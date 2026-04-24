@@ -1,0 +1,12 @@
+# create a profile then add a group to it
+exec omni --config settings.json profile add work base
+exec omni --config settings.json profile add-group work dev
+stdout 'Added group "dev" to profile "work"'
+
+# list shows the updated group list
+exec omni --config settings.json profile list
+stdout 'work'
+stdout 'dev'
+
+-- settings.json --
+{}

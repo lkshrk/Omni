@@ -1,0 +1,354 @@
+package app_test
+
+import (
+	"context"
+	"errors"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/provider"
+)
+
+// describingProvider extends stubProvider with the Descriptor interface.
+type describingProvider struct {
+	stubProvider
+	calls atomic.Int32
+}
+
+func (d *describingProvider) Describe(_ context.Context, t provider.Tool) (string, error) {
+	d.calls.Add(1)
+	return "description of " + t.Name, nil
+}
+
+func TestRefreshDescriptions_FetchesMissing(t *testing.T) {
+	prov := &describingProvider{stubProvider: stubProvider{name: "brew", available: true}}
+	a, cfgPath := newImportApp(t, prov)
+
+	cfg := &config.RootConfig{
+		Tools: logicalToolSpecs(
+			logicalTool("ripgrep", "brew"),
+			logicalTool("jq", "brew"),
+		),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("ripgrep", "jq"),
+		}},
+	}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+
+	if err := a.RefreshDescriptions(context.Background(), 0); err != nil {
+		t.Fatalf("RefreshDescriptions: %v", err)
+	}
+
+	if got := prov.calls.Load(); got != 2 {
+		t.Errorf("Describe called %d times, want 2", got)
+	}
+}
+
+func TestRefreshDescriptions_SkipsCached(t *testing.T) {
+	prov := &describingProvider{stubProvider: stubProvider{name: "brew", available: true}}
+	a, cfgPath := newImportApp(t, prov)
+
+	// Fetch once to populate the cache.
+	cfg := &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("ripgrep"),
+		}},
+	}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+	if err := a.RefreshDescriptions(context.Background(), 0); err != nil {
+		t.Fatalf("first refresh: %v", err)
+	}
+
+	// Second run must not call Describe again.
+	prov.calls.Store(0)
+	if err := a.RefreshDescriptions(context.Background(), 0); err != nil {
+		t.Fatalf("second refresh: %v", err)
+	}
+	if got := prov.calls.Load(); got != 0 {
+		t.Errorf("Describe called %d times on second run, want 0 (already cached)", got)
+	}
+}
+
+func TestRefreshDescriptions_RespectsContextCancel(t *testing.T) {
+	prov := &describingProvider{stubProvider: stubProvider{name: "brew", available: true}}
+	a, cfgPath := newImportApp(t, prov)
+
+	cfg := &config.RootConfig{
+		Tools: logicalToolSpecs(
+			logicalTool("ripgrep", "brew"),
+			logicalTool("jq", "brew"),
+			logicalTool("fd", "brew"),
+		),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("ripgrep", "jq", "fd"),
+		}},
+	}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := a.RefreshDescriptions(ctx, 0); !errors.Is(err, context.Canceled) {
+		t.Fatalf("RefreshDescriptions error = %v, want context.Canceled", err)
+	}
+	if got := prov.calls.Load(); got != 0 {
+		t.Errorf("Describe called %d times after cancel, want 0", got)
+	}
+}
+
+// bulkDescribingProvider extends stubProvider with BulkDescriber.
+type bulkDescribingProvider struct {
+	stubProvider
+	calls atomic.Int32
+}
+
+func (b *bulkDescribingProvider) BulkDescribe(_ context.Context, tools []provider.Tool) (map[string]string, error) {
+	b.calls.Add(1)
+	m := make(map[string]string, len(tools))
+	for _, t := range tools {
+		m[t.EffectivePackage()] = "bulk description of " + t.EffectivePackage()
+	}
+	return m, nil
+}
+
+func TestRefreshDescriptions_UsesBulkDescriber(t *testing.T) {
+	prov := &bulkDescribingProvider{stubProvider: stubProvider{name: "apt", available: true}}
+	a, cfgPath := newImportApp(t, prov)
+
+	cfg := &config.RootConfig{
+		Tools: logicalToolSpecs(
+			logicalTool("ripgrep", "apt"),
+			logicalTool("curl", "apt"),
+		),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("ripgrep", "curl"),
+		}},
+	}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+
+	if err := a.RefreshDescriptions(context.Background(), 0); err != nil {
+		t.Fatalf("RefreshDescriptions: %v", err)
+	}
+
+	// BulkDescribe should have been called exactly once (not twice).
+	if got := prov.calls.Load(); got != 1 {
+		t.Errorf("BulkDescribe called %d times, want 1", got)
+	}
+}
+
+func TestRefreshDescriptions_BulkDescriberMatchesPackageAlias(t *testing.T) {
+	prov := &bulkDescribingProvider{stubProvider: stubProvider{name: "apt", available: true}}
+	a, cfgPath := newImportApp(t, prov)
+
+	cfg := &config.RootConfig{
+		Tools: logicalToolSpecs(logicalToolPackage("editor", "apt", "neovim")),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("editor"),
+		}},
+	}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+
+	if err := a.RefreshDescriptions(context.Background(), 0); err != nil {
+		t.Fatalf("RefreshDescriptions: %v", err)
+	}
+
+	got, err := a.DB().Get(context.Background(), "editor", "system", "neovim")
+	if err != nil {
+		t.Fatalf("db get: %v", err)
+	}
+	if !got.Description.Valid || got.Description.String != "bulk description of neovim" {
+		t.Fatalf("description = %#v, want package alias description", got.Description)
+	}
+}
+
+type partialBulkDescribingProvider struct {
+	describingProvider
+	bulkCalls atomic.Int32
+}
+
+func (b *partialBulkDescribingProvider) BulkDescribe(_ context.Context, tools []provider.Tool) (map[string]string, error) {
+	b.bulkCalls.Add(1)
+	if len(tools) == 0 {
+		return nil, nil
+	}
+	return map[string]string{tools[0].EffectivePackage(): "bulk description of " + tools[0].EffectivePackage()}, nil
+}
+
+func TestRefreshDescriptions_FallsBackForBulkMisses(t *testing.T) {
+	prov := &partialBulkDescribingProvider{
+		describingProvider: describingProvider{stubProvider: stubProvider{name: "brew", available: true}},
+	}
+	a, cfgPath := newImportApp(t, prov)
+
+	cfg := &config.RootConfig{
+		Tools: logicalToolSpecs(
+			logicalTool("ripgrep", "brew"),
+			logicalTool("fd", "brew"),
+		),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("ripgrep", "fd"),
+		}},
+	}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+
+	if err := a.RefreshDescriptions(context.Background(), 0); err != nil {
+		t.Fatalf("RefreshDescriptions: %v", err)
+	}
+	if got := prov.bulkCalls.Load(); got != 1 {
+		t.Fatalf("BulkDescribe called %d times, want 1", got)
+	}
+	if got := prov.calls.Load(); got != 1 {
+		t.Fatalf("Describe fallback called %d times, want 1 missing tool", got)
+	}
+	rg, err := a.DB().Get(context.Background(), "ripgrep", "system", "ripgrep")
+	if err != nil {
+		t.Fatalf("db get ripgrep: %v", err)
+	}
+	fd, err := a.DB().Get(context.Background(), "fd", "system", "fd")
+	if err != nil {
+		t.Fatalf("db get fd: %v", err)
+	}
+	if !rg.Description.Valid || rg.Description.String != "bulk description of ripgrep" {
+		t.Fatalf("ripgrep description = %#v, want bulk description", rg.Description)
+	}
+	if !fd.Description.Valid || fd.Description.String != "description of fd" {
+		t.Fatalf("fd description = %#v, want fallback description", fd.Description)
+	}
+}
+
+func TestRefreshDescriptions_FetchesDiscoveredTools(t *testing.T) {
+	prov := &describingProvider{stubProvider: stubProvider{name: "node", available: true}}
+	a, _ := newImportApp(t, prov)
+	ctx := context.Background()
+
+	if err := a.DB().UpsertDiscovered(ctx, "playwright", "node", "pnpm", "1.52.0"); err != nil {
+		t.Fatalf("seed discovered tool: %v", err)
+	}
+
+	if err := a.RefreshDescriptions(ctx, 0); err != nil {
+		t.Fatalf("RefreshDescriptions: %v", err)
+	}
+
+	got, err := a.DB().Get(ctx, "playwright", "node", "playwright")
+	if err != nil {
+		t.Fatalf("db get: %v", err)
+	}
+	if !got.Description.Valid || got.Description.String != "description of playwright" {
+		t.Fatalf("description = %#v, want discovered tool description", got.Description)
+	}
+	if got.Tracked {
+		t.Fatal("description refresh must not mark discovered tool as tracked")
+	}
+}
+
+type concurrentDescribingProvider struct {
+	stubProvider
+	calls   atomic.Int32
+	current atomic.Int32
+	maxSeen atomic.Int32
+}
+
+func (d *concurrentDescribingProvider) Describe(_ context.Context, t provider.Tool) (string, error) {
+	d.calls.Add(1)
+	cur := d.current.Add(1)
+	for {
+		maxSeen := d.maxSeen.Load()
+		if cur <= maxSeen || d.maxSeen.CompareAndSwap(maxSeen, cur) {
+			break
+		}
+	}
+	time.Sleep(20 * time.Millisecond)
+	d.current.Add(-1)
+	return "description of " + t.Name, nil
+}
+
+func TestRefreshDescriptions_IndividualFallbackIsBoundedConcurrent(t *testing.T) {
+	prov := &concurrentDescribingProvider{stubProvider: stubProvider{name: "node", available: true}}
+	a, cfgPath := newImportApp(t, prov)
+
+	var fixtureTools []logicalFixtureTool
+	for _, name := range []string{"a", "b", "c", "d", "e", "f", "g", "h"} {
+		fixtureTools = append(fixtureTools, logicalTool(name, "node"))
+	}
+	cfg := &config.RootConfig{
+		Tools:  logicalToolSpecs(fixtureTools...),
+		Groups: []*config.GroupConfig{{Tools: groupTools("a", "b", "c", "d", "e", "f", "g", "h")}},
+	}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+
+	if err := a.RefreshDescriptions(context.Background(), 0); err != nil {
+		t.Fatalf("RefreshDescriptions: %v", err)
+	}
+	if got := prov.calls.Load(); got != int32(len(fixtureTools)) {
+		t.Fatalf("Describe calls = %d, want %d", got, len(fixtureTools))
+	}
+	if got := prov.maxSeen.Load(); got <= 1 || got > 4 {
+		t.Fatalf("max concurrent Describe calls = %d, want between 2 and 4", got)
+	}
+}
+
+type failingBulkDescribingProvider struct {
+	describingProvider
+	bulkCalls atomic.Int32
+}
+
+func (b *failingBulkDescribingProvider) BulkDescribe(_ context.Context, _ []provider.Tool) (map[string]string, error) {
+	b.bulkCalls.Add(1)
+	return nil, errors.New("bulk failed")
+}
+
+func TestRefreshDescriptions_FallsBackWhenBulkDescribeFails(t *testing.T) {
+	prov := &failingBulkDescribingProvider{
+		describingProvider: describingProvider{stubProvider: stubProvider{name: "apt", available: true}},
+	}
+	a, cfgPath := newImportApp(t, prov)
+
+	cfg := &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("ripgrep", "apt")),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("ripgrep"),
+		}},
+	}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+
+	if err := a.RefreshDescriptions(context.Background(), 0); err != nil {
+		t.Fatalf("RefreshDescriptions: %v", err)
+	}
+	if got := prov.bulkCalls.Load(); got != 1 {
+		t.Fatalf("BulkDescribe called %d times, want 1", got)
+	}
+	if got := prov.calls.Load(); got != 1 {
+		t.Fatalf("Describe fallback called %d times, want 1", got)
+	}
+}
+
+func TestRefreshDescriptions_EmptyConfig(t *testing.T) {
+	prov := &describingProvider{stubProvider: stubProvider{name: "brew", available: true}}
+	a, _ := newImportApp(t, prov)
+	// No config file at all — should return nil without panic.
+	if err := a.RefreshDescriptions(context.Background(), 0); err != nil {
+		t.Fatalf("RefreshDescriptions on missing config: %v", err)
+	}
+	if got := prov.calls.Load(); got != 0 {
+		t.Errorf("Describe called %d times on missing config, want 0", got)
+	}
+}

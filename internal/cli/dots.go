@@ -1,0 +1,837 @@
+package cli
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/spf13/cobra"
+
+	"github.com/lkshrk/omni/internal/app"
+	"github.com/lkshrk/omni/internal/dots"
+)
+
+func newDotsCmd(state *rootState) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "dots",
+		Short: "Manage dotfile symlinks from a git repo",
+		Long: `dots manages config symlinks declared in your settings.json.
+Source files live in the dotfiles/ stow subtree inside the configured git repo;
+symlinks are created at the target paths. Mutating commands (sync, add, resolve,
+delete) require GNU Stow (stow) on PATH.
+
+Set the repo path via 'omni ui' (Dots tab) or settings.dots_repo in settings.json.`,
+	}
+	cmd.AddCommand(
+		newDotsSyncCmd(state),
+		newDotsDiscoverCmd(state),
+		newDotsAddCmd(state),
+		newDotsGroupsCmd(state),
+		newDotsDeleteCmd(state),
+		newDotsResolveCmd(state),
+		newDotsIgnoreCmd(state),
+		newDotsUnignoreCmd(state),
+		newDotsListCmd(state),
+		newDotsStatusCmd(state),
+		newDotsEnableCmd(state),
+		newDotsDisableCmd(state),
+		newDotsPullCmd(state),
+		newDotsPushCmd(state),
+	)
+	return cmd
+}
+
+func ensureDotsStowForCLI(cmd *cobra.Command, state *rootState) error {
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if state == nil || state.app == nil || state.app.DotsStowInstalled(ctx) {
+		return nil
+	}
+	installMessage := "GNU Stow (stow) is required for dotfile sync. Install stow with your system package manager, then rerun this command."
+	if !stdinIsTerminal() {
+		return fmt.Errorf("%s", installMessage)
+	}
+	ok, err := confirmAction(cmd, state, "GNU Stow (stow) is required for dotfile sync. Install stow with the system package manager now?")
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("%s", installMessage)
+	}
+	if err := state.app.InstallDotsStow(ctx); err != nil {
+		return err
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), "Stow installed.")
+	return nil
+}
+
+// ─── dots sync ────────────────────────────────────────────────────────────────
+
+func newDotsSyncCmd(state *rootState) *cobra.Command {
+	var dryRun bool
+
+	cmd := &cobra.Command{
+		Use:   "sync [name]",
+		Short: "Create or repair dotfile symlinks",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireDotsConfigured(state); err != nil {
+				return err
+			}
+			if err := ensureDotsStowForCLI(cmd, state); err != nil {
+				return err
+			}
+			opts := dots.SyncOptions{DryRun: dryRun}
+			var (
+				ops []dots.Op
+				err error
+			)
+			if len(args) > 0 {
+				ops, err = state.app.DotsSyncEntry(cmd.Context(), args[0], opts)
+			} else {
+				ops, err = state.app.DotsSync(opts)
+			}
+			printDotOps(cmd, ops, dryRun) // print before returning err so partial results are visible
+			return err
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be done without making changes")
+	return cmd
+}
+
+// ─── dots discover ────────────────────────────────────────────────────────────
+
+func newDotsDiscoverCmd(state *rootState) *cobra.Command {
+	var format string
+	cmd := &cobra.Command{
+		Use:   "discover",
+		Short: "List untracked dotfile candidates",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := requireDotsConfigured(state); err != nil {
+				return err
+			}
+			entries, err := state.app.DiscoverUntrackedDotsEntries()
+			if err != nil {
+				return err
+			}
+			if format == "json" {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(entries)
+			}
+			if err := validateFormat(format, "table", "json"); err != nil {
+				return err
+			}
+			if len(entries) == 0 {
+				fmt.Fprintln(cmd.OutOrStdout(), "No untracked dotfile candidates found.")
+				return nil
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "Discovered untracked dotfile candidates:")
+			for _, entry := range entries {
+				fmt.Fprintf(cmd.OutOrStdout(), "  %-20s -> %s\n", entry.Name, entry.Path)
+			}
+			return nil
+		},
+	}
+	addFormatFlag(cmd, &format, "table", "table", "json")
+	return cmd
+}
+
+// ─── dots add ─────────────────────────────────────────────────────────────────
+
+func newDotsAddCmd(state *rootState) *cobra.Command {
+	var name string
+	var group string
+	var adopt bool
+	var ignore []string
+	var discovered bool
+
+	cmd := &cobra.Command{
+		Use:   "add <path>",
+		Short: "Add a config path to dots management",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireDotsConfigured(state); err != nil {
+				return err
+			}
+			if discovered {
+				if adopt || name != "" || len(ignore) > 0 {
+					return fmt.Errorf("--discovered cannot be combined with --adopt, --name, or --ignore")
+				}
+				added, err := state.app.DotsAddDiscoveredEntry(args[0], group)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "added discovered dots entry %q -> %s\n", added.Name, added.Path)
+				return nil
+			}
+			if err := ensureDotsStowForCLI(cmd, state); err != nil {
+				return err
+			}
+			ops, err := state.app.DotsAdd(cmd.Context(), args[0], app.DotsAddOptions{
+				Name:   name,
+				Group:  group,
+				Adopt:  adopt,
+				Ignore: ignore,
+			})
+			if err != nil {
+				return err
+			}
+			printDotOps(cmd, ops, false)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&name, "name", "", "Override the inferred entry name")
+	cmd.Flags().StringVar(&group, "group", "", "Group to add the entry to (default: base)")
+	cmd.Flags().BoolVar(&adopt, "adopt", false, "Move the existing path into the dots repo")
+	cmd.Flags().StringSliceVar(&ignore, "ignore", nil, "Patterns to ignore within this entry")
+	cmd.Flags().BoolVar(&discovered, "discovered", false, "Add a discovered candidate to config without adopting files")
+	return cmd
+}
+
+// ─── dots groups ──────────────────────────────────────────────────────────────
+
+func newDotsGroupsCmd(state *rootState) *cobra.Command {
+	var setGroups []string
+	var addGroups []string
+	var removeGroups []string
+
+	cmd := &cobra.Command{
+		Use:   "groups <name>",
+		Short: "Show or edit a dots entry's group memberships",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireDotsConfigured(state); err != nil {
+				return err
+			}
+			name := args[0]
+			setGroups = normalizeDotsGroupArgs(setGroups)
+			addGroups = normalizeDotsGroupArgs(addGroups)
+			removeGroups = normalizeDotsGroupArgs(removeGroups)
+			setChanged := cmd.Flags().Changed("set")
+			addChanged := cmd.Flags().Changed("add")
+			removeChanged := cmd.Flags().Changed("remove")
+			if setChanged && (addChanged || removeChanged) {
+				return fmt.Errorf("--set cannot be combined with --add or --remove")
+			}
+			if setChanged && len(setGroups) == 0 {
+				return fmt.Errorf("--set requires at least one group")
+			}
+			if (addChanged || removeChanged) && len(addGroups) == 0 && len(removeGroups) == 0 {
+				return fmt.Errorf("--add or --remove requires at least one group")
+			}
+
+			memberships, err := state.app.DotMembershipMap(cmd.Context())
+			if err != nil {
+				return err
+			}
+			current, ok := memberships[name]
+			if !ok || len(current) == 0 {
+				return fmt.Errorf("dots entry %q not found", name)
+			}
+			if !setChanged && !addChanged && !removeChanged {
+				fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", name, strings.Join(current, ", "))
+				return nil
+			}
+
+			target := current
+			if setChanged {
+				target = setGroups
+			} else {
+				target = applyDotsGroupDelta(current, addGroups, removeGroups)
+			}
+			if len(target) == 0 {
+				return fmt.Errorf("dots entry %q needs at least one group", name)
+			}
+			if err := updateDotsGroups(state, name, current, target); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "updated groups for %s: %s\n", name, strings.Join(target, ", "))
+			return nil
+		},
+	}
+	cmd.Flags().StringSliceVar(&setGroups, "set", nil, "Replace memberships with these groups")
+	cmd.Flags().StringSliceVar(&addGroups, "add", nil, "Add memberships to these groups")
+	cmd.Flags().StringSliceVar(&removeGroups, "remove", nil, "Remove memberships from these groups")
+	return cmd
+}
+
+func normalizeDotsGroupArgs(groups []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(groups))
+	for _, group := range groups {
+		group = strings.TrimSpace(group)
+		if group == "" {
+			continue
+		}
+		if seen[group] {
+			continue
+		}
+		seen[group] = true
+		out = append(out, group)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func applyDotsGroupDelta(current, addGroups, removeGroups []string) []string {
+	set := map[string]bool{}
+	for _, group := range current {
+		set[group] = true
+	}
+	for _, group := range removeGroups {
+		delete(set, group)
+	}
+	for _, group := range addGroups {
+		set[group] = true
+	}
+	out := make([]string, 0, len(set))
+	for group := range set {
+		out = append(out, group)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func updateDotsGroups(state *rootState, name string, current, target []string) error {
+	currentSet := dotsGroupSet(current)
+	targetSet := dotsGroupSet(target)
+	for group := range currentSet {
+		if !targetSet[group] {
+			if err := state.app.RemoveDotFromGroup(name, group); err != nil {
+				return err
+			}
+		}
+	}
+	for group := range targetSet {
+		if !currentSet[group] {
+			if err := state.app.AddDotToGroup(name, group); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func dotsGroupSet(groups []string) map[string]bool {
+	set := make(map[string]bool, len(groups))
+	for _, group := range groups {
+		set[group] = true
+	}
+	return set
+}
+
+// ─── dots delete ──────────────────────────────────────────────────────────────
+
+func newDotsDeleteCmd(state *rootState) *cobra.Command {
+	var keepLocal bool
+	cmd := &cobra.Command{
+		Use:   "delete <name>",
+		Short: "Delete a dots entry from management",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireDotsConfigured(state); err != nil {
+				return err
+			}
+			ok, err := confirmAction(cmd, state, fmt.Sprintf("Delete dots entry %q and repo files? keep local: %t", args[0], keepLocal))
+			if err != nil || !ok {
+				return err
+			}
+			if err := ensureDotsStowForCLI(cmd, state); err != nil {
+				return err
+			}
+			if err := state.app.DotsDeleteWithOptions(cmd.Context(), args[0], app.DotsDeleteOptions{KeepLocal: keepLocal}); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "deleted dots entry %q\n", args[0])
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&keepLocal, "keep-local", true, "Keep local files after deleting the repo files")
+	return cmd
+}
+
+// ─── dots resolve ─────────────────────────────────────────────────────────────
+
+func newDotsResolveCmd(state *rootState) *cobra.Command {
+	var useRepo bool
+	var useLocal bool
+	cmd := &cobra.Command{
+		Use:   "resolve <name>",
+		Short: "Resolve a dots conflict with an explicit side",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireDotsConfigured(state); err != nil {
+				return err
+			}
+			if useRepo == useLocal {
+				return fmt.Errorf("choose exactly one of --use-repo or --use-local")
+			}
+			strategy := app.DotResolveUseRepo
+			prompt := fmt.Sprintf("Replace local %q with the repo version?", args[0])
+			if useLocal {
+				strategy = app.DotResolveUseLocal
+				prompt = fmt.Sprintf("Replace repo version for %q with the local version?", args[0])
+			}
+			ok, err := confirmAction(cmd, state, prompt)
+			if err != nil || !ok {
+				return err
+			}
+			if err := ensureDotsStowForCLI(cmd, state); err != nil {
+				return err
+			}
+			ops, err := state.app.DotsResolveConflict(cmd.Context(), args[0], strategy)
+			printDotOps(cmd, ops, false)
+			return err
+		},
+	}
+	cmd.Flags().BoolVar(&useRepo, "use-repo", false, "Keep the repo version and replace the local target")
+	cmd.Flags().BoolVar(&useLocal, "use-local", false, "Copy the local target into the repo and relink it")
+	return cmd
+}
+
+// ─── dots ignore ─────────────────────────────────────────────────────────────
+
+func newDotsIgnoreCmd(state *rootState) *cobra.Command {
+	var entry bool
+	var path string
+	cmd := &cobra.Command{
+		Use:   "ignore <name> [pattern]",
+		Short: "Ignore a dots entry or a path pattern within it",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireDotsConfigured(state); err != nil {
+				return err
+			}
+			if entry || len(args) == 1 {
+				if err := state.app.DotsSetEntryIgnored(args[0], path, true); err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "ignored dots entry %q\n", args[0])
+				return nil
+			}
+			if err := state.app.DotsAddIgnorePattern(args[0], args[1]); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "added ignore pattern %q to %q\n", args[1], args[0])
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&entry, "entry", false, "Ignore the whole dots entry instead of adding a child pattern")
+	cmd.Flags().StringVar(&path, "path", "", "Path for a new ignored discovery candidate")
+	return cmd
+}
+
+func newDotsUnignoreCmd(state *rootState) *cobra.Command {
+	return &cobra.Command{
+		Use:   "unignore <name> [pattern]",
+		Short: "Include a dots entry or remove one of its ignore patterns",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireDotsConfigured(state); err != nil {
+				return err
+			}
+			if len(args) == 1 {
+				if err := state.app.DotsSetEntryIgnored(args[0], "", false); err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "included dots entry %q\n", args[0])
+				return nil
+			}
+			if err := state.app.DotsRemoveIgnorePattern(args[0], args[1]); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "removed ignore pattern %q from %q\n", args[1], args[0])
+			return nil
+		},
+	}
+}
+
+// ─── dots list ────────────────────────────────────────────────────────────────
+
+func newDotsListCmd(state *rootState) *cobra.Command {
+	var stateFilter string
+	var format string
+	cmd := &cobra.Command{
+		Use:   "list [name]",
+		Short: "List managed dots entries and their symlink health",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireDotsConfigured(state); err != nil {
+				return err
+			}
+			name := ""
+			if len(args) > 0 {
+				name = args[0]
+			}
+			statuses, err := state.app.QueryDots(app.DotsQueryOptions{Name: name, State: stateFilter})
+			if err != nil {
+				return err
+			}
+			if format == "json" {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(statuses)
+			}
+			if err := validateFormat(format, "table", "json"); err != nil {
+				return err
+			}
+			if len(statuses) == 0 && len(args) == 0 && stateFilter == "" {
+				fmt.Fprintln(cmd.OutOrStdout(), "No dots entries configured.")
+				fmt.Fprintln(cmd.OutOrStdout(), "Add one with: omni dots add <path>")
+				return nil
+			}
+			if len(statuses) == 0 {
+				fmt.Fprintln(cmd.OutOrStdout(), "No dots entries match filters.")
+				return nil
+			}
+			printDotsTable(cmd, statuses)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&stateFilter, "state", "", "filter by state (synced, missing, broken, conflict, local-only, repo-only, no-source, ignored)")
+	addFormatFlag(cmd, &format, "table", "table", "json")
+	return cmd
+}
+
+// ─── dots status ──────────────────────────────────────────────────────────────
+
+func newDotsStatusCmd(state *rootState) *cobra.Command {
+	var stateFilter string
+	var format string
+	cmd := &cobra.Command{
+		Use:   "status [name]",
+		Short: "Show dots symlink health and git repo status",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireDotsConfigured(state); err != nil {
+				return err
+			}
+			name := ""
+			if len(args) > 0 {
+				name = args[0]
+			}
+			result, err := state.app.QueryDotsStatus(cmd.Context(), app.DotsQueryOptions{Name: name, State: stateFilter})
+			if err != nil {
+				return err
+			}
+			if format == "json" {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
+			}
+			if err := validateFormat(format, "table", "json"); err != nil {
+				return err
+			}
+			printDotsTable(cmd, result.Entries)
+			if result.GitStatus != "" {
+				fmt.Fprintln(cmd.OutOrStdout())
+				fmt.Fprintln(cmd.OutOrStdout(), "Git status:")
+				fmt.Fprintln(cmd.OutOrStdout(), result.GitStatus)
+			} else {
+				fmt.Fprintln(cmd.OutOrStdout(), "\nGit: working tree clean")
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&stateFilter, "state", "", "filter by state (synced, missing, broken, conflict, local-only, repo-only, no-source, ignored)")
+	addFormatFlag(cmd, &format, "table", "table", "json")
+	return cmd
+}
+
+// ─── dots enable / disable ───────────────────────────────────────────────────
+
+func newDotsEnableCmd(state *rootState) *cobra.Command {
+	return &cobra.Command{
+		Use:   "enable",
+		Short: "Enable dotfile sync for this host",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := ensureDotsStowForCLI(cmd, state); err != nil {
+				return err
+			}
+			ops, err := state.app.EnableDotsForHost(cmd.Context())
+			printDotOps(cmd, ops, false)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "Dots enabled.")
+			return nil
+		},
+	}
+}
+
+func newDotsDisableCmd(state *rootState) *cobra.Command {
+	var overwrite bool
+	var removeLocal bool
+
+	cmd := &cobra.Command{
+		Use:   "disable",
+		Short: "Disable dotfile sync for this host",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if overwrite && removeLocal {
+				return fmt.Errorf("--overwrite and --remove-local cannot be combined")
+			}
+			ok, err := confirmAction(cmd, state, "Disable dotfile sync for this host?")
+			if err != nil || !ok {
+				return err
+			}
+			ops, err := state.app.DisableDotsForHost(cmd.Context(), app.DisableDotsOptions{
+				ConflictOverwrite: overwrite,
+				KeepExistingLocal: !removeLocal && !overwrite,
+				RemoveLocal:       removeLocal,
+			})
+			printDotOps(cmd, ops, false)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "Dots disabled.")
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "Overwrite conflicting local files with repo copies when disabling")
+	cmd.Flags().BoolVar(&removeLocal, "remove-local", false, "Remove local dotfile targets instead of keeping local copies")
+	return cmd
+}
+
+// ─── dots pull ────────────────────────────────────────────────────────────────
+
+func newDotsPullCmd(state *rootState) *cobra.Command {
+	return &cobra.Command{
+		Use:   "pull",
+		Short: "Pull latest changes from remote and re-sync symlinks",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := requireDotsConfigured(state); err != nil {
+				return err
+			}
+			if err := ensureDotsStowForCLI(cmd, state); err != nil {
+				return err
+			}
+			ops, err := state.app.DotsPull(cmd.Context())
+			fmt.Fprintln(cmd.OutOrStdout(), "Pulled. Re-syncing symlinks...")
+			printDotOps(cmd, ops, false) // print before returning err so partial results are visible
+			return err
+		},
+	}
+}
+
+// ─── dots push ────────────────────────────────────────────────────────────────
+
+func newDotsPushCmd(state *rootState) *cobra.Command {
+	var message string
+
+	cmd := &cobra.Command{
+		Use:   "push",
+		Short: "Stage, commit, and push all changes in the dots repo",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := requireDotsConfigured(state); err != nil {
+				return err
+			}
+			if err := state.app.DotsPush(cmd.Context(), message); err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "Pushed.")
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&message, "message", "m", "", "Commit message (default: \"dots: update\")")
+	return cmd
+}
+
+// ─── helpers ──────────────────────────────────────────────────────────────────
+
+func requireDotsConfigured(state *rootState) error {
+	if !state.app.DotsConfigured() {
+		return fmt.Errorf("dots_repo is not configured\n\nSet it via 'omni ui' (Dots tab) or settings.dots_repo in settings.json")
+	}
+	return nil
+}
+
+func printDotOps(cmd *cobra.Command, ops []dots.Op, dryRun bool) {
+	conflicts := 0
+	changes := 0
+	skipped := 0
+	for _, op := range ops {
+		switch op.Kind {
+		case dots.OpSkip:
+			if op.Err != nil {
+				fmt.Fprintf(cmd.OutOrStdout(), "  - skipped:  %s — %v\n", op.Dst, op.Err)
+				skipped++
+			}
+		case dots.OpLink:
+			fmt.Fprintf(cmd.OutOrStdout(), "  ✓ linked:   %s → %s\n", op.Dst, op.Src)
+			changes++
+		case dots.OpRepair:
+			fmt.Fprintf(cmd.OutOrStdout(), "  ✓ repaired: %s\n", op.Dst)
+			changes++
+		case dots.OpAdopt:
+			fmt.Fprintf(cmd.OutOrStdout(), "  ✓ adopted:  %s → %s\n", op.Dst, op.Src)
+			changes++
+		case dots.OpConflict:
+			fmt.Fprintf(cmd.ErrOrStderr(), "  ✗ conflict: %s — %v\n", op.Dst, op.Err)
+			conflicts++
+		case dots.OpUnlink:
+			fmt.Fprintf(cmd.OutOrStdout(), "  ✓ unlinked: %s\n", op.Dst)
+			changes++
+		case dots.OpUnlinkSkip:
+			fmt.Fprintf(cmd.OutOrStdout(), "  - skipped:  %s\n", op.Dst)
+		case dots.OpUnlinkConflict:
+			fmt.Fprintf(cmd.ErrOrStderr(), "  ✗ unlink conflict: %s\n", op.Dst)
+			conflicts++
+		case dots.OpDryLink:
+			fmt.Fprintf(cmd.OutOrStdout(), "  → would link:   %s\n", op.Dst)
+		case dots.OpDryRepair:
+			fmt.Fprintf(cmd.OutOrStdout(), "  → would repair: %s\n", op.Dst)
+		case dots.OpDryAdopt:
+			fmt.Fprintf(cmd.OutOrStdout(), "  → would adopt:  %s\n", op.Dst)
+		}
+	}
+	if dryRun {
+		fmt.Fprintln(cmd.OutOrStdout(), "\nDry-run — no changes made.")
+		return
+	}
+	if changes > 0 {
+		fmt.Fprintf(cmd.OutOrStdout(), "\n%d symlink(s) updated.\n", changes)
+	}
+	if conflicts > 0 {
+		fmt.Fprintf(cmd.ErrOrStderr(), "%d conflict(s). Choose use repo version or use local version before syncing.\n", conflicts)
+	}
+	if changes == 0 && conflicts == 0 && skipped > 0 {
+		fmt.Fprintln(cmd.OutOrStdout(), "No symlinks updated.")
+	}
+	if changes == 0 && conflicts == 0 && skipped == 0 {
+		fmt.Fprintln(cmd.OutOrStdout(), "All symlinks up to date.")
+	}
+}
+
+func printDotsTable(cmd *cobra.Command, statuses []app.DotStatus) {
+	for _, section := range dotCLISections(statuses) {
+		if len(section.statuses) == 0 {
+			continue
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), section.title)
+		printDotsSectionTable(cmd, section.statuses)
+		fmt.Fprintln(cmd.OutOrStdout())
+	}
+}
+
+type dotCLISection struct {
+	title    string
+	statuses []app.DotStatus
+}
+
+func dotCLISections(statuses []app.DotStatus) []dotCLISection {
+	sections := []dotCLISection{
+		{title: "Conflict"},
+		{title: "Out Of Sync"},
+		{title: "Synced"},
+		{title: "Ignored"},
+	}
+	for _, status := range statuses {
+		state := dotStatusState(status)
+		switch state {
+		case app.DotStateConflict, app.DotStateUntrackedConflict, app.DotStateAmbiguous:
+			sections[0].statuses = append(sections[0].statuses, status)
+		case app.DotStateSynced:
+			sections[2].statuses = append(sections[2].statuses, status)
+		case app.DotStateIgnored, app.DotStateInactive, app.DotStateDisabled:
+			sections[3].statuses = append(sections[3].statuses, status)
+		default:
+			sections[1].statuses = append(sections[1].statuses, status)
+		}
+	}
+	return sections
+}
+
+func printDotsSectionTable(cmd *cobra.Command, statuses []app.DotStatus) {
+	const (
+		nameW    = 20
+		targetW  = 36
+		stateW   = 18
+		actionsW = 28
+	)
+	header := fmt.Sprintf("%-*s  %-*s  %-*s  %s", nameW, "NAME", targetW, "TARGET", stateW, "STATE", "ACTIONS")
+	fmt.Fprintln(cmd.OutOrStdout(), header)
+	fmt.Fprintln(cmd.OutOrStdout(), strings.Repeat("─", len(header)))
+	for _, s := range statuses {
+		state := dotStatusState(s)
+		fmt.Fprintf(cmd.OutOrStdout(), "%-*s  %-*s  %s %-*s  %s\n",
+			nameW, s.Name,
+			targetW, truncateDotsTarget(s.TargetPath, targetW),
+			dotStateIcon(state), stateW-2, state,
+			truncateDotsActions(s.Actions, actionsW),
+		)
+	}
+}
+
+func dotStatusState(status app.DotStatus) app.DotState {
+	if status.State != "" {
+		return status.State
+	}
+	switch status.Health {
+	case app.HealthOK:
+		return app.DotStateSynced
+	case app.HealthMissing:
+		return app.DotStateMissing
+	case app.HealthConflict:
+		return app.DotStateConflict
+	case app.HealthNoSource:
+		return app.DotStateNoSource
+	default:
+		return app.DotState(status.Health)
+	}
+}
+
+func dotStateIcon(state app.DotState) string {
+	switch state {
+	case app.DotStateSynced:
+		return "✓"
+	case app.DotStateConflict, app.DotStateUntrackedConflict, app.DotStateAmbiguous:
+		return "✗"
+	case app.DotStateNoSource:
+		return "?"
+	case app.DotStateIgnored, app.DotStateInactive, app.DotStateDisabled:
+		return "·"
+	default:
+		return "!"
+	}
+}
+
+func truncateDotsTarget(path string, width int) string {
+	runes := []rune(path)
+	if len(runes) <= width {
+		return path
+	}
+	if width <= 1 {
+		return string(runes[:width])
+	}
+	return "…" + string(runes[len(runes)-width+1:])
+}
+
+func truncateDotsActions(actions []app.DotAction, width int) string {
+	labels := make([]string, 0, len(actions))
+	for _, action := range actions {
+		labels = append(labels, string(action))
+	}
+	out := strings.Join(labels, ",")
+	runes := []rune(out)
+	if len(runes) <= width {
+		return out
+	}
+	if width <= 1 {
+		return string(runes[:width])
+	}
+	return string(runes[:width-1]) + "…"
+}
+
+func healthIcon(h app.DotHealth) string {
+	switch h {
+	case app.HealthOK:
+		return "✓"
+	case app.HealthMissing:
+		return "·"
+	case app.HealthConflict:
+		return "✗"
+	case app.HealthNoSource:
+		return "?"
+	default:
+		return " "
+	}
+}

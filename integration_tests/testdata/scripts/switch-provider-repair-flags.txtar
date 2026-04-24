@@ -1,0 +1,15 @@
+# legacy provider pin repair flags are rejected; physical reinstall remains scoped
+exec omni --config settings.json profile add default base
+exec omni --config settings.json profile set-hostname testhost default
+
+! exec omni --config settings.json switch black --reinstall-default --from brew
+stderr '--from/--to cannot be combined with --reinstall-default'
+
+! exec omni --config settings.json switch black --to-installed
+stderr 'unknown flag: --to-installed'
+
+! exec omni --config settings.json switch black --remove-pin
+stderr 'unknown flag: --remove-pin'
+
+-- settings.json --
+{}

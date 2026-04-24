@@ -1,0 +1,12 @@
+# omni switch without --from exits with an error
+exec omni --config settings.json profile add default base
+exec omni --config settings.json profile set-hostname testhost default
+! exec omni --config settings.json switch black
+stderr '--from is required'
+
+# omni switch with --from but no --to also exits with an error
+! exec omni --config settings.json switch black --from brew
+stderr '--to is required'
+
+-- settings.json --
+{}

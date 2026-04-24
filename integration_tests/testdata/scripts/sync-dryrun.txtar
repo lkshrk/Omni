@@ -1,0 +1,8 @@
+# omni sync --dry-run with an empty config should succeed with no ops
+exec omni --config settings.json profile add default base
+exec omni --config settings.json profile set-hostname testhost default
+exec omni --config settings.json sync --dry-run
+stdout 'Dry-run'
+
+-- settings.json --
+{}

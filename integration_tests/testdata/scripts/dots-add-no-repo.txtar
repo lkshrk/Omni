@@ -1,0 +1,6 @@
+# omni dots add without dots_repo configured exits with error
+! exec omni --config settings.json dots add ./somefile
+stderr 'not configured'
+
+-- settings.json --
+{}

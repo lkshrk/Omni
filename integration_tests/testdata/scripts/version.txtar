@@ -1,0 +1,3 @@
+# omni --version exits 0 and prints a version string
+exec omni --version
+stdout 'omni'

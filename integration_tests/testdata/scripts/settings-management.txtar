@@ -1,0 +1,67 @@
+# settings commands persist host-scoped settings through the real CLI
+exec omni --config settings.json settings show
+stdout 'auto_import = false'
+stdout 'node.manager = .default.'
+stdout 'python.manager = .default.'
+stdout 'system.priority = .none.'
+stdout 'dots_disabled = .default.'
+stdout 'dots_git.auto_commit = false'
+stdout 'dots_git.auto_push = false'
+stdout 'disabled_providers = .none.'
+
+exec omni --config settings.json settings set auto_import true
+stdout 'auto_import = true'
+exec omni --config settings.json settings set node.manager pnpm
+stdout 'node.manager = pnpm'
+exec omni --config settings.json settings set python.manager uv
+stdout 'python.manager = uv'
+exec omni --config settings.json settings set system.priority brew,apt
+stdout 'system.priority = brew, apt'
+exec omni --config settings.json settings set dots-repo $WORK/dotfiles
+stdout 'dots_repo = '
+exec omni --config settings.json settings set dots_git.auto_commit true
+stdout 'dots_git.auto_commit = true'
+exec omni --config settings.json settings set dots_git.auto_push true
+stdout 'dots_git.auto_push = true'
+
+exec omni --config settings.json settings disable-provider node
+stdout 'disabled_providers = node'
+exec omni --config settings.json settings disable-provider system
+stdout 'disabled_providers = node, system'
+! exec omni --config settings.json settings disable-provider brew
+stderr 'not an ecosystem provider'
+exec omni --config settings.json settings enable-provider node
+stdout 'disabled_providers = system'
+
+exec omni --config settings.json settings show
+stdout 'auto_import = true'
+stdout 'node.manager = pnpm'
+stdout 'python.manager = uv'
+stdout 'system.priority = brew, apt'
+stdout 'dots_repo = '
+stdout 'dots_git.auto_commit = true'
+stdout 'dots_git.auto_push = true'
+stdout 'disabled_providers = system'
+exec omni --config settings.json settings get node.manager
+stdout 'pnpm'
+exec omni --config settings.json settings show python.manager --format json
+stdout '"python.manager":"uv"'
+exec omni --config settings.json settings get dots-git.auto-push
+stdout 'true'
+
+exec omni -y --config settings.json settings reset-cache
+stdout 'cache reset'
+exec omni -y --config settings.json settings reset
+stdout 'settings reset'
+exec omni --config settings.json settings show
+stdout 'auto_import = false'
+stdout 'node.manager = .default.'
+stdout 'python.manager = .default.'
+stdout 'system.priority = .none.'
+stdout 'dots_disabled = .default.'
+stdout 'dots_git.auto_commit = false'
+stdout 'dots_git.auto_push = false'
+stdout 'disabled_providers = .none.'
+
+-- settings.json --
+{}

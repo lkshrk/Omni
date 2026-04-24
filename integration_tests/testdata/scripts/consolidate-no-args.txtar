@@ -1,0 +1,8 @@
+# omni consolidate with too few arguments exits with an error
+exec omni --config settings.json profile add default base
+exec omni --config settings.json profile set-hostname testhost default
+! exec omni --config settings.json consolidate python
+stderr 'ecosystem mode requires exactly 2 args'
+
+-- settings.json --
+{}

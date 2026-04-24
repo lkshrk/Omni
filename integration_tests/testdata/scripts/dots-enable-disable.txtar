@@ -1,0 +1,13 @@
+# dots enable/disable uses the same host setting path as the TUI
+exec omni -y --config settings.json dots disable
+stdout 'Dots disabled'
+exec omni --config settings.json settings show
+stdout 'dots_disabled = true'
+
+exec omni --config settings.json dots enable
+stdout 'Dots enabled'
+exec omni --config settings.json settings show
+stdout 'dots_disabled = false'
+
+-- settings.json --
+{}

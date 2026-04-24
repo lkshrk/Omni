@@ -1,0 +1,6 @@
+# omni dots sync without dots_repo configured exits with error
+! exec omni --config settings.json dots sync
+stderr 'not configured'
+
+-- settings.json --
+{}

@@ -1,0 +1,7 @@
+# omni dots without a valid subcommand shows help and exits 0
+exec omni --config settings.json dots init ./dotfiles
+stdout 'Available Commands'
+stdout 'dots_repo'
+
+-- settings.json --
+{}

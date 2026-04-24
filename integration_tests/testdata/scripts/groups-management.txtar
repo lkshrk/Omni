@@ -1,0 +1,35 @@
+# group lifecycle commands persist config changes through the real CLI
+exec omni --config settings.json profile add default base
+exec omni --config settings.json profile set-hostname testhost default
+
+exec omni --config settings.json groups create dev
+stdout 'Created group "dev"'
+exec omni --config settings.json groups
+stdout 'dev'
+stdout '0 tool'
+
+exec omni --config settings.json profile add-group default dev
+exec omni --config settings.json groups rename dev work
+stdout 'Renamed group "dev" to "work"'
+exec omni --config settings.json profile list
+stdout 'work'
+! stdout 'dev'
+
+exec omni --config settings.json add ripgrep --provider system --install-with brew --group base
+exec omni --config settings.json groups add-tool work ripgrep
+stdout 'Added "ripgrep" to group "work"'
+exec omni --config settings.json groups remove-tool base ripgrep
+stdout 'Removed "ripgrep" from group "base"'
+exec omni --config settings.json groups
+stdout 'work'
+stdout '1 tool'
+
+exec omni -y --config settings.json groups delete work --move-to base
+stdout 'Deleted group "work"'
+exec omni --config settings.json groups
+stdout '(base)'
+stdout '1 tool'
+! stdout 'work'
+
+-- settings.json --
+{}

@@ -1,0 +1,14 @@
+# profile rename updates the profile key and hostname mappings
+exec omni --config settings.json profile add work base
+exec omni --config settings.json profile set-hostname myhost work
+exec omni --config settings.json profile rename work office
+stdout 'Profile "work" renamed to "office"'
+
+exec omni --config settings.json profile list
+stdout 'office'
+stdout 'myhost'
+stdout 'office'
+! stdout 'work'
+
+-- settings.json --
+{}
