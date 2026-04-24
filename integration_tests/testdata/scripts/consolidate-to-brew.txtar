@@ -1,0 +1,12 @@
+# omni consolidate --to brew with an empty config prints "All tools already on brew."
+exec omni --config settings.json profile add default base
+exec omni --config settings.json profile set-hostname testhost default
+exec omni --config settings.json consolidate --to brew
+stdout 'All tools already on brew'
+
+# dry-run also works with no tools to migrate
+exec omni --config settings.json consolidate --to brew --dry-run
+stdout 'Nothing to migrate'
+
+-- settings.json --
+{}

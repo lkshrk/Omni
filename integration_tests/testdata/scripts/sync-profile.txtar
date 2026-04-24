@@ -1,0 +1,7 @@
+# sync --profile filters to the named profile's groups
+exec omni --config settings.json profile add myprofile base
+exec omni --config settings.json sync --dry-run --profile myprofile
+stdout 'Dry-run'
+
+-- settings.json --
+{"tools":{"ripgrep":{"provider":"system","install_with":"brew"}},"groups":[{"tools":["ripgrep"]}]}

@@ -1,0 +1,48 @@
+# syntax=docker/dockerfile:1.7
+
+FROM golang:1.26-alpine AS integration-test
+
+# stow  — dotfile symlink manager (needed by integration tests)
+# git   — used by dots pull/push/status in integration tests
+# build-base provides the C toolchain required by `go test -race`.
+RUN apk add --no-cache \
+        build-base \
+        git \
+        nodejs \
+        npm \
+        py3-pip \
+        python3 \
+        stow
+
+# Pre-install a small pip package so pip integration tests have something to query.
+# --break-system-packages is required by externally-managed system Python installs.
+RUN pip3 install --break-system-packages cowsay==6.1
+
+WORKDIR /app
+
+RUN adduser -D -u 10001 omni
+
+# Keep module downloads in BuildKit cache instead of baking them into a large
+# reusable test image layer.
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+
+COPY --chown=omni:omni . .
+
+# Configure git so dots tests that commit don't fail on missing identity.
+RUN git config --system user.email "ci@omni" && \
+    git config --system user.name "omni-ci"
+
+# Run tests as an unprivileged user. Several filesystem error-path tests rely on
+# chmod denying access; root bypasses those permissions and makes the assertions
+# meaningless.
+USER omni
+ENV HOME=/home/omni
+ENV GOCACHE=/home/omni/.cache/go-build
+ENV OMNI_TEST_ISOLATED=1
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/home/omni/.cache/go-build,uid=10001,gid=10001 \
+    go test -race ./... && \
+    go test -tags=integration -race -v ./integration_tests/... ./internal/provider/...

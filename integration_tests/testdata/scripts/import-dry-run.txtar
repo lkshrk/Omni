@@ -1,0 +1,8 @@
+# omni import --dry-run with no matching provider prints "No installed tools found."
+exec omni --config settings.json profile add default base
+exec omni --config settings.json profile set-hostname testhost default
+exec omni --config settings.json import --dry-run --provider nonexistent
+stdout 'No installed tools found'
+
+-- settings.json --
+{}

@@ -1,0 +1,8 @@
+# omni delete without --provider flag exits with an error
+exec omni --config settings.json profile add default base
+exec omni --config settings.json profile set-hostname testhost default
+! exec omni --config settings.json delete ripgrep
+stderr '--provider is required'
+
+-- settings.json --
+{}

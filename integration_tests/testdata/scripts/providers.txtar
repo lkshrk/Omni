@@ -1,0 +1,8 @@
+# omni providers prints a table with a header row
+exec omni --config settings.json providers
+stdout 'NAME'
+stdout 'AVAILABLE'
+stdout 'DESCRIPTION'
+
+-- settings.json --
+{}

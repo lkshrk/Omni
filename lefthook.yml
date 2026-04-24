@@ -1,0 +1,5 @@
+pre-commit:
+  commands:
+    gen-schema:
+      glob: "{internal/config/config.go,scripts/gen-schema/**}"
+      run: go run ./scripts/gen-schema && git add spec/omni.settings.schema.json

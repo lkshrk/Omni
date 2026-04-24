@@ -1,0 +1,10 @@
+{
+  "groups": [
+    {
+      "tools": [
+        {"name": "ripgrep", "provider": "brew"},
+        {"name": "black",   "provider": "pip", "package": "black"}
+      ]
+    }
+  ]
+}

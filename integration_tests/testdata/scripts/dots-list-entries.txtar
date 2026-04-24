@@ -1,0 +1,16 @@
+# omni dots list with one entry shows the entry name and table header
+env HOME=$WORK
+exec omni --config settings.json dots list
+stdout 'NAME'
+stdout 'TARGET'
+stdout 'STATE'
+stdout 'nvim'
+
+exec omni --config settings.json dots list nvim --state no-source --format json
+stdout '"name":"nvim"'
+stdout '"health":"no-source"'
+
+-- settings.json --
+{"settings":{"dots_repo":"~/dotfiles"},"groups":[{"dots":[{"name":"nvim","path":"~/.config/nvim"}]}]}
+
+-- dotfiles/dotfiles/.keep --

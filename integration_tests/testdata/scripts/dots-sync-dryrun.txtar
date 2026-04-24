@@ -1,0 +1,10 @@
+# omni dots sync --dry-run with no entries reports "Dry-run"
+# @requires: stow
+env HOME=$WORK
+exec omni --config settings.json dots sync --dry-run
+stdout 'Dry-run'
+
+-- settings.json --
+{"settings":{"dots_repo":"~/dotfiles"}}
+
+-- dotfiles/dotfiles/.keep --

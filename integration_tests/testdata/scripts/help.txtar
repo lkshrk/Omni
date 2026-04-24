@@ -1,0 +1,6 @@
+# omni --help should exit 0 and show usage
+exec omni --help
+stdout 'omni'
+stdout 'sync'
+stdout 'list'
+stdout 'add'
