@@ -1,0 +1,21 @@
+# omni dots add adopts a path into the dots repo and records the entry in config
+# @requires: stow
+env HOME=$WORK/home
+mkdir $WORK/home
+mkdir $WORK/home/.config
+mkdir $WORK/home/.config/myapp
+exec git init $WORK/home/dotfiles
+exec git -C $WORK/home/dotfiles config user.email t@t.com
+exec git -C $WORK/home/dotfiles config user.name T
+exec git -C $WORK/home/dotfiles commit --allow-empty -m init
+exec omni --config settings.json dots add $WORK/home/.config/myapp --adopt
+stdout 'symlink'
+exec omni --config settings.json dots list
+stdout 'myapp'
+
+-- settings.json --
+{"settings":{"dots_repo":"~/dotfiles"}}
+
+-- home/.config/myapp/config.toml --
+[settings]
+theme = "dark"

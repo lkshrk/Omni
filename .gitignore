@@ -1,0 +1,53 @@
+# Build output
+.worktrees/
+bin/
+.tmp/
+
+# Database files
+*.db
+*.sqlite
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.vim/
+*.iml
+
+# AI assistants
+CLAUDE.md
+AGENTS.md
+GEMINI.md
+.claudeignore
+.claude/
+.omc/
+.wolf/
+.cursor/
+.aider*
+.copilot/
+.continue/
+.windsurf/
+.cline/
+.roo/
+.roomodes
+.leankg/
+
+# Go
+vendor/
+coverage.out
+cover.out
+cpu.prof
+mem.prof
+/gen-schema

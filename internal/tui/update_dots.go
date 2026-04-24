@@ -1,0 +1,961 @@
+package tui
+
+import (
+	"context"
+	"fmt"
+	"path/filepath"
+	"strings"
+
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/lkshrk/omni/internal/app"
+	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/dots"
+)
+
+func (m *Model) beginDotsOperation(status string) {
+	m.cancelDotsOperation()
+	parent := m.ctx
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent)
+	m.dotsOpGen++
+	m.dotsCtx = ctx
+	m.dotsCancel = cancel
+	m.dotsLoading = true
+	startOp(m, status)
+}
+
+func (m *Model) cancelDotsOperation() {
+	if m.dotsCancel != nil {
+		m.dotsCancel()
+		m.dotsCancel = nil
+	}
+	m.dotsCtx = nil
+}
+
+func (m *Model) currentDotsOperation() (context.Context, int) {
+	if m.dotsCtx != nil {
+		return m.dotsCtx, m.dotsOpGen
+	}
+	if m.ctx == nil {
+		return context.Background(), m.dotsOpGen
+	}
+	return m.ctx, m.dotsOpGen
+}
+
+func (m *Model) finishDotsOperation(gen int) bool {
+	if gen != m.dotsOpGen {
+		return false
+	}
+	m.cancelDotsOperation()
+	m.dotsLoading = false
+	return true
+}
+
+func (m *Model) handleDotsSubmodeKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
+	switch {
+	case m.dotsSearchActive:
+		return true, m.handleDotsSearchKeyMsg(msg)
+	default:
+		return false, nil
+	}
+}
+
+func (m *Model) handleDotsSearchKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
+	var cmds []tea.Cmd
+
+	switch {
+	case key.Matches(msg, m.keys.Back):
+		m.dotsSearchActive = false
+		m.filter.SetValue("")
+		m.filter.Blur()
+		m.dotsCursor = 0
+		m.dotsExpandedName = ""
+		m.syncDotsExpandedName(dotsVisibleRows(*m))
+		m.clearDotsConfirmState()
+	case key.Matches(msg, m.keys.Confirm):
+		m.filter.Blur()
+	default:
+		prev := m.filter.Value()
+		var cmd tea.Cmd
+		m.filter, cmd = m.filter.Update(msg)
+		cmds = append(cmds, cmd)
+		if m.filter.Value() != prev {
+			m.dotsCursor = 0
+			m.dotsExpandedName = ""
+			m.syncDotsExpandedName(dotsVisibleRows(*m))
+			m.clearDotsConfirmState()
+		}
+	}
+
+	return cmds
+}
+
+func (m *Model) handleDotsNavigationKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibleRow, cmds *[]tea.Cmd) bool {
+	switch {
+	case key.Matches(msg, m.keys.Back):
+		m.handleDotsBackKey()
+	case key.Matches(msg, m.keys.Up):
+		m.clearDotsConfirmState()
+		if m.dotsCursor > 0 {
+			m.moveDotsCursor(-1, visible)
+		}
+	case key.Matches(msg, m.keys.Down):
+		m.clearDotsConfirmState()
+		if m.dotsCursor < len(visible)-1 {
+			m.moveDotsCursor(1, visible)
+		}
+	case m.dotsConfirmIdx >= 0 || m.dotsOverwriteIdx >= 0 || m.dotsLocalIdx >= 0 || m.dotsIgnoreIdx >= 0:
+		return false
+	case key.Matches(msg, m.keys.GroupPrev):
+		m.moveDotsGroupFilter(-1)
+	case key.Matches(msg, m.keys.GroupNext):
+		m.moveDotsGroupFilter(1)
+	case key.Matches(msg, m.keys.Search):
+		m.dotsSearchActive = true
+		m.filter.SetValue("")
+		m.filter.Focus()
+		m.dotsCursor = 0
+		m.clearDotsConfirmState()
+		*cmds = append(*cmds, textinput.Blink)
+	case key.Matches(msg, m.keys.DotAdd):
+		if msg.IsRepeat {
+			return true
+		}
+		m.filePickerForDotAdd = true
+		*cmds = append(*cmds, m.openFilePicker("Add dotfile path", "", true))
+	default:
+		return false
+	}
+	return true
+}
+
+func (m *Model) handleDotsBackKey() {
+	if m.dotsConfirmIdx >= 0 || m.dotsOverwriteIdx >= 0 || m.dotsLocalIdx >= 0 || m.dotsIgnoreIdx >= 0 {
+		m.clearDotsConfirmState()
+	} else if m.dotsGroupFilter != "" {
+		m.dotsGroupFilter = ""
+		m.dotsCursor = 0
+	} else if m.dotsSearchActive {
+		m.dotsSearchActive = false
+		m.filter.SetValue("")
+		m.dotsCursor = 0
+	}
+}
+
+func (m *Model) moveDotsGroupFilter(delta int) {
+	pills := dotsGroupPills(m.dotsEntries)
+	if len(pills) == 0 {
+		return
+	}
+	idx := 0
+	for i, p := range pills {
+		if p == m.dotsGroupFilter {
+			idx = i
+			break
+		}
+	}
+	idx += delta
+	if idx < 0 {
+		idx = len(pills) - 1
+	} else if idx >= len(pills) {
+		idx = 0
+	}
+	m.dotsGroupFilter = pills[idx]
+	m.dotsCursor = 0
+	m.dotsExpandedName = ""
+	m.syncDotsExpandedName(dotsVisibleRows(*m))
+	m.clearDotsConfirmState()
+}
+
+func (m *Model) syncDotsExpandedName(visible []dotsVisibleRow) {
+	if len(visible) == 0 {
+		m.dotsExpandedName = ""
+		m.dotsCursor = 0
+		return
+	}
+	if m.dotsCursor < 0 {
+		m.dotsCursor = 0
+	}
+	if m.dotsCursor >= len(visible) {
+		m.dotsCursor = len(visible) - 1
+	}
+	if m.dotsExpandedName != "" {
+		found := false
+		for _, row := range visible {
+			if !row.isChild && row.entry.Name == m.dotsExpandedName {
+				found = true
+				break
+			}
+		}
+		if !found {
+			m.dotsExpandedName = ""
+		}
+	}
+}
+
+func (m *Model) moveDotsCursor(delta int, visible []dotsVisibleRow) {
+	if len(visible) == 0 {
+		m.dotsCursor = 0
+		m.dotsExpandedName = ""
+		return
+	}
+	next := m.dotsCursor + delta
+	if next < 0 {
+		next = 0
+	}
+	if next >= len(visible) {
+		next = len(visible) - 1
+	}
+	target := visible[next]
+	if m.dotsExpandedName != "" && target.entry.Name != m.dotsExpandedName {
+		m.dotsExpandedName = ""
+		rows := dotsVisibleRows(*m)
+		if idx := dotsRowIndex(rows, target); idx >= 0 {
+			m.dotsCursor = idx
+			return
+		}
+		m.syncDotsExpandedName(rows)
+		return
+	}
+	m.dotsCursor = next
+}
+
+func dotsRowIndex(rows []dotsVisibleRow, target dotsVisibleRow) int {
+	for i, row := range rows {
+		if row.entry.Name != target.entry.Name || row.isChild != target.isChild {
+			continue
+		}
+		if !row.isChild || row.child.RelPath == target.child.RelPath {
+			return i
+		}
+	}
+	return -1
+}
+
+func (m *Model) clearDotsConfirmState() {
+	if m.dotsConfirmIdx >= 0 || m.dotsOverwriteIdx >= 0 || m.dotsLocalIdx >= 0 || m.dotsIgnoreIdx >= 0 {
+		m.cancelConfirmationTimeout()
+	}
+	m.dotsConfirmIdx = -1
+	m.dotsOverwriteIdx = -1
+	m.dotsLocalIdx = -1
+	m.dotsIgnoreIdx = -1
+}
+
+func (m *Model) handleDotsActionKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibleRow) []tea.Cmd {
+	var cmds []tea.Cmd
+
+	if m.dotsConfirmIdx >= 0 {
+		return m.handleDotsDeleteChoiceKeyMsg(msg, visible)
+	}
+	if m.dotsOverwriteIdx >= 0 && !key.Matches(msg, m.keys.DotUseRepo) {
+		return cmds
+	}
+	if m.dotsLocalIdx >= 0 && !key.Matches(msg, m.keys.DotUseLocal) {
+		return cmds
+	}
+	if m.dotsIgnoreIdx >= 0 && !key.Matches(msg, m.keys.DotIgnore) {
+		return cmds
+	}
+
+	switch {
+	case key.Matches(msg, m.keys.Confirm):
+		cmds = append(cmds, m.handleDotsConfirmKeyMsg(visible)...)
+	case key.Matches(msg, m.keys.Toggle):
+		if msg.IsRepeat {
+			break
+		}
+		m.handleDotsToggleKeyMsg(visible)
+	case key.Matches(msg, m.keys.Sync):
+		if msg.IsRepeat || len(visible) == 0 || m.dotsCursor >= len(visible) {
+			break
+		}
+		row := visible[m.dotsCursor]
+		if row.isChild {
+			break
+		}
+		entry := row.entry
+		if !dotHasAction(entry, app.DotActionSync) {
+			break
+		}
+		m.beginDotsOperation("Syncing " + entry.Name + "…")
+		if isTransientDotCandidate(entry) {
+			cmds = append(cmds, m.spinner.Tick, m.doDotsSyncDiscovered(entry))
+		} else {
+			cmds = append(cmds, m.spinner.Tick, m.doDotsSyncEntry(entry.Name))
+		}
+	case key.Matches(msg, m.keys.SyncAll):
+		if msg.IsRepeat {
+			break
+		}
+		m.beginDotsOperation("Syncing dots…")
+		cmds = append(cmds, m.spinner.Tick, m.doDotsSyncOnly())
+	case key.Matches(msg, m.keys.DotDiscover):
+		if msg.IsRepeat {
+			break
+		}
+		m.beginDotsOperation("Discovering dots…")
+		cmds = append(cmds, m.spinner.Tick, m.doDotsDiscover())
+	case key.Matches(msg, m.keys.MoveGroup):
+		if msg.IsRepeat {
+			break
+		}
+		m.openDotGroupMembershipPicker(visible)
+	case key.Matches(msg, m.keys.DotUseRepo):
+		cmds = append(cmds, m.handleDotsResolveKeyMsg(visible, app.DotResolveUseRepo)...)
+	case key.Matches(msg, m.keys.DotUseLocal):
+		cmds = append(cmds, m.handleDotsResolveKeyMsg(visible, app.DotResolveUseLocal)...)
+	case key.Matches(msg, m.keys.DotDelete):
+		cmds = append(cmds, m.handleDotsDeleteKeyMsg(visible)...)
+	case key.Matches(msg, m.keys.DotIgnore):
+		if msg.IsRepeat {
+			break
+		}
+		cmds = append(cmds, m.handleDotsIgnoreActionKeyMsg(visible)...)
+	}
+
+	return cmds
+}
+
+func (m *Model) handleDotsToggleKeyMsg(visible []dotsVisibleRow) {
+	if len(visible) == 0 || m.dotsCursor < 0 || m.dotsCursor >= len(visible) {
+		return
+	}
+	m.clearDotsConfirmState()
+	row := visible[m.dotsCursor]
+	name := row.entry.Name
+	if len(row.entry.Children) == 0 {
+		return
+	}
+	if row.isChild {
+		m.dotsExpandedName = ""
+		if idx := dotsRowIndex(dotsVisibleRows(*m), dotsVisibleRow{entry: row.entry}); idx >= 0 {
+			m.dotsCursor = idx
+		}
+		return
+	}
+	if m.dotsExpandedName == name {
+		m.dotsExpandedName = ""
+		return
+	}
+	m.dotsExpandedName = name
+}
+
+func (m *Model) openDotGroupMembershipPicker(visible []dotsVisibleRow) {
+	if m.app == nil {
+		return
+	}
+	if len(visible) == 0 || m.dotsCursor < 0 || m.dotsCursor >= len(visible) {
+		return
+	}
+	row := visible[m.dotsCursor]
+	if row.isChild {
+		return
+	}
+	name := row.entry.Name
+	memberships, err := m.app.DotMembershipMap(m.ctx)
+	if err == nil && memberships != nil {
+		m.dotMemberships = memberships
+	}
+	if len(m.dotMemberships[name]) == 0 {
+		return
+	}
+	m.mode = viewGroupMembership
+	m.pickerGroups = append(prioritizedPickerGroups(*m), groupPickerNewSentinel)
+	m.pickerCursor = 0
+	m.pickerCreatingGroup = false
+	m.pickerCreatedGroups = nil
+	m.pickerMembershipKind = pickerMembershipDot
+	m.pickerMembershipName = name
+	m.pickerOriginalGroups = append([]string(nil), m.dotMemberships[name]...)
+}
+
+func (m *Model) handleDotsConfirmKeyMsg(visible []dotsVisibleRow) []tea.Cmd {
+	var cmds []tea.Cmd
+
+	if config.BoolVal(m.settings.DotsDisabled) {
+		if m.settings.DotsRepo == "" {
+			m.mode = viewSetup
+			m.setupBackgroundMode = viewDots
+			m.setupStep = 5
+		} else {
+			if m.promptForStowInstall(stowInstallEnableDots) {
+				return cmds
+			}
+			m.beginDotsOperation("Enabling dots…")
+			cmds = append(cmds, m.spinner.Tick, m.doEnableDots())
+		}
+		return cmds
+	}
+	if m.settings.DotsRepo == "" {
+		m.mode = viewSetup
+		m.setupBackgroundMode = viewDots
+		m.setupStep = 5
+		return cmds
+	}
+	return cmds
+}
+
+func (m *Model) handleDotsResolveKeyMsg(visible []dotsVisibleRow, strategy app.DotsResolveStrategy) []tea.Cmd {
+	var cmds []tea.Cmd
+	if len(visible) == 0 || m.dotsCursor < 0 || m.dotsCursor >= len(visible) {
+		return cmds
+	}
+	row := visible[m.dotsCursor]
+	if row.isChild {
+		return cmds
+	}
+	entry := row.entry
+	if strategy == app.DotResolveUseRepo && !dotHasAction(entry, app.DotActionUseRepo) {
+		return cmds
+	}
+	if strategy == app.DotResolveUseLocal && !dotHasAction(entry, app.DotActionUseLocal) {
+		return cmds
+	}
+	idx := &m.dotsOverwriteIdx
+	label := "repo"
+	if strategy == app.DotResolveUseLocal {
+		idx = &m.dotsLocalIdx
+		label = "local"
+	}
+	if *idx == m.dotsCursor {
+		name := entry.Name
+		m.cancelConfirmationTimeout()
+		m.dotsOverwriteIdx = -1
+		m.dotsLocalIdx = -1
+		m.beginDotsOperation("Using " + label + " for " + name + "…")
+		if isTransientDotCandidate(entry) {
+			cmds = append(cmds, m.spinner.Tick, m.doDotsResolveDiscovered(entry, strategy))
+		} else {
+			cmds = append(cmds, m.spinner.Tick, m.doDotsResolve(name, strategy))
+		}
+		return cmds
+	}
+	m.dotsOverwriteIdx = -1
+	m.dotsLocalIdx = -1
+	m.dotsIgnoreIdx = -1
+	*idx = m.dotsCursor
+	m.dotsConfirmIdx = -1
+	cmds = append(cmds, m.armConfirmationTimeout())
+	return cmds
+}
+
+func (m *Model) handleDotsDeleteKeyMsg(visible []dotsVisibleRow) []tea.Cmd {
+	var cmds []tea.Cmd
+
+	if len(visible) == 0 || m.dotsCursor < 0 || m.dotsCursor >= len(visible) {
+		return cmds
+	}
+	if visible[m.dotsCursor].isChild {
+		return cmds
+	}
+	if !dotHasAction(visible[m.dotsCursor].entry, app.DotActionRemove) {
+		return cmds
+	}
+	m.dotsConfirmIdx = m.dotsCursor
+	m.dotsOverwriteIdx = -1
+	m.dotsLocalIdx = -1
+	m.dotsIgnoreIdx = -1
+	cmds = append(cmds, m.armConfirmationTimeout())
+	return cmds
+}
+
+func (m *Model) handleDotsDeleteChoiceKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibleRow) []tea.Cmd {
+	var cmds []tea.Cmd
+	if m.dotsConfirmIdx < 0 || m.dotsConfirmIdx >= len(visible) {
+		return cmds
+	}
+	row := visible[m.dotsConfirmIdx]
+	if row.isChild {
+		return cmds
+	}
+
+	switch strings.ToLower(msg.String()) {
+	case "y":
+		cmds = append(cmds, m.confirmDotsDelete(row.entry.Name, true)...)
+	case "n":
+		cmds = append(cmds, m.confirmDotsDelete(row.entry.Name, false)...)
+	}
+	return cmds
+}
+
+func (m *Model) confirmDotsDelete(name string, keepLocal bool) []tea.Cmd {
+	m.cancelConfirmationTimeout()
+	m.dotsConfirmIdx = -1
+	m.dotsIgnoreIdx = -1
+	m.beginDotsOperation("Deleting " + name + "…")
+	return []tea.Cmd{m.spinner.Tick, m.doDotsDelete(name, keepLocal)}
+}
+
+func (m *Model) handleDotsIgnoreActionKeyMsg(visible []dotsVisibleRow) []tea.Cmd {
+	var cmds []tea.Cmd
+	if len(visible) == 0 || m.dotsCursor < 0 || m.dotsCursor >= len(visible) {
+		return cmds
+	}
+	row := visible[m.dotsCursor]
+	if row.isChild && row.child.RelPath == "" {
+		return cmds
+	}
+	pattern := row.child.RelPath
+	if m.dotsIgnoreIdx == m.dotsCursor {
+		m.cancelConfirmationTimeout()
+		m.dotsIgnoreIdx = -1
+		m.dotsConfirmIdx = -1
+		m.dotsOverwriteIdx = -1
+		m.dotsLocalIdx = -1
+		if row.isChild && row.child.Ignored {
+			m.beginDotsOperation("Including " + pattern + "…")
+			cmds = append(cmds, m.spinner.Tick, m.doDotsIgnore(row.entry.Name, pattern, false))
+		} else if !row.isChild && dotStatusState(row.entry) == app.DotStateIgnored {
+			m.beginDotsOperation("Including " + row.entry.Name + "…")
+			cmds = append(cmds, m.spinner.Tick, m.doDotsEntryIgnore(row.entry, false))
+		} else if !row.isChild {
+			m.beginDotsOperation("Ignoring " + row.entry.Name + "…")
+			cmds = append(cmds, m.spinner.Tick, m.doDotsEntryIgnore(row.entry, true))
+		} else {
+			m.beginDotsOperation("Ignoring " + pattern + "…")
+			cmds = append(cmds, m.spinner.Tick, m.doDotsIgnore(row.entry.Name, pattern, true))
+		}
+		return cmds
+	}
+	m.dotsIgnoreIdx = m.dotsCursor
+	m.dotsConfirmIdx = -1
+	m.dotsOverwriteIdx = -1
+	m.dotsLocalIdx = -1
+	cmds = append(cmds, m.armConfirmationTimeout())
+	return cmds
+}
+
+func (m *Model) handleDotsLoadedMsg(msg dotsLoadedMsg) []tea.Cmd {
+	var cmds []tea.Cmd
+
+	if !m.finishDotsOperation(msg.gen) {
+		return cmds
+	}
+	m.dotsLoaded = true
+	if msg.entries != nil {
+		m.applyDotsSnapshot(msg.entries, msg.gitStatus, msg.dotMemberships)
+	}
+	if msg.err != nil {
+		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
+	} else if msg.detail != "" {
+		cmds = append(cmds, setStatus(m, msg.detail, false))
+	}
+	return cmds
+}
+
+func (m *Model) handleDotsSyncedMsg(msg dotsSyncedMsg) []tea.Cmd {
+	var cmds []tea.Cmd
+
+	if !m.finishDotsOperation(msg.gen) {
+		return cmds
+	}
+	m.dotsLoaded = true
+	// Always update entries when available — health must reflect conflict state
+	// even when stow partially failed.
+	if msg.entries != nil {
+		m.applyDotsSnapshot(msg.entries, msg.gitStatus, msg.dotMemberships)
+	}
+	if msg.err != nil {
+		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
+	} else {
+		cmds = append(cmds, setStatus(m, "✓ dots synced", false))
+	}
+	return cmds
+}
+
+func (m *Model) handleDotsDiscoveredMsg(msg dotsDiscoveredMsg) []tea.Cmd {
+	var cmds []tea.Cmd
+
+	if !m.finishDotsOperation(msg.gen) {
+		return cmds
+	}
+	m.dotsLoaded = true
+	if msg.discoveredCount > 0 {
+		m.clearDotsFilters()
+	}
+	if msg.entries != nil {
+		m.applyDotsSnapshot(msg.entries, msg.gitStatus, msg.dotMemberships)
+	}
+	if msg.discoveredCount > 0 {
+		m.selectFirstDiscoveredDotCandidate()
+	}
+	if msg.err != nil {
+		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
+		return cmds
+	}
+	count := msg.discoveredCount
+	if count == 0 {
+		cmds = append(cmds, setStatus(m, "✓ no untracked dotfile candidates", false))
+		return cmds
+	}
+	cmds = append(cmds, setStatus(m, fmt.Sprintf("✓ discovered %s", compactCount(count, "candidate")), false))
+	return cmds
+}
+
+func (m *Model) clearDotsFilters() {
+	m.dotsGroupFilter = ""
+	m.dotsSearchActive = false
+	m.filter.SetValue("")
+	m.filter.Blur()
+	m.dotsCursor = 0
+	m.dotsExpandedName = ""
+}
+
+func (m *Model) selectFirstDiscoveredDotCandidate() {
+	for i, row := range dotsVisibleRows(*m) {
+		if row.isChild || !isTransientDotCandidate(row.entry) {
+			continue
+		}
+		m.dotsCursor = i
+		m.dotsExpandedName = ""
+		return
+	}
+}
+
+func (m *Model) handleDotsPulledMsg(msg dotsPulledMsg) []tea.Cmd {
+	var cmds []tea.Cmd
+
+	if !m.finishDotsOperation(msg.gen) {
+		return cmds
+	}
+	// Always update entries when available — conflicts from the pull must be visible.
+	if msg.entries != nil {
+		m.applyDotsSnapshot(msg.entries, msg.gitStatus, msg.dotMemberships)
+	}
+	if msg.err != nil {
+		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
+	} else {
+		cmds = append(cmds, setStatus(m, "✓ pulled", false))
+	}
+	return cmds
+}
+
+func (m *Model) handleDotsPushedMsg(msg dotsPushedMsg) []tea.Cmd {
+	var cmds []tea.Cmd
+
+	if !m.finishDotsOperation(msg.gen) {
+		return cmds
+	}
+	if msg.entries != nil {
+		m.applyDotsSnapshot(msg.entries, msg.gitStatus, msg.dotMemberships)
+	}
+	if msg.err != nil {
+		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
+	} else {
+		cmds = append(cmds, setStatus(m, "✓ pushed", false))
+	}
+	return cmds
+}
+
+func (m *Model) handleDotsDeletedMsg(msg dotsDeletedMsg) []tea.Cmd {
+	var cmds []tea.Cmd
+
+	if !m.finishDotsOperation(msg.gen) {
+		return cmds
+	}
+	m.dotsConfirmIdx = -1
+	m.dotsOverwriteIdx = -1
+	m.dotsLocalIdx = -1
+	m.dotsIgnoreIdx = -1
+	if msg.entries != nil {
+		m.applyDotsSnapshot(msg.entries, msg.gitStatus, msg.dotMemberships)
+	}
+	if msg.err != nil {
+		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
+	} else {
+		cmds = append(cmds, setStatus(m, "✓ deleted "+msg.name, false))
+	}
+	return cmds
+}
+
+func (m *Model) handleDotsFixedMsg(msg dotsFixedMsg) []tea.Cmd {
+	var cmds []tea.Cmd
+
+	if !m.finishDotsOperation(msg.gen) {
+		return cmds
+	}
+	m.dotsOverwriteIdx = -1
+	m.dotsLocalIdx = -1
+	m.dotsIgnoreIdx = -1
+	if msg.entries != nil {
+		m.applyDotsSnapshot(msg.entries, msg.gitStatus, msg.dotMemberships)
+	}
+	if msg.err != nil {
+		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
+	} else {
+		cmds = append(cmds, setStatus(m, "✓ resolved "+msg.name, false))
+	}
+	return cmds
+}
+
+func (m *Model) handleDotsAddedMsg(msg dotsAddedMsg) []tea.Cmd {
+	var cmds []tea.Cmd
+
+	if !m.finishDotsOperation(msg.gen) {
+		return cmds
+	}
+	if msg.entries != nil {
+		m.applyDotsSnapshot(msg.entries, msg.gitStatus, msg.dotMemberships)
+	}
+	if msg.err != nil {
+		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
+	} else {
+		addedName := filepath.Base(msg.path)
+		for i, e := range filteredDotsEntries(*m) {
+			if e.Name == addedName {
+				m.dotsCursor = i
+				break
+			}
+		}
+		cmds = append(cmds, setStatus(m, "✓ added "+msg.path, false))
+	}
+	return cmds
+}
+
+func (m *Model) applyDotsSnapshot(entries []app.DotStatus, gitStatus string, memberships map[string][]string) {
+	m.dotsConfirmIdx = -1
+	m.dotsOverwriteIdx = -1
+	m.dotsLocalIdx = -1
+	m.dotsIgnoreIdx = -1
+	sortDotsEntries(entries)
+	m.dotsEntries = entries
+	m.dotsGitStatus = gitStatus
+	if memberships != nil {
+		m.dotMemberships = memberships
+	}
+	m.syncDotsExpandedName(dotsVisibleRows(*m))
+}
+
+// doLoadDots fetches dots status (entries + git status) for the Dots tab.
+func (m *Model) doLoadDots() tea.Cmd {
+	a := m.app
+	ctx, gen := m.currentDotsOperation()
+	return func() tea.Msg {
+		result, err := a.DiscoverDotsStatus(ctx)
+		if err != nil {
+			if result != nil {
+				return dotsLoadedMsg{gen: gen, entries: result.Entries, gitStatus: result.GitStatus, dotMemberships: loadDotMemberships(a, ctx), err: err}
+			}
+			return dotsLoadedMsg{gen: gen, err: err}
+		}
+		return dotsLoadedMsg{gen: gen, entries: result.Entries, gitStatus: result.GitStatus, dotMemberships: loadDotMemberships(a, ctx)}
+	}
+}
+
+// doDotsSyncOnly repairs symlinks for all dots entries without a git pull.
+func (m *Model) doDotsSyncOnly() tea.Cmd {
+	a := m.app
+	ctx, gen := m.currentDotsOperation()
+	return func() tea.Msg {
+		// Capture sync error but always refresh status so health reflects
+		// conflict state even after a partial stow failure.
+		_, syncErr := a.DotsSyncContext(ctx, dots.SyncOptions{})
+		result, err := a.DiscoverDotsStatus(ctx)
+		if err != nil {
+			if result != nil {
+				return dotsSyncedMsg{gen: gen, entries: result.Entries, gitStatus: result.GitStatus, dotMemberships: loadDotMemberships(a, ctx), err: combineDotsErrors(syncErr, err)}
+			}
+			return dotsSyncedMsg{gen: gen, err: combineDotsErrors(syncErr, err)}
+		}
+		return dotsSyncedMsg{gen: gen, entries: result.Entries, gitStatus: result.GitStatus, dotMemberships: loadDotMemberships(a, ctx), err: syncErr}
+	}
+}
+
+func (m *Model) doDotsSyncEntry(name string) tea.Cmd {
+	a := m.app
+	ctx, gen := m.currentDotsOperation()
+	return func() tea.Msg {
+		_, syncErr := a.DotsSyncEntry(ctx, name, dots.SyncOptions{})
+		result, err := a.DiscoverDotsStatus(ctx)
+		if err != nil {
+			if result != nil {
+				return dotsSyncedMsg{gen: gen, entries: result.Entries, gitStatus: result.GitStatus, dotMemberships: loadDotMemberships(a, ctx), err: combineDotsErrors(syncErr, err)}
+			}
+			return dotsSyncedMsg{gen: gen, err: combineDotsErrors(syncErr, err)}
+		}
+		return dotsSyncedMsg{gen: gen, entries: result.Entries, gitStatus: result.GitStatus, dotMemberships: loadDotMemberships(a, ctx), err: syncErr}
+	}
+}
+
+func (m *Model) doDotsSyncDiscovered(status app.DotStatus) tea.Cmd {
+	a := m.app
+	ctx, gen := m.currentDotsOperation()
+	return func() tea.Msg {
+		added, addErr := a.DotsAddDiscoveredEntry(status.Name, status.Group)
+		name := added.Name
+		if name == "" {
+			name = status.Name
+		}
+		var syncErr error
+		if addErr == nil {
+			_, syncErr = a.DotsSyncEntry(ctx, name, dots.SyncOptions{})
+		}
+		entries, gitStatus, memberships, err := refreshDotsSnapshot(a, ctx)
+		return dotsSyncedMsg{gen: gen, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: combineDotsErrors(combineDotsErrors(addErr, syncErr), err)}
+	}
+}
+
+// doDotsDiscover lists untracked dotfile candidates without mutating config,
+// the repository, or local files.
+func (m *Model) doDotsDiscover() tea.Cmd {
+	a := m.app
+	ctx, gen := m.currentDotsOperation()
+	return func() tea.Msg {
+		result, err := a.DiscoverDotsStatus(ctx)
+		if result != nil {
+			return dotsDiscoveredMsg{
+				gen:             gen,
+				entries:         result.Entries,
+				gitStatus:       result.GitStatus,
+				dotMemberships:  loadDotMemberships(a, ctx),
+				discoveredCount: result.DiscoveredCount,
+				err:             err,
+			}
+		}
+		return dotsDiscoveredMsg{gen: gen, err: err}
+	}
+}
+
+func combineDotsErrors(primary, secondary error) error {
+	switch {
+	case primary == nil:
+		return secondary
+	case secondary == nil:
+		return primary
+	default:
+		return fmt.Errorf("%v; %w", primary, secondary)
+	}
+}
+
+func refreshDotsSnapshot(a *app.App, ctx context.Context) ([]app.DotStatus, string, map[string][]string, error) {
+	result, err := a.DiscoverDotsStatus(ctx)
+	if result == nil {
+		return nil, "", nil, err
+	}
+	return result.Entries, result.GitStatus, loadDotMemberships(a, ctx), err
+}
+
+func loadDotMemberships(a *app.App, ctx context.Context) map[string][]string {
+	memberships, err := a.DotMembershipMap(ctx)
+	if err != nil {
+		return nil
+	}
+	return memberships
+}
+
+// doDotsPull runs git pull + resync and refreshes dots status.
+func (m *Model) doDotsPull() tea.Cmd {
+	a := m.app
+	ctx, gen := m.currentDotsOperation()
+	return func() tea.Msg {
+		// Capture pull/sync error but always refresh status so health reflects
+		// any conflicts introduced by the pull.
+		_, pullErr := a.DotsPull(ctx)
+		entries, gitStatus, memberships, err := refreshDotsSnapshot(a, ctx)
+		return dotsPulledMsg{gen: gen, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: combineDotsErrors(pullErr, err)}
+	}
+}
+
+// doDotsPush commits all changes with an auto-generated message and pushes.
+func (m *Model) doDotsPush() tea.Cmd {
+	a := m.app
+	ctx, gen := m.currentDotsOperation()
+	return func() tea.Msg {
+		pushErr := a.DotsPush(ctx, "")
+		entries, gitStatus, memberships, err := refreshDotsSnapshot(a, ctx)
+		return dotsPushedMsg{gen: gen, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: combineDotsErrors(pushErr, err)}
+	}
+}
+
+// doDotsOverwrite resolves a conflict for the named entry by backing up the
+// original file and creating the managed symlink, then refreshes status.
+func (m *Model) doDotsOverwrite(name string) tea.Cmd {
+	return m.doDotsResolve(name, app.DotResolveUseRepo)
+}
+
+func (m *Model) doDotsResolve(name string, strategy app.DotsResolveStrategy) tea.Cmd {
+	a := m.app
+	ctx, gen := m.currentDotsOperation()
+	return func() tea.Msg {
+		_, resolveErr := a.DotsResolveConflict(ctx, name, strategy)
+		entries, gitStatus, memberships, err := refreshDotsSnapshot(a, ctx)
+		return dotsFixedMsg{gen: gen, name: name, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: combineDotsErrors(resolveErr, err)}
+	}
+}
+
+func (m *Model) doDotsResolveDiscovered(status app.DotStatus, strategy app.DotsResolveStrategy) tea.Cmd {
+	a := m.app
+	ctx, gen := m.currentDotsOperation()
+	return func() tea.Msg {
+		added, addErr := a.DotsAddDiscoveredEntry(status.Name, status.Group)
+		name := added.Name
+		if name == "" {
+			name = status.Name
+		}
+		var resolveErr error
+		if addErr == nil {
+			_, resolveErr = a.DotsResolveConflict(ctx, name, strategy)
+		}
+		entries, gitStatus, memberships, err := refreshDotsSnapshot(a, ctx)
+		return dotsFixedMsg{gen: gen, name: name, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: combineDotsErrors(combineDotsErrors(addErr, resolveErr), err)}
+	}
+}
+
+// doDotsAdd adopts the file/dir at absPath into the dots repo and refreshes status.
+// rawPath is the tilde-form path used for display (e.g. "~/.config/myapp").
+func (m *Model) doDotsAdd(absPath, rawPath, group string) tea.Cmd {
+	a := m.app
+	ctx, gen := m.currentDotsOperation()
+	return func() tea.Msg {
+		_, addErr := a.DotsAdd(ctx, absPath, app.DotsAddOptions{Adopt: true, Group: group})
+		entries, gitStatus, memberships, err := refreshDotsSnapshot(a, ctx)
+		return dotsAddedMsg{gen: gen, path: rawPath, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: combineDotsErrors(addErr, err)}
+	}
+}
+
+// doDotsIgnore toggles a per-entry ignore glob for the named dots entry in config.
+func (m *Model) doDotsIgnore(name, pattern string, ignored bool) tea.Cmd {
+	a := m.app
+	ctx, gen := m.currentDotsOperation()
+	return func() tea.Msg {
+		var err error
+		if ignored {
+			err = a.DotsAddIgnorePattern(name, pattern)
+		} else {
+			err = a.DotsRemoveIgnorePattern(name, pattern)
+		}
+		entries, gitStatus, memberships, refreshErr := refreshDotsSnapshot(a, ctx)
+		return dotsIgnoredMsg{gen: gen, name: name, pattern: pattern, ignored: ignored, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: combineDotsErrors(err, refreshErr)}
+	}
+}
+
+func (m *Model) doDotsEntryIgnore(status app.DotStatus, ignored bool) tea.Cmd {
+	a := m.app
+	ctx, gen := m.currentDotsOperation()
+	return func() tea.Msg {
+		path := status.ConfigPath
+		if path == "" {
+			path = status.TargetPath
+		}
+		ignoreErr := a.DotsSetEntryIgnored(status.Name, path, ignored)
+		entries, gitStatus, memberships, err := refreshDotsSnapshot(a, ctx)
+		return dotsIgnoredMsg{gen: gen, name: status.Name, pattern: status.Name, ignored: ignored, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: combineDotsErrors(ignoreErr, err)}
+	}
+}
+
+// doDotsDelete removes the named dots entry and refreshes status.
+func (m *Model) doDotsDelete(name string, keepLocal bool) tea.Cmd {
+	a := m.app
+	ctx, gen := m.currentDotsOperation()
+	return func() tea.Msg {
+		deleteErr := a.DotsDeleteWithOptions(ctx, name, app.DotsDeleteOptions{KeepLocal: keepLocal})
+		entries, gitStatus, memberships, err := refreshDotsSnapshot(a, ctx)
+		return dotsDeletedMsg{gen: gen, name: name, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: combineDotsErrors(deleteErr, err)}
+	}
+}

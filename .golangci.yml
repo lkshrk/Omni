@@ -1,0 +1,54 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/lkshrk/omni
+
+linters:
+  default: none
+  enable:
+    - errcheck       # check that errors are handled
+    - govet          # go vet (includes copylock, shadow, etc.)
+    - ineffassign    # detect ineffectual assignments
+    - staticcheck    # comprehensive static analysis (includes gosimple)
+    - unused         # detect unused code
+    - misspell       # spell-check comments and strings
+    - revive         # opinionated linter (replaces golint)
+    - bodyclose      # ensure http response bodies are closed
+    - noctx          # detect http calls without context
+    - sqlclosecheck  # ensure sql.Rows/Stmt are closed
+
+  settings:
+    revive:
+      rules:
+        - name: error-return
+        - name: error-strings
+        - name: if-return
+
+    govet:
+      enable:
+        - shadow
+
+  exclusions:
+    rules:
+      # Test files are allowed to use assert-style helpers and long functions.
+      - path: _test\.go
+        linters:
+          - errcheck
+      # internal/sync types are internal-only; stutter is intentional for clarity.
+      - path: internal/sync/syncer\.go
+        text: "stutters"
+        linters:
+          - revive
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

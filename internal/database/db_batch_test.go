@@ -1,0 +1,259 @@
+package database_test
+
+import (
+	"context"
+	"testing"
+
+	"github.com/lkshrk/omni/internal/database"
+)
+
+func TestUpsertBatch_EmptyIsNoOp(t *testing.T) {
+	db := newTestDB(t)
+	if err := db.UpsertBatch(context.Background(), nil); err != nil {
+		t.Errorf("UpsertBatch(nil) = %v, want nil", err)
+	}
+	if err := db.UpsertBatch(context.Background(), []*database.ToolCache{}); err != nil {
+		t.Errorf("UpsertBatch([]) = %v, want nil", err)
+	}
+}
+
+func TestUpsertBatch_InsertsAllAndPersists(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+
+	batch := []*database.ToolCache{
+		{Name: "ripgrep", Provider: "brew", Package: "ripgrep"},
+		{Name: "fd", Provider: "brew", Package: "fd"},
+		{Name: "bat", Provider: "brew"}, // Package empty → defaults to Name
+	}
+	if err := db.UpsertBatch(ctx, batch); err != nil {
+		t.Fatalf("UpsertBatch: %v", err)
+	}
+	for _, want := range []struct{ name, prov, pkg string }{
+		{"ripgrep", "brew", "ripgrep"},
+		{"fd", "brew", "fd"},
+		{"bat", "brew", "bat"},
+	} {
+		got, err := db.Get(ctx, want.name, want.prov, want.pkg)
+		if err != nil {
+			t.Errorf("Get(%s) after batch: %v", want.name, err)
+			continue
+		}
+		if got.Name != want.name || got.Provider != want.prov || got.Package != want.pkg {
+			t.Errorf("Get(%s) = %+v, want name=%s prov=%s pkg=%s", want.name, got, want.name, want.prov, want.pkg)
+		}
+	}
+}
+
+func TestUpsertBatch_SkipsNilEntries(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+
+	batch := []*database.ToolCache{
+		{Name: "ripgrep", Provider: "brew", Package: "ripgrep"},
+		nil,
+		{Name: "fd", Provider: "brew", Package: "fd"},
+	}
+	if err := db.UpsertBatch(ctx, batch); err != nil {
+		t.Fatalf("UpsertBatch with nil entry: %v", err)
+	}
+	if _, err := db.Get(ctx, "ripgrep", "brew", "ripgrep"); err != nil {
+		t.Errorf("ripgrep after nil-skip batch: %v", err)
+	}
+	if _, err := db.Get(ctx, "fd", "brew", "fd"); err != nil {
+		t.Errorf("fd after nil-skip batch: %v", err)
+	}
+}
+
+func TestUpsertBatch_UpdatesExistingRows(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+
+	if err := db.Upsert(ctx, &database.ToolCache{
+		Name: "ripgrep", Provider: "brew", Package: "ripgrep", Installed: false,
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := db.UpsertBatch(ctx, []*database.ToolCache{
+		{Name: "ripgrep", Provider: "brew", Package: "ripgrep", Installed: true},
+	}); err != nil {
+		t.Fatalf("UpsertBatch update: %v", err)
+	}
+	got, err := db.Get(ctx, "ripgrep", "brew", "ripgrep")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !got.Installed {
+		t.Error("Installed flag did not flip via UpsertBatch update")
+	}
+}
+
+func TestUpsertBatch_PreservesFailureStateWhenStillMissing(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+
+	if err := db.MarkFailed(ctx, "ripgrep", "brew", "ripgrep", "install error"); err != nil {
+		t.Fatalf("MarkFailed: %v", err)
+	}
+	if err := db.UpsertBatch(ctx, []*database.ToolCache{
+		{Name: "ripgrep", Provider: "brew", Package: "ripgrep", Installed: false},
+	}); err != nil {
+		t.Fatalf("UpsertBatch: %v", err)
+	}
+
+	got, err := db.Get(ctx, "ripgrep", "brew", "ripgrep")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.FailureCount != 1 {
+		t.Errorf("FailureCount = %d after missing UpsertBatch, want 1", got.FailureCount)
+	}
+	if got.FailedAt == nil {
+		t.Error("FailedAt should remain set after missing UpsertBatch")
+	}
+	if !got.LastError.Valid || got.LastError.String != "install error" {
+		t.Errorf("LastError = %+v, want preserved install error", got.LastError)
+	}
+}
+
+func TestUpdateOutdatedBatch_EmptyIsNoOp(t *testing.T) {
+	db := newTestDB(t)
+	if err := db.UpdateOutdatedBatch(context.Background(), nil); err != nil {
+		t.Errorf("UpdateOutdatedBatch(nil) = %v", err)
+	}
+}
+
+func TestUpdateOutdatedBatch_AppliesAllUpdates(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+
+	for _, name := range []string{"ripgrep", "fd"} {
+		if err := db.Upsert(ctx, &database.ToolCache{Name: name, Provider: "brew", Package: name}); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+	}
+	updates := []database.OutdatedUpdate{
+		{Name: "ripgrep", Provider: "brew", Package: "ripgrep", Outdated: true, LatestVersion: "14.1.0"},
+		{Name: "fd", Provider: "brew", Package: "fd", Outdated: false, LatestVersion: ""},
+	}
+	if err := db.UpdateOutdatedBatch(ctx, updates); err != nil {
+		t.Fatalf("UpdateOutdatedBatch: %v", err)
+	}
+	rg, _ := db.Get(ctx, "ripgrep", "brew", "ripgrep")
+	if !rg.Outdated || rg.LatestVersion.String != "14.1.0" {
+		t.Errorf("ripgrep not updated: outdated=%v latest=%v", rg.Outdated, rg.LatestVersion)
+	}
+	fd, _ := db.Get(ctx, "fd", "brew", "fd")
+	if fd.Outdated || fd.LatestVersion.Valid {
+		t.Errorf("fd should be up-to-date: outdated=%v latest=%v", fd.Outdated, fd.LatestVersion)
+	}
+}
+
+func TestUpdateOutdatedBatch_RejectsInvalidEntry(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	updates := []database.OutdatedUpdate{
+		{Name: "ripgrep", Provider: "brew", Package: ""}, // empty Package fails requirePackage
+	}
+	if err := db.UpdateOutdatedBatch(ctx, updates); err == nil {
+		t.Error("expected error for empty Package in batch entry")
+	}
+}
+
+func TestUpdateDescriptionBatch_EmptyIsNoOp(t *testing.T) {
+	db := newTestDB(t)
+	if err := db.UpdateDescriptionBatch(context.Background(), nil); err != nil {
+		t.Errorf("UpdateDescriptionBatch(nil) = %v", err)
+	}
+}
+
+func TestUpdateDescriptionBatch_UpdatesExistingAndInsertsMissing(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+
+	if err := db.Upsert(ctx, &database.ToolCache{Name: "ripgrep", Provider: "brew", Package: "ripgrep"}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	updates := []database.DescriptionUpdate{
+		{Name: "ripgrep", Provider: "brew", Package: "ripgrep", Description: "fast grep"},
+		// fd has no row yet → INSERT-on-miss path.
+		{Name: "fd", Provider: "brew", Package: "fd", Description: "fast find"},
+	}
+	if err := db.UpdateDescriptionBatch(ctx, updates); err != nil {
+		t.Fatalf("UpdateDescriptionBatch: %v", err)
+	}
+	rg, _ := db.Get(ctx, "ripgrep", "brew", "ripgrep")
+	if rg.Description.String != "fast grep" {
+		t.Errorf("ripgrep description = %q, want 'fast grep'", rg.Description.String)
+	}
+	fd, err := db.Get(ctx, "fd", "brew", "fd")
+	if err != nil {
+		t.Fatalf("fd insert-on-miss: %v", err)
+	}
+	if fd.Description.String != "fast find" {
+		t.Errorf("fd description = %q, want 'fast find'", fd.Description.String)
+	}
+}
+
+func TestUpdateDescriptionBatch_RejectsInvalidEntry(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	if err := db.UpdateDescriptionBatch(ctx, []database.DescriptionUpdate{
+		{Name: "ripgrep", Provider: "brew", Package: "", Description: "d"}, // empty Package fails requirePackage
+	}); err == nil {
+		t.Error("expected error for empty Package in batch entry")
+	}
+}
+
+func TestUpsertDiscoveredBatch_EmptyIsNoOp(t *testing.T) {
+	db := newTestDB(t)
+	if err := db.UpsertDiscoveredBatch(context.Background(), nil); err != nil {
+		t.Errorf("UpsertDiscoveredBatch(nil) = %v", err)
+	}
+}
+
+func TestUpsertDiscoveredBatch_InsertsAsUntracked(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+
+	entries := []database.DiscoveredUpsert{
+		{Name: "fd", Provider: "brew", InstalledWith: "brew", Version: "9.0.0"},
+		{Name: "bat", Provider: "brew", InstalledWith: "brew", Version: ""},
+	}
+	if err := db.UpsertDiscoveredBatch(ctx, entries); err != nil {
+		t.Fatalf("UpsertDiscoveredBatch: %v", err)
+	}
+	discovered, err := db.ListDiscovered(ctx)
+	if err != nil {
+		t.Fatalf("ListDiscovered: %v", err)
+	}
+	names := make(map[string]bool)
+	for _, d := range discovered {
+		names[d.Name] = true
+	}
+	if !names["fd"] || !names["bat"] {
+		t.Errorf("ListDiscovered = %+v, want both fd and bat", names)
+	}
+}
+
+func TestUpsertDiscoveredBatch_DoesNotOverwriteTrackedRows(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+
+	// Seed a tracked (config-managed) row.
+	if err := db.Upsert(ctx, &database.ToolCache{
+		Name: "ripgrep", Provider: "brew", Package: "ripgrep", Installed: false,
+	}); err != nil {
+		t.Fatalf("seed tracked: %v", err)
+	}
+	// UpsertDiscoveredBatch's WHERE clause guards against touching tracked rows.
+	if err := db.UpsertDiscoveredBatch(ctx, []database.DiscoveredUpsert{
+		{Name: "ripgrep", Provider: "brew", InstalledWith: "brew", Version: "14.1.0"},
+	}); err != nil {
+		t.Fatalf("UpsertDiscoveredBatch on tracked: %v", err)
+	}
+	got, _ := db.Get(ctx, "ripgrep", "brew", "ripgrep")
+	if got.Installed {
+		t.Error("UpsertDiscoveredBatch should not flip a tracked row's Installed flag")
+	}
+}

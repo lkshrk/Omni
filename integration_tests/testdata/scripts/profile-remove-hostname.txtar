@@ -1,0 +1,12 @@
+# map then remove a hostname
+exec omni --config settings.json profile add work base
+exec omni --config settings.json profile set-hostname myhost work
+exec omni -y --config settings.json profile remove-hostname myhost
+stdout 'mapping removed'
+
+# list should show no hostname mappings
+exec omni --config settings.json profile list
+! stdout 'Hostname mappings'
+
+-- settings.json --
+{}

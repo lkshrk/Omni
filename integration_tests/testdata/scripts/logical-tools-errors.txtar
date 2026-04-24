@@ -1,0 +1,17 @@
+# non-interactive logical tool commands require explicit assignment targets
+exec omni --config settings.json profile add default base
+exec omni --config settings.json profile set-hostname testhost default
+
+! exec omni --config settings.json add ripgrep --provider system
+stderr 'missing assignment target: pass --group <group> for non-interactive add'
+
+! exec omni --config settings.json add ripgrep --group base
+stderr '--provider is required'
+
+exec omni --config settings.json tools set ripgrep --provider system --install-with brew
+exec omni --config settings.json groups add-tool work ripgrep
+! exec omni --config settings.json groups delete work
+stderr 'groups delete requires --move-to <group> or --delete-tools'
+
+-- settings.json --
+{}

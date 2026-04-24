@@ -1,0 +1,10 @@
+# omni dots list with no entries shows a helpful message
+env HOME=$WORK
+exec omni --config settings.json dots list
+stdout 'No dots entries'
+
+-- settings.json --
+{"settings":{"dots_repo":"~/dotfiles"}}
+
+-- dotfiles/dotfiles/.keep --
+

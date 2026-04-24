@@ -1,0 +1,8 @@
+# omni upgrade with no args and no --all exits with an error
+exec omni --config settings.json profile add default base
+exec omni --config settings.json profile set-hostname testhost default
+! exec omni --config settings.json upgrade
+stderr 'specify a tool name or use --all'
+
+-- settings.json --
+{}

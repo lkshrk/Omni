@@ -1,0 +1,514 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.schema.json",
+  "title": "omni settings",
+  "description": "omni settings.json — manages all dev tools, dotfiles, and profiles from a single file.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "description": "JSON Schema reference URI (injected automatically by omni on every write).",
+      "type": "string"
+    },
+    "groups": {
+      "description": "Tool/dots groups. An entry without a 'name' field is the base group.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/GroupConfig"
+      }
+    },
+    "hostnames": {
+      "description": "Mapping of hostname → profile name for auto-activation on each machine.",
+      "examples": [
+        {
+          "home-desktop": "home",
+          "macbook-pro": "work"
+        }
+      ],
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "profiles": {
+      "description": "Named collections of groups. Keys are profile names.",
+      "examples": [
+        {
+          "work": {
+            "groups": [
+              "work"
+            ]
+          }
+        }
+      ],
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/Profile"
+      }
+    },
+    "settings": {
+      "$ref": "#/$defs/Settings"
+    },
+    "tools": {
+      "description": "Logical tool specs keyed by logical tool name. Groups reference these keys by name.",
+      "examples": [
+        {
+          "ripgrep": {
+            "package": "ripgrep",
+            "provider": "system",
+            "variants": [
+              {
+                "package": "ripgrep",
+                "provider": "node"
+              }
+            ]
+          }
+        }
+      ],
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/ToolSpec"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "DotEntry": {
+      "description": "A dotfile or directory managed by 'omni dots'.",
+      "type": "object",
+      "properties": {
+        "ignore": {
+          "description": "gitignore-style patterns for files to skip within this entry.",
+          "examples": [
+            [
+              "*.local",
+              "secrets/"
+            ]
+          ],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "name": {
+          "description": "Human-readable identifier. Also used as the default source directory name.",
+          "examples": [
+            "nvim",
+            "zsh",
+            "git"
+          ],
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "description": "Path relative to the dots repo root. Defaults to '<name>/'.",
+          "examples": [
+            "nvim/",
+            "configs/zsh"
+          ],
+          "type": "string",
+          "minLength": 1
+        },
+        "target": {
+          "description": "Absolute destination path where the symlink is created (~ is expanded).",
+          "examples": [
+            "~/.config/nvim",
+            "~/.zshrc"
+          ],
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "name",
+        "target"
+      ],
+      "additionalProperties": false
+    },
+    "DotsGitConfig": {
+      "description": "Controls git behaviour for the dots repository.",
+      "type": "object",
+      "properties": {
+        "auto_commit": {
+          "description": "Run 'git commit' automatically after add/remove operations.",
+          "default": false,
+          "type": "boolean"
+        },
+        "auto_push": {
+          "description": "Run 'git push' after add/remove (implies auto_commit).",
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "EcosystemSettings": {
+      "description": "Settings for one ecosystem provider.",
+      "type": "object",
+      "properties": {
+        "manager": {
+          "description": "Concrete manager used by manager-backed ecosystems. Omit to auto-detect.",
+          "examples": [
+            "bun",
+            "pnpm",
+            "npm",
+            "uv",
+            "pip3"
+          ],
+          "type": "string"
+        },
+        "priority": {
+          "description": "Ordered concrete provider/manager priority for this ecosystem.",
+          "examples": [
+            [
+              "apt",
+              "apk",
+              "dnf",
+              "zypper",
+              "pacman",
+              "brew"
+            ]
+          ],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "GroupConfig": {
+      "description": "A named collection of logical tool memberships and dotfile entries.",
+      "type": "object",
+      "properties": {
+        "description": {
+          "description": "Human-readable description shown in 'omni groups'.",
+          "examples": [
+            "Work tools and configs"
+          ],
+          "type": "string"
+        },
+        "dots": {
+          "description": "Dotfile entries managed by this group.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DotEntry"
+          }
+        },
+        "ignore": {
+          "description": "Logical tool names suppressed for this group, including machine groups.",
+          "examples": [
+            [
+              "slack",
+              "zoom"
+            ]
+          ],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "name": {
+          "description": "Group identifier. Omit (or leave empty) for the base group.",
+          "examples": [
+            "work",
+            "personal",
+            "media"
+          ],
+          "type": "string"
+        },
+        "taps": {
+          "description": "Legacy Homebrew taps for this group. Prefer tool-level 'taps' on logical tool specs.",
+          "examples": [
+            [
+              "homebrew/cask-fonts"
+            ]
+          ],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "tools": {
+          "description": "Logical tool names installed by this group.",
+          "examples": [
+            [
+              "ripgrep",
+              "fd",
+              "black"
+            ]
+          ],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "Profile": {
+      "description": "A named collection of groups, optionally with a per-machine ignore list.",
+      "type": "object",
+      "properties": {
+        "groups": {
+          "description": "Group names activated on machines mapped to this profile.",
+          "examples": [
+            [
+              "work",
+              "personal"
+            ]
+          ],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "ignore": {
+          "description": "Tool names skipped during sync on machines using this profile.",
+          "examples": [
+            [
+              "slack",
+              "zoom"
+            ]
+          ],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "groups"
+      ],
+      "additionalProperties": false
+    },
+    "Settings": {
+      "description": "User-configurable options stored in settings.json.",
+      "type": "object",
+      "properties": {
+        "auto_import": {
+          "description": "Add newly discovered installed tools to the config on every sync.",
+          "default": false,
+          "type": "boolean"
+        },
+        "dots_git": {
+          "$ref": "#/$defs/DotsGitConfig"
+        },
+        "dots_repo": {
+          "description": "Per-machine path to the dotfiles git repository (~ is expanded).",
+          "examples": [
+            "~/Dev/dotfiles",
+            "~/.dotfiles"
+          ],
+          "type": "string"
+        },
+        "ecosystems": {
+          "description": "Settings for portable ecosystem providers such as system, node, and python.",
+          "examples": [
+            {
+              "node": {
+                "manager": "bun"
+              },
+              "python": {
+                "manager": "uv"
+              },
+              "system": {
+                "priority": [
+                  "apt",
+                  "apk",
+                  "dnf",
+                  "zypper",
+                  "pacman",
+                  "brew"
+                ]
+              }
+            }
+          ],
+          "type": "object",
+          "properties": {
+            "node": {
+              "$ref": "#/$defs/EcosystemSettings"
+            },
+            "python": {
+              "$ref": "#/$defs/EcosystemSettings"
+            },
+            "system": {
+              "$ref": "#/$defs/EcosystemSettings"
+            }
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/EcosystemSettings"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "ToolInstallSpec": {
+      "description": "One install candidate for a logical tool.",
+      "type": "object",
+      "properties": {
+        "install_with": {
+          "description": "Concrete provider or manager used for this install candidate. Omit to use ecosystem settings/resolution.",
+          "examples": [
+            "brew"
+          ],
+          "type": "string",
+          "enum": [
+            "brew",
+            "apt",
+            "apk",
+            "dnf",
+            "pacman",
+            "zypper",
+            "bun",
+            "pnpm",
+            "npm",
+            "uv",
+            "pip3",
+            "pip"
+          ]
+        },
+        "options": {
+          "description": "Provider-specific install options (key-value pairs).",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "package": {
+          "description": "Package identifier passed to the provider. Defaults to the logical tool name.",
+          "examples": [
+            "ripgrep",
+            "typescript"
+          ],
+          "type": "string",
+          "minLength": 1
+        },
+        "provider": {
+          "description": "Portable ecosystem provider for this install candidate.",
+          "examples": [
+            "node"
+          ],
+          "type": "string",
+          "enum": [
+            "system",
+            "node",
+            "python"
+          ]
+        }
+      },
+      "required": [
+        "provider"
+      ],
+      "additionalProperties": false
+    },
+    "ToolSpec": {
+      "description": "A logical tool spec. Provider identifies the portable ecosystem; variants and hosts define alternate install candidates.",
+      "type": "object",
+      "properties": {
+        "hosts": {
+          "description": "Strict hostname-specific install overrides keyed by full or short hostname.",
+          "examples": [
+            {
+              "linuxbox": {
+                "package": "ripgrep",
+                "provider": "node"
+              }
+            }
+          ],
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/ToolInstallSpec"
+          }
+        },
+        "ignore": {
+          "description": "Ignore this logical tool globally. Used for imported libraries/packages that should not be managed.",
+          "default": false,
+          "type": "boolean"
+        },
+        "install_with": {
+          "description": "Concrete provider or manager used for this logical tool on matching hosts. Omit to use ecosystem settings/resolution.",
+          "examples": [
+            "brew",
+            "bun",
+            "uv"
+          ],
+          "type": "string",
+          "enum": [
+            "brew",
+            "apt",
+            "apk",
+            "dnf",
+            "pacman",
+            "zypper",
+            "bun",
+            "pnpm",
+            "npm",
+            "uv",
+            "pip3",
+            "pip"
+          ]
+        },
+        "options": {
+          "description": "Provider-specific install options (key-value pairs).",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "package": {
+          "description": "Package identifier passed to the provider. Defaults to the logical tool name.",
+          "examples": [
+            "ripgrep",
+            "typescript"
+          ],
+          "type": "string",
+          "minLength": 1
+        },
+        "provider": {
+          "description": "Portable ecosystem provider for this logical tool.",
+          "examples": [
+            "system"
+          ],
+          "type": "string",
+          "enum": [
+            "system",
+            "node",
+            "python"
+          ]
+        },
+        "taps": {
+          "description": "Homebrew taps required before installing this tool.",
+          "examples": [
+            [
+              "homebrew/core"
+            ]
+          ],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "variants": {
+          "description": "Alternate install candidates tried in config order when the default provider is unavailable.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ToolInstallSpec"
+          }
+        }
+      },
+      "required": [
+        "provider"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

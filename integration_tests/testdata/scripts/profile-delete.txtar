@@ -1,0 +1,13 @@
+# create then delete a profile
+exec omni --config settings.json profile add work base
+stdout 'Profile "work" saved'
+
+exec omni -y --config settings.json profile delete work
+stdout 'Profile "work" deleted'
+
+# list should show no profiles
+exec omni --config settings.json profile list
+stdout 'No profiles defined'
+
+-- settings.json --
+{}

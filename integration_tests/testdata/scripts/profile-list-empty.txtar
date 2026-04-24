@@ -1,0 +1,6 @@
+# omni profile list with no profiles shows a helpful message
+exec omni --config settings.json profile list
+stdout 'No profiles defined'
+
+-- settings.json --
+{}

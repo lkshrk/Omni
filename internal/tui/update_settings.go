@@ -1,0 +1,270 @@
+package tui
+
+import (
+	"slices"
+	"strings"
+
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/provider"
+)
+
+func (m *Model) handleSettingsKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
+	var cmds []tea.Cmd
+
+	if handled, subCmds := m.handleSettingsSubmodeKeyMsg(msg); handled {
+		return subCmds
+	}
+
+	switch {
+	case key.Matches(msg, m.keys.Up):
+		if m.settingsCursor > 0 {
+			m.settingsCursor--
+		}
+	case key.Matches(msg, m.keys.Down):
+		if m.settingsCursor < numSettingRows-1 {
+			m.settingsCursor++
+		}
+	case key.Matches(msg, m.keys.Toggle):
+		m.handleSettingsRowAction(&cmds)
+	case key.Matches(msg, m.keys.Confirm):
+		m.handleSettingsConfirmAction(&cmds)
+	case key.Matches(msg, m.keys.Back):
+		m.mode = viewList
+	}
+
+	return cmds
+}
+
+func (m *Model) handleSettingsConfirmAction(cmds *[]tea.Cmd) {
+	switch m.settingsCursor {
+	case settingsRowSystemPriority, settingsRowDotsRepo, settingsRowDotsSync, settingsRowResetSettings, settingsRowResetCache:
+		m.handleSettingsEditAction(cmds)
+	}
+}
+
+func (m *Model) handleSettingsSubmodeKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
+	if m.editingPriority {
+		return true, m.handleSettingsPriorityKeyMsg(msg)
+	}
+	if m.dangerConfirmRow >= 0 {
+		return true, m.handleSettingsDangerConfirmKeyMsg(msg)
+	}
+	return false, nil
+}
+
+func (m *Model) handleSettingsPriorityKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
+	var cmds []tea.Cmd
+	switch msg.String() {
+	case "j":
+		if m.priorityCursor < len(m.priorityDraft)-1 {
+			m.priorityCursor++
+		}
+	case "k":
+		if m.priorityCursor > 0 {
+			m.priorityCursor--
+		}
+	case "J":
+		if m.priorityCursor < len(m.priorityDraft)-1 {
+			i := m.priorityCursor
+			m.priorityDraft[i], m.priorityDraft[i+1] = m.priorityDraft[i+1], m.priorityDraft[i]
+			m.priorityCursor++
+		}
+	case "K":
+		if m.priorityCursor > 0 {
+			i := m.priorityCursor
+			m.priorityDraft[i], m.priorityDraft[i-1] = m.priorityDraft[i-1], m.priorityDraft[i]
+			m.priorityCursor--
+		}
+	default:
+		if key.Matches(msg, m.keys.Confirm) {
+			m.settings.SetEcosystemPriority(provider.EcosystemSystem, m.filterSystemPriority(m.priorityDraft))
+			m.editingPriority = false
+			m.appendSaveSettingsCmd(&cmds)
+		} else if key.Matches(msg, m.keys.Back) {
+			m.editingPriority = false
+		}
+	}
+	return cmds
+}
+
+func (m *Model) handleSettingsDangerConfirmKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
+	var cmds []tea.Cmd
+	if m.dangerConfirmRow == settingsRowDotsSync {
+		switch strings.ToLower(msg.String()) {
+		case "y":
+			cmds = append(cmds, m.confirmSettingsDisableDots(true)...)
+		case "n":
+			cmds = append(cmds, m.confirmSettingsDisableDots(false)...)
+		default:
+			if key.Matches(msg, m.keys.Back) {
+				m.cancelConfirmationTimeout()
+				m.dangerConfirmRow = -1
+			}
+		}
+		return cmds
+	}
+	switch {
+	case key.Matches(msg, m.keys.Confirm):
+		row := m.dangerConfirmRow
+		m.cancelConfirmationTimeout()
+		m.dangerConfirmRow = -1
+		switch row {
+		case settingsRowResetSettings:
+			m.loading = true
+			startOp(m, "Resetting settings…")
+			cmds = append(cmds, m.spinner.Tick, m.doResetSettings())
+		case settingsRowResetCache:
+			m.loading = true
+			startOp(m, "Resetting cache…")
+			cmds = append(cmds, m.spinner.Tick, m.doResetCache())
+		}
+	case key.Matches(msg, m.keys.Back):
+		m.cancelConfirmationTimeout()
+		m.dangerConfirmRow = -1
+	}
+	return cmds
+}
+
+func (m *Model) confirmSettingsDisableDots(keepLocal bool) []tea.Cmd {
+	m.cancelConfirmationTimeout()
+	m.dangerConfirmRow = -1
+	m.loading = true
+	startOp(m, "Disabling dots…")
+	return []tea.Cmd{m.spinner.Tick, m.doDisableDots(keepLocal)}
+}
+
+func (m *Model) handleSettingsRowAction(cmds *[]tea.Cmd) {
+	switch m.settingsCursor {
+	case settingsRowAutoImport:
+		m.settings.AutoImport = !m.settings.AutoImport
+		m.appendSaveSettingsCmd(cmds)
+	case settingsRowSystemProvider:
+		m.settings.DisabledProviders = toggleProvider(m.settings.DisabledProviders, provider.EcosystemSystem)
+		m.appendSaveSettingsCmd(cmds)
+	case settingsRowNodeProvider:
+		m.settings.DisabledProviders = toggleProvider(m.settings.DisabledProviders, provider.EcosystemNode)
+		m.appendSaveSettingsCmd(cmds)
+	case settingsRowPythonProvider:
+		m.settings.DisabledProviders = toggleProvider(m.settings.DisabledProviders, provider.EcosystemPython)
+		m.appendSaveSettingsCmd(cmds)
+	case settingsRowNodeManager:
+		m.settings.SetEcosystemManager(provider.EcosystemNode, cycleNodeManager(m.settings.EcosystemManager(provider.EcosystemNode)))
+		m.appendSaveSettingsCmd(cmds)
+	case settingsRowPythonManager:
+		m.settings.SetEcosystemManager(provider.EcosystemPython, cyclePythonManager(m.settings.EcosystemManager(provider.EcosystemPython)))
+		m.appendSaveSettingsCmd(cmds)
+	case settingsRowDotsCommit:
+		if !m.settings.DotsGit.AutoPush {
+			m.settings.DotsGit.AutoCommit = !m.settings.DotsGit.AutoCommit
+			m.appendSaveSettingsCmd(cmds)
+		}
+	case settingsRowDotsPush:
+		m.settings.DotsGit.AutoPush = !m.settings.DotsGit.AutoPush
+		m.appendSaveSettingsCmd(cmds)
+	}
+}
+
+func (m *Model) handleSettingsEditAction(cmds *[]tea.Cmd) {
+	switch m.settingsCursor {
+	case settingsRowSystemPriority:
+		m.startSettingsPriorityEdit()
+	case settingsRowDotsRepo:
+		*cmds = append(*cmds, m.openFilePicker("Dots repo path", m.settings.DotsRepo, false))
+	case settingsRowDotsSync:
+		m.handleSettingsDotsSyncAction(cmds)
+	case settingsRowResetSettings:
+		m.dangerConfirmRow = settingsRowResetSettings
+		*cmds = append(*cmds, m.armConfirmationTimeout())
+	case settingsRowResetCache:
+		m.dangerConfirmRow = settingsRowResetCache
+		*cmds = append(*cmds, m.armConfirmationTimeout())
+	}
+}
+
+func (m *Model) startSettingsPriorityEdit() {
+	m.priorityDraft = m.systemPriorityDraft(m.settings.EcosystemPriority(provider.EcosystemSystem))
+	m.priorityCursor = 0
+	m.editingPriority = true
+}
+
+func (m Model) systemPriorityDraft(priority []string) []string {
+	defaults := m.systemPriorityDefaults()
+	if len(priority) == 0 {
+		return defaults
+	}
+	draft := m.filterSystemPriority(priority)
+	if len(draft) == 0 {
+		return defaults
+	}
+	for _, name := range defaults {
+		if !slices.Contains(draft, name) {
+			draft = append(draft, name)
+		}
+	}
+	return draft
+}
+
+func (m Model) systemPriorityDisplay(priority []string) []string {
+	return m.filterSystemPriority(priority)
+}
+
+func (m Model) systemPriorityDefaults() []string {
+	defaults := provider.BuiltinSystemProviderPriorityNames()
+	if m.app == nil {
+		return defaults
+	}
+	for _, name := range m.app.ConcreteProviderNamesForEcosystem(provider.EcosystemSystem) {
+		if !slices.Contains(defaults, name) {
+			defaults = append(defaults, name)
+		}
+	}
+	return defaults
+}
+
+func (m Model) filterSystemPriority(priority []string) []string {
+	out := make([]string, 0, len(priority))
+	seen := make(map[string]struct{}, len(priority))
+	for _, name := range priority {
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		if !m.isSystemPriorityProvider(name) {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
+}
+
+func (m Model) isSystemPriorityProvider(name string) bool {
+	if m.app != nil {
+		return m.app.IsConcreteProviderForEcosystem(provider.EcosystemSystem, name)
+	}
+	ecosystem, ok := provider.BuiltinEcosystemFor(name)
+	return ok && ecosystem == provider.EcosystemSystem && !provider.BuiltinIsEcosystem(name)
+}
+
+func (m *Model) handleSettingsDotsSyncAction(cmds *[]tea.Cmd) {
+	if config.BoolVal(m.settings.DotsDisabled) {
+		if m.settings.DotsRepo == "" {
+			*cmds = append(*cmds, setStatus(m, "Dots not configured.", false))
+			return
+		}
+		if m.promptForStowInstall(stowInstallEnableDots) {
+			return
+		}
+		m.beginDotsOperation("Enabling dots…")
+		*cmds = append(*cmds, m.spinner.Tick, m.doEnableDots())
+		return
+	}
+	if m.settings.DotsRepo != "" {
+		m.dangerConfirmRow = settingsRowDotsSync
+		*cmds = append(*cmds, m.armConfirmationTimeout())
+	} else {
+		*cmds = append(*cmds, setStatus(m, "Dots not configured.", false))
+	}
+}

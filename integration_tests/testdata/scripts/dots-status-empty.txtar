@@ -1,0 +1,10 @@
+# omni dots status with no entries shows the repo state without an empty table
+env HOME=$WORK
+exec omni --config settings.json dots status
+! stdout 'NAME'
+stdout 'working tree clean'
+
+-- settings.json --
+{"settings":{"dots_repo":"~/dotfiles"}}
+
+-- dotfiles/dotfiles/.keep --

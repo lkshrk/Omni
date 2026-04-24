@@ -1,0 +1,9 @@
+# omni dots delete with an unknown name exits with error
+env HOME=$WORK
+! exec omni -y --config settings.json dots delete noexist
+stderr 'not found'
+
+-- settings.json --
+{"settings":{"dots_repo":"~/dotfiles"}}
+
+-- dotfiles/dotfiles/.keep --

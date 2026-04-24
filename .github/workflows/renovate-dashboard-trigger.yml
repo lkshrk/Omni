@@ -1,0 +1,76 @@
+name: Trigger Renovate on Dashboard Update
+
+on:
+  issues:
+    types:
+      - edited
+  pull_request:
+    types:
+      - edited
+
+jobs:
+  trigger-dashboard:
+    if: github.event_name == 'issues' && contains(github.event.issue.title, 'Dependency Dashboard')
+    permissions:
+      actions: write
+      issues: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch Renovate workflow
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            try {
+              const before = context.payload.changes?.body?.from ?? '';
+              const after = context.payload.issue?.body ?? '';
+
+              const countChecked = (text) => (text.match(/\[x\]/gi) || []).length;
+              if (countChecked(after) <= countChecked(before)) {
+                core.info('No newly checked items detected; skipping Renovate dispatch.');
+                return;
+              }
+
+              await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'renovate.yml',
+                ref: 'main'
+              });
+              core.info('Triggered renovate.yml via workflow_dispatch.');
+            } catch (error) {
+              core.setFailed(`Failed to trigger Renovate: ${error.message}`);
+            }
+
+  trigger-renovate-pr:
+    if: github.event_name == 'pull_request' && github.event.action == 'edited' && github.event.pull_request.user.login == 'renovate[bot]'
+    permissions:
+      actions: write
+      pull-requests: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch Renovate workflow for PR update
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            try {
+              const before = context.payload.changes?.body?.from ?? '';
+              const after = context.payload.pull_request?.body ?? '';
+
+              const countChecked = (text) => (text.match(/\[x\]/gi) || []).length;
+              if (countChecked(after) <= countChecked(before)) {
+                core.info('No newly checked items detected on PR; skipping Renovate dispatch.');
+                return;
+              }
+
+              await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'renovate.yml',
+                ref: context.payload.pull_request.base.ref
+              });
+              core.info(`Triggered renovate.yml for PR ${context.payload.pull_request.html_url}.`);
+            } catch (error) {
+              core.setFailed(`Failed to trigger Renovate for PR: ${error.message}`);
+            }

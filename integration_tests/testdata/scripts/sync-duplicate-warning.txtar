@@ -1,0 +1,9 @@
+# sync allows the same logical tool to appear in multiple groups without a duplicate warning
+exec omni --config settings.json profile add default base work
+exec omni --config settings.json profile set-hostname testhost default
+exec omni --config settings.json sync --dry-run
+! stderr 'warning'
+stdout 'Dry-run'
+
+-- settings.json --
+{"tools":{"ripgrep":{"provider":"system","install_with":"brew"}},"groups":[{"tools":["ripgrep"]},{"name":"work","tools":["ripgrep"]}]}

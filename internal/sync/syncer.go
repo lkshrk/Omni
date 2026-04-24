@@ -1,0 +1,666 @@
+// Package sync diffs desired config against actual state and drives installs.
+package sync
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"sync"
+	"time"
+
+	"golang.org/x/sync/errgroup"
+
+	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/provider"
+)
+
+// OpKind classifies the action taken (or planned) for a tool.
+type OpKind int
+
+const (
+	OpInstall             OpKind = iota //nolint:revive // tool is missing → install
+	OpAlreadyInstalled                  // tool is present, no action needed
+	OpUninstall                         // tool removed from config + --prune
+	OpProviderUnavailable               // provider binary not on PATH
+	OpIgnored                           // tool is in the active profile's ignore list
+	OpFailed                            // install was attempted but the provider returned an error
+)
+
+// SyncOp describes a single planned or executed operation.
+type SyncOp struct { //nolint:revive // name is intentional for clarity in external call sites
+	Tool    provider.Tool
+	Kind    OpKind
+	Version string // populated after a successful install or for already-installed
+	Err     error  // non-nil if the operation failed
+}
+
+// SyncOptions controls Sync behaviour.
+type SyncOptions struct { //nolint:revive // name is intentional for clarity in external call sites
+	// DryRun collects planned ops without executing them.
+	DryRun bool
+	// Prune uninstalls tools that are in the cache but not in config.
+	Prune bool
+	// Group filters operations to a single named group (empty = all groups).
+	Group string
+	// Profile filters operations to the groups declared in a named profile.
+	// Ignored when Group is set. When both are empty, the active profile is
+	// auto-detected from the system hostname.
+	Profile string
+	// Provider filters operations to a single provider (empty = all).
+	Provider string
+	// Progress is called with a human-readable status string before each operation.
+	// Called from the goroutine running the operation; must be safe for concurrent use.
+	Progress     func(string)
+	ToolProgress func(ProgressEvent)
+	// IgnoreList is a set of tool names skipped entirely during this sync.
+	// Tools whose Name matches an entry receive OpIgnored and are not installed.
+	IgnoreList []string
+	// RetryFailed limits the sync to tools that have a non-null failed_at in
+	// the DB (i.e. failed in a previous run). Has no effect in dry-run mode.
+	RetryFailed bool
+	// InstallTimeout is the per-tool deadline passed to provider Install calls.
+	// Zero uses the default of 5 minutes.
+	InstallTimeout time.Duration
+}
+
+type ProgressEvent struct {
+	Tool    provider.Tool
+	Message string
+	Err     error
+	Done    bool
+}
+
+func (o SyncOptions) progress(msg string) {
+	if o.Progress != nil {
+		o.Progress(msg)
+	}
+}
+
+func (o SyncOptions) toolProgress(event ProgressEvent) {
+	if o.ToolProgress != nil {
+		o.ToolProgress(event)
+	}
+}
+
+func (o SyncOptions) installTimeout() time.Duration {
+	if o.InstallTimeout > 0 {
+		return o.InstallTimeout
+	}
+	return 5 * time.Minute
+}
+
+// SyncResult summarises what happened during a sync run.
+type SyncResult struct { //nolint:revive // name is intentional for clarity in external call sites
+	Ops             []SyncOp
+	Warnings        []string // advisory: e.g. duplicate tools across groups
+	ActiveProfile   string   // profile name used for this sync, "" if none
+	SatisfiedGroups []string // non-active groups whose tools are all installed
+}
+
+// Installed returns ops where Kind == OpInstall and Err == nil.
+func (r *SyncResult) Installed() []SyncOp {
+	return r.filter(func(op SyncOp) bool { return op.Kind == OpInstall && op.Err == nil })
+}
+
+// Skipped returns tools that were already installed.
+func (r *SyncResult) Skipped() []SyncOp {
+	return r.filter(func(op SyncOp) bool { return op.Kind == OpAlreadyInstalled })
+}
+
+// Errors returns ops that failed.
+func (r *SyncResult) Errors() []SyncOp {
+	return r.filter(func(op SyncOp) bool { return op.Err != nil })
+}
+
+// Ignored returns ops where Kind == OpIgnored.
+func (r *SyncResult) Ignored() []SyncOp {
+	return r.filter(func(op SyncOp) bool { return op.Kind == OpIgnored })
+}
+
+// Failed returns ops where Kind == OpFailed.
+func (r *SyncResult) Failed() []SyncOp {
+	return r.filter(func(op SyncOp) bool { return op.Kind == OpFailed })
+}
+
+func (r *SyncResult) filter(fn func(SyncOp) bool) []SyncOp {
+	var out []SyncOp
+	for _, op := range r.Ops {
+		if fn(op) {
+			out = append(out, op)
+		}
+	}
+	return out
+}
+
+// provState holds one provider's bulk status data.
+type provState struct {
+	available          bool
+	installed          map[string]string                  // lowercase name → version
+	installedByManager map[string]provider.InstalledEntry // lowercase name → version + concrete manager
+	outdated           map[string]string                  // lowercase name → latest version
+	outdatedByManager  map[string]map[string]string       // manager → lowercase name → latest version
+}
+
+// Syncer orchestrates diff-and-apply between the desired config and actual system state.
+type Syncer struct {
+	registry *provider.Registry
+	db       *database.DB
+}
+
+func toolEntryLookupKeys(t config.ToolEntry) []string {
+	return provider.PackageLookupKeys(t.Name, t.EffectivePackage())
+}
+
+// New creates a Syncer.
+func New(registry *provider.Registry, db *database.DB) *Syncer {
+	return &Syncer{registry: registry, db: db}
+}
+
+// Sync performs (or plans) the synchronisation.
+//
+// Phase 1a — availability: one check per unique provider, concurrent.
+// Phase 1b — bulk status: InstalledMap + OutdatedMap per available provider, concurrent.
+// Phase 1c — per-tool decision: O(1) map lookup; falls back to IsInstalled for missing entries.
+// Phase 2  — installs: sequential (so progress messages stay readable).
+// Phase 3  — prune (optional).
+func (s *Syncer) Sync(ctx context.Context, cfg *config.Config, opts SyncOptions) (*SyncResult, error) {
+	result := &SyncResult{}
+
+	tools := cfg.Tools
+	if opts.Provider != "" {
+		var filtered []config.ToolEntry
+		for _, t := range tools {
+			if s.providerMatchesFilter(ctx, t, opts.Provider) {
+				filtered = append(filtered, t)
+			}
+		}
+		tools = filtered
+	}
+
+	// --- Filter: ignored tools ---
+	if len(opts.IgnoreList) > 0 || hasIgnoredTools(tools) {
+		ignoreSet := make(map[string]struct{}, len(opts.IgnoreList))
+		for _, name := range opts.IgnoreList {
+			ignoreSet[name] = struct{}{}
+		}
+		var active []config.ToolEntry
+		for _, t := range tools {
+			_, listed := ignoreSet[t.Name]
+			if t.Ignore || listed {
+				result.Ops = append(result.Ops, SyncOp{
+					Tool: provider.Tool{
+						Name:     t.Name,
+						Provider: t.Provider,
+						Package:  t.EffectivePackage(),
+						Options:  t.Options,
+					},
+					Kind: OpIgnored,
+				})
+			} else {
+				active = append(active, t)
+			}
+		}
+		tools = active
+	}
+
+	// --- Filter: retry-failed (limit to tools with a prior failure in DB) ---
+	if opts.RetryFailed {
+		failed, err := s.db.ListFailed(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("loading failed tools for retry: %w", err)
+		}
+		failedSet := make(map[string]struct{}, len(failed))
+		for _, f := range failed {
+			failedSet[f.Name+"\x00"+f.Provider] = struct{}{}
+		}
+		var retryTools []config.ToolEntry
+		for _, t := range tools {
+			if _, ok := failedSet[t.Name+"\x00"+t.Provider]; ok {
+				retryTools = append(retryTools, t)
+			}
+		}
+		tools = retryTools
+	}
+
+	// --- Phase 1a: availability per unique provider ---
+	opts.progress("checking providers…")
+	uniqueProviders := s.uniqueProviderNames(tools)
+	states := make(map[string]*provState, len(uniqueProviders))
+	var mu sync.Mutex
+
+	g1a, gCtx1a := errgroup.WithContext(ctx)
+	for _, name := range uniqueProviders {
+		name := name
+		g1a.Go(func() error {
+			prov, ok := s.registry.Get(name)
+			st := &provState{}
+			if ok {
+				avail, err := prov.Available(gCtx1a)
+				if err != nil {
+					return fmt.Errorf("checking provider %s: %w", name, err)
+				}
+				st.available = avail
+			}
+			mu.Lock()
+			states[name] = st
+			mu.Unlock()
+			return nil
+		})
+	}
+	if err := g1a.Wait(); err != nil {
+		return nil, fmt.Errorf("provider availability check: %w", err)
+	}
+
+	// --- Phase 1b: bulk installed + outdated per available provider ---
+	opts.progress("reading installed packages…")
+	g1b, gCtx1b := errgroup.WithContext(ctx)
+	for name, st := range states {
+		if !st.available {
+			continue
+		}
+		name, st := name, st
+		g1b.Go(func() error {
+			prov, _ := s.registry.Get(name)
+
+			if mbc, ok := prov.(provider.MultiManagerBulkChecker); ok {
+				m, err := mbc.InstalledByManager(gCtx1b)
+				if err == nil {
+					st.installedByManager = m
+				}
+			}
+			if st.installedByManager == nil {
+				if bc, ok := prov.(provider.BulkChecker); ok {
+					m, err := bc.InstalledMap(gCtx1b)
+					if err == nil {
+						st.installed = m
+					}
+				}
+			}
+			if moc, ok := prov.(provider.ManagerOutdatedChecker); ok {
+				m, err := moc.OutdatedByManager(gCtx1b)
+				if err == nil {
+					st.outdatedByManager = m
+					st.outdated = flattenOutdatedManagers(m)
+				}
+			} else if oc, ok := prov.(provider.OutdatedChecker); ok {
+				m, err := oc.OutdatedMap(gCtx1b)
+				if err == nil {
+					st.outdated = m
+				}
+			}
+			return nil
+		})
+	}
+	if err := g1b.Wait(); err != nil {
+		return nil, fmt.Errorf("bulk status check: %w", err)
+	}
+
+	// --- Phase 1c: per-tool decision ---
+	type toolDecision struct {
+		entry         config.ToolEntry
+		opProvider    string
+		installedWith string
+		installed     bool
+		version       string
+		outdated      bool
+		latest        string
+		noProvider    bool
+	}
+
+	decisions := make([]toolDecision, len(tools))
+	for i, entry := range tools {
+		opProvider := s.operationProviderName(entry)
+		st, ok := states[opProvider]
+		if !ok || !st.available {
+			decisions[i] = toolDecision{entry: entry, opProvider: opProvider, installedWith: entry.InstallWith, noProvider: true}
+			continue
+		}
+		prov, ok := s.registry.Get(opProvider)
+		if !ok {
+			decisions[i] = toolDecision{entry: entry, opProvider: opProvider, installedWith: entry.InstallWith, noProvider: true}
+			continue
+		}
+		installedWith := installedWithForOperation(ctx, prov, opProvider, entry.InstallWith)
+
+		keys := toolEntryLookupKeys(entry)
+
+		var (
+			installed bool
+			ver       string
+		)
+		if st.installedByManager != nil && entry.InstallWith == "" {
+			entry := provider.LookupInstalledEntry(st.installedByManager, keys)
+			if entry.ConcreteManager != "" {
+				installed = true
+				ver = entry.Version
+				installedWith = entry.ConcreteManager
+			}
+		} else if st.installed != nil && !(entry.InstallWith != "" && opProvider == entry.Provider) {
+			ver, installed = provider.LookupString(st.installed, keys)
+		} else {
+			// No BulkChecker — fall back to per-tool check.
+			var err error
+			installed, ver, err = s.isInstalled(ctx, prov, opProvider, entry)
+			if err != nil {
+				return nil, fmt.Errorf("checking installed status for %s/%s: %w", entry.Provider, entry.Name, err)
+			}
+		}
+
+		var latestVer string
+		var isOutdated bool
+		if installed && st.outdatedByManager != nil && installedWith != "" {
+			latestVer, isOutdated = provider.LookupString(st.outdatedByManager[installedWith], keys)
+		} else if installed && st.outdated != nil {
+			latestVer, isOutdated = provider.LookupString(st.outdated, keys)
+		}
+
+		decisions[i] = toolDecision{
+			entry:         entry,
+			opProvider:    opProvider,
+			installedWith: installedWith,
+			installed:     installed,
+			version:       ver,
+			outdated:      isOutdated,
+			latest:        latestVer,
+		}
+	}
+
+	// --- Phase 2: build ops and execute installs ---
+	// Already-installed cache updates collect into a slice and write once
+	// in a single transaction at the end. Per-install upserts (after a real
+	// install subprocess) stay individual because the subprocess cost
+	// dwarfs the fsync; batching would only matter relative to a fast op.
+	var alreadyInstalledUpserts []*database.ToolCache
+	var outdatedUpdates []database.OutdatedUpdate
+	for _, d := range decisions {
+		tool := provider.Tool{
+			Name:     d.entry.Name,
+			Provider: d.entry.Provider,
+			Package:  d.entry.EffectivePackage(),
+			Options:  d.entry.Options,
+		}
+
+		if d.noProvider {
+			result.Ops = append(result.Ops, SyncOp{Tool: tool, Kind: OpProviderUnavailable})
+			continue
+		}
+
+		if d.installed {
+			result.Ops = append(result.Ops, SyncOp{
+				Tool:    tool,
+				Kind:    OpAlreadyInstalled,
+				Version: d.version,
+			})
+			if !opts.DryRun {
+				alreadyInstalledUpserts = append(alreadyInstalledUpserts, &database.ToolCache{
+					Name:          d.entry.Name,
+					Provider:      d.entry.Provider,
+					Package:       d.entry.EffectivePackage(),
+					Installed:     true,
+					InstalledWith: d.installedWith,
+					Version:       toNullString(d.version),
+					Outdated:      d.outdated,
+					LatestVersion: toNullString(d.latest),
+					LastChecked:   time.Now(),
+				})
+				outdatedUpdates = append(outdatedUpdates, database.OutdatedUpdate{
+					Name:          d.entry.Name,
+					Provider:      d.entry.Provider,
+					Package:       d.entry.EffectivePackage(),
+					Outdated:      d.outdated,
+					LatestVersion: d.latest,
+				})
+			}
+		} else {
+			op := SyncOp{Tool: tool, Kind: OpInstall}
+			if !opts.DryRun {
+				opts.progress("installing " + d.entry.Name + "…")
+				prov, ok := s.registry.Get(d.opProvider)
+				if !ok {
+					result.Ops = append(result.Ops, SyncOp{Tool: tool, Kind: OpProviderUnavailable})
+					continue
+				}
+				opts.toolProgress(ProgressEvent{Tool: tool, Message: "Installing " + d.entry.Name + "…"})
+
+				installCtx, cancel := context.WithTimeout(ctx, opts.installTimeout())
+				op.Err = s.install(installCtx, prov, d.opProvider, d.entry)
+				cancel()
+
+				if op.Err != nil {
+					op.Kind = OpFailed
+					opts.toolProgress(ProgressEvent{Tool: tool, Message: "Failed installing " + d.entry.Name, Err: op.Err, Done: true})
+					if err := s.db.MarkFailed(ctx, d.entry.Name, d.entry.Provider, d.entry.EffectivePackage(), op.Err.Error()); err != nil {
+						result.Warnings = append(result.Warnings,
+							fmt.Sprintf("failed to record install failure for %s: %v", d.entry.Name, err))
+					}
+				} else {
+					installed, ver, err := s.isInstalled(ctx, prov, d.opProvider, d.entry)
+					if err != nil {
+						op.Err = fmt.Errorf("checking installed status after install for %s/%s: %w", d.opProvider, d.entry.Name, err)
+					} else if !installed {
+						op.Err = fmt.Errorf("install verification failed for %s/%s: not installed after install", d.opProvider, d.entry.Name)
+					}
+					if op.Err != nil {
+						op.Kind = OpFailed
+						opts.toolProgress(ProgressEvent{Tool: tool, Message: "Failed installing " + d.entry.Name, Err: op.Err, Done: true})
+						if err := s.db.MarkFailed(ctx, d.entry.Name, d.entry.Provider, d.entry.EffectivePackage(), op.Err.Error()); err != nil {
+							result.Warnings = append(result.Warnings,
+								fmt.Sprintf("failed to record install failure for %s: %v", d.entry.Name, err))
+						}
+						result.Ops = append(result.Ops, op)
+						continue
+					}
+					opts.toolProgress(ProgressEvent{Tool: tool, Message: "Installed " + d.entry.Name, Done: true})
+					op.Version = ver
+					if err := s.db.Upsert(ctx, &database.ToolCache{
+						Name:          d.entry.Name,
+						Provider:      d.entry.Provider,
+						Package:       d.entry.EffectivePackage(),
+						Installed:     true,
+						InstalledWith: d.installedWith,
+						Version:       toNullString(ver),
+						LastChecked:   time.Now(),
+					}); err != nil {
+						result.Warnings = append(result.Warnings,
+							fmt.Sprintf("cache write failed for %s: %v", d.entry.Name, err))
+					}
+				}
+			}
+			result.Ops = append(result.Ops, op)
+		}
+	}
+
+	// Flush already-installed cache updates as one transaction. A failure
+	// here is non-fatal: the cache will catch up on the next refresh.
+	if err := s.db.UpsertBatch(ctx, alreadyInstalledUpserts); err != nil {
+		result.Warnings = append(result.Warnings,
+			fmt.Sprintf("cache update batch failed: %v", err))
+	}
+	if err := s.db.UpdateOutdatedBatch(ctx, outdatedUpdates); err != nil {
+		result.Warnings = append(result.Warnings,
+			fmt.Sprintf("outdated update batch failed: %v", err))
+	}
+
+	// --- Phase 3: prune (optional) ---
+	if opts.Prune && !opts.DryRun {
+		desiredSet := make(map[string]struct{}, len(cfg.Tools))
+		for _, t := range cfg.Tools {
+			desiredSet[t.Name+"\x00"+t.Provider+"\x00"+t.EffectivePackage()] = struct{}{}
+		}
+		cached, err := s.db.List(ctx)
+		if err != nil {
+			return result, fmt.Errorf("listing cached tools for prune: %w", err)
+		}
+		for _, c := range cached {
+			if _, ok := desiredSet[c.Name+"\x00"+c.Provider+"\x00"+c.Package]; !ok {
+				t := provider.Tool{Name: c.Name, Provider: c.Provider, Package: c.Package}
+				if !c.Installed {
+					if err := s.db.Delete(ctx, c.Name, c.Provider, c.Package); err != nil {
+						result.Warnings = append(result.Warnings,
+							fmt.Sprintf("cache delete failed for %s: %v", c.Name, err))
+					}
+					result.Ops = append(result.Ops, SyncOp{
+						Tool: t,
+						Kind: OpUninstall,
+					})
+					continue
+				}
+				prov, opProvider, manager, ok := s.lifecycleProvider(c.Provider, c.InstalledWith)
+				if !ok {
+					continue
+				}
+				t.Provider = opProvider
+				opts.progress("removing " + c.Name + "…")
+				uninstallErr := uninstall(ctx, prov, t, manager)
+				if uninstallErr == nil {
+					if err := s.db.Delete(ctx, c.Name, c.Provider, c.Package); err != nil {
+						result.Warnings = append(result.Warnings,
+							fmt.Sprintf("cache delete failed for %s: %v", c.Name, err))
+					}
+				}
+				result.Ops = append(result.Ops, SyncOp{
+					Tool: t,
+					Kind: OpUninstall,
+					Err:  uninstallErr,
+				})
+			}
+		}
+	}
+
+	return result, nil
+}
+
+func (s *Syncer) lifecycleProvider(providerName, installedWith string) (provider.Provider, string, string, bool) {
+	if installedWith != "" {
+		if owner, ok := s.registry.Get(installedWith); ok {
+			return owner, installedWith, "", true
+		}
+	}
+	prov, ok := s.registry.Get(providerName)
+	return prov, providerName, installedWith, ok
+}
+
+func uninstall(ctx context.Context, prov provider.Provider, tool provider.Tool, manager string) error {
+	if manager != "" && manager != tool.Provider {
+		if uninstaller, ok := prov.(provider.ManagerUninstaller); ok {
+			return uninstaller.UninstallFrom(ctx, tool, manager)
+		}
+	}
+	return prov.Uninstall(ctx, tool)
+}
+
+func hasIgnoredTools(tools []config.ToolEntry) bool {
+	for _, t := range tools {
+		if t.Ignore {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Syncer) operationProviderName(t config.ToolEntry) string {
+	if t.InstallWith != "" {
+		if _, ok := s.registry.Get(t.InstallWith); ok {
+			return t.InstallWith
+		}
+	}
+	return t.Provider
+}
+
+func (s *Syncer) providerMatchesFilter(ctx context.Context, t config.ToolEntry, providerName string) bool {
+	if providerName == "" || t.Provider == providerName || t.InstallWith == providerName {
+		return true
+	}
+	opProvider := s.operationProviderName(t)
+	if opProvider == providerName {
+		return true
+	}
+	prov, ok := s.registry.Get(opProvider)
+	if !ok {
+		return false
+	}
+	cr, ok := prov.(provider.ConcreteResolver)
+	if !ok {
+		return false
+	}
+	concrete, err := cr.ResolvedName(ctx)
+	return err == nil && concrete == providerName
+}
+
+func (s *Syncer) operationTool(t config.ToolEntry, opProvider string) provider.Tool {
+	return provider.Tool{
+		Name:     t.Name,
+		Provider: opProvider,
+		Package:  t.EffectivePackage(),
+		Options:  t.Options,
+	}
+}
+
+func (s *Syncer) isInstalled(ctx context.Context, prov provider.Provider, opProvider string, entry config.ToolEntry) (bool, string, error) {
+	tool := s.operationTool(entry, opProvider)
+	if entry.InstallWith != "" && opProvider == entry.Provider {
+		if checker, ok := prov.(provider.ManagerInstalledChecker); ok {
+			return checker.IsInstalledWithManager(ctx, tool, entry.InstallWith)
+		}
+	}
+	return prov.IsInstalled(ctx, tool)
+}
+
+func installedWithForOperation(ctx context.Context, prov provider.Provider, opProvider, installWith string) string {
+	if installWith != "" {
+		return installWith
+	}
+	if cr, ok := prov.(provider.ConcreteResolver); ok {
+		concrete, err := cr.ResolvedName(ctx)
+		if err == nil {
+			return concrete
+		}
+		return ""
+	}
+	return opProvider
+}
+
+func flattenOutdatedManagers(byManager map[string]map[string]string) map[string]string {
+	if len(byManager) == 0 {
+		return nil
+	}
+	out := make(map[string]string)
+	for _, m := range byManager {
+		for name, latest := range m {
+			if _, exists := out[name]; !exists {
+				out[name] = latest
+			}
+		}
+	}
+	return out
+}
+
+func (s *Syncer) install(ctx context.Context, prov provider.Provider, opProvider string, entry config.ToolEntry) error {
+	tool := s.operationTool(entry, opProvider)
+	if entry.InstallWith != "" && opProvider == entry.Provider {
+		if installer, ok := prov.(provider.ManagerInstaller); ok {
+			return installer.InstallWithManager(ctx, tool, entry.InstallWith)
+		}
+	}
+	return prov.Install(ctx, tool)
+}
+
+// uniqueProviderNames returns deduplicated operation provider names from the tool list.
+func (s *Syncer) uniqueProviderNames(tools []config.ToolEntry) []string {
+	seen := make(map[string]struct{}, len(tools))
+	var out []string
+	for _, t := range tools {
+		providerName := s.operationProviderName(t)
+		if _, ok := seen[providerName]; !ok {
+			seen[providerName] = struct{}{}
+			out = append(out, providerName)
+		}
+	}
+	return out
+}
+
+// toNullString converts a Go string to sql.NullString (valid when non-empty).
+func toNullString(s string) sql.NullString {
+	return sql.NullString{String: s, Valid: s != ""}
+}

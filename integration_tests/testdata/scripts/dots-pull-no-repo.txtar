@@ -1,0 +1,6 @@
+# omni dots pull without dots_repo configured exits with error
+! exec omni --config settings.json dots pull
+stderr 'not configured'
+
+-- settings.json --
+{}
