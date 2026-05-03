@@ -635,10 +635,6 @@ func buildToolGroups(groups []*config.GroupConfig) map[string]string {
 	return tg
 }
 
-func compactToolGroupMap(memberships map[string][]string) map[string]string {
-	return compactToolGroupMapWithFilter(memberships, nil)
-}
-
 func compactToolGroupMapForProfile(memberships map[string][]string, info *app.ProfileInfo) map[string]string {
 	return compactToolGroupMapWithFilter(memberships, activeProfileGroupSet(info))
 }

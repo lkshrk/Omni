@@ -20,8 +20,6 @@ Main features:
 
 Supported managers include Homebrew, apt, apk, dnf, pacman, zypper, npm, pnpm, bun, uv, pip3, and pip.
 
-Dotfile sync uses GNU Stow (`stow`) to manage links. When dotfile sync is enabled from onboarding, settings, the Dots tab, or interactive CLI commands, Omni checks for Stow and can install it through the detected system package manager. Noninteractive CLI runs fail with install guidance instead of prompting.
-
 ## Install
 
 ```sh
@@ -34,6 +32,8 @@ Releases also publish cross-platform archives, Linux package artifacts (`.deb`, 
 brew tap lkshrk/tap
 brew install omni
 ```
+
+Dotfile sync uses GNU Stow (`stow`) to manage links. When dotfile sync is enabled from onboarding, settings, the Dots tab, or interactive CLI commands, Omni checks for Stow and can install it through the detected system package manager. Noninteractive CLI runs fail with install guidance instead of prompting.
 
 ## Usage
 

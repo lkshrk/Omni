@@ -120,7 +120,7 @@ func buildBrewStatefulMock(installVersions, preInstalled map[string]string) exec
 	// Store installVersions separately so we can set them after install.
 	m := &brewStatefulMock{installed: installed}
 	return &brewStatefulInstaller{
-		mock:           m,
+		mock:            m,
 		installVersions: installVersions,
 	}
 }

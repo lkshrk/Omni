@@ -532,10 +532,7 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 	if err := a.readDB().UpsertBatch(ctx, upserts); err != nil {
 		return fmt.Errorf("upserting installed status: %w", err)
 	}
-	if err := a.reconcileResolvedTools(ctx, tools); err != nil {
-		return err
-	}
-	return nil
+	return a.reconcileResolvedTools(ctx, tools)
 }
 
 // RefreshProviderInstalled updates the DB install status for all configured tools

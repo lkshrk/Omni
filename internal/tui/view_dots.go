@@ -296,7 +296,7 @@ func renderDots(m Model) string {
 				return iconStyle.Render(icon) +
 					iconNameGap +
 					nameStyle.Render(nameCol) +
-					targetStyle.Render(nameTargetGap + targetPadded)
+					targetStyle.Render(nameTargetGap+targetPadded)
 			}
 			activeRight := dotRightColumns(p, true, statusCol, statusStyle, e.FileCount, cols.files, e.Group, cols.group)
 
@@ -354,7 +354,7 @@ func renderDots(m Model) string {
 						return iconStyle.Render(iconText) +
 							iconNameGap +
 							nameStyle.Render(childName) +
-							targetStyle.Render(nameTargetGap + childTarget)
+							targetStyle.Render(nameTargetGap+childTarget)
 					}
 					if childIgnoreConfirm {
 						buf.markCursor()
@@ -488,26 +488,6 @@ func dotStateDisplay(p palette, state app.DotState) (lipgloss.Style, string, str
 	default:
 		return p.styleMissing, "✗", string(state)
 	}
-}
-
-func dotsGroupColumnWidth(entries []app.DotStatus) int {
-	for _, entry := range entries {
-		if entry.Group != "" {
-			return dotsGroupColW
-		}
-	}
-	return 0
-}
-
-func dotsFilesColumnWidth(entries []app.DotStatus) int {
-	width := dotsFilesColW
-	for _, entry := range entries {
-		width = max(width, lipgloss.Width(dotFileCountText(entry.FileCount)))
-		for _, child := range entry.Children {
-			width = max(width, lipgloss.Width(dotFileCountText(child.FileCount)))
-		}
-	}
-	return width
 }
 
 func dotStatusTextStyle(p palette, state app.DotState) lipgloss.Style {

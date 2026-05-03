@@ -1054,7 +1054,7 @@ func (a *App) Uninstall(ctx context.Context, name, providerName string) error {
 	if !ok {
 		return fmt.Errorf("unknown provider %q", providerName)
 	}
-	pkg := name
+	var pkg string
 	installedWith := ""
 	if configured, _, found, err := a.configuredOperationTool(ctx, name, providerName); err != nil {
 		return err
@@ -1160,7 +1160,7 @@ func (a *App) Upgrade(ctx context.Context, name, providerName string) error {
 		return fmt.Errorf("unknown provider %q", providerName)
 	}
 
-	pkg := name
+	var pkg string
 	installedWith := ""
 	if configured, _, found, err := a.configuredOperationTool(ctx, name, providerName); err != nil {
 		return err
@@ -1384,10 +1384,7 @@ func (a *App) Add(ctx context.Context, providerName, pkg, name, groupName, insta
 	// Promote any existing orphan DB row to config-tracked so the UI reflects
 	// the claim immediately without waiting for the next full loadTools cycle.
 	// No-op if the row doesn't exist yet.
-	if err := a.readDB().MarkTracked(ctx, name, providerName, pkg); err != nil {
-		return err
-	}
-	return nil
+	return a.readDB().MarkTracked(ctx, name, providerName, pkg)
 }
 
 func (a *App) providerSupportsTaps(providerName, installWith string) bool {

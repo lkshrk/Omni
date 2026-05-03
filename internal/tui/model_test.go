@@ -1214,7 +1214,7 @@ func TestModel_GroupMembershipPicker_SpaceTogglesEnterSaves(t *testing.T) {
 	m.mode = viewGroupMembership
 	m.pickerGroups = []string{"base", "work"}
 	m.pickerCursor = 1
-	m.toolMemberships = map[string][]string{key: []string{"base"}}
+	m.toolMemberships = map[string][]string{key: {"base"}}
 	m.pickerMembershipKey = key
 	m.pickerOriginalGroups = []string{"base"}
 
@@ -1243,8 +1243,8 @@ func TestModel_GroupMembershipPicker_TargetSurvivesCursorMove(t *testing.T) {
 		{Name: "fd", Provider: "system", Tracked: true},
 	})
 	m.toolMemberships = map[string][]string{
-		rgKey: []string{"base"},
-		fdKey: []string{"work"},
+		rgKey: {"base"},
+		fdKey: {"work"},
 	}
 
 	m.cursor = 1
@@ -1316,7 +1316,7 @@ func TestModel_GroupMembershipPicker_NewGroupDraft(t *testing.T) {
 	m.mode = viewGroupMembership
 	m.pickerGroups = []string{"base", groupPickerNewSentinel}
 	m.pickerCursor = 1
-	m.toolMemberships = map[string][]string{key: []string{"base"}}
+	m.toolMemberships = map[string][]string{key: {"base"}}
 	m.pickerMembershipKey = key
 	m.pickerOriginalGroups = []string{"base"}
 	m.profileInfo = &app.ProfileInfo{
@@ -2995,9 +2995,8 @@ func TestMigration_ProgressDoneMsg_DoesNotClearLoadingWhileMigrating(t *testing.
 	if !got.loading {
 		t.Error("progressDoneMsg must NOT clear m.loading while m.migrating=true — regression: was clearing it")
 	}
-	if got.migrating {
-		// migrating should not change from progressDoneMsg
-		// (only migrateProviderDoneMsg owns that flag)
+	if !got.migrating {
+		t.Error("progressDoneMsg must not clear m.migrating; only migrateProviderDoneMsg owns that flag")
 	}
 }
 

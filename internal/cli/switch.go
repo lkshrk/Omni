@@ -3,8 +3,9 @@ package cli
 import (
 	"fmt"
 
-	"github.com/lkshrk/omni/internal/actions"
 	"github.com/spf13/cobra"
+
+	"github.com/lkshrk/omni/internal/actions"
 )
 
 func newSwitchCmd(state *rootState) *cobra.Command {

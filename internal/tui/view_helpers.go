@@ -145,22 +145,11 @@ func listRowPrefix(p palette, selected bool) string {
 	return inactiveRowPrefix()
 }
 
-func listRowPrimaryStyle(p palette, selected bool) lipgloss.Style {
-	if selected {
-		return p.styleActiveText
-	}
-	return p.styleNormal
-}
-
 func listRowColumnStyle(selected bool, style lipgloss.Style) lipgloss.Style {
 	if selected {
 		return style.Bold(true)
 	}
 	return style
-}
-
-func renderListRowPrimary(p palette, selected bool, text string) string {
-	return listRowPrefix(p, selected) + listRowPrimaryStyle(p, selected).Render(text)
 }
 
 // listSectionWriter applies the main-list section rhythm used across tabs:
@@ -224,10 +213,6 @@ func confirmCancelHintWithPrefix(m Model, confirmLabel, prefix string) string {
 
 func confirmCancelHintText(m Model, confirmLabel string) string {
 	return confirmActionHintText(m, m.keys.Confirm, confirmLabel)
-}
-
-func toggleSaveCancelHint(m Model) string {
-	return "  " + toggleSaveCancelHintText(m)
 }
 
 // newCursorList builds a lipgloss/list with a › cursor on the active row.

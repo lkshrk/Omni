@@ -10,6 +10,7 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
+
 	"github.com/lkshrk/omni/internal/actions"
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
@@ -1298,7 +1299,7 @@ func TestRenderProfileGroupToolsEditor(t *testing.T) {
 		{Name: "ruff", Provider: "python", Installed: false, Tracked: true},
 	}
 	m.toolMemberships = map[string][]string{
-		toolKey("ripgrep", "system"): []string{"work"},
+		toolKey("ripgrep", "system"): {"work"},
 	}
 	m.groupToolsEditor.membership = map[string]bool{"ripgrep": true, "eslint": false, "ruff": false}
 	m.groupToolsEditor.originalMembership = copyBoolMap(m.groupToolsEditor.membership)
@@ -1541,7 +1542,7 @@ func TestRenderGroupMembershipPicker_SeparatesActiveAndInactiveGroups(t *testing
 	m.cursor = 0
 	m.pickerGroups = []string{"base", "work", "personal"}
 	m.toolMemberships = map[string][]string{
-		toolMembershipKey(m.selectedTool()): []string{"base", "personal"},
+		toolMembershipKey(m.selectedTool()): {"base", "personal"},
 	}
 	m.profileInfo = &app.ProfileInfo{
 		Active: "main",
