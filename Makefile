@@ -69,7 +69,8 @@ test-integration: test-integration-build
 
 ## lint: run golangci-lint
 lint:
-	golangci-lint run ./...
+	@mkdir -p .tmp/go-build .tmp/golangci-lint
+	@GOCACHE=$${GOCACHE:-$$(pwd)/.tmp/go-build} GOLANGCI_LINT_CACHE=$${GOLANGCI_LINT_CACHE:-$$(pwd)/.tmp/golangci-lint} golangci-lint run
 
 ## clean: remove build artifacts
 clean:

@@ -26,7 +26,7 @@ var defaultIgnores = []string{
 	// ── Editor / tool artifacts ───────────────────────────────────────────────
 	"*.swp", // Vim swap files
 	"*.swo",
-	"*~",   // emacs/generic backup files
+	"*~",    // emacs/generic backup files
 	"*.bak", // generic backup files (omni's settings.json.bak, others)
 	"*.log",
 

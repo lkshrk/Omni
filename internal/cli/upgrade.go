@@ -3,9 +3,10 @@ package cli
 import (
 	"fmt"
 
+	"github.com/spf13/cobra"
+
 	"github.com/lkshrk/omni/internal/actions"
 	syncprogress "github.com/lkshrk/omni/internal/sync"
-	"github.com/spf13/cobra"
 )
 
 func newUpgradeCmd(state *rootState) *cobra.Command {

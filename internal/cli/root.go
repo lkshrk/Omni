@@ -77,10 +77,7 @@ Already set up?
 				return fmt.Errorf("initialising app: %w", err)
 			}
 			state.app = a
-			if err := requireProfile(cmd, a); err != nil {
-				return err
-			}
-			return nil
+			return requireProfile(cmd, a)
 		},
 		PersistentPostRunE: func(_ *cobra.Command, _ []string) error {
 			if state.app != nil {

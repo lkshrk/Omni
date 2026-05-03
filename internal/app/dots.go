@@ -2043,11 +2043,3 @@ func (a *App) DotsRemoveIgnorePattern(name, pattern string) error {
 		return fmt.Errorf("dots entry %q not found", name)
 	})
 }
-
-// computeEntryHealth determines health by inspecting the stow-managed target path.
-// TargetPath is the original location (e.g. ~/.config/nvim); stow creates a
-// directory-level symlink there pointing to SourcePath in the repo.
-func computeEntryHealth(e dots.ResolvedEntry) DotHealth {
-	state, _ := classifyDotEntry(e)
-	return healthForDotState(state)
-}

@@ -6,11 +6,6 @@ const (
 	// listColumnGap is the standard space between table columns across main lists.
 	listColumnGap = 3
 
-	// listItemIndent is the left margin for list rows (two spaces).
-	listItemIndent = 2
-	// listHintIndent is the left margin for inline hints below a row.
-	listHintIndent = 2
-
 	// dotsIconW is the health icon width (one rune: ✓ ! ✗ ·).
 	dotsIconW = 1
 	// dotsGapW is the standard gap between right-side status columns.
@@ -20,15 +15,8 @@ const (
 	// dotsStatusColW is the fixed width for the status label column.
 	// Covers: "ok", "missing", "conflict", "no-source".
 	dotsStatusColW = 10
-	// dotsGroupColW is the fixed width for the group column on the right.
-	dotsGroupColW = 14
 	// dotsFilesColW is the fixed width for managed file counts near the right edge.
 	dotsFilesColW = 10
 	// dotsNameMinW is the minimum width for the name column.
 	dotsNameMinW = 12
-	// dotsTargetMinW is the minimum width for the target-path column.
-	dotsTargetMinW = 12
-
-	// previewMaxItems is how many level-0 children to show for the selected row.
-	previewMaxItems = 4
 )

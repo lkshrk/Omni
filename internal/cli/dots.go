@@ -236,7 +236,7 @@ func newDotsGroupsCmd(state *rootState) *cobra.Command {
 				return nil
 			}
 
-			target := current
+			var target []string
 			if setChanged {
 				target = setGroups
 			} else {

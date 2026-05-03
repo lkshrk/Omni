@@ -373,7 +373,6 @@ func renderPopupFrame(p palette, content string, frame popupFrame) string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
 		Background(p.colSurface).
-		ColorWhitespace(true).
 		Padding(frame.PaddingY, frame.PaddingX)
 	if frame.Width > 0 {
 		style = style.Width(frame.Width)

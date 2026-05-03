@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -219,7 +220,11 @@ func ensureProfile(a *app.App) error {
 		}
 		line = strings.TrimSpace(line)
 		var choice int
-		fmt.Sscanf(line, "%d", &choice)
+		if line != "" {
+			if parsed, err := strconv.Atoi(line); err == nil {
+				choice = parsed
+			}
+		}
 		if choice > 0 && choice <= len(names) {
 			selected := names[choice-1]
 			if err := a.SetHostname(hostname, selected); err != nil {
