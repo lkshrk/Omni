@@ -111,10 +111,6 @@ func finishOpOK(m *Model, message string) tea.Cmd {
 	return setStatus(m, "✓ "+message, false)
 }
 
-func finishOpErr(m *Model, message string) tea.Cmd {
-	return setStatus(m, message, true)
-}
-
 func clearStatus(m *Model) {
 	m.statusGen++
 	m.statusMsg = ""

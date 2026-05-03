@@ -107,15 +107,3 @@ func tildePath(path string) string {
 	}
 	return path
 }
-
-func dotFilePickerItemCount(path string) int {
-	info, err := os.Lstat(path)
-	if err != nil || !info.IsDir() {
-		return 1
-	}
-	entries, err := os.ReadDir(path)
-	if err != nil {
-		return 1
-	}
-	return len(entries)
-}

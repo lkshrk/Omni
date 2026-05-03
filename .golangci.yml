@@ -27,15 +27,26 @@ linters:
     - sqlclosecheck  # ensure sql.Rows/Stmt are closed
 
   settings:
+    errcheck:
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+
     revive:
       rules:
         - name: error-return
         - name: error-strings
         - name: if-return
 
-    govet:
-      enable:
-        - shadow
+    staticcheck:
+      checks:
+        - all
+        - -ST1000
+        - -QF1001
+        - -QF1002
+        - -QF1008
+        - -QF1012
 
   exclusions:
     rules:
@@ -43,6 +54,8 @@ linters:
       - path: _test\.go
         linters:
           - errcheck
+          - noctx
+          - unused
       # internal/sync types are internal-only; stutter is intentional for clarity.
       - path: internal/sync/syncer\.go
         text: "stutters"

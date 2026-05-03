@@ -806,7 +806,7 @@ func TestFlow2_ProfileRowSpaceActivatesHighlightedProfile(t *testing.T) {
 	key := toolKey("ripgrep", "system")
 	m.profileInfo.Active = "alpha"
 	m.profileInfo.Profiles["beta"] = config.Profile{Groups: []string{"personal"}, Ignore: []string{"fd"}}
-	m.toolMemberships = map[string][]string{key: []string{"work", "personal"}}
+	m.toolMemberships = map[string][]string{key: {"work", "personal"}}
 	m.toolGroups = compactToolGroupMapForProfile(m.toolMemberships, m.profileInfo)
 	m.ignoreLabels = map[string]string{"old": "profile"}
 	m.profileCursor = 1
@@ -1342,7 +1342,7 @@ func TestFlow2_UC109_GroupSectionToolsKey(t *testing.T) {
 	m.allTools = []*database.ToolCache{
 		{Name: "ripgrep", Provider: "system", Tracked: true},
 	}
-	m.toolMemberships = map[string][]string{toolKey("ripgrep", "system"): []string{"work"}}
+	m.toolMemberships = map[string][]string{toolKey("ripgrep", "system"): {"work"}}
 	m.profileSection = 1
 	allGroupNames := buildAllGroupNames(m.groupNames)
 	for i, name := range allGroupNames {
@@ -1394,7 +1394,7 @@ func TestFlow2_GroupToolsEditorStagesMembershipIgnoreAndFilters(t *testing.T) {
 		{Name: "ripgrep", Provider: "system", Tracked: true},
 		{Name: "eslint", Provider: "node", Tracked: true},
 	}
-	m.toolMemberships = map[string][]string{toolKey("ripgrep", "system"): []string{"work"}}
+	m.toolMemberships = map[string][]string{toolKey("ripgrep", "system"): {"work"}}
 	m.groupToolsEditor.membership = map[string]bool{"ripgrep": true, "eslint": false}
 	m.groupToolsEditor.originalMembership = copyBoolMap(m.groupToolsEditor.membership)
 	m.groupToolsIgnore = map[string]bool{"ripgrep": false, "eslint": false}

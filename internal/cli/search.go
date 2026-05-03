@@ -23,8 +23,8 @@ func newSearchCmd(state *rootState) *cobra.Command {
 				fmt.Println("No results found.")
 				return nil
 			}
-			const descWidth = 40                              // match name column width
-			indent := strings.Repeat(" ", 40+1+12+1+8+1)     // align continuation lines with description column
+			const descWidth = 40                         // match name column width
+			indent := strings.Repeat(" ", 40+1+12+1+8+1) // align continuation lines with description column
 			for _, r := range results {
 				ver := r.Version
 				if ver == "" {

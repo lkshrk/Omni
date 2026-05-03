@@ -445,14 +445,6 @@ func toolInlineHints(m Model, t *database.ToolCache) []hintItem {
 	return hints
 }
 
-func toolHasProviderPin(t *database.ToolCache) bool {
-	if t == nil || !t.Tracked {
-		return false
-	}
-	_, _, isOverride := providerParts(t.Provider, "", "", "", "")
-	return isOverride
-}
-
 func tabShortHelpBindings(m *Model) []key.Binding {
 	if m.suppressFooterHints || rowConfirmationActive(*m) {
 		return nil

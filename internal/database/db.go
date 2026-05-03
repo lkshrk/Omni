@@ -10,10 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lkshrk/omni/internal/testguard"
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/sqlitedialect"
 	_ "modernc.org/sqlite" // register "sqlite" driver
+
+	"github.com/lkshrk/omni/internal/testguard"
 )
 
 // ToolCache is the database model for a cached tool entry.

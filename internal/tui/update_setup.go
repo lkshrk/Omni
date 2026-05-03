@@ -293,11 +293,6 @@ func (m *Model) handleSetupProfileNameKey(msg tea.KeyPressMsg, cmds *[]tea.Cmd) 
 	return false
 }
 
-func (m *Model) startProviderScans(msg toolsLoadedMsg) []tea.Cmd {
-	m.configuredProviders = append([]string(nil), msg.configuredProviders...)
-	return m.startCurrentProviderScans()
-}
-
 func (m *Model) startCurrentProviderScans() []tea.Cmd {
 	var cmds []tea.Cmd
 

@@ -63,7 +63,7 @@ func TestLogicalMigration_SearchResultGroupSelectionAddsExplicitGroup(t *testing
 		t.Fatalf("mode = %v, want viewGroupPicker", got.mode)
 	}
 
-	tm, cmd = got.Update(pressRune('j'))
+	tm, _ = got.Update(pressRune('j'))
 	got = tm.(Model)
 	if got.pickerCursor >= len(got.pickerGroups) || got.pickerGroups[got.pickerCursor] != "work" {
 		t.Fatalf("picker cursor selected %q from %v, want work", got.pickerGroups[got.pickerCursor], got.pickerGroups)

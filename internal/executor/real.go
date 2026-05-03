@@ -235,7 +235,7 @@ func nvmNewestBinDir(nodeVersionsDir string) string {
 		return ""
 	}
 	type nv struct {
-		name           string
+		name                string
 		major, minor, patch int
 	}
 	var versions []nv

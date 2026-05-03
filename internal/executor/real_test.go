@@ -92,8 +92,8 @@ func TestNvmNewestBinDir_IgnoresNonVPrefixDirs(t *testing.T) {
 	versionsDir := t.TempDir()
 	// Noise dirs without "v" prefix must be skipped; only v16.0.0 is valid.
 	os.MkdirAll(filepath.Join(versionsDir, "v16.0.0", "bin"), 0o755) //nolint:errcheck
-	os.MkdirAll(filepath.Join(versionsDir, "system"), 0o755)          //nolint:errcheck // no "v" prefix
-	os.MkdirAll(filepath.Join(versionsDir, "lts"), 0o755)             //nolint:errcheck // no "v" prefix
+	os.MkdirAll(filepath.Join(versionsDir, "system"), 0o755)         //nolint:errcheck // no "v" prefix
+	os.MkdirAll(filepath.Join(versionsDir, "lts"), 0o755)            //nolint:errcheck // no "v" prefix
 
 	got := nvmNewestBinDir(versionsDir)
 	want := filepath.Join(versionsDir, "v16.0.0", "bin")
@@ -377,8 +377,8 @@ func TestNvmMajorVersionBinDir_NonThreePartVersionSkipped(t *testing.T) {
 	versionsDir := t.TempDir()
 	// "v22" and "v22.1" are not three-part and must be ignored.
 	// Only v22.2.0 is valid and has a bin dir.
-	os.MkdirAll(filepath.Join(versionsDir, "v22"), 0o755)          //nolint:errcheck
-	os.MkdirAll(filepath.Join(versionsDir, "v22.1"), 0o755)        //nolint:errcheck
+	os.MkdirAll(filepath.Join(versionsDir, "v22"), 0o755)   //nolint:errcheck
+	os.MkdirAll(filepath.Join(versionsDir, "v22.1"), 0o755) //nolint:errcheck
 	binDir := filepath.Join(versionsDir, "v22.2.0", "bin")
 	os.MkdirAll(binDir, 0o755) //nolint:errcheck
 
@@ -393,8 +393,8 @@ func TestNvmMajorVersionBinDir_NonThreePartVersionSkipped(t *testing.T) {
 func TestNvmNewestBinDir_NonThreePartVersionsSkipped(t *testing.T) {
 	versionsDir := t.TempDir()
 	// Malformed dirs must be ignored; only v18.1.0 is valid.
-	os.MkdirAll(filepath.Join(versionsDir, "v18"), 0o755)          //nolint:errcheck
-	os.MkdirAll(filepath.Join(versionsDir, "v18.0"), 0o755)        //nolint:errcheck
+	os.MkdirAll(filepath.Join(versionsDir, "v18"), 0o755)   //nolint:errcheck
+	os.MkdirAll(filepath.Join(versionsDir, "v18.0"), 0o755) //nolint:errcheck
 	binDir := filepath.Join(versionsDir, "v18.1.0", "bin")
 	os.MkdirAll(binDir, 0o755) //nolint:errcheck
 

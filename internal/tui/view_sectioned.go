@@ -72,10 +72,6 @@ func renderSectionedTab(m Model, tab sectionedTab) string {
 	return buf.render(listAvailableHeight(m))
 }
 
-func renderSplitListRow(p palette, selected bool, left, right []rowCell, contentWidth, minGap, columnGap int) string {
-	return listRowPrefix(p, selected) + renderSplitRow(left, right, contentWidth, minGap, columnGap)
-}
-
 func renderFixedGroupListRow(p palette, selected bool, first, rest []rowCell, firstGap, columnGap int) string {
 	return listRowPrefix(p, selected) + renderFixedGroupRow(first, rest, firstGap, columnGap)
 }
