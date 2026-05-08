@@ -198,7 +198,7 @@ func newSettingsEnableProviderCmd(state *rootState) *cobra.Command {
 func newSettingsResetCmd(state *rootState) *cobra.Command {
 	return &cobra.Command{
 		Use:   "reset",
-		Short: "Reset settings to defaults while preserving tools and profiles",
+		Short: "Reset settings to defaults while preserving tools and hosts",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ok, err := confirmAction(cmd, state, "Reset settings to defaults?")
 			if err != nil || !ok {

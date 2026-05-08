@@ -3,7 +3,11 @@ package brew_test
 import (
 	"context"
 	"errors"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/lkshrk/omni/internal/executor"
 	"github.com/lkshrk/omni/internal/provider"
@@ -17,6 +21,85 @@ func newBrew(responses ...executor.MockCall) (*brew.Provider, *executor.MockExec
 
 func tool(name string) provider.Tool {
 	return provider.Tool{Name: name, Provider: "brew", Package: name}
+}
+
+type concurrentBrewExecutor struct {
+	active atomic.Int32
+	max    atomic.Int32
+	delay  time.Duration
+}
+
+func (e *concurrentBrewExecutor) Run(_ context.Context, name string, args ...string) (string, string, error) {
+	cur := e.active.Add(1)
+	for {
+		maxSeen := e.max.Load()
+		if cur <= maxSeen || e.max.CompareAndSwap(maxSeen, cur) {
+			break
+		}
+	}
+	time.Sleep(e.delay)
+	e.active.Add(-1)
+
+	if name != "brew" || len(args) == 0 {
+		return "", "", nil
+	}
+	switch args[0] {
+	case "--version", "update", "tap":
+		return "", "", nil
+	case "outdated":
+		return `{"formulae":[],"casks":[]}`, "", nil
+	case "info":
+		joined := strings.Join(args, " ")
+		if strings.Contains(joined, "--installed") {
+			return `{"formulae":[],"casks":[]}`, "", nil
+		}
+		return `{"formulae":[{"name":"ripgrep","desc":"fast search"}],"casks":[]}`, "", nil
+	default:
+		return "", "", nil
+	}
+}
+
+func TestProviderSerializesBrewCommands(t *testing.T) {
+	exec := &concurrentBrewExecutor{delay: 10 * time.Millisecond}
+	p := brew.New(exec)
+	ctx := context.Background()
+	errs := make(chan error, 4)
+	var wg sync.WaitGroup
+	run := func(fn func() error) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- fn()
+		}()
+	}
+
+	run(func() error {
+		_, err := p.InstalledMap(ctx)
+		return err
+	})
+	run(func() error {
+		_, err := p.OutdatedMap(ctx)
+		return err
+	})
+	run(func() error {
+		_, err := p.BulkDescribe(ctx, []provider.Tool{tool("ripgrep")})
+		return err
+	})
+	run(func() error {
+		_, err := p.Available(ctx)
+		return err
+	})
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("provider call failed: %v", err)
+		}
+	}
+	if got := exec.max.Load(); got != 1 {
+		t.Fatalf("concurrent brew commands = %d, want serialized", got)
+	}
 }
 
 // --- Available ---
@@ -162,6 +245,51 @@ func TestListInstalled_TapPackage(t *testing.T) {
 	}
 }
 
+func TestInstalledMetadataMap_CaskPkgutilRequiresPrivilege(t *testing.T) {
+	output := `{"formulae":[` +
+		`{"full_name":"ripgrep","installed":[{"version":"14.1.1","installed_on_request":true}]}` +
+		`],"casks":[` +
+		`{"token":"parsec","installed":"150-103a","artifacts":[{"uninstall":[{"quit":"tv.parsec.www","pkgutil":"tv.parsec.www"}]},{"pkg":["parsec-macos.pkg"]}]}` +
+		`]}`
+	p, _ := newBrew(executor.MockCall{Stdout: output})
+
+	got, err := p.InstalledMetadataMap(context.Background())
+	if err != nil {
+		t.Fatalf("InstalledMetadataMap: %v", err)
+	}
+	if got["ripgrep"].Privilege.RequiresPrivilege() {
+		t.Fatalf("formula privilege = %+v, want none", got["ripgrep"].Privilege)
+	}
+	parsec := got["parsec"]
+	if parsec.Version != "150-103a" {
+		t.Fatalf("parsec version = %q, want 150-103a", parsec.Version)
+	}
+	if parsec.Privilege.Requirement != provider.PrivilegeMaybe {
+		t.Fatalf("parsec privilege = %+v, want maybe", parsec.Privilege)
+	}
+	if !strings.Contains(parsec.Privilege.Reason, "pkgutil") {
+		t.Fatalf("parsec privilege reason = %q, want pkgutil", parsec.Privilege.Reason)
+	}
+}
+
+func TestPrivilegePlan_CaskPkgInstallerRequiresPrivilege(t *testing.T) {
+	output := `{"formulae":[],"casks":[` +
+		`{"token":"parsec","installed":"150-103a","artifacts":[{"uninstall":[{"pkgutil":"tv.parsec.www"}]},{"pkg":["parsec-macos.pkg"]}]}` +
+		`]}`
+	p, m := newBrew(executor.MockCall{Stdout: output})
+
+	plan, err := p.PrivilegePlan(context.Background(), provider.PrivilegeActionUninstall, tool("parsec"))
+	if err != nil {
+		t.Fatalf("PrivilegePlan: %v", err)
+	}
+	if plan.Requirement != provider.PrivilegeMaybe {
+		t.Fatalf("PrivilegePlan = %+v, want maybe", plan)
+	}
+	if len(m.Calls) != 1 || strings.Join(m.Calls[0].Args, " ") != "info --json=v2 --cask parsec" {
+		t.Fatalf("brew args = %+v, want info --json=v2 --cask parsec", m.Calls)
+	}
+}
+
 // --- Tap / Untap / ListTaps / IsTapped ---
 
 func TestTap_Success(t *testing.T) {
@@ -220,20 +348,56 @@ func TestIsTapped_False(t *testing.T) {
 
 // --- Search ---
 
-func TestSearch_ReturnsFormulae(t *testing.T) {
-	p, _ := newBrew(executor.MockCall{Stdout: "==> Formulae\nbat\nbat-extras\n"})
+func TestSearch_ReturnsFormulaeAndCasks(t *testing.T) {
+	info := `{
+		"formulae": [
+			{"name": "bat", "desc": "cat clone with wings"},
+			{"name": "bat-extras", "desc": "extra scripts"}
+		],
+		"casks": [
+			{"token": "batman", "desc": "dark knight app", "artifacts": [{"pkg": ["Batman.pkg"]}]}
+		]
+	}`
+	p, m := newBrew(
+		executor.MockCall{Stdout: "==> Formulae\nbat\nbat-extras\n==> Casks\nbatman\n"},
+		executor.MockCall{Stdout: info},
+	)
 	results, err := p.Search(context.Background(), "bat")
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
-	if len(results) != 2 {
-		t.Fatalf("got %d results, want 2", len(results))
+	if len(results) != 3 {
+		t.Fatalf("got %d results, want 3", len(results))
 	}
 	if results[0].Name != "bat" {
 		t.Errorf("results[0].Name = %q, want bat", results[0].Name)
 	}
 	if results[0].Provider != "brew" {
 		t.Errorf("results[0].Provider = %q, want brew", results[0].Provider)
+	}
+	if results[2].Name != "batman" {
+		t.Errorf("results[2].Name = %q, want batman cask", results[2].Name)
+	}
+	if results[0].Description != "cat clone with wings" {
+		t.Errorf("results[0].Description = %q, want enriched formula description", results[0].Description)
+	}
+	if results[2].Description != "dark knight app" {
+		t.Errorf("results[2].Description = %q, want enriched cask description", results[2].Description)
+	}
+	if results[2].Privilege.Requirement != provider.PrivilegeMaybe {
+		t.Fatalf("results[2].Privilege = %+v, want maybe", results[2].Privilege)
+	}
+	if !strings.Contains(results[2].Privilege.Reason, "pkg installer") {
+		t.Fatalf("results[2].Privilege.Reason = %q, want pkg installer", results[2].Privilege.Reason)
+	}
+	if len(m.Calls) != 2 {
+		t.Fatalf("brew calls = %+v, want search and info calls", m.Calls)
+	}
+	if strings.Join(m.Calls[0].Args, " ") != "search bat" {
+		t.Fatalf("brew args[0] = %+v, want search bat", m.Calls[0].Args)
+	}
+	if strings.Join(m.Calls[1].Args, " ") != "info --json=v2 bat bat-extras batman" {
+		t.Fatalf("brew args[1] = %+v, want info --json=v2 bat bat-extras batman", m.Calls[1].Args)
 	}
 }
 
@@ -253,6 +417,20 @@ func TestSearch_BrewError(t *testing.T) {
 	_, err := p.Search(context.Background(), "nonexistent")
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestSearch_NoResultsReturnsEmpty(t *testing.T) {
+	p, _ := newBrew(executor.MockCall{
+		Stderr: `Error: No formulae or casks found for "zzzzzz"`,
+		Err:    errors.New("exit 1"),
+	})
+	results, err := p.Search(context.Background(), "zzzzzz")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("results = %d, want none", len(results))
 	}
 }
 

@@ -122,7 +122,7 @@ func TestDiscoverDotsEntries_ShellConfigs_DotPrefixed(t *testing.T) {
 
 func TestDiscoverDotsEntries_WellKnownDirs(t *testing.T) {
 	// Well-known dirs (claude, ssh) should map to home, not ~/.config.
-	root := makeRepoTree(t, []string{"claude/", ".ssh/", "nvim/"})
+	root := makeRepoTree(t, []string{"claude/", ".ssh/", ".docker/", ".kube/", "nvim/"})
 	got, err := app.DiscoverDotsEntries(root)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -139,6 +139,11 @@ func TestDiscoverDotsEntries_WellKnownDirs(t *testing.T) {
 	}
 	if byName["nvim"] != "~/.config/nvim" {
 		t.Errorf("nvim path = %q, want ~/.config/nvim", byName["nvim"])
+	}
+	for _, name := range []string{"docker", "kube"} {
+		if _, ok := byName[name]; ok {
+			t.Errorf("%s should not be proposed by default: %#v", name, byName)
+		}
 	}
 }
 

@@ -73,7 +73,8 @@ func (a *App) RefreshOutdated(ctx context.Context, progress func(string)) error 
 			LatestVersion: latestVer,
 		})
 	}
-	if err := a.readDB().UpdateOutdatedBatch(ctx, updates); err != nil {
+	writeCtx := context.WithoutCancel(ctx)
+	if err := a.readDB().UpdateOutdatedBatch(writeCtx, updates); err != nil {
 		return fmt.Errorf("updating outdated status: %w", err)
 	}
 	return nil
@@ -134,7 +135,8 @@ func (a *App) RefreshProviderOutdated(ctx context.Context, provName string) erro
 			LatestVersion: latestVer,
 		})
 	}
-	if err := a.readDB().UpdateOutdatedBatch(ctx, updates); err != nil {
+	writeCtx := context.WithoutCancel(ctx)
+	if err := a.readDB().UpdateOutdatedBatch(writeCtx, updates); err != nil {
 		return fmt.Errorf("updating outdated status for %s: %w", provName, err)
 	}
 	return nil
@@ -229,6 +231,28 @@ func (a *App) RefreshDescriptions(ctx context.Context, _ time.Duration) error {
 		}
 		cacheByKey[NewToolKey(t.Name, t.Provider, pkg).String()] = t
 	}
+	cachedMetadata, err := a.readDB().ListMetadata(ctx)
+	if err != nil {
+		return err
+	}
+	metadataByKey := make(map[string]*database.ToolMetadata, len(cachedMetadata))
+	for _, m := range cachedMetadata {
+		if m == nil {
+			continue
+		}
+		pkg := m.Package
+		if pkg == "" {
+			pkg = m.Name
+		}
+		metadataByKey[NewToolKey(m.Name, m.Provider, pkg).String()] = m
+	}
+	hasCachedDescription := func(key string, cached *database.ToolCache) bool {
+		if cached != nil && cached.Description.Valid && cached.Description.String != "" {
+			return true
+		}
+		meta := metadataByKey[key]
+		return meta != nil && meta.Description.Valid && meta.Description.String != ""
+	}
 
 	byProvider := make(map[string][]descriptionPendingTool)
 	queued := make(map[string]bool)
@@ -238,12 +262,14 @@ func (a *App) RefreshDescriptions(ctx context.Context, _ time.Duration) error {
 			return ctx.Err()
 		}
 		pkg := e.EffectivePackage()
-		cached, ok := cacheByKey[NewToolKey(e.Name, e.Provider, pkg).String()]
-		if ok && cached.Description.Valid && cached.Description.String != "" {
+		key := NewToolKey(e.Name, e.Provider, pkg).String()
+		cached, ok := cacheByKey[key]
+		if hasCachedDescription(key, cached) {
 			continue // already cached
 		}
 		if ok && cached.Package != "" {
 			pkg = cached.Package
+			key = NewToolKey(e.Name, e.Provider, pkg).String()
 		}
 		opProvider := a.operationProviderName(e)
 		byProvider[opProvider] = append(byProvider[opProvider], descriptionPendingTool{
@@ -251,7 +277,7 @@ func (a *App) RefreshDescriptions(ctx context.Context, _ time.Duration) error {
 			cacheProvider: e.Provider,
 			tool:          provider.Tool{Name: e.Name, Provider: opProvider, Package: pkg},
 		})
-		queued[NewToolKey(e.Name, e.Provider, pkg).String()] = true
+		queued[key] = true
 	}
 	for _, t := range cachedTools {
 		if ctx.Err() != nil {
@@ -264,15 +290,20 @@ func (a *App) RefreshDescriptions(ctx context.Context, _ time.Duration) error {
 		if queued[NewToolKey(t.Name, t.Provider, pkg).String()] {
 			continue
 		}
-		if t.Description.Valid && t.Description.String != "" {
+		key := NewToolKey(t.Name, t.Provider, pkg).String()
+		if hasCachedDescription(key, t) {
 			continue
 		}
-		byProvider[t.Provider] = append(byProvider[t.Provider], descriptionPendingTool{
+		describeProvider := a.descriptionProviderName(t.Provider, t.InstalledWith)
+		if describeProvider == "" {
+			continue
+		}
+		byProvider[describeProvider] = append(byProvider[describeProvider], descriptionPendingTool{
 			name:          t.Name,
 			cacheProvider: t.Provider,
-			tool:          provider.Tool{Name: t.Name, Provider: t.Provider, Package: pkg},
+			tool:          provider.Tool{Name: t.Name, Provider: describeProvider, Package: pkg},
 		})
-		queued[NewToolKey(t.Name, t.Provider, pkg).String()] = true
+		queued[key] = true
 	}
 
 	for provName, pending := range byProvider {
@@ -323,6 +354,20 @@ func (a *App) RefreshDescriptions(ctx context.Context, _ time.Duration) error {
 		}
 	}
 	return nil
+}
+
+func (a *App) descriptionProviderName(cacheProvider, installedWith string) string {
+	if _, ok := a.registry.Get(cacheProvider); ok {
+		return cacheProvider
+	}
+	for _, name := range []string{installedWith, cacheProvider} {
+		if ecosystem, ok := provider.BuiltinEcosystemFor(name); ok {
+			if _, registered := a.registry.Get(ecosystem); registered {
+				return ecosystem
+			}
+		}
+	}
+	return ""
 }
 
 type descriptionResult struct {
@@ -388,12 +433,37 @@ func (a *App) refreshDescriptionsIndividually(ctx context.Context, provName stri
 }
 
 func lookupDescription(descs map[string]string, name, pkg string) string {
-	for _, key := range []string{name, pkg, strings.ToLower(name), strings.ToLower(pkg)} {
-		if desc := descs[key]; desc != "" {
+	for _, key := range descriptionLookupKeys(name, pkg) {
+		if desc := strings.TrimSpace(descs[key]); desc != "" {
 			return desc
 		}
 	}
 	return ""
+}
+
+func descriptionLookupKeys(name, pkg string) []string {
+	if pkg == "" {
+		pkg = name
+	}
+	keys := make([]string, 0, 6)
+	add := func(key string) {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			return
+		}
+		for _, existing := range keys {
+			if existing == key {
+				return
+			}
+		}
+		keys = append(keys, key)
+	}
+	add(pkg)
+	add(name)
+	for _, key := range provider.PackageLookupKeys(name, pkg) {
+		add(key)
+	}
+	return keys
 }
 
 // ─── Init helpers ─────────────────────────────────────────────────────────────
@@ -404,6 +474,9 @@ func (a *App) InitTestMode(ctx context.Context, providers ...provider.Provider) 
 	a.testMode = true
 	if _, err := config.NormalizeFile(a.ConfigPath); err != nil {
 		return fmt.Errorf("normalizing config file: %w", err)
+	}
+	if err := a.repairCurrentHostEntry(); err != nil {
+		return fmt.Errorf("repairing current host entry: %w", err)
 	}
 	dbDir := a.CacheDir
 	if dbDir == "" {

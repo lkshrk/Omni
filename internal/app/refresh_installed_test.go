@@ -20,6 +20,15 @@ func (b *bulkCheckingStub) InstalledMap(_ context.Context) (map[string]string, e
 	return b.bulk, nil
 }
 
+type metadataCheckingStub struct {
+	stubProvider
+	metadata map[string]provider.InstalledMetadata
+}
+
+func (b *metadataCheckingStub) InstalledMetadataMap(_ context.Context) (map[string]provider.InstalledMetadata, error) {
+	return b.metadata, nil
+}
+
 // bulkConcreteStub extends bulkCheckingStub with ConcreteResolver — models a
 // ecosystem provider like "node" that delegates to a concrete backend (e.g. "bun").
 type bulkConcreteStub struct {
@@ -77,6 +86,49 @@ func TestRefreshInstalled_BulkPath_MarksInstalled(t *testing.T) {
 	}
 	if tools[0].Version.String != "14.1.0" {
 		t.Errorf("ripgrep.Version = %q, want 14.1.0", tools[0].Version.String)
+	}
+}
+
+func TestRefreshInstalled_MetadataBulkPath_PersistsPrivilege(t *testing.T) {
+	prov := &metadataCheckingStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		metadata: map[string]provider.InstalledMetadata{
+			"parsec": {
+				Version: "150-103a",
+				Privilege: provider.PrivilegePlan{
+					Requirement: provider.PrivilegeMaybe,
+					Reason:      "brew cask parsec uses pkgutil uninstall",
+				},
+			},
+		},
+	}
+	a, cfgPath := newImportApp(t, prov)
+
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("parsec", "brew")),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("parsec"),
+		}},
+	}); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+
+	if err := a.RefreshInstalled(context.Background(), nil); err != nil {
+		t.Fatalf("RefreshInstalled: %v", err)
+	}
+
+	cached, err := a.DB().Get(context.Background(), "parsec", "system", "parsec")
+	if err != nil {
+		t.Fatalf("Get parsec: %v", err)
+	}
+	if cached.Privilege != string(provider.PrivilegeMaybe) {
+		t.Fatalf("Privilege = %q, want maybe", cached.Privilege)
+	}
+	if !cached.PrivilegeReason.Valid || !strings.Contains(cached.PrivilegeReason.String, "pkgutil") {
+		t.Fatalf("PrivilegeReason = %+v, want pkgutil reason", cached.PrivilegeReason)
+	}
+	if cached.PrivilegeAt == nil {
+		t.Fatal("PrivilegeAt should be set")
 	}
 }
 

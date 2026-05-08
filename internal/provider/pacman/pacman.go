@@ -33,18 +33,25 @@ func (p *Provider) Available(ctx context.Context) (bool, error) {
 
 func (p *Provider) Install(ctx context.Context, tool provider.Tool) error {
 	pkg := tool.EffectivePackage()
-	return provider.RunCmd(ctx, p.exec, "pacman -S "+pkg, "pacman", "-S", "--noconfirm", pkg)
+	cmd, args := provider.PrivilegedCommand("pacman", "-S", "--noconfirm", pkg)
+	return provider.RunCmd(ctx, p.exec, "pacman -S "+pkg, cmd, args...)
 }
 
 func (p *Provider) Uninstall(ctx context.Context, tool provider.Tool) error {
 	pkg := tool.EffectivePackage()
-	return provider.RunCmd(ctx, p.exec, "pacman -R "+pkg, "pacman", "-R", "--noconfirm", pkg)
+	cmd, args := provider.PrivilegedCommand("pacman", "-R", "--noconfirm", pkg)
+	return provider.RunCmd(ctx, p.exec, "pacman -R "+pkg, cmd, args...)
 }
 
 func (p *Provider) Upgrade(ctx context.Context, tool provider.Tool) error {
 	// pacman has no upgrade-single-package command; -S reinstalls the latest version.
 	pkg := tool.EffectivePackage()
-	return provider.RunCmd(ctx, p.exec, "pacman -S "+pkg, "pacman", "-S", "--noconfirm", pkg)
+	cmd, args := provider.PrivilegedCommand("pacman", "-S", "--noconfirm", pkg)
+	return provider.RunCmd(ctx, p.exec, "pacman -S "+pkg, cmd, args...)
+}
+
+func (p *Provider) PrivilegePlan(_ context.Context, action provider.PrivilegeAction, tool provider.Tool) (provider.PrivilegePlan, error) {
+	return provider.SystemPrivilegePlan(p.Name(), action, tool), nil
 }
 
 func (p *Provider) IsInstalled(ctx context.Context, tool provider.Tool) (bool, string, error) {

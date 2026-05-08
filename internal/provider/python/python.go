@@ -58,6 +58,29 @@ func newWithPyPI(exec executor.Executor, hint, pypiURL string, client *http.Clie
 func (p *Provider) Name() string        { return "python" }
 func (p *Provider) Description() string { return "Python tools via uv · pip3" }
 
+func (p *Provider) ErrorSolutions(code provider.ErrorCode, tool provider.Tool) []provider.ErrorSolution {
+	if code != provider.ErrorExternallyManagedPython {
+		return nil
+	}
+	fromProvider := tool.Provider
+	if fromProvider == "" {
+		fromProvider = p.Name()
+	}
+	command := ""
+	if tool.Name != "" {
+		command = fmt.Sprintf("omni switch %s --from %s --to uv", tool.Name, fromProvider)
+	}
+	return []provider.ErrorSolution{
+		{
+			Label:          "Reinstall this tool with uv",
+			Command:        command,
+			Detail:         "uv installs Python CLI tools into isolated tool environments instead of modifying the externally managed Python.",
+			Action:         provider.ErrorSolutionActionSwitchProvider,
+			TargetProvider: "uv",
+		},
+	}
+}
+
 // resolve returns the active backend, honouring hint when set.
 func (p *Provider) resolve(ctx context.Context) (*backend, error) {
 	if p.hint != "" {
@@ -140,6 +163,9 @@ func (p *Provider) installWith(ctx context.Context, tool provider.Tool, b *backe
 	args := b.installArgs(tool.EffectivePackage())
 	_, stderr, err := p.exec.Run(ctx, b.binary, args...)
 	if err != nil {
+		if provider.IsExternallyManagedPythonOutput(stderr) {
+			return provider.NewExternallyManagedPythonError(b.binary, "install", tool, err, stderr, p.ErrorSolutions(provider.ErrorExternallyManagedPython, tool))
+		}
 		return fmt.Errorf("%s %s: %w\n%s", b.binary, strings.Join(args, " "), err, strings.TrimSpace(stderr))
 	}
 	return nil
@@ -153,6 +179,9 @@ func (p *Provider) Uninstall(ctx context.Context, tool provider.Tool) error {
 	args := b.uninstallArgs(tool.EffectivePackage())
 	_, stderr, err := p.exec.Run(ctx, b.binary, args...)
 	if err != nil {
+		if provider.IsExternallyManagedPythonOutput(stderr) {
+			return provider.NewExternallyManagedPythonError(b.binary, "uninstall", tool, err, stderr, p.ErrorSolutions(provider.ErrorExternallyManagedPython, tool))
+		}
 		return fmt.Errorf("%s %s: %w\n%s", b.binary, strings.Join(args, " "), err, strings.TrimSpace(stderr))
 	}
 	return nil
@@ -169,6 +198,9 @@ func (p *Provider) UninstallFrom(ctx context.Context, tool provider.Tool, binary
 			args := supported[i].uninstallArgs(tool.EffectivePackage())
 			_, stderr, err := p.exec.Run(ctx, binary, args...)
 			if err != nil {
+				if provider.IsExternallyManagedPythonOutput(stderr) {
+					return provider.NewExternallyManagedPythonError(binary, "uninstall", tool, err, stderr, p.ErrorSolutions(provider.ErrorExternallyManagedPython, tool))
+				}
 				return fmt.Errorf("%s %s: %w\n%s", binary, strings.Join(args, " "), err, strings.TrimSpace(stderr))
 			}
 			return nil
@@ -198,6 +230,9 @@ func (p *Provider) upgradeWith(ctx context.Context, tool provider.Tool, b *backe
 	args := b.upgradeArgs(tool.EffectivePackage())
 	_, stderr, err := p.exec.Run(ctx, b.binary, args...)
 	if err != nil {
+		if provider.IsExternallyManagedPythonOutput(stderr) {
+			return provider.NewExternallyManagedPythonError(b.binary, "upgrade", tool, err, stderr, p.ErrorSolutions(provider.ErrorExternallyManagedPython, tool))
+		}
 		return fmt.Errorf("%s %s: %w\n%s", b.binary, strings.Join(args, " "), err, strings.TrimSpace(stderr))
 	}
 	return nil

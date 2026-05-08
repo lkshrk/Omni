@@ -37,14 +37,9 @@ func (a *App) Switch(ctx context.Context, name, fromProvider, toProvider string)
 	if !a.knownProvider(fromProvider) {
 		return nil, fmt.Errorf("unknown provider %q", fromProvider)
 	}
-	targetProvider, targetInstallWith := a.logicalInstallTarget(toProvider)
-	opProvider := toProvider
-	if targetInstallWith == "" {
-		opProvider = targetProvider
-	}
-	toProv, ok := a.registry.Get(opProvider)
-	if !ok {
-		return nil, fmt.Errorf("unknown provider %q", toProvider)
+	targetProvider, targetInstallWith, opProvider, toProv, err := a.switchTarget(toProvider)
+	if err != nil {
+		return nil, err
 	}
 
 	var (
@@ -54,7 +49,7 @@ func (a *App) Switch(ctx context.Context, name, fromProvider, toProvider string)
 		tgtTool provider.Tool
 		ver     string
 	)
-	err := a.withConfig(func(cfg *config.RootConfig) error {
+	err = a.withConfig(func(cfg *config.RootConfig) error {
 		spec, ok := cfg.Tools[name]
 		if !ok {
 			return fmt.Errorf("tool %q with provider %q not found in config", name, fromProvider)
@@ -129,6 +124,27 @@ func (a *App) Switch(ctx context.Context, name, fromProvider, toProvider string)
 	}
 
 	return result, nil
+}
+
+func (a *App) switchTarget(toProvider string) (targetProvider, targetInstallWith, opProvider string, prov provider.Provider, err error) {
+	targetProvider, targetInstallWith = a.logicalInstallTarget(toProvider)
+	opProvider = targetProvider
+	if targetInstallWith != "" {
+		if manager, ok := a.managerOption(targetProvider, targetInstallWith); ok {
+			var resolved provider.Provider
+			resolved, opProvider, err = a.managerOperationProvider(targetProvider, manager)
+			if err != nil {
+				return "", "", "", nil, err
+			}
+			return targetProvider, targetInstallWith, opProvider, resolved, nil
+		}
+		opProvider = toProvider
+	}
+	prov, ok := a.registry.Get(opProvider)
+	if !ok {
+		return "", "", "", nil, fmt.Errorf("unknown provider %q", toProvider)
+	}
+	return targetProvider, targetInstallWith, opProvider, prov, nil
 }
 
 // oldEnvCleaner is an optional interface that providers can implement to
@@ -268,7 +284,64 @@ func (a *App) ReinstallWithDefault(ctx context.Context, name, configProv string)
 	if err := a.RefreshInstalled(ctx, nil); err != nil {
 		return result, fmt.Errorf("refreshing installed state after reinstall: %w", err)
 	}
+	if err := a.RefreshDescriptions(ctx, 0); err != nil {
+		return result, fmt.Errorf("refreshing descriptions after reinstall: %w", err)
+	}
 	return result, nil
+}
+
+// ReinstallWithDefaultAfterClearingInstallOverride removes the effective
+// install_with override, then reinstalls the tool with its ecosystem default.
+func (a *App) ReinstallWithDefaultAfterClearingInstallOverride(ctx context.Context, name, configProv string) (*SwitchResult, ClearInstallOverrideResult, error) {
+	target, err := a.providerRepairTarget(ctx, name, configProv)
+	if err != nil {
+		return nil, ClearInstallOverrideResult{}, err
+	}
+	originalSpec, found, err := a.toolSpecSnapshot(name)
+	if err != nil {
+		return nil, ClearInstallOverrideResult{}, err
+	}
+	cleared, err := a.ClearToolInstallOverride(ctx, name, target.configProv)
+	if err != nil {
+		return nil, ClearInstallOverrideResult{}, err
+	}
+	result, err := a.MigrateInstallation(ctx, target.name, target.installedWith, target.configProv)
+	if err != nil {
+		if restoreErr := a.restoreToolSpecSnapshot(name, originalSpec, found); restoreErr != nil {
+			return result, cleared, fmt.Errorf("%w (restore provider override failed: %v)", err, restoreErr)
+		}
+		return result, cleared, err
+	}
+	if err := a.RefreshInstalled(ctx, nil); err != nil {
+		return result, cleared, fmt.Errorf("refreshing installed state after reinstall: %w", err)
+	}
+	if err := a.RefreshDescriptions(ctx, 0); err != nil {
+		return result, cleared, fmt.Errorf("refreshing descriptions after reinstall: %w", err)
+	}
+	return result, cleared, nil
+}
+
+func (a *App) toolSpecSnapshot(name string) (config.ToolSpec, bool, error) {
+	cfg, err := a.loadConfig()
+	if err != nil {
+		return config.ToolSpec{}, false, fmt.Errorf("loading config: %w", err)
+	}
+	spec, ok := cfg.Tools[name]
+	return spec, ok, nil
+}
+
+func (a *App) restoreToolSpecSnapshot(name string, spec config.ToolSpec, found bool) error {
+	return a.withConfig(func(cfg *config.RootConfig) error {
+		if found {
+			if cfg.Tools == nil {
+				cfg.Tools = make(map[string]config.ToolSpec)
+			}
+			cfg.Tools[name] = spec
+		} else if cfg.Tools != nil {
+			delete(cfg.Tools, name)
+		}
+		return nil
+	})
 }
 
 func (a *App) providerRepairTarget(ctx context.Context, name, configProv string) (providerRepairTarget, error) {
@@ -343,16 +416,21 @@ func (a *App) migrateWrongProvider(ctx context.Context, name, installedWith, con
 		return result, err
 	}
 
-	// Remove from the old (wrong) provider — best-effort.
-	if fromProv, ok := a.registry.Get(installedWith); ok {
-		srcTool := provider.Tool{Name: name, Provider: installedWith, Package: pkg}
-		if uninstallErr := fromProv.Uninstall(ctx, srcTool); uninstallErr != nil {
-			result.UninstallWarning = uninstallErr
+	// Remove from the old (wrong) provider — best-effort. Skip when clearing an
+	// override revealed the same concrete owner as the ecosystem default.
+	installedOwner := installedWithForOperation(ctx, toProv, opProvider, install.InstallWith)
+	if installedWith == installedOwner {
+		result.FromProvider = ""
+	} else {
+		if fromProv, ok := a.registry.Get(installedWith); ok {
+			srcTool := provider.Tool{Name: name, Provider: installedWith, Package: pkg}
+			if uninstallErr := fromProv.Uninstall(ctx, srcTool); uninstallErr != nil {
+				result.UninstallWarning = uninstallErr
+			}
 		}
 	}
 
 	// Update DB: mark installed under configProv, remove stale installedWith entry.
-	installedOwner := installedWithForOperation(ctx, toProv, opProvider, install.InstallWith)
 	if err := a.readDB().Upsert(ctx, &database.ToolCache{
 		Name:          name,
 		Provider:      install.Provider,
@@ -364,7 +442,7 @@ func (a *App) migrateWrongProvider(ctx context.Context, name, installedWith, con
 	}); err != nil {
 		return result, fmt.Errorf("upserting migration cache for %s/%s: %w", install.Provider, name, err)
 	}
-	if installedWith != install.Provider {
+	if installedWith != install.Provider && installedWith != installedOwner {
 		if err := a.readDB().Delete(ctx, name, installedWith, pkg); err != nil {
 			return result, fmt.Errorf("deleting old migration cache for %s/%s: %w", installedWith, name, err)
 		}

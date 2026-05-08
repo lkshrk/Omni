@@ -355,6 +355,139 @@ func TestRefreshProviderInstalled_BulkPath_MarksInstalled(t *testing.T) {
 	}
 }
 
+type cancelingBulkStub struct {
+	bulkCheckingStub
+	cancel context.CancelFunc
+}
+
+func (b *cancelingBulkStub) InstalledMap(ctx context.Context) (map[string]string, error) {
+	if b.cancel != nil {
+		b.cancel()
+	}
+	return b.bulkCheckingStub.InstalledMap(ctx)
+}
+
+type errorBulkStub struct {
+	stubProvider
+	err error
+}
+
+func (b *errorBulkStub) InstalledMap(_ context.Context) (map[string]string, error) {
+	return nil, b.err
+}
+
+type countingBulkConcreteStub struct {
+	stubProvider
+	bulk         map[string]string
+	concreteName string
+	calls        int
+}
+
+func (b *countingBulkConcreteStub) InstalledMap(_ context.Context) (map[string]string, error) {
+	b.calls++
+	return b.bulk, nil
+}
+
+func (b *countingBulkConcreteStub) ResolvedName(_ context.Context) (string, error) {
+	return b.concreteName, nil
+}
+
+func TestRefreshProviderInstalled_WritesAfterScanContextExpires(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	prov := &cancelingBulkStub{
+		bulkCheckingStub: bulkCheckingStub{
+			stubProvider: stubProvider{name: "system", available: true},
+			bulk:         map[string]string{"fd": "9.0.0"},
+		},
+		cancel: cancel,
+	}
+	a, cfgPath := newImportApp(t, prov)
+
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("fd", "system")),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("fd"),
+		}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if err := a.RefreshProviderInstalled(ctx, "system"); err != nil {
+		t.Fatalf("RefreshProviderInstalled: %v", err)
+	}
+	got, err := a.DB().Get(context.Background(), "fd", "system", "fd")
+	if err != nil {
+		t.Fatalf("DB.Get: %v", err)
+	}
+	if !got.Installed || got.Version.String != "9.0.0" {
+		t.Fatalf("installed/version = %v/%q, want true/9.0.0", got.Installed, got.Version.String)
+	}
+}
+
+func TestRefreshProviderInstalled_ReturnsBulkScanDeadline(t *testing.T) {
+	prov := &errorBulkStub{
+		stubProvider: stubProvider{name: "system", available: true},
+		err:          context.DeadlineExceeded,
+	}
+	a, cfgPath := newImportApp(t, prov)
+
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("fd", "system")),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("fd"),
+		}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	err := a.RefreshProviderInstalled(context.Background(), "system")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("RefreshProviderInstalled error = %v, want context deadline", err)
+	}
+}
+
+func TestRefreshProviderInstalled_ReusesConcreteOwnerBulkMap(t *testing.T) {
+	system := &countingBulkConcreteStub{
+		stubProvider: stubProvider{name: "system", available: true},
+		bulk:         map[string]string{"fd": "9.0.0"},
+		concreteName: "brew",
+	}
+	brew := &countingBulkConcreteStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		bulk:         map[string]string{"fd": "9.0.0"},
+	}
+	a, cfgPath := newImportApp(t, system, brew)
+
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("fd", "system")),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("fd"),
+		}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	if err := a.DB().Upsert(context.Background(), &database.ToolCache{
+		Name:          "fd",
+		Provider:      "system",
+		Package:       "fd",
+		Installed:     true,
+		InstalledWith: "brew",
+		Tracked:       true,
+	}); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+
+	if err := a.RefreshProviderInstalled(context.Background(), "system"); err != nil {
+		t.Fatalf("RefreshProviderInstalled: %v", err)
+	}
+	if system.calls != 1 {
+		t.Fatalf("system bulk calls = %d, want 1", system.calls)
+	}
+	if brew.calls != 0 {
+		t.Fatalf("brew owner bulk calls = %d, want 0 because system scan already resolved to brew", brew.calls)
+	}
+}
+
 // TestRefreshProviderInstalled_BulkPath_MarksNotInstalled tests the BulkChecker
 // path when the tool is absent from the bulk map.
 func TestRefreshProviderInstalled_BulkPath_MarksNotInstalled(t *testing.T) {

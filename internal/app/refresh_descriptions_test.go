@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/provider"
 )
 
@@ -165,12 +166,80 @@ func TestRefreshDescriptions_BulkDescriberMatchesPackageAlias(t *testing.T) {
 		t.Fatalf("RefreshDescriptions: %v", err)
 	}
 
-	got, err := a.DB().Get(context.Background(), "editor", "system", "neovim")
+	got, err := a.DB().GetMetadata(context.Background(), "editor", "system", "neovim")
 	if err != nil {
-		t.Fatalf("db get: %v", err)
+		t.Fatalf("metadata get: %v", err)
 	}
 	if !got.Description.Valid || got.Description.String != "bulk description of neovim" {
 		t.Fatalf("description = %#v, want package alias description", got.Description)
+	}
+}
+
+type basenameBulkDescribingProvider struct {
+	stubProvider
+	calls atomic.Int32
+}
+
+func (b *basenameBulkDescribingProvider) BulkDescribe(_ context.Context, _ []provider.Tool) (map[string]string, error) {
+	b.calls.Add(1)
+	return map[string]string{
+		"cloudflared":      "Cloudflare tunnel daemon",
+		"@playwright/test": "Playwright test framework",
+		"test":             "wrong basename description",
+	}, nil
+}
+
+func TestRefreshDescriptions_BulkDescriberMatchesPackageBasename(t *testing.T) {
+	prov := &basenameBulkDescribingProvider{stubProvider: stubProvider{name: "brew", available: true}}
+	a, cfgPath := newImportApp(t, prov)
+
+	cfg := &config.RootConfig{
+		Tools: logicalToolSpecs(logicalToolPackage("cloudflare-ddns", "brew", "cloudflare/cloudflare/cloudflared")),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("cloudflare-ddns"),
+		}},
+	}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+
+	if err := a.RefreshDescriptions(context.Background(), 0); err != nil {
+		t.Fatalf("RefreshDescriptions: %v", err)
+	}
+
+	got, err := a.DB().GetMetadata(context.Background(), "cloudflare-ddns", "system", "cloudflare/cloudflare/cloudflared")
+	if err != nil {
+		t.Fatalf("metadata get: %v", err)
+	}
+	if !got.Description.Valid || got.Description.String != "Cloudflare tunnel daemon" {
+		t.Fatalf("description = %#v, want basename package description", got.Description)
+	}
+}
+
+func TestRefreshDescriptions_BulkDescriberPrefersFullScopedPackage(t *testing.T) {
+	prov := &basenameBulkDescribingProvider{stubProvider: stubProvider{name: "node", available: true}}
+	a, cfgPath := newImportApp(t, prov)
+
+	cfg := &config.RootConfig{
+		Tools: logicalToolSpecs(logicalToolPackage("playwright", "node", "@playwright/test")),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("playwright"),
+		}},
+	}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+
+	if err := a.RefreshDescriptions(context.Background(), 0); err != nil {
+		t.Fatalf("RefreshDescriptions: %v", err)
+	}
+
+	got, err := a.DB().GetMetadata(context.Background(), "playwright", "node", "@playwright/test")
+	if err != nil {
+		t.Fatalf("metadata get: %v", err)
+	}
+	if !got.Description.Valid || got.Description.String != "Playwright test framework" {
+		t.Fatalf("description = %#v, want full scoped package description", got.Description)
 	}
 }
 
@@ -215,13 +284,13 @@ func TestRefreshDescriptions_FallsBackForBulkMisses(t *testing.T) {
 	if got := prov.calls.Load(); got != 1 {
 		t.Fatalf("Describe fallback called %d times, want 1 missing tool", got)
 	}
-	rg, err := a.DB().Get(context.Background(), "ripgrep", "system", "ripgrep")
+	rg, err := a.DB().GetMetadata(context.Background(), "ripgrep", "system", "ripgrep")
 	if err != nil {
-		t.Fatalf("db get ripgrep: %v", err)
+		t.Fatalf("metadata get ripgrep: %v", err)
 	}
-	fd, err := a.DB().Get(context.Background(), "fd", "system", "fd")
+	fd, err := a.DB().GetMetadata(context.Background(), "fd", "system", "fd")
 	if err != nil {
-		t.Fatalf("db get fd: %v", err)
+		t.Fatalf("metadata get fd: %v", err)
 	}
 	if !rg.Description.Valid || rg.Description.String != "bulk description of ripgrep" {
 		t.Fatalf("ripgrep description = %#v, want bulk description", rg.Description)
@@ -256,6 +325,71 @@ func TestRefreshDescriptions_FetchesDiscoveredTools(t *testing.T) {
 	}
 }
 
+func TestRefreshDescriptions_FetchesConfiguredNodeRowsInstalledWithManager(t *testing.T) {
+	prov := &describingProvider{stubProvider: stubProvider{name: "node", available: true}}
+	a, cfgPath := newImportApp(t, prov)
+	ctx := context.Background()
+
+	cfg := &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("pm2", "node")),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("pm2"),
+		}},
+	}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name:          "pm2",
+		Provider:      "node",
+		Package:       "pm2",
+		Installed:     true,
+		InstalledWith: "bun",
+	}); err != nil {
+		t.Fatalf("seed node cache row: %v", err)
+	}
+
+	if err := a.RefreshDescriptions(ctx, 0); err != nil {
+		t.Fatalf("RefreshDescriptions: %v", err)
+	}
+
+	got, err := a.DB().Get(ctx, "pm2", "node", "pm2")
+	if err != nil {
+		t.Fatalf("db get: %v", err)
+	}
+	if !got.Description.Valid || got.Description.String != "description of pm2" {
+		t.Fatalf("description = %#v, want node registry description", got.Description)
+	}
+	if got.InstalledWith != "bun" {
+		t.Fatalf("InstalledWith = %q, want bun", got.InstalledWith)
+	}
+}
+
+func TestRefreshDescriptions_FetchesConcreteManagerCacheRows(t *testing.T) {
+	prov := &describingProvider{stubProvider: stubProvider{name: "node", available: true}}
+	a, _ := newImportApp(t, prov)
+	ctx := context.Background()
+
+	if err := a.DB().UpsertDiscovered(ctx, "playwright", "bun", "bun", "1.59.1"); err != nil {
+		t.Fatalf("seed concrete manager row: %v", err)
+	}
+
+	if err := a.RefreshDescriptions(ctx, 0); err != nil {
+		t.Fatalf("RefreshDescriptions: %v", err)
+	}
+
+	got, err := a.DB().Get(ctx, "playwright", "bun", "playwright")
+	if err != nil {
+		t.Fatalf("db get: %v", err)
+	}
+	if !got.Description.Valid || got.Description.String != "description of playwright" {
+		t.Fatalf("description = %#v, want node registry description for concrete bun row", got.Description)
+	}
+	if got.Provider != "bun" || got.InstalledWith != "bun" {
+		t.Fatalf("cache identity = provider %q installed_with %q, want bun/bun", got.Provider, got.InstalledWith)
+	}
+}
+
 type concurrentDescribingProvider struct {
 	stubProvider
 	calls   atomic.Int32
@@ -287,7 +421,7 @@ func TestRefreshDescriptions_IndividualFallbackIsBoundedConcurrent(t *testing.T)
 	}
 	cfg := &config.RootConfig{
 		Tools:  logicalToolSpecs(fixtureTools...),
-		Groups: []*config.GroupConfig{{Tools: groupTools("a", "b", "c", "d", "e", "f", "g", "h")}},
+		Groups: []*config.GroupConfig{testHostToolGroup("a", "b", "c", "d", "e", "f", "g", "h")},
 	}
 	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
 		t.Fatalf("saving config: %v", err)

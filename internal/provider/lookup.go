@@ -48,3 +48,12 @@ func LookupInstalledEntry(m map[string]InstalledEntry, keys []string) InstalledE
 	}
 	return InstalledEntry{}
 }
+
+func LookupInstalledMetadata(m map[string]InstalledMetadata, keys []string) (InstalledMetadata, bool) {
+	for _, key := range keys {
+		if entry, ok := m[key]; ok {
+			return entry, true
+		}
+	}
+	return InstalledMetadata{}, false
+}

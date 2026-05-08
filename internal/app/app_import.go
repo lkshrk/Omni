@@ -37,10 +37,11 @@ func (a *App) Import(ctx context.Context, opts ImportOptions) (*ImportResult, er
 	// from concrete provider name → ecosystem provider name so that tools found
 	// by e.g. "brew" are written into config as "system" when system→brew is
 	// the delegation.
+	resolvedEcosystems := a.ResolvedEcosystemProviders(ctx)
 	var revEcosystem map[string]string
 	if opts.Provider == "" {
 		revEcosystem = make(map[string]string)
-		for eco, concrete := range a.ResolvedEcosystemProviders(ctx) {
+		for eco, concrete := range resolvedEcosystems {
 			revEcosystem[concrete] = eco
 		}
 	}
@@ -97,16 +98,12 @@ func (a *App) Import(ctx context.Context, opts ImportOptions) (*ImportResult, er
 			}
 			for _, t := range installed {
 				configProvider := a.searchResultConfigProvider(p.Name())
-				installWith := ""
-				if configProvider != p.Name() {
-					installWith = p.Name()
-				}
 				if revEcosystem != nil {
 					if eco, ok := revEcosystem[p.Name()]; ok {
 						configProvider = eco
-						installWith = p.Name()
 					}
 				}
+				installWith := configInstallWithForConcreteProvider(configProvider, p.Name(), resolvedEcosystems)
 				if skipEcosystem[configProvider] {
 					continue
 				}
@@ -122,7 +119,10 @@ func (a *App) Import(ctx context.Context, opts ImportOptions) (*ImportResult, er
 				}
 				result.Added = append(result.Added, ImportedTool{Name: t.Name, Provider: configProvider, Version: t.Version})
 				if !opts.DryRun {
-					gc := ensureGroupInConfig(cfg, destGroup)
+					gc, err := ensureImportDestinationGroup(cfg, destGroup)
+					if err != nil {
+						return err
+					}
 					if cfg.Tools == nil {
 						cfg.Tools = make(map[string]config.ToolSpec)
 					}
@@ -153,4 +153,11 @@ func (a *App) Import(ctx context.Context, opts ImportOptions) (*ImportResult, er
 		return nil, err
 	}
 	return result, nil
+}
+
+func ensureImportDestinationGroup(cfg *config.RootConfig, groupName string) (*config.GroupConfig, error) {
+	if machineGroupName(groupName) == currentMachineGroupName() {
+		return ensureHostGroupInConfig(cfg, groupName)
+	}
+	return ensureGroupInConfig(cfg, groupName), nil
 }

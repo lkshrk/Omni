@@ -167,7 +167,7 @@ func TestUpdateDescriptionBatch_EmptyIsNoOp(t *testing.T) {
 	}
 }
 
-func TestUpdateDescriptionBatch_UpdatesExistingAndInsertsMissing(t *testing.T) {
+func TestUpdateDescriptionBatch_UpdatesExistingAndCachesMissing(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
 
@@ -176,7 +176,6 @@ func TestUpdateDescriptionBatch_UpdatesExistingAndInsertsMissing(t *testing.T) {
 	}
 	updates := []database.DescriptionUpdate{
 		{Name: "ripgrep", Provider: "brew", Package: "ripgrep", Description: "fast grep"},
-		// fd has no row yet → INSERT-on-miss path.
 		{Name: "fd", Provider: "brew", Package: "fd", Description: "fast find"},
 	}
 	if err := db.UpdateDescriptionBatch(ctx, updates); err != nil {
@@ -186,12 +185,22 @@ func TestUpdateDescriptionBatch_UpdatesExistingAndInsertsMissing(t *testing.T) {
 	if rg.Description.String != "fast grep" {
 		t.Errorf("ripgrep description = %q, want 'fast grep'", rg.Description.String)
 	}
-	fd, err := db.Get(ctx, "fd", "brew", "fd")
+	if _, err := db.Get(ctx, "fd", "brew", "fd"); err == nil {
+		t.Fatal("fd metadata-only update created a tool_cache row")
+	}
+	fd, err := db.GetMetadata(ctx, "fd", "brew", "fd")
 	if err != nil {
-		t.Fatalf("fd insert-on-miss: %v", err)
+		t.Fatalf("fd metadata: %v", err)
 	}
 	if fd.Description.String != "fast find" {
-		t.Errorf("fd description = %q, want 'fast find'", fd.Description.String)
+		t.Errorf("fd metadata description = %q, want 'fast find'", fd.Description.String)
+	}
+	list, err := db.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 1 || list[0].Name != "ripgrep" {
+		t.Fatalf("List = %+v, want only ripgrep state row", list)
 	}
 }
 
@@ -202,6 +211,64 @@ func TestUpdateDescriptionBatch_RejectsInvalidEntry(t *testing.T) {
 		{Name: "ripgrep", Provider: "brew", Package: "", Description: "d"}, // empty Package fails requirePackage
 	}); err == nil {
 		t.Error("expected error for empty Package in batch entry")
+	}
+}
+
+func TestUpsertMetadataBatch_HydratesExistingRowsWithoutCreatingState(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+
+	if err := db.Upsert(ctx, &database.ToolCache{
+		Name:      "ripgrep",
+		Provider:  "brew",
+		Package:   "ripgrep",
+		Installed: true,
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := db.UpsertMetadataBatch(ctx, []database.MetadataUpdate{
+		{
+			Name:            "ripgrep",
+			Provider:        "brew",
+			Package:         "ripgrep",
+			Version:         "14.1.0",
+			Description:     "fast grep",
+			Privilege:       "maybe",
+			PrivilegeReason: "cask may run installer package",
+		},
+		{
+			Name:        "fd",
+			Provider:    "brew",
+			Package:     "fd",
+			Description: "fast find",
+		},
+	}); err != nil {
+		t.Fatalf("UpsertMetadataBatch: %v", err)
+	}
+
+	rg, err := db.Get(ctx, "ripgrep", "brew", "ripgrep")
+	if err != nil {
+		t.Fatalf("Get ripgrep: %v", err)
+	}
+	if !rg.Description.Valid || rg.Description.String != "fast grep" {
+		t.Fatalf("ripgrep description = %+v, want fast grep", rg.Description)
+	}
+	if rg.Privilege != "maybe" {
+		t.Fatalf("ripgrep privilege = %q, want maybe", rg.Privilege)
+	}
+	if !rg.PrivilegeReason.Valid || rg.PrivilegeReason.String != "cask may run installer package" {
+		t.Fatalf("ripgrep privilege reason = %+v, want cached reason", rg.PrivilegeReason)
+	}
+
+	if _, err := db.Get(ctx, "fd", "brew", "fd"); err == nil {
+		t.Fatal("metadata-only fd created a tool_cache row")
+	}
+	list, err := db.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 1 || list[0].Name != "ripgrep" {
+		t.Fatalf("List = %+v, want only ripgrep state row", list)
 	}
 }
 

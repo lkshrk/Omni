@@ -33,6 +33,71 @@ func TestMigrate_Idempotent(t *testing.T) {
 	}
 }
 
+func TestMigrate_CopiesExistingToolMetadata(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+
+	if _, err := db.Bun().ExecContext(ctx,
+		`INSERT INTO tool_cache (
+		     name, provider, package, installed, description,
+		     privilege, privilege_reason, last_checked
+		 )
+		 VALUES (?, ?, ?, FALSE, ?, ?, ?, CURRENT_TIMESTAMP)`,
+		"parsec", "system", "parsec", "remote desktop", "maybe", "cask may run installer package"); err != nil {
+		t.Fatalf("seed legacy metadata: %v", err)
+	}
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	meta, err := db.GetMetadata(ctx, "parsec", "system", "parsec")
+	if err != nil {
+		t.Fatalf("GetMetadata: %v", err)
+	}
+	if !meta.Description.Valid || meta.Description.String != "remote desktop" {
+		t.Fatalf("description = %+v, want remote desktop", meta.Description)
+	}
+	if meta.Privilege != "maybe" {
+		t.Fatalf("privilege = %q, want maybe", meta.Privilege)
+	}
+}
+
+func TestMarkPrivilegeRequired_PersistsAndSurvivesRefreshUpsert(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+
+	if err := db.MarkPrivilegeRequired(ctx, "vim", "apt", "vim", "required", "apt install vim"); err != nil {
+		t.Fatalf("MarkPrivilegeRequired: %v", err)
+	}
+	got, err := db.Get(ctx, "vim", "apt", "vim")
+	if err != nil {
+		t.Fatalf("Get after MarkPrivilegeRequired: %v", err)
+	}
+	if got.Privilege != "required" {
+		t.Fatalf("Privilege = %q, want required", got.Privilege)
+	}
+	if !got.PrivilegeReason.Valid || got.PrivilegeReason.String != "apt install vim" {
+		t.Fatalf("PrivilegeReason = %+v, want apt install vim", got.PrivilegeReason)
+	}
+	if got.PrivilegeAt == nil {
+		t.Fatal("PrivilegeAt should be set")
+	}
+
+	if err := db.Upsert(ctx, &database.ToolCache{Name: "vim", Provider: "apt", Package: "vim", Installed: false}); err != nil {
+		t.Fatalf("Upsert refresh row: %v", err)
+	}
+	got, err = db.Get(ctx, "vim", "apt", "vim")
+	if err != nil {
+		t.Fatalf("Get after Upsert: %v", err)
+	}
+	if got.Privilege != "required" {
+		t.Fatalf("Privilege after Upsert = %q, want required", got.Privilege)
+	}
+	if !got.PrivilegeReason.Valid || got.PrivilegeReason.String != "apt install vim" {
+		t.Fatalf("PrivilegeReason after Upsert = %+v, want preserved reason", got.PrivilegeReason)
+	}
+}
+
 func TestOpen_RejectsLivePathInLocalTests(t *testing.T) {
 	if testguard.Isolated() {
 		t.Skip("Docker-isolated tests do not enforce local live-path rejection")
@@ -157,6 +222,7 @@ func TestPackageAwareMethodsRequirePackage(t *testing.T) {
 	check("MarkUninstalled", db.MarkUninstalled(ctx, "ripgrep", "brew", ""))
 	check("MarkTracked", db.MarkTracked(ctx, "ripgrep", "brew", ""))
 	check("ReconcileTracked", db.ReconcileTracked(ctx, []*database.ToolCache{{Name: "ripgrep", Provider: "brew"}}))
+	check("UpsertMetadataBatch", db.UpsertMetadataBatch(ctx, []database.MetadataUpdate{{Name: "ripgrep", Provider: "brew"}}))
 }
 
 func TestList(t *testing.T) {
@@ -435,6 +501,32 @@ func TestMarkFailed_IncrementsCount(t *testing.T) {
 	}
 }
 
+func TestClearFailure_ClearsMarker(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+
+	if err := db.MarkFailed(ctx, "ripgrep", "brew", "ripgrep", "install error"); err != nil {
+		t.Fatalf("MarkFailed: %v", err)
+	}
+	if err := db.ClearFailure(ctx, "ripgrep", "brew", "ripgrep"); err != nil {
+		t.Fatalf("ClearFailure: %v", err)
+	}
+
+	got, err := db.Get(ctx, "ripgrep", "brew", "ripgrep")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.FailureCount != 0 {
+		t.Errorf("FailureCount = %d, want 0", got.FailureCount)
+	}
+	if got.FailedAt != nil {
+		t.Errorf("FailedAt = %v, want nil", got.FailedAt)
+	}
+	if got.LastError.Valid {
+		t.Errorf("LastError = %+v, want invalid", got.LastError)
+	}
+}
+
 func TestListFailed_ReturnsOnlyFailed(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
@@ -542,16 +634,25 @@ func TestUpdateDescription_NoExistingRow(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
 
-	// Inserting description without a prior Upsert should create a stub row.
 	if err := db.UpdateDescription(ctx, "git", "brew", "git", "Distributed VCS"); err != nil {
 		t.Fatalf("UpdateDescription: %v", err)
 	}
-	got, err := db.Get(ctx, "git", "brew", "git")
-	if err != nil {
-		t.Fatalf("Get: %v", err)
+	if _, err := db.Get(ctx, "git", "brew", "git"); err == nil {
+		t.Fatal("UpdateDescription created a tool_cache state row, want metadata-only cache")
 	}
-	if got.Description.String != "Distributed VCS" {
-		t.Errorf("Description = %q, want 'Distributed VCS'", got.Description.String)
+	meta, err := db.GetMetadata(ctx, "git", "brew", "git")
+	if err != nil {
+		t.Fatalf("GetMetadata: %v", err)
+	}
+	if meta.Description.String != "Distributed VCS" {
+		t.Errorf("metadata description = %q, want 'Distributed VCS'", meta.Description.String)
+	}
+	list, err := db.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("List returned %d metadata-only rows, want 0", len(list))
 	}
 }
 

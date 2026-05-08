@@ -232,8 +232,8 @@ func TestUninstall_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	if len(tools) != 1 || tools[0].Installed {
-		t.Errorf("tool should be marked uninstalled after Uninstall, got %+v", tools)
+	if len(tools) != 0 {
+		t.Errorf("tool should be removed from cache after Uninstall, got %+v", tools)
 	}
 }
 
@@ -319,13 +319,12 @@ func TestUninstall_UsesConfiguredInstallWithWhenCacheMissing(t *testing.T) {
 	}
 }
 
-func TestUninstall_RemovesAllDuplicateConfiguredEntries(t *testing.T) {
+func TestUninstall_RemovesConfiguredEntry(t *testing.T) {
 	stub := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, stub)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
 		Groups: []*config.GroupConfig{
-			{Tools: groupTools("ripgrep")},
 			{Name: "work", Tools: groupTools("ripgrep")},
 		},
 	}); err != nil {
@@ -341,7 +340,7 @@ func TestUninstall_RemovesAllDuplicateConfiguredEntries(t *testing.T) {
 		t.Fatalf("config.Load: %v", err)
 	}
 	if hasTool(cfg, "ripgrep", "brew") {
-		t.Fatalf("ripgrep duplicate entry still present after uninstall: %+v", cfg.Groups)
+		t.Fatalf("ripgrep entry still present after uninstall: %+v", cfg.Groups)
 	}
 }
 
@@ -350,7 +349,7 @@ func TestUninstall_ProviderFailureLeavesConfigUntouched(t *testing.T) {
 	a, cfgPath := newImportApp(t, stub)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools:  logicalToolSpecs(logicalTool("ripgrep", "brew")),
-		Groups: []*config.GroupConfig{{Tools: groupTools("ripgrep")}},
+		Groups: []*config.GroupConfig{testHostToolGroup("ripgrep")},
 	}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
@@ -380,7 +379,7 @@ func TestRemoveToolFromConfig_RemovesMissingConfiguredTool(t *testing.T) {
 	a, cfgPath := newImportApp(t, stub)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools:  logicalToolSpecs(logicalTool("ripgrep", "brew")),
-		Groups: []*config.GroupConfig{{Tools: groupTools("ripgrep")}},
+		Groups: []*config.GroupConfig{testHostToolGroup("ripgrep")},
 	}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
@@ -717,6 +716,57 @@ func TestSearch_FansOut(t *testing.T) {
 	if len(results) != 1 || results[0].Name != "ripgrep" {
 		t.Errorf("Search = %v, want 1 result named ripgrep", results)
 	}
+	if results[0].Provider != "system" || results[0].SourceProvider != "brew" {
+		t.Fatalf("Search provider = %q source = %q, want system source brew", results[0].Provider, results[0].SourceProvider)
+	}
+}
+
+func TestSearch_CachesResultMetadata(t *testing.T) {
+	ctx := context.Background()
+	s := &searchStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		results: []provider.SearchResult{{
+			Name:        "ripgrep",
+			Provider:    "brew",
+			Version:     "14.1.0",
+			Description: "fast grep",
+			Privilege: provider.PrivilegePlan{
+				Requirement: provider.PrivilegeMaybe,
+				Reason:      "cask may run installer package",
+			},
+		}},
+	}
+	a, _ := newImportApp(t, s)
+
+	results, err := a.Search(ctx, "ripgrep", "")
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(results) != 1 || results[0].Provider != "system" {
+		t.Fatalf("Search results = %+v, want one system result", results)
+	}
+
+	meta, err := a.DB().GetMetadata(ctx, "ripgrep", "system", "ripgrep")
+	if err != nil {
+		t.Fatalf("GetMetadata: %v", err)
+	}
+	if !meta.Description.Valid || meta.Description.String != "fast grep" {
+		t.Fatalf("metadata description = %+v, want fast grep", meta.Description)
+	}
+	if !meta.Version.Valid || meta.Version.String != "14.1.0" {
+		t.Fatalf("metadata version = %+v, want 14.1.0", meta.Version)
+	}
+	if meta.Privilege != string(provider.PrivilegeMaybe) {
+		t.Fatalf("metadata privilege = %q, want maybe", meta.Privilege)
+	}
+
+	tools, err := a.ListTools(ctx, "")
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(tools) != 0 {
+		t.Fatalf("ListTools returned %d metadata-only rows, want 0", len(tools))
+	}
 }
 
 func TestSearch_ProviderFilter(t *testing.T) {
@@ -893,12 +943,10 @@ func TestLoadSettings_WithConfig(t *testing.T) {
 
 func TestSaveSettings_PreservesTools(t *testing.T) {
 	a, cfgPath := newImportApp(t)
-	// Write tools to the base group.
+	// Write tools to the current host group.
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
-		Groups: []*config.GroupConfig{{
-			Tools: groupTools("ripgrep"),
-		}},
+		Tools:  logicalToolSpecs(logicalTool("ripgrep", "brew")),
+		Groups: []*config.GroupConfig{testHostToolGroup("ripgrep")},
 	}); err != nil {
 		t.Fatalf("saving tools: %v", err)
 	}

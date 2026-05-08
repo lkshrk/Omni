@@ -3,6 +3,7 @@ package node_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/executor"
@@ -507,6 +508,49 @@ func TestOutdatedMap_Found(t *testing.T) {
 	}
 	if got["typescript"] != "5.4.0" {
 		t.Errorf("map[typescript] = %q, want 5.4.0", got["typescript"])
+	}
+}
+
+func TestOutdatedMap_BunTableOutput(t *testing.T) {
+	out := "bun outdated v1.3.8 (b64edcb4)\n" +
+		"|--------------------------------------------------|\n" +
+		"| Package              | Current | Update | Latest |\n" +
+		"|----------------------|---------|--------|--------|\n" +
+		"| yaml-language-server | 1.21.0  | 1.22.0 | 1.22.0 |\n" +
+		"| @scope/tool          | 0.1.0   | 0.2.0  | 0.2.0  |\n" +
+		"|--------------------------------------------------|\n"
+	m := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "bun --version", Response: executor.MockCall{Stdout: "1.3.8"}},
+		executor.MatchRule{Pattern: "bun outdated -g --json", Response: executor.MockCall{Stdout: out}},
+	)
+	p := node.New(m, "bun")
+	got, err := p.OutdatedMap(context.Background())
+	if err != nil {
+		t.Fatalf("OutdatedMap: %v", err)
+	}
+	if got["yaml-language-server"] != "1.22.0" {
+		t.Errorf("map[yaml-language-server] = %q, want 1.22.0", got["yaml-language-server"])
+	}
+	if got["@scope/tool"] != "0.2.0" {
+		t.Errorf("map[@scope/tool] = %q, want 0.2.0", got["@scope/tool"])
+	}
+}
+
+func TestOutdatedMap_BunNonJSONFailureReturnsCommandError(t *testing.T) {
+	out := "bun outdated v1.3.8 (b64edcb4)\n" +
+		"PermissionDenied: could not open \"/home/user/.bun/install/global/package.json\"\n" +
+		"error: failed to initialize bun install: PermissionDenied\n"
+	m := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "bun --version", Response: executor.MockCall{Stdout: "1.3.8"}},
+		executor.MatchRule{Pattern: "bun outdated -g --json", Response: executor.MockCall{Stdout: out, Err: errors.New("exit 1")}},
+	)
+	p := node.New(m, "bun")
+	_, err := p.OutdatedMap(context.Background())
+	if err == nil {
+		t.Fatal("OutdatedMap error = nil, want command failure")
+	}
+	if strings.Contains(err.Error(), "invalid character") {
+		t.Fatalf("Bun command failure should not be reported as JSON parse error: %v", err)
 	}
 }
 
