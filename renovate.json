@@ -1,15 +1,21 @@
 {
 	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
-	"extends": ["config:recommended", ":dependencyDashboard", "schedule:earlyMondays"],
+	"extends": ["config:recommended", ":dependencyDashboard"],
 	"rangeStrategy": "replace",
-	"automerge": true,
+	"automerge": false,
 	"automergeType": "pr",
 	"automergeStrategy": "squash",
-	"platformAutomerge": true,
+	"platformAutomerge": false,
 	"packageRules": [
 		{
-			"matchUpdateTypes": ["patch", "minor", "major"],
+			"description": "Automerge non-major updates after CI passes",
+			"matchUpdateTypes": ["patch", "minor"],
 			"automerge": true
+		},
+		{
+			"description": "Require manual review for major updates",
+			"matchUpdateTypes": ["major"],
+			"automerge": false
 		},
 		{
 			"matchDepTypes": ["engines"],
