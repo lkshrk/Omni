@@ -89,10 +89,18 @@ func resolveConfigWritePath(path string) (string, error) {
 	return "", fmt.Errorf("resolving config symlink target: %w", err)
 }
 
-// SchemaURL is the canonical URL to the published JSON Schema for settings.json.
-// It is injected as "$schema" on every write so editors can provide validation
-// and auto-complete without any additional setup.
-const SchemaURL = "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.schema.json"
+const schemaBaseURL = "https://raw.githubusercontent.com/lkshrk/omni/main/spec"
+
+// SchemaURL is the canonical URL to the published JSON Schema for the current
+// settings.json format. It is injected as "$schema" on every write so editors
+// can provide validation and auto-complete without any additional setup.
+var SchemaURL = SchemaURLForVersion(CurrentVersion)
+
+// SchemaURLForVersion returns the canonical JSON Schema URL for a settings.json
+// format version.
+func SchemaURLForVersion(version int) string {
+	return fmt.Sprintf("%s/omni.settings.v%d.schema.json", schemaBaseURL, version)
+}
 
 // DefaultConfigPath returns the path to settings.json using this priority:
 //  1. $OMNI_CONFIG — explicit override (full file path)
@@ -151,29 +159,109 @@ func DefaultCacheDir() (string, error) {
 // Load reads, parses, and normalizes settings.json at path.
 // Returns an empty RootConfig (no error) when the file does not exist.
 func Load(path string) (*RootConfig, error) {
-	return load(path, true)
+	cfg, _, err := load(path, true)
+	return cfg, err
 }
 
-func load(path string, normalize bool) (*RootConfig, error) {
+func load(path string, normalize bool) (*RootConfig, bool, error) {
 	if err := testguard.RequireTempPath("config read", path); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return &RootConfig{}, nil
+			return &RootConfig{Version: CurrentVersion}, false, nil
 		}
-		return nil, fmt.Errorf("reading config file: %w", err)
+		return nil, false, fmt.Errorf("reading config file: %w", err)
 	}
 
 	var cfg RootConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parsing config file: %w", err)
+		return nil, false, fmt.Errorf("parsing config file: %w", err)
+	}
+	migrated, err := Migrate(&cfg)
+	if err != nil {
+		return nil, false, err
 	}
 	if normalize {
 		Normalize(&cfg)
 	}
-	return &cfg, nil
+	return &cfg, migrated, nil
+}
+
+// Migrate updates cfg in place from older settings.json formats to the current
+// in-memory representation. Future versions are rejected so older binaries do
+// not accidentally rewrite configs they cannot understand.
+func Migrate(cfg *RootConfig) (bool, error) {
+	if cfg == nil {
+		return false, nil
+	}
+	if cfg.Version > CurrentVersion || cfg.Version < 0 {
+		return false, unsupportedVersionError(cfg.Version)
+	}
+	migrated := false
+	for cfg.Version < CurrentVersion {
+		step, ok := configMigrationFrom(cfg.Version)
+		if !ok {
+			return false, missingMigrationError(cfg.Version)
+		}
+		from := cfg.Version
+		if step.apply == nil {
+			return false, fmt.Errorf("config migration from version %d to %d has no typed migration", step.from, step.to)
+		}
+		if err := step.apply(cfg); err != nil {
+			return false, fmt.Errorf("migrating config from version %d to %d: %w", step.from, step.to, err)
+		}
+		if cfg.Version != step.to {
+			return false, fmt.Errorf("config migration from version %d to %d set version %d", step.from, step.to, cfg.Version)
+		}
+		if cfg.Version <= from {
+			return false, fmt.Errorf("config migration from version %d to %d did not advance version", step.from, step.to)
+		}
+		migrated = true
+	}
+	return migrated, nil
+}
+
+func unsupportedVersionError(version int) error {
+	if version > CurrentVersion {
+		return fmt.Errorf("config version %d is newer than supported version %d", version, CurrentVersion)
+	}
+	return fmt.Errorf("config version %d is not supported; supported version is %d", version, CurrentVersion)
+}
+
+func missingMigrationError(version int) error {
+	return fmt.Errorf("missing config migration from version %d to %d", version, version+1)
+}
+
+type configMigration struct {
+	from     int
+	to       int
+	apply    func(*RootConfig) error
+	applyRaw func(map[string]json.RawMessage) error
+}
+
+var configMigrations = []configMigration{
+	{from: 0, to: 1, apply: migrateConfigV0ToV1, applyRaw: migrateRawConfigV0ToV1},
+}
+
+func configMigrationFrom(version int) (configMigration, bool) {
+	for _, step := range configMigrations {
+		if step.from == version {
+			return step, true
+		}
+	}
+	return configMigration{}, false
+}
+
+func migrateConfigV0ToV1(cfg *RootConfig) error {
+	cfg.Version = 1
+	return nil
+}
+
+func migrateRawConfigV0ToV1(raw map[string]json.RawMessage) error {
+	raw["version"] = json.RawMessage(`1`)
+	return nil
 }
 
 // Normalize sorts order-insensitive config collections in place.
@@ -202,21 +290,23 @@ func Normalize(cfg *RootConfig) bool {
 // NormalizeFile normalizes the persisted config when it exists.
 // Unknown top-level keys are preserved.
 func NormalizeFile(path string) (bool, error) {
-	cfg, err := load(path, false)
+	cfg, migrated, err := load(path, false)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return false, nil
 		}
 		return false, err
 	}
-	if !Normalize(cfg) {
+	normalized := Normalize(cfg)
+	if !migrated && !normalized {
 		return false, nil
 	}
 	type orderPatch struct {
-		Hosts  map[string][]string `json:"hosts,omitempty"`
-		Groups []*GroupConfig      `json:"groups,omitempty"`
+		Version int                 `json:"version"`
+		Hosts   map[string][]string `json:"hosts,omitempty"`
+		Groups  []*GroupConfig      `json:"groups,omitempty"`
 	}
-	if err := Patch(path, orderPatch{Hosts: cfg.Hosts, Groups: cfg.Groups}); err != nil {
+	if err := Patch(path, orderPatch{Version: cfg.Version, Hosts: cfg.Hosts, Groups: cfg.Groups}); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -277,6 +367,9 @@ func PatchRaw(path string, patch map[string]json.RawMessage) error {
 		if err := json.Unmarshal(data, &raw); err != nil {
 			return fmt.Errorf("parsing existing config: %w", err)
 		}
+		if err := migrateRawVersion(raw); err != nil {
+			return err
+		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("reading config file: %w", err)
 	}
@@ -289,6 +382,11 @@ func PatchRaw(path string, patch map[string]json.RawMessage) error {
 		raw[k] = v
 	}
 	delete(raw, "$schema")
+	if err := migrateRawVersion(raw); err != nil {
+		return err
+	}
+	versionRaw := raw["version"]
+	delete(raw, "version")
 
 	keys := make([]string, 0, len(raw))
 	for k := range raw {
@@ -300,6 +398,8 @@ func PatchRaw(path string, patch map[string]json.RawMessage) error {
 	buf.WriteString("{\n  \"$schema\": \"")
 	buf.WriteString(SchemaURL)
 	buf.WriteString("\"")
+	buf.WriteString(",\n  \"version\": ")
+	buf.Write(versionRaw)
 	for _, k := range keys {
 		buf.WriteString(",\n  ")
 		kJSON, _ := json.Marshal(k)
@@ -316,6 +416,55 @@ func PatchRaw(path string, patch map[string]json.RawMessage) error {
 	return atomicWrite(path, buf.Bytes())
 }
 
+func migrateRawVersion(raw map[string]json.RawMessage) error {
+	if raw == nil {
+		return nil
+	}
+	version, err := rawConfigVersion(raw)
+	if err != nil {
+		return err
+	}
+	if version > CurrentVersion || version < 0 {
+		return unsupportedVersionError(version)
+	}
+	for version < CurrentVersion {
+		step, ok := configMigrationFrom(version)
+		if !ok {
+			return missingMigrationError(version)
+		}
+		if step.applyRaw == nil {
+			return fmt.Errorf("config migration from version %d to %d has no raw migration", step.from, step.to)
+		}
+		if err := step.applyRaw(raw); err != nil {
+			return fmt.Errorf("migrating raw config from version %d to %d: %w", step.from, step.to, err)
+		}
+		nextVersion, err := rawConfigVersion(raw)
+		if err != nil {
+			return err
+		}
+		if nextVersion != step.to {
+			return fmt.Errorf("raw config migration from version %d to %d set version %d", step.from, step.to, nextVersion)
+		}
+		if nextVersion <= version {
+			return fmt.Errorf("raw config migration from version %d to %d did not advance version", step.from, step.to)
+		}
+		version = nextVersion
+	}
+	return nil
+}
+
+func rawConfigVersion(raw map[string]json.RawMessage) (int, error) {
+	versionRaw, ok := raw["version"]
+	if !ok || isJSONNull(versionRaw) {
+		return 0, nil
+	}
+	var version int
+	if err := json.Unmarshal(versionRaw, &version); err != nil {
+		return 0, fmt.Errorf("parsing config version: %w", err)
+	}
+	return version, nil
+}
+
 func isJSONNull(v json.RawMessage) bool {
 	trimmed := bytes.TrimSpace(v)
 	return len(trimmed) == 4 && string(trimmed) == "null"
@@ -328,6 +477,9 @@ func isJSONNull(v json.RawMessage) bool {
 func Save(path string, cfg *RootConfig) error {
 	// Stamp schema URL without mutating the caller's struct.
 	stamped := normalizedCopy(cfg)
+	if _, err := Migrate(&stamped); err != nil {
+		return err
+	}
 	stamped.Schema = SchemaURL
 	data, err := json.MarshalIndent(stamped, "", "  ")
 	if err != nil {
@@ -339,7 +491,7 @@ func Save(path string, cfg *RootConfig) error {
 
 func normalizedCopy(cfg *RootConfig) RootConfig {
 	if cfg == nil {
-		return RootConfig{}
+		return RootConfig{Version: CurrentVersion}
 	}
 	out := *cfg
 	out.Settings = cloneSettings(cfg.Settings)
@@ -354,6 +506,13 @@ func normalizedCopy(cfg *RootConfig) RootConfig {
 		gc.Tools = append([]ToolEntry(nil), g.Tools...)
 		gc.Dots = append([]DotEntry(nil), g.Dots...)
 		for i := range gc.Dots {
+			if gc.Dots[i].Hosts != nil {
+				hosts := make(map[string]DotVariant, len(gc.Dots[i].Hosts))
+				for host, variant := range gc.Dots[i].Hosts {
+					hosts[host] = variant
+				}
+				gc.Dots[i].Hosts = hosts
+			}
 			gc.Dots[i].Ignore = append([]string(nil), gc.Dots[i].Ignore...)
 		}
 		out.Groups = append(out.Groups, &gc)

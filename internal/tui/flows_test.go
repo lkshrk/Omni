@@ -1588,6 +1588,7 @@ func TestFlow_DotsDisabledBlocksMutatingKeys(t *testing.T) {
 		{name: "group", msg: pressRune('g')},
 		{name: "use repo", msg: pressRune('u')},
 		{name: "use local", msg: pressRune('l')},
+		{name: "variant", msg: pressRune('v')},
 		{name: "delete", msg: pressRune('d')},
 		{name: "ignore", msg: pressRune('x')},
 	} {
@@ -1602,7 +1603,7 @@ func TestFlow_DotsDisabledBlocksMutatingKeys(t *testing.T) {
 			if got.filePickerForDotAdd {
 				t.Fatalf("file picker opened for disabled dots key %q", tc.name)
 			}
-			if got.dotsConfirmIdx != -1 || got.dotsOverwriteIdx != -1 || got.dotsLocalIdx != -1 || got.dotsIgnoreIdx != -1 {
+			if got.dotsConfirmIdx != -1 || got.dotsOverwriteIdx != -1 || got.dotsLocalIdx != -1 || got.dotsIgnoreIdx != -1 || got.dotsVariantIdx != -1 {
 				t.Fatalf("confirmation armed for disabled dots key %q", tc.name)
 			}
 		})
@@ -1622,13 +1623,13 @@ func TestRender_DotsDisabledHidesMutatingHints(t *testing.T) {
 		}
 	}
 	rowHints := renderContextHints(m, hintCtxDotsConflict, "")
-	for _, blocked := range []string{"use repo", "use local", "delete", "ignore", "edit groups"} {
+	for _, blocked := range []string{"use repo", "use local", "variant", "delete", "ignore", "edit groups"} {
 		if strings.Contains(rowHints, blocked) {
 			t.Fatalf("disabled dots row hints include %q: %q", blocked, rowHints)
 		}
 	}
 	help := renderHelpPopup(m)
-	for _, blocked := range []string{"discover", "sync all", "delete", "ignore", "use repo", "use local"} {
+	for _, blocked := range []string{"discover", "sync all", "variant", "delete", "ignore", "use repo", "use local"} {
 		if strings.Contains(help, blocked) {
 			t.Fatalf("disabled dots help includes %q: %q", blocked, help)
 		}

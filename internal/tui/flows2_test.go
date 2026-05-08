@@ -2262,6 +2262,8 @@ func TestFlow2_UC141_DotsEscClearsBothIndicesSimultaneously(t *testing.T) {
 	m.dotsConfirmIdx = 0
 	m.dotsOverwriteIdx = 0
 	m.dotsLocalIdx = 0
+	m.dotsVariantIdx = 0
+	m.dotsVariantMode = dotsVariantCreate
 
 	got := drive(m, pressEsc())
 	if got.dotsConfirmIdx != -1 {
@@ -2272,6 +2274,9 @@ func TestFlow2_UC141_DotsEscClearsBothIndicesSimultaneously(t *testing.T) {
 	}
 	if got.dotsLocalIdx != -1 {
 		t.Errorf("dotsLocalIdx = %d, want -1 after Esc with all indices armed", got.dotsLocalIdx)
+	}
+	if got.dotsVariantIdx != -1 || got.dotsVariantMode != dotsVariantNone {
+		t.Errorf("variant prompt = idx:%d mode:%v, want cleared after Esc", got.dotsVariantIdx, got.dotsVariantMode)
 	}
 }
 

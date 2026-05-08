@@ -88,7 +88,21 @@ const (
 	stowInstallEnableDots
 	stowInstallSaveSettingsSync
 	stowInstallSetupDotsRepo
+	stowInstallDotVariant
 )
+
+type dotsVariantMode int
+
+const (
+	dotsVariantNone dotsVariantMode = iota
+	dotsVariantCreate
+	dotsVariantRemove
+)
+
+type dotsVariantRequest struct {
+	name   string
+	remove bool
+}
 
 type groupToolSection int
 
@@ -354,16 +368,20 @@ type Model struct {
 	dotsExpandedChildren map[string]bool
 	dotsLoading          bool
 	dotsLoaded           bool // true after first lazy load
+	dotsPreparing        bool // true while the non-mutating launch snapshot is in flight
+	dotsPrepareGen       int  // increments for each launch snapshot; stale results are dropped
 	dotsOpGen            int  // increments for each async dots operation; stale results are dropped
 	dotsCtx              context.Context
 	dotsCancel           context.CancelFunc
 	dotsProgressCh       chan dotsProgressUpdate
 	dotsPendingNames     map[string]bool
 	dotsActiveName       string
-	dotsConfirmIdx       int  // index of entry pending delete confirm; -1 = none
-	dotsOverwriteIdx     int  // index of conflict entry pending use-repo confirm; -1 = none
-	dotsLocalIdx         int  // index of conflict entry pending use-local confirm; -1 = none
-	dotsIgnoreIdx        int  // index of child path pending ignore/include confirm; -1 = none
+	dotsConfirmIdx       int // index of entry pending delete confirm; -1 = none
+	dotsOverwriteIdx     int // index of conflict entry pending use-repo confirm; -1 = none
+	dotsLocalIdx         int // index of conflict entry pending use-local confirm; -1 = none
+	dotsIgnoreIdx        int // index of child path pending ignore/include confirm; -1 = none
+	dotsVariantIdx       int // index of entry pending host variant choice/removal; -1 = none
+	dotsVariantMode      dotsVariantMode
 	dotsSearchActive     bool // true when dots search bar is open
 	filePickerForDotAdd  bool // true when file picker opened for "add path" on dots tab
 	stowInstalled        bool
@@ -371,6 +389,7 @@ type Model struct {
 	stowInstallAction    stowInstallAction
 	stowInstallSettings  config.Settings
 	stowInstallPath      string
+	stowInstallVariant   dotsVariantRequest
 
 	// danger zone (settings tab)
 	dangerConfirmRow int // settings row awaiting inline confirmation; -1 = none
@@ -526,6 +545,7 @@ func New(a *app.App, ctx context.Context) Model {
 		dotsOverwriteIdx: -1,
 		dotsLocalIdx:     -1,
 		dotsIgnoreIdx:    -1,
+		dotsVariantIdx:   -1,
 		dangerConfirmRow: -1,
 		isDark:           true,             // assume dark until terminal replies
 		focused:          true,             // assume focused until a BlurMsg says otherwise
@@ -545,6 +565,7 @@ func (m *Model) shutdown() {
 	}
 	m.loading = false
 	m.dotsLoading = false
+	m.dotsPreparing = false
 	m.clearDotsProgressState()
 	m.searching = false
 	m.scanningProviders = nil

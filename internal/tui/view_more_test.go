@@ -2773,7 +2773,7 @@ func TestRenderStatusBar_RowConfirmHidesFooterHints(t *testing.T) {
 	m.mode = viewDots
 	m.dotsConfirmIdx = 0
 	out = renderStatusBar(m)
-	for _, unwanted := range []string{"sync all", "pull", "add", "search"} {
+	for _, unwanted := range []string{"sync all", "pull", "add", "variant", "search"} {
 		if strings.Contains(out, unwanted) {
 			t.Fatalf("dots row confirmation should hide footer hints; found %q in %q", unwanted, out)
 		}
@@ -2820,6 +2820,28 @@ func TestActiveConfirmationsUseSingleHelpHint(t *testing.T) {
 				return m
 			}(),
 			want: "yes",
+		},
+		{
+			name: "dots variant create",
+			m: func() Model {
+				m := baseModel(nil)
+				m.mode = viewDots
+				m.dotsVariantIdx = 0
+				m.dotsVariantMode = dotsVariantCreate
+				return m
+			}(),
+			want: "again to create variant",
+		},
+		{
+			name: "dots variant remove",
+			m: func() Model {
+				m := baseModel(nil)
+				m.mode = viewDots
+				m.dotsVariantIdx = 0
+				m.dotsVariantMode = dotsVariantRemove
+				return m
+			}(),
+			want: "again to remove variant",
 		},
 		{
 			name: "settings danger",
@@ -3195,14 +3217,17 @@ func TestRenderHelpPopup_TabSpecificActionsAndLegend(t *testing.T) {
 		mode viewMode
 		want []string
 	}{
-		{"dots", viewDots, []string{"discover", "conflict", "no source"}},
+		{"dots", viewDots, []string{"discover", "conflict", "no source", "host variant", "child"}},
 		{"settings", viewSettings, []string{"change toggle or option", "[ON]", "[OFF]"}},
-		{"hosts", viewGroups, []string{"new group", "current host"}},
+		{"hosts", viewGroups, []string{"new group", "(local)", "[x]", "[ ]", "may need sudo"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			m := baseModel(nil)
 			m.mode = tc.mode
+			if tc.mode == viewDots {
+				m.settings.DotsRepo = "/repo/dotfiles"
+			}
 			out := renderHelpPopup(m)
 			for _, want := range tc.want {
 				if !strings.Contains(out, want) {
@@ -3210,6 +3235,18 @@ func TestRenderHelpPopup_TabSpecificActionsAndLegend(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRenderHelpPopup_DotsLegendOmitsTreeKindIcons(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.settings.DotsRepo = "/repo/dotfiles"
+	out := renderHelpPopup(m)
+	for _, unwanted := range []string{dotKindFolderCollapsedIcon, dotKindFolderExpandedIcon, dotKindFolderEmptyIcon} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("dots help legend should not include tree kind icon %q:\n%s", unwanted, out)
+		}
 	}
 }
 
@@ -3914,6 +3951,26 @@ func TestRenderDotsRow_UsesCompactSpacing(t *testing.T) {
 	}
 	if got, want := targetCol-nameCol-lipgloss.Width(displayName), dotsGapW; got != want {
 		t.Fatalf("name-to-target gap = %d, want %d in row: %q", got, want, row)
+	}
+}
+
+func TestRenderDotsRow_ShowsVariantMarker(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.settings.DotsRepo = "/repo"
+	m.width = 100
+	m.dotsLoaded = true
+	m.dotsEntries = []app.DotStatus{
+		{Name: "nvim", Package: "nvim@laptop", Variant: true, TargetPath: "~/.config/nvim", State: app.DotStateSynced},
+		{Name: "zshrc", Package: "zshrc", TargetPath: "~/.zshrc", State: app.DotStateSynced},
+	}
+
+	out := renderDots(m)
+	if !strings.Contains(out, "nvim "+dotVariantIcon) {
+		t.Fatalf("variant row should include marker %q, got:\n%s", dotVariantIcon, out)
+	}
+	if strings.Contains(out, "zshrc "+dotVariantIcon) {
+		t.Fatalf("default row should not include variant marker, got:\n%s", out)
 	}
 }
 

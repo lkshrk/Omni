@@ -449,6 +449,7 @@ func (a *App) withConfig(fn func(*config.RootConfig) error) error {
 func topLevelKeys(cfg *config.RootConfig) (map[string]json.RawMessage, error) {
 	type rootConfigPatchDoc struct {
 		Schema       string                       `json:"$schema,omitempty"`
+		Version      int                          `json:"version"`
 		Settings     config.Settings              `json:"settings"`
 		Tools        map[string]config.ToolSpec   `json:"tools,omitempty"`
 		Hosts        map[string][]string          `json:"hosts,omitempty"`
@@ -458,6 +459,7 @@ func topLevelKeys(cfg *config.RootConfig) (map[string]json.RawMessage, error) {
 	}
 	data, err := json.Marshal(rootConfigPatchDoc{
 		Schema:       cfg.Schema,
+		Version:      cfg.Version,
 		Settings:     cfg.Settings,
 		Tools:        cfg.Tools,
 		Hosts:        cfg.Hosts,

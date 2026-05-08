@@ -58,6 +58,7 @@ type KeyMap struct {
 	DotPull     key.Binding // p — git pull + resync (command palette only)
 	DotDelete   key.Binding // d — delete dots entry (confirm required)
 	DotAdd      key.Binding // a — adopt a new path into the dots repo
+	DotVariant  key.Binding // v — create/remove host-specific package variant
 	DotIgnore   key.Binding // x — add an ignore pattern for the selected entry
 	DotUseRepo  key.Binding // u — resolve conflict with repo version
 	DotUseLocal key.Binding // l — resolve conflict with local version
@@ -234,6 +235,10 @@ func DefaultKeyMap() KeyMap {
 		DotAdd: key.NewBinding(
 			key.WithKeys("a"),
 			key.WithHelp("a", actions.MustTUILabel(actions.DotsAdd)),
+		),
+		DotVariant: key.NewBinding(
+			key.WithKeys("v"),
+			key.WithHelp("v", actions.MustTUILabel(actions.DotsVariant)),
 		),
 		DotIgnore: key.NewBinding(
 			key.WithKeys("x"),

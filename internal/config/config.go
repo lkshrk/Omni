@@ -4,8 +4,13 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 )
+
+// CurrentVersion is the latest settings.json format version understood by omni.
+// Version 0 is the legacy unversioned format.
+const CurrentVersion = 1
 
 // ToolEntry is the resolved execution form for a logical tool.
 //
@@ -184,18 +189,48 @@ type DotsGitConfig struct {
 	AutoPush bool `json:"auto_push,omitempty"`
 }
 
+// DotVariant selects a host-specific stow package for a logical dot entry.
+type DotVariant struct {
+	// Package is the stow package directory for this host variant. When empty,
+	// the dot entry's default package is used.
+	Package string `json:"package,omitempty"`
+}
+
 // DotEntry is one [[dots]] entry declaring a config file/dir to be managed.
 type DotEntry struct {
-	// Name is the stow package name — must match the package subdirectory in the
-	// dots repo (e.g. "nvim" for ~/dotfiles/nvim/).
+	// Name is the logical dotfile identity used for groups, ignore rules, and UI
+	// rows. It is also the default stow package name when Package is empty.
 	Name string `json:"name"`
 	// Path is the original filesystem location being managed (e.g. "~/.config/nvim").
 	// Used for display, health checks, and onboarding adoption.
 	Path string `json:"path,omitempty"`
+	// Package is the default stow package directory. Empty means Name.
+	Package string `json:"package,omitempty"`
+	// Hosts maps short hostnames to host-specific package variants.
+	Hosts map[string]DotVariant `json:"hosts,omitempty"`
 	// Ignored keeps the entry visible while preventing sync/discovery from managing it.
 	Ignored bool `json:"ignored,omitempty"`
 	// Ignore holds glob patterns for files to skip within this entry.
 	Ignore []string `json:"ignore,omitempty"`
+}
+
+// EffectivePackage returns the default stow package directory for this dot.
+func (e DotEntry) EffectivePackage() string {
+	if strings.TrimSpace(e.Package) != "" {
+		return e.Package
+	}
+	return e.Name
+}
+
+// PackageForHost returns the stow package directory for host, falling back to
+// the default package. Host names are matched exactly; callers own normalization.
+func (e DotEntry) PackageForHost(host string) string {
+	if strings.TrimSpace(host) != "" && e.Hosts != nil {
+		if variant, ok := e.Hosts[host]; ok && strings.TrimSpace(variant.Package) != "" {
+			return variant.Package
+		}
+	}
+	return e.EffectivePackage()
 }
 
 // GlobalIgnore lists tools and dotfiles skipped across all hosts.
@@ -239,7 +274,10 @@ func (g *GroupConfig) BaseName() string {
 type RootConfig struct {
 	// Schema holds the "$schema" URI injected on every write for editor support.
 	// It is read back on load but never acted on by the application.
-	Schema   string              `json:"$schema,omitempty"`
+	Schema string `json:"$schema,omitempty"`
+	// Version identifies the settings.json format. Missing/zero is treated as the
+	// legacy unversioned format and migrated to CurrentVersion on load.
+	Version  int                 `json:"version"`
 	Settings Settings            `json:"settings"`
 	Tools    map[string]ToolSpec `json:"tools,omitempty"`
 	Hosts    map[string][]string `json:"hosts,omitempty"`
@@ -408,6 +446,7 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 	groupByName := make(map[string]*GroupConfig, len(cfg.Groups))
 	memberships := make(map[string]*GroupConfig)
 	dotMemberships := make(map[string]*GroupConfig)
+	dotPackages := make(map[string]string)
 	for gi, g := range cfg.Groups {
 		if g == nil {
 			errs = append(errs, ValidationError{Path: fmt.Sprintf("$.groups[%d]", gi), Message: "group must not be null"})
@@ -455,6 +494,28 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 			if strings.TrimSpace(dot.Name) == "" {
 				errs = append(errs, ValidationError{Path: path, Message: "dotfile name is required"})
 				continue
+			}
+			if err := validateDotPackageName(dot.Name); err != nil {
+				errs = append(errs, ValidationError{Path: path + ".name", Message: err.Error()})
+			}
+			defaultPackage := dot.EffectivePackage()
+			if strings.TrimSpace(dot.Package) != "" {
+				if err := validateDotPackageName(dot.Package); err != nil {
+					errs = append(errs, ValidationError{Path: path + ".package", Message: err.Error()})
+				}
+			}
+			errs = recordDotPackageUsage(errs, dotPackages, path+".package", defaultPackage, dot.Name)
+			for host, variant := range dot.Hosts {
+				hostPath := fmt.Sprintf("%s.hosts.%q", path, host)
+				if strings.TrimSpace(host) == "" {
+					errs = append(errs, ValidationError{Path: path + ".hosts", Message: "host name is required"})
+				}
+				if strings.TrimSpace(variant.Package) != "" {
+					if err := validateDotPackageName(variant.Package); err != nil {
+						errs = append(errs, ValidationError{Path: hostPath + ".package", Message: err.Error()})
+					}
+				}
+				errs = recordDotPackageUsage(errs, dotPackages, hostPath+".package", dot.PackageForHost(host), dot.Name)
 			}
 			if _, dup := seenDots[dot.Name]; dup {
 				errs = append(errs, ValidationError{Path: path, Message: fmt.Sprintf("duplicate dotfile membership %q in group %q", dot.Name, groupName)})
@@ -504,6 +565,34 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 			errs = append(errs, ValidationError{Path: fmt.Sprintf("$.ignore.dots[%d]", i), Message: "dotfile name is required"})
 		}
 	}
+	return errs
+}
+
+func validateDotPackageName(name string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("package name is required")
+	}
+	if filepath.IsAbs(name) || name == "." || name == ".." || filepath.Clean(name) != name {
+		return fmt.Errorf("invalid package name %q", name)
+	}
+	if strings.Contains(name, "/") || strings.Contains(name, "\\") {
+		return fmt.Errorf("invalid package name %q: path separators are not allowed", name)
+	}
+	return nil
+}
+
+func recordDotPackageUsage(errs []ValidationError, packages map[string]string, path, pkg, logicalName string) []ValidationError {
+	if strings.TrimSpace(pkg) == "" {
+		return append(errs, ValidationError{Path: path, Message: "package name is required"})
+	}
+	key := strings.ToLower(pkg)
+	if owner, ok := packages[key]; ok && owner != logicalName {
+		return append(errs, ValidationError{
+			Path:    path,
+			Message: fmt.Sprintf("package %q is already used by dotfile %q", pkg, owner),
+		})
+	}
+	packages[key] = logicalName
 	return errs
 }
 

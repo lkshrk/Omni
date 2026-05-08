@@ -54,7 +54,7 @@ dev-bootstrap:
 install:
 	go install -ldflags "$(LDFLAGS)" $(CMD_PATH)
 
-## gen-schema: regenerate spec/omni.settings.schema.json from config types
+## gen-schema: regenerate versioned/current settings JSON schemas from config types
 gen-schema:
 	go run ./scripts/gen-schema
 

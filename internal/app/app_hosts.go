@@ -161,6 +161,26 @@ func moveHostScopedConfig(cfg *config.RootConfig, oldName, newName string) error
 		delete(spec.Hosts, oldName)
 		cfg.Tools[name] = spec
 	}
+	for _, group := range cfg.Groups {
+		if group == nil {
+			continue
+		}
+		for i, dot := range group.Dots {
+			if dot.Hosts == nil {
+				continue
+			}
+			variant, ok := dot.Hosts[oldName]
+			if !ok {
+				continue
+			}
+			if _, exists := dot.Hosts[newName]; exists {
+				return fmt.Errorf("dotfile %q already has host variant for %q", dot.Name, newName)
+			}
+			dot.Hosts[newName] = variant
+			delete(dot.Hosts, oldName)
+			group.Dots[i] = dot
+		}
+	}
 	return nil
 }
 
@@ -175,6 +195,21 @@ func removeHostScopedConfig(cfg *config.RootConfig, hostname string) {
 			spec.Hosts = nil
 		}
 		cfg.Tools[name] = spec
+	}
+	for _, group := range cfg.Groups {
+		if group == nil {
+			continue
+		}
+		for i, dot := range group.Dots {
+			if dot.Hosts == nil {
+				continue
+			}
+			delete(dot.Hosts, hostname)
+			if len(dot.Hosts) == 0 {
+				dot.Hosts = nil
+			}
+			group.Dots[i] = dot
+		}
 	}
 }
 

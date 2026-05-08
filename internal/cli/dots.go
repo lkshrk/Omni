@@ -29,6 +29,7 @@ Set the repo path via 'omni ui' (Dots tab) or settings.dots_repo in settings.jso
 		newDotsDiscoverCmd(state),
 		newDotsAddCmd(state),
 		newDotsGroupsCmd(state),
+		newDotsVariantCmd(state),
 		newDotsDeleteCmd(state),
 		newDotsResolveCmd(state),
 		newDotsIgnoreCmd(state),
@@ -188,6 +189,127 @@ func newDotsAddCmd(state *rootState) *cobra.Command {
 	cmd.Flags().BoolVar(&adopt, "adopt", false, "Move the existing path into the dots repo")
 	cmd.Flags().StringSliceVar(&ignore, "ignore", nil, "Patterns to ignore within this entry")
 	cmd.Flags().BoolVar(&discovered, "discovered", false, "Add a discovered candidate to config without adopting files")
+	return cmd
+}
+
+// ─── dots variant ────────────────────────────────────────────────────────────
+
+func newDotsVariantCmd(state *rootState) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "variant",
+		Short: "Manage host-specific dots package variants",
+	}
+	cmd.AddCommand(
+		newDotsVariantListCmd(state),
+		newDotsVariantAddCmd(state),
+		newDotsVariantRemoveCmd(state),
+	)
+	return cmd
+}
+
+func newDotsVariantListCmd(state *rootState) *cobra.Command {
+	var format string
+	cmd := &cobra.Command{
+		Use:   "list <name>",
+		Short: "List package variants for a dots entry",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireDotsConfigured(state); err != nil {
+				return err
+			}
+			variants, err := state.app.DotsListVariants(args[0])
+			if err != nil {
+				return err
+			}
+			if format == "json" {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(variants)
+			}
+			if err := validateFormat(format, "table", "json"); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%-18s  %-24s  %s\n", "HOST", "PACKAGE", "ACTIVE")
+			fmt.Fprintln(cmd.OutOrStdout(), strings.Repeat("─", 54))
+			for _, variant := range variants {
+				host := variant.Host
+				if variant.Default {
+					host = "(default)"
+				}
+				active := ""
+				if variant.Active {
+					active = "yes"
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "%-18s  %-24s  %s\n", host, variant.Package, active)
+			}
+			return nil
+		},
+	}
+	addFormatFlag(cmd, &format, "table", "table", "json")
+	return cmd
+}
+
+func newDotsVariantAddCmd(state *rootState) *cobra.Command {
+	var host string
+	var pkgName string
+	var sync bool
+	cmd := &cobra.Command{
+		Use:   "add <name>",
+		Short: "Add a host-specific package variant for a dots entry",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireDotsConfigured(state); err != nil {
+				return err
+			}
+			if sync {
+				if err := ensureDotsStowForCLI(cmd, state); err != nil {
+					return err
+				}
+			}
+			info, ops, err := state.app.DotsAddHostVariant(cmd.Context(), args[0], app.DotsAddVariantOptions{
+				Host:    host,
+				Package: pkgName,
+				Sync:    sync,
+			})
+			if sync || len(ops) > 0 {
+				printDotOps(cmd, ops, false)
+			}
+			if err != nil {
+				return err
+			}
+			if info.Host != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "added dots variant %q for host %q using package %q\n", info.Name, info.Host, info.Package)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&host, "host", "", "Host for the variant (default: current host)")
+	cmd.Flags().StringVar(&pkgName, "package", "", "Stow package directory (default: <name>@<host>)")
+	cmd.Flags().BoolVar(&sync, "sync", false, "Sync immediately when the variant belongs to this host")
+	return cmd
+}
+
+func newDotsVariantRemoveCmd(state *rootState) *cobra.Command {
+	var host string
+	cmd := &cobra.Command{
+		Use:   "remove <name>",
+		Short: "Remove a host-specific package variant",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireDotsConfigured(state); err != nil {
+				return err
+			}
+			ok, err := confirmAction(cmd, state, fmt.Sprintf("Remove dots variant %q and its unused repo package?", args[0]))
+			if err != nil || !ok {
+				return err
+			}
+			info, err := state.app.DotsRemoveHostVariant(cmd.Context(), args[0], app.DotsRemoveVariantOptions{Host: host})
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "removed dots variant %q for host %q using package %q\n", info.Name, info.Host, info.Package)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&host, "host", "", "Host for the variant (default: current host)")
 	return cmd
 }
 

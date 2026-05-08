@@ -41,6 +41,7 @@ func baseModel(tools []*database.ToolCache) Model {
 		dotsOverwriteIdx: -1,
 		dotsLocalIdx:     -1,
 		dotsIgnoreIdx:    -1,
+		dotsVariantIdx:   -1,
 		dangerConfirmRow: -1,
 		width:            120,
 		height:           80, // realistic terminal size so scroll window doesn't clip test output
@@ -2585,6 +2586,58 @@ func dotsModel() Model {
 	return m
 }
 
+func dotsVariantFlowModel(t *testing.T, withVariant bool) Model {
+	t.Helper()
+	t.Setenv("OMNI_HOSTNAME", "laptop.local")
+	cfgDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	repoDir := t.TempDir()
+	entry := config.DotEntry{Name: "nvim", Path: "~/.config/nvim"}
+	pkg := "nvim"
+	if withVariant {
+		pkg = "nvim@laptop"
+		entry.Hosts = map[string]config.DotVariant{
+			"laptop": {Package: pkg},
+		}
+	}
+	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{DotsRepo: repoDir},
+		Groups: []*config.GroupConfig{{
+			Name:    "laptop",
+			Special: "host",
+			Dots:    []config.DotEntry{entry},
+		}},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	a := app.New(cfgPath)
+	a.CacheDir = cfgDir
+	if err := a.InitTestMode(context.Background()); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	m := baseModel(nil)
+	m.app = a
+	m.ctx = context.Background()
+	m.mode = viewDots
+	m.dotsLoaded = true
+	m.stowInstalled = true
+	m.settings = config.Settings{DotsRepo: repoDir}
+	m.dotMemberships = map[string][]string{"nvim": {"laptop"}}
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "nvim",
+		Package:    pkg,
+		SourcePath: filepath.Join(repoDir, "dotfiles", pkg, ".config", "nvim"),
+		TargetPath: "~/.config/nvim",
+		Health:     app.HealthOK,
+		State:      app.DotStateSynced,
+		Actions:    []app.DotAction{app.DotActionRemove, app.DotActionIgnore},
+		Group:      "laptop",
+	}}
+	return m
+}
+
 func TestModel_DotsSyncAllMarksRowsPending(t *testing.T) {
 	got := drive(dotsModel(), pressRune('S'))
 	if !got.dotsLoading {
@@ -2740,6 +2793,58 @@ func TestModel_DotsTab_ConfirmDelete(t *testing.T) {
 	})
 }
 
+func TestModel_DotsTab_HostVariantFlow(t *testing.T) {
+	t.Run("v opens create confirmation when host has no variant", func(t *testing.T) {
+		m := drive(dotsVariantFlowModel(t, false), pressRune('v'))
+		if m.dotsVariantIdx != 0 {
+			t.Fatalf("dotsVariantIdx = %d, want 0", m.dotsVariantIdx)
+		}
+		if m.dotsVariantMode != dotsVariantCreate {
+			t.Fatalf("dotsVariantMode = %v, want create", m.dotsVariantMode)
+		}
+	})
+
+	t.Run("second v starts create operation", func(t *testing.T) {
+		m := drive(dotsVariantFlowModel(t, false), pressRune('v'), pressRune('v'))
+		if !m.dotsLoading {
+			t.Fatal("dotsLoading should start after confirming variant creation")
+		}
+		if m.dotsVariantIdx != -1 || m.dotsVariantMode != dotsVariantNone {
+			t.Fatalf("variant prompt = idx:%d mode:%v, want cleared", m.dotsVariantIdx, m.dotsVariantMode)
+		}
+		if !strings.Contains(m.statusMsg, "Creating variant for nvim") {
+			t.Fatalf("statusMsg = %q, want create variant status", m.statusMsg)
+		}
+	})
+
+	t.Run("v opens remove confirmation when host variant is active", func(t *testing.T) {
+		m := drive(dotsVariantFlowModel(t, true), pressRune('v'))
+		if m.dotsVariantIdx != 0 {
+			t.Fatalf("dotsVariantIdx = %d, want 0", m.dotsVariantIdx)
+		}
+		if m.dotsVariantMode != dotsVariantRemove {
+			t.Fatalf("dotsVariantMode = %v, want remove", m.dotsVariantMode)
+		}
+	})
+
+	t.Run("second v starts remove operation", func(t *testing.T) {
+		m := drive(dotsVariantFlowModel(t, true), pressRune('v'), pressRune('v'))
+		if !m.dotsLoading {
+			t.Fatal("dotsLoading should start after confirming variant removal")
+		}
+		if !strings.Contains(m.statusMsg, "Removing variant for nvim") {
+			t.Fatalf("statusMsg = %q, want remove variant status", m.statusMsg)
+		}
+	})
+
+	t.Run("esc cancels variant prompt", func(t *testing.T) {
+		m := drive(dotsVariantFlowModel(t, false), pressRune('v'), pressEsc())
+		if m.dotsVariantIdx != -1 || m.dotsVariantMode != dotsVariantNone {
+			t.Fatalf("variant prompt = idx:%d mode:%v, want cleared", m.dotsVariantIdx, m.dotsVariantMode)
+		}
+	})
+}
+
 func TestModel_DotsTab_Messages(t *testing.T) {
 	t.Run("dotsLoadedMsg sets entries", func(t *testing.T) {
 		entries := []app.DotStatus{{Name: "nvim", Health: app.HealthOK}}
@@ -2759,6 +2864,42 @@ func TestModel_DotsTab_Messages(t *testing.T) {
 		m := drive(baseModel(nil), dotsLoadedMsg{err: errors.New("no repo")})
 		if m.statusMsg == "" {
 			t.Error("expected statusMsg to be set on error")
+		}
+	})
+
+	t.Run("dotsPreparedMsg populates list without clearing active sync", func(t *testing.T) {
+		m := baseModel(nil)
+		m.dotsPreparing = true
+		m.dotsPrepareGen = 1
+		m.beginDotsOperation("Syncing dots…")
+		entries := []app.DotStatus{{Name: "nvim", Health: app.HealthOK}}
+
+		got := drive(m, dotsPreparedMsg{gen: 1, entries: entries, gitStatus: "M  nvim/init.lua"})
+		if got.dotsPreparing {
+			t.Fatal("dotsPreparing should clear after snapshot")
+		}
+		if !got.dotsLoading {
+			t.Fatal("dots snapshot must not clear the active sync")
+		}
+		if !got.dotsLoaded || len(got.dotsEntries) != 1 || got.dotsEntries[0].Name != "nvim" {
+			t.Fatalf("dots snapshot did not populate entries: loaded=%v entries=%+v", got.dotsLoaded, got.dotsEntries)
+		}
+	})
+
+	t.Run("stale dotsPreparedMsg does not overwrite completed sync", func(t *testing.T) {
+		m := baseModel(nil)
+		m.dotsPreparing = true
+		m.dotsPrepareGen = 1
+		m.dotsOpGen = 1
+		m.dotsLoaded = true
+		m.dotsEntries = []app.DotStatus{{Name: "fresh", Health: app.HealthOK}}
+
+		got := drive(m, dotsPreparedMsg{gen: 1, opGen: 0, entries: []app.DotStatus{{Name: "stale", Health: app.HealthConflict}}})
+		if got.dotsPreparing {
+			t.Fatal("dotsPreparing should clear after stale snapshot")
+		}
+		if len(got.dotsEntries) != 1 || got.dotsEntries[0].Name != "fresh" {
+			t.Fatalf("stale snapshot overwrote entries: %+v", got.dotsEntries)
 		}
 	})
 
@@ -2921,6 +3062,46 @@ func TestModel_DotsTab_Messages(t *testing.T) {
 			t.Errorf("statusMsg = %q", got.statusMsg)
 		}
 		if len(got.dotsEntries) != 1 || got.dotsEntries[0].State != app.DotStateIgnored {
+			t.Fatalf("dotsEntries = %#v, want refreshed entries despite error", got.dotsEntries)
+		}
+	})
+
+	t.Run("dotsVariantChangedMsg sets status and updates entries", func(t *testing.T) {
+		m := baseModel(nil)
+		m.beginDotsOperation("Creating variant for nvim…")
+		gen := m.dotsOpGen
+		got := drive(m, dotsVariantChangedMsg{
+			gen:     gen,
+			name:    "nvim",
+			info:    app.DotVariantInfo{Name: "nvim", Host: "laptop", Package: "nvim@laptop"},
+			entries: []app.DotStatus{{Name: "nvim", Package: "nvim@laptop", State: app.DotStateSynced}},
+		})
+		if got.dotsLoading {
+			t.Fatal("dotsLoading should clear after variant change")
+		}
+		if got.statusMsg != "✓ created variant nvim@laptop for nvim" {
+			t.Fatalf("statusMsg = %q", got.statusMsg)
+		}
+		if len(got.dotsEntries) != 1 || got.dotsEntries[0].Package != "nvim@laptop" {
+			t.Fatalf("dotsEntries = %#v, want variant package snapshot", got.dotsEntries)
+		}
+	})
+
+	t.Run("dotsVariantChangedMsg with error still updates entries", func(t *testing.T) {
+		m := baseModel(nil)
+		m.beginDotsOperation("Removing variant for nvim…")
+		gen := m.dotsOpGen
+		got := drive(m, dotsVariantChangedMsg{
+			gen:     gen,
+			name:    "nvim",
+			removed: true,
+			entries: []app.DotStatus{{Name: "nvim", Package: "nvim", State: app.DotStateSynced}},
+			err:     errors.New("variant failed"),
+		})
+		if got.statusMsg != "✗ variant failed" {
+			t.Fatalf("statusMsg = %q", got.statusMsg)
+		}
+		if len(got.dotsEntries) != 1 || got.dotsEntries[0].Package != "nvim" {
 			t.Fatalf("dotsEntries = %#v, want refreshed entries despite error", got.dotsEntries)
 		}
 	})

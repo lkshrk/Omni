@@ -2016,20 +2016,140 @@ func TestDoDotsAdd_UsesMachineGroupWhenUnfiltered(t *testing.T) {
 	}
 }
 
+func TestDoDotsVariantChange_AddsAndRemovesCurrentHostVariant(t *testing.T) {
+	if _, err := exec.LookPath("stow"); err != nil {
+		t.Skip("stow not installed")
+	}
+	t.Setenv("OMNI_HOSTNAME", "laptop.local")
+	cfgDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	repoDir := t.TempDir()
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	defaultDir := filepath.Join(repoDir, "dotfiles", "nvim", ".config", "nvim")
+	if err := os.MkdirAll(defaultDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(defaultDir, "init.lua"), []byte("default"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(homeDir, ".config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	targetDir := filepath.Join(homeDir, ".config", "nvim")
+	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{DotsRepo: repoDir},
+		Groups: []*config.GroupConfig{{
+			Name:    "laptop",
+			Special: "host",
+			Dots: []config.DotEntry{{
+				Name: "nvim",
+				Path: targetDir,
+			}},
+		}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	a := app.New(cfgPath)
+	a.CacheDir = cfgDir
+	if err := a.InitTestMode(context.Background()); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	m := modelForCmds(a)
+	msg := m.doDotsVariantChange(dotsVariantRequest{name: "nvim"})()
+	added, ok := msg.(dotsVariantChangedMsg)
+	if !ok {
+		t.Fatalf("doDotsVariantChange(add) returned %T, want dotsVariantChangedMsg", msg)
+	}
+	if added.err != nil {
+		t.Fatalf("add variant failed: %v", added.err)
+	}
+	if added.info.Package != "nvim@laptop" {
+		t.Fatalf("added package = %q, want nvim@laptop", added.info.Package)
+	}
+	variantDir := filepath.Join(repoDir, "dotfiles", "nvim@laptop", ".config", "nvim")
+	if data, err := os.ReadFile(filepath.Join(variantDir, "init.lua")); err != nil || string(data) != "default" {
+		t.Fatalf("variant seed file = %q, %v; want default content", string(data), err)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load after add: %v", err)
+	}
+	dot := cfg.Groups[0].Dots[0]
+	if dot.Hosts["laptop"].Package != "nvim@laptop" {
+		t.Fatalf("dot host variant = %#v, want nvim@laptop", dot.Hosts)
+	}
+	targetFile := filepath.Join(targetDir, "init.lua")
+	resolved, err := filepath.EvalSymlinks(targetFile)
+	if err != nil {
+		t.Fatalf("EvalSymlinks target file after add: %v", err)
+	}
+	wantVariant, err := filepath.EvalSymlinks(filepath.Join(variantDir, "init.lua"))
+	if err != nil {
+		t.Fatalf("EvalSymlinks variant source file: %v", err)
+	}
+	if resolved != wantVariant {
+		t.Fatalf("target file resolves to %q, want active variant %q", resolved, wantVariant)
+	}
+
+	msg = m.doDotsVariantChange(dotsVariantRequest{name: "nvim", remove: true})()
+	removed, ok := msg.(dotsVariantChangedMsg)
+	if !ok {
+		t.Fatalf("doDotsVariantChange(remove) returned %T, want dotsVariantChangedMsg", msg)
+	}
+	if removed.err != nil {
+		t.Fatalf("remove variant failed: %v", removed.err)
+	}
+	cfg, err = config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load after remove: %v", err)
+	}
+	if hosts := cfg.Groups[0].Dots[0].Hosts; len(hosts) != 0 {
+		t.Fatalf("dot host variants after remove = %#v, want none", hosts)
+	}
+	resolved, err = filepath.EvalSymlinks(targetFile)
+	if err != nil {
+		t.Fatalf("EvalSymlinks target file after remove: %v", err)
+	}
+	wantDefault, err := filepath.EvalSymlinks(filepath.Join(defaultDir, "init.lua"))
+	if err != nil {
+		t.Fatalf("EvalSymlinks default source file: %v", err)
+	}
+	if resolved != wantDefault {
+		t.Fatalf("target file resolves to %q, want default package %q", resolved, wantDefault)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "dotfiles", "nvim@laptop")); !os.IsNotExist(err) {
+		t.Fatalf("variant package after remove error = %v, want missing", err)
+	}
+}
+
 func TestHandleToolsLoadedMsg_DotsRepoStartsSyncAll(t *testing.T) {
 	m, repoDir := newDotsModelForCmds(t)
 	cmds := m.handleToolsLoadedMsg(toolsLoadedMsg{settings: config.Settings{DotsRepo: repoDir}, stowInstalled: true})
+	if !m.dotsPreparing {
+		t.Fatal("dotsPreparing should start after initial tools load when dots repo is configured")
+	}
 	if !m.dotsLoading {
 		t.Fatal("dotsLoading should start after initial tools load when dots repo is configured")
 	}
-	var sawSync bool
+	var sawSnapshot, sawSync bool
 	for _, cmd := range cmds {
 		if cmd == nil {
 			continue
 		}
-		if _, ok := cmd().(dotsSyncedMsg); ok {
+		switch cmd().(type) {
+		case dotsPreparedMsg:
+			sawSnapshot = true
+		case dotsSyncedMsg:
 			sawSync = true
 		}
+	}
+	if !sawSnapshot {
+		t.Fatalf("startup should dispatch dots snapshot command, got %d commands without dotsPreparedMsg", len(cmds))
 	}
 	if !sawSync {
 		t.Fatalf("startup should dispatch dots sync-all command, got %d commands without dotsSyncedMsg", len(cmds))
@@ -2052,8 +2172,20 @@ func TestHandleToolsLoadedMsg_DotsRepoPromptsForStowBeforeScans(t *testing.T) {
 	if len(m.scanningProviders) != 0 {
 		t.Fatalf("provider scans should wait until stow prompt resolves, got %v", m.scanningProviders)
 	}
-	if len(cmds) != 0 {
-		t.Fatalf("startup should not dispatch scans before stow prompt resolves, got %d commands", len(cmds))
+	if !m.dotsPreparing {
+		t.Fatal("dots snapshot should still prepare while stow prompt is open")
+	}
+	var sawSnapshot bool
+	for _, cmd := range cmds {
+		if cmd == nil {
+			continue
+		}
+		if _, ok := cmd().(dotsPreparedMsg); ok {
+			sawSnapshot = true
+		}
+	}
+	if !sawSnapshot {
+		t.Fatalf("startup should dispatch only dots snapshot before stow prompt resolves, got %d commands without dotsPreparedMsg", len(cmds))
 	}
 }
 

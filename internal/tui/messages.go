@@ -212,6 +212,16 @@ type dotsLoadedMsg struct {
 	err            error
 }
 
+// dotsPreparedMsg is sent when the launch-time, non-mutating dots snapshot is fetched.
+type dotsPreparedMsg struct {
+	gen            int
+	opGen          int
+	entries        []app.DotStatus
+	gitStatus      string
+	dotMemberships map[string][]string
+	err            error
+}
+
 // dotsSyncedMsg is sent after a dots sync completes.
 type dotsSyncedMsg struct {
 	gen            int
@@ -274,6 +284,18 @@ type dotsFixedMsg struct {
 type dotsAddedMsg struct {
 	gen            int
 	path           string // the tilde-form path that was added
+	entries        []app.DotStatus
+	gitStatus      string
+	dotMemberships map[string][]string
+	err            error
+}
+
+// dotsVariantChangedMsg is sent after this host's dots package variant changes.
+type dotsVariantChangedMsg struct {
+	gen            int
+	name           string
+	info           app.DotVariantInfo
+	removed        bool
 	entries        []app.DotStatus
 	gitStatus      string
 	dotMemberships map[string][]string
