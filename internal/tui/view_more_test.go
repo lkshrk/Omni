@@ -4361,6 +4361,63 @@ func TestRenderDots_BulkPendingUsesWaitingIcon(t *testing.T) {
 	}
 }
 
+func TestRenderDots_DoesNotRenderGroupPillBar(t *testing.T) {
+	m := baseModel(nil)
+	m.settings.DotsRepo = "/repo"
+	m.dotsEntries = []app.DotStatus{
+		{Name: "nvim", TargetPath: "~/.config/nvim", State: app.DotStateSynced, Group: "config", Counts: app.DotFileCounts{Synced: 1}},
+		{Name: "zsh", TargetPath: "~/.zshrc", State: app.DotStateSynced, Group: "home", Counts: app.DotFileCounts{Synced: 1}},
+	}
+
+	out := stripANSIEscapeSequences(renderDots(m))
+	first := ""
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(line) != "" {
+			first = line
+			break
+		}
+	}
+	if !strings.Contains(first, "Synced") {
+		t.Fatalf("first visible dots line = %q, want Synced section instead of group controls\n%s", first, out)
+	}
+}
+
+func TestRenderList_RowSpinnerKeepsNameColumn(t *testing.T) {
+	tool := &database.ToolCache{Name: "curl", Provider: "brew", Installed: true, Tracked: true}
+	m := baseModel([]*database.ToolCache{tool})
+	m.cursor = 0
+	normalLine := renderedLineContaining(renderList(m), "curl")
+
+	active := m
+	active.startRowOperation("curl", "brew", "Installing curl…")
+	activeLine := renderedLineContaining(renderList(active), "curl")
+
+	if got, want := visualColumnOf(activeLine, "curl"), visualColumnOf(normalLine, "curl"); got != want {
+		t.Fatalf("tool row spinner shifted name column: got %d want %d\nnormal: %q\nactive: %q", got, want, normalLine, activeLine)
+	}
+}
+
+func TestRenderDots_RowSpinnerKeepsNameColumn(t *testing.T) {
+	m := baseModel(nil)
+	m.settings.DotsRepo = "/repo"
+	m.dotsCursor = 0
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		State:      app.DotStateSynced,
+		Counts:     app.DotFileCounts{Synced: 1},
+	}}
+	normalLine := renderedLineContaining(renderDots(m), "nvim")
+
+	active := m
+	active.dotsActiveName = "nvim"
+	activeLine := renderedLineContaining(renderDots(active), "nvim")
+
+	if got, want := visualColumnOf(activeLine, "nvim"), visualColumnOf(normalLine, "nvim"); got != want {
+		t.Fatalf("dots row spinner shifted name column: got %d want %d\nnormal: %q\nactive: %q", got, want, normalLine, activeLine)
+	}
+}
+
 func TestRenderList_RowOperationUsesSpinnerIcon(t *testing.T) {
 	tool := &database.ToolCache{Name: "curl", Provider: "brew", Installed: false, Tracked: true}
 	m := baseModel([]*database.ToolCache{tool})

@@ -167,6 +167,10 @@ func listRowPrefix(p palette, selected bool) string {
 	return inactiveRowPrefix()
 }
 
+func rowSpinnerIcon(m Model) string {
+	return strings.TrimSpace(m.spinner.View())
+}
+
 func listRowColumnStyle(selected bool, style lipgloss.Style) lipgloss.Style {
 	if selected {
 		return style.Bold(true)

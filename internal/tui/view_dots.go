@@ -82,47 +82,12 @@ func filteredDotsEntries(m Model) []app.DotStatus {
 	}
 	result := make([]app.DotStatus, 0, len(m.dotsEntries))
 	for _, e := range m.dotsEntries {
-		if m.dotsGroupFilter != "" && e.Group != m.dotsGroupFilter {
-			continue
-		}
 		if q != "" && !strings.Contains(strings.ToLower(e.Name), q) {
 			continue
 		}
 		result = append(result, e)
 	}
 	return result
-}
-
-// dotsGroupPills returns unique groups present in entries, ordered canonically.
-// Returns nil when only one group or no group info is available.
-func dotsGroupPills(entries []app.DotStatus) []string {
-	seen := make(map[string]bool)
-	for _, e := range entries {
-		if e.Group != "" {
-			seen[e.Group] = true
-		}
-	}
-	if len(seen) <= 1 {
-		return nil
-	}
-	// Canonical order: config → home → custom → others alphabetically.
-	pills := []string{""}
-	for _, g := range []string{"config", "home", "custom"} {
-		if seen[g] {
-			pills = append(pills, g)
-		}
-	}
-	others := make([]string, 0)
-	for g := range seen {
-		switch g {
-		case "config", "home", "custom":
-		default:
-			others = append(others, g)
-		}
-	}
-	sort.Strings(others)
-	pills = append(pills, others...)
-	return pills
 }
 
 type dotsSection struct {
@@ -268,8 +233,11 @@ func renderDots(m Model) string {
 	hintPrefix := listHintPrefixWithGap(listWideIconGapWidth)
 
 	// ── Top controls ──────────────────────────────────────────────────────────
-	pills := dotsGroupPills(m.dotsEntries)
-	write(renderDotsTopControls(m, pills) + "\n")
+	if m.dotsSearchActive {
+		write(renderDotsSearchControl(m) + "\n")
+	} else {
+		write("\n")
+	}
 
 	visible := filteredDotsEntries(m)
 	expandedName := m.dotsExpandedName
@@ -356,7 +324,7 @@ func renderDots(m Model) string {
 			switch {
 			case m.dotsActiveName == e.Name:
 				iconStyle = lipgloss.NewStyle()
-				icon = m.spinner.View()
+				icon = rowSpinnerIcon(m)
 			case m.dotsPendingNames[e.Name]:
 				iconStyle = p.styleStatus
 				icon = iconPending
@@ -465,30 +433,9 @@ func renderDotsDeleteKeepLocalPrompt(m Model, name, prefix string) string {
 	return prefix + prompt + renderActionHintText(p, contextHintItems(m, hintCtxDotsDeleteConfirm))
 }
 
-func renderDotsTopControls(m Model, pills []string) string {
+func renderDotsSearchControl(m Model) string {
 	p := m.palette
-	var parts []string
-	if len(pills) > 0 {
-		var pb strings.Builder
-		pb.WriteString("  ")
-		for _, g := range pills {
-			label := "all"
-			if g != "" {
-				label = g
-			}
-			if g == m.dotsGroupFilter {
-				pb.WriteString(p.styleTitle.Render(" " + label + " "))
-			} else {
-				pb.WriteString(p.styleHelp.Render(" " + label + " "))
-			}
-			pb.WriteString("  ")
-		}
-		parts = append(parts, strings.TrimRight(pb.String(), " "))
-	}
-	if m.dotsSearchActive {
-		parts = append(parts, p.styleNormal.Render("/")+" "+renderEmptyAwareTextInputView(p, m.filter, m.filter.Placeholder, 0))
-	}
-	return strings.Join(parts, "   ")
+	return "  " + p.styleNormal.Render("/") + " " + renderEmptyAwareTextInputView(p, m.filter, m.filter.Placeholder, 0)
 }
 
 // dotHealthDisplay returns the icon style, icon character, and status label

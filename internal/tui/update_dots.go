@@ -174,10 +174,6 @@ func (m *Model) handleDotsNavigationKeyMsg(msg tea.KeyPressMsg, visible []dotsVi
 		}
 	case m.dotsConfirmIdx >= 0 || m.dotsOverwriteIdx >= 0 || m.dotsLocalIdx >= 0 || m.dotsIgnoreIdx >= 0:
 		return false
-	case key.Matches(msg, m.keys.GroupPrev):
-		m.moveDotsGroupFilter(-1)
-	case key.Matches(msg, m.keys.GroupNext):
-		m.moveDotsGroupFilter(1)
 	case key.Matches(msg, m.keys.Search):
 		m.dotsSearchActive = true
 		m.filter.SetValue("")
@@ -200,11 +196,6 @@ func (m *Model) handleDotsNavigationKeyMsg(msg tea.KeyPressMsg, visible []dotsVi
 func (m *Model) handleDotsBackKey() {
 	if m.dotsConfirmIdx >= 0 || m.dotsOverwriteIdx >= 0 || m.dotsLocalIdx >= 0 || m.dotsIgnoreIdx >= 0 {
 		m.clearDotsConfirmState()
-	} else if m.dotsGroupFilter != "" {
-		m.dotsGroupFilter = ""
-		m.dotsCursor = 0
-		m.dotsExpandedName = ""
-		m.clearDotsExpandedChildren("")
 	} else if m.dotsSearchActive {
 		m.dotsSearchActive = false
 		m.filter.SetValue("")
@@ -212,32 +203,6 @@ func (m *Model) handleDotsBackKey() {
 		m.dotsExpandedName = ""
 		m.clearDotsExpandedChildren("")
 	}
-}
-
-func (m *Model) moveDotsGroupFilter(delta int) {
-	pills := dotsGroupPills(m.dotsEntries)
-	if len(pills) == 0 {
-		return
-	}
-	idx := 0
-	for i, p := range pills {
-		if p == m.dotsGroupFilter {
-			idx = i
-			break
-		}
-	}
-	idx += delta
-	if idx < 0 {
-		idx = len(pills) - 1
-	} else if idx >= len(pills) {
-		idx = 0
-	}
-	m.dotsGroupFilter = pills[idx]
-	m.dotsCursor = 0
-	m.dotsExpandedName = ""
-	m.clearDotsExpandedChildren("")
-	m.syncDotsExpandedName(dotsVisibleRows(*m))
-	m.clearDotsConfirmState()
 }
 
 func (m *Model) syncDotsExpandedName(visible []dotsVisibleRow) {
@@ -783,7 +748,6 @@ func (m *Model) handleDotsDiscoveredMsg(msg dotsDiscoveredMsg) []tea.Cmd {
 }
 
 func (m *Model) clearDotsFilters() {
-	m.dotsGroupFilter = ""
 	m.dotsSearchActive = false
 	m.filter.SetValue("")
 	m.filter.Blur()
