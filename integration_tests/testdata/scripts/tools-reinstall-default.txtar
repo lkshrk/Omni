@@ -1,0 +1,97 @@
+# switch --reinstall-default repairs a wrong concrete manager using the configured default
+exec chmod 755 bin/pip3
+exec chmod 755 bin/uv
+env PATH=$WORK/bin:$PATH
+
+exec omni --config settings.json hosts ensure testhost
+exec omni --config settings.json settings set python.manager pip3
+stdout 'python.manager = pip3'
+exec omni --config settings.json tools set black --provider python
+stdout 'Set logical tool "black" with provider "python"'
+exec omni --config settings.json groups move-tool testhost black
+stdout 'Moved "black" to group "testhost"'
+
+exec omni --config settings.json install black --provider python
+stdout 'installed black'
+exec test -f .omni-cache/fake-pip/black
+exec omni --config settings.json settings set python.manager uv
+stdout 'python.manager = uv'
+
+exec omni -y --config settings.json switch black --reinstall-default --provider python
+stdout 'reinstalled black with default provider python'
+exec test -f .omni-cache/fake-uv/black
+exec test ! -f .omni-cache/fake-pip/black
+exec omni --config settings.json list black --format json
+stdout '"provider":"python"'
+stdout '"installed_with":"uv"'
+
+-- bin/pip3 --
+#!/usr/bin/env sh
+set -eu
+state="${OMNI_CACHE_DIR}/fake-pip"
+mkdir -p "$state"
+case "${1:-}" in
+  --version)
+    echo "pip 25.0"
+    ;;
+  install)
+    if [ "${2:-}" = "--upgrade" ]; then
+      : > "$state/$3"
+    else
+      : > "$state/$2"
+    fi
+    ;;
+  uninstall)
+    rm -f "$state/$3"
+    ;;
+  show)
+    if [ -f "$state/$2" ]; then
+      printf 'Name: %s\nVersion: 1.0.0\nSummary: fake package\n' "$2"
+      exit 0
+    fi
+    exit 1
+    ;;
+  list)
+    if [ -f "$state/black" ]; then
+      echo '[{"name":"black","version":"1.0.0"}]'
+    else
+      echo '[]'
+    fi
+    ;;
+esac
+
+-- bin/uv --
+#!/usr/bin/env sh
+set -eu
+state="${OMNI_CACHE_DIR}/fake-uv"
+mkdir -p "$state"
+case "${1:-}" in
+  --version)
+    echo "uv 0.9.0"
+    ;;
+  tool)
+    case "${2:-}" in
+      install)
+        : > "$state/$3"
+        ;;
+      uninstall)
+        rm -f "$state/$3"
+        ;;
+      list)
+        if [ -f "$state/black" ]; then
+          echo 'black v1.0.0'
+        fi
+        ;;
+    esac
+    ;;
+  pip)
+    if [ "${2:-}" = "show" ] && [ -f "$state/${3:-}" ]; then
+      printf 'Name: %s\nVersion: 1.0.0\nSummary: fake uv package\n' "$3"
+      exit 0
+    fi
+    exit 1
+    ;;
+esac
+
+-- settings.json --
+{}

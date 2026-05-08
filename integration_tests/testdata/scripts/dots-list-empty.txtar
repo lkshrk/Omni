@@ -4,7 +4,6 @@ exec omni --config settings.json dots list
 stdout 'No dots entries'
 
 -- settings.json --
-{"settings":{"dots_repo":"~/dotfiles"}}
+{"host_settings":{"testhost":{"dots_repo":"~/dotfiles"}},"hosts":{"testhost":[]},"groups":[{"name":"testhost","special":"host"}]}
 
 -- dotfiles/dotfiles/.keep --
-

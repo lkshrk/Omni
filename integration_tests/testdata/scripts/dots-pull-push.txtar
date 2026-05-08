@@ -1,0 +1,54 @@
+# dots pull pulls from a local remote, re-syncs symlinks, and dots push commits local repo changes
+# @requires: stow
+env HOME=$WORK/home
+mkdir $WORK/home
+mkdir $WORK/home/.config
+
+exec git init --bare remote.git
+exec git clone remote.git seed
+exec git -C seed config user.email t@t.com
+exec git -C seed config user.name T
+exec cp -R seed-files/dotfiles seed/dotfiles
+exec git -C seed add dotfiles
+exec git -C seed commit -m seed
+exec git -C seed push -u origin master
+
+exec git clone remote.git $WORK/home/dotfiles
+exec git -C $WORK/home/dotfiles config user.email t@t.com
+exec git -C $WORK/home/dotfiles config user.name T
+exec omni --config settings.json dots sync
+stdout 'symlink\(s\) updated'
+
+exec git clone remote.git other
+exec git -C other config user.email t@t.com
+exec git -C other config user.name T
+exec cp remote-change/init.lua other/dotfiles/nvim/.config/nvim/init.lua
+exec git -C other add dotfiles/nvim/.config/nvim/init.lua
+exec git -C other commit -m remote-change
+exec git -C other push
+
+exec omni --config settings.json dots pull
+stdout 'Pulled. Re-syncing symlinks'
+exec grep 'remote change' $WORK/home/dotfiles/dotfiles/nvim/.config/nvim/init.lua
+stdout 'remote change'
+exec grep 'remote change' $WORK/home/.config/nvim/init.lua
+stdout 'remote change'
+
+exec cp local-change/init.lua $WORK/home/dotfiles/dotfiles/nvim/.config/nvim/init.lua
+exec omni --config settings.json dots push -m 'dots: local change'
+stdout 'Pushed.'
+exec git clone remote.git verify
+exec grep 'local change' verify/dotfiles/nvim/.config/nvim/init.lua
+stdout 'local change'
+
+-- settings.json --
+{"host_settings":{"testhost":{"dots_repo":"~/dotfiles"}},"hosts":{"testhost":[]},"groups":[{"name":"testhost","special":"host","dots":[{"name":"nvim","path":"~/.config/nvim"}]}]}
+
+-- seed-files/dotfiles/nvim/.config/nvim/init.lua --
+-- seed config
+
+-- remote-change/init.lua --
+-- remote change
+
+-- local-change/init.lua --
+-- local change

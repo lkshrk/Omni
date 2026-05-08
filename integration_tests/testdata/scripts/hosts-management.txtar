@@ -1,0 +1,40 @@
+# host assignment commands persist reusable groups and protect host groups
+exec omni --config settings.json hosts list
+stdout 'No hosts defined'
+
+exec omni --config settings.json hosts ensure testhost
+stdout 'Host "testhost" ensured.'
+exec omni --config settings.json hosts ensure laptop
+stdout 'Host "laptop" ensured.'
+
+exec omni --config settings.json groups create work
+stdout 'Created group "work".'
+exec omni --config settings.json groups create personal
+stdout 'Created group "personal".'
+
+exec omni --config settings.json hosts set-groups testhost work personal
+stdout 'Host "testhost" groups set to \[personal, work\].'
+exec omni --config settings.json hosts add-group laptop work
+stdout 'Added group "work" to host "laptop".'
+exec omni --config settings.json hosts list
+stdout '\* testhost'
+stdout '\[personal, work\]'
+stdout '  laptop'
+stdout '\[work\]'
+
+exec omni --config settings.json hosts remove-group testhost personal
+stdout 'Removed group "personal" from host "testhost".'
+exec omni --config settings.json hosts list
+stdout '\* testhost'
+stdout '\[work\]'
+! stdout '\[personal, work\]'
+
+exec omni -y --config settings.json hosts remove laptop
+stdout 'Host "laptop" removed.'
+exec omni --config settings.json hosts list
+stdout '\* testhost'
+! stdout 'laptop'
+! exec grep '"laptop"' settings.json
+
+-- settings.json --
+{}

@@ -4,24 +4,80 @@ package integration_test
 
 import (
 	"bufio"
+	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rogpeppe/go-internal/testscript"
 
 	"github.com/lkshrk/omni/internal/cli"
+	"github.com/lkshrk/omni/internal/database"
 )
 
 // TestMain registers "omni" as a testscript command so we test the real
 // binary behaviour in a subprocess without needing a separate build step.
 func TestMain(m *testing.M) {
 	os.Exit(testscript.RunMain(m, map[string]func() int{
-		"omni": func() int { cli.Execute(); return 0 },
+		"omni":            func() int { cli.Execute(); return 0 },
+		"omni-seed-cache": seedCacheMain,
 	}))
+}
+
+func seedCacheMain() int {
+	args := os.Args[1:]
+	if len(args) < 5 || len(args) > 6 {
+		fmt.Fprintln(os.Stderr, "usage: omni-seed-cache <name> <provider> <package> <version> <latest> [installed-with]")
+		return 2
+	}
+	cacheDir := os.Getenv("OMNI_CACHE_DIR")
+	if cacheDir == "" {
+		fmt.Fprintln(os.Stderr, "OMNI_CACHE_DIR is required")
+		return 2
+	}
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "create cache dir: %v\n", err)
+		return 1
+	}
+	db, err := database.Open(filepath.Join(cacheDir, "omni.db"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "open db: %v\n", err)
+		return 1
+	}
+	defer db.Close()
+	ctx := context.Background()
+	if err := db.Migrate(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "migrate db: %v\n", err)
+		return 1
+	}
+	installedWith := ""
+	if len(args) == 6 {
+		installedWith = args[5]
+	}
+	entry := &database.ToolCache{
+		Name:          args[0],
+		Provider:      args[1],
+		Package:       args[2],
+		Installed:     true,
+		InstalledWith: installedWith,
+		Version:       sql.NullString{String: args[3], Valid: args[3] != ""},
+		LastChecked:   time.Now(),
+		Tracked:       true,
+	}
+	if err := db.Upsert(ctx, entry); err != nil {
+		fmt.Fprintf(os.Stderr, "seed cache: %v\n", err)
+		return 1
+	}
+	if err := db.UpdateOutdated(ctx, args[0], args[1], args[2], true, args[4]); err != nil {
+		fmt.Fprintf(os.Stderr, "seed outdated: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 // TestCLI runs .txtar scripts in testdata/scripts/, skipping dependency-gated
@@ -39,7 +95,7 @@ func TestCLI(t *testing.T) {
 			// Point the app's cache dir to the per-test work directory so the
 			// SQLite database is writable even when HOME=/no-home (testscript default).
 			env.Vars = append(env.Vars, "OMNI_CACHE_DIR="+filepath.Join(env.WorkDir, ".omni-cache"))
-			// Use a fixed hostname so txtar scripts can map profiles deterministically.
+			// Use a fixed hostname so txtar scripts can configure hosts deterministically.
 			env.Vars = append(env.Vars, "OMNI_HOSTNAME=testhost")
 			return nil
 		},

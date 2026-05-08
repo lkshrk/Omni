@@ -111,28 +111,3 @@ func TestDefaultCacheDir_XDGContainsOmni(t *testing.T) {
 		t.Errorf("path %q does not end in 'omni'", p)
 	}
 }
-
-// ─── BoolVal ──────────────────────────────────────────────────────────────────
-
-// TestBoolVal_True exercises the non-nil true branch of BoolVal.
-func TestBoolVal_True(t *testing.T) {
-	b := true
-	if !config.BoolVal(&b) {
-		t.Error("BoolVal(&true) = false, want true")
-	}
-}
-
-// TestBoolVal_False exercises the non-nil false branch of BoolVal.
-func TestBoolVal_False(t *testing.T) {
-	b := false
-	if config.BoolVal(&b) {
-		t.Error("BoolVal(&false) = true, want false")
-	}
-}
-
-// TestBoolVal_Nil exercises the nil branch of BoolVal (already covered, belt-and-suspenders).
-func TestBoolVal_Nil(t *testing.T) {
-	if config.BoolVal(nil) {
-		t.Error("BoolVal(nil) = true, want false")
-	}
-}

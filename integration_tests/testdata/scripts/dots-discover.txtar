@@ -1,0 +1,35 @@
+# dots discover lists untracked repo and local config candidates without mutating settings
+env HOME=$WORK/home
+exec omni --config settings.json dots discover
+stdout 'Discovered untracked dotfile candidates'
+stdout 'ghost'
+stdout '~/.config/ghost'
+stdout 'tmux.conf'
+stdout '~/.tmux.conf'
+! stdout 'nvim'
+
+exec omni --config settings.json dots discover --format json
+stdout '"name":"ghost"'
+stdout '"path":"~/.config/ghost"'
+stdout '"name":"tmux.conf"'
+stdout '"path":"~/.tmux.conf"'
+! stdout '"name":"nvim"'
+
+exec omni --config settings.json dots add ghost --discovered --group work
+stdout 'added discovered dots entry "ghost" -> ~/.config/ghost'
+exec omni --config settings.json dots groups ghost
+stdout 'ghost: work'
+exec omni --config settings.json dots discover
+! stdout 'ghost'
+stdout 'tmux'
+
+-- settings.json --
+{"host_settings":{"testhost":{"dots_repo":"~/dotfiles"}},"hosts":{"testhost":["work"]},"groups":[{"name":"testhost","special":"host","dots":[{"name":"nvim","path":"~/.config/nvim"}]},{"name":"work"}]}
+
+-- home/dotfiles/dotfiles/nvim/.keep --
+-- home/dotfiles/dotfiles/ghost/config.json --
+{}
+-- home/.config/ghost/local.json --
+{}
+-- home/.tmux.conf --
+set -g mouse on

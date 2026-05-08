@@ -1,0 +1,18 @@
+# top-level logical tool ignore/unignore persists through the real CLI
+exec omni --config settings.json hosts ensure testhost
+exec omni --config settings.json add ripgrep --provider system --install-with brew --group testhost
+stdout 'added ripgrep'
+
+exec omni --config settings.json tools ignore ripgrep
+stdout 'Ignored logical tool "ripgrep"'
+exec grep '"ignore"' settings.json
+stdout '"ignore"'
+exec grep '"ripgrep"' settings.json
+stdout '"ripgrep"'
+
+exec omni --config settings.json tools unignore ripgrep
+stdout 'Unignored logical tool "ripgrep"'
+! exec grep '"ignore"' settings.json
+
+-- settings.json --
+{}

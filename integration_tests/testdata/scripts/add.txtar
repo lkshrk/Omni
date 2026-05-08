@@ -1,9 +1,8 @@
 # omni add appends a tool to the config file
-exec omni --config settings.json profile add default base
-exec omni --config settings.json profile set-hostname testhost default
-exec omni --config settings.json add ripgrep --provider system --install-with brew --group base
+exec omni --config settings.json hosts ensure testhost
+exec omni --config settings.json add ripgrep --provider system --install-with brew --group testhost
 stdout 'added ripgrep'
 
 # Running add again with a different tool should also succeed
-exec omni --config settings.json add typescript --provider node --install-with npm --group base
+exec omni --config settings.json add typescript --provider node --install-with npm --group testhost
 stdout 'added typescript'

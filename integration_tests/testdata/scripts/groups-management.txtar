@@ -1,6 +1,5 @@
 # group lifecycle commands persist config changes through the real CLI
-exec omni --config settings.json profile add default base
-exec omni --config settings.json profile set-hostname testhost default
+exec omni --config settings.json hosts ensure testhost
 
 exec omni --config settings.json groups create dev
 stdout 'Created group "dev"'
@@ -8,26 +7,35 @@ exec omni --config settings.json groups
 stdout 'dev'
 stdout '0 tool'
 
-exec omni --config settings.json profile add-group default dev
+exec omni --config settings.json hosts add-group testhost dev
 exec omni --config settings.json groups rename dev work
 stdout 'Renamed group "dev" to "work"'
-exec omni --config settings.json profile list
+exec omni --config settings.json hosts list
 stdout 'work'
 ! stdout 'dev'
 
-exec omni --config settings.json add ripgrep --provider system --install-with brew --group base
-exec omni --config settings.json groups add-tool work ripgrep
-stdout 'Added "ripgrep" to group "work"'
-exec omni --config settings.json groups remove-tool base ripgrep
-stdout 'Removed "ripgrep" from group "base"'
+exec omni --config settings.json add ripgrep --provider system --install-with brew --group testhost
+exec omni --config settings.json groups move-tool work ripgrep
+stdout 'Moved "ripgrep" to group "work"'
+exec omni --config settings.json groups ignore-tool work ripgrep
+stdout 'Ignored "ripgrep" in group "work"'
+exec cat settings.json
+stdout '"ignore"'
+stdout '"ripgrep"'
+exec omni --config settings.json groups unignore-tool work ripgrep
+stdout 'Unignored "ripgrep" in group "work"'
+exec omni --config settings.json groups remove-tool work ripgrep
+stdout 'Removed "ripgrep" from group "work"'
+exec omni --config settings.json groups move-tool work ripgrep
+stdout 'Moved "ripgrep" to group "work"'
 exec omni --config settings.json groups
 stdout 'work'
 stdout '1 tool'
 
-exec omni -y --config settings.json groups delete work --move-to base
+exec omni -y --config settings.json groups delete work --move-to testhost
 stdout 'Deleted group "work"'
 exec omni --config settings.json groups
-stdout '(base)'
+stdout 'testhost'
 stdout '1 tool'
 ! stdout 'work'
 
