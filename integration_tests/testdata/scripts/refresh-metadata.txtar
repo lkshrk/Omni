@@ -1,0 +1,98 @@
+# omni refresh updates installed, outdated, discovered, and description cache state
+exec chmod 755 bin/brew bin/apt bin/apk bin/dnf bin/pacman bin/zypper bin/pip bin/pip3
+env PATH=$WORK/bin:$PATH
+
+exec omni --config settings.json refresh
+stdout 'Scanning brew'
+stdout 'checking brew for updates'
+stdout 'finding local tools'
+stdout 'refreshing tool descriptions'
+stdout 'Refresh complete'
+exec omni --config settings.json list ripgrep --format json
+stdout '"state":"outdated"'
+stdout '"installed":true'
+stdout '"installed_with":"brew"'
+stdout '"version":"14.0.0"'
+stdout '"latest_version":"15.0.0"'
+stdout '"description":"fast grep"'
+
+-- bin/brew --
+#!/bin/sh
+set -eu
+case "${1:-}" in
+  --version)
+    echo "Homebrew 4.0.0"
+    ;;
+  info)
+    if [ "${2:-}" = "--json=v2" ] && [ "${3:-}" = "--installed" ]; then
+      printf '{"formulae":[{"name":"ripgrep","full_name":"ripgrep","desc":"fast grep","installed":[{"version":"14.0.0","installed_on_request":true}]}],"casks":[]}\n'
+      exit 0
+    fi
+    if [ "${2:-}" = "--json=v2" ]; then
+      printf '{"formulae":[{"name":"ripgrep","full_name":"ripgrep","desc":"fast grep","installed":[]}],"casks":[]}\n'
+      exit 0
+    fi
+    printf '{"formulae":[],"casks":[]}\n'
+    ;;
+  update)
+    ;;
+  outdated)
+    printf '{"formulae":[{"name":"ripgrep","current_version":"15.0.0"}],"casks":[]}\n'
+    ;;
+  list)
+    shift
+    if [ "${1:-}" = "--versions" ]; then
+      shift
+      if [ "${1:-}" = "--cask" ]; then
+        shift
+      fi
+      if [ "${1:-}" = "ripgrep" ]; then
+        echo "ripgrep 14.0.0"
+        exit 0
+      fi
+    fi
+    exit 1
+    ;;
+esac
+
+-- bin/apt --
+#!/bin/sh
+exit 1
+
+-- bin/apk --
+#!/bin/sh
+exit 1
+
+-- bin/dnf --
+#!/bin/sh
+exit 1
+
+-- bin/pacman --
+#!/bin/sh
+exit 1
+
+-- bin/zypper --
+#!/bin/sh
+exit 1
+
+-- bin/pip --
+#!/bin/sh
+exit 1
+
+-- bin/pip3 --
+#!/bin/sh
+exit 1
+
+-- settings.json --
+{
+  "settings": {
+    "disabled_providers": ["node", "python"]
+  },
+  "hosts": { "testhost": [] },
+  "tools": {
+    "ripgrep": { "provider": "system", "install_with": "brew" }
+  },
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": ["ripgrep"] }
+  ]
+}

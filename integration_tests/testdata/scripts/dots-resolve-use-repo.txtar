@@ -1,0 +1,26 @@
+# dots resolve --use-repo backs up the local conflict and restores the repo version
+# @requires: stow
+env HOME=$WORK/home
+exec git init $WORK/home/dotfiles
+exec git -C $WORK/home/dotfiles config user.email t@t.com
+exec git -C $WORK/home/dotfiles config user.name T
+exec touch -t 202001010000 home/.config/nvim/init.lua
+exec touch -t 202001010100 home/dotfiles/dotfiles/nvim/.config/nvim/init.lua
+exec omni -y --config settings.json dots resolve nvim --use-repo
+stdout 'repaired'
+stdout 'symlink\(s\) updated'
+exec cat home/.config/nvim/init.lua
+stdout '-- repo'
+exec cat home/dotfiles.bkp/.config/nvim/init.lua
+stdout '-- local'
+exec omni --config settings.json dots status nvim
+stdout 'Synced'
+stdout 'nvim'
+
+-- settings.json --
+{"host_settings":{"testhost":{"dots_repo":"~/dotfiles"}},"hosts":{"testhost":[]},"groups":[{"name":"testhost","special":"host","dots":[{"name":"nvim","path":"~/.config/nvim"}]}]}
+
+-- home/dotfiles/dotfiles/nvim/.config/nvim/init.lua --
+-- repo
+-- home/.config/nvim/init.lua --
+-- local

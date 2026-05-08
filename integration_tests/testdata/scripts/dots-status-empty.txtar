@@ -5,6 +5,6 @@ exec omni --config settings.json dots status
 stdout 'working tree clean'
 
 -- settings.json --
-{"settings":{"dots_repo":"~/dotfiles"}}
+{"host_settings":{"testhost":{"dots_repo":"~/dotfiles"}},"hosts":{"testhost":[]},"groups":[{"name":"testhost","special":"host"}]}
 
 -- dotfiles/dotfiles/.keep --

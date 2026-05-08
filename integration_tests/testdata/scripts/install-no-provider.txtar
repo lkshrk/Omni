@@ -1,6 +1,5 @@
 # omni install when no provider is available exits with an error
-exec omni --config settings.json profile add default base
-exec omni --config settings.json profile set-hostname testhost default
+exec omni --config settings.json hosts ensure testhost
 ! exec omni --config settings.json install ripgrep
 stderr 'no provider available'
 

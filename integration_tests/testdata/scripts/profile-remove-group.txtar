@@ -1,7 +1,0 @@
-# create a profile with two groups, then remove one
-exec omni --config settings.json profile add work base dev
-exec omni --config settings.json profile remove-group work dev
-stdout 'Removed group "dev" from profile "work"'
-
--- settings.json --
-{}

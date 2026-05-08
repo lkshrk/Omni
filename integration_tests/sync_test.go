@@ -9,6 +9,7 @@ import (
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/executor"
 	"github.com/lkshrk/omni/internal/provider/brew"
 	"github.com/lkshrk/omni/internal/provider/pip"
@@ -32,19 +33,6 @@ func brewInfoJSON(pkgs map[string]string) string {
 
 const brewInfoEmpty = `{"formulae":[],"casks":[]}`
 const brewOutdatedEmpty = `{"formulae":[],"casks":[]}`
-
-func brewOutdatedJSON(pkgs map[string]string) string {
-	out := `{"formulae":[`
-	first := true
-	for name, ver := range pkgs {
-		if !first {
-			out += ","
-		}
-		out += `{"name":"` + name + `","current_version":"` + ver + `"}`
-		first = false
-	}
-	return out + `],"casks":[]}`
-}
 
 // ─── pip list helper ───────────────────────────────────────────────────────
 
@@ -256,18 +244,27 @@ func TestSync_PipTool(t *testing.T) {
 	mock.AssertCalled(t, "pip3 install black")
 }
 
-func TestSync_OutdatedToolMarkedInDB(t *testing.T) {
+func TestSync_DoesNotRefreshOutdatedState(t *testing.T) {
 	mock := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "brew --version", Response: executor.MockCall{Stdout: "Homebrew 4.0.0"}},
 		executor.MatchRule{Pattern: "brew info --json=v2 --installed", Response: executor.MockCall{
 			Stdout: brewInfoJSON(map[string]string{"ripgrep": "14.0.0"}),
 		}},
-		executor.MatchRule{Pattern: "brew outdated --json=v2", Response: executor.MockCall{
-			Stdout: brewOutdatedJSON(map[string]string{"ripgrep": "14.1.0"}),
-		}},
 	)
 	ta := newTestStackWithMock(t, mock)
 	cfg := simpleConfig("ripgrep", "brew")
+
+	if err := ta.DB.Upsert(context.Background(), &database.ToolCache{
+		Name:      "ripgrep",
+		Provider:  "brew",
+		Package:   "ripgrep",
+		Installed: true,
+	}); err != nil {
+		t.Fatalf("prepopulate DB: %v", err)
+	}
+	if err := ta.DB.UpdateOutdated(context.Background(), "ripgrep", "brew", "ripgrep", true, "14.1.0"); err != nil {
+		t.Fatalf("UpdateOutdated: %v", err)
+	}
 
 	if _, err := ta.Syncer.Sync(context.Background(), cfg, gosync.SyncOptions{}); err != nil {
 		t.Fatalf("Sync: %v", err)
@@ -277,9 +274,10 @@ func TestSync_OutdatedToolMarkedInDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DB.Get: %v", err)
 	}
-	if !entry.Outdated {
-		t.Error("expected Outdated = true for tool with newer version available")
+	if !entry.Outdated || entry.LatestVersion.String != "14.1.0" {
+		t.Fatalf("outdated/latest = %v/%q, want preserved true/14.1.0", entry.Outdated, entry.LatestVersion.String)
 	}
+	mock.MustHaveCalledN(t, "brew outdated", 0)
 }
 
 // ─── App-level integration tests ──────────────────────────────────────────
@@ -306,6 +304,18 @@ func newAppWithPip(t *testing.T, mock executor.Executor) (*app.App, string) {
 	}
 	t.Cleanup(func() { _ = a.Close() })
 	return a, cfgPath
+}
+
+func rootWithTestHostGroup(tools map[string]config.ToolSpec, entries ...config.ToolEntry) *config.RootConfig {
+	return &config.RootConfig{
+		Tools: tools,
+		Hosts: map[string][]string{"testhost": {}},
+		Groups: []*config.GroupConfig{{
+			Name:    "testhost",
+			Special: "host",
+			Tools:   entries,
+		}},
+	}
 }
 
 func TestApp_Install_CallsProviderAndUpdatesDB(t *testing.T) {
@@ -372,12 +382,8 @@ func TestApp_Uninstall_CallsProviderAndUpdatesDB(t *testing.T) {
 
 	mock.AssertCalled(t, "brew uninstall ripgrep")
 
-	entry, err := a.DB().Get(ctx, "ripgrep", "brew", "ripgrep")
-	if err != nil {
-		t.Fatalf("DB.Get: %v", err)
-	}
-	if entry.Installed {
-		t.Error("expected Installed = false after Uninstall")
+	if _, err := a.DB().Get(ctx, "ripgrep", "brew", "ripgrep"); err == nil {
+		t.Fatal("expected DB row to be removed after Uninstall")
 	}
 }
 
@@ -449,17 +455,17 @@ func TestApp_Sync_FullRoundTrip(t *testing.T) {
 	)
 	a, cfgPath := newAppWithBrew(t, mock)
 
-	root := &config.RootConfig{
-		Tools: map[string]config.ToolSpec{
+	root := rootWithTestHostGroup(
+		map[string]config.ToolSpec{
 			"ripgrep": {Provider: "system", Package: "ripgrep", InstallWith: "brew"},
 		},
-		Groups: []*config.GroupConfig{{Tools: []config.ToolEntry{{Name: "ripgrep"}}}},
-	}
+		config.ToolEntry{Name: "ripgrep"},
+	)
 	if err := config.Save(cfgPath, root); err != nil {
 		t.Fatalf("saving config: %v", err)
 	}
 
-	result, err := a.Sync(context.Background(), gosync.SyncOptions{Group: "base"})
+	result, err := a.Sync(context.Background(), gosync.SyncOptions{Group: "testhost"})
 	if err != nil {
 		t.Fatalf("Sync: %v", err)
 	}
@@ -489,21 +495,19 @@ func TestApp_Sync_MixedStates(t *testing.T) {
 	)
 	a, cfgPath := newAppWithBrew(t, mock)
 
-	root := &config.RootConfig{
-		Tools: map[string]config.ToolSpec{
+	root := rootWithTestHostGroup(
+		map[string]config.ToolSpec{
 			"ripgrep": {Provider: "system", Package: "ripgrep", InstallWith: "brew"},
 			"git":     {Provider: "system", Package: "git", InstallWith: "brew"},
 		},
-		Groups: []*config.GroupConfig{{Tools: []config.ToolEntry{
-			{Name: "ripgrep"},
-			{Name: "git"},
-		}}},
-	}
+		config.ToolEntry{Name: "ripgrep"},
+		config.ToolEntry{Name: "git"},
+	)
 	if err := config.Save(cfgPath, root); err != nil {
 		t.Fatalf("saving config: %v", err)
 	}
 
-	result, err := a.Sync(context.Background(), gosync.SyncOptions{Group: "base"})
+	result, err := a.Sync(context.Background(), gosync.SyncOptions{Group: "testhost"})
 	if err != nil {
 		t.Fatalf("Sync: %v", err)
 	}
@@ -555,14 +559,12 @@ func TestApp_Import_DiscoversInstalledTools(t *testing.T) {
 	)
 	a, cfgPath := newAppWithBrew(t, mock)
 
-	root := &config.RootConfig{
-		Tools: map[string]config.ToolSpec{
+	root := rootWithTestHostGroup(
+		map[string]config.ToolSpec{
 			"ripgrep": {Provider: "system", Package: "ripgrep", InstallWith: "brew"},
 		},
-		Groups: []*config.GroupConfig{{Tools: []config.ToolEntry{
-			{Name: "ripgrep"},
-		}}},
-	}
+		config.ToolEntry{Name: "ripgrep"},
+	)
 	if err := config.Save(cfgPath, root); err != nil {
 		t.Fatalf("saving config: %v", err)
 	}
@@ -627,19 +629,17 @@ func TestApp_Sync_BrewCask(t *testing.T) {
 	)
 	a, cfgPath := newAppWithBrew(t, mock)
 
-	root := &config.RootConfig{
-		Tools: map[string]config.ToolSpec{
+	root := rootWithTestHostGroup(
+		map[string]config.ToolSpec{
 			"warp": {Provider: "system", Package: "warp", InstallWith: "brew"},
 		},
-		Groups: []*config.GroupConfig{{Tools: []config.ToolEntry{
-			{Name: "warp"},
-		}}},
-	}
+		config.ToolEntry{Name: "warp"},
+	)
 	if err := config.Save(cfgPath, root); err != nil {
 		t.Fatalf("saving config: %v", err)
 	}
 
-	result, err := a.Sync(context.Background(), gosync.SyncOptions{Group: "base"})
+	result, err := a.Sync(context.Background(), gosync.SyncOptions{Group: "testhost"})
 	if err != nil {
 		t.Fatalf("Sync: %v", err)
 	}

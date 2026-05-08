@@ -1,6 +1,0 @@
-# sync --profile with a non-existent profile exits with an error
-! exec omni --config settings.json sync --dry-run --profile nonexistent
-stderr 'not found'
-
--- settings.json --
-{}

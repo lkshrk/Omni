@@ -1,0 +1,24 @@
+# dots group assignments can be shown, moved, and guarded through the CLI
+env HOME=$WORK
+exec omni --config settings.json dots groups nvim
+stdout 'nvim: testhost'
+
+exec omni --config settings.json dots groups nvim --move work
+stdout 'moved nvim to group work'
+exec omni --config settings.json dots groups nvim
+stdout 'nvim: work'
+exec cat settings.json
+stdout '"name": "work"'
+stdout '"name": "nvim"'
+
+exec omni --config settings.json dots groups nvim --move testhost
+stdout 'moved nvim to group testhost'
+exec omni --config settings.json dots groups nvim
+stdout 'nvim: testhost'
+! exec omni --config settings.json dots groups nvim --remove testhost
+stderr 'needs at least one group'
+
+-- settings.json --
+{"host_settings":{"testhost":{"dots_repo":"~/dotfiles"}},"hosts":{"testhost":["work"]},"groups":[{"name":"testhost","special":"host","dots":[{"name":"nvim","path":"~/.config/nvim"}]},{"name":"work"}]}
+
+-- dotfiles/dotfiles/.keep --

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -39,47 +40,88 @@ func newTestCmd(t *testing.T) (*cobra.Command, string) {
 // withConfig pre-writes a RootConfig to the config path.
 func withConfig(t *testing.T, cfgPath string, cfg *config.RootConfig) {
 	t.Helper()
-	for _, profile := range cfg.Profiles {
-		for _, group := range profile.Groups {
-			ensureTestGroup(cfg, group)
-		}
-	}
+	normalizeCLITestRootConfig(cfg)
 	if err := config.Save(cfgPath, cfg); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
 }
 
-func ensureTestGroup(cfg *config.RootConfig, name string) {
+func normalizeCLITestRootConfig(cfg *config.RootConfig) {
+	host := "testhost"
 	for _, group := range cfg.Groups {
-		if group.BaseName() == name {
-			return
+		if group != nil && group.Name == "" {
+			group.Name = host
+			group.Special = "host"
+		} else if group != nil && group.Name == host {
+			group.Special = "host"
 		}
 	}
-	if name == "" || name == "base" {
-		cfg.Groups = append(cfg.Groups, &config.GroupConfig{})
-		return
+	if cfg.Hosts == nil {
+		cfg.Hosts = map[string][]string{}
 	}
-	cfg.Groups = append(cfg.Groups, &config.GroupConfig{Name: name})
+	for _, group := range cfg.Groups {
+		if group != nil && group.IsHost() {
+			if _, ok := cfg.Hosts[group.Name]; !ok {
+				cfg.Hosts[group.Name] = []string{}
+			}
+		}
+	}
+	byName := map[string]*config.GroupConfig{}
+	merged := make([]*config.GroupConfig, 0, len(cfg.Groups))
+	for _, group := range cfg.Groups {
+		if group == nil {
+			continue
+		}
+		if existing, ok := byName[group.Name]; ok {
+			existing.Taps = append(existing.Taps, group.Taps...)
+			existing.Tools = append(existing.Tools, group.Tools...)
+			existing.Dots = append(existing.Dots, group.Dots...)
+			if group.Special != "" {
+				existing.Special = group.Special
+			}
+			if existing.Description == "" {
+				existing.Description = group.Description
+			}
+			continue
+		}
+		byName[group.Name] = group
+		merged = append(merged, group)
+	}
+	cfg.Groups = merged
 }
 
-// withProfile adds a profile + hostname mapping to an existing config (or creates one)
-// so profile-enforced commands pass requireProfile.
-func withProfile(t *testing.T, cfgPath string) {
+// withHost keeps the old test helper name while creating an active host entry
+// so host-enforced commands pass requireActiveHost.
+func withHost(t *testing.T, cfgPath string) {
 	t.Helper()
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		cfg = &config.RootConfig{}
 	}
-	if cfg.Profiles == nil {
-		cfg.Profiles = map[string]config.Profile{}
+	if cfg.Hosts == nil {
+		cfg.Hosts = map[string][]string{}
 	}
-	cfg.Profiles["default"] = config.Profile{Groups: []string{"base"}}
-	ensureTestGroup(cfg, "base")
-	if cfg.Hostnames == nil {
-		cfg.Hostnames = map[string]string{}
-	}
-	cfg.Hostnames["testhost"] = "default"
+	cfg.Hosts["testhost"] = []string{}
+	ensureTestHostGroup(cfg, "testhost")
 	withConfig(t, cfgPath, cfg)
+}
+
+func ensureTestHostGroup(cfg *config.RootConfig, name string) {
+	for _, group := range cfg.Groups {
+		if group.BaseName() == name {
+			group.Special = "host"
+			return
+		}
+	}
+	cfg.Groups = append(cfg.Groups, &config.GroupConfig{Name: name, Special: "host"})
+}
+
+func cliTestHostGroup(names ...string) *config.GroupConfig {
+	group := &config.GroupConfig{Name: "testhost", Special: "host"}
+	for _, name := range names {
+		group.Tools = append(group.Tools, config.ToolEntry{Name: name})
+	}
+	return group
 }
 
 // executeCmd sets the final args on cmd, captures stdout, runs Execute, and
@@ -114,6 +156,7 @@ func executeCmd(t *testing.T, cmd *cobra.Command, args ...string) (stdout string
 
 type cliStubProvider struct {
 	name           string
+	resolvedName   string
 	unavailable    bool
 	installed      []provider.InstalledTool
 	installedCalls []string
@@ -124,6 +167,12 @@ type cliStubProvider struct {
 func (p *cliStubProvider) Name() string                              { return p.name }
 func (p *cliStubProvider) Description() string                       { return p.name + " stub" }
 func (p *cliStubProvider) Available(_ context.Context) (bool, error) { return !p.unavailable, nil }
+func (p *cliStubProvider) ResolvedName(_ context.Context) (string, error) {
+	if p.resolvedName == "" {
+		return "", fmt.Errorf("no resolved provider")
+	}
+	return p.resolvedName, nil
+}
 func (p *cliStubProvider) Install(_ context.Context, tool provider.Tool) error {
 	p.installedCalls = append(p.installedCalls, tool.Name)
 	for _, installed := range p.installed {
@@ -174,7 +223,7 @@ func TestMain(m *testing.M) {
 			&cliStubProvider{name: "pip"},
 			&cliStubProvider{name: "node"},
 			&cliStubProvider{name: "python"},
-			&cliStubProvider{name: "system"},
+			&cliStubProvider{name: "system", resolvedName: "brew"},
 		)
 	}
 	code := m.Run()
@@ -388,13 +437,8 @@ func TestSyncAllFlag_ClaimsDiscoveredAndSyncs(t *testing.T) {
 			"ripgrep": {Provider: "system", InstallWith: "brew"},
 		},
 		Groups: []*config.GroupConfig{
-			{},
-			{Name: "testhost", Tools: []config.ToolEntry{{Name: "ripgrep"}}},
+			cliTestHostGroup("ripgrep"),
 		},
-		Profiles: map[string]config.Profile{
-			"default": {Groups: []string{"base"}},
-		},
-		Hostnames: map[string]string{"testhost": "default"},
 	})
 	prov := &cliStubProvider{
 		name:      "brew",
@@ -437,7 +481,7 @@ func TestSyncAllFlag_DryRunDoesNotWriteDBOrConfig(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	cacheDir := t.TempDir()
-	withConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{{}}})
+	withConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{cliTestHostGroup()}})
 	prov := &cliStubProvider{
 		name:      "brew",
 		installed: []provider.InstalledTool{{Tool: provider.Tool{Name: "fzf", Provider: "brew"}, Version: "1.0"}},
@@ -478,10 +522,10 @@ func TestSyncAllFlag_DryRunDoesNotWriteDBOrConfig(t *testing.T) {
 
 func TestSyncAllFlag_RejectsScopedOptions(t *testing.T) {
 	cmd := newSyncCmd(&rootState{})
-	cmd.SetArgs([]string{"--all", "--profile", "default"})
+	cmd.SetArgs([]string{"--all", "--group", "default"})
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("sync --all --profile returned nil, want conflict error")
+		t.Fatal("sync --all --group returned nil, want conflict error")
 	}
 	if !strings.Contains(err.Error(), "--all cannot be combined") {
 		t.Fatalf("error = %q, want --all conflict", err)
@@ -497,7 +541,7 @@ func TestToolsSetHostFlag_WritesHostOverride(t *testing.T) {
 		Tools: map[string]config.ToolSpec{
 			"black": {Provider: "system", InstallWith: "brew"},
 		},
-		Groups: []*config.GroupConfig{{Tools: []config.ToolEntry{{Name: "black"}}}},
+		Groups: []*config.GroupConfig{cliTestHostGroup("black")},
 	})
 	brew := &cliStubProvider{name: "brew"}
 	pip := &cliStubProvider{name: "pip"}
@@ -533,7 +577,7 @@ func TestSwitchReinstallDefaultFlag_InstallsConfiguredProvider(t *testing.T) {
 		Tools: map[string]config.ToolSpec{
 			"black": {Provider: "python", InstallWith: "pip"},
 		},
-		Groups: []*config.GroupConfig{{Tools: []config.ToolEntry{{Name: "black"}}}},
+		Groups: []*config.GroupConfig{cliTestHostGroup("black")},
 	})
 	brew := &cliStubProvider{name: "brew"}
 	pip := &cliStubProvider{
@@ -581,20 +625,6 @@ func cliTestGroupHasTool(group *config.GroupConfig, name string) bool {
 		}
 	}
 	return false
-}
-
-func TestWrapText_Delegation(t *testing.T) {
-	// wrapText delegates to text.WrapText — just verify it doesn't panic and
-	// returns sensible results.
-	lines := wrapText("hello world", 5)
-	if len(lines) == 0 {
-		t.Error("wrapText returned empty slice")
-	}
-	// Short text that fits on one line.
-	lines = wrapText("hi", 80)
-	if len(lines) != 1 || lines[0] != "hi" {
-		t.Errorf("wrapText short text = %v, want [hi]", lines)
-	}
 }
 
 func TestPrintDotsTable_FormatsCorrectly(t *testing.T) {
@@ -823,43 +853,37 @@ func TestList_NoConfig_PrintsHelpfulMessage(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 
-	// list requires a profile. Pre-create config with no tools but a profile+hostname.
-	withConfig(t, cfgPath, &config.RootConfig{
-		Profiles:  map[string]config.Profile{"default": {Groups: []string{"base"}}},
-		Hostnames: map[string]string{"testhost": "default"},
-	})
+	// Pre-create an active host with no tools.
+	withConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{cliTestHostGroup()}})
 
-	// Now delete the config so HasConfig() returns false but the DB init still works.
-	// Actually we need the config for profile; instead, write an empty config without
-	// tools so "No tools in cache" is printed. This tests that path.
-	// Instead test: config present + active profile + no tools → "No tools in cache".
+	// Config present + active host + no tools → "No tools in cache".
 	cmd := NewRootCmd()
 	errBuf := &bytes.Buffer{}
 	cmd.SetErr(errBuf)
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "list"})
 	err := cmd.Execute()
 	if err != nil {
-		t.Fatalf("list with profile and empty config: %v", err)
+		t.Fatalf("list with host and empty config: %v", err)
 	}
 	// DB is empty, should print "No tools in cache" (via fmt.Println to os.Stdout).
 	// Command should return nil — that's the primary assertion.
 }
 
-func TestList_NoConfig_File_WithoutProfile_RequiresProfile(t *testing.T) {
+func TestList_NoConfigFile_WithoutHost_RequiresHost(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
-	// No settings.json, no profile → requireProfile should fail.
+	// No settings.json, no host assignment → requireActiveHost should fail.
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "list"})
 	err := cmd.Execute()
 	if err == nil {
-		t.Error("expected error when no active profile")
+		t.Error("expected error when no active host")
 	}
-	if !strings.Contains(err.Error(), "no active profile") {
-		t.Errorf("expected 'no active profile' error, got: %v", err)
+	if !strings.Contains(err.Error(), "no host configuration") {
+		t.Errorf("expected 'no host configuration' error, got: %v", err)
 	}
 }
 
@@ -869,11 +893,8 @@ func TestList_EmptyConfig_PrintsNoToolsMessage(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 
-	// Write config with profile so requireProfile passes.
-	withConfig(t, cfgPath, &config.RootConfig{
-		Profiles:  map[string]config.Profile{"default": {Groups: []string{"base"}}},
-		Hostnames: map[string]string{"testhost": "default"},
-	})
+	// Write config with active host so host enforcement passes.
+	withConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{cliTestHostGroup()}})
 
 	cmd := NewRootCmd()
 	outBuf := &bytes.Buffer{}
@@ -904,9 +925,9 @@ func TestProviders_PrintsHeader(t *testing.T) {
 	// providers uses fmt.Printf which prints to os.Stdout, but command returned nil.
 }
 
-// ─── profile commands ─────────────────────────────────────────────────────────
+// ─── hosts commands ──────────────────────────────────────────────────────────
 
-func TestProfileList_NoProfiles(t *testing.T) {
+func TestHostsEnsure_CreatesHostGroup(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
@@ -914,339 +935,58 @@ func TestProfileList_NoProfiles(t *testing.T) {
 	withConfig(t, cfgPath, &config.RootConfig{})
 
 	cmd := NewRootCmd()
-	outBuf := &bytes.Buffer{}
-	cmd.SetOut(outBuf)
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "profile", "list"})
-	err := cmd.Execute()
-	if err != nil {
-		t.Fatalf("profile list: %v", err)
-	}
-	// fmt.Println goes to os.Stdout; just verify no error returned.
-}
-
-func TestProfileAdd_CreatesProfile(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "profile", "add", "myprofile"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "hosts", "ensure", "myhost"})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("profile add: %v", err)
-	}
-
-	// Verify profile exists in config.
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	if _, ok := cfg.Profiles["myprofile"]; !ok {
-		t.Error("expected profile 'myprofile' in config after add")
-	}
-}
-
-func TestProfileAdd_ThenList(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{})
-
-	// Add a profile.
-	cmd1 := NewRootCmd()
-	cmd1.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "profile", "add", "testprofile"})
-	if err := cmd1.Execute(); err != nil {
-		t.Fatalf("profile add: %v", err)
-	}
-
-	// List profiles — command should succeed.
-	cmd2 := NewRootCmd()
-	cmd2.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "profile", "list"})
-	if err := cmd2.Execute(); err != nil {
-		t.Fatalf("profile list after add: %v", err)
+		t.Fatalf("hosts ensure: %v", err)
 	}
 
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	if _, ok := cfg.Profiles["testprofile"]; !ok {
-		t.Error("expected testprofile in config")
+	if _, ok := cfg.Hosts["myhost"]; !ok {
+		t.Fatal("expected host entry after ensure")
+	}
+	group := cliTestGroup(cfg, "myhost")
+	if group == nil || !group.IsHost() {
+		t.Fatalf("host group = %+v, want protected host group", group)
 	}
 }
 
-func TestProfileDelete_RemovesProfile(t *testing.T) {
+func TestHostsSetAddRemoveGroups(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{
-		Profiles: map[string]config.Profile{
-			"myprofile": {Groups: []string{"base"}},
-		},
+		Groups: []*config.GroupConfig{{Name: "work"}, {Name: "extras"}},
 	})
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"-y", "--config", cfgPath, "--cache-dir", cacheDir, "profile", "delete", "myprofile"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "hosts", "set-groups", "testhost", "work"})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("profile delete: %v", err)
+		t.Fatalf("hosts set-groups: %v", err)
+	}
+
+	cmd = NewRootCmd()
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "hosts", "add-group", "testhost", "extras"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("hosts add-group: %v", err)
+	}
+
+	cmd = NewRootCmd()
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "hosts", "remove-group", "testhost", "work"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("hosts remove-group: %v", err)
 	}
 
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	if _, ok := cfg.Profiles["myprofile"]; ok {
-		t.Error("expected profile 'myprofile' to be removed")
-	}
-}
-
-func TestProfileRename_RenamesProfileAndHostnames(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{
-		Profiles: map[string]config.Profile{
-			"work": {Groups: []string{"base"}},
-		},
-		Hostnames: map[string]string{
-			"mymachine": "work",
-		},
-	})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "profile", "rename", "work", "office"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("profile rename: %v", err)
-	}
-
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	if _, ok := cfg.Profiles["work"]; ok {
-		t.Fatal("old profile still present after rename")
-	}
-	if _, ok := cfg.Profiles["office"]; !ok {
-		t.Fatal("new profile missing after rename")
-	}
-	if got := cfg.Hostnames["mymachine"]; got != "office" {
-		t.Fatalf("hostname mapping = %q, want office", got)
-	}
-}
-
-func TestProfileSetHostname_MapsHostname(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{
-		Profiles: map[string]config.Profile{
-			"work": {Groups: []string{"base"}},
-		},
-	})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "profile", "set-hostname", "mymachine", "work"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("profile set-hostname: %v", err)
-	}
-
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	if cfg.Hostnames["mymachine"] != "work" {
-		t.Errorf("expected hostname mapping mymachine→work, got %q", cfg.Hostnames["mymachine"])
-	}
-}
-
-func TestProfileDeleteHostname_RemovesMapping(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{
-		Profiles: map[string]config.Profile{
-			"work": {Groups: []string{"base"}},
-		},
-		Hostnames: map[string]string{
-			"mymachine": "work",
-		},
-	})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"-y", "--config", cfgPath, "--cache-dir", cacheDir, "profile", "remove-hostname", "mymachine"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("profile remove-hostname: %v", err)
-	}
-
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	if _, ok := cfg.Hostnames["mymachine"]; ok {
-		t.Error("expected hostname mapping to be removed")
-	}
-}
-
-func TestProfileAddGroup_AddsGroup(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{
-		Profiles: map[string]config.Profile{
-			"work": {Groups: []string{"base"}},
-		},
-	})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "profile", "add-group", "work", "extras"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("profile add-group: %v", err)
-	}
-
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	p := cfg.Profiles["work"]
-	found := false
-	for _, g := range p.Groups {
-		if g == "extras" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected 'extras' in profile groups, got %v", p.Groups)
-	}
-}
-
-func TestProfileDeleteGroup_RemovesGroup(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{
-		Profiles: map[string]config.Profile{
-			"work": {Groups: []string{"base", "extras"}},
-		},
-	})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "profile", "remove-group", "work", "extras"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("profile remove-group: %v", err)
-	}
-
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	p := cfg.Profiles["work"]
-	for _, g := range p.Groups {
-		if g == "extras" {
-			t.Error("expected 'extras' to be removed from profile groups")
-		}
-	}
-}
-
-func TestProfileIgnoreAdd_AddsIgnore(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{
-		Profiles: map[string]config.Profile{
-			"work": {Groups: []string{"base"}},
-		},
-	})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "profile", "ignore", "add", "work", "slack"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("profile ignore add: %v", err)
-	}
-
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	p := cfg.Profiles["work"]
-	found := false
-	for _, ig := range p.Ignore {
-		if ig == "slack" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected 'slack' in ignore list, got %v", p.Ignore)
-	}
-}
-
-func TestProfileIgnoreRemove_RemovesIgnore(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{
-		Profiles: map[string]config.Profile{
-			"work": {Groups: []string{"base"}, Ignore: []string{"slack"}},
-		},
-	})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "profile", "ignore", "remove", "work", "slack"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("profile ignore remove: %v", err)
-	}
-
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	p := cfg.Profiles["work"]
-	for _, ig := range p.Ignore {
-		if ig == "slack" {
-			t.Error("expected 'slack' to be removed from ignore list")
-		}
-	}
-}
-
-func TestProfileIgnoreList_Empty(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{
-		Profiles: map[string]config.Profile{
-			"work": {Groups: []string{"base"}},
-		},
-	})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "profile", "ignore", "list", "work"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("profile ignore list: %v", err)
-	}
-}
-
-func TestProfileIgnoreList_NotFoundProfile(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "profile", "ignore", "list", "nonexistent"})
-	err := cmd.Execute()
-	if err == nil {
-		t.Error("expected error for nonexistent profile")
+	got := strings.Join(cfg.Hosts["testhost"], ",")
+	if got != "extras" {
+		t.Fatalf("testhost groups = %q, want extras", got)
 	}
 }
 
@@ -1258,7 +998,7 @@ func TestGroups_EmptyConfig(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "groups"})
@@ -1278,12 +1018,12 @@ func TestGroups_WithGroups(t *testing.T) {
 			"slack": {Provider: "system", InstallWith: "brew"},
 		},
 		Groups: []*config.GroupConfig{
-			{Name: "", Tools: []config.ToolEntry{{Name: "git"}}},
+			cliTestHostGroup("git"),
 			{Name: "work", Description: "work tools", Tools: []config.ToolEntry{{Name: "slack"}}},
 		},
 	}
 	withConfig(t, cfgPath, cfg)
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "groups"})
@@ -1300,7 +1040,7 @@ func TestSync_DryRun_EmptyConfig(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "sync", "--dry-run"})
@@ -1315,26 +1055,23 @@ func TestSync_DryRun_NoConfig_File(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 
-	// No settings.json at all — requireProfile should fail first.
+	// No settings.json at all; active-host enforcement should fail first.
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "sync", "--dry-run"})
 	err := cmd.Execute()
 	if err == nil {
-		t.Error("expected error when no active profile")
+		t.Error("expected error when no active host")
 	}
 }
 
-func TestSync_DryRun_WithProfile_NoConfigFile(t *testing.T) {
+func TestSync_DryRun_WithHost_NoConfigFile(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 
-	// Config with profile but no tools → sync --dry-run should succeed.
-	withConfig(t, cfgPath, &config.RootConfig{
-		Profiles:  map[string]config.Profile{"default": {Groups: []string{"base"}}},
-		Hostnames: map[string]string{"testhost": "default"},
-	})
+	// Config with active host but no tools → sync --dry-run should succeed.
+	withConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{cliTestHostGroup()}})
 
 	cmd := NewRootCmd()
 	errBuf := &bytes.Buffer{}
@@ -1342,57 +1079,41 @@ func TestSync_DryRun_WithProfile_NoConfigFile(t *testing.T) {
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "sync", "--dry-run"})
 	err := cmd.Execute()
 	if err != nil {
-		t.Fatalf("sync --dry-run with profile and empty config: %v", err)
+		t.Fatalf("sync --dry-run with host and empty config: %v", err)
 	}
 	// sync --dry-run with nothing to install should print "Dry-run" via fmt.Fprintln.
 }
 
-func TestSync_Profile_Unknown_ReturnsError(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "sync", "--profile", "nonexistent"})
-	err := cmd.Execute()
-	if err == nil {
-		t.Error("expected error for unknown profile in sync --profile")
-	}
-}
-
 // ─── add command ──────────────────────────────────────────────────────────────
 
-func TestAdd_RequiresProfile_WithActiveProfile(t *testing.T) {
+func TestAdd_RequiresHost_WithActiveHost(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
-	// Pre-create config with profile so requireProfile passes.
+	// Pre-create config with an active host so host enforcement passes.
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "add", "testpkg", "--provider", "system", "--install-with", "brew", "--group", "base"})
-	// This may error because brew is not available, but should not error on profile check.
-	// We just verify requireProfile doesn't block it.
+	// This may error because brew is not available, but should not error on host checks.
 	_ = cmd.Execute()
 }
 
-func TestAdd_NoProfile_ReturnsError(t *testing.T) {
+func TestAdd_NoHost_ReturnsError(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
-	// Config with no profile/hostname mapping.
+	// Config with no active host group.
 	withConfig(t, cfgPath, &config.RootConfig{})
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "add", "testpkg", "--provider", "system"})
 	err := cmd.Execute()
 	if err == nil {
-		t.Error("expected error when no active profile")
+		t.Error("expected error when no active host")
 	}
 }
 
@@ -1640,7 +1361,7 @@ func TestDotsIgnoreEntry_PersistsAndSuppressesDiscovery(t *testing.T) {
 	}
 }
 
-func TestDotsGroups_EditsMemberships(t *testing.T) {
+func TestDotsGroups_MovesAssignment(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
@@ -1661,39 +1382,28 @@ func TestDotsGroups_EditsMemberships(t *testing.T) {
 	if err := listCmd.Execute(); err != nil {
 		t.Fatalf("dots groups list: %v", err)
 	}
-	if got := listOut.String(); !strings.Contains(got, "nvim: base") {
-		t.Fatalf("dots groups list output = %q, want base membership", got)
+	if got := listOut.String(); !strings.Contains(got, "nvim: testhost") {
+		t.Fatalf("dots groups list output = %q, want host membership", got)
 	}
 
-	addCmd := NewRootCmd()
-	addOut := &bytes.Buffer{}
-	addCmd.SetOut(addOut)
-	addCmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "groups", "nvim", "--add", "work"})
-	if err := addCmd.Execute(); err != nil {
-		t.Fatalf("dots groups --add: %v", err)
+	moveCmd := NewRootCmd()
+	moveOut := &bytes.Buffer{}
+	moveCmd.SetOut(moveOut)
+	moveCmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "groups", "nvim", "--move", "work"})
+	if err := moveCmd.Execute(); err != nil {
+		t.Fatalf("dots groups --move: %v", err)
 	}
-	if got := addOut.String(); !strings.Contains(got, "updated groups for nvim: base, work") {
-		t.Fatalf("dots groups --add output = %q", got)
-	}
-
-	setCmd := NewRootCmd()
-	setOut := &bytes.Buffer{}
-	setCmd.SetOut(setOut)
-	setCmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "groups", "nvim", "--set", "work"})
-	if err := setCmd.Execute(); err != nil {
-		t.Fatalf("dots groups --set: %v", err)
-	}
-	if got := setOut.String(); !strings.Contains(got, "updated groups for nvim: work") {
-		t.Fatalf("dots groups --set output = %q", got)
+	if got := moveOut.String(); !strings.Contains(got, "moved nvim to group work") {
+		t.Fatalf("dots groups --move output = %q", got)
 	}
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	base := findCLIDotsTestGroup(cfg.Groups, "base")
+	host := findCLIDotsTestGroup(cfg.Groups, "testhost")
 	work := findCLIDotsTestGroup(cfg.Groups, "work")
-	if base == nil || len(base.Dots) != 0 || work == nil || len(work.Dots) != 1 || work.Dots[0].Name != "nvim" {
-		t.Fatalf("groups after set = %#v, want nvim only in work", cfg.Groups)
+	if host == nil || len(host.Dots) != 0 || work == nil || len(work.Dots) != 1 || work.Dots[0].Name != "nvim" {
+		t.Fatalf("groups after move = %#v, want nvim only in work", cfg.Groups)
 	}
 
 	removeCmd := NewRootCmd()
@@ -1800,6 +1510,14 @@ func TestDotsResolveUseRepoCommand(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(nvimPath, "init.lua"), []byte("-- local"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	repoTime := time.Unix(1_700_000_000, 0).Add(time.Hour)
+	localTime := time.Unix(1_700_000_000, 0)
+	if err := os.Chtimes(filepath.Join(srcDir, "init.lua"), repoTime, repoTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(filepath.Join(nvimPath, "init.lua"), localTime, localTime); err != nil {
+		t.Fatal(err)
+	}
 	withConfig(t, cfgPath, &config.RootConfig{
 		Settings: config.Settings{DotsRepo: repoDir},
 		Groups: []*config.GroupConfig{{
@@ -1842,15 +1560,15 @@ func TestDotsStatus_EmptyEntries_WorkingTreeClean(t *testing.T) {
 	_ = cmd.Execute()
 }
 
-// ─── requireProfile ───────────────────────────────────────────────────────────
+// ─── requireActiveHost ────────────────────────────────────────────────────────
 
-func TestRequireProfile_ExemptCommands(t *testing.T) {
-	// Commands in profileExempt should pass even without a profile.
+func TestRequireActiveHost_ExemptCommands(t *testing.T) {
+	// Commands in hostExempt should pass even without a host.
 	exemptCmds := []struct {
 		args []string
 	}{
-		{[]string{"profile", "list"}},
-		{[]string{"profile", "add", "x"}},
+		{[]string{"hosts", "list"}},
+		{[]string{"hosts", "ensure", "testhost"}},
 		{[]string{"providers"}},
 	}
 	for _, tc := range exemptCmds {
@@ -1865,15 +1583,15 @@ func TestRequireProfile_ExemptCommands(t *testing.T) {
 			args := append([]string{"--config", cfgPath, "--cache-dir", cacheDir}, tc.args...)
 			cmd.SetArgs(args)
 			err := cmd.Execute()
-			// Should not fail due to missing profile (may fail for other reasons).
-			if err != nil && strings.Contains(err.Error(), "no active profile") {
-				t.Errorf("exempt command %v should not require profile, got: %v", tc.args, err)
+			// Should not fail due to missing host (may fail for other reasons).
+			if err != nil && strings.Contains(err.Error(), "no host configuration") {
+				t.Errorf("exempt command %v should not require host, got: %v", tc.args, err)
 			}
 		})
 	}
 }
 
-func TestRequireProfile_NonExemptCommand_NoProfile_ReturnsError(t *testing.T) {
+func TestRequireActiveHost_NonExemptCommand_NoHost_ReturnsError(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
@@ -1884,42 +1602,42 @@ func TestRequireProfile_NonExemptCommand_NoProfile_ReturnsError(t *testing.T) {
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "groups"})
 	err := cmd.Execute()
 	if err == nil {
-		t.Error("expected error for non-exempt command without active profile")
+		t.Error("expected error for non-exempt command without active host")
 	}
-	if !strings.Contains(err.Error(), "no active profile") {
-		t.Errorf("expected 'no active profile', got: %v", err)
+	if !strings.Contains(err.Error(), "no host configuration") {
+		t.Errorf("expected 'no host configuration', got: %v", err)
 	}
 }
 
-func TestRequireProfile_NonExemptCommand_WithProfile_Passes(t *testing.T) {
+func TestRequireActiveHost_NonExemptCommand_WithHost_Passes(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "groups"})
 	err := cmd.Execute()
-	// Error may occur for other reasons but not profile.
-	if err != nil && strings.Contains(err.Error(), "no active profile") {
-		t.Errorf("should not get profile error with active profile, got: %v", err)
+	// Error may occur for other reasons but not host setup.
+	if err != nil && strings.Contains(err.Error(), "no host configuration") {
+		t.Errorf("should not get host error with active host, got: %v", err)
 	}
 }
 
-// ─── profileExempt map ────────────────────────────────────────────────────────
+// ─── hostExempt map ───────────────────────────────────────────────────────────
 
-func TestProfileExempt_ContainsExpectedCommands(t *testing.T) {
-	expected := []string{"init", "profile", "dots", "ui", "version", "providers", "help", "completion"}
+func TestHostExempt_ContainsExpectedCommands(t *testing.T) {
+	expected := []string{"init", "hosts", "dots", "ui", "version", "providers", "settings", "help", "completion"}
 	for _, name := range expected {
-		if !profileExempt[name] {
-			t.Errorf("expected %q in profileExempt", name)
+		if !hostExempt[name] {
+			t.Errorf("expected %q in hostExempt", name)
 		}
 	}
 	// "omni" (root) must NOT be in the exempt list.
-	if profileExempt["omni"] {
-		t.Error("'omni' must not be in profileExempt — it would exempt all commands")
+	if hostExempt["omni"] {
+		t.Error("'omni' must not be in hostExempt — it would exempt all commands")
 	}
 }
 
@@ -1940,22 +1658,6 @@ func TestDotsCmd_NoSubcommand_ShowsHelp(t *testing.T) {
 	_ = cmd.Execute()
 }
 
-// ─── profile command: add-group to nonexistent profile ───────────────────────
-
-func TestProfileAddGroup_SilentlyCreates_UnknownProfile(t *testing.T) {
-	// AddGroupToProfile is idempotent/silent — it creates the profile entry if not found.
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "profile", "add-group", "nonexistent", "extras"})
-	// Should not error — app.AddGroupToProfile is lenient with unknown profiles.
-	_ = cmd.Execute()
-}
-
 // ─── version constant ─────────────────────────────────────────────────────────
 
 func TestVersion_IsDev(t *testing.T) {
@@ -1967,89 +1669,34 @@ func TestVersion_IsDev(t *testing.T) {
 
 // ─── init helpers ─────────────────────────────────────────────────────────────
 
-func TestSortedProfileNames_Empty(t *testing.T) {
-	got := sortedProfileNames(nil)
+func TestSortedHostNames_Empty(t *testing.T) {
+	got := sortedHostNames(nil)
 	if len(got) != 0 {
-		t.Errorf("sortedProfileNames(nil) = %v, want []", got)
+		t.Errorf("sortedHostNames(nil) = %v, want []", got)
 	}
-	got = sortedProfileNames(map[string]config.Profile{})
+	got = sortedHostNames(map[string]config.HostAssignment{})
 	if len(got) != 0 {
-		t.Errorf("sortedProfileNames({}) = %v, want []", got)
+		t.Errorf("sortedHostNames({}) = %v, want []", got)
 	}
 }
 
-func TestSortedProfileNames_Sorted(t *testing.T) {
-	profiles := map[string]config.Profile{
+func TestSortedHostNames_Sorted(t *testing.T) {
+	hosts := map[string]config.HostAssignment{
 		"zebra":   {},
 		"alpha":   {},
 		"beta":    {},
 		"charlie": {},
 	}
-	got := sortedProfileNames(profiles)
+	got := sortedHostNames(hosts)
 	want := []string{"alpha", "beta", "charlie", "zebra"}
 	if len(got) != len(want) {
-		t.Fatalf("sortedProfileNames len = %d, want %d", len(got), len(want))
+		t.Fatalf("sortedHostNames len = %d, want %d", len(got), len(want))
 	}
 	for i := range want {
 		if got[i] != want[i] {
-			t.Errorf("sortedProfileNames[%d] = %q, want %q", i, got[i], want[i])
+			t.Errorf("sortedHostNames[%d] = %q, want %q", i, got[i], want[i])
 		}
 	}
-}
-
-// ─── consolidate helpers ──────────────────────────────────────────────────────
-
-func TestPrintProviderConsolidateResult_AllAlreadyOnProvider(t *testing.T) {
-	res := &app.ConsolidateResult{}
-	// No panic, prints "All tools already on brew."
-	printProviderConsolidateResult(res, "brew", false)
-}
-
-func TestPrintProviderConsolidateResult_DryRun_NothingToMigrate(t *testing.T) {
-	res := &app.ConsolidateResult{}
-	printProviderConsolidateResult(res, "brew", true)
-}
-
-func TestPrintProviderConsolidateResult_DryRun_WithMigrated(t *testing.T) {
-	res := &app.ConsolidateResult{
-		Migrated: []app.ConsolidateTool{
-			{Name: "ripgrep", FromProvider: "apt"},
-		},
-	}
-	printProviderConsolidateResult(res, "brew", true)
-}
-
-func TestPrintProviderConsolidateResult_WithMigratedAndFailed(t *testing.T) {
-	res := &app.ConsolidateResult{
-		Migrated: []app.ConsolidateTool{
-			{Name: "ripgrep", FromProvider: "apt"},
-		},
-		Failed: []app.ConsolidateFailure{
-			{ConsolidateTool: app.ConsolidateTool{Name: "htop", FromProvider: "apt"}, Err: fmt.Errorf("install failed")},
-		},
-		UninstallWarnings: []app.ConsolidateFailure{
-			{ConsolidateTool: app.ConsolidateTool{Name: "ripgrep", FromProvider: "apt"}, Err: fmt.Errorf("uninstall failed")},
-		},
-	}
-	printProviderConsolidateResult(res, "brew", false)
-}
-
-func TestPrintConsolidateLines_Empty(t *testing.T) {
-	res := &app.ConsolidateResult{}
-	// Just verify no panic with empty result.
-	printConsolidateLines(res, "brew")
-}
-
-func TestPrintConsolidateLines_WithEntries(t *testing.T) {
-	res := &app.ConsolidateResult{
-		Migrated: []app.ConsolidateTool{
-			{Name: "tool1", FromProvider: "apt"},
-		},
-		Failed: []app.ConsolidateFailure{
-			{ConsolidateTool: app.ConsolidateTool{Name: "tool2", FromProvider: "apt"}, Err: fmt.Errorf("err")},
-		},
-	}
-	printConsolidateLines(res, "brew")
 }
 
 // ─── consolidate command error paths ─────────────────────────────────────────
@@ -2060,7 +1707,7 @@ func TestConsolidate_MutuallyExclusive_ToAndArgs(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "--to", "brew", "python", "uv"})
@@ -2079,7 +1726,7 @@ func TestConsolidate_EcosystemMode_TooFewArgs(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "python"})
@@ -2095,7 +1742,7 @@ func TestConsolidate_EcosystemDryRun_EmptyConfig(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "--dry-run", "python", "uv"})
@@ -2112,7 +1759,7 @@ func TestConsolidate_ProviderMode_DryRun_EmptyConfig(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "--to", "brew", "--dry-run"})
@@ -2128,7 +1775,7 @@ func TestConsolidate_ProviderMode_EmptyConfig_AllAlreadyOn(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "--to", "brew"})
@@ -2146,7 +1793,7 @@ func TestDelete_MissingProvider_ReturnsError(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "delete", "sometool"})
@@ -2167,7 +1814,7 @@ func TestUpgrade_NoArgsNoAll_ReturnsError(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "upgrade"})
@@ -2186,7 +1833,7 @@ func TestUpgrade_AllAndName_Mutually_Exclusive(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "upgrade", "--all", "sometool"})
@@ -2205,7 +1852,7 @@ func TestUpgrade_All_EmptyDB(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "upgrade", "--all"})
@@ -2221,7 +1868,7 @@ func TestUpgrade_NameWithoutProvider_ReturnsError(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "upgrade", "sometool"})
@@ -2242,7 +1889,7 @@ func TestSwitch_MissingFrom_ReturnsError(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "switch", "sometool", "--to", "brew"})
@@ -2261,7 +1908,7 @@ func TestSwitch_MissingTo_ReturnsError(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "switch", "sometool", "--from", "brew"})
@@ -2282,7 +1929,7 @@ func TestImport_DryRun_NoProviders_PrintsEmpty(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	// Use a non-existent provider so nothing is imported.
@@ -2301,7 +1948,7 @@ func TestInstall_NoProviderAvailable_ReturnsError(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	// Without --provider, it tries to auto-select. In a test env no providers
@@ -2319,7 +1966,7 @@ func TestInstall_WithExplicitProvider_AttemptsFailed(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	// Use pip as provider — if pip exists, install may attempt; if not, it errors.
@@ -2343,7 +1990,7 @@ func TestList_GroupFilter_UnknownGroup_ReturnsError(t *testing.T) {
 			{Name: "base", Tools: []config.ToolEntry{{Name: "git"}}},
 		},
 	})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "list", "--group", "nonexistent"})
@@ -2366,10 +2013,10 @@ func TestList_GroupFilter_KnownGroup_EmptyDB(t *testing.T) {
 			"slack": {Provider: "system", InstallWith: "brew"},
 		},
 		Groups: []*config.GroupConfig{
+			cliTestHostGroup(),
 			{Name: "work", Tools: []config.ToolEntry{{Name: "slack"}}},
 		},
-		Profiles:  map[string]config.Profile{"default": {Groups: []string{"work"}}},
-		Hostnames: map[string]string{"testhost": "default"},
+		Hosts: map[string][]string{"testhost": {"work"}},
 	})
 
 	cmd := NewRootCmd()
@@ -2388,7 +2035,7 @@ func TestSync_GroupPositionalArg_WithNamedGroup(t *testing.T) {
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
-	// Use a named group (non-base) so the group filter matches.
+	// Use a reusable group so the group filter matches.
 	withConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"git": {Provider: "system", InstallWith: "brew"},
@@ -2397,7 +2044,7 @@ func TestSync_GroupPositionalArg_WithNamedGroup(t *testing.T) {
 			{Name: "work", Tools: []config.ToolEntry{{Name: "git"}}},
 		},
 	})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "sync", "--dry-run", "work"})
@@ -2407,94 +2054,11 @@ func TestSync_GroupPositionalArg_WithNamedGroup(t *testing.T) {
 	}
 }
 
-// ─── profile list with active profile marker ─────────────────────────────────
-
-func TestProfileList_WithActiveProfile(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{
-		Profiles: map[string]config.Profile{
-			"work":     {Groups: []string{"base", "work"}},
-			"personal": {Groups: []string{"base"}},
-		},
-		Hostnames: map[string]string{"testhost": "work"},
-	})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "profile", "list"})
-	err := cmd.Execute()
-	if err != nil {
-		t.Fatalf("profile list: %v", err)
-	}
-}
-
-func TestProfileList_WithHostnameMappings(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{
-		Profiles: map[string]config.Profile{
-			"work": {Groups: []string{"base"}},
-		},
-		Hostnames: map[string]string{
-			"machine1": "work",
-			"machine2": "work",
-		},
-	})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "profile", "list"})
-	err := cmd.Execute()
-	if err != nil {
-		t.Fatalf("profile list with hostnames: %v", err)
-	}
-}
-
-// ─── profile ignore list with items ──────────────────────────────────────────
-
-func TestProfileIgnoreList_WithItems(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{
-		Profiles: map[string]config.Profile{
-			"work": {Groups: []string{"base"}, Ignore: []string{"slack", "zoom"}},
-		},
-	})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "profile", "ignore", "list", "work"})
-	err := cmd.Execute()
-	if err != nil {
-		t.Fatalf("profile ignore list: %v", err)
-	}
-}
-
 // ─── search command ───────────────────────────────────────────────────────────
 
-func TestSearch_ReturnsError_WhenSearchFails(t *testing.T) {
-	// search is profile-exempt? Let's check.
-	// It's NOT in profileExempt, so it needs a profile.
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+// ─── groups with host group ───────────────────────────────────────────────────
 
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "search", "git"})
-	// May succeed or fail depending on network; just verify code path is hit.
-	_ = cmd.Execute()
-}
-
-// ─── groups with base group ───────────────────────────────────────────────────
-
-func TestGroups_BaseGroup_ShowsAsBase(t *testing.T) {
+func TestGroups_HostGroup_ShowsSpecialGroup(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
@@ -2505,14 +2069,13 @@ func TestGroups_BaseGroup_ShowsAsBase(t *testing.T) {
 			"jq":  {Provider: "system", InstallWith: "brew"},
 		},
 		Groups: []*config.GroupConfig{
-			// Base group (Name == "") with a description.
-			{Name: "", Description: "base tools", Tools: []config.ToolEntry{
+			{Name: "testhost", Special: "host", Description: "host tools", Tools: []config.ToolEntry{
 				{Name: "git"},
 				{Name: "jq"},
 			}},
 		},
 	})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "groups"})
@@ -2522,15 +2085,15 @@ func TestGroups_BaseGroup_ShowsAsBase(t *testing.T) {
 	}
 }
 
-// ─── add command with profile ─────────────────────────────────────────────────
+// ─── add command with host ────────────────────────────────────────────────────
 
-func TestAdd_WithProfile_AppendsToConfig(t *testing.T) {
+func TestAdd_WithHost_AppendsToConfig(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "add", "ripgrep", "--provider", "system", "--install-with", "brew", "--group", "base"})
@@ -2541,21 +2104,21 @@ func TestAdd_WithProfile_AppendsToConfig(t *testing.T) {
 
 // ─── promptSatisfiedGroups ─────────────────────────────────────────────────────
 
-func TestPromptSatisfiedGroups_NoActiveProfile_NoCalls(t *testing.T) {
+func TestPromptSatisfiedGroups_NoActiveHost_NoCalls(t *testing.T) {
 	called := false
-	// No active profile → should be a no-op.
+	// No active host -> should be a no-op.
 	promptSatisfiedGroups(nil, "", []string{"base"}, func(g string) error {
 		called = true
 		return nil
 	})
 	if called {
-		t.Error("expected no addGroupFn call when no active profile")
+		t.Error("expected no addGroupFn call when no active host")
 	}
 }
 
 func TestPromptSatisfiedGroups_NoSatisfiedGroups_NoCalls(t *testing.T) {
 	called := false
-	// Active profile but no satisfied groups → should be a no-op.
+	// Active host but no satisfied groups -> should be a no-op.
 	promptSatisfiedGroups(nil, "work", nil, func(g string) error {
 		called = true
 		return nil
@@ -2590,17 +2153,6 @@ func TestDetectManager_FirstFound(t *testing.T) {
 	}
 }
 
-// ─── printConsolidateLines with settings updated ──────────────────────────────
-
-func TestPrintConsolidateLines_SettingsUpdated(t *testing.T) {
-	res := &app.ConsolidateResult{
-		Migrated:        []app.ConsolidateTool{{Name: "tool1", FromProvider: "pip"}},
-		SettingsUpdated: true,
-	}
-	// Just verify it doesn't panic.
-	printConsolidateLines(res, "brew")
-}
-
 // ─── consolidate ecosystem mode without dry-run ───────────────────────────────
 
 func TestConsolidate_EcosystemMode_EmptyConfig_NothingToMigrate(t *testing.T) {
@@ -2609,7 +2161,7 @@ func TestConsolidate_EcosystemMode_EmptyConfig_NothingToMigrate(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "node", "bun"})
@@ -2625,7 +2177,7 @@ func TestConsolidate_EcosystemMode_InvalidEcosystem_ReturnsError(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "invalid_eco", "bun"})
@@ -2643,7 +2195,7 @@ func TestImport_WithProvider_EmptyConfig(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	// brew import with an empty config — if brew is available, may find real tools.
@@ -2662,10 +2214,7 @@ func TestList_ProviderFilter_EmptyDB(t *testing.T) {
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{
-		Profiles:  map[string]config.Profile{"default": {Groups: []string{"base"}}},
-		Hostnames: map[string]string{"testhost": "default"},
-	})
+	withConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{cliTestHostGroup()}})
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "list", "--provider", "brew"})
@@ -2683,7 +2232,7 @@ func TestNewRootCmd_HasExpectedSubcommands(t *testing.T) {
 	for _, sub := range cmd.Commands() {
 		names[sub.Name()] = true
 	}
-	expected := []string{"list", "sync", "add", "profile", "dots", "providers", "groups", "tools", "init", "search"}
+	expected := []string{"list", "sync", "add", "hosts", "dots", "providers", "groups", "tools", "init", "search"}
 	for _, name := range expected {
 		if !names[name] {
 			t.Errorf("expected subcommand %q in root cmd", name)
@@ -2709,7 +2258,7 @@ func TestDelete_WithProvider_AttemptsFailed(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"-y", "--config", cfgPath, "--cache-dir", cacheDir, "delete", "--provider", "brew", "sometool"})
@@ -2725,45 +2274,12 @@ func TestSwitch_BothFlags_AttemptsFailed(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "switch", "sometool", "--from", "brew", "--to", "pip"})
 	// Will likely fail (tool not in config) but exercises the code path.
 	_ = cmd.Execute()
-}
-
-// ─── profile add with groups ──────────────────────────────────────────────────
-
-func TestProfileAdd_WithGroups(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "profile", "add", "work", "base", "work"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("profile add work base work: %v", err)
-	}
-
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	p, ok := cfg.Profiles["work"]
-	if !ok {
-		t.Fatal("expected profile 'work' after add")
-	}
-	// Groups should include "base" and "work".
-	groupsMap := make(map[string]bool)
-	for _, g := range p.Groups {
-		groupsMap[g] = true
-	}
-	if !groupsMap["work"] {
-		t.Errorf("expected 'work' in profile groups, got %v", p.Groups)
-	}
 }
 
 // ─── init command: existing config path (non-interactive) ────────────────────
@@ -2835,7 +2351,7 @@ func TestConsolidate_EcosystemMode_NodeBun_EmptyConfig(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "node", "bun", "--dry-run"})
@@ -2850,7 +2366,7 @@ func TestConsolidate_EcosystemMode_NodePnpm(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "node", "pnpm"})
@@ -2865,7 +2381,7 @@ func TestConsolidate_EcosystemMode_PythonPip(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "python", "pip"})
@@ -2882,7 +2398,7 @@ func TestUpgrade_All_PrintsNothingToUpgrade(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "upgrade", "--all"})
@@ -2890,30 +2406,6 @@ func TestUpgrade_All_PrintsNothingToUpgrade(t *testing.T) {
 		t.Fatalf("upgrade --all: %v", err)
 	}
 	// "Nothing to upgrade." printed to os.Stdout when DB is empty.
-}
-
-// ─── requireProfile: --profile flag bypasses hostname check ──────────────────
-
-func TestRequireProfile_ProfileFlagBypassesHostnameCheck(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	// No hostname mapping, but --profile flag supplied to sync.
-	withConfig(t, cfgPath, &config.RootConfig{
-		Profiles: map[string]config.Profile{
-			"work": {Groups: []string{"base"}},
-		},
-	})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "sync", "--profile", "work", "--dry-run"})
-	err := cmd.Execute()
-	// May succeed (work profile exists) or fail with "unknown profile" for different reasons.
-	// The key is it should NOT fail with "no active profile".
-	if err != nil && strings.Contains(err.Error(), "no active profile") {
-		t.Errorf("--profile flag should bypass hostname check, got: %v", err)
-	}
 }
 
 // ─── dots push: with repo configured ─────────────────────────────────────────
@@ -2968,13 +2460,13 @@ func TestConsolidate_EcosystemDryRun_WithPythonTools(t *testing.T) {
 			"ruff":  {Provider: "python", InstallWith: "pip"},
 		},
 		Groups: []*config.GroupConfig{
-			{Name: "", Tools: []config.ToolEntry{
+			{Name: "testhost", Special: "host", Tools: []config.ToolEntry{
 				{Name: "black"},
 				{Name: "ruff"},
 			}},
 		},
 	})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "--dry-run", "python", "uv"})
@@ -2986,28 +2478,23 @@ func TestConsolidate_EcosystemDryRun_WithPythonTools(t *testing.T) {
 
 // ─── sync: warnings output ────────────────────────────────────────────────────
 
-func TestSync_DuplicateWarning_EmitsTOWarning(t *testing.T) {
+func TestSync_DuplicateToolOwnership_ReturnsValidationError(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
-	// Duplicate tool across two groups. Profile must include BOTH groups for dedup to fire.
+	// Duplicate tool across the host group and one reusable group.
 	withConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"ripgrep": {Provider: "system", InstallWith: "brew"},
 		},
 		Groups: []*config.GroupConfig{
-			{Name: "", Tools: []config.ToolEntry{
-				{Name: "ripgrep"},
-			}},
+			cliTestHostGroup("ripgrep"),
 			{Name: "work", Tools: []config.ToolEntry{
 				{Name: "ripgrep"}, // duplicate name
 			}},
 		},
-		Profiles: map[string]config.Profile{
-			"default": {Groups: []string{"base", "work"}}, // include both groups
-		},
-		Hostnames: map[string]string{"testhost": "default"},
+		Hosts: map[string][]string{"testhost": {"work"}},
 	})
 
 	cmd := NewRootCmd()
@@ -3015,31 +2502,9 @@ func TestSync_DuplicateWarning_EmitsTOWarning(t *testing.T) {
 	cmd.SetErr(errBuf)
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "sync", "--dry-run"})
 	err := cmd.Execute()
-	if err != nil {
-		t.Fatalf("sync with duplicate: %v", err)
+	if err == nil || !strings.Contains(err.Error(), `tool "ripgrep" already belongs to group`) {
+		t.Fatalf("sync error = %v, want duplicate ownership validation error", err)
 	}
-	// Multi-group logical tools are expected and should not warn.
-	if strings.Contains(errBuf.String(), "warning") {
-		t.Errorf("unexpected duplicate tool warning, got stderr: %q", errBuf.String())
-	}
-}
-
-// ─── profile list: no output paths ────────────────────────────────────────────
-
-func TestProfileList_EmptyProfiles_NoHostnames(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "profile", "list"})
-	err := cmd.Execute()
-	if err != nil {
-		t.Fatalf("profile list empty: %v", err)
-	}
-	// Prints "No profiles defined." via fmt.Println.
 }
 
 // ─── import: skipped tools count ─────────────────────────────────────────────
@@ -3056,12 +2521,12 @@ func TestImport_AllToolsSkipped_ShowsSkippedCount(t *testing.T) {
 			"git": {Provider: "system", InstallWith: "brew"},
 		},
 		Groups: []*config.GroupConfig{
-			{Name: "", Tools: []config.ToolEntry{
+			{Name: "testhost", Special: "host", Tools: []config.ToolEntry{
 				{Name: "git"},
 			}},
 		},
 	})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "import", "--dry-run", "--provider", "nonexistentprovider"})
@@ -3069,30 +2534,6 @@ func TestImport_AllToolsSkipped_ShowsSkippedCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
-}
-
-// ─── list: HasConfig false path with profile ──────────────────────────────────
-
-func TestList_HasConfigFalse_WithProfile_ShowsMessage(t *testing.T) {
-	// This test verifies the HasConfig() == false path in list.
-	// list checks HasConfig() first and prints "No config found" then returns nil.
-	// But wait — if no settings.json, `requireProfile` runs from PersistentPreRunE
-	// and tries to read config, succeeds (empty RootConfig), and checks hostname mapping.
-	// We need settings.json to exist (for profile check) but HasConfig() to return false.
-	// HasConfig() == os.Stat(configPath) returning no error.
-	// So if settings.json exists → HasConfig() = true.
-	// If settings.json doesn't exist → requireProfile may fail.
-	//
-	// The "No config found" path can't be tested without a profile and no config file
-	// unless we have a profile in a settings.json that somehow doesn't satisfy HasConfig.
-	// HasConfig is just `os.Stat(configPath) == nil`.
-	// Therefore: any existing settings.json means HasConfig is true.
-	// The path is ONLY triggered when HasConfig() returns false, which means no file.
-	// But then requireProfile also fails (reads empty RootConfig with no hostnames).
-	// This path effectively requires the "list" command to be profile-exempt,
-	// which it is not. So this path is currently untestable without changing exemptions.
-	// Skip this test — just verify the scenario doesn't crash.
-	t.Skip("HasConfig=false path requires settings.json to not exist, but requireProfile then fails")
 }
 
 // ─── dots sync: all up to date path ──────────────────────────────────────────
@@ -3130,7 +2571,7 @@ func TestSync_DryRun_NoInstallsNeeded_PrintsDryRun(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "sync", "--dry-run", "--prune"})
@@ -3152,12 +2593,12 @@ func TestConsolidate_EcosystemMode_NothingToMigrate_SettingsUpdated(t *testing.T
 			"git": {Provider: "system", InstallWith: "brew"},
 		},
 		Groups: []*config.GroupConfig{
-			{Name: "", Tools: []config.ToolEntry{
+			{Name: "testhost", Special: "host", Tools: []config.ToolEntry{
 				{Name: "git"},
 			}},
 		},
 	})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "python", "pip"})
@@ -3190,7 +2631,7 @@ func TestAdd_WithNameOverride_UsesOverrideName(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "add", "typescript", "--provider", "node", "--install-with", "npm", "--name", "ts", "--group", "base"})
@@ -3204,7 +2645,7 @@ func TestAdd_ToGroup_UsesGroupName(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "add", "slack", "--provider", "system", "--install-with", "brew", "--group", "work"})
@@ -3215,7 +2656,7 @@ func TestAdd_ToGroup_UsesGroupName(t *testing.T) {
 // ─── newInitCmd: fresh machine path (no config) with stdin closed ─────────────
 
 func TestInit_NewMachine_NoConfig(t *testing.T) {
-	// init with no config requires stdin interaction for profile setup.
+	// init with no config requires stdin interaction for host setup.
 	t.Skip("init with no config requires stdin interaction")
 }
 
@@ -3227,7 +2668,7 @@ func TestSync_RetryFailed_EmptyDB(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "sync", "--retry-failed"})
@@ -3244,7 +2685,7 @@ func TestSync_ProviderFilter_DryRun(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "sync", "--dry-run", "--provider", "brew"})
@@ -3261,7 +2702,7 @@ func TestSearch_EmptyQuery_NoResults(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "search", "nonexistent_xyzqrstuvwxyz_package_123"})
@@ -3276,7 +2717,7 @@ func TestImport_WithGroupFlag_DryRun(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "import", "--dry-run", "--group", "work", "--provider", "nonexistentprovider"})
@@ -3347,21 +2788,6 @@ func TestDotsAdd_DiscoveredPersistsCandidate(t *testing.T) {
 	}
 }
 
-// ─── profile command: error paths ────────────────────────────────────────────
-
-func TestProfileDelete_NonexistentProfile_ReturnsNil(t *testing.T) {
-	// DeleteProfile may succeed even for nonexistent profile (idempotent).
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "profile", "delete", "nonexistent"})
-	_ = cmd.Execute()
-}
-
 // ─── list: with provider filter that returns no results ────────────────────────
 
 func TestList_BothFilters_EmptyDB(t *testing.T) {
@@ -3371,10 +2797,9 @@ func TestList_BothFilters_EmptyDB(t *testing.T) {
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{
 		Groups: []*config.GroupConfig{
-			{Name: "base"},
+			{Name: "testhost", Special: "host"},
 		},
-		Profiles:  map[string]config.Profile{"default": {Groups: []string{"base"}}},
-		Hostnames: map[string]string{"testhost": "default"},
+		Hosts: map[string][]string{"testhost": {}},
 	})
 
 	// Test --provider filter with empty DB.
@@ -3398,7 +2823,7 @@ func TestGroups_WithDescription_PrintsDescription(t *testing.T) {
 			"slack": {Provider: "system", InstallWith: "brew"},
 		},
 		Groups: []*config.GroupConfig{
-			{Name: "", Description: "everyday tools", Tools: []config.ToolEntry{
+			{Name: "testhost", Special: "host", Description: "host tools", Tools: []config.ToolEntry{
 				{Name: "git"},
 			}},
 			{Name: "work", Description: "work utilities", Tools: []config.ToolEntry{
@@ -3406,7 +2831,7 @@ func TestGroups_WithDescription_PrintsDescription(t *testing.T) {
 			}},
 		},
 	})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "groups"})
@@ -3421,7 +2846,7 @@ func TestToolsSet_CreatesLogicalSpec(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{
@@ -3452,7 +2877,7 @@ func TestToolsSet_RequiresProvider(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "set", "ripgrep"})
@@ -3471,9 +2896,9 @@ func TestToolsDelete_RemovesLogicalSpecAndMemberships(t *testing.T) {
 		Tools: map[string]config.ToolSpec{
 			"ripgrep": {Provider: "system"},
 		},
-		Groups: []*config.GroupConfig{{Tools: []config.ToolEntry{{Name: "ripgrep"}}}},
+		Groups: []*config.GroupConfig{cliTestHostGroup("ripgrep")},
 	})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"-y", "--config", cfgPath, "--cache-dir", cacheDir, "tools", "delete", "ripgrep"})
@@ -3497,7 +2922,91 @@ func TestToolsDelete_RemovesLogicalSpecAndMemberships(t *testing.T) {
 	}
 }
 
-func TestGroupsAddAndRemoveTool_ManageMemberships(t *testing.T) {
+func TestToolsNormalizeDefaultOverrides_DryRun(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	withConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"ripgrep": {Provider: "system", InstallWith: "brew"},
+			"jq":      {Provider: "system", InstallWith: "apt"},
+		},
+		Groups: []*config.GroupConfig{cliTestHostGroup("ripgrep", "jq")},
+	})
+	withHost(t, cfgPath)
+
+	cmd := NewRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{
+		"--config", cfgPath,
+		"--cache-dir", cacheDir,
+		"tools", "normalize",
+		"--default-overrides",
+		"--dry-run",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("tools normalize --dry-run: %v", err)
+	}
+	if !strings.Contains(out.String(), "Would normalize 1 provider override:") ||
+		!strings.Contains(out.String(), "  ripgrep: system via brew") {
+		t.Fatalf("output = %q, want dry-run normalized ripgrep", out.String())
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if cfg.Tools["ripgrep"].InstallWith != "brew" {
+		t.Fatalf("dry-run changed install_with to %q", cfg.Tools["ripgrep"].InstallWith)
+	}
+}
+
+func TestToolsNormalizeDefaultOverrides_AppliesWithYes(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	withConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"ripgrep": {Provider: "system", InstallWith: "brew"},
+			"jq":      {Provider: "system", InstallWith: "apt"},
+		},
+		Groups: []*config.GroupConfig{cliTestHostGroup("ripgrep", "jq")},
+	})
+	withHost(t, cfgPath)
+
+	cmd := NewRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{
+		"-y",
+		"--config", cfgPath,
+		"--cache-dir", cacheDir,
+		"tools", "normalize",
+		"--default-overrides",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("tools normalize: %v", err)
+	}
+	if !strings.Contains(out.String(), "Normalized 1 provider override:") {
+		t.Fatalf("output = %q, want normalized count", out.String())
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if cfg.Tools["ripgrep"].InstallWith != "" {
+		t.Fatalf("ripgrep install_with = %q, want cleared", cfg.Tools["ripgrep"].InstallWith)
+	}
+	if cfg.Tools["jq"].InstallWith != "apt" {
+		t.Fatalf("jq install_with = %q, want preserved apt pin", cfg.Tools["jq"].InstallWith)
+	}
+}
+
+func TestGroupsMoveAndRemoveTool_ManageAssignments(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
@@ -3508,21 +3017,21 @@ func TestGroupsAddAndRemoveTool_ManageMemberships(t *testing.T) {
 		},
 		Groups: []*config.GroupConfig{{Name: "work"}},
 	})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
-	addCmd := NewRootCmd()
-	addCmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "groups", "add-tool", "work", "ripgrep"})
-	if err := addCmd.Execute(); err != nil {
-		t.Fatalf("groups add-tool: %v", err)
+	moveCmd := NewRootCmd()
+	moveCmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "groups", "move-tool", "work", "ripgrep"})
+	if err := moveCmd.Execute(); err != nil {
+		t.Fatalf("groups move-tool: %v", err)
 	}
 
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
-		t.Fatalf("config.Load after add: %v", err)
+		t.Fatalf("config.Load after move: %v", err)
 	}
 	work := cliTestGroupByName(cfg, "work")
 	if work == nil || !cliTestGroupHasTool(work, "ripgrep") {
-		t.Fatalf("work group missing ripgrep after add: %+v", cfg.Groups)
+		t.Fatalf("work group missing ripgrep after move: %+v", cfg.Groups)
 	}
 
 	removeCmd := NewRootCmd()
@@ -3555,7 +3064,7 @@ func TestScopedIgnoreCommands_UpdateLogicalAndGroupIgnore(t *testing.T) {
 		},
 		Groups: []*config.GroupConfig{{Name: "work", Tools: []config.ToolEntry{{Name: "ripgrep"}}}},
 	})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	toolIgnore := NewRootCmd()
 	toolIgnore.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "ignore", "ripgrep"})
@@ -3575,9 +3084,8 @@ func TestScopedIgnoreCommands_UpdateLogicalAndGroupIgnore(t *testing.T) {
 	if !cfg.Tools["ripgrep"].Ignore {
 		t.Fatalf("tool ignore was not persisted: %+v", cfg.Tools["ripgrep"])
 	}
-	work := cliTestGroupByName(cfg, "work")
-	if work == nil || len(work.Ignore) != 1 || work.Ignore[0] != "ripgrep" {
-		t.Fatalf("group ignore was not persisted: %+v", work)
+	if len(cfg.Ignore.Tools) != 1 || cfg.Ignore.Tools[0] != "ripgrep" {
+		t.Fatalf("group ignore was not persisted globally: %+v", cfg.Ignore.Tools)
 	}
 
 	toolUnignore := NewRootCmd()
@@ -3598,9 +3106,8 @@ func TestScopedIgnoreCommands_UpdateLogicalAndGroupIgnore(t *testing.T) {
 	if cfg.Tools["ripgrep"].Ignore {
 		t.Fatal("tool ignore still set after tools unignore")
 	}
-	work = cliTestGroupByName(cfg, "work")
-	if work != nil && len(work.Ignore) != 0 {
-		t.Fatalf("group ignore still set after groups unignore-tool: %+v", work.Ignore)
+	if len(cfg.Ignore.Tools) != 0 {
+		t.Fatalf("global ignore still set after groups unignore-tool: %+v", cfg.Ignore.Tools)
 	}
 }
 
@@ -3609,14 +3116,41 @@ func TestGroupsDelete_RequiresMoveOrDeleteFlag(t *testing.T) {
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{{Name: "work"}}})
-	withProfile(t, cfgPath)
+	withConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"ripgrep": {Provider: "system"},
+		},
+		Groups: []*config.GroupConfig{{Name: "work", Tools: []config.ToolEntry{{Name: "ripgrep"}}}},
+	})
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"-y", "--config", cfgPath, "--cache-dir", cacheDir, "groups", "delete", "work"})
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), "requires --move-to <group> or --delete-tools") {
 		t.Fatalf("groups delete err = %v, want explicit handling error", err)
+	}
+}
+
+func TestGroupsDelete_EmptyGroupDoesNotRequireMoveOrDeleteFlag(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	withConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{{Name: "work"}}})
+	withHost(t, cfgPath)
+
+	cmd := NewRootCmd()
+	cmd.SetArgs([]string{"-y", "--config", cfgPath, "--cache-dir", cacheDir, "groups", "delete", "work"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("groups delete empty group: %v", err)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if cliTestGroupByName(cfg, "work") != nil {
+		t.Fatal("empty work group still present after delete")
 	}
 }
 
@@ -3634,7 +3168,7 @@ func TestGroupsDelete_MoveToFlagMovesLastMembershipTools(t *testing.T) {
 			{Name: "work", Tools: []config.ToolEntry{{Name: "ripgrep"}}},
 		},
 	})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"-y", "--config", cfgPath, "--cache-dir", cacheDir, "groups", "delete", "work", "--move-to", "base"})
@@ -3648,7 +3182,7 @@ func TestGroupsDelete_MoveToFlagMovesLastMembershipTools(t *testing.T) {
 	}
 	base := cliTestGroupByName(cfg, "base")
 	if base == nil || !cliTestGroupHasTool(base, "ripgrep") {
-		t.Fatalf("base group missing moved ripgrep: %+v", cfg.Groups)
+		t.Fatalf("move target group missing moved ripgrep: %+v", cfg.Groups)
 	}
 	if cliTestGroupByName(cfg, "work") != nil {
 		t.Fatal("work group still present after delete")
@@ -3669,7 +3203,7 @@ func TestGroupsDelete_TTYPromptsForMoveTarget(t *testing.T) {
 			{Name: "work", Tools: []config.ToolEntry{{Name: "ripgrep"}}},
 		},
 	})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	withMockTerminal(t, true, func() {
 		withMockStdin(t, "base\n", func() {
@@ -3688,7 +3222,7 @@ func TestGroupsDelete_TTYPromptsForMoveTarget(t *testing.T) {
 	}
 	base := cliTestGroupByName(cfg, "base")
 	if base == nil || !cliTestGroupHasTool(base, "ripgrep") {
-		t.Fatalf("base group missing prompted move ripgrep: %+v", cfg.Groups)
+		t.Fatalf("move target group missing prompted move ripgrep: %+v", cfg.Groups)
 	}
 	if cliTestGroupByName(cfg, "work") != nil {
 		t.Fatal("work group still present after prompted delete")
@@ -3708,7 +3242,7 @@ func TestGroupsDelete_TTYPromptsForDeleteTools(t *testing.T) {
 			{Name: "work", Tools: []config.ToolEntry{{Name: "ripgrep"}}},
 		},
 	})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	withMockTerminal(t, true, func() {
 		withMockStdin(t, "DELETE\n", func() {
@@ -3754,7 +3288,7 @@ func TestDotsList_WithEntries_ShowsTable(t *testing.T) {
 	withConfig(t, cfgPath, &config.RootConfig{
 		Settings: config.Settings{DotsRepo: repoDir},
 		Groups: []*config.GroupConfig{
-			{Name: "", Dots: []config.DotEntry{
+			{Name: "testhost", Special: "host", Dots: []config.DotEntry{
 				{Name: "nvim", Path: "~/.config/nvim"},
 				{Name: "zsh", Path: "~/.zshrc"},
 			}},
@@ -3923,7 +3457,7 @@ func TestDotsStatus_WithEntries_ShowsTable(t *testing.T) {
 	withConfig(t, cfgPath, &config.RootConfig{
 		Settings: config.Settings{DotsRepo: repoDir},
 		Groups: []*config.GroupConfig{
-			{Name: "", Dots: []config.DotEntry{
+			{Name: "testhost", Special: "host", Dots: []config.DotEntry{
 				{Name: "nvim", Path: "~/.config/nvim"},
 			}},
 		},
@@ -3955,12 +3489,12 @@ func TestSync_DryRun_WithProviderFlag_NoToolsForProvider(t *testing.T) {
 			"git": {Provider: "system", InstallWith: "brew"},
 		},
 		Groups: []*config.GroupConfig{
-			{Name: "", Tools: []config.ToolEntry{
+			{Name: "testhost", Special: "host", Tools: []config.ToolEntry{
 				{Name: "git"},
 			}},
 		},
 	})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	errBuf := &bytes.Buffer{}
@@ -3979,7 +3513,7 @@ func TestUpgrade_NameAndProvider_NoSuchTool(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "upgrade", "nonexistent_tool_xyz", "--provider", "brew"})
@@ -3995,49 +3529,13 @@ func TestImport_DryRun_AllProviders_EmptyConfig(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "import", "--dry-run"})
 	// Scans all available providers for already-installed tools.
 	// In most environments some tools will be found (brew, pip, etc.).
 	// Either path (found tools or none) is valid.
-	_ = cmd.Execute()
-}
-
-// ─── profile remove-hostname: nonexistent hostname is idempotent ─────────────
-
-func TestProfileDeleteHostname_NonexistentHostname(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{
-		Profiles: map[string]config.Profile{"work": {Groups: []string{"base"}}},
-	})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"-y", "--config", cfgPath, "--cache-dir", cacheDir, "profile", "remove-hostname", "nonexistent_machine"})
-	// Should succeed (no-op) or return an error — both are valid.
-	_ = cmd.Execute()
-}
-
-// ─── profile ignore remove: tool not in ignore list ──────────────────────────
-
-func TestProfileIgnoreRemove_ToolNotInList(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{
-		Profiles: map[string]config.Profile{
-			"work": {Groups: []string{"base"}},
-		},
-	})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "profile", "ignore", "remove", "work", "nonexistent_tool"})
-	// Remove a tool that isn't in the ignore list — should succeed or be a no-op.
 	_ = cmd.Execute()
 }
 
@@ -4057,14 +3555,14 @@ func TestConsolidate_EcosystemDryRun_NodeTools_PrintsWouldMigrate(t *testing.T) 
 			"typescript": {Provider: "node"},
 		},
 		Groups: []*config.GroupConfig{
-			{Name: "", Tools: []config.ToolEntry{
+			{Name: "testhost", Special: "host", Tools: []config.ToolEntry{
 				{Name: "typescript"},
 				{Name: "prettier"},
 			}},
 		},
 		Settings: settings,
 	})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "--dry-run", "node", "bun"})
@@ -4083,7 +3581,7 @@ func TestSwitch_ToolNotFound_ReturnsError(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "switch", "nonexistent_tool_xyz", "--from", "brew", "--to", "pip"})
@@ -4096,13 +3594,13 @@ func TestSwitch_ToolNotFound_ReturnsError(t *testing.T) {
 
 // ─── install: no config file shows error ─────────────────────────────────────
 
-func TestInstall_WithProfile_ExplicitProvider_ReachesInstall(t *testing.T) {
+func TestInstall_WithHost_ExplicitProvider_ReachesInstall(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	// Use an explicit provider — will fail at install step but exercises more code paths
@@ -4130,7 +3628,7 @@ func TestSync_DryRun_WithNamedGroupArg(t *testing.T) {
 			}},
 		},
 	})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "sync", "--dry-run", "devtools"})
@@ -4152,13 +3650,13 @@ func TestList_GroupFilter_GroupWithTools_InConfig(t *testing.T) {
 			"ripgrep": {Provider: "system", InstallWith: "brew"},
 		},
 		Groups: []*config.GroupConfig{
+			cliTestHostGroup(),
 			{Name: "devtools", Tools: []config.ToolEntry{
 				{Name: "ripgrep"},
 				{Name: "jq"},
 			}},
 		},
-		Profiles:  map[string]config.Profile{"default": {Groups: []string{"devtools"}}},
-		Hostnames: map[string]string{"testhost": "default"},
+		Hosts: map[string][]string{"testhost": {"devtools"}},
 	})
 
 	cmd := NewRootCmd()
@@ -4170,48 +3668,41 @@ func TestList_GroupFilter_GroupWithTools_InConfig(t *testing.T) {
 	// DB is empty but group exists → "No tools in cache" is printed.
 }
 
-// ─── profile show-hostname: verify set-hostname uses correct arg order ────────
+// ─── hosts remove: host assignment roundtrip ──────────────────────────────────
 
-func TestProfileSetHostname_ThenRemove_Roundtrip(t *testing.T) {
+func TestHostsEnsure_ThenRemove_Roundtrip(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{
-		Profiles: map[string]config.Profile{
-			"laptop": {Groups: []string{"base"}},
-		},
-	})
+	withConfig(t, cfgPath, &config.RootConfig{})
 
-	// Set hostname.
 	cmd1 := NewRootCmd()
-	cmd1.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "profile", "set-hostname", "mybox", "laptop"})
+	cmd1.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "hosts", "ensure", "mybox"})
 	if err := cmd1.Execute(); err != nil {
-		t.Fatalf("set-hostname: %v", err)
+		t.Fatalf("hosts ensure: %v", err)
 	}
 
-	// Verify it was written.
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	if cfg.Hostnames["mybox"] != "laptop" {
-		t.Errorf("expected hostname mybox→laptop, got %q", cfg.Hostnames["mybox"])
+	if _, ok := cfg.Hosts["mybox"]; !ok {
+		t.Fatal("expected mybox host entry")
 	}
 
-	// Remove hostname.
 	cmd2 := NewRootCmd()
-	cmd2.SetArgs([]string{"-y", "--config", cfgPath, "--cache-dir", cacheDir, "profile", "remove-hostname", "mybox"})
+	cmd2.SetArgs([]string{"-y", "--config", cfgPath, "--cache-dir", cacheDir, "hosts", "remove", "mybox"})
 	if err := cmd2.Execute(); err != nil {
-		t.Fatalf("remove-hostname: %v", err)
+		t.Fatalf("hosts remove: %v", err)
 	}
 
 	cfg2, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("config.Load after remove: %v", err)
 	}
-	if _, ok := cfg2.Hostnames["mybox"]; ok {
-		t.Error("expected hostname mapping to be removed")
+	if _, ok := cfg2.Hosts["mybox"]; ok {
+		t.Error("expected host entry to be removed")
 	}
 }
 
@@ -4223,7 +3714,7 @@ func TestAdd_NonTTYRequiresGroup(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "add", "ripgrep", "--provider", "system"})
@@ -4244,7 +3735,7 @@ func TestAdd_TTYPromptsForGroup(t *testing.T) {
 	withConfig(t, cfgPath, &config.RootConfig{
 		Groups: []*config.GroupConfig{{Name: "work"}},
 	})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	withMockTerminal(t, true, func() {
 		withMockStdin(t, "work\n", func() {
@@ -4282,13 +3773,13 @@ func TestConsolidate_ProviderMode_DryRun_WithBrewTools(t *testing.T) {
 			"ripgrep": {Provider: "system", InstallWith: "brew"},
 		},
 		Groups: []*config.GroupConfig{
-			{Name: "", Tools: []config.ToolEntry{
+			{Name: "testhost", Special: "host", Tools: []config.ToolEntry{
 				{Name: "ripgrep"},
 				{Name: "fd"}, // non-brew tool = candidate for migration
 			}},
 		},
 	})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "--to", "brew", "--dry-run"})
@@ -4298,7 +3789,7 @@ func TestConsolidate_ProviderMode_DryRun_WithBrewTools(t *testing.T) {
 	}
 }
 
-// ─── sync: OpIgnored path — profile ignore list ───────────────────────────────
+// ─── sync: OpIgnored path — global ignore list ────────────────────────────────
 
 func TestSync_DryRun_WithIgnoredTool(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -4311,15 +3802,12 @@ func TestSync_DryRun_WithIgnoredTool(t *testing.T) {
 			"slack": {Provider: "system", InstallWith: "brew"},
 		},
 		Groups: []*config.GroupConfig{
-			{Name: "", Tools: []config.ToolEntry{
+			{Name: "testhost", Special: "host", Tools: []config.ToolEntry{
 				{Name: "git"},
 				{Name: "slack"},
 			}},
 		},
-		Profiles: map[string]config.Profile{
-			"default": {Groups: []string{"base"}, Ignore: []string{"slack"}},
-		},
-		Hostnames: map[string]string{"testhost": "default"},
+		Ignore: config.GlobalIgnore{Tools: []string{"slack"}},
 	})
 
 	cmd := NewRootCmd()
@@ -4337,7 +3825,7 @@ func TestDelete_WithProvider_TargetsMissingTool(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
-	withProfile(t, cfgPath)
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "delete", "--provider", "pip", "definitely_nonexistent_xyz_tool_123"})
@@ -4576,66 +4064,47 @@ func TestPromptSatisfiedGroups_WithSatisfiedGroup_NoAnswer_NoCalls(t *testing.T)
 	}
 }
 
-func TestPromptSatisfiedGroups_AddFnError_PrintsWarning(t *testing.T) {
-	// When addGroupFn returns an error, a warning is printed to stderr (fmt.Fprintf(os.Stderr, ...)).
-	// We just verify no panic and the function returns normally.
-	withMockStdin(t, "y\n", func() {
-		promptSatisfiedGroups(nil, "work", []string{"extras"}, func(g string) error {
-			return fmt.Errorf("add error")
-		})
-	})
-	// No panic = pass.
-}
+// ─── global ignore add/remove roundtrip ──────────────────────────────────────
 
-// ─── profile ignore add/remove roundtrip ─────────────────────────────────────
-
-func TestProfileIgnore_AddRemove_Roundtrip(t *testing.T) {
+func TestGlobalIgnore_AddRemove_Roundtrip(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{
-		Profiles: map[string]config.Profile{
-			"personal": {Groups: []string{"base"}},
+		Tools: map[string]config.ToolSpec{
+			"zoom": {Provider: "system"},
 		},
+		Groups: []*config.GroupConfig{{Name: "work", Tools: []config.ToolEntry{{Name: "zoom"}}}},
 	})
+	withHost(t, cfgPath)
 
-	// Add zoom to ignore list.
 	cmd1 := NewRootCmd()
-	cmd1.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "profile", "ignore", "add", "personal", "zoom"})
+	cmd1.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "groups", "ignore-tool", "work", "zoom"})
 	if err := cmd1.Execute(); err != nil {
-		t.Fatalf("profile ignore add: %v", err)
+		t.Fatalf("groups ignore-tool: %v", err)
 	}
 
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	found := false
-	for _, ig := range cfg.Profiles["personal"].Ignore {
-		if ig == "zoom" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("expected zoom in personal ignore list after add")
+	if len(cfg.Ignore.Tools) != 1 || cfg.Ignore.Tools[0] != "zoom" {
+		t.Fatalf("expected zoom in global ignore list after add, got %+v", cfg.Ignore.Tools)
 	}
 
-	// Remove zoom from ignore list.
 	cmd2 := NewRootCmd()
-	cmd2.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "profile", "ignore", "remove", "personal", "zoom"})
+	cmd2.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "groups", "unignore-tool", "work", "zoom"})
 	if err := cmd2.Execute(); err != nil {
-		t.Fatalf("profile ignore remove: %v", err)
+		t.Fatalf("groups unignore-tool: %v", err)
 	}
 
 	cfg2, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("config.Load after remove: %v", err)
 	}
-	for _, ig := range cfg2.Profiles["personal"].Ignore {
-		if ig == "zoom" {
-			t.Error("expected zoom to be removed from ignore list")
-		}
+	if len(cfg2.Ignore.Tools) != 0 {
+		t.Fatalf("expected zoom to be removed from global ignore list, got %+v", cfg2.Ignore.Tools)
 	}
 }
 
@@ -4676,44 +4145,6 @@ func TestDotsStatus_WithDirtyGitRepo_PrintsGitStatus(t *testing.T) {
 	}
 }
 
-// ─── list: with tools in DB prints the table ─────────────────────────────────
-
-func TestList_WithToolsInDB_PrintsTable(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgPath := filepath.Join(t.TempDir(), "settings.json")
-
-	withConfig(t, cfgPath, &config.RootConfig{
-		Profiles:  map[string]config.Profile{"default": {Groups: []string{"base"}}},
-		Hostnames: map[string]string{"testhost": "default"},
-	})
-
-	// Build the app and seed the DB directly so the list loop is exercised.
-	a, err := buildTestApp(t, cfgPath)
-	if err != nil {
-		t.Fatalf("buildTestApp: %v", err)
-	}
-
-	ctx := t.Context()
-	err = a.DB().Upsert(ctx, &database.ToolCache{
-		Name:      "ripgrep",
-		Provider:  "brew",
-		Package:   "ripgrep",
-		Installed: true,
-	})
-	if err != nil {
-		t.Fatalf("DB.Upsert: %v", err)
-	}
-
-	// Now run the list command against the same DB path.
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", a.CacheDir, "list"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("list with seeded DB: %v", err)
-	}
-	// Output goes to os.Stdout (list.go uses fmt.Printf), so we just verify no error.
-	// The code path through the tool-printing loop is covered by the DB having a tool.
-}
-
 func TestList_SingleToolAndStateFilter_PrintsOnlyMatch(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
@@ -4724,13 +4155,11 @@ func TestList_SingleToolAndStateFilter_PrintsOnlyMatch(t *testing.T) {
 			"ripgrep": {Provider: "system", InstallWith: "brew"},
 		},
 		Groups: []*config.GroupConfig{
-			{Tools: []config.ToolEntry{
+			{Name: "testhost", Special: "host", Tools: []config.ToolEntry{
 				{Name: "ripgrep"},
 				{Name: "bat"},
 			}},
 		},
-		Profiles:  map[string]config.Profile{"default": {Groups: []string{"base"}}},
-		Hostnames: map[string]string{"testhost": "default"},
 	})
 
 	a, err := buildTestApp(t, cfgPath)
@@ -4772,11 +4201,8 @@ func TestList_JSONIncludesDerivedState(t *testing.T) {
 		Tools: map[string]config.ToolSpec{
 			"bat": {Provider: "system", InstallWith: "brew"},
 		},
-		Groups: []*config.GroupConfig{{Tools: []config.ToolEntry{{Name: "bat"}}}},
-		Profiles: map[string]config.Profile{
-			"default": {Groups: []string{"base"}, Ignore: []string{"bat"}},
-		},
-		Hostnames: map[string]string{"testhost": "default"},
+		Groups: []*config.GroupConfig{cliTestHostGroup("bat")},
+		Ignore: config.GlobalIgnore{Tools: []string{"bat"}},
 	})
 
 	a, err := buildTestApp(t, cfgPath)
@@ -4806,10 +4232,7 @@ func TestList_WithInstalledToolAndVersion_PrintsVersion(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
 
-	withConfig(t, cfgPath, &config.RootConfig{
-		Profiles:  map[string]config.Profile{"default": {Groups: []string{"base"}}},
-		Hostnames: map[string]string{"testhost": "default"},
-	})
+	withConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{cliTestHostGroup()}})
 
 	a, err := buildTestApp(t, cfgPath)
 	if err != nil {
@@ -4853,10 +4276,10 @@ func TestNewRootCmd_DefaultConfigPath_ViaEnv(t *testing.T) {
 	t.Setenv("OMNI_CONFIG", cfgPath)
 
 	cmd := NewRootCmd()
-	// Run a profile-exempt command (providers) without --config.
+	// Run a host-exempt command (providers) without --config.
 	cmd.SetArgs([]string{"--cache-dir", cacheDir, "providers"})
 	err := cmd.Execute()
-	// May succeed or fail due to profile check, but the default-path branch is exercised.
+	// Providers is host-exempt; the default-path branch is exercised.
 	_ = err
 }
 
@@ -4866,10 +4289,7 @@ func TestList_WithMissingTool_PrintsMissingStatus(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
 
-	withConfig(t, cfgPath, &config.RootConfig{
-		Profiles:  map[string]config.Profile{"default": {Groups: []string{"base"}}},
-		Hostnames: map[string]string{"testhost": "default"},
-	})
+	withConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{cliTestHostGroup()}})
 
 	a, err := buildTestApp(t, cfgPath)
 	if err != nil {
@@ -5044,10 +4464,10 @@ func TestList_GroupFilter_MatchingTool_PrintsTool(t *testing.T) {
 			"slack": {Provider: "system", InstallWith: "brew"},
 		},
 		Groups: []*config.GroupConfig{
+			cliTestHostGroup(),
 			{Name: "work", Tools: []config.ToolEntry{{Name: "slack"}}},
 		},
-		Profiles:  map[string]config.Profile{"default": {Groups: []string{"work"}}},
-		Hostnames: map[string]string{"testhost": "default"},
+		Hosts: map[string][]string{"testhost": {"work"}},
 	})
 
 	a, err := buildTestApp(t, cfgPath)
@@ -5077,7 +4497,7 @@ func TestList_GroupFilter_MatchingTool_PrintsTool(t *testing.T) {
 // ─── init: full flow with stdin mock ─────────────────────────────────────────
 
 // TestInit_FullFlow_WithMockedStdin exercises the init command's non-interactive
-// branches by providing stdin answers for the ensureProfile prompts.
+// branches by providing stdin answers for the setup prompts.
 func TestInit_FullFlow_WithMockedStdin(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -5086,11 +4506,9 @@ func TestInit_FullFlow_WithMockedStdin(t *testing.T) {
 	cfgPath := filepath.Join(cfgDir, "new_settings.json")
 
 	// Provide stdin answers:
-	// - Profile name: "personal"
-	// - Hostname mapping: "y" (yes, map current hostname)
 	// - Dots section: "n" (no)
 	// - Import: "n" (no)
-	stdinInput := "personal\ny\nn\nn\n"
+	stdinInput := "n\nn\n"
 	withMockStdin(t, stdinInput, func() {
 		cmd := NewRootCmd()
 		cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "init", "--no-import"})
@@ -5100,89 +4518,30 @@ func TestInit_FullFlow_WithMockedStdin(t *testing.T) {
 	})
 }
 
-// ─── ensureProfile: existing profiles, hostname not mapped ───────────────────
+// ─── ensureHost: active host setup ────────────────────────────────────────────
 
-// TestEnsureProfile_ExistingProfiles_PicksOne tests the branch where profiles
-// exist but the current hostname isn't mapped — user picks an existing profile.
-func TestEnsureProfile_ExistingProfiles_PicksOne(t *testing.T) {
+func TestEnsureHost_UsesAppHostnameOverride(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "virtualhost.example")
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{
-		Profiles: map[string]config.Profile{
-			"work": {Groups: []string{"base", "work"}},
-		},
-		// No hostname mapping → info.Active will be empty.
-	})
-
 	a, err := buildTestApp(t, cfgPath)
 	if err != nil {
 		t.Fatalf("buildTestApp: %v", err)
 	}
 
-	// Stdin: "1" to pick the first profile in the sorted list.
-	withMockStdin(t, "1\n", func() {
-		_ = ensureProfile(a)
-	})
-}
+	if err := ensureHost(a); err != nil {
+		t.Fatalf("ensureHost: %v", err)
+	}
 
-// TestEnsureProfile_ExistingProfiles_CreateNew tests the branch where profiles
-// exist but user selects "0" to create a new profile.
-func TestEnsureProfile_ExistingProfiles_CreateNew(t *testing.T) {
-	cfgPath := filepath.Join(t.TempDir(), "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{
-		Profiles: map[string]config.Profile{
-			"work": {Groups: []string{"base"}},
-		},
-	})
-
-	a, err := buildTestApp(t, cfgPath)
+	cfg, err := config.Load(cfgPath)
 	if err != nil {
-		t.Fatalf("buildTestApp: %v", err)
+		t.Fatalf("config.Load: %v", err)
 	}
-
-	// Stdin: "0" (create new) then "laptop" as the new profile name.
-	withMockStdin(t, "0\nlaptop\n", func() {
-		_ = ensureProfile(a)
-	})
-}
-
-// TestEnsureProfile_AlreadyMapped tests the short-circuit path when the hostname
-// is already mapped to an active profile.
-func TestEnsureProfile_AlreadyMapped(t *testing.T) {
-	cfgPath := filepath.Join(t.TempDir(), "settings.json")
-	hostname, _ := os.Hostname()
-	withConfig(t, cfgPath, &config.RootConfig{
-		Profiles:  map[string]config.Profile{"work": {Groups: []string{"base"}}},
-		Hostnames: map[string]string{hostname: "work"},
-	})
-
-	a, err := buildTestApp(t, cfgPath)
-	if err != nil {
-		t.Fatalf("buildTestApp: %v", err)
+	if _, ok := cfg.Hosts["virtualhost"]; !ok {
+		t.Fatalf("hosts = %v, want virtualhost from OMNI_HOSTNAME", cfg.Hosts)
 	}
-
-	// No stdin needed — hostname is already mapped → returns immediately.
-	if err := ensureProfile(a); err != nil {
-		t.Fatalf("ensureProfile with already-mapped hostname: %v", err)
+	if group := cliTestGroupByName(cfg, "virtualhost"); group == nil || !group.IsHost() {
+		t.Fatalf("virtualhost group = %#v, want special host group", group)
 	}
-}
-
-// TestEnsureProfile_EmptyName_ThenValidName tests the loop that retries when
-// the user provides an empty profile name.
-func TestEnsureProfile_EmptyName_ThenValidName(t *testing.T) {
-	cfgPath := filepath.Join(t.TempDir(), "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{
-		// No profiles → goes straight to "create new profile" section.
-	})
-
-	a, err := buildTestApp(t, cfgPath)
-	if err != nil {
-		t.Fatalf("buildTestApp: %v", err)
-	}
-
-	// Stdin: empty line (rejected), then "personal".
-	withMockStdin(t, "\npersonal\n", func() {
-		_ = ensureProfile(a)
-	})
 }
 
 // ─── runDotsInitSection direct tests ──────────────────────────────────────────

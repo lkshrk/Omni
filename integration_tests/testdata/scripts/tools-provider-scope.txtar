@@ -1,0 +1,22 @@
+# tools set covers global defaults and host-scoped provider overrides
+exec omni --config settings.json hosts ensure testhost
+
+exec omni --config settings.json tools set ripgrep --provider system --install-with brew --global
+stdout 'Set logical tool "ripgrep"'
+exec grep '"provider": "system"' settings.json
+stdout '"provider": "system"'
+exec grep '"install_with": "brew"' settings.json
+stdout '"install_with": "brew"'
+
+exec omni --config settings.json tools set ripgrep --provider system --install-with apt --host
+stdout 'Set host override for logical tool "ripgrep"'
+exec grep '"testhost"' settings.json
+stdout '"testhost"'
+exec grep '"install_with": "apt"' settings.json
+stdout '"install_with": "apt"'
+
+! exec omni --config settings.json tools set ripgrep --provider system --host --global
+stderr 'use either --host or --global'
+
+-- settings.json --
+{}
