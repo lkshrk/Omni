@@ -44,19 +44,42 @@ commit_remaining_changes() {
   esac
 }
 
-read -r -p "Update README demo GIF before release? [y/N] " UPDATE_DEMO
-case "${UPDATE_DEMO}" in
-  [Yy]|[Yy][Ee][Ss])
-    make demo-gif
-    if ! git diff --quiet -- docs/assets/omni-demo.gif || ! git diff --cached --quiet -- docs/assets/omni-demo.gif; then
-      git add docs/assets/omni-demo.gif
-      git commit --only docs/assets/omni-demo.gif -m "docs: update demo gif"
-    fi
-    ;;
-esac
+ensure_clean_worktree() {
+  if git diff --quiet && git diff --cached --quiet; then
+    return
+  fi
+
+  echo "Uncommitted changes remain:"
+  git status --short
+  echo
+  echo "Aborted. Commit, include, or stash changes before releasing." >&2
+  exit 1
+}
+
+amend_demo_gif() {
+  read -r -p "Update README demo GIF before release? [y/N] " UPDATE_DEMO
+  case "${UPDATE_DEMO}" in
+    [Yy]|[Yy][Ee][Ss])
+      make demo-gif
+      if ! git diff --quiet -- docs/assets/omni-demo.gif || ! git diff --cached --quiet -- docs/assets/omni-demo.gif; then
+        if ! git rev-parse --verify HEAD >/dev/null 2>&1; then
+          echo "Error: cannot amend demo GIF because HEAD does not exist." >&2
+          exit 1
+        fi
+        git add docs/assets/omni-demo.gif
+        git commit --amend --no-edit --only docs/assets/omni-demo.gif
+      fi
+      ;;
+  esac
+}
+
+# Commit optional release-prep changes before the demo GIF so the generated
+# asset can be amended into that commit instead of becoming a separate commit.
+commit_remaining_changes
+amend_demo_gif
 
 # Require an intentional clean working tree.
-commit_remaining_changes
+ensure_clean_worktree
 
 # Require being on a branch.
 BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")

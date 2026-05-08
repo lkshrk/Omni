@@ -352,6 +352,9 @@ func TestMutatingDotsActionsHaveCLIAndTUIParity(t *testing.T) {
 			continue
 		}
 		if action.TUI == nil && action.Palette == nil {
+			if action.CLIOnlyReason != "" {
+				continue
+			}
 			t.Fatalf("%s mutates state but has no TUI or palette binding", action.ID)
 		}
 		if len(action.CLI) == 0 {

@@ -71,6 +71,11 @@ func TestMutatingCLICommandsAreCataloged(t *testing.T) {
 		{"dots", "disable"},
 		{"dots", "pull"},
 		{"dots", "push"},
+		{"dots", "reminder", "install"},
+		{"dots", "reminder", "uninstall"},
+		{"dots", "watch", "run"},
+		{"dots", "watch", "install"},
+		{"dots", "watch", "uninstall"},
 	} {
 		if !catalogHasCLICommand(path) {
 			t.Fatalf("mutating CLI command %q is missing from action catalog", strings.Join(path, " "))

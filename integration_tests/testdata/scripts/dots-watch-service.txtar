@@ -1,0 +1,53 @@
+# dots watch service installs, reports status, and uninstalls through the native service adapter
+# @requires: linux
+env HOME=$WORK/home
+env XDG_CONFIG_HOME=$WORK/xdg-config
+env PATH=$WORK/bin:$PATH
+env OMNI_SYSTEMCTL_LOG=$WORK/systemctl.log
+mkdir $WORK/home
+mkdir $WORK/bin
+exec chmod 755 $WORK/bin/systemctl
+
+exec git init $WORK/home/dotfiles
+exec git -C $WORK/home/dotfiles config user.email t@t.com
+exec git -C $WORK/home/dotfiles config user.name T
+exec git -C $WORK/home/dotfiles commit --allow-empty -m init
+
+exec omni --config settings.json --cache-dir cache dots watch install --debounce 2s
+stdout 'Installed dots watch service'
+stdout 'Platform: systemd'
+stdout 'Debounce: 2s'
+exists $WORK/xdg-config/systemd/user/omni-dots-watch.service
+exec grep $WORK/settings.json $WORK/xdg-config/systemd/user/omni-dots-watch.service
+stdout 'settings.json'
+exec grep $WORK/cache $WORK/xdg-config/systemd/user/omni-dots-watch.service
+stdout 'cache'
+exec grep 'dots watch run --debounce 2s' $WORK/xdg-config/systemd/user/omni-dots-watch.service
+stdout 'dots watch run --debounce 2s'
+exec grep 'Restart=on-failure' $WORK/xdg-config/systemd/user/omni-dots-watch.service
+stdout 'Restart=on-failure'
+exec grep 'WantedBy=default.target' $WORK/xdg-config/systemd/user/omni-dots-watch.service
+stdout 'WantedBy=default.target'
+exec grep 'daemon-reload' $WORK/systemctl.log
+stdout 'daemon-reload'
+exec grep 'enable --now omni-dots-watch.service' $WORK/systemctl.log
+stdout 'enable --now omni-dots-watch.service'
+
+exec omni --config settings.json --cache-dir cache dots watch status
+stdout 'Dots watch service: installed \(systemd\)'
+
+exec omni --config settings.json --cache-dir cache dots watch uninstall
+stdout 'Uninstalled dots watch service'
+! exists $WORK/xdg-config/systemd/user/omni-dots-watch.service
+exec grep 'disable --now omni-dots-watch.service' $WORK/systemctl.log
+stdout 'disable --now omni-dots-watch.service'
+
+exec omni --config settings.json --cache-dir cache dots watch status
+stdout 'Dots watch service: not installed \(systemd\)'
+
+-- settings.json --
+{"host_settings":{"testhost":{"dots_repo":"~/dotfiles"}},"hosts":{"testhost":[]},"groups":[{"name":"testhost","special":"host"}]}
+
+-- bin/systemctl --
+#!/bin/sh
+printf '%s\n' "$*" >> "$OMNI_SYSTEMCTL_LOG"

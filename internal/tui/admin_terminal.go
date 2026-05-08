@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 	"unicode"
 
 	"charm.land/bubbles/v2/key"
@@ -782,7 +783,9 @@ func startAdminTerminalProcess(ctx context.Context, state adminTerminalState, co
 	if err != nil {
 		return nil, err
 	}
+	readDone := make(chan struct{})
 	go func() {
+		defer close(readDone)
 		buf := make([]byte, 4096)
 		for {
 			n, err := ptmx.Read(buf)
@@ -798,6 +801,15 @@ func startAdminTerminalProcess(ctx context.Context, state adminTerminalState, co
 	doneState := state.completionState()
 	go func() {
 		err := cmd.Wait()
+		select {
+		case <-readDone:
+		case <-time.After(200 * time.Millisecond):
+			_ = ptmx.Close()
+			select {
+			case <-readDone:
+			case <-time.After(50 * time.Millisecond):
+			}
+		}
 		_ = ptmx.Close()
 		events <- adminTerminalDoneMsg{id: doneState.id, state: doneState, err: err}
 	}()

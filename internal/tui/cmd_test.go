@@ -1479,10 +1479,10 @@ func TestSettingsRowActionsPersistExpectedConfigFields(t *testing.T) {
 		t.Fatal("row 0 should persist settings.auto_import=true")
 	}
 	if !cfg.Settings.DotsGit.AutoCommit {
-		t.Fatal("row 9 should persist settings.dots_git.auto_commit=true")
+		t.Fatalf("row %d should persist settings.dots_git.auto_commit=true", settingsRowDotsCommit)
 	}
 	if !cfg.Settings.DotsGit.AutoPush {
-		t.Fatal("row 10 should persist settings.dots_git.auto_push=true")
+		t.Fatalf("row %d should persist settings.dots_git.auto_push=true", settingsRowDotsPush)
 	}
 
 	host := cfg.HostSettings["settingsrowtest"]
