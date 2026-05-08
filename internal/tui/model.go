@@ -24,19 +24,20 @@ import (
 type viewMode int
 
 const (
-	viewList              viewMode = iota
-	viewSearch                     // search input active
-	viewSettings                   // options/settings tab
-	viewSetup                      // first-run: no settings.json found
-	viewCommand                    // command palette active
-	viewProfiles                   // dedicated profiles tab
-	viewGroupPicker                // inline move-to-group picker
-	viewGroupMembership            // logical tool group membership toggles
-	viewProfileGroupTools          // profile group tool membership/ignore editor
-	viewProfileGroupDots           // profile group dotfile membership editor
-	viewIgnoreScope                // explicit ignore scope picker
-	viewProviderScope              // explicit provider pin scope picker
-	viewDots                       // dotfiles management tab
+	viewList            viewMode = iota
+	viewSearch                   // search input active
+	viewSettings                 // options/settings tab
+	viewSetup                    // first-run: no settings.json found
+	viewCommand                  // command palette active
+	viewGroups                   // dedicated group-assignment tab
+	viewGroupPicker              // inline move-to-group picker
+	viewGroupMembership          // logical tool group membership toggles
+	viewGroupTools               // group tool membership/ignore editor
+	viewGroupDots                // group dotfile membership editor
+	viewIgnoreScope              // explicit ignore scope picker
+	viewProviderScope            // explicit provider pin scope picker
+	viewAdminTerminal            // privileged package action terminal handoff
+	viewDots                     // dotfiles management tab
 )
 
 // section groups tools into visual categories in the list view.
@@ -47,7 +48,7 @@ const (
 	sectionOutOfSync                // 1 - config-missing / orphan / wrong-provider
 	sectionInstalled                // 2 - installed, up-to-date
 	sectionAvailable                // 3 - available to install (declared in config or found via search)
-	sectionIgnored                  // 4 - in the active profile's ignore list (rendered last, dimmed)
+	sectionIgnored                  // 4 - in the active host's ignore list (rendered last, dimmed)
 )
 
 // syncStatus is the out-of-sync sub-category for a tool in sectionOutOfSync.
@@ -89,39 +90,39 @@ const (
 	stowInstallSetupDotsRepo
 )
 
-type profileGroupToolSection int
+type groupToolSection int
 
 const (
-	profileGroupToolSectionEnabled profileGroupToolSection = iota
-	profileGroupToolSectionDisabled
-	profileGroupToolSectionIgnored
+	groupToolSectionEnabled groupToolSection = iota
+	groupToolSectionDisabled
+	groupToolSectionIgnored
 )
 
-type profileGroupToolRow struct {
+type groupToolRow struct {
 	tool        *database.ToolCache
-	section     profileGroupToolSection
+	section     groupToolSection
 	enabled     bool
 	groupIgnore bool
 	toolIgnore  bool
 }
 
-type profileGroupDotSection int
+type groupDotSection int
 
 const (
-	profileGroupDotSectionEnabled profileGroupDotSection = iota
-	profileGroupDotSectionDisabled
-	profileGroupDotSectionIgnored
+	groupDotSectionEnabled groupDotSection = iota
+	groupDotSectionDisabled
+	groupDotSectionIgnored
 )
 
-type profileGroupDotRow struct {
+type groupDotRow struct {
 	name    string
 	target  string
-	section profileGroupDotSection
+	section groupDotSection
 	enabled bool
 	ignored bool
 }
 
-type profileGroupAssignmentEditor struct {
+type groupAssignmentEditor struct {
 	group              string
 	cursor             int
 	search             string
@@ -171,20 +172,25 @@ type Model struct {
 	descRefreshGen      int                         // generation for background description refreshes
 	cursor              int
 	loading             bool
-	confirmQuit         bool              // true after first quit key; second press exits
-	quitConfirmKey      string            // key used to arm confirmQuit ("q" or "ctrl+c")
-	confirmGen          int               // increments whenever a timed confirmation is armed
-	upgradingKeys       map[string]bool   // set of in-flight upgrade keys ("name\x00provider" or "*")
-	bulkPendingKeys     map[string]bool   // tool keys waiting for their turn in a bulk operation
-	rowOpKey            string            // selected row operation key ("name\x00provider") for install/delete/reinstall work
-	rowOpStatus         string            // inline status shown where row action hints normally render
+	confirmQuit         bool            // true after first quit key; second press exits
+	quitConfirmKey      string          // key used to arm confirmQuit ("q" or "ctrl+c")
+	confirmGen          int             // increments whenever a timed confirmation is armed
+	upgradingKeys       map[string]bool // set of in-flight upgrade keys ("name\x00provider" or "*")
+	bulkPendingKeys     map[string]bool // tool keys waiting for their turn in a bulk operation
+	rowOpKey            string          // selected row operation key ("name\x00provider") for install/delete/reinstall work
+	rowOpStatus         string          // inline status shown where row action hints normally render
+	activeActionCancel  context.CancelFunc
 	rowErrors           map[string]string // tool key -> last failed row action message; survives filtering/search
+	rowActionErrors     map[string]*provider.ActionError
 	listConfirm         listConfirmation
 	suppressFooterHints bool
 	statusMsg           string
 	statusIsErr         bool // true when statusMsg is an error (shown red, 2× duration)
 	statusGen           int  // incremented on each setStatus call; stale clearStatusMsg events are dropped
 	err                 error
+	launchBatchActive   bool
+	launchBatchErrors   []string
+	launchBatchStatus   int
 
 	settingsSaveRunning        bool
 	settingsSaveQueued         bool
@@ -192,14 +198,20 @@ type Model struct {
 	settingsSaveQueuedGen      int
 	settingsSaveGen            int
 	settingsSaveInFlightGen    int
+	adminTerminal              *adminTerminalState
+	adminTerminalQueue         []adminTerminalState
+	adminTerminalGen           int
 
 	// scanningProviders holds the names of providers whose parallel scan goroutines
 	// are still in flight. The spinner is shown while the set is non-empty; each
 	// providerScannedMsg removes one entry. Initialized to the set of unique
 	// provider names from allTools on every scan kick-off.
-	scanningProviders map[string]bool
-	scanGen           int
-	discoveryGen      int
+	scanningProviders          map[string]bool
+	scanGen                    int
+	discoveryGen               int
+	providerSnapshotRefreshing bool
+	discoveryRefreshing        bool
+	descRefreshing             bool
 	// migrating is true while a doMigrateProvider command is in flight.
 	// Prevents progressDoneMsg (from a concurrent launch scan) from prematurely
 	// clearing m.loading, and prevents installedRefreshedMsg/updatesRefreshedMsg
@@ -218,8 +230,8 @@ type Model struct {
 	consolidateOptions []app.EcosystemMigration // cached at load time; registry lookup, no IO
 
 	// group subtabs — used by group picker (move tool to group), not for list filtering
-	groupNames          []string          // ordered non-base group names (excludes "base")
-	toolGroups          map[string]string // "name\x00provider" → baseName
+	groupNames          []string          // ordered reusable group names
+	toolGroups          map[string]string // "name\x00provider" → group name
 	toolMemberships     map[string][]string
 	ignoreLabels        map[string]string // logical tool name → compact ignore source label
 	toolIgnoreSet       map[string]bool
@@ -236,49 +248,46 @@ type Model struct {
 	effectiveNodeManager   string // e.g. "bun", "pnpm", "npm"
 	effectiveSystemManager string // e.g. "brew", "apt" — concrete PM backing the system ecosystem provider
 
-	// profiles tab
-	profileInfo   *app.ProfileInfo
-	profileCursor int
-	ignoreSet     map[string]bool // tool names ignored by the active profile
-	groupFilter   string          // non-empty: only show tools belonging to this group
-	groupTabIdx   int             // 0=all, 1=base, 2+=named groups; mirrors groupFilter for pill navigation
+	// group-assignment tab
+	hostInfo    *app.HostInfo
+	hostCursor  int
+	ignoreSet   map[string]bool // tool names ignored by the active host
+	groupFilter string          // non-empty: only show tools belonging to this group
+	groupTabIdx int             // 0=all, 1=current host, 2+=reusable groups; mirrors groupFilter
 
-	// profile group editing (inline picker in profiles tab)
-	profileEditMode       int               // 0=none, 1=editGroups, 2=editHosts
-	profileGroupPicker    []string          // groups shown in the profile group picker
-	profileGroupIdx       int               // cursor in the profile group picker
-	profileGroupDraft     []string          // staged group memberships for selected profile
-	profileOriginalGroups []string          // group memberships before staged edit
-	profileHostPicker     []string          // hosts shown in the profile host picker
-	profileHostIdx        int               // cursor in the profile host picker
-	profileHostDraft      map[string]string // staged hostname → profile mapping; empty value means unmapped
-	profileHostOriginal   map[string]string // hostname mappings before staged edit
-	profileEditName       string            // profile captured when group/host editor was opened
-	profileDeleteConfirm  bool              // true when awaiting second Enter to confirm delete
-	profileDeleteName     string            // profile captured when delete confirmation was armed
-	profileCreating       bool              // true when the shared new-profile popup is open
-	profileRenameMode     bool              // true when the inline profile rename text input is open
-	profileRenameName     string            // profile captured when inline rename was opened
+	// host group-assignment editing (inline picker in Groups tab)
+	hostEditMode       int      // 0=none, 1=editGroups
+	hostGroupPicker    []string // groups shown in the host assignment picker
+	hostGroupIdx       int      // cursor in the host assignment picker
+	hostGroupDraft     []string // staged group memberships for selected host
+	hostOriginalGroups []string // group memberships before staged edit
+	hostEditName       string   // host captured when group editor was opened
+	hostCopyConfirm    bool     // true when awaiting second Space to copy groups to current host
+	hostCopyName       string   // host captured when copy confirmation was armed
+	hostDeleteConfirm  bool     // true when awaiting second Enter to confirm delete
+	hostDeleteName     string   // host captured when delete confirmation was armed
+	hostRenameMode     bool     // true when the inline host rename text input is open
+	hostRenameName     string   // host captured when inline rename was opened
 
-	// profiles tab section focus
-	// 0 = profiles list, 1 = groups list
-	profileSection     int
+	// group-assignment tab section focus
+	// 0 = hosts list, 1 = groups list
+	assignmentSection  int
 	groupCursor        int  // cursor within the allGroupNames list
 	groupDeleteConfirm bool // true when awaiting second Enter to confirm group delete
 	groupDeleteName    string
-	groupDeleteChoice  int  // 0=move last-membership tools to base, 1=delete last-membership specs
+	groupDeleteChoice  int  // 0=move last-membership tools to this host, 1=delete last-membership specs
 	groupRenameMode    bool // true when inline rename text input is open
 	groupRenameName    string
 	groupCreating      bool // true when the shared new-group popup is open
 
-	// profile group tools editor popup
-	groupToolsEditor         profileGroupAssignmentEditor
+	// group tools editor popup
+	groupToolsEditor         groupAssignmentEditor
 	groupToolsProviderIdx    int
 	groupToolsIgnore         map[string]bool // logical tool name -> staged group-level ignore in groupToolsEditor.group
 	groupToolsOriginalIgnore map[string]bool // logical tool name -> original group-level ignore in groupToolsEditor.group
 
-	// profile group dotfiles editor popup
-	groupDotsEditor profileGroupAssignmentEditor
+	// group dotfiles editor popup
+	groupDotsEditor groupAssignmentEditor
 
 	// inline group-picker
 	pickerGroups         []string
@@ -298,7 +307,7 @@ type Model struct {
 	scopeTarget          database.ToolCache
 	scopeTargetSet       bool
 
-	// setup wizard step (0 = create config?, 1 = import tools?, 2 = provider selection, 3 = node manager, 4 = profile name, 5 = enable dotfiles?, 6 = dots repo path)
+	// setup wizard step (0 = create config?, 1 = import tools?, 2 = provider selection, 3 = node manager, 4 = unused, 5 = enable dotfiles?, 6 = dots repo path)
 	setupStep int
 	// setupBackgroundMode is the main tab rendered behind setup/onboarding
 	// popups. Zero value keeps first-run setup on the tools tab.
@@ -309,13 +318,17 @@ type Model struct {
 	// setupNodeMgrIdx is the cursor for node manager selection in step 3.
 	// 0=auto, 1=bun, 2=pnpm, 3=npm
 	setupNodeMgrIdx int
-	// setupExitConfirm is true when the user tried to skip profile creation in
-	// setup step 4 and is shown the "exit omni?" confirmation prompt.
-	setupExitConfirm bool
+	// setupComplete is set after onboarding has completed so a follow-up reload
+	// cannot reopen setup from a stale no-host snapshot.
+	setupComplete bool
+	// setupReloading keeps a centered loading overlay visible after onboarding has
+	// switched back to the main UI but before the first post-setup reload
+	// finishes.
+	setupReloading bool
 
-	// profileRequired is true when the config exists but no profile is mapped
-	// to this machine. All navigation is locked until a profile is active.
-	profileRequired bool
+	// hostRequired is true when the config exists but no host entry matches
+	// this machine. All navigation is locked until a host is active.
+	hostRequired bool
 
 	// provider priority editor (active when editing the Priority row in settings)
 	editingPriority bool
@@ -327,31 +340,35 @@ type Model struct {
 	showFilePicker       bool
 	filePickerTitle      string
 	filePickerAllowFiles bool
-	settingsInput        textinput.Model // still used for profile name, group rename
+	settingsInput        textinput.Model // used by settings/group text inputs
 
 	// dots tab
-	dotsEntries         []app.DotStatus
-	dotsGitStatus       string
-	dotMemberships      map[string][]string
-	dotsCursor          int
-	dotsExpandedName    string
-	dotsLoading         bool
-	dotsLoaded          bool // true after first lazy load
-	dotsOpGen           int  // increments for each async dots operation; stale results are dropped
-	dotsCtx             context.Context
-	dotsCancel          context.CancelFunc
-	dotsConfirmIdx      int    // index of entry pending delete confirm; -1 = none
-	dotsOverwriteIdx    int    // index of conflict entry pending use-repo confirm; -1 = none
-	dotsLocalIdx        int    // index of conflict entry pending use-local confirm; -1 = none
-	dotsIgnoreIdx       int    // index of child path pending ignore/include confirm; -1 = none
-	dotsGroupFilter     string // "" = all groups; "config"/"home"/"custom"/etc = filtered
-	dotsSearchActive    bool   // true when dots search bar is open
-	filePickerForDotAdd bool   // true when file picker opened for "add path" on dots tab
-	stowInstalled       bool
-	stowInstallPrompt   bool
-	stowInstallAction   stowInstallAction
-	stowInstallSettings config.Settings
-	stowInstallPath     string
+	dotsEntries          []app.DotStatus
+	dotsGitStatus        string
+	dotMemberships       map[string][]string
+	dotsCursor           int
+	dotsExpandedName     string
+	dotsExpandedChildren map[string]bool
+	dotsLoading          bool
+	dotsLoaded           bool // true after first lazy load
+	dotsOpGen            int  // increments for each async dots operation; stale results are dropped
+	dotsCtx              context.Context
+	dotsCancel           context.CancelFunc
+	dotsProgressCh       chan dotsProgressUpdate
+	dotsPendingNames     map[string]bool
+	dotsActiveName       string
+	dotsConfirmIdx       int    // index of entry pending delete confirm; -1 = none
+	dotsOverwriteIdx     int    // index of conflict entry pending use-repo confirm; -1 = none
+	dotsLocalIdx         int    // index of conflict entry pending use-local confirm; -1 = none
+	dotsIgnoreIdx        int    // index of child path pending ignore/include confirm; -1 = none
+	dotsGroupFilter      string // "" = all groups; "config"/"home"/"custom"/etc = filtered
+	dotsSearchActive     bool   // true when dots search bar is open
+	filePickerForDotAdd  bool   // true when file picker opened for "add path" on dots tab
+	stowInstalled        bool
+	stowInstallPrompt    bool
+	stowInstallAction    stowInstallAction
+	stowInstallSettings  config.Settings
+	stowInstallPath      string
 
 	// danger zone (settings tab)
 	dangerConfirmRow int // settings row awaiting inline confirmation; -1 = none
@@ -361,8 +378,8 @@ type Model struct {
 
 	// palette holds all colours and pre-built lipgloss styles for the active
 	// terminal theme. Initialised to the dark default in New(); rebuilt on
-	// the first tea.BackgroundColorMsg via applyTheme. Each Model owns its
-	// own palette so parallel test instances do not share mutable state.
+	// tea.BackgroundColorMsg via applyTheme. Each Model owns its own palette
+	// so parallel test instances do not share mutable state.
 	palette palette
 
 	// isDark is true when the terminal reports a dark background colour.
@@ -392,7 +409,7 @@ type listConfirmation struct {
 // "node(pnpm)" when one, plain "node" when none detected.
 //
 // Rows respect the existing settings.DisabledProviders so that re-running the
-// setup wizard (noProfile=true path) does not re-enable providers the user has
+// setup wizard (noHost=true path) does not re-enable providers the user has
 // previously disabled.
 func buildSetupProvidersFromManagers(metaMap map[string]string, allPyBins, allNodeBins []string, settings config.Settings) []setupProviderRow {
 	managerLabel := func(meta string, bins []string) string {
@@ -517,11 +534,16 @@ func New(a *app.App, ctx context.Context) Model {
 func (m *Model) shutdown() {
 	m.cancelSearch()
 	m.cancelDotsOperation()
+	if m.activeActionCancel != nil {
+		m.activeActionCancel()
+		m.activeActionCancel = nil
+	}
 	if m.cancel != nil {
 		m.cancel()
 	}
 	m.loading = false
 	m.dotsLoading = false
+	m.clearDotsProgressState()
 	m.searching = false
 	m.scanningProviders = nil
 	m.upgradingKeys = make(map[string]bool)
@@ -536,7 +558,7 @@ func (m Model) Init() tea.Cmd {
 	)
 }
 
-// loadTools fetches tools, settings, taps, groups, and profiles from the DB
+// loadTools fetches tools, settings, taps, groups, and hosts from the DB
 // cache without probing providers. Returns immediately so the list renders
 // on the first frame. A background doRefreshInstalled cmd updates install
 // status afterwards.
@@ -551,22 +573,22 @@ func loadTools(a *app.App, ctx context.Context) tea.Cmd {
 		}
 		settings, _ := a.LoadSettings()
 		taps, _ := a.LoadTaps()
-		profileInfo, _ := a.ProfileStatus()
-		noProfile := profileInfo != nil && profileInfo.Active == ""
-		var activeProfile string
-		var profileIgnore []string
-		if profileInfo != nil && profileInfo.Active != "" {
-			activeProfile = profileInfo.Active
-			if prof, ok := profileInfo.Profiles[activeProfile]; ok {
-				profileIgnore = prof.Ignore
+		hostInfo, _ := a.HostStatus()
+		noHost := hostInfo != nil && hostInfo.Active == ""
+		var activeHost string
+		var hostIgnore []string
+		if hostInfo != nil && hostInfo.Active != "" {
+			activeHost = hostInfo.Active
+			if prof, ok := hostInfo.Hosts[activeHost]; ok {
+				hostIgnore = prof.Ignore
 			}
 		}
 		groups, _ := a.Groups(ctx)
 		toolMemberships, _ := a.ToolMembershipMap(ctx)
 		dotMemberships, _ := a.DotMembershipMap(ctx)
-		toolGroups := compactToolGroupMapForProfile(toolMemberships, profileInfo)
+		toolGroups := compactToolGroupMapForHost(toolMemberships, hostInfo)
 		groupNames := buildGroupNames(groups)
-		ignoreLabels := buildIgnoreLabels(a.ConfigPath, groups, profileIgnore)
+		ignoreLabels := buildIgnoreLabels(a.ConfigPath, groups, hostIgnore)
 		toolIgnoreSet, groupIgnoreSet, toolProviderPins := buildToolScopeState(a.ConfigPath, groups)
 		ignoreList := make([]string, 0, len(ignoreLabels))
 		for name := range ignoreLabels {
@@ -598,9 +620,9 @@ func loadTools(a *app.App, ctx context.Context) tea.Cmd {
 			toolIgnoreSet:          toolIgnoreSet,
 			groupIgnoreSet:         groupIgnoreSet,
 			toolProviderPins:       toolProviderPins,
-			profileInfo:            profileInfo,
+			hostInfo:               hostInfo,
 			ignoreList:             ignoreList,
-			noProfile:              noProfile,
+			noHost:                 noHost,
 			effectivePythonManager: pythonBin,
 			effectiveNodeManager:   nodeBin,
 			effectiveSystemManager: effectiveSystemManager,
@@ -635,39 +657,39 @@ func buildToolGroups(groups []*config.GroupConfig) map[string]string {
 	return tg
 }
 
-func compactToolGroupMapForProfile(memberships map[string][]string, info *app.ProfileInfo) map[string]string {
-	return compactToolGroupMapWithFilter(memberships, activeProfileGroupSet(info))
+func compactToolGroupMapForHost(memberships map[string][]string, info *app.HostInfo) map[string]string {
+	return compactToolGroupMapWithFilter(memberships, activeHostGroupSet(info))
 }
 
 func compactToolGroupMapWithFilter(memberships map[string][]string, allowed map[string]bool) map[string]string {
 	out := make(map[string]string, len(memberships))
 	for key, groups := range memberships {
-		out[key] = compactGroupLabel(filterGroupsForProfile(groups, allowed))
+		out[key] = compactGroupLabel(filterGroupsForHost(groups, allowed))
 	}
 	return out
 }
 
-func activeProfileGroupSet(info *app.ProfileInfo) map[string]bool {
+func activeHostGroupSet(info *app.HostInfo) map[string]bool {
 	if info == nil || info.Active == "" {
 		return nil
 	}
-	profile, ok := info.Profiles[info.Active]
+	host, ok := info.Hosts[info.Active]
 	if !ok {
 		return nil
 	}
-	allowed := make(map[string]bool, len(profile.Groups))
-	for _, group := range profile.Groups {
+	allowed := make(map[string]bool, len(host.Groups))
+	for _, group := range host.Groups {
 		allowed[group] = true
 	}
 	// Machine groups are runtime-active for the current host but are not stored
-	// in profile.Groups. Keep them visible in the list/filter when configured.
+	// in host.Groups. Keep them visible in the list/filter when configured.
 	if host := shortHostname(); host != "" {
 		allowed[host] = true
 	}
 	return allowed
 }
 
-func filterGroupsForProfile(groups []string, allowed map[string]bool) []string {
+func filterGroupsForHost(groups []string, allowed map[string]bool) []string {
 	if allowed == nil {
 		return groups
 	}
@@ -681,7 +703,7 @@ func filterGroupsForProfile(groups []string, allowed map[string]bool) []string {
 }
 
 func visibleGroupNames(m Model) []string {
-	allowed := activeProfileGroupSet(m.profileInfo)
+	allowed := activeHostGroupSet(m.hostInfo)
 	if allowed == nil {
 		return m.groupNames
 	}
@@ -699,7 +721,7 @@ func prioritizedPickerGroups(m Model) []string {
 }
 
 func prioritizePickerGroupList(m Model, groups []string) []string {
-	allowed := pickerActiveGroupSet(m)
+	allowed := pickerActiveHostGroupSet(m)
 	if allowed == nil {
 		return groups
 	}
@@ -715,17 +737,17 @@ func prioritizePickerGroupList(m Model, groups []string) []string {
 	return append(active, inactive...)
 }
 
-func groupInActiveProfile(m Model, group string) bool {
-	allowed := pickerActiveGroupSet(m)
+func groupInActiveHost(m Model, group string) bool {
+	allowed := pickerActiveHostGroupSet(m)
 	return allowed != nil && allowed[group]
 }
 
-func groupHasActiveProfileContext(m Model) bool {
-	return pickerActiveGroupSet(m) != nil
+func groupHasActiveHostContext(m Model) bool {
+	return pickerActiveHostGroupSet(m) != nil
 }
 
-func pickerActiveGroupSet(m Model) map[string]bool {
-	allowed := activeProfileGroupSet(m.profileInfo)
+func pickerActiveHostGroupSet(m Model) map[string]bool {
+	allowed := activeHostGroupSet(m.hostInfo)
 	if len(m.pickerCreatedGroups) == 0 {
 		return allowed
 	}
@@ -778,24 +800,27 @@ func buildToolScopeState(configPath string, groups []*config.GroupConfig) (map[s
 		if g == nil {
 			continue
 		}
-		groupName := g.BaseName()
-		for _, name := range g.Ignore {
-			if groupIgnores[name] == nil {
-				groupIgnores[name] = make(map[string]bool)
-			}
-			groupIgnores[name][groupName] = true
-		}
 	}
 	pins := make(map[string]string)
 	if configPath != "" {
 		if cfg, err := config.Load(configPath); err == nil {
 			shortHost := shortHostname()
+			for _, name := range cfg.Ignore.Tools {
+				if name != "" {
+					if groupIgnores[name] == nil {
+						groupIgnores[name] = make(map[string]bool)
+					}
+					groupIgnores[name]["global"] = true
+				}
+			}
 			for name, spec := range cfg.Tools {
 				if spec.Ignore {
 					toolIgnores[name] = true
 				}
-				if hostSpec, ok := spec.Hosts[shortHost]; ok && hostSpec.InstallWith != "" {
-					pins[name] = hostSpec.InstallWith
+				if hostSpec, ok := spec.Hosts[shortHost]; ok {
+					if hostSpec.InstallWith != "" {
+						pins[name] = hostSpec.InstallWith
+					}
 				} else if spec.InstallWith != "" {
 					pins[name] = spec.InstallWith
 				}
@@ -805,26 +830,14 @@ func buildToolScopeState(configPath string, groups []*config.GroupConfig) (map[s
 	return toolIgnores, groupIgnores, pins
 }
 
-func buildIgnoreLabels(configPath string, groups []*config.GroupConfig, profileIgnore []string) map[string]string {
+func buildIgnoreLabels(configPath string, groups []*config.GroupConfig, hostIgnore []string) map[string]string {
 	labels := make(map[string]string)
-	for _, name := range profileIgnore {
+	for _, name := range hostIgnore {
 		if name != "" {
-			labels[name] = "profile"
+			labels[name] = "global"
 		}
 	}
 	groupSources := make(map[string][]string)
-	for _, g := range groups {
-		if g == nil {
-			continue
-		}
-		groupName := g.BaseName()
-		for _, name := range g.Ignore {
-			if name == "" {
-				continue
-			}
-			groupSources[name] = append(groupSources[name], groupName)
-		}
-	}
 	for name, sources := range groupSources {
 		if len(sources) == 1 {
 			labels[name] = sources[0]
@@ -834,6 +847,11 @@ func buildIgnoreLabels(configPath string, groups []*config.GroupConfig, profileI
 	}
 	if configPath != "" {
 		if cfg, err := config.Load(configPath); err == nil {
+			for _, name := range cfg.Ignore.Tools {
+				if name != "" {
+					labels[name] = "global"
+				}
+			}
 			for name, spec := range cfg.Tools {
 				if spec.Ignore {
 					labels[name] = "tool"
@@ -844,14 +862,17 @@ func buildIgnoreLabels(configPath string, groups []*config.GroupConfig, profileI
 	return labels
 }
 
-// buildGroupNames returns an ordered slice of unique non-base group names.
-// "base" group is excluded — the [All] tab covers it implicitly.
+// buildGroupNames returns an ordered slice of unique reusable group names.
+// Host groups are excluded and added by buildAllGroupNames for host-local UI.
 func buildGroupNames(groups []*config.GroupConfig) []string {
 	var names []string
 	seen := make(map[string]bool)
 	for _, g := range groups {
+		if g.IsHost() {
+			continue
+		}
 		bn := g.BaseName()
-		if bn == "base" || seen[bn] {
+		if bn == "" || seen[bn] {
 			continue
 		}
 		seen[bn] = true
@@ -861,25 +882,29 @@ func buildGroupNames(groups []*config.GroupConfig) []string {
 	return names
 }
 
-// buildAllGroupNames returns all configured group filter names, including base,
-// in display order.
+// buildAllGroupNames returns the local host group plus reusable group names.
 func buildAllGroupNames(groupNames []string) []string {
 	names := make([]string, 0, len(groupNames)+1)
-	seen := map[string]bool{"base": true}
-	names = append(names, "base")
-	for _, name := range groupNames {
+	host := shortHostname()
+	if host == "" {
+		host = "localhost"
+	}
+	seen := map[string]bool{host: true}
+	names = append(names, host)
+	reusable := append([]string(nil), groupNames...)
+	sort.Strings(reusable)
+	for _, name := range reusable {
 		if seen[name] {
 			continue
 		}
 		seen[name] = true
 		names = append(names, name)
 	}
-	sort.Strings(names)
 	return names
 }
 
 // displaySection returns the visual section for a tool, taking into account the
-// active profile's ignore list. Ignored tools always land in sectionIgnored.
+// active host's ignore list. Ignored tools always land in sectionIgnored.
 func (m *Model) displaySection(t *database.ToolCache) section {
 	if m.ignoreLabels[t.Name] != "" || m.ignoreSet[t.Name] {
 		return sectionIgnored
@@ -915,8 +940,8 @@ func (m *Model) rebuildDiscoveredKeys() {
 }
 
 // setGroupFilterFromIdx syncs m.groupFilter from m.groupTabIdx using the given
-// allGroups slice (["base", "work", ...]).  groupTabIdx 0 means "all" → clears
-// the filter; any other index selects the corresponding group name.
+// allGroups slice ([current-host, "work", ...]). groupTabIdx 0 means "all" and
+// clears the filter; any other index selects the corresponding group name.
 func (m *Model) setGroupFilterFromIdx(allGroups []string) {
 	if m.groupTabIdx == 0 {
 		m.groupFilter = ""
@@ -1072,8 +1097,13 @@ func (m *Model) syncStatusOf(t *database.ToolCache) syncStatus {
 	if !t.Installed {
 		return syncMissing
 	}
-	if pin := m.toolProviderPins[t.Name]; pin != "" && t.InstalledWith == pin {
-		return syncOK
+	if pin := m.toolProviderPins[t.Name]; pin != "" {
+		if t.InstalledWith == pin {
+			return syncOK
+		}
+		if t.InstalledWith != "" {
+			return syncWrongProv
+		}
 	}
 	// ⚠ InstalledWith doesn't match the current effective concrete for the ecosystem provider.
 	// All three ecosystem providers are treated equally.

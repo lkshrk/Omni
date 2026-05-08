@@ -3,119 +3,228 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
-	"charm.land/lipgloss/v2/list"
 	"charm.land/lipgloss/v2/table"
+
+	"github.com/lkshrk/omni/internal/app"
+	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/provider"
 )
 
 func renderSetup(m Model) string {
-	p := m.palette
-	var sb strings.Builder
-	sb.WriteString("\n")
-	sb.WriteString(p.styleTitle.PaddingLeft(0).Render(screenEdgeInset() + logoMark + " Omni - Manage all your packages and dotfiles"))
-	sb.WriteString("\n\n")
-	sb.WriteString(renderHRule(p, m.width))
-	sb.WriteString("\n\n")
-
+	var body string
 	switch m.setupStep {
 	case 0:
-		sb.WriteString(p.styleNormal.Render("  No settings.json found."))
-		sb.WriteString("\n")
-		sb.WriteString(p.styleHelp.Render("  Create one now to start managing tools?"))
-		sb.WriteString("\n\n")
-		sb.WriteString(p.styleInstalled.Render("  [y] ") + p.styleNormal.Render("Yes, create settings.json"))
-		sb.WriteString("\n")
-		sb.WriteString(p.styleMissing.Render("  [n] ") + p.styleNormal.Render("No, quit"))
+		body = renderSetupPanel(m, setupPanel{
+			Lead: "Manage packages and dotfiles from one settings.json.",
+			Help: []string{"No config exists yet. Create one to get started?"},
+			Footer: renderSetupFooter(m,
+				[]hintItem{dangerRawHint("esc", "quit")},
+				nil,
+				[]hintItem{hintFromBindingDesc(m.keys.Confirm, "create settings.json")},
+			),
+		})
 	case 1, 2:
-		sb.WriteString(renderProviderPickerStep(m, m.setupStep))
+		body = renderProviderPickerStep(m, m.setupStep)
 	case 3:
-		sb.WriteString(p.styleNormal.Render("  Choose a Node.js package manager."))
-		sb.WriteString("\n\n")
-		sb.WriteString(p.styleHelp.Render("  If you have multiple installed, omni will use this one."))
-		sb.WriteString("\n")
-		sb.WriteString(p.styleHelp.Render("  You can always change this later in Settings."))
-		sb.WriteString("\n\n")
+		var options []setupOption
 		for i, c := range nodeMgrChoices {
-			var bullet string
-			if i == m.setupNodeMgrIdx {
-				bullet = p.styleInstalled.Render("  \u25b6 ")
-			} else {
-				bullet = p.styleHelp.Render("    ")
-			}
-			var label string
-			if i == m.setupNodeMgrIdx {
-				label = p.styleActiveText.Render(c.label)
-			} else {
-				label = p.styleNormal.Render(c.label)
-			}
-			desc := p.styleHelp.Render("  " + c.desc)
-			sb.WriteString(bullet + label + desc)
-			sb.WriteByte('\n')
+			options = append(options, setupOption{Label: c.label, Detail: c.desc, Selected: i == m.setupNodeMgrIdx})
 		}
-		sb.WriteString("\n")
-		sb.WriteString(renderContextHints(m, hintCtxSetupNodeManager, textRowHintPrefix()))
-	case 4:
-		if m.setupExitConfirm {
-			sb.WriteString(p.styleMissing.Render("  A profile is required to use omni."))
-			sb.WriteString("\n\n")
-			sb.WriteString(p.styleHelp.Render("  Skipping profile setup will close omni."))
-			sb.WriteString("\n")
-			sb.WriteString(p.styleHelp.Render("  You can always create a profile later with 'omni profile add <name>'."))
-			sb.WriteString("\n\n")
-			sb.WriteString(p.styleMissing.Render("  [y] ") + p.styleNormal.Render("Close omni"))
-			sb.WriteString("\n")
-			sb.WriteString(p.styleInstalled.Render("  [n] ") + p.styleNormal.Render("Go back and create a profile"))
-		} else {
-			sb.WriteString(p.styleNormal.Render("  Create a profile for this machine."))
-			sb.WriteString("\n\n")
-			sb.WriteString(p.styleHelp.Render("  Profiles let you keep per-machine tool sets and ignore lists."))
-			sb.WriteString("\n")
-			sb.WriteString(p.styleHelp.Render("  A profile is required — omni cannot run without one."))
-			sb.WriteString("\n\n")
-			inputWidth := max(m.width-14, 20)
-			m.settingsInput.SetWidth(inputWidth)
-			sb.WriteString(p.styleNormal.Render("  Name: ") + "[ " + m.settingsInput.View() + " ]")
-			sb.WriteString("\n\n")
-			sb.WriteString(renderActionHints(p, actionHints{
-				prefix: "  ",
-				items:  []hintItem{hintFromBindingDesc(m.keys.Confirm, "create profile")},
-			}))
-		}
+		body = renderSetupPanel(m, setupPanel{
+			Lead: "Choose a Node.js package manager.",
+			Help: []string{
+				"If you have multiple installed, omni will use this one.",
+				"You can always change this later in Settings.",
+			},
+			Body: renderSetupOptions(m, options),
+			Footer: renderSetupFooter(m,
+				[]hintItem{hintFromBindingDesc(m.keys.Back, "skip")},
+				nil,
+				[]hintItem{hintFromBindingDesc(m.keys.Confirm, "confirm")},
+			),
+		})
 	case 5:
-		sb.WriteString(p.styleNormal.Render("  Enable dotfile sync?"))
-		sb.WriteString("\n\n")
-		sb.WriteString(p.styleHelp.Render("  omni can manage your config symlinks from a git repository,"))
-		sb.WriteString("\n")
-		sb.WriteString(p.styleHelp.Render("  keeping dotfiles in sync across machines."))
-		sb.WriteString("\n\n")
-		sb.WriteString(p.styleInstalled.Render("  [y] ") + p.styleNormal.Render("Yes, set up dotfile sync"))
-		sb.WriteString("\n")
-		sb.WriteString(p.styleMissing.Render("  [n] ") + p.styleNormal.Render("No, skip for now"))
+		body = renderSetupPanel(m, setupPanel{
+			Lead: "Enable dotfile sync?",
+			Help: []string{
+				"omni can manage your config symlinks from a git repository,",
+				"keeping dotfiles in sync across machines.",
+			},
+			Footer: renderSetupFooter(m,
+				[]hintItem{hintFromBindingDesc(m.keys.Back, "skip for now")},
+				nil,
+				[]hintItem{hintFromBindingDesc(m.keys.Confirm, "set up dotfile sync")},
+			),
+		})
 	case 6:
 		// File picker overlays the full screen; this header is not reached during
 		// normal flow since renderFilePicker takes over when showFilePicker=true.
 		// Shown only as a placeholder if the picker is somehow not yet active.
-		sb.WriteString(p.styleNormal.Render("  Dotfiles repo path"))
-		sb.WriteString("\n\n")
-		sb.WriteString(p.styleHelp.Render("  Browse to your local dotfiles git repository."))
-		sb.WriteString("\n")
-		sb.WriteString(renderActionHints(p, actionHints{
-			prefix: "  ",
-			items:  []hintItem{hintFromBindingDesc(m.keys.Back, "skip")},
-		}))
+		body = renderSetupPanel(m, setupPanel{
+			Lead: "Dotfiles repo path",
+			Help: []string{"Browse to your local dotfiles git repository."},
+			Footer: renderSetupFooter(m,
+				[]hintItem{hintFromBindingDesc(m.keys.Back, "skip")},
+				nil,
+				nil,
+			),
+		})
 	}
 
-	if m.loading {
-		sb.WriteString("\n\n  " + m.spinner.View() + " " + p.styleStatus.Render(m.statusMsg))
+	return body
+}
+
+type setupPanel struct {
+	Lead   string
+	Help   []string
+	Body   string
+	Footer string
+}
+
+type setupOption struct {
+	Label    string
+	Detail   string
+	Selected bool
+	Checked  *bool
+}
+
+func renderSetupPanel(m Model, panel setupPanel) string {
+	p := m.palette
+	var sections []string
+	if panel.Lead != "" {
+		sections = append(sections, p.styleNormal.Render(panel.Lead))
+	}
+	if len(panel.Help) > 0 {
+		var help strings.Builder
+		for i, line := range panel.Help {
+			if i > 0 {
+				help.WriteByte('\n')
+			}
+			help.WriteString(p.styleHelp.Render(line))
+		}
+		sections = append(sections, help.String())
+	}
+	if panel.Body != "" {
+		sections = append(sections, panel.Body)
+	}
+	if panel.Footer != "" {
+		sections = append(sections, panel.Footer)
+	}
+	return strings.Join(sections, "\n\n")
+}
+
+func renderSetupFooter(m Model, left, middle, right []hintItem) string {
+	return renderPopupActionColumns(m.palette, max(m.width, 1), left, middle, right)
+}
+
+func renderSetupOptions(m Model, options []setupOption) string {
+	p := m.palette
+	var sb strings.Builder
+	for i, opt := range options {
+		if i > 0 {
+			sb.WriteByte('\n')
+		}
+		sb.WriteString(pickerCursor(p, opt.Selected))
+		if opt.Checked != nil {
+			mark := "[ ]"
+			markStyle := p.styleHelp
+			if *opt.Checked {
+				mark = "[x]"
+				markStyle = p.styleInstalled
+			}
+			sb.WriteString(markStyle.Render(mark))
+			sb.WriteByte(' ')
+		}
+		labelStyle := p.styleNormal
+		if opt.Selected {
+			labelStyle = p.styleActiveText
+		}
+		sb.WriteString(labelStyle.Render(opt.Label))
+		if opt.Detail != "" {
+			sb.WriteString(p.styleHelp.Render("  " + opt.Detail))
+		}
 	}
 	return sb.String()
 }
 
-func renderSetupPopup(m Model) string {
+func renderSetupPopup(m Model, width int) string {
 	popupModel := m
-	popupModel.width = min(max(m.width-10, 40), 80)
+	popupModel.width = max(width, 1)
 	return renderSetup(popupModel)
+}
+
+func renderPostSetupLoading(m Model) string {
+	p := m.palette
+	text := m.progressText
+	if text == "" {
+		text = activityLabel(m)
+	}
+	rawLines := []string{
+		p.styleTitle.Bold(true).Render(loadingGlobeFrame()),
+		"",
+		postSetupLoadingTextStyle(p, text).Render(text),
+		p.styleHelp.Render("Scanning configured package ecosystems."),
+	}
+	width := 0
+	for _, line := range rawLines {
+		width = max(width, lipgloss.Width(line))
+	}
+	lines := make([]string, len(rawLines))
+	for i, line := range rawLines {
+		lines[i] = centerPopupLine(line, width)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func postSetupLoadingTextStyle(p palette, text string) lipgloss.Style {
+	if isProviderRefreshText(text) {
+		return p.styleNormal.Bold(true)
+	}
+	return p.styleNormal
+}
+
+func loadingGlobeFrame() string {
+	if logoMark == "o" {
+		return logoMark
+	}
+	frames := []string{"🌍", "🌎", "🌏"}
+	return frames[int(time.Now().UnixMilli()/250)%len(frames)]
+}
+
+func centerPopupLine(line string, width int) string {
+	pad := max((max(width, 1)-lipgloss.Width(line))/2, 0)
+	return strings.Repeat(" ", pad) + line
+}
+
+func setupPopupFrame(m Model) popupFrame {
+	return popupFrame{
+		Title:    setupPopupTitle(m),
+		PaddingY: 1,
+		PaddingX: 3,
+		Width:    clampPopupDimension(64, 44, popupFrameMaxWidth(m)),
+	}
+}
+
+func setupPopupTitle(m Model) string {
+	switch m.setupStep {
+	case 0:
+		return logoMark + " Omni - Create settings"
+	case 1:
+		return logoMark + " Omni - Import tools"
+	case 2:
+		return logoMark + " Omni - Enable ecosystems"
+	case 3:
+		return logoMark + " Omni - Choose Node manager"
+	case 5:
+		return logoMark + " Omni - Dotfile sync"
+	case 6:
+		return logoMark + " Omni - Choose dotfiles repo"
+	default:
+		return logoMark + " Omni"
+	}
 }
 
 func renderHeader(m Model) string {
@@ -123,56 +232,117 @@ func renderHeader(m Model) string {
 	title := p.styleTitle.PaddingLeft(0).Render(screenEdgeInset() + logoMark)
 	tabs := renderTabs(m)
 
-	var right string
-	if m.mode == viewDots {
-		counts := fmt.Sprintf("  %d entries", len(m.dotsEntries))
-		if m.dotsGitStatus != "" {
-			counts += "  " + p.styleOutdated.Render("dirty")
-		}
-		right = lipgloss.NewStyle().Foreground(p.colMuted).Render(counts)
-	} else if m.searching {
-		right = lipgloss.NewStyle().Foreground(p.colMuted).Render("  searching…")
-	} else if len(m.scanningProviders) > 0 {
-		right = lipgloss.NewStyle().Foreground(p.colMuted).Render("  scanning…")
-	} else {
-		updates := m.sectionCounts[sectionUpdates]
-		var counts string
-		if updates > 0 {
-			counts = "  " + p.styleOutdated.Render(fmt.Sprintf("%d updates", updates)) + "  "
-		} else {
-			counts = "  "
-		}
-		counts += fmt.Sprintf("%d tools", len(m.allTools))
-		if len(m.searchTools) > 0 {
-			counts += fmt.Sprintf(" +%d found", len(m.searchTools))
-		}
-		right = lipgloss.NewStyle().Foreground(p.colMuted).Render(counts)
-	}
+	right := renderHeaderInfo(m)
 
 	gap := max(screenContentWidth(m.width)-lipgloss.Width(title)-lipgloss.Width(tabs)-lipgloss.Width(right), 0)
 	return title + tabs + strings.Repeat(" ", gap) + right
 }
 
-func renderTabs(m Model) string {
-	p := m.palette
-	active := func(label string) string { return p.styleActiveText.Render("  " + label) }
-	inactive := func(label string) string { return p.styleHelp.Render("  " + label) }
-
-	toolsTab := inactive("Tools")
-	dotsTab := inactive("Dots")
-	profilesTab := inactive("Profiles")
-	optsTab := inactive("Settings")
+func renderHeaderInfo(m Model) string {
 	switch m.mode {
 	case viewDots:
-		dotsTab = active("Dots")
-	case viewProfiles:
-		profilesTab = active("Profiles")
+		return renderDotsHeaderInfo(m)
+	case viewGroups:
+		return renderGroupsHeaderInfo(m)
 	case viewSettings:
-		optsTab = active("Settings")
+		return renderSettingsHeaderInfo(m)
 	default:
-		toolsTab = active("Tools")
+		return renderToolsHeaderInfo(m)
 	}
-	return toolsTab + dotsTab + profilesTab + optsTab
+}
+
+func renderToolsHeaderInfo(m Model) string {
+	p := m.palette
+	updates := m.sectionCounts[sectionUpdates]
+	var counts string
+	if updates > 0 {
+		counts = fmt.Sprintf("  %d updates  ", updates)
+	} else {
+		counts = "  "
+	}
+	counts += fmt.Sprintf("%d tools", len(m.allTools))
+	if len(m.searchTools) > 0 {
+		counts += fmt.Sprintf(" +%d found", len(m.searchTools))
+	}
+	return renderHeaderInfoText(p, counts)
+}
+
+func renderDotsHeaderInfo(m Model) string {
+	if config.BoolVal(m.settings.DotsDisabled) {
+		return ""
+	}
+	p := m.palette
+	counts := dotHeaderCounts(m.dotsEntries)
+	parts := []string{"  " + dotRatioText(counts)}
+	if ignored := dotIgnoredText(counts); ignored != "" {
+		parts = append(parts, ignored)
+	}
+	return renderHeaderInfoText(p, strings.Join(parts, " "))
+}
+
+func dotHeaderCounts(entries []app.DotStatus) app.DotFileCounts {
+	var total app.DotFileCounts
+	for _, entry := range entries {
+		if dotStatusState(entry) == app.DotStateIgnored {
+			continue
+		}
+		counts := dotEntryCounts(entry)
+		total.Synced += counts.Synced
+		total.OutOfSync += counts.OutOfSync
+		total.Ignored += counts.Ignored
+	}
+	return total
+}
+
+func renderGroupsHeaderInfo(m Model) string {
+	groups := len(buildAllGroupNames(m.groupNames))
+	hosts := len(sortedHostNames(m.hostInfo))
+	return renderHeaderInfoText(m.palette, "  "+compactCount(groups, "group")+"  "+compactCount(hosts, "host"))
+}
+
+func renderSettingsHeaderInfo(m Model) string {
+	enabled := 3 - disabledEcosystemProviderCount(m.settings.DisabledProviders)
+	dotsLabel := "dots unset"
+	if config.BoolVal(m.settings.DotsDisabled) {
+		dotsLabel = "dots off"
+	} else if m.settings.DotsRepo != "" {
+		dotsLabel = "dots on"
+	}
+	return renderHeaderInfoText(m.palette, fmt.Sprintf("  %d/3 providers  %s", enabled, dotsLabel))
+}
+
+func renderHeaderInfoText(p palette, text string) string {
+	if text == "" {
+		return ""
+	}
+	return lipgloss.NewStyle().Foreground(p.colMuted).Render(text)
+}
+
+func disabledEcosystemProviderCount(disabled []string) int {
+	seen := make(map[string]bool, 3)
+	for _, name := range disabled {
+		switch name {
+		case provider.EcosystemSystem, provider.EcosystemNode, provider.EcosystemPython:
+			seen[name] = true
+		}
+	}
+	return len(seen)
+}
+
+func renderTabs(m Model) string {
+	p := m.palette
+	active := func(label string) string { return p.styleStatus.Render("  " + label) }
+	inactive := func(label string) string { return p.styleHelp.Render("  " + label) }
+
+	var sb strings.Builder
+	for _, tab := range mainTabs() {
+		if m.mode == tab.mode {
+			sb.WriteString(active(tab.label))
+		} else {
+			sb.WriteString(inactive(tab.label))
+		}
+	}
+	return sb.String()
 }
 
 type mainTabHitZone struct {
@@ -180,22 +350,29 @@ type mainTabHitZone struct {
 	start, end int
 }
 
+type mainTab struct {
+	mode  viewMode
+	label string
+}
+
+func mainTabs() []mainTab {
+	return []mainTab{
+		{mode: viewList, label: "Tools"},
+		{mode: viewDots, label: "Dots"},
+		{mode: viewGroups, label: "Groups"},
+		{mode: viewSettings, label: "Settings"},
+	}
+}
+
 func mainTabHitZones(m Model) []mainTabHitZone {
 	titleW := lipgloss.Width(m.palette.styleTitle.PaddingLeft(0).Render(screenEdgeInset() + logoMark))
-	labels := []struct {
-		mode  viewMode
-		label string
-	}{
-		{viewList, "  Tools"},
-		{viewDots, "  Dots"},
-		{viewProfiles, "  Profiles"},
-		{viewSettings, "  Settings"},
-	}
-	zones := make([]mainTabHitZone, 0, len(labels))
+	tabs := mainTabs()
+	zones := make([]mainTabHitZone, 0, len(tabs))
 	x := titleW
-	for _, label := range labels {
-		w := lipgloss.Width(label.label)
-		zones = append(zones, mainTabHitZone{mode: label.mode, start: x, end: x + w})
+	for _, tab := range tabs {
+		label := "  " + tab.label
+		w := lipgloss.Width(label)
+		zones = append(zones, mainTabHitZone{mode: tab.mode, start: x, end: x + w})
 		x += w
 	}
 	return zones
@@ -241,79 +418,34 @@ func renderPalette(m Model) string {
 }
 
 // renderProviderPickerStep renders the shared provider selection UI used in
-// setup steps 1 (first-run import) and 2 (no-profile re-run). The only
+// setup steps 1 (first-run import) and 2 (no-host re-run). The only
 // difference between the two steps is the introductory subtitle text.
 func renderProviderPickerStep(m Model, step int) string {
-	p := m.palette
-	var sb strings.Builder
-
-	// Step-specific preamble.
+	lead := "Choose which package ecosystems to enable on this machine."
+	help := []string{"Disabled ecosystems can be re-enabled later in Settings."}
 	if step == 1 {
-		sb.WriteString(p.styleInstalled.Render("  ✓ ") + p.styleNormal.Render("settings.json created."))
-		sb.WriteString("\n\n")
-		sb.WriteString(p.styleNormal.Render("  Choose which ecosystems to enable on this machine."))
-		sb.WriteString("\n\n")
-		sb.WriteString(renderActionHints(p, actionHints{
-			prefix: "  ",
-			items: []hintItem{
-				hintFromBindingDesc(m.keys.Toggle, "toggle"),
-				hintFromBindingDesc(m.keys.Confirm, "confirm"),
-			},
-		}))
-		sb.WriteString("\n")
-		sb.WriteString(p.styleHelp.Render("  Enabled ecosystems will be imported from your existing tools."))
-	} else {
-		sb.WriteString(p.styleNormal.Render("  Choose which package ecosystems to enable on this machine."))
-		sb.WriteString("\n\n")
-		sb.WriteString(renderActionHints(p, actionHints{
-			prefix: "  ",
-			items: []hintItem{
-				hintFromBindingDesc(m.keys.Toggle, "toggle"),
-				hintFromBindingDesc(m.keys.Confirm, "confirm"),
-			},
-		}))
-		sb.WriteString("\n")
-		sb.WriteString(p.styleHelp.Render("  Disabled ecosystems can be re-enabled later in Settings."))
+		lead = "Choose which ecosystems to import on this machine."
+		help = []string{"Enabled ecosystems will be imported from your existing tools."}
 	}
-	sb.WriteString("\n\n")
 
-	// Shared provider list.
 	spCursor := m.setupProviderIdx
-	spItems := make([]any, len(m.setupProviders))
+	options := make([]setupOption, 0, len(m.setupProviders))
 	for i, row := range m.setupProviders {
-		var labelStyle lipgloss.Style
-		if row.enabled {
-			labelStyle = p.styleNormal
-		} else {
-			labelStyle = p.styleHelp
-		}
-		if i == spCursor {
-			labelStyle = labelStyle.Bold(true)
-		}
-		spItems[i] = labelStyle.Render(row.label)
-	}
-	spl := list.New(spItems...).
-		Enumerator(func(_ list.Items, i int) string {
-			if m.setupProviders[i].enabled {
-				return "[✓]"
-			}
-			return "[ ]"
-		}).
-		EnumeratorStyleFunc(func(_ list.Items, i int) lipgloss.Style {
-			s := lipgloss.NewStyle().PaddingLeft(2).PaddingRight(1)
-			if m.setupProviders[i].enabled {
-				return s.Foreground(p.colInstalled)
-			}
-			return s.Foreground(p.colMuted)
-		}).
-		ItemStyleFunc(func(_ list.Items, _ int) lipgloss.Style {
-			return lipgloss.NewStyle() // item text is pre-styled
+		enabled := row.enabled
+		options = append(options, setupOption{
+			Label:    row.label,
+			Selected: i == spCursor,
+			Checked:  &enabled,
 		})
-	sb.WriteString(spl.String() + "\n")
-	sb.WriteString("\n")
-	sb.WriteString(renderActionHints(p, actionHints{
-		prefix: "  ",
-		items:  []hintItem{hintFromBindingDesc(m.keys.Confirm, "save & continue")},
-	}))
-	return sb.String()
+	}
+	return renderSetupPanel(m, setupPanel{
+		Lead: lead,
+		Help: help,
+		Body: renderSetupOptions(m, options),
+		Footer: renderSetupFooter(m,
+			nil,
+			[]hintItem{hintFromBindingDesc(m.keys.Toggle, "toggle")},
+			[]hintItem{hintFromBindingDesc(m.keys.Confirm, "save & continue")},
+		),
+	})
 }

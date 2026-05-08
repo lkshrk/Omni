@@ -6,11 +6,13 @@ package tui
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"charm.land/bubbles/v2/spinner"
@@ -21,6 +23,7 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/provider"
+	gosync "github.com/lkshrk/omni/internal/sync"
 )
 
 // ── stub providers ─────────────────────────────────────────────────────────────
@@ -39,6 +42,23 @@ func (p *okProvider) IsInstalled(_ context.Context, _ provider.Tool) (bool, stri
 }
 func (p *okProvider) ListInstalled(_ context.Context) ([]provider.InstalledTool, error) {
 	return nil, nil
+}
+
+type privilegedOKProvider struct {
+	okProvider
+	plan provider.PrivilegePlan
+}
+
+func (p *privilegedOKProvider) PrivilegePlan(_ context.Context, _ provider.PrivilegeAction, _ provider.Tool) (provider.PrivilegePlan, error) {
+	return p.plan, nil
+}
+
+type privilegedMissingProvider struct {
+	privilegedOKProvider
+}
+
+func (p *privilegedMissingProvider) IsInstalled(_ context.Context, _ provider.Tool) (bool, string, error) {
+	return false, "", nil
 }
 
 // errProvider is a Provider whose Install/Upgrade always fail.
@@ -81,6 +101,22 @@ func tuiToolSpec(providerName string) config.ToolSpec {
 	return spec
 }
 
+func tuiTestHostGroup(names ...string) *config.GroupConfig {
+	group := &config.GroupConfig{Name: shortHostname(), Special: "host"}
+	for _, name := range names {
+		group.Tools = append(group.Tools, config.ToolEntry{Name: name})
+	}
+	return group
+}
+
+func tuiNamedHostGroup(name string, tools ...string) *config.GroupConfig {
+	group := &config.GroupConfig{Name: name, Special: "host"}
+	for _, tool := range tools {
+		group.Tools = append(group.Tools, config.ToolEntry{Name: tool})
+	}
+	return group
+}
+
 // newCmdApp creates an App backed by a stub provider and a pre-existing settings.json.
 func newCmdApp(t *testing.T, prov provider.Provider, tools []tuiFixtureTool) (*app.App, string) {
 	t.Helper()
@@ -88,7 +124,7 @@ func newCmdApp(t *testing.T, prov provider.Provider, tools []tuiFixtureTool) (*a
 	cfgPath := filepath.Join(dir, "settings.json")
 
 	cfg := &config.RootConfig{
-		Groups: []*config.GroupConfig{{}},
+		Groups: []*config.GroupConfig{tuiTestHostGroup()},
 	}
 	if len(tools) > 0 {
 		cfg.Tools = make(map[string]config.ToolSpec, len(tools))
@@ -117,7 +153,60 @@ func newCmdApp(t *testing.T, prov provider.Provider, tools []tuiFixtureTool) (*a
 
 func saveTUIConfig(t testing.TB, path string, cfg *config.RootConfig) error {
 	t.Helper()
+	normalizeTUITestRootConfig(cfg)
 	return config.Save(path, cfg)
+}
+
+func normalizeTUITestRootConfig(cfg *config.RootConfig) {
+	if cfg == nil {
+		return
+	}
+	host := shortHostname()
+	for _, group := range cfg.Groups {
+		if group == nil {
+			continue
+		}
+		for _, ignored := range group.Ignore {
+			if ignored != "" && !slices.Contains(cfg.Ignore.Tools, ignored) {
+				cfg.Ignore.Tools = append(cfg.Ignore.Tools, ignored)
+			}
+		}
+		if group.Name == host {
+			group.Special = "host"
+		}
+	}
+	if cfg.Hosts == nil {
+		cfg.Hosts = map[string][]string{}
+	}
+	for _, group := range cfg.Groups {
+		if group != nil && group.IsHost() {
+			if _, ok := cfg.Hosts[group.Name]; !ok {
+				cfg.Hosts[group.Name] = []string{}
+			}
+		}
+	}
+	byName := map[string]*config.GroupConfig{}
+	merged := make([]*config.GroupConfig, 0, len(cfg.Groups))
+	for _, group := range cfg.Groups {
+		if group == nil {
+			continue
+		}
+		if existing, ok := byName[group.Name]; ok {
+			existing.Taps = append(existing.Taps, group.Taps...)
+			existing.Tools = append(existing.Tools, group.Tools...)
+			existing.Dots = append(existing.Dots, group.Dots...)
+			if group.Special != "" {
+				existing.Special = group.Special
+			}
+			if existing.Description == "" {
+				existing.Description = group.Description
+			}
+			continue
+		}
+		byName[group.Name] = group
+		merged = append(merged, group)
+	}
+	cfg.Groups = merged
 }
 
 func tuiFixtureEcosystem(providerName string) string {
@@ -145,6 +234,15 @@ func findTestGroup(cfg *config.RootConfig, name string) *config.GroupConfig {
 func containsToolMembership(tools []config.ToolEntry, name string) bool {
 	for _, tool := range tools {
 		if tool.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func containsDotMembership(dots []config.DotEntry, name string) bool {
+	for _, dot := range dots {
+		if dot.Name == name {
 			return true
 		}
 	}
@@ -242,6 +340,9 @@ func TestDoDelete_Success(t *testing.T) {
 	if got.err != nil {
 		t.Errorf("unexpected error: %v", got.err)
 	}
+	if !slices.Contains(got.removeDiscoveredKeys, toolKey("ripgrep", "brew")) {
+		t.Fatalf("removeDiscoveredKeys = %v, want ripgrep/brew", got.removeDiscoveredKeys)
+	}
 }
 
 func TestDoDelete_DeletesConfigEntry(t *testing.T) {
@@ -264,6 +365,82 @@ func TestDoDelete_DeletesConfigEntry(t *testing.T) {
 	}
 	if cmdTestToolInConfig(cfg, "ripgrep", "brew") {
 		t.Fatalf("ripgrep still present in config after TUI delete: %+v", cfg.Groups)
+	}
+}
+
+func TestDoDelete_RefreshesToolMembershipState(t *testing.T) {
+	prov := &okProvider{name: "brew"}
+	a, _ := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
+	m := modelForCmds(a)
+	key := toolKey("ripgrep", "system")
+	m.toolGroups = map[string]string{key: "base"}
+	m.toolMemberships = map[string][]string{key: {"base"}}
+	if err := a.DB().Upsert(context.Background(), &database.ToolCache{
+		Name:      "ripgrep",
+		Provider:  "system",
+		Package:   "ripgrep",
+		Installed: true,
+		Tracked:   true,
+	}); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+
+	msg := m.doDelete("ripgrep", "brew")()
+	got, ok := msg.(opCompleteMsg)
+	if !ok {
+		t.Fatalf("expected opCompleteMsg, got %T", msg)
+	}
+	if got.err != nil {
+		t.Fatalf("unexpected error: %v", got.err)
+	}
+	if _, ok := got.toolGroups[key]; ok {
+		t.Fatalf("deleted tool still present in refreshed toolGroups: %v", got.toolGroups)
+	}
+	if _, ok := got.toolMemberships[key]; ok {
+		t.Fatalf("deleted tool still present in refreshed toolMemberships: %v", got.toolMemberships)
+	}
+	if len(got.tools) != 0 {
+		t.Fatalf("deleted tool still present in refreshed tools: %+v", got.tools)
+	}
+
+	m.handleOpCompleteMsg(got)
+	if len(m.visibleTools) != 0 {
+		t.Fatalf("deleted tool should disappear from visible tools, got %+v", m.visibleTools)
+	}
+	if _, ok := m.toolGroups[key]; ok {
+		t.Fatalf("stale tool group survived opComplete handling: %v", m.toolGroups)
+	}
+	if _, ok := m.toolMemberships[key]; ok {
+		t.Fatalf("stale tool membership survived opComplete handling: %v", m.toolMemberships)
+	}
+}
+
+func TestHandleOpCompleteMsg_DeleteRemovesDiscoveredOrphan(t *testing.T) {
+	m := modelForCmds(nil)
+	key := toolKey("swiftlint", "system")
+	swiftformat := &database.ToolCache{Name: "swiftformat", Provider: "system", Package: "swiftformat", Installed: true, Tracked: true}
+	orphan := &database.ToolCache{Name: "swiftlint", Provider: "system", Package: "swiftlint", Installed: true, Tracked: false}
+	m.allTools = []*database.ToolCache{swiftformat}
+	m.discoveredTools = []*database.ToolCache{orphan}
+	m.rebuildDiscoveredKeys()
+	m.applyFilter()
+	if got := m.countSection(sectionOutOfSync); got != 1 {
+		t.Fatalf("precondition out-of-sync count = %d, want 1", got)
+	}
+
+	m.handleOpCompleteMsg(opCompleteMsg{
+		message:              "deleted swiftlint",
+		tools:                []*database.ToolCache{swiftformat},
+		removeDiscoveredKeys: []string{key},
+	})
+	if len(m.discoveredTools) != 0 {
+		t.Fatalf("deleted orphan should leave discovered list: %+v", m.discoveredTools)
+	}
+	if got := m.countSection(sectionOutOfSync); got != 0 {
+		t.Fatalf("out-of-sync count after delete = %d, want 0", got)
+	}
+	if len(m.visibleTools) != 1 || m.visibleTools[0].Name != "swiftformat" {
+		t.Fatalf("visible tools after delete = %+v, want only swiftformat", m.visibleTools)
 	}
 }
 
@@ -294,6 +471,40 @@ func TestDoDeleteFromConfig_DeletesMissingConfigEntry(t *testing.T) {
 	}
 	if cmdTestToolInConfig(cfg, "ripgrep", "brew") {
 		t.Fatalf("ripgrep still present in config after delete-from-config: %+v", cfg.Groups)
+	}
+}
+
+func TestDoDeleteFromConfig_RefreshesToolMembershipState(t *testing.T) {
+	prov := &okProvider{name: "brew"}
+	a, _ := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
+	m := modelForCmds(a)
+	key := toolKey("ripgrep", "brew")
+	m.toolGroups = map[string]string{key: "base"}
+	m.toolMemberships = map[string][]string{key: {"base"}}
+	if err := a.DB().Upsert(context.Background(), &database.ToolCache{
+		Name:      "ripgrep",
+		Provider:  "brew",
+		Installed: false,
+		Tracked:   true,
+	}); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+
+	msg := m.doDeleteFromConfig("ripgrep", "brew")()
+	got, ok := msg.(opCompleteMsg)
+	if !ok {
+		t.Fatalf("expected opCompleteMsg, got %T", msg)
+	}
+	if got.err != nil {
+		t.Fatalf("unexpected error: %v", got.err)
+	}
+
+	m.handleOpCompleteMsg(got)
+	if _, ok := m.toolGroups[key]; ok {
+		t.Fatalf("stale tool group survived config delete: %v", m.toolGroups)
+	}
+	if _, ok := m.toolMemberships[key]; ok {
+		t.Fatalf("stale tool membership survived config delete: %v", m.toolMemberships)
 	}
 }
 
@@ -380,6 +591,95 @@ func TestDoSyncAllWithProgress_ClaimsDiscoveredToHostnameGroup(t *testing.T) {
 	}
 }
 
+func TestDoSyncAllWithProgress_PrivilegedInstallOpensAdminTerminal(t *testing.T) {
+	prov := &privilegedMissingProvider{
+		privilegedOKProvider: privilegedOKProvider{
+			okProvider: okProvider{name: "apt"},
+			plan:       provider.PrivilegePlan{Requirement: provider.PrivilegeRequired, Reason: "apt install vim"},
+		},
+	}
+	a, _ := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("vim", "apt")})
+	m := modelForCmds(a)
+	m.mode = viewList
+	m.allTools = []*database.ToolCache{
+		{Name: "vim", Provider: "apt", Package: "vim", Tracked: true},
+	}
+	m.applyFilter()
+	ch, gen := m.beginProgressStream()
+
+	msg := m.doSyncAllWithProgress(ch, gen, nil)()
+	done, ok := msg.(progressDoneMsg)
+	if !ok {
+		t.Fatalf("expected progressDoneMsg, got %T", msg)
+	}
+	if done.err != nil {
+		t.Fatalf("unexpected error: %v", done.err)
+	}
+	if done.promptPrivilegedActions[toolKey("vim", provider.EcosystemSystem)] != provider.PrivilegeActionInstall {
+		t.Fatalf("promptPrivilegedActions = %#v, want vim install prompt", done.promptPrivilegedActions)
+	}
+
+	got := drive(m, done)
+	if got.mode != viewAdminTerminal || got.adminTerminal == nil {
+		t.Fatalf("mode=%v adminTerminal=%v, want admin terminal prompt", got.mode, got.adminTerminal != nil)
+	}
+	if got.adminTerminal.name != "vim" || got.adminTerminal.providerName != provider.EcosystemSystem {
+		t.Fatalf("admin terminal target = %s/%s, want vim/system", got.adminTerminal.providerName, got.adminTerminal.name)
+	}
+	if got.adminTerminal.display != expectedInteractiveAdminDisplay("apt-get install -y vim") {
+		t.Fatalf("display command = %q", got.adminTerminal.display)
+	}
+	if got.statusMsg != "" || got.statusIsErr {
+		t.Fatalf("status=%q err=%v, want prompt to own status", got.statusMsg, got.statusIsErr)
+	}
+	if got.rowErrors[toolKey("vim", provider.EcosystemSystem)] != "admin approval required to install" {
+		t.Fatalf("rowErrors = %#v, want admin approval row error retained", got.rowErrors)
+	}
+}
+
+func TestQueuedPrivilegedAdminTerminalContinuesAfterSuccess(t *testing.T) {
+	m := baseModel([]*database.ToolCache{
+		{Name: "bat", Provider: "apt", Package: "bat"},
+	})
+	m.mode = viewList
+	m.adminTerminalQueue = []adminTerminalState{
+		{
+			action:                 provider.PrivilegeActionInstall,
+			name:                   "vim",
+			providerName:           "apt",
+			pkg:                    "vim",
+			command:                "sudo",
+			args:                   []string{"apt-get", "install", "-y", "vim"},
+			display:                "sudo apt-get install -y vim",
+			returnMode:             viewList,
+			rowKey:                 toolKey("vim", "apt"),
+			preserveOtherRowErrors: true,
+		},
+	}
+	m.rowErrors = map[string]string{
+		toolKey("bat", "apt"): "requires sudo: apt install bat",
+		toolKey("vim", "apt"): "requires sudo: apt install vim",
+	}
+
+	got := drive(m, opCompleteMsg{
+		key:                    toolKey("bat", "apt"),
+		message:                "installed bat",
+		preserveOtherRowErrors: true,
+	})
+	if got.mode != viewAdminTerminal || got.adminTerminal == nil {
+		t.Fatalf("mode=%v adminTerminal=%v, want next admin terminal prompt", got.mode, got.adminTerminal != nil)
+	}
+	if got.adminTerminal.name != "vim" {
+		t.Fatalf("next admin terminal target = %q, want vim", got.adminTerminal.name)
+	}
+	if _, ok := got.rowErrors[toolKey("bat", "apt")]; ok {
+		t.Fatalf("bat row error should be cleared after success, rowErrors=%#v", got.rowErrors)
+	}
+	if got.rowErrors[toolKey("vim", "apt")] == "" {
+		t.Fatalf("vim row error should remain until its prompt finishes, rowErrors=%#v", got.rowErrors)
+	}
+}
+
 // ── doUpgradeAll ──────────────────────────────────────────────────────────────
 
 func TestDoUpgradeAll_Success(t *testing.T) {
@@ -395,6 +695,133 @@ func TestDoUpgradeAll_Success(t *testing.T) {
 	}
 	if got.err != nil {
 		t.Errorf("unexpected error: %v", got.err)
+	}
+}
+
+func TestDoUpgradeAll_ProgressShowsCurrentTool(t *testing.T) {
+	prov := &okProvider{name: "brew"}
+	a, _ := newCmdApp(t, prov, nil)
+	tools := []*database.ToolCache{
+		{Name: "bat", Provider: "brew", Package: "bat", Installed: true, Outdated: true, Tracked: true},
+		{Name: "ripgrep", Provider: "brew", Package: "ripgrep", Installed: true, Outdated: true, Tracked: true},
+	}
+	for _, tool := range tools {
+		if err := a.DB().Upsert(context.Background(), tool); err != nil {
+			t.Fatalf("seed cache: %v", err)
+		}
+	}
+	m := modelForCmds(a)
+	m.allTools = tools
+	ch := make(chan progressUpdate, 16)
+
+	msg := m.doUpgradeAll(ch, 1)()
+	if _, ok := msg.(progressDoneMsg); !ok {
+		t.Fatalf("expected progressDoneMsg, got %T", msg)
+	}
+	var updates []progressUpdate
+	var texts []string
+	for update := range ch {
+		updates = append(updates, update)
+		texts = append(texts, update.text)
+	}
+	if !slices.Contains(texts, "Upgrading tools 1/2: bat…") {
+		t.Fatalf("progress texts = %v, want current bat status", texts)
+	}
+	if !slices.Contains(texts, "Upgrading tools 2/2: ripgrep…") {
+		t.Fatalf("progress texts = %v, want current ripgrep status", texts)
+	}
+	if !slices.Contains(texts, "Upgrading tools 1/2: bat upgraded") {
+		t.Fatalf("progress texts = %v, want bat done status", texts)
+	}
+	for _, update := range updates {
+		if update.rowStatus == "Upgrading tools 1/2: bat…" {
+			t.Fatalf("row status should stay row-local, got %q", update.rowStatus)
+		}
+	}
+}
+
+func TestDoUpgradeAll_PrivilegedUpgradesOpenAdminTerminalQueue(t *testing.T) {
+	prov := &privilegedOKProvider{
+		okProvider: okProvider{name: "apt"},
+		plan:       provider.PrivilegePlan{Requirement: provider.PrivilegeRequired, Reason: "apt upgrade package"},
+	}
+	a, _ := newCmdApp(t, prov, nil)
+	tools := []*database.ToolCache{
+		{Name: "bat", Provider: "apt", Package: "bat", Installed: true, Outdated: true, Tracked: true},
+		{Name: "vim", Provider: "apt", Package: "vim", Installed: true, Outdated: true, Tracked: true},
+	}
+	for _, tool := range tools {
+		if err := a.DB().Upsert(context.Background(), tool); err != nil {
+			t.Fatalf("seed cache: %v", err)
+		}
+	}
+	m := modelForCmds(a)
+	m.mode = viewList
+	m.allTools = tools
+	m.applyFilter()
+	ch, gen := m.beginProgressStream()
+
+	msg := m.doUpgradeAll(ch, gen)()
+	done, ok := msg.(progressDoneMsg)
+	if !ok {
+		t.Fatalf("expected progressDoneMsg, got %T", msg)
+	}
+	if done.err != nil {
+		t.Fatalf("unexpected error: %v", done.err)
+	}
+	for _, tool := range tools {
+		key := toolKey(tool.Name, tool.Provider)
+		if done.promptPrivilegedActions[key] != provider.PrivilegeActionUpgrade {
+			t.Fatalf("promptPrivilegedActions[%q] = %q, want upgrade; all actions=%#v", key, done.promptPrivilegedActions[key], done.promptPrivilegedActions)
+		}
+	}
+
+	got := drive(m, done)
+	if got.mode != viewAdminTerminal || got.adminTerminal == nil {
+		t.Fatalf("mode=%v adminTerminal=%v, want admin terminal prompt", got.mode, got.adminTerminal != nil)
+	}
+	if got.adminTerminal.action != provider.PrivilegeActionUpgrade {
+		t.Fatalf("admin action = %q, want upgrade", got.adminTerminal.action)
+	}
+	if got.adminTerminal.queueTotal != 2 || len(got.adminTerminalQueue) != 1 {
+		t.Fatalf("queue total=%d remaining=%d, want first prompt plus one queued", got.adminTerminal.queueTotal, len(got.adminTerminalQueue))
+	}
+	queuedNames := map[string]bool{got.adminTerminal.name: true, got.adminTerminalQueue[0].name: true}
+	if !queuedNames["bat"] || !queuedNames["vim"] {
+		t.Fatalf("queued admin targets = %#v, want bat and vim", queuedNames)
+	}
+	for _, tool := range tools {
+		key := toolKey(tool.Name, tool.Provider)
+		if got.rowErrors[key] != "admin approval required to upgrade" {
+			t.Fatalf("rowErrors[%q] = %q, want admin approval to upgrade; all errors=%#v", key, got.rowErrors[key], got.rowErrors)
+		}
+	}
+}
+
+func TestUpgradeAllProgressText_DeduplicatesBulkVerb(t *testing.T) {
+	tool := provider.Tool{Name: "bat", Provider: "brew"}
+	tests := []struct {
+		name    string
+		message string
+		err     error
+		want    string
+	}{
+		{name: "started", message: "Upgrading bat…", want: "Upgrading tools 1/2: bat…"},
+		{name: "done", message: "Upgraded bat", want: "Upgrading tools 1/2: bat upgraded"},
+		{name: "skipped", message: "Skipped upgrading bat", want: "Upgrading tools 1/2: bat skipped"},
+		{name: "admin needed", message: "Admin approval needed for bat", err: errors.New("requires sudo: apt upgrade bat"), want: "Upgrading tools 1/2: bat needs admin approval"},
+		{name: "failed", message: "Failed upgrading bat", want: "Upgrading tools 1/2: bat failed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := upgradeAllProgressText(gosync.ProgressEvent{Tool: tool, Message: tt.message, Err: tt.err}, 1, 2)
+			if got != tt.want {
+				t.Fatalf("upgradeAllProgressText = %q, want %q", got, tt.want)
+			}
+			if strings.Contains(strings.ToLower(got), "upgrading tools 1/2: upgrading") {
+				t.Fatalf("progress text repeats the bulk verb: %q", got)
+			}
+		})
 	}
 }
 
@@ -473,7 +900,7 @@ func TestDoSetupImport_Success(t *testing.T) {
 			{Tool: provider.Tool{Name: "jq"}, Version: "1.7"},
 		},
 	}
-	a, _ := newCmdApp(t, prov, nil)
+	a, cfgPath := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
 	msg := m.doSetupImport(nil)()
 	got, ok := msg.(setupImportDoneMsg)
@@ -485,6 +912,22 @@ func TestDoSetupImport_Success(t *testing.T) {
 	}
 	if got.added == 0 {
 		t.Errorf("expected added > 0 when provider has installed tools, got 0")
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	group := findTestGroup(cfg, shortHostname())
+	if group == nil || !group.IsHost() {
+		t.Fatalf("setup import group = %#v, want protected host group", group)
+	}
+	hostMsg := m.doSetupHost(shortHostname())()
+	hostDone, ok := hostMsg.(setupHostDoneMsg)
+	if !ok {
+		t.Fatalf("expected setupHostDoneMsg, got %T", hostMsg)
+	}
+	if hostDone.err != nil {
+		t.Fatalf("doSetupHost after import: %v", hostDone.err)
 	}
 }
 
@@ -513,9 +956,9 @@ func TestDoSetToolGroupMembership_AddSuccess(t *testing.T) {
 	if work == nil || !containsToolMembership(work.Tools, "ripgrep") {
 		t.Fatalf("work group missing ripgrep membership: %+v", work)
 	}
-	base := findTestGroup(cfg, "base")
-	if base == nil || !containsToolMembership(base.Tools, "ripgrep") {
-		t.Fatalf("base group membership should remain: %+v", base)
+	host := findTestGroup(cfg, shortHostname())
+	if host != nil && containsToolMembership(host.Tools, "ripgrep") {
+		t.Fatalf("host group membership should be moved out: %+v", host)
 	}
 }
 
@@ -523,7 +966,7 @@ func TestDoSetToolGroupMembership_RemoveSuccess(t *testing.T) {
 	prov := &okProvider{name: "brew"}
 	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
 	m := modelForCmds(a)
-	msg := m.doSetToolGroupMembership("ripgrep", "base", false)()
+	msg := m.doSetToolGroupMembership("ripgrep", shortHostname(), false)()
 	got, ok := msg.(groupChangedMsg)
 	if !ok {
 		t.Fatalf("expected groupChangedMsg, got %T", msg)
@@ -535,9 +978,9 @@ func TestDoSetToolGroupMembership_RemoveSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	base := findTestGroup(cfg, "base")
-	if base != nil && containsToolMembership(base.Tools, "ripgrep") {
-		t.Fatalf("base group still has ripgrep membership: %+v", base.Tools)
+	host := findTestGroup(cfg, shortHostname())
+	if host != nil && containsToolMembership(host.Tools, "ripgrep") {
+		t.Fatalf("host group still has ripgrep membership: %+v", host.Tools)
 	}
 	if _, ok := cfg.Tools["ripgrep"]; !ok {
 		t.Fatal("removing membership deleted logical tool spec")
@@ -558,11 +1001,12 @@ func TestDoSetToolGroupMembership_Error(t *testing.T) {
 	}
 }
 
-func TestDoSetToolGroupMemberships_CreatedGroupJoinsProfile(t *testing.T) {
+func TestDoSetToolGroupMemberships_CreatedGroupJoinsHost(t *testing.T) {
 	prov := &okProvider{name: "brew"}
 	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
 	m := modelForCmds(a)
-	msg := m.doSetToolGroupMemberships("ripgrep", []string{"base"}, []string{"base", "work"}, []string{"work"}, "main")()
+	host := shortHostname()
+	msg := m.doSetToolGroupMemberships("ripgrep", []string{host}, []string{"work"}, []string{"work"}, host)()
 	got, ok := msg.(groupChangedMsg)
 	if !ok {
 		t.Fatalf("expected groupChangedMsg, got %T", msg)
@@ -578,12 +1022,147 @@ func TestDoSetToolGroupMemberships_CreatedGroupJoinsProfile(t *testing.T) {
 	if work == nil || !containsToolMembership(work.Tools, "ripgrep") {
 		t.Fatalf("work group missing ripgrep membership: %+v", work)
 	}
-	profile, ok := cfg.Profiles["main"]
+	groups, ok := cfg.Hosts[host]
 	if !ok {
-		t.Fatalf("profile main was not created: %+v", cfg.Profiles)
+		t.Fatalf("host %s was not created: %+v", host, cfg.Hosts)
 	}
-	if !slices.Contains(profile.Groups, "work") {
-		t.Fatalf("profile main groups = %v, want work", profile.Groups)
+	if !slices.Contains(groups, "work") {
+		t.Fatalf("host %s groups = %v, want work", host, groups)
+	}
+}
+
+func TestDoSetToolGroupMemberships_ExistingGroupJoinsHost(t *testing.T) {
+	prov := &okProvider{name: "brew"}
+	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
+	if err := a.CreateGroup("work"); err != nil {
+		t.Fatalf("CreateGroup: %v", err)
+	}
+	m := modelForCmds(a)
+	host := shortHostname()
+	msg := m.doSetToolGroupMemberships("ripgrep", []string{host}, []string{"work"}, nil, host)()
+	got, ok := msg.(groupChangedMsg)
+	if !ok {
+		t.Fatalf("expected groupChangedMsg, got %T", msg)
+	}
+	if got.err != nil {
+		t.Fatalf("unexpected error: %v", got.err)
+	}
+	key := toolKey("ripgrep", "system")
+	if got.toolGroups[key] != "work" {
+		t.Fatalf("toolGroups[%q] = %q, want work", key, got.toolGroups[key])
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if groups := cfg.Hosts[host]; !slices.Contains(groups, "work") {
+		t.Fatalf("host %s groups = %v, want work", host, groups)
+	}
+
+	rowModel := baseModel([]*database.ToolCache{{
+		Name:     "ripgrep",
+		Provider: "system",
+		Tracked:  true,
+	}})
+	rowModel.toolGroups = got.toolGroups
+	rowModel.groupNames = []string{"work"}
+	rowModel.hostInfo = &app.HostInfo{
+		Active: host,
+		Hosts:  map[string]config.HostAssignment{host: {Groups: []string{"work"}}},
+	}
+	rowModel.applyFilter()
+	out := renderList(rowModel)
+	if !strings.Contains(out, "[work]") {
+		t.Fatalf("missing tool row should render group badge:\n%s", out)
+	}
+}
+
+func TestDoSetDotGroupMemberships_ExistingGroupJoinsHost(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "laptop.local")
+	cfgDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	repoDir := t.TempDir()
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	sourceDir := filepath.Join(repoDir, "dotfiles", "nvim", ".config", "nvim")
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceDir, "init.lua"), []byte("-- config\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	targetDir := filepath.Join(homeDir, ".config", "nvim")
+	if err := os.MkdirAll(filepath.Dir(targetDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(sourceDir, targetDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{DotsRepo: repoDir},
+		Groups: []*config.GroupConfig{
+			{
+				Name:    "laptop",
+				Special: "host",
+				Dots: []config.DotEntry{
+					{Name: "nvim", Path: "~/.config/nvim"},
+				},
+			},
+			{Name: "work"},
+		},
+		Hosts: map[string][]string{"laptop": {}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	a := app.New(cfgPath)
+	a.CacheDir = cfgDir
+	if err := a.InitTestMode(context.Background()); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	m := modelForCmds(a)
+	m.settings = config.Settings{DotsRepo: repoDir}
+	m.hostInfo, _ = a.HostStatus()
+	m.beginDotsOperation("Updating groups...")
+	msg := m.doSetDotGroupMemberships("nvim", []string{"laptop"}, []string{"work"}, nil, "laptop")()
+	got, ok := msg.(dotsLoadedMsg)
+	if !ok {
+		t.Fatalf("expected dotsLoadedMsg, got %T", msg)
+	}
+	if got.err != nil {
+		t.Fatalf("unexpected error: %v", got.err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	hostGroup := findTestGroup(cfg, "laptop")
+	if hostGroup == nil {
+		t.Fatalf("host group missing: %#v", cfg.Groups)
+	}
+	if containsDotMembership(hostGroup.Dots, "nvim") {
+		t.Fatalf("host group still has nvim membership: %#v", hostGroup.Dots)
+	}
+	work := findTestGroup(cfg, "work")
+	if work == nil || !containsDotMembership(work.Dots, "nvim") {
+		t.Fatalf("work group missing nvim membership: %+v", work)
+	}
+	if groups := cfg.Hosts["laptop"]; !slices.Contains(groups, "work") {
+		t.Fatalf("host laptop groups = %v, want work", groups)
+	}
+	if memberships := got.dotMemberships["nvim"]; !slices.Equal(memberships, []string{"work"}) {
+		t.Fatalf("dot memberships = %v, want [work]", memberships)
+	}
+	if len(got.entries) != 1 {
+		t.Fatalf("refreshed entries = %#v, want exactly nvim", got.entries)
+	}
+	if got.entries[0].Name != "nvim" || got.entries[0].Group != "work" || got.entries[0].State != app.DotStateSynced {
+		t.Fatalf("refreshed entry = %#v, want synced nvim in work", got.entries[0])
 	}
 }
 
@@ -663,6 +1242,184 @@ func TestDoSaveSettings_QueuesLatestSnapshot(t *testing.T) {
 	}
 	if got := settings.EcosystemManager(provider.EcosystemNode); got != "pnpm" {
 		t.Fatalf("node manager = %q, want queued snapshot pnpm", got)
+	}
+}
+
+func TestBlockPrivilegedToolAction_GenericPrivilegeOpensAdminTerminal(t *testing.T) {
+	prov := &privilegedOKProvider{
+		okProvider: okProvider{name: "apt"},
+		plan:       provider.PrivilegePlan{Requirement: provider.PrivilegeRequired, Reason: "apt install vim"},
+	}
+	a, _ := newCmdApp(t, prov, nil)
+	m := modelForCmds(a)
+	tool := &database.ToolCache{Name: "vim", Provider: "apt", Package: "vim"}
+
+	if !m.blockPrivilegedToolAction(tool, provider.PrivilegeActionInstall) {
+		t.Fatal("generic privileged action should open the admin terminal")
+	}
+	if m.statusMsg != "" || m.statusIsErr || len(m.rowErrors) != 0 {
+		t.Fatalf("status=%q err=%v rowErrors=%v, want clean prompt state", m.statusMsg, m.statusIsErr, m.rowErrors)
+	}
+	if m.mode != viewAdminTerminal || m.adminTerminal == nil {
+		t.Fatalf("mode=%v adminTerminal=%v, want admin terminal prompt", m.mode, m.adminTerminal != nil)
+	}
+	if got := m.adminTerminal.display; got != expectedInteractiveAdminDisplay("apt-get install -y vim") {
+		t.Fatalf("display command = %q", got)
+	}
+	cached, err := a.DB().Get(context.Background(), "vim", "apt", "vim")
+	if err != nil {
+		t.Fatalf("Get cached row: %v", err)
+	}
+	if cached.Privilege != string(provider.PrivilegeRequired) {
+		t.Fatalf("Privilege = %q, want %q", cached.Privilege, provider.PrivilegeRequired)
+	}
+}
+
+func expectedInteractiveAdminDisplay(direct string) string {
+	if os.Geteuid() == 0 {
+		return direct
+	}
+	return "sudo " + direct
+}
+
+func TestBlockPrivilegedToolAction_OpensAdminTerminalForInteractiveBrewCask(t *testing.T) {
+	prov := &privilegedOKProvider{
+		okProvider: okProvider{name: "brew"},
+		plan: provider.PrivilegePlan{
+			Requirement: provider.PrivilegeMaybe,
+			Reason:      "brew cask parsec uses pkgutil uninstall",
+		},
+	}
+	a, _ := newCmdApp(t, prov, nil)
+	m := modelForCmds(a)
+	tool := &database.ToolCache{
+		Name:          "parsec",
+		Provider:      "system",
+		Package:       "parsec",
+		Installed:     true,
+		InstalledWith: "brew",
+	}
+
+	if !m.blockPrivilegedToolAction(tool, provider.PrivilegeActionUninstall) {
+		t.Fatal("interactive brew cask action should pause the normal TUI operation")
+	}
+	if m.mode != viewAdminTerminal {
+		t.Fatalf("mode = %v, want viewAdminTerminal", m.mode)
+	}
+	if m.adminTerminal == nil {
+		t.Fatal("admin terminal prompt was not opened")
+	}
+	if got := m.adminTerminal.display; got != "brew uninstall --cask parsec" {
+		t.Fatalf("display command = %q, want brew uninstall --cask parsec", got)
+	}
+	if m.adminTerminal.providerName != "system" || m.adminTerminal.installedWith != "brew" {
+		t.Fatalf("admin provider state = %q/%q, want system/brew", m.adminTerminal.providerName, m.adminTerminal.installedWith)
+	}
+	if m.statusMsg != "" || len(m.rowErrors) != 0 {
+		t.Fatalf("status=%q rowErrors=%v, want clean prompt state", m.statusMsg, m.rowErrors)
+	}
+}
+
+func TestBlockPrivilegedToolAction_RefreshesGenericCachedBrewPrivilegeIntoAdminPrompt(t *testing.T) {
+	prov := &privilegedOKProvider{
+		okProvider: okProvider{name: "brew"},
+		plan: provider.PrivilegePlan{
+			Requirement: provider.PrivilegeMaybe,
+			Reason:      "brew cask parsec uses pkgutil uninstall",
+		},
+	}
+	a, _ := newCmdApp(t, prov, nil)
+	m := modelForCmds(a)
+	tool := &database.ToolCache{
+		Name:            "parsec",
+		Provider:        "system",
+		Package:         "parsec",
+		Installed:       true,
+		InstalledWith:   "brew",
+		Privilege:       string(provider.PrivilegeRequired),
+		PrivilegeReason: sql.NullString{String: "package manager needs sudo/root access", Valid: true},
+	}
+
+	if !m.blockPrivilegedToolAction(tool, provider.PrivilegeActionUninstall) {
+		t.Fatal("generic cached brew privilege should be refreshed into an admin terminal prompt")
+	}
+	if m.adminTerminal == nil {
+		t.Fatal("admin terminal prompt was not opened")
+	}
+	if !strings.Contains(m.adminTerminal.reason, "pkgutil uninstall") {
+		t.Fatalf("admin reason = %q, want refreshed cask-specific reason", m.adminTerminal.reason)
+	}
+	if got := m.adminTerminal.display; got != "brew uninstall --cask parsec" {
+		t.Fatalf("display command = %q, want brew uninstall --cask parsec", got)
+	}
+}
+
+func TestQueuePrivilegedInstallPrompts_HandlesAdminInstallError(t *testing.T) {
+	prov := &privilegedOKProvider{
+		okProvider: okProvider{name: "brew"},
+		plan: provider.PrivilegePlan{
+			Requirement: provider.PrivilegeMaybe,
+			Reason:      "brew cask karabiner-elements uses a pkg installer",
+		},
+	}
+	a, _ := newCmdApp(t, prov, nil)
+	m := modelForCmds(a)
+	m.mode = viewList
+	m.allTools = []*database.ToolCache{{
+		Name:          "karabiner-elements",
+		Provider:      provider.EcosystemSystem,
+		Package:       "karabiner-elements",
+		InstalledWith: "brew",
+		Tracked:       true,
+	}}
+	m.applyFilter()
+
+	opened := m.queuePrivilegedInstallPrompts(map[string]string{
+		toolKey("karabiner-elements", provider.EcosystemSystem): "installer requires administrator privileges",
+	})
+	if !opened {
+		t.Fatal("admin install failure should open the admin terminal prompt")
+	}
+	if m.adminTerminal == nil {
+		t.Fatal("admin terminal prompt was not opened")
+	}
+	if got := m.adminTerminal.display; got != "brew install --cask karabiner-elements" {
+		t.Fatalf("display command = %q, want brew install --cask karabiner-elements", got)
+	}
+	if !strings.Contains(m.adminTerminal.reason, "pkg installer") {
+		t.Fatalf("admin reason = %q, want cask pkg installer reason", m.adminTerminal.reason)
+	}
+}
+
+func TestQueuePrivilegedInstallPrompts_UsesSyncRowReasonWhenPlanLookupIsGeneric(t *testing.T) {
+	prov := &okProvider{name: "brew"}
+	a, _ := newCmdApp(t, prov, nil)
+	m := modelForCmds(a)
+	m.mode = viewList
+	m.allTools = []*database.ToolCache{{
+		Name:            "karabiner-elements",
+		Provider:        provider.EcosystemSystem,
+		Package:         "karabiner-elements",
+		Tracked:         true,
+		Privilege:       string(provider.PrivilegeRequired),
+		PrivilegeReason: sql.NullString{String: "package manager needs sudo/root access", Valid: true},
+	}}
+	m.applyFilter()
+
+	opened := m.queuePrivilegedInstallPrompts(map[string]string{
+		toolKey("karabiner-elements", provider.EcosystemSystem): "requires sudo: brew cask karabiner-elements uses a pkg installer",
+	})
+	if !opened {
+		t.Fatal("sync row privilege reason should open the admin terminal prompt")
+	}
+	if m.adminTerminal == nil {
+		t.Fatal("admin terminal prompt was not opened")
+	}
+	if got := m.adminTerminal.display; got != "brew install --cask karabiner-elements" {
+		t.Fatalf("display command = %q, want brew install --cask karabiner-elements", got)
+	}
+	if got := m.adminTerminal.reason; got != "brew cask karabiner-elements uses a pkg installer" {
+		t.Fatalf("admin reason = %q, want sync row cask reason", got)
 	}
 }
 
@@ -808,6 +1565,82 @@ func TestWaitForProgress_ReceivesText(t *testing.T) {
 	}
 }
 
+func TestToolProgressUpdate_ContextCanceledCompletesWithoutRowError(t *testing.T) {
+	got := toolProgressUpdate(3, gosync.ProgressEvent{
+		Tool: provider.Tool{
+			Name:     "ripgrep",
+			Provider: "brew",
+		},
+		Message: "Cancelled installing ripgrep",
+		Err:     context.Canceled,
+		Done:    true,
+	})
+
+	if got.rowKey != toolKey("ripgrep", "brew") {
+		t.Fatalf("rowKey = %q, want ripgrep/brew key", got.rowKey)
+	}
+	if !got.rowDone {
+		t.Fatal("rowDone = false, want true")
+	}
+	if got.rowErr != "" {
+		t.Fatalf("rowErr = %q, want empty for cancellation", got.rowErr)
+	}
+}
+
+func TestSyncResultRowErrors_SkipsContextCanceled(t *testing.T) {
+	result := &gosync.SyncResult{Ops: []gosync.SyncOp{
+		{
+			Tool: provider.Tool{Name: "ripgrep", Provider: "brew"},
+			Kind: gosync.OpFailed,
+			Err:  context.Canceled,
+		},
+		{
+			Tool: provider.Tool{Name: "jq", Provider: "brew"},
+			Kind: gosync.OpFailed,
+			Err:  errors.New("install failed"),
+		},
+	}}
+
+	got := syncResultRowErrors(result)
+	if _, ok := got[toolKey("ripgrep", "brew")]; ok {
+		t.Fatalf("cancelled op should not create a row error, got %#v", got)
+	}
+	if got[toolKey("jq", "brew")] != "install failed" {
+		t.Fatalf("rowErrors = %#v, want jq install failure", got)
+	}
+}
+
+func TestSyncAllProgressText_CountsAddAndInstallOnly(t *testing.T) {
+	discovered := []*database.ToolCache{{Name: "fzf", Provider: "brew", Installed: true}}
+	tools := []*database.ToolCache{
+		{Name: "bat", Provider: "brew", Tracked: true, Installed: false},
+		{Name: "ripgrep", Provider: "brew", Tracked: true, Installed: true, Outdated: true},
+	}
+	if got := countSyncAllProgressItems(tools, discovered); got != 2 {
+		t.Fatalf("countSyncAllProgressItems = %d, want 2", got)
+	}
+
+	addText := syncAllToolProgressText(gosync.ProgressEvent{
+		Tool:    provider.Tool{Name: "fzf", Provider: "brew"},
+		Message: "Adding fzf to config…",
+	}, 1, 2)
+	if addText != "Syncing tools 1/2: adding discovered fzf to config…" {
+		t.Fatalf("add progress text = %q", addText)
+	}
+
+	installText := syncAllToolProgressText(gosync.ProgressEvent{
+		Tool:    provider.Tool{Name: "bat", Provider: "brew"},
+		Message: "Installing bat…",
+	}, 2, 2)
+	if installText != "Syncing tools 2/2: installing missing bat…" {
+		t.Fatalf("install progress text = %q", installText)
+	}
+	combined := strings.ToLower(addText + " " + installText)
+	if strings.Contains(combined, "upgrad") {
+		t.Fatalf("sync-all progress should not imply upgrades, got %q", combined)
+	}
+}
+
 // ── displaySection ────────────────────────────────────────────────────────────
 
 func TestDisplaySection_IgnoredTool(t *testing.T) {
@@ -943,9 +1776,10 @@ func TestBuildGroupNames_SortsNonBaseGroups(t *testing.T) {
 	}
 }
 
-func TestBuildAllGroupNames_SortsBaseWithNamedGroups(t *testing.T) {
+func TestBuildAllGroupNames_PutsHostBeforeNamedGroups(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "host")
 	got := buildAllGroupNames([]string{"work", "apps", "personal"})
-	want := []string{"apps", "base", "personal", "work"}
+	want := []string{"host", "apps", "personal", "work"}
 	if len(got) != len(want) {
 		t.Fatalf("buildAllGroupNames len = %d, want %d (%v)", len(got), len(want), got)
 	}
@@ -1065,9 +1899,7 @@ func TestDoSaveSettingsAndDotsSync_SavesRepoBeforeSync(t *testing.T) {
 		HostSettings: map[string]config.Settings{
 			"dotspickertest": {DotsRepo: oldRepo},
 		},
-		Groups: []*config.GroupConfig{{
-			Dots: []config.DotEntry{{Name: "picked", Path: "~/.config/picked"}},
-		}},
+		Groups: []*config.GroupConfig{{Name: shortHostname(), Special: "host", Dots: []config.DotEntry{{Name: "picked", Path: "~/.config/picked"}}}},
 	}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
@@ -1097,16 +1929,23 @@ func TestDoSaveSettingsAndDotsSync_SavesRepoBeforeSync(t *testing.T) {
 	if string(content) != "selected repo" {
 		t.Fatalf("target content = %q, want selected repo content", string(content))
 	}
-	resolved, err := filepath.EvalSymlinks(targetDir)
+	info, err := os.Lstat(targetDir)
 	if err != nil {
-		t.Fatalf("EvalSymlinks(targetDir): %v", err)
+		t.Fatalf("Lstat(targetDir): %v", err)
 	}
-	wantResolved, err := filepath.EvalSymlinks(filepath.Dir(source))
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		t.Fatalf("target dir mode = %v, want real directory", info.Mode())
+	}
+	resolved, err := filepath.EvalSymlinks(target)
 	if err != nil {
-		t.Fatalf("EvalSymlinks(source dir): %v", err)
+		t.Fatalf("EvalSymlinks(target): %v", err)
+	}
+	wantResolved, err := filepath.EvalSymlinks(source)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(source): %v", err)
 	}
 	if resolved != wantResolved {
-		t.Fatalf("target dir resolves to %q, want selected repo source dir %q", resolved, wantResolved)
+		t.Fatalf("target file resolves to %q, want selected repo source file %q", resolved, wantResolved)
 	}
 	settings, err := a.LoadSettings()
 	if err != nil {
@@ -1134,9 +1973,9 @@ func TestDoDotsAdd_UsesMachineGroupWhenUnfiltered(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
-		Settings:  config.Settings{DotsRepo: repoDir},
-		Profiles:  map[string]config.Profile{"main": {}},
-		Hostnames: map[string]string{"laptop": "main"},
+		Settings: config.Settings{DotsRepo: repoDir},
+		Groups:   []*config.GroupConfig{tuiNamedHostGroup("laptop")},
+		Hosts:    map[string][]string{"laptop": {}},
 	}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
@@ -1149,7 +1988,7 @@ func TestDoDotsAdd_UsesMachineGroupWhenUnfiltered(t *testing.T) {
 
 	m := modelForCmds(a)
 	m.settings = config.Settings{DotsRepo: repoDir}
-	m.profileInfo, _ = a.ProfileStatus()
+	m.hostInfo, _ = a.HostStatus()
 	m.beginDotsOperation("Adding zed...")
 	path := filepath.Join(homeDir, ".config", "zed")
 	msg := m.doDotsAdd(path, "~/.config/zed", m.dotAddTargetGroup())()
@@ -1319,11 +2158,11 @@ func TestDoDotsDelete_Success(t *testing.T) {
 
 	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
 		Settings: config.Settings{DotsRepo: repoDir},
-		Groups: []*config.GroupConfig{{
-			Dots: []config.DotEntry{
+		Groups: []*config.GroupConfig{
+			{Name: shortHostname(), Special: "host", Dots: []config.DotEntry{
 				{Name: "nvim", Path: filepath.Join(homeDir, ".config", "nvim")},
-			},
-		}},
+			}},
+		},
 	}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
@@ -1349,17 +2188,16 @@ func TestDoDotsDelete_Success(t *testing.T) {
 	}
 }
 
-// ── doDeleteProfile ───────────────────────────────────────────────────────────
+// ── doRemoveHost ───────────────────────────────────────────────────────────
 
-func TestDoDeleteProfile_Success(t *testing.T) {
+func TestDoRemoveHost_Success(t *testing.T) {
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
-	// Create a profile to delete.
-	if err := a.AddProfile("work", []string{"base"}); err != nil {
-		t.Fatalf("AddProfile: %v", err)
+	if err := a.EnsureHost("work"); err != nil {
+		t.Fatalf("EnsureHost: %v", err)
 	}
 	m := modelForCmds(a)
-	msg := m.doDeleteProfile("work")()
+	msg := m.doRemoveHost("work")()
 	got, ok := msg.(dangerOpDoneMsg)
 	if !ok {
 		t.Fatalf("expected dangerOpDoneMsg, got %T", msg)
@@ -1368,22 +2206,22 @@ func TestDoDeleteProfile_Success(t *testing.T) {
 		t.Errorf("unexpected error: %v", got.err)
 	}
 	if !got.reload {
-		t.Error("reload should be true after delete-profile")
+		t.Error("reload should be true after delete-host")
 	}
 }
 
-func TestDoDeleteProfile_NonExistent(t *testing.T) {
+func TestDoRemoveHost_NonExistent(t *testing.T) {
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
-	// Deleting a profile that doesn't exist should succeed (idempotent).
-	msg := m.doDeleteProfile("nonexistent")()
+	// Deleting a host that doesn't exist should succeed (idempotent).
+	msg := m.doRemoveHost("nonexistent")()
 	got, ok := msg.(dangerOpDoneMsg)
 	if !ok {
 		t.Fatalf("expected dangerOpDoneMsg, got %T", msg)
 	}
 	if got.err != nil {
-		t.Errorf("unexpected error for non-existent profile: %v", got.err)
+		t.Errorf("unexpected error for non-existent host: %v", got.err)
 	}
 }
 
@@ -1484,6 +2322,8 @@ func TestDoDisableDots_Success(t *testing.T) {
 	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
 		Settings: config.Settings{DotsRepo: repoDir},
 		Groups: []*config.GroupConfig{{
+			Name:    shortHostname(),
+			Special: "host",
 			Dots: []config.DotEntry{
 				{Name: "zsh", Path: dstFile},
 			},
@@ -1545,9 +2385,7 @@ func TestDoDisableDots_RemoveLocal(t *testing.T) {
 	}
 	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
 		Settings: config.Settings{DotsRepo: repoDir},
-		Groups: []*config.GroupConfig{{
-			Dots: []config.DotEntry{{Name: "zsh", Path: dstFile}},
-		}},
+		Groups:   []*config.GroupConfig{{Name: shortHostname(), Special: "host", Dots: []config.DotEntry{{Name: "zsh", Path: dstFile}}}},
 	}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
@@ -1570,6 +2408,37 @@ func TestDoDisableDots_RemoveLocal(t *testing.T) {
 	}
 	if _, err := os.Lstat(dstFile); !os.IsNotExist(err) {
 		t.Fatalf("local target exists after doDisableDots(false): %v", err)
+	}
+}
+
+// ── doEnableDots ──────────────────────────────────────────────────────────────
+
+func TestDoEnableDots_ClearsDisabledFlag(t *testing.T) {
+	prov := &okProvider{name: "brew"}
+	a, cfgPath := newCmdApp(t, prov, nil)
+	if err := a.SaveDotsDisabled(context.Background(), true); err != nil {
+		t.Fatalf("SaveDotsDisabled(true): %v", err)
+	}
+
+	m := modelForCmds(a)
+	m.beginDotsOperation("Enabling dots...")
+	msg := m.doEnableDots()()
+	got, ok := msg.(dangerOpDoneMsg)
+	if !ok {
+		t.Fatalf("expected dangerOpDoneMsg, got %T", msg)
+	}
+	if got.err != nil {
+		t.Fatalf("unexpected error: %v", got.err)
+	}
+	if got.action != "enable-dots" || got.detail != "dots enabled" || !got.reload || got.mode != viewDots {
+		t.Fatalf("message = %+v, want enable-dots reload to dots", got)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if config.BoolVal(cfg.HostSettings[shortHostname()].DotsDisabled) {
+		t.Fatal("dots_disabled should be false after doEnableDots")
 	}
 }
 

@@ -17,6 +17,7 @@ import (
 
 func (m *Model) beginDotsOperation(status string) {
 	m.cancelDotsOperation()
+	m.clearDotsProgressState()
 	parent := m.ctx
 	if parent == nil {
 		parent = context.Background()
@@ -27,6 +28,7 @@ func (m *Model) beginDotsOperation(status string) {
 	m.dotsCancel = cancel
 	m.dotsLoading = true
 	startOp(m, status)
+	setActivityStatus(m, status)
 }
 
 func (m *Model) cancelDotsOperation() {
@@ -53,7 +55,66 @@ func (m *Model) finishDotsOperation(gen int) bool {
 	}
 	m.cancelDotsOperation()
 	m.dotsLoading = false
+	m.clearDotsProgressState()
+	if !m.launchBatchActive {
+		m.progressText = ""
+	}
 	return true
+}
+
+func (m *Model) clearDotsProgressState() {
+	m.dotsProgressCh = nil
+	m.dotsPendingNames = nil
+	m.dotsActiveName = ""
+}
+
+func (m *Model) markDotsPendingSyncAll() int {
+	pending := make(map[string]bool)
+	for _, entry := range m.dotsEntries {
+		if entry.Name == "" || isTransientDotCandidate(entry) {
+			continue
+		}
+		switch dotStatusState(entry) {
+		case app.DotStateIgnored, app.DotStateInactive, app.DotStateDisabled:
+			continue
+		}
+		pending[entry.Name] = true
+	}
+	m.dotsPendingNames = pending
+	return len(pending)
+}
+
+func dotsSyncAllEntryOrder(m Model) []string {
+	entries := filteredDotsEntries(m)
+	order := make([]string, 0, len(entries))
+	for _, section := range dotsSections(entries) {
+		for _, entry := range section.entries {
+			if entry.Name != "" {
+				order = append(order, entry.Name)
+			}
+		}
+	}
+	return order
+}
+
+func dotsSyncProgressText(name string, index, total int, done bool, err error) string {
+	if total <= 0 {
+		total = index
+	}
+	if index < 0 {
+		index = 0
+	}
+	progress := fmt.Sprintf("%d/%d", index, total)
+	switch {
+	case name == "":
+		return "Syncing dots " + progress + "…"
+	case err != nil:
+		return fmt.Sprintf("Syncing dots %s: %s failed", progress, name)
+	case done:
+		return fmt.Sprintf("Synced dots %s: %s", progress, name)
+	default:
+		return fmt.Sprintf("Syncing dots %s: %s…", progress, name)
+	}
 }
 
 func (m *Model) handleDotsSubmodeKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
@@ -75,6 +136,7 @@ func (m *Model) handleDotsSearchKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		m.filter.Blur()
 		m.dotsCursor = 0
 		m.dotsExpandedName = ""
+		m.clearDotsExpandedChildren("")
 		m.syncDotsExpandedName(dotsVisibleRows(*m))
 		m.clearDotsConfirmState()
 	case key.Matches(msg, m.keys.Confirm):
@@ -87,6 +149,7 @@ func (m *Model) handleDotsSearchKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		if m.filter.Value() != prev {
 			m.dotsCursor = 0
 			m.dotsExpandedName = ""
+			m.clearDotsExpandedChildren("")
 			m.syncDotsExpandedName(dotsVisibleRows(*m))
 			m.clearDotsConfirmState()
 		}
@@ -140,10 +203,14 @@ func (m *Model) handleDotsBackKey() {
 	} else if m.dotsGroupFilter != "" {
 		m.dotsGroupFilter = ""
 		m.dotsCursor = 0
+		m.dotsExpandedName = ""
+		m.clearDotsExpandedChildren("")
 	} else if m.dotsSearchActive {
 		m.dotsSearchActive = false
 		m.filter.SetValue("")
 		m.dotsCursor = 0
+		m.dotsExpandedName = ""
+		m.clearDotsExpandedChildren("")
 	}
 }
 
@@ -168,6 +235,7 @@ func (m *Model) moveDotsGroupFilter(delta int) {
 	m.dotsGroupFilter = pills[idx]
 	m.dotsCursor = 0
 	m.dotsExpandedName = ""
+	m.clearDotsExpandedChildren("")
 	m.syncDotsExpandedName(dotsVisibleRows(*m))
 	m.clearDotsConfirmState()
 }
@@ -175,6 +243,7 @@ func (m *Model) moveDotsGroupFilter(delta int) {
 func (m *Model) syncDotsExpandedName(visible []dotsVisibleRow) {
 	if len(visible) == 0 {
 		m.dotsExpandedName = ""
+		m.clearDotsExpandedChildren("")
 		m.dotsCursor = 0
 		return
 	}
@@ -186,14 +255,19 @@ func (m *Model) syncDotsExpandedName(visible []dotsVisibleRow) {
 	}
 	if m.dotsExpandedName != "" {
 		found := false
+		var expanded app.DotStatus
 		for _, row := range visible {
 			if !row.isChild && row.entry.Name == m.dotsExpandedName {
 				found = true
+				expanded = row.entry
 				break
 			}
 		}
 		if !found {
+			m.clearDotsExpandedChildren(m.dotsExpandedName)
 			m.dotsExpandedName = ""
+		} else {
+			m.pruneDotsExpandedChildren(expanded)
 		}
 	}
 }
@@ -202,6 +276,7 @@ func (m *Model) moveDotsCursor(delta int, visible []dotsVisibleRow) {
 	if len(visible) == 0 {
 		m.dotsCursor = 0
 		m.dotsExpandedName = ""
+		m.clearDotsExpandedChildren("")
 		return
 	}
 	next := m.dotsCursor + delta
@@ -213,6 +288,7 @@ func (m *Model) moveDotsCursor(delta int, visible []dotsVisibleRow) {
 	}
 	target := visible[next]
 	if m.dotsExpandedName != "" && target.entry.Name != m.dotsExpandedName {
+		m.clearDotsExpandedChildren(m.dotsExpandedName)
 		m.dotsExpandedName = ""
 		rows := dotsVisibleRows(*m)
 		if idx := dotsRowIndex(rows, target); idx >= 0 {
@@ -235,6 +311,51 @@ func dotsRowIndex(rows []dotsVisibleRow, target dotsVisibleRow) int {
 		}
 	}
 	return -1
+}
+
+func (m *Model) clearDotsExpandedChildren(entryName string) {
+	if len(m.dotsExpandedChildren) == 0 {
+		return
+	}
+	if entryName == "" {
+		m.dotsExpandedChildren = nil
+		return
+	}
+	prefix := dotsChildExpandKey(entryName, "")
+	for key := range m.dotsExpandedChildren {
+		if strings.HasPrefix(key, prefix) {
+			delete(m.dotsExpandedChildren, key)
+		}
+	}
+	if len(m.dotsExpandedChildren) == 0 {
+		m.dotsExpandedChildren = nil
+	}
+}
+
+func (m *Model) pruneDotsExpandedChildren(entry app.DotStatus) {
+	if len(m.dotsExpandedChildren) == 0 {
+		return
+	}
+	prefix := dotsChildExpandKey(entry.Name, "")
+	valid := make(map[string]bool)
+	var collect func([]app.DotChild)
+	collect = func(children []app.DotChild) {
+		for _, child := range children {
+			if child.IsDir && len(child.Children) > 0 {
+				valid[dotsChildExpandKey(entry.Name, child.RelPath)] = true
+				collect(child.Children)
+			}
+		}
+	}
+	collect(entry.Children)
+	for key := range m.dotsExpandedChildren {
+		if !strings.HasPrefix(key, prefix) || !valid[key] {
+			delete(m.dotsExpandedChildren, key)
+		}
+	}
+	if len(m.dotsExpandedChildren) == 0 {
+		m.dotsExpandedChildren = nil
+	}
 }
 
 func (m *Model) clearDotsConfirmState() {
@@ -294,7 +415,11 @@ func (m *Model) handleDotsActionKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibl
 			break
 		}
 		m.beginDotsOperation("Syncing dots…")
-		cmds = append(cmds, m.spinner.Tick, m.doDotsSyncOnly())
+		total := m.markDotsPendingSyncAll()
+		setActivityStatus(m, dotsSyncProgressText("", 0, total, false, nil))
+		order := dotsSyncAllEntryOrder(*m)
+		ch := m.beginDotsProgressStream()
+		cmds = append(cmds, m.spinner.Tick, m.doDotsSyncOnlyWithProgress(ch, order), waitForDotsProgress(ch, m.dotsOpGen))
 	case key.Matches(msg, m.keys.DotDiscover):
 		if msg.IsRepeat {
 			break
@@ -329,19 +454,37 @@ func (m *Model) handleDotsToggleKeyMsg(visible []dotsVisibleRow) {
 	m.clearDotsConfirmState()
 	row := visible[m.dotsCursor]
 	name := row.entry.Name
-	if len(row.entry.Children) == 0 {
-		return
-	}
 	if row.isChild {
-		m.dotsExpandedName = ""
-		if idx := dotsRowIndex(dotsVisibleRows(*m), dotsVisibleRow{entry: row.entry}); idx >= 0 {
+		if !dotsRowExpandable(row) {
+			return
+		}
+		if m.dotsExpandedChildren == nil {
+			m.dotsExpandedChildren = make(map[string]bool)
+		}
+		key := dotsChildExpandKey(name, row.child.RelPath)
+		if m.dotsExpandedChildren[key] {
+			delete(m.dotsExpandedChildren, key)
+		} else {
+			m.dotsExpandedChildren[key] = true
+		}
+		if len(m.dotsExpandedChildren) == 0 {
+			m.dotsExpandedChildren = nil
+		}
+		if idx := dotsRowIndex(dotsVisibleRows(*m), row); idx >= 0 {
 			m.dotsCursor = idx
 		}
 		return
 	}
+	if len(row.entry.Children) == 0 {
+		return
+	}
 	if m.dotsExpandedName == name {
+		m.clearDotsExpandedChildren(name)
 		m.dotsExpandedName = ""
 		return
+	}
+	if m.dotsExpandedName != "" {
+		m.clearDotsExpandedChildren(m.dotsExpandedName)
 	}
 	m.dotsExpandedName = name
 }
@@ -562,11 +705,52 @@ func (m *Model) handleDotsSyncedMsg(msg dotsSyncedMsg) []tea.Cmd {
 		m.applyDotsSnapshot(msg.entries, msg.gitStatus, msg.dotMemberships)
 	}
 	if msg.err != nil {
-		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
+		if !m.collectLaunchBatchError(msg.err.Error()) {
+			cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
+		}
 	} else {
-		cmds = append(cmds, setStatus(m, "✓ dots synced", false))
+		if !m.launchBatchActive {
+			cmds = append(cmds, setStatus(m, "✓ dots synced", false))
+		}
+	}
+	if cmd := m.finishLaunchBatchIfIdle(); cmd != nil {
+		cmds = append(cmds, cmd)
 	}
 	return cmds
+}
+
+func (m *Model) handleDotsProgressMsg(msg dotsProgressMsg) []tea.Cmd {
+	if msg.gen != m.dotsOpGen || !m.dotsLoading {
+		return nil
+	}
+	if msg.text != "" {
+		m.progressText = msg.text
+	}
+	if msg.name != "" {
+		if msg.done {
+			delete(m.dotsPendingNames, msg.name)
+			if m.dotsActiveName == msg.name {
+				m.dotsActiveName = ""
+			}
+		} else {
+			delete(m.dotsPendingNames, msg.name)
+			m.dotsActiveName = msg.name
+		}
+	}
+	if msg.entries != nil {
+		m.applyDotsSnapshot(msg.entries, msg.gitStatus, msg.dotMemberships)
+	}
+	if m.dotsProgressCh != nil {
+		return []tea.Cmd{waitForDotsProgress(m.dotsProgressCh, m.dotsOpGen)}
+	}
+	return nil
+}
+
+func (m *Model) handleDotsProgressStreamClosedMsg(msg dotsProgressStreamClosedMsg) {
+	if msg.gen != m.dotsOpGen {
+		return
+	}
+	m.dotsProgressCh = nil
 }
 
 func (m *Model) handleDotsDiscoveredMsg(msg dotsDiscoveredMsg) []tea.Cmd {
@@ -605,6 +789,7 @@ func (m *Model) clearDotsFilters() {
 	m.filter.Blur()
 	m.dotsCursor = 0
 	m.dotsExpandedName = ""
+	m.clearDotsExpandedChildren("")
 }
 
 func (m *Model) selectFirstDiscoveredDotCandidate() {
@@ -614,6 +799,7 @@ func (m *Model) selectFirstDiscoveredDotCandidate() {
 		}
 		m.dotsCursor = i
 		m.dotsExpandedName = ""
+		m.clearDotsExpandedChildren("")
 		return
 	}
 }
@@ -750,12 +936,34 @@ func (m *Model) doLoadDots() tea.Cmd {
 
 // doDotsSyncOnly repairs symlinks for all dots entries without a git pull.
 func (m *Model) doDotsSyncOnly() tea.Cmd {
+	return m.doDotsSyncOnlyWithProgress(nil, nil)
+}
+
+func (m *Model) doDotsSyncOnlyWithProgress(progressCh chan dotsProgressUpdate, entryOrder []string) tea.Cmd {
 	a := m.app
 	ctx, gen := m.currentDotsOperation()
 	return func() tea.Msg {
+		if progressCh != nil {
+			defer close(progressCh)
+		}
+		opts := dots.SyncOptions{EntryOrder: append([]string(nil), entryOrder...)}
+		if progressCh != nil {
+			opts.Progress = func(event dots.SyncProgressEvent) {
+				update := dotsProgressUpdate{
+					gen:  gen,
+					text: dotsSyncProgressText(event.Entry, event.Index, event.Total, event.Done, event.Err),
+					name: event.Entry,
+					done: event.Done,
+				}
+				if event.Done {
+					update.entries, update.gitStatus, update.dotMemberships, _ = refreshDotsSnapshot(a, ctx)
+				}
+				sendDotsProgressUpdate(progressCh, update)
+			}
+		}
 		// Capture sync error but always refresh status so health reflects
 		// conflict state even after a partial stow failure.
-		_, syncErr := a.DotsSyncContext(ctx, dots.SyncOptions{})
+		_, syncErr := a.DotsSyncContext(ctx, opts)
 		result, err := a.DiscoverDotsStatus(ctx)
 		if err != nil {
 			if result != nil {

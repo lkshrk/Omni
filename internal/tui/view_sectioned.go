@@ -75,3 +75,7 @@ func renderSectionedTab(m Model, tab sectionedTab) string {
 func renderFixedGroupListRow(p palette, selected bool, first, rest []rowCell, firstGap, columnGap int) string {
 	return listRowPrefix(p, selected) + renderFixedGroupRow(first, rest, firstGap, columnGap)
 }
+
+func renderResponsiveGroupListRow(p palette, selected bool, first, rest []rowCell, totalWidth, minGap, columnGap int) string {
+	return listRowPrefix(p, selected) + renderSplitRow(first, rest, totalWidth, minGap, columnGap)
+}

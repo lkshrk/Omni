@@ -4,14 +4,17 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/provider"
 )
 
 // redirectToReadOnlyConfig redirects a's ConfigPath to a freshly created
@@ -58,6 +61,95 @@ func TestDoClaim_Success(t *testing.T) {
 		t.Errorf("groupName = %q, want work", got.groupName)
 	}
 	// tools may be nil when DB is empty — just verify no error and name is set.
+}
+
+func TestDoClaim_RefreshesToolMembershipState(t *testing.T) {
+	prov := &okProvider{name: "system"}
+	a, _ := newCmdApp(t, prov, nil)
+	m := modelForCmds(a)
+	key := toolKey("ripgrep", "system")
+	m.toolGroups = map[string]string{key: ""}
+	m.toolMemberships = map[string][]string{}
+
+	msg := m.doClaim("ripgrep", "system", "work")()
+	got, ok := msg.(claimDoneMsg)
+	if !ok {
+		t.Fatalf("expected claimDoneMsg, got %T", msg)
+	}
+	if got.err != nil {
+		t.Fatalf("unexpected error: %v", got.err)
+	}
+	if got.toolGroups[key] != "work" {
+		t.Fatalf("claim toolGroups[%q] = %q, want work", key, got.toolGroups[key])
+	}
+	if !slices.Contains(got.toolMemberships[key], "work") {
+		t.Fatalf("claim memberships = %v, want work", got.toolMemberships[key])
+	}
+
+	m.handleClaimDoneMsg(got)
+	if m.toolGroups[key] != "work" {
+		t.Fatalf("model toolGroups[%q] = %q, want work", key, m.toolGroups[key])
+	}
+	if !slices.Contains(m.toolMemberships[key], "work") {
+		t.Fatalf("model memberships = %v, want work", m.toolMemberships[key])
+	}
+}
+
+func TestHandleClaimDoneMsg_ErrorStillRefreshesClaim(t *testing.T) {
+	m := modelForCmds(nil)
+	key := toolKey("ripgrep", "system")
+	m.discoveredTools = []*database.ToolCache{{Name: "ripgrep", Provider: "system", Installed: true}}
+	m.rebuildDiscoveredKeys()
+	msg := claimDoneMsg{
+		err:             errors.New("host update failed"),
+		name:            "ripgrep",
+		groupName:       "work",
+		tools:           []*database.ToolCache{{Name: "ripgrep", Provider: "system", Installed: true, Tracked: true}},
+		toolGroups:      map[string]string{key: "work"},
+		toolMemberships: map[string][]string{key: {"work"}},
+		groupNames:      []string{"work"},
+	}
+
+	m.handleClaimDoneMsg(msg)
+	if m.toolGroups[key] != "work" {
+		t.Fatalf("model toolGroups[%q] = %q, want work despite host error", key, m.toolGroups[key])
+	}
+	if len(m.discoveredTools) != 0 {
+		t.Fatalf("claimed tool should leave discovered list after partial success: %+v", m.discoveredTools)
+	}
+}
+
+func TestHandleClaimDoneMsg_RemovesDiscoveredBeforeFiltering(t *testing.T) {
+	m := modelForCmds(nil)
+	key := toolKey("swiftlint", "system")
+	swiftformat := &database.ToolCache{Name: "swiftformat", Provider: "system", Package: "swiftformat", Installed: true, Tracked: true}
+	orphan := &database.ToolCache{Name: "swiftlint", Provider: "system", Package: "swiftlint", Installed: true, Tracked: false}
+	m.allTools = []*database.ToolCache{swiftformat, orphan}
+	m.discoveredTools = []*database.ToolCache{orphan}
+	m.rebuildDiscoveredKeys()
+	m.applyFilter()
+	if len(m.visibleTools) != 2 || m.visibleTools[0].Name != "swiftlint" {
+		t.Fatalf("precondition visible order = %+v, want out-of-sync swiftlint first", m.visibleTools)
+	}
+
+	claimed := &database.ToolCache{Name: "swiftlint", Provider: "system", Package: "swiftlint", Installed: true, Tracked: true}
+	m.handleClaimDoneMsg(claimDoneMsg{
+		name:            "swiftlint",
+		groupName:       "dev",
+		tools:           []*database.ToolCache{swiftformat, claimed},
+		toolGroups:      map[string]string{key: "dev"},
+		toolMemberships: map[string][]string{key: {"dev"}},
+		groupNames:      []string{"dev"},
+	})
+	if len(m.discoveredTools) != 0 {
+		t.Fatalf("claimed tool should leave discovered list: %+v", m.discoveredTools)
+	}
+	if got := m.countSection(sectionOutOfSync); got != 0 {
+		t.Fatalf("out-of-sync count after claim = %d, want 0", got)
+	}
+	if len(m.visibleTools) != 2 || m.visibleTools[0].Name != "swiftformat" || m.visibleTools[1].Name != "swiftlint" {
+		t.Fatalf("visible order after claim = %+v, want installed alphabetical order", m.visibleTools)
+	}
 }
 
 func TestDoClaim_AddError(t *testing.T) {
@@ -113,19 +205,19 @@ func TestDoSetIgnoreScope_ToolSuccess(t *testing.T) {
 	}
 }
 
-func TestDoSetIgnoreScope_ProfileError(t *testing.T) {
+func TestDoSetIgnoreScope_HostUsesGlobalIgnore(t *testing.T) {
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("curl", "brew")})
 	m := modelForCmds(a)
-	m.profileInfo = &app.ProfileInfo{Active: "nonexistent"}
+	m.hostInfo = &app.HostInfo{Active: "nonexistent"}
 
-	msg := m.doSetIgnoreScope("curl", scopeOption{kind: "profile"})()
+	msg := m.doSetIgnoreScope("curl", scopeOption{kind: "host"})()
 	got, ok := msg.(ignoreDoneMsg)
 	if !ok {
 		t.Fatalf("expected ignoreDoneMsg, got %T", msg)
 	}
-	if got.err == nil {
-		t.Error("expected error for unknown profile")
+	if got.err != nil {
+		t.Fatalf("unexpected error: %v", got.err)
 	}
 	if got.name != "curl" {
 		t.Errorf("name = %q on error, want curl", got.name)
@@ -140,7 +232,7 @@ func TestDoSetIgnoreScope_GroupSuccess(t *testing.T) {
 	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("wget", "brew")})
 	m := modelForCmds(a)
 
-	msg := m.doSetIgnoreScope("wget", scopeOption{kind: "group", group: "base"})()
+	msg := m.doSetIgnoreScope("wget", scopeOption{kind: "group", group: shortHostname()})()
 	got, ok := msg.(ignoreDoneMsg)
 	if !ok {
 		t.Fatalf("expected ignoreDoneMsg, got %T", msg)
@@ -158,9 +250,8 @@ func TestDoSetIgnoreScope_GroupSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	base := findTestGroup(cfg, "base")
-	if base == nil || len(base.Ignore) != 1 || base.Ignore[0] != "wget" {
-		t.Fatalf("group ignore was not persisted: %+v", base)
+	if len(cfg.Ignore.Tools) != 1 || cfg.Ignore.Tools[0] != "wget" {
+		t.Fatalf("group ignore was not persisted globally: %+v", cfg.Ignore.Tools)
 	}
 }
 
@@ -232,6 +323,118 @@ func TestDoInstallAndAdd_AddError(t *testing.T) {
 	}
 }
 
+func TestDoInstallAndAdd_RefreshesToolMembershipState(t *testing.T) {
+	prov := &okProvider{name: "system"}
+	a, _ := newCmdApp(t, prov, nil)
+	m := modelForCmds(a)
+	key := toolKey("ripgrep", "system")
+
+	msg := m.doInstallAndAdd("ripgrep", "system", "work")()
+	got, ok := msg.(opCompleteMsg)
+	if !ok {
+		t.Fatalf("expected opCompleteMsg, got %T", msg)
+	}
+	if got.err != nil {
+		t.Fatalf("unexpected error: %v", got.err)
+	}
+	if !slices.Contains(got.removeDiscoveredKeys, toolKey("ripgrep", "system")) {
+		t.Fatalf("removeDiscoveredKeys = %v, want ripgrep/system", got.removeDiscoveredKeys)
+	}
+	if got.toolGroups[key] != "work" {
+		t.Fatalf("install-and-add toolGroups[%q] = %q, want work", key, got.toolGroups[key])
+	}
+	if !slices.Contains(got.toolMemberships[key], "work") {
+		t.Fatalf("install-and-add memberships = %v, want work", got.toolMemberships[key])
+	}
+
+	m.handleOpCompleteMsg(got)
+	if m.toolGroups[key] != "work" {
+		t.Fatalf("model toolGroups[%q] = %q, want work", key, m.toolGroups[key])
+	}
+	if !slices.Contains(m.toolMemberships[key], "work") {
+		t.Fatalf("model memberships = %v, want work", m.toolMemberships[key])
+	}
+}
+
+func TestDoInstallAndAdd_PreservesCachedSearchMetadata(t *testing.T) {
+	ctx := context.Background()
+	prov := &okProvider{name: "system"}
+	a, _ := newCmdApp(t, prov, nil)
+	if err := a.DB().UpsertMetadataBatch(ctx, []database.MetadataUpdate{{
+		Name:        "ripgrep",
+		Provider:    "system",
+		Package:     "ripgrep",
+		Description: "fast grep",
+	}}); err != nil {
+		t.Fatalf("UpsertMetadataBatch: %v", err)
+	}
+	m := modelForCmds(a)
+
+	msg := m.doInstallAndAdd("ripgrep", "system")()
+	got, ok := msg.(opCompleteMsg)
+	if !ok {
+		t.Fatalf("expected opCompleteMsg, got %T", msg)
+	}
+	if got.err != nil {
+		t.Fatalf("unexpected error: %v", got.err)
+	}
+	if len(got.tools) != 1 {
+		t.Fatalf("tools = %d, want one installed tool", len(got.tools))
+	}
+	if !got.tools[0].Description.Valid || got.tools[0].Description.String != "fast grep" {
+		t.Fatalf("installed row description = %+v, want cached search metadata", got.tools[0].Description)
+	}
+}
+
+func TestHandleOpCompleteMsg_ErrorStillRefreshesToolMembershipState(t *testing.T) {
+	m := modelForCmds(nil)
+	key := toolKey("ripgrep", "system")
+	msg := opCompleteMsg{
+		err:             errors.New("host update failed"),
+		tools:           []*database.ToolCache{{Name: "ripgrep", Provider: "system", Installed: true, Tracked: true}},
+		toolGroups:      map[string]string{key: "work"},
+		toolMemberships: map[string][]string{key: {"work"}},
+		groupNames:      []string{"work"},
+	}
+
+	m.handleOpCompleteMsg(msg)
+	if m.toolGroups[key] != "work" {
+		t.Fatalf("model toolGroups[%q] = %q, want work despite host error", key, m.toolGroups[key])
+	}
+	if !slices.Contains(m.toolMemberships[key], "work") {
+		t.Fatalf("model memberships = %v, want work despite host error", m.toolMemberships[key])
+	}
+}
+
+func TestHandleOpCompleteMsg_ProviderPinsRefreshBeforeFiltering(t *testing.T) {
+	tool := &database.ToolCache{
+		Name:          "ripgrep",
+		Provider:      "system",
+		Installed:     true,
+		InstalledWith: "brew",
+		Tracked:       true,
+	}
+	m := modelForCmds(nil)
+	m.allTools = []*database.ToolCache{tool}
+	m.effectiveSystemManager = "apt"
+	m.applyFilter()
+	if got := m.countSection(sectionOutOfSync); got != 1 {
+		t.Fatalf("precondition out-of-sync count = %d, want 1", got)
+	}
+
+	m.handleOpCompleteMsg(opCompleteMsg{
+		message:          "pinned ripgrep via this tool everywhere",
+		tools:            []*database.ToolCache{tool},
+		toolProviderPins: map[string]string{"ripgrep": "brew"},
+	})
+	if got := m.countSection(sectionOutOfSync); got != 0 {
+		t.Fatalf("out-of-sync count after pin = %d, want 0", got)
+	}
+	if got := m.countSection(sectionInstalled); got != 1 {
+		t.Fatalf("installed count after pin = %d, want 1", got)
+	}
+}
+
 // ── doSetProviderScope ────────────────────────────────────────────────────────
 
 func TestDoSetProviderScope_ToolSuccess(t *testing.T) {
@@ -263,6 +466,30 @@ func TestDoSetProviderScope_ToolSuccess(t *testing.T) {
 	}
 }
 
+func TestDoSetProviderScope_PersistsPackageAlias(t *testing.T) {
+	prov := &okProvider{name: "brew"}
+	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
+	m := modelForCmds(a)
+
+	msg := m.doSetProviderScope("ripgrep", scopeOption{kind: "provider-tool", label: "this tool everywhere"}, &database.ToolCache{Name: "ripgrep", Provider: "system", Package: "rg", InstalledWith: "brew"})()
+	got, ok := msg.(opCompleteMsg)
+	if !ok {
+		t.Fatalf("expected opCompleteMsg, got %T", msg)
+	}
+	if got.err != nil {
+		t.Fatalf("unexpected error: %v", got.err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	spec := cfg.Tools["ripgrep"]
+	if spec.Provider != "system" || spec.Package != "rg" || spec.InstallWith != "brew" {
+		t.Fatalf("provider scope with package alias was not persisted: %+v", spec)
+	}
+}
+
 func TestDoSetProviderScope_Error(t *testing.T) {
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil) // empty config — no tools
@@ -280,9 +507,18 @@ func TestDoSetProviderScope_Error(t *testing.T) {
 
 // ── doMigrateProvider ─────────────────────────────────────────────────────────
 
+type describingOKProvider struct {
+	okProvider
+	desc string
+}
+
+func (p *describingOKProvider) Describe(_ context.Context, _ provider.Tool) (string, error) {
+	return p.desc, nil
+}
+
 func TestDoMigrateProvider_Success(t *testing.T) {
 	brew := &okProvider{name: "brew"}
-	pip := &okProvider{name: "pip"}
+	pip := &describingOKProvider{okProvider: okProvider{name: "pip"}, desc: "Python package installer"}
 	// Real-world scenario: config already declares "pip" as the intended provider
 	// (configProv), but the tool is physically installed via "brew" (installedWith).
 	// MigrateInstallation detects that "brew" is a registered-but-different provider,
@@ -294,9 +530,7 @@ func TestDoMigrateProvider_Success(t *testing.T) {
 		Tools: map[string]config.ToolSpec{
 			"black": tuiToolSpec("pip"),
 		},
-		Groups: []*config.GroupConfig{{
-			Tools: []config.ToolEntry{{Name: "black"}},
-		}},
+		Groups: []*config.GroupConfig{tuiTestHostGroup("black")},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -328,6 +562,9 @@ func TestDoMigrateProvider_Success(t *testing.T) {
 	}
 	if got.tools == nil {
 		t.Error("expected non-nil tools list on success")
+	}
+	if len(got.tools) != 1 || !got.tools[0].Description.Valid || got.tools[0].Description.String != "Python package installer" {
+		t.Fatalf("migrated tools description = %+v, want refreshed provider description", got.tools)
 	}
 }
 

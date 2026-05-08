@@ -28,13 +28,16 @@ func (m *Model) handleSearchResultsMsg(msg searchResultsMsg) []tea.Cmd {
 	}
 	m.searching = false
 	m.searchCancel = nil
-	if msg.err != nil {
+	if msg.err != nil && len(msg.tools) == 0 {
 		return []tea.Cmd{setStatus(m, "✗ "+msg.err.Error(), true)}
 	}
 	m.searchCache[searchCacheKey(msg.query, msg.providerFilter)] = searchCacheEntry{tools: msg.tools, at: time.Now()}
 	m.searchTools = msg.tools
 	m.applyFilter()
 	m.cursor = 0
+	if msg.err != nil {
+		return []tea.Cmd{setStatus(m, fmt.Sprintf("found %d (partial)", len(msg.tools)), false)}
+	}
 	return m.searchStatus(len(msg.tools))
 }
 
@@ -69,16 +72,7 @@ func (m *Model) handleSearchKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 
 	if key.Matches(msg, m.keys.Back) {
-		m.cancelSearch()
-		m.searchGen++
-		m.mode = viewList
-		m.filter.SetValue("")
-		m.filter.Blur()
-		m.searchTools = nil
-		m.searching = false
-		m.providerTabIdx = 0
-		m.applyFilter()
-		m.cursor = 0
+		m.clearToolFiltersAndSearch()
 		return nil
 	}
 	if !m.filter.Focused() {
@@ -119,6 +113,34 @@ func (m *Model) handleSearchKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	return cmds
 }
 
+func (m *Model) toolFiltersOrSearchActive() bool {
+	return m.filter.Value() != "" ||
+		m.groupFilter != "" ||
+		m.groupTabIdx != 0 ||
+		m.providerTabIdx != 0 ||
+		len(m.searchTools) > 0 ||
+		m.searching
+}
+
+func (m *Model) clearToolFiltersAndSearch() bool {
+	if !m.toolFiltersOrSearchActive() && m.mode != viewSearch {
+		return false
+	}
+	m.cancelSearch()
+	m.searchGen++
+	m.mode = viewList
+	m.filter.SetValue("")
+	m.filter.Blur()
+	m.searchTools = nil
+	m.searching = false
+	m.providerTabIdx = 0
+	m.groupFilter = ""
+	m.groupTabIdx = 0
+	m.applyFilter()
+	m.cursor = 0
+	return true
+}
+
 func (m *Model) handleBlurredSearchKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 
@@ -151,11 +173,11 @@ func (m *Model) handleBlurredSearchKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		cmds = append(cmds, m.moveSearchProviderTab(-1)...)
 	case key.Matches(msg, m.keys.NextTab):
 		cmds = append(cmds, m.moveSearchProviderTab(1)...)
-	default:
+	case key.Matches(msg, m.keys.Search):
 		m.filter.Focus()
-		var cmd tea.Cmd
-		m.filter, cmd = m.filter.Update(msg)
-		cmds = append(cmds, cmd, textinput.Blink)
+		cmds = append(cmds, textinput.Blink)
+	default:
+		cmds = append(cmds, m.handleListActionKeyMsg(msg)...)
 	}
 	return cmds
 }

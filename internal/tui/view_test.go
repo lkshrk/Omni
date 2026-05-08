@@ -134,6 +134,14 @@ func TestDotStateDisplay_TrimsConflictSuffix(t *testing.T) {
 	}
 }
 
+func TestDotStateDisplay_ModifiedShowsLocalChanges(t *testing.T) {
+	p := defaultPalette()
+	_, icon, label := dotStateDisplay(p, app.DotStateModified)
+	if icon != "!" || label != "local changes" {
+		t.Fatalf("modified display = %q %q, want ! local changes", icon, label)
+	}
+}
+
 // ── renderDots ────────────────────────────────────────────────────────────────
 
 func TestRenderDots_NotConfigured(t *testing.T) {
@@ -153,7 +161,7 @@ func TestRenderDots_Disabled(t *testing.T) {
 	if !strings.Contains(out, "disabled") {
 		t.Errorf("expected 'disabled' in output, got:\n%s", out)
 	}
-	if !strings.Contains(out, "Sync on This Machine") {
+	if !strings.Contains(out, "Dotfile Sync") {
 		t.Errorf("expected disabled dots copy to reference renamed Settings row, got:\n%s", out)
 	}
 	if strings.Contains(out, "Dots Sync") {
@@ -252,8 +260,9 @@ func TestRenderDots_WithEntries(t *testing.T) {
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
 	m.dotsEntries = []app.DotStatus{
-		{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: app.DotStateSynced, FileCount: 12, Children: []app.DotChild{
+		{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: app.DotStateSynced, FileCount: 14, Counts: app.DotFileCounts{Synced: 12, OutOfSync: 2, Ignored: 3}, Children: []app.DotChild{
 			{Name: "lua", RelPath: "lua", Path: "~/.config/nvim/lua", IsDir: true, FileCount: 10},
+			{Name: "empty", RelPath: "empty", Path: "~/.config/nvim/empty", IsDir: true},
 		}},
 		{Name: "zsh", TargetPath: "~/.zshrc", Health: app.HealthMissing},
 	}
@@ -264,11 +273,21 @@ func TestRenderDots_WithEntries(t *testing.T) {
 	if !strings.Contains(out, "zsh") {
 		t.Errorf("expected 'zsh' in output, got:\n%s", out)
 	}
-	if !strings.Contains(out, "12 files") {
-		t.Errorf("expected file count in output, got:\n%s", out)
+	for _, want := range []string{"12/14", "(3)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected count summary %q in output, got:\n%s", want, out)
+		}
 	}
 	if !strings.Contains(out, "lua") {
 		t.Errorf("expected expanded child row in output, got:\n%s", out)
+	}
+	if emptyLine := renderedLineContaining(out, "empty"); emptyLine == "" || !strings.Contains(emptyLine, "-") {
+		t.Errorf("expected empty child row to render '-' count, got:\n%s", out)
+	}
+	for _, want := range []string{dotKindFolderExpandedIcon + " nvim", dotKindFolderCollapsedIcon + " lua", dotKindFolderEmptyIcon + " empty", dotKindFileIcon + " zsh"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected dots kind marker %q in output, got:\n%s", want, out)
+		}
 	}
 }
 
@@ -380,8 +399,112 @@ func TestRenderDots_ChildRowsUseParentStatusAndFileCountColumn(t *testing.T) {
 	if strings.Contains(childLine, " dir ") {
 		t.Fatalf("child row should not render a dir status column: %q", childLine)
 	}
-	if !strings.Contains(childLine, "synced") || !strings.Contains(childLine, "12 files") {
+	if !strings.Contains(childLine, "synced") || !strings.Contains(childLine, "12/12") {
 		t.Fatalf("child row should render status and count columns, got: %q", childLine)
+	}
+}
+
+func TestRenderDots_CountColumnsAreSeparateAndRightAligned(t *testing.T) {
+	m := baseModel(nil)
+	m.width = 140
+	m.settings.DotsRepo = "/home/user/dotfiles"
+	m.dotsLoaded = true
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "alpha",
+		TargetPath: "~/.config/alpha",
+		State:      app.DotStateSynced,
+		Counts:     app.DotFileCounts{Synced: 12, OutOfSync: 2, Ignored: 3},
+		Group:      "base",
+	}, {
+		Name:       "beta",
+		TargetPath: "~/.config/beta",
+		State:      app.DotStateSynced,
+		Counts:     app.DotFileCounts{Synced: 2, Ignored: 123},
+		Group:      "base",
+	}}
+
+	out := renderDots(m)
+	alphaLine := renderedLineContaining(out, "alpha")
+	betaLine := renderedLineContaining(out, "beta")
+	if alphaLine == "" || betaLine == "" {
+		t.Fatalf("missing dots rows:\n%s", out)
+	}
+
+	alphaRatioEnd := visualColumnOf(alphaLine, "12/14") + lipgloss.Width("12/14")
+	betaRatioEnd := visualColumnOf(betaLine, "2/2") + lipgloss.Width("2/2")
+	if alphaRatioEnd != betaRatioEnd {
+		t.Fatalf("ratio column should right-align independently:\nalpha=%q\nbeta=%q", alphaLine, betaLine)
+	}
+	alphaIgnoredStart := visualColumnOf(alphaLine, "(3)")
+	alphaIgnoredEnd := alphaIgnoredStart + lipgloss.Width("(3)")
+	betaIgnoredEnd := visualColumnOf(betaLine, "(123)") + lipgloss.Width("(123)")
+	if alphaIgnoredEnd != betaIgnoredEnd {
+		t.Fatalf("ignored column should right-align independently:\nalpha=%q\nbeta=%q", alphaLine, betaLine)
+	}
+	if alphaIgnoredStart <= alphaRatioEnd {
+		t.Fatalf("ignored column should sit after the ratio column:\n%s", alphaLine)
+	}
+	if groupCol := visualColumnOf(alphaLine, "[base]"); groupCol <= alphaIgnoredEnd {
+		t.Fatalf("group column should stay after ignored count column:\n%s", alphaLine)
+	}
+}
+
+func TestDotRatioStyleReflectsSyncCoverage(t *testing.T) {
+	p := baseModel(nil).palette
+	tests := []struct {
+		name   string
+		counts app.DotFileCounts
+		want   string
+	}{
+		{name: "empty", counts: app.DotFileCounts{}, want: p.styleHelp.Render("-")},
+		{name: "none synced", counts: app.DotFileCounts{OutOfSync: 2}, want: p.styleMissing.Render("0/2")},
+		{name: "partially synced", counts: app.DotFileCounts{Synced: 1, OutOfSync: 1}, want: p.styleOutdated.Render("1/2")},
+		{name: "fully synced", counts: app.DotFileCounts{Synced: 2}, want: p.styleInstalled.Render("2/2")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := dotRatioView(p, false, tt.counts, 0); got != tt.want {
+				t.Fatalf("dotRatioView() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRenderDots_ChildRowsUseChildStatusWhenPresent(t *testing.T) {
+	m := baseModel(nil)
+	m.width = 120
+	m.settings.DotsRepo = "/home/user/dotfiles"
+	m.dotsLoaded = true
+	m.dotsExpandedName = "nvim"
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		State:      app.DotStateConflict,
+		Children: []app.DotChild{{
+			Name:    "init.lua",
+			RelPath: "init.lua",
+			Path:    "~/.config/nvim/init.lua",
+			State:   app.DotStateSynced,
+		}, {
+			Name:    "missing.lua",
+			RelPath: "lua/missing.lua",
+			Path:    "~/.config/nvim/lua/missing.lua",
+			State:   app.DotStateMissing,
+		}},
+	}}
+
+	out := renderDots(m)
+	syncedLine := renderedLineContaining(out, "init.lua")
+	missingLine := renderedLineContaining(out, "missing.lua")
+	if syncedLine == "" || missingLine == "" {
+		t.Fatalf("missing child rows:\n%s", out)
+	}
+	if !strings.Contains(syncedLine, "synced") {
+		t.Fatalf("synced child row should render its own status, got: %q", syncedLine)
+	}
+	if !strings.Contains(missingLine, "missing") {
+		t.Fatalf("missing child row should render its own status, got: %q", missingLine)
 	}
 }
 
@@ -419,8 +542,8 @@ func TestRenderDots_RightColumnsKeepStableWidthAndRightMargin(t *testing.T) {
 		t.Fatalf("missing dots rows:\n%s", out)
 	}
 
-	parentFilesEnd := visualColumnOf(parentLine, "2 files") + lipgloss.Width("2 files")
-	childFilesEnd := visualColumnOf(childLine, "123456 files") + lipgloss.Width("123456 files")
+	parentFilesEnd := visualColumnOf(parentLine, "2/2") + lipgloss.Width("2/2")
+	childFilesEnd := visualColumnOf(childLine, "123456/123456") + lipgloss.Width("123456/123456")
 	if parentFilesEnd != childFilesEnd {
 		t.Fatalf("file counts should right-align to same edge:\nparent=%q\nchild=%q", parentLine, childLine)
 	}
@@ -449,12 +572,12 @@ func TestRenderDots_RightColumnsFitContentAcrossSections(t *testing.T) {
 		TargetPath: "~/.config/synced",
 		State:      app.DotStateSynced,
 		FileCount:  23,
-		Group:      "very-long-profile-group",
+		Group:      "very-long-host-group",
 	}}
 
 	out := renderDots(m)
 	conflictLine := renderedLineContaining(out, "untracked")
-	syncedLine := renderedLineContaining(out, "[very-long-profile-group]")
+	syncedLine := renderedLineContaining(out, "[very-long-host-group]")
 	if conflictLine == "" || syncedLine == "" {
 		t.Fatalf("missing expected dots rows:\n%s", out)
 	}
@@ -462,12 +585,12 @@ func TestRenderDots_RightColumnsFitContentAcrossSections(t *testing.T) {
 		t.Fatalf("conflict suffix should not render in dots status label:\n%s", conflictLine)
 	}
 
-	conflictFilesEnd := visualColumnOf(conflictLine, "1 file") + lipgloss.Width("1 file")
-	syncedFilesEnd := visualColumnOf(syncedLine, "23 files") + lipgloss.Width("23 files")
+	conflictFilesEnd := visualColumnOf(conflictLine, "0/1") + lipgloss.Width("0/1")
+	syncedFilesEnd := visualColumnOf(syncedLine, "23/23") + lipgloss.Width("23/23")
 	if conflictFilesEnd != syncedFilesEnd {
 		t.Fatalf("file-count column should right-align across sections:\nconflict=%q\nsynced=%q", conflictLine, syncedLine)
 	}
-	if groupCol := visualColumnOf(syncedLine, "[very-long-profile-group]"); groupCol <= syncedFilesEnd {
+	if groupCol := visualColumnOf(syncedLine, "[very-long-host-group]"); groupCol <= syncedFilesEnd {
 		t.Fatalf("long group badge should fit after file-count column:\n%s", syncedLine)
 	}
 }
@@ -519,6 +642,32 @@ func TestRenderDots_ConflictInfersResolveActionsWithoutExplicitActions(t *testin
 	}
 }
 
+func TestRenderDots_ConflictDirectoryShowsExpandHint(t *testing.T) {
+	m := baseModel(nil)
+	m.settings.DotsRepo = "/home/user/dotfiles"
+	m.dotsLoaded = true
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		State:      app.DotStateConflict,
+		Actions:    []app.DotAction{app.DotActionUseRepo, app.DotActionUseLocal, app.DotActionIgnore},
+		Children: []app.DotChild{{
+			Name:    "init.lua",
+			RelPath: "init.lua",
+			Path:    "~/.config/nvim/init.lua",
+			State:   app.DotStateSynced,
+		}},
+	}}
+	m.dotsCursor = 0
+
+	out := renderDots(m)
+	for _, want := range []string{"space expand", "u use repo", "l use local"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("conflict directory missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestRenderDots_OutOfSyncSyncHintNamesResolutionSide(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -546,6 +695,67 @@ func TestRenderDots_OutOfSyncSyncHintNamesResolutionSide(t *testing.T) {
 				t.Fatalf("out-of-sync row missing %q:\n%s", tt.want, out)
 			}
 		})
+	}
+}
+
+func TestRenderDots_LocalOnlyDirectoryShowsExpandHint(t *testing.T) {
+	m := baseModel(nil)
+	m.settings.DotsRepo = "/home/user/dotfiles"
+	m.dotsLoaded = true
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		State:      app.DotStateLocalOnly,
+		Actions:    []app.DotAction{app.DotActionSync, app.DotActionIgnore},
+		Children: []app.DotChild{{
+			Name:    "init.lua",
+			RelPath: "init.lua",
+			Path:    "~/.config/nvim/init.lua",
+			State:   app.DotStateLocalOnly,
+		}},
+	}}
+	m.dotsCursor = 0
+
+	out := renderDots(m)
+	for _, want := range []string{"space expand", "s use local"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("local-only directory missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRenderDots_SubdirectoryShowsExpandHint(t *testing.T) {
+	m := baseModel(nil)
+	m.settings.DotsRepo = "/home/user/dotfiles"
+	m.dotsLoaded = true
+	m.dotsExpandedName = "nvim"
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		State:      app.DotStateConflict,
+		IsDir:      true,
+		Children: []app.DotChild{{
+			Name:      "lua",
+			RelPath:   "lua",
+			Path:      "~/.config/nvim/lua",
+			State:     app.DotStateConflict,
+			IsDir:     true,
+			FileCount: 1,
+			Children: []app.DotChild{{
+				Name:    "config.lua",
+				RelPath: "lua/config.lua",
+				Path:    "~/.config/nvim/lua/config.lua",
+				State:   app.DotStateMissing,
+			}},
+		}},
+	}}
+	m.dotsCursor = 1
+
+	out := renderDots(m)
+	for _, want := range []string{dotKindFolderCollapsedIcon + " lua", "space expand"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("subdirectory row missing %q:\n%s", want, out)
+		}
 	}
 }
 

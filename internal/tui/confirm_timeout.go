@@ -3,7 +3,6 @@ package tui
 import (
 	"time"
 
-	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -29,8 +28,8 @@ func (m *Model) cancelConfirmationTimeout() {
 func (m *Model) hasActiveConfirmation() bool {
 	return m.confirmQuit ||
 		m.listConfirm.action != "" ||
-		m.setupExitConfirm ||
-		m.profileDeleteConfirm ||
+		m.hostCopyConfirm ||
+		m.hostDeleteConfirm ||
 		m.groupDeleteConfirm ||
 		m.stowInstallPrompt ||
 		m.dangerConfirmRow >= 0 ||
@@ -45,9 +44,10 @@ func (m *Model) clearActiveConfirmation() {
 	m.confirmQuit = false
 	m.quitConfirmKey = ""
 	m.listConfirm = listConfirmation{}
-	m.setupExitConfirm = false
-	m.profileDeleteConfirm = false
-	m.profileDeleteName = ""
+	m.hostCopyConfirm = false
+	m.hostCopyName = ""
+	m.hostDeleteConfirm = false
+	m.hostDeleteName = ""
 	m.groupDeleteConfirm = false
 	m.groupDeleteName = ""
 	m.stowInstallPrompt = false
@@ -66,12 +66,6 @@ func (m *Model) handleConfirmTimeoutMsg(msg confirmTimeoutMsg) []tea.Cmd {
 	if msg.gen != m.confirmGen || !m.hasActiveConfirmation() {
 		return nil
 	}
-	refocusSetupInput := m.setupExitConfirm
 	m.clearActiveConfirmation()
-	var cmds []tea.Cmd
-	if refocusSetupInput {
-		m.settingsInput.Focus()
-		cmds = append(cmds, textinput.Blink)
-	}
-	return cmds
+	return nil
 }
