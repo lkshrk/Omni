@@ -156,8 +156,5 @@ func (a *App) Import(ctx context.Context, opts ImportOptions) (*ImportResult, er
 }
 
 func ensureImportDestinationGroup(cfg *config.RootConfig, groupName string) (*config.GroupConfig, error) {
-	if machineGroupName(groupName) == currentMachineGroupName() {
-		return ensureHostGroupInConfig(cfg, groupName)
-	}
-	return ensureGroupInConfig(cfg, groupName), nil
+	return ensureDestinationGroupInConfig(cfg, groupName)
 }

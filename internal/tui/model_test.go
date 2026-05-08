@@ -642,6 +642,22 @@ func TestModel_HelpOverlay(t *testing.T) {
 		}
 	})
 
+	t.Run("help overlay captures background keys", func(t *testing.T) {
+		m := drive(baseModel(threeTools()), pressRune('?'), pressTab(), pressRune('j'), pressRune('q'))
+		if !m.help.ShowAll {
+			t.Fatal("help.ShowAll should stay true")
+		}
+		if m.mode != viewList {
+			t.Fatalf("mode = %v, want viewList", m.mode)
+		}
+		if m.cursor != 0 {
+			t.Fatalf("cursor = %d, want unchanged 0", m.cursor)
+		}
+		if m.confirmQuit {
+			t.Fatal("q should not arm quit confirmation behind help")
+		}
+	})
+
 	t.Run("esc with help closed goes to normal esc handling", func(t *testing.T) {
 		// In list mode with help closed, esc has no special effect on help.
 		m := drive(baseModel(threeTools()), pressEsc())
@@ -1870,6 +1886,9 @@ func TestModel_KeyU_UpgradeSetsKey(t *testing.T) {
 	got := drive(m, pressRune('u'))
 	if !got.upgradingKeys["ripgrep\x00brew"] {
 		t.Error("expected upgradingKeys entry for ripgrep after 'u'")
+	}
+	if !got.loading {
+		t.Error("expected loading=true while single upgrade is active")
 	}
 }
 

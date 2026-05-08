@@ -12,6 +12,7 @@ concurrency:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   release:
@@ -19,6 +20,27 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
+      - name: Verify CI passed for manual release
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          run_count="$(gh api --method GET "/repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs" \
+            -f head_sha="${TARGET_SHA}" \
+            -f status=success \
+            -f per_page=1 \
+            --jq '.total_count')"
+
+          if [ "${run_count}" = "0" ]; then
+            echo "::error::No successful CI Pipeline run found for commit ${TARGET_SHA}. Run CI for this commit before dispatching release."
+            exit 1
+          fi
+
+          echo "Found successful CI Pipeline run for ${TARGET_SHA}."
+
       - uses: actions/checkout@v6.0.2
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}

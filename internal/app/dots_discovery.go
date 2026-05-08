@@ -205,6 +205,9 @@ func appendMissingStrings(values []string, additions ...string) []string {
 func (a *App) BootstrapDotsEntries() ([]config.DotEntry, error) {
 	var added []config.DotEntry
 	err := a.withConfig(func(rootCfg *config.RootConfig) error {
+		if err := a.requireDotsEnabled(rootCfg); err != nil {
+			return err
+		}
 		rawRepo := a.effectiveSettings(rootCfg).DotsRepo
 		repoPath, err := resolveRepoPath(rawRepo)
 		if err != nil {
@@ -220,7 +223,10 @@ func (a *App) BootstrapDotsEntries() ([]config.DotEntry, error) {
 		if len(candidates) == 0 {
 			return errSkipSave
 		}
-		group := ensureGroupInConfig(rootCfg, shortHostname(currentHostname()))
+		group, err := ensureDestinationGroupInConfig(rootCfg, "")
+		if err != nil {
+			return err
+		}
 		for _, candidate := range untrackedDotCandidates(rootCfg, candidates) {
 			group.Dots = append(group.Dots, candidate)
 			added = append(added, candidate)
@@ -241,6 +247,9 @@ func (a *App) BootstrapDotsEntries() ([]config.DotEntry, error) {
 func (a *App) DotsAddDiscoveredEntry(nameOrPath, groupName string) (config.DotEntry, error) {
 	var added config.DotEntry
 	err := a.withConfig(func(rootCfg *config.RootConfig) error {
+		if err := a.requireDotsEnabled(rootCfg); err != nil {
+			return err
+		}
 		rawRepo := a.effectiveSettings(rootCfg).DotsRepo
 		repoPath, err := resolveRepoPath(rawRepo)
 		if err != nil {
@@ -260,7 +269,10 @@ func (a *App) DotsAddDiscoveredEntry(nameOrPath, groupName string) (config.DotEn
 		if groupName == "" {
 			groupName = shortHostname(currentHostname())
 		}
-		group := ensureGroupInConfig(rootCfg, groupName)
+		group, err := ensureDestinationGroupInConfig(rootCfg, groupName)
+		if err != nil {
+			return err
+		}
 		group.Dots = append(group.Dots, candidate)
 		added = candidate
 		return nil

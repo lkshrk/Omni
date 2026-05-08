@@ -622,6 +622,64 @@ func TestFlow2_UC80_SetupHostDoneMsg(t *testing.T) {
 	// populated synchronously. Check that loading is cleared and step advanced.
 }
 
+func TestFlow2_SetupErrorsStayOnCurrentStep(t *testing.T) {
+	setupErr := errors.New("setup failed")
+
+	t.Run("import failure stays on import step", func(t *testing.T) {
+		m := loadingSetup(1)
+		m.setupProviders = []setupProviderRow{{name: "node", enabled: true}}
+
+		got := drive(m, setupImportDoneMsg{err: setupErr})
+
+		if got.setupStep != 1 {
+			t.Fatalf("setupStep = %d, want 1", got.setupStep)
+		}
+		if got.loading {
+			t.Fatal("loading should clear after import failure")
+		}
+	})
+
+	t.Run("provider save failure stays on provider step", func(t *testing.T) {
+		got := drive(loadingSetup(2), setupProvidersDoneMsg{err: setupErr})
+
+		if got.setupStep != 2 {
+			t.Fatalf("setupStep = %d, want 2", got.setupStep)
+		}
+		if got.loading {
+			t.Fatal("loading should clear after provider failure")
+		}
+	})
+
+	t.Run("node manager failure stays on manager step", func(t *testing.T) {
+		got := drive(loadingSetup(3), setupNodeMgrDoneMsg{err: setupErr})
+
+		if got.setupStep != 3 {
+			t.Fatalf("setupStep = %d, want 3", got.setupStep)
+		}
+		if got.loading {
+			t.Fatal("loading should clear after node manager failure")
+		}
+	})
+
+	t.Run("host creation failure returns to retry step", func(t *testing.T) {
+		m := setupStep3Model()
+		var cmds []tea.Cmd
+		m.startSetupHostCreation(&cmds)
+		if m.setupStep != 5 {
+			t.Fatalf("setupStep = %d after starting host creation, want 5", m.setupStep)
+		}
+
+		got := drive(m, setupHostDoneMsg{err: setupErr})
+
+		if got.setupStep != 3 {
+			t.Fatalf("setupStep = %d, want 3", got.setupStep)
+		}
+		if got.loading {
+			t.Fatal("loading should clear after host failure")
+		}
+	})
+}
+
 // ── Group C — File Picker ─────────────────────────────────────────────────────
 
 // UC-81: Esc with file picker open → close picker.

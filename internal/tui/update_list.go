@@ -201,6 +201,7 @@ func (m *Model) handleListActionKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 			uk := toolKey(t.Name, t.Provider)
 			if !m.upgradingKeys["*"] && !m.upgradingKeys[uk] {
 				m.upgradingKeys[uk] = true
+				m.loading = true
 				startOp(m, "Upgrading "+t.Name+"…")
 				m.startRowOperation(t.Name, t.Provider, m.statusMsg)
 				cmds = append(cmds, m.spinner.Tick, m.doUpgrade(t.Name, t.Provider))

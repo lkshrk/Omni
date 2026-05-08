@@ -288,8 +288,11 @@ func TestBootstrapDotsEntries_AddsCandidatesToMachineGroup(t *testing.T) {
 		t.Fatalf("config.Load: %v", err)
 	}
 	group := findDotsTestGroup(cfg.Groups, "testhost")
-	if group == nil {
-		t.Fatalf("machine group testhost was not created: %#v", cfg.Groups)
+	if group == nil || !group.IsHost() {
+		t.Fatalf("machine group testhost = %#v, want special host group", group)
+	}
+	if groups, ok := cfg.Hosts["testhost"]; !ok || len(groups) != 0 {
+		t.Fatalf("hosts[testhost] = %v, ok=%v, want empty host assignment", groups, ok)
 	}
 	byName := make(map[string]string, len(group.Dots))
 	byEntry := make(map[string]config.DotEntry, len(group.Dots))
@@ -422,8 +425,11 @@ func TestDotsSetEntryIgnored_PersistsDiscoveryCandidateToMachineGroup(t *testing
 		t.Fatalf("config.Load: %v", err)
 	}
 	group := findDotsTestGroup(cfg.Groups, "testhost")
-	if group == nil || len(group.Dots) != 1 || !group.Dots[0].Ignored {
-		t.Fatalf("machine group dots = %#v, want ignored kitty", cfg.Groups)
+	if group == nil || !group.IsHost() || len(group.Dots) != 1 || !group.Dots[0].Ignored {
+		t.Fatalf("machine group = %#v, want special host group with ignored kitty", group)
+	}
+	if groups, ok := cfg.Hosts["testhost"]; !ok || len(groups) != 0 {
+		t.Fatalf("hosts[testhost] = %v, ok=%v, want empty host assignment", groups, ok)
 	}
 
 	entries, err := a.DiscoverUntrackedDotsEntries()
@@ -531,8 +537,11 @@ func TestDotsAddDiscoveredEntry_PersistsCandidateOnly(t *testing.T) {
 		t.Fatalf("config.Load: %v", err)
 	}
 	group := findDotsTestGroup(cfg.Groups, "testhost")
-	if group == nil || len(group.Dots) != 1 || group.Dots[0].Name != "claude" {
-		t.Fatalf("machine group dots = %#v, want claude", cfg.Groups)
+	if group == nil || !group.IsHost() || len(group.Dots) != 1 || group.Dots[0].Name != "claude" {
+		t.Fatalf("machine group = %#v, want special host group with claude", group)
+	}
+	if groups, ok := cfg.Hosts["testhost"]; !ok || len(groups) != 0 {
+		t.Fatalf("hosts[testhost] = %v, ok=%v, want empty host assignment", groups, ok)
 	}
 	if !testContainsString(group.Dots[0].Ignore, "*") || !testContainsString(group.Dots[0].Ignore, "!/settings.json") {
 		t.Fatalf("claude ignore = %#v, want allowlist ignores", group.Dots[0].Ignore)
@@ -978,6 +987,91 @@ func TestDotsConfigured_True(t *testing.T) {
 	a, _, _ := newDotsApp(t)
 	if !a.DotsConfigured() {
 		t.Error("expected DotsConfigured() == true when dots_repo is set")
+	}
+}
+
+func TestDotsMutationsRejectWhenHostDotsDisabled(t *testing.T) {
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := os.Getenv("HOME")
+	target := filepath.Join(home, ".config", "nvim")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	liveFile := filepath.Join(home, ".zshrc")
+	if err := os.WriteFile(liveFile, []byte("zsh"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{Name: "nvim", Path: target, Ignore: []string{"cache"}},
+	}, home)
+	if err := a.SaveDotsDisabled(context.Background(), true); err != nil {
+		t.Fatalf("SaveDotsDisabled(true): %v", err)
+	}
+
+	tests := []struct {
+		name string
+		run  func() error
+	}{
+		{name: "sync all", run: func() error {
+			_, err := a.DotsSync(dots.SyncOptions{DryRun: true})
+			return err
+		}},
+		{name: "sync entry", run: func() error {
+			_, err := a.DotsSyncEntry(context.Background(), "nvim", dots.SyncOptions{DryRun: true})
+			return err
+		}},
+		{name: "add", run: func() error {
+			_, err := a.DotsAdd(context.Background(), liveFile, app.DotsAddOptions{Adopt: true})
+			return err
+		}},
+		{name: "delete", run: func() error {
+			return a.DotsDelete(context.Background(), "nvim")
+		}},
+		{name: "resolve", run: func() error {
+			_, err := a.DotsResolveConflict(context.Background(), "nvim", app.DotResolveUseRepo)
+			return err
+		}},
+		{name: "add ignore pattern", run: func() error {
+			return a.DotsAddIgnorePattern("nvim", "*.log")
+		}},
+		{name: "remove ignore pattern", run: func() error {
+			return a.DotsRemoveIgnorePattern("nvim", "cache")
+		}},
+		{name: "set entry ignored", run: func() error {
+			return a.DotsSetEntryIgnored("nvim", target, true)
+		}},
+		{name: "add discovered entry", run: func() error {
+			_, err := a.DotsAddDiscoveredEntry("nvim", "")
+			return err
+		}},
+		{name: "bootstrap discovered entries", run: func() error {
+			_, err := a.BootstrapDotsEntries()
+			return err
+		}},
+		{name: "move group", run: func() error {
+			return a.MoveDotToGroup("nvim", "work")
+		}},
+		{name: "remove group", run: func() error {
+			return a.RemoveDotFromGroup("nvim", dotsTestHostGroupName())
+		}},
+		{name: "pull", run: func() error {
+			_, err := a.DotsPull(context.Background())
+			return err
+		}},
+		{name: "push", run: func() error {
+			return a.DotsPush(context.Background(), "dots: test")
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.run()
+			if err == nil || !strings.Contains(err.Error(), "dots are disabled for this host") {
+				t.Fatalf("error = %v, want disabled-host guard", err)
+			}
+		})
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "dotfiles")); !os.IsNotExist(err) {
+		t.Fatalf("dotfiles content dir should not be created while disabled, stat err = %v", err)
 	}
 }
 

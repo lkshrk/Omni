@@ -400,6 +400,9 @@ func dotsRowHintItems(m Model) []hintItem {
 	if hint, ok := dotsExpandHintItem(m, row); ok {
 		hints = append(hints, hint)
 	}
+	if config.BoolVal(m.settings.DotsDisabled) {
+		return hints
+	}
 	if !row.isChild && dotHasAction(entry, app.DotActionSync) {
 		hints = append(hints, hintFromBindingDesc(m.keys.Sync, dotsSyncHintDesc(dotStatusState(entry))))
 	}
@@ -435,6 +438,9 @@ func dotsConflictHintItems(m Model) []hintItem {
 	hints := make([]hintItem, 0, 4)
 	if hint, ok := dotsExpandHintItem(m, row); ok {
 		hints = append(hints, hint)
+	}
+	if config.BoolVal(m.settings.DotsDisabled) {
+		return hints
 	}
 	if dotHasAction(entry, app.DotActionUseRepo) {
 		hints = append(hints, hintFromBindingDesc(m.keys.DotUseRepo, "use repo"))
@@ -558,6 +564,9 @@ func tabShortHelpBindings(m *Model) []key.Binding {
 	k := m.keys
 	switch m.mode {
 	case viewDots:
+		if config.BoolVal(m.settings.DotsDisabled) {
+			return footerBindings(k, nil, []key.Binding{k.Search})
+		}
 		return footerBindings(k, []key.Binding{k.DotAdd, k.DotDiscover, k.SyncAll}, []key.Binding{k.Search})
 	case viewSettings:
 		return footerBindings(k, nil, nil)
@@ -626,6 +635,12 @@ func tabFullHelpBindings(m *Model) [][]key.Binding {
 	common := []key.Binding{k.Top, k.Bottom, k.HalfPageUp, k.HalfPageDown, k.PageUp, k.PageDown, k.Tab, k.Search, k.Palette, k.Help, k.Quit}
 	switch m.mode {
 	case viewDots:
+		if config.BoolVal(m.settings.DotsDisabled) {
+			return [][]key.Binding{
+				common,
+				{k.Confirm, k.Back},
+			}
+		}
 		return [][]key.Binding{
 			common,
 			{k.SyncAll, k.DotDiscover, k.DotAdd, k.Sync, k.DotUseRepo, k.DotUseLocal, k.DotDelete, k.DotIgnore, k.Back},
@@ -777,6 +792,15 @@ func helpActionGroups(m Model) []helpGroup {
 	k := m.keys
 	switch m.mode {
 	case viewDots:
+		if config.BoolVal(m.settings.DotsDisabled) {
+			desc := "enable dots"
+			if m.settings.DotsRepo == "" {
+				desc = "set up dots"
+			}
+			return []helpGroup{{items: []hintItem{
+				hintFromBindingDesc(k.Confirm, desc),
+			}}}
+		}
 		return []helpGroup{{items: []hintItem{
 			hintFromBindingDesc(k.DotAdd, actions.MustTUILabel(actions.DotsAdd)),
 			hintFromBindingDesc(k.DotDiscover, actions.MustTUILabel(actions.DotsDiscover)),
