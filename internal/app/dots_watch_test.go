@@ -4,9 +4,12 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/fsnotify/fsnotify"
 
 	"github.com/lkshrk/omni/internal/config"
 )
@@ -96,6 +99,54 @@ func TestDotsWatchCommandArgs_AbsolutizesConfigAndCache(t *testing.T) {
 	}
 }
 
+func TestInstallDotsWatchService_AbsolutizesExecutable(t *testing.T) {
+	switch runtime.GOOS {
+	case "darwin", "linux":
+	default:
+		t.Skipf("dots watch services are not supported on %s", runtime.GOOS)
+	}
+
+	work := t.TempDir()
+	t.Chdir(work)
+	home := filepath.Join(work, "home")
+	binDir := filepath.Join(work, "bin")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "stow"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg-config"))
+	t.Setenv("PATH", binDir)
+
+	a := &App{ConfigPath: filepath.Join(home, "settings.json"), CacheDir: filepath.Join(home, "cache")}
+	info, err := a.InstallDotsWatchService(context.Background(), DotsWatchInstallOptions{
+		Executable: filepath.Join("tools", "omni"),
+		Debounce:   time.Second,
+	})
+	if err != nil {
+		t.Fatalf("InstallDotsWatchService: %v", err)
+	}
+	if len(info.Files) == 0 {
+		t.Fatal("InstallDotsWatchService returned no files")
+	}
+	content, err := os.ReadFile(info.Files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantExe, err := filepath.Abs(filepath.Join("tools", "omni"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(content), wantExe) {
+		t.Fatalf("service file missing absolute executable %q:\n%s", wantExe, string(content))
+	}
+}
+
 func TestDotsWatchServiceStatus_ParsesLinuxDebounce(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -166,10 +217,14 @@ func TestDotsWatchPaths_CollectsActiveSourceAndTargetDirs(t *testing.T) {
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	repoDir := t.TempDir()
 	sourceDir := filepath.Join(repoDir, "dotfiles", "nvim", ".config", "nvim")
+	inactiveSourceDir := filepath.Join(repoDir, "dotfiles", "old-host", ".config", "old-host")
+	ignoredSourceDir := filepath.Join(repoDir, "dotfiles", "ignored", ".config", "ignored")
 	targetDir := filepath.Join(home, ".config", "nvim")
 	ignoredTargetDir := filepath.Join(home, ".config", "ignored")
 	for _, dir := range []string{
 		sourceDir,
+		inactiveSourceDir,
+		ignoredSourceDir,
 		targetDir,
 		ignoredTargetDir,
 		filepath.Join(repoDir, "dotfiles", ".git", "hooks"),
@@ -200,6 +255,12 @@ func TestDotsWatchPaths_CollectsActiveSourceAndTargetDirs(t *testing.T) {
 	}
 	if !containsString(paths, sourceDir) {
 		t.Fatalf("paths = %v, want source dir %s", paths, sourceDir)
+	}
+	if containsString(paths, inactiveSourceDir) {
+		t.Fatalf("paths = %v, inactive package dir should not be watched", paths)
+	}
+	if containsString(paths, ignoredSourceDir) {
+		t.Fatalf("paths = %v, ignored package dir should not be watched", paths)
 	}
 	if !containsString(paths, targetDir) {
 		t.Fatalf("paths = %v, want target dir %s", paths, targetDir)
@@ -253,6 +314,7 @@ func TestDotsWatch_SyncsAfterFilesystemEvent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	startCh := make(chan DotsWatchStart, 1)
+	eventCh := make(chan DotsWatchEvent, 1)
 	syncCh := make(chan DotsWatchSyncResult, 1)
 	errCh := make(chan error, 1)
 	go func() {
@@ -260,6 +322,12 @@ func TestDotsWatch_SyncsAfterFilesystemEvent(t *testing.T) {
 			Debounce: minDotsWatchDebounce,
 			OnStart: func(start DotsWatchStart) {
 				startCh <- start
+			},
+			OnEvent: func(event DotsWatchEvent) {
+				select {
+				case eventCh <- event:
+				default:
+				}
 			},
 			OnSync: func(result DotsWatchSyncResult) {
 				syncCh <- result
@@ -307,6 +375,143 @@ func TestDotsWatch_SyncsAfterFilesystemEvent(t *testing.T) {
 	}
 }
 
+func TestDotsWatch_SyncsAfterManagedSymlinkReplaced(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	binDir := t.TempDir()
+	t.Setenv("PATH", binDir)
+	if err := os.WriteFile(filepath.Join(binDir, "stow"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfgPath := filepath.Join(t.TempDir(), "settings.json")
+	repoDir := t.TempDir()
+	sourceDir := filepath.Join(repoDir, "dotfiles", "zsh", ".config", "zsh")
+	sourceFile := filepath.Join(sourceDir, "zshrc")
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourceFile, []byte("setopt prompt_subst\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	targetDir := filepath.Join(home, ".config", "zsh")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	targetPath := filepath.Join(targetDir, "zshrc")
+	if err := os.Symlink(sourceFile, targetPath); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if err := config.Save(cfgPath, &config.RootConfig{
+		Settings: config.Settings{DotsRepo: repoDir},
+		Hosts:    map[string][]string{"testhost": {}},
+		Groups: []*config.GroupConfig{{
+			Name:    "testhost",
+			Special: "host",
+			Dots:    []config.DotEntry{{Name: "zsh", Path: "~/.config/zsh/zshrc"}},
+		}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	a := &App{ConfigPath: cfgPath}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	startCh := make(chan DotsWatchStart, 1)
+	eventCh := make(chan DotsWatchEvent, 1)
+	syncCh := make(chan DotsWatchSyncResult, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- a.DotsWatch(ctx, DotsWatchOptions{
+			Debounce: minDotsWatchDebounce,
+			OnStart: func(start DotsWatchStart) {
+				startCh <- start
+			},
+			OnEvent: func(event DotsWatchEvent) {
+				select {
+				case eventCh <- event:
+				default:
+				}
+			},
+			OnSync: func(result DotsWatchSyncResult) {
+				syncCh <- result
+				cancel()
+			},
+		})
+	}()
+
+	select {
+	case start := <-startCh:
+		if !containsString(start.Paths, targetDir) {
+			t.Fatalf("watch paths = %v, want local symlink parent %s", start.Paths, targetDir)
+		}
+	case err := <-errCh:
+		t.Fatalf("DotsWatch exited early: %v", err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("DotsWatch did not start")
+	}
+
+	replaceCtx, stopReplacing := context.WithCancel(context.Background())
+	defer stopReplacing()
+	replaceErrCh := make(chan error, 1)
+	go func() {
+		replacementPath := filepath.Join(targetDir, "zshrc.new")
+		for {
+			if err := os.WriteFile(replacementPath, []byte("local replacement\n"), 0o644); err != nil {
+				replaceErrCh <- err
+				return
+			}
+			if err := os.Rename(replacementPath, targetPath); err != nil {
+				replaceErrCh <- err
+				return
+			}
+			select {
+			case <-replaceCtx.Done():
+				return
+			case <-time.After(200 * time.Millisecond):
+			}
+		}
+	}()
+
+	select {
+	case event := <-eventCh:
+		stopReplacing()
+		if filepath.Dir(filepath.Clean(event.Path)) != targetDir {
+			t.Fatalf("watch event path = %q, want event inside %q", event.Path, targetDir)
+		}
+	case err := <-replaceErrCh:
+		t.Fatalf("replace managed symlink: %v", err)
+	case err := <-errCh:
+		t.Fatalf("DotsWatch exited before symlink replacement event: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("DotsWatch did not observe managed symlink replacement")
+	}
+
+	select {
+	case result := <-syncCh:
+		if result.Err != nil {
+			t.Fatalf("watch sync error: %v", result.Err)
+		}
+		if filepath.Dir(filepath.Clean(result.Event.Path)) != targetDir {
+			t.Fatalf("watch sync event path = %q, want event inside %q", result.Event.Path, targetDir)
+		}
+	case err := <-errCh:
+		t.Fatalf("DotsWatch exited before symlink replacement sync: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("DotsWatch did not sync after managed symlink replacement")
+	}
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("DotsWatch exit error: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("DotsWatch did not stop after cancellation")
+	}
+}
+
 func TestCollectDotsWatchPaths_MissingPathWatchesNearestParentOnly(t *testing.T) {
 	home := t.TempDir()
 	configDir := filepath.Join(home, ".config")
@@ -323,6 +528,71 @@ func TestCollectDotsWatchPaths_MissingPathWatchesNearestParentOnly(t *testing.T)
 	if containsString(sortedWatchPaths(out), filepath.Join(configDir, "newapp")) {
 		t.Fatalf("paths = %v, missing child should not be watched", sortedWatchPaths(out))
 	}
+}
+
+func TestCollectDotsWatchPaths_ExactSymlinkWatchesLocalParentAndResolvedTarget(t *testing.T) {
+	home := t.TempDir()
+	localDir := filepath.Join(home, ".config")
+	targetDir := filepath.Join(t.TempDir(), "nvim")
+	if err := os.MkdirAll(localDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	linkPath := filepath.Join(localDir, "nvim")
+	if err := os.Symlink(targetDir, linkPath); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	resolvedTargetDir, err := filepath.EvalSymlinks(targetDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out := make(map[string]struct{})
+	if err := collectDotsWatchPaths(linkPath, out); err != nil {
+		t.Fatalf("collectDotsWatchPaths: %v", err)
+	}
+	paths := sortedWatchPaths(out)
+	if !containsString(paths, localDir) {
+		t.Fatalf("paths = %v, want local symlink parent %s", paths, localDir)
+	}
+	if !containsString(paths, resolvedTargetDir) {
+		t.Fatalf("paths = %v, want resolved target %s", paths, resolvedTargetDir)
+	}
+}
+
+func TestSetDotsWatchPaths_IgnoresNonExistentWatchOnRemove(t *testing.T) {
+	watcher := &fakeDotsPathWatcher{removeErr: fsnotify.ErrNonExistentWatch}
+	current := map[string]struct{}{"/tmp/gone": {}}
+
+	watched, err := setDotsWatchPaths(watcher, current, nil)
+	if err != nil {
+		t.Fatalf("setDotsWatchPaths: %v", err)
+	}
+	if len(watched) != 0 {
+		t.Fatalf("watched = %v, want removed path dropped", sortedWatchPaths(watched))
+	}
+	if len(watcher.removed) != 1 || watcher.removed[0] != "/tmp/gone" {
+		t.Fatalf("removed = %v, want /tmp/gone", watcher.removed)
+	}
+}
+
+type fakeDotsPathWatcher struct {
+	addErr    error
+	removeErr error
+	added     []string
+	removed   []string
+}
+
+func (w *fakeDotsPathWatcher) Add(path string) error {
+	w.added = append(w.added, path)
+	return w.addErr
+}
+
+func (w *fakeDotsPathWatcher) Remove(path string) error {
+	w.removed = append(w.removed, path)
+	return w.removeErr
 }
 
 func TestDotsWatchRejectsTooSmallDebounce(t *testing.T) {

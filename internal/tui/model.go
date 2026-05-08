@@ -395,6 +395,7 @@ type Model struct {
 	dotsWatchService       *app.DotsWatchService
 	dotsWatchServiceErr    string
 	dotsWatchDebounce      time.Duration
+	dotsWatchDebounceNext  time.Duration
 	stowInstallPrompt      bool
 	stowInstallAction      stowInstallAction
 	stowInstallSettings    config.Settings
