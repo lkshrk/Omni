@@ -57,6 +57,9 @@ func (m *Model) cancelStowInstallAction(action stowInstallAction) []tea.Cmd {
 	if action == stowInstallLaunchSync {
 		cmds = append(cmds, m.startPostLoadBackgroundTasks()...)
 	}
+	if action == stowInstallDotVariant {
+		m.stowInstallVariant = dotsVariantRequest{}
+	}
 	cmds = append(cmds, setStatus(m, "GNU Stow is required for dotfile sync.", true))
 	return cmds
 }
@@ -107,6 +110,15 @@ func (m *Model) resumeStowInstallAction(action stowInstallAction) []tea.Cmd {
 		m.loading = true
 		startOp(m, "Saving...")
 		cmds = append(cmds, m.spinner.Tick, m.doSetupDotsRepo(path))
+	case stowInstallDotVariant:
+		req := m.stowInstallVariant
+		m.stowInstallVariant = dotsVariantRequest{}
+		if req.name == "" {
+			cmds = append(cmds, finishOpOK(m, "stow installed"))
+			break
+		}
+		m.beginDotsVariantOperation(req)
+		cmds = append(cmds, m.spinner.Tick, m.doDotsVariantChange(req))
 	default:
 		cmds = append(cmds, finishOpOK(m, "stow installed"))
 	}

@@ -3,5 +3,5 @@ pre-commit:
     lint:
       run: make lint
     gen-schema:
-      glob: "{internal/config/config.go,scripts/gen-schema/**}"
-      run: go run ./scripts/gen-schema && git add spec/omni.settings.schema.json
+      glob: "{internal/config/config.go,internal/config/loader.go,scripts/gen-schema/**}"
+      run: go run ./scripts/gen-schema && git add spec/omni.settings.v*.schema.json spec/omni.settings.schema.json

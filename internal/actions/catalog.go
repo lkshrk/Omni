@@ -28,6 +28,7 @@ const (
 	DotsDiscover                   ID = "dots.discover"
 	DotsAdd                        ID = "dots.add"
 	DotsEditGroups                 ID = "dots.edit_groups"
+	DotsVariant                    ID = "dots.variant"
 	DotsDelete                     ID = "dots.delete"
 	DotsIgnore                     ID = "dots.ignore"
 	DotsEnable                     ID = "dots.enable"
@@ -409,6 +410,21 @@ var Dots = []Action{
 		Requirements:    []Requirement{RequiresToolName, RequiresGroupAssignment},
 		TUI:             &TUIBinding{KeyMapField: "MoveGroup", DefaultKey: "g", Label: LabelMoveGroup, Description: "Move the selected dotfile entry to another group."},
 		CLI:             []CLIBinding{{Command: []string{"dots", "groups"}, Flags: []string{"--move", "--remove"}}},
+	},
+	{
+		ID:              DotsVariant,
+		Domain:          "dots",
+		Scope:           ScopeRow,
+		Label:           "variant",
+		Description:     "Use a host-specific package for one dots entry.",
+		LongDescription: "Create or remove this host's package variant for a managed dots entry, then resync the selected entry.",
+		Mutates:         true,
+		Requirements:    []Requirement{RequiresToolName},
+		TUI:             &TUIBinding{KeyMapField: "DotVariant", DefaultKey: "v", Label: "variant", Description: "Create or remove this host's package variant."},
+		CLI: []CLIBinding{
+			{Command: []string{"dots", "variant", "add"}, Flags: []string{"--host", "--package", "--sync"}},
+			{Command: []string{"dots", "variant", "remove"}, Flags: []string{"--host"}},
+		},
 	},
 	{
 		ID:                 DotsDelete,

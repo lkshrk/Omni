@@ -21,6 +21,9 @@ func TestLoad_MissingFile(t *testing.T) {
 	if cfg == nil {
 		t.Fatal("expected non-nil RootConfig for missing file")
 	}
+	if cfg.Version != config.CurrentVersion {
+		t.Fatalf("version = %d, want %d", cfg.Version, config.CurrentVersion)
+	}
 }
 
 func TestLoad_RejectsLivePathInLocalTests(t *testing.T) {
@@ -79,6 +82,24 @@ func TestLoad_ValidConfig(t *testing.T) {
 	}
 	if cfg.Tools["ripgrep"].Provider != "brew" {
 		t.Errorf("ripgrep provider = %q, want brew", cfg.Tools["ripgrep"].Provider)
+	}
+	if cfg.Version != config.CurrentVersion {
+		t.Fatalf("legacy config version = %d, want %d", cfg.Version, config.CurrentVersion)
+	}
+}
+
+func TestLoad_RejectsFutureConfigVersion(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	if err := os.WriteFile(path, []byte(`{"version": 99}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := config.Load(path)
+	if err == nil {
+		t.Fatal("expected future config version to be rejected")
+	}
+	if !strings.Contains(err.Error(), "newer than supported") {
+		t.Fatalf("error = %v, want newer-than-supported message", err)
 	}
 }
 
@@ -164,6 +185,9 @@ func TestNormalizeFile_PersistsOrderAndPreservesUnknownKeys(t *testing.T) {
 	if !strings.Contains(string(data), `"future": {`) {
 		t.Fatalf("NormalizeFile did not preserve unknown top-level key:\n%s", data)
 	}
+	if !strings.Contains(string(data), `"version": 1`) {
+		t.Fatalf("NormalizeFile did not persist config version:\n%s", data)
+	}
 	cfg, err := config.Load(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -174,6 +198,39 @@ func TestNormalizeFile_PersistsOrderAndPreservesUnknownKeys(t *testing.T) {
 	}
 	if got := strings.Join(cfg.Hosts["laptop"], ","); got != "apps,work" {
 		t.Fatalf("host groups = [%s], want [apps work]", got)
+	}
+}
+
+func TestNormalizeFile_PersistsLegacyVersionWithoutOrderChange(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	raw := `{
+  "future": {"keep": true},
+  "groups": [
+    {"name": "apps"}
+  ]
+}`
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	changed, err := config.NormalizeFile(path)
+	if err != nil {
+		t.Fatalf("NormalizeFile: %v", err)
+	}
+	if !changed {
+		t.Fatal("NormalizeFile changed = false, want true for legacy version migration")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	if !strings.Contains(content, `"version": 1`) {
+		t.Fatalf("NormalizeFile did not write version:\n%s", content)
+	}
+	if !strings.Contains(content, `"future": {`) {
+		t.Fatalf("NormalizeFile did not preserve unknown top-level key:\n%s", content)
 	}
 }
 
@@ -193,7 +250,7 @@ func TestSave_CreatesParentDirs(t *testing.T) {
 	}
 }
 
-func TestSave_InjectsSchema(t *testing.T) {
+func TestSave_InjectsSchemaAndVersion(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")
 	if err := config.Save(path, &config.RootConfig{}); err != nil {
@@ -210,6 +267,9 @@ func TestSave_InjectsSchema(t *testing.T) {
 	if !strings.Contains(content, config.SchemaURL) {
 		t.Errorf("Save did not inject SchemaURL %q", config.SchemaURL)
 	}
+	if !strings.Contains(content, `"version": 1`) {
+		t.Error("Save did not inject current config version")
+	}
 	// $schema must be the very first key so editors pick it up immediately.
 	// encoding/json serialises struct fields in declaration order (Go spec §reflect),
 	// and Schema is declared first in RootConfig — so this check is stable.
@@ -217,9 +277,12 @@ func TestSave_InjectsSchema(t *testing.T) {
 	if !strings.HasPrefix(strings.TrimSpace(content), `{`+"\n"+`  "$schema"`) {
 		t.Errorf("$schema is not the first key; got:\n%s", content[:min(len(content), 80)])
 	}
+	if !strings.HasPrefix(strings.TrimSpace(content), "{\n  \"$schema\":") || !strings.Contains(content[:min(len(content), 120)], "\n  \"version\": 1") {
+		t.Errorf("version is not stamped near the top; got:\n%s", content[:min(len(content), 120)])
+	}
 }
 
-func TestPatch_InjectsSchema(t *testing.T) {
+func TestPatch_InjectsSchemaAndVersion(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")
 	type settingsPatch struct {
@@ -236,11 +299,35 @@ func TestPatch_InjectsSchema(t *testing.T) {
 	if !strings.Contains(content, config.SchemaURL) {
 		t.Error("Patch did not inject $schema")
 	}
+	if !strings.Contains(content, `"version": 1`) {
+		t.Error("Patch did not inject current config version")
+	}
 	// Patch explicitly reconstructs output with $schema first (map iteration order
 	// is non-deterministic, so a naive MarshalIndent on the raw map would not
 	// guarantee position). Verify the contract holds.
 	if !strings.HasPrefix(strings.TrimSpace(content), `{`+"\n"+`  "$schema"`) {
 		t.Errorf("$schema is not the first key after Patch; got:\n%s", content[:min(len(content), 80)])
+	}
+	if !strings.Contains(content[:min(len(content), 120)], "\n  \"version\": 1") {
+		t.Errorf("version is not stamped near the top after Patch; got:\n%s", content[:min(len(content), 120)])
+	}
+}
+
+func TestPatch_RejectsFutureConfigVersion(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	if err := os.WriteFile(path, []byte(`{"version": 99}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	type settingsPatch struct {
+		Settings config.Settings `json:"settings"`
+	}
+	err := config.Patch(path, settingsPatch{})
+	if err == nil {
+		t.Fatal("expected future config version to be rejected")
+	}
+	if !strings.Contains(err.Error(), "newer than supported") {
+		t.Fatalf("error = %v, want newer-than-supported message", err)
 	}
 }
 
@@ -1055,7 +1142,15 @@ func TestDotEntry_Path_RoundTrips(t *testing.T) {
 			{
 				Dots: []config.DotEntry{
 					{Name: "nvim", Path: "~/.config/nvim"},
-					{Name: "zsh", Path: "~/.zshrc", Ignore: []string{"*.zwc"}},
+					{
+						Name:    "zsh",
+						Path:    "~/.zshrc",
+						Package: "zsh-default",
+						Hosts: map[string]config.DotVariant{
+							"work": {Package: "zsh-work"},
+						},
+						Ignore: []string{"*.zwc"},
+					},
 				},
 			},
 		},
@@ -1074,7 +1169,7 @@ func TestDotEntry_Path_RoundTrips(t *testing.T) {
 	if dots[0].Name != "nvim" || dots[0].Path != "~/.config/nvim" {
 		t.Errorf("dots[0] = %+v", dots[0])
 	}
-	if dots[1].Name != "zsh" || dots[1].Path != "~/.zshrc" || len(dots[1].Ignore) != 1 {
+	if dots[1].Name != "zsh" || dots[1].Path != "~/.zshrc" || dots[1].Package != "zsh-default" || dots[1].Hosts["work"].Package != "zsh-work" || len(dots[1].Ignore) != 1 {
 		t.Errorf("dots[1] = %+v", dots[1])
 	}
 }

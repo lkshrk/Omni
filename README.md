@@ -22,6 +22,14 @@ Main features:
 
 Supported managers include Homebrew, apt, apk, dnf, pacman, zypper, npm, pnpm, bun, uv, pip3, and pip.
 
+## Prerequisites
+
+- Installing with `go install` requires Go 1.26.2 or newer. Release archives and package-manager installs do not require Go.
+- Tool management needs the package managers you enable to be installed on `PATH`. Omni detects supported system, Node, and Python managers and only uses the ecosystems you configure.
+- Dotfile sync needs a configured dotfiles repo directory. Git is used for repo operations such as init, pull, push, auto-commit, and auto-push.
+- Dotfile symlink sync uses GNU Stow (`stow`). Interactive flows from onboarding, settings, the Dots tab, or CLI prompts can offer to install Stow through the detected system package manager. Noninteractive CLI runs fail with install guidance instead of prompting.
+- Package actions that require elevated privileges still need the host's normal sudo or admin authentication. Bulk TUI sync/upgrade skips privileged package actions; single Homebrew cask actions can open an embedded Admin Terminal prompt.
+
 ## Install
 
 ```sh
@@ -35,13 +43,11 @@ brew tap lkshrk/tap
 brew install omni
 ```
 
-Dotfile sync uses GNU Stow (`stow`) to manage links. When dotfile sync is enabled from onboarding, settings, the Dots tab, or interactive CLI commands, Omni checks for Stow and can install it through the detected system package manager. Noninteractive CLI runs fail with install guidance instead of prompting.
-
 ## Usage
 
 Run `omni` to start the TUI. On first launch, onboarding creates `~/.config/omni/settings.json`, lets you choose package ecosystems, creates this machine's host assignment, optionally imports installed tools, and can enable dotfile sync. After onboarding, Omni performs the first package scan; this can take a while on a fresh cache.
 
-You can also create or edit `~/.config/omni/settings.json` directly. The schema lives at [spec/omni.settings.schema.json](spec/omni.settings.schema.json).
+You can also create or edit `~/.config/omni/settings.json` directly. The current versioned schema lives at [spec/omni.settings.v1.schema.json](spec/omni.settings.v1.schema.json), with [spec/omni.settings.schema.json](spec/omni.settings.schema.json) kept as the latest-schema alias.
 
 Omni's config model is intentionally small:
 
@@ -53,7 +59,8 @@ Omni's config model is intentionally small:
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.schema.json",
+  "$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v1.schema.json",
+  "version": 1,
   "settings": {
     "ecosystems": {
       "node": { "manager": "bun" },
@@ -106,7 +113,39 @@ omni tools normalize --default-overrides --dry-run
                                           # preview cleanup of no-op provider overrides
 ```
 
-### Dotfile Backups
+### Dotfiles
+
+Dotfiles are logical entries in groups, backed by Stow package directories in the configured repo. Each entry has one target path, such as `~/.config/nvim`, and one default package. If `package` is omitted, the package name defaults to the entry name.
+
+#### Host-Specific Variants
+
+Some dotfiles should exist on every host but differ per machine. For those, keep one logical dot entry and add host-specific package variants. Omni selects the active host's package by short hostname and falls back to the default package on hosts without an override.
+
+```json
+{
+  "name": "nvim",
+  "path": "~/.config/nvim",
+  "package": "nvim",
+  "hosts": {
+    "workstation": { "package": "nvim@workstation" }
+  }
+}
+```
+
+The logical name stays `nvim` for groups, ignore rules, status, and TUI rows. Only the Stow package directory changes for the matching host.
+
+CLI examples:
+
+```sh
+omni dots variant list nvim
+omni dots variant add nvim --host workstation --sync
+omni dots variant add gitconfig --sync
+omni dots variant remove nvim --host workstation
+```
+
+When creating a variant, Omni uses an existing variant package from the repo when one is already present. Otherwise it seeds the new package from the current local target if it exists, falling back to the default repo package. Removing a variant switches the current host back to the default package and removes the unused variant package from the repo. In the TUI Dots tab, variant rows are marked with `◇`; press `v` on an eligible row, then `v` again to create or remove the current host's variant.
+
+#### Backups
 
 Before Omni mutates an existing local dotfile target, it creates a safety copy under `~/dotfiles.bkp`. The backup mirrors the target's home-relative path, so `~/.config/nvim/init.lua` becomes `~/dotfiles.bkp/.config/nvim/init.lua`. If that backup path already exists, Omni keeps the old copy and writes the next backup with a numeric suffix such as `.1`.
 
@@ -134,8 +173,6 @@ Provider choices are stored as portable ecosystem providers such as `system`, `n
 omni tools normalize --default-overrides --dry-run
 omni tools normalize --default-overrides -y
 ```
-
-Bulk TUI sync/upgrade skips package actions that need sudo/root. Single Homebrew cask actions that may prompt for an admin password open an embedded Admin Terminal prompt inside the TUI, then refresh the row when Brew finishes.
 
 Use the TUI for interactive tool management, host/group assignments, dotfile sync, settings, search, admin cask prompts, and the command palette.
 

@@ -192,7 +192,14 @@ func TestRenameHostMovesSpecialHostGroup(t *testing.T) {
 				Name:    "oldhost",
 				Special: "host",
 				Tools:   groupTools("fd"),
-				Dots:    []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}},
+				Dots: []config.DotEntry{{
+					Name: "nvim",
+					Path: "~/.config/nvim",
+					Hosts: map[string]config.DotVariant{
+						"oldhost": {Package: "nvim-oldhost"},
+						"other":   {Package: "nvim-other"},
+					},
+				}},
 			},
 		},
 		Hosts: map[string][]string{"oldhost": {}},
@@ -230,6 +237,15 @@ func TestRenameHostMovesSpecialHostGroup(t *testing.T) {
 	if len(newGroup.Dots) != 1 || newGroup.Dots[0].Name != "nvim" {
 		t.Fatalf("renamed host group dots = %#v, want nvim", newGroup.Dots)
 	}
+	if _, ok := newGroup.Dots[0].Hosts["oldhost"]; ok {
+		t.Fatal("old dot host variant remained")
+	}
+	if got := newGroup.Dots[0].Hosts["newhost"].Package; got != "nvim-oldhost" {
+		t.Fatalf("nvim newhost variant package = %q, want nvim-oldhost", got)
+	}
+	if got := newGroup.Dots[0].Hosts["other"].Package; got != "nvim-other" {
+		t.Fatalf("nvim other variant package = %q, want nvim-other", got)
+	}
 	if _, ok := cfg.HostSettings["oldhost"]; ok {
 		t.Fatal("old host settings remained")
 	}
@@ -265,8 +281,31 @@ func TestRemoveHostDeletesSpecialHostGroup(t *testing.T) {
 			"ripgrep": {Provider: "system", InstallWith: "brew"},
 		},
 		Groups: []*config.GroupConfig{
-			{Name: "laptop", Special: "host", Tools: groupTools("fd")},
-			{Name: "work", Tools: groupTools("ripgrep")},
+			{
+				Name:    "laptop",
+				Special: "host",
+				Tools:   groupTools("fd"),
+				Dots: []config.DotEntry{{
+					Name: "nvim",
+					Path: "~/.config/nvim",
+					Hosts: map[string]config.DotVariant{
+						"laptop": {Package: "nvim-laptop"},
+						"other":  {Package: "nvim-other"},
+					},
+				}},
+			},
+			{
+				Name:  "work",
+				Tools: groupTools("ripgrep"),
+				Dots: []config.DotEntry{{
+					Name: "zsh",
+					Path: "~/.zshrc",
+					Hosts: map[string]config.DotVariant{
+						"laptop": {Package: "zsh-laptop"},
+						"other":  {Package: "zsh-other"},
+					},
+				}},
+			},
 		},
 		Hosts: map[string][]string{"laptop": {"work"}},
 		HostSettings: map[string]config.Settings{
@@ -306,6 +345,22 @@ func TestRemoveHostDeletesSpecialHostGroup(t *testing.T) {
 	}
 	if got := fd.Hosts["other"].InstallWith; got != "apt" {
 		t.Fatalf("fd other override install_with = %q, want apt", got)
+	}
+	workGroup := findHostTestGroup(cfg.Groups, "work")
+	if workGroup == nil {
+		t.Fatal("work group missing")
+	}
+	// The deleted host group is removed entirely, but reusable dots elsewhere
+	// should still lose only the deleted host's scoped variant.
+	for _, group := range cfg.Groups {
+		for _, dot := range group.Dots {
+			if _, ok := dot.Hosts["laptop"]; ok {
+				t.Fatalf("dot %q retained laptop variant after RemoveHost", dot.Name)
+			}
+		}
+	}
+	if len(workGroup.Dots) != 1 || workGroup.Dots[0].Hosts["other"].Package != "zsh-other" {
+		t.Fatalf("work dots after RemoveHost = %#v, want zsh other variant preserved", workGroup.Dots)
 	}
 }
 

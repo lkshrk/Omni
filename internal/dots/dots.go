@@ -1,5 +1,6 @@
 // Package dots manages stow-backed dotfile links declared in config groups.
-// It treats each DotEntry name as one stow package under the dots repo.
+// DotEntry names are logical identities; resolved entries carry the stow
+// package directory selected by the app layer.
 package dots
 
 import (
@@ -109,6 +110,7 @@ type UnlinkOptions struct {
 // ResolvedEntry is a DotEntry with all paths expanded to absolute values.
 type ResolvedEntry struct {
 	Name       string
+	Package    string
 	SourcePath string   // absolute path of source in repo (may be file or dir)
 	TargetPath string   // absolute path of target (dir or file)
 	Ignored    bool     // true when present only to suppress management
@@ -121,8 +123,8 @@ type Manager struct {
 	Entries  []ResolvedEntry
 }
 
-// ValidateEntryName rejects names that cannot be used as a single stow package
-// directory under the dots repo.
+// ValidateEntryName rejects logical names that cannot also safely serve as the
+// default single stow package directory under the dots repo.
 func ValidateEntryName(name string) error {
 	if name == "" {
 		return fmt.Errorf("dots: entry name is required")
@@ -143,7 +145,7 @@ func ValidateEntryName(name string) error {
 //
 // SourcePath for each entry is derived from the stow package tree convention:
 //
-//	<stow-root>/<name>/<rel-from-home>
+//	<stow-root>/<package>/<rel-from-home>
 //
 // where rel-from-home is filepath.Rel($HOME, expanded(entry.Path)).
 func New(repoPath string, entries []config.DotEntry) (*Manager, error) {
@@ -162,6 +164,10 @@ func New(repoPath string, entries []config.DotEntry) (*Manager, error) {
 		if err := ValidateEntryName(e.Name); err != nil {
 			return nil, err
 		}
+		pkg := e.EffectivePackage()
+		if err := ValidateEntryName(pkg); err != nil {
+			return nil, fmt.Errorf("dots: entry %q package: %w", e.Name, err)
+		}
 		dstAbs, err := ExpandPath(e.Path)
 		if err != nil {
 			return nil, fmt.Errorf("dots: expand path for %q: %w", e.Name, err)
@@ -171,7 +177,7 @@ func New(repoPath string, entries []config.DotEntry) (*Manager, error) {
 		if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return nil, fmt.Errorf("dots: path %q for entry %q is not under home directory", e.Path, e.Name)
 		}
-		srcAbs := filepath.Join(expanded, e.Name, rel)
+		srcAbs := filepath.Join(expanded, pkg, rel)
 
 		ignorePatterns, err := combinedIgnores(e.Ignore)
 		if err != nil {
@@ -179,6 +185,7 @@ func New(repoPath string, entries []config.DotEntry) (*Manager, error) {
 		}
 		resolved = append(resolved, ResolvedEntry{
 			Name:       e.Name,
+			Package:    pkg,
 			SourcePath: srcAbs,
 			TargetPath: dstAbs,
 			Ignored:    e.Ignored,

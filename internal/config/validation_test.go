@@ -301,6 +301,41 @@ func TestValidateRoot_DotSingleOwnerIncludesHostGroup(t *testing.T) {
 	}
 }
 
+func TestValidateRoot_DotPackageCollisions(t *testing.T) {
+	cfg := &config.RootConfig{
+		Groups: []*config.GroupConfig{{
+			Name: "base",
+			Dots: []config.DotEntry{
+				{Name: "nvim", Path: "~/.config/nvim", Hosts: map[string]config.DotVariant{
+					"work": {Package: "nvim-work"},
+				}},
+				{Name: "vim", Path: "~/.vim", Package: "nvim-work"},
+			},
+		}},
+	}
+	errs := config.ValidateRoot(cfg, config.ProviderValidation{})
+	if !containsErrorMessage(errs, `package "nvim-work" is already used by dotfile "nvim"`) {
+		t.Errorf("expected duplicate dot package error, got %v", errs)
+	}
+}
+
+func TestValidateRoot_DotRejectsPathLikePackage(t *testing.T) {
+	cfg := &config.RootConfig{
+		Groups: []*config.GroupConfig{{
+			Name: "base",
+			Dots: []config.DotEntry{{
+				Name:    "nvim",
+				Path:    "~/.config/nvim",
+				Package: "../nvim",
+			}},
+		}},
+	}
+	errs := config.ValidateRoot(cfg, config.ProviderValidation{})
+	if !containsErrorMessage(errs, `invalid package name "../nvim"`) {
+		t.Errorf("expected invalid dot package error, got %v", errs)
+	}
+}
+
 func TestValidateRoot_HostReferencesMissingGroup(t *testing.T) {
 	cfg := &config.RootConfig{
 		Tools:  map[string]config.ToolSpec{"a": {Provider: "brew"}},

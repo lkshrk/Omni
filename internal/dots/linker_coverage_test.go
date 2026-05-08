@@ -497,3 +497,30 @@ func TestNew_ExpandsEnvironmentVariables(t *testing.T) {
 		t.Fatalf("TargetPath = %q, want %q", got, filepath.Join(home, ".config/zsh"))
 	}
 }
+
+func TestNew_UsesExplicitDotPackage(t *testing.T) {
+	repo := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	m, err := dots.New(repo, []config.DotEntry{
+		{Name: "nvim", Package: "nvim-work", Path: "~/.config/nvim"},
+	})
+	if err != nil {
+		t.Fatalf("dots.New: %v", err)
+	}
+	if len(m.Entries) != 1 {
+		t.Fatalf("len(Entries) = %d, want 1", len(m.Entries))
+	}
+	entry := m.Entries[0]
+	if entry.Name != "nvim" {
+		t.Fatalf("Name = %q, want nvim", entry.Name)
+	}
+	if entry.Package != "nvim-work" {
+		t.Fatalf("Package = %q, want nvim-work", entry.Package)
+	}
+	wantSource := filepath.Join(repo, "nvim-work", ".config", "nvim")
+	if entry.SourcePath != wantSource {
+		t.Fatalf("SourcePath = %q, want %q", entry.SourcePath, wantSource)
+	}
+}

@@ -126,6 +126,14 @@ func (m *Model) handleDotsSubmodeKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
 	}
 }
 
+func (m *Model) beginDotsVariantOperation(req dotsVariantRequest) {
+	if req.remove {
+		m.beginDotsOperation("Removing variant for " + req.name + "…")
+		return
+	}
+	m.beginDotsOperation("Creating variant for " + req.name + "…")
+}
+
 func (m *Model) handleDotsSearchKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 
@@ -172,7 +180,7 @@ func (m *Model) handleDotsNavigationKeyMsg(msg tea.KeyPressMsg, visible []dotsVi
 		if m.dotsCursor < len(visible)-1 {
 			m.moveDotsCursor(1, visible)
 		}
-	case m.dotsConfirmIdx >= 0 || m.dotsOverwriteIdx >= 0 || m.dotsLocalIdx >= 0 || m.dotsIgnoreIdx >= 0:
+	case m.dotsConfirmIdx >= 0 || m.dotsOverwriteIdx >= 0 || m.dotsLocalIdx >= 0 || m.dotsIgnoreIdx >= 0 || m.dotsVariantIdx >= 0:
 		return false
 	case key.Matches(msg, m.keys.Search):
 		m.dotsSearchActive = true
@@ -197,7 +205,7 @@ func (m *Model) handleDotsNavigationKeyMsg(msg tea.KeyPressMsg, visible []dotsVi
 }
 
 func (m *Model) handleDotsBackKey() {
-	if m.dotsConfirmIdx >= 0 || m.dotsOverwriteIdx >= 0 || m.dotsLocalIdx >= 0 || m.dotsIgnoreIdx >= 0 {
+	if m.dotsConfirmIdx >= 0 || m.dotsOverwriteIdx >= 0 || m.dotsLocalIdx >= 0 || m.dotsIgnoreIdx >= 0 || m.dotsVariantIdx >= 0 {
 		m.clearDotsConfirmState()
 	} else if m.dotsSearchActive {
 		m.dotsSearchActive = false
@@ -327,13 +335,15 @@ func (m *Model) pruneDotsExpandedChildren(entry app.DotStatus) {
 }
 
 func (m *Model) clearDotsConfirmState() {
-	if m.dotsConfirmIdx >= 0 || m.dotsOverwriteIdx >= 0 || m.dotsLocalIdx >= 0 || m.dotsIgnoreIdx >= 0 {
+	if m.dotsConfirmIdx >= 0 || m.dotsOverwriteIdx >= 0 || m.dotsLocalIdx >= 0 || m.dotsIgnoreIdx >= 0 || m.dotsVariantIdx >= 0 {
 		m.cancelConfirmationTimeout()
 	}
 	m.dotsConfirmIdx = -1
 	m.dotsOverwriteIdx = -1
 	m.dotsLocalIdx = -1
 	m.dotsIgnoreIdx = -1
+	m.dotsVariantIdx = -1
+	m.dotsVariantMode = dotsVariantNone
 }
 
 func (m *Model) handleDotsActionKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibleRow) []tea.Cmd {
@@ -355,6 +365,9 @@ func (m *Model) handleDotsActionKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibl
 
 	if m.dotsConfirmIdx >= 0 {
 		return m.handleDotsDeleteChoiceKeyMsg(msg, visible)
+	}
+	if m.dotsVariantIdx >= 0 {
+		return m.handleDotsVariantChoiceKeyMsg(msg, visible)
 	}
 	if m.dotsOverwriteIdx >= 0 && !key.Matches(msg, m.keys.DotUseRepo) {
 		return cmds
@@ -419,6 +432,11 @@ func (m *Model) handleDotsActionKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibl
 		cmds = append(cmds, m.handleDotsResolveKeyMsg(visible, app.DotResolveUseLocal)...)
 	case key.Matches(msg, m.keys.DotDelete):
 		cmds = append(cmds, m.handleDotsDeleteKeyMsg(visible)...)
+	case key.Matches(msg, m.keys.DotVariant):
+		if msg.IsRepeat {
+			break
+		}
+		cmds = append(cmds, m.handleDotsVariantKeyMsg(visible)...)
 	case key.Matches(msg, m.keys.DotIgnore):
 		if msg.IsRepeat {
 			break
@@ -426,6 +444,99 @@ func (m *Model) handleDotsActionKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibl
 		cmds = append(cmds, m.handleDotsIgnoreActionKeyMsg(visible)...)
 	}
 
+	return cmds
+}
+
+func dotsVariantEligible(row dotsVisibleRow) bool {
+	if row.isChild || row.entry.Name == "" || isTransientDotCandidate(row.entry) {
+		return false
+	}
+	switch dotStatusState(row.entry) {
+	case app.DotStateIgnored, app.DotStateInactive, app.DotStateDisabled:
+		return false
+	default:
+		return true
+	}
+}
+
+func (m *Model) handleDotsVariantKeyMsg(visible []dotsVisibleRow) []tea.Cmd {
+	var cmds []tea.Cmd
+	if m.app == nil || len(visible) == 0 || m.dotsCursor < 0 || m.dotsCursor >= len(visible) {
+		return cmds
+	}
+	row := visible[m.dotsCursor]
+	if !dotsVariantEligible(row) {
+		return cmds
+	}
+	mode := dotsVariantCreate
+	variants, err := m.app.DotsListVariants(row.entry.Name)
+	if err != nil {
+		cmds = append(cmds, setStatus(m, "✗ "+err.Error(), true))
+		return cmds
+	}
+	if _, ok := activeHostDotVariant(variants); ok {
+		mode = dotsVariantRemove
+	}
+	m.dotsConfirmIdx = -1
+	m.dotsOverwriteIdx = -1
+	m.dotsLocalIdx = -1
+	m.dotsIgnoreIdx = -1
+	m.dotsVariantIdx = m.dotsCursor
+	m.dotsVariantMode = mode
+	cmds = append(cmds, m.armConfirmationTimeout())
+	return cmds
+}
+
+func activeHostDotVariant(variants []app.DotVariantInfo) (app.DotVariantInfo, bool) {
+	for _, variant := range variants {
+		if variant.Active && !variant.Default {
+			return variant, true
+		}
+	}
+	return app.DotVariantInfo{}, false
+}
+
+func (m *Model) handleDotsVariantChoiceKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibleRow) []tea.Cmd {
+	var cmds []tea.Cmd
+	if m.dotsVariantIdx < 0 || m.dotsVariantIdx >= len(visible) {
+		return cmds
+	}
+	row := visible[m.dotsVariantIdx]
+	if !dotsVariantEligible(row) {
+		return cmds
+	}
+	name := row.entry.Name
+	switch m.dotsVariantMode {
+	case dotsVariantCreate:
+		if !key.Matches(msg, m.keys.DotVariant) {
+			return cmds
+		}
+		return m.startDotsVariantChange(dotsVariantRequest{name: name})
+	case dotsVariantRemove:
+		if !key.Matches(msg, m.keys.DotVariant) {
+			return cmds
+		}
+		return m.startDotsVariantChange(dotsVariantRequest{name: name, remove: true})
+	default:
+		return cmds
+	}
+}
+
+func (m *Model) startDotsVariantChange(req dotsVariantRequest) []tea.Cmd {
+	var cmds []tea.Cmd
+	if req.name == "" || m.app == nil {
+		return cmds
+	}
+	m.cancelConfirmationTimeout()
+	m.dotsVariantIdx = -1
+	m.dotsVariantMode = dotsVariantNone
+	m.stowInstallVariant = req
+	if m.promptForStowInstall(stowInstallDotVariant) {
+		return cmds
+	}
+	m.stowInstallVariant = dotsVariantRequest{}
+	m.beginDotsVariantOperation(req)
+	cmds = append(cmds, m.spinner.Tick, m.doDotsVariantChange(req))
 	return cmds
 }
 
@@ -674,6 +785,26 @@ func (m *Model) handleDotsLoadedMsg(msg dotsLoadedMsg) []tea.Cmd {
 	return cmds
 }
 
+func (m *Model) handleDotsPreparedMsg(msg dotsPreparedMsg) []tea.Cmd {
+	var cmds []tea.Cmd
+
+	if msg.gen != m.dotsPrepareGen || !m.dotsPreparing {
+		return cmds
+	}
+	m.dotsPreparing = false
+	if msg.opGen != m.dotsOpGen && !m.dotsLoading {
+		return cmds
+	}
+	if msg.entries != nil {
+		m.dotsLoaded = true
+		m.applyDotsSnapshot(msg.entries, msg.gitStatus, msg.dotMemberships)
+	}
+	if msg.err != nil && msg.entries == nil && m.mode == viewDots && !m.dotsLoading && !m.stowInstallPrompt {
+		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
+	}
+	return cmds
+}
+
 func (m *Model) handleDotsSyncedMsg(msg dotsSyncedMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 
@@ -830,6 +961,8 @@ func (m *Model) handleDotsDeletedMsg(msg dotsDeletedMsg) []tea.Cmd {
 	m.dotsOverwriteIdx = -1
 	m.dotsLocalIdx = -1
 	m.dotsIgnoreIdx = -1
+	m.dotsVariantIdx = -1
+	m.dotsVariantMode = dotsVariantNone
 	if msg.entries != nil {
 		m.applyDotsSnapshot(msg.entries, msg.gitStatus, msg.dotMemberships)
 	}
@@ -885,11 +1018,40 @@ func (m *Model) handleDotsAddedMsg(msg dotsAddedMsg) []tea.Cmd {
 	return cmds
 }
 
+func (m *Model) handleDotsVariantChangedMsg(msg dotsVariantChangedMsg) []tea.Cmd {
+	var cmds []tea.Cmd
+
+	if !m.finishDotsOperation(msg.gen) {
+		return cmds
+	}
+	m.dotsVariantIdx = -1
+	m.dotsVariantMode = dotsVariantNone
+	if msg.entries != nil {
+		m.applyDotsSnapshot(msg.entries, msg.gitStatus, msg.dotMemberships)
+	}
+	if msg.err != nil {
+		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
+		return cmds
+	}
+	pkg := msg.info.Package
+	if pkg == "" {
+		pkg = msg.name
+	}
+	if msg.removed {
+		cmds = append(cmds, setStatus(m, "✓ removed variant "+pkg+" for "+msg.name, false))
+	} else {
+		cmds = append(cmds, setStatus(m, "✓ created variant "+pkg+" for "+msg.name, false))
+	}
+	return cmds
+}
+
 func (m *Model) applyDotsSnapshot(entries []app.DotStatus, gitStatus string, memberships map[string][]string) {
 	m.dotsConfirmIdx = -1
 	m.dotsOverwriteIdx = -1
 	m.dotsLocalIdx = -1
 	m.dotsIgnoreIdx = -1
+	m.dotsVariantIdx = -1
+	m.dotsVariantMode = dotsVariantNone
 	sortDotsEntries(entries)
 	m.dotsEntries = entries
 	m.dotsGitStatus = gitStatus
@@ -897,6 +1059,15 @@ func (m *Model) applyDotsSnapshot(entries []app.DotStatus, gitStatus string, mem
 		m.dotMemberships = memberships
 	}
 	m.syncDotsExpandedName(dotsVisibleRows(*m))
+}
+
+func (m *Model) prepareDotsSnapshotOnLaunch(cmds *[]tea.Cmd) {
+	if m.app == nil || m.settings.DotsRepo == "" || m.dotsLoaded || m.dotsPreparing {
+		return
+	}
+	m.dotsPreparing = true
+	m.dotsPrepareGen++
+	*cmds = append(*cmds, m.doPrepareDotsSnapshot(m.dotsPrepareGen, m.dotsOpGen))
 }
 
 // doLoadDots fetches dots status (entries + git status) for the Dots tab.
@@ -912,6 +1083,18 @@ func (m *Model) doLoadDots() tea.Cmd {
 			return dotsLoadedMsg{gen: gen, err: err}
 		}
 		return dotsLoadedMsg{gen: gen, entries: result.Entries, gitStatus: result.GitStatus, dotMemberships: loadDotMemberships(a, ctx)}
+	}
+}
+
+func (m *Model) doPrepareDotsSnapshot(gen, opGen int) tea.Cmd {
+	a := m.app
+	ctx := m.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return func() tea.Msg {
+		entries, gitStatus, memberships, err := refreshDotsSnapshot(a, ctx)
+		return dotsPreparedMsg{gen: gen, opGen: opGen, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: err}
 	}
 }
 
@@ -1135,6 +1318,35 @@ func (m *Model) doDotsEntryIgnore(status app.DotStatus, ignored bool) tea.Cmd {
 		ignoreErr := a.DotsSetEntryIgnored(status.Name, path, ignored)
 		entries, gitStatus, memberships, err := refreshDotsSnapshot(a, ctx)
 		return dotsIgnoredMsg{gen: gen, name: status.Name, pattern: status.Name, ignored: ignored, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: combineDotsErrors(ignoreErr, err)}
+	}
+}
+
+func (m *Model) doDotsVariantChange(req dotsVariantRequest) tea.Cmd {
+	a := m.app
+	ctx, gen := m.currentDotsOperation()
+	return func() tea.Msg {
+		var (
+			info  app.DotVariantInfo
+			opErr error
+		)
+		if req.remove {
+			info, opErr = a.DotsRemoveHostVariant(ctx, req.name, app.DotsRemoveVariantOptions{})
+		} else {
+			info, _, opErr = a.DotsAddHostVariant(ctx, req.name, app.DotsAddVariantOptions{
+				Sync: true,
+			})
+		}
+		entries, gitStatus, memberships, err := refreshDotsSnapshot(a, ctx)
+		return dotsVariantChangedMsg{
+			gen:            gen,
+			name:           req.name,
+			info:           info,
+			removed:        req.remove,
+			entries:        entries,
+			gitStatus:      gitStatus,
+			dotMemberships: memberships,
+			err:            combineDotsErrors(opErr, err),
+		}
 	}
 }
 

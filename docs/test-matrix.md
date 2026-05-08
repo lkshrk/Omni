@@ -38,6 +38,7 @@ key routing, modal state, rendering, and async result handling.
 | `dots.discover` | yes | yes | yes | yes | - |
 | `dots.add` | yes | yes | yes | yes | - |
 | `dots.edit_groups` | yes | yes | yes | yes | - |
+| `dots.variant` | yes | yes | yes | yes | - |
 | `dots.delete` | yes | yes | yes | yes | - |
 | `dots.ignore` | yes | yes | yes | yes | - |
 | `dots.enable` | yes | yes | yes | yes | - |

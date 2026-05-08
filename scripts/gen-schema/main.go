@@ -1,9 +1,10 @@
-// gen-schema writes the JSON Schema for omni's settings.json to
-// spec/omni.settings.schema.json (relative to the repository root).
+// gen-schema writes the JSON Schema for omni's settings.json to the current
+// versioned schema path and spec/omni.settings.schema.json (relative to the
+// repository root).
 //
 // Usage:
 //
-//	go run ./scripts/gen-schema          # writes spec/omni.settings.schema.json
+//	go run ./scripts/gen-schema          # writes the canonical and latest schemas
 //	go run ./scripts/gen-schema [path]   # writes to a custom path
 //
 // Run via make:
@@ -12,7 +13,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,8 +25,9 @@ import (
 )
 
 const (
-	schemaMetaURL = "https://json-schema.org/draft/2020-12/schema"
-	defaultOutput = "spec/omni.settings.schema.json"
+	schemaMetaURL  = "https://json-schema.org/draft/2020-12/schema"
+	latestOutput   = "spec/omni.settings.schema.json"
+	latestSchemaID = "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.schema.json"
 )
 
 // schema is a minimal JSON Schema 2020-12 node. Fields with zero values are omitted.
@@ -45,6 +49,7 @@ type schema struct {
 
 	// Type / value constraints
 	Type      any   `json:"type,omitempty"` // string or []string
+	Const     any   `json:"const,omitempty"`
 	Enum      []any `json:"enum,omitempty"`
 	MinLength int   `json:"minLength,omitempty"`
 
@@ -61,6 +66,14 @@ type schema struct {
 }
 
 func build() *schema {
+	return buildWithID(config.SchemaURL)
+}
+
+func currentOutput() string {
+	return fmt.Sprintf("spec/omni.settings.v%d.schema.json", config.CurrentVersion)
+}
+
+func buildWithID(id string) *schema {
 	ecosystemNames := stringsToAny(provider.BuiltinEcosystemNames())
 	managerNames := stringsToAny(provider.BuiltinSettingsManagerNames(provider.EcosystemNode))
 	managerNames = append(managerNames, stringsToAny(provider.BuiltinSettingsManagerNames(provider.EcosystemPython))...)
@@ -69,7 +82,7 @@ func build() *schema {
 	systemPriority := stringsToAny(provider.BuiltinSystemProviderPriorityNames())
 	return &schema{
 		Schema:      schemaMetaURL,
-		ID:          config.SchemaURL,
+		ID:          id,
 		Title:       "omni settings",
 		Description: "omni settings.json — manages all dev tools, dotfiles, host assignments, and groups from a single file.",
 		Type:        "object",
@@ -77,6 +90,13 @@ func build() *schema {
 			"$schema": {
 				Description: "JSON Schema reference URI (injected automatically by omni on every write).",
 				Type:        "string",
+			},
+			"version": {
+				Description: "settings.json format version. Missing means legacy unversioned config; omni migrates it to the current version on write.",
+				Type:        "integer",
+				Const:       config.CurrentVersion,
+				Default:     config.CurrentVersion,
+				Examples:    []any{config.CurrentVersion},
 			},
 			"settings": ref("#/$defs/Settings"),
 			"hosts": {
@@ -132,6 +152,7 @@ func build() *schema {
 				Items:       ref("#/$defs/GroupConfig"),
 			},
 		},
+		Required:             []string{"version"},
 		AdditionalProperties: false,
 		Defs: map[string]*schema{
 			"Settings": {
@@ -371,6 +392,28 @@ func build() *schema {
 						MinLength:   1,
 						Examples:    []any{"nvim", "zsh", "git"},
 					},
+					"package": {
+						Description: "Default stow package directory. Defaults to the logical dotfile name.",
+						Type:        "string",
+						MinLength:   1,
+						Examples:    []any{"nvim", "zsh-work"},
+					},
+					"hosts": {
+						Description: "Host-specific stow package variants keyed by short hostname.",
+						Type:        "object",
+						AdditionalProperties: &schema{
+							Type:                 "object",
+							AdditionalProperties: false,
+							Properties: map[string]*schema{
+								"package": {
+									Description: "Stow package directory to use on this host.",
+									Type:        "string",
+									MinLength:   1,
+									Examples:    []any{"nvim-work-laptop"},
+								},
+							},
+						},
+					},
 					"path": {
 						Description: "Original filesystem location managed by this entry (~ and environment variables are expanded).",
 						Type:        "string",
@@ -435,35 +478,94 @@ func exampleInstallWithNames() []string {
 }
 
 func main() {
-	out := defaultOutput
-	if len(os.Args) > 1 {
-		out = os.Args[1]
+	outputs := []schemaOutput{
+		{path: currentOutput(), id: config.SchemaURL},
+		{path: latestOutput, id: latestSchemaID},
 	}
+	if len(os.Args) > 1 {
+		outputs = outputs[:0]
+		for _, out := range os.Args[1:] {
+			outputs = append(outputs, schemaOutput{path: out, id: config.SchemaURL})
+		}
+	}
+	for _, out := range outputs {
+		if err := writeGeneratedSchema(out); err != nil {
+			fmt.Fprintf(os.Stderr, "gen-schema: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("wrote %s\n", out.path)
+	}
+}
 
+type schemaOutput struct {
+	path string
+	id   string
+}
+
+func writeGeneratedSchema(out schemaOutput) error {
+	doc := buildWithID(out.id)
+	if out.path == currentOutput() {
+		return writeVersionedSchema(out.path, doc)
+	}
+	return writeSchema(out.path, doc)
+}
+
+func writeVersionedSchema(out string, doc *schema) error {
+	data, err := encodeSchema(doc)
+	if err != nil {
+		return err
+	}
+	existing, err := os.ReadFile(out)
+	switch {
+	case err == nil:
+		if !bytes.Equal(existing, data) {
+			return fmt.Errorf("%s already exists with different content; bump config.CurrentVersion to create a new schema version instead of rewriting an old one", out)
+		}
+		return nil
+	case !errors.Is(err, os.ErrNotExist):
+		return fmt.Errorf("read %s: %w", out, err)
+	default:
+		return writeBytes(out, data)
+	}
+}
+
+func writeSchema(out string, doc *schema) error {
+	data, err := encodeSchema(doc)
+	if err != nil {
+		return err
+	}
+	return writeBytes(out, data)
+}
+
+func encodeSchema(doc *schema) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetIndent("", "  ")
+	enc.SetEscapeHTML(false) // keep < > & readable in descriptions
+	if err := enc.Encode(doc); err != nil {
+		return nil, fmt.Errorf("encode: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+func writeBytes(out string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "gen-schema: mkdir: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("mkdir: %w", err)
 	}
 
 	f, err := os.OpenFile(out, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "gen-schema: open: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("open: %w", err)
 	}
-	enc := json.NewEncoder(f)
-	enc.SetIndent("", "  ")
-	enc.SetEscapeHTML(false) // keep < > & readable in descriptions
-	if err := enc.Encode(build()); err != nil {
+	if _, err := f.Write(data); err != nil {
 		if cerr := f.Close(); cerr != nil {
-			fmt.Fprintf(os.Stderr, "gen-schema: close: %v\n", cerr)
+			err = errors.Join(err, fmt.Errorf("close: %w", cerr))
 		}
 		_ = os.Remove(out) // remove partially-written file
-		fmt.Fprintf(os.Stderr, "gen-schema: encode: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("write: %w", err)
 	}
 	if err := f.Close(); err != nil {
-		fmt.Fprintf(os.Stderr, "gen-schema: write: %v\n", err)
-		os.Exit(1)
+		return fmt.Errorf("write: %w", err)
 	}
-	fmt.Printf("wrote %s\n", out)
+	return nil
 }
