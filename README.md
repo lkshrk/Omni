@@ -13,9 +13,11 @@ Omni keeps your development tools and dotfiles in one portable JSON config. It t
 Main features:
 
 - Portable providers for system, Node, and Python tools.
-- Cross-machine profiles and groups.
+- Cross-machine host assignments and reusable groups.
 - Dotfile sync/discovery backed by a git repo.
 - CLI and TUI surfaces over the same app behavior.
+- Privilege-aware package actions that avoid blocking TUI password prompts.
+- Provider override repair and cleanup flows for machine-specific managers.
 - Install, delete, upgrade, import, search, consolidate, and sync flows.
 
 Supported managers include Homebrew, apt, apk, dnf, pacman, zypper, npm, pnpm, bun, uv, pip3, and pip.
@@ -37,7 +39,17 @@ Dotfile sync uses GNU Stow (`stow`) to manage links. When dotfile sync is enable
 
 ## Usage
 
-Create or edit `~/.config/omni/settings.json` (schema in one place: [spec/omni.settings.schema.json](spec/omni.settings.schema.json)):
+Run `omni` to start the TUI. On first launch, onboarding creates `~/.config/omni/settings.json`, lets you choose package ecosystems, creates this machine's host assignment, optionally imports installed tools, and can enable dotfile sync. After onboarding, Omni performs the first package scan; this can take a while on a fresh cache.
+
+You can also create or edit `~/.config/omni/settings.json` directly. The schema lives at [spec/omni.settings.schema.json](spec/omni.settings.schema.json).
+
+Omni's config model is intentionally small:
+
+- `settings` choose ecosystem managers, provider tracking, and dotfile behavior.
+- `tools` define logical tools and their default provider.
+- `groups` contain single-owner tool and dotfile assignments.
+- `hosts` assign groups to hostnames.
+- Each host also gets a protected hostname group for machine-local tools.
 
 ```json
 {
@@ -53,46 +65,54 @@ Create or edit `~/.config/omni/settings.json` (schema in one place: [spec/omni.s
     "typescript": { "provider": "node" },
     "black": { "provider": "python" }
   },
+  "hosts": {
+    "workstation": ["dev"]
+  },
   "groups": [
-    { "tools": ["ripgrep", "typescript", "black"] }
+    {
+      "name": "dev",
+      "tools": ["ripgrep", "typescript", "black"],
+      "dots": [
+        { "name": "nvim", "path": "~/.config/nvim" }
+      ]
+    },
+    { "name": "workstation", "special": "host" }
   ]
 }
 ```
 
-Common CLI commands:
+Base CLI workflow:
 
 ```sh
-omni init                                   # onboard machine and optionally import tools
-omni init --import                          # example init variant
-
-omni sync                                   # sync tools for current profile/group
-omni sync --all                             # example: sync everything
-
-omni list                                   # list tools and install state
-omni list --provider system                 # example filter by provider
-
-omni import                                 # import currently installed tools
-omni import --dry-run                       # example: preview import
-
-omni install fd --provider brew             # install one tool
-omni delete rg --provider brew              # delete one tool
-omni upgrade --all                          # upgrade outdated tools
-omni search ripgrep                         # search provider registries
-omni add fd --provider system               # add a tool spec
-omni switch black --from pip3 --to uv
-
-omni providers                              # list available providers
-omni profile                                # manage profiles (list/add/remove/assign)
-omni tools                                  # manage logical tool specs
-omni groups                                 # manage tool groups
-omni settings                               # inspect/mutate settings
-omni consolidate python uv                  # convert ecosystem managers
-omni dots discover                          # discover unmanaged dotfile candidates
-omni dots sync --dry-run                    # example: sync dot links dry-run
-omni ui
+omni                                      # open the TUI
+omni init                                 # run onboarding from the CLI
+omni sync                                 # install/sync current host groups
+omni sync --all                           # add discovered local tools and install missing tools
+omni refresh                              # rescan installed/outdated tools and metadata
+omni list                                 # show tool state
+omni import                               # add installed tools to config
+omni dots sync                            # sync dotfile links
 ```
 
-For exact, current options, use:
+Examples:
+
+```sh
+omni add fd --provider system             # add a logical tool
+omni groups move-tool dev fd              # move a tool to a group
+omni dots groups nvim --move dev          # move a dotfile entry to a group
+omni dots sync --dry-run                  # preview dotfile links
+omni settings set node.manager pnpm       # choose a host-local ecosystem manager
+omni tools normalize --default-overrides --dry-run
+                                          # preview cleanup of no-op provider overrides
+```
+
+### Dotfile Backups
+
+Before Omni mutates an existing local dotfile target, it creates a safety copy under `~/dotfiles.bkp`. The backup mirrors the target's home-relative path, so `~/.config/nvim/init.lua` becomes `~/dotfiles.bkp/.config/nvim/init.lua`. If that backup path already exists, Omni keeps the old copy and writes the next backup with a numeric suffix such as `.1`.
+
+Backups are created for destructive local dotfile flows such as adopt/add, replacing a broken or conflicting target, resolving conflicts, deleting or disabling managed links, and unstowing. Dry-runs and no-op synced entries do not create backups. The backup covers local files, directories, and symlinks in your home directory; repo-side dotfile history is handled by the configured git repo and optional dots auto-commit/push settings.
+
+For exact options, use:
 
 ```sh
 omni --help
@@ -108,24 +128,35 @@ omni --cache-dir /tmp/omni-cache            # override tool cache path
 omni -y | --yes                             # assume yes for prompts
 ```
 
-Launch the TUI:
+Provider choices are stored as portable ecosystem providers such as `system`, `node`, and `python`. A concrete provider or manager is only stored through `install_with` when it is an intentional pin, for example `system` via `apt` on a host where the default would be `brew`. To clean older configs that explicitly pin the current default manager, preview first and then apply:
 
 ```sh
-omni                                        # starts the TUI directly (same as `omni ui`)
-omni ui
+omni tools normalize --default-overrides --dry-run
+omni tools normalize --default-overrides -y
 ```
 
-Use the TUI for interactive tool management, profile/group edits, dotfile sync, settings, search, and the command palette.
+Bulk TUI sync/upgrade skips package actions that need sudo/root. Single Homebrew cask actions that may prompt for an admin password open an embedded Admin Terminal prompt inside the TUI, then refresh the row when Brew finishes.
+
+Use the TUI for interactive tool management, host/group assignments, dotfile sync, settings, search, admin cask prompts, and the command palette.
 
 ## Development
 
 ```sh
+make tui-live                             # run TUI with live/default config and cache
+make tui-dev                              # run TUI with isolated dev config/cache
+make cli-live ARGS='--help'               # run CLI with live/default config and cache
+make cli-dev ARGS='tools normalize --default-overrides --dry-run'
+                                          # run CLI with isolated dev config/cache
 make build                                 # compile ./bin/omni
 make test                                  # unit tests with race detector
 make test-integration                      # Docker-isolated integration tests
 make demo-gif                              # regenerate the README demo GIF
 ```
 
-CI runs vet, golangci-lint, unit tests, and Docker integration tests. Releases are CI-gated: if a successful CI commit has a `vX.Y.Z` tag, GoReleaser publishes the release artifacts.
+`make run` aliases `make tui-live`; `make cli` aliases `make cli-dev`. Dev targets default to `DEV_DIR=/private/tmp/omni-dev` and `DEV_HOST=devhost`.
+
+The demo GIF target uses [VHS](https://github.com/charmbracelet/vhs) and records `demo/omni-demo.tape` against an isolated temp config, cache, home directory, fake package managers, and fake Stow binary.
+
+CI runs vet, golangci-lint, unit tests, and Docker integration tests. Releases are CI-gated: if a successful CI commit has a `vX.Y.Z` tag, GoReleaser publishes the release artifacts and generates release notes from Conventional Commit subjects.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution details.

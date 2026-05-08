@@ -69,7 +69,32 @@ brews:
       system "#{bin}/omni", "--version"
 
 changelog:
-  disable: true
+  use: git
+  sort: asc
+  abbrev: -1
+  format: "{{ .Message }}"
+  groups:
+    - title: Breaking Changes
+      regexp: '^.*?[[:alpha:]]+(\([^)]+\))?!:.+$'
+      order: 0
+    - title: Features
+      regexp: '^.*?feat(\([^)]+\))?!?:.+$'
+      order: 1
+    - title: Bug Fixes
+      regexp: '^.*?fix(\([^)]+\))?!?:.+$'
+      order: 2
+    - title: Documentation
+      regexp: '^.*?docs(\([^)]+\))?!?:.+$'
+      order: 3
+    - title: Maintenance
+      regexp: '^.*?(build|chore|ci|refactor|style|test)(\([^)]+\))?!?:.+$'
+      order: 4
+    - title: Other Changes
+      order: 999
+  filters:
+    exclude:
+      - '^.*?Merge pull request'
+      - '^.*?Merge branch'
 
 release:
   mode: keep-existing
