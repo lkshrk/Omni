@@ -34,17 +34,24 @@ func (p *Provider) Available(ctx context.Context) (bool, error) {
 
 func (p *Provider) Install(ctx context.Context, tool provider.Tool) error {
 	pkg := tool.EffectivePackage()
-	return provider.RunCmd(ctx, p.exec, "dnf install "+pkg, "dnf", "install", "-y", pkg)
+	cmd, args := provider.PrivilegedCommand("dnf", "install", "-y", pkg)
+	return provider.RunCmd(ctx, p.exec, "dnf install "+pkg, cmd, args...)
 }
 
 func (p *Provider) Uninstall(ctx context.Context, tool provider.Tool) error {
 	pkg := tool.EffectivePackage()
-	return provider.RunCmd(ctx, p.exec, "dnf remove "+pkg, "dnf", "remove", "-y", pkg)
+	cmd, args := provider.PrivilegedCommand("dnf", "remove", "-y", pkg)
+	return provider.RunCmd(ctx, p.exec, "dnf remove "+pkg, cmd, args...)
 }
 
 func (p *Provider) Upgrade(ctx context.Context, tool provider.Tool) error {
 	pkg := tool.EffectivePackage()
-	return provider.RunCmd(ctx, p.exec, "dnf upgrade "+pkg, "dnf", "upgrade", "-y", pkg)
+	cmd, args := provider.PrivilegedCommand("dnf", "upgrade", "-y", pkg)
+	return provider.RunCmd(ctx, p.exec, "dnf upgrade "+pkg, cmd, args...)
+}
+
+func (p *Provider) PrivilegePlan(_ context.Context, action provider.PrivilegeAction, tool provider.Tool) (provider.PrivilegePlan, error) {
+	return provider.SystemPrivilegePlan(p.Name(), action, tool), nil
 }
 
 func (p *Provider) IsInstalled(ctx context.Context, tool provider.Tool) (bool, string, error) {

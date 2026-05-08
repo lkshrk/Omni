@@ -24,6 +24,7 @@ type mockProvider struct {
 	versions     map[string]string // pkg → version
 	installed    []string          // record of Install calls
 	uninstalled  []string          // record of Uninstall calls
+	upgraded     []string          // record of Upgrade calls
 }
 
 func (m *mockProvider) Name() string        { return m.name }
@@ -48,7 +49,10 @@ func (m *mockProvider) Uninstall(_ context.Context, t provider.Tool) error {
 	m.isInstalled[t.EffectivePackage()] = false
 	return nil
 }
-func (m *mockProvider) Upgrade(_ context.Context, _ provider.Tool) error { return nil }
+func (m *mockProvider) Upgrade(_ context.Context, t provider.Tool) error {
+	m.upgraded = append(m.upgraded, t.EffectivePackage())
+	return nil
+}
 func (m *mockProvider) ListInstalled(_ context.Context) ([]provider.InstalledTool, error) {
 	return nil, nil
 }
@@ -86,6 +90,15 @@ func (p *postInstallVerifyProvider) Install(_ context.Context, t provider.Tool) 
 	p.installed = append(p.installed, t.EffectivePackage())
 	p.installDone = true
 	return nil
+}
+
+type privilegedMockProvider struct {
+	mockProvider
+	plan provider.PrivilegePlan
+}
+
+func (p *privilegedMockProvider) PrivilegePlan(_ context.Context, _ provider.PrivilegeAction, _ provider.Tool) (provider.PrivilegePlan, error) {
+	return p.plan, nil
 }
 
 // --- helpers ---
@@ -187,6 +200,58 @@ func TestSync_SomeMissing_InstallsExactlyThose(t *testing.T) {
 		if !found {
 			t.Errorf("expected OpInstall for %q in result.Installed(), got %v", name, installed)
 		}
+	}
+}
+
+func TestSync_SkipPrivileged_SkipsInstallAndCachesRequirement(t *testing.T) {
+	ctx := context.Background()
+	mock := &privilegedMockProvider{
+		mockProvider: mockProvider{
+			name:        "apt",
+			available:   true,
+			isInstalled: map[string]bool{"vim": false},
+			versions:    map[string]string{},
+		},
+		plan: provider.PrivilegePlan{Requirement: provider.PrivilegeRequired, Reason: "apt install vim"},
+	}
+	reg := provider.NewRegistry()
+	reg.Register(mock)
+
+	db := newDB(t)
+	s := syncer.New(reg, db)
+
+	var events []syncer.ProgressEvent
+	result, err := s.Sync(ctx, cfg(entry("vim", "apt")), syncer.SyncOptions{
+		SkipPrivileged: true,
+		ToolProgress: func(event syncer.ProgressEvent) {
+			events = append(events, event)
+		},
+	})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if len(mock.installed) != 0 {
+		t.Fatalf("installed = %v, want none", mock.installed)
+	}
+	failed := result.Failed()
+	if len(failed) != 1 {
+		t.Fatalf("Failed() = %d, want 1", len(failed))
+	}
+	if failed[0].Err == nil || !strings.Contains(failed[0].Err.Error(), "requires sudo") {
+		t.Fatalf("failed error = %v, want sudo requirement", failed[0].Err)
+	}
+	if len(events) == 0 || events[len(events)-1].Message != "Admin approval needed for vim" {
+		t.Fatalf("last progress event = %+v, want admin approval message", events)
+	}
+	got, err := db.Get(ctx, "vim", "apt", "vim")
+	if err != nil {
+		t.Fatalf("Get cached row: %v", err)
+	}
+	if got.Privilege != string(provider.PrivilegeRequired) {
+		t.Fatalf("Privilege = %q, want %q", got.Privilege, provider.PrivilegeRequired)
+	}
+	if !got.PrivilegeReason.Valid || got.PrivilegeReason.String != "apt install vim" {
+		t.Fatalf("PrivilegeReason = %+v, want apt install vim", got.PrivilegeReason)
 	}
 }
 
@@ -768,7 +833,6 @@ func (c *concreteBulkProvider) ResolvedName(_ context.Context) (string, error) {
 type multiManagerMockProvider struct {
 	mockProvider
 	installedByManager map[string]provider.InstalledEntry
-	outdatedByManager  map[string]map[string]string
 	concreteName       string
 }
 
@@ -780,32 +844,15 @@ func (m *multiManagerMockProvider) ResolvedName(_ context.Context) (string, erro
 	return m.concreteName, nil
 }
 
-func (m *multiManagerMockProvider) OutdatedMap(_ context.Context) (map[string]string, error) {
-	if len(m.outdatedByManager) == 0 {
-		return nil, nil
-	}
-	out := make(map[string]string)
-	for _, byTool := range m.outdatedByManager {
-		for name, latest := range byTool {
-			if _, exists := out[name]; !exists {
-				out[name] = latest
-			}
-		}
-	}
-	return out, nil
-}
-
-func (m *multiManagerMockProvider) OutdatedByManager(_ context.Context) (map[string]map[string]string, error) {
-	return m.outdatedByManager, nil
-}
-
 // outdatedMockProvider additionally implements OutdatedChecker.
 type outdatedMockProvider struct {
 	bulkMockProvider
 	outdatedMap map[string]string // lowercase name → latest version
+	calls       int
 }
 
 func (o *outdatedMockProvider) OutdatedMap(_ context.Context) (map[string]string, error) {
+	o.calls++
 	return o.outdatedMap, nil
 }
 
@@ -940,6 +987,50 @@ func TestSync_InstallFails_WritesToDB(t *testing.T) {
 	}
 	if failed[0].Name != "ripgrep" || failed[0].FailureCount != 1 {
 		t.Errorf("got %+v, want ripgrep/failure_count=1", failed[0])
+	}
+}
+
+func TestSync_InstallCanceled_ClearsFailureMarker(t *testing.T) {
+	ctx := context.Background()
+	mock := &failingProvider{
+		mockProvider: mockProvider{
+			name:        "brew",
+			available:   true,
+			isInstalled: map[string]bool{"ripgrep": false},
+			versions:    map[string]string{},
+		},
+		installErr: context.Canceled,
+	}
+	reg := provider.NewRegistry()
+	reg.Register(mock)
+
+	db := newDB(t)
+	if err := db.MarkFailed(ctx, "ripgrep", "brew", "ripgrep", "prior failure"); err != nil {
+		t.Fatalf("MarkFailed: %v", err)
+	}
+	s := syncer.New(reg, db)
+
+	result, err := s.Sync(ctx, cfg(entry("ripgrep", "brew")), syncer.SyncOptions{})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if len(result.Failed()) != 1 {
+		t.Fatalf("Failed() = %d, want 1 cancelled op", len(result.Failed()))
+	}
+
+	failed, err := db.ListFailed(ctx)
+	if err != nil {
+		t.Fatalf("ListFailed: %v", err)
+	}
+	if len(failed) != 0 {
+		t.Fatalf("ListFailed() = %d, want 0 after cancellation", len(failed))
+	}
+	got, err := db.Get(ctx, "ripgrep", "brew", "ripgrep")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.FailureCount != 0 || got.FailedAt != nil || got.LastError.Valid {
+		t.Fatalf("cancelled install should clear failure marker, got %+v", got)
 	}
 }
 
@@ -1219,97 +1310,6 @@ func TestSync_MultiManagerBulkChecker_PersistsOwningManager(t *testing.T) {
 	}
 }
 
-func TestSync_MultiManagerOutdatedChecker_UsesOwningManager(t *testing.T) {
-	ctx := context.Background()
-	mock := &multiManagerMockProvider{
-		mockProvider: mockProvider{
-			name:        "node",
-			available:   true,
-			isInstalled: map[string]bool{},
-			versions:    map[string]string{},
-		},
-		installedByManager: map[string]provider.InstalledEntry{
-			"typescript": {Version: "5.3.3", ConcreteManager: "pnpm"},
-			"prettier":   {Version: "3.2.0", ConcreteManager: "npm"},
-		},
-		outdatedByManager: map[string]map[string]string{
-			"npm": {
-				"typescript": "5.4.0",
-				"prettier":   "3.3.0",
-			},
-		},
-		concreteName: "pnpm",
-	}
-	reg := provider.NewRegistry()
-	reg.Register(mock)
-	db := newDB(t)
-	s := syncer.New(reg, db)
-
-	if _, err := s.Sync(ctx, cfg(entry("typescript", "node"), entry("prettier", "node")), syncer.SyncOptions{}); err != nil {
-		t.Fatalf("Sync: %v", err)
-	}
-	typescript, err := db.Get(ctx, "typescript", "node", "typescript")
-	if err != nil {
-		t.Fatalf("db.Get typescript: %v", err)
-	}
-	prettier, err := db.Get(ctx, "prettier", "node", "prettier")
-	if err != nil {
-		t.Fatalf("db.Get prettier: %v", err)
-	}
-	if typescript.Outdated {
-		t.Fatalf("typescript.Outdated = true, want false because pnpm owns it")
-	}
-	if !prettier.Outdated || prettier.LatestVersion.String != "3.3.0" {
-		t.Fatalf("prettier outdated/latest = %v/%q, want true/3.3.0", prettier.Outdated, prettier.LatestVersion.String)
-	}
-}
-
-func TestSync_MultiManagerOutdatedChecker_UsesFullSlashPackage(t *testing.T) {
-	ctx := context.Background()
-	mock := &multiManagerMockProvider{
-		mockProvider: mockProvider{
-			name:        "node",
-			available:   true,
-			isInstalled: map[string]bool{},
-			versions:    map[string]string{},
-		},
-		installedByManager: map[string]provider.InstalledEntry{
-			"@playwright/test": {Version: "1.52.0", ConcreteManager: "npm"},
-			"test":             {Version: "0.0.1", ConcreteManager: "pnpm"},
-		},
-		outdatedByManager: map[string]map[string]string{
-			"npm": {
-				"@playwright/test": "1.53.0",
-				"test":             "0.0.2",
-			},
-		},
-		concreteName: "npm",
-	}
-	reg := provider.NewRegistry()
-	reg.Register(mock)
-	db := newDB(t)
-	s := syncer.New(reg, db)
-
-	result, err := s.Sync(ctx, cfg(entryPackage("playwright-test", "node", "@playwright/test")), syncer.SyncOptions{})
-	if err != nil {
-		t.Fatalf("Sync: %v", err)
-	}
-	skipped := result.Skipped()
-	if len(skipped) != 1 || skipped[0].Version != "1.52.0" {
-		t.Fatalf("Skipped() = %+v, want playwright-test version 1.52.0", skipped)
-	}
-	cached, err := db.Get(ctx, "playwright-test", "node", "@playwright/test")
-	if err != nil {
-		t.Fatalf("db.Get playwright-test: %v", err)
-	}
-	if cached.InstalledWith != "npm" {
-		t.Fatalf("InstalledWith = %q, want npm", cached.InstalledWith)
-	}
-	if !cached.Outdated || cached.LatestVersion.String != "1.53.0" {
-		t.Fatalf("outdated/latest = %v/%q, want true/1.53.0", cached.Outdated, cached.LatestVersion.String)
-	}
-}
-
 func TestSync_Install_PersistsResolvedConcreteInstalledWith(t *testing.T) {
 	ctx := context.Background()
 	mock := &concreteResolverProvider{
@@ -1338,7 +1338,7 @@ func TestSync_Install_PersistsResolvedConcreteInstalledWith(t *testing.T) {
 	}
 }
 
-func TestSync_OutdatedChecker_MarksOutdated(t *testing.T) {
+func TestSync_PreservesOutdatedState(t *testing.T) {
 	ctx := context.Background()
 	mock := &outdatedMockProvider{
 		bulkMockProvider: bulkMockProvider{
@@ -1350,7 +1350,7 @@ func TestSync_OutdatedChecker_MarksOutdated(t *testing.T) {
 			},
 			installedMap: map[string]string{"ripgrep": "14.0.0"},
 		},
-		outdatedMap: map[string]string{"ripgrep": "14.1.1"},
+		outdatedMap: map[string]string{},
 	}
 	reg := provider.NewRegistry()
 	reg.Register(mock)
@@ -1363,25 +1363,27 @@ func TestSync_OutdatedChecker_MarksOutdated(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("prepopulate db: %v", err)
 	}
+	if err := db.UpdateOutdated(ctx, "ripgrep", "brew", "ripgrep", true, "14.1.1"); err != nil {
+		t.Fatalf("UpdateOutdated: %v", err)
+	}
 	s := syncer.New(reg, db)
 
-	result, err := s.Sync(ctx, cfg(entry("ripgrep", "brew")), syncer.SyncOptions{})
-	if err != nil {
+	if _, err := s.Sync(ctx, cfg(entry("ripgrep", "brew")), syncer.SyncOptions{}); err != nil {
 		t.Fatalf("Sync: %v", err)
 	}
-	if len(result.Skipped()) != 1 {
-		t.Fatalf("expected 1 skipped op, got %d", len(result.Skipped()))
-	}
-	// Verify the DB entry has outdated info.
+
 	cached, err := db.Get(ctx, "ripgrep", "brew", "ripgrep")
 	if err != nil {
 		t.Fatalf("db.Get: %v", err)
 	}
-	if !cached.Outdated {
-		t.Error("expected Outdated=true in DB")
+	if !cached.Outdated || cached.LatestVersion.String != "14.1.1" {
+		t.Fatalf("outdated/latest = %v/%q, want preserved true/14.1.1", cached.Outdated, cached.LatestVersion.String)
 	}
-	if cached.LatestVersion.String != "14.1.1" {
-		t.Errorf("LatestVersion = %q, want 14.1.1", cached.LatestVersion.String)
+	if mock.calls != 0 {
+		t.Fatalf("OutdatedMap calls = %d, want 0; refresh owns update availability", mock.calls)
+	}
+	if len(mock.upgraded) > 0 {
+		t.Fatalf("sync called Upgrade %v, want none", mock.upgraded)
 	}
 }
 

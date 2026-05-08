@@ -6,8 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -92,9 +90,9 @@ Run 'omni init' on every new machine to reproduce your environment.`,
 			}
 			fmt.Println()
 
-			// ── 6. Mandatory profile setup ───────────────────────────────────────
-			if err := ensureProfile(a); err != nil {
-				return fmt.Errorf("setting up profile: %w", err)
+			// ── 6. Mandatory host setup ───────────────────────────────────────
+			if err := ensureHost(a); err != nil {
+				return fmt.Errorf("setting up host: %w", err)
 			}
 
 			// ── 7. Import prompt ──────────────────────────────────────────────
@@ -187,75 +185,18 @@ func detectManager(candidates ...string) string {
 	return ""
 }
 
-// ensureProfile guarantees that this machine has an active profile mapped.
-// Flow:
-//  1. Active profile already exists → done.
-//  2. Profiles exist but none mapped → offer the list; "0" falls through to create.
-//  3. No profiles or user chose to create → prompt for a name (re-prompts until non-empty).
-func ensureProfile(a *app.App) error {
-	info, err := a.ProfileStatus()
-	if err != nil {
-		return err
-	}
-	hostname, _ := os.Hostname()
-
-	// Already mapped — nothing to do.
-	if info.Active != "" {
-		fmt.Printf("✓ Using profile %q\n\n", info.Active)
+// ensureHost guarantees that this machine has an active host entry.
+func ensureHost(a *app.App) error {
+	active, groups, ok := a.ActiveHostInfo()
+	if ok {
+		fmt.Printf("✓ Using host %q with groups: %s\n\n", active, groupList(groups))
 		return nil
 	}
 
-	// Profiles exist but this hostname isn't mapped → offer to pick one.
-	if len(info.Profiles) > 0 {
-		names := sortedProfileNames(info.Profiles)
-		fmt.Printf("Profiles exist but %q is not mapped.\n", hostname)
-		for i, n := range names {
-			fmt.Printf("  %d. %-20s %s\n", i+1, n, groupList(info.Profiles[n].Groups))
-		}
-		fmt.Println("  0. Create new profile")
-		fmt.Print("Select [0]: ")
-		line, ok := scanLine()
-		if !ok {
-			return fmt.Errorf("unexpected EOF reading profile selection")
-		}
-		line = strings.TrimSpace(line)
-		var choice int
-		if line != "" {
-			if parsed, err := strconv.Atoi(line); err == nil {
-				choice = parsed
-			}
-		}
-		if choice > 0 && choice <= len(names) {
-			selected := names[choice-1]
-			if err := a.SetHostname(hostname, selected); err != nil {
-				return fmt.Errorf("mapping hostname: %w", err)
-			}
-			fmt.Printf("✓ Mapped %q → profile %q\n\n", hostname, selected)
-			return nil
-		}
-		fmt.Println()
+	if err := a.EnsureHost(active); err != nil {
+		return fmt.Errorf("creating host: %w", err)
 	}
-
-	// Create a new profile — loop until the user supplies a non-empty name.
-	var profileName string
-	for profileName == "" {
-		fmt.Print("Profile name for this machine: ")
-		line, ok := scanLine()
-		if !ok {
-			return fmt.Errorf("unexpected EOF reading profile name")
-		}
-		profileName = strings.TrimSpace(line)
-		if profileName == "" {
-			fmt.Println("  Name cannot be empty. Please try again.")
-		}
-	}
-	if err := a.AddProfile(profileName, []string{}); err != nil {
-		return fmt.Errorf("creating profile: %w", err)
-	}
-	if err := a.SetHostname(hostname, profileName); err != nil {
-		return fmt.Errorf("mapping hostname: %w", err)
-	}
-	fmt.Printf("✓ Created profile %q and mapped %q\n\n", profileName, hostname)
+	fmt.Printf("✓ Created host %q\n\n", active)
 	return nil
 }
 
@@ -336,14 +277,4 @@ func runDotsInitSection(a *app.App) error {
 
 	fmt.Println()
 	return nil
-}
-
-// sortedProfileNames returns profile names in alphabetical order.
-func sortedProfileNames(profiles map[string]config.Profile) []string {
-	names := make([]string, 0, len(profiles))
-	for n := range profiles {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	return names
 }

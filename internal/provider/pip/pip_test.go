@@ -3,6 +3,7 @@ package pip_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/executor"
@@ -73,6 +74,42 @@ func TestInstall_Error(t *testing.T) {
 	p, _ := newPip(executor.MockCall{Err: errors.New("exit 1")})
 	if err := p.Install(context.Background(), tool("bad")); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestMutation_ExternallyManagedPython(t *testing.T) {
+	stderr := "error: externally-managed-environment\n\n× This environment is externally managed"
+	for _, tc := range []struct {
+		name string
+		run  func(*pip.Provider) error
+	}{
+		{name: "install", run: func(p *pip.Provider) error { return p.Install(context.Background(), tool("black")) }},
+		{name: "uninstall", run: func(p *pip.Provider) error { return p.Uninstall(context.Background(), tool("black")) }},
+		{name: "upgrade", run: func(p *pip.Provider) error { return p.Upgrade(context.Background(), tool("black")) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, _ := newPip(executor.MockCall{Err: errors.New("exit 1"), Stderr: stderr})
+			err := tc.run(p)
+			if err == nil {
+				t.Fatal("expected externally managed error")
+			}
+			actionErr, ok := provider.ActionErrorFrom(err)
+			if !ok {
+				t.Fatalf("ActionErrorFrom ok = false for %T", err)
+			}
+			if actionErr.Code != provider.ErrorExternallyManagedPython {
+				t.Fatalf("Code = %q, want %q", actionErr.Code, provider.ErrorExternallyManagedPython)
+			}
+			if len(actionErr.Solutions) == 0 || actionErr.Solutions[0].Command != "omni switch black --from pip --to uv" {
+				t.Fatalf("solutions = %#v, want uv switch command", actionErr.Solutions)
+			}
+			if actionErr.Solutions[0].Action != provider.ErrorSolutionActionSwitchProvider || actionErr.Solutions[0].TargetProvider != "uv" {
+				t.Fatalf("solution action = %#v, want switch to uv", actionErr.Solutions[0])
+			}
+			if strings.Contains(err.Error(), "This environment") {
+				t.Fatalf("summary should not include raw stderr: %q", err.Error())
+			}
+		})
 	}
 }
 

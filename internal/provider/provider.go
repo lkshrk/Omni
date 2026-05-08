@@ -78,10 +78,12 @@ const (
 
 // SearchResult is a package found in a provider's registry.
 type SearchResult struct {
-	Name        string
-	Version     string
-	Description string
-	Provider    string
+	Name           string
+	Version        string
+	Description    string
+	Provider       string // provider suitable for config/install after app-layer normalization
+	SourceProvider string // provider that produced the registry result
+	Privilege      PrivilegePlan
 }
 
 // Searcher is implemented by providers that support registry search.
@@ -103,6 +105,19 @@ type BulkChecker interface {
 	// InstalledMap returns a lowercase-name→version map for packages the provider
 	// considers user-visible installed tools.
 	InstalledMap(ctx context.Context) (map[string]string, error)
+}
+
+// InstalledMetadata pairs the installed version with provider-specific metadata
+// learned during a bulk installed scan.
+type InstalledMetadata struct {
+	Version   string
+	Privilege PrivilegePlan
+}
+
+// MetadataBulkChecker is optionally implemented by providers whose installed
+// scan can also report metadata that should be cached with the tool row.
+type MetadataBulkChecker interface {
+	InstalledMetadataMap(ctx context.Context) (map[string]InstalledMetadata, error)
 }
 
 // InstalledEntry pairs a tool version with the concrete backend that reports it.
@@ -158,6 +173,12 @@ type ManagerInstaller interface {
 // check a tool using a concrete manager rather than the currently resolved one.
 type ManagerInstalledChecker interface {
 	IsInstalledWithManager(ctx context.Context, tool Tool, manager string) (bool, string, error)
+}
+
+// ErrorAdvisor is optionally implemented by providers that can attach
+// actionable remedies to explicit provider errors.
+type ErrorAdvisor interface {
+	ErrorSolutions(code ErrorCode, tool Tool) []ErrorSolution
 }
 
 // Descriptor is optionally implemented by providers that can fetch a one-line

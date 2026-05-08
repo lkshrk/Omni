@@ -107,6 +107,13 @@ func TestImport_AddsNewTools(t *testing.T) {
 	if len(tools) != 2 {
 		t.Errorf("config tools = %d, want 2", len(tools))
 	}
+	hostGroup := findHostTestGroup(cfg.Groups, testShortHostname())
+	if hostGroup == nil || !hostGroup.IsHost() {
+		t.Fatalf("default import group = %#v, want protected host group", hostGroup)
+	}
+	if err := a.EnsureHost(testShortHostname()); err != nil {
+		t.Fatalf("EnsureHost after import: %v", err)
+	}
 }
 
 func TestImport_SkipsAlreadyConfigured(t *testing.T) {
@@ -123,7 +130,7 @@ func TestImport_SkipsAlreadyConfigured(t *testing.T) {
 	// Pre-populate config with git already declared.
 	existing := &config.RootConfig{
 		Tools:  logicalToolSpecs(logicalTool("git", "brew")),
-		Groups: []*config.GroupConfig{{Tools: groupTools("git")}},
+		Groups: []*config.GroupConfig{testHostToolGroup("git")},
 	}
 	if err := saveAppConfig(t, cfgPath, existing); err != nil {
 		t.Fatalf("saving existing config: %v", err)
@@ -256,6 +263,39 @@ func TestImport_EcosystemProvidersWithRegisteredDelegatesSkipped(t *testing.T) {
 	}
 }
 
+func TestImport_ResolvedDefaultConcreteDoesNotWriteInstallWith(t *testing.T) {
+	brewStub := &stubProvider{
+		name:      "brew",
+		available: true,
+		installed: []provider.InstalledTool{installedTool("git", "2.43.0", "brew")},
+	}
+	systemStub := &lifecycleProvider{
+		stubProvider: stubProvider{name: "system", available: true},
+		resolvedName: "brew",
+	}
+	a, cfgPath := newImportApp(t, brewStub, systemStub)
+
+	result, err := a.Import(context.Background(), app.ImportOptions{})
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if len(result.Added) != 1 {
+		t.Fatalf("Added = %d, want 1", len(result.Added))
+	}
+	if result.Added[0].Provider != "system" {
+		t.Fatalf("Added[0].Provider = %q, want system", result.Added[0].Provider)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	spec := cfg.Tools["git"]
+	if spec.Provider != "system" || spec.InstallWith != "" {
+		t.Fatalf("git spec = %+v, want provider system without install_with", spec)
+	}
+}
+
 func TestImport_EcosystemProviderExplicitFilter(t *testing.T) {
 	// When the user explicitly requests an ecosystem provider via --provider,
 	// the skip set is bypassed and the ecosystem provider IS iterated.
@@ -288,7 +328,7 @@ func TestImport_TapQualifiedPackageSkipped(t *testing.T) {
 	// Pre-populate config with tap-qualified entry.
 	existing := &config.RootConfig{
 		Tools:  logicalToolSpecs(logicalToolPackage("mytool", "brew", "homebrew/tap/mytool")),
-		Groups: []*config.GroupConfig{{Tools: groupTools("mytool")}},
+		Groups: []*config.GroupConfig{testHostToolGroup("mytool")},
 	}
 	if err := saveAppConfig(t, cfgPath, existing); err != nil {
 		t.Fatalf("saving config: %v", err)

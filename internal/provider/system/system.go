@@ -126,6 +126,18 @@ func (p *Provider) ResolvedName(ctx context.Context) (string, error) {
 	return d.Name(), nil
 }
 
+func (p *Provider) PrivilegePlan(ctx context.Context, action provider.PrivilegeAction, tool provider.Tool) (provider.PrivilegePlan, error) {
+	d, err := p.resolve(ctx)
+	if err != nil {
+		return provider.PrivilegePlan{}, err
+	}
+	delegated := toolFor(tool, d.Name())
+	if planner, ok := d.(provider.PrivilegePlanner); ok {
+		return planner.PrivilegePlan(ctx, action, delegated)
+	}
+	return provider.PrivilegePlan{}, nil
+}
+
 // resolve returns the first available delegate or an error if none are available.
 // The result is cached after the first successful resolution to avoid re-probing
 // on every call within the same sync cycle.

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/executor"
@@ -145,6 +146,37 @@ func TestInstall_Error(t *testing.T) {
 	}
 }
 
+func TestInstall_Pip3ExternallyManagedPython(t *testing.T) {
+	m := executor.NewMatchMock(
+		pip3OK(),
+		executor.MatchRule{
+			Pattern:  "pip3 install black",
+			Response: executor.MockCall{Err: errors.New("exit 1"), Stderr: "error: externally-managed-environment\n\n× This environment is externally managed"},
+		},
+	)
+	p := New(m, "pip3")
+	err := p.Install(context.Background(), tool("black"))
+	if err == nil {
+		t.Fatal("expected externally managed error")
+	}
+	actionErr, ok := provider.ActionErrorFrom(err)
+	if !ok {
+		t.Fatalf("ActionErrorFrom ok = false for %T", err)
+	}
+	if actionErr.Code != provider.ErrorExternallyManagedPython {
+		t.Fatalf("Code = %q, want %q", actionErr.Code, provider.ErrorExternallyManagedPython)
+	}
+	if len(actionErr.Solutions) == 0 || actionErr.Solutions[0].Command != "omni switch black --from python --to uv" {
+		t.Fatalf("solutions = %#v, want uv switch command", actionErr.Solutions)
+	}
+	if actionErr.Solutions[0].Action != provider.ErrorSolutionActionSwitchProvider || actionErr.Solutions[0].TargetProvider != "uv" {
+		t.Fatalf("solution action = %#v, want switch to uv", actionErr.Solutions[0])
+	}
+	if strings.Contains(err.Error(), "This environment") {
+		t.Fatalf("summary should not include raw stderr: %q", err.Error())
+	}
+}
+
 // ── Uninstall ─────────────────────────────────────────────────────────────────
 
 func TestUninstall_UV(t *testing.T) {
@@ -210,6 +242,23 @@ func TestUpgradeWithManager_UsesInstalledManager(t *testing.T) {
 	m.AssertCalled(t, "pip3 install --upgrade black")
 	if len(m.CallsMatching("uv tool upgrade")) > 0 {
 		t.Fatal("should not upgrade through active uv manager when installed manager is pip3")
+	}
+}
+
+func TestUpgradeWithManager_Pip3ExternallyManagedPython(t *testing.T) {
+	m := executor.NewMatchMock(
+		executor.MatchRule{
+			Pattern:  "pip3 install --upgrade black",
+			Response: executor.MockCall{Err: errors.New("exit 1"), Stderr: "error: externally-managed-environment"},
+		},
+	)
+	p := New(m, "uv")
+	err := p.UpgradeWithManager(context.Background(), tool("black"), "pip3")
+	if err == nil {
+		t.Fatal("expected externally managed error")
+	}
+	if !provider.HasErrorCode(err, provider.ErrorExternallyManagedPython) {
+		t.Fatalf("expected ErrorExternallyManagedPython, got %T %v", err, err)
 	}
 }
 
