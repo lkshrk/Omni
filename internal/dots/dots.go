@@ -73,22 +73,36 @@ type Op struct {
 	Err   error
 }
 
+// SyncProgressEvent describes progress for one resolved dots entry.
+type SyncProgressEvent struct {
+	Entry string
+	Index int
+	Total int
+	Done  bool
+	Err   error
+	Ops   []Op
+}
+
 // SyncOptions configures the behaviour of DotsSync.
 type SyncOptions struct {
 	DryRun bool
+	// EntryOrder optionally names entries in the preferred sync/progress order.
+	// Entries not listed keep their relative order after the ordered entries.
+	EntryOrder []string
+	Progress   func(SyncProgressEvent)
 }
 
 // UnlinkOptions configures the behaviour of Manager.UnlinkAll.
 type UnlinkOptions struct {
 	// ConflictOverwrite, when true, causes real (non-managed) files at target
-	// paths to be overwritten with the repo version. When false they are kept
-	// as-is (OpUnlinkConflict is emitted but no change is made).
+	// paths to be moved to trash and replaced with the repo version. When false
+	// they are kept as-is (OpUnlinkConflict is emitted but no change is made).
 	ConflictOverwrite bool
 	// KeepExistingLocal, when true, leaves real non-managed local files in
 	// place instead of treating them as unlink conflicts.
 	KeepExistingLocal bool
-	// RemoveLocal removes the local target instead of materializing a copy from
-	// the repo source.
+	// RemoveLocal removes local real targets via trash, or unlinks local
+	// symlinks, instead of materializing a copy from the repo source.
 	RemoveLocal bool
 }
 

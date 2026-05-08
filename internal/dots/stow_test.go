@@ -43,8 +43,7 @@ func TestRestow_CallsStow(t *testing.T) {
 		t.Fatalf("want 1 call, got %d", len(mock.Calls))
 	}
 	got := mock.Calls[0].Args
-	want := []string{"-R", "-d", "/repo", "-t", home, "nvim", "zsh"}
-	assertArgs(t, got, want)
+	assertStowArgs(t, got, "-R", "/repo", home, false, []string{"nvim", "zsh"})
 }
 
 func TestRestow_DryRun_AddsSimulate(t *testing.T) {
@@ -53,8 +52,7 @@ func TestRestow_DryRun_AddsSimulate(t *testing.T) {
 	if err := dots.Restow(context.Background(), mock, "/repo", []string{"nvim"}, true); err != nil {
 		t.Fatalf("Restow dry-run: %v", err)
 	}
-	want := []string{"-R", "--simulate", "-d", "/repo", "-t", home, "nvim"}
-	assertArgs(t, mock.Calls[0].Args, want)
+	assertStowArgs(t, mock.Calls[0].Args, "-R", "/repo", home, true, []string{"nvim"})
 }
 
 func TestRestow_EmptyPackages_IsNoop(t *testing.T) {
@@ -85,8 +83,7 @@ func TestUnstow_CallsStow(t *testing.T) {
 	if err := dots.Unstow(context.Background(), mock, "/repo", []string{"nvim"}); err != nil {
 		t.Fatalf("Unstow: %v", err)
 	}
-	want := []string{"-D", "-d", "/repo", "-t", home, "nvim"}
-	assertArgs(t, mock.Calls[0].Args, want)
+	assertStowArgs(t, mock.Calls[0].Args, "-D", "/repo", home, false, []string{"nvim"})
 }
 
 func TestUnstow_EmptyPackages_IsNoop(t *testing.T) {
@@ -107,8 +104,7 @@ func TestAdopt_CallsStow(t *testing.T) {
 	if err := dots.Adopt(context.Background(), mock, "/repo", "nvim", false); err != nil {
 		t.Fatalf("Adopt: %v", err)
 	}
-	want := []string{"--adopt", "-d", "/repo", "-t", home, "nvim"}
-	assertArgs(t, mock.Calls[0].Args, want)
+	assertStowArgs(t, mock.Calls[0].Args, "--adopt", "/repo", home, false, []string{"nvim"})
 }
 
 func TestAdopt_DryRun_AddsSimulate(t *testing.T) {
@@ -117,20 +113,44 @@ func TestAdopt_DryRun_AddsSimulate(t *testing.T) {
 	if err := dots.Adopt(context.Background(), mock, "/repo", "nvim", true); err != nil {
 		t.Fatalf("Adopt dry-run: %v", err)
 	}
-	want := []string{"--adopt", "--simulate", "-d", "/repo", "-t", home, "nvim"}
-	assertArgs(t, mock.Calls[0].Args, want)
+	assertStowArgs(t, mock.Calls[0].Args, "--adopt", "/repo", home, true, []string{"nvim"})
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
-func assertArgs(t *testing.T, got, want []string) {
+func assertStowArgs(t *testing.T, got []string, mode, repo, home string, dryRun bool, packages []string) {
 	t.Helper()
-	if len(got) != len(want) {
-		t.Fatalf("args length: got %v, want %v", got, want)
+	if len(got) == 0 {
+		t.Fatal("empty stow args")
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("arg[%d]: got %q, want %q", i, got[i], want[i])
+	if got[0] != mode {
+		t.Fatalf("mode arg = %q, want %q in %v", got[0], mode, got)
+	}
+	for _, want := range []string{"--no-folding", "--ignore=(?:^|/)\\.DS_Store$", "--ignore=(?:^|/)[^/]*\\.log$"} {
+		if !containsArg(got, want) {
+			t.Fatalf("args = %v, missing %q", got, want)
 		}
 	}
+	if containsArg(got, "--simulate") != dryRun {
+		t.Fatalf("args = %v, simulate presence = %v, want %v", got, containsArg(got, "--simulate"), dryRun)
+	}
+	wantTail := append([]string{"-d", repo, "-t", home}, packages...)
+	if len(got) < len(wantTail) {
+		t.Fatalf("args = %v, too short for tail %v", got, wantTail)
+	}
+	gotTail := got[len(got)-len(wantTail):]
+	for i := range wantTail {
+		if gotTail[i] != wantTail[i] {
+			t.Fatalf("tail arg[%d]: got %q, want %q in args %v", i, gotTail[i], wantTail[i], got)
+		}
+	}
+}
+
+func containsArg(args []string, want string) bool {
+	for _, arg := range args {
+		if arg == want {
+			return true
+		}
+	}
+	return false
 }

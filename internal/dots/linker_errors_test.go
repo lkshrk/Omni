@@ -105,10 +105,10 @@ func TestCopyFile_SrcUnreadable(t *testing.T) {
 	}
 }
 
-// TestCopyFile_DstReadOnly verifies that copyFile returns an error when the
-// destination file exists as a regular file that is not writable (the
-// ConflictOverwrite path in unlinkFile calls copyFile directly on a real file).
-func TestCopyFile_DstReadOnly(t *testing.T) {
+// TestConflictOverwrite_ReplacesReadOnlyDstViaTrash verifies that overwrite does
+// not truncate the existing local file in place. The old file is moved aside and
+// the staged replacement is installed afterward.
+func TestConflictOverwrite_ReplacesReadOnlyDstViaTrash(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod-based permission tests not supported on Windows")
 	}
@@ -116,6 +116,8 @@ func TestCopyFile_DstReadOnly(t *testing.T) {
 	repo := t.TempDir()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".xdg"))
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
 
 	// SourcePath = repo/zsh/.zshrc, TargetPath = home/.zshrc
 	src := filepath.Join(repo, "zsh", ".zshrc")
@@ -123,7 +125,6 @@ func TestCopyFile_DstReadOnly(t *testing.T) {
 	writeFile(t, src, "# repo version")
 	writeFile(t, dst, "# local version")
 
-	// Make dst read-only so copyFile's os.OpenFile with O_WRONLY fails.
 	if err := os.Chmod(dst, 0o444); err != nil {
 		t.Fatal(err)
 	}
@@ -136,11 +137,24 @@ func TestCopyFile_DstReadOnly(t *testing.T) {
 		t.Fatalf("dots.New: %v", err)
 	}
 
-	// ConflictOverwrite=true causes unlinkFile to call copyFile(src, dst)
-	// even though dst is a real file (not a symlink). copyFile should fail.
 	_, err = m.UnlinkAll(dots.UnlinkOptions{ConflictOverwrite: true})
-	if err == nil {
-		t.Error("expected error when dst is read-only, got nil")
+	if err != nil {
+		t.Fatalf("UnlinkAll: %v", err)
+	}
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("ReadFile dst: %v", err)
+	}
+	if string(got) != "# repo version" {
+		t.Fatalf("dst content = %q, want repo version", string(got))
+	}
+	trash := filepath.Join(expectedTrashRoot(t, home), ".zshrc")
+	got, err = os.ReadFile(trash)
+	if err != nil {
+		t.Fatalf("ReadFile trash: %v", err)
+	}
+	if string(got) != "# local version" {
+		t.Fatalf("trash content = %q, want local version", string(got))
 	}
 }
 
@@ -153,11 +167,16 @@ func TestUnlinkAll_ContinuesAfterEntryError(t *testing.T) {
 	badDst := filepath.Join(home, ".badrc")
 	goodSrc := filepath.Join(repo, "good", ".goodrc")
 	goodDst := filepath.Join(home, ".goodrc")
-	writeFile(t, badSrc, "repo bad")
-	writeFile(t, goodSrc, "repo good")
-	if err := os.MkdirAll(badDst, 0o755); err != nil {
+	secret := filepath.Join(home, "secret")
+	writeFile(t, secret, "secret")
+	if err := os.MkdirAll(filepath.Dir(badSrc), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Symlink(secret, badSrc); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, goodSrc, "repo good")
+	writeFile(t, badDst, "local bad")
 	if err := os.Symlink(goodSrc, goodDst); err != nil {
 		t.Fatal(err)
 	}

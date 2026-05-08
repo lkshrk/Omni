@@ -87,6 +87,166 @@ func TestUnlinkEntry_SourceMissing(t *testing.T) {
 	}
 }
 
+func TestUnlinkEntry_RemoveLocalBacksUpTarget(t *testing.T) {
+	repo := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".xdg"))
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+
+	srcDir := filepath.Join(repo, "nvim", ".config", "nvim")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte("-- repo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(home, ".config", "nvim")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "init.lua"), []byte("-- local"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := dots.New(repo, []config.DotEntry{
+		{Name: "nvim", Path: target},
+	})
+	if err != nil {
+		t.Fatalf("dots.New: %v", err)
+	}
+
+	ops, err := m.UnlinkAll(dots.UnlinkOptions{RemoveLocal: true})
+	if err != nil {
+		t.Fatalf("UnlinkAll: %v", err)
+	}
+	if len(ops) != 1 || ops[0].Kind != dots.OpUnlink {
+		t.Fatalf("ops = %+v, want one unlink op", ops)
+	}
+	if _, err := os.Lstat(target); !os.IsNotExist(err) {
+		t.Fatalf("target should be removed: %v", err)
+	}
+	backup := filepath.Join(home, dots.BackupDirName, ".config", "nvim", "init.lua")
+	got, err := os.ReadFile(backup)
+	if err != nil {
+		t.Fatalf("ReadFile backup: %v", err)
+	}
+	if string(got) != "-- local" {
+		t.Fatalf("backup content = %q, want -- local", string(got))
+	}
+	trash := filepath.Join(expectedTrashRoot(t, home), "nvim", "init.lua")
+	got, err = os.ReadFile(trash)
+	if err != nil {
+		t.Fatalf("ReadFile trash: %v", err)
+	}
+	if string(got) != "-- local" {
+		t.Fatalf("trash content = %q, want -- local", string(got))
+	}
+}
+
+func TestUnlinkEntry_RemoveLocalBacksUpManagedSymlinkContent(t *testing.T) {
+	repo := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".xdg"))
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+
+	srcDir := filepath.Join(repo, "nvim", ".config", "nvim")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte("-- repo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(home, ".config", "nvim")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(srcDir, target); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := dots.New(repo, []config.DotEntry{
+		{Name: "nvim", Path: target},
+	})
+	if err != nil {
+		t.Fatalf("dots.New: %v", err)
+	}
+
+	ops, err := m.UnlinkAll(dots.UnlinkOptions{RemoveLocal: true})
+	if err != nil {
+		t.Fatalf("UnlinkAll: %v", err)
+	}
+	if len(ops) != 1 || ops[0].Kind != dots.OpUnlink {
+		t.Fatalf("ops = %+v, want one unlink op", ops)
+	}
+	if _, err := os.Lstat(target); !os.IsNotExist(err) {
+		t.Fatalf("target should be removed: %v", err)
+	}
+	backupDir := filepath.Join(home, dots.BackupDirName, ".config", "nvim")
+	if _, err := os.Lstat(filepath.Join(expectedTrashRoot(t, home), "nvim")); !os.IsNotExist(err) {
+		t.Fatalf("managed symlink should not move target to trash: %v", err)
+	}
+	if info, err := os.Lstat(backupDir); err != nil {
+		t.Fatalf("Lstat backup: %v", err)
+	} else if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("backup should copy managed content before remove-local, got symlink")
+	}
+	got, err := os.ReadFile(filepath.Join(backupDir, "init.lua"))
+	if err != nil {
+		t.Fatalf("ReadFile backup: %v", err)
+	}
+	if string(got) != "-- repo" {
+		t.Fatalf("backup content = %q, want -- repo", string(got))
+	}
+}
+
+func TestUnlinkEntry_RemoveLocalBacksUpBrokenManagedSymlink(t *testing.T) {
+	repo := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(home, ".xdg"))
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+
+	srcDir := filepath.Join(repo, "nvim", ".config", "nvim")
+	target := filepath.Join(home, ".config", "nvim")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(srcDir, target); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := dots.New(repo, []config.DotEntry{
+		{Name: "nvim", Path: target},
+	})
+	if err != nil {
+		t.Fatalf("dots.New: %v", err)
+	}
+
+	ops, err := m.UnlinkAll(dots.UnlinkOptions{RemoveLocal: true})
+	if err != nil {
+		t.Fatalf("UnlinkAll: %v", err)
+	}
+	if len(ops) != 1 || ops[0].Kind != dots.OpUnlink {
+		t.Fatalf("ops = %+v, want one unlink op", ops)
+	}
+	if _, err := os.Lstat(target); !os.IsNotExist(err) {
+		t.Fatalf("target should be removed: %v", err)
+	}
+	backup := filepath.Join(home, dots.BackupDirName, ".config", "nvim")
+	if _, err := os.Lstat(filepath.Join(expectedTrashRoot(t, home), "nvim")); !os.IsNotExist(err) {
+		t.Fatalf("broken managed symlink should not move target to trash: %v", err)
+	}
+	got, err := os.Readlink(backup)
+	if err != nil {
+		t.Fatalf("Readlink backup: %v", err)
+	}
+	if got != srcDir {
+		t.Fatalf("backup symlink = %q, want %q", got, srcDir)
+	}
+}
+
 // ─── unlinkEntry: file-level walk with ignored files ─────────────────────────
 
 // TestUnlinkEntry_WalkIgnoresPatterns verifies that files matching per-entry

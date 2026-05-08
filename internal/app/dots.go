@@ -2,12 +2,14 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/dots"
@@ -19,8 +21,8 @@ import (
 type DotsAddOptions struct {
 	// Name overrides the name inferred from the path.
 	Name string
-	// Group is the base name of the group file to write the entry to.
-	// Defaults to "base" when empty.
+	// Group is the config group name to write the entry to.
+	// Defaults to the current host group when empty.
 	Group string
 	// Adopt moves the existing file or directory into the dots repo before linking.
 	Adopt bool
@@ -46,26 +48,47 @@ const (
 
 // DotStatus describes the current state of a single dots entry.
 type DotStatus struct {
-	Name       string      `json:"name"`
-	SourcePath string      `json:"source_path"`
-	TargetPath string      `json:"target_path"`
-	ConfigPath string      `json:"path,omitempty"`
-	Health     DotHealth   `json:"health"`
-	State      DotState    `json:"state"`
-	Actions    []DotAction `json:"actions,omitempty"`
-	Group      string      `json:"group,omitempty"` // base name of the group file (e.g. "base", "work")
-	FileCount  int         `json:"file_count,omitempty"`
-	Children   []DotChild  `json:"children,omitempty"`
+	Name       string        `json:"name"`
+	SourcePath string        `json:"source_path"`
+	TargetPath string        `json:"target_path"`
+	ConfigPath string        `json:"path,omitempty"`
+	Health     DotHealth     `json:"health"`
+	State      DotState      `json:"state"`
+	Actions    []DotAction   `json:"actions,omitempty"`
+	Group      string        `json:"group,omitempty"` // config group name (for example "work" or the current host group)
+	FileCount  int           `json:"file_count,omitempty"`
+	Counts     DotFileCounts `json:"counts,omitempty"`
+	IsDir      bool          `json:"is_dir,omitempty"`
+	Children   []DotChild    `json:"children,omitempty"`
+
+	ignoredChildren []DotChild
 }
 
 type DotChild struct {
-	Name      string `json:"name"`
-	RelPath   string `json:"rel_path"`
-	Path      string `json:"path"`
-	IsDir     bool   `json:"is_dir"`
-	Depth     int    `json:"depth,omitempty"`
-	Ignored   bool   `json:"ignored,omitempty"`
-	FileCount int    `json:"file_count,omitempty"`
+	Name      string        `json:"name"`
+	RelPath   string        `json:"rel_path"`
+	Path      string        `json:"path"`
+	State     DotState      `json:"state,omitempty"`
+	IsDir     bool          `json:"is_dir"`
+	Depth     int           `json:"depth,omitempty"`
+	Ignored   bool          `json:"ignored,omitempty"`
+	FileCount int           `json:"file_count,omitempty"`
+	Counts    DotFileCounts `json:"counts,omitempty"`
+	Children  []DotChild    `json:"children,omitempty"`
+}
+
+type DotFileCounts struct {
+	Synced    int `json:"synced,omitempty"`
+	OutOfSync int `json:"out_of_sync,omitempty"`
+	Ignored   int `json:"ignored,omitempty"`
+}
+
+func (c DotFileCounts) Managed() int {
+	return c.Synced + c.OutOfSync
+}
+
+func (c DotFileCounts) Total() int {
+	return c.Managed() + c.Ignored
 }
 
 // DotsStatusResult bundles symlink health with the git status string.
@@ -87,9 +110,10 @@ const (
 	DotResolveUseLocal DotsResolveStrategy = "use-local"
 )
 
-const dotChildrenMaxDepth = 4
-
-const dotsContentDirName = "dotfiles"
+const (
+	dotsContentDirName  = "dotfiles"
+	dotChildrenMaxDepth = 4
+)
 
 // ─── public API ───────────────────────────────────────────────────────────────
 
@@ -99,8 +123,9 @@ func (a *App) DotsConfigured() bool {
 }
 
 // DotsSync creates or repairs all symlinks for all dots entries across active
-// group files. When the current hostname maps to a profile, only that profile's
-// groups are synced. Falls back to all groups when no profile is configured.
+// groups. When the current host has assigned groups, only the host group and
+// assigned reusable groups are synced. Falls back to all groups when no active
+// host is configured.
 // All entries are managed via GNU Stow.
 func (a *App) DotsSync(opts dots.SyncOptions) ([]dots.Op, error) {
 	return a.DotsSyncContext(context.Background(), opts)
@@ -129,12 +154,10 @@ func (a *App) DotsSyncContext(ctx context.Context, opts dots.SyncOptions) ([]dot
 		return nil, fmt.Errorf("dots sync: load config: %w", err)
 	}
 	groups := rootCfg.Groups
-	if profileName, ok := rootCfg.ActiveProfile(currentHostname()); ok {
-		if effective, _, e := effectiveProfileGroups(rootCfg, groups, profileName); e == nil {
-			groups = effective
-		}
+	if effective, _, ok := effectiveHostGroups(rootCfg, groups, currentMachineGroupName()); ok {
+		groups = effective
 	}
-	entries := collectDots(groups)
+	entries := collectDots(rootCfg, groups)
 	entries = filterActiveDotEntries(entries)
 	if len(entries) == 0 {
 		return nil, nil
@@ -150,10 +173,18 @@ func (a *App) DotsSyncContext(ctx context.Context, opts dots.SyncOptions) ([]dot
 	if err != nil {
 		return nil, fmt.Errorf("dots sync: resolve entries: %w", err)
 	}
+	orderedEntries := orderResolvedDotEntries(mgr.Entries, opts.EntryOrder)
 	var ops []dots.Op
 	var failures []dotSyncFailure
-	for _, entry := range mgr.Entries {
-		entryOps, syncErr := syncResolvedDotEntry(ctx, stowPath, entry, opts, false)
+	total := len(orderedEntries)
+	for i, entry := range orderedEntries {
+		if opts.Progress != nil {
+			opts.Progress(dots.SyncProgressEvent{Entry: entry.Name, Index: i + 1, Total: total})
+		}
+		entryOps, syncErr := syncResolvedDotEntry(ctx, repoPath, stowPath, entry, opts, false)
+		if opts.Progress != nil {
+			opts.Progress(dots.SyncProgressEvent{Entry: entry.Name, Index: i + 1, Total: total, Done: true, Err: syncErr, Ops: entryOps})
+		}
 		ops = append(ops, entryOps...)
 		if syncErr != nil {
 			failures = append(failures, dotSyncFailure{entry: entry.Name, err: syncErr})
@@ -163,6 +194,40 @@ func (a *App) DotsSyncContext(ctx context.Context, opts dots.SyncOptions) ([]dot
 		return ops, dotSyncFailures(failures)
 	}
 	return ops, nil
+}
+
+func orderResolvedDotEntries(entries []dots.ResolvedEntry, order []string) []dots.ResolvedEntry {
+	if len(entries) == 0 || len(order) == 0 {
+		return entries
+	}
+	rank := make(map[string]int, len(order))
+	for i, name := range order {
+		if name == "" {
+			continue
+		}
+		if _, exists := rank[name]; !exists {
+			rank[name] = i
+		}
+	}
+	if len(rank) == 0 {
+		return entries
+	}
+	ordered := append([]dots.ResolvedEntry(nil), entries...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		left, leftOK := rank[ordered[i].Name]
+		right, rightOK := rank[ordered[j].Name]
+		switch {
+		case leftOK && rightOK:
+			return left < right
+		case leftOK:
+			return true
+		case rightOK:
+			return false
+		default:
+			return false
+		}
+	})
+	return ordered
 }
 
 type dotSyncFailure struct {
@@ -206,12 +271,10 @@ func (a *App) DotsSyncEntry(ctx context.Context, name string, opts dots.SyncOpti
 		return nil, fmt.Errorf("dots sync: load config: %w", err)
 	}
 	groups := rootCfg.Groups
-	if profileName, ok := rootCfg.ActiveProfile(currentHostname()); ok {
-		if effective, _, e := effectiveProfileGroups(rootCfg, groups, profileName); e == nil {
-			groups = effective
-		}
+	if effective, _, ok := effectiveHostGroups(rootCfg, groups, currentMachineGroupName()); ok {
+		groups = effective
 	}
-	entries := collectDots(groups)
+	entries := collectDots(rootCfg, groups)
 	entries = filterActiveDotEntries(entries)
 	if err := a.requireSafeTestDotsMutation(repoPath, entries); err != nil {
 		return nil, err
@@ -227,7 +290,7 @@ func (a *App) DotsSyncEntry(ctx context.Context, name string, opts dots.SyncOpti
 		if err := a.requireStow(ctx); err != nil {
 			return nil, err
 		}
-		ops, syncErr := syncResolvedDotEntry(ctx, stowPath, entry, opts, true)
+		ops, syncErr := syncResolvedDotEntry(ctx, repoPath, stowPath, entry, opts, true)
 		if syncErr != nil {
 			return ops, fmt.Errorf("dots sync %q: %w", name, syncErr)
 		}
@@ -237,8 +300,8 @@ func (a *App) DotsSyncEntry(ctx context.Context, name string, opts dots.SyncOpti
 }
 
 // DotsAdd moves the file/dir at path into the dots repo and links it back via
-// stow. A backup is made under ~/dotfiles.bkp before any mutation. path must
-// exist on disk.
+// stow. A backup is made under ~/dotfiles.bkp before any mutation, then the
+// local original is moved to trash. path must exist on disk.
 func (a *App) DotsAdd(ctx context.Context, path string, opts DotsAddOptions) ([]dots.Op, error) {
 	rootCfg, err := a.loadConfig()
 	if err != nil {
@@ -268,6 +331,9 @@ func (a *App) DotsAdd(ctx context.Context, path string, opts DotsAddOptions) ([]
 		return nil, fmt.Errorf("dots add: %w", err)
 	}
 	entry := dotEntryWithDefaults(config.DotEntry{Name: name, Path: normalisePath(abs), Ignore: opts.Ignore})
+	if opts.Group == "" {
+		opts.Group = currentMachineGroupName()
+	}
 	if err := a.requireSafeTestDotsMutation(repoPath, []config.DotEntry{entry}); err != nil {
 		return nil, err
 	}
@@ -312,8 +378,8 @@ func (a *App) DotsAdd(ctx context.Context, path string, opts DotsAddOptions) ([]
 		return nil, fmt.Errorf("dots add: backup: %w", err)
 	}
 
-	// Copy filtered content into the repo package tree, remove the local
-	// original, then stow links it back. The backup remains a full safety copy.
+	// Copy filtered content into the repo package tree, move the local original
+	// to trash, then stow links it back. The backup remains a full safety copy.
 	if err := os.MkdirAll(filepath.Dir(pkgDst), 0o755); err != nil {
 		return nil, fmt.Errorf("dots add: create package dir: %w", err)
 	}
@@ -323,7 +389,7 @@ func (a *App) DotsAdd(ctx context.Context, path string, opts DotsAddOptions) ([]
 		}
 		return nil, fmt.Errorf("dots add: copy to repo: %w", err)
 	}
-	if err := os.RemoveAll(abs); err != nil {
+	if err := dots.RemoveLocalPathAfterBackup(abs, backupPath); err != nil {
 		if cleanupErr := cleanupPackage(); cleanupErr != nil {
 			return nil, fmt.Errorf("dots add: remove local target: %w (cleanup failed: %v)", err, cleanupErr)
 		}
@@ -338,6 +404,9 @@ func (a *App) DotsAdd(ctx context.Context, path string, opts DotsAddOptions) ([]
 
 	// Record entry in config using normalised ~-form path.
 	if err := a.withConfig(func(cfg *config.RootConfig) error {
+		if _, err := ensureHostGroupInConfig(cfg, currentMachineGroupName()); err != nil {
+			return err
+		}
 		gc := ensureGroupInConfig(cfg, opts.Group)
 		gc.Dots = append(gc.Dots, entry)
 		return nil
@@ -361,7 +430,12 @@ func (a *App) DotsAdd(ctx context.Context, path string, opts DotsAddOptions) ([]
 		}
 	}
 
-	return []dots.Op{lstatOp(name, abs, stowPath, false)}, nil
+	return []dots.Op{lstatEntryOp(dots.ResolvedEntry{
+		Name:       name,
+		SourcePath: pkgDst,
+		TargetPath: abs,
+		Ignore:     entry.Ignore,
+	}, false)}, nil
 }
 
 // DotsDelete deletes the dots entry named name from all group files. Managed
@@ -515,19 +589,33 @@ func (a *App) DotMembershipMap(_ context.Context) (map[string][]string, error) {
 	return memberships, nil
 }
 
-func (a *App) AddDotToGroup(name, groupName string) error {
+// MoveDotToGroup makes groupName the dotfile entry's only owning group.
+func (a *App) MoveDotToGroup(name, groupName string) error {
 	if strings.TrimSpace(name) == "" {
 		return fmt.Errorf("dots entry name is required")
 	}
+	groupName = compatibilityGroupName(groupName)
 	return a.withConfig(func(cfg *config.RootConfig) error {
 		template, ok := findDotEntryInConfig(cfg, name)
 		if !ok {
 			return fmt.Errorf("dots entry %q not found", name)
 		}
 		group := ensureGroupInConfig(cfg, groupName)
+		changed := false
+		for _, existing := range cfg.Groups {
+			if existing == nil || existing.BaseName() == groupName {
+				continue
+			}
+			if filterDotMemberships(existing, name) {
+				changed = true
+			}
+		}
 		for _, entry := range group.Dots {
 			if entry.Name == name {
-				return errSkipSave
+				if !changed {
+					return errSkipSave
+				}
+				return nil
 			}
 		}
 		group.Dots = append(group.Dots, template)
@@ -539,6 +627,7 @@ func (a *App) RemoveDotFromGroup(name, groupName string) error {
 	if strings.TrimSpace(name) == "" {
 		return fmt.Errorf("dots entry name is required")
 	}
+	groupName = compatibilityGroupName(groupName)
 	return a.withConfig(func(cfg *config.RootConfig) error {
 		group := findGroupInConfig(cfg, groupName)
 		if group == nil {
@@ -553,6 +642,20 @@ func (a *App) RemoveDotFromGroup(name, groupName string) error {
 		}
 		return errSkipSave
 	})
+}
+
+func filterDotMemberships(group *config.GroupConfig, name string) bool {
+	filtered := group.Dots[:0]
+	changed := false
+	for _, dot := range group.Dots {
+		if dot.Name == name {
+			changed = true
+			continue
+		}
+		filtered = append(filtered, dot)
+	}
+	group.Dots = filtered
+	return changed
 }
 
 // DotsList returns the symlink health for every dots entry across active groups.
@@ -643,6 +746,7 @@ func (a *App) DiscoverDotsStatus(ctx context.Context) (*DotsStatusResult, error)
 			discovered[i].Health = healthForDotState(discovered[i].State)
 		}
 		result.Entries = append(result.Entries, discovered...)
+		result.Entries = append(result.Entries, ignoredChildDotStatuses(discovered)...)
 	}
 	if len(ignoredCandidates) > 0 {
 		mgr, err := dots.New(stowPath, ignoredCandidates)
@@ -675,17 +779,25 @@ func countTransientDotCandidates(statuses []DotStatus) int {
 func ignoredChildDotStatuses(statuses []DotStatus) []DotStatus {
 	var ignored []DotStatus
 	for _, status := range statuses {
-		for _, child := range status.Children {
+		seen := make(map[string]bool)
+		for _, child := range append(status.Children, status.ignoredChildren...) {
 			if !child.Ignored {
 				continue
 			}
+			rel := filepath.ToSlash(child.RelPath)
+			if seen[rel] {
+				continue
+			}
+			seen[rel] = true
 			ignored = append(ignored, DotStatus{
-				Name:       status.Name + "/" + filepath.ToSlash(child.RelPath),
+				Name:       status.Name + "/" + rel,
 				TargetPath: child.Path,
 				ConfigPath: child.Path,
 				Health:     healthForDotState(DotStateIgnored),
 				State:      DotStateIgnored,
 				Group:      status.Group,
+				Counts:     child.Counts,
+				IsDir:      child.IsDir,
 			})
 		}
 	}
@@ -733,6 +845,8 @@ func normalizeDotState(raw string) (DotState, error) {
 		return DotStateMissing, nil
 	case "conflict":
 		return DotStateConflict, nil
+	case "modified":
+		return DotStateModified, nil
 	case "broken":
 		return DotStateBroken, nil
 	case "no-source", "nosource", "source-missing":
@@ -798,14 +912,15 @@ func (a *App) DotsPush(ctx context.Context, message string) error {
 
 // DisableDotsOptions controls the behaviour of DotsDisable.
 type DisableDotsOptions struct {
-	// ConflictOverwrite, when true, overwrites any real (non-managed) files at
-	// target paths with the repo version. When false those files are left in
-	// place and an OpUnlinkConflict is recorded.
+	// ConflictOverwrite, when true, moves any real (non-managed) files at target
+	// paths to trash and replaces them with the repo version. When false those
+	// files are left in place and an OpUnlinkConflict is recorded.
 	ConflictOverwrite bool
 	// KeepExistingLocal, when true, leaves real non-managed local files in place
 	// instead of recording unlink conflicts.
 	KeepExistingLocal bool
-	// RemoveLocal removes local targets instead of materializing repo copies.
+	// RemoveLocal removes local real targets via trash, or unlinks local
+	// symlinks, instead of materializing repo copies.
 	RemoveLocal bool
 }
 
@@ -862,7 +977,8 @@ func (a *App) EnableDotsForHost(ctx context.Context) ([]dots.Op, error) {
 }
 
 // DotsResolveConflict resolves a choice-based conflict for one tracked entry.
-// Use-repo backs up the local target, removes it, and restows the repo version.
+// Use-repo backs up the local target, moves it to trash, and restows the repo
+// version.
 // Use-local commits the current repo state first when the repo source exists,
 // copies local content into the repo, then replaces the local target with the
 // managed link.
@@ -911,12 +1027,10 @@ func (a *App) resolvedDotEntry(name, stowPath string) (dots.ResolvedEntry, error
 		return dots.ResolvedEntry{}, fmt.Errorf("dots resolve: load config: %w", err)
 	}
 	groups := rootCfg.Groups
-	if profileName, ok := rootCfg.ActiveProfile(currentHostname()); ok {
-		if effective, _, e := effectiveProfileGroups(rootCfg, groups, profileName); e == nil {
-			groups = effective
-		}
+	if effective, _, ok := effectiveHostGroups(rootCfg, groups, currentMachineGroupName()); ok {
+		groups = effective
 	}
-	entries := collectDots(groups)
+	entries := collectDots(rootCfg, groups)
 	mgr, err := dots.New(stowPath, entries)
 	if err != nil {
 		return dots.ResolvedEntry{}, fmt.Errorf("dots resolve: resolve entries: %w", err)
@@ -930,31 +1044,25 @@ func (a *App) resolvedDotEntry(name, stowPath string) (dots.ResolvedEntry, error
 }
 
 func resolveDotUseRepo(ctx context.Context, stowPath string, entry dots.ResolvedEntry) ([]dots.Op, error) {
-	if err := refuseIgnoredDotSource(entry); err != nil {
-		return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}}, err
-	}
-	backupPath, err := backupAndRemoveLocalTarget(entry.TargetPath)
+	prep, err := prepareDotTargetForRestow(entry)
 	if err != nil {
 		return nil, err
 	}
 	if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Name}, false); err != nil {
-		if backupPath != "" {
-			if restoreErr := restoreDotBackupAfterFailedStow(backupPath, entry.TargetPath); restoreErr != nil {
-				return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}},
-					fmt.Errorf("%w (restore failed: %v)", err, restoreErr)
+		wrapped := fmt.Errorf("dots resolve %q: use repo version relink: %w", entry.Name, err)
+		if prep.backupPath != "" {
+			if restoreErr := restoreDotTargetAfterFailedRestow(entry, prep); restoreErr != nil {
+				return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: wrapped}},
+					fmt.Errorf("%w (restore failed: %v)", wrapped, restoreErr)
 			}
 		}
-		return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}}, err
+		return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: wrapped}}, wrapped
 	}
 	return []dots.Op{{Kind: dots.OpRepair, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}}, nil
 }
 
 func resolveDotUseLocal(ctx context.Context, repoPath, stowPath string, entry dots.ResolvedEntry) (ops []dots.Op, retErr error) {
 	copySource, err := localDotCopySource(entry.TargetPath)
-	if err != nil {
-		return nil, err
-	}
-	backupPath, err := backupLocalTarget(entry.TargetPath)
 	if err != nil {
 		return nil, err
 	}
@@ -971,6 +1079,15 @@ func resolveDotUseLocal(ctx context.Context, repoPath, stowPath string, entry do
 		return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}},
 			fmt.Errorf("dots resolve %q: replace repo source: %w", entry.Name, err)
 	}
+	prep, err := prepareDotTargetForRestow(entry)
+	if err != nil {
+		if rollbackErr := replacement.rollback(); rollbackErr != nil {
+			return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}},
+				fmt.Errorf("dots resolve %q: prepare local target: %w (rollback failed: %v)", entry.Name, err, rollbackErr)
+		}
+		return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}},
+			fmt.Errorf("dots resolve %q: prepare local target: %w", entry.Name, err)
+	}
 	committedSource := false
 	defer func() {
 		if committedSource || retErr == nil {
@@ -983,21 +1100,15 @@ func resolveDotUseLocal(ctx context.Context, repoPath, stowPath string, entry do
 			}
 		}
 	}()
-	if err := refuseIgnoredDotSource(entry); err != nil {
-		return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}}, err
-	}
-	if removeErr := os.RemoveAll(entry.TargetPath); removeErr != nil && !os.IsNotExist(removeErr) {
-		return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: removeErr}},
-			fmt.Errorf("dots resolve %q: remove local target: %w", entry.Name, removeErr)
-	}
 	if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Name}, false); err != nil {
-		if backupPath != "" {
-			if restoreErr := restoreDotBackupAfterFailedStow(backupPath, entry.TargetPath); restoreErr != nil {
-				return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}},
-					fmt.Errorf("%w (restore failed: %v)", err, restoreErr)
+		wrapped := fmt.Errorf("dots resolve %q: use local version relink after copying local content: %w", entry.Name, err)
+		if prep.backupPath != "" {
+			if restoreErr := restoreDotTargetAfterFailedRestow(entry, prep); restoreErr != nil {
+				return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: wrapped}},
+					fmt.Errorf("%w (restore failed: %v)", wrapped, restoreErr)
 			}
 		}
-		return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}}, err
+		return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: wrapped}}, wrapped
 	}
 	committedSource = true
 	if err := replacement.commit(); err != nil {
@@ -1009,7 +1120,7 @@ func resolveDotUseLocal(ctx context.Context, repoPath, stowPath string, entry do
 
 func rollbackDotsAdd(targetPath, packagePath, backupPath string) error {
 	var errs []string
-	if err := os.RemoveAll(targetPath); err != nil && !os.IsNotExist(err) {
+	if err := dots.RemoveLocalPathAfterBackup(targetPath, backupPath); err != nil {
 		errs = append(errs, fmt.Sprintf("remove target link: %v", err))
 	}
 	if backupPath != "" {
@@ -1029,6 +1140,11 @@ func rollbackDotsAdd(targetPath, packagePath, backupPath string) error {
 type dotSourceReplacement struct {
 	commit   func() error
 	rollback func() error
+}
+
+type newerDotSourceFileReplacement struct {
+	sourcePath string
+	backupPath string
 }
 
 func replaceDotSourceFromLocal(copySource, sourcePath, packageRoot string, ignores []string) (*dotSourceReplacement, error) {
@@ -1113,6 +1229,301 @@ func replaceDotSourceFromLocal(copySource, sourcePath, packageRoot string, ignor
 	}, nil
 }
 
+func replaceModifiedDotSourceFilesFromLocal(entry dots.ResolvedEntry, packageRoot string) (*dotSourceReplacement, error) {
+	stagingParent := oldSourceStagingParent(entry.SourcePath, packageRoot)
+	backupRoot, err := os.MkdirTemp(stagingParent, ".omni-newer-*")
+	if err != nil {
+		return nil, err
+	}
+	replacements := make([]newerDotSourceFileReplacement, 0)
+	var addedSourcePaths []string
+	rollback := func() error {
+		var errs []string
+		for i := len(addedSourcePaths) - 1; i >= 0; i-- {
+			if err := os.RemoveAll(addedSourcePaths[i]); err != nil && !os.IsNotExist(err) {
+				errs = append(errs, fmt.Sprintf("remove added source %q: %v", addedSourcePaths[i], err))
+			}
+		}
+		for i := len(replacements) - 1; i >= 0; i-- {
+			replacement := replacements[i]
+			if err := copyRegularDotFileReplace(replacement.backupPath, replacement.sourcePath); err != nil {
+				errs = append(errs, fmt.Sprintf("restore %q: %v", replacement.sourcePath, err))
+			}
+		}
+		if err := os.RemoveAll(backupRoot); err != nil && !os.IsNotExist(err) {
+			errs = append(errs, fmt.Sprintf("remove newer source staging: %v", err))
+		}
+		if len(errs) > 0 {
+			return fmt.Errorf("%s", strings.Join(errs, "; "))
+		}
+		return nil
+	}
+	addOne := func(sourcePath, targetPath string) error {
+		if err := copyDotPath(targetPath, sourcePath, combinedDotIgnores(entry.Ignore)); err != nil {
+			return fmt.Errorf("copy local addition %q into repo source %q: %w", targetPath, sourcePath, err)
+		}
+		addedSourcePaths = append(addedSourcePaths, sourcePath)
+		return nil
+	}
+	replaceOne := func(sourcePath, targetPath string) error {
+		rel, relErr := filepath.Rel(entry.SourcePath, sourcePath)
+		if relErr != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) {
+			rel = filepath.Base(sourcePath)
+		}
+		backupPath := filepath.Join(backupRoot, rel)
+		if err := copyRegularDotFileReplace(sourcePath, backupPath); err != nil {
+			return fmt.Errorf("backup repo source %q: %w", sourcePath, err)
+		}
+		replacements = append(replacements, newerDotSourceFileReplacement{
+			sourcePath: sourcePath,
+			backupPath: backupPath,
+		})
+		if err := copyRegularDotFileReplace(targetPath, sourcePath); err != nil {
+			return fmt.Errorf("copy newer local %q into repo source %q: %w", targetPath, sourcePath, err)
+		}
+		return nil
+	}
+	replaced, err := walkNewerLocalDotFiles(entry, replaceOne)
+	if err != nil {
+		if rollbackErr := rollback(); rollbackErr != nil {
+			return nil, fmt.Errorf("%w (rollback failed: %v)", err, rollbackErr)
+		}
+		return nil, err
+	}
+	added, err := walkLocalOnlyDotFiles(entry, addOne)
+	if err != nil {
+		if rollbackErr := rollback(); rollbackErr != nil {
+			return nil, fmt.Errorf("%w (rollback failed: %v)", err, rollbackErr)
+		}
+		return nil, err
+	}
+	if !replaced && !added {
+		if err := os.RemoveAll(backupRoot); err != nil && !os.IsNotExist(err) {
+			return nil, fmt.Errorf("remove newer source staging: %w", err)
+		}
+		return nil, fmt.Errorf("no local changes found for %q", entry.Name)
+	}
+	return &dotSourceReplacement{
+		commit: func() error {
+			return os.RemoveAll(backupRoot)
+		},
+		rollback: rollback,
+	}, nil
+}
+
+func walkNewerLocalDotFiles(entry dots.ResolvedEntry, replaceOne func(sourcePath, targetPath string) error) (bool, error) {
+	sourceInfo, sourceErr := os.Lstat(entry.SourcePath)
+	if sourceErr != nil {
+		return false, sourceErr
+	}
+	targetInfo, targetErr := os.Lstat(entry.TargetPath)
+	if targetErr != nil {
+		return false, targetErr
+	}
+	if sourceInfo.Mode().IsRegular() {
+		if !localFileIsNewer(sourceInfo, targetInfo) {
+			return false, nil
+		}
+		if replaceOne == nil {
+			return true, nil
+		}
+		return true, replaceOne(entry.SourcePath, entry.TargetPath)
+	}
+	if !sourceInfo.IsDir() || sourceInfo.Mode()&os.ModeSymlink != 0 || !targetInfo.IsDir() || targetInfo.Mode()&os.ModeSymlink != 0 {
+		return false, nil
+	}
+	ignores := combinedDotIgnores(entry.Ignore)
+	found := false
+	err := filepath.WalkDir(entry.SourcePath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, relErr := filepath.Rel(entry.SourcePath, path)
+		if relErr != nil {
+			return relErr
+		}
+		if rel == "." {
+			return nil
+		}
+		if shouldIgnoreDotPath(entry.SourcePath, rel, d.Name(), ignores) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		sourceInfo, infoErr := os.Lstat(path)
+		if infoErr != nil {
+			return infoErr
+		}
+		targetPath := filepath.Join(entry.TargetPath, rel)
+		targetInfo, targetErr := os.Lstat(targetPath)
+		if os.IsNotExist(targetErr) {
+			if sourceInfo.IsDir() && sourceInfo.Mode()&os.ModeSymlink == 0 {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if targetErr != nil {
+			return targetErr
+		}
+		if sameResolvedPath(targetPath, path) {
+			return nil
+		}
+		if sourceInfo.IsDir() && sourceInfo.Mode()&os.ModeSymlink == 0 {
+			if targetInfo.IsDir() && targetInfo.Mode()&os.ModeSymlink == 0 {
+				return nil
+			}
+			return fmt.Errorf("local target %q conflicts with repo directory %q", targetPath, path)
+		}
+		if targetInfo.Mode()&os.ModeSymlink != 0 {
+			target, readErr := os.Readlink(targetPath)
+			if readErr != nil {
+				return fmt.Errorf("read local link %q: %w", targetPath, readErr)
+			}
+			if !filepath.IsAbs(target) {
+				target = filepath.Clean(filepath.Join(filepath.Dir(targetPath), target))
+			}
+			if pathExists(target) {
+				return fmt.Errorf("local target %q links outside managed source", targetPath)
+			}
+			return nil
+		}
+		if localFileIsNewer(sourceInfo, targetInfo) {
+			found = true
+			if replaceOne == nil {
+				return nil
+			}
+			return replaceOne(path, targetPath)
+		}
+		return fmt.Errorf("local target %q is not newer than repo source %q", targetPath, path)
+	})
+	if err != nil {
+		return false, err
+	}
+	return found, nil
+}
+
+func walkLocalOnlyDotFiles(entry dots.ResolvedEntry, addOne func(sourcePath, targetPath string) error) (bool, error) {
+	sourceInfo, sourceErr := os.Lstat(entry.SourcePath)
+	if sourceErr != nil {
+		return false, sourceErr
+	}
+	targetInfo, targetErr := os.Lstat(entry.TargetPath)
+	if targetErr != nil {
+		return false, targetErr
+	}
+	if !sourceInfo.IsDir() || sourceInfo.Mode()&os.ModeSymlink != 0 || !targetInfo.IsDir() || targetInfo.Mode()&os.ModeSymlink != 0 {
+		return false, nil
+	}
+	ignores := combinedDotIgnores(entry.Ignore)
+	found := false
+	err := filepath.WalkDir(entry.TargetPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, relErr := filepath.Rel(entry.TargetPath, path)
+		if relErr != nil {
+			return relErr
+		}
+		if rel == "." {
+			return nil
+		}
+		if shouldIgnoreDotPath(entry.SourcePath, rel, d.Name(), ignores) {
+			if d.IsDir() {
+				if ignoredDotDirHasIncludedDescendant(entry.SourcePath, rel, ignores) {
+					return nil
+				}
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		targetInfo, infoErr := os.Lstat(path)
+		if infoErr != nil {
+			return infoErr
+		}
+		sourcePath := filepath.Join(entry.SourcePath, rel)
+		sourceInfo, sourceErr := os.Lstat(sourcePath)
+		if sourceErr == nil {
+			if sameResolvedPath(path, sourcePath) {
+				if targetInfo.IsDir() && targetInfo.Mode()&os.ModeSymlink == 0 {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if sourceInfo.IsDir() && sourceInfo.Mode()&os.ModeSymlink == 0 && targetInfo.IsDir() && targetInfo.Mode()&os.ModeSymlink == 0 {
+				return nil
+			}
+			return nil
+		}
+		if !os.IsNotExist(sourceErr) {
+			return sourceErr
+		}
+		if targetInfo.IsDir() && targetInfo.Mode()&os.ModeSymlink == 0 {
+			return nil
+		}
+		if !isManagedDotFile(targetInfo.Mode()) {
+			return nil
+		}
+		found = true
+		if addOne == nil {
+			return nil
+		}
+		return addOne(sourcePath, path)
+	})
+	if err != nil {
+		return false, err
+	}
+	return found, nil
+}
+
+func copyRegularDotFileReplace(src, dst string) error {
+	info, err := os.Lstat(src)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("%q is not a regular file", src)
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close() //nolint:errcheck
+	tmp, err := os.CreateTemp(filepath.Dir(dst), "."+filepath.Base(dst)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	cleanup := func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+	}
+	if err := tmp.Chmod(info.Mode().Perm()); err != nil {
+		cleanup()
+		return err
+	}
+	if _, err := io.Copy(tmp, in); err != nil {
+		cleanup()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Chtimes(tmpPath, info.ModTime(), info.ModTime()); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Rename(tmpPath, dst); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	return nil
+}
+
 func oldSourceStagingParent(sourcePath, packageRoot string) string {
 	if packageRoot == "" {
 		return filepath.Dir(sourcePath)
@@ -1125,7 +1536,7 @@ func oldSourceStagingParent(sourcePath, packageRoot string) string {
 }
 
 func restoreDotBackupAfterFailedStow(backupPath, originalPath string) error {
-	if err := os.RemoveAll(originalPath); err != nil && !os.IsNotExist(err) {
+	if err := dots.RemoveLocalPathAfterBackup(originalPath, backupPath); err != nil {
 		return fmt.Errorf("remove partial target: %w", err)
 	}
 	return restoreBackupPath(backupPath, originalPath)
@@ -1268,14 +1679,10 @@ func (a *App) buildDotsManager() (*dots.Manager, map[string]string, error) {
 		return nil, nil, fmt.Errorf("dots: load groups: %w", err)
 	}
 	groups := rootCfg.Groups
-	// Apply profile filtering so only this machine's groups are shown —
-	// same logic as DotsSync to prevent other-profile entries appearing as HealthNoSource.
-	if profileName, ok := rootCfg.ActiveProfile(currentHostname()); ok {
-		if effective, _, e := effectiveProfileGroups(rootCfg, groups, profileName); e == nil {
-			groups = effective
-		}
+	if effective, _, ok := effectiveHostGroups(rootCfg, groups, currentMachineGroupName()); ok {
+		groups = effective
 	}
-	entries := collectDots(groups)
+	entries := collectDots(rootCfg, groups)
 	if err := a.requireSafeTestDotsMutation(repoPath, entries); err != nil {
 		return nil, nil, err
 	}
@@ -1389,39 +1796,39 @@ func normalisePath(path string) string {
 	return "~/" + filepath.ToSlash(rel)
 }
 
-func syncResolvedDotEntry(ctx context.Context, stowPath string, entry dots.ResolvedEntry, opts dots.SyncOptions, failUnsyncable bool) ([]dots.Op, error) {
+func syncResolvedDotEntry(ctx context.Context, repoPath, stowPath string, entry dots.ResolvedEntry, opts dots.SyncOptions, failUnsyncable bool) ([]dots.Op, error) {
 	state, _ := classifyDotEntry(entry)
 	switch state {
 	case DotStateSynced:
-		if err := refuseIgnoredDotSource(entry); err != nil {
-			return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}}, err
+		if isFoldedDotDirectory(entry) {
+			if opts.DryRun {
+				return []dots.Op{{Kind: dots.OpDryRepair, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}}, nil
+			}
+			if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Name}, false); err != nil {
+				return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}}, err
+			}
+			return []dots.Op{lstatEntryOp(entry, false)}, nil
 		}
 		return []dots.Op{{Kind: dots.OpSkip, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}}, nil
 	case DotStateMissing:
 		if opts.DryRun {
 			return []dots.Op{{Kind: dots.OpDryLink, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}}, nil
 		}
-		if err := refuseIgnoredDotSource(entry); err != nil {
-			return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}}, err
-		}
 		if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Name}, false); err != nil {
 			return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}}, err
 		}
-		return []dots.Op{lstatOp(entry.Name, entry.TargetPath, stowPath, false)}, nil
+		return []dots.Op{lstatEntryOp(entry, false)}, nil
 	case DotStateBroken:
 		if opts.DryRun {
 			return []dots.Op{{Kind: dots.OpDryRepair, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}}, nil
 		}
-		if err := refuseIgnoredDotSource(entry); err != nil {
-			return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}}, err
-		}
-		backupPath, err := backupAndRemoveLocalTarget(entry.TargetPath)
+		prep, err := prepareDotTargetForRestow(entry)
 		if err != nil {
 			return nil, err
 		}
 		if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Name}, false); err != nil {
-			if backupPath != "" {
-				if restoreErr := restoreDotBackupAfterFailedStow(backupPath, entry.TargetPath); restoreErr != nil {
+			if prep.backupPath != "" {
+				if restoreErr := restoreDotTargetAfterFailedRestow(entry, prep); restoreErr != nil {
 					return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}},
 						fmt.Errorf("%w (restore failed: %v)", err, restoreErr)
 				}
@@ -1438,6 +1845,15 @@ func syncResolvedDotEntry(ctx context.Context, stowPath string, entry dots.Resol
 			return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}}, err
 		}
 		return []dots.Op{op}, nil
+	case DotStateModified:
+		if opts.DryRun {
+			return []dots.Op{{Kind: dots.OpDryAdopt, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}}, nil
+		}
+		ops, err := syncModifiedDotEntry(ctx, repoPath, stowPath, entry)
+		if err != nil {
+			return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}}, err
+		}
+		return ops, nil
 	case DotStateConflict, DotStateUntrackedConflict, DotStateAmbiguous:
 		err := fmt.Errorf("requires choosing use repo version or use local version")
 		return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}}, err
@@ -1455,28 +1871,25 @@ func syncLocalOnlyDotEntry(ctx context.Context, stowPath string, entry dots.Reso
 	if err != nil {
 		return dots.Op{}, err
 	}
-	backupPath, err := backupLocalTarget(entry.TargetPath)
-	if err != nil {
-		return dots.Op{}, err
-	}
 	if err := copyDotPath(copySource, entry.SourcePath, combinedDotIgnores(entry.Ignore)); err != nil {
 		if removeErr := os.RemoveAll(entry.SourcePath); removeErr != nil {
 			return dots.Op{}, fmt.Errorf("copy local into repo: %w (remove created source failed: %v)", err, removeErr)
 		}
 		return dots.Op{}, fmt.Errorf("copy local into repo: %w", err)
 	}
-	if removeErr := os.RemoveAll(entry.TargetPath); removeErr != nil && !os.IsNotExist(removeErr) {
+	prep, err := prepareDotTargetForRestow(entry)
+	if err != nil {
 		if cleanupErr := os.RemoveAll(entry.SourcePath); cleanupErr != nil {
-			return dots.Op{}, fmt.Errorf("remove local target: %w (remove created source failed: %v)", removeErr, cleanupErr)
+			return dots.Op{}, fmt.Errorf("prepare local target: %w (remove created source failed: %v)", err, cleanupErr)
 		}
-		return dots.Op{}, fmt.Errorf("remove local target: %w", removeErr)
+		return dots.Op{}, fmt.Errorf("prepare local target: %w", err)
 	}
 	if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Name}, false); err != nil {
 		if removeErr := os.RemoveAll(entry.SourcePath); removeErr != nil {
 			return dots.Op{}, fmt.Errorf("%w (remove created source failed: %v)", err, removeErr)
 		}
-		if backupPath != "" {
-			if restoreErr := restoreDotBackupAfterFailedStow(backupPath, entry.TargetPath); restoreErr != nil {
+		if prep.backupPath != "" {
+			if restoreErr := restoreDotTargetAfterFailedRestow(entry, prep); restoreErr != nil {
 				return dots.Op{}, fmt.Errorf("%w (restore failed: %v)", err, restoreErr)
 			}
 		}
@@ -1485,26 +1898,56 @@ func syncLocalOnlyDotEntry(ctx context.Context, stowPath string, entry dots.Reso
 	return dots.Op{Kind: dots.OpAdopt, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}, nil
 }
 
-func localDotCopySource(targetPath string) (string, error) {
-	info, err := os.Lstat(targetPath)
-	if err != nil {
-		return "", err
+func syncModifiedDotEntry(ctx context.Context, repoPath, stowPath string, entry dots.ResolvedEntry) (ops []dots.Op, retErr error) {
+	if pathExists(entry.SourcePath) {
+		gt := newGitForRepo(repoPath, executor.New())
+		if gt.IsRepo() {
+			if err := gt.CommitAll(ctx, "dots: pre-sync "+entry.Name); err != nil {
+				return nil, fmt.Errorf("pre-commit repo state: %w", err)
+			}
+		}
 	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return "", fmt.Errorf("local target %q is a symlink; refusing to adopt linked external content automatically", targetPath)
+	replacement, err := replaceModifiedDotSourceFilesFromLocal(entry, filepath.Join(stowPath, entry.Name))
+	if err != nil {
+		return nil, err
+	}
+	committedSource := false
+	defer func() {
+		if committedSource || retErr == nil {
+			return
+		}
+		if rollbackErr := replacement.rollback(); rollbackErr != nil {
+			retErr = fmt.Errorf("%w (rollback failed: %v)", retErr, rollbackErr)
+		}
+	}()
+	prep, err := prepareDotTargetForRestow(entry)
+	if err != nil {
+		return nil, fmt.Errorf("prepare local target: %w", err)
+	}
+	if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Name}, false); err != nil {
+		if prep.backupPath != "" {
+			if restoreErr := restoreDotTargetAfterFailedRestow(entry, prep); restoreErr != nil {
+				return nil, fmt.Errorf("%w (restore failed: %v)", err, restoreErr)
+			}
+		}
+		return nil, err
+	}
+	committedSource = true
+	if err := replacement.commit(); err != nil {
+		return nil, fmt.Errorf("cleanup source backup: %w", err)
+	}
+	return []dots.Op{{Kind: dots.OpAdopt, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}}, nil
+}
+
+func localDotCopySource(targetPath string) (string, error) {
+	if _, err := os.Lstat(targetPath); err != nil {
+		return "", err
 	}
 	return targetPath, nil
 }
 
 func backupAndRemoveLocalTarget(targetPath string) (string, error) {
-	backupPath, backupErr := dots.BackupLocalPath(targetPath)
-	if backupErr != nil && !os.IsNotExist(backupErr) {
-		return "", fmt.Errorf("backup %q: %w", targetPath, backupErr)
-	}
-	if removeErr := os.RemoveAll(targetPath); removeErr != nil && !os.IsNotExist(removeErr) {
-		return backupPath, fmt.Errorf("remove %q: %w", targetPath, removeErr)
-	}
-	return backupPath, nil
+	return dots.BackupAndRemoveLocalPath(targetPath)
 }
 
 func backupLocalTarget(targetPath string) (string, error) {
@@ -1515,72 +1958,260 @@ func backupLocalTarget(targetPath string) (string, error) {
 	return backupPath, nil
 }
 
-func combinedDotIgnores(ignores []string) []string {
-	return append(dots.DefaultIgnores(), ignores...)
+type preparedDotTarget struct {
+	backupPath          string
+	preservedDirectory  bool
+	removedManagedPaths bool
 }
 
-func refuseIgnoredDotSource(entry dots.ResolvedEntry) error {
-	rel, ok, err := firstIgnoredDotSourcePath(entry.SourcePath, entry.Ignore)
-	if err != nil {
-		return fmt.Errorf("check ignored repo source: %w", err)
-	}
-	if !ok {
-		return nil
-	}
-	return fmt.Errorf("repo source contains ignored path %q; refusing to stow ignored content", rel)
-}
-
-func firstIgnoredDotSourcePath(root string, ignores []string) (string, bool, error) {
-	info, err := os.Lstat(root)
-	if os.IsNotExist(err) {
-		return "", false, nil
-	}
-	if err != nil {
-		return "", false, err
-	}
-	allIgnores := combinedDotIgnores(ignores)
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		if shouldIgnoreDotPath(filepath.Dir(root), filepath.Base(root), filepath.Base(root), allIgnores) {
-			return filepath.Base(root), true, nil
+func prepareDotTargetForRestow(entry dots.ResolvedEntry) (preparedDotTarget, error) {
+	if shouldPreserveDirectoryDotTarget(entry) {
+		prep := preparedDotTarget{preservedDirectory: true}
+		backupPath, err := backupLocalTarget(entry.TargetPath)
+		if err != nil {
+			return prep, err
 		}
-		return "", false, nil
+		prep.backupPath = backupPath
+		prep.removedManagedPaths = true
+		if err := removeManagedDotTargetPaths(entry, backupPath); err != nil {
+			if backupPath != "" {
+				if restoreErr := restorePreparedDirectoryTargetAfterFailedRestow(entry, prep); restoreErr != nil {
+					return prep, fmt.Errorf("%w (restore failed: %v)", err, restoreErr)
+				}
+			}
+			return prep, err
+		}
+		return prep, nil
 	}
-	var first string
-	walkErr := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+	backupPath, err := backupAndRemoveLocalTarget(entry.TargetPath)
+	if err != nil {
+		return preparedDotTarget{}, err
+	}
+	return preparedDotTarget{backupPath: backupPath}, nil
+}
+
+func shouldPreserveDirectoryDotTarget(entry dots.ResolvedEntry) bool {
+	sourceInfo, err := os.Lstat(entry.SourcePath)
+	if err != nil || !sourceInfo.IsDir() || sourceInfo.Mode()&os.ModeSymlink != 0 {
+		return false
+	}
+	targetInfo, err := os.Lstat(entry.TargetPath)
+	return err == nil && targetInfo.IsDir() && targetInfo.Mode()&os.ModeSymlink == 0
+}
+
+func isFoldedDotDirectory(entry dots.ResolvedEntry) bool {
+	sourceInfo, err := os.Lstat(entry.SourcePath)
+	if err != nil || !sourceInfo.IsDir() || sourceInfo.Mode()&os.ModeSymlink != 0 {
+		return false
+	}
+	targetInfo, err := os.Lstat(entry.TargetPath)
+	if err != nil || targetInfo.Mode()&os.ModeSymlink == 0 {
+		return false
+	}
+	return sameResolvedPath(entry.TargetPath, entry.SourcePath)
+}
+
+func removeManagedDotTargetPaths(entry dots.ResolvedEntry, backupPath string) error {
+	ignores := combinedDotIgnores(entry.Ignore)
+	if err := removeManagedDotTargetFiles(entry, ignores, backupPath); err != nil {
+		return err
+	}
+	if err := removeDotTargetDirectoryConflicts(entry, ignores, backupPath); err != nil {
+		return err
+	}
+	return removeEmptyUnmanagedDotTargetDirs(entry, ignores)
+}
+
+func removeManagedDotTargetFiles(entry dots.ResolvedEntry, ignores []string, backupPath string) error {
+	return filepath.WalkDir(entry.TargetPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		rel, relErr := filepath.Rel(root, path)
+		rel, relErr := filepath.Rel(entry.TargetPath, path)
 		if relErr != nil {
 			return relErr
 		}
 		if rel == "." {
 			return nil
 		}
-		if shouldIgnoreDotPath(root, rel, d.Name(), allIgnores) {
-			first = filepath.ToSlash(rel)
+		if shouldIgnoreDotPath(entry.TargetPath, rel, d.Name(), ignores) {
 			if d.IsDir() {
+				if ignoredDotDirHasIncludedDescendant(entry.TargetPath, rel, ignores) {
+					return nil
+				}
 				return filepath.SkipDir
 			}
 			return nil
 		}
+		info, infoErr := os.Lstat(path)
+		if infoErr != nil {
+			return infoErr
+		}
+		if info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
+			return nil
+		}
+		sourcePath := filepath.Join(entry.SourcePath, rel)
+		if sameResolvedPath(path, sourcePath) {
+			return nil
+		}
+		return dots.RemoveLocalPathAfterBackup(path, backupPath)
+	})
+}
+
+func removeDotTargetDirectoryConflicts(entry dots.ResolvedEntry, ignores []string, backupPath string) error {
+	return filepath.WalkDir(entry.SourcePath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, relErr := filepath.Rel(entry.SourcePath, path)
+		if relErr != nil {
+			return relErr
+		}
+		if rel == "." {
+			return nil
+		}
+		if shouldIgnoreDotPath(entry.SourcePath, rel, d.Name(), ignores) {
+			if d.IsDir() {
+				if ignoredDotDirHasIncludedDescendant(entry.SourcePath, rel, ignores) {
+					return nil
+				}
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		sourceInfo, infoErr := os.Lstat(path)
+		if infoErr != nil {
+			return infoErr
+		}
+		targetPath := filepath.Join(entry.TargetPath, rel)
+		targetInfo, targetErr := os.Lstat(targetPath)
+		if os.IsNotExist(targetErr) {
+			return nil
+		}
+		if targetErr != nil {
+			return targetErr
+		}
+		if sourceInfo.IsDir() && sourceInfo.Mode()&os.ModeSymlink == 0 {
+			if targetInfo.IsDir() && targetInfo.Mode()&os.ModeSymlink == 0 {
+				return nil
+			}
+			return dots.RemoveLocalPathAfterBackup(targetPath, backupPath)
+		}
+		if targetInfo.IsDir() && targetInfo.Mode()&os.ModeSymlink == 0 {
+			if err := dots.RemoveLocalPathAfterBackup(targetPath, backupPath); err != nil {
+				return fmt.Errorf("replace directory %q with managed file: %w", targetPath, err)
+			}
+		}
 		return nil
 	})
-	if walkErr != nil {
-		return "", false, walkErr
+}
+
+func removeEmptyUnmanagedDotTargetDirs(entry dots.ResolvedEntry, ignores []string) error {
+	var dirs []string
+	if err := filepath.WalkDir(entry.TargetPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path == entry.TargetPath || !d.IsDir() {
+			return nil
+		}
+		rel, relErr := filepath.Rel(entry.TargetPath, path)
+		if relErr != nil {
+			return relErr
+		}
+		if shouldIgnoreDotPath(entry.TargetPath, rel, d.Name(), ignores) {
+			if ignoredDotDirHasIncludedDescendant(entry.TargetPath, rel, ignores) {
+				return nil
+			}
+			return filepath.SkipDir
+		}
+		if sourceInfo, sourceErr := os.Lstat(filepath.Join(entry.SourcePath, rel)); sourceErr == nil && sourceInfo.IsDir() && sourceInfo.Mode()&os.ModeSymlink == 0 {
+			return nil
+		}
+		dirs = append(dirs, path)
+		return nil
+	}); err != nil {
+		return err
 	}
-	return first, first != "", nil
+	for i := len(dirs) - 1; i >= 0; i-- {
+		err := os.Remove(dirs[i])
+		if err == nil || os.IsNotExist(err) {
+			continue
+		}
+		if errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.EEXIST) {
+			continue
+		}
+		return err
+	}
+	return nil
+}
+
+func restoreDotTargetAfterFailedRestow(entry dots.ResolvedEntry, prep preparedDotTarget) error {
+	if prep.preservedDirectory {
+		return restorePreparedDirectoryTargetAfterFailedRestow(entry, prep)
+	}
+	return restoreDotBackupAfterFailedStow(prep.backupPath, entry.TargetPath)
+}
+
+func restorePreparedDirectoryTargetAfterFailedRestow(entry dots.ResolvedEntry, prep preparedDotTarget) error {
+	if prep.backupPath == "" || !prep.removedManagedPaths {
+		return nil
+	}
+	return filepath.WalkDir(prep.backupPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, relErr := filepath.Rel(prep.backupPath, path)
+		if relErr != nil {
+			return relErr
+		}
+		if rel == "." {
+			return os.MkdirAll(entry.TargetPath, 0o755)
+		}
+		targetItem := filepath.Join(entry.TargetPath, rel)
+		info, infoErr := os.Lstat(path)
+		if infoErr != nil {
+			return infoErr
+		}
+		if info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
+			return os.MkdirAll(targetItem, info.Mode().Perm())
+		}
+		if err := dots.RemoveLocalPathAfterBackup(targetItem, prep.backupPath); err != nil {
+			return err
+		}
+		return restoreBackupFile(path, targetItem)
+	})
+}
+
+func combinedDotIgnores(ignores []string) []string {
+	return append(dots.DefaultIgnores(), ignores...)
 }
 
 func copyDotPath(src, dst string, ignores []string) error {
+	return copyDotPathSeen(src, dst, ignores, src, ".", make(map[string]struct{}))
+}
+
+func copyDotPathSeen(src, dst string, ignores []string, logicalRoot, logicalRel string, seenDirs map[string]struct{}) error {
 	info, err := os.Lstat(src)
 	if err != nil {
 		return err
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("dot copy source %q is a symlink; refusing to adopt linked external content automatically", src)
+		resolved, err := filepath.EvalSymlinks(src)
+		if err != nil {
+			return fmt.Errorf("resolve dot copy symlink %q: %w", src, err)
+		}
+		return copyDotPathSeen(resolved, dst, ignores, logicalRoot, logicalRel, seenDirs)
 	}
 	if info.IsDir() {
+		if resolved, err := filepath.EvalSymlinks(src); err == nil {
+			resolved = filepath.Clean(resolved)
+			if _, ok := seenDirs[resolved]; ok {
+				return fmt.Errorf("dot copy source %q resolves into a symlink cycle at %q", src, resolved)
+			}
+			seenDirs[resolved] = struct{}{}
+			defer delete(seenDirs, resolved)
+		}
 		return filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
 				return err
@@ -1589,8 +2220,15 @@ func copyDotPath(src, dst string, ignores []string) error {
 			if relErr != nil {
 				return relErr
 			}
-			if rel != "." && shouldIgnoreDotPath(src, rel, d.Name(), ignores) {
+			pathLogicalRel := logicalRel
+			if rel != "." {
+				pathLogicalRel = joinDotLogicalRel(logicalRel, rel)
+			}
+			if rel != "." && shouldIgnoreDotPath(logicalRoot, pathLogicalRel, d.Name(), ignores) {
 				if d.IsDir() {
+					if ignoredDotDirHasIncludedDescendant(logicalRoot, pathLogicalRel, ignores) {
+						return nil
+					}
 					return filepath.SkipDir
 				}
 				return nil
@@ -1603,13 +2241,20 @@ func copyDotPath(src, dst string, ignores []string) error {
 			if entryInfo.IsDir() && entryInfo.Mode()&os.ModeSymlink == 0 {
 				return os.MkdirAll(target, entryInfo.Mode().Perm())
 			}
-			return copyDotPath(path, target, ignores)
+			return copyDotPathSeen(path, target, ignores, logicalRoot, pathLogicalRel, seenDirs)
 		})
 	}
 	if !info.Mode().IsRegular() {
 		return nil
 	}
 	return copyDotFile(src, dst, info.Mode().Perm())
+}
+
+func joinDotLogicalRel(parent, rel string) string {
+	if parent == "" || parent == "." {
+		return rel
+	}
+	return filepath.Join(parent, rel)
 }
 
 func copyDotFile(src, dst string, mode os.FileMode) error {
@@ -1635,11 +2280,16 @@ func copyDotFile(src, dst string, mode os.FileMode) error {
 }
 
 func shouldIgnoreDotPath(root, relPath, basename string, ignores []string) bool {
-	if dots.ShouldIgnorePath(relPath, basename, ignores) {
+	rooted := filepath.ToSlash(filepath.Join(filepath.Base(root), relPath))
+	return dots.ShouldIgnoreAnyPath([]string{relPath, rooted}, basename, ignores)
+}
+
+func ignoredDotDirHasIncludedDescendant(root, relPath string, ignores []string) bool {
+	if dots.HasIncludedDescendant(relPath, ignores) {
 		return true
 	}
 	rooted := filepath.ToSlash(filepath.Join(filepath.Base(root), relPath))
-	return dots.ShouldIgnorePath(rooted, basename, ignores)
+	return dots.HasIncludedDescendant(rooted, ignores)
 }
 
 // lstatOp returns an Op that describes the current link state at dst.
@@ -1675,6 +2325,29 @@ func lstatOp(entryName, dst, repoPath string, dryRun bool) dots.Op {
 		Err: fmt.Errorf("real file at %q; use omni dots add --adopt to migrate", dst)}
 }
 
+func lstatEntryOp(entry dots.ResolvedEntry, dryRun bool) dots.Op {
+	local := inspectDotLocal(entry)
+	switch local.kind {
+	case dotLocalExpectedLink:
+		if dryRun {
+			return dots.Op{Kind: dots.OpSkip, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}
+		}
+		return dots.Op{Kind: dots.OpLink, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}
+	case dotLocalMissing:
+		if dryRun {
+			return dots.Op{Kind: dots.OpDryLink, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}
+		}
+		return dots.Op{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath,
+			Err: fmt.Errorf("path not linked after stow")}
+	case dotLocalBrokenLink:
+		return dots.Op{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath,
+			Err: fmt.Errorf("managed link is broken")}
+	default:
+		return dots.Op{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath,
+			Err: fmt.Errorf("real file at %q; use omni dots add --adopt to migrate", entry.TargetPath)}
+	}
+}
+
 func pathWithinDir(path, dir string) bool {
 	rel, err := filepath.Rel(filepath.Clean(dir), filepath.Clean(path))
 	if err != nil {
@@ -1684,15 +2357,22 @@ func pathWithinDir(path, dir string) bool {
 }
 
 // collectDots gathers all DotEntry values from a slice of groups.
-func collectDots(groups []*config.GroupConfig) []config.DotEntry {
+func collectDots(cfg *config.RootConfig, groups []*config.GroupConfig) []config.DotEntry {
 	var entries []config.DotEntry
 	seen := make(map[string]struct{})
+	ignored := make(map[string]struct{}, len(cfg.Ignore.Dots))
+	for _, name := range cfg.Ignore.Dots {
+		ignored[name] = struct{}{}
+	}
 	for _, g := range groups {
 		for _, entry := range g.Dots {
 			if _, ok := seen[entry.Name]; ok {
 				continue
 			}
 			seen[entry.Name] = struct{}{}
+			if _, ok := ignored[entry.Name]; ok {
+				entry.Ignored = true
+			}
 			entries = append(entries, entry)
 		}
 	}
@@ -1790,23 +2470,31 @@ func entryHealth(m *dots.Manager, groupMap map[string]string) []DotStatus {
 	for _, e := range m.Entries {
 		state, actions := classifyDotEntry(e)
 		contentRoot := dotStatusContentRoot(e)
-		fileCount := countManagedDotFiles(contentRoot, e.Ignore)
-		children := directDotChildren(contentRoot, e.TargetPath, e.Ignore)
+		ignoreRoot := dotIgnoreRoot(e.SourcePath, e.TargetPath, contentRoot)
+		counts := dotFileCountsUnion(e.SourcePath, e.TargetPath, contentRoot, "", ignoreRoot, e.Ignore, state)
+		fileCount := counts.Managed()
+		children := directDotChildren(e.SourcePath, e.TargetPath, contentRoot, ignoreRoot, e.Ignore, state)
+		ignoredChildren := ignoredDotChildren(e.SourcePath, e.TargetPath, contentRoot, ignoreRoot, e.Ignore, state)
 		if state == DotStateIgnored {
+			counts = DotFileCounts{}
 			fileCount = 0
 			children = nil
+			ignoredChildren = nil
 		}
 		statuses = append(statuses, DotStatus{
-			Name:       e.Name,
-			SourcePath: e.SourcePath,
-			TargetPath: e.TargetPath,
-			ConfigPath: configPathForTarget(e.TargetPath),
-			Health:     healthForDotState(state),
-			State:      state,
-			Actions:    actions,
-			Group:      groupMap[e.Name],
-			FileCount:  fileCount,
-			Children:   children,
+			Name:            e.Name,
+			SourcePath:      e.SourcePath,
+			TargetPath:      e.TargetPath,
+			ConfigPath:      configPathForTarget(e.TargetPath),
+			Health:          healthForDotState(state),
+			State:           state,
+			Actions:         actions,
+			Group:           groupMap[e.Name],
+			FileCount:       fileCount,
+			Counts:          counts,
+			IsDir:           dotStatusIsDir(e, contentRoot),
+			Children:        children,
+			ignoredChildren: ignoredChildren,
 		})
 	}
 	return statuses
@@ -1860,35 +2548,93 @@ func dotStatusContentRoot(e dots.ResolvedEntry) string {
 	return e.SourcePath
 }
 
-func countManagedDotFiles(root string, ignores []string) int {
-	if root == "" {
-		return 0
+func dotIgnoreRoot(sourceRoot, targetRoot, contentRoot string) string {
+	for _, root := range []string{sourceRoot, contentRoot, targetRoot} {
+		if root != "" && pathExists(root) {
+			return root
+		}
 	}
-	info, err := os.Lstat(root)
+	if sourceRoot != "" {
+		return sourceRoot
+	}
+	if contentRoot != "" {
+		return contentRoot
+	}
+	return targetRoot
+}
+
+func dotFileCountsUnion(entrySourceRoot, targetRoot, contentRoot, relRoot, ignoreRoot string, ignores []string, parentState DotState) DotFileCounts {
+	roots := dotExistingRoots(entrySourceRoot, targetRoot, contentRoot)
+	if len(roots) == 0 {
+		return DotFileCounts{}
+	}
+	tracked := make(map[string]bool)
+	ignored := make(map[string]bool)
+	for _, root := range roots {
+		collectDotFileCountRelsFromRoot(root, relRoot, ignoreRoot, ignores, tracked, ignored)
+	}
+	var counts DotFileCounts
+	for rel := range tracked {
+		if dotFileCountSynced(dotChildState(entrySourceRoot, targetRoot, filepath.FromSlash(rel), false, ignores, parentState)) {
+			counts.Synced++
+		} else {
+			counts.OutOfSync++
+		}
+	}
+	for rel := range ignored {
+		if !tracked[rel] {
+			counts.Ignored++
+		}
+	}
+	return counts
+}
+
+func collectDotFileCountRelsFromRoot(root, relRoot, ignoreRoot string, ignores []string, tracked, ignored map[string]bool) {
+	path := root
+	if relRoot != "" {
+		path = filepath.Join(root, relRoot)
+	}
+	info, err := os.Lstat(path)
 	if err != nil {
-		return 0
+		return
 	}
 	if !info.IsDir() {
-		if shouldIgnoreDotPath(root, ".", filepath.Base(root), ignores) {
-			return 0
+		rel := relRoot
+		if rel == "" {
+			rel = "."
 		}
 		if !isManagedDotFile(info.Mode()) {
-			return 0
+			return
 		}
-		return 1
+		if shouldIgnoreDotPath(ignoreRoot, rel, filepath.Base(path), ignores) {
+			ignored[filepath.ToSlash(rel)] = true
+			return
+		}
+		tracked[filepath.ToSlash(rel)] = true
+		return
 	}
-	count := 0
-	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+	_ = filepath.WalkDir(path, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
-		rel, relErr := filepath.Rel(root, path)
+		walkRel, relErr := filepath.Rel(root, path)
 		if relErr != nil {
 			return nil
 		}
-		if rel != "." && shouldIgnoreDotPath(root, rel, d.Name(), ignores) {
+		if walkRel == "." {
+			return nil
+		}
+		if shouldIgnoreDotPath(ignoreRoot, walkRel, d.Name(), ignores) {
 			if d.IsDir() {
+				if ignoredDotDirHasIncludedDescendant(ignoreRoot, walkRel, ignores) {
+					return nil
+				}
+				collectIgnoredDotFileCountRels(root, path, ignored)
 				return filepath.SkipDir
+			}
+			info, infoErr := d.Info()
+			if infoErr == nil && isManagedDotFile(info.Mode()) {
+				ignored[filepath.ToSlash(walkRel)] = true
 			}
 			return nil
 		}
@@ -1897,75 +2643,308 @@ func countManagedDotFiles(root string, ignores []string) int {
 			return nil
 		}
 		if !d.IsDir() && isManagedDotFile(info.Mode()) {
-			count++
+			tracked[filepath.ToSlash(walkRel)] = true
 		}
 		return nil
 	})
-	return count
 }
 
-func directDotChildren(sourceRoot, targetRoot string, ignores []string) []DotChild {
-	if sourceRoot == "" {
+func collectIgnoredDotFileCountRels(root, path string, ignored map[string]bool) {
+	_ = filepath.WalkDir(path, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		info, infoErr := d.Info()
+		if infoErr != nil || !isManagedDotFile(info.Mode()) {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr == nil {
+			ignored[filepath.ToSlash(rel)] = true
+		}
 		return nil
-	}
-	info, err := os.Lstat(sourceRoot)
-	if err != nil || !info.IsDir() {
-		return nil
-	}
-	return directDotChildrenAt(sourceRoot, targetRoot, "", ignores, 1)
+	})
 }
 
-func directDotChildrenAt(sourceRoot, targetRoot, relRoot string, ignores []string, depth int) []DotChild {
+func dotFileCountSynced(state DotState) bool {
+	return state == DotStateSynced
+}
+
+func dotExistingRoots(entrySourceRoot, targetRoot, contentRoot string) []string {
+	seen := make(map[string]bool)
+	roots := make([]string, 0, 3)
+	for _, root := range []string{entrySourceRoot, targetRoot, contentRoot} {
+		if root == "" || !pathExists(root) {
+			continue
+		}
+		rootPath := root
+		clean := filepath.Clean(root)
+		if resolved, err := filepath.EvalSymlinks(root); err == nil {
+			rootPath = resolved
+			clean = filepath.Clean(resolved)
+		}
+		if seen[clean] {
+			continue
+		}
+		seen[clean] = true
+		roots = append(roots, rootPath)
+	}
+	return roots
+}
+
+func dotChildRoots(entrySourceRoot, targetRoot, contentRoot string) []string {
+	roots := dotExistingRoots(entrySourceRoot, targetRoot, contentRoot)
+	out := roots[:0]
+	for _, root := range roots {
+		if dotPathIsDir(root) {
+			out = append(out, root)
+		}
+	}
+	return out
+}
+
+func dotPathIsDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+func dotStatusIsDir(e dots.ResolvedEntry, contentRoot string) bool {
+	for _, path := range []string{contentRoot, e.SourcePath, e.TargetPath} {
+		if path != "" && dotPathIsDir(path) {
+			return true
+		}
+	}
+	return false
+}
+
+func directDotChildren(entrySourceRoot, targetRoot, contentRoot, ignoreRoot string, ignores []string, parentState DotState) []DotChild {
+	roots := dotChildRoots(entrySourceRoot, targetRoot, contentRoot)
+	if len(roots) == 0 {
+		return nil
+	}
+	return directDotChildrenAt(entrySourceRoot, targetRoot, roots, ignoreRoot, "", ignores, parentState, 1)
+}
+
+type dotChildCandidate struct {
+	name  string
+	rel   string
+	isDir bool
+}
+
+func directDotChildrenAt(entrySourceRoot, targetRoot string, roots []string, ignoreRoot, relRoot string, ignores []string, parentState DotState, depth int) []DotChild {
 	if depth > dotChildrenMaxDepth {
 		return nil
 	}
-	dir := sourceRoot
-	if relRoot != "" {
-		dir = filepath.Join(sourceRoot, relRoot)
-	}
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].IsDir() != entries[j].IsDir() {
-			return entries[i].IsDir()
-		}
-		return entries[i].Name() < entries[j].Name()
-	})
-	children := make([]DotChild, 0, len(entries))
-	for _, entry := range entries {
-		rel := entry.Name()
+	candidates := make(map[string]dotChildCandidate)
+	for _, root := range roots {
+		dir := root
 		if relRoot != "" {
-			rel = filepath.Join(relRoot, entry.Name())
+			dir = filepath.Join(root, relRoot)
 		}
-		sourcePath := filepath.Join(sourceRoot, rel)
-		info, infoErr := entry.Info()
-		if infoErr != nil || (!entry.IsDir() && !isManagedDotFile(info.Mode())) {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
 			continue
 		}
-		ignored := shouldIgnoreDotPath(sourceRoot, rel, entry.Name(), ignores)
+		for _, entry := range entries {
+			rel := entry.Name()
+			if relRoot != "" {
+				rel = filepath.Join(relRoot, entry.Name())
+			}
+			info, infoErr := entry.Info()
+			if infoErr != nil || (!entry.IsDir() && !isManagedDotFile(info.Mode())) {
+				continue
+			}
+			candidate := candidates[rel]
+			candidate.name = entry.Name()
+			candidate.rel = rel
+			candidate.isDir = candidate.isDir || entry.IsDir()
+			candidates[rel] = candidate
+		}
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	ordered := make([]dotChildCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		ordered = append(ordered, candidate)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].isDir != ordered[j].isDir {
+			return ordered[i].isDir
+		}
+		return ordered[i].name < ordered[j].name
+	})
+	children := make([]DotChild, 0, len(ordered))
+	for _, candidate := range ordered {
+		ignored := shouldIgnoreDotPath(ignoreRoot, candidate.rel, candidate.name, ignores)
+		counts := dotFileCountsUnion(entrySourceRoot, targetRoot, "", candidate.rel, ignoreRoot, ignores, parentState)
 		child := DotChild{
-			Name:    entry.Name(),
-			RelPath: rel,
-			Path:    filepath.Join(targetRoot, rel),
-			IsDir:   entry.IsDir(),
+			Name:    candidate.name,
+			RelPath: candidate.rel,
+			Path:    filepath.Join(targetRoot, candidate.rel),
+			State:   dotChildState(entrySourceRoot, targetRoot, candidate.rel, ignored, ignores, parentState),
+			IsDir:   candidate.isDir,
 			Depth:   depth,
 			Ignored: ignored,
+			Counts:  counts,
 		}
 		if ignored {
 			child.FileCount = 0
-		} else if entry.IsDir() {
-			child.FileCount = countManagedDotFiles(sourcePath, ignores)
+		} else if candidate.isDir {
+			child.FileCount = counts.Managed()
 		} else {
 			child.FileCount = 1
 		}
-		children = append(children, child)
-		if entry.IsDir() && !ignored {
-			children = append(children, directDotChildrenAt(sourceRoot, targetRoot, rel, ignores, depth+1)...)
+		if candidate.isDir && (!ignored || ignoredDotDirHasIncludedDescendant(ignoreRoot, candidate.rel, ignores)) {
+			child.Children = directDotChildrenAt(entrySourceRoot, targetRoot, roots, ignoreRoot, candidate.rel, ignores, parentState, depth+1)
 		}
+		children = append(children, child)
 	}
 	return children
+}
+
+func ignoredDotChildren(entrySourceRoot, targetRoot, contentRoot, ignoreRoot string, ignores []string, parentState DotState) []DotChild {
+	roots := dotChildRoots(entrySourceRoot, targetRoot, contentRoot)
+	if len(roots) == 0 {
+		return nil
+	}
+	var children []DotChild
+	collectIgnoredDotChildrenAt(entrySourceRoot, targetRoot, roots, ignoreRoot, "", ignores, parentState, 1, &children)
+	return children
+}
+
+func collectIgnoredDotChildrenAt(entrySourceRoot, targetRoot string, roots []string, ignoreRoot, relRoot string, ignores []string, parentState DotState, depth int, out *[]DotChild) {
+	candidates := make(map[string]dotChildCandidate)
+	for _, root := range roots {
+		dir := root
+		if relRoot != "" {
+			dir = filepath.Join(root, relRoot)
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			rel := entry.Name()
+			if relRoot != "" {
+				rel = filepath.Join(relRoot, entry.Name())
+			}
+			info, infoErr := entry.Info()
+			if infoErr != nil || (!entry.IsDir() && !isManagedDotFile(info.Mode())) {
+				continue
+			}
+			candidate := candidates[rel]
+			candidate.name = entry.Name()
+			candidate.rel = rel
+			candidate.isDir = candidate.isDir || entry.IsDir()
+			candidates[rel] = candidate
+		}
+	}
+	if len(candidates) == 0 {
+		return
+	}
+	ordered := make([]dotChildCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		ordered = append(ordered, candidate)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].isDir != ordered[j].isDir {
+			return ordered[i].isDir
+		}
+		return ordered[i].name < ordered[j].name
+	})
+	for _, candidate := range ordered {
+		ignored := shouldIgnoreDotPath(ignoreRoot, candidate.rel, candidate.name, ignores)
+		if ignored {
+			*out = append(*out, DotChild{
+				Name:    candidate.name,
+				RelPath: candidate.rel,
+				Path:    filepath.Join(targetRoot, candidate.rel),
+				State:   DotStateIgnored,
+				IsDir:   candidate.isDir,
+				Depth:   depth,
+				Ignored: true,
+			})
+		}
+		if candidate.isDir && (!ignored || ignoredDotDirHasIncludedDescendant(ignoreRoot, candidate.rel, ignores)) {
+			collectIgnoredDotChildrenAt(entrySourceRoot, targetRoot, roots, ignoreRoot, candidate.rel, ignores, parentState, depth+1, out)
+		}
+	}
+}
+
+func dotChildState(entrySourceRoot, targetRoot, rel string, ignored bool, ignores []string, parentState DotState) DotState {
+	if ignored {
+		return DotStateIgnored
+	}
+	if entrySourceRoot == "" || !pathExists(entrySourceRoot) {
+		return parentState
+	}
+	return classifyDotPathState(filepath.Join(entrySourceRoot, rel), filepath.Join(targetRoot, rel), ignores, parentState)
+}
+
+func classifyDotPathState(sourcePath, targetPath string, ignores []string, parentState DotState) DotState {
+	sourceInfo, sourceErr := os.Lstat(sourcePath)
+	sourceExists := sourceErr == nil
+	targetInfo, targetErr := os.Lstat(targetPath)
+	targetExists := targetErr == nil
+
+	switch {
+	case !sourceExists && !targetExists:
+		return DotStateNoSource
+	case !sourceExists:
+		return DotStateLocalOnly
+	case !targetExists:
+		if parentState == DotStateRepoOnly {
+			return DotStateRepoOnly
+		}
+		return DotStateMissing
+	}
+
+	if sameResolvedPath(targetPath, sourcePath) {
+		return DotStateSynced
+	}
+	if sourceInfo.IsDir() && targetInfo.IsDir() && sourceInfo.Mode()&os.ModeSymlink == 0 && targetInfo.Mode()&os.ModeSymlink == 0 {
+		return dotLocalKindState(inspectManagedDotDirectory(dots.ResolvedEntry{
+			SourcePath: sourcePath,
+			TargetPath: targetPath,
+			Ignore:     ignores,
+		}), parentState)
+	}
+	if targetInfo.Mode()&os.ModeSymlink == 0 && localFileIsNewer(sourceInfo, targetInfo) {
+		return DotStateModified
+	}
+	if targetInfo.Mode()&os.ModeSymlink != 0 {
+		target, err := os.Readlink(targetPath)
+		if err != nil {
+			return DotStateBroken
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Clean(filepath.Join(filepath.Dir(targetPath), target))
+		}
+		if pathExists(target) {
+			return DotStateConflict
+		}
+		return DotStateBroken
+	}
+	return DotStateConflict
+}
+
+func dotLocalKindState(kind dotLocalKind, parentState DotState) DotState {
+	switch kind {
+	case dotLocalExpectedLink:
+		return DotStateSynced
+	case dotLocalMissing:
+		if parentState == DotStateRepoOnly {
+			return DotStateRepoOnly
+		}
+		return DotStateMissing
+	case dotLocalBrokenLink:
+		return DotStateBroken
+	case dotLocalModified:
+		return DotStateModified
+	default:
+		return DotStateConflict
+	}
 }
 
 func isManagedDotFile(mode os.FileMode) bool {
@@ -1973,11 +2952,11 @@ func isManagedDotFile(mode os.FileMode) bool {
 }
 
 // DotsAddIgnorePattern appends a per-entry glob pattern to the named dots entry
-// in config. The pattern is validated (filepath.Match) before saving.
+// in config. The pattern is validated before saving.
 // Adding a pattern that is already present is a no-op.
 func (a *App) DotsAddIgnorePattern(name, pattern string) error {
-	if _, err := filepath.Match(pattern, "test"); err != nil {
-		return fmt.Errorf("invalid glob pattern %q: %w", pattern, err)
+	if err := dots.ValidateIgnorePattern(pattern); err != nil {
+		return err
 	}
 	return a.withConfig(func(rootCfg *config.RootConfig) error {
 		for _, g := range rootCfg.Groups {
