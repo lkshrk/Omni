@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -4272,6 +4273,128 @@ func TestDotsReminderCheck_DirtyGitRepo(t *testing.T) {
 	if !strings.Contains(output, "Dotfiles need attention:") || !strings.Contains(output, "pending git change") {
 		t.Fatalf("dots reminder check output = %q, want git reminder", output)
 	}
+}
+
+func TestDotsReminderStatus_PrintsPersistedServiceOptions(t *testing.T) {
+	cfgPath, cacheDir := setupDotsServiceCLITest(t)
+
+	if _, err := runRootCommand(t, "--config", cfgPath, "--cache-dir", cacheDir, "dots", "reminder", "install", "--interval", "3h", "--notify=false"); err != nil {
+		t.Fatalf("dots reminder install: %v", err)
+	}
+	output, err := runRootCommand(t, "--config", cfgPath, "--cache-dir", cacheDir, "dots", "reminder", "status")
+	if err != nil {
+		t.Fatalf("dots reminder status: %v", err)
+	}
+
+	for _, want := range []string{
+		"Dots reminder service: installed",
+		"Interval: 3h0m0s",
+		"Notifications: false",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("dots reminder status output = %q, want %q", output, want)
+		}
+	}
+}
+
+func TestDotsWatchStatus_PrintsPersistedServiceOptions(t *testing.T) {
+	cfgPath, cacheDir := setupDotsServiceCLITest(t)
+
+	if _, err := runRootCommand(t, "--config", cfgPath, "--cache-dir", cacheDir, "dots", "watch", "install", "--debounce", "7s"); err != nil {
+		t.Fatalf("dots watch install: %v", err)
+	}
+	output, err := runRootCommand(t, "--config", cfgPath, "--cache-dir", cacheDir, "dots", "watch", "status")
+	if err != nil {
+		t.Fatalf("dots watch status: %v", err)
+	}
+
+	for _, want := range []string{
+		"Dots watch service: installed",
+		"Debounce: 7s",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("dots watch status output = %q, want %q", output, want)
+		}
+	}
+}
+
+func TestDotsServiceCommandsUseAppDefaultDurations(t *testing.T) {
+	root := NewRootCmd()
+	reminderInstall := findCommand(root, []string{"dots", "reminder", "install"})
+	if reminderInstall == nil {
+		t.Fatal("missing dots reminder install command")
+	}
+	if got := reminderInstall.Flags().Lookup("interval").DefValue; got != app.DefaultDotsReminderInterval().String() {
+		t.Fatalf("reminder interval default = %q, want %q", got, app.DefaultDotsReminderInterval())
+	}
+
+	watchRun := findCommand(root, []string{"dots", "watch", "run"})
+	if watchRun == nil {
+		t.Fatal("missing dots watch run command")
+	}
+	if got := watchRun.Flags().Lookup("debounce").DefValue; got != app.DefaultDotsWatchDebounce().String() {
+		t.Fatalf("watch run debounce default = %q, want %q", got, app.DefaultDotsWatchDebounce())
+	}
+
+	watchInstall := findCommand(root, []string{"dots", "watch", "install"})
+	if watchInstall == nil {
+		t.Fatal("missing dots watch install command")
+	}
+	if got := watchInstall.Flags().Lookup("debounce").DefValue; got != app.DefaultDotsWatchDebounce().String() {
+		t.Fatalf("watch install debounce default = %q, want %q", got, app.DefaultDotsWatchDebounce())
+	}
+}
+
+func setupDotsServiceCLITest(t *testing.T) (string, string) {
+	t.Helper()
+	switch runtime.GOOS {
+	case "darwin", "linux":
+	default:
+		t.Skipf("native dots services are not supported on %s", runtime.GOOS)
+	}
+
+	home := t.TempDir()
+	binDir := filepath.Join(home, "bin")
+	repoDir := filepath.Join(home, "dotfiles")
+	configDir := filepath.Join(home, "config")
+	cacheDir := filepath.Join(home, "cache")
+	cfgPath := filepath.Join(configDir, "settings.json")
+	for _, dir := range []string{binDir, repoDir, configDir, cacheDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"stow", "systemctl", "launchctl"} {
+		if err := os.WriteFile(filepath.Join(binDir, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg-config"))
+	t.Setenv("PATH", binDir)
+
+	withConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{DotsRepo: repoDir},
+		Groups:   []*config.GroupConfig{{Name: "testhost", Special: "host"}},
+		Hosts:    map[string][]string{"testhost": {}},
+	})
+	return cfgPath, cacheDir
+}
+
+func runRootCommand(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	cmd := NewRootCmd()
+	out := &bytes.Buffer{}
+	errOut := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(errOut)
+	cmd.SetArgs(args)
+	err := cmd.Execute()
+	if err != nil && errOut.Len() > 0 {
+		return out.String() + errOut.String(), err
+	}
+	return out.String(), err
 }
 
 func TestList_SingleToolAndStateFilter_PrintsOnlyMatch(t *testing.T) {

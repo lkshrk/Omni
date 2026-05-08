@@ -15,7 +15,7 @@ ARGS        ?= --help
 GIT_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS     := -X $(MODULE)/internal/cli.Version=$(GIT_VERSION)
 
-.PHONY: build run tui-live tui-dev cli cli-live cli-dev dev-bootstrap test test-package-managers test-all test-integration-build test-integration lint clean install gen-schema demo-gif
+.PHONY: build run tui-live tui-dev cli cli-live cli-dev dev-bootstrap test test-scripts test-package-managers test-all test-integration-build test-integration lint clean install gen-schema demo-gif
 
 ## build: compile the binary to ./bin/omni
 build:
@@ -68,9 +68,13 @@ demo-gif:
 		vhs "$(DEMO_TAPE)"; \
 	fi
 
-## test: run unit tests with race detector
-test:
+## test: run unit tests with race detector and script regressions
+test: test-scripts
 	go test -race ./...
+
+## test-scripts: run shell-script regression tests
+test-scripts:
+	bash scripts/test-release.sh
 
 ## test-package-managers: run real package-manager provider tests in minimal distro containers
 test-package-managers:

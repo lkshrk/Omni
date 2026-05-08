@@ -503,6 +503,13 @@ func (m Model) currentDotsWatchDebounce() time.Duration {
 	return dotsWatchDebounceFromService(m.dotsWatchService)
 }
 
+func (m Model) dotsWatchDebounceForServiceInstall() time.Duration {
+	if m.dotsWatchDebounceNext > 0 {
+		return m.dotsWatchDebounceNext
+	}
+	return m.currentDotsWatchDebounce()
+}
+
 func dotsReminderIntervalFromService(service *app.DotsReminderService) time.Duration {
 	if service != nil && service.Interval > 0 {
 		return service.Interval

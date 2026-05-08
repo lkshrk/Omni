@@ -771,7 +771,7 @@ func visibleAdminTerminalOutputLines(output string, width, height int) []string 
 	return lines
 }
 
-func startAdminTerminalProcess(ctx context.Context, state adminTerminalState, cols, rows int, events chan<- tea.Msg) (*adminTerminalSession, error) {
+func startAdminTerminalProcess(ctx context.Context, state adminTerminalState, cols, rows int, events chan tea.Msg) (*adminTerminalSession, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -816,11 +816,17 @@ func startAdminTerminalProcess(ctx context.Context, state adminTerminalState, co
 	return &adminTerminalSession{ptmx: ptmx}, nil
 }
 
-func sendAdminTerminalOutput(events chan<- tea.Msg, msg adminTerminalOutputMsg) {
+func sendAdminTerminalOutput(events chan tea.Msg, msg adminTerminalOutputMsg) {
 	select {
 	case events <- msg:
+		return
 	default:
 	}
+	select {
+	case <-events:
+	default:
+	}
+	events <- msg
 }
 
 func adminTerminalWinsize(cols, rows int) *pty.Winsize {

@@ -19,6 +19,38 @@ usage() {
 [[ $# -ne 1 ]] && usage
 
 INPUT="$1"
+BRANCH=""
+PUBLISHED_REMOTE_HEAD=""
+
+ensure_release_branch_current() {
+  BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+  if [[ -z "$BRANCH" ]]; then
+    echo "Error: must be on a branch, not detached HEAD." >&2
+    exit 1
+  fi
+
+  if git diff --quiet && git diff --cached --quiet; then
+    git pull --ff-only origin "$BRANCH"
+  else
+    git fetch origin "$BRANCH"
+    if ! git merge-base --is-ancestor "refs/remotes/origin/${BRANCH}" HEAD; then
+      echo "Error: ${BRANCH} is behind or diverged from origin/${BRANCH}." >&2
+      echo "Pull/rebase before including local changes in a release." >&2
+      exit 1
+    fi
+  fi
+
+  PUBLISHED_REMOTE_HEAD=$(git rev-parse "refs/remotes/origin/${BRANCH}")
+}
+
+verify_release_branch_still_current() {
+  git fetch origin "$BRANCH"
+  if ! git merge-base --is-ancestor "refs/remotes/origin/${BRANCH}" HEAD; then
+    echo "Error: origin/${BRANCH} changed while preparing the release." >&2
+    echo "Pull/rebase, rerun the release script, and create the tag from the updated branch." >&2
+    exit 1
+  fi
+}
 
 commit_remaining_changes() {
   if git diff --quiet && git diff --cached --quiet; then
@@ -67,11 +99,19 @@ amend_demo_gif() {
           exit 1
         fi
         git add docs/assets/omni-demo.gif
-        git commit --amend --no-edit --only docs/assets/omni-demo.gif
+        if [[ -n "$PUBLISHED_REMOTE_HEAD" ]] && [[ "$(git rev-parse HEAD)" == "$PUBLISHED_REMOTE_HEAD" ]]; then
+          git commit -m "chore: update demo gif" -- docs/assets/omni-demo.gif
+        else
+          git commit --amend --no-edit --only docs/assets/omni-demo.gif
+        fi
       fi
       ;;
   esac
 }
+
+# Pull or verify origin before any local release commits/amends. This prevents
+# demo GIF generation from rewriting an already-published origin HEAD.
+ensure_release_branch_current
 
 # Commit optional release-prep changes before the demo GIF so the generated
 # asset can be amended into that commit instead of becoming a separate commit.
@@ -81,15 +121,9 @@ amend_demo_gif
 # Require an intentional clean working tree.
 ensure_clean_worktree
 
-# Require being on a branch.
-BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
-if [[ -z "$BRANCH" ]]; then
-  echo "Error: must be on a branch, not detached HEAD." >&2
-  exit 1
-fi
-
-# Pull latest so we tag the right commit.
-git pull --ff-only origin "$BRANCH"
+# Re-check origin before creating a local tag so a concurrent branch update
+# fails before leaving behind a tag that cannot be pushed with the branch.
+verify_release_branch_still_current
 
 # Resolve current version from latest tag (default v0.0.0 if no tags yet).
 CURRENT=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")

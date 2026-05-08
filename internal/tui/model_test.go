@@ -1258,6 +1258,7 @@ func TestModel_SettingsWatchDebouncePickerUpdatesInstalledService(t *testing.T) 
 	m.settingsCursor = settingsRowDotsWatchDebounce
 	m.dotsWatchService = &app.DotsWatchService{Installed: true, Debounce: time.Second}
 	m.dotsWatchDebounce = time.Second
+	m.stowInstalled = true
 
 	var cmds []tea.Cmd
 	m.handleSettingsEditAction(&cmds)
@@ -1270,14 +1271,119 @@ func TestModel_SettingsWatchDebouncePickerUpdatesInstalledService(t *testing.T) 
 	if m.editingServiceDuration {
 		t.Fatal("enter should close duration picker")
 	}
-	if m.dotsWatchDebounce != 2*time.Second {
-		t.Fatalf("dotsWatchDebounce = %s, want 2s", m.dotsWatchDebounce)
+	if m.dotsWatchDebounce != time.Second {
+		t.Fatalf("dotsWatchDebounce = %s, want old 1s value until service update succeeds", m.dotsWatchDebounce)
+	}
+	if m.dotsWatchDebounceNext != 2*time.Second {
+		t.Fatalf("dotsWatchDebounceNext = %s, want pending 2s value", m.dotsWatchDebounceNext)
 	}
 	if !m.loading {
 		t.Fatal("installed watch debounce update should start service work")
 	}
 	if len(cmds) != 2 {
 		t.Fatalf("installed watch debounce update commands = %d, want spinner + service command", len(cmds))
+	}
+
+	m = drive(m, dotsServiceChangedMsg{
+		kind:    dotsWatchServiceKind,
+		enabled: true,
+		watch:   &app.DotsWatchService{Installed: true, Debounce: 2 * time.Second},
+	})
+	if m.dotsWatchDebounce != 2*time.Second {
+		t.Fatalf("dotsWatchDebounce after success = %s, want 2s", m.dotsWatchDebounce)
+	}
+	if m.dotsWatchDebounceNext != 0 {
+		t.Fatalf("dotsWatchDebounceNext after success = %s, want cleared", m.dotsWatchDebounceNext)
+	}
+}
+
+func TestModel_SettingsWatchDebouncePickerPromptsForStowBeforeInstalledServiceUpdate(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "watchdebouncestow")
+	t.Setenv("PATH", t.TempDir())
+	a, _ := newCmdApp(t, &okProvider{name: "brew"}, nil)
+	m := modelForCmds(a)
+	m.settingsCursor = settingsRowDotsWatchDebounce
+	m.dotsWatchService = &app.DotsWatchService{Installed: true, Debounce: time.Second}
+	m.dotsWatchDebounce = time.Second
+
+	var cmds []tea.Cmd
+	m.handleSettingsEditAction(&cmds)
+	cmds = m.handleSettingsServiceDurationKeyMsg(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	if len(cmds) != 0 {
+		t.Fatalf("adjusting duration produced %d commands, want none", len(cmds))
+	}
+	cmds = m.handleSettingsServiceDurationKeyMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if !m.stowInstallPrompt {
+		t.Fatal("installed watch debounce update should prompt for GNU Stow before service work")
+	}
+	if m.stowInstallAction != stowInstallDotsWatch {
+		t.Fatalf("stowInstallAction = %v, want stowInstallDotsWatch", m.stowInstallAction)
+	}
+	if m.dotsWatchDebounce != time.Second {
+		t.Fatalf("dotsWatchDebounce = %s, want old 1s value until service update succeeds", m.dotsWatchDebounce)
+	}
+	if m.loading {
+		t.Fatal("installed watch debounce update should wait for stow prompt before loading")
+	}
+	if len(cmds) != 0 {
+		t.Fatalf("installed watch debounce update commands = %d, want none until stow prompt is answered", len(cmds))
+	}
+}
+
+func TestModel_DotsWatchDebounceRevertsWhenInstalledServiceUpdateFails(t *testing.T) {
+	oldService := &app.DotsWatchService{Installed: true, Debounce: time.Second}
+	m := baseModel(nil)
+	m.dotsWatchService = oldService
+	m.dotsWatchDebounce = 2 * time.Second
+	m.loading = true
+
+	got := drive(m, dotsServiceChangedMsg{
+		kind:    dotsWatchServiceKind,
+		enabled: true,
+		watch:   &app.DotsWatchService{Installed: true, Debounce: 5 * time.Second},
+		err:     errors.New("install watch service: stow not found"),
+	})
+
+	if got.loading {
+		t.Fatal("service result should clear loading")
+	}
+	if got.dotsWatchService != oldService {
+		t.Fatalf("dotsWatchService was replaced on error: %+v", got.dotsWatchService)
+	}
+	if got.dotsWatchDebounce != time.Second {
+		t.Fatalf("dotsWatchDebounce = %s, want restored service value 1s", got.dotsWatchDebounce)
+	}
+	if !got.statusIsErr || !strings.Contains(got.statusMsg, "stow not found") {
+		t.Fatalf("status = (%q, err=%v), want stow error", got.statusMsg, got.statusIsErr)
+	}
+}
+
+func TestModel_DotsReminderIntervalRevertsWhenInstalledServiceUpdateFails(t *testing.T) {
+	oldService := &app.DotsReminderService{Installed: true, Interval: 2 * time.Hour}
+	m := baseModel(nil)
+	m.dotsReminderService = oldService
+	m.dotsReminderInterval = 4 * time.Hour
+	m.loading = true
+
+	got := drive(m, dotsServiceChangedMsg{
+		kind:     dotsReminderServiceKind,
+		enabled:  true,
+		reminder: &app.DotsReminderService{Installed: true, Interval: 8 * time.Hour},
+		err:      errors.New("install reminder service: launchctl failed"),
+	})
+
+	if got.loading {
+		t.Fatal("service result should clear loading")
+	}
+	if got.dotsReminderService != oldService {
+		t.Fatalf("dotsReminderService was replaced on error: %+v", got.dotsReminderService)
+	}
+	if got.dotsReminderInterval != 2*time.Hour {
+		t.Fatalf("dotsReminderInterval = %s, want restored service value 2h", got.dotsReminderInterval)
+	}
+	if !got.statusIsErr || !strings.Contains(got.statusMsg, "launchctl failed") {
+		t.Fatalf("status = (%q, err=%v), want launchctl error", got.statusMsg, got.statusIsErr)
 	}
 }
 

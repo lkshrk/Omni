@@ -210,6 +210,10 @@ func (a *App) InstallDotsWatchService(ctx context.Context, opts DotsWatchInstall
 			return nil, fmt.Errorf("resolve executable: %w", err)
 		}
 	}
+	exe, err = filepath.Abs(exe)
+	if err != nil {
+		return nil, fmt.Errorf("resolve executable: %w", err)
+	}
 	service, err := a.dotsWatchServiceForPlatform(runtime.GOOS, exe, debounce)
 	if err != nil {
 		return nil, err
@@ -467,11 +471,11 @@ func (a *App) dotsWatchPaths() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	roots := []string{dotsContentPath(rawRepo)}
 	mgr, err := dots.New(dotsContentPath(rawRepo), entries)
 	if err != nil {
 		return nil, fmt.Errorf("dots watch: resolve entries: %w", err)
 	}
+	roots := make([]string, 0, len(mgr.Entries)*2)
 	for _, entry := range mgr.Entries {
 		roots = append(roots, entry.SourcePath, entry.TargetPath)
 	}
@@ -529,9 +533,9 @@ func collectDotsWatchPaths(root string, out map[string]struct{}) error {
 		return fmt.Errorf("dots watch: stat %q: %w", existing, err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
+		out[filepath.Dir(existing)] = struct{}{}
 		resolved, err := filepath.EvalSymlinks(existing)
 		if err != nil {
-			out[filepath.Dir(existing)] = struct{}{}
 			return nil
 		}
 		existing = resolved
@@ -602,7 +606,12 @@ func dotsWatchPathHasSegment(path, segment string) bool {
 	return false
 }
 
-func setDotsWatchPaths(watcher *fsnotify.Watcher, current map[string]struct{}, paths []string) (map[string]struct{}, error) {
+type dotsPathWatcher interface {
+	Add(string) error
+	Remove(string) error
+}
+
+func setDotsWatchPaths(watcher dotsPathWatcher, current map[string]struct{}, paths []string) (map[string]struct{}, error) {
 	if current == nil {
 		current = make(map[string]struct{})
 	}
@@ -614,7 +623,7 @@ func setDotsWatchPaths(watcher *fsnotify.Watcher, current map[string]struct{}, p
 		if _, ok := next[path]; ok {
 			continue
 		}
-		if err := watcher.Remove(path); err != nil && !os.IsNotExist(err) {
+		if err := watcher.Remove(path); err != nil && !os.IsNotExist(err) && !errors.Is(err, fsnotify.ErrNonExistentWatch) {
 			return current, fmt.Errorf("dots watch: remove %q: %w", path, err)
 		}
 		delete(current, path)

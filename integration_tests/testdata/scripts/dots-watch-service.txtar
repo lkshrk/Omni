@@ -35,6 +35,7 @@ stdout 'enable --now omni-dots-watch.service'
 
 exec omni --config settings.json --cache-dir cache dots watch status
 stdout 'Dots watch service: installed \(systemd\)'
+stdout 'Debounce: 2s'
 
 exec omni --config settings.json --cache-dir cache dots watch uninstall
 stdout 'Uninstalled dots watch service'
@@ -44,6 +45,7 @@ stdout 'disable --now omni-dots-watch.service'
 
 exec omni --config settings.json --cache-dir cache dots watch status
 stdout 'Dots watch service: not installed \(systemd\)'
+stdout 'Debounce: 5s'
 
 -- settings.json --
 {"host_settings":{"testhost":{"dots_repo":"~/dotfiles"}},"hosts":{"testhost":[]},"groups":[{"name":"testhost","special":"host"}]}
