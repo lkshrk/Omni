@@ -218,7 +218,7 @@ func (p pathPickerModel) View(pal palette) string {
 	sb.WriteString(strings.Join(rows, "\n"))
 	sb.WriteString("\n\n")
 	sb.WriteString(pal.styleHelp.Render("path "))
-	sb.WriteString(p.input.View())
+	sb.WriteString(renderEmptyAwareTextInputView(pal, p.input, p.input.Placeholder, pathPickerInputWidth(p.width)))
 	return sb.String()
 }
 

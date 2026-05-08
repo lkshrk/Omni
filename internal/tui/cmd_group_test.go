@@ -1,6 +1,6 @@
 package tui
 
-// cmd_group_test.go — unit tests for group/profile/hostname do* commands
+// cmd_group_test.go — unit tests for group/host do* commands
 // and the error branches of the dots pull/push/overwrite commands.
 //
 // All tests call cmd() directly (the tea.Cmd closure) rather than driving
@@ -23,20 +23,19 @@ import (
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-// newGroupApp builds an App with a minimal settings.json that has one profile
-// ("default") and one named group ("mygroup"), ready for group/profile ops.
+// newGroupApp builds an App with a minimal settings.json that has one host
+// ("default") and one named group ("mygroup"), ready for group/host ops.
 func newGroupApp(t *testing.T) *app.App {
 	t.Helper()
+	t.Setenv("OMNI_HOSTNAME", "default")
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
 		Groups: []*config.GroupConfig{
-			{Name: "base"},
+			{Name: "default", Special: "host"},
 			{Name: "mygroup"},
 		},
-		Profiles: map[string]config.Profile{
-			"default": {Groups: []string{"base", "mygroup"}},
-		},
+		Hosts: map[string][]string{"default": {"mygroup"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -69,6 +68,15 @@ func TestDoCreateGroup_Success(t *testing.T) {
 	if got.name != "newgroup" {
 		t.Errorf("name = %q, want %q", got.name, "newgroup")
 	}
+	if !slices.Contains(got.groupNames, "newgroup") {
+		t.Fatalf("groupNames = %v, want newgroup", got.groupNames)
+	}
+	if got.hostInfo == nil {
+		t.Fatal("hostInfo should be refreshed after group creation")
+	}
+	if groups := got.hostInfo.Hosts[shortHostname()].Groups; !slices.Contains(groups, "newgroup") {
+		t.Fatalf("new group should be assigned to current host, groups=%v", groups)
+	}
 }
 
 func TestDoCreateGroup_DuplicateIsOK(t *testing.T) {
@@ -83,14 +91,14 @@ func TestDoCreateGroup_DuplicateIsOK(t *testing.T) {
 	// Whether err is nil or not depends on app semantics; we just assert no panic.
 }
 
-// ── doAddGroupToProfile ───────────────────────────────────────────────────────
+// ── doAddGroupToHost ───────────────────────────────────────────────────────
 
-func TestDoAddGroupToProfile_Success(t *testing.T) {
+func TestDoAddGroupToHost_Success(t *testing.T) {
 	m := modelWithGroupApp(t)
-	msg := m.doAddGroupToProfile("default", "mygroup")()
-	got, ok := msg.(profileGroupChangedMsg)
+	msg := m.doAddGroupToHost("default", "mygroup")()
+	got, ok := msg.(hostGroupChangedMsg)
 	if !ok {
-		t.Fatalf("expected profileGroupChangedMsg, got %T", msg)
+		t.Fatalf("expected hostGroupChangedMsg, got %T", msg)
 	}
 	if got.err != nil {
 		t.Errorf("unexpected error: %v", got.err)
@@ -98,29 +106,29 @@ func TestDoAddGroupToProfile_Success(t *testing.T) {
 	if !got.added {
 		t.Error("expected added=true")
 	}
-	if got.profile != "default" {
-		t.Errorf("profile = %q, want %q", got.profile, "default")
+	if got.host != "default" {
+		t.Errorf("host = %q, want %q", got.host, "default")
 	}
 }
 
-func TestDoAddGroupToProfile_NewProfile(t *testing.T) {
-	// Adding a group to a non-existent profile should create it (app is idempotent).
+func TestDoAddGroupToHost_NewHost(t *testing.T) {
+	// Adding a group to a non-existent host should create it (app is idempotent).
 	m := modelWithGroupApp(t)
-	msg := m.doAddGroupToProfile("brandnew", "mygroup")()
-	_, ok := msg.(profileGroupChangedMsg)
+	msg := m.doAddGroupToHost("brandnew", "mygroup")()
+	_, ok := msg.(hostGroupChangedMsg)
 	if !ok {
-		t.Fatalf("expected profileGroupChangedMsg, got %T", msg)
+		t.Fatalf("expected hostGroupChangedMsg, got %T", msg)
 	}
 }
 
-// ── doRemoveGroupFromProfile ──────────────────────────────────────────────────
+// ── doRemoveGroupFromHost ──────────────────────────────────────────────────
 
-func TestDoRemoveGroupFromProfile_Success(t *testing.T) {
+func TestDoRemoveGroupFromHost_Success(t *testing.T) {
 	m := modelWithGroupApp(t)
-	msg := m.doRemoveGroupFromProfile("default", "mygroup")()
-	got, ok := msg.(profileGroupChangedMsg)
+	msg := m.doRemoveGroupFromHost("default", "mygroup")()
+	got, ok := msg.(hostGroupChangedMsg)
 	if !ok {
-		t.Fatalf("expected profileGroupChangedMsg, got %T", msg)
+		t.Fatalf("expected hostGroupChangedMsg, got %T", msg)
 	}
 	if got.err != nil {
 		t.Errorf("unexpected error: %v", got.err)
@@ -128,44 +136,44 @@ func TestDoRemoveGroupFromProfile_Success(t *testing.T) {
 	if got.added {
 		t.Error("expected added=false for remove")
 	}
-	if got.profile != "default" {
-		t.Errorf("profile = %q, want %q", got.profile, "default")
+	if got.host != "default" {
+		t.Errorf("host = %q, want %q", got.host, "default")
 	}
 	if got.group != "mygroup" {
 		t.Errorf("group = %q, want %q", got.group, "mygroup")
 	}
 }
 
-func TestDoRemoveGroupFromProfile_MissingProfileIsOK(t *testing.T) {
+func TestDoRemoveGroupFromHost_MissingHostIsOK(t *testing.T) {
 	m := modelWithGroupApp(t)
-	msg := m.doRemoveGroupFromProfile("nonexistent", "mygroup")()
-	_, ok := msg.(profileGroupChangedMsg)
+	msg := m.doRemoveGroupFromHost("nonexistent", "mygroup")()
+	_, ok := msg.(hostGroupChangedMsg)
 	if !ok {
-		t.Fatalf("expected profileGroupChangedMsg, got %T", msg)
+		t.Fatalf("expected hostGroupChangedMsg, got %T", msg)
 	}
 }
 
-func TestDoSetProfileGroups_UpdatesMemberships(t *testing.T) {
+func TestDoSetHostGroups_UpdatesMemberships(t *testing.T) {
 	m := modelWithGroupApp(t)
-	msg := m.doSetProfileGroups("default", []string{"base", "mygroup"}, []string{"base", "newgroup"}, []string{"newgroup"})()
-	got, ok := msg.(profileGroupChangedMsg)
+	msg := m.doSetHostGroups("default", []string{"mygroup"}, []string{"newgroup"}, []string{"newgroup"})()
+	got, ok := msg.(hostGroupChangedMsg)
 	if !ok {
-		t.Fatalf("expected profileGroupChangedMsg, got %T", msg)
+		t.Fatalf("expected hostGroupChangedMsg, got %T", msg)
 	}
 	if got.err != nil {
 		t.Fatalf("unexpected error: %v", got.err)
 	}
-	info, err := m.app.ProfileStatus()
+	info, err := m.app.HostStatus()
 	if err != nil {
-		t.Fatalf("ProfileStatus: %v", err)
+		t.Fatalf("HostStatus: %v", err)
 	}
-	groups := info.Profiles["default"].Groups
-	if !slices.Contains(groups, "base") || !slices.Contains(groups, "newgroup") || slices.Contains(groups, "mygroup") {
-		t.Fatalf("profile groups = %v, want base + newgroup only", groups)
+	groups := info.Hosts["default"].Groups
+	if !slices.Contains(groups, "newgroup") || slices.Contains(groups, "mygroup") {
+		t.Fatalf("host groups = %v, want newgroup only", groups)
 	}
 }
 
-func TestDoSetProfileGroupTools_UpdatesMembershipsAndIgnores(t *testing.T) {
+func TestDoSetHostGroupTools_UpdatesMembershipsAndIgnores(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
@@ -175,11 +183,14 @@ func TestDoSetProfileGroupTools_UpdatesMembershipsAndIgnores(t *testing.T) {
 			"ruff":    {Provider: "python"},
 		},
 		Groups: []*config.GroupConfig{{
+			Name:    "default",
+			Special: "host",
+		}, {
 			Name:   "work",
 			Tools:  []config.ToolEntry{{Name: "ripgrep"}},
 			Ignore: []string{"ruff"},
 		}},
-		Profiles: map[string]config.Profile{"default": {Groups: []string{"work"}}},
+		Hosts: map[string][]string{"default": {"work"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +202,7 @@ func TestDoSetProfileGroupTools_UpdatesMembershipsAndIgnores(t *testing.T) {
 	t.Cleanup(func() { _ = a.Close() })
 
 	m := modelForCmds(a)
-	msg := m.doSetProfileGroupTools(
+	msg := m.doSetGroupTools(
 		"work",
 		map[string]bool{"ripgrep": false, "eslint": true, "ruff": false},
 		map[string]bool{"ripgrep": true, "eslint": false, "ruff": false},
@@ -217,20 +228,21 @@ func TestDoSetProfileGroupTools_UpdatesMembershipsAndIgnores(t *testing.T) {
 	if !slices.ContainsFunc(work.Tools, func(t config.ToolEntry) bool { return t.Name == "eslint" }) {
 		t.Fatalf("eslint should be added to work tools: %+v", work.Tools)
 	}
-	if !slices.Contains(work.Ignore, "ruff") || !slices.Contains(work.Ignore, "eslint") {
-		t.Fatalf("work ignore = %v, want ruff and eslint", work.Ignore)
+	if !slices.Contains(cfg.Ignore.Tools, "ruff") || !slices.Contains(cfg.Ignore.Tools, "eslint") {
+		t.Fatalf("global ignore = %v, want ruff and eslint", cfg.Ignore.Tools)
 	}
 }
 
-func TestDoSetProfileGroupDots_UpdatesMemberships(t *testing.T) {
+func TestDoSetHostGroupDots_UpdatesMemberships(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
 		Groups: []*config.GroupConfig{
 			{
+				Name:    "default",
+				Special: "host",
 				Dots: []config.DotEntry{
 					{Name: "nvim", Path: "~/.config/nvim"},
-					{Name: "zsh", Path: "~/.zshrc"},
 				},
 			},
 			{
@@ -238,7 +250,7 @@ func TestDoSetProfileGroupDots_UpdatesMemberships(t *testing.T) {
 				Dots: []config.DotEntry{{Name: "zsh", Path: "~/.zshrc"}},
 			},
 		},
-		Profiles: map[string]config.Profile{"default": {Groups: []string{"work"}}},
+		Hosts: map[string][]string{"default": {"work"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +262,7 @@ func TestDoSetProfileGroupDots_UpdatesMemberships(t *testing.T) {
 	t.Cleanup(func() { _ = a.Close() })
 
 	m := modelForCmds(a)
-	msg := m.doSetProfileGroupDots(
+	msg := m.doSetGroupDots(
 		"work",
 		map[string]bool{"nvim": true, "zsh": false},
 		map[string]bool{"nvim": false, "zsh": true},
@@ -267,7 +279,7 @@ func TestDoSetProfileGroupDots_UpdatesMemberships(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	work := cfg.Groups[1]
+	work := findTestGroup(cfg, "work")
 	if !slices.ContainsFunc(work.Dots, func(d config.DotEntry) bool { return d.Name == "nvim" }) {
 		t.Fatalf("nvim should be added to work dots: %+v", work.Dots)
 	}
@@ -279,62 +291,41 @@ func TestDoSetProfileGroupDots_UpdatesMemberships(t *testing.T) {
 	}
 }
 
-func TestDoSetProfileHosts_UpdatesMappings(t *testing.T) {
-	m := modelWithGroupApp(t)
-	msg := m.doSetProfileHosts("default", map[string]string{"oldhost": "default"}, map[string]string{"oldhost": "", "newhost": "default"})()
-	got, ok := msg.(profileGroupChangedMsg)
-	if !ok {
-		t.Fatalf("expected profileGroupChangedMsg, got %T", msg)
-	}
-	if got.err != nil {
-		t.Fatalf("unexpected error: %v", got.err)
-	}
-	info, err := m.app.ProfileStatus()
-	if err != nil {
-		t.Fatalf("ProfileStatus: %v", err)
-	}
-	if _, ok := info.Hostnames["oldhost"]; ok {
-		t.Fatal("oldhost mapping should be removed")
-	}
-	if got := info.Hostnames["newhost"]; got != "default" {
-		t.Fatalf("newhost mapping = %q, want default", got)
-	}
-}
+// ── doRemoveHostFromTab ────────────────────────────────────────────────────
 
-// ── doDeleteProfileFromTab ────────────────────────────────────────────────────
-
-func TestDoDeleteProfileFromTab_Success(t *testing.T) {
+func TestDoRemoveHostFromTab_Success(t *testing.T) {
 	m := modelWithGroupApp(t)
-	msg := m.doDeleteProfileFromTab("default")()
-	got, ok := msg.(profileGroupChangedMsg)
+	msg := m.doRemoveHostFromTab("default")()
+	got, ok := msg.(hostGroupChangedMsg)
 	if !ok {
-		t.Fatalf("expected profileGroupChangedMsg, got %T", msg)
+		t.Fatalf("expected hostGroupChangedMsg, got %T", msg)
 	}
 	if got.err != nil {
 		t.Errorf("unexpected error: %v", got.err)
 	}
-	if got.profile != "default" {
-		t.Errorf("profile = %q, want %q", got.profile, "default")
+	if got.host != "default" {
+		t.Errorf("host = %q, want %q", got.host, "default")
 	}
 }
 
-func TestDoDeleteProfileFromTab_NonexistentIsOK(t *testing.T) {
+func TestDoRemoveHostFromTab_NonexistentIsOK(t *testing.T) {
 	m := modelWithGroupApp(t)
-	msg := m.doDeleteProfileFromTab("ghost")()
-	_, ok := msg.(profileGroupChangedMsg)
+	msg := m.doRemoveHostFromTab("ghost")()
+	_, ok := msg.(hostGroupChangedMsg)
 	if !ok {
-		t.Fatalf("expected profileGroupChangedMsg, got %T", msg)
+		t.Fatalf("expected hostGroupChangedMsg, got %T", msg)
 	}
 }
 
-func TestProfileDeleteConfirm_UsesCapturedProfileName(t *testing.T) {
+func TestHostDeleteConfirm_UsesCapturedHostName(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
-		Profiles: map[string]config.Profile{
-			"alpha": {},
-			"beta":  {},
+		Groups: []*config.GroupConfig{
+			{Name: "alpha", Special: "host"},
+			{Name: "beta", Special: "host"},
 		},
+		Hosts: map[string][]string{"alpha": {}, "beta": {}},
 	}); err != nil {
 		t.Fatalf("saveTUIConfig: %v", err)
 	}
@@ -343,24 +334,24 @@ func TestProfileDeleteConfirm_UsesCapturedProfileName(t *testing.T) {
 		t.Fatalf("InitTestMode: %v", err)
 	}
 	defer func() { _ = a.Close() }()
-	info, err := a.ProfileStatus()
+	info, err := a.HostStatus()
 	if err != nil {
-		t.Fatalf("ProfileStatus: %v", err)
+		t.Fatalf("HostStatus: %v", err)
 	}
 	m := baseModel(nil)
 	m.app = a
-	m.profileInfo = info
-	m.profileSection = 0
-	m.profileCursor = 0
+	m.hostInfo = info
+	m.assignmentSection = 0
+	m.hostCursor = 0
 
 	var armCmds []tea.Cmd
-	m.startProfileDelete(&armCmds)
-	if !m.profileDeleteConfirm || m.profileDeleteName != "alpha" {
-		t.Fatalf("delete confirmation target = confirm:%v name:%q, want alpha", m.profileDeleteConfirm, m.profileDeleteName)
+	m.startHostDelete(&armCmds)
+	if !m.hostDeleteConfirm || m.hostDeleteName != "alpha" {
+		t.Fatalf("delete confirmation target = confirm:%v name:%q, want alpha", m.hostDeleteConfirm, m.hostDeleteName)
 	}
 
-	m.profileCursor = 1
-	handled, cmds := m.handleProfileSubmodeKeyMsg(pressEnter().(tea.KeyPressMsg))
+	m.hostCursor = 1
+	handled, cmds := m.handleHostSubmodeKeyMsg(pressEnter().(tea.KeyPressMsg))
 	if !handled {
 		t.Fatal("delete confirmation key should be handled")
 	}
@@ -368,36 +359,35 @@ func TestProfileDeleteConfirm_UsesCapturedProfileName(t *testing.T) {
 		t.Fatalf("confirm returned %d commands, want 1", len(cmds))
 	}
 	msg := cmds[0]()
-	got, ok := msg.(profileGroupChangedMsg)
+	got, ok := msg.(hostGroupChangedMsg)
 	if !ok {
-		t.Fatalf("confirm command returned %T, want profileGroupChangedMsg", msg)
+		t.Fatalf("confirm command returned %T, want hostGroupChangedMsg", msg)
 	}
 	if got.err != nil {
-		t.Fatalf("delete profile returned error: %v", got.err)
+		t.Fatalf("delete host returned error: %v", got.err)
 	}
-	if got.profile != "alpha" {
-		t.Fatalf("deleted profile = %q, want alpha", got.profile)
+	if got.host != "alpha" {
+		t.Fatalf("deleted host = %q, want alpha", got.host)
 	}
-	if _, ok := got.info.Profiles["alpha"]; ok {
-		t.Fatal("alpha profile should be deleted")
+	if _, ok := got.info.Hosts["alpha"]; ok {
+		t.Fatal("alpha host should be deleted")
 	}
-	if _, ok := got.info.Profiles["beta"]; !ok {
-		t.Fatal("beta profile should remain")
+	if _, ok := got.info.Hosts["beta"]; !ok {
+		t.Fatal("beta host should remain")
 	}
 }
 
 func TestGroupDeleteConfirm_UsesCapturedGroupName(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "default")
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
 		Groups: []*config.GroupConfig{
-			{Name: "base"},
+			{Name: "default", Special: "host"},
 			{Name: "alpha"},
 			{Name: "beta"},
 		},
-		Profiles: map[string]config.Profile{
-			"default": {Groups: []string{"base", "alpha", "beta"}},
-		},
+		Hosts: map[string][]string{"default": {"alpha", "beta"}},
 	}); err != nil {
 		t.Fatalf("saveTUIConfig: %v", err)
 	}
@@ -408,18 +398,18 @@ func TestGroupDeleteConfirm_UsesCapturedGroupName(t *testing.T) {
 	defer func() { _ = a.Close() }()
 
 	m := modelForCmds(a)
-	m.mode = viewProfiles
+	m.mode = viewGroups
 	m.groupNames = []string{"alpha", "beta"}
-	m.profileSection = 1
-	m.groupCursor = 0
+	m.assignmentSection = 1
+	m.groupCursor = 1
 	var armCmds []tea.Cmd
-	m.startProfileDelete(&armCmds)
+	m.startHostDelete(&armCmds)
 	if !m.groupDeleteConfirm || m.groupDeleteName != "alpha" {
 		t.Fatalf("group delete target = confirm:%v name:%q, want alpha", m.groupDeleteConfirm, m.groupDeleteName)
 	}
 
 	m.groupCursor = 2
-	handled, cmds := m.handleProfileSubmodeKeyMsg(pressEnter().(tea.KeyPressMsg))
+	handled, cmds := m.handleHostSubmodeKeyMsg(pressEnter().(tea.KeyPressMsg))
 	if !handled {
 		t.Fatal("group delete confirmation key should be handled")
 	}
@@ -445,16 +435,18 @@ func TestGroupDeleteConfirm_UsesCapturedGroupName(t *testing.T) {
 	}
 }
 
-func TestDoActivateProfile_PersistsHostnameMapping(t *testing.T) {
+func TestDoActivateHost_CopiesGroupsToCurrentHost(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "desk.example.com")
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
-		Profiles: map[string]config.Profile{
-			"alpha": {},
-			"beta":  {},
+		Groups: []*config.GroupConfig{
+			{Name: "desk", Special: "host"},
+			{Name: "alpha", Special: "host"},
+			{Name: "beta", Special: "host"},
+			{Name: "shared"},
 		},
-		Hostnames: map[string]string{"desk": "alpha"},
+		Hosts: map[string][]string{"desk": {}, "alpha": {}, "beta": {"shared"}},
 	}); err != nil {
 		t.Fatalf("saveTUIConfig: %v", err)
 	}
@@ -465,71 +457,48 @@ func TestDoActivateProfile_PersistsHostnameMapping(t *testing.T) {
 	defer func() { _ = a.Close() }()
 
 	m := modelForCmds(a)
-	msg := m.doActivateProfile("beta")()
-	got, ok := msg.(profileActivatedMsg)
+	msg := m.doCopyHostGroupsFrom("beta")()
+	got, ok := msg.(hostCopiedMsg)
 	if !ok {
-		t.Fatalf("doActivateProfile returned %T, want profileActivatedMsg", msg)
+		t.Fatalf("doCopyHostGroupsFrom returned %T, want hostCopiedMsg", msg)
 	}
 	if got.err != nil {
-		t.Fatalf("doActivateProfile error: %v", got.err)
+		t.Fatalf("doCopyHostGroupsFrom error: %v", got.err)
 	}
-	if got.info == nil || got.info.Active != "beta" {
-		t.Fatalf("active profile = %v, want beta", got.info)
+	if got.info == nil || got.info.Active != "desk" {
+		t.Fatalf("active host = %v, want desk", got.info)
 	}
-	reloaded, err := a.ProfileStatus()
+	reloaded, err := a.HostStatus()
 	if err != nil {
-		t.Fatalf("ProfileStatus: %v", err)
+		t.Fatalf("HostStatus: %v", err)
 	}
-	if reloaded.Active != "beta" {
-		t.Fatalf("persisted active profile = %q, want beta", reloaded.Active)
+	if reloaded.Active != "desk" {
+		t.Fatalf("persisted active host = %q, want desk", reloaded.Active)
+	}
+	if got := reloaded.Hosts["desk"].Groups; !slices.Equal(got, []string{"shared"}) {
+		t.Fatalf("desk groups = %v, want [shared]", got)
 	}
 }
 
-func TestDoRenameProfile_Success(t *testing.T) {
+func TestDoRenameHost_Success(t *testing.T) {
 	m := modelWithGroupApp(t)
-	msg := m.doRenameProfile("default", "office")()
-	got, ok := msg.(profileGroupChangedMsg)
+	msg := m.doRenameHost("default", "office")()
+	got, ok := msg.(hostGroupChangedMsg)
 	if !ok {
-		t.Fatalf("expected profileGroupChangedMsg, got %T", msg)
+		t.Fatalf("expected hostGroupChangedMsg, got %T", msg)
 	}
 	if got.err != nil {
 		t.Fatalf("unexpected error: %v", got.err)
 	}
-	info, err := m.app.ProfileStatus()
+	info, err := m.app.HostStatus()
 	if err != nil {
-		t.Fatalf("ProfileStatus: %v", err)
+		t.Fatalf("HostStatus: %v", err)
 	}
-	if _, ok := info.Profiles["default"]; ok {
-		t.Fatal("old profile still present after rename")
+	if _, ok := info.Hosts["default"]; ok {
+		t.Fatal("old host still present after rename")
 	}
-	if _, ok := info.Profiles["office"]; !ok {
-		t.Fatal("renamed profile missing")
-	}
-}
-
-// ── doCreateProfileFromTab ────────────────────────────────────────────────────
-
-func TestDoCreateProfileFromTab_Success(t *testing.T) {
-	m := modelWithGroupApp(t)
-	msg := m.doCreateProfileFromTab("laptop")()
-	got, ok := msg.(profileCreatedMsg)
-	if !ok {
-		t.Fatalf("expected profileCreatedMsg, got %T", msg)
-	}
-	if got.err != nil {
-		t.Errorf("unexpected error: %v", got.err)
-	}
-	if got.profile != "laptop" {
-		t.Errorf("profile = %q, want %q", got.profile, "laptop")
-	}
-}
-
-func TestDoCreateProfileFromTab_DuplicateIsOK(t *testing.T) {
-	m := modelWithGroupApp(t)
-	msg := m.doCreateProfileFromTab("default")()
-	_, ok := msg.(profileCreatedMsg)
-	if !ok {
-		t.Fatalf("expected profileCreatedMsg, got %T", msg)
+	if _, ok := info.Hosts["office"]; !ok {
+		t.Fatal("renamed host missing")
 	}
 }
 

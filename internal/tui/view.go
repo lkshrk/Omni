@@ -10,14 +10,15 @@ import (
 )
 
 const (
-	iconInstalled = "✓"
-	iconMissing   = "✗"
-	iconOutdated  = "↑"
-	iconIgnored   = "–"
-	iconOrphan    = "+"
-	iconWrongProv = "⚠"
-	iconFailed    = "!"
-	iconPending   = "◷"
+	iconInstalled  = "✓"
+	iconMissing    = "✗"
+	iconOutdated   = "↑"
+	iconIgnored    = "–"
+	iconOrphan     = "+"
+	iconWrongProv  = "⚠"
+	iconFailed     = "!"
+	iconPending    = "◷"
+	iconPrivileged = "⚿"
 )
 
 // newHelp creates a help.Model styled to match the omni palette.
@@ -49,12 +50,14 @@ func (m Model) windowTitle() string {
 	switch m.mode {
 	case viewDots:
 		return "omni — dots"
-	case viewProfiles:
-		return "omni — profiles"
+	case viewGroups:
+		return "omni — groups"
 	case viewSettings:
 		return "omni — settings"
 	case viewSetup:
 		return "omni — setup"
+	case viewAdminTerminal:
+		return "omni — admin"
 	default:
 		return "omni"
 	}
@@ -84,6 +87,20 @@ func (m Model) viewString() string {
 		return placePopup(bg, m, renderStowInstallPopup(m), popupFrame{Title: "Install Stow", PaddingY: 1, PaddingX: 2, Width: 48})
 	}
 
+	if m.setupReloading {
+		bgModel := m
+		bgModel.setupReloading = false
+		bgModel.loading = true
+		bgModel.visibleTools = nil
+		if bgModel.mode == viewSetup {
+			bgModel.mode = bgModel.setupBackgroundMode
+			if bgModel.mode == viewSetup {
+				bgModel.mode = viewList
+			}
+		}
+		return placeOverlay(bgModel.viewString(), renderPostSetupLoading(m), m.width, m.height)
+	}
+
 	// Setup/onboarding is modal over the regular tools UI. Keep mode=viewSetup
 	// for key routing, but render a normal background so async scans/status stay visible.
 	if m.mode == viewSetup {
@@ -93,7 +110,9 @@ func (m Model) viewString() string {
 			bgModel.mode = viewList
 		}
 		bg := bgModel.viewString()
-		return placePopup(bg, m, renderSetupPopup(m), popupFrame{PaddingX: 1})
+		frame := setupPopupFrame(m)
+		contentWidth := popupInnerContentWidth(fitPopupFrameToWindow(m, frame))
+		return placePopup(bg, m, renderSetupPopup(m, contentWidth), frame)
 	}
 
 	// Group picker — overlays the tool list so context stays visible.
@@ -107,84 +126,86 @@ func (m Model) viewString() string {
 		} else if m.pickerPurposeInstall {
 			title = "Install And Add"
 		}
-		return placePopup(bg, m, renderGroupPicker(m), popupFrame{Title: popupTitleForGroupPickerTool(m, title), PaddingY: 1, PaddingX: 2, Width: 40, NoTitleDivider: true})
+		paddingX := 2
+		return placePopup(bg, m, renderGroupPicker(m), popupFrame{Title: popupTitleForGroupPickerTool(m, title), PaddingY: 1, PaddingX: paddingX, Width: popupFrameWidthForContent(groupPickerContentWidth(m), paddingX), NoTitleDivider: true})
 	}
 
 	if m.mode == viewGroupMembership {
 		bgModel := m
 		bgModel.mode = viewList
-		title := popupTitleForMembershipTool(m, "Edit Groups")
 		if m.pickerMembershipKind == pickerMembershipDot {
 			bgModel.mode = viewDots
-			title = popupTitleForSelectedDot(m, "Edit Groups")
 		}
 		bg := bgModel.viewString()
-		return placePopup(bg, m, renderGroupMembershipPicker(m), popupFrame{Title: title, PaddingY: 1, PaddingX: 2, NoTitleDivider: true})
+		paddingX := 2
+		return placePopup(bg, m, renderGroupMembershipPicker(m), popupFrame{Title: groupMembershipPopupTitle(m), PaddingY: 1, PaddingX: paddingX, Width: popupFrameWidthForContent(groupMembershipContentWidth(m), paddingX), NoTitleDivider: true})
 	}
 
-	if m.mode == viewProfileGroupTools {
+	if m.mode == viewGroupTools {
 		bgModel := m
-		bgModel.mode = viewProfiles
+		bgModel.mode = viewGroups
 		bg := bgModel.viewString()
-		return placePopup(bg, m, renderProfileGroupToolsEditor(m), profileGroupToolsPopupFrame(m))
+		return placePopup(bg, m, renderHostGroupToolsEditor(m), groupToolsPopupFrame(m))
 	}
 
-	if m.mode == viewProfileGroupDots {
+	if m.mode == viewGroupDots {
 		bgModel := m
-		bgModel.mode = viewProfiles
+		bgModel.mode = viewGroups
 		bg := bgModel.viewString()
-		return placePopup(bg, m, renderProfileGroupDotsEditor(m), profileGroupDotsPopupFrame(m))
+		return placePopup(bg, m, renderHostGroupDotsEditor(m), groupDotsPopupFrame(m))
 	}
 
 	if m.mode == viewIgnoreScope {
 		bgModel := m
 		bgModel.mode = viewList
 		bg := bgModel.viewString()
-		return placePopup(bg, m, renderScopePicker(m), popupFrame{Title: popupTitleForScopeTool(m, "Ignore"), PaddingY: 1, PaddingX: 2, NoTitleDivider: true})
+		return placePopup(bg, m, renderScopePicker(m), scopePickerPopupFrame(m, popupTitleForScopeTool(m, "Ignore")))
 	}
 
 	if m.mode == viewProviderScope {
 		bgModel := m
 		bgModel.mode = viewList
 		bg := bgModel.viewString()
-		return placePopup(bg, m, renderScopePicker(m), popupFrame{Title: popupTitleForScopeTool(m, "Pin Provider"), PaddingY: 1, PaddingX: 2, NoTitleDivider: true})
+		return placePopup(bg, m, renderScopePicker(m), scopePickerPopupFrame(m, popupTitleForScopeTool(m, "Pin Provider")))
 	}
 
-	if m.mode == viewProfiles && m.groupDeleteConfirm {
+	if m.mode == viewAdminTerminal {
+		bgModel := m
+		bgModel.adminTerminal = nil
+		bgModel.mode = viewList
+		if m.adminTerminal != nil {
+			switch m.adminTerminal.returnMode {
+			case viewList, viewSearch, viewDots:
+				bgModel.mode = m.adminTerminal.returnMode
+			}
+		}
+		bg := bgModel.viewString()
+		return placePopup(bg, m, renderAdminTerminalPopup(m), adminTerminalPopupFrame(m))
+	}
+
+	if m.mode == viewGroups && m.groupDeleteConfirm {
 		bgModel := m
 		bgModel.groupDeleteConfirm = false
 		bgModel.suppressFooterHints = true
 		bg := bgModel.viewString()
-		return placePopup(bg, m, renderGroupDeletePopup(m), popupFrame{Title: "Delete Group", PaddingX: 1, Width: 46})
+		paddingX := 1
+		return placePopup(bg, m, renderGroupDeletePopup(m), popupFrame{Title: "Delete Group", PaddingX: paddingX, Width: popupFrameWidthForContent(groupDeletePopupContentWidth, paddingX)})
 	}
 
-	if m.mode == viewProfiles && m.profileCreating {
-		bgModel := m
-		bgModel.profileCreating = false
-		bg := bgModel.viewString()
-		return placePopup(bg, m, renderProfileCreatePopup(m), popupFrame{Title: "New Profile", PaddingY: 1, PaddingX: 2, Width: profileCreatePopupWidth(m), NoTitleDivider: true})
-	}
-
-	if m.mode == viewProfiles && m.groupCreating {
+	if m.mode == viewGroups && m.groupCreating {
 		bgModel := m
 		bgModel.groupCreating = false
 		bg := bgModel.viewString()
-		return placePopup(bg, m, renderGroupCreatePopup(m), popupFrame{Title: "New Group", PaddingY: 1, PaddingX: 2, Width: profileCreatePopupWidth(m), NoTitleDivider: true})
+		paddingX := 2
+		return placePopup(bg, m, renderGroupCreatePopup(m), popupFrame{Title: "New Group", PaddingY: 1, PaddingX: paddingX, Width: popupFrameWidthForContent(groupCreatePopupWidth(m), paddingX), NoTitleDivider: true})
 	}
 
-	if m.mode == viewProfiles && m.profileEditMode == 1 {
+	if m.mode == viewGroups && m.hostEditMode == 1 {
 		bgModel := m
-		bgModel.profileEditMode = 0
+		bgModel.hostEditMode = 0
 		bgModel.pickerCreatingGroup = false
 		bg := bgModel.viewString()
-		return placePopup(bg, m, renderProfileGroupEditor(m), popupFrame{Title: "Edit Groups: " + m.profileEditName, PaddingY: 1, PaddingX: 2, NoTitleDivider: true})
-	}
-
-	if m.mode == viewProfiles && m.profileEditMode == 2 {
-		bgModel := m
-		bgModel.profileEditMode = 0
-		bg := bgModel.viewString()
-		return placePopup(bg, m, renderProfileHostEditor(m), popupFrame{Title: "Edit Hosts: " + m.profileEditName, PaddingY: 1, PaddingX: 2, NoTitleDivider: true})
+		return placePopup(bg, m, renderHostGroupEditor(m), groupEditorPopupFrame(m))
 	}
 
 	// Help — centered popup overlay, drawn over the current tab.
@@ -222,7 +243,7 @@ func (m Model) viewString() string {
 
 	// Filter input (when active)
 	if m.mode == viewSearch {
-		sb.WriteString(screenEdgeInset() + m.filter.View())
+		sb.WriteString(screenEdgeInset() + renderEmptyAwareTextInputView(p, m.filter, m.filter.Placeholder, 0))
 		sb.WriteByte('\n')
 		sb.WriteString(renderHRule(p, m.width))
 		sb.WriteByte('\n')
@@ -230,7 +251,7 @@ func (m Model) viewString() string {
 
 	// Command palette input (when active)
 	if m.mode == viewCommand {
-		sb.WriteString(p.styleHelp.Render(screenEdgeInset()+": ") + m.commandInput.View())
+		sb.WriteString(p.styleHelp.Render(screenEdgeInset()+": ") + renderEmptyAwareTextInputView(p, m.commandInput, m.commandInput.Placeholder, 0))
 		sb.WriteByte('\n')
 		sb.WriteString(renderHRule(p, m.width))
 		sb.WriteByte('\n')
@@ -242,8 +263,8 @@ func (m Model) viewString() string {
 	switch {
 	case m.mode == viewSettings:
 		body = renderSettings(m)
-	case m.mode == viewProfiles:
-		body = renderProfiles(m)
+	case m.mode == viewGroups:
+		body = renderGroups(m)
 	case m.mode == viewDots:
 		body = renderDots(m)
 	case m.mode == viewCommand:
@@ -347,32 +368,71 @@ func popupInnerContentWidth(frame popupFrame) int {
 	return max(innerWidth, 0)
 }
 
+func popupFrameWidthForContent(contentWidth, paddingX int) int {
+	return max(contentWidth, 1) + paddingX*2 + 2
+}
+
+func popupDividerWithStyle(style lipgloss.Style, width int) string {
+	return style.Render(strings.Repeat("─", max(width, 1)))
+}
+
+func popupDivider(p palette, width int) string {
+	return popupDividerWithStyle(p.styleSep, width)
+}
+
+func fitPopupLine(line string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	fitted := lipgloss.NewStyle().
+		Inline(true).
+		MaxWidth(width).
+		Render(line)
+	return lipgloss.NewStyle().
+		Inline(true).
+		Width(width).
+		Render(fitted)
+}
+
+func normalizePopupContent(content string, width int) string {
+	if width <= 0 {
+		return content
+	}
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		lines[i] = fitPopupLine(line, width)
+	}
+	return strings.Join(lines, "\n")
+}
+
 func renderPopupFrame(p palette, content string, frame popupFrame) string {
 	borderColor := frame.BorderColor
 	if borderColor == nil {
 		borderColor = p.colMuted
 	}
+	width := frame.Width
+	innerWidth := popupInnerContentWidth(frame)
+	if width <= 0 {
+		width = lipgloss.Width(content)
+		innerWidth = max(width-2-frame.PaddingX*2, 1)
+	}
+	innerWidth = max(innerWidth, 1)
 	if frame.Title != "" {
-		width := frame.Width
-		innerWidth := popupInnerContentWidth(frame)
-		if width <= 0 {
-			width = lipgloss.Width(content)
-			innerWidth = max(width-2-frame.PaddingX*2, 1)
-		}
-		innerWidth = max(innerWidth, 1)
-		titleText := fitCellText(frame.Title, max(innerWidth-1, 1))
-		title := p.styleTitle.PaddingLeft(0).Render(" " + titleText)
+		titleText := fitCellText(frame.Title, innerWidth)
+		title := lipgloss.NewStyle().
+			Width(innerWidth).
+			Align(lipgloss.Center).
+			Render(p.styleTitle.PaddingLeft(0).Render(titleText))
 		if frame.NoTitleDivider {
 			content = title + "\n\n" + content
 		} else {
-			separator := p.styleSep.Render(strings.Repeat("─", innerWidth))
-			content = title + "\n\n" + separator + "\n\n" + content
+			content = title + "\n\n" + popupDivider(p, innerWidth) + "\n\n" + content
 		}
 	}
+	content = normalizePopupContent(content, innerWidth)
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
-		Background(p.colSurface).
 		Padding(frame.PaddingY, frame.PaddingX)
 	if frame.Width > 0 {
 		style = style.Width(frame.Width)
@@ -529,22 +589,44 @@ func popupTitleForSelectedDot(m Model, action string) string {
 	return popupTitleForName(action, m.pickerMembershipName)
 }
 
-func profileGroupToolsPopupFrame(m Model) popupFrame {
+func groupMembershipPopupTitle(m Model) string {
+	if m.pickerMembershipKind == pickerMembershipDot {
+		return popupTitleForSelectedDot(m, "Move Group")
+	}
+	return popupTitleForMembershipTool(m, "Move Group")
+}
+
+func groupEditorPopupFrame(m Model) popupFrame {
+	paddingX := 2
 	return popupFrame{
-		Title:          "Edit Tools: " + m.groupToolsEditor.group,
+		Title:          "Edit Groups: " + m.hostEditName,
 		PaddingY:       1,
-		PaddingX:       2,
-		ContentHeight:  profileGroupToolsPopupContentHeight(m),
+		PaddingX:       paddingX,
+		Width:          popupFrameWidthForContent(groupEditorContentWidth(m), paddingX),
 		NoTitleDivider: true,
 	}
 }
 
-func profileGroupDotsPopupFrame(m Model) popupFrame {
+func groupToolsPopupFrame(m Model) popupFrame {
+	paddingX := 2
+	return popupFrame{
+		Title:          "Edit Tools: " + m.groupToolsEditor.group,
+		PaddingY:       1,
+		PaddingX:       paddingX,
+		Width:          popupFrameWidthForContent(groupToolsContentWidth(m), paddingX),
+		ContentHeight:  groupToolsPopupContentHeight(m),
+		NoTitleDivider: true,
+	}
+}
+
+func groupDotsPopupFrame(m Model) popupFrame {
+	paddingX := 2
 	return popupFrame{
 		Title:          "Edit Dots: " + m.groupDotsEditor.group,
 		PaddingY:       1,
-		PaddingX:       2,
-		ContentHeight:  profileGroupDotsPopupContentHeight(m),
+		PaddingX:       paddingX,
+		Width:          popupFrameWidthForContent(groupDotsContentWidth(m), paddingX),
+		ContentHeight:  groupDotsPopupContentHeight(m),
 		NoTitleDivider: true,
 	}
 }
@@ -559,14 +641,14 @@ func placePopup(bg string, m Model, content string, frame popupFrame) string {
 	return placeOverlay(bg, renderPopupFrame(m.palette, content, frame), m.width, m.height)
 }
 
-func renderPopupBodyWithFooter(m Model, width, bodyHeight int, body, hints string) string {
+func renderPopupBodyWithFooterItems(m Model, width, bodyHeight int, body string, hints []hintItem) string {
 	body = strings.TrimRight(body, "\n")
 	if bodyHeight > 0 {
 		body = fitPopupContent(m.palette, body, bodyHeight)
 		body = padPopupContentToHeight(body, bodyHeight)
 	}
-	if hints != "" {
-		body += "\n" + renderPickerHints(m, width, hints)
+	if len(hints) > 0 {
+		body += "\n" + renderPickerHintItems(m, width, hints)
 	}
 	return lipgloss.NewStyle().Width(width).Render(body)
 }
@@ -597,7 +679,7 @@ func renderFilePickerPopup(m Model) string {
 	var sb strings.Builder
 	sb.WriteString(strings.TrimRight(fp.View(p), "\n"))
 
-	return renderPopupBodyWithFooter(m, contentW, filePickerBrowseBodyHeight(m), sb.String(), renderContextHints(m, hintCtxFilePickerBrowse, ""))
+	return renderPopupBodyWithFooterItems(m, contentW, filePickerBrowseBodyHeight(m), sb.String(), contextHintItems(m, hintCtxFilePickerBrowse))
 }
 
 func filePickerPopupFrame(m Model) popupFrame {
@@ -605,7 +687,7 @@ func filePickerPopupFrame(m Model) popupFrame {
 		Title:          m.filePickerTitle,
 		PaddingY:       1,
 		PaddingX:       2,
-		Width:          filePickerContentWidth(m) + 4,
+		Width:          popupFrameWidthForContent(filePickerContentWidth(m), 2),
 		ContentHeight:  filePickerPopupContentHeight(m),
 		NoTitleDivider: true,
 	}

@@ -42,8 +42,8 @@ package tui
 //  UC-27  q sets confirmQuit; second q quits; other key resets
 //  UC-28  Keys ignored while loading=true
 //  UC-29  : opens command palette; Esc closes it
-//  UC-30  Tab cycles tabs: list→dots→profiles→settings→list
-//  UC-31  Tab blocked in profileRequired state
+//  UC-30  Tab cycles tabs: list→dots→hosts→settings→list
+//  UC-31  Tab blocked in hostRequired state
 //
 // SETUP WIZARD
 //  UC-32  Setup step 0: y starts config creation (loading=true)
@@ -52,7 +52,7 @@ package tui
 //  UC-35  Setup step 3: empty name triggers exit confirm
 //  UC-36  toolsLoadedMsg noConfig sets viewSetup
 //  UC-37  toolsLoadedMsg from viewSetup step 0 advances to step 1
-//  UC-38  toolsLoadedMsg noProfile sets viewSetup step 2
+//  UC-38  toolsLoadedMsg noHost sets viewSetup step 2
 //
 // SETTINGS TAB
 //  UC-39  j/k navigate settingsCursor; clamps at bounds
@@ -64,10 +64,10 @@ package tui
 //  UC-45  Priority editor: j/k/J/K navigation and discard on Esc
 //
 // PROFILES TAB
-//  UC-46  j/k navigate profileCursor; Down enters groupSection
-//  UC-47  Esc returns to list (when not profileRequired)
-//  UC-48  n opens new-profile text input; Esc cancels
-//  UC-49  Profile delete confirm (D → Enter / Esc)
+//  UC-46  j/k navigate hostCursor; Down enters groupSection
+//  UC-47  Esc returns to list (when not hostRequired)
+//  UC-48  n opens new-host text input; Esc cancels
+//  UC-49  Host delete confirm (D → Enter / Esc)
 //  UC-50  Group rename mode (r → type → Enter/Esc)
 //  UC-51  Group create mode (n → type → Enter)
 //  UC-52  Group delete confirm (D → Enter/Esc in section 1)
@@ -793,14 +793,14 @@ func TestFlow_UC24_TabCycle(t *testing.T) {
 		}
 	})
 
-	t.Run("dots → profiles", func(t *testing.T) {
+	t.Run("dots → groups", func(t *testing.T) {
 		got := drive(baseModel(nil), pressTab(), pressTab())
-		if got.mode != viewProfiles {
-			t.Errorf("mode = %v, want viewProfiles", got.mode)
+		if got.mode != viewGroups {
+			t.Errorf("mode = %v, want viewGroups", got.mode)
 		}
 	})
 
-	t.Run("profiles → settings", func(t *testing.T) {
+	t.Run("groups → settings", func(t *testing.T) {
 		got := drive(baseModel(nil), pressTab(), pressTab(), pressTab())
 		if got.mode != viewSettings {
 			t.Errorf("mode = %v, want viewSettings", got.mode)
@@ -815,7 +815,7 @@ func TestFlow_UC24_TabCycle(t *testing.T) {
 	})
 
 	t.Run("Esc from settings returns to list", func(t *testing.T) {
-		got := drive(baseModel(nil), pressTab(), pressTab(), pressTab(), pressEsc())
+		got := drive(baseModel(nil), append(toSettings(), pressEsc())...)
 		if got.mode != viewList {
 			t.Errorf("mode = %v, want viewList after esc from settings", got.mode)
 		}
@@ -827,8 +827,8 @@ func TestFlow_UC24_TabCycle(t *testing.T) {
 			t.Errorf("mode = %v, want viewSettings after shift+tab from list", got.mode)
 		}
 		got = drive(got, pressShiftTab())
-		if got.mode != viewProfiles {
-			t.Errorf("mode = %v, want viewProfiles after second shift+tab", got.mode)
+		if got.mode != viewGroups {
+			t.Errorf("mode = %v, want viewGroups after second shift+tab", got.mode)
 		}
 	})
 }
@@ -936,20 +936,20 @@ func TestDotsEmptyStateEnterDoesNotStartOnboarding(t *testing.T) {
 	}
 }
 
-// ── UC-25 Tab blocked when profileRequired ────────────────────────────────────
+// ── UC-25 Tab blocked when hostRequired ────────────────────────────────────
 
-func TestFlow_UC25_TabBlockedWhenProfileRequired(t *testing.T) {
+func TestFlow_UC25_TabBlockedWhenHostRequired(t *testing.T) {
 	m := baseModel(nil)
-	m.mode = viewProfiles
-	m.profileRequired = true
+	m.mode = viewGroups
+	m.hostRequired = true
 	got := drive(m, pressTab())
-	// Tab should not advance past profiles when profile is required.
-	if got.mode != viewProfiles {
-		t.Errorf("mode = %v, want viewProfiles (tab blocked)", got.mode)
+	// Tab should not advance past hosts when host is required.
+	if got.mode != viewGroups {
+		t.Errorf("mode = %v, want viewGroups (tab blocked)", got.mode)
 	}
 }
 
-// ── UC-26 Setup step 0: y/n ──────────────────────────────────────────────────
+// ── UC-26 Setup step 0: create config ────────────────────────────────────────
 
 func TestFlow_UC26_SetupStep0(t *testing.T) {
 	setupModel := func() Model {
@@ -961,7 +961,14 @@ func TestFlow_UC26_SetupStep0(t *testing.T) {
 		}
 	}
 
-	t.Run("y starts config creation (loading=true)", func(t *testing.T) {
+	t.Run("enter starts config creation (loading=true)", func(t *testing.T) {
+		got := drive(setupModel(), pressEnter())
+		if !got.loading {
+			t.Error("loading should be true after enter in step 0")
+		}
+	})
+
+	t.Run("y shortcut starts config creation", func(t *testing.T) {
 		got := drive(setupModel(), pressRune('y'))
 		if !got.loading {
 			t.Error("loading should be true after y in step 0")
@@ -983,7 +990,7 @@ func TestFlow_UC26_SetupStep0(t *testing.T) {
 	})
 
 	t.Run("other keys ignored in step 0", func(t *testing.T) {
-		got := drive(setupModel(), pressRune('j'), pressEnter())
+		got := drive(setupModel(), pressRune('j'), pressRune('/'))
 		if got.loading {
 			t.Error("loading should not change from unrelated keys in step 0")
 		}
@@ -1025,26 +1032,6 @@ func TestFlow_UC27_SetupStep1(t *testing.T) {
 	})
 }
 
-// ── UC-28 Setup step 4: empty name triggers exit confirm ─────────────────────
-
-func TestFlow_UC28_SetupStep4EmptyName(t *testing.T) {
-	m := Model{
-		keys:          DefaultKeyMap(),
-		spinner:       spinner.New(),
-		filter:        textinput.New(),
-		commandInput:  textinput.New(),
-		settingsInput: textinput.New(),
-		mode:          viewSetup,
-		setupStep:     4,
-		upgradingKeys: make(map[string]bool),
-	}
-	// Enter with empty settingsInput value → setupExitConfirm.
-	got := drive(m, pressEnter())
-	if !got.setupExitConfirm {
-		t.Error("setupExitConfirm should be true after empty name submit")
-	}
-}
-
 // ── UC-29 toolsLoadedMsg state transitions ────────────────────────────────────
 
 func TestFlow_UC29_ToolsLoadedMsg(t *testing.T) {
@@ -1078,8 +1065,8 @@ func TestFlow_UC29_ToolsLoadedMsg(t *testing.T) {
 		}
 	})
 
-	t.Run("noProfile sets viewSetup step 2", func(t *testing.T) {
-		got := drive(loadingModel(), toolsLoadedMsg{noProfile: true})
+	t.Run("noHost sets viewSetup step 2", func(t *testing.T) {
+		got := drive(loadingModel(), toolsLoadedMsg{noHost: true})
 		if got.mode != viewSetup {
 			t.Errorf("mode = %v, want viewSetup", got.mode)
 		}
@@ -1187,17 +1174,17 @@ func TestFlow_UC33_FilePickerEscCloses(t *testing.T) {
 // ── UC-34 Maintenance: dangerConfirmRow set/cancelled ────────────────────────
 
 func TestFlow_UC34_DangerZoneConfirm(t *testing.T) {
-	t.Run("row 11 Enter sets dangerConfirmRow=11", func(t *testing.T) {
-		msgs := append(toSettings(), nj(11)...)
+	t.Run("reset settings Enter sets dangerConfirmRow", func(t *testing.T) {
+		msgs := append(toSettings(), nj(settingsRowResetSettings)...)
 		msgs = append(msgs, pressEnter())
 		got := drive(baseModel(nil), msgs...)
-		if got.dangerConfirmRow != 11 {
-			t.Errorf("dangerConfirmRow = %d, want 11", got.dangerConfirmRow)
+		if got.dangerConfirmRow != settingsRowResetSettings {
+			t.Errorf("dangerConfirmRow = %d, want %d", got.dangerConfirmRow, settingsRowResetSettings)
 		}
 	})
 
 	t.Run("Esc cancels dangerConfirmRow", func(t *testing.T) {
-		msgs := append(toSettings(), nj(11)...)
+		msgs := append(toSettings(), nj(settingsRowResetSettings)...)
 		msgs = append(msgs, pressEnter(), pressEsc())
 		got := drive(baseModel(nil), msgs...)
 		if got.dangerConfirmRow != -1 {
@@ -1205,12 +1192,12 @@ func TestFlow_UC34_DangerZoneConfirm(t *testing.T) {
 		}
 	})
 
-	t.Run("row 12 Enter sets dangerConfirmRow=12", func(t *testing.T) {
-		msgs := append(toSettings(), nj(12)...)
+	t.Run("reset cache Enter sets dangerConfirmRow", func(t *testing.T) {
+		msgs := append(toSettings(), nj(settingsRowResetCache)...)
 		msgs = append(msgs, pressEnter())
 		got := drive(baseModel(nil), msgs...)
-		if got.dangerConfirmRow != 12 {
-			t.Errorf("dangerConfirmRow = %d, want 12", got.dangerConfirmRow)
+		if got.dangerConfirmRow != settingsRowResetCache {
+			t.Errorf("dangerConfirmRow = %d, want %d", got.dangerConfirmRow, settingsRowResetCache)
 		}
 	})
 
@@ -1281,9 +1268,9 @@ func TestFlow_UC35_DangerDotsDisableKeepLocalChoice(t *testing.T) {
 // ── UC-36 Priority editor ─────────────────────────────────────────────────────
 
 func TestFlow_UC36_PriorityEditor(t *testing.T) {
-	// Navigate to settings and to priority row (index 1).
+	// Navigate to settings and to the provider-order row.
 	toPriority := func() []tea.Msg {
-		return append(toSettings(), pressRune('j'))
+		return append(toSettings(), nj(settingsRowSystemPriority)...)
 	}
 
 	t.Run("Enter on priority row opens editor", func(t *testing.T) {
@@ -1342,76 +1329,76 @@ func TestFlow_UC36_PriorityEditor(t *testing.T) {
 	})
 }
 
-// ── UC-37 Profiles tab navigation ────────────────────────────────────────────
+// ── UC-37 Hosts tab navigation ────────────────────────────────────────────
 
-func TestFlow_UC37_ProfilesNavigation(t *testing.T) {
-	toProfiles := func() []tea.Msg { return []tea.Msg{pressTab(), pressTab()} }
+func TestFlow_UC37_GroupsNavigation(t *testing.T) {
+	toHosts := func() []tea.Msg { return []tea.Msg{pressTab(), pressTab()} }
 
-	t.Run("Esc from profiles returns to list", func(t *testing.T) {
-		got := drive(baseModel(nil), append(toProfiles(), pressEsc())...)
+	t.Run("Esc from hosts returns to list", func(t *testing.T) {
+		got := drive(baseModel(nil), append(toHosts(), pressEsc())...)
 		if got.mode != viewList {
 			t.Errorf("mode = %v, want viewList", got.mode)
 		}
 	})
 
-	t.Run("j navigates profileCursor down", func(t *testing.T) {
+	t.Run("j navigates hostCursor down", func(t *testing.T) {
 		m := baseModel(nil)
-		m.profileInfo = &app.ProfileInfo{
-			Profiles: map[string]config.Profile{
+		m.hostInfo = &app.HostInfo{
+			Hosts: map[string]config.HostAssignment{
 				"alpha": {},
 				"beta":  {},
 			},
 		}
-		msgs := append(toProfiles(), pressRune('j'))
+		msgs := append(toHosts(), pressRune('j'))
 		got := drive(m, msgs...)
-		// profileCursor advances OR profileSection advances.
-		if got.profileCursor < 1 && got.profileSection < 1 {
-			t.Error("j in profiles tab should move cursor or section")
+		// hostCursor advances OR assignmentSection advances.
+		if got.hostCursor < 1 && got.assignmentSection < 1 {
+			t.Error("j in hosts tab should move cursor or section")
 		}
 	})
 }
 
-// ── UC-38 New profile creation ────────────────────────────────────────────────
+// ── UC-38 Host creation is onboarding/CLI only ────────────────────────────────
 
-func TestFlow_UC38_NewProfile(t *testing.T) {
-	toProfiles := func() []tea.Msg { return []tea.Msg{pressTab(), pressTab()} }
+func TestFlow_UC38_NewHostRemovedFromHostsTab(t *testing.T) {
+	toHosts := func() []tea.Msg { return []tea.Msg{pressTab(), pressTab()} }
 
-	t.Run("p opens profile creation input", func(t *testing.T) {
-		got := drive(baseModel(nil), append(toProfiles(), pressRune('p'))...)
-		if !got.profileCreating {
-			t.Error("profileCreating should be true after p in profiles tab")
+	t.Run("p does not open host creation", func(t *testing.T) {
+		got := drive(baseModel(nil), append(toHosts(), pressRune('p'))...)
+		if got.groupCreating || got.hostRenameMode || got.hostEditMode != 0 {
+			t.Fatalf("p should not start a Hosts tab edit mode: groupCreating=%v hostRename=%v hostEditMode=%d", got.groupCreating, got.hostRenameMode, got.hostEditMode)
 		}
 	})
 
-	t.Run("Esc cancels profile creation", func(t *testing.T) {
-		got := drive(baseModel(nil), append(toProfiles(), pressRune('p'), pressEsc())...)
-		if got.profileCreating {
-			t.Error("profileCreating should be false after esc")
+	t.Run("n still opens reusable group creation", func(t *testing.T) {
+		got := drive(baseModel(nil), append(toHosts(), pressRune('n'))...)
+		if !got.groupCreating {
+			t.Error("groupCreating should be true after n in hosts tab")
 		}
 	})
 }
 
-// ── UC-39 Profile delete confirm ─────────────────────────────────────────────
+// ── UC-39 Host delete confirm ─────────────────────────────────────────────
 
-func TestFlow_UC39_ProfileDeleteConfirm(t *testing.T) {
-	toProfiles := func() []tea.Msg { return []tea.Msg{pressTab(), pressTab()} }
+func TestFlow_UC39_HostDeleteConfirm(t *testing.T) {
+	toHosts := func() []tea.Msg { return []tea.Msg{pressTab(), pressTab()} }
 
 	m := baseModel(nil)
-	m.profileInfo = &app.ProfileInfo{
-		Profiles: map[string]config.Profile{"work": {}},
+	m.hostInfo = &app.HostInfo{
+		Hosts: map[string]config.HostAssignment{"work": {}},
 	}
 
-	t.Run("d on a profile arms delete confirm", func(t *testing.T) {
-		got := drive(m, append(toProfiles(), pressRune('d'))...)
-		if !got.profileDeleteConfirm {
-			t.Error("profileDeleteConfirm should be true after d")
+	t.Run("d on a host arms delete confirm", func(t *testing.T) {
+		got := drive(m, append(toHosts(), pressRune('d'))...)
+		if !got.hostDeleteConfirm {
+			t.Error("hostDeleteConfirm should be true after d")
 		}
 	})
 
-	t.Run("Esc cancels profile delete confirm", func(t *testing.T) {
-		got := drive(m, append(toProfiles(), pressRune('d'), pressEsc())...)
-		if got.profileDeleteConfirm {
-			t.Error("profileDeleteConfirm should be false after esc")
+	t.Run("Esc cancels host delete confirm", func(t *testing.T) {
+		got := drive(m, append(toHosts(), pressRune('d'), pressEsc())...)
+		if got.hostDeleteConfirm {
+			t.Error("hostDeleteConfirm should be false after esc")
 		}
 	})
 }
@@ -1681,8 +1668,8 @@ func TestFlow_DotsChildRowsCanBeIgnored(t *testing.T) {
 		Actions: []app.DotAction{app.DotActionRemove, app.DotActionIgnore},
 		Children: []app.DotChild{{
 			Name:    "auth.json",
-			RelPath: "profiles/work/auth.json",
-			Path:    "~/.config/nvim/profiles/work/auth.json",
+			RelPath: "hosts/work/auth.json",
+			Path:    "~/.config/nvim/hosts/work/auth.json",
 		}},
 	}}
 
@@ -1746,6 +1733,96 @@ func TestFlow_DotsExpansionUsesSpaceAndNavigationDoesNotAutoExpand(t *testing.T)
 	}
 	if got.dotsExpandedName != "" {
 		t.Fatalf("dotsExpandedName = %q, want collapsed after leaving alpha subtree", got.dotsExpandedName)
+	}
+}
+
+func TestFlow_DotsOutOfSyncDirectoryCanExpand(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.dotsLoaded = true
+	m.settings.DotsRepo = "/repo"
+	m.dotsEntries = []app.DotStatus{{
+		Name:    "nvim",
+		State:   app.DotStateConflict,
+		Actions: []app.DotAction{app.DotActionUseRepo, app.DotActionUseLocal, app.DotActionRemove, app.DotActionIgnore},
+		Children: []app.DotChild{{
+			Name:    "init.lua",
+			RelPath: "init.lua",
+			Path:    "~/.config/nvim/init.lua",
+			State:   app.DotStateSynced,
+		}},
+	}}
+
+	got := drive(m, pressRune(' '))
+	if got.dotsExpandedName != "nvim" {
+		t.Fatalf("dotsExpandedName = %q, want nvim", got.dotsExpandedName)
+	}
+	if rows := dotsVisibleRows(got); len(rows) != 2 || !rows[1].isChild {
+		t.Fatalf("visible rows after expand = %#v, want parent plus child", rows)
+	}
+}
+
+func TestFlow_DotsSubdirectoryCanExpand(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.dotsLoaded = true
+	m.settings.DotsRepo = "/repo"
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		State:      app.DotStateConflict,
+		IsDir:      true,
+		Children: []app.DotChild{{
+			Name:      "lua",
+			RelPath:   "lua",
+			Path:      "~/.config/nvim/lua",
+			State:     app.DotStateConflict,
+			IsDir:     true,
+			FileCount: 1,
+			Children: []app.DotChild{{
+				Name:    "config.lua",
+				RelPath: "lua/config.lua",
+				Path:    "~/.config/nvim/lua/config.lua",
+				State:   app.DotStateMissing,
+			}},
+		}},
+	}}
+
+	got := drive(m, pressRune(' '), pressRune('j'), pressRune(' '))
+	if got.dotsExpandedName != "nvim" {
+		t.Fatalf("dotsExpandedName = %q, want parent to stay expanded", got.dotsExpandedName)
+	}
+	if !got.dotsExpandedChildren[dotsChildExpandKey("nvim", "lua")] {
+		t.Fatalf("lua subdirectory should be expanded: %#v", got.dotsExpandedChildren)
+	}
+	rows := dotsVisibleRows(got)
+	if len(rows) != 3 || !rows[2].isChild || rows[2].child.RelPath != "lua/config.lua" {
+		t.Fatalf("visible rows after child expand = %#v, want nested config.lua", rows)
+	}
+
+	parentCollapsed := drive(got, pressRune('k'), pressRune(' '))
+	if parentCollapsed.dotsExpandedName != "" {
+		t.Fatalf("dotsExpandedName = %q, want parent collapsed", parentCollapsed.dotsExpandedName)
+	}
+	if len(parentCollapsed.dotsExpandedChildren) != 0 {
+		t.Fatalf("collapsing parent should also collapse children: %#v", parentCollapsed.dotsExpandedChildren)
+	}
+	parentReexpanded := drive(parentCollapsed, pressRune(' '))
+	if rows := dotsVisibleRows(parentReexpanded); len(rows) != 2 {
+		t.Fatalf("visible rows after parent re-expand = %#v, want nested child still collapsed", rows)
+	}
+
+	got = drive(parentReexpanded, pressRune('j'), pressRune(' '))
+	if !got.dotsExpandedChildren[dotsChildExpandKey("nvim", "lua")] {
+		t.Fatalf("lua subdirectory should expand again after parent re-expand: %#v", got.dotsExpandedChildren)
+	}
+
+	got = drive(got, pressRune(' '))
+	if got.dotsExpandedChildren[dotsChildExpandKey("nvim", "lua")] {
+		t.Fatalf("lua subdirectory should collapse on second space: %#v", got.dotsExpandedChildren)
+	}
+	if rows := dotsVisibleRows(got); len(rows) != 2 {
+		t.Fatalf("visible rows after child collapse = %#v, want parent plus direct child", rows)
 	}
 }
 
@@ -1943,8 +2020,8 @@ func TestFlow_UC50_DangerOpDoneMsg(t *testing.T) {
 	})
 
 	t.Run("error sets ✗ action in status", func(t *testing.T) {
-		got := drive(baseModel(nil), dangerOpDoneMsg{action: "delete-profile", err: errors.New("write failed")})
-		if got.statusMsg != "✗ delete-profile: write failed" {
+		got := drive(baseModel(nil), dangerOpDoneMsg{action: "delete-host", err: errors.New("write failed")})
+		if got.statusMsg != "✗ delete-host: write failed" {
 			t.Errorf("statusMsg = %q", got.statusMsg)
 		}
 	})
@@ -2470,6 +2547,17 @@ func TestFlow_UC63_DescRefreshDoneMsg(t *testing.T) {
 	if len(got.allTools) != 1 || got.allTools[0].Name != "fresh" {
 		t.Fatalf("stale descRefreshDoneMsg replaced allTools with %+v", got.allTools)
 	}
+
+	m = baseModel([]*database.ToolCache{{Name: "fresh", Provider: "brew"}})
+	m.descRefreshGen = 2
+	m.descRefreshing = true
+	got = drive(m, descRefreshDoneMsg{gen: 2, err: errors.New("registry unavailable")})
+	if got.descRefreshing {
+		t.Fatal("descRefreshing should clear after refresh error")
+	}
+	if !got.statusIsErr || !strings.Contains(got.statusMsg, "description refresh failed") {
+		t.Fatalf("status = %q err=%v, want description refresh failure", got.statusMsg, got.statusIsErr)
+	}
 }
 
 // ── UC-64 Mouse wheel scrolling ──────────────────────────────────────────────
@@ -2518,11 +2606,11 @@ func TestFlow_UC64_MouseWheelScroll(t *testing.T) {
 		}
 	})
 
-	t.Run("profiles wheel scrolls profile cursor", func(t *testing.T) {
-		m := profilesModel()
+	t.Run("hosts wheel scrolls host cursor", func(t *testing.T) {
+		m := hostsModel()
 		got := drive(m, tea.MouseWheelMsg{Button: tea.MouseWheelDown})
-		if got.profileCursor != 1 {
-			t.Errorf("profileCursor = %d, want 1 after wheel down", got.profileCursor)
+		if got.hostCursor != 1 {
+			t.Errorf("hostCursor = %d, want 1 after wheel down", got.hostCursor)
 		}
 	})
 

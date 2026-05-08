@@ -91,6 +91,7 @@ func (m *Model) resumeStowInstallAction(action stowInstallAction) []tea.Cmd {
 		m.beginDotsOperation("Syncing dots...")
 		cmds = append(cmds, m.spinner.Tick, m.doDotsSyncOnly())
 		cmds = append(cmds, m.startPostLoadBackgroundTasks()...)
+		m.beginLaunchBatchIfPending()
 	case stowInstallEnableDots:
 		m.beginDotsOperation("Enabling dots...")
 		cmds = append(cmds, m.spinner.Tick, m.doEnableDots())

@@ -5,12 +5,15 @@ package tui
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 
+	"github.com/lkshrk/omni/internal/app"
+	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/provider"
 )
@@ -39,6 +42,23 @@ func (p *searchProvider) ListInstalled(_ context.Context) ([]provider.InstalledT
 }
 func (p *searchProvider) Search(_ context.Context, _ string) ([]provider.SearchResult, error) {
 	return p.results, p.searchErr
+}
+
+func newSearchCmdApp(t *testing.T, providers ...provider.Provider) *app.App {
+	t.Helper()
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "settings.json")
+	cfg := &config.RootConfig{Groups: []*config.GroupConfig{tuiTestHostGroup()}}
+	if err := saveTUIConfig(t, cfgPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	a := app.New(cfgPath)
+	a.CacheDir = dir
+	if err := a.InitTestMode(context.Background(), providers...); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	return a
 }
 
 // ── TestDebounceSearch_EmitsMsg ────────────────────────────────────────────────
@@ -102,8 +122,73 @@ func TestDoSearch_ReturnsResults(t *testing.T) {
 	if got.tools[0].Provider != "system" {
 		t.Errorf("tools[0].Provider = %q, want system", got.tools[0].Provider)
 	}
+	if got.tools[0].InstalledWith != "brew" {
+		t.Errorf("tools[0].InstalledWith = %q, want brew search source for display", got.tools[0].InstalledWith)
+	}
 	if got.tools[1].Name != "fd" {
 		t.Errorf("tools[1].Name = %q, want fd", got.tools[1].Name)
+	}
+}
+
+func TestDoSearch_EcosystemFilterReturnsOnlyMatchingSearchResults(t *testing.T) {
+	brew := &searchProvider{
+		name:    "brew",
+		results: []provider.SearchResult{{Name: "presenterm", Provider: "brew"}},
+	}
+	node := &searchProvider{
+		name:    "node",
+		results: []provider.SearchResult{{Name: "terminal-kit", Provider: "node"}},
+	}
+	a := newSearchCmdApp(t, brew, node)
+	m := modelForCmds(a)
+	m.providerNames = []string{"system", "node", "python"}
+	m.providerTabIdx = 1
+
+	msg := m.doSearch(context.Background(), "term", 9)()
+	got, ok := msg.(searchResultsMsg)
+	if !ok {
+		t.Fatalf("expected searchResultsMsg, got %T", msg)
+	}
+	if got.providerFilter != "system" {
+		t.Fatalf("providerFilter = %q, want system", got.providerFilter)
+	}
+	if len(got.tools) != 1 {
+		t.Fatalf("tools = %d, want one system result: %+v", len(got.tools), got.tools)
+	}
+	if got.tools[0].Name != "presenterm" || got.tools[0].Provider != "system" || got.tools[0].InstalledWith != "brew" {
+		t.Fatalf("tool = %+v, want presenterm system via brew", got.tools[0])
+	}
+}
+
+func TestDoSearch_PreservesSearchPrivilegeMetadata(t *testing.T) {
+	prov := &searchProvider{
+		name: "brew",
+		results: []provider.SearchResult{{
+			Name:        "parsec",
+			Provider:    "brew",
+			Description: "remote desktop",
+			Privilege: provider.PrivilegePlan{
+				Requirement: provider.PrivilegeMaybe,
+				Reason:      "brew cask parsec uses a pkg installer",
+			},
+		}},
+	}
+	a := newSearchCmdApp(t, prov)
+	m := modelForCmds(a)
+
+	msg := m.doSearch(context.Background(), "parsec", 3)()
+	got, ok := msg.(searchResultsMsg)
+	if !ok {
+		t.Fatalf("expected searchResultsMsg, got %T", msg)
+	}
+	if len(got.tools) != 1 {
+		t.Fatalf("tools = %d, want one result", len(got.tools))
+	}
+	if got.tools[0].Privilege != string(provider.PrivilegeMaybe) {
+		t.Fatalf("Privilege = %q, want %q", got.tools[0].Privilege, provider.PrivilegeMaybe)
+	}
+	if !got.tools[0].PrivilegeReason.Valid || got.tools[0].PrivilegeReason.String == "" {
+		t.Fatalf("PrivilegeReason = %+v, want populated reason", got.tools[0].PrivilegeReason)
 	}
 }
 
@@ -158,6 +243,80 @@ func TestDoSearch_ErrorReturnsMsg(t *testing.T) {
 	}
 	if got.providerFilter != "" {
 		t.Errorf("providerFilter = %q, want empty", got.providerFilter)
+	}
+}
+
+func TestDoSearch_PreservesPartialResultsWithError(t *testing.T) {
+	okProvider := &searchProvider{
+		name:    "brew",
+		results: []provider.SearchResult{{Name: "prettyping", Provider: "brew"}},
+	}
+	errProvider := &searchProvider{
+		name:      "npm",
+		searchErr: errors.New("registry timeout"),
+	}
+	a := newSearchCmdApp(t, okProvider, errProvider)
+	m := modelForCmds(a)
+
+	msg := m.doSearch(context.Background(), "pre", 4)()
+	got, ok := msg.(searchResultsMsg)
+	if !ok {
+		t.Fatalf("expected searchResultsMsg, got %T", msg)
+	}
+	if got.err == nil {
+		t.Fatal("expected err to be set")
+	}
+	if len(got.tools) != 1 || got.tools[0].Name != "prettyping" {
+		t.Fatalf("tools = %v, want one partial result named prettyping", got.tools)
+	}
+}
+
+func TestSearchResultsMsg_PartialErrorStillShowsResults(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewSearch
+	m.searchGen = 2
+	m.searching = true
+	m.searchCache = make(map[string]searchCacheEntry)
+
+	got := drive(m, searchResultsMsg{
+		query: "pre",
+		gen:   2,
+		tools: []*database.ToolCache{{Name: "prettyping", Provider: "system"}},
+		err:   errors.New("registry timeout"),
+	})
+
+	if got.searching {
+		t.Fatal("searching should be false after partial search result")
+	}
+	if len(got.searchTools) != 1 || got.searchTools[0].Name != "prettyping" {
+		t.Fatalf("searchTools = %v, want one partial result named prettyping", got.searchTools)
+	}
+	if _, ok := got.searchCache[searchCacheKey("pre", "")]; !ok {
+		t.Fatal("partial search results should be cached")
+	}
+}
+
+func TestSearchResultsMsg_EmptyResultsUsesNonErrorStatus(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewSearch
+	m.searchGen = 2
+	m.searching = true
+	m.searchCache = make(map[string]searchCacheEntry)
+	m.filter.SetValue("zzzz")
+
+	got := drive(m, searchResultsMsg{query: "zzzz", gen: 2})
+
+	if got.searching {
+		t.Fatal("searching should be false after empty search result")
+	}
+	if got.statusMsg != "no results" {
+		t.Fatalf("statusMsg = %q, want no results", got.statusMsg)
+	}
+	if got.statusIsErr {
+		t.Fatal("empty search result should not be marked as an error")
+	}
+	if _, ok := got.searchCache[searchCacheKey("zzzz", "")]; !ok {
+		t.Fatal("empty search results should be cached")
 	}
 }
 
@@ -242,6 +401,13 @@ func TestDoSearch_VersionAndDescriptionPopulated(t *testing.T) {
 	}
 	if !tc.Description.Valid || tc.Description.String != "JSON processor" {
 		t.Errorf("Description = %v, want {String:JSON processor, Valid:true}", tc.Description)
+	}
+	meta, err := a.DB().GetMetadata(context.Background(), "jq", "system", "jq")
+	if err != nil {
+		t.Fatalf("GetMetadata: %v", err)
+	}
+	if !meta.Description.Valid || meta.Description.String != "JSON processor" {
+		t.Fatalf("cached metadata description = %+v, want JSON processor", meta.Description)
 	}
 }
 

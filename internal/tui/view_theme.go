@@ -25,7 +25,6 @@ type palette struct {
 	colStatus         color.Color
 	colSection        color.Color
 	colDanger         color.Color
-	colSurface        color.Color
 
 	// Pre-built styles.
 	styleTitle          lipgloss.Style
@@ -61,46 +60,44 @@ func buildPaletteFor(isDark bool) palette {
 	var p palette
 
 	if isDark {
-		p.colMuted = lipgloss.Color("#636da6")
-		p.colInstalled = lipgloss.Color("#c3e88d")
-		p.colMissing = lipgloss.Color("#ff757f")
-		p.colOutdated = lipgloss.Color("#ffc777")
-		p.colProvider = lipgloss.Color("#82aaff")
+		p.colMuted = lipgloss.Color("#6f78a8")
+		p.colInstalled = lipgloss.Color("#9ece6a")
+		p.colMissing = lipgloss.Color("#ff6b8a")
+		p.colOutdated = lipgloss.Color("#f7c46c")
+		p.colProvider = lipgloss.Color("#7aa2f7")
 		p.colProviderLinux = lipgloss.Color("#e0af68")
-		p.colProviderSystem = lipgloss.Color("#89dceb")
-		p.colVersion = lipgloss.Color("#ffc777")
-		p.colSelected = lipgloss.Color("#3d59a1")
-		p.colTitle = lipgloss.Color("#c0caf5")
-		p.colHelp = lipgloss.Color("#565f89")
-		p.colStatus = lipgloss.Color("#7aa2f7")
-		p.colSection = lipgloss.Color("#7aa2f7")
-		p.colDanger = lipgloss.Color("#ff757f")
-		p.colSurface = lipgloss.Color("#1a1b26")
+		p.colProviderSystem = lipgloss.Color("#4fd6be")
+		p.colVersion = lipgloss.Color("#d9a94f")
+		p.colSelected = lipgloss.Color("#253553")
+		p.colTitle = lipgloss.Color("#e3e9ff")
+		p.colHelp = lipgloss.Color("#8a94c2")
+		p.colStatus = lipgloss.Color("#7dcfff")
+		p.colSection = lipgloss.Color("#7dcfff")
+		p.colDanger = lipgloss.Color("#ff5d7a")
 
-		p.styleNormal = lipgloss.NewStyle().Foreground(lipgloss.Color("#a9b1d6"))
-		p.styleSelected = lipgloss.NewStyle().Background(p.colSelected).Foreground(lipgloss.Color("#c0caf5"))
-		p.styleIgnored = lipgloss.NewStyle().Foreground(lipgloss.Color("#3b4261"))
+		p.styleNormal = lipgloss.NewStyle().Foreground(lipgloss.Color("#c8d3f5"))
+		p.styleSelected = lipgloss.NewStyle().Background(p.colSelected).Foreground(lipgloss.Color("#e3e9ff"))
+		p.styleIgnored = lipgloss.NewStyle().Foreground(lipgloss.Color("#4b557a"))
 	} else {
 		// TokyoNight Day
-		p.colMuted = lipgloss.Color("#6172b0")
-		p.colInstalled = lipgloss.Color("#587539")
-		p.colMissing = lipgloss.Color("#f52a65")
-		p.colOutdated = lipgloss.Color("#8c6c3e")
-		p.colProvider = lipgloss.Color("#2e7de9")
-		p.colProviderLinux = lipgloss.Color("#b15c00")
-		p.colProviderSystem = lipgloss.Color("#007197")
-		p.colVersion = lipgloss.Color("#8c6c3e")
-		p.colSelected = lipgloss.Color("#b4c2f0")
-		p.colTitle = lipgloss.Color("#3760bf")
-		p.colHelp = lipgloss.Color("#848cb5")
-		p.colStatus = lipgloss.Color("#2e7de9")
-		p.colSection = lipgloss.Color("#2e7de9")
-		p.colDanger = lipgloss.Color("#f52a65")
-		p.colSurface = lipgloss.Color("#e1e2e7")
+		p.colMuted = lipgloss.Color("#8b93b8")
+		p.colInstalled = lipgloss.Color("#3f6b1f")
+		p.colMissing = lipgloss.Color("#c9214d")
+		p.colOutdated = lipgloss.Color("#8f5e15")
+		p.colProvider = lipgloss.Color("#1f63d8")
+		p.colProviderLinux = lipgloss.Color("#a95000")
+		p.colProviderSystem = lipgloss.Color("#007b8f")
+		p.colVersion = lipgloss.Color("#7c5a18")
+		p.colSelected = lipgloss.Color("#dce6ff")
+		p.colTitle = lipgloss.Color("#1f3f8f")
+		p.colHelp = lipgloss.Color("#59627f")
+		p.colStatus = lipgloss.Color("#006d9c")
+		p.colSection = lipgloss.Color("#1f63d8")
+		p.colDanger = lipgloss.Color("#c9214d")
 
-		p.styleNormal = lipgloss.NewStyle().Foreground(lipgloss.Color("#3760bf"))
-		p.styleSelected = lipgloss.NewStyle().Background(p.colSelected).Foreground(lipgloss.Color("#1f2335"))
-		p.styleIgnored = lipgloss.NewStyle().Foreground(lipgloss.Color("#c4c8da"))
+		p.styleNormal = lipgloss.NewStyle().Foreground(lipgloss.Color("#24304f"))
+		p.styleSelected = lipgloss.NewStyle().Background(p.colSelected).Foreground(lipgloss.Color("#111827"))
+		p.styleIgnored = lipgloss.NewStyle().Foreground(lipgloss.Color("#b7bed4"))
 	}
 
 	// Rebuild all styles that reference the colour tokens.
@@ -125,7 +122,7 @@ func buildPaletteFor(isDark bool) palette {
 	p.styleSection = lipgloss.NewStyle().Foreground(p.colSection).Bold(true)
 	p.styleDangerLabel = lipgloss.NewStyle().Foreground(p.colDanger)
 	p.styleDangerSection = lipgloss.NewStyle().Foreground(p.colDanger).Bold(true)
-	p.styleCursor = lipgloss.NewStyle().Foreground(p.colTitle).Bold(true)
+	p.styleCursor = lipgloss.NewStyle().Foreground(p.colStatus).Bold(true)
 	p.styleActiveText = lipgloss.NewStyle().Foreground(p.colTitle).Bold(true)
 
 	return p
@@ -141,4 +138,13 @@ func defaultPalette() palette {
 // Called once per model from the tea.BackgroundColorMsg handler.
 func (m *Model) applyTheme(isDark bool) {
 	m.palette = buildPaletteFor(isDark)
+}
+
+func backgroundIsDark(c color.Color) bool {
+	if c == nil {
+		return true
+	}
+	r, g, b, _ := c.RGBA()
+	lum := 0.299*float64(r) + 0.587*float64(g) + 0.114*float64(b)
+	return lum < 32768
 }

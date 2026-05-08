@@ -21,19 +21,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.dotsFilePicker.SetWidth(filePickerContentWidth(m))
 			m.dotsFilePicker.SetHeight(filePickerListHeight(m))
 		}
+		m.resizeAdminTerminalSession()
 
 	case tea.BackgroundColorMsg:
-		// Detect terminal light/dark theme once at startup.
-		// RGBA() returns 0-65535; check perceived luminance.
-		r, g, b, _ := msg.RGBA()
-		lum := 0.299*float64(r) + 0.587*float64(g) + 0.114*float64(b)
-		m.isDark = lum < 32768
+		// Detect terminal light/dark theme for foreground tokens. Backgrounds
+		// stay on the terminal default instead of being repainted by Omni.
+		m.isDark = backgroundIsDark(msg.Color)
 		m.applyTheme(m.isDark)
 
 	case tea.FocusMsg:
 		m.focused = true
 		// Re-kick the spinner tick chain if any activity is still ongoing.
-		if m.loading || len(m.scanningProviders) > 0 || m.dotsLoading || m.searching || len(m.upgradingKeys) > 0 {
+		if m.loading || len(m.scanningProviders) > 0 || m.providerSnapshotRefreshing || m.discoveryRefreshing || m.descRefreshing || m.dotsLoading || m.searching || len(m.upgradingKeys) > 0 {
 			cmds = append(cmds, m.spinner.Tick)
 		}
 
@@ -54,6 +53,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.showFilePicker {
 			return m, tea.Batch(cmds...)
 		}
+		if m.adminTerminal != nil && m.adminTerminal.running {
+			m.writeAdminTerminalInput([]byte(msg.Content))
+			return m, tea.Batch(cmds...)
+		}
 		// Route bracketed-paste content directly into whichever text input is live.
 		switch m.mode {
 		case viewSearch:
@@ -66,7 +69,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case spinner.TickMsg:
 		// Only reschedule while focused — avoids burning CPU in the background.
-		if m.focused && (m.loading || len(m.scanningProviders) > 0 || m.dotsLoading || m.searching || len(m.upgradingKeys) > 0) {
+		if m.focused && (m.loading || len(m.scanningProviders) > 0 || m.providerSnapshotRefreshing || m.discoveryRefreshing || m.descRefreshing || m.dotsLoading || m.searching || len(m.upgradingKeys) > 0) {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			cmds = append(cmds, cmd)
@@ -84,8 +87,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case setupNodeMgrDoneMsg:
 		cmds = append(cmds, m.handleSetupNodeMgrDoneMsg(msg)...)
 
-	case setupProfileDoneMsg:
-		cmds = append(cmds, m.handleSetupProfileDoneMsg(msg)...)
+	case setupHostDoneMsg:
+		cmds = append(cmds, m.handleSetupHostDoneMsg(msg)...)
 
 	case stowInstallDoneMsg:
 		cmds = append(cmds, m.handleStowInstallDoneMsg(msg)...)
@@ -122,7 +125,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case descRefreshDoneMsg:
-		m.handleDescRefreshDoneMsg(msg)
+		if cmd := m.handleDescRefreshDoneMsg(msg); cmd != nil {
+			return m, cmd
+		}
 
 	case progressMsg:
 		cmds = append(cmds, m.handleProgressMsg(msg)...)
@@ -130,17 +135,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case progressStreamClosedMsg:
 		m.handleProgressStreamClosedMsg(msg)
 
+	case dotsProgressMsg:
+		cmds = append(cmds, m.handleDotsProgressMsg(msg)...)
+
+	case dotsProgressStreamClosedMsg:
+		m.handleDotsProgressStreamClosedMsg(msg)
+
 	case progressDoneMsg:
 		cmds = append(cmds, m.handleProgressDoneMsg(msg)...)
 
 	case opCompleteMsg:
 		cmds = append(cmds, m.handleOpCompleteMsg(msg)...)
 
+	case adminTerminalDoneMsg:
+		cmds = append(cmds, m.handleAdminTerminalDoneMsg(msg)...)
+
+	case adminTerminalOutputMsg:
+		cmds = append(cmds, m.handleAdminTerminalOutputMsg(msg)...)
+
 	case createGroupDoneMsg:
 		cmds = append(cmds, m.handleCreateGroupDoneMsg(msg)...)
 
-	case profileActivatedMsg:
-		cmds = append(cmds, m.handleProfileActivatedMsg(msg)...)
+	case hostCopiedMsg:
+		cmds = append(cmds, m.handleHostCopiedMsg(msg)...)
 
 	case groupChangedMsg:
 		cmds = append(cmds, m.handleGroupChangedMsg(msg)...)
@@ -166,11 +183,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dangerOpDoneMsg:
 		cmds = append(cmds, m.handleDangerOpDoneMsg(msg)...)
 
-	case profileGroupChangedMsg:
-		cmds = append(cmds, m.handleProfileGroupChangedMsg(msg)...)
-
-	case profileCreatedMsg:
-		cmds = append(cmds, m.handleProfileCreatedMsg(msg)...)
+	case hostGroupChangedMsg:
+		cmds = append(cmds, m.handleHostGroupChangedMsg(msg)...)
 
 	case debouncedSearchMsg:
 		cmds = append(cmds, m.handleDebouncedSearchMsg(msg)...)
@@ -259,23 +273,23 @@ func (m *Model) handleToolFilterClick(x, y int) bool {
 }
 
 func (m Model) toolFiltersClickable() bool {
-	if m.profileRequired || m.showFilePicker || m.stowInstallPrompt || m.help.ShowAll {
+	if m.hostRequired || m.showFilePicker || m.stowInstallPrompt || m.help.ShowAll {
 		return false
 	}
 	return m.mode == viewList || m.mode == viewSearch
 }
 
 func (m Model) mainTabsClickable() bool {
-	if m.profileRequired || m.showFilePicker || m.stowInstallPrompt || m.help.ShowAll {
+	if m.hostRequired || m.showFilePicker || m.stowInstallPrompt || m.help.ShowAll {
 		return false
 	}
-	if m.mode != viewList && m.mode != viewDots && m.mode != viewProfiles && m.mode != viewSettings {
+	if m.mode != viewList && m.mode != viewDots && m.mode != viewGroups && m.mode != viewSettings {
 		return false
 	}
-	if m.profileCreating || m.profileRenameMode || m.groupCreating || m.groupRenameMode || m.groupDeleteConfirm {
+	if m.hostRenameMode || m.groupCreating || m.groupRenameMode || m.groupDeleteConfirm {
 		return false
 	}
-	if m.profileEditMode != 0 || m.editingPriority || m.dangerConfirmRow >= 0 {
+	if m.hostEditMode != 0 || m.editingPriority || m.dangerConfirmRow >= 0 {
 		return false
 	}
 	return true
@@ -312,14 +326,14 @@ func (m *Model) scrollBy(delta int) {
 		m.scrollDotsBy(delta)
 	case viewSettings:
 		m.scrollSettingsBy(delta)
-	case viewProfiles:
-		m.scrollProfilesBy(delta)
+	case viewGroups:
+		m.scrollGroupsBy(delta)
 	case viewGroupPicker, viewGroupMembership:
 		m.pickerCursor = clampIndex(m.pickerCursor+delta, len(m.pickerGroups))
-	case viewProfileGroupTools:
-		m.groupToolsEditor.cursor = clampIndex(m.groupToolsEditor.cursor+delta, len(profileGroupToolRows(*m)))
-	case viewProfileGroupDots:
-		m.groupDotsEditor.cursor = clampIndex(m.groupDotsEditor.cursor+delta, len(profileGroupDotRows(*m)))
+	case viewGroupTools:
+		m.groupToolsEditor.cursor = clampIndex(m.groupToolsEditor.cursor+delta, len(groupToolRows(*m)))
+	case viewGroupDots:
+		m.groupDotsEditor.cursor = clampIndex(m.groupDotsEditor.cursor+delta, len(groupDotRows(*m)))
 	case viewIgnoreScope, viewProviderScope:
 		m.scopeCursor = clampIndex(m.scopeCursor+delta, len(m.scopeOptions))
 	case viewSetup:
@@ -342,19 +356,17 @@ func (m *Model) scrollSettingsBy(delta int) {
 	m.settingsCursor = clampIndex(m.settingsCursor+delta, numSettingRows)
 }
 
-func (m *Model) scrollProfilesBy(delta int) {
+func (m *Model) scrollGroupsBy(delta int) {
 	switch {
-	case m.profileEditMode == 1:
-		m.profileGroupIdx = clampIndex(m.profileGroupIdx+delta, len(m.profileGroupPicker))
-	case m.profileEditMode == 2:
-		m.profileHostIdx = clampIndex(m.profileHostIdx+delta, len(m.profileHostPicker))
+	case m.hostEditMode == 1:
+		m.hostGroupIdx = clampIndex(m.hostGroupIdx+delta, len(m.hostGroupPicker))
 	case m.groupDeleteConfirm:
 		m.groupDeleteChoice = clampIndex(m.groupDeleteChoice+delta, 2)
 	default:
 		if delta > 0 {
-			m.moveProfilesCursorDown()
+			m.moveGroupsCursorDown()
 		} else {
-			m.moveProfilesCursorUp()
+			m.moveGroupsCursorUp()
 		}
 	}
 }

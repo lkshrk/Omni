@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/provider"
 )
 
 const (
@@ -69,8 +70,9 @@ func (m *Model) confirmGroupPickerSelection(cmds *[]tea.Cmd) {
 		m.openPickerNewGroupInput(cmds)
 		return
 	}
-	m.runGroupPickerAction(selected, cmds)
-	m.closeGroupPicker()
+	if m.runGroupPickerAction(selected, cmds) {
+		m.closeGroupPicker()
+	}
 }
 
 func (m *Model) submitGroupPickerNewGroup(cmds *[]tea.Cmd) {
@@ -79,7 +81,9 @@ func (m *Model) submitGroupPickerNewGroup(cmds *[]tea.Cmd) {
 		if !slices.Contains(nonSentinelGroups(m.pickerGroups), newGroup) {
 			m.pickerCreatedGroups = appendUniqueString(m.pickerCreatedGroups, newGroup)
 		}
-		m.runGroupPickerAction(newGroup, cmds)
+		if !m.runGroupPickerAction(newGroup, cmds) {
+			return
+		}
 	}
 	m.closeGroupPicker()
 }
@@ -92,29 +96,41 @@ func (m *Model) openPickerNewGroupInput(cmds *[]tea.Cmd) {
 	*cmds = append(*cmds, textinput.Blink)
 }
 
-func (m *Model) runGroupPickerAction(group string, cmds *[]tea.Cmd) {
+func (m *Model) runGroupPickerAction(group string, cmds *[]tea.Cmd) bool {
 	t, ok := m.groupPickerActionTool()
 	if !ok {
-		return
+		return true
 	}
 	m.loading = true
 	if m.pickerPurposeClaim || m.pickerPurposeInstall {
 		claimGroup := group
-		if claimGroup == "base" {
+		if isProtectedGroupName(claimGroup) {
 			claimGroup = ""
 		}
 		if m.pickerPurposeInstall {
+			activeHost := m.activeHostForCreatedGroup(group)
+			m.closeGroupPicker()
+			if m.blockPrivilegedToolAction(&t, provider.PrivilegeActionInstall) {
+				if m.adminTerminal != nil {
+					m.adminTerminal.addToConfig = true
+					m.adminTerminal.addGroup = claimGroup
+					m.adminTerminal.addHost = activeHost
+				}
+				m.loading = false
+				return false
+			}
 			startOp(m, "Installing "+t.Name+"…")
 			m.startRowOperation(t.Name, t.Provider, m.statusMsg)
-			*cmds = append(*cmds, m.spinner.Tick, m.doInstallAndAdd(t.Name, t.Provider, claimGroup, m.activeProfileForCreatedGroup(group)))
-			return
+			*cmds = append(*cmds, m.spinner.Tick, m.doInstallAndAdd(t.Name, t.Provider, claimGroup, activeHost))
+			return false
 		}
 		startOp(m, "Adding "+t.Name+" to config…")
-		*cmds = append(*cmds, m.spinner.Tick, m.doClaim(t.Name, t.Provider, claimGroup, m.activeProfileForCreatedGroup(group)))
-		return
+		*cmds = append(*cmds, m.spinner.Tick, m.doClaim(t.Name, t.Provider, claimGroup, m.activeHostForCreatedGroup(group)))
+		return true
 	}
 	m.loading = false
 	*cmds = append(*cmds, setStatus(m, "✗ group picker has no assignment action", true))
+	return true
 }
 
 func (m *Model) groupPickerActionTool() (database.ToolCache, bool) {
@@ -128,11 +144,11 @@ func (m *Model) groupPickerActionTool() (database.ToolCache, bool) {
 	return *t, true
 }
 
-func (m *Model) activeProfileForCreatedGroup(group string) string {
-	if m.profileInfo == nil || !slices.Contains(m.pickerCreatedGroups, group) {
+func (m *Model) activeHostForCreatedGroup(group string) string {
+	if m.hostInfo == nil || !slices.Contains(m.pickerCreatedGroups, group) {
 		return ""
 	}
-	return m.profileInfo.Active
+	return m.hostInfo.Active
 }
 
 func (m *Model) handleGroupMembershipKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
@@ -162,7 +178,8 @@ func (m *Model) handleGroupMembershipKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		if m.selectedPickerGroupIsNewSentinel() {
 			m.openPickerNewGroupInput(&cmds)
 		} else {
-			cmds = append(cmds, m.toggleSelectedGroupMembership()...)
+			cmds = append(cmds, m.selectGroupMembership()...)
+			m.saveGroupMembershipPicker(&cmds)
 		}
 	case key.Matches(msg, m.keys.Confirm):
 		if m.selectedPickerGroupIsNewSentinel() {
@@ -267,8 +284,8 @@ func (m *Model) setSelectedMemberships(memberships []string) {
 	}
 }
 
-func (m *Model) toggleSelectedGroupMembership() []tea.Cmd {
-	name, memberships, ok := m.selectedMembershipTarget()
+func (m *Model) selectGroupMembership() []tea.Cmd {
+	_, _, ok := m.selectedMembershipTarget()
 	if !ok || m.pickerCursor < 0 || m.pickerCursor >= len(m.pickerGroups) {
 		return nil
 	}
@@ -276,17 +293,7 @@ func (m *Model) toggleSelectedGroupMembership() []tea.Cmd {
 	if isNewGroupSentinel(group) {
 		return nil
 	}
-	hasMembership := slices.Contains(memberships, group)
-	if hasMembership && len(memberships) <= 1 {
-		return []tea.Cmd{setStatus(m, "✗ "+name+" needs at least one group", true)}
-	}
-	if hasMembership {
-		memberships = removeString(memberships, group)
-	} else {
-		memberships = append(memberships, group)
-	}
-	slices.Sort(memberships)
-	m.setSelectedMemberships(memberships)
+	m.setSelectedMemberships([]string{group})
 	return nil
 }
 
@@ -305,13 +312,10 @@ func (m *Model) submitGroupMembershipNewGroup() {
 		m.pickerCreatedGroups = appendUniqueString(m.pickerCreatedGroups, newGroup)
 		m.pickerGroups = appendGroupToPicker(m, newGroup)
 	}
-	_, memberships, ok := m.selectedMembershipTarget()
-	if !ok {
+	if _, _, ok := m.selectedMembershipTarget(); !ok {
 		return
 	}
-	memberships = appendUniqueString(memberships, newGroup)
-	slices.Sort(memberships)
-	m.setSelectedMemberships(memberships)
+	m.setSelectedMemberships([]string{newGroup})
 	for i, group := range m.pickerGroups {
 		if group == newGroup {
 			m.pickerCursor = i
@@ -365,17 +369,17 @@ func (m *Model) saveGroupMembershipPicker(cmds *[]tea.Cmd) {
 		return
 	}
 	created := createdMembershipGroups(m.pickerCreatedGroups, next)
-	profile := ""
-	if m.profileInfo != nil {
-		profile = m.profileInfo.Active
+	host := ""
+	if m.hostInfo != nil {
+		host = m.hostInfo.Active
 	}
 	if m.pickerMembershipKind == pickerMembershipDot {
 		m.beginDotsOperation("Updating groups for " + name + "…")
-		*cmds = append(*cmds, m.spinner.Tick, m.doSetDotGroupMemberships(name, m.pickerOriginalGroups, next, created, profile))
+		*cmds = append(*cmds, m.spinner.Tick, m.doSetDotGroupMemberships(name, m.pickerOriginalGroups, next, created, host))
 	} else {
 		m.loading = true
 		startOp(m, "Updating groups for "+name+"…")
-		*cmds = append(*cmds, m.spinner.Tick, m.doSetToolGroupMemberships(name, m.pickerOriginalGroups, next, created, profile))
+		*cmds = append(*cmds, m.spinner.Tick, m.doSetToolGroupMemberships(name, m.pickerOriginalGroups, next, created, host))
 	}
 	m.finishGroupMembershipPicker()
 }
@@ -417,11 +421,25 @@ func (m *Model) handleScopePickerKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 			m.scopeCursor++
 		}
 	case key.Matches(msg, m.keys.Toggle):
-		m.toggleSelectedScopeOption()
+		if m.mode == viewProviderScope {
+			m.selectHighlightedProviderScopeOption()
+			m.saveScopePickerSelection(&cmds)
+		} else {
+			m.toggleSelectedScopeOption()
+		}
 	case key.Matches(msg, m.keys.Confirm):
 		m.saveScopePickerSelection(&cmds)
 	}
 	return cmds
+}
+
+func (m *Model) selectHighlightedProviderScopeOption() {
+	if m.scopeCursor < 0 || m.scopeCursor >= len(m.scopeOptions) {
+		return
+	}
+	for i := range m.scopeOptions {
+		m.scopeOptions[i].checked = i == m.scopeCursor
+	}
 }
 
 func (m *Model) closeScopePicker() {

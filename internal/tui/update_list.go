@@ -1,17 +1,21 @@
 package tui
 
 import (
+	"context"
+
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/provider"
 )
 
 const (
-	listConfirmSyncAll          = "sync-all"
-	listConfirmDelete           = "delete"
-	listConfirmReinstallDefault = "reinstall-default"
+	listConfirmSyncAll               = "sync-all"
+	listConfirmDelete                = "delete"
+	listConfirmReinstallDefault      = "reinstall-default"
+	listConfirmClearProviderOverride = "clear-provider-override"
 )
 
 func (m *Model) handleListNavigationKeyMsg(msg tea.KeyPressMsg) bool {
@@ -89,14 +93,7 @@ func (m *Model) handleListNavigationKeyMsg(msg tea.KeyPressMsg) bool {
 			m.cursor = 0
 		}
 	case key.Matches(msg, m.keys.Back):
-		if m.groupFilter != "" {
-			m.groupFilter = ""
-			m.groupTabIdx = 0
-			m.applyFilter()
-		} else if m.providerTabIdx != 0 {
-			m.providerTabIdx = 0
-			m.applyFilter()
-		}
+		m.clearToolFiltersAndSearch()
 	default:
 		return false
 	}
@@ -113,6 +110,20 @@ func (m *Model) handleListActionKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	}
 
 	switch {
+	case key.Matches(msg, m.keys.ApplySolution):
+		if msg.IsRepeat {
+			break
+		}
+		if t := m.selectedTool(); t != nil {
+			solution, ok := m.selectedRowApplicableSolution()
+			if !ok {
+				break
+			}
+			m.loading = true
+			startOp(m, "Applying fix: "+solution.Label+"…")
+			m.startRowOperation(t.Name, t.Provider, m.statusMsg)
+			cmds = append(cmds, m.spinner.Tick, m.doApplyProviderSolution(t.Name, t.Provider, solution))
+		}
 	case key.Matches(msg, m.keys.MoveGroup):
 		if m.selectedTool() != nil {
 			m.openGroupMembershipPicker()
@@ -133,6 +144,13 @@ func (m *Model) handleListActionKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		}
 	case key.Matches(msg, m.keys.Confirm):
 		if t := m.selectedTool(); t != nil && !t.Installed {
+			if m.isInstallAndAddCandidate(t) {
+				m.openInstallGroupPicker()
+				break
+			}
+			if m.blockPrivilegedToolAction(t, provider.PrivilegeActionInstall) {
+				break
+			}
 			m.loading = true
 			startOp(m, "Installing "+t.Name+"…")
 			m.startRowOperation(t.Name, t.Provider, m.statusMsg)
@@ -153,9 +171,12 @@ func (m *Model) handleListActionKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 			break
 		}
 		if t := m.selectedTool(); t != nil && !t.Installed {
-			if !t.Tracked {
+			if m.isInstallAndAddCandidate(t) {
 				m.openInstallGroupPicker()
 			} else {
+				if m.blockPrivilegedToolAction(t, provider.PrivilegeActionInstall) {
+					break
+				}
 				m.loading = true
 				startOp(m, "Installing "+t.Name+"…")
 				m.startRowOperation(t.Name, t.Provider, m.statusMsg)
@@ -174,10 +195,14 @@ func (m *Model) handleListActionKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 			break
 		}
 		if t := m.selectedTool(); t != nil && t.Installed && t.Outdated {
+			if m.blockPrivilegedToolAction(t, provider.PrivilegeActionUpgrade) {
+				break
+			}
 			uk := toolKey(t.Name, t.Provider)
 			if !m.upgradingKeys["*"] && !m.upgradingKeys[uk] {
 				m.upgradingKeys[uk] = true
 				startOp(m, "Upgrading "+t.Name+"…")
+				m.startRowOperation(t.Name, t.Provider, m.statusMsg)
 				cmds = append(cmds, m.spinner.Tick, m.doUpgrade(t.Name, t.Provider))
 			}
 		}
@@ -202,8 +227,12 @@ func (m *Model) handleListActionKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		if msg.IsRepeat {
 			break
 		}
-		if t := m.selectedTool(); t != nil && m.syncStatusOf(t) == syncWrongProv {
-			m.openProviderScopePicker(t)
+		if t := m.selectedTool(); t != nil {
+			if providerPinForTool(t, m.toolProviderPins) != "" {
+				cmds = append(cmds, m.armListConfirmation(listConfirmClearProviderOverride, t))
+			} else if m.syncStatusOf(t) == syncWrongProv {
+				m.openProviderScopePicker(t)
+			}
 		}
 	case key.Matches(msg, m.keys.MigrateProvider):
 		if msg.IsRepeat {
@@ -244,6 +273,10 @@ func (m *Model) handleListConfirmationKeyMsg(msg tea.KeyPressMsg) (bool, []tea.C
 	case listConfirmDelete:
 		m.loading = true
 		if c.installed {
+			if m.blockPrivilegedToolAction(&database.ToolCache{Name: c.name, Provider: c.provider, Installed: true, InstalledWith: c.installedWith}, provider.PrivilegeActionUninstall) {
+				m.loading = false
+				break
+			}
 			startOp(m, "Deleting "+c.name+"…")
 			cmds = append(cmds, m.spinner.Tick, m.doDelete(c.name, c.provider))
 		} else {
@@ -257,6 +290,12 @@ func (m *Model) handleListConfirmationKeyMsg(msg tea.KeyPressMsg) (bool, []tea.C
 		startOp(m, "Reinstalling "+c.name+" with default ("+c.provider+")…")
 		m.startRowOperation(c.name, c.provider, m.statusMsg)
 		cmds = append(cmds, m.spinner.Tick, m.doMigrateProvider(c.name, c.provider, c.installedWith))
+	case listConfirmClearProviderOverride:
+		m.loading = true
+		m.migrating = c.installed && c.installedWith != ""
+		startOp(m, "Removing provider override for "+c.name+"…")
+		m.startRowOperation(c.name, c.provider, m.statusMsg)
+		cmds = append(cmds, m.spinner.Tick, m.doClearProviderOverride(c.name, c.provider, c.installedWith))
 	}
 	return true, cmds
 }
@@ -272,7 +311,42 @@ func (m *Model) clearRowOperation() {
 	m.rowOpStatus = ""
 }
 
-func (m *Model) setToolActionError(key, message string) {
+func (m *Model) beginCancellableAction() context.Context {
+	if m.activeActionCancel != nil {
+		m.activeActionCancel()
+	}
+	parent := m.ctx
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent)
+	m.activeActionCancel = cancel
+	return ctx
+}
+
+func (m *Model) finishCancellableAction() {
+	m.activeActionCancel = nil
+}
+
+func (m *Model) cancelActiveAction() tea.Cmd {
+	if m.activeActionCancel == nil {
+		return nil
+	}
+	m.activeActionCancel()
+	m.activeActionCancel = nil
+	m.progressGen++
+	m.progressCh = nil
+	m.progressText = ""
+	m.loading = false
+	m.migrating = false
+	m.clearRowOperation()
+	m.clearBulkPending()
+	clear(m.upgradingKeys)
+	m.adminTerminalQueue = nil
+	return setStatus(m, "cancelled", false)
+}
+
+func (m *Model) setToolActionError(key, message string, errValues ...error) {
 	if key == "" || message == "" {
 		return
 	}
@@ -280,6 +354,31 @@ func (m *Model) setToolActionError(key, message string) {
 		m.rowErrors = make(map[string]string)
 	}
 	m.rowErrors[key] = message
+	if len(errValues) > 0 {
+		if actionErr, ok := provider.ActionErrorFrom(errValues[0]); ok {
+			if m.rowActionErrors == nil {
+				m.rowActionErrors = make(map[string]*provider.ActionError)
+			}
+			m.rowActionErrors[key] = actionErr
+		}
+	}
+}
+
+func (m *Model) isInstallAndAddCandidate(t *database.ToolCache) bool {
+	if t == nil {
+		return false
+	}
+	for _, searchTool := range m.searchTools {
+		if searchTool == t {
+			return true
+		}
+	}
+	for _, discoveredTool := range m.discoveredTools {
+		if discoveredTool == t {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Model) clearToolActionError(key string) {
@@ -287,10 +386,44 @@ func (m *Model) clearToolActionError(key string) {
 		return
 	}
 	delete(m.rowErrors, key)
+	delete(m.rowActionErrors, key)
 }
 
 func (m *Model) clearRowActionError() {
 	clear(m.rowErrors)
+	clear(m.rowActionErrors)
+}
+
+func (m Model) selectedRowApplicableSolution() (provider.ErrorSolution, bool) {
+	t := m.selectedTool()
+	if t == nil || len(m.rowActionErrors) == 0 {
+		return provider.ErrorSolution{}, false
+	}
+	actionErr := m.rowActionErrors[toolKey(t.Name, t.Provider)]
+	if actionErr == nil {
+		return provider.ErrorSolution{}, false
+	}
+	return firstApplicableSolution(actionErr)
+}
+
+func firstApplicableSolution(actionErr *provider.ActionError) (provider.ErrorSolution, bool) {
+	idx := firstApplicableSolutionIndex(actionErr)
+	if idx < 0 {
+		return provider.ErrorSolution{}, false
+	}
+	return actionErr.Solutions[idx], true
+}
+
+func firstApplicableSolutionIndex(actionErr *provider.ActionError) int {
+	if actionErr == nil {
+		return -1
+	}
+	for i, solution := range actionErr.Solutions {
+		if solution.Action == provider.ErrorSolutionActionSwitchProvider && solution.TargetProvider != "" {
+			return i
+		}
+	}
+	return -1
 }
 
 func (m *Model) markBulkPendingUpdates() {
@@ -348,6 +481,8 @@ func (m *Model) matchesListConfirmationAction(msg tea.KeyPressMsg) bool {
 		return key.Matches(msg, m.keys.Delete)
 	case listConfirmReinstallDefault:
 		return key.Matches(msg, m.keys.MigrateProvider)
+	case listConfirmClearProviderOverride:
+		return key.Matches(msg, m.keys.PinProvider)
 	default:
 		return false
 	}
@@ -420,13 +555,11 @@ func (m *Model) refreshInstalledProviders() []tea.Cmd {
 		return cmds
 	}
 	clearStatus(m)
-	m.scanningProviders = make(map[string]bool)
-	for _, t := range m.allTools {
-		m.scanningProviders[t.Provider] = true
-	}
+	m.scanningProviders = m.currentProviderScanSet()
 	if len(m.scanningProviders) == 0 {
 		return cmds
 	}
+	setActivityStatus(m, providerRefreshStatus(m.scanningProviders))
 	m.scanGen++
 	gen := m.scanGen
 	cmds = append(cmds, m.spinner.Tick)

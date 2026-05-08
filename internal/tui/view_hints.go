@@ -15,9 +15,10 @@ import (
 
 // hintItem pairs a key label and its action description for rendered hints.
 type hintItem struct {
-	key    string
-	desc   string
-	danger bool
+	key        string
+	desc       string
+	danger     bool
+	pressAgain bool
 }
 
 type helpGroup struct {
@@ -39,8 +40,8 @@ const (
 	hintCtxSettingsDotsSync
 	hintCtxSettingsDanger
 	hintCtxSettingsPriorityEdit
-	hintCtxProfileGroupPicker
-	hintCtxProfileDefault
+	hintCtxHostGroupPicker
+	hintCtxHostDefault
 	hintCtxGroupDefault
 	hintCtxDotsDeleteConfirm
 	hintCtxDotsRepoConfirm
@@ -49,10 +50,10 @@ const (
 	hintCtxDotsRow
 	hintCtxDotsConflict
 	hintCtxFilePickerBrowse
-	hintCtxProfileGroupTools
-	hintCtxProfileGroupToolsSearch
-	hintCtxProfileGroupDots
-	hintCtxProfileGroupDotsSearch
+	hintCtxHostGroupTools
+	hintCtxHostGroupToolsSearch
+	hintCtxHostGroupDots
+	hintCtxHostGroupDotsSearch
 )
 
 func rawHint(key, desc string) hintItem {
@@ -78,12 +79,21 @@ func dangerRawHint(key, desc string) hintItem {
 	return hintItem{key: key, desc: desc, danger: true}
 }
 
+func pressAgainHint(key, action string) hintItem {
+	return hintItem{key: key, desc: action, danger: true, pressAgain: true}
+}
+
 // hintKey renders a key+description pair with the key styled like the legend.
 func hintKey(pal palette, k, desc string) string {
 	return pal.styleTitle.Render(k) + pal.styleHintDesc.Render(" "+desc)
 }
 
 func renderHintItem(pal palette, h hintItem) string {
+	if h.pressAgain {
+		return pal.styleDangerLabel.Bold(true).Render("press ") +
+			pal.styleDangerSection.Bold(true).Render(h.key) +
+			pal.styleDangerLabel.Bold(true).Render(" again to "+h.desc)
+	}
 	if h.danger {
 		return pal.styleDangerSection.Render(h.key) + pal.styleDangerLabel.Bold(true).Render(" "+h.desc)
 	}
@@ -113,6 +123,70 @@ func renderActionHintText(pal palette, hints []hintItem) string {
 		parts[i] = renderHintItem(pal, h)
 	}
 	return hintJoin(pal, parts...)
+}
+
+func renderPopupActionHintText(pal palette, width int, hints []hintItem) string {
+	if len(hints) == 0 {
+		return ""
+	}
+	width = max(width, 1)
+	left, middle, right := splitPopupActionHints(hints)
+	if len(left) == 0 && len(right) == 0 {
+		return lipgloss.NewStyle().Width(width).Align(lipgloss.Center).Render(renderActionHintText(pal, middle))
+	}
+	return renderPopupActionColumns(pal, width, left, middle, right)
+}
+
+func splitPopupActionHints(hints []hintItem) (left, middle, right []hintItem) {
+	for _, h := range hints {
+		switch {
+		case isPopupAbortHint(h):
+			left = append(left, h)
+		case isPopupPrimaryHint(h):
+			right = append(right, h)
+		default:
+			middle = append(middle, h)
+		}
+	}
+	return left, middle, right
+}
+
+func isPopupAbortHint(h hintItem) bool {
+	desc := strings.ToLower(strings.TrimSpace(h.desc))
+	return desc == "cancel" || desc == "close" || desc == "skip" ||
+		strings.Contains(desc, "cancel")
+}
+
+func isPopupPrimaryHint(h hintItem) bool {
+	desc := strings.ToLower(strings.TrimSpace(h.desc))
+	if desc == "save" || desc == "create" || desc == "confirm" || desc == "pick" || desc == "apply" || desc == "select" || desc == "run" {
+		return true
+	}
+	return strings.Contains(desc, "continue") ||
+		strings.HasPrefix(desc, "confirm ") ||
+		strings.HasPrefix(desc, "create ") ||
+		strings.HasPrefix(desc, "save ")
+}
+
+func renderPopupActionColumns(pal palette, width int, left, middle, right []hintItem) string {
+	leftText := renderActionHintText(pal, append(append([]hintItem(nil), left...), middle...))
+	rightText := renderActionHintText(pal, right)
+	return renderPopupActionEdgeLine(width, leftText, rightText)
+}
+
+func renderPopupActionEdgeLine(width int, left, right string) string {
+	leftW := lipgloss.Width(left)
+	rightW := lipgloss.Width(right)
+	switch {
+	case left == "":
+		return strings.Repeat(" ", max(width-rightW, 0)) + right
+	case right == "":
+		return fitPopupLine(left, width)
+	case leftW+rightW+2 <= width:
+		return left + strings.Repeat(" ", width-leftW-rightW) + right
+	default:
+		return fitPopupLine(left, width) + "\n" + strings.Repeat(" ", max(width-rightW, 0)) + right
+	}
 }
 
 // renderInlineHints renders a list of hintItems joined by the footer help
@@ -173,16 +247,18 @@ func toggleSaveCancelHintText(m Model) string {
 	return renderActionHintText(m.palette, toggleSaveCancelActionItems(m))
 }
 
+func selectCancelActionItems(m Model) []hintItem {
+	return []hintItem{
+		hintFromBindingDesc(m.keys.Toggle, "select"),
+		hintFromBindingDesc(m.keys.Back, "cancel"),
+	}
+}
+
 func renderPressAgainActionHint(pal palette, prefix, keyLabel, action string) string {
 	return renderActionHints(pal, actionHints{
 		prefix: prefix,
-		items:  []hintItem{dangerRawHint(keyLabel, "press "+keyLabel+" again to "+action)},
+		items:  []hintItem{pressAgainHint(keyLabel, action)},
 	})
-}
-
-func pressAgainBinding(b key.Binding, action string) key.Binding {
-	h := b.Help()
-	return key.NewBinding(key.WithKeys(b.Keys()...), key.WithHelp(h.Key, "press "+h.Key+" again to "+action))
 }
 
 func contextHintItems(m Model, ctx hintContext) []hintItem {
@@ -219,23 +295,27 @@ func contextHintItems(m Model, ctx hintContext) []hintItem {
 			hintFromBindingDesc(m.keys.Confirm, "save"),
 			hintFromBindingDesc(m.keys.Back, "cancel"),
 		}
-	case hintCtxProfileGroupPicker:
+	case hintCtxHostGroupPicker:
 		return []hintItem{
 			hintFromBindingDesc(m.keys.Toggle, "toggle"),
 			hintFromBindingDesc(m.keys.Confirm, "save"),
 			hintFromBindingDesc(m.keys.Back, "cancel"),
 		}
-	case hintCtxProfileDefault:
-		return []hintItem{
-			hintFromBindingDesc(m.keys.Toggle, "activate profile"),
-			hintFromBinding(m.keys.Rename),
-			hintFromBinding(m.keys.ProfileGroups),
-			hintFromBinding(m.keys.EditHosts),
-			hintFromBinding(m.keys.Delete),
+	case hintCtxHostDefault:
+		hints := []hintItem{}
+		if m.hostCopyConfirm {
+			hints = append(hints, pressAgainHint(m.keys.Toggle.Help().Key, "copy groups"))
+		} else if m.canCopySelectedHostGroups() {
+			hints = append(hints, hintFromBindingDesc(m.keys.Toggle, "copy groups"))
 		}
+		return append(hints,
+			hintFromBinding(m.keys.Rename),
+			hintFromBinding(m.keys.HostGroups),
+			hintFromBinding(m.keys.Delete),
+		)
 	case hintCtxGroupDefault:
 		hints := []hintItem{}
-		if m.selectedProfileGroupName() != "base" {
+		if !isProtectedGroupName(m.selectedHostGroupName()) {
 			hints = append(hints,
 				hintFromBinding(m.keys.Rename),
 			)
@@ -244,7 +324,7 @@ func contextHintItems(m Model, ctx hintContext) []hintItem {
 			hintFromBinding(m.keys.GroupTools),
 			hintFromBindingDesc(m.keys.GroupDots, "edit dotfiles"),
 		)
-		if m.selectedProfileGroupName() != "base" {
+		if !isProtectedGroupName(m.selectedHostGroupName()) {
 			hints = append(hints, hintFromBinding(m.keys.Delete))
 		}
 		return hints
@@ -274,25 +354,32 @@ func contextHintItems(m Model, ctx hintContext) []hintItem {
 			hintFromBindingDesc(m.keys.Confirm, "pick"),
 			hintFromBindingDesc(m.keys.Back, "close"),
 		}
-	case hintCtxProfileGroupTools:
+	case hintCtxHostGroupTools:
+		ignoreDesc := "ignore"
+		if row, ok := m.selectedGroupToolRow(); ok && row.groupIgnore {
+			ignoreDesc = "unignore"
+		}
 		return []hintItem{
+			hintFromBindingDesc(m.keys.Back, "cancel"),
 			hintFromBindingDesc(m.keys.Search, "search"),
 			hintFromBindingDesc(footerFilterBinding(m.keys, false), "filter"),
+			hintFromBindingDesc(m.keys.Toggle, "toggle"),
+			hintFromBindingDesc(m.keys.Ignore, ignoreDesc),
 			hintFromBindingDesc(m.keys.Confirm, "save"),
-			hintFromBindingDesc(m.keys.Back, "cancel"),
 		}
-	case hintCtxProfileGroupToolsSearch:
+	case hintCtxHostGroupToolsSearch:
 		return []hintItem{
 			hintFromBindingDesc(m.keys.Confirm, "apply"),
 			hintFromBindingDesc(m.keys.Back, "cancel"),
 		}
-	case hintCtxProfileGroupDots:
+	case hintCtxHostGroupDots:
 		return []hintItem{
-			hintFromBindingDesc(m.keys.Search, "search"),
-			hintFromBindingDesc(m.keys.Confirm, "save"),
 			hintFromBindingDesc(m.keys.Back, "cancel"),
+			hintFromBindingDesc(m.keys.Search, "search"),
+			hintFromBindingDesc(m.keys.Toggle, "toggle"),
+			hintFromBindingDesc(m.keys.Confirm, "save"),
 		}
-	case hintCtxProfileGroupDotsSearch:
+	case hintCtxHostGroupDotsSearch:
 		return []hintItem{
 			hintFromBindingDesc(m.keys.Confirm, "apply"),
 			hintFromBindingDesc(m.keys.Back, "cancel"),
@@ -310,18 +397,14 @@ func dotsRowHintItems(m Model) []hintItem {
 	row := visible[m.dotsCursor]
 	entry := row.entry
 	hints := make([]hintItem, 0, 4)
-	if len(entry.Children) > 0 && !row.isChild {
-		desc := "expand"
-		if m.dotsExpandedName == entry.Name {
-			desc = "collapse"
-		}
-		hints = append(hints, hintFromBindingDesc(m.keys.Toggle, desc))
+	if hint, ok := dotsExpandHintItem(m, row); ok {
+		hints = append(hints, hint)
 	}
 	if !row.isChild && dotHasAction(entry, app.DotActionSync) {
 		hints = append(hints, hintFromBindingDesc(m.keys.Sync, dotsSyncHintDesc(dotStatusState(entry))))
 	}
 	if !row.isChild && len(m.dotMemberships[entry.Name]) > 0 {
-		hints = append(hints, hintFromBindingDesc(m.keys.MoveGroup, "edit groups"))
+		hints = append(hints, hintFromBindingDesc(m.keys.MoveGroup, actions.MustTUILabel(actions.DotsEditGroups)))
 	}
 	if row.isChild && dotHasAction(entry, app.DotActionIgnore) {
 		desc := "ignore"
@@ -347,8 +430,12 @@ func dotsConflictHintItems(m Model) []hintItem {
 	if m.dotsCursor < 0 || m.dotsCursor >= len(visible) {
 		return nil
 	}
-	entry := visible[m.dotsCursor].entry
+	row := visible[m.dotsCursor]
+	entry := row.entry
 	hints := make([]hintItem, 0, 4)
+	if hint, ok := dotsExpandHintItem(m, row); ok {
+		hints = append(hints, hint)
+	}
 	if dotHasAction(entry, app.DotActionUseRepo) {
 		hints = append(hints, hintFromBindingDesc(m.keys.DotUseRepo, "use repo"))
 	}
@@ -366,6 +453,17 @@ func dotsConflictHintItems(m Model) []hintItem {
 		hints = append(hints, hintFromBinding(m.keys.DotDelete))
 	}
 	return hints
+}
+
+func dotsExpandHintItem(m Model, row dotsVisibleRow) (hintItem, bool) {
+	if !dotsRowExpandable(row) {
+		return hintItem{}, false
+	}
+	desc := "expand"
+	if dotsRowExpanded(m, row) {
+		desc = "collapse"
+	}
+	return hintFromBindingDesc(m.keys.Toggle, desc), true
 }
 
 func dotsSyncHintDesc(state app.DotState) string {
@@ -412,6 +510,14 @@ func toolInlineHints(m Model, t *database.ToolCache) []hintItem {
 	case ss == syncOrphan && t.Installed:
 		hints = append(hints, hintFromBinding(m.keys.Claim))
 		showDelete = true
+	case providerPinForTool(t, m.toolProviderPins) != "":
+		hints = append(hints, hintFromBindingDesc(m.keys.PinProvider, "remove override"))
+		if ss == syncWrongProv {
+			hints = append(hints, hintFromBinding(m.keys.MigrateProvider))
+		}
+		showGroup = true
+		showIgnore = true
+		showDelete = true
 	case ss == syncWrongProv:
 		hints = append(hints, hintFromBinding(m.keys.PinProvider))
 		hints = append(hints, hintFromBinding(m.keys.MigrateProvider))
@@ -455,14 +561,17 @@ func tabShortHelpBindings(m *Model) []key.Binding {
 		return footerBindings(k, []key.Binding{k.DotAdd, k.DotDiscover, k.SyncAll}, []key.Binding{k.Search})
 	case viewSettings:
 		return footerBindings(k, nil, nil)
-	case viewProfiles:
-		actions := []key.Binding{k.NewProfile, k.NewGroup}
+	case viewGroups:
+		actions := []key.Binding{k.NewGroup}
 		return footerBindings(k, actions, nil)
 	default:
 		if m.listConfirm.action == listConfirmSyncAll {
-			return footerBindings(k, []key.Binding{pressAgainBinding(k.SyncAll, "sync all")}, nil)
+			return nil
 		}
 		filters := []key.Binding{k.Search, footerFilterBinding(k, true)}
+		if m.toolFiltersOrSearchActive() {
+			filters = append(filters, footerClearFiltersBinding(k))
+		}
 		return footerBindings(k, []key.Binding{k.UpgradeAll, k.SyncAll, k.Refresh}, filters)
 	}
 }
@@ -471,7 +580,7 @@ func rowConfirmationActive(m Model) bool {
 	if m.listConfirm.action != "" && m.listConfirm.action != listConfirmSyncAll {
 		return true
 	}
-	return m.profileDeleteConfirm ||
+	return m.hostDeleteConfirm ||
 		m.groupDeleteConfirm ||
 		m.dangerConfirmRow >= 0 ||
 		dotsConfirmationActive(m)
@@ -503,6 +612,11 @@ func footerFilterBinding(k KeyMap, includeGroup bool) key.Binding {
 	return key.NewBinding(key.WithKeys(keys...), key.WithHelp(strings.Join(labels, ","), providerHelp.Desc))
 }
 
+func footerClearFiltersBinding(k KeyMap) key.Binding {
+	help := k.Back.Help()
+	return key.NewBinding(key.WithKeys(k.Back.Keys()...), key.WithHelp(help.Key, "clear"))
+}
+
 func compactFilterLabel(label string) string {
 	return strings.ReplaceAll(label, ",", "")
 }
@@ -521,10 +635,10 @@ func tabFullHelpBindings(m *Model) [][]key.Binding {
 			common,
 			{k.Toggle, k.Confirm, k.Back, k.GroupPrev, k.GroupNext},
 		}
-	case viewProfiles:
+	case viewGroups:
 		return [][]key.Binding{
 			common,
-			{k.NewProfile, k.NewGroup, k.ProfileGroups, k.GroupTools, k.GroupDots, k.Toggle, k.Back},
+			{k.NewGroup, k.HostGroups, k.GroupTools, k.GroupDots, k.Toggle, k.Back},
 		}
 	default:
 		return [][]key.Binding{
@@ -563,14 +677,16 @@ func activeConfirmationHelpItems(m Model) []hintItem {
 		if keyLabel == "" {
 			keyLabel = "q"
 		}
-		return []hintItem{dangerRawHint(keyLabel, "press "+keyLabel+" again to quit")}
+		return []hintItem{pressAgainHint(keyLabel, "quit")}
 	case m.listConfirm.action == listConfirmSyncAll:
 		keyLabel := m.keys.SyncAll.Help().Key
-		return []hintItem{dangerRawHint(keyLabel, "press "+keyLabel+" again to sync all")}
+		return []hintItem{pressAgainHint(keyLabel, "sync all")}
 	case m.listConfirm.action == listConfirmDelete:
-		return confirmActionItems(m.keys.Delete, actions.MustConfirmDescription(actions.ToolDelete), m.keys.Back)
+		return confirmActionItems(m.keys.Delete, actions.MustTUIConfirmDescription(actions.ToolDelete), m.keys.Back)
 	case m.listConfirm.action == listConfirmReinstallDefault:
-		return confirmActionItems(m.keys.MigrateProvider, actions.MustConfirmDescription(actions.ToolReinstallDefault), m.keys.Back)
+		return confirmActionItems(m.keys.MigrateProvider, actions.MustTUIConfirmDescription(actions.ToolReinstallDefault), m.keys.Back)
+	case m.listConfirm.action == listConfirmClearProviderOverride:
+		return confirmActionItems(m.keys.PinProvider, "remove provider override and reinstall with default", m.keys.Back)
 	case m.dotsConfirmIdx >= 0:
 		return contextHintItems(m, hintCtxDotsDeleteConfirm)
 	case m.dotsOverwriteIdx >= 0:
@@ -583,10 +699,12 @@ func activeConfirmationHelpItems(m Model) []hintItem {
 		return contextHintItems(m, hintCtxDotsDeleteConfirm)
 	case m.dangerConfirmRow >= 0:
 		return contextHintItems(m, hintCtxSettingsDanger)
-	case m.profileDeleteConfirm:
-		return []hintItem{dangerRawHint("d", "press d again to confirm delete")}
+	case m.hostDeleteConfirm:
+		return []hintItem{pressAgainHint("d", "delete")}
+	case m.hostCopyConfirm:
+		return []hintItem{pressAgainHint(m.keys.Toggle.Help().Key, "copy groups")}
 	case m.groupDeleteConfirm:
-		return confirmActionItems(m.keys.Confirm, actions.MustConfirmDescription(actions.GroupDelete), m.keys.Back)
+		return confirmActionItems(m.keys.Confirm, actions.MustTUIConfirmDescription(actions.GroupDelete), m.keys.Back)
 	default:
 		return nil
 	}
@@ -630,6 +748,12 @@ func renderHelpRows(p palette, hints []hintItem, width int) string {
 
 	var sb strings.Builder
 	for _, h := range hints {
+		if h.pressAgain {
+			sb.WriteString("  ")
+			sb.WriteString(renderHintItem(p, h))
+			sb.WriteByte('\n')
+			continue
+		}
 		keyStyle := p.styleTitle
 		descStyle := p.styleHelp
 		if h.danger {
@@ -654,15 +778,15 @@ func helpActionGroups(m Model) []helpGroup {
 	switch m.mode {
 	case viewDots:
 		return []helpGroup{{items: []hintItem{
-			hintFromBindingDesc(k.DotAdd, actions.MustLabel(actions.DotsAdd)),
-			hintFromBindingDesc(k.DotDiscover, actions.MustLabel(actions.DotsDiscover)),
-			hintFromBindingDesc(k.SyncAll, actions.MustLabel(actions.ToolSyncAll)),
-			hintFromBindingDesc(k.Sync, actions.MustLabel(actions.DotsSync)),
+			hintFromBindingDesc(k.DotAdd, actions.MustTUILabel(actions.DotsAdd)),
+			hintFromBindingDesc(k.DotDiscover, actions.MustTUILabel(actions.DotsDiscover)),
+			hintFromBindingDesc(k.SyncAll, actions.MustTUILabel(actions.ToolSyncAll)),
+			hintFromBindingDesc(k.Sync, actions.MustTUILabel(actions.DotsSync)),
 			hintFromBindingDesc(k.DotUseRepo, "use repo"),
 			hintFromBindingDesc(k.DotUseLocal, "use local"),
-			hintFromBindingDesc(k.MoveGroup, actions.MustLabel(actions.DotsEditGroups)),
-			hintFromBindingDesc(k.DotIgnore, actions.MustLabel(actions.DotsIgnore)),
-			hintFromBindingDesc(k.DotDelete, actions.MustLabel(actions.DotsDelete)),
+			hintFromBindingDesc(k.MoveGroup, actions.MustTUILabel(actions.DotsEditGroups)),
+			hintFromBindingDesc(k.DotIgnore, actions.MustTUILabel(actions.DotsIgnore)),
+			hintFromBindingDesc(k.DotDelete, actions.MustTUILabel(actions.DotsDelete)),
 		}}}
 	case viewSettings:
 		return []helpGroup{{items: []hintItem{
@@ -670,29 +794,30 @@ func helpActionGroups(m Model) []helpGroup {
 			hintFromBindingDesc(k.Confirm, "edit or save expanded setting"),
 			rawHint("K/J", "move system priority"),
 		}}}
-	case viewProfiles:
-		return []helpGroup{{items: []hintItem{
-			hintFromBindingDesc(k.NewProfile, actions.MustLabel(actions.ProfileCreate)),
-			hintFromBindingDesc(k.NewGroup, actions.MustLabel(actions.GroupCreate)),
-			hintFromBindingDesc(k.Toggle, "activate profile"),
+	case viewGroups:
+		items := []hintItem{
+			hintFromBindingDesc(k.NewGroup, actions.MustTUILabel(actions.GroupCreate)),
 			hintFromBindingDesc(k.Rename, actions.LabelRename),
-			hintFromBindingDesc(k.ProfileGroups, actions.MustLabel(actions.ProfileEditGroups)),
-			hintFromBindingDesc(k.EditHosts, actions.MustLabel(actions.ProfileEditHosts)),
-			hintFromBindingDesc(k.GroupTools, actions.MustLabel(actions.GroupEditTools)),
+			hintFromBindingDesc(k.HostGroups, actions.MustTUILabel(actions.HostEditGroups)),
+			hintFromBindingDesc(k.GroupTools, actions.MustTUILabel(actions.GroupEditTools)),
 			hintFromBindingDesc(k.GroupDots, "edit dotfiles"),
 			hintFromBindingDesc(k.Delete, actions.LabelDelete),
-		}}}
+		}
+		if m.canCopySelectedHostGroups() {
+			items = append([]hintItem{items[0], hintFromBindingDesc(k.Toggle, "copy groups")}, items[1:]...)
+		}
+		return []helpGroup{{items: items}}
 	default:
 		return []helpGroup{
 			{title: "Row", items: []hintItem{
-				hintFromBindingDesc(k.Install, actions.MustLabel(actions.ToolInstall)),
-				hintFromBindingDesc(k.Upgrade, actions.MustLabel(actions.ToolUpdate)),
-				hintFromBindingDesc(k.Claim, actions.MustLabel(actions.ToolClaim)),
-				hintFromBindingDesc(k.PinProvider, actions.MustLabel(actions.ToolPinProvider)),
-				hintFromBindingDesc(k.MigrateProvider, actions.MustLabel(actions.ToolReinstallDefault)),
-				hintFromBindingDesc(k.MoveGroup, actions.MustLabel(actions.ToolChangeGroup)),
-				hintFromBindingDesc(k.Ignore, actions.MustLabel(actions.ToolIgnore)),
-				hintFromBindingDesc(k.Delete, actions.MustLabel(actions.ToolDelete)),
+				hintFromBindingDesc(k.Install, actions.MustTUILabel(actions.ToolInstall)),
+				hintFromBindingDesc(k.Upgrade, actions.MustTUILabel(actions.ToolUpdate)),
+				hintFromBindingDesc(k.Claim, actions.MustTUILabel(actions.ToolClaim)),
+				hintFromBindingDesc(k.PinProvider, actions.MustTUILabel(actions.ToolPinProvider)),
+				hintFromBindingDesc(k.MigrateProvider, actions.MustTUILabel(actions.ToolReinstallDefault)),
+				hintFromBindingDesc(k.MoveGroup, actions.MustTUILabel(actions.ToolChangeGroup)),
+				hintFromBindingDesc(k.Ignore, actions.MustTUILabel(actions.ToolIgnore)),
+				hintFromBindingDesc(k.Delete, actions.MustTUILabel(actions.ToolDelete)),
 			}},
 			{title: "Bulk", items: []hintItem{
 				hintFromBindingDesc(k.UpgradeAll, "upgrade all outdated tools"),
@@ -721,13 +846,13 @@ func helpGlobalItems(m Model) []hintItem {
 }
 
 func isToolsHelpMode(mode viewMode) bool {
-	return mode == viewList || mode == viewSearch || mode == viewCommand || mode == viewGroupPicker || mode == viewGroupMembership || mode == viewProfileGroupTools || mode == viewProfileGroupDots || mode == viewIgnoreScope || mode == viewProviderScope || mode == viewSetup
+	return mode == viewList || mode == viewSearch || mode == viewCommand || mode == viewGroupPicker || mode == viewGroupMembership || mode == viewGroupTools || mode == viewGroupDots || mode == viewIgnoreScope || mode == viewProviderScope || mode == viewSetup
 }
 
 func renderHelpLegend(m Model, width int) string {
 	p := m.palette
 	items := helpLegendItems(m)
-	divider := p.styleHelp.Render(strings.Repeat("─", width))
+	divider := popupDividerWithStyle(p.styleHelp, width)
 	if len(items) == 0 {
 		return divider + "\n" + lipgloss.NewStyle().Width(width).Align(lipgloss.Center).Render(p.styleHelp.Render("none"))
 	}
@@ -751,9 +876,9 @@ func helpLegendItems(m Model) []string {
 			p.styleMissing.Render("[OFF]") + p.styleHelp.Render(" disabled"),
 			p.styleMissing.Render("⚠") + p.styleHelp.Render(" confirm"),
 		}
-	case viewProfiles:
+	case viewGroups:
 		return []string{
-			p.styleInstalled.Render("*") + p.styleHelp.Render(" active profile"),
+			p.styleInstalled.Render("*") + p.styleHelp.Render(" current host"),
 			p.styleMissing.Render("⚠") + p.styleHelp.Render(" confirm"),
 		}
 	default:
@@ -764,6 +889,7 @@ func helpLegendItems(m Model) []string {
 			p.styleOrphan.Render(iconOrphan) + p.styleHelp.Render(" orphan"),
 			p.styleWrongProv.Render(iconWrongProv) + p.styleHelp.Render(" wrong provider"),
 			p.styleIgnored.Render(iconIgnored) + p.styleHelp.Render(" ignored"),
+			p.styleHelp.Render(iconPrivileged) + p.styleHelp.Render(" may need sudo"),
 		}
 	}
 }
@@ -774,8 +900,8 @@ func helpPopupTitle(m Model) string {
 		return "Dots Help"
 	case viewSettings:
 		return "Settings Help"
-	case viewProfiles:
-		return "Profiles Help"
+	case viewGroups:
+		return "Groups Help"
 	default:
 		return "Tools Help"
 	}

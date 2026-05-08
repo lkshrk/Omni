@@ -171,7 +171,7 @@ func TestLoadTools_WithGroups(t *testing.T) {
 	}
 }
 
-func TestLoadTools_GroupDisplayIsScopedToActiveProfile(t *testing.T) {
+func TestLoadTools_GroupDisplayIsScopedToActiveHost(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
@@ -179,14 +179,12 @@ func TestLoadTools_GroupDisplayIsScopedToActiveProfile(t *testing.T) {
 		Tools: map[string]config.ToolSpec{
 			"ripgrep": {Provider: "system", InstallWith: "brew"},
 		},
-		Profiles: map[string]config.Profile{
-			"main": {Groups: []string{"work"}},
-		},
-		Hostnames: map[string]string{"testhost": "main"},
 		Groups: []*config.GroupConfig{
+			{Name: "testhost", Special: "host"},
 			{Name: "work", Tools: []config.ToolEntry{{Name: "ripgrep"}}},
-			{Name: "personal", Tools: []config.ToolEntry{{Name: "ripgrep"}}},
+			{Name: "personal"},
 		},
+		Hosts: map[string][]string{"testhost": {"work"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -204,22 +202,20 @@ func TestLoadTools_GroupDisplayIsScopedToActiveProfile(t *testing.T) {
 	}
 	key := toolKey("ripgrep", "system")
 	if got.toolGroups[key] != "work" {
-		t.Fatalf("display group = %q, want active-profile group work (all memberships: %v)", got.toolGroups[key], got.toolMemberships[key])
+		t.Fatalf("display group = %q, want active-host group work (all memberships: %v)", got.toolGroups[key], got.toolMemberships[key])
 	}
-	if len(got.toolMemberships[key]) != 2 {
-		t.Fatalf("toolMemberships = %v, want all memberships retained for editing", got.toolMemberships[key])
+	if len(got.toolMemberships[key]) != 1 {
+		t.Fatalf("toolMemberships = %v, want active membership retained for editing", got.toolMemberships[key])
 	}
 }
 
-// TestLoadTools_WithProfile verifies that loadTools populates profileInfo and
-// ignoreList when a profile with an ignore list is present.
-func TestLoadTools_WithProfile(t *testing.T) {
+// TestLoadTools_WithHost verifies that loadTools populates hostInfo when
+// a host entry is present.
+func TestLoadTools_WithHost(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
-		Profiles: map[string]config.Profile{
-			"main": {Groups: []string{}},
-		},
+		Groups: []*config.GroupConfig{{Name: shortHostname(), Special: "host"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -240,12 +236,11 @@ func TestLoadTools_WithProfile(t *testing.T) {
 	if got.err != nil {
 		t.Errorf("unexpected error: %v", got.err)
 	}
-	// No hostname mapping → noProfile = true
-	if !got.noProfile {
-		// Only fail if profileInfo is non-nil and has an active profile
-		if got.profileInfo != nil && got.profileInfo.Active != "" {
-			t.Errorf("expected noProfile=true when no hostname mapping exists, active=%q", got.profileInfo.Active)
-		}
+	if got.noHost {
+		t.Fatal("noHost = true, want active host")
+	}
+	if got.hostInfo == nil || got.hostInfo.Active == "" {
+		t.Fatalf("hostInfo = %#v, want active host", got.hostInfo)
 	}
 }
 
@@ -397,35 +392,55 @@ func TestDoSaveDisabledProviders_Empty(t *testing.T) {
 	}
 }
 
-// ── doSetupProfile ────────────────────────────────────────────────────────────
+// ── doSetupHost ────────────────────────────────────────────────────────────
 
-// TestDoSetupProfile_HappyPath verifies that doSetupProfile creates a profile
-// and maps the hostname when called with a valid profile name.
-func TestDoSetupProfile_HappyPath(t *testing.T) {
+// TestDoSetupHost_HappyPath verifies that doSetupHost creates the
+// current host entry instead of reviving legacy host mappings.
+func TestDoSetupHost_HappyPath(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost.example")
 	m := newCmdTestModel(t)
-	msg := m.doSetupProfile("mymachine")()
-	got, ok := msg.(setupProfileDoneMsg)
+	msg := m.doSetupHost("mymachine")()
+	got, ok := msg.(setupHostDoneMsg)
 	if !ok {
-		t.Fatalf("expected setupProfileDoneMsg, got %T", msg)
+		t.Fatalf("expected setupHostDoneMsg, got %T", msg)
 	}
 	if got.err != nil {
 		t.Errorf("unexpected error: %v", got.err)
 	}
-	if got.profileName != "mymachine" {
-		t.Errorf("profileName = %q, want %q", got.profileName, "mymachine")
+	if got.hostName != "testhost" {
+		t.Errorf("hostName = %q, want %q", got.hostName, "testhost")
+	}
+	if got.info == nil {
+		t.Fatal("setup host message should include refreshed host info")
+	}
+	if got.info.Active != "testhost" {
+		t.Fatalf("message active host = %q, want testhost; info=%#v", got.info.Active, got.info)
+	}
+	info, err := m.app.HostStatus()
+	if err != nil {
+		t.Fatalf("HostStatus: %v", err)
+	}
+	if info.Active != "testhost" {
+		t.Fatalf("active host = %q, want testhost; info=%#v", info.Active, info)
+	}
+	if _, ok := info.Hosts["testhost"]; !ok {
+		t.Fatalf("setup should create current host entry, hosts=%v", info.Hosts)
+	}
+	if _, ok := info.Hosts["mymachine"]; ok {
+		t.Fatalf("setup should not create typed legacy host name, hosts=%v", info.Hosts)
 	}
 }
 
-// TestDoSetupProfile_EmptyName verifies that doSetupProfile surfaces an error
-// when passed an empty profile name (app rejects blank names).
-func TestDoSetupProfile_EmptyName(t *testing.T) {
+// TestDoSetupHost_EmptyName verifies that doSetupHost surfaces an error
+// when passed an empty host name (app rejects blank names).
+func TestDoSetupHost_EmptyName(t *testing.T) {
 	m := newCmdTestModel(t)
-	msg := m.doSetupProfile("")()
-	got, ok := msg.(setupProfileDoneMsg)
+	msg := m.doSetupHost("")()
+	got, ok := msg.(setupHostDoneMsg)
 	if !ok {
-		t.Fatalf("expected setupProfileDoneMsg, got %T", msg)
+		t.Fatalf("expected setupHostDoneMsg, got %T", msg)
 	}
-	// An empty profile name is invalid; the app should return an error.
+	// An empty host name is invalid; the app should return an error.
 	// If the app is lenient (returns no error), just confirm the message type.
 	_ = got
 }
@@ -433,7 +448,8 @@ func TestDoSetupProfile_EmptyName(t *testing.T) {
 // ── doSetupDotsRepo ───────────────────────────────────────────────────────────
 
 // TestDoSetupDotsRepo_HappyPath verifies that doSetupDotsRepo saves the dots
-// repo path and returns to normal loading without opening the old checklist.
+// repo path and asks the setup result handler to close onboarding before the
+// first tools reload starts.
 func TestDoSetupDotsRepo_HappyPath(t *testing.T) {
 	repoDir := t.TempDir()
 	home := t.TempDir()
@@ -445,12 +461,15 @@ func TestDoSetupDotsRepo_HappyPath(t *testing.T) {
 	m := newCmdTestModel(t)
 	m.settings.DotsDisabled = config.BoolPtr(true)
 	msg := m.doSetupDotsRepo(repoDir)()
-	got, ok := msg.(toolsLoadedMsg)
+	got, ok := msg.(dangerOpDoneMsg)
 	if !ok {
-		t.Fatalf("expected toolsLoadedMsg, got %T", msg)
+		t.Fatalf("expected dangerOpDoneMsg, got %T", msg)
 	}
 	if got.err != nil {
 		t.Errorf("unexpected error: %v", got.err)
+	}
+	if !got.reload || !got.setupComplete {
+		t.Fatalf("setup dots result should close onboarding and trigger reload, got reload=%v setupComplete=%v", got.reload, got.setupComplete)
 	}
 	settings, err := m.app.LoadSettings()
 	if err != nil {
@@ -482,7 +501,7 @@ func findTUITestGroup(groups []*config.GroupConfig, name string) *config.GroupCo
 }
 
 // TestDoSetupDotsRepo_ErrorOnSave verifies that doSetupDotsRepo surfaces an
-// error via toolsLoadedMsg when the settings save fails (read-only config).
+// error without closing onboarding when the settings save fails.
 func TestDoSetupDotsRepo_ErrorOnSave(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
@@ -504,12 +523,15 @@ func TestDoSetupDotsRepo_ErrorOnSave(t *testing.T) {
 
 	m := modelForCmds(a)
 	msg := m.doSetupDotsRepo("/some/repo")()
-	got, ok := msg.(toolsLoadedMsg)
+	got, ok := msg.(dangerOpDoneMsg)
 	if !ok {
-		t.Fatalf("expected toolsLoadedMsg, got %T", msg)
+		t.Fatalf("expected dangerOpDoneMsg, got %T", msg)
 	}
 	if got.err == nil {
 		t.Error("expected error when config directory is read-only")
+	}
+	if got.setupComplete || got.reload {
+		t.Fatalf("failed setup dots should not close onboarding or reload, got reload=%v setupComplete=%v", got.reload, got.setupComplete)
 	}
 }
 
