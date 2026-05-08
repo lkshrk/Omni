@@ -1,0 +1,55 @@
+name: Issue
+description: Report a bug, request a small improvement, or ask a project question.
+title: "[Issue]: "
+body:
+  - type: dropdown
+    id: type
+    attributes:
+      label: Type
+      options:
+        - Bug
+        - Feature request
+        - Documentation
+        - Question
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened, or what should change?
+      placeholder: Briefly describe the issue.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: For bugs, include the smallest set of steps that shows the problem.
+      placeholder: |
+        1. Run ...
+        2. See ...
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: What did you expect to happen?
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include details that may affect behavior.
+      placeholder: |
+        omni version:
+        OS:
+        Shell:
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Extra context
+      description: Logs, screenshots, config snippets, or links.
