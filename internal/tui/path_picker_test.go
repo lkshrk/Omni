@@ -366,6 +366,21 @@ func TestPathPickerViewShowsInputAndMatches(t *testing.T) {
 	}
 }
 
+func TestPathPickerFocusedEmptyInputDoesNotDuplicatePlaceholderFirstRune(t *testing.T) {
+	p, _ := newPathPicker(t.TempDir(), false, 60, 8)
+	p.input.SetValue("")
+	p.input.Placeholder = "Path"
+	p.input.Focus()
+
+	out := p.View(defaultPalette())
+	if !strings.Contains(out, "Path") {
+		t.Fatalf("path picker placeholder missing:\n%s", out)
+	}
+	if strings.Contains(out, "PPath") {
+		t.Fatalf("path picker placeholder first character rendered twice:\n%s", out)
+	}
+}
+
 func TestPathPickerViewAnchorsInputBelowFixedResultArea(t *testing.T) {
 	tmp := t.TempDir()
 	mustMkdir(t, filepath.Join(tmp, "dotfiles"))

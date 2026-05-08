@@ -2,7 +2,7 @@ package tui
 
 // flows2_test.go — additional flow tests UC-66 through UC-136,
 // covering global messages, setup wizard steps 2-5, file picker,
-// dots tab pull key, settings rows 1-9, profiles tab full navigation,
+// dots tab pull key, settings rows 1-9, hosts tab full navigation,
 // group picker inline new-group, and all remaining message handlers.
 
 import (
@@ -25,7 +25,7 @@ import (
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-// setupStep2Model builds a model at setup step 2 (no-profile re-run, all
+// setupStep2Model builds a model at setup step 2 (no-host re-run, all
 // providers enabled). Step 2 uses the same provider-selection UI as step 1.
 func setupStep2Model() Model {
 	m := Model{
@@ -74,32 +74,7 @@ func setupStep3Model() Model {
 	return m
 }
 
-// setupStep4Model builds a model at setup step 4 (profile name input).
-func setupStep4Model() Model {
-	si := textinput.New()
-	si.Placeholder = "profile name…"
-	si.SetValue("myhost")
-	si.Focus()
-	m := Model{
-		keys:             DefaultKeyMap(),
-		spinner:          spinner.New(),
-		filter:           textinput.New(),
-		commandInput:     textinput.New(),
-		settingsInput:    si,
-		mode:             viewSetup,
-		setupStep:        4,
-		upgradingKeys:    make(map[string]bool),
-		dangerConfirmRow: -1,
-		dotsConfirmIdx:   -1,
-		dotsOverwriteIdx: -1,
-		dotsLocalIdx:     -1,
-		width:            120,
-		height:           80,
-	}
-	return m
-}
-
-// setupStep5Model builds a model at setup step 5 (enable dotfiles? y/n).
+// setupStep5Model builds a model at setup step 5 (enable dotfiles?).
 func setupStep5Model() Model {
 	m := Model{
 		keys:             DefaultKeyMap(),
@@ -165,19 +140,18 @@ func loadingSetup(step int) Model {
 	return m
 }
 
-// profilesModel builds a model in viewProfiles with two profiles and hostname
+// hostsModel builds a model in viewGroups with two hosts and hostname
 // mappings.
-func profilesModel() Model {
+func hostsModel() Model {
 	m := baseModel(nil)
-	m.mode = viewProfiles
+	m.mode = viewGroups
 	m.upgradingKeys = make(map[string]bool)
 	m.groupNames = []string{"work", "personal"}
-	m.profileInfo = &app.ProfileInfo{
-		Profiles: map[string]config.Profile{
+	m.hostInfo = &app.HostInfo{
+		Hosts: map[string]config.HostAssignment{
 			"alpha": {Groups: []string{"work"}},
 			"beta":  {Groups: []string{"personal"}},
 		},
-		Hostnames: map[string]string{"myhost": "alpha"},
 	}
 	return m
 }
@@ -188,7 +162,7 @@ func profilesModel() Model {
 func TestFlow2_UC66_BackgroundColorMsg(t *testing.T) {
 	t.Run("light terminal sets isDark=false", func(t *testing.T) {
 		m := baseModel(nil)
-		got := drive(m, tea.BackgroundColorMsg{Color: color.RGBA{R: 255, G: 255, B: 255, A: 255}})
+		got := drive(m, tea.BackgroundColorMsg{Color: color.RGBA{R: 250, G: 251, B: 252, A: 255}})
 		if got.isDark {
 			t.Error("isDark should be false for white terminal background")
 		}
@@ -196,7 +170,7 @@ func TestFlow2_UC66_BackgroundColorMsg(t *testing.T) {
 
 	t.Run("dark terminal sets isDark=true", func(t *testing.T) {
 		m := baseModel(nil)
-		got := drive(m, tea.BackgroundColorMsg{Color: color.RGBA{R: 0, G: 0, B: 0, A: 255}})
+		got := drive(m, tea.BackgroundColorMsg{Color: color.RGBA{R: 13, G: 14, B: 15, A: 255}})
 		if !got.isDark {
 			t.Error("isDark should be true for black terminal background")
 		}
@@ -259,10 +233,10 @@ func TestFlow2_UC70_SecondQQuits(t *testing.T) {
 	}
 }
 
-// UC-71: q while profileRequired uses footer confirmation.
-func TestFlow2_UC71_QWithProfileRequired(t *testing.T) {
+// UC-71: q while hostRequired uses footer confirmation.
+func TestFlow2_UC71_QWithHostRequired(t *testing.T) {
 	m := baseModel(nil)
-	m.profileRequired = true
+	m.hostRequired = true
 	got := drive(m, pressRune('q'))
 	if !got.confirmQuit {
 		t.Fatal("confirmQuit should be true")
@@ -325,8 +299,7 @@ func TestConfirmTimeoutClearsAllConfirmationState(t *testing.T) {
 	m.confirmQuit = true
 	m.quitConfirmKey = "q"
 	m.listConfirm = listConfirmation{action: listConfirmDelete, name: "bat", provider: "brew"}
-	m.setupExitConfirm = true
-	m.profileDeleteConfirm = true
+	m.hostDeleteConfirm = true
 	m.groupDeleteConfirm = true
 	m.dangerConfirmRow = settingsRowResetCache
 	m.dotsConfirmIdx = 1
@@ -335,8 +308,8 @@ func TestConfirmTimeoutClearsAllConfirmationState(t *testing.T) {
 	m.dotsIgnoreIdx = 4
 
 	cmds := m.handleConfirmTimeoutMsg(confirmTimeoutMsg{gen: 9})
-	if len(cmds) == 0 {
-		t.Fatal("setup-exit timeout should return a refocus command")
+	if len(cmds) != 0 {
+		t.Fatalf("confirmation timeout commands = %d, want none", len(cmds))
 	}
 	if m.hasActiveConfirmation() {
 		t.Fatal("confirmation state should be cleared after timeout")
@@ -372,7 +345,7 @@ func TestGlobalNavigationClearsActiveConfirmations(t *testing.T) {
 				return m
 			}(),
 			key:      pressTab(),
-			wantMode: viewProfiles,
+			wantMode: viewGroups,
 		},
 		{
 			name: "settings danger confirm palette",
@@ -436,58 +409,22 @@ func TestFlow2_UC72_SetupStep2AllEnabled(t *testing.T) {
 	})
 }
 
-// UC-73: Setup step 4 — Esc → setupExitConfirm=true.
-func TestFlow2_UC73_SetupStep4Esc(t *testing.T) {
-	got := drive(setupStep4Model(), pressEsc())
-	if !got.setupExitConfirm {
-		t.Error("setupExitConfirm should be true after Esc at step 4")
-	}
-}
-
-// UC-74: setupExitConfirm → n/Esc re-focuses input.
-func TestFlow2_UC74_SetupExitConfirmCancel(t *testing.T) {
-	t.Run("n cancels exit confirm", func(t *testing.T) {
-		m := setupStep4Model()
-		m.setupExitConfirm = true
-		got := drive(m, pressRune('n'))
-		if got.setupExitConfirm {
-			t.Error("setupExitConfirm should be false after n")
-		}
-		if !got.settingsInput.Focused() {
-			t.Error("settingsInput should be focused after cancel")
-		}
-	})
-
-	t.Run("Esc cancels exit confirm", func(t *testing.T) {
-		m := setupStep4Model()
-		m.setupExitConfirm = true
-		got := drive(m, pressEsc())
-		if got.setupExitConfirm {
-			t.Error("setupExitConfirm should be false after Esc")
-		}
-		if !got.settingsInput.Focused() {
-			t.Error("settingsInput should be focused after Esc cancel")
-		}
-	})
-}
-
-// UC-75: Setup step 4 — valid name → loading=true.
-func TestFlow2_UC75_SetupStep4ValidName(t *testing.T) {
-	got := drive(setupStep4Model(), pressEnter())
-	if !got.loading {
-		t.Error("loading should be true after submitting profile name in step 4")
-	}
-}
-
-// UC-76: Setup step 5 — y opens file picker (step 6); n sets loading.
+// UC-76: Setup step 5 — enter opens file picker (step 6); n/esc skip.
 func TestFlow2_UC76_SetupStep5(t *testing.T) {
-	t.Run("y advances to step 6 and shows file picker", func(t *testing.T) {
-		got := drive(setupStep5Model(), pressRune('y'))
+	t.Run("enter advances to step 6 and shows file picker", func(t *testing.T) {
+		got := drive(setupStep5Model(), pressEnter())
 		if got.setupStep != 6 {
-			t.Errorf("setupStep = %d, want 6 after y at step 5", got.setupStep)
+			t.Errorf("setupStep = %d, want 6 after enter at step 5", got.setupStep)
 		}
 		if !got.showFilePicker {
-			t.Error("showFilePicker should be true after y at step 5")
+			t.Error("showFilePicker should be true after enter at step 5")
+		}
+	})
+
+	t.Run("y remains a shortcut for dotfile setup", func(t *testing.T) {
+		got := drive(setupStep5Model(), pressRune('y'))
+		if got.setupStep != 6 {
+			t.Errorf("setupStep = %d, want 6 after y shortcut at step 5", got.setupStep)
 		}
 	})
 
@@ -495,6 +432,120 @@ func TestFlow2_UC76_SetupStep5(t *testing.T) {
 		got := drive(setupStep5Model(), pressRune('n'))
 		if !got.loading {
 			t.Error("loading should be true after n at step 5")
+		}
+	})
+
+	t.Run("n completes setup after disable dots finishes", func(t *testing.T) {
+		m := drive(setupStep5Model(), pressRune('n'))
+		got := drive(m, dangerOpDoneMsg{action: "disable-dots", detail: "dots disabled", reload: true, setupComplete: true})
+		if got.mode != viewList {
+			t.Fatalf("mode = %v, want viewList after setup dotfiles skip completes", got.mode)
+		}
+		if got.setupStep != 0 {
+			t.Fatalf("setupStep = %d, want reset after setup dotfiles skip completes", got.setupStep)
+		}
+		if !got.setupComplete {
+			t.Fatal("setupComplete should guard the follow-up reload")
+		}
+		if !got.setupReloading {
+			t.Fatal("setupReloading should keep post-onboarding progress visible")
+		}
+		if got.progressText != "Loading tools…" {
+			t.Fatalf("progressText = %q, want post-onboarding reload progress", got.progressText)
+		}
+		got = drive(got, toolsLoadedMsg{})
+		if got.setupReloading {
+			t.Fatal("setupReloading should clear after the reload completes")
+		}
+		if got.progressText != "" {
+			t.Fatalf("progressText = %q, want cleared after reload completes", got.progressText)
+		}
+	})
+
+	t.Run("post-onboarding reload waits for provider and discovery refresh", func(t *testing.T) {
+		m := setupStep5Model()
+		m.setupReloading = true
+		m.loading = true
+		got := drive(m, toolsLoadedMsg{configuredProviders: []string{"brew"}})
+		if !got.setupReloading {
+			t.Fatal("setupReloading should stay visible while provider refreshes run")
+		}
+		if got.loading {
+			t.Fatal("loading should clear after toolsLoadedMsg; provider refresh owns the wait")
+		}
+		if !got.scanningProviders["brew"] {
+			t.Fatalf("scanningProviders = %v, want brew", got.scanningProviders)
+		}
+
+		got = drive(got, providerScannedMsg{gen: got.scanGen, provider: "brew"})
+		if !got.setupReloading || !got.providerSnapshotRefreshing || !got.discoveryRefreshing {
+			t.Fatalf("setup reload should wait for provider snapshot and discovery refresh, setupReloading=%v providerSnapshotRefreshing=%v discoveryRefreshing=%v", got.setupReloading, got.providerSnapshotRefreshing, got.discoveryRefreshing)
+		}
+		got = drive(got, discoveredRefreshedMsg{gen: got.discoveryGen, discovered: []*database.ToolCache{{Name: "orphan"}}})
+		if !got.setupReloading {
+			t.Fatal("setupReloading should stay visible after discovery while provider snapshot is pending")
+		}
+		got = drive(got, allProvidersDoneMsg{gen: got.scanGen})
+		if !got.setupReloading {
+			t.Fatal("setupReloading should stay visible while discovered tools still need descriptions")
+		}
+		got = drive(got, descRefreshDoneMsg{gen: got.descRefreshGen})
+		if got.setupReloading {
+			t.Fatal("setupReloading should clear after provider/discovery/description refreshes finish")
+		}
+	})
+
+	t.Run("post-onboarding reload waits for description refresh", func(t *testing.T) {
+		m := setupStep5Model()
+		m.setupReloading = true
+		m.loading = true
+		got := drive(m, toolsLoadedMsg{tools: []*database.ToolCache{{Name: "git"}}})
+		if !got.setupReloading || !got.descRefreshing {
+			t.Fatalf("setup reload should wait for descriptions, setupReloading=%v descRefreshing=%v", got.setupReloading, got.descRefreshing)
+		}
+		if got.progressText != "Refreshing tool descriptions…" {
+			t.Fatalf("progressText = %q, want tool description refresh", got.progressText)
+		}
+		got = drive(got, descRefreshDoneMsg{gen: got.descRefreshGen})
+		if got.setupReloading {
+			t.Fatal("setupReloading should clear after description refresh finishes")
+		}
+	})
+
+	t.Run("completed setup does not reopen on stale no-host reload", func(t *testing.T) {
+		m := setupStep5Model()
+		m.setupComplete = true
+		got := drive(m, toolsLoadedMsg{noHost: true})
+		if got.mode == viewSetup {
+			t.Fatalf("completed setup should not reopen onboarding on stale no-host reload")
+		}
+		if got.hostRequired {
+			t.Fatal("hostRequired should remain false after completed setup reload")
+		}
+	})
+
+	t.Run("configured dotfiles closes setup and shows reload progress", func(t *testing.T) {
+		got := drive(setupStep6Model(), dangerOpDoneMsg{action: "setup-dots", detail: "dots configured", reload: true, setupComplete: true})
+		if got.mode != viewList {
+			t.Fatalf("mode = %v, want viewList after setup dotfiles repo completes", got.mode)
+		}
+		if !got.setupReloading {
+			t.Fatal("setupReloading should keep post-onboarding progress visible after dots repo setup")
+		}
+		if got.progressText != "Loading tools…" {
+			t.Fatalf("progressText = %q, want post-onboarding reload progress", got.progressText)
+		}
+	})
+
+	t.Run("loading setup ignores dotfile choices until host creation finishes", func(t *testing.T) {
+		m := setupStep5Model()
+		m.loading = true
+		got := drive(m, pressEnter())
+		if got.showFilePicker {
+			t.Fatal("dotfile repo picker should not open while automatic host creation is still loading")
+		}
+		if got.setupStep != 5 {
+			t.Fatalf("setupStep = %d, want to stay on dotfile decision", got.setupStep)
 		}
 	})
 }
@@ -507,46 +558,65 @@ func TestFlow2_UC77_SetupStep6Esc(t *testing.T) {
 	}
 }
 
-// UC-78: setupImportDoneMsg (no node providers) → step 4, input focused.
+// UC-78: setupImportDoneMsg (no node providers) → auto-create host.
 func TestFlow2_UC78_SetupImportDoneMsg(t *testing.T) {
-	// loadingSetup(1) has no setupProviders, so node is not enabled → goes to step 4.
+	// loadingSetup(1) has no setupProviders, so node is not enabled → creates host.
 	m := loadingSetup(1)
 	m.allTools = []*database.ToolCache{{Name: "snapshot", Provider: "brew"}}
 	got := drive(m, setupImportDoneMsg{added: 2, tools: threeTools()})
-	if got.setupStep != 4 {
-		t.Errorf("setupStep = %d, want 4 (no node providers configured)", got.setupStep)
+	if got.setupStep == 4 {
+		t.Fatalf("setupStep = %d, host confirmation screen should not be shown", got.setupStep)
 	}
-	if got.loading {
-		t.Error("loading should be false after setupImportDoneMsg")
+	if got.setupStep != 5 {
+		t.Fatalf("setupStep = %d, want dotfile decision while host is created", got.setupStep)
 	}
-	if !got.settingsInput.Focused() {
-		t.Error("settingsInput should be focused at step 4")
+	if !got.loading {
+		t.Error("loading should be true while creating the host automatically")
+	}
+	if got.settingsInput.Focused() {
+		t.Error("settingsInput should not be focused during automatic host creation")
 	}
 	if len(got.allTools) != 1 || got.allTools[0].Name != "snapshot" {
 		t.Fatalf("allTools changed before onboarding finished: %+v", got.allTools)
 	}
 }
 
-// UC-79: setupProvidersDoneMsg (no node providers) → step 4.
+// UC-79: setupProvidersDoneMsg (no node providers) → auto-create host.
 func TestFlow2_UC79_SetupProvidersDoneMsg(t *testing.T) {
-	// loadingSetup(2) has no setupProviders, so node is not enabled → goes to step 4.
+	// loadingSetup(2) has no setupProviders, so node is not enabled → creates host.
 	got := drive(loadingSetup(2), setupProvidersDoneMsg{})
-	if got.setupStep != 4 {
-		t.Errorf("setupStep = %d, want 4 (no node providers configured)", got.setupStep)
+	if got.setupStep == 4 {
+		t.Fatalf("setupStep = %d, host confirmation screen should not be shown", got.setupStep)
 	}
-	if got.loading {
-		t.Error("loading should be false after setupProvidersDoneMsg")
+	if got.setupStep != 5 {
+		t.Fatalf("setupStep = %d, want dotfile decision while host is created", got.setupStep)
+	}
+	if !got.loading {
+		t.Error("loading should be true while creating the host automatically")
+	}
+	if got.settingsInput.Focused() {
+		t.Error("settingsInput should not be focused during automatic host creation")
 	}
 }
 
-// UC-80: setupProfileDoneMsg → step 5, status ✓.
-func TestFlow2_UC80_SetupProfileDoneMsg(t *testing.T) {
-	got := drive(loadingSetup(4), setupProfileDoneMsg{profileName: "myhost"})
+// UC-80: setupHostDoneMsg → step 5, status ✓.
+func TestFlow2_UC80_SetupHostDoneMsg(t *testing.T) {
+	info := &app.HostInfo{
+		Active: "myhost",
+		Hosts:  map[string]config.HostAssignment{"myhost": {}},
+	}
+	got := drive(loadingSetup(4), setupHostDoneMsg{hostName: "myhost", info: info})
 	if got.setupStep != 5 {
 		t.Errorf("setupStep = %d, want 5", got.setupStep)
 	}
 	if got.loading {
-		t.Error("loading should be false after setupProfileDoneMsg")
+		t.Error("loading should be false after setupHostDoneMsg")
+	}
+	if got.hostInfo == nil || got.hostInfo.Active != "myhost" {
+		t.Fatalf("hostInfo = %#v, want refreshed myhost info", got.hostInfo)
+	}
+	if got.hostRequired {
+		t.Fatal("hostRequired should clear after setup host succeeds")
 	}
 	// Status is set via setStatus (async cmd), but the statusMsg may not be
 	// populated synchronously. Check that loading is cleared and step advanced.
@@ -637,9 +707,9 @@ func TestFlow2_UC87_SettingsPythonManager(t *testing.T) {
 	}
 }
 
-// UC-88: Row 2 → system provider toggle (adds "system" to DisabledProviders).
+// UC-88: Track System row toggles the system ecosystem for this host.
 func TestFlow2_UC88_SettingsSystemProviderToggle(t *testing.T) {
-	msgs := append(toSettings(), nj(2)...)
+	msgs := append(toSettings(), nj(settingsRowSystemProvider)...)
 	msgs = append(msgs, pressRune(' '))
 	got := drive(baseModel(nil), msgs...)
 	if !slices.Contains(got.settings.DisabledProviders, "system") {
@@ -721,11 +791,11 @@ func TestFlow2_UC93_DangerDisableDots(t *testing.T) {
 	}
 }
 
-// UC-94: Priority editor — K swaps item up.
+// UC-94: Provider-order editor — K swaps item up.
 func TestFlow2_UC94_PriorityEditorKSwap(t *testing.T) {
-	// Navigate to row 1 (priority editor), open it, move cursor down once,
+	// Navigate to the provider-order row, open it, move cursor down once,
 	// then K to swap up (moving item 1 to position 0).
-	msgs := append(toSettings(), nj(1)...)
+	msgs := append(toSettings(), nj(settingsRowSystemPriority)...)
 	msgs = append(msgs, pressEnter())                          // opens priority editor
 	msgs = append(msgs, pressRune('j'))                        // move cursor to index 1
 	msgs = append(msgs, tea.KeyPressMsg{Code: 'K', Text: "K"}) // swap up
@@ -748,27 +818,27 @@ func TestFlow2_UC94_PriorityEditorKSwap(t *testing.T) {
 	}
 }
 
-// ── Group F — Profiles Tab ────────────────────────────────────────────────────
+// ── Group F — Hosts Tab ────────────────────────────────────────────────────
 
-// UC-95: Up at top of groups → back to profiles section.
+// UC-95: Up at top of groups → back to hosts section.
 func TestFlow2_UC95_GroupSectionUpAtTop(t *testing.T) {
-	m := profilesModel()
-	m.profileSection = 1
+	m := hostsModel()
+	m.assignmentSection = 1
 	m.groupCursor = 0
 	got := drive(m, pressRune('k'))
-	if got.profileSection != 0 {
-		t.Errorf("profileSection = %d, want 0 after k at top of groups", got.profileSection)
+	if got.assignmentSection != 0 {
+		t.Errorf("assignmentSection = %d, want 0 after k at top of groups", got.assignmentSection)
 	}
 }
 
-// UC-97: Down at last profile → advances to group section.
-func TestFlow2_UC97_ProfileSectionDownAtLast(t *testing.T) {
-	m := profilesModel()
-	// 2 profiles (alpha, beta), cursor at last index = 1
-	m.profileCursor = 1
+// UC-97: Down at last host → advances to group section.
+func TestFlow2_UC97_HostSectionDownAtLast(t *testing.T) {
+	m := hostsModel()
+	// 2 hosts (alpha, beta), cursor at last index = 1
+	m.hostCursor = 1
 	got := drive(m, pressRune('j'))
-	if got.profileSection != 1 {
-		t.Errorf("profileSection = %d, want 1 after j at last profile", got.profileSection)
+	if got.assignmentSection != 1 {
+		t.Errorf("assignmentSection = %d, want 1 after j at last host", got.assignmentSection)
 	}
 	if got.groupCursor != 0 {
 		t.Errorf("groupCursor = %d, want 0 after entering group section", got.groupCursor)
@@ -777,57 +847,57 @@ func TestFlow2_UC97_ProfileSectionDownAtLast(t *testing.T) {
 
 // UC-98: Down at last group stays in group section.
 func TestFlow2_UC98_GroupSectionDownAtLast(t *testing.T) {
-	m := profilesModel()
-	m.profileSection = 1
+	m := hostsModel()
+	m.assignmentSection = 1
 	allGroupNames := buildAllGroupNames(m.groupNames)
 	m.groupCursor = len(allGroupNames) - 1
 	got := drive(m, pressRune('j'))
-	if got.profileSection != 1 {
-		t.Errorf("profileSection = %d, want 1 after j at last group", got.profileSection)
+	if got.assignmentSection != 1 {
+		t.Errorf("assignmentSection = %d, want 1 after j at last group", got.assignmentSection)
 	}
 }
 
-// UC-99: r key → profileRenameMode=true (only when a profile is selected).
-func TestFlow2_UC99_ProfileRenameKey(t *testing.T) {
-	m := profilesModel()
-	m.profileSection = 0
-	m.profileCursor = 0
+// UC-99: r key → hostRenameMode=true (only when a host is selected).
+func TestFlow2_UC99_HostRenameKey(t *testing.T) {
+	m := hostsModel()
+	m.assignmentSection = 0
+	m.hostCursor = 0
 	got := drive(m, pressRune('r'))
-	if !got.profileRenameMode {
-		t.Error("profileRenameMode should be true after r key with a profile selected")
+	if !got.hostRenameMode {
+		t.Error("hostRenameMode should be true after r key with a host selected")
 	}
 	if got.settingsInput.Value() != "alpha" {
 		t.Fatalf("rename input = %q, want alpha", got.settingsInput.Value())
 	}
 }
 
-func TestFlow2_ProfileRowSpaceActivatesHighlightedProfile(t *testing.T) {
-	m := profilesModel()
+func TestFlow2_HostRowSpaceActivatesHighlightedHost(t *testing.T) {
+	m := hostsModel()
 	key := toolKey("ripgrep", "system")
-	m.profileInfo.Active = "alpha"
-	m.profileInfo.Profiles["beta"] = config.Profile{Groups: []string{"personal"}, Ignore: []string{"fd"}}
+	m.hostInfo.Active = "alpha"
+	m.hostInfo.Hosts["beta"] = config.HostAssignment{Groups: []string{"personal"}, Ignore: []string{"fd"}}
 	m.toolMemberships = map[string][]string{key: {"work", "personal"}}
-	m.toolGroups = compactToolGroupMapForProfile(m.toolMemberships, m.profileInfo)
-	m.ignoreLabels = map[string]string{"old": "profile"}
-	m.profileCursor = 1
+	m.toolGroups = compactToolGroupMapForHost(m.toolMemberships, m.hostInfo)
+	m.ignoreLabels = map[string]string{"old": "host"}
+	m.hostCursor = 1
 	m.groupFilter = "work"
 	m.groupTabIdx = 1
 
 	tm, cmd := m.Update(pressRune(' '))
 	got := tm.(Model)
 	if cmd == nil {
-		t.Fatal("profile activation should dispatch persistence command")
+		t.Fatal("host activation should dispatch persistence command")
 	}
-	got = drive(got, profileActivatedMsg{profile: "beta", info: &app.ProfileInfo{
+	got = drive(got, hostCopiedMsg{host: "beta", info: &app.HostInfo{
 		Active: "beta",
-		Profiles: map[string]config.Profile{
+		Hosts: map[string]config.HostAssignment{
 			"alpha": {Groups: []string{"work"}},
 			"beta":  {Groups: []string{"personal"}, Ignore: []string{"fd"}},
 		},
 	}})
 
-	if got.profileInfo.Active != "beta" {
-		t.Fatalf("active profile = %q, want beta", got.profileInfo.Active)
+	if got.hostInfo.Active != "beta" {
+		t.Fatalf("active host = %q, want beta", got.hostInfo.Active)
 	}
 	if got.groupFilter != "" || got.groupTabIdx != 0 {
 		t.Fatalf("group filter = %q/%d, want cleared", got.groupFilter, got.groupTabIdx)
@@ -839,290 +909,240 @@ func TestFlow2_ProfileRowSpaceActivatesHighlightedProfile(t *testing.T) {
 		t.Fatalf("ignoreSet = %v, want fd ignored", got.ignoreSet)
 	}
 	if _, ok := got.ignoreLabels["old"]; ok {
-		t.Fatalf("old profile ignore label should be removed: %v", got.ignoreLabels)
+		t.Fatalf("old host ignore label should be removed: %v", got.ignoreLabels)
 	}
 }
 
-func TestFlow2_ProfileRowEnterDoesNotActivate(t *testing.T) {
-	m := profilesModel()
-	m.profileInfo.Active = "alpha"
-	m.profileCursor = 1
+func TestFlow2_HostRowEnterDoesNotActivate(t *testing.T) {
+	m := hostsModel()
+	m.hostInfo.Active = "alpha"
+	m.hostCursor = 1
 
 	got := drive(m, pressEnter())
 
-	if got.profileInfo.Active != "alpha" {
-		t.Fatalf("active profile = %q, want alpha", got.profileInfo.Active)
+	if got.hostInfo.Active != "alpha" {
+		t.Fatalf("active host = %q, want alpha", got.hostInfo.Active)
 	}
 }
 
-// UC-100: profileRenameMode Enter/Esc.
-func TestFlow2_UC100_ProfileRenameMode(t *testing.T) {
-	t.Run("Enter clears profileRenameMode", func(t *testing.T) {
-		m := profilesModel()
-		m.profileRenameMode = true
-		m.profileRenameName = "alpha"
+// UC-100: hostRenameMode Enter/Esc.
+func TestFlow2_UC100_HostRenameMode(t *testing.T) {
+	t.Run("Enter clears hostRenameMode", func(t *testing.T) {
+		m := hostsModel()
+		m.hostRenameMode = true
+		m.hostRenameName = "alpha"
 		m.settingsInput.SetValue("renamed")
 		got := drive(m, pressEnter())
-		if got.profileRenameMode {
-			t.Error("profileRenameMode should be false after Enter")
+		if got.hostRenameMode {
+			t.Error("hostRenameMode should be false after Enter")
 		}
-		if got.profileRenameName != "" {
-			t.Fatalf("profileRenameName = %q, want cleared", got.profileRenameName)
+		if got.hostRenameName != "" {
+			t.Fatalf("hostRenameName = %q, want cleared", got.hostRenameName)
 		}
 	})
 
-	t.Run("Esc clears profileRenameMode", func(t *testing.T) {
-		m := profilesModel()
-		m.profileRenameMode = true
-		m.profileRenameName = "alpha"
+	t.Run("Esc clears hostRenameMode", func(t *testing.T) {
+		m := hostsModel()
+		m.hostRenameMode = true
+		m.hostRenameName = "alpha"
 		got := drive(m, pressEsc())
-		if got.profileRenameMode {
-			t.Error("profileRenameMode should be false after Esc")
+		if got.hostRenameMode {
+			t.Error("hostRenameMode should be false after Esc")
 		}
-		if got.profileRenameName != "" {
-			t.Fatalf("profileRenameName = %q, want cleared", got.profileRenameName)
+		if got.hostRenameName != "" {
+			t.Fatalf("hostRenameName = %q, want cleared", got.hostRenameName)
 		}
 	})
 }
 
-func TestFlow2_ProfileRenameUsesCapturedProfileAfterCursorMoves(t *testing.T) {
-	a := newProfilesFlowApp(t)
-	m := profilesModel()
+func TestFlow2_HostRenameUsesCapturedHostAfterCursorMoves(t *testing.T) {
+	a := newHostsFlowApp(t)
+	m := hostsModel()
 	m.app = a
 	m.ctx = context.Background()
-	m.profileCursor = 0
+	m.hostCursor = 0
 
 	tm, _ := m.Update(pressRune('r'))
 	renaming := tm.(Model)
-	renaming.profileCursor = 1
+	renaming.hostCursor = 1
 	renaming.settingsInput.SetValue("renamed-alpha")
 
 	tm, cmd := renaming.Update(pressEnter())
 	got := tm.(Model)
-	if got.profileRenameMode || got.profileRenameName != "" {
-		t.Fatalf("rename state not cleared: mode=%v name=%q", got.profileRenameMode, got.profileRenameName)
+	if got.hostRenameMode || got.hostRenameName != "" {
+		t.Fatalf("rename state not cleared: mode=%v name=%q", got.hostRenameMode, got.hostRenameName)
 	}
 	if cmd == nil {
 		t.Fatal("rename command missing")
 	}
 	msg := cmd()
-	changed, ok := msg.(profileGroupChangedMsg)
+	changed, ok := msg.(hostGroupChangedMsg)
 	if !ok {
 		t.Fatalf("rename command returned %T", msg)
 	}
 	if changed.err != nil {
 		t.Fatalf("rename command error: %v", changed.err)
 	}
-	info, err := a.ProfileStatus()
+	info, err := a.HostStatus()
 	if err != nil {
-		t.Fatalf("ProfileStatus: %v", err)
+		t.Fatalf("HostStatus: %v", err)
 	}
-	if _, ok := info.Profiles["renamed-alpha"]; !ok {
-		t.Fatalf("renamed-alpha missing after rename: %+v", info.Profiles)
+	if _, ok := info.Hosts["renamed-alpha"]; !ok {
+		t.Fatalf("renamed-alpha missing after rename: %+v", info.Hosts)
 	}
-	if _, ok := info.Profiles["alpha"]; ok {
-		t.Fatalf("alpha still present after rename: %+v", info.Profiles)
+	if _, ok := info.Hosts["alpha"]; ok {
+		t.Fatalf("alpha still present after rename: %+v", info.Hosts)
 	}
-	if _, ok := info.Profiles["beta"]; !ok {
-		t.Fatalf("beta should not be renamed: %+v", info.Profiles)
+	if _, ok := info.Hosts["beta"]; !ok {
+		t.Fatalf("beta should not be renamed: %+v", info.Hosts)
 	}
 }
 
-// UC-101: g key → profileEditMode=1 (edit group picker).
-func TestFlow2_UC101_EditProfileGroups(t *testing.T) {
-	m := profilesModel()
-	m.profileSection = 0
-	m.profileCursor = 0 // "alpha" profile
+// UC-101: g key → hostEditMode=1 (edit group picker).
+func TestFlow2_UC101_EditHostGroups(t *testing.T) {
+	m := hostsModel()
+	m.assignmentSection = 0
+	m.hostCursor = 0 // "alpha" host
 	got := drive(m, pressRune('g'))
-	if got.profileEditMode != 1 {
-		t.Errorf("profileEditMode = %d, want 1 after g key", got.profileEditMode)
+	if got.hostEditMode != 1 {
+		t.Errorf("hostEditMode = %d, want 1 after g key", got.hostEditMode)
 	}
-	if got.profileGroupPicker == nil {
-		t.Error("profileGroupPicker should not be nil after g key")
+	if got.hostGroupPicker == nil {
+		t.Error("hostGroupPicker should not be nil after g key")
 	}
-	if !slices.Contains(got.profileGroupDraft, "work") {
-		t.Fatalf("profileGroupDraft = %v, want work checked", got.profileGroupDraft)
+	if !slices.Contains(got.hostGroupDraft, "work") {
+		t.Fatalf("hostGroupDraft = %v, want work checked", got.hostGroupDraft)
 	}
-	if got.profileEditName != "alpha" {
-		t.Fatalf("profileEditName = %q, want alpha", got.profileEditName)
+	if got.hostEditName != "alpha" {
+		t.Fatalf("hostEditName = %q, want alpha", got.hostEditName)
 	}
 }
 
-func TestFlow2_ProfileGroupEditUsesCapturedProfileAfterCursorMoves(t *testing.T) {
-	a := newProfilesFlowApp(t)
-	m := profilesModel()
+func TestFlow2_HostGroupEditUsesCapturedHostAfterCursorMoves(t *testing.T) {
+	a := newHostsFlowApp(t)
+	m := hostsModel()
 	m.app = a
 	m.ctx = context.Background()
-	m.profileSection = 0
-	m.profileCursor = 0
+	m.assignmentSection = 0
+	m.hostCursor = 0
 
 	tm, _ := m.Update(pressRune('g'))
 	editing := tm.(Model)
-	editing.profileCursor = 1
-	editing.profileGroupDraft = []string{"work", "personal"}
+	editing.hostCursor = 1
+	editing.hostGroupDraft = []string{"work", "personal"}
 
 	tm, cmd := editing.Update(pressEnter())
 	got := tm.(Model)
-	if got.profileEditMode != 0 || got.profileEditName != "" {
-		t.Fatalf("profile edit state not cleared: mode=%d name=%q", got.profileEditMode, got.profileEditName)
+	if got.hostEditMode != 0 || got.hostEditName != "" {
+		t.Fatalf("host edit state not cleared: mode=%d name=%q", got.hostEditMode, got.hostEditName)
 	}
 	if cmd == nil {
-		t.Fatal("profile group save command missing")
+		t.Fatal("host group save command missing")
 	}
 	msg := cmd()
-	changed, ok := msg.(profileGroupChangedMsg)
+	changed, ok := msg.(hostGroupChangedMsg)
 	if !ok {
-		t.Fatalf("profile group command returned %T", msg)
+		t.Fatalf("host group command returned %T", msg)
 	}
 	if changed.err != nil {
-		t.Fatalf("profile group command error: %v", changed.err)
+		t.Fatalf("host group command error: %v", changed.err)
 	}
-	info, err := a.ProfileStatus()
+	info, err := a.HostStatus()
 	if err != nil {
-		t.Fatalf("ProfileStatus: %v", err)
+		t.Fatalf("HostStatus: %v", err)
 	}
-	if !slices.Contains(info.Profiles["alpha"].Groups, "personal") {
-		t.Fatalf("alpha groups = %v, want personal added", info.Profiles["alpha"].Groups)
+	if !slices.Contains(info.Hosts["alpha"].Groups, "personal") {
+		t.Fatalf("alpha groups = %v, want personal added", info.Hosts["alpha"].Groups)
 	}
-	if slices.Contains(info.Profiles["beta"].Groups, "personal") {
-		t.Fatalf("beta groups unexpectedly changed: %v", info.Profiles["beta"].Groups)
+	if slices.Contains(info.Hosts["beta"].Groups, "personal") {
+		t.Fatalf("beta groups unexpectedly changed: %v", info.Hosts["beta"].Groups)
 	}
 }
 
-// UC-102: h key → profileEditMode=2 (edit host picker).
-func TestFlow2_UC102_EditProfileHosts(t *testing.T) {
-	m := profilesModel()
-	m.profileSection = 0
-	m.profileCursor = 0 // "alpha" has myhost
+// UC-102: h no longer opens the legacy host→host mapping editor.
+func TestFlow2_UC102_HDoesNotOpenLegacyHostMapping(t *testing.T) {
+	m := hostsModel()
+	m.assignmentSection = 0
+	m.hostCursor = 0 // "alpha" has myhost
 	got := drive(m, pressRune('h'))
-	if got.profileEditMode != 2 {
-		t.Errorf("profileEditMode = %d, want 2 after h key", got.profileEditMode)
+	if got.hostEditMode != 0 {
+		t.Errorf("hostEditMode = %d, want 0 after h key", got.hostEditMode)
 	}
-	if got.profileHostPicker == nil {
-		t.Error("profileHostPicker should not be nil after h key")
-	}
-	if got.profileEditName != "alpha" {
-		t.Fatalf("profileEditName = %q, want alpha", got.profileEditName)
+	if got.hostEditName != "" {
+		t.Fatalf("hostEditName = %q, want empty", got.hostEditName)
 	}
 }
 
-func TestFlow2_ProfileHostEditUsesCapturedProfileAfterCursorMoves(t *testing.T) {
-	a := newProfilesFlowApp(t)
-	m := profilesModel()
-	m.app = a
-	m.ctx = context.Background()
-	m.profileSection = 0
-	m.profileCursor = 0
-
-	tm, _ := m.Update(pressRune('h'))
-	editing := tm.(Model)
-	editing.profileCursor = 1
-	for i, host := range editing.profileHostPicker {
-		if host == "myhost" {
-			editing.profileHostIdx = i
-			break
-		}
-	}
-	editing.toggleProfileHostDraft()
-	if got := editing.profileHostDraft["myhost"]; got != "" {
-		t.Fatalf("profileHostDraft[myhost] = %q, want unmapped for captured alpha", got)
-	}
-
-	tm, cmd := editing.Update(pressEnter())
-	got := tm.(Model)
-	if got.profileEditMode != 0 || got.profileEditName != "" {
-		t.Fatalf("profile edit state not cleared: mode=%d name=%q", got.profileEditMode, got.profileEditName)
-	}
-	if cmd == nil {
-		t.Fatal("profile host save command missing")
-	}
-	msg := cmd()
-	changed, ok := msg.(profileGroupChangedMsg)
-	if !ok {
-		t.Fatalf("profile host command returned %T", msg)
-	}
-	if changed.err != nil {
-		t.Fatalf("profile host command error: %v", changed.err)
-	}
-	info, err := a.ProfileStatus()
-	if err != nil {
-		t.Fatalf("ProfileStatus: %v", err)
-	}
-	if got := info.Hostnames["myhost"]; got != "" {
-		t.Fatalf("myhost mapping = %q, want removed from captured alpha", got)
-	}
-}
-
-// UC-103: profile group picker j/k/Space/Enter/Esc.
-func TestFlow2_UC103_ProfileGroupPickerNavigation(t *testing.T) {
+// UC-103: host group picker j/k/Space/Enter/Esc.
+func TestFlow2_UC103_HostGroupPickerNavigation(t *testing.T) {
 	t.Run("j moves picker cursor", func(t *testing.T) {
-		m := profilesModel()
-		m.profileEditMode = 1
-		m.profileGroupPicker = []string{"work", "personal"}
-		m.profileGroupIdx = 0
+		m := hostsModel()
+		m.hostEditMode = 1
+		m.hostGroupPicker = []string{"work", "personal"}
+		m.hostGroupIdx = 0
 		got := drive(m, pressRune('j'))
-		if got.profileGroupIdx != 1 {
-			t.Errorf("profileGroupIdx = %d, want 1 after j", got.profileGroupIdx)
+		if got.hostGroupIdx != 1 {
+			t.Errorf("hostGroupIdx = %d, want 1 after j", got.hostGroupIdx)
 		}
 	})
 
 	t.Run("k moves picker cursor up", func(t *testing.T) {
-		m := profilesModel()
-		m.profileEditMode = 1
-		m.profileGroupPicker = []string{"work", "personal"}
-		m.profileGroupIdx = 1
+		m := hostsModel()
+		m.hostEditMode = 1
+		m.hostGroupPicker = []string{"work", "personal"}
+		m.hostGroupIdx = 1
 		got := drive(m, pressRune('k'))
-		if got.profileGroupIdx != 0 {
-			t.Errorf("profileGroupIdx = %d, want 0 after k", got.profileGroupIdx)
+		if got.hostGroupIdx != 0 {
+			t.Errorf("hostGroupIdx = %d, want 0 after k", got.hostGroupIdx)
 		}
 	})
 
 	t.Run("space toggles draft group", func(t *testing.T) {
-		m := profilesModel()
-		m.profileEditMode = 1
-		m.profileGroupPicker = []string{"work", "personal"}
-		m.profileGroupDraft = []string{"work"}
-		m.profileGroupIdx = 1
+		m := hostsModel()
+		m.hostEditMode = 1
+		m.hostGroupPicker = []string{"work", "personal"}
+		m.hostGroupDraft = []string{"work"}
+		m.hostGroupIdx = 1
 		got := drive(m, pressRune(' '))
-		if !slices.Contains(got.profileGroupDraft, "personal") {
-			t.Fatalf("profileGroupDraft = %v, want personal checked", got.profileGroupDraft)
+		if !slices.Contains(got.hostGroupDraft, "personal") {
+			t.Fatalf("hostGroupDraft = %v, want personal checked", got.hostGroupDraft)
 		}
 	})
 
 	t.Run("Esc clears mode and picker", func(t *testing.T) {
-		m := profilesModel()
-		m.profileEditMode = 1
-		m.profileGroupPicker = []string{"work", "personal"}
+		m := hostsModel()
+		m.hostEditMode = 1
+		m.hostGroupPicker = []string{"work", "personal"}
 		got := drive(m, pressEsc())
-		if got.profileEditMode != 0 {
-			t.Errorf("profileEditMode = %d, want 0 after Esc", got.profileEditMode)
+		if got.hostEditMode != 0 {
+			t.Errorf("hostEditMode = %d, want 0 after Esc", got.hostEditMode)
 		}
-		if got.profileGroupPicker != nil {
-			t.Error("profileGroupPicker should be nil after Esc")
+		if got.hostGroupPicker != nil {
+			t.Error("hostGroupPicker should be nil after Esc")
 		}
 	})
 
 	t.Run("Enter clears mode and picker", func(t *testing.T) {
-		m := profilesModel()
-		m.profileEditMode = 1
-		m.profileGroupPicker = []string{"personal"}
-		m.profileGroupDraft = []string{"personal"}
-		m.profileGroupIdx = 0
-		m.profileCursor = 0 // alpha
+		m := hostsModel()
+		m.hostEditMode = 1
+		m.hostGroupPicker = []string{"personal"}
+		m.hostGroupDraft = []string{"personal"}
+		m.hostGroupIdx = 0
+		m.hostCursor = 0 // alpha
 		got := drive(m, pressEnter())
-		if got.profileEditMode != 0 {
-			t.Errorf("profileEditMode = %d, want 0 after Enter", got.profileEditMode)
+		if got.hostEditMode != 0 {
+			t.Errorf("hostEditMode = %d, want 0 after Enter", got.hostEditMode)
 		}
-		if got.profileGroupPicker != nil {
-			t.Error("profileGroupPicker should be nil after Enter")
+		if got.hostGroupPicker != nil {
+			t.Error("hostGroupPicker should be nil after Enter")
 		}
 	})
 }
 
-// UC-104: n in profileSection=1 → groupCreating=true.
+// UC-104: n in assignmentSection=1 → groupCreating=true.
 func TestFlow2_UC104_NewGroupCreating(t *testing.T) {
-	m := profilesModel()
-	m.profileSection = 1
+	m := hostsModel()
+	m.assignmentSection = 1
 	got := drive(m, pressRune('n'))
 	if !got.groupCreating {
 		t.Error("groupCreating should be true after n in section 1")
@@ -1132,55 +1152,55 @@ func TestFlow2_UC104_NewGroupCreating(t *testing.T) {
 	}
 }
 
-func TestFlow2_ProfileCreationAvailableFromGroupSection(t *testing.T) {
-	m := profilesModel()
-	m.profileSection = 1
+func TestFlow2_HostCreationRemovedFromGroupSection(t *testing.T) {
+	m := hostsModel()
+	m.assignmentSection = 1
 	got := drive(m, pressRune('p'))
-	if !got.profileCreating {
-		t.Error("profileCreating should be true after p in section 1")
-	}
 	if got.groupCreating {
 		t.Error("groupCreating should stay false after p in section 1")
 	}
+	if got.hostEditMode != 0 || got.hostRenameMode {
+		t.Fatalf("p should not start a Hosts tab edit mode: hostEditMode=%d hostRename=%v", got.hostEditMode, got.hostRenameMode)
+	}
 }
 
-func TestFlow2_GroupCreationAvailableFromProfileSection(t *testing.T) {
-	m := profilesModel()
-	m.profileSection = 0
+func TestFlow2_GroupCreationAvailableFromHostSection(t *testing.T) {
+	m := hostsModel()
+	m.assignmentSection = 0
 	got := drive(m, pressRune('n'))
 	if !got.groupCreating {
 		t.Error("groupCreating should be true after n in section 0")
 	}
-	if got.profileSection != 1 {
-		t.Errorf("profileSection = %d, want 1 after starting group creation", got.profileSection)
+	if got.assignmentSection != 1 {
+		t.Errorf("assignmentSection = %d, want 1 after starting group creation", got.assignmentSection)
 	}
 }
 
-// UC-105: d on base group (index 0) is blocked.
-func TestFlow2_UC105_DeleteBaseGroupBlocked(t *testing.T) {
-	m := profilesModel()
-	m.profileSection = 1
+// UC-105: d on host group (index 0) is blocked.
+func TestFlow2_UC105_DeleteHostGroupBlocked(t *testing.T) {
+	m := hostsModel()
+	m.assignmentSection = 1
 	m.groupCursor = 0
 	got := drive(m, pressRune('d'))
 	if got.groupDeleteConfirm {
-		t.Error("groupDeleteConfirm should not be set for base group (index 0)")
+		t.Error("groupDeleteConfirm should not be set for host group (index 0)")
 	}
 }
 
-// UC-106: r on base group is blocked.
-func TestFlow2_UC106_RenameBaseGroupBlocked(t *testing.T) {
-	m := profilesModel()
-	m.profileSection = 1
+// UC-106: r on host group is blocked.
+func TestFlow2_UC106_RenameHostGroupBlocked(t *testing.T) {
+	m := hostsModel()
+	m.assignmentSection = 1
 	m.groupCursor = 0
 	got := drive(m, pressRune('r'))
 	if got.groupRenameMode {
-		t.Error("groupRenameMode should not be set for base group (index 0)")
+		t.Error("groupRenameMode should not be set for host group (index 0)")
 	}
 }
 
 func TestFlow2_GroupRenameNegativeCursorIsNoop(t *testing.T) {
-	m := profilesModel()
-	m.profileSection = 1
+	m := hostsModel()
+	m.assignmentSection = 1
 	m.groupCursor = -1
 	got := drive(m, pressRune('r'))
 	if got.groupRenameMode {
@@ -1191,20 +1211,21 @@ func TestFlow2_GroupRenameNegativeCursorIsNoop(t *testing.T) {
 	}
 }
 
-func TestFlow2_GroupBeforeBaseCanBeDeletedAndRenamed(t *testing.T) {
-	m := profilesModel()
+func TestFlow2_GroupAfterHostCanBeDeletedAndRenamed(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "host")
+	m := hostsModel()
 	m.groupNames = []string{"apps", "work"}
-	m.profileSection = 1
-	m.groupCursor = 0 // "apps"; "base" sorts to index 1.
+	m.assignmentSection = 1
+	m.groupCursor = 1 // "apps"; host group is index 0.
 
 	deleteGot := drive(m, pressRune('d'))
 	if !deleteGot.groupDeleteConfirm {
-		t.Error("groupDeleteConfirm should be set for non-base group before base")
+		t.Error("groupDeleteConfirm should be set for reusable group after host")
 	}
 
 	renameGot := drive(m, pressRune('r'))
 	if !renameGot.groupRenameMode {
-		t.Error("groupRenameMode should be set for non-base group before base")
+		t.Error("groupRenameMode should be set for reusable group after host")
 	}
 	if renameGot.settingsInput.Value() != "apps" {
 		t.Errorf("rename input = %q, want apps", renameGot.settingsInput.Value())
@@ -1215,13 +1236,13 @@ func TestFlow2_GroupBeforeBaseCanBeDeletedAndRenamed(t *testing.T) {
 }
 
 func TestFlow2_GroupRenameUsesCapturedGroupAfterCursorMoves(t *testing.T) {
-	a := newProfilesFlowApp(t)
-	m := profilesModel()
+	a := newHostsFlowApp(t)
+	m := hostsModel()
 	m.app = a
 	m.ctx = context.Background()
 	m.groupNames = []string{"apps", "work"}
-	m.profileSection = 1
-	m.groupCursor = 0
+	m.assignmentSection = 1
+	m.groupCursor = 1
 
 	tm, _ := m.Update(pressRune('r'))
 	renaming := tm.(Model)
@@ -1260,20 +1281,21 @@ func TestFlow2_GroupRenameUsesCapturedGroupAfterCursorMoves(t *testing.T) {
 }
 
 func TestFlow2_GroupDeletePopupOffersMoveOrDeleteTools(t *testing.T) {
-	m := profilesModel()
+	m := hostsModel()
 	m.groupNames = []string{"work"}
-	m.profileSection = 1
-	m.groupCursor = 1 // work, after base
+	m.toolMemberships = map[string][]string{toolKey("ripgrep", "brew"): {"work"}}
+	m.assignmentSection = 1
+	m.groupCursor = 1 // work, after host
 
 	got := drive(m, pressRune('d'))
 	if !got.groupDeleteConfirm {
 		t.Fatal("groupDeleteConfirm should be set")
 	}
 	if got.groupDeleteChoice != 0 {
-		t.Fatalf("groupDeleteChoice = %d, want move-to-base default", got.groupDeleteChoice)
+		t.Fatalf("groupDeleteChoice = %d, want move-to-host default", got.groupDeleteChoice)
 	}
 	view := got.viewString()
-	if !strings.Contains(view, "Move last-membership tools to base") || !strings.Contains(view, "Delete last-membership logical tools") {
+	if !strings.Contains(view, "Move last-membership tools to this host") || !strings.Contains(view, "Delete last-membership logical tools") {
 		t.Fatalf("delete popup missing choices: %q", view)
 	}
 
@@ -1292,21 +1314,44 @@ func TestFlow2_GroupDeletePopupOffersMoveOrDeleteTools(t *testing.T) {
 	}
 }
 
-func newProfilesFlowApp(t *testing.T) *app.App {
+func TestFlow2_GroupDeletePopupSkipsMoveChoiceForEmptyGroup(t *testing.T) {
+	m := hostsModel()
+	m.groupNames = []string{"work"}
+	m.assignmentSection = 1
+	m.groupCursor = 1 // work, after host
+
+	got := drive(m, pressRune('d'))
+	if !got.groupDeleteConfirm {
+		t.Fatal("groupDeleteConfirm should be set")
+	}
+	view := got.viewString()
+	if strings.Contains(view, "Move last-membership tools") || strings.Contains(view, "Delete last-membership logical tools") {
+		t.Fatalf("empty group delete popup should not ask where to move contents: %q", view)
+	}
+	if !strings.Contains(view, "No tools or dotfiles belong to this group") {
+		t.Fatalf("empty group delete popup should explain no contents: %q", view)
+	}
+
+	got = drive(got, pressRune('j'))
+	if got.groupDeleteChoice != 0 {
+		t.Fatalf("empty group delete choice should not move, got %d", got.groupDeleteChoice)
+	}
+}
+
+func newHostsFlowApp(t *testing.T) *app.App {
 	t.Helper()
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
 		Groups: []*config.GroupConfig{
-			{Name: "base"},
+			{Name: "myhost", Special: "host"},
+			{Name: "alpha", Special: "host"},
+			{Name: "beta", Special: "host"},
 			{Name: "apps"},
 			{Name: "work"},
+			{Name: "personal"},
 		},
-		Profiles: map[string]config.Profile{
-			"alpha": {Groups: []string{"apps"}},
-			"beta":  {Groups: []string{"work"}},
-		},
-		Hostnames: map[string]string{"myhost": "alpha"},
+		Hosts: map[string][]string{"myhost": {"apps"}, "alpha": {"apps"}, "beta": {"work"}},
 	}); err != nil {
 		t.Fatalf("saveTUIConfig: %v", err)
 	}
@@ -1319,31 +1364,32 @@ func newProfilesFlowApp(t *testing.T) *app.App {
 	return a
 }
 
-func TestFlow2_BaseBlockedAfterAlphabeticalSort(t *testing.T) {
-	m := profilesModel()
+func TestFlow2_HostGroupBlockedBeforeReusableGroups(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "host")
+	m := hostsModel()
 	m.groupNames = []string{"apps", "work"}
-	m.profileSection = 1
-	m.groupCursor = 1 // "base" after "apps".
+	m.assignmentSection = 1
+	m.groupCursor = 0 // host group.
 
 	deleteGot := drive(m, pressRune('d'))
 	if deleteGot.groupDeleteConfirm {
-		t.Error("groupDeleteConfirm should not be set for base group after alphabetical sort")
+		t.Error("groupDeleteConfirm should not be set for host group")
 	}
 
 	renameGot := drive(m, pressRune('r'))
 	if renameGot.groupRenameMode {
-		t.Error("groupRenameMode should not be set for base group after alphabetical sort")
+		t.Error("groupRenameMode should not be set for host group")
 	}
 }
 
 // UC-109: t in group section → opens group tools editor.
 func TestFlow2_UC109_GroupSectionToolsKey(t *testing.T) {
-	m := profilesModel()
+	m := hostsModel()
 	m.allTools = []*database.ToolCache{
 		{Name: "ripgrep", Provider: "system", Tracked: true},
 	}
 	m.toolMemberships = map[string][]string{toolKey("ripgrep", "system"): {"work"}}
-	m.profileSection = 1
+	m.assignmentSection = 1
 	allGroupNames := buildAllGroupNames(m.groupNames)
 	for i, name := range allGroupNames {
 		if name == "work" {
@@ -1355,15 +1401,32 @@ func TestFlow2_UC109_GroupSectionToolsKey(t *testing.T) {
 	if got.groupToolsEditor.group != "work" {
 		t.Errorf("groupToolsEditor.group = %q, want %q", got.groupToolsEditor.group, "work")
 	}
-	if got.mode != viewProfileGroupTools {
-		t.Errorf("mode = %v, want viewProfileGroupTools", got.mode)
+	if got.mode != viewGroupTools {
+		t.Errorf("mode = %v, want viewGroupTools", got.mode)
+	}
+}
+
+func TestFlow2_GroupToolsKeyIgnoredOnHostSection(t *testing.T) {
+	m := hostsModel()
+	m.mode = viewGroups
+	m.assignmentSection = 0
+	m.groupCursor = 1
+	m.allTools = []*database.ToolCache{
+		{Name: "ripgrep", Provider: "system", Tracked: true},
+	}
+	got := drive(m, pressRune('t'))
+	if got.mode != viewGroups {
+		t.Fatalf("mode = %v, want viewGroups", got.mode)
+	}
+	if got.groupToolsEditor.group != "" {
+		t.Fatalf("group tools editor opened for host section group %q", got.groupToolsEditor.group)
 	}
 }
 
 func TestFlow2_GroupDotsEditorOpensFromGroupRow(t *testing.T) {
-	m := profilesModel()
+	m := hostsModel()
 	m.dotMemberships = map[string][]string{"nvim": {"base"}, "zsh": {"work"}}
-	m.profileSection = 1
+	m.assignmentSection = 1
 	allGroupNames := buildAllGroupNames(m.groupNames)
 	for i, name := range allGroupNames {
 		if name == "work" {
@@ -1375,8 +1438,8 @@ func TestFlow2_GroupDotsEditorOpensFromGroupRow(t *testing.T) {
 	if got.groupDotsEditor.group != "work" {
 		t.Errorf("groupDotsEditor.group = %q, want %q", got.groupDotsEditor.group, "work")
 	}
-	if got.mode != viewProfileGroupDots {
-		t.Errorf("mode = %v, want viewProfileGroupDots", got.mode)
+	if got.mode != viewGroupDots {
+		t.Errorf("mode = %v, want viewGroupDots", got.mode)
 	}
 	if got.groupDotsEditor.membership["nvim"] {
 		t.Fatal("nvim should start disabled for work")
@@ -1387,8 +1450,8 @@ func TestFlow2_GroupDotsEditorOpensFromGroupRow(t *testing.T) {
 }
 
 func TestFlow2_GroupToolsEditorStagesMembershipIgnoreAndFilters(t *testing.T) {
-	m := profilesModel()
-	m.mode = viewProfileGroupTools
+	m := hostsModel()
+	m.mode = viewGroupTools
 	m.groupToolsEditor.group = "work"
 	m.allTools = []*database.ToolCache{
 		{Name: "ripgrep", Provider: "system", Tracked: true},
@@ -1404,7 +1467,7 @@ func TestFlow2_GroupToolsEditorStagesMembershipIgnoreAndFilters(t *testing.T) {
 	if !got.groupToolsIgnore["ripgrep"] {
 		t.Fatal("x should toggle group ignore for selected tool")
 	}
-	for i, row := range profileGroupToolRows(got) {
+	for i, row := range groupToolRows(got) {
 		if row.tool.Name == "ripgrep" {
 			got.groupToolsEditor.cursor = i
 			break
@@ -1418,7 +1481,7 @@ func TestFlow2_GroupToolsEditorStagesMembershipIgnoreAndFilters(t *testing.T) {
 	if !got.groupToolsEditor.searchActive || got.groupToolsEditor.search != "es" {
 		t.Fatalf("search state = active:%v query:%q, want active query es", got.groupToolsEditor.searchActive, got.groupToolsEditor.search)
 	}
-	if rows := profileGroupToolRows(got); len(rows) != 1 || rows[0].tool.Name != "eslint" {
+	if rows := groupToolRows(got); len(rows) != 1 || rows[0].tool.Name != "eslint" {
 		t.Fatalf("search rows = %+v, want eslint only", rows)
 	}
 	got = drive(got, pressEnter())
@@ -1430,14 +1493,14 @@ func TestFlow2_GroupToolsEditorStagesMembershipIgnoreAndFilters(t *testing.T) {
 		t.Fatal("] should cycle provider filter")
 	}
 	got = drive(got, pressEnter())
-	if got.mode != viewProfiles || !got.loading {
+	if got.mode != viewGroups || !got.loading {
 		t.Fatalf("enter after staged changes should save and close, mode=%v loading=%v", got.mode, got.loading)
 	}
 }
 
 func TestFlow2_GroupDotsEditorStagesMembershipAndSearch(t *testing.T) {
-	m := profilesModel()
-	m.mode = viewProfileGroupDots
+	m := hostsModel()
+	m.mode = viewGroupDots
 	m.groupDotsEditor.group = "work"
 	m.dotMemberships = map[string][]string{"nvim": {"work"}, "zsh": {"base"}}
 	m.groupDotsEditor.membership = map[string]bool{"nvim": true, "zsh": false}
@@ -1451,7 +1514,7 @@ func TestFlow2_GroupDotsEditorStagesMembershipAndSearch(t *testing.T) {
 	if !got.groupDotsEditor.searchActive || got.groupDotsEditor.search != "zs" {
 		t.Fatalf("search state = active:%v query:%q, want active query zs", got.groupDotsEditor.searchActive, got.groupDotsEditor.search)
 	}
-	if rows := profileGroupDotRows(got); len(rows) != 1 || rows[0].name != "zsh" {
+	if rows := groupDotRows(got); len(rows) != 1 || rows[0].name != "zsh" {
 		t.Fatalf("search rows = %+v, want zsh only", rows)
 	}
 	got = drive(got, pressEnter())
@@ -1459,26 +1522,26 @@ func TestFlow2_GroupDotsEditorStagesMembershipAndSearch(t *testing.T) {
 		t.Fatal("enter while searching should apply/close search, not save")
 	}
 	got = drive(got, pressEnter())
-	if got.mode != viewProfiles || !got.loading {
+	if got.mode != viewGroups || !got.loading {
 		t.Fatalf("enter after staged changes should save and close, mode=%v loading=%v", got.mode, got.loading)
 	}
 }
 
-// UC-112: profileRequired blocks Esc from leaving profiles view.
-func TestFlow2_UC112_ProfileRequiredBlocksEsc(t *testing.T) {
+// UC-112: hostRequired blocks Esc from leaving hosts view.
+func TestFlow2_UC112_HostRequiredBlocksEsc(t *testing.T) {
 	m := baseModel(nil)
-	m.mode = viewProfiles
-	m.profileRequired = true
+	m.mode = viewGroups
+	m.hostRequired = true
 	got := drive(m, pressEsc())
-	if got.mode != viewProfiles {
-		t.Errorf("mode = %v, want viewProfiles (Esc blocked by profileRequired)", got.mode)
+	if got.mode != viewGroups {
+		t.Errorf("mode = %v, want viewGroups (Esc blocked by hostRequired)", got.mode)
 	}
 }
 
 // UC-113: Group rename Enter with empty name — loading stays false.
 func TestFlow2_UC113_GroupRenameEmptyName(t *testing.T) {
-	m := profilesModel()
-	m.profileSection = 1
+	m := hostsModel()
+	m.assignmentSection = 1
 	m.groupCursor = 1 // "work"
 	m.groupRenameMode = true
 	si := textinput.New()
@@ -1589,6 +1652,35 @@ func TestFlow2_UC117_CreateGroupDoneMsg(t *testing.T) {
 	})
 }
 
+func TestFlow2_CreateGroupDonePropagatesToHostViewsAndPickers(t *testing.T) {
+	m := hostsModel()
+	info := &app.HostInfo{
+		Hosts: m.hostInfo.Hosts,
+	}
+	got := drive(m, createGroupDoneMsg{
+		name:            "dev",
+		groupNames:      []string{"dev", "personal", "work"},
+		toolMemberships: map[string][]string{},
+		toolGroups:      map[string]string{},
+		hostInfo:        info,
+	})
+
+	if !slices.Contains(got.groupNames, "dev") {
+		t.Fatalf("groupNames = %v, want dev", got.groupNames)
+	}
+	if out := renderGroups(got); !strings.Contains(out, "dev") {
+		t.Fatalf("hosts tab did not render newly-created group:\n%s", out)
+	}
+
+	got.assignmentSection = 0
+	got.hostCursor = 0
+	var cmds []tea.Cmd
+	got.startHostGroupEdit(&cmds)
+	if !slices.Contains(got.hostGroupPicker, "dev") {
+		t.Fatalf("host group picker = %v, want dev", got.hostGroupPicker)
+	}
+}
+
 // UC-118: groupChangedMsg — success, cursor clamp.
 func TestFlow2_UC118_GroupChangedMsg(t *testing.T) {
 	m := baseModel(nil)
@@ -1603,14 +1695,83 @@ func TestFlow2_UC118_GroupChangedMsg(t *testing.T) {
 	}
 }
 
-// UC-119: profileGroupChangedMsg — add group.
-func TestFlow2_UC119_ProfileGroupChangedMsgAdd(t *testing.T) {
-	got := drive(baseModel(nil), profileGroupChangedMsg{
-		profile: "work",
-		group:   "dev",
-		added:   true,
-		info: &app.ProfileInfo{
-			Profiles: map[string]config.Profile{
+func TestFlow2_GroupToolsChangedMsgRefreshesGroupsAndMemberships(t *testing.T) {
+	ripgrep := &database.ToolCache{Name: "ripgrep", Provider: "system", Tracked: true}
+	eslint := &database.ToolCache{Name: "eslint", Provider: "node", Tracked: true}
+	m := baseModel([]*database.ToolCache{ripgrep, eslint})
+	m.groupNames = []string{"old"}
+	m.toolMemberships = map[string][]string{
+		toolKey("ripgrep", "system"): {"old"},
+	}
+	m.toolGroups = map[string]string{
+		toolKey("ripgrep", "system"): "old",
+	}
+
+	got := drive(m, groupToolsChangedMsg{
+		detail: "✓ updated 1 tool settings for work",
+		tools:  []*database.ToolCache{ripgrep, eslint},
+		toolMemberships: map[string][]string{
+			toolKey("eslint", "node"): {"work"},
+		},
+		toolGroups: map[string]string{
+			toolKey("eslint", "node"): "work",
+		},
+		groupNames: []string{"work"},
+	})
+
+	if got.loading {
+		t.Fatal("loading should be false")
+	}
+	if !slices.Equal(got.groupNames, []string{"work"}) {
+		t.Fatalf("groupNames = %v, want [work]", got.groupNames)
+	}
+	if got.toolGroups[toolKey("eslint", "node")] != "work" {
+		t.Fatalf("toolGroups = %v, want eslint assigned to work", got.toolGroups)
+	}
+	if got.toolMemberships[toolKey("ripgrep", "system")] != nil {
+		t.Fatalf("stale ripgrep membership remained: %v", got.toolMemberships)
+	}
+}
+
+func TestFlow2_GroupDotsChangedMsgRefreshesEntriesAndMemberships(t *testing.T) {
+	m := dotsModel()
+	m.dotMemberships = map[string][]string{"nvim": {"old"}}
+
+	got := drive(m, groupDotsChangedMsg{
+		detail:         "✓ updated 1 dotfiles for work",
+		dotMemberships: map[string][]string{"nvim": {"work"}},
+		entries: []app.DotStatus{
+			{Name: "nvim", TargetPath: "~/.config/nvim", Group: "work", Health: app.HealthOK},
+		},
+		gitStatus: "clean",
+	})
+
+	if got.loading {
+		t.Fatal("loading should be false")
+	}
+	if !slices.Equal(got.dotMemberships["nvim"], []string{"work"}) {
+		t.Fatalf("dotMemberships[nvim] = %v, want [work]", got.dotMemberships["nvim"])
+	}
+	if len(got.dotsEntries) != 1 || got.dotsEntries[0].Group != "work" {
+		t.Fatalf("dotsEntries = %#v, want refreshed work entry", got.dotsEntries)
+	}
+	if got.dotsGitStatus != "clean" {
+		t.Fatalf("dotsGitStatus = %q, want clean", got.dotsGitStatus)
+	}
+}
+
+// UC-119: hostGroupChangedMsg — add group.
+func TestFlow2_UC119_HostGroupChangedMsgAdd(t *testing.T) {
+	m := baseModel([]*database.ToolCache{{Name: "ripgrep", Provider: "system", Tracked: true}})
+	key := toolKey("ripgrep", "system")
+	m.toolMemberships = map[string][]string{key: {"dev"}}
+	got := drive(m, hostGroupChangedMsg{
+		host:  "work",
+		group: "dev",
+		added: true,
+		info: &app.HostInfo{
+			Active: "work",
+			Hosts: map[string]config.HostAssignment{
 				"work": {Groups: []string{"dev"}},
 			},
 		},
@@ -1618,64 +1779,40 @@ func TestFlow2_UC119_ProfileGroupChangedMsgAdd(t *testing.T) {
 	if got.loading {
 		t.Error("loading should be false")
 	}
-	if got.profileInfo == nil {
-		t.Error("profileInfo should be set")
+	if got.hostInfo == nil {
+		t.Error("hostInfo should be set")
+	}
+	if got.toolGroups[key] != "dev" {
+		t.Fatalf("toolGroups[%q] = %q, want dev after active host group change", key, got.toolGroups[key])
 	}
 }
 
-// UC-120: profileGroupChangedMsg — remove group.
-func TestFlow2_UC120_ProfileGroupChangedMsgRemove(t *testing.T) {
-	got := drive(baseModel(nil), profileGroupChangedMsg{
-		profile: "work",
-		group:   "dev",
-		added:   false,
+// UC-120: hostGroupChangedMsg — remove group.
+func TestFlow2_UC120_HostGroupChangedMsgRemove(t *testing.T) {
+	got := drive(baseModel(nil), hostGroupChangedMsg{
+		host:  "work",
+		group: "dev",
+		added: false,
 	})
 	if got.loading {
 		t.Error("loading should be false")
 	}
 }
 
-// UC-121: profileGroupChangedMsg — profile deleted.
-func TestFlow2_UC121_ProfileGroupChangedMsgDelete(t *testing.T) {
+// UC-121: hostGroupChangedMsg — host deleted.
+func TestFlow2_UC121_HostGroupChangedMsgDelete(t *testing.T) {
 	m := baseModel(nil)
-	m.profileCursor = 0
-	got := drive(m, profileGroupChangedMsg{
-		profile: "work",
-		group:   "",
-		info: &app.ProfileInfo{
-			Profiles: map[string]config.Profile{},
+	m.hostCursor = 0
+	got := drive(m, hostGroupChangedMsg{
+		host:  "work",
+		group: "",
+		info: &app.HostInfo{
+			Hosts: map[string]config.HostAssignment{},
 		},
 	})
 	if got.loading {
 		t.Error("loading should be false")
 	}
-}
-
-// UC-122: profileCreatedMsg — cursor positioned.
-func TestFlow2_UC122_ProfileCreatedMsg(t *testing.T) {
-	t.Run("success positions cursor on new profile", func(t *testing.T) {
-		info := &app.ProfileInfo{
-			Profiles: map[string]config.Profile{
-				"alpha": {},
-				"work":  {},
-			},
-		}
-		got := drive(baseModel(nil), profileCreatedMsg{profile: "work", info: info})
-		// Sorted: alpha=0, work=1
-		if got.profileCursor != 1 {
-			t.Errorf("profileCursor = %d, want 1", got.profileCursor)
-		}
-		if got.loading {
-			t.Error("loading should be false")
-		}
-	})
-
-	t.Run("error sets status without panic", func(t *testing.T) {
-		got := drive(baseModel(nil), profileCreatedMsg{err: errors.New("already exists")})
-		if got.loading {
-			t.Error("loading should be false")
-		}
-	})
 }
 
 // UC-125: debouncedSearchMsg — cache miss fires search (searching=true).
@@ -1775,14 +1912,40 @@ func TestFlow2_UC131_BlurredSearchTabCycle(t *testing.T) {
 	}
 }
 
-// UC-132: Blurred viewSearch — other key refocuses input.
-func TestFlow2_UC132_BlurredSearchRefocusOnKey(t *testing.T) {
+// UC-132: Blurred viewSearch — / refocuses input.
+func TestFlow2_UC132_BlurredSearchSlashRefocusesInput(t *testing.T) {
 	m := baseModel(threeTools())
 	m.mode = viewSearch
-	// filter not focused → typing a letter refocuses it
-	got := drive(m, pressRune('z'))
+	m.filter.SetValue("git")
+	// filter not focused -> / reopens search editing without changing the query.
+	got := drive(m, pressRune('/'))
 	if !got.filter.Focused() {
-		t.Error("filter should be focused after typing in blurred viewSearch")
+		t.Error("filter should be focused after / in blurred viewSearch")
+	}
+	if got.filter.Value() != "git" {
+		t.Fatalf("filter = %q, want existing query preserved", got.filter.Value())
+	}
+}
+
+func TestFlow2_BlurredSearchActionKeyTriggersSelectedRowAction(t *testing.T) {
+	m := baseModel(oneMissing())
+	m.mode = viewSearch
+	m.filter.SetValue("curl")
+	m.filter.Blur()
+	m.applyFilter()
+
+	got := drive(m, pressRune('i'))
+	if got.filter.Focused() {
+		t.Fatal("filter should stay blurred after a row action")
+	}
+	if got.filter.Value() != "curl" {
+		t.Fatalf("filter = %q, want action key not appended to query", got.filter.Value())
+	}
+	if !got.loading {
+		t.Fatal("install action should start for selected search result")
+	}
+	if got.rowOpKey != toolKey("curl", "brew") {
+		t.Fatalf("rowOpKey = %q, want selected curl row", got.rowOpKey)
 	}
 }
 
@@ -2077,16 +2240,19 @@ func TestFlow2_UC142_SetupStep3NodeMgr(t *testing.T) {
 			t.Errorf("setupNodeMgrIdx = %d, want 0 after k at top", got.setupNodeMgrIdx)
 		}
 	})
-	t.Run("enter on auto advances to step 4 without loading", func(t *testing.T) {
+	t.Run("enter on auto creates host without showing step 4", func(t *testing.T) {
 		got := drive(setupStep3Model(), pressEnter())
-		if got.setupStep != 4 {
-			t.Errorf("setupStep = %d, want 4 after enter on auto", got.setupStep)
+		if got.setupStep == 4 {
+			t.Fatalf("setupStep = %d, host confirmation screen should not be shown", got.setupStep)
 		}
-		if got.loading {
-			t.Error("loading should be false when auto (no save needed)")
+		if got.setupStep != 5 {
+			t.Fatalf("setupStep = %d, want dotfile decision while host is created", got.setupStep)
 		}
-		if !got.settingsInput.Focused() {
-			t.Error("settingsInput should be focused at step 4")
+		if !got.loading {
+			t.Error("loading should be true while creating the host automatically")
+		}
+		if got.settingsInput.Focused() {
+			t.Error("settingsInput should not be focused during automatic host creation")
 		}
 	})
 	t.Run("enter on bun sets loading=true", func(t *testing.T) {
@@ -2097,25 +2263,31 @@ func TestFlow2_UC142_SetupStep3NodeMgr(t *testing.T) {
 			t.Error("loading should be true when saving non-auto manager")
 		}
 	})
-	t.Run("esc advances to step 4 without loading", func(t *testing.T) {
+	t.Run("esc creates host without showing step 4", func(t *testing.T) {
 		got := drive(setupStep3Model(), pressEsc())
-		if got.setupStep != 4 {
-			t.Errorf("setupStep = %d, want 4 after esc", got.setupStep)
+		if got.setupStep == 4 {
+			t.Fatalf("setupStep = %d, host confirmation screen should not be shown", got.setupStep)
 		}
-		if got.loading {
-			t.Error("loading should be false after esc (uses auto)")
+		if got.setupStep != 5 {
+			t.Fatalf("setupStep = %d, want dotfile decision while host is created", got.setupStep)
+		}
+		if !got.loading {
+			t.Error("loading should be true while creating the host automatically")
 		}
 	})
-	t.Run("setupNodeMgrDoneMsg advances to step 4", func(t *testing.T) {
+	t.Run("setupNodeMgrDoneMsg creates host without showing step 4", func(t *testing.T) {
 		got := drive(loadingSetup(3), setupNodeMgrDoneMsg{})
-		if got.setupStep != 4 {
-			t.Errorf("setupStep = %d, want 4 after setupNodeMgrDoneMsg", got.setupStep)
+		if got.setupStep == 4 {
+			t.Fatalf("setupStep = %d, host confirmation screen should not be shown", got.setupStep)
 		}
-		if got.loading {
-			t.Error("loading should be false after setupNodeMgrDoneMsg")
+		if got.setupStep != 5 {
+			t.Fatalf("setupStep = %d, want dotfile decision while host is created", got.setupStep)
 		}
-		if !got.settingsInput.Focused() {
-			t.Error("settingsInput should be focused at step 4")
+		if !got.loading {
+			t.Error("loading should be true while creating the host automatically")
+		}
+		if got.settingsInput.Focused() {
+			t.Error("settingsInput should not be focused during automatic host creation")
 		}
 	})
 }
@@ -2147,14 +2319,14 @@ func multiGroupModel() Model {
 
 // UC-144: } cycles group filter forward; groupFilter and groupTabIdx stay in sync.
 func TestFlow2_UC144_GroupNextFilter(t *testing.T) {
-	t.Run("} at idx=0 advances to base (idx=1)", func(t *testing.T) {
+	t.Run("} at idx=0 advances to host (idx=1)", func(t *testing.T) {
 		m := multiGroupModel()
 		got := drive(m, tea.KeyPressMsg{Code: '}', Text: "}"})
 		if got.groupTabIdx != 1 {
 			t.Errorf("groupTabIdx = %d, want 1", got.groupTabIdx)
 		}
-		if got.groupFilter != "base" {
-			t.Errorf("groupFilter = %q, want base", got.groupFilter)
+		if got.groupFilter != shortHostname() {
+			t.Errorf("groupFilter = %q, want host", got.groupFilter)
 		}
 	})
 	t.Run("} at last idx wraps to all (idx=0)", func(t *testing.T) {
@@ -2189,45 +2361,44 @@ func TestFlow2_UC145_GroupPrevFilter(t *testing.T) {
 		if got.groupTabIdx != 1 {
 			t.Errorf("groupTabIdx = %d, want 1", got.groupTabIdx)
 		}
-		if got.groupFilter != "base" {
-			t.Errorf("groupFilter = %q, want base", got.groupFilter)
+		if got.groupFilter != shortHostname() {
+			t.Errorf("groupFilter = %q, want host", got.groupFilter)
 		}
 	})
 }
 
-// UC-146: newColWidths reserves group column when groupNames is non-empty,
-// even when all visible tools are in the base group.
+// UC-146: newColWidths reserves group column when visible tools have a host
+// or reusable group badge.
 func TestFlow2_UC146_GroupColAlwaysVisible(t *testing.T) {
-	// Two tools both in base group.
+	// Two tools both in the host group.
 	tools := []*database.ToolCache{
 		{Name: "git", Provider: "brew", Installed: true},
 		{Name: "curl", Provider: "brew", Installed: true},
 	}
 	tg := map[string]string{
-		toolKey("git", "brew"):  "base",
-		toolKey("curl", "brew"): "base",
+		toolKey("git", "brew"):  "host",
+		toolKey("curl", "brew"): "host",
 	}
 
-	t.Run("no non-base groups → cols.group=0", func(t *testing.T) {
+	t.Run("host group only → cols.group shows host badge", func(t *testing.T) {
 		cols := newColWidths(tools, tg, nil, "", "", "", 120)
-		if cols.group != 0 {
-			t.Errorf("cols.group = %d, want 0 when no groups configured", cols.group)
+		if cols.group < len("[host]") {
+			t.Errorf("cols.group = %d, too narrow for [host]", cols.group)
 		}
 	})
 
-	t.Run("with non-base groups → cols.group>0 even if all tools are in base", func(t *testing.T) {
+	t.Run("with reusable groups → cols.group>0 even if all tools are in host group", func(t *testing.T) {
 		cols := newColWidths(tools, tg, []string{"work"}, "", "", "", 120)
 		if cols.group == 0 {
-			t.Error("cols.group should be > 0 when non-base groups exist")
+			t.Error("cols.group should be > 0 when reusable groups exist")
 		}
-		// Must be wide enough for at least "[base]"
-		if cols.group < len("[base]") {
-			t.Errorf("cols.group = %d, too narrow for [base]", cols.group)
+		if cols.group < len("[work]") {
+			t.Errorf("cols.group = %d, too narrow for [work]", cols.group)
 		}
 	})
 }
 
-// UC-143: Setup step 2 with node disabled → advance directly to step 4.
+// UC-143: Setup step 2 with node disabled → auto-create host.
 func TestFlow2_UC143_SetupStep2NodeDisabled(t *testing.T) {
 	m := Model{
 		keys:          DefaultKeyMap(),
@@ -2250,10 +2421,16 @@ func TestFlow2_UC143_SetupStep2NodeDisabled(t *testing.T) {
 		height:           80,
 	}
 	got := drive(m, pressEnter())
-	if got.setupStep != 4 {
-		t.Errorf("setupStep = %d, want 4 (node not enabled, skip node manager)", got.setupStep)
+	if got.setupStep == 4 {
+		t.Fatalf("setupStep = %d, host confirmation screen should not be shown", got.setupStep)
 	}
-	if !got.settingsInput.Focused() {
-		t.Error("settingsInput should be focused at step 4 (profile name)")
+	if got.setupStep != 5 {
+		t.Fatalf("setupStep = %d, want dotfile decision while host is created", got.setupStep)
+	}
+	if !got.loading {
+		t.Error("loading should be true while creating the host automatically")
+	}
+	if got.settingsInput.Focused() {
+		t.Error("settingsInput should not be focused during automatic host creation")
 	}
 }

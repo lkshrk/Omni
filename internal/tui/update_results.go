@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"sort"
 	"strings"
 
@@ -9,14 +10,29 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-func (m *Model) handleDescRefreshDoneMsg(msg descRefreshDoneMsg) {
+func (m *Model) handleDescRefreshDoneMsg(msg descRefreshDoneMsg) tea.Cmd {
 	if msg.gen != m.descRefreshGen {
-		return
+		return nil
+	}
+	m.descRefreshing = false
+	if msg.err != nil && (m.ctx == nil || !errors.Is(msg.err, m.ctx.Err())) {
+		m.finishSetupReloadIfIdle()
+		status := "description refresh failed: " + msg.err.Error()
+		if m.collectLaunchBatchError(status) {
+			return m.finishLaunchBatchIfIdle()
+		}
+		return setStatus(m, status, true)
 	}
 	if msg.tools != nil {
 		m.allTools = msg.tools
 		m.applyFilter()
 	}
+	m.finishSetupReloadIfIdle()
+	if cmd := m.finishLaunchBatchIfIdle(); cmd != nil {
+		return cmd
+	}
+	m.clearActivityStatusIfIdle()
+	return nil
 }
 
 func (m *Model) handleProgressMsg(msg progressMsg) []tea.Cmd {
@@ -24,6 +40,28 @@ func (m *Model) handleProgressMsg(msg progressMsg) []tea.Cmd {
 		return nil
 	}
 	m.progressText = msg.text
+	progressChangedList := false
+	if msg.tools != nil {
+		m.allTools = msg.tools
+		progressChangedList = true
+	}
+	if len(msg.claimedNames) > 0 {
+		if m.removeDiscoveredByName(msg.claimedNames) {
+			progressChangedList = true
+		}
+	}
+	if msg.toolGroups != nil {
+		m.toolGroups = msg.toolGroups
+		progressChangedList = true
+	}
+	if msg.toolMemberships != nil {
+		m.toolMemberships = msg.toolMemberships
+		progressChangedList = true
+	}
+	if msg.groupNames != nil {
+		m.groupNames = msg.groupNames
+		progressChangedList = true
+	}
 	if msg.rowKey != "" {
 		delete(m.bulkPendingKeys, msg.rowKey)
 		switch {
@@ -41,6 +79,9 @@ func (m *Model) handleProgressMsg(msg progressMsg) []tea.Cmd {
 				m.startRowOperation(parts[0], parts[1], msg.rowStatus)
 			}
 		}
+	}
+	if progressChangedList {
+		m.applyFilter()
 	}
 	if m.progressCh != nil {
 		return []tea.Cmd{waitForProgress(m.progressCh, m.progressGen)}
@@ -60,6 +101,7 @@ func (m *Model) handleProgressDoneMsg(msg progressDoneMsg) []tea.Cmd {
 	if msg.gen != m.progressGen {
 		return nil
 	}
+	m.finishCancellableAction()
 	m.progressGen++
 	if !m.migrating {
 		m.loading = false
@@ -85,14 +127,30 @@ func (m *Model) handleProgressDoneMsg(msg progressDoneMsg) []tea.Cmd {
 		m.groupNames = msg.groupNames
 	}
 	m.applyFilter()
-	if msg.rowErrors != nil {
+	if msg.rowErrors != nil || msg.rowActionErrors != nil {
 		m.clearRowActionError()
 		for key, message := range msg.rowErrors {
 			m.setToolActionError(key, message)
 		}
+		for key, actionErr := range msg.rowActionErrors {
+			if actionErr == nil {
+				continue
+			}
+			m.setToolActionError(key, actionErr.Error(), actionErr)
+		}
 	}
-	if msg.err != nil {
+	promptingPrivilegedAction := false
+	if msg.err == nil && len(msg.rowErrors) > 0 && len(msg.promptPrivilegedActions) > 0 {
+		promptingPrivilegedAction = m.queuePrivilegedToolPrompts(msg.rowErrors, msg.promptPrivilegedActions)
+	}
+	if isContextCanceled(msg.err) {
+		m.adminTerminalQueue = nil
+		cmds = append(cmds, setStatus(m, "cancelled", false))
+	} else if msg.err != nil {
+		m.adminTerminalQueue = nil
 		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
+	} else if promptingPrivilegedAction {
+		return cmds
 	} else if msg.message != "" {
 		if msg.rowErrors == nil {
 			m.clearRowActionError()
@@ -102,27 +160,102 @@ func (m *Model) handleProgressDoneMsg(msg progressDoneMsg) []tea.Cmd {
 	return cmds
 }
 
-func (m *Model) removeDiscoveredByName(names []string) {
+func (m *Model) removeDiscoveredByName(names []string) bool {
 	if len(names) == 0 || len(m.discoveredTools) == 0 {
-		return
+		return false
 	}
 	claimed := make(map[string]struct{}, len(names))
 	for _, name := range names {
 		claimed[name] = struct{}{}
 	}
 	remaining := m.discoveredTools[:0]
+	changed := false
 	for _, t := range m.discoveredTools {
 		if _, ok := claimed[t.Name]; ok {
+			changed = true
 			continue
 		}
 		remaining = append(remaining, t)
 	}
+	if !changed {
+		return false
+	}
 	m.discoveredTools = remaining
 	m.rebuildDiscoveredKeys()
+	return true
+}
+
+func (m *Model) removeDiscoveredByKeys(keys []string) bool {
+	if len(keys) == 0 || len(m.discoveredTools) == 0 {
+		return false
+	}
+	remove := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		remove[key] = struct{}{}
+	}
+	remaining := m.discoveredTools[:0]
+	changed := false
+	for _, t := range m.discoveredTools {
+		if _, ok := remove[toolKey(t.Name, t.Provider)]; ok {
+			changed = true
+			continue
+		}
+		remaining = append(remaining, t)
+	}
+	if !changed {
+		return false
+	}
+	m.discoveredTools = remaining
+	m.rebuildDiscoveredKeys()
+	return true
+}
+
+func (m *Model) removeSearchResultsByKeys(keys []string) bool {
+	if len(keys) == 0 {
+		return false
+	}
+	remove := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		remove[key] = struct{}{}
+	}
+
+	changed := false
+	if len(m.searchTools) > 0 {
+		remaining := m.searchTools[:0]
+		for _, t := range m.searchTools {
+			if _, ok := remove[toolKey(t.Name, t.Provider)]; ok {
+				changed = true
+				continue
+			}
+			remaining = append(remaining, t)
+		}
+		m.searchTools = remaining
+	}
+	for cacheKey, entry := range m.searchCache {
+		if len(entry.tools) == 0 {
+			continue
+		}
+		remaining := entry.tools[:0]
+		entryChanged := false
+		for _, t := range entry.tools {
+			if _, ok := remove[toolKey(t.Name, t.Provider)]; ok {
+				entryChanged = true
+				continue
+			}
+			remaining = append(remaining, t)
+		}
+		if entryChanged {
+			entry.tools = remaining
+			m.searchCache[cacheKey] = entry
+			changed = true
+		}
+	}
+	return changed
 }
 
 func (m *Model) handleOpCompleteMsg(msg opCompleteMsg) []tea.Cmd {
 	var cmds []tea.Cmd
+	m.finishCancellableAction()
 	m.loading = false
 	rowErrKey := msg.key
 	if rowErrKey == "" {
@@ -130,23 +263,60 @@ func (m *Model) handleOpCompleteMsg(msg opCompleteMsg) []tea.Cmd {
 	}
 	m.clearRowOperation()
 	delete(m.upgradingKeys, msg.key)
-	if msg.err != nil {
-		m.setToolActionError(rowErrKey, msg.err.Error())
+	m.applyOpCompleteRefresh(msg)
+	if isContextCanceled(msg.err) {
+		m.adminTerminalQueue = nil
+		cmds = append(cmds, setStatus(m, "cancelled", false))
+	} else if msg.err != nil {
+		m.adminTerminalQueue = nil
+		m.setToolActionError(rowErrKey, msg.err.Error(), msg.err)
 		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
 	} else {
-		m.clearRowActionError()
+		if msg.preserveOtherRowErrors && rowErrKey != "" {
+			m.clearToolActionError(rowErrKey)
+		} else {
+			m.clearRowActionError()
+		}
+		if msg.preserveOtherRowErrors && m.openNextQueuedAdminTerminalAction() {
+			return cmds
+		}
 		cmds = append(cmds, setStatus(m, "✓ "+msg.message, false))
-		if msg.tools != nil {
-			m.allTools = msg.tools
-		}
-		if msg.toolProviderPins != nil {
-			m.toolProviderPins = msg.toolProviderPins
-		}
-		if msg.tools != nil {
-			m.applyFilter()
-		}
 	}
 	return cmds
+}
+
+func (m *Model) applyOpCompleteRefresh(msg opCompleteMsg) {
+	changed := m.removeDiscoveredByKeys(msg.removeDiscoveredKeys)
+	if m.removeSearchResultsByKeys(msg.removeDiscoveredKeys) {
+		changed = true
+	}
+	if msg.tools != nil {
+		m.allTools = msg.tools
+		changed = true
+	}
+	if msg.toolGroups != nil {
+		m.toolGroups = msg.toolGroups
+		changed = true
+	}
+	if msg.toolMemberships != nil {
+		m.toolMemberships = msg.toolMemberships
+		changed = true
+	}
+	if msg.groupNames != nil {
+		m.groupNames = msg.groupNames
+		changed = true
+	}
+	if msg.hostInfo != nil {
+		m.hostInfo = msg.hostInfo
+		changed = true
+	}
+	if msg.toolProviderPins != nil {
+		m.toolProviderPins = msg.toolProviderPins
+		changed = true
+	}
+	if changed {
+		m.applyFilter()
+	}
 }
 
 func (m *Model) handleCreateGroupDoneMsg(msg createGroupDoneMsg) []tea.Cmd {
@@ -157,9 +327,11 @@ func (m *Model) handleCreateGroupDoneMsg(msg createGroupDoneMsg) []tea.Cmd {
 		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
 		return cmds
 	}
-	cmds = append(cmds, setStatus(m, "✓ group "+msg.name+" created", false))
+	cmds = append(cmds, setStatus(m, "✓ group "+msg.name+" created and assigned to this host", false))
+	refreshed := false
 	if msg.groupNames != nil {
 		m.groupNames = msg.groupNames
+		refreshed = true
 		allGroupNames := buildAllGroupNames(m.groupNames)
 		for i, name := range allGroupNames {
 			if name == msg.name {
@@ -168,18 +340,33 @@ func (m *Model) handleCreateGroupDoneMsg(msg createGroupDoneMsg) []tea.Cmd {
 			}
 		}
 	}
+	if msg.toolMemberships != nil {
+		m.toolMemberships = msg.toolMemberships
+		refreshed = true
+	}
+	if msg.toolGroups != nil {
+		m.toolGroups = msg.toolGroups
+		refreshed = true
+	}
+	if msg.hostInfo != nil {
+		m.hostInfo = msg.hostInfo
+		refreshed = true
+	}
+	if refreshed {
+		m.applyFilter()
+	}
 	return cmds
 }
 
-func (m *Model) handleProfileActivatedMsg(msg profileActivatedMsg) []tea.Cmd {
+func (m *Model) handleHostCopiedMsg(msg hostCopiedMsg) []tea.Cmd {
 	if msg.err != nil {
 		return []tea.Cmd{setStatus(m, "✗ "+msg.err.Error(), true)}
 	}
 	if msg.info != nil {
-		m.profileInfo = msg.info
+		m.hostInfo = msg.info
 	}
-	m.applyActivatedProfile(msg.profile)
-	return []tea.Cmd{setStatus(m, "✓ activated profile "+msg.profile, false)}
+	m.applyCopiedHost(msg.host)
+	return []tea.Cmd{setStatus(m, "✓ copied groups from "+msg.host, false)}
 }
 
 func (m *Model) handleGroupChangedMsg(msg groupChangedMsg) []tea.Cmd {
@@ -205,7 +392,7 @@ func (m *Model) handleGroupChangedMsg(msg groupChangedMsg) []tea.Cmd {
 		}
 	}
 	if msg.info != nil {
-		m.profileInfo = msg.info
+		m.hostInfo = msg.info
 	}
 	m.applyFilter()
 	return cmds
@@ -290,6 +477,7 @@ func (m *Model) handleSettingsSavedMsg(msg settingsSavedMsg) []tea.Cmd {
 func (m *Model) handleDangerOpDoneMsg(msg dangerOpDoneMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 	m.loading = false
+	m.setupReloading = false
 	if msg.action == "enable-dots" {
 		if !m.finishDotsOperation(msg.dotsGen) {
 			return cmds
@@ -304,11 +492,22 @@ func (m *Model) handleDangerOpDoneMsg(msg dangerOpDoneMsg) []tea.Cmd {
 		}
 		cmds = append(cmds, setStatus(m, text, false))
 	}
+	if msg.setupComplete && msg.err == nil {
+		m.mode = viewList
+		m.setupBackgroundMode = viewList
+		m.setupStep = 0
+		m.hostRequired = false
+		m.setupComplete = true
+	}
 	if msg.reload {
 		if msg.mode != viewList {
 			m.setupBackgroundMode = msg.mode
 		}
 		m.loading = true
+		if msg.setupComplete && msg.err == nil {
+			m.setupReloading = true
+			m.progressText = "Loading tools…"
+		}
 		cmds = append(cmds, m.spinner.Tick, loadTools(m.app, m.ctx))
 	} else if len(msg.tools) > 0 {
 		m.allTools = msg.tools
@@ -325,7 +524,7 @@ func (m *Model) handleDangerOpDoneMsg(msg dangerOpDoneMsg) []tea.Cmd {
 	return cmds
 }
 
-func (m *Model) handleProfileGroupChangedMsg(msg profileGroupChangedMsg) []tea.Cmd {
+func (m *Model) handleHostGroupChangedMsg(msg hostGroupChangedMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 	m.loading = false
 	if msg.err != nil {
@@ -333,57 +532,61 @@ func (m *Model) handleProfileGroupChangedMsg(msg profileGroupChangedMsg) []tea.C
 		return cmds
 	}
 	if msg.info != nil {
-		m.profileInfo = msg.info
-		if msg.detail != "" && msg.profile != "" {
-			m.placeProfileCursor(msg.profile)
+		m.hostInfo = msg.info
+		if msg.detail != "" && msg.host != "" {
+			m.placeHostCursor(msg.host)
 		}
+	}
+	refreshed := false
+	if msg.toolMemberships != nil {
+		m.toolMemberships = msg.toolMemberships
+		refreshed = true
+	}
+	if msg.groupNames != nil {
+		m.groupNames = msg.groupNames
+		refreshed = true
+	}
+	if msg.toolGroups != nil {
+		m.toolGroups = msg.toolGroups
+		refreshed = true
+	} else if msg.info != nil && m.toolMemberships != nil {
+		m.toolGroups = compactToolGroupMapForHost(m.toolMemberships, msg.info)
+		refreshed = true
 	}
 	statusText := msg.detail
 	if statusText == "" {
-		statusText = "✓ " + msg.profile + " deleted"
+		statusText = "✓ host " + msg.host + " deleted"
 	}
 	if msg.group != "" {
 		verb := "added to"
 		if !msg.added {
 			verb = "removed from"
 		}
-		statusText = "✓ " + msg.group + " " + verb + " " + msg.profile
-	} else if m.profileInfo != nil {
-		if n := len(m.profileInfo.Profiles); m.profileCursor >= n {
-			m.profileCursor = max(n-1, 0)
+		statusText = "✓ " + msg.group + " " + verb + " host " + msg.host
+	} else if m.hostInfo != nil {
+		if n := len(m.hostInfo.Hosts); m.hostCursor >= n {
+			m.hostCursor = max(n-1, 0)
 		}
+	}
+	if refreshed {
+		m.applyFilter()
 	}
 	cmds = append(cmds, setStatus(m, statusText, false))
 	return cmds
 }
 
-func (m *Model) handleProfileCreatedMsg(msg profileCreatedMsg) []tea.Cmd {
-	var cmds []tea.Cmd
-	m.loading = false
-	if msg.err != nil {
-		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
-		return cmds
-	}
-	if msg.info != nil {
-		m.profileInfo = msg.info
-		m.placeProfileCursor(msg.profile)
-	}
-	cmds = append(cmds, setStatus(m, "✓ profile "+msg.profile+" created", false))
-	return cmds
-}
-
-func (m *Model) placeProfileCursor(profile string) {
-	if m.profileInfo == nil {
+func (m *Model) placeHostCursor(host string) {
+	if m.hostInfo == nil {
 		return
 	}
-	names := make([]string, 0, len(m.profileInfo.Profiles))
-	for name := range m.profileInfo.Profiles {
+	names := make([]string, 0, len(m.hostInfo.Hosts))
+	for name := range m.hostInfo.Hosts {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	for i, name := range names {
-		if name == profile {
-			m.profileCursor = i
+		if name == host {
+			m.hostCursor = i
 			return
 		}
 	}
@@ -392,23 +595,49 @@ func (m *Model) placeProfileCursor(profile string) {
 func (m *Model) handleClaimDoneMsg(msg claimDoneMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 	m.loading = false
+	hasRefresh := msg.tools != nil || msg.toolGroups != nil || msg.toolMemberships != nil || msg.groupNames != nil || msg.hostInfo != nil
+	discoveredChanged := false
+	if msg.err == nil || hasRefresh {
+		discoveredChanged = m.removeDiscoveredByName([]string{msg.name})
+	}
+	refreshed := m.applyClaimRefresh(msg)
+	if discoveredChanged && !refreshed {
+		m.applyFilter()
+	}
 	if msg.err != nil {
 		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
 		return cmds
 	}
 	cmds = append(cmds, setStatusFor(m, claimSuccessStatus(msg), false, statusDurationErr))
-	for i, t := range m.discoveredTools {
-		if t.Name == msg.name {
-			m.discoveredTools = append(m.discoveredTools[:i], m.discoveredTools[i+1:]...)
-			m.rebuildDiscoveredKeys()
-			break
-		}
-	}
+	return cmds
+}
+
+func (m *Model) applyClaimRefresh(msg claimDoneMsg) bool {
+	changed := false
 	if msg.tools != nil {
 		m.allTools = msg.tools
+		changed = true
+	}
+	if msg.toolGroups != nil {
+		m.toolGroups = msg.toolGroups
+		changed = true
+	}
+	if msg.toolMemberships != nil {
+		m.toolMemberships = msg.toolMemberships
+		changed = true
+	}
+	if msg.groupNames != nil {
+		m.groupNames = msg.groupNames
+		changed = true
+	}
+	if msg.hostInfo != nil {
+		m.hostInfo = msg.hostInfo
+		changed = true
+	}
+	if changed {
 		m.applyFilter()
 	}
-	return cmds
+	return changed
 }
 
 func (m *Model) handleIgnoreDoneMsg(msg ignoreDoneMsg) []tea.Cmd {
@@ -422,11 +651,11 @@ func (m *Model) handleIgnoreDoneMsg(msg ignoreDoneMsg) []tea.Cmd {
 	verb := "ignored"
 	if !msg.ignored {
 		verb = "un-ignored"
-		if msg.profileScope || msg.ignoreLabels == nil {
+		if msg.hostScope || msg.ignoreLabels == nil {
 			delete(m.ignoreSet, msg.name)
 		}
 	} else {
-		if msg.profileScope || msg.ignoreLabels == nil {
+		if msg.hostScope || msg.ignoreLabels == nil {
 			m.ignoreSet[msg.name] = true
 		}
 	}
@@ -449,9 +678,14 @@ func (m *Model) handleIgnoreDoneMsg(msg ignoreDoneMsg) []tea.Cmd {
 
 func (m *Model) handleMigrateProviderDoneMsg(msg migrateProviderDoneMsg) []tea.Cmd {
 	var cmds []tea.Cmd
+	m.finishCancellableAction()
 	m.loading = false
 	m.migrating = false
 	m.clearRowOperation()
+	if isContextCanceled(msg.err) {
+		cmds = append(cmds, setStatus(m, "cancelled", false))
+		return cmds
+	}
 	if msg.err != nil {
 		m.setToolActionError(toolKey(msg.name, msg.toProvider), msg.err.Error())
 		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
@@ -463,18 +697,32 @@ func (m *Model) handleMigrateProviderDoneMsg(msg migrateProviderDoneMsg) []tea.C
 		m.allTools = msg.tools
 		m.applyFilter()
 	}
+	if msg.toolProviderPins != nil {
+		m.toolProviderPins = msg.toolProviderPins
+		m.applyFilter()
+	}
 	return cmds
 }
 
 func claimSuccessStatus(msg claimDoneMsg) string {
 	group := msg.groupName
 	if group == "" {
-		group = "base"
+		group = shortHostname()
 	}
 	return "✓ added " + msg.name + " to config (" + group + ")"
 }
 
 func migrateProviderSuccessStatus(msg migrateProviderDoneMsg) string {
+	if msg.clearedProviderOverride {
+		switch {
+		case msg.fromProvider != "" && msg.toProvider != "":
+			return "✓ removed provider override for " + msg.name + " and reinstalled with default (" + msg.toProvider + "), removed " + msg.fromProvider
+		case msg.toProvider != "":
+			return "✓ removed provider override for " + msg.name + " and reinstalled with default (" + msg.toProvider + ")"
+		default:
+			return "✓ removed provider override for " + msg.name
+		}
+	}
 	switch {
 	case msg.fromProvider != "" && msg.toProvider != "":
 		return "✓ reinstalled " + msg.name + " with default (" + msg.toProvider + "), removed " + msg.fromProvider

@@ -394,6 +394,98 @@ func TestModel_ToolsLoadedMsg(t *testing.T) {
 		}
 	})
 
+	t.Run("launch batch status follows latest bulk activity", func(t *testing.T) {
+		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true, width: 100}
+		got := drive(m, toolsLoadedMsg{
+			settings:            config.Settings{DotsRepo: "/tmp/dots"},
+			configuredProviders: []string{"brew"},
+		})
+		if got.statusMsg != "Syncing dots…" {
+			t.Fatalf("statusMsg = %q, want initial dots operation status", got.statusMsg)
+		}
+		if got.progressText != "Refreshing providers: brew…" {
+			t.Fatalf("progressText = %q, want provider refresh to replace dots activity", got.progressText)
+		}
+		out := stripANSIEscapeSequences(renderFooterStatusLayer(got, 80))
+		if !strings.Contains(out, "Refreshing providers: brew…") || strings.Contains(out, "Syncing dots…") {
+			t.Fatalf("footer status = %q, want latest provider activity instead of stale dots status", out)
+		}
+
+		dotsGen := got.dotsOpGen
+		scanGen := got.scanGen
+		got = drive(got, dotsSyncedMsg{gen: dotsGen})
+		got = drive(got, providerScannedMsg{gen: scanGen, provider: "brew"})
+		if got.progressText != "Finding local tools…" {
+			t.Fatalf("progressText = %q, want discovery activity after provider scan", got.progressText)
+		}
+		out = stripANSIEscapeSequences(renderFooterStatusLayer(got, 80))
+		if !strings.Contains(out, "Finding local tools…") {
+			t.Fatalf("footer status = %q, want discovery activity after dots finished", out)
+		}
+
+		got = drive(got, allProvidersDoneMsg{gen: scanGen}, discoveredRefreshedMsg{gen: got.discoveryGen})
+		if got.launchBatchActive {
+			t.Fatal("launchBatchActive should be false after all launch work finishes")
+		}
+		if got.statusMsg != "" || got.progressText != "" {
+			t.Fatalf("statusMsg=%q progressText=%q, want cleared after successful launch batch", got.statusMsg, got.progressText)
+		}
+	})
+
+	t.Run("launch batch reports dots and provider errors after all startup work finishes", func(t *testing.T) {
+		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true}
+		got := drive(m, toolsLoadedMsg{
+			settings:            config.Settings{DotsRepo: "/tmp/dots"},
+			configuredProviders: []string{"brew"},
+		})
+		if !got.launchBatchActive {
+			t.Fatal("launchBatchActive should be true while startup dots sync and provider scans are running")
+		}
+		scanGen := got.scanGen
+		dotsGen := got.dotsOpGen
+
+		got = drive(got, providerScannedMsg{gen: scanGen, provider: "brew", err: errors.New("brew unavailable")})
+		if got.statusIsErr {
+			t.Fatalf("provider error should be deferred during launch batch, status=%q", got.statusMsg)
+		}
+		got = drive(got, dotsSyncedMsg{gen: dotsGen, err: errors.New("dots conflict")})
+		if got.statusIsErr {
+			t.Fatalf("dots error should be deferred during launch batch, status=%q", got.statusMsg)
+		}
+		got = drive(got, allProvidersDoneMsg{gen: scanGen})
+		got = drive(got, discoveredRefreshedMsg{gen: got.discoveryGen})
+
+		if got.launchBatchActive {
+			t.Fatal("launchBatchActive should be false after startup work finishes")
+		}
+		for _, want := range []string{"launch completed with 2 errors", "scan failed for brew: brew unavailable", "dots conflict"} {
+			if !strings.Contains(got.statusMsg, want) {
+				t.Fatalf("final launch status missing %q: %q", want, got.statusMsg)
+			}
+		}
+		if !got.statusIsErr {
+			t.Fatal("final launch status should be an error")
+		}
+	})
+
+	t.Run("successful launch batch clears stale dots activity status", func(t *testing.T) {
+		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true}
+		got := drive(m, toolsLoadedMsg{settings: config.Settings{DotsRepo: "/tmp/dots"}})
+		if !got.launchBatchActive {
+			t.Fatal("launchBatchActive should be true while startup dots sync is running")
+		}
+		got = drive(got, dotsSyncedMsg{gen: got.dotsOpGen})
+		if got.launchBatchActive {
+			t.Fatal("launchBatchActive should be false after startup dots sync finishes")
+		}
+		if got.statusMsg != "" {
+			t.Fatalf("statusMsg = %q, want cleared after successful launch batch", got.statusMsg)
+		}
+		if got.progressText != "" {
+			t.Fatalf("progressText = %q, want cleared after successful launch batch", got.progressText)
+		}
+	})
+
 	t.Run("success with dots reload target preserves dots tab", func(t *testing.T) {
 		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true, mode: viewDots, setupBackgroundMode: viewDots}
 		got := drive(m, toolsLoadedMsg{tools: threeTools(), settings: config.Settings{DotsRepo: "/tmp/dots"}})
@@ -428,12 +520,12 @@ func TestModel_ToolsLoadedMsg(t *testing.T) {
 		}
 	})
 
-	t.Run("noProfile does not start main data refresh", func(t *testing.T) {
+	t.Run("noHost does not start main data refresh", func(t *testing.T) {
 		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true}
 		m.allTools = []*database.ToolCache{{Name: "snapshot", Provider: "brew"}}
 		cmds := m.handleToolsLoadedMsg(toolsLoadedMsg{
 			tools:               threeTools(),
-			noProfile:           true,
+			noHost:              true,
 			configuredProviders: []string{"brew"},
 		})
 		if m.mode != viewSetup {
@@ -468,7 +560,14 @@ func TestModel_SetupMode(t *testing.T) {
 		return Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), mode: viewSetup}
 	}
 
-	t.Run("y starts config creation", func(t *testing.T) {
+	t.Run("enter starts config creation", func(t *testing.T) {
+		got := drive(setupModel(), pressEnter())
+		if !got.loading {
+			t.Error("loading should be true after pressing enter")
+		}
+	})
+
+	t.Run("y shortcut starts config creation", func(t *testing.T) {
 		got := drive(setupModel(), pressRune('y'))
 		if !got.loading {
 			t.Error("loading should be true after pressing y")
@@ -483,7 +582,7 @@ func TestModel_SetupMode(t *testing.T) {
 	})
 
 	t.Run("other keys ignored in setup mode", func(t *testing.T) {
-		got := drive(setupModel(), pressRune('j'), pressEnter(), pressRune('/'))
+		got := drive(setupModel(), pressRune('j'), pressRune('/'))
 		if got.mode != viewSetup {
 			t.Errorf("mode = %v, want viewSetup; other keys should be ignored", got.mode)
 		}
@@ -576,6 +675,29 @@ func TestModel_ConfirmQuit(t *testing.T) {
 		}
 	})
 
+	t.Run("ctrl+c cancels active package action instead of quitting", func(t *testing.T) {
+		m := baseModel(threeTools())
+		m.loading = true
+		cancelled := false
+		m.activeActionCancel = func() { cancelled = true }
+		m.startRowOperation("git", "brew", "Deleting git…")
+		m.upgradingKeys = map[string]bool{"git\x00brew": true}
+
+		got := drive(m, pressCtrlC())
+		if !cancelled {
+			t.Fatal("active action cancel func was not called")
+		}
+		if got.confirmQuit {
+			t.Fatal("ctrl+c should not arm quit confirmation while an action is cancellable")
+		}
+		if got.loading || got.rowOpKey != "" || len(got.upgradingKeys) != 0 {
+			t.Fatalf("active action state not cleared: loading=%v row=%q upgrades=%v", got.loading, got.rowOpKey, got.upgradingKeys)
+		}
+		if got.statusMsg != "cancelled" || got.statusIsErr {
+			t.Fatalf("status = %q err=%v, want cancelled non-error", got.statusMsg, got.statusIsErr)
+		}
+	})
+
 	t.Run("any other key resets confirmQuit and clears prompt", func(t *testing.T) {
 		m := drive(baseModel(nil), pressRune('q'), pressRune('j'))
 		if m.confirmQuit {
@@ -596,6 +718,8 @@ func TestModel_QuitCancelsBackgroundContext(t *testing.T) {
 
 	searchCtx, searchCancel := context.WithCancel(context.Background())
 	m.searchCancel = searchCancel
+	actionCancelled := false
+	m.activeActionCancel = func() { actionCancelled = true }
 	m.searching = true
 	m.loading = true
 	m.scanningProviders = map[string]bool{"brew": true}
@@ -611,9 +735,29 @@ func TestModel_QuitCancelsBackgroundContext(t *testing.T) {
 	if searchCtx.Err() == nil {
 		t.Fatal("search context is not cancelled after confirmed quit")
 	}
+	if !actionCancelled {
+		t.Fatal("active action context is not cancelled after confirmed quit")
+	}
 	if got.loading || got.searching || len(got.scanningProviders) != 0 || len(got.upgradingKeys) != 0 {
 		t.Fatalf("background state still active after quit: loading=%v searching=%v scanning=%v upgrading=%v",
 			got.loading, got.searching, got.scanningProviders, got.upgradingKeys)
+	}
+}
+
+func TestModel_CancelledOperationDoesNotCreateRowError(t *testing.T) {
+	m := baseModel(threeTools())
+	m.loading = true
+	m.startRowOperation("git", "brew", "Deleting git…")
+
+	got := drive(m, opCompleteMsg{err: context.Canceled})
+	if got.loading || got.rowOpKey != "" {
+		t.Fatalf("cancelled operation should clear loading/row state, got loading=%v row=%q", got.loading, got.rowOpKey)
+	}
+	if len(got.rowErrors) != 0 {
+		t.Fatalf("cancelled operation should not create row error, got %#v", got.rowErrors)
+	}
+	if got.statusMsg != "cancelled" || got.statusIsErr {
+		t.Fatalf("status = %q err=%v, want cancelled non-error", got.statusMsg, got.statusIsErr)
 	}
 }
 
@@ -629,9 +773,40 @@ func TestModel_KeysIgnoredWhileLoading(t *testing.T) {
 	}
 }
 
+func TestStartCurrentProviderScans_DedupesConcreteCoveredByEcosystem(t *testing.T) {
+	m := baseModel([]*database.ToolCache{{Name: "git", Provider: "brew"}})
+	m.configuredProviders = []string{"system", "brew"}
+	m.effectiveSystemManager = "brew"
+
+	cmds := m.startCurrentProviderScans()
+	if len(cmds) != 2 {
+		t.Fatalf("scan commands = %d, want spinner plus one provider scan", len(cmds))
+	}
+	if len(m.scanningProviders) != 1 || !m.scanningProviders["system"] {
+		t.Fatalf("scanningProviders = %v, want only logical system scan", m.scanningProviders)
+	}
+}
+
+func TestRefreshInstalledProviders_DedupesConcreteCoveredByEcosystem(t *testing.T) {
+	m := baseModel([]*database.ToolCache{
+		{Name: "fd", Provider: "system", InstalledWith: "brew"},
+		{Name: "git", Provider: "brew"},
+	})
+	m.configuredProviders = []string{"system", "brew"}
+	m.effectiveSystemManager = "brew"
+
+	cmds := m.refreshInstalledProviders()
+	if len(cmds) != 2 {
+		t.Fatalf("scan commands = %d, want spinner plus one provider scan", len(cmds))
+	}
+	if len(m.scanningProviders) != 1 || !m.scanningProviders["system"] {
+		t.Fatalf("scanningProviders = %v, want only logical system scan", m.scanningProviders)
+	}
+}
+
 func TestModel_SettingsTab(t *testing.T) {
-	// Tab order: Tools → Dots → Profiles → Settings → Tools
-	// Within Profiles, j/k cascades through sections; Tab switches main tabs.
+	// Tab order: Tools → Dots → Groups → Settings → Tools.
+	// Within Groups, j/k cascades through sections; Tab switches main tabs.
 	t.Run("tab from list opens dots", func(t *testing.T) {
 		m := drive(baseModel(threeTools()), pressTab())
 		if m.mode != viewDots {
@@ -639,14 +814,14 @@ func TestModel_SettingsTab(t *testing.T) {
 		}
 	})
 
-	t.Run("tab from dots opens profiles", func(t *testing.T) {
+	t.Run("tab from dots opens groups", func(t *testing.T) {
 		m := drive(baseModel(threeTools()), pressTab(), pressTab())
-		if m.mode != viewProfiles {
-			t.Errorf("mode = %v, want viewProfiles", m.mode)
+		if m.mode != viewGroups {
+			t.Errorf("mode = %v, want viewGroups", m.mode)
 		}
 	})
 
-	t.Run("tab from profiles opens settings", func(t *testing.T) {
+	t.Run("tab from groups opens settings", func(t *testing.T) {
 		m := drive(baseModel(threeTools()), pressTab(), pressTab(), pressTab())
 		if m.mode != viewSettings {
 			t.Errorf("mode = %v, want viewSettings", m.mode)
@@ -660,10 +835,10 @@ func TestModel_SettingsTab(t *testing.T) {
 		}
 	})
 
-	t.Run("esc from profiles returns to list", func(t *testing.T) {
+	t.Run("esc from hosts returns to list", func(t *testing.T) {
 		m := drive(baseModel(threeTools()), pressTab(), pressTab(), pressEsc())
 		if m.mode != viewList {
-			t.Errorf("mode = %v, want viewList after esc from profiles", m.mode)
+			t.Errorf("mode = %v, want viewList after esc from hosts", m.mode)
 		}
 	})
 
@@ -678,7 +853,7 @@ func TestModel_SettingsTab(t *testing.T) {
 		// In viewSearch, tab is consumed by the textinput — mode stays viewSearch.
 
 		m := drive(baseModel(threeTools()), pressRune('/'), pressTab())
-		if m.mode == viewSettings || m.mode == viewProfiles {
+		if m.mode == viewSettings || m.mode == viewGroups {
 			t.Error("tab should not switch tabs from filter mode")
 		}
 	})
@@ -779,7 +954,8 @@ func TestModel_SettingsCursor(t *testing.T) {
 		msgs := append(toSettings(),
 			pressRune('j'), pressRune('j'), pressRune('j'), pressRune('j'),
 			pressRune('j'), pressRune('j'), pressRune('j'), pressRune('j'),
-			pressRune('j'), pressRune('j'), pressRune('j'), pressRune('j'))
+			pressRune('j'), pressRune('j'), pressRune('j'), pressRune('j'),
+			pressRune('j'))
 		m := drive(baseModel(nil), msgs...)
 		if m.settingsCursor != numSettingRows-1 {
 			t.Errorf("settingsCursor = %d, want %d (clamped)", m.settingsCursor, numSettingRows-1)
@@ -823,23 +999,23 @@ func TestModel_SettingsVisibleRowsMutateExpectedFields(t *testing.T) {
 		},
 		{
 			name:   "system provider order",
-			row:    1,
+			row:    settingsRowSystemPriority,
 			action: pressEnter(),
 			assert: func(t *testing.T, m Model) {
 				t.Helper()
 				if !m.editingPriority {
-					t.Fatal("row 1 should open provider order editor")
+					t.Fatalf("row %d should open provider order editor", settingsRowSystemPriority)
 				}
 			},
 		},
 		{
 			name:   "system provider",
-			row:    2,
+			row:    settingsRowSystemProvider,
 			action: pressRune(' '),
 			assert: func(t *testing.T, m Model) {
 				t.Helper()
 				if !slices.Contains(m.settings.DisabledProviders, "system") {
-					t.Fatalf("row 2 should toggle system provider, disabled providers = %v", m.settings.DisabledProviders)
+					t.Fatalf("row %d should toggle system provider, disabled providers = %v", settingsRowSystemProvider, m.settings.DisabledProviders)
 				}
 			},
 		},
@@ -899,7 +1075,7 @@ func TestModel_SettingsVisibleRowsMutateExpectedFields(t *testing.T) {
 			},
 		},
 		{
-			name:   "sync on this machine",
+			name:   "dotfile sync",
 			row:    settingsRowDotsSync,
 			action: pressEnter(),
 			assert: func(t *testing.T, m Model) {
@@ -1003,26 +1179,26 @@ func TestModel_DotsRepoEdit(t *testing.T) {
 	})
 }
 
-func TestModel_ProfilesTab(t *testing.T) {
-	t.Run("tab from dots opens profiles", func(t *testing.T) {
+func TestModel_HostsTab(t *testing.T) {
+	t.Run("tab from dots opens hosts", func(t *testing.T) {
 		m := drive(baseModel(threeTools()), pressTab(), pressTab())
-		if m.mode != viewProfiles {
-			t.Errorf("mode = %v, want viewProfiles", m.mode)
+		if m.mode != viewGroups {
+			t.Errorf("mode = %v, want viewGroups", m.mode)
 		}
 	})
 
-	t.Run("esc from profiles returns to list", func(t *testing.T) {
+	t.Run("esc from hosts returns to list", func(t *testing.T) {
 		m := drive(baseModel(threeTools()), pressTab(), pressTab(), pressEsc())
 		if m.mode != viewList {
 			t.Errorf("mode = %v, want viewList", m.mode)
 		}
 	})
 
-	t.Run("j/k navigate profile cursor", func(t *testing.T) {
+	t.Run("j/k navigate host cursor", func(t *testing.T) {
 		m := drive(baseModel(threeTools()), pressTab(), pressTab())
-		// profileCursor starts at 0; profileInfo is nil so Down is clamped
-		if m.profileCursor != 0 {
-			t.Errorf("profileCursor = %d, want 0", m.profileCursor)
+		// hostCursor starts at 0; hostInfo is nil so Down is clamped
+		if m.hostCursor != 0 {
+			t.Errorf("hostCursor = %d, want 0", m.hostCursor)
 		}
 	})
 }
@@ -1102,6 +1278,33 @@ func TestModel_ProviderSubtabs(t *testing.T) {
 		}
 	})
 
+	t.Run("esc clears active tool filters and search results", func(t *testing.T) {
+		m := modelWithProviders()
+		cancelled := false
+		m.searchCancel = func() { cancelled = true }
+		m.searching = true
+		m.searchTools = []*database.ToolCache{{Name: "ripgrep", Provider: "system"}}
+		m.filter.SetValue("rip")
+		m.providerTabIdx = 1
+		m.groupFilter = "work"
+		m.groupTabIdx = 1
+		m.applyFilter()
+
+		got := drive(m, pressEsc())
+		if !cancelled {
+			t.Fatal("esc should cancel in-flight search")
+		}
+		if got.mode != viewList {
+			t.Fatalf("mode = %v, want viewList", got.mode)
+		}
+		if got.filter.Value() != "" || got.providerTabIdx != 0 || got.groupFilter != "" || got.groupTabIdx != 0 {
+			t.Fatalf("filters not cleared: query=%q provider=%d group=%q groupIdx=%d", got.filter.Value(), got.providerTabIdx, got.groupFilter, got.groupTabIdx)
+		}
+		if got.searching || len(got.searchTools) != 0 {
+			t.Fatalf("search state not cleared: searching=%v tools=%d", got.searching, len(got.searchTools))
+		}
+	})
+
 	t.Run("group filter hides discovered tools without config group", func(t *testing.T) {
 		orphan := &database.ToolCache{Name: "fzf", Provider: "system", InstalledWith: "brew", Installed: true, Tracked: false}
 		m := modelWithProviders()
@@ -1118,12 +1321,44 @@ func TestModel_ProviderSubtabs(t *testing.T) {
 	})
 }
 
+func TestHandleOpCompleteMsg_RemovesInstalledSearchResultAndCache(t *testing.T) {
+	key := toolKey("ripgrep", "system")
+	stale := &database.ToolCache{Name: "ripgrep", Provider: "system", Package: "ripgrep", Tracked: false}
+	installed := &database.ToolCache{Name: "ripgrep", Provider: "system", Package: "ripgrep", Installed: true, Tracked: true}
+	m := baseModel(nil)
+	m.mode = viewSearch
+	m.filter.SetValue("ripgrep")
+	m.filter.Blur()
+	m.searchTools = []*database.ToolCache{stale}
+	m.searchCache = map[string]searchCacheEntry{
+		searchCacheKey("ripgrep", ""): {tools: []*database.ToolCache{stale}},
+	}
+	m.applyFilter()
+
+	m.handleOpCompleteMsg(opCompleteMsg{
+		message:              "installed ripgrep and added to config",
+		tools:                []*database.ToolCache{installed},
+		removeDiscoveredKeys: []string{key},
+	})
+
+	if len(m.searchTools) != 0 {
+		t.Fatalf("searchTools = %d, want stale installed result removed", len(m.searchTools))
+	}
+	if got := len(m.searchCache[searchCacheKey("ripgrep", "")].tools); got != 0 {
+		t.Fatalf("cached search results = %d, want stale installed result removed", got)
+	}
+	if len(m.visibleTools) != 1 || m.visibleTools[0].Name != "ripgrep" || !m.visibleTools[0].Installed || !m.visibleTools[0].Tracked {
+		t.Fatalf("visibleTools = %+v, want refreshed installed config row", m.visibleTools)
+	}
+}
+
 func TestModel_GroupPicker(t *testing.T) {
 	modelWithGroups := func() Model {
+		t.Setenv("OMNI_HOSTNAME", "host")
 		m := baseModel(threeTools())
-		m.groupNames = []string{"base", "work"}
+		m.groupNames = []string{"work"}
 		m.toolGroups = map[string]string{
-			"git\x00brew":   "base",
+			"git\x00brew":   "host",
 			"node\x00npm":   "work",
 			"python\x00pip": "work",
 		}
@@ -1154,12 +1389,13 @@ func TestModel_GroupPicker(t *testing.T) {
 		}
 	})
 
-	t.Run("g with no groups opens membership picker with base", func(t *testing.T) {
+	t.Run("g with no groups opens membership picker with host", func(t *testing.T) {
+		t.Setenv("OMNI_HOSTNAME", "host")
 		m := drive(baseModel(threeTools()), pressRune('g'))
 		if m.mode != viewGroupMembership {
 			t.Errorf("mode = %v, want viewGroupMembership", m.mode)
 		}
-		want := []string{"base", groupPickerNewSentinel}
+		want := []string{"host", groupPickerNewSentinel}
 		if len(m.pickerGroups) != len(want) || m.pickerGroups[0] != want[0] {
 			t.Errorf("pickerGroups = %v, want %v", m.pickerGroups, want)
 		}
@@ -1169,9 +1405,9 @@ func TestModel_GroupPicker(t *testing.T) {
 func TestModel_DotsRootRowsOpenGroupMembershipPicker(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
-	if err := config.Save(cfgPath, &config.RootConfig{
+	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
 		Groups: []*config.GroupConfig{
-			{Dots: []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}}},
+			{Name: shortHostname(), Special: "host", Dots: []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}}},
 			{Name: "work"},
 		},
 	}); err != nil {
@@ -1189,7 +1425,7 @@ func TestModel_DotsRootRowsOpenGroupMembershipPicker(t *testing.T) {
 	m.mode = viewDots
 	m.settings.DotsRepo = "/repo"
 	m.dotsLoaded = true
-	m.groupNames = []string{"base", "work"}
+	m.groupNames = []string{shortHostname(), "work"}
 	m.dotsEntries = []app.DotStatus{{
 		Name:    "nvim",
 		State:   app.DotStateSynced,
@@ -1203,12 +1439,12 @@ func TestModel_DotsRootRowsOpenGroupMembershipPicker(t *testing.T) {
 	if got.pickerMembershipKind != pickerMembershipDot || got.pickerMembershipName != "nvim" {
 		t.Fatalf("picker target kind=%q name=%q, want dot/nvim", got.pickerMembershipKind, got.pickerMembershipName)
 	}
-	if !slices.Contains(got.dotMemberships["nvim"], "base") {
-		t.Fatalf("dotMemberships[nvim] = %v, want base", got.dotMemberships["nvim"])
+	if !slices.Contains(got.dotMemberships["nvim"], shortHostname()) {
+		t.Fatalf("dotMemberships[nvim] = %v, want host group", got.dotMemberships["nvim"])
 	}
 }
 
-func TestModel_GroupMembershipPicker_SpaceTogglesEnterSaves(t *testing.T) {
+func TestModel_GroupMembershipPicker_SpaceSelectsAndSaves(t *testing.T) {
 	m := baseModel([]*database.ToolCache{{Name: "ripgrep", Provider: "system", Tracked: true}})
 	key := toolKey("ripgrep", "system")
 	m.mode = viewGroupMembership
@@ -1219,16 +1455,11 @@ func TestModel_GroupMembershipPicker_SpaceTogglesEnterSaves(t *testing.T) {
 	m.pickerOriginalGroups = []string{"base"}
 
 	got := drive(m, pressRune(' '))
-	if got.loading {
-		t.Fatal("space should only stage membership changes")
+	if !slices.Equal(got.toolMemberships[key], []string{"work"}) {
+		t.Fatalf("space should select work as the only membership, got %v", got.toolMemberships[key])
 	}
-	if !slices.Contains(got.toolMemberships[key], "work") {
-		t.Fatalf("space should toggle work into draft memberships, got %v", got.toolMemberships[key])
-	}
-
-	got = drive(got, pressEnter())
 	if !got.loading {
-		t.Fatal("enter should save staged membership changes")
+		t.Fatal("space should save selected membership changes")
 	}
 	if got.mode != viewList {
 		t.Fatalf("mode = %v, want viewList after save", got.mode)
@@ -1236,6 +1467,7 @@ func TestModel_GroupMembershipPicker_SpaceTogglesEnterSaves(t *testing.T) {
 }
 
 func TestModel_GroupMembershipPicker_TargetSurvivesCursorMove(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "host")
 	rgKey := toolKey("ripgrep", "system")
 	fdKey := toolKey("fd", "system")
 	m := baseModel([]*database.ToolCache{
@@ -1243,7 +1475,7 @@ func TestModel_GroupMembershipPicker_TargetSurvivesCursorMove(t *testing.T) {
 		{Name: "fd", Provider: "system", Tracked: true},
 	})
 	m.toolMemberships = map[string][]string{
-		rgKey: {"base"},
+		rgKey: {"host"},
 		fdKey: {"work"},
 	}
 
@@ -1258,13 +1490,13 @@ func TestModel_GroupMembershipPicker_TargetSurvivesCursorMove(t *testing.T) {
 	if name != "ripgrep" {
 		t.Fatalf("selectedMembershipTarget name = %q, want ripgrep", name)
 	}
-	if !slices.Equal(memberships, []string{"base"}) {
-		t.Fatalf("selectedMembershipTarget memberships = %v, want [base]", memberships)
+	if !slices.Equal(memberships, []string{"host"}) {
+		t.Fatalf("selectedMembershipTarget memberships = %v, want [host]", memberships)
 	}
 
-	m.setSelectedMemberships([]string{"base", "work"})
-	if !slices.Equal(m.toolMemberships[rgKey], []string{"base", "work"}) {
-		t.Fatalf("ripgrep memberships = %v, want [base work]", m.toolMemberships[rgKey])
+	m.setSelectedMemberships([]string{"work"})
+	if !slices.Equal(m.toolMemberships[rgKey], []string{"work"}) {
+		t.Fatalf("ripgrep memberships = %v, want [work]", m.toolMemberships[rgKey])
 	}
 	if !slices.Equal(m.toolMemberships[fdKey], []string{"work"}) {
 		t.Fatalf("fd memberships = %v, want unchanged [work]", m.toolMemberships[fdKey])
@@ -1311,17 +1543,18 @@ func TestModel_GroupPickerUsesCapturedInstallToolAfterCursorMoves(t *testing.T) 
 }
 
 func TestModel_GroupMembershipPicker_NewGroupDraft(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "host")
 	m := baseModel([]*database.ToolCache{{Name: "ripgrep", Provider: "system", Tracked: true}})
 	key := toolKey("ripgrep", "system")
 	m.mode = viewGroupMembership
-	m.pickerGroups = []string{"base", groupPickerNewSentinel}
+	m.pickerGroups = []string{"host", groupPickerNewSentinel}
 	m.pickerCursor = 1
-	m.toolMemberships = map[string][]string{key: {"base"}}
+	m.toolMemberships = map[string][]string{key: {"host"}}
 	m.pickerMembershipKey = key
-	m.pickerOriginalGroups = []string{"base"}
-	m.profileInfo = &app.ProfileInfo{
-		Active:   "main",
-		Profiles: map[string]config.Profile{"main": {Groups: []string{"base"}}},
+	m.pickerOriginalGroups = []string{"host"}
+	m.hostInfo = &app.HostInfo{
+		Active: "main",
+		Hosts:  map[string]config.HostAssignment{"main": {Groups: []string{"host"}}},
 	}
 
 	got := drive(m, pressEnter())
@@ -1333,18 +1566,18 @@ func TestModel_GroupMembershipPicker_NewGroupDraft(t *testing.T) {
 	if got.pickerCreatingGroup {
 		t.Fatal("new group input should close after submit")
 	}
-	if !slices.Contains(got.toolMemberships[key], "work") {
-		t.Fatalf("new group should be staged as checked, got memberships %v", got.toolMemberships[key])
+	if !slices.Equal(got.toolMemberships[key], []string{"work"}) {
+		t.Fatalf("new group should become the only selected group, got memberships %v", got.toolMemberships[key])
 	}
-	if !groupInActiveProfile(got, "work") {
-		t.Fatal("new group should be treated as part of the current profile while staged")
+	if !groupInActiveHost(got, "work") {
+		t.Fatal("new group should be treated as part of the current host while staged")
 	}
 	if got.pickerGroups[len(got.pickerGroups)-1] != groupPickerNewSentinel {
 		t.Fatalf("new-group row should remain last, got %v", got.pickerGroups)
 	}
 }
 
-func TestModel_ScopePicker_SpaceTogglesEnterSaves(t *testing.T) {
+func TestModel_ProviderScopePicker_SpaceSelectsAndSaves(t *testing.T) {
 	m := baseModel([]*database.ToolCache{{Name: "ripgrep", Provider: "system", Installed: true, InstalledWith: "brew", Tracked: true}})
 	m.mode = viewProviderScope
 	m.scopeOptions = []scopeOption{
@@ -1356,19 +1589,39 @@ func TestModel_ScopePicker_SpaceTogglesEnterSaves(t *testing.T) {
 	m.scopeCursor = 1
 
 	got := drive(m, pressRune(' '))
-	if got.loading {
-		t.Fatal("space should only stage provider scope")
+	if !got.loading {
+		t.Fatal("space should save selected provider scope")
 	}
-	if !got.scopeOptions[1].checked || got.scopeOptions[0].checked {
-		t.Fatalf("space should select only the highlighted provider scope: %+v", got.scopeOptions)
+	if got.mode != viewList {
+		t.Fatalf("mode = %v, want viewList after save", got.mode)
+	}
+	if got.statusMsg != "Pinning provider for ripgrep…" {
+		t.Fatalf("statusMsg = %q, want provider save to start", got.statusMsg)
+	}
+}
+
+func TestModel_IgnoreScopePicker_SpaceStillStages(t *testing.T) {
+	m := baseModel([]*database.ToolCache{{Name: "ripgrep", Provider: "system", Tracked: true}})
+	m.mode = viewIgnoreScope
+	m.scopeOptions = []scopeOption{
+		{kind: "tool", label: "this tool everywhere"},
+		{kind: "group", label: "this group"},
+	}
+	m.scopeTarget = *m.selectedTool()
+	m.scopeTargetSet = true
+	m.scopeCursor = 1
+
+	got := drive(m, pressRune(' '))
+	if got.loading {
+		t.Fatal("space should only stage multi-scope ignore changes")
+	}
+	if !got.scopeOptions[1].checked {
+		t.Fatalf("space should toggle highlighted ignore scope: %+v", got.scopeOptions)
 	}
 
 	got = drive(got, pressEnter())
 	if !got.loading {
-		t.Fatal("enter should save selected provider scope")
-	}
-	if got.mode != viewList {
-		t.Fatalf("mode = %v, want viewList after save", got.mode)
+		t.Fatal("enter should save staged ignore scope changes")
 	}
 }
 
@@ -1439,9 +1692,10 @@ func TestModel_SettingsSavedMsg(t *testing.T) {
 
 // ─── Priority editor ──────────────────────────────────────────────────────────
 
-// goToPriorityRow navigates to settings tab (3 tabs) and moves cursor to the Priority row (index 1).
+// goToPriorityRow navigates to Settings and moves the cursor to Provider Order.
 func goToPriorityRow() []tea.Msg {
-	return []tea.Msg{pressTab(), pressTab(), pressTab(), pressRune('j')}
+	msgs := []tea.Msg{pressTab(), pressTab(), pressTab()}
+	return append(msgs, nj(settingsRowSystemPriority)...)
 }
 
 func TestModel_PriorityEditor_Open(t *testing.T) {
@@ -1815,12 +2069,12 @@ func TestModel_GroupPicker_EscReturnsToList(t *testing.T) {
 	}
 }
 
-func TestVisibleGroupNames_UsesActiveProfileGroups(t *testing.T) {
+func TestVisibleGroupNames_UsesActiveHostGroups(t *testing.T) {
 	m := baseModel(nil)
 	m.groupNames = []string{"archive", "personal", "work"}
-	m.profileInfo = &app.ProfileInfo{
+	m.hostInfo = &app.HostInfo{
 		Active: "main",
-		Profiles: map[string]config.Profile{
+		Hosts: map[string]config.HostAssignment{
 			"main": {Groups: []string{"base", "work"}},
 		},
 	}
@@ -1835,9 +2089,9 @@ func TestVisibleGroupNames_IncludesCurrentMachineGroup(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost.example.com")
 	m := baseModel(nil)
 	m.groupNames = []string{"archive", "testhost", "work"}
-	m.profileInfo = &app.ProfileInfo{
+	m.hostInfo = &app.HostInfo{
 		Active: "main",
-		Profiles: map[string]config.Profile{
+		Hosts: map[string]config.HostAssignment{
 			"main": {Groups: []string{"base"}},
 		},
 	}
@@ -1860,17 +2114,18 @@ func TestDotAddTargetGroup_UsesVisibleGroupOrMachineGroup(t *testing.T) {
 	}
 }
 
-func TestPrioritizedPickerGroups_ActiveProfileGroupsFirst(t *testing.T) {
+func TestPrioritizedPickerGroups_ActiveHostGroupsFirst(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "host")
 	m := baseModel(nil)
 	m.groupNames = []string{"archive", "personal", "work"}
-	m.profileInfo = &app.ProfileInfo{
+	m.hostInfo = &app.HostInfo{
 		Active: "main",
-		Profiles: map[string]config.Profile{
+		Hosts: map[string]config.HostAssignment{
 			"main": {Groups: []string{"base", "work"}},
 		},
 	}
 	got := prioritizedPickerGroups(m)
-	want := []string{"base", "work", "archive", "personal"}
+	want := []string{"host", "work", "archive", "personal"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("prioritizedPickerGroups = %v, want %v", got, want)
 	}
@@ -1907,6 +2162,45 @@ func TestModel_ProgressMsg_SetsProgressText(t *testing.T) {
 	got := drive(m, progressMsg{text: "installing…"})
 	if got.progressText != "installing…" {
 		t.Errorf("progressMsg: progressText = %q, want 'installing…'", got.progressText)
+	}
+}
+
+func TestModel_ProgressMsg_RefreshesFinishedToolBeforeBatchDone(t *testing.T) {
+	m := baseModel([]*database.ToolCache{
+		{Name: "ripgrep", Provider: "system", Installed: false, Tracked: true},
+		{Name: "fd", Provider: "system", Installed: false, Tracked: true},
+	})
+	key := toolKey("ripgrep", "system")
+	m.progressGen = 3
+	m.loading = true
+	m.bulkPendingKeys = map[string]bool{key: true, toolKey("fd", "system"): true}
+
+	got := drive(m, progressMsg{
+		gen:     3,
+		text:    "Installed ripgrep",
+		rowKey:  key,
+		rowDone: true,
+		tools: []*database.ToolCache{
+			{Name: "ripgrep", Provider: "system", Installed: true, Tracked: true},
+			{Name: "fd", Provider: "system", Installed: false, Tracked: true},
+		},
+	})
+
+	if !got.loading {
+		t.Fatal("batch should stay loading until progressDoneMsg")
+	}
+	if got.bulkPendingKeys[key] {
+		t.Fatal("finished row should leave pending state before batch completion")
+	}
+	refreshed := false
+	for _, tool := range got.visibleTools {
+		if tool.Name == "ripgrep" && tool.Installed {
+			refreshed = true
+			break
+		}
+	}
+	if !refreshed {
+		t.Fatalf("finished row should refresh immediately, got %+v", got.visibleTools)
 	}
 }
 
@@ -2038,6 +2332,21 @@ func TestModel_ProviderScannedMsg_ClearsScanningProviders(t *testing.T) {
 	}
 }
 
+func TestModel_ProviderScannedMsg_RefreshStatusShowsRemainingProviders(t *testing.T) {
+	m := baseModel(nil)
+	m.scanningProviders = map[string]bool{"brew": true, "node": true}
+	m.progressText = providerRefreshStatus(m.scanningProviders)
+
+	got := drive(m, providerScannedMsg{provider: "brew"})
+
+	if got.progressText != "Refreshing providers: node…" {
+		t.Fatalf("progressText = %q, want remaining provider", got.progressText)
+	}
+	if len(got.bulkPendingKeys) > 0 {
+		t.Fatalf("refresh should not mark tool rows pending, got %v", got.bulkPendingKeys)
+	}
+}
+
 func TestModel_ProviderScannedMsg_IgnoresStaleGeneration(t *testing.T) {
 	m := baseModel(nil)
 	m.scanGen = 2
@@ -2058,6 +2367,20 @@ func TestModel_ProviderScannedMsg_IgnoresUnknownProvider(t *testing.T) {
 	}
 	if len(got.allTools) != 0 {
 		t.Fatalf("unknown providerScannedMsg triggered final refresh: %v", toolNames(got.allTools))
+	}
+}
+
+func TestProviderScanFailureStatus_DeadlineIsConcise(t *testing.T) {
+	err := errors.Join(
+		errors.New("upserting installed status for system/fd: context deadline exceeded"),
+		context.DeadlineExceeded,
+	)
+	got := providerScanFailureStatus("system", err)
+	if got != "scan timed out for system" {
+		t.Fatalf("status = %q, want concise timeout", got)
+	}
+	if strings.Contains(got, "upserting") || strings.Contains(got, "listing tools") {
+		t.Fatalf("status should not expose internals: %q", got)
 	}
 }
 
@@ -2185,6 +2508,53 @@ func TestModel_PaletteConsolidate_SetsLoading(t *testing.T) {
 	}
 }
 
+func TestModel_PaletteDotsCommandsStartDotsOperations(t *testing.T) {
+	cases := []struct {
+		name       string
+		wantStatus string
+	}{
+		{name: "dots pull", wantStatus: "Pulling…"},
+		{name: "dots push", wantStatus: "Pushing…"},
+		{name: "dots sync", wantStatus: "Syncing dots…"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := baseModel(nil)
+			m.mode = viewCommand
+			m.commandInput.Focus()
+			m.commandCursor = -1
+			m.settings.DotsRepo = "/repo/dotfiles"
+			m.commandSuggestions = []palCmd{mustPaletteCommand(t, m, tc.name)}
+
+			got := drive(m, pressEnter())
+			if got.mode != viewDots {
+				t.Fatalf("mode = %v, want viewDots", got.mode)
+			}
+			if !got.dotsLoaded {
+				t.Fatal("dotsLoaded = false, want true")
+			}
+			if !got.dotsLoading {
+				t.Fatal("dotsLoading = false, want true")
+			}
+			if got.statusMsg != tc.wantStatus {
+				t.Fatalf("statusMsg = %q, want %q", got.statusMsg, tc.wantStatus)
+			}
+		})
+	}
+}
+
+func mustPaletteCommand(t *testing.T, m Model, name string) palCmd {
+	t.Helper()
+	for _, cmd := range buildPalette(m) {
+		if cmd.name == name {
+			return cmd
+		}
+	}
+	t.Fatalf("palette command %q not found", name)
+	return palCmd{}
+}
+
 // ─── Dots tab ────────────────────────────────────────────────────────────────
 
 func dotsModel() Model {
@@ -2198,6 +2568,75 @@ func dotsModel() Model {
 		{Name: "nvim", SourcePath: "/repo/nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: app.DotStateSynced, Actions: []app.DotAction{app.DotActionRemove, app.DotActionIgnore}},
 	}
 	return m
+}
+
+func TestModel_DotsSyncAllMarksRowsPending(t *testing.T) {
+	got := drive(dotsModel(), pressRune('S'))
+	if !got.dotsLoading {
+		t.Fatal("dotsLoading should start after sync all")
+	}
+	if len(got.dotsPendingNames) != 3 {
+		t.Fatalf("dotsPendingNames len = %d, want 3 (%v)", len(got.dotsPendingNames), got.dotsPendingNames)
+	}
+	if !strings.Contains(got.progressText, "0/3") {
+		t.Fatalf("progressText = %q, want 0/3 progress", got.progressText)
+	}
+}
+
+func TestModel_DotsSyncAllEntryOrderMatchesRenderedSections(t *testing.T) {
+	m := baseModel(nil)
+	m.settings.DotsRepo = "/repo/dotfiles"
+	m.dotsEntries = []app.DotStatus{
+		{Name: "synced", State: app.DotStateSynced},
+		{Name: "ignored", State: app.DotStateIgnored},
+		{Name: "conflict", State: app.DotStateConflict},
+		{Name: "missing", State: app.DotStateMissing},
+	}
+
+	got := dotsSyncAllEntryOrder(m)
+	want := []string{"conflict", "missing", "synced", "ignored"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("dots sync-all order = %v, want rendered order %v", got, want)
+	}
+}
+
+func TestModel_DotsProgressMsgUpdatesRowStateAndSnapshot(t *testing.T) {
+	m := dotsModel()
+	m.beginDotsOperation("Syncing dots…")
+	gen := m.dotsOpGen
+	m.dotsPendingNames = map[string]bool{"nvim": true, "zshrc": true}
+
+	got := drive(m, dotsProgressMsg{
+		gen:  gen,
+		text: dotsSyncProgressText("nvim", 1, 2, false, nil),
+		name: "nvim",
+	})
+	if got.dotsActiveName != "nvim" {
+		t.Fatalf("dotsActiveName = %q, want nvim", got.dotsActiveName)
+	}
+	if got.dotsPendingNames["nvim"] {
+		t.Fatal("active dots row should no longer be pending")
+	}
+	if !strings.Contains(got.progressText, "1/2") {
+		t.Fatalf("progressText = %q, want 1/2 progress", got.progressText)
+	}
+
+	got = drive(got, dotsProgressMsg{
+		gen:     gen,
+		text:    dotsSyncProgressText("nvim", 1, 2, true, nil),
+		name:    "nvim",
+		done:    true,
+		entries: []app.DotStatus{{Name: "nvim", State: app.DotStateSynced}},
+	})
+	if got.dotsActiveName != "" {
+		t.Fatalf("dotsActiveName = %q, want cleared", got.dotsActiveName)
+	}
+	if got.dotsPendingNames["nvim"] {
+		t.Fatal("done dots row should no longer be pending")
+	}
+	if len(got.dotsEntries) != 1 || got.dotsEntries[0].Name != "nvim" {
+		t.Fatalf("dotsEntries = %#v, want refreshed nvim snapshot", got.dotsEntries)
+	}
 }
 
 func TestModel_DotsTab_Navigation(t *testing.T) {
@@ -2637,17 +3076,17 @@ func TestDangerZone_SettingsCursor(t *testing.T) {
 		return msgs
 	}
 
-	t.Run("row 11 enter sets dangerConfirmRow", func(t *testing.T) {
-		msgs := append(toSettings(), nj(11)...)
+	t.Run("reset settings enter sets dangerConfirmRow", func(t *testing.T) {
+		msgs := append(toSettings(), nj(settingsRowResetSettings)...)
 		msgs = append(msgs, pressEnter())
 		m := drive(baseModel(nil), msgs...)
-		if m.dangerConfirmRow != 11 {
-			t.Errorf("dangerConfirmRow = %d, want 11", m.dangerConfirmRow)
+		if m.dangerConfirmRow != settingsRowResetSettings {
+			t.Errorf("dangerConfirmRow = %d, want %d", m.dangerConfirmRow, settingsRowResetSettings)
 		}
 	})
 
-	t.Run("row 11 space is no-op", func(t *testing.T) {
-		msgs := append(toSettings(), nj(11)...)
+	t.Run("reset settings space is no-op", func(t *testing.T) {
+		msgs := append(toSettings(), nj(settingsRowResetSettings)...)
 		msgs = append(msgs, pressRune(' '))
 		m := drive(baseModel(nil), msgs...)
 		if m.dangerConfirmRow != -1 {
@@ -2655,12 +3094,12 @@ func TestDangerZone_SettingsCursor(t *testing.T) {
 		}
 	})
 
-	t.Run("row 12 enter sets dangerConfirmRow", func(t *testing.T) {
-		msgs := append(toSettings(), nj(12)...)
+	t.Run("reset cache enter sets dangerConfirmRow", func(t *testing.T) {
+		msgs := append(toSettings(), nj(settingsRowResetCache)...)
 		msgs = append(msgs, pressEnter())
 		m := drive(baseModel(nil), msgs...)
-		if m.dangerConfirmRow != 12 {
-			t.Errorf("dangerConfirmRow = %d, want 12", m.dangerConfirmRow)
+		if m.dangerConfirmRow != settingsRowResetCache {
+			t.Errorf("dangerConfirmRow = %d, want %d", m.dangerConfirmRow, settingsRowResetCache)
 		}
 	})
 
@@ -2676,8 +3115,7 @@ func TestDangerZone_SettingsCursor(t *testing.T) {
 	})
 
 	t.Run("esc cancels dangerConfirmRow", func(t *testing.T) {
-		// Navigate to row 11 (Reset Settings) and open confirm.
-		msgs := append(toSettings(), nj(11)...)
+		msgs := append(toSettings(), nj(settingsRowResetSettings)...)
 		msgs = append(msgs, pressEnter(), pressEsc())
 		m := drive(baseModel(nil), msgs...)
 		if m.dangerConfirmRow != -1 {
@@ -2735,9 +3173,7 @@ func TestDangerZone_SettingsCursor(t *testing.T) {
 	})
 
 	t.Run("confirm enter triggers execution (loading=true)", func(t *testing.T) {
-		// Row 11 (reset settings) — no app wired, so the cmd will fail, but
-		// model.loading is set synchronously before the cmd fires.
-		msgs := append(toSettings(), nj(11)...)
+		msgs := append(toSettings(), nj(settingsRowResetSettings)...)
 		msgs = append(msgs, pressEnter(), pressEnter()) // open confirm + execute
 		m := drive(baseModel(nil), msgs...)
 		// After the second enter, loading=true and dangerConfirmRow=-1.
@@ -2762,11 +3198,11 @@ func TestDangerZone_DangerOpDoneMsg(t *testing.T) {
 	})
 
 	t.Run("error sets error statusMsg", func(t *testing.T) {
-		m := drive(baseModel(nil), dangerOpDoneMsg{action: "delete-profile", err: errors.New("write failed")})
+		m := drive(baseModel(nil), dangerOpDoneMsg{action: "delete-host", err: errors.New("write failed")})
 		if !stringContains(m.statusMsg, "✗") {
 			t.Errorf("statusMsg = %q, want error prefix ✗", m.statusMsg)
 		}
-		if !stringContains(m.statusMsg, "delete-profile") {
+		if !stringContains(m.statusMsg, "delete-host") {
 			t.Errorf("statusMsg = %q, want action name in error", m.statusMsg)
 		}
 	})
@@ -2788,7 +3224,9 @@ func TestActivityLabel_Branches(t *testing.T) {
 		want string
 	}{
 		{"searching", Model{searching: true}, "Searching…"},
-		{"scanning", Model{scanningProviders: map[string]bool{"brew": true}}, "Scanning brew…"},
+		{"scanning", Model{scanningProviders: map[string]bool{"brew": true}}, "Refreshing providers: brew…"},
+		{"finding local tools", Model{providerSnapshotRefreshing: true}, "Finding local tools…"},
+		{"descriptions", Model{descRefreshing: true}, "Refreshing tool descriptions…"},
 		{"dotsLoading", Model{dotsLoading: true}, "Loading dots…"},
 		{"default", Model{}, "Loading…"},
 	}
@@ -2801,39 +3239,39 @@ func TestActivityLabel_Branches(t *testing.T) {
 	}
 }
 
-// ─── selectedProfileName ─────────────────────────────────────────────────────
+// ─── selectedHostName ─────────────────────────────────────────────────────
 
-func TestSelectedProfileName_NilInfo(t *testing.T) {
+func TestSelectedHostName_NilInfo(t *testing.T) {
 	m := Model{}
-	if got := m.selectedProfileName(); got != "" {
+	if got := m.selectedHostName(); got != "" {
 		t.Errorf("got %q, want empty", got)
 	}
 }
 
-func TestSelectedProfileName_ValidCursor(t *testing.T) {
+func TestSelectedHostName_ValidCursor(t *testing.T) {
 	m := Model{
-		profileInfo: &app.ProfileInfo{
-			Profiles: map[string]config.Profile{
+		hostInfo: &app.HostInfo{
+			Hosts: map[string]config.HostAssignment{
 				"alpha": {},
 				"beta":  {},
 			},
 		},
-		profileCursor: 0,
+		hostCursor: 0,
 	}
 	// sorted: ["alpha", "beta"] → cursor 0 → "alpha"
-	if got := m.selectedProfileName(); got != "alpha" {
+	if got := m.selectedHostName(); got != "alpha" {
 		t.Errorf("got %q, want alpha", got)
 	}
 }
 
-func TestSelectedProfileName_OutOfRange(t *testing.T) {
+func TestSelectedHostName_OutOfRange(t *testing.T) {
 	m := Model{
-		profileInfo: &app.ProfileInfo{
-			Profiles: map[string]config.Profile{"alpha": {}},
+		hostInfo: &app.HostInfo{
+			Hosts: map[string]config.HostAssignment{"alpha": {}},
 		},
-		profileCursor: 99,
+		hostCursor: 99,
 	}
-	if got := m.selectedProfileName(); got != "" {
+	if got := m.selectedHostName(); got != "" {
 		t.Errorf("out-of-range cursor: got %q, want empty", got)
 	}
 }
@@ -2846,7 +3284,7 @@ func TestWindowTitle_Modes(t *testing.T) {
 		want string
 	}{
 		{viewDots, "omni — dots"},
-		{viewProfiles, "omni — profiles"},
+		{viewGroups, "omni — groups"},
 		{viewSettings, "omni — settings"},
 		{viewSetup, "omni — setup"},
 		{viewList, "omni"},
@@ -2890,29 +3328,29 @@ func TestShortHostname_OmniHostnameEmpty_FallsBackToOsHostname(t *testing.T) {
 	_ = got
 }
 
-func TestDefaultSetupProfileName_NoProfilesUsesDefault(t *testing.T) {
+func TestDefaultSetupHostName_NoHostsUsesHostname(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "workstation")
 	m := baseModel(nil)
-	m.profileInfo = &app.ProfileInfo{Profiles: map[string]config.Profile{}}
-	if got := m.defaultSetupProfileName(); got != "default" {
-		t.Fatalf("defaultSetupProfileName = %q, want default", got)
+	m.hostInfo = &app.HostInfo{Hosts: map[string]config.HostAssignment{}}
+	if got := m.defaultSetupHostName(); got != "workstation" {
+		t.Fatalf("defaultSetupHostName = %q, want workstation", got)
 	}
 }
 
-func TestDefaultSetupProfileName_UnknownProfilesUsesDefault(t *testing.T) {
+func TestDefaultSetupHostName_UnknownHostsUsesHostname(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "workstation")
 	m := baseModel(nil)
-	if got := m.defaultSetupProfileName(); got != "default" {
-		t.Fatalf("defaultSetupProfileName = %q, want default", got)
+	if got := m.defaultSetupHostName(); got != "workstation" {
+		t.Fatalf("defaultSetupHostName = %q, want workstation", got)
 	}
 }
 
-func TestDefaultSetupProfileName_ExistingProfilesUsesHostname(t *testing.T) {
+func TestDefaultSetupHostName_ExistingHostsUsesHostname(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "workstation.local")
 	m := baseModel(nil)
-	m.profileInfo = &app.ProfileInfo{Profiles: map[string]config.Profile{"work": {}}}
-	if got := m.defaultSetupProfileName(); got != "workstation" {
-		t.Fatalf("defaultSetupProfileName = %q, want workstation", got)
+	m.hostInfo = &app.HostInfo{Hosts: map[string]config.HostAssignment{"work": {}}}
+	if got := m.defaultSetupHostName(); got != "workstation" {
+		t.Fatalf("defaultSetupHostName = %q, want workstation", got)
 	}
 }
 
@@ -2948,6 +3386,57 @@ func wrongProvModel() Model {
 	m.effectiveNodeManager = "bun"
 	m.upgradingKeys = make(map[string]bool)
 	return m
+}
+
+func TestSyncStatusOf_PinnedProviderMismatchWinsOverDefault(t *testing.T) {
+	tool := &database.ToolCache{
+		Name:          "typescript",
+		Provider:      "node",
+		InstalledWith: "bun",
+		Installed:     true,
+		Tracked:       true,
+	}
+	m := baseModel([]*database.ToolCache{tool})
+	m.effectiveNodeManager = "bun"
+	m.toolProviderPins = map[string]string{"typescript": "npm"}
+
+	if got := m.syncStatusOf(tool); got != syncWrongProv {
+		t.Fatalf("syncStatusOf pinned mismatch = %v, want syncWrongProv", got)
+	}
+}
+
+func TestPinnedProvider_KeyPressArmsClearOverride(t *testing.T) {
+	tool := &database.ToolCache{
+		Name:          "typescript",
+		Provider:      "node",
+		InstalledWith: "npm",
+		Installed:     true,
+		Tracked:       true,
+	}
+	m := baseModel([]*database.ToolCache{tool})
+	m.effectiveNodeManager = "bun"
+	m.toolProviderPins = map[string]string{"typescript": "npm"}
+	m.upgradingKeys = make(map[string]bool)
+	m.applyFilter()
+
+	got := drive(m, pressRune('p'))
+	if got.listConfirm.action != listConfirmClearProviderOverride {
+		t.Fatalf("listConfirm.action = %q, want clear provider override", got.listConfirm.action)
+	}
+	if got.loading {
+		t.Fatal("loading should stay false before clear override confirmation")
+	}
+
+	got = drive(got, pressRune('p'))
+	if !got.loading {
+		t.Fatal("loading should be true after confirmed clear override")
+	}
+	if !got.migrating {
+		t.Fatal("migrating should be true when clearing an installed provider override")
+	}
+	if got.rowOpKey != toolKey("typescript", "node") {
+		t.Fatalf("rowOpKey = %q, want selected tool key", got.rowOpKey)
+	}
 }
 
 // TestMigration_KeyPressSetsFlags verifies that confirming 'r' on a syncWrongProv

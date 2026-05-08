@@ -4,6 +4,7 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/provider"
 )
 
 // toolsLoadedMsg is sent when the initial tool list and settings have been fetched.
@@ -12,18 +13,18 @@ type toolsLoadedMsg struct {
 	discovered             []*database.ToolCache // locally installed but not in config
 	settings               config.Settings
 	taps                   []string
-	groupNames             []string          // ordered non-base group names
-	toolGroups             map[string]string // "name\x00provider" → baseName
+	groupNames             []string          // ordered reusable group names
+	toolGroups             map[string]string // "name\x00provider" → group name
 	toolMemberships        map[string][]string
 	dotMemberships         map[string][]string
 	ignoreLabels           map[string]string // logical tool name → compact ignore source label
 	toolIgnoreSet          map[string]bool
 	groupIgnoreSet         map[string]map[string]bool
 	toolProviderPins       map[string]string
-	profileInfo            *app.ProfileInfo
-	ignoreList             []string // tool names ignored by the active profile
+	hostInfo               *app.HostInfo
+	ignoreList             []string // tool names ignored by the active host
 	noConfig               bool     // true when no settings.json was found
-	noProfile              bool     // true when settings.json exists but no profile is mapped to this machine
+	noHost                 bool     // true when settings.json exists but no host entry matches this machine
 	err                    error
 	effectivePythonManager string             // binary actually used (uv, pip3, pip) — empty if not found
 	effectiveNodeManager   string             // binary actually used (bun, pnpm, npm) — empty if not found
@@ -66,25 +67,34 @@ type discoveredRefreshedMsg struct {
 
 // createGroupDoneMsg is sent after a new named group has been created.
 type createGroupDoneMsg struct {
-	err        error
-	name       string
-	groupNames []string
+	err             error
+	name            string
+	groupNames      []string
+	toolGroups      map[string]string
+	toolMemberships map[string][]string
+	hostInfo        *app.HostInfo
 }
 
-type profileActivatedMsg struct {
-	err     error
-	profile string
-	info    *app.ProfileInfo
+type hostCopiedMsg struct {
+	err  error
+	host string
+	info *app.HostInfo
 }
 
 // opCompleteMsg is sent after an async operation (install/uninstall/upgrade) finishes.
 // key is the upgradingKeys entry to remove ("name\x00provider"); empty for non-upgrade ops.
 type opCompleteMsg struct {
-	key              string
-	message          string
-	err              error
-	tools            []*database.ToolCache // refreshed list after op
-	toolProviderPins map[string]string
+	key                    string
+	message                string
+	err                    error
+	tools                  []*database.ToolCache // refreshed list after op
+	removeDiscoveredKeys   []string              // exact "name\x00provider" orphan rows consumed by the op
+	toolProviderPins       map[string]string
+	toolGroups             map[string]string
+	toolMemberships        map[string][]string
+	groupNames             []string
+	hostInfo               *app.HostInfo
+	preserveOtherRowErrors bool
 }
 
 // settingsSavedMsg is sent after an async settings save completes.
@@ -94,12 +104,17 @@ type settingsSavedMsg struct {
 }
 
 type progressUpdate struct {
-	gen       int
-	text      string
-	rowKey    string
-	rowStatus string
-	rowErr    string
-	rowDone   bool
+	gen             int
+	text            string
+	rowKey          string
+	rowStatus       string
+	rowErr          string
+	rowDone         bool
+	tools           []*database.ToolCache
+	claimedNames    []string
+	toolGroups      map[string]string
+	toolMemberships map[string][]string
+	groupNames      []string
 }
 
 // progressMsg carries one progress update from a background operation.
@@ -112,25 +127,46 @@ type progressStreamClosedMsg struct {
 	gen int
 }
 
+type dotsProgressUpdate struct {
+	gen            int
+	text           string
+	name           string
+	done           bool
+	entries        []app.DotStatus
+	gitStatus      string
+	dotMemberships map[string][]string
+}
+
+// dotsProgressMsg carries one dots sync progress update.
+type dotsProgressMsg dotsProgressUpdate
+
+// dotsProgressStreamClosedMsg signals that the dots progress channel closed.
+type dotsProgressStreamClosedMsg struct {
+	gen int
+}
+
 // progressDoneMsg signals that a progress-emitting operation has finished.
 // key is the upgradingKeys entry to remove ("*" for upgrade-all); empty for sync.
 type progressDoneMsg struct {
-	gen             int
-	key             string
-	message         string
-	err             error
-	tools           []*database.ToolCache
-	claimedNames    []string
-	toolGroups      map[string]string
-	toolMemberships map[string][]string
-	groupNames      []string
-	rowErrors       map[string]string
+	gen                     int
+	key                     string
+	message                 string
+	err                     error
+	tools                   []*database.ToolCache
+	claimedNames            []string
+	toolGroups              map[string]string
+	toolMemberships         map[string][]string
+	groupNames              []string
+	rowErrors               map[string]string
+	rowActionErrors         map[string]*provider.ActionError
+	promptPrivilegedActions map[string]provider.PrivilegeAction
 }
 
 // descRefreshDoneMsg is sent when the background bulk-description refresh
 // finishes. tools is the refreshed list (nil on error or empty config).
 type descRefreshDoneMsg struct {
 	gen   int
+	err   error
 	tools []*database.ToolCache
 }
 
@@ -141,6 +177,7 @@ type setupImportDoneMsg struct {
 	tools      []*database.ToolCache
 	toolGroups map[string]string
 	groupNames []string
+	hostInfo   *app.HostInfo
 }
 
 // setupProvidersDoneMsg is sent after the setup-wizard provider selection step saves.
@@ -149,10 +186,11 @@ type setupProvidersDoneMsg struct{ err error }
 // setupNodeMgrDoneMsg is sent after the setup-wizard node manager step saves.
 type setupNodeMgrDoneMsg struct{ err error }
 
-// setupProfileDoneMsg is sent after the setup-wizard profile step completes.
-type setupProfileDoneMsg struct {
-	profileName string
-	err         error
+// setupHostDoneMsg is sent after the setup-wizard host step completes.
+type setupHostDoneMsg struct {
+	hostName string
+	info     *app.HostInfo
+	err      error
 }
 
 type stowInstallDoneMsg struct {
@@ -258,15 +296,16 @@ type debouncedSearchMsg struct {
 }
 
 // dangerOpDoneMsg is sent after a high-impact maintenance action completes.
-// action is a short label (e.g. "delete-profile", "reset-settings").
+// action is a short label (e.g. "delete-host", "reset-settings").
 type dangerOpDoneMsg struct {
-	action  string
-	dotsGen int
-	err     error
-	detail  string                // optional human-readable summary
-	tools   []*database.ToolCache // refreshed list (nil when not applicable)
-	reload  bool                  // true when the tools list should be reloaded
-	mode    viewMode              // optional top-level view to show after reload
+	action        string
+	dotsGen       int
+	err           error
+	detail        string                // optional human-readable summary
+	tools         []*database.ToolCache // refreshed list (nil when not applicable)
+	reload        bool                  // true when the tools list should be reloaded
+	mode          viewMode              // optional top-level view to show after reload
+	setupComplete bool                  // true when an onboarding action should leave setup
 }
 
 // groupChangedMsg is sent after a group rename or delete completes.
@@ -274,13 +313,13 @@ type groupChangedMsg struct {
 	err             error
 	detail          string
 	tools           []*database.ToolCache // refreshed tool list (non-nil on delete)
-	groupNames      []string              // refreshed non-base group names
-	toolGroups      map[string]string     // refreshed "name\x00provider" → baseName
+	groupNames      []string              // refreshed reusable group names
+	toolGroups      map[string]string     // refreshed "name\x00provider" → group name
 	toolMemberships map[string][]string
-	info            *app.ProfileInfo // refreshed profile info
+	info            *app.HostInfo // refreshed host info
 }
 
-// groupToolsChangedMsg is sent after a profile group tools popup save completes.
+// groupToolsChangedMsg is sent after a group tools popup save completes.
 type groupToolsChangedMsg struct {
 	err             error
 	detail          string
@@ -293,7 +332,7 @@ type groupToolsChangedMsg struct {
 	groupIgnoreSet  map[string]map[string]bool
 }
 
-// groupDotsChangedMsg is sent after a profile group dots popup save completes.
+// groupDotsChangedMsg is sent after a group dots popup save completes.
 type groupDotsChangedMsg struct {
 	err            error
 	detail         string
@@ -302,22 +341,29 @@ type groupDotsChangedMsg struct {
 	dotMemberships map[string][]string
 }
 
-// profileGroupChangedMsg is sent after a profile group add/remove or profile delete.
-type profileGroupChangedMsg struct {
-	err     error
-	profile string
-	group   string           // empty for profile delete
-	added   bool             // true=added, false=removed/deleted
-	detail  string           // optional status text for rename/bulk edits
-	info    *app.ProfileInfo // refreshed profile info on success
+// hostGroupChangedMsg is sent after a host group add/remove or host delete.
+type hostGroupChangedMsg struct {
+	err             error
+	host            string
+	group           string // empty for host delete
+	added           bool   // true=added, false=removed/deleted
+	detail          string // optional status text for rename/bulk edits
+	info            *app.HostInfo
+	toolGroups      map[string]string
+	toolMemberships map[string][]string
+	groupNames      []string
 }
 
 // claimDoneMsg is sent after an orphan tool has been added to the config.
 type claimDoneMsg struct {
-	err       error
-	name      string
-	groupName string
-	tools     []*database.ToolCache
+	err             error
+	name            string
+	groupName       string
+	tools           []*database.ToolCache
+	toolGroups      map[string]string
+	toolMemberships map[string][]string
+	groupNames      []string
+	hostInfo        *app.HostInfo
 }
 
 // ignoreDoneMsg is sent after a tool's ignore status has been toggled.
@@ -326,7 +372,7 @@ type ignoreDoneMsg struct {
 	name           string
 	ignored        bool // true = was added to ignore list, false = was removed
 	tools          []*database.ToolCache
-	profileScope   bool
+	hostScope      bool
 	ignoreLabels   map[string]string
 	toolIgnoreSet  map[string]bool
 	groupIgnoreSet map[string]map[string]bool
@@ -335,18 +381,13 @@ type ignoreDoneMsg struct {
 // migrateProviderDoneMsg is sent after a wrong-provider tool has been migrated
 // (installed via the correct provider and removed from the old one).
 type migrateProviderDoneMsg struct {
-	err          error
-	name         string
-	fromProvider string
-	toProvider   string
-	tools        []*database.ToolCache
-}
-
-// profileCreatedMsg is sent after a new profile has been created from the Profiles tab.
-type profileCreatedMsg struct {
-	err     error
-	profile string
-	info    *app.ProfileInfo
+	err                     error
+	name                    string
+	fromProvider            string
+	toProvider              string
+	tools                   []*database.ToolCache
+	toolProviderPins        map[string]string
+	clearedProviderOverride bool
 }
 
 // dotsIgnoredMsg is sent after DotsAddIgnorePattern completes.

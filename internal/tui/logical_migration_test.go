@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"database/sql"
 	"slices"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/provider"
 )
 
 func searchResultModel(tools []*database.ToolCache) Model {
@@ -138,9 +140,9 @@ func TestLogicalMigration_SearchInstallAndAddPersistsLogicalProvider(t *testing.
 	if spec.Provider != "system" || spec.InstallWith != "" {
 		t.Fatalf("ripgrep spec = %+v, want provider system without install_with pin", spec)
 	}
-	base := groupByName(cfg, "")
-	if base == nil || !groupHasTool(base, "ripgrep") {
-		t.Fatalf("base group does not contain ripgrep: %+v", cfg.Groups)
+	host := groupByName(cfg, shortHostname())
+	if host == nil || !groupHasTool(host, "ripgrep") {
+		t.Fatalf("host group does not contain ripgrep: %+v", cfg.Groups)
 	}
 }
 
@@ -202,6 +204,107 @@ func TestLogicalMigration_SearchInstallAndAddAsksGroup(t *testing.T) {
 	base := groupByName(cfg, "")
 	if base != nil && groupHasTool(base, "ripgrep") {
 		t.Fatalf("base group unexpectedly contains ripgrep: %+v", cfg.Groups)
+	}
+}
+
+func TestLogicalMigration_SearchInstallEnterAsksGroup(t *testing.T) {
+	m := searchResultModel([]*database.ToolCache{{
+		Name:     "ripgrep",
+		Provider: "system",
+		Tracked:  false,
+	}})
+
+	got := drive(m, pressEnter())
+	if got.mode != viewGroupPicker {
+		t.Fatalf("mode = %v, want viewGroupPicker", got.mode)
+	}
+	if !got.pickerPurposeInstall {
+		t.Fatal("pickerPurposeInstall should be true")
+	}
+}
+
+func TestLogicalMigration_SearchInstallAndAddPrivilegedOpensAdminTerminal(t *testing.T) {
+	prov := &okProvider{name: "system"}
+	a, _ := newCmdApp(t, prov, nil)
+
+	m := modelForCmds(a)
+	m.searchTools = []*database.ToolCache{{
+		Name:            "vim",
+		Provider:        "system",
+		Package:         "vim",
+		Tracked:         false,
+		Privilege:       string(provider.PrivilegeRequired),
+		PrivilegeReason: sql.NullString{String: "apt install vim", Valid: true},
+	}}
+	m.groupNames = []string{"work"}
+	m.applyFilter()
+
+	tm, _ := m.Update(pressRune('i'))
+	got := tm.(Model)
+	if got.mode != viewGroupPicker {
+		t.Fatalf("mode = %v, want viewGroupPicker", got.mode)
+	}
+
+	tm, _ = got.Update(pressRune('j'))
+	got = tm.(Model)
+	if got.pickerCursor >= len(got.pickerGroups) || got.pickerGroups[got.pickerCursor] != "work" {
+		t.Fatalf("picker cursor selected %q from %v, want work", got.pickerGroups[got.pickerCursor], got.pickerGroups)
+	}
+
+	tm, cmd := got.Update(pressEnter())
+	got = tm.(Model)
+	if cmd != nil {
+		t.Fatal("privileged install picker should not dispatch normal install command")
+	}
+	if got.mode != viewAdminTerminal || got.adminTerminal == nil {
+		t.Fatalf("mode=%v adminTerminal=%v, want admin terminal prompt", got.mode, got.adminTerminal != nil)
+	}
+	if got.loading {
+		t.Fatal("loading should be false while waiting for admin terminal confirmation")
+	}
+	if got.adminTerminal.returnMode != viewList {
+		t.Fatalf("returnMode = %v, want viewList", got.adminTerminal.returnMode)
+	}
+	if !got.adminTerminal.addToConfig || got.adminTerminal.addGroup != "work" {
+		t.Fatalf("admin install-add state = add:%v group:%q, want add to work", got.adminTerminal.addToConfig, got.adminTerminal.addGroup)
+	}
+}
+
+func TestLogicalMigration_AdminTerminalInstallAndAddPersistsGroup(t *testing.T) {
+	prov := &okProvider{name: "system"}
+	a, cfgPath := newCmdApp(t, prov, nil)
+	m := modelForCmds(a)
+
+	msg := m.doCompleteAdminTerminalAction(adminTerminalState{
+		action:       provider.PrivilegeActionInstall,
+		name:         "vim",
+		providerName: "system",
+		pkg:          "vim",
+		rowKey:       toolKey("vim", "system"),
+		addToConfig:  true,
+		addGroup:     "work",
+	})()
+	got, ok := msg.(opCompleteMsg)
+	if !ok {
+		t.Fatalf("expected opCompleteMsg, got %T", msg)
+	}
+	if got.err != nil {
+		t.Fatalf("unexpected error: %v", got.err)
+	}
+	if got.message != "installed vim and added to config" {
+		t.Fatalf("message = %q, want install-and-add success", got.message)
+	}
+	if !slices.Contains(got.removeDiscoveredKeys, toolKey("vim", "system")) {
+		t.Fatalf("removeDiscoveredKeys = %v, want vim/system", got.removeDiscoveredKeys)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	work := groupByName(cfg, "work")
+	if work == nil || !groupHasTool(work, "vim") {
+		t.Fatalf("work group does not contain vim: %+v", cfg.Groups)
 	}
 }
 

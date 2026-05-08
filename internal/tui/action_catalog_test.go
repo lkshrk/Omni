@@ -37,8 +37,8 @@ func TestToolActionCatalogMatchesDefaultKeyMap(t *testing.T) {
 		if help.Key != action.TUI.DefaultKey {
 			t.Fatalf("%s help key = %q, want %q", action.ID, help.Key, action.TUI.DefaultKey)
 		}
-		if fieldRefs[action.TUI.KeyMapField] == 1 && help.Desc != action.Label {
-			t.Fatalf("%s help desc = %q, want %q", action.ID, help.Desc, action.Label)
+		if fieldRefs[action.TUI.KeyMapField] == 1 && help.Desc != actions.MustTUILabel(action.ID) {
+			t.Fatalf("%s help desc = %q, want %q", action.ID, help.Desc, actions.MustTUILabel(action.ID))
 		}
 	}
 }
@@ -71,7 +71,7 @@ func TestCanonicalActionKeys(t *testing.T) {
 		actions.ToolDeleteSpec,
 		actions.DotsDelete,
 		actions.GroupDelete,
-		actions.ProfileDelete,
+		actions.HostDelete,
 	} {
 		action, ok := actions.Get(id)
 		if !ok {
@@ -93,7 +93,7 @@ func TestCanonicalActionKeys(t *testing.T) {
 			t.Fatalf("%s ignore TUI key = %+v, want x", id, action.TUI)
 		}
 	}
-	if discover := actions.MustLabel(actions.DotsDiscover); discover != "discover" {
+	if discover := actions.MustTUILabel(actions.DotsDiscover); discover != "discover" {
 		t.Fatalf("dots discover label = %q, want discover", discover)
 	}
 	if action, _ := actions.Get(actions.DotsDiscover); action.TUI == nil || action.TUI.DefaultKey == "d" {
@@ -127,11 +127,8 @@ func TestDurableTUIActionsAreCataloged(t *testing.T) {
 		actions.GroupDelete,
 		actions.GroupEditTools,
 		actions.GroupEditDots,
-		actions.ProfileCreate,
-		actions.ProfileRename,
-		actions.ProfileDelete,
-		actions.ProfileEditGroups,
-		actions.ProfileEditHosts,
+		actions.HostDelete,
+		actions.HostEditGroups,
 		actions.SettingsSet,
 		actions.SettingsProvider,
 		actions.SettingsReset,
@@ -200,5 +197,5 @@ func toolActionConfirmDesc(t *testing.T, id actions.ID) string {
 	if action.ConfirmDescription == "" {
 		t.Fatalf("%s has no confirmation description", id)
 	}
-	return action.ConfirmDescription
+	return actions.MustTUIConfirmDescription(id)
 }

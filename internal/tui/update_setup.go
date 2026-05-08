@@ -5,23 +5,29 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/key"
-	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/provider"
 )
 
 func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 
+	wasSetupReloading := m.setupReloading
 	m.loading = false
+	if !wasSetupReloading {
+		m.setupReloading = false
+	}
 	if msg.noConfig {
+		m.finishSetupReload()
 		m.mode = viewSetup
 		m.setupBackgroundMode = viewList
 		m.setupStep = 0
 		return nil
 	}
 	if msg.err != nil {
+		m.finishSetupReload()
 		m.err = msg.err
 		return nil
 	}
@@ -33,8 +39,8 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 		return nil
 	}
 
-	if msg.noProfile {
-		// Config exists but no profile is mapped to this machine. Keep the
+	if msg.noHost && !m.setupComplete {
+		// Config exists but no host entry matches this machine. Keep the
 		// background list as the pre-onboarding snapshot; fresh scans/reloads run
 		// only after onboarding exits.
 		m.settings = msg.settings
@@ -42,7 +48,7 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 		m.effectivePythonManager = msg.effectivePythonManager
 		m.effectiveNodeManager = msg.effectiveNodeManager
 		m.effectiveSystemManager = msg.effectiveSystemManager
-		m.profileInfo = msg.profileInfo
+		m.hostInfo = msg.hostInfo
 		m.setupProviders = msg.setupProviders
 		m.setupProviderIdx = 0
 		m.mode = viewSetup
@@ -50,6 +56,7 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 		m.setupStep = 2
 		return cmds
 	}
+	m.setupComplete = false
 
 	m.allTools = msg.tools
 	m.discoveredTools = msg.discovered
@@ -72,7 +79,7 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 	if len(msg.ecosystemProviders) > 0 {
 		m.providerNames = append([]string(nil), msg.ecosystemProviders...)
 	}
-	m.profileInfo = msg.profileInfo
+	m.hostInfo = msg.hostInfo
 	m.ignoreSet = make(map[string]bool, len(msg.ignoreList))
 	for _, name := range msg.ignoreList {
 		m.ignoreSet[name] = true
@@ -88,7 +95,7 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 		m.mode = viewList
 		m.setupBackgroundMode = viewList
 	}
-	m.profileRequired = false
+	m.hostRequired = false
 
 	if m.settings.DotsRepo != "" && !config.BoolVal(m.settings.DotsDisabled) && !m.dotsLoaded && !m.dotsLoading {
 		if m.promptForStowInstall(stowInstallLaunchSync) {
@@ -99,6 +106,8 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 	}
 
 	cmds = append(cmds, m.startPostLoadBackgroundTasks()...)
+	m.beginLaunchBatchIfPending()
+	m.finishSetupReloadIfIdle()
 	return cmds
 }
 
@@ -112,6 +121,12 @@ func (m *Model) handleSetupImportDoneMsg(msg setupImportDoneMsg) []tea.Cmd {
 		cmds = append(cmds, setStatus(m, fmt.Sprintf("✓ %d imported", msg.added), false))
 	} else {
 		cmds = append(cmds, setStatus(m, "✓ nothing to import", false))
+	}
+	if msg.hostInfo != nil {
+		m.hostInfo = msg.hostInfo
+		if msg.hostInfo.Active != "" {
+			m.hostRequired = false
+		}
 	}
 	m.advanceSetupPastProviders(&cmds)
 	return cmds
@@ -135,18 +150,20 @@ func (m *Model) handleSetupNodeMgrDoneMsg(msg setupNodeMgrDoneMsg) []tea.Cmd {
 	if msg.err != nil {
 		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
 	}
-	m.advanceToSetupProfileStep(&cmds)
+	m.startSetupHostCreation(&cmds)
 	return cmds
 }
 
-func (m *Model) handleSetupProfileDoneMsg(msg setupProfileDoneMsg) []tea.Cmd {
+func (m *Model) handleSetupHostDoneMsg(msg setupHostDoneMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 
 	m.loading = false
 	if msg.err != nil {
 		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
-	} else if msg.profileName != "" {
-		cmds = append(cmds, setStatus(m, "✓ profile "+msg.profileName+" created", false))
+	} else if msg.hostName != "" {
+		m.hostInfo = msg.info
+		m.hostRequired = false
+		cmds = append(cmds, setStatus(m, "✓ host "+msg.hostName+" created", false))
 	}
 	m.settingsInput.Blur()
 	m.setupStep = 5
@@ -156,18 +173,22 @@ func (m *Model) handleSetupProfileDoneMsg(msg setupProfileDoneMsg) []tea.Cmd {
 func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	var cmds []tea.Cmd
 
+	if m.loading {
+		return tea.Batch(cmds...), false
+	}
+
 	switch m.setupStep {
-	case 0: // Create config?
-		switch strings.ToLower(msg.String()) {
-		case "y":
+	case 0: // Create config.
+		switch {
+		case key.Matches(msg, m.keys.Confirm) || strings.EqualFold(msg.String(), "y"):
 			m.loading = true
 			startOp(m, "Creating settings.json…")
 			cmds = append(cmds, m.spinner.Tick, m.doCreateConfig())
-		case "n", "esc":
+		case strings.EqualFold(msg.String(), "n") || key.Matches(msg, m.keys.Back):
 			m.shutdown()
 			return tea.Quit, true
 		}
-	case 1, 2: // Provider selection (step 1: first-run + import; step 2: no-profile re-run)
+	case 1, 2: // Provider selection (step 1: first-run + import; step 2: no-host re-run)
 		switch {
 		case key.Matches(msg, m.keys.Up):
 			if m.setupProviderIdx > 0 {
@@ -197,28 +218,24 @@ func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		case key.Matches(msg, m.keys.Confirm):
 			chosen := nodeMgrChoices[m.setupNodeMgrIdx].value
 			if chosen == "" {
-				m.advanceToSetupProfileStep(&cmds)
+				m.startSetupHostCreation(&cmds)
 			} else {
 				m.loading = true
 				startOp(m, "Saving…")
 				cmds = append(cmds, m.spinner.Tick, m.doSaveNodeManager(chosen))
 			}
 		case key.Matches(msg, m.keys.Back):
-			m.advanceToSetupProfileStep(&cmds)
+			m.startSetupHostCreation(&cmds)
 		}
-	case 4: // Profile name for this machine (required)
-		if quit := m.handleSetupProfileNameKey(msg, &cmds); quit {
-			return tea.Quit, true
-		}
-	case 5: // Enable dotfile sync? (y/n)
-		switch strings.ToLower(msg.String()) {
-		case "y":
+	case 5: // Enable dotfile sync.
+		switch {
+		case key.Matches(msg, m.keys.Confirm) || strings.EqualFold(msg.String(), "y"):
 			m.setupStep = 6
 			cmds = append(cmds, m.openFilePicker("Dots repo path", "", false))
-		case "n", "esc":
+		case strings.EqualFold(msg.String(), "n") || key.Matches(msg, m.keys.Back):
 			m.loading = true
 			startOp(m, "Disabling dots…")
-			cmds = append(cmds, m.spinner.Tick, m.doDisableDots(true))
+			cmds = append(cmds, m.spinner.Tick, m.doDisableDots(true, true))
 		}
 	case 6: // Dots repo path — handled by showFilePicker routing above.
 		if key.Matches(msg, m.keys.Back) {
@@ -253,61 +270,16 @@ func (m *Model) confirmSetupProviders(cmds *[]tea.Cmd) {
 	m.advanceSetupPastProviders(cmds)
 }
 
-func (m *Model) handleSetupProfileNameKey(msg tea.KeyPressMsg, cmds *[]tea.Cmd) bool {
-	if m.setupExitConfirm {
-		switch strings.ToLower(msg.String()) {
-		case "y":
-			m.cancelConfirmationTimeout()
-			m.shutdown()
-			return true
-		case "n", "esc":
-			m.cancelConfirmationTimeout()
-			m.setupExitConfirm = false
-			m.settingsInput.Focus()
-			*cmds = append(*cmds, textinput.Blink)
-		}
-		return false
-	}
-	switch {
-	case key.Matches(msg, m.keys.Confirm):
-		name := strings.TrimSpace(m.settingsInput.Value())
-		m.settingsInput.Blur()
-		if name != "" {
-			m.loading = true
-			startOp(m, "Creating profile…")
-			*cmds = append(*cmds, m.spinner.Tick, m.doSetupProfile(name))
-		} else {
-			m.setupExitConfirm = true
-			m.settingsInput.Blur()
-			*cmds = append(*cmds, m.armConfirmationTimeout())
-		}
-	case key.Matches(msg, m.keys.Back):
-		m.setupExitConfirm = true
-		m.settingsInput.Blur()
-		*cmds = append(*cmds, m.armConfirmationTimeout())
-	default:
-		var cmd tea.Cmd
-		m.settingsInput, cmd = m.settingsInput.Update(msg)
-		*cmds = append(*cmds, cmd)
-	}
-	return false
-}
-
 func (m *Model) startCurrentProviderScans() []tea.Cmd {
 	var cmds []tea.Cmd
 
 	// Use the UNION of DB-row providers and config-declared providers so scans
 	// run on first launch after import. Import() writes JSON config, not DB rows.
-	m.scanningProviders = make(map[string]bool)
-	for _, t := range m.allTools {
-		m.scanningProviders[t.Provider] = true
-	}
-	for _, p := range m.configuredProviders {
-		m.scanningProviders[p] = true
-	}
+	m.scanningProviders = m.currentProviderScanSet()
 	if len(m.scanningProviders) == 0 {
 		return nil
 	}
+	setActivityStatus(m, providerRefreshStatus(m.scanningProviders))
 	m.scanGen++
 	gen := m.scanGen
 	cmds = append(cmds, m.spinner.Tick)
@@ -317,12 +289,69 @@ func (m *Model) startCurrentProviderScans() []tea.Cmd {
 	return cmds
 }
 
+func (m Model) currentProviderScanSet() map[string]bool {
+	providers := make(map[string]bool)
+	for _, p := range m.configuredProviders {
+		if m.providerScanCoveredByConfiguredEcosystem(p) {
+			continue
+		}
+		providers[p] = true
+	}
+	for _, t := range m.allTools {
+		if m.providerScanCoveredByConfiguredEcosystem(t.Provider) {
+			continue
+		}
+		providers[t.Provider] = true
+	}
+	return providers
+}
+
+func (m Model) providerScanCoveredByConfiguredEcosystem(prov string) bool {
+	if prov == "" {
+		return true
+	}
+	configured := make(map[string]bool, len(m.configuredProviders))
+	for _, name := range m.configuredProviders {
+		configured[name] = true
+	}
+	switch prov {
+	case m.effectiveSystemManager:
+		return configured[provider.EcosystemSystem]
+	case m.effectiveNodeManager:
+		return configured[provider.EcosystemNode]
+	case m.effectivePythonManager:
+		return configured[provider.EcosystemPython]
+	default:
+		return false
+	}
+}
+
 func (m *Model) startPostLoadBackgroundTasks() []tea.Cmd {
 	cmds := m.startCurrentProviderScans()
 	if anyMissingDescription(m.allTools) {
 		cmds = append(cmds, m.startDescriptionRefresh())
 	}
+	m.finishSetupReloadIfIdle()
 	return cmds
+}
+
+func (m *Model) setupReloadPending() bool {
+	return m.loading ||
+		len(m.scanningProviders) > 0 ||
+		m.providerSnapshotRefreshing ||
+		m.discoveryRefreshing ||
+		m.descRefreshing
+}
+
+func (m *Model) finishSetupReloadIfIdle() {
+	if m.setupReloading && !m.setupReloadPending() {
+		m.finishSetupReload()
+	}
+}
+
+func (m *Model) finishSetupReload() {
+	m.setupReloading = false
+	m.progressText = ""
 }
 
 func (m *Model) advanceSetupPastProviders(cmds *[]tea.Cmd) {
@@ -330,20 +359,24 @@ func (m *Model) advanceSetupPastProviders(cmds *[]tea.Cmd) {
 		m.setupStep = 3
 		return
 	}
-	m.advanceToSetupProfileStep(cmds)
+	m.startSetupHostCreation(cmds)
 }
 
-func (m *Model) advanceToSetupProfileStep(cmds *[]tea.Cmd) {
-	m.setupStep = 4
-	m.settingsInput.Placeholder = "profile name…"
-	m.settingsInput.SetValue(m.defaultSetupProfileName())
-	m.settingsInput.Focus()
-	*cmds = append(*cmds, textinput.Blink)
-}
-
-func (m *Model) defaultSetupProfileName() string {
-	if m.profileInfo == nil || len(m.profileInfo.Profiles) == 0 {
-		return "default"
+func (m *Model) startSetupHostCreation(cmds *[]tea.Cmd) {
+	name := strings.TrimSpace(m.defaultSetupHostName())
+	m.settingsInput.Blur()
+	m.setupStep = 5
+	if m.hostInfo != nil && m.hostInfo.Active == name {
+		if _, ok := m.hostInfo.Hosts[name]; ok {
+			m.hostRequired = false
+			return
+		}
 	}
+	m.loading = true
+	startOp(m, "Preparing this machine…")
+	*cmds = append(*cmds, m.spinner.Tick, m.doSetupHost(name))
+}
+
+func (m *Model) defaultSetupHostName() string {
 	return shortHostname()
 }

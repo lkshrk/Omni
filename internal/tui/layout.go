@@ -5,6 +5,8 @@ package tui
 const (
 	// listColumnGap is the standard space between table columns across main lists.
 	listColumnGap = 3
+	// toolPrivilegeProviderGap keeps the sudo marker visually attached to provider.
+	toolPrivilegeProviderGap = 1
 
 	// dotsIconW is the health icon width (one rune: ✓ ! ✗ ·).
 	dotsIconW = 1
@@ -15,8 +17,12 @@ const (
 	// dotsStatusColW is the fixed width for the status label column.
 	// Covers: "ok", "missing", "conflict", "no-source".
 	dotsStatusColW = 10
-	// dotsFilesColW is the fixed width for managed file counts near the right edge.
-	dotsFilesColW = 10
+	// dotsRatioColW is the fixed width for synced/managed dot file summaries.
+	// Covers compact rows like "12/14".
+	dotsRatioColW = 5
+	// dotsIgnoredColW is the minimum width for ignored dot file summaries.
+	// Covers compact rows like "(3)".
+	dotsIgnoredColW = 3
 	// dotsNameMinW is the minimum width for the name column.
 	dotsNameMinW = 12
 )

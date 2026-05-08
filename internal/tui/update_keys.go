@@ -12,6 +12,18 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 		return *m, tea.Batch(cmds...)
 	}
 
+	if m.adminTerminal != nil && m.adminTerminal.running {
+		cmds = append(cmds, m.handleAdminTerminalKeyMsg(msg)...)
+		return *m, tea.Batch(cmds...)
+	}
+
+	if isCtrlC(msg) {
+		if cmd := m.cancelActiveAction(); cmd != nil {
+			cmds = append(cmds, cmd)
+			return *m, tea.Batch(cmds...)
+		}
+	}
+
 	if key.Matches(msg, m.keys.Quit) {
 		if m.confirmQuit {
 			m.shutdown()
@@ -65,16 +77,16 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 	switch m.mode {
 	case viewSearch:
 		cmds = append(cmds, m.handleSearchKeyMsg(msg)...)
-	case viewProfiles:
-		cmds = append(cmds, m.handleProfilesKeyMsg(msg)...)
+	case viewGroups:
+		cmds = append(cmds, m.handleGroupsKeyMsg(msg)...)
 	case viewGroupPicker:
 		cmds = append(cmds, m.handleGroupPickerKeyMsg(msg)...)
 	case viewGroupMembership:
 		cmds = append(cmds, m.handleGroupMembershipKeyMsg(msg)...)
-	case viewProfileGroupTools:
-		cmds = append(cmds, m.handleProfileGroupToolsKeyMsg(msg)...)
-	case viewProfileGroupDots:
-		cmds = append(cmds, m.handleProfileGroupDotsKeyMsg(msg)...)
+	case viewGroupTools:
+		cmds = append(cmds, m.handleGroupToolsKeyMsg(msg)...)
+	case viewGroupDots:
+		cmds = append(cmds, m.handleGroupDotsKeyMsg(msg)...)
 	case viewIgnoreScope, viewProviderScope:
 		cmds = append(cmds, m.handleScopePickerKeyMsg(msg)...)
 	case viewSettings:
@@ -92,6 +104,8 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 		}
 	case viewCommand:
 		cmds = append(cmds, m.handleCommandKeyMsg(msg)...)
+	case viewAdminTerminal:
+		cmds = append(cmds, m.handleAdminTerminalKeyMsg(msg)...)
 	default:
 		switch {
 		case m.handleListNavigationKeyMsg(msg):
@@ -104,54 +118,50 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 }
 
 func quitKeyLabel(msg tea.KeyPressMsg) string {
-	if msg.Mod == tea.ModCtrl && msg.Code == 'c' {
+	if isCtrlC(msg) {
 		return "ctrl+c"
 	}
 	return "q"
 }
 
+func isCtrlC(msg tea.KeyPressMsg) bool {
+	return msg.Mod == tea.ModCtrl && msg.Code == 'c'
+}
+
 func (m *Model) handleTabKeyMsg(msg tea.KeyPressMsg, cmds *[]tea.Cmd) bool {
-	if !key.Matches(msg, m.keys.Tab) || m.mode == viewSearch || m.mode == viewCommand || m.mode == viewGroupPicker || m.mode == viewGroupMembership || m.mode == viewProfileGroupTools || m.mode == viewProfileGroupDots || m.mode == viewIgnoreScope || m.mode == viewProviderScope || m.profileRequired {
+	if !key.Matches(msg, m.keys.Tab) || m.mode == viewSearch || m.mode == viewCommand || m.mode == viewGroupPicker || m.mode == viewGroupMembership || m.mode == viewGroupTools || m.mode == viewGroupDots || m.mode == viewIgnoreScope || m.mode == viewProviderScope || m.mode == viewAdminTerminal || m.hostRequired {
 		return false
 	}
-	target := viewList
-	if msg.Mod.Contains(tea.ModShift) {
-		switch m.mode {
-		case viewList:
-			target = viewSettings
-		case viewDots:
-			target = viewList
-		case viewProfiles:
-			target = viewDots
-		case viewSettings:
-			target = viewProfiles
-		}
-	} else {
-		switch m.mode {
-		case viewList:
-			target = viewDots
-		case viewDots:
-			target = viewProfiles
-		case viewProfiles:
-			target = viewSettings
-		case viewSettings:
-			target = viewList
+	tabs := mainTabs()
+	idx := -1
+	for i, tab := range tabs {
+		if tab.mode == m.mode {
+			idx = i
+			break
 		}
 	}
+	if idx < 0 {
+		return false
+	}
+	delta := 1
+	if msg.Mod.Contains(tea.ModShift) {
+		delta = -1
+	}
+	target := tabs[(idx+delta+len(tabs))%len(tabs)].mode
 	return m.switchMainTab(target, cmds)
 }
 
 func (m *Model) switchMainTab(target viewMode, cmds *[]tea.Cmd) bool {
-	if m.profileRequired {
+	if m.hostRequired {
 		return false
 	}
 	switch target {
-	case viewList, viewDots, viewProfiles, viewSettings:
+	case viewList, viewDots, viewGroups, viewSettings:
 	default:
 		return false
 	}
-	if m.mode == viewProfiles && target != viewProfiles {
-		m.profileSection = 0
+	if m.mode == viewGroups && target != viewGroups {
+		m.assignmentSection = 0
 	}
 	m.cancelConfirmationForGlobalNavigation()
 	m.mode = target
@@ -169,7 +179,7 @@ func (m *Model) handlePaletteOpenKeyMsg(msg tea.KeyPressMsg, cmds *[]tea.Cmd) bo
 	if m.loading {
 		return false
 	}
-	if m.mode != viewList && m.mode != viewSettings && m.mode != viewProfiles && m.mode != viewDots {
+	if m.mode != viewList && m.mode != viewSettings && m.mode != viewGroups && m.mode != viewDots {
 		return false
 	}
 	m.cancelConfirmationForGlobalNavigation()

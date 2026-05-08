@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"charm.land/bubbles/v2/textinput"
 	"charm.land/lipgloss/v2"
 
 	"github.com/lkshrk/omni/internal/app"
@@ -17,12 +18,14 @@ import (
 const (
 	settingLabelWidth = 28
 	firstColumnGap    = listColumnGap * 2
+	settingsMinGap    = listColumnGap * 3
+	groupsMinGap      = listColumnGap * 3
 )
 
 const (
 	settingsRowAutoImport = iota
-	settingsRowSystemPriority
 	settingsRowSystemProvider
+	settingsRowSystemPriority
 	settingsRowNodeProvider
 	settingsRowPythonProvider
 	settingsRowNodeManager
@@ -57,17 +60,17 @@ var settingsRows = []settingsRowMeta{
 		hint:    hintCtxSettingsEdit,
 	},
 	settingsRowSystemProvider: {
-		label:   "System Provider",
+		label:   "Track System",
 		section: "Tools",
 		hint:    hintCtxSettingsToggle,
 	},
 	settingsRowNodeProvider: {
-		label:   "Node Provider",
+		label:   "Track Node",
 		section: "Tools",
 		hint:    hintCtxSettingsToggle,
 	},
 	settingsRowPythonProvider: {
-		label:   "Python Provider",
+		label:   "Track Python",
 		section: "Tools",
 		hint:    hintCtxSettingsToggle,
 	},
@@ -87,7 +90,7 @@ var settingsRows = []settingsRowMeta{
 		hint:    hintCtxSettingsEdit,
 	},
 	settingsRowDotsSync: {
-		label:   "Sync on This Machine",
+		label:   "Dotfile Sync",
 		section: "Dotfiles",
 		hint:    hintCtxSettingsDotsSync,
 	},
@@ -129,7 +132,7 @@ func renderSettings(m Model) string {
 	p := m.palette
 	var buf scrollBuf
 	write := buf.write
-	rowInset := rowContentInset()
+	rowInset := ""
 	detailPrefix := textRowContentPrefix()
 	hintPrefix := textRowHintPrefix()
 	contentW := rowAvailableWidth(m.width)
@@ -161,7 +164,7 @@ func renderSettings(m Model) string {
 		if v == "" {
 			return p.styleHelp.Render("[not set]")
 		}
-		avail := max(contentW-lipgloss.Width(rowInset)-settingLabelWidth-firstColumnGap, 12)
+		avail := max(contentW-lipgloss.Width(rowInset)-settingLabelWidth-settingsMinGap, 12)
 		return p.styleProvider.Render(truncatePath(v, avail))
 	}
 
@@ -188,17 +191,17 @@ func renderSettings(m Model) string {
 		settingsRowSystemProvider: {
 			settingsRowMeta: settingsRows[settingsRowSystemProvider],
 			value:           onOff(providerEnabled(provider.EcosystemSystem)),
-			help:            p.styleHelp.Render("Enable the system ecosystem provider (brew/apt/dnf/…) on this machine."),
+			help:            p.styleHelp.Render("Track system tools on this machine (brew/apt/dnf/...)."),
 		},
 		settingsRowNodeProvider: {
 			settingsRowMeta: settingsRows[settingsRowNodeProvider],
 			value:           onOff(providerEnabled(provider.EcosystemNode)),
-			help:            p.styleHelp.Render("Enable the node ecosystem provider (bun/pnpm/npm) on this machine."),
+			help:            p.styleHelp.Render("Track node tools on this machine (bun/pnpm/npm)."),
 		},
 		settingsRowPythonProvider: {
 			settingsRowMeta: settingsRows[settingsRowPythonProvider],
 			value:           onOff(providerEnabled(provider.EcosystemPython)),
-			help:            p.styleHelp.Render("Enable the python ecosystem provider (uv/pip3) on this machine."),
+			help:            p.styleHelp.Render("Track python tools on this machine (uv/pip3)."),
 		},
 		settingsRowNodeManager: {
 			settingsRowMeta: settingsRows[settingsRowNodeManager],
@@ -248,7 +251,7 @@ func renderSettings(m Model) string {
 		settingsRowResetSettings: {
 			settingsRowMeta: settingsRows[settingsRowResetSettings],
 			value:           p.styleHelp.Render("[reset]"),
-			help:            p.styleHelp.Render("Restore all settings to defaults (tools & profiles preserved)."),
+			help:            p.styleHelp.Render("Restore all settings to defaults (tools, hosts, and groups preserved)."),
 		},
 		settingsRowResetCache: {
 			settingsRowMeta: settingsRows[settingsRowResetCache],
@@ -281,10 +284,10 @@ func renderSettings(m Model) string {
 
 		// System Provider Order row: expand into an inline reorder list when editing.
 		if i == settingsRowSystemPriority && m.editingPriority {
-			write(renderFixedGroupListRow(p, true,
+			write(renderResponsiveGroupListRow(p, true,
 				[]rowCell{leftCell(p.styleActiveText.Render(rowInset+formatSettingLabel(row.label)), settingLabelWidth+lipgloss.Width(rowInset))},
 				[]rowCell{rightCell(p.styleProvider.Render("[editing]"), 0)},
-				firstColumnGap, listColumnGap,
+				contentW, settingsMinGap, listColumnGap,
 			) + "\n")
 			prCursor := m.priorityCursor
 			prItems := make([]any, len(m.priorityDraft))
@@ -323,16 +326,16 @@ func renderSettings(m Model) string {
 			if row.danger {
 				labelStyle = p.styleDangerSection
 			}
-			write(renderFixedGroupListRow(p, true,
+			write(renderResponsiveGroupListRow(p, true,
 				[]rowCell{leftCell(labelStyle.Render(rowInset+formatSettingLabel(row.label)), settingLabelWidth+lipgloss.Width(rowInset))},
 				[]rowCell{rightCell(row.value, 0)},
-				firstColumnGap, listColumnGap,
+				contentW, settingsMinGap, listColumnGap,
 			) + "\n")
 		} else {
-			write(renderFixedGroupListRow(p, false,
+			write(renderResponsiveGroupListRow(p, false,
 				[]rowCell{leftCell(lbl.Render(rowInset+formatSettingLabel(row.label)), settingLabelWidth+lipgloss.Width(rowInset))},
 				[]rowCell{rightCell(row.value, 0)},
-				firstColumnGap, listColumnGap,
+				contentW, settingsMinGap, listColumnGap,
 			) + "\n")
 		}
 		if i == m.settingsCursor {
@@ -362,39 +365,40 @@ func renderGroupDeletePopup(m Model) string {
 	p := m.palette
 	groupName := m.groupDeleteName
 	if groupName == "" {
-		groupName = m.selectedProfileGroupName()
+		groupName = m.selectedHostGroupName()
 	}
 	if groupName == "" {
 		groupName = "group"
 	}
-	choices := []string{
-		"Move last-membership tools to base",
-		"Delete last-membership logical tools",
-	}
 	var sb strings.Builder
 	sb.WriteString(p.styleMissing.Render(groupName))
 	sb.WriteString("\n\n")
-	for i, choice := range choices {
-		prefix := "  "
-		style := p.styleNormal
-		if i == m.groupDeleteChoice {
-			prefix = "› "
-			style = p.styleActiveText
+	if m.groupHasContent(groupName) {
+		choices := []string{
+			"Move last-membership tools to this host",
+			"Delete last-membership logical tools",
 		}
-		sb.WriteString(prefix)
-		sb.WriteString(style.Render(choice))
+		for i, choice := range choices {
+			prefix := "  "
+			style := p.styleNormal
+			if i == m.groupDeleteChoice {
+				prefix = "› "
+				style = p.styleActiveText
+			}
+			sb.WriteString(prefix)
+			sb.WriteString(style.Render(choice))
+			sb.WriteString("\n")
+		}
+	} else {
+		sb.WriteString(p.styleHelp.Render("No tools or dotfiles belong to this group."))
 		sb.WriteString("\n")
 	}
 	sb.WriteString("\n")
-	sb.WriteString(renderPickerHints(m, groupDeletePopupContentWidth, confirmActionHintText(m, m.keys.Confirm, "confirm")))
+	sb.WriteString(renderPickerHintItems(m, groupDeletePopupContentWidth, confirmActionItems(m.keys.Confirm, "delete", m.keys.Back)))
 	return sb.String()
 }
 
 const groupDeletePopupContentWidth = 44
-
-func renderProfileCreatePopup(m Model) string {
-	return renderNameCreatePopup(m, "profile name")
-}
 
 func renderGroupCreatePopup(m Model) string {
 	return renderNameCreatePopup(m, "group name")
@@ -402,86 +406,88 @@ func renderGroupCreatePopup(m Model) string {
 
 func renderNameCreatePopup(m Model, label string) string {
 	p := m.palette
-	contentW := profileCreatePopupWidth(m)
+	contentW := groupCreatePopupWidth(m)
 	input := m.settingsInput
 	input.Prompt = ""
-	input.Placeholder = label + "..."
-	input.SetWidth(max(contentW-6, 1))
+	fieldLabel := "name"
+	inputWidth := max(contentW-lipgloss.Width(fieldLabel)-8, 1)
+	inputView := renderCreateNameInputView(p, input, label+"...", inputWidth)
 
 	var sb strings.Builder
-	sb.WriteString(renderCreateNameField(p, input.View(), contentW))
+	sb.WriteString(renderCreateNameField(p, fieldLabel, inputView, contentW))
 	sb.WriteString("\n\n")
-	sb.WriteString(renderPickerHints(m, contentW, confirmCancelHintText(m, "create")))
+	sb.WriteString(renderPickerHintItems(m, contentW, confirmActionItems(m.keys.Confirm, "create", m.keys.Back)))
 	return lipgloss.NewStyle().Width(contentW).Render(sb.String())
 }
 
-func profileCreatePopupWidth(m Model) int {
+func groupCreatePopupWidth(m Model) int {
 	return popupContentWidth(m, 42, 28, 42)
 }
 
-func renderCreateNameField(p palette, input string, width int) string {
-	return lipgloss.NewStyle().
-		Width(width).
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(p.colMuted).
-		Padding(0, 1).
-		Render(input)
+func renderCreateNameField(p palette, label, input string, width int) string {
+	prefix := p.styleHelp.Render(label + " ")
+	field := p.styleHelp.Render("[ ") + input + p.styleHelp.Render(" ]")
+	return lipgloss.NewStyle().Width(width).Render(prefix + field)
 }
 
-func renderProfiles(m Model) string {
+func renderCreateNameInputView(p palette, input textinput.Model, placeholder string, width int) string {
+	return renderEmptyAwareTextInputView(p, input, placeholder, width)
+}
+
+func renderNewGroupInputView(m Model, width int) string {
+	placeholder := m.settingsInput.Placeholder
+	if placeholder == "" {
+		placeholder = "new group name…"
+	}
+	return renderCreateNameInputView(m.palette, m.settingsInput, placeholder, width)
+}
+
+func renderGroups(m Model) string {
 	p := m.palette
 	rowInset := rowContentInset()
 	detailPrefix := textRowContentPrefix()
 	hintPrefix := textRowHintPrefix()
 	var top []string
 
-	// ── Profile-required banner ─────────────────────────────────────────────
-	if m.profileRequired {
+	if m.hostRequired {
 		top = append(top,
-			p.styleMissing.Render("  ⚠  No active profile for this machine."),
-			p.styleHelp.Render("  Create a profile or map this host to an existing one."),
-			p.styleHelp.Render("  Navigation is locked until a profile is active. Press q to quit."),
+			p.styleMissing.Render("  ⚠  No host configuration for this machine."),
+			p.styleHelp.Render("  Create this host or copy groups from an existing host."),
+			p.styleHelp.Render("  Navigation is locked until this host is configured. Press q to quit."),
 			"",
 		)
 	}
 
-	names := sortedProfileNames(m.profileInfo)
+	names := sortedHostNames(m.hostInfo)
 	allGroupNames := buildAllGroupNames(m.groupNames)
-	hostCounts := profileHostCounts(m.profileInfo)
-	groupCounts := make(map[string]int, len(allGroupNames))
-	for _, gn := range m.toolGroups {
-		groupCounts[gn]++
-	}
-	groupDots := make(map[string]int, len(allGroupNames))
-	for _, groups := range m.dotMemberships {
-		for _, gn := range groups {
-			groupDots[gn]++
-		}
-	}
-	cols := profileTableColumnWidths(names, m.profileInfo, hostCounts, allGroupNames, groupCounts, groupDots)
+	groupCounts := toolCountsByGroup(m)
+	groupDots := dotCountsByGroup(m)
+	cols := groupAssignmentTableColumnWidths(names, m.hostInfo, allGroupNames, groupCounts, groupDots)
 
-	profileSection := sectionedTabSection{
-		title:            "Profiles",
+	assignmentSection := sectionedTabSection{
+		title:            "Group Assignments",
 		blankAfterHeader: false,
 	}
 	if len(names) == 0 {
-		profileSection.empty = []string{
-			p.styleHelp.Render("  No profiles configured."),
-			p.styleHelp.Render("  Press p to create a new profile."),
+		assignmentSection.empty = []string{
+			p.styleHelp.Render("  No host assignments configured."),
+			p.styleHelp.Render("  Onboarding creates this machine's host assignment."),
 		}
 	} else {
 		for i, name := range names {
-			prof := m.profileInfo.Profiles[name]
-			profileGroups := append([]string(nil), prof.Groups...)
-			sort.Strings(profileGroups)
-			groupBadge := compactCount(len(profileGroups), "group")
-			hostBadge := compactCount(hostCounts[name], "host")
+			prof := m.hostInfo.Hosts[name]
+			hostGroups := append([]string(nil), prof.Groups...)
+			sort.Strings(hostGroups)
+			groupBadge := compactHostAssignmentList(name, hostGroups)
+			hostBadge := hostStatusLabel(m.hostInfo, name)
 			nameLabel := name
-			if i == m.profileCursor {
-				if m.profileRenameMode {
+			hostSelected := m.assignmentSection == 0 && i == m.hostCursor
+			if hostSelected {
+				if m.hostRenameMode {
 					inputWidth := max(m.width-lipgloss.Width("    Rename: [ ")-4, 20)
 					m.settingsInput.SetWidth(inputWidth)
-					profileSection.rows = append(profileSection.rows, sectionedTabRow{
+					inputView := renderEmptyAwareTextInputView(p, m.settingsInput, m.settingsInput.Placeholder, inputWidth)
+					assignmentSection.rows = append(assignmentSection.rows, sectionedTabRow{
 						selected: true,
 						line: renderFixedGroupListRow(p, true,
 							[]rowCell{leftCell(p.styleActiveText.Render(nameLabel), cols.name)},
@@ -489,55 +495,49 @@ func renderProfiles(m Model) string {
 							firstColumnGap, listColumnGap,
 						),
 						details: []string{
-							p.styleHelp.Render(detailPrefix+"Rename: ") + "[ " + m.settingsInput.View() + " ]",
+							p.styleHelp.Render(detailPrefix+"Rename: ") + "[ " + inputView + " ]",
 							confirmCancelHintWithPrefix(m, "save", hintPrefix),
 						},
 					})
 					continue
 				}
 
-				groups := strings.Join(profileGroups, ", ")
-				if groups == "" {
-					groups = "(no groups)"
-				}
-				details := []string{p.styleHelp.Render(detailPrefix + "groups: " + groups)}
-
-				if hosts := hostnamesForProfile(m.profileInfo, name); len(hosts) > 0 {
-					details = append(details, p.styleProvider.Render(detailPrefix+"hosts: "+strings.Join(hosts, ", ")))
-				} else {
-					details = append(details, p.styleProvider.Render(detailPrefix+"hosts: (none)"))
-				}
+				hostTools, hostDots := hostAssignmentCounts(m, name, prof.Groups)
+				localStats := fmt.Sprintf("current host: %s, %s",
+					compactCount(hostTools, "tool"),
+					compactCount(hostDots, "dotfile"),
+				)
+				details := []string{p.styleHelp.Render(detailPrefix + localStats)}
 
 				// Inline delete confirmation.
-				if m.profileDeleteConfirm {
-					details = append(details, renderPressAgainActionHint(p, detailPrefix, "d", "confirm delete"))
+				if m.hostDeleteConfirm {
+					details = append(details, renderPressAgainActionHint(p, detailPrefix, "d", "delete"))
 				}
 
-				// Default inline hints — only when profiles section is focused and no sub-mode active.
-				if m.profileSection == 0 && !m.profileCreating && !m.profileRenameMode && m.profileEditMode == 0 && !m.profileDeleteConfirm {
-					details = append(details, renderContextHints(m, hintCtxProfileDefault, hintPrefix))
+				if m.assignmentSection == 0 && !m.hostRenameMode && m.hostEditMode == 0 && !m.hostDeleteConfirm {
+					details = append(details, renderContextHints(m, hintCtxHostDefault, hintPrefix))
 				}
-				profileSection.rows = append(profileSection.rows, sectionedTabRow{
+				assignmentSection.rows = append(assignmentSection.rows, sectionedTabRow{
 					selected: true,
-					line: renderFixedGroupListRow(p, true,
+					line: renderResponsiveGroupListRow(p, true,
 						[]rowCell{leftCell(p.styleActiveText.Render(nameLabel), cols.name)},
 						[]rowCell{
 							leftCell(listRowColumnStyle(true, p.styleHelp).Render(groupBadge), cols.mid),
 							leftCell(listRowColumnStyle(true, p.styleProvider).Render(hostBadge), cols.tail),
 						},
-						firstColumnGap, listColumnGap,
+						rowAvailableWidth(m.width), groupsMinGap, listColumnGap,
 					),
 					details: details,
 				})
 			} else {
-				profileSection.rows = append(profileSection.rows, sectionedTabRow{
-					line: renderFixedGroupListRow(p, false,
+				assignmentSection.rows = append(assignmentSection.rows, sectionedTabRow{
+					line: renderResponsiveGroupListRow(p, false,
 						[]rowCell{leftCell(p.styleNormal.Render(nameLabel), cols.name)},
 						[]rowCell{
 							leftCell(p.styleHelp.Render(groupBadge), cols.mid),
 							leftCell(p.styleHelp.Render(hostBadge), cols.tail),
 						},
-						firstColumnGap, listColumnGap,
+						rowAvailableWidth(m.width), groupsMinGap, listColumnGap,
 					),
 				})
 			}
@@ -545,7 +545,7 @@ func renderProfiles(m Model) string {
 	}
 
 	// ── Groups section ──────────────────────────────────────────────────────
-	groupsFocused := m.profileSection == 1
+	groupsFocused := m.assignmentSection == 1
 	groupSection := sectionedTabSection{
 		title:            "Groups",
 		blankAfterHeader: false,
@@ -553,7 +553,8 @@ func renderProfiles(m Model) string {
 
 	for i, gn := range allGroupNames {
 		count := groupCounts[gn]
-		label := rowInset + gn
+		displayName := groupDisplayName(gn)
+		label := rowInset + displayName
 		toolCount := compactCount(count, "tool")
 		dotCount := compactCount(groupDots[gn], "dotfile")
 		isSelected := groupsFocused && i == m.groupCursor
@@ -563,6 +564,7 @@ func renderProfiles(m Model) string {
 			case m.groupRenameMode:
 				inputWidth := max(m.width-lipgloss.Width("    Rename: [ ")-4, 20)
 				m.settingsInput.SetWidth(inputWidth)
+				inputView := renderEmptyAwareTextInputView(p, m.settingsInput, m.settingsInput.Placeholder, inputWidth)
 				groupSection.rows = append(groupSection.rows, sectionedTabRow{
 					selected: true,
 					line: renderFixedGroupListRow(p, true,
@@ -571,51 +573,53 @@ func renderProfiles(m Model) string {
 						firstColumnGap, listColumnGap,
 					),
 					details: []string{
-						p.styleHelp.Render(detailPrefix+"Rename: ") + "[ " + m.settingsInput.View() + " ]",
+						p.styleHelp.Render(detailPrefix+"Rename: ") + "[ " + inputView + " ]",
 						confirmCancelHintWithPrefix(m, "confirm", hintPrefix),
 					},
 				})
 			case m.groupDeleteConfirm:
 				groupSection.rows = append(groupSection.rows, sectionedTabRow{
 					selected: true,
-					line: renderFixedGroupListRow(p, true,
+					line: renderResponsiveGroupListRow(p, true,
 						[]rowCell{leftCell(p.styleMissing.Render(label), cols.name)},
 						[]rowCell{
-							leftCell(listRowColumnStyle(true, p.styleHelp).Render(toolCount), cols.mid),
-							leftCell(listRowColumnStyle(true, p.styleProvider).Render(dotCount), cols.tail),
+							rightCell(listRowColumnStyle(true, p.styleHelp).Render(toolCount), cols.mid),
+							rightCell(listRowColumnStyle(true, p.styleProvider).Render(dotCount), cols.tail),
 						},
-						firstColumnGap, listColumnGap,
+						rowAvailableWidth(m.width), groupsMinGap, listColumnGap,
 					),
 					details: []string{confirmCancelHintWithPrefix(m, "confirm delete", hintPrefix)},
 				})
 			default:
 				details := []string{}
-				if profiles := profilesForGroup(m.profileInfo, gn); len(profiles) > 0 {
-					details = append(details, p.styleHelp.Render(detailPrefix+"profiles: "+strings.Join(profiles, ", ")))
+				if isProtectedGroupName(gn) {
+					details = append(details, p.styleProvider.Render(detailPrefix+"host bound group"))
+				} else if hosts := hostsForGroup(m.hostInfo, gn); len(hosts) > 0 {
+					details = append(details, p.styleHelp.Render(detailPrefix+"hosts: "+strings.Join(hosts, ", ")))
 				}
 				details = append(details, renderContextHints(m, hintCtxGroupDefault, hintPrefix))
 				groupSection.rows = append(groupSection.rows, sectionedTabRow{
 					selected: true,
-					line: renderFixedGroupListRow(p, true,
+					line: renderResponsiveGroupListRow(p, true,
 						[]rowCell{leftCell(p.styleActiveText.Render(label), cols.name)},
 						[]rowCell{
-							leftCell(listRowColumnStyle(true, p.styleHelp).Render(toolCount), cols.mid),
-							leftCell(listRowColumnStyle(true, p.styleProvider).Render(dotCount), cols.tail),
+							rightCell(listRowColumnStyle(true, p.styleHelp).Render(toolCount), cols.mid),
+							rightCell(listRowColumnStyle(true, p.styleProvider).Render(dotCount), cols.tail),
 						},
-						firstColumnGap, listColumnGap,
+						rowAvailableWidth(m.width), groupsMinGap, listColumnGap,
 					),
 					details: details,
 				})
 			}
 		} else {
 			groupSection.rows = append(groupSection.rows, sectionedTabRow{
-				line: renderFixedGroupListRow(p, false,
+				line: renderResponsiveGroupListRow(p, false,
 					[]rowCell{leftCell(p.styleNormal.Render(label), cols.name)},
 					[]rowCell{
-						leftCell(p.styleHelp.Render(toolCount), cols.mid),
-						leftCell(p.styleHelp.Render(dotCount), cols.tail),
+						rightCell(p.styleHelp.Render(toolCount), cols.mid),
+						rightCell(p.styleHelp.Render(dotCount), cols.tail),
 					},
-					firstColumnGap, listColumnGap,
+					rowAvailableWidth(m.width), groupsMinGap, listColumnGap,
 				),
 			})
 		}
@@ -624,41 +628,178 @@ func renderProfiles(m Model) string {
 	return renderSectionedTab(m, sectionedTab{
 		leadingBlank: true,
 		top:          top,
-		sections:     []sectionedTabSection{profileSection, groupSection},
+		sections:     []sectionedTabSection{assignmentSection, groupSection},
 	})
 }
 
-type profileTableColumns struct {
+type groupAssignmentTableColumns struct {
 	name int
 	mid  int
 	tail int
 }
 
-func profileTableColumnWidths(profileNames []string, info *app.ProfileInfo, hostCounts map[string]int, groupNames []string, groupCounts, groupDots map[string]int) profileTableColumns {
-	cols := profileTableColumns{name: 20, mid: len("groups"), tail: len("dotfiles")}
-	for _, name := range profileNames {
-		profile := info.Profiles[name]
+func groupAssignmentTableColumnWidths(hostNames []string, info *app.HostInfo, groupNames []string, groupCounts, groupDots map[string]int) groupAssignmentTableColumns {
+	cols := groupAssignmentTableColumns{name: 20, mid: len("assigned groups"), tail: len("status")}
+	for _, name := range hostNames {
+		host := info.Hosts[name]
 		cols.name = max(cols.name, lipgloss.Width(name))
-		cols.mid = max(cols.mid, lipgloss.Width(compactCount(len(profile.Groups), "group")))
-		cols.tail = max(cols.tail, lipgloss.Width(compactCount(hostCounts[name], "host")))
+		cols.mid = max(cols.mid, lipgloss.Width(compactHostAssignmentList(name, host.Groups)))
+		cols.tail = max(cols.tail, lipgloss.Width(hostStatusLabel(info, name)))
 	}
 	for _, name := range groupNames {
-		cols.name = max(cols.name, lipgloss.Width(rowContentInset()+name))
+		cols.name = max(cols.name, lipgloss.Width(rowContentInset()+groupDisplayName(name)))
 		cols.mid = max(cols.mid, lipgloss.Width(compactCount(groupCounts[name], "tool")))
 		cols.tail = max(cols.tail, lipgloss.Width(compactCount(groupDots[name], "dotfile")))
 	}
 	return cols
 }
 
-func sortedProfileNames(info *app.ProfileInfo) []string {
-	if info == nil || len(info.Profiles) == 0 {
+func groupDisplayName(group string) string {
+	if isProtectedGroupName(group) {
+		return group + " (local)"
+	}
+	return group
+}
+
+func compactHostAssignmentList(host string, groups []string) string {
+	items := []string{}
+	if host != "" {
+		items = append(items, host+" (local)")
+	}
+	for _, group := range groups {
+		if group == "" || group == host {
+			continue
+		}
+		items = append(items, group)
+	}
+	return compactGroupList(items)
+}
+
+func hostAssignmentCounts(m Model, host string, groups []string) (int, int) {
+	groupSet := hostAssignmentGroupSet(host, groups)
+	toolCount := 0
+	if len(m.toolMemberships) > 0 {
+		for _, memberships := range m.toolMemberships {
+			if containsAnyGroup(memberships, groupSet) {
+				toolCount++
+			}
+		}
+	} else {
+		for _, group := range m.toolGroups {
+			if groupSet[group] {
+				toolCount++
+			}
+		}
+	}
+
+	dotCount := 0
+	for _, memberships := range m.dotMemberships {
+		if containsAnyGroup(memberships, groupSet) {
+			dotCount++
+		}
+	}
+	return toolCount, dotCount
+}
+
+func hostAssignmentGroupSet(host string, groups []string) map[string]bool {
+	set := make(map[string]bool, len(groups)+1)
+	if host != "" {
+		set[host] = true
+	}
+	for _, group := range groups {
+		if group == "" {
+			continue
+		}
+		set[group] = true
+	}
+	return set
+}
+
+func toolCountsByGroup(m Model) map[string]int {
+	counts := make(map[string]int)
+	if len(m.toolMemberships) > 0 {
+		for _, memberships := range m.toolMemberships {
+			for _, group := range uniqueGroups(memberships) {
+				counts[group]++
+			}
+		}
+		return counts
+	}
+	for _, group := range m.toolGroups {
+		if group == "" {
+			continue
+		}
+		counts[group]++
+	}
+	return counts
+}
+
+func dotCountsByGroup(m Model) map[string]int {
+	counts := make(map[string]int)
+	for _, memberships := range m.dotMemberships {
+		for _, group := range uniqueGroups(memberships) {
+			counts[group]++
+		}
+	}
+	return counts
+}
+
+func uniqueGroups(groups []string) []string {
+	seen := make(map[string]bool, len(groups))
+	out := make([]string, 0, len(groups))
+	for _, group := range groups {
+		if group == "" || seen[group] {
+			continue
+		}
+		seen[group] = true
+		out = append(out, group)
+	}
+	return out
+}
+
+func containsAnyGroup(groups []string, set map[string]bool) bool {
+	for _, group := range groups {
+		if set[group] {
+			return true
+		}
+	}
+	return false
+}
+
+func compactGroupList(groups []string) string {
+	if len(groups) == 0 {
+		return "no groups"
+	}
+	groups = append([]string(nil), groups...)
+	sort.Strings(groups)
+	if len(groups) <= 3 {
+		return strings.Join(groups, ", ")
+	}
+	return fmt.Sprintf("%s, %s, %s +%d", groups[0], groups[1], groups[2], len(groups)-3)
+}
+
+func hostStatusLabel(info *app.HostInfo, name string) string {
+	if info != nil && name == info.Active {
+		return "this host"
+	}
+	return ""
+}
+
+func sortedHostNames(info *app.HostInfo) []string {
+	if info == nil || len(info.Hosts) == 0 {
 		return nil
 	}
-	names := make([]string, 0, len(info.Profiles))
-	for n := range info.Profiles {
+	names := make([]string, 0, len(info.Hosts))
+	for n := range info.Hosts {
 		names = append(names, n)
 	}
 	sort.Strings(names)
+	if info.Active != "" {
+		if idx := slices.Index(names, info.Active); idx > 0 {
+			copy(names[1:idx+1], names[:idx])
+			names[0] = info.Active
+		}
+	}
 	return names
 }
 
@@ -669,43 +810,18 @@ func compactCount(n int, label string) string {
 	return fmt.Sprintf("%d %ss", n, label)
 }
 
-func profileHostCounts(info *app.ProfileInfo) map[string]int {
-	counts := make(map[string]int)
-	if info == nil {
-		return counts
-	}
-	for _, profile := range info.Hostnames {
-		counts[profile]++
-	}
-	return counts
-}
-
-func hostnamesForProfile(info *app.ProfileInfo, profile string) []string {
+func hostsForGroup(info *app.HostInfo, group string) []string {
 	if info == nil {
 		return nil
 	}
 	var hosts []string
-	for host, mapped := range info.Hostnames {
-		if mapped == profile {
-			hosts = append(hosts, host)
+	for name, host := range info.Hosts {
+		if slices.Contains(host.Groups, group) {
+			hosts = append(hosts, name)
 		}
 	}
 	sort.Strings(hosts)
 	return hosts
-}
-
-func profilesForGroup(info *app.ProfileInfo, group string) []string {
-	if info == nil {
-		return nil
-	}
-	var profiles []string
-	for name, profile := range info.Profiles {
-		if slices.Contains(profile.Groups, group) {
-			profiles = append(profiles, name)
-		}
-	}
-	sort.Strings(profiles)
-	return profiles
 }
 
 // toggleProvider toggles name in the DisabledProviders slice. If name is in
@@ -781,7 +897,7 @@ func renderGroupPicker(m Model) string {
 
 		// Replace sentinel with input field — same position, same width.
 		if m.pickerCreatingGroup && isNewGroupSentinel(g) {
-			sb.WriteString(pickerCursor(p, isSelected) + m.settingsInput.View() + "\n")
+			sb.WriteString(pickerCursor(p, isSelected) + renderNewGroupInputView(m, max(contentW-2, 1)) + "\n")
 			continue
 		}
 
@@ -789,7 +905,7 @@ func renderGroupPicker(m Model) string {
 		switch {
 		case isNewGroupSentinel(g):
 			style = p.styleProvider
-		case groupHasActiveProfileContext(m) && !groupInActiveProfile(m, g):
+		case groupHasActiveHostContext(m) && !groupInActiveHost(m, g):
 			style = p.styleHelp
 		case isSelected:
 			style = p.styleActiveText
@@ -798,9 +914,9 @@ func renderGroupPicker(m Model) string {
 	}
 	sb.WriteString("\n")
 	if m.pickerCreatingGroup {
-		sb.WriteString(renderPickerHints(m, contentW, confirmCancelHintText(m, "create")))
+		sb.WriteString(renderPickerHintItems(m, contentW, confirmActionItems(m.keys.Confirm, "create", m.keys.Back)))
 	} else {
-		sb.WriteString(renderPickerHints(m, contentW, confirmCancelHintText(m, "confirm")))
+		sb.WriteString(renderPickerHintItems(m, contentW, confirmActionItems(m.keys.Confirm, "confirm", m.keys.Back)))
 	}
 	return lipgloss.NewStyle().Width(contentW).Render(sb.String())
 }
@@ -811,6 +927,7 @@ func renderGroupMembershipPicker(m Model) string {
 	if !ok || targetName == "" {
 		return p.styleHelp.Render("no entry selected")
 	}
+	selectedGroup := primaryMembershipGroup(memberships)
 	contentW := groupMembershipContentWidth(m)
 	labelW, detailW := groupMembershipColumnWidths(m)
 	labelW, detailW = fitPickerChoiceColumnWidths(contentW, true, labelW, detailW)
@@ -819,7 +936,7 @@ func renderGroupMembershipPicker(m Model) string {
 		selected := i == m.pickerCursor
 		row := pickerChoiceRow{section: groupPickerSection(m, group), selected: selected, label: group}
 		if m.pickerCreatingGroup && isNewGroupSentinel(group) {
-			row.inputView = m.settingsInput.View()
+			row.inputView = renderNewGroupInputView(m, max(contentW-2, 1))
 			rows = append(rows, row)
 			continue
 		}
@@ -833,13 +950,13 @@ func renderGroupMembershipPicker(m Model) string {
 			continue
 		}
 		row.mark = "[ ]"
-		if slices.Contains(memberships, group) {
+		if group == selectedGroup {
 			row.mark = "[x]"
 		}
 		row.style = p.styleNormal
 		if selected {
 			row.style = p.styleActiveText
-		} else if groupHasActiveProfileContext(m) && !groupInActiveProfile(m, group) {
+		} else if groupHasActiveHostContext(m) && !groupInActiveHost(m, group) {
 			row.style = p.styleHelp
 		}
 		rows = append(rows, row)
@@ -847,25 +964,35 @@ func renderGroupMembershipPicker(m Model) string {
 	var sb strings.Builder
 	sb.WriteString(renderPickerChoiceRows(p, rows, labelW, detailW))
 	sb.WriteString("\n")
-	sb.WriteString(renderPickerHints(m, contentW, toggleSaveCancelHintText(m)))
+	hints := selectCancelActionItems(m)
+	if m.pickerCreatingGroup {
+		hints = confirmActionItems(m.keys.Confirm, "create", m.keys.Back)
+	}
+	sb.WriteString(renderPickerHintItems(m, contentW, hints))
 	return lipgloss.NewStyle().Width(contentW).Render(sb.String())
 }
 
-func renderProfileGroupEditor(m Model) string {
+func primaryMembershipGroup(memberships []string) string {
+	if len(memberships) == 0 {
+		return ""
+	}
+	return memberships[0]
+}
+
+func renderHostGroupEditor(m Model) string {
 	p := m.palette
-	contentW := profileGroupEditorContentWidth(m)
+	contentW := groupEditorContentWidth(m)
 	labelW := 0
-	for _, group := range m.profileGroupPicker {
-		labelW = max(labelW, lipgloss.Width(group))
+	for _, group := range m.hostGroupPicker {
+		labelW = max(labelW, lipgloss.Width(hostAssignmentPickerLabel(m, group)))
 	}
 	labelW, _ = fitPickerChoiceColumnWidths(contentW, true, labelW, 0)
-	rows := make([]pickerChoiceRow, 0, len(m.profileGroupPicker))
-	for i, group := range m.profileGroupPicker {
-		selected := i == m.profileGroupIdx
-		row := pickerChoiceRow{selected: selected, label: group}
+	rows := make([]pickerChoiceRow, 0, len(m.hostGroupPicker))
+	for i, group := range m.hostGroupPicker {
+		selected := i == m.hostGroupIdx
+		row := pickerChoiceRow{selected: selected, label: hostAssignmentPickerLabel(m, group)}
 		if m.pickerCreatingGroup && selected && isNewGroupSentinel(group) {
-			m.settingsInput.SetWidth(max(contentW-2, 1))
-			row.inputView = m.settingsInput.View()
+			row.inputView = renderNewGroupInputView(m, max(contentW-2, 1))
 			rows = append(rows, row)
 			continue
 		}
@@ -879,7 +1006,7 @@ func renderProfileGroupEditor(m Model) string {
 			continue
 		}
 		row.mark = "[ ]"
-		if slices.Contains(m.profileGroupDraft, group) {
+		if group == m.hostEditName || slices.Contains(m.hostGroupDraft, group) {
 			row.mark = "[x]"
 		}
 		row.style = p.styleNormal
@@ -891,57 +1018,37 @@ func renderProfileGroupEditor(m Model) string {
 	var sb strings.Builder
 	sb.WriteString(renderPickerChoiceRows(p, rows, labelW, 0))
 	sb.WriteString("\n")
-	hint := toggleSaveCancelHintText(m)
+	hints := toggleSaveCancelActionItems(m)
 	if m.pickerCreatingGroup {
-		hint = confirmCancelHintText(m, "create")
+		hints = confirmActionItems(m.keys.Confirm, "create", m.keys.Back)
 	}
-	sb.WriteString(renderPickerHints(m, contentW, hint))
+	sb.WriteString(renderPickerHintItems(m, contentW, hints))
 	return lipgloss.NewStyle().Width(contentW).Render(sb.String())
 }
 
-func renderProfileHostEditor(m Model) string {
-	p := m.palette
-	profile := m.profileEditName
-	contentW := profileHostEditorContentWidth(m)
-	labelW, detailW := profileHostEditorColumnWidths(m)
-	labelW, detailW = fitPickerChoiceColumnWidths(contentW, true, labelW, detailW)
-	rows := make([]pickerChoiceRow, 0, len(m.profileHostPicker))
-	for i, host := range m.profileHostPicker {
-		selected := i == m.profileHostIdx
-		row := pickerChoiceRow{selected: selected, label: host, detail: profileHostDetail(m, host), mark: "[ ]"}
-		if m.profileHostDraft[host] == profile {
-			row.mark = "[x]"
-		}
-		row.style = p.styleNormal
-		if selected {
-			row.style = p.styleActiveText
-		} else if m.profileHostDraft[host] != "" && m.profileHostDraft[host] != profile {
-			row.style = p.styleHelp
-		}
-		rows = append(rows, row)
+func hostAssignmentPickerLabel(m Model, group string) string {
+	if group == m.hostEditName {
+		return group + " (local)"
 	}
-	var sb strings.Builder
-	sb.WriteString(renderPickerChoiceRows(p, rows, labelW, detailW))
-	sb.WriteString("\n")
-	sb.WriteString(renderPickerHints(m, contentW, toggleSaveCancelHintText(m)))
-	return lipgloss.NewStyle().Width(contentW).Render(sb.String())
+	return group
 }
 
-func renderProfileGroupToolsEditor(m Model) string {
+func renderHostGroupToolsEditor(m Model) string {
 	p := m.palette
-	contentW := profileGroupToolsContentWidth(m)
-	rows := profileGroupToolRows(m)
+	contentW := groupToolsContentWidth(m)
+	rows := groupToolRows(m)
 	var sb strings.Builder
 
 	if m.groupToolsEditor.searchActive {
-		m.settingsInput.SetWidth(max(contentW-2, 1))
+		inputW := max(contentW-2, 1)
+		m.settingsInput.SetWidth(inputW)
 		sb.WriteString(p.styleHelp.Render("search"))
 		sb.WriteString("\n")
-		sb.WriteString(m.settingsInput.View())
+		sb.WriteString(renderEmptyAwareTextInputView(p, m.settingsInput, m.settingsInput.Placeholder, inputW))
 		sb.WriteString("\n")
 	}
 
-	if filterBar := renderProfileGroupToolsFilterBar(m); filterBar != "" {
+	if filterBar := renderHostGroupToolsFilterBar(m); filterBar != "" {
 		if m.groupToolsEditor.searchActive {
 			sb.WriteString("\n")
 		}
@@ -955,15 +1062,16 @@ func renderProfileGroupToolsEditor(m Model) string {
 		sb.WriteString(p.styleHelp.Render("no configured tools match"))
 		sb.WriteString("\n\n")
 	} else {
-		nameW := popupNameSlot(contentW)
-		providerW := popupSecondaryWidth(contentW)
-		lastSection := profileGroupToolSection(-1)
+		baseRows := groupToolRows(unfilteredHostGroupToolsModel(m))
+		secondaryW := groupToolsSecondaryWidth(m, baseRows)
+		nameW, providerW := popupToggleTableColumnWidths(contentW, secondaryW)
+		lastSection := groupToolSection(-1)
 		for i, row := range rows {
 			if row.section != lastSection {
 				if i > 0 {
 					sb.WriteString("\n")
 				}
-				sb.WriteString(renderPickerSectionLabel(p, profileGroupToolSectionLabel(row.section)))
+				sb.WriteString(renderPickerSectionLabel(p, groupToolSectionLabel(row.section)))
 				sb.WriteString("\n")
 				lastSection = row.section
 			}
@@ -973,67 +1081,41 @@ func renderProfileGroupToolsEditor(m Model) string {
 				mark = "[x]"
 			}
 			labelStyle := p.styleNormal
-			if row.section == profileGroupToolSectionIgnored {
+			if row.section == groupToolSectionIgnored {
 				labelStyle = p.styleIgnored
 			}
 			if selected {
 				labelStyle = p.styleActiveText
 			}
-			rowText := pickerCursor(p, selected)
-			rowText += p.styleHelp.Render(mark) + " "
-			rowText += renderNameWithPackage(p, labelStyle, row.tool, nameW, selected)
-			rowText += "  "
-			providerLabel := providerLabelForTool(row.tool, m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager)
-			rowText += renderProviderCol(p, row.tool.Provider, row.tool.InstalledWith, m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager, providerLabel, providerW, selected, false)
-			if row.groupIgnore {
-				rowText += "  " + listRowColumnStyle(selected, p.styleIgnored).Render("ignored")
-			} else if row.toolIgnore {
-				rowText += "  " + listRowColumnStyle(selected, p.styleIgnored).Render("ignored: tool")
-			}
+			nameCell := renderNameWithPackage(p, labelStyle, row.tool, nameW, selected)
+			secondaryCell := renderHostGroupToolSecondary(m, row, providerW, selected)
+			rowText := renderPopupToggleTableRenderedRow(p, selected, mark, nameCell, secondaryCell, nameW, providerW)
 			sb.WriteString(rowText)
 			sb.WriteString("\n")
-			if selected {
-				sb.WriteString(renderProfileGroupToolRowHints(m, row))
-				sb.WriteString("\n")
-			}
 		}
 		sb.WriteString("\n")
 	}
 
-	ctx := hintCtxProfileGroupTools
+	ctx := hintCtxHostGroupTools
 	if m.groupToolsEditor.searchActive {
-		ctx = hintCtxProfileGroupToolsSearch
+		ctx = hintCtxHostGroupToolsSearch
 	}
-	sb.WriteString(renderPickerHints(m, contentW, renderContextHints(m, ctx, "")))
+	sb.WriteString(renderPickerHintItems(m, contentW, contextHintItems(m, ctx)))
 	return lipgloss.NewStyle().Width(contentW).Render(sb.String())
 }
 
-func renderProfileGroupToolRowHints(m Model, row profileGroupToolRow) string {
-	toggleDesc := "enable"
-	if row.enabled {
-		toggleDesc = "disable"
-	}
-	ignoreDesc := "ignore"
-	if row.groupIgnore {
-		ignoreDesc = "unignore"
-	}
-	return renderInlineHints(m.palette, []hintItem{
-		hintFromBindingDesc(m.keys.Toggle, toggleDesc),
-		hintFromBindingDesc(m.keys.Ignore, ignoreDesc),
-	}, textRowHintPrefix())
-}
-
-func renderProfileGroupDotsEditor(m Model) string {
+func renderHostGroupDotsEditor(m Model) string {
 	p := m.palette
-	contentW := profileGroupDotsContentWidth(m)
-	rows := profileGroupDotRows(m)
+	contentW := groupDotsContentWidth(m)
+	rows := groupDotRows(m)
 	var sb strings.Builder
 
 	if m.groupDotsEditor.searchActive {
-		m.settingsInput.SetWidth(max(contentW-2, 1))
+		inputW := max(contentW-2, 1)
+		m.settingsInput.SetWidth(inputW)
 		sb.WriteString(p.styleHelp.Render("search"))
 		sb.WriteString("\n")
-		sb.WriteString(m.settingsInput.View())
+		sb.WriteString(renderEmptyAwareTextInputView(p, m.settingsInput, m.settingsInput.Placeholder, inputW))
 		sb.WriteString("\n\n")
 	}
 
@@ -1041,15 +1123,16 @@ func renderProfileGroupDotsEditor(m Model) string {
 		sb.WriteString(p.styleHelp.Render("no configured dotfiles match"))
 		sb.WriteString("\n\n")
 	} else {
-		nameW := popupNameSlot(contentW)
-		targetW := popupSecondaryWidth(contentW)
-		lastSection := profileGroupDotSection(-1)
+		baseRows := groupDotRows(unfilteredHostGroupDotsModel(m))
+		_, secondaryW := groupDotsColumnWidths(baseRows)
+		nameW, targetW := popupToggleTableColumnWidths(contentW, secondaryW)
+		lastSection := groupDotSection(-1)
 		for i, row := range rows {
 			if row.section != lastSection {
 				if i > 0 {
 					sb.WriteString("\n")
 				}
-				sb.WriteString(renderPickerSectionLabel(p, profileGroupDotSectionLabel(row.section)))
+				sb.WriteString(renderPickerSectionLabel(p, groupDotSectionLabel(row.section)))
 				sb.WriteString("\n")
 				lastSection = row.section
 			}
@@ -1059,45 +1142,31 @@ func renderProfileGroupDotsEditor(m Model) string {
 				mark = "[x]"
 			}
 			labelStyle := p.styleNormal
-			if row.section == profileGroupDotSectionIgnored {
+			if row.section == groupDotSectionIgnored {
 				labelStyle = p.styleIgnored
 			}
 			if selected {
 				labelStyle = p.styleActiveText
 			}
-			rowText := pickerCursor(p, selected)
-			rowText += p.styleHelp.Render(mark) + " "
 			displayName := truncatePath(row.name, nameW)
-			rowText += labelStyle.Render(displayName) + strings.Repeat(" ", max(nameW-lipgloss.Width(displayName), 0))
+			nameCell := labelStyle.Render(displayName) + strings.Repeat(" ", max(nameW-lipgloss.Width(displayName), 0))
+			targetCell := ""
 			if row.target != "" {
-				rowText += "  " + p.styleHelp.Render(fmt.Sprintf("%-*s", targetW, truncatePath(row.target, targetW)))
+				targetCell = p.styleHelp.Render(truncatePath(row.target, targetW))
 			}
+			rowText := renderPopupToggleTableRenderedRow(p, selected, mark, nameCell, targetCell, nameW, targetW)
 			sb.WriteString(rowText)
 			sb.WriteString("\n")
-			if selected {
-				sb.WriteString(renderProfileGroupDotRowHints(m, row))
-				sb.WriteString("\n")
-			}
 		}
 		sb.WriteString("\n")
 	}
 
-	ctx := hintCtxProfileGroupDots
+	ctx := hintCtxHostGroupDots
 	if m.groupDotsEditor.searchActive {
-		ctx = hintCtxProfileGroupDotsSearch
+		ctx = hintCtxHostGroupDotsSearch
 	}
-	sb.WriteString(renderPickerHints(m, contentW, renderContextHints(m, ctx, "")))
+	sb.WriteString(renderPickerHintItems(m, contentW, contextHintItems(m, ctx)))
 	return lipgloss.NewStyle().Width(contentW).Render(sb.String())
-}
-
-func renderProfileGroupDotRowHints(m Model, row profileGroupDotRow) string {
-	toggleDesc := "enable"
-	if row.enabled {
-		toggleDesc = "disable"
-	}
-	return renderInlineHints(m.palette, []hintItem{
-		hintFromBindingDesc(m.keys.Toggle, toggleDesc),
-	}, textRowHintPrefix())
 }
 
 func renderScopePicker(m Model) string {
@@ -1125,15 +1194,12 @@ func renderScopePicker(m Model) string {
 	var sb strings.Builder
 	sb.WriteString(renderPickerChoiceRows(p, rows, labelW, detailW))
 	sb.WriteString("\n")
-	sb.WriteString(renderPickerHints(m, contentW, toggleSaveCancelHintText(m)))
-	return lipgloss.NewStyle().Width(contentW).Render(sb.String())
-}
-
-func renderPickerSectionHeader(p palette, label string, width int) string {
-	if label == "" {
-		return p.styleSep.Render(strings.Repeat("─", max(width, 1)))
+	hints := toggleSaveCancelActionItems(m)
+	if m.mode == viewProviderScope {
+		hints = selectCancelActionItems(m)
 	}
-	return renderSectionHeader(p, label, width)
+	sb.WriteString(renderPickerHintItems(m, contentW, hints))
+	return lipgloss.NewStyle().Width(contentW).Render(sb.String())
 }
 
 func renderPickerSectionLabel(p palette, label string) string {
@@ -1142,8 +1208,8 @@ func renderPickerSectionLabel(p palette, label string) string {
 
 func pickerSectionLabel(label string) string {
 	switch label {
-	case "Current Profile":
-		return "current profile"
+	case "Current Host":
+		return "current host"
 	case "Inactive":
 		return "inactive groups"
 	default:
@@ -1151,10 +1217,9 @@ func pickerSectionLabel(label string) string {
 	}
 }
 
-func renderPickerHints(m Model, width int, hint string) string {
-	dividerWidth := max(width-2, 1)
-	return renderPickerSectionHeader(m.palette, "", dividerWidth) + "\n" +
-		lipgloss.NewStyle().Width(width).Align(lipgloss.Center).Render(hint)
+func renderPickerHintItems(m Model, width int, hints []hintItem) string {
+	width = max(width, 1)
+	return popupDivider(m.palette, width) + "\n" + renderPopupActionHintText(m.palette, width, hints)
 }
 
 func pickerCursor(p palette, selected bool) string {
@@ -1165,33 +1230,39 @@ func pickerCursor(p palette, selected bool) string {
 }
 
 const (
-	popupSecondColumnFraction = 30
-	popupRowPrefixWidth       = 6
-	popupRowSeparatorWidth    = 2
-	popupSecondColumnMinStart = 12
-	popupNameSlotMin          = 6
+	popupRowPrefixWidth    = 6
+	popupRowSeparatorWidth = 2
+	popupNameSlotMin       = 6
 )
 
-func popupSecondColumnStart(contentW int) int {
-	start := contentW * popupSecondColumnFraction / 100
-	if start < popupSecondColumnMinStart {
-		start = popupSecondColumnMinStart
+func popupToggleTableWidth(longestName, longestSecondary int) int {
+	return popupRowPrefixWidth + max(longestName, popupNameSlotMin) + popupRowSeparatorWidth + max(longestSecondary, 1)
+}
+
+func popupToggleTableColumnWidths(contentW, longestSecondary int) (int, int) {
+	maxSecondary := max(contentW-popupRowPrefixWidth-popupRowSeparatorWidth-popupNameSlotMin, 1)
+	secondaryW := min(max(longestSecondary, 1), maxSecondary)
+	nameW := max(contentW-popupRowPrefixWidth-popupRowSeparatorWidth-secondaryW, 1)
+	return nameW, secondaryW
+}
+
+func renderPopupToggleTableRenderedRow(p palette, selected bool, mark, nameCell, secondaryCell string, nameW, secondaryW int) string {
+	row := pickerCursor(p, selected)
+	if mark != "" {
+		row += p.styleHelp.Render(mark) + " "
 	}
-	return start
+	row += fitRenderedCell(nameCell, nameW)
+	row += strings.Repeat(" ", popupRowSeparatorWidth)
+	row += renderRightAlignedCell(secondaryCell, secondaryW)
+	return row
 }
 
-func popupNameSlot(contentW int) int {
-	return max(popupSecondColumnStart(contentW)-popupRowPrefixWidth, popupNameSlotMin)
+func fitRenderedCell(rendered string, width int) string {
+	return rendered + strings.Repeat(" ", max(width-lipgloss.Width(rendered), 0))
 }
 
-func popupSecondaryWidth(contentW int) int {
-	return max(contentW-popupSecondColumnStart(contentW)-popupRowSeparatorWidth, 1)
-}
-
-func popupContentWidthFor(longestName, longestSecondary int) int {
-	nameMin := (longestName+popupRowPrefixWidth)*100/popupSecondColumnFraction + 1
-	secondaryMin := (longestSecondary+popupRowSeparatorWidth)*100/(100-popupSecondColumnFraction) + 1
-	return max(nameMin, secondaryMin)
+func renderRightAlignedCell(rendered string, width int) string {
+	return strings.Repeat(" ", max(width-lipgloss.Width(rendered), 0)) + rendered
 }
 
 // pickerToggleRowWidth returns the rendered width of one "[ ] label  detail"
@@ -1248,9 +1319,15 @@ func fitPickerChoiceColumnWidths(contentW int, hasMark bool, labelW, detailW int
 		return min(labelW, available), 0
 	}
 	available = max(available-2, 1)
-	labelMax := max(available*45/100, 1)
-	labelW = min(labelW, labelMax)
-	detailW = min(detailW, max(available-labelW, 1))
+	if labelW+detailW <= available {
+		return labelW, detailW
+	}
+	if labelW < available {
+		return labelW, max(available-labelW, 1)
+	}
+	labelMin := min(labelW, max(popupNameSlotMin, available/2))
+	detailW = min(detailW, max(available-labelMin, 1))
+	labelW = max(available-detailW, 1)
 	return labelW, detailW
 }
 
@@ -1285,11 +1362,24 @@ func scopePickerContentWidth(m Model) int {
 	return popupContentWidth(m, width, 34, 64)
 }
 
-func profileGroupEditorContentWidth(m Model) int {
-	width := lipgloss.Width(toggleSaveCancelHintText(m))
+func scopePickerPopupFrame(m Model, title string) popupFrame {
+	const paddingX = 2
+	return popupFrame{
+		Title:          title,
+		PaddingY:       1,
+		PaddingX:       paddingX,
+		Width:          scopePickerContentWidth(m) + 2 + paddingX*2,
+		NoTitleDivider: true,
+	}
+}
+
+func groupEditorContentWidth(m Model) int {
+	width := lipgloss.Width("Edit Groups: " + m.hostEditName)
+	width = max(width, lipgloss.Width(toggleSaveCancelHintText(m)))
 	width = max(width, lipgloss.Width(confirmCancelHintText(m, "create")))
-	for _, group := range m.profileGroupPicker {
-		rowW := 2 + lipgloss.Width("[ ]") + 1 + lipgloss.Width(group)
+	for _, group := range m.hostGroupPicker {
+		label := hostAssignmentPickerLabel(m, group)
+		rowW := 2 + lipgloss.Width("[ ]") + 1 + lipgloss.Width(label)
 		if isNewGroupSentinel(group) {
 			rowW = 2 + lipgloss.Width(group)
 		}
@@ -1298,89 +1388,66 @@ func profileGroupEditorContentWidth(m Model) int {
 	return popupContentWidth(m, width, 34, 64)
 }
 
-func profileHostEditorContentWidth(m Model) int {
-	labelW, detailW := profileHostEditorColumnWidths(m)
-	width := 0
-	for range m.profileHostPicker {
-		width = max(width, pickerToggleRowWidth(labelW, detailW))
-	}
-	width = max(width, lipgloss.Width(toggleSaveCancelHintText(m)))
-	return popupContentWidth(m, width, 34, 64)
-}
-
-func profileGroupToolsContentWidth(m Model) int {
-	widthModel := unfilteredProfileGroupToolsModel(m)
-	rows := profileGroupToolRows(widthModel)
-	longestName, longestProvider := profileGroupToolsColumnWidths(m, rows)
-	longestSecondary := longestProvider
-	for _, row := range rows {
-		secondary := longestProvider
-		if row.groupIgnore {
-			secondary += 2 + lipgloss.Width("ignored")
-		} else if row.toolIgnore {
-			secondary += 2 + lipgloss.Width("ignored: tool")
-		}
-		longestSecondary = max(longestSecondary, secondary)
-	}
-	width := popupContentWidthFor(longestName, longestSecondary)
-	for _, row := range rows {
-		width = max(width, lipgloss.Width(renderProfileGroupToolRowHints(m, row)))
-	}
+func groupToolsContentWidth(m Model) int {
+	widthModel := unfilteredHostGroupToolsModel(m)
+	rows := groupToolRows(widthModel)
+	longestName, _ := groupToolsColumnWidths(m, rows)
+	longestSecondary := groupToolsSecondaryWidth(m, rows)
+	width := popupToggleTableWidth(longestName, longestSecondary)
 	for _, label := range []string{"enabled", "disabled", "ignored"} {
 		width = max(width, lipgloss.Width(pickerSectionLabel(label))+2)
 	}
-	width = max(width, lipgloss.Width(renderContextHints(m, hintCtxProfileGroupTools, "")))
+	width = max(width, lipgloss.Width(renderContextHints(m, hintCtxHostGroupTools, "")))
 	if m.groupToolsEditor.searchActive {
-		width = max(width, lipgloss.Width(m.settingsInput.View()))
+		width = max(width, lipgloss.Width(renderEmptyAwareTextInputView(m.palette, m.settingsInput, m.settingsInput.Placeholder, 0)))
 	}
-	if filterBar := renderProfileGroupToolsFilterBar(widthModel); filterBar != "" {
+	if filterBar := renderHostGroupToolsFilterBar(widthModel); filterBar != "" {
 		width = max(width, lipgloss.Width(filterBar))
 	}
-	return popupContentWidth(m, width, 44, 88)
+	width = max(width, lipgloss.Width("Edit Tools: "+m.groupToolsEditor.group))
+	return popupContentWidth(m, width, 40, 72)
 }
 
-func profileGroupToolsPopupContentHeight(m Model) int {
-	base := unfilteredProfileGroupToolsModel(m)
-	return max(lipgloss.Height(renderProfileGroupToolsEditor(base)), lipgloss.Height(renderProfileGroupToolsEditor(m)))
+func groupToolsPopupContentHeight(m Model) int {
+	base := unfilteredHostGroupToolsModel(m)
+	return max(lipgloss.Height(renderHostGroupToolsEditor(base)), lipgloss.Height(renderHostGroupToolsEditor(m)))
 }
 
-func profileGroupDotsContentWidth(m Model) int {
-	widthModel := unfilteredProfileGroupDotsModel(m)
-	rows := profileGroupDotRows(widthModel)
-	longestName, longestTarget := profileGroupDotsColumnWidths(rows)
-	width := popupContentWidthFor(longestName, longestTarget)
-	for _, row := range rows {
-		width = max(width, lipgloss.Width(renderProfileGroupDotRowHints(m, row)))
-	}
+func groupDotsContentWidth(m Model) int {
+	widthModel := unfilteredHostGroupDotsModel(m)
+	rows := groupDotRows(widthModel)
+	longestName, longestTarget := groupDotsColumnWidths(rows)
+	width := popupToggleTableWidth(longestName, longestTarget)
 	for _, label := range []string{"enabled", "disabled", "ignored"} {
 		width = max(width, lipgloss.Width(pickerSectionLabel(label))+2)
 	}
-	width = max(width, lipgloss.Width(renderContextHints(m, hintCtxProfileGroupDots, "")))
+	width = max(width, lipgloss.Width(renderContextHints(m, hintCtxHostGroupDots, "")))
 	if m.groupDotsEditor.searchActive {
-		width = max(width, lipgloss.Width(m.settingsInput.View()))
+		width = max(width, lipgloss.Width(renderEmptyAwareTextInputView(m.palette, m.settingsInput, m.settingsInput.Placeholder, 0)))
 	}
-	return popupContentWidth(m, width, 44, 88)
+	width = max(width, lipgloss.Width("Edit Dots: "+m.groupDotsEditor.group))
+	return popupContentWidth(m, width, 40, 72)
 }
 
-func profileGroupDotsPopupContentHeight(m Model) int {
-	base := unfilteredProfileGroupDotsModel(m)
-	return max(lipgloss.Height(renderProfileGroupDotsEditor(base)), lipgloss.Height(renderProfileGroupDotsEditor(m)))
+func groupDotsPopupContentHeight(m Model) int {
+	base := unfilteredHostGroupDotsModel(m)
+	return max(lipgloss.Height(renderHostGroupDotsEditor(base)), lipgloss.Height(renderHostGroupDotsEditor(m)))
 }
 
-func unfilteredProfileGroupDotsModel(m Model) Model {
+func unfilteredHostGroupDotsModel(m Model) Model {
 	m.groupDotsEditor.search = ""
 	m.groupDotsEditor.searchActive = false
 	return m
 }
 
-func unfilteredProfileGroupToolsModel(m Model) Model {
+func unfilteredHostGroupToolsModel(m Model) Model {
 	m.groupToolsProviderIdx = 0
 	m.groupToolsEditor.search = ""
 	m.groupToolsEditor.searchActive = false
 	return m
 }
 
-func profileGroupToolsColumnWidths(m Model, rows []profileGroupToolRow) (int, int) {
+func groupToolsColumnWidths(m Model, rows []groupToolRow) (int, int) {
 	nameW := len("tool")
 	providerW := len("provider")
 	for _, row := range rows {
@@ -1388,12 +1455,63 @@ func profileGroupToolsColumnWidths(m Model, rows []profileGroupToolRow) (int, in
 			continue
 		}
 		nameW = max(nameW, lipgloss.Width(nameDisplayText(row.tool)))
-		providerW = max(providerW, lipgloss.Width(providerLabelForTool(row.tool, m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager)))
+		providerW = max(providerW, lipgloss.Width(providerLabelForToolWithPin(row.tool, providerPinForTool(row.tool, m.toolProviderPins), m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager)))
 	}
 	return nameW, providerW
 }
 
-func profileGroupDotsColumnWidths(rows []profileGroupDotRow) (int, int) {
+func groupToolsSecondaryWidth(m Model, rows []groupToolRow) int {
+	width := len("provider")
+	for _, row := range rows {
+		if row.tool == nil {
+			continue
+		}
+		w := lipgloss.Width(providerLabelForToolWithPin(row.tool, providerPinForTool(row.tool, m.toolProviderPins), m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager))
+		if toolHasPrivilegeMarker(row.tool, m.effectiveSystemManager) {
+			w += lipgloss.Width(iconPrivileged) + listColumnGap
+		}
+		switch {
+		case row.groupIgnore:
+			w += popupRowSeparatorWidth + lipgloss.Width("ignored")
+		case row.toolIgnore:
+			w += popupRowSeparatorWidth + lipgloss.Width("ignored: tool")
+		}
+		width = max(width, w)
+	}
+	return width
+}
+
+func renderHostGroupToolSecondary(m Model, row groupToolRow, width int, selected bool) string {
+	if row.tool == nil {
+		return ""
+	}
+	p := m.palette
+	providerPin := providerPinForTool(row.tool, m.toolProviderPins)
+	providerLabel := providerLabelForToolWithPin(row.tool, providerPin, m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager)
+	privW := 0
+	if toolHasPrivilegeMarker(row.tool, m.effectiveSystemManager) {
+		privW = lipgloss.Width(iconPrivileged)
+	}
+	privGap := 0
+	if privW > 0 {
+		privGap = listColumnGap
+	}
+	providerW := min(lipgloss.Width(providerDisplayTextForToolWithPin(row.tool, providerPin, m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager)), max(width-privW-privGap, 1))
+	priv := renderPrivilegeCol(privW > 0, privW, listRowColumnStyle(selected, p.styleHelp))
+	provider := renderProviderColWithExplicit(p, row.tool.Provider, row.tool.InstalledWith, providerPin, m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager, providerLabel, providerW, selected, false)
+	rendered := renderCellGroup(privilegeProviderCells(priv, privW, provider, providerW), listColumnGap)
+	remaining := max(width-lipgloss.Width(rendered)-popupRowSeparatorWidth, 0)
+	ignoreStyle := listRowColumnStyle(selected, p.styleIgnored)
+	switch {
+	case row.groupIgnore && remaining > 0:
+		rendered += strings.Repeat(" ", popupRowSeparatorWidth) + ignoreStyle.Render(fitCellText("ignored", remaining))
+	case row.toolIgnore && remaining > 0:
+		rendered += strings.Repeat(" ", popupRowSeparatorWidth) + ignoreStyle.Render(fitCellText("ignored: tool", remaining))
+	}
+	return rendered
+}
+
+func groupDotsColumnWidths(rows []groupDotRow) (int, int) {
 	nameW := len("dotfile")
 	targetW := len("path")
 	for _, row := range rows {
@@ -1405,10 +1523,10 @@ func profileGroupDotsColumnWidths(rows []profileGroupDotRow) (int, int) {
 	return nameW, targetW
 }
 
-func profileGroupToolRows(m Model) []profileGroupToolRow {
-	providerFilter := profileGroupToolsProviderFilter(m)
+func groupToolRows(m Model) []groupToolRow {
+	providerFilter := groupToolsProviderFilter(m)
 	query := strings.ToLower(strings.TrimSpace(m.groupToolsEditor.search))
-	rows := make([]profileGroupToolRow, 0, len(m.allTools))
+	rows := make([]groupToolRow, 0, len(m.allTools))
 	for _, t := range m.allTools {
 		if t == nil || !t.Tracked || t.Name == "" {
 			continue
@@ -1422,14 +1540,14 @@ func profileGroupToolRows(m Model) []profileGroupToolRow {
 		enabled := m.groupToolsEditor.membership[t.Name]
 		groupIgnored := m.groupToolsIgnore[t.Name]
 		toolIgnored := m.toolIgnoreSet[t.Name]
-		section := profileGroupToolSectionDisabled
+		section := groupToolSectionDisabled
 		switch {
 		case groupIgnored || toolIgnored:
-			section = profileGroupToolSectionIgnored
+			section = groupToolSectionIgnored
 		case enabled:
-			section = profileGroupToolSectionEnabled
+			section = groupToolSectionEnabled
 		}
-		rows = append(rows, profileGroupToolRow{
+		rows = append(rows, groupToolRow{
 			tool:        t,
 			section:     section,
 			enabled:     enabled,
@@ -1446,7 +1564,7 @@ func profileGroupToolRows(m Model) []profileGroupToolRow {
 	return rows
 }
 
-func profileGroupDotNames(m Model) []string {
+func groupDotNames(m Model) []string {
 	seen := make(map[string]bool)
 	names := make([]string, 0, len(m.dotMemberships))
 	for name := range m.dotMemberships {
@@ -1460,7 +1578,7 @@ func profileGroupDotNames(m Model) []string {
 	return names
 }
 
-func profileGroupDotRows(m Model) []profileGroupDotRow {
+func groupDotRows(m Model) []groupDotRow {
 	query := strings.ToLower(strings.TrimSpace(m.groupDotsEditor.search))
 	statusByName := make(map[string]app.DotStatus, len(m.dotsEntries))
 	for _, entry := range m.dotsEntries {
@@ -1468,8 +1586,8 @@ func profileGroupDotRows(m Model) []profileGroupDotRow {
 			statusByName[entry.Name] = entry
 		}
 	}
-	names := profileGroupDotNames(m)
-	rows := make([]profileGroupDotRow, 0, len(names))
+	names := groupDotNames(m)
+	rows := make([]groupDotRow, 0, len(names))
 	for _, name := range names {
 		status := statusByName[name]
 		target := tildePath(status.TargetPath)
@@ -1478,14 +1596,14 @@ func profileGroupDotRows(m Model) []profileGroupDotRow {
 		}
 		enabled := m.groupDotsEditor.membership[name]
 		ignored := status.State == app.DotStateIgnored
-		section := profileGroupDotSectionDisabled
+		section := groupDotSectionDisabled
 		switch {
 		case ignored:
-			section = profileGroupDotSectionIgnored
+			section = groupDotSectionIgnored
 		case enabled:
-			section = profileGroupDotSectionEnabled
+			section = groupDotSectionEnabled
 		}
-		rows = append(rows, profileGroupDotRow{
+		rows = append(rows, groupDotRow{
 			name:    name,
 			target:  target,
 			section: section,
@@ -1502,23 +1620,23 @@ func profileGroupDotRows(m Model) []profileGroupDotRow {
 	return rows
 }
 
-func profileGroupToolProviders(m Model) []string {
+func groupToolProviders(m Model) []string {
 	if len(m.providerNames) > 0 {
 		return append([]string(nil), m.providerNames...)
 	}
 	return provider.BuiltinEcosystemNames()
 }
 
-func profileGroupToolsProviderFilter(m Model) string {
-	providers := profileGroupToolProviders(m)
+func groupToolsProviderFilter(m Model) string {
+	providers := groupToolProviders(m)
 	if m.groupToolsProviderIdx <= 0 || m.groupToolsProviderIdx > len(providers) {
 		return ""
 	}
 	return providers[m.groupToolsProviderIdx-1]
 }
 
-func renderProfileGroupToolsFilterBar(m Model) string {
-	providers := profileGroupToolProviders(m)
+func renderHostGroupToolsFilterBar(m Model) string {
+	providers := groupToolProviders(m)
 	if len(providers) == 0 {
 		return ""
 	}
@@ -1529,50 +1647,30 @@ func renderProfileGroupToolsFilterBar(m Model) string {
 	return bar
 }
 
-func profileGroupDotSectionLabel(section profileGroupDotSection) string {
+func groupDotSectionLabel(section groupDotSection) string {
 	switch section {
-	case profileGroupDotSectionEnabled:
+	case groupDotSectionEnabled:
 		return "enabled"
-	case profileGroupDotSectionDisabled:
+	case groupDotSectionDisabled:
 		return "disabled"
-	case profileGroupDotSectionIgnored:
+	case groupDotSectionIgnored:
 		return "ignored"
 	default:
 		return ""
 	}
 }
 
-func profileGroupToolSectionLabel(section profileGroupToolSection) string {
+func groupToolSectionLabel(section groupToolSection) string {
 	switch section {
-	case profileGroupToolSectionEnabled:
+	case groupToolSectionEnabled:
 		return "enabled"
-	case profileGroupToolSectionDisabled:
+	case groupToolSectionDisabled:
 		return "disabled"
-	case profileGroupToolSectionIgnored:
+	case groupToolSectionIgnored:
 		return "ignored"
 	default:
 		return ""
 	}
-}
-
-func profileHostEditorColumnWidths(m Model) (int, int) {
-	var labelW, detailW int
-	for _, host := range m.profileHostPicker {
-		labelW = max(labelW, lipgloss.Width(host))
-		detailW = max(detailW, lipgloss.Width(profileHostDetail(m, host)))
-	}
-	return labelW, detailW
-}
-
-func profileHostDetail(m Model, host string) string {
-	profile := m.profileHostDraft[host]
-	if profile == "" {
-		profile = "unmapped"
-	}
-	if host == shortHostname() {
-		return profile + " · this host"
-	}
-	return profile
 }
 
 func scopePickerColumnWidths(m Model) (int, int) {
@@ -1605,12 +1703,12 @@ func ignoreScopeOptions(m Model, t *database.ToolCache) []scopeOption {
 			checked: checked, initialChecked: checked,
 		})
 	}
-	if m.profileInfo != nil && m.profileInfo.Active != "" {
+	if m.hostInfo != nil && m.hostInfo.Active != "" {
 		checked := m.ignoreSet[t.Name]
 		options = append(options, scopeOption{
-			kind:    "profile",
-			label:   "profile: " + m.profileInfo.Active,
-			detail:  "local profile ignore",
+			kind:    "host",
+			label:   "this host",
+			detail:  "local host ignore",
 			checked: checked, initialChecked: checked,
 		})
 	}
@@ -1671,11 +1769,11 @@ func groupPickerDetail(m Model, group, current string) string {
 }
 
 func groupPickerSection(m Model, group string) string {
-	if isNewGroupSentinel(group) || !groupHasActiveProfileContext(m) {
+	if isNewGroupSentinel(group) || !groupHasActiveHostContext(m) {
 		return ""
 	}
-	if groupInActiveProfile(m, group) {
-		return "Current Profile"
+	if groupInActiveHost(m, group) {
+		return "Current Host"
 	}
 	return "Inactive"
 }
@@ -1686,12 +1784,12 @@ func isNewGroupSentinel(group string) bool {
 
 func groupMembershipContentWidth(m Model) int {
 	labelW, detailW := groupMembershipColumnWidths(m)
-	width := 0
+	width := lipgloss.Width(groupMembershipPopupTitle(m))
 	for range m.pickerGroups {
 		width = max(width, pickerToggleRowWidth(labelW, detailW))
 	}
 	width = max(width, lipgloss.Width(toggleSaveCancelHintText(m)))
-	for _, label := range []string{"Current Profile", "Inactive"} {
+	for _, label := range []string{"Current Host", "Inactive"} {
 		width = max(width, lipgloss.Width(pickerSectionLabel(label))+2)
 	}
 	return popupContentWidth(m, width, 34, 64)
@@ -1716,7 +1814,7 @@ func groupPickerContentWidth(m Model) int {
 
 	width = max(width, lipgloss.Width(confirmCancelHintText(m, "confirm")))
 	width = max(width, lipgloss.Width(confirmCancelHintText(m, "create")))
-	for _, label := range []string{"Current Profile", "Inactive"} {
+	for _, label := range []string{"Current Host", "Inactive"} {
 		width = max(width, lipgloss.Width(pickerSectionLabel(label))+2)
 	}
 	return popupContentWidth(m, width, 34, 64)

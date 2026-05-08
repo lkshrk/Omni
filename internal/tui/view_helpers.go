@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 
+	"charm.land/bubbles/v2/textinput"
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/list"
 )
@@ -28,6 +29,27 @@ var logoMark = func() string {
 // renderHRule renders a full-width horizontal rule using the separator style.
 func renderHRule(pal palette, width int) string {
 	return pal.styleSep.Render(strings.Repeat("─", max(width, 1)))
+}
+
+func renderEmptyAwareTextInputView(p palette, input textinput.Model, placeholder string, width int) string {
+	if placeholder == "" {
+		placeholder = input.Placeholder
+	}
+	if input.Value() != "" {
+		input.Placeholder = placeholder
+		if width > 0 {
+			input.SetWidth(width)
+		}
+		return input.View()
+	}
+
+	input.Placeholder = ""
+	input.SetWidth(0)
+	view := input.View() + p.styleHelp.Render(placeholder)
+	if width <= 0 {
+		return view
+	}
+	return view + strings.Repeat(" ", max(width-lipgloss.Width(view), 0))
 }
 
 // alignLR left-aligns left and right-aligns right within totalWidth,
@@ -242,7 +264,7 @@ func newCursorList(pal palette, items []any, cursor, paddingLeft int) *list.List
 
 // scrollBuf accumulates rendered lines, tracks the cursor row, and applies a
 // scroll window when rendering. It replaces the write/lineCount/applyScrollWindow
-// pattern duplicated in renderSettings, renderProfiles, and renderDots.
+// pattern duplicated in renderSettings, renderGroups, and renderDots.
 type scrollBuf struct {
 	sb         strings.Builder
 	lineCount  int
