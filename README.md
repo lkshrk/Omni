@@ -45,7 +45,7 @@ brew install omni
 
 ## Usage
 
-Run `omni` to start the TUI. On first launch, onboarding creates `~/.config/omni/settings.json`, lets you choose package ecosystems, creates this machine's host assignment, optionally imports installed tools, and can enable dotfile sync. After onboarding, Omni performs the first package scan; this can take a while on a fresh cache.
+Run `omni` to start the TUI. On first launch, onboarding creates `~/.config/omni/settings.json`, lets you choose package ecosystems, creates this machine's host assignment, optionally imports installed tools, can enable dotfile sync, and lets you attach existing reusable groups. If a config already exists but this machine has no host entry yet, onboarding first offers to copy another host's reusable groups, host-local settings, provider overrides, and dotfile variants. After onboarding, Omni performs the first package scan; this can take a while on a fresh cache.
 
 You can also create or edit `~/.config/omni/settings.json` directly. The current versioned schema lives at [spec/omni.settings.v1.schema.json](spec/omni.settings.v1.schema.json), with [spec/omni.settings.schema.json](spec/omni.settings.schema.json) kept as the latest-schema alias.
 
@@ -109,6 +109,7 @@ omni groups move-tool dev fd              # move a tool to a group
 omni dots groups nvim --move dev          # move a dotfile entry to a group
 omni dots sync --dry-run                  # preview dotfile links
 omni settings set node.manager pnpm       # choose a host-local ecosystem manager
+omni hosts copy laptop workstation        # seed a new host from an existing one
 omni tools normalize --default-overrides --dry-run
                                           # preview cleanup of no-op provider overrides
 ```

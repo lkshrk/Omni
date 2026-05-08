@@ -991,6 +991,41 @@ func TestHostsSetAddRemoveGroups(t *testing.T) {
 	}
 }
 
+func TestHostsCopyCopiesHostConfig(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "target")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	withConfig(t, cfgPath, &config.RootConfig{
+		Groups: []*config.GroupConfig{{Name: "source", Special: "host"}, {Name: "target", Special: "host"}, {Name: "work"}},
+		Hosts: map[string][]string{
+			"source": {"work"},
+			"target": {},
+		},
+		HostSettings: map[string]config.Settings{
+			"source": {DotsRepo: "~/source-dots"},
+			"target": {DotsRepo: "~/old-target-dots"},
+		},
+	})
+
+	cmd := NewRootCmd()
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "hosts", "copy", "source", "target"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("hosts copy: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got := strings.Join(cfg.Hosts["target"], ","); got != "work" {
+		t.Fatalf("target groups = %q, want work", got)
+	}
+	if got := cfg.HostSettings["target"].DotsRepo; got != "~/source-dots" {
+		t.Fatalf("target dots_repo = %q, want copied source dots repo", got)
+	}
+}
+
 // ─── groups command ───────────────────────────────────────────────────────────
 
 func TestGroups_EmptyConfig(t *testing.T) {

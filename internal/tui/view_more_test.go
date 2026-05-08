@@ -330,6 +330,41 @@ func TestRenderSetup_Step6(t *testing.T) {
 	assertActionLeftAligned(t, out, "skip")
 }
 
+func TestRenderSetup_CopyHostAndGroups(t *testing.T) {
+	t.Run("copy prompt", func(t *testing.T) {
+		m := setupRenderModel(7)
+		m.hostInfo = &app.HostInfo{Hosts: map[string]config.HostAssignment{"laptop": {}}}
+		out := renderSetup(m)
+		if !strings.Contains(out, "Copy another host") {
+			t.Fatalf("expected copy prompt, got:\n%s", out)
+		}
+		assertActionLeftAligned(t, out, "start fresh")
+		assertActionRightAligned(t, out, "copy host", m.width)
+	})
+
+	t.Run("host picker", func(t *testing.T) {
+		m := setupRenderModel(8)
+		m.hostInfo = &app.HostInfo{Hosts: map[string]config.HostAssignment{"laptop": {Groups: []string{"base"}}}}
+		out := renderSetup(m)
+		if !strings.Contains(out, "laptop") || !strings.Contains(out, "base") {
+			t.Fatalf("expected host picker details, got:\n%s", out)
+		}
+		assertActionRightAligned(t, out, "copy selected", m.width)
+	})
+
+	t.Run("group selection", func(t *testing.T) {
+		m := setupRenderModel(9)
+		m.groupNames = []string{"base", "work"}
+		m.setupGroupDraft = map[string]bool{"base": true}
+		out := renderSetup(m)
+		if !strings.Contains(out, "base") || !strings.Contains(out, "[x]") || !strings.Contains(out, "work") {
+			t.Fatalf("expected group checklist, got:\n%s", out)
+		}
+		assertActionLeftAligned(t, out, "skip")
+		assertActionRightAligned(t, out, "continue", m.width)
+	})
+}
+
 func TestRenderSetup_AllActionFootersUsePopupAlignment(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -343,6 +378,9 @@ func TestRenderSetup_AllActionFootersUsePopupAlignment(t *testing.T) {
 		{name: "node manager", model: setupRenderModel(3), left: "skip", right: "confirm"},
 		{name: "dotfiles decision", model: setupRenderModel(5), left: "skip for now", right: "set up dotfile sync"},
 		{name: "dotfiles picker fallback", model: setupRenderModel(6), left: "skip"},
+		{name: "copy host", model: setupRenderModel(7), left: "start fresh", right: "copy host"},
+		{name: "host picker", model: setupRenderModel(8), left: "start fresh", right: "copy selected"},
+		{name: "group selection", model: setupRenderModel(9), left: "skip", right: "continue"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

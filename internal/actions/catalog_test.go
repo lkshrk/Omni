@@ -243,6 +243,7 @@ func TestActionCatalogIncludesDurableDomains(t *testing.T) {
 		GroupEditTools,
 		GroupEditDots,
 		HostCreate,
+		HostCopy,
 		HostDelete,
 		HostEditGroups,
 		SettingsSet,

@@ -85,6 +85,19 @@ type hostCopiedMsg struct {
 	info *app.HostInfo
 }
 
+type setupHostCopyDoneMsg struct {
+	err    error
+	source string
+	target string
+	info   *app.HostInfo
+}
+
+type setupHostGroupsDoneMsg struct {
+	err    error
+	groups []string
+	info   *app.HostInfo
+}
+
 // opCompleteMsg is sent after an async operation (install/uninstall/upgrade) finishes.
 // key is the upgradingKeys entry to remove ("name\x00provider"); empty for non-upgrade ops.
 type opCompleteMsg struct {

@@ -90,6 +90,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case setupHostDoneMsg:
 		cmds = append(cmds, m.handleSetupHostDoneMsg(msg)...)
 
+	case setupHostCopyDoneMsg:
+		cmds = append(cmds, m.handleSetupHostCopyDoneMsg(msg)...)
+
+	case setupHostGroupsDoneMsg:
+		cmds = append(cmds, m.handleSetupHostGroupsDoneMsg(msg)...)
+
 	case stowInstallDoneMsg:
 		cmds = append(cmds, m.handleStowInstallDoneMsg(msg)...)
 
@@ -391,6 +397,10 @@ func (m *Model) scrollSetupBy(delta int) {
 		m.setupProviderIdx = clampIndex(m.setupProviderIdx+delta, len(m.setupProviders))
 	case 3:
 		m.setupNodeMgrIdx = clampIndex(m.setupNodeMgrIdx+delta, len(nodeMgrChoices))
+	case 8:
+		m.setupCopyHostIdx = clampIndex(m.setupCopyHostIdx+delta, len(m.setupCopyHostNames()))
+	case 9:
+		m.setupGroupIdx = clampIndex(m.setupGroupIdx+delta, len(m.groupNames))
 	}
 }
 

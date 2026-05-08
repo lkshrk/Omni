@@ -35,6 +35,9 @@ func (m *Model) handleFilePickerKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
 	if key.Matches(msg, m.keys.Back) {
 		m.showFilePicker = false
 		m.filePickerForDotAdd = false
+		if m.mode == viewSetup && m.setupStep == 6 {
+			m.startSetupGroupSelection(&cmds)
+		}
 		return true, cmds
 	}
 	if key.Matches(msg, m.keys.Confirm) {

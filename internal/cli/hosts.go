@@ -23,6 +23,7 @@ groups assigned to it.`,
 		newHostsSetGroupsCmd(state),
 		newHostsAddGroupCmd(state),
 		newHostsRemoveGroupCmd(state),
+		newHostsCopyCmd(state),
 		newHostsRemoveCmd(state),
 	)
 	return cmd
@@ -108,6 +109,21 @@ func newHostsRemoveGroupCmd(state *rootState) *cobra.Command {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "Removed group %q from host %q.\n", args[1], args[0])
+			return nil
+		},
+	}
+}
+
+func newHostsCopyCmd(state *rootState) *cobra.Command {
+	return &cobra.Command{
+		Use:   "copy <source-host> <target-host>",
+		Short: "Copy host-scoped config to another host",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := state.app.CopyHostConfig(args[0], args[1]); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Copied host config from %q to %q.\n", args[0], args[1])
 			return nil
 		},
 	}

@@ -1075,6 +1075,19 @@ func TestFlow_UC29_ToolsLoadedMsg(t *testing.T) {
 		}
 	})
 
+	t.Run("noHost with existing hosts starts copy prompt", func(t *testing.T) {
+		got := drive(loadingModel(), toolsLoadedMsg{
+			noHost:   true,
+			hostInfo: &app.HostInfo{Hosts: map[string]config.HostAssignment{"workstation": {}}},
+		})
+		if got.mode != viewSetup {
+			t.Errorf("mode = %v, want viewSetup", got.mode)
+		}
+		if got.setupStep != 7 {
+			t.Errorf("setupStep = %d, want 7", got.setupStep)
+		}
+	})
+
 	t.Run("success from viewSetup step 0 advances to step 1", func(t *testing.T) {
 		m := loadingModel()
 		m.mode = viewSetup

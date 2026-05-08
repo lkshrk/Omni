@@ -118,6 +118,35 @@ func setupStep6Model() Model {
 	return m
 }
 
+func setupStep7Model() Model {
+	m := setupStep2Model()
+	m.setupStep = 7
+	m.hostInfo = &app.HostInfo{Hosts: map[string]config.HostAssignment{
+		"laptop": {Groups: []string{"base"}},
+		"server": {},
+	}}
+	m.groupNames = []string{"base", "work"}
+	return m
+}
+
+func setupStep8Model() Model {
+	m := setupStep7Model()
+	m.setupStep = 8
+	return m
+}
+
+func setupStep9Model() Model {
+	m := setupStep7Model()
+	m.setupStep = 9
+	m.hostInfo = &app.HostInfo{
+		Active: "testhost",
+		Hosts:  map[string]config.HostAssignment{"testhost": {Groups: []string{"base"}}},
+	}
+	m.setupGroupIdx = 0
+	m.initSetupGroupDraft()
+	return m
+}
+
 // loadingSetup builds a loading model stuck at a given setup step.
 func loadingSetup(step int) Model {
 	m := Model{
@@ -409,6 +438,104 @@ func TestFlow2_UC72_SetupStep2AllEnabled(t *testing.T) {
 	})
 }
 
+func TestFlow2_SetupNoHostCopyAndGroups(t *testing.T) {
+	t.Run("no-host with existing hosts starts at copy prompt", func(t *testing.T) {
+		m := baseModel(nil)
+		m.loading = true
+		got := drive(m, toolsLoadedMsg{
+			noHost: true,
+			hostInfo: &app.HostInfo{Hosts: map[string]config.HostAssignment{
+				"laptop": {Groups: []string{"base"}},
+			}},
+			groupNames: []string{"base"},
+		})
+		if got.mode != viewSetup {
+			t.Fatalf("mode = %v, want setup", got.mode)
+		}
+		if got.setupStep != 7 {
+			t.Fatalf("setupStep = %d, want copy prompt", got.setupStep)
+		}
+	})
+
+	t.Run("copy prompt no continues normal onboarding", func(t *testing.T) {
+		got := drive(setupStep7Model(), pressRune('n'))
+		if got.setupStep != 2 {
+			t.Fatalf("setupStep = %d, want provider step", got.setupStep)
+		}
+	})
+
+	t.Run("copy prompt yes with one host starts copy", func(t *testing.T) {
+		m := setupStep7Model()
+		m.hostInfo = &app.HostInfo{Hosts: map[string]config.HostAssignment{"laptop": {}}}
+		got := drive(m, pressEnter())
+		if !got.loading {
+			t.Fatal("loading should be true while copying the only host")
+		}
+		if got.setupStep != 7 {
+			t.Fatalf("setupStep = %d, want to stay on copy prompt while loading", got.setupStep)
+		}
+	})
+
+	t.Run("copy prompt yes with multiple hosts opens picker", func(t *testing.T) {
+		got := drive(setupStep7Model(), pressEnter())
+		if got.setupStep != 8 {
+			t.Fatalf("setupStep = %d, want host picker", got.setupStep)
+		}
+	})
+
+	t.Run("host picker navigates and confirm starts copy", func(t *testing.T) {
+		got := drive(setupStep8Model(), pressRune('j'))
+		if got.setupCopyHostIdx != 1 {
+			t.Fatalf("setupCopyHostIdx = %d, want 1", got.setupCopyHostIdx)
+		}
+		got = drive(got, pressEnter())
+		if !got.loading {
+			t.Fatal("loading should be true after confirming host copy")
+		}
+	})
+
+	t.Run("host copy success finishes onboarding and reloads", func(t *testing.T) {
+		got := drive(loadingSetup(8), setupHostCopyDoneMsg{
+			source: "laptop",
+			target: "testhost",
+			info:   &app.HostInfo{Active: "testhost", Hosts: map[string]config.HostAssignment{"testhost": {Groups: []string{"base"}}}},
+		})
+		if got.mode != viewList {
+			t.Fatalf("mode = %v, want viewList", got.mode)
+		}
+		if !got.setupComplete || !got.setupReloading || !got.loading {
+			t.Fatalf("setup completion flags = complete:%v reloading:%v loading:%v", got.setupComplete, got.setupReloading, got.loading)
+		}
+		if got.hostRequired {
+			t.Fatal("hostRequired should clear after host copy")
+		}
+	})
+
+	t.Run("group selection toggles and saves", func(t *testing.T) {
+		got := drive(setupStep9Model(), pressRune('j'), pressRune(' '))
+		if !got.setupGroupDraft["work"] {
+			t.Fatalf("work group should be selected: %#v", got.setupGroupDraft)
+		}
+		got = drive(got, pressEnter())
+		if !got.loading {
+			t.Fatal("loading should be true while saving selected groups")
+		}
+	})
+
+	t.Run("group save success finishes onboarding and reloads", func(t *testing.T) {
+		got := drive(loadingSetup(9), setupHostGroupsDoneMsg{
+			groups: []string{"base", "work"},
+			info:   &app.HostInfo{Active: "testhost", Hosts: map[string]config.HostAssignment{"testhost": {Groups: []string{"base", "work"}}}},
+		})
+		if got.mode != viewList {
+			t.Fatalf("mode = %v, want viewList", got.mode)
+		}
+		if !got.setupComplete || !got.setupReloading || !got.loading {
+			t.Fatalf("setup completion flags = complete:%v reloading:%v loading:%v", got.setupComplete, got.setupReloading, got.loading)
+		}
+	})
+}
+
 // UC-76: Setup step 5 — enter opens file picker (step 6); n/esc skip.
 func TestFlow2_UC76_SetupStep5(t *testing.T) {
 	t.Run("enter advances to step 6 and shows file picker", func(t *testing.T) {
@@ -437,7 +564,7 @@ func TestFlow2_UC76_SetupStep5(t *testing.T) {
 
 	t.Run("n completes setup after disable dots finishes", func(t *testing.T) {
 		m := drive(setupStep5Model(), pressRune('n'))
-		got := drive(m, dangerOpDoneMsg{action: "disable-dots", detail: "dots disabled", reload: true, setupComplete: true})
+		got := drive(m, dangerOpDoneMsg{action: "disable-dots", detail: "dots disabled"})
 		if got.mode != viewList {
 			t.Fatalf("mode = %v, want viewList after setup dotfiles skip completes", got.mode)
 		}
@@ -459,6 +586,22 @@ func TestFlow2_UC76_SetupStep5(t *testing.T) {
 		}
 		if got.progressText != "" {
 			t.Fatalf("progressText = %q, want cleared after reload completes", got.progressText)
+		}
+	})
+
+	t.Run("n advances to group selection when reusable groups exist", func(t *testing.T) {
+		m := setupStep5Model()
+		m.groupNames = []string{"base", "work"}
+		m = drive(m, pressRune('n'))
+		got := drive(m, dangerOpDoneMsg{action: "disable-dots", detail: "dots disabled"})
+		if got.mode != viewSetup {
+			t.Fatalf("mode = %v, want setup", got.mode)
+		}
+		if got.setupStep != 9 {
+			t.Fatalf("setupStep = %d, want reusable group selection", got.setupStep)
+		}
+		if got.loading {
+			t.Fatal("loading should clear before group selection")
 		}
 	})
 
@@ -525,7 +668,7 @@ func TestFlow2_UC76_SetupStep5(t *testing.T) {
 	})
 
 	t.Run("configured dotfiles closes setup and shows reload progress", func(t *testing.T) {
-		got := drive(setupStep6Model(), dangerOpDoneMsg{action: "setup-dots", detail: "dots configured", reload: true, setupComplete: true})
+		got := drive(setupStep6Model(), dangerOpDoneMsg{action: "setup-dots", detail: "dots configured"})
 		if got.mode != viewList {
 			t.Fatalf("mode = %v, want viewList after setup dotfiles repo completes", got.mode)
 		}
@@ -534,6 +677,18 @@ func TestFlow2_UC76_SetupStep5(t *testing.T) {
 		}
 		if got.progressText != "Loading tools…" {
 			t.Fatalf("progressText = %q, want post-onboarding reload progress", got.progressText)
+		}
+	})
+
+	t.Run("configured dotfiles advances to group selection when reusable groups exist", func(t *testing.T) {
+		m := setupStep6Model()
+		m.groupNames = []string{"base"}
+		got := drive(m, dangerOpDoneMsg{action: "setup-dots", detail: "dots configured"})
+		if got.mode != viewSetup {
+			t.Fatalf("mode = %v, want setup", got.mode)
+		}
+		if got.setupStep != 9 {
+			t.Fatalf("setupStep = %d, want group selection", got.setupStep)
 		}
 	})
 

@@ -58,6 +58,7 @@ key routing, modal state, rendering, and async result handling.
 | `groups.edit_tools` | yes | yes | yes | yes | - |
 | `groups.edit_dots` | yes | yes | yes | yes | - |
 | `hosts.create` | yes | yes | yes | n/a | - |
+| `hosts.copy` | yes | yes | yes | yes | TUI coverage is onboarding-only |
 | `hosts.delete` | yes | yes | yes | yes | - |
 | `hosts.edit_groups` | yes | yes | yes | yes | - |
 | `settings.set` | yes | yes | yes | yes | - |

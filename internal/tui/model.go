@@ -322,7 +322,9 @@ type Model struct {
 	scopeTarget          database.ToolCache
 	scopeTargetSet       bool
 
-	// setup wizard step (0 = create config?, 1 = import tools?, 2 = provider selection, 3 = node manager, 4 = unused, 5 = enable dotfiles?, 6 = dots repo path)
+	// setup wizard step (0 = create config?, 1 = import tools?, 2 = provider
+	// selection, 3 = node manager, 4 = unused, 5 = enable dotfiles?, 6 = dots
+	// repo path, 7 = copy host?, 8 = host picker, 9 = reusable groups)
 	setupStep int
 	// setupBackgroundMode is the main tab rendered behind setup/onboarding
 	// popups. Zero value keeps first-run setup on the tools tab.
@@ -333,6 +335,11 @@ type Model struct {
 	// setupNodeMgrIdx is the cursor for node manager selection in step 3.
 	// 0=auto, 1=bun, 2=pnpm, 3=npm
 	setupNodeMgrIdx int
+	// setupCopyHostIdx is the cursor for the host-copy picker in step 8.
+	setupCopyHostIdx int
+	// setupGroupIdx/draft are the final reusable-group selection in step 9.
+	setupGroupIdx   int
+	setupGroupDraft map[string]bool
 	// setupComplete is set after onboarding has completed so a follow-up reload
 	// cannot reopen setup from a stale no-host snapshot.
 	setupComplete bool

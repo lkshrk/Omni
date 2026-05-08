@@ -136,6 +136,118 @@ func (a *App) RenameHost(oldName, newName string) error {
 	})
 }
 
+// CopyHostConfig copies reusable group assignments and host-scoped settings
+// from sourceName to targetName. The target's protected host group is ensured
+// but source host-local tool/dot memberships are not duplicated.
+func (a *App) CopyHostConfig(sourceName, targetName string) error {
+	sourceName = strings.TrimSpace(machineGroupName(sourceName))
+	targetName = strings.TrimSpace(machineGroupName(targetName))
+	if sourceName == "" || targetName == "" {
+		return fmt.Errorf("hostname is required")
+	}
+	if sourceName == targetName {
+		return a.EnsureHost(targetName)
+	}
+	return a.withConfig(func(cfg *config.RootConfig) error {
+		sourceGroups, ok := cfg.Hosts[sourceName]
+		if !ok {
+			return fmt.Errorf("host %q not found", sourceName)
+		}
+		if _, err := ensureHostGroupInConfig(cfg, targetName); err != nil {
+			return err
+		}
+		if cfg.Hosts == nil {
+			cfg.Hosts = make(map[string][]string)
+		}
+		groups, err := reusableHostGroupsInConfig(cfg, targetName, sourceGroups)
+		if err != nil {
+			return err
+		}
+		cfg.Hosts[targetName] = groups
+		copyHostSettings(cfg, sourceName, targetName)
+		copyToolHostOverrides(cfg, sourceName, targetName)
+		copyDotHostVariants(cfg, sourceName, targetName)
+		return nil
+	})
+}
+
+func copyHostSettings(cfg *config.RootConfig, sourceName, targetName string) {
+	if cfg.HostSettings == nil {
+		return
+	}
+	settings, ok := cfg.HostSettings[sourceName]
+	if !ok {
+		delete(cfg.HostSettings, targetName)
+		return
+	}
+	cfg.HostSettings[targetName] = cloneHostSettings(settings)
+}
+
+func cloneHostSettings(settings config.Settings) config.Settings {
+	settings.DisabledProviders = append([]string(nil), settings.DisabledProviders...)
+	if settings.DotsDisabled != nil {
+		dotsDisabled := *settings.DotsDisabled
+		settings.DotsDisabled = &dotsDisabled
+	}
+	if settings.Ecosystems != nil {
+		ecosystems := make(map[string]config.EcosystemSettings, len(settings.Ecosystems))
+		for name, eco := range settings.Ecosystems {
+			eco.Priority = append([]string(nil), eco.Priority...)
+			ecosystems[name] = eco
+		}
+		settings.Ecosystems = ecosystems
+	}
+	return settings
+}
+
+func copyToolHostOverrides(cfg *config.RootConfig, sourceName, targetName string) {
+	for name, spec := range cfg.Tools {
+		if spec.Hosts == nil {
+			continue
+		}
+		delete(spec.Hosts, targetName)
+		if install, ok := spec.Hosts[sourceName]; ok {
+			spec.Hosts[targetName] = cloneToolInstallSpec(install)
+		}
+		if len(spec.Hosts) == 0 {
+			spec.Hosts = nil
+		}
+		cfg.Tools[name] = spec
+	}
+}
+
+func cloneToolInstallSpec(spec config.ToolInstallSpec) config.ToolInstallSpec {
+	if spec.Options != nil {
+		options := make(map[string]string, len(spec.Options))
+		for key, value := range spec.Options {
+			options[key] = value
+		}
+		spec.Options = options
+	}
+	return spec
+}
+
+func copyDotHostVariants(cfg *config.RootConfig, sourceName, targetName string) {
+	for _, group := range cfg.Groups {
+		if group == nil || group.IsHost() {
+			continue
+		}
+		for i, dot := range group.Dots {
+			if dot.Hosts == nil {
+				continue
+			}
+			delete(dot.Hosts, targetName)
+			if variant, ok := dot.Hosts[sourceName]; ok {
+				dot.Hosts[targetName] = variant
+			}
+			if len(dot.Hosts) == 0 {
+				dot.Hosts = nil
+			}
+			group.Dots[i] = dot
+		}
+	}
+}
+
 func moveHostScopedConfig(cfg *config.RootConfig, oldName, newName string) error {
 	if cfg.HostSettings != nil {
 		if settings, ok := cfg.HostSettings[oldName]; ok {
@@ -225,27 +337,35 @@ func (a *App) SetHostGroups(hostname string, groups []string) error {
 		if cfg.Hosts == nil {
 			cfg.Hosts = make(map[string][]string)
 		}
-		seen := make(map[string]struct{}, len(groups))
-		filtered := make([]string, 0, len(groups))
-		for _, group := range groups {
-			group = strings.TrimSpace(group)
-			if group == "" || group == hostname {
-				continue
-			}
-			if _, ok := seen[group]; ok {
-				continue
-			}
-			seen[group] = struct{}{}
-			if g := findGroupInConfig(cfg, group); g == nil {
-				return fmt.Errorf("group %q not found", group)
-			} else if g.IsHost() {
-				return fmt.Errorf("host group %q cannot be assigned to another host", group)
-			}
-			filtered = append(filtered, group)
+		filtered, err := reusableHostGroupsInConfig(cfg, hostname, groups)
+		if err != nil {
+			return err
 		}
 		cfg.Hosts[hostname] = filtered
 		return nil
 	})
+}
+
+func reusableHostGroupsInConfig(cfg *config.RootConfig, hostname string, groups []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(groups))
+	filtered := make([]string, 0, len(groups))
+	for _, group := range groups {
+		group = strings.TrimSpace(group)
+		if group == "" || group == hostname {
+			continue
+		}
+		if _, ok := seen[group]; ok {
+			continue
+		}
+		seen[group] = struct{}{}
+		if g := findGroupInConfig(cfg, group); g == nil {
+			return nil, fmt.Errorf("group %q not found", group)
+		} else if g.IsHost() {
+			return nil, fmt.Errorf("host group %q cannot be assigned to another host", group)
+		}
+		filtered = append(filtered, group)
+	}
+	return filtered, nil
 }
 
 func (a *App) AddGroupToHost(hostname, group string) error {
