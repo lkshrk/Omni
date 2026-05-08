@@ -30,7 +30,7 @@ func TestToolActionCatalogCLIBindingsExist(t *testing.T) {
 
 func TestMutatingCLICommandsAreCataloged(t *testing.T) {
 	for _, path := range [][]string{
-		{"init"},
+		{"bootstrap"},
 		{"sync"},
 		{"add"},
 		{"install"},

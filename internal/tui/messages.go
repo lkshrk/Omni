@@ -34,6 +34,7 @@ type toolsLoadedMsg struct {
 	dotsReminderServiceErr string
 	dotsWatchService       *app.DotsWatchService
 	dotsWatchServiceErr    string
+	bootstrapRequired      bool
 	allPythonManagers      []string           // all python managers found on PATH (for setup wizard)
 	allNodeManagers        []string           // all node managers found on PATH (for setup wizard)
 	setupProviders         []setupProviderRow // pre-built provider rows for the setup wizard
@@ -217,6 +218,14 @@ type setupProvidersDoneMsg struct{ err error }
 
 // setupNodeMgrDoneMsg is sent after the setup-wizard node manager step saves.
 type setupNodeMgrDoneMsg struct{ err error }
+
+// setupBootstrapDoneMsg is sent after the existing-host bootstrap activation
+// applies one optional action.
+type setupBootstrapDoneMsg struct {
+	action  string
+	message string
+	err     error
+}
 
 // setupHostDoneMsg is sent after the setup-wizard host step completes.
 type setupHostDoneMsg struct {

@@ -1109,6 +1109,40 @@ func (m *Model) doSetupHostGroups(groups []string) tea.Cmd {
 	}
 }
 
+func (m *Model) doSetupBootstrapTools() tea.Cmd {
+	a, ctx := m.app, m.ctx
+	return func() tea.Msg {
+		result, err := a.Sync(ctx, gosync.SyncOptions{SkipPrivileged: true})
+		if err != nil {
+			return setupBootstrapDoneMsg{action: "sync-tools", err: err}
+		}
+		installed := 0
+		if result != nil {
+			installed = len(result.Installed())
+		}
+		message := "host tools applied"
+		if installed > 0 {
+			message = fmt.Sprintf("host tools applied, %d installed", installed)
+		}
+		return setupBootstrapDoneMsg{action: "sync-tools", message: message}
+	}
+}
+
+func (m *Model) doSetupBootstrapDots() tea.Cmd {
+	a, ctx := m.app, m.ctx
+	return func() tea.Msg {
+		ops, err := a.DotsSyncContext(ctx, dots.SyncOptions{})
+		if err != nil {
+			return setupBootstrapDoneMsg{action: "sync-dots", err: err}
+		}
+		message := "dotfiles applied"
+		if len(ops) > 0 {
+			message = fmt.Sprintf("dotfiles applied, %d operation(s)", len(ops))
+		}
+		return setupBootstrapDoneMsg{action: "sync-dots", message: message}
+	}
+}
+
 // doSetupDotsRepo saves the dots repo path to settings. Dotfile sync itself is
 // run from the Dots tab so onboarding stays limited to configuration.
 func (m *Model) doSetupDotsRepo(path string) tea.Cmd {

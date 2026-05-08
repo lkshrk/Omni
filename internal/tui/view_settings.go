@@ -39,6 +39,7 @@ const (
 	settingsRowDotsWatchDebounce
 	settingsRowDotsCommit
 	settingsRowDotsPush
+	settingsRowBootstrap
 	settingsRowResetSettings
 	settingsRowResetCache
 	settingsRowCount
@@ -128,6 +129,12 @@ var settingsRows = []settingsRowMeta{
 		label:   "Push Changes",
 		section: "Dotfiles",
 		hint:    hintCtxSettingsToggle,
+	},
+	settingsRowBootstrap: {
+		label:   "Run Bootstrap Again",
+		section: "Maintenance",
+		hint:    hintCtxSettingsDanger,
+		danger:  true,
 	},
 	settingsRowResetSettings: {
 		label:   "Reset Settings",
@@ -364,6 +371,11 @@ func renderSettings(m Model) string {
 			settingsRowMeta: settingsRows[settingsRowDotsPush],
 			value:           onOff(m.settings.DotsGit.AutoPush),
 			help:            p.styleHelp.Render("Push (and commit) automatically after dots add/remove/variant operations; does not affect Watch Sync."),
+		},
+		settingsRowBootstrap: {
+			settingsRowMeta: settingsRows[settingsRowBootstrap],
+			value:           p.styleHelp.Render("[run]"),
+			help:            p.styleHelp.Render("Run the guided bootstrap flow for this host again."),
 		},
 		settingsRowResetSettings: {
 			settingsRowMeta: settingsRows[settingsRowResetSettings],

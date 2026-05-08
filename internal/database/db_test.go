@@ -62,6 +62,35 @@ func TestMigrate_CopiesExistingToolMetadata(t *testing.T) {
 	}
 }
 
+func TestLocalState_UpsertAndGet(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+
+	if _, err := db.GetState(ctx, "bootstrap.testhost"); err == nil || !strings.Contains(err.Error(), sql.ErrNoRows.Error()) {
+		t.Fatalf("GetState missing err = %v, want sql.ErrNoRows", err)
+	}
+	if err := db.SetState(ctx, "bootstrap.testhost", "complete"); err != nil {
+		t.Fatalf("SetState: %v", err)
+	}
+	got, err := db.GetState(ctx, "bootstrap.testhost")
+	if err != nil {
+		t.Fatalf("GetState: %v", err)
+	}
+	if got != "complete" {
+		t.Fatalf("state = %q, want complete", got)
+	}
+	if err := db.SetState(ctx, "bootstrap.testhost", "again"); err != nil {
+		t.Fatalf("SetState update: %v", err)
+	}
+	got, err = db.GetState(ctx, "bootstrap.testhost")
+	if err != nil {
+		t.Fatalf("GetState after update: %v", err)
+	}
+	if got != "again" {
+		t.Fatalf("updated state = %q, want again", got)
+	}
+}
+
 func TestMarkPrivilegeRequired_PersistsAndSurvivesRefreshUpsert(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)

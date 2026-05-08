@@ -1098,6 +1098,22 @@ func TestFlow_UC29_ToolsLoadedMsg(t *testing.T) {
 		}
 	})
 
+	t.Run("configured host first launch enters bootstrap activation", func(t *testing.T) {
+		got := drive(loadingModel(), toolsLoadedMsg{
+			tools:             threeTools(),
+			bootstrapRequired: true,
+			hostInfo: &app.HostInfo{Active: "testhost", Hosts: map[string]config.HostAssignment{
+				"testhost": {},
+			}},
+		})
+		if got.mode != viewSetup {
+			t.Errorf("mode = %v, want viewSetup", got.mode)
+		}
+		if got.setupStep != 10 {
+			t.Errorf("setupStep = %d, want 10", got.setupStep)
+		}
+	})
+
 	t.Run("success populates allTools and sets viewList", func(t *testing.T) {
 		got := drive(loadingModel(), toolsLoadedMsg{tools: threeTools()})
 		if got.mode != viewList {
@@ -1211,6 +1227,32 @@ func TestFlow_UC34_DangerZoneConfirm(t *testing.T) {
 		got := drive(baseModel(nil), msgs...)
 		if got.dangerConfirmRow != settingsRowResetCache {
 			t.Errorf("dangerConfirmRow = %d, want %d", got.dangerConfirmRow, settingsRowResetCache)
+		}
+	})
+
+	t.Run("bootstrap Enter sets dangerConfirmRow", func(t *testing.T) {
+		msgs := append(toSettings(), nj(settingsRowBootstrap)...)
+		msgs = append(msgs, pressEnter())
+		got := drive(baseModel(nil), msgs...)
+		if got.dangerConfirmRow != settingsRowBootstrap {
+			t.Errorf("dangerConfirmRow = %d, want %d", got.dangerConfirmRow, settingsRowBootstrap)
+		}
+	})
+
+	t.Run("bootstrap confirm enters activation setup", func(t *testing.T) {
+		base := baseModel(nil)
+		base.hostInfo = &app.HostInfo{Active: "testhost", Hosts: map[string]config.HostAssignment{"testhost": {}}}
+		msgs := append(toSettings(), nj(settingsRowBootstrap)...)
+		msgs = append(msgs, pressEnter(), pressEnter())
+		got := drive(base, msgs...)
+		if got.mode != viewSetup {
+			t.Errorf("mode = %v, want viewSetup", got.mode)
+		}
+		if got.setupStep != 10 {
+			t.Errorf("setupStep = %d, want 10", got.setupStep)
+		}
+		if got.setupBackgroundMode != viewSettings {
+			t.Errorf("setupBackgroundMode = %v, want viewSettings", got.setupBackgroundMode)
 		}
 	})
 

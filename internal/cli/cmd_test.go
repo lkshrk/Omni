@@ -1665,7 +1665,7 @@ func TestRequireActiveHost_NonExemptCommand_WithHost_Passes(t *testing.T) {
 // ─── hostExempt map ───────────────────────────────────────────────────────────
 
 func TestHostExempt_ContainsExpectedCommands(t *testing.T) {
-	expected := []string{"init", "hosts", "dots", "ui", "version", "providers", "settings", "help", "completion"}
+	expected := []string{"bootstrap", "init", "hosts", "dots", "ui", "version", "providers", "settings", "help", "completion"}
 	for _, name := range expected {
 		if !hostExempt[name] {
 			t.Errorf("expected %q in hostExempt", name)
@@ -2268,11 +2268,25 @@ func TestNewRootCmd_HasExpectedSubcommands(t *testing.T) {
 	for _, sub := range cmd.Commands() {
 		names[sub.Name()] = true
 	}
-	expected := []string{"list", "sync", "add", "hosts", "dots", "providers", "groups", "tools", "init", "search"}
+	expected := []string{"list", "sync", "add", "hosts", "dots", "providers", "groups", "tools", "bootstrap", "search"}
 	for _, name := range expected {
 		if !names[name] {
 			t.Errorf("expected subcommand %q in root cmd", name)
 		}
+	}
+}
+
+func TestNewRootCmd_InitAliasResolvesToBootstrap(t *testing.T) {
+	cmd := NewRootCmd()
+	found, _, err := cmd.Find([]string{"init"})
+	if err != nil {
+		t.Fatalf("Find init alias: %v", err)
+	}
+	if found == nil {
+		t.Fatal("init alias did not resolve to a command")
+	}
+	if found.Name() != "bootstrap" {
+		t.Fatalf("init resolved to %q, want bootstrap", found.Name())
 	}
 }
 
@@ -2333,6 +2347,35 @@ func TestInit_ExistingConfig_PrintsNothingToDo(t *testing.T) {
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "init"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("init with existing config: %v", err)
+	}
+}
+
+func TestBootstrapExistingHostMarksComplete(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	withConfig(t, cfgPath, &config.RootConfig{})
+	withHost(t, cfgPath)
+
+	cmd := NewRootCmd()
+	cmd.SetArgs([]string{"-y", "--config", cfgPath, "--cache-dir", cacheDir, "bootstrap"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("bootstrap existing host: %v", err)
+	}
+
+	verify := app.New(cfgPath)
+	verify.CacheDir = cacheDir
+	if err := verify.InitTestMode(context.Background()); err != nil {
+		t.Fatalf("InitTestMode verify: %v", err)
+	}
+	t.Cleanup(func() { _ = verify.Close() })
+	completed, err := verify.HostBootstrapCompleted(context.Background(), "testhost")
+	if err != nil {
+		t.Fatalf("HostBootstrapCompleted: %v", err)
+	}
+	if !completed {
+		t.Fatal("bootstrap marker not persisted")
 	}
 }
 

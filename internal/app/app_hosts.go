@@ -449,7 +449,7 @@ func (a *App) RequireActiveHost() error {
 	}
 	hostname := currentMachineGroupName()
 	if _, ok := activeHostGroupNames(cfg, hostname); !ok {
-		return fmt.Errorf("no host configuration for %q - run 'omni init' to set one up", hostname)
+		return fmt.Errorf("no host configuration for %q - run 'omni bootstrap' to set one up", hostname)
 	}
 	return nil
 }

@@ -39,8 +39,8 @@ func NewRootCmd() *cobra.Command {
 		Long: `omni keeps your development tools (brew, npm, pip, …) and dotfiles
 in sync across machines from a single JSON config file (settings.json).
 
-New machine? Run 'omni init' to detect providers, create the config, and
-optionally import your currently installed tools.
+New machine? Run 'omni bootstrap' to detect providers, create or activate the
+host config, and optionally import or sync tools and dotfiles.
 
 Already set up?
   omni sync       sync local tools to match config
@@ -58,7 +58,7 @@ Already set up?
 			return nil
 		},
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
-			// Skip init for commands that don't need the DB.
+			// Skip app initialisation for commands that don't need the DB.
 			if cmd.Name() == "help" {
 				return nil
 			}
@@ -95,7 +95,7 @@ Already set up?
 		"assume yes for confirmation prompts")
 
 	root.AddCommand(
-		newInitCmd(state),
+		newBootstrapCmd(state),
 		newListCmd(state),
 		newSyncCmd(state),
 		newInstallCmd(state),
@@ -124,7 +124,8 @@ Already set up?
 // NOTE: Do NOT add "omni" here — it is the ancestor of every command and would
 // exempt the entire CLI from host enforcement.
 var hostExempt = map[string]bool{
-	"init":       true,
+	"bootstrap":  true,
+	"init":       true, // compatibility alias for bootstrap
 	"hosts":      true,
 	"dots":       true, // dots commands work independently of tool hosts
 	"ui":         true, // TUI handles its own onboarding including host setup

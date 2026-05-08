@@ -136,6 +136,36 @@ func renderSetup(m Model) string {
 			Body:   optionsBody,
 			Footer: renderSetupFooter(m, []hintItem{hintFromBindingDesc(m.keys.Back, "skip")}, middle, []hintItem{hintFromBindingDesc(m.keys.Confirm, "continue")}),
 		})
+	case 10:
+		var options []setupOption
+		for i, opt := range setupActivationOptions {
+			options = append(options, setupOption{Label: opt.label, Detail: opt.detail, Selected: i == m.setupActivationIdx})
+		}
+		host := shortHostname()
+		groupSummary := "no reusable groups"
+		if m.hostInfo != nil && m.hostInfo.Active != "" {
+			host = m.hostInfo.Active
+			if assignment, ok := m.hostInfo.Hosts[host]; ok && len(assignment.Groups) > 0 {
+				groupSummary = compactGroupList(assignment.Groups)
+			}
+		}
+		dotsSummary := "dotfiles disabled"
+		if strings.TrimSpace(m.settings.DotsRepo) != "" && !config.BoolVal(m.settings.DotsDisabled) {
+			dotsSummary = "dotfiles enabled"
+		}
+		body = renderSetupPanel(m, setupPanel{
+			Lead: fmt.Sprintf("Host %q is configured.", host),
+			Help: []string{
+				"Choose how to activate this machine before entering Omni.",
+				"Groups: " + groupSummary + " · " + dotsSummary,
+			},
+			Body: renderSetupOptions(m, options),
+			Footer: renderSetupFooter(m,
+				[]hintItem{hintFromBindingDesc(m.keys.Back, "review first")},
+				nil,
+				[]hintItem{hintFromBindingDesc(m.keys.Confirm, "continue")},
+			),
+		})
 	}
 
 	return body
@@ -292,6 +322,8 @@ func setupPopupTitle(m Model) string {
 		return logoMark + " Omni - Choose host"
 	case 9:
 		return logoMark + " Omni - Choose groups"
+	case 10:
+		return logoMark + " Omni - Bootstrap host"
 	default:
 		return logoMark + " Omni"
 	}

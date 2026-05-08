@@ -1,9 +1,9 @@
-# omni init persists detected package managers, creates the host, and can skip dots
+# omni bootstrap persists detected package managers, creates the host, and can skip dots
 exec chmod 755 bin/pnpm bin/npm bin/pip3 bin/apt bin/apk bin/dnf bin/pacman bin/zypper bin/brew bin/pip
 env PATH=$WORK/bin:$PATH
 stdin init-input
 
-exec omni --config settings.json init --no-import
+exec omni --config settings.json bootstrap --no-import
 stdout 'Detected providers:'
 stdout 'node.manager   = pnpm'
 stdout 'python.manager = pip3'
@@ -18,6 +18,7 @@ stdout '"testhost"'
 
 -- init-input --
 n
+
 
 -- bin/pnpm --
 #!/bin/sh

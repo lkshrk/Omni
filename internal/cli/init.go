@@ -16,19 +16,21 @@ import (
 	gosync "github.com/lkshrk/omni/internal/sync"
 )
 
-func newInitCmd(state *rootState) *cobra.Command {
+func newBootstrapCmd(state *rootState) *cobra.Command {
 	var flagImport bool
 	var flagNoImport bool
 
 	cmd := &cobra.Command{
-		Use:   "init",
-		Short: "Set up omni on this machine",
-		Long: `init sets up omni for first use:
+		Use:     "bootstrap",
+		Aliases: []string{"init"},
+		Short:   "Bootstrap omni on this machine",
+		Long: `bootstrap guides this machine into a working omni config:
   1. Detects available package managers (brew, bun, pnpm, npm, uv, pip3)
   2. Creates settings.json with sensible defaults
-  3. Optionally imports your currently installed tools
+  3. Creates or activates this machine's host config
+  4. Optionally imports or syncs tools and dotfiles
 
-Run 'omni init' on every new machine to reproduce your environment.`,
+Run 'omni bootstrap' on every new machine to reproduce your environment.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
 			a := state.app
@@ -55,9 +57,7 @@ Run 'omni init' on every new machine to reproduce your environment.`,
 
 			// ── 2. Guard: config already exists ──────────────────────────────
 			if a.HasConfig() {
-				fmt.Printf("Config already exists at %s\n", a.ConfigPath)
-				fmt.Println("Nothing to do. Run 'omni sync' to apply it or 'omni import' to add more tools.")
-				return nil
+				return runExistingConfigBootstrap(cmd, state, a)
 			}
 
 			// ── 3. Auto-detect managers ───────────────────────────────────────
@@ -126,38 +126,18 @@ Run 'omni init' on every new machine to reproduce your environment.`,
 
 			// ── 8. Sync prompt ────────────────────────────────────────────────
 			if promptYesNo(state, "Run sync now to install all tools from config?", doImport) {
-				fmt.Println("Syncing…")
-				syncResult, err := a.Sync(ctx, gosync.SyncOptions{})
-				if err != nil {
-					return fmt.Errorf("syncing: %w", err)
+				if err := runToolSyncSection(ctx, a); err != nil {
+					return err
 				}
-				for _, w := range syncResult.Warnings {
-					fmt.Fprintf(os.Stderr, "warning: %s\n", w)
-				}
-				for _, op := range syncResult.Ops {
-					switch op.Kind {
-					case gosync.OpInstall:
-						if op.Err != nil {
-							fmt.Printf("  ✗ %s/%s: %v\n", op.Tool.Provider, op.Tool.Name, op.Err)
-						} else {
-							fmt.Printf("  ✓ installed: %s (%s)\n", op.Tool.Name, op.Tool.Provider)
-						}
-					case gosync.OpAlreadyInstalled:
-						fmt.Printf("  ✓ already installed: %s (%s)\n", op.Tool.Name, op.Tool.Provider)
-					case gosync.OpProviderUnavailable:
-						fmt.Printf("  ! provider unavailable: %s (skipping %s)\n", op.Tool.Provider, op.Tool.Name)
-					}
-				}
-				if n := len(syncResult.Installed()); n > 0 {
-					fmt.Printf("\n%d tool(s) installed.\n", n)
-				}
-				fmt.Println()
 			}
 
 			// ── 9. Dots setup ─────────────────────────────────────────────────
 			if err := runDotsInitSection(a); err != nil {
-				// Non-fatal: dots is optional during init.
+				// Non-fatal: dots is optional during bootstrap.
 				fmt.Fprintf(os.Stderr, "warning: dots setup: %v\n", err)
+			}
+			if err := markBootstrapComplete(ctx, a); err != nil {
+				return err
 			}
 
 			// ── 10. Next steps ────────────────────────────────────────────────
@@ -173,6 +153,141 @@ Run 'omni init' on every new machine to reproduce your environment.`,
 	cmd.Flags().BoolVar(&flagImport, "import", false, "import installed tools without prompting")
 	cmd.Flags().BoolVar(&flagNoImport, "no-import", false, "skip importing installed tools")
 	return cmd
+}
+
+func runExistingConfigBootstrap(cmd *cobra.Command, state *rootState, a *app.App) error {
+	ctx := cmd.Context()
+	fmt.Printf("Config already exists at %s\n", a.ConfigPath)
+
+	active, groups, ok := a.ActiveHostInfo()
+	if ok {
+		fmt.Printf("✓ Host %q is configured with groups: %s\n\n", active, groupList(groups))
+	} else {
+		active = shortHostnameForCLI()
+		fmt.Printf("No host config found for %q.\n", active)
+		if info, err := a.HostStatus(); err == nil && info != nil && len(info.Hosts) > 0 {
+			fmt.Printf("To seed this host from another one, run: omni hosts copy <source-host> %s\n", active)
+		}
+		if !promptYesNo(state, "Create this host now?", true) {
+			fmt.Println("Leaving config unchanged.")
+			return nil
+		}
+		if err := ensureHost(a); err != nil {
+			return fmt.Errorf("setting up host: %w", err)
+		}
+		active, groups, ok = a.ActiveHostInfo()
+		if ok {
+			fmt.Printf("✓ Host %q is ready with groups: %s\n\n", active, groupList(groups))
+		}
+	}
+
+	if promptYesNo(state, "Run sync now to install configured tools?", true) {
+		if err := runToolSyncSection(ctx, a); err != nil {
+			return err
+		}
+	}
+	if promptYesNo(state, "Run dotfile sync now?", false) {
+		if err := runDotsSyncSection(ctx, a); err != nil {
+			return err
+		}
+	}
+	if err := markBootstrapComplete(ctx, a); err != nil {
+		return err
+	}
+	fmt.Println("✓ Bootstrap complete.")
+	return nil
+}
+
+func runToolSyncSection(ctx context.Context, a *app.App) error {
+	fmt.Println("Syncing…")
+	syncResult, err := a.Sync(ctx, gosync.SyncOptions{})
+	if err != nil {
+		return fmt.Errorf("syncing: %w", err)
+	}
+	if syncResult == nil {
+		return fmt.Errorf("syncing: result unavailable")
+	}
+	for _, w := range syncResult.Warnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+	}
+	for _, op := range syncResult.Ops {
+		switch op.Kind {
+		case gosync.OpInstall:
+			if op.Err != nil {
+				fmt.Printf("  ✗ %s/%s: %v\n", op.Tool.Provider, op.Tool.Name, op.Err)
+			} else {
+				fmt.Printf("  ✓ installed: %s (%s)\n", op.Tool.Name, op.Tool.Provider)
+			}
+		case gosync.OpAlreadyInstalled:
+			fmt.Printf("  ✓ already installed: %s (%s)\n", op.Tool.Name, op.Tool.Provider)
+		case gosync.OpProviderUnavailable:
+			fmt.Printf("  ! provider unavailable: %s (skipping %s)\n", op.Tool.Provider, op.Tool.Name)
+		}
+	}
+	if n := len(syncResult.Installed()); n > 0 {
+		fmt.Printf("\n%d tool(s) installed.\n", n)
+	}
+	fmt.Println()
+	return nil
+}
+
+func runDotsSyncSection(ctx context.Context, a *app.App) error {
+	settings, err := a.LoadSettings()
+	if err != nil {
+		return fmt.Errorf("loading settings: %w", err)
+	}
+	if strings.TrimSpace(settings.DotsRepo) == "" || config.BoolVal(settings.DotsDisabled) {
+		fmt.Println("Dotfile sync is not configured for this host.")
+		return nil
+	}
+	if !a.DotsStowInstalled(ctx) {
+		installMessage := "GNU Stow (stow) is required for dotfile sync. Install stow with your system package manager, then rerun bootstrap."
+		if !stdinIsTerminal() {
+			return fmt.Errorf("%s", installMessage)
+		}
+		if !promptYesNo(nil, "GNU Stow (stow) is required for dotfile sync. Install stow with the system package manager now?", false) {
+			return fmt.Errorf("%s", installMessage)
+		}
+		if err := a.InstallDotsStow(ctx); err != nil {
+			return err
+		}
+		fmt.Println("✓ Stow installed.")
+	}
+	ops, err := a.DotsSyncContext(ctx, dots.SyncOptions{})
+	if err != nil {
+		return fmt.Errorf("dots sync: %w", err)
+	}
+	fmt.Printf("✓ Dotfiles synced (%d operation(s)).\n\n", len(ops))
+	return nil
+}
+
+func markBootstrapComplete(ctx context.Context, a *app.App) error {
+	active, _, ok := a.ActiveHostInfo()
+	if !ok {
+		return nil
+	}
+	if err := a.MarkHostBootstrapCompleted(ctx, active); err != nil {
+		return fmt.Errorf("marking bootstrap complete: %w", err)
+	}
+	return nil
+}
+
+func shortHostnameForCLI() string {
+	h := strings.TrimSpace(os.Getenv("OMNI_HOSTNAME"))
+	if h == "" {
+		host, err := os.Hostname()
+		if err != nil {
+			return "localhost"
+		}
+		h = strings.TrimSpace(host)
+		if h == "" {
+			return "localhost"
+		}
+	}
+	if idx := strings.IndexByte(h, '.'); idx >= 0 {
+		return h[:idx]
+	}
+	return h
 }
 
 // detectManager returns the first binary from candidates that is found in PATH.
@@ -200,9 +315,9 @@ func ensureHost(a *app.App) error {
 	return nil
 }
 
-// ─── dots init section ────────────────────────────────────────────────────────
+// ─── dots bootstrap section ───────────────────────────────────────────────────
 
-// runDotsInitSection runs the interactive dots setup during omni init.
+// runDotsInitSection runs the interactive dots setup during omni bootstrap.
 // It is non-fatal: if the user skips (empty input) or an error occurs the
 // caller logs a warning and continues.
 func runDotsInitSection(a *app.App) error {
@@ -236,7 +351,7 @@ func runDotsInitSection(a *app.App) error {
 
 	ctx := context.Background()
 	if !a.DotsStowInstalled(ctx) {
-		installMessage := "GNU Stow (stow) is required for dotfile sync. Install stow with your system package manager, then rerun init."
+		installMessage := "GNU Stow (stow) is required for dotfile sync. Install stow with your system package manager, then rerun bootstrap."
 		if !stdinIsTerminal() {
 			return fmt.Errorf("%s", installMessage)
 		}
