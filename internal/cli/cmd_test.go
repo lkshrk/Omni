@@ -4219,6 +4219,61 @@ func TestDotsStatus_WithDirtyGitRepo_PrintsGitStatus(t *testing.T) {
 	}
 }
 
+func TestDotsReminderCheck_Clean(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	t.Setenv("HOME", t.TempDir())
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	repoDir := t.TempDir()
+
+	withConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{DotsRepo: repoDir},
+	})
+
+	cmd := NewRootCmd()
+	outBuf := &bytes.Buffer{}
+	cmd.SetOut(outBuf)
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "reminder", "check"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("dots reminder check: %v", err)
+	}
+	if got := outBuf.String(); !strings.Contains(got, "Dotfiles are in sync.") {
+		t.Fatalf("dots reminder check output = %q, want clean message", got)
+	}
+}
+
+func TestDotsReminderCheck_DirtyGitRepo(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	t.Setenv("HOME", t.TempDir())
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	repoDir := t.TempDir()
+	if err := initGitRepo(t, repoDir); err != nil {
+		t.Skip("git not available: " + err.Error())
+	}
+	if err := os.WriteFile(filepath.Join(repoDir, "dirty.txt"), []byte("dirty\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	withConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{DotsRepo: repoDir},
+	})
+
+	cmd := NewRootCmd()
+	outBuf := &bytes.Buffer{}
+	cmd.SetOut(outBuf)
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "reminder", "check"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("dots reminder check: %v", err)
+	}
+	output := outBuf.String()
+	if !strings.Contains(output, "Dotfiles need attention:") || !strings.Contains(output, "pending git change") {
+		t.Fatalf("dots reminder check output = %q, want git reminder", output)
+	}
+}
+
 func TestList_SingleToolAndStateFilter_PrintsOnlyMatch(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")

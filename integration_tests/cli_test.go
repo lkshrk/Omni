@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -80,7 +81,7 @@ func seedCacheMain() int {
 	return 0
 }
 
-// TestCLI runs .txtar scripts in testdata/scripts/, skipping dependency-gated
+// TestCLI runs .txtar scripts in testdata/scripts/, skipping dependency/OS-gated
 // fixtures when the local environment does not satisfy them.
 func TestCLI(t *testing.T) {
 	scripts, err := stowAwareScriptFiles()
@@ -116,7 +117,15 @@ func stowAwareScriptFiles() ([]string, error) {
 		if filepath.Ext(name) != ".txtar" {
 			continue
 		}
-		requiresStow, err := scriptRequiresStow(filepath.Join("testdata/scripts", name))
+		path := filepath.Join("testdata/scripts", name)
+		requiresLinux, err := scriptRequires(path, "linux")
+		if err != nil {
+			return nil, err
+		}
+		if requiresLinux && runtime.GOOS != "linux" {
+			continue
+		}
+		requiresStow, err := scriptRequires(path, "stow")
 		if err != nil {
 			return nil, err
 		}
@@ -124,7 +133,7 @@ func stowAwareScriptFiles() ([]string, error) {
 			stowMissing = append(stowMissing, name)
 			continue
 		}
-		files = append(files, filepath.Join("testdata/scripts", name))
+		files = append(files, path)
 	}
 
 	if len(stowMissing) > 0 {
@@ -137,7 +146,7 @@ func stowAwareScriptFiles() ([]string, error) {
 	return files, nil
 }
 
-func scriptRequiresStow(path string) (bool, error) {
+func scriptRequires(path, requirement string) (bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return false, err
@@ -151,7 +160,7 @@ func scriptRequiresStow(path string) (bool, error) {
 			continue
 		}
 		if strings.HasPrefix(line, "#") {
-			if strings.Contains(line, "@requires:") && strings.Contains(line, "stow") {
+			if strings.Contains(line, "@requires:") && strings.Contains(line, requirement) {
 				return true, nil
 			}
 			continue

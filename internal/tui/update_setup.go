@@ -48,6 +48,12 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 		m.effectivePythonManager = msg.effectivePythonManager
 		m.effectiveNodeManager = msg.effectiveNodeManager
 		m.effectiveSystemManager = msg.effectiveSystemManager
+		m.dotsReminderService = msg.dotsReminderService
+		m.dotsReminderServiceErr = msg.dotsReminderServiceErr
+		m.dotsReminderInterval = dotsReminderIntervalFromService(msg.dotsReminderService)
+		m.dotsWatchService = msg.dotsWatchService
+		m.dotsWatchServiceErr = msg.dotsWatchServiceErr
+		m.dotsWatchDebounce = dotsWatchDebounceFromService(msg.dotsWatchService)
 		m.hostInfo = msg.hostInfo
 		m.setupProviders = msg.setupProviders
 		m.setupProviderIdx = 0
@@ -76,6 +82,12 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 	m.effectiveNodeManager = msg.effectiveNodeManager
 	m.effectiveSystemManager = msg.effectiveSystemManager
 	m.stowInstalled = msg.stowInstalled
+	m.dotsReminderService = msg.dotsReminderService
+	m.dotsReminderServiceErr = msg.dotsReminderServiceErr
+	m.dotsReminderInterval = dotsReminderIntervalFromService(msg.dotsReminderService)
+	m.dotsWatchService = msg.dotsWatchService
+	m.dotsWatchServiceErr = msg.dotsWatchServiceErr
+	m.dotsWatchDebounce = dotsWatchDebounceFromService(msg.dotsWatchService)
 	if len(msg.ecosystemProviders) > 0 {
 		m.providerNames = append([]string(nil), msg.ecosystemProviders...)
 	}

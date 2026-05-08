@@ -123,6 +123,8 @@ func TestDurableTUIActionsAreCataloged(t *testing.T) {
 		actions.DotsIgnore,
 		actions.DotsEnable,
 		actions.DotsDisable,
+		actions.DotsReminder,
+		actions.DotsWatch,
 		actions.GroupCreate,
 		actions.GroupRename,
 		actions.GroupDelete,

@@ -35,6 +35,8 @@ const (
 	DotsDisable                    ID = "dots.disable"
 	DotsPull                       ID = "dots.pull"
 	DotsPush                       ID = "dots.push"
+	DotsReminder                   ID = "dots.reminder"
+	DotsWatch                      ID = "dots.watch"
 	GroupCreate                    ID = "groups.create"
 	GroupRename                    ID = "groups.rename"
 	GroupDelete                    ID = "groups.delete"
@@ -499,6 +501,39 @@ var Dots = []Action{
 		CLI:             []CLIBinding{{Command: []string{"dots", "push"}, Flags: []string{"--message"}}},
 		Palette:         &PaletteBinding{Command: []string{"dots", "push"}, Description: "commit + push dotfile changes"},
 		PaletteEligible: true,
+	},
+	{
+		ID:              DotsReminder,
+		Domain:          "dots",
+		Scope:           ScopeGlobal,
+		Label:           "dots reminder",
+		Description:     "Check or install periodic dotfile sync reminders.",
+		LongDescription: "Check whether dotfiles need attention, or install a native user timer that runs the same check periodically.",
+		Mutates:         true,
+		TUI:             &TUIBinding{KeyMapField: "Toggle", DefaultKey: "space", Label: "toggle reminders", Description: "Enable or disable native dotfile reminder notifications from Settings."},
+		CLI: []CLIBinding{
+			{Command: []string{"dots", "reminder", "check"}, Flags: []string{"--format"}},
+			{Command: []string{"dots", "reminder", "run"}, Flags: []string{"--format", "--notify"}},
+			{Command: []string{"dots", "reminder", "install"}, Flags: []string{"--interval", "--notify"}},
+			{Command: []string{"dots", "reminder", "uninstall"}},
+			{Command: []string{"dots", "reminder", "status"}, Flags: []string{"--format"}},
+		},
+	},
+	{
+		ID:              DotsWatch,
+		Domain:          "dots",
+		Scope:           ScopeGlobal,
+		Label:           "dots watch",
+		Description:     "Watch dotfile paths and sync after changes.",
+		LongDescription: "Run a foreground dotfile filesystem watcher, or install a native user service that keeps configured dotfiles synced after local changes.",
+		Mutates:         true,
+		TUI:             &TUIBinding{KeyMapField: "Toggle", DefaultKey: "space", Label: "toggle watch", Description: "Enable or disable native dotfile watch sync from Settings."},
+		CLI: []CLIBinding{
+			{Command: []string{"dots", "watch", "run"}, Flags: []string{"--debounce"}},
+			{Command: []string{"dots", "watch", "install"}, Flags: []string{"--debounce"}},
+			{Command: []string{"dots", "watch", "uninstall"}},
+			{Command: []string{"dots", "watch", "status"}, Flags: []string{"--format"}},
+		},
 	},
 }
 

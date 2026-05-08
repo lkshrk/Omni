@@ -119,6 +119,10 @@ func (m *Model) resumeStowInstallAction(action stowInstallAction) []tea.Cmd {
 		}
 		m.beginDotsVariantOperation(req)
 		cmds = append(cmds, m.spinner.Tick, m.doDotsVariantChange(req))
+	case stowInstallDotsWatch:
+		m.loading = true
+		startOp(m, "Enabling dotfile watch…")
+		cmds = append(cmds, m.spinner.Tick, m.doToggleDotsWatchService(true))
 	default:
 		cmds = append(cmds, finishOpOK(m, "stow installed"))
 	}

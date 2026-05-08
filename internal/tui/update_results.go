@@ -474,6 +474,43 @@ func (m *Model) handleSettingsSavedMsg(msg settingsSavedMsg) []tea.Cmd {
 	return []tea.Cmd{setStatus(m, "✓ settings saved", false)}
 }
 
+func (m *Model) handleDotsServiceChangedMsg(msg dotsServiceChangedMsg) []tea.Cmd {
+	m.loading = false
+	name := "service"
+	switch msg.kind {
+	case dotsReminderServiceKind:
+		name = "reminder"
+		if msg.reminder != nil {
+			m.dotsReminderService = msg.reminder
+			if msg.enabled && msg.reminder.Interval > 0 {
+				m.dotsReminderInterval = msg.reminder.Interval
+			}
+		}
+		if msg.err == nil {
+			m.dotsReminderServiceErr = ""
+		}
+	case dotsWatchServiceKind:
+		name = "watch"
+		if msg.watch != nil {
+			m.dotsWatchService = msg.watch
+			if msg.enabled && msg.watch.Debounce > 0 {
+				m.dotsWatchDebounce = msg.watch.Debounce
+			}
+		}
+		if msg.err == nil {
+			m.dotsWatchServiceErr = ""
+		}
+	}
+	if msg.err != nil {
+		return []tea.Cmd{setStatus(m, "✗ dotfile "+name+" service: "+msg.err.Error(), true)}
+	}
+	action := "enabled"
+	if !msg.enabled {
+		action = "disabled"
+	}
+	return []tea.Cmd{setStatus(m, "✓ dotfile "+name+" service "+action, false)}
+}
+
 func (m *Model) handleDangerOpDoneMsg(msg dangerOpDoneMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 	m.loading = false

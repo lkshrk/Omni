@@ -5,6 +5,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/lipgloss/v2"
@@ -32,6 +33,10 @@ const (
 	settingsRowPythonManager
 	settingsRowDotsRepo
 	settingsRowDotsSync
+	settingsRowDotsReminder
+	settingsRowDotsReminderInterval
+	settingsRowDotsWatch
+	settingsRowDotsWatchDebounce
 	settingsRowDotsCommit
 	settingsRowDotsPush
 	settingsRowResetSettings
@@ -94,6 +99,26 @@ var settingsRows = []settingsRowMeta{
 		section: "Dotfiles",
 		hint:    hintCtxSettingsDotsSync,
 	},
+	settingsRowDotsReminder: {
+		label:   "Reminder Notifications",
+		section: "Dotfiles",
+		hint:    hintCtxSettingsToggle,
+	},
+	settingsRowDotsReminderInterval: {
+		label:   "Reminder Interval",
+		section: "Dotfiles",
+		hint:    hintCtxSettingsDuration,
+	},
+	settingsRowDotsWatch: {
+		label:   "Watch Sync",
+		section: "Dotfiles",
+		hint:    hintCtxSettingsToggle,
+	},
+	settingsRowDotsWatchDebounce: {
+		label:   "Watch Debounce",
+		section: "Dotfiles",
+		hint:    hintCtxSettingsDuration,
+	},
 	settingsRowDotsCommit: {
 		label:   "Commit Changes",
 		section: "Dotfiles",
@@ -122,6 +147,31 @@ type settingRow struct {
 	settingsRowMeta
 	value string
 	help  string // pre-rendered with styling
+}
+
+type settingsDurationChoice struct {
+	label string
+	value time.Duration
+}
+
+var reminderIntervalChoices = []settingsDurationChoice{
+	{label: "15m", value: 15 * time.Minute},
+	{label: "30m", value: 30 * time.Minute},
+	{label: "1h", value: time.Hour},
+	{label: "4h", value: 4 * time.Hour},
+	{label: "12h", value: 12 * time.Hour},
+	{label: "24h", value: 24 * time.Hour},
+	{label: "48h", value: 48 * time.Hour},
+	{label: "7d", value: 7 * 24 * time.Hour},
+}
+
+var watchDebounceChoices = []settingsDurationChoice{
+	{label: "500ms", value: 500 * time.Millisecond},
+	{label: "1s", value: time.Second},
+	{label: "2s", value: 2 * time.Second},
+	{label: "5s", value: 5 * time.Second},
+	{label: "10s", value: 10 * time.Second},
+	{label: "30s", value: 30 * time.Second},
 }
 
 func formatSettingLabel(label string) string {
@@ -166,6 +216,43 @@ func renderSettings(m Model) string {
 		}
 		avail := max(contentW-lipgloss.Width(rowInset)-settingLabelWidth-settingsMinGap, 12)
 		return p.styleProvider.Render(truncatePath(v, avail))
+	}
+
+	serviceVal := func(installed bool, statusErr string) string {
+		if statusErr != "" {
+			return p.styleHelp.Render("[n/a]")
+		}
+		return onOff(installed)
+	}
+
+	durationVal := func(duration time.Duration, statusErr string) string {
+		if statusErr != "" {
+			return p.styleHelp.Render("[n/a]")
+		}
+		return p.styleProvider.Render("[" + formatSettingsDuration(duration) + "]")
+	}
+
+	serviceHelp := func(name string, installed bool, statusErr string, enableCopy string) string {
+		if strings.TrimSpace(m.settings.DotsRepo) == "" {
+			return p.styleHelp.Render("Set a dotfiles repository before enabling " + name + ".")
+		}
+		if statusErr != "" {
+			return p.styleHelp.Render(statusErr)
+		}
+		if installed {
+			return p.styleHelp.Render("Native " + name + " service is installed; space disables it.")
+		}
+		return p.styleHelp.Render(enableCopy)
+	}
+
+	durationHelp := func(name string, installed bool, statusErr string) string {
+		if statusErr != "" {
+			return p.styleHelp.Render(statusErr)
+		}
+		if installed {
+			return p.styleHelp.Render("Update the installed " + name + " service interval.")
+		}
+		return p.styleHelp.Render("Choose the " + name + " service value used on the next enable.")
 	}
 
 	providerEnabled := func(name string) bool {
@@ -228,6 +315,36 @@ func renderSettings(m Model) string {
 				return p.styleHelp.Render("Disable sync: remove managed symlinks and copy files back locally.")
 			}(),
 		},
+		settingsRowDotsReminder: {
+			settingsRowMeta: settingsRows[settingsRowDotsReminder],
+			value:           serviceVal(m.dotsReminderService != nil && m.dotsReminderService.Installed, m.dotsReminderServiceErr),
+			help: serviceHelp(
+				"reminder",
+				m.dotsReminderService != nil && m.dotsReminderService.Installed,
+				m.dotsReminderServiceErr,
+				"Install a native reminder timer with desktop notifications.",
+			),
+		},
+		settingsRowDotsReminderInterval: {
+			settingsRowMeta: settingsRows[settingsRowDotsReminderInterval],
+			value:           durationVal(m.currentDotsReminderInterval(), m.dotsReminderServiceErr),
+			help:            durationHelp("reminder", m.dotsReminderService != nil && m.dotsReminderService.Installed, m.dotsReminderServiceErr),
+		},
+		settingsRowDotsWatch: {
+			settingsRowMeta: settingsRows[settingsRowDotsWatch],
+			value:           serviceVal(m.dotsWatchService != nil && m.dotsWatchService.Installed, m.dotsWatchServiceErr),
+			help: serviceHelp(
+				"watch",
+				m.dotsWatchService != nil && m.dotsWatchService.Installed,
+				m.dotsWatchServiceErr,
+				"Install a native watcher that syncs links after changes; it does not commit or push.",
+			),
+		},
+		settingsRowDotsWatchDebounce: {
+			settingsRowMeta: settingsRows[settingsRowDotsWatchDebounce],
+			value:           durationVal(m.currentDotsWatchDebounce(), m.dotsWatchServiceErr),
+			help:            durationHelp("watch", m.dotsWatchService != nil && m.dotsWatchService.Installed, m.dotsWatchServiceErr),
+		},
 		settingsRowDotsCommit: {
 			settingsRowMeta: settingsRows[settingsRowDotsCommit],
 			value: func() string {
@@ -240,13 +357,13 @@ func renderSettings(m Model) string {
 				if m.settings.DotsGit.AutoPush {
 					return p.styleHelp.Render("Implied by Push Changes.")
 				}
-				return p.styleHelp.Render("Commit changes automatically after dots add/remove.")
+				return p.styleHelp.Render("Commit automatically after dots add/remove/variant operations; does not affect Watch Sync.")
 			}(),
 		},
 		settingsRowDotsPush: {
 			settingsRowMeta: settingsRows[settingsRowDotsPush],
 			value:           onOff(m.settings.DotsGit.AutoPush),
-			help:            p.styleHelp.Render("Push (and commit) automatically after dots add/remove."),
+			help:            p.styleHelp.Render("Push (and commit) automatically after dots add/remove/variant operations; does not affect Watch Sync."),
 		},
 		settingsRowResetSettings: {
 			settingsRowMeta: settingsRows[settingsRowResetSettings],
@@ -297,6 +414,17 @@ func renderSettings(m Model) string {
 			prl := newCursorList(p, prItems, prCursor, 4)
 			write(prl.String() + "\n")
 			write(renderContextHints(m, hintCtxSettingsPriorityEdit, hintPrefix) + "\n")
+			continue
+		}
+
+		if i == m.serviceDurationRow && m.editingServiceDuration {
+			write(renderResponsiveGroupListRow(p, true,
+				[]rowCell{leftCell(p.styleActiveText.Render(rowInset+formatSettingLabel(row.label)), settingLabelWidth+lipgloss.Width(rowInset))},
+				[]rowCell{rightCell(p.styleProvider.Render("[editing]"), 0)},
+				contentW, settingsMinGap, listColumnGap,
+			) + "\n")
+			write(renderSettingsDurationPicker(m, detailPrefix) + "\n")
+			write(renderContextHints(m, hintCtxSettingsDurationEdit, hintPrefix) + "\n")
 			continue
 		}
 
@@ -359,6 +487,111 @@ func settingsRowHintContext(row int) hintContext {
 		return settingsRows[row].hint
 	}
 	return hintCtxSettingsToggle
+}
+
+func (m Model) currentDotsReminderInterval() time.Duration {
+	if m.dotsReminderInterval > 0 {
+		return m.dotsReminderInterval
+	}
+	return dotsReminderIntervalFromService(m.dotsReminderService)
+}
+
+func (m Model) currentDotsWatchDebounce() time.Duration {
+	if m.dotsWatchDebounce > 0 {
+		return m.dotsWatchDebounce
+	}
+	return dotsWatchDebounceFromService(m.dotsWatchService)
+}
+
+func dotsReminderIntervalFromService(service *app.DotsReminderService) time.Duration {
+	if service != nil && service.Interval > 0 {
+		return service.Interval
+	}
+	return app.DefaultDotsReminderInterval()
+}
+
+func dotsWatchDebounceFromService(service *app.DotsWatchService) time.Duration {
+	if service != nil && service.Debounce > 0 {
+		return service.Debounce
+	}
+	return app.DefaultDotsWatchDebounce()
+}
+
+func settingsDurationChoicesForRow(row int, current time.Duration) []settingsDurationChoice {
+	var base []settingsDurationChoice
+	switch row {
+	case settingsRowDotsReminderInterval:
+		base = reminderIntervalChoices
+	case settingsRowDotsWatchDebounce:
+		base = watchDebounceChoices
+	default:
+		return nil
+	}
+	choices := append([]settingsDurationChoice(nil), base...)
+	if current > 0 && !settingsDurationChoicesContain(choices, current) {
+		choices = append(choices, settingsDurationChoice{label: formatSettingsDuration(current), value: current})
+		sort.Slice(choices, func(i, j int) bool { return choices[i].value < choices[j].value })
+	}
+	return choices
+}
+
+func settingsDurationChoicesContain(choices []settingsDurationChoice, value time.Duration) bool {
+	return settingsDurationChoiceIndex(choices, value) >= 0
+}
+
+func settingsDurationChoiceIndex(choices []settingsDurationChoice, value time.Duration) int {
+	for i, choice := range choices {
+		if choice.value == value {
+			return i
+		}
+	}
+	return -1
+}
+
+func formatSettingsDuration(duration time.Duration) string {
+	switch {
+	case duration%(24*time.Hour) == 0:
+		days := duration / (24 * time.Hour)
+		return fmt.Sprintf("%dd", days)
+	case duration%time.Hour == 0:
+		hours := duration / time.Hour
+		return fmt.Sprintf("%dh", hours)
+	case duration%time.Minute == 0:
+		minutes := duration / time.Minute
+		return fmt.Sprintf("%dm", minutes)
+	default:
+		return duration.String()
+	}
+}
+
+func renderSettingsDurationPicker(m Model, prefix string) string {
+	p := m.palette
+	current := m.currentSettingsDurationValue(m.serviceDurationRow)
+	choices := settingsDurationChoicesForRow(m.serviceDurationRow, current)
+	if len(choices) == 0 {
+		return prefix + p.styleHelp.Render("No duration choices available.")
+	}
+	idx := clampRange(m.serviceDurationIdx, 0, len(choices)-1)
+	parts := make([]string, 0, len(choices))
+	for i, choice := range choices {
+		if i == idx {
+			parts = append(parts, p.styleInstalled.Render("["+choice.label+"]"))
+			continue
+		}
+		parts = append(parts, p.styleHelp.Render(choice.label))
+	}
+	return prefix + strings.Join(parts, "  ")
+}
+
+func (m Model) currentSettingsDurationValue(row int) time.Duration {
+	switch row {
+	case settingsRowDotsReminderInterval:
+		return m.currentDotsReminderInterval()
+	case settingsRowDotsWatchDebounce:
+		return m.currentDotsWatchDebounce()
+	default:
+		return 0
+	}
 }
 
 func renderGroupDeletePopup(m Model) string {

@@ -180,6 +180,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case settingsSavedMsg:
 		cmds = append(cmds, m.handleSettingsSavedMsg(msg)...)
 
+	case dotsServiceChangedMsg:
+		cmds = append(cmds, m.handleDotsServiceChangedMsg(msg)...)
+
 	case dangerOpDoneMsg:
 		cmds = append(cmds, m.handleDangerOpDoneMsg(msg)...)
 
@@ -295,7 +298,7 @@ func (m Model) mainTabsClickable() bool {
 	if m.hostRenameMode || m.groupCreating || m.groupRenameMode || m.groupDeleteConfirm {
 		return false
 	}
-	if m.hostEditMode != 0 || m.editingPriority || m.dangerConfirmRow >= 0 {
+	if m.hostEditMode != 0 || m.editingPriority || m.editingServiceDuration || m.dangerConfirmRow >= 0 {
 		return false
 	}
 	return true
@@ -357,6 +360,11 @@ func (m *Model) scrollDotsBy(delta int) {
 func (m *Model) scrollSettingsBy(delta int) {
 	if m.editingPriority {
 		m.priorityCursor = clampIndex(m.priorityCursor+delta, len(m.priorityDraft))
+		return
+	}
+	if m.editingServiceDuration {
+		choices := settingsDurationChoicesForRow(m.serviceDurationRow, m.currentSettingsDurationValue(m.serviceDurationRow))
+		m.serviceDurationIdx = clampIndex(m.serviceDurationIdx+delta, len(choices))
 		return
 	}
 	m.settingsCursor = clampIndex(m.settingsCursor+delta, numSettingRows)

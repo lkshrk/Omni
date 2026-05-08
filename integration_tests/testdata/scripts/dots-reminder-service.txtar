@@ -1,0 +1,55 @@
+# dots reminder service installs, reports status, and uninstalls through the native service adapter
+# @requires: linux
+env HOME=$WORK/home
+env XDG_CONFIG_HOME=$WORK/xdg-config
+env PATH=$WORK/bin:$PATH
+env OMNI_SYSTEMCTL_LOG=$WORK/systemctl.log
+mkdir $WORK/home
+mkdir $WORK/bin
+exec chmod 755 $WORK/bin/systemctl
+
+exec git init $WORK/home/dotfiles
+exec git -C $WORK/home/dotfiles config user.email t@t.com
+exec git -C $WORK/home/dotfiles config user.name T
+exec git -C $WORK/home/dotfiles commit --allow-empty -m init
+
+exec omni --config settings.json --cache-dir cache dots reminder install --interval 2m --notify=false
+stdout 'Installed dots reminder service'
+stdout 'Platform: systemd'
+stdout 'Interval: 2m0s'
+stdout 'Notifications: false'
+exists $WORK/xdg-config/systemd/user/omni-dots-reminder.service
+exists $WORK/xdg-config/systemd/user/omni-dots-reminder.timer
+exec grep $WORK/settings.json $WORK/xdg-config/systemd/user/omni-dots-reminder.service
+stdout 'settings.json'
+exec grep $WORK/cache $WORK/xdg-config/systemd/user/omni-dots-reminder.service
+stdout 'cache'
+exec grep 'dots reminder run' $WORK/xdg-config/systemd/user/omni-dots-reminder.service
+stdout 'dots reminder run'
+! exec grep -- '--notify' $WORK/xdg-config/systemd/user/omni-dots-reminder.service
+exec grep 'OnUnitActiveSec=120s' $WORK/xdg-config/systemd/user/omni-dots-reminder.timer
+stdout 'OnUnitActiveSec=120s'
+exec grep 'daemon-reload' $WORK/systemctl.log
+stdout 'daemon-reload'
+exec grep 'enable --now omni-dots-reminder.timer' $WORK/systemctl.log
+stdout 'enable --now omni-dots-reminder.timer'
+
+exec omni --config settings.json --cache-dir cache dots reminder status
+stdout 'Dots reminder service: installed \(systemd\)'
+
+exec omni --config settings.json --cache-dir cache dots reminder uninstall
+stdout 'Uninstalled dots reminder service'
+! exists $WORK/xdg-config/systemd/user/omni-dots-reminder.service
+! exists $WORK/xdg-config/systemd/user/omni-dots-reminder.timer
+exec grep 'disable --now omni-dots-reminder.timer' $WORK/systemctl.log
+stdout 'disable --now omni-dots-reminder.timer'
+
+exec omni --config settings.json --cache-dir cache dots reminder status
+stdout 'Dots reminder service: not installed \(systemd\)'
+
+-- settings.json --
+{"host_settings":{"testhost":{"dots_repo":"~/dotfiles"}},"hosts":{"testhost":[]},"groups":[{"name":"testhost","special":"host"}]}
+
+-- bin/systemctl --
+#!/bin/sh
+printf '%s\n' "$*" >> "$OMNI_SYSTEMCTL_LOG"
