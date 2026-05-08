@@ -45,7 +45,7 @@ brew install omni
 
 ## Usage
 
-Run `omni` to start the TUI. On first launch, onboarding creates `~/.config/omni/settings.json`, lets you choose package ecosystems, creates this machine's host assignment, optionally imports installed tools, can enable dotfile sync, and lets you attach existing reusable groups. If a config already exists but this machine has no host entry yet, onboarding first offers to copy another host's reusable groups, host-local settings, provider overrides, and dotfile variants. After onboarding, Omni performs the first package scan; this can take a while on a fresh cache.
+Run `omni` to start the TUI. On first launch, bootstrap creates `~/.config/omni/settings.json`, lets you choose package ecosystems, creates this machine's host assignment, optionally imports installed tools, can enable dotfile sync, and lets you attach existing reusable groups. If a config already exists but this machine has no host entry yet, bootstrap first offers to copy another host's reusable groups, host-local settings, provider overrides, and dotfile variants. If this host is already configured, bootstrap offers to review first, sync configured tools, or sync dotfiles before entering the app. You can rerun it later with `omni bootstrap` or Settings -> Maintenance -> Run Bootstrap Again. After bootstrap, Omni performs the first package scan; this can take a while on a fresh cache.
 
 You can also create or edit `~/.config/omni/settings.json` directly. The current versioned schema lives at [spec/omni.settings.v1.schema.json](spec/omni.settings.v1.schema.json), with [spec/omni.settings.schema.json](spec/omni.settings.schema.json) kept as the latest-schema alias.
 
@@ -92,7 +92,7 @@ Base CLI workflow:
 
 ```sh
 omni                                      # open the TUI
-omni init                                 # run onboarding from the CLI
+omni bootstrap                            # run guided host bootstrap from the CLI
 omni sync                                 # install/sync current host groups
 omni sync --all                           # add discovered local tools and install missing tools
 omni refresh                              # rescan installed/outdated tools and metadata

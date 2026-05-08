@@ -778,12 +778,12 @@ var Setup = []Action{
 		ID:              SetupInit,
 		Domain:          "setup",
 		Scope:           ScopeGlobal,
-		Label:           "initialise config",
-		Description:     "Create or update omni's config.",
-		LongDescription: "Run first-time setup: choose ecosystem providers, host groups, and optional dots configuration.",
+		Label:           "bootstrap host",
+		Description:     "Create or activate omni's config for this host.",
+		LongDescription: "Run guided bootstrap: choose ecosystem providers, host groups, and optional tools or dots activation.",
 		Mutates:         true,
-		TUI:             &TUIBinding{KeyMapField: "Confirm", DefaultKey: "enter", Label: "set up omni", Description: "Create config from the setup flow."},
-		CLI:             []CLIBinding{{Command: []string{"init"}}},
+		TUI:             &TUIBinding{KeyMapField: "Confirm", DefaultKey: "enter", Label: "run bootstrap", Description: "Run the guided bootstrap flow."},
+		CLI:             []CLIBinding{{Command: []string{"bootstrap"}}},
 	},
 }
 

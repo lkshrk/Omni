@@ -11,6 +11,17 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
+type setupActivationOption struct {
+	label  string
+	detail string
+}
+
+var setupActivationOptions = []setupActivationOption{
+	{label: "Review first", detail: "Open Omni without changing tools or dotfiles."},
+	{label: "Sync tools", detail: "Install configured missing tools for this host."},
+	{label: "Sync dotfiles", detail: "Apply configured dotfile links for this host."},
+}
+
 func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 
@@ -63,6 +74,7 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 		m.setupCopyHostIdx = 0
 		m.setupGroupIdx = 0
 		m.setupGroupDraft = nil
+		m.setupActivationIdx = 0
 		m.mode = viewSetup
 		m.setupBackgroundMode = viewList
 		m.setupStep = 2
@@ -109,6 +121,13 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 		m.consolidateOptions = m.app.ConsolidateOptions()
 	}
 	m.applyFilter()
+	if msg.bootstrapRequired && !m.setupComplete {
+		m.mode = viewSetup
+		m.setupBackgroundMode = viewList
+		m.setupActivationIdx = 0
+		m.setupStep = 10
+		return cmds
+	}
 	if m.setupBackgroundMode == viewDots {
 		m.mode = viewDots
 		m.setupBackgroundMode = viewList
@@ -238,6 +257,21 @@ func (m *Model) handleSetupHostGroupsDoneMsg(msg setupHostGroupsDoneMsg) []tea.C
 	}
 	m.hostRequired = false
 	cmds = append(cmds, setStatus(m, setupGroupsSavedStatus(msg.groups), false))
+	m.finishSetupWithReload(&cmds)
+	return cmds
+}
+
+func (m *Model) handleSetupBootstrapDoneMsg(msg setupBootstrapDoneMsg) []tea.Cmd {
+	var cmds []tea.Cmd
+
+	m.loading = false
+	if msg.err != nil {
+		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
+		return cmds
+	}
+	if msg.message != "" {
+		cmds = append(cmds, setStatus(m, "✓ "+msg.message, false))
+	}
 	m.finishSetupWithReload(&cmds)
 	return cmds
 }
@@ -381,6 +415,41 @@ func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			m.loading = true
 			startOp(m, "Saving groups…")
 			cmds = append(cmds, m.spinner.Tick, m.doSetupHostGroups(nil))
+		}
+	case 10: // Existing-host activation.
+		switch {
+		case key.Matches(msg, m.keys.Up):
+			if m.setupActivationIdx > 0 {
+				m.setupActivationIdx--
+			}
+		case key.Matches(msg, m.keys.Down):
+			if m.setupActivationIdx < len(setupActivationOptions)-1 {
+				m.setupActivationIdx++
+			}
+		case key.Matches(msg, m.keys.Confirm):
+			switch clampRange(m.setupActivationIdx, 0, len(setupActivationOptions)-1) {
+			case 0:
+				cmds = append(cmds, setStatus(m, "✓ bootstrap reviewed", false))
+				m.finishSetupWithReload(&cmds)
+			case 1:
+				m.loading = true
+				startOp(m, "Syncing tools…")
+				cmds = append(cmds, m.spinner.Tick, m.doSetupBootstrapTools())
+			case 2:
+				if strings.TrimSpace(m.settings.DotsRepo) == "" || config.BoolVal(m.settings.DotsDisabled) {
+					cmds = append(cmds, setStatus(m, "dotfile sync is not configured for this host", true))
+					break
+				}
+				if m.promptForStowInstall(stowInstallLaunchSync) {
+					break
+				}
+				m.loading = true
+				startOp(m, "Syncing dotfiles…")
+				cmds = append(cmds, m.spinner.Tick, m.doSetupBootstrapDots())
+			}
+		case key.Matches(msg, m.keys.Back):
+			cmds = append(cmds, setStatus(m, "✓ bootstrap skipped", false))
+			m.finishSetupWithReload(&cmds)
 		}
 	}
 
@@ -574,18 +643,33 @@ func (m Model) setupSelectedGroups() []string {
 }
 
 func (m *Model) finishSetupWithReload(cmds *[]tea.Cmd) {
+	m.markBootstrapComplete(cmds)
 	m.mode = viewList
 	m.setupBackgroundMode = viewList
 	m.setupStep = 0
 	m.setupCopyHostIdx = 0
 	m.setupGroupIdx = 0
 	m.setupGroupDraft = nil
+	m.setupActivationIdx = 0
 	m.hostRequired = false
 	m.setupComplete = true
 	m.setupReloading = true
 	m.progressText = "Loading tools…"
 	m.loading = true
 	*cmds = append(*cmds, m.spinner.Tick, loadTools(m.app, m.ctx))
+}
+
+func (m *Model) markBootstrapComplete(cmds *[]tea.Cmd) {
+	if m.app == nil {
+		return
+	}
+	host := shortHostname()
+	if m.hostInfo != nil && m.hostInfo.Active != "" {
+		host = m.hostInfo.Active
+	}
+	if err := m.app.MarkHostBootstrapCompleted(m.ctx, host); err != nil {
+		*cmds = append(*cmds, setStatus(m, "✗ bootstrap marker: "+err.Error(), true))
+	}
 }
 
 func setupGroupsSavedStatus(groups []string) string {

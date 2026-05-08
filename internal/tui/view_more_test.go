@@ -363,6 +363,20 @@ func TestRenderSetup_CopyHostAndGroups(t *testing.T) {
 		assertActionLeftAligned(t, out, "skip")
 		assertActionRightAligned(t, out, "continue", m.width)
 	})
+
+	t.Run("bootstrap activation", func(t *testing.T) {
+		m := setupRenderModel(10)
+		m.hostInfo = &app.HostInfo{Active: "workstation", Hosts: map[string]config.HostAssignment{
+			"workstation": {Groups: []string{"base", "work"}},
+		}}
+		m.settings.DotsRepo = "~/dotfiles"
+		out := renderSetup(m)
+		if !strings.Contains(out, `Host "workstation" is configured`) || !strings.Contains(out, "Sync tools") {
+			t.Fatalf("expected bootstrap activation options, got:\n%s", out)
+		}
+		assertActionLeftAligned(t, out, "review first")
+		assertActionRightAligned(t, out, "continue", m.width)
+	})
 }
 
 func TestRenderSetup_AllActionFootersUsePopupAlignment(t *testing.T) {
@@ -381,6 +395,7 @@ func TestRenderSetup_AllActionFootersUsePopupAlignment(t *testing.T) {
 		{name: "copy host", model: setupRenderModel(7), left: "start fresh", right: "copy host"},
 		{name: "host picker", model: setupRenderModel(8), left: "start fresh", right: "copy selected"},
 		{name: "group selection", model: setupRenderModel(9), left: "skip", right: "continue"},
+		{name: "bootstrap host", model: setupRenderModel(10), left: "review first", right: "continue"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1091,6 +1106,7 @@ func TestRenderSettings_LabelOrderAndLegacyNames(t *testing.T) {
 		{"Commit Changes", false},
 		{"Push Changes", false},
 		{"Maintenance", true},
+		{"Run Bootstrap Again", false},
 		{"Reset Settings", false},
 		{"Reset Cache", false},
 	}

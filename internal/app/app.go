@@ -723,7 +723,7 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 		hostname := currentMachineGroupName()
 		effective, active, ok := effectiveHostGroups(cfg, groups, hostname)
 		if !ok {
-			return nil, fmt.Errorf("no host configuration for %q - run 'omni init' to set one up", hostname)
+			return nil, fmt.Errorf("no host configuration for %q - run 'omni bootstrap' to set one up", hostname)
 		}
 		groups = effective
 		activeGroups = active

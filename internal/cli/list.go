@@ -24,7 +24,7 @@ func newListCmd(state *rootState) *cobra.Command {
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !state.app.HasConfig() {
-				fmt.Fprintln(cmd.ErrOrStderr(), "No config found. Run 'omni init' to get started.")
+				fmt.Fprintln(cmd.ErrOrStderr(), "No config found. Run 'omni bootstrap' to get started.")
 				return nil
 			}
 			if err := validateFormat(format, "table", "json"); err != nil {

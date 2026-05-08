@@ -35,7 +35,7 @@ Use --all to ` + actions.MustLongDescription(actions.ToolSyncAll) + `.`,
 				}
 			}
 			if !state.app.HasConfig() {
-				fmt.Fprintln(cmd.ErrOrStderr(), "No config found. Run 'omni init' to get started.")
+				fmt.Fprintln(cmd.ErrOrStderr(), "No config found. Run 'omni bootstrap' to get started.")
 				return nil
 			}
 			if all {
