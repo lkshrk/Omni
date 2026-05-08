@@ -23,59 +23,36 @@ Type "mkdir -p /private/tmp/omni-vhs-bin && GOCACHE=/private/tmp/omni-gocache go
 Sleep 1s
 Type "chmod +x demo/prepare-vhs-demo.sh && demo/prepare-vhs-demo.sh /private/tmp/omni-vhs-demo /private/tmp/omni-vhs-bin/omni" Enter
 Sleep 1s
-Type "export OMNI_CONFIG=/private/tmp/omni-vhs-demo/settings.json OMNI_CACHE_DIR=/private/tmp/omni-vhs-demo/cache OMNI_HOSTNAME=demo-macbook HOME=/private/tmp/omni-vhs-demo/home PATH=/private/tmp/omni-vhs-demo/bin:/private/tmp/omni-vhs-bin" Enter
-Show
-
+Type "export OMNI_CONFIG=/private/tmp/omni-vhs-demo/settings.json OMNI_CACHE_DIR=/private/tmp/omni-vhs-demo/cache OMNI_HOSTNAME=demo-macbook HOME=/private/tmp/omni-vhs-demo/home PATH=/private/tmp/omni-vhs-demo/bin:/private/tmp/omni-vhs-bin TERM_PROGRAM=WezTerm COLORTERM=truecolor" Enter
 Type "omni ui" Enter
-Sleep 3s
+Sleep 5s
+Show
+Sleep 3.2s
 
-Type "?"
-Sleep 2s
-Escape
-Sleep 800ms
-
-Tab
-Sleep 1.5s
-Type "/fd"
-Sleep 600ms
-Escape
-Sleep 800ms
-
-Type ":"
-Sleep 500ms
-Type "sync"
-Sleep 2s
-Escape
-Sleep 800ms
+Type "jj"
+Sleep 900ms
 
 Tab
-Sleep 1.5s
-Type "/go"
-Sleep 600ms
-Escape
-Sleep 800ms
-
-Type ":"
-Sleep 500ms
-Type "sync"
-Sleep 1.5s
-Escape
-Sleep 800ms
+Sleep 2.2s
 
 Tab
-Sleep 1.5s
-Type "/alacritty"
-Sleep 600ms
-Escape
-Sleep 800ms
+Sleep 2.2s
 
-Type ":"
-Sleep 500ms
-Type "help"
+Tab
+Sleep 2.2s
+
+Tab
 Sleep 1.2s
-Escape
-Sleep 800ms
 
+Type "]"
+Sleep 600ms
+
+Type "/term"
+Sleep 1.2s
+Enter
+Sleep 2.4s
+
+Hide
 Type "q"
 Sleep 400ms
 Type "q"

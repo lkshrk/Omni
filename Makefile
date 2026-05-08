@@ -3,21 +3,52 @@ BINARY   := omni
 CMD_PATH := ./cmd/omni
 DEMO_TAPE := demo/omni-demo.tape
 DEMO_GIF  := docs/assets/omni-demo.gif
+LIVE_GOCACHE ?= $(CURDIR)/.tmp/go-build
+DEV_DIR     ?= /private/tmp/omni-dev
+DEV_HOST    ?= devhost
+DEV_CONFIG  ?= $(DEV_DIR)/settings.json
+DEV_CACHE   ?= $(DEV_DIR)/cache
+DEV_GOCACHE ?= $(DEV_DIR)/go-build
+ARGS        ?= --help
 
 # Embed version from git tags; fall back to "dev" on untagged repos.
 GIT_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS     := -X $(MODULE)/internal/cli.Version=$(GIT_VERSION)
 
-.PHONY: build run test test-package-managers test-all test-integration-build test-integration lint clean install gen-schema demo-gif
+.PHONY: build run tui-live tui-dev cli cli-live cli-dev dev-bootstrap test test-package-managers test-all test-integration-build test-integration lint clean install gen-schema demo-gif
 
 ## build: compile the binary to ./bin/omni
 build:
 	@mkdir -p bin
 	go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD_PATH)
 
-## run: build and run the TUI
-run:
-	go run -ldflags "$(LDFLAGS)" $(CMD_PATH)
+## run: alias for tui-live
+run: tui-live
+
+## tui-live: run the TUI with live/default config and cache
+tui-live:
+	@mkdir -p "$(LIVE_GOCACHE)"
+	GOCACHE="$(LIVE_GOCACHE)" go run -ldflags "$(LDFLAGS)" $(CMD_PATH)
+
+## tui-dev: run the TUI with isolated dev config and cache
+tui-dev: dev-bootstrap
+	GOCACHE="$(DEV_GOCACHE)" OMNI_HOSTNAME="$(DEV_HOST)" go run -ldflags "$(LDFLAGS)" $(CMD_PATH) --config "$(DEV_CONFIG)" --cache-dir "$(DEV_CACHE)"
+
+## cli: alias for cli-dev
+cli: cli-dev
+
+## cli-live: run the CLI with live/default config and cache; pass ARGS="..."
+cli-live:
+	@mkdir -p "$(LIVE_GOCACHE)"
+	GOCACHE="$(LIVE_GOCACHE)" go run -ldflags "$(LDFLAGS)" $(CMD_PATH) $(ARGS)
+
+## cli-dev: run the CLI with isolated dev config and cache; pass ARGS="..."
+cli-dev: dev-bootstrap
+	GOCACHE="$(DEV_GOCACHE)" OMNI_HOSTNAME="$(DEV_HOST)" go run -ldflags "$(LDFLAGS)" $(CMD_PATH) --config "$(DEV_CONFIG)" --cache-dir "$(DEV_CACHE)" $(ARGS)
+
+dev-bootstrap:
+	@mkdir -p "$(DEV_DIR)" "$(DEV_CACHE)" "$(DEV_GOCACHE)"
+	@GOCACHE="$(DEV_GOCACHE)" OMNI_HOSTNAME="$(DEV_HOST)" go run -ldflags "$(LDFLAGS)" $(CMD_PATH) --config "$(DEV_CONFIG)" --cache-dir "$(DEV_CACHE)" hosts ensure "$(DEV_HOST)" >/dev/null
 
 ## install: install the binary to $GOPATH/bin
 install:
