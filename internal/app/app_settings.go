@@ -317,7 +317,7 @@ func (a *App) PinEcosystemForHost(_ context.Context, ecosystem, concrete string)
 }
 
 // ResetSettings replaces the settings block with zero-value defaults,
-// preserving all other data (groups, profiles, etc.).
+// preserving all other data (groups, hosts, etc.).
 func (a *App) ResetSettings(ctx context.Context) error {
 	return a.SaveSettings(ctx, config.Settings{})
 }

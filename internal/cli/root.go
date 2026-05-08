@@ -51,7 +51,7 @@ Already set up?
 		// behave the same as `omni ui` so the binary is self-contained.
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			model := tui.New(state.app, cmd.Context())
-			p := tea.NewProgram(model)
+			p := tea.NewProgram(model, tui.ProgramOptions()...)
 			if _, err := p.Run(); err != nil {
 				return fmt.Errorf("TUI error: %w", err)
 			}
@@ -77,7 +77,7 @@ Already set up?
 				return fmt.Errorf("initialising app: %w", err)
 			}
 			state.app = a
-			return requireProfile(cmd, a)
+			return requireActiveHost(cmd, a)
 		},
 		PersistentPostRunE: func(_ *cobra.Command, _ []string) error {
 			if state.app != nil {
@@ -104,13 +104,14 @@ Already set up?
 		newAddCmd(state),
 		newImportCmd(state),
 		newSearchCmd(state),
+		newRefreshCmd(state),
 		newProvidersCmd(state),
 		newSettingsCmd(state),
 		newConsolidateCmd(state),
 		newSwitchCmd(state),
 		newToolsCmd(state),
 		newGroupsCmd(state),
-		newProfileCmd(state),
+		newHostsCmd(state),
 		newDotsCmd(state),
 		newUICmd(state),
 	)
@@ -118,15 +119,15 @@ Already set up?
 	return root
 }
 
-// profileExempt lists command names (and their ancestor names) that may run
-// without an active profile. Checked against the full command chain.
+// hostExempt lists command names (and their ancestor names) that may run
+// without an active host. Checked against the full command chain.
 // NOTE: Do NOT add "omni" here — it is the ancestor of every command and would
-// exempt the entire CLI from profile enforcement.
-var profileExempt = map[string]bool{
+// exempt the entire CLI from host enforcement.
+var hostExempt = map[string]bool{
 	"init":       true,
-	"profile":    true,
-	"dots":       true, // dots commands work independently of tool profiles
-	"ui":         true, // TUI handles its own onboarding including profile setup
+	"hosts":      true,
+	"dots":       true, // dots commands work independently of tool hosts
+	"ui":         true, // TUI handles its own onboarding including host setup
 	"version":    true,
 	"providers":  true,
 	"settings":   true,
@@ -134,30 +135,29 @@ var profileExempt = map[string]bool{
 	"completion": true,
 }
 
-// requireProfile returns an error when no profile is mapped to this machine,
-// unless the command (or one of its ancestors) is exempt from profile checks,
-// or the command was invoked with an explicit --profile flag (which directly
-// selects the profile to use, bypassing hostname resolution).
-func requireProfile(cmd *cobra.Command, a *app.App) error {
+// requireActiveHost returns an error when no host is configured for this machine,
+// unless the command (or one of its ancestors) is exempt from host checks,
+// or the command was invoked with an explicit --group flag.
+func requireActiveHost(cmd *cobra.Command, a *app.App) error {
 	// The bare `omni` root command (no subcommand) launches the TUI, which
-	// handles profile setup internally. Skip enforcement here so the TUI can
-	// present its own onboarding flow when no profile is configured.
+	// handles host setup internally. Skip enforcement here so the TUI can
+	// present its own onboarding flow when no host is configured.
 	// NOTE: we check cmd.Parent() == nil rather than adding "omni" to
-	// profileExempt, because the ancestor walk would then exempt every subcommand.
+	// hostExempt, because the ancestor walk would then exempt every subcommand.
 	if cmd.Parent() == nil {
 		return nil
 	}
 	for c := cmd; c != nil; c = c.Parent() {
-		if profileExempt[c.Name()] {
+		if hostExempt[c.Name()] {
 			return nil
 		}
-		// An explicit --profile flag means the caller knows which profile to
-		// use — skip the hostname requirement.
-		if f := c.Flags().Lookup("profile"); f != nil && f.Changed {
+		// An explicit --group flag targets a concrete group and does not need
+		// active-host expansion.
+		if f := c.Flags().Lookup("group"); f != nil && f.Changed {
 			return nil
 		}
 	}
-	return a.RequireActiveProfile()
+	return a.RequireActiveHost()
 }
 
 // Execute runs the root command with a signal-aware context.
@@ -169,6 +169,7 @@ func Execute() {
 	root := NewRootCmd()
 	if err := root.ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
+		printProviderErrorAdvice(os.Stderr, err)
 		os.Exit(1)
 	}
 }

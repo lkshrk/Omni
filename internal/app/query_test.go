@@ -14,10 +14,9 @@ func TestQueryTools_FiltersByNameStateAndGroup(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools:     logicalToolSpecs(logicalTool("ripgrep", "brew"), logicalTool("bat", "brew")),
-		Groups:    []*config.GroupConfig{{Tools: groupTools("ripgrep", "bat")}},
-		Profiles:  map[string]config.Profile{"default": {Groups: []string{"base"}}},
-		Hostnames: map[string]string{"testhost": "default"},
+		Tools:  logicalToolSpecs(logicalTool("ripgrep", "brew"), logicalTool("bat", "brew")),
+		Groups: []*config.GroupConfig{{Name: "testhost", Special: "host", Tools: groupTools("ripgrep", "bat")}},
+		Hosts:  map[string][]string{"testhost": {}},
 	}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
@@ -32,7 +31,7 @@ func TestQueryTools_FiltersByNameStateAndGroup(t *testing.T) {
 		t.Fatalf("upsert bat: %v", err)
 	}
 
-	items, err := a.QueryTools(ctx, app.ToolListOptions{Name: "ripgrep", State: "updates", Group: "base"})
+	items, err := a.QueryTools(ctx, app.ToolListOptions{Name: "ripgrep", State: "updates", Group: "testhost"})
 	if err != nil {
 		t.Fatalf("QueryTools: %v", err)
 	}
@@ -41,7 +40,7 @@ func TestQueryTools_FiltersByNameStateAndGroup(t *testing.T) {
 	}
 }
 
-func TestQueryTools_ProfileIncludesMachineGroup(t *testing.T) {
+func TestQueryTools_HostIncludesMachineGroup(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -51,9 +50,9 @@ func TestQueryTools_ProfileIncludesMachineGroup(t *testing.T) {
 		),
 		Groups: []*config.GroupConfig{
 			{Name: "work", Tools: groupTools("slack")},
-			{Name: "testhost", Tools: groupTools("fd")},
+			{Name: "testhost", Special: "host", Tools: groupTools("fd")},
 		},
-		Profiles: map[string]config.Profile{"work-profile": {Groups: []string{"work"}}},
+		Hosts: map[string][]string{"testhost": {"work"}},
 	}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
@@ -65,7 +64,7 @@ func TestQueryTools_ProfileIncludesMachineGroup(t *testing.T) {
 		t.Fatalf("upsert fd: %v", err)
 	}
 
-	items, err := a.QueryTools(ctx, app.ToolListOptions{Profile: "work-profile"})
+	items, err := a.QueryTools(ctx, app.ToolListOptions{Host: "testhost"})
 	if err != nil {
 		t.Fatalf("QueryTools: %v", err)
 	}

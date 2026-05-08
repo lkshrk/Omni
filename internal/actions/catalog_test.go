@@ -73,6 +73,18 @@ func TestMustLabel_PanicsOnUnknown(t *testing.T) {
 	_ = MustLabel(ID("does.not.exist"))
 }
 
+func TestMustTUICopy_UsesTUIOverrides(t *testing.T) {
+	if got := MustTUILabel(DotsSync); got != "sync dotfiles" {
+		t.Fatalf("MustTUILabel(DotsSync) = %q, want TUI override", got)
+	}
+	if got := MustTUIDescription(ToolSyncAll); got != "Add discovered tools and install missing tools." {
+		t.Fatalf("MustTUIDescription(ToolSyncAll) = %q, want TUI override", got)
+	}
+	if got := MustTUIConfirmDescription(ToolReinstallDefault); got != ConfirmReinstall {
+		t.Fatalf("MustTUIConfirmDescription(ToolReinstallDefault) = %q, want %q", got, ConfirmReinstall)
+	}
+}
+
 func TestMustDescription_PanicsOnUnknown(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
@@ -181,6 +193,12 @@ func TestActionsHaveSurfaceBindings(t *testing.T) {
 		if action.TUI != nil && (action.TUI.KeyMapField == "" || action.TUI.DefaultKey == "") {
 			t.Fatalf("%s has incomplete TUI binding: %+v", action.ID, action.TUI)
 		}
+		if action.TUI != nil && (action.TUI.Label == "" || action.TUI.Description == "") {
+			t.Fatalf("%s has incomplete TUI copy: %+v", action.ID, action.TUI)
+		}
+		if action.TUI != nil && action.RequiresConfirm && action.TUI.ConfirmDescription == "" {
+			t.Fatalf("%s requires confirmation without TUI confirm text", action.ID)
+		}
 		if action.Palette != nil {
 			if len(action.Palette.Command) == 0 || action.Palette.Description == "" {
 				t.Fatalf("%s has incomplete palette binding: %+v", action.ID, action.Palette)
@@ -208,6 +226,7 @@ func TestActionCatalogIncludesDurableDomains(t *testing.T) {
 	for _, id := range []ID{
 		ToolSetSpec,
 		ToolDeleteSpec,
+		ToolNormalizeProviderOverrides,
 		ToolImport,
 		ToolSwitchProvider,
 		DotsDiscover,
@@ -222,11 +241,9 @@ func TestActionCatalogIncludesDurableDomains(t *testing.T) {
 		GroupDelete,
 		GroupEditTools,
 		GroupEditDots,
-		ProfileCreate,
-		ProfileRename,
-		ProfileDelete,
-		ProfileEditGroups,
-		ProfileEditHosts,
+		HostCreate,
+		HostDelete,
+		HostEditGroups,
 		SettingsSet,
 		SettingsProvider,
 		SettingsReset,
@@ -261,13 +278,13 @@ func TestLogicalToolActionContracts(t *testing.T) {
 	}
 
 	changeGroup := mustAction(t, ToolChangeGroup)
-	for _, command := range [][]string{{"groups", "add-tool"}, {"groups", "remove-tool"}} {
+	for _, command := range [][]string{{"groups", "move-tool"}, {"groups", "remove-tool"}} {
 		if !hasCLICommand(changeGroup, command) {
 			t.Fatalf("%s missing CLI command %v in %+v", changeGroup.ID, command, changeGroup.CLI)
 		}
 	}
-	if hasCLICommand(changeGroup, []string{"groups", "move-tool"}) {
-		t.Fatalf("%s must not expose legacy single-membership move-tool command: %+v", changeGroup.ID, changeGroup.CLI)
+	if hasCLICommand(changeGroup, []string{"groups", "add-tool"}) {
+		t.Fatalf("%s must not expose legacy add-tool command: %+v", changeGroup.ID, changeGroup.CLI)
 	}
 
 	pin := mustAction(t, ToolPinProvider)
@@ -292,7 +309,7 @@ func TestDotsActionContracts(t *testing.T) {
 	if !hasCLICommand(editGroups, []string{"dots", "groups"}) {
 		t.Fatalf("%s missing dots groups CLI binding: %+v", editGroups.ID, editGroups.CLI)
 	}
-	for _, flag := range []string{"--set", "--add", "--remove"} {
+	for _, flag := range []string{"--move", "--remove"} {
 		if !hasCLIFlag(editGroups, flag) {
 			t.Fatalf("%s missing %s CLI flag: %+v", editGroups.ID, flag, editGroups.CLI)
 		}
@@ -316,10 +333,10 @@ func TestMutatingToolActionsHaveCLIAndTUIParity(t *testing.T) {
 		if len(action.CLI) == 0 {
 			t.Fatalf("%s mutates state but has no CLI binding", action.ID)
 		}
-		if action.Requires(RequiresGroupAssignment) && !hasAnyCLICommand(action, [][]string{{"add"}, {"groups", "add-tool"}, {"groups", "remove-tool"}}) {
+		if action.Requires(RequiresGroupAssignment) && !hasAnyCLICommand(action, [][]string{{"add"}, {"groups", "move-tool"}, {"groups", "remove-tool"}}) {
 			t.Fatalf("%s requires group assignment but has no explicit group CLI: %+v", action.ID, action.CLI)
 		}
-		if action.Requires(RequiresIgnoreScope) && !hasAnyCLICommand(action, [][]string{{"tools", "ignore"}, {"groups", "ignore-tool"}, {"profile", "ignore", "add"}}) {
+		if action.Requires(RequiresIgnoreScope) && !hasAnyCLICommand(action, [][]string{{"tools", "ignore"}, {"groups", "ignore-tool"}}) {
 			t.Fatalf("%s requires ignore scope but has no scoped ignore CLI: %+v", action.ID, action.CLI)
 		}
 		if action.Requires(RequiresProviderScope) && !hasCLICommand(action, []string{"tools", "set"}) {

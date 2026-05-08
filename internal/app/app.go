@@ -103,27 +103,34 @@ func dotsTestTargetPath(path string) (string, error) {
 }
 
 type SyncAllOptions struct {
-	Discovered   []*database.ToolCache
-	DryRun       bool
-	Progress     func(string)
-	ToolProgress func(isync.ProgressEvent)
+	Discovered     []*database.ToolCache
+	DryRun         bool
+	Progress       func(string)
+	ToolProgress   func(isync.ProgressEvent)
+	SkipPrivileged bool
 }
 
 type SyncAllResult struct {
-	SyncResult   *isync.SyncResult
-	ClaimedNames []string
-	Failures     []BulkToolError
+	SyncResult                  *isync.SyncResult
+	ClaimedNames                []string
+	NormalizedProviderOverrides []NormalizedInstallOverride
+	Failures                    []BulkToolError
 }
 
 type BulkToolError struct {
-	Name     string
-	Provider string
-	Message  string
+	Name        string
+	Provider    string
+	Message     string
+	ActionError *provider.ActionError
 }
 
 type UpgradeAllResult struct {
 	Upgraded []string
 	Failures []BulkToolError
+}
+
+type UpgradeAllOptions struct {
+	SkipPrivileged bool
 }
 
 // New creates an App targeting configPath (the full path to settings.json).
@@ -165,6 +172,9 @@ func (a *App) Init(ctx context.Context) error {
 		return fmt.Errorf("normalizing config file: %w", err)
 	}
 	a.backupConfigOnLaunch()
+	if err := a.repairCurrentHostEntry(); err != nil {
+		return fmt.Errorf("repairing current host entry: %w", err)
+	}
 
 	db, err := database.Open(a.DBPath)
 	if err != nil {
@@ -399,6 +409,11 @@ func (a *App) withConfig(fn func(*config.RootConfig) error) error {
 		}
 		return err
 	}
+	if a.registry != nil {
+		if errs := config.ValidateRoot(cfg, a.providerValidation()); len(errs) > 0 {
+			return config.ValidationErrors(errs)
+		}
+	}
 	after, err := topLevelKeys(cfg)
 	if err != nil {
 		return err
@@ -436,8 +451,8 @@ func topLevelKeys(cfg *config.RootConfig) (map[string]json.RawMessage, error) {
 		Schema       string                       `json:"$schema,omitempty"`
 		Settings     config.Settings              `json:"settings"`
 		Tools        map[string]config.ToolSpec   `json:"tools,omitempty"`
-		Profiles     map[string]config.Profile    `json:"profiles,omitempty"`
-		Hostnames    map[string]string            `json:"hostnames,omitempty"`
+		Hosts        map[string][]string          `json:"hosts,omitempty"`
+		Ignore       config.GlobalIgnore          `json:"ignore,omitempty"`
 		Groups       []*config.GroupConfig        `json:"groups,omitempty"`
 		HostSettings map[string]hostSettingsPatch `json:"host_settings,omitempty"`
 	}
@@ -445,8 +460,8 @@ func topLevelKeys(cfg *config.RootConfig) (map[string]json.RawMessage, error) {
 		Schema:       cfg.Schema,
 		Settings:     cfg.Settings,
 		Tools:        cfg.Tools,
-		Profiles:     cfg.Profiles,
-		Hostnames:    cfg.Hostnames,
+		Hosts:        cfg.Hosts,
+		Ignore:       cfg.Ignore,
 		Groups:       cfg.Groups,
 		HostSettings: hostSettingsPatchDoc(cfg.HostSettings),
 	})
@@ -471,22 +486,12 @@ func findGroupInConfig(cfg *config.RootConfig, name string) *config.GroupConfig 
 	return nil
 }
 
-// ensureGroupInConfig returns an existing group by base-name or appends and
-// returns a new one. "base" and "" both address the base group.
+// ensureGroupInConfig returns an existing group by name or appends and returns a new one.
 func ensureGroupInConfig(cfg *config.RootConfig, name string) *config.GroupConfig {
-	// Normalise: "" and "base" both address the base group whose Name == "".
-	if name == "" {
-		name = "base"
-	}
 	if g := findGroupInConfig(cfg, name); g != nil {
 		return g
 	}
-	var g *config.GroupConfig
-	if name == "base" {
-		g = &config.GroupConfig{}
-	} else {
-		g = &config.GroupConfig{Name: name}
-	}
+	g := &config.GroupConfig{Name: name}
 	cfg.Groups = append(cfg.Groups, g)
 	return g
 }
@@ -553,76 +558,78 @@ func currentMachineGroupName() string {
 	return machineGroupName(currentHostname())
 }
 
-func ensureCurrentMachineGroupInConfig(cfg *config.RootConfig) *config.GroupConfig {
-	return ensureGroupInConfig(cfg, currentMachineGroupName())
+func compatibilityGroupName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return currentMachineGroupName()
+	}
+	return name
 }
 
-// explicitProfileGroups returns only the groups persisted in profile.Groups.
-// The machine group is deliberately not included here.
-func explicitProfileGroups(cfg *config.RootConfig, groups []*config.GroupConfig, profileName string) ([]*config.GroupConfig, error) {
-	prof, ok := cfg.Profiles[profileName]
-	if !ok {
-		return nil, fmt.Errorf("profile %q not found", profileName)
+func ensureHostGroupInConfig(cfg *config.RootConfig, hostname string) (*config.GroupConfig, error) {
+	groupName := machineGroupName(hostname)
+	if groupName == "" {
+		return nil, fmt.Errorf("hostname is required")
 	}
-	nameSet := make(map[string]struct{}, len(prof.Groups))
-	for _, n := range prof.Groups {
-		nameSet[n] = struct{}{}
+	if group := findGroupInConfig(cfg, groupName); group != nil {
+		if !group.IsHost() {
+			return nil, fmt.Errorf("group %q already exists and is not a host group", groupName)
+		}
+		return group, nil
 	}
-	var out []*config.GroupConfig
-	for _, g := range groups {
-		if _, ok := nameSet[g.BaseName()]; ok {
-			out = append(out, g)
+	group := &config.GroupConfig{Name: groupName, Special: "host"}
+	cfg.Groups = append(cfg.Groups, group)
+	return group, nil
+}
+
+func activeHostGroupNames(cfg *config.RootConfig, hostname string) ([]string, bool) {
+	hostname = machineGroupName(hostname)
+	groups, ok := cfg.Hosts[hostname]
+	out := make([]string, 0, len(groups)+1)
+	out = append(out, hostname)
+	out = append(out, groups...)
+	return out, ok
+}
+
+func groupsByNames(groups []*config.GroupConfig, names []string) []*config.GroupConfig {
+	byName := make(map[string]*config.GroupConfig, len(groups))
+	for _, group := range groups {
+		byName[group.BaseName()] = group
+	}
+	out := make([]*config.GroupConfig, 0, len(names))
+	for _, name := range names {
+		if group := byName[name]; group != nil {
+			out = append(out, group)
 		}
 	}
-	return out, nil
+	return out
 }
 
-// injectMachineGroup appends the current machine group to groups and active if
-// it exists in cfg and is not already present. The machine group is not stored
-// in profile.Groups, so runtime profile operations inject it explicitly.
-func injectMachineGroup(cfg *config.RootConfig, groups, active []*config.GroupConfig) ([]*config.GroupConfig, []*config.GroupConfig) {
-	machineGroup := currentMachineGroupName()
-	hg := findGroupInConfig(cfg, machineGroup)
-	if hg == nil {
-		return groups, active
-	}
-	for _, g := range groups {
-		if g.BaseName() == machineGroup {
-			return groups, active // already present
-		}
-	}
-	return append(groups, hg), append(active, hg)
+func effectiveHostGroups(cfg *config.RootConfig, groups []*config.GroupConfig, hostname string) ([]*config.GroupConfig, []*config.GroupConfig, bool) {
+	names, ok := activeHostGroupNames(cfg, hostname)
+	effective := groupsByNames(groups, names)
+	return effective, effective, ok
 }
 
-// effectiveProfileGroups returns the profile's explicit groups plus the current
-// machine group when it exists. active is the same effective set and is returned
-// separately for sync result bookkeeping.
-func effectiveProfileGroups(cfg *config.RootConfig, groups []*config.GroupConfig, profileName string) ([]*config.GroupConfig, []*config.GroupConfig, error) {
-	explicit, err := explicitProfileGroups(cfg, groups, profileName)
-	if err != nil {
-		return nil, nil, err
-	}
-	effective, active := injectMachineGroup(cfg, explicit, explicit)
-	return effective, active, nil
-}
-
-// ProfileGroups returns the explicit persisted groups that belong to the named
-// profile. The current machine group is runtime-only and is not included.
-// When profileName is empty, all groups are returned.
-// Returns an error if profileName is non-empty but not found in the config.
-func (a *App) ProfileGroups(ctx context.Context, profileName string) ([]*config.GroupConfig, error) {
+// HostGroups returns groups active for a host. When hostname is empty, all
+// groups are returned.
+func (a *App) HostGroups(ctx context.Context, hostname string) ([]*config.GroupConfig, error) {
 	groups, err := a.Groups(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if profileName == "" {
+	if hostname == "" {
 		return groups, nil
 	}
 	cfg, err := a.loadConfig()
 	if err != nil {
 		return nil, fmt.Errorf("loading config: %w", err)
 	}
-	return explicitProfileGroups(cfg, groups, profileName)
+	effective, _, ok := effectiveHostGroups(cfg, groups, hostname)
+	if !ok {
+		return nil, fmt.Errorf("host %q is not configured", hostname)
+	}
+	return effective, nil
 }
 
 // ─── Tap management ───────────────────────────────────────────────────────────
@@ -675,8 +682,8 @@ func (a *App) syncTaps(ctx context.Context, taps []string, dryRun bool) error {
 // Sync syncs taps first, then tools. When AutoImport is enabled it also runs
 // Import so newly installed tools are captured in the config.
 // opts.Group restricts the sync to one named group.
-// opts.Profile restricts the sync to the groups in a named profile.
-// When both are empty, the active profile is auto-detected from the hostname.
+// When opts.Group is empty, the active host's special group plus assigned
+// reusable groups are synced.
 func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResult, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -684,7 +691,6 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 	}
 	groups := cfg.Groups
 
-	var activeProfileName string
 	var activeGroups []*config.GroupConfig
 
 	switch {
@@ -693,41 +699,14 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 		if len(groups) == 0 {
 			return nil, fmt.Errorf("group %q not found", opts.Group)
 		}
-	case opts.Profile != "":
-		activeProfileName = opts.Profile
-		groups, activeGroups, err = effectiveProfileGroups(cfg, groups, opts.Profile)
-		if err != nil {
-			return nil, err
-		}
 	default:
-		hostname := currentHostname()
-		if profileName, ok := cfg.ActiveProfile(hostname); ok {
-			// Hostname maps to a profile: use explicit profile groups plus
-			// the machine-local inbox group.
-			activeProfileName = profileName
-			if effective, active, e := effectiveProfileGroups(cfg, groups, profileName); e == nil {
-				groups = effective
-				activeGroups = active
-			}
-		} else {
-			// No profile mapping: fall back to the machine group.
-			machineGroup := currentMachineGroupName()
-			hostnameGroups := filterGroups(groups, machineGroup)
-			if len(hostnameGroups) > 0 {
-				groups = hostnameGroups
-			} else if !opts.DryRun {
-				// Machine group doesn't exist yet: create it by importing
-				// locally installed packages that aren't tracked anywhere.
-				if _, err := a.Import(ctx, ImportOptions{Group: machineGroup}); err != nil {
-					return nil, fmt.Errorf("importing machine group %q: %w", machineGroup, err)
-				}
-				if reloaded, e := a.loadConfig(); e == nil {
-					if hg := filterGroups(reloaded.Groups, machineGroup); len(hg) > 0 {
-						groups = hg
-					}
-				}
-			}
+		hostname := currentMachineGroupName()
+		effective, active, ok := effectiveHostGroups(cfg, groups, hostname)
+		if !ok {
+			return nil, fmt.Errorf("no host configuration for %q - run 'omni init' to set one up", hostname)
 		}
+		groups = effective
+		activeGroups = active
 	}
 
 	// Resolve once and derive both the entry list (for the syncer) and the
@@ -746,12 +725,7 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 	// by the resolver across group memberships.
 	flatCfg := &config.Config{Tools: resolvedTools, Settings: cfg.Settings}
 
-	// Thread the active profile's ignore list into sync options.
-	if activeProfileName != "" {
-		if prof, ok := cfg.Profiles[activeProfileName]; ok {
-			opts.IgnoreList = prof.Ignore
-		}
-	}
+	opts.IgnoreList = cfg.Ignore.Tools
 
 	// Construct syncer per call so Sync always sees the current *database.DB,
 	// avoiding stale references after ResetCache rotates the connection.
@@ -762,8 +736,8 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 	result.Warnings = append(result.Warnings, warnings...)
 
 	if !opts.DryRun {
-		if activeProfileName != "" {
-			// Collect installed tools not covered by the active profile and
+		if opts.Group == "" {
+			// Collect installed tools not covered by the active host and
 			// append them to the machine group so nothing is lost.
 			if err := a.syncOrphansToMachineGroup(ctx, activeGroups); err != nil {
 				result.Warnings = append(result.Warnings,
@@ -771,11 +745,10 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 			}
 
 			// Report non-active groups that are now fully installed so the CLI
-			// can prompt the user to add them to the profile.
+			// can prompt the user to add them to the host.
 			activeNames := groupBaseNames(activeGroups)
 			if satisfied, e := a.CheckSatisfiedGroups(ctx, activeNames); e == nil {
 				result.SatisfiedGroups = satisfied
-				result.ActiveProfile = activeProfileName
 			}
 		} else if cfg.Settings.AutoImport {
 			if _, err := a.Import(ctx, ImportOptions{Group: currentMachineGroupName()}); err != nil {
@@ -808,33 +781,54 @@ func (a *App) SyncAll(ctx context.Context, opts SyncAllOptions) (*SyncAllResult,
 		}
 	}
 
+	if !opts.DryRun {
+		if err := a.EnsureHost(currentMachineGroupName()); err != nil {
+			return nil, err
+		}
+	}
+	var normalized []NormalizedInstallOverride
+	if !opts.DryRun {
+		var err error
+		normalized, err = a.NormalizeHostDefaultInstallOverrides(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("normalizing default provider overrides: %w", err)
+		}
+		if len(normalized) > 0 && opts.Progress != nil {
+			opts.Progress(fmt.Sprintf("normalized %d default provider overrides…", len(normalized)))
+		}
+	}
 	claimedNames, claimFailures, claimErr := a.claimDiscoveredTools(ctx, discovered, currentMachineGroupName(), opts)
 	syncResult, syncErr := a.Sync(ctx, isync.SyncOptions{
-		DryRun:       opts.DryRun,
-		Progress:     opts.Progress,
-		ToolProgress: opts.ToolProgress,
+		DryRun:         opts.DryRun,
+		Progress:       opts.Progress,
+		ToolProgress:   opts.ToolProgress,
+		SkipPrivileged: opts.SkipPrivileged,
 	})
 	failures := append([]BulkToolError(nil), claimFailures...)
 	if syncResult != nil {
 		for _, op := range syncResult.Failed() {
-			message := ""
-			if op.Err != nil {
-				message = op.Err.Error()
-			}
-			failures = append(failures, BulkToolError{
-				Name:     op.Tool.Name,
-				Provider: op.Tool.Provider,
-				Message:  message,
-			})
+			failures = append(failures, bulkToolErrorFromError(op.Tool.Name, op.Tool.Provider, op.Err))
 		}
 	}
-	return &SyncAllResult{SyncResult: syncResult, ClaimedNames: claimedNames, Failures: failures}, errors.Join(claimErr, syncErr)
+	return &SyncAllResult{SyncResult: syncResult, ClaimedNames: claimedNames, NormalizedProviderOverrides: normalized, Failures: failures}, errors.Join(claimErr, syncErr)
+}
+
+func bulkToolErrorFromError(name, providerName string, err error) BulkToolError {
+	failure := BulkToolError{Name: name, Provider: providerName}
+	if err != nil {
+		failure.Message = err.Error()
+		if actionErr, ok := provider.ActionErrorFrom(err); ok {
+			failure.ActionError = actionErr
+		}
+	}
+	return failure
 }
 
 func (a *App) claimDiscoveredTools(ctx context.Context, discovered []*database.ToolCache, groupName string, opts SyncAllOptions) ([]string, []BulkToolError, error) {
 	var claimed []string
 	var failures []BulkToolError
 	var errs []error
+	resolvedEcosystems := a.ResolvedEcosystemProviders(ctx)
 	for _, t := range discovered {
 		if t == nil || !t.Installed || t.Name == "" || t.Provider == "" {
 			continue
@@ -847,9 +841,9 @@ func (a *App) claimDiscoveredTools(ctx context.Context, discovered []*database.T
 			}
 		}
 		configProvider := a.searchResultConfigProvider(t.Provider)
-		installWith := t.InstalledWith
-		if configProvider != t.Provider && installWith == "" {
-			installWith = t.Provider
+		installWith := configInstallWithForConcreteProvider(configProvider, t.InstalledWith, resolvedEcosystems)
+		if installWith == "" && t.InstalledWith == "" {
+			installWith = configInstallWithForConcreteProvider(configProvider, t.Provider, resolvedEcosystems)
 		}
 		tool := provider.Tool{Name: t.Name, Provider: configProvider, Package: t.Package}
 		if tool.Package == "" {
@@ -869,7 +863,7 @@ func (a *App) claimDiscoveredTools(ctx context.Context, discovered []*database.T
 			if opts.ToolProgress != nil {
 				opts.ToolProgress(isync.ProgressEvent{Tool: tool, Message: "Failed adding " + t.Name + " to config", Err: err, Done: true})
 			}
-			failures = append(failures, BulkToolError{Name: t.Name, Provider: configProvider, Message: err.Error()})
+			failures = append(failures, bulkToolErrorFromError(t.Name, configProvider, err))
 			errs = append(errs, fmt.Errorf("claim %s: %w", t.Name, err))
 			continue
 		}
@@ -931,6 +925,7 @@ func (a *App) Install(ctx context.Context, name, providerName string) error {
 		}
 		tool := a.operationTool(t, opProvider)
 		if err := installWithProvider(ctx, prov, tool, t.InstallWith); err != nil {
+			a.recordPrivilegeError(ctx, t.Name, t.Provider, t.EffectivePackage(), err)
 			return err
 		}
 		ver, err := verifyInstalledAfterInstall(ctx, prov, tool, t.InstallWith, opProvider)
@@ -970,6 +965,7 @@ func (a *App) Install(ctx context.Context, name, providerName string) error {
 	}
 	t := provider.Tool{Name: name, Provider: providerName, Package: name}
 	if err := prov.Install(ctx, t); err != nil {
+		a.recordPrivilegeError(ctx, name, providerName, name, err)
 		return err
 	}
 	ver, err := verifyInstalledAfterInstall(ctx, prov, t, "", providerName)
@@ -1088,12 +1084,13 @@ func (a *App) Uninstall(ctx context.Context, name, providerName string) error {
 	}
 	t := provider.Tool{Name: name, Provider: opProvider, Package: pkg}
 	if err := uninstallWithProvider(ctx, prov, t, manager); err != nil {
+		a.recordPrivilegeError(ctx, name, providerName, pkg, err)
 		return err
 	}
 	if err := a.removeToolFromConfig(name, providerName); err != nil {
 		return err
 	}
-	return a.readDB().MarkUninstalled(ctx, name, providerName, pkg)
+	return a.readDB().Delete(ctx, name, providerName, pkg)
 }
 
 // RemoveToolFromConfig removes a configured tool without calling a package
@@ -1196,6 +1193,7 @@ func (a *App) Upgrade(ctx context.Context, name, providerName string) error {
 	}
 	t := provider.Tool{Name: name, Provider: opProvider, Package: pkg}
 	if err := upgradeTool(ctx, prov, t, manager); err != nil {
+		a.recordPrivilegeError(ctx, name, providerName, pkg, err)
 		return err
 	}
 	installed, ver, err := isInstalledTool(ctx, prov, t, manager)
@@ -1256,6 +1254,10 @@ func (a *App) UpgradeAll(ctx context.Context, progress func(string)) error {
 }
 
 func (a *App) UpgradeAllDetailed(ctx context.Context, progress func(string), toolProgress func(isync.ProgressEvent)) (*UpgradeAllResult, error) {
+	return a.UpgradeAllDetailedWithOptions(ctx, progress, toolProgress, UpgradeAllOptions{})
+}
+
+func (a *App) UpgradeAllDetailedWithOptions(ctx context.Context, progress func(string), toolProgress func(isync.ProgressEvent), opts UpgradeAllOptions) (*UpgradeAllResult, error) {
 	tools, err := a.readDB().List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing tools: %w", err)
@@ -1276,15 +1278,29 @@ func (a *App) UpgradeAllDetailed(ctx context.Context, progress func(string), too
 		if toolProgress != nil {
 			toolProgress(isync.ProgressEvent{Tool: tool, Message: "Upgrading " + t.Name + "…"})
 		}
+		if opts.SkipPrivileged {
+			if plan, planErr := a.ToolPrivilegePlan(ctx, t, provider.PrivilegeActionUpgrade); planErr == nil && plan.RequiresPrivilege() {
+				err := fmt.Errorf("requires sudo: %s", privilegeReason(plan))
+				if toolProgress != nil {
+					toolProgress(isync.ProgressEvent{Tool: tool, Message: "Admin approval needed for " + t.Name, Err: err, Done: true})
+				}
+				result.Failures = append(result.Failures, BulkToolError{
+					Name:     t.Name,
+					Provider: t.Provider,
+					Message:  err.Error(),
+				})
+				if markErr := a.readDB().MarkPrivilegeRequired(ctx, t.Name, t.Provider, t.Package, string(plan.Requirement), plan.Reason); markErr != nil {
+					err = fmt.Errorf("%w (failed to record privilege requirement: %v)", err, markErr)
+				}
+				errs = append(errs, fmt.Errorf("%s: %w", t.Name, err))
+				continue
+			}
+		}
 		if err := a.Upgrade(ctx, t.Name, t.Provider); err != nil {
 			if toolProgress != nil {
 				toolProgress(isync.ProgressEvent{Tool: tool, Message: "Failed upgrading " + t.Name, Err: err, Done: true})
 			}
-			result.Failures = append(result.Failures, BulkToolError{
-				Name:     t.Name,
-				Provider: t.Provider,
-				Message:  err.Error(),
-			})
+			result.Failures = append(result.Failures, bulkToolErrorFromError(t.Name, t.Provider, err))
 			errs = append(errs, fmt.Errorf("%s: %w", t.Name, err))
 			continue
 		}
@@ -1309,10 +1325,7 @@ func (a *App) CreateEmptyConfig() error {
 	if a.HasConfig() {
 		return nil
 	}
-	return a.withConfig(func(cfg *config.RootConfig) error {
-		cfg.Groups = []*config.GroupConfig{{}} // one base group
-		return nil
-	})
+	return config.Save(a.ConfigPath, &config.RootConfig{})
 }
 
 // LoadTaps returns the union of all taps declared across all groups.
@@ -1335,7 +1348,7 @@ func (a *App) Groups(_ context.Context) ([]*config.GroupConfig, error) {
 
 // ─── Add ──────────────────────────────────────────────────────────────────────
 
-// Add appends a tool to the named group (empty = base group).
+// Add appends a tool to the named group (empty = current host group).
 // For brew tap packages like "hashicorp/tap/terraform", the tap is auto-added.
 func (a *App) Add(ctx context.Context, providerName, pkg, name, groupName, installWith string) error {
 	if providerName == "" {
@@ -1354,8 +1367,19 @@ func (a *App) Add(ctx context.Context, providerName, pkg, name, groupName, insta
 	if name == "" {
 		name = pkg
 	}
+	if groupName == "" {
+		groupName = currentMachineGroupName()
+	}
 
 	if err := a.withConfig(func(cfg *config.RootConfig) error {
+		if _, err := ensureHostGroupInConfig(cfg, currentMachineGroupName()); err != nil {
+			return err
+		}
+		for _, existing := range cfg.Groups {
+			if existing.BaseName() != groupName {
+				filterToolMemberships(existing, name)
+			}
+		}
 		gc := ensureGroupInConfig(cfg, groupName)
 		if cfg.Tools == nil {
 			cfg.Tools = make(map[string]config.ToolSpec)
@@ -1407,7 +1431,7 @@ func (a *App) providerSupportsTaps(providerName, installWith string) bool {
 	return false
 }
 
-// currentHostname returns the machine's hostname for profile matching.
+// currentHostname returns the machine's hostname for host matching.
 // OMNI_HOSTNAME overrides os.Hostname() — useful for tests and containers.
 func currentHostname() string {
 	if h := os.Getenv("OMNI_HOSTNAME"); h != "" {

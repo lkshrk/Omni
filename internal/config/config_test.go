@@ -102,16 +102,16 @@ func TestLoad_OldGroupToolObjectRejected(t *testing.T) {
 	}
 }
 
-func TestLoad_NormalizesGroupAndProfileOrder(t *testing.T) {
+func TestLoad_NormalizesGroupAndHostOrder(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")
 	raw := `{
-  "profiles": {
-    "work": {"groups": ["work", "base", "apps"]}
+  "hosts": {
+    "laptop": ["work", "apps"]
   },
   "groups": [
     {"name": "work"},
-    {},
+    {"name": "laptop", "special": "host"},
     {"name": "apps"}
   ]
 }`
@@ -124,11 +124,11 @@ func TestLoad_NormalizesGroupAndProfileOrder(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	gotGroups := []string{cfg.Groups[0].BaseName(), cfg.Groups[1].BaseName(), cfg.Groups[2].BaseName()}
-	if strings.Join(gotGroups, ",") != "apps,base,work" {
-		t.Fatalf("groups = %v, want [apps base work]", gotGroups)
+	if strings.Join(gotGroups, ",") != "apps,work,laptop" {
+		t.Fatalf("groups = %v, want [apps work laptop]", gotGroups)
 	}
-	if got := strings.Join(cfg.Profiles["work"].Groups, ","); got != "apps,base,work" {
-		t.Fatalf("profile groups = [%s], want [apps base work]", got)
+	if got := strings.Join(cfg.Hosts["laptop"], ","); got != "apps,work" {
+		t.Fatalf("host groups = [%s], want [apps work]", got)
 	}
 }
 
@@ -137,12 +137,12 @@ func TestNormalizeFile_PersistsOrderAndPreservesUnknownKeys(t *testing.T) {
 	path := filepath.Join(dir, "settings.json")
 	raw := `{
   "future": {"keep": true},
-  "profiles": {
-    "work": {"groups": ["work", "base", "apps"]}
+  "hosts": {
+    "laptop": ["work", "apps"]
   },
   "groups": [
     {"name": "work"},
-    {},
+    {"name": "laptop", "special": "host"},
     {"name": "apps"}
   ]
 }`
@@ -169,11 +169,11 @@ func TestNormalizeFile_PersistsOrderAndPreservesUnknownKeys(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	gotGroups := []string{cfg.Groups[0].BaseName(), cfg.Groups[1].BaseName(), cfg.Groups[2].BaseName()}
-	if strings.Join(gotGroups, ",") != "apps,base,work" {
-		t.Fatalf("groups = %v, want [apps base work]", gotGroups)
+	if strings.Join(gotGroups, ",") != "apps,work,laptop" {
+		t.Fatalf("groups = %v, want [apps work laptop]", gotGroups)
 	}
-	if got := strings.Join(cfg.Profiles["work"].Groups, ","); got != "apps,base,work" {
-		t.Fatalf("profile groups = [%s], want [apps base work]", got)
+	if got := strings.Join(cfg.Hosts["laptop"], ","); got != "apps,work" {
+		t.Fatalf("host groups = [%s], want [apps work]", got)
 	}
 }
 
@@ -422,24 +422,8 @@ func TestValidateGroups_SameNameDifferentProvider(t *testing.T) {
 
 // ─── GroupConfig methods ──────────────────────────────────────────────────────
 
-func TestGroupConfig_BaseGroup(t *testing.T) {
-	g := &config.GroupConfig{}
-	if !g.IsBase() {
-		t.Error("empty Name should be IsBase")
-	}
-	if g.GroupName() != "" {
-		t.Errorf("GroupName = %q, want empty", g.GroupName())
-	}
-	if g.BaseName() != "base" {
-		t.Errorf("BaseName = %q, want base", g.BaseName())
-	}
-}
-
 func TestGroupConfig_NamedGroup(t *testing.T) {
 	g := &config.GroupConfig{Name: "work"}
-	if g.IsBase() {
-		t.Error("non-empty Name should not be IsBase")
-	}
 	if g.GroupName() != "work" {
 		t.Errorf("GroupName = %q, want work", g.GroupName())
 	}
@@ -448,82 +432,18 @@ func TestGroupConfig_NamedGroup(t *testing.T) {
 	}
 }
 
-// ─── ActiveProfile ────────────────────────────────────────────────────────────
+// ─── Host round-trip ──────────────────────────────────────────────────────────
 
-func TestActiveProfile_EmptyHostnames(t *testing.T) {
-	cfg := &config.RootConfig{}
-	_, ok := cfg.ActiveProfile("myhost")
-	if ok {
-		t.Error("expected no active profile when Hostnames is empty")
-	}
-}
-
-func TestActiveProfile_FullHostnameMatch(t *testing.T) {
-	cfg := &config.RootConfig{
-		Hostnames: map[string]string{"myhost.corp.local": "work"},
-	}
-	name, ok := cfg.ActiveProfile("myhost.corp.local")
-	if !ok {
-		t.Fatal("expected match for full hostname")
-	}
-	if name != "work" {
-		t.Errorf("got %q, want work", name)
-	}
-}
-
-func TestActiveProfile_ShortHostnameFallback(t *testing.T) {
-	cfg := &config.RootConfig{
-		Hostnames: map[string]string{"myhost": "work"},
-	}
-	name, ok := cfg.ActiveProfile("myhost.corp.local")
-	if !ok {
-		t.Fatal("expected match via short hostname fallback")
-	}
-	if name != "work" {
-		t.Errorf("got %q, want work", name)
-	}
-}
-
-func TestActiveProfile_NoMatch(t *testing.T) {
-	cfg := &config.RootConfig{
-		Hostnames: map[string]string{"other": "personal"},
-	}
-	_, ok := cfg.ActiveProfile("myhost")
-	if ok {
-		t.Error("expected no match for unknown hostname")
-	}
-}
-
-func TestActiveProfile_FullHostnameTakesPrecedenceOverShort(t *testing.T) {
-	cfg := &config.RootConfig{
-		Hostnames: map[string]string{
-			"myhost":            "personal",
-			"myhost.corp.local": "work",
-		},
-	}
-	name, ok := cfg.ActiveProfile("myhost.corp.local")
-	if !ok {
-		t.Fatal("expected match")
-	}
-	if name != "work" {
-		t.Errorf("got %q, want work (full hostname takes precedence)", name)
-	}
-}
-
-// ─── Profile round-trip ───────────────────────────────────────────────────────
-
-func TestRootConfig_ProfileRoundTrip(t *testing.T) {
+func TestRootConfig_HostRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")
 
 	original := &config.RootConfig{
-		Profiles: map[string]config.Profile{
-			"work":     {Groups: []string{"base", "work"}},
-			"personal": {Groups: []string{"base", "personal"}},
+		Groups: []*config.GroupConfig{
+			{Name: "myhost", Special: "host"},
+			{Name: "work"},
 		},
-		Hostnames: map[string]string{
-			"myhost": "work",
-		},
+		Hosts: map[string][]string{"myhost": {"work"}},
 	}
 	if err := config.Save(path, original); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -533,29 +453,17 @@ func TestRootConfig_ProfileRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(loaded.Profiles) != 2 {
-		t.Errorf("got %d profiles, want 2", len(loaded.Profiles))
-	}
-	work := loaded.Profiles["work"]
-	if len(work.Groups) != 2 || work.Groups[0] != "base" || work.Groups[1] != "work" {
-		t.Errorf("work groups = %v, want [base work]", work.Groups)
-	}
-	if loaded.Hostnames["myhost"] != "work" {
-		t.Errorf("hostname myhost = %q, want work", loaded.Hostnames["myhost"])
+	if got := strings.Join(loaded.Hosts["myhost"], ","); got != "work" {
+		t.Errorf("host groups = %q, want work", got)
 	}
 }
 
-func TestProfile_IgnoreRoundtrip(t *testing.T) {
+func TestGlobalIgnore_Roundtrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")
 
 	original := &config.RootConfig{
-		Profiles: map[string]config.Profile{
-			"work": {
-				Groups: []string{"base", "work"},
-				Ignore: []string{"node", "ripgrep"},
-			},
-		},
+		Ignore: config.GlobalIgnore{Tools: []string{"node", "ripgrep"}},
 	}
 	if err := config.Save(path, original); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -566,35 +474,29 @@ func TestProfile_IgnoreRoundtrip(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	work := loaded.Profiles["work"]
-	if len(work.Ignore) != 2 {
-		t.Fatalf("got %d ignore entries, want 2", len(work.Ignore))
+	if len(loaded.Ignore.Tools) != 2 {
+		t.Fatalf("got %d ignore entries, want 2", len(loaded.Ignore.Tools))
 	}
-	if work.Ignore[0] != "node" || work.Ignore[1] != "ripgrep" {
-		t.Errorf("ignore = %v, want [node ripgrep]", work.Ignore)
+	if loaded.Ignore.Tools[0] != "node" || loaded.Ignore.Tools[1] != "ripgrep" {
+		t.Errorf("ignore = %v, want [node ripgrep]", loaded.Ignore.Tools)
 	}
 }
 
-func TestProfile_EmptyIgnore_OmittedFromJSON(t *testing.T) {
+func TestGlobalIgnore_EmptyOmittedFromJSON(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")
 
-	original := &config.RootConfig{
-		Profiles: map[string]config.Profile{
-			"work": {Groups: []string{"base"}},
-		},
-	}
+	original := &config.RootConfig{}
 	if err := config.Save(path, original); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
 
-	loaded, err := config.Load(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("ReadFile: %v", err)
 	}
-
-	if len(loaded.Profiles["work"].Ignore) != 0 {
-		t.Errorf("expected empty ignore list, got %v", loaded.Profiles["work"].Ignore)
+	if !strings.Contains(string(data), `"ignore": {}`) {
+		t.Errorf("empty ignore should round-trip as an empty object: %s", data)
 	}
 }
 
@@ -842,6 +744,50 @@ func TestPatch_CreatesFileWhenMissing(t *testing.T) {
 	}
 	if loaded.Settings.DotsRepo != "~/dots" {
 		t.Errorf("DotsRepo = %q, want ~/dots", loaded.Settings.DotsRepo)
+	}
+}
+
+func TestPatch_PreservesSymlinkedSettingsFile(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config", "omni")
+	repoDir := filepath.Join(dir, "repo", "dotfiles", "omni", ".config", "omni")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(repoDir, "settings.json")
+	if err := os.WriteFile(target, []byte(`{"settings":{},"groups":[]}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(configDir, "settings.json")
+	relTarget, err := filepath.Rel(configDir, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(relTarget, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	type settingsPatch struct {
+		Settings config.Settings `json:"settings"`
+	}
+	if err := config.Patch(link, settingsPatch{Settings: config.Settings{DotsRepo: "~/dots"}}); err != nil {
+		t.Fatalf("Patch: %v", err)
+	}
+
+	if info, err := os.Lstat(link); err != nil {
+		t.Fatalf("Lstat link: %v", err)
+	} else if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("settings path mode = %v, want symlink preserved", info.Mode())
+	}
+	loaded, err := config.Load(target)
+	if err != nil {
+		t.Fatalf("Load target: %v", err)
+	}
+	if loaded.Settings.DotsRepo != "~/dots" {
+		t.Fatalf("target DotsRepo = %q, want ~/dots", loaded.Settings.DotsRepo)
 	}
 }
 

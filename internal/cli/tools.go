@@ -2,10 +2,12 @@ package cli
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/spf13/cobra"
 
 	"github.com/lkshrk/omni/internal/actions"
+	appcore "github.com/lkshrk/omni/internal/app"
 )
 
 func newToolsCmd(state *rootState) *cobra.Command {
@@ -16,6 +18,7 @@ func newToolsCmd(state *rootState) *cobra.Command {
 	cmd.AddCommand(
 		newToolsSetCmd(state),
 		newToolsDeleteCmd(state),
+		newToolsNormalizeCmd(state),
 		newToolsIgnoreCmd(state),
 		newToolsUnignoreCmd(state),
 	)
@@ -96,6 +99,75 @@ func newToolsDeleteCmd(state *rootState) *cobra.Command {
 			fmt.Printf("Deleted logical tool %q.\n", args[0])
 			return nil
 		},
+	}
+}
+
+func newToolsNormalizeCmd(state *rootState) *cobra.Command {
+	var defaultOverrides bool
+	var dryRun bool
+
+	cmd := &cobra.Command{
+		Use:   "normalize",
+		Short: actions.MustDescription(actions.ToolNormalizeProviderOverrides),
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if !defaultOverrides {
+				return fmt.Errorf("choose what to normalize (supported: --default-overrides)")
+			}
+			opts := appcore.NormalizeInstallOverridesOptions{
+				IncludeDefaults:    true,
+				IncludeCurrentHost: true,
+				DryRun:             true,
+			}
+			normalized, err := state.app.NormalizeDefaultInstallOverrides(cmd.Context(), opts)
+			if err != nil {
+				return err
+			}
+			if len(normalized) == 0 {
+				fmt.Fprintln(cmd.OutOrStdout(), "No default provider overrides to normalize.")
+				return nil
+			}
+			if dryRun {
+				fmt.Fprintf(cmd.OutOrStdout(), "Would normalize %d %s:\n", len(normalized), providerOverrideNoun(len(normalized)))
+				printNormalizedOverrides(cmd.OutOrStdout(), normalized)
+				return nil
+			}
+
+			ok, err := confirmAction(cmd, state, fmt.Sprintf("Normalize %d default provider overrides in config?", len(normalized)))
+			if err != nil || !ok {
+				return err
+			}
+			normalized, err = state.app.NormalizeDefaultInstallOverrides(cmd.Context(), appcore.NormalizeInstallOverridesOptions{
+				IncludeDefaults:    true,
+				IncludeCurrentHost: true,
+			})
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "Normalized %d %s:\n", len(normalized), providerOverrideNoun(len(normalized)))
+			printNormalizedOverrides(cmd.OutOrStdout(), normalized)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&defaultOverrides, "default-overrides", false, "remove install-with values that only restate resolved ecosystem defaults")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show provider overrides that would be normalized without writing config")
+	return cmd
+}
+
+func providerOverrideNoun(count int) string {
+	if count == 1 {
+		return "provider override"
+	}
+	return "provider overrides"
+}
+
+func printNormalizedOverrides(out io.Writer, overrides []appcore.NormalizedInstallOverride) {
+	for _, override := range overrides {
+		scope := ""
+		if override.Host != "" {
+			scope = fmt.Sprintf(" (host %s)", override.Host)
+		}
+		fmt.Fprintf(out, "  %s: %s via %s%s\n", override.Name, override.Provider, override.InstallWith, scope)
 	}
 }
 

@@ -2,6 +2,7 @@ package app_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/app"
@@ -56,7 +57,7 @@ func TestRenameGroup_HappyPath(t *testing.T) {
 	}
 }
 
-func TestRenameGroup_UpdatesProfileReferences(t *testing.T) {
+func TestRenameGroup_UpdatesHostReferences(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -65,12 +66,10 @@ func TestRenameGroup_UpdatesProfileReferences(t *testing.T) {
 			logicalTool("go", "brew"),
 		),
 		Groups: []*config.GroupConfig{
-			{Tools: groupTools("ripgrep")},
+			{Name: "testhost", Special: "host", Tools: groupTools("ripgrep")},
 			{Name: "dev", Tools: groupTools("go")},
 		},
-		Profiles: map[string]config.Profile{
-			"work": {Groups: []string{"base", "dev"}},
-		},
+		Hosts: map[string][]string{"testhost": {"dev"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -84,23 +83,23 @@ func TestRenameGroup_UpdatesProfileReferences(t *testing.T) {
 		t.Fatalf("config.Load: %v", err)
 	}
 
-	p, ok := updated.Profiles["work"]
+	groups, ok := updated.Hosts["testhost"]
 	if !ok {
-		t.Fatal("profile 'work' not found")
+		t.Fatal("host 'testhost' not found")
 	}
-	for _, g := range p.Groups {
+	for _, g := range groups {
 		if g == "dev" {
-			t.Error("old group name 'dev' still referenced in profile 'work'")
+			t.Error("old group name 'dev' still referenced by host 'testhost'")
 		}
 	}
 	found := false
-	for _, g := range p.Groups {
+	for _, g := range groups {
 		if g == "development" {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("profile 'work' groups = %v, want to include 'development'", p.Groups)
+		t.Errorf("host groups = %v, want to include 'development'", groups)
 	}
 }
 
@@ -128,22 +127,21 @@ func TestRenameGroup_DuplicateNameReturnsError(t *testing.T) {
 	}
 }
 
-func TestRenameGroup_BaseGroupReturnsError(t *testing.T) {
+func TestRenameGroup_EmptyNameReturnsError(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
 		Groups: []*config.GroupConfig{
-			{Tools: groupTools("ripgrep")},
+			testHostToolGroup("ripgrep"),
 		},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	// The base group has Name == "" internally.
 	err := a.RenameGroup("", "newbase")
 	if err == nil {
-		t.Error("expected error when renaming base group, got nil")
+		t.Error("expected error when renaming empty group name, got nil")
 	}
 }
 
@@ -167,7 +165,7 @@ func TestRenameGroup_NotFoundReturnsError(t *testing.T) {
 
 // ─── DeleteGroup ──────────────────────────────────────────────────────────────
 
-func TestDeleteGroup_HappyPath_MovesToolsToBase(t *testing.T) {
+func TestDeleteGroup_HappyPath_MovesToolsToHost(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -177,14 +175,15 @@ func TestDeleteGroup_HappyPath_MovesToolsToBase(t *testing.T) {
 			logicalTool("rust", "brew"),
 		),
 		Groups: []*config.GroupConfig{
-			{Tools: groupTools("ripgrep")},
+			testHostToolGroup("ripgrep"),
 			{Name: "dev", Tools: groupTools("go", "rust")},
 		},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := a.DeleteGroup(context.Background(), "dev", app.DeleteGroupOptions{MoveTo: "base"}); err != nil {
+	host := testShortHostname()
+	if err := a.DeleteGroup(context.Background(), "dev", app.DeleteGroupOptions{MoveTo: host}); err != nil {
 		t.Fatalf("DeleteGroup: %v", err)
 	}
 
@@ -200,24 +199,25 @@ func TestDeleteGroup_HappyPath_MovesToolsToBase(t *testing.T) {
 		}
 	}
 
-	// Its tools must have been moved to the base group.
-	tools := toolsFromConfig(updated)
+	// Its tools must have been moved to the host group.
+	hostGroup := findTestGroup(updated, host)
+	tools := materializeTestTools(updated, hostGroup.Tools)
 	names := make(map[string]bool, len(tools))
 	for _, t := range tools {
 		names[t.Name] = true
 	}
 	if !names["ripgrep"] {
-		t.Error("base group missing original tool 'ripgrep'")
+		t.Error("host group missing original tool 'ripgrep'")
 	}
 	if !names["go"] {
-		t.Error("base group missing moved tool 'go'")
+		t.Error("host group missing moved tool 'go'")
 	}
 	if !names["rust"] {
-		t.Error("base group missing moved tool 'rust'")
+		t.Error("host group missing moved tool 'rust'")
 	}
 }
 
-func TestDeleteGroup_RemovesFromProfileReferences(t *testing.T) {
+func TestDeleteGroup_RemovesFromHostReferences(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -227,13 +227,11 @@ func TestDeleteGroup_RemovesFromProfileReferences(t *testing.T) {
 			logicalTool("slack", "brew"),
 		),
 		Groups: []*config.GroupConfig{
-			{Tools: groupTools("ripgrep")},
+			{Name: "testhost", Special: "host", Tools: groupTools("ripgrep")},
 			{Name: "dev", Tools: groupTools("go")},
 			{Name: "work", Tools: groupTools("slack")},
 		},
-		Profiles: map[string]config.Profile{
-			"laptop": {Groups: []string{"base", "dev", "work"}},
-		},
+		Hosts: map[string][]string{"testhost": {"dev", "work"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -247,18 +245,17 @@ func TestDeleteGroup_RemovesFromProfileReferences(t *testing.T) {
 		t.Fatalf("config.Load: %v", err)
 	}
 
-	p, ok := updated.Profiles["laptop"]
+	groups, ok := updated.Hosts["testhost"]
 	if !ok {
-		t.Fatal("profile 'laptop' not found")
+		t.Fatal("host 'testhost' not found")
 	}
-	for _, g := range p.Groups {
+	for _, g := range groups {
 		if g == "dev" {
-			t.Error("deleted group 'dev' still referenced in profile 'laptop'")
+			t.Error("deleted group 'dev' still referenced by host 'testhost'")
 		}
 	}
-	// The remaining groups should be "base" and "work".
-	if len(p.Groups) != 2 {
-		t.Errorf("profile groups after delete = %v, want [base work]", p.Groups)
+	if !slices.Equal(groups, []string{"work"}) {
+		t.Errorf("host groups after delete = %v, want [work]", groups)
 	}
 }
 
@@ -289,20 +286,20 @@ func TestDeleteGroup_MoveTargetMustDiffer(t *testing.T) {
 	}
 }
 
-func TestDeleteGroup_SharedToolOnlyLosesDeletedMembership(t *testing.T) {
+func TestDeleteGroup_MoveToHostPreservesToolSpec(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
 		Groups: []*config.GroupConfig{
-			{Tools: groupTools("ripgrep")},
+			{Name: testShortHostname(), Special: "host"},
 			{Name: "dev", Tools: groupTools("ripgrep")},
 		},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := a.DeleteGroup(context.Background(), "dev", app.DeleteGroupOptions{}); err != nil {
+	if err := a.DeleteGroup(context.Background(), "dev", app.DeleteGroupOptions{MoveTo: testShortHostname()}); err != nil {
 		t.Fatalf("DeleteGroup: %v", err)
 	}
 
@@ -311,11 +308,11 @@ func TestDeleteGroup_SharedToolOnlyLosesDeletedMembership(t *testing.T) {
 		t.Fatalf("config.Load: %v", err)
 	}
 	if _, ok := updated.Tools["ripgrep"]; !ok {
-		t.Fatal("shared tool spec should remain")
+		t.Fatal("moved tool spec should remain")
 	}
 	tools := toolsFromConfig(updated)
 	if len(tools) != 1 || tools[0].Name != "ripgrep" {
-		t.Fatalf("tools = %+v, want only base ripgrep membership", tools)
+		t.Fatalf("tools = %+v, want only host ripgrep membership", tools)
 	}
 }
 
@@ -344,22 +341,21 @@ func TestDeleteGroup_DeleteToolsRemovesLastMembershipSpecs(t *testing.T) {
 	}
 }
 
-func TestDeleteGroup_BaseGroupReturnsError(t *testing.T) {
+func TestDeleteGroup_EmptyNameReturnsError(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
 		Groups: []*config.GroupConfig{
-			{Tools: groupTools("ripgrep")},
+			testHostToolGroup("ripgrep"),
 		},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	// The base group is identified by empty name "".
-	err := a.DeleteGroup(context.Background(), "", app.DeleteGroupOptions{MoveTo: "base"})
+	err := a.DeleteGroup(context.Background(), "", app.DeleteGroupOptions{MoveTo: testShortHostname()})
 	if err == nil {
-		t.Error("expected error when deleting base group, got nil")
+		t.Error("expected error when deleting empty group name, got nil")
 	}
 }
 
@@ -371,14 +367,14 @@ func TestDeleteGroup_NonExistentGroupReturnsNoError(t *testing.T) {
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
 		Groups: []*config.GroupConfig{
-			{Tools: groupTools("ripgrep")},
+			testHostToolGroup("ripgrep"),
 		},
 	}); err != nil {
 		t.Fatal(err)
 	}
 
 	// Should not error for a group that doesn't exist.
-	if err := a.DeleteGroup(context.Background(), "nonexistent", app.DeleteGroupOptions{MoveTo: "base"}); err != nil {
+	if err := a.DeleteGroup(context.Background(), "nonexistent", app.DeleteGroupOptions{MoveTo: testShortHostname()}); err != nil {
 		t.Errorf("DeleteGroup on non-existent group: %v", err)
 	}
 

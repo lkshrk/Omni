@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -15,7 +14,7 @@ import (
 func newListCmd(state *rootState) *cobra.Command {
 	var providerFilter string
 	var groupFilter string
-	var profileFilter string
+	var hostFilter string
 	var stateFilter string
 	var format string
 
@@ -38,7 +37,7 @@ func newListCmd(state *rootState) *cobra.Command {
 			items, err := state.app.QueryTools(cmd.Context(), app.ToolListOptions{
 				Provider: providerFilter,
 				Group:    groupFilter,
-				Profile:  profileFilter,
+				Host:     hostFilter,
 				Name:     name,
 				State:    stateFilter,
 			})
@@ -70,7 +69,7 @@ func newListCmd(state *rootState) *cobra.Command {
 
 	addProviderFlag(cmd, &providerFilter, "filter by provider")
 	cmd.Flags().StringVar(&groupFilter, "group", "", "filter by group")
-	cmd.Flags().StringVar(&profileFilter, "profile", "", "filter by profile")
+	cmd.Flags().StringVar(&hostFilter, "host", "", "filter by host")
 	cmd.Flags().StringVar(&stateFilter, "state", "", "filter by state (installed, missing, outdated, ignored, unclaimed, out-of-sync, failed)")
 	addFormatFlag(cmd, &format, "table", "table", "json")
 	return cmd
@@ -134,8 +133,8 @@ func nullString(value sql.NullString) string {
 }
 
 func displayGroup(group string) string {
-	if strings.TrimSpace(group) == "" {
-		return "base"
+	if group == "" {
+		return "-"
 	}
 	return group
 }

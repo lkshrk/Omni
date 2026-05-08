@@ -74,21 +74,19 @@ func promptYesNo(state *rootState, question string, defaultVal bool) bool {
 	return answer == "y" || answer == "yes"
 }
 
-// promptSatisfiedGroups checks result.SatisfiedGroups and for each one
-// asks the user whether to add it to result.ActiveProfile.
-// Calls addGroupFn when the user answers yes. Silently skips when no profile
-// is active or no satisfied groups were found.
-func promptSatisfiedGroups(state *rootState, activeProfile string, satisfiedGroups []string, addGroupFn func(group string) error) {
-	if activeProfile == "" || len(satisfiedGroups) == 0 {
+// promptSatisfiedGroups checks result.SatisfiedGroups and for each one asks the
+// user whether to assign it to the active host.
+func promptSatisfiedGroups(state *rootState, activeHost string, satisfiedGroups []string, addGroupFn func(group string) error) {
+	if activeHost == "" || len(satisfiedGroups) == 0 {
 		return
 	}
 	for _, g := range satisfiedGroups {
-		q := fmt.Sprintf("Group %q is fully installed on this machine. Add it to profile %q?", g, activeProfile)
+		q := fmt.Sprintf("Group %q is fully installed on this machine. Add it to host %q?", g, activeHost)
 		if promptYesNo(state, q, false) {
 			if err := addGroupFn(g); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: could not add group %q to profile: %v\n", g, err)
+				fmt.Fprintf(os.Stderr, "warning: could not add group %q to host: %v\n", g, err)
 			} else {
-				fmt.Printf("Added group %q to profile %q.\n", g, activeProfile)
+				fmt.Printf("Added group %q to host %q.\n", g, activeHost)
 			}
 		}
 	}

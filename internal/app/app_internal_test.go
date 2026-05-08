@@ -144,7 +144,7 @@ func TestExpandAndStat_ExpandsEnvironmentVariables(t *testing.T) {
 	}
 }
 
-func TestEffectiveProfileGroupsInjectsCurrentMachineGroup(t *testing.T) {
+func TestEffectiveHostGroupsIncludesHostGroupFirst(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost.example.com")
 	cfg := &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
@@ -153,31 +153,21 @@ func TestEffectiveProfileGroupsInjectsCurrentMachineGroup(t *testing.T) {
 			"fd":      {Provider: "system", InstallWith: "brew"},
 		},
 		Groups: []*config.GroupConfig{
-			{Tools: []config.ToolEntry{{Name: "ripgrep"}}},
+			{Name: "shared", Tools: []config.ToolEntry{{Name: "ripgrep"}}},
 			{Name: "work", Tools: []config.ToolEntry{{Name: "slack"}}},
-			{Name: "testhost", Tools: []config.ToolEntry{{Name: "fd"}}},
+			{Name: "testhost", Special: "host", Tools: []config.ToolEntry{{Name: "fd"}}},
 		},
-		Profiles: map[string]config.Profile{
-			"work": {Groups: []string{"work"}},
-		},
+		Hosts: map[string][]string{"testhost": {"work"}},
 	}
 
-	explicit, err := explicitProfileGroups(cfg, cfg.Groups, "work")
-	if err != nil {
-		t.Fatalf("explicitProfileGroups: %v", err)
+	effective, active, ok := effectiveHostGroups(cfg, cfg.Groups, "testhost.example.com")
+	if !ok {
+		t.Fatal("effectiveHostGroups ok=false")
 	}
-	if len(explicit) != 1 || explicit[0].BaseName() != "work" {
-		t.Fatalf("explicit groups = %v, want [work]", groupBaseNames(explicit))
+	if got := groupBaseNames(effective); len(got) != 2 || got[0] != "testhost" || got[1] != "work" {
+		t.Fatalf("effective groups = %v, want [testhost work]", got)
 	}
-
-	effective, active, err := effectiveProfileGroups(cfg, cfg.Groups, "work")
-	if err != nil {
-		t.Fatalf("effectiveProfileGroups: %v", err)
-	}
-	if got := groupBaseNames(effective); len(got) != 2 || got[0] != "work" || got[1] != "testhost" {
-		t.Fatalf("effective groups = %v, want [work testhost]", got)
-	}
-	if got := groupBaseNames(active); len(got) != 2 || got[0] != "work" || got[1] != "testhost" {
-		t.Fatalf("active groups = %v, want [work testhost]", got)
+	if got := groupBaseNames(active); len(got) != 2 || got[0] != "testhost" || got[1] != "work" {
+		t.Fatalf("active groups = %v, want [testhost work]", got)
 	}
 }

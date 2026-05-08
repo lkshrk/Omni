@@ -71,7 +71,7 @@ func build() *schema {
 		Schema:      schemaMetaURL,
 		ID:          config.SchemaURL,
 		Title:       "omni settings",
-		Description: "omni settings.json — manages all dev tools, dotfiles, and profiles from a single file.",
+		Description: "omni settings.json — manages all dev tools, dotfiles, host assignments, and groups from a single file.",
 		Type:        "object",
 		Properties: map[string]*schema{
 			"$schema": {
@@ -79,20 +79,35 @@ func build() *schema {
 				Type:        "string",
 			},
 			"settings": ref("#/$defs/Settings"),
-			"profiles": {
-				Description:          "Named collections of groups. Keys are profile names.",
-				Type:                 "object",
-				AdditionalProperties: ref("#/$defs/Profile"),
+			"hosts": {
+				Description: "Reusable group assignments keyed by short hostname. The matching special host group is active implicitly and must not be listed here.",
+				Type:        "object",
+				AdditionalProperties: &schema{
+					Type:  "array",
+					Items: &schema{Type: "string", MinLength: 1},
+				},
 				Examples: []any{
-					map[string]any{"work": map[string]any{"groups": []any{"work"}}},
+					map[string]any{"macbook-pro": []any{"work", "personal"}, "home-desktop": []any{"personal"}},
 				},
 			},
-			"hostnames": {
-				Description:          "Mapping of hostname → profile name for auto-activation on each machine.",
+			"ignore": {
+				Description:          "Tool and dotfile names skipped globally.",
 				Type:                 "object",
-				AdditionalProperties: &schema{Type: "string", MinLength: 1},
+				AdditionalProperties: false,
+				Properties: map[string]*schema{
+					"tools": {Type: "array", Items: &schema{Type: "string", MinLength: 1}},
+					"dots":  {Type: "array", Items: &schema{Type: "string", MinLength: 1}},
+				},
 				Examples: []any{
-					map[string]any{"macbook-pro": "work", "home-desktop": "home"},
+					map[string]any{"tools": []any{"slack"}, "dots": []any{"work-secrets"}},
+				},
+			},
+			"host_settings": {
+				Description:          "Per-host setting overrides keyed by short hostname.",
+				Type:                 "object",
+				AdditionalProperties: ref("#/$defs/HostSettings"),
+				Examples: []any{
+					map[string]any{"macbook-pro": map[string]any{"dots_disabled": false}},
 				},
 			},
 			"tools": {
@@ -112,7 +127,7 @@ func build() *schema {
 				},
 			},
 			"groups": {
-				Description: "Tool/dots groups. An entry without a 'name' field is the base group.",
+				Description: "Tool/dots groups. Host groups use special=\"host\" and are reserved for one hostname.",
 				Type:        "array",
 				Items:       ref("#/$defs/GroupConfig"),
 			},
@@ -152,6 +167,38 @@ func build() *schema {
 				},
 				AdditionalProperties: false,
 			},
+			"HostSettings": {
+				Description: "Per-host setting overrides.",
+				Type:        "object",
+				Properties: map[string]*schema{
+					"ecosystems": {
+						Description: "Host-specific ecosystem manager and priority overrides.",
+						Type:        "object",
+						Properties: map[string]*schema{
+							provider.EcosystemSystem: ref("#/$defs/EcosystemSettings"),
+							provider.EcosystemNode:   ref("#/$defs/EcosystemSettings"),
+							provider.EcosystemPython: ref("#/$defs/EcosystemSettings"),
+						},
+						AdditionalProperties: ref("#/$defs/EcosystemSettings"),
+					},
+					"dots_repo": {
+						Description: "Host-specific path to the dotfiles git repository.",
+						Type:        "string",
+						Examples:    []any{"~/Dev/dotfiles", "~/.dotfiles"},
+					},
+					"dots_disabled": {
+						Description: "Whether dotfile sync is disabled on this host.",
+						Type:        "boolean",
+					},
+					"disabled_providers": {
+						Description: "Ecosystem provider names disabled on this host.",
+						Type:        "array",
+						Items:       &schema{Type: "string", MinLength: 1},
+						Examples:    []any{ecosystemNames},
+					},
+				},
+				AdditionalProperties: false,
+			},
 			"EcosystemSettings": {
 				Description: "Settings for one ecosystem provider.",
 				Type:        "object",
@@ -187,34 +234,20 @@ func build() *schema {
 				},
 				AdditionalProperties: false,
 			},
-			"Profile": {
-				Description: "A named collection of groups, optionally with a per-machine ignore list.",
-				Type:        "object",
-				Required:    []string{"groups"},
-				Properties: map[string]*schema{
-					"groups": {
-						Description: "Group names activated on machines mapped to this profile.",
-						Type:        "array",
-						Items:       &schema{Type: "string", MinLength: 1},
-						Examples:    []any{[]any{"work", "personal"}},
-					},
-					"ignore": {
-						Description: "Tool names skipped during sync on machines using this profile.",
-						Type:        "array",
-						Items:       &schema{Type: "string", MinLength: 1},
-						Examples:    []any{[]any{"slack", "zoom"}},
-					},
-				},
-				AdditionalProperties: false,
-			},
 			"GroupConfig": {
 				Description: "A named collection of logical tool memberships and dotfile entries.",
 				Type:        "object",
 				Properties: map[string]*schema{
 					"name": {
-						Description: "Group identifier. Omit (or leave empty) for the base group.",
+						Description: "Group identifier.",
 						Type:        "string",
 						Examples:    []any{"work", "personal", "media"},
+					},
+					"special": {
+						Description: "Reserved marker for protected host groups.",
+						Type:        "string",
+						Enum:        []any{"host"},
+						Examples:    []any{"host"},
 					},
 					"description": {
 						Description: "Human-readable description shown in 'omni groups'.",
@@ -232,12 +265,6 @@ func build() *schema {
 						Type:        "array",
 						Items:       &schema{Type: "string", MinLength: 1},
 						Examples:    []any{[]any{"ripgrep", "fd", "black"}},
-					},
-					"ignore": {
-						Description: "Logical tool names suppressed for this group, including machine groups.",
-						Type:        "array",
-						Items:       &schema{Type: "string", MinLength: 1},
-						Examples:    []any{[]any{"slack", "zoom"}},
 					},
 					"dots": {
 						Description: "Dotfile entries managed by this group.",
@@ -336,7 +363,7 @@ func build() *schema {
 			"DotEntry": {
 				Description: "A dotfile or directory managed by 'omni dots'.",
 				Type:        "object",
-				Required:    []string{"name", "target"},
+				Required:    []string{"name", "path"},
 				Properties: map[string]*schema{
 					"name": {
 						Description: "Human-readable identifier. Also used as the default source directory name.",
@@ -344,17 +371,15 @@ func build() *schema {
 						MinLength:   1,
 						Examples:    []any{"nvim", "zsh", "git"},
 					},
-					"source": {
-						Description: "Path relative to the dots repo root. Defaults to '<name>/'.",
-						Type:        "string",
-						MinLength:   1,
-						Examples:    []any{"nvim/", "configs/zsh"},
-					},
-					"target": {
-						Description: "Absolute destination path where the symlink is created (~ is expanded).",
+					"path": {
+						Description: "Original filesystem location managed by this entry (~ and environment variables are expanded).",
 						Type:        "string",
 						MinLength:   1,
 						Examples:    []any{"~/.config/nvim", "~/.zshrc"},
+					},
+					"ignored": {
+						Description: "Keep the entry visible but skip sync/discovery management.",
+						Type:        "boolean",
 					},
 					"ignore": {
 						Description: "gitignore-style patterns for files to skip within this entry.",
