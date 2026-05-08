@@ -324,7 +324,8 @@ type Model struct {
 
 	// setup wizard step (0 = create config?, 1 = import tools?, 2 = provider
 	// selection, 3 = node manager, 4 = unused, 5 = enable dotfiles?, 6 = dots
-	// repo path, 7 = copy host?, 8 = host picker, 9 = reusable groups)
+	// repo path, 7 = copy host?, 8 = host picker, 9 = reusable groups,
+	// 10 = existing-host activation)
 	setupStep int
 	// setupBackgroundMode is the main tab rendered behind setup/onboarding
 	// popups. Zero value keeps first-run setup on the tools tab.
@@ -340,6 +341,8 @@ type Model struct {
 	// setupGroupIdx/draft are the final reusable-group selection in step 9.
 	setupGroupIdx   int
 	setupGroupDraft map[string]bool
+	// setupActivationIdx is the cursor for existing-host bootstrap activation.
+	setupActivationIdx int
 	// setupComplete is set after onboarding has completed so a follow-up reload
 	// cannot reopen setup from a stale no-host snapshot.
 	setupComplete bool
@@ -643,6 +646,10 @@ func loadTools(a *app.App, ctx context.Context) tea.Cmd {
 		dotsReminderService, dotsReminderServiceErr := a.DotsReminderServiceStatus()
 		dotsWatchService, dotsWatchServiceErr := a.DotsWatchServiceStatus()
 		discovered, _ := a.ListDiscovered(ctx)
+		bootstrapRequired, err := a.BootstrapRequired(ctx)
+		if err != nil {
+			return toolsLoadedMsg{err: fmt.Errorf("checking bootstrap state: %w", err)}
+		}
 		// Build setup provider rows from already-fetched manager data — no extra calls needed.
 		spRows := buildSetupProvidersFromManagers(ecosystemMap, allPyBins, allNodeBins, settings)
 		// Collect unique provider names from config groups so the toolsLoadedMsg
@@ -674,6 +681,7 @@ func loadTools(a *app.App, ctx context.Context) tea.Cmd {
 			dotsReminderServiceErr: errorString(dotsReminderServiceErr),
 			dotsWatchService:       dotsWatchService,
 			dotsWatchServiceErr:    errorString(dotsWatchServiceErr),
+			bootstrapRequired:      bootstrapRequired,
 			allPythonManagers:      allPyBins,
 			allNodeManagers:        allNodeBins,
 			setupProviders:         spRows,

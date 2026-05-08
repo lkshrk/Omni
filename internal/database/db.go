@@ -57,6 +57,16 @@ type ToolMetadata struct {
 	UpdatedAt       time.Time      `bun:"updated_at,notnull"`
 }
 
+// LocalState stores machine-local app markers. These rows are intentionally in
+// the cache DB, not settings.json, because they describe this checkout/host.
+type LocalState struct {
+	bun.BaseModel `bun:"table:local_state,alias:ls"`
+
+	Key       string    `bun:"key,pk,notnull"`
+	Value     string    `bun:"value,notnull"`
+	UpdatedAt time.Time `bun:"updated_at,notnull"`
+}
+
 // MetadataUpdate is registry metadata learned without changing install state.
 type MetadataUpdate struct {
 	Name            string
@@ -143,6 +153,13 @@ func (db *DB) Migrate(ctx context.Context) error {
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("creating tool_metadata table: %w", err)
+	}
+	_, err = db.bun.NewCreateTable().
+		Model((*LocalState)(nil)).
+		IfNotExists().
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("creating local_state table: %w", err)
 	}
 	// Ensure the unique index exists (bun doesn't auto-create indexes from tags).
 	_, err = db.bun.ExecContext(ctx,
@@ -480,6 +497,36 @@ func (db *DB) ListMetadata(ctx context.Context) ([]*ToolMetadata, error) {
 		return nil, fmt.Errorf("listing tool metadata: %w", err)
 	}
 	return metadata, nil
+}
+
+// GetState retrieves a machine-local state value by key.
+// Returns sql.ErrNoRows if not found.
+func (db *DB) GetState(ctx context.Context, key string) (string, error) {
+	state := new(LocalState)
+	err := db.bun.NewSelect().
+		Model(state).
+		Where("key = ?", key).
+		Limit(1).
+		Scan(ctx)
+	if err != nil {
+		return "", fmt.Errorf("getting local state %q: %w", key, err)
+	}
+	return state.Value, nil
+}
+
+// SetState upserts a machine-local state value.
+func (db *DB) SetState(ctx context.Context, key, value string) error {
+	_, err := db.bun.ExecContext(ctx,
+		`INSERT INTO local_state (key, value, updated_at)
+		 VALUES (?, ?, ?)
+		 ON CONFLICT (key) DO UPDATE SET
+		     value = EXCLUDED.value,
+		     updated_at = EXCLUDED.updated_at`,
+		key, value, time.Now().UTC())
+	if err != nil {
+		return fmt.Errorf("setting local state %q: %w", key, err)
+	}
+	return nil
 }
 
 func (db *DB) hydrateMetadata(ctx context.Context, tools []*ToolCache) error {

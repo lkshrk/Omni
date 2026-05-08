@@ -65,4 +65,4 @@ key routing, modal state, rendering, and async result handling.
 | `settings.provider` | yes | yes | yes | yes | - |
 | `settings.reset` | yes | yes | yes | yes | - |
 | `settings.reset_cache` | yes | yes | yes | yes | - |
-| `setup.init` | yes | yes | yes | yes | - |
+| `setup.init` | yes | yes | yes | yes | CLI command is `bootstrap`; `init` remains an alias |

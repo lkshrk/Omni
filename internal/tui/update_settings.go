@@ -40,7 +40,7 @@ func (m *Model) handleSettingsKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 
 func (m *Model) handleSettingsConfirmAction(cmds *[]tea.Cmd) {
 	switch m.settingsCursor {
-	case settingsRowSystemPriority, settingsRowDotsRepo, settingsRowDotsSync, settingsRowDotsReminderInterval, settingsRowDotsWatchDebounce, settingsRowResetSettings, settingsRowResetCache:
+	case settingsRowSystemPriority, settingsRowDotsRepo, settingsRowDotsSync, settingsRowDotsReminderInterval, settingsRowDotsWatchDebounce, settingsRowBootstrap, settingsRowResetSettings, settingsRowResetCache:
 		m.handleSettingsEditAction(cmds)
 	}
 }
@@ -138,6 +138,8 @@ func (m *Model) handleSettingsDangerConfirmKeyMsg(msg tea.KeyPressMsg) []tea.Cmd
 		m.cancelConfirmationTimeout()
 		m.dangerConfirmRow = -1
 		switch row {
+		case settingsRowBootstrap:
+			m.startBootstrapSetup()
 		case settingsRowResetSettings:
 			m.loading = true
 			startOp(m, "Resetting settings…")
@@ -207,6 +209,9 @@ func (m *Model) handleSettingsEditAction(cmds *[]tea.Cmd) {
 		m.handleSettingsDotsSyncAction(cmds)
 	case settingsRowDotsReminderInterval, settingsRowDotsWatchDebounce:
 		m.startSettingsServiceDurationEdit()
+	case settingsRowBootstrap:
+		m.dangerConfirmRow = settingsRowBootstrap
+		*cmds = append(*cmds, m.armConfirmationTimeout())
 	case settingsRowResetSettings:
 		m.dangerConfirmRow = settingsRowResetSettings
 		*cmds = append(*cmds, m.armConfirmationTimeout())
@@ -214,6 +219,28 @@ func (m *Model) handleSettingsEditAction(cmds *[]tea.Cmd) {
 		m.dangerConfirmRow = settingsRowResetCache
 		*cmds = append(*cmds, m.armConfirmationTimeout())
 	}
+}
+
+func (m *Model) startBootstrapSetup() {
+	m.cancelConfirmationTimeout()
+	m.dangerConfirmRow = -1
+	m.mode = viewSetup
+	m.setupBackgroundMode = viewSettings
+	m.setupProviderIdx = 0
+	m.setupCopyHostIdx = 0
+	m.setupGroupIdx = 0
+	m.setupGroupDraft = nil
+	m.setupActivationIdx = 0
+	m.setupComplete = false
+	m.setupReloading = false
+	if m.hostInfo == nil || m.hostInfo.Active == "" {
+		m.setupStep = 2
+		if len(m.setupCopyHostNames()) > 0 {
+			m.setupStep = 7
+		}
+		return
+	}
+	m.setupStep = 10
 }
 
 func (m *Model) startSettingsPriorityEdit() {
