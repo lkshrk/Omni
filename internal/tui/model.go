@@ -357,13 +357,12 @@ type Model struct {
 	dotsProgressCh       chan dotsProgressUpdate
 	dotsPendingNames     map[string]bool
 	dotsActiveName       string
-	dotsConfirmIdx       int    // index of entry pending delete confirm; -1 = none
-	dotsOverwriteIdx     int    // index of conflict entry pending use-repo confirm; -1 = none
-	dotsLocalIdx         int    // index of conflict entry pending use-local confirm; -1 = none
-	dotsIgnoreIdx        int    // index of child path pending ignore/include confirm; -1 = none
-	dotsGroupFilter      string // "" = all groups; "config"/"home"/"custom"/etc = filtered
-	dotsSearchActive     bool   // true when dots search bar is open
-	filePickerForDotAdd  bool   // true when file picker opened for "add path" on dots tab
+	dotsConfirmIdx       int  // index of entry pending delete confirm; -1 = none
+	dotsOverwriteIdx     int  // index of conflict entry pending use-repo confirm; -1 = none
+	dotsLocalIdx         int  // index of conflict entry pending use-local confirm; -1 = none
+	dotsIgnoreIdx        int  // index of child path pending ignore/include confirm; -1 = none
+	dotsSearchActive     bool // true when dots search bar is open
+	filePickerForDotAdd  bool // true when file picker opened for "add path" on dots tab
 	stowInstalled        bool
 	stowInstallPrompt    bool
 	stowInstallAction    stowInstallAction
