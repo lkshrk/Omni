@@ -87,9 +87,6 @@ func (m *Model) acceptDotAddFilePickerPath(path string, cmds *[]tea.Cmd) {
 }
 
 func (m Model) dotAddTargetGroup() string {
-	if group := strings.TrimSpace(m.dotsGroupFilter); group != "" {
-		return group
-	}
 	if group := shortHostname(); group != "" {
 		return group
 	}

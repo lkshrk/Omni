@@ -252,14 +252,14 @@ func renderList(m Model) string {
 			if m.upgradingKeys["*"] && t.Outdated && m.bulkPendingKeys[key] {
 				spinnerView = p.styleStatus.Render(iconPending)
 			} else if m.upgradingKeys[key] {
-				spinnerView = m.spinner.View()
+				spinnerView = rowSpinnerIcon(m)
 			}
 		}
 		if spinnerView == "" && m.bulkPendingKeys[key] {
 			spinnerView = p.styleStatus.Render(iconPending)
 		}
 		if m.rowOpKey == key {
-			spinnerView = m.spinner.View()
+			spinnerView = rowSpinnerIcon(m)
 		}
 		group := m.toolGroups[key]
 		isIgnored := sec == sectionIgnored

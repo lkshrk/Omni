@@ -2102,15 +2102,11 @@ func TestVisibleGroupNames_IncludesCurrentMachineGroup(t *testing.T) {
 	}
 }
 
-func TestDotAddTargetGroup_UsesVisibleGroupOrMachineGroup(t *testing.T) {
+func TestDotAddTargetGroup_UsesMachineGroup(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost.example.com")
 	m := dotsModel()
 	if got := m.dotAddTargetGroup(); got != "testhost" {
 		t.Fatalf("dotAddTargetGroup = %q, want current machine group", got)
-	}
-	m.dotsGroupFilter = "work"
-	if got := m.dotAddTargetGroup(); got != "work" {
-		t.Fatalf("dotAddTargetGroup with filter = %q, want selected group", got)
 	}
 }
 
@@ -2818,13 +2814,12 @@ func TestModel_DotsTab_Messages(t *testing.T) {
 		m := baseModel(nil)
 		m.filter = fi
 		m.dotsSearchActive = true
-		m.dotsGroupFilter = "base"
 		m.dotsEntries = []app.DotStatus{{Name: "tracked", Group: "base"}}
 		got := drive(m, dotsDiscoveredMsg{entries: []app.DotStatus{
 			{Name: "kitty", TargetPath: "~/.config/kitty", State: app.DotStateLocalOnly},
 		}, discoveredCount: 1})
-		if got.dotsGroupFilter != "" || got.dotsSearchActive || got.filter.Value() != "" {
-			t.Fatalf("filters not cleared: group=%q search=%v filter=%q", got.dotsGroupFilter, got.dotsSearchActive, got.filter.Value())
+		if got.dotsSearchActive || got.filter.Value() != "" {
+			t.Fatalf("filters not cleared: search=%v filter=%q", got.dotsSearchActive, got.filter.Value())
 		}
 		if visible := filteredDotsEntries(got); len(visible) != 1 || visible[0].Name != "kitty" {
 			t.Fatalf("visible entries = %#v, want discovered kitty", visible)
