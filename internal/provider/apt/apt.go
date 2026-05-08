@@ -33,17 +33,24 @@ func (p *Provider) Available(ctx context.Context) (bool, error) {
 
 func (p *Provider) Install(ctx context.Context, tool provider.Tool) error {
 	pkg := tool.EffectivePackage()
-	return provider.RunCmd(ctx, p.exec, "apt-get install "+pkg, "apt-get", "install", "-y", pkg)
+	cmd, args := provider.PrivilegedCommand("apt-get", "install", "-y", pkg)
+	return provider.RunCmd(ctx, p.exec, "apt-get install "+pkg, cmd, args...)
 }
 
 func (p *Provider) Uninstall(ctx context.Context, tool provider.Tool) error {
 	pkg := tool.EffectivePackage()
-	return provider.RunCmd(ctx, p.exec, "apt-get remove "+pkg, "apt-get", "remove", "-y", pkg)
+	cmd, args := provider.PrivilegedCommand("apt-get", "remove", "-y", pkg)
+	return provider.RunCmd(ctx, p.exec, "apt-get remove "+pkg, cmd, args...)
 }
 
 func (p *Provider) Upgrade(ctx context.Context, tool provider.Tool) error {
 	pkg := tool.EffectivePackage()
-	return provider.RunCmd(ctx, p.exec, "apt-get upgrade "+pkg, "apt-get", "install", "--only-upgrade", "-y", pkg)
+	cmd, args := provider.PrivilegedCommand("apt-get", "install", "--only-upgrade", "-y", pkg)
+	return provider.RunCmd(ctx, p.exec, "apt-get upgrade "+pkg, cmd, args...)
+}
+
+func (p *Provider) PrivilegePlan(_ context.Context, action provider.PrivilegeAction, tool provider.Tool) (provider.PrivilegePlan, error) {
+	return provider.SystemPrivilegePlan(p.Name(), action, tool), nil
 }
 
 func (p *Provider) IsInstalled(ctx context.Context, tool provider.Tool) (bool, string, error) {

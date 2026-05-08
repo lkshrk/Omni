@@ -3,7 +3,7 @@ package app_test
 import (
 	"context"
 	"database/sql"
-	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -61,7 +61,7 @@ func TestCheckSatisfiedGroups_FullySatisfied(t *testing.T) {
 			logicalTool("slack", "brew"),
 		),
 		Groups: []*config.GroupConfig{
-			{Tools: groupTools("ripgrep")},
+			testHostToolGroup("ripgrep"),
 			{Name: "work", Tools: groupTools("slack")},
 		},
 	}
@@ -70,7 +70,7 @@ func TestCheckSatisfiedGroups_FullySatisfied(t *testing.T) {
 	}
 	upsertInstalled(t, a.DB(), "slack", "brew")
 
-	satisfied, err := a.CheckSatisfiedGroups(context.Background(), []string{"base"})
+	satisfied, err := a.CheckSatisfiedGroups(context.Background(), []string{testShortHostname()})
 	if err != nil {
 		t.Fatalf("CheckSatisfiedGroups: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestCheckSatisfiedGroups_PartiallyInstalled(t *testing.T) {
 			logicalTool("zoom", "brew"),
 		),
 		Groups: []*config.GroupConfig{
-			{Tools: groupTools("ripgrep")},
+			testHostToolGroup("ripgrep"),
 			{Name: "work", Tools: groupTools("slack", "zoom")},
 		},
 	}
@@ -99,7 +99,7 @@ func TestCheckSatisfiedGroups_PartiallyInstalled(t *testing.T) {
 	}
 	upsertInstalled(t, a.DB(), "slack", "brew") // zoom NOT installed
 
-	satisfied, err := a.CheckSatisfiedGroups(context.Background(), []string{"base"})
+	satisfied, err := a.CheckSatisfiedGroups(context.Background(), []string{testShortHostname()})
 	if err != nil {
 		t.Fatalf("CheckSatisfiedGroups: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestCheckSatisfiedGroups_EmptyGroupSkipped(t *testing.T) {
 	rootCfg := &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
 		Groups: []*config.GroupConfig{
-			{Tools: groupTools("ripgrep")},
+			testHostToolGroup("ripgrep"),
 			{Name: "empty", Tools: nil},
 		},
 	}
@@ -123,7 +123,7 @@ func TestCheckSatisfiedGroups_EmptyGroupSkipped(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	satisfied, err := a.CheckSatisfiedGroups(context.Background(), []string{"base"})
+	satisfied, err := a.CheckSatisfiedGroups(context.Background(), []string{testShortHostname()})
 	if err != nil {
 		t.Fatalf("CheckSatisfiedGroups: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestCheckSatisfiedGroups_ActiveGroupExcluded(t *testing.T) {
 			logicalTool("slack", "brew"),
 		),
 		Groups: []*config.GroupConfig{
-			{Tools: groupTools("ripgrep")},
+			testHostToolGroup("ripgrep"),
 			{Name: "work", Tools: groupTools("slack")},
 		},
 	}
@@ -152,7 +152,7 @@ func TestCheckSatisfiedGroups_ActiveGroupExcluded(t *testing.T) {
 	upsertInstalled(t, a.DB(), "slack", "brew")
 
 	// work is in the active set → should not be returned.
-	satisfied, err := a.CheckSatisfiedGroups(context.Background(), []string{"base", "work"})
+	satisfied, err := a.CheckSatisfiedGroups(context.Background(), []string{testShortHostname(), "work"})
 	if err != nil {
 		t.Fatalf("CheckSatisfiedGroups: %v", err)
 	}
@@ -163,12 +163,12 @@ func TestCheckSatisfiedGroups_ActiveGroupExcluded(t *testing.T) {
 
 // ─── syncOrphansToMachineGroup (via Sync) ────────────────────────────────────
 
-func TestSync_ProfileActive_OrphansAddedToHostnameGroup(t *testing.T) {
+func TestSync_HostActive_OrphansAddedToHostnameGroup(t *testing.T) {
 	brew := &stubProvider{
 		name:      "brew",
 		available: true,
 		installed: []provider.InstalledTool{
-			installedTool("slack", "1.0", "brew"), // in profile group
+			installedTool("slack", "1.0", "brew"), // in reusable host-assigned group
 			installedTool("fd", "8.0", "brew"),    // orphan
 		},
 	}
@@ -178,17 +178,12 @@ func TestSync_ProfileActive_OrphansAddedToHostnameGroup(t *testing.T) {
 	rootCfg := &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("slack", "brew")),
 		Groups: []*config.GroupConfig{
+			{Name: short, Special: "host"},
 			{Name: "work", Tools: groupTools("slack")},
 		},
+		Hosts: map[string][]string{short: {"work"}},
 	}
 	if err := saveAppConfig(t, cfgPath, rootCfg); err != nil {
-		t.Fatal(err)
-	}
-	if err := a.AddProfile("work-profile", []string{"work"}); err != nil {
-		t.Fatal(err)
-	}
-	hostname, _ := os.Hostname()
-	if err := a.SetHostname(hostname, "work-profile"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -218,7 +213,7 @@ func TestSync_ProfileActive_OrphansAddedToHostnameGroup(t *testing.T) {
 			found = true
 		}
 		if tool.Name == "slack" {
-			t.Error("slack is in the profile group and should not be in the hostname group")
+			t.Error("slack is in a host-assigned reusable group and should not be in the hostname group")
 		}
 	}
 	if !found {
@@ -234,11 +229,8 @@ func TestSyncAll_ClaimsDiscoveredToHostnameGroupAndSyncs(t *testing.T) {
 	}
 	a, cfgPath := newImportApp(t, brew)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
-		Groups: []*config.GroupConfig{
-			{},
-			{Name: "testhost", Tools: groupTools("ripgrep")},
-		},
+		Tools:  logicalToolSpecs(logicalTool("ripgrep", "brew")),
+		Groups: []*config.GroupConfig{testHostToolGroup("ripgrep")},
 	}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
@@ -270,11 +262,97 @@ func TestSyncAll_ClaimsDiscoveredToHostnameGroupAndSyncs(t *testing.T) {
 	}
 }
 
+func TestSyncAll_ClaimResolvedDefaultConcreteDoesNotWriteInstallWith(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	brew := &lifecycleProvider{stubProvider: stubProvider{name: "brew", available: true}, installed: true}
+	system := &lifecycleProvider{
+		stubProvider: stubProvider{name: "system", available: true},
+		resolvedName: "brew",
+		installed:    true,
+	}
+	a, cfgPath := newImportApp(t, brew, system)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{testHostGroup()}}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	discovered := []*database.ToolCache{
+		{Name: "fzf", Provider: "system", InstalledWith: "brew", Installed: true, Tracked: false},
+	}
+
+	result, err := a.SyncAll(context.Background(), app.SyncAllOptions{Discovered: discovered})
+	if err != nil {
+		t.Fatalf("SyncAll: %v", err)
+	}
+	if len(result.ClaimedNames) != 1 || result.ClaimedNames[0] != "fzf" {
+		t.Fatalf("ClaimedNames = %v, want [fzf]", result.ClaimedNames)
+	}
+	updated, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	spec := updated.Tools["fzf"]
+	if spec.Provider != "system" || spec.InstallWith != "" {
+		t.Fatalf("fzf spec = %+v, want provider system without install_with", spec)
+	}
+}
+
+func TestSyncAll_NormalizesHostDefaultInstallOverrides(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost.example.com")
+	brew := &lifecycleProvider{stubProvider: stubProvider{name: "brew", available: true}, installed: true}
+	system := &lifecycleProvider{
+		stubProvider: stubProvider{name: "system", available: true},
+		resolvedName: "brew",
+		installed:    true,
+	}
+	a, cfgPath := newImportApp(t, brew, system)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"ripgrep": {
+				Provider: "system",
+				Hosts: map[string]config.ToolInstallSpec{
+					"testhost": {Provider: "system", InstallWith: "brew"},
+				},
+			},
+			"jq": {
+				Provider:    "system",
+				InstallWith: "brew",
+				Hosts: map[string]config.ToolInstallSpec{
+					"testhost": {Provider: "system", InstallWith: "brew"},
+				},
+			},
+		},
+		Groups: []*config.GroupConfig{testHostToolGroup("ripgrep", "jq")},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	result, err := a.SyncAll(context.Background(), app.SyncAllOptions{Discovered: []*database.ToolCache{}})
+	if err != nil {
+		t.Fatalf("SyncAll: %v", err)
+	}
+	if len(result.NormalizedProviderOverrides) != 2 {
+		t.Fatalf("NormalizedProviderOverrides = %+v, want 2 entries", result.NormalizedProviderOverrides)
+	}
+	updated, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if _, ok := updated.Tools["ripgrep"].Hosts["testhost"]; ok {
+		t.Fatalf("ripgrep host override still present: %+v", updated.Tools["ripgrep"].Hosts)
+	}
+	jq := updated.Tools["jq"]
+	if jq.InstallWith != "brew" {
+		t.Fatalf("jq global install_with = %q, want preserved brew", jq.InstallWith)
+	}
+	if jq.Hosts["testhost"].InstallWith != "" {
+		t.Fatalf("jq host install_with = %q, want cleared", jq.Hosts["testhost"].InstallWith)
+	}
+}
+
 func TestSyncAll_DryRunDoesNotWriteClaims(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	brew := &installTracker{stubProvider: stubProvider{name: "brew", available: true}}
 	a, cfgPath := newImportApp(t, brew)
-	if err := saveAppConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{{}}}); err != nil {
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{testHostGroup()}}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
 	discovered := []*database.ToolCache{
@@ -310,7 +388,7 @@ func TestSyncAll_DryRunDiscoversWithoutWritingDB(t *testing.T) {
 		},
 	}
 	a, cfgPath := newImportApp(t, brew)
-	if err := saveAppConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{{}}}); err != nil {
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{testHostGroup()}}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
 
@@ -334,12 +412,12 @@ func TestSyncAll_DryRunDiscoversWithoutWritingDB(t *testing.T) {
 	}
 }
 
-func TestSync_ProfileActive_NoOrphansSkipsHostnameGroup(t *testing.T) {
+func TestSync_HostActive_NoOrphansSkipsHostnameGroup(t *testing.T) {
 	brew := &stubProvider{
 		name:      "brew",
 		available: true,
 		installed: []provider.InstalledTool{
-			installedTool("slack", "1.0", "brew"), // in profile — no orphans
+			installedTool("slack", "1.0", "brew"), // in reusable host-assigned group; no orphans
 		},
 	}
 	a, cfgPath := newImportApp(t, brew)
@@ -348,17 +426,12 @@ func TestSync_ProfileActive_NoOrphansSkipsHostnameGroup(t *testing.T) {
 	rootCfg := &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("slack", "brew")),
 		Groups: []*config.GroupConfig{
+			{Name: short, Special: "host"},
 			{Name: "work", Tools: groupTools("slack")},
 		},
+		Hosts: map[string][]string{short: {"work"}},
 	}
 	if err := saveAppConfig(t, cfgPath, rootCfg); err != nil {
-		t.Fatal(err)
-	}
-	if err := a.AddProfile("work-profile", []string{"work"}); err != nil {
-		t.Fatal(err)
-	}
-	hostname, _ := os.Hostname()
-	if err := a.SetHostname(hostname, "work-profile"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -400,13 +473,14 @@ func testGroupHasTool(group *config.GroupConfig, name string) bool {
 	return false
 }
 
-func TestSync_ProfileActive_ReturnsSatisfiedGroups(t *testing.T) {
+func TestSync_HostActive_ReturnsSatisfiedGroups(t *testing.T) {
 	brew := &stubProvider{
 		name:      "brew",
 		available: true,
 		installed: []provider.InstalledTool{},
 	}
 	a, cfgPath := newImportApp(t, brew)
+	short := testShortHostname()
 
 	rootCfg := &config.RootConfig{
 		Tools: logicalToolSpecs(
@@ -414,27 +488,21 @@ func TestSync_ProfileActive_ReturnsSatisfiedGroups(t *testing.T) {
 			logicalTool("slack", "brew"),
 		),
 		Groups: []*config.GroupConfig{
-			{Tools: groupTools("ripgrep")},
+			{Name: short, Special: "host", Tools: groupTools("ripgrep")},
 			{Name: "work", Tools: groupTools("slack")},
 		},
+		Hosts: map[string][]string{short: {}},
 	}
 	if err := saveAppConfig(t, cfgPath, rootCfg); err != nil {
 		t.Fatal(err)
 	}
 	upsertInstalled(t, a.DB(), "slack", "brew")
 
-	if err := a.AddProfile("base-profile", []string{"base"}); err != nil {
-		t.Fatal(err)
-	}
-
-	result, err := a.Sync(context.Background(), gosync.SyncOptions{Profile: "base-profile"})
+	result, err := a.Sync(context.Background(), gosync.SyncOptions{})
 	if err != nil {
 		t.Fatalf("Sync: %v", err)
 	}
 
-	if result.ActiveProfile != "base-profile" {
-		t.Errorf("ActiveProfile = %q, want base-profile", result.ActiveProfile)
-	}
 	found := false
 	for _, g := range result.SatisfiedGroups {
 		if g == "work" {
@@ -448,7 +516,7 @@ func TestSync_ProfileActive_ReturnsSatisfiedGroups(t *testing.T) {
 
 // ─── hostname group injection ─────────────────────────────────────────────────
 
-func TestSync_ProfileActive_HostnameGroupInjected(t *testing.T) {
+func TestSync_HostActive_HostnameGroupInjected(t *testing.T) {
 	brew := &installTracker{stubProvider: stubProvider{name: "brew", available: true}}
 	a, cfgPath := newImportApp(t, brew)
 	short := testShortHostname()
@@ -461,22 +529,20 @@ func TestSync_ProfileActive_HostnameGroupInjected(t *testing.T) {
 		),
 		Groups: []*config.GroupConfig{
 			{Name: "work", Tools: groupTools("slack")},
-			{Name: short, Tools: groupTools("fd")},
+			{Name: short, Special: "host", Tools: groupTools("fd")},
 		},
+		Hosts: map[string][]string{short: {"work"}},
 	}
 	if err := saveAppConfig(t, cfgPath, rootCfg); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.AddProfile("work-profile", []string{"work"}); err != nil {
-		t.Fatal(err)
-	}
 
-	_, err := a.Sync(context.Background(), gosync.SyncOptions{Profile: "work-profile"})
+	_, err := a.Sync(context.Background(), gosync.SyncOptions{})
 	if err != nil {
 		t.Fatalf("Sync: %v", err)
 	}
 
-	// Both slack (from profile) and fd (from hostname group injection) must be installed.
+	// Both slack (from the host-assigned reusable group) and fd (from hostname group injection) must be installed.
 	installed := make(map[string]bool, len(brew.installCalled))
 	for _, n := range brew.installCalled {
 		installed[n] = true
@@ -502,38 +568,28 @@ func TestClaimFromMachineGroup_PrunesMachineGroup(t *testing.T) {
 			logicalTool("ripgrep", "brew"),
 		),
 		Groups: []*config.GroupConfig{
-			{Name: short, Tools: groupTools("fd", "ripgrep")},
+			{Name: short, Special: "host", Tools: groupTools("ripgrep")},
 			{Name: "tools", Tools: groupTools("fd")},
 		},
+		Hosts: map[string][]string{short: {}},
 	}
 	if err := saveAppConfig(t, cfgPath, rootCfg); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.AddProfile("work", []string{"base"}); err != nil {
-		t.Fatal(err)
-	}
 
-	if err := a.ClaimFromMachineGroup("work", "tools"); err != nil {
+	if err := a.ClaimFromMachineGroup("tools"); err != nil {
 		t.Fatalf("ClaimFromMachineGroup: %v", err)
 	}
 
-	// "tools" must be in the profile.
-	info, _ := a.ProfileStatus()
-	found := false
-	for _, g := range info.Profiles["work"].Groups {
-		if g == "tools" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("profile groups = %v, want 'tools' to be present", info.Profiles["work"].Groups)
-	}
-
-	// fd must be removed from the hostname group; ripgrep must remain.
 	updated, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
+	if got := updated.Hosts[short]; !slices.Contains(got, "tools") {
+		t.Errorf("host groups = %v, want 'tools' to be present", got)
+	}
+
+	// fd must not be copied into the hostname group; ripgrep must remain.
 	var hg *config.GroupConfig
 	for _, g := range updated.Groups {
 		if g.Name == short {

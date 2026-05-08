@@ -30,7 +30,7 @@ const (
 type ToolListOptions struct {
 	Provider string
 	Group    string
-	Profile  string
+	Host     string
 	Name     string
 	State    string
 }
@@ -118,10 +118,11 @@ func (a *App) QueryTools(ctx context.Context, opts ToolListOptions) ([]ToolListI
 		return nil, err
 	}
 	groups := cfg.Groups
-	if opts.Profile != "" {
-		groups, _, err = effectiveProfileGroups(cfg, groups, opts.Profile)
-		if err != nil {
-			return nil, err
+	if opts.Host != "" {
+		var ok bool
+		groups, _, ok = effectiveHostGroups(cfg, groups, opts.Host)
+		if !ok {
+			return nil, fmt.Errorf("host %q is not configured", opts.Host)
 		}
 	}
 
@@ -150,7 +151,7 @@ func (a *App) QueryTools(ctx context.Context, opts ToolListOptions) ([]ToolListI
 		return nil, fmt.Errorf("group %q not found", opts.Group)
 	}
 
-	ignoreSet := profileIgnoreSet(cfg, opts.Profile)
+	ignoreSet := globalIgnoreSet(cfg)
 	resolvedProviders := a.ResolvedEcosystemProviders(ctx)
 	stateFilter, err := normalizeToolState(opts.State)
 	if err != nil {
@@ -161,7 +162,7 @@ func (a *App) QueryTools(ctx context.Context, opts ToolListOptions) ([]ToolListI
 	for _, t := range tools {
 		key := NewToolKey(t.Name, t.Provider, t.Package).String()
 		groupName := groupByTool[key]
-		if opts.Profile != "" {
+		if opts.Host != "" {
 			if _, ok := allowed[key]; !ok {
 				continue
 			}
@@ -221,7 +222,17 @@ func toolCacheLookupKeys(t *database.ToolCache) []string {
 	return provider.PackageLookupKeys(t.Name, pkg)
 }
 
-func (a *App) refreshWithCachedOwner(ctx context.Context, t config.ToolEntry, keys []string, owner string, installedMaps map[string]map[string]string) (*database.ToolCache, bool) {
+func refreshContextErr(ctx context.Context, err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	return ctx.Err()
+}
+
+func (a *App) refreshWithCachedOwner(ctx context.Context, t config.ToolEntry, keys []string, owner string, installedMaps map[string]map[string]string, metadataMaps map[string]map[string]provider.InstalledMetadata) (*database.ToolCache, bool) {
 	ownerProv, ok := a.registry.Get(owner)
 	if !ok {
 		return nil, false
@@ -234,14 +245,32 @@ func (a *App) refreshWithCachedOwner(ctx context.Context, t config.ToolEntry, ke
 		installed bool
 		ver       string
 	)
+	if metadataMaps != nil {
+		if m, ok := metadataMaps[owner]; ok {
+			entry, installed := provider.LookupInstalledMetadata(m, keys)
+			return installedOwnerUpsertWithMetadata(t, owner, installed, entry), true
+		}
+	}
 	if installedMaps != nil {
 		if m, ok := installedMaps[owner]; ok {
 			ver, installed = provider.LookupString(m, keys)
 			return installedOwnerUpsert(t, owner, installed, ver), true
 		}
 	}
+	if mbc, ok := ownerProv.(provider.MetadataBulkChecker); ok {
+		if m, err := mbc.InstalledMetadataMap(ctx); err == nil {
+			if metadataMaps != nil {
+				metadataMaps[owner] = m
+			}
+			entry, installed := provider.LookupInstalledMetadata(m, keys)
+			return installedOwnerUpsertWithMetadata(t, owner, installed, entry), true
+		}
+	}
 	if bc, ok := ownerProv.(provider.BulkChecker); ok {
 		if m, err := bc.InstalledMap(ctx); err == nil {
+			if installedMaps != nil {
+				installedMaps[owner] = m
+			}
 			ver, installed = provider.LookupString(m, keys)
 			return installedOwnerUpsert(t, owner, installed, ver), true
 		}
@@ -266,20 +295,33 @@ func installedOwnerUpsert(t config.ToolEntry, owner string, installed bool, ver 
 	}
 }
 
-func profileIgnoreSet(cfg *config.RootConfig, profileName string) map[string]struct{} {
-	ignoreSet := make(map[string]struct{})
-	if profileName == "" {
-		var ok bool
-		profileName, ok = cfg.ActiveProfile(currentHostname())
-		if !ok {
-			return ignoreSet
-		}
+func installedOwnerUpsertWithMetadata(t config.ToolEntry, owner string, installed bool, entry provider.InstalledMetadata) *database.ToolCache {
+	upsert := installedOwnerUpsert(t, owner, installed, entry.Version)
+	applyPrivilegeMetadata(upsert, entry.Privilege)
+	return upsert
+}
+
+func applyPrivilegeMetadata(upsert *database.ToolCache, plan provider.PrivilegePlan) {
+	if upsert == nil || !plan.RequiresPrivilege() {
+		return
 	}
-	profile, ok := cfg.Profiles[profileName]
-	if !ok {
-		return ignoreSet
+	now := time.Now()
+	upsert.Privilege = string(plan.Requirement)
+	upsert.PrivilegeReason = sql.NullString{String: plan.Reason, Valid: plan.Reason != ""}
+	upsert.PrivilegeAt = &now
+}
+
+func installedMapFromMetadata(metadata map[string]provider.InstalledMetadata) map[string]string {
+	m := make(map[string]string, len(metadata))
+	for name, entry := range metadata {
+		m[name] = entry.Version
 	}
-	for _, name := range profile.Ignore {
+	return m
+}
+
+func globalIgnoreSet(cfg *config.RootConfig) map[string]struct{} {
+	ignoreSet := make(map[string]struct{}, len(cfg.Ignore.Tools))
+	for _, name := range cfg.Ignore.Tools {
 		ignoreSet[name] = struct{}{}
 	}
 	return ignoreSet
@@ -394,9 +436,11 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 	// Build installed map per provider using bulk check where available.
 	// multiMaps: provider → name → InstalledEntry (per-tool manager attribution).
 	// installedMaps: provider → name → version (single-manager bulk path).
+	// metadataMaps: provider → name → version plus provider metadata.
 	// concreteForBulk: provider → concrete backend for BulkChecker providers.
 	multiMaps := make(map[string]map[string]provider.InstalledEntry)
 	installedMaps := make(map[string]map[string]string)
+	metadataMaps := make(map[string]map[string]provider.InstalledMetadata)
 	concreteForBulk := make(map[string]string)
 	// Iterate the precomputed available set so we don't call Available a
 	// second time. Per-provider scan failures are skipped silently so a
@@ -414,13 +458,26 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 			}
 			continue
 		}
-		bc, ok := p.(provider.BulkChecker)
-		if !ok {
-			continue
-		}
-		m, err := bc.InstalledMap(ctx)
-		if err != nil {
-			continue
+		var (
+			m   map[string]string
+			err error
+		)
+		if mbc, ok := p.(provider.MetadataBulkChecker); ok {
+			metadata, err := mbc.InstalledMetadataMap(ctx)
+			if err != nil {
+				continue
+			}
+			metadataMaps[p.Name()] = metadata
+			m = installedMapFromMetadata(metadata)
+		} else {
+			bc, ok := p.(provider.BulkChecker)
+			if !ok {
+				continue
+			}
+			m, err = bc.InstalledMap(ctx)
+			if err != nil {
+				continue
+			}
 		}
 		// Resolve concrete backend for InstalledWith. Ecosystem providers (e.g. node)
 		// implement ConcreteResolver; concrete providers are their own backend.
@@ -464,7 +521,7 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 
 		opProvider := a.operationProviderName(t)
 		if owner := cachedOwners[resolvedToolKey(t)]; owner != "" && owner != opProvider && t.InstallWith == "" {
-			if upsert, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, installedMaps); handled {
+			if upsert, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, installedMaps, metadataMaps); handled {
 				if upsert == nil {
 					continue
 				}
@@ -490,7 +547,7 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 		if m, hasBulk := installedMaps[opProvider]; hasBulk && !(t.InstallWith != "" && opProvider == t.Provider) {
 			// Fast path: bulk map lookup (concrete providers with BulkChecker).
 			ver, installed := provider.LookupString(m, keys)
-			upserts = append(upserts, &database.ToolCache{
+			upsert := &database.ToolCache{
 				Name:          t.Name,
 				Provider:      t.Provider,
 				Package:       t.EffectivePackage(),
@@ -498,7 +555,11 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 				InstalledWith: concreteForBulk[opProvider],
 				Version:       sql.NullString{String: ver, Valid: ver != ""},
 				LastChecked:   time.Now(),
-			})
+			}
+			if metadata, ok := provider.LookupInstalledMetadata(metadataMaps[opProvider], keys); ok {
+				applyPrivilegeMetadata(upsert, metadata.Privilege)
+			}
+			upserts = append(upserts, upsert)
 			continue
 		}
 		// Slow path: per-tool IsInstalled call.
@@ -529,16 +590,19 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 			LastChecked:   time.Now(),
 		})
 	}
-	if err := a.readDB().UpsertBatch(ctx, upserts); err != nil {
+	writeCtx := context.WithoutCancel(ctx)
+	if err := a.readDB().UpsertBatch(writeCtx, upserts); err != nil {
 		return fmt.Errorf("upserting installed status: %w", err)
 	}
-	return a.reconcileResolvedTools(ctx, tools)
+	return a.reconcileResolvedTools(writeCtx, tools)
 }
 
 // RefreshProviderInstalled updates the DB install status for all configured tools
 // belonging to a single named provider. It mirrors the inner logic of
 // RefreshInstalled but scoped to one provider so callers can run providers in
-// parallel with independent timeouts. Best-effort: errors are silently skipped.
+// parallel with independent timeouts. Best-effort provider failures are skipped,
+// but caller cancellation/deadline errors are returned so refresh state does not
+// silently go stale.
 func (a *App) RefreshProviderInstalled(ctx context.Context, provName string) error {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -566,23 +630,29 @@ func (a *App) RefreshProviderInstalled(ctx context.Context, provName string) err
 		return nil
 	}
 	avail, err := p.Available(ctx)
-	if err != nil || !avail {
+	if err != nil {
+		return refreshContextErr(ctx, err)
+	}
+	if !avail {
 		return nil
 	}
+	writeCtx := context.WithoutCancel(ctx)
+	ownerInstalledMaps := make(map[string]map[string]string)
+	ownerMetadataMaps := make(map[string]map[string]provider.InstalledMetadata)
 
 	if mbc, ok := p.(provider.MultiManagerBulkChecker); ok {
 		entries, err := mbc.InstalledByManager(ctx)
 		if err != nil {
-			return nil
+			return refreshContextErr(ctx, err)
 		}
 		for _, t := range provTools {
 			keys := toolEntryLookupKeys(t)
 			if owner := cachedOwners[resolvedToolKey(t)]; owner != "" && owner != provName && t.InstallWith == "" {
-				if upsert, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, nil); handled {
+				if upsert, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, ownerInstalledMaps, ownerMetadataMaps); handled {
 					if upsert == nil {
 						continue
 					}
-					if err := a.readDB().Upsert(ctx, upsert); err != nil {
+					if err := a.readDB().Upsert(writeCtx, upsert); err != nil {
 						return fmt.Errorf("upserting installed status for %s/%s: %w", t.Provider, t.Name, err)
 					}
 					continue
@@ -593,7 +663,7 @@ func (a *App) RefreshProviderInstalled(ctx context.Context, provName string) err
 				if err != nil {
 					continue
 				}
-				if err := a.readDB().Upsert(ctx, &database.ToolCache{
+				if err := a.readDB().Upsert(writeCtx, &database.ToolCache{
 					Name:          t.Name,
 					Provider:      t.Provider,
 					Package:       t.EffectivePackage(),
@@ -608,7 +678,7 @@ func (a *App) RefreshProviderInstalled(ctx context.Context, provName string) err
 			}
 			entry := provider.LookupInstalledEntry(entries, keys)
 			installed := entry.ConcreteManager != ""
-			if err := a.readDB().Upsert(ctx, &database.ToolCache{
+			if err := a.readDB().Upsert(writeCtx, &database.ToolCache{
 				Name:          t.Name,
 				Provider:      t.Provider,
 				Package:       t.EffectivePackage(),
@@ -626,6 +696,56 @@ func (a *App) RefreshProviderInstalled(ctx context.Context, provName string) err
 	// BulkChecker path: single backend, bulk map lookup.
 	// On error fall through to per-tool slow path so a partial failure (e.g. a
 	// ecosystem provider whose delegate doesn't support bulk) doesn't skip all tools.
+	if mbc, ok := p.(provider.MetadataBulkChecker); ok {
+		if metadata, err := mbc.InstalledMetadataMap(ctx); err == nil {
+			m := installedMapFromMetadata(metadata)
+			installedWith := p.Name()
+			if cr, ok := p.(provider.ConcreteResolver); ok {
+				if name, resolveErr := cr.ResolvedName(ctx); resolveErr == nil && name != "" {
+					installedWith = name
+				} else {
+					installedWith = ""
+				}
+			}
+			if installedWith != "" {
+				ownerMetadataMaps[installedWith] = metadata
+				ownerInstalledMaps[installedWith] = m
+			}
+			for _, t := range provTools {
+				keys := toolEntryLookupKeys(t)
+				if owner := cachedOwners[resolvedToolKey(t)]; owner != "" && owner != provName && t.InstallWith == "" {
+					if upsert, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, ownerInstalledMaps, ownerMetadataMaps); handled {
+						if upsert == nil {
+							continue
+						}
+						if err := a.readDB().Upsert(writeCtx, upsert); err != nil {
+							return fmt.Errorf("upserting installed status for %s/%s: %w", t.Provider, t.Name, err)
+						}
+						continue
+					}
+				}
+				ver, installed := provider.LookupString(m, keys)
+				upsert := &database.ToolCache{
+					Name:          t.Name,
+					Provider:      t.Provider,
+					Package:       t.EffectivePackage(),
+					Installed:     installed,
+					InstalledWith: installedWith,
+					Version:       sql.NullString{String: ver, Valid: ver != ""},
+					LastChecked:   time.Now(),
+				}
+				if entry, ok := provider.LookupInstalledMetadata(metadata, keys); ok {
+					applyPrivilegeMetadata(upsert, entry.Privilege)
+				}
+				if err := a.readDB().Upsert(writeCtx, upsert); err != nil {
+					return fmt.Errorf("upserting installed status for %s/%s: %w", t.Provider, t.Name, err)
+				}
+			}
+			return nil
+		} else if err := refreshContextErr(ctx, err); err != nil {
+			return err
+		}
+	}
 	if bc, ok := p.(provider.BulkChecker); ok {
 		if m, err := bc.InstalledMap(ctx); err == nil {
 			installedWith := p.Name()
@@ -636,21 +756,24 @@ func (a *App) RefreshProviderInstalled(ctx context.Context, provName string) err
 					installedWith = ""
 				}
 			}
+			if installedWith != "" {
+				ownerInstalledMaps[installedWith] = m
+			}
 			for _, t := range provTools {
 				keys := toolEntryLookupKeys(t)
 				if owner := cachedOwners[resolvedToolKey(t)]; owner != "" && owner != provName && t.InstallWith == "" {
-					if upsert, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, nil); handled {
+					if upsert, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, ownerInstalledMaps, ownerMetadataMaps); handled {
 						if upsert == nil {
 							continue
 						}
-						if err := a.readDB().Upsert(ctx, upsert); err != nil {
+						if err := a.readDB().Upsert(writeCtx, upsert); err != nil {
 							return fmt.Errorf("upserting installed status for %s/%s: %w", t.Provider, t.Name, err)
 						}
 						continue
 					}
 				}
 				ver, installed := provider.LookupString(m, keys)
-				if err := a.readDB().Upsert(ctx, &database.ToolCache{
+				if err := a.readDB().Upsert(writeCtx, &database.ToolCache{
 					Name:          t.Name,
 					Provider:      t.Provider,
 					Package:       t.EffectivePackage(),
@@ -663,6 +786,8 @@ func (a *App) RefreshProviderInstalled(ctx context.Context, provName string) err
 				}
 			}
 			return nil
+		} else if err := refreshContextErr(ctx, err); err != nil {
+			return err
 		}
 		// InstalledMap failed — fall through to per-tool slow path.
 	}
@@ -671,11 +796,11 @@ func (a *App) RefreshProviderInstalled(ctx context.Context, provName string) err
 	// or when BulkChecker.InstalledMap returned an error.
 	for _, t := range provTools {
 		if owner := cachedOwners[resolvedToolKey(t)]; owner != "" && owner != provName && t.InstallWith == "" {
-			if upsert, handled := a.refreshWithCachedOwner(ctx, t, toolEntryLookupKeys(t), owner, nil); handled {
+			if upsert, handled := a.refreshWithCachedOwner(ctx, t, toolEntryLookupKeys(t), owner, ownerInstalledMaps, ownerMetadataMaps); handled {
 				if upsert == nil {
 					continue
 				}
-				if err := a.readDB().Upsert(ctx, upsert); err != nil {
+				if err := a.readDB().Upsert(writeCtx, upsert); err != nil {
 					return fmt.Errorf("upserting installed status for %s/%s: %w", t.Provider, t.Name, err)
 				}
 				continue
@@ -683,10 +808,13 @@ func (a *App) RefreshProviderInstalled(ctx context.Context, provName string) err
 		}
 		installed, ver, err := a.isInstalledWithEntry(ctx, p, provName, t)
 		if err != nil {
+			if err := refreshContextErr(ctx, err); err != nil {
+				return err
+			}
 			continue
 		}
 		installedWith := installedWithForOperation(ctx, p, provName, t.InstallWith)
-		if err := a.readDB().Upsert(ctx, &database.ToolCache{
+		if err := a.readDB().Upsert(writeCtx, &database.ToolCache{
 			Name:          t.Name,
 			Provider:      t.Provider,
 			Package:       t.EffectivePackage(),
@@ -714,11 +842,12 @@ func (a *App) RefreshDiscovered(ctx context.Context) error {
 	cutoff := time.Now()
 	discovered := a.discoverUntrackedInstalled(ctx, cfg)
 
-	if err := a.readDB().UpsertDiscoveredBatch(ctx, discovered); err != nil {
+	writeCtx := context.WithoutCancel(ctx)
+	if err := a.readDB().UpsertDiscoveredBatch(writeCtx, discovered); err != nil {
 		return fmt.Errorf("upserting discovered tools: %w", err)
 	}
 
-	if err := a.readDB().PruneDiscovered(ctx, cutoff); err != nil {
+	if err := a.readDB().PruneDiscovered(writeCtx, cutoff); err != nil {
 		return fmt.Errorf("pruning discovered tools: %w", err)
 	}
 	return nil
@@ -881,11 +1010,47 @@ func (a *App) Search(ctx context.Context, query, providerFilter string) ([]provi
 			if resultProvider == "" {
 				resultProvider = p.Name()
 			}
+			if r.SourceProvider == "" {
+				r.SourceProvider = resultProvider
+			}
 			r.Provider = a.searchResultConfigProvider(resultProvider)
 			results = append(results, r)
 		}
 	}
+	if err := a.cacheSearchMetadata(ctx, results); err != nil {
+		errs = append(errs, err)
+	}
 	return results, errors.Join(errs...)
+}
+
+func (a *App) cacheSearchMetadata(ctx context.Context, results []provider.SearchResult) error {
+	updates := make([]database.MetadataUpdate, 0, len(results))
+	for _, r := range results {
+		name := strings.TrimSpace(r.Name)
+		providerName := strings.TrimSpace(r.Provider)
+		if name == "" || providerName == "" {
+			continue
+		}
+		u := database.MetadataUpdate{
+			Name:        name,
+			Provider:    providerName,
+			Package:     name,
+			Version:     strings.TrimSpace(r.Version),
+			Description: strings.TrimSpace(r.Description),
+		}
+		if r.Privilege.RequiresPrivilege() {
+			u.Privilege = string(r.Privilege.Requirement)
+			u.PrivilegeReason = strings.TrimSpace(r.Privilege.Reason)
+		}
+		if u.Version == "" && u.Description == "" && u.Privilege == "" {
+			continue
+		}
+		updates = append(updates, u)
+	}
+	if err := a.readDB().UpsertMetadataBatch(ctx, updates); err != nil {
+		return fmt.Errorf("caching search metadata: %w", err)
+	}
+	return nil
 }
 
 func (a *App) searchProviderMatches(providerName, filter string) bool {

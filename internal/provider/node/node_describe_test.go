@@ -31,6 +31,24 @@ func TestDescribe_Success(t *testing.T) {
 	}
 }
 
+func TestDescribe_FallsBackToReadmeIntro(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"readme": "# corepack\n\nCorepack is a zero-runtime-dependency Node.js script.\n\n## Usage\nMore docs.",
+		})
+	}))
+	defer srv.Close()
+
+	p := newWithRegistry(executor.NewMatchMock(), "pnpm", srv.URL, srv.Client())
+	desc, err := p.Describe(context.Background(), nodeTool("corepack"))
+	if err != nil {
+		t.Fatalf("Describe: %v", err)
+	}
+	if desc != "Corepack is a zero-runtime-dependency Node.js script." {
+		t.Fatalf("desc = %q, want README intro", desc)
+	}
+}
+
 func TestDescribe_NotFound(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)

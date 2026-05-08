@@ -38,6 +38,29 @@ func newWithPyPI(exec executor.Executor, pypiURL string, client *http.Client) *P
 func (p *Provider) Name() string        { return "pip" }
 func (p *Provider) Description() string { return "pip — Python package installer" }
 
+func (p *Provider) ErrorSolutions(code provider.ErrorCode, tool provider.Tool) []provider.ErrorSolution {
+	if code != provider.ErrorExternallyManagedPython {
+		return nil
+	}
+	fromProvider := tool.Provider
+	if fromProvider == "" {
+		fromProvider = p.Name()
+	}
+	command := ""
+	if tool.Name != "" {
+		command = fmt.Sprintf("omni switch %s --from %s --to uv", tool.Name, fromProvider)
+	}
+	return []provider.ErrorSolution{
+		{
+			Label:          "Reinstall this tool with uv",
+			Command:        command,
+			Detail:         "uv installs Python CLI tools into isolated tool environments instead of modifying the externally managed Python.",
+			Action:         provider.ErrorSolutionActionSwitchProvider,
+			TargetProvider: "uv",
+		},
+	}
+}
+
 func (p *Provider) Available(ctx context.Context) (bool, error) {
 	_, _, err := p.exec.Run(ctx, p.bin, "--version")
 	return err == nil, nil
@@ -46,6 +69,9 @@ func (p *Provider) Available(ctx context.Context) (bool, error) {
 func (p *Provider) Install(ctx context.Context, tool provider.Tool) error {
 	_, stderr, err := p.exec.Run(ctx, p.bin, "install", tool.EffectivePackage())
 	if err != nil {
+		if provider.IsExternallyManagedPythonOutput(stderr) {
+			return provider.NewExternallyManagedPythonError(p.bin, "install", tool, err, stderr, p.ErrorSolutions(provider.ErrorExternallyManagedPython, tool))
+		}
 		return fmt.Errorf("pip install %s: %w (stderr: %s)", tool.EffectivePackage(), err, strings.TrimSpace(stderr))
 	}
 	return nil
@@ -54,6 +80,9 @@ func (p *Provider) Install(ctx context.Context, tool provider.Tool) error {
 func (p *Provider) Uninstall(ctx context.Context, tool provider.Tool) error {
 	_, stderr, err := p.exec.Run(ctx, p.bin, "uninstall", "-y", tool.EffectivePackage())
 	if err != nil {
+		if provider.IsExternallyManagedPythonOutput(stderr) {
+			return provider.NewExternallyManagedPythonError(p.bin, "uninstall", tool, err, stderr, p.ErrorSolutions(provider.ErrorExternallyManagedPython, tool))
+		}
 		return fmt.Errorf("pip uninstall %s: %w (stderr: %s)", tool.EffectivePackage(), err, strings.TrimSpace(stderr))
 	}
 	return nil
@@ -62,6 +91,9 @@ func (p *Provider) Uninstall(ctx context.Context, tool provider.Tool) error {
 func (p *Provider) Upgrade(ctx context.Context, tool provider.Tool) error {
 	_, stderr, err := p.exec.Run(ctx, p.bin, "install", "--upgrade", tool.EffectivePackage())
 	if err != nil {
+		if provider.IsExternallyManagedPythonOutput(stderr) {
+			return provider.NewExternallyManagedPythonError(p.bin, "upgrade", tool, err, stderr, p.ErrorSolutions(provider.ErrorExternallyManagedPython, tool))
+		}
 		return fmt.Errorf("pip install --upgrade %s: %w (stderr: %s)", tool.EffectivePackage(), err, strings.TrimSpace(stderr))
 	}
 	return nil

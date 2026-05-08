@@ -21,21 +21,51 @@ import (
 type ToolCache struct {
 	bun.BaseModel `bun:"table:tool_cache,alias:tc"`
 
-	ID            int64          `bun:"id,pk,autoincrement"`
-	Name          string         `bun:"name,notnull"`
-	Provider      string         `bun:"provider,notnull"`
-	Package       string         `bun:"package,notnull"`
-	Installed     bool           `bun:"installed,notnull,default:false"`
-	InstalledWith string         `bun:"installed_with,notnull,default:''"`
-	Version       sql.NullString `bun:"version"`
-	Outdated      bool           `bun:"outdated,notnull,default:false"`
-	LatestVersion sql.NullString `bun:"latest_version"`
-	Description   sql.NullString `bun:"description"`
-	LastChecked   time.Time      `bun:"last_checked,notnull"`
-	FailedAt      *time.Time     `bun:"failed_at"`
-	FailureCount  int            `bun:"failure_count,notnull,default:0"`
-	LastError     sql.NullString `bun:"last_error"`
-	Tracked       bool           `bun:"tracked,notnull,default:true"`
+	ID              int64          `bun:"id,pk,autoincrement"`
+	Name            string         `bun:"name,notnull"`
+	Provider        string         `bun:"provider,notnull"`
+	Package         string         `bun:"package,notnull"`
+	Installed       bool           `bun:"installed,notnull,default:false"`
+	InstalledWith   string         `bun:"installed_with,notnull,default:''"`
+	Version         sql.NullString `bun:"version"`
+	Outdated        bool           `bun:"outdated,notnull,default:false"`
+	LatestVersion   sql.NullString `bun:"latest_version"`
+	Description     sql.NullString `bun:"description"`
+	LastChecked     time.Time      `bun:"last_checked,notnull"`
+	FailedAt        *time.Time     `bun:"failed_at"`
+	FailureCount    int            `bun:"failure_count,notnull,default:0"`
+	LastError       sql.NullString `bun:"last_error"`
+	Tracked         bool           `bun:"tracked,notnull,default:true"`
+	Privilege       string         `bun:"privilege,notnull,default:''"`
+	PrivilegeReason sql.NullString `bun:"privilege_reason"`
+	PrivilegeAt     *time.Time     `bun:"privilege_at"`
+}
+
+// ToolMetadata is provider registry metadata cached independently from
+// install/config state.
+type ToolMetadata struct {
+	bun.BaseModel `bun:"table:tool_metadata,alias:tm"`
+
+	ID              int64          `bun:"id,pk,autoincrement"`
+	Name            string         `bun:"name,notnull"`
+	Provider        string         `bun:"provider,notnull"`
+	Package         string         `bun:"package,notnull"`
+	Version         sql.NullString `bun:"version"`
+	Description     sql.NullString `bun:"description"`
+	Privilege       string         `bun:"privilege,notnull,default:''"`
+	PrivilegeReason sql.NullString `bun:"privilege_reason"`
+	UpdatedAt       time.Time      `bun:"updated_at,notnull"`
+}
+
+// MetadataUpdate is registry metadata learned without changing install state.
+type MetadataUpdate struct {
+	Name            string
+	Provider        string
+	Package         string
+	Version         string
+	Description     string
+	Privilege       string
+	PrivilegeReason string
 }
 
 // DB wraps a bun.DB and provides typed tool-cache operations.
@@ -48,6 +78,10 @@ func requirePackage(name, provider, pkg string) error {
 		return fmt.Errorf("missing package for %s/%s cache key", provider, name)
 	}
 	return nil
+}
+
+func metadataKey(name, provider, pkg string) string {
+	return name + "\x00" + provider + "\x00" + pkg
 }
 
 // Open opens (or creates) the SQLite database at path and returns a DB.
@@ -103,12 +137,25 @@ func (db *DB) Migrate(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("creating tool_cache table: %w", err)
 	}
+	_, err = db.bun.NewCreateTable().
+		Model((*ToolMetadata)(nil)).
+		IfNotExists().
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("creating tool_metadata table: %w", err)
+	}
 	// Ensure the unique index exists (bun doesn't auto-create indexes from tags).
 	_, err = db.bun.ExecContext(ctx,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_tool_cache_name_provider_package
 		 ON tool_cache (name, provider, package)`)
 	if err != nil {
 		return fmt.Errorf("creating unique index: %w", err)
+	}
+	_, err = db.bun.ExecContext(ctx,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_tool_metadata_name_provider_package
+		 ON tool_metadata (name, provider, package)`)
+	if err != nil {
+		return fmt.Errorf("creating metadata unique index: %w", err)
 	}
 	// Add columns introduced after initial schema; duplicate-column errors are
 	// expected (column already created by the CREATE TABLE above) and suppressed.
@@ -129,6 +176,9 @@ func (db *DB) Migrate(ctx context.Context) error {
 		{"last_error", "TEXT"},
 		{"installed_with", "TEXT NOT NULL DEFAULT ''"},
 		{"tracked", "BOOLEAN NOT NULL DEFAULT TRUE"},
+		{"privilege", "TEXT NOT NULL DEFAULT ''"},
+		{"privilege_reason", "TEXT"},
+		{"privilege_at", "DATETIME"},
 	} {
 		if err := addCol(c.col, c.def); err != nil {
 			return err
@@ -145,6 +195,46 @@ func (db *DB) Migrate(ctx context.Context) error {
 		if _, err := db.bun.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS "+idx.name+" "+idx.def); err != nil {
 			return fmt.Errorf("creating index %s: %w", idx.name, err)
 		}
+	}
+	return db.migrateExistingToolMetadata(ctx)
+}
+
+func (db *DB) migrateExistingToolMetadata(ctx context.Context) error {
+	_, err := db.bun.ExecContext(ctx,
+		`INSERT INTO tool_metadata (
+		     name, provider, package, description,
+		     privilege, privilege_reason, updated_at
+		 )
+		 SELECT
+		     name,
+		     provider,
+		     package,
+		     NULLIF(description, ''),
+		     privilege,
+		     privilege_reason,
+		     COALESCE(privilege_at, last_checked, CURRENT_TIMESTAMP)
+		 FROM tool_cache
+		 WHERE package != ''
+		   AND (
+		       (description IS NOT NULL AND description != '')
+		       OR (privilege IS NOT NULL AND privilege != '')
+		   )
+		 ON CONFLICT (name, provider, package) DO UPDATE SET
+		     description = CASE
+		         WHEN EXCLUDED.description IS NOT NULL AND EXCLUDED.description != '' THEN EXCLUDED.description
+		         ELSE tool_metadata.description
+		     END,
+		     privilege = CASE
+		         WHEN EXCLUDED.privilege != '' THEN EXCLUDED.privilege
+		         ELSE tool_metadata.privilege
+		     END,
+		     privilege_reason = CASE
+		         WHEN EXCLUDED.privilege != '' THEN EXCLUDED.privilege_reason
+		         ELSE tool_metadata.privilege_reason
+		     END,
+		     updated_at = EXCLUDED.updated_at`)
+	if err != nil {
+		return fmt.Errorf("migrating existing tool metadata: %w", err)
 	}
 	return nil
 }
@@ -188,6 +278,9 @@ func (db *DB) Upsert(ctx context.Context, t *ToolCache) error {
 		Set("failed_at = CASE WHEN EXCLUDED.installed THEN NULL ELSE failed_at END").
 		Set("last_error = CASE WHEN EXCLUDED.installed THEN NULL ELSE last_error END").
 		Set("tracked = TRUE").
+		Set("privilege = CASE WHEN EXCLUDED.privilege != '' THEN EXCLUDED.privilege ELSE privilege END").
+		Set("privilege_reason = CASE WHEN EXCLUDED.privilege != '' THEN EXCLUDED.privilege_reason ELSE privilege_reason END").
+		Set("privilege_at = CASE WHEN EXCLUDED.privilege != '' THEN EXCLUDED.privilege_at ELSE privilege_at END").
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("upserting tool %s/%s: %w", t.Provider, t.Name, err)
@@ -223,9 +316,56 @@ func (db *DB) UpsertBatch(ctx context.Context, tools []*ToolCache) error {
 				Set("failed_at = CASE WHEN EXCLUDED.installed THEN NULL ELSE failed_at END").
 				Set("last_error = CASE WHEN EXCLUDED.installed THEN NULL ELSE last_error END").
 				Set("tracked = TRUE").
+				Set("privilege = CASE WHEN EXCLUDED.privilege != '' THEN EXCLUDED.privilege ELSE privilege END").
+				Set("privilege_reason = CASE WHEN EXCLUDED.privilege != '' THEN EXCLUDED.privilege_reason ELSE privilege_reason END").
+				Set("privilege_at = CASE WHEN EXCLUDED.privilege != '' THEN EXCLUDED.privilege_at ELSE privilege_at END").
 				Exec(ctx)
 			if err != nil {
 				return fmt.Errorf("upserting tool %s/%s: %w", t.Provider, t.Name, err)
+			}
+		}
+		return nil
+	})
+}
+
+// UpsertMetadataBatch caches registry metadata for tools that may not be
+// installed or configured yet. It never changes install/config state.
+func (db *DB) UpsertMetadataBatch(ctx context.Context, updates []MetadataUpdate) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	return db.bun.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		now := time.Now()
+		for _, u := range updates {
+			if err := requirePackage(u.Name, u.Provider, u.Package); err != nil {
+				return err
+			}
+			version := sql.NullString{String: u.Version, Valid: u.Version != ""}
+			description := sql.NullString{String: u.Description, Valid: u.Description != ""}
+			privilegeReason := sql.NullString{String: u.PrivilegeReason, Valid: u.PrivilegeReason != ""}
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO tool_metadata (
+				     name, provider, package, version, description,
+				     privilege, privilege_reason, updated_at
+				 )
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+				 ON CONFLICT (name, provider, package) DO UPDATE SET
+				     description = CASE
+				         WHEN EXCLUDED.description IS NOT NULL AND EXCLUDED.description != '' THEN EXCLUDED.description
+				         ELSE tool_metadata.description
+				     END,
+				     version = CASE WHEN EXCLUDED.version IS NOT NULL THEN EXCLUDED.version ELSE tool_metadata.version END,
+				     privilege = CASE
+				         WHEN EXCLUDED.privilege != '' THEN EXCLUDED.privilege
+				         ELSE tool_metadata.privilege
+				     END,
+				     privilege_reason = CASE
+				         WHEN EXCLUDED.privilege != '' THEN EXCLUDED.privilege_reason
+				         ELSE tool_metadata.privilege_reason
+				     END,
+				     updated_at = EXCLUDED.updated_at`,
+				u.Name, u.Provider, u.Package, version, description, u.Privilege, privilegeReason, now); err != nil {
+				return fmt.Errorf("upserting metadata for %s/%s: %w", u.Provider, u.Name, err)
 			}
 		}
 		return nil
@@ -250,31 +390,18 @@ func (db *DB) UpdateOutdated(ctx context.Context, name, provider, pkg string, ou
 	return nil
 }
 
-// UpdateDescription caches a one-line description for a tool.
-// If the tool has no row yet (never synced) it inserts a minimal stub row so
-// that the description is not silently dropped.
+// UpdateDescription caches a one-line description for a tool without changing
+// install/config state.
 func (db *DB) UpdateDescription(ctx context.Context, name, prov, pkg, description string) error {
 	if err := requirePackage(name, prov, pkg); err != nil {
 		return err
 	}
-	res, err := db.bun.ExecContext(ctx,
-		`UPDATE tool_cache SET description = ? WHERE name = ? AND provider = ? AND package = ?`,
-		description, name, prov, pkg)
-	if err != nil {
-		return fmt.Errorf("updating description for %s/%s: %w", prov, name, err)
-	}
-	if rows, _ := res.RowsAffected(); rows > 0 {
-		return nil
-	}
-	_, err = db.bun.ExecContext(ctx,
-		`INSERT INTO tool_cache (name, provider, package, installed, last_checked, description)
-		 VALUES (?, ?, ?, FALSE, CURRENT_TIMESTAMP, ?)
-		 ON CONFLICT (name, provider, package) DO UPDATE SET description = EXCLUDED.description`,
-		name, prov, pkg, description)
-	if err != nil {
-		return fmt.Errorf("updating description for %s/%s: %w", prov, name, err)
-	}
-	return nil
+	return db.UpsertMetadataBatch(ctx, []MetadataUpdate{{
+		Name:        name,
+		Provider:    prov,
+		Package:     pkg,
+		Description: description,
+	}})
 }
 
 // DescriptionUpdate is one row of UpdateDescriptionBatch input.
@@ -285,37 +412,22 @@ type DescriptionUpdate struct {
 	Description string
 }
 
-// UpdateDescriptionBatch applies many UpdateDescription calls inside a single
-// transaction. Each entry follows the UPDATE-then-INSERT-on-miss pattern of
-// UpdateDescription. Empty slices are no-ops.
+// UpdateDescriptionBatch caches many tool descriptions without changing
+// install/config state. Empty slices are no-ops.
 func (db *DB) UpdateDescriptionBatch(ctx context.Context, updates []DescriptionUpdate) error {
 	if len(updates) == 0 {
 		return nil
 	}
-	return db.bun.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
-		for _, u := range updates {
-			if err := requirePackage(u.Name, u.Provider, u.Package); err != nil {
-				return err
-			}
-			res, err := tx.ExecContext(ctx,
-				`UPDATE tool_cache SET description = ? WHERE name = ? AND provider = ? AND package = ?`,
-				u.Description, u.Name, u.Provider, u.Package)
-			if err != nil {
-				return fmt.Errorf("updating description for %s/%s: %w", u.Provider, u.Name, err)
-			}
-			if rows, _ := res.RowsAffected(); rows > 0 {
-				continue
-			}
-			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO tool_cache (name, provider, package, installed, last_checked, description)
-				 VALUES (?, ?, ?, FALSE, CURRENT_TIMESTAMP, ?)
-				 ON CONFLICT (name, provider, package) DO UPDATE SET description = EXCLUDED.description`,
-				u.Name, u.Provider, u.Package, u.Description); err != nil {
-				return fmt.Errorf("updating description for %s/%s: %w", u.Provider, u.Name, err)
-			}
-		}
-		return nil
-	})
+	metadata := make([]MetadataUpdate, 0, len(updates))
+	for _, u := range updates {
+		metadata = append(metadata, MetadataUpdate{
+			Name:        u.Name,
+			Provider:    u.Provider,
+			Package:     u.Package,
+			Description: u.Description,
+		})
+	}
+	return db.UpsertMetadataBatch(ctx, metadata)
 }
 
 // Get retrieves a single tool entry by name, provider, and package.
@@ -333,7 +445,98 @@ func (db *DB) Get(ctx context.Context, name, provider, pkg string) (*ToolCache, 
 	if err != nil {
 		return nil, fmt.Errorf("getting tool %s/%s: %w", provider, name, err)
 	}
+	if err := db.hydrateMetadata(ctx, []*ToolCache{t}); err != nil {
+		return nil, err
+	}
 	return t, nil
+}
+
+// GetMetadata retrieves central registry metadata by name, provider, and package.
+// Returns sql.ErrNoRows if not found.
+func (db *DB) GetMetadata(ctx context.Context, name, provider, pkg string) (*ToolMetadata, error) {
+	if err := requirePackage(name, provider, pkg); err != nil {
+		return nil, err
+	}
+	m := new(ToolMetadata)
+	err := db.bun.NewSelect().
+		Model(m).
+		Where("name = ? AND provider = ? AND package = ?", name, provider, pkg).
+		Limit(1).
+		Scan(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("getting metadata %s/%s: %w", provider, name, err)
+	}
+	return m, nil
+}
+
+// ListMetadata returns all central registry metadata rows ordered by provider
+// then name.
+func (db *DB) ListMetadata(ctx context.Context) ([]*ToolMetadata, error) {
+	var metadata []*ToolMetadata
+	if err := db.bun.NewSelect().
+		Model(&metadata).
+		OrderExpr("provider, name").
+		Scan(ctx); err != nil {
+		return nil, fmt.Errorf("listing tool metadata: %w", err)
+	}
+	return metadata, nil
+}
+
+func (db *DB) hydrateMetadata(ctx context.Context, tools []*ToolCache) error {
+	if len(tools) == 0 {
+		return nil
+	}
+	providerSet := make(map[string]struct{})
+	for _, t := range tools {
+		if t == nil || t.Provider == "" {
+			continue
+		}
+		providerSet[t.Provider] = struct{}{}
+	}
+	if len(providerSet) == 0 {
+		return nil
+	}
+	providers := make([]string, 0, len(providerSet))
+	for p := range providerSet {
+		providers = append(providers, p)
+	}
+	var metadata []*ToolMetadata
+	if err := db.bun.NewSelect().
+		Model(&metadata).
+		Where("provider IN (?)", bun.List(providers)).
+		Scan(ctx); err != nil {
+		return fmt.Errorf("listing tool metadata: %w", err)
+	}
+	byKey := make(map[string]*ToolMetadata, len(metadata))
+	for _, m := range metadata {
+		if m == nil {
+			continue
+		}
+		byKey[metadataKey(m.Name, m.Provider, m.Package)] = m
+	}
+	for _, t := range tools {
+		if t == nil {
+			continue
+		}
+		pkg := t.Package
+		if pkg == "" {
+			pkg = t.Name
+		}
+		if m := byKey[metadataKey(t.Name, t.Provider, pkg)]; m != nil {
+			applyToolMetadata(t, m)
+		}
+	}
+	return nil
+}
+
+func applyToolMetadata(t *ToolCache, m *ToolMetadata) {
+	if m.Description.Valid && strings.TrimSpace(m.Description.String) != "" {
+		t.Description = m.Description
+	}
+	if t.Privilege == "" && m.Privilege != "" {
+		t.Privilege = m.Privilege
+		t.PrivilegeReason = m.PrivilegeReason
+	}
 }
 
 // List returns all tool entries ordered by provider then name.
@@ -345,6 +548,9 @@ func (db *DB) List(ctx context.Context) ([]*ToolCache, error) {
 		Scan(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing tools: %w", err)
+	}
+	if err := db.hydrateMetadata(ctx, tools); err != nil {
+		return nil, err
 	}
 	return tools, nil
 }
@@ -359,6 +565,9 @@ func (db *DB) ListByProvider(ctx context.Context, provider string) ([]*ToolCache
 		Scan(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing tools for provider %s: %w", provider, err)
+	}
+	if err := db.hydrateMetadata(ctx, tools); err != nil {
+		return nil, err
 	}
 	return tools, nil
 }
@@ -421,6 +630,46 @@ func (db *DB) MarkFailed(ctx context.Context, name, prov, pkg, errMsg string) er
 	return nil
 }
 
+// MarkPrivilegeRequired records that an attempted operation needs privileged
+// package-manager access. Creates a stub row if none exists yet.
+func (db *DB) MarkPrivilegeRequired(ctx context.Context, name, prov, pkg, requirement, reason string) error {
+	if err := requirePackage(name, prov, pkg); err != nil {
+		return err
+	}
+	_, err := db.bun.ExecContext(ctx,
+		`INSERT INTO tool_cache (name, provider, package, installed, last_checked, privilege, privilege_reason, privilege_at)
+		 VALUES (?, ?, ?, FALSE, CURRENT_TIMESTAMP, ?, ?, CURRENT_TIMESTAMP)
+		 ON CONFLICT (name, provider, package) DO UPDATE SET
+		     privilege        = EXCLUDED.privilege,
+		     privilege_reason = EXCLUDED.privilege_reason,
+		     privilege_at     = CURRENT_TIMESTAMP,
+		     last_checked     = CURRENT_TIMESTAMP`,
+		name, prov, pkg, requirement, sql.NullString{String: reason, Valid: reason != ""})
+	if err != nil {
+		return fmt.Errorf("marking privilege for %s/%s: %w", prov, name, err)
+	}
+	return nil
+}
+
+// ClearFailure removes the retry/failure marker for a tool without changing
+// installed state. Used when an operation was cancelled rather than failed.
+func (db *DB) ClearFailure(ctx context.Context, name, prov, pkg string) error {
+	if err := requirePackage(name, prov, pkg); err != nil {
+		return err
+	}
+	_, err := db.bun.NewUpdate().
+		Model((*ToolCache)(nil)).
+		Set("failed_at = NULL").
+		Set("failure_count = 0").
+		Set("last_error = NULL").
+		Where("name = ? AND provider = ? AND package = ?", name, prov, pkg).
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("clearing failure for %s/%s: %w", prov, name, err)
+	}
+	return nil
+}
+
 // ListFailed returns all tool entries with a non-null failed_at, ordered by
 // provider then name.
 func (db *DB) ListFailed(ctx context.Context) ([]*ToolCache, error) {
@@ -432,6 +681,9 @@ func (db *DB) ListFailed(ctx context.Context) ([]*ToolCache, error) {
 		Scan(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing failed tools: %w", err)
+	}
+	if err := db.hydrateMetadata(ctx, tools); err != nil {
+		return nil, err
 	}
 	return tools, nil
 }
@@ -540,6 +792,9 @@ func (db *DB) ListDiscovered(ctx context.Context) ([]*ToolCache, error) {
 		Scan(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing discovered tools: %w", err)
+	}
+	if err := db.hydrateMetadata(ctx, tools); err != nil {
+		return nil, err
 	}
 	return tools, nil
 }

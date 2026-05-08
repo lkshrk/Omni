@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
@@ -61,6 +62,92 @@ func (p *lifecycleProvider) IsInstalledWithManager(_ context.Context, tool provi
 
 func (p *lifecycleProvider) ResolvedName(_ context.Context) (string, error) {
 	return p.resolvedName, nil
+}
+
+func TestCompleteExternalToolAction_UpgradeVerifiesAndClearsOutdated(t *testing.T) {
+	ctx := context.Background()
+	brew := &lifecycleProvider{
+		stubProvider: stubProvider{name: "brew", available: true},
+		installed:    true,
+		version:      "2.0.0",
+	}
+	a, _ := newImportApp(t, brew)
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name:          "parsec",
+		Provider:      "system",
+		Package:       "parsec",
+		Installed:     true,
+		InstalledWith: "brew",
+		Version:       sql.NullString{String: "1.0.0", Valid: true},
+		LastChecked:   time.Now(),
+	}); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+	if err := a.DB().UpdateOutdated(ctx, "parsec", "system", "parsec", true, "2.0.0"); err != nil {
+		t.Fatalf("seed outdated: %v", err)
+	}
+
+	if err := a.CompleteExternalToolAction(ctx, provider.PrivilegeActionUpgrade, "parsec", "system", "parsec", "brew"); err != nil {
+		t.Fatalf("CompleteExternalToolAction: %v", err)
+	}
+
+	cached, err := a.DB().Get(ctx, "parsec", "system", "parsec")
+	if err != nil {
+		t.Fatalf("db.Get: %v", err)
+	}
+	if !cached.Installed || cached.InstalledWith != "brew" || !cached.Version.Valid || cached.Version.String != "2.0.0" {
+		t.Fatalf("cached row = installed=%v installedWith=%q version=%+v, want installed via brew version 2.0.0", cached.Installed, cached.InstalledWith, cached.Version)
+	}
+	if cached.Outdated || cached.LatestVersion.Valid {
+		t.Fatalf("outdated state = %v latest=%+v, want cleared", cached.Outdated, cached.LatestVersion)
+	}
+	if len(brew.installedChecks) != 1 || brew.installedChecks[0].Provider != "brew" {
+		t.Fatalf("installed checks = %#v, want one brew-owned verification", brew.installedChecks)
+	}
+}
+
+func TestCompleteExternalToolAction_UninstallRemovesConfigAndCache(t *testing.T) {
+	ctx := context.Background()
+	brew := &lifecycleProvider{stubProvider: stubProvider{name: "brew", available: true}}
+	a, cfgPath := newImportApp(t, brew)
+	cfg := &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("parsec", "system")),
+		Groups: []*config.GroupConfig{{
+			Name:  "testhost",
+			Tools: groupTools("parsec"),
+		}},
+	}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name:          "parsec",
+		Provider:      "system",
+		Package:       "parsec",
+		Installed:     true,
+		InstalledWith: "brew",
+		LastChecked:   time.Now(),
+	}); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+
+	if err := a.CompleteExternalToolAction(ctx, provider.PrivilegeActionUninstall, "parsec", "system", "parsec", "brew"); err != nil {
+		t.Fatalf("CompleteExternalToolAction: %v", err)
+	}
+
+	if _, err := a.DB().Get(ctx, "parsec", "system", "parsec"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("cache row after uninstall err = %v, want sql.ErrNoRows", err)
+	}
+	gotCfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("loading config: %v", err)
+	}
+	if _, ok := gotCfg.Tools["parsec"]; ok {
+		t.Fatal("logical tool spec survived external uninstall completion")
+	}
+	if len(gotCfg.Groups) != 1 || len(gotCfg.Groups[0].Tools) != 0 {
+		t.Fatalf("group tools after uninstall = %+v, want parsec removed", gotCfg.Groups)
+	}
 }
 
 func TestRefreshProviderInstalled_ManagerPinnedPersistsCheckedManager(t *testing.T) {
@@ -249,12 +336,8 @@ func TestUninstall_ConcreteProviderRequestUsesConfiguredEcosystemTool(t *testing
 	if len(brew.uninstalled) != 1 || brew.uninstalled[0].Package != "rg" {
 		t.Fatalf("brew uninstalled = %+v, want package rg", brew.uninstalled)
 	}
-	got, err := a.DB().Get(context.Background(), "ripgrep", "system", "rg")
-	if err != nil {
-		t.Fatalf("Get configured row: %v", err)
-	}
-	if got.Installed {
-		t.Fatal("configured cache row should be marked uninstalled")
+	if _, err := a.DB().Get(context.Background(), "ripgrep", "system", "rg"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("configured cache row should be deleted, got err=%v", err)
 	}
 }
 

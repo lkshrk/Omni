@@ -34,17 +34,24 @@ func (p *Provider) Available(ctx context.Context) (bool, error) {
 
 func (p *Provider) Install(ctx context.Context, tool provider.Tool) error {
 	pkg := tool.EffectivePackage()
-	return provider.RunCmd(ctx, p.exec, "apk add "+pkg, "apk", "add", pkg)
+	cmd, args := provider.PrivilegedCommand("apk", "add", pkg)
+	return provider.RunCmd(ctx, p.exec, "apk add "+pkg, cmd, args...)
 }
 
 func (p *Provider) Uninstall(ctx context.Context, tool provider.Tool) error {
 	pkg := tool.EffectivePackage()
-	return provider.RunCmd(ctx, p.exec, "apk del "+pkg, "apk", "del", pkg)
+	cmd, args := provider.PrivilegedCommand("apk", "del", pkg)
+	return provider.RunCmd(ctx, p.exec, "apk del "+pkg, cmd, args...)
 }
 
 func (p *Provider) Upgrade(ctx context.Context, tool provider.Tool) error {
 	pkg := tool.EffectivePackage()
-	return provider.RunCmd(ctx, p.exec, "apk upgrade "+pkg, "apk", "upgrade", pkg)
+	cmd, args := provider.PrivilegedCommand("apk", "upgrade", pkg)
+	return provider.RunCmd(ctx, p.exec, "apk upgrade "+pkg, cmd, args...)
+}
+
+func (p *Provider) PrivilegePlan(_ context.Context, action provider.PrivilegeAction, tool provider.Tool) (provider.PrivilegePlan, error) {
+	return provider.SystemPrivilegePlan(p.Name(), action, tool), nil
 }
 
 func (p *Provider) IsInstalled(ctx context.Context, tool provider.Tool) (bool, string, error) {

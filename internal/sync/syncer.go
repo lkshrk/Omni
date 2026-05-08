@@ -4,6 +4,7 @@ package sync
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -23,7 +24,7 @@ const (
 	OpAlreadyInstalled                  // tool is present, no action needed
 	OpUninstall                         // tool removed from config + --prune
 	OpProviderUnavailable               // provider binary not on PATH
-	OpIgnored                           // tool is in the active profile's ignore list
+	OpIgnored                           // tool is in the configured ignore list
 	OpFailed                            // install was attempted but the provider returned an error
 )
 
@@ -43,10 +44,6 @@ type SyncOptions struct { //nolint:revive // name is intentional for clarity in 
 	Prune bool
 	// Group filters operations to a single named group (empty = all groups).
 	Group string
-	// Profile filters operations to the groups declared in a named profile.
-	// Ignored when Group is set. When both are empty, the active profile is
-	// auto-detected from the system hostname.
-	Profile string
 	// Provider filters operations to a single provider (empty = all).
 	Provider string
 	// Progress is called with a human-readable status string before each operation.
@@ -62,6 +59,9 @@ type SyncOptions struct { //nolint:revive // name is intentional for clarity in 
 	// InstallTimeout is the per-tool deadline passed to provider Install calls.
 	// Zero uses the default of 5 minutes.
 	InstallTimeout time.Duration
+	// SkipPrivileged records privileged package-manager actions as failures
+	// without executing them.
+	SkipPrivileged bool
 }
 
 type ProgressEvent struct {
@@ -90,11 +90,24 @@ func (o SyncOptions) installTimeout() time.Duration {
 	return 5 * time.Minute
 }
 
+func isContextCancel(err error) bool {
+	return errors.Is(err, context.Canceled)
+}
+
+func (s *Syncer) recordCancelledInstall(ctx context.Context, result *SyncResult, opts SyncOptions, entry config.ToolEntry, tool provider.Tool, op SyncOp) {
+	op.Kind = OpFailed
+	if err := s.db.ClearFailure(context.WithoutCancel(ctx), entry.Name, entry.Provider, entry.EffectivePackage()); err != nil {
+		result.Warnings = append(result.Warnings,
+			fmt.Sprintf("failed to clear cancelled install state for %s: %v", entry.Name, err))
+	}
+	opts.toolProgress(ProgressEvent{Tool: tool, Message: "Cancelled installing " + entry.Name, Err: op.Err, Done: true})
+	result.Ops = append(result.Ops, op)
+}
+
 // SyncResult summarises what happened during a sync run.
 type SyncResult struct { //nolint:revive // name is intentional for clarity in external call sites
 	Ops             []SyncOp
 	Warnings        []string // advisory: e.g. duplicate tools across groups
-	ActiveProfile   string   // profile name used for this sync, "" if none
 	SatisfiedGroups []string // non-active groups whose tools are all installed
 }
 
@@ -138,8 +151,6 @@ type provState struct {
 	available          bool
 	installed          map[string]string                  // lowercase name → version
 	installedByManager map[string]provider.InstalledEntry // lowercase name → version + concrete manager
-	outdated           map[string]string                  // lowercase name → latest version
-	outdatedByManager  map[string]map[string]string       // manager → lowercase name → latest version
 }
 
 // Syncer orchestrates diff-and-apply between the desired config and actual system state.
@@ -160,7 +171,7 @@ func New(registry *provider.Registry, db *database.DB) *Syncer {
 // Sync performs (or plans) the synchronisation.
 //
 // Phase 1a — availability: one check per unique provider, concurrent.
-// Phase 1b — bulk status: InstalledMap + OutdatedMap per available provider, concurrent.
+// Phase 1b — bulk install status per available provider, concurrent.
 // Phase 1c — per-tool decision: O(1) map lookup; falls back to IsInstalled for missing entries.
 // Phase 2  — installs: sequential (so progress messages stay readable).
 // Phase 3  — prune (optional).
@@ -252,7 +263,7 @@ func (s *Syncer) Sync(ctx context.Context, cfg *config.Config, opts SyncOptions)
 		return nil, fmt.Errorf("provider availability check: %w", err)
 	}
 
-	// --- Phase 1b: bulk installed + outdated per available provider ---
+	// --- Phase 1b: bulk installed state per available provider ---
 	opts.progress("reading installed packages…")
 	g1b, gCtx1b := errgroup.WithContext(ctx)
 	for name, st := range states {
@@ -277,18 +288,6 @@ func (s *Syncer) Sync(ctx context.Context, cfg *config.Config, opts SyncOptions)
 					}
 				}
 			}
-			if moc, ok := prov.(provider.ManagerOutdatedChecker); ok {
-				m, err := moc.OutdatedByManager(gCtx1b)
-				if err == nil {
-					st.outdatedByManager = m
-					st.outdated = flattenOutdatedManagers(m)
-				}
-			} else if oc, ok := prov.(provider.OutdatedChecker); ok {
-				m, err := oc.OutdatedMap(gCtx1b)
-				if err == nil {
-					st.outdated = m
-				}
-			}
 			return nil
 		})
 	}
@@ -303,8 +302,6 @@ func (s *Syncer) Sync(ctx context.Context, cfg *config.Config, opts SyncOptions)
 		installedWith string
 		installed     bool
 		version       string
-		outdated      bool
-		latest        string
 		noProvider    bool
 	}
 
@@ -347,22 +344,12 @@ func (s *Syncer) Sync(ctx context.Context, cfg *config.Config, opts SyncOptions)
 			}
 		}
 
-		var latestVer string
-		var isOutdated bool
-		if installed && st.outdatedByManager != nil && installedWith != "" {
-			latestVer, isOutdated = provider.LookupString(st.outdatedByManager[installedWith], keys)
-		} else if installed && st.outdated != nil {
-			latestVer, isOutdated = provider.LookupString(st.outdated, keys)
-		}
-
 		decisions[i] = toolDecision{
 			entry:         entry,
 			opProvider:    opProvider,
 			installedWith: installedWith,
 			installed:     installed,
 			version:       ver,
-			outdated:      isOutdated,
-			latest:        latestVer,
 		}
 	}
 
@@ -372,7 +359,6 @@ func (s *Syncer) Sync(ctx context.Context, cfg *config.Config, opts SyncOptions)
 	// install subprocess) stay individual because the subprocess cost
 	// dwarfs the fsync; batching would only matter relative to a fast op.
 	var alreadyInstalledUpserts []*database.ToolCache
-	var outdatedUpdates []database.OutdatedUpdate
 	for _, d := range decisions {
 		tool := provider.Tool{
 			Name:     d.entry.Name,
@@ -400,16 +386,7 @@ func (s *Syncer) Sync(ctx context.Context, cfg *config.Config, opts SyncOptions)
 					Installed:     true,
 					InstalledWith: d.installedWith,
 					Version:       toNullString(d.version),
-					Outdated:      d.outdated,
-					LatestVersion: toNullString(d.latest),
 					LastChecked:   time.Now(),
-				})
-				outdatedUpdates = append(outdatedUpdates, database.OutdatedUpdate{
-					Name:          d.entry.Name,
-					Provider:      d.entry.Provider,
-					Package:       d.entry.EffectivePackage(),
-					Outdated:      d.outdated,
-					LatestVersion: d.latest,
 				})
 			}
 		} else {
@@ -421,6 +398,19 @@ func (s *Syncer) Sync(ctx context.Context, cfg *config.Config, opts SyncOptions)
 					result.Ops = append(result.Ops, SyncOp{Tool: tool, Kind: OpProviderUnavailable})
 					continue
 				}
+				if opts.SkipPrivileged {
+					if plan := s.privilegePlan(ctx, prov, provider.PrivilegeActionInstall, s.operationTool(d.entry, d.opProvider)); plan.RequiresPrivilege() {
+						op.Kind = OpFailed
+						op.Err = fmt.Errorf("requires sudo: %s", privilegeReason(plan))
+						result.Ops = append(result.Ops, op)
+						if err := s.db.MarkPrivilegeRequired(ctx, d.entry.Name, d.entry.Provider, d.entry.EffectivePackage(), string(plan.Requirement), plan.Reason); err != nil {
+							result.Warnings = append(result.Warnings,
+								fmt.Sprintf("failed to record privilege requirement for %s: %v", d.entry.Name, err))
+						}
+						opts.toolProgress(ProgressEvent{Tool: tool, Message: "Admin approval needed for " + d.entry.Name, Err: op.Err, Done: true})
+						continue
+					}
+				}
 				opts.toolProgress(ProgressEvent{Tool: tool, Message: "Installing " + d.entry.Name + "…"})
 
 				installCtx, cancel := context.WithTimeout(ctx, opts.installTimeout())
@@ -428,12 +418,22 @@ func (s *Syncer) Sync(ctx context.Context, cfg *config.Config, opts SyncOptions)
 				cancel()
 
 				if op.Err != nil {
+					if isContextCancel(op.Err) {
+						s.recordCancelledInstall(ctx, result, opts, d.entry, tool, op)
+						continue
+					}
 					op.Kind = OpFailed
-					opts.toolProgress(ProgressEvent{Tool: tool, Message: "Failed installing " + d.entry.Name, Err: op.Err, Done: true})
+					if plan, ok := provider.ClassifyPrivilegeError(op.Err); ok && plan.RequiresPrivilege() {
+						if err := s.db.MarkPrivilegeRequired(ctx, d.entry.Name, d.entry.Provider, d.entry.EffectivePackage(), string(plan.Requirement), plan.Reason); err != nil {
+							result.Warnings = append(result.Warnings,
+								fmt.Sprintf("failed to record privilege requirement for %s: %v", d.entry.Name, err))
+						}
+					}
 					if err := s.db.MarkFailed(ctx, d.entry.Name, d.entry.Provider, d.entry.EffectivePackage(), op.Err.Error()); err != nil {
 						result.Warnings = append(result.Warnings,
 							fmt.Sprintf("failed to record install failure for %s: %v", d.entry.Name, err))
 					}
+					opts.toolProgress(ProgressEvent{Tool: tool, Message: "Failed installing " + d.entry.Name, Err: op.Err, Done: true})
 				} else {
 					installed, ver, err := s.isInstalled(ctx, prov, d.opProvider, d.entry)
 					if err != nil {
@@ -442,16 +442,25 @@ func (s *Syncer) Sync(ctx context.Context, cfg *config.Config, opts SyncOptions)
 						op.Err = fmt.Errorf("install verification failed for %s/%s: not installed after install", d.opProvider, d.entry.Name)
 					}
 					if op.Err != nil {
+						if isContextCancel(op.Err) {
+							s.recordCancelledInstall(ctx, result, opts, d.entry, tool, op)
+							continue
+						}
 						op.Kind = OpFailed
-						opts.toolProgress(ProgressEvent{Tool: tool, Message: "Failed installing " + d.entry.Name, Err: op.Err, Done: true})
+						if plan, ok := provider.ClassifyPrivilegeError(op.Err); ok && plan.RequiresPrivilege() {
+							if err := s.db.MarkPrivilegeRequired(ctx, d.entry.Name, d.entry.Provider, d.entry.EffectivePackage(), string(plan.Requirement), plan.Reason); err != nil {
+								result.Warnings = append(result.Warnings,
+									fmt.Sprintf("failed to record privilege requirement for %s: %v", d.entry.Name, err))
+							}
+						}
 						if err := s.db.MarkFailed(ctx, d.entry.Name, d.entry.Provider, d.entry.EffectivePackage(), op.Err.Error()); err != nil {
 							result.Warnings = append(result.Warnings,
 								fmt.Sprintf("failed to record install failure for %s: %v", d.entry.Name, err))
 						}
+						opts.toolProgress(ProgressEvent{Tool: tool, Message: "Failed installing " + d.entry.Name, Err: op.Err, Done: true})
 						result.Ops = append(result.Ops, op)
 						continue
 					}
-					opts.toolProgress(ProgressEvent{Tool: tool, Message: "Installed " + d.entry.Name, Done: true})
 					op.Version = ver
 					if err := s.db.Upsert(ctx, &database.ToolCache{
 						Name:          d.entry.Name,
@@ -465,6 +474,7 @@ func (s *Syncer) Sync(ctx context.Context, cfg *config.Config, opts SyncOptions)
 						result.Warnings = append(result.Warnings,
 							fmt.Sprintf("cache write failed for %s: %v", d.entry.Name, err))
 					}
+					opts.toolProgress(ProgressEvent{Tool: tool, Message: "Installed " + d.entry.Name, Done: true})
 				}
 			}
 			result.Ops = append(result.Ops, op)
@@ -476,10 +486,6 @@ func (s *Syncer) Sync(ctx context.Context, cfg *config.Config, opts SyncOptions)
 	if err := s.db.UpsertBatch(ctx, alreadyInstalledUpserts); err != nil {
 		result.Warnings = append(result.Warnings,
 			fmt.Sprintf("cache update batch failed: %v", err))
-	}
-	if err := s.db.UpdateOutdatedBatch(ctx, outdatedUpdates); err != nil {
-		result.Warnings = append(result.Warnings,
-			fmt.Sprintf("outdated update batch failed: %v", err))
 	}
 
 	// --- Phase 3: prune (optional) ---
@@ -512,7 +518,28 @@ func (s *Syncer) Sync(ctx context.Context, cfg *config.Config, opts SyncOptions)
 				}
 				t.Provider = opProvider
 				opts.progress("removing " + c.Name + "…")
+				if opts.SkipPrivileged {
+					if plan := s.privilegePlan(ctx, prov, provider.PrivilegeActionUninstall, t); plan.RequiresPrivilege() {
+						uninstallErr := fmt.Errorf("requires sudo: %s", privilegeReason(plan))
+						if err := s.db.MarkPrivilegeRequired(ctx, c.Name, c.Provider, c.Package, string(plan.Requirement), plan.Reason); err != nil {
+							result.Warnings = append(result.Warnings,
+								fmt.Sprintf("failed to record privilege requirement for %s: %v", c.Name, err))
+						}
+						result.Ops = append(result.Ops, SyncOp{
+							Tool: t,
+							Kind: OpUninstall,
+							Err:  uninstallErr,
+						})
+						continue
+					}
+				}
 				uninstallErr := uninstall(ctx, prov, t, manager)
+				if plan, ok := provider.ClassifyPrivilegeError(uninstallErr); ok && plan.RequiresPrivilege() {
+					if err := s.db.MarkPrivilegeRequired(ctx, c.Name, c.Provider, c.Package, string(plan.Requirement), plan.Reason); err != nil {
+						result.Warnings = append(result.Warnings,
+							fmt.Sprintf("failed to record privilege requirement for %s: %v", c.Name, err))
+					}
+				}
 				if uninstallErr == nil {
 					if err := s.db.Delete(ctx, c.Name, c.Provider, c.Package); err != nil {
 						result.Warnings = append(result.Warnings,
@@ -548,6 +575,23 @@ func uninstall(ctx context.Context, prov provider.Provider, tool provider.Tool, 
 		}
 	}
 	return prov.Uninstall(ctx, tool)
+}
+
+func (s *Syncer) privilegePlan(ctx context.Context, prov provider.Provider, action provider.PrivilegeAction, tool provider.Tool) provider.PrivilegePlan {
+	if planner, ok := prov.(provider.PrivilegePlanner); ok {
+		plan, err := planner.PrivilegePlan(ctx, action, tool)
+		if err == nil {
+			return plan
+		}
+	}
+	return provider.PrivilegePlan{}
+}
+
+func privilegeReason(plan provider.PrivilegePlan) string {
+	if plan.Reason != "" {
+		return plan.Reason
+	}
+	return "package manager needs privileged access"
 }
 
 func hasIgnoredTools(tools []config.ToolEntry) bool {
@@ -619,21 +663,6 @@ func installedWithForOperation(ctx context.Context, prov provider.Provider, opPr
 		return ""
 	}
 	return opProvider
-}
-
-func flattenOutdatedManagers(byManager map[string]map[string]string) map[string]string {
-	if len(byManager) == 0 {
-		return nil
-	}
-	out := make(map[string]string)
-	for _, m := range byManager {
-		for name, latest := range m {
-			if _, exists := out[name]; !exists {
-				out[name] = latest
-			}
-		}
-	}
-	return out
 }
 
 func (s *Syncer) install(ctx context.Context, prov provider.Provider, opProvider string, entry config.ToolEntry) error {

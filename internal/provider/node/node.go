@@ -402,6 +402,12 @@ func (p *Provider) outdatedMapForManager(ctx context.Context, m *mgr) (map[strin
 		}
 		return nil, nil
 	}
+	if m.binary == "bun" {
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w\n%s", cmdStr(m.binary, []string{"outdated", "-g", "--json"}), err, strings.TrimSpace(stdout+"\n"+stderr))
+		}
+		return parseBunOutdatedMap(stdout), nil
+	}
 	var payload map[string]npmOutdatedEntry
 	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
 		return nil, fmt.Errorf("parsing %s outdated output: %w", m.binary, err)
@@ -415,9 +421,34 @@ func (p *Provider) outdatedMapForManager(ctx context.Context, m *mgr) (map[strin
 	return result, nil
 }
 
+func parseBunOutdatedMap(stdout string) map[string]string {
+	result := make(map[string]string)
+	for _, line := range strings.Split(stdout, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "|") || strings.Contains(line, "---") {
+			continue
+		}
+		cols := strings.Split(line, "|")
+		if len(cols) < 5 {
+			continue
+		}
+		name := strings.TrimSpace(cols[1])
+		latest := strings.TrimSpace(cols[4])
+		if name == "" || latest == "" || strings.EqualFold(name, "package") {
+			continue
+		}
+		result[strings.ToLower(name)] = latest
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
 // npmPackageResponse is the relevant subset of GET /registry.npmjs.org/<pkg>.
 type npmPackageResponse struct {
 	Description string `json:"description"`
+	Readme      string `json:"readme"`
 }
 
 // Describe fetches a one-line description from the npm registry.
@@ -431,7 +462,36 @@ func (p *Provider) Describe(ctx context.Context, tool provider.Tool) (string, er
 	if err != nil || status != http.StatusOK {
 		return "", nil
 	}
-	return payload.Description, nil
+	if desc := strings.TrimSpace(payload.Description); desc != "" {
+		return desc, nil
+	}
+	return readmeIntro(payload.Readme), nil
+}
+
+func readmeIntro(readme string) string {
+	inFence := false
+	var paragraph []string
+	for _, line := range strings.Split(readme, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "```") || strings.HasPrefix(line, "~~~") {
+			inFence = !inFence
+			continue
+		}
+		if inFence {
+			continue
+		}
+		if line == "" {
+			if len(paragraph) > 0 {
+				break
+			}
+			continue
+		}
+		if len(paragraph) == 0 && (strings.HasPrefix(line, "#") || strings.HasPrefix(line, "[!") || strings.HasPrefix(line, "![") || strings.HasPrefix(line, "<")) {
+			continue
+		}
+		paragraph = append(paragraph, line)
+	}
+	return strings.TrimSpace(strings.Join(paragraph, " "))
 }
 
 // parseVersion finds "pkg@version" in `list -g <pkg> --depth=0` output.

@@ -7,13 +7,15 @@ import (
 	"testing"
 
 	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// toolsFromConfig extracts the resolved flat tools list from the base group of a RootConfig.
+// toolsFromConfig extracts the resolved flat tools list from the first regular
+// group of a RootConfig, falling back to the first group.
 func toolsFromConfig(cfg *config.RootConfig) []config.ToolEntry {
 	for _, g := range cfg.Groups {
-		if g.IsBase() {
+		if !g.IsHost() {
 			return materializeTestTools(cfg, g.Tools)
 		}
 	}
@@ -51,7 +53,7 @@ func TestSwitch_Success(t *testing.T) {
 
 	cfg := &config.RootConfig{
 		Tools:  logicalToolSpecs(logicalTool("black", "brew")),
-		Groups: []*config.GroupConfig{{Tools: groupTools("black")}},
+		Groups: []*config.GroupConfig{testHostToolGroup("black")},
 	}
 	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
 		t.Fatalf("saving config: %v", err)
@@ -78,6 +80,46 @@ func TestSwitch_Success(t *testing.T) {
 	}
 }
 
+type uninstallFailProvider struct {
+	stubProvider
+	err error
+}
+
+func (p *uninstallFailProvider) Uninstall(_ context.Context, _ provider.Tool) error {
+	return p.err
+}
+
+func TestSwitch_PreservesUninstallWarning(t *testing.T) {
+	uninstallErr := errors.New("old provider cleanup failed")
+	brew := &uninstallFailProvider{stubProvider: stubProvider{name: "brew", available: true}, err: uninstallErr}
+	pip := &stubProvider{name: "pip", available: true}
+	a, cfgPath := newImportApp(t, brew, pip)
+
+	cfg := &config.RootConfig{
+		Tools:  logicalToolSpecs(logicalTool("black", "brew")),
+		Groups: []*config.GroupConfig{testHostToolGroup("black")},
+	}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+
+	result, err := a.Switch(context.Background(), "black", "brew", "pip")
+	if err != nil {
+		t.Fatalf("Switch returned hard error: %v", err)
+	}
+	if result.UninstallWarning != uninstallErr {
+		t.Fatalf("UninstallWarning = %v, want %v", result.UninstallWarning, uninstallErr)
+	}
+	updated, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("loading config: %v", err)
+	}
+	tools := toolsFromConfig(updated)
+	if len(tools) != 1 || tools[0].Provider != "python" || tools[0].InstallWith != "pip" {
+		t.Fatalf("config tool = %+v, want switched despite cleanup warning", tools)
+	}
+}
+
 func TestSwitch_UpdatesDB(t *testing.T) {
 	brew := &stubProvider{name: "brew", available: true}
 	pip := &stubProvider{name: "pip", available: true}
@@ -85,7 +127,7 @@ func TestSwitch_UpdatesDB(t *testing.T) {
 
 	cfg := &config.RootConfig{
 		Tools:  logicalToolSpecs(logicalTool("black", "brew")),
-		Groups: []*config.GroupConfig{{Tools: groupTools("black")}},
+		Groups: []*config.GroupConfig{testHostToolGroup("black")},
 	}
 	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
 		t.Fatalf("saving config: %v", err)
@@ -132,7 +174,7 @@ func TestSwitch_PersistsResolvedConcreteOwner(t *testing.T) {
 
 	cfg := &config.RootConfig{
 		Tools:  logicalToolSpecs(logicalTool("ripgrep", "brew")),
-		Groups: []*config.GroupConfig{{Tools: groupTools("ripgrep")}},
+		Groups: []*config.GroupConfig{testHostToolGroup("ripgrep")},
 	}
 	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
 		t.Fatalf("saving config: %v", err)
@@ -165,7 +207,7 @@ func TestSwitch_VerificationFailureDoesNotRewriteConfigOrCache(t *testing.T) {
 
 	cfg := &config.RootConfig{
 		Tools:  logicalToolSpecs(logicalTool("ripgrep", "brew")),
-		Groups: []*config.GroupConfig{{Tools: groupTools("ripgrep")}},
+		Groups: []*config.GroupConfig{testHostToolGroup("ripgrep")},
 	}
 	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
 		t.Fatalf("saving config: %v", err)
@@ -206,7 +248,7 @@ func TestSwitch_UninstallsConfiguredSourceManager(t *testing.T) {
 		Tools: map[string]config.ToolSpec{
 			"black": {Provider: "python", InstallWith: "pip3"},
 		},
-		Groups: []*config.GroupConfig{{Tools: groupTools("black")}},
+		Groups: []*config.GroupConfig{testHostToolGroup("black")},
 	}
 	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
 		t.Fatalf("saving config: %v", err)
@@ -220,6 +262,50 @@ func TestSwitch_UninstallsConfiguredSourceManager(t *testing.T) {
 	}
 }
 
+func TestSwitch_ToPythonManagerUsesEcosystemProvider(t *testing.T) {
+	python := &envCleanerProvider{stubProvider: stubProvider{name: "python", available: true}}
+	a, cfgPath := newImportApp(t, python)
+
+	cfg := &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"black": {Provider: "python", InstallWith: "pip3"},
+		},
+		Groups: []*config.GroupConfig{testHostToolGroup("black")},
+	}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+
+	result, err := a.Switch(context.Background(), "black", "pip3", "uv")
+	if err != nil {
+		t.Fatalf("Switch to uv: %v", err)
+	}
+	if result.FromProvider != "pip3" || result.ToProvider != "uv" {
+		t.Fatalf("result = %+v, want pip3 -> uv", result)
+	}
+	if len(python.installWithManagers) != 1 || python.installWithManagers[0] != "uv" {
+		t.Fatalf("InstallWithManager calls = %v, want [uv]", python.installWithManagers)
+	}
+	if len(python.uninstallFromBinaries) != 1 || python.uninstallFromBinaries[0] != "pip3" {
+		t.Fatalf("UninstallFrom binaries = %v, want [pip3]", python.uninstallFromBinaries)
+	}
+	updated, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("loading config: %v", err)
+	}
+	tools := toolsFromConfig(updated)
+	if len(tools) != 1 || tools[0].Provider != "python" || tools[0].InstallWith != "uv" {
+		t.Fatalf("config tool = %+v, want python via uv", tools)
+	}
+	dbTools, err := a.ListTools(context.Background(), "")
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(dbTools) != 1 || dbTools[0].Provider != "python" || dbTools[0].InstalledWith != "uv" {
+		t.Fatalf("DB tools = %+v, want python installed_with uv", dbTools)
+	}
+}
+
 func TestSwitch_ReturnsDBUpdateError(t *testing.T) {
 	brew := &stubProvider{name: "brew", available: true}
 	pip := &stubProvider{name: "pip", available: true}
@@ -227,7 +313,7 @@ func TestSwitch_ReturnsDBUpdateError(t *testing.T) {
 
 	cfg := &config.RootConfig{
 		Tools:  logicalToolSpecs(logicalTool("black", "brew")),
-		Groups: []*config.GroupConfig{{Tools: groupTools("black")}},
+		Groups: []*config.GroupConfig{testHostToolGroup("black")},
 	}
 	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
 		t.Fatalf("saving config: %v", err)
@@ -266,7 +352,7 @@ func TestSwitch_ToolNotInConfig(t *testing.T) {
 
 	cfg := &config.RootConfig{
 		Tools:  logicalToolSpecs(logicalTool("ripgrep", "brew")),
-		Groups: []*config.GroupConfig{{Tools: groupTools("ripgrep")}},
+		Groups: []*config.GroupConfig{testHostToolGroup("ripgrep")},
 	}
 	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
 		t.Fatalf("saving config: %v", err)
@@ -396,7 +482,7 @@ func TestMigrateInstallation_RegisteredWrongProviderPersistsResolvedConcreteOwne
 
 	cfg := &config.RootConfig{
 		Tools:  logicalToolSpecs(logicalTool("ripgrep", "system")),
-		Groups: []*config.GroupConfig{{Tools: groupTools("ripgrep")}},
+		Groups: []*config.GroupConfig{testHostToolGroup("ripgrep")},
 	}
 	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
 		t.Fatalf("saving config: %v", err)
@@ -418,6 +504,52 @@ func TestMigrateInstallation_RegisteredWrongProviderPersistsResolvedConcreteOwne
 	}
 }
 
+func TestReinstallWithDefaultAfterClearingInstallOverride_SkipsUninstallWhenDefaultMatchesOwner(t *testing.T) {
+	brew := &lifecycleProvider{stubProvider: stubProvider{name: "brew", available: true}}
+	system := &lifecycleProvider{
+		stubProvider: stubProvider{name: "system", available: true},
+		resolvedName: "brew",
+		installed:    true,
+		version:      "1.0.0",
+	}
+	a, cfgPath := newImportApp(t, brew, system)
+
+	cfg := &config.RootConfig{
+		Tools:  logicalToolSpecs(logicalFixtureTool{Name: "ripgrep", Provider: "system", InstallWith: "brew"}),
+		Groups: []*config.GroupConfig{testHostToolGroup("ripgrep")},
+	}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+	if err := a.DB().Upsert(context.Background(), &database.ToolCache{
+		Name:          "ripgrep",
+		Provider:      "system",
+		Package:       "ripgrep",
+		Installed:     true,
+		InstalledWith: "brew",
+	}); err != nil {
+		t.Fatalf("upsert cache: %v", err)
+	}
+
+	_, cleared, err := a.ReinstallWithDefaultAfterClearingInstallOverride(context.Background(), "ripgrep", "system")
+	if err != nil {
+		t.Fatalf("ReinstallWithDefaultAfterClearingInstallOverride: %v", err)
+	}
+	if cleared.InstallWith != "brew" {
+		t.Fatalf("cleared override = %+v, want brew", cleared)
+	}
+	if len(brew.uninstalled) != 0 {
+		t.Fatalf("brew uninstall calls = %v, want none when default owner is still brew", brew.uninstalled)
+	}
+	updated, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("loading config: %v", err)
+	}
+	if updated.Tools["ripgrep"].InstallWith != "" {
+		t.Fatalf("install_with = %q, want cleared", updated.Tools["ripgrep"].InstallWith)
+	}
+}
+
 func TestMigrateInstallation_VerificationFailureDoesNotUninstallOldProvider(t *testing.T) {
 	brew := &lifecycleProvider{
 		stubProvider: stubProvider{name: "brew", available: true},
@@ -432,7 +564,7 @@ func TestMigrateInstallation_VerificationFailureDoesNotUninstallOldProvider(t *t
 
 	cfg := &config.RootConfig{
 		Tools:  logicalToolSpecs(logicalTool("ripgrep", "system")),
-		Groups: []*config.GroupConfig{{Tools: groupTools("ripgrep")}},
+		Groups: []*config.GroupConfig{testHostToolGroup("ripgrep")},
 	}
 	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
 		t.Fatalf("saving config: %v", err)
