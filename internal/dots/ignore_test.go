@@ -1,6 +1,7 @@
 package dots_test
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/dots"
@@ -108,21 +109,68 @@ func TestShouldIgnore_CustomPattern(t *testing.T) {
 }
 
 func TestShouldIgnorePath_RelativePatterns(t *testing.T) {
-	patterns := []string{"profiles/work/auth.json", "node_modules", "cache", "*.log"}
-	if !dots.ShouldIgnorePath("profiles/work/auth.json", "auth.json", patterns) {
+	patterns := []string{"workspaces/work/auth.json", "node_modules", "cache", "*.log"}
+	if !dots.ShouldIgnorePath("workspaces/work/auth.json", "auth.json", patterns) {
 		t.Error("expected relative path pattern to match nested auth.json")
 	}
-	if !dots.ShouldIgnorePath("profiles/work/node_modules", "node_modules", patterns) {
+	if !dots.ShouldIgnorePath("workspaces/work/node_modules", "node_modules", patterns) {
 		t.Error("expected basename pattern to match nested node_modules")
 	}
-	if !dots.ShouldIgnorePath("profiles/work/cache", "cache", patterns) {
+	if !dots.ShouldIgnorePath("workspaces/work/cache", "cache", patterns) {
 		t.Error("expected basename pattern to match nested cache dir")
 	}
-	if !dots.ShouldIgnorePath("profiles/work/debug.log", "debug.log", patterns) {
+	if !dots.ShouldIgnorePath("workspaces/work/debug.log", "debug.log", patterns) {
 		t.Error("expected basename pattern to match nested .log file")
 	}
-	if dots.ShouldIgnorePath("profiles/home/auth.json", "auth.json", patterns) {
+	if dots.ShouldIgnorePath("workspaces/home/auth.json", "auth.json", patterns) {
 		t.Error("relative path pattern should not match other directories")
+	}
+}
+
+func TestShouldIgnorePath_IncludesOverrideEarlierIgnores(t *testing.T) {
+	patterns := []string{
+		"*",
+		"!/settings.json",
+		"!/CLAUDE.md",
+		"!/mcp.json",
+		"!/plugins",
+		"!/plugins/installed_plugins.json",
+		"!/.omc-config.json",
+		"!/keybindings.json",
+		"!/statusline-command.sh",
+		"!/rules/",
+		"!/skills/",
+	}
+
+	for _, rel := range []string{
+		"settings.json",
+		"CLAUDE.md",
+		"mcp.json",
+		"plugins",
+		"plugins/installed_plugins.json",
+		".omc-config.json",
+		"keybindings.json",
+		"statusline-command.sh",
+		"rules",
+		"rules/global.md",
+		"rules/nested/rule.md",
+		"skills",
+		"skills/example/SKILL.md",
+	} {
+		if dots.ShouldIgnorePath(rel, filepath.Base(rel), patterns) {
+			t.Errorf("%s should be included by a later ! pattern", rel)
+		}
+	}
+	for _, rel := range []string{
+		"projects/session.json",
+		"history.jsonl",
+		"plugins/cache.json",
+		"nested/settings.json",
+		"nested/rules/global.md",
+	} {
+		if !dots.ShouldIgnorePath(rel, filepath.Base(rel), patterns) {
+			t.Errorf("%s should stay ignored", rel)
+		}
 	}
 }
 

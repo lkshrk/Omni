@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
@@ -94,6 +95,12 @@ func TestDiscoverDotsEntries_CombinesRepoLocalConfigAndOutliers(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".ssh"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(home, ".docker"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".kube"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 
 	got, err := app.DiscoverDotsEntries(repoDir)
 	if err != nil {
@@ -115,9 +122,14 @@ func TestDiscoverDotsEntries_CombinesRepoLocalConfigAndOutliers(t *testing.T) {
 	if _, ok := byName["cache"]; ok {
 		t.Fatal("static ignored ~/.config/cache should not be discovered")
 	}
+	for _, name := range []string{"docker", "kube"} {
+		if _, ok := byName[name]; ok {
+			t.Fatalf("sensitive default %s should not be discovered: %#v", name, byName)
+		}
+	}
 }
 
-func TestDiscoverDotsEntries_AddsClaudeEntryIgnores(t *testing.T) {
+func TestDiscoverDotsEntries_AddsClaudeAllowlistIgnores(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	repoDir := t.TempDir()
@@ -139,9 +151,70 @@ func TestDiscoverDotsEntries_AddsClaudeEntryIgnores(t *testing.T) {
 	if claude.Name == "" {
 		t.Fatalf("claude entry not discovered: %#v", got)
 	}
-	for _, want := range []string{"projects", "transcripts", "file-history", "plugins", "history.jsonl", "*.log"} {
+	for _, want := range []string{
+		"*",
+		"!/settings.json",
+		"!/CLAUDE.md",
+		"!/mcp.json",
+		"!/plugins",
+		"!/plugins/installed_plugins.json",
+		"!/skills/",
+		"!/agents/",
+		"!/hooks/",
+		"!/scripts/",
+		"!/.omc-config.json",
+		"!/keybindings.json",
+		"!/statusline-command.sh",
+	} {
 		if !testContainsString(claude.Ignore, want) {
 			t.Fatalf("claude ignore = %v, missing %q", claude.Ignore, want)
+		}
+	}
+	for _, duplicateGlobal := range []string{"*.log", ".DS_Store", "cache"} {
+		if testContainsString(claude.Ignore, duplicateGlobal) {
+			t.Fatalf("claude ignore = %v, should not duplicate global ignore %q", claude.Ignore, duplicateGlobal)
+		}
+	}
+}
+
+func TestDiscoverDotsEntries_AddsCodexAllowlistIgnores(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repoDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := app.DiscoverDotsEntries(repoDir)
+	if err != nil {
+		t.Fatalf("DiscoverDotsEntries: %v", err)
+	}
+	var codex config.DotEntry
+	for _, entry := range got {
+		if entry.Name == "codex" {
+			codex = entry
+			break
+		}
+	}
+	if codex.Name == "" {
+		t.Fatalf("codex entry not discovered: %#v", got)
+	}
+	for _, want := range []string{
+		"*",
+		"!/config.toml",
+		"!/mcp.json",
+		"!/AGENTS.md",
+		"!/RTK.md",
+		"!/rules/",
+		"!/skills/",
+	} {
+		if !testContainsString(codex.Ignore, want) {
+			t.Fatalf("codex ignore = %v, missing %q", codex.Ignore, want)
+		}
+	}
+	for _, duplicateGlobal := range []string{"*.log", ".DS_Store", "cache"} {
+		if testContainsString(codex.Ignore, duplicateGlobal) {
+			t.Fatalf("codex ignore = %v, should not duplicate global ignore %q", codex.Ignore, duplicateGlobal)
 		}
 	}
 }
@@ -228,8 +301,8 @@ func TestBootstrapDotsEntries_AddsCandidatesToMachineGroup(t *testing.T) {
 		t.Fatalf("machine group dots = %#v", byName)
 	}
 	claude := byEntry["claude"]
-	if !testContainsString(claude.Ignore, "projects") || !testContainsString(claude.Ignore, "history.jsonl") {
-		t.Fatalf("bootstrapped claude ignore = %v, want runtime ignores", claude.Ignore)
+	if !testContainsString(claude.Ignore, "*") || !testContainsString(claude.Ignore, "!/settings.json") {
+		t.Fatalf("bootstrapped claude ignore = %v, want allowlist ignores", claude.Ignore)
 	}
 }
 
@@ -461,8 +534,8 @@ func TestDotsAddDiscoveredEntry_PersistsCandidateOnly(t *testing.T) {
 	if group == nil || len(group.Dots) != 1 || group.Dots[0].Name != "claude" {
 		t.Fatalf("machine group dots = %#v, want claude", cfg.Groups)
 	}
-	if !testContainsString(group.Dots[0].Ignore, "projects") {
-		t.Fatalf("claude ignore = %#v, want runtime ignores", group.Dots[0].Ignore)
+	if !testContainsString(group.Dots[0].Ignore, "*") || !testContainsString(group.Dots[0].Ignore, "!/settings.json") {
+		t.Fatalf("claude ignore = %#v, want allowlist ignores", group.Dots[0].Ignore)
 	}
 }
 
@@ -541,7 +614,7 @@ func TestDiscoverDotsStatus_CountExcludesIgnoredAndTracked(t *testing.T) {
 		if entry.Name == "node_modules" && entry.State == app.DotStateIgnored {
 			seenIgnored = true
 		}
-		if entry.Name == "zshrc" && entry.Group == "base" {
+		if entry.Name == "zshrc" && entry.Group == dotsTestHostGroupName() {
 			seenTracked = true
 		}
 	}
@@ -563,33 +636,70 @@ func TestDotGroupMemberships_UpdateConfigAndListOnce(t *testing.T) {
 	}
 	target := filepath.Join(home, ".config", "nvim")
 	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{{Name: "nvim", Path: target}}, home)
+	if err := a.CreateGroup("work"); err != nil {
+		t.Fatalf("CreateGroup: %v", err)
+	}
+	if err := a.AddGroupToHost(dotsTestHostGroupName(), "work"); err != nil {
+		t.Fatalf("AddGroupToHost: %v", err)
+	}
 
-	if err := a.AddDotToGroup("nvim", "work"); err != nil {
-		t.Fatalf("AddDotToGroup: %v", err)
+	if err := a.MoveDotToGroup("nvim", "work"); err != nil {
+		t.Fatalf("MoveDotToGroup: %v", err)
 	}
 	memberships, err := a.DotMembershipMap(context.Background())
 	if err != nil {
 		t.Fatalf("DotMembershipMap: %v", err)
 	}
-	if !reflect.DeepEqual(memberships["nvim"], []string{"base", "work"}) {
-		t.Fatalf("memberships = %v, want [base work]", memberships["nvim"])
+	if !reflect.DeepEqual(memberships["nvim"], []string{"work"}) {
+		t.Fatalf("memberships = %v, want [work]", memberships["nvim"])
 	}
 	statuses, err := a.DotsList()
 	if err != nil {
 		t.Fatalf("DotsList: %v", err)
 	}
-	if len(statuses) != 1 || statuses[0].Group != "base,work" {
-		t.Fatalf("statuses = %#v, want one compact multi-group row", statuses)
+	if len(statuses) != 1 || statuses[0].Group != "work" {
+		t.Fatalf("statuses = %#v, want one work-owned row", statuses)
 	}
-	if err := a.RemoveDotFromGroup("nvim", "base"); err != nil {
-		t.Fatalf("RemoveDotFromGroup: %v", err)
-	}
-	memberships, err = a.DotMembershipMap(context.Background())
+}
+
+func TestMoveDotToGroup_MovesBetweenReusableGroups(t *testing.T) {
+	a, cfgDir, _ := newDotsApp(t)
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+
+	rootCfg, err := config.Load(cfgPath)
 	if err != nil {
-		t.Fatalf("DotMembershipMap after remove: %v", err)
+		t.Fatalf("config.Load: %v", err)
 	}
-	if !reflect.DeepEqual(memberships["nvim"], []string{"work"}) {
-		t.Fatalf("memberships after remove = %v, want [work]", memberships["nvim"])
+	rootCfg.Groups = []*config.GroupConfig{
+		{Name: "ai", Dots: []config.DotEntry{{Name: "com.corsair", Path: "~/.config/com.corsair"}}},
+		{Name: "gaming"},
+	}
+	if err := saveAppConfig(t, cfgPath, rootCfg); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if err := a.MoveDotToGroup("com.corsair", "gaming"); err != nil {
+		t.Fatalf("MoveDotToGroup: %v", err)
+	}
+
+	memberships, err := a.DotMembershipMap(context.Background())
+	if err != nil {
+		t.Fatalf("DotMembershipMap: %v", err)
+	}
+	if !reflect.DeepEqual(memberships["com.corsair"], []string{"gaming"}) {
+		t.Fatalf("memberships = %v, want [gaming]", memberships["com.corsair"])
+	}
+
+	updated, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load updated: %v", err)
+	}
+	if group := findDotsTestGroup(updated.Groups, "ai"); group == nil || len(group.Dots) != 0 {
+		t.Fatalf("ai group dots = %+v, want empty", group)
+	}
+	group := findDotsTestGroup(updated.Groups, "gaming")
+	if group == nil || len(group.Dots) != 1 || group.Dots[0].Name != "com.corsair" {
+		t.Fatalf("gaming group = %+v, want com.corsair dot", group)
 	}
 }
 
@@ -628,6 +738,46 @@ func assertNoOldDotTempInHome(t *testing.T, home string) {
 		return nil
 	}); err != nil {
 		t.Fatalf("walk HOME looking for old source temps: %v", err)
+	}
+}
+
+func assertRealDirectory(t *testing.T, path string) {
+	t.Helper()
+	info, err := os.Lstat(path)
+	if err != nil {
+		t.Fatalf("Lstat %q: %v", path, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		t.Fatalf("%q mode = %v, want real directory", path, info.Mode())
+	}
+}
+
+func assertSymlinkResolvesTo(t *testing.T, linkPath, sourcePath string) {
+	t.Helper()
+	info, err := os.Lstat(linkPath)
+	if err != nil {
+		t.Fatalf("Lstat %q: %v", linkPath, err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("%q mode = %v, want symlink", linkPath, info.Mode())
+	}
+	resolved, err := filepath.EvalSymlinks(linkPath)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", linkPath, err)
+	}
+	wantResolved, err := filepath.EvalSymlinks(sourcePath)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", sourcePath, err)
+	}
+	if resolved != wantResolved {
+		t.Fatalf("%q resolves to %q, want %q", linkPath, resolved, wantResolved)
+	}
+}
+
+func setDotTestModTime(t *testing.T, path string, when time.Time) {
+	t.Helper()
+	if err := os.Chtimes(path, when, when); err != nil {
+		t.Fatalf("Chtimes %q: %v", path, err)
 	}
 }
 
@@ -771,7 +921,15 @@ func findDotsTestGroup(groups []*config.GroupConfig, name string) *config.GroupC
 	return nil
 }
 
-// writeGroupWithDots writes dot entries to the base group in settings.json.
+func dotsTestHostGroupName() string {
+	hostname := os.Getenv("OMNI_HOSTNAME")
+	if hostname == "" {
+		hostname, _ = os.Hostname()
+	}
+	return shortHostnameForTest(hostname)
+}
+
+// writeGroupWithDots writes dot entries to the current host group in settings.json.
 // The config file must already exist (created by newDotsApp or newDotsAppWithGitCfg).
 // Callers must set t.Setenv("HOME", home) before this call and before any
 // App method that invokes dots.New (so path derivation uses the temp home).
@@ -784,16 +942,16 @@ func writeGroupWithDots(t *testing.T, cfgDir, _ string, entries []config.DotEntr
 		t.Fatalf("config.Load: %v", err)
 	}
 
-	// Find or create the base group.
+	hostGroupName := dotsTestHostGroupName()
 	var baseGroup *config.GroupConfig
 	for _, g := range rootCfg.Groups {
-		if g.IsBase() {
+		if g.BaseName() == hostGroupName {
 			baseGroup = g
 			break
 		}
 	}
 	if baseGroup == nil {
-		baseGroup = &config.GroupConfig{}
+		baseGroup = &config.GroupConfig{Name: hostGroupName, Special: "host"}
 		rootCfg.Groups = append(rootCfg.Groups, baseGroup)
 	}
 	baseGroup.Dots = entries
@@ -908,7 +1066,7 @@ func TestDotsSync_LinksFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte("-- cfg"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Pre-create real ~/.config so stow folds at nvim level (not config level).
+	// Pre-create real ~/.config to exercise directory package linking beneath it.
 	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -925,19 +1083,112 @@ func TestDotsSync_LinksFiles(t *testing.T) {
 	if len(ops) != 1 || ops[0].Kind != dots.OpLink {
 		t.Errorf("got ops %v, want [OpLink]", ops)
 	}
-	// Stow creates a directory-level symlink (may be relative); resolve both
-	// sides via EvalSymlinks to handle OS-level indirections (e.g. /var→/private/var on macOS).
-	resolved, err := filepath.EvalSymlinks(nvimPath)
+	assertRealDirectory(t, nvimPath)
+	assertSymlinkResolvesTo(t, filepath.Join(nvimPath, "init.lua"), filepath.Join(srcDir, "init.lua"))
+}
+
+func TestDotsSync_ReportsEntryProgress(t *testing.T) {
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	nvimSrc := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim", "init.lua")
+	if err := os.MkdirAll(filepath.Dir(nvimSrc), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(nvimSrc, []byte("-- cfg"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	zshSrc := filepath.Join(dotsContentDir(repoDir), "zshrc", ".zshrc")
+	if err := os.MkdirAll(filepath.Dir(zshSrc), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(zshSrc, []byte("export PATH=$PATH"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{Name: "nvim", Path: filepath.Join(home, ".config", "nvim")},
+		{Name: "zshrc", Path: filepath.Join(home, ".zshrc")},
+	}, home)
+
+	var events []dots.SyncProgressEvent
+	if _, err := a.DotsSync(dots.SyncOptions{
+		EntryOrder: []string{"zshrc", "nvim"},
+		Progress: func(event dots.SyncProgressEvent) {
+			events = append(events, event)
+		},
+	}); err != nil {
+		t.Fatalf("DotsSync: %v", err)
+	}
+
+	if len(events) != 4 {
+		t.Fatalf("progress events len = %d, want 4: %#v", len(events), events)
+	}
+	want := []struct {
+		name  string
+		index int
+		total int
+		done  bool
+	}{
+		{"zshrc", 1, 2, false},
+		{"zshrc", 1, 2, true},
+		{"nvim", 2, 2, false},
+		{"nvim", 2, 2, true},
+	}
+	for i, event := range events {
+		if event.Entry != want[i].name || event.Index != want[i].index || event.Total != want[i].total || event.Done != want[i].done {
+			t.Fatalf("event[%d] = %#v, want %#v", i, event, want[i])
+		}
+		if event.Done && event.Err != nil {
+			t.Fatalf("event[%d] Err = %v", i, event.Err)
+		}
+	}
+}
+
+func TestDotsSync_UnfoldsExistingDirectorySymlink(t *testing.T) {
+	if _, err := exec.LookPath("stow"); err != nil {
+		t.Skip("stow not available")
+	}
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte("-- cfg"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	nvimPath := filepath.Join(home, ".config", "nvim")
+	if err := os.MkdirAll(filepath.Dir(nvimPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	relTarget, err := filepath.Rel(filepath.Dir(nvimPath), srcDir)
 	if err != nil {
-		t.Fatalf("EvalSymlinks(nvimPath): %v", err)
+		t.Fatal(err)
 	}
-	wantResolved, err := filepath.EvalSymlinks(srcDir)
+	if err := os.Symlink(relTarget, nvimPath); err != nil {
+		t.Fatal(err)
+	}
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{Name: "nvim", Path: nvimPath},
+	}, home)
+
+	ops, err := a.DotsSync(dots.SyncOptions{})
 	if err != nil {
-		t.Fatalf("EvalSymlinks(srcDir): %v", err)
+		t.Fatalf("DotsSync: %v", err)
 	}
-	if resolved != wantResolved {
-		t.Errorf("symlink → %q, want %q", resolved, wantResolved)
+	if len(ops) != 1 || ops[0].Kind != dots.OpLink {
+		t.Fatalf("ops = %v, want OpLink repair", ops)
 	}
+	assertRealDirectory(t, nvimPath)
+	assertSymlinkResolvesTo(t, filepath.Join(nvimPath, "init.lua"), filepath.Join(srcDir, "init.lua"))
 }
 
 func TestDotsSync_DryRun(t *testing.T) {
@@ -994,7 +1245,7 @@ func TestDotsSyncEntry_DryRunDoesNotCreateContentDir(t *testing.T) {
 	}
 }
 
-func TestDotsSync_RefusesIgnoredRepoSource(t *testing.T) {
+func TestDotsSync_AllowsIgnoredRepoSource(t *testing.T) {
 	if _, err := exec.LookPath("stow"); err != nil {
 		t.Skip("stow not available")
 	}
@@ -1018,21 +1269,25 @@ func TestDotsSync_RefusesIgnoredRepoSource(t *testing.T) {
 	}, home)
 
 	ops, err := a.DotsSync(dots.SyncOptions{})
-	if err == nil {
-		t.Fatal("DotsSync returned nil, want conflict for ignored repo source")
+	if err != nil {
+		t.Fatalf("DotsSync: %v", err)
 	}
-	if !strings.Contains(err.Error(), "auth.json") || !strings.Contains(err.Error(), "refusing to stow") {
-		t.Fatalf("DotsSync error = %q, want ignored path refusal", err)
+	if len(ops) != 1 || ops[0].Kind != dots.OpLink {
+		t.Fatalf("ops = %v, want one link", ops)
 	}
-	if len(ops) != 1 || ops[0].Kind != dots.OpConflict {
-		t.Fatalf("ops = %v, want one conflict", ops)
+	statuses, err := a.DotsList()
+	if err != nil {
+		t.Fatalf("DotsList: %v", err)
 	}
-	if _, err := os.Lstat(filepath.Join(targetPath, "auth.json")); !os.IsNotExist(err) {
-		t.Fatalf("ignored auth.json should not be linked into HOME, stat err=%v", err)
+	if len(statuses) != 1 || statuses[0].Health != app.HealthOK {
+		t.Fatalf("statuses = %#v, want one healthy entry", statuses)
+	}
+	if statuses[0].FileCount != 1 {
+		t.Fatalf("file count = %d, want only non-ignored files counted", statuses[0].FileCount)
 	}
 }
 
-func TestDotsSync_RefusesIgnoredRepoSourceWhenAlreadySynced(t *testing.T) {
+func TestDotsSync_AllowsIgnoredRepoSourceWhenAlreadySynced(t *testing.T) {
 	if _, err := exec.LookPath("stow"); err != nil {
 		t.Skip("stow not available")
 	}
@@ -1066,14 +1321,21 @@ func TestDotsSync_RefusesIgnoredRepoSourceWhenAlreadySynced(t *testing.T) {
 	}, home)
 
 	ops, err := a.DotsSync(dots.SyncOptions{})
-	if err == nil {
-		t.Fatal("DotsSync returned nil, want conflict for ignored source on synced entry")
+	if err != nil {
+		t.Fatalf("DotsSync: %v", err)
 	}
-	if !strings.Contains(err.Error(), "secret.log") || !strings.Contains(err.Error(), "refusing to stow") {
-		t.Fatalf("DotsSync error = %q, want ignored path refusal", err)
+	if len(ops) != 1 || ops[0].Kind != dots.OpSkip {
+		t.Fatalf("ops = %v, want one skip", ops)
 	}
-	if len(ops) != 1 || ops[0].Kind != dots.OpConflict {
-		t.Fatalf("ops = %v, want one conflict", ops)
+	statuses, err := a.DotsList()
+	if err != nil {
+		t.Fatalf("DotsList: %v", err)
+	}
+	if len(statuses) != 1 || statuses[0].Health != app.HealthOK {
+		t.Fatalf("statuses = %#v, want one healthy entry", statuses)
+	}
+	if statuses[0].FileCount != 1 {
+		t.Fatalf("file count = %d, want ignored log excluded", statuses[0].FileCount)
 	}
 }
 
@@ -1111,20 +1373,11 @@ func TestDotsSyncEntry_LocalOnlyCopiesRepoBacksUpAndLinks(t *testing.T) {
 	if got, err := os.ReadFile(backupFile); err != nil || string(got) != "-- local" {
 		t.Fatalf("backup file = %q, %v; want copied local content", got, err)
 	}
-	resolved, err := filepath.EvalSymlinks(nvimPath)
-	if err != nil {
-		t.Fatalf("EvalSymlinks(target): %v", err)
-	}
-	wantResolved, err := filepath.EvalSymlinks(filepath.Dir(sourceFile))
-	if err != nil {
-		t.Fatalf("EvalSymlinks(source): %v", err)
-	}
-	if resolved != wantResolved {
-		t.Fatalf("target resolves to %q, want %q", resolved, wantResolved)
-	}
+	assertRealDirectory(t, nvimPath)
+	assertSymlinkResolvesTo(t, filepath.Join(nvimPath, "init.lua"), sourceFile)
 }
 
-func TestDotsSyncEntry_LocalOnlyRefusesSymlinkAdoption(t *testing.T) {
+func TestDotsSyncEntry_LocalOnlyFollowsSymlinkAdoption(t *testing.T) {
 	if _, err := exec.LookPath("stow"); err != nil {
 		t.Skip("stow not available")
 	}
@@ -1146,19 +1399,242 @@ func TestDotsSyncEntry_LocalOnlyRefusesSymlinkAdoption(t *testing.T) {
 	}, home)
 
 	ops, err := a.DotsSync(dots.SyncOptions{})
-	if err == nil {
-		t.Fatal("DotsSync returned nil, want conflict for symlink adoption")
+	if err != nil {
+		t.Fatalf("DotsSync: %v", err)
 	}
-	if !strings.Contains(err.Error(), "refusing to adopt") {
-		t.Fatalf("DotsSync error = %q, want refusing to adopt", err)
-	}
-	if len(ops) != 1 || ops[0].Kind != dots.OpConflict {
-		t.Fatalf("ops = %v, want one conflict", ops)
+	if len(ops) != 1 || ops[0].Kind != dots.OpAdopt {
+		t.Fatalf("ops = %v, want one adopt", ops)
 	}
 	repoPath := filepath.Join(dotsContentDir(repoDir), "gitconfig", ".gitconfig")
-	if _, err := os.Lstat(repoPath); !os.IsNotExist(err) {
-		t.Fatalf("repo source should not be created from symlink target, stat err=%v", err)
+	if got, err := os.ReadFile(repoPath); err != nil || string(got) != "[user]\n" {
+		t.Fatalf("repo source = %q err=%v, want followed symlink content", got, err)
 	}
+	if info, err := os.Lstat(repoPath); err != nil {
+		t.Fatalf("repo source stat: %v", err)
+	} else if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("repo source is still a symlink")
+	}
+	if got, err := os.ReadFile(externalTarget); err != nil || string(got) != "[user]\n" {
+		t.Fatalf("external target changed: body=%q err=%v", got, err)
+	}
+	resolved, err := filepath.EvalSymlinks(linkPath)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(linkPath): %v", err)
+	}
+	wantResolved, err := filepath.EvalSymlinks(repoPath)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(repoPath): %v", err)
+	}
+	if resolved != wantResolved {
+		t.Fatalf("link resolves to %q, want repo source %q", resolved, wantResolved)
+	}
+}
+
+func TestDotsSync_FileOverwrittenByNewerLocalAdoptsAndRelinks(t *testing.T) {
+	if _, err := exec.LookPath("stow"); err != nil {
+		t.Skip("stow not available")
+	}
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	sourcePath := filepath.Join(dotsContentDir(repoDir), "gitconfig", ".gitconfig")
+	if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourcePath, []byte("[repo]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	targetPath := filepath.Join(home, ".gitconfig")
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{Name: "gitconfig", Path: targetPath},
+	}, home)
+
+	if _, err := a.DotsSync(dots.SyncOptions{}); err != nil {
+		t.Fatalf("initial DotsSync: %v", err)
+	}
+	assertSymlinkResolvesTo(t, targetPath, sourcePath)
+
+	oldTime := time.Unix(1_700_000_000, 0)
+	newTime := oldTime.Add(time.Hour)
+	if err := os.Chtimes(sourcePath, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(targetPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(targetPath, []byte("[local]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(targetPath, newTime, newTime); err != nil {
+		t.Fatal(err)
+	}
+
+	statuses, err := a.DotsList()
+	if err != nil {
+		t.Fatalf("DotsList: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("got %d statuses, want 1", len(statuses))
+	}
+	assertDotState(t, statuses[0], app.DotStateModified, []app.DotAction{app.DotActionSync, app.DotActionRemove, app.DotActionIgnore})
+
+	ops, err := a.DotsSync(dots.SyncOptions{})
+	if err != nil {
+		t.Fatalf("DotsSync: %v", err)
+	}
+	if len(ops) != 1 || ops[0].Kind != dots.OpAdopt {
+		t.Fatalf("ops = %v, want OpAdopt", ops)
+	}
+	if got, readErr := os.ReadFile(sourcePath); readErr != nil || string(got) != "[local]\n" {
+		t.Fatalf("source file = %q, %v; want newer local content", got, readErr)
+	}
+	assertSymlinkResolvesTo(t, targetPath, sourcePath)
+}
+
+func TestDotsSync_DirectoryChildOverwrittenByNewerLocalAdoptsAndRelinks(t *testing.T) {
+	if _, err := exec.LookPath("stow"); err != nil {
+		t.Skip("stow not available")
+	}
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sourcePath := filepath.Join(srcDir, "init.lua")
+	if err := os.WriteFile(sourcePath, []byte("-- repo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	targetDir := filepath.Join(home, ".config", "nvim")
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{Name: "nvim", Path: targetDir},
+	}, home)
+
+	if _, err := a.DotsSync(dots.SyncOptions{}); err != nil {
+		t.Fatalf("initial DotsSync: %v", err)
+	}
+	targetPath := filepath.Join(targetDir, "init.lua")
+	assertRealDirectory(t, targetDir)
+	assertSymlinkResolvesTo(t, targetPath, sourcePath)
+
+	oldTime := time.Unix(1_700_000_000, 0)
+	newTime := oldTime.Add(time.Hour)
+	if err := os.Chtimes(sourcePath, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(targetPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(targetPath, []byte("-- local"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(targetPath, newTime, newTime); err != nil {
+		t.Fatal(err)
+	}
+	localOnlyPath := filepath.Join(targetDir, "local.lua")
+	if err := os.WriteFile(localOnlyPath, []byte("-- local only"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	statuses, err := a.DotsList()
+	if err != nil {
+		t.Fatalf("DotsList: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("got %d statuses, want 1", len(statuses))
+	}
+	assertDotState(t, statuses[0], app.DotStateModified, []app.DotAction{app.DotActionSync, app.DotActionRemove, app.DotActionIgnore})
+	childStates := make(map[string]app.DotState)
+	for _, child := range statuses[0].Children {
+		childStates[child.Name] = child.State
+	}
+	wantChildStates := map[string]app.DotState{
+		"init.lua":  app.DotStateModified,
+		"local.lua": app.DotStateLocalOnly,
+	}
+	if !reflect.DeepEqual(childStates, wantChildStates) {
+		t.Fatalf("child states = %#v, want %#v", childStates, wantChildStates)
+	}
+
+	ops, err := a.DotsSync(dots.SyncOptions{})
+	if err != nil {
+		t.Fatalf("DotsSync: %v", err)
+	}
+	if len(ops) != 1 || ops[0].Kind != dots.OpAdopt {
+		t.Fatalf("ops = %v, want OpAdopt", ops)
+	}
+	if got, readErr := os.ReadFile(sourcePath); readErr != nil || string(got) != "-- local" {
+		t.Fatalf("source file = %q, %v; want newer local content", got, readErr)
+	}
+	localOnlySourcePath := filepath.Join(srcDir, "local.lua")
+	if got, readErr := os.ReadFile(localOnlySourcePath); readErr != nil || string(got) != "-- local only" {
+		t.Fatalf("local-only source file = %q, %v; want copied local content", got, readErr)
+	}
+	assertRealDirectory(t, targetDir)
+	assertSymlinkResolvesTo(t, targetPath, sourcePath)
+	assertSymlinkResolvesTo(t, localOnlyPath, localOnlySourcePath)
+}
+
+func TestDotsSync_DirectoryLocalOnlyNewFileAdoptsAndRelinks(t *testing.T) {
+	if _, err := exec.LookPath("stow"); err != nil {
+		t.Skip("stow not available")
+	}
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sourcePath := filepath.Join(srcDir, "init.lua")
+	if err := os.WriteFile(sourcePath, []byte("-- repo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	targetDir := filepath.Join(home, ".config", "nvim")
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{Name: "nvim", Path: targetDir},
+	}, home)
+
+	if _, err := a.DotsSync(dots.SyncOptions{}); err != nil {
+		t.Fatalf("initial DotsSync: %v", err)
+	}
+	localOnlyPath := filepath.Join(targetDir, "local.lua")
+	if err := os.WriteFile(localOnlyPath, []byte("-- local only"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	statuses, err := a.DotsList()
+	if err != nil {
+		t.Fatalf("DotsList: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("got %d statuses, want 1", len(statuses))
+	}
+	assertDotState(t, statuses[0], app.DotStateModified, []app.DotAction{app.DotActionSync, app.DotActionRemove, app.DotActionIgnore})
+
+	ops, err := a.DotsSync(dots.SyncOptions{})
+	if err != nil {
+		t.Fatalf("DotsSync: %v", err)
+	}
+	if len(ops) != 1 || ops[0].Kind != dots.OpAdopt {
+		t.Fatalf("ops = %v, want OpAdopt", ops)
+	}
+	localOnlySourcePath := filepath.Join(srcDir, "local.lua")
+	if got, readErr := os.ReadFile(localOnlySourcePath); readErr != nil || string(got) != "-- local only" {
+		t.Fatalf("local-only source file = %q, %v; want copied local content", got, readErr)
+	}
+	assertSymlinkResolvesTo(t, filepath.Join(targetDir, "init.lua"), sourcePath)
+	assertSymlinkResolvesTo(t, localOnlyPath, localOnlySourcePath)
 }
 
 func TestDotsSyncEntry_ConflictRequiresChoice(t *testing.T) {
@@ -1281,14 +1757,17 @@ func TestDotsList_FileCountAndChildrenSkipIgnoredPaths(t *testing.T) {
 	if statuses[0].FileCount != 2 {
 		t.Fatalf("file count = %d, want 2", statuses[0].FileCount)
 	}
+	if want := (app.DotFileCounts{Synced: 2, Ignored: 2}); statuses[0].Counts != want {
+		t.Fatalf("counts = %#v, want %#v", statuses[0].Counts, want)
+	}
 	childNames := make([]string, 0, len(statuses[0].Children))
 	ignoredChildren := make(map[string]bool)
 	for _, child := range statuses[0].Children {
 		childNames = append(childNames, child.Name)
 		ignoredChildren[child.Name] = child.Ignored
 	}
-	if !reflect.DeepEqual(childNames, []string{"lua", "auth.json", "config.lua", "node_modules", "init.lua"}) {
-		t.Fatalf("children = %v, want depth-4 flattened children", childNames)
+	if !reflect.DeepEqual(childNames, []string{"lua", "node_modules", "init.lua"}) {
+		t.Fatalf("children = %v, want direct children only", childNames)
 	}
 	if !ignoredChildren["node_modules"] {
 		t.Fatalf("node_modules child should be listed as ignored: %#v", statuses[0].Children)
@@ -1307,6 +1786,216 @@ func TestDotsList_FileCountAndChildrenSkipIgnoredPaths(t *testing.T) {
 	if !foundIgnoredSectionEntry {
 		t.Fatalf("DiscoverDotsStatus entries = %#v, want ignored nvim/node_modules row", result.Entries)
 	}
+}
+
+func TestDotsList_ClaudeAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	a, _, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	srcDir := filepath.Join(dotsContentDir(repoDir), "claude", ".claude")
+	for _, dir := range []string{
+		filepath.Join(srcDir, "plugins"),
+		filepath.Join(srcDir, "skills", "example"),
+		filepath.Join(srcDir, "agents"),
+		filepath.Join(srcDir, "hooks"),
+		filepath.Join(srcDir, "scripts"),
+		filepath.Join(srcDir, "projects"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files := map[string]string{
+		filepath.Join(srcDir, "settings.json"):                     "{}",
+		filepath.Join(srcDir, "CLAUDE.md"):                         "# Claude",
+		filepath.Join(srcDir, "mcp.json"):                          "{}",
+		filepath.Join(srcDir, "plugins", "installed_plugins.json"): "[]",
+		filepath.Join(srcDir, "skills", "example", "SKILL.md"):     "# skill",
+		filepath.Join(srcDir, "agents", "review.md"):               "# agent",
+		filepath.Join(srcDir, "hooks", "pre.sh"):                   "#!/bin/sh\n",
+		filepath.Join(srcDir, "scripts", "status.sh"):              "#!/bin/sh\n",
+		filepath.Join(srcDir, ".omc-config.json"):                  "{}",
+		filepath.Join(srcDir, "keybindings.json"):                  "{}",
+		filepath.Join(srcDir, "statusline-command.sh"):             "#!/bin/sh\n",
+		filepath.Join(srcDir, "history.jsonl"):                     "{}",
+		filepath.Join(srcDir, "projects", "session.json"):          "{}",
+		filepath.Join(srcDir, "plugins", "cache.json"):             "{}",
+	}
+	for path, body := range files {
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	assertIgnoredRows := func(result *app.DotsStatusResult) {
+		t.Helper()
+		ignoredRows := make(map[string]bool)
+		for _, entry := range result.Entries {
+			if entry.State == app.DotStateIgnored {
+				ignoredRows[entry.Name] = true
+			}
+		}
+		for _, name := range []string{"claude/history.jsonl", "claude/projects", "claude/plugins/cache.json"} {
+			if !ignoredRows[name] {
+				t.Fatalf("ignored rows = %#v, missing %s", ignoredRows, name)
+			}
+		}
+	}
+	discovered, err := a.DiscoverDotsStatus(context.Background())
+	if err != nil {
+		t.Fatalf("DiscoverDotsStatus before add: %v", err)
+	}
+	assertIgnoredRows(discovered)
+
+	if _, err := a.DotsAddDiscoveredEntry("claude", ""); err != nil {
+		t.Fatalf("DotsAddDiscoveredEntry: %v", err)
+	}
+	statuses, err := a.DotsList()
+	if err != nil {
+		t.Fatalf("DotsList: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("statuses = %#v, want one claude entry", statuses)
+	}
+	if statuses[0].FileCount != 11 {
+		t.Fatalf("file count = %d, want the eleven default Claude proposal files", statuses[0].FileCount)
+	}
+	childIgnored := make(map[string]bool, len(statuses[0].Children))
+	for _, child := range statuses[0].Children {
+		childIgnored[filepath.ToSlash(child.RelPath)] = child.Ignored
+	}
+	for _, rel := range []string{
+		"settings.json",
+		"CLAUDE.md",
+		"mcp.json",
+		"plugins",
+		"skills",
+		"agents",
+		"hooks",
+		"scripts",
+		".omc-config.json",
+		"keybindings.json",
+		"statusline-command.sh",
+	} {
+		ignored, ok := childIgnored[rel]
+		if !ok || ignored {
+			t.Fatalf("%s should be included in Claude default proposal: %#v", rel, statuses[0].Children)
+		}
+	}
+	for _, rel := range []string{"history.jsonl", "projects"} {
+		ignored, ok := childIgnored[rel]
+		if !ok || !ignored {
+			t.Fatalf("%s should be listed as ignored: %#v", rel, statuses[0].Children)
+		}
+	}
+
+	result, err := a.DiscoverDotsStatus(context.Background())
+	if err != nil {
+		t.Fatalf("DiscoverDotsStatus: %v", err)
+	}
+	assertIgnoredRows(result)
+}
+
+func TestDotsList_CodexAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	a, _, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	srcDir := filepath.Join(dotsContentDir(repoDir), "codex", ".codex")
+	for _, dir := range []string{
+		filepath.Join(srcDir, "rules", "nested"),
+		filepath.Join(srcDir, "skills", "example"),
+		filepath.Join(srcDir, "skills", ".system", "generated"),
+		filepath.Join(srcDir, "sessions"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files := map[string]string{
+		filepath.Join(srcDir, "config.toml"):                                "model = \"gpt\"",
+		filepath.Join(srcDir, "mcp.json"):                                   "{}",
+		filepath.Join(srcDir, "AGENTS.md"):                                  "# Agents",
+		filepath.Join(srcDir, "RTK.md"):                                     "# RTK",
+		filepath.Join(srcDir, "rules", "global.md"):                         "# rule",
+		filepath.Join(srcDir, "rules", "nested", "rule.md"):                 "# nested",
+		filepath.Join(srcDir, "skills", "example", "SKILL.md"):              "# skill",
+		filepath.Join(srcDir, "skills", ".system", "generated", "SKILL.md"): "# generated",
+		filepath.Join(srcDir, "history.jsonl"):                              "{}",
+		filepath.Join(srcDir, "sessions", "latest.json"):                    "{}",
+		filepath.Join(srcDir, "tmp.json"):                                   "{}",
+	}
+	for path, body := range files {
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	assertIgnoredRows := func(result *app.DotsStatusResult) {
+		t.Helper()
+		ignoredRows := make(map[string]bool)
+		for _, entry := range result.Entries {
+			if entry.State == app.DotStateIgnored {
+				ignoredRows[entry.Name] = true
+			}
+		}
+		for _, name := range []string{"codex/history.jsonl", "codex/sessions", "codex/skills/.system", "codex/tmp.json"} {
+			if !ignoredRows[name] {
+				t.Fatalf("ignored rows = %#v, missing %s", ignoredRows, name)
+			}
+		}
+	}
+	discovered, err := a.DiscoverDotsStatus(context.Background())
+	if err != nil {
+		t.Fatalf("DiscoverDotsStatus before add: %v", err)
+	}
+	assertIgnoredRows(discovered)
+
+	if _, err := a.DotsAddDiscoveredEntry("codex", ""); err != nil {
+		t.Fatalf("DotsAddDiscoveredEntry: %v", err)
+	}
+	statuses, err := a.DotsList()
+	if err != nil {
+		t.Fatalf("DotsList: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("statuses = %#v, want one codex entry", statuses)
+	}
+	if statuses[0].FileCount != 7 {
+		t.Fatalf("file count = %d, want the seven default Codex proposal files", statuses[0].FileCount)
+	}
+	childIgnored := make(map[string]bool, len(statuses[0].Children))
+	for _, child := range statuses[0].Children {
+		childIgnored[filepath.ToSlash(child.RelPath)] = child.Ignored
+	}
+	for _, rel := range []string{
+		"config.toml",
+		"mcp.json",
+		"AGENTS.md",
+		"RTK.md",
+		"rules",
+		"skills",
+	} {
+		ignored, ok := childIgnored[rel]
+		if !ok || ignored {
+			t.Fatalf("%s should be included in Codex default proposal: %#v", rel, statuses[0].Children)
+		}
+	}
+	for _, rel := range []string{"history.jsonl", "sessions", "tmp.json"} {
+		ignored, ok := childIgnored[rel]
+		if !ok || !ignored {
+			t.Fatalf("%s should be listed as ignored: %#v", rel, statuses[0].Children)
+		}
+	}
+
+	result, err := a.DiscoverDotsStatus(context.Background())
+	if err != nil {
+		t.Fatalf("DiscoverDotsStatus: %v", err)
+	}
+	assertIgnoredRows(result)
 }
 
 func TestDotsSync_LocalOnlyDirectorySkipsSocketFiles(t *testing.T) {
@@ -1341,6 +2030,11 @@ func TestDotsSync_LocalOnlyDirectorySkipsSocketFiles(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim", "agent.sock")); !os.IsNotExist(err) {
 		t.Fatalf("socket should not be copied into repo, stat err=%v", err)
+	}
+	assertRealDirectory(t, nvimPath)
+	assertSymlinkResolvesTo(t, filepath.Join(nvimPath, "init.lua"), filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim", "init.lua"))
+	if _, err := os.Lstat(filepath.Join(nvimPath, "agent.sock")); err != nil {
+		t.Fatalf("ignored local socket should be preserved: %v", err)
 	}
 }
 
@@ -1419,12 +2113,129 @@ func TestDotsList_LocalOnlyDirectoryShowsChildren(t *testing.T) {
 	if statuses[0].FileCount != 2 {
 		t.Fatalf("file count = %d, want 2", statuses[0].FileCount)
 	}
+	if want := (app.DotFileCounts{OutOfSync: 2}); statuses[0].Counts != want {
+		t.Fatalf("counts = %#v, want %#v", statuses[0].Counts, want)
+	}
 	childNames := make([]string, 0, len(statuses[0].Children))
 	for _, child := range statuses[0].Children {
 		childNames = append(childNames, child.Name)
 	}
-	if !reflect.DeepEqual(childNames, []string{"lua", "config.lua", "init.lua"}) {
-		t.Fatalf("children = %v, want depth-4 flattened children", childNames)
+	if !reflect.DeepEqual(childNames, []string{"lua", "init.lua"}) {
+		t.Fatalf("children = %v, want direct children only", childNames)
+	}
+	var luaChild app.DotChild
+	for _, child := range statuses[0].Children {
+		if child.Name == "lua" {
+			luaChild = child
+			break
+		}
+	}
+	if len(luaChild.Children) != 1 || luaChild.Children[0].Name != "config.lua" {
+		t.Fatalf("lua children = %#v, want nested config.lua", luaChild.Children)
+	}
+	if luaChild.Children[0].State != app.DotStateLocalOnly {
+		t.Fatalf("nested config.lua state = %q, want local-only", luaChild.Children[0].State)
+	}
+	if want := (app.DotFileCounts{OutOfSync: 1}); luaChild.Counts != want {
+		t.Fatalf("lua counts = %#v, want %#v", luaChild.Counts, want)
+	}
+}
+
+func TestDotsList_DirectoryChildrenReportIndividualStates(t *testing.T) {
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
+	if err := os.MkdirAll(filepath.Join(srcDir, "lua"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		filepath.Join(srcDir, "init.lua"):           "-- cfg",
+		filepath.Join(srcDir, "lua", "config.lua"):  "-- repo",
+		filepath.Join(srcDir, "lua", "missing.lua"): "-- missing",
+	}
+	for path, body := range files {
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	localDir := filepath.Join(home, ".config", "nvim")
+	if err := os.MkdirAll(filepath.Join(localDir, "lua"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(srcDir, "init.lua"), filepath.Join(localDir, "init.lua")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(localDir, "lua", "config.lua"), []byte("-- local"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	setDotTestModTime(t, filepath.Join(srcDir, "lua", "config.lua"), time.Unix(1_700_000_000, 0).Add(time.Hour))
+	setDotTestModTime(t, filepath.Join(localDir, "lua", "config.lua"), time.Unix(1_700_000_000, 0))
+	if err := os.WriteFile(filepath.Join(localDir, "local.lua"), []byte("-- local only"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{Name: "nvim", Path: localDir},
+	}, home)
+
+	statuses, err := a.DotsList()
+	if err != nil {
+		t.Fatalf("DotsList: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("got %d statuses, want 1", len(statuses))
+	}
+	if statuses[0].State != app.DotStateConflict {
+		t.Fatalf("state = %q, want conflict", statuses[0].State)
+	}
+	if want := (app.DotFileCounts{Synced: 1, OutOfSync: 3}); statuses[0].Counts != want {
+		t.Fatalf("counts = %#v, want %#v", statuses[0].Counts, want)
+	}
+	childStates := make(map[string]app.DotState)
+	childCounts := make(map[string]app.DotFileCounts)
+	for _, child := range statuses[0].Children {
+		childStates[filepath.ToSlash(child.RelPath)] = child.State
+		childCounts[filepath.ToSlash(child.RelPath)] = child.Counts
+	}
+	want := map[string]app.DotState{
+		"init.lua":  app.DotStateSynced,
+		"lua":       app.DotStateConflict,
+		"local.lua": app.DotStateLocalOnly,
+	}
+	if len(childStates) != len(want) {
+		t.Fatalf("child states = %#v, want direct children only: %#v", childStates, want)
+	}
+	for rel, state := range want {
+		if childStates[rel] != state {
+			t.Fatalf("child states = %#v, want %s=%s", childStates, rel, state)
+		}
+	}
+	wantCounts := map[string]app.DotFileCounts{
+		"init.lua":  {Synced: 1},
+		"lua":       {OutOfSync: 2},
+		"local.lua": {OutOfSync: 1},
+	}
+	if !reflect.DeepEqual(childCounts, wantCounts) {
+		t.Fatalf("child counts = %#v, want %#v", childCounts, wantCounts)
+	}
+	var luaChild app.DotChild
+	for _, child := range statuses[0].Children {
+		if child.RelPath == "lua" {
+			luaChild = child
+			break
+		}
+	}
+	nestedStates := make(map[string]app.DotState)
+	for _, child := range luaChild.Children {
+		nestedStates[filepath.ToSlash(child.RelPath)] = child.State
+	}
+	wantNested := map[string]app.DotState{
+		"lua/config.lua":  app.DotStateConflict,
+		"lua/missing.lua": app.DotStateMissing,
+	}
+	if !reflect.DeepEqual(nestedStates, wantNested) {
+		t.Fatalf("nested child states = %#v, want %#v", nestedStates, wantNested)
 	}
 }
 
@@ -1466,7 +2277,7 @@ func TestDotsDelete_RemovesSymlinkAndEntry(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte("-- cfg"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Pre-create real ~/.config so stow folds at nvim level.
+	// Pre-create real ~/.config so stow links inside the nvim directory.
 	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1476,7 +2287,7 @@ func TestDotsDelete_RemovesSymlinkAndEntry(t *testing.T) {
 		{Name: "nvim", Path: nvimPath},
 	}, home)
 
-	// Use DotsSync to create the stow-managed relative symlink.
+	// Use DotsSync to create the stow-managed file links.
 	if _, err := a.DotsSync(dots.SyncOptions{}); err != nil {
 		t.Fatalf("DotsSync: %v", err)
 	}
@@ -1512,11 +2323,11 @@ func TestDotsDelete_RemovesSymlinkAndEntry(t *testing.T) {
 		t.Fatalf("repo package should be removed, stat err=%v", err)
 	}
 
-	backupPath := filepath.Join(home, dots.BackupDirName, ".config", "nvim")
-	if info, err := os.Lstat(backupPath); err != nil {
-		t.Fatalf("expected backup before removing symlink: %v", err)
-	} else if info.Mode()&os.ModeSymlink == 0 {
-		t.Fatalf("backup %q is not a symlink", backupPath)
+	backupPath := filepath.Join(home, dots.BackupDirName, ".config", "nvim", "init.lua")
+	if got, err := os.ReadFile(backupPath); err != nil {
+		t.Fatalf("expected backup before removing managed link: %v", err)
+	} else if string(got) != "-- cfg" {
+		t.Fatalf("backup content = %q, want -- cfg", got)
 	}
 
 	// Entry should be gone from settings.json.
@@ -1530,6 +2341,63 @@ func TestDotsDelete_RemovesSymlinkAndEntry(t *testing.T) {
 				t.Error("expected nvim dot entry to be removed from config")
 			}
 		}
+	}
+}
+
+func TestDotsDelete_SyncedDirectoryKeepsIgnoredLocalChildren(t *testing.T) {
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte("-- cfg"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	nvimPath := filepath.Join(home, ".config", "nvim")
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{Name: "nvim", Path: nvimPath},
+	}, home)
+
+	if _, err := a.DotsSync(dots.SyncOptions{}); err != nil {
+		t.Fatalf("DotsSync: %v", err)
+	}
+	assertRealDirectory(t, nvimPath)
+	assertSymlinkResolvesTo(t, filepath.Join(nvimPath, "init.lua"), filepath.Join(srcDir, "init.lua"))
+
+	ignoredPath := filepath.Join(nvimPath, "debug.log")
+	if err := os.WriteFile(ignoredPath, []byte("local only"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := a.DotsDelete(context.Background(), "nvim"); err != nil {
+		t.Fatalf("DotsDelete: %v", err)
+	}
+
+	assertRealDirectory(t, nvimPath)
+	if info, err := os.Lstat(filepath.Join(nvimPath, "init.lua")); err != nil {
+		t.Fatalf("expected managed file to remain local: %v", err)
+	} else if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		t.Fatalf("managed file mode = %v, want regular local file", info.Mode())
+	}
+	if body, err := os.ReadFile(filepath.Join(nvimPath, "init.lua")); err != nil {
+		t.Fatalf("ReadFile init.lua: %v", err)
+	} else if string(body) != "-- cfg" {
+		t.Fatalf("init.lua = %q, want -- cfg", body)
+	}
+	if body, err := os.ReadFile(ignoredPath); err != nil {
+		t.Fatalf("ignored local child should survive delete: %v", err)
+	} else if string(body) != "local only" {
+		t.Fatalf("ignored local child = %q, want local only", body)
+	}
+	if _, err := os.Lstat(filepath.Join(dotsContentDir(repoDir), "nvim")); !os.IsNotExist(err) {
+		t.Fatalf("repo package should be removed, stat err=%v", err)
 	}
 }
 
@@ -1565,6 +2433,14 @@ func TestDotsDeleteWithoutKeepLocalRemovesLocalAndRepo(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(dotsContentDir(repoDir), "nvim")); !os.IsNotExist(err) {
 		t.Fatalf("repo package should be removed, stat err=%v", err)
+	}
+	backup := filepath.Join(home, dots.BackupDirName, ".config", "nvim", "init.lua")
+	got, err := os.ReadFile(backup)
+	if err != nil {
+		t.Fatalf("ReadFile backup: %v", err)
+	}
+	if string(got) != "-- cfg" {
+		t.Fatalf("backup content = %q, want -- cfg", string(got))
 	}
 
 	updated, err := config.Load(filepath.Join(cfgDir, "settings.json"))
@@ -1715,7 +2591,7 @@ func TestDotsAdd_RequiresAdoptBeforeMutatingLocalPath(t *testing.T) {
 	}
 }
 
-func TestDotsAdd_AdoptRejectsNestedSymlinkBeforeMutating(t *testing.T) {
+func TestDotsAdd_AdoptFollowsNestedSymlink(t *testing.T) {
 	a, _, repoDir := newDotsApp(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -1737,19 +2613,34 @@ func TestDotsAdd_AdoptRejectsNestedSymlinkBeforeMutating(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := a.DotsAdd(context.Background(), liveDir, app.DotsAddOptions{Name: "myapp", Adopt: true})
-	if err == nil || !strings.Contains(err.Error(), "symlink") {
-		t.Fatalf("DotsAdd error = %v, want symlink refusal", err)
+	ops, err := a.DotsAdd(context.Background(), liveDir, app.DotsAddOptions{Name: "myapp", Adopt: true})
+	if err != nil {
+		t.Fatalf("DotsAdd: %v", err)
 	}
-	if got, readErr := os.ReadFile(liveFile); readErr != nil || string(got) != "{}" {
-		t.Fatalf("local file changed after rejected adopt: body=%q err=%v", got, readErr)
+	if len(ops) != 1 || ops[0].Kind != dots.OpLink {
+		t.Fatalf("ops = %v, want OpLink", ops)
 	}
-	if _, statErr := os.Lstat(externalLink); statErr != nil {
-		t.Fatalf("local symlink removed after rejected adopt: %v", statErr)
+	repoFile := filepath.Join(dotsContentDir(repoDir), "myapp", ".config", "myapp", "settings.json")
+	if got, readErr := os.ReadFile(repoFile); readErr != nil || string(got) != "{}" {
+		t.Fatalf("repo regular file = %q err=%v, want local content", got, readErr)
 	}
-	if _, statErr := os.Lstat(filepath.Join(dotsContentDir(repoDir), "myapp")); !os.IsNotExist(statErr) {
-		t.Fatalf("repo package should not be created after rejected adopt, stat err=%v", statErr)
+	repoExternal := filepath.Join(dotsContentDir(repoDir), "myapp", ".config", "myapp", "external.conf")
+	if got, readErr := os.ReadFile(repoExternal); readErr != nil || string(got) != "external" {
+		t.Fatalf("repo followed symlink file = %q err=%v, want external content", got, readErr)
 	}
+	info, statErr := os.Lstat(repoExternal)
+	if statErr != nil {
+		t.Fatalf("repo followed symlink stat: %v", statErr)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("repo followed symlink file is still a symlink")
+	}
+	if got, readErr := os.ReadFile(externalFile); readErr != nil || string(got) != "external" {
+		t.Fatalf("external symlink target changed: body=%q err=%v", got, readErr)
+	}
+	assertRealDirectory(t, liveDir)
+	assertSymlinkResolvesTo(t, filepath.Join(liveDir, "settings.json"), repoFile)
+	assertSymlinkResolvesTo(t, filepath.Join(liveDir, "external.conf"), repoExternal)
 }
 
 func TestDotsAddRejectsConfiguredDuplicateBeforeMutation(t *testing.T) {
@@ -1821,17 +2712,17 @@ func TestDotsAdd_AdoptSkipsDefaultIgnoredChildren(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(appDir, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(appDir, "profiles", "work", "node_modules", "pkg"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(appDir, "workspaces", "work", "node_modules", "pkg"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	files := map[string]string{
-		filepath.Join(appDir, "settings.json"):                                   "{}",
-		filepath.Join(appDir, "profiles", "work", "config.json"):                 "work",
-		filepath.Join(appDir, "profiles", "work", "auth.json"):                   "secret",
-		filepath.Join(appDir, "profiles", "work", "node_modules", "pkg", "x.js"): "module",
-		filepath.Join(appDir, "node_modules", "pkg", "x.js"):                     "module",
-		filepath.Join(appDir, ".git", "config"):                                  "git",
-		filepath.Join(appDir, "auth.json"):                                       "secret",
+		filepath.Join(appDir, "settings.json"):                                     "{}",
+		filepath.Join(appDir, "workspaces", "work", "config.json"):                 "work",
+		filepath.Join(appDir, "workspaces", "work", "auth.json"):                   "secret",
+		filepath.Join(appDir, "workspaces", "work", "node_modules", "pkg", "x.js"): "module",
+		filepath.Join(appDir, "node_modules", "pkg", "x.js"):                       "module",
+		filepath.Join(appDir, ".git", "config"):                                    "git",
+		filepath.Join(appDir, "auth.json"):                                         "secret",
 	}
 	for path, body := range files {
 		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
@@ -1846,15 +2737,15 @@ func TestDotsAdd_AdoptSkipsDefaultIgnoredChildren(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(repoAppDir, "settings.json")); err != nil {
 		t.Fatalf("settings.json should be copied into repo: %v", err)
 	}
-	if _, err := os.Lstat(filepath.Join(repoAppDir, "profiles", "work", "config.json")); err != nil {
+	if _, err := os.Lstat(filepath.Join(repoAppDir, "workspaces", "work", "config.json")); err != nil {
 		t.Fatalf("nested non-ignored file should be copied into repo: %v", err)
 	}
 	for _, rel := range []string{
 		"node_modules",
 		".git",
 		"auth.json",
-		filepath.Join("profiles", "work", "node_modules"),
-		filepath.Join("profiles", "work", "auth.json"),
+		filepath.Join("workspaces", "work", "node_modules"),
+		filepath.Join("workspaces", "work", "auth.json"),
 	} {
 		if _, err := os.Lstat(filepath.Join(repoAppDir, rel)); !os.IsNotExist(err) {
 			t.Fatalf("%s should be skipped while copying into repo, stat err=%v", rel, err)
@@ -2239,6 +3130,94 @@ func TestDotsPull_NonGitRepo(t *testing.T) {
 	}
 }
 
+func TestDotsPullAndPush_WithGitRemote(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	if _, err := exec.LookPath("stow"); err != nil {
+		t.Skip("stow not available")
+	}
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := os.Getenv("HOME")
+	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	gitCmd := func(dir string, args ...string) {
+		t.Helper()
+		c := exec.Command("git", args...)
+		if dir != "" {
+			c.Dir = dir
+		}
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git -C %s %v: %v\n%s", dir, args, err, out)
+		}
+	}
+	configGitUser := func(dir string) {
+		t.Helper()
+		gitCmd(dir, "config", "user.email", "test@example.com")
+		gitCmd(dir, "config", "user.name", "Test")
+	}
+
+	remoteDir := filepath.Join(t.TempDir(), "remote.git")
+	seedDir := filepath.Join(t.TempDir(), "seed")
+	otherDir := filepath.Join(t.TempDir(), "other")
+	gitCmd("", "init", "--bare", "--initial-branch=main", remoteDir)
+	gitCmd("", "clone", remoteDir, seedDir)
+	configGitUser(seedDir)
+	seedFile := filepath.Join(seedDir, "dotfiles", "nvim", ".config", "nvim", "init.lua")
+	if err := os.MkdirAll(filepath.Dir(seedFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(seedFile, []byte("-- seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(seedDir, "add", "dotfiles")
+	gitCmd(seedDir, "commit", "-m", "seed")
+	gitCmd(seedDir, "push", "-u", "origin", "main")
+
+	gitCmd("", "clone", remoteDir, repoDir)
+	configGitUser(repoDir)
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{Name: "nvim", Path: filepath.Join(home, ".config", "nvim")},
+	}, home)
+	if _, err := a.DotsSyncContext(context.Background(), dots.SyncOptions{}); err != nil {
+		t.Fatalf("initial DotsSyncContext: %v", err)
+	}
+
+	gitCmd("", "clone", remoteDir, otherDir)
+	configGitUser(otherDir)
+	remoteFile := filepath.Join(otherDir, "dotfiles", "nvim", ".config", "nvim", "init.lua")
+	if err := os.WriteFile(remoteFile, []byte("-- remote change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(otherDir, "add", "dotfiles/nvim/.config/nvim/init.lua")
+	gitCmd(otherDir, "commit", "-m", "remote-change")
+	gitCmd(otherDir, "push")
+
+	if _, err := a.DotsPull(context.Background()); err != nil {
+		t.Fatalf("DotsPull: %v", err)
+	}
+	localFile := filepath.Join(home, ".config", "nvim", "init.lua")
+	if got, err := os.ReadFile(localFile); err != nil || string(got) != "-- remote change\n" {
+		t.Fatalf("local file after pull = %q, %v; want remote change", got, err)
+	}
+
+	repoFile := filepath.Join(repoDir, "dotfiles", "nvim", ".config", "nvim", "init.lua")
+	if err := os.WriteFile(repoFile, []byte("-- local change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.DotsPush(context.Background(), "dots: local change"); err != nil {
+		t.Fatalf("DotsPush: %v", err)
+	}
+	verifyDir := filepath.Join(t.TempDir(), "verify")
+	gitCmd("", "clone", remoteDir, verifyDir)
+	verifyFile := filepath.Join(verifyDir, "dotfiles", "nvim", ".config", "nvim", "init.lua")
+	if got, err := os.ReadFile(verifyFile); err != nil || string(got) != "-- local change\n" {
+		t.Fatalf("remote file after push = %q, %v; want local change", got, err)
+	}
+}
+
 func TestDotsPush_NotConfigured(t *testing.T) {
 	cfgDir := t.TempDir()
 	a := app.New(filepath.Join(cfgDir, "settings.json"))
@@ -2323,7 +3302,7 @@ func TestDotsAdd_WithExistingGroup(t *testing.T) {
 	}
 	var baseGroup *config.GroupConfig
 	for _, g := range updated.Groups {
-		if g.IsBase() {
+		if g.BaseName() == dotsTestHostGroupName() {
 			baseGroup = g
 			break
 		}
@@ -2556,6 +3535,8 @@ func TestDotsResolveConflict_UseRepoBacksUpLocalAndRelinks(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(nvimPath, "init.lua"), []byte("-- existing"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	setDotTestModTime(t, filepath.Join(srcDir, "init.lua"), time.Unix(1_700_000_000, 0).Add(time.Hour))
+	setDotTestModTime(t, filepath.Join(nvimPath, "init.lua"), time.Unix(1_700_000_000, 0))
 
 	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
 		{Name: "nvim", Path: nvimPath},
@@ -2569,14 +3550,8 @@ func TestDotsResolveConflict_UseRepoBacksUpLocalAndRelinks(t *testing.T) {
 		t.Fatalf("ops = %v, want OpRepair", ops)
 	}
 
-	// The target path should now be a directory-level symlink.
-	fi, err := os.Lstat(nvimPath)
-	if err != nil {
-		t.Fatalf("Lstat %q: %v", nvimPath, err)
-	}
-	if fi.Mode()&os.ModeSymlink == 0 {
-		t.Errorf("%q is not a symlink after DotsFixConflict", nvimPath)
-	}
+	assertRealDirectory(t, nvimPath)
+	assertSymlinkResolvesTo(t, filepath.Join(nvimPath, "init.lua"), filepath.Join(srcDir, "init.lua"))
 
 	backupDir := filepath.Join(home, dots.BackupDirName, ".config", "nvim")
 	if _, err := os.Stat(backupDir); os.IsNotExist(err) {
@@ -2591,7 +3566,7 @@ func TestDotsResolveConflict_UseRepoBacksUpLocalAndRelinks(t *testing.T) {
 	}
 }
 
-func TestDotsResolveConflict_UseRepoRefusesIgnoredSourceBeforeRemovingLocal(t *testing.T) {
+func TestDotsResolveConflict_UseRepoAllowsIgnoredSource(t *testing.T) {
 	if _, err := exec.LookPath("stow"); err != nil {
 		t.Skip("stow not available")
 	}
@@ -2617,23 +3592,33 @@ func TestDotsResolveConflict_UseRepoRefusesIgnoredSourceBeforeRemovingLocal(t *t
 	if err := os.WriteFile(filepath.Join(nvimPath, "init.lua"), []byte("-- local"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(nvimPath, "local.log"), []byte("local secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	setDotTestModTime(t, filepath.Join(srcDir, "init.lua"), time.Unix(1_700_000_000, 0).Add(time.Hour))
+	setDotTestModTime(t, filepath.Join(nvimPath, "init.lua"), time.Unix(1_700_000_000, 0))
 	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
 		{Name: "nvim", Path: nvimPath, Ignore: []string{"*.log"}},
 	}, home)
 
 	ops, err := a.DotsResolveConflict(context.Background(), "nvim", app.DotResolveUseRepo)
-	if err == nil {
-		t.Fatal("DotsResolveConflict returned nil, want ignored source error")
+	if err != nil {
+		t.Fatalf("DotsResolveConflict use-repo: %v", err)
 	}
-	if len(ops) != 1 || ops[0].Kind != dots.OpConflict {
-		t.Fatalf("ops = %v, want one conflict", ops)
+	if len(ops) != 1 || ops[0].Kind != dots.OpRepair {
+		t.Fatalf("ops = %v, want one repair", ops)
 	}
-	got, readErr := os.ReadFile(filepath.Join(nvimPath, "init.lua"))
-	if readErr != nil {
-		t.Fatalf("local target was removed before validation: %v", readErr)
+	assertRealDirectory(t, nvimPath)
+	assertSymlinkResolvesTo(t, filepath.Join(nvimPath, "init.lua"), filepath.Join(srcDir, "init.lua"))
+	if got, err := os.ReadFile(filepath.Join(nvimPath, "init.lua")); err != nil || string(got) != "-- cfg" {
+		t.Fatalf("target content = %q, %v; want repo content", got, err)
 	}
-	if string(got) != "-- local" {
-		t.Fatalf("local target content = %q, want -- local", got)
+	if got, err := os.ReadFile(filepath.Join(nvimPath, "local.log")); err != nil || string(got) != "local secret" {
+		t.Fatalf("ignored local log = %q, %v; want preserved local content", got, err)
+	}
+	backupPath := filepath.Join(home, dots.BackupDirName, ".config", "nvim", "init.lua")
+	if got, err := os.ReadFile(backupPath); err != nil || string(got) != "-- local" {
+		t.Fatalf("backup = %q, %v; want local content", got, err)
 	}
 }
 
@@ -2681,6 +3666,8 @@ func TestDotsResolveConflict_UseLocalCommitsRepoCopiesLocalAndRelinks(t *testing
 	if err := os.WriteFile(filepath.Join(nvimPath, "init.lua"), []byte("-- local"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	setDotTestModTime(t, filepath.Join(srcDir, "init.lua"), time.Unix(1_700_000_000, 0).Add(time.Hour))
+	setDotTestModTime(t, filepath.Join(nvimPath, "init.lua"), time.Unix(1_700_000_000, 0))
 	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
 		{Name: "nvim", Path: nvimPath},
 	}, home)
@@ -2698,17 +3685,8 @@ func TestDotsResolveConflict_UseLocalCommitsRepoCopiesLocalAndRelinks(t *testing
 	if got, err := os.ReadFile(filepath.Join(home, dots.BackupDirName, ".config", "nvim", "init.lua")); err != nil || string(got) != "-- local" {
 		t.Fatalf("backup = %q, %v; want local content", got, err)
 	}
-	resolved, err := filepath.EvalSymlinks(nvimPath)
-	if err != nil {
-		t.Fatalf("EvalSymlinks(target): %v", err)
-	}
-	wantResolved, err := filepath.EvalSymlinks(srcDir)
-	if err != nil {
-		t.Fatalf("EvalSymlinks(source): %v", err)
-	}
-	if resolved != wantResolved {
-		t.Fatalf("target resolves to %q, want %q", resolved, wantResolved)
-	}
+	assertRealDirectory(t, nvimPath)
+	assertSymlinkResolvesTo(t, filepath.Join(nvimPath, "init.lua"), filepath.Join(srcDir, "init.lua"))
 	assertNoOldDotTempInHome(t, home)
 	c := exec.Command("git", "-C", repoDir, "log", "--oneline", "-1")
 	out, err := c.CombinedOutput()
@@ -2720,7 +3698,7 @@ func TestDotsResolveConflict_UseLocalCommitsRepoCopiesLocalAndRelinks(t *testing
 	}
 }
 
-func TestDotsResolveConflict_UseLocalRefusesIgnoredSourceBeforeRemovingLocal(t *testing.T) {
+func TestDotsResolveConflict_UseLocalFollowsSymlinkTarget(t *testing.T) {
 	if _, err := exec.LookPath("stow"); err != nil {
 		t.Skip("stow not available")
 	}
@@ -2728,33 +3706,167 @@ func TestDotsResolveConflict_UseLocalRefusesIgnoredSourceBeforeRemovingLocal(t *
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	srcFile := filepath.Join(dotsContentDir(repoDir), "applog", ".app.log")
+	srcFile := filepath.Join(dotsContentDir(repoDir), "gitconfig", ".gitconfig")
 	if err := os.MkdirAll(filepath.Dir(srcFile), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(srcFile, []byte("repo"), 0o644); err != nil {
+	if err := os.WriteFile(srcFile, []byte("[repo]\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	localFile := filepath.Join(home, ".app.log")
-	if err := os.WriteFile(localFile, []byte("local"), 0o644); err != nil {
+	externalDir := t.TempDir()
+	externalTarget := filepath.Join(externalDir, "real.gitconfig")
+	if err := os.WriteFile(externalTarget, []byte("[local]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	linkPath := filepath.Join(home, ".gitconfig")
+	if err := os.Symlink(externalTarget, linkPath); err != nil {
 		t.Fatal(err)
 	}
 	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
-		{Name: "applog", Path: localFile, Ignore: []string{"*.log"}},
+		{Name: "gitconfig", Path: linkPath},
 	}, home)
 
-	ops, err := a.DotsResolveConflict(context.Background(), "applog", app.DotResolveUseLocal)
-	if err == nil {
-		t.Fatal("DotsResolveConflict returned nil, want ignored source error")
+	ops, err := a.DotsResolveConflict(context.Background(), "gitconfig", app.DotResolveUseLocal)
+	if err != nil {
+		t.Fatalf("DotsResolveConflict use-local: %v", err)
 	}
-	if len(ops) != 1 || ops[0].Kind != dots.OpConflict {
-		t.Fatalf("ops = %v, want one conflict", ops)
+	if len(ops) != 1 || ops[0].Kind != dots.OpAdopt {
+		t.Fatalf("ops = %v, want one adopt", ops)
 	}
-	if got, readErr := os.ReadFile(localFile); readErr != nil || string(got) != "local" {
-		t.Fatalf("local target changed after validation failure: body=%q err=%v", got, readErr)
+	if got, err := os.ReadFile(srcFile); err != nil || string(got) != "[local]\n" {
+		t.Fatalf("repo source = %q err=%v, want followed symlink content", got, err)
 	}
-	if got, readErr := os.ReadFile(srcFile); readErr != nil || string(got) != "repo" {
-		t.Fatalf("repo source not rolled back after validation failure: body=%q err=%v", got, readErr)
+	if info, err := os.Lstat(srcFile); err != nil {
+		t.Fatalf("repo source stat: %v", err)
+	} else if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("repo source is still a symlink")
+	}
+	if got, err := os.ReadFile(externalTarget); err != nil || string(got) != "[local]\n" {
+		t.Fatalf("external target changed: body=%q err=%v", got, err)
+	}
+	resolved, err := filepath.EvalSymlinks(linkPath)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(linkPath): %v", err)
+	}
+	wantResolved, err := filepath.EvalSymlinks(srcFile)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(srcFile): %v", err)
+	}
+	if resolved != wantResolved {
+		t.Fatalf("link resolves to %q, want repo source %q", resolved, wantResolved)
+	}
+}
+
+func TestDotsResolveConflict_UseLocalAllowsIgnoredSource(t *testing.T) {
+	if _, err := exec.LookPath("stow"); err != nil {
+		t.Skip("stow not available")
+	}
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte("-- repo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "secret.log"), []byte("repo secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	nvimPath := filepath.Join(home, ".config", "nvim")
+	if err := os.MkdirAll(nvimPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nvimPath, "init.lua"), []byte("-- local"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nvimPath, "local.log"), []byte("local secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	setDotTestModTime(t, filepath.Join(srcDir, "init.lua"), time.Unix(1_700_000_000, 0).Add(time.Hour))
+	setDotTestModTime(t, filepath.Join(nvimPath, "init.lua"), time.Unix(1_700_000_000, 0))
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{Name: "nvim", Path: nvimPath, Ignore: []string{"*.log"}},
+	}, home)
+
+	ops, err := a.DotsResolveConflict(context.Background(), "nvim", app.DotResolveUseLocal)
+	if err != nil {
+		t.Fatalf("DotsResolveConflict use-local: %v", err)
+	}
+	if len(ops) != 1 || ops[0].Kind != dots.OpAdopt {
+		t.Fatalf("ops = %v, want one adopt", ops)
+	}
+	if got, err := os.ReadFile(filepath.Join(srcDir, "init.lua")); err != nil || string(got) != "-- local" {
+		t.Fatalf("repo source = %q, %v; want local content", got, err)
+	}
+	if _, err := os.Lstat(filepath.Join(srcDir, "secret.log")); !os.IsNotExist(err) {
+		t.Fatalf("ignored repo log should be removed by local adoption, stat err=%v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(srcDir, "local.log")); !os.IsNotExist(err) {
+		t.Fatalf("ignored local log should not be copied to repo, stat err=%v", err)
+	}
+	assertRealDirectory(t, nvimPath)
+	assertSymlinkResolvesTo(t, filepath.Join(nvimPath, "init.lua"), filepath.Join(srcDir, "init.lua"))
+	if got, err := os.ReadFile(filepath.Join(nvimPath, "local.log")); err != nil || string(got) != "local secret" {
+		t.Fatalf("ignored local log = %q, %v; want preserved local content", got, err)
+	}
+}
+
+func TestDotsResolveConflict_UseLocalIgnoresPackageRootDSStore(t *testing.T) {
+	if _, err := exec.LookPath("stow"); err != nil {
+		t.Skip("stow not available")
+	}
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	packageRoot := filepath.Join(dotsContentDir(repoDir), "claude")
+	srcDir := filepath.Join(packageRoot, ".claude")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "settings.json"), []byte(`{"repo":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(packageRoot, ".DS_Store"), []byte("finder metadata"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".DS_Store"), []byte("local finder metadata"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	claudePath := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(claudePath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(claudePath, "settings.json"), []byte(`{"local":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	setDotTestModTime(t, filepath.Join(srcDir, "settings.json"), time.Unix(1_700_000_000, 0).Add(time.Hour))
+	setDotTestModTime(t, filepath.Join(claudePath, "settings.json"), time.Unix(1_700_000_000, 0))
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{Name: "claude", Path: claudePath},
+	}, home)
+
+	ops, err := a.DotsResolveConflict(context.Background(), "claude", app.DotResolveUseLocal)
+	if err != nil {
+		t.Fatalf("DotsResolveConflict use-local: %v", err)
+	}
+	if len(ops) != 1 || ops[0].Kind != dots.OpAdopt {
+		t.Fatalf("ops = %v, want one adopt", ops)
+	}
+	if got, err := os.ReadFile(filepath.Join(srcDir, "settings.json")); err != nil || string(got) != `{"local":true}` {
+		t.Fatalf("repo settings = %q, %v; want local content", got, err)
+	}
+	assertRealDirectory(t, claudePath)
+	assertSymlinkResolvesTo(t, filepath.Join(claudePath, "settings.json"), filepath.Join(srcDir, "settings.json"))
+	if got, err := os.ReadFile(filepath.Join(home, ".DS_Store")); err != nil || string(got) != "local finder metadata" {
+		t.Fatalf("home .DS_Store = %q, %v; want preserved local metadata", got, err)
+	}
+	if got, err := os.ReadFile(filepath.Join(packageRoot, ".DS_Store")); err != nil || string(got) != "finder metadata" {
+		t.Fatalf("package .DS_Store = %q, %v; want ignored package metadata left untouched", got, err)
 	}
 }
 
@@ -2775,7 +3887,7 @@ func TestDotsDisable_UnlinksManagedSymlinks(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Pre-create real ~/.config so stow folds at nvim level.
+	// Pre-create real ~/.config so stow links inside the nvim directory.
 	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -2936,10 +4048,14 @@ func TestDisableDotsForHost_PersistsDisabledAfterUnlinkError(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(srcFile), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(srcFile, []byte("# repo"), 0o644); err != nil {
+	secret := filepath.Join(home, "secret")
+	if err := os.WriteFile(secret, []byte("# external"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(dstFile, 0o755); err != nil {
+	if err := os.Symlink(secret, srcFile); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dstFile, []byte("# local"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
@@ -3177,7 +4293,7 @@ func TestLstatOp_DryRun_ExistingManagedSymlink(t *testing.T) {
 		{Name: "nvim", Path: nvimPath},
 	}, home)
 
-	// First sync to create the real symlink.
+	// First sync to create the managed file link.
 	if _, err := a.DotsSync(dots.SyncOptions{DryRun: false}); err != nil {
 		t.Fatalf("DotsSync (first): %v", err)
 	}
@@ -3284,17 +4400,16 @@ func TestDotsSync_ContinuesAfterEntryConflict(t *testing.T) {
 	}
 }
 
-// TestDotsSync_ProfileFiltering verifies that DotsSync only syncs the groups
-// belonging to the active profile (as determined by the hostname→profile
-// mapping), not all groups.
+// TestDotsSync_HostFiltering verifies that DotsSync only syncs the groups
+// assigned to the active host, not all groups.
 //
 // Strategy: two groups — "mac" (has a dot entry) and "empty-group" (no dots).
-// A profile "macbook" covers only "empty-group". When the hostname maps to
-// "macbook", collectDots should receive only the empty group and return zero
+// The active host covers only "empty-group". collectDots should receive only
+// the empty group and return zero
 // entries, causing DotsSync to return nil without invoking stow.
-// Without the profile-awareness fix, collectDots would receive all groups
+// Without the host-awareness fix, collectDots would receive all groups
 // (including "mac") and attempt to run stow.
-func TestDotsSync_ProfileFiltering(t *testing.T) {
+func TestDotsSync_HostFiltering(t *testing.T) {
 	a, cfgDir, repoDir := newDotsApp(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -3312,21 +4427,18 @@ func TestDotsSync_ProfileFiltering(t *testing.T) {
 	vimrcPath := filepath.Join(home, ".vimrc")
 
 	// Config: "mac" group has a dot entry; "empty-group" has none.
-	// Profile "macbook" covers only "empty-group".
-	// Hostname "testhost" maps to "macbook".
+	// Host "testhost" covers only "empty-group".
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	rootCfg, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	rootCfg.Groups = []*config.GroupConfig{
+		{Name: "testhost", Special: "host"},
 		{Name: "mac", Dots: []config.DotEntry{{Name: "vimrc", Path: vimrcPath}}},
 		{Name: "empty-group"},
 	}
-	rootCfg.Profiles = map[string]config.Profile{
-		"macbook": {Groups: []string{"empty-group"}},
-	}
-	rootCfg.Hostnames = map[string]string{"testhost": "macbook"}
+	rootCfg.Hosts = map[string][]string{"testhost": {"empty-group"}}
 	if err := saveAppConfig(t, cfgPath, rootCfg); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -3335,8 +4447,8 @@ func TestDotsSync_ProfileFiltering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DotsSync: %v", err)
 	}
-	// Active profile covers only "empty-group" (no dots) → zero ops.
+	// Active host covers only "empty-group" (no dots) -> zero ops.
 	if len(ops) != 0 {
-		t.Errorf("got %d ops, want 0 (profile filtering should exclude mac group); ops=%v", len(ops), ops)
+		t.Errorf("got %d ops, want 0 (host filtering should exclude mac group); ops=%v", len(ops), ops)
 	}
 }

@@ -42,11 +42,10 @@ var wellKnownDotPaths = map[string]string{
 	"rbenv":            "~/.rbenv",
 	"rustup":           "~/.rustup",
 	"aws":              "~/.aws",
-	"kube":             "~/.kube",
-	"docker":           "~/.docker",
 	"hushlogin":        "~/.hushlogin",
 	"editorconfig":     "~/.editorconfig",
 	"claude":           "~/.claude",
+	"codex":            "~/.codex",
 	"ssh":              "~/.ssh",
 	"gnupg":            "~/.gnupg",
 }
@@ -62,34 +61,29 @@ var ignoredDotCandidateNames = map[string]struct{}{
 	"trash":        {},
 }
 
-var claudeDotIgnorePatterns = []string{
-	"projects",
-	"transcripts",
-	"file-history",
-	"session-env",
-	"session-data",
-	"sessions",
-	"tasks",
-	"todos",
-	"plans",
-	"paste-cache",
-	"cache",
-	"debug",
-	"shell-snapshots",
-	"metrics",
-	"telemetry",
-	"statsig",
-	"backups",
+var claudeDotIgnorePatterns = dotAllowlistIgnorePatterns(
+	"settings.json",
+	"CLAUDE.md",
+	"mcp.json",
 	"plugins",
-	"*.log",
-	"history.jsonl",
-	"stats-cache.json",
-	"mcp-health-cache.json",
-	"mcp-needs-auth-cache.json",
-	"settings.json.bak",
-	"settings.json.bkp",
-	".DS_Store",
-}
+	"plugins/installed_plugins.json",
+	"skills/",
+	"agents/",
+	"hooks/",
+	"scripts/",
+	".omc-config.json",
+	"keybindings.json",
+	"statusline-command.sh",
+)
+
+var codexDotIgnorePatterns = append(dotAllowlistIgnorePatterns(
+	"config.toml",
+	"mcp.json",
+	"AGENTS.md",
+	"RTK.md",
+	"rules/",
+	"skills/",
+), "/skills/.system/")
 
 // DiscoverDotsEntries returns initial dots candidates from the managed repo
 // subtree, ~/.config, and well-known home-level dotfile paths.
@@ -166,17 +160,29 @@ func discoverDotsEntries(repoPath string, includeIgnored bool) ([]config.DotEntr
 }
 
 func dotEntryWithDefaults(entry config.DotEntry) config.DotEntry {
-	if !isClaudeDotEntry(entry) {
-		return entry
+	switch {
+	case isNamedHomeDotEntry(entry, "claude", "~/.claude"):
+		entry.Ignore = appendMissingStrings(entry.Ignore, claudeDotIgnorePatterns...)
+	case isNamedHomeDotEntry(entry, "codex", "~/.codex"):
+		entry.Ignore = appendMissingStrings(entry.Ignore, codexDotIgnorePatterns...)
 	}
-	entry.Ignore = appendMissingStrings(entry.Ignore, claudeDotIgnorePatterns...)
 	return entry
 }
 
-func isClaudeDotEntry(entry config.DotEntry) bool {
+func isNamedHomeDotEntry(entry config.DotEntry, wantName, wantPath string) bool {
 	name := strings.ToLower(strings.Trim(strings.TrimPrefix(entry.Name, "."), " "))
 	path := strings.ToLower(filepath.ToSlash(strings.TrimSpace(entry.Path)))
-	return name == "claude" || path == "~/.claude"
+	return name == wantName || path == wantPath
+}
+
+func dotAllowlistIgnorePatterns(paths ...string) []string {
+	out := make([]string, 0, len(paths)+1)
+	out = append(out, "*")
+	for _, path := range paths {
+		path = strings.TrimPrefix(filepath.ToSlash(path), "/")
+		out = append(out, "!/"+path)
+	}
+	return out
 }
 
 func appendMissingStrings(values []string, additions ...string) []string {

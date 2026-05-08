@@ -30,7 +30,7 @@ func resolveSymlinkTarget(linkPath, target string) string {
 //     symlinks inside it are checked and replaced with real copies.
 func unlinkEntry(e ResolvedEntry, opts UnlinkOptions) ([]Op, error) {
 	if opts.RemoveLocal {
-		if err := os.RemoveAll(e.TargetPath); err != nil && !os.IsNotExist(err) {
+		if _, err := backupAndRemoveUnlinkedTarget(e); err != nil {
 			return nil, fmt.Errorf("remove local target %q: %w", e.TargetPath, err)
 		}
 		return []Op{{Kind: OpUnlink, Entry: e.Name, Src: e.SourcePath, Dst: e.TargetPath}}, nil
@@ -47,11 +47,8 @@ func unlinkEntry(e ResolvedEntry, opts UnlinkOptions) ([]Op, error) {
 		existing, readErr := os.Readlink(e.TargetPath)
 		if readErr == nil && resolveSymlinkTarget(e.TargetPath, existing) == filepath.Clean(e.SourcePath) {
 			// Our stow-managed directory link → remove and copy source tree.
-			if _, backupErr := BackupLocalPath(e.TargetPath); backupErr != nil {
-				return nil, fmt.Errorf("backup stow symlink %q: %w", e.TargetPath, backupErr)
-			}
-			if rmErr := os.Remove(e.TargetPath); rmErr != nil {
-				return nil, fmt.Errorf("remove stow symlink %q: %w", e.TargetPath, rmErr)
+			if _, err := backupAndRemoveManagedLink(e.TargetPath); err != nil {
+				return nil, fmt.Errorf("remove stow symlink %q: %w", e.TargetPath, err)
 			}
 			if cpErr := copyDir(e.SourcePath, e.TargetPath, e.Ignore); cpErr != nil {
 				return nil, fmt.Errorf("copy %q → %q: %w", e.SourcePath, e.TargetPath, cpErr)
@@ -85,6 +82,9 @@ func unlinkEntry(e ResolvedEntry, opts UnlinkOptions) ([]Op, error) {
 		}
 		if ShouldIgnorePath(rel, d.Name(), e.Ignore) {
 			if d.IsDir() {
+				if HasIncludedDescendant(rel, e.Ignore) {
+					return nil
+				}
 				return filepath.SkipDir
 			}
 			return nil
@@ -101,6 +101,108 @@ func unlinkEntry(e ResolvedEntry, opts UnlinkOptions) ([]Op, error) {
 		return nil
 	})
 	return ops, walkErr
+}
+
+func backupAndRemoveUnlinkedTarget(e ResolvedEntry) (string, error) {
+	info, err := os.Lstat(e.TargetPath)
+	if os.IsNotExist(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("stat local target %q: %w", e.TargetPath, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		if target, readErr := os.Readlink(e.TargetPath); readErr == nil && resolveSymlinkTarget(e.TargetPath, target) == filepath.Clean(e.SourcePath) {
+			backupPath, backupErr := BackupLocalPathFrom(e.TargetPath, e.SourcePath)
+			if os.IsNotExist(backupErr) {
+				backupPath, backupErr = BackupLocalPath(e.TargetPath)
+			}
+			if backupErr != nil && !os.IsNotExist(backupErr) {
+				return "", fmt.Errorf("backup %q: %w", e.TargetPath, backupErr)
+			}
+			if removeErr := RemoveLocalPathAfterBackup(e.TargetPath, backupPath); removeErr != nil {
+				return backupPath, removeErr
+			}
+			return backupPath, nil
+		}
+		return "", RemoveLocalPathAfterBackup(e.TargetPath, "")
+	}
+	sourceInfo, sourceErr := os.Lstat(e.SourcePath)
+	if sourceErr == nil && sourceInfo.IsDir() && sourceInfo.Mode()&os.ModeSymlink == 0 && info.IsDir() && targetDirectoryHasManagedLinks(e) {
+		backupPath, backupErr := BackupLocalPathFrom(e.TargetPath, e.SourcePath)
+		if backupErr != nil && !os.IsNotExist(backupErr) {
+			return "", fmt.Errorf("backup %q: %w", e.TargetPath, backupErr)
+		}
+		if removeErr := RemoveLocalPathAfterBackup(e.TargetPath, backupPath); removeErr != nil {
+			return backupPath, removeErr
+		}
+		return backupPath, nil
+	}
+	return BackupAndRemoveLocalPath(e.TargetPath)
+}
+
+func targetDirectoryHasManagedLinks(e ResolvedEntry) bool {
+	found := false
+	_ = filepath.WalkDir(e.SourcePath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || found {
+			return filepath.SkipAll
+		}
+		rel, relErr := filepath.Rel(e.SourcePath, path)
+		if relErr != nil {
+			return filepath.SkipAll
+		}
+		if rel == "." {
+			return nil
+		}
+		if ShouldIgnorePath(rel, d.Name(), e.Ignore) {
+			if d.IsDir() {
+				if HasIncludedDescendant(rel, e.Ignore) {
+					return nil
+				}
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		targetPath := filepath.Join(e.TargetPath, rel)
+		info, infoErr := os.Lstat(targetPath)
+		if infoErr != nil || info.Mode()&os.ModeSymlink == 0 {
+			return nil
+		}
+		target, readErr := os.Readlink(targetPath)
+		if readErr == nil && resolveSymlinkTarget(targetPath, target) == filepath.Clean(path) {
+			found = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return found
+}
+
+func backupAndRemoveManagedLink(path string) (string, error) {
+	backupPath, err := backupManagedLinkContent(path)
+	if err != nil && !os.IsNotExist(err) {
+		return "", fmt.Errorf("backup %q: %w", path, err)
+	}
+	if err := RemoveLocalPathAfterBackup(path, backupPath); err != nil {
+		return backupPath, err
+	}
+	return backupPath, nil
+}
+
+func backupManagedLinkContent(path string) (string, error) {
+	target, err := os.Readlink(path)
+	if err != nil {
+		return BackupLocalPath(path)
+	}
+	source := resolveSymlinkTarget(path, target)
+	backupPath, err := BackupLocalPathFrom(path, source)
+	if os.IsNotExist(err) {
+		return BackupLocalPath(path)
+	}
+	return backupPath, err
 }
 
 // unlinkFile handles one src→dst pair for the unlink operation.
@@ -128,11 +230,8 @@ func unlinkFile(entryName, rel, src, dst string, opts UnlinkOptions) (Op, error)
 			return Op{Kind: OpUnlinkSkip, Entry: entryName, File: fileLabel, Src: src, Dst: dst}, nil
 		}
 		// Our managed symlink — replace with a real copy.
-		if _, backupErr := BackupLocalPath(dst); backupErr != nil {
-			return Op{}, fmt.Errorf("backup symlink %q: %w", dst, backupErr)
-		}
-		if rmErr := os.Remove(dst); rmErr != nil {
-			return Op{}, fmt.Errorf("remove symlink %q: %w", dst, rmErr)
+		if _, err := backupAndRemoveManagedLink(dst); err != nil {
+			return Op{}, fmt.Errorf("remove symlink %q: %w", dst, err)
 		}
 		if cpErr := copyFile(src, dst); cpErr != nil {
 			return Op{}, fmt.Errorf("copy %q → %q: %w", src, dst, cpErr)
@@ -145,11 +244,22 @@ func unlinkFile(entryName, rel, src, dst string, opts UnlinkOptions) (Op, error)
 		return Op{Kind: OpUnlinkSkip, Entry: entryName, File: fileLabel, Src: src, Dst: dst}, nil
 	}
 	if opts.ConflictOverwrite {
-		if _, backupErr := BackupLocalPath(dst); backupErr != nil {
+		tmpPath, stageErr := stagedCopyFile(src, dst)
+		if stageErr != nil {
+			return Op{}, fmt.Errorf("stage overwrite %q: %w", dst, stageErr)
+		}
+		backupPath, backupErr := BackupLocalPath(dst)
+		if backupErr != nil {
+			_ = os.Remove(tmpPath)
 			return Op{}, fmt.Errorf("backup %q: %w", dst, backupErr)
 		}
-		if cpErr := copyFile(src, dst); cpErr != nil {
-			return Op{}, fmt.Errorf("overwrite %q: %w", dst, cpErr)
+		if removeErr := RemoveLocalPathAfterBackup(dst, backupPath); removeErr != nil {
+			_ = os.Remove(tmpPath)
+			return Op{}, fmt.Errorf("remove existing %q: %w", dst, removeErr)
+		}
+		if renameErr := os.Rename(tmpPath, dst); renameErr != nil {
+			_ = os.Remove(tmpPath)
+			return Op{}, fmt.Errorf("install staged overwrite %q: %w", dst, renameErr)
 		}
 		return Op{Kind: OpUnlink, Entry: entryName, File: fileLabel, Src: src, Dst: dst}, nil
 	}
@@ -194,6 +304,29 @@ func copyFile(src, dst string) error {
 	return out.Close()
 }
 
+func stagedCopyFile(src, dst string) (string, error) {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return "", err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(dst), "."+filepath.Base(dst)+".tmp-*")
+	if err != nil {
+		return "", err
+	}
+	tmpPath := tmp.Name()
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", err
+	}
+	if err := os.Remove(tmpPath); err != nil {
+		return "", err
+	}
+	if err := copyFile(src, tmpPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", err
+	}
+	return tmpPath, nil
+}
+
 // copyDir recursively copies the directory tree at src to dst.
 func copyDir(src, dst string, ignores []string) error {
 	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
@@ -206,6 +339,9 @@ func copyDir(src, dst string, ignores []string) error {
 		}
 		if rel != "." && ShouldIgnorePath(rel, d.Name(), ignores) {
 			if d.IsDir() {
+				if HasIncludedDescendant(rel, ignores) {
+					return nil
+				}
 				return filepath.SkipDir
 			}
 			return nil
