@@ -20,8 +20,12 @@ func TestAdminTerminalProcess_FakeBrewCaskGetsTTYAndInput(t *testing.T) {
 		t.Skip("PTY admin terminal is unsupported on Windows")
 	}
 
-	dir := t.TempDir()
-	brewPath := filepath.Join(dir, "brew")
+	home := t.TempDir()
+	brewDir := filepath.Join(home, ".volta", "bin")
+	if err := os.MkdirAll(brewDir, 0o755); err != nil {
+		t.Fatalf("create fake node-manager bin dir: %v", err)
+	}
+	brewPath := filepath.Join(brewDir, "brew")
 	script := `#!/bin/sh
 set -eu
 if [ "$1" != "uninstall" ] || [ "$2" != "--cask" ] || [ "$3" != "parsec" ]; then
@@ -42,11 +46,13 @@ echo "PTY_OK"
 	if err := os.WriteFile(brewPath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake brew: %v", err)
 	}
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", "/usr/bin:/bin")
 
 	events := make(chan tea.Msg, adminTerminalEventBuffer)
 	state := adminTerminalState{
 		id:      1,
-		command: brewPath,
+		command: "brew",
 		args:    []string{"uninstall", "--cask", "parsec"},
 		display: "brew uninstall --cask parsec",
 	}

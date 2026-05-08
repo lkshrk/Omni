@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -257,7 +258,7 @@ func parsePipShowDescriptions(output string) map[string]string {
 // Describe fetches a one-line description from PyPI.
 func (p *Provider) Describe(ctx context.Context, tool provider.Tool) (string, error) {
 	var payload pypiInfoResponse
-	status, err := provider.FetchJSON(ctx, p.httpClient, p.pypiURL+"/pypi/"+tool.EffectivePackage()+"/json", &payload)
+	status, err := provider.FetchJSON(ctx, p.httpClient, p.pypiURL+"/pypi/"+url.PathEscape(tool.EffectivePackage())+"/json", &payload)
 	if status == 0 {
 		return "", fmt.Errorf("PyPI describe: %w", err)
 	}
@@ -294,7 +295,7 @@ type pypiInfoResponse struct {
 // option that doesn't involve scraping HTML.
 func (p *Provider) Search(ctx context.Context, query string) ([]provider.SearchResult, error) {
 	var payload pypiInfoResponse
-	status, err := provider.FetchJSON(ctx, p.httpClient, p.pypiURL+"/pypi/"+query+"/json", &payload)
+	status, err := provider.FetchJSON(ctx, p.httpClient, p.pypiURL+"/pypi/"+url.PathEscape(query)+"/json", &payload)
 	if status == http.StatusNotFound {
 		return nil, nil
 	}

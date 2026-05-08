@@ -117,6 +117,13 @@ func (m *Model) handleSetupImportDoneMsg(msg setupImportDoneMsg) []tea.Cmd {
 	m.loading = false
 	if msg.err != nil {
 		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
+		if msg.hostInfo != nil {
+			m.hostInfo = msg.hostInfo
+			if msg.hostInfo.Active != "" {
+				m.hostRequired = false
+			}
+		}
+		return cmds
 	} else if msg.added > 0 {
 		cmds = append(cmds, setStatus(m, fmt.Sprintf("✓ %d imported", msg.added), false))
 	} else {
@@ -138,6 +145,7 @@ func (m *Model) handleSetupProvidersDoneMsg(msg setupProvidersDoneMsg) []tea.Cmd
 	m.loading = false
 	if msg.err != nil {
 		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
+		return cmds
 	}
 	m.advanceSetupPastProviders(&cmds)
 	return cmds
@@ -149,6 +157,7 @@ func (m *Model) handleSetupNodeMgrDoneMsg(msg setupNodeMgrDoneMsg) []tea.Cmd {
 	m.loading = false
 	if msg.err != nil {
 		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
+		return cmds
 	}
 	m.startSetupHostCreation(&cmds)
 	return cmds
@@ -159,8 +168,14 @@ func (m *Model) handleSetupHostDoneMsg(msg setupHostDoneMsg) []tea.Cmd {
 
 	m.loading = false
 	if msg.err != nil {
+		if m.setupHostReturnStep != 0 {
+			m.setupStep = m.setupHostReturnStep
+			m.setupHostReturnStep = 0
+		}
 		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
+		return cmds
 	} else if msg.hostName != "" {
+		m.setupHostReturnStep = 0
 		m.hostInfo = msg.info
 		m.hostRequired = false
 		cmds = append(cmds, setStatus(m, "✓ host "+msg.hostName+" created", false))
@@ -364,10 +379,14 @@ func (m *Model) advanceSetupPastProviders(cmds *[]tea.Cmd) {
 
 func (m *Model) startSetupHostCreation(cmds *[]tea.Cmd) {
 	name := strings.TrimSpace(m.defaultSetupHostName())
+	if m.setupStep != 5 {
+		m.setupHostReturnStep = m.setupStep
+	}
 	m.settingsInput.Blur()
 	m.setupStep = 5
 	if m.hostInfo != nil && m.hostInfo.Active == name {
 		if _, ok := m.hostInfo.Hosts[name]; ok {
+			m.setupHostReturnStep = 0
 			m.hostRequired = false
 			return
 		}
