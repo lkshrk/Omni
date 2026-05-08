@@ -16,18 +16,21 @@ exec omni --config settings.json hosts set-groups testhost work personal
 stdout 'Host "testhost" groups set to \[personal, work\].'
 exec omni --config settings.json hosts add-group laptop work
 stdout 'Added group "work" to host "laptop".'
+exec omni --config settings.json hosts copy testhost laptop
+stdout 'Copied host config from "testhost" to "laptop".'
 exec omni --config settings.json hosts list
 stdout '\* testhost'
 stdout '\[personal, work\]'
 stdout '  laptop'
-stdout '\[work\]'
+stdout '\[personal, work\]'
 
 exec omni --config settings.json hosts remove-group testhost personal
 stdout 'Removed group "personal" from host "testhost".'
 exec omni --config settings.json hosts list
 stdout '\* testhost'
 stdout '\[work\]'
-! stdout '\[personal, work\]'
+stdout '  laptop'
+stdout '\[personal, work\]'
 
 exec omni -y --config settings.json hosts remove laptop
 stdout 'Host "laptop" removed.'

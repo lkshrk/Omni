@@ -535,6 +535,15 @@ func (m *Model) handleDangerOpDoneMsg(msg dangerOpDoneMsg) []tea.Cmd {
 		}
 		cmds = append(cmds, setStatus(m, text, false))
 	}
+	if m.mode == viewSetup && msg.err == nil && (msg.action == "setup-dots" || msg.action == "disable-dots") && !msg.setupComplete {
+		if msg.action == "disable-dots" {
+			m.dotsEntries = nil
+			m.dotsGitStatus = ""
+			m.dotsLoaded = false
+		}
+		m.startSetupGroupSelection(&cmds)
+		return cmds
+	}
 	if msg.setupComplete && msg.err == nil {
 		m.mode = viewList
 		m.setupBackgroundMode = viewList

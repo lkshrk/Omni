@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/app"
@@ -445,11 +446,106 @@ func TestDoSetupHost_EmptyName(t *testing.T) {
 	_ = got
 }
 
+func TestDoSetupCopyHostConfigFrom_CopiesSourceToCurrentHost(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "desk.example.com")
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "settings.json")
+	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"fd": {Provider: "system", Hosts: map[string]config.ToolInstallSpec{
+				"alpha": {Provider: "system", Package: "fd-find"},
+			}},
+		},
+		HostSettings: map[string]config.Settings{
+			"alpha": {DotsRepo: "/alpha/dots", DisabledProviders: []string{"node"}},
+		},
+		Groups: []*config.GroupConfig{
+			{Name: "alpha", Special: "host"},
+			{Name: "shared"},
+		},
+		Hosts: map[string][]string{"alpha": {"shared"}},
+	}); err != nil {
+		t.Fatalf("saveTUIConfig: %v", err)
+	}
+	a := app.New(cfgPath)
+	a.CacheDir = dir
+	if err := a.InitTestMode(context.Background()); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	m := modelForCmds(a)
+	msg := m.doSetupCopyHostConfigFrom("alpha")()
+	got, ok := msg.(setupHostCopyDoneMsg)
+	if !ok {
+		t.Fatalf("expected setupHostCopyDoneMsg, got %T", msg)
+	}
+	if got.err != nil {
+		t.Fatalf("doSetupCopyHostConfigFrom: %v", got.err)
+	}
+	if got.source != "alpha" || got.target != "desk" {
+		t.Fatalf("source/target = %q/%q, want alpha/desk", got.source, got.target)
+	}
+	if got.info == nil || got.info.Active != "desk" {
+		t.Fatalf("active host = %#v, want desk", got.info)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if groups := cfg.Hosts["desk"]; !slices.Equal(groups, []string{"shared"}) {
+		t.Fatalf("desk groups = %v, want [shared]", groups)
+	}
+	if cfg.HostSettings["desk"].DotsRepo != "/alpha/dots" {
+		t.Fatalf("desk dots repo = %q, want copied source", cfg.HostSettings["desk"].DotsRepo)
+	}
+	if got := cfg.Tools["fd"].Hosts["desk"].Package; got != "fd-find" {
+		t.Fatalf("desk fd package = %q, want fd-find", got)
+	}
+}
+
+func TestDoSetupHostGroups_SavesCurrentHostGroups(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "desk.example.com")
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "settings.json")
+	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
+		Groups: []*config.GroupConfig{
+			{Name: "desk", Special: "host"},
+			{Name: "shared"},
+		},
+		Hosts: map[string][]string{"desk": {}},
+	}); err != nil {
+		t.Fatalf("saveTUIConfig: %v", err)
+	}
+	a := app.New(cfgPath)
+	a.CacheDir = dir
+	if err := a.InitTestMode(context.Background()); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	m := modelForCmds(a)
+	msg := m.doSetupHostGroups([]string{"shared"})()
+	got, ok := msg.(setupHostGroupsDoneMsg)
+	if !ok {
+		t.Fatalf("expected setupHostGroupsDoneMsg, got %T", msg)
+	}
+	if got.err != nil {
+		t.Fatalf("doSetupHostGroups: %v", got.err)
+	}
+	if got.info == nil || got.info.Active != "desk" {
+		t.Fatalf("active host = %#v, want desk", got.info)
+	}
+	if groups := got.info.Hosts["desk"].Groups; !slices.Equal(groups, []string{"shared"}) {
+		t.Fatalf("desk groups = %v, want [shared]", groups)
+	}
+}
+
 // ── doSetupDotsRepo ───────────────────────────────────────────────────────────
 
 // TestDoSetupDotsRepo_HappyPath verifies that doSetupDotsRepo saves the dots
-// repo path and asks the setup result handler to close onboarding before the
-// first tools reload starts.
+// repo path. The setup result handler decides whether onboarding should advance
+// to group selection or finish.
 func TestDoSetupDotsRepo_HappyPath(t *testing.T) {
 	repoDir := t.TempDir()
 	home := t.TempDir()
@@ -468,8 +564,8 @@ func TestDoSetupDotsRepo_HappyPath(t *testing.T) {
 	if got.err != nil {
 		t.Errorf("unexpected error: %v", got.err)
 	}
-	if !got.reload || !got.setupComplete {
-		t.Fatalf("setup dots result should close onboarding and trigger reload, got reload=%v setupComplete=%v", got.reload, got.setupComplete)
+	if got.reload || got.setupComplete {
+		t.Fatalf("setup dots result should not close onboarding directly, got reload=%v setupComplete=%v", got.reload, got.setupComplete)
 	}
 	settings, err := m.app.LoadSettings()
 	if err != nil {
