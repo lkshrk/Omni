@@ -15,6 +15,7 @@ import (
 	"github.com/creack/pty"
 
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/executor"
 	"github.com/lkshrk/omni/internal/provider"
 )
 
@@ -773,8 +774,9 @@ func startAdminTerminalProcess(ctx context.Context, state adminTerminalState, co
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	cmd := exec.CommandContext(ctx, state.command, state.args...)
-	cmd.Env = os.Environ()
+	commandPath, env := executor.ResolveCommand(state.command)
+	cmd := exec.CommandContext(ctx, commandPath, state.args...)
+	cmd.Env = env
 
 	ptmx, err := pty.StartWithSize(cmd, adminTerminalWinsize(cols, rows))
 	if err != nil {

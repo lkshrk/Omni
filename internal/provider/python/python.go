@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -509,7 +510,7 @@ func (p *Provider) OutdatedByManager(ctx context.Context) (map[string]map[string
 // Describe fetches a one-line description from PyPI.
 func (p *Provider) Describe(ctx context.Context, tool provider.Tool) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-		p.pypiURL+"/pypi/"+tool.EffectivePackage()+"/json", nil)
+		p.pypiURL+"/pypi/"+url.PathEscape(tool.EffectivePackage())+"/json", nil)
 	if err != nil {
 		return "", fmt.Errorf("building PyPI request: %w", err)
 	}

@@ -189,6 +189,28 @@ func TestResolveInEnv_PrefersFirstMatchInPath(t *testing.T) {
 	}
 }
 
+func TestResolveCommand_UsesAugmentedPath(t *testing.T) {
+	home := t.TempDir()
+	binDir := filepath.Join(home, ".volta", "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(binDir, "node-managed-tool")
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", "/usr/bin:/bin")
+
+	got, env := ResolveCommand("node-managed-tool")
+	if got != binary {
+		t.Fatalf("ResolveCommand path = %q, want %q", got, binary)
+	}
+	if len(env) == 0 || !strings.Contains(strings.Join(env, "\x00"), "PATH="+binDir) {
+		t.Fatalf("ResolveCommand env does not contain augmented PATH entry %q: %v", binDir, env)
+	}
+}
+
 // ─── New ─────────────────────────────────────────────────────────────────────
 
 func TestNew_ReturnsNonNil(t *testing.T) {

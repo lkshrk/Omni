@@ -122,6 +122,13 @@ func (a *App) DotsConfigured() bool {
 	return a.dotsRepoPath() != ""
 }
 
+func (a *App) requireDotsEnabled(rootCfg *config.RootConfig) error {
+	if config.BoolVal(a.effectiveSettings(rootCfg).DotsDisabled) {
+		return fmt.Errorf("dots are disabled for this host")
+	}
+	return nil
+}
+
 // DotsSync creates or repairs all symlinks for all dots entries across active
 // groups. When the current host has assigned groups, only the host group and
 // assigned reusable groups are synced. Falls back to all groups when no active
@@ -134,6 +141,13 @@ func (a *App) DotsSync(opts dots.SyncOptions) ([]dots.Op, error) {
 // DotsSyncContext creates or repairs all symlinks like DotsSync, honoring ctx
 // for provider/stow commands.
 func (a *App) DotsSyncContext(ctx context.Context, opts dots.SyncOptions) ([]dots.Op, error) {
+	rootCfg, err := a.loadConfig()
+	if err != nil {
+		return nil, fmt.Errorf("dots sync: load config: %w", err)
+	}
+	if err := a.requireDotsEnabled(rootCfg); err != nil {
+		return nil, err
+	}
 	repoPath, err := resolveRepoPath(a.dotsRepoPath())
 	if err != nil {
 		return nil, err
@@ -148,10 +162,6 @@ func (a *App) DotsSyncContext(ctx context.Context, opts dots.SyncOptions) ([]dot
 		if err != nil {
 			return nil, fmt.Errorf("dots sync: content dir: %w", err)
 		}
-	}
-	rootCfg, err := a.loadConfig()
-	if err != nil {
-		return nil, fmt.Errorf("dots sync: load config: %w", err)
 	}
 	groups := rootCfg.Groups
 	if effective, _, ok := effectiveHostGroups(rootCfg, groups, currentMachineGroupName()); ok {
@@ -251,6 +261,13 @@ func (a *App) DotsSyncEntry(ctx context.Context, name string, opts dots.SyncOpti
 	if strings.TrimSpace(name) == "" {
 		return nil, fmt.Errorf("dots sync: entry name is required")
 	}
+	rootCfg, err := a.loadConfig()
+	if err != nil {
+		return nil, fmt.Errorf("dots sync: load config: %w", err)
+	}
+	if err := a.requireDotsEnabled(rootCfg); err != nil {
+		return nil, err
+	}
 	repoPath, err := resolveRepoPath(a.dotsRepoPath())
 	if err != nil {
 		return nil, err
@@ -265,10 +282,6 @@ func (a *App) DotsSyncEntry(ctx context.Context, name string, opts dots.SyncOpti
 		if err != nil {
 			return nil, fmt.Errorf("dots sync %q: content dir: %w", name, err)
 		}
-	}
-	rootCfg, err := a.loadConfig()
-	if err != nil {
-		return nil, fmt.Errorf("dots sync: load config: %w", err)
 	}
 	groups := rootCfg.Groups
 	if effective, _, ok := effectiveHostGroups(rootCfg, groups, currentMachineGroupName()); ok {
@@ -306,6 +319,9 @@ func (a *App) DotsAdd(ctx context.Context, path string, opts DotsAddOptions) ([]
 	rootCfg, err := a.loadConfig()
 	if err != nil {
 		return nil, fmt.Errorf("dots add: load config: %w", err)
+	}
+	if err := a.requireDotsEnabled(rootCfg); err != nil {
+		return nil, err
 	}
 	rawRepo := a.effectiveSettings(rootCfg).DotsRepo
 	gitCfg := rootCfg.Settings.DotsGit
@@ -460,6 +476,9 @@ func (a *App) DotsDeleteWithOptions(ctx context.Context, name string, opts DotsD
 		deletedEntries []deletedDotEntry
 	)
 	err := a.withConfig(func(rootCfg *config.RootConfig) error {
+		if err := a.requireDotsEnabled(rootCfg); err != nil {
+			return err
+		}
 		rawRepo := a.effectiveSettings(rootCfg).DotsRepo
 		gitCfg = rootCfg.Settings.DotsGit
 
@@ -596,6 +615,9 @@ func (a *App) MoveDotToGroup(name, groupName string) error {
 	}
 	groupName = compatibilityGroupName(groupName)
 	return a.withConfig(func(cfg *config.RootConfig) error {
+		if err := a.requireDotsEnabled(cfg); err != nil {
+			return err
+		}
 		template, ok := findDotEntryInConfig(cfg, name)
 		if !ok {
 			return fmt.Errorf("dots entry %q not found", name)
@@ -629,6 +651,9 @@ func (a *App) RemoveDotFromGroup(name, groupName string) error {
 	}
 	groupName = compatibilityGroupName(groupName)
 	return a.withConfig(func(cfg *config.RootConfig) error {
+		if err := a.requireDotsEnabled(cfg); err != nil {
+			return err
+		}
 		group := findGroupInConfig(cfg, groupName)
 		if group == nil {
 			return fmt.Errorf("group %q not found", groupName)
@@ -874,6 +899,13 @@ func normalizeDotState(raw string) (DotState, error) {
 
 // DotsPull runs git pull in the dots repo, then re-syncs all symlinks.
 func (a *App) DotsPull(ctx context.Context) ([]dots.Op, error) {
+	rootCfg, err := a.loadConfig()
+	if err != nil {
+		return nil, fmt.Errorf("dots pull: load config: %w", err)
+	}
+	if err := a.requireDotsEnabled(rootCfg); err != nil {
+		return nil, err
+	}
 	repoPath, err := resolveRepoPath(a.dotsRepoPath())
 	if err != nil {
 		return nil, err
@@ -892,6 +924,13 @@ func (a *App) DotsPull(ctx context.Context) ([]dots.Op, error) {
 // When message is empty the commit message is auto-generated from the git
 // status of the repo (e.g. "dots: update nvim, zshrc").
 func (a *App) DotsPush(ctx context.Context, message string) error {
+	rootCfg, err := a.loadConfig()
+	if err != nil {
+		return fmt.Errorf("dots push: load config: %w", err)
+	}
+	if err := a.requireDotsEnabled(rootCfg); err != nil {
+		return err
+	}
 	repoPath, err := resolveRepoPath(a.dotsRepoPath())
 	if err != nil {
 		return err
@@ -985,6 +1024,13 @@ func (a *App) EnableDotsForHost(ctx context.Context) ([]dots.Op, error) {
 func (a *App) DotsResolveConflict(ctx context.Context, name string, strategy DotsResolveStrategy) ([]dots.Op, error) {
 	if strings.TrimSpace(name) == "" {
 		return nil, fmt.Errorf("dots resolve: entry name is required")
+	}
+	rootCfg, err := a.loadConfig()
+	if err != nil {
+		return nil, fmt.Errorf("dots resolve: load config: %w", err)
+	}
+	if err := a.requireDotsEnabled(rootCfg); err != nil {
+		return nil, err
 	}
 	repoPath, err := resolveRepoPath(a.dotsRepoPath())
 	if err != nil {
@@ -2959,6 +3005,9 @@ func (a *App) DotsAddIgnorePattern(name, pattern string) error {
 		return err
 	}
 	return a.withConfig(func(rootCfg *config.RootConfig) error {
+		if err := a.requireDotsEnabled(rootCfg); err != nil {
+			return err
+		}
 		for _, g := range rootCfg.Groups {
 			for i, d := range g.Dots {
 				if d.Name != name {
@@ -2982,6 +3031,9 @@ func (a *App) DotsAddIgnorePattern(name, pattern string) error {
 // machine group so discovery does not keep suggesting it.
 func (a *App) DotsSetEntryIgnored(name, path string, ignored bool) error {
 	return a.withConfig(func(rootCfg *config.RootConfig) error {
+		if err := a.requireDotsEnabled(rootCfg); err != nil {
+			return err
+		}
 		for _, g := range rootCfg.Groups {
 			for i, d := range g.Dots {
 				if d.Name != name && (path == "" || d.Path != path) {
@@ -2994,7 +3046,10 @@ func (a *App) DotsSetEntryIgnored(name, path string, ignored bool) error {
 		if strings.TrimSpace(path) == "" {
 			return fmt.Errorf("dots ignore entry %q: path is required", name)
 		}
-		group := ensureGroupInConfig(rootCfg, shortHostname(currentHostname()))
+		group, err := ensureDestinationGroupInConfig(rootCfg, "")
+		if err != nil {
+			return err
+		}
 		group.Dots = append(group.Dots, config.DotEntry{Name: name, Path: normalisePath(path), Ignored: ignored})
 		return nil
 	})
@@ -3004,6 +3059,9 @@ func (a *App) DotsSetEntryIgnored(name, path string, ignored bool) error {
 // entry in config. Removing a pattern that is not present is a no-op.
 func (a *App) DotsRemoveIgnorePattern(name, pattern string) error {
 	return a.withConfig(func(rootCfg *config.RootConfig) error {
+		if err := a.requireDotsEnabled(rootCfg); err != nil {
+			return err
+		}
 		for _, g := range rootCfg.Groups {
 			for i, d := range g.Dots {
 				if d.Name != name {

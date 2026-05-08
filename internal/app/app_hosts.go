@@ -127,10 +127,55 @@ func (a *App) RenameHost(oldName, newName string) error {
 		} else if _, err := ensureHostGroupInConfig(cfg, newName); err != nil {
 			return err
 		}
+		if err := moveHostScopedConfig(cfg, oldName, newName); err != nil {
+			return err
+		}
 		cfg.Hosts[newName] = append([]string(nil), groups...)
 		delete(cfg.Hosts, oldName)
 		return nil
 	})
+}
+
+func moveHostScopedConfig(cfg *config.RootConfig, oldName, newName string) error {
+	if cfg.HostSettings != nil {
+		if settings, ok := cfg.HostSettings[oldName]; ok {
+			if _, exists := cfg.HostSettings[newName]; exists {
+				return fmt.Errorf("host settings for %q already exist", newName)
+			}
+			cfg.HostSettings[newName] = settings
+			delete(cfg.HostSettings, oldName)
+		}
+	}
+	for name, spec := range cfg.Tools {
+		if spec.Hosts == nil {
+			continue
+		}
+		install, ok := spec.Hosts[oldName]
+		if !ok {
+			continue
+		}
+		if _, exists := spec.Hosts[newName]; exists {
+			return fmt.Errorf("tool %q already has host override for %q", name, newName)
+		}
+		spec.Hosts[newName] = install
+		delete(spec.Hosts, oldName)
+		cfg.Tools[name] = spec
+	}
+	return nil
+}
+
+func removeHostScopedConfig(cfg *config.RootConfig, hostname string) {
+	delete(cfg.HostSettings, hostname)
+	for name, spec := range cfg.Tools {
+		if spec.Hosts == nil {
+			continue
+		}
+		delete(spec.Hosts, hostname)
+		if len(spec.Hosts) == 0 {
+			spec.Hosts = nil
+		}
+		cfg.Tools[name] = spec
+	}
 }
 
 func (a *App) SetHostGroups(hostname string, groups []string) error {
@@ -229,6 +274,7 @@ func (a *App) RemoveHost(hostname string) error {
 	}
 	return a.withConfig(func(cfg *config.RootConfig) error {
 		delete(cfg.Hosts, hostname)
+		removeHostScopedConfig(cfg, hostname)
 		filtered := cfg.Groups[:0]
 		for _, group := range cfg.Groups {
 			if group != nil && group.BaseName() == hostname && group.IsHost() {

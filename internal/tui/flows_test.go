@@ -1569,6 +1569,75 @@ func TestFlow_UC44_DotsSyncKey(t *testing.T) {
 	}
 }
 
+func TestFlow_DotsDisabledBlocksMutatingKeys(t *testing.T) {
+	disabledModel := func() Model {
+		m := dotsModel()
+		m.settings.DotsDisabled = config.BoolPtr(true)
+		m.dotMemberships = map[string][]string{"gitconfig": {"default"}}
+		return m
+	}
+
+	for _, tc := range []struct {
+		name string
+		msg  tea.Msg
+	}{
+		{name: "add", msg: pressRune('a')},
+		{name: "sync row", msg: pressRune('s')},
+		{name: "sync all", msg: pressRune('S')},
+		{name: "discover", msg: pressRune('D')},
+		{name: "group", msg: pressRune('g')},
+		{name: "use repo", msg: pressRune('u')},
+		{name: "use local", msg: pressRune('l')},
+		{name: "delete", msg: pressRune('d')},
+		{name: "ignore", msg: pressRune('x')},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := drive(disabledModel(), tc.msg)
+			if got.mode != viewDots {
+				t.Fatalf("mode = %v, want viewDots", got.mode)
+			}
+			if got.dotsLoading || got.loading {
+				t.Fatalf("loading started for disabled dots key %q", tc.name)
+			}
+			if got.filePickerForDotAdd {
+				t.Fatalf("file picker opened for disabled dots key %q", tc.name)
+			}
+			if got.dotsConfirmIdx != -1 || got.dotsOverwriteIdx != -1 || got.dotsLocalIdx != -1 || got.dotsIgnoreIdx != -1 {
+				t.Fatalf("confirmation armed for disabled dots key %q", tc.name)
+			}
+		})
+	}
+}
+
+func TestRender_DotsDisabledHidesMutatingHints(t *testing.T) {
+	m := dotsModel()
+	m.settings.DotsDisabled = config.BoolPtr(true)
+	m.dotMemberships = map[string][]string{"gitconfig": {"default"}}
+
+	footer := tabShortHelpBindings(&m)
+	for _, binding := range footer {
+		key := binding.Help().Key
+		if key == "a" || key == "D" || key == "S" {
+			t.Fatalf("disabled dots footer includes mutating binding %q", key)
+		}
+	}
+	rowHints := renderContextHints(m, hintCtxDotsConflict, "")
+	for _, blocked := range []string{"use repo", "use local", "delete", "ignore", "edit groups"} {
+		if strings.Contains(rowHints, blocked) {
+			t.Fatalf("disabled dots row hints include %q: %q", blocked, rowHints)
+		}
+	}
+	help := renderHelpPopup(m)
+	for _, blocked := range []string{"discover", "sync all", "delete", "ignore", "use repo", "use local"} {
+		if strings.Contains(help, blocked) {
+			t.Fatalf("disabled dots help includes %q: %q", blocked, help)
+		}
+	}
+	if !strings.Contains(help, "enable dots") {
+		t.Fatalf("disabled dots help should keep enable path: %q", help)
+	}
+}
+
 // ── UC-45 Dots tab: explicit conflict choice ──────────────────────────────────
 
 func TestFlow_UC45_DotsConflictOverwrite(t *testing.T) {

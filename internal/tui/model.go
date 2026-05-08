@@ -325,6 +325,9 @@ type Model struct {
 	// switched back to the main UI but before the first post-setup reload
 	// finishes.
 	setupReloading bool
+	// setupHostReturnStep is the setup step to restore if automatic host
+	// creation fails after the UI has advanced to the dotfile decision step.
+	setupHostReturnStep int
 
 	// hostRequired is true when the config exists but no host entry matches
 	// this machine. All navigation is locked until a host is active.

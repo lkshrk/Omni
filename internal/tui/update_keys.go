@@ -17,6 +17,18 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 		return *m, tea.Batch(cmds...)
 	}
 
+	if key.Matches(msg, m.keys.Help) {
+		m.help.ShowAll = !m.help.ShowAll
+		return *m, nil
+	}
+	if m.help.ShowAll && key.Matches(msg, m.keys.Back) {
+		m.help.ShowAll = false
+		return *m, nil
+	}
+	if m.help.ShowAll {
+		return *m, nil
+	}
+
 	if isCtrlC(msg) {
 		if cmd := m.cancelActiveAction(); cmd != nil {
 			cmds = append(cmds, cmd)
@@ -52,15 +64,6 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 			return *m, cmd
 		}
 		return *m, cmd
-	}
-
-	if key.Matches(msg, m.keys.Help) {
-		m.help.ShowAll = !m.help.ShowAll
-		return *m, nil
-	}
-	if m.help.ShowAll && key.Matches(msg, m.keys.Back) {
-		m.help.ShowAll = false
-		return *m, nil
 	}
 
 	if m.handleTabKeyMsg(msg, &cmds) {

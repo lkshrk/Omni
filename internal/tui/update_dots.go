@@ -185,6 +185,9 @@ func (m *Model) handleDotsNavigationKeyMsg(msg tea.KeyPressMsg, visible []dotsVi
 		if msg.IsRepeat {
 			return true
 		}
+		if config.BoolVal(m.settings.DotsDisabled) {
+			return true
+		}
 		m.filePickerForDotAdd = true
 		*cmds = append(*cmds, m.openFilePicker("Add dotfile path", "", true))
 	default:
@@ -335,6 +338,20 @@ func (m *Model) clearDotsConfirmState() {
 
 func (m *Model) handleDotsActionKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibleRow) []tea.Cmd {
 	var cmds []tea.Cmd
+
+	if config.BoolVal(m.settings.DotsDisabled) {
+		switch {
+		case key.Matches(msg, m.keys.Confirm):
+			cmds = append(cmds, m.handleDotsConfirmKeyMsg(visible)...)
+		case key.Matches(msg, m.keys.Toggle):
+			if !msg.IsRepeat {
+				m.handleDotsToggleKeyMsg(visible)
+			}
+		default:
+			m.clearDotsConfirmState()
+		}
+		return cmds
+	}
 
 	if m.dotsConfirmIdx >= 0 {
 		return m.handleDotsDeleteChoiceKeyMsg(msg, visible)

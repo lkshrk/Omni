@@ -178,7 +178,15 @@ func TestActiveHostInfoAlwaysIncludesProtectedHostGroup(t *testing.T) {
 func TestRenameHostMovesSpecialHostGroup(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: logicalToolSpecs(logicalTool("fd", "brew")),
+		Tools: map[string]config.ToolSpec{
+			"fd": {
+				Provider: "system",
+				Hosts: map[string]config.ToolInstallSpec{
+					"oldhost": {Provider: "system", InstallWith: "brew", Package: "fd-find"},
+					"other":   {Provider: "system", InstallWith: "apt"},
+				},
+			},
+		},
 		Groups: []*config.GroupConfig{
 			{
 				Name:    "oldhost",
@@ -188,6 +196,9 @@ func TestRenameHostMovesSpecialHostGroup(t *testing.T) {
 			},
 		},
 		Hosts: map[string][]string{"oldhost": {}},
+		HostSettings: map[string]config.Settings{
+			"oldhost": {DotsRepo: "~/old-dotfiles", DotsDisabled: config.BoolPtr(true)},
+		},
 	}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
@@ -219,20 +230,49 @@ func TestRenameHostMovesSpecialHostGroup(t *testing.T) {
 	if len(newGroup.Dots) != 1 || newGroup.Dots[0].Name != "nvim" {
 		t.Fatalf("renamed host group dots = %#v, want nvim", newGroup.Dots)
 	}
+	if _, ok := cfg.HostSettings["oldhost"]; ok {
+		t.Fatal("old host settings remained")
+	}
+	if got := cfg.HostSettings["newhost"].DotsRepo; got != "~/old-dotfiles" {
+		t.Fatalf("host_settings[newhost].dots_repo = %q, want old repo", got)
+	}
+	if !config.BoolVal(cfg.HostSettings["newhost"].DotsDisabled) {
+		t.Fatal("renamed host settings lost dots_disabled")
+	}
+	fd := cfg.Tools["fd"]
+	if _, ok := fd.Hosts["oldhost"]; ok {
+		t.Fatal("old tool host override remained")
+	}
+	if got := fd.Hosts["newhost"]; got.InstallWith != "brew" || got.Package != "fd-find" {
+		t.Fatalf("fd newhost override = %#v, want brew fd-find", got)
+	}
+	if got := fd.Hosts["other"].InstallWith; got != "apt" {
+		t.Fatalf("fd other override install_with = %q, want apt", got)
+	}
 }
 
 func TestRemoveHostDeletesSpecialHostGroup(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: logicalToolSpecs(
-			logicalTool("fd", "brew"),
-			logicalTool("ripgrep", "brew"),
-		),
+		Tools: map[string]config.ToolSpec{
+			"fd": {
+				Provider: "system",
+				Hosts: map[string]config.ToolInstallSpec{
+					"laptop": {Provider: "system", InstallWith: "brew"},
+					"other":  {Provider: "system", InstallWith: "apt"},
+				},
+			},
+			"ripgrep": {Provider: "system", InstallWith: "brew"},
+		},
 		Groups: []*config.GroupConfig{
 			{Name: "laptop", Special: "host", Tools: groupTools("fd")},
 			{Name: "work", Tools: groupTools("ripgrep")},
 		},
 		Hosts: map[string][]string{"laptop": {"work"}},
+		HostSettings: map[string]config.Settings{
+			"laptop": {DotsRepo: "~/dotfiles", DotsDisabled: config.BoolPtr(true)},
+			"other":  {DotsRepo: "~/other-dotfiles"},
+		},
 	}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
@@ -253,6 +293,19 @@ func TestRemoveHostDeletesSpecialHostGroup(t *testing.T) {
 	}
 	if group := findHostTestGroup(cfg.Groups, "work"); group == nil || group.IsHost() {
 		t.Fatalf("reusable group = %#v, want preserved reusable work group", group)
+	}
+	if _, ok := cfg.HostSettings["laptop"]; ok {
+		t.Fatal("host_settings[laptop] remained after RemoveHost")
+	}
+	if got := cfg.HostSettings["other"].DotsRepo; got != "~/other-dotfiles" {
+		t.Fatalf("host_settings[other].dots_repo = %q, want preserved", got)
+	}
+	fd := cfg.Tools["fd"]
+	if _, ok := fd.Hosts["laptop"]; ok {
+		t.Fatal("fd laptop override remained after RemoveHost")
+	}
+	if got := fd.Hosts["other"].InstallWith; got != "apt" {
+		t.Fatalf("fd other override install_with = %q, want apt", got)
 	}
 }
 

@@ -32,12 +32,7 @@ func New() *RealExecutor {
 // Each subprocess receives a copy of the current environment with the
 // augmented PATH (nvm/volta bin dirs prepended) injected via cmd.Env.
 func (r *RealExecutor) Run(ctx context.Context, name string, args ...string) (string, string, error) {
-	env := augmentedEnv()
-
-	// exec.CommandContext resolves the binary using the current process PATH,
-	// not cmd.Env. For tools like nvm-managed npm that only exist in the augmented
-	// PATH, we must resolve the binary explicitly before creating the command.
-	resolved := resolveInEnv(name, env)
+	resolved, env := ResolveCommand(name)
 
 	cmd := exec.CommandContext(ctx, resolved, args...)
 	cmd.Env = env
@@ -46,6 +41,15 @@ func (r *RealExecutor) Run(ctx context.Context, name string, args ...string) (st
 	cmd.Stderr = &stderr
 	err := cmd.Run()
 	return stdout.String(), stderr.String(), err
+}
+
+// ResolveCommand returns the executable path and environment used by
+// RealExecutor. exec.CommandContext resolves binaries using the current process
+// PATH, not cmd.Env, so callers that build their own exec.Cmd must pre-resolve
+// names through the same augmented PATH.
+func ResolveCommand(name string) (string, []string) {
+	env := augmentedEnv()
+	return resolveInEnv(name, env), env
 }
 
 // resolveInEnv looks up binary in the PATH extracted from env.

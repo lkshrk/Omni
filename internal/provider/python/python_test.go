@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -532,6 +533,26 @@ func TestDescribe_Success(t *testing.T) {
 	}
 	if desc != "The uncompromising code formatter." {
 		t.Errorf("Describe() = %q", desc)
+	}
+}
+
+func TestDescribe_URLPathEscapesPackage(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.EscapedPath()
+		payload := map[string]any{"info": map[string]any{"summary": ""}}
+		_ = json.NewEncoder(w).Encode(payload)
+	}))
+	defer srv.Close()
+
+	pkg := "pkg/../name?version=1"
+	m := executor.NewMatchMock()
+	p := newWithPyPI(m, "uv", srv.URL, srv.Client())
+	_, _ = p.Describe(context.Background(), tool(pkg))
+
+	want := "/pypi/" + url.PathEscape(pkg) + "/json"
+	if gotPath != want {
+		t.Errorf("path = %q, want %q", gotPath, want)
 	}
 }
 

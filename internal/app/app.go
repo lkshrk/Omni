@@ -582,6 +582,24 @@ func ensureHostGroupInConfig(cfg *config.RootConfig, hostname string) (*config.G
 	return group, nil
 }
 
+func ensureDestinationGroupInConfig(cfg *config.RootConfig, groupName string) (*config.GroupConfig, error) {
+	groupName = compatibilityGroupName(groupName)
+	if machineGroupName(groupName) == currentMachineGroupName() {
+		group, err := ensureHostGroupInConfig(cfg, groupName)
+		if err != nil {
+			return nil, err
+		}
+		if cfg.Hosts == nil {
+			cfg.Hosts = make(map[string][]string)
+		}
+		if _, ok := cfg.Hosts[group.BaseName()]; !ok {
+			cfg.Hosts[group.BaseName()] = []string{}
+		}
+		return group, nil
+	}
+	return ensureGroupInConfig(cfg, groupName), nil
+}
+
 func activeHostGroupNames(cfg *config.RootConfig, hostname string) ([]string, bool) {
 	hostname = machineGroupName(hostname)
 	groups, ok := cfg.Hosts[hostname]
