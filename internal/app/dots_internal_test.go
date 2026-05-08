@@ -48,7 +48,7 @@ func TestReplaceDotSourceFromLocal_CopyFailureKeepsOldSource(t *testing.T) {
 	}
 }
 
-func TestReplaceDotSourceFromLocal_RejectsNestedSymlink(t *testing.T) {
+func TestReplaceDotSourceFromLocal_FollowsNestedSymlink(t *testing.T) {
 	tmp := t.TempDir()
 	sourcePath := filepath.Join(tmp, "repo", "nvim", ".config", "nvim")
 	copySource := filepath.Join(tmp, "home", ".config", "nvim")
@@ -73,13 +73,26 @@ func TestReplaceDotSourceFromLocal_RejectsNestedSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := replaceDotSourceFromLocal(copySource, sourcePath, filepath.Join(tmp, "repo", "nvim"), nil)
-	if err == nil || !strings.Contains(err.Error(), "symlink") {
-		t.Fatalf("replaceDotSourceFromLocal error = %v, want symlink refusal", err)
+	replacement, err := replaceDotSourceFromLocal(copySource, sourcePath, filepath.Join(tmp, "repo", "nvim"), nil)
+	if err != nil {
+		t.Fatalf("replaceDotSourceFromLocal: %v", err)
 	}
-	got, readErr := os.ReadFile(oldFile)
-	if readErr != nil || string(got) != "old" {
-		t.Fatalf("old source changed after symlink rejection: body=%q err=%v", got, readErr)
+	if err := replacement.commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if got, readErr := os.ReadFile(oldFile); readErr != nil || string(got) != "new" {
+		t.Fatalf("regular local file copy = %q err=%v, want new", got, readErr)
+	}
+	got, readErr := os.ReadFile(filepath.Join(sourcePath, "external.lua"))
+	if readErr != nil || string(got) != "external" {
+		t.Fatalf("followed symlink copy = %q err=%v, want external content", got, readErr)
+	}
+	info, statErr := os.Lstat(filepath.Join(sourcePath, "external.lua"))
+	if statErr != nil {
+		t.Fatalf("copied external file stat: %v", statErr)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("copied external file is still a symlink")
 	}
 }
 

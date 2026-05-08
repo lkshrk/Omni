@@ -184,7 +184,7 @@ func newDotsAddCmd(state *rootState) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&name, "name", "", "Override the inferred entry name")
-	cmd.Flags().StringVar(&group, "group", "", "Group to add the entry to (default: base)")
+	cmd.Flags().StringVar(&group, "group", "", "Group to add the entry to (default: current host)")
 	cmd.Flags().BoolVar(&adopt, "adopt", false, "Move the existing path into the dots repo")
 	cmd.Flags().StringSliceVar(&ignore, "ignore", nil, "Patterns to ignore within this entry")
 	cmd.Flags().BoolVar(&discovered, "discovered", false, "Add a discovered candidate to config without adopting files")
@@ -194,33 +194,30 @@ func newDotsAddCmd(state *rootState) *cobra.Command {
 // ─── dots groups ──────────────────────────────────────────────────────────────
 
 func newDotsGroupsCmd(state *rootState) *cobra.Command {
-	var setGroups []string
-	var addGroups []string
+	var moveGroup string
 	var removeGroups []string
 
 	cmd := &cobra.Command{
 		Use:   "groups <name>",
-		Short: "Show or edit a dots entry's group memberships",
+		Short: "Show or move a dots entry's group assignment",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireDotsConfigured(state); err != nil {
 				return err
 			}
 			name := args[0]
-			setGroups = normalizeDotsGroupArgs(setGroups)
-			addGroups = normalizeDotsGroupArgs(addGroups)
+			moveGroup = strings.TrimSpace(moveGroup)
 			removeGroups = normalizeDotsGroupArgs(removeGroups)
-			setChanged := cmd.Flags().Changed("set")
-			addChanged := cmd.Flags().Changed("add")
+			moveChanged := cmd.Flags().Changed("move")
 			removeChanged := cmd.Flags().Changed("remove")
-			if setChanged && (addChanged || removeChanged) {
-				return fmt.Errorf("--set cannot be combined with --add or --remove")
+			if moveChanged && removeChanged {
+				return fmt.Errorf("--move cannot be combined with --remove")
 			}
-			if setChanged && len(setGroups) == 0 {
-				return fmt.Errorf("--set requires at least one group")
+			if moveChanged && moveGroup == "" {
+				return fmt.Errorf("--move requires a group")
 			}
-			if (addChanged || removeChanged) && len(addGroups) == 0 && len(removeGroups) == 0 {
-				return fmt.Errorf("--add or --remove requires at least one group")
+			if removeChanged && len(removeGroups) == 0 {
+				return fmt.Errorf("--remove requires at least one group")
 			}
 
 			memberships, err := state.app.DotMembershipMap(cmd.Context())
@@ -231,30 +228,29 @@ func newDotsGroupsCmd(state *rootState) *cobra.Command {
 			if !ok || len(current) == 0 {
 				return fmt.Errorf("dots entry %q not found", name)
 			}
-			if !setChanged && !addChanged && !removeChanged {
+			if !moveChanged && !removeChanged {
 				fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", name, strings.Join(current, ", "))
 				return nil
 			}
 
 			var target []string
-			if setChanged {
-				target = setGroups
+			if moveChanged {
+				target = []string{moveGroup}
 			} else {
-				target = applyDotsGroupDelta(current, addGroups, removeGroups)
+				target = applyDotsGroupDelta(current, removeGroups)
 			}
 			if len(target) == 0 {
-				return fmt.Errorf("dots entry %q needs at least one group", name)
+				return fmt.Errorf("dots entry %q needs at least one group; use dots delete to remove it from management", name)
 			}
 			if err := updateDotsGroups(state, name, current, target); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "updated groups for %s: %s\n", name, strings.Join(target, ", "))
+			fmt.Fprintf(cmd.OutOrStdout(), "moved %s to group %s\n", name, strings.Join(target, ", "))
 			return nil
 		},
 	}
-	cmd.Flags().StringSliceVar(&setGroups, "set", nil, "Replace memberships with these groups")
-	cmd.Flags().StringSliceVar(&addGroups, "add", nil, "Add memberships to these groups")
-	cmd.Flags().StringSliceVar(&removeGroups, "remove", nil, "Remove memberships from these groups")
+	cmd.Flags().StringVar(&moveGroup, "move", "", "Move this dots entry to a group")
+	cmd.Flags().StringSliceVar(&removeGroups, "remove", nil, "Remove this dots entry from a group")
 	return cmd
 }
 
@@ -276,16 +272,13 @@ func normalizeDotsGroupArgs(groups []string) []string {
 	return out
 }
 
-func applyDotsGroupDelta(current, addGroups, removeGroups []string) []string {
+func applyDotsGroupDelta(current, removeGroups []string) []string {
 	set := map[string]bool{}
 	for _, group := range current {
 		set[group] = true
 	}
 	for _, group := range removeGroups {
 		delete(set, group)
-	}
-	for _, group := range addGroups {
-		set[group] = true
 	}
 	out := make([]string, 0, len(set))
 	for group := range set {
@@ -296,18 +289,25 @@ func applyDotsGroupDelta(current, addGroups, removeGroups []string) []string {
 }
 
 func updateDotsGroups(state *rootState, name string, current, target []string) error {
+	if len(target) == 1 {
+		currentSet := dotsGroupSet(current)
+		if len(currentSet) == 1 && currentSet[target[0]] {
+			return nil
+		}
+		return state.app.MoveDotToGroup(name, target[0])
+	}
 	currentSet := dotsGroupSet(current)
 	targetSet := dotsGroupSet(target)
-	for group := range currentSet {
-		if !targetSet[group] {
-			if err := state.app.RemoveDotFromGroup(name, group); err != nil {
+	for group := range targetSet {
+		if !currentSet[group] {
+			if err := state.app.MoveDotToGroup(name, group); err != nil {
 				return err
 			}
 		}
 	}
-	for group := range targetSet {
-		if !currentSet[group] {
-			if err := state.app.AddDotToGroup(name, group); err != nil {
+	for group := range currentSet {
+		if !targetSet[group] {
+			if err := state.app.RemoveDotFromGroup(name, group); err != nil {
 				return err
 			}
 		}
