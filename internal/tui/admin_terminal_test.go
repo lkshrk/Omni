@@ -98,6 +98,30 @@ func collectAdminTerminalTestOutput(events <-chan tea.Msg, timeout time.Duration
 	}
 }
 
+func TestSendAdminTerminalOutputPreservesRecentOutputWhenBufferFull(t *testing.T) {
+	events := make(chan tea.Msg, adminTerminalEventBuffer)
+	for i := 0; i < adminTerminalEventBuffer+8; i++ {
+		sendAdminTerminalOutput(events, adminTerminalOutputMsg{id: 7, chunk: "old output line\n"})
+	}
+	sendAdminTerminalOutput(events, adminTerminalOutputMsg{id: 7, chunk: "FINAL_MARKER\n"})
+	sendAdminTerminalOutput(events, adminTerminalOutputMsg{id: 7, chunk: "ERROR: final failure detail\n"})
+
+	var output strings.Builder
+	for len(events) > 0 {
+		msg := <-events
+		if msg, ok := msg.(adminTerminalOutputMsg); ok {
+			output.WriteString(msg.chunk)
+		}
+	}
+	got := output.String()
+	if !strings.Contains(got, "FINAL_MARKER") {
+		t.Fatalf("buffered output lost final marker:\n%s", got)
+	}
+	if !strings.Contains(got, "ERROR: final failure detail") {
+		t.Fatalf("buffered output lost final error line:\n%s", got)
+	}
+}
+
 func TestAdminTerminalKeyBytes(t *testing.T) {
 	tests := []struct {
 		name string

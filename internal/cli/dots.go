@@ -7,7 +7,6 @@ import (
 	"runtime"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -827,7 +826,7 @@ func newDotsReminderRunCmd(state *rootState) *cobra.Command {
 }
 
 func newDotsReminderInstallCmd(state *rootState) *cobra.Command {
-	interval := 24 * time.Hour
+	interval := app.DefaultDotsReminderInterval()
 	notify := true
 	cmd := &cobra.Command{
 		Use:   "install",
@@ -884,14 +883,7 @@ func newDotsReminderStatusCmd(state *rootState) *cobra.Command {
 			if err := validateFormat(format, "text", "json"); err != nil {
 				return err
 			}
-			status := "not installed"
-			if info.Installed {
-				status = "installed"
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Dots reminder service: %s (%s)\n", status, info.Platform)
-			for _, file := range info.Files {
-				fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", file)
-			}
+			printDotsReminderService(cmd, dotsServiceStatusHeader("Dots reminder service", info.Installed, info.Platform), info)
 			return nil
 		},
 	}
@@ -979,7 +971,7 @@ func newDotsWatchCmd(state *rootState) *cobra.Command {
 }
 
 func newDotsWatchRunCmd(state *rootState) *cobra.Command {
-	debounce := 5 * time.Second
+	debounce := app.DefaultDotsWatchDebounce()
 	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "Run the dotfile watcher in the foreground",
@@ -1006,7 +998,7 @@ func newDotsWatchRunCmd(state *rootState) *cobra.Command {
 }
 
 func newDotsWatchInstallCmd(state *rootState) *cobra.Command {
-	debounce := 5 * time.Second
+	debounce := app.DefaultDotsWatchDebounce()
 	cmd := &cobra.Command{
 		Use:   "install",
 		Short: "Install a user service for automatic dotfile sync",
@@ -1063,14 +1055,7 @@ func newDotsWatchStatusCmd(state *rootState) *cobra.Command {
 			if err := validateFormat(format, "text", "json"); err != nil {
 				return err
 			}
-			status := "not installed"
-			if info.Installed {
-				status = "installed"
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Dots watch service: %s (%s)\n", status, info.Platform)
-			for _, file := range info.Files {
-				fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", file)
-			}
+			printDotsWatchService(cmd, dotsServiceStatusHeader("Dots watch service", info.Installed, info.Platform), info)
 			return nil
 		},
 	}
@@ -1085,6 +1070,14 @@ func printDotsWatchService(cmd *cobra.Command, header string, info *app.DotsWatc
 	for _, file := range info.Files {
 		fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", file)
 	}
+}
+
+func dotsServiceStatusHeader(name string, installed bool, platform string) string {
+	status := "not installed"
+	if installed {
+		status = "installed"
+	}
+	return fmt.Sprintf("%s: %s (%s)", name, status, platform)
 }
 
 func printDotsWatchSyncResult(cmd *cobra.Command, result app.DotsWatchSyncResult) {

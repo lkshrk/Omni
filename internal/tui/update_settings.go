@@ -254,12 +254,16 @@ func (m *Model) applySettingsServiceDurationChoice(choices []settingsDurationCho
 		}
 		return []tea.Cmd{setStatus(m, "✓ reminder interval set to "+choice.label, false)}
 	case settingsRowDotsWatchDebounce:
-		m.dotsWatchDebounce = choice.value
 		if m.dotsWatchService != nil && m.dotsWatchService.Installed {
+			m.dotsWatchDebounceNext = choice.value
+			if m.promptForStowInstall(stowInstallDotsWatch) {
+				return nil
+			}
 			m.loading = true
 			startOp(m, "Updating dotfile watch…")
 			return []tea.Cmd{m.spinner.Tick, m.doToggleDotsWatchService(true)}
 		}
+		m.dotsWatchDebounce = choice.value
 		return []tea.Cmd{setStatus(m, "✓ watch debounce set to "+choice.label, false)}
 	default:
 		return nil

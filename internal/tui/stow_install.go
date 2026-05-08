@@ -60,6 +60,9 @@ func (m *Model) cancelStowInstallAction(action stowInstallAction) []tea.Cmd {
 	if action == stowInstallDotVariant {
 		m.stowInstallVariant = dotsVariantRequest{}
 	}
+	if action == stowInstallDotsWatch {
+		m.dotsWatchDebounceNext = 0
+	}
 	cmds = append(cmds, setStatus(m, "GNU Stow is required for dotfile sync.", true))
 	return cmds
 }
@@ -77,6 +80,10 @@ func (m *Model) doInstallStow(action stowInstallAction) tea.Cmd {
 func (m *Model) handleStowInstallDoneMsg(msg stowInstallDoneMsg) []tea.Cmd {
 	m.loading = false
 	if msg.err != nil {
+		if msg.action == stowInstallDotsWatch {
+			m.dotsWatchDebounceNext = 0
+			m.dotsWatchDebounce = dotsWatchDebounceFromService(m.dotsWatchService)
+		}
 		cmds := []tea.Cmd{setStatus(m, "✗ "+msg.err.Error(), true)}
 		if msg.action == stowInstallLaunchSync {
 			cmds = append(cmds, m.startPostLoadBackgroundTasks()...)

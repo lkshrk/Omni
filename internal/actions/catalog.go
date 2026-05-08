@@ -36,7 +36,12 @@ const (
 	DotsPull                       ID = "dots.pull"
 	DotsPush                       ID = "dots.push"
 	DotsReminder                   ID = "dots.reminder"
+	DotsReminderCheck              ID = "dots.reminder.check"
+	DotsReminderRun                ID = "dots.reminder.run"
+	DotsReminderStatus             ID = "dots.reminder.status"
 	DotsWatch                      ID = "dots.watch"
+	DotsWatchRun                   ID = "dots.watch.run"
+	DotsWatchStatus                ID = "dots.watch.status"
 	GroupCreate                    ID = "groups.create"
 	GroupRename                    ID = "groups.rename"
 	GroupDelete                    ID = "groups.delete"
@@ -507,33 +512,83 @@ var Dots = []Action{
 		Domain:          "dots",
 		Scope:           ScopeGlobal,
 		Label:           "dots reminder",
-		Description:     "Check or install periodic dotfile sync reminders.",
-		LongDescription: "Check whether dotfiles need attention, or install a native user timer that runs the same check periodically.",
+		Description:     "Install or remove periodic dotfile sync reminders.",
+		LongDescription: "Install or uninstall a native user timer that periodically checks whether dotfiles need attention.",
 		Mutates:         true,
 		TUI:             &TUIBinding{KeyMapField: "Toggle", DefaultKey: "space", Label: "toggle reminders", Description: "Enable or disable native dotfile reminder notifications from Settings."},
 		CLI: []CLIBinding{
-			{Command: []string{"dots", "reminder", "check"}, Flags: []string{"--format"}},
-			{Command: []string{"dots", "reminder", "run"}, Flags: []string{"--format", "--notify"}},
 			{Command: []string{"dots", "reminder", "install"}, Flags: []string{"--interval", "--notify"}},
 			{Command: []string{"dots", "reminder", "uninstall"}},
-			{Command: []string{"dots", "reminder", "status"}, Flags: []string{"--format"}},
 		},
+	},
+	{
+		ID:              DotsReminderCheck,
+		Domain:          "dots",
+		Scope:           ScopeGlobal,
+		Label:           "dots reminder check",
+		Description:     "Check whether dotfiles need attention.",
+		LongDescription: "Inspect dotfile sync health and git state without mutating config, repo, local files, or native services.",
+		Mutates:         false,
+		CLI:             []CLIBinding{{Command: []string{"dots", "reminder", "check"}, Flags: []string{"--format"}}},
+		CLIOnlyReason:   "TUI surfaces dotfile health in the Dots tab instead of a separate reminder-check action.",
+	},
+	{
+		ID:              DotsReminderRun,
+		Domain:          "dots",
+		Scope:           ScopeGlobal,
+		Label:           "dots reminder run",
+		Description:     "Run one dotfile reminder check.",
+		LongDescription: "Run the reminder check once, optionally sending a desktop notification when dotfiles need attention.",
+		Mutates:         false,
+		CLI:             []CLIBinding{{Command: []string{"dots", "reminder", "run"}, Flags: []string{"--format", "--notify"}}},
+		CLIOnlyReason:   "Native reminder timers call this helper command; TUI uses service toggles and the Dots tab instead.",
+	},
+	{
+		ID:              DotsReminderStatus,
+		Domain:          "dots",
+		Scope:           ScopeGlobal,
+		Label:           "dots reminder status",
+		Description:     "Show reminder service status.",
+		LongDescription: "Inspect the native dotfile reminder service files and parsed timer settings without changing them.",
+		Mutates:         false,
+		CLI:             []CLIBinding{{Command: []string{"dots", "reminder", "status"}, Flags: []string{"--format"}}},
+		CLIOnlyReason:   "TUI renders reminder service status in Settings instead of a separate status action.",
 	},
 	{
 		ID:              DotsWatch,
 		Domain:          "dots",
 		Scope:           ScopeGlobal,
 		Label:           "dots watch",
-		Description:     "Watch dotfile paths and sync after changes.",
-		LongDescription: "Run a foreground dotfile filesystem watcher, or install a native user service that keeps configured dotfiles synced after local changes.",
+		Description:     "Install or remove automatic dotfile watch sync.",
+		LongDescription: "Install or uninstall a native user service that keeps configured dotfiles synced after local changes.",
 		Mutates:         true,
 		TUI:             &TUIBinding{KeyMapField: "Toggle", DefaultKey: "space", Label: "toggle watch", Description: "Enable or disable native dotfile watch sync from Settings."},
 		CLI: []CLIBinding{
-			{Command: []string{"dots", "watch", "run"}, Flags: []string{"--debounce"}},
 			{Command: []string{"dots", "watch", "install"}, Flags: []string{"--debounce"}},
 			{Command: []string{"dots", "watch", "uninstall"}},
-			{Command: []string{"dots", "watch", "status"}, Flags: []string{"--format"}},
 		},
+	},
+	{
+		ID:              DotsWatchRun,
+		Domain:          "dots",
+		Scope:           ScopeGlobal,
+		Label:           "dots watch run",
+		Description:     "Run the dotfile watcher in the foreground.",
+		LongDescription: "Watch active dotfile source and target paths in the foreground and run dotfile sync after filesystem changes.",
+		Mutates:         true,
+		CLI:             []CLIBinding{{Command: []string{"dots", "watch", "run"}, Flags: []string{"--debounce"}}},
+		CLIOnlyReason:   "Foreground watch is a long-running CLI/service helper; TUI exposes the native service toggle instead.",
+	},
+	{
+		ID:              DotsWatchStatus,
+		Domain:          "dots",
+		Scope:           ScopeGlobal,
+		Label:           "dots watch status",
+		Description:     "Show watch service status.",
+		LongDescription: "Inspect the native dotfile watch service file and parsed debounce setting without changing it.",
+		Mutates:         false,
+		CLI:             []CLIBinding{{Command: []string{"dots", "watch", "status"}, Flags: []string{"--format"}}},
+		CLIOnlyReason:   "TUI renders watch service status in Settings instead of a separate status action.",
 	},
 }
 

@@ -480,26 +480,32 @@ func (m *Model) handleDotsServiceChangedMsg(msg dotsServiceChangedMsg) []tea.Cmd
 	switch msg.kind {
 	case dotsReminderServiceKind:
 		name = "reminder"
+		if msg.err != nil {
+			m.dotsReminderInterval = dotsReminderIntervalFromService(m.dotsReminderService)
+			break
+		}
 		if msg.reminder != nil {
 			m.dotsReminderService = msg.reminder
 			if msg.enabled && msg.reminder.Interval > 0 {
 				m.dotsReminderInterval = msg.reminder.Interval
 			}
 		}
-		if msg.err == nil {
-			m.dotsReminderServiceErr = ""
-		}
+		m.dotsReminderServiceErr = ""
 	case dotsWatchServiceKind:
 		name = "watch"
+		if msg.err != nil {
+			m.dotsWatchDebounce = dotsWatchDebounceFromService(m.dotsWatchService)
+			m.dotsWatchDebounceNext = 0
+			break
+		}
 		if msg.watch != nil {
 			m.dotsWatchService = msg.watch
 			if msg.enabled && msg.watch.Debounce > 0 {
 				m.dotsWatchDebounce = msg.watch.Debounce
 			}
 		}
-		if msg.err == nil {
-			m.dotsWatchServiceErr = ""
-		}
+		m.dotsWatchDebounceNext = 0
+		m.dotsWatchServiceErr = ""
 	}
 	if msg.err != nil {
 		return []tea.Cmd{setStatus(m, "✗ dotfile "+name+" service: "+msg.err.Error(), true)}

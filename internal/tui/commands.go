@@ -1402,7 +1402,7 @@ func (m *Model) doToggleDotsWatchService(enable bool) tea.Cmd {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	debounce := m.currentDotsWatchDebounce()
+	debounce := m.dotsWatchDebounceForServiceInstall()
 	return func() tea.Msg {
 		if enable {
 			service, err := a.InstallDotsWatchService(ctx, app.DotsWatchInstallOptions{Debounce: debounce, Activate: true})

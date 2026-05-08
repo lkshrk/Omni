@@ -318,6 +318,58 @@ func TestDotsActionContracts(t *testing.T) {
 	if editGroups.TUI == nil || editGroups.TUI.KeyMapField != "MoveGroup" {
 		t.Fatalf("%s should use shared group membership picker binding, got %+v", editGroups.ID, editGroups.TUI)
 	}
+
+	reminderService := mustAction(t, DotsReminder)
+	for _, command := range [][]string{
+		{"dots", "reminder", "install"},
+		{"dots", "reminder", "uninstall"},
+	} {
+		if !hasCLICommand(reminderService, command) {
+			t.Fatalf("%s missing service mutation command %v in %+v", reminderService.ID, command, reminderService.CLI)
+		}
+	}
+	for _, command := range [][]string{
+		{"dots", "reminder", "check"},
+		{"dots", "reminder", "run"},
+		{"dots", "reminder", "status"},
+	} {
+		if hasCLICommand(reminderService, command) {
+			t.Fatalf("%s must not collapse read-only command %v into mutating service action: %+v", reminderService.ID, command, reminderService.CLI)
+		}
+	}
+
+	for _, id := range []ID{
+		ID("dots.reminder.check"),
+		ID("dots.reminder.run"),
+		ID("dots.reminder.status"),
+		ID("dots.watch.status"),
+	} {
+		action := mustAction(t, id)
+		if action.Mutates {
+			t.Fatalf("%s should be read-only/non-persistent, got mutates=true", action.ID)
+		}
+	}
+
+	watchService := mustAction(t, DotsWatch)
+	for _, command := range [][]string{
+		{"dots", "watch", "install"},
+		{"dots", "watch", "uninstall"},
+	} {
+		if !hasCLICommand(watchService, command) {
+			t.Fatalf("%s missing service mutation command %v in %+v", watchService.ID, command, watchService.CLI)
+		}
+	}
+	for _, command := range [][]string{
+		{"dots", "watch", "run"},
+		{"dots", "watch", "status"},
+	} {
+		if hasCLICommand(watchService, command) {
+			t.Fatalf("%s must not collapse command %v into service toggle action: %+v", watchService.ID, command, watchService.CLI)
+		}
+	}
+	if watchRun := mustAction(t, ID("dots.watch.run")); !watchRun.Mutates {
+		t.Fatalf("%s should be mutating because it runs sync after filesystem changes", watchRun.ID)
+	}
 }
 
 func TestMutatingToolActionsHaveCLIAndTUIParity(t *testing.T) {

@@ -36,6 +36,8 @@ stdout 'enable --now omni-dots-reminder.timer'
 
 exec omni --config settings.json --cache-dir cache dots reminder status
 stdout 'Dots reminder service: installed \(systemd\)'
+stdout 'Interval: 2m0s'
+stdout 'Notifications: false'
 
 exec omni --config settings.json --cache-dir cache dots reminder uninstall
 stdout 'Uninstalled dots reminder service'
@@ -46,6 +48,8 @@ stdout 'disable --now omni-dots-reminder.timer'
 
 exec omni --config settings.json --cache-dir cache dots reminder status
 stdout 'Dots reminder service: not installed \(systemd\)'
+stdout 'Interval: 24h0m0s'
+stdout 'Notifications: true'
 
 -- settings.json --
 {"host_settings":{"testhost":{"dots_repo":"~/dotfiles"}},"hosts":{"testhost":[]},"groups":[{"name":"testhost","special":"host"}]}
