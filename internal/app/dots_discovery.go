@@ -323,10 +323,14 @@ func (a *App) DiscoverUntrackedDotsEntries() ([]config.DotEntry, error) {
 
 func untrackedDotCandidates(rootCfg *config.RootConfig, candidates []config.DotEntry) []config.DotEntry {
 	existingNames := make(map[string]struct{})
+	existingPackages := make(map[string]struct{})
 	existingPaths := make(map[string]struct{})
 	for _, group := range rootCfg.Groups {
 		for _, entry := range group.Dots {
 			existingNames[strings.ToLower(entry.Name)] = struct{}{}
+			for _, pkg := range dotEntryPackages(entry) {
+				existingPackages[strings.ToLower(pkg)] = struct{}{}
+			}
 			existingPaths[strings.ToLower(filepath.ToSlash(entry.Path))] = struct{}{}
 		}
 	}
@@ -335,6 +339,9 @@ func untrackedDotCandidates(rootCfg *config.RootConfig, candidates []config.DotE
 		nameKey := strings.ToLower(candidate.Name)
 		pathKey := strings.ToLower(filepath.ToSlash(candidate.Path))
 		if _, ok := existingNames[nameKey]; ok {
+			continue
+		}
+		if _, ok := existingPackages[nameKey]; ok {
 			continue
 		}
 		if _, ok := existingPaths[pathKey]; ok {
@@ -427,6 +434,9 @@ func discoverLocalWellKnownDotsEntries() ([]config.DotEntry, error) {
 
 func dotEntryForRepoPackage(name string, isDir, includeIgnored bool) (config.DotEntry, bool) {
 	canon := strings.TrimPrefix(name, ".")
+	if strings.Contains(canon, "@") {
+		return config.DotEntry{}, false
+	}
 	if ignoredDotCandidate(canon) {
 		if !includeIgnored || !isDir {
 			return config.DotEntry{}, false

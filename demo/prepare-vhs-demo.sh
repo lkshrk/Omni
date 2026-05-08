@@ -399,7 +399,8 @@ git -C "$root/dotfiles" \
 
 cat > "$root/settings.json" <<EOF
 {
-  "\$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.schema.json",
+  "\$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v1.schema.json",
+  "version": 1,
   "settings": {
     "auto_import": true,
     "ecosystems": {
@@ -499,7 +500,8 @@ EOF
 
 cat > "$root/onboarding-settings.json" <<EOF
 {
-  "\$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.schema.json",
+  "\$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v1.schema.json",
+  "version": 1,
   "settings": {
     "ecosystems": {
       "system": { "manager": "brew", "priority": ["brew"] },

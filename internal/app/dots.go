@@ -36,6 +36,29 @@ type DotsDeleteOptions struct {
 	KeepLocal bool
 }
 
+type DotVariantInfo struct {
+	Name    string `json:"name"`
+	Host    string `json:"host,omitempty"`
+	Package string `json:"package"`
+	Default bool   `json:"default,omitempty"`
+	Active  bool   `json:"active,omitempty"`
+}
+
+type DotsAddVariantOptions struct {
+	// Host is the short hostname for the variant. Defaults to the current host.
+	Host string
+	// Package is the stow package directory for this variant. Defaults to
+	// "<name>@<host>".
+	Package string
+	// Sync immediately syncs the entry when Host is the current host.
+	Sync bool
+}
+
+type DotsRemoveVariantOptions struct {
+	// Host is the short hostname for the variant. Defaults to the current host.
+	Host string
+}
+
 // DotHealth summarises the symlink health of a dots entry.
 type DotHealth string
 
@@ -49,6 +72,8 @@ const (
 // DotStatus describes the current state of a single dots entry.
 type DotStatus struct {
 	Name       string        `json:"name"`
+	Package    string        `json:"package,omitempty"`
+	Variant    bool          `json:"variant,omitempty"`
 	SourcePath string        `json:"source_path"`
 	TargetPath string        `json:"target_path"`
 	ConfigPath string        `json:"path,omitempty"`
@@ -168,6 +193,7 @@ func (a *App) DotsSyncContext(ctx context.Context, opts dots.SyncOptions) ([]dot
 		groups = effective
 	}
 	entries := collectDots(rootCfg, groups)
+	entries = resolveDotEntryPackagesForCurrentHost(entries)
 	entries = filterActiveDotEntries(entries)
 	if len(entries) == 0 {
 		return nil, nil
@@ -288,6 +314,7 @@ func (a *App) DotsSyncEntry(ctx context.Context, name string, opts dots.SyncOpti
 		groups = effective
 	}
 	entries := collectDots(rootCfg, groups)
+	entries = resolveDotEntryPackagesForCurrentHost(entries)
 	entries = filterActiveDotEntries(entries)
 	if err := a.requireSafeTestDotsMutation(repoPath, entries); err != nil {
 		return nil, err
@@ -347,6 +374,7 @@ func (a *App) DotsAdd(ctx context.Context, path string, opts DotsAddOptions) ([]
 		return nil, fmt.Errorf("dots add: %w", err)
 	}
 	entry := dotEntryWithDefaults(config.DotEntry{Name: name, Path: normalisePath(abs), Ignore: opts.Ignore})
+	pkgName := entry.EffectivePackage()
 	if opts.Group == "" {
 		opts.Group = currentMachineGroupName()
 	}
@@ -365,14 +393,14 @@ func (a *App) DotsAdd(ctx context.Context, path string, opts DotsAddOptions) ([]
 	}
 
 	// Where this entry lives in the stow package tree.
-	pkgDst, err := stowPackagePath(stowPath, name, abs)
+	pkgDst, err := stowPackagePath(stowPath, pkgName, abs)
 	if err != nil {
 		return nil, fmt.Errorf("dots add: %w", err)
 	}
 	if _, statErr := os.Lstat(pkgDst); statErr == nil {
 		return nil, fmt.Errorf("dots add: %q is already tracked (repo path: %s)", name, pkgDst)
 	}
-	pkgRoot := filepath.Join(stowPath, name)
+	pkgRoot := filepath.Join(stowPath, pkgName)
 	pkgRootExisted := true
 	if _, statErr := os.Lstat(pkgRoot); os.IsNotExist(statErr) {
 		pkgRootExisted = false
@@ -411,7 +439,7 @@ func (a *App) DotsAdd(ctx context.Context, path string, opts DotsAddOptions) ([]
 		}
 		return nil, fmt.Errorf("dots add: remove local target: %w", err)
 	}
-	if err := dots.Restow(ctx, executor.New(), stowPath, []string{name}, false); err != nil {
+	if err := dots.Restow(ctx, executor.New(), stowPath, []string{pkgName}, false); err != nil {
 		if rollbackErr := rollbackDotsAdd(abs, pkgDst, backupPath); rollbackErr != nil {
 			return nil, fmt.Errorf("dots add: stow: %w (rollback failed: %v)", err, rollbackErr)
 		}
@@ -448,10 +476,240 @@ func (a *App) DotsAdd(ctx context.Context, path string, opts DotsAddOptions) ([]
 
 	return []dots.Op{lstatEntryOp(dots.ResolvedEntry{
 		Name:       name,
+		Package:    pkgName,
 		SourcePath: pkgDst,
 		TargetPath: abs,
 		Ignore:     entry.Ignore,
 	}, false)}, nil
+}
+
+func (a *App) DotsListVariants(name string) ([]DotVariantInfo, error) {
+	if strings.TrimSpace(name) == "" {
+		return nil, fmt.Errorf("dots variants: entry name is required")
+	}
+	rootCfg, err := a.loadConfig()
+	if err != nil {
+		return nil, fmt.Errorf("dots variants: load config: %w", err)
+	}
+	if err := a.requireDotsEnabled(rootCfg); err != nil {
+		return nil, err
+	}
+	entry, ok := findDotEntryInConfig(rootCfg, name)
+	if !ok {
+		return nil, fmt.Errorf("dots entry %q not found", name)
+	}
+	activePackage := entry.PackageForHost(currentMachineGroupName())
+	variants := []DotVariantInfo{{
+		Name:    entry.Name,
+		Package: entry.EffectivePackage(),
+		Default: true,
+		Active:  entry.EffectivePackage() == activePackage,
+	}}
+	hosts := make([]string, 0, len(entry.Hosts))
+	for host := range entry.Hosts {
+		hosts = append(hosts, host)
+	}
+	sort.Strings(hosts)
+	for _, host := range hosts {
+		pkgName := entry.PackageForHost(host)
+		variants = append(variants, DotVariantInfo{
+			Name:    entry.Name,
+			Host:    host,
+			Package: pkgName,
+			Active:  host == currentMachineGroupName() && pkgName == activePackage,
+		})
+	}
+	return variants, nil
+}
+
+func (a *App) DotsAddHostVariant(ctx context.Context, name string, opts DotsAddVariantOptions) (DotVariantInfo, []dots.Op, error) {
+	if err := dots.ValidateEntryName(name); err != nil {
+		return DotVariantInfo{}, nil, fmt.Errorf("dots variant add: %w", err)
+	}
+	host := normalizeDotsVariantHost(opts.Host)
+	if host == "" {
+		return DotVariantInfo{}, nil, fmt.Errorf("dots variant add: host is required")
+	}
+	pkgName := strings.TrimSpace(opts.Package)
+	if pkgName == "" {
+		pkgName = defaultDotVariantPackage(name, host)
+	}
+	if err := dots.ValidateEntryName(pkgName); err != nil {
+		return DotVariantInfo{}, nil, fmt.Errorf("dots variant add: package: %w", err)
+	}
+	rootCfg, err := a.loadConfig()
+	if err != nil {
+		return DotVariantInfo{}, nil, fmt.Errorf("dots variant add: load config: %w", err)
+	}
+	if err := a.requireDotsEnabled(rootCfg); err != nil {
+		return DotVariantInfo{}, nil, err
+	}
+	gitCfg := rootCfg.Settings.DotsGit
+	entry, ok := findDotEntryInConfig(rootCfg, name)
+	if !ok {
+		return DotVariantInfo{}, nil, fmt.Errorf("dots entry %q not found", name)
+	}
+	if existing, ok := entry.Hosts[host]; ok {
+		if existing.Package == pkgName {
+			return DotVariantInfo{Name: name, Host: host, Package: pkgName, Active: host == currentMachineGroupName()}, nil, nil
+		}
+		return DotVariantInfo{}, nil, fmt.Errorf("dots variant add: %q already has host variant for %q", name, host)
+	}
+	if owner, exists := dotPackageOwner(rootCfg, pkgName); exists && owner != name {
+		return DotVariantInfo{}, nil, fmt.Errorf("dots variant add: package %q is already used by dotfile %q", pkgName, owner)
+	}
+
+	repoPath, err := resolveRepoPath(a.effectiveSettings(rootCfg).DotsRepo)
+	if err != nil {
+		return DotVariantInfo{}, nil, err
+	}
+	if err := a.requireSafeTestDotsMutation(repoPath, []config.DotEntry{entry}); err != nil {
+		return DotVariantInfo{}, nil, err
+	}
+	stowPath, err := ensureDotsContentPath(repoPath)
+	if err != nil {
+		return DotVariantInfo{}, nil, fmt.Errorf("dots variant add: content dir: %w", err)
+	}
+	source, err := ensureDotVariantSource(stowPath, entry, pkgName)
+	if err != nil {
+		return DotVariantInfo{}, nil, fmt.Errorf("dots variant add: %w", err)
+	}
+
+	var changed bool
+	saveErr := a.withConfig(func(cfg *config.RootConfig) error {
+		if err := a.requireDotsEnabled(cfg); err != nil {
+			return err
+		}
+		dot, ok := findDotEntryPtrInConfig(cfg, name)
+		if !ok {
+			return fmt.Errorf("dots entry %q not found", name)
+		}
+		if owner, exists := dotPackageOwner(cfg, pkgName); exists && owner != name {
+			return fmt.Errorf("dots variant add: package %q is already used by dotfile %q", pkgName, owner)
+		}
+		if dot.Hosts == nil {
+			dot.Hosts = make(map[string]config.DotVariant)
+		}
+		if _, ok := dot.Hosts[host]; ok {
+			return fmt.Errorf("dots variant add: %q already has host variant for %q", name, host)
+		}
+		dot.Hosts[host] = config.DotVariant{Package: pkgName}
+		changed = true
+		return nil
+	})
+	if saveErr != nil {
+		if source.Created {
+			_ = os.RemoveAll(source.CleanupPath)
+		}
+		return DotVariantInfo{}, nil, saveErr
+	}
+
+	info := DotVariantInfo{Name: name, Host: host, Package: pkgName, Active: host == currentMachineGroupName()}
+	var ops []dots.Op
+	if changed && opts.Sync && host == currentMachineGroupName() {
+		syncOps, syncErr := a.DotsSyncEntry(ctx, name, dots.SyncOptions{})
+		ops = syncOps
+		if syncErr != nil {
+			return info, ops, fmt.Errorf("dots variant add: sync %q: %w", name, syncErr)
+		}
+	}
+	if source.Created {
+		if gt := newGitForRepo(repoPath, executor.New()); gt.IsRepo() {
+			msg := fmt.Sprintf("dots: add %s variant for %s", name, host)
+			if gitCfg.AutoPush {
+				if err := gt.Push(ctx, msg); err != nil {
+					return info, ops, fmt.Errorf("dots variant add: auto-push: %w", err)
+				}
+			} else if gitCfg.AutoCommit {
+				if err := gt.CommitAll(ctx, msg); err != nil {
+					return info, ops, fmt.Errorf("dots variant add: auto-commit: %w", err)
+				}
+			}
+		}
+	}
+	return info, ops, nil
+}
+
+func (a *App) DotsRemoveHostVariant(ctx context.Context, name string, opts DotsRemoveVariantOptions) (DotVariantInfo, error) {
+	if err := dots.ValidateEntryName(name); err != nil {
+		return DotVariantInfo{}, fmt.Errorf("dots variant remove: %w", err)
+	}
+	host := normalizeDotsVariantHost(opts.Host)
+	if host == "" {
+		return DotVariantInfo{}, fmt.Errorf("dots variant remove: host is required")
+	}
+	var (
+		removed       DotVariantInfo
+		repoPath      string
+		stowPath      string
+		gitCfg        config.DotsGitConfig
+		removePackage bool
+	)
+	err := a.withConfig(func(cfg *config.RootConfig) error {
+		if err := a.requireDotsEnabled(cfg); err != nil {
+			return err
+		}
+		var err error
+		repoPath, err = resolveRepoPath(a.effectiveSettings(cfg).DotsRepo)
+		if err != nil {
+			return err
+		}
+		stowPath, err = existingDotsContentPath(repoPath)
+		if err != nil {
+			return fmt.Errorf("dots variant remove: content dir: %w", err)
+		}
+		gitCfg = cfg.Settings.DotsGit
+		dot, ok := findDotEntryPtrInConfig(cfg, name)
+		if !ok {
+			return fmt.Errorf("dots entry %q not found", name)
+		}
+		if err := a.requireSafeTestDotsMutation(repoPath, []config.DotEntry{*dot}); err != nil {
+			return err
+		}
+		variant, ok := dot.Hosts[host]
+		if !ok {
+			return fmt.Errorf("dots variant remove: %q has no variant for host %q", name, host)
+		}
+		removed = DotVariantInfo{Name: name, Host: host, Package: variant.Package}
+		delete(dot.Hosts, host)
+		if len(dot.Hosts) == 0 {
+			dot.Hosts = nil
+		}
+		removePackage = !dotPackageReferencedInConfig(cfg, variant.Package)
+		return nil
+	})
+	if err != nil {
+		return removed, err
+	}
+
+	if host == currentMachineGroupName() {
+		if _, syncErr := a.DotsSyncEntry(ctx, name, dots.SyncOptions{}); syncErr != nil {
+			_, resolveErr := a.DotsResolveConflict(ctx, name, DotResolveUseRepo)
+			if resolveErr != nil {
+				return removed, fmt.Errorf("dots variant remove: sync %q: %w", name, errors.Join(syncErr, resolveErr))
+			}
+		}
+	}
+
+	if removePackage {
+		pkgRoot := filepath.Join(stowPath, removed.Package)
+		if rmErr := os.RemoveAll(pkgRoot); rmErr != nil {
+			return removed, fmt.Errorf("dots variant remove: remove repo package %q: %w", removed.Package, rmErr)
+		}
+		if gt := newGitForRepo(repoPath, executor.New()); gt.IsRepo() {
+			msg := fmt.Sprintf("dots: remove %s variant for %s", name, host)
+			if gitCfg.AutoPush {
+				if err := gt.Push(ctx, msg); err != nil {
+					return removed, fmt.Errorf("dots variant remove: auto-push: %w", err)
+				}
+			} else if gitCfg.AutoCommit {
+				if err := gt.CommitAll(ctx, msg); err != nil {
+					return removed, fmt.Errorf("dots variant remove: auto-commit: %w", err)
+				}
+			}
+		}
+	}
+	return removed, nil
 }
 
 // DotsDelete deletes the dots entry named name from all group files. Managed
@@ -555,7 +813,8 @@ type deletedDotEntry struct {
 }
 
 func (a *App) removeDeletedDotFiles(ctx context.Context, name, stowPath string, deleteDot *config.DotEntry, opts DotsDeleteOptions) error {
-	mgr, resolveErr := dots.New(stowPath, []config.DotEntry{*deleteDot})
+	unlinkDots := dotEntriesForAllPackages(*deleteDot)
+	mgr, resolveErr := dots.New(stowPath, unlinkDots)
 	if resolveErr != nil {
 		return fmt.Errorf("dots delete %q: resolve entry: %w", name, resolveErr)
 	}
@@ -563,8 +822,10 @@ func (a *App) removeDeletedDotFiles(ctx context.Context, name, stowPath string, 
 	if _, unlinkErr := mgr.UnlinkAll(unlinkOpts); unlinkErr != nil {
 		return fmt.Errorf("dots delete %q: %w", name, unlinkErr)
 	}
-	if rmErr := os.RemoveAll(filepath.Join(stowPath, deleteDot.Name)); rmErr != nil {
-		return fmt.Errorf("dots delete %q: remove repo package: %w", name, rmErr)
+	for _, pkgName := range dotEntryPackages(*deleteDot) {
+		if rmErr := os.RemoveAll(filepath.Join(stowPath, pkgName)); rmErr != nil {
+			return fmt.Errorf("dots delete %q: remove repo package %q: %w", name, pkgName, rmErr)
+		}
 	}
 	return nil
 }
@@ -685,11 +946,11 @@ func filterDotMemberships(group *config.GroupConfig, name string) bool {
 
 // DotsList returns the symlink health for every dots entry across active groups.
 func (a *App) DotsList() ([]DotStatus, error) {
-	m, groupMap, err := a.buildDotsManager()
+	m, groupMap, variantMap, err := a.buildDotsManager()
 	if err != nil {
 		return nil, err
 	}
-	return entryHealth(m, groupMap), nil
+	return entryHealth(m, groupMap, variantMap), nil
 }
 
 func (a *App) QueryDots(opts DotsQueryOptions) ([]DotStatus, error) {
@@ -702,11 +963,11 @@ func (a *App) QueryDots(opts DotsQueryOptions) ([]DotStatus, error) {
 
 // DotsStatus returns DotsList combined with the git status of the dots repo.
 func (a *App) DotsStatus(ctx context.Context) (*DotsStatusResult, error) {
-	mgr, groupMap, err := a.buildDotsManager()
+	mgr, groupMap, variantMap, err := a.buildDotsManager()
 	if err != nil {
 		return nil, err
 	}
-	statuses := entryHealth(mgr, groupMap)
+	statuses := entryHealth(mgr, groupMap, variantMap)
 	var gitStatus string
 	repoPath, repoErr := resolveRepoPath(a.dotsRepoPath())
 	if repoErr != nil {
@@ -764,7 +1025,7 @@ func (a *App) DiscoverDotsStatus(ctx context.Context) (*DotsStatusResult, error)
 		if err != nil {
 			return result, fmt.Errorf("dots discover: resolve candidates: %w", err)
 		}
-		discovered := entryHealth(mgr, nil)
+		discovered := entryHealth(mgr, nil, nil)
 		for i := range discovered {
 			discovered[i].State = discoveredDotState(discovered[i])
 			discovered[i].Actions = discoveredDotActions(discovered[i].State)
@@ -778,7 +1039,7 @@ func (a *App) DiscoverDotsStatus(ctx context.Context) (*DotsStatusResult, error)
 		if err != nil {
 			return result, fmt.Errorf("dots discover: resolve ignored candidates: %w", err)
 		}
-		ignored := entryHealth(mgr, nil)
+		ignored := entryHealth(mgr, nil, nil)
 		for i := range ignored {
 			ignored[i].Actions = []DotAction{DotActionUnignore}
 			ignored[i].State = DotStateIgnored
@@ -971,7 +1232,7 @@ func (a *App) DotsDisable(opts DisableDotsOptions) ([]dots.Op, error) {
 	if err := a.requireSafeTestHomeForDots(); err != nil {
 		return nil, err
 	}
-	m, _, err := a.buildDotsManager()
+	m, _, _, err := a.buildDotsManager()
 	if err != nil {
 		return nil, fmt.Errorf("dots disable: %w", err)
 	}
@@ -1077,6 +1338,7 @@ func (a *App) resolvedDotEntry(name, stowPath string) (dots.ResolvedEntry, error
 		groups = effective
 	}
 	entries := collectDots(rootCfg, groups)
+	entries = resolveDotEntryPackagesForCurrentHost(entries)
 	mgr, err := dots.New(stowPath, entries)
 	if err != nil {
 		return dots.ResolvedEntry{}, fmt.Errorf("dots resolve: resolve entries: %w", err)
@@ -1094,7 +1356,7 @@ func resolveDotUseRepo(ctx context.Context, stowPath string, entry dots.Resolved
 	if err != nil {
 		return nil, err
 	}
-	if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Name}, false); err != nil {
+	if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Package}, false); err != nil {
 		wrapped := fmt.Errorf("dots resolve %q: use repo version relink: %w", entry.Name, err)
 		if prep.backupPath != "" {
 			if restoreErr := restoreDotTargetAfterFailedRestow(entry, prep); restoreErr != nil {
@@ -1120,7 +1382,7 @@ func resolveDotUseLocal(ctx context.Context, repoPath, stowPath string, entry do
 			}
 		}
 	}
-	replacement, err := replaceDotSourceFromLocal(copySource, entry.SourcePath, filepath.Join(stowPath, entry.Name), entry.Ignore)
+	replacement, err := replaceDotSourceFromLocal(copySource, entry.SourcePath, filepath.Join(stowPath, entry.Package), entry.Ignore)
 	if err != nil {
 		return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}},
 			fmt.Errorf("dots resolve %q: replace repo source: %w", entry.Name, err)
@@ -1146,7 +1408,7 @@ func resolveDotUseLocal(ctx context.Context, repoPath, stowPath string, entry do
 			}
 		}
 	}()
-	if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Name}, false); err != nil {
+	if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Package}, false); err != nil {
 		wrapped := fmt.Errorf("dots resolve %q: use local version relink after copying local content: %w", entry.Name, err)
 		if prep.backupPath != "" {
 			if restoreErr := restoreDotTargetAfterFailedRestow(entry, prep); restoreErr != nil {
@@ -1711,30 +1973,32 @@ func newGitForRepo(repoPath string, exec executor.Executor) *dots.Git {
 	return dots.NewGit(repoPath, exec)
 }
 
-func (a *App) buildDotsManager() (*dots.Manager, map[string]string, error) {
+func (a *App) buildDotsManager() (*dots.Manager, map[string]string, map[string]bool, error) {
 	repoPath, err := resolveRepoPath(a.dotsRepoPath())
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if err := a.requireSafeTestDotsMutation(repoPath, nil); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	stowPath := dotsContentPath(repoPath)
 	rootCfg, err := a.loadConfig()
 	if err != nil {
-		return nil, nil, fmt.Errorf("dots: load groups: %w", err)
+		return nil, nil, nil, fmt.Errorf("dots: load groups: %w", err)
 	}
 	groups := rootCfg.Groups
 	if effective, _, ok := effectiveHostGroups(rootCfg, groups, currentMachineGroupName()); ok {
 		groups = effective
 	}
 	entries := collectDots(rootCfg, groups)
+	variantMap := activeDotVariantMap(entries, currentMachineGroupName())
+	entries = resolveDotEntryPackagesForCurrentHost(entries)
 	if err := a.requireSafeTestDotsMutation(repoPath, entries); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	groupMap := collectDotsGroupMap(groups)
 	mgr, err := dots.New(stowPath, entries)
-	return mgr, groupMap, err
+	return mgr, groupMap, variantMap, err
 }
 
 // resolveRepoPath validates that a non-empty repo path is configured, expands
@@ -1813,6 +2077,81 @@ func stowPackagePath(stowPath, pkgName, absPath string) (string, error) {
 	return filepath.Join(stowPath, pkgName, rel), nil
 }
 
+func normalizeDotsVariantHost(host string) string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return currentMachineGroupName()
+	}
+	return machineGroupName(host)
+}
+
+func defaultDotVariantPackage(name, host string) string {
+	return name + "@" + host
+}
+
+type dotVariantSourceResult struct {
+	CleanupPath string
+	Created     bool
+}
+
+func ensureDotVariantSource(stowPath string, entry config.DotEntry, pkgName string) (dotVariantSourceResult, error) {
+	targetPath, err := dots.ExpandPath(entry.Path)
+	if err != nil {
+		return dotVariantSourceResult{}, fmt.Errorf("expand target path: %w", err)
+	}
+	targetPath, err = filepath.Abs(targetPath)
+	if err != nil {
+		return dotVariantSourceResult{}, fmt.Errorf("target path: %w", err)
+	}
+	targetPath = filepath.Clean(targetPath)
+	dst, err := stowPackagePath(stowPath, pkgName, targetPath)
+	if err != nil {
+		return dotVariantSourceResult{}, err
+	}
+	if _, err := os.Lstat(dst); err == nil {
+		return dotVariantSourceResult{}, nil
+	} else if !os.IsNotExist(err) {
+		return dotVariantSourceResult{}, fmt.Errorf("stat package source: %w", err)
+	}
+
+	pkgRoot := filepath.Join(stowPath, pkgName)
+	pkgRootExisted := true
+	if info, err := os.Lstat(pkgRoot); err == nil {
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return dotVariantSourceResult{}, fmt.Errorf("package root %q is not a real directory", pkgRoot)
+		}
+	} else if os.IsNotExist(err) {
+		pkgRootExisted = false
+	} else {
+		return dotVariantSourceResult{}, fmt.Errorf("stat package root: %w", err)
+	}
+
+	src, err := localDotCopySource(targetPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return dotVariantSourceResult{}, fmt.Errorf("local target %q: %w", targetPath, err)
+		}
+		src, err = stowPackagePath(stowPath, entry.EffectivePackage(), targetPath)
+		if err != nil {
+			return dotVariantSourceResult{}, err
+		}
+		if _, err := os.Lstat(src); err != nil {
+			return dotVariantSourceResult{}, fmt.Errorf("default package source %q: %w", src, err)
+		}
+	}
+	cleanupPath := dst
+	if !pkgRootExisted {
+		cleanupPath = pkgRoot
+	}
+	if err := copyDotPath(src, dst, combinedDotIgnores(entry.Ignore)); err != nil {
+		if removeErr := os.RemoveAll(cleanupPath); removeErr != nil {
+			return dotVariantSourceResult{}, fmt.Errorf("seed package source: %w (cleanup failed: %v)", err, removeErr)
+		}
+		return dotVariantSourceResult{}, fmt.Errorf("seed package source: %w", err)
+	}
+	return dotVariantSourceResult{CleanupPath: cleanupPath, Created: true}, nil
+}
+
 // normalisePath converts a path under $HOME to ~/... form for persisted config.
 // Falls back to the cleaned path when it is not under HOME.
 func normalisePath(path string) string {
@@ -1850,7 +2189,7 @@ func syncResolvedDotEntry(ctx context.Context, repoPath, stowPath string, entry 
 			if opts.DryRun {
 				return []dots.Op{{Kind: dots.OpDryRepair, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}}, nil
 			}
-			if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Name}, false); err != nil {
+			if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Package}, false); err != nil {
 				return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}}, err
 			}
 			return []dots.Op{lstatEntryOp(entry, false)}, nil
@@ -1860,7 +2199,7 @@ func syncResolvedDotEntry(ctx context.Context, repoPath, stowPath string, entry 
 		if opts.DryRun {
 			return []dots.Op{{Kind: dots.OpDryLink, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}}, nil
 		}
-		if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Name}, false); err != nil {
+		if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Package}, false); err != nil {
 			return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}}, err
 		}
 		return []dots.Op{lstatEntryOp(entry, false)}, nil
@@ -1872,7 +2211,7 @@ func syncResolvedDotEntry(ctx context.Context, repoPath, stowPath string, entry 
 		if err != nil {
 			return nil, err
 		}
-		if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Name}, false); err != nil {
+		if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Package}, false); err != nil {
 			if prep.backupPath != "" {
 				if restoreErr := restoreDotTargetAfterFailedRestow(entry, prep); restoreErr != nil {
 					return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}},
@@ -1901,6 +2240,25 @@ func syncResolvedDotEntry(ctx context.Context, repoPath, stowPath string, entry 
 		}
 		return ops, nil
 	case DotStateConflict, DotStateUntrackedConflict, DotStateAmbiguous:
+		if state == DotStateConflict && dotConflictIsManagedStowLink(entry, stowPath) {
+			if opts.DryRun {
+				return []dots.Op{{Kind: dots.OpDryRepair, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}}, nil
+			}
+			prep, err := prepareDotTargetForRestow(entry)
+			if err != nil {
+				return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}}, err
+			}
+			if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Package}, false); err != nil {
+				if prep.backupPath != "" {
+					if restoreErr := restoreDotTargetAfterFailedRestow(entry, prep); restoreErr != nil {
+						return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}},
+							fmt.Errorf("%w (restore failed: %v)", err, restoreErr)
+					}
+				}
+				return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}}, err
+			}
+			return []dots.Op{{Kind: dots.OpRepair, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}}, nil
+		}
 		err := fmt.Errorf("requires choosing use repo version or use local version")
 		return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}}, err
 	default:
@@ -1930,7 +2288,7 @@ func syncLocalOnlyDotEntry(ctx context.Context, stowPath string, entry dots.Reso
 		}
 		return dots.Op{}, fmt.Errorf("prepare local target: %w", err)
 	}
-	if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Name}, false); err != nil {
+	if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Package}, false); err != nil {
 		if removeErr := os.RemoveAll(entry.SourcePath); removeErr != nil {
 			return dots.Op{}, fmt.Errorf("%w (remove created source failed: %v)", err, removeErr)
 		}
@@ -1953,7 +2311,7 @@ func syncModifiedDotEntry(ctx context.Context, repoPath, stowPath string, entry 
 			}
 		}
 	}
-	replacement, err := replaceModifiedDotSourceFilesFromLocal(entry, filepath.Join(stowPath, entry.Name))
+	replacement, err := replaceModifiedDotSourceFilesFromLocal(entry, filepath.Join(stowPath, entry.Package))
 	if err != nil {
 		return nil, err
 	}
@@ -1970,7 +2328,7 @@ func syncModifiedDotEntry(ctx context.Context, repoPath, stowPath string, entry 
 	if err != nil {
 		return nil, fmt.Errorf("prepare local target: %w", err)
 	}
-	if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Name}, false); err != nil {
+	if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Package}, false); err != nil {
 		if prep.backupPath != "" {
 			if restoreErr := restoreDotTargetAfterFailedRestow(entry, prep); restoreErr != nil {
 				return nil, fmt.Errorf("%w (restore failed: %v)", err, restoreErr)
@@ -1983,6 +2341,83 @@ func syncModifiedDotEntry(ctx context.Context, repoPath, stowPath string, entry 
 		return nil, fmt.Errorf("cleanup source backup: %w", err)
 	}
 	return []dots.Op{{Kind: dots.OpAdopt, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}}, nil
+}
+
+func dotConflictIsManagedStowLink(entry dots.ResolvedEntry, stowPath string) bool {
+	if inspectDotLocal(entry).kind != dotLocalWrongLink {
+		return false
+	}
+	targetInfo, err := os.Lstat(entry.TargetPath)
+	if err != nil {
+		return false
+	}
+	if targetInfo.Mode()&os.ModeSymlink != 0 {
+		return symlinkTargetWithinStowRoot(entry.TargetPath, stowPath)
+	}
+	sourceInfo, err := os.Lstat(entry.SourcePath)
+	if err != nil || !sourceInfo.IsDir() || sourceInfo.Mode()&os.ModeSymlink != 0 || !targetInfo.IsDir() {
+		return false
+	}
+	managedWrongLink := false
+	walkErr := filepath.WalkDir(entry.SourcePath, func(sourcePath string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, relErr := filepath.Rel(entry.SourcePath, sourcePath)
+		if relErr != nil {
+			return relErr
+		}
+		if rel == "." {
+			return nil
+		}
+		if shouldIgnoreDotPath(entry.SourcePath, rel, d.Name(), combinedDotIgnores(entry.Ignore)) {
+			if d.IsDir() {
+				if ignoredDotDirHasIncludedDescendant(entry.SourcePath, rel, combinedDotIgnores(entry.Ignore)) {
+					return nil
+				}
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		sourceInfo, infoErr := os.Lstat(sourcePath)
+		if infoErr != nil {
+			return infoErr
+		}
+		targetPath := filepath.Join(entry.TargetPath, rel)
+		targetInfo, targetErr := os.Lstat(targetPath)
+		if os.IsNotExist(targetErr) {
+			if sourceInfo.IsDir() && sourceInfo.Mode()&os.ModeSymlink == 0 {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if targetErr != nil {
+			return targetErr
+		}
+		if sameResolvedPath(targetPath, sourcePath) {
+			return nil
+		}
+		if sourceInfo.IsDir() && sourceInfo.Mode()&os.ModeSymlink == 0 && targetInfo.IsDir() && targetInfo.Mode()&os.ModeSymlink == 0 {
+			return nil
+		}
+		if targetInfo.Mode()&os.ModeSymlink != 0 && symlinkTargetWithinStowRoot(targetPath, stowPath) {
+			managedWrongLink = true
+			return nil
+		}
+		return fmt.Errorf("unmanaged conflict at %s", targetPath)
+	})
+	return walkErr == nil && managedWrongLink
+}
+
+func symlinkTargetWithinStowRoot(path, stowPath string) bool {
+	target, err := os.Readlink(path)
+	if err != nil {
+		return false
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Clean(filepath.Join(filepath.Dir(path), target))
+	}
+	return pathWithinDir(target, stowPath)
 }
 
 func localDotCopySource(targetPath string) (string, error) {
@@ -2425,6 +2860,67 @@ func collectDots(cfg *config.RootConfig, groups []*config.GroupConfig) []config.
 	return entries
 }
 
+func resolveDotEntryPackagesForCurrentHost(entries []config.DotEntry) []config.DotEntry {
+	if len(entries) == 0 {
+		return entries
+	}
+	host := currentMachineGroupName()
+	out := make([]config.DotEntry, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, resolveDotEntryPackageForHost(entry, host))
+	}
+	return out
+}
+
+func activeDotVariantMap(entries []config.DotEntry, host string) map[string]bool {
+	variants := make(map[string]bool)
+	for _, entry := range entries {
+		if _, ok := entry.Hosts[host]; ok {
+			variants[entry.Name] = true
+		}
+	}
+	return variants
+}
+
+func resolveDotEntryPackageForHost(entry config.DotEntry, host string) config.DotEntry {
+	entry.Package = entry.PackageForHost(host)
+	return entry
+}
+
+func dotEntryPackages(entry config.DotEntry) []string {
+	seen := map[string]bool{}
+	add := func(pkg string, out *[]string) {
+		pkg = strings.TrimSpace(pkg)
+		if pkg == "" || seen[pkg] {
+			return
+		}
+		seen[pkg] = true
+		*out = append(*out, pkg)
+	}
+	var packages []string
+	add(entry.EffectivePackage(), &packages)
+	for _, variant := range entry.Hosts {
+		add(variant.Package, &packages)
+	}
+	sort.Strings(packages)
+	return packages
+}
+
+func dotEntriesForAllPackages(entry config.DotEntry) []config.DotEntry {
+	packages := dotEntryPackages(entry)
+	if len(packages) == 0 {
+		return nil
+	}
+	entries := make([]config.DotEntry, 0, len(packages))
+	for _, pkgName := range packages {
+		resolved := entry
+		resolved.Package = pkgName
+		resolved.Hosts = nil
+		entries = append(entries, resolved)
+	}
+	return entries
+}
+
 func filterActiveDotEntries(entries []config.DotEntry) []config.DotEntry {
 	filtered := entries[:0]
 	for _, entry := range entries {
@@ -2485,6 +2981,45 @@ func findDotEntryInConfig(cfg *config.RootConfig, name string) (config.DotEntry,
 	return config.DotEntry{}, false
 }
 
+func findDotEntryPtrInConfig(cfg *config.RootConfig, name string) (*config.DotEntry, bool) {
+	for _, group := range cfg.Groups {
+		if group == nil {
+			continue
+		}
+		for i := range group.Dots {
+			if group.Dots[i].Name == name {
+				return &group.Dots[i], true
+			}
+		}
+	}
+	return nil, false
+}
+
+func dotPackageOwner(cfg *config.RootConfig, pkgName string) (string, bool) {
+	pkgName = strings.ToLower(strings.TrimSpace(pkgName))
+	if pkgName == "" {
+		return "", false
+	}
+	for _, group := range cfg.Groups {
+		if group == nil {
+			continue
+		}
+		for _, entry := range group.Dots {
+			for _, pkg := range dotEntryPackages(entry) {
+				if strings.ToLower(pkg) == pkgName {
+					return entry.Name, true
+				}
+			}
+		}
+	}
+	return "", false
+}
+
+func dotPackageReferencedInConfig(cfg *config.RootConfig, pkgName string) bool {
+	_, ok := dotPackageOwner(cfg, pkgName)
+	return ok
+}
+
 // expandAndStat expands environment variables and ~, then confirms the path exists.
 func expandAndStat(path string) (string, error) {
 	expanded, err := dots.ExpandPath(path)
@@ -2511,7 +3046,8 @@ func inferName(abs string) string {
 // entryHealth computes a DotStatus for each ResolvedEntry in the manager
 // by lstat-ing the expected symlink locations. groupMap maps entry name →
 // group base name and is used to populate the Group field; may be nil.
-func entryHealth(m *dots.Manager, groupMap map[string]string) []DotStatus {
+// variantMap marks entries that are using a host-specific package.
+func entryHealth(m *dots.Manager, groupMap map[string]string, variantMap map[string]bool) []DotStatus {
 	statuses := make([]DotStatus, 0, len(m.Entries))
 	for _, e := range m.Entries {
 		state, actions := classifyDotEntry(e)
@@ -2529,6 +3065,8 @@ func entryHealth(m *dots.Manager, groupMap map[string]string) []DotStatus {
 		}
 		statuses = append(statuses, DotStatus{
 			Name:            e.Name,
+			Package:         e.Package,
+			Variant:         variantMap[e.Name],
 			SourcePath:      e.SourcePath,
 			TargetPath:      e.TargetPath,
 			ConfigPath:      configPathForTarget(e.TargetPath),

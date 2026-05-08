@@ -63,6 +63,8 @@ func TestMutatingCLICommandsAreCataloged(t *testing.T) {
 		{"dots", "sync"},
 		{"dots", "add"},
 		{"dots", "groups"},
+		{"dots", "variant", "add"},
+		{"dots", "variant", "remove"},
 		{"dots", "delete"},
 		{"dots", "ignore"},
 		{"dots", "enable"},

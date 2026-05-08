@@ -220,6 +220,11 @@ func renderDots(m Model) string {
 	// ── Empty state ───────────────────────────────────────────────────────────
 	if len(m.dotsEntries) == 0 {
 		sb.WriteString("\n")
+		if m.dotsPreparing {
+			sb.WriteString(p.styleHelp.Render("  Loading dotfiles…"))
+			sb.WriteString("\n")
+			return sb.String()
+		}
 		sb.WriteString(p.styleNormal.Render("  No dotfiles tracked yet.") + "\n\n")
 		sb.WriteString(p.styleHelp.Render("  Add dot entries from this tab or run sync all to discover candidates."))
 		sb.WriteString("\n")
@@ -298,7 +303,7 @@ func renderDots(m Model) string {
 				buf.markCursor()
 				left := childLeft(p.styleHelp.Bold(true), p.styleActiveText, p.styleHelp.Bold(true), "↳", childName, childTargetPadded)
 				write(renderDotsRow(true, left, childRight) + "\n")
-				if hints := renderContextHints(m, hintCtxDotsRow, hintPrefix); hints != "" {
+				if hints := renderDotsContextHints(m, hintCtxDotsRow, hintPrefix, m.width); hints != "" {
 					write(hints + "\n")
 					buf.markCursorEnd()
 				} else {
@@ -340,6 +345,8 @@ func renderDots(m Model) string {
 			repoConfirm := m.dotsOverwriteIdx == rowIndex && dotHasAction(e, app.DotActionUseRepo)
 			localConfirm := m.dotsLocalIdx == rowIndex && dotHasAction(e, app.DotActionUseLocal)
 			ignoreConfirm := m.dotsIgnoreIdx == rowIndex
+			variantCreate := m.dotsVariantIdx == rowIndex && m.dotsVariantMode == dotsVariantCreate
+			variantRemove := m.dotsVariantIdx == rowIndex && m.dotsVariantMode == dotsVariantRemove
 			isCursor := rowIndex == m.dotsCursor
 
 			if isCursor {
@@ -376,14 +383,24 @@ func renderDots(m Model) string {
 				write(renderDotsRow(true, left, activeRight) + "\n")
 				write(renderContextHints(m, hintCtxDotsIgnoreConfirm, hintPrefix) + "\n")
 				buf.markCursorEnd()
+			case variantCreate:
+				left := rowLeft(p.styleProvider, p.styleActiveText, p.styleHelp.Bold(true))
+				write(renderDotsRow(true, left, activeRight) + "\n")
+				write(renderDotsVariantCreatePrompt(m, e.Name, hintPrefix, m.width) + "\n")
+				buf.markCursorEnd()
+			case variantRemove:
+				left := rowLeft(p.styleMissing, p.styleMissing, p.styleMissing)
+				write(renderDotsRow(true, left, activeRight) + "\n")
+				write(renderDotsVariantRemovePrompt(m, e.Name, hintPrefix, m.width) + "\n")
+				buf.markCursorEnd()
 			case isCursor:
 				left := rowLeft(iconStyle.Bold(true), p.styleActiveText, p.styleHelp.Bold(true))
 				write(renderDotsRow(true, left, activeRight) + "\n")
 				if dotHasAction(e, app.DotActionUseRepo) || dotHasAction(e, app.DotActionUseLocal) {
-					write(renderContextHints(m, hintCtxDotsConflict, hintPrefix) + "\n")
+					write(renderDotsContextHints(m, hintCtxDotsConflict, hintPrefix, m.width) + "\n")
 					buf.markCursorEnd()
 				} else {
-					if hints := renderContextHints(m, hintCtxDotsRow, hintPrefix); hints != "" {
+					if hints := renderDotsContextHints(m, hintCtxDotsRow, hintPrefix, m.width); hints != "" {
 						write(hints + "\n")
 						buf.markCursorEnd()
 					} else {
@@ -431,6 +448,44 @@ func renderDotsDeleteKeepLocalPrompt(m Model, name, prefix string) string {
 		p.styleProvider.Bold(true).Render(name) +
 		p.styleHelp.Render(", keep local? ")
 	return prefix + prompt + renderActionHintText(p, contextHintItems(m, hintCtxDotsDeleteConfirm))
+}
+
+func renderDotsContextHints(m Model, ctx hintContext, prefix string, width int) string {
+	items := contextHintItems(m, ctx)
+	for len(items) > 0 {
+		rendered := renderHintItems(m.palette, prefix, items)
+		if width <= 0 || lipgloss.Width(rendered) <= width {
+			return rendered
+		}
+		items = items[:len(items)-1]
+	}
+	return ""
+}
+
+func renderDotsVariantCreatePrompt(m Model, name, prefix string, width int) string {
+	p := m.palette
+	hints := renderDotsContextHints(m, hintCtxDotsVariantCreate, "", max(width-lipgloss.Width(prefix), 1))
+	prompt := p.styleHelp.Render("create host variant for ") +
+		p.styleProvider.Bold(true).Render(name) +
+		p.styleHelp.Render(" ")
+	line := prefix + prompt + hints
+	if width <= 0 || lipgloss.Width(line) <= width {
+		return line
+	}
+	return prefix + hints
+}
+
+func renderDotsVariantRemovePrompt(m Model, name, prefix string, width int) string {
+	p := m.palette
+	hints := renderDotsContextHints(m, hintCtxDotsVariantRemove, "", max(width-lipgloss.Width(prefix), 1))
+	prompt := p.styleHelp.Render("remove host variant for ") +
+		p.styleProvider.Bold(true).Render(name) +
+		p.styleHelp.Render(" ")
+	line := prefix + prompt + hints
+	if width <= 0 || lipgloss.Width(line) <= width {
+		return line
+	}
+	return prefix + hints
 }
 
 func renderDotsSearchControl(m Model) string {
@@ -524,10 +579,15 @@ const (
 	dotKindFolderCollapsedIcon = "▸"
 	dotKindFolderExpandedIcon  = "▾"
 	dotKindFolderEmptyIcon     = "▹"
+	dotVariantIcon             = "◇"
 )
 
 func dotEntryDisplayName(m Model, entry app.DotStatus) string {
-	return dotEntryKindIcon(m, entry) + " " + entry.Name
+	name := dotEntryKindIcon(m, entry) + " " + entry.Name
+	if entry.Variant {
+		name += " " + dotVariantIcon
+	}
+	return name
 }
 
 func dotChildDisplayName(m Model, entry app.DotStatus, child app.DotChild) string {

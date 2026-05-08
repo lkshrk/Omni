@@ -97,6 +97,8 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 	}
 	m.hostRequired = false
 
+	m.prepareDotsSnapshotOnLaunch(&cmds)
+
 	if m.settings.DotsRepo != "" && !config.BoolVal(m.settings.DotsDisabled) && !m.dotsLoaded && !m.dotsLoading {
 		if m.promptForStowInstall(stowInstallLaunchSync) {
 			return cmds

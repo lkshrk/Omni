@@ -2727,6 +2727,80 @@ func TestImport_WithGroupFlag_DryRun(t *testing.T) {
 	}
 }
 
+func TestDotsVariantAddListRemove(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	repoDir := t.TempDir()
+	srcDir := filepath.Join(repoDir, "dotfiles", "nvim", ".config", "nvim")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte("default"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{DotsRepo: repoDir},
+		Groups: []*config.GroupConfig{{
+			Name:    "testhost",
+			Special: "host",
+			Dots:    []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}},
+		}},
+		Hosts: map[string][]string{"testhost": {}},
+	})
+
+	add := NewRootCmd()
+	addOut := &bytes.Buffer{}
+	add.SetOut(addOut)
+	add.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "variant", "add", "nvim", "--host", "work.local", "--package", "nvim-work"})
+	if err := add.Execute(); err != nil {
+		t.Fatalf("dots variant add: %v", err)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	group := findCLIDotsTestGroup(cfg.Groups, "testhost")
+	if group == nil || group.Dots[0].Hosts["work"].Package != "nvim-work" {
+		t.Fatalf("dots variant not persisted: %#v", cfg.Groups)
+	}
+	seeded := filepath.Join(repoDir, "dotfiles", "nvim-work", ".config", "nvim", "init.lua")
+	if data, err := os.ReadFile(seeded); err != nil || string(data) != "default" {
+		t.Fatalf("seeded variant = %q, %v; want default content", string(data), err)
+	}
+
+	list := NewRootCmd()
+	listOut := &bytes.Buffer{}
+	list.SetOut(listOut)
+	list.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "variant", "list", "nvim"})
+	if err := list.Execute(); err != nil {
+		t.Fatalf("dots variant list: %v", err)
+	}
+	if !strings.Contains(listOut.String(), "nvim-work") {
+		t.Fatalf("dots variant list output = %q, want nvim-work", listOut.String())
+	}
+
+	remove := NewRootCmd()
+	remove.SetArgs([]string{"--yes", "--config", cfgPath, "--cache-dir", cacheDir, "dots", "variant", "remove", "nvim", "--host", "work"})
+	if err := remove.Execute(); err != nil {
+		t.Fatalf("dots variant remove: %v", err)
+	}
+	cfg, err = config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load after remove: %v", err)
+	}
+	group = findCLIDotsTestGroup(cfg.Groups, "testhost")
+	if group == nil || group.Dots[0].Hosts != nil {
+		t.Fatalf("dots variant remained after remove: %#v", cfg.Groups)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "dotfiles", "nvim-work")); !os.IsNotExist(err) {
+		t.Fatalf("variant package after remove error = %v, want missing", err)
+	}
+}
+
 // ─── dots add command: with flags ─────────────────────────────────────────────
 
 func TestDotsAdd_WithFlags_ErrorPath(t *testing.T) {

@@ -47,6 +47,8 @@ const (
 	hintCtxDotsRepoConfirm
 	hintCtxDotsLocalConfirm
 	hintCtxDotsIgnoreConfirm
+	hintCtxDotsVariantCreate
+	hintCtxDotsVariantRemove
 	hintCtxDotsRow
 	hintCtxDotsConflict
 	hintCtxFilePickerBrowse
@@ -343,6 +345,14 @@ func contextHintItems(m Model, ctx hintContext) []hintItem {
 		}
 	case hintCtxDotsIgnoreConfirm:
 		return dotsIgnoreConfirmHintItems(m)
+	case hintCtxDotsVariantCreate:
+		return []hintItem{
+			pressAgainHint(m.keys.DotVariant.Help().Key, "create variant"),
+		}
+	case hintCtxDotsVariantRemove:
+		return []hintItem{
+			pressAgainHint(m.keys.DotVariant.Help().Key, "remove variant"),
+		}
 	case hintCtxDotsRow:
 		return dotsRowHintItems(m)
 	case hintCtxDotsConflict:
@@ -409,6 +419,9 @@ func dotsRowHintItems(m Model) []hintItem {
 	if !row.isChild && len(m.dotMemberships[entry.Name]) > 0 {
 		hints = append(hints, hintFromBindingDesc(m.keys.MoveGroup, actions.MustTUILabel(actions.DotsEditGroups)))
 	}
+	if dotsVariantEligible(row) {
+		hints = append(hints, hintFromBinding(m.keys.DotVariant))
+	}
 	if row.isChild && dotHasAction(entry, app.DotActionIgnore) {
 		desc := "ignore"
 		if row.child.Ignored {
@@ -447,6 +460,9 @@ func dotsConflictHintItems(m Model) []hintItem {
 	}
 	if dotHasAction(entry, app.DotActionUseLocal) {
 		hints = append(hints, hintFromBindingDesc(m.keys.DotUseLocal, "use local"))
+	}
+	if dotsVariantEligible(row) {
+		hints = append(hints, hintFromBinding(m.keys.DotVariant))
 	}
 	if dotHasAction(entry, app.DotActionIgnore) || dotHasAction(entry, app.DotActionUnignore) {
 		desc := "ignore"
@@ -599,7 +615,8 @@ func dotsConfirmationActive(m Model) bool {
 	return m.dotsConfirmIdx >= 0 ||
 		m.dotsOverwriteIdx >= 0 ||
 		m.dotsLocalIdx >= 0 ||
-		m.dotsIgnoreIdx >= 0
+		m.dotsIgnoreIdx >= 0 ||
+		m.dotsVariantIdx >= 0
 }
 
 func footerBindings(k KeyMap, actions, filters []key.Binding) []key.Binding {
@@ -643,7 +660,7 @@ func tabFullHelpBindings(m *Model) [][]key.Binding {
 		}
 		return [][]key.Binding{
 			common,
-			{k.SyncAll, k.DotDiscover, k.DotAdd, k.Sync, k.DotUseRepo, k.DotUseLocal, k.DotDelete, k.DotIgnore, k.Back},
+			{k.SyncAll, k.DotDiscover, k.DotAdd, k.DotVariant, k.Sync, k.DotUseRepo, k.DotUseLocal, k.DotDelete, k.DotIgnore, k.Back},
 		}
 	case viewSettings:
 		return [][]key.Binding{
@@ -710,6 +727,10 @@ func activeConfirmationHelpItems(m Model) []hintItem {
 		return contextHintItems(m, hintCtxDotsLocalConfirm)
 	case m.dotsIgnoreIdx >= 0:
 		return contextHintItems(m, hintCtxDotsIgnoreConfirm)
+	case m.dotsVariantIdx >= 0 && m.dotsVariantMode == dotsVariantCreate:
+		return contextHintItems(m, hintCtxDotsVariantCreate)
+	case m.dotsVariantIdx >= 0 && m.dotsVariantMode == dotsVariantRemove:
+		return contextHintItems(m, hintCtxDotsVariantRemove)
 	case m.dangerConfirmRow == settingsRowDotsSync:
 		return contextHintItems(m, hintCtxDotsDeleteConfirm)
 	case m.dangerConfirmRow >= 0:
@@ -806,6 +827,7 @@ func helpActionGroups(m Model) []helpGroup {
 			hintFromBindingDesc(k.DotDiscover, actions.MustTUILabel(actions.DotsDiscover)),
 			hintFromBindingDesc(k.SyncAll, actions.MustTUILabel(actions.ToolSyncAll)),
 			hintFromBindingDesc(k.Sync, actions.MustTUILabel(actions.DotsSync)),
+			hintFromBindingDesc(k.DotVariant, actions.MustTUILabel(actions.DotsVariant)),
 			hintFromBindingDesc(k.DotUseRepo, "use repo"),
 			hintFromBindingDesc(k.DotUseLocal, "use local"),
 			hintFromBindingDesc(k.MoveGroup, actions.MustTUILabel(actions.DotsEditGroups)),
@@ -880,29 +902,41 @@ func renderHelpLegend(m Model, width int) string {
 	if len(items) == 0 {
 		return divider + "\n" + lipgloss.NewStyle().Width(width).Align(lipgloss.Center).Render(p.styleHelp.Render("none"))
 	}
-	legend := strings.Join(items, p.styleHelp.Render("  "))
-	return divider + "\n" + lipgloss.NewStyle().Width(width).Align(lipgloss.Center).Render(legend)
+	lines := wrapHelpLegendItems(items, p.styleHelp.Render("  "), width)
+	for i, line := range lines {
+		lines[i] = lipgloss.NewStyle().Width(width).Align(lipgloss.Center).Render(line)
+	}
+	return divider + "\n" + strings.Join(lines, "\n")
 }
 
 func helpLegendItems(m Model) []string {
 	p := m.palette
-	switch m.mode {
-	case viewDots:
+	switch {
+	case m.mode == viewDots:
+		if config.BoolVal(m.settings.DotsDisabled) || m.settings.DotsRepo == "" {
+			return nil
+		}
 		return []string{
-			p.styleInstalled.Render("✓") + p.styleHelp.Render(" ok"),
+			p.styleInstalled.Render("✓") + p.styleHelp.Render(" synced"),
 			p.styleMissing.Render("✗") + p.styleHelp.Render(" missing"),
 			p.styleOutdated.Render("!") + p.styleHelp.Render(" conflict"),
 			p.styleHelp.Render("· no source"),
+			p.styleProvider.Render(dotVariantIcon) + p.styleHelp.Render(" host variant"),
+			p.styleHelp.Render("↳ child"),
 		}
-	case viewSettings:
+	case m.mode == viewSettings:
 		return []string{
 			p.styleInstalled.Render("[ON]") + p.styleHelp.Render(" enabled"),
 			p.styleMissing.Render("[OFF]") + p.styleHelp.Render(" disabled"),
 			p.styleMissing.Render("⚠") + p.styleHelp.Render(" confirm"),
 		}
-	case viewGroups:
+	case isGroupsHelpMode(m.mode):
 		return []string{
-			p.styleInstalled.Render("*") + p.styleHelp.Render(" current host"),
+			p.styleProvider.Render("(local)") + p.styleHelp.Render(" machine group"),
+			p.styleHelp.Render("[x] included"),
+			p.styleHelp.Render("[ ] excluded"),
+			p.styleIgnored.Render(iconIgnored) + p.styleHelp.Render(" ignored"),
+			p.styleHelp.Render(iconPrivileged) + p.styleHelp.Render(" may need sudo"),
 			p.styleMissing.Render("⚠") + p.styleHelp.Render(" confirm"),
 		}
 	default:
@@ -914,7 +948,43 @@ func helpLegendItems(m Model) []string {
 			p.styleWrongProv.Render(iconWrongProv) + p.styleHelp.Render(" wrong provider"),
 			p.styleIgnored.Render(iconIgnored) + p.styleHelp.Render(" ignored"),
 			p.styleHelp.Render(iconPrivileged) + p.styleHelp.Render(" may need sudo"),
+			p.styleErr.Render(iconFailed) + p.styleHelp.Render(" failed"),
+			p.styleHelp.Render("mgr!") + p.styleHelp.Render(" override"),
 		}
+	}
+}
+
+func wrapHelpLegendItems(items []string, sep string, width int) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	width = max(width, 1)
+	var lines []string
+	line := ""
+	for _, item := range items {
+		candidate := item
+		if line != "" {
+			candidate = line + sep + item
+		}
+		if line != "" && lipgloss.Width(candidate) > width {
+			lines = append(lines, line)
+			line = item
+			continue
+		}
+		line = candidate
+	}
+	if line != "" {
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+func isGroupsHelpMode(mode viewMode) bool {
+	switch mode {
+	case viewGroups, viewGroupMembership, viewGroupTools, viewGroupDots:
+		return true
+	default:
+		return false
 	}
 }
 

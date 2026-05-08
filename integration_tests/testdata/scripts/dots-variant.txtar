@@ -1,0 +1,37 @@
+# dots variant commands persist host-specific package mappings without hand-editing JSON
+env HOME=$WORK/home
+
+exec omni --config settings.json dots variant list nvim
+stdout '(default)'
+stdout 'nvim'
+! stdout 'nvim-work'
+
+exec omni --config settings.json dots variant add nvim --host work.local --package nvim-work
+stdout 'added dots variant "nvim" for host "work" using package "nvim-work"'
+exec grep relativenumber home/dotfiles/dotfiles/nvim-work/.config/nvim/init.lua
+stdout 'relativenumber'
+
+exec omni --config settings.json dots variant list nvim
+stdout 'work'
+stdout 'nvim-work'
+
+exec omni --config settings.json dots list nvim --format json
+stdout '"package":"nvim"'
+stdout '"name":"nvim"'
+
+exec omni --yes --config settings.json dots variant remove nvim --host work
+stdout 'removed dots variant "nvim" for host "work" using package "nvim-work"'
+! exists home/dotfiles/dotfiles/nvim-work
+
+exec omni --config settings.json dots variant list nvim
+stdout '(default)'
+! stdout 'nvim-work'
+
+-- settings.json --
+{"host_settings":{"testhost":{"dots_repo":"~/dotfiles"}},"hosts":{"testhost":[]},"groups":[{"name":"testhost","special":"host","dots":[{"name":"nvim","path":"~/.config/nvim"}]}]}
+
+-- home/dotfiles/dotfiles/nvim/.config/nvim/init.lua --
+vim.opt.number = true
+
+-- home/dotfiles/dotfiles/nvim-work/.config/nvim/init.lua --
+vim.opt.relativenumber = true

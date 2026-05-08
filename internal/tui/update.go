@@ -195,6 +195,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dotsLoadedMsg:
 		cmds = append(cmds, m.handleDotsLoadedMsg(msg)...)
 
+	case dotsPreparedMsg:
+		cmds = append(cmds, m.handleDotsPreparedMsg(msg)...)
+
 	case dotsSyncedMsg:
 		cmds = append(cmds, m.handleDotsSyncedMsg(msg)...)
 
@@ -215,6 +218,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case dotsAddedMsg:
 		cmds = append(cmds, m.handleDotsAddedMsg(msg)...)
+
+	case dotsVariantChangedMsg:
+		cmds = append(cmds, m.handleDotsVariantChangedMsg(msg)...)
 
 	case claimDoneMsg:
 		cmds = append(cmds, m.handleClaimDoneMsg(msg)...)

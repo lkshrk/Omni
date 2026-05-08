@@ -1524,6 +1524,327 @@ func TestDotsSyncEntry_LocalOnlyFollowsSymlinkAdoption(t *testing.T) {
 	}
 }
 
+func TestDotsList_UsesHostVariantPackage(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "work.local")
+	a, cfgDir, repoDir := newDotsApp(t)
+
+	source := filepath.Join(dotsContentDir(repoDir), "nvim-work", ".config", "nvim", "init.lua")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("work"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{{
+		Name: "nvim",
+		Path: "~/.config/nvim",
+		Hosts: map[string]config.DotVariant{
+			"work": {Package: "nvim-work"},
+		},
+	}}, "")
+
+	statuses, err := a.DotsList()
+	if err != nil {
+		t.Fatalf("DotsList: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("len(statuses) = %d, want 1", len(statuses))
+	}
+	if got := statuses[0].Package; got != "nvim-work" {
+		t.Fatalf("Package = %q, want nvim-work", got)
+	}
+	if !statuses[0].Variant {
+		t.Fatal("Variant = false, want true for active host package")
+	}
+	wantSource := filepath.Join(dotsContentDir(repoDir), "nvim-work", ".config", "nvim")
+	if got := statuses[0].SourcePath; got != wantSource {
+		t.Fatalf("SourcePath = %q, want %q", got, wantSource)
+	}
+}
+
+func TestDotsAddHostVariant_SeedsFromDefaultWhenLocalTargetMissing(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "work")
+	a, cfgDir, repoDir := newDotsApp(t)
+
+	source := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim", "init.lua")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("default"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}}, "")
+
+	info, ops, err := a.DotsAddHostVariant(context.Background(), "nvim", app.DotsAddVariantOptions{
+		Host: "work.local",
+	})
+	if err != nil {
+		t.Fatalf("DotsAddHostVariant: %v", err)
+	}
+	if len(ops) != 0 {
+		t.Fatalf("ops = %v, want none without sync", ops)
+	}
+	if info.Host != "work" || info.Package != "nvim@work" {
+		t.Fatalf("variant info = %+v, want host work package nvim@work", info)
+	}
+	seeded := filepath.Join(dotsContentDir(repoDir), "nvim@work", ".config", "nvim", "init.lua")
+	got, err := os.ReadFile(seeded)
+	if err != nil {
+		t.Fatalf("ReadFile seeded variant: %v", err)
+	}
+	if string(got) != "default" {
+		t.Fatalf("seeded content = %q, want default", string(got))
+	}
+
+	cfg, err := config.Load(filepath.Join(cfgDir, "settings.json"))
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	group := findDotsTestGroup(cfg.Groups, "work")
+	if group == nil || len(group.Dots) != 1 {
+		t.Fatalf("work group dots = %#v", group)
+	}
+	if got := group.Dots[0].Hosts["work"].Package; got != "nvim@work" {
+		t.Fatalf("host variant package = %q, want nvim@work", got)
+	}
+}
+
+func TestDotsAddHostVariant_SeedsFromLocalTargetWhenPresent(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "work")
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := os.Getenv("HOME")
+
+	source := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim", "init.lua")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("default"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	local := filepath.Join(home, ".config", "nvim", "init.lua")
+	if err := os.MkdirAll(filepath.Dir(local), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(local, []byte("local"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}}, "")
+
+	info, _, err := a.DotsAddHostVariant(context.Background(), "nvim", app.DotsAddVariantOptions{
+		Host: "work.local",
+	})
+	if err != nil {
+		t.Fatalf("DotsAddHostVariant: %v", err)
+	}
+	if info.Host != "work" || info.Package != "nvim@work" {
+		t.Fatalf("variant info = %+v, want host work package nvim@work", info)
+	}
+	seeded := filepath.Join(dotsContentDir(repoDir), "nvim@work", ".config", "nvim", "init.lua")
+	got, err := os.ReadFile(seeded)
+	if err != nil {
+		t.Fatalf("ReadFile seeded variant: %v", err)
+	}
+	if string(got) != "local" {
+		t.Fatalf("seeded content = %q, want local", string(got))
+	}
+}
+
+func TestDotsAddHostVariant_UsesExistingRepoPackageWhenPresent(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "work")
+	a, cfgDir, repoDir := newDotsApp(t)
+
+	defaultSource := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim", "init.lua")
+	variantSource := filepath.Join(dotsContentDir(repoDir), "nvim@work", ".config", "nvim", "init.lua")
+	if err := os.MkdirAll(filepath.Dir(defaultSource), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(variantSource), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(defaultSource, []byte("default"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(variantSource, []byte("existing variant"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}}, "")
+
+	info, _, err := a.DotsAddHostVariant(context.Background(), "nvim", app.DotsAddVariantOptions{
+		Host: "work.local",
+	})
+	if err != nil {
+		t.Fatalf("DotsAddHostVariant: %v", err)
+	}
+	if info.Host != "work" || info.Package != "nvim@work" {
+		t.Fatalf("variant info = %+v, want host work package nvim@work", info)
+	}
+	got, err := os.ReadFile(variantSource)
+	if err != nil {
+		t.Fatalf("ReadFile existing variant: %v", err)
+	}
+	if string(got) != "existing variant" {
+		t.Fatalf("variant content = %q, want existing repo content preserved", string(got))
+	}
+}
+
+func TestDotsRemoveHostVariant_RemovesUnreferencedRepoPackage(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "laptop")
+	a, cfgDir, repoDir := newDotsApp(t)
+
+	defaultSource := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim", "init.lua")
+	variantRoot := filepath.Join(dotsContentDir(repoDir), "nvim@work")
+	variantSource := filepath.Join(variantRoot, ".config", "nvim", "init.lua")
+	if err := os.MkdirAll(filepath.Dir(defaultSource), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(variantSource), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(defaultSource, []byte("default"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(variantSource, []byte("work"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{{
+		Name: "nvim",
+		Path: "~/.config/nvim",
+		Hosts: map[string]config.DotVariant{
+			"work": {Package: "nvim@work"},
+		},
+	}}, "")
+
+	info, err := a.DotsRemoveHostVariant(context.Background(), "nvim", app.DotsRemoveVariantOptions{
+		Host: "work.local",
+	})
+	if err != nil {
+		t.Fatalf("DotsRemoveHostVariant: %v", err)
+	}
+	if info.Host != "work" || info.Package != "nvim@work" {
+		t.Fatalf("variant info = %+v, want work nvim@work", info)
+	}
+	if _, err := os.Stat(variantRoot); !os.IsNotExist(err) {
+		t.Fatalf("variant root stat = %v, want missing", err)
+	}
+	cfg, err := config.Load(filepath.Join(cfgDir, "settings.json"))
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	group := findDotsTestGroup(cfg.Groups, "laptop")
+	if group == nil || group.Dots[0].Hosts != nil {
+		t.Fatalf("host variants after remove = %#v, want none", group)
+	}
+}
+
+func TestDotsSync_HostVariantRepairsManagedLinkFromDefaultPackage(t *testing.T) {
+	if _, err := exec.LookPath("stow"); err != nil {
+		t.Skip("stow not available")
+	}
+	t.Setenv("OMNI_HOSTNAME", "work")
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := os.Getenv("HOME")
+
+	defaultSource := filepath.Join(dotsContentDir(repoDir), "gitconfig", ".gitconfig")
+	variantSource := filepath.Join(dotsContentDir(repoDir), "gitconfig@work", ".gitconfig")
+	if err := os.MkdirAll(filepath.Dir(defaultSource), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(variantSource), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(defaultSource, []byte("default"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(variantSource, []byte("work"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(home, ".gitconfig")
+	if err := os.Symlink(defaultSource, target); err != nil {
+		t.Fatal(err)
+	}
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{{
+		Name: "gitconfig",
+		Path: "~/.gitconfig",
+		Hosts: map[string]config.DotVariant{
+			"work": {Package: "gitconfig@work"},
+		},
+	}}, "")
+
+	ops, err := a.DotsSync(dots.SyncOptions{})
+	if err != nil {
+		t.Fatalf("DotsSync: %v", err)
+	}
+	if len(ops) == 0 || ops[0].Kind != dots.OpRepair {
+		t.Fatalf("ops = %v, want repair", ops)
+	}
+	resolved, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatalf("EvalSymlinks target: %v", err)
+	}
+	wantResolved, err := filepath.EvalSymlinks(variantSource)
+	if err != nil {
+		t.Fatalf("EvalSymlinks variant source: %v", err)
+	}
+	if resolved != wantResolved {
+		t.Fatalf("target resolves to %q, want %q", resolved, wantResolved)
+	}
+}
+
+func TestDotsDelete_RemovesAllVariantPackagesAndKeepsLinkedLocal(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "work")
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := os.Getenv("HOME")
+
+	defaultSource := filepath.Join(dotsContentDir(repoDir), "gitconfig", ".gitconfig")
+	variantSource := filepath.Join(dotsContentDir(repoDir), "gitconfig@work", ".gitconfig")
+	if err := os.MkdirAll(filepath.Dir(defaultSource), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(variantSource), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(defaultSource, []byte("default"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(variantSource, []byte("work"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(home, ".gitconfig")
+	if err := os.Symlink(defaultSource, target); err != nil {
+		t.Fatal(err)
+	}
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{{
+		Name: "gitconfig",
+		Path: "~/.gitconfig",
+		Hosts: map[string]config.DotVariant{
+			"work": {Package: "gitconfig@work"},
+		},
+	}}, "")
+
+	if err := a.DotsDelete(context.Background(), "gitconfig"); err != nil {
+		t.Fatalf("DotsDelete: %v", err)
+	}
+	info, err := os.Lstat(target)
+	if err != nil {
+		t.Fatalf("Lstat target: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("target is still a symlink after delete")
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("ReadFile target: %v", err)
+	}
+	if string(got) != "default" {
+		t.Fatalf("target content = %q, want default", string(got))
+	}
+	for _, pkg := range []string{"gitconfig", "gitconfig@work"} {
+		if _, err := os.Lstat(filepath.Join(dotsContentDir(repoDir), pkg)); !os.IsNotExist(err) {
+			t.Fatalf("package %s still exists or stat failed: %v", pkg, err)
+		}
+	}
+}
+
 func TestDotsSync_FileOverwrittenByNewerLocalAdoptsAndRelinks(t *testing.T) {
 	if _, err := exec.LookPath("stow"); err != nil {
 		t.Skip("stow not available")

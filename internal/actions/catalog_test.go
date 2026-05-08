@@ -232,6 +232,7 @@ func TestActionCatalogIncludesDurableDomains(t *testing.T) {
 		DotsDiscover,
 		DotsAdd,
 		DotsEditGroups,
+		DotsVariant,
 		DotsDelete,
 		DotsIgnore,
 		DotsEnable,
