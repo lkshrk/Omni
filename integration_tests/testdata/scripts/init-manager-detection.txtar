@@ -1,0 +1,81 @@
+# omni init persists detected package managers, creates the host, and can skip dots
+exec chmod 755 bin/pnpm bin/npm bin/pip3 bin/apt bin/apk bin/dnf bin/pacman bin/zypper bin/brew bin/pip
+env PATH=$WORK/bin:$PATH
+stdin init-input
+
+exec omni --config settings.json init --no-import
+stdout 'Detected providers:'
+stdout 'node.manager   = pnpm'
+stdout 'python.manager = pip3'
+stdout 'Created host "testhost"'
+stdout 'Skipping dots setup'
+exec grep '"manager": "pnpm"' settings.json
+stdout '"manager": "pnpm"'
+exec grep '"manager": "pip3"' settings.json
+stdout '"manager": "pip3"'
+exec grep '"testhost"' settings.json
+stdout '"testhost"'
+
+-- init-input --
+n
+
+-- bin/pnpm --
+#!/bin/sh
+case "${1:-}" in
+  --version)
+    echo "9.0.0"
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+
+-- bin/npm --
+#!/bin/sh
+case "${1:-}" in
+  --version)
+    echo "10.0.0"
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+
+-- bin/pip3 --
+#!/bin/sh
+case "${1:-}" in
+  --version)
+    echo "pip 24.0"
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+
+-- bin/apt --
+#!/bin/sh
+exit 1
+
+-- bin/apk --
+#!/bin/sh
+exit 1
+
+-- bin/dnf --
+#!/bin/sh
+exit 1
+
+-- bin/pacman --
+#!/bin/sh
+exit 1
+
+-- bin/zypper --
+#!/bin/sh
+exit 1
+
+-- bin/brew --
+#!/bin/sh
+exit 1
+
+-- bin/pip --
+#!/bin/sh
+exit 1

@@ -1,5 +1,4 @@
 # omni add with --name uses the override name in the confirmation message
-exec omni --config settings.json profile add default base
-exec omni --config settings.json profile set-hostname testhost default
-exec omni --config settings.json add typescript --provider node --install-with npm --name ts --group base
+exec omni --config settings.json hosts ensure testhost
+exec omni --config settings.json add typescript --provider node --install-with npm --name ts --group testhost
 stdout 'added ts'

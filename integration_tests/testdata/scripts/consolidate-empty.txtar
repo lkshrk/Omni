@@ -1,6 +1,5 @@
 # consolidate --dry-run with no tools to migrate prints "Nothing to migrate"
-exec omni --config settings.json profile add default base
-exec omni --config settings.json profile set-hostname testhost default
+exec omni --config settings.json hosts ensure testhost
 exec omni --config settings.json consolidate python uv --dry-run
 stdout 'Nothing to migrate'
 

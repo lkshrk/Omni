@@ -1,0 +1,53 @@
+# omni import writes newly discovered installed tools and skips existing tools
+exec chmod 755 bin/npm
+exec chmod 755 bin/bun
+exec chmod 755 bin/pnpm
+env PATH=$WORK/bin:$PATH
+
+exec omni --config settings.json import --provider node --group work
+stdout 'Imported 1 tool\(s\):'
+stdout 'typescript'
+stdout '\(node\) 5.4.0'
+stdout 'Skipped 1 already configured tool\(s\)'
+exec grep '"typescript"' settings.json
+stdout '"typescript"'
+exec grep '"name": "work"' settings.json
+stdout '"name": "work"'
+exec grep '"provider": "node"' settings.json
+stdout '"provider": "node"'
+
+-- bin/npm --
+#!/usr/bin/env sh
+set -eu
+case "${1:-}" in
+  --version)
+    echo "10.0.0"
+    ;;
+  list)
+    printf '%s\n' '/fake/npm/global' '+-- eslint@9.0.0' '`-- typescript@5.4.0'
+    ;;
+esac
+
+-- bin/bun --
+#!/usr/bin/env sh
+exit 1
+
+-- bin/pnpm --
+#!/usr/bin/env sh
+exit 1
+
+-- settings.json --
+{
+  "settings": {
+    "ecosystems": {
+      "node": { "manager": "npm" }
+    }
+  },
+  "hosts": { "testhost": [] },
+  "tools": {
+    "eslint": { "provider": "node" }
+  },
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": ["eslint"] }
+  ]
+}

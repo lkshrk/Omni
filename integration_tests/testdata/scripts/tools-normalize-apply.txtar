@@ -1,0 +1,37 @@
+# tools normalize --default-overrides applies no-op install_with cleanup
+exec chmod 755 bin/pip3
+env PATH=$WORK/bin:$PATH
+
+exec omni --config settings.json tools normalize --default-overrides --dry-run
+stdout 'Would normalize 1 provider override'
+stdout 'black: python via pip3'
+exec grep '"install_with"' settings.json
+stdout '"install_with"'
+
+exec omni -y --config settings.json tools normalize --default-overrides
+stdout 'Normalized 1 provider override'
+stdout 'black: python via pip3'
+! exec grep '"install_with"' settings.json
+
+-- bin/pip3 --
+#!/usr/bin/env sh
+if [ "$1" = "--version" ]; then
+  echo "pip 25.0"
+fi
+
+-- settings.json --
+{
+  "settings": {
+    "ecosystems": {
+      "python": { "manager": "pip3" }
+    }
+  },
+  "hosts": { "testhost": ["work"] },
+  "tools": {
+    "black": { "provider": "python", "install_with": "pip3" }
+  },
+  "groups": [
+    { "name": "testhost", "special": "host" },
+    { "name": "work", "tools": ["black"] }
+  ]
+}
