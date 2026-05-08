@@ -89,6 +89,7 @@ const (
 	stowInstallSaveSettingsSync
 	stowInstallSetupDotsRepo
 	stowInstallDotVariant
+	stowInstallDotsWatch
 )
 
 type dotsVariantMode int
@@ -348,9 +349,12 @@ type Model struct {
 	hostRequired bool
 
 	// provider priority editor (active when editing the Priority row in settings)
-	editingPriority bool
-	priorityCursor  int
-	priorityDraft   []string
+	editingPriority        bool
+	priorityCursor         int
+	priorityDraft          []string
+	editingServiceDuration bool
+	serviceDurationRow     int
+	serviceDurationIdx     int
 
 	// file picker popup (reusable for any path selection)
 	dotsFilePicker       pathPickerModel
@@ -360,36 +364,42 @@ type Model struct {
 	settingsInput        textinput.Model // used by settings/group text inputs
 
 	// dots tab
-	dotsEntries          []app.DotStatus
-	dotsGitStatus        string
-	dotMemberships       map[string][]string
-	dotsCursor           int
-	dotsExpandedName     string
-	dotsExpandedChildren map[string]bool
-	dotsLoading          bool
-	dotsLoaded           bool // true after first lazy load
-	dotsPreparing        bool // true while the non-mutating launch snapshot is in flight
-	dotsPrepareGen       int  // increments for each launch snapshot; stale results are dropped
-	dotsOpGen            int  // increments for each async dots operation; stale results are dropped
-	dotsCtx              context.Context
-	dotsCancel           context.CancelFunc
-	dotsProgressCh       chan dotsProgressUpdate
-	dotsPendingNames     map[string]bool
-	dotsActiveName       string
-	dotsConfirmIdx       int // index of entry pending delete confirm; -1 = none
-	dotsOverwriteIdx     int // index of conflict entry pending use-repo confirm; -1 = none
-	dotsLocalIdx         int // index of conflict entry pending use-local confirm; -1 = none
-	dotsIgnoreIdx        int // index of child path pending ignore/include confirm; -1 = none
-	dotsVariantIdx       int // index of entry pending host variant choice/removal; -1 = none
-	dotsVariantMode      dotsVariantMode
-	dotsSearchActive     bool // true when dots search bar is open
-	filePickerForDotAdd  bool // true when file picker opened for "add path" on dots tab
-	stowInstalled        bool
-	stowInstallPrompt    bool
-	stowInstallAction    stowInstallAction
-	stowInstallSettings  config.Settings
-	stowInstallPath      string
-	stowInstallVariant   dotsVariantRequest
+	dotsEntries            []app.DotStatus
+	dotsGitStatus          string
+	dotMemberships         map[string][]string
+	dotsCursor             int
+	dotsExpandedName       string
+	dotsExpandedChildren   map[string]bool
+	dotsLoading            bool
+	dotsLoaded             bool // true after first lazy load
+	dotsPreparing          bool // true while the non-mutating launch snapshot is in flight
+	dotsPrepareGen         int  // increments for each launch snapshot; stale results are dropped
+	dotsOpGen              int  // increments for each async dots operation; stale results are dropped
+	dotsCtx                context.Context
+	dotsCancel             context.CancelFunc
+	dotsProgressCh         chan dotsProgressUpdate
+	dotsPendingNames       map[string]bool
+	dotsActiveName         string
+	dotsConfirmIdx         int // index of entry pending delete confirm; -1 = none
+	dotsOverwriteIdx       int // index of conflict entry pending use-repo confirm; -1 = none
+	dotsLocalIdx           int // index of conflict entry pending use-local confirm; -1 = none
+	dotsIgnoreIdx          int // index of child path pending ignore/include confirm; -1 = none
+	dotsVariantIdx         int // index of entry pending host variant choice/removal; -1 = none
+	dotsVariantMode        dotsVariantMode
+	dotsSearchActive       bool // true when dots search bar is open
+	filePickerForDotAdd    bool // true when file picker opened for "add path" on dots tab
+	stowInstalled          bool
+	dotsReminderService    *app.DotsReminderService
+	dotsReminderServiceErr string
+	dotsReminderInterval   time.Duration
+	dotsWatchService       *app.DotsWatchService
+	dotsWatchServiceErr    string
+	dotsWatchDebounce      time.Duration
+	stowInstallPrompt      bool
+	stowInstallAction      stowInstallAction
+	stowInstallSettings    config.Settings
+	stowInstallPath        string
+	stowInstallVariant     dotsVariantRequest
 
 	// danger zone (settings tab)
 	dangerConfirmRow int // settings row awaiting inline confirmation; -1 = none
@@ -622,6 +632,8 @@ func loadTools(a *app.App, ctx context.Context) tea.Cmd {
 		ecosystemMap := a.ResolvedEcosystemProviders(ctx)
 		effectiveSystemManager := ecosystemMap[provider.EcosystemSystem]
 		stowInstalled := a.DotsStowInstalled(ctx)
+		dotsReminderService, dotsReminderServiceErr := a.DotsReminderServiceStatus()
+		dotsWatchService, dotsWatchServiceErr := a.DotsWatchServiceStatus()
 		discovered, _ := a.ListDiscovered(ctx)
 		// Build setup provider rows from already-fetched manager data — no extra calls needed.
 		spRows := buildSetupProvidersFromManagers(ecosystemMap, allPyBins, allNodeBins, settings)
@@ -650,6 +662,10 @@ func loadTools(a *app.App, ctx context.Context) tea.Cmd {
 			effectiveNodeManager:   nodeBin,
 			effectiveSystemManager: effectiveSystemManager,
 			stowInstalled:          stowInstalled,
+			dotsReminderService:    dotsReminderService,
+			dotsReminderServiceErr: errorString(dotsReminderServiceErr),
+			dotsWatchService:       dotsWatchService,
+			dotsWatchServiceErr:    errorString(dotsWatchServiceErr),
 			allPythonManagers:      allPyBins,
 			allNodeManagers:        allNodeBins,
 			setupProviders:         spRows,
@@ -662,6 +678,13 @@ func loadTools(a *app.App, ctx context.Context) tea.Cmd {
 // toolKey returns the composite key used to identify a tool in maps.
 func toolKey(name, provider string) string {
 	return name + "\x00" + provider
+}
+
+func errorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func toolNameFromKey(key string) string {

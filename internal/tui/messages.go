@@ -26,10 +26,14 @@ type toolsLoadedMsg struct {
 	noConfig               bool     // true when no settings.json was found
 	noHost                 bool     // true when settings.json exists but no host entry matches this machine
 	err                    error
-	effectivePythonManager string             // binary actually used (uv, pip3, pip) — empty if not found
-	effectiveNodeManager   string             // binary actually used (bun, pnpm, npm) — empty if not found
-	effectiveSystemManager string             // concrete PM backing the system ecosystem provider (e.g. "brew", "apt") — empty if not resolved
-	stowInstalled          bool               // true when GNU Stow is reachable on PATH
+	effectivePythonManager string // binary actually used (uv, pip3, pip) — empty if not found
+	effectiveNodeManager   string // binary actually used (bun, pnpm, npm) — empty if not found
+	effectiveSystemManager string // concrete PM backing the system ecosystem provider (e.g. "brew", "apt") — empty if not resolved
+	stowInstalled          bool   // true when GNU Stow is reachable on PATH
+	dotsReminderService    *app.DotsReminderService
+	dotsReminderServiceErr string
+	dotsWatchService       *app.DotsWatchService
+	dotsWatchServiceErr    string
 	allPythonManagers      []string           // all python managers found on PATH (for setup wizard)
 	allNodeManagers        []string           // all node managers found on PATH (for setup wizard)
 	setupProviders         []setupProviderRow // pre-built provider rows for the setup wizard
@@ -101,6 +105,21 @@ type opCompleteMsg struct {
 type settingsSavedMsg struct {
 	gen int
 	err error
+}
+
+type dotsServiceKind string
+
+const (
+	dotsReminderServiceKind dotsServiceKind = "reminder"
+	dotsWatchServiceKind    dotsServiceKind = "watch"
+)
+
+type dotsServiceChangedMsg struct {
+	kind     dotsServiceKind
+	enabled  bool
+	reminder *app.DotsReminderService
+	watch    *app.DotsWatchService
+	err      error
 }
 
 type progressUpdate struct {

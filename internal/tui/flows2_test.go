@@ -775,10 +775,10 @@ func TestFlow2_UC88_SettingsSystemProviderToggle(t *testing.T) {
 	}
 }
 
-// UC-89: Row 9 → AutoCommit toggle (only when AutoPush=false).
+// UC-89: Commit Changes row toggles AutoCommit (only when AutoPush=false).
 func TestFlow2_UC89_SettingsAutoCommit(t *testing.T) {
 	t.Run("AutoPush=false: toggles AutoCommit", func(t *testing.T) {
-		msgs := append(toSettings(), nj(9)...)
+		msgs := append(toSettings(), nj(settingsRowDotsCommit)...)
 		msgs = append(msgs, pressRune(' '))
 		got := drive(baseModel(nil), msgs...)
 		if !got.settings.DotsGit.AutoCommit {
@@ -789,7 +789,7 @@ func TestFlow2_UC89_SettingsAutoCommit(t *testing.T) {
 	t.Run("AutoPush=true: no toggle", func(t *testing.T) {
 		m := baseModel(nil)
 		m.settings.DotsGit.AutoPush = true
-		msgs := append(toSettings(), nj(9)...)
+		msgs := append(toSettings(), nj(settingsRowDotsCommit)...)
 		msgs = append(msgs, pressRune(' '))
 		got := drive(m, msgs...)
 		if got.settings.DotsGit.AutoCommit {
@@ -798,13 +798,13 @@ func TestFlow2_UC89_SettingsAutoCommit(t *testing.T) {
 	})
 }
 
-// UC-90: Row 10 → AutoPush toggle.
+// UC-90: Push Changes row toggles AutoPush.
 func TestFlow2_UC90_SettingsAutoPush(t *testing.T) {
-	msgs := append(toSettings(), nj(10)...)
+	msgs := append(toSettings(), nj(settingsRowDotsPush)...)
 	msgs = append(msgs, pressRune(' '))
 	got := drive(baseModel(nil), msgs...)
 	if !got.settings.DotsGit.AutoPush {
-		t.Error("AutoPush should be true after toggle from row 10")
+		t.Error("AutoPush should be true after toggling Push Changes")
 	}
 }
 

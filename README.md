@@ -117,6 +117,65 @@ omni tools normalize --default-overrides --dry-run
 
 Dotfiles are logical entries in groups, backed by Stow package directories in the configured repo. Each entry has one target path, such as `~/.config/nvim`, and one default package. If `package` is omitted, the package name defaults to the entry name.
 
+#### Ignored Paths
+
+Each dot entry can skip files inside its package with an `ignore` list. This is useful for local caches, generated files, logs, machine-local secrets, or anything that should not be copied into the repo or linked back into the target.
+
+```json
+{
+  "name": "nvim",
+  "path": "~/.config/nvim",
+  "ignore": [
+    "*.log",
+    "cache/",
+    "/local.lua",
+    "!/cache/keep"
+  ]
+}
+```
+
+You can also manage these patterns from the CLI:
+
+```sh
+omni dots ignore nvim '*.log'
+omni dots unignore nvim '*.log'
+```
+
+Patterns are evaluated in order, and later matches override earlier ones. Basename patterns such as `*.log` match files with that name anywhere in the entry. Patterns with `/` match paths relative to the entry root. A leading `/` anchors the pattern to the entry root, a trailing `/` matches a directory and its descendants, and `!` includes a path after an earlier ignore.
+
+This syntax is gitignore-like, but it is not full Git `.gitignore` compatibility: nested ignore files, comments, escaping rules, and `**` wildmatch semantics are not supported. Host-specific variants use the same logical dot entry, so they inherit the same ignore rules.
+
+#### Reminders
+
+Omni can run a lightweight reminder check for dotfiles that need attention. The check is read-only: it does not sync, commit, push, or resolve conflicts. It reports dirty dotfiles repo state, entries that need sync, conflict resolution, untracked candidates, or missing repo sources.
+
+```sh
+omni dots reminder check
+omni dots reminder run --notify
+omni dots reminder install --interval 24h
+omni dots reminder status
+omni dots reminder uninstall
+```
+
+`install` creates a native user-level timer for the current platform: `launchd` on macOS or `systemd --user` on Linux. The installed timer runs `omni dots reminder run --notify` with the current `--config` and `--cache-dir` paths. Desktop notifications are best-effort; if notification delivery is unavailable, the reminder still writes normal command output to the service logs.
+
+In the TUI, open Settings -> Dotfiles and toggle `Reminder Notifications` to install or remove the native reminder timer with notifications enabled. Use `Reminder Interval` to choose the timer interval before enabling it, or to update the installed timer.
+
+#### Automatic Watch Sync
+
+Omni can also watch configured dotfile source and target paths and run the normal dots sync flow after filesystem changes settle. The watcher uses OS filesystem events through `fsnotify`, not polling. It watches the dotfiles repo's `dotfiles/` subtree plus the active, non-ignored dot targets for this host, then debounces bursts before syncing.
+
+```sh
+omni dots watch run --debounce 5s
+omni dots watch install --debounce 5s
+omni dots watch status
+omni dots watch uninstall
+```
+
+`run` keeps the watcher in the foreground for debugging. `install` creates a native user-level service: a `launchd` agent on macOS or a `systemd --user` service on Linux. The watcher repairs links, adopts eligible local-only files, and reports conflicts using the same app-level behavior as `omni dots sync`. It does not commit or push the dotfiles repo, even when dots auto-commit or auto-push settings are enabled; use `omni dots push` or normal git commands for that step.
+
+In the TUI, open Settings -> Dotfiles and toggle `Watch Sync` to install or remove the native watcher service. Use `Watch Debounce` to choose how long Omni waits for file-change bursts to settle before syncing. Enabling watch sync requires GNU Stow, so the TUI prompts to install Stow first when needed.
+
 #### Host-Specific Variants
 
 Some dotfiles should exist on every host but differ per machine. For those, keep one logical dot entry and add host-specific package variants. Omni selects the active host's package by short hostname and falls back to the default package on hosts without an override.

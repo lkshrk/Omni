@@ -1381,6 +1381,38 @@ func (m *Model) appendSaveSettingsCmd(cmds *[]tea.Cmd) {
 	}
 }
 
+func (m *Model) doToggleDotsReminderService(enable bool) tea.Cmd {
+	a, ctx := m.app, m.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	interval := m.currentDotsReminderInterval()
+	return func() tea.Msg {
+		if enable {
+			service, err := a.InstallDotsReminderService(ctx, app.DotsReminderInstallOptions{Interval: interval, Notify: true, Activate: true})
+			return dotsServiceChangedMsg{kind: dotsReminderServiceKind, enabled: true, reminder: service, err: err}
+		}
+		service, err := a.UninstallDotsReminderService(ctx)
+		return dotsServiceChangedMsg{kind: dotsReminderServiceKind, enabled: false, reminder: service, err: err}
+	}
+}
+
+func (m *Model) doToggleDotsWatchService(enable bool) tea.Cmd {
+	a, ctx := m.app, m.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	debounce := m.currentDotsWatchDebounce()
+	return func() tea.Msg {
+		if enable {
+			service, err := a.InstallDotsWatchService(ctx, app.DotsWatchInstallOptions{Debounce: debounce, Activate: true})
+			return dotsServiceChangedMsg{kind: dotsWatchServiceKind, enabled: true, watch: service, err: err}
+		}
+		service, err := a.UninstallDotsWatchService(ctx)
+		return dotsServiceChangedMsg{kind: dotsWatchServiceKind, enabled: false, watch: service, err: err}
+	}
+}
+
 func (m *Model) startSettingsSave(settings config.Settings, gen int) tea.Cmd {
 	m.settingsSaveRunning = true
 	m.settingsSaveInFlightGen = gen

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
@@ -968,11 +969,10 @@ func TestModel_SettingsCursor(t *testing.T) {
 
 	t.Run("cursor clamps at bottom", func(t *testing.T) {
 		// More j presses than numSettingRows-1 — should clamp at the last row.
-		msgs := append(toSettings(),
-			pressRune('j'), pressRune('j'), pressRune('j'), pressRune('j'),
-			pressRune('j'), pressRune('j'), pressRune('j'), pressRune('j'),
-			pressRune('j'), pressRune('j'), pressRune('j'), pressRune('j'),
-			pressRune('j'))
+		msgs := toSettings()
+		for range numSettingRows + 5 {
+			msgs = append(msgs, pressRune('j'))
+		}
 		m := drive(baseModel(nil), msgs...)
 		if m.settingsCursor != numSettingRows-1 {
 			t.Errorf("settingsCursor = %d, want %d (clamped)", m.settingsCursor, numSettingRows-1)
@@ -1038,56 +1038,56 @@ func TestModel_SettingsVisibleRowsMutateExpectedFields(t *testing.T) {
 		},
 		{
 			name:   "node provider",
-			row:    3,
+			row:    settingsRowNodeProvider,
 			action: pressRune(' '),
 			assert: func(t *testing.T, m Model) {
 				t.Helper()
 				if !slices.Contains(m.settings.DisabledProviders, "node") {
-					t.Fatalf("row 3 should toggle node provider, disabled providers = %v", m.settings.DisabledProviders)
+					t.Fatalf("row %d should toggle node provider, disabled providers = %v", settingsRowNodeProvider, m.settings.DisabledProviders)
 				}
 			},
 		},
 		{
 			name:   "python provider",
-			row:    4,
+			row:    settingsRowPythonProvider,
 			action: pressRune(' '),
 			assert: func(t *testing.T, m Model) {
 				t.Helper()
 				if !slices.Contains(m.settings.DisabledProviders, "python") {
-					t.Fatalf("row 4 should toggle python provider, disabled providers = %v", m.settings.DisabledProviders)
+					t.Fatalf("row %d should toggle python provider, disabled providers = %v", settingsRowPythonProvider, m.settings.DisabledProviders)
 				}
 			},
 		},
 		{
 			name:   "node manager",
-			row:    5,
+			row:    settingsRowNodeManager,
 			action: pressRune(' '),
 			assert: func(t *testing.T, m Model) {
 				t.Helper()
 				if got := m.settings.EcosystemManager("node"); got != "bun" {
-					t.Fatalf("row 5 should cycle node manager to bun, got %q", got)
+					t.Fatalf("row %d should cycle node manager to bun, got %q", settingsRowNodeManager, got)
 				}
 			},
 		},
 		{
 			name:   "python manager",
-			row:    6,
+			row:    settingsRowPythonManager,
 			action: pressRune(' '),
 			assert: func(t *testing.T, m Model) {
 				t.Helper()
 				if got := m.settings.EcosystemManager("python"); got != "uv" {
-					t.Fatalf("row 6 should cycle python manager to uv, got %q", got)
+					t.Fatalf("row %d should cycle python manager to uv, got %q", settingsRowPythonManager, got)
 				}
 			},
 		},
 		{
 			name:   "repository",
-			row:    7,
+			row:    settingsRowDotsRepo,
 			action: pressEnter(),
 			assert: func(t *testing.T, m Model) {
 				t.Helper()
 				if !m.showFilePicker {
-					t.Fatal("row 7 should open dots repository file picker")
+					t.Fatalf("row %d should open dots repository file picker", settingsRowDotsRepo)
 				}
 			},
 		},
@@ -1104,23 +1104,23 @@ func TestModel_SettingsVisibleRowsMutateExpectedFields(t *testing.T) {
 		},
 		{
 			name:   "commit changes",
-			row:    9,
+			row:    settingsRowDotsCommit,
 			action: pressRune(' '),
 			assert: func(t *testing.T, m Model) {
 				t.Helper()
 				if !m.settings.DotsGit.AutoCommit {
-					t.Fatal("row 9 should toggle dots auto commit")
+					t.Fatalf("row %d should toggle dots auto commit", settingsRowDotsCommit)
 				}
 			},
 		},
 		{
 			name:   "push changes",
-			row:    10,
+			row:    settingsRowDotsPush,
 			action: pressRune(' '),
 			assert: func(t *testing.T, m Model) {
 				t.Helper()
 				if !m.settings.DotsGit.AutoPush {
-					t.Fatal("row 10 should toggle dots auto push")
+					t.Fatalf("row %d should toggle dots auto push", settingsRowDotsPush)
 				}
 			},
 		},
@@ -1153,6 +1153,151 @@ func TestModel_SettingsVisibleRowsMutateExpectedFields(t *testing.T) {
 			msgs := append(toSettingsRow(tc.row), tc.action)
 			tc.assert(t, drive(base, msgs...))
 		})
+	}
+}
+
+func TestModel_SettingsReminderToggleStartsServiceCommand(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "remindertoggle")
+	a, _ := newCmdApp(t, &okProvider{name: "brew"}, nil)
+	m := modelForCmds(a)
+	m.settings.DotsRepo = "/tmp/dotfiles"
+	m.settingsCursor = settingsRowDotsReminder
+	m.dotsReminderService = &app.DotsReminderService{Installed: false}
+
+	var cmds []tea.Cmd
+	m.handleSettingsRowAction(&cmds)
+
+	if !m.loading {
+		t.Fatal("reminder toggle should enter loading state")
+	}
+	if !strings.Contains(m.statusMsg, "Enabling dotfile reminders") {
+		t.Fatalf("statusMsg = %q, want enabling reminder status", m.statusMsg)
+	}
+	if len(cmds) != 2 {
+		t.Fatalf("reminder toggle commands = %d, want spinner + service command", len(cmds))
+	}
+}
+
+func TestModel_SettingsWatchTogglePromptsForStow(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "watchtoggle")
+	t.Setenv("PATH", t.TempDir())
+	a, _ := newCmdApp(t, &okProvider{name: "brew"}, nil)
+	m := modelForCmds(a)
+	m.settings.DotsRepo = "/tmp/dotfiles"
+	m.settingsCursor = settingsRowDotsWatch
+	m.dotsWatchService = &app.DotsWatchService{Installed: false}
+
+	var cmds []tea.Cmd
+	m.handleSettingsRowAction(&cmds)
+
+	if !m.stowInstallPrompt {
+		t.Fatal("watch toggle should prompt for GNU Stow before enabling service")
+	}
+	if m.stowInstallAction != stowInstallDotsWatch {
+		t.Fatalf("stowInstallAction = %v, want stowInstallDotsWatch", m.stowInstallAction)
+	}
+	if m.loading {
+		t.Fatal("watch toggle should wait for stow confirmation before loading")
+	}
+	if len(cmds) != 0 {
+		t.Fatalf("watch toggle commands = %d, want none until stow prompt is answered", len(cmds))
+	}
+}
+
+func TestModel_SettingsServiceToggleRequiresDotsRepo(t *testing.T) {
+	m := baseModel(nil)
+	m.settingsCursor = settingsRowDotsReminder
+
+	var cmds []tea.Cmd
+	m.handleSettingsRowAction(&cmds)
+
+	if m.loading {
+		t.Fatal("service toggle without dots repo should not start loading")
+	}
+	if m.statusMsg != "Dots not configured." {
+		t.Fatalf("statusMsg = %q, want dots not configured", m.statusMsg)
+	}
+	if len(cmds) != 1 {
+		t.Fatalf("service toggle without repo commands = %d, want status clear timer", len(cmds))
+	}
+}
+
+func TestModel_SettingsReminderIntervalPickerSetsPendingValue(t *testing.T) {
+	m := baseModel(nil)
+	m.settingsCursor = settingsRowDotsReminderInterval
+	m.dotsReminderInterval = 15 * time.Minute
+
+	var cmds []tea.Cmd
+	m.handleSettingsEditAction(&cmds)
+	if !m.editingServiceDuration {
+		t.Fatal("reminder interval row should open duration picker")
+	}
+	cmds = m.handleSettingsServiceDurationKeyMsg(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	if len(cmds) != 0 {
+		t.Fatalf("adjusting duration produced %d commands, want none", len(cmds))
+	}
+	cmds = m.handleSettingsServiceDurationKeyMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.editingServiceDuration {
+		t.Fatal("enter should close duration picker")
+	}
+	if m.dotsReminderInterval != 30*time.Minute {
+		t.Fatalf("dotsReminderInterval = %s, want 30m", m.dotsReminderInterval)
+	}
+	if m.loading {
+		t.Fatal("pending interval change should not start service work when reminder is disabled")
+	}
+	if len(cmds) != 1 {
+		t.Fatalf("pending interval change commands = %d, want status clear timer", len(cmds))
+	}
+}
+
+func TestModel_SettingsWatchDebouncePickerUpdatesInstalledService(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "watchdebounce")
+	a, _ := newCmdApp(t, &okProvider{name: "brew"}, nil)
+	m := modelForCmds(a)
+	m.settingsCursor = settingsRowDotsWatchDebounce
+	m.dotsWatchService = &app.DotsWatchService{Installed: true, Debounce: time.Second}
+	m.dotsWatchDebounce = time.Second
+
+	var cmds []tea.Cmd
+	m.handleSettingsEditAction(&cmds)
+	cmds = m.handleSettingsServiceDurationKeyMsg(tea.KeyPressMsg{Code: 'l', Text: "l"})
+	if len(cmds) != 0 {
+		t.Fatalf("adjusting duration produced %d commands, want none", len(cmds))
+	}
+	cmds = m.handleSettingsServiceDurationKeyMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	if m.editingServiceDuration {
+		t.Fatal("enter should close duration picker")
+	}
+	if m.dotsWatchDebounce != 2*time.Second {
+		t.Fatalf("dotsWatchDebounce = %s, want 2s", m.dotsWatchDebounce)
+	}
+	if !m.loading {
+		t.Fatal("installed watch debounce update should start service work")
+	}
+	if len(cmds) != 2 {
+		t.Fatalf("installed watch debounce update commands = %d, want spinner + service command", len(cmds))
+	}
+}
+
+func TestModel_DotsServiceChangedMsgUpdatesStatus(t *testing.T) {
+	got := drive(baseModel(nil), dotsServiceChangedMsg{
+		kind:     dotsReminderServiceKind,
+		enabled:  true,
+		reminder: &app.DotsReminderService{Installed: true, Interval: 4 * time.Hour},
+	})
+	if got.loading {
+		t.Fatal("service result should clear loading")
+	}
+	if got.dotsReminderService == nil || !got.dotsReminderService.Installed {
+		t.Fatalf("reminder service status not updated: %+v", got.dotsReminderService)
+	}
+	if got.dotsReminderInterval != 4*time.Hour {
+		t.Fatalf("dotsReminderInterval = %s, want 4h", got.dotsReminderInterval)
+	}
+	if !strings.Contains(got.statusMsg, "dotfile reminder service enabled") {
+		t.Fatalf("statusMsg = %q, want enabled status", got.statusMsg)
 	}
 }
 

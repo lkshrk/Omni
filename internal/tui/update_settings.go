@@ -40,7 +40,7 @@ func (m *Model) handleSettingsKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 
 func (m *Model) handleSettingsConfirmAction(cmds *[]tea.Cmd) {
 	switch m.settingsCursor {
-	case settingsRowSystemPriority, settingsRowDotsRepo, settingsRowDotsSync, settingsRowResetSettings, settingsRowResetCache:
+	case settingsRowSystemPriority, settingsRowDotsRepo, settingsRowDotsSync, settingsRowDotsReminderInterval, settingsRowDotsWatchDebounce, settingsRowResetSettings, settingsRowResetCache:
 		m.handleSettingsEditAction(cmds)
 	}
 }
@@ -48,6 +48,9 @@ func (m *Model) handleSettingsConfirmAction(cmds *[]tea.Cmd) {
 func (m *Model) handleSettingsSubmodeKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
 	if m.editingPriority {
 		return true, m.handleSettingsPriorityKeyMsg(msg)
+	}
+	if m.editingServiceDuration {
+		return true, m.handleSettingsServiceDurationKeyMsg(msg)
 	}
 	if m.dangerConfirmRow >= 0 {
 		return true, m.handleSettingsDangerConfirmKeyMsg(msg)
@@ -85,6 +88,29 @@ func (m *Model) handleSettingsPriorityKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 			m.appendSaveSettingsCmd(&cmds)
 		} else if key.Matches(msg, m.keys.Back) {
 			m.editingPriority = false
+		}
+	}
+	return cmds
+}
+
+func (m *Model) handleSettingsServiceDurationKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
+	var cmds []tea.Cmd
+	choices := settingsDurationChoicesForRow(m.serviceDurationRow, m.currentSettingsDurationValue(m.serviceDurationRow))
+	switch msg.String() {
+	case "h", "left":
+		m.serviceDurationIdx = clampIndex(m.serviceDurationIdx-1, len(choices))
+	case "l", "right":
+		m.serviceDurationIdx = clampIndex(m.serviceDurationIdx+1, len(choices))
+	default:
+		switch {
+		case key.Matches(msg, m.keys.Up):
+			m.serviceDurationIdx = clampIndex(m.serviceDurationIdx-1, len(choices))
+		case key.Matches(msg, m.keys.Down), key.Matches(msg, m.keys.Toggle):
+			m.serviceDurationIdx = clampIndex(m.serviceDurationIdx+1, len(choices))
+		case key.Matches(msg, m.keys.Confirm):
+			cmds = append(cmds, m.applySettingsServiceDurationChoice(choices)...)
+		case key.Matches(msg, m.keys.Back):
+			m.editingServiceDuration = false
 		}
 	}
 	return cmds
@@ -164,6 +190,10 @@ func (m *Model) handleSettingsRowAction(cmds *[]tea.Cmd) {
 	case settingsRowDotsPush:
 		m.settings.DotsGit.AutoPush = !m.settings.DotsGit.AutoPush
 		m.appendSaveSettingsCmd(cmds)
+	case settingsRowDotsReminder:
+		m.handleSettingsDotsReminderAction(cmds)
+	case settingsRowDotsWatch:
+		m.handleSettingsDotsWatchAction(cmds)
 	}
 }
 
@@ -175,6 +205,8 @@ func (m *Model) handleSettingsEditAction(cmds *[]tea.Cmd) {
 		*cmds = append(*cmds, m.openFilePicker("Dots repo path", m.settings.DotsRepo, false))
 	case settingsRowDotsSync:
 		m.handleSettingsDotsSyncAction(cmds)
+	case settingsRowDotsReminderInterval, settingsRowDotsWatchDebounce:
+		m.startSettingsServiceDurationEdit()
 	case settingsRowResetSettings:
 		m.dangerConfirmRow = settingsRowResetSettings
 		*cmds = append(*cmds, m.armConfirmationTimeout())
@@ -188,6 +220,50 @@ func (m *Model) startSettingsPriorityEdit() {
 	m.priorityDraft = m.systemPriorityDraft(m.settings.EcosystemPriority(provider.EcosystemSystem))
 	m.priorityCursor = 0
 	m.editingPriority = true
+}
+
+func (m *Model) startSettingsServiceDurationEdit() {
+	row := m.settingsCursor
+	current := m.currentSettingsDurationValue(row)
+	choices := settingsDurationChoicesForRow(row, current)
+	idx := settingsDurationChoiceIndex(choices, current)
+	if idx < 0 {
+		idx = 0
+	}
+	m.serviceDurationRow = row
+	m.serviceDurationIdx = idx
+	m.editingServiceDuration = true
+}
+
+func (m *Model) applySettingsServiceDurationChoice(choices []settingsDurationChoice) []tea.Cmd {
+	if len(choices) == 0 {
+		m.editingServiceDuration = false
+		return nil
+	}
+	idx := clampRange(m.serviceDurationIdx, 0, len(choices)-1)
+	choice := choices[idx]
+	row := m.serviceDurationRow
+	m.editingServiceDuration = false
+	switch row {
+	case settingsRowDotsReminderInterval:
+		m.dotsReminderInterval = choice.value
+		if m.dotsReminderService != nil && m.dotsReminderService.Installed {
+			m.loading = true
+			startOp(m, "Updating dotfile reminders…")
+			return []tea.Cmd{m.spinner.Tick, m.doToggleDotsReminderService(true)}
+		}
+		return []tea.Cmd{setStatus(m, "✓ reminder interval set to "+choice.label, false)}
+	case settingsRowDotsWatchDebounce:
+		m.dotsWatchDebounce = choice.value
+		if m.dotsWatchService != nil && m.dotsWatchService.Installed {
+			m.loading = true
+			startOp(m, "Updating dotfile watch…")
+			return []tea.Cmd{m.spinner.Tick, m.doToggleDotsWatchService(true)}
+		}
+		return []tea.Cmd{setStatus(m, "✓ watch debounce set to "+choice.label, false)}
+	default:
+		return nil
+	}
 }
 
 func (m Model) systemPriorityDraft(priority []string) []string {
@@ -267,4 +343,45 @@ func (m *Model) handleSettingsDotsSyncAction(cmds *[]tea.Cmd) {
 	} else {
 		*cmds = append(*cmds, setStatus(m, "Dots not configured.", false))
 	}
+}
+
+func (m *Model) handleSettingsDotsReminderAction(cmds *[]tea.Cmd) {
+	if strings.TrimSpace(m.settings.DotsRepo) == "" {
+		*cmds = append(*cmds, setStatus(m, "Dots not configured.", false))
+		return
+	}
+	if m.app == nil {
+		*cmds = append(*cmds, setStatus(m, "Dots reminder service is unavailable.", true))
+		return
+	}
+	enable := m.dotsReminderService == nil || !m.dotsReminderService.Installed
+	m.loading = true
+	if enable {
+		startOp(m, "Enabling dotfile reminders…")
+	} else {
+		startOp(m, "Disabling dotfile reminders…")
+	}
+	*cmds = append(*cmds, m.spinner.Tick, m.doToggleDotsReminderService(enable))
+}
+
+func (m *Model) handleSettingsDotsWatchAction(cmds *[]tea.Cmd) {
+	if strings.TrimSpace(m.settings.DotsRepo) == "" {
+		*cmds = append(*cmds, setStatus(m, "Dots not configured.", false))
+		return
+	}
+	if m.app == nil {
+		*cmds = append(*cmds, setStatus(m, "Dots watch service is unavailable.", true))
+		return
+	}
+	enable := m.dotsWatchService == nil || !m.dotsWatchService.Installed
+	if enable && m.promptForStowInstall(stowInstallDotsWatch) {
+		return
+	}
+	m.loading = true
+	if enable {
+		startOp(m, "Enabling dotfile watch…")
+	} else {
+		startOp(m, "Disabling dotfile watch…")
+	}
+	*cmds = append(*cmds, m.spinner.Tick, m.doToggleDotsWatchService(enable))
 }

@@ -38,6 +38,8 @@ const (
 	hintCtxSettingsToggle
 	hintCtxSettingsEdit
 	hintCtxSettingsDotsSync
+	hintCtxSettingsDuration
+	hintCtxSettingsDurationEdit
 	hintCtxSettingsDanger
 	hintCtxSettingsPriorityEdit
 	hintCtxHostGroupPicker
@@ -285,6 +287,16 @@ func contextHintItems(m Model, ctx hintContext) []hintItem {
 		}
 		return []hintItem{
 			dangerHintFromBindingDesc(m.keys.Confirm, desc),
+		}
+	case hintCtxSettingsDuration:
+		return []hintItem{
+			hintFromBindingDesc(m.keys.Confirm, "set"),
+		}
+	case hintCtxSettingsDurationEdit:
+		return []hintItem{
+			rawHint("h/l", "adjust"),
+			hintFromBindingDesc(m.keys.Confirm, "apply"),
+			hintFromBindingDesc(m.keys.Back, "cancel"),
 		}
 	case hintCtxSettingsDanger:
 		return []hintItem{

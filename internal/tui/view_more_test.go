@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -1045,6 +1046,10 @@ func TestRenderSettings_LabelOrderAndLegacyNames(t *testing.T) {
 		{"Dotfiles", true},
 		{"Repository", false},
 		{"Dotfile Sync", false},
+		{"Reminder Notifications", false},
+		{"Reminder Interval", false},
+		{"Watch Sync", false},
+		{"Watch Debounce", false},
 		{"Commit Changes", false},
 		{"Push Changes", false},
 		{"Maintenance", true},
@@ -1135,6 +1140,21 @@ func TestRenderSettings_DotsRepo(t *testing.T) {
 	out := renderSettings(m)
 	if !strings.Contains(out, "dotfiles") {
 		t.Errorf("expected dotfiles path in settings output, got:\n%s", out)
+	}
+}
+
+func TestRenderSettings_DotsServiceRows(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewSettings
+	m.settings.DotsRepo = "/home/user/dotfiles"
+	m.dotsReminderService = &app.DotsReminderService{Installed: true, Interval: 12 * time.Hour}
+	m.dotsWatchService = &app.DotsWatchService{Installed: false, Debounce: 2 * time.Second}
+
+	out := renderSettings(m)
+	for _, want := range []string{"Reminder Notifications", "Reminder Interval", "Watch Sync", "Watch Debounce", "[ON]", "[OFF]", "[12h]", "[2s]"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("settings service row output missing %q:\n%s", want, out)
+		}
 	}
 }
 
@@ -2504,16 +2524,18 @@ func TestRenderSettings_ExpandableRowsUseEnterHint(t *testing.T) {
 		{"priority", settingsRowSystemPriority, "edit"},
 		{"dots repo", settingsRowDotsRepo, "edit"},
 		{"disable dots", settingsRowDotsSync, "disable"},
+		{"reminder interval", settingsRowDotsReminderInterval, "set"},
+		{"watch debounce", settingsRowDotsWatchDebounce, "set"},
 		{"reset settings", settingsRowResetSettings, "confirm"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m.settingsCursor = tc.row
 			out := renderSettings(m)
-			line := renderedLineContaining(out, tc.word)
+			line := renderedLineContaining(out, "enter")
 			if line == "" {
 				t.Fatalf("%s row hint missing from output:\n%s", tc.name, out)
 			}
-			if !strings.Contains(line, "enter") || strings.Contains(line, "space") || strings.Contains(line, "cancel") {
+			if !strings.Contains(line, tc.word) || strings.Contains(line, "space") || strings.Contains(line, "cancel") {
 				t.Fatalf("%s row should hint enter %s without space/cancel, got %q", tc.name, tc.word, line)
 			}
 		})
