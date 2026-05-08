@@ -72,6 +72,70 @@ func renderSetup(m Model) string {
 				nil,
 			),
 		})
+	case 7:
+		count := len(m.setupCopyHostNames())
+		hostWord := "hosts"
+		if count == 1 {
+			hostWord = "host"
+		}
+		body = renderSetupPanel(m, setupPanel{
+			Lead: "Copy another host's config?",
+			Help: []string{
+				fmt.Sprintf("Found %d existing %s in this config.", count, hostWord),
+				"Copying brings over reusable groups, host settings, and host-specific overrides.",
+				"Machine-local entries stay with the source host.",
+			},
+			Footer: renderSetupFooter(m,
+				[]hintItem{hintFromBindingDesc(m.keys.Back, "start fresh")},
+				nil,
+				[]hintItem{hintFromBindingDesc(m.keys.Confirm, "copy host")},
+			),
+		})
+	case 8:
+		var options []setupOption
+		names := m.setupCopyHostNames()
+		for i, name := range names {
+			detail := "no reusable groups"
+			if m.hostInfo != nil {
+				if host, ok := m.hostInfo.Hosts[name]; ok && len(host.Groups) > 0 {
+					detail = compactGroupList(host.Groups)
+				}
+			}
+			options = append(options, setupOption{Label: name, Detail: detail, Selected: i == m.setupCopyHostIdx})
+		}
+		body = renderSetupPanel(m, setupPanel{
+			Lead: "Choose the host to copy.",
+			Help: []string{
+				"The new host will receive the selected host's reusable groups and host-scoped settings.",
+			},
+			Body: renderSetupOptions(m, options),
+			Footer: renderSetupFooter(m,
+				[]hintItem{hintFromBindingDesc(m.keys.Back, "start fresh")},
+				nil,
+				[]hintItem{hintFromBindingDesc(m.keys.Confirm, "copy selected")},
+			),
+		})
+	case 9:
+		var options []setupOption
+		for i, name := range m.groupNames {
+			checked := m.setupGroupDraft[name]
+			options = append(options, setupOption{Label: name, Selected: i == m.setupGroupIdx, Checked: &checked})
+		}
+		help := []string{"Choose any reusable groups this host should use."}
+		optionsBody := renderSetupOptions(m, options)
+		if len(options) == 0 {
+			help = append(help, "No reusable groups are configured yet.")
+		}
+		var middle []hintItem
+		if len(options) > 0 {
+			middle = []hintItem{hintFromBindingDesc(m.keys.Toggle, "toggle")}
+		}
+		body = renderSetupPanel(m, setupPanel{
+			Lead:   "Add existing groups to this host.",
+			Help:   help,
+			Body:   optionsBody,
+			Footer: renderSetupFooter(m, []hintItem{hintFromBindingDesc(m.keys.Back, "skip")}, middle, []hintItem{hintFromBindingDesc(m.keys.Confirm, "continue")}),
+		})
 	}
 
 	return body
@@ -222,6 +286,12 @@ func setupPopupTitle(m Model) string {
 		return logoMark + " Omni - Dotfile sync"
 	case 6:
 		return logoMark + " Omni - Choose dotfiles repo"
+	case 7:
+		return logoMark + " Omni - Copy host"
+	case 8:
+		return logoMark + " Omni - Choose host"
+	case 9:
+		return logoMark + " Omni - Choose groups"
 	default:
 		return logoMark + " Omni"
 	}

@@ -1079,6 +1079,36 @@ func (m *Model) doCopyHostGroupsFrom(host string) tea.Cmd {
 	}
 }
 
+func (m *Model) doSetupCopyHostConfigFrom(source string) tea.Cmd {
+	a := m.app
+	return func() tea.Msg {
+		target := shortHostname()
+		if err := a.CopyHostConfig(source, target); err != nil {
+			return setupHostCopyDoneMsg{err: err, source: source, target: target}
+		}
+		info, err := a.HostStatus()
+		if err != nil {
+			return setupHostCopyDoneMsg{err: err, source: source, target: target}
+		}
+		return setupHostCopyDoneMsg{source: source, target: target, info: info}
+	}
+}
+
+func (m *Model) doSetupHostGroups(groups []string) tea.Cmd {
+	a := m.app
+	return func() tea.Msg {
+		target := shortHostname()
+		if err := a.SetHostGroups(target, groups); err != nil {
+			return setupHostGroupsDoneMsg{err: err, groups: groups}
+		}
+		info, err := a.HostStatus()
+		if err != nil {
+			return setupHostGroupsDoneMsg{err: err, groups: groups}
+		}
+		return setupHostGroupsDoneMsg{groups: append([]string(nil), groups...), info: info}
+	}
+}
+
 // doSetupDotsRepo saves the dots repo path to settings. Dotfile sync itself is
 // run from the Dots tab so onboarding stays limited to configuration.
 func (m *Model) doSetupDotsRepo(path string) tea.Cmd {
@@ -1093,7 +1123,7 @@ func (m *Model) doSetupDotsRepo(path string) tea.Cmd {
 		if _, err := a.BootstrapDotsEntries(); err != nil {
 			return dangerOpDoneMsg{action: "setup-dots", err: fmt.Errorf("bootstrap dots entries: %w", err)}
 		}
-		return dangerOpDoneMsg{action: "setup-dots", detail: "dots configured", reload: true, setupComplete: true}
+		return dangerOpDoneMsg{action: "setup-dots", detail: "dots configured"}
 	}
 }
 
@@ -1644,8 +1674,10 @@ func (m *Model) doResetCache() tea.Cmd {
 
 // doDisableDots removes managed symlinks when dots is configured, optionally
 // keeping local materialized copies, then persists dots_disabled=true for this
-// machine and triggers a full settings reload. Safe to call when dots is not
-// yet configured — the physical unlink step is skipped in that case.
+// machine. Regular settings flows trigger a full settings reload; setup can
+// suppress that reload while advancing to the next onboarding step. Safe to
+// call when dots is not yet configured — the physical unlink step is skipped in
+// that case.
 func (m *Model) doDisableDots(keepLocal bool, setupComplete ...bool) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
@@ -1655,10 +1687,11 @@ func (m *Model) doDisableDots(keepLocal bool, setupComplete ...bool) tea.Cmd {
 		})
 		detail := dotsDisableDetail(ops)
 		done := len(setupComplete) > 0 && setupComplete[0]
+		reload := len(setupComplete) == 0 || done
 		if err != nil {
-			return dangerOpDoneMsg{action: "disable-dots", detail: detail, reload: true, setupComplete: done, err: err}
+			return dangerOpDoneMsg{action: "disable-dots", detail: detail, reload: reload, setupComplete: done, err: err}
 		}
-		return dangerOpDoneMsg{action: "disable-dots", detail: detail, reload: true, setupComplete: done}
+		return dangerOpDoneMsg{action: "disable-dots", detail: detail, reload: reload, setupComplete: done}
 	}
 }
 

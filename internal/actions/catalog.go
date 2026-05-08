@@ -48,6 +48,7 @@ const (
 	GroupEditTools                 ID = "groups.edit_tools"
 	GroupEditDots                  ID = "groups.edit_dots"
 	HostCreate                     ID = "hosts.create"
+	HostCopy                       ID = "hosts.copy"
 	HostDelete                     ID = "hosts.delete"
 	HostEditGroups                 ID = "hosts.edit_groups"
 	SettingsSet                    ID = "settings.set"
@@ -673,6 +674,17 @@ var Hosts = []Action{
 		Mutates:         true,
 		CLIOnlyReason:   "TUI creates the current host during onboarding; manual remote host creation is intentionally CLI-only.",
 		CLI:             []CLIBinding{{Command: []string{"hosts", "ensure"}}},
+	},
+	{
+		ID:              HostCopy,
+		Domain:          "hosts",
+		Scope:           ScopeGlobal,
+		Label:           "copy host config",
+		Description:     "Copy one host's config to another host.",
+		LongDescription: "Copy reusable group assignments, host settings, provider overrides, and reusable dotfile variants from one host to another.",
+		Mutates:         true,
+		CLIOnlyReason:   "TUI exposes host config copy only during onboarding for a missing current host.",
+		CLI:             []CLIBinding{{Command: []string{"hosts", "copy"}}},
 	},
 	{
 		ID:                 HostDelete,

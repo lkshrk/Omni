@@ -45,6 +45,9 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 		// only after onboarding exits.
 		m.settings = msg.settings
 		m.taps = msg.taps
+		m.groupNames = msg.groupNames
+		m.toolMemberships = msg.toolMemberships
+		m.dotMemberships = msg.dotMemberships
 		m.effectivePythonManager = msg.effectivePythonManager
 		m.effectiveNodeManager = msg.effectiveNodeManager
 		m.effectiveSystemManager = msg.effectiveSystemManager
@@ -57,9 +60,15 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 		m.hostInfo = msg.hostInfo
 		m.setupProviders = msg.setupProviders
 		m.setupProviderIdx = 0
+		m.setupCopyHostIdx = 0
+		m.setupGroupIdx = 0
+		m.setupGroupDraft = nil
 		m.mode = viewSetup
 		m.setupBackgroundMode = viewList
 		m.setupStep = 2
+		if len(m.setupCopyHostNames()) > 0 {
+			m.setupStep = 7
+		}
 		return cmds
 	}
 	m.setupComplete = false
@@ -199,6 +208,40 @@ func (m *Model) handleSetupHostDoneMsg(msg setupHostDoneMsg) []tea.Cmd {
 	return cmds
 }
 
+func (m *Model) handleSetupHostCopyDoneMsg(msg setupHostCopyDoneMsg) []tea.Cmd {
+	var cmds []tea.Cmd
+
+	m.loading = false
+	if msg.err != nil {
+		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
+		return cmds
+	}
+	if msg.info != nil {
+		m.hostInfo = msg.info
+	}
+	m.hostRequired = false
+	cmds = append(cmds, setStatus(m, fmt.Sprintf("✓ copied %s to %s", msg.source, msg.target), false))
+	m.finishSetupWithReload(&cmds)
+	return cmds
+}
+
+func (m *Model) handleSetupHostGroupsDoneMsg(msg setupHostGroupsDoneMsg) []tea.Cmd {
+	var cmds []tea.Cmd
+
+	m.loading = false
+	if msg.err != nil {
+		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
+		return cmds
+	}
+	if msg.info != nil {
+		m.hostInfo = msg.info
+	}
+	m.hostRequired = false
+	cmds = append(cmds, setStatus(m, setupGroupsSavedStatus(msg.groups), false))
+	m.finishSetupWithReload(&cmds)
+	return cmds
+}
+
 func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	var cmds []tea.Cmd
 
@@ -264,13 +307,80 @@ func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		case strings.EqualFold(msg.String(), "n") || key.Matches(msg, m.keys.Back):
 			m.loading = true
 			startOp(m, "Disabling dots…")
-			cmds = append(cmds, m.spinner.Tick, m.doDisableDots(true, true))
+			cmds = append(cmds, m.spinner.Tick, m.doDisableDots(true, false))
 		}
 	case 6: // Dots repo path — handled by showFilePicker routing above.
 		if key.Matches(msg, m.keys.Back) {
+			m.startSetupGroupSelection(&cmds)
+		}
+	case 7: // Copy another host?
+		switch {
+		case key.Matches(msg, m.keys.Confirm) || strings.EqualFold(msg.String(), "y"):
+			names := m.setupCopyHostNames()
+			if len(names) == 0 {
+				m.setupStep = 2
+				break
+			}
+			if len(names) == 1 {
+				m.loading = true
+				startOp(m, "Copying host config…")
+				cmds = append(cmds, m.spinner.Tick, m.doSetupCopyHostConfigFrom(names[0]))
+				break
+			}
+			m.setupCopyHostIdx = clampRange(m.setupCopyHostIdx, 0, len(names)-1)
+			m.setupStep = 8
+		case strings.EqualFold(msg.String(), "n") || key.Matches(msg, m.keys.Back):
+			m.setupStep = 2
+		}
+	case 8: // Host picker for copy.
+		names := m.setupCopyHostNames()
+		switch {
+		case key.Matches(msg, m.keys.Up):
+			if m.setupCopyHostIdx > 0 {
+				m.setupCopyHostIdx--
+			}
+		case key.Matches(msg, m.keys.Down):
+			if m.setupCopyHostIdx < len(names)-1 {
+				m.setupCopyHostIdx++
+			}
+		case key.Matches(msg, m.keys.Confirm):
+			if len(names) == 0 {
+				m.setupStep = 2
+				break
+			}
+			source := names[clampRange(m.setupCopyHostIdx, 0, len(names)-1)]
 			m.loading = true
-			startOp(m, "Loading…")
-			cmds = append(cmds, m.spinner.Tick, loadTools(m.app, m.ctx))
+			startOp(m, "Copying host config…")
+			cmds = append(cmds, m.spinner.Tick, m.doSetupCopyHostConfigFrom(source))
+		case key.Matches(msg, m.keys.Back):
+			m.setupStep = 2
+		}
+	case 9: // Reusable group selection.
+		switch {
+		case key.Matches(msg, m.keys.Up):
+			if m.setupGroupIdx > 0 {
+				m.setupGroupIdx--
+			}
+		case key.Matches(msg, m.keys.Down):
+			if m.setupGroupIdx < len(m.groupNames)-1 {
+				m.setupGroupIdx++
+			}
+		case key.Matches(msg, m.keys.Toggle):
+			if m.setupGroupIdx >= 0 && m.setupGroupIdx < len(m.groupNames) {
+				if m.setupGroupDraft == nil {
+					m.initSetupGroupDraft()
+				}
+				group := m.groupNames[m.setupGroupIdx]
+				m.setupGroupDraft[group] = !m.setupGroupDraft[group]
+			}
+		case key.Matches(msg, m.keys.Confirm):
+			m.loading = true
+			startOp(m, "Saving groups…")
+			cmds = append(cmds, m.spinner.Tick, m.doSetupHostGroups(m.setupSelectedGroups()))
+		case key.Matches(msg, m.keys.Back):
+			m.loading = true
+			startOp(m, "Saving groups…")
+			cmds = append(cmds, m.spinner.Tick, m.doSetupHostGroups(nil))
 		}
 	}
 
@@ -412,4 +522,75 @@ func (m *Model) startSetupHostCreation(cmds *[]tea.Cmd) {
 
 func (m *Model) defaultSetupHostName() string {
 	return shortHostname()
+}
+
+func (m Model) setupCopyHostNames() []string {
+	return sortedHostNames(m.hostInfo)
+}
+
+func (m *Model) startSetupGroupSelection(cmds *[]tea.Cmd) {
+	if len(m.groupNames) == 0 {
+		m.finishSetupWithReload(cmds)
+		return
+	}
+	m.loading = false
+	m.setupStep = 9
+	m.setupGroupIdx = clampRange(m.setupGroupIdx, 0, len(m.groupNames)-1)
+	m.initSetupGroupDraft()
+}
+
+func (m *Model) initSetupGroupDraft() {
+	draft := make(map[string]bool, len(m.groupNames))
+	for _, group := range m.groupNames {
+		draft[group] = false
+	}
+	if m.hostInfo != nil {
+		host := m.hostInfo.Active
+		if host == "" {
+			host = shortHostname()
+		}
+		if assignment, ok := m.hostInfo.Hosts[host]; ok {
+			for _, group := range assignment.Groups {
+				if _, exists := draft[group]; exists {
+					draft[group] = true
+				}
+			}
+		}
+	}
+	m.setupGroupDraft = draft
+}
+
+func (m Model) setupSelectedGroups() []string {
+	if len(m.groupNames) == 0 || len(m.setupGroupDraft) == 0 {
+		return nil
+	}
+	groups := make([]string, 0, len(m.groupNames))
+	for _, group := range m.groupNames {
+		if m.setupGroupDraft[group] {
+			groups = append(groups, group)
+		}
+	}
+	return groups
+}
+
+func (m *Model) finishSetupWithReload(cmds *[]tea.Cmd) {
+	m.mode = viewList
+	m.setupBackgroundMode = viewList
+	m.setupStep = 0
+	m.setupCopyHostIdx = 0
+	m.setupGroupIdx = 0
+	m.setupGroupDraft = nil
+	m.hostRequired = false
+	m.setupComplete = true
+	m.setupReloading = true
+	m.progressText = "Loading tools…"
+	m.loading = true
+	*cmds = append(*cmds, m.spinner.Tick, loadTools(m.app, m.ctx))
+}
+
+func setupGroupsSavedStatus(groups []string) string {
+	if len(groups) == 0 {
+		return "✓ no reusable groups selected"
+	}
+	return fmt.Sprintf("✓ %d reusable groups selected", len(groups))
 }

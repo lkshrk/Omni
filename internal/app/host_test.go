@@ -267,6 +267,121 @@ func TestRenameHostMovesSpecialHostGroup(t *testing.T) {
 	}
 }
 
+func TestCopyHostConfigCopiesHostScopedSettingsAndOverrides(t *testing.T) {
+	a, cfgPath := newImportApp(t)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"fd": {
+				Provider: "system",
+				Hosts: map[string]config.ToolInstallSpec{
+					"laptop": {
+						Provider:    "system",
+						InstallWith: "brew",
+						Package:     "fd-find",
+						Options:     map[string]string{"scope": "source"},
+					},
+					"desktop": {Provider: "system", InstallWith: "apt", Package: "fd"},
+				},
+			},
+			"ripgrep": {Provider: "system", InstallWith: "brew"},
+		},
+		Groups: []*config.GroupConfig{
+			{Name: "laptop", Special: "host", Tools: groupTools("fd"), Dots: []config.DotEntry{{
+				Name: "private",
+				Path: "~/.private",
+				Hosts: map[string]config.DotVariant{
+					"laptop": {Package: "private-laptop"},
+				},
+			}}},
+			{Name: "desktop", Special: "host", Tools: groupTools("ripgrep")},
+			{Name: "work", Dots: []config.DotEntry{{
+				Name: "nvim",
+				Path: "~/.config/nvim",
+				Hosts: map[string]config.DotVariant{
+					"laptop":  {Package: "nvim-laptop"},
+					"desktop": {Package: "nvim-desktop"},
+				},
+			}}},
+		},
+		Hosts: map[string][]string{
+			"laptop":  {"work"},
+			"desktop": {},
+		},
+		HostSettings: map[string]config.Settings{
+			"laptop": {
+				DotsRepo:          "~/dotfiles-laptop",
+				DotsDisabled:      config.BoolPtr(true),
+				DisabledProviders: []string{"node"},
+				Ecosystems: map[string]config.EcosystemSettings{
+					"system": {Priority: []string{"brew", "apt"}},
+				},
+			},
+			"desktop": {DotsRepo: "~/old-desktop"},
+		},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if err := a.CopyHostConfig("laptop", "desktop.example"); err != nil {
+		t.Fatalf("CopyHostConfig: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got := cfg.Hosts["desktop"]; !slices.Equal(got, []string{"work"}) {
+		t.Fatalf("hosts[desktop] = %v, want [work]", got)
+	}
+	desktopGroup := findHostTestGroup(cfg.Groups, "desktop")
+	if desktopGroup == nil || !desktopGroup.IsHost() {
+		t.Fatalf("desktop host group = %#v, want ensured special host group", desktopGroup)
+	}
+	if !containsToolMembershipForTest(desktopGroup.Tools, "ripgrep") {
+		t.Fatal("copy should not delete existing target host-local tools")
+	}
+	laptopGroup := findHostTestGroup(cfg.Groups, "laptop")
+	if laptopGroup == nil || len(laptopGroup.Dots) != 1 {
+		t.Fatalf("source host group = %#v, want private dot preserved only on source", laptopGroup)
+	}
+	if _, ok := laptopGroup.Dots[0].Hosts["desktop"]; ok {
+		t.Fatal("source host-local dot variant was copied into target host")
+	}
+	settings := cfg.HostSettings["desktop"]
+	if settings.DotsRepo != "~/dotfiles-laptop" {
+		t.Fatalf("desktop dots_repo = %q, want copied laptop repo", settings.DotsRepo)
+	}
+	if !config.BoolVal(settings.DotsDisabled) {
+		t.Fatal("desktop dots_disabled was not copied")
+	}
+	if !slices.Equal(settings.DisabledProviders, []string{"node"}) {
+		t.Fatalf("desktop disabled providers = %v, want [node]", settings.DisabledProviders)
+	}
+	if got := settings.EcosystemPriority("system"); !slices.Equal(got, []string{"brew", "apt"}) {
+		t.Fatalf("desktop system priority = %v, want [brew apt]", got)
+	}
+	settings.DisabledProviders[0] = "python"
+	if cfg.HostSettings["laptop"].DisabledProviders[0] != "node" {
+		t.Fatal("copied host settings share slices with source settings")
+	}
+	fd := cfg.Tools["fd"]
+	if got := fd.Hosts["desktop"]; got.InstallWith != "brew" || got.Package != "fd-find" || got.Options["scope"] != "source" {
+		t.Fatalf("fd desktop override = %#v, want copied laptop override", got)
+	}
+	desktopOverride := fd.Hosts["desktop"]
+	desktopOverride.Options["scope"] = "mutated"
+	if cfg.Tools["fd"].Hosts["laptop"].Options["scope"] != "source" {
+		t.Fatal("copied tool host override shares options map with source override")
+	}
+	workGroup := findHostTestGroup(cfg.Groups, "work")
+	if workGroup == nil || len(workGroup.Dots) != 1 {
+		t.Fatalf("work group = %#v, want nvim dot", workGroup)
+	}
+	if got := workGroup.Dots[0].Hosts["desktop"].Package; got != "nvim-laptop" {
+		t.Fatalf("nvim desktop variant = %q, want copied laptop variant", got)
+	}
+}
+
 func TestRemoveHostDeletesSpecialHostGroup(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
