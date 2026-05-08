@@ -198,54 +198,57 @@ type DotEntry struct {
 	Ignore []string `json:"ignore,omitempty"`
 }
 
-// Profile is a named collection of group names.
-type Profile struct {
-	Groups []string `json:"groups"`
-	// Ignore lists tool names that are skipped during sync on this profile's machines.
+// GlobalIgnore lists tools and dotfiles skipped across all hosts.
+type GlobalIgnore struct {
+	Tools []string `json:"tools,omitempty"`
+	Dots  []string `json:"dots,omitempty"`
+}
+
+// HostAssignment is the in-memory UI/app view of one host's reusable group
+// assignments plus the global tool ignore list exposed for the active host.
+type HostAssignment struct {
+	Groups []string `json:"groups,omitempty"`
 	Ignore []string `json:"ignore,omitempty"`
 }
 
 // GroupConfig is a named collection of tools, dots, and taps.
-// The base group has Name == "".
 type GroupConfig struct {
-	// Name is the group identifier. Empty string denotes the base group.
+	// Name is the group identifier.
 	Name        string      `json:"name,omitempty"`
+	Special     string      `json:"special,omitempty"`
 	Description string      `json:"description,omitempty"`
 	Taps        []string    `json:"taps,omitempty"`
 	Tools       []ToolEntry `json:"tools,omitempty"`
-	Ignore      []string    `json:"ignore,omitempty"`
 	Dots        []DotEntry  `json:"dots,omitempty"`
+	Ignore      []string    `json:"-"`
 }
 
-// IsBase reports whether this is the base group (Name == "").
-func (g *GroupConfig) IsBase() bool { return g.Name == "" }
+// IsHost reports whether this is the physical special group for a hostname.
+func (g *GroupConfig) IsHost() bool { return g != nil && g.Special == "host" }
 
-// GroupName returns the display name. Returns "" for the base group.
+// GroupName returns the display name.
 func (g *GroupConfig) GroupName() string { return g.Name }
 
 // BaseName returns the identifier used for filtering and display.
-// Returns "base" for the base group, otherwise returns Name.
 func (g *GroupConfig) BaseName() string {
-	if g.Name == "" {
-		return "base"
-	}
 	return g.Name
 }
 
 // RootConfig is the top-level settings.json struct.
-// It holds all omni configuration: settings, profiles, hostnames, and groups.
+// It holds all omni configuration: settings, host assignments, and groups.
 type RootConfig struct {
 	// Schema holds the "$schema" URI injected on every write for editor support.
 	// It is read back on load but never acted on by the application.
-	Schema    string              `json:"$schema,omitempty"`
-	Settings  Settings            `json:"settings"`
-	Tools     map[string]ToolSpec `json:"tools,omitempty"`
-	Profiles  map[string]Profile  `json:"profiles,omitempty"`
-	Hostnames map[string]string   `json:"hostnames,omitempty"`
-	Groups    []*GroupConfig      `json:"groups,omitempty"`
+	Schema   string              `json:"$schema,omitempty"`
+	Settings Settings            `json:"settings"`
+	Tools    map[string]ToolSpec `json:"tools,omitempty"`
+	Hosts    map[string][]string `json:"hosts,omitempty"`
+	Ignore   GlobalIgnore        `json:"ignore,omitempty"`
+	Groups   []*GroupConfig      `json:"groups,omitempty"`
 	// HostSettings holds per-machine setting overrides, keyed by short hostname.
 	// Fields set here override the global Settings block for that machine.
-	// Host-specific fields: Ecosystems, DotsRepo, DotsDisabled, DisabledProviders.
+	// Host-specific fields: Ecosystems, DotsRepo, DotsDisabled,
+	// DisabledProviders.
 	// Global fields (not overridable here): AutoImport, DotsGit.
 	HostSettings map[string]Settings `json:"host_settings,omitempty"`
 }
@@ -290,24 +293,6 @@ func (c *RootConfig) EffectiveSettings(shortHostname string) Settings {
 		s.DisabledProviders = cloneStringSlice(hs.DisabledProviders)
 	}
 	return s
-}
-
-// ActiveProfile returns the profile name mapped to hostname.
-// Tries the full hostname first, then the short name (before the first dot).
-// Returns ("", false) when no mapping exists.
-func (c *RootConfig) ActiveProfile(hostname string) (string, bool) {
-	if len(c.Hostnames) == 0 {
-		return "", false
-	}
-	if name, ok := c.Hostnames[hostname]; ok {
-		return name, true
-	}
-	if idx := strings.IndexByte(hostname, '.'); idx != -1 {
-		if name, ok := c.Hostnames[hostname[:idx]]; ok {
-			return name, true
-		}
-	}
-	return "", false
 }
 
 // Config is a flat view of tools and settings used by the syncer.
@@ -420,14 +405,26 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 	}
 
 	groupNames := make(map[string]struct{}, len(cfg.Groups))
-	memberships := make(map[string]string)
+	groupByName := make(map[string]*GroupConfig, len(cfg.Groups))
+	memberships := make(map[string]*GroupConfig)
+	dotMemberships := make(map[string]*GroupConfig)
 	for gi, g := range cfg.Groups {
 		if g == nil {
 			errs = append(errs, ValidationError{Path: fmt.Sprintf("$.groups[%d]", gi), Message: "group must not be null"})
 			continue
 		}
 		groupName := g.BaseName()
+		if strings.TrimSpace(groupName) == "" {
+			errs = append(errs, ValidationError{Path: fmt.Sprintf("$.groups[%d].name", gi), Message: "group name is required"})
+		}
+		if _, dup := groupNames[groupName]; dup {
+			errs = append(errs, ValidationError{Path: fmt.Sprintf("$.groups[%d].name", gi), Message: fmt.Sprintf("duplicate group %q", groupName)})
+		}
 		groupNames[groupName] = struct{}{}
+		groupByName[groupName] = g
+		if g.Special != "" && g.Special != "host" {
+			errs = append(errs, ValidationError{Path: fmt.Sprintf("$.groups[%d].special", gi), Message: fmt.Sprintf("unknown special group kind %q", g.Special)})
+		}
 		seenInGroup := make(map[string]struct{}, len(g.Tools))
 		for ti, tool := range g.Tools {
 			path := fmt.Sprintf("$.groups[%d].tools[%d]", gi, ti)
@@ -445,32 +442,66 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 				errs = append(errs, ValidationError{Path: path, Message: fmt.Sprintf("duplicate tool membership %q in group %q", tool.Name, groupName)})
 			}
 			seenInGroup[tool.Name] = struct{}{}
-			if first, ok := memberships[tool.Name]; ok && first == groupName {
-				errs = append(errs, ValidationError{Path: path, Message: fmt.Sprintf("duplicate tool membership %q in group %q", tool.Name, groupName)})
+			if first, ok := memberships[tool.Name]; ok {
+				errs = append(errs, ValidationError{Path: path, Message: fmt.Sprintf("tool %q already belongs to group %q", tool.Name, first.BaseName())})
 			}
 			if _, ok := memberships[tool.Name]; !ok {
-				memberships[tool.Name] = groupName
+				memberships[tool.Name] = g
 			}
 		}
-		for ii, ignored := range g.Ignore {
-			if strings.TrimSpace(ignored) == "" {
-				errs = append(errs, ValidationError{Path: fmt.Sprintf("$.groups[%d].ignore[%d]", gi, ii), Message: "tool name is required"})
+		seenDots := make(map[string]struct{}, len(g.Dots))
+		for di, dot := range g.Dots {
+			path := fmt.Sprintf("$.groups[%d].dots[%d]", gi, di)
+			if strings.TrimSpace(dot.Name) == "" {
+				errs = append(errs, ValidationError{Path: path, Message: "dotfile name is required"})
+				continue
 			}
-			if _, ok := cfg.Tools[ignored]; !ok {
-				errs = append(errs, ValidationError{Path: fmt.Sprintf("$.groups[%d].ignore[%d]", gi, ii), Message: fmt.Sprintf("missing logical tool %q", ignored)})
+			if _, dup := seenDots[dot.Name]; dup {
+				errs = append(errs, ValidationError{Path: path, Message: fmt.Sprintf("duplicate dotfile membership %q in group %q", dot.Name, groupName)})
+			}
+			seenDots[dot.Name] = struct{}{}
+			if first, ok := dotMemberships[dot.Name]; ok {
+				errs = append(errs, ValidationError{Path: path, Message: fmt.Sprintf("dotfile %q already belongs to group %q", dot.Name, first.BaseName())})
+			}
+			if _, ok := dotMemberships[dot.Name]; !ok {
+				dotMemberships[dot.Name] = g
 			}
 		}
 	}
-	for profileName, profile := range cfg.Profiles {
-		for i, group := range profile.Groups {
-			if _, ok := groupNames[group]; !ok {
-				errs = append(errs, ValidationError{Path: fmt.Sprintf("$.profiles.%q.groups[%d]", profileName, i), Message: fmt.Sprintf("missing group %q", group)})
+	for host, groups := range cfg.Hosts {
+		if strings.TrimSpace(host) == "" {
+			errs = append(errs, ValidationError{Path: "$.hosts", Message: "host name is required"})
+		}
+		hostGroup, ok := groupByName[host]
+		if !ok {
+			errs = append(errs, ValidationError{Path: fmt.Sprintf("$.hosts.%q", host), Message: fmt.Sprintf("missing host group %q", host)})
+		} else if !hostGroup.IsHost() {
+			errs = append(errs, ValidationError{Path: fmt.Sprintf("$.hosts.%q", host), Message: fmt.Sprintf("group %q must be marked as special host group", host)})
+		}
+		for i, group := range groups {
+			assigned, ok := groupByName[group]
+			if !ok {
+				errs = append(errs, ValidationError{Path: fmt.Sprintf("$.hosts.%q[%d]", host, i), Message: fmt.Sprintf("missing group %q", group)})
+			}
+			if group == host {
+				errs = append(errs, ValidationError{Path: fmt.Sprintf("$.hosts.%q[%d]", host, i), Message: "host group is implicit and must not be listed"})
+			}
+			if assigned != nil && assigned.IsHost() {
+				errs = append(errs, ValidationError{Path: fmt.Sprintf("$.hosts.%q[%d]", host, i), Message: fmt.Sprintf("host group %q cannot be assigned", group)})
 			}
 		}
 	}
-	for host, profileName := range cfg.Hostnames {
-		if _, ok := cfg.Profiles[profileName]; !ok {
-			errs = append(errs, ValidationError{Path: fmt.Sprintf("$.hostnames.%q", host), Message: fmt.Sprintf("missing profile %q", profileName)})
+	for i, ignored := range cfg.Ignore.Tools {
+		if strings.TrimSpace(ignored) == "" {
+			errs = append(errs, ValidationError{Path: fmt.Sprintf("$.ignore.tools[%d]", i), Message: "tool name is required"})
+		}
+		if _, ok := cfg.Tools[ignored]; !ok {
+			errs = append(errs, ValidationError{Path: fmt.Sprintf("$.ignore.tools[%d]", i), Message: fmt.Sprintf("missing logical tool %q", ignored)})
+		}
+	}
+	for i, ignored := range cfg.Ignore.Dots {
+		if strings.TrimSpace(ignored) == "" {
+			errs = append(errs, ValidationError{Path: fmt.Sprintf("$.ignore.dots[%d]", i), Message: "dotfile name is required"})
 		}
 	}
 	return errs

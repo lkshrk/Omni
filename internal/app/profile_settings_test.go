@@ -11,12 +11,11 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-// ─── ProfileGroups ────────────────────────────────────────────────────────────
+// ─── HostGroups ───────────────────────────────────────────────────────────────
 
-func TestProfileGroups_ProfileWithTwoGroups(t *testing.T) {
+func TestHostGroups_HostWithAssignedGroup(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 
-	// Seed two named groups in config.
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(
 			logicalTool("ripgrep", "brew"),
@@ -24,69 +23,64 @@ func TestProfileGroups_ProfileWithTwoGroups(t *testing.T) {
 			logicalTool("jq", "brew"),
 		),
 		Groups: []*config.GroupConfig{
-			{Tools: groupTools("ripgrep")}, // base
+			{Name: "testhost", Special: "host", Tools: groupTools("ripgrep")},
 			{Name: "work", Tools: groupTools("slack")},
 			{Name: "dev", Tools: groupTools("jq")},
 		},
+		Hosts: map[string][]string{"testhost": {"work"}},
 	}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
 
-	// Create a profile that references "base" and "work" (not "dev").
-	if err := a.AddProfile("myprofile", []string{"base", "work"}); err != nil {
-		t.Fatalf("AddProfile: %v", err)
-	}
-
-	groups, err := a.ProfileGroups(context.Background(), "myprofile")
+	groups, err := a.HostGroups(context.Background(), "testhost")
 	if err != nil {
-		t.Fatalf("ProfileGroups: %v", err)
+		t.Fatalf("HostGroups: %v", err)
 	}
 
-	// Should return exactly the groups belonging to the profile (base + work).
 	if len(groups) != 2 {
-		t.Fatalf("ProfileGroups returned %d groups, want 2: %v", len(groups), groups)
+		t.Fatalf("HostGroups returned %d groups, want 2: %v", len(groups), groups)
 	}
 	names := make(map[string]bool)
 	for _, g := range groups {
 		names[g.BaseName()] = true
 	}
-	if !names["base"] || !names["work"] {
-		t.Errorf("ProfileGroups returned wrong groups: %v, want base and work", names)
+	if !names["testhost"] || !names["work"] {
+		t.Errorf("HostGroups returned wrong groups: %v, want testhost and work", names)
 	}
 	if names["dev"] {
-		t.Error("ProfileGroups should not have returned the 'dev' group")
+		t.Error("HostGroups should not have returned the 'dev' group")
 	}
 }
 
-func TestProfileGroups_ProfileWithNoGroups(t *testing.T) {
+func TestHostGroups_HostWithNoAssignedGroups(t *testing.T) {
 	a, _ := newImportApp(t)
 
-	if err := a.AddProfile("empty-profile", []string{}); err != nil {
-		t.Fatalf("AddProfile: %v", err)
+	if err := a.EnsureHost("testhost"); err != nil {
+		t.Fatalf("EnsureHost: %v", err)
 	}
 
-	groups, err := a.ProfileGroups(context.Background(), "empty-profile")
+	groups, err := a.HostGroups(context.Background(), "testhost")
 	if err != nil {
-		t.Fatalf("ProfileGroups: %v", err)
+		t.Fatalf("HostGroups: %v", err)
 	}
-	if len(groups) != 0 {
-		t.Fatalf("ProfileGroups returned %d groups, want 0: %v", len(groups), groups)
+	if len(groups) != 1 || groups[0].BaseName() != "testhost" {
+		t.Fatalf("HostGroups returned %v, want only testhost", groupNamesForTest(groups))
 	}
 }
 
-func TestProfileGroups_UnknownProfile_ReturnsError(t *testing.T) {
+func TestHostGroups_UnknownHost_ReturnsError(t *testing.T) {
 	a, _ := newImportApp(t)
 
-	_, err := a.ProfileGroups(context.Background(), "nonexistent")
+	_, err := a.HostGroups(context.Background(), "nonexistent")
 	if err == nil {
-		t.Error("ProfileGroups with unknown profile should return an error, got nil")
+		t.Error("HostGroups with unknown host should return an error, got nil")
 	}
-	if !strings.Contains(err.Error(), "not found") {
-		t.Errorf("error should mention 'not found', got %q", err.Error())
+	if !strings.Contains(err.Error(), "not configured") {
+		t.Errorf("error should mention 'not configured', got %q", err.Error())
 	}
 }
 
-func TestProfileGroups_EmptyProfileName_ReturnsAllGroups(t *testing.T) {
+func TestHostGroups_EmptyHostName_ReturnsAllGroups(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -95,20 +89,28 @@ func TestProfileGroups_EmptyProfileName_ReturnsAllGroups(t *testing.T) {
 			logicalTool("slack", "brew"),
 		),
 		Groups: []*config.GroupConfig{
-			{Tools: groupTools("ripgrep")},
+			{Name: "testhost", Special: "host", Tools: groupTools("ripgrep")},
 			{Name: "work", Tools: groupTools("slack")},
 		},
 	}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
 
-	groups, err := a.ProfileGroups(context.Background(), "")
+	groups, err := a.HostGroups(context.Background(), "")
 	if err != nil {
-		t.Fatalf("ProfileGroups with empty name: %v", err)
+		t.Fatalf("HostGroups with empty name: %v", err)
 	}
 	if len(groups) != 2 {
-		t.Errorf("ProfileGroups(\"\") returned %d groups, want 2 (all groups)", len(groups))
+		t.Errorf("HostGroups(\"\") returned %d groups, want 2 (all groups)", len(groups))
 	}
+}
+
+func groupNamesForTest(groups []*config.GroupConfig) []string {
+	names := make([]string, 0, len(groups))
+	for _, group := range groups {
+		names = append(names, group.BaseName())
+	}
+	return names
 }
 
 // ─── SaveDisabledProviders ────────────────────────────────────────────────────
@@ -350,54 +352,7 @@ func TestEnableDotsForHost_NoRepoClearsDisabled(t *testing.T) {
 	}
 }
 
-// ─── EffectiveManagers ────────────────────────────────────────────────────────
-
-func TestEffectiveManagers_ReturnsTwoStrings(t *testing.T) {
-	a, _ := newImportApp(t)
-
-	pythonBin, nodeBin := a.EffectiveManagers()
-	// Neither should panic. Both may be "" if none of the candidates are on PATH,
-	// but they must be valid strings (not undefined/nil).
-	t.Logf("pythonBin=%q nodeBin=%q", pythonBin, nodeBin)
-}
-
-func TestEffectiveManagers_NoPanicWithoutConfig(t *testing.T) {
-	// App with no config written yet — settings load will return zero-value; probeFirst
-	// must still run without panicking.
-	a, _ := newImportApp(t)
-
-	pythonBin, nodeBin := a.EffectiveManagers()
-	// Both values are strings (possibly ""); verify via valid assignment.
-	if false {
-		t.Log(pythonBin, nodeBin)
-	}
-}
-
-func TestEffectiveManagers_HonoursPinnedManager(t *testing.T) {
-	// If we pin the node ecosystem manager to "npm" and npm is on PATH, EffectiveManagers
-	// should return "npm" for the node bin.  We cannot guarantee "npm" is on the
-	// test runner's PATH, so we only assert no error occurs and return type is string.
-	a, _ := newImportApp(t)
-
-	if err := a.SaveSettings(context.Background(), testSettingsWithNodePython("npm", "pip3")); err != nil {
-		t.Fatalf("SaveSettings: %v", err)
-	}
-
-	pythonBin, nodeBin := a.EffectiveManagers()
-	t.Logf("pythonBin=%q nodeBin=%q", pythonBin, nodeBin)
-	// pythonBin and nodeBin are strings — assignment confirms they are the right type.
-	_ = pythonBin
-	_ = nodeBin
-}
-
-// ─── AllAvailableManagers ─────────────────────────────────────────────────────
-
-func TestAllAvailableManagers_NoPanic(t *testing.T) {
-	a, _ := newImportApp(t)
-	pyBins, nodeBins := a.AllAvailableManagers()
-	// Must return slices (possibly nil/empty) without panicking.
-	t.Logf("pyBins=%v nodeBins=%v", pyBins, nodeBins)
-}
+// ─── Effective managers ──────────────────────────────────────────────────────
 
 func TestAllAvailableManagers_SupersetOfEffective(t *testing.T) {
 	a, _ := newImportApp(t)

@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"database/sql"
+	"slices"
 	"testing"
 	"time"
 
@@ -58,11 +59,11 @@ func TestSetTool_RejectsMismatchedInstallWith(t *testing.T) {
 	}
 }
 
-func TestAddToolToGroup_RequiresLogicalSpec(t *testing.T) {
+func TestMoveToolToGroup_RequiresLogicalSpec(t *testing.T) {
 	a, _ := newImportApp(t)
 
-	if err := a.AddToolToGroup("ripgrep", "base"); err == nil {
-		t.Fatal("AddToolToGroup without logical spec returned nil")
+	if err := a.MoveToolToGroup("ripgrep", "base"); err == nil {
+		t.Fatal("MoveToolToGroup without logical spec returned nil")
 	}
 }
 
@@ -77,8 +78,8 @@ func TestAddAndRemoveToolToGroup_UpdatesMembershipOnly(t *testing.T) {
 		t.Fatalf("config.Save: %v", err)
 	}
 
-	if err := a.AddToolToGroup("ripgrep", "work"); err != nil {
-		t.Fatalf("AddToolToGroup: %v", err)
+	if err := a.MoveToolToGroup("ripgrep", "work"); err != nil {
+		t.Fatalf("MoveToolToGroup: %v", err)
 	}
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
@@ -105,6 +106,46 @@ func TestAddAndRemoveToolToGroup_UpdatesMembershipOnly(t *testing.T) {
 	}
 }
 
+func TestMoveToolToGroupMovesSingleOwnerMembership(t *testing.T) {
+	a, cfgPath := newImportApp(t)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"ripgrep": {Provider: "system"},
+		},
+		Groups: []*config.GroupConfig{
+			{Name: "testhost", Special: "host", Tools: []config.ToolEntry{{Name: "ripgrep"}}},
+			{Name: "work"},
+		},
+		Hosts: map[string][]string{"testhost": {"work"}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if err := a.MoveToolToGroup("ripgrep", "work"); err != nil {
+		t.Fatalf("MoveToolToGroup: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	host := logicalTestGroupByName(cfg, "testhost")
+	if host != nil && logicalTestGroupHasTool(host, "ripgrep") {
+		t.Fatalf("ripgrep should move out of host group, host tools=%+v", host.Tools)
+	}
+	work := logicalTestGroupByName(cfg, "work")
+	if work == nil || !logicalTestGroupHasTool(work, "ripgrep") {
+		t.Fatalf("ripgrep should move into work group, groups=%+v", cfg.Groups)
+	}
+	memberships, err := a.ToolMembershipMap(context.Background())
+	if err != nil {
+		t.Fatalf("ToolMembershipMap: %v", err)
+	}
+	if got := memberships["ripgrep\x00system"]; !slices.Equal(got, []string{"work"}) {
+		t.Fatalf("memberships = %v, want [work]", got)
+	}
+}
+
 func TestSync_MachineGroupIgnoreSuppressesSharedLogicalTool(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	brew := &installTracker{stubProvider: stubProvider{name: "brew", available: true}}
@@ -112,11 +153,10 @@ func TestSync_MachineGroupIgnoreSuppressesSharedLogicalTool(t *testing.T) {
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
 		Groups: []*config.GroupConfig{
-			{Tools: groupTools("ripgrep")},
-			{Name: "testhost", Ignore: []string{"ripgrep"}},
+			{Name: "testhost", Special: "host", Tools: groupTools("ripgrep")},
 		},
-		Profiles:  map[string]config.Profile{"default": {Groups: []string{"base"}}},
-		Hostnames: map[string]string{"testhost": "default"},
+		Hosts:  map[string][]string{"testhost": {}},
+		Ignore: config.GlobalIgnore{Tools: []string{"ripgrep"}},
 	}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
@@ -146,9 +186,10 @@ func TestRemoveLogicalTool_RemovesMembershipsIgnoresAndCache(t *testing.T) {
 			"fd":      {Provider: "system"},
 		},
 		Groups: []*config.GroupConfig{
-			{Tools: []config.ToolEntry{{Name: "ripgrep"}, {Name: "fd"}}},
-			{Name: "work", Tools: []config.ToolEntry{{Name: "ripgrep"}}, Ignore: []string{"ripgrep"}},
+			{Name: "tools", Tools: []config.ToolEntry{{Name: "ripgrep"}, {Name: "fd"}}},
+			{Name: "work"},
 		},
+		Ignore: config.GlobalIgnore{Tools: []string{"ripgrep"}},
 	}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
@@ -162,6 +203,17 @@ func TestRemoveLogicalTool_RemovesMembershipsIgnoresAndCache(t *testing.T) {
 		Tracked:     true,
 	}); err != nil {
 		t.Fatalf("seed cache: %v", err)
+	}
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name:        "fd",
+		Provider:    "system",
+		Package:     "fd",
+		Installed:   true,
+		Version:     sql.NullString{String: "9.0.0", Valid: true},
+		LastChecked: time.Now(),
+		Tracked:     true,
+	}); err != nil {
+		t.Fatalf("seed fd cache: %v", err)
 	}
 
 	if err := a.RemoveLogicalTool(ctx, "ripgrep"); err != nil {
@@ -179,10 +231,10 @@ func TestRemoveLogicalTool_RemovesMembershipsIgnoresAndCache(t *testing.T) {
 		if logicalTestGroupHasTool(group, "ripgrep") {
 			t.Fatalf("group %q still has ripgrep membership", group.BaseName())
 		}
-		for _, ignored := range group.Ignore {
-			if ignored == "ripgrep" {
-				t.Fatalf("group %q still ignores ripgrep", group.BaseName())
-			}
+	}
+	for _, ignored := range cfg.Ignore.Tools {
+		if ignored == "ripgrep" {
+			t.Fatalf("global ignore still contains ripgrep")
 		}
 	}
 	cached, err := a.DB().List(ctx)
@@ -193,6 +245,9 @@ func TestRemoveLogicalTool_RemovesMembershipsIgnoresAndCache(t *testing.T) {
 		if tool.Name == "ripgrep" {
 			t.Fatalf("cache still has ripgrep: %+v", tool)
 		}
+	}
+	if _, err := a.DB().Get(ctx, "fd", "system", "fd"); err != nil {
+		t.Fatalf("unrelated fd cache row was removed: %v", err)
 	}
 }
 

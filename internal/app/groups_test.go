@@ -51,9 +51,9 @@ func TestGroups_ReturnsAllDiscovered(t *testing.T) {
 		t.Fatalf("Groups: %v", err)
 	}
 	if len(groups) != 3 {
-		t.Errorf("got %d groups, want 3 (apps + base + work)", len(groups))
+		t.Errorf("got %d groups, want 3 (apps + host + work)", len(groups))
 	}
-	want := []string{"apps", "base", "work"}
+	want := []string{"apps", "work", testShortHostname()}
 	for i, name := range want {
 		if i >= len(groups) {
 			break
@@ -78,7 +78,7 @@ func TestInitTestMode_NormalizesConfigGroupOrderOnDisk(t *testing.T) {
   },
   "groups": [
     {"name": "work", "tools": ["slack"]},
-    {"tools": ["ripgrep"]},
+    {"name": "testhost", "special": "host", "tools": ["ripgrep"]},
     {"name": "apps", "tools": ["zoom"]}
   ]
 }`
@@ -94,7 +94,7 @@ func TestInitTestMode_NormalizesConfigGroupOrderOnDisk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	want := []string{"apps", "base", "work"}
+	want := []string{"apps", "work", "testhost"}
 	for i, name := range want {
 		if got := updated.Groups[i].BaseName(); got != name {
 			t.Fatalf("groups[%d] = %q, want %q", i, got, name)
@@ -252,7 +252,7 @@ func TestImport_ToNamedGroup(t *testing.T) {
 		t.Errorf("Added = %v, want [ripgrep]", result.Added)
 	}
 
-	// ripgrep must be in the "work" group, not the base group.
+	// ripgrep must be in the requested "work" group.
 	updated, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
@@ -268,9 +268,9 @@ func TestImport_ToNamedGroup(t *testing.T) {
 	t.Error("work group not found in config")
 }
 
-// ─── Cross-group duplicate warnings ──────────────────────────────────────────
+// ─── Cross-group duplicate rejection ─────────────────────────────────────────
 
-func TestSync_DuplicateToolAcrossGroups_WarnsAndDeduplicates(t *testing.T) {
+func TestSync_DuplicateToolAcrossGroups_IsInvalid(t *testing.T) {
 	brew := &installTracker{stubProvider: stubProvider{name: "brew", available: true}}
 	a, cfgPath := newImportApp(t, brew)
 
@@ -286,27 +286,12 @@ func TestSync_DuplicateToolAcrossGroups_WarnsAndDeduplicates(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := a.Sync(context.Background(), gosync.SyncOptions{})
-	if err != nil {
-		t.Fatalf("Sync: %v", err)
+	_, err := a.Sync(context.Background(), gosync.SyncOptions{})
+	if err == nil || !strings.Contains(err.Error(), `tool "ripgrep" already belongs to group`) {
+		t.Fatalf("Sync error = %v, want duplicate ownership validation error", err)
 	}
-
-	// Multi-group logical tools are expected and should not warn.
-	for _, w := range result.Warnings {
-		if strings.Contains(w, "ripgrep") {
-			t.Errorf("unexpected duplicate warning for logical tool: %v", result.Warnings)
-		}
-	}
-
-	// Should only attempt to install ripgrep once despite appearing twice.
-	count := 0
-	for _, name := range brew.installCalled {
-		if name == "ripgrep" {
-			count++
-		}
-	}
-	if count > 1 {
-		t.Errorf("ripgrep installed %d times, want at most 1", count)
+	if len(brew.installCalled) != 0 {
+		t.Fatalf("install calls = %v, want none for invalid config", brew.installCalled)
 	}
 }
 
@@ -345,10 +330,10 @@ func TestCreateGroup_EmptyName_Error(t *testing.T) {
 	}
 }
 
-func TestCreateGroup_BaseReserved_Error(t *testing.T) {
+func TestCreateGroup_BaseAllowed(t *testing.T) {
 	a, _ := newImportApp(t)
-	if err := a.CreateGroup("base"); err == nil {
-		t.Error("expected error for reserved name 'base', got nil")
+	if err := a.CreateGroup("base"); err != nil {
+		t.Fatalf("CreateGroup(base): %v", err)
 	}
 }
 

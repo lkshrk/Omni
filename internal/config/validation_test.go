@@ -272,10 +272,40 @@ func TestValidateRoot_GroupDuplicateTool(t *testing.T) {
 	}
 }
 
-func TestValidateRoot_ProfileReferencesMissingGroup(t *testing.T) {
+func TestValidateRoot_ToolSingleOwnerIncludesHostGroup(t *testing.T) {
 	cfg := &config.RootConfig{
-		Tools:    map[string]config.ToolSpec{"a": {Provider: "brew"}},
-		Profiles: map[string]config.Profile{"home": {Groups: []string{"ghost"}}},
+		Tools: map[string]config.ToolSpec{"a": {Provider: "brew"}},
+		Groups: []*config.GroupConfig{
+			{Name: "host", Special: "host", Tools: []config.ToolEntry{{Name: "a"}}},
+			{Name: "work", Tools: []config.ToolEntry{{Name: "a"}}},
+		},
+		Hosts: map[string][]string{"host": {"work"}},
+	}
+	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"brew"}})
+	if !containsErrorMessage(errs, `tool "a" already belongs to group "host"`) {
+		t.Errorf("expected cross-group tool owner error, got %v", errs)
+	}
+}
+
+func TestValidateRoot_DotSingleOwnerIncludesHostGroup(t *testing.T) {
+	cfg := &config.RootConfig{
+		Groups: []*config.GroupConfig{
+			{Name: "host", Special: "host", Dots: []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}}},
+			{Name: "work", Dots: []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}}},
+		},
+		Hosts: map[string][]string{"host": {"work"}},
+	}
+	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"brew"}})
+	if !containsErrorMessage(errs, `dotfile "nvim" already belongs to group "host"`) {
+		t.Errorf("expected cross-group dot owner error, got %v", errs)
+	}
+}
+
+func TestValidateRoot_HostReferencesMissingGroup(t *testing.T) {
+	cfg := &config.RootConfig{
+		Tools:  map[string]config.ToolSpec{"a": {Provider: "brew"}},
+		Groups: []*config.GroupConfig{{Name: "home", Special: "host"}},
+		Hosts:  map[string][]string{"home": {"ghost"}},
 	}
 	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"brew"}})
 	if !containsErrorMessage(errs, `missing group "ghost"`) {
@@ -283,14 +313,15 @@ func TestValidateRoot_ProfileReferencesMissingGroup(t *testing.T) {
 	}
 }
 
-func TestValidateRoot_HostnameReferencesMissingProfile(t *testing.T) {
+func TestValidateRoot_HostRequiresSpecialHostGroup(t *testing.T) {
 	cfg := &config.RootConfig{
-		Tools:     map[string]config.ToolSpec{"a": {Provider: "brew"}},
-		Hostnames: map[string]string{"laptop": "ghost"},
+		Tools:  map[string]config.ToolSpec{"a": {Provider: "brew"}},
+		Groups: []*config.GroupConfig{{Name: "laptop"}},
+		Hosts:  map[string][]string{"laptop": {}},
 	}
 	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"brew"}})
-	if !containsErrorMessage(errs, `missing profile "ghost"`) {
-		t.Errorf("expected missing-profile error, got %v", errs)
+	if !containsErrorMessage(errs, `must be marked as special host group`) {
+		t.Errorf("expected special-host error, got %v", errs)
 	}
 }
 
@@ -298,8 +329,11 @@ func TestValidateRoot_CleanCfgReturnsEmpty(t *testing.T) {
 	cfg := &config.RootConfig{
 		Tools: map[string]config.ToolSpec{"ripgrep": {Provider: "brew"}},
 		Groups: []*config.GroupConfig{{
-			Tools: []config.ToolEntry{{Name: "ripgrep"}},
+			Name:    "testhost",
+			Special: "host",
+			Tools:   []config.ToolEntry{{Name: "ripgrep"}},
 		}},
+		Hosts: map[string][]string{"testhost": {}},
 	}
 	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"brew"}})
 	if len(errs) != 0 {

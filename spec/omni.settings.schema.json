@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.schema.json",
   "title": "omni settings",
-  "description": "omni settings.json — manages all dev tools, dotfiles, and profiles from a single file.",
+  "description": "omni settings.json — manages all dev tools, dotfiles, host assignments, and groups from a single file.",
   "type": "object",
   "properties": {
     "$schema": {
@@ -10,41 +10,78 @@
       "type": "string"
     },
     "groups": {
-      "description": "Tool/dots groups. An entry without a 'name' field is the base group.",
+      "description": "Tool/dots groups. Host groups use special=\"host\" and are reserved for one hostname.",
       "type": "array",
       "items": {
         "$ref": "#/$defs/GroupConfig"
       }
     },
-    "hostnames": {
-      "description": "Mapping of hostname → profile name for auto-activation on each machine.",
+    "host_settings": {
+      "description": "Per-host setting overrides keyed by short hostname.",
       "examples": [
         {
-          "home-desktop": "home",
-          "macbook-pro": "work"
-        }
-      ],
-      "type": "object",
-      "additionalProperties": {
-        "type": "string",
-        "minLength": 1
-      }
-    },
-    "profiles": {
-      "description": "Named collections of groups. Keys are profile names.",
-      "examples": [
-        {
-          "work": {
-            "groups": [
-              "work"
-            ]
+          "macbook-pro": {
+            "dots_disabled": false
           }
         }
       ],
       "type": "object",
       "additionalProperties": {
-        "$ref": "#/$defs/Profile"
+        "$ref": "#/$defs/HostSettings"
       }
+    },
+    "hosts": {
+      "description": "Reusable group assignments keyed by short hostname. The matching special host group is active implicitly and must not be listed here.",
+      "examples": [
+        {
+          "home-desktop": [
+            "personal"
+          ],
+          "macbook-pro": [
+            "work",
+            "personal"
+          ]
+        }
+      ],
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "ignore": {
+      "description": "Tool and dotfile names skipped globally.",
+      "examples": [
+        {
+          "dots": [
+            "work-secrets"
+          ],
+          "tools": [
+            "slack"
+          ]
+        }
+      ],
+      "type": "object",
+      "properties": {
+        "dots": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
     },
     "settings": {
       "$ref": "#/$defs/Settings"
@@ -91,6 +128,10 @@
             "minLength": 1
           }
         },
+        "ignored": {
+          "description": "Keep the entry visible but skip sync/discovery management.",
+          "type": "boolean"
+        },
         "name": {
           "description": "Human-readable identifier. Also used as the default source directory name.",
           "examples": [
@@ -101,17 +142,8 @@
           "type": "string",
           "minLength": 1
         },
-        "source": {
-          "description": "Path relative to the dots repo root. Defaults to '<name>/'.",
-          "examples": [
-            "nvim/",
-            "configs/zsh"
-          ],
-          "type": "string",
-          "minLength": 1
-        },
-        "target": {
-          "description": "Absolute destination path where the symlink is created (~ is expanded).",
+        "path": {
+          "description": "Original filesystem location managed by this entry (~ and environment variables are expanded).",
           "examples": [
             "~/.config/nvim",
             "~/.zshrc"
@@ -122,7 +154,7 @@
       },
       "required": [
         "name",
-        "target"
+        "path"
       ],
       "additionalProperties": false
     },
@@ -197,28 +229,24 @@
             "$ref": "#/$defs/DotEntry"
           }
         },
-        "ignore": {
-          "description": "Logical tool names suppressed for this group, including machine groups.",
-          "examples": [
-            [
-              "slack",
-              "zoom"
-            ]
-          ],
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
         "name": {
-          "description": "Group identifier. Omit (or leave empty) for the base group.",
+          "description": "Group identifier.",
           "examples": [
             "work",
             "personal",
             "media"
           ],
           "type": "string"
+        },
+        "special": {
+          "description": "Reserved marker for protected host groups.",
+          "examples": [
+            "host"
+          ],
+          "type": "string",
+          "enum": [
+            "host"
+          ]
         },
         "taps": {
           "description": "Legacy Homebrew taps for this group. Prefer tool-level 'taps' on logical tool specs.",
@@ -251,16 +279,17 @@
       },
       "additionalProperties": false
     },
-    "Profile": {
-      "description": "A named collection of groups, optionally with a per-machine ignore list.",
+    "HostSettings": {
+      "description": "Per-host setting overrides.",
       "type": "object",
       "properties": {
-        "groups": {
-          "description": "Group names activated on machines mapped to this profile.",
+        "disabled_providers": {
+          "description": "Ecosystem provider names disabled on this host.",
           "examples": [
             [
-              "work",
-              "personal"
+              "system",
+              "node",
+              "python"
             ]
           ],
           "type": "array",
@@ -269,24 +298,37 @@
             "minLength": 1
           }
         },
-        "ignore": {
-          "description": "Tool names skipped during sync on machines using this profile.",
+        "dots_disabled": {
+          "description": "Whether dotfile sync is disabled on this host.",
+          "type": "boolean"
+        },
+        "dots_repo": {
+          "description": "Host-specific path to the dotfiles git repository.",
           "examples": [
-            [
-              "slack",
-              "zoom"
-            ]
+            "~/Dev/dotfiles",
+            "~/.dotfiles"
           ],
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
+          "type": "string"
+        },
+        "ecosystems": {
+          "description": "Host-specific ecosystem manager and priority overrides.",
+          "type": "object",
+          "properties": {
+            "node": {
+              "$ref": "#/$defs/EcosystemSettings"
+            },
+            "python": {
+              "$ref": "#/$defs/EcosystemSettings"
+            },
+            "system": {
+              "$ref": "#/$defs/EcosystemSettings"
+            }
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/EcosystemSettings"
           }
         }
       },
-      "required": [
-        "groups"
-      ],
       "additionalProperties": false
     },
     "Settings": {

@@ -6,48 +6,47 @@ package actions
 type ID string
 
 const (
-	ToolSync             ID = "tools.sync"
-	ToolInstall          ID = "tools.install"
-	ToolDelete           ID = "tools.delete"
-	ToolUpdate           ID = "tools.update"
-	ToolUpdateAll        ID = "tools.update_all"
-	ToolSyncAll          ID = "tools.sync_all"
-	ToolClaim            ID = "tools.claim"
-	ToolIgnore           ID = "tools.ignore"
-	ToolChangeGroup      ID = "tools.change_group"
-	ToolPinProvider      ID = "tools.pin_provider"
-	ToolReinstallDefault ID = "tools.reinstall_default"
-	ToolRefresh          ID = "tools.refresh"
-	ToolConsolidate      ID = "tools.consolidate"
-	ToolSetSpec          ID = "tools.set_spec"
-	ToolDeleteSpec       ID = "tools.delete_spec"
-	ToolImport           ID = "tools.import"
-	ToolSwitchProvider   ID = "tools.switch_provider"
-	DotsSync             ID = "dots.sync"
-	DotsDiscover         ID = "dots.discover"
-	DotsAdd              ID = "dots.add"
-	DotsEditGroups       ID = "dots.edit_groups"
-	DotsDelete           ID = "dots.delete"
-	DotsIgnore           ID = "dots.ignore"
-	DotsEnable           ID = "dots.enable"
-	DotsDisable          ID = "dots.disable"
-	DotsPull             ID = "dots.pull"
-	DotsPush             ID = "dots.push"
-	GroupCreate          ID = "groups.create"
-	GroupRename          ID = "groups.rename"
-	GroupDelete          ID = "groups.delete"
-	GroupEditTools       ID = "groups.edit_tools"
-	GroupEditDots        ID = "groups.edit_dots"
-	ProfileCreate        ID = "profiles.create"
-	ProfileRename        ID = "profiles.rename"
-	ProfileDelete        ID = "profiles.delete"
-	ProfileEditGroups    ID = "profiles.edit_groups"
-	ProfileEditHosts     ID = "profiles.edit_hosts"
-	SettingsSet          ID = "settings.set"
-	SettingsProvider     ID = "settings.provider"
-	SettingsReset        ID = "settings.reset"
-	SettingsResetCache   ID = "settings.reset_cache"
-	SetupInit            ID = "setup.init"
+	ToolSync                       ID = "tools.sync"
+	ToolInstall                    ID = "tools.install"
+	ToolDelete                     ID = "tools.delete"
+	ToolUpdate                     ID = "tools.update"
+	ToolUpdateAll                  ID = "tools.update_all"
+	ToolSyncAll                    ID = "tools.sync_all"
+	ToolClaim                      ID = "tools.claim"
+	ToolIgnore                     ID = "tools.ignore"
+	ToolChangeGroup                ID = "tools.change_group"
+	ToolPinProvider                ID = "tools.pin_provider"
+	ToolReinstallDefault           ID = "tools.reinstall_default"
+	ToolRefresh                    ID = "tools.refresh"
+	ToolConsolidate                ID = "tools.consolidate"
+	ToolSetSpec                    ID = "tools.set_spec"
+	ToolDeleteSpec                 ID = "tools.delete_spec"
+	ToolNormalizeProviderOverrides ID = "tools.normalize_provider_overrides"
+	ToolImport                     ID = "tools.import"
+	ToolSwitchProvider             ID = "tools.switch_provider"
+	DotsSync                       ID = "dots.sync"
+	DotsDiscover                   ID = "dots.discover"
+	DotsAdd                        ID = "dots.add"
+	DotsEditGroups                 ID = "dots.edit_groups"
+	DotsDelete                     ID = "dots.delete"
+	DotsIgnore                     ID = "dots.ignore"
+	DotsEnable                     ID = "dots.enable"
+	DotsDisable                    ID = "dots.disable"
+	DotsPull                       ID = "dots.pull"
+	DotsPush                       ID = "dots.push"
+	GroupCreate                    ID = "groups.create"
+	GroupRename                    ID = "groups.rename"
+	GroupDelete                    ID = "groups.delete"
+	GroupEditTools                 ID = "groups.edit_tools"
+	GroupEditDots                  ID = "groups.edit_dots"
+	HostCreate                     ID = "hosts.create"
+	HostDelete                     ID = "hosts.delete"
+	HostEditGroups                 ID = "hosts.edit_groups"
+	SettingsSet                    ID = "settings.set"
+	SettingsProvider               ID = "settings.provider"
+	SettingsReset                  ID = "settings.reset"
+	SettingsResetCache             ID = "settings.reset_cache"
+	SetupInit                      ID = "setup.init"
 )
 
 // Scope describes whether an action targets one row, a whole tab/domain, or
@@ -77,8 +76,11 @@ const (
 // TUIBinding records the default TUI exposure for an action without depending
 // on Bubble Tea key types.
 type TUIBinding struct {
-	KeyMapField string
-	DefaultKey  string
+	KeyMapField        string
+	DefaultKey         string
+	Label              string
+	Description        string
+	ConfirmDescription string
 }
 
 // CLIBinding records the CLI exposure for an action without depending on Cobra.
@@ -134,7 +136,7 @@ var Tools = []Action{
 		Description:     "Install missing tools from config.",
 		LongDescription: "Install configured tools that are missing locally.",
 		Mutates:         true,
-		CLI:             []CLIBinding{{Command: []string{"sync"}, Flags: []string{"--dry-run", "--prune", "--provider", "--group", "--profile", "--retry-failed"}}},
+		CLI:             []CLIBinding{{Command: []string{"sync"}, Flags: []string{"--dry-run", "--prune", "--provider", "--group", "--retry-failed"}}},
 		Palette:         &PaletteBinding{Command: []string{"sync"}, Description: "sync tools from config"},
 		PaletteEligible: true,
 	},
@@ -147,7 +149,7 @@ var Tools = []Action{
 		LongDescription: "Install one missing logical tool using its resolved package and install-with target. Configured tools stay in the config.",
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresToolName},
-		TUI:             &TUIBinding{KeyMapField: "Install", DefaultKey: "i"},
+		TUI:             &TUIBinding{KeyMapField: "Install", DefaultKey: "i", Label: "install", Description: "Install the selected missing tool."},
 		CLI:             []CLIBinding{{Command: []string{"install"}, Flags: []string{"--provider"}}},
 	},
 	{
@@ -161,7 +163,7 @@ var Tools = []Action{
 		RequiresConfirm:    true,
 		ConfirmDescription: ConfirmDelete,
 		Requirements:       []Requirement{RequiresToolName},
-		TUI:                &TUIBinding{KeyMapField: "Delete", DefaultKey: "d"},
+		TUI:                &TUIBinding{KeyMapField: "Delete", DefaultKey: "d", Label: LabelDelete, Description: "Delete the selected tool and config entry.", ConfirmDescription: ConfirmDelete},
 		CLI:                []CLIBinding{{Command: []string{"delete"}, Flags: []string{"--provider"}}},
 	},
 	{
@@ -173,7 +175,7 @@ var Tools = []Action{
 		LongDescription: "Upgrade one outdated installed tool using the logical provider and installed-with owner recorded in cache.",
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresToolName},
-		TUI:             &TUIBinding{KeyMapField: "Upgrade", DefaultKey: "u"},
+		TUI:             &TUIBinding{KeyMapField: "Upgrade", DefaultKey: "u", Label: "upgrade", Description: "Upgrade the selected outdated tool."},
 		CLI:             []CLIBinding{{Command: []string{"upgrade"}, Flags: []string{"--provider"}}},
 	},
 	{
@@ -184,7 +186,7 @@ var Tools = []Action{
 		Description:     "Upgrade every outdated tool.",
 		LongDescription: "Upgrade every outdated installed tool currently tracked in the local cache.",
 		Mutates:         true,
-		TUI:             &TUIBinding{KeyMapField: "UpgradeAll", DefaultKey: "U"},
+		TUI:             &TUIBinding{KeyMapField: "UpgradeAll", DefaultKey: "U", Label: "upgrade all", Description: "Upgrade every visible outdated tool."},
 		CLI:             []CLIBinding{{Command: []string{"upgrade"}, Flags: []string{"--all"}}},
 	},
 	{
@@ -197,7 +199,7 @@ var Tools = []Action{
 		Mutates:            true,
 		RequiresConfirm:    true,
 		ConfirmDescription: ConfirmSyncAll,
-		TUI:                &TUIBinding{KeyMapField: "SyncAll", DefaultKey: "S"},
+		TUI:                &TUIBinding{KeyMapField: "SyncAll", DefaultKey: "S", Label: "sync all", Description: "Add discovered tools and install missing tools.", ConfirmDescription: ConfirmSyncAll},
 		CLI:                []CLIBinding{{Command: []string{"sync"}, Flags: []string{"--all"}}},
 	},
 	{
@@ -209,7 +211,7 @@ var Tools = []Action{
 		LongDescription: "Add a locally discovered installed tool to a config group so it becomes managed by omni.",
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresToolName, RequiresGroupAssignment, RequiresEcosystemProvider},
-		TUI:             &TUIBinding{KeyMapField: "Claim", DefaultKey: "c"},
+		TUI:             &TUIBinding{KeyMapField: "Claim", DefaultKey: "c", Label: "add to config", Description: "Add the selected discovered tool to config."},
 		CLI:             []CLIBinding{{Command: []string{"add"}, Flags: []string{"--group", "--provider", "--install-with"}}},
 	},
 	{
@@ -218,31 +220,29 @@ var Tools = []Action{
 		Scope:           ScopeRow,
 		Label:           LabelIgnore,
 		Description:     "Toggle whether a scope skips this logical tool.",
-		LongDescription: "Toggle a tool-level or group-level ignore entry. Ignored tools remain in config but are skipped during sync for the selected scope.",
+		LongDescription: "Toggle a tool-level ignore entry. Ignored tools remain in config but are skipped during sync.",
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresToolName, RequiresIgnoreScope},
-		TUI:             &TUIBinding{KeyMapField: "Ignore", DefaultKey: "x"},
+		TUI:             &TUIBinding{KeyMapField: "Ignore", DefaultKey: "x", Label: LabelIgnore, Description: "Ignore or unignore the selected tool."},
 		CLI: []CLIBinding{
 			{Command: []string{"tools", "ignore"}},
 			{Command: []string{"tools", "unignore"}},
 			{Command: []string{"groups", "ignore-tool"}},
 			{Command: []string{"groups", "unignore-tool"}},
-			{Command: []string{"profile", "ignore", "add"}},
-			{Command: []string{"profile", "ignore", "remove"}},
 		},
 	},
 	{
 		ID:              ToolChangeGroup,
 		Domain:          "tools",
 		Scope:           ScopeRow,
-		Label:           LabelEditGroups,
-		Description:     "Change logical tool group memberships.",
-		LongDescription: "Add, remove, or move a logical tool membership without changing its installed state or logical tool spec.",
+		Label:           LabelMoveGroup,
+		Description:     "Move a logical tool to another group.",
+		LongDescription: "Move a logical tool's single group assignment without changing its installed state or logical tool spec.",
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresToolName, RequiresGroupAssignment},
-		TUI:             &TUIBinding{KeyMapField: "MoveGroup", DefaultKey: "g"},
+		TUI:             &TUIBinding{KeyMapField: "MoveGroup", DefaultKey: "g", Label: LabelMoveGroup, Description: "Move the selected tool to another group."},
 		CLI: []CLIBinding{
-			{Command: []string{"groups", "add-tool"}},
+			{Command: []string{"groups", "move-tool"}},
 			{Command: []string{"groups", "remove-tool"}},
 		},
 	},
@@ -255,7 +255,7 @@ var Tools = []Action{
 		LongDescription: "Set a host override, ecosystem host manager, or explicit logical tool install-with override, or remove an existing override when explicitly chosen.",
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresToolName, RequiresProviderScope},
-		TUI:             &TUIBinding{KeyMapField: "PinProvider", DefaultKey: "p"},
+		TUI:             &TUIBinding{KeyMapField: "PinProvider", DefaultKey: "p", Label: "pin provider", Description: "Pin or remove provider settings for the selected tool."},
 		CLI: []CLIBinding{
 			{Command: []string{"tools", "set"}, Flags: []string{"--provider", "--install-with", "--global", "--host"}},
 		},
@@ -271,7 +271,7 @@ var Tools = []Action{
 		RequiresConfirm:    true,
 		ConfirmDescription: ConfirmReinstall,
 		Requirements:       []Requirement{RequiresToolName},
-		TUI:                &TUIBinding{KeyMapField: "MigrateProvider", DefaultKey: "r"},
+		TUI:                &TUIBinding{KeyMapField: "MigrateProvider", DefaultKey: "r", Label: "reinstall with default", Description: "Reinstall the selected tool with its default provider.", ConfirmDescription: ConfirmReinstall},
 		CLI:                []CLIBinding{{Command: []string{"switch"}, Flags: []string{"--reinstall-default", "--provider"}}},
 	},
 	{
@@ -279,10 +279,10 @@ var Tools = []Action{
 		Domain:          "tools",
 		Scope:           ScopeGlobal,
 		Label:           "refresh",
-		Description:     "Refresh cached installed and outdated state.",
-		LongDescription: "Refresh omni's local cache of installed and outdated tools without installing or uninstalling packages.",
-		TUI:             &TUIBinding{KeyMapField: "Refresh", DefaultKey: "R"},
-		CLI:             []CLIBinding{{Command: []string{"list"}}},
+		Description:     "Refresh cached tool state and metadata.",
+		LongDescription: "Refresh omni's local cache of installed, outdated, discovered, and description metadata without installing or uninstalling packages.",
+		TUI:             &TUIBinding{KeyMapField: "Refresh", DefaultKey: "R", Label: "refresh", Description: "Rescan installed, outdated, discovered, and description state."},
+		CLI:             []CLIBinding{{Command: []string{"refresh"}}},
 	},
 	{
 		ID:              ToolConsolidate,
@@ -305,7 +305,7 @@ var Tools = []Action{
 		LongDescription: "Create or update a logical tool spec, including package name, ecosystem provider, concrete install-with target, or host override.",
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresToolName, RequiresEcosystemProvider},
-		TUI:             &TUIBinding{KeyMapField: "PinProvider", DefaultKey: "p"},
+		TUI:             &TUIBinding{KeyMapField: "PinProvider", DefaultKey: "p", Label: "set tool spec", Description: "Edit provider and package settings for the selected tool."},
 		CLI:             []CLIBinding{{Command: []string{"tools", "set"}, Flags: []string{"--provider", "--package", "--install-with", "--host", "--global"}}},
 	},
 	{
@@ -319,8 +319,21 @@ var Tools = []Action{
 		RequiresConfirm:    true,
 		ConfirmDescription: "confirm delete tool spec",
 		Requirements:       []Requirement{RequiresToolName},
-		TUI:                &TUIBinding{KeyMapField: "Delete", DefaultKey: "d"},
+		TUI:                &TUIBinding{KeyMapField: "Delete", DefaultKey: "d", Label: "delete tool spec", Description: "Delete the selected tool spec and memberships.", ConfirmDescription: "confirm delete tool spec"},
 		CLI:                []CLIBinding{{Command: []string{"tools", "delete"}}},
+	},
+	{
+		ID:                 ToolNormalizeProviderOverrides,
+		Domain:             "tools",
+		Scope:              ScopeGlobal,
+		Label:              "normalize provider overrides",
+		Description:        "Remove no-op default provider overrides.",
+		LongDescription:    "Remove install-with overrides that only restate the currently resolved ecosystem defaults, including global logical tool specs and this host's overrides.",
+		Mutates:            true,
+		RequiresConfirm:    true,
+		ConfirmDescription: "confirm normalize provider overrides",
+		CLI:                []CLIBinding{{Command: []string{"tools", "normalize"}, Flags: []string{"--default-overrides", "--dry-run"}}},
+		CLIOnlyReason:      "TUI Settings danger-zone cleanup is being added separately; sync all already auto-cleans current-host no-op overrides.",
 	},
 	{
 		ID:              ToolImport,
@@ -330,7 +343,7 @@ var Tools = []Action{
 		Description:     "Import installed tools into config.",
 		LongDescription: "Discover locally installed tools and add them to config, optionally scoped by provider and destination group.",
 		Mutates:         true,
-		TUI:             &TUIBinding{KeyMapField: "Confirm", DefaultKey: "enter"},
+		TUI:             &TUIBinding{KeyMapField: "Confirm", DefaultKey: "enter", Label: "import installed tools", Description: "Import installed tools into the selected group."},
 		CLI:             []CLIBinding{{Command: []string{"import"}, Flags: []string{"--provider", "--group", "--dry-run"}}},
 	},
 	{
@@ -357,7 +370,7 @@ var Dots = []Action{
 		Description:     "Repair dotfile symlinks.",
 		LongDescription: "Repair managed dotfile symlinks without pulling or pushing git changes.",
 		Mutates:         true,
-		TUI:             &TUIBinding{KeyMapField: "Sync", DefaultKey: "s"},
+		TUI:             &TUIBinding{KeyMapField: "Sync", DefaultKey: "s", Label: "sync dotfiles", Description: "Repair managed dotfile symlinks."},
 		CLI:             []CLIBinding{{Command: []string{"dots", "sync"}, Flags: []string{"--dry-run"}}},
 		Palette:         &PaletteBinding{Command: []string{"dots", "sync"}, Description: "repair dotfile symlinks (no git)"},
 		PaletteEligible: true,
@@ -370,7 +383,7 @@ var Dots = []Action{
 		Description:     "List untracked dotfile candidates.",
 		LongDescription: "Discover repo, local config, and well-known dotfile candidates without mutating config, the repo, or local files.",
 		Mutates:         false,
-		TUI:             &TUIBinding{KeyMapField: "DotDiscover", DefaultKey: "D"},
+		TUI:             &TUIBinding{KeyMapField: "DotDiscover", DefaultKey: "D", Label: LabelDiscover, Description: "Find untracked dotfile candidates."},
 		CLI:             []CLIBinding{{Command: []string{"dots", "discover"}, Flags: []string{"--format"}}},
 	},
 	{
@@ -382,20 +395,20 @@ var Dots = []Action{
 		LongDescription: "Add or adopt a config path into the dots repo and register it with an explicit group assignment.",
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresGroupAssignment},
-		TUI:             &TUIBinding{KeyMapField: "DotAdd", DefaultKey: "a"},
+		TUI:             &TUIBinding{KeyMapField: "DotAdd", DefaultKey: "a", Label: LabelAdd, Description: "Add the selected path to dotfile sync."},
 		CLI:             []CLIBinding{{Command: []string{"dots", "add"}, Flags: []string{"--name", "--group", "--adopt", "--ignore", "--discovered"}}},
 	},
 	{
 		ID:              DotsEditGroups,
 		Domain:          "dots",
 		Scope:           ScopeRow,
-		Label:           LabelEditGroups,
-		Description:     "Change dots entry group memberships.",
-		LongDescription: "Add, remove, or replace group memberships for a managed dots entry without changing its repo or local files.",
+		Label:           LabelMoveGroup,
+		Description:     "Move a dots entry to another group.",
+		LongDescription: "Show or move a managed dots entry's single group assignment without changing its repo or local files.",
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresToolName, RequiresGroupAssignment},
-		TUI:             &TUIBinding{KeyMapField: "MoveGroup", DefaultKey: "g"},
-		CLI:             []CLIBinding{{Command: []string{"dots", "groups"}, Flags: []string{"--set", "--add", "--remove"}}},
+		TUI:             &TUIBinding{KeyMapField: "MoveGroup", DefaultKey: "g", Label: LabelMoveGroup, Description: "Move the selected dotfile entry to another group."},
+		CLI:             []CLIBinding{{Command: []string{"dots", "groups"}, Flags: []string{"--move", "--remove"}}},
 	},
 	{
 		ID:                 DotsDelete,
@@ -408,7 +421,7 @@ var Dots = []Action{
 		RequiresConfirm:    true,
 		ConfirmDescription: ConfirmDelete,
 		Requirements:       []Requirement{RequiresToolName},
-		TUI:                &TUIBinding{KeyMapField: "DotDelete", DefaultKey: "d"},
+		TUI:                &TUIBinding{KeyMapField: "DotDelete", DefaultKey: "d", Label: LabelDelete, Description: "Delete the selected dotfile entry from sync.", ConfirmDescription: ConfirmDelete},
 		CLI:                []CLIBinding{{Command: []string{"dots", "delete"}}},
 	},
 	{
@@ -420,7 +433,7 @@ var Dots = []Action{
 		LongDescription: "Persist a whole dots entry as ignored, or add a per-entry ignore glob so matching files are skipped while syncing that dots entry.",
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresToolName},
-		TUI:             &TUIBinding{KeyMapField: "DotIgnore", DefaultKey: "x"},
+		TUI:             &TUIBinding{KeyMapField: "DotIgnore", DefaultKey: "x", Label: LabelIgnore, Description: "Ignore or unignore the selected dotfile entry."},
 		CLI:             []CLIBinding{{Command: []string{"dots", "ignore"}}, {Command: []string{"dots", "unignore"}}},
 	},
 	{
@@ -431,7 +444,7 @@ var Dots = []Action{
 		Description:     "Enable dotfile sync for this host.",
 		LongDescription: "Clear the host dots-disabled setting and restore managed symlinks.",
 		Mutates:         true,
-		TUI:             &TUIBinding{KeyMapField: "Confirm", DefaultKey: "enter"},
+		TUI:             &TUIBinding{KeyMapField: "Confirm", DefaultKey: "enter", Label: "enable dots", Description: "Enable dotfile sync on this machine."},
 		CLI:             []CLIBinding{{Command: []string{"dots", "enable"}}},
 	},
 	{
@@ -444,7 +457,7 @@ var Dots = []Action{
 		Mutates:            true,
 		RequiresConfirm:    true,
 		ConfirmDescription: "confirm disable dots",
-		TUI:                &TUIBinding{KeyMapField: "Confirm", DefaultKey: "enter"},
+		TUI:                &TUIBinding{KeyMapField: "Confirm", DefaultKey: "enter", Label: "disable dots", Description: "Disable dotfile sync on this machine.", ConfirmDescription: "confirm disable dots"},
 		CLI:                []CLIBinding{{Command: []string{"dots", "disable"}, Flags: []string{"--overwrite"}}},
 	},
 	{
@@ -483,7 +496,7 @@ var Groups = []Action{
 		Description:     "Create an empty group.",
 		LongDescription: "Create an empty group that can receive logical tool and dot memberships.",
 		Mutates:         true,
-		TUI:             &TUIBinding{KeyMapField: "NewGroup", DefaultKey: "n"},
+		TUI:             &TUIBinding{KeyMapField: "NewGroup", DefaultKey: "n", Label: LabelNewGroup, Description: "Create a new group."},
 		CLI:             []CLIBinding{{Command: []string{"groups", "create"}}},
 	},
 	{
@@ -492,9 +505,9 @@ var Groups = []Action{
 		Scope:           ScopeRow,
 		Label:           LabelRename,
 		Description:     "Rename a group.",
-		LongDescription: "Rename a group and update profile references to the new name.",
+		LongDescription: "Rename a group and update host assignments to the new name.",
 		Mutates:         true,
-		TUI:             &TUIBinding{KeyMapField: "Rename", DefaultKey: "r"},
+		TUI:             &TUIBinding{KeyMapField: "Rename", DefaultKey: "r", Label: LabelRename, Description: "Rename the selected group."},
 		CLI:             []CLIBinding{{Command: []string{"groups", "rename"}}},
 	},
 	{
@@ -508,7 +521,7 @@ var Groups = []Action{
 		RequiresConfirm:    true,
 		ConfirmDescription: ConfirmDelete,
 		Requirements:       []Requirement{RequiresDeleteFallback},
-		TUI:                &TUIBinding{KeyMapField: "Delete", DefaultKey: "d"},
+		TUI:                &TUIBinding{KeyMapField: "Delete", DefaultKey: "d", Label: LabelDelete, Description: "Delete the selected group.", ConfirmDescription: ConfirmDelete},
 		CLI:                []CLIBinding{{Command: []string{"groups", "delete"}, Flags: []string{"--move-to", "--delete-tools"}}},
 	},
 	{
@@ -516,13 +529,13 @@ var Groups = []Action{
 		Domain:          "groups",
 		Scope:           ScopeRow,
 		Label:           LabelEditTools,
-		Description:     "Edit group tool memberships and ignores.",
-		LongDescription: "Toggle logical tool membership and group-level ignore state for one group.",
+		Description:     "Edit group tool assignments and ignores.",
+		LongDescription: "Toggle logical tool assignment and group-level ignore state for one group.",
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresGroupAssignment, RequiresIgnoreScope},
-		TUI:             &TUIBinding{KeyMapField: "GroupTools", DefaultKey: "t"},
+		TUI:             &TUIBinding{KeyMapField: "GroupTools", DefaultKey: "t", Label: LabelEditTools, Description: "Edit tools in the selected group."},
 		CLI: []CLIBinding{
-			{Command: []string{"groups", "add-tool"}},
+			{Command: []string{"groups", "move-tool"}},
 			{Command: []string{"groups", "remove-tool"}},
 			{Command: []string{"groups", "ignore-tool"}},
 			{Command: []string{"groups", "unignore-tool"}},
@@ -533,79 +546,55 @@ var Groups = []Action{
 		Domain:          "groups",
 		Scope:           ScopeRow,
 		Label:           LabelEditDots,
-		Description:     "Edit group dotfile memberships.",
-		LongDescription: "Toggle configured dotfile membership for one group.",
+		Description:     "Edit group dotfile assignments.",
+		LongDescription: "Move configured dotfile entries into or out of one group.",
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresGroupAssignment},
-		TUI:             &TUIBinding{KeyMapField: "GroupDots", DefaultKey: "f"},
-		CLI:             []CLIBinding{{Command: []string{"dots", "groups"}, Flags: []string{"--set", "--add", "--remove"}}},
+		TUI:             &TUIBinding{KeyMapField: "GroupDots", DefaultKey: "f", Label: LabelEditDots, Description: "Edit dotfiles in the selected group."},
+		CLI:             []CLIBinding{{Command: []string{"dots", "groups"}, Flags: []string{"--move", "--remove"}}},
 	},
 }
 
-// Profiles is the canonical catalog for profile-management actions.
-var Profiles = []Action{
+// Hosts is the canonical catalog for host-management actions.
+var Hosts = []Action{
 	{
-		ID:              ProfileCreate,
-		Domain:          "profiles",
+		ID:              HostCreate,
+		Domain:          "hosts",
 		Scope:           ScopeGlobal,
-		Label:           LabelNewProfile,
-		Description:     "Create a profile.",
-		LongDescription: "Create or replace a profile with an explicit list of groups.",
+		Label:           LabelNewHost,
+		Description:     "Create a host.",
+		LongDescription: "Create a host assignment and its protected host group.",
 		Mutates:         true,
-		TUI:             &TUIBinding{KeyMapField: "NewProfile", DefaultKey: "p"},
-		CLI:             []CLIBinding{{Command: []string{"profile", "add"}}},
+		CLIOnlyReason:   "TUI creates the current host during onboarding; manual remote host creation is intentionally CLI-only.",
+		CLI:             []CLIBinding{{Command: []string{"hosts", "ensure"}}},
 	},
 	{
-		ID:              ProfileRename,
-		Domain:          "profiles",
-		Scope:           ScopeRow,
-		Label:           LabelRename,
-		Description:     "Rename a profile.",
-		LongDescription: "Rename a profile and update hostname mappings that point at it.",
-		Mutates:         true,
-		TUI:             &TUIBinding{KeyMapField: "Rename", DefaultKey: "r"},
-		CLI:             []CLIBinding{{Command: []string{"profile", "rename"}}},
-	},
-	{
-		ID:                 ProfileDelete,
-		Domain:             "profiles",
+		ID:                 HostDelete,
+		Domain:             "hosts",
 		Scope:              ScopeRow,
 		Label:              LabelDelete,
-		Description:        "Delete a profile.",
-		LongDescription:    "Delete a profile and remove hostname mappings that point at it.",
+		Description:        "Delete a host.",
+		LongDescription:    "Delete a host assignment and its protected host group.",
 		Mutates:            true,
 		RequiresConfirm:    true,
 		ConfirmDescription: ConfirmDelete,
-		TUI:                &TUIBinding{KeyMapField: "Delete", DefaultKey: "d"},
-		CLI:                []CLIBinding{{Command: []string{"profile", "delete"}}},
+		TUI:                &TUIBinding{KeyMapField: "Delete", DefaultKey: "d", Label: LabelDelete, Description: "Delete the selected host.", ConfirmDescription: ConfirmDelete},
+		CLI:                []CLIBinding{{Command: []string{"hosts", "remove"}}},
 	},
 	{
-		ID:              ProfileEditGroups,
-		Domain:          "profiles",
+		ID:              HostEditGroups,
+		Domain:          "hosts",
 		Scope:           ScopeRow,
 		Label:           LabelEditGroups,
-		Description:     "Edit a profile's group list.",
-		LongDescription: "Toggle which groups are active when a profile is selected.",
+		Description:     "Edit a host's reusable group list.",
+		LongDescription: "Set, add, or remove reusable groups assigned to a host.",
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresGroupAssignment},
-		TUI:             &TUIBinding{KeyMapField: "ProfileGroups", DefaultKey: "g"},
+		TUI:             &TUIBinding{KeyMapField: "HostGroups", DefaultKey: "g", Label: LabelEditGroups, Description: "Edit groups assigned to the selected host."},
 		CLI: []CLIBinding{
-			{Command: []string{"profile", "add-group"}},
-			{Command: []string{"profile", "remove-group"}},
-		},
-	},
-	{
-		ID:              ProfileEditHosts,
-		Domain:          "profiles",
-		Scope:           ScopeRow,
-		Label:           LabelEditHosts,
-		Description:     "Edit hostname mappings for a profile.",
-		LongDescription: "Assign or remove existing hostname mappings for one profile.",
-		Mutates:         true,
-		TUI:             &TUIBinding{KeyMapField: "EditHosts", DefaultKey: "h"},
-		CLI: []CLIBinding{
-			{Command: []string{"profile", "set-hostname"}},
-			{Command: []string{"profile", "remove-hostname"}},
+			{Command: []string{"hosts", "set-groups"}},
+			{Command: []string{"hosts", "add-group"}},
+			{Command: []string{"hosts", "remove-group"}},
 		},
 	},
 }
@@ -620,7 +609,7 @@ var Settings = []Action{
 		Description:     "Set an omni setting.",
 		LongDescription: "Set one host-effective setting such as managers, system priority, dots repo, or git automation.",
 		Mutates:         true,
-		TUI:             &TUIBinding{KeyMapField: "Toggle", DefaultKey: "space"},
+		TUI:             &TUIBinding{KeyMapField: "Toggle", DefaultKey: "space", Label: "change setting", Description: "Change the selected setting."},
 		CLI:             []CLIBinding{{Command: []string{"settings", "set"}}},
 	},
 	{
@@ -631,7 +620,7 @@ var Settings = []Action{
 		Description:     "Enable or disable an ecosystem provider.",
 		LongDescription: "Enable or disable an ecosystem provider for this host.",
 		Mutates:         true,
-		TUI:             &TUIBinding{KeyMapField: "Toggle", DefaultKey: "space"},
+		TUI:             &TUIBinding{KeyMapField: "Toggle", DefaultKey: "space", Label: "toggle provider", Description: "Enable or disable the selected provider."},
 		CLI: []CLIBinding{
 			{Command: []string{"settings", "disable-provider"}},
 			{Command: []string{"settings", "enable-provider"}},
@@ -643,11 +632,11 @@ var Settings = []Action{
 		Scope:              ScopeGlobal,
 		Label:              "reset settings",
 		Description:        "Reset settings to defaults.",
-		LongDescription:    "Reset host/global settings while preserving tools, groups, and profiles.",
+		LongDescription:    "Reset host/global settings while preserving tools, groups, and hosts.",
 		Mutates:            true,
 		RequiresConfirm:    true,
 		ConfirmDescription: "confirm reset settings",
-		TUI:                &TUIBinding{KeyMapField: "Confirm", DefaultKey: "enter"},
+		TUI:                &TUIBinding{KeyMapField: "Confirm", DefaultKey: "enter", Label: "reset settings", Description: "Reset settings from the danger zone.", ConfirmDescription: "confirm reset settings"},
 		CLI:                []CLIBinding{{Command: []string{"settings", "reset"}}},
 	},
 	{
@@ -660,7 +649,7 @@ var Settings = []Action{
 		Mutates:            true,
 		RequiresConfirm:    true,
 		ConfirmDescription: "confirm reset cache",
-		TUI:                &TUIBinding{KeyMapField: "Confirm", DefaultKey: "enter"},
+		TUI:                &TUIBinding{KeyMapField: "Confirm", DefaultKey: "enter", Label: "reset cache", Description: "Clear the local tool cache.", ConfirmDescription: "confirm reset cache"},
 		CLI:                []CLIBinding{{Command: []string{"settings", "reset-cache"}}},
 	},
 }
@@ -673,9 +662,9 @@ var Setup = []Action{
 		Scope:           ScopeGlobal,
 		Label:           "initialise config",
 		Description:     "Create or update omni's config.",
-		LongDescription: "Run first-time setup: choose ecosystem providers, profile mapping, and optional dots configuration.",
+		LongDescription: "Run first-time setup: choose ecosystem providers, host groups, and optional dots configuration.",
 		Mutates:         true,
-		TUI:             &TUIBinding{KeyMapField: "Confirm", DefaultKey: "enter"},
+		TUI:             &TUIBinding{KeyMapField: "Confirm", DefaultKey: "enter", Label: "set up omni", Description: "Create config from the setup flow."},
 		CLI:             []CLIBinding{{Command: []string{"init"}}},
 	},
 }
@@ -690,11 +679,11 @@ func init() {
 
 // All returns every user-visible action cataloged across domains.
 func All() []Action {
-	out := make([]Action, 0, len(Tools)+len(Dots)+len(Groups)+len(Profiles)+len(Settings)+len(Setup))
+	out := make([]Action, 0, len(Tools)+len(Dots)+len(Groups)+len(Hosts)+len(Settings)+len(Setup))
 	out = append(out, Tools...)
 	out = append(out, Dots...)
 	out = append(out, Groups...)
-	out = append(out, Profiles...)
+	out = append(out, Hosts...)
 	out = append(out, Settings...)
 	out = append(out, Setup...)
 	return out
@@ -716,11 +705,39 @@ func MustLabel(id ID) string {
 	return action.Label
 }
 
+// MustTUILabel returns the TUI-specific compact label for id. It falls back to
+// the canonical label so palette-only actions can share short nouns safely.
+func MustTUILabel(id ID) string {
+	action, ok := Get(id)
+	if !ok {
+		panic("unknown action: " + string(id))
+	}
+	if action.TUI != nil && action.TUI.Label != "" {
+		return action.TUI.Label
+	}
+	return action.Label
+}
+
 // MustDescription returns the short catalog description for id.
 func MustDescription(id ID) string {
 	action, ok := Get(id)
 	if !ok {
 		panic("unknown action: " + string(id))
+	}
+	return action.Description
+}
+
+// MustTUIDescription returns the TUI-specific action description for id.
+func MustTUIDescription(id ID) string {
+	action, ok := Get(id)
+	if !ok {
+		panic("unknown action: " + string(id))
+	}
+	if action.TUI != nil && action.TUI.Description != "" {
+		return action.TUI.Description
+	}
+	if action.Palette != nil && action.Palette.Description != "" {
+		return action.Palette.Description
 	}
 	return action.Description
 }
@@ -743,6 +760,18 @@ func MustConfirmDescription(id ID) string {
 	action, ok := Get(id)
 	if !ok {
 		panic("unknown action: " + string(id))
+	}
+	return action.ConfirmDescription
+}
+
+// MustTUIConfirmDescription returns TUI-specific confirmation copy for id.
+func MustTUIConfirmDescription(id ID) string {
+	action, ok := Get(id)
+	if !ok {
+		panic("unknown action: " + string(id))
+	}
+	if action.TUI != nil && action.TUI.ConfirmDescription != "" {
+		return action.TUI.ConfirmDescription
 	}
 	return action.ConfirmDescription
 }
