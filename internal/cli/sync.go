@@ -15,7 +15,6 @@ func newSyncCmd(state *rootState) *cobra.Command {
 	var prune bool
 	var providerFilter string
 	var group string
-	var profile string
 	var retryFailed bool
 	var all bool
 
@@ -31,8 +30,8 @@ Use --all to ` + actions.MustLongDescription(actions.ToolSyncAll) + `.`,
 				group = args[0]
 			}
 			if all {
-				if group != "" || providerFilter != "" || profile != "" || retryFailed || prune {
-					return fmt.Errorf("--all cannot be combined with group, --provider, --profile, --retry-failed, or --prune")
+				if group != "" || providerFilter != "" || retryFailed || prune {
+					return fmt.Errorf("--all cannot be combined with group, --provider, --retry-failed, or --prune")
 				}
 			}
 			if !state.app.HasConfig() {
@@ -68,7 +67,7 @@ Use --all to ` + actions.MustLongDescription(actions.ToolSyncAll) + `.`,
 				if dryRun {
 					fmt.Fprintln(cmd.OutOrStdout(), "Dry-run — no changes made.")
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "Sync all complete — %d installed, %d added to config.\n", installedCount(result), claimedCount(result))
+				fmt.Fprintf(cmd.OutOrStdout(), "Sync all complete — %d installed, %d added to config%s.\n", installedCount(result), claimedCount(result), normalizedProviderOverrideSummary(result))
 				return nil
 			}
 			opts := gosync.SyncOptions{
@@ -76,7 +75,6 @@ Use --all to ` + actions.MustLongDescription(actions.ToolSyncAll) + `.`,
 				Prune:       prune,
 				Provider:    providerFilter,
 				Group:       group,
-				Profile:     profile,
 				RetryFailed: retryFailed,
 				Progress: func(msg string) {
 					fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", msg)
@@ -133,10 +131,13 @@ Use --all to ` + actions.MustLongDescription(actions.ToolSyncAll) + `.`,
 				fmt.Fprintf(out, "%d tool(s) failed. Run 'omni sync --retry-failed' to try again.\n", len(failed))
 			}
 
-			promptSatisfiedGroups(state, result.ActiveProfile, result.SatisfiedGroups,
-				func(g string) error {
-					return state.app.ClaimFromMachineGroup(result.ActiveProfile, g)
-				})
+			hostname, _, hasHost := state.app.ActiveHostInfo()
+			if hasHost {
+				promptSatisfiedGroups(state, hostname, result.SatisfiedGroups,
+					func(g string) error {
+						return state.app.ClaimFromMachineGroup(g)
+					})
+			}
 
 			return nil
 		},
@@ -146,7 +147,6 @@ Use --all to ` + actions.MustLongDescription(actions.ToolSyncAll) + `.`,
 	cmd.Flags().BoolVar(&prune, "prune", false, "delete local installations no longer in config")
 	addProviderFlag(cmd, &providerFilter, "limit sync to one provider")
 	cmd.Flags().StringVar(&group, "group", "", "limit sync to one group (overridden by positional arg)")
-	cmd.Flags().StringVar(&profile, "profile", "", "limit sync to groups in a named profile")
 	cmd.Flags().BoolVar(&retryFailed, "retry-failed", false, "only retry tools that failed in a previous sync")
 	cmd.Flags().BoolVar(&all, "all", false, actions.MustDescription(actions.ToolSyncAll))
 	return cmd
@@ -164,4 +164,15 @@ func claimedCount(result *app.SyncAllResult) int {
 		return 0
 	}
 	return len(result.ClaimedNames)
+}
+
+func normalizedProviderOverrideSummary(result *app.SyncAllResult) string {
+	if result == nil {
+		return ""
+	}
+	count := len(result.NormalizedProviderOverrides)
+	if count == 0 {
+		return ""
+	}
+	return fmt.Sprintf(", %d provider overrides normalized", count)
 }

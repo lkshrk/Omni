@@ -35,14 +35,14 @@ func newInstallCmd(state *rootState) *cobra.Command {
 			}
 			fmt.Printf("✓ installed %s (%s)\n", name, providerName)
 
-			// After each install, check if any unselected group is now fully
-			// satisfied and offer to add it to the active profile.
-			activeProfile, activeGroupNames, hasProfile := state.app.ActiveProfileInfo()
-			if hasProfile {
+			// After each install, check if any unselected reusable group is now
+			// fully satisfied and offer to add it to the active host.
+			hostname, activeGroupNames, hasHost := state.app.ActiveHostInfo()
+			if hasHost {
 				satisfied, err := state.app.CheckSatisfiedGroups(cmd.Context(), activeGroupNames)
 				if err == nil {
-					promptSatisfiedGroups(state, activeProfile, satisfied, func(g string) error {
-						return state.app.AddGroupToProfile(activeProfile, g)
+					promptSatisfiedGroups(state, hostname, satisfied, func(g string) error {
+						return state.app.ClaimFromMachineGroup(g)
 					})
 				}
 			}

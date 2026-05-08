@@ -18,7 +18,7 @@ func newAddCmd(state *rootState) *cobra.Command {
 		Long: `Add creates a logical tool spec and adds its name to a group.
 
 Example:
-  omni add ripgrep --provider system --group base
+  omni add ripgrep --provider system
   omni add typescript --provider node --install-with pnpm --name ts --group work
   omni add slack --provider system --install-with brew --group work`,
 		Args: cobra.ExactArgs(1),
@@ -31,7 +31,7 @@ Example:
 				if !stdinIsTerminal() {
 					return fmt.Errorf("missing assignment target: pass --group <group> for non-interactive add")
 				}
-				selected, ok := promptText("Add to group?", "base")
+				selected, ok := promptText("Add to group?", "")
 				if !ok {
 					return fmt.Errorf("missing assignment target: pass --group <group>")
 				}
@@ -44,7 +44,7 @@ Example:
 			if displayName == "" {
 				displayName = pkg
 			}
-			dest := "base"
+			dest := "current host"
 			if group != "" {
 				dest = group
 			}
@@ -58,7 +58,7 @@ Example:
 	}
 
 	cmd.Flags().StringVar(&name, "name", "", "override the tool name in config (default: package name)")
-	cmd.Flags().StringVar(&group, "group", "", "group to add the tool to (default: base)")
+	cmd.Flags().StringVar(&group, "group", "", "group to add the tool to (default: current host)")
 	addProviderFlag(cmd, &providerName, "ecosystem provider for the logical tool")
 	cmd.Flags().StringVar(&installWith, "install-with", "", "concrete provider or manager to use for this tool")
 	return cmd

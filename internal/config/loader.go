@@ -25,6 +25,17 @@ func atomicWrite(path string, data []byte) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
+	writePath, err := resolveConfigWritePath(path)
+	if err != nil {
+		return err
+	}
+	if err := testguard.RequireTempPath("config write target", writePath); err != nil {
+		return err
+	}
+	dir = filepath.Dir(writePath)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("creating config directory: %w", err)
+	}
 	f, err := os.CreateTemp(dir, "settings-*.json.tmp")
 	if err != nil {
 		return fmt.Errorf("creating temp file: %w", err)
@@ -40,11 +51,42 @@ func atomicWrite(path string, data []byte) error {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("closing temp file: %w", cerr)
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := os.Rename(tmp, writePath); err != nil {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("renaming config file: %w", err)
 	}
 	return nil
+}
+
+func resolveConfigWritePath(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return path, nil
+	}
+	if err != nil {
+		if errors.Is(err, os.ErrPermission) {
+			return path, nil
+		}
+		return "", fmt.Errorf("checking config file: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return path, nil
+	}
+	target, err := os.Readlink(path)
+	if err != nil {
+		return "", fmt.Errorf("reading config symlink: %w", err)
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(path), target)
+	}
+	resolved, err := filepath.EvalSymlinks(target)
+	if err == nil {
+		return resolved, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return filepath.Clean(target), nil
+	}
+	return "", fmt.Errorf("resolving config symlink target: %w", err)
 }
 
 // SchemaURL is the canonical URL to the published JSON Schema for settings.json.
@@ -143,14 +185,14 @@ func Normalize(cfg *RootConfig) bool {
 	changed := false
 	if !groupsSorted(cfg.Groups) {
 		sort.SliceStable(cfg.Groups, func(i, j int) bool {
-			return groupBaseName(cfg.Groups[i]) < groupBaseName(cfg.Groups[j])
+			return groupSortKey(cfg.Groups[i]) < groupSortKey(cfg.Groups[j])
 		})
 		changed = true
 	}
-	for name, profile := range cfg.Profiles {
-		if !sort.StringsAreSorted(profile.Groups) {
-			sort.Strings(profile.Groups)
-			cfg.Profiles[name] = profile
+	for host, groups := range cfg.Hosts {
+		if !sort.StringsAreSorted(groups) {
+			sort.Strings(groups)
+			cfg.Hosts[host] = groups
 			changed = true
 		}
 	}
@@ -171,10 +213,10 @@ func NormalizeFile(path string) (bool, error) {
 		return false, nil
 	}
 	type orderPatch struct {
-		Profiles map[string]Profile `json:"profiles,omitempty"`
-		Groups   []*GroupConfig     `json:"groups,omitempty"`
+		Hosts  map[string][]string `json:"hosts,omitempty"`
+		Groups []*GroupConfig      `json:"groups,omitempty"`
 	}
-	if err := Patch(path, orderPatch{Profiles: cfg.Profiles, Groups: cfg.Groups}); err != nil {
+	if err := Patch(path, orderPatch{Hosts: cfg.Hosts, Groups: cfg.Groups}); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -182,8 +224,15 @@ func NormalizeFile(path string) (bool, error) {
 
 func groupsSorted(groups []*GroupConfig) bool {
 	return sort.SliceIsSorted(groups, func(i, j int) bool {
-		return groupBaseName(groups[i]) < groupBaseName(groups[j])
+		return groupSortKey(groups[i]) < groupSortKey(groups[j])
 	})
+}
+
+func groupSortKey(g *GroupConfig) string {
+	if g != nil && g.IsHost() {
+		return "1:" + groupBaseName(g)
+	}
+	return "0:" + groupBaseName(g)
 }
 
 func groupBaseName(g *GroupConfig) string {
@@ -303,7 +352,6 @@ func normalizedCopy(cfg *RootConfig) RootConfig {
 		gc := *g
 		gc.Taps = append([]string(nil), g.Taps...)
 		gc.Tools = append([]ToolEntry(nil), g.Tools...)
-		gc.Ignore = append([]string(nil), g.Ignore...)
 		gc.Dots = append([]DotEntry(nil), g.Dots...)
 		for i := range gc.Dots {
 			gc.Dots[i].Ignore = append([]string(nil), gc.Dots[i].Ignore...)
@@ -328,12 +376,12 @@ func normalizedCopy(cfg *RootConfig) RootConfig {
 		}
 		out.Tools[name] = spec
 	}
-	out.Profiles = make(map[string]Profile, len(cfg.Profiles))
-	for name, profile := range cfg.Profiles {
-		profile.Groups = append([]string(nil), profile.Groups...)
-		profile.Ignore = append([]string(nil), profile.Ignore...)
-		out.Profiles[name] = profile
+	out.Hosts = make(map[string][]string, len(cfg.Hosts))
+	for host, groups := range cfg.Hosts {
+		out.Hosts[host] = append([]string(nil), groups...)
 	}
+	out.Ignore.Tools = append([]string(nil), cfg.Ignore.Tools...)
+	out.Ignore.Dots = append([]string(nil), cfg.Ignore.Dots...)
 	out.HostSettings = make(map[string]Settings, len(cfg.HostSettings))
 	for host, settings := range cfg.HostSettings {
 		out.HostSettings[host] = cloneSettings(settings)

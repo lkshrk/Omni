@@ -122,6 +122,51 @@ func TestAtomicWrite_Overwrite(t *testing.T) {
 	}
 }
 
+func TestAtomicWrite_PreservesSettingsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config", "omni")
+	repoDir := filepath.Join(dir, "repo", "dotfiles", "omni", ".config", "omni")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	target := filepath.Join(repoDir, "settings.json")
+	if err := os.WriteFile(target, []byte(`{"v":1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(configDir, "settings.json")
+	relTarget, err := filepath.Rel(configDir, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(relTarget, link); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	if err := atomicWrite(link, []byte(`{"v":2}`)); err != nil {
+		t.Fatalf("atomicWrite: %v", err)
+	}
+
+	if info, err := os.Lstat(link); err != nil {
+		t.Fatalf("Lstat link: %v", err)
+	} else if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("settings path mode = %v, want symlink preserved", info.Mode())
+	}
+	if got, err := os.ReadFile(target); err != nil {
+		t.Fatalf("ReadFile target: %v", err)
+	} else if string(got) != `{"v":2}` {
+		t.Fatalf("target content = %q, want updated content", got)
+	}
+	if got, err := os.ReadFile(link); err != nil {
+		t.Fatalf("ReadFile link: %v", err)
+	} else if string(got) != `{"v":2}` {
+		t.Fatalf("link content = %q, want updated content through symlink", got)
+	}
+}
+
 // TestAtomicWrite_NoTempFileLeft verifies that no temp files are left behind
 // after a successful write.
 func TestAtomicWrite_NoTempFileLeft(t *testing.T) {

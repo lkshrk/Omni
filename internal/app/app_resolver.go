@@ -41,6 +41,9 @@ func (a *App) resolveTools(ctx context.Context, cfg *config.RootConfig, groups [
 		return nil, nil
 	}
 	ignored := make(map[string]struct{})
+	for _, name := range cfg.Ignore.Tools {
+		ignored[name] = struct{}{}
+	}
 	memberships := make(map[string][]string)
 	order := make([]string, 0)
 	seen := make(map[string]struct{})
@@ -49,9 +52,6 @@ func (a *App) resolveTools(ctx context.Context, cfg *config.RootConfig, groups [
 			continue
 		}
 		groupName := g.BaseName()
-		for _, name := range g.Ignore {
-			ignored[name] = struct{}{}
-		}
 		for _, membership := range g.Tools {
 			if membership.Name == "" {
 				continue
@@ -189,6 +189,16 @@ func (a *App) logicalInstallTarget(providerName string) (configProvider, install
 		return ecosystem, providerName
 	}
 	return providerName, ""
+}
+
+func configInstallWithForConcreteProvider(configProvider, concreteProvider string, resolvedEcosystems map[string]string) string {
+	if configProvider == "" || concreteProvider == "" || configProvider == concreteProvider {
+		return ""
+	}
+	if resolvedEcosystems[configProvider] == concreteProvider {
+		return ""
+	}
+	return concreteProvider
 }
 
 func installSpecMatchesProvider(install config.ToolInstallSpec, providerName string) bool {

@@ -46,19 +46,15 @@ func TestMutatingCLICommandsAreCataloged(t *testing.T) {
 		{"groups", "create"},
 		{"groups", "rename"},
 		{"groups", "delete"},
-		{"groups", "add-tool"},
+		{"groups", "move-tool"},
 		{"groups", "remove-tool"},
 		{"groups", "ignore-tool"},
 		{"groups", "unignore-tool"},
-		{"profile", "add"},
-		{"profile", "rename"},
-		{"profile", "delete"},
-		{"profile", "add-group"},
-		{"profile", "remove-group"},
-		{"profile", "set-hostname"},
-		{"profile", "remove-hostname"},
-		{"profile", "ignore", "add"},
-		{"profile", "ignore", "remove"},
+		{"hosts", "ensure"},
+		{"hosts", "set-groups"},
+		{"hosts", "add-group"},
+		{"hosts", "remove-group"},
+		{"hosts", "remove"},
 		{"settings", "set"},
 		{"settings", "disable-provider"},
 		{"settings", "enable-provider"},
@@ -84,7 +80,7 @@ func TestCanonicalDeleteCLICommands(t *testing.T) {
 	for _, path := range [][]string{
 		{"delete"},
 		{"tools", "delete"},
-		{"profile", "delete"},
+		{"hosts", "remove"},
 		{"dots", "delete"},
 		{"groups", "delete"},
 	} {
@@ -95,11 +91,26 @@ func TestCanonicalDeleteCLICommands(t *testing.T) {
 	for _, path := range [][]string{
 		{"uninstall"},
 		{"tools", "remove"},
-		{"profile", "remove"},
 		{"dots", "remove"},
 	} {
 		if findCommand(NewRootCmd(), path) != nil {
 			t.Fatalf("legacy destructive command %q should not be registered", strings.Join(path, " "))
+		}
+	}
+}
+
+func TestLegacyGroupAssignmentSurfacesAreRemoved(t *testing.T) {
+	root := NewRootCmd()
+	if findCommand(root, []string{"groups", "add-tool"}) != nil {
+		t.Fatal("legacy groups add-tool command should not be registered")
+	}
+	dotsGroups := findCommand(root, []string{"dots", "groups"})
+	if dotsGroups == nil {
+		t.Fatal("missing dots groups command")
+	}
+	for _, flagName := range []string{"add", "set"} {
+		if dotsGroups.Flags().Lookup(flagName) != nil {
+			t.Fatalf("legacy dots groups --%s flag should not be registered", flagName)
 		}
 	}
 }
