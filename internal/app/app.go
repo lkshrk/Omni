@@ -191,6 +191,33 @@ func (a *App) Init(ctx context.Context) error {
 		settings = a.effectiveSettings(cfg)
 	}
 
+	a.initProviderRegistry(settings)
+	return nil
+}
+
+// InitReadOnly prepares config/cache paths and provider metadata without
+// normalizing settings.json, repairing host entries, or migrating the cache DB.
+// It is intended for diagnostic commands that must report broken state without
+// mutating it first.
+func (a *App) InitReadOnly(_ context.Context) error {
+	if a.CacheDir == "" {
+		cacheDir, err := config.DefaultCacheDir()
+		if err != nil {
+			return fmt.Errorf("resolving cache directory: %w", err)
+		}
+		a.CacheDir = cacheDir
+	}
+	a.DBPath = filepath.Join(a.CacheDir, "omni.db")
+
+	var settings config.Settings
+	if cfg, err := config.Load(a.ConfigPath); err == nil {
+		settings = a.effectiveSettings(cfg)
+	}
+	a.initProviderRegistry(settings)
+	return nil
+}
+
+func (a *App) initProviderRegistry(settings config.Settings) {
 	exec := executor.New()
 	a.registry = provider.NewRegistry()
 
@@ -240,8 +267,6 @@ func (a *App) Init(ctx context.Context) error {
 			provider.BuiltinMetadata(provider.EcosystemSystem),
 		)
 	}
-
-	return nil
 }
 
 func (a *App) Close() error {

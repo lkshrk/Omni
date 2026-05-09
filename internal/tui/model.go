@@ -38,6 +38,7 @@ const (
 	viewProviderScope            // explicit provider pin scope picker
 	viewAdminTerminal            // privileged package action terminal handoff
 	viewDots                     // dotfiles management tab
+	viewStatus                   // read-only health/status dashboard tab
 )
 
 // section groups tools into visual categories in the list view.
@@ -154,6 +155,15 @@ type scopeOption struct {
 	checked        bool
 	initialChecked bool
 }
+
+type dashboardReconcilePlanKind string
+
+const (
+	dashboardReconcilePlanSyncTools    dashboardReconcilePlanKind = "sync-tools"
+	dashboardReconcilePlanUpgradeTools dashboardReconcilePlanKind = "upgrade-tools"
+	dashboardReconcilePlanSyncDots     dashboardReconcilePlanKind = "sync-dots"
+	dashboardReconcilePlanCommitDots   dashboardReconcilePlanKind = "commit-dots"
+)
 
 // Model is the root Bubbletea model.
 type Model struct {
@@ -359,12 +369,23 @@ type Model struct {
 	hostRequired bool
 
 	// provider priority editor (active when editing the Priority row in settings)
-	editingPriority        bool
-	priorityCursor         int
-	priorityDraft          []string
-	editingServiceDuration bool
-	serviceDurationRow     int
-	serviceDurationIdx     int
+	editingPriority                bool
+	priorityCursor                 int
+	priorityDraft                  []string
+	editingServiceDuration         bool
+	serviceDurationRow             int
+	serviceDurationIdx             int
+	doctorResult                   *app.DoctorResult
+	doctorErr                      string
+	doctorRunning                  bool
+	statusCursor                   int
+	dashboardReconcilePlanOpen     bool
+	dashboardReconcilePlanCursor   int
+	dashboardReconcilePlanSelected map[dashboardReconcilePlanKind]bool
+	dashboardReconcileRunning      bool
+	dashboardReconcileCurrent      dashboardReconcilePlanKind
+	dashboardReconcileQueue        []dashboardReconcilePlanKind
+	dashboardReconcileErrors       []string
 
 	// file picker popup (reusable for any path selection)
 	dotsFilePicker       pathPickerModel
@@ -406,6 +427,7 @@ type Model struct {
 	dotsWatchServiceErr    string
 	dotsWatchDebounce      time.Duration
 	dotsWatchDebounceNext  time.Duration
+	dotsServicesRefreshing bool
 	stowInstallPrompt      bool
 	stowInstallAction      stowInstallAction
 	stowInstallSettings    config.Settings
@@ -557,6 +579,7 @@ func New(a *app.App, ctx context.Context) Model {
 		filter:           fi,
 		commandInput:     ci,
 		settingsInput:    si,
+		mode:             viewStatus,
 		commandCursor:    -1,
 		loading:          true,
 		cursor:           -1, // nothing selected until the user navigates

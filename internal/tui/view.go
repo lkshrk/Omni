@@ -54,6 +54,8 @@ func (m Model) windowTitle() string {
 		return "omni — groups"
 	case viewSettings:
 		return "omni — settings"
+	case viewStatus:
+		return "omni — status"
 	case viewSetup:
 		return "omni — setup"
 	case viewAdminTerminal:
@@ -183,6 +185,13 @@ func (m Model) viewString() string {
 		return placePopup(bg, m, renderAdminTerminalPopup(m), adminTerminalPopupFrame(m))
 	}
 
+	if m.dashboardReconcilePlanOpen {
+		bgModel := m
+		bgModel.dashboardReconcilePlanOpen = false
+		bg := bgModel.viewString()
+		return placePopup(bg, m, renderDashboardReconcilePlanPopup(m), dashboardReconcilePlanPopupFrame(m))
+	}
+
 	if m.mode == viewGroups && m.groupDeleteConfirm {
 		bgModel := m
 		bgModel.groupDeleteConfirm = false
@@ -267,6 +276,8 @@ func (m Model) viewString() string {
 		body = renderGroups(m)
 	case m.mode == viewDots:
 		body = renderDots(m)
+	case m.mode == viewStatus:
+		body = renderStatus(m)
 	case m.mode == viewCommand:
 		body = renderPalette(m)
 	default:

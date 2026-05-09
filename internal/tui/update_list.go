@@ -265,12 +265,11 @@ func (m *Model) handleListConfirmationKeyMsg(msg tea.KeyPressMsg) (bool, []tea.C
 	m.clearListConfirmation()
 	switch c.action {
 	case listConfirmSyncAll:
-		m.loading = true
-		m.progressText = ""
-		ch, gen := m.beginProgressStream()
-		discovered := append([]*database.ToolCache(nil), m.discoveredTools...)
-		m.markBulkPendingSyncAll(discovered)
-		cmds = append(cmds, m.spinner.Tick, m.doSyncAllWithProgress(ch, gen, discovered), waitForProgress(ch, gen))
+		if m.mode == viewStatus {
+			m.startDashboardReconcile(&cmds)
+		} else {
+			m.startToolSyncAllConfirmed(&cmds)
+		}
 	case listConfirmDelete:
 		m.loading = true
 		if c.installed {
@@ -568,4 +567,13 @@ func (m *Model) refreshInstalledProviders() []tea.Cmd {
 		cmds = append(cmds, m.doScanProvider(prov, gen))
 	}
 	return cmds
+}
+
+func (m *Model) startToolSyncAllConfirmed(cmds *[]tea.Cmd) {
+	m.loading = true
+	m.progressText = ""
+	ch, gen := m.beginProgressStream()
+	discovered := append([]*database.ToolCache(nil), m.discoveredTools...)
+	m.markBulkPendingSyncAll(discovered)
+	*cmds = append(*cmds, m.spinner.Tick, m.doSyncAllWithProgress(ch, gen, discovered), waitForProgress(ch, gen))
 }

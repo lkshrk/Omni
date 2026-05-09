@@ -41,9 +41,11 @@ Set the repo path via 'omni ui' (Dots tab) or settings.dots_repo in settings.jso
 		newDotsEnableCmd(state),
 		newDotsDisableCmd(state),
 		newDotsPullCmd(state),
+		newDotsCommitCmd(state),
 		newDotsPushCmd(state),
 		newDotsReminderCmd(state),
 		newDotsWatchCmd(state),
+		newDotsServicesCmd(state),
 	)
 	return cmd
 }
@@ -761,6 +763,27 @@ func newDotsPushCmd(state *rootState) *cobra.Command {
 	return cmd
 }
 
+func newDotsCommitCmd(state *rootState) *cobra.Command {
+	var message string
+
+	cmd := &cobra.Command{
+		Use:   "commit",
+		Short: "Stage and commit all changes in the dots repo",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := requireDotsConfigured(state); err != nil {
+				return err
+			}
+			if err := state.app.DotsCommit(cmd.Context(), message); err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "Committed.")
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&message, "message", "m", "", "Commit message (default: \"dots: update\")")
+	return cmd
+}
+
 // ─── dots reminder ───────────────────────────────────────────────────────────
 
 func newDotsReminderCmd(state *rootState) *cobra.Command {
@@ -1097,6 +1120,69 @@ func printDotsWatchSyncResult(cmd *cobra.Command, result app.DotsWatchSyncResult
 		fmt.Fprintf(cmd.OutOrStdout(), "Synced dotfiles after %s (%d change(s)).\n", event, changes)
 	default:
 		fmt.Fprintf(cmd.OutOrStdout(), "Checked dotfiles after %s; no changes.\n", event)
+	}
+}
+
+// ─── dots services ───────────────────────────────────────────────────────────
+
+func newDotsServicesCmd(state *rootState) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "services",
+		Short: "Inspect optional dotfile services",
+	}
+	cmd.AddCommand(newDotsServicesStatusCmd(state))
+	return cmd
+}
+
+func newDotsServicesStatusCmd(state *rootState) *cobra.Command {
+	var format string
+	cmd := &cobra.Command{
+		Use:   "status",
+		Short: "Show reminder and watch service status",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			status := state.app.DotsServicesStatus()
+			if format == "json" {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(status)
+			}
+			if err := validateFormat(format, "text", "json"); err != nil {
+				return err
+			}
+			printDotsServicesStatus(cmd, status)
+			return nil
+		},
+	}
+	addFormatFlag(cmd, &format, "text", "text", "json")
+	return cmd
+}
+
+func printDotsServicesStatus(cmd *cobra.Command, status app.DotsServicesStatus) {
+	fmt.Fprintln(cmd.OutOrStdout(), "Dots services")
+	if status.ReminderError != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "Reminder: unavailable - %s\n", status.ReminderError)
+	} else if status.Reminder != nil {
+		installed := "not installed"
+		if status.Reminder.Installed {
+			installed = "installed"
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Reminder: %s (%s)\n", installed, status.Reminder.Platform)
+		fmt.Fprintf(cmd.OutOrStdout(), "  Interval: %s\n", status.Reminder.Interval)
+		fmt.Fprintf(cmd.OutOrStdout(), "  Notifications: %s\n", displaySettingsValue(status.Reminder.Notify))
+		for _, file := range status.Reminder.Files {
+			fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", file)
+		}
+	}
+	if status.WatchError != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "Watch: unavailable - %s\n", status.WatchError)
+	} else if status.Watch != nil {
+		installed := "not installed"
+		if status.Watch.Installed {
+			installed = "installed"
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "Watch: %s (%s)\n", installed, status.Watch.Platform)
+		fmt.Fprintf(cmd.OutOrStdout(), "  Debounce: %s\n", status.Watch.Debounce)
+		for _, file := range status.Watch.Files {
+			fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", file)
+		}
 	}
 }
 

@@ -40,7 +40,7 @@ func (m *Model) handleSettingsKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 
 func (m *Model) handleSettingsConfirmAction(cmds *[]tea.Cmd) {
 	switch m.settingsCursor {
-	case settingsRowSystemPriority, settingsRowDotsRepo, settingsRowDotsSync, settingsRowDotsReminderInterval, settingsRowDotsWatchDebounce, settingsRowBootstrap, settingsRowResetSettings, settingsRowResetCache:
+	case settingsRowSystemPriority, settingsRowDotsRepo, settingsRowDotsSync, settingsRowDotsReminderInterval, settingsRowDotsWatchDebounce, settingsRowDoctor, settingsRowBootstrap, settingsRowResetSettings, settingsRowResetCache:
 		m.handleSettingsEditAction(cmds)
 	}
 }
@@ -209,6 +209,9 @@ func (m *Model) handleSettingsEditAction(cmds *[]tea.Cmd) {
 		m.handleSettingsDotsSyncAction(cmds)
 	case settingsRowDotsReminderInterval, settingsRowDotsWatchDebounce:
 		m.startSettingsServiceDurationEdit()
+	case settingsRowDoctor:
+		m.startDoctorRun("Running doctor…")
+		*cmds = append(*cmds, m.spinner.Tick, m.doRunDoctor())
 	case settingsRowBootstrap:
 		m.dangerConfirmRow = settingsRowBootstrap
 		*cmds = append(*cmds, m.armConfirmationTimeout())

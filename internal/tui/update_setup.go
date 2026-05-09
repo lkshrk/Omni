@@ -132,7 +132,9 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 		m.mode = viewDots
 		m.setupBackgroundMode = viewList
 	} else {
-		m.mode = viewList
+		if !isMainTabMode(m.mode) || m.mode == viewSetup {
+			m.mode = viewStatus
+		}
 		m.setupBackgroundMode = viewList
 	}
 	m.hostRequired = false

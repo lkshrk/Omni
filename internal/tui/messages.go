@@ -121,6 +121,11 @@ type settingsSavedMsg struct {
 	err error
 }
 
+type doctorDoneMsg struct {
+	result *app.DoctorResult
+	err    error
+}
+
 type dotsServiceKind string
 
 const (
@@ -134,6 +139,13 @@ type dotsServiceChangedMsg struct {
 	reminder *app.DotsReminderService
 	watch    *app.DotsWatchService
 	err      error
+}
+
+type dotsServicesStatusMsg struct {
+	reminder    *app.DotsReminderService
+	reminderErr string
+	watch       *app.DotsWatchService
+	watchErr    string
 }
 
 type progressUpdate struct {
@@ -293,6 +305,15 @@ type dotsPulledMsg struct {
 
 // dotsPushedMsg is sent after a dots push completes.
 type dotsPushedMsg struct {
+	gen            int
+	entries        []app.DotStatus
+	gitStatus      string
+	dotMemberships map[string][]string
+	err            error
+}
+
+// dotsCommittedMsg is sent after a dots commit completes.
+type dotsCommittedMsg struct {
 	gen            int
 	entries        []app.DotStatus
 	gitStatus      string

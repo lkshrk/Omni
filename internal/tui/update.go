@@ -189,8 +189,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case settingsSavedMsg:
 		cmds = append(cmds, m.handleSettingsSavedMsg(msg)...)
 
+	case doctorDoneMsg:
+		cmds = append(cmds, m.handleDoctorDoneMsg(msg)...)
+
 	case dotsServiceChangedMsg:
 		cmds = append(cmds, m.handleDotsServiceChangedMsg(msg)...)
+
+	case dotsServicesStatusMsg:
+		m.handleDotsServicesStatusMsg(msg)
 
 	case dangerOpDoneMsg:
 		cmds = append(cmds, m.handleDangerOpDoneMsg(msg)...)
@@ -221,6 +227,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case dotsPushedMsg:
 		cmds = append(cmds, m.handleDotsPushedMsg(msg)...)
+
+	case dotsCommittedMsg:
+		cmds = append(cmds, m.handleDotsCommittedMsg(msg)...)
 
 	case dotsDeletedMsg:
 		cmds = append(cmds, m.handleDotsDeletedMsg(msg)...)
@@ -298,10 +307,10 @@ func (m Model) toolFiltersClickable() bool {
 }
 
 func (m Model) mainTabsClickable() bool {
-	if m.hostRequired || m.showFilePicker || m.stowInstallPrompt || m.help.ShowAll {
+	if m.hostRequired || m.showFilePicker || m.stowInstallPrompt || m.dashboardReconcilePlanOpen || m.help.ShowAll {
 		return false
 	}
-	if m.mode != viewList && m.mode != viewDots && m.mode != viewGroups && m.mode != viewSettings {
+	if m.mode != viewList && m.mode != viewDots && m.mode != viewStatus && m.mode != viewGroups && m.mode != viewSettings {
 		return false
 	}
 	if m.hostRenameMode || m.groupCreating || m.groupRenameMode || m.groupDeleteConfirm {
@@ -342,6 +351,8 @@ func (m *Model) scrollBy(delta int) {
 		m.commandCursor = clampRange(m.commandCursor+delta, -1, max(len(m.commandSuggestions)-1, -1))
 	case viewDots:
 		m.scrollDotsBy(delta)
+	case viewStatus:
+		m.scrollStatusBy(delta)
 	case viewSettings:
 		m.scrollSettingsBy(delta)
 	case viewGroups:

@@ -37,8 +37,10 @@ const (
 	settingsRowDotsReminderInterval
 	settingsRowDotsWatch
 	settingsRowDotsWatchDebounce
+	settingsRowDotsServices
 	settingsRowDotsCommit
 	settingsRowDotsPush
+	settingsRowDoctor
 	settingsRowBootstrap
 	settingsRowResetSettings
 	settingsRowResetCache
@@ -120,6 +122,11 @@ var settingsRows = []settingsRowMeta{
 		section: "Dotfiles",
 		hint:    hintCtxSettingsDuration,
 	},
+	settingsRowDotsServices: {
+		label:   "Service Status",
+		section: "Dotfiles",
+		hint:    hintCtxSettingsStatus,
+	},
 	settingsRowDotsCommit: {
 		label:   "Commit Changes",
 		section: "Dotfiles",
@@ -129,6 +136,11 @@ var settingsRows = []settingsRowMeta{
 		label:   "Push Changes",
 		section: "Dotfiles",
 		hint:    hintCtxSettingsToggle,
+	},
+	settingsRowDoctor: {
+		label:   "Run Doctor",
+		section: "Maintenance",
+		hint:    hintCtxSettingsEdit,
 	},
 	settingsRowBootstrap: {
 		label:   "Run Bootstrap Again",
@@ -237,6 +249,33 @@ func renderSettings(m Model) string {
 			return p.styleHelp.Render("[n/a]")
 		}
 		return p.styleProvider.Render("[" + formatSettingsDuration(duration) + "]")
+	}
+
+	servicesVal := func() string {
+		if m.dotsReminderServiceErr != "" || m.dotsWatchServiceErr != "" {
+			return p.styleHelp.Render("[n/a]")
+		}
+		installed := 0
+		if m.dotsReminderService != nil && m.dotsReminderService.Installed {
+			installed++
+		}
+		if m.dotsWatchService != nil && m.dotsWatchService.Installed {
+			installed++
+		}
+		return p.styleProvider.Render(fmt.Sprintf("[%d/2 on]", installed))
+	}
+
+	doctorVal := func() string {
+		switch {
+		case m.doctorRunning:
+			return p.styleProvider.Render("[running]")
+		case m.doctorErr != "":
+			return p.styleMissing.Render("[failed]")
+		case m.doctorResult != nil:
+			return p.styleProvider.Render(fmt.Sprintf("[%d ok/%d warn/%d fail]", m.doctorResult.Summary.OK, m.doctorResult.Summary.Warn, m.doctorResult.Summary.Fail))
+		default:
+			return p.styleHelp.Render("[run]")
+		}
 	}
 
 	serviceHelp := func(name string, installed bool, statusErr string, enableCopy string) string {
@@ -352,6 +391,11 @@ func renderSettings(m Model) string {
 			value:           durationVal(m.currentDotsWatchDebounce(), m.dotsWatchServiceErr),
 			help:            durationHelp("watch", m.dotsWatchService != nil && m.dotsWatchService.Installed, m.dotsWatchServiceErr),
 		},
+		settingsRowDotsServices: {
+			settingsRowMeta: settingsRows[settingsRowDotsServices],
+			value:           servicesVal(),
+			help:            p.styleHelp.Render("Native service file status for reminders and watch sync."),
+		},
 		settingsRowDotsCommit: {
 			settingsRowMeta: settingsRows[settingsRowDotsCommit],
 			value: func() string {
@@ -371,6 +415,11 @@ func renderSettings(m Model) string {
 			settingsRowMeta: settingsRows[settingsRowDotsPush],
 			value:           onOff(m.settings.DotsGit.AutoPush),
 			help:            p.styleHelp.Render("Push (and commit) automatically after dots add/remove/variant operations; does not affect Watch Sync."),
+		},
+		settingsRowDoctor: {
+			settingsRowMeta: settingsRows[settingsRowDoctor],
+			value:           doctorVal(),
+			help:            p.styleHelp.Render("Run read-only checks for config, host setup, providers, dotfiles, services, and cache."),
 		},
 		settingsRowBootstrap: {
 			settingsRowMeta: settingsRows[settingsRowBootstrap],
@@ -479,12 +528,131 @@ func renderSettings(m Model) string {
 			) + "\n")
 		}
 		if i == m.settingsCursor {
-			write(detailPrefix + row.help + "\n")
-			write(renderContextHints(m, settingsRowHintContext(i), hintPrefix) + "\n")
+			if i == settingsRowDotsServices {
+				write(renderDotsServiceDashboard(m, detailPrefix) + "\n")
+			} else if i == settingsRowDoctor && (m.doctorResult != nil || m.doctorErr != "") {
+				write(renderDoctorDashboard(m, detailPrefix) + "\n")
+			} else {
+				write(detailPrefix + row.help + "\n")
+			}
+			if hints := renderContextHints(m, settingsRowHintContext(i), hintPrefix); hints != "" {
+				write(hints + "\n")
+			}
 		}
 	}
 
 	return buf.render(listAvailableHeight(m))
+}
+
+func renderDotsServiceDashboard(m Model, prefix string) string {
+	return strings.Join([]string{
+		renderDotsReminderServiceDashboardLine(m, prefix),
+		renderDotsWatchServiceDashboardLine(m, prefix),
+	}, "\n")
+}
+
+func renderDotsReminderServiceDashboardLine(m Model, prefix string) string {
+	p := m.palette
+	if m.dotsReminderServiceErr != "" {
+		return prefix + p.styleMissing.Render("Reminder") + p.styleHelp.Render("  unavailable  "+m.dotsReminderServiceErr)
+	}
+	service := m.dotsReminderService
+	if service == nil {
+		service = &app.DotsReminderService{Interval: app.DefaultDotsReminderInterval()}
+	}
+	state := p.styleMissing.Render("[OFF]")
+	if service.Installed {
+		state = p.styleInstalled.Render("[ON]")
+	}
+	platform := service.Platform
+	if platform == "" {
+		platform = "native"
+	}
+	notify := "notify off"
+	if service.Notify {
+		notify = "notify on"
+	}
+	return prefix + p.styleNormal.Render("Reminder") +
+		"  " + state +
+		"  " + p.styleProvider.Render(platform) +
+		"  " + p.styleHelp.Render("interval "+formatSettingsDuration(service.Interval)) +
+		"  " + p.styleHelp.Render(notify)
+}
+
+func renderDotsWatchServiceDashboardLine(m Model, prefix string) string {
+	p := m.palette
+	if m.dotsWatchServiceErr != "" {
+		return prefix + p.styleMissing.Render("Watch") + p.styleHelp.Render("     unavailable  "+m.dotsWatchServiceErr)
+	}
+	service := m.dotsWatchService
+	if service == nil {
+		service = &app.DotsWatchService{Debounce: app.DefaultDotsWatchDebounce()}
+	}
+	state := p.styleMissing.Render("[OFF]")
+	if service.Installed {
+		state = p.styleInstalled.Render("[ON]")
+	}
+	platform := service.Platform
+	if platform == "" {
+		platform = "native"
+	}
+	return prefix + p.styleNormal.Render("Watch") +
+		"     " + state +
+		"  " + p.styleProvider.Render(platform) +
+		"  " + p.styleHelp.Render("debounce "+formatSettingsDuration(service.Debounce))
+}
+
+func renderDoctorDashboard(m Model, prefix string) string {
+	p := m.palette
+	if m.doctorErr != "" {
+		return prefix + p.styleMissing.Render("Doctor failed") + p.styleHelp.Render("  "+m.doctorErr)
+	}
+	if m.doctorResult == nil {
+		return prefix + p.styleHelp.Render("Run doctor to collect diagnostics.")
+	}
+	lines := []string{
+		prefix + p.styleHelp.Render(fmt.Sprintf("Summary  %d ok  %d warn  %d fail", m.doctorResult.Summary.OK, m.doctorResult.Summary.Warn, m.doctorResult.Summary.Fail)),
+	}
+	for _, check := range m.doctorResult.Checks {
+		lines = append(lines, renderDoctorCheckLine(m, prefix, check))
+		lines = append(lines, renderDoctorCheckDetails(m, prefix, check)...)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func renderDoctorCheckLine(m Model, prefix string, check app.DoctorCheck) string {
+	p := m.palette
+	status := p.styleHelp.Render("[?]")
+	switch check.Status {
+	case app.DoctorStatusOK:
+		status = p.styleInstalled.Render("[ok]")
+	case app.DoctorStatusWarn:
+		status = p.styleOutdated.Render("[warn]")
+	case app.DoctorStatusFail:
+		status = p.styleMissing.Render("[fail]")
+	}
+	return prefix + status + " " + p.styleNormal.Render(check.Label) + p.styleHelp.Render("  "+check.Message)
+}
+
+func renderDoctorCheckDetails(m Model, prefix string, check app.DoctorCheck) []string {
+	if len(check.Details) == 0 {
+		return nil
+	}
+	p := m.palette
+	maxLines := min(len(check.Details), 4)
+	detailW := max(rowAvailableWidth(m.width)-lipgloss.Width(prefix)-4, 20)
+	lines := make([]string, 0, maxLines+1)
+	for _, detail := range check.Details[:maxLines] {
+		detail = strings.TrimSpace(detail)
+		if detail == "" {
+			continue
+		}
+		lines = append(lines, prefix+p.styleHelp.Render("  - "+truncatePath(detail, detailW)))
+	}
+	if remaining := len(check.Details) - maxLines; remaining > 0 {
+		lines = append(lines, prefix+p.styleHelp.Render(fmt.Sprintf("  - +%d more", remaining)))
+	}
+	return lines
 }
 
 func renderSettingsDotsDisableKeepLocalPrompt(m Model, prefix string) string {

@@ -800,7 +800,7 @@ func TestRenderTabs_DefaultMode(t *testing.T) {
 
 func TestRenderTabs_Order(t *testing.T) {
 	out := renderTabs(baseModel(nil))
-	assertOrderedSubstrings(t, out, "Tools", "Dots", "Groups", "Settings")
+	assertOrderedSubstrings(t, out, "Dashboard", "Tools", "Dots", "Groups", "Settings")
 }
 
 func TestRenderTabs_DotsMode(t *testing.T) {
@@ -821,6 +821,15 @@ func TestRenderTabs_HostsMode(t *testing.T) {
 	}
 }
 
+func TestRenderTabs_StatusMode(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewStatus
+	out := renderTabs(m)
+	if !strings.Contains(out, "Dashboard") {
+		t.Errorf("expected 'Dashboard' in status mode output, got: %q", out)
+	}
+}
+
 func TestRenderTabs_SettingsMode(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSettings
@@ -833,7 +842,7 @@ func TestRenderTabs_SettingsMode(t *testing.T) {
 func TestRenderTabs_HasStableWidthAcrossModes(t *testing.T) {
 	m := baseModel(nil)
 	base := lipgloss.Width(renderTabs(m))
-	for _, mode := range []viewMode{viewDots, viewGroups, viewSettings} {
+	for _, mode := range []viewMode{viewDots, viewStatus, viewGroups, viewSettings} {
 		m.mode = mode
 		got := lipgloss.Width(renderTabs(m))
 		if got != base {
@@ -1103,9 +1112,11 @@ func TestRenderSettings_LabelOrderAndLegacyNames(t *testing.T) {
 		{"Reminder Interval", false},
 		{"Watch Sync", false},
 		{"Watch Debounce", false},
+		{"Service Status", false},
 		{"Commit Changes", false},
 		{"Push Changes", false},
 		{"Maintenance", true},
+		{"Run Doctor", false},
 		{"Run Bootstrap Again", false},
 		{"Reset Settings", false},
 		{"Reset Cache", false},
@@ -1201,13 +1212,53 @@ func TestRenderSettings_DotsServiceRows(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSettings
 	m.settings.DotsRepo = "/home/user/dotfiles"
-	m.dotsReminderService = &app.DotsReminderService{Installed: true, Interval: 12 * time.Hour}
-	m.dotsWatchService = &app.DotsWatchService{Installed: false, Debounce: 2 * time.Second}
+	m.dotsReminderService = &app.DotsReminderService{Installed: true, Platform: "systemd", Interval: 12 * time.Hour, Notify: true}
+	m.dotsWatchService = &app.DotsWatchService{Installed: false, Platform: "systemd", Debounce: 2 * time.Second}
 
 	out := renderSettings(m)
-	for _, want := range []string{"Reminder Notifications", "Reminder Interval", "Watch Sync", "Watch Debounce", "[ON]", "[OFF]", "[12h]", "[2s]"} {
+	for _, want := range []string{"Reminder Notifications", "Reminder Interval", "Watch Sync", "Watch Debounce", "Service Status", "[ON]", "[OFF]", "[12h]", "[2s]", "[1/2 on]"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("settings service row output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRenderSettings_DotsServiceDashboard(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewSettings
+	m.settings.DotsRepo = "/home/user/dotfiles"
+	m.settingsCursor = settingsRowDotsServices
+	m.dotsReminderService = &app.DotsReminderService{Installed: true, Platform: "systemd", Interval: 12 * time.Hour, Notify: true}
+	m.dotsWatchService = &app.DotsWatchService{Installed: false, Platform: "systemd", Debounce: 2 * time.Second}
+
+	out := renderSettings(m)
+	for _, want := range []string{"Reminder", "Watch", "systemd", "interval 12h", "notify on", "debounce 2s"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("settings service dashboard missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "enter") {
+		t.Fatalf("read-only service dashboard should not show an action hint:\n%s", out)
+	}
+}
+
+func TestRenderSettings_DoctorDashboard(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewSettings
+	m.settingsCursor = settingsRowDoctor
+	m.doctorResult = &app.DoctorResult{
+		Summary: app.DoctorSummary{OK: 1, Warn: 1, Fail: 1},
+		Checks: []app.DoctorCheck{
+			{Label: "Config", Status: app.DoctorStatusOK, Message: "settings.json is valid", Details: []string{"/tmp/settings.json", "version 1"}},
+			{Label: "Host", Status: app.DoctorStatusWarn, Message: "current host is not configured", Details: []string{"host laptop"}},
+			{Label: "Dotfiles", Status: app.DoctorStatusFail, Message: "dots_repo is not accessible", Details: []string{"stow missing"}},
+		},
+	}
+
+	out := renderSettings(m)
+	for _, want := range []string{"Run Doctor", "Summary", "1 ok", "1 warn", "1 fail", "Config", "Host", "Dotfiles", "/tmp/settings.json", "version 1", "host laptop", "stow missing"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("settings doctor dashboard missing %q:\n%s", want, out)
 		}
 	}
 }
@@ -3110,6 +3161,42 @@ func TestTabKeyMap_ShortHelp_SettingsMode(t *testing.T) {
 	}
 }
 
+func TestTabKeyMap_ShortHelp_StatusMode(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewStatus
+	got := strings.Join(bindingHelpDescs(tabKeyMap{&m}.ShortHelp()), ",")
+	if !strings.Contains(got, "refresh dashboard") {
+		t.Errorf("dashboard footer missing refresh action, got %q", got)
+	}
+	for _, unwanted := range []string{"reconcile all", "upgrade all tools", "open/fix selected"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("dashboard footer should hide inactive or inline action %q, got %q", unwanted, got)
+		}
+	}
+
+	m = baseModel([]*database.ToolCache{
+		{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
+		{Name: "fd", Provider: "brew", Installed: false, Tracked: true},
+	})
+	m.mode = viewStatus
+	m.settings.DotsRepo = "/repo/dotfiles"
+	m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+	got = strings.Join(bindingHelpDescs(tabKeyMap{&m}.ShortHelp()), ",")
+	for _, want := range []string{"reconcile all", "refresh dashboard"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("dashboard footer missing %q, got %q", want, got)
+		}
+	}
+	if strings.Index(got, "reconcile all") > strings.Index(got, "refresh dashboard") {
+		t.Errorf("dashboard footer should put reconcile before refresh, got %q", got)
+	}
+	for _, unwanted := range []string{"open/fix selected", "upgrade all tools"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("dashboard footer should not duplicate row action %q, got %q", unwanted, got)
+		}
+	}
+}
+
 func TestTabKeyMap_ShortHelp_HostsMode(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewGroups
@@ -3231,6 +3318,7 @@ func TestTabKeyMap_ShortHelp_StaticSuffix(t *testing.T) {
 		mode viewMode
 	}{
 		{"dots", viewDots},
+		{"status", viewStatus},
 		{"settings", viewSettings},
 		{"hosts", viewGroups},
 		{"list", viewList},
@@ -3294,6 +3382,7 @@ func TestRenderHelpPopup_TabSpecificActionsAndLegend(t *testing.T) {
 		want []string
 	}{
 		{"dots", viewDots, []string{"discover", "conflict", "no source", "host variant", "child"}},
+		{"status", viewStatus, []string{"upgrade all tools", "reconcile all", "refresh dashboard", iconInstalled, "healthy", iconPending, "working", iconFailed, "warning", iconMissing, "failure", iconIgnored, "quiet"}},
 		{"settings", viewSettings, []string{"change toggle or option", "[ON]", "[OFF]"}},
 		{"hosts", viewGroups, []string{"new group", "(local)", "[x]", "[ ]", "may need sudo"}},
 	}
@@ -3304,10 +3393,101 @@ func TestRenderHelpPopup_TabSpecificActionsAndLegend(t *testing.T) {
 			if tc.mode == viewDots {
 				m.settings.DotsRepo = "/repo/dotfiles"
 			}
+			if tc.mode == viewStatus {
+				m.allTools = []*database.ToolCache{
+					{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
+					{Name: "fd", Provider: "brew", Installed: false, Tracked: true},
+				}
+				m.settings.DotsRepo = "/repo/dotfiles"
+				m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+			}
 			out := renderHelpPopup(m)
 			for _, want := range tc.want {
 				if !strings.Contains(out, want) {
 					t.Errorf("help popup missing %q:\n%s", want, out)
+				}
+			}
+			if tc.mode == viewStatus && strings.Contains(out, "open/fix selected") {
+				t.Errorf("dashboard help should show the selected row action, not generic open/fix copy:\n%s", out)
+			}
+		})
+	}
+}
+
+func TestRenderHelpPopup_DashboardSelectedRowActions(t *testing.T) {
+	cases := []struct {
+		name     string
+		setup    func(Model) Model
+		want     []string
+		unwanted []string
+	}{
+		{
+			name: "updates",
+			setup: func(m Model) Model {
+				m.allTools = []*database.ToolCache{{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true}}
+				m.statusCursor = statusRowIndex(statusRows(m), "Tool Updates")
+				return m
+			},
+			want:     []string{"Row", "U", "upgrade all tools", "Bulk", "A", "reconcile all", "R", "refresh dashboard"},
+			unwanted: []string{"enter upgrade all tools", "open/fix selected"},
+		},
+		{
+			name: "tool sync",
+			setup: func(m Model) Model {
+				m.allTools = []*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}}
+				m.statusCursor = statusRowIndex(statusRows(m), "Tool Sync")
+				return m
+			},
+			want:     []string{"Row", "S", "sync tools", "Bulk", "A", "reconcile all", "R", "refresh dashboard"},
+			unwanted: []string{"enter sync tools", "open/fix selected"},
+		},
+		{
+			name: "dotfiles sync",
+			setup: func(m Model) Model {
+				m.settings.DotsRepo = "/repo/dotfiles"
+				m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+				m.statusCursor = statusRowIndex(statusRows(m), "Dotfiles")
+				return m
+			},
+			want:     []string{"Row", "S", "sync dotfiles", "Bulk", "A", "reconcile all", "R", "refresh dashboard"},
+			unwanted: []string{"enter sync dotfiles", "open/fix selected"},
+		},
+		{
+			name: "services",
+			setup: func(m Model) Model {
+				m.dotsReminderServiceErr = "read service file: denied"
+				m.statusCursor = statusRowIndex(statusRows(m), "Services")
+				return m
+			},
+			want:     []string{"Row", "enter", "open service settings", "Bulk", "R", "refresh dashboard"},
+			unwanted: []string{"open/fix selected"},
+		},
+		{
+			name: "all clear",
+			setup: func(m Model) Model {
+				m.settings.DotsRepo = "/repo/dotfiles"
+				m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}}}
+				m.statusCursor = statusRowIndex(statusRows(m), "All Clear")
+				return m
+			},
+			want:     []string{"Bulk", "R", "refresh dashboard"},
+			unwanted: []string{"Row", "reconcile all", "open/fix selected"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := baseModel(nil)
+			m.mode = viewStatus
+			m = tc.setup(m)
+			out := renderHelpPopup(m)
+			for _, want := range tc.want {
+				if !strings.Contains(out, want) {
+					t.Fatalf("dashboard help missing %q:\n%s", want, out)
+				}
+			}
+			for _, unwanted := range tc.unwanted {
+				if strings.Contains(out, unwanted) {
+					t.Fatalf("dashboard help should not contain %q:\n%s", unwanted, out)
 				}
 			}
 		})
@@ -3361,7 +3541,7 @@ func TestRenderHelpPopup_ContentLinesFitAvailableWidth(t *testing.T) {
 	m.help.ShowAll = true
 	helpWidth := helpPopupContentWidth(m)
 
-	for _, mode := range []viewMode{viewList, viewDots, viewGroups, viewSettings} {
+	for _, mode := range []viewMode{viewList, viewDots, viewStatus, viewGroups, viewSettings} {
 		m.mode = mode
 		content := renderHelpPopupWithWidth(m, helpWidth)
 		for i, line := range strings.Split(content, "\n") {
@@ -4997,6 +5177,7 @@ func TestWindowTitle_AllModes(t *testing.T) {
 		want string
 	}{
 		{viewDots, "dots"},
+		{viewStatus, "status"},
 		{viewGroups, "groups"},
 		{viewSettings, "settings"},
 		{viewSetup, "setup"},
@@ -5123,6 +5304,590 @@ func TestViewString_SettingsMode(t *testing.T) {
 	out := m.viewString()
 	if !strings.Contains(out, "Node Manager") {
 		t.Errorf("expected settings content in viewString, got:\n%s", out)
+	}
+}
+
+func TestViewString_StatusMode(t *testing.T) {
+	m := baseModel([]*database.ToolCache{
+		{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
+		{Name: "fd", Provider: "brew", Installed: false, Tracked: true},
+		{Name: "certifi", Provider: "python", Installed: true, Tracked: true},
+	})
+	m.mode = viewStatus
+	m.ignoreSet = map[string]bool{"certifi": true}
+	m.settings.DotsRepo = "/repo/dotfiles"
+	m.doctorResult = &app.DoctorResult{
+		Checks: []app.DoctorCheck{
+			{ID: "config", Label: "Config", Status: app.DoctorStatusOK, Message: "settings.json is valid"},
+			{ID: "dots", Label: "Dotfiles", Status: app.DoctorStatusWarn, Message: "dotfiles need attention"},
+		},
+		Summary: app.DoctorSummary{OK: 1, Warn: 1},
+	}
+	m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateConflict, Health: app.HealthConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+	out := m.viewString()
+	for _, want := range []string{"Health Check", "Data", "Quiet", "Tool Updates", "Tool Sync", "Dotfiles", "Services", "Ignored Tools"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("status view missing %q:\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{"Inventory", "OK Checks", "Watch Sync"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("status view should not render old dashboard row %q:\n%s", unwanted, out)
+		}
+	}
+}
+
+func TestDashboardAttentionRowsCollapseOKDoctorChecks(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewStatus
+	m.allTools = []*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}}
+	m.settings.DotsRepo = "/repo/dotfiles"
+	m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateSynced, Health: app.HealthOK}}
+	m.doctorResult = &app.DoctorResult{
+		Checks: []app.DoctorCheck{
+			{ID: "config", Label: "Config", Status: app.DoctorStatusOK, Message: "settings.json is valid"},
+			{ID: "cache", Label: "Cache", Status: app.DoctorStatusOK, Message: "cache database is readable"},
+			{ID: "dots", Label: "Dotfiles", Status: app.DoctorStatusWarn, Message: "dotfiles need attention"},
+		},
+		Summary: app.DoctorSummary{OK: 2, Warn: 1},
+	}
+
+	rows := statusRows(m)
+	if statusRowIndex(rows, "Config") >= 0 || statusRowIndex(rows, "Cache") >= 0 {
+		t.Fatalf("OK doctor checks should be collapsed into one row: %#v", rows)
+	}
+	if statusRowIndex(rows, "OK Checks") >= 0 {
+		t.Fatalf("OK doctor checks should not render a dashboard row: %#v", rows)
+	}
+	if idx := statusRowIndex(rows, "Doctor"); idx < 0 || rows[idx].action.kind != statusActionOpenDotsIssue {
+		t.Fatalf("single dotfiles health warning should open dotfile issues, idx=%d row=%#v", idx, rows)
+	}
+}
+
+func TestStatusSelectedRowExpandsDetails(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewStatus
+	m.allTools = []*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}}
+	m.settings.DotsRepo = "/repo/dotfiles"
+	m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateSynced, Health: app.HealthOK}}
+	m.doctorResult = &app.DoctorResult{
+		Checks: []app.DoctorCheck{
+			{ID: "dots", Label: "Dotfiles", Status: app.DoctorStatusWarn, Message: "dotfiles need attention"},
+			{ID: "config", Label: "Config", Status: app.DoctorStatusOK, Message: "settings.json is valid"},
+		},
+		Summary: app.DoctorSummary{OK: 1, Warn: 1},
+	}
+
+	m.statusCursor = statusRowIndex(statusRows(m), "Doctor")
+	out := renderStatus(m)
+	if !strings.Contains(out, "Dotfiles: dotfiles need attention") || !strings.Contains(out, "enter") || !strings.Contains(out, "open dotfiles") {
+		t.Fatalf("selected health row should show actionable details:\n%s", out)
+	}
+	if strings.Contains(out, "reconcile all") {
+		t.Fatalf("bulk dashboard action should stay in the footer, not row details:\n%s", out)
+	}
+	if strings.Contains(out, "settings.json is valid") {
+		t.Fatalf("passed health checks should stay out of the dashboard details:\n%s", out)
+	}
+
+	m.statusCursor = statusRowIndex(statusRows(m), "Tools")
+	out = renderStatus(m)
+	if strings.Contains(out, "open dotfiles") {
+		t.Fatalf("unselected health row action should be collapsed:\n%s", out)
+	}
+}
+
+func TestDashboardServicesRowShowsActionableDetails(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewStatus
+	m.settings.DotsRepo = "/repo/dotfiles"
+	m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateSynced, Health: app.HealthOK}}
+	m.doctorResult = &app.DoctorResult{
+		Checks:  []app.DoctorCheck{{ID: "config", Label: "Config", Status: app.DoctorStatusOK, Message: "settings.json is valid"}},
+		Summary: app.DoctorSummary{OK: 1},
+	}
+	m.dotsReminderService = &app.DotsReminderService{
+		Installed: true,
+		Platform:  "launchd",
+		Interval:  12 * time.Hour,
+		Notify:    true,
+		Files:     []string{"~/Library/LaunchAgents/com.lkshrk.omni.dots-reminder.plist"},
+	}
+	m.dotsWatchService = &app.DotsWatchService{
+		Installed: true,
+		Platform:  "systemd",
+		Debounce:  5 * time.Second,
+		Files:     []string{"~/.config/systemd/user/omni-dots-watch.service"},
+	}
+
+	m.statusCursor = statusRowIndex(statusRows(m), "Services")
+	out := renderStatus(m)
+	for _, want := range []string{"Services", "Reminder [ON]", "Watch [ON]", "launchd every 12h notify on", "systemd debounce 5s"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("services row should show compact service state, missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "LaunchAgents") || strings.Contains(out, "journalctl") || strings.Contains(out, "systemd/user") {
+		t.Fatalf("services row should not expose native service files or logs:\n%s", out)
+	}
+
+	m.dotsReminderServiceErr = "read service file: denied"
+	rows := statusRows(m)
+	idx := statusRowIndex(rows, "Services")
+	if idx < 0 || rows[idx].section != statusSectionAttention {
+		t.Fatalf("service warning should promote services to attention, idx=%d rows=%#v", idx, rows)
+	}
+	m.statusCursor = idx
+	out = renderStatus(m)
+	if !strings.Contains(out, "Reminder [WARN]") || !strings.Contains(out, "open service settings") {
+		t.Fatalf("selected services warning should explain and route to settings:\n%s", out)
+	}
+}
+
+func TestStatusNavigationAndEnterActions(t *testing.T) {
+	m := baseModel([]*database.ToolCache{
+		{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
+		{Name: "fd", Provider: "brew", Installed: false, Tracked: true},
+	})
+	m.mode = viewStatus
+	got := drive(m, pressRune('j'))
+	if got.statusCursor != 1 {
+		t.Fatalf("statusCursor = %d, want 1 after j", got.statusCursor)
+	}
+
+	m.statusCursor = statusRowIndex(statusRows(m), "Tool Updates")
+	out := renderStatus(m)
+	if !strings.Contains(out, "U") || !strings.Contains(out, "upgrade all tools") || strings.Contains(out, "enter upgrade all tools") {
+		t.Fatalf("updates row should use the Tools tab upgrade-all key inline:\n%s", out)
+	}
+	got = drive(m, pressEnter())
+	if got.loading || got.upgradingKeys["*"] {
+		t.Fatalf("enter should not trigger the updates row action, loading=%v upgrading=%v", got.loading, got.upgradingKeys)
+	}
+	got = drive(m, pressRune('U'))
+	if !got.loading || !got.upgradingKeys["*"] {
+		t.Fatalf("U on updates should start upgrade all, loading=%v upgrading=%v", got.loading, got.upgradingKeys)
+	}
+
+	m = baseModel([]*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}})
+	m.mode = viewStatus
+	m.statusCursor = statusRowIndex(statusRows(m), "Tool Sync")
+	out = renderStatus(m)
+	if !strings.Contains(out, "S") || !strings.Contains(out, "sync tools") || strings.Contains(out, "enter sync tools") {
+		t.Fatalf("tool sync row should use the Tools tab sync-all key inline:\n%s", out)
+	}
+	got = drive(m, pressRune('S'))
+	if !got.loading || !got.bulkPendingKeys[toolKey("fd", "brew")] {
+		t.Fatalf("S on tool sync should start sync-all with row progress, loading=%v pending=%v", got.loading, got.bulkPendingKeys)
+	}
+
+	m = baseModel(nil)
+	m.mode = viewStatus
+	m.settings.DotsRepo = "/repo/dotfiles"
+	m.doctorResult = &app.DoctorResult{
+		Checks:  []app.DoctorCheck{{ID: "dots", Label: "Dotfiles", Status: app.DoctorStatusWarn, Message: "dotfiles need attention"}},
+		Summary: app.DoctorSummary{Warn: 1},
+	}
+	m.dotsEntries = []app.DotStatus{
+		{Name: "zsh", State: app.DotStateSynced},
+		{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}},
+	}
+	m.statusCursor = statusRowIndex(statusRows(m), "Dotfiles")
+	out = renderStatus(m)
+	if !strings.Contains(out, "S") || !strings.Contains(out, "sync dotfiles") || strings.Contains(out, "enter sync dotfiles") {
+		t.Fatalf("dotfiles sync row should use the Dots tab sync-all key inline:\n%s", out)
+	}
+	got = drive(m, pressRune('S'))
+	if !got.dotsLoading || !got.dotsPendingNames["nvim"] {
+		t.Fatalf("S on dotfiles warning should start sync, loading=%v pending=%v", got.dotsLoading, got.dotsPendingNames)
+	}
+
+	m = baseModel(nil)
+	m.mode = viewStatus
+	m.settings.DotsRepo = "/repo/dotfiles"
+	m.dotsGitStatus = " M dotfiles/zsh/.zshrc"
+	m.statusCursor = statusRowIndex(statusRows(m), "Dotfiles")
+	out = renderStatus(m)
+	if !strings.Contains(out, "enter") || !strings.Contains(out, "commit dotfiles") {
+		t.Fatalf("dirty dotfiles row should use the Dots commit key inline:\n%s", out)
+	}
+	got = drive(m, pressEnter())
+	if !got.dotsLoading || got.statusMsg != "Committing dots…" {
+		t.Fatalf("enter on dirty dotfiles should commit, loading=%v status=%q", got.dotsLoading, got.statusMsg)
+	}
+
+	m = baseModel(nil)
+	m.mode = viewStatus
+	m.statusCursor = statusRowIndex(statusRows(m), "Services")
+	out = renderStatus(m)
+	if !strings.Contains(out, "enter") || !strings.Contains(out, "open service settings") {
+		t.Fatalf("services row should keep the Settings navigation key inline:\n%s", out)
+	}
+	got = drive(m, pressEnter())
+	if got.mode != viewSettings || got.settingsCursor != settingsRowDotsServices {
+		t.Fatalf("enter on services should open service settings, mode=%v settingsCursor=%d", got.mode, got.settingsCursor)
+	}
+}
+
+func TestDashboardRowsUseMiddleSummaryColumn(t *testing.T) {
+	m := baseModel([]*database.ToolCache{
+		{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
+		{Name: "fd", Provider: "brew", Installed: false, Tracked: true},
+	})
+	m.mode = viewStatus
+	m.width = 140
+
+	out := renderStatus(m)
+	for _, want := range []string{"git", "fd missing", "1 installed locally"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("dashboard should render row summaries in the main row, missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestDashboardSelectedUpdateDoesNotDuplicateSummary(t *testing.T) {
+	m := baseModel([]*database.ToolCache{
+		{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true, Version: sql.NullString{String: "2.45", Valid: true}, LatestVersion: sql.NullString{String: "2.46", Valid: true}},
+	})
+	m.mode = viewStatus
+	m.statusCursor = statusRowIndex(statusRows(m), "Tool Updates")
+
+	out := renderStatus(m)
+	if got := strings.Count(out, "git (2.46)"); got != 1 {
+		t.Fatalf("selected update summary should not be repeated in details, count=%d:\n%s", got, out)
+	}
+}
+
+func TestDashboardUpdatesShowPendingProgress(t *testing.T) {
+	m := baseModel([]*database.ToolCache{
+		{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true, Version: sql.NullString{String: "2.45", Valid: true}, LatestVersion: sql.NullString{String: "2.46", Valid: true}},
+		{Name: "fd", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
+	})
+	m.mode = viewStatus
+	m.upgradingKeys = map[string]bool{"*": true}
+	m.bulkPendingKeys = map[string]bool{
+		toolKey("git", "brew"): true,
+		toolKey("fd", "brew"):  true,
+	}
+	m.statusCursor = statusRowIndex(statusRows(m), "Tool Updates")
+
+	out := renderStatus(m)
+	for _, want := range []string{iconPending, "2 queued", "Upgrading tools…", "ctrl+c", "queued:", "git (2.46)"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("dashboard update row should show pending progress, missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestDashboardToolSyncShowsPendingProgress(t *testing.T) {
+	m := baseModel([]*database.ToolCache{
+		{Name: "fd", Provider: "brew", Installed: false, Tracked: true},
+		{Name: "git", Provider: "brew", Installed: true, Tracked: true},
+	})
+	m.mode = viewStatus
+	m.loading = true
+	m.progressText = "Syncing tools 1/1"
+	m.bulkPendingKeys = map[string]bool{
+		toolKey("fd", "brew"): true,
+	}
+	m.statusCursor = statusRowIndex(statusRows(m), "Tool Sync")
+
+	out := renderStatus(m)
+	for _, want := range []string{iconPending, "syncing", "Syncing tools 1/1", "ctrl+c", "queued:", "fd missing"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("dashboard tool sync row should show pending progress, missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestDashboardDataRowsShowLoadingWithCurrentSnapshot(t *testing.T) {
+	t.Run("tools", func(t *testing.T) {
+		m := baseModel([]*database.ToolCache{{Name: "git", Provider: "brew", Installed: true, Tracked: true}})
+		m.mode = viewStatus
+		m.scanningProviders = map[string]bool{"brew": true}
+		m.progressText = "Refreshing providers: brew…"
+
+		out := renderStatus(m)
+		for _, want := range []string{iconPending, "Refreshing providers: brew…", "1 installed locally"} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("dashboard should keep tool data visible while refreshing, missing %q:\n%s", want, out)
+			}
+		}
+	})
+
+	t.Run("dotfiles", func(t *testing.T) {
+		m := baseModel(nil)
+		m.mode = viewStatus
+		m.settings.DotsRepo = "/repo/dotfiles"
+		m.dotsLoading = true
+		m.progressText = "Syncing dots 1/2"
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 3}}}
+
+		out := renderStatus(m)
+		for _, want := range []string{iconPending, "Syncing dots 1/2", "3/3 managed"} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("dashboard should keep dotfile data visible while syncing, missing %q:\n%s", want, out)
+			}
+		}
+	})
+
+	t.Run("services", func(t *testing.T) {
+		m := baseModel(nil)
+		m.mode = viewStatus
+		m.dotsServicesRefreshing = true
+		m.dotsReminderService = &app.DotsReminderService{Installed: true, Interval: 12 * time.Hour, Notify: true}
+
+		out := renderStatus(m)
+		for _, want := range []string{iconPending, "Refreshing service status…", "Reminder [ON]"} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("dashboard should keep service data visible while refreshing, missing %q:\n%s", want, out)
+			}
+		}
+	})
+}
+
+func TestDashboardIgnoredToolsAreMuted(t *testing.T) {
+	m := baseModel([]*database.ToolCache{
+		{Name: "certifi", Provider: "python", Installed: true, Tracked: true},
+	})
+	m.ignoreSet = map[string]bool{"certifi": true}
+
+	rows := statusRows(m)
+	idx := statusRowIndex(rows, "Ignored Tools")
+	if idx < 0 {
+		t.Fatalf("missing ignored row: %#v", rows)
+	}
+	if rows[idx].section != statusSectionQuiet {
+		t.Fatalf("ignored tools should be quiet, row=%#v", rows[idx])
+	}
+	if got, want := rows[idx].value, m.palette.styleHelp.Render("1 ignored"); got != want {
+		t.Fatalf("ignored value = %q, want muted %q", got, want)
+	}
+	if statusRowIndex(rows, "Inventory") >= 0 {
+		t.Fatalf("dashboard should not render the old inventory row: %#v", rows)
+	}
+}
+
+func TestDashboardRowsUseSharedStatusIcons(t *testing.T) {
+	t.Run("attention rows", func(t *testing.T) {
+		m := baseModel([]*database.ToolCache{
+			{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
+			{Name: "fd", Provider: "brew", Installed: false, Tracked: true},
+			{Name: "certifi", Provider: "python", Installed: true, Tracked: true},
+		})
+		m.mode = viewStatus
+		m.settings.DotsRepo = "/repo/dotfiles"
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+		m.dotsReminderServiceErr = "read service file: denied"
+		m.ignoreSet = map[string]bool{"certifi": true}
+
+		rows := statusRows(m)
+		want := map[string]string{
+			"Tool Updates":  iconFailed,
+			"Tool Sync":     iconFailed,
+			"Dotfiles":      iconFailed,
+			"Services":      iconFailed,
+			"Ignored Tools": iconIgnored,
+		}
+		for label, icon := range want {
+			idx := statusRowIndex(rows, label)
+			if idx < 0 {
+				t.Fatalf("missing dashboard row %q: %#v", label, rows)
+			}
+			if rows[idx].icon != icon {
+				t.Fatalf("%s icon = %q, want %q in rows %#v", label, rows[idx].icon, icon, rows)
+			}
+		}
+	})
+
+	t.Run("all clear", func(t *testing.T) {
+		m := baseModel(nil)
+		m.mode = viewStatus
+		m.settings.DotsRepo = "/repo/dotfiles"
+		m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}}}
+
+		rows := statusRows(m)
+		idx := statusRowIndex(rows, "All Clear")
+		if idx < 0 || rows[idx].icon != iconInstalled {
+			t.Fatalf("all-clear row should use healthy icon, idx=%d rows=%#v", idx, rows)
+		}
+	})
+}
+
+func TestDashboardFooterBulkActions(t *testing.T) {
+	t.Run("refresh starts dashboard refresh", func(t *testing.T) {
+		m := baseModel(nil)
+		m.mode = viewStatus
+		got := drive(m, pressRune('R'))
+		if !got.doctorRunning || !strings.Contains(got.statusMsg, "Refreshing dashboard") {
+			t.Fatalf("refresh should start dashboard refresh, running=%v status=%q", got.doctorRunning, got.statusMsg)
+		}
+	})
+
+	t.Run("reconcile opens planned operations", func(t *testing.T) {
+		m := baseModel([]*database.ToolCache{
+			{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
+			{Name: "fd", Provider: "brew", Installed: false, Tracked: true},
+		})
+		m.mode = viewStatus
+		m.settings.DotsRepo = "/repo/dotfiles"
+		m.dotsGitStatus = " M dotfiles/zsh/.zshrc"
+		got := drive(m, pressRune('A'))
+		if !got.dashboardReconcilePlanOpen || !got.dashboardReconcilePlanSelected[dashboardReconcilePlanSyncTools] {
+			t.Fatalf("reconcile should open a selected plan, open=%v selected=%v", got.dashboardReconcilePlanOpen, got.dashboardReconcilePlanSelected)
+		}
+		out := got.viewString()
+		for _, want := range []string{"Reconcile Plan", "Sync tools", "install 1 missing tool", "Upgrade tools", "Commit dotfiles"} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("reconcile plan missing %q:\n%s", want, out)
+			}
+		}
+		plain := stripANSIEscapeSequences(got.viewString())
+		actionLine := renderedLineContaining(plain, "reconcile selected")
+		if actionLine == "" || !strings.Contains(actionLine, "esc") || !strings.Contains(actionLine, "space") || !strings.Contains(actionLine, "enter") {
+			t.Fatalf("reconcile popup should show cancel/select/primary actions:\n%s", plain)
+		}
+		if visualColumnOf(actionLine, "cancel") > visualColumnOf(actionLine, "select") || visualColumnOf(actionLine, "select") > visualColumnOf(actionLine, "reconcile selected") {
+			t.Fatalf("reconcile popup actions should keep the usual cancel/select/primary order:\n%s", actionLine)
+		}
+	})
+
+	t.Run("lowercase apply fix does not trigger dashboard reconcile", func(t *testing.T) {
+		m := baseModel([]*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}})
+		m.mode = viewStatus
+		got := drive(m, pressRune('a'))
+		if got.dashboardReconcilePlanOpen || got.loading {
+			t.Fatalf("lowercase apply-fix key should not trigger dashboard reconcile, open=%v loading=%v", got.dashboardReconcilePlanOpen, got.loading)
+		}
+	})
+
+	t.Run("reconcile ignores non-auto-fixable provider mismatch", func(t *testing.T) {
+		m := baseModel([]*database.ToolCache{{Name: "fd", Provider: "system", Installed: true, InstalledWith: "apt", Tracked: true}})
+		m.mode = viewStatus
+		m.effectiveSystemManager = "brew"
+		got := drive(m, pressRune('A'))
+		if got.dashboardReconcilePlanOpen {
+			t.Fatalf("reconcile should not open a plan for provider mismatch only: selected=%v", got.dashboardReconcilePlanSelected)
+		}
+		if got.statusMsg != "nothing to reconcile" {
+			t.Fatalf("status = %q, want nothing to reconcile", got.statusMsg)
+		}
+		rows := statusRows(got)
+		idx := statusRowIndex(rows, "Tool Sync")
+		if idx < 0 || rows[idx].action.kind != statusActionOpenToolsSection {
+			t.Fatalf("provider mismatch should route to sync issues, idx=%d row=%#v", idx, rows)
+		}
+	})
+
+	t.Run("confirmed reconcile starts first operation and queues the rest", func(t *testing.T) {
+		m := baseModel([]*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}})
+		m.mode = viewStatus
+		m.settings.DotsRepo = "/repo/dotfiles"
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+		got := drive(m, pressRune('A'), pressEnter())
+		if !got.loading || !got.bulkPendingKeys[toolKey("fd", "brew")] {
+			t.Fatalf("tool sync should start and mark pending tools, loading=%v pending=%v", got.loading, got.bulkPendingKeys)
+		}
+		if got.dotsLoading {
+			t.Fatalf("dot sync should wait for the tool step, dotsLoading=%v", got.dotsLoading)
+		}
+		if len(got.dashboardReconcileQueue) != 1 || got.dashboardReconcileQueue[0] != dashboardReconcilePlanSyncDots {
+			t.Fatalf("reconcile queue = %v, want sync dots", got.dashboardReconcileQueue)
+		}
+		gen := got.progressGen
+		got = drive(got, progressDoneMsg{gen: gen, message: "sync complete", tools: got.allTools})
+		if !got.dotsLoading || !got.dotsPendingNames["nvim"] {
+			t.Fatalf("dot sync should start after tool sync completes, loading=%v pending=%v", got.dotsLoading, got.dotsPendingNames)
+		}
+	})
+
+	t.Run("reconcile skips queued operations that became clean", func(t *testing.T) {
+		m := baseModel([]*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}})
+		m.mode = viewStatus
+		m.settings.DotsRepo = "/repo/dotfiles"
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+		got := drive(m, pressRune('A'), pressEnter())
+		got.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}}}
+		got = drive(got, progressDoneMsg{gen: got.progressGen, message: "sync complete", tools: got.allTools})
+		if got.dashboardReconcileRunning || got.dotsLoading {
+			t.Fatalf("clean queued dot sync should be skipped, reconcileRunning=%v dotsLoading=%v", got.dashboardReconcileRunning, got.dotsLoading)
+		}
+		if got.statusMsg != "✓ reconciled" {
+			t.Fatalf("status = %q, want reconciled", got.statusMsg)
+		}
+	})
+
+	t.Run("deselected reconcile operation is skipped", func(t *testing.T) {
+		m := baseModel([]*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}})
+		m.mode = viewStatus
+		m.settings.DotsRepo = "/repo/dotfiles"
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+		got := drive(m, pressRune('A'), pressRune(' '), pressEnter())
+		if got.loading || got.bulkPendingKeys[toolKey("fd", "brew")] {
+			t.Fatalf("deselected tool sync should not start, loading=%v pending=%v", got.loading, got.bulkPendingKeys)
+		}
+		if !got.dotsLoading || !got.dotsPendingNames["nvim"] {
+			t.Fatalf("selected dot sync should start, loading=%v pending=%v", got.dotsLoading, got.dotsPendingNames)
+		}
+	})
+
+	t.Run("dirty dotfiles row can start commit", func(t *testing.T) {
+		m := baseModel(nil)
+		m.mode = viewStatus
+		m.settings.DotsRepo = "/repo/dotfiles"
+		m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}}}
+		m.dotsGitStatus = " M zsh/.zshrc"
+		rows := statusRows(m)
+		m.statusCursor = statusRowIndex(rows, "Dotfiles")
+		if m.statusCursor < 0 || rows[m.statusCursor].action.kind != statusActionCommitDots {
+			t.Fatalf("dirty dotfiles should expose commit action, cursor=%d row=%#v", m.statusCursor, rows)
+		}
+		got := drive(m, pressEnter())
+		if !got.dotsLoading || got.progressText != "Committing dots…" {
+			t.Fatalf("commit action should start dots commit, loading=%v progress=%q", got.dotsLoading, got.progressText)
+		}
+	})
+
+	t.Run("upgrade tools key is row scoped", func(t *testing.T) {
+		m := baseModel([]*database.ToolCache{{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true}})
+		m.mode = viewStatus
+		m.sectionCounts = map[section]int{}
+		m.statusCursor = statusRowIndex(statusRows(m), "Tools")
+		got := drive(m, pressRune('U'))
+		if got.loading || got.upgradingKeys["*"] {
+			t.Fatalf("U should not be a dashboard footer action, loading=%v upgrading=%v", got.loading, got.upgradingKeys)
+		}
+		m.statusCursor = statusRowIndex(statusRows(m), "Tool Updates")
+		got = drive(m, pressRune('U'))
+		if !got.loading || !got.upgradingKeys["*"] {
+			t.Fatalf("U on updates row should start upgrade all, loading=%v upgrading=%v", got.loading, got.upgradingKeys)
+		}
+	})
+}
+
+func statusRowIndex(rows []statusListRow, label string) int {
+	for i, row := range rows {
+		if row.label == label {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestStatusToolCountsIncludesDiscoveredTools(t *testing.T) {
+	m := baseModel([]*database.ToolCache{{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true}})
+	m.discoveredTools = []*database.ToolCache{{Name: "fd", Provider: "brew", Installed: true}}
+	m.rebuildDiscoveredKeys()
+
+	counts := statusToolCounts(m)
+	if counts.updates != 1 {
+		t.Fatalf("updates = %d, want 1", counts.updates)
+	}
+	if counts.outOfSync != 1 {
+		t.Fatalf("outOfSync = %d, want 1 discovered orphan", counts.outOfSync)
+	}
+	if counts.installed != 2 {
+		t.Fatalf("installed = %d, want 2", counts.installed)
 	}
 }
 

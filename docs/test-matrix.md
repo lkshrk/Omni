@@ -16,6 +16,7 @@ key routing, modal state, rendering, and async result handling.
 
 | Action ID | App/shared | CLI unit | CLI integration | TUI flow/render | Gap/next fixture |
 | --- | --- | --- | --- | --- | --- |
+| `reconcile` | yes | yes | partial | yes | Add an integration fixture that exercises `omni reconcile --yes` in an isolated tool/dotfile repo. |
 | `tools.sync` | yes | yes | yes | yes | - |
 | `tools.install` | yes | yes | yes | yes | - |
 | `tools.delete` | yes | yes | yes | yes | - |
@@ -44,6 +45,7 @@ key routing, modal state, rendering, and async result handling.
 | `dots.enable` | yes | yes | yes | yes | - |
 | `dots.disable` | yes | yes | yes | yes | - |
 | `dots.pull` | yes | yes | yes | n/a | - |
+| `dots.commit` | yes | yes | partial | yes | Add an integration fixture for committing a dirty dotfiles repo without pushing. |
 | `dots.push` | yes | yes | yes | n/a | - |
 | `dots.reminder` | yes | yes | yes | yes | - |
 | `dots.reminder.check` | yes | yes | yes | n/a | - |
@@ -52,6 +54,7 @@ key routing, modal state, rendering, and async result handling.
 | `dots.watch` | yes | yes | yes | yes | - |
 | `dots.watch.run` | yes | yes | yes | n/a | - |
 | `dots.watch.status` | yes | yes | yes | n/a | - |
+| `dots.services.status` | yes | yes | yes | yes | - |
 | `groups.create` | yes | yes | yes | yes | - |
 | `groups.rename` | yes | yes | yes | yes | - |
 | `groups.delete` | yes | yes | yes | yes | - |
@@ -66,3 +69,4 @@ key routing, modal state, rendering, and async result handling.
 | `settings.reset` | yes | yes | yes | yes | - |
 | `settings.reset_cache` | yes | yes | yes | yes | - |
 | `setup.init` | yes | yes | yes | yes | CLI command is `bootstrap`; `init` remains an alias |
+| `doctor` | yes | yes | yes | yes | - |
