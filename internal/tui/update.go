@@ -198,6 +198,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dotsServicesStatusMsg:
 		m.handleDotsServicesStatusMsg(msg)
 
+	case dotsHistoryLoadedMsg:
+		m.handleDotsHistoryLoadedMsg(msg)
+
 	case dangerOpDoneMsg:
 		cmds = append(cmds, m.handleDangerOpDoneMsg(msg)...)
 

@@ -5380,8 +5380,12 @@ func TestStatusSelectedRowExpandsDetails(t *testing.T) {
 
 	m.statusCursor = statusRowIndex(statusRows(m), "Doctor")
 	out := renderStatus(m)
-	if !strings.Contains(out, "Dotfiles: dotfiles need attention") || !strings.Contains(out, "enter") || !strings.Contains(out, "open dotfiles") {
+	plain := stripANSIEscapeSequences(out)
+	if !strings.Contains(plain, "Cause: 1 warn: Dotfiles") || !strings.Contains(plain, "Dotfiles: dotfiles need attention") {
 		t.Fatalf("selected health row should show actionable details:\n%s", out)
+	}
+	if !strings.Contains(plain, "Action:") || !strings.Contains(plain, "enter") || !strings.Contains(plain, "open dotfiles") {
+		t.Fatalf("selected health row should show a labeled action hint:\n%s", out)
 	}
 	if strings.Contains(out, "reconcile all") {
 		t.Fatalf("bulk dashboard action should stay in the footer, not row details:\n%s", out)
@@ -5442,6 +5446,29 @@ func TestDashboardServicesRowShowsActionableDetails(t *testing.T) {
 	if !strings.Contains(out, "Reminder [WARN]") || !strings.Contains(out, "open service settings") {
 		t.Fatalf("selected services warning should explain and route to settings:\n%s", out)
 	}
+}
+
+func TestDashboardDotfilesRowShowsRecentHistory(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewStatus
+	m.width = 72
+	m.settings.DotsRepo = "/repo/dotfiles"
+	m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 2}}}
+	m.dotsHistory = []app.DotsHistoryEntry{{
+		Operation: "sync",
+		Status:    "success",
+		Summary:   "sync completed with 2 dotfile ops",
+	}}
+	m.statusCursor = statusRowIndex(statusRows(m), "Dotfiles")
+
+	out := renderStatus(m)
+	plain := stripANSIEscapeSequences(out)
+	for _, want := range []string{"last sync: success", "sync completed with 2 dotfile ops"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("selected dotfiles row should show recent history, missing %q:\n%s", want, out)
+		}
+	}
+	assertLinesFitWidth(t, out, m.width)
 }
 
 func TestStatusNavigationAndEnterActions(t *testing.T) {
@@ -5553,7 +5580,11 @@ func TestDashboardSelectedUpdateDoesNotDuplicateSummary(t *testing.T) {
 	m.statusCursor = statusRowIndex(statusRows(m), "Tool Updates")
 
 	out := renderStatus(m)
-	if got := strings.Count(out, "git (2.46)"); got != 1 {
+	plain := stripANSIEscapeSequences(out)
+	if got := strings.Count(plain, "Cause: git (2.46)"); got != 1 {
+		t.Fatalf("selected update summary should move into one cause detail, count=%d:\n%s", got, out)
+	}
+	if got := strings.Count(plain, "git (2.46)"); got != 1 {
 		t.Fatalf("selected update summary should not be repeated in details, count=%d:\n%s", got, out)
 	}
 }

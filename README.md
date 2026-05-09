@@ -85,7 +85,8 @@ steps Omni can run together: sync tools, upgrade tools, sync dotfiles, and
 commit pending dotfile repo changes.
 
 Dashboard also shows a Data section for current tool, dotfile, and service
-state, plus a Quiet section for ignored tools. For read-only setup
+state, plus a Quiet section for ignored tools. Dotfile details include the
+latest local dots operation history entry when one exists. For read-only setup
 troubleshooting, refresh Dashboard or run `omni doctor`; Doctor checks config
 validity, host activation, available providers, dotfile readiness, native
 dotfile services, and cache database presence. The same reconcile lifecycle is
@@ -145,6 +146,7 @@ omni doctor                               # run read-only health checks
 omni reconcile                            # review/run safe host lifecycle work
 omni import                               # add installed tools to config
 omni dots sync                            # sync dotfile links
+omni dots history                         # show recent local dotfile operations
 ```
 
 Examples:
@@ -163,6 +165,26 @@ omni tools normalize --default-overrides --dry-run
 ### Dotfiles
 
 Dotfiles are logical entries in groups, backed by Stow package directories in the configured repo. Each entry has one target path, such as `~/.config/nvim`, and one default package. If `package` is omitted, the package name defaults to the entry name.
+
+#### Operation History
+
+Omni records recent dotfile operations in the local cache DB so you can review
+what happened on this machine after syncs, adds, deletes, git pull/push/commit
+actions, enable/disable flows, and conflict resolutions. Records include the
+operation name, affected entry when relevant, success/failed/partial status,
+summary, error text, repo path, and low-level dotfile ops. Dry-runs are
+intentionally not recorded, and this history is not written to the portable JSON
+config or the dotfiles repo.
+
+```sh
+omni dots history
+omni dots history --limit 10
+omni dots history --format json
+```
+
+In the TUI, the Dots tab shows a compact History section and Dashboard dotfile
+details show the latest history entry. Repo-side history is still normal Git
+history in your configured dots repo.
 
 #### Ignored Paths
 

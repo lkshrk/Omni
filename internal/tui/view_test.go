@@ -183,6 +183,30 @@ func TestRenderDots_LoadingKeepsExistingTable(t *testing.T) {
 	}
 }
 
+func TestRenderDots_HistorySection(t *testing.T) {
+	m := baseModel(nil)
+	m.width = 100
+	m.settings.DotsRepo = "/home/user/dotfiles"
+	m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: app.DotStateSynced}}
+
+	out := renderDots(m)
+	if strings.Contains(out, "History") {
+		t.Fatalf("empty history should not render a History section:\n%s", out)
+	}
+
+	m.dotsHistory = []app.DotsHistoryEntry{{
+		Operation: "sync",
+		Status:    "success",
+		Summary:   "sync completed with 2 dotfile ops",
+	}}
+	out = renderDots(m)
+	for _, want := range []string{"History", "sync: success", "sync completed with 2 dotfile ops"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("history section missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestRenderDots_IgnoredSectionVisible(t *testing.T) {
 	m := baseModel(nil)
 	m.width = 100

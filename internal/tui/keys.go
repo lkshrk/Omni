@@ -251,11 +251,11 @@ func DefaultKeyMap() KeyMap {
 		),
 		DotUseRepo: key.NewBinding(
 			key.WithKeys("u"),
-			key.WithHelp("u", "use repo"),
+			key.WithHelp("u", actions.MustTUILabel(actions.DotsResolveUseRepo)),
 		),
 		DotUseLocal: key.NewBinding(
 			key.WithKeys("l"),
-			key.WithHelp("l", "use local"),
+			key.WithHelp("l", actions.MustTUILabel(actions.DotsResolveUseLocal)),
 		),
 		PinProvider: key.NewBinding(
 			key.WithKeys("p"),

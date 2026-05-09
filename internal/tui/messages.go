@@ -23,8 +23,10 @@ type toolsLoadedMsg struct {
 	toolProviderPins       map[string]string
 	hostInfo               *app.HostInfo
 	ignoreList             []string // tool names ignored by the active host
-	noConfig               bool     // true when no settings.json was found
-	noHost                 bool     // true when settings.json exists but no host entry matches this machine
+	dotsHistory            []app.DotsHistoryEntry
+	dotsHistoryErr         string
+	noConfig               bool // true when no settings.json was found
+	noHost                 bool // true when settings.json exists but no host entry matches this machine
 	err                    error
 	effectivePythonManager string // binary actually used (uv, pip3, pip) — empty if not found
 	effectiveNodeManager   string // binary actually used (bun, pnpm, npm) — empty if not found
@@ -146,6 +148,11 @@ type dotsServicesStatusMsg struct {
 	reminderErr string
 	watch       *app.DotsWatchService
 	watchErr    string
+}
+
+type dotsHistoryLoadedMsg struct {
+	entries []app.DotsHistoryEntry
+	err     error
 }
 
 type progressUpdate struct {

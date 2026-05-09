@@ -251,10 +251,7 @@ func statusSections(m Model, rows []statusListRow) []sectionedTabSection {
 		selected := i == m.statusCursor
 		details := []string(nil)
 		if selected {
-			details = append(details, row.details...)
-			if hint := statusActionHintLine(m, row); hint != "" {
-				details = append(details, hint)
-			}
+			details = statusSelectedDetails(m, row)
 		}
 		bySection[row.section] = append(bySection[row.section], sectionedTabRow{
 			selected: selected,
@@ -690,7 +687,7 @@ func statusRowLine(m Model, row statusListRow, selected bool) string {
 	valueW := lipgloss.Width(row.value)
 	summaryW := contentW - statusLabelWidth - valueW - settingsMinGap - listColumnGap
 	left := []rowCell{leftCell(labelCell, statusLabelWidth)}
-	if summary := strings.TrimSpace(row.summary); summary != "" && summaryW >= 16 {
+	if summary := strings.TrimSpace(row.summary); !selected && summary != "" && summaryW >= 16 {
 		left = append(left, leftCell(p.styleHelp.Render(fitCellText(summary, summaryW)), summaryW))
 	}
 	return renderResponsiveGroupListRow(p, selected,
@@ -829,6 +826,47 @@ func statusDetailLines(m Model, lines ...string) []string {
 	return details
 }
 
+func statusSelectedDetails(m Model, row statusListRow) []string {
+	details := make([]string, 0, len(row.details)+2)
+	seen := make(map[string]struct{}, len(row.details)+2)
+	if summary := strings.TrimSpace(row.summary); summary != "" {
+		if line := statusDetailLine(m, "Cause: "+summary); line != "" {
+			details = append(details, line)
+			statusRememberDetailKey(seen, line)
+			statusRememberDetailKey(seen, summary)
+		}
+	}
+	for _, detail := range row.details {
+		key := statusDetailKey(detail)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		details = append(details, detail)
+	}
+	if hint := statusActionHintLine(m, row); hint != "" {
+		details = append(details, hint)
+	}
+	return details
+}
+
+func statusRememberDetailKey(seen map[string]struct{}, text string) {
+	if key := statusDetailKey(text); key != "" {
+		seen[key] = struct{}{}
+	}
+}
+
+func statusDetailKey(text string) string {
+	text = strings.TrimSpace(stripANSIEscapeSequences(text))
+	if text == "" {
+		return ""
+	}
+	return strings.Join(strings.Fields(text), " ")
+}
+
 func statusActionHintLine(m Model, row statusListRow) string {
 	hints := make([]hintItem, 0, 1)
 	if hint, ok := statusActionHintItem(m.keys, row.action); ok {
@@ -837,7 +875,7 @@ func statusActionHintLine(m Model, row statusListRow) string {
 	if len(hints) == 0 {
 		return ""
 	}
-	return textRowHintPrefix() + renderActionHintText(m.palette, hints)
+	return textRowHintPrefix() + m.palette.styleHelp.Render("Action: ") + renderActionHintText(m.palette, hints)
 }
 
 func statusActionHintItem(k KeyMap, action statusAction) (hintItem, bool) {
@@ -1410,6 +1448,7 @@ func statusDotDetails(m Model, counts app.DotFileCounts) []string {
 			details = append(details, statusDetailLine(m, fmt.Sprintf("+%d more repo change(s)", len(statusLines)-3)))
 		}
 	}
+	details = append(details, statusDotsHistoryDetails(m)...)
 	if repo := strings.TrimSpace(m.settings.DotsRepo); repo != "" {
 		details = append(details, statusDetailLine(m, "repo "+repo))
 	}
@@ -1417,6 +1456,16 @@ func statusDotDetails(m Model, counts app.DotFileCounts) []string {
 		details = append(details, statusDetailLine(m, "No dotfile entries loaded."))
 	}
 	return details
+}
+
+func statusDotsHistoryDetails(m Model) []string {
+	if errText := strings.TrimSpace(m.dotsHistoryErr); errText != "" {
+		return statusDetailLines(m, "history unavailable: "+errText)
+	}
+	if len(m.dotsHistory) == 0 {
+		return nil
+	}
+	return statusDetailLines(m, dotsHistoryDashboardLine(m.dotsHistory[0]))
 }
 
 func statusDotsActiveQueuedNames(m Model) ([]string, []string) {
