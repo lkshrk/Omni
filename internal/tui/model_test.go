@@ -823,12 +823,43 @@ func TestRefreshInstalledProviders_DedupesConcreteCoveredByEcosystem(t *testing.
 }
 
 func TestModel_SettingsTab(t *testing.T) {
-	// Tab order: Tools → Dots → Groups → Settings → Tools.
+	// Tab order: Dashboard → Tools → Dots → Groups → Settings → Dashboard.
 	// Within Groups, j/k cascades through sections; Tab switches main tabs.
+	t.Run("tab from dashboard opens list", func(t *testing.T) {
+		m := baseModel(threeTools())
+		m.mode = viewStatus
+		got := drive(m, pressTab())
+		if got.mode != viewList {
+			t.Errorf("mode = %v, want viewList", got.mode)
+		}
+	})
+
 	t.Run("tab from list opens dots", func(t *testing.T) {
 		m := drive(baseModel(threeTools()), pressTab())
 		if m.mode != viewDots {
 			t.Errorf("mode = %v, want viewDots", m.mode)
+		}
+	})
+
+	t.Run("shift tab from list opens status", func(t *testing.T) {
+		m := drive(baseModel(threeTools()), pressShiftTab())
+		if m.mode != viewStatus {
+			t.Errorf("mode = %v, want viewStatus", m.mode)
+		}
+		if !m.doctorRunning {
+			t.Error("status tab should auto-run doctor when no result is loaded")
+		}
+	})
+
+	t.Run("shift tab to status does not auto-run doctor while globally loading", func(t *testing.T) {
+		base := baseModel(threeTools())
+		base.loading = true
+		m := drive(base, pressShiftTab())
+		if m.mode != viewStatus {
+			t.Errorf("mode = %v, want viewStatus", m.mode)
+		}
+		if m.doctorRunning {
+			t.Error("status tab should not auto-run doctor while another global operation is loading")
 		}
 	})
 
@@ -846,8 +877,15 @@ func TestModel_SettingsTab(t *testing.T) {
 		}
 	})
 
-	t.Run("tab from settings returns to list", func(t *testing.T) {
+	t.Run("tab from settings opens status", func(t *testing.T) {
 		m := drive(baseModel(threeTools()), pressTab(), pressTab(), pressTab(), pressTab())
+		if m.mode != viewStatus {
+			t.Errorf("mode = %v, want viewStatus", m.mode)
+		}
+	})
+
+	t.Run("tab from settings returns to list", func(t *testing.T) {
+		m := drive(baseModel(threeTools()), pressTab(), pressTab(), pressTab(), pressTab(), pressTab())
 		if m.mode != viewList {
 			t.Errorf("mode = %v, want viewList", m.mode)
 		}
@@ -871,8 +909,44 @@ func TestModel_SettingsTab(t *testing.T) {
 		// In viewSearch, tab is consumed by the textinput — mode stays viewSearch.
 
 		m := drive(baseModel(threeTools()), pressRune('/'), pressTab())
-		if m.mode == viewSettings || m.mode == viewGroups {
+		if m.mode != viewSearch {
 			t.Error("tab should not switch tabs from filter mode")
+		}
+	})
+}
+
+func TestModel_StatusTabActions(t *testing.T) {
+	t.Run("enter starts doctor without locking loading", func(t *testing.T) {
+		m := baseModel(nil)
+		m.mode = viewStatus
+		m.settings.DotsRepo = "/repo/dotfiles"
+		m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateSynced}}
+		m.doctorErr = "previous failure"
+		m.statusCursor = statusRowIndex(statusRows(m), "Doctor")
+		got := drive(m, pressEnter())
+		if !got.doctorRunning {
+			t.Fatal("enter in status tab should start doctor")
+		}
+		if got.loading {
+			t.Fatal("doctor should run as a status activity, not as a global loading lock")
+		}
+	})
+
+	t.Run("refresh starts doctor", func(t *testing.T) {
+		m := baseModel(nil)
+		m.mode = viewStatus
+		got := drive(m, pressRune('R'))
+		if !got.doctorRunning {
+			t.Fatal("refresh in status tab should start doctor")
+		}
+	})
+
+	t.Run("back returns to tools", func(t *testing.T) {
+		m := baseModel(nil)
+		m.mode = viewStatus
+		got := drive(m, pressEsc())
+		if got.mode != viewList {
+			t.Fatalf("mode = %v, want viewList", got.mode)
 		}
 	})
 }
@@ -1121,6 +1195,17 @@ func TestModel_SettingsVisibleRowsMutateExpectedFields(t *testing.T) {
 				t.Helper()
 				if !m.settings.DotsGit.AutoPush {
 					t.Fatalf("row %d should toggle dots auto push", settingsRowDotsPush)
+				}
+			},
+		},
+		{
+			name:   "doctor",
+			row:    settingsRowDoctor,
+			action: pressEnter(),
+			assert: func(t *testing.T, m Model) {
+				t.Helper()
+				if !m.doctorRunning {
+					t.Fatalf("doctor row should start diagnostics, doctorRunning=%v loading=%v", m.doctorRunning, m.loading)
 				}
 			},
 		},
@@ -1407,8 +1492,39 @@ func TestModel_DotsServiceChangedMsgUpdatesStatus(t *testing.T) {
 	}
 }
 
+func TestModel_DoctorDoneMsgStoresResult(t *testing.T) {
+	result := &app.DoctorResult{Summary: app.DoctorSummary{OK: 2, Warn: 1}}
+	m := baseModel(nil)
+	m.doctorRunning = true
+
+	got := drive(m, doctorDoneMsg{result: result})
+	if got.doctorRunning {
+		t.Fatalf("doctor result should clear doctor running state, loading=%v running=%v", got.loading, got.doctorRunning)
+	}
+	if got.doctorResult != result {
+		t.Fatalf("doctorResult not stored: %+v", got.doctorResult)
+	}
+	if got.statusIsErr || !strings.Contains(got.statusMsg, "doctor complete") {
+		t.Fatalf("status = (%q, err=%v), want success", got.statusMsg, got.statusIsErr)
+	}
+}
+
+func TestModel_DoctorDoneMsgDoesNotClearUnrelatedLoading(t *testing.T) {
+	m := baseModel(nil)
+	m.loading = true
+	m.doctorRunning = true
+
+	got := drive(m, doctorDoneMsg{result: &app.DoctorResult{}})
+	if !got.loading {
+		t.Fatal("doctor completion should not clear unrelated global loading")
+	}
+	if got.doctorRunning {
+		t.Fatal("doctorRunning should still be cleared")
+	}
+}
+
 func TestModel_DotsRepoEdit(t *testing.T) {
-	// navigate to settings (3 tabs), then down to row 7 (Repository, shifted from 4)
+	// navigate to settings, then down to row 7 (Repository, shifted from 4)
 	toRow4 := func() []tea.Msg {
 		return []tea.Msg{
 			pressTab(), pressTab(), pressTab(),
@@ -2739,7 +2855,7 @@ func TestModel_PaletteSync_SetsLoading(t *testing.T) {
 	}
 	m.commandInput.Focus()
 	// Pre-populate the suggestion list (single suggestion → auto-chosen on enter).
-	syncCmd := buildPalette(m)[0] // sync is always first
+	syncCmd := mustPaletteCommand(t, m, "sync")
 	m.commandSuggestions = []palCmd{syncCmd}
 	got := drive(m, pressEnter())
 	if !got.loading {
@@ -2781,6 +2897,7 @@ func TestModel_PaletteDotsCommandsStartDotsOperations(t *testing.T) {
 		wantStatus string
 	}{
 		{name: "dots pull", wantStatus: "Pulling…"},
+		{name: "dots commit", wantStatus: "Committing dots…"},
 		{name: "dots push", wantStatus: "Pushing…"},
 		{name: "dots sync", wantStatus: "Syncing dots…"},
 	}
@@ -3674,6 +3791,7 @@ func TestActivityLabel_Branches(t *testing.T) {
 		{"finding local tools", Model{providerSnapshotRefreshing: true}, "Finding local tools…"},
 		{"descriptions", Model{descRefreshing: true}, "Refreshing tool descriptions…"},
 		{"dotsLoading", Model{dotsLoading: true}, "Loading dots…"},
+		{"doctorRunning", Model{doctorRunning: true}, "Running doctor…"},
 		{"default", Model{}, "Loading…"},
 	}
 	for _, tc := range cases {

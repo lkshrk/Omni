@@ -829,6 +829,7 @@ func (m *Model) handleDotsSyncedMsg(msg dotsSyncedMsg) []tea.Cmd {
 	if cmd := m.finishLaunchBatchIfIdle(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
+	m.continueDashboardReconcile(dashboardReconcilePlanSyncDots, msg.err, &cmds)
 	return cmds
 }
 
@@ -948,6 +949,24 @@ func (m *Model) handleDotsPushedMsg(msg dotsPushedMsg) []tea.Cmd {
 	} else {
 		cmds = append(cmds, setStatus(m, "✓ pushed", false))
 	}
+	return cmds
+}
+
+func (m *Model) handleDotsCommittedMsg(msg dotsCommittedMsg) []tea.Cmd {
+	var cmds []tea.Cmd
+
+	if !m.finishDotsOperation(msg.gen) {
+		return cmds
+	}
+	if msg.entries != nil {
+		m.applyDotsSnapshot(msg.entries, msg.gitStatus, msg.dotMemberships)
+	}
+	if msg.err != nil {
+		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
+	} else {
+		cmds = append(cmds, setStatus(m, "✓ committed", false))
+	}
+	m.continueDashboardReconcile(dashboardReconcilePlanCommitDots, msg.err, &cmds)
 	return cmds
 }
 
@@ -1242,6 +1261,17 @@ func (m *Model) doDotsPush() tea.Cmd {
 		pushErr := a.DotsPush(ctx, "")
 		entries, gitStatus, memberships, err := refreshDotsSnapshot(a, ctx)
 		return dotsPushedMsg{gen: gen, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: combineDotsErrors(pushErr, err)}
+	}
+}
+
+// doDotsCommit commits all changes with an auto-generated message.
+func (m *Model) doDotsCommit() tea.Cmd {
+	a := m.app
+	ctx, gen := m.currentDotsOperation()
+	return func() tea.Msg {
+		commitErr := a.DotsCommit(ctx, "")
+		entries, gitStatus, memberships, err := refreshDotsSnapshot(a, ctx)
+		return dotsCommittedMsg{gen: gen, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: combineDotsErrors(commitErr, err)}
 	}
 }
 

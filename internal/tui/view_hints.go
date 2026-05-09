@@ -42,6 +42,7 @@ const (
 	hintCtxSettingsDurationEdit
 	hintCtxSettingsDanger
 	hintCtxSettingsPriorityEdit
+	hintCtxSettingsStatus
 	hintCtxHostGroupPicker
 	hintCtxHostDefault
 	hintCtxGroupDefault
@@ -167,6 +168,7 @@ func isPopupPrimaryHint(h hintItem) bool {
 		return true
 	}
 	return strings.Contains(desc, "continue") ||
+		strings.HasPrefix(desc, "reconcile ") ||
 		strings.HasPrefix(desc, "confirm ") ||
 		strings.HasPrefix(desc, "create ") ||
 		strings.HasPrefix(desc, "save ")
@@ -309,6 +311,8 @@ func contextHintItems(m Model, ctx hintContext) []hintItem {
 			hintFromBindingDesc(m.keys.Confirm, "save"),
 			hintFromBindingDesc(m.keys.Back, "cancel"),
 		}
+	case hintCtxSettingsStatus:
+		return nil
 	case hintCtxHostGroupPicker:
 		return []hintItem{
 			hintFromBindingDesc(m.keys.Toggle, "toggle"),
@@ -598,6 +602,8 @@ func tabShortHelpBindings(m *Model) []key.Binding {
 		return footerBindings(k, []key.Binding{k.DotAdd, k.DotDiscover, k.SyncAll}, []key.Binding{k.Search})
 	case viewSettings:
 		return footerBindings(k, nil, nil)
+	case viewStatus:
+		return footerBindings(k, dashboardFooterActionBindings(m), nil)
 	case viewGroups:
 		actions := []key.Binding{k.NewGroup}
 		return footerBindings(k, actions, nil)
@@ -617,7 +623,8 @@ func rowConfirmationActive(m Model) bool {
 	if m.listConfirm.action != "" && m.listConfirm.action != listConfirmSyncAll {
 		return true
 	}
-	return m.hostDeleteConfirm ||
+	return m.dashboardReconcilePlanOpen ||
+		m.hostDeleteConfirm ||
 		m.groupDeleteConfirm ||
 		m.dangerConfirmRow >= 0 ||
 		dotsConfirmationActive(m)
@@ -655,6 +662,26 @@ func footerClearFiltersBinding(k KeyMap) key.Binding {
 	return key.NewBinding(key.WithKeys(k.Back.Keys()...), key.WithHelp(help.Key, "clear"))
 }
 
+func dashboardRefreshBinding(k KeyMap) key.Binding {
+	help := k.Refresh.Help()
+	return key.NewBinding(key.WithKeys(k.Refresh.Keys()...), key.WithHelp(help.Key, "refresh dashboard"))
+}
+
+func dashboardReconcileBinding(k KeyMap) key.Binding {
+	help := k.Reconcile.Help()
+	return key.NewBinding(key.WithKeys(k.Reconcile.Keys()...), key.WithHelp(help.Key, "reconcile all"))
+}
+
+func dashboardFooterActionBindings(m *Model) []key.Binding {
+	k := m.keys
+	actions := make([]key.Binding, 0, 2)
+	if statusDashboardReconcileActionable(*m) {
+		actions = append(actions, dashboardReconcileBinding(k))
+	}
+	actions = append(actions, dashboardRefreshBinding(k))
+	return actions
+}
+
 func compactFilterLabel(label string) string {
 	return strings.ReplaceAll(label, ",", "")
 }
@@ -678,6 +705,17 @@ func tabFullHelpBindings(m *Model) [][]key.Binding {
 		return [][]key.Binding{
 			common,
 			{k.Toggle, k.Confirm, k.Back, k.GroupPrev, k.GroupNext},
+		}
+	case viewStatus:
+		statusActions := make([]key.Binding, 0, 4)
+		if binding, ok := selectedStatusActionHintBinding(*m); ok {
+			statusActions = append(statusActions, binding)
+		}
+		statusActions = append(statusActions, dashboardFooterActionBindings(m)...)
+		statusActions = append(statusActions, k.Back)
+		return [][]key.Binding{
+			common,
+			statusActions,
 		}
 	case viewGroups:
 		return [][]key.Binding{
@@ -724,7 +762,11 @@ func activeConfirmationHelpItems(m Model) []hintItem {
 		return []hintItem{pressAgainHint(keyLabel, "quit")}
 	case m.listConfirm.action == listConfirmSyncAll:
 		keyLabel := m.keys.SyncAll.Help().Key
-		return []hintItem{pressAgainHint(keyLabel, "sync all")}
+		desc := "sync all"
+		if m.mode == viewStatus {
+			desc = "reconcile all"
+		}
+		return []hintItem{pressAgainHint(keyLabel, desc)}
 	case m.listConfirm.action == listConfirmDelete:
 		return confirmActionItems(m.keys.Delete, actions.MustTUIConfirmDescription(actions.ToolDelete), m.keys.Back)
 	case m.listConfirm.action == listConfirmReinstallDefault:
@@ -852,6 +894,21 @@ func helpActionGroups(m Model) []helpGroup {
 			hintFromBindingDesc(k.Confirm, "edit or save expanded setting"),
 			rawHint("K/J", "move system priority"),
 		}}}
+	case viewStatus:
+		rowItems := []hintItem(nil)
+		if hint, ok := selectedStatusActionHintItem(m); ok {
+			rowItems = []hintItem{hint}
+		}
+		groups := make([]helpGroup, 0, 2)
+		if len(rowItems) > 0 {
+			groups = append(groups, helpGroup{title: "Row", items: rowItems})
+		}
+		bulkItems := make([]hintItem, 0, 2)
+		for _, binding := range dashboardFooterActionBindings(&m) {
+			bulkItems = append(bulkItems, hintFromBinding(binding))
+		}
+		groups = append(groups, helpGroup{title: "Bulk", items: bulkItems})
+		return groups
 	case viewGroups:
 		items := []hintItem{
 			hintFromBindingDesc(k.NewGroup, actions.MustTUILabel(actions.GroupCreate)),
@@ -942,6 +999,16 @@ func helpLegendItems(m Model) []string {
 			p.styleMissing.Render("[OFF]") + p.styleHelp.Render(" disabled"),
 			p.styleMissing.Render("⚠") + p.styleHelp.Render(" confirm"),
 		}
+	case m.mode == viewStatus:
+		return []string{
+			p.styleInstalled.Render(iconInstalled) + p.styleHelp.Render(" healthy"),
+			p.styleStatus.Render(iconPending) + p.styleHelp.Render(" working"),
+			p.styleOutdated.Render(iconFailed) + p.styleHelp.Render(" warning"),
+			p.styleMissing.Render(iconMissing) + p.styleHelp.Render(" failure"),
+			p.styleHelp.Render(iconIgnored) + p.styleHelp.Render(" quiet"),
+			p.styleProvider.Render("[ON]") + p.styleHelp.Render(" service on"),
+			p.styleHelp.Render("[OFF] service off"),
+		}
 	case isGroupsHelpMode(m.mode):
 		return []string{
 			p.styleProvider.Render("(local)") + p.styleHelp.Render(" machine group"),
@@ -1006,6 +1073,8 @@ func helpPopupTitle(m Model) string {
 		return "Dots Help"
 	case viewSettings:
 		return "Settings Help"
+	case viewStatus:
+		return "Dashboard Help"
 	case viewGroups:
 		return "Groups Help"
 	default:

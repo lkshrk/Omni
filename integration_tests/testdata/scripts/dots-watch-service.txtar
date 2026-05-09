@@ -37,6 +37,12 @@ exec omni --config settings.json --cache-dir cache dots watch status
 stdout 'Dots watch service: installed \(systemd\)'
 stdout 'Debounce: 2s'
 
+exec omni --config settings.json --cache-dir cache dots services status
+stdout 'Dots services'
+stdout 'Reminder: not installed \(systemd\)'
+stdout 'Watch: installed \(systemd\)'
+stdout 'Debounce: 2s'
+
 exec omni --config settings.json --cache-dir cache dots watch uninstall
 stdout 'Uninstalled dots watch service'
 ! exists $WORK/xdg-config/systemd/user/omni-dots-watch.service

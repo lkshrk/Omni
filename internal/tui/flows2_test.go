@@ -2205,8 +2205,8 @@ func TestFlow2_UC134_CommandPaletteEnter(t *testing.T) {
 	m.commandCursor = 0 // select first suggestion
 	got := drive(m, pressEnter())
 	// After Enter the palette closes.
-	if got.mode != viewList {
-		t.Errorf("mode = %v, want viewList after palette Enter", got.mode)
+	if got.mode == viewCommand {
+		t.Errorf("mode = %v, want command palette closed after Enter", got.mode)
 	}
 	if got.commandSuggestions != nil {
 		t.Error("commandSuggestions should be nil after palette Enter")

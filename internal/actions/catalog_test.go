@@ -344,6 +344,7 @@ func TestDotsActionContracts(t *testing.T) {
 		ID("dots.reminder.run"),
 		ID("dots.reminder.status"),
 		ID("dots.watch.status"),
+		ID("dots.services.status"),
 	} {
 		action := mustAction(t, id)
 		if action.Mutates {
@@ -370,6 +371,17 @@ func TestDotsActionContracts(t *testing.T) {
 	}
 	if watchRun := mustAction(t, ID("dots.watch.run")); !watchRun.Mutates {
 		t.Fatalf("%s should be mutating because it runs sync after filesystem changes", watchRun.ID)
+	}
+	servicesStatus := mustAction(t, DotsServicesStatus)
+	if !hasCLICommand(servicesStatus, []string{"dots", "services", "status"}) {
+		t.Fatalf("%s missing combined services status CLI binding: %+v", servicesStatus.ID, servicesStatus.CLI)
+	}
+	doctor := mustAction(t, Doctor)
+	if doctor.Mutates {
+		t.Fatalf("%s should be read-only", doctor.ID)
+	}
+	if !hasCLICommand(doctor, []string{"doctor"}) {
+		t.Fatalf("%s missing doctor CLI binding: %+v", doctor.ID, doctor.CLI)
 	}
 }
 

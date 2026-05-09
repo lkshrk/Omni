@@ -397,6 +397,10 @@ git -C "$root/dotfiles" \
   -c commit.gpgSign=false \
   commit -q -m "Seed dotfiles"
 
+cat >> "$root/dotfiles/dotfiles/starship/.config/starship.toml" <<'EOF'
+add_newline = false
+EOF
+
 cat > "$root/settings.json" <<EOF
 {
   "\$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v1.schema.json",
@@ -519,8 +523,27 @@ OMNI_HOSTNAME=demo-macbook HOME="$root/home" PATH="$root/bin" \
   "$omni_bin" --config "$root/settings.json" --cache-dir "$root/cache" providers >/dev/null
 
 db="$root/cache/omni.db"
+config_path="$root/settings.json"
+if command -v shasum >/dev/null 2>&1; then
+  hash_line="$(printf '%s' "$config_path" | shasum -a 256)"
+elif command -v sha256sum >/dev/null 2>&1; then
+  hash_line="$(printf '%s' "$config_path" | sha256sum)"
+elif command -v openssl >/dev/null 2>&1; then
+  hash_line="$(printf '%s' "$config_path" | openssl dgst -sha256 -r)"
+else
+  echo "missing sha256 helper for bootstrap demo marker" >&2
+  exit 1
+fi
+config_hash="${hash_line%% *}"
+bootstrap_key="bootstrap.completed.demo-macbook.${config_hash:0:16}"
 
 sqlite3 "$db" <<SQL
+INSERT INTO local_state (key, value, updated_at)
+VALUES ('$bootstrap_key', 'complete', CURRENT_TIMESTAMP)
+ON CONFLICT (key) DO UPDATE SET
+  value = EXCLUDED.value,
+  updated_at = EXCLUDED.updated_at;
+
 DELETE FROM tool_cache;
 INSERT INTO tool_cache
   (name, provider, package, installed, installed_with, version, outdated, latest_version, description, last_checked, tracked)

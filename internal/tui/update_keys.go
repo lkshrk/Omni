@@ -17,6 +17,11 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 		return *m, tea.Batch(cmds...)
 	}
 
+	if m.dashboardReconcilePlanOpen {
+		cmds = append(cmds, m.handleDashboardReconcilePlanKeyMsg(msg)...)
+		return *m, tea.Batch(cmds...)
+	}
+
 	if key.Matches(msg, m.keys.Help) {
 		m.help.ShowAll = !m.help.ShowAll
 		return *m, nil
@@ -94,6 +99,8 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 		cmds = append(cmds, m.handleScopePickerKeyMsg(msg)...)
 	case viewSettings:
 		cmds = append(cmds, m.handleSettingsKeyMsg(msg)...)
+	case viewStatus:
+		cmds = append(cmds, m.handleStatusKeyMsg(msg)...)
 	case viewDots:
 		if handled, subCmds := m.handleDotsSubmodeKeyMsg(msg); handled {
 			cmds = append(cmds, subCmds...)
@@ -158,9 +165,7 @@ func (m *Model) switchMainTab(target viewMode, cmds *[]tea.Cmd) bool {
 	if m.hostRequired {
 		return false
 	}
-	switch target {
-	case viewList, viewDots, viewGroups, viewSettings:
-	default:
+	if !isMainTabMode(target) {
 		return false
 	}
 	if m.mode == viewGroups && target != viewGroups {
@@ -172,7 +177,20 @@ func (m *Model) switchMainTab(target viewMode, cmds *[]tea.Cmd) bool {
 		m.beginDotsOperation("Loading dots…")
 		*cmds = append(*cmds, m.spinner.Tick, m.doLoadDots())
 	}
+	if target == viewStatus && m.shouldAutoRunStatusDoctor() {
+		m.startDoctorRun("Running doctor…")
+		*cmds = append(*cmds, m.spinner.Tick, m.doRunDoctor())
+	}
 	return true
+}
+
+func isMainTabMode(mode viewMode) bool {
+	switch mode {
+	case viewStatus, viewList, viewDots, viewGroups, viewSettings:
+		return true
+	default:
+		return false
+	}
 }
 
 func (m *Model) handlePaletteOpenKeyMsg(msg tea.KeyPressMsg, cmds *[]tea.Cmd) bool {
@@ -182,7 +200,7 @@ func (m *Model) handlePaletteOpenKeyMsg(msg tea.KeyPressMsg, cmds *[]tea.Cmd) bo
 	if m.loading {
 		return false
 	}
-	if m.mode != viewList && m.mode != viewSettings && m.mode != viewGroups && m.mode != viewDots {
+	if m.mode != viewList && m.mode != viewSettings && m.mode != viewStatus && m.mode != viewGroups && m.mode != viewDots {
 		return false
 	}
 	m.cancelConfirmationForGlobalNavigation()

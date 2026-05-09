@@ -6,6 +6,7 @@ package actions
 type ID string
 
 const (
+	Reconcile                      ID = "reconcile"
 	ToolSync                       ID = "tools.sync"
 	ToolInstall                    ID = "tools.install"
 	ToolDelete                     ID = "tools.delete"
@@ -34,6 +35,7 @@ const (
 	DotsEnable                     ID = "dots.enable"
 	DotsDisable                    ID = "dots.disable"
 	DotsPull                       ID = "dots.pull"
+	DotsCommit                     ID = "dots.commit"
 	DotsPush                       ID = "dots.push"
 	DotsReminder                   ID = "dots.reminder"
 	DotsReminderCheck              ID = "dots.reminder.check"
@@ -42,6 +44,7 @@ const (
 	DotsWatch                      ID = "dots.watch"
 	DotsWatchRun                   ID = "dots.watch.run"
 	DotsWatchStatus                ID = "dots.watch.status"
+	DotsServicesStatus             ID = "dots.services.status"
 	GroupCreate                    ID = "groups.create"
 	GroupRename                    ID = "groups.rename"
 	GroupDelete                    ID = "groups.delete"
@@ -56,6 +59,7 @@ const (
 	SettingsReset                  ID = "settings.reset"
 	SettingsResetCache             ID = "settings.reset_cache"
 	SetupInit                      ID = "setup.init"
+	Doctor                         ID = "doctor"
 )
 
 // Scope describes whether an action targets one row, a whole tab/domain, or
@@ -123,6 +127,25 @@ type Action struct {
 	Palette            *PaletteBinding
 	PaletteEligible    bool
 	CLIOnlyReason      string
+}
+
+// Lifecycle is the canonical catalog for app-wide lifecycle actions.
+var Lifecycle = []Action{
+	{
+		ID:                 Reconcile,
+		Domain:             "lifecycle",
+		Scope:              ScopeGlobal,
+		Label:              "reconcile",
+		Description:        "Sync tools, upgrade tools, sync dotfiles, and commit dotfile changes.",
+		LongDescription:    "Run the host lifecycle in one command: add discovered tools and install missing configured tools, upgrade outdated tools, repair managed dotfile symlinks, and commit pending dotfile repository changes.",
+		Mutates:            true,
+		RequiresConfirm:    true,
+		ConfirmDescription: "Reconcile this host: sync tools, upgrade tools, sync dotfiles, and commit dotfile changes?",
+		TUI:                &TUIBinding{KeyMapField: "Reconcile", DefaultKey: "A", Label: "reconcile all", Description: "Review and run all safe host lifecycle fixes.", ConfirmDescription: "reconcile all"},
+		CLI:                []CLIBinding{{Command: []string{"reconcile"}, Flags: []string{"--message", "--skip-privileged"}}},
+		Palette:            &PaletteBinding{Command: []string{"reconcile"}, Description: "sync, upgrade, repair dotfiles, and commit changes"},
+		PaletteEligible:    true,
+	},
 }
 
 // Requires reports whether this action declares requirement.
@@ -497,6 +520,19 @@ var Dots = []Action{
 		PaletteEligible: true,
 	},
 	{
+		ID:              DotsCommit,
+		Domain:          "dots",
+		Scope:           ScopeGlobal,
+		Label:           "dots commit",
+		Description:     "Commit dotfile changes.",
+		LongDescription: "Stage and commit pending dotfile repository changes without pushing.",
+		Mutates:         true,
+		TUI:             &TUIBinding{KeyMapField: "Confirm", DefaultKey: "enter", Label: "commit dotfiles", Description: "Commit pending dotfile repository changes."},
+		CLI:             []CLIBinding{{Command: []string{"dots", "commit"}, Flags: []string{"--message"}}},
+		Palette:         &PaletteBinding{Command: []string{"dots", "commit"}, Description: "commit dotfile changes without pushing"},
+		PaletteEligible: true,
+	},
+	{
 		ID:              DotsPush,
 		Domain:          "dots",
 		Scope:           ScopeGlobal,
@@ -590,6 +626,17 @@ var Dots = []Action{
 		Mutates:         false,
 		CLI:             []CLIBinding{{Command: []string{"dots", "watch", "status"}, Flags: []string{"--format"}}},
 		CLIOnlyReason:   "TUI renders watch service status in Settings instead of a separate status action.",
+	},
+	{
+		ID:              DotsServicesStatus,
+		Domain:          "dots",
+		Scope:           ScopeGlobal,
+		Label:           "dots services status",
+		Description:     "Show dotfile service status.",
+		LongDescription: "Inspect the native dotfile reminder and watch service files and parsed timing settings without changing them.",
+		Mutates:         false,
+		CLI:             []CLIBinding{{Command: []string{"dots", "services", "status"}, Flags: []string{"--format"}}},
+		CLIOnlyReason:   "TUI renders the combined service dashboard in the Status tab.",
 	},
 }
 
@@ -787,6 +834,21 @@ var Setup = []Action{
 	},
 }
 
+// Diagnostics is the canonical catalog for read-only health checks.
+var Diagnostics = []Action{
+	{
+		ID:              Doctor,
+		Domain:          "diagnostics",
+		Scope:           ScopeGlobal,
+		Label:           "doctor",
+		Description:     "Run read-only health checks.",
+		LongDescription: "Run diagnostics for config, host setup, providers, dotfiles, native services, and local cache state.",
+		Mutates:         false,
+		TUI:             &TUIBinding{KeyMapField: "Confirm", DefaultKey: "enter", Label: "run doctor", Description: "Run read-only diagnostics from the Status tab."},
+		CLI:             []CLIBinding{{Command: []string{"doctor"}, Flags: []string{"--format"}}},
+	},
+}
+
 var byID = map[ID]Action{}
 
 func init() {
@@ -797,13 +859,15 @@ func init() {
 
 // All returns every user-visible action cataloged across domains.
 func All() []Action {
-	out := make([]Action, 0, len(Tools)+len(Dots)+len(Groups)+len(Hosts)+len(Settings)+len(Setup))
+	out := make([]Action, 0, len(Lifecycle)+len(Tools)+len(Dots)+len(Groups)+len(Hosts)+len(Settings)+len(Setup)+len(Diagnostics))
+	out = append(out, Lifecycle...)
 	out = append(out, Tools...)
 	out = append(out, Dots...)
 	out = append(out, Groups...)
 	out = append(out, Hosts...)
 	out = append(out, Settings...)
 	out = append(out, Setup...)
+	out = append(out, Diagnostics...)
 	return out
 }
 

@@ -30,6 +30,7 @@ func TestToolActionCatalogCLIBindingsExist(t *testing.T) {
 
 func TestMutatingCLICommandsAreCataloged(t *testing.T) {
 	for _, path := range [][]string{
+		{"reconcile"},
 		{"bootstrap"},
 		{"sync"},
 		{"add"},
@@ -70,6 +71,7 @@ func TestMutatingCLICommandsAreCataloged(t *testing.T) {
 		{"dots", "enable"},
 		{"dots", "disable"},
 		{"dots", "pull"},
+		{"dots", "commit"},
 		{"dots", "push"},
 		{"dots", "reminder", "install"},
 		{"dots", "reminder", "uninstall"},

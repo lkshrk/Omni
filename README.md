@@ -15,6 +15,7 @@ Main features:
 - Portable providers for system, Node, and Python tools.
 - Cross-machine host assignments and reusable groups.
 - Dotfile sync/discovery backed by a git repo.
+- Dashboard health checks with a reviewable reconcile flow for pending host work.
 - CLI and TUI surfaces over the same app behavior.
 - Privilege-aware package actions that avoid blocking TUI password prompts.
 - Provider override repair and cleanup flows for machine-specific managers.
@@ -26,7 +27,7 @@ Supported managers include Homebrew, apt, apk, dnf, pacman, zypper, npm, pnpm, b
 
 - Installing with `go install` requires Go 1.26.2 or newer. Release archives and package-manager installs do not require Go.
 - Tool management needs the package managers you enable to be installed on `PATH`. Omni detects supported system, Node, and Python managers and only uses the ecosystems you configure.
-- Dotfile sync needs a configured dotfiles repo directory. Git is used for repo operations such as init, pull, push, auto-commit, and auto-push.
+- Dotfile sync needs a configured dotfiles repo directory. Git is used for repo operations such as init, pull, commit, push, auto-commit, and auto-push.
 - Dotfile symlink sync uses GNU Stow (`stow`). Interactive flows from onboarding, settings, the Dots tab, or CLI prompts can offer to install Stow through the detected system package manager. Noninteractive CLI runs fail with install guidance instead of prompting.
 - Package actions that require elevated privileges still need the host's normal sudo or admin authentication. Bulk TUI sync/upgrade skips privileged package actions; single Homebrew cask actions can open an embedded Admin Terminal prompt.
 
@@ -45,7 +46,50 @@ brew install omni
 
 ## Usage
 
-Run `omni` to start the TUI. On first launch, bootstrap creates `~/.config/omni/settings.json`, lets you choose package ecosystems, creates this machine's host assignment, optionally imports installed tools, can enable dotfile sync, and lets you attach existing reusable groups. If a config already exists but this machine has no host entry yet, bootstrap first offers to copy another host's reusable groups, host-local settings, provider overrides, and dotfile variants. If this host is already configured, bootstrap offers to review first, sync configured tools, or sync dotfiles before entering the app. You can rerun it later with `omni bootstrap` or Settings -> Maintenance -> Run Bootstrap Again. After bootstrap, Omni performs the first package scan; this can take a while on a fresh cache.
+Run `omni` to start the TUI. When the current machine still needs setup,
+Omni opens bootstrap before the main app. After bootstrap, Omni performs the
+first package scan; this can take a while on a fresh cache.
+
+### Bootstrap
+
+Bootstrap is Omni's host setup and activation flow. It connects the current
+machine to the portable config: creating a config when none exists, adding this
+host to an existing config, or helping an already configured host apply its
+tools and dotfiles on a new checkout.
+
+Bootstrap chooses the path from the current config state:
+
+- No config exists: create `~/.config/omni/settings.json`, choose package
+  ecosystems, create this machine's host assignment, optionally import installed
+  tools, optionally enable dotfile sync, and attach existing reusable groups.
+- A config exists but this machine has no host entry: copy another host's
+  reusable groups, host-local settings, provider overrides, and dotfile variants,
+  or continue through normal setup and attach existing reusable groups at the
+  end.
+- This host is already configured: review first, sync configured tools, or sync
+  dotfiles before entering the app.
+
+You can rerun bootstrap with `omni bootstrap` or Settings -> Maintenance ->
+Run Bootstrap Again. `omni init` remains available as a compatibility alias.
+The "already bootstrapped" marker is stored in Omni's local cache DB, keyed by
+config path and hostname, so it is not written to the portable JSON config.
+
+### Dashboard
+
+The TUI opens on Dashboard. Its Health Check section keeps actionable work at
+the top: pending tool updates, missing or local-only tools, dirty or
+out-of-sync dotfiles, service warnings, and doctor failures. Rows use the same
+action keys as their owning tabs, so fixes remain predictable from the summary
+view. Press `A` to open a selectable Reconcile Plan for the safe host lifecycle
+steps Omni can run together: sync tools, upgrade tools, sync dotfiles, and
+commit pending dotfile repo changes.
+
+Dashboard also shows a Data section for current tool, dotfile, and service
+state, plus a Quiet section for ignored tools. For read-only setup
+troubleshooting, refresh Dashboard or run `omni doctor`; Doctor checks config
+validity, host activation, available providers, dotfile readiness, native
+dotfile services, and cache database presence. The same reconcile lifecycle is
+available from the CLI with `omni reconcile`.
 
 You can also create or edit `~/.config/omni/settings.json` directly. The current versioned schema lives at [spec/omni.settings.v1.schema.json](spec/omni.settings.v1.schema.json), with [spec/omni.settings.schema.json](spec/omni.settings.schema.json) kept as the latest-schema alias.
 
@@ -97,6 +141,8 @@ omni sync                                 # install/sync current host groups
 omni sync --all                           # add discovered local tools and install missing tools
 omni refresh                              # rescan installed/outdated tools and metadata
 omni list                                 # show tool state
+omni doctor                               # run read-only health checks
+omni reconcile                            # review/run safe host lifecycle work
 omni import                               # add installed tools to config
 omni dots sync                            # sync dotfile links
 ```
@@ -156,6 +202,7 @@ omni dots reminder run --notify
 omni dots reminder install --interval 24h
 omni dots reminder status
 omni dots reminder uninstall
+omni dots services status
 ```
 
 `install` creates a native user-level timer for the current platform: `launchd` on macOS or `systemd --user` on Linux. The installed timer runs `omni dots reminder run --notify` with the current `--config` and `--cache-dir` paths. Desktop notifications are best-effort; if notification delivery is unavailable, the reminder still writes normal command output to the service logs.
@@ -173,9 +220,11 @@ omni dots watch status
 omni dots watch uninstall
 ```
 
-`run` keeps the watcher in the foreground for debugging. `install` creates a native user-level service: a `launchd` agent on macOS or a `systemd --user` service on Linux. The watcher repairs links, adopts eligible local-only files, and reports conflicts using the same app-level behavior as `omni dots sync`. It does not commit or push the dotfiles repo, even when dots auto-commit or auto-push settings are enabled; use `omni dots push` or normal git commands for that step.
+`run` keeps the watcher in the foreground for debugging. `install` creates a native user-level service: a `launchd` agent on macOS or a `systemd --user` service on Linux. The watcher repairs links, adopts eligible local-only files, and reports conflicts using the same app-level behavior as `omni dots sync`. It does not commit or push the dotfiles repo, even when dots auto-commit or auto-push settings are enabled; use `omni dots commit`, `omni dots push`, or normal git commands for that step.
 
 In the TUI, open Settings -> Dotfiles and toggle `Watch Sync` to install or remove the native watcher service. Use `Watch Debounce` to choose how long Omni waits for file-change bursts to settle before syncing. Enabling watch sync requires GNU Stow, so the TUI prompts to install Stow first when needed.
+
+Use `omni dots services status` for native service diagnostics. The Dashboard tab shows the same services as a concise action summary: on/off state, reminder interval, notification mode, watch debounce, and any status error that needs Settings attention.
 
 #### Host-Specific Variants
 
@@ -234,7 +283,7 @@ omni tools normalize --default-overrides --dry-run
 omni tools normalize --default-overrides -y
 ```
 
-Use the TUI for interactive tool management, host/group assignments, dotfile sync, settings, search, admin cask prompts, and the command palette.
+Use the TUI for dashboard triage, reconcile planning, interactive tool management, host/group assignments, dotfile sync, settings, search, admin cask prompts, and the command palette.
 
 ## Development
 
@@ -252,7 +301,7 @@ make demo-gif                              # regenerate the README demo GIF
 
 `make run` aliases `make tui-live`; `make cli` aliases `make cli-dev`. Dev targets default to `DEV_DIR=/private/tmp/omni-dev` and `DEV_HOST=devhost`.
 
-The demo GIF target uses [VHS](https://github.com/charmbracelet/vhs) and records `demo/omni-demo.tape` against an isolated temp config, cache, home directory, fake package managers, and fake Stow binary.
+The demo GIF target uses [VHS](https://github.com/charmbracelet/vhs) and records `demo/omni-demo.tape` against an isolated temp config, cache, home directory, fake package managers, and fake Stow binary. The recording starts on Dashboard, opens the reconcile plan, then tours Tools, Dots, Groups, Settings, and search.
 
 CI runs vet, golangci-lint, unit tests, and Docker integration tests. Releases are CI-gated: if a successful CI commit has a `vX.Y.Z` tag, GoReleaser publishes the release artifacts and generates release notes from Conventional Commit subjects.
 

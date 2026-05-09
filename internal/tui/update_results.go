@@ -150,12 +150,17 @@ func (m *Model) handleProgressDoneMsg(msg progressDoneMsg) []tea.Cmd {
 		m.adminTerminalQueue = nil
 		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
 	} else if promptingPrivilegedAction {
+		m.cancelDashboardReconcile()
 		return cmds
 	} else if msg.message != "" {
 		if msg.rowErrors == nil {
 			m.clearRowActionError()
 		}
 		cmds = append(cmds, setStatus(m, "✓ "+msg.message, false))
+	}
+	switch m.dashboardReconcileCurrent {
+	case dashboardReconcilePlanSyncTools, dashboardReconcilePlanUpgradeTools:
+		m.continueDashboardReconcile(m.dashboardReconcileCurrent, msg.err, &cmds)
 	}
 	return cmds
 }
@@ -515,6 +520,20 @@ func (m *Model) handleDotsServiceChangedMsg(msg dotsServiceChangedMsg) []tea.Cmd
 		action = "disabled"
 	}
 	return []tea.Cmd{setStatus(m, "✓ dotfile "+name+" service "+action, false)}
+}
+
+func (m *Model) handleDoctorDoneMsg(msg doctorDoneMsg) []tea.Cmd {
+	m.doctorRunning = false
+	if msg.err != nil {
+		m.doctorErr = msg.err.Error()
+		return []tea.Cmd{setStatus(m, "✗ doctor: "+msg.err.Error(), true)}
+	}
+	m.doctorResult = msg.result
+	m.doctorErr = ""
+	if msg.result != nil && msg.result.HasFailures() {
+		return []tea.Cmd{setStatus(m, "✗ doctor found failing checks", true)}
+	}
+	return []tea.Cmd{setStatus(m, "✓ doctor complete", false)}
 }
 
 func (m *Model) handleDangerOpDoneMsg(msg dangerOpDoneMsg) []tea.Cmd {

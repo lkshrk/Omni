@@ -31,7 +31,11 @@ func renderStatusBar(m Model) string {
 		}
 		legend = renderPressAgainActionHint(p, "", keyLabel, "quit")
 	} else if m.listConfirm.action == listConfirmSyncAll {
-		legend = renderPressAgainActionHint(p, "", m.keys.SyncAll.Help().Key, "sync all")
+		desc := "sync all"
+		if m.mode == viewStatus {
+			desc = "reconcile all"
+		}
+		legend = renderPressAgainActionHint(p, "", m.keys.SyncAll.Help().Key, desc)
 	}
 
 	contentW := screenContentWidth(m.width)
@@ -70,7 +74,7 @@ func renderFooterStatusOnly(status string, contentW int) string {
 func renderFooterStatusLayer(m Model, maxWidth int) string {
 	p := m.palette
 	switch {
-	case m.loading || m.dotsLoading || m.searching || len(m.scanningProviders) > 0 || m.providerSnapshotRefreshing || m.discoveryRefreshing || m.descRefreshing || len(m.upgradingKeys) > 0:
+	case m.loading || m.dotsLoading || m.doctorRunning || m.searching || len(m.scanningProviders) > 0 || m.providerSnapshotRefreshing || m.discoveryRefreshing || m.descRefreshing || len(m.upgradingKeys) > 0:
 		text := m.progressText
 		progress := text != ""
 		if text == "" {
@@ -130,6 +134,8 @@ func activityLabel(m Model) string {
 		return "Refreshing tool descriptions…"
 	case m.dotsLoading:
 		return "Loading dots…"
+	case m.doctorRunning:
+		return "Running doctor…"
 	default:
 		return "Loading…"
 	}

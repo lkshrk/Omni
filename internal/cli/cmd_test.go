@@ -1665,7 +1665,7 @@ func TestRequireActiveHost_NonExemptCommand_WithHost_Passes(t *testing.T) {
 // ─── hostExempt map ───────────────────────────────────────────────────────────
 
 func TestHostExempt_ContainsExpectedCommands(t *testing.T) {
-	expected := []string{"bootstrap", "init", "hosts", "dots", "ui", "version", "providers", "settings", "help", "completion"}
+	expected := []string{"bootstrap", "doctor", "init", "hosts", "dots", "ui", "version", "providers", "settings", "help", "completion"}
 	for _, name := range expected {
 		if !hostExempt[name] {
 			t.Errorf("expected %q in hostExempt", name)
@@ -2268,7 +2268,7 @@ func TestNewRootCmd_HasExpectedSubcommands(t *testing.T) {
 	for _, sub := range cmd.Commands() {
 		names[sub.Name()] = true
 	}
-	expected := []string{"list", "sync", "add", "hosts", "dots", "providers", "groups", "tools", "bootstrap", "search"}
+	expected := []string{"list", "sync", "add", "hosts", "dots", "providers", "groups", "tools", "bootstrap", "search", "doctor"}
 	for _, name := range expected {
 		if !names[name] {
 			t.Errorf("expected subcommand %q in root cmd", name)
@@ -2502,6 +2502,23 @@ func TestDotsPush_WithDotsRepo_NothingToCommit(t *testing.T) {
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "push"})
+	// May fail if git is not available or not a repo — just exercise the code path.
+	_ = cmd.Execute()
+}
+
+func TestDotsCommit_WithDotsRepo_NothingToCommit(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	repoDir := t.TempDir()
+
+	withConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{DotsRepo: repoDir},
+	})
+
+	cmd := NewRootCmd()
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "commit"})
 	// May fail if git is not available or not a repo — just exercise the code path.
 	_ = cmd.Execute()
 }
@@ -4396,6 +4413,34 @@ func TestDotsWatchStatus_PrintsPersistedServiceOptions(t *testing.T) {
 	}
 }
 
+func TestDotsServicesStatus_PrintsCombinedServiceOptions(t *testing.T) {
+	cfgPath, cacheDir := setupDotsServiceCLITest(t)
+
+	if _, err := runRootCommand(t, "--config", cfgPath, "--cache-dir", cacheDir, "dots", "reminder", "install", "--interval", "3h", "--notify=false"); err != nil {
+		t.Fatalf("dots reminder install: %v", err)
+	}
+	if _, err := runRootCommand(t, "--config", cfgPath, "--cache-dir", cacheDir, "dots", "watch", "install", "--debounce", "7s"); err != nil {
+		t.Fatalf("dots watch install: %v", err)
+	}
+	output, err := runRootCommand(t, "--config", cfgPath, "--cache-dir", cacheDir, "dots", "services", "status")
+	if err != nil {
+		t.Fatalf("dots services status: %v", err)
+	}
+
+	for _, want := range []string{
+		"Dots services",
+		"Reminder: installed",
+		"Interval: 3h0m0s",
+		"Notifications: false",
+		"Watch: installed",
+		"Debounce: 7s",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("dots services status output = %q, want %q", output, want)
+		}
+	}
+}
+
 func TestDotsServiceCommandsUseAppDefaultDurations(t *testing.T) {
 	root := NewRootCmd()
 	reminderInstall := findCommand(root, []string{"dots", "reminder", "install"})
@@ -4420,6 +4465,44 @@ func TestDotsServiceCommandsUseAppDefaultDurations(t *testing.T) {
 	}
 	if got := watchInstall.Flags().Lookup("debounce").DefValue; got != app.DefaultDotsWatchDebounce().String() {
 		t.Fatalf("watch install debounce default = %q, want %q", got, app.DefaultDotsWatchDebounce())
+	}
+}
+
+func TestDoctor_NoHostStillRuns(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	withConfig(t, cfgPath, &config.RootConfig{})
+
+	output, err := runRootCommand(t, "--config", cfgPath, "--cache-dir", cacheDir, "doctor")
+	if err != nil {
+		t.Fatalf("doctor without host: %v\n%s", err, output)
+	}
+	for _, want := range []string{"Omni doctor", "Host:", "current host is not configured", "Summary:"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("doctor output = %q, want %q", output, want)
+		}
+	}
+}
+
+func TestDoctor_InvalidConfigPrintsDiagnosticsAndFails(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	if err := os.WriteFile(cfgPath, []byte("{not json"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	output, err := runRootCommand(t, "--config", cfgPath, "--cache-dir", cacheDir, "doctor")
+	if err == nil {
+		t.Fatalf("doctor invalid config err = nil, output:\n%s", output)
+	}
+	for _, want := range []string{"Omni doctor", "[fail] Config:", "settings.json cannot be loaded"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("doctor output = %q, want %q", output, want)
+		}
 	}
 }
 

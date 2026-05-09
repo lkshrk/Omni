@@ -27,10 +27,19 @@ Type "export OMNI_CONFIG=/private/tmp/omni-vhs-demo/settings.json OMNI_CACHE_DIR
 Type "omni ui" Enter
 Sleep 5s
 Show
-Sleep 3.2s
+Sleep 2s
 
-Type "jj"
-Sleep 900ms
+Type "j"
+Sleep 800ms
+
+Type "A"
+Sleep 1.8s
+
+Escape
+Sleep 700ms
+
+Type "j"
+Sleep 700ms
 
 Tab
 Sleep 2.2s
