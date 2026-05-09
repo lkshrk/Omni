@@ -749,7 +749,14 @@ func (m *Model) handleDotsIgnoreActionKeyMsg(visible []dotsVisibleRow) []tea.Cmd
 			cmds = append(cmds, m.spinner.Tick, m.doDotsIgnore(row.entry.Name, pattern, false))
 		} else if !row.isChild && dotStatusState(row.entry) == app.DotStateIgnored {
 			m.beginDotsOperation("Including " + row.entry.Name + "…")
-			cmds = append(cmds, m.spinner.Tick, m.doDotsEntryIgnore(row.entry, false))
+			// Synthesized ignored-child rows use "parent/relpath" as Name;
+			// split and remove the per-entry ignore pattern instead of
+			// toggling whole-entry ignore.
+			if parent, rel, ok := strings.Cut(row.entry.Name, "/"); ok {
+				cmds = append(cmds, m.spinner.Tick, m.doDotsIgnore(parent, rel, false))
+			} else {
+				cmds = append(cmds, m.spinner.Tick, m.doDotsEntryIgnore(row.entry, false))
+			}
 		} else if !row.isChild {
 			m.beginDotsOperation("Ignoring " + row.entry.Name + "…")
 			cmds = append(cmds, m.spinner.Tick, m.doDotsEntryIgnore(row.entry, true))
