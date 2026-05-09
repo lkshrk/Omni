@@ -11,7 +11,7 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 )
 
-func TestToolActionCatalogMatchesDefaultKeyMap(t *testing.T) {
+func TestActionCatalogMatchesDefaultKeyMap(t *testing.T) {
 	keys := DefaultKeyMap()
 	value := reflect.ValueOf(keys)
 	fieldRefs := map[string]int{}
@@ -21,7 +21,7 @@ func TestToolActionCatalogMatchesDefaultKeyMap(t *testing.T) {
 		}
 	}
 
-	for _, action := range actions.Tools {
+	for _, action := range actions.All() {
 		if action.TUI == nil {
 			continue
 		}
@@ -120,6 +120,8 @@ func TestDurableTUIActionsAreCataloged(t *testing.T) {
 		actions.DotsEditGroups,
 		actions.DotsVariant,
 		actions.DotsDelete,
+		actions.DotsResolveUseRepo,
+		actions.DotsResolveUseLocal,
 		actions.DotsIgnore,
 		actions.DotsEnable,
 		actions.DotsDisable,

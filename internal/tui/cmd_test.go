@@ -1843,6 +1843,96 @@ func TestDoLoadDots_Success(t *testing.T) {
 	}
 }
 
+func TestDoRefreshDotsHistory_ReadsRecentAppHistory(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	t.Setenv("OMNI_HOSTNAME", "historyhost")
+	ctx := context.Background()
+	cfgDir := t.TempDir()
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	repoDir := filepath.Join(homeDir, "dotfiles")
+	sourceFile := filepath.Join(repoDir, "dotfiles", "nvim", ".config", "nvim", "init.lua")
+	if err := os.MkdirAll(filepath.Dir(sourceFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourceFile, []byte("-- seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	runGit("init")
+	runGit("config", "user.email", "test@example.com")
+	runGit("config", "user.name", "Test")
+	runGit("config", "commit.gpgsign", "false")
+	runGit("config", "tag.gpgsign", "false")
+	runGit("add", "dotfiles")
+	runGit("commit", "-m", "seed")
+	if err := os.WriteFile(sourceFile, []byte("-- changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{DotsRepo: repoDir},
+		Groups: []*config.GroupConfig{{
+			Name:    shortHostname(),
+			Special: "host",
+			Dots:    []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}},
+		}},
+		Hosts: map[string][]string{shortHostname(): {}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	a := app.New(cfgPath)
+	a.CacheDir = cfgDir
+	if err := a.InitTestMode(ctx); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	if err := a.DotsCommit(ctx, "dots: tui history"); err != nil {
+		t.Fatalf("DotsCommit: %v", err)
+	}
+
+	m := modelForCmds(a)
+	m.width = 100
+	m.height = 24
+	m.settings = config.Settings{DotsRepo: repoDir}
+	m.dotsLoaded = true
+	m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: app.DotStateSynced}}
+	m.dotsConfirmIdx = -1
+	m.dotsOverwriteIdx = -1
+	m.dotsLocalIdx = -1
+	m.dotsIgnoreIdx = -1
+	m.dotsVariantIdx = -1
+	msg := m.doRefreshDotsHistory()()
+	got, ok := msg.(dotsHistoryLoadedMsg)
+	if !ok {
+		t.Fatalf("expected dotsHistoryLoadedMsg, got %T", msg)
+	}
+	if got.err != nil {
+		t.Fatalf("unexpected history error: %v", got.err)
+	}
+	if len(got.entries) != 1 || got.entries[0].Operation != "commit" || got.entries[0].Status != "success" {
+		t.Fatalf("history entries = %+v, want successful commit entry", got.entries)
+	}
+
+	updated := drive(m, got)
+	out := renderDots(updated)
+	for _, want := range []string{"History", "commit: success", "commit completed"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("rendered dots history missing %q:\n%s", want, out)
+		}
+	}
+}
+
 // ── doDotsSyncOnly ────────────────────────────────────────────────────────────
 
 func TestDoDotsSyncOnly_NoRepo(t *testing.T) {

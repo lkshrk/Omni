@@ -544,6 +544,19 @@ func TestModel_ToolsLoadedMsg(t *testing.T) {
 		}
 	})
 
+	t.Run("toolsLoadedMsg stores dots history", func(t *testing.T) {
+		got := drive(baseModel(nil), toolsLoadedMsg{
+			dotsHistory:    []app.DotsHistoryEntry{{Operation: "sync", Status: "success", Summary: "sync completed"}},
+			dotsHistoryErr: "history warning",
+		})
+		if len(got.dotsHistory) != 1 || got.dotsHistory[0].Operation != "sync" {
+			t.Fatalf("dotsHistory = %+v, want initial sync history", got.dotsHistory)
+		}
+		if got.dotsHistoryErr != "history warning" {
+			t.Fatalf("dotsHistoryErr = %q, want history warning", got.dotsHistoryErr)
+		}
+	})
+
 	t.Run("error clears loading and sets err", func(t *testing.T) {
 		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true}
 		got := drive(m, toolsLoadedMsg{err: errors.New("db unavailable")})
@@ -3232,6 +3245,29 @@ func TestModel_DotsTab_Messages(t *testing.T) {
 		m := drive(baseModel(nil), dotsLoadedMsg{err: errors.New("no repo")})
 		if m.statusMsg == "" {
 			t.Error("expected statusMsg to be set on error")
+		}
+	})
+
+	t.Run("dotsHistoryLoadedMsg updates history", func(t *testing.T) {
+		entries := []app.DotsHistoryEntry{{Operation: "sync", Status: "success", Summary: "sync completed"}}
+		m := drive(baseModel(nil), dotsHistoryLoadedMsg{entries: entries})
+		if len(m.dotsHistory) != 1 || m.dotsHistory[0].Operation != "sync" {
+			t.Fatalf("dotsHistory = %+v, want sync entry", m.dotsHistory)
+		}
+		if m.dotsHistoryErr != "" {
+			t.Fatalf("dotsHistoryErr = %q, want empty", m.dotsHistoryErr)
+		}
+	})
+
+	t.Run("dotsHistoryLoadedMsg error preserves history", func(t *testing.T) {
+		m := baseModel(nil)
+		m.dotsHistory = []app.DotsHistoryEntry{{Operation: "commit", Status: "success", Summary: "commit completed"}}
+		got := drive(m, dotsHistoryLoadedMsg{err: errors.New("history db unavailable")})
+		if len(got.dotsHistory) != 1 || got.dotsHistory[0].Operation != "commit" {
+			t.Fatalf("dotsHistory = %+v, want previous history preserved", got.dotsHistory)
+		}
+		if !strings.Contains(got.dotsHistoryErr, "history db unavailable") {
+			t.Fatalf("dotsHistoryErr = %q, want history db unavailable", got.dotsHistoryErr)
 		}
 	})
 

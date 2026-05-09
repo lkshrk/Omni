@@ -87,7 +87,7 @@ func (m *Model) startDashboardRefresh(cmds *[]tea.Cmd) {
 	}
 	if m.app != nil {
 		m.dotsServicesRefreshing = true
-		*cmds = append(*cmds, m.doRefreshDotsServices())
+		*cmds = append(*cmds, m.doRefreshDotsServices(), m.doRefreshDotsHistory())
 	}
 	if m.app != nil && m.settings.DotsRepo != "" && !config.BoolVal(m.settings.DotsDisabled) && !m.dotsLoading && !m.dotsPreparing {
 		m.beginDotsOperation("Refreshing dashboard…")

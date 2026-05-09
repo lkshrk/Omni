@@ -234,6 +234,8 @@ func TestActionCatalogIncludesDurableDomains(t *testing.T) {
 		DotsEditGroups,
 		DotsVariant,
 		DotsDelete,
+		DotsResolveUseRepo,
+		DotsResolveUseLocal,
 		DotsIgnore,
 		DotsEnable,
 		DotsDisable,
@@ -320,6 +322,21 @@ func TestDotsActionContracts(t *testing.T) {
 		t.Fatalf("%s should use shared group membership picker binding, got %+v", editGroups.ID, editGroups.TUI)
 	}
 
+	resolveRepo := mustAction(t, DotsResolveUseRepo)
+	if !resolveRepo.Requires(RequiresToolName) || !hasCLICommand(resolveRepo, []string{"dots", "resolve"}) || !hasCLIFlag(resolveRepo, "--use-repo") {
+		t.Fatalf("%s must expose dots resolve --use-repo for one entry: %+v", resolveRepo.ID, resolveRepo)
+	}
+	if resolveRepo.TUI == nil || resolveRepo.TUI.KeyMapField != "DotUseRepo" {
+		t.Fatalf("%s should use DotUseRepo binding, got %+v", resolveRepo.ID, resolveRepo.TUI)
+	}
+	resolveLocal := mustAction(t, DotsResolveUseLocal)
+	if !resolveLocal.Requires(RequiresToolName) || !hasCLICommand(resolveLocal, []string{"dots", "resolve"}) || !hasCLIFlag(resolveLocal, "--use-local") {
+		t.Fatalf("%s must expose dots resolve --use-local for one entry: %+v", resolveLocal.ID, resolveLocal)
+	}
+	if resolveLocal.TUI == nil || resolveLocal.TUI.KeyMapField != "DotUseLocal" {
+		t.Fatalf("%s should use DotUseLocal binding, got %+v", resolveLocal.ID, resolveLocal.TUI)
+	}
+
 	reminderService := mustAction(t, DotsReminder)
 	for _, command := range [][]string{
 		{"dots", "reminder", "install"},
@@ -345,6 +362,7 @@ func TestDotsActionContracts(t *testing.T) {
 		ID("dots.reminder.status"),
 		ID("dots.watch.status"),
 		ID("dots.services.status"),
+		ID("dots.history"),
 	} {
 		action := mustAction(t, id)
 		if action.Mutates {
@@ -375,6 +393,10 @@ func TestDotsActionContracts(t *testing.T) {
 	servicesStatus := mustAction(t, DotsServicesStatus)
 	if !hasCLICommand(servicesStatus, []string{"dots", "services", "status"}) {
 		t.Fatalf("%s missing combined services status CLI binding: %+v", servicesStatus.ID, servicesStatus.CLI)
+	}
+	history := mustAction(t, DotsHistory)
+	if !hasCLICommand(history, []string{"dots", "history"}) || !hasCLIFlag(history, "--limit") || !hasCLIFlag(history, "--format") {
+		t.Fatalf("%s missing dots history CLI binding: %+v", history.ID, history.CLI)
 	}
 	doctor := mustAction(t, Doctor)
 	if doctor.Mutates {

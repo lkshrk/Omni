@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/provider"
 )
@@ -68,6 +69,8 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 		m.dotsWatchService = msg.dotsWatchService
 		m.dotsWatchServiceErr = msg.dotsWatchServiceErr
 		m.dotsWatchDebounce = dotsWatchDebounceFromService(msg.dotsWatchService)
+		m.dotsHistory = append([]app.DotsHistoryEntry(nil), msg.dotsHistory...)
+		m.dotsHistoryErr = msg.dotsHistoryErr
 		m.hostInfo = msg.hostInfo
 		m.setupProviders = msg.setupProviders
 		m.setupProviderIdx = 0
@@ -109,6 +112,8 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 	m.dotsWatchService = msg.dotsWatchService
 	m.dotsWatchServiceErr = msg.dotsWatchServiceErr
 	m.dotsWatchDebounce = dotsWatchDebounceFromService(msg.dotsWatchService)
+	m.dotsHistory = append([]app.DotsHistoryEntry(nil), msg.dotsHistory...)
+	m.dotsHistoryErr = msg.dotsHistoryErr
 	if len(msg.ecosystemProviders) > 0 {
 		m.providerNames = append([]string(nil), msg.ecosystemProviders...)
 	}

@@ -165,7 +165,7 @@ func (a *App) DotsSync(opts dots.SyncOptions) ([]dots.Op, error) {
 
 // DotsSyncContext creates or repairs all symlinks like DotsSync, honoring ctx
 // for provider/stow commands.
-func (a *App) DotsSyncContext(ctx context.Context, opts dots.SyncOptions) ([]dots.Op, error) {
+func (a *App) DotsSyncContext(ctx context.Context, opts dots.SyncOptions) (ops []dots.Op, err error) {
 	rootCfg, err := a.loadConfig()
 	if err != nil {
 		return nil, fmt.Errorf("dots sync: load config: %w", err)
@@ -180,6 +180,9 @@ func (a *App) DotsSyncContext(ctx context.Context, opts dots.SyncOptions) ([]dot
 	if err := a.requireSafeTestDotsMutation(repoPath, nil); err != nil {
 		return nil, err
 	}
+	defer func() {
+		a.recordDotsHistoryResult(ctx, "sync", "", repoPath, ops, err, opts.DryRun)
+	}()
 	stowPath := dotsContentPath(repoPath)
 	if !opts.DryRun {
 		var err error
@@ -210,7 +213,6 @@ func (a *App) DotsSyncContext(ctx context.Context, opts dots.SyncOptions) ([]dot
 		return nil, fmt.Errorf("dots sync: resolve entries: %w", err)
 	}
 	orderedEntries := orderResolvedDotEntries(mgr.Entries, opts.EntryOrder)
-	var ops []dots.Op
 	var failures []dotSyncFailure
 	total := len(orderedEntries)
 	for i, entry := range orderedEntries {
@@ -283,7 +285,7 @@ func (f dotSyncFailures) Error() string {
 
 // DotsSyncEntry syncs one configured dots entry when the classifier reports a
 // single safe action. Choice-based conflicts are reported but not resolved.
-func (a *App) DotsSyncEntry(ctx context.Context, name string, opts dots.SyncOptions) ([]dots.Op, error) {
+func (a *App) DotsSyncEntry(ctx context.Context, name string, opts dots.SyncOptions) (ops []dots.Op, err error) {
 	if strings.TrimSpace(name) == "" {
 		return nil, fmt.Errorf("dots sync: entry name is required")
 	}
@@ -301,6 +303,9 @@ func (a *App) DotsSyncEntry(ctx context.Context, name string, opts dots.SyncOpti
 	if err := a.requireSafeTestDotsMutation(repoPath, nil); err != nil {
 		return nil, err
 	}
+	defer func() {
+		a.recordDotsHistoryResult(ctx, "sync entry", name, repoPath, ops, err, opts.DryRun)
+	}()
 	stowPath := dotsContentPath(repoPath)
 	if !opts.DryRun {
 		var err error
@@ -342,7 +347,7 @@ func (a *App) DotsSyncEntry(ctx context.Context, name string, opts dots.SyncOpti
 // DotsAdd moves the file/dir at path into the dots repo and links it back via
 // stow. A backup is made under ~/dotfiles.bkp before any mutation, then the
 // local original is moved to trash. path must exist on disk.
-func (a *App) DotsAdd(ctx context.Context, path string, opts DotsAddOptions) ([]dots.Op, error) {
+func (a *App) DotsAdd(ctx context.Context, path string, opts DotsAddOptions) (ops []dots.Op, err error) {
 	rootCfg, err := a.loadConfig()
 	if err != nil {
 		return nil, fmt.Errorf("dots add: load config: %w", err)
@@ -360,6 +365,10 @@ func (a *App) DotsAdd(ctx context.Context, path string, opts DotsAddOptions) ([]
 	if err := a.requireSafeTestDotsMutation(repoPath, nil); err != nil {
 		return nil, err
 	}
+	historyEntry := ""
+	defer func() {
+		a.recordDotsHistoryResult(ctx, "add", historyEntry, repoPath, ops, err, false)
+	}()
 
 	abs, err := expandAndStat(path)
 	if err != nil {
@@ -370,6 +379,7 @@ func (a *App) DotsAdd(ctx context.Context, path string, opts DotsAddOptions) ([]
 	if name == "" {
 		name = inferName(abs)
 	}
+	historyEntry = name
 	if err := dots.ValidateEntryName(name); err != nil {
 		return nil, fmt.Errorf("dots add: %w", err)
 	}
@@ -721,19 +731,22 @@ func (a *App) DotsDelete(ctx context.Context, name string) error {
 // DotsDeleteWithOptions deletes the dots entry named name from all group files
 // and always removes its package from the dots repo. When KeepLocal is true,
 // managed local symlinks are first replaced with real local copies.
-func (a *App) DotsDeleteWithOptions(ctx context.Context, name string, opts DotsDeleteOptions) error {
+func (a *App) DotsDeleteWithOptions(ctx context.Context, name string, opts DotsDeleteOptions) (err error) {
+	repoPath := ""
+	defer func() {
+		a.recordDotsHistoryResult(ctx, "delete", name, repoPath, nil, err, false)
+	}()
 	if err := dots.ValidateEntryName(name); err != nil {
 		return fmt.Errorf("dots delete: %w", err)
 	}
 	var (
-		repoPath       string
 		stowPath       string
 		gitCfg         config.DotsGitConfig
 		found          bool
 		deleteDot      *config.DotEntry
 		deletedEntries []deletedDotEntry
 	)
-	err := a.withConfig(func(rootCfg *config.RootConfig) error {
+	err = a.withConfig(func(rootCfg *config.RootConfig) error {
 		if err := a.requireDotsEnabled(rootCfg); err != nil {
 			return err
 		}
@@ -1159,7 +1172,7 @@ func normalizeDotState(raw string) (DotState, error) {
 }
 
 // DotsPull runs git pull in the dots repo, then re-syncs all symlinks.
-func (a *App) DotsPull(ctx context.Context) ([]dots.Op, error) {
+func (a *App) DotsPull(ctx context.Context) (ops []dots.Op, err error) {
 	rootCfg, err := a.loadConfig()
 	if err != nil {
 		return nil, fmt.Errorf("dots pull: load config: %w", err)
@@ -1174,17 +1187,20 @@ func (a *App) DotsPull(ctx context.Context) ([]dots.Op, error) {
 	if err := a.requireSafeTestDotsMutation(repoPath, nil); err != nil {
 		return nil, err
 	}
+	defer func() {
+		a.recordDotsHistoryResult(ctx, "pull", "", repoPath, ops, err, false)
+	}()
 	g := newGitForRepo(repoPath, executor.New())
 	if err := g.Pull(ctx); err != nil {
 		return nil, fmt.Errorf("dots pull: %w", err)
 	}
-	return a.DotsSyncContext(ctx, dots.SyncOptions{})
+	return a.DotsSyncContext(suppressDotsHistory(ctx), dots.SyncOptions{})
 }
 
 // DotsPush stages all changes in the dots repo, commits, and pushes.
 // When message is empty the commit message is auto-generated from the git
 // status of the repo (e.g. "dots: update nvim, zshrc").
-func (a *App) DotsPush(ctx context.Context, message string) error {
+func (a *App) DotsPush(ctx context.Context, message string) (err error) {
 	rootCfg, err := a.loadConfig()
 	if err != nil {
 		return fmt.Errorf("dots push: load config: %w", err)
@@ -1199,6 +1215,9 @@ func (a *App) DotsPush(ctx context.Context, message string) error {
 	if err := a.requireSafeTestDotsMutation(repoPath, nil); err != nil {
 		return err
 	}
+	defer func() {
+		a.recordDotsHistoryResult(ctx, "push", "", repoPath, nil, err, false)
+	}()
 	g := newGitForRepo(repoPath, executor.New())
 	if message == "" {
 		gitStatus, err := g.Status(ctx)
@@ -1213,7 +1232,7 @@ func (a *App) DotsPush(ctx context.Context, message string) error {
 // DotsCommit stages and commits all changes in the dots repo without pushing.
 // When message is empty the commit message is auto-generated from the git
 // status of the repo (e.g. "dots: update nvim, zshrc").
-func (a *App) DotsCommit(ctx context.Context, message string) error {
+func (a *App) DotsCommit(ctx context.Context, message string) (err error) {
 	rootCfg, err := a.loadConfig()
 	if err != nil {
 		return fmt.Errorf("dots commit: load config: %w", err)
@@ -1228,6 +1247,9 @@ func (a *App) DotsCommit(ctx context.Context, message string) error {
 	if err := a.requireSafeTestDotsMutation(repoPath, nil); err != nil {
 		return err
 	}
+	defer func() {
+		a.recordDotsHistoryResult(ctx, "commit", "", repoPath, nil, err, false)
+	}()
 	g := newGitForRepo(repoPath, executor.New())
 	if message == "" {
 		gitStatus, err := g.Status(ctx)
@@ -1274,31 +1296,48 @@ func (a *App) DotsDisable(opts DisableDotsOptions) ([]dots.Op, error) {
 
 // DisableDotsForHost disables dots on this machine. When a repo is configured,
 // managed symlinks are first replaced with real local copies.
-func (a *App) DisableDotsForHost(ctx context.Context, opts DisableDotsOptions) ([]dots.Op, error) {
-	var ops []dots.Op
+func (a *App) DisableDotsForHost(ctx context.Context, opts DisableDotsOptions) (ops []dots.Op, err error) {
+	repoPath := ""
+	if a.DotsConfigured() {
+		if resolved, resolveErr := resolveRepoPath(a.dotsRepoPath()); resolveErr == nil {
+			repoPath = resolved
+		}
+	}
+	defer func() {
+		a.recordDotsHistoryResult(ctx, "disable", "", repoPath, ops, err, false)
+	}()
 	var disableErr error
 	if a.DotsConfigured() {
 		ops, disableErr = a.DotsDisable(opts)
 	}
-	if err := a.SaveDotsDisabled(ctx, true); err != nil {
+	if saveErr := a.SaveDotsDisabled(ctx, true); saveErr != nil {
 		if disableErr != nil {
-			return ops, fmt.Errorf("%v; save dots disabled flag: %w", disableErr, err)
+			return ops, fmt.Errorf("%v; save dots disabled flag: %w", disableErr, saveErr)
 		}
-		return ops, fmt.Errorf("save dots disabled flag: %w", err)
+		return ops, fmt.Errorf("save dots disabled flag: %w", saveErr)
 	}
 	return ops, disableErr
 }
 
 // EnableDotsForHost enables dots on this machine. If dots_repo is configured,
 // it immediately runs a sync so managed symlinks are restored.
-func (a *App) EnableDotsForHost(ctx context.Context) ([]dots.Op, error) {
-	if err := a.SaveDotsDisabled(ctx, false); err != nil {
-		return nil, fmt.Errorf("save dots enabled flag: %w", err)
+func (a *App) EnableDotsForHost(ctx context.Context) (ops []dots.Op, err error) {
+	repoPath := ""
+	if a.DotsConfigured() {
+		if resolved, resolveErr := resolveRepoPath(a.dotsRepoPath()); resolveErr == nil {
+			repoPath = resolved
+		}
+	}
+	defer func() {
+		a.recordDotsHistoryResult(ctx, "enable", "", repoPath, ops, err, false)
+	}()
+	if saveErr := a.SaveDotsDisabled(ctx, false); saveErr != nil {
+		return nil, fmt.Errorf("save dots enabled flag: %w", saveErr)
 	}
 	if !a.DotsConfigured() {
 		return nil, nil
 	}
-	ops, err := a.DotsSyncContext(ctx, dots.SyncOptions{})
+	ops, err = a.DotsSyncContext(suppressDotsHistory(ctx), dots.SyncOptions{})
 	if err != nil {
 		return ops, fmt.Errorf("dots sync: %w", err)
 	}
@@ -1311,7 +1350,7 @@ func (a *App) EnableDotsForHost(ctx context.Context) ([]dots.Op, error) {
 // Use-local commits the current repo state first when the repo source exists,
 // copies local content into the repo, then replaces the local target with the
 // managed link.
-func (a *App) DotsResolveConflict(ctx context.Context, name string, strategy DotsResolveStrategy) ([]dots.Op, error) {
+func (a *App) DotsResolveConflict(ctx context.Context, name string, strategy DotsResolveStrategy) (ops []dots.Op, err error) {
 	if strings.TrimSpace(name) == "" {
 		return nil, fmt.Errorf("dots resolve: entry name is required")
 	}
@@ -1329,6 +1368,9 @@ func (a *App) DotsResolveConflict(ctx context.Context, name string, strategy Dot
 	if err := a.requireSafeTestDotsMutation(repoPath, nil); err != nil {
 		return nil, err
 	}
+	defer func() {
+		a.recordDotsHistoryResult(ctx, "resolve "+string(strategy), name, repoPath, ops, err, false)
+	}()
 	stowPath, err := ensureDotsContentPath(repoPath)
 	if err != nil {
 		return nil, fmt.Errorf("dots resolve %q: content dir: %w", name, err)
