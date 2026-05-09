@@ -522,6 +522,18 @@ func TestOutdatedMap_ReturnsFormulae(t *testing.T) {
 	}
 }
 
+func TestOutdatedMap_TapQualifiedName(t *testing.T) {
+	out := `{"formulae":[{"name":"lkshrk/tap/omni","current_version":"0.4.5"}],"casks":[]}`
+	p, _ := newBrew(executor.MockCall{}, executor.MockCall{Stdout: out})
+	got, err := p.OutdatedMap(context.Background())
+	if err != nil {
+		t.Fatalf("OutdatedMap: %v", err)
+	}
+	if got["omni"] != "0.4.5" {
+		t.Errorf("map[omni] = %q, want 0.4.5 (tap prefix should be stripped)", got["omni"])
+	}
+}
+
 func TestOutdatedMap_Error(t *testing.T) {
 	p, _ := newBrew(executor.MockCall{Err: errors.New("exit 1")})
 	if _, err := p.OutdatedMap(context.Background()); err == nil {
