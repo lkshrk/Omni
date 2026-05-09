@@ -438,8 +438,57 @@ func renderDots(m Model) string {
 			}
 		}
 	}
+	renderDotsHistorySection(m, write, sections)
 
 	return buf.render(listAvailableHeight(m))
+}
+
+func renderDotsHistorySection(m Model, write func(string), sections *listSectionWriter) {
+	if len(m.dotsHistory) == 0 && strings.TrimSpace(m.dotsHistoryErr) == "" {
+		return
+	}
+	sections.Header("History")
+	lineW := max(rowAvailableWidth(m.width)-2, 12)
+	if errText := strings.TrimSpace(m.dotsHistoryErr); errText != "" {
+		write(m.palette.styleHelp.PaddingLeft(2).Render(fitCellText("history unavailable: "+errText, lineW)) + "\n")
+		return
+	}
+	for i, entry := range m.dotsHistory {
+		if i >= 3 {
+			break
+		}
+		write(m.palette.styleHelp.PaddingLeft(2).Render(fitCellText(dotsHistoryTabLine(entry), lineW)) + "\n")
+	}
+}
+
+func dotsHistoryDashboardLine(entry app.DotsHistoryEntry) string {
+	return "last " + dotsHistoryEntryText(entry)
+}
+
+func dotsHistoryTabLine(entry app.DotsHistoryEntry) string {
+	return dotsHistoryEntryText(entry)
+}
+
+func dotsHistoryEntryText(entry app.DotsHistoryEntry) string {
+	operation := strings.TrimSpace(entry.Operation)
+	if operation == "" {
+		operation = "operation"
+	}
+	if entryName := strings.TrimSpace(entry.Entry); entryName != "" {
+		operation += " " + entryName
+	}
+	status := strings.TrimSpace(entry.Status)
+	if status == "" {
+		status = "unknown"
+	}
+	summary := strings.TrimSpace(entry.Summary)
+	if summary == "" {
+		summary = strings.TrimSpace(entry.Error)
+	}
+	if summary == "" {
+		return operation + ": " + status
+	}
+	return operation + ": " + status + ", " + summary
 }
 
 func renderDotsDeleteKeepLocalPrompt(m Model, name, prefix string) string {

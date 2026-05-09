@@ -31,6 +31,8 @@ const (
 	DotsEditGroups                 ID = "dots.edit_groups"
 	DotsVariant                    ID = "dots.variant"
 	DotsDelete                     ID = "dots.delete"
+	DotsResolveUseRepo             ID = "dots.resolve_use_repo"
+	DotsResolveUseLocal            ID = "dots.resolve_use_local"
 	DotsIgnore                     ID = "dots.ignore"
 	DotsEnable                     ID = "dots.enable"
 	DotsDisable                    ID = "dots.disable"
@@ -45,6 +47,7 @@ const (
 	DotsWatchRun                   ID = "dots.watch.run"
 	DotsWatchStatus                ID = "dots.watch.status"
 	DotsServicesStatus             ID = "dots.services.status"
+	DotsHistory                    ID = "dots.history"
 	GroupCreate                    ID = "groups.create"
 	GroupRename                    ID = "groups.rename"
 	GroupDelete                    ID = "groups.delete"
@@ -244,7 +247,7 @@ var Tools = []Action{
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresToolName, RequiresGroupAssignment, RequiresEcosystemProvider},
 		TUI:             &TUIBinding{KeyMapField: "Claim", DefaultKey: "c", Label: "add to config", Description: "Add the selected discovered tool to config."},
-		CLI:             []CLIBinding{{Command: []string{"add"}, Flags: []string{"--group", "--provider", "--install-with"}}},
+		CLI:             []CLIBinding{{Command: []string{"add"}, Flags: []string{"--name", "--group", "--provider", "--install-with"}}},
 	},
 	{
 		ID:              ToolIgnore,
@@ -313,6 +316,7 @@ var Tools = []Action{
 		Label:           "refresh",
 		Description:     "Refresh cached tool state and metadata.",
 		LongDescription: "Refresh omni's local cache of installed, outdated, discovered, and description metadata without installing or uninstalling packages.",
+		Mutates:         true,
 		TUI:             &TUIBinding{KeyMapField: "Refresh", DefaultKey: "R", Label: "refresh", Description: "Rescan installed, outdated, discovered, and description state."},
 		CLI:             []CLIBinding{{Command: []string{"refresh"}}},
 	},
@@ -324,7 +328,7 @@ var Tools = []Action{
 		Description:     "Move an ecosystem to one manager.",
 		LongDescription: "Consolidate all tools in an ecosystem to the selected manager.",
 		Mutates:         true,
-		CLI:             []CLIBinding{{Command: []string{"consolidate"}}},
+		CLI:             []CLIBinding{{Command: []string{"consolidate"}, Flags: []string{"--dry-run", "--to"}}},
 		Palette:         &PaletteBinding{Command: []string{"consolidate"}, Description: "use selected manager for ecosystem tools", DescriptionFormat: "use %s for %s tools"},
 		PaletteEligible: true,
 	},
@@ -469,7 +473,35 @@ var Dots = []Action{
 		ConfirmDescription: ConfirmDelete,
 		Requirements:       []Requirement{RequiresToolName},
 		TUI:                &TUIBinding{KeyMapField: "DotDelete", DefaultKey: "d", Label: LabelDelete, Description: "Delete the selected dotfile entry from sync.", ConfirmDescription: ConfirmDelete},
-		CLI:                []CLIBinding{{Command: []string{"dots", "delete"}}},
+		CLI:                []CLIBinding{{Command: []string{"dots", "delete"}, Flags: []string{"--keep-local"}}},
+	},
+	{
+		ID:                 DotsResolveUseRepo,
+		Domain:             "dots",
+		Scope:              ScopeRow,
+		Label:              "use repo",
+		Description:        "Resolve a dots conflict with the repo version.",
+		LongDescription:    "Replace the local target for a conflicting dots entry with the repository version, backing up local content first.",
+		Mutates:            true,
+		RequiresConfirm:    true,
+		ConfirmDescription: "confirm use repo",
+		Requirements:       []Requirement{RequiresToolName},
+		TUI:                &TUIBinding{KeyMapField: "DotUseRepo", DefaultKey: "u", Label: "use repo", Description: "Resolve the selected conflict with the repo version.", ConfirmDescription: "confirm use repo"},
+		CLI:                []CLIBinding{{Command: []string{"dots", "resolve"}, Flags: []string{"--use-repo"}}},
+	},
+	{
+		ID:                 DotsResolveUseLocal,
+		Domain:             "dots",
+		Scope:              ScopeRow,
+		Label:              "use local",
+		Description:        "Resolve a dots conflict with the local version.",
+		LongDescription:    "Copy the local target for a conflicting dots entry into the repository, then relink the managed target.",
+		Mutates:            true,
+		RequiresConfirm:    true,
+		ConfirmDescription: "confirm use local",
+		Requirements:       []Requirement{RequiresToolName},
+		TUI:                &TUIBinding{KeyMapField: "DotUseLocal", DefaultKey: "l", Label: "use local", Description: "Resolve the selected conflict with the local version.", ConfirmDescription: "confirm use local"},
+		CLI:                []CLIBinding{{Command: []string{"dots", "resolve"}, Flags: []string{"--use-local"}}},
 	},
 	{
 		ID:              DotsIgnore,
@@ -481,7 +513,10 @@ var Dots = []Action{
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresToolName},
 		TUI:             &TUIBinding{KeyMapField: "DotIgnore", DefaultKey: "x", Label: LabelIgnore, Description: "Ignore or unignore the selected dotfile entry."},
-		CLI:             []CLIBinding{{Command: []string{"dots", "ignore"}}, {Command: []string{"dots", "unignore"}}},
+		CLI: []CLIBinding{
+			{Command: []string{"dots", "ignore"}, Flags: []string{"--entry", "--path"}},
+			{Command: []string{"dots", "unignore"}},
+		},
 	},
 	{
 		ID:              DotsEnable,
@@ -505,7 +540,7 @@ var Dots = []Action{
 		RequiresConfirm:    true,
 		ConfirmDescription: "confirm disable dots",
 		TUI:                &TUIBinding{KeyMapField: "Confirm", DefaultKey: "enter", Label: "disable dots", Description: "Disable dotfile sync on this machine.", ConfirmDescription: "confirm disable dots"},
-		CLI:                []CLIBinding{{Command: []string{"dots", "disable"}, Flags: []string{"--overwrite"}}},
+		CLI:                []CLIBinding{{Command: []string{"dots", "disable"}, Flags: []string{"--overwrite", "--remove-local"}}},
 	},
 	{
 		ID:              DotsPull,
@@ -637,6 +672,17 @@ var Dots = []Action{
 		Mutates:         false,
 		CLI:             []CLIBinding{{Command: []string{"dots", "services", "status"}, Flags: []string{"--format"}}},
 		CLIOnlyReason:   "TUI renders the combined service dashboard in the Status tab.",
+	},
+	{
+		ID:              DotsHistory,
+		Domain:          "dots",
+		Scope:           ScopeGlobal,
+		Label:           "dots history",
+		Description:     "Show recent dotfile operation history.",
+		LongDescription: "Show recent machine-local dotfile operation records from the cache DB, including operation status, affected entry, summary, and low-level dotfile ops for recovery context.",
+		Mutates:         false,
+		CLI:             []CLIBinding{{Command: []string{"dots", "history"}, Flags: []string{"--limit", "--format"}}},
+		CLIOnlyReason:   "TUI renders recent history in Dashboard and the Dots tab instead of exposing a separate key action.",
 	},
 }
 
@@ -830,7 +876,7 @@ var Setup = []Action{
 		LongDescription: "Run guided bootstrap: choose ecosystem providers, host groups, and optional tools or dots activation.",
 		Mutates:         true,
 		TUI:             &TUIBinding{KeyMapField: "Confirm", DefaultKey: "enter", Label: "run bootstrap", Description: "Run the guided bootstrap flow."},
-		CLI:             []CLIBinding{{Command: []string{"bootstrap"}}},
+		CLI:             []CLIBinding{{Command: []string{"bootstrap"}, Flags: []string{"--import", "--no-import"}}},
 	},
 }
 

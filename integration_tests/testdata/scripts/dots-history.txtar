@@ -1,0 +1,54 @@
+# dots history shows recent machine-local dotfile operations
+# @requires: stow
+env HOME=$WORK/home
+mkdir $WORK/home
+mkdir $WORK/home/.config
+
+exec git init $WORK/home/dotfiles
+exec git -C $WORK/home/dotfiles config user.email t@t.com
+exec git -C $WORK/home/dotfiles config user.name T
+exec git -C $WORK/home/dotfiles config commit.gpgsign false
+exec git -C $WORK/home/dotfiles config tag.gpgsign false
+exec git -C $WORK/home/dotfiles add dotfiles
+exec git -C $WORK/home/dotfiles commit -m seed
+exec cp changed/init.lua $WORK/home/dotfiles/dotfiles/nvim/.config/nvim/init.lua
+
+exec omni --config settings.json dots history
+stdout 'No dots history yet.'
+exec omni --config settings.json dots history --format json
+stdout '\[\]'
+! exec omni --config settings.json dots history --format yaml
+stderr 'unknown format "yaml"'
+! exec omni --config settings.json dots history --limit -1
+stderr 'limit must be >= 0'
+exec omni --config settings.json dots sync
+stdout 'symlink\(s\) updated'
+exec omni --config settings.json dots history --format json
+stdout '"operation":"sync"'
+stdout '"status":"success"'
+stdout '"ops":'
+stdout '"kind":"link"'
+exec omni --config settings.json dots commit -m 'dots: history commit'
+stdout 'Committed.'
+exec omni --config settings.json dots history --format json
+stdout '"operation":"commit"'
+stdout '"status":"success"'
+stdout '"summary":"commit completed"'
+exec omni --config settings.json dots history --limit 1
+stdout 'OPERATION'
+stdout 'commit'
+exec omni --config settings.json dots history --limit 2
+stdout 'commit'
+stdout 'sync'
+exec omni --config settings.json dots history
+stdout 'OPERATION'
+stdout 'commit'
+
+-- settings.json --
+{"host_settings":{"testhost":{"dots_repo":"~/dotfiles"}},"hosts":{"testhost":[]},"groups":[{"name":"testhost","special":"host","dots":[{"name":"nvim","path":"~/.config/nvim"}]}]}
+
+-- home/dotfiles/dotfiles/nvim/.config/nvim/init.lua --
+-- seed config
+
+-- changed/init.lua --
+-- history config

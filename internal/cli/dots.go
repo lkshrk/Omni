@@ -38,6 +38,7 @@ Set the repo path via 'omni ui' (Dots tab) or settings.dots_repo in settings.jso
 		newDotsUnignoreCmd(state),
 		newDotsListCmd(state),
 		newDotsStatusCmd(state),
+		newDotsHistoryCmd(state),
 		newDotsEnableCmd(state),
 		newDotsDisableCmd(state),
 		newDotsPullCmd(state),
@@ -47,6 +48,55 @@ Set the repo path via 'omni ui' (Dots tab) or settings.dots_repo in settings.jso
 		newDotsWatchCmd(state),
 		newDotsServicesCmd(state),
 	)
+	return cmd
+}
+
+func newDotsHistoryCmd(state *rootState) *cobra.Command {
+	var limit int
+	var format string
+	cmd := &cobra.Command{
+		Use:   "history",
+		Short: "Show recent dotfile operation history",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := validateFormat(format, "table", "json"); err != nil {
+				return err
+			}
+			if limit < 0 {
+				return fmt.Errorf("limit must be >= 0")
+			}
+			entries, err := state.app.RecentDotsHistory(cmd.Context(), limit)
+			if err != nil {
+				return err
+			}
+			if format == "json" {
+				if entries == nil {
+					entries = []app.DotsHistoryEntry{}
+				}
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(entries)
+			}
+			if len(entries) == 0 {
+				fmt.Fprintln(cmd.OutOrStdout(), "No dots history yet.")
+				return nil
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "%-19s  %-16s  %-10s  %-18s  %s\n", "TIME", "OPERATION", "STATUS", "ENTRY", "SUMMARY")
+			for _, entry := range entries {
+				name := entry.Entry
+				if strings.TrimSpace(name) == "" {
+					name = "-"
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "%-19s  %-16s  %-10s  %-18s  %s\n",
+					entry.Time.Local().Format("2006-01-02 15:04:05"),
+					entry.Operation,
+					entry.Status,
+					name,
+					entry.Summary,
+				)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().IntVar(&limit, "limit", 20, "Maximum history entries to show")
+	cmd.Flags().StringVar(&format, "format", "table", "Output format (table, json)")
 	return cmd
 }
 

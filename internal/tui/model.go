@@ -397,6 +397,8 @@ type Model struct {
 	// dots tab
 	dotsEntries            []app.DotStatus
 	dotsGitStatus          string
+	dotsHistory            []app.DotsHistoryEntry
+	dotsHistoryErr         string
 	dotMemberships         map[string][]string
 	dotsCursor             int
 	dotsExpandedName       string
@@ -668,6 +670,7 @@ func loadTools(a *app.App, ctx context.Context) tea.Cmd {
 		stowInstalled := a.DotsStowInstalled(ctx)
 		dotsReminderService, dotsReminderServiceErr := a.DotsReminderServiceStatus()
 		dotsWatchService, dotsWatchServiceErr := a.DotsWatchServiceStatus()
+		dotsHistory, dotsHistoryErr := a.RecentDotsHistory(ctx, 3)
 		discovered, _ := a.ListDiscovered(ctx)
 		bootstrapRequired, err := a.BootstrapRequired(ctx)
 		if err != nil {
@@ -695,6 +698,8 @@ func loadTools(a *app.App, ctx context.Context) tea.Cmd {
 			toolProviderPins:       toolProviderPins,
 			hostInfo:               hostInfo,
 			ignoreList:             ignoreList,
+			dotsHistory:            dotsHistory,
+			dotsHistoryErr:         errorString(dotsHistoryErr),
 			noHost:                 noHost,
 			effectivePythonManager: pythonBin,
 			effectiveNodeManager:   nodeBin,

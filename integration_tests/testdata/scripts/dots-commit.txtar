@@ -1,0 +1,42 @@
+# dots commit stages and commits local dotfiles repo changes without pushing
+env HOME=$WORK/home
+mkdir $WORK/home
+
+exec git init --bare remote.git
+exec git clone remote.git seed
+exec git -C seed config user.email t@t.com
+exec git -C seed config user.name T
+exec git -C seed config commit.gpgsign false
+exec git -C seed config tag.gpgsign false
+exec cp -R seed-files/dotfiles seed/dotfiles
+exec git -C seed add dotfiles
+exec git -C seed commit -m seed
+exec git -C seed push -u origin HEAD
+
+exec git clone remote.git $WORK/home/dotfiles
+exec git -C $WORK/home/dotfiles config user.email t@t.com
+exec git -C $WORK/home/dotfiles config user.name T
+exec git -C $WORK/home/dotfiles config commit.gpgsign false
+exec git -C $WORK/home/dotfiles config tag.gpgsign false
+
+exec cp local-change/init.lua $WORK/home/dotfiles/dotfiles/nvim/.config/nvim/init.lua
+exec omni --config settings.json dots commit -m 'dots: local commit'
+stdout 'Committed.'
+exec git -C $WORK/home/dotfiles log -1 --pretty=%s
+stdout 'dots: local commit'
+exec grep 'local commit' $WORK/home/dotfiles/dotfiles/nvim/.config/nvim/init.lua
+stdout 'local commit'
+
+exec git clone remote.git verify
+exec grep 'seed config' verify/dotfiles/nvim/.config/nvim/init.lua
+stdout 'seed config'
+! exec grep 'local commit' verify/dotfiles/nvim/.config/nvim/init.lua
+
+-- settings.json --
+{"host_settings":{"testhost":{"dots_repo":"~/dotfiles"}},"hosts":{"testhost":[]},"groups":[{"name":"testhost","special":"host","dots":[{"name":"nvim","path":"~/.config/nvim"}]}]}
+
+-- seed-files/dotfiles/nvim/.config/nvim/init.lua --
+-- seed config
+
+-- local-change/init.lua --
+-- local commit

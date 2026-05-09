@@ -353,11 +353,11 @@ func contextHintItems(m Model, ctx hintContext) []hintItem {
 		}
 	case hintCtxDotsRepoConfirm:
 		return []hintItem{
-			dangerHintFromBindingDesc(m.keys.DotUseRepo, "confirm use repo"),
+			dangerHintFromBindingDesc(m.keys.DotUseRepo, actions.MustTUIConfirmDescription(actions.DotsResolveUseRepo)),
 		}
 	case hintCtxDotsLocalConfirm:
 		return []hintItem{
-			dangerHintFromBindingDesc(m.keys.DotUseLocal, "confirm use local"),
+			dangerHintFromBindingDesc(m.keys.DotUseLocal, actions.MustTUIConfirmDescription(actions.DotsResolveUseLocal)),
 		}
 	case hintCtxDotsIgnoreConfirm:
 		return dotsIgnoreConfirmHintItems(m)
@@ -472,10 +472,10 @@ func dotsConflictHintItems(m Model) []hintItem {
 		return hints
 	}
 	if dotHasAction(entry, app.DotActionUseRepo) {
-		hints = append(hints, hintFromBindingDesc(m.keys.DotUseRepo, "use repo"))
+		hints = append(hints, hintFromBindingDesc(m.keys.DotUseRepo, actions.MustTUILabel(actions.DotsResolveUseRepo)))
 	}
 	if dotHasAction(entry, app.DotActionUseLocal) {
-		hints = append(hints, hintFromBindingDesc(m.keys.DotUseLocal, "use local"))
+		hints = append(hints, hintFromBindingDesc(m.keys.DotUseLocal, actions.MustTUILabel(actions.DotsResolveUseLocal)))
 	}
 	if dotsVariantEligible(row) {
 		hints = append(hints, hintFromBinding(m.keys.DotVariant))
@@ -882,8 +882,8 @@ func helpActionGroups(m Model) []helpGroup {
 			hintFromBindingDesc(k.SyncAll, actions.MustTUILabel(actions.ToolSyncAll)),
 			hintFromBindingDesc(k.Sync, actions.MustTUILabel(actions.DotsSync)),
 			hintFromBindingDesc(k.DotVariant, actions.MustTUILabel(actions.DotsVariant)),
-			hintFromBindingDesc(k.DotUseRepo, "use repo"),
-			hintFromBindingDesc(k.DotUseLocal, "use local"),
+			hintFromBindingDesc(k.DotUseRepo, actions.MustTUILabel(actions.DotsResolveUseRepo)),
+			hintFromBindingDesc(k.DotUseLocal, actions.MustTUILabel(actions.DotsResolveUseLocal)),
 			hintFromBindingDesc(k.MoveGroup, actions.MustTUILabel(actions.DotsEditGroups)),
 			hintFromBindingDesc(k.DotIgnore, actions.MustTUILabel(actions.DotsIgnore)),
 			hintFromBindingDesc(k.DotDelete, actions.MustTUILabel(actions.DotsDelete)),

@@ -782,6 +782,7 @@ func (m *Model) handleDotsLoadedMsg(msg dotsLoadedMsg) []tea.Cmd {
 	} else if msg.detail != "" {
 		cmds = append(cmds, setStatus(m, msg.detail, false))
 	}
+	m.refreshDotsHistory(&cmds)
 	return cmds
 }
 
@@ -830,6 +831,7 @@ func (m *Model) handleDotsSyncedMsg(msg dotsSyncedMsg) []tea.Cmd {
 		cmds = append(cmds, cmd)
 	}
 	m.continueDashboardReconcile(dashboardReconcilePlanSyncDots, msg.err, &cmds)
+	m.refreshDotsHistory(&cmds)
 	return cmds
 }
 
@@ -932,6 +934,7 @@ func (m *Model) handleDotsPulledMsg(msg dotsPulledMsg) []tea.Cmd {
 	} else {
 		cmds = append(cmds, setStatus(m, "✓ pulled", false))
 	}
+	m.refreshDotsHistory(&cmds)
 	return cmds
 }
 
@@ -949,6 +952,7 @@ func (m *Model) handleDotsPushedMsg(msg dotsPushedMsg) []tea.Cmd {
 	} else {
 		cmds = append(cmds, setStatus(m, "✓ pushed", false))
 	}
+	m.refreshDotsHistory(&cmds)
 	return cmds
 }
 
@@ -967,6 +971,7 @@ func (m *Model) handleDotsCommittedMsg(msg dotsCommittedMsg) []tea.Cmd {
 		cmds = append(cmds, setStatus(m, "✓ committed", false))
 	}
 	m.continueDashboardReconcile(dashboardReconcilePlanCommitDots, msg.err, &cmds)
+	m.refreshDotsHistory(&cmds)
 	return cmds
 }
 
@@ -990,6 +995,7 @@ func (m *Model) handleDotsDeletedMsg(msg dotsDeletedMsg) []tea.Cmd {
 	} else {
 		cmds = append(cmds, setStatus(m, "✓ deleted "+msg.name, false))
 	}
+	m.refreshDotsHistory(&cmds)
 	return cmds
 }
 
@@ -1010,6 +1016,7 @@ func (m *Model) handleDotsFixedMsg(msg dotsFixedMsg) []tea.Cmd {
 	} else {
 		cmds = append(cmds, setStatus(m, "✓ resolved "+msg.name, false))
 	}
+	m.refreshDotsHistory(&cmds)
 	return cmds
 }
 
@@ -1034,6 +1041,7 @@ func (m *Model) handleDotsAddedMsg(msg dotsAddedMsg) []tea.Cmd {
 		}
 		cmds = append(cmds, setStatus(m, "✓ added "+msg.path, false))
 	}
+	m.refreshDotsHistory(&cmds)
 	return cmds
 }
 
@@ -1061,6 +1069,7 @@ func (m *Model) handleDotsVariantChangedMsg(msg dotsVariantChangedMsg) []tea.Cmd
 	} else {
 		cmds = append(cmds, setStatus(m, "✓ created variant "+pkg+" for "+msg.name, false))
 	}
+	m.refreshDotsHistory(&cmds)
 	return cmds
 }
 
@@ -1238,6 +1247,36 @@ func loadDotMemberships(a *app.App, ctx context.Context) map[string][]string {
 		return nil
 	}
 	return memberships
+}
+
+func (m *Model) doRefreshDotsHistory() tea.Cmd {
+	a, ctx := m.app, m.ctx
+	return func() tea.Msg {
+		if a == nil {
+			return dotsHistoryLoadedMsg{}
+		}
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		entries, err := a.RecentDotsHistory(ctx, 3)
+		return dotsHistoryLoadedMsg{entries: entries, err: err}
+	}
+}
+
+func (m *Model) refreshDotsHistory(cmds *[]tea.Cmd) {
+	if m.app == nil {
+		return
+	}
+	*cmds = append(*cmds, m.doRefreshDotsHistory())
+}
+
+func (m *Model) handleDotsHistoryLoadedMsg(msg dotsHistoryLoadedMsg) {
+	if msg.err != nil {
+		m.dotsHistoryErr = msg.err.Error()
+		return
+	}
+	m.dotsHistory = append([]app.DotsHistoryEntry(nil), msg.entries...)
+	m.dotsHistoryErr = ""
 }
 
 // doDotsPull runs git pull + resync and refreshes dots status.
