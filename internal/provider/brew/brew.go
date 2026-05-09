@@ -330,7 +330,7 @@ func (p *Provider) OutdatedMap(ctx context.Context) (map[string]string, error) {
 	}
 	m := make(map[string]string, len(out.Formulae)+len(out.Casks))
 	for _, f := range out.Formulae {
-		m[strings.ToLower(f.Name)] = f.CurrentVersion
+		m[strings.ToLower(formulaName(f.Name))] = f.CurrentVersion
 	}
 	for _, c := range out.Casks {
 		m[strings.ToLower(c.Name)] = c.CurrentVersion
