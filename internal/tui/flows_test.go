@@ -1803,6 +1803,31 @@ func TestFlow_UC45_DotsConflictOverwrite(t *testing.T) {
 	})
 }
 
+func TestFlow_DotsSynthesizedIgnoredChildUnignore(t *testing.T) {
+	// Synthesized ignored-child top-level rows (name = "parent/relpath") must
+	// dispatch doDotsIgnore (pattern removal) not doDotsEntryIgnore (whole-entry
+	// toggle). Regression: the composite name did not match any real entry,
+	// leaving the child permanently ignored.
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.dotsLoaded = true
+	m.settings.DotsRepo = "/repo"
+	// ignoredChildDotStatuses synthesizes top-level entries with Name = "nvim/lua/plugin.lua"
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "nvim/lua/plugin.lua",
+		TargetPath: "~/.config/nvim/lua/plugin.lua",
+		ConfigPath: "~/.config/nvim/lua/plugin.lua",
+		Health:     app.HealthOK,
+		State:      app.DotStateIgnored,
+	}}
+
+	// First x = confirmation, second x = dispatch
+	got := drive(m, pressRune('x'), pressRune('x'))
+	if !got.dotsLoading {
+		t.Fatalf("dotsLoading = false, want true after un-ignoring synthesized child")
+	}
+}
+
 func TestFlow_DotsChildRowsCanBeIgnored(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewDots
