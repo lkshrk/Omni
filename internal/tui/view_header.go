@@ -346,6 +346,8 @@ func renderHeaderInfo(m Model) string {
 		return renderDotsHeaderInfo(m)
 	case viewGroups:
 		return renderGroupsHeaderInfo(m)
+	case viewStatus:
+		return renderStatusHeaderInfo(m)
 	case viewSettings:
 		return renderSettingsHeaderInfo(m)
 	default:
@@ -413,6 +415,20 @@ func renderSettingsHeaderInfo(m Model) string {
 	return renderHeaderInfoText(m.palette, fmt.Sprintf("  %d/3 providers  %s", enabled, dotsLabel))
 }
 
+func renderStatusHeaderInfo(m Model) string {
+	attention := statusAttentionCount(m)
+	if m.doctorRunning {
+		if attention > 0 {
+			return renderHeaderInfoText(m.palette, fmt.Sprintf("  checking…  %d need attention", attention))
+		}
+		return renderHeaderInfoText(m.palette, "  checking…")
+	}
+	if attention == 0 {
+		return renderHeaderInfoText(m.palette, "  all clear")
+	}
+	return renderHeaderInfoText(m.palette, fmt.Sprintf("  %d need attention", attention))
+}
+
 func renderHeaderInfoText(p palette, text string) string {
 	if text == "" {
 		return ""
@@ -459,6 +475,7 @@ type mainTab struct {
 
 func mainTabs() []mainTab {
 	return []mainTab{
+		{mode: viewStatus, label: "Dashboard"},
 		{mode: viewList, label: "Tools"},
 		{mode: viewDots, label: "Dots"},
 		{mode: viewGroups, label: "Groups"},

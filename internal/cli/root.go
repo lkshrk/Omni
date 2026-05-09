@@ -43,6 +43,7 @@ New machine? Run 'omni bootstrap' to detect providers, create or activate the
 host config, and optionally import or sync tools and dotfiles.
 
 Already set up?
+  omni reconcile  sync tools, upgrades, dotfiles, and dotfile commits
   omni sync       sync local tools to match config
   omni dots sync  sync dotfile symlinks from repo`,
 		SilenceUsage:  true,
@@ -73,6 +74,13 @@ Already set up?
 			if state.cacheDir != "" {
 				a.CacheDir = state.cacheDir
 			}
+			if commandInChain(cmd, "doctor") {
+				if err := a.InitReadOnly(cmd.Context()); err != nil {
+					return fmt.Errorf("initialising diagnostics: %w", err)
+				}
+				state.app = a
+				return nil
+			}
 			if err := initRootApp(cmd.Context(), a); err != nil {
 				return fmt.Errorf("initialising app: %w", err)
 			}
@@ -96,6 +104,7 @@ Already set up?
 
 	root.AddCommand(
 		newBootstrapCmd(state),
+		newReconcileCmd(state),
 		newListCmd(state),
 		newSyncCmd(state),
 		newInstallCmd(state),
@@ -105,6 +114,7 @@ Already set up?
 		newImportCmd(state),
 		newSearchCmd(state),
 		newRefreshCmd(state),
+		newDoctorCmd(state),
 		newProvidersCmd(state),
 		newSettingsCmd(state),
 		newConsolidateCmd(state),
@@ -125,6 +135,7 @@ Already set up?
 // exempt the entire CLI from host enforcement.
 var hostExempt = map[string]bool{
 	"bootstrap":  true,
+	"doctor":     true,
 	"init":       true, // compatibility alias for bootstrap
 	"hosts":      true,
 	"dots":       true, // dots commands work independently of tool hosts
@@ -134,6 +145,15 @@ var hostExempt = map[string]bool{
 	"settings":   true,
 	"help":       true,
 	"completion": true,
+}
+
+func commandInChain(cmd *cobra.Command, name string) bool {
+	for c := cmd; c != nil; c = c.Parent() {
+		if c.Name() == name {
+			return true
+		}
+	}
+	return false
 }
 
 // requireActiveHost returns an error when no host is configured for this machine,

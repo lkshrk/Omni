@@ -1477,6 +1477,17 @@ func (m *Model) doToggleDotsWatchService(enable bool) tea.Cmd {
 	}
 }
 
+func (m *Model) doRunDoctor() tea.Cmd {
+	a, ctx := m.app, m.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return func() tea.Msg {
+		result, err := a.Doctor(ctx)
+		return doctorDoneMsg{result: result, err: err}
+	}
+}
+
 func (m *Model) startSettingsSave(settings config.Settings, gen int) tea.Cmd {
 	m.settingsSaveRunning = true
 	m.settingsSaveInFlightGen = gen

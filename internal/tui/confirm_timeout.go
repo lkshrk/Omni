@@ -28,6 +28,7 @@ func (m *Model) cancelConfirmationTimeout() {
 func (m *Model) hasActiveConfirmation() bool {
 	return m.confirmQuit ||
 		m.listConfirm.action != "" ||
+		m.dashboardReconcilePlanOpen ||
 		m.hostCopyConfirm ||
 		m.hostDeleteConfirm ||
 		m.groupDeleteConfirm ||
@@ -45,6 +46,7 @@ func (m *Model) clearActiveConfirmation() {
 	m.confirmQuit = false
 	m.quitConfirmKey = ""
 	m.listConfirm = listConfirmation{}
+	m.clearDashboardReconcilePlan()
 	m.hostCopyConfirm = false
 	m.hostCopyName = ""
 	m.hostDeleteConfirm = false

@@ -629,6 +629,71 @@ func TestUpgradeAll_SkipsUninstalledOutdatedRows(t *testing.T) {
 	}
 }
 
+func TestReconcile_SyncsAndUpgradesTools(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	stub := &stubProvider{
+		name:      "system",
+		available: true,
+		installed: []provider.InstalledTool{
+			installedTool("ripgrep", "1.0.0", "system"),
+		},
+	}
+	a, cfgPath := newImportApp(t, stub)
+	if err := config.Save(cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"fd":      {Provider: "system"},
+			"ripgrep": {Provider: "system"},
+		},
+		Hosts: map[string][]string{"testhost": {"base"}},
+		Groups: []*config.GroupConfig{
+			{Name: "testhost", Special: "host"},
+			{Name: "base", Tools: []config.ToolEntry{{Name: "fd"}, {Name: "ripgrep"}}},
+		},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	ctx := context.Background()
+	if err := a.RefreshInstalled(ctx, nil); err != nil {
+		t.Fatalf("RefreshInstalled: %v", err)
+	}
+	if err := a.DB().UpdateOutdated(ctx, "ripgrep", "system", "ripgrep", true, "2.0.0"); err != nil {
+		t.Fatalf("UpdateOutdated: %v", err)
+	}
+
+	result, err := a.Reconcile(ctx, app.ReconcileOptions{})
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if result == nil || result.SyncAll == nil || result.UpgradeAll == nil {
+		t.Fatalf("result = %#v, want sync and upgrade results", result)
+	}
+	if got := len(result.SyncAll.SyncResult.Installed()); got != 1 {
+		t.Fatalf("installed count = %d, want 1", got)
+	}
+	if got := len(result.UpgradeAll.Upgraded); got != 1 {
+		t.Fatalf("upgraded count = %d, want 1", got)
+	}
+	foundFD := false
+	for _, installed := range stub.installed {
+		if installed.Name == "fd" {
+			foundFD = true
+			break
+		}
+	}
+	if !foundFD {
+		t.Fatalf("fd was not installed during reconcile: %#v", stub.installed)
+	}
+	tools, err := a.ListTools(ctx, "")
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	for _, tool := range tools {
+		if tool.Name == "ripgrep" && tool.Outdated {
+			t.Fatal("ripgrep should no longer be outdated after reconcile upgrade")
+		}
+	}
+}
+
 type selectiveUpgradeStub struct {
 	stubProvider
 	failName string

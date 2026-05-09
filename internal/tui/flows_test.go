@@ -42,7 +42,7 @@ package tui
 //  UC-27  q sets confirmQuit; second q quits; other key resets
 //  UC-28  Keys ignored while loading=true
 //  UC-29  : opens command palette; Esc closes it
-//  UC-30  Tab cycles tabs: list→dots→hosts→settings→list
+//  UC-30  Tab cycles tabs: list→dots→status→hosts→settings→list
 //  UC-31  Tab blocked in hostRequired state
 //
 // SETUP WIZARD
@@ -786,6 +786,15 @@ func TestFlow_UC23_CommandPalette(t *testing.T) {
 // ── UC-24 Tab cycles main tabs ───────────────────────────────────────────────
 
 func TestFlow_UC24_TabCycle(t *testing.T) {
+	t.Run("dashboard → list", func(t *testing.T) {
+		m := baseModel(nil)
+		m.mode = viewStatus
+		got := drive(m, pressTab())
+		if got.mode != viewList {
+			t.Errorf("mode = %v, want viewList", got.mode)
+		}
+	})
+
 	t.Run("list → dots", func(t *testing.T) {
 		got := drive(baseModel(nil), pressTab())
 		if got.mode != viewDots {
@@ -807,8 +816,15 @@ func TestFlow_UC24_TabCycle(t *testing.T) {
 		}
 	})
 
-	t.Run("settings → list", func(t *testing.T) {
+	t.Run("settings → dashboard", func(t *testing.T) {
 		got := drive(baseModel(nil), pressTab(), pressTab(), pressTab(), pressTab())
+		if got.mode != viewStatus {
+			t.Errorf("mode = %v, want viewStatus", got.mode)
+		}
+	})
+
+	t.Run("settings → list", func(t *testing.T) {
+		got := drive(baseModel(nil), pressTab(), pressTab(), pressTab(), pressTab(), pressTab())
 		if got.mode != viewList {
 			t.Errorf("mode = %v, want viewList (full cycle)", got.mode)
 		}
@@ -823,12 +839,12 @@ func TestFlow_UC24_TabCycle(t *testing.T) {
 
 	t.Run("shift tab cycles backward", func(t *testing.T) {
 		got := drive(baseModel(nil), pressShiftTab())
-		if got.mode != viewSettings {
-			t.Errorf("mode = %v, want viewSettings after shift+tab from list", got.mode)
+		if got.mode != viewStatus {
+			t.Errorf("mode = %v, want viewStatus after shift+tab from list", got.mode)
 		}
 		got = drive(got, pressShiftTab())
-		if got.mode != viewGroups {
-			t.Errorf("mode = %v, want viewGroups after second shift+tab", got.mode)
+		if got.mode != viewSettings {
+			t.Errorf("mode = %v, want viewSettings after second shift+tab", got.mode)
 		}
 	})
 }
@@ -848,6 +864,13 @@ func TestFlow_UC24_ClickTabs(t *testing.T) {
 		got := clickTab(baseModel(nil), viewDots)
 		if got.mode != viewDots {
 			t.Errorf("mode = %v, want viewDots", got.mode)
+		}
+	})
+
+	t.Run("click status tab switches to status", func(t *testing.T) {
+		got := clickTab(baseModel(nil), viewStatus)
+		if got.mode != viewStatus {
+			t.Errorf("mode = %v, want viewStatus", got.mode)
 		}
 	})
 
@@ -2595,7 +2618,13 @@ func TestFlow_UC61_PaletteExecution(t *testing.T) {
 			upgradingKeys: make(map[string]bool),
 		}
 		m.commandInput.Focus()
-		syncCmd := buildPalette(m)[0]
+		var syncCmd palCmd
+		for _, cmd := range buildPalette(m) {
+			if cmd.name == "sync" {
+				syncCmd = cmd
+				break
+			}
+		}
 		m.commandSuggestions = []palCmd{syncCmd}
 		got := drive(m, pressEnter())
 		if !got.loading {

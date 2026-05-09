@@ -29,6 +29,7 @@ type KeyMap struct {
 	Ignore          key.Binding // x — ignore / un-ignore
 	MigrateProvider key.Binding // r — reinstall with default provider
 	ApplySolution   key.Binding // a — apply selected provider remedy
+	Reconcile       key.Binding // A — reconcile all safe host lifecycle fixes
 	NewGroup        key.Binding // n — new group
 	HostGroups      key.Binding // g — edit host group assignments
 	Rename          key.Binding // r — rename selected host/group
@@ -151,6 +152,10 @@ func DefaultKeyMap() KeyMap {
 		ApplySolution: key.NewBinding(
 			key.WithKeys("a"),
 			key.WithHelp("a", "apply fix"),
+		),
+		Reconcile: key.NewBinding(
+			key.WithKeys("A"),
+			key.WithHelp("A", actions.MustTUILabel(actions.Reconcile)),
 		),
 		NewGroup: key.NewBinding(
 			key.WithKeys("n"),

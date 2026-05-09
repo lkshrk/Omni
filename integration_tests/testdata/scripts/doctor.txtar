@@ -1,0 +1,13 @@
+# omni doctor prints read-only diagnostics without requiring an active host mutation
+exec omni --config settings.json --cache-dir cache doctor
+stdout 'Omni doctor'
+stdout 'Config:'
+stdout 'settings.json is valid'
+stdout 'Host:'
+stdout 'current host is configured'
+stdout 'Dotfiles:'
+stdout 'dots_repo is not configured'
+stdout 'Summary:'
+
+-- settings.json --
+{"hosts":{"testhost":[]},"groups":[{"name":"testhost","special":"host"}]}

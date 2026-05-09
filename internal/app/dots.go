@@ -1210,6 +1210,35 @@ func (a *App) DotsPush(ctx context.Context, message string) error {
 	return g.Push(ctx, message)
 }
 
+// DotsCommit stages and commits all changes in the dots repo without pushing.
+// When message is empty the commit message is auto-generated from the git
+// status of the repo (e.g. "dots: update nvim, zshrc").
+func (a *App) DotsCommit(ctx context.Context, message string) error {
+	rootCfg, err := a.loadConfig()
+	if err != nil {
+		return fmt.Errorf("dots commit: load config: %w", err)
+	}
+	if err := a.requireDotsEnabled(rootCfg); err != nil {
+		return err
+	}
+	repoPath, err := resolveRepoPath(a.dotsRepoPath())
+	if err != nil {
+		return err
+	}
+	if err := a.requireSafeTestDotsMutation(repoPath, nil); err != nil {
+		return err
+	}
+	g := newGitForRepo(repoPath, executor.New())
+	if message == "" {
+		gitStatus, err := g.Status(ctx)
+		if err != nil {
+			return fmt.Errorf("dots commit: %w", err)
+		}
+		message = dots.CommitMessageFromStatus(gitStatus)
+	}
+	return g.CommitAll(ctx, message)
+}
+
 // DisableDotsOptions controls the behaviour of DotsDisable.
 type DisableDotsOptions struct {
 	// ConflictOverwrite, when true, moves any real (non-managed) files at target

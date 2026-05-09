@@ -19,8 +19,19 @@ type palCmd struct {
 // buildPalette returns the full set of available commands for the current model
 // state. Called on every keystroke in palette mode — must be free of IO.
 func buildPalette(m Model) []palCmd {
+	reconcileAction := actions.MustPalette(actions.Reconcile)
 	syncAction := actions.MustPalette(actions.ToolSync)
 	cmds := []palCmd{
+		{
+			name: paletteCommandName(reconcileAction),
+			desc: reconcileAction.Description,
+			run: func(m *Model) tea.Cmd {
+				m.mode = viewStatus
+				var cmds []tea.Cmd
+				m.startDashboardReconcile(&cmds)
+				return tea.Batch(cmds...)
+			},
+		},
 		{
 			name: paletteCommandName(syncAction),
 			desc: syncAction.Description,
@@ -36,6 +47,7 @@ func buildPalette(m Model) []palCmd {
 
 	if m.settings.DotsRepo != "" {
 		dotsPull := actions.MustPalette(actions.DotsPull)
+		dotsCommit := actions.MustPalette(actions.DotsCommit)
 		dotsPush := actions.MustPalette(actions.DotsPush)
 		dotsSync := actions.MustPalette(actions.DotsSync)
 		cmds = append(cmds,
@@ -49,6 +61,18 @@ func buildPalette(m Model) []palCmd {
 					}
 					m.beginDotsOperation("Pulling…")
 					return tea.Batch(m.spinner.Tick, m.doDotsPull())
+				},
+			},
+			palCmd{
+				name: paletteCommandName(dotsCommit),
+				desc: dotsCommit.Description,
+				run: func(m *Model) tea.Cmd {
+					m.mode = viewDots
+					if !m.dotsLoaded && !m.dotsLoading {
+						m.dotsLoaded = true
+					}
+					m.beginDotsOperation("Committing dots…")
+					return tea.Batch(m.spinner.Tick, m.doDotsCommit())
 				},
 			},
 			palCmd{

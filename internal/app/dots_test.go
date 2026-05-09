@@ -1058,6 +1058,9 @@ func TestDotsMutationsRejectWhenHostDotsDisabled(t *testing.T) {
 			_, err := a.DotsPull(context.Background())
 			return err
 		}},
+		{name: "commit", run: func() error {
+			return a.DotsCommit(context.Background(), "dots: test")
+		}},
 		{name: "push", run: func() error {
 			return a.DotsPush(context.Background(), "dots: test")
 		}},
