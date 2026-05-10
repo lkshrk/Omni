@@ -63,6 +63,7 @@ type KeyMap struct {
 	DotIgnore   key.Binding // x — add an ignore pattern for the selected entry
 	DotUseRepo  key.Binding // u — resolve conflict with repo version
 	DotUseLocal key.Binding // l — resolve conflict with local version
+	DotCommit   key.Binding // C — commit dotfiles (global)
 
 	// Out-of-sync actions
 	PinProvider key.Binding // p — pin provider scope
@@ -79,8 +80,9 @@ func (k KeyMap) ShortHelp() []key.Binding {
 func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Top, k.Bottom, k.HalfPageUp, k.HalfPageDown, k.PageUp, k.PageDown, k.Tab},
-		{k.Install, k.Upgrade, k.UpgradeAll, k.SyncAll, k.Claim, k.MoveGroup, k.PinProvider, k.MigrateProvider, k.Ignore, k.Delete, k.Refresh},
-		{k.Search, k.PrevTab, k.NextTab, k.GroupPrev, k.GroupNext, k.Palette, k.NewGroup, k.HostGroups, k.GroupTools, k.Help, k.Quit},
+		{k.Install, k.Upgrade, k.UpgradeAll, k.SyncAll, k.DotCommit, k.Claim, k.MoveGroup, k.PinProvider, k.MigrateProvider, k.Ignore, k.Delete, k.Refresh},
+		{k.DotDiscover, k.DotAdd, k.DotDelete, k.DotVariant, k.DotIgnore, k.DotUseRepo, k.DotUseLocal, k.Reconcile, k.ApplySolution},
+		{k.Search, k.PrevTab, k.NextTab, k.GroupPrev, k.GroupNext, k.Palette, k.NewGroup, k.HostGroups, k.GroupTools, k.GroupDots, k.Rename, k.Help, k.Quit},
 	}
 }
 
@@ -256,6 +258,10 @@ func DefaultKeyMap() KeyMap {
 		DotUseLocal: key.NewBinding(
 			key.WithKeys("l"),
 			key.WithHelp("l", actions.MustTUILabel(actions.DotsResolveUseLocal)),
+		),
+		DotCommit: key.NewBinding(
+			key.WithKeys("C"),
+			key.WithHelp("C", "commit dotfiles"),
 		),
 		PinProvider: key.NewBinding(
 			key.WithKeys("p"),
