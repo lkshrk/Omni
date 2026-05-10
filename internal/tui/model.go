@@ -378,6 +378,7 @@ type Model struct {
 	doctorResult                   *app.DoctorResult
 	doctorErr                      string
 	doctorRunning                  bool
+	cursorHidden                   bool // true until user navigates after tab switch
 	statusCursor                   int
 	dashboardReconcilePlanOpen     bool
 	dashboardReconcilePlanCursor   int
@@ -402,6 +403,7 @@ type Model struct {
 	dotMemberships         map[string][]string
 	dotsCursor             int
 	dotsExpandedName       string
+	dotsExpandedState      app.DotState
 	dotsExpandedChildren   map[string]bool
 	dotsLoading            bool
 	dotsLoaded             bool // true after first lazy load
@@ -585,6 +587,7 @@ func New(a *app.App, ctx context.Context) Model {
 		commandCursor:    -1,
 		loading:          true,
 		cursor:           -1, // nothing selected until the user navigates
+		cursorHidden:     true,
 		upgradingKeys:    make(map[string]bool),
 		searchCache:      make(map[string]searchCacheEntry),
 		dotsConfirmIdx:   -1,

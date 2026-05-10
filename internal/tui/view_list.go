@@ -264,8 +264,9 @@ func renderList(m Model) string {
 		group := m.toolGroups[key]
 		isIgnored := sec == sectionIgnored
 		ss := m.syncStatusOf(t)
-		line := renderToolRowWithProviderPin(p, t, cols, spinnerView, group, providerPinForTool(t, m.toolProviderPins), m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager, isIgnored, i == m.cursor, ss, rowActionErrorStatus(m, t))
-		if i == m.cursor {
+		isCursor := i == m.cursor && !m.cursorHidden
+		line := renderToolRowWithProviderPin(p, t, cols, spinnerView, group, providerPinForTool(t, m.toolProviderPins), m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager, isIgnored, isCursor, ss, rowActionErrorStatus(m, t))
+		if isCursor {
 			cursorRow = len(rows)
 			rows = append(rows, displayRow{text: selectedRowPrefix(p) + line, toolIdx: i})
 			// Inline detail — expand the selected row with its info.

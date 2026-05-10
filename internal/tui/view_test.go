@@ -283,6 +283,7 @@ func TestRenderDots_WithEntries(t *testing.T) {
 	m.settings.DotsRepo = "/home/user/dotfiles"
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
+	m.dotsExpandedState = app.DotStateSynced
 	m.dotsEntries = []app.DotStatus{
 		{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: app.DotStateSynced, FileCount: 14, Counts: app.DotFileCounts{Synced: 12, OutOfSync: 2, Ignored: 3}, Children: []app.DotChild{
 			{Name: "lua", RelPath: "lua", Path: "~/.config/nvim/lua", IsDir: true, FileCount: 10},
@@ -355,7 +356,153 @@ func TestRenderDots_SectionsUseSharedListSpacing(t *testing.T) {
 	}
 	assertNextNonBlankLine("Out Of Sync", "zsh")
 	assertNextNonBlankLine("Synced", "nvim")
-	assertNextNonBlankLine("Repo", "/home/user/dotfiles")
+	// Repo is rendered as compact inline status, not a section header.
+	found := false
+	for _, line := range lines {
+		if strings.Contains(line, "/home/user/dotfiles") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("repo path not found in dots output:\n%s", out)
+	}
+}
+
+func TestRenderDots_IgnoredSectionChildrenStatus(t *testing.T) {
+	// Ignored section layout:
+	//   dotfiles  (synthesized container, no DotActionUnignore) → "-"
+	//     claude/ (intermediate dir, Ignored=false) → "-"
+	//       a     (explicitly ignored leaf, Ignored=true) → "ignored"
+	//       b     (explicitly ignored leaf, Ignored=true) → "ignored"
+	//   backup    (truly ignored entry, DotActionUnignore) → "ignored"
+	m := baseModel(nil)
+	m.width = 100
+	m.height = 40
+	m.settings.DotsRepo = "/repo"
+	m.dotsLoaded = true
+	m.dotsEntries = []app.DotStatus{
+		{Name: "zsh", TargetPath: "~/.zsh", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}},
+		// Synthesized container (from ignoredChildDotStatuses).
+		{
+			Name:       "dotfiles",
+			TargetPath: "~/.config",
+			State:      app.DotStateIgnored,
+			Actions:    []app.DotAction{app.DotActionIgnore, app.DotActionRemove},
+			IsDir:      true,
+			Counts:     app.DotFileCounts{Ignored: 2},
+			Children: []app.DotChild{
+				{
+					Name: "claude", RelPath: "claude", Path: "~/.config/claude",
+					IsDir: true, Depth: 1, Ignored: false,
+					FileCount: 2,
+					Children: []app.DotChild{
+						{Name: "a", RelPath: "claude/a", Path: "~/.config/claude/a", Depth: 2, Ignored: true},
+						{Name: "b", RelPath: "claude/b", Path: "~/.config/claude/b", Depth: 2, Ignored: true},
+					},
+				},
+			},
+		},
+		// Truly ignored entry (from ignoredCandidates).
+		{
+			Name:       "backup",
+			TargetPath: "~/.backup",
+			State:      app.DotStateIgnored,
+			Actions:    []app.DotAction{app.DotActionUnignore},
+			IsDir:      true,
+			Counts:     app.DotFileCounts{Ignored: 5},
+		},
+	}
+	m.dotsExpandedName = "dotfiles"
+	m.dotsExpandedState = app.DotStateIgnored
+	m.dotsExpandedChildren = map[string]bool{
+		dotsChildExpandKey("dotfiles", "claude"): true,
+	}
+
+	out := stripANSIEscapeSequences(renderDots(m))
+	inIgnored := false
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "Ignored") && strings.Contains(line, "───") {
+			inIgnored = true
+			continue
+		}
+		if !inIgnored {
+			continue
+		}
+		// Synthesized container "dotfiles" should show "-", not "ignored".
+		if strings.Contains(line, "dotfiles") {
+			if strings.Contains(line, "ignored") {
+				t.Fatalf("synthesized container should show '-' not 'ignored', got: %q", line)
+			}
+		}
+		// Truly ignored "backup" should show "ignored".
+		if strings.Contains(line, "backup") {
+			if !strings.Contains(line, "ignored") {
+				t.Fatalf("truly ignored entry should show 'ignored', got: %q", line)
+			}
+		}
+		// Intermediate dir "claude" child should show "-", not "ignored".
+		if strings.Contains(line, "claude") && !strings.Contains(line, "claude/") {
+			if strings.Contains(line, "ignored") {
+				t.Fatalf("intermediate dir should show '-' not 'ignored', got: %q", line)
+			}
+		}
+		// Leaf children "a" and "b" should show "ignored".
+		for _, leaf := range []string{" a ", " b "} {
+			if strings.Contains(line, leaf) {
+				if !strings.Contains(line, "ignored") {
+					t.Fatalf("explicitly-ignored child %q should show 'ignored', got: %q", strings.TrimSpace(leaf), line)
+				}
+			}
+		}
+	}
+}
+
+func TestRenderDots_RepoInlineBeforeSections(t *testing.T) {
+	m := baseModel(nil)
+	m.width = 100
+	m.height = 30
+	m.settings.DotsRepo = "/home/user/dotfiles"
+	m.dotsLoaded = true
+	m.dotsEntries = []app.DotStatus{
+		{Name: "nvim", TargetPath: "~/.config/nvim", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}},
+	}
+	out := stripANSIEscapeSequences(renderDots(m))
+	repoLine := -1
+	sectionLine := -1
+	for i, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "/home/user/dotfiles") && repoLine < 0 {
+			repoLine = i
+		}
+		if strings.Contains(line, "Synced") && strings.Contains(line, "───") && sectionLine < 0 {
+			sectionLine = i
+		}
+	}
+	if repoLine < 0 {
+		t.Fatalf("repo path not found in output:\n%s", out)
+	}
+	if sectionLine < 0 {
+		t.Fatalf("Synced section not found in output:\n%s", out)
+	}
+	if repoLine >= sectionLine {
+		t.Fatalf("repo line (%d) should appear before Synced section (%d):\n%s", repoLine, sectionLine, out)
+	}
+}
+
+func TestRenderDots_DirtyRepoShowsCommitHint(t *testing.T) {
+	m := baseModel(nil)
+	m.width = 100
+	m.height = 30
+	m.settings.DotsRepo = "/repo"
+	m.dotsLoaded = true
+	m.dotsGitStatus = "M config.toml"
+	m.dotsEntries = []app.DotStatus{
+		{Name: "nvim", TargetPath: "~/.config/nvim", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}},
+	}
+	out := stripANSIEscapeSequences(renderDots(m))
+	if !strings.Contains(out, "commit") {
+		t.Fatalf("dirty repo should show commit hint:\n%s", out)
+	}
 }
 
 func TestRenderDots_ChildNamesShareNameColumnWidth(t *testing.T) {
@@ -364,6 +511,7 @@ func TestRenderDots_ChildNamesShareNameColumnWidth(t *testing.T) {
 	m.settings.DotsRepo = "/home/user/dotfiles"
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
+	m.dotsExpandedState = app.DotStateSynced
 	m.dotsCursor = -1
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
@@ -400,6 +548,7 @@ func TestRenderDots_ChildRowsUseParentStatusAndFileCountColumn(t *testing.T) {
 	m.settings.DotsRepo = "/home/user/dotfiles"
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
+	m.dotsExpandedState = app.DotStateSynced
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
@@ -501,6 +650,7 @@ func TestRenderDots_ChildRowsUseChildStatusWhenPresent(t *testing.T) {
 	m.settings.DotsRepo = "/home/user/dotfiles"
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
+	m.dotsExpandedState = app.DotStateConflict
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
@@ -538,6 +688,7 @@ func TestRenderDots_RightColumnsKeepStableWidthAndRightMargin(t *testing.T) {
 	m.settings.DotsRepo = "/home/user/dotfiles"
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
+	m.dotsExpandedState = app.DotStateSynced
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
@@ -753,6 +904,7 @@ func TestRenderDots_SubdirectoryShowsExpandHint(t *testing.T) {
 	m.settings.DotsRepo = "/home/user/dotfiles"
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
+	m.dotsExpandedState = app.DotStateConflict
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
@@ -819,6 +971,7 @@ func TestRenderDots_IgnoreConfirmRendersInlineAction(t *testing.T) {
 	m.settings.DotsRepo = "/home/user/dotfiles"
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
+	m.dotsExpandedState = app.DotStateSynced
 	m.dotsEntries = []app.DotStatus{
 		{
 			Name:       "nvim",
@@ -887,6 +1040,7 @@ func TestRenderDots_UsesHomeAliasForUserPaths(t *testing.T) {
 	m.settings.DotsRepo = "/home/user/dotfiles"
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
+	m.dotsExpandedState = app.DotStateSynced
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "/home/user/.config/nvim",
@@ -1341,6 +1495,7 @@ func TestRenderDots_NarrowWidthFitsRows(t *testing.T) {
 		}},
 	}}
 	m.dotsExpandedName = "very-long-dot-entry-name"
+	m.dotsExpandedState = app.DotStateSynced
 
 	assertLinesFitWidth(t, renderDots(m), m.width)
 }
@@ -1367,3 +1522,168 @@ func TestRenderDots_DotsDisabledTrue(t *testing.T) {
 
 // Ensure we import config so BoolVal is exercised via renderDots.
 var _ = config.BoolVal
+
+// ── dotsRowHintItems — ignored-section child hints ────────────────────────────
+
+// ignoredSectionModel builds a model with one synthesized container (dotfiles)
+// in the Ignored section, expanded to show an intermediate dir (claude,
+// Ignored=false) with two explicitly-ignored leaves (a, b, Ignored=true).
+// The synthesized container has DotActionIgnore+DotActionRemove (no Unignore).
+func ignoredSectionModel() Model {
+	m := baseModel(nil)
+	m.width = 120
+	m.height = 40
+	m.settings.DotsRepo = "/repo"
+	m.dotsLoaded = true
+	m.dotsEntries = []app.DotStatus{
+		{
+			Name:       "dotfiles",
+			TargetPath: "~/.config",
+			State:      app.DotStateIgnored,
+			Actions:    []app.DotAction{app.DotActionIgnore, app.DotActionRemove},
+			IsDir:      true,
+			Counts:     app.DotFileCounts{Ignored: 2},
+			Children: []app.DotChild{
+				{
+					Name: "claude", RelPath: "claude", Path: "~/.config/claude",
+					IsDir: true, Depth: 1, Ignored: false,
+					FileCount: 2,
+					Children: []app.DotChild{
+						{Name: "a", RelPath: "claude/a", Path: "~/.config/claude/a", Depth: 2, Ignored: true},
+						{Name: "b", RelPath: "claude/b", Path: "~/.config/claude/b", Depth: 2, Ignored: true},
+					},
+				},
+			},
+		},
+	}
+	m.dotsExpandedName = "dotfiles"
+	m.dotsExpandedState = app.DotStateIgnored
+	m.dotsExpandedChildren = map[string]bool{
+		dotsChildExpandKey("dotfiles", "claude"): true,
+	}
+	return m
+}
+
+// TestDotsRowHintItems_IgnoredChild_ExplicitlyIgnored verifies that when the
+// cursor is on an explicitly-ignored leaf (Ignored=true) inside the ignored
+// section, dotsRowHintItems returns a hint whose description is "include".
+func TestDotsRowHintItems_IgnoredChild_ExplicitlyIgnored(t *testing.T) {
+	m := ignoredSectionModel()
+
+	// Enumerate visible rows to find a leaf with Ignored=true.
+	visible := dotsVisibleRows(m)
+	leafIdx := -1
+	for i, row := range visible {
+		if row.isChild && row.child.Ignored {
+			leafIdx = i
+			break
+		}
+	}
+	if leafIdx < 0 {
+		t.Fatal("no explicitly-ignored child row found in visible rows")
+	}
+
+	m.dotsCursor = leafIdx
+	hints := dotsRowHintItems(m)
+
+	var descs []string
+	for _, h := range hints {
+		descs = append(descs, h.desc)
+	}
+	found := false
+	for _, d := range descs {
+		if strings.Contains(d, "include") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected 'include' hint for explicitly-ignored child, got hints: %v", descs)
+	}
+	for _, d := range descs {
+		if strings.Contains(d, "ignore") && !strings.Contains(d, "include") {
+			t.Errorf("expected no bare 'ignore' hint for already-ignored child, got hints: %v", descs)
+		}
+	}
+}
+
+// TestDotsRowHintItems_IgnoredChild_IntermediateDir verifies that when the
+// cursor is on an intermediate directory (Ignored=false) inside the ignored
+// section, dotsRowHintItems returns a hint whose description is "ignore".
+func TestDotsRowHintItems_IgnoredChild_IntermediateDir(t *testing.T) {
+	m := ignoredSectionModel()
+
+	// Enumerate visible rows to find an intermediate dir child (Ignored=false).
+	visible := dotsVisibleRows(m)
+	dirIdx := -1
+	for i, row := range visible {
+		if row.isChild && !row.child.Ignored && row.child.IsDir {
+			dirIdx = i
+			break
+		}
+	}
+	if dirIdx < 0 {
+		t.Fatal("no intermediate-dir child row found in visible rows")
+	}
+
+	m.dotsCursor = dirIdx
+	hints := dotsRowHintItems(m)
+
+	var descs []string
+	for _, h := range hints {
+		descs = append(descs, h.desc)
+	}
+	found := false
+	for _, d := range descs {
+		if strings.Contains(d, "ignore") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected 'ignore' hint for intermediate-dir child, got hints: %v", descs)
+	}
+	for _, d := range descs {
+		if strings.Contains(d, "include") {
+			t.Errorf("unexpected 'include' hint for non-ignored intermediate dir, got hints: %v", descs)
+		}
+	}
+}
+
+// TestDotsRowHintItems_SynthesizedContainer_HasIgnoreHint verifies that a
+// synthesized container (DotActionIgnore, State=DotStateIgnored, no
+// DotActionUnignore) shows an "include" hint (State is Ignored → "include"),
+// confirming the hint branch is reached now that the entry has DotActionIgnore.
+func TestDotsRowHintItems_SynthesizedContainer_HasIgnoreHint(t *testing.T) {
+	m := ignoredSectionModel()
+
+	// The synthesized container is the first visible row (index 0).
+	visible := dotsVisibleRows(m)
+	if len(visible) == 0 {
+		t.Fatal("no visible rows")
+	}
+	containerIdx := 0
+	if visible[containerIdx].isChild {
+		t.Fatal("expected row 0 to be the container entry, not a child")
+	}
+
+	m.dotsCursor = containerIdx
+	hints := dotsRowHintItems(m)
+
+	// State is DotStateIgnored, so the hint desc must be "include"
+	// (the entry is already ignored; the action un-ignores it).
+	var descs []string
+	for _, h := range hints {
+		descs = append(descs, h.desc)
+	}
+	found := false
+	for _, d := range descs {
+		if strings.Contains(d, "include") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("synthesized container with DotActionIgnore+State=Ignored should have 'include' hint, got hints: %v", descs)
+	}
+}
