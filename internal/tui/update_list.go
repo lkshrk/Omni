@@ -21,12 +21,12 @@ const (
 func (m *Model) handleListNavigationKeyMsg(msg tea.KeyPressMsg) bool {
 	switch {
 	case key.Matches(msg, m.keys.Up):
-		if m.cursor > 0 {
-			m.cursor--
+		if n := len(m.visibleTools); n > 0 {
+			m.cursor = (m.cursor - 1 + n) % n
 		}
 	case key.Matches(msg, m.keys.Down):
-		if m.cursor < len(m.visibleTools)-1 {
-			m.cursor++
+		if n := len(m.visibleTools); n > 0 {
+			m.cursor = (m.cursor + 1) % n
 		}
 	case key.Matches(msg, m.keys.Top):
 		m.cursor = 0
