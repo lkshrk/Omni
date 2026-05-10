@@ -34,7 +34,7 @@ func (a *App) RefreshOutdated(ctx context.Context, progress func(string)) error 
 	outdatedByManager := make(map[string]map[string]map[string]string)
 	// Closure always returns nil; per-provider OutdatedMap failures are skipped so a
 	// single bad provider doesn't prevent updating the rest.
-	_ = a.forEachAvailable(ctx, func(p provider.Provider) error {
+	_ = a.forEachAvailable(ctx, func(p provider.Provider) error { //nolint:errcheck // best-effort outdated check
 		oc, ok := p.(provider.OutdatedChecker)
 		if !ok {
 			return nil
@@ -401,7 +401,10 @@ func (a *App) refreshDescriptionsIndividually(ctx context.Context, provName stri
 			}
 		}()
 	}
+	var feederDone sync.WaitGroup
+	feederDone.Add(1)
 	go func() {
+		defer feederDone.Done()
 		defer close(jobs)
 		for _, p := range pending {
 			select {
@@ -412,6 +415,7 @@ func (a *App) refreshDescriptionsIndividually(ctx context.Context, provName stri
 		}
 	}()
 	wg.Wait()
+	feederDone.Wait()
 	close(results)
 
 	if err := ctx.Err(); err != nil {

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -119,6 +120,35 @@ func TestSendAdminTerminalOutputPreservesRecentOutputWhenBufferFull(t *testing.T
 	}
 	if !strings.Contains(got, "ERROR: final failure detail") {
 		t.Fatalf("buffered output lost final error line:\n%s", got)
+	}
+}
+
+func TestSendAdminTerminalOutputPreservesDoneMsg(t *testing.T) {
+	events := make(chan tea.Msg, adminTerminalEventBuffer)
+	// Fill channel completely with output messages.
+	for i := range adminTerminalEventBuffer {
+		events <- adminTerminalOutputMsg{id: 1, chunk: fmt.Sprintf("line %d\n", i)}
+	}
+	// Inject a doneMsg at the front by draining one and re-inserting.
+	<-events
+	events <- adminTerminalDoneMsg{id: 1, state: adminTerminalState{id: 1}}
+
+	// Now the channel is full with a mix of output + one doneMsg at the end.
+	// Send more output — this should drain output messages but never the doneMsg.
+	for range 10 {
+		sendAdminTerminalOutput(events, adminTerminalOutputMsg{id: 1, chunk: "new\n"})
+	}
+
+	// Drain and verify the doneMsg survived.
+	foundDone := false
+	for len(events) > 0 {
+		msg := <-events
+		if _, ok := msg.(adminTerminalDoneMsg); ok {
+			foundDone = true
+		}
+	}
+	if !foundDone {
+		t.Fatal("sendAdminTerminalOutput dropped adminTerminalDoneMsg; it must never be discarded")
 	}
 }
 

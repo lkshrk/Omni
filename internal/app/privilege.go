@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/lkshrk/omni/internal/database"
@@ -64,7 +65,13 @@ func (a *App) recordPrivilegeError(ctx context.Context, name, prov, pkg string, 
 	if pkg == "" {
 		pkg = name
 	}
-	_ = a.readDB().MarkPrivilegeRequired(context.WithoutCancel(ctx), name, prov, pkg, string(plan.Requirement), plan.Reason)
+	db := a.readDB()
+	if db == nil {
+		return // DB not initialised; skip best-effort privilege recording
+	}
+	if err := db.MarkPrivilegeRequired(context.WithoutCancel(ctx), name, prov, pkg, string(plan.Requirement), plan.Reason); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: omni: record privilege for %s: %v\n", name, err)
+	}
 }
 
 func (a *App) MarkToolPrivilegeRequired(ctx context.Context, name, prov, pkg, requirement, reason string) error {

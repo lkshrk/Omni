@@ -14,7 +14,7 @@ import (
 
 type Provider struct {
 	exec executor.Executor
-	mu   sync.Mutex
+	mu   sync.RWMutex
 }
 
 func New(exec executor.Executor) *Provider {
@@ -25,8 +25,8 @@ func (p *Provider) Name() string        { return "brew" }
 func (p *Provider) Description() string { return "Homebrew — macOS/Linux package manager" }
 
 func (p *Provider) Available(ctx context.Context) (bool, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	_, _, err := p.exec.Run(ctx, "brew", "--version")
 	if err != nil {
 		return false, nil // binary not found; not an error from our perspective
@@ -71,8 +71,8 @@ func (p *Provider) Upgrade(ctx context.Context, tool provider.Tool) error {
 // `brew list --versions` only searches formulae by default, so we try the cask
 // flag as a fallback.
 func (p *Provider) IsInstalled(ctx context.Context, tool provider.Tool) (bool, string, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	name := formulaName(tool.EffectivePackage())
 	for _, args := range [][]string{
 		{"list", "--versions", name},
@@ -116,8 +116,8 @@ type brewCaskInfo struct {
 // Uses `brew info --json=v2 --installed` because `--full-name` and `--versions` are
 // mutually exclusive on `brew list`.
 func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	stdout, _, err := p.exec.Run(ctx, "brew", "info", "--json=v2", "--installed")
 	if err != nil {
 		return nil, fmt.Errorf("brew info --installed: %w", err)
@@ -166,8 +166,8 @@ func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) 
 // artifact and uninstall through pkgutil, which may require sudo even though
 // normal brew formula operations do not.
 func (p *Provider) InstalledMetadataMap(ctx context.Context) (map[string]provider.InstalledMetadata, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	out, err := p.info(ctx, "info", "--json=v2", "--installed")
 	if err != nil {
 		return nil, err
@@ -207,8 +207,8 @@ func (p *Provider) info(ctx context.Context, args ...string) (brewInfoOutput, er
 }
 
 func (p *Provider) PrivilegePlan(ctx context.Context, action provider.PrivilegeAction, tool provider.Tool) (provider.PrivilegePlan, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	out, err := p.info(ctx, "info", "--json=v2", "--cask", tool.EffectivePackage())
 	if err != nil {
 		return provider.PrivilegePlan{}, nil
@@ -333,15 +333,15 @@ func (p *Provider) OutdatedMap(ctx context.Context) (map[string]string, error) {
 		m[strings.ToLower(formulaName(f.Name))] = f.CurrentVersion
 	}
 	for _, c := range out.Casks {
-		m[strings.ToLower(c.Name)] = c.CurrentVersion
+		m[strings.ToLower(formulaName(c.Name))] = c.CurrentVersion
 	}
 	return m, nil
 }
 
 // Describe fetches a one-line description via `brew info --json=v2`.
 func (p *Provider) Describe(ctx context.Context, tool provider.Tool) (string, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	out, err := p.info(ctx, "info", "--json=v2", tool.EffectivePackage())
 	if err != nil {
 		return "", fmt.Errorf("brew info %s: %w", tool.EffectivePackage(), err)
@@ -361,8 +361,8 @@ func (p *Provider) BulkDescribe(ctx context.Context, tools []provider.Tool) (map
 	if len(tools) == 0 {
 		return nil, nil
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	args := make([]string, 0, len(tools)+2)
 	args = append(args, "info", "--json=v2")
 	for _, t := range tools {
@@ -407,8 +407,8 @@ func (p *Provider) Untap(ctx context.Context, name string) error {
 }
 
 func (p *Provider) ListTaps(ctx context.Context) ([]string, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	stdout, _, err := p.exec.Run(ctx, "brew", "tap")
 	if err != nil {
 		return nil, fmt.Errorf("brew tap: %w", err)
@@ -436,8 +436,8 @@ func (p *Provider) IsTapped(ctx context.Context, name string) (bool, error) {
 }
 
 func (p *Provider) Search(ctx context.Context, query string) ([]provider.SearchResult, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	stdout, stderr, err := p.exec.Run(ctx, "brew", "search", query)
 	if err != nil {
 		if isSearchNotFound(stdout) || isSearchNotFound(stderr) {

@@ -391,7 +391,10 @@ func (a *App) ResolvedEcosystemProviders(ctx context.Context) map[string]string 
 			return nil
 		})
 	}
-	_ = g.Wait()
+	// Goroutines return nil unconditionally; Wait only fails on panic recovery.
+	if err := g.Wait(); err != nil {
+		return nil
+	}
 	result := make(map[string]string, len(out))
 	for _, r := range out {
 		if r.name != "" {

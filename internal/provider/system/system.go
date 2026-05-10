@@ -6,12 +6,18 @@ package system
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 
 	"github.com/lkshrk/omni/internal/provider"
 )
+
+// errNoPMAvailable is returned by resolve when no delegate package manager is
+// found. It is distinguished from delegate probe errors so Available can return
+// false without surfacing a misleading error.
+var errNoPMAvailable = errors.New("system: no package manager available")
 
 // Provider is an ecosystem provider that delegates to the first available PM.
 type Provider struct {
@@ -34,13 +40,7 @@ func (p *Provider) Description() string {
 func (p *Provider) Available(ctx context.Context) (bool, error) {
 	_, err := p.resolve(ctx)
 	if err != nil {
-		// resolve returns an error both when no delegate is available (no PM
-		// found) and when a delegate probe itself errored. Only the latter is
-		// a real error worth propagating; "no PM available" is a normal false.
-		// resolve wraps delegate errors with "checking <name> availability:",
-		// whereas "system: no package manager available" indicates exhausted
-		// delegates with no error. Distinguish by checking the prefix.
-		if strings.HasPrefix(err.Error(), "system: no package manager available") {
+		if errors.Is(err, errNoPMAvailable) {
 			return false, nil
 		}
 		return false, err
@@ -161,7 +161,7 @@ func (p *Provider) resolve(ctx context.Context) (provider.Provider, error) {
 			return d, nil
 		}
 	}
-	return nil, fmt.Errorf("system: no package manager available (tried: %s)", p.delegateNames())
+	return nil, fmt.Errorf("%w (tried: %s)", errNoPMAvailable, p.delegateNames())
 }
 
 func (p *Provider) delegateNames() string {

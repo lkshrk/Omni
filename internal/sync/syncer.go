@@ -276,16 +276,18 @@ func (s *Syncer) Sync(ctx context.Context, cfg *config.Config, opts SyncOptions)
 
 			if mbc, ok := prov.(provider.MultiManagerBulkChecker); ok {
 				m, err := mbc.InstalledByManager(gCtx1b)
-				if err == nil {
-					st.installedByManager = m
+				if err != nil {
+					return fmt.Errorf("bulk check %s (by-manager): %w", name, err)
 				}
+				st.installedByManager = m
 			}
 			if st.installedByManager == nil {
 				if bc, ok := prov.(provider.BulkChecker); ok {
 					m, err := bc.InstalledMap(gCtx1b)
-					if err == nil {
-						st.installed = m
+					if err != nil {
+						return fmt.Errorf("bulk check %s: %w", name, err)
 					}
+					st.installed = m
 				}
 			}
 			return nil
