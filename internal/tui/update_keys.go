@@ -82,6 +82,20 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 		return *m, tea.Batch(cmds...)
 	}
 
+	wasHidden := m.cursorHidden
+	m.cursorHidden = false
+
+	// First navigation keypress after a tab switch reveals the cursor without moving it.
+	if wasHidden && isMainTabMode(m.mode) && isNavigationKey(msg, m.keys) {
+		return *m, tea.Batch(cmds...)
+	}
+
+	// Global actions available from any main tab.
+	if isMainTabMode(m.mode) && key.Matches(msg, m.keys.DotCommit) {
+		m.startDashboardDotsCommit(&cmds)
+		return *m, tea.Batch(cmds...)
+	}
+
 	switch m.mode {
 	case viewSearch:
 		cmds = append(cmds, m.handleSearchKeyMsg(msg)...)
@@ -172,6 +186,7 @@ func (m *Model) switchMainTab(target viewMode, cmds *[]tea.Cmd) bool {
 		m.assignmentSection = 0
 	}
 	m.cancelConfirmationForGlobalNavigation()
+	m.cursorHidden = true
 	m.mode = target
 	if target == viewDots && m.settings.DotsRepo != "" && !m.dotsLoaded && !m.dotsLoading && !m.dotsPreparing {
 		m.beginDotsOperation("Loading dots…")
@@ -219,4 +234,9 @@ func (m *Model) cancelConfirmationForGlobalNavigation() {
 	}
 	m.clearActiveConfirmation()
 	m.cancelConfirmationTimeout()
+}
+
+func isNavigationKey(msg tea.KeyPressMsg, k KeyMap) bool {
+	return key.Matches(msg, k.Up, k.Down, k.Top, k.Bottom,
+		k.HalfPageUp, k.HalfPageDown, k.PageUp, k.PageDown)
 }

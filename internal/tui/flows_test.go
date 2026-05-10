@@ -141,7 +141,8 @@ func manyTools(n int) []*database.ToolCache {
 
 // toSettings returns the key sequence that navigates from list to settings tab.
 func toSettings() []tea.Msg {
-	return []tea.Msg{pressTab(), pressTab(), pressTab()}
+	// Third tab lands on settings with cursor hidden; the extra j reveals cursor at row 0.
+	return []tea.Msg{pressTab(), pressTab(), pressTab(), pressRune('j')}
 }
 
 // nj returns n 'j' presses.
@@ -184,17 +185,17 @@ func TestFlow_UC01_CursorNavigation(t *testing.T) {
 		}
 	})
 
-	t.Run("k at top stays at 0", func(t *testing.T) {
+	t.Run("k at top wraps to bottom", func(t *testing.T) {
 		got := drive(m, pressRune('k'))
-		if got.cursor != 0 {
-			t.Errorf("cursor = %d, want 0", got.cursor)
+		if got.cursor != 2 {
+			t.Errorf("cursor = %d, want 2 (wrapped)", got.cursor)
 		}
 	})
 
-	t.Run("j clamps at last item", func(t *testing.T) {
-		got := drive(m, pressRune('j'), pressRune('j'), pressRune('j'), pressRune('j'))
-		if got.cursor != 2 {
-			t.Errorf("cursor = %d, want 2", got.cursor)
+	t.Run("j wraps to top from last item", func(t *testing.T) {
+		got := drive(m, pressRune('j'), pressRune('j'), pressRune('j'))
+		if got.cursor != 0 {
+			t.Errorf("cursor = %d, want 0 (wrapped)", got.cursor)
 		}
 	})
 
@@ -1167,11 +1168,11 @@ func TestFlow_UC30_SettingsNavigation(t *testing.T) {
 		}
 	})
 
-	t.Run("cursor clamps at last row", func(t *testing.T) {
-		msgs := append(toSettings(), nj(20)...)
+	t.Run("cursor wraps to top from last row", func(t *testing.T) {
+		msgs := append(toSettings(), nj(numSettingRows)...)
 		got := drive(baseModel(nil), msgs...)
-		if got.settingsCursor != numSettingRows-1 {
-			t.Errorf("settingsCursor = %d, want %d (clamped)", got.settingsCursor, numSettingRows-1)
+		if got.settingsCursor != 0 {
+			t.Errorf("settingsCursor = %d, want 0 (wrapped)", got.settingsCursor)
 		}
 	})
 }
@@ -1427,7 +1428,8 @@ func TestFlow_UC37_GroupsNavigation(t *testing.T) {
 				"beta":  {},
 			},
 		}
-		msgs := append(toHosts(), pressRune('j'))
+		// First j after tab switch reveals cursor; second j navigates.
+		msgs := append(toHosts(), pressRune('j'), pressRune('j'))
 		got := drive(m, msgs...)
 		// hostCursor advances OR assignmentSection advances.
 		if got.hostCursor < 1 && got.assignmentSection < 1 {
@@ -1571,17 +1573,17 @@ func TestFlow_UC42_DotsNavigation(t *testing.T) {
 		}
 	})
 
-	t.Run("cursor clamps at top", func(t *testing.T) {
+	t.Run("cursor wraps to bottom from top", func(t *testing.T) {
 		got := drive(m, pressRune('k'))
-		if got.dotsCursor != 0 {
-			t.Errorf("dotsCursor = %d at top, want 0", got.dotsCursor)
+		if got.dotsCursor != 2 {
+			t.Errorf("dotsCursor = %d, want 2 (wrapped to bottom)", got.dotsCursor)
 		}
 	})
 
-	t.Run("cursor clamps at bottom", func(t *testing.T) {
-		got := drive(m, pressRune('j'), pressRune('j'), pressRune('j'), pressRune('j'))
-		if got.dotsCursor != 2 {
-			t.Errorf("dotsCursor = %d, want 2 at bottom", got.dotsCursor)
+	t.Run("cursor wraps to top from bottom", func(t *testing.T) {
+		got := drive(m, pressRune('j'), pressRune('j'), pressRune('j'))
+		if got.dotsCursor != 0 {
+			t.Errorf("dotsCursor = %d, want 0 (wrapped to top)", got.dotsCursor)
 		}
 	})
 }
@@ -1804,27 +1806,211 @@ func TestFlow_UC45_DotsConflictOverwrite(t *testing.T) {
 }
 
 func TestFlow_DotsSynthesizedIgnoredChildUnignore(t *testing.T) {
-	// Synthesized ignored-child top-level rows (name = "parent/relpath") must
-	// dispatch doDotsIgnore (pattern removal) not doDotsEntryIgnore (whole-entry
-	// toggle). Regression: the composite name did not match any real entry,
-	// leaving the child permanently ignored.
+	// Merged ignored-child entries with Children expand instead of toggling
+	// the whole entry; individual children can then be unignored.
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.dotsLoaded = true
 	m.settings.DotsRepo = "/repo"
-	// ignoredChildDotStatuses synthesizes top-level entries with Name = "nvim/lua/plugin.lua"
 	m.dotsEntries = []app.DotStatus{{
-		Name:       "nvim/lua/plugin.lua",
-		TargetPath: "~/.config/nvim/lua/plugin.lua",
-		ConfigPath: "~/.config/nvim/lua/plugin.lua",
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		ConfigPath: "~/.config/nvim",
 		Health:     app.HealthOK,
 		State:      app.DotStateIgnored,
+		IsDir:      true,
+		Children: []app.DotChild{{
+			Name:    "lua",
+			RelPath: "lua",
+			Path:    "~/.config/nvim/lua",
+			IsDir:   true,
+			Depth:   1,
+			Ignored: true,
+			Children: []app.DotChild{{
+				Name:    "plugin.lua",
+				RelPath: "lua/plugin.lua",
+				Path:    "~/.config/nvim/lua/plugin.lua",
+				Depth:   2,
+				Ignored: true,
+			}},
+		}},
 	}}
 
-	// First x = confirmation, second x = dispatch
+	// First x = confirmation, second x = expands tree instead of dispatching
 	got := drive(m, pressRune('x'), pressRune('x'))
-	if !got.dotsLoading {
-		t.Fatalf("dotsLoading = false, want true after un-ignoring synthesized child")
+	if got.dotsExpandedName != "nvim" {
+		t.Fatalf("dotsExpandedName = %q, want %q after pressing x on merged ignored entry", got.dotsExpandedName, "nvim")
+	}
+}
+
+func TestFlow_DotsMergedIgnoredExpandCollapse(t *testing.T) {
+	// Merged ignored entries expand/collapse with space like synced entries.
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.dotsLoaded = true
+	m.settings.DotsRepo = "/repo"
+	m.dotsEntries = []app.DotStatus{
+		{
+			Name:   "nvim",
+			State:  app.DotStateSynced,
+			Health: app.HealthOK,
+			Counts: app.DotFileCounts{Synced: 2},
+		},
+		{
+			Name:       "nvim",
+			TargetPath: "~/.config/nvim",
+			State:      app.DotStateIgnored,
+			Health:     app.HealthOK,
+			IsDir:      true,
+			Children: []app.DotChild{
+				{Name: "node_modules", RelPath: "node_modules", Path: "~/.config/nvim/node_modules", IsDir: true, Depth: 1, Ignored: true, Children: []app.DotChild{
+					{Name: "pkg", RelPath: "node_modules/pkg", Path: "~/.config/nvim/node_modules/pkg", IsDir: true, Depth: 2, Ignored: true},
+				}},
+				{Name: "auth.json", RelPath: "auth.json", Path: "~/.config/nvim/auth.json", Depth: 1, Ignored: true},
+			},
+		},
+	}
+
+	// Cursor starts on first entry (synced nvim). Move to ignored nvim.
+	toIgnored := drive(m, pressRune('j'))
+
+	// Space expands the merged ignored entry.
+	expanded := drive(toIgnored, pressRune(' '))
+	if expanded.dotsExpandedName != "nvim" {
+		t.Fatalf("dotsExpandedName = %q, want nvim after space on merged ignored entry", expanded.dotsExpandedName)
+	}
+	rows := dotsVisibleRows(expanded)
+	if len(rows) != 4 { // synced nvim + ignored nvim + node_modules + auth.json
+		t.Fatalf("visible rows = %d, want 4 (synced + ignored parent + 2 children)", len(rows))
+	}
+
+	// Space again collapses.
+	collapsed := drive(expanded, pressRune(' '))
+	if collapsed.dotsExpandedName != "" {
+		t.Fatalf("dotsExpandedName = %q, want empty after collapsing", collapsed.dotsExpandedName)
+	}
+	if rows := dotsVisibleRows(collapsed); len(rows) != 2 {
+		t.Fatalf("visible rows after collapse = %d, want 2", len(rows))
+	}
+}
+
+func TestFlow_DotsExpandIgnoredDoesNotExpandSyncedSameName(t *testing.T) {
+	// Regression: expanding an ignored entry must not also expand a synced entry
+	// with the same name. The fix introduced dotsExpandedState to scope expansion
+	// to the correct section (DotStateSynced vs DotStateIgnored).
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.dotsLoaded = true
+	m.settings.DotsRepo = "/repo"
+
+	syncedEntry := app.DotStatus{
+		Name:   "nvim",
+		State:  app.DotStateSynced,
+		Health: app.HealthOK,
+		Counts: app.DotFileCounts{Synced: 2},
+	}
+	ignoredEntry := app.DotStatus{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		State:      app.DotStateIgnored,
+		Health:     app.HealthOK,
+		IsDir:      true,
+		Children: []app.DotChild{
+			{Name: "node_modules", RelPath: "node_modules", Path: "~/.config/nvim/node_modules", IsDir: true, Depth: 1, Ignored: true},
+			{Name: "auth.json", RelPath: "auth.json", Path: "~/.config/nvim/auth.json", Depth: 1, Ignored: true},
+		},
+	}
+	m.dotsEntries = []app.DotStatus{syncedEntry, ignoredEntry}
+
+	// Cursor starts on synced nvim (index 0). Move down to ignored nvim.
+	m = drive(m, pressRune('j'))
+
+	// Expand the ignored nvim with space.
+	m = drive(m, pressRune(' '))
+
+	// 1. dotsExpandedState must be DotStateIgnored.
+	if m.dotsExpandedState != app.DotStateIgnored {
+		t.Fatalf("dotsExpandedState = %v, want DotStateIgnored", m.dotsExpandedState)
+	}
+
+	// 2. Visible rows: synced nvim (collapsed) + ignored nvim + 2 children = 4.
+	rows := dotsVisibleRows(m)
+	if len(rows) != 4 {
+		t.Fatalf("visible rows = %d, want 4 (synced collapsed + ignored parent + 2 children)", len(rows))
+	}
+
+	// 3. The synced nvim entry must NOT match the expanded state.
+	if dotsEntryMatchesExpanded(m, syncedEntry) {
+		t.Fatal("synced nvim incorrectly treated as expanded — dual-expand bug is present")
+	}
+}
+
+func TestFlow_DotsMergedIgnoredNestedExpand(t *testing.T) {
+	// Expanding a child directory inside a merged ignored entry works.
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.dotsLoaded = true
+	m.settings.DotsRepo = "/repo"
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		State:      app.DotStateIgnored,
+		Health:     app.HealthOK,
+		IsDir:      true,
+		Children: []app.DotChild{
+			{Name: "lua", RelPath: "lua", Path: "~/.config/nvim/lua", IsDir: true, Depth: 1, Ignored: true, Children: []app.DotChild{
+				{Name: "config.lua", RelPath: "lua/config.lua", Path: "~/.config/nvim/lua/config.lua", Depth: 2, Ignored: true},
+			}},
+			{Name: "init.vim", RelPath: "init.vim", Path: "~/.config/nvim/init.vim", Depth: 1, Ignored: true},
+		},
+	}}
+
+	// Expand top-level entry.
+	expanded := drive(m, pressRune(' '))
+	if expanded.dotsExpandedName != "nvim" {
+		t.Fatalf("dotsExpandedName = %q, want nvim", expanded.dotsExpandedName)
+	}
+	rows := dotsVisibleRows(expanded)
+	if len(rows) != 3 { // nvim + lua + init.vim
+		t.Fatalf("visible rows = %d, want 3", len(rows))
+	}
+
+	// Move to lua child and expand it.
+	down := drive(expanded, pressRune('j'))
+	nestedExpanded := drive(down, pressRune(' '))
+	rows = dotsVisibleRows(nestedExpanded)
+	if len(rows) != 4 { // nvim + lua + config.lua + init.vim
+		t.Fatalf("visible rows after nested expand = %d, want 4", len(rows))
+	}
+	if !nestedExpanded.dotsExpandedChildren[dotsChildExpandKey("nvim", "lua")] {
+		t.Fatal("lua child not marked expanded in dotsExpandedChildren")
+	}
+}
+
+func TestFlow_DotsMergedIgnoredChildUnignoreDispatch(t *testing.T) {
+	// Pressing x on an ignored child within a merged entry dispatches
+	// the ignore-pattern removal, not the whole-entry toggle.
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.dotsLoaded = true
+	m.settings.DotsRepo = "/repo"
+	m.dotsExpandedName = "nvim"
+	m.dotsExpandedState = app.DotStateIgnored
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		State:      app.DotStateIgnored,
+		Health:     app.HealthOK,
+		IsDir:      true,
+		Children: []app.DotChild{
+			{Name: "node_modules", RelPath: "node_modules", Path: "~/.config/nvim/node_modules", IsDir: true, Depth: 1, Ignored: true},
+		},
+	}}
+
+	// j moves to child row, x opens confirmation.
+	got := drive(m, pressRune('j'), pressRune('x'))
+	if got.dotsIgnoreIdx != 1 {
+		t.Fatalf("dotsIgnoreIdx = %d, want 1 (child row confirmation)", got.dotsIgnoreIdx)
 	}
 }
 
@@ -1834,6 +2020,7 @@ func TestFlow_DotsChildRowsCanBeIgnored(t *testing.T) {
 	m.dotsLoaded = true
 	m.settings.DotsRepo = "/repo"
 	m.dotsExpandedName = "nvim"
+	m.dotsExpandedState = app.DotStateSynced
 	m.dotsEntries = []app.DotStatus{{
 		Name:    "nvim",
 		Health:  app.HealthOK,

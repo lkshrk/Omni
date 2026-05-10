@@ -20,13 +20,9 @@ func (m *Model) handleSettingsKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 
 	switch {
 	case key.Matches(msg, m.keys.Up):
-		if m.settingsCursor > 0 {
-			m.settingsCursor--
-		}
+		m.settingsCursor = (m.settingsCursor - 1 + numSettingRows) % numSettingRows
 	case key.Matches(msg, m.keys.Down):
-		if m.settingsCursor < numSettingRows-1 {
-			m.settingsCursor++
-		}
+		m.settingsCursor = (m.settingsCursor + 1) % numSettingRows
 	case key.Matches(msg, m.keys.Toggle):
 		m.handleSettingsRowAction(&cmds)
 	case key.Matches(msg, m.keys.Confirm):

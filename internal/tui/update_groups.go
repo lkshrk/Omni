@@ -518,6 +518,13 @@ func (m *Model) moveGroupsCursorUp() {
 	case 0:
 		if m.hostCursor > 0 {
 			m.hostCursor--
+		} else {
+			// Wrap to bottom of groups section.
+			allGroupNames := buildAllGroupNames(m.groupNames)
+			if len(allGroupNames) > 0 {
+				m.assignmentSection = 1
+				m.groupCursor = len(allGroupNames) - 1
+			}
 		}
 	case 1:
 		if m.groupCursor > 0 {
@@ -548,6 +555,10 @@ func (m *Model) moveGroupsCursorDown() {
 		allGroupNames := buildAllGroupNames(m.groupNames)
 		if m.groupCursor < len(allGroupNames)-1 {
 			m.groupCursor++
+		} else {
+			// Wrap to top of hosts section.
+			m.assignmentSection = 0
+			m.hostCursor = 0
 		}
 	}
 }

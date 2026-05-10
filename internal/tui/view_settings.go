@@ -451,7 +451,8 @@ func renderSettings(m Model) string {
 		}
 
 		// Record cursor line after the section header but before the row content.
-		if i == m.settingsCursor {
+		isSettingsCursor := i == m.settingsCursor && !m.cursorHidden
+		if isSettingsCursor {
 			buf.markCursor()
 		}
 
@@ -510,7 +511,7 @@ func renderSettings(m Model) string {
 			continue
 		}
 
-		if i == m.settingsCursor {
+		if isSettingsCursor {
 			labelStyle := p.styleActiveText
 			if row.danger {
 				labelStyle = p.styleDangerSection
@@ -527,7 +528,7 @@ func renderSettings(m Model) string {
 				contentW, settingsMinGap, listColumnGap,
 			) + "\n")
 		}
-		if i == m.settingsCursor {
+		if isSettingsCursor {
 			if i == settingsRowDotsServices {
 				write(renderDotsServiceDashboard(m, detailPrefix) + "\n")
 			} else if i == settingsRowDoctor && (m.doctorResult != nil || m.doctorErr != "") {
@@ -864,7 +865,6 @@ func renderNewGroupInputView(m Model, width int) string {
 
 func renderGroups(m Model) string {
 	p := m.palette
-	rowInset := rowContentInset()
 	detailPrefix := textRowContentPrefix()
 	hintPrefix := textRowHintPrefix()
 	var top []string
@@ -901,7 +901,7 @@ func renderGroups(m Model) string {
 			groupBadge := compactHostAssignmentList(name, hostGroups)
 			hostBadge := hostStatusLabel(m.hostInfo, name)
 			nameLabel := name
-			hostSelected := m.assignmentSection == 0 && i == m.hostCursor
+			hostSelected := m.assignmentSection == 0 && i == m.hostCursor && !m.cursorHidden
 			if hostSelected {
 				if m.hostRenameMode {
 					inputWidth := max(m.width-lipgloss.Width("    Rename: [ ")-4, 20)
@@ -974,10 +974,10 @@ func renderGroups(m Model) string {
 	for i, gn := range allGroupNames {
 		count := groupCounts[gn]
 		displayName := groupDisplayName(gn)
-		label := rowInset + displayName
+		label := displayName
 		toolCount := compactCount(count, "tool")
 		dotCount := compactCount(groupDots[gn], "dotfile")
-		isSelected := groupsFocused && i == m.groupCursor
+		isSelected := groupsFocused && i == m.groupCursor && !m.cursorHidden
 
 		if isSelected {
 			switch {

@@ -24,12 +24,12 @@ func (m *Model) handleStatusKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		m.mode = viewList
 		return nil
 	case key.Matches(msg, m.keys.Up):
-		if m.statusCursor > 0 {
-			m.statusCursor--
+		if n := len(rows); n > 0 {
+			m.statusCursor = (m.statusCursor - 1 + n) % n
 		}
 	case key.Matches(msg, m.keys.Down):
-		if m.statusCursor < len(rows)-1 {
-			m.statusCursor++
+		if n := len(rows); n > 0 {
+			m.statusCursor = (m.statusCursor + 1) % n
 		}
 	case key.Matches(msg, m.keys.Top):
 		m.statusCursor = 0
