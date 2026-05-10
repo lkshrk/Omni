@@ -56,6 +56,10 @@ type App struct {
 	// a shared lock long enough to copy the pointer; the copy is then used directly
 	// because SQLite's own locking handles concurrent method calls.
 	dbMu sync.RWMutex
+
+	// historyMu serialises the read-modify-write cycle in prependDotsHistory
+	// so concurrent tea.Cmd goroutines cannot lose history entries.
+	historyMu sync.Mutex
 }
 
 func (a *App) requireSafeTestHomeForDots() error {
@@ -334,7 +338,10 @@ func (a *App) availableProviders(ctx context.Context) []provider.Provider {
 			return nil // never propagate; treat error as unavailable
 		})
 	}
-	_ = g.Wait()
+	// Goroutines return nil unconditionally; Wait only fails on panic recovery.
+	if err := g.Wait(); err != nil {
+		return nil
+	}
 	out := make([]provider.Provider, 0, len(all))
 	for i, p := range all {
 		if avail[i] {

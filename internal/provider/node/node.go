@@ -201,7 +201,7 @@ func (p *Provider) upgradeWith(ctx context.Context, tool provider.Tool, m *mgr) 
 func (p *Provider) IsInstalled(ctx context.Context, tool provider.Tool) (bool, string, error) {
 	m, err := p.resolve(ctx)
 	if err != nil {
-		return false, "", nil
+		return false, "", err
 	}
 	return p.isInstalledWith(ctx, tool, m)
 }

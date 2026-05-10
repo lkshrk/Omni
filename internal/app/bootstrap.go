@@ -66,5 +66,5 @@ func (a *App) MarkHostBootstrapCompleted(ctx context.Context, host string) error
 
 func (a *App) bootstrapStateKey(host string) string {
 	sum := sha256.Sum256([]byte(filepath.Clean(a.ConfigPath)))
-	return fmt.Sprintf("bootstrap.completed.%s.%x", host, sum[:8])
+	return fmt.Sprintf("bootstrap.completed.%s.%x", host, sum[:16])
 }

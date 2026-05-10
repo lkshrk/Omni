@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"strings"
 
 	"github.com/lkshrk/omni/internal/database"
@@ -22,7 +24,9 @@ func (m *Model) blockPrivilegedToolAction(t *database.ToolCache, action provider
 		reason = "package manager needs sudo/root access"
 	}
 	plan.Reason = reason
-	_ = m.app.MarkToolPrivilegeRequired(m.ctx, t.Name, t.Provider, t.Package, string(plan.Requirement), reason)
+	if err := m.app.MarkToolPrivilegeRequired(m.ctx, t.Name, t.Provider, t.Package, string(plan.Requirement), reason); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: omni: mark privilege required: %v\n", err)
+	}
 	if m.openAdminTerminalPrompt(t, action, plan) {
 		return true
 	}
@@ -67,7 +71,9 @@ func (m *Model) queuePrivilegedToolPrompts(rowErrors map[string]string, actions 
 		if plan.Reason == "" {
 			plan.Reason = "package manager needs sudo/root access"
 		}
-		_ = m.app.MarkToolPrivilegeRequired(ctx, t.Name, t.Provider, t.Package, string(plan.Requirement), plan.Reason)
+		if err := m.app.MarkToolPrivilegeRequired(ctx, t.Name, t.Provider, t.Package, string(plan.Requirement), plan.Reason); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: omni: mark privilege required: %v\n", err)
+		}
 		state, ok := m.adminTerminalStateForTool(t, action, plan)
 		if !ok {
 			m.setToolActionError(key, "requires admin terminal; unsupported provider command")

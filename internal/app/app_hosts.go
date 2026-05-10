@@ -483,7 +483,9 @@ func (a *App) syncOrphansToMachineGroup(ctx context.Context, activeGroups []*con
 		}
 
 		var orphans []config.ToolEntry
-		_ = a.forEachAvailable(ctx, func(p provider.Provider) error {
+		// Best-effort: per-provider errors are skipped so one bad provider
+		// doesn't prevent discovering orphans from the rest.
+		_ = a.forEachAvailable(ctx, func(p provider.Provider) error { //nolint:errcheck // best-effort orphan scan
 			if a.registry.ImportSkipsProvider(p.Name()) {
 				return nil
 			}

@@ -1,9 +1,11 @@
 package app
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/lkshrk/omni/internal/config"
 )
@@ -169,5 +171,19 @@ func TestEffectiveHostGroupsIncludesHostGroupFirst(t *testing.T) {
 	}
 	if got := groupBaseNames(active); len(got) != 2 || got[0] != "testhost" || got[1] != "work" {
 		t.Fatalf("active groups = %v, want [testhost work]", got)
+	}
+}
+
+func TestDotsHistoryIDUniqueness(t *testing.T) {
+	// Generate IDs rapidly — the atomic counter suffix must prevent collisions
+	// even when time.Now().UnixNano() returns the same value.
+	const n = 100
+	ids := make(map[string]struct{}, n)
+	for range n {
+		id := fmt.Sprintf("%d-%d", time.Now().UnixNano(), dotsHistoryIDCounter.Add(1))
+		if _, dup := ids[id]; dup {
+			t.Fatalf("duplicate dots history ID: %s", id)
+		}
+		ids[id] = struct{}{}
 	}
 }
