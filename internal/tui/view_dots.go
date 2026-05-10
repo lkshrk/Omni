@@ -101,13 +101,18 @@ type dotsVisibleRow struct {
 	isChild bool
 }
 
+func dotsEntryMatchesExpanded(m Model, entry app.DotStatus) bool {
+	return m.dotsExpandedName != "" &&
+		entry.Name == m.dotsExpandedName &&
+		dotStatusState(entry) == m.dotsExpandedState
+}
+
 func dotsVisibleRows(m Model) []dotsVisibleRow {
 	entries := filteredDotsEntries(m)
-	expanded := m.dotsExpandedName
 	rows := make([]dotsVisibleRow, 0, len(entries))
 	for _, entry := range entries {
 		rows = append(rows, dotsVisibleRow{entry: entry})
-		if entry.Name != expanded {
+		if !dotsEntryMatchesExpanded(m, entry) {
 			continue
 		}
 		rows = appendDotsChildRows(m, rows, entry, entry.Children)
@@ -147,7 +152,7 @@ func dotsRowExpanded(m Model, row dotsVisibleRow) bool {
 	if row.isChild {
 		return dotsChildExpanded(m, row.entry.Name, row.child)
 	}
-	return m.dotsExpandedName == row.entry.Name
+	return dotsEntryMatchesExpanded(m, row.entry)
 }
 
 func dotsSections(entries []app.DotStatus) []dotsSection {
@@ -240,12 +245,28 @@ func renderDots(m Model) string {
 	// ── Top controls ──────────────────────────────────────────────────────────
 	if m.dotsSearchActive {
 		write(renderDotsSearchControl(m) + "\n")
-	} else {
-		write("\n")
+	}
+
+	// ── Repo status (compact, not a list section) ───────────────────────────
+	if repoPath := m.settings.DotsRepo; repoPath != "" {
+		var gitPart string
+		if m.dotsGitStatus == "" {
+			gitPart = "  " + p.styleInstalled.Render("✓ clean")
+		} else {
+			gitPart = "  " + p.styleOutdated.Render("✗ dirty") + "  " + p.styleHelp.Render("C commit")
+		}
+		repoW := max(rowAvailableWidth(m.width)-lipgloss.Width(gitPart)-2, 1)
+		write(p.styleHelp.PaddingLeft(2).Render(truncatePath(tildePath(repoPath), repoW)) + gitPart + "\n")
+		if m.dotsGitStatus != "" {
+			for _, line := range strings.Split(m.dotsGitStatus, "\n") {
+				if strings.TrimSpace(line) != "" {
+					write(p.styleHelp.PaddingLeft(4).Render(line) + "\n")
+				}
+			}
+		}
 	}
 
 	visible := filteredDotsEntries(m)
-	expandedName := m.dotsExpandedName
 	cols := dotsTableColumnWidths(p, m, visible)
 	contentW := rowAvailableWidth(m.width)
 	cols = fitDotsColumnsToWidth(cols, contentW)
@@ -276,15 +297,20 @@ func renderDots(m Model) string {
 	}
 
 	rowIndex := 0
+	inIgnoredSection := false
 	var renderChildRows func(e app.DotStatus, children []app.DotChild)
 	renderChildRows = func(e app.DotStatus, children []app.DotChild) {
 		for _, child := range children {
 			childStatus, childStatusStyle := dotChildStatusDisplay(p, child, dotStatusState(e))
+			if inIgnoredSection && !child.Ignored {
+				childStatus = "-"
+				childStatusStyle = p.styleHelp
+			}
 			childStatusCol := renderCell(leftCell(fitCellText(childStatus, cols.status), cols.status))
 			childName := renderCell(leftCell(fitCellText(dotChildDisplayName(m, e, child), cols.name), cols.name))
 			childTarget := truncatePath(tildePath(child.Path), targetWidth)
 			childTargetPadded := renderCell(leftCell(childTarget, targetWidth))
-			isChildCursor := rowIndex == m.dotsCursor
+			isChildCursor := rowIndex == m.dotsCursor && !m.cursorHidden
 			childIgnoreConfirm := m.dotsIgnoreIdx == rowIndex
 			childRight := dotRightColumns(p, isChildCursor || childIgnoreConfirm, childStatusCol, childStatusStyle, dotChildCounts(child, dotStatusState(e)), cols.ratio, cols.ignore, "", cols.group)
 			childLeft := func(iconStyle, nameStyle, targetStyle lipgloss.Style, iconText, childName, childTarget string) string {
@@ -309,6 +335,9 @@ func renderDots(m Model) string {
 				} else {
 					buf.markCursorEnd()
 				}
+			} else if inIgnoredSection && child.Ignored {
+				left := childLeft(p.styleHelp, p.styleNormal, p.styleHelp, "↳", childName, childTargetPadded)
+				write(renderDotsRow(false, left, childRight) + "\n")
 			} else {
 				left := childLeft(p.styleHelp, p.styleHelp, p.styleHelp, "↳", childName, childTargetPadded)
 				write(renderDotsRow(false, left, childRight) + "\n")
@@ -323,9 +352,16 @@ func renderDots(m Model) string {
 		if len(section.entries) == 0 {
 			continue
 		}
+		inIgnoredSection = section.title == "Ignored"
 		sections.Header(section.title)
 		for _, e := range section.entries {
 			iconStyle, icon, statusLabel := dotStateDisplay(p, dotStatusState(e))
+			// Synthesized container entries in the Ignored section (not
+			// explicitly ignored themselves) get muted "-" status.
+			ignoredContainer := inIgnoredSection && !dotHasAction(e, app.DotActionUnignore)
+			if ignoredContainer {
+				statusLabel = "-"
+			}
 			switch {
 			case m.dotsActiveName == e.Name:
 				iconStyle = lipgloss.NewStyle()
@@ -335,6 +371,9 @@ func renderDots(m Model) string {
 				icon = iconPending
 			}
 			statusStyle := dotStatusTextStyle(p, dotStatusState(e))
+			if ignoredContainer {
+				statusStyle = p.styleHelp
+			}
 
 			nameCol := renderCell(leftCell(fitCellText(dotEntryDisplayName(m, e), cols.name), cols.name))
 			statusCol := renderCell(leftCell(fitCellText(statusLabel, cols.status), cols.status))
@@ -347,7 +386,7 @@ func renderDots(m Model) string {
 			ignoreConfirm := m.dotsIgnoreIdx == rowIndex
 			variantCreate := m.dotsVariantIdx == rowIndex && m.dotsVariantMode == dotsVariantCreate
 			variantRemove := m.dotsVariantIdx == rowIndex && m.dotsVariantMode == dotsVariantRemove
-			isCursor := rowIndex == m.dotsCursor
+			isCursor := rowIndex == m.dotsCursor && !m.cursorHidden
 
 			if isCursor {
 				buf.markCursor()
@@ -412,32 +451,12 @@ func renderDots(m Model) string {
 				write(renderDotsRow(false, left, right) + "\n")
 			}
 			rowIndex++
-			if e.Name == expandedName {
+			if dotsEntryMatchesExpanded(m, e) {
 				renderChildRows(e, e.Children)
 			}
 		}
 	}
 
-	// ── Repo section ──────────────────────────────────────────────────────────
-	sections.Header("Repo")
-
-	if repoPath := m.settings.DotsRepo; repoPath != "" {
-		var gitPart string
-		if m.dotsGitStatus == "" {
-			gitPart = "  " + p.styleInstalled.Render("✓ clean")
-		} else {
-			gitPart = "  " + p.styleOutdated.Render("✗ dirty")
-		}
-		repoW := max(rowAvailableWidth(m.width)-lipgloss.Width(gitPart)-2, 1)
-		write(p.styleNormal.PaddingLeft(2).Render(truncatePath(tildePath(repoPath), repoW)) + gitPart + "\n")
-		if m.dotsGitStatus != "" {
-			for _, line := range strings.Split(m.dotsGitStatus, "\n") {
-				if strings.TrimSpace(line) != "" {
-					write(p.styleHelp.PaddingLeft(4).Render(line) + "\n")
-				}
-			}
-		}
-	}
 	renderDotsHistorySection(m, write, sections)
 
 	return buf.render(listAvailableHeight(m))
@@ -654,7 +673,7 @@ func dotEntryKindIcon(m Model, entry app.DotStatus) string {
 	if len(entry.Children) == 0 && entry.FileCount == 0 {
 		return dotKindFolderEmptyIcon
 	}
-	if m.dotsExpandedName == entry.Name {
+	if dotsEntryMatchesExpanded(m, entry) {
 		return dotKindFolderExpandedIcon
 	}
 	return dotKindFolderCollapsedIcon

@@ -211,3 +211,150 @@ func TestDotsTestTargetPath_LeavesUnsupportedTildePrefixUntouched(t *testing.T) 
 		t.Fatalf("got %q, want path outside HOME %q", got, home)
 	}
 }
+
+func TestCountIgnoredTree_DepthGuardPreventsRunaway(t *testing.T) {
+	// Build a chain deeper than countIgnoredTreeMaxDepth to verify
+	// the depth guard returns 0 instead of overflowing the stack.
+	leaf := DotChild{Name: "file.txt", IsDir: false}
+	for i := range countIgnoredTreeMaxDepth + 10 {
+		leaf = DotChild{
+			Name:     "d" + string(rune('0'+i%10)),
+			IsDir:    true,
+			Children: []DotChild{leaf},
+		}
+	}
+	got := countIgnoredTree(leaf)
+	if got != 0 {
+		t.Fatalf("countIgnoredTree = %d, want 0 for tree deeper than maxDepth", got)
+	}
+}
+
+func TestCountIgnoredTree_NormalDepthWorks(t *testing.T) {
+	tree := DotChild{
+		Name:  "root",
+		IsDir: true,
+		Children: []DotChild{
+			{Name: "a.txt"},
+			{Name: "sub", IsDir: true, Children: []DotChild{
+				{Name: "b.txt"},
+				{Name: "c.txt"},
+			}},
+		},
+	}
+	got := countIgnoredTree(tree)
+	if got != 3 {
+		t.Fatalf("countIgnoredTree = %d, want 3", got)
+	}
+}
+
+func TestCountIgnoredTree_LeafDirCountsAsOne(t *testing.T) {
+	// An ignored leaf directory (e.g. node_modules) with no sub-tree
+	// should count as 1, not 0.
+	tree := DotChild{
+		Name:  "root",
+		IsDir: true,
+		Children: []DotChild{
+			{Name: "a.txt"},
+			{Name: "node_modules", IsDir: true, Ignored: true}, // leaf dir
+		},
+	}
+	got := countIgnoredTree(tree)
+	if got != 2 {
+		t.Fatalf("countIgnoredTree = %d, want 2 (file + leaf dir)", got)
+	}
+}
+
+// TestBuildIgnoredChildTree_IntermediateNotIgnored verifies that intermediate
+// directories synthesized by buildIgnoredChildTree have Ignored=false while
+// leaf entries (explicitly ignored files) keep Ignored=true.
+func TestBuildIgnoredChildTree_IntermediateNotIgnored(t *testing.T) {
+	flat := []DotChild{
+		{Name: "a", RelPath: "claude/a", Path: "/home/.config/claude/a", Ignored: true, Depth: 2},
+		{Name: "b", RelPath: "claude/b", Path: "/home/.config/claude/b", Ignored: true, Depth: 2},
+	}
+	result := buildIgnoredChildTree(flat, "/home/.config")
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 top-level child (claude dir), got %d", len(result))
+	}
+	claude := result[0]
+	if claude.Name != "claude" {
+		t.Errorf("top-level child name = %q, want %q", claude.Name, "claude")
+	}
+	if !claude.IsDir {
+		t.Errorf("intermediate dir 'claude' should have IsDir=true")
+	}
+	if claude.Ignored {
+		t.Errorf("intermediate dir 'claude' should have Ignored=false, got Ignored=true")
+	}
+	if claude.Counts.Ignored != 2 {
+		t.Errorf("intermediate dir 'claude' Counts.Ignored = %d, want 2", claude.Counts.Ignored)
+	}
+	if claude.FileCount != 2 {
+		t.Errorf("intermediate dir 'claude' FileCount = %d, want 2", claude.FileCount)
+	}
+	if len(claude.Children) != 2 {
+		t.Fatalf("expected 2 children under claude, got %d", len(claude.Children))
+	}
+	for _, leaf := range claude.Children {
+		if !leaf.Ignored {
+			t.Errorf("leaf %q should have Ignored=true", leaf.Name)
+		}
+		if leaf.Counts.Ignored != 1 {
+			t.Errorf("leaf %q Counts.Ignored = %d, want 1", leaf.Name, leaf.Counts.Ignored)
+		}
+	}
+}
+
+// TestBuildIgnoredChildTree_FlatLeaves verifies that flat ignored children
+// (no intermediate dirs) are returned as-is with Ignored preserved.
+func TestBuildIgnoredChildTree_FlatLeaves(t *testing.T) {
+	flat := []DotChild{
+		{Name: "foo", RelPath: "foo", Path: "/home/foo", Ignored: true, Depth: 1},
+		{Name: "bar", RelPath: "bar", Path: "/home/bar", Ignored: true, Depth: 1},
+	}
+	result := buildIgnoredChildTree(flat, "/home")
+
+	if len(result) != 2 {
+		t.Fatalf("expected 2 top-level children, got %d", len(result))
+	}
+	for _, child := range result {
+		if !child.Ignored {
+			t.Errorf("flat leaf %q should have Ignored=true", child.Name)
+		}
+		if child.IsDir {
+			t.Errorf("flat leaf %q should have IsDir=false", child.Name)
+		}
+	}
+}
+
+// TestBuildIgnoredChildTree_DeepTree verifies multi-level nesting: only the
+// deepest leaf is Ignored=true; all intermediate dirs are Ignored=false.
+func TestBuildIgnoredChildTree_DeepTree(t *testing.T) {
+	flat := []DotChild{
+		{Name: "config.toml", RelPath: "a/b/config.toml", Path: "/root/a/b/config.toml", Ignored: true, Depth: 3},
+	}
+	result := buildIgnoredChildTree(flat, "/root")
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 top-level dir 'a', got %d", len(result))
+	}
+	a := result[0]
+	if a.Ignored {
+		t.Errorf("intermediate 'a' should have Ignored=false")
+	}
+	if len(a.Children) != 1 {
+		t.Fatalf("expected 1 child under 'a', got %d", len(a.Children))
+	}
+	b := a.Children[0]
+	if b.Ignored {
+		t.Errorf("intermediate 'b' should have Ignored=false")
+	}
+	if len(b.Children) != 1 {
+		t.Fatalf("expected 1 child under 'b', got %d", len(b.Children))
+	}
+	leaf := b.Children[0]
+	if !leaf.Ignored {
+		t.Errorf("leaf 'config.toml' should have Ignored=true")
+	}
+}
