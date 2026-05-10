@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/lkshrk/omni/internal/executor"
+	"github.com/lkshrk/omni/internal/provider"
 	"github.com/lkshrk/omni/internal/provider/apt"
 	"github.com/lkshrk/omni/internal/provider/pmtest"
 )
@@ -21,5 +22,6 @@ func TestAPTProvider_DebianSlimUseCases(t *testing.T) {
 	pmtest.RequireDescription(t, ctx, p, "base-files")
 	pmtest.RequireBulkDescription(t, ctx, p, "base-files")
 	pmtest.RequireMissing(t, ctx, p, "omni-fake-pkg-zzz-apt")
+	pmtest.RequirePrivilegePlan(t, ctx, p, provider.PrivilegeActionInstall, "hello")
 	pmtest.ExercisePackageLifecycle(t, ctx, p, "hello")
 }

@@ -179,6 +179,24 @@ func ExercisePackageLifecycle(t *testing.T, ctx context.Context, p provider.Prov
 	RequireMissing(t, ctx, p, pkg)
 }
 
+// RequirePrivilegePlan verifies that the provider implements PrivilegePlanner
+// and returns a non-empty plan for the given action. System package managers
+// (apt, dnf, pacman, apk, zypper) always require privilege for mutations.
+func RequirePrivilegePlan(t *testing.T, ctx context.Context, p provider.Provider, action provider.PrivilegeAction, pkg string) {
+	t.Helper()
+	planner, ok := p.(provider.PrivilegePlanner)
+	if !ok {
+		t.Fatalf("%s does not implement provider.PrivilegePlanner", p.Name())
+	}
+	plan, err := planner.PrivilegePlan(ctx, action, toolFor(p, pkg))
+	if err != nil {
+		t.Fatalf("%s PrivilegePlan(%s, %s) error: %v", p.Name(), action, pkg, err)
+	}
+	if !plan.RequiresPrivilege() {
+		t.Fatalf("%s PrivilegePlan(%s, %s) = %+v, want RequiresPrivilege=true", p.Name(), action, pkg, plan)
+	}
+}
+
 func toolFor(p provider.Provider, pkg string) provider.Tool {
 	return provider.Tool{Name: pkg, Provider: p.Name(), Package: pkg}
 }

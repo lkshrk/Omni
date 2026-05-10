@@ -891,7 +891,9 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 	// Collect discovered upserts across all providers. forEachAvailable is serial
 	// so the slice is captured without a lock.
 	var discovered []database.DiscoveredUpsert
-	_ = a.forEachAvailable(ctx, func(p provider.Provider) error {
+	// Best-effort: per-provider errors are skipped so one bad provider
+	// doesn't prevent discovering the rest.
+	_ = a.forEachAvailable(ctx, func(p provider.Provider) error { //nolint:errcheck // best-effort discovery
 		if a.registry.ImportSkipsProvider(p.Name()) {
 			return nil // skip ecosystem providers whose concrete delegates are iterated
 		}

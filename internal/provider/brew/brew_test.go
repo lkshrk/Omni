@@ -59,11 +59,11 @@ func (e *concurrentBrewExecutor) Run(_ context.Context, name string, args ...str
 	}
 }
 
-func TestProviderSerializesBrewCommands(t *testing.T) {
+func TestProviderSerializesWriteCommands(t *testing.T) {
 	exec := &concurrentBrewExecutor{delay: 10 * time.Millisecond}
 	p := brew.New(exec)
 	ctx := context.Background()
-	errs := make(chan error, 4)
+	errs := make(chan error, 3)
 	var wg sync.WaitGroup
 	run := func(fn func() error) {
 		wg.Add(1)
@@ -73,12 +73,40 @@ func TestProviderSerializesBrewCommands(t *testing.T) {
 		}()
 	}
 
+	// All three are write ops that acquire exclusive Lock.
+	run(func() error { return p.Install(ctx, tool("a")) })
+	run(func() error { return p.Uninstall(ctx, tool("b")) })
+	run(func() error { return p.Upgrade(ctx, tool("c")) })
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("provider call failed: %v", err)
+		}
+	}
+	if got := exec.max.Load(); got != 1 {
+		t.Fatalf("concurrent write commands = %d, want serialized", got)
+	}
+}
+
+func TestProviderAllowsConcurrentReads(t *testing.T) {
+	exec := &concurrentBrewExecutor{delay: 10 * time.Millisecond}
+	p := brew.New(exec)
+	ctx := context.Background()
+	errs := make(chan error, 3)
+	var wg sync.WaitGroup
+	run := func(fn func() error) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- fn()
+		}()
+	}
+
+	// All three are read ops that acquire RLock — they should overlap.
 	run(func() error {
 		_, err := p.InstalledMap(ctx)
-		return err
-	})
-	run(func() error {
-		_, err := p.OutdatedMap(ctx)
 		return err
 	})
 	run(func() error {
@@ -97,8 +125,8 @@ func TestProviderSerializesBrewCommands(t *testing.T) {
 			t.Fatalf("provider call failed: %v", err)
 		}
 	}
-	if got := exec.max.Load(); got != 1 {
-		t.Fatalf("concurrent brew commands = %d, want serialized", got)
+	if got := exec.max.Load(); got < 2 {
+		t.Fatalf("concurrent read commands = %d, want >= 2 (reads should overlap)", got)
 	}
 }
 
@@ -531,6 +559,18 @@ func TestOutdatedMap_TapQualifiedName(t *testing.T) {
 	}
 	if got["omni"] != "0.4.5" {
 		t.Errorf("map[omni] = %q, want 0.4.5 (tap prefix should be stripped)", got["omni"])
+	}
+}
+
+func TestOutdatedMap_TapQualifiedCask(t *testing.T) {
+	out := `{"formulae":[],"casks":[{"name":"lkshrk/tap/my-app","current_version":"2.1.0"}]}`
+	p, _ := newBrew(executor.MockCall{}, executor.MockCall{Stdout: out})
+	got, err := p.OutdatedMap(context.Background())
+	if err != nil {
+		t.Fatalf("OutdatedMap: %v", err)
+	}
+	if got["my-app"] != "2.1.0" {
+		t.Errorf("map[my-app] = %q, want 2.1.0 (tap prefix should be stripped for casks)", got["my-app"])
 	}
 }
 

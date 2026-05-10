@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -425,6 +426,69 @@ func TestDotsHistoryRecordsOperationFailureModes(t *testing.T) {
 		}
 		assertLatestDotsHistory(t, a, ctx, dotsHistoryWant{operation: "resolve use-repo", entry: "ghost", status: "failed", summaryContains: "resolve use-repo failed", errorContains: "not found"})
 	})
+}
+
+func TestDotsHistoryConcurrentWritesPreserveAllEntries(t *testing.T) {
+	ctx := context.Background()
+	a, _, _ := newDotsApp(t)
+
+	// Fire 10 concurrent sync-entry calls (all will fail on missing entries,
+	// which is fine — we just need them to record history concurrently).
+	const n = 10
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := range n {
+		go func() {
+			defer wg.Done()
+			name := fmt.Sprintf("concurrent-%02d", i)
+			_, _ = a.DotsSyncEntry(ctx, name, dots.SyncOptions{})
+		}()
+	}
+	wg.Wait()
+
+	history, err := a.RecentDotsHistory(ctx, 100)
+	if err != nil {
+		t.Fatalf("RecentDotsHistory: %v", err)
+	}
+	if len(history) != n {
+		t.Fatalf("history len = %d, want %d (concurrent writes lost entries)", len(history), n)
+	}
+}
+
+func TestDotsHistoryIDTimestampMatchesTimeField(t *testing.T) {
+	ctx := context.Background()
+	a, _, _ := newDotsApp(t)
+
+	// Record one entry and verify the ID's timestamp prefix is
+	// consistent with the Time field (within 1 second).
+	if _, err := a.DotsSyncEntry(ctx, "ts-check", dots.SyncOptions{}); err == nil {
+		t.Fatal("expected error for missing entry")
+	}
+	history, err := a.RecentDotsHistory(ctx, 1)
+	if err != nil {
+		t.Fatalf("RecentDotsHistory: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history len = %d, want 1", len(history))
+	}
+	entry := history[0]
+	// ID format: "<unixnano>-<counter>"
+	parts := strings.SplitN(entry.ID, "-", 2)
+	if len(parts) != 2 {
+		t.Fatalf("unexpected ID format: %q", entry.ID)
+	}
+	var idNano int64
+	if _, err := fmt.Sscanf(parts[0], "%d", &idNano); err != nil {
+		t.Fatalf("parse ID nano: %v", err)
+	}
+	idTime := time.Unix(0, idNano)
+	diff := idTime.Sub(entry.Time)
+	if diff < 0 {
+		diff = -diff
+	}
+	if diff > time.Second {
+		t.Fatalf("ID time %v differs from Time %v by %v (want <1s)", idTime, entry.Time, diff)
+	}
 }
 
 func seedHistoryNvimEntry(t *testing.T, cfgDir, repoDir, home string) (sourceFile, targetDir string) {

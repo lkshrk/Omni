@@ -6,10 +6,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"sync/atomic"
 	"time"
 
+	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/dots"
 )
+
+// dotsHistoryIDCounter ensures unique IDs even when two operations
+// occur within the same nanosecond.
+var dotsHistoryIDCounter atomic.Uint64
 
 const (
 	dotsHistoryStateKey = "dots.history"
@@ -72,9 +79,10 @@ func (a *App) recordDotsHistoryResult(ctx context.Context, operation, entry, rep
 		return
 	}
 	historyCtx := context.WithoutCancel(ctx)
+	now := time.Now()
 	record := DotsHistoryEntry{
-		ID:        fmt.Sprintf("%d", time.Now().UnixNano()),
-		Time:      time.Now().UTC(),
+		ID:        fmt.Sprintf("%d-%d", now.UnixNano(), dotsHistoryIDCounter.Add(1)),
+		Time:      now.UTC(),
 		Operation: operation,
 		Entry:     entry,
 		Status:    dotsHistoryStatus(ops, opErr),
@@ -85,11 +93,20 @@ func (a *App) recordDotsHistoryResult(ctx context.Context, operation, entry, rep
 	if opErr != nil {
 		record.Error = opErr.Error()
 	}
-	_ = a.prependDotsHistory(historyCtx, record)
+	if err := a.prependDotsHistory(historyCtx, record); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: omni: record dots history: %v\n", err)
+	}
 }
 
 func (a *App) prependDotsHistory(ctx context.Context, record DotsHistoryEntry) error {
-	entries, err := a.readDotsHistory(ctx)
+	a.historyMu.Lock()
+	defer a.historyMu.Unlock()
+
+	db := a.readDB()
+	if db == nil {
+		return fmt.Errorf("database is not initialised")
+	}
+	entries, err := readDotsHistoryFrom(ctx, db)
 	if err != nil {
 		return err
 	}
@@ -101,11 +118,19 @@ func (a *App) prependDotsHistory(ctx context.Context, record DotsHistoryEntry) e
 	if err != nil {
 		return fmt.Errorf("marshal dots history: %w", err)
 	}
-	return a.readDB().SetState(ctx, dotsHistoryStateKey, string(body))
+	return db.SetState(ctx, dotsHistoryStateKey, string(body))
 }
 
 func (a *App) readDotsHistory(ctx context.Context) ([]DotsHistoryEntry, error) {
-	raw, err := a.readDB().GetState(ctx, dotsHistoryStateKey)
+	db := a.readDB()
+	if db == nil {
+		return nil, nil
+	}
+	return readDotsHistoryFrom(ctx, db)
+}
+
+func readDotsHistoryFrom(ctx context.Context, db *database.DB) ([]DotsHistoryEntry, error) {
+	raw, err := db.GetState(ctx, dotsHistoryStateKey)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
@@ -119,6 +144,9 @@ func (a *App) readDotsHistory(ctx context.Context) ([]DotsHistoryEntry, error) {
 	return entries, nil
 }
 
+// dotsHistoryStatus classifies the outcome of a dots operation.
+// ops contains the operations that completed before the error (if any);
+// a non-nil opErr with completed ops means partial success.
 func dotsHistoryStatus(ops []dots.Op, opErr error) string {
 	if opErr == nil {
 		return "success"

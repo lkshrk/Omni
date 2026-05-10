@@ -811,22 +811,41 @@ func startAdminTerminalProcess(ctx context.Context, state adminTerminalState, co
 			}
 		}
 		_ = ptmx.Close()
-		events <- adminTerminalDoneMsg{id: doneState.id, state: doneState, err: err}
+		select {
+		case events <- adminTerminalDoneMsg{id: doneState.id, state: doneState, err: err}:
+		case <-ctx.Done():
+		}
 	}()
 	return &adminTerminalSession{ptmx: ptmx}, nil
 }
 
+// sendAdminTerminalOutput sends an output message to the event channel.
+// If the channel is full it drains up to 4 old output messages to make room,
+// skipping any non-output messages (e.g. doneMsg) so they are never lost.
 func sendAdminTerminalOutput(events chan tea.Msg, msg adminTerminalOutputMsg) {
 	select {
 	case events <- msg:
 		return
 	default:
 	}
-	select {
-	case <-events:
-	default:
+drain:
+	for range 4 {
+		select {
+		case old := <-events:
+			if _, ok := old.(adminTerminalOutputMsg); !ok {
+				// Non-output message (e.g. doneMsg) — put it back and stop draining.
+				events <- old
+				break drain
+			}
+		default:
+			break drain
+		}
 	}
-	events <- msg
+	select {
+	case events <- msg:
+	default:
+		// Channel still full after draining; drop this chunk to avoid blocking.
+	}
 }
 
 func adminTerminalWinsize(cols, rows int) *pty.Winsize {
