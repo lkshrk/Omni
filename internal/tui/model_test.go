@@ -88,8 +88,8 @@ func TestModel_CursorNavigation(t *testing.T) {
 	}{
 		// j/k
 		{"j moves down", []tea.Msg{pressRune('j')}, 1},
-		{"j clamps at bottom", []tea.Msg{pressRune('j'), pressRune('j'), pressRune('j')}, 2},
-		{"k at top stays at 0", []tea.Msg{pressRune('k')}, 0},
+		{"j wraps to top from bottom", []tea.Msg{pressRune('j'), pressRune('j'), pressRune('j')}, 0},
+		{"k wraps to bottom from top", []tea.Msg{pressRune('k')}, 2},
 		{"j then k returns to 0", []tea.Msg{pressRune('j'), pressRune('k')}, 0},
 		{"j j k lands on 1", []tea.Msg{pressRune('j'), pressRune('j'), pressRune('k')}, 1},
 		// home/G — top/bottom
@@ -966,21 +966,21 @@ func TestModel_StatusTabActions(t *testing.T) {
 
 func TestModel_SettingsToggle(t *testing.T) {
 	t.Run("space toggles auto import on", func(t *testing.T) {
-		m := drive(baseModel(nil), pressTab(), pressTab(), pressTab(), pressRune(' '))
+		m := drive(baseModel(nil), append(toSettings(), pressRune(' '))...)
 		if !m.settings.AutoImport {
 			t.Error("auto import should be true after toggle")
 		}
 	})
 
 	t.Run("enter does not toggle auto import", func(t *testing.T) {
-		m := drive(baseModel(nil), pressTab(), pressTab(), pressTab(), pressEnter())
+		m := drive(baseModel(nil), append(toSettings(), pressEnter())...)
 		if m.settings.AutoImport {
 			t.Error("auto import should stay false after enter")
 		}
 	})
 
 	t.Run("double toggle returns to false", func(t *testing.T) {
-		m := drive(baseModel(nil), pressTab(), pressTab(), pressTab(), pressRune(' '), pressRune(' '))
+		m := drive(baseModel(nil), append(toSettings(), pressRune(' '), pressRune(' '))...)
 		if m.settings.AutoImport {
 			t.Error("auto import should be false after two toggles")
 		}
@@ -1045,8 +1045,6 @@ func TestCycleNodeManager(t *testing.T) {
 }
 
 func TestModel_SettingsCursor(t *testing.T) {
-	toSettings := func() []tea.Msg { return []tea.Msg{pressTab(), pressTab(), pressTab()} }
-
 	t.Run("j moves cursor down in settings", func(t *testing.T) {
 		m := drive(baseModel(nil), append(toSettings(), pressRune('j'))...)
 		if m.settingsCursor != 1 {
@@ -1054,15 +1052,12 @@ func TestModel_SettingsCursor(t *testing.T) {
 		}
 	})
 
-	t.Run("cursor clamps at bottom", func(t *testing.T) {
-		// More j presses than numSettingRows-1 — should clamp at the last row.
-		msgs := toSettings()
-		for range numSettingRows + 5 {
-			msgs = append(msgs, pressRune('j'))
-		}
+	t.Run("cursor wraps to top from bottom", func(t *testing.T) {
+		// Exactly numSettingRows j presses from row 0 wraps back to 0.
+		msgs := append(toSettings(), nj(numSettingRows)...)
 		m := drive(baseModel(nil), msgs...)
-		if m.settingsCursor != numSettingRows-1 {
-			t.Errorf("settingsCursor = %d, want %d (clamped)", m.settingsCursor, numSettingRows-1)
+		if m.settingsCursor != 0 {
+			t.Errorf("settingsCursor = %d, want 0 (wrapped)", m.settingsCursor)
 		}
 	})
 
@@ -1077,7 +1072,7 @@ func TestModel_SettingsCursor(t *testing.T) {
 
 func TestModel_SettingsVisibleRowsMutateExpectedFields(t *testing.T) {
 	toSettingsRow := func(row int) []tea.Msg {
-		msgs := []tea.Msg{pressTab(), pressTab(), pressTab()}
+		msgs := toSettings()
 		for range row {
 			msgs = append(msgs, pressRune('j'))
 		}
@@ -1537,13 +1532,9 @@ func TestModel_DoctorDoneMsgDoesNotClearUnrelatedLoading(t *testing.T) {
 }
 
 func TestModel_DotsRepoEdit(t *testing.T) {
-	// navigate to settings, then down to row 7 (Repository, shifted from 4)
+	// navigate to settings, then down to settingsRowDotsRepo (row 7)
 	toRow4 := func() []tea.Msg {
-		return []tea.Msg{
-			pressTab(), pressTab(), pressTab(),
-			pressRune('j'), pressRune('j'), pressRune('j'), pressRune('j'),
-			pressRune('j'), pressRune('j'), pressRune('j'),
-		}
+		return append(toSettings(), nj(settingsRowDotsRepo)...)
 	}
 
 	t.Run("enter on row 7 shows file picker", func(t *testing.T) {
@@ -2091,8 +2082,7 @@ func TestModel_SettingsSavedMsg(t *testing.T) {
 
 // goToPriorityRow navigates to Settings and moves the cursor to Provider Order.
 func goToPriorityRow() []tea.Msg {
-	msgs := []tea.Msg{pressTab(), pressTab(), pressTab()}
-	return append(msgs, nj(settingsRowSystemPriority)...)
+	return append(toSettings(), nj(settingsRowSystemPriority)...)
 }
 
 func TestModel_PriorityEditor_Open(t *testing.T) {
@@ -3105,17 +3095,17 @@ func TestModel_DotsTab_Navigation(t *testing.T) {
 		}
 	})
 
-	t.Run("cursor clamps at top", func(t *testing.T) {
+	t.Run("cursor wraps to bottom from top", func(t *testing.T) {
 		m := drive(dotsModel(), pressRune('k'))
-		if m.dotsCursor != 0 {
-			t.Errorf("dotsCursor = %d, want 0 at top", m.dotsCursor)
+		if m.dotsCursor != 2 {
+			t.Errorf("dotsCursor = %d, want 2 (wrapped to bottom)", m.dotsCursor)
 		}
 	})
 
-	t.Run("cursor clamps at bottom", func(t *testing.T) {
-		m := drive(dotsModel(), pressRune('j'), pressRune('j'), pressRune('j'), pressRune('j'))
-		if m.dotsCursor != 2 {
-			t.Errorf("dotsCursor = %d, want 2 at bottom", m.dotsCursor)
+	t.Run("cursor wraps to top from bottom", func(t *testing.T) {
+		m := drive(dotsModel(), pressRune('j'), pressRune('j'), pressRune('j'))
+		if m.dotsCursor != 0 {
+			t.Errorf("dotsCursor = %d, want 0 (wrapped to top)", m.dotsCursor)
 		}
 	})
 }
@@ -3666,15 +3656,6 @@ func TestModel_DotsTab_FixedMsg(t *testing.T) {
 // ─── Maintenance state machine ────────────────────────────────────────────────
 
 func TestDangerZone_SettingsCursor(t *testing.T) {
-	toSettings := func() []tea.Msg { return []tea.Msg{pressTab(), pressTab(), pressTab()} }
-	nj := func(n int) []tea.Msg {
-		msgs := make([]tea.Msg, n)
-		for i := range msgs {
-			msgs[i] = pressRune('j')
-		}
-		return msgs
-	}
-
 	t.Run("reset settings enter sets dangerConfirmRow", func(t *testing.T) {
 		msgs := append(toSettings(), nj(settingsRowResetSettings)...)
 		msgs = append(msgs, pressEnter())
@@ -4160,4 +4141,311 @@ func stringContains(s, sub string) bool {
 		}
 		return false
 	}()
+}
+
+// ─── Cursor reveal on tab switch ─────────────────────────────────────────────
+
+// toSettingsRaw switches to the settings tab without the reveal press.
+// 3 tabs from list: list→dots→groups→settings.
+func toSettingsRaw() []tea.Msg {
+	return []tea.Msg{pressTab(), pressTab(), pressTab()}
+}
+
+// TestCursorReveal_FirstDownAfterTabSwitch verifies that the first navigation
+// keypress after a tab switch reveals the cursor at its current position (row 0)
+// without moving it, and that the second keypress navigates normally.
+func TestCursorReveal_FirstDownAfterTabSwitch(t *testing.T) {
+	// After 3 tabs cursorHidden is true and settingsCursor is 0.
+	// First j should reveal (cursorHidden→false) but NOT advance the cursor.
+	m := drive(baseModel(nil), append(toSettingsRaw(), pressRune('j'))...)
+	if m.mode != viewSettings {
+		t.Fatalf("mode = %v, want viewSettings", m.mode)
+	}
+	if m.cursorHidden {
+		t.Error("cursorHidden should be false after first keypress")
+	}
+	if m.settingsCursor != 0 {
+		t.Errorf("settingsCursor = %d after first j, want 0 (revealed, not moved)", m.settingsCursor)
+	}
+
+	// Second j should now navigate: cursor moves from 0 → 1.
+	m2 := drive(m, pressRune('j'))
+	if m2.settingsCursor != 1 {
+		t.Errorf("settingsCursor = %d after second j, want 1 (navigated)", m2.settingsCursor)
+	}
+}
+
+// TestCursorReveal_ActionKeyNotConsumed verifies that a non-navigation key
+// (Enter) is NOT consumed by the reveal logic and fires its action on row 0.
+func TestCursorReveal_ActionKeyNotConsumed(t *testing.T) {
+	// Row 0 in settings is AutoImport; space toggles it.
+	// After raw tab-switch (cursorHidden=true), space should still toggle.
+	m := drive(baseModel(nil), append(toSettingsRaw(), pressRune(' '))...)
+	if m.mode != viewSettings {
+		t.Fatalf("mode = %v, want viewSettings", m.mode)
+	}
+	if !m.settings.AutoImport {
+		t.Error("space on row 0 (AutoImport) should toggle setting even when cursor was hidden")
+	}
+}
+
+// TestCursorReveal_CursorHiddenFalseAfterKeypress verifies that any keypress
+// clears cursorHidden, regardless of whether it was a navigation key.
+func TestCursorReveal_CursorHiddenFalseAfterKeypress(t *testing.T) {
+	// Verify cursorHidden is set after the tab switch.
+	mHidden := drive(baseModel(nil), toSettingsRaw()...)
+	if !mHidden.cursorHidden {
+		t.Fatal("cursorHidden should be true immediately after tab switch to settings")
+	}
+
+	// Any keypress (here: j) must clear cursorHidden.
+	mRevealed := drive(mHidden, pressRune('j'))
+	if mRevealed.cursorHidden {
+		t.Error("cursorHidden should be false after any keypress")
+	}
+
+	// Verify for a non-navigation key too (space).
+	mHidden2 := drive(baseModel(nil), toSettingsRaw()...)
+	mRevealed2 := drive(mHidden2, pressRune(' '))
+	if mRevealed2.cursorHidden {
+		t.Error("cursorHidden should be false after non-navigation keypress")
+	}
+}
+
+// ─── Wrap-around cursor navigation ───────────────────────────────────────────
+
+// TestWrapAround_ListTab verifies that Up at index 0 wraps to last and Down at
+// last wraps to first in the list (tools) view.
+func TestWrapAround_ListTab(t *testing.T) {
+	// k at cursor 0 should wrap to last item (index 2).
+	m := drive(baseModel(threeTools()), pressRune('k'))
+	if m.cursor != 2 {
+		t.Errorf("cursor after k at 0 = %d, want 2 (wrap to bottom)", m.cursor)
+	}
+
+	// j at cursor 2 should wrap back to 0.
+	m2 := drive(m, pressRune('j'))
+	if m2.cursor != 0 {
+		t.Errorf("cursor after j at 2 = %d, want 0 (wrap to top)", m2.cursor)
+	}
+}
+
+// TestWrapAround_SettingsTab verifies that Up at row 0 wraps to the last
+// settings row and Down at the last row wraps back to 0.
+func TestWrapAround_SettingsTab(t *testing.T) {
+	// toSettings() = 3 tabs + reveal j; cursor is at 0 and ready to navigate.
+	// k at row 0 should wrap to numSettingRows-1.
+	m := drive(baseModel(nil), append(toSettings(), pressRune('k'))...)
+	if m.settingsCursor != numSettingRows-1 {
+		t.Errorf("settingsCursor after k at 0 = %d, want %d (wrap to bottom)", m.settingsCursor, numSettingRows-1)
+	}
+
+	// j at the last row should wrap back to 0.
+	m2 := drive(m, pressRune('j'))
+	if m2.settingsCursor != 0 {
+		t.Errorf("settingsCursor after j at last row = %d, want 0 (wrap to top)", m2.settingsCursor)
+	}
+}
+
+// TestWrapAround_DotsTab verifies that Up at dotsCursor 0 wraps to the last
+// visible dot entry and Down at the last entry wraps to 0.
+func TestWrapAround_DotsTab(t *testing.T) {
+	// dotsModel() has 3 entries; dotsCursor starts at 0 and cursorHidden is false.
+	m := dotsModel()
+
+	// k at cursor 0 should wrap to index 2.
+	got := drive(m, pressRune('k'))
+	if got.dotsCursor != 2 {
+		t.Errorf("dotsCursor after k at 0 = %d, want 2 (wrap to bottom)", got.dotsCursor)
+	}
+
+	// j at cursor 2 should wrap back to 0.
+	got2 := drive(got, pressRune('j'))
+	if got2.dotsCursor != 0 {
+		t.Errorf("dotsCursor after j at 2 = %d, want 0 (wrap to top)", got2.dotsCursor)
+	}
+}
+
+// TestCursorReveal_GroupsTab verifies that the first navigation keypress after
+// switching to the groups tab reveals the cursor at hostCursor 0 without
+// moving it, and that the second keypress navigates normally.
+func TestCursorReveal_GroupsTab(t *testing.T) {
+	// Build a model in list mode with 2 hosts so the groups tab has content.
+	m := baseModel(nil)
+	m.hostInfo = &app.HostInfo{
+		Hosts: map[string]config.HostAssignment{
+			"alpha": {Groups: []string{"work"}},
+			"beta":  {Groups: []string{"personal"}},
+		},
+	}
+	m.groupNames = []string{"work", "personal"}
+
+	// Two Tab presses: list → dots → groups. cursorHidden should be true.
+	mGroups := drive(m, pressTab(), pressTab())
+	if mGroups.mode != viewGroups {
+		t.Fatalf("mode = %v, want viewGroups after 2 tabs", mGroups.mode)
+	}
+	if !mGroups.cursorHidden {
+		t.Fatal("cursorHidden should be true immediately after tab switch to groups")
+	}
+
+	// First j: reveal only — cursorHidden clears, hostCursor stays at 0.
+	mRevealed := drive(mGroups, pressRune('j'))
+	if mRevealed.cursorHidden {
+		t.Error("cursorHidden should be false after first j")
+	}
+	if mRevealed.hostCursor != 0 {
+		t.Errorf("hostCursor = %d after first j, want 0 (revealed, not moved)", mRevealed.hostCursor)
+	}
+
+	// Second j: navigate — hostCursor moves to 1 OR assignmentSection advances.
+	mNav := drive(mRevealed, pressRune('j'))
+	navigated := mNav.hostCursor == 1 || mNav.assignmentSection == 1
+	if !navigated {
+		t.Errorf("after second j: hostCursor=%d assignmentSection=%d, want cursor moved (hostCursor=1 or assignmentSection=1)",
+			mNav.hostCursor, mNav.assignmentSection)
+	}
+}
+
+// TestWrapAround_GroupsTab_UpWrapsToGroups verifies that pressing Up (k) at
+// the top of the hosts section (assignmentSection=0, hostCursor=0) wraps the
+// cursor to the bottom of the groups section.
+func TestWrapAround_GroupsTab_UpWrapsToGroups(t *testing.T) {
+	m := hostsModel()
+	m.assignmentSection = 0
+	m.hostCursor = 0
+
+	got := drive(m, pressRune('k'))
+
+	if got.assignmentSection != 1 {
+		t.Errorf("assignmentSection = %d after k at top of hosts, want 1 (groups section)", got.assignmentSection)
+	}
+	allGroups := buildAllGroupNames(m.groupNames)
+	lastIdx := len(allGroups) - 1
+	if got.groupCursor != lastIdx {
+		t.Errorf("groupCursor = %d after wrap, want %d (last group index)", got.groupCursor, lastIdx)
+	}
+}
+
+// TestWrapAround_GroupsTab_DownWrapsToHosts verifies that pressing Down (j) at
+// the bottom of the groups section wraps the cursor back to the top of the
+// hosts section (assignmentSection=0, hostCursor=0).
+func TestWrapAround_GroupsTab_DownWrapsToHosts(t *testing.T) {
+	m := hostsModel()
+	allGroups := buildAllGroupNames(m.groupNames)
+	m.assignmentSection = 1
+	m.groupCursor = len(allGroups) - 1
+
+	got := drive(m, pressRune('j'))
+
+	if got.assignmentSection != 0 {
+		t.Errorf("assignmentSection = %d after j at last group, want 0 (hosts section)", got.assignmentSection)
+	}
+	if got.hostCursor != 0 {
+		t.Errorf("hostCursor = %d after wrap, want 0 (top of hosts)", got.hostCursor)
+	}
+}
+
+// ── Global C keybinding: commit dotfiles from any main tab ───────────────────
+
+// TestGlobalDotsCommit_FromToolsTab verifies that pressing C on the tools tab
+// (viewList, the default) starts the dots commit operation when DotsRepo is set
+// and dotsGitStatus is non-empty.
+func TestGlobalDotsCommit_FromToolsTab(t *testing.T) {
+	m := baseModel(nil)
+	m.settings.DotsRepo = "/repo/dotfiles"
+	m.dotsGitStatus = "M somefile"
+
+	got := drive(m, pressRune('C'))
+
+	if !got.dotsLoading {
+		t.Error("dotsLoading should be true after C on tools tab with pending changes")
+	}
+}
+
+// TestGlobalDotsCommit_FromDotsTab verifies that pressing C while on the dots
+// tab also starts the commit operation.
+func TestGlobalDotsCommit_FromDotsTab(t *testing.T) {
+	m := dotsModel()
+	m.dotsGitStatus = "M somefile"
+
+	got := drive(m, pressRune('C'))
+
+	if !got.dotsLoading {
+		t.Error("dotsLoading should be true after C on dots tab with pending changes")
+	}
+}
+
+// TestGlobalDotsCommit_FromSettingsTab verifies that pressing C while on the
+// settings tab also starts the commit operation.
+func TestGlobalDotsCommit_FromSettingsTab(t *testing.T) {
+	m := baseModel(nil)
+	m.settings.DotsRepo = "/repo/dotfiles"
+	m.dotsGitStatus = "M somefile"
+	msgs := toSettings()
+	msgs = append(msgs, pressRune('C'))
+
+	got := drive(m, msgs...)
+
+	if !got.dotsLoading {
+		t.Error("dotsLoading should be true after C on settings tab with pending changes")
+	}
+}
+
+// TestGlobalDotsCommit_NoRepoShowsError verifies that pressing C when DotsRepo
+// is empty sets an error status and does not start a commit operation.
+func TestGlobalDotsCommit_NoRepoShowsError(t *testing.T) {
+	m := baseModel(nil)
+	// DotsRepo is empty by default
+
+	got := drive(m, pressRune('C'))
+
+	if got.dotsLoading {
+		t.Error("dotsLoading should stay false when DotsRepo is not configured")
+	}
+	if !got.statusIsErr {
+		t.Error("statusIsErr should be true when DotsRepo is not configured")
+	}
+	if !strings.Contains(got.statusMsg, "set dots_repo") {
+		t.Errorf("statusMsg = %q, want message containing 'set dots_repo'", got.statusMsg)
+	}
+}
+
+// TestGlobalDotsCommit_DisabledShowsError verifies that pressing C when dots
+// sync is disabled sets an error status and does not start a commit operation.
+func TestGlobalDotsCommit_DisabledShowsError(t *testing.T) {
+	m := baseModel(nil)
+	m.settings.DotsRepo = "/repo/dotfiles"
+	m.settings.DotsDisabled = config.BoolPtr(true)
+	m.dotsGitStatus = "M somefile"
+
+	got := drive(m, pressRune('C'))
+
+	if got.dotsLoading {
+		t.Error("dotsLoading should stay false when dots sync is disabled")
+	}
+	if !got.statusIsErr {
+		t.Error("statusIsErr should be true when dots sync is disabled")
+	}
+	if !strings.Contains(got.statusMsg, "disabled") {
+		t.Errorf("statusMsg = %q, want message containing 'disabled'", got.statusMsg)
+	}
+}
+
+// TestGlobalDotsCommit_NothingToCommit verifies that pressing C when
+// dotsGitStatus is empty (nothing to commit) is a no-op: no operation starts
+// and no error status is shown.
+func TestGlobalDotsCommit_NothingToCommit(t *testing.T) {
+	m := baseModel(nil)
+	m.settings.DotsRepo = "/repo/dotfiles"
+	m.dotsGitStatus = "" // nothing to commit
+
+	got := drive(m, pressRune('C'))
+
+	if got.dotsLoading {
+		t.Error("dotsLoading should stay false when there is nothing to commit")
+	}
+	if strings.Contains(got.statusMsg, "Committing") {
+		t.Errorf("statusMsg = %q, should not mention committing when nothing to commit", got.statusMsg)
+	}
 }
