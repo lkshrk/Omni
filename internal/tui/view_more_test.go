@@ -2727,9 +2727,13 @@ func TestMainTabs_FirstSectionStartsAtSharedRow(t *testing.T) {
 		{"hosts", renderGroups(hosts), "Group Assignments"},
 	}
 
-	want := 1
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			want := 1
+			// Dots with search control has an extra line for the search bar.
+			if tc.name == "dots controls" {
+				want = 2
+			}
 			if got := sectionLineIndex(tc.out, tc.label); got != want {
 				t.Fatalf("first section line = %d, want %d for %s:\n%s", got, want, tc.name, tc.out)
 			}
@@ -4690,8 +4694,8 @@ func TestRenderDots_DoesNotRenderGroupPillBar(t *testing.T) {
 			break
 		}
 	}
-	if !strings.Contains(first, "Synced") {
-		t.Fatalf("first visible dots line = %q, want Synced section instead of group controls\n%s", first, out)
+	if !strings.Contains(first, "/repo") {
+		t.Fatalf("first visible dots line = %q, want repo status line instead of group controls\n%s", first, out)
 	}
 }
 
@@ -4760,6 +4764,49 @@ func TestRenderDots_RowOperationUsesSpinnerIcon(t *testing.T) {
 	out := renderDots(m)
 	if spin := m.spinner.View(); spin != "" && !strings.Contains(out, spin) {
 		t.Fatalf("rendered dots should show row spinner %q, got:\n%s", spin, out)
+	}
+}
+
+func TestRenderDots_NoExtraBlankLineAtTop(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.settings.DotsRepo = "/repo"
+	m.dotsLoaded = true
+	m.dotsEntries = []app.DotStatus{
+		{Name: "nvim", TargetPath: "~/.config/nvim", State: app.DotStateSynced},
+		{Name: "zsh", TargetPath: "~/.zshrc", State: app.DotStateSynced},
+	}
+	// dotsSearchActive is false by default — the removed else-branch would have
+	// emitted a blank line here; verify the first line is not empty.
+	out := stripANSIEscapeSequences(renderDots(m))
+	lines := strings.Split(out, "\n")
+	if len(lines) == 0 {
+		t.Fatal("renderDots returned empty output")
+	}
+	if strings.TrimSpace(lines[0]) == "" {
+		t.Fatalf("renderDots emitted a leading blank line when search is not active; first line = %q", lines[0])
+	}
+}
+
+func TestRenderDots_SearchActiveHasControlLine(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.settings.DotsRepo = "/repo"
+	m.dotsLoaded = true
+	m.dotsEntries = []app.DotStatus{
+		{Name: "nvim", TargetPath: "~/.config/nvim", State: app.DotStateSynced},
+		{Name: "zsh", TargetPath: "~/.zshrc", State: app.DotStateSynced},
+	}
+	m.dotsSearchActive = true
+
+	out := stripANSIEscapeSequences(renderDots(m))
+	lines := strings.Split(out, "\n")
+	if len(lines) == 0 {
+		t.Fatal("renderDots returned empty output")
+	}
+	// The search control line contains "/" as the search prompt prefix.
+	if !strings.Contains(lines[0], "/") {
+		t.Fatalf("renderDots first line should contain search control when dotsSearchActive=true; first line = %q\nfull output:\n%s", lines[0], out)
 	}
 }
 
@@ -5919,6 +5966,40 @@ func TestStatusToolCountsIncludesDiscoveredTools(t *testing.T) {
 	}
 	if counts.installed != 2 {
 		t.Fatalf("installed = %d, want 2", counts.installed)
+	}
+}
+
+func TestStatusToolsOverviewValue_UpdateCountUsesOutdatedStyle(t *testing.T) {
+	// Case 1: outdated tool → value contains "update", not "tracked"
+	m := baseModel([]*database.ToolCache{
+		{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
+	})
+	counts := statusToolCounts(m)
+	value := statusToolsOverviewValue(m, counts)
+	if !strings.Contains(value, "update") {
+		t.Errorf("outdated: value = %q, want it to contain \"update\"", value)
+	}
+	if strings.Contains(value, "tracked") {
+		t.Errorf("outdated: value = %q, must not contain \"tracked\"", value)
+	}
+
+	// Case 2: no outdated tools → value contains "tracked", not "update"
+	m2 := baseModel([]*database.ToolCache{
+		{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: false, Tracked: true},
+	})
+	counts2 := statusToolCounts(m2)
+	value2 := statusToolsOverviewValue(m2, counts2)
+	if !strings.Contains(value2, "tracked") {
+		t.Errorf("no updates: value = %q, want it to contain \"tracked\"", value2)
+	}
+	if strings.Contains(value2, "update") {
+		t.Errorf("no updates: value = %q, must not contain \"update\"", value2)
+	}
+
+	// Case 3: outdated tool → summary does NOT contain "update"
+	summary := statusToolsOverviewSummary(counts)
+	if strings.Contains(summary, "update") {
+		t.Errorf("summary = %q, must not contain \"update\"", summary)
 	}
 }
 

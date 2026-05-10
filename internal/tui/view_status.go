@@ -248,7 +248,7 @@ func statusSections(m Model, rows []statusListRow) []sectionedTabSection {
 	sectionOrder := []string{statusSectionAttention, statusSectionOverview, statusSectionQuiet}
 	bySection := make(map[string][]sectionedTabRow, len(sectionOrder))
 	for i, row := range rows {
-		selected := i == m.statusCursor
+		selected := i == m.statusCursor && !m.cursorHidden
 		details := []string(nil)
 		if selected {
 			details = statusSelectedDetails(m, row)
@@ -283,7 +283,8 @@ func statusAttentionRows(m Model, counts statusToolSummary) []statusListRow {
 	if row, ok := statusAutomationAttentionRow(m); ok {
 		rows = append(rows, row)
 	}
-	if row, ok := statusHealthAttentionRow(m); ok {
+	hasDotfilesRow := len(rows) > 0 && rows[len(rows)-1].label == "Dotfiles"
+	if row, ok := statusHealthAttentionRow(m, hasDotfilesRow); ok {
 		rows = append(rows, row)
 	}
 	return rows
@@ -293,7 +294,7 @@ func statusAttentionCount(m Model) int {
 	return len(statusAttentionRows(m, statusToolCounts(m)))
 }
 
-func statusHealthAttentionRow(m Model) (statusListRow, bool) {
+func statusHealthAttentionRow(m Model, hasDotfilesRow bool) (statusListRow, bool) {
 	switch {
 	case m.doctorRunning:
 		icon, iconStyle := statusRowWorkingIcon(m, true)
@@ -336,9 +337,15 @@ func statusHealthAttentionRow(m Model) (statusListRow, bool) {
 
 	var nonOK []app.DoctorCheck
 	for _, check := range m.doctorResult.Checks {
-		if check.Status != app.DoctorStatusOK {
-			nonOK = append(nonOK, check)
+		if check.Status == app.DoctorStatusOK {
+			continue
 		}
+		// Skip dots check when the dedicated Dotfiles attention row already
+		// covers it — avoids duplicating dotfile issues across two rows.
+		if hasDotfilesRow && check.ID == "dots" {
+			continue
+		}
+		nonOK = append(nonOK, check)
 	}
 	if len(nonOK) == 0 {
 		return statusListRow{}, false
@@ -354,6 +361,10 @@ func statusDoctorSummaryRow(m Model, checks []app.DoctorCheck) statusListRow {
 		if len(details) < 5 {
 			line := check.Label + ": " + check.Message
 			details = append(details, statusDetailLine(m, line))
+			for _, d := range check.Details {
+				hint := doctorDetailHint(check.ID, d)
+				details = append(details, statusDetailLine(m, "  "+d+hint))
+			}
 		}
 	}
 	if len(checks) > len(details) {
@@ -388,7 +399,7 @@ func statusDoctorCheckAction(check app.DoctorCheck) statusAction {
 		if strings.Contains(check.Message, "dots_repo") {
 			return statusAction{kind: statusActionOpenSettings, settingsRow: settingsRowDotsRepo, desc: "open dotfile settings"}
 		}
-		return statusAction{kind: statusActionOpenDotsIssue, desc: "open dotfiles"}
+		return doctorDotsAction(check)
 	case "services":
 		return statusAction{kind: statusActionOpenSettings, settingsRow: settingsRowDotsServices, desc: "open service settings"}
 	case "cache":
@@ -398,14 +409,55 @@ func statusDoctorCheckAction(check app.DoctorCheck) statusAction {
 	}
 }
 
+// doctorDotsAction picks the most actionable enter-key action for a dots
+// doctor warning based on the check details.
+func doctorDotsAction(check app.DoctorCheck) statusAction {
+	hasGit, hasSync := false, false
+	for _, d := range check.Details {
+		switch {
+		case strings.Contains(d, "pending git"):
+			hasGit = true
+		case strings.Contains(d, "out-of-sync") || strings.Contains(d, "missing"):
+			hasSync = true
+		}
+	}
+	switch {
+	case hasSync:
+		return statusAction{kind: statusActionSyncDots, desc: "sync dotfiles"}
+	case hasGit:
+		return statusAction{kind: statusActionCommitDots, desc: "commit dotfiles"}
+	default:
+		return statusAction{kind: statusActionOpenDotsIssue, desc: "open dotfiles"}
+	}
+}
+
+// doctorDetailHint returns a short inline fix suggestion appended to a doctor
+// check detail line, based on the check ID and detail content.
+func doctorDetailHint(checkID, detail string) string {
+	if checkID != "dots" {
+		return ""
+	}
+	switch {
+	case strings.Contains(detail, "pending git"):
+		return " — press C or 'omni dots commit'"
+	case strings.Contains(detail, "out-of-sync"):
+		return " — sync from Dots tab or 'omni dots sync'"
+	case strings.Contains(detail, "conflict"):
+		return " — resolve from Dots tab"
+	case strings.Contains(detail, "stow missing"):
+		return " — install stow ('brew install stow')"
+	default:
+		return ""
+	}
+}
+
 func statusOverviewRows(m Model, counts statusToolSummary) []statusListRow {
-	rows := []statusListRow{
+	return []statusListRow{
 		statusToolsOverviewRow(m, counts),
 		statusToolSyncOverviewRow(m, counts),
 		statusDotfilesOverviewRow(m),
 		statusAutomationOverviewRow(m),
 	}
-	return rows
 }
 
 func statusQuietRows(m Model, counts statusToolSummary) []statusListRow {
@@ -528,7 +580,11 @@ func statusToolSyncOverviewRow(m Model, counts statusToolSummary) statusListRow 
 	icon, iconStyle := statusToolSyncIcon(m, counts)
 	if activity := statusToolsActivityText(m); activity != "" {
 		value = statusLoadingValue(m, "checking")
-		summary = statusStaleSummary(activity, summary, counts.outOfSync > 0)
+		// Keep the fallback summary instead of repeating the scan activity
+		// text that the Tools row already shows.
+		if counts.outOfSync > 0 {
+			summary = statusStaleSummary(activity, summary, true)
+		}
 		if statusDashboardToolSyncBusy(m) {
 			icon, iconStyle = statusRowWorkingIcon(m, m.rowOpKey != "" || strings.TrimSpace(m.progressText) != "")
 		}
@@ -605,8 +661,8 @@ func statusDotfilesAttentionRow(m Model) (statusListRow, bool) {
 		iconStyle: iconStyle,
 		label:     "Dotfiles",
 		value:     value,
-		summary:   statusDotSummary(counts, m.dotsGitStatus),
-		details:   statusDotDetails(m, counts),
+		summary:   statusDotAttentionSummary(counts, m.dotsGitStatus),
+		details:   statusDotAttentionDetails(m, counts),
 		action:    action,
 	}, true
 }
@@ -1104,6 +1160,9 @@ func statusToolsOverviewValue(m Model, counts statusToolSummary) string {
 	if counts.tracked == 0 {
 		return m.palette.styleHelp.Render("no tools")
 	}
+	if counts.updates > 0 {
+		return m.palette.styleOutdated.Render(pluralCount(counts.updates, "update", "updates"))
+	}
 	return m.palette.styleProvider.Render(pluralCount(counts.tracked, "tracked", "tracked"))
 }
 
@@ -1114,9 +1173,6 @@ func statusToolsOverviewSummary(counts statusToolSummary) string {
 	parts := []string{pluralCount(counts.installed, "installed locally", "installed locally")}
 	if counts.available > 0 {
 		parts = append(parts, pluralCount(counts.available, "available", "available"))
-	}
-	if counts.updates > 0 {
-		parts = append(parts, pluralCount(counts.updates, "update", "updates"))
 	}
 	if counts.outOfSync > 0 {
 		parts = append(parts, pluralCount(counts.outOfSync, "sync issue", "sync issues"))
@@ -1482,6 +1538,57 @@ func statusDotsActiveQueuedNames(m Model) ([]string, []string) {
 	}
 	sort.Strings(queued)
 	return active, queued
+}
+
+// statusDotAttentionSummary returns a summary focused on what's wrong
+// (out-of-sync, dirty repo) without repeating managed/ignored counts
+// that the overview row already shows.
+func statusDotAttentionSummary(counts app.DotFileCounts, gitStatus string) string {
+	var parts []string
+	if counts.OutOfSync > 0 {
+		parts = append(parts, pluralCount(counts.OutOfSync, "out-of-sync entry", "out-of-sync entries"))
+	}
+	if strings.TrimSpace(gitStatus) != "" {
+		parts = append(parts, "repo dirty")
+	}
+	if len(parts) == 0 {
+		return "Dotfiles need attention."
+	}
+	return strings.Join(parts, ", ") + "."
+}
+
+// statusDotAttentionDetails returns detail lines for the attention row,
+// omitting managed/ignored counts (shown in the overview row below).
+func statusDotAttentionDetails(m Model, counts app.DotFileCounts) []string {
+	var details []string
+	if activity := statusDotsActivityText(m); activity != "" {
+		details = append(details, statusActivityDetailLine(m, activity, true))
+		active, queued := statusDotsActiveQueuedNames(m)
+		if len(active) > 0 {
+			details = append(details, statusDetailLine(m, "active: "+statusInlineNames(active, 3)))
+		}
+		if len(queued) > 0 {
+			details = append(details, statusDetailLine(m, "queued: "+statusInlineNames(queued, 5)))
+		}
+	}
+	if counts.OutOfSync > 0 {
+		details = append(details, statusDetailLine(m, pluralCount(counts.OutOfSync, "entry out of sync", "entries out of sync")))
+	}
+	if gitStatus := strings.TrimSpace(m.dotsGitStatus); gitStatus != "" {
+		statusLines := strings.Split(gitStatus, "\n")
+		details = append(details, statusDetailLine(m, "repo dirty: "+statusLines[0]))
+		for _, line := range limitedNames(statusLines[1:], 2) {
+			details = append(details, statusDetailLine(m, line))
+		}
+		if len(statusLines) > 3 {
+			details = append(details, statusDetailLine(m, fmt.Sprintf("+%d more repo change(s)", len(statusLines)-3)))
+		}
+	}
+	details = append(details, statusDotsHistoryDetails(m)...)
+	if len(details) == 0 {
+		details = append(details, statusDetailLine(m, "Dotfiles need attention."))
+	}
+	return details
 }
 
 func statusDotIgnoredSuffix(counts app.DotFileCounts) string {
