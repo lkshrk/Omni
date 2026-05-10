@@ -172,14 +172,10 @@ func (m *Model) handleDotsNavigationKeyMsg(msg tea.KeyPressMsg, visible []dotsVi
 		m.handleDotsBackKey()
 	case key.Matches(msg, m.keys.Up):
 		m.clearDotsConfirmState()
-		if m.dotsCursor > 0 {
-			m.moveDotsCursor(-1, visible)
-		}
+		m.moveDotsCursor(-1, visible)
 	case key.Matches(msg, m.keys.Down):
 		m.clearDotsConfirmState()
-		if m.dotsCursor < len(visible)-1 {
-			m.moveDotsCursor(1, visible)
-		}
+		m.moveDotsCursor(1, visible)
 	case m.dotsConfirmIdx >= 0 || m.dotsOverwriteIdx >= 0 || m.dotsLocalIdx >= 0 || m.dotsIgnoreIdx >= 0 || m.dotsVariantIdx >= 0:
 		return false
 	case key.Matches(msg, m.keys.Search):
@@ -233,7 +229,7 @@ func (m *Model) syncDotsExpandedName(visible []dotsVisibleRow) {
 		found := false
 		var expanded app.DotStatus
 		for _, row := range visible {
-			if !row.isChild && row.entry.Name == m.dotsExpandedName {
+			if !row.isChild && row.entry.Name == m.dotsExpandedName && dotStatusState(row.entry) == m.dotsExpandedState {
 				found = true
 				expanded = row.entry
 				break
@@ -255,15 +251,10 @@ func (m *Model) moveDotsCursor(delta int, visible []dotsVisibleRow) {
 		m.clearDotsExpandedChildren("")
 		return
 	}
-	next := m.dotsCursor + delta
-	if next < 0 {
-		next = 0
-	}
-	if next >= len(visible) {
-		next = len(visible) - 1
-	}
+	n := len(visible)
+	next := (m.dotsCursor + delta + n) % n
 	target := visible[next]
-	if m.dotsExpandedName != "" && target.entry.Name != m.dotsExpandedName {
+	if m.dotsExpandedName != "" && (target.entry.Name != m.dotsExpandedName || dotStatusState(target.entry) != m.dotsExpandedState) {
 		m.clearDotsExpandedChildren(m.dotsExpandedName)
 		m.dotsExpandedName = ""
 		rows := dotsVisibleRows(*m)
@@ -571,7 +562,8 @@ func (m *Model) handleDotsToggleKeyMsg(visible []dotsVisibleRow) {
 	if len(row.entry.Children) == 0 {
 		return
 	}
-	if m.dotsExpandedName == name {
+	state := dotStatusState(row.entry)
+	if m.dotsExpandedName == name && m.dotsExpandedState == state {
 		m.clearDotsExpandedChildren(name)
 		m.dotsExpandedName = ""
 		return
@@ -580,6 +572,7 @@ func (m *Model) handleDotsToggleKeyMsg(visible []dotsVisibleRow) {
 		m.clearDotsExpandedChildren(m.dotsExpandedName)
 	}
 	m.dotsExpandedName = name
+	m.dotsExpandedState = state
 }
 
 func (m *Model) openDotGroupMembershipPicker(visible []dotsVisibleRow) {
@@ -748,15 +741,28 @@ func (m *Model) handleDotsIgnoreActionKeyMsg(visible []dotsVisibleRow) []tea.Cmd
 			m.beginDotsOperation("Including " + pattern + "…")
 			cmds = append(cmds, m.spinner.Tick, m.doDotsIgnore(row.entry.Name, pattern, false))
 		} else if !row.isChild && dotStatusState(row.entry) == app.DotStateIgnored {
-			m.beginDotsOperation("Including " + row.entry.Name + "…")
-			// Synthesized ignored-child rows use "parent/relpath" as Name;
-			// split and remove the per-entry ignore pattern instead of
-			// toggling whole-entry ignore.
-			if parent, rel, ok := strings.Cut(row.entry.Name, "/"); ok {
-				cmds = append(cmds, m.spinner.Tick, m.doDotsIgnore(parent, rel, false))
-			} else {
-				cmds = append(cmds, m.spinner.Tick, m.doDotsEntryIgnore(row.entry, false))
+			if len(row.entry.Children) > 0 {
+				// Merged ignored-child tree: expand to show individual children
+				// instead of toggling the entire entry.
+				m.dotsIgnoreIdx = -1
+				m.dotsConfirmIdx = -1
+				m.dotsOverwriteIdx = -1
+				m.dotsLocalIdx = -1
+				entryState := dotStatusState(row.entry)
+				if m.dotsExpandedName == row.entry.Name && m.dotsExpandedState == entryState {
+					m.clearDotsExpandedChildren(row.entry.Name)
+					m.dotsExpandedName = ""
+				} else {
+					if m.dotsExpandedName != "" {
+						m.clearDotsExpandedChildren(m.dotsExpandedName)
+					}
+					m.dotsExpandedName = row.entry.Name
+					m.dotsExpandedState = entryState
+				}
+				return cmds
 			}
+			m.beginDotsOperation("Including " + row.entry.Name + "…")
+			cmds = append(cmds, m.spinner.Tick, m.doDotsEntryIgnore(row.entry, false))
 		} else if !row.isChild {
 			m.beginDotsOperation("Ignoring " + row.entry.Name + "…")
 			cmds = append(cmds, m.spinner.Tick, m.doDotsEntryIgnore(row.entry, true))

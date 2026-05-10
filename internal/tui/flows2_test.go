@@ -500,8 +500,8 @@ func TestFlow2_SetupNoHostCopyAndGroups(t *testing.T) {
 			target: "testhost",
 			info:   &app.HostInfo{Active: "testhost", Hosts: map[string]config.HostAssignment{"testhost": {Groups: []string{"base"}}}},
 		})
-		if got.mode != viewList {
-			t.Fatalf("mode = %v, want viewList", got.mode)
+		if got.mode != viewStatus {
+			t.Fatalf("mode = %v, want viewStatus", got.mode)
 		}
 		if !got.setupComplete || !got.setupReloading || !got.loading {
 			t.Fatalf("setup completion flags = complete:%v reloading:%v loading:%v", got.setupComplete, got.setupReloading, got.loading)
@@ -527,8 +527,8 @@ func TestFlow2_SetupNoHostCopyAndGroups(t *testing.T) {
 			groups: []string{"base", "work"},
 			info:   &app.HostInfo{Active: "testhost", Hosts: map[string]config.HostAssignment{"testhost": {Groups: []string{"base", "work"}}}},
 		})
-		if got.mode != viewList {
-			t.Fatalf("mode = %v, want viewList", got.mode)
+		if got.mode != viewStatus {
+			t.Fatalf("mode = %v, want viewStatus", got.mode)
 		}
 		if !got.setupComplete || !got.setupReloading || !got.loading {
 			t.Fatalf("setup completion flags = complete:%v reloading:%v loading:%v", got.setupComplete, got.setupReloading, got.loading)
@@ -565,8 +565,8 @@ func TestFlow2_UC76_SetupStep5(t *testing.T) {
 	t.Run("n completes setup after disable dots finishes", func(t *testing.T) {
 		m := drive(setupStep5Model(), pressRune('n'))
 		got := drive(m, dangerOpDoneMsg{action: "disable-dots", detail: "dots disabled"})
-		if got.mode != viewList {
-			t.Fatalf("mode = %v, want viewList after setup dotfiles skip completes", got.mode)
+		if got.mode != viewStatus {
+			t.Fatalf("mode = %v, want viewStatus after setup dotfiles skip completes", got.mode)
 		}
 		if got.setupStep != 0 {
 			t.Fatalf("setupStep = %d, want reset after setup dotfiles skip completes", got.setupStep)
@@ -669,8 +669,8 @@ func TestFlow2_UC76_SetupStep5(t *testing.T) {
 
 	t.Run("configured dotfiles closes setup and shows reload progress", func(t *testing.T) {
 		got := drive(setupStep6Model(), dangerOpDoneMsg{action: "setup-dots", detail: "dots configured"})
-		if got.mode != viewList {
-			t.Fatalf("mode = %v, want viewList after setup dotfiles repo completes", got.mode)
+		if got.mode != viewStatus {
+			t.Fatalf("mode = %v, want viewStatus after setup dotfiles repo completes", got.mode)
 		}
 		if !got.setupReloading {
 			t.Fatal("setupReloading should keep post-onboarding progress visible after dots repo setup")
@@ -1058,15 +1058,18 @@ func TestFlow2_UC97_HostSectionDownAtLast(t *testing.T) {
 	}
 }
 
-// UC-98: Down at last group stays in group section.
+// UC-98: Down at last group wraps to top of hosts section.
 func TestFlow2_UC98_GroupSectionDownAtLast(t *testing.T) {
 	m := hostsModel()
 	m.assignmentSection = 1
 	allGroupNames := buildAllGroupNames(m.groupNames)
 	m.groupCursor = len(allGroupNames) - 1
 	got := drive(m, pressRune('j'))
-	if got.assignmentSection != 1 {
-		t.Errorf("assignmentSection = %d, want 1 after j at last group", got.assignmentSection)
+	if got.assignmentSection != 0 {
+		t.Errorf("assignmentSection = %d, want 0 (wrapped to hosts)", got.assignmentSection)
+	}
+	if got.hostCursor != 0 {
+		t.Errorf("hostCursor = %d, want 0 (wrapped to top)", got.hostCursor)
 	}
 }
 

@@ -1078,29 +1078,149 @@ func countTransientDotCandidates(statuses []DotStatus) int {
 func ignoredChildDotStatuses(statuses []DotStatus) []DotStatus {
 	var ignored []DotStatus
 	for _, status := range statuses {
-		seen := make(map[string]bool)
-		for _, child := range append(status.Children, status.ignoredChildren...) {
-			if !child.Ignored {
-				continue
-			}
-			rel := filepath.ToSlash(child.RelPath)
-			if seen[rel] {
-				continue
-			}
-			seen[rel] = true
-			ignored = append(ignored, DotStatus{
-				Name:       status.Name + "/" + rel,
-				TargetPath: child.Path,
-				ConfigPath: child.Path,
-				Health:     healthForDotState(DotStateIgnored),
-				State:      DotStateIgnored,
-				Group:      status.Group,
-				Counts:     child.Counts,
-				IsDir:      child.IsDir,
-			})
+		flat := collectIgnoredFromChildren(status.Children, status.ignoredChildren)
+		if len(flat) == 0 {
+			continue
 		}
+		tree := buildIgnoredChildTree(flat, status.TargetPath)
+		var totalIgnored int
+		for _, child := range tree {
+			totalIgnored += countIgnoredTree(child)
+		}
+		ignored = append(ignored, DotStatus{
+			Name:       status.Name,
+			SourcePath: status.SourcePath,
+			TargetPath: status.TargetPath,
+			ConfigPath: status.ConfigPath,
+			Health:     healthForDotState(DotStateIgnored),
+			State:      DotStateIgnored,
+			Actions:    []DotAction{DotActionIgnore, DotActionRemove},
+			Group:      status.Group,
+			Counts:     DotFileCounts{Ignored: totalIgnored},
+			IsDir:      true,
+			Children:   tree,
+		})
 	}
 	return ignored
+}
+
+// collectIgnoredFromChildren deduplicates ignored children from both the
+// visible tree and the separate ignored-children list.
+func collectIgnoredFromChildren(children, ignoredChildren []DotChild) []DotChild {
+	seen := make(map[string]bool)
+	var result []DotChild
+	for _, child := range append(children, ignoredChildren...) {
+		if !child.Ignored {
+			continue
+		}
+		rel := filepath.ToSlash(child.RelPath)
+		if seen[rel] {
+			continue
+		}
+		seen[rel] = true
+		result = append(result, child)
+	}
+	return result
+}
+
+// buildIgnoredChildTree reconstructs a tree of DotChild from a flat list of
+// ignored entries, grouping files under their parent directories.
+func buildIgnoredChildTree(flat []DotChild, targetRoot string) []DotChild {
+	type node struct {
+		child    DotChild
+		children map[string]*node
+		order    []string
+	}
+
+	root := &node{children: make(map[string]*node)}
+
+	for _, child := range flat {
+		rel := filepath.ToSlash(child.RelPath)
+		parts := strings.Split(rel, "/")
+
+		cur := root
+		for i, part := range parts {
+			if cur.children == nil {
+				cur.children = make(map[string]*node)
+			}
+			n, ok := cur.children[part]
+			if !ok {
+				n = &node{children: make(map[string]*node)}
+				if i == len(parts)-1 {
+					// Leaf — use the original child data.
+					n.child = child
+					n.child.Depth = i + 1
+				} else {
+					// Intermediate directory — synthesize as tree
+					// container (not explicitly ignored).
+					dirRel := strings.Join(parts[:i+1], "/")
+					n.child = DotChild{
+						Name:    part,
+						RelPath: dirRel,
+						Path:    filepath.Join(targetRoot, filepath.FromSlash(dirRel)),
+						State:   DotStateIgnored,
+						IsDir:   true,
+						Depth:   i + 1,
+					}
+				}
+				cur.children[part] = n
+				cur.order = append(cur.order, part)
+			}
+			cur = n
+		}
+	}
+
+	var buildChildren func(n *node) []DotChild
+	buildChildren = func(n *node) []DotChild {
+		if len(n.children) == 0 {
+			return nil
+		}
+		result := make([]DotChild, 0, len(n.children))
+		for _, key := range n.order {
+			child := n.children[key]
+			ch := child.child
+			ch.Children = buildChildren(child)
+			if len(ch.Children) > 0 {
+				ch.IsDir = true
+			}
+			n := countIgnoredTree(ch)
+			ch.FileCount = n
+			ch.Counts = DotFileCounts{Ignored: n}
+			result = append(result, ch)
+		}
+		// Sort: dirs first, then alphabetically.
+		sort.SliceStable(result, func(i, j int) bool {
+			if result[i].IsDir != result[j].IsDir {
+				return result[i].IsDir
+			}
+			return result[i].Name < result[j].Name
+		})
+		return result
+	}
+
+	return buildChildren(root)
+}
+
+// countIgnoredTree counts all leaves (files and leaf directories) in the tree.
+// maxDepth guards against malformed trees with cycles.
+const countIgnoredTreeMaxDepth = 64
+
+func countIgnoredTree(child DotChild) int {
+	return countIgnoredTreeDepth(child, 0)
+}
+
+func countIgnoredTreeDepth(child DotChild, depth int) int {
+	if depth > countIgnoredTreeMaxDepth {
+		return 0
+	}
+	if len(child.Children) == 0 {
+		return 1
+	}
+	count := 0
+	for _, ch := range child.Children {
+		count += countIgnoredTreeDepth(ch, depth+1)
+	}
+	return count
 }
 
 func (a *App) QueryDotsStatus(ctx context.Context, opts DotsQueryOptions) (*DotsStatusResult, error) {
