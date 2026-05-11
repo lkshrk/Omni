@@ -519,10 +519,54 @@ cat > "$root/onboarding-settings.json" <<EOF
 }
 EOF
 
-OMNI_HOSTNAME=demo-macbook HOME="$root/home" PATH="$root/bin" \
-  "$omni_bin" --config "$root/settings.json" --cache-dir "$root/cache" providers >/dev/null
-
 db="$root/cache/omni.db"
+
+# Create DB schema (the old "omni providers" command doesn't exist; create
+# tables directly so the bootstrap-key INSERT below succeeds).
+sqlite3 "$db" <<'SCHEMA'
+CREATE TABLE IF NOT EXISTS tool_cache (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  package TEXT NOT NULL,
+  installed BOOLEAN NOT NULL DEFAULT 0,
+  installed_with TEXT NOT NULL DEFAULT '',
+  version TEXT,
+  outdated BOOLEAN NOT NULL DEFAULT 0,
+  latest_version TEXT,
+  description TEXT,
+  last_checked DATETIME NOT NULL,
+  failed_at DATETIME,
+  failure_count INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  tracked BOOLEAN NOT NULL DEFAULT 1,
+  privilege TEXT NOT NULL DEFAULT '',
+  privilege_reason TEXT,
+  privilege_at DATETIME
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tool_cache_name_provider_package
+  ON tool_cache (name, provider, package);
+
+CREATE TABLE IF NOT EXISTS tool_metadata (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  package TEXT NOT NULL,
+  version TEXT,
+  description TEXT,
+  privilege TEXT NOT NULL DEFAULT '',
+  privilege_reason TEXT,
+  updated_at DATETIME NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tool_metadata_name_provider_package
+  ON tool_metadata (name, provider, package);
+
+CREATE TABLE IF NOT EXISTS local_state (
+  key TEXT PRIMARY KEY NOT NULL,
+  value TEXT NOT NULL,
+  updated_at DATETIME NOT NULL
+);
+SCHEMA
 config_path="$root/settings.json"
 if command -v shasum >/dev/null 2>&1; then
   hash_line="$(printf '%s' "$config_path" | shasum -a 256)"
@@ -535,7 +579,7 @@ else
   exit 1
 fi
 config_hash="${hash_line%% *}"
-bootstrap_key="bootstrap.completed.demo-macbook.${config_hash:0:16}"
+bootstrap_key="bootstrap.completed.demo-macbook.${config_hash:0:32}"
 
 sqlite3 "$db" <<SQL
 INSERT INTO local_state (key, value, updated_at)
