@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.23
 
 FROM golang:1.26-alpine AS integration-test
 
@@ -20,15 +20,7 @@ RUN pip3 install --break-system-packages cowsay==6.1
 
 WORKDIR /app
 
-RUN adduser -D -u 10001 omni
-
-# Keep module downloads in BuildKit cache instead of baking them into a large
-# reusable test image layer.
-COPY go.mod go.sum ./
-RUN --mount=type=cache,target=/go/pkg/mod \
-    go mod download
-
-COPY --chown=omni:omni . .
+RUN adduser -D -u 10001 omni && chown omni:omni /app
 
 # Configure git so dots tests that commit don't fail on missing identity.
 RUN git config --system user.email "ci@omni" && \
@@ -40,9 +32,18 @@ RUN git config --system user.email "ci@omni" && \
 USER omni
 ENV HOME=/home/omni
 ENV GOCACHE=/home/omni/.cache/go-build
+ENV GOMODCACHE=/home/omni/.cache/go-mod
 ENV OMNI_TEST_ISOLATED=1
 
-RUN --mount=type=cache,target=/go/pkg/mod \
+# Keep module downloads in BuildKit cache instead of baking them into a large
+# reusable test image layer.
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/home/omni/.cache/go-mod,uid=10001,gid=10001 \
+    go mod download
+
+COPY --chown=omni:omni . .
+
+RUN --mount=type=cache,target=/home/omni/.cache/go-mod,uid=10001,gid=10001 \
     --mount=type=cache,target=/home/omni/.cache/go-build,uid=10001,gid=10001 \
-    go test -race ./... && \
-    go test -tags=integration -race -v ./integration_tests/... ./internal/provider/...
+    go test -race -trimpath ./... && \
+    go test -tags=integration -race -trimpath -v ./integration_tests/... ./internal/provider/...

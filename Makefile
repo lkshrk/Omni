@@ -15,12 +15,12 @@ ARGS        ?= --help
 GIT_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS     := -X $(MODULE)/internal/cli.Version=$(GIT_VERSION)
 
-.PHONY: build run tui-live tui-dev cli cli-live cli-dev dev-bootstrap test test-scripts test-package-managers test-all test-integration-build test-integration lint clean install gen-schema demo-gif
+.PHONY: build run tui-live tui-dev cli cli-live cli-dev dev-bootstrap test test-scripts test-package-managers test-all test-integration-build test-integration lint clean clean-cache clean-docker install gen-schema demo-gif
 
 ## build: compile the binary to ./bin/omni
 build:
 	@mkdir -p bin
-	go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD_PATH)
+	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD_PATH)
 
 ## run: alias for tui-live
 run: tui-live
@@ -70,7 +70,8 @@ demo-gif:
 
 ## test: run unit tests with race detector and script regressions
 test: test-scripts
-	go test -race ./...
+	go clean -testcache
+	go test -race -trimpath ./...
 
 ## test-scripts: run shell-script regression tests
 test-scripts:
@@ -101,15 +102,24 @@ test-integration-build:
 
 ## test-integration: run all tests inside the isolated Docker environment
 test-integration: test-integration-build
+	@docker builder prune --keep-storage=2g -f >/dev/null 2>&1 || true
 
 ## lint: run golangci-lint
 lint:
 	@mkdir -p .tmp/go-build .tmp/golangci-lint
 	@GOCACHE=$${GOCACHE:-$$(pwd)/.tmp/go-build} GOLANGCI_LINT_CACHE=$${GOLANGCI_LINT_CACHE:-$$(pwd)/.tmp/golangci-lint} golangci-lint run
 
-## clean: remove build artifacts
-clean:
-	rm -rf bin/
+## clean: remove build artifacts and caches
+clean: clean-cache clean-docker
+	rm -rf bin/ .tmp/
+
+## clean-cache: prune Go build and test caches
+clean-cache:
+	go clean -cache -testcache
+
+## clean-docker: prune Docker BuildKit build cache
+clean-docker:
+	docker builder prune --keep-storage=2g -f
 
 ## help: print this help message
 help:
