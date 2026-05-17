@@ -23,7 +23,7 @@ func renderGroupDeletePopup(m Model) string {
 		groupName = "group"
 	}
 	var sb strings.Builder
-	sb.WriteString(p.styleMissing.Render(groupName))
+	sb.WriteString(p.styleMissing.Render(fitCellText(groupName, groupDeletePopupContentWidth)))
 	sb.WriteString("\n\n")
 	if m.groupHasContent(groupName) {
 		choices := []string{
