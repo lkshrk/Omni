@@ -120,6 +120,13 @@ Run 'omni bootstrap' on every new machine to reproduce your environment.`,
 						}
 					}
 					fmt.Printf("\n✓ Imported %d tool(s) into settings.json\n", len(result.Added))
+					if stdinIsTerminal() {
+						names := make([]string, len(result.Added))
+						for i, t := range result.Added {
+							names[i] = t.Name
+						}
+						promptReassignClaimedTools(state, names)
+					}
 				}
 				fmt.Println()
 			}

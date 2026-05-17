@@ -93,11 +93,11 @@ func TestCanonicalActionKeys(t *testing.T) {
 			t.Fatalf("%s ignore TUI key = %+v, want x", id, action.TUI)
 		}
 	}
-	if discover := actions.MustTUILabel(actions.DotsDiscover); discover != "discover" {
-		t.Fatalf("dots discover label = %q, want discover", discover)
+	if refresh := actions.MustTUILabel(actions.DotsRefresh); refresh != "refresh" {
+		t.Fatalf("dots refresh label = %q, want refresh", refresh)
 	}
-	if action, _ := actions.Get(actions.DotsDiscover); action.TUI == nil || action.TUI.DefaultKey == "d" {
-		t.Fatalf("dots discover must not use d because d is reserved for delete: %+v", action.TUI)
+	if action, _ := actions.Get(actions.DotsRefresh); action.TUI == nil || action.TUI.DefaultKey == "d" {
+		t.Fatalf("dots refresh must not use d because d is reserved for delete: %+v", action.TUI)
 	}
 }
 
@@ -115,7 +115,7 @@ func TestDurableTUIActionsAreCataloged(t *testing.T) {
 		actions.ToolReinstallDefault,
 		actions.ToolRefresh,
 		actions.DotsSync,
-		actions.DotsDiscover,
+		actions.DotsRefresh,
 		actions.DotsAdd,
 		actions.DotsEditGroups,
 		actions.DotsVariant,

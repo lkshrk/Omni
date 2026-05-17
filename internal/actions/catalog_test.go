@@ -229,7 +229,7 @@ func TestActionCatalogIncludesDurableDomains(t *testing.T) {
 		ToolNormalizeProviderOverrides,
 		ToolImport,
 		ToolSwitchProvider,
-		DotsDiscover,
+		DotsRefresh,
 		DotsAdd,
 		DotsEditGroups,
 		DotsVariant,
@@ -421,7 +421,7 @@ func TestMutatingToolActionsHaveCLIAndTUIParity(t *testing.T) {
 		if len(action.CLI) == 0 {
 			t.Fatalf("%s mutates state but has no CLI binding", action.ID)
 		}
-		if action.Requires(RequiresGroupAssignment) && !hasAnyCLICommand(action, [][]string{{"add"}, {"groups", "move-tool"}, {"groups", "remove-tool"}}) {
+		if action.Requires(RequiresGroupAssignment) && !hasAnyCLICommand(action, [][]string{{"tools", "add"}, {"groups", "move-tool"}, {"groups", "remove-tool"}}) {
 			t.Fatalf("%s requires group assignment but has no explicit group CLI: %+v", action.ID, action.CLI)
 		}
 		if action.Requires(RequiresIgnoreScope) && !hasAnyCLICommand(action, [][]string{{"tools", "ignore"}, {"groups", "ignore-tool"}}) {

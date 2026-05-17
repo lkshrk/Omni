@@ -1,6 +1,6 @@
-# omni upgrade with no args and no --all exits with an error
+# omni tools upgrade with no args and no --all exits with an error
 exec omni --config settings.json hosts ensure testhost
-! exec omni --config settings.json upgrade
+! exec omni --config settings.json tools upgrade
 stderr 'specify a tool name or use --all'
 
 -- settings.json --

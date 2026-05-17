@@ -1,6 +1,6 @@
-# omni upgrade --all with an empty DB prints "Nothing to upgrade."
+# omni tools upgrade --all with an empty DB prints "Nothing to upgrade."
 exec omni --config settings.json hosts ensure testhost
-exec omni --config settings.json upgrade --all
+exec omni --config settings.json tools upgrade --all
 stdout 'Nothing to upgrade'
 
 -- settings.json --

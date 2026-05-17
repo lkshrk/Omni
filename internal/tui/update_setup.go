@@ -34,7 +34,7 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 	if msg.noConfig {
 		m.finishSetupReload()
 		m.mode = viewSetup
-		m.setupBackgroundMode = viewList
+		m.setupBackgroundMode = viewStatus
 		m.setupStep = 0
 		return nil
 	}
@@ -79,7 +79,7 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 		m.setupGroupDraft = nil
 		m.setupActivationIdx = 0
 		m.mode = viewSetup
-		m.setupBackgroundMode = viewList
+		m.setupBackgroundMode = viewStatus
 		m.setupStep = 2
 		if len(m.setupCopyHostNames()) > 0 {
 			m.setupStep = 7
@@ -128,19 +128,19 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 	m.applyFilter()
 	if msg.bootstrapRequired && !m.setupComplete {
 		m.mode = viewSetup
-		m.setupBackgroundMode = viewList
+		m.setupBackgroundMode = viewStatus
 		m.setupActivationIdx = 0
 		m.setupStep = 10
 		return cmds
 	}
 	if m.setupBackgroundMode == viewDots {
 		m.mode = viewDots
-		m.setupBackgroundMode = viewList
+		m.setupBackgroundMode = viewStatus
 	} else {
 		if !isMainTabMode(m.mode) || m.mode == viewSetup {
 			m.mode = viewStatus
 		}
-		m.setupBackgroundMode = viewList
+		m.setupBackgroundMode = viewStatus
 	}
 	m.hostRequired = false
 

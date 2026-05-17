@@ -8,7 +8,7 @@ exec git init $WORK/home/dotfiles
 exec git -C $WORK/home/dotfiles config user.email t@t.com
 exec git -C $WORK/home/dotfiles config user.name T
 exec git -C $WORK/home/dotfiles commit --allow-empty -m init
-exec omni --config settings.json dots add $WORK/home/.config/myapp --adopt
+exec omni --config settings.json dots add $WORK/home/.config/myapp --adopt --group testhost
 stdout 'symlink'
 exec omni --config settings.json dots list
 stdout 'myapp'

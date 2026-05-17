@@ -1,5 +1,5 @@
 # duplicate tool group ownership is rejected before sync runs
-! exec omni --config settings.json sync --dry-run
+! exec omni --config settings.json tools sync --dry-run
 stderr 'tool "ripgrep" already belongs to group "work"'
 
 -- settings.json --

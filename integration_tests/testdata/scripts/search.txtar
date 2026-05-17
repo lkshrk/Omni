@@ -1,0 +1,14 @@
+# search command tests
+
+exec omni --config settings.json hosts ensure testhost
+
+# no args exits with an error (ExactArgs(1))
+! exec omni --config settings.json tools search
+stderr 'accepts 1 arg'
+
+# filtering to a provider that does not exist yields no results without invoking real providers
+exec omni --config settings.json tools search ripgrep --provider nonexistent-provider-xyz
+stdout 'No results found\.'
+
+-- settings.json --
+{}

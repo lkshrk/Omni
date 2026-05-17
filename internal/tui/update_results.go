@@ -116,6 +116,7 @@ func (m *Model) handleProgressDoneMsg(msg progressDoneMsg) []tea.Cmd {
 	}
 	if len(msg.claimedNames) > 0 {
 		m.removeDiscoveredByName(msg.claimedNames)
+		m.startGroupReassignQueue(msg.claimedNames)
 	}
 	if msg.toolGroups != nil {
 		m.toolGroups = msg.toolGroups
@@ -564,14 +565,14 @@ func (m *Model) handleDangerOpDoneMsg(msg dangerOpDoneMsg) []tea.Cmd {
 		return cmds
 	}
 	if msg.setupComplete && msg.err == nil {
-		m.mode = viewList
-		m.setupBackgroundMode = viewList
+		m.mode = viewStatus
+		m.setupBackgroundMode = viewStatus
 		m.setupStep = 0
 		m.hostRequired = false
 		m.setupComplete = true
 	}
 	if msg.reload {
-		if msg.mode != viewList {
+		if msg.mode != viewStatus {
 			m.setupBackgroundMode = msg.mode
 		}
 		m.loading = true

@@ -1,10 +1,10 @@
 # non-interactive logical tool commands require explicit assignment targets
 exec omni --config settings.json hosts ensure testhost
 
-! exec omni --config settings.json add ripgrep --provider system
+! exec omni --config settings.json tools add ripgrep --provider system
 stderr 'missing assignment target: pass --group <group> for non-interactive add'
 
-! exec omni --config settings.json add ripgrep --group testhost
+! exec omni --config settings.json tools add ripgrep --group testhost
 stderr '--provider is required'
 
 exec omni --config settings.json tools set ripgrep --provider system --install-with brew

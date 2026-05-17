@@ -271,6 +271,7 @@ func modelForCmds(a *app.App) Model {
 		keys:          DefaultKeyMap(),
 		spinner:       spinner.New(),
 		filter:        fi,
+		mode:          viewList,
 		upgradingKeys: make(map[string]bool),
 	}
 }
@@ -2081,7 +2082,7 @@ func TestDoDotsAdd_UsesMachineGroupWhenUnfiltered(t *testing.T) {
 	m.hostInfo, _ = a.HostStatus()
 	m.beginDotsOperation("Adding zed...")
 	path := filepath.Join(homeDir, ".config", "zed")
-	msg := m.doDotsAdd(path, "~/.config/zed", m.dotAddTargetGroup())()
+	msg := m.doDotsAdd(path, "~/.config/zed", "laptop")()
 	got, ok := msg.(dotsAddedMsg)
 	if !ok {
 		t.Fatalf("doDotsAdd returned %T, want dotsAddedMsg", msg)

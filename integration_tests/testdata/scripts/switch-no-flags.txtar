@@ -1,10 +1,10 @@
-# omni switch without --from exits with an error
+# omni tools switch without --from exits with an error
 exec omni --config settings.json hosts ensure testhost
-! exec omni --config settings.json switch black
+! exec omni --config settings.json tools switch black
 stderr '--from is required'
 
-# omni switch with --from but no --to also exits with an error
-! exec omni --config settings.json switch black --from brew
+# omni tools switch with --from but no --to also exits with an error
+! exec omni --config settings.json tools switch black --from brew
 stderr '--to is required'
 
 -- settings.json --

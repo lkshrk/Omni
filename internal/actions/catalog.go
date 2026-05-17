@@ -26,7 +26,7 @@ const (
 	ToolImport                     ID = "tools.import"
 	ToolSwitchProvider             ID = "tools.switch_provider"
 	DotsSync                       ID = "dots.sync"
-	DotsDiscover                   ID = "dots.discover"
+	DotsRefresh                    ID = "dots.refresh"
 	DotsAdd                        ID = "dots.add"
 	DotsEditGroups                 ID = "dots.edit_groups"
 	DotsVariant                    ID = "dots.variant"
@@ -171,8 +171,8 @@ var Tools = []Action{
 		Description:     "Install missing tools from config.",
 		LongDescription: "Install configured tools that are missing locally.",
 		Mutates:         true,
-		CLI:             []CLIBinding{{Command: []string{"sync"}, Flags: []string{"--dry-run", "--prune", "--provider", "--group", "--retry-failed"}}},
-		Palette:         &PaletteBinding{Command: []string{"sync"}, Description: "sync tools from config"},
+		CLI:             []CLIBinding{{Command: []string{"tools", "sync"}, Flags: []string{"--dry-run", "--prune", "--provider", "--group", "--retry-failed"}}},
+		Palette:         &PaletteBinding{Command: []string{"tools", "sync"}, Description: "sync tools from config"},
 		PaletteEligible: true,
 	},
 	{
@@ -185,7 +185,7 @@ var Tools = []Action{
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresToolName},
 		TUI:             &TUIBinding{KeyMapField: "Install", DefaultKey: "i", Label: "install", Description: "Install the selected missing tool."},
-		CLI:             []CLIBinding{{Command: []string{"install"}, Flags: []string{"--provider"}}},
+		CLI:             []CLIBinding{{Command: []string{"tools", "install"}, Flags: []string{"--provider"}}},
 	},
 	{
 		ID:                 ToolDelete,
@@ -199,7 +199,7 @@ var Tools = []Action{
 		ConfirmDescription: ConfirmDelete,
 		Requirements:       []Requirement{RequiresToolName},
 		TUI:                &TUIBinding{KeyMapField: "Delete", DefaultKey: "d", Label: LabelDelete, Description: "Delete the selected tool and config entry.", ConfirmDescription: ConfirmDelete},
-		CLI:                []CLIBinding{{Command: []string{"delete"}, Flags: []string{"--provider"}}},
+		CLI:                []CLIBinding{{Command: []string{"tools", "delete"}, Flags: []string{"--provider"}}},
 	},
 	{
 		ID:              ToolUpdate,
@@ -211,7 +211,7 @@ var Tools = []Action{
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresToolName},
 		TUI:             &TUIBinding{KeyMapField: "Upgrade", DefaultKey: "u", Label: "upgrade", Description: "Upgrade the selected outdated tool."},
-		CLI:             []CLIBinding{{Command: []string{"upgrade"}, Flags: []string{"--provider"}}},
+		CLI:             []CLIBinding{{Command: []string{"tools", "upgrade"}, Flags: []string{"--provider"}}},
 	},
 	{
 		ID:              ToolUpdateAll,
@@ -222,7 +222,7 @@ var Tools = []Action{
 		LongDescription: "Upgrade every outdated installed tool currently tracked in the local cache.",
 		Mutates:         true,
 		TUI:             &TUIBinding{KeyMapField: "UpgradeAll", DefaultKey: "U", Label: "upgrade all", Description: "Upgrade every visible outdated tool."},
-		CLI:             []CLIBinding{{Command: []string{"upgrade"}, Flags: []string{"--all"}}},
+		CLI:             []CLIBinding{{Command: []string{"tools", "upgrade"}, Flags: []string{"--all"}}},
 	},
 	{
 		ID:                 ToolSyncAll,
@@ -235,7 +235,7 @@ var Tools = []Action{
 		RequiresConfirm:    true,
 		ConfirmDescription: ConfirmSyncAll,
 		TUI:                &TUIBinding{KeyMapField: "SyncAll", DefaultKey: "S", Label: "sync all", Description: "Add discovered tools and install missing tools.", ConfirmDescription: ConfirmSyncAll},
-		CLI:                []CLIBinding{{Command: []string{"sync"}, Flags: []string{"--all"}}},
+		CLI:                []CLIBinding{{Command: []string{"tools", "sync"}, Flags: []string{"--all"}}},
 	},
 	{
 		ID:              ToolClaim,
@@ -247,7 +247,7 @@ var Tools = []Action{
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresToolName, RequiresGroupAssignment, RequiresEcosystemProvider},
 		TUI:             &TUIBinding{KeyMapField: "Claim", DefaultKey: "c", Label: "add to config", Description: "Add the selected discovered tool to config."},
-		CLI:             []CLIBinding{{Command: []string{"add"}, Flags: []string{"--name", "--group", "--provider", "--install-with"}}},
+		CLI:             []CLIBinding{{Command: []string{"tools", "add"}, Flags: []string{"--name", "--group", "--provider", "--install-with"}}},
 	},
 	{
 		ID:              ToolIgnore,
@@ -307,7 +307,7 @@ var Tools = []Action{
 		ConfirmDescription: ConfirmReinstall,
 		Requirements:       []Requirement{RequiresToolName},
 		TUI:                &TUIBinding{KeyMapField: "MigrateProvider", DefaultKey: "r", Label: "reinstall with default", Description: "Reinstall the selected tool with its default provider.", ConfirmDescription: ConfirmReinstall},
-		CLI:                []CLIBinding{{Command: []string{"switch"}, Flags: []string{"--reinstall-default", "--provider"}}},
+		CLI:                []CLIBinding{{Command: []string{"tools", "switch"}, Flags: []string{"--reinstall-default", "--provider"}}},
 	},
 	{
 		ID:              ToolRefresh,
@@ -318,7 +318,7 @@ var Tools = []Action{
 		LongDescription: "Refresh omni's local cache of installed, outdated, discovered, and description metadata without installing or uninstalling packages.",
 		Mutates:         true,
 		TUI:             &TUIBinding{KeyMapField: "Refresh", DefaultKey: "R", Label: "refresh", Description: "Rescan installed, outdated, discovered, and description state."},
-		CLI:             []CLIBinding{{Command: []string{"refresh"}}},
+		CLI:             []CLIBinding{{Command: []string{"tools", "refresh"}}},
 	},
 	{
 		ID:              ToolConsolidate,
@@ -328,8 +328,8 @@ var Tools = []Action{
 		Description:     "Move an ecosystem to one manager.",
 		LongDescription: "Consolidate all tools in an ecosystem to the selected manager.",
 		Mutates:         true,
-		CLI:             []CLIBinding{{Command: []string{"consolidate"}, Flags: []string{"--dry-run", "--to"}}},
-		Palette:         &PaletteBinding{Command: []string{"consolidate"}, Description: "use selected manager for ecosystem tools", DescriptionFormat: "use %s for %s tools"},
+		CLI:             []CLIBinding{{Command: []string{"tools", "consolidate"}, Flags: []string{"--dry-run", "--to"}}},
+		Palette:         &PaletteBinding{Command: []string{"tools", "consolidate"}, Description: "use selected manager for ecosystem tools", DescriptionFormat: "use %s for %s tools"},
 		PaletteEligible: true,
 	},
 	{
@@ -356,7 +356,7 @@ var Tools = []Action{
 		ConfirmDescription: "confirm delete tool spec",
 		Requirements:       []Requirement{RequiresToolName},
 		TUI:                &TUIBinding{KeyMapField: "Delete", DefaultKey: "d", Label: "delete tool spec", Description: "Delete the selected tool spec and memberships.", ConfirmDescription: "confirm delete tool spec"},
-		CLI:                []CLIBinding{{Command: []string{"tools", "delete"}}},
+		CLI:                []CLIBinding{{Command: []string{"tools", "delete-spec"}}},
 	},
 	{
 		ID:                 ToolNormalizeProviderOverrides,
@@ -380,7 +380,7 @@ var Tools = []Action{
 		LongDescription: "Discover locally installed tools and add them to config, optionally scoped by provider and destination group.",
 		Mutates:         true,
 		TUI:             &TUIBinding{KeyMapField: "Confirm", DefaultKey: "enter", Label: "import installed tools", Description: "Import installed tools into the selected group."},
-		CLI:             []CLIBinding{{Command: []string{"import"}, Flags: []string{"--provider", "--group", "--dry-run"}}},
+		CLI:             []CLIBinding{{Command: []string{"tools", "import"}, Flags: []string{"--provider", "--group", "--dry-run"}}},
 	},
 	{
 		ID:              ToolSwitchProvider,
@@ -391,7 +391,7 @@ var Tools = []Action{
 		LongDescription: "Install one tool with an explicit target provider, remove the old provider installation best-effort, and rewrite config/cache ownership.",
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresToolName},
-		CLI:             []CLIBinding{{Command: []string{"switch"}, Flags: []string{"--from", "--to"}}},
+		CLI:             []CLIBinding{{Command: []string{"tools", "switch"}, Flags: []string{"--from", "--to"}}},
 		CLIOnlyReason:   "explicit --from/--to provider migration is a legacy CLI repair path; TUI exposes scoped provider pinning and reinstall-with-default instead",
 	},
 }
@@ -412,14 +412,14 @@ var Dots = []Action{
 		PaletteEligible: true,
 	},
 	{
-		ID:              DotsDiscover,
+		ID:              DotsRefresh,
 		Domain:          "dots",
 		Scope:           ScopeGlobal,
-		Label:           LabelDiscover,
-		Description:     "List untracked dotfile candidates.",
-		LongDescription: "Discover repo, local config, and well-known dotfile candidates without mutating config, the repo, or local files.",
+		Label:           "refresh",
+		Description:     "Refresh dotfile status and discover candidates.",
+		LongDescription: "Re-scan all dot entries, refresh git status, and discover untracked dotfile candidates without mutating config, the repo, or local files.",
 		Mutates:         false,
-		TUI:             &TUIBinding{KeyMapField: "DotDiscover", DefaultKey: "D", Label: LabelDiscover, Description: "Find untracked dotfile candidates."},
+		TUI:             &TUIBinding{KeyMapField: "DotRefresh", DefaultKey: "R", Label: "refresh", Description: "Refresh status and discover candidates."},
 		CLI:             []CLIBinding{{Command: []string{"dots", "discover"}, Flags: []string{"--format"}}},
 	},
 	{

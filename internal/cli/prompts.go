@@ -74,6 +74,64 @@ func promptYesNo(state *rootState, question string, defaultVal bool) bool {
 	return answer == "y" || answer == "yes"
 }
 
+// promptReassignClaimedTools offers to move freshly claimed tools out of the
+// machine hostname group. The user can move all to one group, choose per tool,
+// or skip (keep in machine group).
+func promptReassignClaimedTools(state *rootState, claimedNames []string) {
+	if len(claimedNames) == 0 {
+		return
+	}
+	fmt.Printf("\n%d tool(s) added to machine group. Move to a different group?\n", len(claimedNames))
+	fmt.Print("  [a]ll to same group / [i]ndividual / [s]kip: ")
+	line, ok := scanLine()
+	if !ok {
+		return
+	}
+	answer := strings.TrimSpace(strings.ToLower(line))
+	switch {
+	case answer == "a" || answer == "all":
+		group, ok := promptText("Move all to group?", "")
+		if !ok || group == "" {
+			return
+		}
+		for _, name := range claimedNames {
+			if err := state.app.MoveToolToGroup(name, group); err != nil {
+				fmt.Fprintf(os.Stderr, "  warning: could not move %s: %v\n", name, err)
+			} else {
+				fmt.Printf("  ✓ %s → %s\n", name, group)
+			}
+		}
+	case answer == "i" || answer == "individual":
+		var lastGroup string
+		for _, name := range claimedNames {
+			prompt := fmt.Sprintf("  %s → group?", name)
+			if lastGroup != "" {
+				prompt += fmt.Sprintf(" [%s]", lastGroup)
+			}
+			prompt += " "
+			fmt.Print(prompt)
+			l, ok := scanLine()
+			if !ok {
+				return
+			}
+			g := strings.TrimSpace(l)
+			if g == "" {
+				g = lastGroup
+			}
+			if g == "" {
+				continue
+			}
+			lastGroup = g
+			if err := state.app.MoveToolToGroup(name, g); err != nil {
+				fmt.Fprintf(os.Stderr, "  warning: could not move %s: %v\n", name, err)
+			} else {
+				fmt.Printf("  ✓ %s → %s\n", name, g)
+			}
+		}
+	}
+	// "s", "skip", or anything else: keep in machine group.
+}
+
 // promptSatisfiedGroups checks result.SatisfiedGroups and for each one asks the
 // user whether to assign it to the active host.
 func promptSatisfiedGroups(state *rootState, activeHost string, satisfiedGroups []string, addGroupFn func(group string) error) {
