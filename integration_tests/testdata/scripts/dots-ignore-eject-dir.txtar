@@ -1,0 +1,52 @@
+# dots ignore with a dir pattern ejects a directory symlink and copies contents.
+env HOME=$WORK/home
+mkdir $WORK/home
+
+exec git init $WORK/home/dotfiles
+exec git -C $WORK/home/dotfiles config user.email t@t.com
+exec git -C $WORK/home/dotfiles config user.name T
+exec git -C $WORK/home/dotfiles commit --allow-empty -m init
+
+mkdir $WORK/home/dotfiles/dotfiles
+mkdir $WORK/home/dotfiles/dotfiles/myapp
+mkdir $WORK/home/dotfiles/dotfiles/myapp/.myapp
+mkdir $WORK/home/dotfiles/dotfiles/myapp/.myapp/cache
+
+# Simulate per-item stow state: target is a real dir with a symlink for cache/
+mkdir $WORK/home/.myapp
+exec ln -s $WORK/home/dotfiles/dotfiles/myapp/.myapp/config.toml $WORK/home/.myapp/config.toml
+exec ln -s $WORK/home/dotfiles/dotfiles/myapp/.myapp/cache $WORK/home/.myapp/cache
+
+# Sanity: cache is a symlink to a directory
+exec sh -c 'test -L '"$WORK"'/home/.myapp/cache && echo symlink-ok'
+stdout 'symlink-ok'
+
+# Ignore cache/ directory — should eject the dir symlink
+exec omni --config settings.json dots ignore myapp '/cache/'
+stdout 'ejected 1 previously synced path\(s\)'
+
+# cache must now be a real directory (not a symlink)
+exec sh -c 'test -d '"$WORK"'/home/.myapp/cache && test ! -L '"$WORK"'/home/.myapp/cache && echo real-dir'
+stdout 'real-dir'
+
+# Contents should be copied
+exec cat $WORK/home/.myapp/cache/data.db
+stdout 'cached-content'
+
+# Repo source removed
+exec sh -c 'test ! -e '"$WORK"'/home/dotfiles/dotfiles/myapp/.myapp/cache && echo removed'
+stdout 'removed'
+
+# config.toml unaffected
+exec sh -c 'test -L '"$WORK"'/home/.myapp/config.toml && echo still-symlink'
+stdout 'still-symlink'
+
+-- settings.json --
+{"host_settings":{"testhost":{"dots_repo":"~/dotfiles"}},"hosts":{"testhost":[]},"groups":[{"name":"testhost","special":"host","dots":[{"name":"myapp","path":"~/.myapp"}]}]}
+
+-- home/dotfiles/dotfiles/myapp/.myapp/config.toml --
+[app]
+theme = "dark"
+
+-- home/dotfiles/dotfiles/myapp/.myapp/cache/data.db --
+cached-content
