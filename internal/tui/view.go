@@ -277,7 +277,7 @@ func (m Model) viewString() string {
 	case m.mode == viewDots:
 		body = renderDots(m)
 	case m.mode == viewStatus:
-		if m.loading && len(m.allTools) == 0 {
+		if len(m.allTools) == 0 || m.launchBatchActive {
 			body = ""
 		} else {
 			body = renderStatus(m)

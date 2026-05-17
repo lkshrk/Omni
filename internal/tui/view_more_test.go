@@ -6434,3 +6434,243 @@ func TestTruncatedGitStatus(t *testing.T) {
 		})
 	}
 }
+
+// ── renderSetupOptions ────────────────────────────────────────────────────────
+
+func TestRenderSetupOptions_DescriptionAlignment(t *testing.T) {
+	// Labels of different lengths: descriptions must all start at the same column.
+	m := baseModel(nil)
+	m.width = 80
+	options := []setupOption{
+		{Label: "short", Detail: "detail A", Selected: false},
+		{Label: "much-longer-label", Detail: "detail B", Selected: false},
+		{Label: "mid", Detail: "detail C", Selected: true},
+	}
+	out := stripANSIEscapeSequences(renderSetupOptions(m, options))
+
+	// Collect the column position of each detail string.
+	cols := make(map[string]int)
+	for _, line := range strings.Split(out, "\n") {
+		for _, detail := range []string{"detail A", "detail B", "detail C"} {
+			if strings.Contains(line, detail) {
+				cols[detail] = visualColumnOf(line, detail)
+			}
+		}
+	}
+	for _, detail := range []string{"detail A", "detail B", "detail C"} {
+		if _, ok := cols[detail]; !ok {
+			t.Fatalf("detail %q not found in output:\n%s", detail, out)
+		}
+	}
+	if cols["detail A"] != cols["detail B"] || cols["detail B"] != cols["detail C"] {
+		t.Fatalf("description columns should be equal across rows: detailA=%d detailB=%d detailC=%d\n%s",
+			cols["detail A"], cols["detail B"], cols["detail C"], out)
+	}
+}
+
+func TestRenderSetupOptions_DescriptionColumnMatchesFormula(t *testing.T) {
+	// Verify that the desc column equals prefixW + maxLabelW + detailGap (2).
+	m := baseModel(nil)
+	m.width = 80
+	options := []setupOption{
+		{Label: "abc", Detail: "x", Selected: false},
+		{Label: "abcdefgh", Detail: "y", Selected: false}, // widest: 8 runes
+	}
+	out := stripANSIEscapeSequences(renderSetupOptions(m, options))
+
+	// prefixW=2 (cursor), maxLabelW=8, detailGap=2 → descCol=12
+	wantDescCol := 2 + 8 + 2 // 12
+	for _, line := range strings.Split(out, "\n") {
+		for _, detail := range []string{"x", "y"} {
+			if strings.Contains(line, detail) {
+				if got := visualColumnOf(line, detail); got != wantDescCol {
+					t.Fatalf("detail %q at column %d, want %d:\n%s", detail, got, wantDescCol, out)
+				}
+			}
+		}
+	}
+}
+
+func TestRenderSetupOptions_DescriptionColumnWithCheckbox(t *testing.T) {
+	// When all options have Checked fields, prefix grows by 4 ("[ ] " or "[x] ").
+	// All descriptions must start at the same column.
+	m := baseModel(nil)
+	m.width = 80
+	checkedTrue := true
+	checkedFalse := false
+	options := []setupOption{
+		{Label: "brew", Detail: "system packages", Selected: false, Checked: &checkedTrue},
+		{Label: "node", Detail: "js packages", Selected: false, Checked: &checkedFalse},
+	}
+	out := stripANSIEscapeSequences(renderSetupOptions(m, options))
+
+	// prefixW=2+4=6, maxLabelW=4 ("brew"/"node"), detailGap=2 → descCol=12
+	wantDescCol := 6 + 4 + 2 // 12
+	colA, colB := -1, -1
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "system packages") {
+			colA = visualColumnOf(line, "system packages")
+		}
+		if strings.Contains(line, "js packages") {
+			colB = visualColumnOf(line, "js packages")
+		}
+	}
+	if colA < 0 || colB < 0 {
+		t.Fatalf("details not found in output:\n%s", out)
+	}
+	if colA != wantDescCol {
+		t.Fatalf("\"system packages\" column=%d, want %d:\n%s", colA, wantDescCol, out)
+	}
+	if colA != colB {
+		t.Fatalf("description columns should match: %d vs %d:\n%s", colA, colB, out)
+	}
+}
+
+func TestRenderSetupOptions_LineWrapping(t *testing.T) {
+	// A detail longer than availW should wrap to a continuation line.
+	m := baseModel(nil)
+	// prefixW=2, maxLabelW=4 ("opt1"), detailGap=2 → descCol=8; availW=m.width-8
+	m.width = 30 // availW = 30-8 = 22
+	longDetail := "this is a fairly long detail text that must wrap"
+	options := []setupOption{
+		{Label: "opt1", Detail: longDetail, Selected: false},
+	}
+	out := stripANSIEscapeSequences(renderSetupOptions(m, options))
+	lines := strings.Split(out, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 lines for wrapped detail, got:\n%s", out)
+	}
+	// Every continuation line must be indented by descCol (8 spaces).
+	indent := strings.Repeat(" ", 8)
+	foundContinuation := false
+	for _, line := range lines[1:] {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, indent) {
+			t.Fatalf("continuation line missing %d-space indent:\n%q\nfull output:\n%s", 8, line, out)
+		}
+		foundContinuation = true
+	}
+	if !foundContinuation {
+		t.Fatalf("expected at least one continuation/wrapped line:\n%s", out)
+	}
+}
+
+func TestRenderSetupOptions_NoDetail_NoTrailingGap(t *testing.T) {
+	// When Detail is empty, the line should contain only prefix + label with no trailing padding.
+	m := baseModel(nil)
+	m.width = 80
+	options := []setupOption{
+		{Label: "brew", Detail: "", Selected: false},
+	}
+	out := stripANSIEscapeSequences(renderSetupOptions(m, options))
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "brew") {
+			// Right-trimmed line must end right after "brew".
+			trimmed := strings.TrimRight(line, " ")
+			if !strings.HasSuffix(trimmed, "brew") {
+				t.Fatalf("line with empty detail should not have trailing content after label, got:\n%q", line)
+			}
+			return
+		}
+	}
+	t.Fatalf("label not found in output:\n%s", out)
+}
+
+func TestRenderSetupOptions_SelectedRowCursorDiffers(t *testing.T) {
+	// The selected row's cursor character must differ from the unselected cursor.
+	m := baseModel(nil)
+	m.width = 80
+	options := []setupOption{
+		{Label: "first", Detail: "d1", Selected: false},
+		{Label: "second", Detail: "d2", Selected: true},
+	}
+	out := stripANSIEscapeSequences(renderSetupOptions(m, options))
+	lines := strings.Split(out, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 lines, got:\n%s", out)
+	}
+	firstCursor := string([]rune(lines[0])[0])
+	secondCursor := string([]rune(lines[1])[0])
+	if firstCursor == secondCursor {
+		t.Fatalf("selected and unselected rows should have different cursor characters: both=%q", firstCursor)
+	}
+}
+
+func TestRenderSetupOptions_CheckboxState(t *testing.T) {
+	// Checked and unchecked options must render "[x]" and "[ ]" respectively.
+	m := baseModel(nil)
+	m.width = 80
+	checkedTrue := true
+	checkedFalse := false
+	options := []setupOption{
+		{Label: "brew", Detail: "", Selected: false, Checked: &checkedTrue},
+		{Label: "node", Detail: "", Selected: false, Checked: &checkedFalse},
+	}
+	out := stripANSIEscapeSequences(renderSetupOptions(m, options))
+	if !strings.Contains(out, "[x]") {
+		t.Fatalf("expected [x] for checked option:\n%s", out)
+	}
+	if !strings.Contains(out, "[ ]") {
+		t.Fatalf("expected [ ] for unchecked option:\n%s", out)
+	}
+}
+
+func TestRenderSetupOptions_MultipleOptions_LineCount(t *testing.T) {
+	// n options with single-line details → exactly n lines.
+	m := baseModel(nil)
+	m.width = 80
+	options := []setupOption{
+		{Label: "a", Detail: "alpha", Selected: false},
+		{Label: "b", Detail: "beta", Selected: false},
+		{Label: "c", Detail: "gamma", Selected: false},
+	}
+	out := stripANSIEscapeSequences(renderSetupOptions(m, options))
+	lines := strings.Split(out, "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 lines for 3 short-detail options, got %d:\n%s", len(lines), out)
+	}
+}
+
+func TestRenderSetupOptions_WrapIndentMatchesDescCol(t *testing.T) {
+	// Continuation lines from wrapping must be indented by exactly descCol spaces.
+	m := baseModel(nil)
+	// prefixW=2, labels "go"(2)/"rust"(4) → maxLabelW=4, detailGap=2 → descCol=8
+	m.width = 20 // availW = 20-8 = 12
+	longDetail := "some fairly long text here for wrapping test"
+	options := []setupOption{
+		{Label: "go", Detail: longDetail, Selected: false},
+		{Label: "rust", Detail: "short", Selected: false},
+	}
+	out := stripANSIEscapeSequences(renderSetupOptions(m, options))
+	lines := strings.Split(out, "\n")
+
+	firstDetailLine := -1
+	for i, line := range lines {
+		if strings.Contains(line, "go") && !strings.Contains(line, "rust") {
+			firstDetailLine = i
+			break
+		}
+	}
+	if firstDetailLine < 0 {
+		t.Fatalf("could not find 'go' option line:\n%s", out)
+	}
+	wantIndent := strings.Repeat(" ", 8)
+	for _, line := range lines[firstDetailLine+1:] {
+		if strings.Contains(line, "rust") {
+			break
+		}
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, wantIndent) {
+			t.Fatalf("continuation line should start with 8 spaces, got:\n%q\nfull output:\n%s", line, out)
+		}
+		stripped := strings.TrimLeft(line, " ")
+		actualIndent := len(line) - len(stripped)
+		if actualIndent != 8 {
+			t.Fatalf("continuation line indent = %d, want exactly 8:\n%q\nfull output:\n%s", actualIndent, line, out)
+		}
+	}
+}

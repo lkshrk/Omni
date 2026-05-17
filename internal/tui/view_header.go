@@ -216,6 +216,32 @@ func renderSetupFooter(m Model, left, middle, right []hintItem) string {
 
 func renderSetupOptions(m Model, options []setupOption) string {
 	p := m.palette
+
+	// Compute fixed-width prefix: cursor (2) + optional checkbox (4).
+	hasCheck := false
+	for _, opt := range options {
+		if opt.Checked != nil {
+			hasCheck = true
+			break
+		}
+	}
+	prefixW := 2 // pickerCursor width
+	if hasCheck {
+		prefixW += 4 // "[x] "
+	}
+
+	// Find widest label so descriptions align.
+	maxLabelW := 0
+	for _, opt := range options {
+		if w := len([]rune(opt.Label)); w > maxLabelW {
+			maxLabelW = w
+		}
+	}
+
+	const detailGap = 2 // spaces between label column and description
+	descCol := prefixW + maxLabelW + detailGap
+	availW := max(m.width-descCol, 10)
+
 	var sb strings.Builder
 	for i, opt := range options {
 		if i > 0 {
@@ -236,9 +262,20 @@ func renderSetupOptions(m Model, options []setupOption) string {
 		if opt.Selected {
 			labelStyle = p.styleActiveText
 		}
-		sb.WriteString(labelStyle.Render(opt.Label))
+		label := opt.Label
+		pad := maxLabelW - len([]rune(label))
+		sb.WriteString(labelStyle.Render(label))
 		if opt.Detail != "" {
-			sb.WriteString(p.styleHelp.Render("  " + opt.Detail))
+			sb.WriteString(strings.Repeat(" ", pad+detailGap))
+			lines := wrapText(opt.Detail, availW)
+			indent := strings.Repeat(" ", descCol)
+			for j, line := range lines {
+				if j > 0 {
+					sb.WriteByte('\n')
+					sb.WriteString(indent)
+				}
+				sb.WriteString(p.styleHelp.Render(line))
+			}
 		}
 	}
 	return sb.String()
@@ -416,6 +453,9 @@ func renderSettingsHeaderInfo(m Model) string {
 }
 
 func renderStatusHeaderInfo(m Model) string {
+	if len(m.allTools) == 0 || m.launchBatchActive {
+		return ""
+	}
 	attention := statusAttentionCount(m)
 	if m.doctorRunning {
 		if attention > 0 {
@@ -452,15 +492,32 @@ func renderTabs(m Model) string {
 	active := func(label string) string { return p.styleStatus.Render("  " + label) }
 	inactive := func(label string) string { return p.styleHelp.Render("  " + label) }
 
+	activeTab := activeTabMode(m.mode)
 	var sb strings.Builder
 	for _, tab := range mainTabs() {
-		if m.mode == tab.mode {
+		if activeTab == tab.mode {
 			sb.WriteString(active(tab.label))
 		} else {
 			sb.WriteString(inactive(tab.label))
 		}
 	}
 	return sb.String()
+}
+
+// activeTabMode maps any viewMode to the parent tab that should be highlighted.
+func activeTabMode(mode viewMode) viewMode {
+	switch mode {
+	case viewSearch, viewCommand, viewGroupPicker,
+		viewIgnoreScope, viewProviderScope, viewAdminTerminal:
+		return viewList
+	case viewGroupTools, viewGroupDots:
+		return viewGroups
+	case viewGroupMembership:
+		// membership picker can overlay tools or dots; default to tools
+		return viewList
+	default:
+		return mode
+	}
 }
 
 type mainTabHitZone struct {
