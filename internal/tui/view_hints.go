@@ -599,7 +599,7 @@ func tabShortHelpBindings(m *Model) []key.Binding {
 		if config.BoolVal(m.settings.DotsDisabled) {
 			return footerBindings(k, nil, []key.Binding{k.Search})
 		}
-		return footerBindings(k, []key.Binding{k.DotAdd, k.DotDiscover, k.SyncAll}, []key.Binding{k.Search})
+		return footerBindings(k, []key.Binding{k.DotAdd, k.DotRefresh, k.SyncAll}, []key.Binding{k.Search})
 	case viewSettings:
 		return footerBindings(k, nil, nil)
 	case viewStatus:
@@ -699,7 +699,7 @@ func tabFullHelpBindings(m *Model) [][]key.Binding {
 		}
 		return [][]key.Binding{
 			common,
-			{k.SyncAll, k.DotDiscover, k.DotAdd, k.DotVariant, k.Sync, k.DotUseRepo, k.DotUseLocal, k.DotDelete, k.DotIgnore, k.Back},
+			{k.SyncAll, k.DotRefresh, k.DotAdd, k.DotVariant, k.Sync, k.DotUseRepo, k.DotUseLocal, k.DotDelete, k.DotIgnore, k.Back},
 		}
 	case viewSettings:
 		return [][]key.Binding{
@@ -878,7 +878,7 @@ func helpActionGroups(m Model) []helpGroup {
 		}
 		return []helpGroup{{items: []hintItem{
 			hintFromBindingDesc(k.DotAdd, actions.MustTUILabel(actions.DotsAdd)),
-			hintFromBindingDesc(k.DotDiscover, actions.MustTUILabel(actions.DotsDiscover)),
+			hintFromBindingDesc(k.DotRefresh, actions.MustTUILabel(actions.DotsRefresh)),
 			hintFromBindingDesc(k.SyncAll, actions.MustTUILabel(actions.ToolSyncAll)),
 			hintFromBindingDesc(k.Sync, actions.MustTUILabel(actions.DotsSync)),
 			hintFromBindingDesc(k.DotVariant, actions.MustTUILabel(actions.DotsVariant)),

@@ -30,8 +30,8 @@ Use --all to ` + actions.MustLongDescription(actions.ToolSyncAll) + `.`,
 				group = args[0]
 			}
 			if all {
-				if group != "" || providerFilter != "" || retryFailed || prune {
-					return fmt.Errorf("--all cannot be combined with group, --provider, --retry-failed, or --prune")
+				if providerFilter != "" || retryFailed || prune {
+					return fmt.Errorf("--all cannot be combined with --provider, --retry-failed, or --prune")
 				}
 			}
 			if !state.app.HasConfig() {
@@ -45,8 +45,9 @@ Use --all to ` + actions.MustLongDescription(actions.ToolSyncAll) + `.`,
 						return err
 					}
 				}
-				result, err := state.app.SyncAll(cmd.Context(), app.SyncAllOptions{
+				syncOpts := app.SyncAllOptions{
 					DryRun: dryRun,
+					Group:  group,
 					Progress: func(msg string) {
 						fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", msg)
 					},
@@ -60,7 +61,8 @@ Use --all to ` + actions.MustLongDescription(actions.ToolSyncAll) + `.`,
 						}
 						fmt.Fprintf(cmd.OutOrStdout(), "  ✓ done: %s (%s)\n", event.Tool.Name, event.Tool.Provider)
 					},
-				})
+				}
+				result, err := state.app.SyncAll(cmd.Context(), syncOpts)
 				if err != nil {
 					return err
 				}
@@ -68,6 +70,9 @@ Use --all to ` + actions.MustLongDescription(actions.ToolSyncAll) + `.`,
 					fmt.Fprintln(cmd.OutOrStdout(), "Dry-run — no changes made.")
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "Sync all complete — %d installed, %d added to config%s.\n", installedCount(result), claimedCount(result), normalizedProviderOverrideSummary(result))
+				if !dryRun && len(result.ClaimedNames) > 0 && !cmd.Flags().Changed("group") && stdinIsTerminal() {
+					promptReassignClaimedTools(state, result.ClaimedNames)
+				}
 				return nil
 			}
 			opts := gosync.SyncOptions{
@@ -146,7 +151,7 @@ Use --all to ` + actions.MustLongDescription(actions.ToolSyncAll) + `.`,
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be done without making changes")
 	cmd.Flags().BoolVar(&prune, "prune", false, "delete local installations no longer in config")
 	addProviderFlag(cmd, &providerFilter, "limit sync to one provider")
-	cmd.Flags().StringVar(&group, "group", "", "limit sync to one group (overridden by positional arg)")
+	cmd.Flags().StringVar(&group, "group", "", "limit sync to one group, or assign discovered tools (with --all)")
 	cmd.Flags().BoolVar(&retryFailed, "retry-failed", false, "only retry tools that failed in a previous sync")
 	cmd.Flags().BoolVar(&all, "all", false, actions.MustDescription(actions.ToolSyncAll))
 	return cmd

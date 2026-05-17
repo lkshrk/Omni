@@ -36,6 +36,7 @@ func baseModel(tools []*database.ToolCache) Model {
 		filter:           fi,
 		commandInput:     ci,
 		settingsInput:    si,
+		mode:             viewList,
 		allTools:         tools,
 		visibleTools:     tools,
 		dotsConfirmIdx:   -1,
@@ -377,19 +378,19 @@ func TestModel_ToolsLoadedMsg(t *testing.T) {
 		}
 	})
 
-	t.Run("success from viewList sets mode to viewList", func(t *testing.T) {
+	t.Run("success from viewStatus sets mode to viewStatus", func(t *testing.T) {
 		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true}
 		got := drive(m, toolsLoadedMsg{tools: threeTools()})
-		if got.mode != viewList {
-			t.Errorf("mode = %v, want viewList after successful load", got.mode)
+		if got.mode != viewStatus {
+			t.Errorf("mode = %v, want viewStatus after successful load", got.mode)
 		}
 	})
 
 	t.Run("success with dots repo starts background dots refresh", func(t *testing.T) {
 		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true}
 		got := drive(m, toolsLoadedMsg{tools: threeTools(), settings: config.Settings{DotsRepo: "/tmp/dots"}})
-		if got.mode != viewList {
-			t.Errorf("mode = %v, want viewList after successful load", got.mode)
+		if got.mode != viewStatus {
+			t.Errorf("mode = %v, want viewStatus after successful load", got.mode)
 		}
 		if !got.dotsLoading {
 			t.Error("dotsLoading should start after initial tools load when dots repo is configured")
@@ -799,7 +800,7 @@ func TestModel_KeysIgnoredWhileLoading(t *testing.T) {
 	if got.cursor != 0 {
 		t.Errorf("cursor should not change while loading, got %d", got.cursor)
 	}
-	if got.mode != viewList {
+	if got.mode != viewStatus {
 		t.Errorf("mode should not change while loading, got %v", got.mode)
 	}
 }
@@ -2492,11 +2493,17 @@ func TestVisibleGroupNames_IncludesCurrentMachineGroup(t *testing.T) {
 	}
 }
 
-func TestDotAddTargetGroup_UsesMachineGroup(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost.example.com")
+func TestDotAddOpensGroupPicker(t *testing.T) {
 	m := dotsModel()
-	if got := m.dotAddTargetGroup(); got != "testhost" {
-		t.Fatalf("dotAddTargetGroup = %q, want current machine group", got)
+	m.openGroupPickerForDotAdd("/home/test/.config/zed", "~/.config/zed")
+	if m.mode != viewGroupPicker {
+		t.Fatalf("mode = %v, want viewGroupPicker", m.mode)
+	}
+	if !m.pickerPurposeDotAdd {
+		t.Fatal("pickerPurposeDotAdd should be true")
+	}
+	if m.pickerDotAddPath != "/home/test/.config/zed" {
+		t.Fatalf("pickerDotAddPath = %q, want /home/test/.config/zed", m.pickerDotAddPath)
 	}
 }
 
@@ -2858,7 +2865,7 @@ func TestModel_PaletteSync_SetsLoading(t *testing.T) {
 	}
 	m.commandInput.Focus()
 	// Pre-populate the suggestion list (single suggestion → auto-chosen on enter).
-	syncCmd := mustPaletteCommand(t, m, "sync")
+	syncCmd := mustPaletteCommand(t, m, "tools sync")
 	m.commandSuggestions = []palCmd{syncCmd}
 	got := drive(m, pressEnter())
 	if !got.loading {
@@ -2882,7 +2889,7 @@ func TestModel_PaletteConsolidate_SetsLoading(t *testing.T) {
 	// Find the consolidate command.
 	var consolidateCmd palCmd
 	for _, c := range allCmds {
-		if c.name == "consolidate node bun" {
+		if c.name == "tools consolidate node bun" {
 			consolidateCmd = c
 			break
 		}
@@ -4447,5 +4454,256 @@ func TestGlobalDotsCommit_NothingToCommit(t *testing.T) {
 	}
 	if strings.Contains(got.statusMsg, "Committing") {
 		t.Errorf("statusMsg = %q, should not mention committing when nothing to commit", got.statusMsg)
+	}
+}
+
+// ─── Group Reassign Queue ──────────────────────────────────────────────────────
+
+// TestStartGroupReassignQueue_OpensFirstPicker verifies that calling
+// startGroupReassignQueue with two names opens a group picker for the first
+// tool and leaves the second in pendingGroupReassign.
+func TestStartGroupReassignQueue_OpensFirstPicker(t *testing.T) {
+	m := baseModel([]*database.ToolCache{
+		{Name: "ripgrep", Provider: "brew"},
+		{Name: "fd", Provider: "brew"},
+	})
+	m.startGroupReassignQueue([]string{"ripgrep", "fd"})
+
+	if m.mode != viewGroupPicker {
+		t.Fatalf("mode = %v, want viewGroupPicker", m.mode)
+	}
+	if !m.pickerPurposeReassign {
+		t.Fatal("pickerPurposeReassign should be true")
+	}
+	if m.pickerActionTool.Name != "ripgrep" {
+		t.Errorf("pickerActionTool.Name = %q, want %q", m.pickerActionTool.Name, "ripgrep")
+	}
+	if len(m.pendingGroupReassign) != 1 || m.pendingGroupReassign[0] != "fd" {
+		t.Errorf("pendingGroupReassign = %v, want [fd]", m.pendingGroupReassign)
+	}
+	// Reassign pickers must NOT set m.loading — it blocks key input and
+	// stale groupChangedMsg from prior tool would clear it for the next picker.
+	if m.loading {
+		t.Error("m.loading should be false for reassign picker (fire-and-forget)")
+	}
+}
+
+// TestStartGroupReassignQueue_Empty verifies that calling startGroupReassignQueue
+// with a nil or empty slice is a no-op (mode stays viewList).
+func TestStartGroupReassignQueue_Empty(t *testing.T) {
+	m := baseModel(nil)
+
+	m.startGroupReassignQueue(nil)
+	if m.mode != viewList {
+		t.Errorf("nil: mode = %v, want viewList", m.mode)
+	}
+
+	m.startGroupReassignQueue([]string{})
+	if m.mode != viewList {
+		t.Errorf("empty: mode = %v, want viewList", m.mode)
+	}
+}
+
+// TestCloseGroupPicker_ChainsReassign verifies that when a group picker
+// completes with pickerPurposeReassign=true and more tools remain in
+// pendingGroupReassign, closeGroupPicker opens the next picker.
+func TestCloseGroupPicker_ChainsReassign(t *testing.T) {
+	m := baseModel([]*database.ToolCache{
+		{Name: "fd", Provider: "brew"},
+	})
+	// Simulate being mid-reassign for "ripgrep", with "fd" still queued.
+	m.mode = viewGroupPicker
+	m.pickerPurposeReassign = true
+	m.pendingGroupReassign = []string{"fd"}
+
+	m.closeGroupPicker()
+
+	if m.mode != viewGroupPicker {
+		t.Fatalf("mode = %v, want viewGroupPicker (chained to next tool)", m.mode)
+	}
+	if !m.pickerPurposeReassign {
+		t.Fatal("pickerPurposeReassign should still be true for chained picker")
+	}
+	if m.pickerActionTool.Name != "fd" {
+		t.Errorf("pickerActionTool.Name = %q, want %q", m.pickerActionTool.Name, "fd")
+	}
+	if len(m.pendingGroupReassign) != 0 {
+		t.Errorf("pendingGroupReassign = %v, want empty", m.pendingGroupReassign)
+	}
+}
+
+// TestCloseGroupPicker_LastInQueueCleansUp verifies that when no more tools
+// remain in pendingGroupReassign, closeGroupPicker returns to viewList and
+// clears reassignCreatedGroups.
+func TestCloseGroupPicker_LastInQueueCleansUp(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewGroupPicker
+	m.pickerPurposeReassign = true
+	m.pendingGroupReassign = nil
+	m.reassignCreatedGroups = []string{"dev"}
+
+	m.closeGroupPicker()
+
+	if m.mode != viewList {
+		t.Fatalf("mode = %v, want viewList after last reassign", m.mode)
+	}
+	if m.reassignCreatedGroups != nil {
+		t.Errorf("reassignCreatedGroups = %v, want nil after queue drained", m.reassignCreatedGroups)
+	}
+}
+
+// TestCancelGroupPicker_DrainsQueue verifies that cancelGroupPicker clears
+// pendingGroupReassign and reassignCreatedGroups, then closes the picker.
+func TestCancelGroupPicker_DrainsQueue(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewGroupPicker
+	m.pickerPurposeReassign = true
+	m.pendingGroupReassign = []string{"fd", "bat"}
+	m.reassignCreatedGroups = []string{"dev"}
+
+	m.cancelGroupPicker()
+
+	if m.pendingGroupReassign != nil {
+		t.Errorf("pendingGroupReassign = %v, want nil after cancel", m.pendingGroupReassign)
+	}
+	if m.reassignCreatedGroups != nil {
+		t.Errorf("reassignCreatedGroups = %v, want nil after cancel", m.reassignCreatedGroups)
+	}
+	if m.mode != viewList {
+		t.Errorf("mode = %v, want viewList after cancel", m.mode)
+	}
+}
+
+// TestReassignCreatedGroups_CarryForward verifies that groups created during an
+// earlier reassign picker are included in the groups offered by the next picker.
+func TestReassignCreatedGroups_CarryForward(t *testing.T) {
+	m := baseModel([]*database.ToolCache{
+		{Name: "fd", Provider: "brew"},
+	})
+	// Simulate: first picker created "dev" group; next tool is "fd".
+	m.pickerCreatedGroups = []string{"dev"}
+	m.reassignCreatedGroups = nil
+	m.pendingGroupReassign = []string{"fd"}
+
+	m.openNextReassignPicker()
+
+	if m.mode != viewGroupPicker {
+		t.Fatalf("mode = %v, want viewGroupPicker", m.mode)
+	}
+	if m.pickerActionTool.Name != "fd" {
+		t.Errorf("pickerActionTool.Name = %q, want %q", m.pickerActionTool.Name, "fd")
+	}
+	found := false
+	for _, g := range m.pickerGroups {
+		if g == "dev" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("pickerGroups = %v, want \"dev\" to be carried forward", m.pickerGroups)
+	}
+	// pickerCreatedGroups resets for the new picker; carry-forward is in reassignCreatedGroups.
+	if len(m.pickerCreatedGroups) != 0 {
+		t.Errorf("pickerCreatedGroups = %v, want empty (reset per picker)", m.pickerCreatedGroups)
+	}
+}
+
+// TestProgressDoneMsg_StartsReassignQueue verifies that a progressDoneMsg
+// carrying claimedNames triggers startGroupReassignQueue: the first tool's
+// picker opens with pickerPurposeReassign=true.
+func TestProgressDoneMsg_StartsReassignQueue(t *testing.T) {
+	m := baseModel([]*database.ToolCache{
+		{Name: "ripgrep", Provider: "brew"},
+	})
+	m.progressGen = 1
+
+	got := drive(m, progressDoneMsg{
+		gen:          1,
+		claimedNames: []string{"ripgrep"},
+		tools: []*database.ToolCache{
+			{Name: "ripgrep", Provider: "brew"},
+		},
+	})
+
+	if got.mode != viewGroupPicker {
+		t.Fatalf("mode = %v, want viewGroupPicker after progressDoneMsg with claimedNames", got.mode)
+	}
+	if !got.pickerPurposeReassign {
+		t.Fatal("pickerPurposeReassign should be true")
+	}
+	if got.pickerActionTool.Name != "ripgrep" {
+		t.Errorf("pickerActionTool.Name = %q, want %q", got.pickerActionTool.Name, "ripgrep")
+	}
+}
+
+// TestReassignQueue_E2E_FullCycle drives the complete flow:
+// progressDoneMsg → picker for tool 1 → Enter → chains to tool 2 →
+// groupChangedMsg from tool 1 arrives (shouldn't break) → Enter →
+// queue drains → viewList.
+func TestReassignQueue_E2E_FullCycle(t *testing.T) {
+	tools := []*database.ToolCache{
+		{Name: "ripgrep", Provider: "brew"},
+		{Name: "fd", Provider: "brew"},
+	}
+	m := baseModel(tools)
+	m.progressGen = 1
+	m.groupNames = []string{"dev"}
+
+	// Step 1: progressDoneMsg triggers queue with 2 claimed tools.
+	m = drive(m, progressDoneMsg{
+		gen:          1,
+		claimedNames: []string{"ripgrep", "fd"},
+		tools:        tools,
+	})
+	if m.mode != viewGroupPicker {
+		t.Fatalf("step1: mode = %v, want viewGroupPicker", m.mode)
+	}
+	if m.pickerActionTool.Name != "ripgrep" {
+		t.Fatalf("step1: picker tool = %q, want ripgrep", m.pickerActionTool.Name)
+	}
+	if len(m.pendingGroupReassign) != 1 {
+		t.Fatalf("step1: pending = %v, want [fd]", m.pendingGroupReassign)
+	}
+	// pickerGroups should have "dev" + sentinel.
+	if len(m.pickerGroups) < 2 {
+		t.Fatalf("step1: pickerGroups = %v, want at least [dev, sentinel]", m.pickerGroups)
+	}
+
+	// Step 2: Press Enter on first group — selects it, closes picker, chains to fd.
+	// pickerCursor=0 points to "dev".
+	m = drive(m, pressEnter())
+	if m.mode != viewGroupPicker {
+		t.Fatalf("step2: mode = %v, want viewGroupPicker (chained to fd)", m.mode)
+	}
+	if m.pickerActionTool.Name != "fd" {
+		t.Fatalf("step2: picker tool = %q, want fd", m.pickerActionTool.Name)
+	}
+	if len(m.pendingGroupReassign) != 0 {
+		t.Fatalf("step2: pending = %v, want empty", m.pendingGroupReassign)
+	}
+	if m.loading {
+		t.Error("step2: m.loading should be false between reassign pickers")
+	}
+
+	// Step 3: Stale groupChangedMsg from ripgrep's move arrives — should not break fd's picker.
+	m = drive(m, groupChangedMsg{detail: "✓ ripgrep → dev"})
+	if m.mode != viewGroupPicker {
+		t.Fatalf("step3: mode = %v, want viewGroupPicker (fd still active)", m.mode)
+	}
+	if m.pickerActionTool.Name != "fd" {
+		t.Fatalf("step3: picker tool = %q, want fd (unchanged)", m.pickerActionTool.Name)
+	}
+
+	// Step 4: Press Enter on fd's picker — last in queue, should return to viewList.
+	m = drive(m, pressEnter())
+	if m.mode != viewList {
+		t.Fatalf("step4: mode = %v, want viewList after queue drained", m.mode)
+	}
+	if m.pickerPurposeReassign {
+		t.Error("step4: pickerPurposeReassign should be false")
+	}
+	if m.reassignCreatedGroups != nil {
+		t.Error("step4: reassignCreatedGroups should be nil")
 	}
 }

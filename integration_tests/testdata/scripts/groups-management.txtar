@@ -14,7 +14,7 @@ exec omni --config settings.json hosts list
 stdout 'work'
 ! stdout 'dev'
 
-exec omni --config settings.json add ripgrep --provider system --install-with brew --group testhost
+exec omni --config settings.json tools add ripgrep --provider system --install-with brew --group testhost
 exec omni --config settings.json groups move-tool work ripgrep
 stdout 'Moved "ripgrep" to group "work"'
 exec omni --config settings.json groups ignore-tool work ripgrep

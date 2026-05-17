@@ -1,0 +1,49 @@
+# omni import --group places tools directly into the named group with no reassignment prompt
+exec chmod 755 bin/npm
+exec chmod 755 bin/bun
+exec chmod 755 bin/pnpm
+env PATH=$WORK/bin:$PATH
+
+exec omni --config settings.json tools import --provider node --group dev
+stdout 'Imported 1 tool\(s\):'
+stdout 'typescript'
+exec grep '"name": "dev"' settings.json
+stdout '"name": "dev"'
+# no reassignment prompt output (stdin is non-interactive in testscript and --group was set)
+! stdout 'Move to a different group'
+! stdout '\[a\]ll to same group'
+
+-- bin/npm --
+#!/usr/bin/env sh
+set -eu
+case "${1:-}" in
+  --version)
+    echo "10.0.0"
+    ;;
+  list)
+    printf '%s\n' '/fake/npm/global' '`-- typescript@5.4.0'
+    ;;
+esac
+
+-- bin/bun --
+#!/usr/bin/env sh
+exit 1
+
+-- bin/pnpm --
+#!/usr/bin/env sh
+exit 1
+
+-- settings.json --
+{
+  "settings": {
+    "ecosystems": {
+      "node": { "manager": "npm" }
+    }
+  },
+  "hosts": { "testhost": [] },
+  "tools": {},
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": [] },
+    { "name": "dev", "tools": [] }
+  ]
+}

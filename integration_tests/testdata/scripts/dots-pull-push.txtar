@@ -4,14 +4,14 @@ env HOME=$WORK/home
 mkdir $WORK/home
 mkdir $WORK/home/.config
 
-exec git init --bare remote.git
+exec git init --bare --initial-branch=main remote.git
 exec git clone remote.git seed
 exec git -C seed config user.email t@t.com
 exec git -C seed config user.name T
 exec cp -R seed-files/dotfiles seed/dotfiles
 exec git -C seed add dotfiles
 exec git -C seed commit -m seed
-exec git -C seed push -u origin master
+exec git -C seed push -u origin main
 
 exec git clone remote.git $WORK/home/dotfiles
 exec git -C $WORK/home/dotfiles config user.email t@t.com

@@ -9,15 +9,15 @@ stdout 'Set logical tool "black"'
 exec omni --config settings.json groups move-tool testhost black
 stdout 'Moved "black" to group "testhost"'
 
-exec omni --config settings.json install black --provider python
+exec omni --config settings.json tools install black --provider python
 stdout 'installed black'
 exec test -f .omni-cache/fake-pip/black
 
-exec omni --config settings.json upgrade black --provider python
+exec omni --config settings.json tools upgrade black --provider python
 stdout 'upgraded black'
 exec test -f .omni-cache/fake-pip/black-upgraded
 
-exec omni --config settings.json switch black --from python --to brew
+exec omni --config settings.json tools switch black --from python --to brew
 stdout 'switched black'
 stdout 'python'
 stdout 'brew'
@@ -28,7 +28,7 @@ stdout '"provider": "system"'
 exec grep '"install_with": "brew"' settings.json
 stdout '"install_with": "brew"'
 
-exec omni -y --config settings.json delete black --provider brew
+exec omni -y --config settings.json tools delete black --provider brew
 stdout 'deleted black'
 exec test ! -f .omni-cache/fake-brew/black
 ! exec grep '"black"' settings.json

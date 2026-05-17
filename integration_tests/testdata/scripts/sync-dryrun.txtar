@@ -1,6 +1,6 @@
-# omni sync --dry-run with an empty config should succeed with no ops
+# omni tools sync --dry-run with an empty config should succeed with no ops
 exec omni --config settings.json hosts ensure testhost
-exec omni --config settings.json sync --dry-run
+exec omni --config settings.json tools sync --dry-run
 stdout 'Dry-run'
 
 -- settings.json --

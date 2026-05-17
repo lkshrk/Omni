@@ -1,5 +1,6 @@
-# omni providers prints a table with a header row
-exec omni --config settings.json providers
+# omni tools providers prints a table with a header row
+exec omni --config settings.json hosts ensure testhost
+exec omni --config settings.json tools providers
 stdout 'NAME'
 stdout 'AVAILABLE'
 stdout 'DESCRIPTION'

@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -523,10 +524,10 @@ func TestSyncAllFlag_DryRunDoesNotWriteDBOrConfig(t *testing.T) {
 
 func TestSyncAllFlag_RejectsScopedOptions(t *testing.T) {
 	cmd := newSyncCmd(&rootState{})
-	cmd.SetArgs([]string{"--all", "--group", "default"})
+	cmd.SetArgs([]string{"--all", "--provider", "brew"})
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("sync --all --group returned nil, want conflict error")
+		t.Fatal("sync --all --provider returned nil, want conflict error")
 	}
 	if !strings.Contains(err.Error(), "--all cannot be combined") {
 		t.Fatalf("error = %q, want --all conflict", err)
@@ -861,7 +862,7 @@ func TestList_NoConfig_PrintsHelpfulMessage(t *testing.T) {
 	cmd := NewRootCmd()
 	errBuf := &bytes.Buffer{}
 	cmd.SetErr(errBuf)
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "list"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "list"})
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("list with host and empty config: %v", err)
@@ -878,7 +879,7 @@ func TestList_NoConfigFile_WithoutHost_RequiresHost(t *testing.T) {
 	// No settings.json, no host assignment → requireActiveHost should fail.
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "list"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "list"})
 	err := cmd.Execute()
 	if err == nil {
 		t.Error("expected error when no active host")
@@ -900,7 +901,7 @@ func TestList_EmptyConfig_PrintsNoToolsMessage(t *testing.T) {
 	cmd := NewRootCmd()
 	outBuf := &bytes.Buffer{}
 	cmd.SetOut(outBuf)
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "list"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "list"})
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("list with empty config: %v", err)
@@ -916,9 +917,10 @@ func TestProviders_PrintsHeader(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "providers"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "providers"})
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("providers: %v", err)
@@ -1079,7 +1081,7 @@ func TestSync_DryRun_EmptyConfig(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "sync", "--dry-run"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "sync", "--dry-run"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("sync --dry-run: %v", err)
 	}
@@ -1093,7 +1095,7 @@ func TestSync_DryRun_NoConfig_File(t *testing.T) {
 
 	// No settings.json at all; active-host enforcement should fail first.
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "sync", "--dry-run"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "sync", "--dry-run"})
 	err := cmd.Execute()
 	if err == nil {
 		t.Error("expected error when no active host")
@@ -1112,7 +1114,7 @@ func TestSync_DryRun_WithHost_NoConfigFile(t *testing.T) {
 	cmd := NewRootCmd()
 	errBuf := &bytes.Buffer{}
 	cmd.SetErr(errBuf)
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "sync", "--dry-run"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "sync", "--dry-run"})
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("sync --dry-run with host and empty config: %v", err)
@@ -1132,7 +1134,7 @@ func TestAdd_RequiresHost_WithActiveHost(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "add", "testpkg", "--provider", "system", "--install-with", "brew", "--group", "base"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "add", "testpkg", "--provider", "system", "--install-with", "brew", "--group", "base"})
 	// This may error because brew is not available, but should not error on host checks.
 	_ = cmd.Execute()
 }
@@ -1146,7 +1148,7 @@ func TestAdd_NoHost_ReturnsError(t *testing.T) {
 	withConfig(t, cfgPath, &config.RootConfig{})
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "add", "testpkg", "--provider", "system"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "add", "testpkg", "--provider", "system"})
 	err := cmd.Execute()
 	if err == nil {
 		t.Error("expected error when no active host")
@@ -1241,10 +1243,34 @@ func TestDotsAdd_NoDotsRepo_ReturnsError(t *testing.T) {
 	withConfig(t, cfgPath, &config.RootConfig{})
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "add", "~/.config/nvim"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "add", "--group", "dev", "~/.config/nvim"})
 	err := cmd.Execute()
 	if err == nil {
 		t.Error("expected error when dots_repo is not configured")
+	}
+}
+
+func TestDotsAdd_NoGroup_NonInteractive_ReturnsError(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	withConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{DotsRepo: t.TempDir()},
+	})
+	// Force non-interactive stdin.
+	origIsTerminal := stdinIsTerminal
+	stdinIsTerminal = func() bool { return false }
+	t.Cleanup(func() { stdinIsTerminal = origIsTerminal })
+
+	cmd := NewRootCmd()
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "add", "~/.config/nvim"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when --group not passed non-interactively")
+	}
+	if !strings.Contains(err.Error(), "missing assignment target") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -1605,7 +1631,6 @@ func TestRequireActiveHost_ExemptCommands(t *testing.T) {
 	}{
 		{[]string{"hosts", "list"}},
 		{[]string{"hosts", "ensure", "testhost"}},
-		{[]string{"providers"}},
 	}
 	for _, tc := range exemptCmds {
 		t.Run(strings.Join(tc.args, "_"), func(t *testing.T) {
@@ -1665,7 +1690,7 @@ func TestRequireActiveHost_NonExemptCommand_WithHost_Passes(t *testing.T) {
 // ─── hostExempt map ───────────────────────────────────────────────────────────
 
 func TestHostExempt_ContainsExpectedCommands(t *testing.T) {
-	expected := []string{"bootstrap", "doctor", "init", "hosts", "dots", "ui", "version", "providers", "settings", "help", "completion"}
+	expected := []string{"bootstrap", "doctor", "init", "hosts", "dots", "ui", "version", "settings", "help", "completion"}
 	for _, name := range expected {
 		if !hostExempt[name] {
 			t.Errorf("expected %q in hostExempt", name)
@@ -1746,7 +1771,7 @@ func TestConsolidate_MutuallyExclusive_ToAndArgs(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "--to", "brew", "python", "uv"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "consolidate", "--to", "brew", "python", "uv"})
 	err := cmd.Execute()
 	if err == nil {
 		t.Error("expected error for --to with positional args")
@@ -1765,7 +1790,7 @@ func TestConsolidate_EcosystemMode_TooFewArgs(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "python"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "consolidate", "python"})
 	err := cmd.Execute()
 	if err == nil {
 		t.Error("expected error for ecosystem mode with only 1 arg")
@@ -1781,7 +1806,7 @@ func TestConsolidate_EcosystemDryRun_EmptyConfig(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "--dry-run", "python", "uv"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "consolidate", "--dry-run", "python", "uv"})
 	// Should succeed with "Nothing to migrate" since config is empty.
 	err := cmd.Execute()
 	if err != nil {
@@ -1798,7 +1823,7 @@ func TestConsolidate_ProviderMode_DryRun_EmptyConfig(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "--to", "brew", "--dry-run"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "consolidate", "--to", "brew", "--dry-run"})
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("consolidate --to brew --dry-run: %v", err)
@@ -1814,7 +1839,7 @@ func TestConsolidate_ProviderMode_EmptyConfig_AllAlreadyOn(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "--to", "brew"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "consolidate", "--to", "brew"})
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("consolidate --to brew: %v", err)
@@ -1832,7 +1857,7 @@ func TestDelete_MissingProvider_ReturnsError(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "delete", "sometool"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "delete", "sometool"})
 	err := cmd.Execute()
 	if err == nil {
 		t.Error("expected error when --provider is missing")
@@ -1853,7 +1878,7 @@ func TestUpgrade_NoArgsNoAll_ReturnsError(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "upgrade"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "upgrade"})
 	err := cmd.Execute()
 	if err == nil {
 		t.Error("expected error when neither tool name nor --all")
@@ -1872,7 +1897,7 @@ func TestUpgrade_AllAndName_Mutually_Exclusive(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "upgrade", "--all", "sometool"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "upgrade", "--all", "sometool"})
 	err := cmd.Execute()
 	if err == nil {
 		t.Error("expected error when --all and tool name specified together")
@@ -1891,7 +1916,7 @@ func TestUpgrade_All_EmptyDB(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "upgrade", "--all"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "upgrade", "--all"})
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("upgrade --all with empty DB: %v", err)
@@ -1907,7 +1932,7 @@ func TestUpgrade_NameWithoutProvider_ReturnsError(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "upgrade", "sometool"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "upgrade", "sometool"})
 	err := cmd.Execute()
 	if err == nil {
 		t.Error("expected error when --provider is missing for named upgrade")
@@ -1928,7 +1953,7 @@ func TestSwitch_MissingFrom_ReturnsError(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "switch", "sometool", "--to", "brew"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "switch", "sometool", "--to", "brew"})
 	err := cmd.Execute()
 	if err == nil {
 		t.Error("expected error when --from is missing")
@@ -1947,7 +1972,7 @@ func TestSwitch_MissingTo_ReturnsError(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "switch", "sometool", "--from", "brew"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "switch", "sometool", "--from", "brew"})
 	err := cmd.Execute()
 	if err == nil {
 		t.Error("expected error when --to is missing")
@@ -1969,7 +1994,7 @@ func TestImport_DryRun_NoProviders_PrintsEmpty(t *testing.T) {
 
 	cmd := NewRootCmd()
 	// Use a non-existent provider so nothing is imported.
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "import", "--dry-run", "--provider", "nonexistentprovider"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "import", "--dry-run", "--provider", "nonexistentprovider"})
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("import --dry-run with nonexistent provider: %v", err)
@@ -2029,7 +2054,7 @@ func TestList_GroupFilter_UnknownGroup_ReturnsError(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "list", "--group", "nonexistent"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "list", "--group", "nonexistent"})
 	err := cmd.Execute()
 	if err == nil {
 		t.Error("expected error for unknown group filter")
@@ -2056,7 +2081,7 @@ func TestList_GroupFilter_KnownGroup_EmptyDB(t *testing.T) {
 	})
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "list", "--group", "work"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "list", "--group", "work"})
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("list --group work with known group but empty DB: %v", err)
@@ -2083,7 +2108,7 @@ func TestSync_GroupPositionalArg_WithNamedGroup(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "sync", "--dry-run", "work"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "sync", "--dry-run", "work"})
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("sync --dry-run work: %v", err)
@@ -2132,7 +2157,7 @@ func TestAdd_WithHost_AppendsToConfig(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "add", "ripgrep", "--provider", "system", "--install-with", "brew", "--group", "base"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "add", "ripgrep", "--provider", "system", "--install-with", "brew", "--group", "base"})
 	// This may succeed (writes config) or fail (if add validation fails for provider).
 	// Either way, we exercise the code path.
 	_ = cmd.Execute()
@@ -2200,7 +2225,7 @@ func TestConsolidate_EcosystemMode_EmptyConfig_NothingToMigrate(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "node", "bun"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "consolidate", "node", "bun"})
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("consolidate node bun: %v", err)
@@ -2216,7 +2241,7 @@ func TestConsolidate_EcosystemMode_InvalidEcosystem_ReturnsError(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "invalid_eco", "bun"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "consolidate", "invalid_eco", "bun"})
 	err := cmd.Execute()
 	if err == nil {
 		t.Error("expected error for invalid ecosystem")
@@ -2236,7 +2261,7 @@ func TestImport_WithProvider_EmptyConfig(t *testing.T) {
 	cmd := NewRootCmd()
 	// brew import with an empty config — if brew is available, may find real tools.
 	// If not available, returns empty. Either way, exercise the code path.
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "import", "--provider", "nonexistentprovider"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "import", "--provider", "nonexistentprovider"})
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("import with nonexistent provider: %v", err)
@@ -2253,7 +2278,7 @@ func TestList_ProviderFilter_EmptyDB(t *testing.T) {
 	withConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{cliTestHostGroup()}})
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "list", "--provider", "brew"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "list", "--provider", "brew"})
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("list --provider brew with empty DB: %v", err)
@@ -2268,7 +2293,7 @@ func TestNewRootCmd_HasExpectedSubcommands(t *testing.T) {
 	for _, sub := range cmd.Commands() {
 		names[sub.Name()] = true
 	}
-	expected := []string{"list", "sync", "add", "hosts", "dots", "providers", "groups", "tools", "bootstrap", "search", "doctor"}
+	expected := []string{"hosts", "dots", "groups", "tools", "bootstrap", "doctor"}
 	for _, name := range expected {
 		if !names[name] {
 			t.Errorf("expected subcommand %q in root cmd", name)
@@ -2311,7 +2336,7 @@ func TestDelete_WithProvider_AttemptsFailed(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"-y", "--config", cfgPath, "--cache-dir", cacheDir, "delete", "--provider", "brew", "sometool"})
+	cmd.SetArgs([]string{"-y", "--config", cfgPath, "--cache-dir", cacheDir, "tools", "delete", "--provider", "brew", "sometool"})
 	// May succeed or fail depending on brew availability — we just want the code path.
 	_ = cmd.Execute()
 }
@@ -2327,7 +2352,7 @@ func TestSwitch_BothFlags_AttemptsFailed(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "switch", "sometool", "--from", "brew", "--to", "pip"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "switch", "sometool", "--from", "brew", "--to", "pip"})
 	// Will likely fail (tool not in config) but exercises the code path.
 	_ = cmd.Execute()
 }
@@ -2433,7 +2458,7 @@ func TestConsolidate_EcosystemMode_NodeBun_EmptyConfig(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "node", "bun", "--dry-run"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "consolidate", "node", "bun", "--dry-run"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("consolidate node bun --dry-run: %v", err)
 	}
@@ -2448,7 +2473,7 @@ func TestConsolidate_EcosystemMode_NodePnpm(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "node", "pnpm"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "consolidate", "node", "pnpm"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("consolidate node pnpm: %v", err)
 	}
@@ -2463,7 +2488,7 @@ func TestConsolidate_EcosystemMode_PythonPip(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "python", "pip"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "consolidate", "python", "pip"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("consolidate python pip: %v", err)
 	}
@@ -2480,7 +2505,7 @@ func TestUpgrade_All_PrintsNothingToUpgrade(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "upgrade", "--all"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "upgrade", "--all"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("upgrade --all: %v", err)
 	}
@@ -2565,7 +2590,7 @@ func TestConsolidate_EcosystemDryRun_WithPythonTools(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "--dry-run", "python", "uv"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "consolidate", "--dry-run", "python", "uv"})
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("consolidate --dry-run python uv with pip tools: %v", err)
@@ -2596,7 +2621,7 @@ func TestSync_DuplicateToolOwnership_ReturnsValidationError(t *testing.T) {
 	cmd := NewRootCmd()
 	errBuf := &bytes.Buffer{}
 	cmd.SetErr(errBuf)
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "sync", "--dry-run"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "sync", "--dry-run"})
 	err := cmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), `tool "ripgrep" already belongs to group`) {
 		t.Fatalf("sync error = %v, want duplicate ownership validation error", err)
@@ -2625,7 +2650,7 @@ func TestImport_AllToolsSkipped_ShowsSkippedCount(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "import", "--dry-run", "--provider", "nonexistentprovider"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "import", "--dry-run", "--provider", "nonexistentprovider"})
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("import: %v", err)
@@ -2670,7 +2695,7 @@ func TestSync_DryRun_NoInstallsNeeded_PrintsDryRun(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "sync", "--dry-run", "--prune"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "sync", "--dry-run", "--prune"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("sync --dry-run --prune: %v", err)
 	}
@@ -2697,7 +2722,7 @@ func TestConsolidate_EcosystemMode_NothingToMigrate_SettingsUpdated(t *testing.T
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "python", "pip"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "consolidate", "python", "pip"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("consolidate python pip: %v", err)
 	}
@@ -2711,9 +2736,10 @@ func TestProviders_AllUnavailable_ReturnsNil(t *testing.T) {
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{})
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "providers"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "providers"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("providers: %v", err)
 	}
@@ -2730,7 +2756,7 @@ func TestAdd_WithNameOverride_UsesOverrideName(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "add", "typescript", "--provider", "node", "--install-with", "npm", "--name", "ts", "--group", "base"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "add", "typescript", "--provider", "node", "--install-with", "npm", "--name", "ts", "--group", "base"})
 	// Exercises the name-override code path: displayName = name (not pkg).
 	_ = cmd.Execute()
 }
@@ -2744,7 +2770,7 @@ func TestAdd_ToGroup_UsesGroupName(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "add", "slack", "--provider", "system", "--install-with", "brew", "--group", "work"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "add", "slack", "--provider", "system", "--install-with", "brew", "--group", "work"})
 	// Exercises the group-destination code path: dest = group (not "base").
 	_ = cmd.Execute()
 }
@@ -2767,7 +2793,7 @@ func TestSync_RetryFailed_EmptyDB(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "sync", "--retry-failed"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "sync", "--retry-failed"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("sync --retry-failed with empty DB: %v", err)
 	}
@@ -2784,7 +2810,7 @@ func TestSync_ProviderFilter_DryRun(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "sync", "--dry-run", "--provider", "brew"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "sync", "--dry-run", "--provider", "brew"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("sync --dry-run --provider brew: %v", err)
 	}
@@ -2801,7 +2827,7 @@ func TestSearch_EmptyQuery_NoResults(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "search", "nonexistent_xyzqrstuvwxyz_package_123"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "search", "nonexistent_xyzqrstuvwxyz_package_123"})
 	_ = cmd.Execute()
 }
 
@@ -2816,7 +2842,7 @@ func TestImport_WithGroupFlag_DryRun(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "import", "--dry-run", "--group", "work", "--provider", "nonexistentprovider"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "import", "--dry-run", "--group", "work", "--provider", "nonexistentprovider"})
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("import --dry-run --group work: %v", err)
@@ -2941,7 +2967,7 @@ func TestDotsAdd_DiscoveredPersistsCandidate(t *testing.T) {
 	cmd := NewRootCmd()
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "add", "claude", "--discovered"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "add", "claude", "--discovered", "--group", "testhost"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("dots add --discovered: %v", err)
 	}
@@ -2974,7 +3000,7 @@ func TestList_BothFilters_EmptyDB(t *testing.T) {
 
 	// Test --provider filter with empty DB.
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "list", "--provider", "pip"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "list", "--provider", "pip"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list --provider pip: %v", err)
 	}
@@ -3071,9 +3097,9 @@ func TestToolsDelete_RemovesLogicalSpecAndMemberships(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"-y", "--config", cfgPath, "--cache-dir", cacheDir, "tools", "delete", "ripgrep"})
+	cmd.SetArgs([]string{"-y", "--config", cfgPath, "--cache-dir", cacheDir, "tools", "delete-spec", "ripgrep"})
 	if err := cmd.Execute(); err != nil {
-		t.Fatalf("tools delete: %v", err)
+		t.Fatalf("tools delete-spec: %v", err)
 	}
 
 	cfg, err := config.Load(cfgPath)
@@ -3669,7 +3695,7 @@ func TestSync_DryRun_WithProviderFlag_NoToolsForProvider(t *testing.T) {
 	cmd := NewRootCmd()
 	errBuf := &bytes.Buffer{}
 	cmd.SetErr(errBuf)
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "sync", "--dry-run", "--provider", "pip"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "sync", "--dry-run", "--provider", "pip"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("sync --dry-run --provider pip: %v", err)
 	}
@@ -3686,7 +3712,7 @@ func TestUpgrade_NameAndProvider_NoSuchTool(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "upgrade", "nonexistent_tool_xyz", "--provider", "brew"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "upgrade", "nonexistent_tool_xyz", "--provider", "brew"})
 	// Will fail because tool isn't installed — exercises the upgrade path that calls Upgrade().
 	_ = cmd.Execute()
 }
@@ -3702,7 +3728,7 @@ func TestImport_DryRun_AllProviders_EmptyConfig(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "import", "--dry-run"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "import", "--dry-run"})
 	// Scans all available providers for already-installed tools.
 	// In most environments some tools will be found (brew, pip, etc.).
 	// Either path (found tools or none) is valid.
@@ -3735,7 +3761,7 @@ func TestConsolidate_EcosystemDryRun_NodeTools_PrintsWouldMigrate(t *testing.T) 
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "--dry-run", "node", "bun"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "consolidate", "--dry-run", "node", "bun"})
 	// ConsolidatePlan with node tools — should plan migration.
 	err := cmd.Execute()
 	if err != nil {
@@ -3754,7 +3780,7 @@ func TestSwitch_ToolNotFound_ReturnsError(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "switch", "nonexistent_tool_xyz", "--from", "brew", "--to", "pip"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "switch", "nonexistent_tool_xyz", "--from", "brew", "--to", "pip"})
 	err := cmd.Execute()
 	// Should error: tool not found in config.
 	if err == nil {
@@ -3801,7 +3827,7 @@ func TestSync_DryRun_WithNamedGroupArg(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "sync", "--dry-run", "devtools"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "sync", "--dry-run", "devtools"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("sync --dry-run devtools: %v", err)
 	}
@@ -3830,7 +3856,7 @@ func TestList_GroupFilter_GroupWithTools_InConfig(t *testing.T) {
 	})
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "list", "--group", "devtools"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "list", "--group", "devtools"})
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("list --group devtools: %v", err)
@@ -3887,7 +3913,7 @@ func TestAdd_NonTTYRequiresGroup(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "add", "ripgrep", "--provider", "system"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "add", "ripgrep", "--provider", "system"})
 	err := cmd.Execute()
 	if err == nil {
 		t.Fatal("expected missing group error")
@@ -3910,7 +3936,7 @@ func TestAdd_TTYPromptsForGroup(t *testing.T) {
 	withMockTerminal(t, true, func() {
 		withMockStdin(t, "work\n", func() {
 			cmd := NewRootCmd()
-			cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "add", "ripgrep", "--provider", "system", "--install-with", "brew"})
+			cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "add", "ripgrep", "--provider", "system", "--install-with", "brew"})
 			if err := cmd.Execute(); err != nil {
 				t.Fatalf("add with prompted group: %v", err)
 			}
@@ -3952,7 +3978,7 @@ func TestConsolidate_ProviderMode_DryRun_WithBrewTools(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "consolidate", "--to", "brew", "--dry-run"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "consolidate", "--to", "brew", "--dry-run"})
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("consolidate --to brew --dry-run with mixed tools: %v", err)
@@ -3981,7 +4007,7 @@ func TestSync_DryRun_WithIgnoredTool(t *testing.T) {
 	})
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "sync", "--dry-run"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "sync", "--dry-run"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("sync --dry-run with ignored tool: %v", err)
 	}
@@ -3998,7 +4024,7 @@ func TestDelete_WithProvider_TargetsMissingTool(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "delete", "--provider", "pip", "definitely_nonexistent_xyz_tool_123"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "delete", "--provider", "pip", "definitely_nonexistent_xyz_tool_123"})
 	// Will fail at the PM level — exercises code paths in newDeleteCmd beyond
 	// the --provider-missing check.
 	_ = cmd.Execute()
@@ -4232,6 +4258,140 @@ func TestPromptSatisfiedGroups_WithSatisfiedGroup_NoAnswer_NoCalls(t *testing.T)
 	if called {
 		t.Error("expected addGroupFn NOT to be called when user answers no")
 	}
+}
+
+// ─── promptReassignClaimedTools ──────────────────────────────────────────────
+
+func newReassignTestApp(t *testing.T, toolNames ...string) *app.App {
+	t.Helper()
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	tools := map[string]config.ToolSpec{}
+	hostGroup := &config.GroupConfig{Name: "testhost", Special: "host"}
+	for _, name := range toolNames {
+		tools[name] = config.ToolSpec{Provider: "system", InstallWith: "brew"}
+		hostGroup.Tools = append(hostGroup.Tools, config.ToolEntry{Name: name})
+	}
+	withConfig(t, cfgPath, &config.RootConfig{
+		Tools:  tools,
+		Groups: []*config.GroupConfig{hostGroup},
+	})
+	a := app.New(cfgPath)
+	a.CacheDir = cacheDir
+	brew := &cliStubProvider{name: "brew"}
+	if err := a.InitTestMode(context.Background(), brew); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	return a
+}
+
+func TestPromptReassign_AllToSameGroup(t *testing.T) {
+	a := newReassignTestApp(t, "ripgrep", "fd", "bat")
+	state := &rootState{app: a}
+	// User types "a" (all), then "dev" as group name.
+	withMockStdin(t, "a\ndev\n", func() {
+		promptReassignClaimedTools(state, []string{"ripgrep", "fd", "bat"})
+	})
+	cfg, err := config.Load(a.ConfigPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	devGroup := findGroup(cfg, "dev")
+	if devGroup == nil {
+		t.Fatal("expected 'dev' group to be created")
+	}
+	got := groupToolNames(devGroup)
+	want := []string{"bat", "fd", "ripgrep"}
+	slices.Sort(got)
+	if !slices.Equal(got, want) {
+		t.Errorf("dev group tools = %v, want %v", got, want)
+	}
+}
+
+func TestPromptReassign_Individual(t *testing.T) {
+	a := newReassignTestApp(t, "ripgrep", "fd")
+	state := &rootState{app: a}
+	// User types "i" (individual), "dev" for ripgrep, "" for fd (uses lastGroup="dev").
+	withMockStdin(t, "i\ndev\n\n", func() {
+		promptReassignClaimedTools(state, []string{"ripgrep", "fd"})
+	})
+	cfg, err := config.Load(a.ConfigPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	devGroup := findGroup(cfg, "dev")
+	if devGroup == nil {
+		t.Fatal("expected 'dev' group to be created")
+	}
+	got := groupToolNames(devGroup)
+	slices.Sort(got)
+	want := []string{"fd", "ripgrep"}
+	if !slices.Equal(got, want) {
+		t.Errorf("dev group tools = %v, want %v", got, want)
+	}
+}
+
+func TestPromptReassign_Skip(t *testing.T) {
+	a := newReassignTestApp(t, "ripgrep")
+	state := &rootState{app: a}
+	withMockStdin(t, "s\n", func() {
+		promptReassignClaimedTools(state, []string{"ripgrep"})
+	})
+	cfg, err := config.Load(a.ConfigPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	// Tool should stay in testhost group, no "dev" group created.
+	if findGroup(cfg, "dev") != nil {
+		t.Error("expected no 'dev' group after skip")
+	}
+	hostGroup := findGroup(cfg, "testhost")
+	if hostGroup == nil || !slices.Contains(groupToolNames(hostGroup), "ripgrep") {
+		t.Error("ripgrep should remain in testhost group")
+	}
+}
+
+func TestPromptReassign_EOF(t *testing.T) {
+	a := newReassignTestApp(t, "ripgrep")
+	state := &rootState{app: a}
+	withMockStdin(t, "", func() {
+		promptReassignClaimedTools(state, []string{"ripgrep"})
+	})
+	// Should not panic or error — graceful exit on EOF.
+	cfg, err := config.Load(a.ConfigPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if findGroup(cfg, "dev") != nil {
+		t.Error("expected no 'dev' group after EOF")
+	}
+}
+
+func TestPromptReassign_Empty(t *testing.T) {
+	state := &rootState{}
+	// Empty list — should be no-op, no panic.
+	promptReassignClaimedTools(state, nil)
+	promptReassignClaimedTools(state, []string{})
+}
+
+func findGroup(cfg *config.RootConfig, name string) *config.GroupConfig {
+	for _, g := range cfg.Groups {
+		if g.BaseName() == name {
+			return g
+		}
+	}
+	return nil
+}
+
+func groupToolNames(g *config.GroupConfig) []string {
+	names := make([]string, len(g.Tools))
+	for i, t := range g.Tools {
+		names[i] = t.Name
+	}
+	return names
 }
 
 // ─── global ignore add/remove roundtrip ──────────────────────────────────────
@@ -4593,7 +4753,7 @@ func TestList_SingleToolAndStateFilter_PrintsOnlyMatch(t *testing.T) {
 	cmd := NewRootCmd()
 	var out bytes.Buffer
 	cmd.SetOut(&out)
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", a.CacheDir, "list", "ripgrep", "--state", "outdated"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", a.CacheDir, "tools", "list", "ripgrep", "--state", "outdated"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list single outdated: %v", err)
 	}
@@ -4629,7 +4789,7 @@ func TestList_JSONIncludesDerivedState(t *testing.T) {
 	cmd := NewRootCmd()
 	var out bytes.Buffer
 	cmd.SetOut(&out)
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", a.CacheDir, "list", "--state", "ignored", "--format", "json"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", a.CacheDir, "tools", "list", "--state", "ignored", "--format", "json"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list json ignored: %v", err)
 	}
@@ -4668,7 +4828,7 @@ func TestList_WithInstalledToolAndVersion_PrintsVersion(t *testing.T) {
 	}
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", a.CacheDir, "list"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", a.CacheDir, "tools", "list"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list with versioned tool: %v", err)
 	}
@@ -4690,7 +4850,7 @@ func TestNewRootCmd_DefaultConfigPath_ViaEnv(t *testing.T) {
 
 	cmd := NewRootCmd()
 	// Run a host-exempt command (providers) without --config.
-	cmd.SetArgs([]string{"--cache-dir", cacheDir, "providers"})
+	cmd.SetArgs([]string{"--cache-dir", cacheDir, "tools", "providers"})
 	err := cmd.Execute()
 	// Providers is host-exempt; the default-path branch is exercised.
 	_ = err
@@ -4722,7 +4882,7 @@ func TestList_WithMissingTool_PrintsMissingStatus(t *testing.T) {
 	}
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", a.CacheDir, "list"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", a.CacheDir, "tools", "list"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list with missing tool: %v", err)
 	}
@@ -4900,7 +5060,7 @@ func TestList_GroupFilter_MatchingTool_PrintsTool(t *testing.T) {
 	}
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", a.CacheDir, "list", "--group", "work"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", a.CacheDir, "tools", "list", "--group", "work"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list --group work with matching tool: %v", err)
 	}

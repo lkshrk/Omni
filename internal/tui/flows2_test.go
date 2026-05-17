@@ -881,19 +881,27 @@ func TestFlow2_UC83_FilePickerPickSetup(t *testing.T) {
 
 // ── Group D — Dots Tab ────────────────────────────────────────────────────────
 
-// UC-84: D key → dotsLoading=true.
-func TestFlow2_UC84_DotsDiscoverKey(t *testing.T) {
-	got := drive(dotsModel(), pressRune('D'))
+// UC-84: R key → dotsLoading=true.
+func TestFlow2_UC84_DotsRefreshKey(t *testing.T) {
+	got := drive(dotsModel(), pressRune('R'))
 	if !got.dotsLoading {
-		t.Error("dotsLoading should be true after D (discover) key in dots tab")
+		t.Error("dotsLoading should be true after R (refresh) key in dots tab")
 	}
 }
 
-// UC-85: D with IsRepeat → no-op (dotsLoading stays false).
-func TestFlow2_UC85_DotsDiscoverKeyRepeat(t *testing.T) {
-	got := drive(dotsModel(), tea.KeyPressMsg{Code: 'D', Text: "D", IsRepeat: true})
+// UC-85: R with IsRepeat → no-op (dotsLoading stays false).
+func TestFlow2_UC85_DotsRefreshKeyRepeat(t *testing.T) {
+	got := drive(dotsModel(), tea.KeyPressMsg{Code: 'R', Text: "R", IsRepeat: true})
 	if got.dotsLoading {
-		t.Error("dotsLoading should stay false when D is a repeated key press")
+		t.Error("dotsLoading should stay false when R is a repeated key press")
+	}
+}
+
+// UC-85b: D key is no longer bound in dots tab (was discover, now R=refresh).
+func TestFlow2_UC85b_DotsOldDiscoverKeyNoop(t *testing.T) {
+	got := drive(dotsModel(), pressRune('D'))
+	if got.dotsLoading {
+		t.Error("D should not trigger any dots operation (discover moved to R)")
 	}
 }
 

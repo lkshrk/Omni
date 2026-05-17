@@ -46,17 +46,17 @@ func TestMutatingCLICommandsAreCataloged(t *testing.T) {
 	expected := [][]string{
 		{"reconcile"},
 		{"bootstrap"},
-		{"sync"},
-		{"add"},
-		{"install"},
-		{"delete"},
-		{"upgrade"},
-		{"switch"},
-		{"import"},
-		{"refresh"},
-		{"consolidate"},
-		{"tools", "set"},
+		{"tools", "sync"},
+		{"tools", "add"},
+		{"tools", "install"},
 		{"tools", "delete"},
+		{"tools", "upgrade"},
+		{"tools", "switch"},
+		{"tools", "import"},
+		{"tools", "refresh"},
+		{"tools", "consolidate"},
+		{"tools", "set"},
+		{"tools", "delete-spec"},
 		{"tools", "ignore"},
 		{"tools", "unignore"},
 		{"tools", "normalize"},
@@ -215,8 +215,8 @@ func TestMutatingCLICommandFlagsAreCataloged(t *testing.T) {
 
 func TestCanonicalDeleteCLICommands(t *testing.T) {
 	for _, path := range [][]string{
-		{"delete"},
 		{"tools", "delete"},
+		{"tools", "delete-spec"},
 		{"hosts", "remove"},
 		{"dots", "delete"},
 		{"groups", "delete"},
@@ -226,6 +226,7 @@ func TestCanonicalDeleteCLICommands(t *testing.T) {
 		}
 	}
 	for _, path := range [][]string{
+		{"delete"},
 		{"uninstall"},
 		{"tools", "remove"},
 		{"dots", "remove"},
@@ -348,9 +349,9 @@ func discoverRunnableCLICommands(root *cobra.Command) [][]string {
 func uncatalogedRunnableCLICommandAllowed(path []string) bool {
 	switch commandKey(path) {
 	case "ui",
-		"list",
-		"search",
-		"providers",
+		"tools list",
+		"tools search",
+		"tools providers",
 		"groups",
 		"hosts",
 		"settings",
@@ -459,7 +460,7 @@ func isMutatingCLICommand(path []string) bool {
 	}
 	if len(path) == 1 {
 		switch path[0] {
-		case "reconcile", "bootstrap", "sync", "add", "install", "delete", "upgrade", "switch", "import", "refresh", "consolidate":
+		case "reconcile", "bootstrap":
 			return true
 		default:
 			return false
@@ -467,7 +468,7 @@ func isMutatingCLICommand(path []string) bool {
 	}
 	switch path[0] {
 	case "tools":
-		return len(path) == 2 && oneOf(path[1], "set", "delete", "ignore", "unignore", "normalize")
+		return len(path) == 2 && oneOf(path[1], "sync", "add", "install", "delete", "delete-spec", "upgrade", "switch", "import", "refresh", "consolidate", "set", "ignore", "unignore", "normalize")
 	case "groups":
 		return len(path) == 2 && oneOf(path[1], "create", "rename", "delete", "move-tool", "remove-tool", "ignore-tool", "unignore-tool")
 	case "hosts":
