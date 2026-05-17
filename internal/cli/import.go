@@ -46,6 +46,13 @@ adds them to your config file. Tools already present in the config are skipped.
 			if len(result.Skipped) > 0 {
 				fmt.Printf("Skipped %d already configured tool(s)\n", len(result.Skipped))
 			}
+			if !opts.DryRun && len(result.Added) > 0 && !cmd.Flags().Changed("group") && stdinIsTerminal() {
+				names := make([]string, len(result.Added))
+				for i, t := range result.Added {
+					names[i] = t.Name
+				}
+				promptReassignClaimedTools(state, names)
+			}
 			return nil
 		},
 	}

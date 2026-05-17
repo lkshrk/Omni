@@ -1,15 +1,15 @@
-# omni sync --all claims discovered tools and installs missing configured tools
+# omni tools sync --all claims discovered tools and installs missing configured tools
 exec chmod 755 bin/brew bin/apt bin/apk bin/dnf bin/pacman bin/zypper bin/pip bin/pip3
 env PATH=$WORK/bin:$PATH
 
-exec omni --yes --config settings.json sync --all
+exec omni --yes --config settings.json tools sync --all
 stdout 'claiming fzf'
 stdout 'done: fd \(system\)'
 stdout 'Sync all complete .* 1 installed, 1 added to config'
 exec test -f .omni-cache/fake-brew/fd
 exec grep '"fzf"' settings.json
 stdout '"fzf"'
-exec omni --config settings.json list --state unclaimed --format json
+exec omni --config settings.json tools list --state unclaimed --format json
 stdout '^\[\]$'
 
 -- bin/brew --

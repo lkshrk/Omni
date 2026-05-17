@@ -477,7 +477,7 @@ func TestSync_HostActive_ReturnsSatisfiedGroups(t *testing.T) {
 	brew := &stubProvider{
 		name:      "brew",
 		available: true,
-		installed: []provider.InstalledTool{},
+		installed: []provider.InstalledTool{{Tool: provider.Tool{Name: "slack", Provider: "brew"}}},
 	}
 	a, cfgPath := newImportApp(t, brew)
 	short := testShortHostname()

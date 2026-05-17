@@ -97,7 +97,7 @@ func (m Model) viewString() string {
 		if bgModel.mode == viewSetup {
 			bgModel.mode = bgModel.setupBackgroundMode
 			if bgModel.mode == viewSetup {
-				bgModel.mode = viewList
+				bgModel.mode = viewStatus
 			}
 		}
 		return placeOverlay(bgModel.viewString(), renderPostSetupLoading(m), m.width, m.height)
@@ -109,7 +109,7 @@ func (m Model) viewString() string {
 		bgModel := m
 		bgModel.mode = m.setupBackgroundMode
 		if bgModel.mode == viewSetup {
-			bgModel.mode = viewList
+			bgModel.mode = viewStatus
 		}
 		bg := bgModel.viewString()
 		frame := setupPopupFrame(m)
@@ -277,7 +277,11 @@ func (m Model) viewString() string {
 	case m.mode == viewDots:
 		body = renderDots(m)
 	case m.mode == viewStatus:
-		body = renderStatus(m)
+		if m.loading && len(m.allTools) == 0 {
+			body = ""
+		} else {
+			body = renderStatus(m)
+		}
 	case m.mode == viewCommand:
 		body = renderPalette(m)
 	default:

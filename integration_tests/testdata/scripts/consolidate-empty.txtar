@@ -1,6 +1,6 @@
 # consolidate --dry-run with no tools to migrate prints "Nothing to migrate"
 exec omni --config settings.json hosts ensure testhost
-exec omni --config settings.json consolidate python uv --dry-run
+exec omni --config settings.json tools consolidate python uv --dry-run
 stdout 'Nothing to migrate'
 
 -- settings.json --

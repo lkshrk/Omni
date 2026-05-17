@@ -258,10 +258,12 @@ func renderDots(m Model) string {
 		repoW := max(rowAvailableWidth(m.width)-lipgloss.Width(gitPart)-2, 1)
 		write(p.styleHelp.PaddingLeft(2).Render(truncatePath(tildePath(repoPath), repoW)) + gitPart + "\n")
 		if m.dotsGitStatus != "" {
-			for _, line := range strings.Split(m.dotsGitStatus, "\n") {
-				if strings.TrimSpace(line) != "" {
-					write(p.styleHelp.PaddingLeft(4).Render(line) + "\n")
-				}
+			lines, overflow := truncatedGitStatus(m.dotsGitStatus, 3)
+			for _, line := range lines {
+				write(p.styleHelp.PaddingLeft(4).Render(line) + "\n")
+			}
+			if overflow != "" {
+				write(p.styleHelp.PaddingLeft(4).Render(overflow) + "\n")
 			}
 		}
 	}

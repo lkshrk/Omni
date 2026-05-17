@@ -1,14 +1,14 @@
-# omni refresh updates installed, outdated, discovered, and description cache state
+# omni tools refresh updates installed, outdated, discovered, and description cache state
 exec chmod 755 bin/brew bin/apt bin/apk bin/dnf bin/pacman bin/zypper bin/pip bin/pip3
 env PATH=$WORK/bin:$PATH
 
-exec omni --config settings.json refresh
+exec omni --config settings.json tools refresh
 stdout 'Scanning brew'
 stdout 'checking brew for updates'
 stdout 'finding local tools'
 stdout 'refreshing tool descriptions'
 stdout 'Refresh complete'
-exec omni --config settings.json list ripgrep --format json
+exec omni --config settings.json tools list ripgrep --format json
 stdout '"state":"outdated"'
 stdout '"installed":true'
 stdout '"installed_with":"brew"'

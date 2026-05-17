@@ -1,6 +1,6 @@
-# omni install when no provider is available exits with an error
+# omni tools install when no provider is available exits with an error
 exec omni --config settings.json hosts ensure testhost
-! exec omni --config settings.json install ripgrep
+! exec omni --config settings.json tools install ripgrep
 stderr 'no provider available'
 
 -- settings.json --

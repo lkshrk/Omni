@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/database"
 )
 
 func (m *Model) updateActiveFilePicker(msg tea.Msg) []tea.Cmd {
@@ -82,18 +83,22 @@ func (m *Model) acceptFilePickerPath(path string) []tea.Cmd {
 	return cmds
 }
 
-func (m *Model) acceptDotAddFilePickerPath(path string, cmds *[]tea.Cmd) {
+func (m *Model) acceptDotAddFilePickerPath(path string, _ *[]tea.Cmd) {
 	rawPath := tildePath(path)
-	group := m.dotAddTargetGroup()
-	m.beginDotsOperation("Adding " + rawPath + "…")
-	*cmds = append(*cmds, m.spinner.Tick, m.doDotsAdd(path, rawPath, group))
+	m.openGroupPickerForDotAdd(path, rawPath)
 }
 
-func (m Model) dotAddTargetGroup() string {
-	if group := shortHostname(); group != "" {
-		return group
-	}
-	return "base"
+func (m *Model) openGroupPickerForDotAdd(absPath, rawPath string) {
+	m.mode = viewGroupPicker
+	m.pickerGroups = append(prioritizedPickerGroups(*m), groupPickerNewSentinel)
+	m.pickerCursor = 0
+	m.pickerCreatingGroup = false
+	m.pickerPurposeDotAdd = true
+	m.pickerDotAddPath = absPath
+	m.pickerDotAddRawPath = rawPath
+	m.pickerCreatedGroups = nil
+	m.pickerActionTool = database.ToolCache{}
+	m.pickerActionToolSet = false
 }
 
 func tildePath(path string) string {

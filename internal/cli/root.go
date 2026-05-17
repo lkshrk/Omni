@@ -43,9 +43,9 @@ New machine? Run 'omni bootstrap' to detect providers, create or activate the
 host config, and optionally import or sync tools and dotfiles.
 
 Already set up?
-  omni reconcile  sync tools, upgrades, dotfiles, and dotfile commits
-  omni sync       sync local tools to match config
-  omni dots sync  sync dotfile symlinks from repo`,
+  omni reconcile      sync tools, upgrades, dotfiles, and dotfile commits
+  omni tools sync     sync local tools to match config
+  omni dots sync      sync dotfile symlinks from repo`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		// No subcommand → launch the TUI directly. This makes `omni` alone
@@ -105,20 +105,8 @@ Already set up?
 	root.AddCommand(
 		newBootstrapCmd(state),
 		newReconcileCmd(state),
-		newListCmd(state),
-		newSyncCmd(state),
-		newInstallCmd(state),
-		newDeleteCmd(state),
-		newUpgradeCmd(state),
-		newAddCmd(state),
-		newImportCmd(state),
-		newSearchCmd(state),
-		newRefreshCmd(state),
 		newDoctorCmd(state),
-		newProvidersCmd(state),
 		newSettingsCmd(state),
-		newConsolidateCmd(state),
-		newSwitchCmd(state),
 		newToolsCmd(state),
 		newGroupsCmd(state),
 		newHostsCmd(state),
@@ -141,7 +129,6 @@ var hostExempt = map[string]bool{
 	"dots":       true, // dots commands work independently of tool hosts
 	"ui":         true, // TUI handles its own onboarding including host setup
 	"version":    true,
-	"providers":  true,
 	"settings":   true,
 	"help":       true,
 	"completion": true,

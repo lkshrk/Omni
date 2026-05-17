@@ -1,13 +1,13 @@
 # legacy provider pin repair flags are rejected; physical reinstall remains scoped
 exec omni --config settings.json hosts ensure testhost
 
-! exec omni --config settings.json switch black --reinstall-default --from brew
+! exec omni --config settings.json tools switch black --reinstall-default --from brew
 stderr '--from/--to cannot be combined with --reinstall-default'
 
-! exec omni --config settings.json switch black --to-installed
+! exec omni --config settings.json tools switch black --to-installed
 stderr 'unknown flag: --to-installed'
 
-! exec omni --config settings.json switch black --remove-pin
+! exec omni --config settings.json tools switch black --remove-pin
 stderr 'unknown flag: --remove-pin'
 
 -- settings.json --

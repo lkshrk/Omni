@@ -1,10 +1,10 @@
-# omni import writes newly discovered installed tools and skips existing tools
+# omni tools import writes newly discovered installed tools and skips existing tools
 exec chmod 755 bin/npm
 exec chmod 755 bin/bun
 exec chmod 755 bin/pnpm
 env PATH=$WORK/bin:$PATH
 
-exec omni --config settings.json import --provider node --group work
+exec omni --config settings.json tools import --provider node --group work
 stdout 'Imported 1 tool\(s\):'
 stdout 'typescript'
 stdout '\(node\) 5.4.0'

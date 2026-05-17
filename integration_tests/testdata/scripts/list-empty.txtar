@@ -1,6 +1,6 @@
-# omni list with empty DB shows helpful message
+# omni tools list with empty DB shows helpful message
 exec omni --config settings.json hosts ensure testhost
-exec omni --config settings.json list
+exec omni --config settings.json tools list
 stdout 'No tools'
 
 -- settings.json --

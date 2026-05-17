@@ -1,6 +1,6 @@
-# omni delete without --provider flag exits with an error
+# omni tools delete without --provider flag exits with an error
 exec omni --config settings.json hosts ensure testhost
-! exec omni --config settings.json delete ripgrep
+! exec omni --config settings.json tools delete ripgrep
 stderr '--provider is required'
 
 -- settings.json --

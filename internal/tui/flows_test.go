@@ -754,7 +754,7 @@ func TestFlow_UC22_KeysIgnoredWhileLoading(t *testing.T) {
 	if got.cursor != 0 {
 		t.Errorf("cursor should not change while loading, got %d", got.cursor)
 	}
-	if got.mode != viewList {
+	if got.mode != viewStatus {
 		t.Errorf("mode should not change while loading, got %v", got.mode)
 	}
 }
@@ -1138,10 +1138,10 @@ func TestFlow_UC29_ToolsLoadedMsg(t *testing.T) {
 		}
 	})
 
-	t.Run("success populates allTools and sets viewList", func(t *testing.T) {
+	t.Run("success populates allTools and sets viewStatus", func(t *testing.T) {
 		got := drive(loadingModel(), toolsLoadedMsg{tools: threeTools()})
-		if got.mode != viewList {
-			t.Errorf("mode = %v, want viewList", got.mode)
+		if got.mode != viewStatus {
+			t.Errorf("mode = %v, want viewStatus", got.mode)
 		}
 		if len(got.allTools) != 3 {
 			t.Errorf("allTools = %d, want 3", len(got.allTools))
@@ -2832,7 +2832,7 @@ func TestFlow_UC61_PaletteExecution(t *testing.T) {
 		m.commandInput.Focus()
 		var syncCmd palCmd
 		for _, cmd := range buildPalette(m) {
-			if cmd.name == "sync" {
+			if cmd.name == "tools sync" {
 				syncCmd = cmd
 				break
 			}

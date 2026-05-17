@@ -17,10 +17,23 @@ func newToolsCmd(state *rootState) *cobra.Command {
 	}
 	cmd.AddCommand(
 		newToolsSetCmd(state),
-		newToolsDeleteCmd(state),
+		newToolsDeleteSpecCmd(state),
 		newToolsNormalizeCmd(state),
 		newToolsIgnoreCmd(state),
 		newToolsUnignoreCmd(state),
+		// moved from root:
+		newAddCmd(state),
+		newDeleteCmd(state),
+		newInstallCmd(state),
+		newUpgradeCmd(state),
+		newSyncCmd(state),
+		newImportCmd(state),
+		newSearchCmd(state),
+		newRefreshCmd(state),
+		newConsolidateCmd(state),
+		newSwitchCmd(state),
+		newProvidersCmd(state),
+		newListCmd(state),
 	)
 	return cmd
 }
@@ -83,9 +96,9 @@ func newToolsSetCmd(state *rootState) *cobra.Command {
 	return cmd
 }
 
-func newToolsDeleteCmd(state *rootState) *cobra.Command {
+func newToolsDeleteSpecCmd(state *rootState) *cobra.Command {
 	return &cobra.Command{
-		Use:   "delete <name>",
+		Use:   "delete-spec <name>",
 		Short: actions.MustDescription(actions.ToolDeleteSpec),
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

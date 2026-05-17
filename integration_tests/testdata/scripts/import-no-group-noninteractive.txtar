@@ -1,0 +1,52 @@
+# omni import without --group in non-interactive mode adds tools to machine hostname group silently (no prompt, no error)
+exec chmod 755 bin/npm
+exec chmod 755 bin/bun
+exec chmod 755 bin/pnpm
+env PATH=$WORK/bin:$PATH
+
+exec omni --config settings.json tools import --provider node
+stdout 'Imported 1 tool\(s\):'
+stdout 'typescript'
+# tool must be added to the machine hostname group (testhost)
+exec grep '"typescript"' settings.json
+stdout '"typescript"'
+exec grep '"name": "testhost"' settings.json
+stdout '"name": "testhost"'
+# no reassignment prompt fires (stdin is non-interactive in testscript)
+! stdout 'Move to a different group'
+! stdout '\[a\]ll to same group'
+! stderr 'Move to a different group'
+
+-- bin/npm --
+#!/usr/bin/env sh
+set -eu
+case "${1:-}" in
+  --version)
+    echo "10.0.0"
+    ;;
+  list)
+    printf '%s\n' '/fake/npm/global' '`-- typescript@5.4.0'
+    ;;
+esac
+
+-- bin/bun --
+#!/usr/bin/env sh
+exit 1
+
+-- bin/pnpm --
+#!/usr/bin/env sh
+exit 1
+
+-- settings.json --
+{
+  "settings": {
+    "ecosystems": {
+      "node": { "manager": "npm" }
+    }
+  },
+  "hosts": { "testhost": [] },
+  "tools": {},
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": [] }
+  ]
+}

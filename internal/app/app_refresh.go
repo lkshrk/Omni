@@ -13,6 +13,57 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
+// ─── Auto-refresh with staleness check ───────────────────────────────────────
+
+const (
+	stateKeyRefreshInstalled = "last_refresh_installed"
+	stateKeyRefreshOutdated  = "last_refresh_outdated"
+	refreshStaleness         = 2 * time.Minute
+)
+
+// refreshInstalledIfStale runs RefreshInstalled when the last successful run
+// was more than refreshStaleness ago (or never recorded).
+func (a *App) refreshInstalledIfStale(ctx context.Context, progress func(string)) error {
+	if a.refreshRecent(ctx, stateKeyRefreshInstalled) {
+		return nil
+	}
+	if err := a.RefreshInstalled(ctx, progress); err != nil {
+		return err
+	}
+	return a.markRefreshed(ctx, stateKeyRefreshInstalled)
+}
+
+// refreshOutdatedIfStale runs RefreshOutdated when the last successful run
+// was more than refreshStaleness ago (or never recorded).
+func (a *App) refreshOutdatedIfStale(ctx context.Context, progress func(string)) error {
+	if a.refreshRecent(ctx, stateKeyRefreshOutdated) {
+		return nil
+	}
+	if err := a.RefreshOutdated(ctx, progress); err != nil {
+		return err
+	}
+	return a.markRefreshed(ctx, stateKeyRefreshOutdated)
+}
+
+// refreshRecent returns true when the given state key was marked within the
+// staleness window. DB or parse errors are treated as "stale" (fail-open) so
+// a transient DB issue triggers a fresh refresh rather than silently skipping.
+func (a *App) refreshRecent(ctx context.Context, key string) bool {
+	val, err := a.readDB().GetState(ctx, key)
+	if err != nil {
+		return false
+	}
+	t, err := time.Parse(time.RFC3339, val)
+	if err != nil {
+		return false
+	}
+	return time.Since(t) < refreshStaleness
+}
+
+func (a *App) markRefreshed(ctx context.Context, key string) error {
+	return a.readDB().SetState(ctx, key, time.Now().UTC().Format(time.RFC3339))
+}
+
 // ─── Outdated / Descriptions ──────────────────────────────────────────────────
 
 const descriptionFallbackConcurrency = 4

@@ -1,10 +1,10 @@
-# omni upgrade --all upgrades every outdated cached tool and clears outdated state
+# omni tools upgrade --all upgrades every outdated cached tool and clears outdated state
 exec chmod 755 bin/brew
 env PATH=$WORK/bin:$PATH
 
 exec omni-seed-cache ripgrep system ripgrep 14.0.0 15.0.0 brew
 exec omni-seed-cache fd system fd 9.0.0 10.0.0 brew
-exec omni --config settings.json upgrade --all
+exec omni --config settings.json tools upgrade --all
 stdout 'upgrading ripgrep'
 stdout 'upgraded: ripgrep \(system\)'
 stdout 'upgrading fd'
@@ -12,7 +12,7 @@ stdout 'upgraded: fd \(system\)'
 exec test -f .omni-cache/fake-brew/ripgrep-upgraded
 exec test -f .omni-cache/fake-brew/fd-upgraded
 
-exec omni --config settings.json list --state outdated --format json
+exec omni --config settings.json tools list --state outdated --format json
 stdout '^\[\]$'
 
 -- bin/brew --

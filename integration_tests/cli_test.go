@@ -110,6 +110,7 @@ func stowAwareScriptFiles() ([]string, error) {
 	}
 
 	_, stowErr := exec.LookPath("stow")
+	_, brewErr := exec.LookPath("brew")
 	var stowMissing []string
 	var files []string
 	for _, entry := range entries {
@@ -131,6 +132,13 @@ func stowAwareScriptFiles() ([]string, error) {
 		}
 		if stowErr != nil && requiresStow {
 			stowMissing = append(stowMissing, name)
+			continue
+		}
+		requiresBrew, err := scriptRequires(path, "brew")
+		if err != nil {
+			return nil, err
+		}
+		if requiresBrew && brewErr != nil {
 			continue
 		}
 		files = append(files, path)

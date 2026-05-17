@@ -22,7 +22,7 @@ func (m *Model) handleGroupPickerKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 
 	switch {
 	case !m.pickerCreatingGroup && key.Matches(msg, m.keys.Back):
-		m.closeGroupPicker()
+		m.cancelGroupPicker()
 	case !m.pickerCreatingGroup && key.Matches(msg, m.keys.Up):
 		if m.pickerCursor > 0 {
 			m.pickerCursor--
@@ -36,7 +36,7 @@ func (m *Model) handleGroupPickerKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	case m.pickerCreatingGroup && key.Matches(msg, m.keys.Confirm):
 		m.submitGroupPickerNewGroup(&cmds)
 	case m.pickerCreatingGroup && key.Matches(msg, m.keys.Back):
-		m.closeGroupPicker()
+		m.cancelGroupPicker()
 	default:
 		if m.pickerCreatingGroup {
 			var cmd tea.Cmd
@@ -50,15 +50,83 @@ func (m *Model) handleGroupPickerKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	return cmds
 }
 
+// cancelGroupPicker closes the picker and drains the reassign queue (user pressed Escape).
+func (m *Model) cancelGroupPicker() {
+	m.pendingGroupReassign = nil
+	m.reassignCreatedGroups = nil
+	m.closeGroupPicker()
+}
+
 func (m *Model) closeGroupPicker() {
 	m.settingsInput.Blur()
 	m.pickerCreatingGroup = false
 	m.pickerPurposeClaim = false
 	m.pickerPurposeInstall = false
+	wasDotAdd := m.pickerPurposeDotAdd
+	wasReassign := m.pickerPurposeReassign
+	m.pickerPurposeDotAdd = false
+	m.pickerPurposeReassign = false
+	m.pickerDotAddPath = ""
+	m.pickerDotAddRawPath = ""
 	m.pickerActionTool = database.ToolCache{}
 	m.pickerActionToolSet = false
-	m.mode = viewList
+	if wasDotAdd {
+		m.mode = viewDots
+	} else {
+		m.mode = viewList
+	}
 	m.pickerGroups = nil
+	// If this was a reassignment and more tools are queued, open next picker.
+	if wasReassign && len(m.pendingGroupReassign) > 0 {
+		m.openNextReassignPicker()
+	} else if wasReassign {
+		m.reassignCreatedGroups = nil
+	}
+}
+
+// startGroupReassignQueue begins iterating through claimed tools with group
+// pickers so the user can move them out of the machine hostname group.
+func (m *Model) startGroupReassignQueue(names []string) {
+	if len(names) == 0 {
+		return
+	}
+	m.pendingGroupReassign = append([]string(nil), names...)
+	m.reassignCreatedGroups = nil
+	m.openNextReassignPicker()
+}
+
+func (m *Model) openNextReassignPicker() {
+	if len(m.pendingGroupReassign) == 0 {
+		return
+	}
+	// Carry forward any groups created in previous reassign pickers.
+	for _, g := range m.pickerCreatedGroups {
+		m.reassignCreatedGroups = appendUniqueString(m.reassignCreatedGroups, g)
+	}
+	name := m.pendingGroupReassign[0]
+	m.pendingGroupReassign = m.pendingGroupReassign[1:]
+	// Find the tool in allTools to set as pickerActionTool.
+	for _, t := range m.allTools {
+		if t != nil && t.Name == name {
+			m.pickerActionTool = *t
+			m.pickerActionToolSet = true
+			break
+		}
+	}
+	m.mode = viewGroupPicker
+	groups := prioritizedPickerGroups(*m)
+	// Include groups created during earlier reassign pickers that may not
+	// yet appear in m.groupNames (the async groupChangedMsg hasn't arrived).
+	for _, g := range m.reassignCreatedGroups {
+		if !slices.Contains(groups, g) {
+			groups = append(groups, g)
+		}
+	}
+	m.pickerGroups = append(groups, groupPickerNewSentinel)
+	m.pickerCursor = 0
+	m.pickerCreatingGroup = false
+	m.pickerPurposeReassign = true
+	m.pickerCreatedGroups = nil
 }
 
 func (m *Model) confirmGroupPickerSelection(cmds *[]tea.Cmd) {
@@ -97,6 +165,22 @@ func (m *Model) openPickerNewGroupInput(cmds *[]tea.Cmd) {
 }
 
 func (m *Model) runGroupPickerAction(group string, cmds *[]tea.Cmd) bool {
+	if m.pickerPurposeDotAdd {
+		m.beginDotsOperation("Adding " + m.pickerDotAddRawPath + "…")
+		*cmds = append(*cmds, m.spinner.Tick, m.doDotsAdd(m.pickerDotAddPath, m.pickerDotAddRawPath, group))
+		return true
+	}
+	if m.pickerPurposeReassign {
+		t, ok := m.groupPickerActionTool()
+		if !ok {
+			return true
+		}
+		// Don't set m.loading — the move is fire-and-forget so the next
+		// reassign picker can accept input immediately. A stale
+		// groupChangedMsg from this op must not block the next picker.
+		*cmds = append(*cmds, m.doSetToolGroupMembership(t.Name, group, true))
+		return true
+	}
 	t, ok := m.groupPickerActionTool()
 	if !ok {
 		return true

@@ -24,21 +24,21 @@ import (
 type viewMode int
 
 const (
-	viewList            viewMode = iota
-	viewSearch                   // search input active
-	viewSettings                 // options/settings tab
-	viewSetup                    // first-run: no settings.json found
-	viewCommand                  // command palette active
-	viewGroups                   // dedicated group-assignment tab
-	viewGroupPicker              // inline move-to-group picker
-	viewGroupMembership          // logical tool group membership toggles
-	viewGroupTools               // group tool membership/ignore editor
-	viewGroupDots                // group dotfile membership editor
-	viewIgnoreScope              // explicit ignore scope picker
-	viewProviderScope            // explicit provider pin scope picker
-	viewAdminTerminal            // privileged package action terminal handoff
-	viewDots                     // dotfiles management tab
-	viewStatus                   // read-only health/status dashboard tab
+	viewStatus          viewMode = iota // read-only health/status dashboard tab (zero value = default)
+	viewList                            // tools list
+	viewSearch                          // search input active
+	viewSettings                        // options/settings tab
+	viewSetup                           // first-run: no settings.json found
+	viewCommand                         // command palette active
+	viewGroups                          // dedicated group-assignment tab
+	viewGroupPicker                     // inline move-to-group picker
+	viewGroupMembership                 // logical tool group membership toggles
+	viewGroupTools                      // group tool membership/ignore editor
+	viewGroupDots                       // group dotfile membership editor
+	viewIgnoreScope                     // explicit ignore scope picker
+	viewProviderScope                   // explicit provider pin scope picker
+	viewAdminTerminal                   // privileged package action terminal handoff
+	viewDots                            // dotfiles management tab
 )
 
 // section groups tools into visual categories in the list view.
@@ -315,22 +315,28 @@ type Model struct {
 	groupDotsEditor groupAssignmentEditor
 
 	// inline group-picker
-	pickerGroups         []string
-	pickerCursor         int
-	pickerCreatingGroup  bool // true when the user selected the "+ new group…" sentinel
-	pickerPurposeClaim   bool // true when the picker is for claiming an orphan tool
-	pickerPurposeInstall bool // true when the picker is for install-and-add
-	pickerMembershipKind string
-	pickerMembershipName string
-	pickerMembershipKey  string
-	pickerActionTool     database.ToolCache
-	pickerActionToolSet  bool
-	pickerOriginalGroups []string
-	pickerCreatedGroups  []string
-	scopeOptions         []scopeOption
-	scopeCursor          int
-	scopeTarget          database.ToolCache
-	scopeTargetSet       bool
+	pickerGroups          []string
+	pickerCursor          int
+	pickerCreatingGroup   bool // true when the user selected the "+ new group…" sentinel
+	pickerPurposeClaim    bool // true when the picker is for claiming an orphan tool
+	pickerPurposeInstall  bool // true when the picker is for install-and-add
+	pickerPurposeDotAdd   bool // true when the picker is for dots add
+	pickerDotAddPath      string
+	pickerDotAddRawPath   string
+	pickerPurposeReassign bool     // true when iterating claimed tools for group reassignment
+	pendingGroupReassign  []string // queue of tool names awaiting group reassignment
+	reassignCreatedGroups []string // groups created during the reassign sequence (carried across pickers)
+	pickerMembershipKind  string
+	pickerMembershipName  string
+	pickerMembershipKey   string
+	pickerActionTool      database.ToolCache
+	pickerActionToolSet   bool
+	pickerOriginalGroups  []string
+	pickerCreatedGroups   []string
+	scopeOptions          []scopeOption
+	scopeCursor           int
+	scopeTarget           database.ToolCache
+	scopeTargetSet        bool
 
 	// setup wizard step (0 = create config?, 1 = import tools?, 2 = provider
 	// selection, 3 = node manager, 4 = unused, 5 = enable dotfiles?, 6 = dots

@@ -3278,7 +3278,7 @@ func TestTabKeyMap_ShortHelp_DotsOrder(t *testing.T) {
 	got := bindingHelpKeys(tabKeyMap{&m}.ShortHelp())
 	want := []string{
 		toolActionTUIKey(t, actions.DotsAdd),
-		toolActionTUIKey(t, actions.DotsDiscover),
+		toolActionTUIKey(t, actions.DotsRefresh),
 		m.keys.SyncAll.Help().Key,
 		"/", "tab", "?", "q",
 	}
@@ -3385,7 +3385,7 @@ func TestRenderHelpPopup_TabSpecificActionsAndLegend(t *testing.T) {
 		mode viewMode
 		want []string
 	}{
-		{"dots", viewDots, []string{"discover", "conflict", "no source", "host variant", "child"}},
+		{"dots", viewDots, []string{"refresh", "conflict", "no source", "host variant", "child"}},
 		{"status", viewStatus, []string{"upgrade all tools", "reconcile all", "refresh dashboard", iconInstalled, "healthy", iconPending, "working", iconFailed, "warning", iconMissing, "failure", iconIgnored, "quiet"}},
 		{"settings", viewSettings, []string{"change toggle or option", "[ON]", "[OFF]"}},
 		{"hosts", viewGroups, []string{"new group", "(local)", "[x]", "[ ]", "may need sudo"}},
@@ -3570,7 +3570,7 @@ func TestRenderHelpPopup_ActionOrderKeepsDeleteLast(t *testing.T) {
 		{
 			name:   "dots",
 			mode:   viewDots,
-			before: []string{"add", "discover", "move group", "ignore"},
+			before: []string{"add", "refresh", "move group", "ignore"},
 		},
 		{
 			name:   "groups",
@@ -5325,6 +5325,49 @@ func TestViewString_SetupModeCanRenderOverDotsTab(t *testing.T) {
 	}
 }
 
+func TestViewString_SetupDefaultBackgroundIsDashboard(t *testing.T) {
+	t.Run("zero-value setupBackgroundMode resolves to Dashboard", func(t *testing.T) {
+		var m Model
+		// Zero-value viewMode should be viewStatus (Dashboard), not viewList.
+		if m.setupBackgroundMode != viewStatus {
+			t.Fatalf("zero-value setupBackgroundMode = %v, want viewStatus", m.setupBackgroundMode)
+		}
+	})
+
+	t.Run("noConfig setup shows Dashboard background", func(t *testing.T) {
+		m := baseModel(nil)
+		m.loading = true
+		got := drive(m, toolsLoadedMsg{noConfig: true})
+		if got.mode != viewSetup {
+			t.Fatalf("mode = %v, want viewSetup", got.mode)
+		}
+		if got.setupBackgroundMode != viewStatus {
+			t.Fatalf("setupBackgroundMode = %v, want viewStatus (Dashboard)", got.setupBackgroundMode)
+		}
+	})
+
+	t.Run("noHost setup shows Dashboard background", func(t *testing.T) {
+		m := baseModel(nil)
+		m.loading = true
+		got := drive(m, toolsLoadedMsg{noHost: true})
+		if got.setupBackgroundMode != viewStatus {
+			t.Fatalf("setupBackgroundMode = %v, want viewStatus (Dashboard)", got.setupBackgroundMode)
+		}
+	})
+
+	t.Run("view.go fallback renders Dashboard not Tools", func(t *testing.T) {
+		m := baseModel(threeTools())
+		m.mode = viewSetup
+		m.setupBackgroundMode = viewSetup // triggers the fallback branch
+
+		out := stripANSIEscapeSequences(m.viewString())
+		// Health Check is a Dashboard-only section header.
+		if !strings.Contains(out, "Health Check") {
+			t.Errorf("fallback background should be Dashboard (expected 'Health Check'), got:\n%s", out)
+		}
+	})
+}
+
 func TestViewString_WithError(t *testing.T) {
 	m := baseModel(nil)
 	m.err = errForTest("something failed")
@@ -6326,3 +6369,68 @@ func hintKeys(hints []hintItem) []string {
 type errForTest string
 
 func (e errForTest) Error() string { return string(e) }
+
+func TestTruncatedGitStatus(t *testing.T) {
+	tests := []struct {
+		name         string
+		status       string
+		maxLines     int
+		wantLines    []string
+		wantOverflow string
+	}{
+		{
+			name:         "empty",
+			status:       "",
+			maxLines:     3,
+			wantLines:    nil,
+			wantOverflow: "",
+		},
+		{
+			name:         "under limit",
+			status:       " M settings.json\n M dots.go\n",
+			maxLines:     3,
+			wantLines:    []string{" M settings.json", " M dots.go"},
+			wantOverflow: "",
+		},
+		{
+			name:         "at limit",
+			status:       " M a\n M b\n M c\n",
+			maxLines:     3,
+			wantLines:    []string{" M a", " M b", " M c"},
+			wantOverflow: "",
+		},
+		{
+			name:         "over limit",
+			status:       " M a\n M b\n M c\n M d\n M e\n",
+			maxLines:     3,
+			wantLines:    []string{" M a", " M b", " M c"},
+			wantOverflow: "+2 more repo change(s)",
+		},
+		{
+			name:         "filters empty lines",
+			status:       " M a\n\n M b\n  \n M c\n M d\n",
+			maxLines:     3,
+			wantLines:    []string{" M a", " M b", " M c"},
+			wantOverflow: "+1 more repo change(s)",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lines, overflow := truncatedGitStatus(tt.status, tt.maxLines)
+			if len(lines) == 0 && len(tt.wantLines) == 0 {
+				// both nil/empty — ok
+			} else if len(lines) != len(tt.wantLines) {
+				t.Fatalf("lines = %v, want %v", lines, tt.wantLines)
+			} else {
+				for i := range lines {
+					if lines[i] != tt.wantLines[i] {
+						t.Fatalf("lines[%d] = %q, want %q", i, lines[i], tt.wantLines[i])
+					}
+				}
+			}
+			if overflow != tt.wantOverflow {
+				t.Fatalf("overflow = %q, want %q", overflow, tt.wantOverflow)
+			}
+		})
+	}
+}
