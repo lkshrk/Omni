@@ -129,6 +129,50 @@ func TestDiscoverDotsEntries_CombinesRepoLocalConfigAndOutliers(t *testing.T) {
 	}
 }
 
+func TestDiscoverDotsEntries_DiscoversAgentsSkillLockFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repoDir := t.TempDir()
+
+	// Create the nested file that wellKnownDotPaths maps.
+	agentsDir := filepath.Join(home, ".agents")
+	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(agentsDir, ".skill-lock.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := app.DiscoverDotsEntries(repoDir)
+	if err != nil {
+		t.Fatalf("DiscoverDotsEntries: %v", err)
+	}
+	byName := make(map[string]string, len(got))
+	for _, entry := range got {
+		byName[entry.Name] = entry.Path
+	}
+	wantPath := "~/.agents/.skill-lock.json"
+	if p, ok := byName["agents-skill-lock"]; !ok || p != wantPath {
+		t.Fatalf("agents-skill-lock entry = %q (ok=%v), want %q", p, ok, wantPath)
+	}
+}
+
+func TestDiscoverDotsEntries_SkipsAgentsSkillLockWhenMissing(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repoDir := t.TempDir()
+
+	got, err := app.DiscoverDotsEntries(repoDir)
+	if err != nil {
+		t.Fatalf("DiscoverDotsEntries: %v", err)
+	}
+	for _, entry := range got {
+		if entry.Name == "agents-skill-lock" {
+			t.Fatalf("agents-skill-lock should not be discovered when file missing, got: %#v", entry)
+		}
+	}
+}
+
 func TestDiscoverDotsEntries_AddsClaudeAllowlistIgnores(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -158,7 +202,6 @@ func TestDiscoverDotsEntries_AddsClaudeAllowlistIgnores(t *testing.T) {
 		"!/mcp.json",
 		"!/plugins",
 		"!/plugins/installed_plugins.json",
-		"!/skills/",
 		"!/agents/",
 		"!/hooks/",
 		"!/scripts/",
@@ -206,7 +249,6 @@ func TestDiscoverDotsEntries_AddsCodexAllowlistIgnores(t *testing.T) {
 		"!/AGENTS.md",
 		"!/RTK.md",
 		"!/rules/",
-		"!/skills/",
 	} {
 		if !testContainsString(codex.Ignore, want) {
 			t.Fatalf("codex ignore = %v, missing %q", codex.Ignore, want)
@@ -2288,8 +2330,8 @@ func TestDotsList_ClaudeAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *tes
 	if len(statuses) != 1 {
 		t.Fatalf("statuses = %#v, want one claude entry", statuses)
 	}
-	if statuses[0].FileCount != 11 {
-		t.Fatalf("file count = %d, want the eleven default Claude proposal files", statuses[0].FileCount)
+	if statuses[0].FileCount != 10 {
+		t.Fatalf("file count = %d, want the ten default Claude proposal files", statuses[0].FileCount)
 	}
 	childIgnored := make(map[string]bool, len(statuses[0].Children))
 	for _, child := range statuses[0].Children {
@@ -2300,7 +2342,6 @@ func TestDotsList_ClaudeAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *tes
 		"CLAUDE.md",
 		"mcp.json",
 		"plugins",
-		"skills",
 		"agents",
 		"hooks",
 		"scripts",
@@ -2313,7 +2354,7 @@ func TestDotsList_ClaudeAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *tes
 			t.Fatalf("%s should be included in Claude default proposal: %#v", rel, statuses[0].Children)
 		}
 	}
-	for _, rel := range []string{"history.jsonl", "projects"} {
+	for _, rel := range []string{"history.jsonl", "projects", "skills"} {
 		ignored, ok := childIgnored[rel]
 		if !ok || !ignored {
 			t.Fatalf("%s should be listed as ignored: %#v", rel, statuses[0].Children)
@@ -2401,8 +2442,8 @@ func TestDotsList_CodexAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *test
 	if len(statuses) != 1 {
 		t.Fatalf("statuses = %#v, want one codex entry", statuses)
 	}
-	if statuses[0].FileCount != 7 {
-		t.Fatalf("file count = %d, want the seven default Codex proposal files", statuses[0].FileCount)
+	if statuses[0].FileCount != 6 {
+		t.Fatalf("file count = %d, want the six default Codex proposal files", statuses[0].FileCount)
 	}
 	childIgnored := make(map[string]bool, len(statuses[0].Children))
 	for _, child := range statuses[0].Children {
@@ -2414,14 +2455,13 @@ func TestDotsList_CodexAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *test
 		"AGENTS.md",
 		"RTK.md",
 		"rules",
-		"skills",
 	} {
 		ignored, ok := childIgnored[rel]
 		if !ok || ignored {
 			t.Fatalf("%s should be included in Codex default proposal: %#v", rel, statuses[0].Children)
 		}
 	}
-	for _, rel := range []string{"history.jsonl", "sessions", "tmp.json"} {
+	for _, rel := range []string{"history.jsonl", "sessions", "tmp.json", "skills"} {
 		ignored, ok := childIgnored[rel]
 		if !ok || !ignored {
 			t.Fatalf("%s should be listed as ignored: %#v", rel, statuses[0].Children)

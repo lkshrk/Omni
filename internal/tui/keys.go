@@ -55,7 +55,7 @@ type KeyMap struct {
 	GroupNext key.Binding // } — cycle group filter forward
 
 	// Dots tab actions
-	DotDiscover key.Binding // D — discover untracked dotfile candidates
+	DotRefresh  key.Binding // R — refresh status and discover candidates
 	DotPull     key.Binding // p — git pull + resync (command palette only)
 	DotDelete   key.Binding // d — delete dots entry (confirm required)
 	DotAdd      key.Binding // a — adopt a new path into the dots repo
@@ -81,7 +81,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Top, k.Bottom, k.HalfPageUp, k.HalfPageDown, k.PageUp, k.PageDown, k.Tab},
 		{k.Install, k.Upgrade, k.UpgradeAll, k.SyncAll, k.DotCommit, k.Claim, k.MoveGroup, k.PinProvider, k.MigrateProvider, k.Ignore, k.Delete, k.Refresh},
-		{k.DotDiscover, k.DotAdd, k.DotDelete, k.DotVariant, k.DotIgnore, k.DotUseRepo, k.DotUseLocal, k.Reconcile, k.ApplySolution},
+		{k.DotRefresh, k.DotAdd, k.DotDelete, k.DotVariant, k.DotIgnore, k.DotUseRepo, k.DotUseLocal, k.Reconcile, k.ApplySolution},
 		{k.Search, k.PrevTab, k.NextTab, k.GroupPrev, k.GroupNext, k.Palette, k.NewGroup, k.HostGroups, k.GroupTools, k.GroupDots, k.Rename, k.Help, k.Quit},
 	}
 }
@@ -227,9 +227,9 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("R"),
 			key.WithHelp("R", actions.MustTUILabel(actions.ToolRefresh)),
 		),
-		DotDiscover: key.NewBinding(
-			key.WithKeys("D"),
-			key.WithHelp("D", actions.MustTUILabel(actions.DotsDiscover)),
+		DotRefresh: key.NewBinding(
+			key.WithKeys("R"),
+			key.WithHelp("R", actions.MustTUILabel(actions.DotsRefresh)),
 		),
 		DotPull: key.NewBinding(
 			key.WithKeys("p"),

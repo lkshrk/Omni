@@ -128,6 +128,11 @@ type doctorDoneMsg struct {
 	err    error
 }
 
+type fixIgnoreDoneMsg struct {
+	modified []string
+	err      error
+}
+
 type dotsServiceKind string
 
 const (

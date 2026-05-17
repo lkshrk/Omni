@@ -1,10 +1,12 @@
 package dots
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -205,29 +207,103 @@ func backupCopyPath(src, dst string, info os.FileInfo) error {
 		return os.Symlink(target, dst)
 	}
 	if info.IsDir() {
-		return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			rel, relErr := filepath.Rel(src, path)
-			if relErr != nil {
-				return relErr
-			}
-			target := filepath.Join(dst, rel)
-			entryInfo, infoErr := os.Lstat(path)
-			if infoErr != nil {
-				return infoErr
-			}
-			if entryInfo.IsDir() && entryInfo.Mode()&os.ModeSymlink == 0 {
-				return os.MkdirAll(target, entryInfo.Mode().Perm())
-			}
-			return backupCopyPath(path, target, entryInfo)
-		})
+		// Prefer git ls-files when src is inside a git repo — only tracked
+		// files are backed up, which naturally excludes caches, build
+		// artifacts, and anything in .gitignore.
+		if err := backupCopyGitTracked(src, dst); err == nil {
+			return nil
+		}
+		// Fallback: walk the directory but skip default-ignored paths
+		// (.cache, node_modules, __pycache__, etc.).
+		return backupCopyDirFiltered(src, dst)
 	}
 	if !info.Mode().IsRegular() {
 		return nil
 	}
 	return backupCopyFile(src, dst, info.Mode())
+}
+
+// backupCopyGitTracked copies only git-tracked files from src into dst.
+// Returns a non-nil error when src is not inside a git repo or git is
+// unavailable, signalling the caller to fall back.
+func backupCopyGitTracked(src, dst string) error {
+	cmd := exec.CommandContext(context.Background(), "git", "-C", src, "ls-files", "-z")
+	out, err := cmd.Output()
+	if err != nil {
+		return err
+	}
+	files := strings.Split(string(out), "\x00")
+	var hasFiles bool
+	for _, rel := range files {
+		if rel == "" {
+			continue
+		}
+		hasFiles = true
+		srcPath := filepath.Join(src, rel)
+		dstPath := filepath.Join(dst, rel)
+		info, err := os.Lstat(srcPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue // deleted but still in index
+			}
+			return err
+		}
+		if info.IsDir() {
+			continue
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			target, err := os.Readlink(srcPath)
+			if err != nil {
+				return err
+			}
+			if err := os.MkdirAll(filepath.Dir(dstPath), 0o755); err != nil {
+				return err
+			}
+			if err := os.Symlink(target, dstPath); err != nil {
+				return err
+			}
+			continue
+		}
+		if !info.Mode().IsRegular() {
+			continue
+		}
+		if err := backupCopyFile(srcPath, dstPath, info.Mode()); err != nil {
+			return err
+		}
+	}
+	if !hasFiles {
+		return fmt.Errorf("git ls-files returned no tracked files")
+	}
+	return nil
+}
+
+// backupCopyDirFiltered walks src recursively, skipping default-ignored paths.
+func backupCopyDirFiltered(src, dst string) error {
+	ignores := defaultIgnores
+	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, relErr := filepath.Rel(src, path)
+		if relErr != nil {
+			return relErr
+		}
+		if rel != "." && ShouldIgnore(d.Name(), ignores) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		target := filepath.Join(dst, rel)
+		entryInfo, infoErr := os.Lstat(path)
+		if infoErr != nil {
+			return infoErr
+		}
+		if entryInfo.IsDir() && entryInfo.Mode()&os.ModeSymlink == 0 {
+			return os.MkdirAll(target, entryInfo.Mode().Perm())
+		}
+		return backupCopyPath(path, target, entryInfo)
+	})
 }
 
 func backupCopyFile(src, dst string, mode fs.FileMode) error {

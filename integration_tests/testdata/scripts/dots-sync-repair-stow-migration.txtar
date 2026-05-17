@@ -1,0 +1,37 @@
+# auto-repair a directory where all symlinks point to an old stow package (within current stow path)
+# @requires: stow
+env HOME=$WORK/home
+mkdir $WORK/home
+mkdir $WORK/home/.config
+mkdir $WORK/home/.config/myapp
+exec git init $WORK/home/dotfiles
+exec git -C $WORK/home/dotfiles config user.email t@t.com
+exec git -C $WORK/home/dotfiles config user.name T
+exec git -C $WORK/home/dotfiles commit --allow-empty -m init
+
+# Simulate a migration scenario: symlinks in the target dir point within the
+# stow root but to an OLD package directory (myapp-old) rather than the current
+# package (myapp). This is DotStateConflict + dotConflictIsManagedStowLink=true
+# → dots sync should auto-repair via restow.
+exec ln -s $WORK/home/dotfiles/dotfiles/myapp-old/.config/myapp/config.toml $WORK/home/.config/myapp/config.toml
+
+exec omni --config settings.json dots sync
+stdout 'symlink\(s\) updated'
+
+# After repair, the symlink must resolve to the current stow source file.
+exec readlink $WORK/home/.config/myapp/config.toml
+stdout 'dotfiles/myapp/\.config/myapp/config\.toml'
+
+exec omni --config settings.json dots status myapp
+stdout 'Synced'
+
+-- settings.json --
+{"host_settings":{"testhost":{"dots_repo":"~/dotfiles"}},"hosts":{"testhost":[]},"groups":[{"name":"testhost","special":"host","dots":[{"name":"myapp","path":"~/.config/myapp"}]}]}
+
+-- home/dotfiles/dotfiles/myapp/.config/myapp/config.toml --
+[settings]
+key = value
+
+-- home/dotfiles/dotfiles/myapp-old/.config/myapp/config.toml --
+[settings]
+key = value

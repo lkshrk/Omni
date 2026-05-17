@@ -212,6 +212,8 @@ func (m *Model) startNextDashboardReconcileStep(cmds *[]tea.Cmd) {
 			m.startDashboardDotsSync(cmds)
 		case dashboardReconcilePlanCommitDots:
 			m.startDashboardDotsCommit(cmds)
+		case dashboardReconcilePlanFixIgnore:
+			m.startDashboardFixIgnore(cmds)
 		}
 		if len(*cmds) > before {
 			return
@@ -230,6 +232,8 @@ func (m *Model) dashboardReconcileStepActionable(kind dashboardReconcilePlanKind
 		return statusDashboardDotsSyncActionable(*m)
 	case dashboardReconcilePlanCommitDots:
 		return statusDashboardDotsCommitActionable(*m)
+	case dashboardReconcilePlanFixIgnore:
+		return statusDashboardFixIgnoreActionable(*m)
 	default:
 		return false
 	}
@@ -307,6 +311,17 @@ func (m *Model) startDashboardDotsCommit(cmds *[]tea.Cmd) {
 	}
 	m.beginDotsOperation("Committing dots…")
 	*cmds = append(*cmds, m.spinner.Tick, m.doDotsCommit())
+}
+
+func (m *Model) startDashboardFixIgnore(cmds *[]tea.Cmd) {
+	if !doctorHasIgnoreFindings(*m) {
+		return
+	}
+	a := m.app
+	*cmds = append(*cmds, func() tea.Msg {
+		modified, err := a.DotsFixIgnorePatterns()
+		return fixIgnoreDoneMsg{modified: modified, err: err}
+	})
 }
 
 func (m *Model) startDashboardUpgradeAll(cmds *[]tea.Cmd) {
@@ -389,7 +404,26 @@ func (m *Model) handleStatusAction(action statusAction, cmds *[]tea.Cmd) {
 		m.startDashboardDotsCommit(cmds)
 	case statusActionUpgradeTools:
 		m.startDashboardUpgradeAll(cmds)
+	case statusActionFixIgnore:
+		m.startDashboardFixIgnore(cmds)
 	}
+}
+
+func (m *Model) handleFixIgnoreDoneMsg(msg fixIgnoreDoneMsg) []tea.Cmd {
+	var cmds []tea.Cmd
+	if msg.err != nil {
+		cmds = append(cmds, setStatus(m, "fix ignore patterns: "+msg.err.Error(), true))
+		m.continueDashboardReconcile(dashboardReconcilePlanFixIgnore, msg.err, &cmds)
+		return cmds
+	}
+	if len(msg.modified) > 0 {
+		cmds = append(cmds, setStatus(m, "✓ fixed ignore patterns for "+strings.Join(msg.modified, ", "), false))
+		// Re-run doctor to refresh findings.
+		m.startDoctorRun("Refreshing doctor…")
+		cmds = append(cmds, m.spinner.Tick, m.doRunDoctor())
+	}
+	m.continueDashboardReconcile(dashboardReconcilePlanFixIgnore, nil, &cmds)
+	return cmds
 }
 
 func selectedStatusAction(rows []statusListRow, cursor int) statusAction {

@@ -2,6 +2,7 @@ package dots_test
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -231,6 +232,94 @@ func TestRemoveLocalPathAfterBackup_AllowsSymlinkWithoutBackup(t *testing.T) {
 	}
 	if got, err := os.ReadFile(target); err != nil || string(got) != "# repo" {
 		t.Fatalf("target changed: body=%q err=%v", got, err)
+	}
+}
+
+func TestBackupLocalPath_SkipsCacheDirs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	src := filepath.Join(home, ".config", "myapp")
+	writeFile(t, filepath.Join(src, "config.toml"), "key = true")
+	writeFile(t, filepath.Join(src, ".cache", "big.bin"), "huge cache")
+	writeFile(t, filepath.Join(src, "node_modules", "pkg", "index.js"), "module")
+	writeFile(t, filepath.Join(src, "__pycache__", "mod.pyc"), "bytecode")
+	writeFile(t, filepath.Join(src, "sub", "real.txt"), "keep me")
+
+	backup, err := dots.BackupLocalPath(src)
+	if err != nil {
+		t.Fatalf("BackupLocalPath: %v", err)
+	}
+
+	// Tracked file should be backed up.
+	if _, err := os.Stat(filepath.Join(backup, "config.toml")); err != nil {
+		t.Errorf("config.toml should be in backup: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(backup, "sub", "real.txt")); err != nil {
+		t.Errorf("sub/real.txt should be in backup: %v", err)
+	}
+
+	// Cache dirs should be excluded.
+	for _, excluded := range []string{".cache", "node_modules", "__pycache__"} {
+		if _, err := os.Stat(filepath.Join(backup, excluded)); !os.IsNotExist(err) {
+			t.Errorf("%s should NOT be in backup, got err=%v", excluded, err)
+		}
+	}
+}
+
+func TestBackupLocalPathFrom_GitTrackedOnly(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Create a git repo with tracked + untracked files.
+	repo := filepath.Join(home, "dotfiles", "nvim", ".config", "nvim")
+	writeFile(t, filepath.Join(repo, "init.lua"), "-- config")
+	writeFile(t, filepath.Join(repo, "lua", "plugins.lua"), "-- plugins")
+	writeFile(t, filepath.Join(repo, ".cache", "huge.bin"), "100MB of cache")
+	writeFile(t, filepath.Join(repo, "node_modules", "dep", "index.js"), "module")
+
+	// git init + add only the tracked files
+	runGit(t, repo, "init")
+	runGit(t, repo, "config", "user.email", "t@t.com")
+	runGit(t, repo, "config", "user.name", "T")
+	runGit(t, repo, "add", "init.lua", "lua/plugins.lua")
+	runGit(t, repo, "commit", "-m", "init")
+
+	target := filepath.Join(home, ".config", "nvim")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(repo, target); err != nil {
+		t.Fatal(err)
+	}
+
+	backup, err := dots.BackupLocalPathFrom(target, repo)
+	if err != nil {
+		t.Fatalf("BackupLocalPathFrom: %v", err)
+	}
+
+	// Tracked files present.
+	if _, err := os.Stat(filepath.Join(backup, "init.lua")); err != nil {
+		t.Errorf("init.lua should be in backup: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(backup, "lua", "plugins.lua")); err != nil {
+		t.Errorf("lua/plugins.lua should be in backup: %v", err)
+	}
+
+	// Untracked cache dirs absent.
+	for _, excluded := range []string{".cache", "node_modules"} {
+		if _, err := os.Stat(filepath.Join(backup, excluded)); !os.IsNotExist(err) {
+			t.Errorf("%s should NOT be in backup (untracked), got err=%v", excluded, err)
+		}
+	}
+}
+
+func runGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
 }
 

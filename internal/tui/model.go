@@ -163,6 +163,7 @@ const (
 	dashboardReconcilePlanUpgradeTools dashboardReconcilePlanKind = "upgrade-tools"
 	dashboardReconcilePlanSyncDots     dashboardReconcilePlanKind = "sync-dots"
 	dashboardReconcilePlanCommitDots   dashboardReconcilePlanKind = "commit-dots"
+	dashboardReconcilePlanFixIgnore    dashboardReconcilePlanKind = "fix-ignore"
 )
 
 // Model is the root Bubbletea model.
@@ -605,6 +606,7 @@ func New(a *app.App, ctx context.Context) Model {
 		isDark:           true,             // assume dark until terminal replies
 		focused:          true,             // assume focused until a BlurMsg says otherwise
 		palette:          defaultPalette(), // dark default; rebuilt on BackgroundColorMsg
+		doctorRunning:    true,             // Init fires doctor; prevents double-run on status tab
 	}
 }
 
@@ -632,6 +634,7 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
 		loadTools(m.app, m.ctx),
+		m.doRunDoctor(),
 		tea.RequestBackgroundColor,
 	)
 }
