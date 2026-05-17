@@ -1,0 +1,60 @@
+# dots ignore ejects previously-synced symlinks that match the new pattern.
+# Pre-eject state is built manually: ~/.myapp is a real dir with per-item symlinks
+# pointing into the dotfiles repo (file-level symlinks, not whole-dir fold).
+env HOME=$WORK/home
+mkdir $WORK/home
+
+exec git init $WORK/home/dotfiles
+exec git -C $WORK/home/dotfiles config user.email t@t.com
+exec git -C $WORK/home/dotfiles config user.name T
+exec git -C $WORK/home/dotfiles commit --allow-empty -m init
+
+# Create the stow package directory tree (txtar creates the leaf files below)
+mkdir $WORK/home/dotfiles/dotfiles
+mkdir $WORK/home/dotfiles/dotfiles/myapp
+mkdir $WORK/home/dotfiles/dotfiles/myapp/.myapp
+mkdir $WORK/home/dotfiles/dotfiles/myapp/.myapp/cache
+
+# Simulate the state after stow was run with ~/.myapp already existing:
+# individual symlinks inside ~/.myapp/ pointing directly into the repo.
+mkdir $WORK/home/.myapp
+mkdir $WORK/home/.myapp/cache
+exec ln -s $WORK/home/dotfiles/dotfiles/myapp/.myapp/config.toml $WORK/home/.myapp/config.toml
+exec ln -s $WORK/home/dotfiles/dotfiles/myapp/.myapp/cache/data.db $WORK/home/.myapp/cache/data.db
+
+# Sanity check: both paths are symlinks before the ignore command
+exec sh -c 'test -L '"$WORK"'/home/.myapp/config.toml && echo symlink-ok'
+stdout 'symlink-ok'
+exec sh -c 'test -L '"$WORK"'/home/.myapp/cache/data.db && echo symlink-ok'
+stdout 'symlink-ok'
+
+# Add ignore pattern targeting data.db files — should eject the managed symlink
+exec omni --config settings.json dots ignore myapp 'cache/data.db'
+stdout 'ejected 1 previously synced path\(s\)'
+stdout 'added ignore pattern'
+
+# cache/data.db must now be a real file (not a symlink)
+exec sh -c 'test ! -L '"$WORK"'/home/.myapp/cache/data.db && echo real-file'
+stdout 'real-file'
+
+# The ejected file should contain the original content
+exec cat $WORK/home/.myapp/cache/data.db
+stdout 'placeholder-cache-data'
+
+# config.toml symlink must be unaffected (pattern only targets cache/data.db)
+exec sh -c 'test -L '"$WORK"'/home/.myapp/config.toml && echo still-symlink'
+stdout 'still-symlink'
+
+# The repo source for data.db must have been removed
+exec sh -c 'test ! -e '"$WORK"'/home/dotfiles/dotfiles/myapp/.myapp/cache/data.db && echo removed'
+stdout 'removed'
+
+-- settings.json --
+{"host_settings":{"testhost":{"dots_repo":"~/dotfiles"}},"hosts":{"testhost":[]},"groups":[{"name":"testhost","special":"host","dots":[{"name":"myapp","path":"~/.myapp"}]}]}
+
+-- home/dotfiles/dotfiles/myapp/.myapp/config.toml --
+[app]
+theme = "dark"
+
+-- home/dotfiles/dotfiles/myapp/.myapp/cache/data.db --
+placeholder-cache-data

@@ -19,13 +19,21 @@ const (
 	DoctorStatusFail DoctorStatus = "fail"
 )
 
+// DoctorDetailGroup is a header with nested detail items, used when a single
+// check reports findings across multiple entries (e.g. per-dot ignore audits).
+type DoctorDetailGroup struct {
+	Header string   `json:"header"`
+	Items  []string `json:"items,omitempty"`
+}
+
 // DoctorCheck describes one read-only diagnostic result.
 type DoctorCheck struct {
-	ID      string       `json:"id"`
-	Label   string       `json:"label"`
-	Status  DoctorStatus `json:"status"`
-	Message string       `json:"message"`
-	Details []string     `json:"details,omitempty"`
+	ID      string              `json:"id"`
+	Label   string              `json:"label"`
+	Status  DoctorStatus        `json:"status"`
+	Message string              `json:"message"`
+	Details []string            `json:"details,omitempty"`
+	Groups  []DoctorDetailGroup `json:"groups,omitempty"`
 }
 
 // DoctorSummary counts diagnostic severities.
@@ -56,6 +64,7 @@ func (a *App) Doctor(ctx context.Context) (*DoctorResult, error) {
 		a.doctorHost(result, cfg)
 		a.doctorProviders(ctx, result)
 		a.doctorDots(ctx, result, cfg)
+		a.doctorDotsIgnorePatterns(result, cfg)
 	}
 	result.Summary = doctorSummary(result.Checks)
 	return result, nil

@@ -192,6 +192,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case doctorDoneMsg:
 		cmds = append(cmds, m.handleDoctorDoneMsg(msg)...)
 
+	case fixIgnoreDoneMsg:
+		cmds = append(cmds, m.handleFixIgnoreDoneMsg(msg)...)
+
 	case dotsServiceChangedMsg:
 		cmds = append(cmds, m.handleDotsServiceChangedMsg(msg)...)
 
