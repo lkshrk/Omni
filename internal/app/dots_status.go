@@ -352,10 +352,11 @@ func entryHealth(m *dots.Manager, groupMap map[string]string, variantMap map[str
 		state, actions := classifyDotEntry(e)
 		contentRoot := dotStatusContentRoot(e)
 		ignoreRoot := dotIgnoreRoot(e.SourcePath, e.TargetPath, contentRoot)
-		counts := dotFileCountsUnion(e.SourcePath, e.TargetPath, contentRoot, "", ignoreRoot, e.Ignore, state)
+		ignores := combinedDotIgnores(e.Ignore)
+		counts := dotFileCountsUnion(e.SourcePath, e.TargetPath, contentRoot, "", ignoreRoot, ignores, state)
 		fileCount := counts.Managed()
-		children := directDotChildren(e.SourcePath, e.TargetPath, contentRoot, ignoreRoot, e.Ignore, state)
-		ignoredChildren := ignoredDotChildren(e.SourcePath, e.TargetPath, contentRoot, ignoreRoot, e.Ignore, state)
+		children := directDotChildren(e.SourcePath, e.TargetPath, contentRoot, ignoreRoot, ignores, state)
+		ignoredChildren := ignoredDotChildren(e.SourcePath, e.TargetPath, contentRoot, ignoreRoot, ignores, state)
 		if state == DotStateIgnored {
 			counts = DotFileCounts{}
 			fileCount = 0
