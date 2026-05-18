@@ -1,6 +1,17 @@
-# omni bootstrap persists detected package managers, creates the host, and can skip dots
-exec chmod 755 bin/pnpm bin/npm bin/pip3 bin/apt bin/apk bin/dnf bin/pacman bin/zypper bin/brew bin/pip
-env PATH=$WORK/bin:$PATH
+# omni bootstrap persists detected package managers, creates the host, and can skip dots.
+#
+# Detection priority: bun > pnpm > npm (node), uv > pip3 > pip (python).
+# This fixture provides only pnpm/npm/pip3 fakes so the expected detection
+# result is pnpm + pip3. A fully controlled PATH (no host dirs) prevents
+# real bun/uv from leaking in.
+#
+# $WORK/bin holds the fake scripts; the testscript binary dir is extracted
+# from the first component of the original $PATH so the omni command remains
+# available.
+exec chmod 755 bin/pnpm bin/npm bin/pip3 bin/apt bin/apk bin/dnf bin/pacman bin/zypper bin/brew bin/pip bin/extract-testscript-bin
+exec bin/extract-testscript-bin
+env PATH=$WORK/bin:/usr/bin:/bin:/usr/sbin:/sbin
+
 stdin init-input
 
 exec omni --config settings.json bootstrap --no-import
@@ -19,6 +30,15 @@ stdout '"testhost"'
 -- init-input --
 n
 
+
+-- bin/extract-testscript-bin --
+#!/bin/sh
+# Copy the testscript omni binary into $WORK/bin so it survives the PATH reset.
+# The testscript binary dir is the first PATH component (set by testscript.Run).
+tsbin="${PATH%%:*}"
+for f in "$tsbin"/*; do
+  [ -x "$f" ] && cp "$f" "$WORK/bin/" 2>/dev/null
+done
 
 -- bin/pnpm --
 #!/bin/sh
