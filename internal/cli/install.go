@@ -51,5 +51,6 @@ func newInstallCmd(state *rootState) *cobra.Command {
 	}
 
 	addProviderFlag(cmd, &providerName, "provider to use; omit to auto-select from priority list")
+	cmd.ValidArgsFunction = completeToolNames(state)
 	return cmd
 }

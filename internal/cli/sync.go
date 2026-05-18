@@ -154,6 +154,8 @@ Use --all to ` + actions.MustLongDescription(actions.ToolSyncAll) + `.`,
 	cmd.Flags().StringVar(&group, "group", "", "limit sync to one group, or assign discovered tools (with --all)")
 	cmd.Flags().BoolVar(&retryFailed, "retry-failed", false, "only retry tools that failed in a previous sync")
 	cmd.Flags().BoolVar(&all, "all", false, actions.MustDescription(actions.ToolSyncAll))
+	cmd.ValidArgsFunction = completeToolNames(state)
+	_ = cmd.RegisterFlagCompletionFunc("group", completeGroupNames(state))
 	return cmd
 }
 

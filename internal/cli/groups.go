@@ -62,7 +62,7 @@ func newGroupsCreateCmd(state *rootState) *cobra.Command {
 }
 
 func newGroupsRenameCmd(state *rootState) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "rename <old> <new>",
 		Short: "Rename a tool group",
 		Args:  cobra.ExactArgs(2),
@@ -74,6 +74,14 @@ func newGroupsRenameCmd(state *rootState) *cobra.Command {
 			return nil
 		},
 	}
+	// first arg is the old group name; second arg (new name) is freeform
+	cmd.ValidArgsFunction = func(c *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) == 0 {
+			return completeGroupNames(state)(c, args, toComplete)
+		}
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return cmd
 }
 
 func newGroupsDeleteCmd(state *rootState) *cobra.Command {
@@ -127,11 +135,13 @@ func newGroupsDeleteCmd(state *rootState) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&moveTo, "move-to", "", "move tools that have no other group membership to this group")
 	cmd.Flags().BoolVar(&deleteTools, "delete-tools", false, "delete logical tool specs that have no other group membership")
+	cmd.ValidArgsFunction = completeGroupNames(state)
+	_ = cmd.RegisterFlagCompletionFunc("move-to", completeGroupNames(state))
 	return cmd
 }
 
 func newGroupsMoveToolCmd(state *rootState) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "move-tool <group> <tool>",
 		Short: "Move a logical tool to a group",
 		Args:  cobra.ExactArgs(2),
@@ -139,6 +149,13 @@ func newGroupsMoveToolCmd(state *rootState) *cobra.Command {
 			return runGroupsMoveTool(cmd, state, args)
 		},
 	}
+	cmd.ValidArgsFunction = func(c *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) == 0 {
+			return completeGroupNames(state)(c, args, toComplete)
+		}
+		return completeToolNames(state)(c, args, toComplete)
+	}
+	return cmd
 }
 
 func runGroupsMoveTool(cmd *cobra.Command, state *rootState, args []string) error {
@@ -150,7 +167,7 @@ func runGroupsMoveTool(cmd *cobra.Command, state *rootState, args []string) erro
 }
 
 func newGroupsIgnoreToolCmd(state *rootState) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "ignore-tool <group> <tool>",
 		Short: "Ignore a logical tool in one group",
 		Args:  cobra.ExactArgs(2),
@@ -162,10 +179,17 @@ func newGroupsIgnoreToolCmd(state *rootState) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.ValidArgsFunction = func(c *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) == 0 {
+			return completeGroupNames(state)(c, args, toComplete)
+		}
+		return completeToolNames(state)(c, args, toComplete)
+	}
+	return cmd
 }
 
 func newGroupsUnignoreToolCmd(state *rootState) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "unignore-tool <group> <tool>",
 		Short: "Stop ignoring a logical tool in one group",
 		Args:  cobra.ExactArgs(2),
@@ -177,10 +201,17 @@ func newGroupsUnignoreToolCmd(state *rootState) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.ValidArgsFunction = func(c *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) == 0 {
+			return completeGroupNames(state)(c, args, toComplete)
+		}
+		return completeToolNames(state)(c, args, toComplete)
+	}
+	return cmd
 }
 
 func newGroupsRemoveToolCmd(state *rootState) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "remove-tool <group> <tool>",
 		Short: "Remove a logical tool membership from a group",
 		Args:  cobra.ExactArgs(2),
@@ -192,4 +223,11 @@ func newGroupsRemoveToolCmd(state *rootState) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.ValidArgsFunction = func(c *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) == 0 {
+			return completeGroupNames(state)(c, args, toComplete)
+		}
+		return completeToolNames(state)(c, args, toComplete)
+	}
+	return cmd
 }

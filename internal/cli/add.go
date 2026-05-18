@@ -61,5 +61,8 @@ Example:
 	cmd.Flags().StringVar(&group, "group", "", "group to add the tool to (default: current host)")
 	addProviderFlag(cmd, &providerName, "ecosystem provider for the logical tool")
 	cmd.Flags().StringVar(&installWith, "install-with", "", "concrete provider or manager to use for this tool")
+	cmd.ValidArgsFunction = cobra.NoFileCompletions
+	_ = cmd.RegisterFlagCompletionFunc("group", completeGroupNames(state))
+	_ = cmd.RegisterFlagCompletionFunc("install-with", completeProviderNames(state))
 	return cmd
 }
