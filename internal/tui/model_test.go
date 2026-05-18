@@ -398,7 +398,7 @@ func TestModel_ToolsLoadedMsg(t *testing.T) {
 	})
 
 	t.Run("launch batch status follows latest bulk activity", func(t *testing.T) {
-		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true, width: 100}
+		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true, width: 100, setupReloading: true}
 		got := drive(m, toolsLoadedMsg{
 			settings:            config.Settings{DotsRepo: "/tmp/dots"},
 			configuredProviders: []string{"brew"},
@@ -436,7 +436,7 @@ func TestModel_ToolsLoadedMsg(t *testing.T) {
 	})
 
 	t.Run("launch batch reports dots and provider errors after all startup work finishes", func(t *testing.T) {
-		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true}
+		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true, setupReloading: true}
 		got := drive(m, toolsLoadedMsg{
 			settings:            config.Settings{DotsRepo: "/tmp/dots"},
 			configuredProviders: []string{"brew"},
@@ -472,7 +472,7 @@ func TestModel_ToolsLoadedMsg(t *testing.T) {
 	})
 
 	t.Run("successful launch batch clears stale dots activity status", func(t *testing.T) {
-		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true}
+		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true, setupReloading: true}
 		got := drive(m, toolsLoadedMsg{settings: config.Settings{DotsRepo: "/tmp/dots"}})
 		if !got.launchBatchActive {
 			t.Fatal("launchBatchActive should be true while startup dots sync is running")
@@ -486,6 +486,17 @@ func TestModel_ToolsLoadedMsg(t *testing.T) {
 		}
 		if got.progressText != "" {
 			t.Fatalf("progressText = %q, want cleared after successful launch batch", got.progressText)
+		}
+	})
+
+	t.Run("normal launch does not activate launch batch", func(t *testing.T) {
+		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true}
+		got := drive(m, toolsLoadedMsg{
+			settings:            config.Settings{DotsRepo: "/tmp/dots"},
+			configuredProviders: []string{"brew"},
+		})
+		if got.launchBatchActive {
+			t.Fatal("launchBatchActive should be false on normal launch (non-bootstrap)")
 		}
 	})
 
