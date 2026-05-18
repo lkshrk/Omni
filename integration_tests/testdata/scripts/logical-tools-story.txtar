@@ -1,5 +1,6 @@
 # logical tool CLI story: specs, memberships, destructive handling, dry-run
-# @requires: brew
+exec chmod 755 bin/brew bin/npm
+env PATH=$WORK/bin:$PATH
 exec omni --config settings.json hosts ensure testhost
 stdout 'Host "testhost" ensured.'
 
@@ -60,6 +61,25 @@ exec grep '"jq"' settings.json
 stdout '"jq"'
 ! exec grep '"shellcheck"' settings.json
 ! exec grep '"typescript"' settings.json
+
+-- bin/brew --
+#!/bin/sh
+case "$1" in
+  info)
+    # Return empty JSON for --json=v2 calls
+    echo '{"formulae":[],"casks":[]}'
+    ;;
+  list)
+    echo ""
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+
+-- bin/npm --
+#!/bin/sh
+exit 1
 
 -- settings.json --
 {}
