@@ -99,6 +99,7 @@ Ecosystems and managers:
 
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be done without making changes")
 	cmd.Flags().StringVar(&toProvider, "to", "", "move all tools to this provider (e.g. brew)")
+	_ = cmd.RegisterFlagCompletionFunc("to", completeProviderNames(state))
 	return cmd
 }
 

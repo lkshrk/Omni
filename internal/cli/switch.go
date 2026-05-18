@@ -68,5 +68,8 @@ Examples:
 	cmd.Flags().StringVar(&toProvider, "to", "", "target provider (brew, npm, pip, …)")
 	addProviderFlag(cmd, &providerName, "configured provider to repair when tool names are duplicated")
 	cmd.Flags().BoolVar(&reinstallDefault, "reinstall-default", false, actions.MustDescription(actions.ToolReinstallDefault))
+	cmd.ValidArgsFunction = completeToolNames(state)
+	_ = cmd.RegisterFlagCompletionFunc("from", completeProviderNames(state))
+	_ = cmd.RegisterFlagCompletionFunc("to", completeProviderNames(state))
 	return cmd
 }

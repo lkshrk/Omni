@@ -60,5 +60,6 @@ adds them to your config file. Tools already present in the config are skipped.
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "preview what would be added without writing")
 	addProviderFlag(cmd, &opts.Provider, "import only from this provider")
 	cmd.Flags().StringVar(&opts.Group, "group", "", "destination group (default: machine hostname group)")
+	_ = cmd.RegisterFlagCompletionFunc("group", completeGroupNames(state))
 	return cmd
 }

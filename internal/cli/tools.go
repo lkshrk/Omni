@@ -93,11 +93,13 @@ func newToolsSetCmd(state *rootState) *cobra.Command {
 	cmd.Flags().StringVar(&installWith, "install-with", "", "concrete provider or manager to use for this tool")
 	cmd.Flags().BoolVar(&globalScope, "global", false, "write the default logical tool install spec")
 	cmd.Flags().BoolVar(&hostScope, "host", false, "write a host override for this machine")
+	cmd.ValidArgsFunction = completeToolNames(state)
+	_ = cmd.RegisterFlagCompletionFunc("install-with", completeProviderNames(state))
 	return cmd
 }
 
 func newToolsDeleteSpecCmd(state *rootState) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "delete-spec <name>",
 		Short: actions.MustDescription(actions.ToolDeleteSpec),
 		Args:  cobra.ExactArgs(1),
@@ -113,6 +115,8 @@ func newToolsDeleteSpecCmd(state *rootState) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.ValidArgsFunction = completeToolNames(state)
+	return cmd
 }
 
 func newToolsNormalizeCmd(state *rootState) *cobra.Command {
@@ -185,7 +189,7 @@ func printNormalizedOverrides(out io.Writer, overrides []appcore.NormalizedInsta
 }
 
 func newToolsIgnoreCmd(state *rootState) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "ignore <name>",
 		Short: "Ignore a logical tool everywhere",
 		Args:  cobra.ExactArgs(1),
@@ -197,10 +201,12 @@ func newToolsIgnoreCmd(state *rootState) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.ValidArgsFunction = completeToolNames(state)
+	return cmd
 }
 
 func newToolsUnignoreCmd(state *rootState) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "unignore <name>",
 		Short: "Stop ignoring a logical tool everywhere",
 		Args:  cobra.ExactArgs(1),
@@ -212,4 +218,6 @@ func newToolsUnignoreCmd(state *rootState) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.ValidArgsFunction = completeToolNames(state)
+	return cmd
 }

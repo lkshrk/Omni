@@ -34,5 +34,6 @@ func newDeleteCmd(state *rootState) *cobra.Command {
 	}
 
 	addProviderFlag(cmd, &providerName, "provider to use for the delete operation")
+	cmd.ValidArgsFunction = completeToolNames(state)
 	return cmd
 }

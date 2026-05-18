@@ -70,7 +70,7 @@ func newHostsEnsureCmd(state *rootState) *cobra.Command {
 }
 
 func newHostsSetGroupsCmd(state *rootState) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "set-groups <hostname> [group ...]",
 		Short: "Replace reusable groups assigned to a host",
 		Args:  cobra.MinimumNArgs(1),
@@ -82,10 +82,17 @@ func newHostsSetGroupsCmd(state *rootState) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.ValidArgsFunction = func(c *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) == 0 {
+			return completeHostNames(state)(c, args, toComplete)
+		}
+		return completeGroupNames(state)(c, args, toComplete)
+	}
+	return cmd
 }
 
 func newHostsAddGroupCmd(state *rootState) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "add-group <hostname> <group>",
 		Short: "Assign a reusable group to a host",
 		Args:  cobra.ExactArgs(2),
@@ -97,10 +104,17 @@ func newHostsAddGroupCmd(state *rootState) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.ValidArgsFunction = func(c *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) == 0 {
+			return completeHostNames(state)(c, args, toComplete)
+		}
+		return completeGroupNames(state)(c, args, toComplete)
+	}
+	return cmd
 }
 
 func newHostsRemoveGroupCmd(state *rootState) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "remove-group <hostname> <group>",
 		Short: "Remove a reusable group from a host",
 		Args:  cobra.ExactArgs(2),
@@ -112,10 +126,17 @@ func newHostsRemoveGroupCmd(state *rootState) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.ValidArgsFunction = func(c *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) == 0 {
+			return completeHostNames(state)(c, args, toComplete)
+		}
+		return completeGroupNames(state)(c, args, toComplete)
+	}
+	return cmd
 }
 
 func newHostsCopyCmd(state *rootState) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "copy <source-host> <target-host>",
 		Short: "Copy host-scoped config to another host",
 		Args:  cobra.ExactArgs(2),
@@ -127,10 +148,12 @@ func newHostsCopyCmd(state *rootState) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.ValidArgsFunction = completeHostNames(state)
+	return cmd
 }
 
 func newHostsRemoveCmd(state *rootState) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "remove <hostname>",
 		Short: "Remove a host assignment",
 		Args:  cobra.ExactArgs(1),
@@ -146,6 +169,8 @@ func newHostsRemoveCmd(state *rootState) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.ValidArgsFunction = completeHostNames(state)
+	return cmd
 }
 
 func groupList(groups []string) string {
