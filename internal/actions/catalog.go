@@ -185,7 +185,7 @@ var Tools = []Action{
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresToolName},
 		TUI:             &TUIBinding{KeyMapField: "Install", DefaultKey: "i", Label: "install", Description: "Install the selected missing tool."},
-		CLI:             []CLIBinding{{Command: []string{"tools", "install"}, Flags: []string{"--provider"}}},
+		CLI:             []CLIBinding{{Command: []string{"tools", "install"}, Flags: []string{"--provider", "--group", "--force"}}},
 	},
 	{
 		ID:                 ToolDelete,

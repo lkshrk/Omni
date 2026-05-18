@@ -164,6 +164,10 @@ func requireActiveHost(cmd *cobra.Command, a *app.App) error {
 		if f := c.Flags().Lookup("group"); f != nil && f.Changed {
 			return nil
 		}
+		// An explicit --force flag opts out of host enforcement.
+		if f := c.Flags().Lookup("force"); f != nil && f.Changed {
+			return nil
+		}
 	}
 	return a.RequireActiveHost()
 }
