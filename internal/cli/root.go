@@ -171,9 +171,21 @@ func requireActiveHost(cmd *cobra.Command, a *app.App) error {
 // Execute runs the root command with a signal-aware context.
 // Pressing Ctrl+C (SIGINT) or sending SIGTERM cancels the context, which
 // propagates cancellation to child processes via the context passed to RunE.
+// A background goroutine ensures the process exits immediately on signal even
+// when the main goroutine is blocked reading stdin (e.g. confirmation prompts).
 func Execute() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Force-exit on signal so blocking stdin reads cannot prevent shutdown.
+	// When the TUI is active the terminal is in raw mode and Ctrl+C is
+	// delivered as a byte on stdin (not SIGINT), so this only fires for
+	// non-TUI code paths.
+	go func() {
+		<-ctx.Done()
+		os.Exit(130) // 128 + SIGINT
+	}()
+
 	root := NewRootCmd()
 	if err := root.ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
