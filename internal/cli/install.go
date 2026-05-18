@@ -6,17 +6,34 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/lkshrk/omni/internal/actions"
+	gosync "github.com/lkshrk/omni/internal/sync"
 )
 
 func newInstallCmd(state *rootState) *cobra.Command {
 	var providerName string
+	var group string
+	var force bool
 
 	cmd := &cobra.Command{
-		Use:   "install <tool>",
+		Use:   "install [tool]",
 		Short: actions.MustDescription(actions.ToolInstall),
-		Long:  actions.MustLongDescription(actions.ToolInstall),
-		Args:  cobra.ExactArgs(1),
+		Long: actions.MustLongDescription(actions.ToolInstall) + `
+
+Use --group to install all tools in a named group without requiring
+bootstrap or host assignment:
+
+  omni tools install --group dev-tools --force`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if group != "" {
+				if len(args) > 0 {
+					return fmt.Errorf("--group and <tool> argument are mutually exclusive")
+				}
+				return runInstallGroup(cmd, state, group)
+			}
+			if len(args) == 0 {
+				return fmt.Errorf("tool name is required (or use --group)")
+			}
 			name := args[0]
 			if providerName == "" {
 				settings, err := state.app.LoadSettings()
@@ -51,6 +68,54 @@ func newInstallCmd(state *rootState) *cobra.Command {
 	}
 
 	addProviderFlag(cmd, &providerName, "provider to use; omit to auto-select from priority list")
+	cmd.Flags().StringVar(&group, "group", "", "install all tools in the named group")
+	cmd.Flags().BoolVar(&force, "force", false, "skip bootstrap and host assignment checks")
 	cmd.ValidArgsFunction = completeToolNames(state)
+	_ = cmd.RegisterFlagCompletionFunc("group", completeGroupNames(state))
 	return cmd
+}
+
+func runInstallGroup(cmd *cobra.Command, state *rootState, group string) error {
+	if !state.app.HasConfig() {
+		return fmt.Errorf("no config found; create settings.json first")
+	}
+	opts := gosync.SyncOptions{
+		Group: group,
+		Progress: func(msg string) {
+			fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", msg)
+		},
+		ToolProgress: func(event gosync.ProgressEvent) {
+			if !event.Done {
+				return
+			}
+			if event.Err != nil {
+				fmt.Fprintf(cmd.OutOrStdout(), "  ✗ failed: %s (%s): %v\n", event.Tool.Name, event.Tool.Provider, event.Err)
+				return
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "  ✓ installed: %s (%s)\n", event.Tool.Name, event.Tool.Provider)
+		},
+	}
+	result, err := state.app.Sync(cmd.Context(), opts)
+	if err != nil {
+		return err
+	}
+
+	installed := result.Installed()
+	failed := result.Failed()
+	already := result.Skipped()
+
+	out := cmd.OutOrStdout()
+	if len(installed) > 0 {
+		fmt.Fprintf(out, "\n%d tool(s) installed.\n", len(installed))
+	}
+	if len(already) > 0 {
+		fmt.Fprintf(out, "%d tool(s) already installed.\n", len(already))
+	}
+	if len(failed) > 0 {
+		fmt.Fprintf(out, "%d tool(s) failed.\n", len(failed))
+	}
+	if len(installed) == 0 && len(failed) == 0 && len(already) == 0 {
+		fmt.Fprintln(out, "No tools in group or nothing to install.")
+	}
+	return nil
 }

@@ -3801,6 +3801,96 @@ func TestInstall_WithHost_ExplicitProvider_ReachesInstall(t *testing.T) {
 	_ = cmd.Execute()
 }
 
+// ─── install --group ────────────────────────────────────────────────────────
+
+func TestInstall_Group_NoHostRequired_SyncsGroup(t *testing.T) {
+	// --group + --force should work without any host setup.
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	withConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"git": {Provider: "system", InstallWith: "brew"},
+		},
+		Groups: []*config.GroupConfig{
+			{Name: "devtools", Tools: []config.ToolEntry{{Name: "git"}}},
+		},
+		// Intentionally NO host group and NO Hosts map — no bootstrap done.
+		Hosts: nil,
+	})
+
+	cmd := NewRootCmd()
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir,
+		"tools", "install", "--group", "devtools", "--force"})
+	// The sync may fail at provider level (no brew in test), but the command
+	// must not fail at the host-enforcement gate.
+	err := cmd.Execute()
+	if err != nil && strings.Contains(err.Error(), "run 'omni bootstrap'") {
+		t.Fatalf("--group --force should bypass host check, got: %v", err)
+	}
+}
+
+func TestInstall_Group_UnknownGroup_ReturnsError(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	withConfig(t, cfgPath, &config.RootConfig{})
+	withHost(t, cfgPath)
+
+	cmd := NewRootCmd()
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir,
+		"tools", "install", "--group", "nonexistent"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error for unknown group")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected 'not found', got: %v", err)
+	}
+}
+
+func TestInstall_GroupAndToolArg_ReturnsError(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	withConfig(t, cfgPath, &config.RootConfig{})
+	withHost(t, cfgPath)
+
+	cmd := NewRootCmd()
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir,
+		"tools", "install", "--group", "devtools", "sometool"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when --group and <tool> both provided")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Errorf("expected 'mutually exclusive', got: %v", err)
+	}
+}
+
+func TestInstall_NoArgsNoGroup_ReturnsError(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	withConfig(t, cfgPath, &config.RootConfig{})
+	withHost(t, cfgPath)
+
+	cmd := NewRootCmd()
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir,
+		"tools", "install"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected error when no args and no --group")
+	}
+	if !strings.Contains(err.Error(), "tool name is required") {
+		t.Errorf("expected 'tool name is required', got: %v", err)
+	}
+}
+
 // ─── sync: group positional arg that exists with tools ───────────────────────
 
 func TestSync_DryRun_WithNamedGroupArg(t *testing.T) {

@@ -1,0 +1,38 @@
+# install --group tests: force+group bypasses host check, unknown group errors,
+# mutually-exclusive args, and no-args error.
+
+# Ensure a host so the arg-validation scenarios can reach argument checking
+# (without --group or --force, requireActiveHost runs first).
+exec omni --config settings.json hosts ensure testhost
+
+# ── scenario 1: no args and no --group returns "tool name is required" ────────
+! exec omni --config settings.json tools install
+stderr 'tool name is required'
+
+# ── scenario 2: --group and <tool> together are mutually exclusive ─────────────
+! exec omni --config settings.json tools install ripgrep --group devtools
+stderr 'mutually exclusive'
+
+# ── scenario 3: unknown group name returns "not found" ────────────────────────
+# --force skips host check so no host needed here; the group simply doesn't exist.
+! exec omni --config settings.json tools install --group nonexistent --force
+stderr 'not found'
+
+# ── scenario 4: --group --force with a configured group bypasses host check ───
+# The group exists in config; --force skips requireActiveHost. The syncer
+# reaches the provider stage (brew unavailable in CI) which fails — but the
+# error must be a provider error, never the bootstrap or host-configuration message.
+! exec omni --config settings.json tools install --group devtools --force
+! stderr 'run .omni bootstrap'
+! stderr 'no host configuration'
+
+-- settings.json --
+{
+  "version": 1,
+  "tools": {
+    "ripgrep": { "provider": "system", "install_with": "brew" }
+  },
+  "groups": [
+    { "name": "devtools", "tools": ["ripgrep"] }
+  ]
+}
