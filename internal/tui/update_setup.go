@@ -155,7 +155,12 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 	}
 
 	cmds = append(cmds, m.startPostLoadBackgroundTasks()...)
-	m.beginLaunchBatchIfPending()
+	// Only suppress the dashboard body during the post-bootstrap reload so
+	// the user sees a complete first render after onboarding. On a normal
+	// launch the dashboard renders immediately with per-row loading indicators.
+	if wasSetupReloading {
+		m.beginLaunchBatchIfPending()
+	}
 	m.finishSetupReloadIfIdle()
 	return cmds
 }
