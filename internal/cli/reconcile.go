@@ -71,6 +71,43 @@ func printReconcileSummary(cmd *cobra.Command, result *app.ReconcileResult) {
 		fmt.Fprintf(out, ", %s", result.DotsSkipped)
 	}
 	fmt.Fprintln(out, ".")
+	printReconcileIssues(cmd, result)
+}
+
+func printReconcileIssues(cmd *cobra.Command, result *app.ReconcileResult) {
+	out := cmd.OutOrStdout()
+	var syncFails, upgradeFails int
+	if result.SyncAll != nil {
+		syncFails = len(result.SyncAll.Failures)
+	}
+	if result.UpgradeAll != nil {
+		upgradeFails = len(result.UpgradeAll.Failures)
+	}
+	var dotsConflicts, dotsMissing int
+	for _, e := range result.DotsEntries {
+		switch e.Health {
+		case app.HealthConflict:
+			dotsConflicts++
+		case app.HealthMissing, app.HealthNoSource:
+			dotsMissing++
+		}
+	}
+	if syncFails+upgradeFails+dotsConflicts+dotsMissing == 0 {
+		return
+	}
+	fmt.Fprintln(out, "\nOpen issues:")
+	if syncFails > 0 {
+		fmt.Fprintf(out, "  ⚠ %d tool(s) failed to install\n", syncFails)
+	}
+	if upgradeFails > 0 {
+		fmt.Fprintf(out, "  ⚠ %d tool(s) failed to upgrade\n", upgradeFails)
+	}
+	if dotsConflicts > 0 {
+		fmt.Fprintf(out, "  ⚠ %d dots entry(s) have conflicts\n", dotsConflicts)
+	}
+	if dotsMissing > 0 {
+		fmt.Fprintf(out, "  ⚠ %d dots entry(s) missing or no source\n", dotsMissing)
+	}
 }
 
 func reconcileUpgradeCount(result *app.ReconcileResult) int {

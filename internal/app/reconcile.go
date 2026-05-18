@@ -26,6 +26,7 @@ type ReconcileResult struct {
 	DotsOps       []dots.Op
 	DotsCommitted bool
 	DotsSkipped   string
+	DotsEntries   []DotStatus // post-reconcile dots health snapshot
 }
 
 // Reconcile brings the current host toward the configured desired state:
@@ -77,6 +78,7 @@ func (a *App) Reconcile(ctx context.Context, opts ReconcileOptions) (*ReconcileR
 		errs = append(errs, fmt.Errorf("status dotfiles: %w", err))
 		return result, errors.Join(errs...)
 	}
+	result.DotsEntries = status.Entries
 	if strings.TrimSpace(status.GitStatus) != "" {
 		a.reconcileProgress(opts, "committing dotfiles...")
 		if err := a.DotsCommit(ctx, opts.CommitMessage); err != nil {
