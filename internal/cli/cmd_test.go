@@ -279,18 +279,19 @@ func TestConfirmAction_NoAborts(t *testing.T) {
 	cmd := &cobra.Command{}
 	var out bytes.Buffer
 	cmd.SetOut(&out)
-	cmd.SetIn(strings.NewReader("n\n"))
 
-	ok, err := confirmAction(cmd, &rootState{}, "Delete thing?")
-	if err != nil {
-		t.Fatalf("confirmAction: %v", err)
-	}
-	if ok {
-		t.Fatal("confirmAction returned true for n")
-	}
-	if !strings.Contains(out.String(), "Aborted.") {
-		t.Fatalf("output = %q, want Aborted.", out.String())
-	}
+	withMockStdin(t, "n\n", func() {
+		ok, err := confirmAction(cmd, &rootState{}, "Delete thing?")
+		if err != nil {
+			t.Fatalf("confirmAction: %v", err)
+		}
+		if ok {
+			t.Fatal("confirmAction returned true for n")
+		}
+		if !strings.Contains(out.String(), "Aborted.") {
+			t.Fatalf("output = %q, want Aborted.", out.String())
+		}
+	})
 }
 
 func TestConfirmAction_YesFlagSkipsPrompt(t *testing.T) {
@@ -368,9 +369,8 @@ func TestEnsureDotsStowForCLI_InteractiveInstalls(t *testing.T) {
 	cmd := &cobra.Command{}
 	var out bytes.Buffer
 	cmd.SetOut(&out)
-	cmd.SetIn(strings.NewReader("y\n"))
 
-	withMockTerminal(t, true, func() {
+	withMockStdin(t, "y\n", func() {
 		if err := ensureDotsStowForCLI(cmd, &rootState{app: a}); err != nil {
 			t.Fatalf("ensureDotsStowForCLI: %v", err)
 		}
@@ -3401,15 +3401,12 @@ func TestGroupsDelete_TTYPromptsForMoveTarget(t *testing.T) {
 	})
 	withHost(t, cfgPath)
 
-	withMockTerminal(t, true, func() {
-		withMockStdin(t, "base\n", func() {
-			cmd := NewRootCmd()
-			cmd.SetIn(strings.NewReader("y\n"))
-			cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "groups", "delete", "work"})
-			if err := cmd.Execute(); err != nil {
-				t.Fatalf("groups delete with prompted move target: %v", err)
-			}
-		})
+	withMockStdin(t, "base\ny\n", func() {
+		cmd := NewRootCmd()
+		cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "groups", "delete", "work"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("groups delete with prompted move target: %v", err)
+		}
 	})
 
 	cfg, err := config.Load(cfgPath)
@@ -3440,15 +3437,12 @@ func TestGroupsDelete_TTYPromptsForDeleteTools(t *testing.T) {
 	})
 	withHost(t, cfgPath)
 
-	withMockTerminal(t, true, func() {
-		withMockStdin(t, "DELETE\n", func() {
-			cmd := NewRootCmd()
-			cmd.SetIn(strings.NewReader("y\n"))
-			cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "groups", "delete", "work"})
-			if err := cmd.Execute(); err != nil {
-				t.Fatalf("groups delete with prompted delete-tools: %v", err)
-			}
-		})
+	withMockStdin(t, "DELETE\ny\n", func() {
+		cmd := NewRootCmd()
+		cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "groups", "delete", "work"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("groups delete with prompted delete-tools: %v", err)
+		}
 	})
 
 	cfg, err := config.Load(cfgPath)

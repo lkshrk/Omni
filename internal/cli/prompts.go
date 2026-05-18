@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/charmbracelet/x/term"
 )
 
 // stdinScanner is the shared line-oriented reader for all interactive prompts.
@@ -34,6 +36,55 @@ func defaultStdinIsTerminal() bool {
 	return err == nil && (info.Mode()&os.ModeCharDevice) != 0
 }
 
+// readYesNo reads a single y/n keypress without requiring Enter.
+// Returns (answer, ok). ok is false on read error or non-terminal stdin,
+// in which case the caller should fall back to defaultVal.
+// When stdin is not a terminal, falls back to line-based reading.
+func readYesNo(defaultVal bool) (bool, bool) {
+	fd := os.Stdin.Fd()
+	if !term.IsTerminal(fd) {
+		line, ok := scanLine()
+		if !ok {
+			return defaultVal, false
+		}
+		answer := strings.ToLower(strings.TrimSpace(line))
+		if answer == "" {
+			return defaultVal, true
+		}
+		return answer == "y" || answer == "yes", true
+	}
+
+	oldState, err := term.MakeRaw(fd)
+	if err != nil {
+		// Can't enter raw mode; fall back to line-based input.
+		line, ok := scanLine()
+		if !ok {
+			return defaultVal, false
+		}
+		answer := strings.ToLower(strings.TrimSpace(line))
+		if answer == "" {
+			return defaultVal, true
+		}
+		return answer == "y" || answer == "yes", true
+	}
+	defer func() { _ = term.Restore(fd, oldState) }() // best-effort cleanup
+
+	var buf [1]byte
+	n, err := os.Stdin.Read(buf[:])
+	if err != nil || n == 0 {
+		return defaultVal, false
+	}
+	ch := buf[0]
+	switch {
+	case ch == 3: // Ctrl+C
+		return false, false
+	case ch == '\r' || ch == '\n':
+		return defaultVal, true
+	default:
+		return ch == 'y' || ch == 'Y', true
+	}
+}
+
 func promptText(question, defaultVal string) (string, bool) {
 	if defaultVal != "" {
 		fmt.Printf("%s [%s] ", question, defaultVal)
@@ -51,8 +102,8 @@ func promptText(question, defaultVal string) (string, bool) {
 	return answer, true
 }
 
-// promptYesNo prints question to stdout and reads a yes/no answer from stdin.
-// Returns defaultVal when the user presses enter without typing anything.
+// promptYesNo prints question to stdout and reads a single y/n keypress.
+// Returns defaultVal when the user presses Enter without typing anything.
 // When state.yes is set the prompt is skipped and answered "yes".
 func promptYesNo(state *rootState, question string, defaultVal bool) bool {
 	if state != nil && state.yes {
@@ -63,15 +114,17 @@ func promptYesNo(state *rootState, question string, defaultVal bool) bool {
 		hint = "[Y/n]"
 	}
 	fmt.Printf("%s %s ", question, hint)
-	line, ok := scanLine()
+	yes, ok := readYesNo(defaultVal)
 	if !ok {
+		fmt.Println()
 		return defaultVal
 	}
-	answer := strings.TrimSpace(strings.ToLower(line))
-	if answer == "" {
-		return defaultVal
+	if yes {
+		fmt.Println("y")
+	} else {
+		fmt.Println("n")
 	}
-	return answer == "y" || answer == "yes"
+	return yes
 }
 
 // promptReassignClaimedTools offers to move freshly claimed tools out of the
