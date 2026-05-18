@@ -253,6 +253,10 @@ func newDotsAddCmd(state *rootState) *cobra.Command {
 	cmd.Flags().BoolVar(&adopt, "adopt", false, "Move the existing path into the dots repo")
 	cmd.Flags().StringSliceVar(&ignore, "ignore", nil, "Patterns to ignore within this entry")
 	cmd.Flags().BoolVar(&discovered, "discovered", false, "Add a discovered candidate to config without adopting files")
+	cmd.ValidArgsFunction = func(_ *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+		return nil, cobra.ShellCompDirectiveFilterDirs
+	}
+	_ = cmd.RegisterFlagCompletionFunc("group", completeGroupNames(state))
 	return cmd
 }
 
@@ -348,6 +352,8 @@ func newDotsVariantAddCmd(state *rootState) *cobra.Command {
 	cmd.Flags().StringVar(&host, "host", "", "Host for the variant (default: current host)")
 	cmd.Flags().StringVar(&pkgName, "package", "", "Stow package directory (default: <name>@<host>)")
 	cmd.Flags().BoolVar(&sync, "sync", false, "Sync immediately when the variant belongs to this host")
+	cmd.ValidArgsFunction = completeDotNames(state)
+	_ = cmd.RegisterFlagCompletionFunc("host", completeHostNames(state))
 	return cmd
 }
 
@@ -374,6 +380,8 @@ func newDotsVariantRemoveCmd(state *rootState) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&host, "host", "", "Host for the variant (default: current host)")
+	cmd.ValidArgsFunction = completeDotNames(state)
+	_ = cmd.RegisterFlagCompletionFunc("host", completeHostNames(state))
 	return cmd
 }
 
@@ -437,6 +445,8 @@ func newDotsGroupsCmd(state *rootState) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&moveGroup, "move", "", "Move this dots entry to a group")
 	cmd.Flags().StringSliceVar(&removeGroups, "remove", nil, "Remove this dots entry from a group")
+	cmd.ValidArgsFunction = completeDotNames(state)
+	_ = cmd.RegisterFlagCompletionFunc("move", completeGroupNames(state))
 	return cmd
 }
 
@@ -536,6 +546,7 @@ func newDotsDeleteCmd(state *rootState) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&keepLocal, "keep-local", true, "Keep local files after deleting the repo files")
+	cmd.ValidArgsFunction = completeDotNames(state)
 	return cmd
 }
 
@@ -575,6 +586,7 @@ func newDotsResolveCmd(state *rootState) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&useRepo, "use-repo", false, "Keep the repo version and replace the local target")
 	cmd.Flags().BoolVar(&useLocal, "use-local", false, "Copy the local target into the repo and relink it")
+	cmd.ValidArgsFunction = completeDotNames(state)
 	return cmd
 }
 
@@ -613,11 +625,12 @@ func newDotsIgnoreCmd(state *rootState) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&entry, "entry", false, "Ignore the whole dots entry instead of adding a child pattern")
 	cmd.Flags().StringVar(&path, "path", "", "Path for a new ignored discovery candidate")
+	cmd.ValidArgsFunction = completeDotNames(state)
 	return cmd
 }
 
 func newDotsUnignoreCmd(state *rootState) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "unignore <name> [pattern]",
 		Short: "Include a dots entry or remove one of its ignore patterns",
 		Args:  cobra.RangeArgs(1, 2),
@@ -639,6 +652,8 @@ func newDotsUnignoreCmd(state *rootState) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.ValidArgsFunction = completeDotNames(state)
+	return cmd
 }
 
 // ─── dots list ────────────────────────────────────────────────────────────────
@@ -726,6 +741,7 @@ func newDotsStatusCmd(state *rootState) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&stateFilter, "state", "", "filter by state (synced, missing, broken, conflict, local-only, repo-only, no-source, ignored)")
 	addFormatFlag(cmd, &format, "table", "table", "json")
+	cmd.ValidArgsFunction = completeDotNames(state)
 	return cmd
 }
 

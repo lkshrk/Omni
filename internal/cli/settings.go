@@ -59,7 +59,7 @@ func newSettingsShowCmd(state *rootState) *cobra.Command {
 }
 
 func newSettingsGetCmd(state *rootState) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "get <key>",
 		Short: "Show one effective setting for this host",
 		Args:  cobra.ExactArgs(1),
@@ -72,10 +72,12 @@ func newSettingsGetCmd(state *rootState) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.ValidArgsFunction = completeSettingsKeys(state)
+	return cmd
 }
 
 func newSettingsSetCmd(state *rootState) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "set <key> <value>",
 		Short: "Set an omni setting",
 		Args:  cobra.ExactArgs(2),
@@ -138,6 +140,14 @@ func newSettingsSetCmd(state *rootState) *cobra.Command {
 			return nil
 		},
 	}
+	// complete the key (first arg); value (second arg) is freeform
+	cmd.ValidArgsFunction = func(c *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) == 0 {
+			return completeSettingsKeys(state)(c, args, toComplete)
+		}
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return cmd
 }
 
 func newSettingsDisableProviderCmd(state *rootState) *cobra.Command {

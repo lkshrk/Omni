@@ -73,5 +73,6 @@ Examples:
 
 	addProviderFlag(cmd, &providerName, "provider to use")
 	cmd.Flags().BoolVar(&all, "all", false, actions.MustDescription(actions.ToolUpdateAll))
+	cmd.ValidArgsFunction = completeToolNames(state)
 	return cmd
 }
