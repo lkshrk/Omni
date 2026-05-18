@@ -183,7 +183,8 @@ func Execute() {
 	// non-TUI code paths.
 	go func() {
 		<-ctx.Done()
-		os.Exit(130) // 128 + SIGINT
+		fmt.Fprintln(os.Stderr)
+		os.Exit(0)
 	}()
 
 	root := NewRootCmd()
