@@ -149,7 +149,9 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 
 	m.prepareDotsSnapshotOnLaunch(&cmds)
 
-	if m.settings.DotsRepo != "" && !config.BoolVal(m.settings.DotsDisabled) && !m.dotsLoaded && !m.dotsLoading {
+	skipLaunchDotsSync := m.skipLaunchDotsSyncOnce
+	m.skipLaunchDotsSyncOnce = false
+	if m.settings.DotsRepo != "" && !config.BoolVal(m.settings.DotsDisabled) && !m.dotsLoading && !skipLaunchDotsSync {
 		if m.promptForStowInstall(stowInstallLaunchSync) {
 			return cmds
 		}
@@ -300,6 +302,9 @@ func (m *Model) handleSetupBootstrapDoneMsg(msg setupBootstrapDoneMsg) []tea.Cmd
 	}
 	if msg.message != "" {
 		cmds = append(cmds, setStatus(m, "✓ "+msg.message, false))
+	}
+	if msg.action == "sync-dots" {
+		m.skipLaunchDotsSyncOnce = true
 	}
 	m.finishSetupWithReload(&cmds)
 	return cmds
@@ -613,6 +618,8 @@ func (m *Model) startPostLoadBackgroundTasks() []tea.Cmd {
 
 func (m *Model) setupReloadPending() bool {
 	return m.loading ||
+		m.dotsLoading ||
+		m.dotsPreparing ||
 		len(m.scanningProviders) > 0 ||
 		m.providerSnapshotRefreshing ||
 		m.discoveryRefreshing ||

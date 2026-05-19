@@ -2352,6 +2352,46 @@ func TestHandleToolsLoadedMsg_DotsRepoStartsSyncAll(t *testing.T) {
 	}
 }
 
+func TestHandleToolsLoadedMsg_SkipsLaunchDotsSyncAfterBootstrapDotsSync(t *testing.T) {
+	m, repoDir := newDotsModelForCmds(t)
+	cmds := m.handleSetupBootstrapDoneMsg(setupBootstrapDoneMsg{action: "sync-dots", message: "dotfiles applied"})
+	if !m.skipLaunchDotsSyncOnce {
+		t.Fatal("sync-dots bootstrap should skip the next launch dots sync")
+	}
+	if len(cmds) == 0 {
+		t.Fatal("sync-dots bootstrap should start the post-bootstrap reload")
+	}
+
+	cmds = m.handleToolsLoadedMsg(toolsLoadedMsg{settings: config.Settings{DotsRepo: repoDir}, stowInstalled: true})
+	if m.skipLaunchDotsSyncOnce {
+		t.Fatal("launch dots sync skip should be one-shot")
+	}
+	if !m.dotsPreparing {
+		t.Fatal("dotsPreparing should still start so status is hydrated")
+	}
+	if m.dotsLoading {
+		t.Fatal("dotsLoading should stay false because bootstrap already synced dots")
+	}
+	var sawSnapshot, sawSync bool
+	for _, cmd := range cmds {
+		if cmd == nil {
+			continue
+		}
+		switch cmd().(type) {
+		case dotsPreparedMsg:
+			sawSnapshot = true
+		case dotsSyncedMsg:
+			sawSync = true
+		}
+	}
+	if !sawSnapshot {
+		t.Fatalf("post-bootstrap reload should still dispatch dots snapshot, got %d commands without dotsPreparedMsg", len(cmds))
+	}
+	if sawSync {
+		t.Fatalf("post-bootstrap reload should not repeat dots sync after sync-dots bootstrap")
+	}
+}
+
 func TestHandleToolsLoadedMsg_DotsRepoPromptsForStowBeforeScans(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	m, repoDir := newDotsModelForCmds(t)

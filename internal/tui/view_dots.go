@@ -110,12 +110,14 @@ func dotsEntryMatchesExpanded(m Model, entry app.DotStatus) bool {
 func dotsVisibleRows(m Model) []dotsVisibleRow {
 	entries := filteredDotsEntries(m)
 	rows := make([]dotsVisibleRow, 0, len(entries))
-	for _, entry := range entries {
-		rows = append(rows, dotsVisibleRow{entry: entry})
-		if !dotsEntryMatchesExpanded(m, entry) {
-			continue
+	for _, section := range dotsSections(entries) {
+		for _, entry := range section.entries {
+			rows = append(rows, dotsVisibleRow{entry: entry})
+			if !dotsEntryMatchesExpanded(m, entry) {
+				continue
+			}
+			rows = appendDotsChildRows(m, rows, entry, entry.Children)
 		}
-		rows = appendDotsChildRows(m, rows, entry, entry.Children)
 	}
 	return rows
 }
@@ -303,7 +305,8 @@ func renderDots(m Model) string {
 	var renderChildRows func(e app.DotStatus, children []app.DotChild)
 	renderChildRows = func(e app.DotStatus, children []app.DotChild) {
 		for _, child := range children {
-			childStatus, childStatusStyle := dotChildStatusDisplay(p, child, dotStatusState(e))
+			parentState := dotStatusState(e)
+			childStatus, childStatusStyle := dotChildStatusDisplay(p, child, parentState)
 			if inIgnoredSection && !child.Ignored {
 				childStatus = "-"
 				childStatusStyle = p.styleHelp
@@ -321,6 +324,7 @@ func renderDots(m Model) string {
 					nameStyle.Render(childName) +
 					targetStyle.Render(nameTargetGap+childTarget)
 			}
+			childIconStyle, childNameStyle, childTargetStyle := dotChildRowStyles(p, child, parentState, inIgnoredSection)
 			if childIgnoreConfirm {
 				buf.markCursor()
 				left := childLeft(p.styleIgnored.Bold(true), p.styleActiveText, p.styleHelp.Bold(true), "↳", childName, childTargetPadded)
@@ -329,7 +333,7 @@ func renderDots(m Model) string {
 				buf.markCursorEnd()
 			} else if isChildCursor {
 				buf.markCursor()
-				left := childLeft(p.styleHelp.Bold(true), p.styleActiveText, p.styleHelp.Bold(true), "↳", childName, childTargetPadded)
+				left := childLeft(childIconStyle.Bold(true), p.styleActiveText, childTargetStyle.Bold(true), "↳", childName, childTargetPadded)
 				write(renderDotsRow(true, left, childRight) + "\n")
 				if hints := renderDotsContextHints(m, hintCtxDotsRow, hintPrefix, m.width); hints != "" {
 					write(hints + "\n")
@@ -337,11 +341,8 @@ func renderDots(m Model) string {
 				} else {
 					buf.markCursorEnd()
 				}
-			} else if inIgnoredSection && child.Ignored {
-				left := childLeft(p.styleHelp, p.styleNormal, p.styleHelp, "↳", childName, childTargetPadded)
-				write(renderDotsRow(false, left, childRight) + "\n")
 			} else {
-				left := childLeft(p.styleHelp, p.styleHelp, p.styleHelp, "↳", childName, childTargetPadded)
+				left := childLeft(childIconStyle, childNameStyle, childTargetStyle, "↳", childName, childTargetPadded)
 				write(renderDotsRow(false, left, childRight) + "\n")
 			}
 			rowIndex++
@@ -636,12 +637,37 @@ func dotChildStatusDisplay(p palette, child app.DotChild, parentState app.DotSta
 	if child.Ignored {
 		return "ignored", p.styleIgnored
 	}
-	state := parentState
-	if child.State != "" {
-		state = child.State
-	}
+	state := dotChildStateForDisplay(child, parentState)
 	_, _, label := dotStateDisplay(p, state)
 	return label, dotStatusTextStyle(p, state)
+}
+
+func dotChildStateForDisplay(child app.DotChild, parentState app.DotState) app.DotState {
+	if child.Ignored {
+		return app.DotStateIgnored
+	}
+	if child.State != "" {
+		return child.State
+	}
+	return parentState
+}
+
+func dotChildRowStyles(p palette, child app.DotChild, parentState app.DotState, inIgnoredSection bool) (lipgloss.Style, lipgloss.Style, lipgloss.Style) {
+	if inIgnoredSection && !child.Ignored {
+		return p.styleHelp, p.styleHelp, p.styleHelp
+	}
+	state := dotChildStateForDisplay(child, parentState)
+	iconStyle := dotStatusTextStyle(p, state)
+	var nameStyle lipgloss.Style
+	switch state {
+	case app.DotStateSynced:
+		nameStyle = p.styleNormal
+	case app.DotStateNoSource:
+		nameStyle = p.styleHelp
+	default:
+		nameStyle = dotStatusTextStyle(p, state)
+	}
+	return iconStyle, nameStyle, p.styleHelp
 }
 
 const (

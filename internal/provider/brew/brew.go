@@ -114,16 +114,17 @@ type brewCaskInfo struct {
 	Artifacts []map[string]json.RawMessage `json:"artifacts"`
 }
 
-// ListInstalled returns explicitly installed formulae and all installed casks.
-// It avoids `brew info --json=v2 --installed` because that command can emit
-// megabytes of JSON and dominate startup refreshes on cask-heavy systems.
+// ListInstalled returns explicitly installed formulae for import/discovery.
+// Casks are intentionally excluded here so ordinary macOS apps do not get
+// claimed as tools; InstalledMap/OutdatedMap still include casks for tracked
+// cask status and updates.
 func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.listInstalled(ctx)
+	return p.installedFormulae(ctx)
 }
 
-func (p *Provider) listInstalled(ctx context.Context) ([]provider.InstalledTool, error) {
+func (p *Provider) installedStatusTools(ctx context.Context) ([]provider.InstalledTool, error) {
 	formulae, err := p.installedFormulae(ctx)
 	if err != nil {
 		return nil, err
@@ -142,7 +143,7 @@ func (p *Provider) listInstalled(ctx context.Context) ([]provider.InstalledTool,
 func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	tools, err := p.listInstalled(ctx)
+	tools, err := p.installedStatusTools(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -100,6 +100,7 @@ package tui
 //  UC-73  dotsFixedMsg clears overwriteIdx
 
 import (
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -2940,16 +2941,30 @@ func TestFlow_UC62_DiscoveredRefreshedMsg(t *testing.T) {
 // ── UC-63 descRefreshDoneMsg ──────────────────────────────────────────────────
 
 func TestFlow_UC63_DescRefreshDoneMsg(t *testing.T) {
-	got := drive(baseModel(nil), descRefreshDoneMsg{tools: threeTools()})
+	refreshedDiscovered := []*database.ToolCache{{
+		Name:        "playwright",
+		Provider:    "node",
+		Installed:   true,
+		Tracked:     false,
+		Description: sql.NullString{String: "browser automation", Valid: true},
+	}}
+	got := drive(baseModel(nil), descRefreshDoneMsg{tools: threeTools(), discovered: refreshedDiscovered})
 	if len(got.allTools) != 3 {
 		t.Errorf("allTools = %d, want 3 after descRefreshDoneMsg", len(got.allTools))
 	}
+	if len(got.discoveredTools) != 1 || got.discoveredTools[0].Description.String != "browser automation" {
+		t.Fatalf("discoveredTools = %+v, want refreshed discovered descriptions", got.discoveredTools)
+	}
 
 	m := baseModel([]*database.ToolCache{{Name: "fresh", Provider: "brew"}})
+	m.discoveredTools = []*database.ToolCache{{Name: "old-orphan", Provider: "brew"}}
 	m.descRefreshGen = 2
-	got = drive(m, descRefreshDoneMsg{gen: 1, tools: threeTools()})
+	got = drive(m, descRefreshDoneMsg{gen: 1, tools: threeTools(), discovered: refreshedDiscovered})
 	if len(got.allTools) != 1 || got.allTools[0].Name != "fresh" {
 		t.Fatalf("stale descRefreshDoneMsg replaced allTools with %+v", got.allTools)
+	}
+	if len(got.discoveredTools) != 1 || got.discoveredTools[0].Name != "old-orphan" {
+		t.Fatalf("stale descRefreshDoneMsg replaced discoveredTools with %+v", got.discoveredTools)
 	}
 
 	m = baseModel([]*database.ToolCache{{Name: "fresh", Provider: "brew"}})

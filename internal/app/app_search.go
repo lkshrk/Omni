@@ -87,19 +87,19 @@ type ToolListItem struct {
 }
 
 func (a *App) ListTools(ctx context.Context, providerFilter string) ([]*database.ToolCache, error) {
-	ignored := a.ignoredToolSetBestEffort()
-	if providerFilter != "" {
-		tools, err := a.readDB().ListByProvider(ctx, providerFilter)
-		if err != nil {
-			return nil, err
-		}
-		return filterIgnoredToolCaches(tools, ignored), nil
+	cfg, cfgErr := a.loadConfig()
+	ecosystemProviders := map[string]string(nil)
+	if cfgErr == nil {
+		ecosystemProviders = a.ResolvedEcosystemProviders(ctx)
 	}
-	tools, err := a.readDB().List(ctx)
+	tools, err := a.listToolsFromConfig(ctx, cfg, providerFilter, ecosystemProviders)
 	if err != nil {
 		return nil, err
 	}
-	return filterIgnoredToolCaches(tools, ignored), nil
+	if cfgErr != nil {
+		return filterIgnoredToolCaches(tools, nil), nil
+	}
+	return tools, nil
 }
 
 func (a *App) ConfiguredProviders(ctx context.Context) ([]string, error) {
@@ -181,7 +181,12 @@ func toolMembershipMapFromResolved(resolved []resolvedTool) map[string][]string 
 }
 
 func (a *App) QueryTools(ctx context.Context, opts ToolListOptions) ([]ToolListItem, error) {
-	tools, err := a.ListTools(ctx, "")
+	cfg, err := a.loadConfig()
+	if err != nil {
+		return nil, err
+	}
+	resolvedProviders := a.ResolvedEcosystemProviders(ctx)
+	tools, err := a.listToolsFromConfig(ctx, cfg, "", resolvedProviders)
 	if err != nil {
 		return nil, err
 	}
@@ -193,11 +198,6 @@ func (a *App) QueryTools(ctx context.Context, opts ToolListOptions) ([]ToolListI
 			}
 		}
 		tools = filtered
-	}
-
-	cfg, err := a.loadConfig()
-	if err != nil {
-		return nil, err
 	}
 	groups := cfg.Groups
 	if opts.Host != "" {
@@ -234,7 +234,6 @@ func (a *App) QueryTools(ctx context.Context, opts ToolListOptions) ([]ToolListI
 	}
 
 	ignoreSet := ignoredToolSet(cfg)
-	resolvedProviders := a.ResolvedEcosystemProviders(ctx)
 	stateFilter, err := normalizeToolState(opts.State)
 	if err != nil {
 		return nil, err
@@ -1042,14 +1041,17 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 		configuredNames[name] = struct{}{}
 	}
 
-	// Build reverse ecosystem map (concrete → ecosystem) so discovered tools get
-	// the ecosystem provider name as their config provider label.
+	// Build ecosystem maps so discovered tools get the ecosystem provider name
+	// as their config provider label while scope checks can use the resolved
+	// concrete manager for default ecosystem tools.
 	stop := profile.Start("app.refresh.discovered.resolve_ecosystems")
-	revEcosystem := make(map[string]string)
-	for eco, concrete := range a.ResolvedEcosystemProviders(ctx) {
-		revEcosystem[concrete] = eco
-	}
+	ecosystemProviders := a.ResolvedEcosystemProviders(ctx)
+	revEcosystem := reverseEcosystemProviders(ecosystemProviders)
 	stop()
+	scope := a.discoveryProviderScope(ctx, cfg, ecosystemProviders)
+	if scope.empty() {
+		return nil
+	}
 
 	// Collect discovered upserts across all available providers. Providers are
 	// processed serially after the availability pass, so no lock is needed.
@@ -1059,7 +1061,7 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 	providers := make([]provider.Provider, 0)
 	stop = profile.Start("app.refresh.discovered.available_providers")
 	for _, p := range a.availableProviders(ctx) {
-		if !a.registry.ImportSkipsProvider(p.Name()) {
+		if !a.registry.ImportSkipsProvider(p.Name()) && a.discoveryProviderAllowed(p, revEcosystem, scope) {
 			providers = append(providers, p)
 		}
 	}
@@ -1069,10 +1071,7 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 			progress(RefreshDiscoveredProgressEvent{Provider: p.Name(), Index: i + 1, Total: len(providers)})
 		}
 
-		configProvider := p.Name()
-		if eco, ok := revEcosystem[p.Name()]; ok {
-			configProvider = eco
-		}
+		configProvider := discoveryConfigProvider(p.Name(), revEcosystem, scope)
 
 		// MultiManagerBulkChecker path: probe all backends to get per-tool
 		// concrete-manager attribution (e.g. pnpm vs npm vs bun).
@@ -1083,6 +1082,9 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 			}
 			for name, entry := range entries {
 				if _, ok := configuredNames[name]; ok {
+					continue
+				}
+				if !scope.allowsDiscovered(configProvider, entry.ConcreteManager) {
 					continue
 				}
 				discovered = append(discovered, database.DiscoveredUpsert{
@@ -1104,6 +1106,9 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 			if _, ok := configuredNames[t.Name]; ok {
 				continue // already in config; skip
 			}
+			if !scope.allowsDiscovered(configProvider, p.Name()) {
+				continue
+			}
 			discovered = append(discovered, database.DiscoveredUpsert{
 				Name:          t.Name,
 				Provider:      configProvider,
@@ -1118,11 +1123,207 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 // ListDiscovered returns all tool entries that are installed locally but not
 // declared in config (tracked=false).
 func (a *App) ListDiscovered(ctx context.Context) ([]*database.ToolCache, error) {
+	cfg, err := a.loadConfig()
+	if err != nil {
+		return nil, err
+	}
+	return a.listDiscoveredFromConfig(ctx, cfg, a.ResolvedEcosystemProviders(ctx))
+}
+
+func (a *App) listDiscoveredFromConfig(ctx context.Context, cfg *config.RootConfig, ecosystemProviders map[string]string) ([]*database.ToolCache, error) {
 	discovered, err := a.readDB().ListDiscovered(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return filterIgnoredToolCaches(discovered, a.ignoredToolSetBestEffort()), nil
+	scope := a.discoveryProviderScope(ctx, cfg, ecosystemProviders)
+	discovered = filterDiscoveredByScope(discovered, scope)
+	return filterIgnoredToolCaches(discovered, ignoredToolSet(cfg)), nil
+}
+
+func (a *App) listToolsFromConfig(ctx context.Context, cfg *config.RootConfig, providerFilter string, ecosystemProviders map[string]string) ([]*database.ToolCache, error) {
+	var (
+		tools []*database.ToolCache
+		err   error
+	)
+	if providerFilter != "" {
+		tools, err = a.readDB().ListByProvider(ctx, providerFilter)
+	} else {
+		tools, err = a.readDB().List(ctx)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if cfg == nil {
+		return tools, nil
+	}
+	scope := a.discoveryProviderScope(ctx, cfg, ecosystemProviders)
+	tools = filterUntrackedToolCachesByScope(tools, scope)
+	return filterIgnoredToolCaches(tools, ignoredToolSet(cfg)), nil
+}
+
+type discoveryScope struct {
+	providers map[string]struct{}
+	managers  map[string]struct{}
+}
+
+func (s discoveryScope) empty() bool {
+	return len(s.providers) == 0 && len(s.managers) == 0
+}
+
+func (s discoveryScope) hasProvider(name string) bool {
+	_, ok := s.providers[name]
+	return ok
+}
+
+func (s discoveryScope) hasManager(name string) bool {
+	_, ok := s.managers[name]
+	return ok
+}
+
+func (s discoveryScope) allowsDiscovered(configProvider, installedWith string) bool {
+	if s.empty() {
+		return false
+	}
+	if configProvider != "" && !s.hasProvider(configProvider) && !s.hasManager(configProvider) {
+		return false
+	}
+	if installedWith == "" {
+		return false
+	}
+	if installedWith == configProvider {
+		return true
+	}
+	return s.hasManager(installedWith) || s.hasProvider(installedWith)
+}
+
+func (a *App) discoveryProviderScope(ctx context.Context, cfg *config.RootConfig, ecosystemProviders map[string]string) discoveryScope {
+	scope := discoveryScope{
+		providers: make(map[string]struct{}),
+		managers:  make(map[string]struct{}),
+	}
+	add := func(t config.ToolEntry) {
+		if t.Provider != "" {
+			scope.providers[t.Provider] = struct{}{}
+		}
+		if t.InstallWith != "" {
+			scope.managers[t.InstallWith] = struct{}{}
+		}
+		if opProvider := a.operationProviderName(t); opProvider != "" && opProvider != t.Provider {
+			scope.managers[opProvider] = struct{}{}
+		}
+		if t.InstallWith == "" {
+			if concrete := ecosystemProviders[t.Provider]; concrete != "" {
+				scope.managers[concrete] = struct{}{}
+			}
+		}
+	}
+	seen := make(map[string]struct{})
+	for _, group := range cfg.Groups {
+		if group == nil {
+			continue
+		}
+		for _, membership := range group.Tools {
+			if membership.Name == "" {
+				continue
+			}
+			if _, ok := seen[membership.Name]; ok {
+				continue
+			}
+			seen[membership.Name] = struct{}{}
+			spec, ok := cfg.Tools[membership.Name]
+			if !ok {
+				continue
+			}
+			for _, install := range discoveryScopeInstallSpecs(spec) {
+				add(spec.ToToolEntry(membership.Name, install))
+			}
+		}
+	}
+	return scope
+}
+
+func discoveryScopeInstallSpecs(spec config.ToolSpec) []config.ToolInstallSpec {
+	hostname := currentHostname()
+	if install, ok := spec.Hosts[hostname]; ok {
+		return []config.ToolInstallSpec{install}
+	}
+	if short := shortHostname(hostname); short != hostname {
+		if install, ok := spec.Hosts[short]; ok {
+			return []config.ToolInstallSpec{install}
+		}
+	}
+	specs := make([]config.ToolInstallSpec, 0, 1+len(spec.Variants))
+	specs = append(specs, spec.DefaultInstallSpec())
+	specs = append(specs, spec.Variants...)
+	return specs
+}
+
+func (a *App) discoveryProviderAllowed(p provider.Provider, ecosystemMap map[string]string, scope discoveryScope) bool {
+	name := p.Name()
+	if scope.hasProvider(name) {
+		return true
+	}
+	if scope.hasManager(name) {
+		if ecosystem, ok := a.registry.EcosystemFor(name); ok && ecosystem != name && scope.hasProvider(ecosystem) {
+			if _, ecosystemRegistered := a.registry.Get(ecosystem); ecosystemRegistered && !a.registry.ImportSkipsProvider(ecosystem) {
+				return false
+			}
+		}
+		return true
+	}
+	if ecosystem, ok := ecosystemMap[name]; ok {
+		return scope.hasProvider(ecosystem) && scope.hasManager(name)
+	}
+	return false
+}
+
+func discoveryConfigProvider(providerName string, ecosystemMap map[string]string, scope discoveryScope) string {
+	if ecosystem, ok := ecosystemMap[providerName]; ok && scope.hasProvider(ecosystem) {
+		return ecosystem
+	}
+	return providerName
+}
+
+func filterDiscoveredByScope(discovered []*database.ToolCache, scope discoveryScope) []*database.ToolCache {
+	if scope.empty() {
+		return nil
+	}
+	out := discovered[:0]
+	for _, tool := range discovered {
+		if tool == nil {
+			continue
+		}
+		if scope.allowsDiscovered(tool.Provider, tool.InstalledWith) {
+			out = append(out, tool)
+		}
+	}
+	return out
+}
+
+func filterUntrackedToolCachesByScope(tools []*database.ToolCache, scope discoveryScope) []*database.ToolCache {
+	if len(tools) == 0 {
+		return tools
+	}
+	out := tools[:0]
+	for _, tool := range tools {
+		if tool == nil {
+			continue
+		}
+		if tool.Tracked || scope.allowsDiscovered(tool.Provider, tool.InstalledWith) {
+			out = append(out, tool)
+		}
+	}
+	return out
+}
+
+func reverseEcosystemProviders(ecosystemProviders map[string]string) map[string]string {
+	rev := make(map[string]string, len(ecosystemProviders))
+	for ecosystem, concrete := range ecosystemProviders {
+		if concrete != "" {
+			rev[concrete] = ecosystem
+		}
+	}
+	return rev
 }
 
 func (a *App) reconcileResolvedTools(ctx context.Context, tools []config.ToolEntry) error {
