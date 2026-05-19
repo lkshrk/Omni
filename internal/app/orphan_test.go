@@ -444,7 +444,10 @@ func TestSyncAll_DryRunDiscoversWithoutWritingDB(t *testing.T) {
 		},
 	}
 	a, cfgPath := newImportApp(t, brew)
-	if err := saveAppConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{testHostGroup()}}); err != nil {
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools:  logicalToolSpecs(logicalTool("ripgrep", "brew")),
+		Groups: []*config.GroupConfig{testHostToolGroup("ripgrep")},
+	}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
 

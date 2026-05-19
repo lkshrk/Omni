@@ -50,8 +50,12 @@ func (a *App) StartupSnapshot(ctx context.Context) (*StartupSnapshot, error) {
 		return nil, err
 	}
 
+	stop = profile.Start("app.startup.ecosystem_providers")
+	ecosystemProviders := a.ResolvedEcosystemProviders(ctx)
+	stop()
+
 	stop = profile.Start("app.startup.list_tools")
-	tools, err := a.ListTools(ctx, "")
+	tools, err := a.listToolsFromConfig(ctx, cfg, "", ecosystemProviders)
 	stop()
 	if err != nil {
 		return nil, err
@@ -99,11 +103,7 @@ func (a *App) StartupSnapshot(ctx context.Context) (*StartupSnapshot, error) {
 	stop()
 
 	stop = profile.Start("app.startup.list_discovered")
-	discovered, _ := a.ListDiscovered(ctx)
-	stop()
-
-	stop = profile.Start("app.startup.ecosystem_providers")
-	ecosystemProviders := a.ResolvedEcosystemProviders(ctx)
+	discovered, _ := a.listDiscoveredFromConfig(ctx, cfg, ecosystemProviders)
 	stop()
 
 	stop = profile.Start("app.startup.stow_installed")

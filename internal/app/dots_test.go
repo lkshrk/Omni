@@ -2221,16 +2221,19 @@ func TestDotsList_FileCountAndChildrenSkipIgnoredPaths(t *testing.T) {
 		t.Fatalf("counts = %#v, want %#v", statuses[0].Counts, want)
 	}
 	childNames := make([]string, 0, len(statuses[0].Children))
-	ignoredChildren := make(map[string]bool)
+	childByName := make(map[string]app.DotChild)
 	for _, child := range statuses[0].Children {
 		childNames = append(childNames, child.Name)
-		ignoredChildren[child.Name] = child.Ignored
+		childByName[child.Name] = child
 	}
 	if !reflect.DeepEqual(childNames, []string{"lua", "node_modules", "init.lua"}) {
-		t.Fatalf("children = %v, want direct children only", childNames)
+		t.Fatalf("children = %v, want full direct child tree", childNames)
 	}
-	if !ignoredChildren["node_modules"] {
-		t.Fatalf("node_modules child should be listed as ignored: %#v", statuses[0].Children)
+	if childByName["lua"].Ignored || childByName["init.lua"].Ignored {
+		t.Fatalf("tracked direct children should not be marked ignored: %#v", statuses[0].Children)
+	}
+	if child := childByName["node_modules"]; !child.Ignored || child.State != app.DotStateIgnored {
+		t.Fatalf("ignored direct child should stay in the full tree as ignored, got: %#v", child)
 	}
 	result, err := a.DiscoverDotsStatus(context.Background())
 	if err != nil {
@@ -2249,6 +2252,22 @@ func TestDotsList_FileCountAndChildrenSkipIgnoredPaths(t *testing.T) {
 	if len(mergedIgnored.Children) == 0 {
 		t.Fatal("merged ignored nvim entry has no children tree")
 	}
+	if !dotChildTreeHasRel(mergedIgnored.Children, "node_modules") {
+		t.Fatalf("merged ignored nvim entry should contain node_modules: %#v", mergedIgnored.Children)
+	}
+}
+
+func dotChildTreeHasRel(children []app.DotChild, rel string) bool {
+	rel = filepath.ToSlash(rel)
+	for _, child := range children {
+		if filepath.ToSlash(child.RelPath) == rel {
+			return true
+		}
+		if dotChildTreeHasRel(child.Children, rel) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestDotsList_ClaudeAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *testing.T) {
@@ -2292,7 +2311,7 @@ func TestDotsList_ClaudeAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *tes
 		}
 	}
 
-	assertMergedIgnoredEntry := func(result *app.DotsStatusResult) {
+	assertMergedIgnoredEntry := func(result *app.DotsStatusResult) *app.DotStatus {
 		t.Helper()
 		var found *app.DotStatus
 		for i := range result.Entries {
@@ -2313,6 +2332,7 @@ func TestDotsList_ClaudeAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *tes
 		if len(found.Children) == 0 {
 			t.Fatal("merged ignored entry 'claude' has no children tree")
 		}
+		return found
 	}
 	discovered, err := a.DiscoverDotsStatus(context.Background())
 	if err != nil {
@@ -2357,7 +2377,7 @@ func TestDotsList_ClaudeAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *tes
 	for _, rel := range []string{"history.jsonl", "projects", "skills"} {
 		ignored, ok := childIgnored[rel]
 		if !ok || !ignored {
-			t.Fatalf("%s should be listed as ignored: %#v", rel, statuses[0].Children)
+			t.Fatalf("%s should remain in the full Claude child tree as ignored: %#v", rel, statuses[0].Children)
 		}
 	}
 
@@ -2365,7 +2385,12 @@ func TestDotsList_ClaudeAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *tes
 	if err != nil {
 		t.Fatalf("DiscoverDotsStatus: %v", err)
 	}
-	assertMergedIgnoredEntry(result)
+	mergedIgnored := assertMergedIgnoredEntry(result)
+	for _, rel := range []string{"history.jsonl", "projects", "skills"} {
+		if !dotChildTreeHasRel(mergedIgnored.Children, rel) {
+			t.Fatalf("%s should be listed in the merged ignored Claude tree: %#v", rel, mergedIgnored.Children)
+		}
+	}
 }
 
 func TestDotsList_CodexAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *testing.T) {
@@ -2404,7 +2429,7 @@ func TestDotsList_CodexAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *test
 		}
 	}
 
-	assertMergedIgnoredEntry := func(result *app.DotsStatusResult) {
+	assertMergedIgnoredEntry := func(result *app.DotsStatusResult) *app.DotStatus {
 		t.Helper()
 		var found *app.DotStatus
 		for i := range result.Entries {
@@ -2425,6 +2450,7 @@ func TestDotsList_CodexAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *test
 		if len(found.Children) == 0 {
 			t.Fatal("merged ignored entry 'codex' has no children tree")
 		}
+		return found
 	}
 	discovered, err := a.DiscoverDotsStatus(context.Background())
 	if err != nil {
@@ -2464,7 +2490,7 @@ func TestDotsList_CodexAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *test
 	for _, rel := range []string{"history.jsonl", "sessions", "tmp.json", "skills"} {
 		ignored, ok := childIgnored[rel]
 		if !ok || !ignored {
-			t.Fatalf("%s should be listed as ignored: %#v", rel, statuses[0].Children)
+			t.Fatalf("%s should remain in the full Codex child tree as ignored: %#v", rel, statuses[0].Children)
 		}
 	}
 
@@ -2472,7 +2498,12 @@ func TestDotsList_CodexAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *test
 	if err != nil {
 		t.Fatalf("DiscoverDotsStatus: %v", err)
 	}
-	assertMergedIgnoredEntry(result)
+	mergedIgnored := assertMergedIgnoredEntry(result)
+	for _, rel := range []string{"history.jsonl", "sessions", "tmp.json", "skills"} {
+		if !dotChildTreeHasRel(mergedIgnored.Children, rel) {
+			t.Fatalf("%s should be listed in the merged ignored Codex tree: %#v", rel, mergedIgnored.Children)
+		}
+	}
 }
 
 func TestDotsSync_LocalOnlyDirectorySkipsSocketFiles(t *testing.T) {

@@ -231,7 +231,6 @@ func TestListInstalled(t *testing.T) {
 	p, _ := newBrew(
 		executor.MockCall{Stdout: "git\nnode\nripgrep\n"},
 		executor.MockCall{Stdout: "git 2.43.0\nnode 21.5.0\nripgrep 14.1.1\n"},
-		executor.MockCall{},
 	)
 	tools, err := p.ListInstalled(context.Background())
 	if err != nil {
@@ -249,7 +248,6 @@ func TestListInstalled_TapPackage(t *testing.T) {
 	p, _ := newBrew(
 		executor.MockCall{Stdout: "git\nhashicorp/tap/terraform\n"},
 		executor.MockCall{Stdout: "git 2.43.0\nhashicorp/tap/terraform 1.7.5\n"},
-		executor.MockCall{},
 	)
 	tools, err := p.ListInstalled(context.Background())
 	if err != nil {
@@ -548,13 +546,10 @@ func TestInstalledMap_Error(t *testing.T) {
 	}
 }
 
-func TestListInstalled_ReturnsFormulaeAndCasks(t *testing.T) {
-	caskInfo := `{"formulae":[],"casks":[{"token":"iterm2","installed":"3.4.23"}]}`
+func TestListInstalled_ReturnsFormulaeOnly(t *testing.T) {
 	p, _ := newBrew(
 		executor.MockCall{Stdout: "homebrew/core/git\nasmvik/formulae/yabai\n"},
 		executor.MockCall{Stdout: "homebrew/core/git 2.43.0\nasmvik/formulae/yabai 7.1.0\n"},
-		executor.MockCall{Stdout: "iterm2\n"},
-		executor.MockCall{Stdout: caskInfo},
 	)
 	got, err := p.ListInstalled(context.Background())
 	if err != nil {
@@ -570,8 +565,8 @@ func TestListInstalled_ReturnsFormulaeAndCasks(t *testing.T) {
 	if byName["yabai"].Package != "asmvik/formulae/yabai" || byName["yabai"].Version != "7.1.0" {
 		t.Fatalf("yabai = %+v, want tap-qualified package and version", byName["yabai"])
 	}
-	if byName["iterm2"].Package != "iterm2" || byName["iterm2"].Version != "3.4.23" {
-		t.Fatalf("iterm2 = %+v, want cask token package and version", byName["iterm2"])
+	if _, ok := byName["iterm2"]; ok {
+		t.Fatalf("ListInstalled included cask iterm2: %+v", byName["iterm2"])
 	}
 }
 

@@ -432,6 +432,9 @@ func renderDotsHeaderInfo(m Model) string {
 	if ignored := dotIgnoredText(counts); ignored != "" {
 		parts = append(parts, ignored)
 	}
+	if strings.TrimSpace(m.dotsGitStatus) != "" {
+		parts = append(parts, m.palette.styleOutdated.Render("dirty"))
+	}
 	return renderHeaderInfoText(p, strings.Join(parts, " "))
 }
 

@@ -634,14 +634,14 @@ func TestRenderHeader_DotsDisabledShowsNoInfo(t *testing.T) {
 	}
 }
 
-func TestRenderHeader_DotsGitStatusDoesNotShowDirty(t *testing.T) {
+func TestRenderHeader_DotsGitStatusShowsDirty(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.dotsGitStatus = "M .zshrc"
 	m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}}}
 	out := stripANSIEscapeSequences(renderHeader(m))
-	if strings.Contains(out, "dirty") {
-		t.Errorf("dots git status belongs outside header summary, got: %q", out)
+	if !strings.Contains(out, "dirty") {
+		t.Errorf("expected dirty dots repo in header summary, got: %q", out)
 	}
 	if !strings.Contains(out, "1/1") {
 		t.Errorf("expected synced dots count summary, got: %q", out)
@@ -4023,6 +4023,21 @@ func TestRenderToolRow_StatusColorStaysOnIcon(t *testing.T) {
 	}
 	if !strings.Contains(out, p.styleNormal.Render("git")) {
 		t.Fatalf("row should render installed tool name with normal text style, got: %q", out)
+	}
+}
+
+func TestRenderToolRow_OrphanUsesOrphanIconColor(t *testing.T) {
+	p := defaultPalette()
+	tool := &database.ToolCache{Name: "utm", Provider: "system", Installed: true, InstalledWith: "brew", Tracked: false}
+	cols := colWidths{name: 20, prov: 10, screenW: 120}
+
+	out := renderToolRow(p, tool, cols, "", "", "brew", "", "", false, false, syncOrphan)
+
+	if !strings.Contains(out, p.styleOrphan.Render(iconOrphan)) {
+		t.Fatalf("orphan row should color orphan icon, got: %q", out)
+	}
+	if strings.Contains(out, p.styleInstalled.Render(iconInstalled)) {
+		t.Fatalf("orphan row should not render as a normal installed row, got: %q", out)
 	}
 }
 
