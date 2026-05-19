@@ -23,8 +23,17 @@ func (m *Model) handleDescRefreshDoneMsg(msg descRefreshDoneMsg) tea.Cmd {
 		}
 		return setStatus(m, status, true)
 	}
+	changed := false
 	if msg.tools != nil {
 		m.allTools = msg.tools
+		changed = true
+	}
+	if msg.discovered != nil {
+		m.discoveredTools = msg.discovered
+		m.rebuildDiscoveredKeys()
+		changed = true
+	}
+	if changed {
 		m.applyFilter()
 	}
 	m.finishSetupReloadIfIdle()

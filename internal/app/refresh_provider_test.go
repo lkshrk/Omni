@@ -764,9 +764,18 @@ func TestRefreshDiscovered_PopulatesDB(t *testing.T) {
 		stubProvider: stubProvider{name: "brew", available: true},
 		installed: []provider.InstalledTool{
 			{Tool: provider.Tool{Name: "ripgrep", Provider: "brew"}, Version: "14.1.0"},
+			{Tool: provider.Tool{Name: "git", Provider: "brew"}, Version: "2.45.0"},
 		},
 	}
-	a, _ := newImportApp(t, prov)
+	a, cfgPath := newImportApp(t, prov)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("git", "brew")),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("git"),
+		}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
 
 	if err := a.RefreshDiscovered(context.Background()); err != nil {
 		t.Fatalf("RefreshDiscovered: %v", err)
@@ -797,7 +806,15 @@ func TestRefreshDiscovered_MetaMappedToolKeepsConcreteInstalledWith(t *testing.T
 		},
 		concreteName: "brew",
 	}
-	a, _ := newImportApp(t, brew, system)
+	a, cfgPath := newImportApp(t, brew, system)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("git", "system")),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("git"),
+		}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
 
 	if err := a.RefreshDiscovered(context.Background()); err != nil {
 		t.Fatalf("RefreshDiscovered: %v", err)
@@ -815,6 +832,43 @@ func TestRefreshDiscovered_MetaMappedToolKeepsConcreteInstalledWith(t *testing.T
 	}
 	if discovered[0].InstalledWith != "brew" {
 		t.Fatalf("InstalledWith = %q, want brew", discovered[0].InstalledWith)
+	}
+}
+
+func TestRefreshDiscovered_ScansOnlyTrackedProviders(t *testing.T) {
+	brew := &listInstalledStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		installed: []provider.InstalledTool{
+			{Tool: provider.Tool{Name: "ripgrep", Provider: "brew"}, Version: "14.1.0"},
+			{Tool: provider.Tool{Name: "jq", Provider: "brew"}, Version: "1.7.0"},
+		},
+	}
+	pip := &listInstalledStub{
+		stubProvider: stubProvider{name: "pip", available: true},
+		installed: []provider.InstalledTool{
+			{Tool: provider.Tool{Name: "black", Provider: "pip"}, Version: "24.4.0"},
+		},
+	}
+	a, cfgPath := newImportApp(t, brew, pip)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("ripgrep"),
+		}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if err := a.RefreshDiscovered(context.Background()); err != nil {
+		t.Fatalf("RefreshDiscovered: %v", err)
+	}
+
+	discovered, err := a.ListDiscovered(context.Background())
+	if err != nil {
+		t.Fatalf("ListDiscovered: %v", err)
+	}
+	if len(discovered) != 1 || discovered[0].Name != "jq" {
+		t.Fatalf("discovered = %+v, want only brew jq", discovered)
 	}
 }
 

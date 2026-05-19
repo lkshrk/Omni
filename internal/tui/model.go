@@ -375,6 +375,10 @@ type Model struct {
 	// switched back to the main UI but before the first post-setup reload
 	// finishes.
 	setupReloading bool
+	// skipLaunchDotsSyncOnce prevents a post-bootstrap reload from repeating a
+	// dot sync that the bootstrap flow just completed. The launch snapshot still
+	// hydrates dots status asynchronously.
+	skipLaunchDotsSyncOnce bool
 	// setupHostReturnStep is the setup step to restore if automatic host
 	// creation fails after the UI has advanced to the dotfile decision step.
 	setupHostReturnStep int

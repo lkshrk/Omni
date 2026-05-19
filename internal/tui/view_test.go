@@ -577,6 +577,43 @@ func TestRenderDots_ChildRowsUseParentStatusAndFileCountColumn(t *testing.T) {
 	}
 }
 
+func TestRenderDots_ChildRowsUseChildStateColor(t *testing.T) {
+	m := baseModel(nil)
+	m.width = 140
+	m.settings.DotsRepo = "/home/user/dotfiles"
+	m.dotsLoaded = true
+	m.dotsExpandedName = "nvim"
+	m.dotsExpandedState = app.DotStateSynced
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		State:      app.DotStateSynced,
+		Children: []app.DotChild{
+			{Name: "tracked.lua", RelPath: "tracked.lua", Path: "~/.config/nvim/tracked.lua", State: app.DotStateSynced, FileCount: 1},
+			{Name: "local.lua", RelPath: "local.lua", Path: "~/.config/nvim/local.lua", State: app.DotStateLocalOnly, FileCount: 1},
+			{Name: "ignored.log", RelPath: "ignored.log", Path: "~/.config/nvim/ignored.log", State: app.DotStateIgnored, Ignored: true},
+		},
+	}}
+
+	out := renderDots(m)
+	for _, tc := range []struct {
+		name      string
+		iconStyle string
+	}{
+		{name: "tracked.lua", iconStyle: m.palette.styleInstalled.Render("↳")},
+		{name: "local.lua", iconStyle: m.palette.styleMissing.Render("↳")},
+		{name: "ignored.log", iconStyle: m.palette.styleIgnored.Render("↳")},
+	} {
+		line := renderedLineContaining(out, tc.name)
+		if line == "" {
+			t.Fatalf("missing child row %q:\n%s", tc.name, out)
+		}
+		if !strings.Contains(line, tc.iconStyle) {
+			t.Fatalf("child row %q should color the tree marker from child state, got: %q", tc.name, line)
+		}
+	}
+}
+
 func TestRenderDots_CountColumnsAreSeparateAndRightAligned(t *testing.T) {
 	m := baseModel(nil)
 	m.width = 140

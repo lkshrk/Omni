@@ -202,6 +202,26 @@ func TestApplyFilter_SortsToolsBySectionThenName(t *testing.T) {
 	}
 }
 
+func TestApplyFilter_KeepsDiscoveredOrphansVisibleOutOfSync(t *testing.T) {
+	tracked := &database.ToolCache{Name: "git", Provider: "system", Installed: true, InstalledWith: "brew", Tracked: true}
+	orphan := &database.ToolCache{Name: "utm", Provider: "system", Installed: true, InstalledWith: "brew", Tracked: false}
+	m := baseModel([]*database.ToolCache{tracked})
+	m.discoveredTools = []*database.ToolCache{orphan}
+	m.rebuildDiscoveredKeys()
+
+	m.applyFilter()
+
+	if got := toolNames(m.visibleTools); !slices.Equal(got, []string{"utm", "git"}) {
+		t.Fatalf("visibleTools = %v, want orphan and tracked tool", got)
+	}
+	if m.displaySection(orphan) != sectionOutOfSync {
+		t.Fatalf("orphan display section = %v, want sectionOutOfSync", m.displaySection(orphan))
+	}
+	if m.syncStatusOf(orphan) != syncOrphan {
+		t.Fatalf("orphan sync status = %v, want syncOrphan", m.syncStatusOf(orphan))
+	}
+}
+
 func toolNames(tools []*database.ToolCache) []string {
 	names := make([]string, 0, len(tools))
 	for _, t := range tools {

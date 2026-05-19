@@ -713,8 +713,10 @@ func (m *Model) doRefreshDescriptions(gen int, progressCh chan progressUpdate, p
 		}); err != nil {
 			return descRefreshDoneMsg{gen: gen, err: err}
 		}
-		tools, _ := a.ListTools(ctx, "") // non-fatal: stale descriptions remain if list refresh fails
-		return descRefreshDoneMsg{gen: gen, tools: tools}
+		// Non-fatal: stale descriptions remain visible if either snapshot read fails.
+		tools, _ := a.ListTools(ctx, "")
+		discovered, _ := a.ListDiscovered(ctx)
+		return descRefreshDoneMsg{gen: gen, tools: tools, discovered: discovered}
 	}
 }
 

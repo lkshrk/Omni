@@ -219,6 +219,7 @@ func TestRefreshDiscoveredSkipsGloballyIgnoredName(t *testing.T) {
 	a, cfgPath := newImportApp(t, stub)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools:  logicalToolSpecs(logicalTool("ripgrep", "brew")),
+		Groups: []*config.GroupConfig{testHostToolGroup("ripgrep")},
 		Ignore: config.GlobalIgnore{Tools: []string{"ripgrep"}},
 	}); err != nil {
 		t.Fatalf("config.Save: %v", err)

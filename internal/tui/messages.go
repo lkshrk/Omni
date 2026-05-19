@@ -240,11 +240,12 @@ type progressDoneMsg struct {
 }
 
 // descRefreshDoneMsg is sent when the background bulk-description refresh
-// finishes. tools is the refreshed list (nil on error or empty config).
+// finishes. tools/discovered are refreshed snapshots (nil on error or empty config).
 type descRefreshDoneMsg struct {
-	gen   int
-	err   error
-	tools []*database.ToolCache
+	gen        int
+	err        error
+	tools      []*database.ToolCache
+	discovered []*database.ToolCache
 }
 
 // setupImportDoneMsg is sent after the setup-wizard import step completes.
