@@ -883,7 +883,7 @@ func (m *Model) doApplyProviderSolution(name, fromProvider string, solution prov
 // currentPath sets the starting directory: opens at the path itself if it
 // already exists as a directory, otherwise falls back to its parent (or home).
 // allowFiles controls whether plain files are selectable in addition to directories.
-// Returns a tea.Cmd that starts the async directory read.
+// Returns any command needed to initialize the picker.
 func (m *Model) openFilePicker(title, currentPath string, allowFiles bool) tea.Cmd {
 	fp, cmd := newPathPicker(currentPath, allowFiles, filePickerContentWidth(*m), filePickerListHeight(*m))
 

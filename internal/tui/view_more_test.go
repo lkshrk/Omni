@@ -200,20 +200,23 @@ func TestRenderSetup_Step0(t *testing.T) {
 	if out == "" {
 		t.Error("expected non-empty output for setupStep=0")
 	}
-	if !strings.Contains(out, "Manage packages and dotfiles") {
-		t.Errorf("expected welcome value copy in step 0 output, got:\n%s", out)
+	if !strings.Contains(out, "No settings.json was found.") {
+		t.Errorf("expected missing-settings copy in step 0 output, got:\n%s", out)
 	}
-	if !strings.Contains(out, "No config exists yet") {
-		t.Errorf("expected setup prompt in step 0 output, got:\n%s", out)
+	if !strings.Contains(out, "Import an existing Omni settings file") {
+		t.Errorf("expected import prompt in step 0 output, got:\n%s", out)
 	}
-	choiceLine := renderedLineContaining(out, "create settings.json")
+	choiceLine := renderedLineContaining(out, "import existing")
 	if !strings.Contains(choiceLine, "quit") {
 		t.Errorf("expected step 0 choices on one row, got:\n%s", out)
+	}
+	if !strings.Contains(choiceLine, "create new") {
+		t.Errorf("expected create-new choice in step 0 choices, got:\n%s", out)
 	}
 	if got := visualColumnOf(choiceLine, "quit"); got < 0 || got > 8 {
 		t.Errorf("expected abort choice near left edge, column=%d:\n%s", got, out)
 	}
-	if visualColumnOf(choiceLine, "create settings.json") <= visualColumnOf(choiceLine, "quit") {
+	if visualColumnOf(choiceLine, "import existing") <= visualColumnOf(choiceLine, "quit") {
 		t.Errorf("expected accept choice to the right of abort choice, got:\n%s", out)
 	}
 }
@@ -226,7 +229,7 @@ func TestRenderSetupPopup_UsesSharedCenteredTitle(t *testing.T) {
 	frame := setupPopupFrame(m)
 	contentWidth := popupInnerContentWidth(frame)
 	out := renderPopupFrame(m.palette, renderSetupPopup(m, contentWidth), frame)
-	title := logoMark + " Omni - Create settings"
+	title := logoMark + " Omni - Import settings"
 	expectedCol := 1 + frame.PaddingX + (contentWidth-lipgloss.Width(title))/2
 
 	for _, line := range strings.Split(out, "\n") {
@@ -388,7 +391,7 @@ func TestRenderSetup_AllActionFootersUsePopupAlignment(t *testing.T) {
 		right     string
 		rightOnly string
 	}{
-		{name: "create settings", model: setupRenderModel(0), left: "quit", right: "create settings.json"},
+		{name: "import settings", model: setupRenderModel(0), left: "quit", right: "import existing"},
 		{name: "provider picker", model: setupRenderModel(1), rightOnly: "save & continue"},
 		{name: "node manager", model: setupRenderModel(3), left: "skip", right: "confirm"},
 		{name: "dotfiles decision", model: setupRenderModel(5), left: "skip for now", right: "set up dotfile sync"},
@@ -5438,7 +5441,7 @@ func TestViewString_SetupMode(t *testing.T) {
 	if out == "" {
 		t.Error("expected non-empty viewString for setup mode")
 	}
-	if !strings.Contains(out, "Manage packages and dotfiles") {
+	if !strings.Contains(out, "No settings.json was found.") {
 		t.Errorf("expected setup content in viewString, got:\n%s", out)
 	}
 	if !strings.Contains(out, "Tools") {
@@ -6331,8 +6334,14 @@ func TestViewString_FilePickerOverlay(t *testing.T) {
 	if strings.Contains(out, "→") || strings.Contains(out, "←") {
 		t.Errorf("file picker overlay hints should not use arrow glyphs, got: %q", out)
 	}
-	if !strings.Contains(out, "tab") || !strings.Contains(out, "bs") {
+	if !strings.Contains(out, "enter") || !strings.Contains(out, "pick") || !strings.Contains(out, "esc") || !strings.Contains(out, "close") {
 		t.Errorf("file picker overlay should render text key labels, got: %q", out)
+	}
+	actionLine := renderedLineContaining(out, "pick")
+	for _, unwanted := range []string{"type", "path", "tab", "complete"} {
+		if strings.Contains(actionLine, unwanted) {
+			t.Errorf("file picker overlay action line should not render redundant %q hint, got: %q", unwanted, actionLine)
+		}
 	}
 }
 
@@ -6368,17 +6377,19 @@ func TestRenderFilePickerPopup_BrowsingMode(t *testing.T) {
 	if strings.Contains(out, "→") || strings.Contains(out, "←") {
 		t.Errorf("file picker hints should not use arrow glyphs, got: %q", out)
 	}
-	for _, want := range []string{"tab", "complete", "enter", "pick", "bs", "parent", "esc", "close"} {
+	for _, want := range []string{"enter", "pick", "esc", "close"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("file picker popup missing %q in hints, got: %q", want, out)
 		}
 	}
 	actionLine := renderedLineContaining(out, "pick")
+	for _, unwanted := range []string{"type", "path", "tab", "complete"} {
+		if strings.Contains(actionLine, unwanted) {
+			t.Errorf("file picker action line should not render redundant %q hint, got: %q", unwanted, actionLine)
+		}
+	}
 	if visualColumnOf(actionLine, "close") >= visualColumnOf(actionLine, "pick") {
 		t.Errorf("file picker primary action should be right of close action, got: %q", out)
-	}
-	if !strings.Contains(actionLine, "parent") {
-		t.Errorf("file picker secondary browse actions should share the popup action edge row, got: %q", out)
 	}
 }
 
@@ -6417,7 +6428,12 @@ func TestRenderFilePickerPopup_BoundedBrowsingMode(t *testing.T) {
 			t.Fatalf("file picker divider wrapped onto its own line:\n%s", popup)
 		}
 	}
-	if !strings.Contains(popup, "tab") || !strings.Contains(popup, "enter") || !strings.Contains(popup, "esc") {
+	for _, unwanted := range []string{"type", "tab", "complete"} {
+		if strings.Contains(popup, unwanted) {
+			t.Fatalf("file picker popup should not render redundant %q hint:\n%s", unwanted, popup)
+		}
+	}
+	if !strings.Contains(popup, "enter") || !strings.Contains(popup, "esc") {
 		t.Fatalf("file picker popup missing footer hints:\n%s", popup)
 	}
 }

@@ -1,0 +1,109 @@
+# bootstrap imports an existing settings.json before setup.
+#
+# This fixture runs inside the Docker-backed integration target and covers the
+# CLI parity path for the TUI's first-run settings import prompt.
+stdin bootstrap-input
+
+exec omni --config settings.json bootstrap --import-config imported.json
+stdout 'Imported settings from imported.json'
+stdout 'Config already exists at settings.json'
+stdout 'Host "testhost" is configured with groups: \[testhost, work\]'
+stdout 'Bootstrap complete'
+
+exec grep '"ripgrep"' settings.json
+stdout '"ripgrep"'
+exec grep '"manager": "pnpm"' settings.json
+stdout '"manager": "pnpm"'
+exec grep '"testhost"' settings.json
+stdout '"testhost"'
+exec grep '"work"' settings.json
+stdout '"work"'
+
+stdin prompt-input
+
+exec omni --config prompted-settings.json bootstrap
+stdout 'Import an existing settings\.json\? \[y/N\] y'
+stdout 'Settings file path:'
+stdout 'Imported settings from prompted.json'
+stdout 'Config already exists at prompted-settings.json'
+stdout 'Host "testhost" is configured with groups: \[(testhost, promptwork|promptwork, testhost)\]'
+stdout 'Bootstrap complete'
+
+exec grep '"fd"' prompted-settings.json
+stdout '"fd"'
+exec grep '"manager": "uv"' prompted-settings.json
+stdout '"manager": "uv"'
+exec grep '"testhost"' prompted-settings.json
+stdout '"testhost"'
+exec grep '"promptwork"' prompted-settings.json
+stdout '"promptwork"'
+
+-- bootstrap-input --
+n
+n
+
+-- prompt-input --
+y
+prompted.json
+n
+n
+
+-- imported.json --
+{
+  "version": 1,
+  "settings": {
+    "ecosystems": {
+      "node": { "manager": "pnpm" }
+    }
+  },
+  "hosts": {
+    "testhost": ["work"]
+  },
+  "tools": {
+    "ripgrep": {
+      "provider": "system",
+      "package": "ripgrep"
+    }
+  },
+  "groups": [
+    {
+      "name": "testhost",
+      "special": "host",
+      "tools": []
+    },
+    {
+      "name": "work",
+      "tools": ["ripgrep"]
+    }
+  ]
+}
+
+-- prompted.json --
+{
+  "version": 1,
+  "settings": {
+    "ecosystems": {
+      "python": { "manager": "uv" }
+    }
+  },
+  "hosts": {
+    "testhost": ["promptwork"]
+  },
+  "tools": {
+    "fd": {
+      "provider": "system",
+      "package": "fd"
+    }
+  },
+  "groups": [
+    {
+      "name": "testhost",
+      "special": "host",
+      "tools": []
+    },
+    {
+      "name": "promptwork",
+      "tools": ["fd"]
+    }
+  ]
+}

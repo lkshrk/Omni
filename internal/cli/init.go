@@ -19,6 +19,7 @@ import (
 func newBootstrapCmd(state *rootState) *cobra.Command {
 	var flagImport bool
 	var flagNoImport bool
+	var flagImportConfig string
 
 	cmd := &cobra.Command{
 		Use:     "bootstrap",
@@ -57,6 +58,13 @@ Run 'omni bootstrap' on every new machine to reproduce your environment.`,
 
 			// ── 2. Guard: config already exists ──────────────────────────────
 			if a.HasConfig() {
+				return runExistingConfigBootstrap(cmd, state, a)
+			}
+			importedConfig, err := maybeImportExistingConfig(cmd.Context(), state, a, flagImportConfig)
+			if err != nil {
+				return err
+			}
+			if importedConfig {
 				return runExistingConfigBootstrap(cmd, state, a)
 			}
 
@@ -159,7 +167,29 @@ Run 'omni bootstrap' on every new machine to reproduce your environment.`,
 
 	cmd.Flags().BoolVar(&flagImport, "import", false, "import installed tools without prompting")
 	cmd.Flags().BoolVar(&flagNoImport, "no-import", false, "skip importing installed tools")
+	cmd.Flags().StringVar(&flagImportConfig, "import-config", "", "import an existing settings.json before bootstrapping")
 	return cmd
+}
+
+func maybeImportExistingConfig(_ context.Context, state *rootState, a *app.App, importPath string) (bool, error) {
+	if strings.TrimSpace(importPath) == "" {
+		if state != nil && state.yes {
+			return false, nil
+		}
+		if !promptYesNo(nil, "Import an existing settings.json?", false) {
+			return false, nil
+		}
+		path, ok := promptText("Settings file path:", "")
+		if !ok || strings.TrimSpace(path) == "" {
+			return false, fmt.Errorf("settings import path is required")
+		}
+		importPath = path
+	}
+	if err := a.ImportConfigFile(importPath); err != nil {
+		return false, fmt.Errorf("importing settings: %w", err)
+	}
+	fmt.Printf("✓ Imported settings from %s\n\n", importPath)
+	return true, nil
 }
 
 func runExistingConfigBootstrap(cmd *cobra.Command, state *rootState, a *app.App) error {

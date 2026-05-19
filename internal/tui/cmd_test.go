@@ -889,6 +889,85 @@ func TestDoCreateConfig_ExistingConfig_Noop(t *testing.T) {
 	}
 }
 
+func TestDoImportConfigFile_Success(t *testing.T) {
+	prov := &okProvider{name: "brew"}
+	a := newCmdAppNoConfig(t, prov)
+	m := modelForCmds(a)
+	sourcePath := filepath.Join(t.TempDir(), "settings.json")
+	if err := config.Save(sourcePath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"ripgrep": {Provider: "system"},
+		},
+		Groups: []*config.GroupConfig{{
+			Name:  "work",
+			Tools: []config.ToolEntry{{Name: "ripgrep"}},
+		}},
+	}); err != nil {
+		t.Fatalf("save source config: %v", err)
+	}
+
+	msg := m.doImportConfigFile(sourcePath)()
+	got, ok := msg.(setupConfigImportDoneMsg)
+	if !ok {
+		t.Fatalf("expected setupConfigImportDoneMsg, got %T", msg)
+	}
+	if got.err != nil {
+		t.Fatalf("doImportConfigFile: %v", got.err)
+	}
+	cfg, err := config.Load(a.ConfigPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if _, ok := cfg.Tools["ripgrep"]; !ok {
+		t.Fatal("imported config missing ripgrep")
+	}
+}
+
+func TestHandleSetupConfigImportDoneMsg_SuccessReloadsTools(t *testing.T) {
+	prov := &okProvider{name: "brew"}
+	a, _ := newCmdApp(t, prov, nil)
+	m := modelForCmds(a)
+
+	cmds := m.handleSetupConfigImportDoneMsg(setupConfigImportDoneMsg{path: "settings.json"})
+
+	if m.statusMsg != "✓ imported settings" || m.statusIsErr {
+		t.Fatalf("status=%q err=%v, want imported settings success", m.statusMsg, m.statusIsErr)
+	}
+	if !m.loading {
+		t.Fatal("loading = false, want true while imported config reloads tools")
+	}
+	if len(cmds) != 3 {
+		t.Fatalf("cmd count = %d, want status, spinner, and loadTools", len(cmds))
+	}
+	msg := cmds[len(cmds)-1]()
+	got, ok := msg.(toolsLoadedMsg)
+	if !ok {
+		t.Fatalf("reload command returned %T, want toolsLoadedMsg", msg)
+	}
+	if got.err != nil {
+		t.Fatalf("reload command err = %v", got.err)
+	}
+}
+
+func TestHandleSetupConfigImportDoneMsg_ErrorStopsLoading(t *testing.T) {
+	prov := &okProvider{name: "brew"}
+	a := newCmdAppNoConfig(t, prov)
+	m := modelForCmds(a)
+	m.loading = true
+
+	cmds := m.handleSetupConfigImportDoneMsg(setupConfigImportDoneMsg{err: errors.New("bad import")})
+
+	if m.loading {
+		t.Fatal("loading = true, want false after import error")
+	}
+	if m.statusMsg != "✗ bad import" || !m.statusIsErr {
+		t.Fatalf("status=%q err=%v, want import error status", m.statusMsg, m.statusIsErr)
+	}
+	if len(cmds) != 1 {
+		t.Fatalf("cmd count = %d, want status clear command only", len(cmds))
+	}
+}
+
 // ── doSetupImport ─────────────────────────────────────────────────────────────
 
 func TestDoSetupImport_Success(t *testing.T) {

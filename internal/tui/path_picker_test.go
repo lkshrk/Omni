@@ -3,7 +3,9 @@ package tui
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -41,7 +43,7 @@ func TestPathPickerQueryAllowsDotDotPrefixChild(t *testing.T) {
 	}
 }
 
-func TestPathPickerTabCompletesCommonPrefix(t *testing.T) {
+func TestPathPickerTabCyclesFilteredMatches(t *testing.T) {
 	tmp := t.TempDir()
 	mustMkdir(t, filepath.Join(tmp, "alpha"))
 	mustMkdir(t, filepath.Join(tmp, "alpine"))
@@ -52,8 +54,103 @@ func TestPathPickerTabCompletesCommonPrefix(t *testing.T) {
 	p, _ = p.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	p, _ = p.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 
-	if got, want := p.input.Value(), filepath.Join(tmp, "alp"); got != want {
-		t.Fatalf("input after tab = %q, want %q", got, want)
+	if got, want := p.input.Value(), filepath.Join(tmp, "alpha"); got != want {
+		t.Fatalf("input after first tab = %q, want %q", got, want)
+	}
+	if got := pathPickerFilteredNames(p); strings.Join(got, ",") != "alpha,alpine" {
+		t.Fatalf("filtered after first tab = %#v, want original cycle candidates", got)
+	}
+	p, _ = p.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	if got, want := p.input.Value(), filepath.Join(tmp, "alpine"); got != want {
+		t.Fatalf("input after second tab = %q, want %q", got, want)
+	}
+	p, _ = p.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	if got, want := p.input.Value(), filepath.Join(tmp, "alpha"); got != want {
+		t.Fatalf("input after third tab = %q, want wrapped %q", got, want)
+	}
+}
+
+func TestPathPickerTabStartsCycleFromHighlightedMatch(t *testing.T) {
+	tmp := t.TempDir()
+	mustMkdir(t, filepath.Join(tmp, "alpha"))
+	mustMkdir(t, filepath.Join(tmp, "alpine"))
+	mustMkdir(t, filepath.Join(tmp, "amber"))
+
+	p, _ := newPathPicker(tmp, false, 60, 8)
+	p, _ = p.Update(tea.KeyPressMsg{Code: '/', Text: string(filepath.Separator)})
+	p, _ = p.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	p, _ = p.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	p, _ = p.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+
+	if got, want := p.input.Value(), filepath.Join(tmp, "alpine"); got != want {
+		t.Fatalf("input after tab from highlighted row = %q, want %q", got, want)
+	}
+}
+
+func TestPathPickerTabCycleResetsAfterTextEdit(t *testing.T) {
+	tmp := t.TempDir()
+	mustMkdir(t, filepath.Join(tmp, "alpha"))
+	mustMkdir(t, filepath.Join(tmp, "alpine"))
+
+	p, _ := newPathPicker(tmp, false, 60, 8)
+	p, _ = p.Update(tea.KeyPressMsg{Code: '/', Text: string(filepath.Separator)})
+	p, _ = p.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	p, _ = p.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	if got, want := p.input.Value(), filepath.Join(tmp, "alpha"); got != want {
+		t.Fatalf("input after first tab = %q, want %q", got, want)
+	}
+
+	p, _ = p.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	if p.completionActive {
+		t.Fatal("completion cycle should reset after text edit")
+	}
+	p, _ = p.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	if got, want := p.input.Value(), filepath.Join(tmp, "alpha"); got != want {
+		t.Fatalf("input after reset tab = %q, want rebuilt single match %q", got, want)
+	}
+}
+
+func TestPathPickerTabWithNoMatchesLeavesInput(t *testing.T) {
+	tmp := t.TempDir()
+	mustMkdir(t, filepath.Join(tmp, "alpha"))
+
+	p, _ := newPathPicker(tmp, false, 60, 8)
+	p, _ = p.Update(tea.KeyPressMsg{Code: '/', Text: string(filepath.Separator)})
+	p, _ = p.Update(tea.KeyPressMsg{Code: 'z', Text: "z"})
+	before := p.input.Value()
+	p, _ = p.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+
+	if got := p.input.Value(); got != before {
+		t.Fatalf("input after no-match tab = %q, want unchanged %q", got, before)
+	}
+	if p.completionActive {
+		t.Fatal("no-match tab should not start a completion cycle")
+	}
+}
+
+func TestPathPickerTabCycleRespectsAllowFiles(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "alpha")
+	file := filepath.Join(tmp, "alpine")
+	mustMkdir(t, dir)
+	mustWriteFile(t, file)
+
+	dirsOnly, _ := newPathPicker(tmp, false, 60, 8)
+	dirsOnly, _ = dirsOnly.Update(tea.KeyPressMsg{Code: '/', Text: string(filepath.Separator)})
+	dirsOnly, _ = dirsOnly.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	dirsOnly, _ = dirsOnly.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	dirsOnly, _ = dirsOnly.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	if got := dirsOnly.input.Value(); got != dir {
+		t.Fatalf("directory-only input after tab cycle = %q, want only dir %q", got, dir)
+	}
+
+	withFiles, _ := newPathPicker(tmp, true, 60, 8)
+	withFiles, _ = withFiles.Update(tea.KeyPressMsg{Code: '/', Text: string(filepath.Separator)})
+	withFiles, _ = withFiles.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	withFiles, _ = withFiles.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	withFiles, _ = withFiles.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	if got := withFiles.input.Value(); got != file {
+		t.Fatalf("file-allowed input after second tab = %q, want file %q", got, file)
 	}
 }
 
@@ -64,17 +161,71 @@ func TestPathPickerDisplaysHomeAlias(t *testing.T) {
 	mustMkdir(t, filepath.Join(home, "alpine"))
 
 	p, _ := newPathPicker("", false, 60, 8)
-	if got := p.input.Value(); got != "~" {
-		t.Fatalf("input = %q, want ~", got)
+	if got := p.input.Value(); got != "~/" {
+		t.Fatalf("input = %q, want ~/", got)
 	}
-	p, _ = p.Update(tea.KeyPressMsg{Code: '/', Text: string(filepath.Separator)})
 	p, _ = p.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	p, _ = p.Update(tea.KeyPressMsg{Code: tea.KeyTab})
-	if got := p.input.Value(); got != "~/alp" {
-		t.Fatalf("input after tab = %q, want ~/alp", got)
+	if got := p.input.Value(); got != "~/alpha" {
+		t.Fatalf("input after tab = %q, want ~/alpha", got)
 	}
-	if got := p.SelectedPath(); got != filepath.Join(home, "alpha") && got != filepath.Join(home, "alpine") {
-		t.Fatalf("SelectedPath = %q, want one home child", got)
+	if got := p.SelectedPath(); got != filepath.Join(home, "alpha") {
+		t.Fatalf("SelectedPath = %q, want first home child", got)
+	}
+}
+
+func TestPathPickerSuggestsPartialRepeatedHomeBasename(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "lkshrk")
+	mustMkdir(t, home)
+	t.Setenv("HOME", home)
+
+	p, _ := newPathPicker("", true, 60, 8)
+	for _, r := range "lks" {
+		p, _ = p.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+
+	if got := p.input.Value(); got != "~/lks" {
+		t.Fatalf("input = %q, want ~/lks before accepting fallback", got)
+	}
+	if got := pathPickerFilteredNames(p); strings.Join(got, ",") != "lkshrk" {
+		t.Fatalf("filtered names = %#v, want home basename fallback", got)
+	}
+	if got := p.HighlightedPath(); got != home {
+		t.Fatalf("HighlightedPath = %q, want home %q", got, home)
+	}
+	if got := p.SelectedPath(); got != home {
+		t.Fatalf("SelectedPath = %q, want home fallback %q", got, home)
+	}
+
+	p, _ = p.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	if got := p.input.Value(); got != "~/" {
+		t.Fatalf("input after fallback tab = %q, want ~/", got)
+	}
+}
+
+func TestPathPickerPartialHomeBasenamePrefersRealChild(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "lkshrk")
+	mustMkdir(t, home)
+	t.Setenv("HOME", home)
+	child := filepath.Join(home, "lkshrk")
+	mustMkdir(t, child)
+
+	p, _ := newPathPicker("", true, 60, 8)
+	for _, r := range "lks" {
+		p, _ = p.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+
+	if got := pathPickerFilteredNames(p); strings.Join(got, ",") != "lkshrk" {
+		t.Fatalf("filtered names = %#v, want real child", got)
+	}
+	if got := p.HighlightedPath(); got != child {
+		t.Fatalf("HighlightedPath = %q, want child %q", got, child)
+	}
+	p, _ = p.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	if got := p.input.Value(); got != "~/lkshrk" {
+		t.Fatalf("input after tab = %q, want real child path", got)
 	}
 }
 
@@ -135,6 +286,87 @@ func TestPathPickerSlashDescendsAndShowsFiles(t *testing.T) {
 	}
 }
 
+func TestPathPickerTrailingSlashShowsTypedHomeDirectoryContents(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	config := filepath.Join(home, ".config")
+	mustMkdir(t, config)
+	mustMkdir(t, filepath.Join(config, "nvim"))
+	mustWriteFile(t, filepath.Join(config, "settings.json"))
+
+	p, _ := newPathPicker("", true, 60, 8)
+	for _, r := range ".config/" {
+		p, _ = p.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+
+	if got := p.CurrentDirectory(); got != config {
+		t.Fatalf("CurrentDirectory = %q, want typed directory %q", got, config)
+	}
+	var names []string
+	for _, entry := range p.filtered {
+		names = append(names, entry.name)
+	}
+	if !containsString(names, "nvim") || !containsString(names, "settings.json") {
+		t.Fatalf("filtered names after trailing slash = %#v, want typed directory contents", names)
+	}
+}
+
+func TestPathPickerCollapsesRepeatedHomeBasenameInput(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "lkshrk")
+	mustMkdir(t, home)
+	t.Setenv("HOME", home)
+	mustMkdir(t, filepath.Join(home, ".claude"))
+
+	p, _ := newPathPicker("", true, 60, 8)
+	for _, r := range "lkshrk/.cla" {
+		p, _ = p.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+
+	if got := p.input.Value(); got != "~/.cla" {
+		t.Fatalf("input = %q, want home-relative path without repeated username", got)
+	}
+	if got := p.CurrentDirectory(); got != home {
+		t.Fatalf("CurrentDirectory = %q, want home %q", got, home)
+	}
+	var names []string
+	for _, entry := range p.filtered {
+		names = append(names, entry.name)
+	}
+	if !containsString(names, ".claude") {
+		t.Fatalf("filtered names after repeated home basename = %#v, want .claude", names)
+	}
+}
+
+func TestPathPickerKeepsRealHomeBasenameChild(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "lkshrk")
+	mustMkdir(t, home)
+	t.Setenv("HOME", home)
+	child := filepath.Join(home, "lkshrk")
+	mustMkdir(t, child)
+	mustMkdir(t, filepath.Join(child, ".claude"))
+
+	p, _ := newPathPicker("", true, 60, 8)
+	for _, r := range "lkshrk/.cla" {
+		p, _ = p.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+
+	if got := p.input.Value(); got != "~/lkshrk/.cla" {
+		t.Fatalf("input = %q, want real home-basename child path", got)
+	}
+	if got := p.CurrentDirectory(); got != child {
+		t.Fatalf("CurrentDirectory = %q, want child %q", got, child)
+	}
+	var names []string
+	for _, entry := range p.filtered {
+		names = append(names, entry.name)
+	}
+	if !containsString(names, ".claude") {
+		t.Fatalf("filtered names under real child = %#v, want .claude", names)
+	}
+}
+
 func TestPathPickerDotFiltersHiddenEntries(t *testing.T) {
 	tmp := t.TempDir()
 	mustMkdir(t, filepath.Join(tmp, ".cache"))
@@ -160,6 +392,154 @@ func TestPathPickerDotFiltersHiddenEntries(t *testing.T) {
 	}
 }
 
+func TestPathPickerDoesNotFuzzyMatchSubsequence(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	mustMkdir(t, filepath.Join(home, ".luarocks"))
+	mustMkdir(t, filepath.Join(home, "lkshrk"))
+
+	p, _ := newPathPicker("", true, 60, 8)
+	for _, r := range "lks" {
+		p, _ = p.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+
+	var names []string
+	for _, entry := range p.filtered {
+		names = append(names, entry.name)
+	}
+	if containsString(names, ".luarocks") {
+		t.Fatalf("filtered names for lks = %#v, should not fuzzy-match .luarocks", names)
+	}
+	if !containsString(names, "lkshrk") {
+		t.Fatalf("filtered names for lks = %#v, want prefix match lkshrk", names)
+	}
+}
+
+func TestPathPickerMatchesHiddenNamesWithDotPrefix(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	mustMkdir(t, filepath.Join(home, ".claude"))
+	mustMkdir(t, filepath.Join(home, ".config"))
+	mustMkdir(t, filepath.Join(home, "client"))
+
+	p, _ := newPathPicker("", true, 60, 8)
+	for _, r := range ".cla" {
+		p, _ = p.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+
+	var names []string
+	for _, entry := range p.filtered {
+		names = append(names, entry.name)
+	}
+	if !containsString(names, ".claude") {
+		t.Fatalf("filtered names for .cla = %#v, want hidden prefix .claude", names)
+	}
+	if containsString(names, ".config") || containsString(names, "client") {
+		t.Fatalf("filtered names for .cla = %#v, should only include prefix-style matches", names)
+	}
+}
+
+func TestPathPickerPredictionsMatchFindFilteredChildren(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	mustMkdir(t, filepath.Join(home, "lkshrk"))
+	mustMkdir(t, filepath.Join(home, ".luarocks"))
+	mustMkdir(t, filepath.Join(home, ".claude"))
+	config := filepath.Join(home, ".config")
+	mustMkdir(t, config)
+	mustMkdir(t, filepath.Join(config, "zathura"))
+	mustMkdir(t, filepath.Join(config, "zed"))
+	mustMkdir(t, filepath.Join(config, "nvim"))
+	mustWriteFile(t, filepath.Join(config, "zellij.kdl"))
+
+	tests := []struct {
+		name     string
+		typed    string
+		dir      string
+		query    string
+		wantCwd  string
+		wantText string
+	}{
+		{
+			name:     "home prefix",
+			typed:    "lks",
+			dir:      home,
+			query:    "lks",
+			wantCwd:  home,
+			wantText: "~/lks",
+		},
+		{
+			name:     "hidden prefix",
+			typed:    ".cla",
+			dir:      home,
+			query:    ".cla",
+			wantCwd:  home,
+			wantText: "~/.cla",
+		},
+		{
+			name:     "nested directory prefix",
+			typed:    ".config/ze",
+			dir:      config,
+			query:    "ze",
+			wantCwd:  config,
+			wantText: "~/.config/ze",
+		},
+		{
+			name:     "trailing slash lists directory",
+			typed:    ".config/",
+			dir:      config,
+			query:    "",
+			wantCwd:  config,
+			wantText: "~/.config/",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, _ := newPathPicker("", true, 60, 8)
+			for _, r := range tt.typed {
+				p, _ = p.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+			}
+
+			if got := p.input.Value(); got != tt.wantText {
+				t.Fatalf("input = %q, want %q", got, tt.wantText)
+			}
+			if got := p.CurrentDirectory(); got != tt.wantCwd {
+				t.Fatalf("CurrentDirectory = %q, want %q", got, tt.wantCwd)
+			}
+			got := pathPickerFilteredNames(p)
+			want := findFilteredChildren(t, tt.dir, tt.query, true)
+			if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+				t.Fatalf("filtered names = %#v, want find-filtered children %#v", got, want)
+			}
+		})
+	}
+}
+
+func TestPathPickerRefreshesAfterInvalidDirectoryInput(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	mustMkdir(t, filepath.Join(home, "lkshrk"))
+
+	p, _ := newPathPicker("", true, 60, 8)
+	p.input.SetValue("~/missing/path")
+	p.input.CursorEnd()
+	p.syncDirectoryFromInput()
+	p.applyFilter()
+	if len(p.filtered) != 0 {
+		t.Fatalf("filtered after invalid directory = %#v, want no matches", pathPickerFilteredNames(p))
+	}
+
+	p.input.SetValue("~/lks")
+	p.input.CursorEnd()
+	p.syncDirectoryFromInput()
+	p.applyFilter()
+
+	if got := pathPickerFilteredNames(p); !containsString(got, "lkshrk") {
+		t.Fatalf("filtered after returning to home query = %#v, want lkshrk", got)
+	}
+}
+
 func TestPathPickerRejectsFilesWhenDirectoryOnly(t *testing.T) {
 	tmp := t.TempDir()
 	file := filepath.Join(tmp, "settings.json")
@@ -175,23 +555,36 @@ func TestPathPickerRejectsFilesWhenDirectoryOnly(t *testing.T) {
 	}
 }
 
+func TestPathPickerRejectsInvalidTypedPath(t *testing.T) {
+	tmp := t.TempDir()
+	p, _ := newPathPicker(tmp, false, 60, 8)
+	p.input.SetValue(filepath.Join(tmp, "missing"))
+	p.input.CursorEnd()
+	p.syncDirectoryFromInput()
+	p.applyFilter()
+
+	if got := p.SelectedPath(); got != "" {
+		t.Fatalf("SelectedPath = %q, want no selection for invalid typed path", got)
+	}
+}
+
 func TestPathPickerPasteUpdatesMatches(t *testing.T) {
 	tmp := t.TempDir()
 	mustMkdir(t, filepath.Join(tmp, "alpha"))
 	mustMkdir(t, filepath.Join(tmp, "cider"))
 
 	p, _ := newPathPicker(tmp, false, 60, 8)
-	p, _ = p.Update(tea.PasteMsg{Content: string(filepath.Separator) + "a"})
+	p, _ = p.Update(tea.PasteMsg{Content: filepath.Join(tmp, "a")})
 
 	if got := p.input.Value(); got != filepath.Join(tmp, "a") {
-		t.Fatalf("input after paste = %q, want %q", got, filepath.Join(tmp, "a"))
+		t.Fatalf("input after paste = %q, want pasted absolute path", got)
 	}
 	if len(p.filtered) != 1 || p.filtered[0].name != "alpha" {
 		t.Fatalf("filtered = %#v, want alpha only", p.filtered)
 	}
 }
 
-func TestPathPickerParentNavigation(t *testing.T) {
+func TestPathPickerLeftKeyEditsCursorInsteadOfParent(t *testing.T) {
 	tmp := t.TempDir()
 	child := filepath.Join(tmp, "child")
 	mustMkdir(t, child)
@@ -199,11 +592,54 @@ func TestPathPickerParentNavigation(t *testing.T) {
 	p, _ := newPathPicker(child, false, 60, 8)
 	p, _ = p.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
 
-	if got := p.CurrentDirectory(); got != tmp {
-		t.Fatalf("CurrentDirectory = %q, want parent %q", got, tmp)
+	if got := p.CurrentDirectory(); got != child {
+		t.Fatalf("CurrentDirectory = %q, want unchanged %q", got, child)
 	}
-	if got := p.input.Value(); got != tmp {
-		t.Fatalf("input = %q, want parent %q", got, tmp)
+	if got := p.input.Position(); got != len(child)-1 {
+		t.Fatalf("input cursor = %d, want one position left", got)
+	}
+}
+
+func TestPathPickerBackspaceEditsPathInsteadOfParent(t *testing.T) {
+	tmp := t.TempDir()
+	mustMkdir(t, filepath.Join(tmp, "alpha"))
+
+	p, _ := newPathPicker(tmp, false, 60, 8)
+	p, _ = p.Update(tea.KeyPressMsg{Code: '/', Text: string(filepath.Separator)})
+	p, _ = p.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	p, _ = p.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+
+	if got := p.CurrentDirectory(); got != tmp {
+		t.Fatalf("CurrentDirectory = %q, want unchanged %q", got, tmp)
+	}
+	if got := p.input.Value(); got != tmp+string(filepath.Separator) {
+		t.Fatalf("input after backspace = %q, want trailing separator path", got)
+	}
+}
+
+func TestPathPickerDotDotInputMovesAboveHome(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "lkshrk")
+	mustMkdir(t, home)
+	mustMkdir(t, filepath.Join(root, "other-user"))
+	t.Setenv("HOME", home)
+
+	p, _ := newPathPicker("", true, 60, 8)
+	for _, r := range ".." {
+		p, _ = p.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+
+	if got := p.CurrentDirectory(); got != root {
+		t.Fatalf("CurrentDirectory = %q, want parent %q", got, root)
+	}
+	if got := p.query(); got != "" {
+		t.Fatalf("query = %q, want empty parent listing query", got)
+	}
+	if got := p.SelectedPath(); got != root {
+		t.Fatalf("SelectedPath = %q, want parent %q", got, root)
+	}
+	if got := pathPickerFilteredNames(p); !containsString(got, "other-user") {
+		t.Fatalf("filtered names = %#v, want parent directory contents", got)
 	}
 }
 
@@ -321,6 +757,40 @@ func TestModelFilePickerCapturesQuitKey(t *testing.T) {
 	}
 }
 
+func TestModelFilePickerEscClosesPathInput(t *testing.T) {
+	tmp := t.TempDir()
+	m := baseModel(nil)
+	m.openFilePicker("Dots repo path", tmp, false)
+
+	got := drive(m, pressEsc())
+	if got.showFilePicker {
+		t.Fatal("esc should close picker")
+	}
+}
+
+func TestModelFilePickerKeepsInvalidTypedPathOpen(t *testing.T) {
+	tmp := t.TempDir()
+	m := baseModel(nil)
+	m.mode = viewSettings
+	m.openFilePicker("Dots repo path", tmp, false)
+
+	got := drive(m,
+		tea.KeyPressMsg{Code: '/', Text: string(filepath.Separator)},
+		tea.KeyPressMsg{Code: 'm', Text: "m"},
+		tea.KeyPressMsg{Code: 'i', Text: "i"},
+		tea.KeyPressMsg{Code: 's', Text: "s"},
+		tea.KeyPressMsg{Code: 's', Text: "s"},
+		pressEnter(),
+	)
+
+	if !got.showFilePicker {
+		t.Fatal("picker should remain open for an invalid typed path")
+	}
+	if got.settings.DotsRepo != "" {
+		t.Fatalf("settings.DotsRepo = %q, want unchanged", got.settings.DotsRepo)
+	}
+}
+
 func TestModelFilePickerCapturesPasteFromBackgroundInputs(t *testing.T) {
 	tmp := t.TempDir()
 	mustMkdir(t, filepath.Join(tmp, "alpha"))
@@ -328,7 +798,7 @@ func TestModelFilePickerCapturesPasteFromBackgroundInputs(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSearch
 	m.openFilePicker("Dots repo path", tmp, false)
-	got := drive(m, tea.PasteMsg{Content: string(filepath.Separator) + "a"})
+	got := drive(m, tea.PasteMsg{Content: filepath.Join(tmp, "a")})
 
 	if got.filter.Value() != "" {
 		t.Fatalf("search filter = %q, want unchanged while picker is open", got.filter.Value())
@@ -366,18 +836,14 @@ func TestPathPickerViewShowsInputAndMatches(t *testing.T) {
 	}
 }
 
-func TestPathPickerFocusedEmptyInputDoesNotDuplicatePlaceholderFirstRune(t *testing.T) {
+func TestPathPickerFocusedEmptyInputDoesNotRenderPlaceholder(t *testing.T) {
 	p, _ := newPathPicker(t.TempDir(), false, 60, 8)
 	p.input.SetValue("")
-	p.input.Placeholder = "Path"
 	p.input.Focus()
 
 	out := p.View(defaultPalette())
-	if !strings.Contains(out, "Path") {
-		t.Fatalf("path picker placeholder missing:\n%s", out)
-	}
-	if strings.Contains(out, "PPath") {
-		t.Fatalf("path picker placeholder first character rendered twice:\n%s", out)
+	if strings.Contains(out, "Path") {
+		t.Fatalf("path picker should not render placeholder text:\n%s", out)
 	}
 }
 
@@ -513,6 +979,49 @@ func containsString(values []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+func pathPickerFilteredNames(p pathPickerModel) []string {
+	names := make([]string, 0, len(p.filtered))
+	for _, entry := range p.filtered {
+		names = append(names, entry.name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func findFilteredChildren(t *testing.T, dir, query string, allowFiles bool) []string {
+	t.Helper()
+	out, err := exec.Command("find", dir).Output()
+	if err != nil {
+		t.Fatalf("find %s: %v", dir, err)
+	}
+	dir = pathClean(dir)
+	query = strings.ToLower(query)
+	var names []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		path := pathClean(line)
+		if path == dir || pathClean(filepath.Dir(path)) != dir {
+			continue
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			continue
+		}
+		if !allowFiles && !info.IsDir() {
+			continue
+		}
+		name := filepath.Base(path)
+		if query != "" && !strings.HasPrefix(strings.ToLower(name), query) {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func mustMkdir(t *testing.T, path string) {

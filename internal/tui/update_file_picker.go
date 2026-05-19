@@ -36,6 +36,7 @@ func (m *Model) handleFilePickerKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
 	if key.Matches(msg, m.keys.Back) {
 		m.showFilePicker = false
 		m.filePickerForDotAdd = false
+		m.filePickerForConfig = false
 		if m.mode == viewSetup && m.setupStep == 6 {
 			m.startSetupGroupSelection(&cmds)
 		}
@@ -56,7 +57,12 @@ func (m *Model) handleFilePickerKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
 func (m *Model) acceptFilePickerPath(path string) []tea.Cmd {
 	var cmds []tea.Cmd
 	m.showFilePicker = false
-	if m.filePickerForDotAdd {
+	if m.filePickerForConfig {
+		m.filePickerForConfig = false
+		m.loading = true
+		startOp(m, "Importing settings…")
+		cmds = append(cmds, m.spinner.Tick, m.doImportConfigFile(path))
+	} else if m.filePickerForDotAdd {
 		m.filePickerForDotAdd = false
 		m.acceptDotAddFilePickerPath(path, &cmds)
 	} else if m.mode == viewSetup {

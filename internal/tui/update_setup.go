@@ -23,6 +23,8 @@ var setupActivationOptions = []setupActivationOption{
 	{label: "Sync dotfiles", detail: "Apply configured dotfile links for this host."},
 }
 
+const setupStepCreateConfig = 11
+
 func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 
@@ -43,8 +45,8 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 		m.err = msg.err
 		return nil
 	}
-	// Config was just created in setup step 0 — advance to provider/import step.
-	if m.mode == viewSetup && m.setupStep == 0 {
+	// Config was just created in setup — advance to provider/import step.
+	if m.mode == viewSetup && m.setupStep == setupStepCreateConfig {
 		m.setupStep = 1
 		m.setupProviders = msg.setupProviders
 		m.setupProviderIdx = 0
@@ -193,6 +195,20 @@ func (m *Model) handleSetupImportDoneMsg(msg setupImportDoneMsg) []tea.Cmd {
 	return cmds
 }
 
+func (m *Model) handleSetupConfigImportDoneMsg(msg setupConfigImportDoneMsg) []tea.Cmd {
+	var cmds []tea.Cmd
+
+	m.loading = false
+	if msg.err != nil {
+		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
+		return cmds
+	}
+	cmds = append(cmds, setStatus(m, "✓ imported settings", false))
+	m.loading = true
+	cmds = append(cmds, m.spinner.Tick, loadTools(m.app, m.ctx))
+	return cmds
+}
+
 func (m *Model) handleSetupProvidersDoneMsg(msg setupProvidersDoneMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 
@@ -296,13 +312,17 @@ func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	}
 
 	switch m.setupStep {
-	case 0: // Create config.
+	case 0: // Import existing config or create a fresh one.
 		switch {
 		case key.Matches(msg, m.keys.Confirm) || strings.EqualFold(msg.String(), "y"):
+			m.filePickerForConfig = true
+			cmds = append(cmds, m.openFilePicker("Import settings.json", "", true))
+		case strings.EqualFold(msg.String(), "n"):
+			m.setupStep = setupStepCreateConfig
 			m.loading = true
 			startOp(m, "Creating settings.json…")
 			cmds = append(cmds, m.spinner.Tick, m.doCreateConfig())
-		case strings.EqualFold(msg.String(), "n") || key.Matches(msg, m.keys.Back):
+		case key.Matches(msg, m.keys.Back):
 			m.shutdown()
 			return tea.Quit, true
 		}
