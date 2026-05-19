@@ -17,6 +17,7 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/profile"
 	"github.com/lkshrk/omni/internal/provider"
 )
 
@@ -233,9 +234,15 @@ type Model struct {
 	// providerScannedMsg removes one entry. Initialized to the set of unique
 	// provider names from allTools on every scan kick-off.
 	scanningProviders          map[string]bool
+	outdatedProviders          map[string]bool
+	providerScanToolCounts     map[string]int
+	providerScanToolDone       map[string]int
+	refreshToolDone            int
+	refreshToolTotal           int
 	scanGen                    int
 	discoveryGen               int
 	providerSnapshotRefreshing bool
+	outdatedSnapshotRefreshing bool
 	discoveryRefreshing        bool
 	descRefreshing             bool
 	// migrating is true while a doMigrateProvider command is in flight.
@@ -264,6 +271,7 @@ type Model struct {
 	groupIgnoreSet      map[string]map[string]bool
 	toolProviderPins    map[string]string
 	configuredProviders []string
+	providerToolCounts  map[string]int
 
 	// provider filter — [All] [system] [node] [python] …
 	providerNames  []string // ordered ecosystem provider names from the app/provider registry
@@ -627,6 +635,10 @@ func (m *Model) shutdown() {
 	m.clearDotsProgressState()
 	m.searching = false
 	m.scanningProviders = nil
+	m.providerScanToolCounts = nil
+	m.providerScanToolDone = nil
+	m.refreshToolDone = 0
+	m.refreshToolTotal = 0
 	m.upgradingKeys = make(map[string]bool)
 }
 
@@ -646,16 +658,22 @@ func (m Model) Init() tea.Cmd {
 // status afterwards.
 func loadTools(a *app.App, ctx context.Context) tea.Cmd {
 	return func() tea.Msg {
+		defer profile.Start("tui.load_tools.total")()
+
+		stop := profile.Start("tui.load_tools.has_config")
 		if !a.HasConfig() {
+			stop()
 			return toolsLoadedMsg{noConfig: true}
 		}
-		tools, err := a.ListTools(ctx, "")
+		stop()
+		stop = profile.Start("tui.load_tools.startup_snapshot")
+		snapshot, err := a.StartupSnapshot(ctx)
+		stop()
 		if err != nil {
-			return toolsLoadedMsg{err: err}
+			return toolsLoadedMsg{err: fmt.Errorf("loading startup state: %w", err)}
 		}
-		settings, _ := a.LoadSettings()
-		taps, _ := a.LoadTaps()
-		hostInfo, _ := a.HostStatus()
+		stop = profile.Start("tui.load_tools.build_message")
+		hostInfo := snapshot.HostInfo
 		noHost := hostInfo != nil && hostInfo.Active == ""
 		var activeHost string
 		var hostIgnore []string
@@ -665,42 +683,26 @@ func loadTools(a *app.App, ctx context.Context) tea.Cmd {
 				hostIgnore = prof.Ignore
 			}
 		}
-		groups, _ := a.Groups(ctx)
-		toolMemberships, _ := a.ToolMembershipMap(ctx)
-		dotMemberships, _ := a.DotMembershipMap(ctx)
+		groups := snapshot.Groups
+		toolMemberships := snapshot.ToolMemberships
+		dotMemberships := snapshot.DotMemberships
 		toolGroups := compactToolGroupMapForHost(toolMemberships, hostInfo)
 		groupNames := buildGroupNames(groups)
-		ignoreLabels := buildIgnoreLabels(a.ConfigPath, groups, hostIgnore)
-		toolIgnoreSet, groupIgnoreSet, toolProviderPins := buildToolScopeState(a.ConfigPath, groups)
+		ignoreLabels := buildIgnoreLabelsFromState(hostIgnore, snapshot.GlobalIgnoredTools, snapshot.ToolIgnores)
+		toolIgnoreSet, groupIgnoreSet, toolProviderPins := buildToolScopeStateFromState(snapshot.GlobalIgnoredTools, snapshot.ToolIgnores, snapshot.ToolProviderPins)
 		ignoreList := make([]string, 0, len(ignoreLabels))
 		for name := range ignoreLabels {
 			ignoreList = append(ignoreList, name)
 		}
-		pythonBin, nodeBin := a.EffectiveManagers()
-		allPyBins, allNodeBins := a.AllAvailableManagers()
-		ecosystemMap := a.ResolvedEcosystemProviders(ctx)
+		ecosystemMap := snapshot.EcosystemProviders
 		effectiveSystemManager := ecosystemMap[provider.EcosystemSystem]
-		stowInstalled := a.DotsStowInstalled(ctx)
-		dotsReminderService, dotsReminderServiceErr := a.DotsReminderServiceStatus()
-		dotsWatchService, dotsWatchServiceErr := a.DotsWatchServiceStatus()
-		dotsHistory, dotsHistoryErr := a.RecentDotsHistory(ctx, 3)
-		discovered, _ := a.ListDiscovered(ctx)
-		bootstrapRequired, err := a.BootstrapRequired(ctx)
-		if err != nil {
-			return toolsLoadedMsg{err: fmt.Errorf("checking bootstrap state: %w", err)}
-		}
 		// Build setup provider rows from already-fetched manager data — no extra calls needed.
-		spRows := buildSetupProvidersFromManagers(ecosystemMap, allPyBins, allNodeBins, settings)
-		// Collect unique provider names from config groups so the toolsLoadedMsg
-		// handler can launch scan goroutines even when the DB is empty (e.g. after
-		// a fresh import where Import() only writes to config, not the DB).
-		ecosystemProviders := a.EcosystemProviderNames()
-		configuredProviders, _ := a.ConfiguredProviders(ctx)
-		return toolsLoadedMsg{
-			tools:                  tools,
-			discovered:             discovered,
-			settings:               settings,
-			taps:                   taps,
+		spRows := buildSetupProvidersFromManagers(ecosystemMap, snapshot.AllPythonManagers, snapshot.AllNodeManagers, snapshot.Settings)
+		msg := toolsLoadedMsg{
+			tools:                  snapshot.Tools,
+			discovered:             snapshot.Discovered,
+			settings:               snapshot.Settings,
+			taps:                   snapshot.Taps,
 			groupNames:             groupNames,
 			toolGroups:             toolGroups,
 			toolMemberships:        toolMemberships,
@@ -711,24 +713,27 @@ func loadTools(a *app.App, ctx context.Context) tea.Cmd {
 			toolProviderPins:       toolProviderPins,
 			hostInfo:               hostInfo,
 			ignoreList:             ignoreList,
-			dotsHistory:            dotsHistory,
-			dotsHistoryErr:         errorString(dotsHistoryErr),
+			dotsHistory:            snapshot.DotsHistory,
+			dotsHistoryErr:         errorString(snapshot.DotsHistoryErr),
 			noHost:                 noHost,
-			effectivePythonManager: pythonBin,
-			effectiveNodeManager:   nodeBin,
+			effectivePythonManager: snapshot.EffectivePythonManager,
+			effectiveNodeManager:   snapshot.EffectiveNodeManager,
 			effectiveSystemManager: effectiveSystemManager,
-			stowInstalled:          stowInstalled,
-			dotsReminderService:    dotsReminderService,
-			dotsReminderServiceErr: errorString(dotsReminderServiceErr),
-			dotsWatchService:       dotsWatchService,
-			dotsWatchServiceErr:    errorString(dotsWatchServiceErr),
-			bootstrapRequired:      bootstrapRequired,
-			allPythonManagers:      allPyBins,
-			allNodeManagers:        allNodeBins,
+			stowInstalled:          snapshot.StowInstalled,
+			dotsReminderService:    snapshot.DotsReminderService,
+			dotsReminderServiceErr: errorString(snapshot.DotsReminderServiceErr),
+			dotsWatchService:       snapshot.DotsWatchService,
+			dotsWatchServiceErr:    errorString(snapshot.DotsWatchServiceErr),
+			bootstrapRequired:      snapshot.BootstrapRequired,
+			allPythonManagers:      snapshot.AllPythonManagers,
+			allNodeManagers:        snapshot.AllNodeManagers,
 			setupProviders:         spRows,
-			ecosystemProviders:     ecosystemProviders,
-			configuredProviders:    configuredProviders,
+			ecosystemProviders:     snapshot.EcosystemProviderNames,
+			configuredProviders:    snapshot.ConfiguredProviders,
+			providerToolCounts:     snapshot.ProviderToolCounts,
 		}
+		stop()
+		return msg
 	}
 }
 
@@ -897,25 +902,13 @@ func toolInGroup(m Model, t *database.ToolCache, group string) bool {
 }
 
 func buildToolScopeState(configPath string, groups []*config.GroupConfig) (map[string]bool, map[string]map[string]bool, map[string]string) {
-	toolIgnores := make(map[string]bool)
-	groupIgnores := make(map[string]map[string]bool)
-	for _, g := range groups {
-		if g == nil {
-			continue
-		}
-	}
+	var globalIgnoredTools []string
+	toolIgnores := map[string]bool{}
 	pins := make(map[string]string)
 	if configPath != "" {
 		if cfg, err := config.Load(configPath); err == nil {
 			shortHost := shortHostname()
-			for _, name := range cfg.Ignore.Tools {
-				if name != "" {
-					if groupIgnores[name] == nil {
-						groupIgnores[name] = make(map[string]bool)
-					}
-					groupIgnores[name]["global"] = true
-				}
-			}
+			globalIgnoredTools = append([]string(nil), cfg.Ignore.Tools...)
 			for name, spec := range cfg.Tools {
 				if spec.Ignore {
 					toolIgnores[name] = true
@@ -930,36 +923,66 @@ func buildToolScopeState(configPath string, groups []*config.GroupConfig) (map[s
 			}
 		}
 	}
-	return toolIgnores, groupIgnores, pins
+	return buildToolScopeStateFromState(globalIgnoredTools, toolIgnores, pins)
 }
 
 func buildIgnoreLabels(configPath string, groups []*config.GroupConfig, hostIgnore []string) map[string]string {
+	var globalIgnoredTools []string
+	toolIgnores := map[string]bool{}
+	if configPath != "" {
+		if cfg, err := config.Load(configPath); err == nil {
+			globalIgnoredTools = append([]string(nil), cfg.Ignore.Tools...)
+			for name, spec := range cfg.Tools {
+				if spec.Ignore {
+					toolIgnores[name] = true
+				}
+			}
+		}
+	}
+	return buildIgnoreLabelsFromState(hostIgnore, globalIgnoredTools, toolIgnores)
+}
+
+func buildToolScopeStateFromState(globalIgnoredTools []string, toolIgnores map[string]bool, pins map[string]string) (map[string]bool, map[string]map[string]bool, map[string]string) {
+	toolIgnoreCopy := make(map[string]bool, len(toolIgnores))
+	for name, ignored := range toolIgnores {
+		if ignored {
+			toolIgnoreCopy[name] = true
+		}
+	}
+	groupIgnores := make(map[string]map[string]bool)
+	for _, name := range globalIgnoredTools {
+		if name == "" {
+			continue
+		}
+		if groupIgnores[name] == nil {
+			groupIgnores[name] = make(map[string]bool)
+		}
+		groupIgnores[name]["global"] = true
+	}
+	pinCopy := make(map[string]string, len(pins))
+	for name, pin := range pins {
+		if pin != "" {
+			pinCopy[name] = pin
+		}
+	}
+	return toolIgnoreCopy, groupIgnores, pinCopy
+}
+
+func buildIgnoreLabelsFromState(hostIgnore, globalIgnoredTools []string, toolIgnores map[string]bool) map[string]string {
 	labels := make(map[string]string)
 	for _, name := range hostIgnore {
 		if name != "" {
 			labels[name] = "global"
 		}
 	}
-	groupSources := make(map[string][]string)
-	for name, sources := range groupSources {
-		if len(sources) == 1 {
-			labels[name] = sources[0]
-		} else {
-			labels[name] = sources[0] + fmt.Sprintf("+%d", len(sources)-1)
+	for _, name := range globalIgnoredTools {
+		if name != "" {
+			labels[name] = "global"
 		}
 	}
-	if configPath != "" {
-		if cfg, err := config.Load(configPath); err == nil {
-			for _, name := range cfg.Ignore.Tools {
-				if name != "" {
-					labels[name] = "global"
-				}
-			}
-			for name, spec := range cfg.Tools {
-				if spec.Ignore {
-					labels[name] = "tool"
-				}
-			}
+	for name, ignored := range toolIgnores {
+		if ignored {
+			labels[name] = "tool"
 		}
 	}
 	return labels

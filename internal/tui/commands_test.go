@@ -262,7 +262,7 @@ func TestModel_Init(t *testing.T) {
 // a descRefreshDoneMsg when the app has no tools to describe (empty config).
 func TestDoRefreshDescriptions_HappyPath(t *testing.T) {
 	m := newCmdTestModel(t)
-	msg := m.doRefreshDescriptions(7)()
+	msg := m.doRefreshDescriptions(7, nil, 0)()
 	got, ok := msg.(descRefreshDoneMsg)
 	if !ok {
 		t.Fatalf("expected descRefreshDoneMsg, got %T", msg)
@@ -298,7 +298,7 @@ func TestDoRefreshDescriptions_WithTools(t *testing.T) {
 	t.Cleanup(func() { _ = a.Close() })
 
 	m := modelForCmds(a)
-	msg := m.doRefreshDescriptions(9)()
+	msg := m.doRefreshDescriptions(9, nil, 0)()
 	if _, ok := msg.(descRefreshDoneMsg); !ok {
 		t.Fatalf("expected descRefreshDoneMsg, got %T", msg)
 	}
@@ -678,7 +678,7 @@ func TestDoUpgradeAll_ChannelClosed(t *testing.T) {
 // return a discoveredRefreshedMsg with nil discovered list and no error.
 func TestDoRefreshDiscovered_EmptyApp(t *testing.T) {
 	m := newCmdTestModel(t)
-	msg := m.doRefreshDiscovered(4)()
+	msg := m.doRefreshDiscovered(4, nil, 0)()
 	got, ok := msg.(discoveredRefreshedMsg)
 	if !ok {
 		t.Fatalf("expected discoveredRefreshedMsg, got %T", msg)

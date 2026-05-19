@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/lkshrk/omni/internal/actions"
+	"github.com/lkshrk/omni/internal/app"
 )
 
 func newRefreshCmd(state *rootState) *cobra.Command {
@@ -27,12 +28,14 @@ func newRefreshCmd(state *rootState) *cobra.Command {
 			if err := state.app.RefreshOutdated(ctx, progress); err != nil {
 				return fmt.Errorf("refreshing update state: %w", err)
 			}
-			fmt.Fprintln(out, "  finding local tools...")
-			if err := state.app.RefreshDiscovered(ctx); err != nil {
+			if err := state.app.RefreshDiscoveredWithProgress(ctx, func(event app.RefreshDiscoveredProgressEvent) {
+				progress(app.RefreshDiscoveredProgressText(event))
+			}); err != nil {
 				return fmt.Errorf("refreshing discovered tools: %w", err)
 			}
-			fmt.Fprintln(out, "  refreshing tool descriptions...")
-			if err := state.app.RefreshDescriptions(ctx, 0); err != nil {
+			if err := state.app.RefreshDescriptionsWithProgress(ctx, 0, func(event app.RefreshDescriptionsProgressEvent) {
+				progress(app.RefreshDescriptionsProgressText(event))
+			}); err != nil {
 				return fmt.Errorf("refreshing tool descriptions: %w", err)
 			}
 			fmt.Fprintln(out, "Refresh complete.")

@@ -551,20 +551,25 @@ func (m *Model) openProviderScopePicker(t *database.ToolCache) {
 
 func (m *Model) refreshInstalledProviders() []tea.Cmd {
 	var cmds []tea.Cmd
-	if len(m.scanningProviders) > 0 {
+	if len(m.scanningProviders) > 0 || len(m.outdatedProviders) > 0 || m.providerSnapshotRefreshing || m.outdatedSnapshotRefreshing {
 		return cmds
 	}
 	clearStatus(m)
 	m.scanningProviders = m.currentProviderScanSet()
+	m.providerScanToolCounts = m.currentProviderScanToolCounts()
+	m.providerScanToolDone = make(map[string]int, len(m.providerScanToolCounts))
+	m.refreshToolDone = 0
+	m.refreshToolTotal = sumProviderToolCounts(m.providerScanToolCounts)
 	if len(m.scanningProviders) == 0 {
 		return cmds
 	}
-	setActivityStatus(m, providerRefreshStatus(m.scanningProviders))
+	setActivityStatus(m, toolRefreshStatus(m.scanningProviders, m.refreshToolDone, m.refreshToolTotal))
+	ch, progressGen := m.beginProgressStream()
 	m.scanGen++
 	gen := m.scanGen
-	cmds = append(cmds, m.spinner.Tick)
+	cmds = append(cmds, m.spinner.Tick, waitForProgress(ch, progressGen))
 	for prov := range m.scanningProviders {
-		cmds = append(cmds, m.doScanProvider(prov, gen))
+		cmds = append(cmds, m.doScanProvider(prov, gen, ch, progressGen))
 	}
 	return cmds
 }

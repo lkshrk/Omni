@@ -156,6 +156,10 @@ func (a *App) DotMembershipMap(_ context.Context) (map[string][]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	return dotMembershipMapFromConfig(cfg), nil
+}
+
+func dotMembershipMapFromConfig(cfg *config.RootConfig) map[string][]string {
 	memberships := make(map[string][]string)
 	for _, group := range cfg.Groups {
 		for _, entry := range group.Dots {
@@ -168,7 +172,7 @@ func (a *App) DotMembershipMap(_ context.Context) (map[string][]string, error) {
 	for name := range memberships {
 		sort.Strings(memberships[name])
 	}
-	return memberships, nil
+	return memberships
 }
 
 // MoveDotToGroup makes groupName the dotfile entry's only owning group.

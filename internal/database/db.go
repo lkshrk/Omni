@@ -814,18 +814,39 @@ func (db *DB) UpsertDiscoveredBatch(ctx context.Context, entries []DiscoveredUps
 // Best-effort: if the row doesn't exist yet this is a no-op.
 // Called after claiming an orphan so it stops appearing as a discovered tool.
 func (db *DB) MarkTracked(ctx context.Context, name, provider, pkg string) error {
-	if err := requirePackage(name, provider, pkg); err != nil {
-		return err
+	return db.MarkTrackedBatch(ctx, []TrackedTool{{Name: name, Provider: provider, Package: pkg}})
+}
+
+// TrackedTool is one tool-cache row to promote from discovered to config-tracked.
+type TrackedTool struct {
+	Name     string
+	Provider string
+	Package  string
+}
+
+// MarkTrackedBatch promotes discovered rows to config-tracked in one
+// transaction. Best-effort: rows that do not exist are ignored.
+func (db *DB) MarkTrackedBatch(ctx context.Context, tools []TrackedTool) error {
+	if len(tools) == 0 {
+		return nil
 	}
-	_, err := db.bun.NewUpdate().
-		Model((*ToolCache)(nil)).
-		Set("tracked = TRUE").
-		Where("name = ? AND provider = ? AND package = ?", name, provider, pkg).
-		Exec(ctx)
-	if err != nil {
-		return fmt.Errorf("marking %s/%s tracked: %w", provider, name, err)
+	for _, t := range tools {
+		if err := requirePackage(t.Name, t.Provider, t.Package); err != nil {
+			return err
+		}
 	}
-	return nil
+	return db.bun.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		for _, t := range tools {
+			if _, err := tx.ExecContext(ctx,
+				`UPDATE tool_cache
+				 SET tracked = TRUE
+				 WHERE name = ? AND provider = ? AND package = ?`,
+				t.Name, t.Provider, t.Package); err != nil {
+				return fmt.Errorf("marking %s/%s tracked: %w", t.Provider, t.Name, err)
+			}
+		}
+		return nil
+	})
 }
 
 // ListDiscovered returns all tool entries that are installed locally but not

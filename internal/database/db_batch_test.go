@@ -324,3 +324,35 @@ func TestUpsertDiscoveredBatch_DoesNotOverwriteTrackedRows(t *testing.T) {
 		t.Error("UpsertDiscoveredBatch should not flip a tracked row's Installed flag")
 	}
 }
+
+func TestMarkTrackedBatch_PromotesDiscoveredRows(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+
+	if err := db.UpsertDiscoveredBatch(ctx, []database.DiscoveredUpsert{
+		{Name: "ripgrep", Provider: "system", InstalledWith: "brew", Version: "14.1.0"},
+		{Name: "fd", Provider: "system", InstalledWith: "brew", Version: "9.0.0"},
+	}); err != nil {
+		t.Fatalf("UpsertDiscoveredBatch: %v", err)
+	}
+	if err := db.MarkTrackedBatch(ctx, []database.TrackedTool{
+		{Name: "ripgrep", Provider: "system", Package: "ripgrep"},
+		{Name: "fd", Provider: "system", Package: "fd"},
+	}); err != nil {
+		t.Fatalf("MarkTrackedBatch: %v", err)
+	}
+	discovered, err := db.ListDiscovered(ctx)
+	if err != nil {
+		t.Fatalf("ListDiscovered: %v", err)
+	}
+	if len(discovered) != 0 {
+		t.Fatalf("ListDiscovered after MarkTrackedBatch = %+v, want none", discovered)
+	}
+}
+
+func TestMarkTrackedBatch_EmptyIsNoOp(t *testing.T) {
+	db := newTestDB(t)
+	if err := db.MarkTrackedBatch(context.Background(), nil); err != nil {
+		t.Fatalf("MarkTrackedBatch(nil): %v", err)
+	}
+}

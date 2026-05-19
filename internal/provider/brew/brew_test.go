@@ -228,13 +228,11 @@ func TestIsInstalled_TapPackage(t *testing.T) {
 // --- ListInstalled ---
 
 func TestListInstalled(t *testing.T) {
-	// brew info --json=v2 --installed; only installed_on_request=true entries shown.
-	output := `{"formulae":[` +
-		`{"full_name":"git","installed":[{"version":"2.43.0","installed_on_request":true}]},` +
-		`{"full_name":"node","installed":[{"version":"21.5.0","installed_on_request":true}]},` +
-		`{"full_name":"ripgrep","installed":[{"version":"14.1.1","installed_on_request":true}]}` +
-		`]}`
-	p, _ := newBrew(executor.MockCall{Stdout: output})
+	p, _ := newBrew(
+		executor.MockCall{Stdout: "git\nnode\nripgrep\n"},
+		executor.MockCall{Stdout: "git 2.43.0\nnode 21.5.0\nripgrep 14.1.1\n"},
+		executor.MockCall{},
+	)
 	tools, err := p.ListInstalled(context.Background())
 	if err != nil {
 		t.Fatalf("ListInstalled: %v", err)
@@ -248,12 +246,11 @@ func TestListInstalled(t *testing.T) {
 }
 
 func TestListInstalled_TapPackage(t *testing.T) {
-	// Tap-qualified full_name — formula name extracted as the bare name.
-	output := `{"formulae":[` +
-		`{"full_name":"git","installed":[{"version":"2.43.0","installed_on_request":true}]},` +
-		`{"full_name":"hashicorp/tap/terraform","installed":[{"version":"1.7.5","installed_on_request":true}]}` +
-		`]}`
-	p, _ := newBrew(executor.MockCall{Stdout: output})
+	p, _ := newBrew(
+		executor.MockCall{Stdout: "git\nhashicorp/tap/terraform\n"},
+		executor.MockCall{Stdout: "git 2.43.0\nhashicorp/tap/terraform 1.7.5\n"},
+		executor.MockCall{},
+	)
 	tools, err := p.ListInstalled(context.Background())
 	if err != nil {
 		t.Fatalf("ListInstalled: %v", err)
@@ -274,12 +271,15 @@ func TestListInstalled_TapPackage(t *testing.T) {
 }
 
 func TestInstalledMetadataMap_CaskPkgutilRequiresPrivilege(t *testing.T) {
-	output := `{"formulae":[` +
-		`{"full_name":"ripgrep","installed":[{"version":"14.1.1","installed_on_request":true}]}` +
-		`],"casks":[` +
+	caskInfo := `{"formulae":[],"casks":[` +
 		`{"token":"parsec","installed":"150-103a","artifacts":[{"uninstall":[{"quit":"tv.parsec.www","pkgutil":"tv.parsec.www"}]},{"pkg":["parsec-macos.pkg"]}]}` +
 		`]}`
-	p, _ := newBrew(executor.MockCall{Stdout: output})
+	p, m := newBrew(
+		executor.MockCall{Stdout: "ripgrep\n"},
+		executor.MockCall{Stdout: "ripgrep 14.1.1\n"},
+		executor.MockCall{Stdout: "parsec\n"},
+		executor.MockCall{Stdout: caskInfo},
+	)
 
 	got, err := p.InstalledMetadataMap(context.Background())
 	if err != nil {
@@ -297,6 +297,9 @@ func TestInstalledMetadataMap_CaskPkgutilRequiresPrivilege(t *testing.T) {
 	}
 	if !strings.Contains(parsec.Privilege.Reason, "pkgutil") {
 		t.Fatalf("parsec privilege reason = %q, want pkgutil", parsec.Privilege.Reason)
+	}
+	if len(m.Calls) != 4 || strings.Join(m.Calls[3].Args, " ") != "info --json=v2 --cask parsec" {
+		t.Fatalf("calls = %+v, want cask-only info metadata lookup", m.Calls)
 	}
 }
 
@@ -500,8 +503,11 @@ func TestUpgrade_Error(t *testing.T) {
 // --- InstalledMap ---
 
 func TestInstalledMap_ReturnsFormulae(t *testing.T) {
-	out := `{"formulae":[{"full_name":"git","installed":[{"version":"2.43.0","installed_on_request":true}]},{"full_name":"dep","installed":[{"version":"1.0.0","installed_on_request":false}]}],"casks":[]}`
-	p, _ := newBrew(executor.MockCall{Stdout: out})
+	p, m := newBrew(
+		executor.MockCall{Stdout: "git\n"},
+		executor.MockCall{Stdout: "git 2.43.0\n"},
+		executor.MockCall{},
+	)
 	got, err := p.InstalledMap(context.Background())
 	if err != nil {
 		t.Fatalf("InstalledMap: %v", err)
@@ -512,11 +518,20 @@ func TestInstalledMap_ReturnsFormulae(t *testing.T) {
 	if _, ok := got["dep"]; ok {
 		t.Errorf("transitive formula dep should not be in map: %v", got)
 	}
+	if len(m.Calls) != 3 || strings.Join(m.Calls[0].Args, " ") != "leaves --installed-on-request" ||
+		strings.Join(m.Calls[1].Args, " ") != "list --versions git" ||
+		strings.Join(m.Calls[2].Args, " ") != "list --cask" {
+		t.Fatalf("calls = %+v, want fast leaves/list installed scan", m.Calls)
+	}
 }
 
 func TestInstalledMap_IncludesCasks(t *testing.T) {
-	out := `{"formulae":[],"casks":[{"token":"iterm2","installed":"3.4.23"}]}`
-	p, _ := newBrew(executor.MockCall{Stdout: out})
+	caskInfo := `{"formulae":[],"casks":[{"token":"iterm2","installed":"3.4.23"}]}`
+	p, _ := newBrew(
+		executor.MockCall{},
+		executor.MockCall{Stdout: "iterm2\n"},
+		executor.MockCall{Stdout: caskInfo},
+	)
 	got, err := p.InstalledMap(context.Background())
 	if err != nil {
 		t.Fatalf("InstalledMap: %v", err)
@@ -533,11 +548,38 @@ func TestInstalledMap_Error(t *testing.T) {
 	}
 }
 
+func TestListInstalled_ReturnsFormulaeAndCasks(t *testing.T) {
+	caskInfo := `{"formulae":[],"casks":[{"token":"iterm2","installed":"3.4.23"}]}`
+	p, _ := newBrew(
+		executor.MockCall{Stdout: "homebrew/core/git\nasmvik/formulae/yabai\n"},
+		executor.MockCall{Stdout: "homebrew/core/git 2.43.0\nasmvik/formulae/yabai 7.1.0\n"},
+		executor.MockCall{Stdout: "iterm2\n"},
+		executor.MockCall{Stdout: caskInfo},
+	)
+	got, err := p.ListInstalled(context.Background())
+	if err != nil {
+		t.Fatalf("ListInstalled: %v", err)
+	}
+	byName := make(map[string]provider.InstalledTool)
+	for _, item := range got {
+		byName[item.Name] = item
+	}
+	if byName["git"].Package != "homebrew/core/git" || byName["git"].Version != "2.43.0" {
+		t.Fatalf("git = %+v, want full package and version", byName["git"])
+	}
+	if byName["yabai"].Package != "asmvik/formulae/yabai" || byName["yabai"].Version != "7.1.0" {
+		t.Fatalf("yabai = %+v, want tap-qualified package and version", byName["yabai"])
+	}
+	if byName["iterm2"].Package != "iterm2" || byName["iterm2"].Version != "3.4.23" {
+		t.Fatalf("iterm2 = %+v, want cask token package and version", byName["iterm2"])
+	}
+}
+
 // --- OutdatedMap ---
 
 func TestOutdatedMap_ReturnsFormulae(t *testing.T) {
 	out := `{"formulae":[{"name":"git","current_version":"2.44.0"}],"casks":[]}`
-	p, m := newBrew(executor.MockCall{}, executor.MockCall{Stdout: out})
+	p, m := newBrew(executor.MockCall{Stdout: out})
 	got, err := p.OutdatedMap(context.Background())
 	if err != nil {
 		t.Fatalf("OutdatedMap: %v", err)
@@ -545,14 +587,14 @@ func TestOutdatedMap_ReturnsFormulae(t *testing.T) {
 	if got["git"] != "2.44.0" {
 		t.Errorf("map[git] = %q, want 2.44.0", got["git"])
 	}
-	if len(m.Calls) != 2 || m.Calls[0].Args[0] != "update" || m.Calls[1].Args[0] != "outdated" {
-		t.Fatalf("calls = %+v, want brew update before brew outdated", m.Calls)
+	if len(m.Calls) != 1 || strings.Join(m.Calls[0].Args, " ") != "outdated --json=v2" {
+		t.Fatalf("calls = %+v, want brew outdated without explicit update", m.Calls)
 	}
 }
 
 func TestOutdatedMap_TapQualifiedName(t *testing.T) {
 	out := `{"formulae":[{"name":"lkshrk/tap/omni","current_version":"0.4.5"}],"casks":[]}`
-	p, _ := newBrew(executor.MockCall{}, executor.MockCall{Stdout: out})
+	p, _ := newBrew(executor.MockCall{Stdout: out})
 	got, err := p.OutdatedMap(context.Background())
 	if err != nil {
 		t.Fatalf("OutdatedMap: %v", err)
@@ -564,7 +606,7 @@ func TestOutdatedMap_TapQualifiedName(t *testing.T) {
 
 func TestOutdatedMap_TapQualifiedCask(t *testing.T) {
 	out := `{"formulae":[],"casks":[{"name":"lkshrk/tap/my-app","current_version":"2.1.0"}]}`
-	p, _ := newBrew(executor.MockCall{}, executor.MockCall{Stdout: out})
+	p, _ := newBrew(executor.MockCall{Stdout: out})
 	got, err := p.OutdatedMap(context.Background())
 	if err != nil {
 		t.Fatalf("OutdatedMap: %v", err)
@@ -582,7 +624,7 @@ func TestOutdatedMap_Error(t *testing.T) {
 }
 
 func TestOutdatedMap_OutdatedError(t *testing.T) {
-	p, _ := newBrew(executor.MockCall{}, executor.MockCall{Err: errors.New("exit 1")})
+	p, _ := newBrew(executor.MockCall{Err: errors.New("exit 1")})
 	if _, err := p.OutdatedMap(context.Background()); err == nil {
 		t.Fatal("expected error, got nil")
 	}

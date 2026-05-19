@@ -145,6 +145,13 @@ func newDotsSyncCmd(state *rootState) *cobra.Command {
 				ops []dots.Op
 				err error
 			)
+			out := cmd.OutOrStdout()
+			opts.Progress = func(event dots.SyncProgressEvent) {
+				if event.Done || event.Entry == "" {
+					return
+				}
+				fmt.Fprintf(out, "  %s\n", dotsCLIProgressText(event))
+			}
 			if len(args) > 0 {
 				ops, err = state.app.DotsSyncEntry(cmd.Context(), args[0], opts)
 			} else {
@@ -156,6 +163,22 @@ func newDotsSyncCmd(state *rootState) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be done without making changes")
 	return cmd
+}
+
+func dotsCLIProgressText(event dots.SyncProgressEvent) string {
+	total := event.Total
+	if total <= 0 {
+		total = event.Index
+	}
+	index := event.Index
+	if index < 0 {
+		index = 0
+	}
+	progress := fmt.Sprintf("%d/%d", index, total)
+	if event.Entry == "" {
+		return "syncing dots " + progress
+	}
+	return fmt.Sprintf("syncing dots %s: %s", progress, event.Entry)
 }
 
 // ─── dots discover ────────────────────────────────────────────────────────────

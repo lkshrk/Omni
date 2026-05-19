@@ -359,7 +359,10 @@ func (a *App) ResetCache(ctx context.Context) error {
 // Returns "" for either ecosystem when no suitable binary is found on PATH.
 func (a *App) EffectiveManagers() (pythonBin, nodeBin string) {
 	s, _ := a.LoadSettings()
+	return a.effectiveManagersFromSettings(s)
+}
 
+func (a *App) effectiveManagersFromSettings(s config.Settings) (pythonBin, nodeBin string) {
 	pythonBin = probeFirst(s.EcosystemManager(provider.EcosystemPython), a.managerNames(provider.EcosystemPython))
 	nodeBin = probeFirst(s.EcosystemManager(provider.EcosystemNode), a.managerNames(provider.EcosystemNode))
 	return pythonBin, nodeBin
@@ -409,6 +412,10 @@ func (a *App) ResolvedEcosystemProviders(ctx context.Context) map[string]string 
 // binary), this is used by the setup wizard to display every available manager.
 func (a *App) AllAvailableManagers() (pythonBins, nodeBins []string) {
 	s, _ := a.LoadSettings()
+	return a.allAvailableManagersFromSettings(s)
+}
+
+func (a *App) allAvailableManagersFromSettings(s config.Settings) (pythonBins, nodeBins []string) {
 	pythonBins = probeAll(s.EcosystemManager(provider.EcosystemPython), a.managerNames(provider.EcosystemPython))
 	nodeBins = probeAll(s.EcosystemManager(provider.EcosystemNode), a.managerNames(provider.EcosystemNode))
 	return pythonBins, nodeBins

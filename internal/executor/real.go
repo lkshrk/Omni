@@ -49,15 +49,41 @@ func (r *RealExecutor) Run(ctx context.Context, name string, args ...string) (st
 // names through the same augmented PATH.
 func ResolveCommand(name string) (string, []string) {
 	env := augmentedEnv()
-	return resolveInEnv(name, env), env
+	if resolved, ok := lookupInEnv(name, env); ok {
+		return resolved, env
+	}
+	return name, env
+}
+
+// CommandAvailable reports whether name resolves to an executable through the
+// same augmented PATH RealExecutor uses for subprocesses.
+func CommandAvailable(name string) bool {
+	_, ok := lookupInEnv(name, augmentedEnv())
+	return ok
+}
+
+// CommandAvailable reports whether name resolves to an executable through the
+// same augmented PATH this executor uses for subprocesses.
+func (r *RealExecutor) CommandAvailable(name string) bool {
+	return CommandAvailable(name)
 }
 
 // resolveInEnv looks up binary in the PATH extracted from env.
 // Returns the full path if found, otherwise returns name unchanged
 // (letting the OS produce a meaningful "not found" error).
 func resolveInEnv(name string, env []string) string {
+	if resolved, ok := lookupInEnv(name, env); ok {
+		return resolved
+	}
+	return name
+}
+
+func lookupInEnv(name string, env []string) (string, bool) {
 	if strings.ContainsRune(name, '/') {
-		return name // already a path
+		if isExecutableFile(name) {
+			return name, true
+		}
+		return "", false
 	}
 	for _, e := range env {
 		if !strings.HasPrefix(e, "PATH=") {
@@ -66,12 +92,17 @@ func resolveInEnv(name string, env []string) string {
 		augPath := strings.TrimPrefix(e, "PATH=")
 		for _, dir := range filepath.SplitList(augPath) {
 			candidate := filepath.Join(dir, name)
-			if info, err := os.Stat(candidate); err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
-				return candidate
+			if isExecutableFile(candidate) {
+				return candidate, true
 			}
 		}
 	}
-	return name
+	return "", false
+}
+
+func isExecutableFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir() && info.Mode()&0o111 != 0
 }
 
 // ── PATH augmentation ────────────────────────────────────────────────────────

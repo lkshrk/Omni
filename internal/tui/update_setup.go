@@ -104,6 +104,7 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 	m.groupIgnoreSet = msg.groupIgnoreSet
 	m.toolProviderPins = msg.toolProviderPins
 	m.configuredProviders = append([]string(nil), msg.configuredProviders...)
+	m.providerToolCounts = copyStringIntMap(msg.providerToolCounts)
 	m.effectivePythonManager = msg.effectivePythonManager
 	m.effectiveNodeManager = msg.effectiveNodeManager
 	m.effectiveSystemManager = msg.effectiveSystemManager
@@ -516,15 +517,20 @@ func (m *Model) startCurrentProviderScans() []tea.Cmd {
 	// Use the UNION of DB-row providers and config-declared providers so scans
 	// run on first launch after import. Import() writes JSON config, not DB rows.
 	m.scanningProviders = m.currentProviderScanSet()
+	m.providerScanToolCounts = m.currentProviderScanToolCounts()
+	m.providerScanToolDone = make(map[string]int, len(m.providerScanToolCounts))
+	m.refreshToolDone = 0
+	m.refreshToolTotal = sumProviderToolCounts(m.providerScanToolCounts)
 	if len(m.scanningProviders) == 0 {
 		return nil
 	}
-	setActivityStatus(m, providerRefreshStatus(m.scanningProviders))
+	setActivityStatus(m, toolRefreshStatus(m.scanningProviders, m.refreshToolDone, m.refreshToolTotal))
+	ch, progressGen := m.beginProgressStream()
 	m.scanGen++
 	gen := m.scanGen
-	cmds = append(cmds, m.spinner.Tick)
+	cmds = append(cmds, m.spinner.Tick, waitForProgress(ch, progressGen))
 	for prov := range m.scanningProviders {
-		cmds = append(cmds, m.doScanProvider(prov, gen))
+		cmds = append(cmds, m.doScanProvider(prov, gen, ch, progressGen))
 	}
 	return cmds
 }
@@ -544,6 +550,36 @@ func (m Model) currentProviderScanSet() map[string]bool {
 		providers[t.Provider] = true
 	}
 	return providers
+}
+
+func (m Model) currentProviderScanToolCounts() map[string]int {
+	counts := make(map[string]int, len(m.scanningProviders))
+	for prov := range m.scanningProviders {
+		count := m.providerToolCounts[prov]
+		if count == 0 {
+			for _, t := range m.allTools {
+				if t == nil || !t.Tracked || t.Provider != prov {
+					continue
+				}
+				count++
+			}
+		}
+		if count == 0 {
+			count = 1
+		}
+		counts[prov] = count
+	}
+	return counts
+}
+
+func sumProviderToolCounts(counts map[string]int) int {
+	total := 0
+	for _, count := range counts {
+		if count > 0 {
+			total += count
+		}
+	}
+	return total
 }
 
 func (m Model) providerScanCoveredByConfiguredEcosystem(prov string) bool {
@@ -568,7 +604,7 @@ func (m Model) providerScanCoveredByConfiguredEcosystem(prov string) bool {
 
 func (m *Model) startPostLoadBackgroundTasks() []tea.Cmd {
 	cmds := m.startCurrentProviderScans()
-	if anyMissingDescription(m.allTools) {
+	if len(m.scanningProviders) == 0 && anyMissingDescription(m.allTools) {
 		cmds = append(cmds, m.startDescriptionRefresh())
 	}
 	m.finishSetupReloadIfIdle()
