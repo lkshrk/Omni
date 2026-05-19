@@ -147,14 +147,16 @@ func (m Model) viewString() string {
 		bgModel := m
 		bgModel.mode = viewGroups
 		bg := bgModel.viewString()
-		return placePopup(bg, m, renderHostGroupToolsEditor(m), groupToolsPopupFrame(m))
+		content, frame := renderHostGroupToolsPopup(m)
+		return placePopup(bg, m, content, frame)
 	}
 
 	if m.mode == viewGroupDots {
 		bgModel := m
 		bgModel.mode = viewGroups
 		bg := bgModel.viewString()
-		return placePopup(bg, m, renderHostGroupDotsEditor(m), groupDotsPopupFrame(m))
+		content, frame := renderHostGroupDotsPopup(m)
+		return placePopup(bg, m, content, frame)
 	}
 
 	if m.mode == viewIgnoreScope {
@@ -623,25 +625,33 @@ func groupEditorPopupFrame(m Model) popupFrame {
 }
 
 func groupToolsPopupFrame(m Model) popupFrame {
+	return groupToolsPopupFrameWithLayout(m, groupToolsPopupLayoutFor(m))
+}
+
+func groupToolsPopupFrameWithLayout(m Model, layout groupToolsPopupLayout) popupFrame {
 	paddingX := 2
 	return popupFrame{
 		Title:          "Edit Tools: " + m.groupToolsEditor.group,
 		PaddingY:       1,
 		PaddingX:       paddingX,
-		Width:          popupFrameWidthForContent(groupToolsContentWidth(m), paddingX),
-		ContentHeight:  groupToolsPopupContentHeight(m),
+		Width:          popupFrameWidthForContent(layout.contentWidth, paddingX),
+		ContentHeight:  layout.contentHeight,
 		NoTitleDivider: true,
 	}
 }
 
 func groupDotsPopupFrame(m Model) popupFrame {
+	return groupDotsPopupFrameWithLayout(m, groupDotsPopupLayoutFor(m))
+}
+
+func groupDotsPopupFrameWithLayout(m Model, layout groupDotsPopupLayout) popupFrame {
 	paddingX := 2
 	return popupFrame{
 		Title:          "Edit Dots: " + m.groupDotsEditor.group,
 		PaddingY:       1,
 		PaddingX:       paddingX,
-		Width:          popupFrameWidthForContent(groupDotsContentWidth(m), paddingX),
-		ContentHeight:  groupDotsPopupContentHeight(m),
+		Width:          popupFrameWidthForContent(layout.contentWidth, paddingX),
+		ContentHeight:  layout.contentHeight,
 		NoTitleDivider: true,
 	}
 }

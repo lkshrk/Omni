@@ -1,0 +1,151 @@
+# ignored tools stay invisible across import, refresh, and upgrade-all
+exec chmod 755 bin/brew bin/apt bin/apk bin/dnf bin/pacman bin/zypper bin/pip bin/pip3 bin/npm bin/pnpm bin/bun
+env PATH=$WORK/bin:$PATH
+
+exec omni --config settings.json tools import --provider brew --group testhost
+stdout 'Imported 1 tool\(s\):'
+stdout 'fd'
+! stdout 'ripgrep'
+stdout 'Skipped 1 already configured tool\(s\)'
+exec grep '"fd"' settings.json
+
+exec omni --config settings.json tools refresh
+stdout 'Refresh complete'
+
+exec omni --config settings.json tools list --state outdated --format json
+stdout '"name":"fd"'
+! stdout '"name":"ripgrep"'
+
+exec omni-seed-cache ripgrep system ripgrep 14.0.0 15.0.0 brew
+exec omni-seed-cache fd system fd 9.0.0 10.0.0 brew
+exec omni --config settings.json tools upgrade --all
+stdout 'upgrading fd'
+stdout 'upgraded: fd \(system\)'
+! stdout 'ripgrep'
+exec test -f .omni-cache/fake-brew/fd-upgraded
+! exec test -f .omni-cache/fake-brew/ripgrep-upgraded
+! exec grep 'upgrade ripgrep' .omni-cache/fake-brew/calls
+! exec grep 'list --versions ripgrep' .omni-cache/fake-brew/calls
+! exec grep 'info --json=v2 ripgrep' .omni-cache/fake-brew/calls
+
+-- bin/brew --
+#!/usr/bin/env sh
+set -eu
+state="${OMNI_CACHE_DIR}/fake-brew"
+mkdir -p "$state"
+printf '%s\n' "$*" >> "$state/calls"
+case "${1:-}" in
+  --version)
+    echo "Homebrew 4.0.0"
+    ;;
+  info)
+    if [ "${2:-}" = "--json=v2" ] && [ "${3:-}" = "--installed" ]; then
+      printf '{"formulae":[{"name":"ripgrep","full_name":"ripgrep","desc":"fast grep","installed":[{"version":"14.0.0","installed_on_request":true}]},{"name":"fd","full_name":"fd","desc":"fast find","installed":[{"version":"9.0.0","installed_on_request":true}]}],"casks":[]}\n'
+      exit 0
+    fi
+    if [ "${2:-}" = "--json=v2" ]; then
+      shift 2
+      formulae=""
+      for pkg in "$@"; do
+        if [ "$pkg" = "fd" ]; then
+          if [ -n "$formulae" ]; then
+            formulae="$formulae,"
+          fi
+          formulae="${formulae}{\"name\":\"fd\",\"full_name\":\"fd\",\"desc\":\"fast find\",\"installed\":[]}"
+        fi
+      done
+      printf '{"formulae":[%s],"casks":[]}\n' "$formulae"
+      exit 0
+    fi
+    printf '{"formulae":[],"casks":[]}\n'
+    ;;
+  update)
+    ;;
+  outdated)
+    formulae='{"name":"ripgrep","current_version":"15.0.0"}'
+    if [ ! -f "$state/fd-upgraded" ]; then
+      formulae="${formulae},{\"name\":\"fd\",\"current_version\":\"10.0.0\"}"
+    fi
+    printf '{"formulae":[%s],"casks":[]}\n' "$formulae"
+    ;;
+  upgrade)
+    : > "$state/$2-upgraded"
+    echo "10.0.0" > "$state/$2.version"
+    ;;
+  list)
+    shift
+    if [ "${1:-}" = "--versions" ]; then
+      shift
+      if [ "${1:-}" = "--cask" ]; then
+        shift
+      fi
+      pkg="${1:-}"
+      if [ "$pkg" = "fd" ]; then
+        version="9.0.0"
+        if [ -f "$state/fd.version" ]; then
+          version="$(cat "$state/fd.version")"
+        fi
+        echo "fd $version"
+        exit 0
+      fi
+    fi
+    exit 1
+    ;;
+esac
+
+-- bin/apt --
+#!/usr/bin/env sh
+exit 1
+
+-- bin/apk --
+#!/usr/bin/env sh
+exit 1
+
+-- bin/dnf --
+#!/usr/bin/env sh
+exit 1
+
+-- bin/pacman --
+#!/usr/bin/env sh
+exit 1
+
+-- bin/zypper --
+#!/usr/bin/env sh
+exit 1
+
+-- bin/pip --
+#!/usr/bin/env sh
+exit 1
+
+-- bin/pip3 --
+#!/usr/bin/env sh
+exit 1
+
+-- bin/npm --
+#!/usr/bin/env sh
+exit 1
+
+-- bin/pnpm --
+#!/usr/bin/env sh
+exit 1
+
+-- bin/bun --
+#!/usr/bin/env sh
+exit 1
+
+-- settings.json --
+{
+  "settings": {
+    "disabled_providers": ["node", "python"]
+  },
+  "hosts": { "testhost": [] },
+  "tools": {
+    "ripgrep": { "provider": "system", "install_with": "brew" }
+  },
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": ["ripgrep"] }
+  ],
+  "ignore": {
+    "tools": ["ripgrep"]
+  }
+}

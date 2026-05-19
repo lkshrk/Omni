@@ -196,10 +196,8 @@ type BulkDescriber interface {
 }
 
 // CLIToolProvider is optionally implemented by providers that can distinguish
-// CLI tools from pure library packages (e.g. pip).  Import uses it to
-// auto-mark non-CLI packages with Ignore:true in the config so they still
-// appear in the ignored section for version tracking but don't clutter the
-// active tools list.
+// CLI tools from pure library packages (e.g. pip). Import uses it to mark
+// non-CLI packages with Ignore:true so app-level tool processing can skip them.
 type CLIToolProvider interface {
 	// CLIToolSet returns the set of lowercase package names that install at
 	// least one CLI entry point.  Packages absent from the set are libraries.

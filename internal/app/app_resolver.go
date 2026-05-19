@@ -40,10 +40,7 @@ func (a *App) resolveTools(ctx context.Context, cfg *config.RootConfig, groups [
 	if cfg == nil {
 		return nil, nil
 	}
-	ignored := make(map[string]struct{})
-	for _, name := range cfg.Ignore.Tools {
-		ignored[name] = struct{}{}
-	}
+	ignored := ignoredToolSet(cfg)
 	memberships := make(map[string][]string)
 	order := make([]string, 0)
 	seen := make(map[string]struct{})
@@ -74,8 +71,8 @@ func (a *App) resolveTools(ctx context.Context, cfg *config.RootConfig, groups [
 		}
 		install := a.resolveInstallSpec(ctx, name, spec)
 		entry := spec.ToToolEntry(name, install)
-		if _, ok := ignored[name]; ok {
-			entry.Ignore = true
+		if toolNameIgnored(ignored, name) || entry.Ignore {
+			continue
 		}
 		resolved = append(resolved, resolvedTool{
 			entry:       entry,

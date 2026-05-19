@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +23,7 @@ type lifecycleProvider struct {
 	resolvedName      string
 	installed         bool
 	version           string
+	outdated          map[string]string
 }
 
 type multiManagerLifecycleProvider struct {
@@ -58,6 +60,10 @@ func (p *lifecycleProvider) IsInstalledWithManager(_ context.Context, tool provi
 	p.managerChecks = append(p.managerChecks, manager)
 	p.installedChecks = append(p.installedChecks, tool)
 	return p.installed, p.version, nil
+}
+
+func (p *lifecycleProvider) OutdatedMap(_ context.Context) (map[string]string, error) {
+	return p.outdated, nil
 }
 
 func (p *lifecycleProvider) ResolvedName(_ context.Context) (string, error) {
@@ -147,6 +153,51 @@ func TestCompleteExternalToolAction_UninstallRemovesConfigAndCache(t *testing.T)
 	}
 	if len(gotCfg.Groups) != 1 || len(gotCfg.Groups[0].Tools) != 0 {
 		t.Fatalf("group tools after uninstall = %+v, want parsec removed", gotCfg.Groups)
+	}
+}
+
+func TestCompleteExternalToolAction_UninstallRejectsProviderTool(t *testing.T) {
+	ctx := context.Background()
+	node := &lifecycleProvider{stubProvider: stubProvider{name: "node", available: true}}
+	a, cfgPath := newImportApp(t, node)
+	cfg := &config.RootConfig{
+		Tools: logicalToolSpecs(logicalFixtureTool{Name: "npm", Provider: "node", InstallWith: "npm"}),
+		Groups: []*config.GroupConfig{{
+			Name:  "testhost",
+			Tools: groupTools("npm"),
+		}},
+	}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name:          "npm",
+		Provider:      "node",
+		Package:       "npm",
+		Installed:     true,
+		InstalledWith: "npm",
+		LastChecked:   time.Now(),
+	}); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+
+	err := a.CompleteExternalToolAction(ctx, provider.PrivilegeActionUninstall, "npm", "node", "npm", "npm")
+	if err == nil || !strings.Contains(err.Error(), "package manager/provider") {
+		t.Fatalf("CompleteExternalToolAction err = %v, want protected provider tool error", err)
+	}
+
+	if _, err := a.DB().Get(ctx, "npm", "node", "npm"); err != nil {
+		t.Fatalf("cache row after rejected uninstall err = %v, want still present", err)
+	}
+	gotCfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("loading config: %v", err)
+	}
+	if _, ok := gotCfg.Tools["npm"]; !ok {
+		t.Fatal("npm logical tool spec was removed despite protected provider guard")
+	}
+	if len(gotCfg.Groups) != 1 || !logicalTestGroupHasTool(gotCfg.Groups[0], "npm") {
+		t.Fatalf("group tools after rejected uninstall = %+v, want npm preserved", gotCfg.Groups)
 	}
 }
 

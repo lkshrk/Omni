@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	osExec "os/exec"
 	"sort"
 	"strings"
 
@@ -13,6 +12,7 @@ import (
 
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/executor"
 	"github.com/lkshrk/omni/internal/provider"
 )
 
@@ -419,12 +419,12 @@ func (a *App) AllAvailableManagers() (pythonBins, nodeBins []string) {
 // found on PATH, or "" if none are available.
 func probeFirst(hint string, priority []string) string {
 	if hint != "" {
-		if _, err := osExec.LookPath(hint); err == nil {
+		if managerAvailable(hint) {
 			return hint
 		}
 	}
 	for _, bin := range priority {
-		if _, err := osExec.LookPath(bin); err == nil {
+		if managerAvailable(bin) {
 			return bin
 		}
 	}
@@ -438,7 +438,7 @@ func probeAll(hint string, priority []string) []string {
 	var found []string
 	add := func(bin string) {
 		if bin != "" && !seen[bin] {
-			if _, err := osExec.LookPath(bin); err == nil {
+			if managerAvailable(bin) {
 				seen[bin] = true
 				found = append(found, bin)
 			}
@@ -449,4 +449,9 @@ func probeAll(hint string, priority []string) []string {
 		add(bin)
 	}
 	return found
+}
+
+func managerAvailable(bin string) bool {
+	resolved, _ := executor.ResolveCommand(bin)
+	return resolved != bin
 }

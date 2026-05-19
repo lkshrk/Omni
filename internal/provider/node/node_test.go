@@ -347,19 +347,55 @@ func TestDescription_NonEmpty(t *testing.T) {
 func TestUpgrade_PnpmArgs(t *testing.T) {
 	m := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "pnpm --version", Response: executor.MockCall{Stdout: "8.0.0"}},
-		executor.MatchRule{Pattern: "pnpm update -g typescript", Response: executor.MockCall{}},
+		executor.MatchRule{Pattern: "pnpm update -g --latest typescript", Response: executor.MockCall{}},
 	)
 	p := node.New(m, "pnpm")
 	if err := p.Upgrade(context.Background(), tool("typescript")); err != nil {
 		t.Fatalf("Upgrade: %v", err)
 	}
-	m.AssertCalled(t, "pnpm update -g typescript")
+	m.AssertCalled(t, "pnpm update -g --latest typescript")
+}
+
+func TestUpgrade_BunUsesLatestFlag(t *testing.T) {
+	m := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "bun --version", Response: executor.MockCall{Stdout: "1.3.8"}},
+		executor.MatchRule{Pattern: "bun update -g --latest typescript", Response: executor.MockCall{}},
+	)
+	p := node.New(m, "bun")
+	if err := p.Upgrade(context.Background(), tool("typescript")); err != nil {
+		t.Fatalf("Upgrade: %v", err)
+	}
+	m.AssertCalled(t, "bun update -g --latest typescript")
+}
+
+func TestUpgrade_NpmInstallsLatestTag(t *testing.T) {
+	m := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "npm --version", Response: executor.MockCall{Stdout: "10.2.4"}},
+		executor.MatchRule{Pattern: "npm install -g typescript@latest", Response: executor.MockCall{}},
+	)
+	p := node.New(m, "npm")
+	if err := p.Upgrade(context.Background(), tool("typescript")); err != nil {
+		t.Fatalf("Upgrade: %v", err)
+	}
+	m.AssertCalled(t, "npm install -g typescript@latest")
+}
+
+func TestUpgrade_NpmInstallsLatestTagForScopedPackage(t *testing.T) {
+	m := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "npm --version", Response: executor.MockCall{Stdout: "10.2.4"}},
+		executor.MatchRule{Pattern: "npm install -g @scope/toolkit@latest", Response: executor.MockCall{}},
+	)
+	p := node.New(m, "npm")
+	if err := p.Upgrade(context.Background(), tool("@scope/toolkit")); err != nil {
+		t.Fatalf("Upgrade: %v", err)
+	}
+	m.AssertCalled(t, "npm install -g @scope/toolkit@latest")
 }
 
 func TestUpgrade_Error(t *testing.T) {
 	m := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "pnpm --version", Response: executor.MockCall{Stdout: "8.0.0"}},
-		executor.MatchRule{Pattern: "pnpm update -g bad", Response: executor.MockCall{Err: errors.New("exit 1")}},
+		executor.MatchRule{Pattern: "pnpm update -g --latest bad", Response: executor.MockCall{Err: errors.New("exit 1")}},
 	)
 	p := node.New(m, "pnpm")
 	if err := p.Upgrade(context.Background(), tool("bad")); err == nil {
@@ -369,13 +405,13 @@ func TestUpgrade_Error(t *testing.T) {
 
 func TestUpgradeWithManager_UsesInstalledManager(t *testing.T) {
 	m := executor.NewMatchMock(
-		executor.MatchRule{Pattern: "npm update -g typescript", Response: executor.MockCall{}},
+		executor.MatchRule{Pattern: "npm install -g typescript@latest", Response: executor.MockCall{}},
 	)
 	p := node.New(m, "bun")
 	if err := p.UpgradeWithManager(context.Background(), tool("typescript"), "npm"); err != nil {
 		t.Fatalf("UpgradeWithManager: %v", err)
 	}
-	m.AssertCalled(t, "npm update -g typescript")
+	m.AssertCalled(t, "npm install -g typescript@latest")
 	if len(m.CallsMatching("bun update")) > 0 {
 		t.Fatal("should not upgrade through active bun manager when installed manager is npm")
 	}

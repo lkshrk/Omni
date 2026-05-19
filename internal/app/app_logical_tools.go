@@ -75,6 +75,9 @@ func (a *App) RemoveLogicalTool(ctx context.Context, name string) error {
 	if name == "" {
 		return fmt.Errorf("tool name is required")
 	}
+	if err := a.rejectProviderToolDelete(name); err != nil {
+		return err
+	}
 
 	if err := a.withConfig(func(cfg *config.RootConfig) error {
 		changed := false

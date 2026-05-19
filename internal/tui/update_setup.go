@@ -656,8 +656,12 @@ func (m Model) setupSelectedGroups() []string {
 
 func (m *Model) finishSetupWithReload(cmds *[]tea.Cmd) {
 	m.markBootstrapComplete(cmds)
-	m.mode = viewStatus
-	m.setupBackgroundMode = viewStatus
+	targetMode := m.setupBackgroundMode
+	if !isMainTabMode(targetMode) || targetMode == viewSetup {
+		targetMode = viewStatus
+	}
+	m.mode = targetMode
+	m.setupBackgroundMode = targetMode
 	m.setupStep = 0
 	m.setupCopyHostIdx = 0
 	m.setupGroupIdx = 0

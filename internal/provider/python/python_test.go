@@ -210,13 +210,26 @@ func TestUninstall_Pip3(t *testing.T) {
 func TestUpgrade_UV(t *testing.T) {
 	m := executor.NewMatchMock(
 		uvOK(),
-		executor.MatchRule{Pattern: "uv tool upgrade black", Response: executor.MockCall{}},
+		executor.MatchRule{Pattern: "uv tool install black@latest", Response: executor.MockCall{}},
 	)
 	p := New(m, "uv")
 	if err := p.Upgrade(context.Background(), tool("black")); err != nil {
 		t.Fatalf("Upgrade: %v", err)
 	}
-	m.AssertCalled(t, "uv tool upgrade black")
+	m.AssertCalled(t, "uv tool install black@latest")
+}
+
+func TestUpgrade_UVPreservesExplicitVersionSpec(t *testing.T) {
+	m := executor.NewMatchMock(
+		uvOK(),
+		executor.MatchRule{Pattern: "uv tool install black==24.1.0", Response: executor.MockCall{}},
+	)
+	p := New(m, "uv")
+	spec := provider.Tool{Name: "black", Provider: "python", Package: "black==24.1.0"}
+	if err := p.Upgrade(context.Background(), spec); err != nil {
+		t.Fatalf("Upgrade: %v", err)
+	}
+	m.AssertCalled(t, "uv tool install black==24.1.0")
 }
 
 func TestUpgrade_Pip3(t *testing.T) {
@@ -241,7 +254,7 @@ func TestUpgradeWithManager_UsesInstalledManager(t *testing.T) {
 		t.Fatalf("UpgradeWithManager: %v", err)
 	}
 	m.AssertCalled(t, "pip3 install --upgrade black")
-	if len(m.CallsMatching("uv tool upgrade")) > 0 {
+	if len(m.CallsMatching("uv tool install")) > 0 {
 		t.Fatal("should not upgrade through active uv manager when installed manager is pip3")
 	}
 }
