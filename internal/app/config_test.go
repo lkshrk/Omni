@@ -64,6 +64,81 @@ func TestCreateEmptyConfig_Noop(t *testing.T) {
 	}
 }
 
+func TestImportConfigFile_CopiesExistingSettings(t *testing.T) {
+	a, cfgPath := newImportApp(t)
+	sourcePath := filepath.Join(t.TempDir(), "settings.json")
+	source := &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("ripgrep", "system")),
+		Groups: []*config.GroupConfig{
+			{Name: "work", Tools: groupTools("ripgrep")},
+		},
+		Hosts: map[string][]string{"laptop": {"work"}},
+	}
+	source.Settings.SetEcosystemManager("node", "pnpm")
+	if err := config.Save(sourcePath, source); err != nil {
+		t.Fatalf("save source config: %v", err)
+	}
+
+	if err := a.ImportConfigFile(sourcePath); err != nil {
+		t.Fatalf("ImportConfigFile: %v", err)
+	}
+
+	got, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if _, ok := got.Tools["ripgrep"]; !ok {
+		t.Fatal("imported config missing ripgrep tool")
+	}
+	if group := findTestGroup(got, "work"); group == nil || !testGroupHasTool(group, "ripgrep") {
+		t.Fatalf("imported work group = %#v, want ripgrep membership", group)
+	}
+	if got.Settings.EcosystemManager("node") != "pnpm" {
+		t.Fatalf("node manager = %q, want pnpm", got.Settings.EcosystemManager("node"))
+	}
+}
+
+func TestImportConfigFile_RejectsMissingSource(t *testing.T) {
+	a, _ := newImportApp(t)
+	err := a.ImportConfigFile(filepath.Join(t.TempDir(), "missing-settings.json"))
+	if err == nil || !strings.Contains(err.Error(), "settings import") {
+		t.Fatalf("ImportConfigFile err = %v, want missing source error", err)
+	}
+}
+
+func TestImportConfigFile_RejectsDirectorySource(t *testing.T) {
+	a, _ := newImportApp(t)
+	err := a.ImportConfigFile(t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "is a directory") {
+		t.Fatalf("ImportConfigFile err = %v, want directory source error", err)
+	}
+}
+
+func TestImportConfigFile_RejectsMalformedSource(t *testing.T) {
+	a, _ := newImportApp(t)
+	sourcePath := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(sourcePath, []byte(`{"version":`), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	err := a.ImportConfigFile(sourcePath)
+	if err == nil || !strings.Contains(err.Error(), "load settings import") {
+		t.Fatalf("ImportConfigFile err = %v, want malformed source error", err)
+	}
+}
+
+func TestImportConfigFile_RejectsActiveConfigSource(t *testing.T) {
+	a, cfgPath := newImportApp(t)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	err := a.ImportConfigFile(cfgPath)
+	if err == nil || !strings.Contains(err.Error(), "already the active config") {
+		t.Fatalf("ImportConfigFile err = %v, want active config source error", err)
+	}
+}
+
 // ─── LoadTaps ─────────────────────────────────────────────────────────────────
 
 func TestLoadTaps_Empty(t *testing.T) {

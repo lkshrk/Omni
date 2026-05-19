@@ -44,6 +44,11 @@ type toolsLoadedMsg struct {
 	configuredProviders    []string           // unique provider names declared in config groups (may differ from DB rows on first run)
 }
 
+type setupConfigImportDoneMsg struct {
+	path string
+	err  error
+}
+
 // providerScannedMsg is sent when the per-provider parallel scan goroutine
 // completes (both install-status and outdated-status passes). Tools are NOT
 // fetched here to avoid concurrent ListTools calls racing each other and

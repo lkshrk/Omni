@@ -18,12 +18,14 @@ func renderSetup(m Model) string {
 	switch m.setupStep {
 	case 0:
 		body = renderSetupPanel(m, setupPanel{
-			Lead: "Manage packages and dotfiles from one settings.json.",
-			Help: []string{"No config exists yet. Create one to get started?"},
+			Lead: "No settings.json was found.",
+			Help: []string{
+				"Import an existing Omni settings file, or create a new one for this machine.",
+			},
 			Footer: renderSetupFooter(m,
 				[]hintItem{dangerRawHint("esc", "quit")},
-				nil,
-				[]hintItem{hintFromBindingDesc(m.keys.Confirm, "create settings.json")},
+				[]hintItem{dangerRawHint("n", "create new")},
+				[]hintItem{hintFromBindingDesc(m.keys.Confirm, "import existing")},
 			),
 		})
 	case 1, 2:
@@ -164,6 +166,16 @@ func renderSetup(m Model) string {
 				[]hintItem{hintFromBindingDesc(m.keys.Back, "review first")},
 				nil,
 				[]hintItem{hintFromBindingDesc(m.keys.Confirm, "continue")},
+			),
+		})
+	case setupStepCreateConfig:
+		body = renderSetupPanel(m, setupPanel{
+			Lead: "Creating a new settings.json.",
+			Help: []string{"Omni will detect available package managers next."},
+			Footer: renderSetupFooter(m,
+				[]hintItem{hintFromBindingDesc(m.keys.Back, "back")},
+				nil,
+				nil,
 			),
 		})
 	}
@@ -342,7 +354,7 @@ func setupPopupFrame(m Model) popupFrame {
 func setupPopupTitle(m Model) string {
 	switch m.setupStep {
 	case 0:
-		return logoMark + " Omni - Create settings"
+		return logoMark + " Omni - Import settings"
 	case 1:
 		return logoMark + " Omni - Import tools"
 	case 2:
@@ -361,6 +373,8 @@ func setupPopupTitle(m Model) string {
 		return logoMark + " Omni - Choose groups"
 	case 10:
 		return logoMark + " Omni - Bootstrap host"
+	case setupStepCreateConfig:
+		return logoMark + " Omni - Create settings"
 	default:
 		return logoMark + " Omni"
 	}

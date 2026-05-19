@@ -26,6 +26,10 @@ type pathPickerModel struct {
 	showHidden bool
 	err        error
 
+	completionActive  bool
+	completionEntries []pathPickerEntry
+	completionIndex   int
+
 	// Kept as public-looking fields so picker-focused tests can assert the
 	// same TUI-owned bounds and cursor contract the old filepicker exposed.
 	AutoHeight bool
@@ -41,7 +45,7 @@ type pathPickerEntry struct {
 func newPathPicker(currentPath string, allowFiles bool, width, height int) (pathPickerModel, tea.Cmd) {
 	input := textinput.New()
 	input.Prompt = ""
-	input.Placeholder = "Path"
+	input.Placeholder = ""
 	input.ShowSuggestions = false
 	input.SetWidth(pathPickerInputWidth(width))
 	input.SetVirtualCursor(true)
@@ -62,11 +66,12 @@ func newPathPicker(currentPath string, allowFiles bool, width, height int) (path
 }
 
 func (p *pathPickerModel) setStartPath(currentPath string) {
+	currentPath = normalizeRepeatedHomeInput(currentPath)
 	start := expandPath(currentPath)
 	if start != "" {
 		if info, err := os.Stat(start); err == nil && info.IsDir() {
 			p.cwd = start
-			p.input.SetValue(tildePath(start))
+			p.input.SetValue(tildePathForInput(start))
 			p.input.CursorEnd()
 			return
 		}
@@ -80,7 +85,7 @@ func (p *pathPickerModel) setStartPath(currentPath string) {
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		p.cwd = home
-		p.input.SetValue("~")
+		p.input.SetValue("~/")
 		p.input.CursorEnd()
 		return
 	}
@@ -96,11 +101,17 @@ func (p *pathPickerModel) Init() tea.Cmd {
 func (p pathPickerModel) Update(msg tea.Msg) (pathPickerModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.PasteMsg:
-		p.input.SetValue(p.input.Value() + msg.Content)
+		if pathPasteReplacesInput(msg.Content) {
+			p.input.SetValue(msg.Content)
+		} else {
+			p.input.SetValue(p.input.Value() + msg.Content)
+		}
+		p.resetCompletion()
+		p.normalizeInputValue()
 		p.input.CursorEnd()
 		p.syncDirectoryFromInput()
 		p.applyFilter()
-		return p, nil
+		return p, p.input.Focus()
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "up", "ctrl+p":
@@ -118,17 +129,12 @@ func (p pathPickerModel) Update(msg tea.Msg) (pathPickerModel, tea.Cmd) {
 		case "tab":
 			p.complete()
 			return p, nil
-		case "right":
-			p.descendHighlighted()
-			return p, nil
-		case "left":
+		case "ctrl+left":
 			p.goParent()
 			return p, nil
-		case "backspace":
-			if p.input.Position() == 0 || pathClean(p.input.Value()) == pathClean(p.cwd) {
-				p.goParent()
-				return p, nil
-			}
+		case "ctrl+right":
+			p.descendHighlighted()
+			return p, nil
 		}
 	}
 
@@ -136,10 +142,28 @@ func (p pathPickerModel) Update(msg tea.Msg) (pathPickerModel, tea.Cmd) {
 	old := p.input.Value()
 	p.input, cmd = p.input.Update(msg)
 	if p.input.Value() != old {
+		p.resetCompletion()
+		p.normalizeInputValue()
 		p.syncDirectoryFromInput()
 		p.applyFilter()
 	}
 	return p, cmd
+}
+
+func pathPasteReplacesInput(content string) bool {
+	if strings.HasPrefix(content, "~") {
+		return true
+	}
+	return filepath.IsAbs(content)
+}
+
+func (p *pathPickerModel) normalizeInputValue() {
+	normalized := normalizeRepeatedHomeInput(p.input.Value())
+	if normalized == p.input.Value() {
+		return
+	}
+	p.input.SetValue(normalized)
+	p.input.CursorEnd()
 }
 
 func (p *pathPickerModel) SetHeight(h int) {
@@ -170,8 +194,8 @@ func (p pathPickerModel) HighlightedPath() string {
 }
 
 func (p pathPickerModel) SelectedPath() string {
-	typed := expandPath(p.input.Value())
-	if typed != "" && pathClean(typed) != pathClean(p.cwd) {
+	typed := expandPath(normalizeRepeatedHomeInput(p.input.Value()))
+	if typed != "" {
 		if info, err := os.Stat(typed); err == nil && (info.IsDir() || p.allowFiles) {
 			return typed
 		}
@@ -180,14 +204,6 @@ func (p pathPickerModel) SelectedPath() string {
 		if info, err := os.Stat(h); err == nil && (info.IsDir() || p.allowFiles) {
 			return h
 		}
-	}
-	if typed != "" {
-		if info, err := os.Stat(typed); err == nil && (info.IsDir() || p.allowFiles) {
-			return typed
-		}
-	}
-	if p.cwd != "" {
-		return p.cwd
 	}
 	return ""
 }
@@ -217,9 +233,12 @@ func (p pathPickerModel) View(pal palette) string {
 	var sb strings.Builder
 	sb.WriteString(strings.Join(rows, "\n"))
 	sb.WriteString("\n\n")
-	sb.WriteString(pal.styleHelp.Render("path "))
-	sb.WriteString(renderEmptyAwareTextInputView(pal, p.input, p.input.Placeholder, pathPickerInputWidth(p.width)))
+	sb.WriteString(p.inputLine(pal))
 	return sb.String()
+}
+
+func (p pathPickerModel) inputLine(pal palette) string {
+	return pal.styleHelp.Render("path ") + renderEmptyAwareTextInputView(pal, p.input, "", pathPickerInputWidth(p.width))
 }
 
 func (p pathPickerModel) renderRow(entry pathPickerEntry, selected bool, pal palette) string {
@@ -263,7 +282,8 @@ func (p *pathPickerModel) goParent() {
 		return
 	}
 	p.cwd = parent
-	p.input.SetValue(tildePath(parent))
+	p.resetCompletion()
+	p.input.SetValue(tildePathForInput(parent))
 	p.input.CursorEnd()
 	p.refreshEntries()
 	p.applyFilter()
@@ -279,52 +299,98 @@ func (p *pathPickerModel) descendHighlighted() {
 		return
 	}
 	p.cwd = h
-	p.input.SetValue(tildePath(h))
+	p.resetCompletion()
+	p.input.SetValue(tildePathForInput(h))
 	p.input.CursorEnd()
 	p.refreshEntries()
 	p.applyFilter()
 }
 
 func (p *pathPickerModel) complete() {
-	if len(p.filtered) == 0 {
+	if !p.shouldContinueCompletionCycle() {
+		p.completionEntries = p.completableFilteredEntries()
+		if len(p.completionEntries) == 0 {
+			p.resetCompletion()
+			return
+		}
+		p.completionIndex = completionStartIndex(p.completionEntries, p.HighlightedPath())
+		p.completionActive = true
+	} else {
+		p.completionIndex = (p.completionIndex + 1) % len(p.completionEntries)
+	}
+	if p.completionIndex < 0 || p.completionIndex >= len(p.completionEntries) {
+		p.resetCompletion()
 		return
 	}
-	paths := make([]string, 0, len(p.filtered))
+	entry := p.completionEntries[p.completionIndex]
+	p.input.SetValue(tildePathForInput(entry.path))
+	p.input.CursorEnd()
+	p.filtered = append(p.filtered[:0], p.completionEntries...)
+	p.cursor = p.completionIndex
+}
+
+func (p pathPickerModel) completableFilteredEntries() []pathPickerEntry {
+	entries := make([]pathPickerEntry, 0, len(p.filtered))
 	for _, entry := range p.filtered {
 		if entry.isDir || p.allowFiles {
-			paths = append(paths, entry.path)
+			entries = append(entries, entry)
 		}
 	}
-	if len(paths) == 0 {
-		return
+	return entries
+}
+
+func (p pathPickerModel) shouldContinueCompletionCycle() bool {
+	if !p.completionActive || len(p.completionEntries) == 0 || p.completionIndex < 0 || p.completionIndex >= len(p.completionEntries) {
+		return false
 	}
-	prefix := longestCommonPrefix(paths)
-	if prefix == "" {
-		return
+	current := expandPathPreserveInput(p.input.Value())
+	if current == "" {
+		return false
 	}
-	p.input.SetValue(tildePath(prefix))
-	p.input.CursorEnd()
-	p.syncDirectoryFromInput()
-	p.applyFilter()
+	return pathClean(current) == pathClean(p.completionEntries[p.completionIndex].path)
+}
+
+func (p *pathPickerModel) resetCompletion() {
+	p.completionActive = false
+	p.completionEntries = nil
+	p.completionIndex = 0
+}
+
+func completionStartIndex(entries []pathPickerEntry, highlighted string) int {
+	if highlighted == "" {
+		return 0
+	}
+	for i, entry := range entries {
+		if pathClean(entry.path) == pathClean(highlighted) {
+			return i
+		}
+	}
+	return 0
 }
 
 func (p *pathPickerModel) syncDirectoryFromInput() {
-	raw := p.input.Value()
-	value := expandPathPreserveInput(raw)
-	if value == "" {
+	p.normalizeInputValue()
+	dir, _, ok := p.inputDirectoryAndQuery()
+	if !ok {
+		p.err = nil
+		p.entries = nil
+		p.filtered = nil
 		return
 	}
-	parent := filepath.Dir(value)
-	if pathInputHasTrailingSeparator(raw) {
-		parent = pathClean(value)
-	}
-	if parent == "" || parent == "." || pathClean(parent) == pathClean(p.cwd) {
+	if pathClean(dir) == pathClean(p.cwd) {
+		if p.entries == nil || p.err != nil {
+			p.refreshEntries()
+		}
 		return
 	}
-	if info, err := os.Stat(parent); err == nil && info.IsDir() {
-		p.cwd = parent
+	if info, err := os.Stat(dir); err == nil && info.IsDir() {
+		p.cwd = dir
 		p.refreshEntries()
+		return
 	}
+	p.err = nil
+	p.entries = nil
+	p.filtered = nil
 }
 
 func pathInputHasTrailingSeparator(path string) bool {
@@ -364,6 +430,7 @@ func (p *pathPickerModel) refreshEntries() {
 }
 
 func (p *pathPickerModel) applyFilter() {
+	p.syncDirectoryFromInput()
 	query := p.query()
 	type scored struct {
 		entry pathPickerEntry
@@ -377,6 +444,11 @@ func (p *pathPickerModel) applyFilter() {
 		score, ok := matchPathPickerEntry(entry.name, query)
 		if ok {
 			matches = append(matches, scored{entry: entry, score: score})
+		}
+	}
+	if len(matches) == 0 {
+		if entry, ok := p.repeatedHomeBasenameFallback(query); ok {
+			matches = append(matches, scored{entry: entry, score: 0})
 		}
 	}
 	sort.SliceStable(matches, func(i, j int) bool {
@@ -401,26 +473,35 @@ func (p *pathPickerModel) applyFilter() {
 	p.input.SetSuggestions(suggestions)
 }
 
+func (p pathPickerModel) repeatedHomeBasenameFallback(query string) (pathPickerEntry, bool) {
+	if query == "" {
+		return pathPickerEntry{}, false
+	}
+	raw := normalizeRepeatedHomeInput(p.input.Value())
+	rest := strings.TrimPrefix(raw, "~/")
+	if !strings.HasPrefix(raw, "~/") || strings.Contains(rest, "/") || (filepath.Separator != '/' && strings.Contains(rest, string(filepath.Separator))) {
+		return pathPickerEntry{}, false
+	}
+	home := pathPickerHomeDir()
+	if pathClean(p.cwd) != pathClean(home) {
+		return pathPickerEntry{}, false
+	}
+	homeBase := filepath.Base(filepath.Clean(home))
+	if homeBase == "" || homeBase == "." || homeBase == string(filepath.Separator) {
+		return pathPickerEntry{}, false
+	}
+	if !strings.HasPrefix(strings.ToLower(homeBase), strings.ToLower(query)) {
+		return pathPickerEntry{}, false
+	}
+	return pathPickerEntry{name: homeBase, path: home, isDir: true}, true
+}
+
 func (p pathPickerModel) query() string {
-	raw := p.input.Value()
-	value := expandPathPreserveInput(raw)
-	if value == "" {
+	_, query, ok := p.inputDirectoryAndQuery()
+	if !ok {
 		return ""
 	}
-	if pathClean(value) == pathClean(p.cwd) {
-		if !pathInputHasTrailingSeparator(raw) && filepath.Base(value) == "." {
-			return "."
-		}
-		return ""
-	}
-	if pathInputHasTrailingSeparator(raw) {
-		return ""
-	}
-	if rel, err := filepath.Rel(p.cwd, value); err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		parts := strings.Split(rel, string(filepath.Separator))
-		return parts[0]
-	}
-	return filepath.Base(value)
+	return query
 }
 
 func matchPathPickerEntry(name, query string) (int, bool) {
@@ -432,44 +513,7 @@ func matchPathPickerEntry(name, query string) (int, bool) {
 	if strings.HasPrefix(nameLower, queryLower) {
 		return 0, true
 	}
-	if fuzzySubsequence(nameLower, queryLower) {
-		return 1, true
-	}
 	return 0, false
-}
-
-func fuzzySubsequence(s, query string) bool {
-	if query == "" {
-		return true
-	}
-	i := 0
-	q := []rune(query)
-	for _, r := range s {
-		if r == q[i] {
-			i++
-			if i == len(q) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func longestCommonPrefix(paths []string) string {
-	if len(paths) == 0 {
-		return ""
-	}
-	prefix := paths[0]
-	for _, path := range paths[1:] {
-		for !strings.HasPrefix(path, prefix) {
-			rs := []rune(prefix)
-			prefix = string(rs[:len(rs)-1])
-			if prefix == "" {
-				return ""
-			}
-		}
-	}
-	return prefix
 }
 
 func expandPath(path string) string {
@@ -488,6 +532,7 @@ func expandPath(path string) string {
 }
 
 func expandPathPreserveInput(path string) string {
+	path = normalizeRepeatedHomeInput(path)
 	if path == "" {
 		return ""
 	}
@@ -502,6 +547,55 @@ func expandPathPreserveInput(path string) string {
 	return path
 }
 
+func (p pathPickerModel) inputDirectoryAndQuery() (string, string, bool) {
+	raw := normalizeRepeatedHomeInput(p.input.Value())
+	if raw == "" || raw == "~" {
+		return pathPickerHomeDir(), "", true
+	}
+	if pathInputHasTrailingSeparator(raw) {
+		return resolvePathInput(raw, p.cwd), "", true
+	}
+
+	full := resolvePathInput(raw, p.cwd)
+	base := filepath.Base(raw)
+	if base == ".." {
+		return full, "", true
+	}
+	if pathClean(full) == pathClean(p.cwd) && base != "." {
+		return p.cwd, "", true
+	}
+
+	dirInput := filepath.Dir(raw)
+	if dirInput == "." && (strings.HasPrefix(raw, "~") || filepath.IsAbs(raw)) {
+		dirInput = raw
+	}
+	dir := resolvePathInput(dirInput, p.cwd)
+	if dir == "" {
+		return "", "", false
+	}
+	return dir, base, true
+}
+
+func resolvePathInput(path, baseDir string) string {
+	path = normalizeRepeatedHomeInput(path)
+	if path == "" || path == "." {
+		if baseDir != "" {
+			return pathClean(baseDir)
+		}
+		return pathPickerHomeDir()
+	}
+	if expanded, err := dots.ExpandPath(path); err == nil {
+		path = expanded
+	}
+	if filepath.IsAbs(path) {
+		return pathClean(path)
+	}
+	if baseDir == "" {
+		baseDir = pathPickerHomeDir()
+	}
+	return pathClean(filepath.Join(baseDir, path))
+}
+
 func pathClean(path string) string {
 	if path == "" {
 		return ""
@@ -509,6 +603,43 @@ func pathClean(path string) string {
 	return filepath.Clean(path)
 }
 
+func pathPickerHomeDir() string {
+	if home, err := os.UserHomeDir(); err == nil {
+		return home
+	}
+	return string(filepath.Separator)
+}
+
+func normalizeRepeatedHomeInput(path string) string {
+	if path == "" {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	homeBase := filepath.Base(filepath.Clean(home))
+	if homeBase == "" || homeBase == "." || homeBase == string(filepath.Separator) {
+		return path
+	}
+	prefix := "~/" + homeBase + "/"
+	if !strings.HasPrefix(path, prefix) {
+		return path
+	}
+	if _, err := os.Stat(filepath.Join(home, homeBase)); err == nil {
+		return path
+	}
+	return "~/" + strings.TrimPrefix(path, prefix)
+}
+
 func pathPickerInputWidth(width int) int {
 	return max(width-5, 8)
+}
+
+func tildePathForInput(path string) string {
+	value := tildePath(path)
+	if value == "~" {
+		return "~/"
+	}
+	return value
 }

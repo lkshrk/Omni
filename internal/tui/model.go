@@ -400,6 +400,7 @@ type Model struct {
 	showFilePicker       bool
 	filePickerTitle      string
 	filePickerAllowFiles bool
+	filePickerForConfig  bool
 	settingsInput        textinput.Model // used by settings/group text inputs
 
 	// dots tab

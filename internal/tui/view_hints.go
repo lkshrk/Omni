@@ -375,8 +375,6 @@ func contextHintItems(m Model, ctx hintContext) []hintItem {
 		return dotsConflictHintItems(m)
 	case hintCtxFilePickerBrowse:
 		return []hintItem{
-			rawHint("tab", "complete"),
-			rawHint("bs", "parent"),
 			hintFromBindingDesc(m.keys.Confirm, "pick"),
 			hintFromBindingDesc(m.keys.Back, "close"),
 		}

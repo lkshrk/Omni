@@ -81,6 +81,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case setupImportDoneMsg:
 		cmds = append(cmds, m.handleSetupImportDoneMsg(msg)...)
 
+	case setupConfigImportDoneMsg:
+		cmds = append(cmds, m.handleSetupConfigImportDoneMsg(msg)...)
+
 	case setupProvidersDoneMsg:
 		cmds = append(cmds, m.handleSetupProvidersDoneMsg(msg)...)
 
