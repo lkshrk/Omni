@@ -279,8 +279,7 @@ func TestRefreshInstalled_EmptyConfig_Noop(t *testing.T) {
 // ── TestRefreshInstalled_Progress_BulkProvider ────────────────────────────────
 
 // TestRefreshInstalled_Progress_BulkProvider verifies that the progress callback
-// is called with "Scanning brew…" before the bulk-check pass for a BulkChecker
-// provider. It should be called exactly once per provider.
+// reports configured tool progress for a BulkChecker provider.
 func TestRefreshInstalled_Progress_BulkProvider(t *testing.T) {
 	prov := &bulkCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
@@ -307,14 +306,9 @@ func TestRefreshInstalled_Progress_BulkProvider(t *testing.T) {
 	if len(msgs) == 0 {
 		t.Fatal("progress callback never called")
 	}
-	found := false
-	for _, m := range msgs {
-		if m == "Scanning brew…" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("progress msgs = %v, want entry %q", msgs, "Scanning brew…")
+	want := "Refreshing tools 1/1: brew/ripgrep…"
+	if msgs[len(msgs)-1] != want {
+		t.Errorf("progress msgs = %v, want final entry %q", msgs, want)
 	}
 }
 
@@ -349,14 +343,9 @@ func TestRefreshInstalled_Progress_SlowPath(t *testing.T) {
 	if len(msgs) == 0 {
 		t.Fatal("progress callback never called for slow-path provider")
 	}
-	found := false
-	for _, m := range msgs {
-		if m == "Scanning pip…" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("progress msgs = %v, want entry %q", msgs, "Scanning pip…")
+	want := "Refreshing tools 1/1: pip/black…"
+	if msgs[len(msgs)-1] != want {
+		t.Errorf("progress msgs = %v, want final entry %q", msgs, want)
 	}
 }
 
@@ -434,8 +423,8 @@ func TestRefreshInstalled_BulkPath_ConcreteResolver(t *testing.T) {
 
 // ── TestRefreshInstalled_Progress_XofY ───────────────────────────────────────
 
-// TestRefreshInstalled_Progress_XofY verifies that when multiple providers are
-// present, progress messages include the "(x/y)" suffix.
+// TestRefreshInstalled_Progress_XofY verifies that progress counts configured
+// tools, not providers.
 func TestRefreshInstalled_Progress_XofY(t *testing.T) {
 	brew := &bulkCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
@@ -468,9 +457,13 @@ func TestRefreshInstalled_Progress_XofY(t *testing.T) {
 	if len(msgs) != 2 {
 		t.Fatalf("got %d progress messages, want 2: %v", len(msgs), msgs)
 	}
-	for _, m := range msgs {
-		if !strings.Contains(m, "/2") {
-			t.Errorf("progress message %q missing x/2 suffix", m)
+	want := []string{
+		"Refreshing tools 1/2: brew/ripgrep…",
+		"Refreshing tools 2/2: pip/black…",
+	}
+	for i, msg := range msgs {
+		if msg != want[i] {
+			t.Errorf("progress message %d = %q, want %q", i, msg, want[i])
 		}
 	}
 }

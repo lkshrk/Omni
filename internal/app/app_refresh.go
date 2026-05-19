@@ -10,6 +10,7 @@ import (
 
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/profile"
 	"github.com/lkshrk/omni/internal/provider"
 )
 
@@ -76,7 +77,11 @@ type descriptionPendingTool struct {
 
 // RefreshOutdated queries each provider's OutdatedMap and writes results to the DB.
 func (a *App) RefreshOutdated(ctx context.Context, progress func(string)) error {
+	defer profile.Start("app.refresh.outdated.total")()
+
+	stop := profile.Start("app.refresh.outdated.list_tools")
 	tools, err := a.readDB().List(ctx)
+	stop()
 	if err != nil {
 		return fmt.Errorf("listing tools: %w", err)
 	}
@@ -92,39 +97,21 @@ func (a *App) RefreshOutdated(ctx context.Context, progress func(string)) error 
 		return nil
 	}
 
-	outdatedByProv := make(map[string]map[string]string)
-	outdatedByManager := make(map[string]map[string]map[string]string)
-	// Closure always returns nil; per-provider OutdatedMap failures are skipped so a
-	// single bad provider doesn't prevent updating the rest.
-	_ = a.forEachAvailable(ctx, func(p provider.Provider) error { //nolint:errcheck // best-effort outdated check
-		if _, needed := neededProviders[p.Name()]; !needed {
-			return nil
-		}
-		oc, ok := p.(provider.OutdatedChecker)
-		if !ok {
-			return nil
-		}
-		if progress != nil {
-			progress("checking " + p.Name() + " for updates…")
-		}
-		if moc, ok := p.(provider.ManagerOutdatedChecker); ok {
-			m, err := moc.OutdatedByManager(ctx)
-			if err == nil {
-				outdatedByManager[p.Name()] = m
-				outdatedByProv[p.Name()] = flattenOutdatedManagers(m)
-			}
-			return nil
-		}
-		m, err := oc.OutdatedMap(ctx)
-		if err == nil {
-			outdatedByProv[p.Name()] = m
-		}
-		return nil
-	})
+	stop = profile.Start("app.refresh.outdated.provider_maps")
+	outdatedByProv, outdatedByManager := a.outdatedMapsForProvidersBestEffort(ctx, neededProviders)
+	stop()
 
+	stop = profile.Start("app.refresh.outdated.build_updates")
 	updates := make([]database.OutdatedUpdate, 0, len(tools))
-	for _, t := range tools {
+	for i, t := range tools {
 		outdatedProvider := a.outdatedLookupProvider(t)
+		if progress != nil {
+			labelProvider := outdatedProvider
+			if labelProvider == "" {
+				labelProvider = t.Provider
+			}
+			progress(fmt.Sprintf("Checking updates %d/%d: %s/%s…", i+1, len(tools), labelProvider, t.Name))
+		}
 		m, ok := outdatedByProv[outdatedProvider]
 		if !ok {
 			continue
@@ -138,16 +125,55 @@ func (a *App) RefreshOutdated(ctx context.Context, progress func(string)) error 
 			LatestVersion: latestVer,
 		})
 	}
+	stop()
 	writeCtx := context.WithoutCancel(ctx)
+	stop = profile.Start("app.refresh.outdated.write")
 	if err := a.readDB().UpdateOutdatedBatch(writeCtx, updates); err != nil {
+		stop()
 		return fmt.Errorf("updating outdated status: %w", err)
 	}
+	stop()
 	return nil
+}
+
+func (a *App) outdatedMapsForProvidersBestEffort(ctx context.Context, providerNames map[string]struct{}) (map[string]map[string]string, map[string]map[string]map[string]string) {
+	outdatedByProv := make(map[string]map[string]string)
+	outdatedByManager := make(map[string]map[string]map[string]string)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for provName := range providerNames {
+		p, ok := a.registry.Get(provName)
+		if !ok {
+			continue
+		}
+		if _, ok := p.(provider.OutdatedChecker); !ok {
+			continue
+		}
+		provName := provName
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			m, byManager, ok, err := a.outdatedMapsForProvider(ctx, provName)
+			if err != nil || !ok {
+				return
+			}
+			mu.Lock()
+			outdatedByProv[provName] = m
+			if byManager != nil {
+				outdatedByManager[provName] = byManager
+			}
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+	return outdatedByProv, outdatedByManager
 }
 
 // RefreshProviderOutdated queries outdated status for a single named provider and
 // writes results to the DB.
 func (a *App) RefreshProviderOutdated(ctx context.Context, provName string) error {
+	defer profile.Start("app.refresh.outdated.provider." + provName)()
+
 	tools, err := a.readDB().List(ctx)
 	if err != nil {
 		return fmt.Errorf("listing tools for %s: %w", provName, err)
@@ -235,6 +261,8 @@ func (a *App) RefreshProviderOutdated(ctx context.Context, provName string) erro
 }
 
 func (a *App) outdatedMapsForProvider(ctx context.Context, providerName string) (map[string]string, map[string]map[string]string, bool, error) {
+	defer profile.Start("app.refresh.outdated.map." + providerName)()
+
 	p, ok := a.registry.Get(providerName)
 	if !ok {
 		return nil, nil, false, nil
@@ -304,14 +332,47 @@ func outdatedForTool(t *database.ToolCache, flat map[string]string, byManager ma
 // discovered tools that don't already have one. Bulk provider metadata is used
 // first; individual provider lookups are a bounded-concurrent fallback.
 func (a *App) RefreshDescriptions(ctx context.Context, _ time.Duration) error {
+	return a.RefreshDescriptionsWithProgress(ctx, 0, nil)
+}
+
+type RefreshDescriptionsProgressEvent struct {
+	Provider string
+	Name     string
+	Index    int
+	Total    int
+}
+
+func RefreshDescriptionsProgressText(event RefreshDescriptionsProgressEvent) string {
+	total := event.Total
+	if total <= 0 {
+		total = event.Index
+	}
+	index := event.Index
+	if index < 0 {
+		index = 0
+	}
+	providerName := event.Provider
+	if providerName == "" {
+		providerName = "tool"
+	}
+	return fmt.Sprintf("Refreshing descriptions %d/%d: %s/%s…", index, total, providerName, event.Name)
+}
+
+func (a *App) RefreshDescriptionsWithProgress(ctx context.Context, _ time.Duration, progress func(RefreshDescriptionsProgressEvent)) error {
+	defer profile.Start("app.refresh.descriptions.total")()
+
+	stop := profile.Start("app.refresh.descriptions.load_config")
 	cfg, err := a.loadConfig()
+	stop()
 	if err != nil {
 		return err
 	}
 
 	// List the cache once and build a lookup map so the configured-tools loop
 	// below can avoid N point-lookups (one per resolved tool).
+	stop = profile.Start("app.refresh.descriptions.list_tools")
 	cachedTools, err := a.readDB().List(ctx)
+	stop()
 	if err != nil {
 		return err
 	}
@@ -325,7 +386,9 @@ func (a *App) RefreshDescriptions(ctx context.Context, _ time.Duration) error {
 		}
 		cacheByKey[NewToolKey(t.Name, t.Provider, pkg).String()] = t
 	}
+	stop = profile.Start("app.refresh.descriptions.list_metadata")
 	cachedMetadata, err := a.readDB().ListMetadata(ctx)
+	stop()
 	if err != nil {
 		return err
 	}
@@ -348,6 +411,7 @@ func (a *App) RefreshDescriptions(ctx context.Context, _ time.Duration) error {
 		return meta != nil && meta.Description.Valid && meta.Description.String != ""
 	}
 
+	stop = profile.Start("app.refresh.descriptions.queue")
 	byProvider := make(map[string][]descriptionPendingTool)
 	queued := make(map[string]bool)
 	tools, _ := a.resolvedToolEntries(ctx, cfg, cfg.Groups)
@@ -399,16 +463,41 @@ func (a *App) RefreshDescriptions(ctx context.Context, _ time.Duration) error {
 		})
 		queued[key] = true
 	}
+	stop()
 
+	pendingTotal := 0
+	for _, pending := range byProvider {
+		pendingTotal += len(pending)
+	}
+	pendingDone := 0
+	emit := func(provName string, pending descriptionPendingTool) {
+		if progress == nil {
+			return
+		}
+		pendingDone++
+		progress(RefreshDescriptionsProgressEvent{
+			Provider: provName,
+			Name:     pending.name,
+			Index:    pendingDone,
+			Total:    pendingTotal,
+		})
+	}
+
+	stop = profile.Start("app.refresh.descriptions.providers")
 	for provName, pending := range byProvider {
 		if ctx.Err() != nil {
+			stop()
 			return ctx.Err()
 		}
 		prov, ok := a.registry.Get(provName)
 		if !ok {
+			for _, p := range pending {
+				emit(provName, p)
+			}
 			continue
 		}
 
+		bulkProgressEmitted := false
 		if bd, ok := prov.(provider.BulkDescriber); ok {
 			toolSlice := make([]provider.Tool, len(pending))
 			for i, p := range pending {
@@ -418,6 +507,7 @@ func (a *App) RefreshDescriptions(ctx context.Context, _ time.Duration) error {
 				bulkUpdates := make([]database.DescriptionUpdate, 0, len(pending))
 				missing := pending[:0]
 				for _, p := range pending {
+					emit(provName, p)
 					if desc := lookupDescription(descs, p.name, p.tool.EffectivePackage()); desc != "" {
 						bulkUpdates = append(bulkUpdates, database.DescriptionUpdate{
 							Name:        p.name,
@@ -429,7 +519,9 @@ func (a *App) RefreshDescriptions(ctx context.Context, _ time.Duration) error {
 					}
 					missing = append(missing, p)
 				}
+				bulkProgressEmitted = true
 				if err := a.readDB().UpdateDescriptionBatch(ctx, bulkUpdates); err != nil {
+					stop()
 					return fmt.Errorf("updating descriptions for %s: %w", provName, err)
 				}
 				pending = missing
@@ -441,12 +533,24 @@ func (a *App) RefreshDescriptions(ctx context.Context, _ time.Duration) error {
 
 		d, ok := prov.(provider.Descriptor)
 		if !ok {
+			if !bulkProgressEmitted {
+				for _, p := range pending {
+					emit(provName, p)
+				}
+			}
 			continue
 		}
+		if !bulkProgressEmitted {
+			for _, p := range pending {
+				emit(provName, p)
+			}
+		}
 		if err := a.refreshDescriptionsIndividually(ctx, provName, pending, d); err != nil {
+			stop()
 			return err
 		}
 	}
+	stop()
 	return nil
 }
 

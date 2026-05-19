@@ -12,6 +12,9 @@ import (
 
 // CheckInstalled reports whether the stow binary is reachable on PATH.
 func CheckInstalled(ctx context.Context, exec executor.Executor) bool {
+	if checker, ok := exec.(interface{ CommandAvailable(string) bool }); ok {
+		return checker.CommandAvailable("stow")
+	}
 	_, _, err := exec.Run(ctx, "stow", "--version")
 	return err == nil
 }

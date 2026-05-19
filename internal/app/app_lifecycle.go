@@ -178,6 +178,7 @@ func (a *App) claimDiscoveredTools(ctx context.Context, discovered []*database.T
 	var errs []error
 	ignored := a.ignoredToolSetBestEffort()
 	resolvedEcosystems := a.ResolvedEcosystemProviders(ctx)
+	var pending []discoveredClaim
 	for _, t := range discovered {
 		if t == nil || !t.Installed || t.Name == "" || t.Provider == "" {
 			continue
@@ -201,17 +202,14 @@ func (a *App) claimDiscoveredTools(ctx context.Context, discovered []*database.T
 		if tool.Package == "" {
 			tool.Package = t.Name
 		}
-		if opts.ToolProgress != nil {
-			opts.ToolProgress(isync.ProgressEvent{Tool: tool, Message: "Adding " + t.Name + " to config…"})
+		claim := discoveredClaim{
+			name:           t.Name,
+			configProvider: configProvider,
+			pkg:            tool.Package,
+			installWith:    installWith,
+			tool:           tool,
 		}
-		if opts.DryRun {
-			claimed = append(claimed, t.Name)
-			if opts.ToolProgress != nil {
-				opts.ToolProgress(isync.ProgressEvent{Tool: tool, Message: "Would add " + t.Name + " to config", Done: true})
-			}
-			continue
-		}
-		if err := a.Add(ctx, configProvider, tool.Package, t.Name, groupName, installWith); err != nil {
+		if err := a.validateDiscoveredClaim(claim); err != nil {
 			if opts.ToolProgress != nil {
 				opts.ToolProgress(isync.ProgressEvent{Tool: tool, Message: "Failed adding " + t.Name + " to config", Err: err, Done: true})
 			}
@@ -219,12 +217,124 @@ func (a *App) claimDiscoveredTools(ctx context.Context, discovered []*database.T
 			errs = append(errs, fmt.Errorf("claim %s: %w", t.Name, err))
 			continue
 		}
-		if opts.ToolProgress != nil {
-			opts.ToolProgress(isync.ProgressEvent{Tool: tool, Message: "Added " + t.Name + " to config", Done: true})
+		if opts.DryRun {
+			if opts.ToolProgress != nil {
+				opts.ToolProgress(isync.ProgressEvent{Tool: tool, Message: "Adding " + t.Name + " to config…"})
+			}
+			claimed = append(claimed, t.Name)
+			if opts.ToolProgress != nil {
+				opts.ToolProgress(isync.ProgressEvent{Tool: tool, Message: "Would add " + t.Name + " to config", Done: true})
+			}
+			continue
 		}
-		claimed = append(claimed, t.Name)
+		pending = append(pending, claim)
+	}
+	if len(pending) == 0 || opts.DryRun {
+		return claimed, failures, errors.Join(errs...)
+	}
+	if err := a.addDiscoveredClaimsToConfig(groupName, pending); err != nil {
+		for _, claim := range pending {
+			if opts.ToolProgress != nil {
+				opts.ToolProgress(isync.ProgressEvent{Tool: claim.tool, Message: "Failed adding " + claim.name + " to config", Err: err, Done: true})
+			}
+			failures = append(failures, bulkToolErrorFromError(claim.name, claim.configProvider, err))
+			errs = append(errs, fmt.Errorf("claim %s: %w", claim.name, err))
+		}
+		return claimed, failures, errors.Join(errs...)
+	}
+	tracked := make([]database.TrackedTool, 0, len(pending))
+	for _, claim := range pending {
+		tracked = append(tracked, database.TrackedTool{
+			Name:     claim.name,
+			Provider: claim.configProvider,
+			Package:  claim.pkg,
+		})
+	}
+	if err := a.readDB().MarkTrackedBatch(ctx, tracked); err != nil {
+		for _, claim := range pending {
+			if opts.ToolProgress != nil {
+				opts.ToolProgress(isync.ProgressEvent{Tool: claim.tool, Message: "Failed adding " + claim.name + " to config", Err: err, Done: true})
+			}
+			failures = append(failures, bulkToolErrorFromError(claim.name, claim.configProvider, err))
+			errs = append(errs, fmt.Errorf("claim %s: %w", claim.name, err))
+		}
+		return claimed, failures, errors.Join(errs...)
+	}
+	for _, claim := range pending {
+		if opts.ToolProgress != nil {
+			opts.ToolProgress(isync.ProgressEvent{Tool: claim.tool, Message: "Adding " + claim.name + " to config…"})
+			opts.ToolProgress(isync.ProgressEvent{Tool: claim.tool, Message: "Added " + claim.name + " to config", Done: true})
+		}
+		claimed = append(claimed, claim.name)
 	}
 	return claimed, failures, errors.Join(errs...)
+}
+
+type discoveredClaim struct {
+	name           string
+	configProvider string
+	pkg            string
+	installWith    string
+	tool           provider.Tool
+}
+
+func (a *App) validateDiscoveredClaim(claim discoveredClaim) error {
+	if claim.configProvider == "" {
+		return fmt.Errorf("provider is required")
+	}
+	if !a.knownProvider(claim.configProvider) {
+		return fmt.Errorf("unknown provider %q", claim.configProvider)
+	}
+	if !a.knownEcosystemProvider(claim.configProvider) {
+		return fmt.Errorf("provider %q is not an ecosystem provider", claim.configProvider)
+	}
+	return a.validateInstallWith(claim.configProvider, claim.installWith)
+}
+
+func (a *App) addDiscoveredClaimsToConfig(groupName string, claims []discoveredClaim) error {
+	if len(claims) == 0 {
+		return nil
+	}
+	if groupName == "" {
+		groupName = currentMachineGroupName()
+	}
+	return a.withConfig(func(cfg *config.RootConfig) error {
+		if _, err := ensureHostGroupInConfig(cfg, currentMachineGroupName()); err != nil {
+			return err
+		}
+		for _, existing := range cfg.Groups {
+			if existing.BaseName() == groupName {
+				continue
+			}
+			for _, claim := range claims {
+				filterToolMemberships(existing, claim.name)
+			}
+		}
+		gc := ensureGroupInConfig(cfg, groupName)
+		if cfg.Tools == nil {
+			cfg.Tools = make(map[string]config.ToolSpec)
+		}
+		for _, claim := range claims {
+			spec := cfg.Tools[claim.name]
+			spec.Provider = claim.configProvider
+			spec.Package = claim.pkg
+			spec.InstallWith = claim.installWith
+			cfg.Tools[claim.name] = spec
+			if !containsToolMembership(gc.Tools, claim.name) {
+				gc.Tools = append(gc.Tools, config.ToolEntry{Name: claim.name})
+			}
+			if a.providerSupportsTaps(claim.configProvider, claim.installWith) {
+				if tap := tapFromPackage(claim.pkg); tap != "" && !slices.Contains(gc.Taps, tap) {
+					spec := cfg.Tools[claim.name]
+					if !slices.Contains(spec.Taps, tap) {
+						spec.Taps = append(spec.Taps, tap)
+						cfg.Tools[claim.name] = spec
+					}
+				}
+			}
+		}
+		return nil
+	})
 }
 
 // ─── Install / Uninstall / Upgrade ───────────────────────────────────────────
@@ -640,7 +750,7 @@ func (a *App) UpgradeAllDetailed(ctx context.Context, progress func(string), too
 }
 
 func (a *App) UpgradeAllDetailedWithOptions(ctx context.Context, progress func(string), toolProgress func(isync.ProgressEvent), opts UpgradeAllOptions) (*UpgradeAllResult, error) {
-	if err := a.refreshOutdatedIfStale(ctx, progress); err != nil {
+	if err := a.refreshOutdatedIfStale(ctx, nil); err != nil {
 		return nil, fmt.Errorf("refreshing outdated state: %w", err)
 	}
 	tools, err := a.readDB().List(ctx)

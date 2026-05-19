@@ -13,6 +13,7 @@ import (
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/profile"
 	"github.com/lkshrk/omni/internal/tui"
 )
 
@@ -51,6 +52,7 @@ Already set up?
 		// No subcommand → launch the TUI directly. This makes `omni` alone
 		// behave the same as `omni ui` so the binary is self-contained.
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			defer profile.Start("cli.tui.run")()
 			model := tui.New(state.app, cmd.Context())
 			p := tea.NewProgram(model, tui.ProgramOptions()...)
 			if _, err := p.Run(); err != nil {
@@ -64,7 +66,9 @@ Already set up?
 				return nil
 			}
 			if state.configPath == "" {
+				stop := profile.Start("cli.default_config_path")
 				p, err := config.DefaultConfigPath()
+				stop()
 				if err != nil {
 					return fmt.Errorf("resolving default config path: %w", err)
 				}
@@ -75,17 +79,26 @@ Already set up?
 				a.CacheDir = state.cacheDir
 			}
 			if commandInChain(cmd, "doctor") {
+				stop := profile.Start("cli.app_init_read_only")
 				if err := a.InitReadOnly(cmd.Context()); err != nil {
+					stop()
 					return fmt.Errorf("initialising diagnostics: %w", err)
 				}
+				stop()
 				state.app = a
 				return nil
 			}
+			stop := profile.Start("cli.app_init")
 			if err := initRootApp(cmd.Context(), a); err != nil {
+				stop()
 				return fmt.Errorf("initialising app: %w", err)
 			}
+			stop()
 			state.app = a
-			return requireActiveHost(cmd, a)
+			stop = profile.Start("cli.require_active_host")
+			err := requireActiveHost(cmd, a)
+			stop()
+			return err
 		},
 		PersistentPostRunE: func(_ *cobra.Command, _ []string) error {
 			if state.app != nil {

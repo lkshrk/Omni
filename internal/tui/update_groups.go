@@ -282,6 +282,14 @@ func copyBoolMap(in map[string]bool) map[string]bool {
 	return out
 }
 
+func copyStringIntMap(in map[string]int) map[string]int {
+	out := make(map[string]int, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
 func boolMapsChanged(current, original map[string]bool) bool {
 	for name, value := range current {
 		if original[name] != value {

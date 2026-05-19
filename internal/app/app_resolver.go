@@ -63,13 +63,14 @@ func (a *App) resolveTools(ctx context.Context, cfg *config.RootConfig, groups [
 
 	var warnings []string
 	resolved := make([]resolvedTool, 0, len(order))
+	availability := make(map[string]bool)
 	for _, name := range order {
 		spec, ok := cfg.Tools[name]
 		if !ok {
 			warnings = append(warnings, fmt.Sprintf("tool %q is referenced by a group but has no logical spec", name))
 			continue
 		}
-		install := a.resolveInstallSpec(ctx, name, spec)
+		install := a.resolveInstallSpecWithAvailability(ctx, name, spec, availability)
 		entry := spec.ToToolEntry(name, install)
 		if toolNameIgnored(ignored, name) || entry.Ignore {
 			continue
@@ -93,6 +94,10 @@ func (a *App) resolvedToolEntries(ctx context.Context, cfg *config.RootConfig, g
 }
 
 func (a *App) resolveInstallSpec(ctx context.Context, logicalName string, spec config.ToolSpec) config.ToolInstallSpec {
+	return a.resolveInstallSpecWithAvailability(ctx, logicalName, spec, nil)
+}
+
+func (a *App) resolveInstallSpecWithAvailability(ctx context.Context, logicalName string, spec config.ToolSpec, availability map[string]bool) config.ToolInstallSpec {
 	hostname := currentHostname()
 	if install, ok := spec.Hosts[hostname]; ok {
 		return install
@@ -106,11 +111,23 @@ func (a *App) resolveInstallSpec(ctx context.Context, logicalName string, spec c
 	defaultSpec := spec.DefaultInstallSpec()
 	candidates := append([]config.ToolInstallSpec{defaultSpec}, spec.Variants...)
 	for _, candidate := range candidates {
-		if a.providerUsable(ctx, candidate.Provider) {
+		if a.providerUsableCached(ctx, candidate.Provider, availability) {
 			return candidate
 		}
 	}
 	return defaultSpec
+}
+
+func (a *App) providerUsableCached(ctx context.Context, providerName string, availability map[string]bool) bool {
+	if availability == nil {
+		return a.providerUsable(ctx, providerName)
+	}
+	if usable, ok := availability[providerName]; ok {
+		return usable
+	}
+	usable := a.providerUsable(ctx, providerName)
+	availability[providerName] = usable
+	return usable
 }
 
 func (a *App) providerUsable(ctx context.Context, providerName string) bool {

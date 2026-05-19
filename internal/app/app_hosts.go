@@ -35,6 +35,10 @@ func (a *App) HostStatus() (*HostInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	return a.hostStatusFromConfig(cfg), nil
+}
+
+func (a *App) hostStatusFromConfig(cfg *config.RootConfig) *HostInfo {
 	hosts := make(map[string]config.HostAssignment, len(cfg.Hosts))
 	for host, groups := range cfg.Hosts {
 		hosts[host] = config.HostAssignment{Groups: append([]string(nil), groups...)}
@@ -47,7 +51,7 @@ func (a *App) HostStatus() (*HostInfo, error) {
 		host.Ignore = append([]string(nil), cfg.Ignore.Tools...)
 		hosts[active] = host
 	}
-	return &HostInfo{Hosts: hosts, Active: active}, nil
+	return &HostInfo{Hosts: hosts, Active: active}
 }
 
 func (a *App) repairCurrentHostEntry() error {

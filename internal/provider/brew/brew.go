@@ -27,6 +27,9 @@ func (p *Provider) Description() string { return "Homebrew — macOS/Linux packa
 func (p *Provider) Available(ctx context.Context) (bool, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
+	if checker, ok := p.exec.(interface{ CommandAvailable(string) bool }); ok {
+		return checker.CommandAvailable("brew"), nil
+	}
 	_, _, err := p.exec.Run(ctx, "brew", "--version")
 	if err != nil {
 		return false, nil // binary not found; not an error from our perspective
@@ -111,33 +114,79 @@ type brewCaskInfo struct {
 	Artifacts []map[string]json.RawMessage `json:"artifacts"`
 }
 
-// ListInstalled returns explicitly installed formulae (installed_on_request=true) and
-// all installed casks (casks are always explicit). Excludes transitive formula deps.
-// Uses `brew info --json=v2 --installed` because `--full-name` and `--versions` are
-// mutually exclusive on `brew list`.
+// ListInstalled returns explicitly installed formulae and all installed casks.
+// It avoids `brew info --json=v2 --installed` because that command can emit
+// megabytes of JSON and dominate startup refreshes on cask-heavy systems.
 func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	stdout, _, err := p.exec.Run(ctx, "brew", "info", "--json=v2", "--installed")
+	return p.listInstalled(ctx)
+}
+
+func (p *Provider) listInstalled(ctx context.Context) ([]provider.InstalledTool, error) {
+	formulae, err := p.installedFormulae(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("brew info --installed: %w", err)
+		return nil, err
 	}
-	var out brewInfoOutput
-	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
-		return nil, fmt.Errorf("parsing brew info output: %w", err)
+	casks, err := p.installedCasks(ctx)
+	if err != nil {
+		return nil, err
 	}
 	var tools []provider.InstalledTool
-	for _, f := range out.Formulae {
-		if len(f.Installed) == 0 || !f.Installed[0].InstalledOnRequest {
-			continue
-		}
+	tools = append(tools, formulae...)
+	tools = append(tools, casks...)
+	return tools, nil
+}
+
+// InstalledMap returns explicitly installed formulae and casks as lowercase-name→version map.
+func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	tools, err := p.listInstalled(ctx)
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]string, len(tools))
+	for _, t := range tools {
+		m[strings.ToLower(t.Name)] = t.Version
+	}
+	return m, nil
+}
+
+func (p *Provider) installedFormulae(ctx context.Context) ([]provider.InstalledTool, error) {
+	stdout, _, err := p.exec.Run(ctx, "brew", "leaves", "--installed-on-request")
+	if err != nil {
+		return nil, fmt.Errorf("brew leaves --installed-on-request: %w", err)
+	}
+	packages := strings.Fields(stdout)
+	if len(packages) == 0 {
+		return nil, nil
+	}
+	args := append([]string{"list", "--versions"}, packages...)
+	stdout, _, err = p.exec.Run(ctx, "brew", args...)
+	if err != nil {
+		return nil, fmt.Errorf("brew list --versions: %w", err)
+	}
+	versions := parseBrewListVersions(stdout)
+	tools := make([]provider.InstalledTool, 0, len(packages))
+	for _, pkg := range packages {
+		name := formulaName(pkg)
 		tools = append(tools, provider.InstalledTool{
-			Tool:    provider.Tool{Name: formulaName(f.FullName), Provider: "brew", Package: f.FullName},
-			Version: f.Installed[0].Version,
+			Tool:    provider.Tool{Name: name, Provider: "brew", Package: pkg},
+			Version: lookupBrewListVersion(versions, pkg),
 		})
 	}
-	for _, c := range out.Casks {
-		if c.Installed == "" {
+	return tools, nil
+}
+
+func (p *Provider) installedCasks(ctx context.Context) ([]provider.InstalledTool, error) {
+	casks, err := p.installedCaskInfos(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tools := make([]provider.InstalledTool, 0, len(casks))
+	for _, c := range casks {
+		if c.Token == "" {
 			continue
 		}
 		tools = append(tools, provider.InstalledTool{
@@ -148,17 +197,59 @@ func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool,
 	return tools, nil
 }
 
-// InstalledMap returns explicitly installed formulae and casks as lowercase-name→version map.
-func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) {
-	metadata, err := p.InstalledMetadataMap(ctx)
+func (p *Provider) installedCaskInfos(ctx context.Context) ([]brewCaskInfo, error) {
+	stdout, _, err := p.exec.Run(ctx, "brew", "list", "--cask")
+	if err != nil {
+		return nil, fmt.Errorf("brew list --cask: %w", err)
+	}
+	tokens := strings.Fields(stdout)
+	if len(tokens) == 0 {
+		return nil, nil
+	}
+
+	args := append([]string{"info", "--json=v2", "--cask"}, tokens...)
+	out, err := p.info(ctx, args...)
 	if err != nil {
 		return nil, err
 	}
-	m := make(map[string]string, len(metadata))
-	for name, entry := range metadata {
-		m[name] = entry.Version
+	infoByToken := make(map[string]brewCaskInfo, len(out.Casks))
+	for _, c := range out.Casks {
+		infoByToken[strings.ToLower(c.Token)] = c
 	}
-	return m, nil
+	casks := make([]brewCaskInfo, 0, len(tokens))
+	for _, token := range tokens {
+		if c, ok := infoByToken[strings.ToLower(token)]; ok {
+			casks = append(casks, c)
+			continue
+		}
+		casks = append(casks, brewCaskInfo{Token: token})
+	}
+	return casks, nil
+}
+
+func parseBrewListVersions(output string) map[string]string {
+	versions := make(map[string]string)
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		version := ""
+		if len(fields) > 1 {
+			version = strings.Join(fields[1:], " ")
+		}
+		pkg := strings.ToLower(fields[0])
+		versions[pkg] = version
+		versions[strings.ToLower(formulaName(fields[0]))] = version
+	}
+	return versions
+}
+
+func lookupBrewListVersion(versions map[string]string, pkg string) string {
+	if version, ok := versions[strings.ToLower(pkg)]; ok {
+		return version
+	}
+	return versions[strings.ToLower(formulaName(pkg))]
 }
 
 // InstalledMetadataMap returns explicitly installed formulae and casks with
@@ -168,23 +259,19 @@ func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) 
 func (p *Provider) InstalledMetadataMap(ctx context.Context) (map[string]provider.InstalledMetadata, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	out, err := p.info(ctx, "info", "--json=v2", "--installed")
+	formulae, err := p.installedFormulae(ctx)
 	if err != nil {
 		return nil, err
 	}
-	metadata := make(map[string]provider.InstalledMetadata, len(out.Formulae)+len(out.Casks))
-	for _, f := range out.Formulae {
-		if len(f.Installed) == 0 || !f.Installed[0].InstalledOnRequest {
-			continue
-		}
-		metadata[strings.ToLower(formulaName(f.FullName))] = provider.InstalledMetadata{
-			Version: f.Installed[0].Version,
-		}
+	casks, err := p.installedCaskInfos(ctx)
+	if err != nil {
+		return nil, err
 	}
-	for _, c := range out.Casks {
-		if c.Installed == "" {
-			continue
-		}
+	metadata := make(map[string]provider.InstalledMetadata, len(formulae)+len(casks))
+	for _, f := range formulae {
+		metadata[strings.ToLower(f.Name)] = provider.InstalledMetadata{Version: f.Version}
+	}
+	for _, c := range casks {
 		entry := provider.InstalledMetadata{Version: c.Installed}
 		if plan := c.privilegePlan(provider.PrivilegeActionUninstall); plan.RequiresPrivilege() {
 			entry.Privilege = plan
@@ -315,11 +402,8 @@ type brewOutdatedOutput struct {
 
 // OutdatedMap returns lowercase name → latest available version for outdated formulae and casks.
 func (p *Provider) OutdatedMap(ctx context.Context) (map[string]string, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if _, stderr, err := p.exec.Run(ctx, "brew", "update"); err != nil {
-		return nil, fmt.Errorf("brew update: %w (stderr: %s)", err, strings.TrimSpace(stderr))
-	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	stdout, _, err := p.exec.Run(ctx, "brew", "outdated", "--json=v2")
 	if err != nil {
 		return nil, fmt.Errorf("brew outdated: %w", err)

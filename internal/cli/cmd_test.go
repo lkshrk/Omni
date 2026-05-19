@@ -1518,7 +1518,7 @@ func TestDotsSync_NameDryRunUsesSingleEntry(t *testing.T) {
 		t.Fatalf("dots sync nvim --dry-run: %v", err)
 	}
 	got := outBuf.String()
-	if !strings.Contains(got, "would link") || strings.Contains(got, ".zshrc") {
+	if !strings.Contains(got, "syncing dots 1/1: nvim") || !strings.Contains(got, "would link") || strings.Contains(got, ".zshrc") {
 		t.Fatalf("output = %q, want only nvim dry-run link", got)
 	}
 }
