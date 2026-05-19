@@ -10,6 +10,7 @@ import (
 
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/profile"
 	"github.com/lkshrk/omni/internal/provider"
 )
 
@@ -26,6 +27,50 @@ const (
 	ToolStateOutOfSync ToolListState = "out-of-sync"
 	ToolStateFailed    ToolListState = "failed"
 )
+
+type RefreshInstalledProgressEvent struct {
+	Provider string
+	Name     string
+	Index    int
+	Total    int
+}
+
+type RefreshDiscoveredProgressEvent struct {
+	Provider string
+	Index    int
+	Total    int
+}
+
+func RefreshInstalledProgressText(event RefreshInstalledProgressEvent) string {
+	total := event.Total
+	if total <= 0 {
+		total = event.Index
+	}
+	index := event.Index
+	if index < 0 {
+		index = 0
+	}
+	providerName := event.Provider
+	if providerName == "" {
+		providerName = "tool"
+	}
+	return fmt.Sprintf("Refreshing tools %d/%d: %s/%s…", index, total, providerName, event.Name)
+}
+
+func RefreshDiscoveredProgressText(event RefreshDiscoveredProgressEvent) string {
+	total := event.Total
+	if total <= 0 {
+		total = event.Index
+	}
+	index := event.Index
+	if index < 0 {
+		index = 0
+	}
+	if event.Provider == "" {
+		return fmt.Sprintf("Finding local tools %d/%d…", index, total)
+	}
+	return fmt.Sprintf("Finding local tools %d/%d: %s…", index, total, event.Provider)
+}
 
 type ToolListOptions struct {
 	Provider string
@@ -58,23 +103,43 @@ func (a *App) ListTools(ctx context.Context, providerFilter string) ([]*database
 }
 
 func (a *App) ConfiguredProviders(ctx context.Context) ([]string, error) {
+	counts, err := a.ConfiguredProviderToolCounts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return configuredProvidersFromCounts(counts), nil
+}
+
+func configuredProvidersFromCounts(counts map[string]int) []string {
+	providers := make([]string, 0, len(counts))
+	for p := range counts {
+		providers = append(providers, p)
+	}
+	return providers
+}
+
+func (a *App) ConfiguredProviderToolCounts(ctx context.Context) (map[string]int, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
 		return nil, err
 	}
-	tools, _ := a.resolvedToolEntries(ctx, cfg, cfg.Groups)
-	provSet := make(map[string]struct{})
+	return a.configuredProviderToolCountsFromConfig(ctx, cfg), nil
+}
+
+func (a *App) configuredProviderToolCountsFromConfig(ctx context.Context, cfg *config.RootConfig) map[string]int {
+	resolved, _ := a.resolveTools(ctx, cfg, cfg.Groups)
+	return a.configuredProviderToolCountsFromResolved(resolved)
+}
+
+func (a *App) configuredProviderToolCountsFromResolved(tools []resolvedTool) map[string]int {
+	counts := make(map[string]int)
 	for _, t := range tools {
-		providerName := a.operationProviderName(t)
+		providerName := a.operationProviderName(t.entry)
 		if providerName != "" {
-			provSet[providerName] = struct{}{}
+			counts[providerName]++
 		}
 	}
-	providers := make([]string, 0, len(provSet))
-	for p := range provSet {
-		providers = append(providers, p)
-	}
-	return providers, nil
+	return counts
 }
 
 func (a *App) ToolGroupMap(ctx context.Context) (map[string]string, error) {
@@ -96,15 +161,23 @@ func (a *App) ToolMembershipMap(ctx context.Context) (map[string][]string, error
 	if err != nil {
 		return nil, err
 	}
+	return a.toolMembershipMapFromConfig(ctx, cfg), nil
+}
+
+func (a *App) toolMembershipMapFromConfig(ctx context.Context, cfg *config.RootConfig) map[string][]string {
 	resolved, _ := a.resolveTools(ctx, cfg, cfg.Groups)
+	return toolMembershipMapFromResolved(resolved)
+}
+
+func toolMembershipMapFromResolved(resolved []resolvedTool) map[string][]string {
 	groups := make(map[string][]string, len(resolved))
 	for _, t := range resolved {
 		if len(t.memberships) == 0 {
 			continue
 		}
-		groups[t.entry.Name+"\x00"+t.entry.Provider] = append([]string(nil), t.memberships...)
+		groups[t.entry.Name+"\x00"+t.entry.Provider] = t.memberships
 	}
-	return groups, nil
+	return groups
 }
 
 func (a *App) QueryTools(ctx context.Context, opts ToolListOptions) ([]ToolListItem, error) {
@@ -448,24 +521,35 @@ func toolStateMatches(state, filter ToolListState) bool {
 // RefreshInstalled updates the DB install status for every configured tool
 // using the provider's current state. Does not install missing tools.
 // Best-effort: errors on individual providers or tools are silently skipped.
-// The optional progress callback is called with a short description before each
-// provider is scanned (e.g. "Scanning brew…"); pass nil to omit progress.
+// The optional progress callback is called with configured tool progress
+// (e.g. "Refreshing tools 3/12: brew/git…"); pass nil to omit progress.
 func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error {
+	defer profile.Start("app.refresh.installed.total")()
+
+	stop := profile.Start("app.refresh.installed.load_config")
 	cfg, err := a.loadConfig()
+	stop()
 	if err != nil {
 		return err
 	}
+	stop = profile.Start("app.refresh.installed.resolve_tools")
 	tools, _ := a.resolvedToolEntries(ctx, cfg, cfg.Groups)
+	stop()
 	if len(tools) == 0 {
-		return a.reconcileResolvedTools(context.WithoutCancel(ctx), tools)
+		stop = profile.Start("app.refresh.installed.reconcile")
+		err := a.reconcileResolvedTools(context.WithoutCancel(ctx), tools)
+		stop()
+		return err
 	}
+	stop = profile.Start("app.refresh.installed.cached_owners")
 	cachedOwners, err := a.cachedInstalledOwners(ctx)
+	stop()
 	if err != nil {
 		return err
 	}
 
-	// Build a set of providers that have tools in config — used to filter
-	// progress messages and the pre-scan count.
+	// Build a set of providers that have tools in config — used to skip
+	// provider work that cannot affect any configured tool.
 	configProviders := make(map[string]bool, len(tools))
 	for _, t := range tools {
 		configProviders[a.operationProviderName(t)] = true
@@ -474,26 +558,24 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 	// Resolve availability once in parallel; reuse the result for both the
 	// scanTotal count and the main scan loop below to avoid two Available
 	// passes per provider.
+	stop = profile.Start("app.refresh.installed.available_providers")
 	available := a.availableProviders(ctx)
-	var scanTotal int
-	if progress != nil {
-		for _, p := range available {
-			if configProviders[p.Name()] {
-				scanTotal++
-			}
-		}
-	}
-	scanIdx := 0
-	emit := func(label string) {
+	stop()
+	toolIdx := 0
+	emitTool := func(t config.ToolEntry, opProvider string) {
 		if progress == nil {
 			return
 		}
-		scanIdx++
-		if scanTotal > 1 {
-			progress(fmt.Sprintf("%s (%d/%d)", label, scanIdx, scanTotal))
-		} else {
-			progress(label)
+		toolIdx++
+		if opProvider == "" {
+			opProvider = t.Provider
 		}
+		progress(RefreshInstalledProgressText(RefreshInstalledProgressEvent{
+			Provider: opProvider,
+			Name:     t.Name,
+			Index:    toolIdx,
+			Total:    len(tools),
+		}))
 	}
 
 	// Build installed map per provider using bulk check where available.
@@ -508,6 +590,7 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 	// Iterate the precomputed available set so we don't call Available a
 	// second time. Per-provider scan failures are skipped silently so a
 	// single failing backend doesn't block discovery for others.
+	stop = profile.Start("app.refresh.installed.bulk_maps")
 	for _, p := range available {
 		// MultiManagerBulkChecker takes priority: probes all backends for per-tool attribution.
 		if mbc, ok := p.(provider.MultiManagerBulkChecker); ok {
@@ -516,9 +599,6 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 				continue
 			}
 			multiMaps[p.Name()] = entries
-			if configProviders[p.Name()] {
-				emit("Scanning " + p.Name() + "…")
-			}
 			continue
 		}
 		var (
@@ -554,35 +634,16 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 		}
 		installedMaps[p.Name()] = m
 		concreteForBulk[p.Name()] = installedWith
-		// Emit progress after InstalledMap succeeds (only for providers with config tools).
-		if configProviders[p.Name()] {
-			emit("Scanning " + p.Name() + "…")
-		}
 	}
+	stop()
 
-	// Emit one progress message per unique non-bulk provider with config tools.
-	{
-		seen := make(map[string]bool)
-		for _, t := range tools {
-			opProvider := a.operationProviderName(t)
-			_, hasBulk := installedMaps[opProvider]
-			_, hasMulti := multiMaps[opProvider]
-			if t.InstallWith != "" && opProvider == t.Provider {
-				hasBulk = false
-				hasMulti = false
-			}
-			if !hasBulk && !hasMulti && !seen[opProvider] {
-				seen[opProvider] = true
-				emit("Scanning " + opProvider + "…")
-			}
-		}
-	}
-
+	stop = profile.Start("app.refresh.installed.resolve_installed")
 	upserts := make([]*database.ToolCache, 0, len(tools))
 	for _, t := range tools {
 		keys := toolEntryLookupKeys(t)
 
 		opProvider := a.operationProviderName(t)
+		emitTool(t, opProvider)
 		if owner := cachedOwners[resolvedToolKey(t)]; owner != "" && owner != opProvider && t.InstallWith == "" {
 			if upsert, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, installedMaps, metadataMaps); handled {
 				if upsert == nil {
@@ -653,11 +714,19 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 			LastChecked:   time.Now(),
 		})
 	}
+	stop()
 	writeCtx := context.WithoutCancel(ctx)
+	stop = profile.Start("app.refresh.installed.write_reconcile")
 	if err := a.readDB().UpsertBatch(writeCtx, upserts); err != nil {
+		stop()
 		return fmt.Errorf("upserting installed status: %w", err)
 	}
-	return a.reconcileResolvedTools(writeCtx, tools)
+	if err := a.reconcileResolvedTools(writeCtx, tools); err != nil {
+		stop()
+		return err
+	}
+	stop()
+	return nil
 }
 
 // RefreshProviderInstalled updates the DB install status for all configured tools
@@ -667,6 +736,12 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 // but caller cancellation/deadline errors are returned so refresh state does not
 // silently go stale.
 func (a *App) RefreshProviderInstalled(ctx context.Context, provName string) error {
+	return a.RefreshProviderInstalledWithProgress(ctx, provName, nil)
+}
+
+func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName string, progress func(RefreshInstalledProgressEvent)) error {
+	defer profile.Start("app.refresh.installed.provider." + provName)()
+
 	cfg, err := a.loadConfig()
 	if err != nil {
 		return err
@@ -699,7 +774,25 @@ func (a *App) RefreshProviderInstalled(ctx context.Context, provName string) err
 	if !avail {
 		return nil
 	}
+	emitTool := func(index int, t config.ToolEntry) {
+		if progress == nil {
+			return
+		}
+		progress(RefreshInstalledProgressEvent{
+			Provider: provName,
+			Name:     t.Name,
+			Index:    index + 1,
+			Total:    len(provTools),
+		})
+	}
 	writeCtx := context.WithoutCancel(ctx)
+	upserts := make([]*database.ToolCache, 0, len(provTools))
+	flushUpserts := func() error {
+		if err := a.readDB().UpsertBatch(writeCtx, upserts); err != nil {
+			return fmt.Errorf("upserting installed status for %s: %w", provName, err)
+		}
+		return nil
+	}
 	ownerInstalledMaps := make(map[string]map[string]string)
 	ownerMetadataMaps := make(map[string]map[string]provider.InstalledMetadata)
 
@@ -708,16 +801,15 @@ func (a *App) RefreshProviderInstalled(ctx context.Context, provName string) err
 		if err != nil {
 			return refreshContextErr(ctx, err)
 		}
-		for _, t := range provTools {
+		for i, t := range provTools {
+			emitTool(i, t)
 			keys := toolEntryLookupKeys(t)
 			if owner := cachedOwners[resolvedToolKey(t)]; owner != "" && owner != provName && t.InstallWith == "" {
 				if upsert, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, ownerInstalledMaps, ownerMetadataMaps); handled {
 					if upsert == nil {
 						continue
 					}
-					if err := a.readDB().Upsert(writeCtx, upsert); err != nil {
-						return fmt.Errorf("upserting installed status for %s/%s: %w", t.Provider, t.Name, err)
-					}
+					upserts = append(upserts, upsert)
 					continue
 				}
 			}
@@ -726,7 +818,7 @@ func (a *App) RefreshProviderInstalled(ctx context.Context, provName string) err
 				if err != nil {
 					continue
 				}
-				if err := a.readDB().Upsert(writeCtx, &database.ToolCache{
+				upserts = append(upserts, &database.ToolCache{
 					Name:          t.Name,
 					Provider:      t.Provider,
 					Package:       t.EffectivePackage(),
@@ -734,14 +826,12 @@ func (a *App) RefreshProviderInstalled(ctx context.Context, provName string) err
 					InstalledWith: t.InstallWith,
 					Version:       sql.NullString{String: ver, Valid: ver != ""},
 					LastChecked:   time.Now(),
-				}); err != nil {
-					return fmt.Errorf("upserting installed status for %s/%s: %w", t.Provider, t.Name, err)
-				}
+				})
 				continue
 			}
 			entry := provider.LookupInstalledEntry(entries, keys)
 			installed := entry.ConcreteManager != ""
-			if err := a.readDB().Upsert(writeCtx, &database.ToolCache{
+			upserts = append(upserts, &database.ToolCache{
 				Name:          t.Name,
 				Provider:      t.Provider,
 				Package:       t.EffectivePackage(),
@@ -749,11 +839,9 @@ func (a *App) RefreshProviderInstalled(ctx context.Context, provName string) err
 				InstalledWith: entry.ConcreteManager,
 				Version:       sql.NullString{String: entry.Version, Valid: entry.Version != ""},
 				LastChecked:   time.Now(),
-			}); err != nil {
-				return fmt.Errorf("upserting installed status for %s/%s: %w", t.Provider, t.Name, err)
-			}
+			})
 		}
-		return nil
+		return flushUpserts()
 	}
 
 	// BulkChecker path: single backend, bulk map lookup.
@@ -774,16 +862,15 @@ func (a *App) RefreshProviderInstalled(ctx context.Context, provName string) err
 				ownerMetadataMaps[installedWith] = metadata
 				ownerInstalledMaps[installedWith] = m
 			}
-			for _, t := range provTools {
+			for i, t := range provTools {
+				emitTool(i, t)
 				keys := toolEntryLookupKeys(t)
 				if owner := cachedOwners[resolvedToolKey(t)]; owner != "" && owner != provName && t.InstallWith == "" {
 					if upsert, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, ownerInstalledMaps, ownerMetadataMaps); handled {
 						if upsert == nil {
 							continue
 						}
-						if err := a.readDB().Upsert(writeCtx, upsert); err != nil {
-							return fmt.Errorf("upserting installed status for %s/%s: %w", t.Provider, t.Name, err)
-						}
+						upserts = append(upserts, upsert)
 						continue
 					}
 				}
@@ -800,11 +887,9 @@ func (a *App) RefreshProviderInstalled(ctx context.Context, provName string) err
 				if entry, ok := provider.LookupInstalledMetadata(metadata, keys); ok {
 					applyPrivilegeMetadata(upsert, entry.Privilege)
 				}
-				if err := a.readDB().Upsert(writeCtx, upsert); err != nil {
-					return fmt.Errorf("upserting installed status for %s/%s: %w", t.Provider, t.Name, err)
-				}
+				upserts = append(upserts, upsert)
 			}
-			return nil
+			return flushUpserts()
 		} else if err := refreshContextErr(ctx, err); err != nil {
 			return err
 		}
@@ -822,21 +907,20 @@ func (a *App) RefreshProviderInstalled(ctx context.Context, provName string) err
 			if installedWith != "" {
 				ownerInstalledMaps[installedWith] = m
 			}
-			for _, t := range provTools {
+			for i, t := range provTools {
+				emitTool(i, t)
 				keys := toolEntryLookupKeys(t)
 				if owner := cachedOwners[resolvedToolKey(t)]; owner != "" && owner != provName && t.InstallWith == "" {
 					if upsert, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, ownerInstalledMaps, ownerMetadataMaps); handled {
 						if upsert == nil {
 							continue
 						}
-						if err := a.readDB().Upsert(writeCtx, upsert); err != nil {
-							return fmt.Errorf("upserting installed status for %s/%s: %w", t.Provider, t.Name, err)
-						}
+						upserts = append(upserts, upsert)
 						continue
 					}
 				}
 				ver, installed := provider.LookupString(m, keys)
-				if err := a.readDB().Upsert(writeCtx, &database.ToolCache{
+				upserts = append(upserts, &database.ToolCache{
 					Name:          t.Name,
 					Provider:      t.Provider,
 					Package:       t.EffectivePackage(),
@@ -844,11 +928,9 @@ func (a *App) RefreshProviderInstalled(ctx context.Context, provName string) err
 					InstalledWith: installedWith,
 					Version:       sql.NullString{String: ver, Valid: ver != ""},
 					LastChecked:   time.Now(),
-				}); err != nil {
-					return fmt.Errorf("upserting installed status for %s/%s: %w", t.Provider, t.Name, err)
-				}
+				})
 			}
-			return nil
+			return flushUpserts()
 		} else if err := refreshContextErr(ctx, err); err != nil {
 			return err
 		}
@@ -857,15 +939,14 @@ func (a *App) RefreshProviderInstalled(ctx context.Context, provName string) err
 
 	// Slow path: per-tool IsInstalled. Used when provider has no BulkChecker,
 	// or when BulkChecker.InstalledMap returned an error.
-	for _, t := range provTools {
+	for i, t := range provTools {
+		emitTool(i, t)
 		if owner := cachedOwners[resolvedToolKey(t)]; owner != "" && owner != provName && t.InstallWith == "" {
 			if upsert, handled := a.refreshWithCachedOwner(ctx, t, toolEntryLookupKeys(t), owner, ownerInstalledMaps, ownerMetadataMaps); handled {
 				if upsert == nil {
 					continue
 				}
-				if err := a.readDB().Upsert(writeCtx, upsert); err != nil {
-					return fmt.Errorf("upserting installed status for %s/%s: %w", t.Provider, t.Name, err)
-				}
+				upserts = append(upserts, upsert)
 				continue
 			}
 		}
@@ -877,7 +958,7 @@ func (a *App) RefreshProviderInstalled(ctx context.Context, provName string) err
 			continue
 		}
 		installedWith := installedWithForOperation(ctx, p, provName, t.InstallWith)
-		if err := a.readDB().Upsert(writeCtx, &database.ToolCache{
+		upserts = append(upserts, &database.ToolCache{
 			Name:          t.Name,
 			Provider:      t.Provider,
 			Package:       t.EffectivePackage(),
@@ -885,11 +966,9 @@ func (a *App) RefreshProviderInstalled(ctx context.Context, provName string) err
 			InstalledWith: installedWith,
 			Version:       sql.NullString{String: ver, Valid: ver != ""},
 			LastChecked:   time.Now(),
-		}); err != nil {
-			return fmt.Errorf("upserting installed status for %s/%s: %w", t.Provider, t.Name, err)
-		}
+		})
 	}
-	return nil
+	return flushUpserts()
 }
 
 // RefreshDiscovered scans all available providers whose concrete delegates are
@@ -897,22 +976,38 @@ func (a *App) RefreshProviderInstalled(ctx context.Context, provName string) err
 // as tracked=false entries. Config-tracked rows are never overwritten.
 // Best-effort: providers that error are silently skipped.
 func (a *App) RefreshDiscovered(ctx context.Context) error {
+	return a.RefreshDiscoveredWithProgress(ctx, nil)
+}
+
+func (a *App) RefreshDiscoveredWithProgress(ctx context.Context, progress func(RefreshDiscoveredProgressEvent)) error {
+	defer profile.Start("app.refresh.discovered.total")()
+
+	stop := profile.Start("app.refresh.discovered.load_config")
 	cfg, err := a.loadConfig()
+	stop()
 	if err != nil {
 		return err
 	}
 
 	cutoff := time.Now()
-	discovered := a.discoverUntrackedInstalled(ctx, cfg)
+	stop = profile.Start("app.refresh.discovered.scan")
+	discovered := a.discoverUntrackedInstalled(ctx, cfg, progress)
+	stop()
 
 	writeCtx := context.WithoutCancel(ctx)
+	stop = profile.Start("app.refresh.discovered.write")
 	if err := a.readDB().UpsertDiscoveredBatch(writeCtx, discovered); err != nil {
+		stop()
 		return fmt.Errorf("upserting discovered tools: %w", err)
 	}
+	stop()
 
+	stop = profile.Start("app.refresh.discovered.prune")
 	if err := a.readDB().PruneDiscovered(writeCtx, cutoff); err != nil {
+		stop()
 		return fmt.Errorf("pruning discovered tools: %w", err)
 	}
+	stop()
 	return nil
 }
 
@@ -921,7 +1016,7 @@ func (a *App) previewDiscovered(ctx context.Context) ([]*database.ToolCache, err
 	if err != nil {
 		return nil, err
 	}
-	discovered := a.discoverUntrackedInstalled(ctx, cfg)
+	discovered := a.discoverUntrackedInstalled(ctx, cfg, nil)
 	out := make([]*database.ToolCache, 0, len(discovered))
 	for _, d := range discovered {
 		out = append(out, &database.ToolCache{
@@ -937,7 +1032,7 @@ func (a *App) previewDiscovered(ctx context.Context) ([]*database.ToolCache, err
 	return out, nil
 }
 
-func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootConfig) []database.DiscoveredUpsert {
+func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootConfig, progress func(RefreshDiscoveredProgressEvent)) []database.DiscoveredUpsert {
 	// Build name-only set of tools already declared in config.
 	configuredNames := make(map[string]struct{})
 	for name := range cfg.Tools {
@@ -949,19 +1044,29 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 
 	// Build reverse ecosystem map (concrete → ecosystem) so discovered tools get
 	// the ecosystem provider name as their config provider label.
+	stop := profile.Start("app.refresh.discovered.resolve_ecosystems")
 	revEcosystem := make(map[string]string)
 	for eco, concrete := range a.ResolvedEcosystemProviders(ctx) {
 		revEcosystem[concrete] = eco
 	}
+	stop()
 
-	// Collect discovered upserts across all providers. forEachAvailable is serial
-	// so the slice is captured without a lock.
+	// Collect discovered upserts across all available providers. Providers are
+	// processed serially after the availability pass, so no lock is needed.
 	var discovered []database.DiscoveredUpsert
 	// Best-effort: per-provider errors are skipped so one bad provider
 	// doesn't prevent discovering the rest.
-	_ = a.forEachAvailable(ctx, func(p provider.Provider) error { //nolint:errcheck // best-effort discovery
-		if a.registry.ImportSkipsProvider(p.Name()) {
-			return nil // skip ecosystem providers whose concrete delegates are iterated
+	providers := make([]provider.Provider, 0)
+	stop = profile.Start("app.refresh.discovered.available_providers")
+	for _, p := range a.availableProviders(ctx) {
+		if !a.registry.ImportSkipsProvider(p.Name()) {
+			providers = append(providers, p)
+		}
+	}
+	stop()
+	for i, p := range providers {
+		if progress != nil {
+			progress(RefreshDiscoveredProgressEvent{Provider: p.Name(), Index: i + 1, Total: len(providers)})
 		}
 
 		configProvider := p.Name()
@@ -987,13 +1092,13 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 					Version:       entry.Version,
 				})
 			}
-			return nil
+			continue
 		}
 
 		// Standard path: ListInstalled returns tools without per-manager attribution.
 		installed, err := p.ListInstalled(ctx)
 		if err != nil {
-			return nil // best-effort: skip erroring providers
+			continue // best-effort: skip erroring providers
 		}
 		for _, t := range installed {
 			if _, ok := configuredNames[t.Name]; ok {
@@ -1006,8 +1111,7 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 				Version:       t.Version,
 			})
 		}
-		return nil
-	})
+	}
 	return discovered
 }
 

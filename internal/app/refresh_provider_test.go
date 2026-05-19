@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/provider"
@@ -352,6 +353,42 @@ func TestRefreshProviderInstalled_BulkPath_MarksInstalled(t *testing.T) {
 	}
 	if tools[0].Version.String != "14.1.0" {
 		t.Errorf("ripgrep.Version = %q, want 14.1.0", tools[0].Version.String)
+	}
+}
+
+func TestRefreshProviderInstalledWithProgress_ReportsEachTool(t *testing.T) {
+	prov := &bulkCheckingStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		bulk:         map[string]string{"git": "2.45.0", "ripgrep": "14.1.0"},
+	}
+	a, cfgPath := newImportApp(t, prov)
+
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(
+			logicalTool("ripgrep", "brew"),
+			logicalTool("git", "brew"),
+		),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("ripgrep", "git"),
+		}},
+	}); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+
+	var events []app.RefreshInstalledProgressEvent
+	if err := a.RefreshProviderInstalledWithProgress(context.Background(), "brew", func(event app.RefreshInstalledProgressEvent) {
+		events = append(events, event)
+	}); err != nil {
+		t.Fatalf("RefreshProviderInstalledWithProgress: %v", err)
+	}
+
+	if len(events) != 2 {
+		t.Fatalf("events len = %d, want 2: %#v", len(events), events)
+	}
+	for i, event := range events {
+		if event.Provider != "brew" || event.Index != i+1 || event.Total != 2 {
+			t.Fatalf("event[%d] = %#v, want brew %d/2", i, event, i+1)
+		}
 	}
 }
 

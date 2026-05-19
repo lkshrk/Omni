@@ -512,10 +512,10 @@ func TestViewString_PostSetupReloadEmphasizesProviderRefresh(t *testing.T) {
 	m.mode = viewList
 	m.loading = true
 	m.setupReloading = true
-	m.progressText = "Refreshing providers: brew…"
+	m.progressText = "Refreshing tools… 0/1: brew"
 
 	out := m.viewString()
-	line := renderedLineContaining(out, "Refreshing providers: brew…")
+	line := renderedLineContaining(out, "Refreshing tools… 0/1: brew")
 	if line == "" {
 		t.Fatalf("post-setup reload should render provider refresh text:\n%s", out)
 	}
@@ -3261,8 +3261,9 @@ func TestActivityLabel_Searching(t *testing.T) {
 func TestActivityLabel_Scanning(t *testing.T) {
 	m := baseModel(nil)
 	m.scanningProviders = map[string]bool{"brew": true, "npm": true}
+	m.refreshToolTotal = 4
 	got := activityLabel(m)
-	if got != "Refreshing providers: brew, npm…" {
+	if got != "Refreshing tools… 0/4: brew, npm" {
 		t.Errorf("activity label = %q, want sorted provider refresh status", got)
 	}
 }
@@ -5866,10 +5867,11 @@ func TestDashboardDataRowsShowLoadingWithCurrentSnapshot(t *testing.T) {
 		m := baseModel([]*database.ToolCache{{Name: "git", Provider: "brew", Installed: true, Tracked: true}})
 		m.mode = viewStatus
 		m.scanningProviders = map[string]bool{"brew": true}
-		m.progressText = "Refreshing providers: brew…"
+		m.refreshToolTotal = 1
+		m.progressText = "Refreshing tools… 0/1: brew"
 
 		out := renderStatus(m)
-		for _, want := range []string{iconPending, "Refreshing providers: brew…", "1 installed locally"} {
+		for _, want := range []string{iconPending, "Refreshing tools… 0/1: brew", "1 installed locally"} {
 			if !strings.Contains(out, want) {
 				t.Fatalf("dashboard should keep tool data visible while refreshing, missing %q:\n%s", want, out)
 			}

@@ -190,7 +190,13 @@ func (a *App) DotsSyncEntry(ctx context.Context, name string, opts dots.SyncOpti
 		if err := a.requireStow(ctx); err != nil {
 			return nil, err
 		}
+		if opts.Progress != nil {
+			opts.Progress(dots.SyncProgressEvent{Entry: entry.Name, Index: 1, Total: 1})
+		}
 		ops, syncErr := syncResolvedDotEntry(ctx, repoPath, stowPath, entry, opts, true)
+		if opts.Progress != nil {
+			opts.Progress(dots.SyncProgressEvent{Entry: entry.Name, Index: 1, Total: 1, Done: true, Err: syncErr, Ops: ops})
+		}
 		if syncErr != nil {
 			return ops, fmt.Errorf("dots sync %q: %w", name, syncErr)
 		}

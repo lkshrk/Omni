@@ -11,6 +11,7 @@ import (
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/profile"
 	"github.com/lkshrk/omni/internal/provider"
 	gosync "github.com/lkshrk/omni/internal/sync"
 )
@@ -70,22 +71,17 @@ func sendDotsProgressUpdate(ch chan dotsProgressUpdate, update dotsProgressUpdat
 	}
 }
 
-func (m *Model) sendToolProgressSnapshot(ch chan progressUpdate, gen int, event gosync.ProgressEvent) {
+func (m *Model) sendToolProgressUpdate(ch chan progressUpdate, gen int, event gosync.ProgressEvent) {
 	update := toolProgressUpdate(gen, event)
-	if event.Done {
-		update.tools, _ = m.app.ListTools(m.ctx, "")
-	}
 	sendProgressUpdate(ch, update)
 }
 
-func (m *Model) sendSyncAllToolProgressSnapshot(ch chan progressUpdate, gen int, event gosync.ProgressEvent, text string) {
+func (m *Model) sendSyncAllToolProgressUpdate(ch chan progressUpdate, gen int, event gosync.ProgressEvent, text string) {
 	update := toolProgressUpdate(gen, event)
 	if text != "" {
 		update.text = text
 	}
 	if event.Done {
-		update.tools, _ = m.app.ListTools(m.ctx, "")
-		update.groupNames, update.toolGroups, update.toolMemberships = m.reloadToolGroups()
 		if strings.HasPrefix(event.Message, "Added ") || strings.HasPrefix(event.Message, "Would add ") {
 			update.claimedNames = []string{event.Tool.Name}
 		}
@@ -93,13 +89,10 @@ func (m *Model) sendSyncAllToolProgressSnapshot(ch chan progressUpdate, gen int,
 	sendProgressUpdate(ch, update)
 }
 
-func (m *Model) sendUpgradeAllToolProgressSnapshot(ch chan progressUpdate, gen int, event gosync.ProgressEvent, text string) {
+func (m *Model) sendUpgradeAllToolProgressUpdate(ch chan progressUpdate, gen int, event gosync.ProgressEvent, text string) {
 	update := toolProgressUpdate(gen, event)
 	if text != "" {
 		update.text = text
-	}
-	if event.Done {
-		update.tools, _ = m.app.ListTools(m.ctx, "")
 	}
 	sendProgressUpdate(ch, update)
 }
@@ -333,7 +326,7 @@ func (m *Model) doSyncWithProgress(ch chan progressUpdate, gen int) tea.Cmd {
 				sendProgress(ch, gen, s)
 			},
 			ToolProgress: func(event gosync.ProgressEvent) {
-				m.sendToolProgressSnapshot(ch, gen, event)
+				m.sendToolProgressUpdate(ch, gen, event)
 			},
 			SkipPrivileged: true,
 		})
@@ -394,7 +387,7 @@ func (m *Model) doSyncAllWithProgress(ch chan progressUpdate, gen int, discovere
 					current++
 					started[key] = true
 				}
-				m.sendSyncAllToolProgressSnapshot(ch, gen, event, syncAllToolProgressText(event, current, total))
+				m.sendSyncAllToolProgressUpdate(ch, gen, event, syncAllToolProgressText(event, current, total))
 			},
 		})
 
@@ -597,24 +590,27 @@ func anyMissingDescription(tools []*database.ToolCache) bool {
 	return false
 }
 
-// doScanProvider scans a single named provider: updates install status and
-// checks for outdated tools. A 45-second timeout prevents slow network calls
-// (e.g. brew outdated) from blocking the UI indefinitely. Does NOT call
-// ListTools — all goroutines must finish their upserts before a consistent
-// snapshot can be read. The final ListTools is done by doFetchFinalTools once
-// every providerScannedMsg has arrived.
-func (m *Model) doScanProvider(provName string, gen int) tea.Cmd {
+// doScanProvider scans a single named provider's installed state. A 45-second
+// timeout prevents slow local package-manager calls from blocking the UI
+// indefinitely. Does NOT call ListTools — all goroutines must finish their
+// upserts before a consistent snapshot can be read. The final ListTools is done
+// by doFetchFinalTools once every providerScannedMsg has arrived.
+func (m *Model) doScanProvider(provName string, gen int, progressCh chan progressUpdate, progressGen int) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
+		defer profile.Start("tui.refresh.installed.provider." + provName)()
+
 		installCtx, cancelInstall := context.WithTimeout(ctx, 45*time.Second)
-		installErr := a.RefreshProviderInstalled(installCtx, provName)
+		installErr := a.RefreshProviderInstalledWithProgress(installCtx, provName, func(event app.RefreshInstalledProgressEvent) {
+			sendProgressUpdate(progressCh, progressUpdate{
+				gen:             progressGen,
+				refreshProvider: event.Provider,
+				refreshToolName: event.Name,
+			})
+		})
 		cancelInstall()
 
-		outdatedCtx, cancelOutdated := context.WithTimeout(ctx, 45*time.Second)
-		outdatedErr := a.RefreshProviderOutdated(outdatedCtx, provName)
-		cancelOutdated()
-
-		return providerScannedMsg{gen: gen, provider: provName, err: errors.Join(installErr, outdatedErr)}
+		return providerScannedMsg{gen: gen, provider: provName, err: installErr}
 	}
 }
 
@@ -625,6 +621,8 @@ func (m *Model) doScanProvider(provName string, gen int) tea.Cmd {
 func (m *Model) doFetchFinalTools(gen int) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
+		defer profile.Start("tui.refresh.installed.final_tools")()
+
 		tools, err := a.ListTools(ctx, "")
 		if err != nil {
 			return allProvidersDoneMsg{gen: gen, err: err}
@@ -638,13 +636,50 @@ func (m *Model) doFetchFinalTools(gen int) tea.Cmd {
 	}
 }
 
+func (m *Model) doCheckProviderOutdated(provName string, gen int) tea.Cmd {
+	a, ctx := m.app, m.ctx
+	return func() tea.Msg {
+		defer profile.Start("tui.refresh.outdated.provider." + provName)()
+
+		outdatedCtx, cancelOutdated := context.WithTimeout(ctx, 45*time.Second)
+		outdatedErr := a.RefreshProviderOutdated(outdatedCtx, provName)
+		cancelOutdated()
+		return providerOutdatedCheckedMsg{gen: gen, provider: provName, err: outdatedErr}
+	}
+}
+
+func (m *Model) doFetchOutdatedTools(gen int) tea.Cmd {
+	a, ctx := m.app, m.ctx
+	return func() tea.Msg {
+		defer profile.Start("tui.refresh.outdated.final_tools")()
+
+		tools, err := a.ListTools(ctx, "")
+		if err != nil {
+			return outdatedProvidersDoneMsg{gen: gen, err: err}
+		}
+		ecosystemMap := a.ResolvedEcosystemProviders(ctx)
+		return outdatedProvidersDoneMsg{
+			gen:                    gen,
+			tools:                  tools,
+			effectiveSystemManager: ecosystemMap[provider.EcosystemSystem],
+		}
+	}
+}
+
 // doRefreshDiscovered scans all providers for locally-installed tools that are
 // not in the config (orphan scan). Runs as a separate background pass so it
 // does not delay the installedRefreshedMsg signal.
-func (m *Model) doRefreshDiscovered(gen int) tea.Cmd {
+func (m *Model) doRefreshDiscovered(gen int, progressCh chan progressUpdate, progressGen int) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
-		if err := a.RefreshDiscovered(ctx); err != nil {
+		defer profile.Start("tui.refresh.discovered.total")()
+
+		if progressCh != nil {
+			defer close(progressCh)
+		}
+		if err := a.RefreshDiscoveredWithProgress(ctx, func(event app.RefreshDiscoveredProgressEvent) {
+			sendProgress(progressCh, progressGen, app.RefreshDiscoveredProgressText(event))
+		}); err != nil {
 			return discoveredRefreshedMsg{gen: gen, err: err}
 		}
 		discovered, err := a.ListDiscovered(ctx)
@@ -661,13 +696,21 @@ func (m *Model) startDescriptionRefresh() tea.Cmd {
 	m.descRefreshGen++
 	m.descRefreshing = true
 	setActivityStatus(m, "Refreshing tool descriptions…")
-	return m.doRefreshDescriptions(m.descRefreshGen)
+	ch, progressGen := m.beginProgressStream()
+	return tea.Batch(m.doRefreshDescriptions(m.descRefreshGen, ch, progressGen), waitForProgress(ch, progressGen))
 }
 
-func (m *Model) doRefreshDescriptions(gen int) tea.Cmd {
+func (m *Model) doRefreshDescriptions(gen int, progressCh chan progressUpdate, progressGen int) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
-		if err := a.RefreshDescriptions(ctx, 0); err != nil {
+		defer profile.Start("tui.refresh.descriptions.total")()
+
+		if progressCh != nil {
+			defer close(progressCh)
+		}
+		if err := a.RefreshDescriptionsWithProgress(ctx, 0, func(event app.RefreshDescriptionsProgressEvent) {
+			sendProgress(progressCh, progressGen, app.RefreshDescriptionsProgressText(event))
+		}); err != nil {
 			return descRefreshDoneMsg{gen: gen, err: err}
 		}
 		tools, _ := a.ListTools(ctx, "") // non-fatal: stale descriptions remain if list refresh fails
@@ -696,7 +739,7 @@ func (m *Model) doUpgradeAll(ch chan progressUpdate, gen int) tea.Cmd {
 					started[key] = current
 				}
 			}
-			m.sendUpgradeAllToolProgressSnapshot(ch, gen, event, upgradeAllProgressText(event, started[key], total))
+			m.sendUpgradeAllToolProgressUpdate(ch, gen, event, upgradeAllProgressText(event, started[key], total))
 		}, app.UpgradeAllOptions{SkipPrivileged: true})
 		tools, _ := a.ListTools(ctx, "") // non-fatal: upgrade succeeded; stale list retained if refresh fails
 		rowErrors := upgradeAllRowErrors(result)

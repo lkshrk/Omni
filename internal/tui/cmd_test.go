@@ -2780,7 +2780,7 @@ func TestDoScanProvider_ReturnsMsg(t *testing.T) {
 	a, _ := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
 	m := modelForCmds(a)
 
-	msg := m.doScanProvider("brew", 7)()
+	msg := m.doScanProvider("brew", 7, nil, 0)()
 	got, ok := msg.(providerScannedMsg)
 	if !ok {
 		t.Fatalf("expected providerScannedMsg, got %T", msg)
@@ -2810,6 +2810,24 @@ func TestDoFetchFinalTools_ReturnsMsg(t *testing.T) {
 	}
 }
 
+func TestDoCheckProviderOutdated_ReturnsMsg(t *testing.T) {
+	prov := &okProvider{name: "brew"}
+	a, _ := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
+	m := modelForCmds(a)
+
+	msg := m.doCheckProviderOutdated("brew", 9)()
+	got, ok := msg.(providerOutdatedCheckedMsg)
+	if !ok {
+		t.Fatalf("expected providerOutdatedCheckedMsg, got %T", msg)
+	}
+	if got.gen != 9 {
+		t.Errorf("gen = %d, want 9", got.gen)
+	}
+	if got.provider != "brew" {
+		t.Errorf("provider = %q, want brew", got.provider)
+	}
+}
+
 // ── doRefreshDiscovered ───────────────────────────────────────────────────────
 
 // TestDoRefreshDiscovered_ReturnsMsg verifies that doRefreshDiscovered always
@@ -2819,7 +2837,7 @@ func TestDoRefreshDiscovered_ReturnsMsg(t *testing.T) {
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
 
-	msg := m.doRefreshDiscovered(9)()
+	msg := m.doRefreshDiscovered(9, nil, 0)()
 	got, ok := msg.(discoveredRefreshedMsg)
 	if !ok {
 		t.Fatalf("expected discoveredRefreshedMsg, got %T", msg)

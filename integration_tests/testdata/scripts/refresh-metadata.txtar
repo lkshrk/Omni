@@ -3,10 +3,10 @@ exec chmod 755 bin/brew bin/apt bin/apk bin/dnf bin/pacman bin/zypper bin/pip bi
 env PATH=$WORK/bin:$PATH
 
 exec omni --config settings.json tools refresh
-stdout 'Scanning brew'
-stdout 'checking brew for updates'
-stdout 'finding local tools'
-stdout 'refreshing tool descriptions'
+stdout 'Refreshing tools 1/1: brew/ripgrep'
+stdout 'Checking updates 1/1: brew/ripgrep'
+stdout 'Finding local tools [0-9]+/[0-9]+:'
+stdout 'Refreshing descriptions 1/1: brew/ripgrep'
 stdout 'Refresh complete'
 exec omni --config settings.json tools list ripgrep --format json
 stdout '"state":"outdated"'

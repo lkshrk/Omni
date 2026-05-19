@@ -211,6 +211,33 @@ func TestResolveCommand_UsesAugmentedPath(t *testing.T) {
 	}
 }
 
+func TestCommandAvailable_UsesAugmentedPath(t *testing.T) {
+	home := t.TempDir()
+	binDir := filepath.Join(home, ".volta", "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(binDir, "stow")
+	if err := os.WriteFile(binary, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", "/usr/bin:/bin")
+
+	if !CommandAvailable("stow") {
+		t.Fatal("CommandAvailable(stow) = false, want true through augmented PATH")
+	}
+}
+
+func TestCommandAvailable_Missing(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+
+	if CommandAvailable("stow") {
+		t.Fatal("CommandAvailable(stow) = true, want false")
+	}
+}
+
 func TestResolveCommand_UsesActiveNVMBinBeforeDefaultAlias(t *testing.T) {
 	home, versionsDir := makeNvmHome(t)
 	defaultBin := filepath.Join(versionsDir, "v20.10.0", "bin")

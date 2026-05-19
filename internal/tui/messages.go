@@ -42,6 +42,7 @@ type toolsLoadedMsg struct {
 	setupProviders         []setupProviderRow // pre-built provider rows for the setup wizard
 	ecosystemProviders     []string           // ordered ecosystem provider names for the tools-list provider filter
 	configuredProviders    []string           // unique provider names declared in config groups (may differ from DB rows on first run)
+	providerToolCounts     map[string]int     // operation provider name → configured tool count
 }
 
 type setupConfigImportDoneMsg struct {
@@ -49,11 +50,10 @@ type setupConfigImportDoneMsg struct {
 	err  error
 }
 
-// providerScannedMsg is sent when the per-provider parallel scan goroutine
-// completes (both install-status and outdated-status passes). Tools are NOT
-// fetched here to avoid concurrent ListTools calls racing each other and
-// producing stale snapshots. The handler launches a single allProvidersDoneMsg
-// fetch once the set empties.
+// providerScannedMsg is sent when the per-provider installed-state scan
+// goroutine completes. Tools are NOT fetched here to avoid concurrent ListTools
+// calls racing each other and producing stale snapshots. The handler launches a
+// single allProvidersDoneMsg fetch once the set empties.
 type providerScannedMsg struct {
 	gen      int
 	provider string
@@ -63,6 +63,19 @@ type providerScannedMsg struct {
 // allProvidersDoneMsg is sent after all per-provider goroutines have finished
 // and a single, consistent ListTools call has captured the final DB state.
 type allProvidersDoneMsg struct {
+	gen                    int
+	tools                  []*database.ToolCache
+	effectiveSystemManager string
+	err                    error
+}
+
+type providerOutdatedCheckedMsg struct {
+	gen      int
+	provider string
+	err      error
+}
+
+type outdatedProvidersDoneMsg struct {
 	gen                    int
 	tools                  []*database.ToolCache
 	effectiveSystemManager string
@@ -172,6 +185,8 @@ type progressUpdate struct {
 	rowStatus       string
 	rowErr          string
 	rowDone         bool
+	refreshProvider string
+	refreshToolName string
 	tools           []*database.ToolCache
 	claimedNames    []string
 	toolGroups      map[string]string

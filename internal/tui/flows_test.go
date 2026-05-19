@@ -2312,6 +2312,22 @@ func TestFlow_UC48_ProviderScanMsgs(t *testing.T) {
 		}
 	})
 
+	t.Run("last providerScannedMsg starts visible snapshot and background outdated checks", func(t *testing.T) {
+		m := baseModel(nil)
+		m.scanningProviders = map[string]bool{"brew": true}
+		m.providerScanToolCounts = map[string]int{"brew": 2}
+		got := drive(m, providerScannedMsg{provider: "brew"})
+		if len(got.scanningProviders) != 0 {
+			t.Fatalf("scanningProviders = %v, want empty", got.scanningProviders)
+		}
+		if !got.providerSnapshotRefreshing || !got.discoveryRefreshing {
+			t.Fatalf("provider snapshot/discovery flags = %v/%v, want true/true", got.providerSnapshotRefreshing, got.discoveryRefreshing)
+		}
+		if !got.outdatedProviders["brew"] {
+			t.Fatalf("outdatedProviders = %v, want brew", got.outdatedProviders)
+		}
+	})
+
 	t.Run("allProvidersDoneMsg refreshes tools", func(t *testing.T) {
 		m := baseModel(nil)
 		m.rowErrors = map[string]string{toolKey("ripgrep", "brew"): "provider not found"}
@@ -2345,6 +2361,25 @@ func TestFlow_UC48_ProviderScanMsgs(t *testing.T) {
 		got := drive(m, allProvidersDoneMsg{tools: threeTools()})
 		if got.statusMsg == "" {
 			t.Error("statusMsg must not be cleared while scan error is visible")
+		}
+	})
+
+	t.Run("outdated provider completion refreshes tools without blocking installed snapshot", func(t *testing.T) {
+		m := baseModel(nil)
+		m.outdatedProviders = map[string]bool{"brew": true}
+		got := drive(m, providerOutdatedCheckedMsg{provider: "brew"})
+		if len(got.outdatedProviders) != 0 {
+			t.Fatalf("outdatedProviders = %v, want empty", got.outdatedProviders)
+		}
+		if !got.outdatedSnapshotRefreshing {
+			t.Fatal("outdatedSnapshotRefreshing = false, want true")
+		}
+		got = drive(got, outdatedProvidersDoneMsg{tools: threeTools()})
+		if got.outdatedSnapshotRefreshing {
+			t.Fatal("outdatedSnapshotRefreshing = true, want false")
+		}
+		if len(got.allTools) != 3 {
+			t.Fatalf("allTools = %d, want 3", len(got.allTools))
 		}
 	})
 }

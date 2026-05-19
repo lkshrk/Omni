@@ -262,6 +262,62 @@ func TestSyncAll_ClaimsDiscoveredToHostnameGroupAndSyncs(t *testing.T) {
 	}
 }
 
+func TestSyncAll_ClaimsMultipleDiscoveredTools(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	brew := &lifecycleProvider{stubProvider: stubProvider{name: "brew", available: true}, installed: true}
+	system := &lifecycleProvider{
+		stubProvider: stubProvider{name: "system", available: true},
+		resolvedName: "brew",
+		installed:    true,
+	}
+	a, cfgPath := newImportApp(t, brew, system)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{testHostGroup()}}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	discovered := []*database.ToolCache{
+		{Name: "fzf", Provider: "system", Package: "fzf", InstalledWith: "brew", Installed: true, Tracked: false},
+		{Name: "fd", Provider: "system", Package: "fd", InstalledWith: "brew", Installed: true, Tracked: false},
+	}
+	if err := a.DB().UpsertDiscoveredBatch(context.Background(), []database.DiscoveredUpsert{
+		{Name: "fzf", Provider: "system", InstalledWith: "brew", Version: "1.0.0"},
+		{Name: "fd", Provider: "system", InstalledWith: "brew", Version: "2.0.0"},
+	}); err != nil {
+		t.Fatalf("UpsertDiscoveredBatch: %v", err)
+	}
+
+	var progress []string
+	result, err := a.SyncAll(context.Background(), app.SyncAllOptions{
+		Discovered: discovered,
+		ToolProgress: func(event gosync.ProgressEvent) {
+			progress = append(progress, event.Message)
+		},
+	})
+	if err != nil {
+		t.Fatalf("SyncAll: %v", err)
+	}
+	if !slices.Equal(result.ClaimedNames, []string{"fzf", "fd"}) {
+		t.Fatalf("ClaimedNames = %v, want [fzf fd]", result.ClaimedNames)
+	}
+	if !slices.Contains(progress, "Added fzf to config") || !slices.Contains(progress, "Added fd to config") {
+		t.Fatalf("progress = %v, want both discovered tools marked added", progress)
+	}
+	updated, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	hostGroup := findTestGroup(updated, "testhost")
+	if hostGroup == nil || !testGroupHasTool(hostGroup, "fzf") || !testGroupHasTool(hostGroup, "fd") {
+		t.Fatalf("hostname group tools = %+v, want fzf and fd", hostGroup)
+	}
+	left, err := a.ListDiscovered(context.Background())
+	if err != nil {
+		t.Fatalf("ListDiscovered: %v", err)
+	}
+	if len(left) != 0 {
+		t.Fatalf("ListDiscovered after claims = %+v, want none", left)
+	}
+}
+
 func TestSyncAll_ClaimResolvedDefaultConcreteDoesNotWriteInstallWith(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	brew := &lifecycleProvider{stubProvider: stubProvider{name: "brew", available: true}, installed: true}

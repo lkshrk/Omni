@@ -2,6 +2,7 @@ package tui
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -74,7 +75,7 @@ func renderFooterStatusOnly(status string, contentW int) string {
 func renderFooterStatusLayer(m Model, maxWidth int) string {
 	p := m.palette
 	switch {
-	case m.loading || m.dotsLoading || m.doctorRunning || m.searching || len(m.scanningProviders) > 0 || m.providerSnapshotRefreshing || m.discoveryRefreshing || m.descRefreshing || len(m.upgradingKeys) > 0:
+	case m.loading || m.dotsLoading || m.doctorRunning || m.searching || len(m.scanningProviders) > 0 || len(m.outdatedProviders) > 0 || m.providerSnapshotRefreshing || m.outdatedSnapshotRefreshing || m.discoveryRefreshing || m.descRefreshing || len(m.upgradingKeys) > 0:
 		text := m.progressText
 		progress := text != ""
 		if text == "" {
@@ -117,7 +118,8 @@ func statusTextStyle(p palette, text string, isErr bool) lipgloss.Style {
 }
 
 func isProviderRefreshText(text string) bool {
-	return strings.Contains(strings.ToLower(text), "refreshing provider")
+	lower := strings.ToLower(text)
+	return strings.Contains(lower, "refreshing provider") || strings.Contains(lower, "refreshing tool")
 }
 
 // activityLabel returns a descriptive fallback for the footer when no
@@ -127,9 +129,11 @@ func activityLabel(m Model) string {
 	case m.searching:
 		return "Searching…"
 	case len(m.scanningProviders) > 0:
-		return providerRefreshStatus(m.scanningProviders)
+		return toolRefreshStatus(m.scanningProviders, m.refreshToolDone, m.refreshToolTotal)
 	case m.providerSnapshotRefreshing || m.discoveryRefreshing:
 		return "Finding local tools…"
+	case len(m.outdatedProviders) > 0 || m.outdatedSnapshotRefreshing:
+		return "Checking updates…"
 	case m.descRefreshing:
 		return "Refreshing tool descriptions…"
 	case m.dotsLoading:
@@ -141,7 +145,7 @@ func activityLabel(m Model) string {
 	}
 }
 
-func providerRefreshStatus(providers map[string]bool) string {
+func toolRefreshStatus(providers map[string]bool, done, total int) string {
 	names := make([]string, 0, len(providers))
 	for p := range providers {
 		if p != "" {
@@ -149,8 +153,26 @@ func providerRefreshStatus(providers map[string]bool) string {
 		}
 	}
 	sort.Strings(names)
-	if len(names) == 0 {
-		return "Refreshing providers…"
+	if done < 0 {
+		done = 0
 	}
-	return "Refreshing providers: " + strings.Join(names, ", ") + "…"
+	if done > total {
+		done = total
+	}
+	status := "Refreshing tools…"
+	if total > 0 {
+		status += " " + strconv.Itoa(done) + "/" + strconv.Itoa(total)
+	}
+	if len(names) == 0 || total <= 0 {
+		return status
+	}
+	return status + ": " + strings.Join(names, ", ")
+}
+
+func refreshToolProgressText(active string, done, total int) string {
+	status := toolRefreshStatus(nil, done, total)
+	if active == "" || total <= 0 {
+		return status
+	}
+	return status + ": " + active
 }

@@ -39,7 +39,11 @@ func (m *Model) handleProgressMsg(msg progressMsg) []tea.Cmd {
 	if msg.gen != m.progressGen {
 		return nil
 	}
-	m.progressText = msg.text
+	if msg.refreshProvider != "" {
+		m.handleRefreshToolProgress(msg)
+	} else {
+		m.progressText = msg.text
+	}
 	progressChangedList := false
 	if msg.tools != nil {
 		m.allTools = msg.tools
@@ -73,6 +77,9 @@ func (m *Model) handleProgressMsg(msg progressMsg) []tea.Cmd {
 				m.clearRowOperation()
 			}
 			m.clearToolActionError(msg.rowKey)
+			if m.markToolProgressDone(msg.rowKey) {
+				progressChangedList = true
+			}
 		case msg.rowStatus != "":
 			parts := strings.SplitN(msg.rowKey, "\x00", 2)
 			if len(parts) == 2 {
@@ -87,6 +94,58 @@ func (m *Model) handleProgressMsg(msg progressMsg) []tea.Cmd {
 		return []tea.Cmd{waitForProgress(m.progressCh, m.progressGen)}
 	}
 	return nil
+}
+
+func (m *Model) markToolProgressDone(rowKey string) bool {
+	if rowKey == "" {
+		return false
+	}
+	changed := false
+	for _, t := range m.allTools {
+		if t == nil || toolKey(t.Name, t.Provider) != rowKey {
+			continue
+		}
+		if !t.Installed || !t.Tracked || t.Outdated {
+			changed = true
+		}
+		t.Installed = true
+		t.Tracked = true
+		t.Outdated = false
+	}
+	return changed
+}
+
+func (m *Model) handleRefreshToolProgress(msg progressMsg) {
+	providerName := msg.refreshProvider
+	if providerName == "" {
+		return
+	}
+	if len(m.scanningProviders) > 0 && !m.scanningProviders[providerName] {
+		return
+	}
+	if m.providerScanToolDone == nil {
+		m.providerScanToolDone = make(map[string]int)
+	}
+	expected := m.providerScanToolCounts[providerName]
+	if expected <= 0 {
+		expected = 1
+	}
+	if m.providerScanToolDone[providerName] >= expected {
+		return
+	}
+	m.providerScanToolDone[providerName]++
+	if m.refreshToolTotal == 0 {
+		m.refreshToolTotal = sumProviderToolCounts(m.providerScanToolCounts)
+	}
+	m.refreshToolDone++
+	if m.refreshToolTotal > 0 && m.refreshToolDone > m.refreshToolTotal {
+		m.refreshToolDone = m.refreshToolTotal
+	}
+	active := providerName
+	if msg.refreshToolName != "" {
+		active += "/" + msg.refreshToolName
+	}
+	m.progressText = refreshToolProgressText(active, m.refreshToolDone, m.refreshToolTotal)
 }
 
 func (m *Model) handleProgressStreamClosedMsg(msg progressStreamClosedMsg) {

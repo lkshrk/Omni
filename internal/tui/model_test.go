@@ -406,11 +406,11 @@ func TestModel_ToolsLoadedMsg(t *testing.T) {
 		if got.statusMsg != "Syncing dots…" {
 			t.Fatalf("statusMsg = %q, want initial dots operation status", got.statusMsg)
 		}
-		if got.progressText != "Refreshing providers: brew…" {
+		if got.progressText != "Refreshing tools… 0/1: brew" {
 			t.Fatalf("progressText = %q, want provider refresh to replace dots activity", got.progressText)
 		}
 		out := stripANSIEscapeSequences(renderFooterStatusLayer(got, 80))
-		if !strings.Contains(out, "Refreshing providers: brew…") || strings.Contains(out, "Syncing dots…") {
+		if !strings.Contains(out, "Refreshing tools… 0/1: brew") || strings.Contains(out, "Syncing dots…") {
 			t.Fatalf("footer status = %q, want latest provider activity instead of stale dots status", out)
 		}
 
@@ -835,8 +835,8 @@ func TestStartCurrentProviderScans_DedupesConcreteCoveredByEcosystem(t *testing.
 	m.effectiveSystemManager = "brew"
 
 	cmds := m.startCurrentProviderScans()
-	if len(cmds) != 2 {
-		t.Fatalf("scan commands = %d, want spinner plus one provider scan", len(cmds))
+	if len(cmds) != 3 {
+		t.Fatalf("scan commands = %d, want spinner, progress wait, and one provider scan", len(cmds))
 	}
 	if len(m.scanningProviders) != 1 || !m.scanningProviders["system"] {
 		t.Fatalf("scanningProviders = %v, want only logical system scan", m.scanningProviders)
@@ -852,8 +852,8 @@ func TestRefreshInstalledProviders_DedupesConcreteCoveredByEcosystem(t *testing.
 	m.effectiveSystemManager = "brew"
 
 	cmds := m.refreshInstalledProviders()
-	if len(cmds) != 2 {
-		t.Fatalf("scan commands = %d, want spinner plus one provider scan", len(cmds))
+	if len(cmds) != 3 {
+		t.Fatalf("scan commands = %d, want spinner, progress wait, and one provider scan", len(cmds))
 	}
 	if len(m.scanningProviders) != 1 || !m.scanningProviders["system"] {
 		t.Fatalf("scanningProviders = %v, want only logical system scan", m.scanningProviders)
@@ -2582,6 +2582,27 @@ func TestModel_ProgressMsg_SetsProgressText(t *testing.T) {
 	}
 }
 
+func TestModel_ProgressMsg_AdvancesRefreshToolProgress(t *testing.T) {
+	m := baseModel(nil)
+	m.progressGen = 4
+	m.scanningProviders = map[string]bool{"brew": true}
+	m.providerScanToolCounts = map[string]int{"brew": 2}
+	m.providerScanToolDone = map[string]int{}
+	m.refreshToolTotal = 2
+
+	got := drive(m, progressMsg{gen: 4, refreshProvider: "brew", refreshToolName: "ripgrep"})
+
+	if got.refreshToolDone != 1 {
+		t.Fatalf("refreshToolDone = %d, want 1", got.refreshToolDone)
+	}
+	if got.providerScanToolDone["brew"] != 1 {
+		t.Fatalf("providerScanToolDone[brew] = %d, want 1", got.providerScanToolDone["brew"])
+	}
+	if got.progressText != "Refreshing tools… 1/2: brew/ripgrep" {
+		t.Fatalf("progressText = %q, want per-tool refresh progress", got.progressText)
+	}
+}
+
 func TestModel_ProgressMsg_RefreshesFinishedToolBeforeBatchDone(t *testing.T) {
 	m := baseModel([]*database.ToolCache{
 		{Name: "ripgrep", Provider: "system", Installed: false, Tracked: true},
@@ -2618,6 +2639,41 @@ func TestModel_ProgressMsg_RefreshesFinishedToolBeforeBatchDone(t *testing.T) {
 	}
 	if !refreshed {
 		t.Fatalf("finished row should refresh immediately, got %+v", got.visibleTools)
+	}
+}
+
+func TestModel_ProgressMsg_MarksFinishedToolWithoutSnapshot(t *testing.T) {
+	m := baseModel([]*database.ToolCache{
+		{Name: "ripgrep", Provider: "system", Installed: false, Tracked: true},
+		{Name: "fd", Provider: "system", Installed: false, Tracked: true},
+	})
+	key := toolKey("ripgrep", "system")
+	m.progressGen = 3
+	m.loading = true
+	m.bulkPendingKeys = map[string]bool{key: true, toolKey("fd", "system"): true}
+
+	got := drive(m, progressMsg{
+		gen:     3,
+		text:    "Installed ripgrep",
+		rowKey:  key,
+		rowDone: true,
+	})
+
+	if !got.loading {
+		t.Fatal("batch should stay loading until progressDoneMsg")
+	}
+	if got.bulkPendingKeys[key] {
+		t.Fatal("finished row should leave pending state before batch completion")
+	}
+	refreshed := false
+	for _, tool := range got.visibleTools {
+		if tool.Name == "ripgrep" && tool.Installed {
+			refreshed = true
+			break
+		}
+	}
+	if !refreshed {
+		t.Fatalf("finished row should update from row progress alone, got %+v", got.visibleTools)
 	}
 }
 
@@ -2752,12 +2808,17 @@ func TestModel_ProviderScannedMsg_ClearsScanningProviders(t *testing.T) {
 func TestModel_ProviderScannedMsg_RefreshStatusShowsRemainingProviders(t *testing.T) {
 	m := baseModel(nil)
 	m.scanningProviders = map[string]bool{"brew": true, "node": true}
-	m.progressText = providerRefreshStatus(m.scanningProviders)
+	m.providerScanToolCounts = map[string]int{"brew": 2, "node": 3}
+	m.refreshToolTotal = 5
+	m.progressText = toolRefreshStatus(m.scanningProviders, m.refreshToolDone, m.refreshToolTotal)
 
 	got := drive(m, providerScannedMsg{provider: "brew"})
 
-	if got.progressText != "Refreshing providers: node…" {
+	if got.progressText != "Refreshing tools… 2/5: node" {
 		t.Fatalf("progressText = %q, want remaining provider", got.progressText)
+	}
+	if got.refreshToolDone != 2 || got.refreshToolTotal != 5 {
+		t.Fatalf("refresh progress = %d/%d, want 2/5", got.refreshToolDone, got.refreshToolTotal)
 	}
 	if len(got.bulkPendingKeys) > 0 {
 		t.Fatalf("refresh should not mark tool rows pending, got %v", got.bulkPendingKeys)
@@ -2768,9 +2829,13 @@ func TestModel_ProviderScannedMsg_IgnoresStaleGeneration(t *testing.T) {
 	m := baseModel(nil)
 	m.scanGen = 2
 	m.scanningProviders = map[string]bool{"brew": true}
+	m.refreshToolTotal = 1
 	got := drive(m, providerScannedMsg{gen: 1, provider: "brew"})
 	if !got.scanningProviders["brew"] {
 		t.Fatalf("stale providerScannedMsg removed current scan state: %v", got.scanningProviders)
+	}
+	if got.refreshToolDone != 0 || got.refreshToolTotal != 1 {
+		t.Fatalf("stale providerScannedMsg changed progress: %d/%d", got.refreshToolDone, got.refreshToolTotal)
 	}
 }
 
@@ -2778,9 +2843,13 @@ func TestModel_ProviderScannedMsg_IgnoresUnknownProvider(t *testing.T) {
 	m := baseModel(nil)
 	m.scanGen = 2
 	m.scanningProviders = map[string]bool{"brew": true}
+	m.refreshToolTotal = 1
 	got := drive(m, providerScannedMsg{gen: 2, provider: "npm"})
 	if len(got.scanningProviders) != 1 || !got.scanningProviders["brew"] {
 		t.Fatalf("unknown providerScannedMsg changed scan state: %v", got.scanningProviders)
+	}
+	if got.refreshToolDone != 0 || got.refreshToolTotal != 1 {
+		t.Fatalf("unknown providerScannedMsg changed progress: %d/%d", got.refreshToolDone, got.refreshToolTotal)
 	}
 	if len(got.allTools) != 0 {
 		t.Fatalf("unknown providerScannedMsg triggered final refresh: %v", toolNames(got.allTools))
@@ -3835,7 +3904,7 @@ func TestActivityLabel_Branches(t *testing.T) {
 		want string
 	}{
 		{"searching", Model{searching: true}, "Searching…"},
-		{"scanning", Model{scanningProviders: map[string]bool{"brew": true}}, "Refreshing providers: brew…"},
+		{"scanning", Model{scanningProviders: map[string]bool{"brew": true}, refreshToolTotal: 1}, "Refreshing tools… 0/1: brew"},
 		{"finding local tools", Model{providerSnapshotRefreshing: true}, "Finding local tools…"},
 		{"descriptions", Model{descRefreshing: true}, "Refreshing tool descriptions…"},
 		{"dotsLoading", Model{dotsLoading: true}, "Loading dots…"},
