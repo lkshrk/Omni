@@ -511,8 +511,8 @@ func TestModel_ToolsLoadedMsg(t *testing.T) {
 		}
 	})
 
-	t.Run("success from viewSetup step0 advances to step1", func(t *testing.T) {
-		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true, mode: viewSetup, setupStep: 0}
+	t.Run("success from fresh config creation advances to step1", func(t *testing.T) {
+		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true, mode: viewSetup, setupStep: setupStepCreateConfig}
 		m.allTools = []*database.ToolCache{{Name: "snapshot", Provider: "brew"}}
 		got := drive(m, toolsLoadedMsg{tools: threeTools()})
 		if got.mode != viewSetup {
@@ -587,24 +587,37 @@ func TestModel_SetupMode(t *testing.T) {
 		return Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), mode: viewSetup}
 	}
 
-	t.Run("enter starts config creation", func(t *testing.T) {
+	t.Run("enter opens settings import picker", func(t *testing.T) {
 		got := drive(setupModel(), pressEnter())
-		if !got.loading {
-			t.Error("loading should be true after pressing enter")
+		if !got.showFilePicker {
+			t.Error("showFilePicker should be true after pressing enter")
+		}
+		if !got.filePickerForConfig || !got.filePickerAllowFiles {
+			t.Fatalf("file picker flags = config:%v allowFiles:%v, want config import file picker", got.filePickerForConfig, got.filePickerAllowFiles)
 		}
 	})
 
-	t.Run("y shortcut starts config creation", func(t *testing.T) {
+	t.Run("y shortcut opens settings import picker", func(t *testing.T) {
 		got := drive(setupModel(), pressRune('y'))
-		if !got.loading {
-			t.Error("loading should be true after pressing y")
+		if !got.showFilePicker {
+			t.Error("showFilePicker should be true after pressing y")
 		}
 	})
 
-	t.Run("Y (uppercase) also starts config creation", func(t *testing.T) {
+	t.Run("Y (uppercase) also opens settings import picker", func(t *testing.T) {
 		got := drive(setupModel(), tea.KeyPressMsg{Code: 'Y'})
+		if !got.showFilePicker {
+			t.Error("showFilePicker should be true after pressing Y")
+		}
+	})
+
+	t.Run("n creates fresh config", func(t *testing.T) {
+		got := drive(setupModel(), pressRune('n'))
 		if !got.loading {
-			t.Error("loading should be true after pressing Y")
+			t.Error("loading should be true after pressing n")
+		}
+		if got.setupStep != setupStepCreateConfig {
+			t.Fatalf("setupStep = %d, want create config step", got.setupStep)
 		}
 	})
 

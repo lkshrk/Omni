@@ -985,32 +985,35 @@ func TestFlow_UC26_SetupStep0(t *testing.T) {
 		}
 	}
 
-	t.Run("enter starts config creation (loading=true)", func(t *testing.T) {
+	t.Run("enter opens settings import picker", func(t *testing.T) {
 		got := drive(setupModel(), pressEnter())
-		if !got.loading {
-			t.Error("loading should be true after enter in step 0")
+		if !got.showFilePicker {
+			t.Error("showFilePicker should be true after enter in step 0")
 		}
 	})
 
-	t.Run("y shortcut starts config creation", func(t *testing.T) {
+	t.Run("y shortcut opens settings import picker", func(t *testing.T) {
 		got := drive(setupModel(), pressRune('y'))
-		if !got.loading {
-			t.Error("loading should be true after y in step 0")
+		if !got.showFilePicker {
+			t.Error("showFilePicker should be true after y in step 0")
 		}
 	})
 
-	t.Run("Y (uppercase) also starts config creation", func(t *testing.T) {
+	t.Run("Y (uppercase) also opens settings import picker", func(t *testing.T) {
 		got := drive(setupModel(), tea.KeyPressMsg{Code: 'Y'})
-		if !got.loading {
-			t.Error("loading should be true after Y in step 0")
+		if !got.showFilePicker {
+			t.Error("showFilePicker should be true after Y in step 0")
 		}
 	})
 
-	t.Run("n stays in setup (would quit via tea.Quit in real runtime)", func(t *testing.T) {
-		// In test drive(), tea.Quit is returned as cmd but model.mode won't change.
-		// We just verify the model doesn't blow up.
+	t.Run("n starts config creation", func(t *testing.T) {
 		got := drive(setupModel(), pressRune('n'))
-		_ = got
+		if !got.loading {
+			t.Error("loading should be true after n in step 0")
+		}
+		if got.setupStep != setupStepCreateConfig {
+			t.Fatalf("setupStep = %d, want create config step", got.setupStep)
+		}
 	})
 
 	t.Run("other keys ignored in step 0", func(t *testing.T) {
@@ -1112,10 +1115,10 @@ func TestFlow_UC29_ToolsLoadedMsg(t *testing.T) {
 		}
 	})
 
-	t.Run("success from viewSetup step 0 advances to step 1", func(t *testing.T) {
+	t.Run("success from fresh config creation advances to step 1", func(t *testing.T) {
 		m := loadingModel()
 		m.mode = viewSetup
-		m.setupStep = 0
+		m.setupStep = setupStepCreateConfig
 		got := drive(m, toolsLoadedMsg{tools: threeTools()})
 		if got.setupStep != 1 {
 			t.Errorf("setupStep = %d, want 1", got.setupStep)

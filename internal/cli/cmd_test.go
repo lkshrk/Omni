@@ -5212,6 +5212,77 @@ func TestInit_FullFlow_WithMockedStdin(t *testing.T) {
 	})
 }
 
+func TestBootstrapImportConfigFlag(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	sourcePath := filepath.Join(t.TempDir(), "settings.json")
+	withConfig(t, sourcePath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"ripgrep": {Provider: "system"},
+		},
+		Groups: []*config.GroupConfig{
+			{Name: "work", Tools: []config.ToolEntry{{Name: "ripgrep"}}},
+			cliTestHostGroup(),
+		},
+		Hosts: map[string][]string{"testhost": {"work"}},
+	})
+
+	withMockStdin(t, "n\nn\n", func() {
+		cmd := NewRootCmd()
+		cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "bootstrap", "--import-config", sourcePath})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("bootstrap --import-config: %v", err)
+		}
+	})
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if _, ok := cfg.Tools["ripgrep"]; !ok {
+		t.Fatal("imported config missing ripgrep tool")
+	}
+	if group := cliTestGroupByName(cfg, "work"); group == nil || !cliTestGroupHasTool(group, "ripgrep") {
+		t.Fatalf("work group = %#v, want ripgrep membership", group)
+	}
+}
+
+func TestBootstrapPromptImportsExistingConfig(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	sourcePath := filepath.Join(t.TempDir(), "settings.json")
+	withConfig(t, sourcePath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"jq": {Provider: "system"},
+		},
+		Groups: []*config.GroupConfig{
+			{Name: "work", Tools: []config.ToolEntry{{Name: "jq"}}},
+			cliTestHostGroup(),
+		},
+		Hosts: map[string][]string{"testhost": {"work"}},
+	})
+
+	withMockStdin(t, "y\n"+sourcePath+"\nn\nn\n", func() {
+		cmd := NewRootCmd()
+		cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "bootstrap"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatalf("bootstrap prompted import: %v", err)
+		}
+	})
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if _, ok := cfg.Tools["jq"]; !ok {
+		t.Fatal("imported config missing jq tool")
+	}
+}
+
 // ─── ensureHost: active host setup ────────────────────────────────────────────
 
 func TestEnsureHost_UsesAppHostnameOverride(t *testing.T) {

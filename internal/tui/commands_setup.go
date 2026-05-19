@@ -43,6 +43,16 @@ func (m *Model) doCreateConfig() tea.Cmd {
 	}
 }
 
+func (m *Model) doImportConfigFile(path string) tea.Cmd {
+	a := m.app
+	return func() tea.Msg {
+		if err := a.ImportConfigFile(path); err != nil {
+			return setupConfigImportDoneMsg{path: path, err: err}
+		}
+		return setupConfigImportDoneMsg{path: path}
+	}
+}
+
 // doSetupImport runs omni import during the setup wizard and returns setupImportDoneMsg.
 // enabled is the list of ecosystem provider names the user chose to keep active.
 // disabled is the list to persist as host_settings.DisabledProviders.

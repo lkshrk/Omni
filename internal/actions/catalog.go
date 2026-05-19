@@ -876,7 +876,7 @@ var Setup = []Action{
 		LongDescription: "Run guided bootstrap: choose ecosystem providers, host groups, and optional tools or dots activation.",
 		Mutates:         true,
 		TUI:             &TUIBinding{KeyMapField: "Confirm", DefaultKey: "enter", Label: "run bootstrap", Description: "Run the guided bootstrap flow."},
-		CLI:             []CLIBinding{{Command: []string{"bootstrap"}, Flags: []string{"--import", "--no-import"}}},
+		CLI:             []CLIBinding{{Command: []string{"bootstrap"}, Flags: []string{"--import", "--no-import", "--import-config"}}},
 	},
 }
 
