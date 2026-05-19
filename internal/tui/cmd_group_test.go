@@ -19,6 +19,7 @@ import (
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/dots"
 )
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -231,6 +232,14 @@ func TestDoSetHostGroupTools_UpdatesMembershipsAndIgnores(t *testing.T) {
 	if !slices.Contains(cfg.Ignore.Tools, "ruff") || !slices.Contains(cfg.Ignore.Tools, "eslint") {
 		t.Fatalf("global ignore = %v, want ruff and eslint", cfg.Ignore.Tools)
 	}
+
+	m.handleGroupToolsChangedMsg(got)
+	if names := toolNames(m.allTools); slices.Contains(names, "eslint") || slices.Contains(names, "ruff") {
+		t.Fatalf("allTools = %v, want group-ignored tools absent after save", names)
+	}
+	if names := toolNames(m.visibleTools); slices.Contains(names, "eslint") || slices.Contains(names, "ruff") {
+		t.Fatalf("visibleTools = %v, want group-ignored tools absent after save", names)
+	}
 }
 
 func TestDoSetHostGroupDots_UpdatesMemberships(t *testing.T) {
@@ -288,6 +297,54 @@ func TestDoSetHostGroupDots_UpdatesMemberships(t *testing.T) {
 	}
 	if !slices.Contains(got.dotMemberships["nvim"], "work") {
 		t.Fatalf("dotMemberships[nvim] = %v, want work", got.dotMemberships["nvim"])
+	}
+}
+
+func TestDoSetHostGroupDots_DeselectedEntryExcludedFromSync(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "default")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := t.TempDir()
+	repoDir := t.TempDir()
+	cfgPath := filepath.Join(dir, "settings.json")
+	zshPath := filepath.Join(home, ".zshrc")
+	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{DotsRepo: repoDir},
+		Groups: []*config.GroupConfig{
+			{Name: "default", Special: "host"},
+			{Name: "work", Dots: []config.DotEntry{{Name: "zsh", Path: zshPath}}},
+		},
+		Hosts: map[string][]string{"default": {"work"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	a := app.New(cfgPath)
+	a.CacheDir = dir
+	if err := a.InitTestMode(context.Background()); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	m := modelForCmds(a)
+	msg := m.doSetGroupDots(
+		"work",
+		map[string]bool{"zsh": false},
+		map[string]bool{"zsh": true},
+	)()
+	got, ok := msg.(groupDotsChangedMsg)
+	if !ok {
+		t.Fatalf("expected groupDotsChangedMsg, got %T", msg)
+	}
+	if got.err != nil {
+		t.Fatalf("unexpected error: %v", got.err)
+	}
+
+	ops, err := a.DotsSync(dots.SyncOptions{DryRun: true})
+	if err != nil {
+		t.Fatalf("DotsSync dry-run: %v", err)
+	}
+	if len(ops) != 0 {
+		t.Fatalf("DotsSync ops = %v, want deselected zsh excluded from active sync", ops)
 	}
 }
 

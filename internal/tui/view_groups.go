@@ -685,9 +685,18 @@ func hostAssignmentPickerLabel(m Model, group string) string {
 }
 
 func renderHostGroupToolsEditor(m Model) string {
+	return renderHostGroupToolsEditorWithLayout(m, groupToolsPopupLayoutFor(m))
+}
+
+func renderHostGroupToolsPopup(m Model) (string, popupFrame) {
+	layout := groupToolsPopupLayoutFor(m)
+	return renderHostGroupToolsEditorWithLayout(m, layout), groupToolsPopupFrameWithLayout(m, layout)
+}
+
+func renderHostGroupToolsEditorWithLayout(m Model, layout groupToolsPopupLayout) string {
 	p := m.palette
-	contentW := groupToolsContentWidth(m)
-	rows := groupToolRows(m)
+	contentW := layout.contentWidth
+	rows := layout.rows
 	var sb strings.Builder
 
 	if m.groupToolsEditor.searchActive {
@@ -713,9 +722,7 @@ func renderHostGroupToolsEditor(m Model) string {
 		sb.WriteString(p.styleHelp.Render("no configured tools match"))
 		sb.WriteString("\n\n")
 	} else {
-		baseRows := groupToolRows(unfilteredHostGroupToolsModel(m))
-		secondaryW := groupToolsSecondaryWidth(m, baseRows)
-		nameW, providerW := popupToggleTableColumnWidths(contentW, secondaryW)
+		nameW, providerW := popupToggleTableColumnWidths(contentW, layout.secondaryWidth)
 		lastSection := groupToolSection(-1)
 		for i, row := range rows {
 			if row.section != lastSection {
@@ -756,9 +763,18 @@ func renderHostGroupToolsEditor(m Model) string {
 }
 
 func renderHostGroupDotsEditor(m Model) string {
+	return renderHostGroupDotsEditorWithLayout(m, groupDotsPopupLayoutFor(m))
+}
+
+func renderHostGroupDotsPopup(m Model) (string, popupFrame) {
+	layout := groupDotsPopupLayoutFor(m)
+	return renderHostGroupDotsEditorWithLayout(m, layout), groupDotsPopupFrameWithLayout(m, layout)
+}
+
+func renderHostGroupDotsEditorWithLayout(m Model, layout groupDotsPopupLayout) string {
 	p := m.palette
-	contentW := groupDotsContentWidth(m)
-	rows := groupDotRows(m)
+	contentW := layout.contentWidth
+	rows := layout.rows
 	var sb strings.Builder
 
 	if m.groupDotsEditor.searchActive {
@@ -774,9 +790,7 @@ func renderHostGroupDotsEditor(m Model) string {
 		sb.WriteString(p.styleHelp.Render("no configured dotfiles match"))
 		sb.WriteString("\n\n")
 	} else {
-		baseRows := groupDotRows(unfilteredHostGroupDotsModel(m))
-		_, secondaryW := groupDotsColumnWidths(baseRows)
-		nameW, targetW := popupToggleTableColumnWidths(contentW, secondaryW)
+		nameW, targetW := popupToggleTableColumnWidths(contentW, layout.secondaryWidth)
 		lastSection := groupDotSection(-1)
 		for i, row := range rows {
 			if row.section != lastSection {

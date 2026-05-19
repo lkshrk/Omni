@@ -211,6 +211,36 @@ func TestResolveCommand_UsesAugmentedPath(t *testing.T) {
 	}
 }
 
+func TestResolveCommand_UsesActiveNVMBinBeforeDefaultAlias(t *testing.T) {
+	home, versionsDir := makeNvmHome(t)
+	defaultBin := filepath.Join(versionsDir, "v20.10.0", "bin")
+	activeBin := filepath.Join(versionsDir, "v24.15.0", "bin")
+	for _, dir := range []string{defaultBin, activeBin} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "npm"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeAlias(t, filepath.Join(home, ".nvm"), "default", "v20.10.0\n")
+	t.Setenv("HOME", home)
+	t.Setenv("NVM_BIN", activeBin)
+	t.Setenv("PATH", "/usr/bin:/bin")
+
+	got, env := ResolveCommand("npm")
+	want := filepath.Join(activeBin, "npm")
+	if got != want {
+		t.Fatalf("ResolveCommand path = %q, want active NVM_BIN %q", got, want)
+	}
+	pathEntry := strings.Join(env, "\x00")
+	activeIdx := strings.Index(pathEntry, "PATH="+activeBin)
+	defaultIdx := strings.Index(pathEntry, defaultBin)
+	if activeIdx == -1 || defaultIdx == -1 || activeIdx > defaultIdx {
+		t.Fatalf("ResolveCommand env should put NVM_BIN before default alias: %v", env)
+	}
+}
+
 // ─── New ─────────────────────────────────────────────────────────────────────
 
 func TestNew_ReturnsNonNil(t *testing.T) {

@@ -136,9 +136,16 @@ func (b *backend) uninstallArgs(pkg string) []string {
 
 func (b *backend) upgradeArgs(pkg string) []string {
 	if b.usesTool {
-		return []string{"tool", "upgrade", pkg}
+		return []string{"tool", "install", uvLatestToolSpec(pkg)}
 	}
 	return []string{"install", "--upgrade", pkg}
+}
+
+func uvLatestToolSpec(pkg string) string {
+	if pkg == "" || strings.Contains(pkg, "@") || strings.ContainsAny(pkg, "<>=") || strings.Contains(pkg, "~=") || strings.Contains(pkg, "!=") {
+		return pkg
+	}
+	return pkg + "@latest"
 }
 
 // ─── Provider interface ──────────────────────────────────────────────────────

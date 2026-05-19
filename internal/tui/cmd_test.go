@@ -1276,6 +1276,32 @@ func TestBlockPrivilegedToolAction_GenericPrivilegeOpensAdminTerminal(t *testing
 	}
 }
 
+func TestBlockPrivilegedToolAction_RejectsProviderToolUninstall(t *testing.T) {
+	prov := &privilegedOKProvider{
+		okProvider: okProvider{name: "node"},
+		plan:       provider.PrivilegePlan{Requirement: provider.PrivilegeRequired, Reason: "npm uninstall npm"},
+	}
+	a, _ := newCmdApp(t, prov, nil)
+	m := modelForCmds(a)
+	tool := &database.ToolCache{
+		Name:          "npm",
+		Provider:      "node",
+		Package:       "npm",
+		Installed:     true,
+		InstalledWith: "npm",
+	}
+
+	if !m.blockPrivilegedToolAction(tool, provider.PrivilegeActionUninstall) {
+		t.Fatal("protected provider uninstall should pause the normal TUI operation")
+	}
+	if m.mode == viewAdminTerminal || m.adminTerminal != nil {
+		t.Fatalf("admin terminal opened for protected provider uninstall: mode=%v terminal=%v", m.mode, m.adminTerminal != nil)
+	}
+	if got := m.rowErrors[toolKey("npm", "node")]; !strings.Contains(got, "package manager/provider") {
+		t.Fatalf("row error = %q, want protected provider tool error", got)
+	}
+}
+
 func expectedInteractiveAdminDisplay(direct string) string {
 	if os.Geteuid() == 0 {
 		return direct

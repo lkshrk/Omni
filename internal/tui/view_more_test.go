@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	sql "database/sql"
 	"fmt"
 	"image/color"
@@ -1555,15 +1556,59 @@ func TestHostGroupToolsPopup_FilterKeepsDimensions(t *testing.T) {
 	m.groupToolsEditor.membership = map[string]bool{"ripgrep": true}
 	m.groupToolsIgnore = map[string]bool{"ruff": true}
 	bg := strings.Repeat("\n", m.height-1)
-	full := placePopup(bg, m, renderHostGroupToolsEditor(m), groupToolsPopupFrame(m))
+	fullContent, fullFrame := renderHostGroupToolsPopup(m)
+	full := placePopup(bg, m, fullContent, fullFrame)
 
 	filtered := m
 	filtered.groupToolsProviderIdx = 2 // node
 	filtered.groupToolsEditor.search = "eslint"
-	narrow := placePopup(bg, filtered, renderHostGroupToolsEditor(filtered), groupToolsPopupFrame(filtered))
+	filteredContent, filteredFrame := renderHostGroupToolsPopup(filtered)
+	narrow := placePopup(bg, filtered, filteredContent, filteredFrame)
 	if lipgloss.Width(narrow) != lipgloss.Width(full) || lipgloss.Height(narrow) != lipgloss.Height(full) {
 		t.Fatalf("filtered popup dimensions changed: full=%dx%d filtered=%dx%d\nfull:\n%s\nfiltered:\n%s",
 			lipgloss.Width(full), lipgloss.Height(full), lipgloss.Width(narrow), lipgloss.Height(narrow), full, narrow)
+	}
+
+	baseContent := renderHostGroupToolsEditor(unfilteredHostGroupToolsModel(filtered))
+	wantHeight := max(lipgloss.Height(baseContent), lipgloss.Height(filteredContent))
+	if filteredFrame.ContentHeight != wantHeight {
+		t.Fatalf("filtered tool popup content height = %d, want %d", filteredFrame.ContentHeight, wantHeight)
+	}
+}
+
+func TestHostGroupDotsPopup_SearchKeepsDimensions(t *testing.T) {
+	m := hostsModel()
+	m.mode = viewGroupDots
+	m.width = 100
+	m.height = 40
+	m.groupDotsEditor.group = "work"
+	m.dotsEntries = []app.DotStatus{
+		{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK},
+		{Name: "tmux", TargetPath: "~/.tmux.conf", Health: app.HealthOK},
+		{Name: "zsh", TargetPath: "~/.zshrc", Health: app.HealthMissing},
+		{Name: "copilot", TargetPath: "~/.config/copilot", State: app.DotStateIgnored},
+	}
+	m.groupDotsEditor.membership = map[string]bool{"nvim": true, "tmux": true}
+	bg := strings.Repeat("\n", m.height-1)
+	fullContent, fullFrame := renderHostGroupDotsPopup(m)
+	full := placePopup(bg, m, fullContent, fullFrame)
+
+	filtered := m
+	filtered.groupDotsEditor.search = "zsh"
+	filteredContent, filteredFrame := renderHostGroupDotsPopup(filtered)
+	narrow := placePopup(bg, filtered, filteredContent, filteredFrame)
+	if lipgloss.Width(narrow) != lipgloss.Width(full) || lipgloss.Height(narrow) != lipgloss.Height(full) {
+		t.Fatalf("filtered dot popup dimensions changed: full=%dx%d filtered=%dx%d\nfull:\n%s\nfiltered:\n%s",
+			lipgloss.Width(full), lipgloss.Height(full), lipgloss.Width(narrow), lipgloss.Height(narrow), full, narrow)
+	}
+
+	searching := filtered
+	searching.groupDotsEditor.searchActive = true
+	searchingContent, searchingFrame := renderHostGroupDotsPopup(searching)
+	baseContent := renderHostGroupDotsEditor(unfilteredHostGroupDotsModel(searching))
+	wantHeight := max(lipgloss.Height(baseContent), lipgloss.Height(searchingContent))
+	if searchingFrame.ContentHeight != wantHeight {
+		t.Fatalf("searching dot popup content height = %d, want %d", searchingFrame.ContentHeight, wantHeight)
 	}
 }
 
@@ -2088,6 +2133,7 @@ func TestRenderHostGroupDotsEditor_GroupsIgnoredSeparately(t *testing.T) {
 	}
 	m.dotsEntries = []app.DotStatus{
 		{Name: "nvim", TargetPath: "~/.config/nvim", State: app.DotStateSynced},
+		{Name: "nvim", TargetPath: "~/.config/nvim", State: app.DotStateIgnored, Counts: app.DotFileCounts{Ignored: 2}},
 		{Name: "copilot", TargetPath: "~/.config/copilot", State: app.DotStateIgnored},
 	}
 	m.groupDotsEditor.membership = map[string]bool{"nvim": true, "copilot": true}
@@ -2105,6 +2151,97 @@ func TestRenderHostGroupDotsEditor_GroupsIgnoredSeparately(t *testing.T) {
 	copilotIdx := strings.Index(out, "copilot")
 	if copilotIdx < ignoredIdx {
 		t.Fatalf("copilot row should appear under the ignored section:\n%s", out)
+	}
+	nvimIdx := strings.Index(out, "nvim")
+	if nvimIdx < enabledIdx || nvimIdx > ignoredIdx {
+		t.Fatalf("synced nvim row should stay in enabled section despite ignored-child status:\n%s", out)
+	}
+}
+
+func TestRenderHostGroupDotsEditor_AppGeneratedIgnoredChildSummary(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := t.TempDir()
+	repoDir := filepath.Join(dir, "dotfiles-repo")
+	cfgPath := filepath.Join(dir, "settings.json")
+	target := filepath.Join(home, ".config", "nvim")
+	source := filepath.Join(repoDir, "dotfiles", "nvim", ".config", "nvim")
+	if err := os.MkdirAll(filepath.Join(source, "node_modules", "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "init.lua"), []byte("-- cfg"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "node_modules", "pkg", "mod.js"), []byte("module"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(source, target); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{DotsRepo: repoDir},
+		Groups: []*config.GroupConfig{
+			{Name: "testhost", Special: "host"},
+			{Name: "work", Dots: []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}}},
+		},
+		Hosts: map[string][]string{"testhost": {"work"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	a := app.New(cfgPath)
+	a.CacheDir = dir
+	if err := a.InitTestMode(context.Background()); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	result, err := a.DiscoverDotsStatus(context.Background())
+	if err != nil {
+		t.Fatalf("DiscoverDotsStatus: %v", err)
+	}
+	var syncedNvim, ignoredNvim bool
+	for _, entry := range result.Entries {
+		if entry.Name == "nvim" && entry.State == app.DotStateSynced {
+			syncedNvim = true
+		}
+		if entry.Name == "nvim" && entry.State == app.DotStateIgnored {
+			ignoredNvim = true
+		}
+	}
+	if !syncedNvim || !ignoredNvim {
+		t.Fatalf("DiscoverDotsStatus entries = %#v, want synced and ignored nvim rows", result.Entries)
+	}
+	memberships, err := a.DotMembershipMap(context.Background())
+	if err != nil {
+		t.Fatalf("DotMembershipMap: %v", err)
+	}
+
+	m := hostsModel()
+	m.mode = viewGroupDots
+	m.groupDotsEditor.group = "work"
+	m.dotMemberships = memberships
+	m.dotsEntries = result.Entries
+	m.groupDotsEditor.start("work", groupDotNames(m), func(name string) bool {
+		return slices.Contains(m.dotMemberships[name], "work")
+	})
+
+	for _, tc := range []struct {
+		name         string
+		search       string
+		searchActive bool
+	}{
+		{name: "normal"},
+		{name: "search", search: "nvim", searchActive: true},
+	} {
+		m.groupDotsEditor.search = tc.search
+		m.groupDotsEditor.searchActive = tc.searchActive
+		out := renderHostGroupDotsEditor(m)
+		if !strings.Contains(out, "enabled") || strings.Contains(out, "ignored") {
+			t.Fatalf("synced nvim with ignored children should render only as enabled (%s):\n%s", tc.name, out)
+		}
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -401,6 +402,30 @@ func TestAllAvailableManagers_NoDuplicates(t *testing.T) {
 	}
 	check("python", pyBins)
 	check("node", nodeBins)
+}
+
+func TestEffectiveManagers_UsesActiveNVMBin(t *testing.T) {
+	home := t.TempDir()
+	activeBin := filepath.Join(home, ".nvm", "versions", "node", "v24.15.0", "bin")
+	if err := os.MkdirAll(activeBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(activeBin, "npm"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("NVM_BIN", activeBin)
+	t.Setenv("PATH", "/usr/bin:/bin")
+
+	a, _ := newImportApp(t)
+	_, nodeBin := a.EffectiveManagers()
+	if nodeBin != "npm" {
+		t.Fatalf("EffectiveManagers node = %q, want npm from active NVM_BIN", nodeBin)
+	}
+	_, nodeBins := a.AllAvailableManagers()
+	if len(nodeBins) != 1 || nodeBins[0] != "npm" {
+		t.Fatalf("AllAvailableManagers node = %v, want [npm] from active NVM_BIN", nodeBins)
+	}
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────

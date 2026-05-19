@@ -6,6 +6,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
@@ -395,6 +396,9 @@ func TestApp_Upgrade_CallsProviderAndUpdatesVersion(t *testing.T) {
 		{Stdout: "ripgrep 14.0.0\n"}, // brew list --versions ripgrep (after install)
 		{},                           // brew upgrade ripgrep
 		{Stdout: "ripgrep 14.1.0\n"}, // brew list --versions ripgrep (after upgrade)
+		{Stdout: "Homebrew 4.0.0"},   // brew --version (post-upgrade outdated refresh)
+		{},                           // brew update
+		{Stdout: brewOutdatedEmpty},  // brew outdated --json=v2
 	}}
 	a, _ := newAppWithBrew(t, installMock)
 	ctx := context.Background()
@@ -423,6 +427,8 @@ func TestApp_UpgradeAll_OnlyUpgradesOutdatedTools(t *testing.T) {
 		executor.MatchRule{Pattern: "brew list --versions ripgrep", Response: executor.MockCall{Stdout: "ripgrep 14.0.0\n"}},
 		executor.MatchRule{Pattern: "brew list --versions git", Response: executor.MockCall{Stdout: "git 2.43.0\n"}},
 		executor.MatchRule{Pattern: "brew upgrade ripgrep", Response: executor.MockCall{}},
+		executor.MatchRule{Pattern: "brew update", Response: executor.MockCall{}},
+		executor.MatchRule{Pattern: "brew outdated --json=v2", Response: executor.MockCall{Stdout: brewOutdatedEmpty}},
 	)
 	a, _ := newAppWithBrew(t, mock)
 	ctx := context.Background()
@@ -435,6 +441,9 @@ func TestApp_UpgradeAll_OnlyUpgradesOutdatedTools(t *testing.T) {
 	}
 	if err := a.DB().UpdateOutdated(ctx, "ripgrep", "brew", "ripgrep", true, "14.1.0"); err != nil {
 		t.Fatalf("UpdateOutdated: %v", err)
+	}
+	if err := a.DB().SetState(ctx, "last_refresh_outdated", time.Now().UTC().Format(time.RFC3339)); err != nil {
+		t.Fatalf("mark outdated refresh fresh: %v", err)
 	}
 
 	if err := a.UpgradeAll(ctx, nil); err != nil {

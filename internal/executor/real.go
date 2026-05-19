@@ -100,7 +100,7 @@ func augmentedEnv() []string {
 	return append(env, "PATH="+prefix)
 }
 
-// discoverNodeManagerPaths returns bin directories for nvm, volta, and bun,
+// discoverNodeManagerPaths returns bin directories for node version managers,
 // in the order they should appear at the front of PATH.
 func discoverNodeManagerPaths() []string {
 	if runtime.GOOS == "windows" {
@@ -111,18 +111,25 @@ func discoverNodeManagerPaths() []string {
 		return nil
 	}
 	var paths []string
+	addPath := func(path string) {
+		if path == "" || !filepath.IsAbs(path) || !isDir(path) {
+			return
+		}
+		for _, existing := range paths {
+			if existing == path {
+				return
+			}
+		}
+		paths = append(paths, path)
+	}
+	// nvm: honour the currently selected shell version first.
+	addPath(os.Getenv("NVM_BIN"))
 	// Volta: single fixed location, manages shims itself.
-	if d := filepath.Join(home, ".volta", "bin"); isDir(d) {
-		paths = append(paths, d)
-	}
-	// nvm: resolve the default alias chain to the active version's bin dir.
-	if d := nvmDefaultBinDir(home); d != "" {
-		paths = append(paths, d)
-	}
+	addPath(filepath.Join(home, ".volta", "bin"))
+	// nvm: resolve the default alias chain as the non-interactive fallback.
+	addPath(nvmDefaultBinDir(home))
 	// bun: fixed location ~/.bun/bin.
-	if d := filepath.Join(home, ".bun", "bin"); isDir(d) {
-		paths = append(paths, d)
-	}
+	addPath(filepath.Join(home, ".bun", "bin"))
 	return paths
 }
 

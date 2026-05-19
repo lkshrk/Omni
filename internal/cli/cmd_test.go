@@ -3118,6 +3118,43 @@ func TestToolsDelete_RemovesLogicalSpecAndMemberships(t *testing.T) {
 	}
 }
 
+func TestToolsDeleteSpec_RejectsProviderTool(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	withConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"npm": {Provider: "node", InstallWith: "npm"},
+		},
+		Groups: []*config.GroupConfig{cliTestHostGroup("npm")},
+	})
+	withHost(t, cfgPath)
+
+	cmd := NewRootCmd()
+	cmd.SetArgs([]string{"-y", "--config", cfgPath, "--cache-dir", cacheDir, "tools", "delete-spec", "npm"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "package manager/provider") {
+		t.Fatalf("tools delete-spec err = %v, want protected provider tool error", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if _, ok := cfg.Tools["npm"]; !ok {
+		t.Fatal("npm spec was removed despite protected provider guard")
+	}
+	for _, group := range cfg.Groups {
+		for _, tool := range group.Tools {
+			if tool.Name == "npm" {
+				return
+			}
+		}
+	}
+	t.Fatalf("npm membership was removed despite protected provider guard: %+v", cfg.Groups)
+}
+
 func TestToolsNormalizeDefaultOverrides_DryRun(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -4850,7 +4887,7 @@ func TestList_SingleToolAndStateFilter_PrintsOnlyMatch(t *testing.T) {
 	}
 }
 
-func TestList_JSONIncludesDerivedState(t *testing.T) {
+func TestList_JSONExcludesIgnoredTools(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
 
@@ -4878,8 +4915,8 @@ func TestList_JSONIncludesDerivedState(t *testing.T) {
 		t.Fatalf("list json ignored: %v", err)
 	}
 	got := out.String()
-	if !strings.Contains(got, `"name":"bat"`) || !strings.Contains(got, `"state":"ignored"`) {
-		t.Fatalf("output = %q, want ignored bat JSON", got)
+	if strings.TrimSpace(got) != "[]" {
+		t.Fatalf("output = %q, want ignored tools hidden from JSON list", got)
 	}
 }
 

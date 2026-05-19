@@ -15,6 +15,9 @@ func (m *Model) blockPrivilegedToolAction(t *database.ToolCache, action provider
 	if t == nil || m.app == nil {
 		return false
 	}
+	if m.blockProtectedProviderToolDelete(t, action) {
+		return true
+	}
 	plan, err := m.app.ToolPrivilegePlan(m.ctx, t, action)
 	if err != nil || !plan.RequiresPrivilege() {
 		return false
@@ -35,6 +38,17 @@ func (m *Model) blockPrivilegedToolAction(t *database.ToolCache, action provider
 	return true
 }
 
+func (m *Model) blockProtectedProviderToolDelete(t *database.ToolCache, action provider.PrivilegeAction) bool {
+	if t == nil || m.app == nil || action != provider.PrivilegeActionUninstall {
+		return false
+	}
+	if err := m.app.ValidateToolDelete(t.Name); err != nil {
+		m.setToolActionError(toolKey(t.Name, t.Provider), err.Error())
+		return true
+	}
+	return false
+}
+
 func (m *Model) queuePrivilegedInstallPrompts(rowErrors map[string]string) bool {
 	return m.queuePrivilegedToolPrompts(rowErrors, privilegedActionMapForRows(rowErrors, provider.PrivilegeActionInstall))
 }
@@ -52,6 +66,9 @@ func (m *Model) queuePrivilegedToolPrompts(rowErrors map[string]string, actions 
 		key := toolKey(t.Name, t.Provider)
 		action, ok := actions[key]
 		if !ok || action == "" || skipPrivilegedToolQueueCandidate(t, action) {
+			continue
+		}
+		if m.blockProtectedProviderToolDelete(t, action) {
 			continue
 		}
 		message := rowErrors[key]

@@ -319,6 +319,36 @@ func TestUninstall_UsesConfiguredInstallWithWhenCacheMissing(t *testing.T) {
 	}
 }
 
+func TestUninstall_RejectsProviderTool(t *testing.T) {
+	node := &managerUninstallCaptureStub{
+		uninstallCaptureStub: uninstallCaptureStub{stubProvider: stubProvider{name: "node", available: true}},
+	}
+	a, cfgPath := newImportApp(t, node)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalFixtureTool{Name: "npm", Provider: "node", InstallWith: "npm"}),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("npm"),
+		}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	err := a.Uninstall(context.Background(), "npm", "node")
+	if err == nil || !strings.Contains(err.Error(), "package manager/provider") {
+		t.Fatalf("Uninstall err = %v, want protected provider tool error", err)
+	}
+	if len(node.uninstalled) != 0 || len(node.managerUninstalls) != 0 {
+		t.Fatalf("uninstall calls = %+v manager calls = %+v, want none", node.uninstalled, node.managerUninstalls)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if !hasTool(cfg, "npm", "node") {
+		t.Fatalf("npm config entry was removed despite protected provider guard: %+v", cfg.Groups)
+	}
+}
+
 func TestUninstall_RemovesConfiguredEntry(t *testing.T) {
 	stub := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, stub)
@@ -412,6 +442,32 @@ func TestRemoveToolFromConfig_RemovesMissingConfiguredTool(t *testing.T) {
 	}
 }
 
+func TestRemoveToolFromConfig_RejectsProviderTool(t *testing.T) {
+	node := &stubProvider{name: "node", available: true}
+	a, cfgPath := newImportApp(t, node)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalFixtureTool{Name: "bun", Provider: "node", InstallWith: "bun"}),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("bun"),
+		}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	err := a.RemoveToolFromConfig(context.Background(), "bun", "node")
+	if err == nil || !strings.Contains(err.Error(), "package manager/provider") {
+		t.Fatalf("RemoveToolFromConfig err = %v, want protected provider tool error", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if !hasTool(cfg, "bun", "node") {
+		t.Fatalf("bun config entry was removed despite protected provider guard: %+v", cfg.Groups)
+	}
+}
+
 // ─── Upgrade ─────────────────────────────────────────────────────────────────
 
 func TestUpgrade_Success(t *testing.T) {
@@ -435,10 +491,12 @@ func TestUpgrade_UnknownProvider(t *testing.T) {
 
 type managerUpgradeStub struct {
 	stubProvider
-	fallbackUpgrades int
-	managerUpgrades  []string
-	verifyInstalled  bool
-	verifyErr        error
+	fallbackUpgrades  int
+	managerUpgrades   []string
+	verifyInstalled   bool
+	verifyErr         error
+	outdatedByManager map[string]map[string]string
+	outdatedErr       error
 }
 
 func (s *managerUpgradeStub) Upgrade(_ context.Context, _ provider.Tool) error {
@@ -459,6 +517,28 @@ func (s *managerUpgradeStub) IsInstalledWithManager(_ context.Context, _ provide
 		return false, "", nil
 	}
 	return true, manager + "-version", nil
+}
+
+func (s *managerUpgradeStub) OutdatedMap(_ context.Context) (map[string]string, error) {
+	if s.outdatedErr != nil {
+		return nil, s.outdatedErr
+	}
+	out := make(map[string]string)
+	for _, entries := range s.outdatedByManager {
+		for name, latest := range entries {
+			if _, exists := out[name]; !exists {
+				out[name] = latest
+			}
+		}
+	}
+	return out, nil
+}
+
+func (s *managerUpgradeStub) OutdatedByManager(_ context.Context) (map[string]map[string]string, error) {
+	if s.outdatedErr != nil {
+		return nil, s.outdatedErr
+	}
+	return s.outdatedByManager, nil
 }
 
 func TestUpgrade_UsesInstalledWithManager(t *testing.T) {
@@ -496,6 +576,43 @@ func TestUpgrade_UsesInstalledWithManager(t *testing.T) {
 	}
 	if got.Version.String != "npm-version" {
 		t.Fatalf("version = %q, want npm-version", got.Version.String)
+	}
+}
+
+func TestUpgrade_RechecksOutdatedAfterVerification(t *testing.T) {
+	node := &managerUpgradeStub{
+		stubProvider:      stubProvider{name: "node", available: true},
+		verifyInstalled:   true,
+		outdatedByManager: map[string]map[string]string{"npm": {"typescript": "5.0.0"}},
+	}
+	a, _ := newImportApp(t, node)
+	ctx := context.Background()
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name:          "typescript",
+		Provider:      "node",
+		Package:       "typescript",
+		Installed:     true,
+		InstalledWith: "npm",
+		Outdated:      true,
+		LatestVersion: sql.NullString{String: "5.0.0", Valid: true},
+		Tracked:       true,
+	}); err != nil {
+		t.Fatalf("seed tool: %v", err)
+	}
+
+	if err := a.Upgrade(ctx, "typescript", "node"); err != nil {
+		t.Fatalf("Upgrade: %v", err)
+	}
+
+	got, err := a.DB().Get(ctx, "typescript", "node", "typescript")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !got.Outdated || got.LatestVersion.String != "5.0.0" {
+		t.Fatalf("outdated/latest = %v/%q, want preserved real provider status 5.0.0", got.Outdated, got.LatestVersion.String)
+	}
+	if got.Version.String != "npm-version" {
+		t.Fatalf("version = %q, want npm-version from post-upgrade verification", got.Version.String)
 	}
 }
 
@@ -631,11 +748,13 @@ func TestUpgradeAll_SkipsUninstalledOutdatedRows(t *testing.T) {
 
 func TestReconcile_SyncsAndUpgradesTools(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
-	stub := &stubProvider{
-		name:      "system",
-		available: true,
-		installed: []provider.InstalledTool{
-			installedTool("ripgrep", "1.0.0", "system"),
+	stub := &reconcileUpgradeStub{
+		stubProvider: stubProvider{
+			name:      "system",
+			available: true,
+			installed: []provider.InstalledTool{
+				installedTool("ripgrep", "1.0.0", "system"),
+			},
 		},
 	}
 	a, cfgPath := newImportApp(t, stub)
@@ -694,10 +813,31 @@ func TestReconcile_SyncsAndUpgradesTools(t *testing.T) {
 	}
 }
 
+type reconcileUpgradeStub struct {
+	stubProvider
+	upgraded map[string]bool
+}
+
+func (s *reconcileUpgradeStub) Upgrade(_ context.Context, tool provider.Tool) error {
+	if s.upgraded == nil {
+		s.upgraded = make(map[string]bool)
+	}
+	s.upgraded[tool.Name] = true
+	return nil
+}
+
+func (s *reconcileUpgradeStub) OutdatedMap(_ context.Context) (map[string]string, error) {
+	if s.upgraded["ripgrep"] {
+		return nil, nil
+	}
+	return map[string]string{"ripgrep": "2.0.0"}, nil
+}
+
 type selectiveUpgradeStub struct {
 	stubProvider
 	failName string
 	upgraded []string
+	outdated []string
 }
 
 func (s *selectiveUpgradeStub) Upgrade(_ context.Context, tool provider.Tool) error {
@@ -712,10 +852,25 @@ func (s *selectiveUpgradeStub) IsInstalled(_ context.Context, tool provider.Tool
 	return true, tool.Name + "-new", nil
 }
 
+func (s *selectiveUpgradeStub) OutdatedMap(_ context.Context) (map[string]string, error) {
+	out := make(map[string]string)
+	alreadyUpgraded := make(map[string]bool, len(s.upgraded))
+	for _, name := range s.upgraded {
+		alreadyUpgraded[name] = true
+	}
+	for _, name := range s.outdated {
+		if name == s.failName || !alreadyUpgraded[name] {
+			out[name] = name + "-latest"
+		}
+	}
+	return out, nil
+}
+
 func TestUpgradeAll_ContinuesAfterToolFailure(t *testing.T) {
 	stub := &selectiveUpgradeStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		failName:     "ripgrep",
+		outdated:     []string{"ripgrep", "git"},
 	}
 	a, _ := newImportApp(t, stub)
 	ctx := context.Background()

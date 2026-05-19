@@ -20,12 +20,13 @@ import (
 
 // mgr holds the command shape for one JS package manager.
 type mgr struct {
-	binary      string
-	install     []string // global install args — package name appended by caller
-	uninstall   []string
-	upgrade     []string
-	listGlobal  []string // lists all global packages
-	filterByPkg bool     // whether listGlobal accepts a package name to narrow output
+	binary               string
+	install              []string // global install args — package name appended by caller
+	uninstall            []string
+	upgrade              []string
+	upgradeWithLatestTag bool
+	listGlobal           []string // lists all global packages
+	filterByPkg          bool     // whether listGlobal accepts a package name to narrow output
 }
 
 // supported is ordered by auto-detect preference (bun → pnpm → npm).
@@ -34,7 +35,7 @@ var supported = []mgr{
 		binary:      "bun",
 		install:     []string{"add", "-g"},
 		uninstall:   []string{"remove", "-g"},
-		upgrade:     []string{"update", "-g"},
+		upgrade:     []string{"update", "-g", "--latest"},
 		listGlobal:  []string{"pm", "ls", "-g"},
 		filterByPkg: false, // bun pm ls -g does not accept a package filter
 	},
@@ -42,17 +43,18 @@ var supported = []mgr{
 		binary:      "pnpm",
 		install:     []string{"add", "-g"},
 		uninstall:   []string{"remove", "-g"},
-		upgrade:     []string{"update", "-g"},
+		upgrade:     []string{"update", "-g", "--latest"},
 		listGlobal:  []string{"ls", "-g", "--depth=0"}, // "ls" outputs tree format in all pnpm versions; "list" outputs JSON by default in pnpm v10+
 		filterByPkg: true,
 	},
 	{
-		binary:      "npm",
-		install:     []string{"install", "-g"},
-		uninstall:   []string{"uninstall", "-g"},
-		upgrade:     []string{"update", "-g"},
-		listGlobal:  []string{"list", "-g", "--depth=0"},
-		filterByPkg: true,
+		binary:               "npm",
+		install:              []string{"install", "-g"},
+		uninstall:            []string{"uninstall", "-g"},
+		upgrade:              []string{"install", "-g"},
+		upgradeWithLatestTag: true,
+		listGlobal:           []string{"list", "-g", "--depth=0"},
+		filterByPkg:          true,
 	},
 }
 
@@ -190,12 +192,32 @@ func (p *Provider) UpgradeWithManager(ctx context.Context, tool provider.Tool, m
 }
 
 func (p *Provider) upgradeWith(ctx context.Context, tool provider.Tool, m *mgr) error {
-	args := with(m.upgrade, tool.EffectivePackage())
+	pkg := tool.EffectivePackage()
+	if m.upgradeWithLatestTag {
+		pkg = npmLatestSpec(pkg)
+	}
+	args := with(m.upgrade, pkg)
 	_, stderr, err := p.exec.Run(ctx, m.binary, args...)
 	if err != nil {
 		return fmt.Errorf("%s: %w\n%s", cmdStr(m.binary, args), err, strings.TrimSpace(stderr))
 	}
 	return nil
+}
+
+func npmLatestSpec(pkg string) string {
+	if pkg == "" {
+		return pkg
+	}
+	if strings.HasPrefix(pkg, "@") {
+		if strings.LastIndex(pkg, "@") > 0 {
+			return pkg
+		}
+		return pkg + "@latest"
+	}
+	if strings.Contains(pkg, "@") {
+		return pkg
+	}
+	return pkg + "@latest"
 }
 
 func (p *Provider) IsInstalled(ctx context.Context, tool provider.Tool) (bool, string, error) {

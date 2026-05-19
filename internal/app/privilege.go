@@ -92,6 +92,9 @@ func (a *App) CompleteExternalToolAction(ctx context.Context, action provider.Pr
 	case provider.PrivilegeActionInstall, provider.PrivilegeActionUpgrade:
 		return a.completeExternalInstalledToolAction(ctx, action, name, providerName, pkg, installedWith)
 	case provider.PrivilegeActionUninstall:
+		if err := a.rejectProviderToolDelete(name); err != nil {
+			return err
+		}
 		if err := a.removeToolFromConfig(name, providerName); err != nil {
 			return err
 		}
