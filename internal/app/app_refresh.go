@@ -80,12 +80,26 @@ func (a *App) RefreshOutdated(ctx context.Context, progress func(string)) error 
 	if err != nil {
 		return fmt.Errorf("listing tools: %w", err)
 	}
+	ignored := a.ignoredToolSetBestEffort()
+	tools = filterIgnoredToolCaches(tools, ignored)
+	neededProviders := make(map[string]struct{})
+	for _, t := range tools {
+		if lookupProvider := a.outdatedLookupProvider(t); lookupProvider != "" {
+			neededProviders[lookupProvider] = struct{}{}
+		}
+	}
+	if len(neededProviders) == 0 {
+		return nil
+	}
 
 	outdatedByProv := make(map[string]map[string]string)
 	outdatedByManager := make(map[string]map[string]map[string]string)
 	// Closure always returns nil; per-provider OutdatedMap failures are skipped so a
 	// single bad provider doesn't prevent updating the rest.
 	_ = a.forEachAvailable(ctx, func(p provider.Provider) error { //nolint:errcheck // best-effort outdated check
+		if _, needed := neededProviders[p.Name()]; !needed {
+			return nil
+		}
 		oc, ok := p.(provider.OutdatedChecker)
 		if !ok {
 			return nil
@@ -138,14 +152,44 @@ func (a *App) RefreshProviderOutdated(ctx context.Context, provName string) erro
 	if err != nil {
 		return fmt.Errorf("listing tools for %s: %w", provName, err)
 	}
+	ignored := a.ignoredToolSetBestEffort()
+	tools = filterIgnoredToolCaches(tools, ignored)
+	targetTools := make([]*database.ToolCache, 0, len(tools))
+	neededLookups := make(map[string]struct{})
+	for _, t := range tools {
+		if t.Provider != provName && t.InstalledWith != provName {
+			continue
+		}
+		targetTools = append(targetTools, t)
+		if lookupProvider := a.outdatedLookupProvider(t); lookupProvider != "" {
+			neededLookups[lookupProvider] = struct{}{}
+		}
+	}
+	if cfg, cfgErr := a.loadConfig(); cfgErr == nil {
+		resolved, _ := a.resolvedToolEntries(ctx, cfg, cfg.Groups)
+		for _, entry := range resolved {
+			opProvider := a.operationProviderName(entry)
+			if entry.Provider != provName && opProvider != provName && entry.InstallWith != provName {
+				continue
+			}
+			if opProvider != "" {
+				neededLookups[opProvider] = struct{}{}
+			}
+		}
+	}
+	if len(neededLookups) == 0 {
+		return nil
+	}
 	outdatedByProv := make(map[string]map[string]string)
 	outdatedByManager := make(map[string]map[string]map[string]string)
-	if m, byManager, ok, err := a.outdatedMapsForProvider(ctx, provName); err != nil {
-		return err
-	} else if ok {
-		outdatedByProv[provName] = m
-		if byManager != nil {
-			outdatedByManager[provName] = byManager
+	if _, needed := neededLookups[provName]; needed {
+		if m, byManager, ok, err := a.outdatedMapsForProvider(ctx, provName); err != nil {
+			return err
+		} else if ok {
+			outdatedByProv[provName] = m
+			if byManager != nil {
+				outdatedByManager[provName] = byManager
+			}
 		}
 	}
 	ensureOutdated := func(providerName string) bool {
@@ -168,11 +212,8 @@ func (a *App) RefreshProviderOutdated(ctx context.Context, provName string) erro
 		}
 		return true
 	}
-	updates := make([]database.OutdatedUpdate, 0, len(tools))
-	for _, t := range tools {
-		if t.Provider != provName && t.InstalledWith != provName {
-			continue
-		}
+	updates := make([]database.OutdatedUpdate, 0, len(targetTools))
+	for _, t := range targetTools {
 		lookupProvider := a.outdatedLookupProvider(t)
 		if !ensureOutdated(lookupProvider) {
 			continue
@@ -274,6 +315,8 @@ func (a *App) RefreshDescriptions(ctx context.Context, _ time.Duration) error {
 	if err != nil {
 		return err
 	}
+	ignored := ignoredToolSet(cfg)
+	cachedTools = filterIgnoredToolCaches(cachedTools, ignored)
 	cacheByKey := make(map[string]*database.ToolCache, len(cachedTools))
 	for _, t := range cachedTools {
 		pkg := t.Package

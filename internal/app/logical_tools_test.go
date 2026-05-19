@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -166,14 +167,8 @@ func TestSync_MachineGroupIgnoreSuppressesSharedLogicalTool(t *testing.T) {
 		t.Fatalf("Sync: %v", err)
 	}
 
-	ignored := result.Ignored()
-	if len(ignored) != 1 || ignored[0].Tool.Name != "ripgrep" {
-		t.Fatalf("Ignored() = %+v, want ripgrep suppressed by machine group", ignored)
-	}
-	for _, op := range result.Ops {
-		if op.Tool.Name == "ripgrep" && op.Kind != gosync.OpIgnored {
-			t.Fatalf("ripgrep op = %v, want only ignored", op.Kind)
-		}
+	if len(result.Ops) != 0 {
+		t.Fatalf("Sync ops = %+v, want globally ignored logical tool excluded", result.Ops)
 	}
 }
 
@@ -248,6 +243,39 @@ func TestRemoveLogicalTool_RemovesMembershipsIgnoresAndCache(t *testing.T) {
 	}
 	if _, err := a.DB().Get(ctx, "fd", "system", "fd"); err != nil {
 		t.Fatalf("unrelated fd cache row was removed: %v", err)
+	}
+}
+
+func TestRemoveLogicalTool_RejectsProviderTool(t *testing.T) {
+	a, cfgPath := newImportApp(t)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalFixtureTool{Name: "pnpm", Provider: "node", InstallWith: "pnpm"}),
+		Groups: []*config.GroupConfig{{
+			Name:  "tools",
+			Tools: groupTools("pnpm"),
+		}},
+		Ignore: config.GlobalIgnore{Tools: []string{"pnpm"}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	err := a.RemoveLogicalTool(context.Background(), "pnpm")
+	if err == nil || !strings.Contains(err.Error(), "package manager/provider") {
+		t.Fatalf("RemoveLogicalTool err = %v, want protected provider tool error", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if _, ok := cfg.Tools["pnpm"]; !ok {
+		t.Fatal("pnpm logical spec was removed despite protected provider guard")
+	}
+	if group := logicalTestGroupByName(cfg, "tools"); group == nil || !logicalTestGroupHasTool(group, "pnpm") {
+		t.Fatalf("pnpm membership was removed despite protected provider guard: %+v", cfg.Groups)
+	}
+	if !slices.Contains(cfg.Ignore.Tools, "pnpm") {
+		t.Fatalf("pnpm ignore entry was removed despite protected provider guard: %+v", cfg.Ignore.Tools)
 	}
 }
 

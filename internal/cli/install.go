@@ -103,8 +103,17 @@ func runInstallGroup(cmd *cobra.Command, state *rootState, group string) error {
 	installed := result.Installed()
 	failed := result.Failed()
 	already := result.Skipped()
+	var unavailable []gosync.SyncOp
+	for _, op := range result.Ops {
+		if op.Kind == gosync.OpProviderUnavailable {
+			unavailable = append(unavailable, op)
+		}
+	}
 
 	out := cmd.OutOrStdout()
+	for _, op := range unavailable {
+		fmt.Fprintf(out, "  ! provider unavailable: %s (skipping %s)\n", op.Tool.Provider, op.Tool.Name)
+	}
 	if len(installed) > 0 {
 		fmt.Fprintf(out, "\n%d tool(s) installed.\n", len(installed))
 	}
@@ -114,7 +123,13 @@ func runInstallGroup(cmd *cobra.Command, state *rootState, group string) error {
 	if len(failed) > 0 {
 		fmt.Fprintf(out, "%d tool(s) failed.\n", len(failed))
 	}
-	if len(installed) == 0 && len(failed) == 0 && len(already) == 0 {
+	if len(unavailable) > 0 {
+		return fmt.Errorf("%d tool(s) unavailable", len(unavailable))
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("%d tool(s) failed", len(failed))
+	}
+	if len(installed) == 0 && len(failed) == 0 && len(already) == 0 && len(unavailable) == 0 {
 		fmt.Fprintln(out, "No tools in group or nothing to install.")
 	}
 	return nil

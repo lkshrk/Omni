@@ -3863,6 +3863,23 @@ func TestSelectedHostName_ValidCursor(t *testing.T) {
 	}
 }
 
+func TestSelectedHostName_UsesRenderedActiveHostOrder(t *testing.T) {
+	m := Model{
+		hostInfo: &app.HostInfo{
+			Active: "beta",
+			Hosts: map[string]config.HostAssignment{
+				"alpha": {},
+				"beta":  {},
+			},
+		},
+		hostCursor: 0,
+	}
+
+	if got := m.selectedHostName(); got != "beta" {
+		t.Errorf("got %q, want beta", got)
+	}
+}
+
 func TestSelectedHostName_OutOfRange(t *testing.T) {
 	m := Model{
 		hostInfo: &app.HostInfo{

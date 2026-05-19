@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -382,14 +381,10 @@ func (m *Model) doSaveSettingsAndDotsSync(settings config.Settings) tea.Cmd {
 
 // selectedHostName returns the host name at the current host-assignment cursor, or "".
 func (m *Model) selectedHostName() string {
-	if m.hostInfo == nil || len(m.hostInfo.Hosts) == 0 {
+	names := sortedHostNames(m.hostInfo)
+	if len(names) == 0 {
 		return ""
 	}
-	names := make([]string, 0, len(m.hostInfo.Hosts))
-	for n := range m.hostInfo.Hosts {
-		names = append(names, n)
-	}
-	sort.Strings(names)
 	if m.hostCursor >= 0 && m.hostCursor < len(names) {
 		return names[m.hostCursor]
 	}

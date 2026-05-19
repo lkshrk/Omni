@@ -176,9 +176,13 @@ func (a *App) claimDiscoveredTools(ctx context.Context, discovered []*database.T
 	var claimed []string
 	var failures []BulkToolError
 	var errs []error
+	ignored := a.ignoredToolSetBestEffort()
 	resolvedEcosystems := a.ResolvedEcosystemProviders(ctx)
 	for _, t := range discovered {
 		if t == nil || !t.Installed || t.Name == "" || t.Provider == "" {
+			continue
+		}
+		if toolNameIgnored(ignored, t.Name) {
 			continue
 		}
 		if opts.Progress != nil {
@@ -257,6 +261,11 @@ func (a *App) ResolveProvider(ctx context.Context, priority []string) (string, e
 }
 
 func (a *App) Install(ctx context.Context, name, providerName string) error {
+	if ignored, err := a.configuredToolIgnored(name); err != nil {
+		return err
+	} else if ignored {
+		return fmt.Errorf("tool %q is ignored", name)
+	}
 	if t, opProvider, ok, err := a.configuredOperationTool(ctx, name, providerName); err != nil {
 		return err
 	} else if ok {
@@ -398,6 +407,9 @@ func (a *App) Uninstall(ctx context.Context, name, providerName string) error {
 	if !ok {
 		return fmt.Errorf("unknown provider %q", providerName)
 	}
+	if err := a.rejectProviderToolDelete(name); err != nil {
+		return err
+	}
 	var pkg string
 	installedWith := ""
 	if configured, _, found, err := a.configuredOperationTool(ctx, name, providerName); err != nil {
@@ -444,6 +456,9 @@ func (a *App) Uninstall(ctx context.Context, name, providerName string) error {
 // RemoveToolFromConfig removes a configured tool without calling a package
 // manager. Use for tools that are configured but not installed locally.
 func (a *App) RemoveToolFromConfig(ctx context.Context, name, providerName string) error {
+	if err := a.rejectProviderToolDelete(name); err != nil {
+		return err
+	}
 	pkg, err := a.configuredPackageForTool(ctx, name, providerName)
 	if err != nil {
 		return err
@@ -504,6 +519,11 @@ func (a *App) Upgrade(ctx context.Context, name, providerName string) error {
 	if !ok {
 		return fmt.Errorf("unknown provider %q", providerName)
 	}
+	if ignored, err := a.configuredToolIgnored(name); err != nil {
+		return err
+	} else if ignored {
+		return fmt.Errorf("tool %q is ignored", name)
+	}
 
 	var pkg string
 	installedWith := ""
@@ -551,21 +571,35 @@ func (a *App) Upgrade(ctx context.Context, name, providerName string) error {
 	if !installed {
 		return fmt.Errorf("verify %s after upgrade: not installed", name)
 	}
+	installedOwner := installedWithForLifecycle(opProvider, manager)
 	if err := a.readDB().Upsert(ctx, &database.ToolCache{
 		Name:          name,
 		Provider:      providerName,
 		Package:       pkg,
 		Installed:     true,
-		InstalledWith: installedWithForLifecycle(opProvider, manager),
+		InstalledWith: installedOwner,
 		Version:       sql.NullString{String: ver, Valid: ver != ""},
 		LastChecked:   time.Now(),
 	}); err != nil {
 		return fmt.Errorf("update cache after upgrade: %w", err)
 	}
-	if err := a.readDB().UpdateOutdated(ctx, name, providerName, pkg, false, ""); err != nil {
-		return fmt.Errorf("clear outdated after upgrade: %w", err)
+	if err := a.refreshOutdatedAfterUpgrade(ctx, name, providerName, pkg, installedOwner); err != nil {
+		return fmt.Errorf("refresh outdated after upgrade: %w", err)
 	}
 	return nil
+}
+
+func (a *App) refreshOutdatedAfterUpgrade(ctx context.Context, name, providerName, pkg, installedWith string) error {
+	lookupProvider := a.outdatedLookupProvider(&database.ToolCache{
+		Name:          name,
+		Provider:      providerName,
+		Package:       pkg,
+		InstalledWith: installedWith,
+	})
+	if lookupProvider == "" {
+		return nil
+	}
+	return a.RefreshProviderOutdated(ctx, lookupProvider)
 }
 
 func installedWithForLifecycle(opProvider, manager string) string {
@@ -613,6 +647,7 @@ func (a *App) UpgradeAllDetailedWithOptions(ctx context.Context, progress func(s
 	if err != nil {
 		return nil, fmt.Errorf("listing tools: %w", err)
 	}
+	tools = filterIgnoredToolCaches(tools, a.ignoredToolSetBestEffort())
 	result := &UpgradeAllResult{}
 	var errs []error
 	for _, t := range tools {

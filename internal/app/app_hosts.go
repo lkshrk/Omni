@@ -700,6 +700,13 @@ func (a *App) DeleteGroup(ctx context.Context, name string, opts DeleteGroupOpti
 		if len(deletedDots) > 0 && opts.MoveTo == "" {
 			return fmt.Errorf("group %q contains dots; provide MoveTo", name)
 		}
+		if opts.DeleteTools {
+			for _, tool := range deletedTools {
+				if err := a.rejectProviderToolDelete(tool.Name); err != nil {
+					return err
+				}
+			}
+		}
 
 		cfg.Groups = newGroups
 		if opts.DeleteTools {

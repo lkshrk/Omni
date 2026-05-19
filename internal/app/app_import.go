@@ -57,9 +57,9 @@ func (a *App) Import(ctx context.Context, opts ImportOptions) (*ImportResult, er
 	}
 
 	// Collect CLI-tool sets from providers that can distinguish CLI tools from
-	// library packages (e.g. pip).  Non-CLI packages get Ignore:true so they
-	// appear in the ignored section for version tracking without cluttering the
-	// active list.  Errors are non-fatal — fall back to treating all as CLI.
+	// library packages (e.g. pip). Non-CLI packages get Ignore:true so normal
+	// tool processing can skip them. Errors are non-fatal: fall back to treating
+	// all as CLI.
 	cliSets := make(map[string]map[string]bool)
 	for _, prov := range a.registry.All() {
 		if cp, ok := prov.(provider.CLIToolProvider); ok {
@@ -83,6 +83,9 @@ func (a *App) Import(ctx context.Context, opts ImportOptions) (*ImportResult, er
 				configured[t.Provider+"\x00"+ep] = struct{}{}
 			}
 			configuredNames[t.Name] = struct{}{}
+		}
+		for name := range ignoredToolSet(cfg) {
+			configuredNames[name] = struct{}{}
 		}
 
 		if err := a.forEachAvailable(ctx, func(p provider.Provider) error {

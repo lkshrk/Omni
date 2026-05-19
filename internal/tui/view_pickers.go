@@ -231,11 +231,30 @@ func groupEditorContentWidth(m Model) int {
 	return popupContentWidth(m, width, 34, 64)
 }
 
-func groupToolsContentWidth(m Model) int {
-	widthModel := unfilteredHostGroupToolsModel(m)
-	rows := groupToolRows(widthModel)
-	longestName, _ := groupToolsColumnWidths(m, rows)
-	longestSecondary := groupToolsSecondaryWidth(m, rows)
+type groupToolsPopupLayout struct {
+	contentWidth   int
+	contentHeight  int
+	rows           []groupToolRow
+	secondaryWidth int
+}
+
+type groupDotsPopupLayout struct {
+	contentWidth   int
+	contentHeight  int
+	rows           []groupDotRow
+	secondaryWidth int
+}
+
+func groupToolsPopupLayoutFor(m Model) groupToolsPopupLayout {
+	base := unfilteredHostGroupToolsModel(m)
+	baseRows := groupToolRows(base)
+	rows := baseRows
+	if groupToolsNeedsFilteredRows(m) {
+		rows = groupToolRows(m)
+	}
+
+	longestName, _ := groupToolsColumnWidths(m, baseRows)
+	longestSecondary := groupToolsSecondaryWidth(m, baseRows)
 	width := popupToggleTableWidth(longestName, longestSecondary)
 	for _, label := range []string{"enabled", "disabled", "ignored"} {
 		width = max(width, lipgloss.Width(pickerSectionLabel(label))+2)
@@ -244,22 +263,40 @@ func groupToolsContentWidth(m Model) int {
 	if m.groupToolsEditor.searchActive {
 		width = max(width, lipgloss.Width(renderEmptyAwareTextInputView(m.palette, m.settingsInput, m.settingsInput.Placeholder, 0)))
 	}
-	if filterBar := renderHostGroupToolsFilterBar(widthModel); filterBar != "" {
+	if filterBar := renderHostGroupToolsFilterBar(base); filterBar != "" {
 		width = max(width, lipgloss.Width(filterBar))
 	}
 	width = max(width, lipgloss.Width("Edit Tools: "+m.groupToolsEditor.group))
-	return popupContentWidth(m, width, 40, 72)
+	contentWidth := popupContentWidth(m, width, 40, 72)
+	contentHeight := groupToolsEditorContentHeight(base, baseRows, contentWidth)
+	if groupToolsNeedsFilteredRows(m) || m.groupToolsEditor.searchActive {
+		contentHeight = max(contentHeight, groupToolsEditorContentHeight(m, rows, contentWidth))
+	}
+	return groupToolsPopupLayout{
+		contentWidth:   contentWidth,
+		contentHeight:  contentHeight,
+		rows:           rows,
+		secondaryWidth: longestSecondary,
+	}
 }
 
-func groupToolsPopupContentHeight(m Model) int {
-	base := unfilteredHostGroupToolsModel(m)
-	return max(lipgloss.Height(renderHostGroupToolsEditor(base)), lipgloss.Height(renderHostGroupToolsEditor(m)))
+func groupToolsNeedsFilteredRows(m Model) bool {
+	return m.groupToolsProviderIdx != 0 || strings.TrimSpace(m.groupToolsEditor.search) != ""
 }
 
-func groupDotsContentWidth(m Model) int {
-	widthModel := unfilteredHostGroupDotsModel(m)
-	rows := groupDotRows(widthModel)
-	longestName, longestTarget := groupDotsColumnWidths(rows)
+func groupToolsContentWidth(m Model) int {
+	return groupToolsPopupLayoutFor(m).contentWidth
+}
+
+func groupDotsPopupLayoutFor(m Model) groupDotsPopupLayout {
+	base := unfilteredHostGroupDotsModel(m)
+	baseRows := groupDotRows(base)
+	rows := baseRows
+	if groupDotsNeedsFilteredRows(m) {
+		rows = groupDotRows(m)
+	}
+
+	longestName, longestTarget := groupDotsColumnWidths(baseRows)
 	width := popupToggleTableWidth(longestName, longestTarget)
 	for _, label := range []string{"enabled", "disabled", "ignored"} {
 		width = max(width, lipgloss.Width(pickerSectionLabel(label))+2)
@@ -269,12 +306,94 @@ func groupDotsContentWidth(m Model) int {
 		width = max(width, lipgloss.Width(renderEmptyAwareTextInputView(m.palette, m.settingsInput, m.settingsInput.Placeholder, 0)))
 	}
 	width = max(width, lipgloss.Width("Edit Dots: "+m.groupDotsEditor.group))
-	return popupContentWidth(m, width, 40, 72)
+	contentWidth := popupContentWidth(m, width, 40, 72)
+	contentHeight := groupDotsEditorContentHeight(base, baseRows, contentWidth)
+	if groupDotsNeedsFilteredRows(m) || m.groupDotsEditor.searchActive {
+		contentHeight = max(contentHeight, groupDotsEditorContentHeight(m, rows, contentWidth))
+	}
+	return groupDotsPopupLayout{
+		contentWidth:   contentWidth,
+		contentHeight:  contentHeight,
+		rows:           rows,
+		secondaryWidth: longestTarget,
+	}
 }
 
-func groupDotsPopupContentHeight(m Model) int {
-	base := unfilteredHostGroupDotsModel(m)
-	return max(lipgloss.Height(renderHostGroupDotsEditor(base)), lipgloss.Height(renderHostGroupDotsEditor(m)))
+func groupDotsNeedsFilteredRows(m Model) bool {
+	return strings.TrimSpace(m.groupDotsEditor.search) != ""
+}
+
+func groupDotsContentWidth(m Model) int {
+	return groupDotsPopupLayoutFor(m).contentWidth
+}
+
+func groupToolsEditorContentHeight(m Model, rows []groupToolRow, contentW int) int {
+	height := 0
+	if m.groupToolsEditor.searchActive {
+		height += 2
+	}
+	if filterBar := renderHostGroupToolsFilterBar(m); filterBar != "" {
+		if m.groupToolsEditor.searchActive {
+			height++
+		}
+		height += lipgloss.Height(lipgloss.NewStyle().Width(contentW).Render(filterBar)) + 1
+	} else if m.groupToolsEditor.searchActive {
+		height++
+	}
+	height += sectionedPopupRowsHeight(len(rows), groupToolSectionCount(rows))
+
+	ctx := hintCtxHostGroupTools
+	if m.groupToolsEditor.searchActive {
+		ctx = hintCtxHostGroupToolsSearch
+	}
+	height += lipgloss.Height(renderPickerHintItems(m, contentW, contextHintItems(m, ctx)))
+	return height
+}
+
+func groupDotsEditorContentHeight(m Model, rows []groupDotRow, contentW int) int {
+	height := 0
+	if m.groupDotsEditor.searchActive {
+		height += 3
+	}
+	height += sectionedPopupRowsHeight(len(rows), groupDotSectionCount(rows))
+
+	ctx := hintCtxHostGroupDots
+	if m.groupDotsEditor.searchActive {
+		ctx = hintCtxHostGroupDotsSearch
+	}
+	height += lipgloss.Height(renderPickerHintItems(m, contentW, contextHintItems(m, ctx)))
+	return height
+}
+
+func sectionedPopupRowsHeight(rowCount int, sectionCount int) int {
+	if rowCount == 0 {
+		return 2
+	}
+	return rowCount + sectionCount*2
+}
+
+func groupToolSectionCount(rows []groupToolRow) int {
+	count := 0
+	lastSection := groupToolSection(-1)
+	for _, row := range rows {
+		if row.section != lastSection {
+			count++
+			lastSection = row.section
+		}
+	}
+	return count
+}
+
+func groupDotSectionCount(rows []groupDotRow) int {
+	count := 0
+	lastSection := groupDotSection(-1)
+	for _, row := range rows {
+		if row.section != lastSection {
+			count++
+			lastSection = row.section
+		}
+	}
+	return count
 }
 
 func unfilteredHostGroupDotsModel(m Model) Model {
@@ -425,7 +544,13 @@ func groupDotRows(m Model) []groupDotRow {
 	query := strings.ToLower(strings.TrimSpace(m.groupDotsEditor.search))
 	statusByName := make(map[string]app.DotStatus, len(m.dotsEntries))
 	for _, entry := range m.dotsEntries {
-		if entry.Name != "" {
+		if entry.Name == "" {
+			continue
+		}
+		current, exists := statusByName[entry.Name]
+		currentIgnored := exists && dotStatusState(current) == app.DotStateIgnored
+		entryIgnored := dotStatusState(entry) == app.DotStateIgnored
+		if !exists || currentIgnored && !entryIgnored {
 			statusByName[entry.Name] = entry
 		}
 	}
@@ -438,7 +563,7 @@ func groupDotRows(m Model) []groupDotRow {
 			continue
 		}
 		enabled := m.groupDotsEditor.membership[name]
-		ignored := status.State == app.DotStateIgnored
+		ignored := dotStatusState(status) == app.DotStateIgnored
 		section := groupDotSectionDisabled
 		switch {
 		case ignored:

@@ -42,10 +42,19 @@ type ToolListItem struct {
 }
 
 func (a *App) ListTools(ctx context.Context, providerFilter string) ([]*database.ToolCache, error) {
+	ignored := a.ignoredToolSetBestEffort()
 	if providerFilter != "" {
-		return a.readDB().ListByProvider(ctx, providerFilter)
+		tools, err := a.readDB().ListByProvider(ctx, providerFilter)
+		if err != nil {
+			return nil, err
+		}
+		return filterIgnoredToolCaches(tools, ignored), nil
 	}
-	return a.readDB().List(ctx)
+	tools, err := a.readDB().List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return filterIgnoredToolCaches(tools, ignored), nil
 }
 
 func (a *App) ConfiguredProviders(ctx context.Context) ([]string, error) {
@@ -151,7 +160,7 @@ func (a *App) QueryTools(ctx context.Context, opts ToolListOptions) ([]ToolListI
 		return nil, fmt.Errorf("group %q not found", opts.Group)
 	}
 
-	ignoreSet := globalIgnoreSet(cfg)
+	ignoreSet := ignoredToolSet(cfg)
 	resolvedProviders := a.ResolvedEcosystemProviders(ctx)
 	stateFilter, err := normalizeToolState(opts.State)
 	if err != nil {
@@ -208,6 +217,68 @@ func (a *App) cachedInstalledOwners(ctx context.Context) (map[string]string, err
 		owners[NewToolKey(t.Name, t.Provider, t.Package).String()] = t.InstalledWith
 	}
 	return owners, nil
+}
+
+func ignoredToolSet(cfg *config.RootConfig) map[string]struct{} {
+	if cfg == nil {
+		return nil
+	}
+	size := len(cfg.Ignore.Tools)
+	for _, spec := range cfg.Tools {
+		if spec.Ignore {
+			size++
+		}
+	}
+	if size == 0 {
+		return nil
+	}
+	ignored := make(map[string]struct{}, size)
+	for _, name := range cfg.Ignore.Tools {
+		if name != "" {
+			ignored[name] = struct{}{}
+		}
+	}
+	for name, spec := range cfg.Tools {
+		if spec.Ignore && name != "" {
+			ignored[name] = struct{}{}
+		}
+	}
+	return ignored
+}
+
+func toolNameIgnored(ignored map[string]struct{}, name string) bool {
+	_, ok := ignored[name]
+	return ok
+}
+
+func filterIgnoredToolCaches(tools []*database.ToolCache, ignored map[string]struct{}) []*database.ToolCache {
+	if len(ignored) == 0 || len(tools) == 0 {
+		return tools
+	}
+	filtered := make([]*database.ToolCache, 0, len(tools))
+	for _, t := range tools {
+		if t == nil || toolNameIgnored(ignored, t.Name) {
+			continue
+		}
+		filtered = append(filtered, t)
+	}
+	return filtered
+}
+
+func (a *App) ignoredToolSetBestEffort() map[string]struct{} {
+	cfg, err := a.loadConfig()
+	if err != nil {
+		return nil
+	}
+	return ignoredToolSet(cfg)
+}
+
+func (a *App) configuredToolIgnored(name string) (bool, error) {
+	cfg, err := a.loadConfig()
+	if err != nil {
+		return false, fmt.Errorf("loading config: %w", err)
+	}
+	return toolNameIgnored(ignoredToolSet(cfg), name), nil
 }
 
 func toolEntryLookupKeys(t config.ToolEntry) []string {
@@ -319,14 +390,6 @@ func installedMapFromMetadata(metadata map[string]provider.InstalledMetadata) ma
 	return m
 }
 
-func globalIgnoreSet(cfg *config.RootConfig) map[string]struct{} {
-	ignoreSet := make(map[string]struct{}, len(cfg.Ignore.Tools))
-	for _, name := range cfg.Ignore.Tools {
-		ignoreSet[name] = struct{}{}
-	}
-	return ignoreSet
-}
-
 func classifyToolState(t *database.ToolCache, ignoreSet map[string]struct{}, resolved map[string]string) ToolListState {
 	if t.FailedAt != nil {
 		return ToolStateFailed
@@ -394,7 +457,7 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 	}
 	tools, _ := a.resolvedToolEntries(ctx, cfg, cfg.Groups)
 	if len(tools) == 0 {
-		return nil
+		return a.reconcileResolvedTools(context.WithoutCancel(ctx), tools)
 	}
 	cachedOwners, err := a.cachedInstalledOwners(ctx)
 	if err != nil {
@@ -880,6 +943,9 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 	for name := range cfg.Tools {
 		configuredNames[name] = struct{}{}
 	}
+	for name := range ignoredToolSet(cfg) {
+		configuredNames[name] = struct{}{}
+	}
 
 	// Build reverse ecosystem map (concrete → ecosystem) so discovered tools get
 	// the ecosystem provider name as their config provider label.
@@ -948,7 +1014,11 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 // ListDiscovered returns all tool entries that are installed locally but not
 // declared in config (tracked=false).
 func (a *App) ListDiscovered(ctx context.Context) ([]*database.ToolCache, error) {
-	return a.readDB().ListDiscovered(ctx)
+	discovered, err := a.readDB().ListDiscovered(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return filterIgnoredToolCaches(discovered, a.ignoredToolSetBestEffort()), nil
 }
 
 func (a *App) reconcileResolvedTools(ctx context.Context, tools []config.ToolEntry) error {

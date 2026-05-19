@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/app"
@@ -338,6 +339,41 @@ func TestDeleteGroup_DeleteToolsRemovesLastMembershipSpecs(t *testing.T) {
 	}
 	if _, ok := updated.Tools["go"]; ok {
 		t.Fatal("last-membership logical tool spec still present")
+	}
+}
+
+func TestDeleteGroup_DeleteToolsRejectsProviderTool(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	a, cfgPath := newImportApp(t)
+
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalFixtureTool{Name: "npm", Provider: "node", InstallWith: "npm"}),
+		Groups: []*config.GroupConfig{
+			testHostGroup(),
+			{Name: "dev", Tools: groupTools("npm")},
+		},
+		Hosts: map[string][]string{"testhost": {"dev"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	err := a.DeleteGroup(context.Background(), "dev", app.DeleteGroupOptions{DeleteTools: true})
+	if err == nil || !strings.Contains(err.Error(), "package manager/provider") {
+		t.Fatalf("DeleteGroup err = %v, want protected provider tool error", err)
+	}
+
+	updated, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if _, ok := updated.Tools["npm"]; !ok {
+		t.Fatal("npm logical spec was removed despite protected provider guard")
+	}
+	if group := findTestGroup(updated, "dev"); group == nil || !testGroupHasTool(group, "npm") {
+		t.Fatalf("dev group was removed or lost npm despite protected provider guard: %+v", updated.Groups)
+	}
+	if !slices.Contains(updated.Hosts["testhost"], "dev") {
+		t.Fatalf("host reference to dev was removed despite protected provider guard: %+v", updated.Hosts["testhost"])
 	}
 }
 

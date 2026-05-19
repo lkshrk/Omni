@@ -51,6 +51,22 @@ case "${1:-}" in
   info)
     echo '{"formulae":[],"casks":[]}'
     ;;
+  outdated)
+    formulae=""
+    for pkg in ripgrep fd; do
+      if [ ! -f "$state/$pkg-upgraded" ]; then
+        if [ -n "$formulae" ]; then
+          formulae="$formulae,"
+        fi
+        case "$pkg" in
+          ripgrep) latest="15.0.0" ;;
+          fd) latest="10.0.0" ;;
+        esac
+        formulae="${formulae}{\"name\":\"$pkg\",\"current_version\":\"$latest\"}"
+      fi
+    done
+    echo "{\"formulae\":[$formulae],\"casks\":[]}"
+    ;;
 esac
 
 -- settings.json --

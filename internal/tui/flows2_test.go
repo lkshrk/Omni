@@ -680,6 +680,25 @@ func TestFlow2_UC76_SetupStep5(t *testing.T) {
 		}
 	})
 
+	t.Run("configured dotfiles from dots tab stays on dots during reload", func(t *testing.T) {
+		m := setupStep6Model()
+		m.setupBackgroundMode = viewDots
+		got := drive(m, dangerOpDoneMsg{action: "setup-dots", detail: "dots configured"})
+		if got.mode != viewDots {
+			t.Fatalf("mode = %v, want viewDots after dotfiles setup from Dots tab", got.mode)
+		}
+		if got.setupBackgroundMode != viewDots {
+			t.Fatalf("setupBackgroundMode = %v, want viewDots reload target", got.setupBackgroundMode)
+		}
+		if !got.setupReloading {
+			t.Fatal("setupReloading should keep post-onboarding progress visible on Dots tab")
+		}
+		got = drive(got, toolsLoadedMsg{})
+		if got.mode != viewDots {
+			t.Fatalf("mode = %v, want viewDots after dotfiles setup reload", got.mode)
+		}
+	})
+
 	t.Run("configured dotfiles advances to group selection when reusable groups exist", func(t *testing.T) {
 		m := setupStep6Model()
 		m.groupNames = []string{"base"}
@@ -689,6 +708,25 @@ func TestFlow2_UC76_SetupStep5(t *testing.T) {
 		}
 		if got.setupStep != 9 {
 			t.Fatalf("setupStep = %d, want group selection", got.setupStep)
+		}
+	})
+
+	t.Run("group selection after dotfiles setup from dots tab returns to dots", func(t *testing.T) {
+		m := setupStep9Model()
+		m.setupBackgroundMode = viewDots
+		got := drive(m, setupHostGroupsDoneMsg{
+			groups: []string{"base"},
+			info:   &app.HostInfo{Active: "testhost", Hosts: map[string]config.HostAssignment{"testhost": {Groups: []string{"base"}}}},
+		})
+		if got.mode != viewDots {
+			t.Fatalf("mode = %v, want viewDots after group selection from Dots setup", got.mode)
+		}
+		if got.setupBackgroundMode != viewDots {
+			t.Fatalf("setupBackgroundMode = %v, want viewDots reload target", got.setupBackgroundMode)
+		}
+		got = drive(got, toolsLoadedMsg{})
+		if got.mode != viewDots {
+			t.Fatalf("mode = %v, want viewDots after group-selection reload", got.mode)
 		}
 	})
 
@@ -1239,6 +1277,25 @@ func TestFlow2_UC101_EditHostGroups(t *testing.T) {
 	}
 	if got.hostEditName != "alpha" {
 		t.Fatalf("hostEditName = %q, want alpha", got.hostEditName)
+	}
+}
+
+func TestFlow2_EditHostGroupsUsesRenderedActiveHostOrder(t *testing.T) {
+	m := hostsModel()
+	m.hostInfo.Active = "beta"
+	m.assignmentSection = 0
+	m.hostCursor = 0 // rendered first because beta is active
+
+	got := drive(m, pressRune('g'))
+
+	if got.hostEditMode != 1 {
+		t.Fatalf("hostEditMode = %d, want 1 after g key", got.hostEditMode)
+	}
+	if got.hostEditName != "beta" {
+		t.Fatalf("hostEditName = %q, want beta", got.hostEditName)
+	}
+	if !slices.Contains(got.hostGroupDraft, "personal") {
+		t.Fatalf("hostGroupDraft = %v, want personal checked", got.hostGroupDraft)
 	}
 }
 
