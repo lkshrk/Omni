@@ -1,0 +1,82 @@
+site_name: Omni
+site_description: Portable package and dotfile management for developer machines.
+site_url: https://lkshrk.github.io/omni/
+repo_url: https://github.com/lkshrk/omni
+repo_name: lkshrk/omni
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  language: en
+  features:
+    - content.action.edit
+    - content.code.copy
+    - navigation.footer
+    - navigation.indexes
+    - navigation.instant
+    - navigation.sections
+    - navigation.top
+    - search.highlight
+    - search.suggest
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue grey
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue grey
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: installation.md
+      - First Run: getting-started.md
+      - Core Concepts: concepts.md
+      - State And Files: state-and-files.md
+      - Safety Model: safety.md
+  - Guides:
+      - Recipes: recipes.md
+      - Configuration: configuration.md
+      - Providers: providers.md
+      - Tools: tools.md
+      - Dotfiles: dotfiles.md
+      - TUI: tui.md
+  - Reference:
+      - CLI Reference: cli.md
+      - Command Matrix: command-matrix.md
+      - Schema Reference: schema-reference.md
+      - Architecture: architecture.md
+      - Glossary: glossary.md
+  - Operations:
+      - Runbooks: runbooks.md
+      - FAQ: faq.md
+      - Troubleshooting: troubleshooting.md
+      - Development: development.md
+      - Test Matrix: test-matrix.md
+      - Documentation Maintenance: documentation-maintenance.md

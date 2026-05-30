@@ -1,0 +1,117 @@
+name: Docs
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/docs.yml
+      - docs/**
+      - mkdocs.yml
+      - README.md
+  pull_request:
+    paths:
+      - .github/workflows/docs.yml
+      - docs/**
+      - mkdocs.yml
+      - README.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: docs/requirements.txt
+
+      - name: Install docs dependencies
+        run: |
+          uv venv .tmp/docs-venv --python 3.13
+          uv pip install --python .tmp/docs-venv/bin/python -r docs/requirements.txt
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Build MkDocs site
+        run: .tmp/docs-venv/bin/mkdocs build --strict
+
+      - name: Check Markdown links and structure
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          root = Path.cwd()
+          docs = sorted((root / "docs").glob("*.md"))
+          files = [root / "README.md", *docs]
+          warnings = []
+          bad_links = []
+          placeholder_pattern = re.compile("|".join(["TO" + "DO", "TB" + "D", "FIX" + "ME"]))
+
+          for file in files:
+              text = file.read_text(encoding="utf-8")
+              rel = file.relative_to(root)
+              if not text.startswith("# "):
+                  warnings.append(f"{rel}: missing H1")
+              if placeholder_pattern.search(text):
+                  warnings.append(f"{rel}: placeholder marker")
+              for line_no, line in enumerate(text.splitlines(), start=1):
+                  for match in re.finditer(r"\[[^\]]+\]\(([^)]+)\)", line):
+                      href = match.group(1).split("#", 1)[0]
+                      if not href or href.startswith(("http", "mailto:")):
+                          continue
+                      target = (file.parent / href).resolve()
+                      if not target.exists():
+                          bad_links.append(f"{rel}:{line_no} {href}")
+
+          if warnings:
+              print("\n".join(warnings))
+          if bad_links:
+              print("\n".join(bad_links))
+          if warnings or bad_links:
+              sys.exit(1)
+          print("structure: ok")
+          print("links: ok")
+          PY
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    name: Deploy docs
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
