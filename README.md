@@ -52,8 +52,7 @@ Before broad repairs, read the [Safety Model](docs/safety.md).
 
 ## Docs
 
-Full documentation is in [`docs/`](docs/index.md) and is built for GitHub Pages
-at <https://lkshrk.github.io/omni/>. Local docs commands use `uv`:
+Full documentation can be found at <https://lkshrk.github.io/omni/>. Local docs commands use `uv`:
 
 ```sh
 python3 -m venv .tmp/docs-venv
