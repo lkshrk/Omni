@@ -33,25 +33,38 @@ func (p *Provider) Available(ctx context.Context) (bool, error) {
 
 func (p *Provider) Install(ctx context.Context, tool provider.Tool) error {
 	pkg := tool.EffectivePackage()
-	cmd, args := provider.PrivilegedCommand("pacman", "-S", "--noconfirm", pkg)
+	rawCmd, rawArgs, _ := p.PrivilegeCommand(provider.PrivilegeActionInstall, tool)
+	cmd, args := provider.PrivilegedCommand(rawCmd, rawArgs...)
 	return provider.RunCmd(ctx, p.exec, "pacman -S "+pkg, cmd, args...)
 }
 
 func (p *Provider) Uninstall(ctx context.Context, tool provider.Tool) error {
 	pkg := tool.EffectivePackage()
-	cmd, args := provider.PrivilegedCommand("pacman", "-R", "--noconfirm", pkg)
+	rawCmd, rawArgs, _ := p.PrivilegeCommand(provider.PrivilegeActionUninstall, tool)
+	cmd, args := provider.PrivilegedCommand(rawCmd, rawArgs...)
 	return provider.RunCmd(ctx, p.exec, "pacman -R "+pkg, cmd, args...)
 }
 
 func (p *Provider) Upgrade(ctx context.Context, tool provider.Tool) error {
 	// pacman has no upgrade-single-package command; -S reinstalls the latest version.
 	pkg := tool.EffectivePackage()
-	cmd, args := provider.PrivilegedCommand("pacman", "-S", "--noconfirm", pkg)
+	rawCmd, rawArgs, _ := p.PrivilegeCommand(provider.PrivilegeActionUpgrade, tool)
+	cmd, args := provider.PrivilegedCommand(rawCmd, rawArgs...)
 	return provider.RunCmd(ctx, p.exec, "pacman -S "+pkg, cmd, args...)
 }
 
 func (p *Provider) PrivilegePlan(_ context.Context, action provider.PrivilegeAction, tool provider.Tool) (provider.PrivilegePlan, error) {
 	return provider.SystemPrivilegePlan(p.Name(), action, tool), nil
+}
+
+func (p *Provider) PrivilegeCommand(action provider.PrivilegeAction, tool provider.Tool) (string, []string, bool) {
+	pkg := tool.EffectivePackage()
+	switch action {
+	case provider.PrivilegeActionUninstall:
+		return "pacman", []string{"-R", "--noconfirm", pkg}, true
+	default:
+		return "pacman", []string{"-S", "--noconfirm", pkg}, true
+	}
 }
 
 func (p *Provider) IsInstalled(ctx context.Context, tool provider.Tool) (bool, string, error) {

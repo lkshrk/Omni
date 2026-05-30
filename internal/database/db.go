@@ -4,6 +4,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,24 +22,25 @@ import (
 type ToolCache struct {
 	bun.BaseModel `bun:"table:tool_cache,alias:tc"`
 
-	ID              int64          `bun:"id,pk,autoincrement"`
-	Name            string         `bun:"name,notnull"`
-	Provider        string         `bun:"provider,notnull"`
-	Package         string         `bun:"package,notnull"`
-	Installed       bool           `bun:"installed,notnull,default:false"`
-	InstalledWith   string         `bun:"installed_with,notnull,default:''"`
-	Version         sql.NullString `bun:"version"`
-	Outdated        bool           `bun:"outdated,notnull,default:false"`
-	LatestVersion   sql.NullString `bun:"latest_version"`
-	Description     sql.NullString `bun:"description"`
-	LastChecked     time.Time      `bun:"last_checked,notnull"`
-	FailedAt        *time.Time     `bun:"failed_at"`
-	FailureCount    int            `bun:"failure_count,notnull,default:0"`
-	LastError       sql.NullString `bun:"last_error"`
-	Tracked         bool           `bun:"tracked,notnull,default:true"`
-	Privilege       string         `bun:"privilege,notnull,default:''"`
-	PrivilegeReason sql.NullString `bun:"privilege_reason"`
-	PrivilegeAt     *time.Time     `bun:"privilege_at"`
+	ID              int64             `bun:"id,pk,autoincrement"`
+	Name            string            `bun:"name,notnull"`
+	Provider        string            `bun:"provider,notnull"`
+	Package         string            `bun:"package,notnull"`
+	Installed       bool              `bun:"installed,notnull,default:false"`
+	InstalledWith   string            `bun:"installed_with,notnull,default:''"`
+	Version         sql.NullString    `bun:"version"`
+	Outdated        bool              `bun:"outdated,notnull,default:false"`
+	LatestVersion   sql.NullString    `bun:"latest_version"`
+	Description     sql.NullString    `bun:"description"`
+	LastChecked     time.Time         `bun:"last_checked,notnull"`
+	FailedAt        *time.Time        `bun:"failed_at"`
+	FailureCount    int               `bun:"failure_count,notnull,default:0"`
+	LastError       sql.NullString    `bun:"last_error"`
+	Tracked         bool              `bun:"tracked,notnull,default:true"`
+	Privilege       string            `bun:"privilege,notnull,default:''"`
+	PrivilegeReason sql.NullString    `bun:"privilege_reason"`
+	PrivilegeAt     *time.Time        `bun:"privilege_at"`
+	Options         map[string]string `bun:"-"`
 }
 
 // ToolMetadata is provider registry metadata cached independently from
@@ -66,6 +68,46 @@ type LocalState struct {
 	Value     string    `bun:"value,notnull"`
 	UpdatedAt time.Time `bun:"updated_at,notnull"`
 }
+
+type DotStatusCache struct {
+	bun.BaseModel `bun:"table:dot_status_cache,alias:dsc"`
+
+	ID           int64     `bun:"id,pk,autoincrement"`
+	Name         string    `bun:"name,notnull"`
+	Package      string    `bun:"package,notnull,default:''"`
+	Variant      bool      `bun:"variant,notnull,default:false"`
+	SourcePath   string    `bun:"source_path,notnull,default:''"`
+	TargetPath   string    `bun:"target_path,notnull,default:''"`
+	ConfigPath   string    `bun:"config_path,notnull,default:''"`
+	Health       string    `bun:"health,notnull,default:''"`
+	State        string    `bun:"state,notnull,default:''"`
+	ActionsJSON  string    `bun:"actions_json,type:TEXT,notnull,default:''"`
+	Group        string    `bun:"group_name,notnull,default:''"`
+	FileCount    int       `bun:"file_count,notnull,default:0"`
+	CountsJSON   string    `bun:"counts_json,type:TEXT,notnull,default:''"`
+	IsDir        bool      `bun:"is_dir,notnull,default:false"`
+	ChildrenJSON string    `bun:"children_json,type:TEXT,notnull,default:''"`
+	Position     int       `bun:"position,notnull,default:0"`
+	ObservedAt   time.Time `bun:"observed_at,notnull"`
+}
+
+type DotSnapshotMeta struct {
+	bun.BaseModel `bun:"table:dot_snapshot_meta,alias:dsm"`
+
+	Key             string    `bun:"key,pk,notnull"`
+	GitStatus       string    `bun:"git_status,type:TEXT,notnull,default:''"`
+	DiscoveredCount int       `bun:"discovered_count,notnull,default:0"`
+	ObservedAt      time.Time `bun:"observed_at,notnull"`
+}
+
+type DotsSnapshot struct {
+	Entries         []*DotStatusCache
+	GitStatus       string
+	DiscoveredCount int
+	ObservedAt      time.Time
+}
+
+const dotsSnapshotMetaKey = "current"
 
 // MetadataUpdate is registry metadata learned without changing install state.
 type MetadataUpdate struct {
@@ -161,6 +203,20 @@ func (db *DB) Migrate(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("creating local_state table: %w", err)
 	}
+	_, err = db.bun.NewCreateTable().
+		Model((*DotStatusCache)(nil)).
+		IfNotExists().
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("creating dot_status_cache table: %w", err)
+	}
+	_, err = db.bun.NewCreateTable().
+		Model((*DotSnapshotMeta)(nil)).
+		IfNotExists().
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("creating dot_snapshot_meta table: %w", err)
+	}
 	// Ensure the unique index exists (bun doesn't auto-create indexes from tags).
 	_, err = db.bun.ExecContext(ctx,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_tool_cache_name_provider_package
@@ -173,6 +229,9 @@ func (db *DB) Migrate(ctx context.Context) error {
 		 ON tool_metadata (name, provider, package)`)
 	if err != nil {
 		return fmt.Errorf("creating metadata unique index: %w", err)
+	}
+	if _, err := db.bun.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_dot_status_cache_position ON dot_status_cache (position)`); err != nil {
+		return fmt.Errorf("creating dot status cache position index: %w", err)
 	}
 	// Add columns introduced after initial schema; duplicate-column errors are
 	// expected (column already created by the CREATE TABLE above) and suppressed.
@@ -527,6 +586,73 @@ func (db *DB) SetState(ctx context.Context, key, value string) error {
 		return fmt.Errorf("setting local state %q: %w", key, err)
 	}
 	return nil
+}
+
+func (db *DB) ReplaceDotsSnapshot(ctx context.Context, entries []*DotStatusCache, gitStatus string, discoveredCount int, observedAt time.Time) error {
+	if observedAt.IsZero() {
+		observedAt = time.Now().UTC()
+	}
+	return db.bun.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM dot_status_cache`); err != nil {
+			return fmt.Errorf("clearing dots snapshot: %w", err)
+		}
+		for i, entry := range entries {
+			if entry == nil {
+				continue
+			}
+			row := *entry
+			row.ID = 0
+			row.Position = i
+			row.ObservedAt = observedAt
+			if _, err := tx.NewInsert().Model(&row).Exec(ctx); err != nil {
+				return fmt.Errorf("inserting dots snapshot entry %q: %w", row.Name, err)
+			}
+		}
+		meta := &DotSnapshotMeta{
+			Key:             dotsSnapshotMetaKey,
+			GitStatus:       gitStatus,
+			DiscoveredCount: discoveredCount,
+			ObservedAt:      observedAt,
+		}
+		_, err := tx.NewInsert().
+			Model(meta).
+			On("CONFLICT (key) DO UPDATE").
+			Set("git_status = EXCLUDED.git_status").
+			Set("discovered_count = EXCLUDED.discovered_count").
+			Set("observed_at = EXCLUDED.observed_at").
+			Exec(ctx)
+		if err != nil {
+			return fmt.Errorf("upserting dots snapshot metadata: %w", err)
+		}
+		return nil
+	})
+}
+
+func (db *DB) GetDotsSnapshot(ctx context.Context) (*DotsSnapshot, bool, error) {
+	meta := new(DotSnapshotMeta)
+	if err := db.bun.NewSelect().
+		Model(meta).
+		Where("key = ?", dotsSnapshotMetaKey).
+		Limit(1).
+		Scan(ctx); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("getting dots snapshot metadata: %w", err)
+	}
+	var entries []*DotStatusCache
+	if err := db.bun.NewSelect().
+		Model(&entries).
+		OrderExpr("position, name").
+		Scan(ctx); err != nil {
+		return nil, false, fmt.Errorf("listing dots snapshot entries: %w", err)
+	}
+	return &DotsSnapshot{
+		Entries:         entries,
+		GitStatus:       meta.GitStatus,
+		DiscoveredCount: meta.DiscoveredCount,
+		ObservedAt:      meta.ObservedAt,
+	}, true, nil
 }
 
 func (db *DB) hydrateMetadata(ctx context.Context, tools []*ToolCache) error {

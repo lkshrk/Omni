@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/term"
+
+	textutil "github.com/lkshrk/omni/internal/text"
 )
 
 // stdinScanner is the shared line-oriented reader for all interactive prompts.
@@ -24,7 +26,7 @@ var stdinIsTerminal = defaultStdinIsTerminal
 func scanLine() (string, bool) {
 	if !stdinScanner.Scan() {
 		if err := stdinScanner.Err(); err != nil {
-			fmt.Fprintf(os.Stderr, "stdin read error: %v\n", err)
+			fmt.Fprintf(stdErr(), "stdin read error: %v\n", err)
 		}
 		return "", false
 	}
@@ -87,9 +89,9 @@ func readYesNo(defaultVal bool) (bool, bool) {
 
 func promptText(question, defaultVal string) (string, bool) {
 	if defaultVal != "" {
-		fmt.Printf("%s [%s] ", question, defaultVal)
+		fmt.Fprintf(stdOut(), "%s [%s] ", question, defaultVal)
 	} else {
-		fmt.Printf("%s ", question)
+		fmt.Fprintf(stdOut(), "%s ", question)
 	}
 	line, ok := scanLine()
 	if !ok {
@@ -113,16 +115,16 @@ func promptYesNo(state *rootState, question string, defaultVal bool) bool {
 	if defaultVal {
 		hint = "[Y/n]"
 	}
-	fmt.Printf("%s %s ", question, hint)
+	fmt.Fprintf(stdOut(), "%s %s ", question, hint)
 	yes, ok := readYesNo(defaultVal)
 	if !ok {
-		fmt.Println()
+		fmt.Fprintln(stdOut())
 		return defaultVal
 	}
 	if yes {
-		fmt.Println("y")
+		fmt.Fprintln(stdOut(), "y")
 	} else {
-		fmt.Println("n")
+		fmt.Fprintln(stdOut(), "n")
 	}
 	return yes
 }
@@ -134,8 +136,8 @@ func promptReassignClaimedTools(state *rootState, claimedNames []string) {
 	if len(claimedNames) == 0 {
 		return
 	}
-	fmt.Printf("\n%d tool(s) added to machine group. Move to a different group?\n", len(claimedNames))
-	fmt.Print("  [a]ll to same group / [i]ndividual / [s]kip: ")
+	fmt.Fprintf(stdOut(), "\n%s added to machine group. Move to a different group?\n", textutil.PluralCount(len(claimedNames), "tool", "tools"))
+	fmt.Fprint(stdOut(), "  [a]ll to same group / [i]ndividual / [s]kip: ")
 	line, ok := scanLine()
 	if !ok {
 		return
@@ -149,9 +151,9 @@ func promptReassignClaimedTools(state *rootState, claimedNames []string) {
 		}
 		for _, name := range claimedNames {
 			if err := state.app.MoveToolToGroup(name, group); err != nil {
-				fmt.Fprintf(os.Stderr, "  warning: could not move %s: %v\n", name, err)
+				fmt.Fprintf(stdErr(), "  warning: could not move %s: %v\n", name, err)
 			} else {
-				fmt.Printf("  ✓ %s → %s\n", name, group)
+				fmt.Fprintf(stdOut(), "  ✓ %s → %s\n", name, group)
 			}
 		}
 	case answer == "i" || answer == "individual":
@@ -162,7 +164,7 @@ func promptReassignClaimedTools(state *rootState, claimedNames []string) {
 				prompt += fmt.Sprintf(" [%s]", lastGroup)
 			}
 			prompt += " "
-			fmt.Print(prompt)
+			fmt.Fprint(stdOut(), prompt)
 			l, ok := scanLine()
 			if !ok {
 				return
@@ -176,9 +178,9 @@ func promptReassignClaimedTools(state *rootState, claimedNames []string) {
 			}
 			lastGroup = g
 			if err := state.app.MoveToolToGroup(name, g); err != nil {
-				fmt.Fprintf(os.Stderr, "  warning: could not move %s: %v\n", name, err)
+				fmt.Fprintf(stdErr(), "  warning: could not move %s: %v\n", name, err)
 			} else {
-				fmt.Printf("  ✓ %s → %s\n", name, g)
+				fmt.Fprintf(stdOut(), "  ✓ %s → %s\n", name, g)
 			}
 		}
 	}
@@ -195,9 +197,9 @@ func promptSatisfiedGroups(state *rootState, activeHost string, satisfiedGroups 
 		q := fmt.Sprintf("Group %q is fully installed on this machine. Add it to host %q?", g, activeHost)
 		if promptYesNo(state, q, false) {
 			if err := addGroupFn(g); err != nil {
-				fmt.Fprintf(os.Stderr, "warning: could not add group %q to host: %v\n", g, err)
+				fmt.Fprintf(stdErr(), "warning: could not add group %q to host: %v\n", g, err)
 			} else {
-				fmt.Printf("Added group %q to host %q.\n", g, activeHost)
+				fmt.Fprintf(stdOut(), "Added group %q to host %q.\n", g, activeHost)
 			}
 		}
 	}

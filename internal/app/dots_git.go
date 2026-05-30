@@ -53,6 +53,7 @@ func (a *App) DotsPush(ctx context.Context, message string) (err error) {
 	}
 	defer func() {
 		a.recordDotsHistoryResult(ctx, "push", "", repoPath, nil, err, false)
+		a.refreshDotsStateAfterSuccess(ctx, &err, false)
 	}()
 	g := newGitForRepo(repoPath, executor.New())
 	if message == "" {
@@ -85,6 +86,7 @@ func (a *App) DotsCommit(ctx context.Context, message string) (err error) {
 	}
 	defer func() {
 		a.recordDotsHistoryResult(ctx, "commit", "", repoPath, nil, err, false)
+		a.refreshDotsStateAfterSuccess(ctx, &err, false)
 	}()
 	g := newGitForRepo(repoPath, executor.New())
 	if message == "" {

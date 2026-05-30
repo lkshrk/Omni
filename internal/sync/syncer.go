@@ -65,10 +65,11 @@ type SyncOptions struct { //nolint:revive // name is intentional for clarity in 
 }
 
 type ProgressEvent struct {
-	Tool    provider.Tool
-	Message string
-	Err     error
-	Done    bool
+	Tool          provider.Tool
+	Message       string
+	TargetVersion string
+	Err           error
+	Done          bool
 }
 
 func (o SyncOptions) progress(msg string) {

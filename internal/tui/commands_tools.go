@@ -3,23 +3,32 @@ package tui
 import (
 	"context"
 	"database/sql"
+	"maps"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/database"
-	"github.com/lkshrk/omni/internal/provider"
 )
 
 // doInstall installs a single tool.
 func (m *Model) doInstall(name, prov string) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
 	return func() tea.Msg {
-		if err := a.Install(ctx, name, prov); err != nil {
+		result, err := a.InstallWithState(ctx, name, prov)
+		if err != nil {
 			return opCompleteMsg{err: err}
 		}
-		tools, _ := a.ListTools(ctx, "") // non-fatal: install succeeded; stale list retained if refresh fails
-		return opCompleteMsg{message: "installed " + name, tools: tools, removeDiscoveredKeys: []string{toolKey(name, prov)}}
+		return opCompleteMsg{
+			message:              "installed " + name,
+			tools:                result.Tools,
+			removeDiscoveredKeys: []string{toolKey(name, prov)},
+			groupNames:           result.State.GroupNames,
+			toolGroups:           result.State.ToolGroups,
+			toolMemberships:      result.State.ToolMemberships,
+			hostInfo:             result.State.HostInfo,
+		}
 	}
 }
 
@@ -27,13 +36,20 @@ func (m *Model) doInstall(name, prov string) tea.Cmd {
 func (m *Model) doDelete(name, prov string) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
 	return func() tea.Msg {
-		if err := a.Uninstall(ctx, name, prov); err != nil {
+		result, err := a.UninstallWithState(ctx, name, prov)
+		if err != nil {
 			return opCompleteMsg{err: err}
 		}
-		tools, _ := a.ListTools(ctx, "") // non-fatal: delete succeeded; stale list retained if refresh fails
-		groupNames, toolGroups, memberships, info := m.reloadToolContext()
 		removeDiscovered := []string{toolKey(name, prov)}
-		return opCompleteMsg{message: "deleted " + name, tools: tools, removeDiscoveredKeys: removeDiscovered, groupNames: groupNames, toolGroups: toolGroups, toolMemberships: memberships, hostInfo: info}
+		return opCompleteMsg{
+			message:              "deleted " + name,
+			tools:                result.Tools,
+			removeDiscoveredKeys: removeDiscovered,
+			groupNames:           result.State.GroupNames,
+			toolGroups:           result.State.ToolGroups,
+			toolMemberships:      result.State.ToolMemberships,
+			hostInfo:             result.State.HostInfo,
+		}
 	}
 }
 
@@ -42,12 +58,18 @@ func (m *Model) doDelete(name, prov string) tea.Cmd {
 func (m *Model) doDeleteFromConfig(name, prov string) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
 	return func() tea.Msg {
-		if err := a.RemoveToolFromConfig(ctx, name, prov); err != nil {
+		result, err := a.RemoveToolFromConfigWithState(ctx, name, prov)
+		if err != nil {
 			return opCompleteMsg{err: err}
 		}
-		tools, _ := a.ListTools(ctx, "") // non-fatal: config update succeeded
-		groupNames, toolGroups, memberships, info := m.reloadToolContext()
-		return opCompleteMsg{message: "deleted " + name + " from config", tools: tools, groupNames: groupNames, toolGroups: toolGroups, toolMemberships: memberships, hostInfo: info}
+		return opCompleteMsg{
+			message:         "deleted " + name + " from config",
+			tools:           result.Tools,
+			groupNames:      result.State.GroupNames,
+			toolGroups:      result.State.ToolGroups,
+			toolMemberships: result.State.ToolMemberships,
+			hostInfo:        result.State.HostInfo,
+		}
 	}
 }
 
@@ -56,11 +78,19 @@ func (m *Model) doUpgrade(name, prov string) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
 	uk := toolKey(name, prov)
 	return func() tea.Msg {
-		if err := a.Upgrade(ctx, name, prov); err != nil {
+		result, err := a.UpgradeWithState(ctx, name, prov)
+		if err != nil {
 			return opCompleteMsg{key: uk, err: err}
 		}
-		tools, _ := a.ListTools(ctx, "") // non-fatal: upgrade succeeded; stale list retained if refresh fails
-		return opCompleteMsg{key: uk, message: "upgraded " + name, tools: tools}
+		return opCompleteMsg{
+			key:             uk,
+			message:         "upgraded " + name,
+			tools:           result.Tools,
+			groupNames:      result.State.GroupNames,
+			toolGroups:      result.State.ToolGroups,
+			toolMemberships: result.State.ToolMemberships,
+			hostInfo:        result.State.HostInfo,
+		}
 	}
 }
 
@@ -117,7 +147,8 @@ func (m *Model) doSearch(ctx context.Context, query string, gen int) tea.Cmd {
 			t := &database.ToolCache{
 				Name:          r.Name,
 				Provider:      r.Provider,
-				InstalledWith: searchResultDisplayProvider(r),
+				InstalledWith: app.SearchResultDisplayProvider(r),
+				Options:       maps.Clone(r.Options),
 			}
 			if r.Version != "" {
 				t.Version = sql.NullString{String: r.Version, Valid: true}
@@ -133,14 +164,4 @@ func (m *Model) doSearch(ctx context.Context, query string, gen int) tea.Cmd {
 		}
 		return searchResultsMsg{gen: gen, query: query, providerFilter: providerFilter, tools: tools, err: err}
 	}
-}
-
-func searchResultDisplayProvider(r provider.SearchResult) string {
-	if r.SourceProvider == "" || r.SourceProvider == r.Provider {
-		return ""
-	}
-	if providerEcosystem(r.SourceProvider) != providerEcosystem(r.Provider) {
-		return ""
-	}
-	return r.SourceProvider
 }

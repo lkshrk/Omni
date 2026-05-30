@@ -52,7 +52,7 @@ Example:
 			if installWith != "" {
 				providerLabel += " via " + installWith
 			}
-			fmt.Printf("✓ added %s (%s) to %s group\n", displayName, providerLabel, dest)
+			fmt.Fprintf(cmdOut(cmd), "✓ added %s (%s) to %s group\n", displayName, providerLabel, dest)
 			return nil
 		},
 	}

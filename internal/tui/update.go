@@ -404,7 +404,11 @@ func (m *Model) scrollSettingsBy(delta int) {
 		m.serviceDurationIdx = clampIndex(m.serviceDurationIdx+delta, len(choices))
 		return
 	}
-	m.settingsCursor = clampIndex(m.settingsCursor+delta, numSettingRows)
+	if maxScroll := m.settingsDetailScrollMax(); maxScroll > 0 && m.settingsCursor == settingsRowDoctor {
+		m.settingsDetailScroll = clampRange(m.settingsDetailScroll+delta, 0, maxScroll)
+		return
+	}
+	m.setSettingsCursor(m.settingsCursor + delta)
 }
 
 func (m *Model) scrollGroupsBy(delta int) {
@@ -427,7 +431,7 @@ func (m *Model) scrollSetupBy(delta int) {
 	case 1, 2:
 		m.setupProviderIdx = clampIndex(m.setupProviderIdx+delta, len(m.setupProviders))
 	case 3:
-		m.setupNodeMgrIdx = clampIndex(m.setupNodeMgrIdx+delta, len(nodeMgrChoices))
+		m.setupNodeMgrIdx = clampIndex(m.setupNodeMgrIdx+delta, len(m.setupNodeManagerChoices()))
 	case 8:
 		m.setupCopyHostIdx = clampIndex(m.setupCopyHostIdx+delta, len(m.setupCopyHostNames()))
 	case 9:

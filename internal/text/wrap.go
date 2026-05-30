@@ -1,7 +1,10 @@
 // Package text provides shared text-processing utilities.
 package text
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // WrapText splits s into lines of at most width runes, breaking at word
 // boundaries. Width is measured in runes so multibyte characters count as one
@@ -29,4 +32,11 @@ func WrapText(s string, width int) []string {
 		}
 	}
 	return append(out, strings.TrimRight(line, " "))
+}
+
+func PluralCount(count int, singular, plural string) string {
+	if count == 1 {
+		return fmt.Sprintf("1 %s", singular)
+	}
+	return fmt.Sprintf("%d %s", count, plural)
 }

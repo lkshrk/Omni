@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -104,6 +105,15 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 	return result, nil
 }
 
+func (a *App) SyncWithState(ctx context.Context, opts isync.SyncOptions) (*SyncStateResult, error) {
+	result, err := a.Sync(ctx, opts)
+	state, stateErr := a.toolGroupMutationState(ctx)
+	if stateErr != nil {
+		return nil, stateErr
+	}
+	return &SyncStateResult{Result: result, Tools: state.Tools, State: state.State}, err
+}
+
 func (a *App) SyncAll(ctx context.Context, opts SyncAllOptions) (*SyncAllResult, error) {
 	discovered := opts.Discovered
 	if discovered == nil {
@@ -159,6 +169,15 @@ func (a *App) SyncAll(ctx context.Context, opts SyncAllOptions) (*SyncAllResult,
 		}
 	}
 	return &SyncAllResult{SyncResult: syncResult, ClaimedNames: claimedNames, NormalizedProviderOverrides: normalized, Failures: failures}, errors.Join(claimErr, syncErr)
+}
+
+func (a *App) SyncAllWithState(ctx context.Context, opts SyncAllOptions) (*SyncAllStateResult, error) {
+	result, err := a.SyncAll(ctx, opts)
+	state, stateErr := a.toolGroupMutationState(ctx)
+	if stateErr != nil {
+		return nil, stateErr
+	}
+	return &SyncAllStateResult{Result: result, Tools: state.Tools, State: state.State}, err
 }
 
 func bulkToolErrorFromError(name, providerName string, err error) BulkToolError {
@@ -370,6 +389,18 @@ func (a *App) ResolveProvider(ctx context.Context, priority []string) (string, e
 	return a.resolveProvider(ctx, priority)
 }
 
+func (a *App) DefaultInstallProvider(ctx context.Context) (string, error) {
+	settings, err := a.LoadSettings()
+	if err != nil {
+		return "", fmt.Errorf("loading settings: %w", err)
+	}
+	resolved, err := a.ResolveProvider(ctx, settings.EcosystemPriority("system"))
+	if err != nil {
+		return "", fmt.Errorf("no provider available; use --provider to specify one")
+	}
+	return resolved, nil
+}
+
 func (a *App) Install(ctx context.Context, name, providerName string) error {
 	if ignored, err := a.configuredToolIgnored(name); err != nil {
 		return err
@@ -448,6 +479,12 @@ func (a *App) Install(ctx context.Context, name, providerName string) error {
 		InstalledWith: installedWith,
 		Version:       sql.NullString{String: ver, Valid: ver != ""},
 		LastChecked:   time.Now(),
+	})
+}
+
+func (a *App) InstallWithState(ctx context.Context, name, providerName string) (*ToolGroupMutationState, error) {
+	return a.toolGroupMutationStateAfter(ctx, func() error {
+		return a.Install(ctx, name, providerName)
 	})
 }
 
@@ -563,20 +600,53 @@ func (a *App) Uninstall(ctx context.Context, name, providerName string) error {
 	return a.readDB().Delete(ctx, name, providerName, pkg)
 }
 
+func (a *App) UninstallWithState(ctx context.Context, name, providerName string) (*ToolGroupMutationState, error) {
+	return a.toolGroupMutationStateAfter(ctx, func() error {
+		return a.Uninstall(ctx, name, providerName)
+	})
+}
+
 // RemoveToolFromConfig removes a configured tool without calling a package
 // manager. Use for tools that are configured but not installed locally.
 func (a *App) RemoveToolFromConfig(ctx context.Context, name, providerName string) error {
 	if err := a.rejectProviderToolDelete(name); err != nil {
 		return err
 	}
-	pkg, err := a.configuredPackageForTool(ctx, name, providerName)
+	cacheProvider, pkg, err := a.configuredCacheIdentityForTool(ctx, name, providerName)
 	if err != nil {
 		return err
 	}
 	if err := a.removeToolFromConfig(name, providerName); err != nil {
 		return err
 	}
-	return a.readDB().Delete(ctx, name, providerName, pkg)
+	if err := a.readDB().Delete(ctx, name, cacheProvider, pkg); err != nil {
+		return err
+	}
+	if providerName != "" && providerName != cacheProvider {
+		return a.readDB().Delete(ctx, name, providerName, pkg)
+	}
+	return nil
+}
+
+func (a *App) RemoveToolFromConfigWithState(ctx context.Context, name, providerName string) (*ToolGroupMutationState, error) {
+	return a.toolGroupMutationStateAfter(ctx, func() error {
+		return a.RemoveToolFromConfig(ctx, name, providerName)
+	})
+}
+
+func (a *App) configuredCacheIdentityForTool(ctx context.Context, name, providerName string) (string, string, error) {
+	if providerName != "" {
+		if configured, _, found, err := a.configuredOperationTool(ctx, name, providerName); err != nil {
+			return "", "", err
+		} else if found {
+			return configured.Provider, configured.EffectivePackage(), nil
+		}
+	}
+	pkg, err := a.configuredPackageForTool(ctx, name, providerName)
+	if err != nil {
+		return "", "", err
+	}
+	return providerName, pkg, nil
 }
 
 func (a *App) configuredPackageForTool(ctx context.Context, name, providerName string) (string, error) {
@@ -699,6 +769,12 @@ func (a *App) Upgrade(ctx context.Context, name, providerName string) error {
 	return nil
 }
 
+func (a *App) UpgradeWithState(ctx context.Context, name, providerName string) (*ToolGroupMutationState, error) {
+	return a.toolGroupMutationStateAfter(ctx, func() error {
+		return a.Upgrade(ctx, name, providerName)
+	})
+}
+
 func (a *App) refreshOutdatedAfterUpgrade(ctx context.Context, name, providerName, pkg, installedWith string) error {
 	lookupProvider := a.outdatedLookupProvider(&database.ToolCache{
 		Name:          name,
@@ -764,21 +840,23 @@ func (a *App) UpgradeAllDetailedWithOptions(ctx context.Context, progress func(s
 		if !t.Installed || !t.Outdated {
 			continue
 		}
+		targetVersion := toolTargetVersion(t)
+		displayName := ToolNameWithVersion(t.Name, targetVersion)
 		if progress != nil {
-			progress("upgrading " + t.Name + "…")
+			progress("upgrading " + displayName + "…")
 		}
 		tool := provider.Tool{Name: t.Name, Provider: t.Provider, Package: t.Package}
 		if tool.Package == "" {
 			tool.Package = t.Name
 		}
 		if toolProgress != nil {
-			toolProgress(isync.ProgressEvent{Tool: tool, Message: "Upgrading " + t.Name + "…"})
+			toolProgress(isync.ProgressEvent{Tool: tool, Message: "Upgrading " + t.Name + "…", TargetVersion: targetVersion})
 		}
 		if opts.SkipPrivileged {
 			if plan, planErr := a.ToolPrivilegePlan(ctx, t, provider.PrivilegeActionUpgrade); planErr == nil && plan.RequiresPrivilege() {
 				err := fmt.Errorf("requires sudo: %s", privilegeReason(plan))
 				if toolProgress != nil {
-					toolProgress(isync.ProgressEvent{Tool: tool, Message: "Admin approval needed for " + t.Name, Err: err, Done: true})
+					toolProgress(isync.ProgressEvent{Tool: tool, Message: "Admin approval needed for " + t.Name, TargetVersion: targetVersion, Err: err, Done: true})
 				}
 				result.Failures = append(result.Failures, BulkToolError{
 					Name:     t.Name,
@@ -794,18 +872,34 @@ func (a *App) UpgradeAllDetailedWithOptions(ctx context.Context, progress func(s
 		}
 		if err := a.Upgrade(ctx, t.Name, t.Provider); err != nil {
 			if toolProgress != nil {
-				toolProgress(isync.ProgressEvent{Tool: tool, Message: "Failed upgrading " + t.Name, Err: err, Done: true})
+				toolProgress(isync.ProgressEvent{Tool: tool, Message: "Failed upgrading " + t.Name, TargetVersion: targetVersion, Err: err, Done: true})
 			}
 			result.Failures = append(result.Failures, bulkToolErrorFromError(t.Name, t.Provider, err))
 			errs = append(errs, fmt.Errorf("%s: %w", t.Name, err))
 			continue
 		}
 		if toolProgress != nil {
-			toolProgress(isync.ProgressEvent{Tool: tool, Message: "Upgraded " + t.Name, Done: true})
+			toolProgress(isync.ProgressEvent{Tool: tool, Message: "Upgraded " + t.Name, TargetVersion: targetVersion, Done: true})
 		}
 		result.Upgraded = append(result.Upgraded, t.Name)
 	}
 	return result, errors.Join(errs...)
+}
+
+func toolTargetVersion(tool *database.ToolCache) string {
+	if tool == nil || !tool.LatestVersion.Valid {
+		return ""
+	}
+	return strings.TrimSpace(tool.LatestVersion.String)
+}
+
+func (a *App) UpgradeAllDetailedWithState(ctx context.Context, progress func(string), toolProgress func(isync.ProgressEvent), opts UpgradeAllOptions) (*UpgradeAllStateResult, error) {
+	result, err := a.UpgradeAllDetailedWithOptions(ctx, progress, toolProgress, opts)
+	state, stateErr := a.toolGroupMutationState(ctx)
+	if stateErr != nil {
+		return nil, stateErr
+	}
+	return &UpgradeAllStateResult{Result: result, Tools: state.Tools, State: state.State}, err
 }
 
 // ─── Config helpers ───────────────────────────────────────────────────────────
@@ -842,11 +936,43 @@ func (a *App) Groups(_ context.Context) ([]*config.GroupConfig, error) {
 	return append([]*config.GroupConfig(nil), cfg.Groups...), nil
 }
 
+type GroupSummary struct {
+	Name        string
+	Description string
+	ToolCount   int
+}
+
+func (a *App) GroupSummaries(ctx context.Context) ([]GroupSummary, error) {
+	groups, err := a.Groups(ctx)
+	if err != nil {
+		return nil, err
+	}
+	summaries := make([]GroupSummary, 0, len(groups))
+	for _, group := range groups {
+		summaries = append(summaries, GroupSummary{
+			Name:        group.GroupName(),
+			Description: group.Description,
+			ToolCount:   len(group.Tools),
+		})
+	}
+	return summaries, nil
+}
+
 // ─── Add ──────────────────────────────────────────────────────────────────────
+
+type AddToolOptions struct {
+	ProviderName string
+	Package      string
+	Name         string
+	GroupName    string
+	InstallWith  string
+	Options      map[string]string
+	AssignHosts  []string
+}
 
 // Add appends a tool to the named group (empty = current host group).
 // For brew tap packages like "hashicorp/tap/terraform", the tap is auto-added.
-func (a *App) Add(ctx context.Context, providerName, pkg, name, groupName, installWith string) error {
+func (a *App) Add(ctx context.Context, providerName, pkg, name, groupName, installWith string, optionMaps ...map[string]string) error {
 	if providerName == "" {
 		return fmt.Errorf("provider is required")
 	}
@@ -884,6 +1010,9 @@ func (a *App) Add(ctx context.Context, providerName, pkg, name, groupName, insta
 		spec.Provider = providerName
 		spec.Package = pkg
 		spec.InstallWith = installWith
+		if options, ok := firstOptionMap(optionMaps); ok {
+			spec.Options = cloneOptionMap(options)
+		}
 		cfg.Tools[name] = spec
 		if !containsToolMembership(gc.Tools, name) {
 			gc.Tools = append(gc.Tools, config.ToolEntry{Name: name})
@@ -905,6 +1034,162 @@ func (a *App) Add(ctx context.Context, providerName, pkg, name, groupName, insta
 	// the claim immediately without waiting for the next full loadTools cycle.
 	// No-op if the row doesn't exist yet.
 	return a.readDB().MarkTracked(ctx, name, providerName, pkg)
+}
+
+func (a *App) AddWithState(ctx context.Context, opts AddToolOptions) (*ToolGroupMutationState, error) {
+	name, pkg := addToolNameAndPackage(opts)
+	if err := a.Add(ctx, opts.ProviderName, pkg, name, opts.GroupName, opts.InstallWith, optionMapArg(opts.Options)...); err != nil {
+		return nil, err
+	}
+	return a.toolGroupStateAfterHostAssignment(ctx, opts.GroupName, opts.AssignHosts)
+}
+
+func (a *App) InstallAndAddWithState(ctx context.Context, opts AddToolOptions) (*ToolGroupMutationState, error) {
+	name, pkg := addToolNameAndPackage(opts)
+	if err := a.installForAdd(ctx, opts); err != nil {
+		return nil, err
+	}
+	if err := a.Add(ctx, opts.ProviderName, pkg, name, opts.GroupName, opts.InstallWith, optionMapArg(opts.Options)...); err != nil {
+		return nil, fmt.Errorf("installed %s but config save failed: %w", name, err)
+	}
+	hostErr := a.assignToolGroupHosts(opts.GroupName, opts.AssignHosts)
+	state, stateErr := a.toolGroupMutationState(ctx)
+	if stateErr != nil {
+		return nil, errors.Join(hostErr, stateErr)
+	}
+	if hostErr != nil {
+		return state, fmt.Errorf("installed %s and added to config but host update failed: %w", name, hostErr)
+	}
+	return state, nil
+}
+
+func (a *App) installForAdd(ctx context.Context, opts AddToolOptions) error {
+	name, pkg := addToolNameAndPackage(opts)
+	if opts.InstallWith == "" && opts.Options == nil && pkg == name {
+		return a.Install(ctx, name, opts.ProviderName)
+	}
+	providerName := opts.ProviderName
+	if ignored, err := a.configuredToolIgnored(name); err != nil {
+		return err
+	} else if ignored {
+		return fmt.Errorf("tool %q is ignored", name)
+	}
+	if providerName == "" {
+		settings, _ := a.LoadSettings()
+		resolved, err := a.resolveProvider(ctx, settings.EcosystemPriority("system"))
+		if err != nil {
+			return err
+		}
+		providerName = resolved
+	}
+	if !a.knownProvider(providerName) {
+		return fmt.Errorf("unknown provider %q", providerName)
+	}
+	if err := a.validateInstallWith(providerName, opts.InstallWith); err != nil {
+		return err
+	}
+	prov, opProvider, manager, ok := a.lifecycleProvider(providerName, opts.InstallWith)
+	if !ok {
+		return fmt.Errorf("unknown provider %q", providerName)
+	}
+	avail, err := prov.Available(ctx)
+	if err != nil {
+		return err
+	}
+	if !avail {
+		return fmt.Errorf("provider %q is not available on this system", opProvider)
+	}
+	tool := provider.Tool{
+		Name:     name,
+		Provider: opProvider,
+		Package:  pkg,
+		Options:  cloneOptionMap(opts.Options),
+	}
+	if err := installWithProvider(ctx, prov, tool, manager); err != nil {
+		a.recordPrivilegeError(ctx, name, providerName, pkg, err)
+		return err
+	}
+	ver, err := verifyInstalledAfterInstall(ctx, prov, tool, manager, opProvider)
+	if err != nil {
+		return err
+	}
+	installedWith := installedWithForOperation(ctx, prov, opProvider, manager)
+	return a.readDB().Upsert(ctx, &database.ToolCache{
+		Name:          name,
+		Provider:      providerName,
+		Package:       pkg,
+		Installed:     true,
+		InstalledWith: installedWith,
+		Version:       sql.NullString{String: ver, Valid: ver != ""},
+		LastChecked:   time.Now(),
+	})
+}
+
+func addToolNameAndPackage(opts AddToolOptions) (string, string) {
+	name := opts.Name
+	if name == "" {
+		name = opts.Package
+	}
+	pkg := opts.Package
+	if pkg == "" {
+		pkg = name
+	}
+	return name, pkg
+}
+
+func optionMapArg(options map[string]string) []map[string]string {
+	if options == nil {
+		return nil
+	}
+	return []map[string]string{options}
+}
+
+func firstOptionMap(optionMaps []map[string]string) (map[string]string, bool) {
+	if len(optionMaps) == 0 {
+		return nil, false
+	}
+	return optionMaps[0], true
+}
+
+func cloneOptionMap(options map[string]string) map[string]string {
+	if len(options) == 0 {
+		return nil
+	}
+	return maps.Clone(options)
+}
+
+func (a *App) toolGroupStateAfterHostAssignment(ctx context.Context, groupName string, hosts []string) (*ToolGroupMutationState, error) {
+	err := a.assignToolGroupHosts(groupName, hosts)
+	state, stateErr := a.toolGroupMutationState(ctx)
+	if stateErr != nil {
+		return nil, errors.Join(err, stateErr)
+	}
+	return state, err
+}
+
+func (a *App) assignToolGroupHosts(groupName string, hosts []string) error {
+	groupName = strings.TrimSpace(groupName)
+	if groupName == "" {
+		return nil
+	}
+	targets := make([]string, 0, len(hosts)+1)
+	targets = append(targets, currentMachineGroupName())
+	targets = append(targets, hosts...)
+	seen := make(map[string]struct{}, len(targets))
+	for _, host := range targets {
+		host = strings.TrimSpace(machineGroupName(host))
+		if host == "" {
+			continue
+		}
+		if _, ok := seen[host]; ok {
+			continue
+		}
+		seen[host] = struct{}{}
+		if err := a.AddGroupToHost(host, groupName); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *App) providerSupportsTaps(providerName, installWith string) bool {
@@ -930,11 +1215,11 @@ func (a *App) providerSupportsTaps(providerName, installWith string) bool {
 // currentHostname returns the machine's hostname for host matching.
 // OMNI_HOSTNAME overrides os.Hostname() — useful for tests and containers.
 func currentHostname() string {
-	if h := os.Getenv("OMNI_HOSTNAME"); h != "" {
+	if h := strings.TrimSpace(os.Getenv("OMNI_HOSTNAME")); h != "" {
 		return h
 	}
 	h, _ := os.Hostname()
-	return h
+	return strings.TrimSpace(h)
 }
 
 // shortHostname returns the first label of hostname (strips domain suffix).

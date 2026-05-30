@@ -28,7 +28,7 @@ func newDeleteCmd(state *rootState) *cobra.Command {
 			if err := state.app.Uninstall(cmd.Context(), name, providerName); err != nil {
 				return err
 			}
-			fmt.Printf("✓ deleted %s (%s)\n", name, providerName)
+			fmt.Fprintf(cmdOut(cmd), "✓ deleted %s (%s)\n", name, providerName)
 			return nil
 		},
 	}

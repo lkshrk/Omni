@@ -27,24 +27,20 @@ adds them to your config file. Tools already present in the config are skipped.
 			}
 
 			if len(result.Added) == 0 && len(result.Skipped) == 0 {
-				fmt.Println("No installed tools found.")
+				fmt.Fprintln(cmdOut(cmd), "No installed tools found.")
 				return nil
 			}
 
-			action := "Imported"
-			if opts.DryRun {
-				action = "Would import"
-			}
-			fmt.Printf("%s %d tool(s):\n", action, len(result.Added))
+			fmt.Fprintln(cmdOut(cmd), app.ImportCommandSummaryText(result, opts.DryRun))
 			for _, t := range result.Added {
 				if t.Version != "" {
-					fmt.Printf("  + %-30s (%s) %s\n", t.Name, t.Provider, t.Version)
+					fmt.Fprintf(cmdOut(cmd), "  + %-30s (%s) %s\n", t.Name, t.Provider, t.Version)
 				} else {
-					fmt.Printf("  + %-30s (%s)\n", t.Name, t.Provider)
+					fmt.Fprintf(cmdOut(cmd), "  + %-30s (%s)\n", t.Name, t.Provider)
 				}
 			}
-			if len(result.Skipped) > 0 {
-				fmt.Printf("Skipped %d already configured tool(s)\n", len(result.Skipped))
+			if skipped := app.ImportSkippedSummaryText(result); skipped != "" {
+				fmt.Fprintln(cmdOut(cmd), skipped)
 			}
 			if !opts.DryRun && len(result.Added) > 0 && !cmd.Flags().Changed("group") && stdinIsTerminal() {
 				names := make([]string, len(result.Added))

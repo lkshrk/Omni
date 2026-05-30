@@ -6,8 +6,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-
-	"github.com/lkshrk/omni/internal/config"
 )
 
 func newHostsCmd(state *rootState) *cobra.Command {
@@ -34,20 +32,20 @@ func newHostsListCmd(state *rootState) *cobra.Command {
 		Use:   "list",
 		Short: "List host group assignments",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			info, err := state.app.HostStatus()
+			hosts, err := state.app.HostSummaries()
 			if err != nil {
 				return err
 			}
-			if len(info.Hosts) == 0 {
+			if len(hosts) == 0 {
 				fmt.Fprintln(cmd.OutOrStdout(), "No hosts defined. Use 'omni hosts ensure <hostname>' to create one.")
 				return nil
 			}
-			for _, host := range sortedHostNames(info.Hosts) {
+			for _, host := range hosts {
 				marker := "  "
-				if host == info.Active {
+				if host.Active {
 					marker = "* "
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "%s%-20s %s\n", marker, host, groupList(info.Hosts[host].Groups))
+				fmt.Fprintf(cmd.OutOrStdout(), "%s%-20s %s\n", marker, host.Name, groupList(host.Groups))
 			}
 			return nil
 		},
@@ -180,13 +178,4 @@ func groupList(groups []string) string {
 	sorted := append([]string(nil), groups...)
 	sort.Strings(sorted)
 	return "[" + strings.Join(sorted, ", ") + "]"
-}
-
-func sortedHostNames(hosts map[string]config.HostAssignment) []string {
-	names := make([]string, 0, len(hosts))
-	for name := range hosts {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
 }

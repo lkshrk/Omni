@@ -8,7 +8,6 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
 )
 
@@ -74,17 +73,14 @@ func (m *Model) acceptFilePickerPath(path string) []tea.Cmd {
 		startOp(m, "Saving…")
 		cmds = append(cmds, m.spinner.Tick, m.doSetupDotsRepo(path))
 	} else {
-		settings := m.settings
-		settings.DotsRepo = tildePath(path)
-		settings.DotsDisabled = config.BoolPtr(false)
+		repo := tildePath(path)
 		if m.promptForStowInstall(stowInstallSaveSettingsSync) {
-			m.stowInstallSettings = settings
+			m.stowInstallDotsRepo = repo
 			return cmds
 		}
-		m.settings = settings
 		m.dotsLoaded = false
 		m.beginDotsOperation("Syncing dots…")
-		cmds = append(cmds, m.spinner.Tick, m.doSaveSettingsAndDotsSync(settings))
+		cmds = append(cmds, m.spinner.Tick, m.doSaveDotsRepoAndSync(repo))
 	}
 	return cmds
 }

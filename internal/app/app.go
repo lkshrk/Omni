@@ -120,6 +120,18 @@ type SyncAllResult struct {
 	Failures                    []BulkToolError
 }
 
+type SyncStateResult struct {
+	Result *isync.SyncResult
+	Tools  []*database.ToolCache
+	State  *ToolGroupState
+}
+
+type SyncAllStateResult struct {
+	Result *SyncAllResult
+	Tools  []*database.ToolCache
+	State  *ToolGroupState
+}
+
 type BulkToolError struct {
 	Name        string
 	Provider    string
@@ -130,6 +142,12 @@ type BulkToolError struct {
 type UpgradeAllResult struct {
 	Upgraded []string
 	Failures []BulkToolError
+}
+
+type UpgradeAllStateResult struct {
+	Result *UpgradeAllResult
+	Tools  []*database.ToolCache
+	State  *ToolGroupState
 }
 
 type UpgradeAllOptions struct {
@@ -589,6 +607,11 @@ func machineGroupName(hostname string) string {
 
 func currentMachineGroupName() string {
 	return machineGroupName(currentHostname())
+}
+
+// CurrentMachineGroupName returns the current machine's config group name.
+func CurrentMachineGroupName() string {
+	return currentMachineGroupName()
 }
 
 func compatibilityGroupName(name string) string {

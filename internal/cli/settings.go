@@ -3,14 +3,11 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/provider"
 )
 
 func newSettingsCmd(state *rootState) *cobra.Command {
@@ -82,54 +79,8 @@ func newSettingsSetCmd(state *rootState) *cobra.Command {
 		Short: "Set an omni setting",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			key, value := app.CanonicalSettingKey(args[0]), args[1]
-			settings, err := state.app.LoadSettings()
+			key, err := state.app.SetSetting(cmd.Context(), args[0], args[1])
 			if err != nil {
-				return err
-			}
-			switch key {
-			case "auto_import":
-				parsed, err := parseSettingBool(key, value)
-				if err != nil {
-					return err
-				}
-				settings.AutoImport = parsed
-			case "node.manager":
-				manager, err := parseSettingManager(state.app, provider.EcosystemNode, value)
-				if err != nil {
-					return err
-				}
-				settings.SetEcosystemManager(provider.EcosystemNode, manager)
-			case "python.manager":
-				manager, err := parseSettingManager(state.app, provider.EcosystemPython, value)
-				if err != nil {
-					return err
-				}
-				settings.SetEcosystemManager(provider.EcosystemPython, manager)
-			case "system.priority":
-				priority, err := parseSystemPriority(state.app, value)
-				if err != nil {
-					return err
-				}
-				settings.SetEcosystemPriority(provider.EcosystemSystem, priority)
-			case "dots_repo":
-				settings.DotsRepo = value
-			case "dots_git.auto_commit":
-				parsed, err := parseSettingBool(key, value)
-				if err != nil {
-					return err
-				}
-				settings.DotsGit.AutoCommit = parsed
-			case "dots_git.auto_push":
-				parsed, err := parseSettingBool(key, value)
-				if err != nil {
-					return err
-				}
-				settings.DotsGit.AutoPush = parsed
-			default:
-				return fmt.Errorf("unknown setting %q", args[0])
-			}
-			if err := state.app.SaveSettings(cmd.Context(), settings); err != nil {
 				return err
 			}
 			values, err := state.app.QuerySettings(key)
@@ -156,21 +107,11 @@ func newSettingsDisableProviderCmd(state *rootState) *cobra.Command {
 		Short: "Disable an ecosystem provider on this host",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			providerName := args[0]
-			if err := validateEcosystemProvider(state.app, providerName); err != nil {
-				return err
-			}
-			settings, err := state.app.LoadSettings()
+			disabled, err := state.app.DisableProvider(cmd.Context(), args[0])
 			if err != nil {
 				return err
 			}
-			if !slices.Contains(settings.DisabledProviders, providerName) {
-				settings.DisabledProviders = append(settings.DisabledProviders, providerName)
-			}
-			if err := state.app.SaveDisabledProviders(cmd.Context(), settings.DisabledProviders); err != nil {
-				return err
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "disabled_providers = %s\n", displayList(settings.DisabledProviders))
+			fmt.Fprintf(cmd.OutOrStdout(), "disabled_providers = %s\n", displayList(disabled))
 			return nil
 		},
 	}
@@ -182,21 +123,8 @@ func newSettingsEnableProviderCmd(state *rootState) *cobra.Command {
 		Short: "Enable an ecosystem provider on this host",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			providerName := args[0]
-			if err := validateEcosystemProvider(state.app, providerName); err != nil {
-				return err
-			}
-			settings, err := state.app.LoadSettings()
+			enabled, err := state.app.EnableProvider(cmd.Context(), args[0])
 			if err != nil {
-				return err
-			}
-			var enabled []string
-			for _, disabled := range settings.DisabledProviders {
-				if disabled != providerName {
-					enabled = append(enabled, disabled)
-				}
-			}
-			if err := state.app.SaveDisabledProviders(cmd.Context(), enabled); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "disabled_providers = %s\n", displayList(enabled))
@@ -256,19 +184,8 @@ func singleArg(args []string) string {
 }
 
 func settingsKeys(values map[string]any) []string {
-	order := []string{
-		"auto_import",
-		provider.EcosystemNode + ".manager",
-		provider.EcosystemPython + ".manager",
-		provider.EcosystemSystem + ".priority",
-		"dots_repo",
-		"dots_disabled",
-		"dots_git.auto_commit",
-		"dots_git.auto_push",
-		"disabled_providers",
-	}
 	var keys []string
-	for _, key := range order {
+	for _, key := range app.SettingKeys() {
 		if _, ok := values[key]; ok {
 			keys = append(keys, key)
 		}
@@ -309,50 +226,4 @@ func displayBoolPtr(value *bool) string {
 		return "true"
 	}
 	return "false"
-}
-
-func parseSettingBool(key, value string) (bool, error) {
-	parsed, err := strconv.ParseBool(value)
-	if err != nil {
-		return false, fmt.Errorf("%s must be true or false", key)
-	}
-	return parsed, nil
-}
-
-func parseSettingManager(a *app.App, ecosystem, value string) (string, error) {
-	if value == "auto" || value == "default" {
-		return "", nil
-	}
-	if a.IsManagerForEcosystem(ecosystem, value) {
-		return value, nil
-	}
-	return "", fmt.Errorf("%q is not a manager for ecosystem %q (supported: %s)", value, ecosystem, strings.Join(a.ManagerNames(ecosystem), ", "))
-}
-
-func parseSystemPriority(a *app.App, value string) ([]string, error) {
-	raw := strings.Split(value, ",")
-	priority := make([]string, 0, len(raw))
-	seen := make(map[string]struct{}, len(raw))
-	for _, part := range raw {
-		name := strings.TrimSpace(part)
-		if name == "" {
-			return nil, fmt.Errorf("system.priority contains an empty provider")
-		}
-		if _, ok := seen[name]; ok {
-			return nil, fmt.Errorf("system.priority contains duplicate provider %q", name)
-		}
-		if !a.IsConcreteProviderForEcosystem(provider.EcosystemSystem, name) {
-			return nil, fmt.Errorf("%q is not a concrete provider for ecosystem %q (supported: %s)", name, provider.EcosystemSystem, strings.Join(a.ConcreteProviderNamesForEcosystem(provider.EcosystemSystem), ", "))
-		}
-		seen[name] = struct{}{}
-		priority = append(priority, name)
-	}
-	return priority, nil
-}
-
-func validateEcosystemProvider(a *app.App, name string) error {
-	if a.IsEcosystemProvider(name) {
-		return nil
-	}
-	return fmt.Errorf("%q is not an ecosystem provider (supported: %s)", name, strings.Join(a.EcosystemProviderNames(), ", "))
 }

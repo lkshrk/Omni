@@ -34,24 +34,39 @@ func (p *Provider) Available(ctx context.Context) (bool, error) {
 
 func (p *Provider) Install(ctx context.Context, tool provider.Tool) error {
 	pkg := tool.EffectivePackage()
-	cmd, args := provider.PrivilegedCommand("dnf", "install", "-y", pkg)
+	rawCmd, rawArgs, _ := p.PrivilegeCommand(provider.PrivilegeActionInstall, tool)
+	cmd, args := provider.PrivilegedCommand(rawCmd, rawArgs...)
 	return provider.RunCmd(ctx, p.exec, "dnf install "+pkg, cmd, args...)
 }
 
 func (p *Provider) Uninstall(ctx context.Context, tool provider.Tool) error {
 	pkg := tool.EffectivePackage()
-	cmd, args := provider.PrivilegedCommand("dnf", "remove", "-y", pkg)
+	rawCmd, rawArgs, _ := p.PrivilegeCommand(provider.PrivilegeActionUninstall, tool)
+	cmd, args := provider.PrivilegedCommand(rawCmd, rawArgs...)
 	return provider.RunCmd(ctx, p.exec, "dnf remove "+pkg, cmd, args...)
 }
 
 func (p *Provider) Upgrade(ctx context.Context, tool provider.Tool) error {
 	pkg := tool.EffectivePackage()
-	cmd, args := provider.PrivilegedCommand("dnf", "upgrade", "-y", pkg)
+	rawCmd, rawArgs, _ := p.PrivilegeCommand(provider.PrivilegeActionUpgrade, tool)
+	cmd, args := provider.PrivilegedCommand(rawCmd, rawArgs...)
 	return provider.RunCmd(ctx, p.exec, "dnf upgrade "+pkg, cmd, args...)
 }
 
 func (p *Provider) PrivilegePlan(_ context.Context, action provider.PrivilegeAction, tool provider.Tool) (provider.PrivilegePlan, error) {
 	return provider.SystemPrivilegePlan(p.Name(), action, tool), nil
+}
+
+func (p *Provider) PrivilegeCommand(action provider.PrivilegeAction, tool provider.Tool) (string, []string, bool) {
+	pkg := tool.EffectivePackage()
+	switch action {
+	case provider.PrivilegeActionInstall:
+		return "dnf", []string{"install", "-y", pkg}, true
+	case provider.PrivilegeActionUpgrade:
+		return "dnf", []string{"upgrade", "-y", pkg}, true
+	default:
+		return "dnf", []string{"remove", "-y", pkg}, true
+	}
 }
 
 func (p *Provider) IsInstalled(ctx context.Context, tool provider.Tool) (bool, string, error) {
@@ -91,29 +106,13 @@ func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) 
 	return m, nil
 }
 
-// BulkDescribe fetches summaries for multiple tools via a single `dnf info` call.
+// BulkDescribe fetches summaries for multiple installed tools from the local RPM DB.
 // Implements provider.BulkDescriber.
 func (p *Provider) BulkDescribe(ctx context.Context, tools []provider.Tool) (map[string]string, error) {
-	if len(tools) == 0 {
-		return nil, nil
-	}
-	args := make([]string, 0, len(tools)+1)
-	args = append(args, "info")
-	for _, t := range tools {
-		args = append(args, t.EffectivePackage())
-	}
-	stdout, _, err := p.exec.Run(ctx, "dnf", args...)
-	if err != nil {
-		return nil, fmt.Errorf("dnf info: %w", err)
-	}
-	return rpm.ParseInfoSummaries(stdout), nil
+	return rpm.Summaries(ctx, p.exec, tools)
 }
 
-// Describe fetches a one-line summary via `dnf info`.
+// Describe fetches a one-line summary from the local RPM DB.
 func (p *Provider) Describe(ctx context.Context, tool provider.Tool) (string, error) {
-	stdout, _, err := p.exec.Run(ctx, "dnf", "info", tool.EffectivePackage())
-	if err != nil {
-		return "", fmt.Errorf("dnf info %s: %w", tool.EffectivePackage(), err)
-	}
-	return rpm.ParseInfoSummary(stdout), nil
+	return rpm.Summary(ctx, p.exec, tool.EffectivePackage())
 }

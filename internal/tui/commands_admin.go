@@ -3,12 +3,10 @@ package tui
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/dots"
 	"github.com/lkshrk/omni/internal/provider"
@@ -17,27 +15,21 @@ import (
 func (m *Model) doSetToolGroupMembership(name, group string, add bool) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
-		var err error
-		if add {
-			err = a.MoveToolToGroup(name, group)
-		} else {
-			err = a.RemoveToolFromGroup(name, group)
-		}
+		result, err := a.SetToolGroupMembershipWithState(ctx, name, group, add)
 		if err != nil {
 			return groupChangedMsg{err: err}
 		}
-		groupNames, toolGroups, memberships := m.reloadToolGroups()
-		tools, _ := a.ListTools(ctx, "")
 		action := "added to"
 		if !add {
 			action = "removed from"
 		}
 		return groupChangedMsg{
 			detail:          "✓ " + name + " " + action + " " + group,
-			tools:           tools,
-			toolGroups:      toolGroups,
-			toolMemberships: memberships,
-			groupNames:      groupNames,
+			tools:           result.Tools,
+			toolGroups:      result.State.ToolGroups,
+			toolMemberships: result.State.ToolMemberships,
+			groupNames:      result.State.GroupNames,
+			info:            result.State.HostInfo,
 		}
 	}
 }
@@ -45,41 +37,17 @@ func (m *Model) doSetToolGroupMembership(name, group string, add bool) tea.Cmd {
 func (m *Model) doSetToolGroupMemberships(name string, before, after, createdGroups []string, activeHost string) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
-		for _, group := range createdGroups {
-			if err := a.CreateGroup(group); err != nil {
-				return groupChangedMsg{err: err}
-			}
-		}
-		beforeSet := stringSet(before)
-		afterSet := stringSet(after)
-		if err := ensureMembershipGroupsOnHost(a, activeHost, afterSet); err != nil {
+		result, err := a.SetToolGroupsWithState(ctx, name, after, createdGroups, activeHost)
+		if err != nil {
 			return groupChangedMsg{err: err}
 		}
-		for group := range beforeSet {
-			if !afterSet[group] {
-				if err := a.RemoveToolFromGroup(name, group); err != nil {
-					return groupChangedMsg{err: err}
-				}
-			}
-		}
-		for group := range afterSet {
-			if !beforeSet[group] {
-				if err := a.MoveToolToGroup(name, group); err != nil {
-					return groupChangedMsg{err: err}
-				}
-			}
-		}
-		groups, _ := a.Groups(ctx)
-		memberships, _ := a.ToolMembershipMap(ctx)
-		info, _ := a.HostStatus()
-		tools, _ := a.ListTools(ctx, "")
 		return groupChangedMsg{
 			detail:          groupMoveDetail(name, after),
-			tools:           tools,
-			toolGroups:      compactToolGroupMapForHost(memberships, info),
-			toolMemberships: memberships,
-			groupNames:      buildGroupNames(groups),
-			info:            info,
+			tools:           result.Tools,
+			toolGroups:      result.State.ToolGroups,
+			toolMemberships: result.State.ToolMemberships,
+			groupNames:      result.State.GroupNames,
+			info:            result.State.HostInfo,
 		}
 	}
 }
@@ -88,41 +56,21 @@ func (m *Model) doSetDotGroupMemberships(name string, before, after, createdGrou
 	a, ctx := m.app, m.ctx
 	_, gen := m.currentDotsOperation()
 	return func() tea.Msg {
-		for _, group := range createdGroups {
-			if err := a.CreateGroup(group); err != nil {
-				return dotsLoadedMsg{gen: gen, err: err}
-			}
-		}
-		beforeSet := stringSet(before)
-		afterSet := stringSet(after)
-		if err := ensureMembershipGroupsOnHost(a, activeHost, afterSet); err != nil {
-			return dotsLoadedMsg{gen: gen, err: err}
-		}
-		for group := range afterSet {
-			if !beforeSet[group] {
-				if err := a.MoveDotToGroup(name, group); err != nil {
-					return dotsLoadedMsg{gen: gen, err: err}
-				}
-			}
-		}
-		for group := range beforeSet {
-			if !afterSet[group] {
-				if err := a.RemoveDotFromGroup(name, group); err != nil {
-					return dotsLoadedMsg{gen: gen, err: err}
-				}
-			}
-		}
-		result, err := a.DiscoverDotsStatus(ctx)
+		change, err := a.SetDotGroupsWithState(ctx, name, after, createdGroups, activeHost)
 		if err != nil {
 			return dotsLoadedMsg{gen: gen, err: err}
 		}
-		return dotsLoadedMsg{
+		msg := dotsLoadedMsg{
 			gen:            gen,
-			entries:        result.Entries,
-			gitStatus:      result.GitStatus,
-			dotMemberships: loadDotMemberships(a, ctx),
+			dotMemberships: change.DotMemberships,
 			detail:         groupMoveDetail(name, after),
 		}
+		if change.DotsState != nil {
+			msg.entries = change.DotsState.Entries
+			msg.gitStatus = change.DotsState.GitStatus
+			msg.dotMemberships = change.DotsState.DotMemberships
+		}
+		return msg
 	}
 }
 
@@ -133,70 +81,22 @@ func groupMoveDetail(name string, groups []string) string {
 	return "✓ updated group for " + name
 }
 
-func ensureMembershipGroupsOnHost(a *app.App, activeHost string, groups map[string]bool) error {
-	if activeHost == "" {
-		return nil
-	}
-	for group := range groups {
-		if group == "" {
-			continue
-		}
-		if err := a.AddGroupToHost(activeHost, group); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (m *Model) doSetGroupTools(group string, membership, originalMembership, ignores, originalIgnores map[string]bool) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
-		changed := 0
-		for name, desired := range membership {
-			if originalMembership[name] == desired {
-				continue
-			}
-			var err error
-			if desired {
-				err = a.MoveToolToGroup(name, group)
-			} else {
-				err = a.RemoveToolFromGroup(name, group)
-			}
-			if err != nil {
-				return groupToolsChangedMsg{err: err}
-			}
-			changed++
+		result, err := a.SetGroupToolsWithState(ctx, group, membership, originalMembership, ignores, originalIgnores)
+		if err != nil {
+			return groupToolsChangedMsg{err: err}
 		}
-		for name, desired := range ignores {
-			if originalIgnores[name] == desired {
-				continue
-			}
-			if err := a.SetGroupIgnore(group, name, desired); err != nil {
-				return groupToolsChangedMsg{err: err}
-			}
-			changed++
-		}
-		groups, _ := a.Groups(ctx)
-		memberships, _ := a.ToolMembershipMap(ctx)
-		info, _ := a.HostStatus()
-		tools, _ := a.ListTools(ctx, "")
-		var hostIgnore []string
-		if info != nil && info.Active != "" {
-			if prof, ok := info.Hosts[info.Active]; ok {
-				hostIgnore = prof.Ignore
-			}
-		}
-		labels := buildIgnoreLabels(a.ConfigPath, groups, hostIgnore)
-		toolIgnores, groupIgnores, _ := buildToolScopeState(a.ConfigPath, groups)
 		return groupToolsChangedMsg{
-			detail:          fmt.Sprintf("✓ updated %d tool settings for %s", changed, group),
-			tools:           tools,
-			toolGroups:      compactToolGroupMapForHost(memberships, info),
-			toolMemberships: memberships,
-			groupNames:      buildGroupNames(groups),
-			ignoreLabels:    labels,
-			toolIgnoreSet:   toolIgnores,
-			groupIgnoreSet:  groupIgnores,
+			detail:          fmt.Sprintf("✓ updated %d tool settings for %s", result.Changed, group),
+			tools:           result.Tools,
+			toolGroups:      result.State.ToolGroups,
+			toolMemberships: result.State.ToolMemberships,
+			groupNames:      result.State.GroupNames,
+			ignoreLabels:    result.ScopeDisplay.IgnoreLabels,
+			toolIgnoreSet:   result.ScopeDisplay.ToolIgnores,
+			groupIgnoreSet:  result.ScopeDisplay.GroupIgnores,
 		}
 	}
 }
@@ -204,86 +104,55 @@ func (m *Model) doSetGroupTools(group string, membership, originalMembership, ig
 func (m *Model) doSetGroupDots(group string, membership, originalMembership map[string]bool) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
-		changed := 0
-		for name, desired := range membership {
-			if originalMembership[name] == desired {
-				continue
-			}
-			var err error
-			if desired {
-				err = a.MoveDotToGroup(name, group)
-			} else {
-				err = a.RemoveDotFromGroup(name, group)
-			}
-			if err != nil {
-				return groupDotsChangedMsg{err: err}
-			}
-			changed++
+		change, err := a.SetGroupDotsWithState(ctx, group, membership, originalMembership)
+		if err != nil {
+			return groupDotsChangedMsg{err: err}
 		}
-		memberships := loadDotMemberships(a, ctx)
+		memberships := change.DotMemberships
 		msg := groupDotsChangedMsg{
-			detail:         fmt.Sprintf("✓ updated %d dotfiles for %s", changed, group),
+			detail:         fmt.Sprintf("✓ updated %d dotfiles for %s", change.Changed, group),
 			dotMemberships: memberships,
 		}
-		settings, _ := a.LoadSettings()
-		if settings.DotsRepo == "" {
-			return msg
+		if change.DotsState != nil {
+			msg.entries = change.DotsState.Entries
+			msg.gitStatus = change.DotsState.GitStatus
+			msg.dotMemberships = change.DotsState.DotMemberships
 		}
-		result, err := a.DiscoverDotsStatus(ctx)
-		if err != nil {
-			return groupDotsChangedMsg{err: err, dotMemberships: memberships}
-		}
-		msg.entries = result.Entries
-		msg.gitStatus = result.GitStatus
 		return msg
 	}
 }
 
-func stringSet(values []string) map[string]bool {
-	set := make(map[string]bool, len(values))
-	for _, value := range values {
-		set[value] = true
-	}
-	return set
-}
-
-// doCreateGroup creates a new empty named group in config.
 func (m *Model) doCreateGroup(name string) tea.Cmd {
-	a := m.app
+	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
-		if err := a.CreateGroup(name); err != nil {
+		state, err := a.CreateGroupWithState(ctx, name)
+		if err != nil {
 			return createGroupDoneMsg{err: err, name: name}
 		}
-		if err := a.AddGroupToHost(shortHostname(), name); err != nil {
-			return createGroupDoneMsg{err: err, name: name}
-		}
-		groupNames, toolGroups, memberships, info := m.reloadToolContext()
 		return createGroupDoneMsg{
 			name:            name,
-			groupNames:      groupNames,
-			toolGroups:      toolGroups,
-			toolMemberships: memberships,
-			hostInfo:        info,
+			groupNames:      state.GroupNames,
+			toolGroups:      state.ToolGroups,
+			toolMemberships: state.ToolMemberships,
+			hostInfo:        state.HostInfo,
 		}
 	}
 }
 
-// doSaveSettings persists the current settings to the config file.
-func (m *Model) doSaveSettings() tea.Cmd {
+func (m *Model) doSaveSettingsChange(change app.SettingsChange) tea.Cmd {
 	m.settingsSaveGen++
 	gen := m.settingsSaveGen
-	snapshot := cloneSettingsSnapshot(m.settings)
 	if m.settingsSaveRunning {
 		m.settingsSaveQueued = true
-		m.settingsSaveQueuedSnapshot = snapshot
+		m.settingsSaveQueuedChanges = append(m.settingsSaveQueuedChanges, change)
 		m.settingsSaveQueuedGen = gen
 		return nil
 	}
-	return m.startSettingsSave(snapshot, gen)
+	return m.startSettingsChangeSave([]app.SettingsChange{change}, gen)
 }
 
-func (m *Model) appendSaveSettingsCmd(cmds *[]tea.Cmd) {
-	if cmd := m.doSaveSettings(); cmd != nil {
+func (m *Model) appendSaveSettingsChangeCmd(cmds *[]tea.Cmd, change app.SettingsChange) {
+	if cmd := m.doSaveSettingsChange(change); cmd != nil {
 		*cmds = append(*cmds, cmd)
 	}
 }
@@ -331,167 +200,152 @@ func (m *Model) doRunDoctor() tea.Cmd {
 	}
 }
 
-func (m *Model) startSettingsSave(settings config.Settings, gen int) tea.Cmd {
+func (m *Model) startSettingsChangeSave(changes []app.SettingsChange, gen int) tea.Cmd {
 	m.settingsSaveRunning = true
 	m.settingsSaveInFlightGen = gen
 	a, ctx := m.app, m.ctx
+	changes = append([]app.SettingsChange(nil), changes...)
 	return func() tea.Msg {
-		return settingsSavedMsg{gen: gen, err: a.SaveSettings(ctx, settings)}
-	}
-}
-
-func cloneSettingsSnapshot(in config.Settings) config.Settings {
-	out := in
-	if in.Ecosystems != nil {
-		out.Ecosystems = make(map[string]config.EcosystemSettings, len(in.Ecosystems))
-		for name, eco := range in.Ecosystems {
-			eco.Priority = append([]string(nil), eco.Priority...)
-			out.Ecosystems[name] = eco
+		settings, _, err := a.SaveSettingsChanges(ctx, changes...)
+		if err != nil {
+			return settingsSavedMsg{gen: gen, err: err}
 		}
+		return settingsSavedMsg{gen: gen, settings: settings, hasSettings: true}
 	}
-	if in.DotsDisabled != nil {
-		dotsDisabled := *in.DotsDisabled
-		out.DotsDisabled = &dotsDisabled
-	}
-	if in.DisabledProviders != nil {
-		out.DisabledProviders = append([]string{}, in.DisabledProviders...)
-	}
-	return out
 }
 
-func (m *Model) doSaveSettingsAndDotsSync(settings config.Settings) tea.Cmd {
+func (m *Model) doSaveDotsRepoAndSync(repo string) tea.Cmd {
 	a := m.app
 	ctx, gen := m.currentDotsOperation()
-	snapshot := cloneSettingsSnapshot(settings)
 	return func() tea.Msg {
-		if err := a.SaveSettings(ctx, snapshot); err != nil {
-			return dotsSyncedMsg{gen: gen, err: fmt.Errorf("save dots repo: %w", err)}
+		result, err := a.SaveDotsRepoAndSync(ctx, repo, dots.SyncOptions{})
+		entries, gitStatus, memberships := dotsSnapshotFromState(result)
+		msg := dotsSyncedMsg{gen: gen, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: err}
+		if result != nil && result.HasSettings {
+			msg.settings = result.Settings
+			msg.hasSettings = true
 		}
-		_, syncErr := a.DotsSyncContext(ctx, dots.SyncOptions{})
-		result, err := a.DiscoverDotsStatus(ctx)
-		if err != nil {
-			if result != nil {
-				return dotsSyncedMsg{gen: gen, entries: result.Entries, gitStatus: result.GitStatus, dotMemberships: loadDotMemberships(a, ctx), err: combineDotsErrors(syncErr, err)}
-			}
-			return dotsSyncedMsg{gen: gen, err: combineDotsErrors(syncErr, err)}
-		}
-		return dotsSyncedMsg{gen: gen, entries: result.Entries, gitStatus: result.GitStatus, dotMemberships: loadDotMemberships(a, ctx), err: syncErr}
+		return msg
 	}
 }
 
 // selectedHostName returns the host name at the current host-assignment cursor, or "".
 func (m *Model) selectedHostName() string {
-	names := sortedHostNames(m.hostInfo)
-	if len(names) == 0 {
+	hosts := app.PrioritizedHostSummaries(m.hostInfo)
+	if len(hosts) == 0 {
 		return ""
 	}
-	if m.hostCursor >= 0 && m.hostCursor < len(names) {
-		return names[m.hostCursor]
+	if m.hostCursor >= 0 && m.hostCursor < len(hosts) {
+		return hosts[m.hostCursor].Name
 	}
 	return ""
 }
 
-// doAddGroupToHost appends a group to a host and reloads host info.
 func (m *Model) doAddGroupToHost(host, group string) tea.Cmd {
-	a := m.app
+	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
-		if err := a.AddGroupToHost(host, group); err != nil {
+		state, err := a.AddGroupToHostWithState(ctx, host, group)
+		if err != nil {
 			return hostGroupChangedMsg{err: err, host: host, group: group, added: true}
 		}
-		groupNames, toolGroups, memberships, info := m.reloadToolContext()
-		return hostGroupChangedMsg{host: host, group: group, added: true, info: info, groupNames: groupNames, toolGroups: toolGroups, toolMemberships: memberships}
+		return hostGroupChangedMsg{
+			host:            host,
+			group:           group,
+			added:           true,
+			info:            state.HostInfo,
+			groupNames:      state.GroupNames,
+			toolGroups:      state.ToolGroups,
+			toolMemberships: state.ToolMemberships,
+		}
 	}
 }
 
-// doRemoveGroupFromHost removes a group from a host and reloads host info.
 func (m *Model) doRemoveGroupFromHost(host, group string) tea.Cmd {
-	a := m.app
+	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
-		if err := a.RemoveGroupFromHost(host, group); err != nil {
+		state, err := a.RemoveGroupFromHostWithState(ctx, host, group)
+		if err != nil {
 			return hostGroupChangedMsg{err: err, host: host, group: group, added: false}
 		}
-		groupNames, toolGroups, memberships, info := m.reloadToolContext()
-		return hostGroupChangedMsg{host: host, group: group, added: false, info: info, groupNames: groupNames, toolGroups: toolGroups, toolMemberships: memberships}
+		return hostGroupChangedMsg{
+			host:            host,
+			group:           group,
+			added:           false,
+			info:            state.HostInfo,
+			groupNames:      state.GroupNames,
+			toolGroups:      state.ToolGroups,
+			toolMemberships: state.ToolMemberships,
+		}
 	}
 }
 
-// doSetHostGroups persists a staged host group-assignment edit.
-func (m *Model) doSetHostGroups(host string, before, after, createdGroups []string) tea.Cmd {
-	a := m.app
+func (m *Model) doSetHostGroups(host string, _ []string, after, createdGroups []string) tea.Cmd {
+	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
-		beforeSet := make(map[string]bool, len(before))
-		afterSet := make(map[string]bool, len(after))
-		for _, group := range before {
-			beforeSet[group] = true
+		state, err := a.SetHostGroupsWithState(ctx, host, after, createdGroups)
+		if err != nil {
+			return hostGroupChangedMsg{err: err, host: host}
 		}
-		for _, group := range after {
-			afterSet[group] = true
+		return hostGroupChangedMsg{
+			host:            host,
+			detail:          "✓ groups updated for host " + host,
+			info:            state.HostInfo,
+			groupNames:      state.GroupNames,
+			toolGroups:      state.ToolGroups,
+			toolMemberships: state.ToolMemberships,
 		}
-		for _, group := range createdGroups {
-			if afterSet[group] {
-				if err := a.CreateGroup(group); err != nil {
-					return hostGroupChangedMsg{err: err, host: host}
-				}
-			}
-		}
-		for group := range beforeSet {
-			if !afterSet[group] {
-				if err := a.RemoveGroupFromHost(host, group); err != nil {
-					return hostGroupChangedMsg{err: err, host: host}
-				}
-			}
-		}
-		for group := range afterSet {
-			if !beforeSet[group] {
-				if err := a.AddGroupToHost(host, group); err != nil {
-					return hostGroupChangedMsg{err: err, host: host}
-				}
-			}
-		}
-		groupNames, toolGroups, memberships, info := m.reloadToolContext()
-		return hostGroupChangedMsg{host: host, detail: "✓ groups updated for host " + host, info: info, groupNames: groupNames, toolGroups: toolGroups, toolMemberships: memberships}
 	}
 }
 
-// doRemoveHostFromTab removes a host from settings.json and reloads host info.
 func (m *Model) doRemoveHostFromTab(name string) tea.Cmd {
-	a := m.app
+	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
-		if err := a.RemoveHost(name); err != nil {
+		state, err := a.RemoveHostWithState(ctx, name)
+		if err != nil {
 			return hostGroupChangedMsg{err: err, host: name}
 		}
-		groupNames, toolGroups, memberships, info := m.reloadToolContext()
-		return hostGroupChangedMsg{host: name, info: info, groupNames: groupNames, toolGroups: toolGroups, toolMemberships: memberships}
+		return hostGroupChangedMsg{
+			host:            name,
+			info:            state.HostInfo,
+			groupNames:      state.GroupNames,
+			toolGroups:      state.ToolGroups,
+			toolMemberships: state.ToolMemberships,
+		}
 	}
 }
 
-// doRenameHost renames a host and reloads host info.
 func (m *Model) doRenameHost(oldName, newName string) tea.Cmd {
-	a := m.app
+	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
-		if err := a.RenameHost(oldName, newName); err != nil {
+		state, err := a.RenameHostWithState(ctx, oldName, newName)
+		if err != nil {
 			return hostGroupChangedMsg{err: err, host: oldName}
 		}
-		groupNames, toolGroups, memberships, info := m.reloadToolContext()
-		return hostGroupChangedMsg{host: newName, detail: "✓ " + oldName + " renamed to " + newName, info: info, groupNames: groupNames, toolGroups: toolGroups, toolMemberships: memberships}
+		return hostGroupChangedMsg{
+			host:            newName,
+			detail:          "✓ " + oldName + " renamed to " + newName,
+			info:            state.HostInfo,
+			groupNames:      state.GroupNames,
+			toolGroups:      state.ToolGroups,
+			toolMemberships: state.ToolMemberships,
+		}
 	}
 }
 
 // doRenameGroup renames a group in config and reloads group/host data.
 func (m *Model) doRenameGroup(oldName, newName string) tea.Cmd {
-	a := m.app
+	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
-		if err := a.RenameGroup(oldName, newName); err != nil {
+		state, err := a.RenameGroupWithState(ctx, oldName, newName)
+		if err != nil {
 			return groupChangedMsg{err: err}
 		}
-		groupNames, toolGroups, memberships := m.reloadToolGroups()
-		info, _ := a.HostStatus()
 		return groupChangedMsg{
 			detail:          "✓ renamed " + oldName + " → " + newName,
-			groupNames:      groupNames,
-			toolGroups:      toolGroups,
-			toolMemberships: memberships,
-			info:            info,
+			groupNames:      state.GroupNames,
+			toolGroups:      state.ToolGroups,
+			toolMemberships: state.ToolMemberships,
+			info:            state.HostInfo,
 		}
 	}
 }
@@ -500,25 +354,21 @@ func (m *Model) doRenameGroup(oldName, newName string) tea.Cmd {
 func (m *Model) doDeleteGroup(name string, deleteTools bool) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
-		opts := app.DeleteGroupOptions{MoveTo: shortHostname()}
 		detail := "✓ deleted group " + name + " (tools moved to this host)"
 		if deleteTools {
-			opts = app.DeleteGroupOptions{DeleteTools: true}
 			detail = "✓ deleted group " + name + " (last-membership tools deleted)"
 		}
-		if err := a.DeleteGroup(ctx, name, opts); err != nil {
+		result, err := a.DeleteGroupWithDefaultMoveTarget(ctx, name, deleteTools)
+		if err != nil {
 			return groupChangedMsg{err: err}
 		}
-		groupNames, toolGroups, memberships := m.reloadToolGroups()
-		tools, _ := a.ListTools(ctx, "")
-		info, _ := a.HostStatus()
 		return groupChangedMsg{
 			detail:          detail,
-			tools:           tools,
-			groupNames:      groupNames,
-			toolGroups:      toolGroups,
-			toolMemberships: memberships,
-			info:            info,
+			tools:           result.Tools,
+			groupNames:      result.State.GroupNames,
+			toolGroups:      result.State.ToolGroups,
+			toolMemberships: result.State.ToolMemberships,
+			info:            result.State.HostInfo,
 		}
 	}
 }
@@ -569,7 +419,7 @@ func (m *Model) doDisableDots(keepLocal bool, setupComplete ...bool) tea.Cmd {
 			KeepExistingLocal: keepLocal,
 			RemoveLocal:       !keepLocal,
 		})
-		detail := dotsDisableDetail(ops)
+		detail := app.DotsDisableDetail(ops)
 		done := len(setupComplete) > 0 && setupComplete[0]
 		reload := len(setupComplete) == 0 || done
 		if err != nil {
@@ -577,26 +427,6 @@ func (m *Model) doDisableDots(keepLocal bool, setupComplete ...bool) tea.Cmd {
 		}
 		return dangerOpDoneMsg{action: "disable-dots", detail: detail, reload: reload, setupComplete: done}
 	}
-}
-
-func dotsDisableDetail(ops []dots.Op) string {
-	if len(ops) == 0 {
-		return "dots disabled"
-	}
-	var unlinked, conflicts int
-	for _, op := range ops {
-		switch op.Kind {
-		case dots.OpUnlink:
-			unlinked++
-		case dots.OpUnlinkConflict:
-			conflicts++
-		}
-	}
-	detail := fmt.Sprintf("%d unlinked", unlinked)
-	if conflicts > 0 {
-		detail += fmt.Sprintf(", %d conflicts", conflicts)
-	}
-	return detail
 }
 
 // doEnableDots re-enables dotfile sync: clears the disabled flag and runs a
@@ -616,19 +446,23 @@ func (m *Model) doEnableDots() tea.Cmd {
 func (m *Model) doConsolidate(ecosystem, manager string) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
 	return func() tea.Msg {
-		result, err := a.Consolidate(ctx, ecosystem, manager, nil)
-		tools, _ := a.ListTools(ctx, "") // non-fatal: consolidate succeeded; stale list retained if refresh fails
+		stateResult, err := a.ConsolidateWithState(ctx, ecosystem, manager, nil)
 		if err != nil {
 			return opCompleteMsg{err: err}
 		}
-		parts := []string{fmt.Sprintf("%d migrated to %s", len(result.Migrated), manager)}
-		if len(result.Failed) > 0 {
-			parts = append(parts, fmt.Sprintf("%d failed", len(result.Failed)))
+		if stateResult == nil || stateResult.Result == nil {
+			return opCompleteMsg{err: fmt.Errorf("consolidate result unavailable")}
 		}
-		if len(result.UninstallWarnings) > 0 {
-			parts = append(parts, fmt.Sprintf("%d uninstall warning(s)", len(result.UninstallWarnings)))
+		result := stateResult.Result
+		groupState := stateResult.State
+		return opCompleteMsg{
+			message:         app.ConsolidateSummaryText(result, manager),
+			tools:           stateResult.Tools,
+			groupNames:      groupState.GroupNames,
+			toolGroups:      groupState.ToolGroups,
+			toolMemberships: groupState.ToolMemberships,
+			hostInfo:        groupState.HostInfo,
 		}
-		return opCompleteMsg{message: strings.Join(parts, ", "), tools: tools}
 	}
 }
 
@@ -637,26 +471,27 @@ func (m *Model) doConsolidate(ecosystem, manager string) tea.Cmd {
 func (m *Model) doClaim(name, prov, groupName string, activeHost ...string) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
-		if err := a.Add(ctx, prov, name, name, groupName, ""); err != nil {
-			return claimDoneMsg{err: err, name: name, groupName: groupName}
+		var assignHosts []string
+		if len(activeHost) > 0 && activeHost[0] != "" {
+			assignHosts = append(assignHosts, activeHost[0])
 		}
-		if groupName != "" {
-			if err := a.AddGroupToHost(shortHostname(), groupName); err != nil {
-				tools, _ := a.ListTools(ctx, "")
-				groupNames, toolGroups, memberships, info := m.reloadToolContext()
-				return claimDoneMsg{err: err, name: name, groupName: groupName, tools: tools, groupNames: groupNames, toolGroups: toolGroups, toolMemberships: memberships, hostInfo: info}
-			}
+		result, err := a.AddWithState(ctx, app.AddToolOptions{
+			ProviderName: prov,
+			Package:      name,
+			Name:         name,
+			GroupName:    groupName,
+			AssignHosts:  assignHosts,
+		})
+		msg := claimDoneMsg{err: err, name: name, groupName: groupName}
+		if result == nil || result.State == nil {
+			return msg
 		}
-		if len(activeHost) > 0 && activeHost[0] != "" && groupName != "" {
-			if err := a.AddGroupToHost(activeHost[0], groupName); err != nil {
-				tools, _ := a.ListTools(ctx, "")
-				groupNames, toolGroups, memberships, info := m.reloadToolContext()
-				return claimDoneMsg{err: err, name: name, groupName: groupName, tools: tools, groupNames: groupNames, toolGroups: toolGroups, toolMemberships: memberships, hostInfo: info}
-			}
-		}
-		tools, _ := a.ListTools(ctx, "") // non-fatal: claim succeeded; stale list retained if refresh fails
-		groupNames, toolGroups, memberships, info := m.reloadToolContext()
-		return claimDoneMsg{name: name, groupName: groupName, tools: tools, groupNames: groupNames, toolGroups: toolGroups, toolMemberships: memberships, hostInfo: info}
+		msg.tools = result.Tools
+		msg.groupNames = result.State.GroupNames
+		msg.toolGroups = result.State.ToolGroups
+		msg.toolMemberships = result.State.ToolMemberships
+		msg.hostInfo = result.State.HostInfo
+		return msg
 	}
 }
 
@@ -669,83 +504,96 @@ func (m *Model) doSetIgnoreScope(name string, opt scopeOption) tea.Cmd {
 func (m *Model) doSaveIgnoreScopes(name string, options []scopeOption) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
-		changedHost := false
-		ignored := false
+		var changes []app.ToolIgnoreScopeChange
 		for _, opt := range options {
 			if opt.checked == opt.initialChecked {
 				continue
 			}
-			desired := opt.checked
-			ignored = ignored || desired
-			var err error
+			change := app.ToolIgnoreScopeChange{Ignored: opt.checked, Group: opt.group}
 			switch opt.kind {
 			case "tool":
-				err = a.SetToolIgnore(name, desired)
+				change.Kind = app.ToolIgnoreScopeTool
 			case "group":
-				err = a.SetGroupIgnore(opt.group, name, desired)
+				change.Kind = app.ToolIgnoreScopeGroup
 			case "host":
-				changedHost = true
-				err = a.SetGlobalToolIgnore(name, desired)
+				change.Kind = app.ToolIgnoreScopeHost
 			default:
-				err = fmt.Errorf("unknown ignore scope %q", opt.kind)
+				return ignoreDoneMsg{err: fmt.Errorf("unknown ignore scope %q", opt.kind), name: name, ignored: opt.checked}
 			}
-			if err != nil {
-				return ignoreDoneMsg{err: err, name: name, ignored: desired}
+			changes = append(changes, change)
+		}
+		result, err := a.SetToolIgnoreScopesWithState(ctx, name, changes)
+		if err != nil {
+			desired := false
+			if len(changes) > 0 {
+				desired = changes[len(changes)-1].Ignored
 			}
+			return ignoreDoneMsg{err: err, name: name, ignored: desired}
 		}
-		groups, _ := a.Groups(ctx)
-		tools, _ := a.ListTools(ctx, "")
-		var hostIgnore []string
-		if info, _ := a.HostStatus(); info != nil && info.Active != "" {
-			if prof, ok := info.Hosts[info.Active]; ok {
-				hostIgnore = prof.Ignore
-			}
+		msg := ignoreDoneMsg{
+			name:           name,
+			ignored:        result.Ignored,
+			tools:          result.Tools,
+			hostScope:      result.HostScopeChanged,
+			ignoreLabels:   result.ScopeDisplay.IgnoreLabels,
+			toolIgnoreSet:  result.ScopeDisplay.ToolIgnores,
+			groupIgnoreSet: result.ScopeDisplay.GroupIgnores,
 		}
-		labels := buildIgnoreLabels(a.ConfigPath, groups, hostIgnore)
-		toolIgnores, groupIgnores, _ := buildToolScopeState(a.ConfigPath, groups)
-		if labels[name] != "" {
-			ignored = true
-		}
-		return ignoreDoneMsg{name: name, ignored: ignored, tools: tools, hostScope: changedHost, ignoreLabels: labels, toolIgnoreSet: toolIgnores, groupIgnoreSet: groupIgnores}
+		return msg
 	}
 }
 
 // doInstallAndAdd installs a tool and adds it to the selected config group.
 // Used for search results and orphan tools that are not yet in config.
 func (m *Model) doInstallAndAdd(name, prov string, groupAndHost ...string) tea.Cmd {
+	return m.doInstallAndAddTool(&database.ToolCache{Name: name, Provider: prov, Package: name}, groupAndHost...)
+}
+
+func (m *Model) doInstallAndAddTool(t *database.ToolCache, groupAndHost ...string) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
 	return func() tea.Msg {
+		if t == nil {
+			return opCompleteMsg{err: fmt.Errorf("missing tool")}
+		}
+		name := t.Name
+		pkg := t.Package
+		if pkg == "" {
+			pkg = name
+		}
 		group := ""
 		if len(groupAndHost) > 0 {
 			group = groupAndHost[0]
 		}
-		removeDiscovered := []string{toolKey(name, prov)}
-		if err := a.Install(ctx, name, prov); err != nil {
+		var assignHosts []string
+		if len(groupAndHost) > 1 && groupAndHost[1] != "" {
+			assignHosts = append(assignHosts, groupAndHost[1])
+		}
+		removeDiscovered := []string{toolKey(name, t.Provider)}
+		result, err := a.InstallAndAddWithState(ctx, app.AddToolOptions{
+			ProviderName: t.Provider,
+			Package:      pkg,
+			Name:         name,
+			GroupName:    group,
+			InstallWith:  t.InstalledWith,
+			Options:      t.Options,
+			AssignHosts:  assignHosts,
+		})
+		if result == nil || result.State == nil {
 			return opCompleteMsg{err: err}
 		}
-		if err := a.Add(ctx, prov, name, name, group, ""); err != nil {
-			// Install succeeded but config save failed. Surface as error so the
-			// status bar renders red — config is the recoverable part the user
-			// must address; pretending green ✓ would hide the failure.
-			return opCompleteMsg{err: fmt.Errorf("installed %s but config save failed: %w", name, err)}
+		msg := opCompleteMsg{
+			err:                  err,
+			tools:                result.Tools,
+			removeDiscoveredKeys: removeDiscovered,
+			groupNames:           result.State.GroupNames,
+			toolGroups:           result.State.ToolGroups,
+			toolMemberships:      result.State.ToolMemberships,
+			hostInfo:             result.State.HostInfo,
 		}
-		if group != "" {
-			if err := a.AddGroupToHost(shortHostname(), group); err != nil {
-				tools, _ := a.ListTools(ctx, "")
-				groupNames, toolGroups, memberships, info := m.reloadToolContext()
-				return opCompleteMsg{err: fmt.Errorf("installed %s and added to config but host update failed: %w", name, err), tools: tools, removeDiscoveredKeys: removeDiscovered, groupNames: groupNames, toolGroups: toolGroups, toolMemberships: memberships, hostInfo: info}
-			}
+		if err == nil {
+			msg.message = "installed " + name + " and added to config"
 		}
-		if len(groupAndHost) > 1 && groupAndHost[1] != "" && group != "" {
-			if err := a.AddGroupToHost(groupAndHost[1], group); err != nil {
-				tools, _ := a.ListTools(ctx, "")
-				groupNames, toolGroups, memberships, info := m.reloadToolContext()
-				return opCompleteMsg{err: fmt.Errorf("installed %s and added to config but host update failed: %w", name, err), tools: tools, removeDiscoveredKeys: removeDiscovered, groupNames: groupNames, toolGroups: toolGroups, toolMemberships: memberships, hostInfo: info}
-			}
-		}
-		tools, _ := a.ListTools(ctx, "") // non-fatal: install+add succeeded; stale list retained if refresh fails
-		groupNames, toolGroups, memberships, info := m.reloadToolContext()
-		return opCompleteMsg{message: "installed " + name + " and added to config", tools: tools, removeDiscoveredKeys: removeDiscovered, groupNames: groupNames, toolGroups: toolGroups, toolMemberships: memberships, hostInfo: info}
+		return msg
 	}
 }
 
@@ -755,94 +603,52 @@ func (m *Model) doSetProviderScope(name string, opt scopeOption, t *database.Too
 		if t == nil || t.InstalledWith == "" {
 			return opCompleteMsg{err: fmt.Errorf("provider pin: installed provider is unknown")}
 		}
-		var err error
-		switch opt.kind {
-		case "provider-host":
-			err = a.SetToolHostInstallSpec(name, t.Provider, t.Package, t.InstalledWith)
-		case "provider-tool":
-			err = a.SetToolDefaultInstallSpec(name, t.Provider, t.Package, t.InstalledWith)
-		case "provider-ecosystem":
-			err = a.PinEcosystemForHost(ctx, t.Provider, t.InstalledWith)
-		default:
-			err = fmt.Errorf("unknown provider scope %q", opt.kind)
-		}
+		result, err := a.SetToolProviderScopeWithState(ctx, name, app.ToolProviderScopeOptions{
+			Kind:         app.ToolProviderScopeKind(opt.kind),
+			ProviderName: t.Provider,
+			Package:      t.Package,
+			InstallWith:  t.InstalledWith,
+		})
 		if err != nil {
 			return opCompleteMsg{err: fmt.Errorf("pin provider: %w", err)}
 		}
-		tools, err := a.ListTools(ctx, "")
-		if err != nil {
-			return opCompleteMsg{err: fmt.Errorf("pin provider: list tools: %w", err)}
-		}
-		groups, _ := a.Groups(ctx)
-		_, _, pins := buildToolScopeState(a.ConfigPath, groups)
-		if pins == nil {
-			pins = make(map[string]string)
-		}
-		pins[name] = t.InstalledWith
-		return opCompleteMsg{message: "pinned " + name + " via " + opt.label, tools: tools, toolProviderPins: pins}
+		return opCompleteMsg{message: "pinned " + name + " via " + opt.label, tools: result.Tools, toolProviderPins: result.ScopeDisplay.ToolProviderPins}
 	}
 }
 
 func (m *Model) doClearProviderOverride(name, configProv, installedWith string) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
 	return func() tea.Msg {
-		var (
-			err     error
-			result  *app.SwitchResult
-			cleared app.ClearInstallOverrideResult
-		)
-		if installedWith != "" {
-			result, cleared, err = a.ReinstallWithDefaultAfterClearingInstallOverride(ctx, name, configProv)
-		} else {
-			cleared, err = a.ClearToolInstallOverride(ctx, name, configProv)
-			if err == nil {
-				if refreshErr := a.RefreshInstalled(ctx, nil); refreshErr != nil {
-					err = fmt.Errorf("refresh installed: %w", refreshErr)
-				}
-			}
-		}
+		result, err := a.ClearProviderOverrideWithState(ctx, name, configProv, installedWith)
 		fromProvider := installedWith
 		toProvider := configProv
+		var tools []*database.ToolCache
+		var pins map[string]string
 		if result != nil {
 			fromProvider = result.FromProvider
 			toProvider = result.ToProvider
-		} else if fromProvider == "" {
-			fromProvider = cleared.InstallWith
+			tools = result.Tools
+			if result.ScopeDisplay != nil {
+				pins = result.ScopeDisplay.ToolProviderPins
+			}
 		}
 		if err != nil {
 			return migrateProviderDoneMsg{err: fmt.Errorf("remove provider override: %w", err), name: name, fromProvider: fromProvider, toProvider: toProvider, clearedProviderOverride: true}
 		}
-		tools, err := a.ListTools(ctx, "")
-		if err != nil {
-			return migrateProviderDoneMsg{err: fmt.Errorf("remove provider override: list tools: %w", err), name: name, fromProvider: fromProvider, toProvider: toProvider, clearedProviderOverride: true}
-		}
-		groups, _ := a.Groups(ctx)
-		_, _, pins := buildToolScopeState(a.ConfigPath, groups)
 		return migrateProviderDoneMsg{name: name, fromProvider: fromProvider, toProvider: toProvider, tools: tools, toolProviderPins: pins, clearedProviderOverride: true}
 	}
 }
 
-// doMigrateProvider installs the tool via the config-intended provider, removes
-// it from the currently-installed (wrong) provider, and updates the config.
-// syncWrongProv means: tool is installed via installedWith but config says configProv.
-// Migrate = install via configProv, uninstall from installedWith, rewrite config.
 func (m *Model) doMigrateProvider(name, configProv, installedWith string) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
 	return func() tea.Msg {
-		if _, err := a.MigrateInstallation(ctx, name, installedWith, configProv); err != nil {
-			return migrateProviderDoneMsg{err: fmt.Errorf("reinstall with default: %w", err), name: name, fromProvider: installedWith, toProvider: configProv}
+		result, err := a.MigrateInstallationWithState(ctx, name, installedWith, configProv)
+		var tools []*database.ToolCache
+		if result != nil {
+			tools = result.Tools
 		}
-		// Re-probe all providers so InstalledWith is updated in the DB before we
-		// return the fresh tool list. Runs silently (no progress channel needed here).
-		if err := a.RefreshInstalled(ctx, nil); err != nil {
-			return migrateProviderDoneMsg{err: fmt.Errorf("reinstall with default: refresh installed: %w", err), name: name, fromProvider: installedWith, toProvider: configProv}
-		}
-		if err := a.RefreshDescriptions(ctx, 0); err != nil {
-			return migrateProviderDoneMsg{err: fmt.Errorf("reinstall with default: refresh descriptions: %w", err), name: name, fromProvider: installedWith, toProvider: configProv}
-		}
-		tools, err := a.ListTools(ctx, "")
 		if err != nil {
-			return migrateProviderDoneMsg{err: fmt.Errorf("reinstall with default: list tools: %w", err), name: name, fromProvider: installedWith, toProvider: configProv}
+			return migrateProviderDoneMsg{err: fmt.Errorf("reinstall with default: %w", err), name: name, fromProvider: installedWith, toProvider: configProv}
 		}
 		return migrateProviderDoneMsg{name: name, fromProvider: installedWith, toProvider: configProv, tools: tools}
 	}
@@ -853,25 +659,16 @@ func (m *Model) doApplyProviderSolution(name, fromProvider string, solution prov
 	target := solution.TargetProvider
 	return func() tea.Msg {
 		key := toolKey(name, fromProvider)
-		if target == "" {
-			return opCompleteMsg{key: key, err: fmt.Errorf("apply fix: missing target provider")}
+		result, err := a.ApplyProviderSolutionWithState(ctx, name, fromProvider, solution)
+		var tools []*database.ToolCache
+		if result != nil {
+			tools = result.Tools
 		}
-		result, err := a.Switch(ctx, name, fromProvider, target)
 		if err != nil {
 			return opCompleteMsg{key: key, err: fmt.Errorf("apply fix: %w", err)}
 		}
-		if err := a.RefreshInstalled(ctx, nil); err != nil {
-			return opCompleteMsg{key: key, err: fmt.Errorf("apply fix: refresh installed: %w", err)}
-		}
-		if err := a.RefreshDescriptions(ctx, 0); err != nil {
-			return opCompleteMsg{key: key, err: fmt.Errorf("apply fix: refresh descriptions: %w", err)}
-		}
-		tools, err := a.ListTools(ctx, "")
-		if err != nil {
-			return opCompleteMsg{key: key, err: fmt.Errorf("apply fix: list tools: %w", err)}
-		}
 		message := fmt.Sprintf("reinstalled %s with %s", name, target)
-		if result != nil && result.UninstallWarning != nil {
+		if result != nil && result.Result != nil && result.Result.UninstallWarning != nil {
 			message += ", cleanup warning"
 		}
 		return opCompleteMsg{key: key, message: message, tools: tools}

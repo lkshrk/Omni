@@ -1,14 +1,13 @@
 package tui
 
 import (
-	"slices"
+	"context"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/provider"
+	"github.com/lkshrk/omni/internal/app"
 )
 
 func (m *Model) handleSettingsKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
@@ -20,9 +19,29 @@ func (m *Model) handleSettingsKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 
 	switch {
 	case key.Matches(msg, m.keys.Up):
-		m.settingsCursor = (m.settingsCursor - 1 + numSettingRows) % numSettingRows
+		m.setSettingsCursor((m.settingsCursor - 1 + numSettingRows) % numSettingRows)
 	case key.Matches(msg, m.keys.Down):
-		m.settingsCursor = (m.settingsCursor + 1) % numSettingRows
+		m.setSettingsCursor((m.settingsCursor + 1) % numSettingRows)
+	case key.Matches(msg, m.keys.Top):
+		if m.settingsDetailScroll > 0 && m.settingsCursor == settingsRowDoctor {
+			m.settingsDetailScroll = 0
+		} else {
+			m.setSettingsCursor(0)
+		}
+	case key.Matches(msg, m.keys.Bottom):
+		if maxScroll := m.settingsDetailScrollMax(); maxScroll > 0 && m.settingsCursor == settingsRowDoctor {
+			m.settingsDetailScroll = maxScroll
+		} else {
+			m.setSettingsCursor(numSettingRows - 1)
+		}
+	case key.Matches(msg, m.keys.HalfPageDown):
+		m.scrollSettingsBy(max(listAvailableHeight(*m)/2, 1))
+	case key.Matches(msg, m.keys.HalfPageUp):
+		m.scrollSettingsBy(-max(listAvailableHeight(*m)/2, 1))
+	case key.Matches(msg, m.keys.PageDown):
+		m.scrollSettingsBy(max(listAvailableHeight(*m), 1))
+	case key.Matches(msg, m.keys.PageUp):
+		m.scrollSettingsBy(-max(listAvailableHeight(*m), 1))
 	case key.Matches(msg, m.keys.Toggle):
 		m.handleSettingsRowAction(&cmds)
 	case key.Matches(msg, m.keys.Confirm):
@@ -32,6 +51,14 @@ func (m *Model) handleSettingsKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	}
 
 	return cmds
+}
+
+func (m *Model) setSettingsCursor(row int) {
+	next := clampIndex(row, numSettingRows)
+	if next != m.settingsCursor {
+		m.settingsDetailScroll = 0
+	}
+	m.settingsCursor = next
 }
 
 func (m *Model) handleSettingsConfirmAction(cmds *[]tea.Cmd) {
@@ -79,9 +106,11 @@ func (m *Model) handleSettingsPriorityKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		}
 	default:
 		if key.Matches(msg, m.keys.Confirm) {
-			m.settings.SetEcosystemPriority(provider.EcosystemSystem, m.filterSystemPriority(m.priorityDraft))
-			m.editingPriority = false
-			m.appendSaveSettingsCmd(&cmds)
+			change := app.SetSystemPriority(m.priorityDraft)
+			if m.applySettingsChange(change) {
+				m.editingPriority = false
+				m.appendSaveSettingsChangeCmd(&cmds, change)
+			}
 		} else if key.Matches(msg, m.keys.Back) {
 			m.editingPriority = false
 		}
@@ -161,33 +190,15 @@ func (m *Model) confirmSettingsDisableDots(keepLocal bool) []tea.Cmd {
 }
 
 func (m *Model) handleSettingsRowAction(cmds *[]tea.Cmd) {
-	switch m.settingsCursor {
-	case settingsRowAutoImport:
-		m.settings.AutoImport = !m.settings.AutoImport
-		m.appendSaveSettingsCmd(cmds)
-	case settingsRowSystemProvider:
-		m.settings.DisabledProviders = toggleProvider(m.settings.DisabledProviders, provider.EcosystemSystem)
-		m.appendSaveSettingsCmd(cmds)
-	case settingsRowNodeProvider:
-		m.settings.DisabledProviders = toggleProvider(m.settings.DisabledProviders, provider.EcosystemNode)
-		m.appendSaveSettingsCmd(cmds)
-	case settingsRowPythonProvider:
-		m.settings.DisabledProviders = toggleProvider(m.settings.DisabledProviders, provider.EcosystemPython)
-		m.appendSaveSettingsCmd(cmds)
-	case settingsRowNodeManager:
-		m.settings.SetEcosystemManager(provider.EcosystemNode, cycleNodeManager(m.settings.EcosystemManager(provider.EcosystemNode)))
-		m.appendSaveSettingsCmd(cmds)
-	case settingsRowPythonManager:
-		m.settings.SetEcosystemManager(provider.EcosystemPython, cyclePythonManager(m.settings.EcosystemManager(provider.EcosystemPython)))
-		m.appendSaveSettingsCmd(cmds)
-	case settingsRowDotsCommit:
-		if !m.settings.DotsGit.AutoPush {
-			m.settings.DotsGit.AutoCommit = !m.settings.DotsGit.AutoCommit
-			m.appendSaveSettingsCmd(cmds)
+	if action := settingsRows[m.settingsCursor].action; action != "" {
+		if !app.SettingsActionAvailable(m.settings, action) {
+			return
 		}
-	case settingsRowDotsPush:
-		m.settings.DotsGit.AutoPush = !m.settings.DotsGit.AutoPush
-		m.appendSaveSettingsCmd(cmds)
+		m.applySettingsActionAndSave(cmds, action)
+		return
+	}
+
+	switch m.settingsCursor {
 	case settingsRowDotsReminder:
 		m.handleSettingsDotsReminderAction(cmds)
 	case settingsRowDotsWatch:
@@ -195,12 +206,45 @@ func (m *Model) handleSettingsRowAction(cmds *[]tea.Cmd) {
 	}
 }
 
+func (m *Model) applySettingsActionAndSave(cmds *[]tea.Cmd, action app.SettingsActionID) {
+	change, err := app.SettingsChangeForAction(action)
+	if err != nil {
+		m.err = err
+		return
+	}
+	m.applySettingsChangeAndSave(cmds, change)
+}
+
+func (m *Model) applySettingsChangeAndSave(cmds *[]tea.Cmd, change app.SettingsChange) {
+	if m.applySettingsChange(change) {
+		m.appendSaveSettingsChangeCmd(cmds, change)
+	}
+}
+
+func (m *Model) applySettingsChange(change app.SettingsChange) bool {
+	a := m.app
+	if a == nil {
+		a = app.New("")
+	}
+	ctx := m.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	next, _, err := a.ApplySettingsChange(ctx, m.settings, change)
+	if err != nil {
+		m.err = err
+		return false
+	}
+	m.setSettings(next)
+	return true
+}
+
 func (m *Model) handleSettingsEditAction(cmds *[]tea.Cmd) {
 	switch m.settingsCursor {
 	case settingsRowSystemPriority:
 		m.startSettingsPriorityEdit()
 	case settingsRowDotsRepo:
-		*cmds = append(*cmds, m.openFilePicker("Dots repo path", m.settings.DotsRepo, false))
+		*cmds = append(*cmds, m.openFilePicker("Dots repo path", dotsRepoPathForView(*m), false))
 	case settingsRowDotsSync:
 		m.handleSettingsDotsSyncAction(cmds)
 	case settingsRowDotsReminderInterval, settingsRowDotsWatchDebounce:
@@ -243,7 +287,8 @@ func (m *Model) startBootstrapSetup() {
 }
 
 func (m *Model) startSettingsPriorityEdit() {
-	m.priorityDraft = m.systemPriorityDraft(m.settings.EcosystemPriority(provider.EcosystemSystem))
+	providerState := app.SettingsProviderStateFrom(m.settings)
+	m.priorityDraft = m.systemPriorityDraft(providerState.SystemPriority)
 	m.priorityCursor = 0
 	m.editingPriority = true
 }
@@ -297,86 +342,37 @@ func (m *Model) applySettingsServiceDurationChoice(choices []settingsDurationCho
 }
 
 func (m Model) systemPriorityDraft(priority []string) []string {
-	defaults := m.systemPriorityDefaults()
-	if len(priority) == 0 {
-		return defaults
+	if m.app == nil {
+		return app.DefaultSystemProviderPriorityDraft(priority)
 	}
-	draft := m.filterSystemPriority(priority)
-	if len(draft) == 0 {
-		return defaults
-	}
-	for _, name := range defaults {
-		if !slices.Contains(draft, name) {
-			draft = append(draft, name)
-		}
-	}
-	return draft
+	return m.app.SystemProviderPriorityDraft(priority)
 }
 
 func (m Model) systemPriorityDisplay(priority []string) []string {
-	return m.filterSystemPriority(priority)
-}
-
-func (m Model) systemPriorityDefaults() []string {
-	defaults := provider.BuiltinSystemProviderPriorityNames()
 	if m.app == nil {
-		return defaults
+		return app.DefaultSystemProviderPriorityDisplay(priority)
 	}
-	for _, name := range m.app.ConcreteProviderNamesForEcosystem(provider.EcosystemSystem) {
-		if !slices.Contains(defaults, name) {
-			defaults = append(defaults, name)
-		}
-	}
-	return defaults
-}
-
-func (m Model) filterSystemPriority(priority []string) []string {
-	out := make([]string, 0, len(priority))
-	seen := make(map[string]struct{}, len(priority))
-	for _, name := range priority {
-		if _, ok := seen[name]; ok {
-			continue
-		}
-		if !m.isSystemPriorityProvider(name) {
-			continue
-		}
-		seen[name] = struct{}{}
-		out = append(out, name)
-	}
-	return out
-}
-
-func (m Model) isSystemPriorityProvider(name string) bool {
-	if m.app != nil {
-		return m.app.IsConcreteProviderForEcosystem(provider.EcosystemSystem, name)
-	}
-	ecosystem, ok := provider.BuiltinEcosystemFor(name)
-	return ok && ecosystem == provider.EcosystemSystem && !provider.BuiltinIsEcosystem(name)
+	return m.app.SystemProviderPriorityDisplay(priority)
 }
 
 func (m *Model) handleSettingsDotsSyncAction(cmds *[]tea.Cmd) {
-	if config.BoolVal(m.settings.DotsDisabled) {
-		if m.settings.DotsRepo == "" {
-			*cmds = append(*cmds, setStatus(m, "Dots not configured.", false))
-			return
-		}
+	switch m.dotsSyncAvailability().Reason {
+	case app.DotsSyncAvailabilityDisabled:
 		if m.promptForStowInstall(stowInstallEnableDots) {
 			return
 		}
 		m.beginDotsOperation("Enabling dots…")
 		*cmds = append(*cmds, m.spinner.Tick, m.doEnableDots())
-		return
-	}
-	if m.settings.DotsRepo != "" {
+	case app.DotsSyncAvailabilityReady:
 		m.dangerConfirmRow = settingsRowDotsSync
 		*cmds = append(*cmds, m.armConfirmationTimeout())
-	} else {
+	case app.DotsSyncAvailabilityNoRepo, app.DotsSyncAvailabilityUnknown:
 		*cmds = append(*cmds, setStatus(m, "Dots not configured.", false))
 	}
 }
 
 func (m *Model) handleSettingsDotsReminderAction(cmds *[]tea.Cmd) {
-	if strings.TrimSpace(m.settings.DotsRepo) == "" {
+	if !m.dotsConfigured() {
 		*cmds = append(*cmds, setStatus(m, "Dots not configured.", false))
 		return
 	}
@@ -395,7 +391,7 @@ func (m *Model) handleSettingsDotsReminderAction(cmds *[]tea.Cmd) {
 }
 
 func (m *Model) handleSettingsDotsWatchAction(cmds *[]tea.Cmd) {
-	if strings.TrimSpace(m.settings.DotsRepo) == "" {
+	if !m.dotsConfigured() {
 		*cmds = append(*cmds, setStatus(m, "Dots not configured.", false))
 		return
 	}

@@ -21,12 +21,77 @@ type ReconcileOptions struct {
 
 // ReconcileResult records the operations attempted by Reconcile.
 type ReconcileResult struct {
-	SyncAll       *SyncAllResult
-	UpgradeAll    *UpgradeAllResult
-	DotsOps       []dots.Op
+	SyncAll            *SyncAllResult
+	UpgradeAll         *UpgradeAllResult
+	FixedIgnoreEntries []string
+	DotsOps            []dots.Op
+	DotsCommitted      bool
+	DotsSkipped        string
+	DotsEntries        []DotStatus // post-reconcile dots health snapshot
+}
+
+type ReconcileSummary struct {
+	Installed     int
+	Claimed       int
+	Upgraded      int
+	DotOps        int
 	DotsCommitted bool
 	DotsSkipped   string
-	DotsEntries   []DotStatus // post-reconcile dots health snapshot
+}
+
+type ReconcileIssueSummary struct {
+	SyncFailures    int
+	UpgradeFailures int
+	DotsConflicts   int
+	DotsMissing     int
+}
+
+func SummarizeReconcile(result *ReconcileResult) ReconcileSummary {
+	if result == nil {
+		return ReconcileSummary{}
+	}
+	syncSummary := SummarizeSyncAll(result.SyncAll)
+	summary := ReconcileSummary{
+		Installed:     syncSummary.Installed,
+		Claimed:       syncSummary.Claimed,
+		DotOps:        len(result.DotsOps),
+		DotsCommitted: result.DotsCommitted,
+		DotsSkipped:   result.DotsSkipped,
+	}
+	if result.UpgradeAll != nil {
+		summary.Upgraded = len(result.UpgradeAll.Upgraded)
+	}
+	return summary
+}
+
+func SummarizeReconcileIssues(result *ReconcileResult) ReconcileIssueSummary {
+	if result == nil {
+		return ReconcileIssueSummary{}
+	}
+	var summary ReconcileIssueSummary
+	if result.SyncAll != nil {
+		summary.SyncFailures = len(result.SyncAll.Failures)
+	}
+	if result.UpgradeAll != nil {
+		summary.UpgradeFailures = len(result.UpgradeAll.Failures)
+	}
+	for _, entry := range result.DotsEntries {
+		switch entry.Health {
+		case HealthConflict:
+			summary.DotsConflicts++
+		case HealthMissing, HealthNoSource:
+			summary.DotsMissing++
+		}
+	}
+	return summary
+}
+
+func (s ReconcileIssueSummary) Total() int {
+	return s.SyncFailures + s.UpgradeFailures + s.DotsConflicts + s.DotsMissing
+}
+
+func (s ReconcileIssueSummary) HasIssues() bool {
+	return s.Total() > 0
 }
 
 // Reconcile brings the current host toward the configured desired state:
@@ -54,6 +119,14 @@ func (a *App) Reconcile(ctx context.Context, opts ReconcileOptions) (*ReconcileR
 	result.UpgradeAll = upgradeResult
 	if err != nil {
 		errs = append(errs, fmt.Errorf("upgrade tools: %w", err))
+	}
+
+	fixedIgnoreEntries, err := a.DotsFixIgnorePatterns()
+	result.FixedIgnoreEntries = fixedIgnoreEntries
+	if err != nil {
+		errs = append(errs, fmt.Errorf("fix dotfile ignore patterns: %w", err))
+	} else if len(fixedIgnoreEntries) > 0 {
+		a.reconcileProgress(opts, "fixed dotfile ignore patterns: "+strings.Join(fixedIgnoreEntries, ", "))
 	}
 
 	dotsReady, skipReason, err := a.reconcileDotsReady()

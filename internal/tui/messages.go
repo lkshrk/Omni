@@ -25,6 +25,7 @@ type toolsLoadedMsg struct {
 	ignoreList             []string // tool names ignored by the active host
 	dotsHistory            []app.DotsHistoryEntry
 	dotsHistoryErr         string
+	dotsState              *app.DotsState
 	noConfig               bool // true when no settings.json was found
 	noHost                 bool // true when settings.json exists but no host entry matches this machine
 	err                    error
@@ -36,13 +37,12 @@ type toolsLoadedMsg struct {
 	dotsReminderServiceErr string
 	dotsWatchService       *app.DotsWatchService
 	dotsWatchServiceErr    string
-	bootstrapRequired      bool
-	allPythonManagers      []string           // all python managers found on PATH (for setup wizard)
-	allNodeManagers        []string           // all node managers found on PATH (for setup wizard)
-	setupProviders         []setupProviderRow // pre-built provider rows for the setup wizard
-	ecosystemProviders     []string           // ordered ecosystem provider names for the tools-list provider filter
-	configuredProviders    []string           // unique provider names declared in config groups (may differ from DB rows on first run)
-	providerToolCounts     map[string]int     // operation provider name → configured tool count
+	dotsConfigured         bool
+	dotsConfiguredKnown    bool
+	dotsSyncAvail          app.DotsSyncAvailability
+	dotsSyncAvailKnown     bool
+	setupProviders         []app.SetupProviderOption
+	ecosystemProviders     []string
 }
 
 type setupConfigImportDoneMsg struct {
@@ -137,8 +137,10 @@ type opCompleteMsg struct {
 
 // settingsSavedMsg is sent after an async settings save completes.
 type settingsSavedMsg struct {
-	gen int
-	err error
+	gen         int
+	settings    config.Settings
+	hasSettings bool
+	err         error
 }
 
 type doctorDoneMsg struct {
@@ -179,19 +181,20 @@ type dotsHistoryLoadedMsg struct {
 }
 
 type progressUpdate struct {
-	gen             int
-	text            string
-	rowKey          string
-	rowStatus       string
-	rowErr          string
-	rowDone         bool
-	refreshProvider string
-	refreshToolName string
-	tools           []*database.ToolCache
-	claimedNames    []string
-	toolGroups      map[string]string
-	toolMemberships map[string][]string
-	groupNames      []string
+	gen                  int
+	text                 string
+	rowKey               string
+	rowStatus            string
+	rowErr               string
+	rowDone              bool
+	refreshProvider      string
+	refreshProviderLabel string
+	refreshToolName      string
+	tools                []*database.ToolCache
+	claimedNames         []string
+	toolGroups           map[string]string
+	toolMemberships      map[string][]string
+	groupNames           []string
 }
 
 // progressMsg carries one progress update from a background operation.
@@ -250,12 +253,9 @@ type descRefreshDoneMsg struct {
 
 // setupImportDoneMsg is sent after the setup-wizard import step completes.
 type setupImportDoneMsg struct {
-	added      int
-	err        error
-	tools      []*database.ToolCache
-	toolGroups map[string]string
-	groupNames []string
-	hostInfo   *app.HostInfo
+	added    int
+	err      error
+	hostInfo *app.HostInfo
 }
 
 // setupProvidersDoneMsg is sent after the setup-wizard provider selection step saves.
@@ -314,6 +314,8 @@ type dotsSyncedMsg struct {
 	entries        []app.DotStatus
 	gitStatus      string
 	dotMemberships map[string][]string
+	settings       config.Settings
+	hasSettings    bool
 	err            error
 }
 
@@ -507,7 +509,7 @@ type migrateProviderDoneMsg struct {
 	clearedProviderOverride bool
 }
 
-// dotsIgnoredMsg is sent after DotsAddIgnorePattern completes.
+// dotsIgnoredMsg is sent after a dots ignore/include operation completes.
 type dotsIgnoredMsg struct {
 	gen            int
 	name           string

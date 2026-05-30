@@ -2,11 +2,13 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/dots"
@@ -36,6 +38,7 @@ func (a *App) DotsStatus(ctx context.Context) (*DotsStatusResult, error) {
 		return nil, err
 	}
 	statuses := entryHealth(mgr, groupMap, variantMap)
+	memberships, membershipErr := a.DotMembershipMap(ctx)
 	var gitStatus string
 	repoPath, repoErr := resolveRepoPath(a.dotsRepoPath())
 	if repoErr != nil {
@@ -45,10 +48,11 @@ func (a *App) DotsStatus(ctx context.Context) (*DotsStatusResult, error) {
 	if g.IsRepo() {
 		gitStatus, err = g.Status(ctx)
 		if err != nil {
-			return &DotsStatusResult{Entries: statuses}, fmt.Errorf("dots status: git status: %w", err)
+			return &DotsStatusResult{Entries: statuses, DotMemberships: memberships}, fmt.Errorf("dots status: git status: %w", err)
 		}
 	}
-	return &DotsStatusResult{Entries: statuses, GitStatus: gitStatus}, nil
+	result := &DotsStatusResult{Entries: statuses, GitStatus: gitStatus, DotMemberships: memberships}
+	return result, membershipErr
 }
 
 // DiscoverDotsStatus returns current tracked status plus transient untracked
@@ -282,6 +286,10 @@ func (a *App) QueryDotsStatus(ctx context.Context, opts DotsQueryOptions) (*Dots
 	result, err := a.DotsStatus(ctx)
 	if err != nil && result == nil {
 		return nil, err
+	}
+	if result != nil {
+		_, cacheErr := a.cacheDotsStatusResult(ctx, result, time.Now().UTC())
+		err = errors.Join(err, cacheErr)
 	}
 	filtered, filterErr := filterDotStatuses(result.Entries, opts)
 	if filterErr != nil {
@@ -834,5 +842,3 @@ func dotLocalKindState(kind dotLocalKind, parentState DotState) DotState {
 func isManagedDotFile(mode os.FileMode) bool {
 	return mode.IsRegular() || mode&os.ModeSymlink != 0
 }
-
-// DotsAddIgnorePattern appends a per-entry glob pattern to the named dots entry

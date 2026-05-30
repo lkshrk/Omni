@@ -36,7 +36,12 @@ func (a *App) DotsSyncContext(ctx context.Context, opts dots.SyncOptions) (ops [
 		return nil, err
 	}
 	defer func() {
-		a.recordDotsHistoryResult(ctx, "sync", "", repoPath, ops, err, opts.DryRun)
+		historyCtx := ctx
+		if opts.SuppressUnchangedHistory {
+			historyCtx = suppressUnchangedDotsHistory(historyCtx)
+		}
+		a.recordDotsHistoryResult(historyCtx, "sync", "", repoPath, ops, err, opts.DryRun)
+		a.refreshDotsStateAfterSuccess(ctx, &err, opts.DryRun)
 	}()
 	stowPath := dotsContentPath(repoPath)
 	if !opts.DryRun {
@@ -159,7 +164,12 @@ func (a *App) DotsSyncEntry(ctx context.Context, name string, opts dots.SyncOpti
 		return nil, err
 	}
 	defer func() {
-		a.recordDotsHistoryResult(ctx, "sync entry", name, repoPath, ops, err, opts.DryRun)
+		historyCtx := ctx
+		if opts.SuppressUnchangedHistory {
+			historyCtx = suppressUnchangedDotsHistory(historyCtx)
+		}
+		a.recordDotsHistoryResult(historyCtx, "sync entry", name, repoPath, ops, err, opts.DryRun)
+		a.refreshDotsStateAfterSuccess(ctx, &err, opts.DryRun)
 	}()
 	stowPath := dotsContentPath(repoPath)
 	if !opts.DryRun {

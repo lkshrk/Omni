@@ -24,7 +24,7 @@ func newListCmd(state *rootState) *cobra.Command {
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !state.app.HasConfig() {
-				fmt.Fprintln(cmd.ErrOrStderr(), "No config found. Run 'omni bootstrap' to get started.")
+				fmt.Fprintln(cmdErr(cmd), "No config found. Run 'omni bootstrap' to get started.")
 				return nil
 			}
 			if err := validateFormat(format, "table", "json"); err != nil {
@@ -48,8 +48,9 @@ func newListCmd(state *rootState) *cobra.Command {
 			if format == "json" {
 				return json.NewEncoder(cmd.OutOrStdout()).Encode(toolListOutput(items))
 			}
+			out := cmdOut(cmd)
 			if len(items) == 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "No tools match filters.")
+				fmt.Fprintln(out, "No tools match filters.")
 				return nil
 			}
 			tbl := newTable("NAME", "PROVIDER", "GROUP", "STATE", "VERSION")
@@ -62,7 +63,7 @@ func newListCmd(state *rootState) *cobra.Command {
 					displayToolVersion(item.Tool),
 				)
 			}
-			tbl.Render(cmd.OutOrStdout())
+			tbl.Render(out)
 			return nil
 		},
 	}

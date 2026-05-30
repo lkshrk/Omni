@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/lkshrk/omni/internal/dots"
 )
@@ -274,6 +275,234 @@ func conflictDotActions() []DotAction {
 
 func noSourceDotActions() []DotAction {
 	return []DotAction{DotActionRemove, DotActionIgnore}
+}
+
+func DotStatusState(status DotStatus) DotState {
+	if status.State != "" {
+		return status.State
+	}
+	switch status.Health {
+	case HealthOK:
+		return DotStateSynced
+	case HealthMissing:
+		return DotStateMissing
+	case HealthConflict:
+		return DotStateConflict
+	case HealthNoSource:
+		return DotStateNoSource
+	default:
+		return DotState(status.Health)
+	}
+}
+
+type DotStatusSection struct {
+	Title    string
+	Statuses []DotStatus
+}
+
+func DotStatusSections(statuses []DotStatus) []DotStatusSection {
+	sections := []DotStatusSection{
+		{Title: "Conflict"},
+		{Title: "Out Of Sync"},
+		{Title: "Synced"},
+		{Title: "Ignored"},
+	}
+	for _, status := range statuses {
+		switch dotStatusSectionIndex(status) {
+		case 0:
+			sections[0].Statuses = append(sections[0].Statuses, status)
+		case 2:
+			sections[2].Statuses = append(sections[2].Statuses, status)
+		case 3:
+			sections[3].Statuses = append(sections[3].Statuses, status)
+		default:
+			sections[1].Statuses = append(sections[1].Statuses, status)
+		}
+	}
+	return sections
+}
+
+func SortDotStatuses(statuses []DotStatus) {
+	sort.SliceStable(statuses, func(i, j int) bool {
+		ki, kj := dotStatusSectionIndex(statuses[i]), dotStatusSectionIndex(statuses[j])
+		if ki != kj {
+			return ki < kj
+		}
+		return statuses[i].Name < statuses[j].Name
+	})
+}
+
+func dotStatusSectionIndex(status DotStatus) int {
+	if DotStatusTransientCandidate(status) {
+		return 1
+	}
+	switch DotStatusState(status) {
+	case DotStateConflict, DotStateUntrackedConflict, DotStateAmbiguous:
+		return 0
+	case DotStateSynced:
+		return 2
+	case DotStateIgnored, DotStateInactive, DotStateDisabled:
+		return 3
+	default:
+		return 1
+	}
+}
+
+func DotStatusTransientCandidate(status DotStatus) bool {
+	if status.Group != "" {
+		return false
+	}
+	switch DotStatusState(status) {
+	case DotStateLocalOnly, DotStateRepoOnly, DotStateUntrackedConflict, DotStateUntrackedLinked, DotStateNoSource:
+		return true
+	default:
+		return false
+	}
+}
+
+func DotSyncAllPendingNames(statuses []DotStatus) map[string]bool {
+	pending := make(map[string]bool)
+	for _, status := range statuses {
+		if status.Name == "" || DotStatusTransientCandidate(status) {
+			continue
+		}
+		switch DotStatusState(status) {
+		case DotStateIgnored, DotStateInactive, DotStateDisabled:
+			continue
+		}
+		pending[status.Name] = true
+	}
+	return pending
+}
+
+func DotSyncAllEntryOrder(statuses []DotStatus) []string {
+	ordered := append([]DotStatus(nil), statuses...)
+	SortDotStatuses(ordered)
+	order := make([]string, 0, len(ordered))
+	for _, section := range DotStatusSections(ordered) {
+		for _, status := range section.Statuses {
+			if status.Name != "" {
+				order = append(order, status.Name)
+			}
+		}
+	}
+	return order
+}
+
+func DotStatusVariantEligible(status DotStatus) bool {
+	if status.Name == "" || DotStatusTransientCandidate(status) {
+		return false
+	}
+	switch DotStatusState(status) {
+	case DotStateIgnored, DotStateInactive, DotStateDisabled:
+		return false
+	default:
+		return true
+	}
+}
+
+func DotStatusIgnored(status DotStatus) bool {
+	return DotStatusState(status) == DotStateIgnored
+}
+
+func DotStatusNeedsAttention(status DotStatus) bool {
+	state := DotStatusState(status)
+	return state != DotStateSynced && state != DotStateIgnored
+}
+
+func DotStatusSyncActionLabel(status DotStatus) string {
+	switch DotStatusState(status) {
+	case DotStateMissing:
+		return "use repo"
+	case DotStateBroken:
+		return "repair"
+	case DotStateLocalOnly:
+		return "use local"
+	case DotStateRepoOnly:
+		return "use repo"
+	default:
+		return "sync"
+	}
+}
+
+func DotStatusFileCounts(status DotStatus) DotFileCounts {
+	if status.Counts.Total() > 0 || status.FileCount <= 0 {
+		return status.Counts
+	}
+	if DotStatusState(status) == DotStateSynced {
+		return DotFileCounts{Synced: status.FileCount}
+	}
+	return DotFileCounts{OutOfSync: status.FileCount}
+}
+
+func DotStatusesFileCounts(statuses []DotStatus) DotFileCounts {
+	var total DotFileCounts
+	for _, status := range statuses {
+		if DotStatusState(status) == DotStateIgnored {
+			continue
+		}
+		counts := DotStatusFileCounts(status)
+		total.Synced += counts.Synced
+		total.OutOfSync += counts.OutOfSync
+		total.Ignored += counts.Ignored
+	}
+	return total
+}
+
+func DotChildFileCounts(child DotChild, parentState DotState) DotFileCounts {
+	if child.Counts.Total() > 0 || child.FileCount <= 0 {
+		return child.Counts
+	}
+	state := parentState
+	if child.State != "" {
+		state = child.State
+	}
+	if state == DotStateSynced {
+		return DotFileCounts{Synced: child.FileCount}
+	}
+	return DotFileCounts{OutOfSync: child.FileCount}
+}
+
+func DotStateIcon(state DotState) string {
+	switch state {
+	case DotStateSynced:
+		return "✓"
+	case DotStateConflict, DotStateUntrackedConflict, DotStateAmbiguous:
+		return "✗"
+	case DotStateNoSource:
+		return "?"
+	case DotStateIgnored, DotStateInactive, DotStateDisabled:
+		return "·"
+	default:
+		return "!"
+	}
+}
+
+func DotStatusHasAction(status DotStatus, action DotAction) bool {
+	for _, candidate := range status.Actions {
+		if candidate == action {
+			return true
+		}
+	}
+	if len(status.Actions) > 0 {
+		return false
+	}
+	switch DotStatusState(status) {
+	case DotStateMissing, DotStateBroken, DotStateModified, DotStateLocalOnly, DotStateRepoOnly, DotStateUntrackedConflict:
+		if DotStatusState(status) == DotStateUntrackedConflict {
+			return action == DotActionUseRepo || action == DotActionUseLocal || action == DotActionIgnore
+		}
+		return action == DotActionSync || action == DotActionRemove || action == DotActionIgnore
+	case DotStateSynced:
+		return action == DotActionRemove || action == DotActionIgnore
+	case DotStateConflict:
+		return action == DotActionUseRepo || action == DotActionUseLocal || action == DotActionRemove || action == DotActionIgnore
+	case DotStateNoSource:
+		return action == DotActionRemove || action == DotActionIgnore
+	case DotStateIgnored:
+		return action == DotActionUnignore || action == DotActionRemove
+	}
+	return false
 }
 
 func healthForDotState(state DotState) DotHealth {

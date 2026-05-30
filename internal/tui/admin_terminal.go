@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/creack/pty"
 
+	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/executor"
 	"github.com/lkshrk/omni/internal/provider"
@@ -31,6 +33,7 @@ type adminTerminalState struct {
 	providerName           string
 	pkg                    string
 	installedWith          string
+	options                map[string]string
 	addToConfig            bool
 	addGroup               string
 	addHost                string
@@ -74,26 +77,31 @@ func (m *Model) openAdminTerminalPrompt(t *database.ToolCache, action provider.P
 }
 
 func (m *Model) adminTerminalStateForTool(t *database.ToolCache, action provider.PrivilegeAction, plan provider.PrivilegePlan) (adminTerminalState, bool) {
-	if t == nil {
+	if t == nil || m.app == nil {
 		return adminTerminalState{}, false
 	}
-	command, args, ok := m.adminTerminalCommand(action, t, plan)
+	commandPlan, ok := m.app.PrivilegedToolCommand(m.ctx, t, action, plan)
 	if !ok {
 		return adminTerminalState{}, false
 	}
+	return m.adminTerminalStateForCommand(commandPlan), true
+}
+
+func (m *Model) adminTerminalStateForCommand(commandPlan app.PrivilegedToolCommand) adminTerminalState {
 	return adminTerminalState{
-		action:        action,
-		name:          t.Name,
-		providerName:  t.Provider,
-		pkg:           effectiveToolPackage(t),
-		installedWith: t.InstalledWith,
-		reason:        plan.Reason,
-		command:       command,
-		args:          args,
-		display:       shellJoin(append([]string{command}, args...)),
+		action:        commandPlan.Action,
+		name:          commandPlan.Name,
+		providerName:  commandPlan.ProviderName,
+		pkg:           commandPlan.Package,
+		installedWith: commandPlan.InstalledWith,
+		options:       maps.Clone(commandPlan.Options),
+		reason:        commandPlan.Reason,
+		command:       commandPlan.Command,
+		args:          commandPlan.Args,
+		display:       commandPlan.Display,
 		returnMode:    m.mode,
-		rowKey:        toolKey(t.Name, t.Provider),
-	}, true
+		rowKey:        toolKey(commandPlan.Name, commandPlan.ProviderName),
+	}
 }
 
 func (m *Model) openAdminTerminalState(state adminTerminalState) bool {
@@ -105,143 +113,6 @@ func (m *Model) openAdminTerminalState(state adminTerminalState) bool {
 	m.clearListConfirmation()
 	clearStatus(m)
 	return true
-}
-
-func brewCaskAdminCommand(action provider.PrivilegeAction, t *database.ToolCache) (string, []string) {
-	verb := "uninstall"
-	switch action {
-	case provider.PrivilegeActionInstall:
-		verb = "install"
-	case provider.PrivilegeActionUpgrade:
-		verb = "upgrade"
-	}
-	return "brew", []string{verb, "--cask", effectiveToolPackage(t)}
-}
-
-func (m *Model) adminTerminalCommand(action provider.PrivilegeAction, t *database.ToolCache, plan provider.PrivilegePlan) (string, []string, bool) {
-	concrete := m.adminTerminalConcreteProvider(t, action)
-	if concrete == "" || concrete == provider.EcosystemSystem {
-		concrete = adminTerminalProviderFromPlan(plan)
-	}
-	switch concrete {
-	case "brew":
-		if !brewCaskMayPromptForPassword(plan) {
-			return "", nil, false
-		}
-		cmd, args := brewCaskAdminCommand(action, t)
-		return cmd, args, true
-	case "apt":
-		return interactivePrivilegedCommand("apt-get", adminTerminalAPTArgs(action, effectiveToolPackage(t))...)
-	case "apk":
-		return interactivePrivilegedCommand("apk", adminTerminalAPKArgs(action, effectiveToolPackage(t))...)
-	case "dnf":
-		return interactivePrivilegedCommand("dnf", adminTerminalDNFArgs(action, effectiveToolPackage(t))...)
-	case "pacman":
-		return interactivePrivilegedCommand("pacman", adminTerminalPacmanArgs(action, effectiveToolPackage(t))...)
-	case "zypper":
-		return interactivePrivilegedCommand("zypper", adminTerminalZypperArgs(action, effectiveToolPackage(t))...)
-	default:
-		return "", nil, false
-	}
-}
-
-func adminTerminalProviderFromPlan(plan provider.PrivilegePlan) string {
-	fields := strings.Fields(plan.Reason)
-	if len(fields) == 0 {
-		return ""
-	}
-	switch fields[0] {
-	case "apt", "apk", "dnf", "pacman", "zypper", "brew":
-		return fields[0]
-	default:
-		return ""
-	}
-}
-
-func (m *Model) adminTerminalConcreteProvider(t *database.ToolCache, action provider.PrivilegeAction) string {
-	if t == nil {
-		return ""
-	}
-	if t.InstalledWith != "" && t.InstalledWith != t.Provider {
-		return t.InstalledWith
-	}
-	if (action == provider.PrivilegeActionUninstall || action == provider.PrivilegeActionUpgrade) && t.InstalledWith != "" {
-		return t.InstalledWith
-	}
-	if t.Provider == provider.EcosystemSystem {
-		return m.effectiveSystemManager
-	}
-	return t.Provider
-}
-
-func interactivePrivilegedCommand(cmd string, args ...string) (string, []string, bool) {
-	if os.Geteuid() == 0 {
-		return cmd, args, true
-	}
-	return "sudo", append([]string{cmd}, args...), true
-}
-
-func adminTerminalAPTArgs(action provider.PrivilegeAction, pkg string) []string {
-	switch action {
-	case provider.PrivilegeActionInstall:
-		return []string{"install", "-y", pkg}
-	case provider.PrivilegeActionUpgrade:
-		return []string{"install", "--only-upgrade", "-y", pkg}
-	default:
-		return []string{"remove", "-y", pkg}
-	}
-}
-
-func adminTerminalAPKArgs(action provider.PrivilegeAction, pkg string) []string {
-	switch action {
-	case provider.PrivilegeActionInstall:
-		return []string{"add", pkg}
-	case provider.PrivilegeActionUpgrade:
-		return []string{"upgrade", pkg}
-	default:
-		return []string{"del", pkg}
-	}
-}
-
-func adminTerminalDNFArgs(action provider.PrivilegeAction, pkg string) []string {
-	switch action {
-	case provider.PrivilegeActionInstall:
-		return []string{"install", "-y", pkg}
-	case provider.PrivilegeActionUpgrade:
-		return []string{"upgrade", "-y", pkg}
-	default:
-		return []string{"remove", "-y", pkg}
-	}
-}
-
-func adminTerminalPacmanArgs(action provider.PrivilegeAction, pkg string) []string {
-	switch action {
-	case provider.PrivilegeActionUninstall:
-		return []string{"-R", "--noconfirm", pkg}
-	default:
-		return []string{"-S", "--noconfirm", pkg}
-	}
-}
-
-func adminTerminalZypperArgs(action provider.PrivilegeAction, pkg string) []string {
-	switch action {
-	case provider.PrivilegeActionInstall:
-		return []string{"install", "-y", pkg}
-	case provider.PrivilegeActionUpgrade:
-		return []string{"update", "-y", pkg}
-	default:
-		return []string{"remove", "-y", pkg}
-	}
-}
-
-func effectiveToolPackage(t *database.ToolCache) string {
-	if t == nil {
-		return ""
-	}
-	if t.Package != "" {
-		return t.Package
-	}
-	return t.Name
 }
 
 func (m *Model) handleAdminTerminalKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
@@ -337,76 +208,45 @@ func (m *Model) handleAdminTerminalDoneMsg(msg adminTerminalDoneMsg) []tea.Cmd {
 func (m *Model) doCompleteAdminTerminalAction(state adminTerminalState) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
 	return func() tea.Msg {
-		if err := a.CompleteExternalToolAction(ctx, state.action, state.name, state.providerName, state.pkg, state.installedWith); err != nil {
-			return opCompleteMsg{key: state.rowKey, err: err}
+		assignHosts := []string(nil)
+		if state.addHost != "" {
+			assignHosts = []string{state.addHost}
 		}
-		tools, _ := a.ListTools(ctx, "")
+		result, err := a.CompleteExternalToolActionWithState(ctx, app.CompleteExternalToolActionOptions{
+			Action:        state.action,
+			Name:          state.name,
+			ProviderName:  state.providerName,
+			Package:       state.pkg,
+			InstalledWith: state.installedWith,
+			Options:       maps.Clone(state.options),
+			AddToConfig:   state.addToConfig,
+			GroupName:     state.addGroup,
+			AssignHosts:   assignHosts,
+		})
 		msg := opCompleteMsg{
 			key:                    state.rowKey,
-			message:                adminTerminalSuccessMessage(state),
-			tools:                  tools,
 			preserveOtherRowErrors: state.preserveOtherRowErrors,
 		}
+		if err == nil {
+			msg.message = adminTerminalSuccessMessage(state)
+		}
+		if result != nil {
+			msg.tools = result.Tools
+			if result.GroupState != nil {
+				msg.groupNames = result.GroupState.GroupNames
+				msg.toolGroups = result.GroupState.ToolGroups
+				msg.toolMemberships = result.GroupState.ToolMemberships
+				msg.hostInfo = result.GroupState.HostInfo
+			}
+		}
 		if state.addToConfig && state.action == provider.PrivilegeActionInstall {
-			removeDiscovered := []string{toolKey(state.name, state.providerName)}
-			if err := a.Add(ctx, state.providerName, state.pkg, state.name, state.addGroup, ""); err != nil {
-				groupNames, toolGroups, memberships, info := m.reloadToolContext()
-				return opCompleteMsg{
-					key:                  state.rowKey,
-					err:                  fmt.Errorf("installed %s but config save failed: %w", state.name, err),
-					tools:                tools,
-					removeDiscoveredKeys: removeDiscovered,
-					groupNames:           groupNames,
-					toolGroups:           toolGroups,
-					toolMemberships:      memberships,
-					hostInfo:             info,
-				}
+			msg.removeDiscoveredKeys = []string{toolKey(state.name, state.providerName)}
+			if err == nil {
+				msg.message = "installed " + state.name + " and added to config"
 			}
-			if state.addGroup != "" {
-				if err := a.AddGroupToHost(shortHostname(), state.addGroup); err != nil {
-					groupNames, toolGroups, memberships, info := m.reloadToolContext()
-					return opCompleteMsg{
-						key:                  state.rowKey,
-						err:                  fmt.Errorf("installed %s and added to config but host update failed: %w", state.name, err),
-						tools:                tools,
-						removeDiscoveredKeys: removeDiscovered,
-						groupNames:           groupNames,
-						toolGroups:           toolGroups,
-						toolMemberships:      memberships,
-						hostInfo:             info,
-					}
-				}
-				if state.addHost != "" {
-					if err := a.AddGroupToHost(state.addHost, state.addGroup); err != nil {
-						groupNames, toolGroups, memberships, info := m.reloadToolContext()
-						return opCompleteMsg{
-							key:                  state.rowKey,
-							err:                  fmt.Errorf("installed %s and added to config but host update failed: %w", state.name, err),
-							tools:                tools,
-							removeDiscoveredKeys: removeDiscovered,
-							groupNames:           groupNames,
-							toolGroups:           toolGroups,
-							toolMemberships:      memberships,
-							hostInfo:             info,
-						}
-					}
-				}
-			}
-			tools, _ = a.ListTools(ctx, "")
-			groupNames, toolGroups, memberships, info := m.reloadToolContext()
-			msg.message = "installed " + state.name + " and added to config"
-			msg.tools = tools
-			msg.removeDiscoveredKeys = removeDiscovered
-			msg.groupNames = groupNames
-			msg.toolGroups = toolGroups
-			msg.toolMemberships = memberships
-			msg.hostInfo = info
-		} else if state.action == provider.PrivilegeActionUninstall {
-			groupNames, toolGroups, memberships, info := m.reloadToolContext()
-			msg.groupNames = groupNames
-			msg.toolGroups = toolGroups
-			msg.toolMemberships = memberships
-			msg.hostInfo = info
+		}
+		if err != nil {
+			msg.err = err
 		}
 		return msg
 	}
@@ -992,24 +832,4 @@ func sanitizeAdminTerminalOutput(s string) string {
 	s = strings.ReplaceAll(s, "\r", "\n")
 	s = strings.ReplaceAll(s, "\x00", "")
 	return s
-}
-
-func shellJoin(parts []string) string {
-	quoted := make([]string, len(parts))
-	for i, part := range parts {
-		quoted[i] = shellQuote(part)
-	}
-	return strings.Join(quoted, " ")
-}
-
-func shellQuote(s string) string {
-	if s == "" {
-		return "''"
-	}
-	if strings.IndexFunc(s, func(r rune) bool {
-		return !(r == '-' || r == '_' || r == '.' || r == '/' || r == ':' || r == '+' || r == '@' || r == '=' || r == ',' || r == '%' || r >= '0' && r <= '9' || r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z')
-	}) == -1 {
-		return s
-	}
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }

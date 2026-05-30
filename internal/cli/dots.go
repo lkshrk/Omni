@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -150,7 +149,7 @@ func newDotsSyncCmd(state *rootState) *cobra.Command {
 				if event.Done || event.Entry == "" {
 					return
 				}
-				fmt.Fprintf(out, "  %s\n", dotsCLIProgressText(event))
+				fmt.Fprintf(out, "  %s\n", app.DotsSyncProgressLineText(event))
 			}
 			if len(args) > 0 {
 				ops, err = state.app.DotsSyncEntry(cmd.Context(), args[0], opts)
@@ -163,22 +162,6 @@ func newDotsSyncCmd(state *rootState) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be done without making changes")
 	return cmd
-}
-
-func dotsCLIProgressText(event dots.SyncProgressEvent) string {
-	total := event.Total
-	if total <= 0 {
-		total = event.Index
-	}
-	index := event.Index
-	if index < 0 {
-		index = 0
-	}
-	progress := fmt.Sprintf("%d/%d", index, total)
-	if event.Entry == "" {
-		return "syncing dots " + progress
-	}
-	return fmt.Sprintf("syncing dots %s: %s", progress, event.Entry)
 }
 
 // ─── dots discover ────────────────────────────────────────────────────────────
@@ -318,8 +301,8 @@ func newDotsVariantListCmd(state *rootState) *cobra.Command {
 			if err := validateFormat(format, "table", "json"); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%-18s  %-24s  %s\n", "HOST", "PACKAGE", "ACTIVE")
-			fmt.Fprintln(cmd.OutOrStdout(), strings.Repeat("─", 54))
+			fmt.Fprintf(cmdOut(cmd), "%-18s  %-24s  %s\n", "HOST", "PACKAGE", "ACTIVE")
+			fmt.Fprintln(cmdOut(cmd), strings.Repeat("─", 54))
 			for _, variant := range variants {
 				host := variant.Host
 				if variant.Default {
@@ -329,7 +312,7 @@ func newDotsVariantListCmd(state *rootState) *cobra.Command {
 				if variant.Active {
 					active = "yes"
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "%-18s  %-24s  %s\n", host, variant.Package, active)
+				fmt.Fprintf(cmdOut(cmd), "%-18s  %-24s  %s\n", host, variant.Package, active)
 			}
 			return nil
 		},
@@ -424,7 +407,7 @@ func newDotsGroupsCmd(state *rootState) *cobra.Command {
 			}
 			name := args[0]
 			moveGroup = strings.TrimSpace(moveGroup)
-			removeGroups = normalizeDotsGroupArgs(removeGroups)
+			removeGroups = app.NormalizeGroupNames(removeGroups)
 			moveChanged := cmd.Flags().Changed("move")
 			removeChanged := cmd.Flags().Changed("remove")
 			if moveChanged && removeChanged {
@@ -437,31 +420,26 @@ func newDotsGroupsCmd(state *rootState) *cobra.Command {
 				return fmt.Errorf("--remove requires at least one group")
 			}
 
-			memberships, err := state.app.DotMembershipMap(cmd.Context())
-			if err != nil {
-				return err
-			}
-			current, ok := memberships[name]
-			if !ok || len(current) == 0 {
-				return fmt.Errorf("dots entry %q not found", name)
-			}
 			if !moveChanged && !removeChanged {
+				current, err := state.app.DotGroups(name)
+				if err != nil {
+					return err
+				}
 				fmt.Fprintf(cmd.OutOrStdout(), "%s: %s\n", name, strings.Join(current, ", "))
 				return nil
 			}
 
-			var target []string
+			var change app.DotGroupsChange
+			var err error
 			if moveChanged {
-				target = []string{moveGroup}
+				change, err = state.app.SetDotGroupsWithState(cmd.Context(), name, []string{moveGroup}, nil, "")
 			} else {
-				target = applyDotsGroupDelta(current, removeGroups)
+				change, err = state.app.RemoveDotGroupsWithState(cmd.Context(), name, removeGroups)
 			}
-			if len(target) == 0 {
-				return fmt.Errorf("dots entry %q needs at least one group; use dots delete to remove it from management", name)
-			}
-			if err := updateDotsGroups(state, name, current, target); err != nil {
+			if err != nil {
 				return err
 			}
+			target := change.DotMemberships[name]
 			fmt.Fprintf(cmd.OutOrStdout(), "moved %s to group %s\n", name, strings.Join(target, ", "))
 			return nil
 		},
@@ -471,75 +449,6 @@ func newDotsGroupsCmd(state *rootState) *cobra.Command {
 	cmd.ValidArgsFunction = completeDotNames(state)
 	_ = cmd.RegisterFlagCompletionFunc("move", completeGroupNames(state))
 	return cmd
-}
-
-func normalizeDotsGroupArgs(groups []string) []string {
-	seen := map[string]bool{}
-	out := make([]string, 0, len(groups))
-	for _, group := range groups {
-		group = strings.TrimSpace(group)
-		if group == "" {
-			continue
-		}
-		if seen[group] {
-			continue
-		}
-		seen[group] = true
-		out = append(out, group)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func applyDotsGroupDelta(current, removeGroups []string) []string {
-	set := map[string]bool{}
-	for _, group := range current {
-		set[group] = true
-	}
-	for _, group := range removeGroups {
-		delete(set, group)
-	}
-	out := make([]string, 0, len(set))
-	for group := range set {
-		out = append(out, group)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func updateDotsGroups(state *rootState, name string, current, target []string) error {
-	if len(target) == 1 {
-		currentSet := dotsGroupSet(current)
-		if len(currentSet) == 1 && currentSet[target[0]] {
-			return nil
-		}
-		return state.app.MoveDotToGroup(name, target[0])
-	}
-	currentSet := dotsGroupSet(current)
-	targetSet := dotsGroupSet(target)
-	for group := range targetSet {
-		if !currentSet[group] {
-			if err := state.app.MoveDotToGroup(name, group); err != nil {
-				return err
-			}
-		}
-	}
-	for group := range currentSet {
-		if !targetSet[group] {
-			if err := state.app.RemoveDotFromGroup(name, group); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func dotsGroupSet(groups []string) map[string]bool {
-	set := make(map[string]bool, len(groups))
-	for _, group := range groups {
-		set[group] = true
-	}
-	return set
 }
 
 // ─── dots delete ──────────────────────────────────────────────────────────────
@@ -627,16 +536,16 @@ func newDotsIgnoreCmd(state *rootState) *cobra.Command {
 				return err
 			}
 			if entry || len(args) == 1 {
-				if err := state.app.DotsSetEntryIgnored(args[0], path, true); err != nil {
+				if err := state.app.DotsSetEntryIgnoredContext(cmd.Context(), args[0], path, true); err != nil {
 					return err
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "ignored dots entry %q\n", args[0])
 				return nil
 			}
-			if err := state.app.DotsAddIgnorePattern(args[0], args[1]); err != nil {
+			if err := state.app.DotsAddIgnorePatternContext(cmd.Context(), args[0], args[1]); err != nil {
 				return err
 			}
-			ejected, ejectErr := state.app.DotsEjectIgnoredPaths(args[0], args[1])
+			ejected, ejectErr := state.app.DotsEjectIgnoredPathsContext(cmd.Context(), args[0], args[1])
 			if ejectErr != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "warning: eject failed: %v\n", ejectErr)
 			} else if ejected > 0 {
@@ -662,13 +571,13 @@ func newDotsUnignoreCmd(state *rootState) *cobra.Command {
 				return err
 			}
 			if len(args) == 1 {
-				if err := state.app.DotsSetEntryIgnored(args[0], "", false); err != nil {
+				if err := state.app.DotsSetEntryIgnoredContext(cmd.Context(), args[0], "", false); err != nil {
 					return err
 				}
 				fmt.Fprintf(cmd.OutOrStdout(), "included dots entry %q\n", args[0])
 				return nil
 			}
-			if err := state.app.DotsRemoveIgnorePattern(args[0], args[1]); err != nil {
+			if err := state.app.DotsRemoveIgnorePatternContext(cmd.Context(), args[0], args[1]); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "removed ignore pattern %q from %q\n", args[1], args[0])

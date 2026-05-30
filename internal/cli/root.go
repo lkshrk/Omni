@@ -14,6 +14,7 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/profile"
+	textutil "github.com/lkshrk/omni/internal/text"
 	"github.com/lkshrk/omni/internal/tui"
 )
 
@@ -114,6 +115,10 @@ Already set up?
 		"omni cache directory for the database (default: $XDG_CACHE_HOME/omni)")
 	root.PersistentFlags().BoolVarP(&state.yes, "yes", "y", false,
 		"assume yes for confirmation prompts")
+
+	symbols := textutil.SymbolsFromEnv()
+	root.SetOut(symbols.Writer(os.Stdout))
+	root.SetErr(symbols.Writer(os.Stderr))
 
 	root.AddCommand(
 		newBootstrapCmd(state),

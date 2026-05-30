@@ -27,10 +27,33 @@ const (
 	dotsReminderServiceMacOS = "launchd"
 )
 
+var dotsReminderIntervalChoices = []time.Duration{
+	15 * time.Minute,
+	30 * time.Minute,
+	time.Hour,
+	4 * time.Hour,
+	12 * time.Hour,
+	24 * time.Hour,
+	48 * time.Hour,
+	7 * 24 * time.Hour,
+}
+
 // DefaultDotsReminderInterval is the interval used when no reminder interval
 // is specified.
 func DefaultDotsReminderInterval() time.Duration {
 	return defaultReminderInterval
+}
+
+// DotsReminderIntervalChoices returns preset intervals for reminder controls.
+func DotsReminderIntervalChoices() []time.Duration {
+	return append([]time.Duration(nil), dotsReminderIntervalChoices...)
+}
+
+func DotsReminderInterval(service *DotsReminderService) time.Duration {
+	if service != nil && service.Interval > 0 {
+		return service.Interval
+	}
+	return DefaultDotsReminderInterval()
 }
 
 // DotsReminderReason explains one reason a reminder should be shown.

@@ -21,7 +21,7 @@ func newProvidersCmd(state *rootState) *cobra.Command {
 				}
 				tbl.AddRow(p.Name, avail, p.Description)
 			}
-			tbl.Render(cmd.OutOrStdout())
+			tbl.Render(cmdOut(cmd))
 			return nil
 		},
 	}

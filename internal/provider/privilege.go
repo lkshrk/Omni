@@ -39,6 +39,12 @@ type PrivilegePlanner interface {
 	PrivilegePlan(ctx context.Context, action PrivilegeAction, tool Tool) (PrivilegePlan, error)
 }
 
+// PrivilegeCommandPlanner returns the raw package-manager command for an
+// interactive privileged action. Callers own sudo policy.
+type PrivilegeCommandPlanner interface {
+	PrivilegeCommand(action PrivilegeAction, tool Tool) (cmd string, args []string, ok bool)
+}
+
 func SystemPrivilegePlan(providerName string, action PrivilegeAction, tool Tool) PrivilegePlan {
 	pkg := tool.EffectivePackage()
 	reason := providerName + " " + string(action)
@@ -46,6 +52,19 @@ func SystemPrivilegePlan(providerName string, action PrivilegeAction, tool Tool)
 		reason += " " + pkg
 	}
 	return PrivilegePlan{Requirement: PrivilegeRequired, Reason: reason}
+}
+
+func SystemPrivilegePlanProvider(plan PrivilegePlan) string {
+	fields := strings.Fields(plan.Reason)
+	if len(fields) == 0 {
+		return ""
+	}
+	switch fields[0] {
+	case "apt", "apk", "dnf", "pacman", "zypper", "brew":
+		return fields[0]
+	default:
+		return ""
+	}
 }
 
 func ClassifyPrivilegeError(err error) (PrivilegePlan, bool) {

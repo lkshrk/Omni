@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/lkshrk/omni/internal/actions"
+	"github.com/lkshrk/omni/internal/app"
 	syncprogress "github.com/lkshrk/omni/internal/sync"
 )
 
@@ -34,18 +35,19 @@ Examples:
 				if len(args) > 0 {
 					return fmt.Errorf("--all and a tool name are mutually exclusive")
 				}
-				out := cmd.OutOrStdout()
+				out := cmdOut(cmd)
 				result, err := a.UpgradeAllDetailed(ctx, func(msg string) {
 					fmt.Fprintf(out, "  %s\n", msg)
 				}, func(event syncprogress.ProgressEvent) {
 					if !event.Done {
 						return
 					}
+					name := app.ToolNameWithVersion(event.Tool.Name, event.TargetVersion)
 					if event.Err != nil {
-						fmt.Fprintf(out, "  ! failed: %s (%s): %v\n", event.Tool.Name, event.Tool.Provider, event.Err)
+						fmt.Fprintf(out, "  ! failed: %s (%s): %v\n", name, event.Tool.Provider, event.Err)
 						return
 					}
-					fmt.Fprintf(out, "  ✓ upgraded: %s (%s)\n", event.Tool.Name, event.Tool.Provider)
+					fmt.Fprintf(out, "  ✓ upgraded: %s (%s)\n", name, event.Tool.Provider)
 				})
 				if err != nil {
 					return err
@@ -66,7 +68,7 @@ Examples:
 			if err := a.Upgrade(ctx, name, providerName); err != nil {
 				return err
 			}
-			fmt.Printf("✓ upgraded %s (%s)\n", name, providerName)
+			fmt.Fprintf(cmdOut(cmd), "✓ upgraded %s (%s)\n", name, providerName)
 			return nil
 		},
 	}

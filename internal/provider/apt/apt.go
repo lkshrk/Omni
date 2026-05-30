@@ -33,24 +33,39 @@ func (p *Provider) Available(ctx context.Context) (bool, error) {
 
 func (p *Provider) Install(ctx context.Context, tool provider.Tool) error {
 	pkg := tool.EffectivePackage()
-	cmd, args := provider.PrivilegedCommand("apt-get", "install", "-y", pkg)
+	rawCmd, rawArgs, _ := p.PrivilegeCommand(provider.PrivilegeActionInstall, tool)
+	cmd, args := provider.PrivilegedCommand(rawCmd, rawArgs...)
 	return provider.RunCmd(ctx, p.exec, "apt-get install "+pkg, cmd, args...)
 }
 
 func (p *Provider) Uninstall(ctx context.Context, tool provider.Tool) error {
 	pkg := tool.EffectivePackage()
-	cmd, args := provider.PrivilegedCommand("apt-get", "remove", "-y", pkg)
+	rawCmd, rawArgs, _ := p.PrivilegeCommand(provider.PrivilegeActionUninstall, tool)
+	cmd, args := provider.PrivilegedCommand(rawCmd, rawArgs...)
 	return provider.RunCmd(ctx, p.exec, "apt-get remove "+pkg, cmd, args...)
 }
 
 func (p *Provider) Upgrade(ctx context.Context, tool provider.Tool) error {
 	pkg := tool.EffectivePackage()
-	cmd, args := provider.PrivilegedCommand("apt-get", "install", "--only-upgrade", "-y", pkg)
+	rawCmd, rawArgs, _ := p.PrivilegeCommand(provider.PrivilegeActionUpgrade, tool)
+	cmd, args := provider.PrivilegedCommand(rawCmd, rawArgs...)
 	return provider.RunCmd(ctx, p.exec, "apt-get upgrade "+pkg, cmd, args...)
 }
 
 func (p *Provider) PrivilegePlan(_ context.Context, action provider.PrivilegeAction, tool provider.Tool) (provider.PrivilegePlan, error) {
 	return provider.SystemPrivilegePlan(p.Name(), action, tool), nil
+}
+
+func (p *Provider) PrivilegeCommand(action provider.PrivilegeAction, tool provider.Tool) (string, []string, bool) {
+	pkg := tool.EffectivePackage()
+	switch action {
+	case provider.PrivilegeActionInstall:
+		return "apt-get", []string{"install", "-y", pkg}, true
+	case provider.PrivilegeActionUpgrade:
+		return "apt-get", []string{"install", "--only-upgrade", "-y", pkg}, true
+	default:
+		return "apt-get", []string{"remove", "-y", pkg}, true
+	}
 }
 
 func (p *Provider) IsInstalled(ctx context.Context, tool provider.Tool) (bool, string, error) {

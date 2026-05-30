@@ -17,7 +17,7 @@ func newRefreshCmd(state *rootState) *cobra.Command {
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
-			out := cmd.OutOrStdout()
+			out := cmdOut(cmd)
 			progress := func(msg string) {
 				fmt.Fprintf(out, "  %s\n", msg)
 			}

@@ -2,11 +2,12 @@ package cli
 
 import (
 	"fmt"
-	"strings"
+	"io"
 
 	"github.com/spf13/cobra"
 
 	"github.com/lkshrk/omni/internal/app"
+	textutil "github.com/lkshrk/omni/internal/text"
 )
 
 func newConsolidateCmd(state *rootState) *cobra.Command {
@@ -36,6 +37,7 @@ Ecosystems and managers:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			a := state.app
+			out := cmdOut(cmd)
 
 			// Provider mode: --to <provider>
 			if toProvider != "" {
@@ -43,12 +45,12 @@ Ecosystems and managers:
 					return fmt.Errorf("--to and positional args are mutually exclusive")
 				}
 				res, err := a.ConsolidateToProvider(ctx, toProvider, dryRun, func(msg string) {
-					fmt.Printf("  %s\n", msg)
+					fmt.Fprintf(out, "  %s\n", msg)
 				})
 				if err != nil {
 					return err
 				}
-				printProviderConsolidateResult(res, toProvider, dryRun)
+				printProviderConsolidateResult(out, res, toProvider, dryRun)
 				return nil
 			}
 
@@ -63,36 +65,36 @@ Ecosystems and managers:
 				if err != nil {
 					return err
 				}
-				fmt.Printf("Dry-run — consolidating %s tools → %s\n\n", ecosystem, manager)
+				fmt.Fprintf(out, "Dry-run — consolidating %s tools → %s\n\n", ecosystem, manager)
 				if len(plan.Migrated) == 0 {
-					fmt.Println("  Nothing to migrate (settings would be updated).")
+					fmt.Fprintln(out, "  Nothing to migrate (settings would be updated).")
 					return nil
 				}
 				for _, m := range plan.Migrated {
-					fmt.Printf("  → would migrate: %s (from %s)\n", m.Name, m.FromProvider)
+					fmt.Fprintf(out, "  → would migrate: %s (from %s)\n", m.Name, m.FromProvider)
 				}
-				fmt.Printf("\n  %d tool(s) would be migrated.\n", len(plan.Migrated))
+				fmt.Fprintf(out, "\n  %s would be migrated.\n", textutil.PluralCount(len(plan.Migrated), "tool", "tools"))
 				return nil
 			}
 
 			res, err := a.Consolidate(ctx, ecosystem, manager, func(msg string) {
-				fmt.Printf("  %s\n", msg)
+				fmt.Fprintf(out, "  %s\n", msg)
 			})
 			if err != nil {
 				return err
 			}
 
 			if len(res.Migrated) == 0 && len(res.Failed) == 0 {
-				fmt.Printf("Consolidated %s → %s: nothing to migrate", ecosystem, manager)
+				fmt.Fprintf(out, "Consolidated %s → %s: nothing to migrate", ecosystem, manager)
 				if res.SettingsUpdated {
-					fmt.Printf(" (settings updated)")
+					fmt.Fprint(out, " (settings updated)")
 				}
-				fmt.Println()
+				fmt.Fprintln(out)
 				return nil
 			}
 
-			fmt.Printf("Consolidated %s tools → %s:\n", ecosystem, manager)
-			printConsolidateLines(res, manager)
+			fmt.Fprintf(out, "Consolidated %s tools → %s:\n", ecosystem, manager)
+			printConsolidateLines(out, res, manager)
 			return nil
 		},
 	}
@@ -103,48 +105,38 @@ Ecosystems and managers:
 	return cmd
 }
 
-func printProviderConsolidateResult(res *app.ConsolidateResult, provider string, dryRun bool) {
+func printProviderConsolidateResult(out io.Writer, res *app.ConsolidateResult, provider string, dryRun bool) {
 	if dryRun {
-		fmt.Printf("Dry-run — consolidating all tools → %s\n\n", provider)
+		fmt.Fprintf(out, "Dry-run — consolidating all tools → %s\n\n", provider)
 		if len(res.Migrated) == 0 {
-			fmt.Println("  Nothing to migrate.")
+			fmt.Fprintln(out, "  Nothing to migrate.")
 			return
 		}
 		for _, m := range res.Migrated {
-			fmt.Printf("  → would migrate: %s (from %s)\n", m.Name, m.FromProvider)
+			fmt.Fprintf(out, "  → would migrate: %s (from %s)\n", m.Name, m.FromProvider)
 		}
-		fmt.Printf("\n  %d tool(s) would be migrated.\n", len(res.Migrated))
+		fmt.Fprintf(out, "\n  %s would be migrated.\n", textutil.PluralCount(len(res.Migrated), "tool", "tools"))
 		return
 	}
 
 	if len(res.Migrated) == 0 && len(res.Failed) == 0 {
-		fmt.Printf("All tools already on %s.\n", provider)
+		fmt.Fprintf(out, "All tools already on %s.\n", provider)
 		return
 	}
 
-	fmt.Printf("Consolidated all tools → %s:\n", provider)
-	printConsolidateLines(res, provider)
+	fmt.Fprintf(out, "Consolidated all tools → %s:\n", provider)
+	printConsolidateLines(out, res, provider)
 }
 
-func printConsolidateLines(res *app.ConsolidateResult, manager string) {
+func printConsolidateLines(out io.Writer, res *app.ConsolidateResult, manager string) {
 	for _, m := range res.Migrated {
-		fmt.Printf("  ✓ %s  %s → %s\n", m.Name, m.FromProvider, manager)
+		fmt.Fprintf(out, "  ✓ %s  %s → %s\n", m.Name, m.FromProvider, manager)
 	}
 	for _, f := range res.Failed {
-		fmt.Printf("  ✗ %s  %s → %s: %v\n", f.Name, f.FromProvider, manager, f.Err)
+		fmt.Fprintf(out, "  ✗ %s  %s → %s: %v\n", f.Name, f.FromProvider, manager, f.Err)
 	}
 	for _, w := range res.UninstallWarnings {
-		fmt.Printf("  ! %s  could not remove from %s: %v\n", w.Name, w.FromProvider, w.Err)
+		fmt.Fprintf(out, "  ! %s  could not remove from %s: %v\n", w.Name, w.FromProvider, w.Err)
 	}
-	parts := []string{fmt.Sprintf("%d migrated", len(res.Migrated))}
-	if len(res.Failed) > 0 {
-		parts = append(parts, fmt.Sprintf("%d failed", len(res.Failed)))
-	}
-	if len(res.UninstallWarnings) > 0 {
-		parts = append(parts, fmt.Sprintf("%d uninstall warning(s)", len(res.UninstallWarnings)))
-	}
-	if res.SettingsUpdated {
-		parts = append(parts, "settings updated")
-	}
-	fmt.Println("  " + strings.Join(parts, ", "))
+	fmt.Fprintln(out, "  "+app.ConsolidateSummaryText(res, ""))
 }

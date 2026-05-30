@@ -8,6 +8,8 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/lkshrk/omni/internal/app"
 )
 
 func (m *Model) handleGroupsKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
@@ -76,7 +78,7 @@ func (e groupAssignmentEditor) snapshot() (string, map[string]bool, map[string]b
 }
 
 func (e groupAssignmentEditor) changed() bool {
-	return boolMapsChanged(e.membership, e.originalMembership)
+	return app.GroupAssignmentChanged(e.membership, e.originalMembership)
 }
 
 func (m *Model) handleGroupToolsKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
@@ -252,7 +254,7 @@ func (m *Model) saveGroupToolsEditor(cmds *[]tea.Cmd) {
 	group, membership, originalMembership := m.groupToolsEditor.snapshot()
 	ignores := copyBoolMap(m.groupToolsIgnore)
 	originalIgnores := copyBoolMap(m.groupToolsOriginalIgnore)
-	if !groupToolsChanged(membership, originalMembership, ignores, originalIgnores) {
+	if !app.GroupToolsEditorChanged(membership, originalMembership, ignores, originalIgnores) {
 		m.closeGroupToolsEditor()
 		return
 	}
@@ -280,45 +282,6 @@ func copyBoolMap(in map[string]bool) map[string]bool {
 		out[k] = v
 	}
 	return out
-}
-
-func copyStringIntMap(in map[string]int) map[string]int {
-	out := make(map[string]int, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
-}
-
-func boolMapsChanged(current, original map[string]bool) bool {
-	for name, value := range current {
-		if original[name] != value {
-			return true
-		}
-	}
-	for name, value := range original {
-		if current[name] != value {
-			return true
-		}
-	}
-	return false
-}
-
-func groupToolsChanged(membership, originalMembership, ignores, originalIgnores map[string]bool) bool {
-	if boolMapsChanged(membership, originalMembership) {
-		return true
-	}
-	for name, value := range ignores {
-		if originalIgnores[name] != value {
-			return true
-		}
-	}
-	for name, value := range originalIgnores {
-		if ignores[name] != value {
-			return true
-		}
-	}
-	return false
 }
 
 func (m *Model) handleHostSubmodeKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
@@ -454,8 +417,8 @@ func (m *Model) handleHostSubmodeKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
 				return true, cmds
 			}
 			host := m.hostEditName
-			before := editableHostAssignmentGroups(host, m.hostOriginalGroups)
-			after := editableHostAssignmentGroups(host, m.hostGroupDraft)
+			before := app.EditableHostAssignmentGroups(host, m.hostOriginalGroups)
+			after := app.EditableHostAssignmentGroups(host, m.hostGroupDraft)
 			created := append([]string(nil), m.pickerCreatedGroups...)
 			m.clearHostPickerState()
 			if host != "" {
@@ -629,13 +592,13 @@ func (m *Model) startHostGroupEdit(cmds *[]tea.Cmd) {
 	if host == "" || m.hostInfo == nil {
 		return
 	}
-	all := buildHostAssignmentPickerGroups(host, m.groupNames)
+	all := app.HostAssignmentPickerGroups(host, m.groupNames)
 	if len(all) == 0 {
 		*cmds = append(*cmds, setStatus(m, "no groups configured", false))
 		return
 	}
 	m.hostGroupPicker = append(append([]string(nil), all...), groupPickerNewSentinel)
-	m.hostGroupDraft = hostAssignmentDraftGroups(host, m.hostInfo.Hosts[host].Groups)
+	m.hostGroupDraft = app.HostAssignmentDraftGroups(host, m.hostInfo.Hosts[host].Groups)
 	m.hostOriginalGroups = append([]string(nil), m.hostGroupDraft...)
 	m.hostGroupIdx = 0
 	m.hostEditName = host
@@ -679,24 +642,6 @@ func (m Model) groupHasContent(group string) bool {
 	return false
 }
 
-func buildHostAssignmentPickerGroups(host string, groupNames []string) []string {
-	names := make([]string, 0, len(groupNames)+1)
-	if host != "" {
-		names = append(names, host)
-	}
-	reusable := append([]string(nil), groupNames...)
-	sort.Strings(reusable)
-	seen := map[string]bool{host: true}
-	for _, name := range reusable {
-		if seen[name] {
-			continue
-		}
-		seen[name] = true
-		names = append(names, name)
-	}
-	return names
-}
-
 func (m *Model) startGroupRename() {
 	group := m.selectedHostGroupName()
 	if m.assignmentSection != 1 || group == "" || isProtectedGroupName(group) {
@@ -729,7 +674,7 @@ func (m *Model) canCopySelectedHostGroups() bool {
 }
 
 func isProtectedGroupName(group string) bool {
-	return group == "" || group == shortHostname()
+	return app.IsCurrentMachineGroup(group)
 }
 
 func (m *Model) startHostGroupToolsEdit() {
@@ -804,46 +749,6 @@ func (m *Model) confirmCopySelectedHostGroups(cmds *[]tea.Cmd) {
 	*cmds = append(*cmds, m.armConfirmationTimeout())
 }
 
-func hostAssignmentDraftGroups(host string, groups []string) []string {
-	out := []string{}
-	if host != "" {
-		out = append(out, host)
-	}
-	for _, group := range groups {
-		if group == "" || group == host || slices.Contains(out, group) {
-			continue
-		}
-		out = append(out, group)
-	}
-	sort.Strings(out)
-	if host != "" {
-		out = moveStringToFront(out, host)
-	}
-	return out
-}
-
-func editableHostAssignmentGroups(host string, groups []string) []string {
-	out := []string{}
-	for _, group := range groups {
-		if group == "" || group == host || slices.Contains(out, group) {
-			continue
-		}
-		out = append(out, group)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func moveStringToFront(groups []string, first string) []string {
-	idx := slices.Index(groups, first)
-	if idx <= 0 {
-		return groups
-	}
-	out := append([]string{groups[idx]}, groups[:idx]...)
-	out = append(out, groups[idx+1:]...)
-	return out
-}
-
 func (m *Model) applyCopiedHost(host string) {
 	if m.hostInfo != nil && m.hostInfo.Active != "" {
 		host = m.hostInfo.Active
@@ -855,7 +760,7 @@ func (m *Model) applyCopiedHost(host string) {
 	m.hostRequired = false
 	m.groupFilter = ""
 	m.groupTabIdx = 0
-	m.toolGroups = compactToolGroupMapForHost(m.toolMemberships, m.hostInfo)
+	m.toolGroups = app.ToolGroupLabels(m.toolMemberships, m.hostInfo)
 	m.applyHostIgnoreState(host)
 	m.applyFilter()
 }

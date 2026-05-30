@@ -17,6 +17,12 @@ type Provider struct {
 	mu   sync.RWMutex
 }
 
+const (
+	brewKindOption  = "brew_kind"
+	brewKindFormula = "formula"
+	brewKindCask    = "cask"
+)
+
 func New(exec executor.Executor) *Provider {
 	return &Provider{exec: exec}
 }
@@ -40,11 +46,24 @@ func (p *Provider) Available(ctx context.Context) (bool, error) {
 func (p *Provider) Install(ctx context.Context, tool provider.Tool) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	_, stderr, err := p.exec.Run(ctx, "brew", "install", tool.EffectivePackage())
+	args := installArgs(tool)
+	_, stderr, err := p.exec.Run(ctx, "brew", args...)
 	if err != nil {
-		return fmt.Errorf("brew install %s: %w (stderr: %s)", tool.EffectivePackage(), err, strings.TrimSpace(stderr))
+		return fmt.Errorf("brew %s: %w (stderr: %s)", strings.Join(args, " "), err, strings.TrimSpace(stderr))
 	}
 	return nil
+}
+
+func installArgs(tool provider.Tool) []string {
+	pkg := tool.EffectivePackage()
+	switch tool.Options[brewKindOption] {
+	case brewKindFormula:
+		return []string{"install", "--formula", pkg}
+	case brewKindCask:
+		return []string{"install", "--cask", pkg}
+	default:
+		return []string{"install", pkg}
+	}
 }
 
 func (p *Provider) Uninstall(ctx context.Context, tool provider.Tool) error {
@@ -60,11 +79,33 @@ func (p *Provider) Uninstall(ctx context.Context, tool provider.Tool) error {
 func (p *Provider) Upgrade(ctx context.Context, tool provider.Tool) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	_, stderr, err := p.exec.Run(ctx, "brew", "upgrade", tool.EffectivePackage())
+	args := p.upgradeArgs(ctx, tool.EffectivePackage())
+	_, stderr, err := p.exec.Run(ctx, "brew", args...)
 	if err != nil {
-		return fmt.Errorf("brew upgrade %s: %w (stderr: %s)", tool.EffectivePackage(), err, strings.TrimSpace(stderr))
+		return fmt.Errorf("brew %s: %w (stderr: %s)", strings.Join(args, " "), err, strings.TrimSpace(stderr))
 	}
 	return nil
+}
+
+func (p *Provider) upgradeArgs(ctx context.Context, pkg string) []string {
+	name := formulaName(pkg)
+	if p.installedFormula(ctx, name) {
+		return []string{"upgrade", "--formula", pkg}
+	}
+	if p.installedCask(ctx, name) {
+		return []string{"upgrade", "--cask", name}
+	}
+	return []string{"upgrade", pkg}
+}
+
+func (p *Provider) installedFormula(ctx context.Context, name string) bool {
+	stdout, _, err := p.exec.Run(ctx, "brew", "list", "--versions", name)
+	return err == nil && strings.TrimSpace(stdout) != ""
+}
+
+func (p *Provider) installedCask(ctx context.Context, name string) bool {
+	stdout, _, err := p.exec.Run(ctx, "brew", "list", "--versions", "--cask", name)
+	return err == nil && strings.TrimSpace(stdout) != ""
 }
 
 // IsInstalled checks whether a formula or cask is installed.
@@ -114,17 +155,12 @@ type brewCaskInfo struct {
 	Artifacts []map[string]json.RawMessage `json:"artifacts"`
 }
 
-// ListInstalled returns explicitly installed formulae for import/discovery.
-// Casks are intentionally excluded here so ordinary macOS apps do not get
-// claimed as tools; InstalledMap/OutdatedMap still include casks for tracked
-// cask status and updates.
+// ListInstalled returns Homebrew-managed formulae and casks for import/discovery.
+// Casks come from `brew list --cask`, so ordinary macOS apps that merely exist
+// on disk are not claimed as tools.
 func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.installedFormulae(ctx)
-}
-
-func (p *Provider) installedStatusTools(ctx context.Context) ([]provider.InstalledTool, error) {
 	formulae, err := p.installedFormulae(ctx)
 	if err != nil {
 		return nil, err
@@ -141,15 +177,13 @@ func (p *Provider) installedStatusTools(ctx context.Context) ([]provider.Install
 
 // InstalledMap returns explicitly installed formulae and casks as lowercase-name→version map.
 func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	tools, err := p.installedStatusTools(ctx)
+	metadata, err := p.InstalledMetadataMap(ctx)
 	if err != nil {
 		return nil, err
 	}
-	m := make(map[string]string, len(tools))
-	for _, t := range tools {
-		m[strings.ToLower(t.Name)] = t.Version
+	m := make(map[string]string, len(metadata))
+	for name, entry := range metadata {
+		m[name] = entry.Version
 	}
 	return m, nil
 }
@@ -181,51 +215,47 @@ func (p *Provider) installedFormulae(ctx context.Context) ([]provider.InstalledT
 }
 
 func (p *Provider) installedCasks(ctx context.Context) ([]provider.InstalledTool, error) {
-	casks, err := p.installedCaskInfos(ctx)
+	tokens, err := p.installedCaskTokens(ctx)
 	if err != nil {
 		return nil, err
 	}
-	tools := make([]provider.InstalledTool, 0, len(casks))
-	for _, c := range casks {
-		if c.Token == "" {
-			continue
-		}
+	if len(tokens) == 0 {
+		return nil, nil
+	}
+	args := append([]string{"list", "--versions", "--cask"}, tokens...)
+	stdout, _, err := p.exec.Run(ctx, "brew", args...)
+	if err != nil {
+		return nil, fmt.Errorf("brew list --versions --cask: %w", err)
+	}
+	versions := parseBrewListVersions(stdout)
+	tools := make([]provider.InstalledTool, 0, len(tokens))
+	for _, token := range tokens {
 		tools = append(tools, provider.InstalledTool{
-			Tool:    provider.Tool{Name: c.Token, Provider: "brew", Package: c.Token},
-			Version: c.Installed,
+			Tool:    provider.Tool{Name: token, Provider: "brew", Package: token},
+			Version: lookupBrewListVersion(versions, token),
 		})
 	}
 	return tools, nil
 }
 
-func (p *Provider) installedCaskInfos(ctx context.Context) ([]brewCaskInfo, error) {
+func (p *Provider) installedCaskTokens(ctx context.Context) ([]string, error) {
 	stdout, _, err := p.exec.Run(ctx, "brew", "list", "--cask")
 	if err != nil {
 		return nil, fmt.Errorf("brew list --cask: %w", err)
 	}
-	tokens := strings.Fields(stdout)
-	if len(tokens) == 0 {
-		return nil, nil
-	}
+	return strings.Fields(stdout), nil
+}
 
-	args := append([]string{"info", "--json=v2", "--cask"}, tokens...)
-	out, err := p.info(ctx, args...)
+func (p *Provider) installedCaskTokenSet(ctx context.Context) (map[string]struct{}, error) {
+	tokens, err := p.installedCaskTokens(ctx)
 	if err != nil {
 		return nil, err
 	}
-	infoByToken := make(map[string]brewCaskInfo, len(out.Casks))
-	for _, c := range out.Casks {
-		infoByToken[strings.ToLower(c.Token)] = c
-	}
-	casks := make([]brewCaskInfo, 0, len(tokens))
+	set := make(map[string]struct{}, len(tokens))
 	for _, token := range tokens {
-		if c, ok := infoByToken[strings.ToLower(token)]; ok {
-			casks = append(casks, c)
-			continue
-		}
-		casks = append(casks, brewCaskInfo{Token: token})
+		set[strings.ToLower(token)] = struct{}{}
 	}
-	return casks, nil
+	return set, nil
 }
 
 func parseBrewListVersions(output string) map[string]string {
@@ -260,24 +290,50 @@ func lookupBrewListVersion(versions map[string]string, pkg string) string {
 func (p *Provider) InstalledMetadataMap(ctx context.Context) (map[string]provider.InstalledMetadata, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	formulae, err := p.installedFormulae(ctx)
+	out, err := p.info(ctx, "info", "--json=v2", "--installed")
 	if err != nil {
 		return nil, err
 	}
-	casks, err := p.installedCaskInfos(ctx)
+	caskTokens, err := p.installedCaskTokenSet(ctx)
 	if err != nil {
 		return nil, err
 	}
-	metadata := make(map[string]provider.InstalledMetadata, len(formulae)+len(casks))
-	for _, f := range formulae {
-		metadata[strings.ToLower(f.Name)] = provider.InstalledMetadata{Version: f.Version}
+
+	metadata := make(map[string]provider.InstalledMetadata, len(out.Formulae)+len(caskTokens))
+	for _, f := range out.Formulae {
+		if len(f.Installed) == 0 || !f.Installed[0].InstalledOnRequest {
+			continue
+		}
+		name := f.Name
+		if name == "" {
+			name = formulaName(f.FullName)
+		}
+		if name == "" {
+			continue
+		}
+		metadata[strings.ToLower(name)] = provider.InstalledMetadata{Version: f.Installed[0].Version}
 	}
-	for _, c := range casks {
+
+	seenCasks := make(map[string]struct{}, len(caskTokens))
+	for _, c := range out.Casks {
+		key := strings.ToLower(c.Token)
+		if key == "" {
+			continue
+		}
+		if _, ok := caskTokens[key]; !ok {
+			continue
+		}
 		entry := provider.InstalledMetadata{Version: c.Installed}
 		if plan := c.privilegePlan(provider.PrivilegeActionUninstall); plan.RequiresPrivilege() {
 			entry.Privilege = plan
 		}
-		metadata[strings.ToLower(c.Token)] = entry
+		metadata[key] = entry
+		seenCasks[key] = struct{}{}
+	}
+	for token := range caskTokens {
+		if _, ok := seenCasks[token]; !ok {
+			metadata[token] = provider.InstalledMetadata{}
+		}
 	}
 	return metadata, nil
 }
@@ -308,6 +364,17 @@ func (p *Provider) PrivilegePlan(ctx context.Context, action provider.PrivilegeA
 		return cask.privilegePlan(action), nil
 	}
 	return provider.PrivilegePlan{}, nil
+}
+
+func (p *Provider) PrivilegeCommand(action provider.PrivilegeAction, tool provider.Tool) (string, []string, bool) {
+	verb := "uninstall"
+	switch action {
+	case provider.PrivilegeActionInstall:
+		verb = "install"
+	case provider.PrivilegeActionUpgrade:
+		verb = "upgrade"
+	}
+	return "brew", []string{verb, "--cask", tool.EffectivePackage()}, true
 }
 
 func (c brewCaskInfo) privilegePlan(action provider.PrivilegeAction) provider.PrivilegePlan {
@@ -531,14 +598,31 @@ func (p *Provider) Search(ctx context.Context, query string) ([]provider.SearchR
 		return nil, fmt.Errorf("brew search: %w", err)
 	}
 	var results []provider.SearchResult
+	kind := ""
 	for _, line := range strings.Split(stdout, "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "==>") {
+		if line == "" {
+			continue
+		}
+		switch line {
+		case "==> Formulae":
+			kind = brewKindFormula
+			continue
+		case "==> Casks":
+			kind = brewKindCask
+			continue
+		}
+		if strings.HasPrefix(line, "==>") {
+			kind = ""
 			continue
 		}
 		// Each output line may contain multiple space-separated formula names.
 		for _, name := range strings.Fields(line) {
-			results = append(results, provider.SearchResult{Name: name, Provider: "brew"})
+			result := provider.SearchResult{Name: name, Provider: "brew"}
+			if kind != "" {
+				result.Options = map[string]string{brewKindOption: kind}
+			}
+			results = append(results, result)
 		}
 	}
 	p.enrichSearchResults(ctx, results)

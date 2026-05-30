@@ -24,6 +24,7 @@ func (a *App) DotsDeleteWithOptions(ctx context.Context, name string, opts DotsD
 	repoPath := ""
 	defer func() {
 		a.recordDotsHistoryResult(ctx, "delete", name, repoPath, nil, err, false)
+		a.refreshDotsStateAfterSuccess(ctx, &err, false)
 	}()
 	if err := dots.ValidateEntryName(name); err != nil {
 		return fmt.Errorf("dots delete: %w", err)
@@ -185,30 +186,7 @@ func (a *App) MoveDotToGroup(name, groupName string) error {
 		if err := a.requireDotsEnabled(cfg); err != nil {
 			return err
 		}
-		template, ok := findDotEntryInConfig(cfg, name)
-		if !ok {
-			return fmt.Errorf("dots entry %q not found", name)
-		}
-		group := ensureGroupInConfig(cfg, groupName)
-		changed := false
-		for _, existing := range cfg.Groups {
-			if existing == nil || existing.BaseName() == groupName {
-				continue
-			}
-			if filterDotMemberships(existing, name) {
-				changed = true
-			}
-		}
-		for _, entry := range group.Dots {
-			if entry.Name == name {
-				if !changed {
-					return errSkipSave
-				}
-				return nil
-			}
-		}
-		group.Dots = append(group.Dots, template)
-		return nil
+		return moveDotToGroupInConfig(cfg, name, groupName)
 	})
 }
 
@@ -221,18 +199,7 @@ func (a *App) RemoveDotFromGroup(name, groupName string) error {
 		if err := a.requireDotsEnabled(cfg); err != nil {
 			return err
 		}
-		group := findGroupInConfig(cfg, groupName)
-		if group == nil {
-			return fmt.Errorf("group %q not found", groupName)
-		}
-		for i, entry := range group.Dots {
-			if entry.Name != name {
-				continue
-			}
-			group.Dots = append(group.Dots[:i], group.Dots[i+1:]...)
-			return nil
-		}
-		return errSkipSave
+		return removeDotFromGroupInConfig(cfg, name, groupName)
 	})
 }
 
