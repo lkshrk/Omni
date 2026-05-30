@@ -4,8 +4,10 @@ FROM golang:1.26-alpine AS integration-test
 
 # stow  — dotfile symlink manager (needed by integration tests)
 # git   — used by dots pull/push/status in integration tests
+# bash  — used by release/test wrapper scripts and their regressions
 # build-base provides the C toolchain required by `go test -race`.
 RUN apk add --no-cache \
+        bash \
         build-base \
         git \
         nodejs \
@@ -33,17 +35,21 @@ USER omni
 ENV HOME=/home/omni
 ENV GOCACHE=/home/omni/.cache/go-build
 ENV GOMODCACHE=/home/omni/.cache/go-mod
+ENV TMPDIR=/app/.tmp
+ENV GOTMPDIR=/app/.tmp
 ENV OMNI_TEST_ISOLATED=1
 
 # Keep module downloads in BuildKit cache instead of baking them into a large
 # reusable test image layer.
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/home/omni/.cache/go-mod,uid=10001,gid=10001 \
+    --mount=type=cache,target=/app/.tmp,uid=10001,gid=10001 \
     go mod download
 
 COPY --chown=omni:omni . .
 
 RUN --mount=type=cache,target=/home/omni/.cache/go-mod,uid=10001,gid=10001 \
     --mount=type=cache,target=/home/omni/.cache/go-build,uid=10001,gid=10001 \
+    --mount=type=cache,target=/app/.tmp,uid=10001,gid=10001 \
     go test -count=1 -race -trimpath ./... && \
     go test -count=1 -tags=integration -race -trimpath -v ./integration_tests/... ./internal/provider/...
