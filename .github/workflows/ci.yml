@@ -40,9 +40,10 @@ jobs:
           cache: true
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9.2.0
+        uses: golangci/golangci-lint-action@v9.2.1
         with:
           version: latest
+          skip-cache: true
 
   test:
     name: Unit Tests
