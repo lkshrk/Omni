@@ -202,6 +202,38 @@ func TestDotsHistoryRecordsSuccessfulFilesystemOperations(t *testing.T) {
 	assertLatestDotsHistory(t, a, ctx, dotsHistoryWant{operation: "add", entry: "zshrc", status: "success", summaryContains: "add completed"})
 }
 
+func TestDotsSyncSuppressesUnchangedHistoryWhenRequested(t *testing.T) {
+	if _, err := exec.LookPath("stow"); err != nil {
+		t.Skip("stow not available")
+	}
+	ctx := context.Background()
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := os.Getenv("HOME")
+	seedHistoryNvimEntry(t, cfgDir, repoDir, home)
+
+	if _, err := a.DotsSyncContext(ctx, dots.SyncOptions{SuppressUnchangedHistory: true}); err != nil {
+		t.Fatalf("initial DotsSyncContext: %v", err)
+	}
+	before, err := a.RecentDotsHistory(ctx, 10)
+	if err != nil {
+		t.Fatalf("RecentDotsHistory before unchanged sync: %v", err)
+	}
+	if len(before) != 1 {
+		t.Fatalf("history before unchanged sync len = %d, want 1: %+v", len(before), before)
+	}
+
+	if _, err := a.DotsSyncContext(ctx, dots.SyncOptions{SuppressUnchangedHistory: true}); err != nil {
+		t.Fatalf("unchanged DotsSyncContext: %v", err)
+	}
+	after, err := a.RecentDotsHistory(ctx, 10)
+	if err != nil {
+		t.Fatalf("RecentDotsHistory after unchanged sync: %v", err)
+	}
+	if len(after) != len(before) || after[0].ID != before[0].ID {
+		t.Fatalf("unchanged sync should not add history, before=%+v after=%+v", before, after)
+	}
+}
+
 func TestDotsHistoryRecordsGitOperationSuccesses(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")

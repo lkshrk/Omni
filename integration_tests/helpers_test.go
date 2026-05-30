@@ -102,8 +102,6 @@ func simpleConfig(tools ...string) *config.Config {
 // --- Stateful brew mock --------------------------------------------------
 
 // brewStatefulMock is an executor.Executor that simulates brew with state.
-// It tracks which packages are installed and returns correct responses for
-// `brew list --versions <pkg>`, `brew install <pkg>`, `brew uninstall <pkg>`.
 type brewStatefulMock struct {
 	mu        sync.Mutex
 	installed map[string]string // pkg → version
@@ -141,26 +139,58 @@ func (b *brewStatefulInstaller) Run(_ context.Context, name string, args ...stri
 	case key == "brew --version":
 		return "Homebrew 4.0.0", "", nil
 
-	case strings.HasPrefix(key, "brew list --versions ") && len(args) == 3:
-		// args: ["list", "--versions", "<pkg>"]
-		pkg := args[2]
+	case key == "brew info --json=v2 --installed":
 		b.mock.mu.Lock()
-		ver, ok := b.mock.installed[pkg]
-		b.mock.mu.Unlock()
-		if !ok {
-			return "", "", os.ErrProcessDone // not installed
+		installed := make(map[string]string, len(b.mock.installed))
+		for pkg, ver := range b.mock.installed {
+			installed[pkg] = ver
 		}
-		return fmt.Sprintf("%s %s\n", pkg, ver), "", nil
+		b.mock.mu.Unlock()
+		return brewInfoJSON(installed), "", nil
 
-	case strings.HasPrefix(key, "brew list --versions") && len(args) == 2:
-		// brew list --versions (no package = list all)
+	case key == "brew leaves --installed-on-request":
+		b.mock.mu.Lock()
+		var names []string
+		for pkg := range b.mock.installed {
+			names = append(names, pkg)
+		}
+		b.mock.mu.Unlock()
+		return strings.Join(names, "\n"), "", nil
+
+	case key == "brew list --cask":
+		return "", "", nil
+
+	case strings.HasPrefix(key, "brew list --versions --cask"):
+		return "", "", nil
+
+	case strings.HasPrefix(key, "brew list --versions") && len(args) >= 2:
 		b.mock.mu.Lock()
 		var lines []string
-		for pkg, ver := range b.mock.installed {
-			lines = append(lines, fmt.Sprintf("%s %s", pkg, ver))
+		requested := args[2:]
+		if len(requested) == 0 {
+			for pkg := range b.mock.installed {
+				requested = append(requested, pkg)
+			}
+		}
+		for _, pkg := range requested {
+			if len(requested) > 0 && pkg == "--cask" {
+				continue
+			}
+			if ver, ok := b.mock.installed[pkg]; ok {
+				lines = append(lines, fmt.Sprintf("%s %s", pkg, ver))
+			}
 		}
 		b.mock.mu.Unlock()
+		if len(lines) == 0 && len(args) == 3 {
+			return "", "", os.ErrProcessDone // not installed
+		}
 		return strings.Join(lines, "\n"), "", nil
+
+	case key == "brew update":
+		return "", "", nil
+
+	case key == "brew outdated --json=v2":
+		return `{"formulae":[],"casks":[]}`, "", nil
 
 	case strings.HasPrefix(key, "brew install ") && len(args) == 2:
 		pkg := args[1]

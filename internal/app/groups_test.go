@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -60,6 +61,44 @@ func TestGroups_ReturnsAllDiscovered(t *testing.T) {
 		}
 		if got := groups[i].BaseName(); got != name {
 			t.Fatalf("groups[%d] = %q, want %q", i, got, name)
+		}
+	}
+}
+
+func TestGroupSummaries_ReturnsDisplayFields(t *testing.T) {
+	stub := &stubProvider{name: "brew", available: true}
+	a, cfgPath := newImportApp(t, stub)
+
+	rootCfg := &config.RootConfig{
+		Tools: logicalToolSpecs(
+			logicalTool("ripgrep", "brew"),
+			logicalTool("fd", "brew"),
+			logicalTool("slack", "brew"),
+		),
+		Groups: []*config.GroupConfig{
+			{Name: "work", Description: "Work tools", Tools: groupTools("ripgrep", "fd")},
+			{Name: "apps", Tools: groupTools("slack")},
+		},
+	}
+	if err := saveAppConfig(t, cfgPath, rootCfg); err != nil {
+		t.Fatal(err)
+	}
+
+	summaries, err := a.GroupSummaries(context.Background())
+	if err != nil {
+		t.Fatalf("GroupSummaries: %v", err)
+	}
+
+	want := []app.GroupSummary{
+		{Name: "apps", ToolCount: 1},
+		{Name: "work", Description: "Work tools", ToolCount: 2},
+	}
+	if len(summaries) != len(want) {
+		t.Fatalf("got %d summaries, want %d", len(summaries), len(want))
+	}
+	for i := range want {
+		if summaries[i] != want[i] {
+			t.Fatalf("summaries[%d] = %+v, want %+v", i, summaries[i], want[i])
 		}
 	}
 }
@@ -179,6 +218,157 @@ func TestAdd_ToNamedGroup_AppendsIfExists(t *testing.T) {
 		}
 	}
 	t.Error("work group not found")
+}
+
+func TestAddWithStateAssignsGroupHostsAndReturnsState(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost.example")
+	ctx := context.Background()
+	stub := &stubProvider{name: "system", available: true}
+	a, cfgPath := newImportApp(t, stub)
+
+	if err := a.DB().UpsertDiscovered(ctx, "ripgrep", "system", "brew", "14.1.0"); err != nil {
+		t.Fatalf("UpsertDiscovered: %v", err)
+	}
+
+	result, err := a.AddWithState(ctx, app.AddToolOptions{
+		ProviderName: "system",
+		Package:      "ripgrep",
+		Name:         "ripgrep",
+		GroupName:    "work",
+		AssignHosts:  []string{"other.example"},
+	})
+	if err != nil {
+		t.Fatalf("AddWithState: %v", err)
+	}
+
+	key := "ripgrep\x00system"
+	if result.State.ToolGroups[key] != "work" {
+		t.Fatalf("ToolGroups[%q] = %q, want work", key, result.State.ToolGroups[key])
+	}
+	if !slices.Contains(result.State.ToolMemberships[key], "work") {
+		t.Fatalf("ToolMemberships[%q] = %v, want work", key, result.State.ToolMemberships[key])
+	}
+	assertHostAssignedToGroup(t, result.State.HostInfo, "testhost", "work")
+	assertHostAssignedToGroup(t, result.State.HostInfo, "other", "work")
+
+	found := false
+	for _, tool := range result.Tools {
+		if tool.Name == "ripgrep" && tool.Provider == "system" {
+			found = true
+			if !tool.Tracked {
+				t.Fatalf("claimed tool row Tracked = false, want true")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("returned tools missing ripgrep/system: %+v", result.Tools)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if !slices.Contains(cfg.Hosts["testhost"], "work") {
+		t.Fatalf("config host testhost groups = %v, want work", cfg.Hosts["testhost"])
+	}
+	if !slices.Contains(cfg.Hosts["other"], "work") {
+		t.Fatalf("config host other groups = %v, want work", cfg.Hosts["other"])
+	}
+}
+
+func TestInstallAndAddWithStateReturnsUpdatedState(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost.example")
+	ctx := context.Background()
+	system := &installTracker{stubProvider: stubProvider{name: "system", available: true}}
+	a, _ := newImportApp(t, system)
+
+	result, err := a.InstallAndAddWithState(ctx, app.AddToolOptions{
+		ProviderName: "system",
+		Package:      "ripgrep",
+		Name:         "ripgrep",
+		GroupName:    "work",
+	})
+	if err != nil {
+		t.Fatalf("InstallAndAddWithState: %v", err)
+	}
+	if len(system.installCalled) != 1 || system.installCalled[0] != "ripgrep" {
+		t.Fatalf("installCalled = %v, want [ripgrep]", system.installCalled)
+	}
+
+	key := "ripgrep\x00system"
+	if result.State.ToolGroups[key] != "work" {
+		t.Fatalf("ToolGroups[%q] = %q, want work", key, result.State.ToolGroups[key])
+	}
+	if !slices.Contains(result.State.ToolMemberships[key], "work") {
+		t.Fatalf("ToolMemberships[%q] = %v, want work", key, result.State.ToolMemberships[key])
+	}
+	assertHostAssignedToGroup(t, result.State.HostInfo, "testhost", "work")
+
+	for _, tool := range result.Tools {
+		if tool.Name == "ripgrep" && tool.Provider == "system" {
+			if !tool.Installed || !tool.Tracked {
+				t.Fatalf("installed tool row = %+v, want installed tracked", tool)
+			}
+			return
+		}
+	}
+	t.Fatalf("returned tools missing ripgrep/system: %+v", result.Tools)
+}
+
+func TestInstallAndAddWithStatePersistsAndPassesOptions(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost.example")
+	ctx := context.Background()
+	system := &stubProvider{name: "system", available: true}
+	brew := &installCaptureStub{stubProvider: stubProvider{name: "brew", available: true}}
+	a, cfgPath := newImportApp(t, system, brew)
+
+	_, err := a.InstallAndAddWithState(ctx, app.AddToolOptions{
+		ProviderName: "system",
+		Package:      "visual-studio-code",
+		Name:         "visual-studio-code",
+		GroupName:    "work",
+		InstallWith:  "brew",
+		Options:      map[string]string{"brew_kind": "cask"},
+	})
+	if err != nil {
+		t.Fatalf("InstallAndAddWithState: %v", err)
+	}
+	if len(brew.installed) != 1 {
+		t.Fatalf("brew installs = %d, want 1", len(brew.installed))
+	}
+	installed := brew.installed[0]
+	if installed.Provider != "brew" {
+		t.Fatalf("installed.Provider = %q, want brew", installed.Provider)
+	}
+	if installed.Options["brew_kind"] != "cask" {
+		t.Fatalf("installed.Options[brew_kind] = %q, want cask", installed.Options["brew_kind"])
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	spec := cfg.Tools["visual-studio-code"]
+	if spec.Provider != "system" || spec.InstallWith != "brew" {
+		t.Fatalf("spec provider/install_with = %q/%q, want system/brew", spec.Provider, spec.InstallWith)
+	}
+	if spec.Options["brew_kind"] != "cask" {
+		t.Fatalf("spec.Options[brew_kind] = %q, want cask", spec.Options["brew_kind"])
+	}
+}
+
+func assertHostAssignedToGroup(t *testing.T, info *app.HostInfo, host, group string) {
+	t.Helper()
+	if info == nil {
+		t.Fatalf("HostInfo is nil")
+	}
+	assignment, ok := info.Hosts[host]
+	if !ok {
+		t.Fatalf("HostInfo missing host %q: %+v", host, info.Hosts)
+	}
+	if !slices.Contains(assignment.Groups, group) {
+		t.Fatalf("HostInfo host %q groups = %v, want %s", host, assignment.Groups, group)
+	}
 }
 
 // ─── Sync group filter ────────────────────────────────────────────────────────

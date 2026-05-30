@@ -21,39 +21,58 @@ case "${1:-}" in
   --version)
     echo "Homebrew 4.0.0"
     ;;
-  info)
-    if [ "${2:-}" = "--json=v2" ] && [ "${3:-}" = "--installed" ]; then
-      printf '{"formulae":[{"name":"fzf","full_name":"fzf","desc":"fuzzy finder","installed":[{"version":"0.61.1","installed_on_request":true}]}],"casks":[]}\n'
-      exit 0
-    fi
-    printf '{"formulae":[],"casks":[]}\n'
-    ;;
-  list)
-    shift
-    if [ "${1:-}" = "--versions" ]; then
-      shift
-      if [ "${1:-}" = "--cask" ]; then
-        shift
-      fi
-      pkg="${1:-}"
-      case "$pkg" in
-        fzf)
-          echo "fzf 0.61.1"
-          exit 0
-          ;;
-        fd)
-          if [ -f "$state/fd" ]; then
-            echo "fd 10.2.0"
-            exit 0
-          fi
-          ;;
-      esac
-    fi
-    exit 1
-    ;;
-  install)
-    : > "$state/$2"
-    ;;
+	  info)
+	    if [ "${2:-}" = "--json=v2" ] && [ "${3:-}" = "--installed" ]; then
+	      printf '{"formulae":[{"name":"fzf","full_name":"fzf","desc":"fuzzy finder","installed":[{"version":"0.61.1","installed_on_request":true}]}],"casks":[]}\n'
+	      exit 0
+	    fi
+	    printf '{"formulae":[],"casks":[]}\n'
+	    ;;
+	  leaves)
+	    if [ "${2:-}" = "--installed-on-request" ]; then
+	      echo "fzf"
+	      if [ -f "$state/fd" ]; then
+	        echo "fd"
+	      fi
+	    fi
+	    ;;
+	  list)
+	    shift
+	    if [ "${1:-}" = "--cask" ]; then
+	      exit 0
+	    fi
+	    if [ "${1:-}" = "--versions" ]; then
+	      shift
+	      if [ "${1:-}" = "--cask" ]; then
+	        shift
+	      fi
+	      found=0
+	      for pkg in "$@"; do
+	        case "$pkg" in
+	          fzf)
+	            echo "fzf 0.61.1"
+	            found=1
+	            ;;
+	          fd)
+	            if [ -f "$state/fd" ]; then
+	              echo "fd 10.2.0"
+	              found=1
+	            fi
+	            ;;
+	        esac
+	      done
+	      [ "$found" -eq 1 ] && exit 0
+	    fi
+	    exit 1
+	    ;;
+	  update)
+	    ;;
+	  outdated)
+	    printf '{"formulae":[],"casks":[]}\n'
+	    ;;
+	  install)
+	    : > "$state/$2"
+	    ;;
 esac
 
 -- bin/apt --

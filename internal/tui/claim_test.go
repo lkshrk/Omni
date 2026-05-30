@@ -386,6 +386,48 @@ func TestDoInstallAndAdd_PreservesCachedSearchMetadata(t *testing.T) {
 	}
 }
 
+type installOptionCaptureProvider struct {
+	okProvider
+	installed []provider.Tool
+}
+
+func (p *installOptionCaptureProvider) Install(_ context.Context, tool provider.Tool) error {
+	p.installed = append(p.installed, tool)
+	return nil
+}
+
+func TestDoInstallAndAddTool_PassesSearchOptions(t *testing.T) {
+	system := &okProvider{name: "system"}
+	brew := &installOptionCaptureProvider{okProvider: okProvider{name: "brew"}}
+	a := newSearchCmdApp(t, system, brew)
+	m := modelForCmds(a)
+	row := &database.ToolCache{
+		Name:          "visual-studio-code",
+		Provider:      "system",
+		InstalledWith: "brew",
+		Options:       map[string]string{"brew_kind": "cask"},
+	}
+
+	msg := m.doInstallAndAddTool(row, "work")()
+	got, ok := msg.(opCompleteMsg)
+	if !ok {
+		t.Fatalf("expected opCompleteMsg, got %T", msg)
+	}
+	if got.err != nil {
+		t.Fatalf("unexpected error: %v", got.err)
+	}
+	if len(brew.installed) != 1 {
+		t.Fatalf("brew installs = %d, want 1", len(brew.installed))
+	}
+	installed := brew.installed[0]
+	if installed.Provider != "brew" {
+		t.Fatalf("installed.Provider = %q, want brew", installed.Provider)
+	}
+	if installed.Options["brew_kind"] != "cask" {
+		t.Fatalf("installed.Options[brew_kind] = %q, want cask", installed.Options["brew_kind"])
+	}
+}
+
 func TestHandleOpCompleteMsg_ErrorStillRefreshesToolMembershipState(t *testing.T) {
 	m := modelForCmds(nil)
 	key := toolKey("ripgrep", "system")

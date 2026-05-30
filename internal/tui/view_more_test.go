@@ -248,9 +248,9 @@ func TestRenderSetup_Step1(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSetup
 	m.setupStep = 1
-	m.setupProviders = []setupProviderRow{
-		{name: "system", label: "system(brew)", enabled: true},
-		{name: "node", label: "node(bun)", enabled: false},
+	m.setupProviders = []app.SetupProviderOption{
+		{Name: "system", Label: "system(brew)", Enabled: true},
+		{Name: "node", Label: "node(bun)", Enabled: false},
 	}
 	out := renderSetup(m)
 	if out == "" {
@@ -281,9 +281,9 @@ func TestRenderSetup_Step2(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSetup
 	m.setupStep = 2
-	m.setupProviders = []setupProviderRow{
-		{name: "system", label: "system(brew)", enabled: true},
-		{name: "python", label: "python(uv)", enabled: true},
+	m.setupProviders = []app.SetupProviderOption{
+		{Name: "system", Label: "system(brew)", Enabled: true},
+		{Name: "python", Label: "python(uv)", Enabled: true},
 	}
 	out := renderSetup(m)
 	if out == "" {
@@ -373,7 +373,7 @@ func TestRenderSetup_CopyHostAndGroups(t *testing.T) {
 		m.hostInfo = &app.HostInfo{Active: "workstation", Hosts: map[string]config.HostAssignment{
 			"workstation": {Groups: []string{"base", "work"}},
 		}}
-		m.settings.DotsRepo = "~/dotfiles"
+		setDotsRepoForTest(&m, "~/dotfiles")
 		out := renderSetup(m)
 		if !strings.Contains(out, `Host "workstation" is configured`) || !strings.Contains(out, "Sync tools") {
 			t.Fatalf("expected bootstrap activation options, got:\n%s", out)
@@ -421,9 +421,9 @@ func setupRenderModel(step int) Model {
 	m := baseModel(nil)
 	m.mode = viewSetup
 	m.setupStep = step
-	m.setupProviders = []setupProviderRow{
-		{name: "system", label: "system(brew)", enabled: true},
-		{name: "node", label: "node(bun)", enabled: false},
+	m.setupProviders = []app.SetupProviderOption{
+		{Name: "system", Label: "system(brew)", Enabled: true},
+		{Name: "node", Label: "node(bun)", Enabled: false},
 	}
 	return m
 }
@@ -555,6 +555,7 @@ func TestRenderHeader_DefaultMode(t *testing.T) {
 func TestRenderHeader_DotsMode(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewDots
+	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
 	m.dotsEntries = []app.DotStatus{{
 		Name:   "nvim",
 		State:  app.DotStateConflict,
@@ -575,6 +576,7 @@ func TestRenderHeaderInfo_UsesUniformRegularWeight(t *testing.T) {
 	}})
 	dots := baseModel(nil)
 	dots.mode = viewDots
+	dots.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
 	dots.dotsEntries = []app.DotStatus{{
 		Name:   "nvim",
 		State:  app.DotStateConflict,
@@ -585,7 +587,7 @@ func TestRenderHeaderInfo_UsesUniformRegularWeight(t *testing.T) {
 	groups.groupNames = []string{"dev"}
 	settings := baseModel(nil)
 	settings.mode = viewSettings
-	settings.settings.DotsRepo = "~/dotfiles"
+	settings.setSettings(config.Settings{DotsRepo: "~/dotfiles"})
 
 	for name, m := range map[string]Model{
 		"tools":    tools,
@@ -610,6 +612,7 @@ func headerInfoHasBoldANSI(s string) bool {
 func TestRenderHeader_DotsLoadingKeepsCountSummary(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewDots
+	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
 	m.dotsLoading = true
 	m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}}}
 	out := renderHeader(m)
@@ -622,10 +625,9 @@ func TestRenderHeader_DotsLoadingKeepsCountSummary(t *testing.T) {
 }
 
 func TestRenderHeader_DotsDisabledShowsNoInfo(t *testing.T) {
-	disabled := true
 	m := baseModel(nil)
 	m.mode = viewDots
-	m.settings.DotsDisabled = &disabled
+	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles", DotsDisabled: config.BoolPtr(true)})
 	m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}}}
 
 	out := stripANSIEscapeSequences(renderHeader(m))
@@ -637,6 +639,7 @@ func TestRenderHeader_DotsDisabledShowsNoInfo(t *testing.T) {
 func TestRenderHeader_DotsGitStatusShowsDirty(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewDots
+	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
 	m.dotsGitStatus = "M .zshrc"
 	m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}}}
 	out := stripANSIEscapeSequences(renderHeader(m))
@@ -683,12 +686,54 @@ func TestRenderHeader_SettingsModeUsesSettingsInfo(t *testing.T) {
 func TestRenderHeader_SettingsModeShowsDotsOff(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSettings
-	m.settings.DotsDisabled = config.BoolPtr(true)
+	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles", DotsDisabled: config.BoolPtr(true)})
 
 	out := stripANSIEscapeSequences(renderHeader(m))
 	if !strings.Contains(out, "3/3 providers") || !strings.Contains(out, "dots off") {
 		t.Fatalf("settings header info = %q, want disabled dots summary", out)
 	}
+}
+
+func TestRenderHeaderUsesCachedDotsAvailability(t *testing.T) {
+	t.Run("settings shows dots on when app is enabled despite stale disabled setting", func(t *testing.T) {
+		m := baseModel(nil)
+		m.mode = viewSettings
+		m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
+		m.settings = config.Settings{DotsRepo: "/repo/dotfiles", DotsDisabled: config.BoolPtr(true)}
+
+		out := stripANSIEscapeSequences(renderHeader(m))
+
+		if !strings.Contains(out, "dots on") || strings.Contains(out, "dots off") {
+			t.Fatalf("settings header should use app-backed enabled state: %q", out)
+		}
+	})
+
+	t.Run("settings shows dots unset when app is unconfigured despite stale repo", func(t *testing.T) {
+		m := baseModel(nil)
+		m.mode = viewSettings
+		m.settings = config.Settings{DotsRepo: "/tmp/stale-dotfiles"}
+		m.dotsSyncAvailCached = app.DotsSyncAvailability{Reason: app.DotsSyncAvailabilityNoRepo}
+
+		out := stripANSIEscapeSequences(renderHeader(m))
+
+		if !strings.Contains(out, "dots unset") || strings.Contains(out, "dots on") {
+			t.Fatalf("settings header should use app-backed unconfigured state: %q", out)
+		}
+	})
+
+	t.Run("dots header keeps counts when app is enabled despite stale disabled setting", func(t *testing.T) {
+		m := baseModel(nil)
+		m.mode = viewDots
+		m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
+		m.settings = config.Settings{DotsRepo: "/repo/dotfiles", DotsDisabled: config.BoolPtr(true)}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}}}
+
+		out := stripANSIEscapeSequences(renderHeader(m))
+
+		if !strings.Contains(out, "1/1") {
+			t.Fatalf("dots header should use app-backed enabled state: %q", out)
+		}
+	})
 }
 
 func TestRenderHeader_Searching(t *testing.T) {
@@ -1027,10 +1072,10 @@ func TestRenderPalette_WithSuggestions(t *testing.T) {
 
 func TestRenderProviderPickerStep_Step1(t *testing.T) {
 	m := baseModel(nil)
-	m.setupProviders = []setupProviderRow{
-		{name: "system", label: "system(brew)", enabled: true},
-		{name: "node", label: "node(bun)", enabled: false},
-		{name: "python", label: "python(uv)", enabled: true},
+	m.setupProviders = []app.SetupProviderOption{
+		{Name: "system", Label: "system(brew)", Enabled: true},
+		{Name: "node", Label: "node(bun)", Enabled: false},
+		{Name: "python", Label: "python(uv)", Enabled: true},
 	}
 	m.setupProviderIdx = 0
 	out := renderProviderPickerStep(m, 1)
@@ -1044,8 +1089,8 @@ func TestRenderProviderPickerStep_Step1(t *testing.T) {
 
 func TestRenderProviderPickerStep_Step2(t *testing.T) {
 	m := baseModel(nil)
-	m.setupProviders = []setupProviderRow{
-		{name: "system", label: "system(apt)", enabled: true},
+	m.setupProviders = []app.SetupProviderOption{
+		{Name: "system", Label: "system(apt)", Enabled: true},
 	}
 	out := renderProviderPickerStep(m, 2)
 	if !strings.Contains(out, "system") {
@@ -1055,9 +1100,9 @@ func TestRenderProviderPickerStep_Step2(t *testing.T) {
 
 func TestRenderProviderPickerStep_CheckboxStates(t *testing.T) {
 	m := baseModel(nil)
-	m.setupProviders = []setupProviderRow{
-		{name: "system", label: "system(brew)", enabled: true},
-		{name: "node", label: "node(bun)", enabled: false},
+	m.setupProviders = []app.SetupProviderOption{
+		{Name: "system", Label: "system(brew)", Enabled: true},
+		{Name: "node", Label: "node(bun)", Enabled: false},
 	}
 	out := renderProviderPickerStep(m, 1)
 	if !strings.Contains(out, "[x]") || !strings.Contains(out, "[ ]") {
@@ -1205,17 +1250,65 @@ func TestRenderSettings_NodeManagerSet(t *testing.T) {
 func TestRenderSettings_DotsRepo(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSettings
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	out := renderSettings(m)
 	if !strings.Contains(out, "dotfiles") {
 		t.Errorf("expected dotfiles path in settings output, got:\n%s", out)
 	}
 }
 
+func TestRenderSettingsUsesCachedDotsAvailability(t *testing.T) {
+	t.Run("repo row shows app repo when local settings are stale", func(t *testing.T) {
+		m := baseModel(nil)
+		m.mode = viewSettings
+		m.settings = config.Settings{DotsRepo: "/tmp/stale-dotfiles"}
+		cacheDotsAvailability(&m, app.DotsSyncAvailability{
+			Configured: true,
+			Reason:     app.DotsSyncAvailabilityReady,
+			RepoPath:   "/repo/current-dotfiles",
+		})
+
+		out := stripANSIEscapeSequences(renderSettings(m))
+		line := renderedLineContaining(out, "Repository")
+
+		if !strings.Contains(line, "current-dotfiles") || strings.Contains(line, "stale-dotfiles") {
+			t.Fatalf("Repository row should use app-backed repo path, line=%q\n%s", line, out)
+		}
+	})
+
+	t.Run("dotfile sync row shows on when app is enabled despite stale disabled setting", func(t *testing.T) {
+		m := baseModel(nil)
+		m.mode = viewSettings
+		m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
+		m.settings = config.Settings{DotsRepo: "/repo/dotfiles", DotsDisabled: config.BoolPtr(true)}
+
+		out := stripANSIEscapeSequences(renderSettings(m))
+		line := renderedLineContaining(out, "Dotfile Sync")
+
+		if !strings.Contains(line, "[ON]") || strings.Contains(line, "[OFF]") {
+			t.Fatalf("Dotfile Sync row should use app-backed enabled state, line=%q\n%s", line, out)
+		}
+	})
+
+	t.Run("service help asks for repo when app is unconfigured despite stale local repo", func(t *testing.T) {
+		m := baseModel(nil)
+		m.mode = viewSettings
+		m.settingsCursor = settingsRowDotsReminder
+		m.settings = config.Settings{DotsRepo: "/tmp/stale-dotfiles"}
+		m.dotsSyncAvailCached = app.DotsSyncAvailability{Reason: app.DotsSyncAvailabilityNoRepo}
+
+		out := stripANSIEscapeSequences(renderSettings(m))
+
+		if !strings.Contains(out, "Set a dotfiles repository before enabling reminder.") {
+			t.Fatalf("settings service help should use app-backed unconfigured state:\n%s", out)
+		}
+	})
+}
+
 func TestRenderSettings_DotsServiceRows(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSettings
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsReminderService = &app.DotsReminderService{Installed: true, Platform: "systemd", Interval: 12 * time.Hour, Notify: true}
 	m.dotsWatchService = &app.DotsWatchService{Installed: false, Platform: "systemd", Debounce: 2 * time.Second}
 
@@ -1230,7 +1323,7 @@ func TestRenderSettings_DotsServiceRows(t *testing.T) {
 func TestRenderSettings_DotsServiceDashboard(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSettings
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.settingsCursor = settingsRowDotsServices
 	m.dotsReminderService = &app.DotsReminderService{Installed: true, Platform: "systemd", Interval: 12 * time.Hour, Notify: true}
 	m.dotsWatchService = &app.DotsWatchService{Installed: false, Platform: "systemd", Debounce: 2 * time.Second}
@@ -1794,7 +1887,7 @@ func TestRenderHosts_HostAndGroupColumnsAlign(t *testing.T) {
 	if hostSecondCol < 0 || groupSecondCol < 0 || hostThirdCol < 0 || groupThirdCol < 0 {
 		t.Fatalf("missing expected count columns:\nhost=%q\ngroup=%q", hostLine, groupLine)
 	}
-	cols := groupAssignmentTableColumnWidths(sortedHostNames(m.hostInfo), m.hostInfo, buildAllGroupNames(m.groupNames), map[string]int{
+	cols := groupAssignmentTableColumnWidths(app.PrioritizedHostSummaries(m.hostInfo), buildAllGroupNames(m.groupNames), map[string]int{
 		"very-long-group": 1,
 	}, map[string]int{})
 	wantSecondCol := rowMarkerWidth + rowAvailableWidth(m.width) - (cols.mid + listColumnGap + cols.tail)
@@ -1918,9 +2011,8 @@ func visualColumnOf(line, needle string) int {
 }
 
 func colsNameWidthForHostTest(m Model) int {
-	names := sortedHostNames(m.hostInfo)
 	allGroupNames := buildAllGroupNames(m.groupNames)
-	return groupAssignmentTableColumnWidths(names, m.hostInfo, allGroupNames, toolCountsByGroup(m), dotCountsByGroup(m)).name
+	return groupAssignmentTableColumnWidths(app.PrioritizedHostSummaries(m.hostInfo), allGroupNames, toolCountsByGroup(m), dotCountsByGroup(m)).name
 }
 
 func TestRenderHosts_HostActionsAndRename(t *testing.T) {
@@ -2363,7 +2455,7 @@ func TestRenderFocusedEmptyInputsDoNotDuplicatePlaceholderFirstRune(t *testing.T
 			render: func(placeholder string) string {
 				m := baseModel(nil)
 				m.mode = viewDots
-				m.settings.DotsRepo = "~/dotfiles"
+				setDotsRepoForTest(&m, "~/dotfiles")
 				m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim"}}
 				m.dotsSearchActive = true
 				m.filter.Placeholder = placeholder
@@ -2443,37 +2535,6 @@ func TestViewHostEditorTitlesUseCapturedHostAfterCursorMoves(t *testing.T) {
 	}
 	if strings.Contains(out, "Edit Groups: beta") {
 		t.Fatalf("host group editor title used live cursor:\n%s", out)
-	}
-}
-
-func TestToggleProvider_AddNew(t *testing.T) {
-	disabled := []string{"node"}
-	result := toggleProvider(disabled, "python")
-	found := false
-	for _, d := range result {
-		if d == "python" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("expected 'python' to be added to disabled list")
-	}
-}
-
-func TestToggleProvider_RemoveExisting(t *testing.T) {
-	disabled := []string{"node", "python"}
-	result := toggleProvider(disabled, "node")
-	for _, d := range result {
-		if d == "node" {
-			t.Error("expected 'node' to be removed from disabled list")
-		}
-	}
-}
-
-func TestToggleProvider_EmptyList(t *testing.T) {
-	result := toggleProvider(nil, "system")
-	if len(result) != 1 || result[0] != "system" {
-		t.Errorf("expected [system], got %v", result)
 	}
 }
 
@@ -2832,12 +2893,12 @@ func TestMainTabs_FirstSectionStartsAtSharedRow(t *testing.T) {
 	toolsWithFilters.providerTabIdx = 0
 
 	dotsNoFilters := baseModel(nil)
-	dotsNoFilters.settings.DotsRepo = "/repo"
+	setDotsRepoForTest(&dotsNoFilters, "/repo")
 	dotsNoFilters.dotsLoaded = true
 	dotsNoFilters.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", State: app.DotStateSynced}}
 
 	dotsWithControls := baseModel(nil)
-	dotsWithControls.settings.DotsRepo = "/repo"
+	setDotsRepoForTest(&dotsWithControls, "/repo")
 	dotsWithControls.dotsLoaded = true
 	dotsWithControls.dotsSearchActive = true
 	dotsWithControls.dotsEntries = []app.DotStatus{
@@ -3324,7 +3385,7 @@ func TestTabKeyMap_ShortHelp_StatusMode(t *testing.T) {
 		{Name: "fd", Provider: "brew", Installed: false, Tracked: true},
 	})
 	m.mode = viewStatus
-	m.settings.DotsRepo = "/repo/dotfiles"
+	setDotsRepoForTest(&m, "/repo/dotfiles")
 	m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 	got = strings.Join(bindingHelpDescs(tabKeyMap{&m}.ShortHelp()), ",")
 	for _, want := range []string{"reconcile all", "refresh dashboard"} {
@@ -3416,6 +3477,7 @@ func TestTabKeyMap_ShortHelp_ListOrder(t *testing.T) {
 func TestTabKeyMap_ShortHelp_DotsOrder(t *testing.T) {
 	m := baseModel(threeTools())
 	m.mode = viewDots
+	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
 	got := bindingHelpKeys(tabKeyMap{&m}.ShortHelp())
 	want := []string{
 		toolActionTUIKey(t, actions.DotsAdd),
@@ -3536,14 +3598,14 @@ func TestRenderHelpPopup_TabSpecificActionsAndLegend(t *testing.T) {
 			m := baseModel(nil)
 			m.mode = tc.mode
 			if tc.mode == viewDots {
-				m.settings.DotsRepo = "/repo/dotfiles"
+				setDotsRepoForTest(&m, "/repo/dotfiles")
 			}
 			if tc.mode == viewStatus {
 				m.allTools = []*database.ToolCache{
 					{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
 					{Name: "fd", Provider: "brew", Installed: false, Tracked: true},
 				}
-				m.settings.DotsRepo = "/repo/dotfiles"
+				setDotsRepoForTest(&m, "/repo/dotfiles")
 				m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 			}
 			out := renderHelpPopup(m)
@@ -3589,7 +3651,7 @@ func TestRenderHelpPopup_DashboardSelectedRowActions(t *testing.T) {
 		{
 			name: "dotfiles sync",
 			setup: func(m Model) Model {
-				m.settings.DotsRepo = "/repo/dotfiles"
+				m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
 				m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 				m.statusCursor = statusRowIndex(statusRows(m), "Dotfiles")
 				return m
@@ -3610,7 +3672,7 @@ func TestRenderHelpPopup_DashboardSelectedRowActions(t *testing.T) {
 		{
 			name: "all clear",
 			setup: func(m Model) Model {
-				m.settings.DotsRepo = "/repo/dotfiles"
+				m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
 				m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}}}
 				m.statusCursor = statusRowIndex(statusRows(m), "All Clear")
 				return m
@@ -3642,7 +3704,7 @@ func TestRenderHelpPopup_DashboardSelectedRowActions(t *testing.T) {
 func TestRenderHelpPopup_DotsLegendOmitsTreeKindIcons(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewDots
-	m.settings.DotsRepo = "/repo/dotfiles"
+	setDotsRepoForTest(&m, "/repo/dotfiles")
 	out := renderHelpPopup(m)
 	for _, unwanted := range []string{dotKindFolderCollapsedIcon, dotKindFolderExpandedIcon, dotKindFolderEmptyIcon} {
 		if strings.Contains(out, unwanted) {
@@ -3723,6 +3785,9 @@ func TestRenderHelpPopup_ActionOrderKeepsDeleteLast(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := baseModel(nil)
 			m.mode = tc.mode
+			if tc.mode == viewDots {
+				m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
+			}
 			out := renderHelpPopup(m)
 			deleteIdx := strings.Index(out, "delete")
 			if deleteIdx < 0 {
@@ -3758,34 +3823,6 @@ func bindingHelpDescs(bindings []key.Binding) []string {
 }
 
 // ── view_list.go ──────────────────────────────────────────────────────────────
-
-func TestProviderEcosystem_TableDriven(t *testing.T) {
-	cases := []struct{ input, want string }{
-		{"system", "system"},
-		{"brew", "system"},
-		{"apt", "system"},
-		{"apk", "system"},
-		{"dnf", "system"},
-		{"pacman", "system"},
-		{"zypper", "system"},
-		{"python", "python"},
-		{"pip", "python"},
-		{"pip3", "python"},
-		{"uv", "python"},
-		{"node", "node"},
-		{"npm", "node"},
-		{"bun", "node"},
-		{"pnpm", "node"},
-		{"cargo", "cargo"}, // unknown → raw
-		{"unknown", "unknown"},
-	}
-	for _, tc := range cases {
-		got := providerEcosystem(tc.input)
-		if got != tc.want {
-			t.Errorf("providerEcosystem(%q) = %q, want %q", tc.input, got, tc.want)
-		}
-	}
-}
 
 func TestProviderLabel_TableDriven(t *testing.T) {
 	cases := []struct {
@@ -4335,7 +4372,7 @@ func TestRenderDotsRow_UsesCompactSpacing(t *testing.T) {
 
 	m := baseModel(nil)
 	m.mode = viewDots
-	m.settings.DotsRepo = "/repo"
+	setDotsRepoForTest(&m, "/repo")
 	m.width = 120
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{
@@ -4373,7 +4410,7 @@ func TestRenderDotsRow_UsesCompactSpacing(t *testing.T) {
 func TestRenderDotsRow_ShowsVariantMarker(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewDots
-	m.settings.DotsRepo = "/repo"
+	setDotsRepoForTest(&m, "/repo")
 	m.width = 100
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{
@@ -4819,7 +4856,7 @@ func TestRenderList_BulkPendingUsesWaitingIcon(t *testing.T) {
 
 func TestRenderDots_BulkPendingUsesWaitingIcon(t *testing.T) {
 	m := baseModel(nil)
-	m.settings.DotsRepo = "/repo"
+	setDotsRepoForTest(&m, "/repo")
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
@@ -4836,7 +4873,7 @@ func TestRenderDots_BulkPendingUsesWaitingIcon(t *testing.T) {
 
 func TestRenderDots_DoesNotRenderGroupPillBar(t *testing.T) {
 	m := baseModel(nil)
-	m.settings.DotsRepo = "/repo"
+	setDotsRepoForTest(&m, "/repo")
 	m.dotsEntries = []app.DotStatus{
 		{Name: "nvim", TargetPath: "~/.config/nvim", State: app.DotStateSynced, Group: "config", Counts: app.DotFileCounts{Synced: 1}},
 		{Name: "zsh", TargetPath: "~/.zshrc", State: app.DotStateSynced, Group: "home", Counts: app.DotFileCounts{Synced: 1}},
@@ -4872,7 +4909,7 @@ func TestRenderList_RowSpinnerKeepsNameColumn(t *testing.T) {
 
 func TestRenderDots_RowSpinnerKeepsNameColumn(t *testing.T) {
 	m := baseModel(nil)
-	m.settings.DotsRepo = "/repo"
+	setDotsRepoForTest(&m, "/repo")
 	m.dotsCursor = 0
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
@@ -4908,7 +4945,7 @@ func TestRenderList_RowOperationUsesSpinnerIcon(t *testing.T) {
 
 func TestRenderDots_RowOperationUsesSpinnerIcon(t *testing.T) {
 	m := baseModel(nil)
-	m.settings.DotsRepo = "/repo"
+	setDotsRepoForTest(&m, "/repo")
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
@@ -4926,7 +4963,7 @@ func TestRenderDots_RowOperationUsesSpinnerIcon(t *testing.T) {
 func TestRenderDots_NoExtraBlankLineAtTop(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewDots
-	m.settings.DotsRepo = "/repo"
+	setDotsRepoForTest(&m, "/repo")
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{
 		{Name: "nvim", TargetPath: "~/.config/nvim", State: app.DotStateSynced},
@@ -4947,7 +4984,7 @@ func TestRenderDots_NoExtraBlankLineAtTop(t *testing.T) {
 func TestRenderDots_SearchActiveHasControlLine(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewDots
-	m.settings.DotsRepo = "/repo"
+	setDotsRepoForTest(&m, "/repo")
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{
 		{Name: "nvim", TargetPath: "~/.config/nvim", State: app.DotStateSynced},
@@ -5470,7 +5507,7 @@ func TestViewString_SetupModeCanRenderOverDotsTab(t *testing.T) {
 	m.mode = viewSetup
 	m.setupBackgroundMode = viewDots
 	m.setupStep = 5
-	m.settings.DotsRepo = ""
+	setDotsRepoForTest(&m, "")
 
 	out := m.viewString()
 	if !strings.Contains(out, "Enable dotfile sync?") {
@@ -5561,7 +5598,7 @@ func TestViewString_StatusMode(t *testing.T) {
 	})
 	m.mode = viewStatus
 	m.ignoreSet = map[string]bool{"certifi": true}
-	m.settings.DotsRepo = "/repo/dotfiles"
+	setDotsRepoForTest(&m, "/repo/dotfiles")
 	m.doctorResult = &app.DoctorResult{
 		Checks: []app.DoctorCheck{
 			{ID: "config", Label: "Config", Status: app.DoctorStatusOK, Message: "settings.json is valid"},
@@ -5587,7 +5624,7 @@ func TestDashboardAttentionRowsCollapseOKDoctorChecks(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewStatus
 	m.allTools = []*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}}
-	m.settings.DotsRepo = "/repo/dotfiles"
+	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
 	m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateSynced, Health: app.HealthOK}}
 	m.doctorResult = &app.DoctorResult{
 		Checks: []app.DoctorCheck{
@@ -5610,11 +5647,31 @@ func TestDashboardAttentionRowsCollapseOKDoctorChecks(t *testing.T) {
 	}
 }
 
+func TestDashboardDoctorIgnoreWarningOffersFix(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewStatus
+	m.doctorResult = &app.DoctorResult{
+		Checks: []app.DoctorCheck{
+			{ID: "dots.ignore", Label: "Dots ignore", Status: app.DoctorStatusWarn, Message: "1 pattern issue(s) across dot entries"},
+		},
+		Summary: app.DoctorSummary{Warn: 1},
+	}
+
+	rows := statusRows(m)
+	idx := statusRowIndex(rows, "Doctor")
+	if idx < 0 {
+		t.Fatalf("missing Doctor row: %#v", rows)
+	}
+	if rows[idx].action.kind != statusActionFixIgnore || rows[idx].action.desc != "fix ignore patterns" {
+		t.Fatalf("dots.ignore row action = %#v, want fix ignore patterns", rows[idx].action)
+	}
+}
+
 func TestStatusSelectedRowExpandsDetails(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewStatus
 	m.allTools = []*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}}
-	m.settings.DotsRepo = "/repo/dotfiles"
+	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
 	m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateSynced, Health: app.HealthOK}}
 	m.doctorResult = &app.DoctorResult{
 		Checks: []app.DoctorCheck{
@@ -5650,7 +5707,7 @@ func TestStatusSelectedRowExpandsDetails(t *testing.T) {
 func TestDashboardServicesRowShowsActionableDetails(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewStatus
-	m.settings.DotsRepo = "/repo/dotfiles"
+	setDotsRepoForTest(&m, "/repo/dotfiles")
 	m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateSynced, Health: app.HealthOK}}
 	m.doctorResult = &app.DoctorResult{
 		Checks:  []app.DoctorCheck{{ID: "config", Label: "Config", Status: app.DoctorStatusOK, Message: "settings.json is valid"}},
@@ -5698,18 +5755,19 @@ func TestDashboardDotfilesRowShowsRecentHistory(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewStatus
 	m.width = 72
-	m.settings.DotsRepo = "/repo/dotfiles"
+	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
 	m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 2}}}
 	m.dotsHistory = []app.DotsHistoryEntry{{
 		Operation: "sync",
 		Status:    "success",
-		Summary:   "sync completed with 2 dotfile ops",
+		Summary:   "sync completed: no changes, 2 dotfiles unchanged",
+		Time:      time.Date(2026, 1, 2, 3, 4, 0, 0, time.Local),
 	}}
 	m.statusCursor = statusRowIndex(statusRows(m), "Dotfiles")
 
 	out := renderStatus(m)
 	plain := stripANSIEscapeSequences(out)
-	for _, want := range []string{"last sync: success", "sync completed with 2 dotfile ops"} {
+	for _, want := range []string{"last 01-02 03:04 sync: success", "no changes"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("selected dotfiles row should show recent history, missing %q:\n%s", want, out)
 		}
@@ -5754,9 +5812,8 @@ func TestStatusNavigationAndEnterActions(t *testing.T) {
 		t.Fatalf("S on tool sync should start sync-all with row progress, loading=%v pending=%v", got.loading, got.bulkPendingKeys)
 	}
 
-	m = baseModel(nil)
+	m, _ = dashboardDotsAppModel(t, nil)
 	m.mode = viewStatus
-	m.settings.DotsRepo = "/repo/dotfiles"
 	m.doctorResult = &app.DoctorResult{
 		Checks:  []app.DoctorCheck{{ID: "dots", Label: "Dotfiles", Status: app.DoctorStatusWarn, Message: "dotfiles need attention"}},
 		Summary: app.DoctorSummary{Warn: 1},
@@ -5775,9 +5832,8 @@ func TestStatusNavigationAndEnterActions(t *testing.T) {
 		t.Fatalf("S on dotfiles warning should start sync, loading=%v pending=%v", got.dotsLoading, got.dotsPendingNames)
 	}
 
-	m = baseModel(nil)
+	m, _ = dashboardDotsAppModel(t, nil)
 	m.mode = viewStatus
-	m.settings.DotsRepo = "/repo/dotfiles"
 	m.dotsGitStatus = " M dotfiles/zsh/.zshrc"
 	m.statusCursor = statusRowIndex(statusRows(m), "Dotfiles")
 	out = renderStatus(m)
@@ -5800,6 +5856,240 @@ func TestStatusNavigationAndEnterActions(t *testing.T) {
 	if got.mode != viewSettings || got.settingsCursor != settingsRowDotsServices {
 		t.Fatalf("enter on services should open service settings, mode=%v settingsCursor=%d", got.mode, got.settingsCursor)
 	}
+}
+
+func dashboardDotsAppModel(t *testing.T, tools []*database.ToolCache) (Model, string) {
+	t.Helper()
+	appModel, repoDir := newDotsModelForCmds(t)
+	m := baseModel(tools)
+	m.app = appModel.app
+	m.ctx = appModel.ctx
+	m.setSettings(config.Settings{DotsRepo: repoDir})
+	return m, repoDir
+}
+
+func TestDashboardReconcilePlanUsesCachedDotsAvailability(t *testing.T) {
+	t.Run("includes dot steps when app is configured despite stale empty settings", func(t *testing.T) {
+		m, _ := newDotsModelForCmds(t)
+		m.settings = config.Settings{}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+
+		steps := dashboardReconcilePlanItems(m)
+
+		if !app.DashboardReconcilePlanHasStep(steps, app.ReconcileStepSyncDots) {
+			t.Fatalf("missing sync-dots step from app-backed configuration: %#v", steps)
+		}
+	})
+
+	t.Run("omits dot steps when app is unconfigured despite stale local repo", func(t *testing.T) {
+		m := baseModel(nil)
+		m.settings = config.Settings{DotsRepo: "/tmp/stale-dotfiles"}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+		m.dotsGitStatus = " M dotfiles/nvim/init.lua"
+
+		steps := dashboardReconcilePlanItems(m)
+
+		for _, id := range []app.DashboardReconcileStepID{app.ReconcileStepSyncDots, app.ReconcileStepCommitDots} {
+			if app.DashboardReconcilePlanHasStep(steps, id) {
+				t.Fatalf("unexpected %s step from stale local settings: %#v", id, steps)
+			}
+		}
+	})
+
+	t.Run("includes dot steps when app is enabled despite stale local disabled flag", func(t *testing.T) {
+		m, repoDir := newDotsModelForCmds(t)
+		m.settings = config.Settings{DotsRepo: repoDir, DotsDisabled: config.BoolPtr(true)}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+
+		steps := dashboardReconcilePlanItems(m)
+
+		if !app.DashboardReconcilePlanHasStep(steps, app.ReconcileStepSyncDots) {
+			t.Fatalf("missing sync-dots step from app-backed enabled state: %#v", steps)
+		}
+	})
+}
+
+func TestDashboardAutomationWarningsUseCachedDotsAvailability(t *testing.T) {
+	t.Run("does not warn when app is configured despite stale empty settings", func(t *testing.T) {
+		m, _ := newDotsModelForCmds(t)
+		m.settings = config.Settings{}
+		m.dotsReminderService = &app.DotsReminderService{Installed: true}
+
+		warnings := dashboardDotsAutomationStatus(m).ReadinessWarnings
+
+		if len(warnings) != 0 {
+			t.Fatalf("readiness warnings = %v, want none from app-backed configuration", warnings)
+		}
+	})
+
+	t.Run("warns when app is unconfigured despite stale local repo", func(t *testing.T) {
+		m := baseModel(nil)
+		m.settings = config.Settings{DotsRepo: "/tmp/stale-dotfiles"}
+		m.dotsReminderService = &app.DotsReminderService{Installed: true}
+
+		warnings := dashboardDotsAutomationStatus(m).ReadinessWarnings
+
+		if want := []string{"Blocked: dots_repo is not configured."}; !slices.Equal(warnings, want) {
+			t.Fatalf("readiness warnings = %v, want %v", warnings, want)
+		}
+	})
+
+	t.Run("does not warn disabled when app is enabled despite stale local disabled flag", func(t *testing.T) {
+		m, repoDir := newDotsModelForCmds(t)
+		m.settings = config.Settings{DotsRepo: repoDir, DotsDisabled: config.BoolPtr(true)}
+		m.dotsReminderService = &app.DotsReminderService{Installed: true}
+
+		warnings := dashboardDotsAutomationStatus(m).ReadinessWarnings
+
+		if len(warnings) != 0 {
+			t.Fatalf("readiness warnings = %v, want none from app-backed enabled state", warnings)
+		}
+	})
+}
+
+func TestDashboardDotfileRowsUseCachedDotsAvailability(t *testing.T) {
+	t.Run("syncs when app is configured despite stale empty settings", func(t *testing.T) {
+		m, _ := newDotsModelForCmds(t)
+		m.mode = viewStatus
+		m.settings = config.Settings{}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+
+		row, ok := statusDotfilesAttentionRow(m)
+		if !ok {
+			t.Fatal("expected dotfiles attention row")
+		}
+		if row.action.kind != statusActionSyncDots {
+			t.Fatalf("attention action = %v, want sync dots from app-backed availability", row.action)
+		}
+		if strings.Contains(stripANSIEscapeSequences(row.value), "not set") {
+			t.Fatalf("attention value should not use stale empty settings: %#v", row)
+		}
+
+		overview := statusDotfilesOverviewRow(m)
+		if overview.action.kind != statusActionOpenDots {
+			t.Fatalf("overview action = %v, want open dots", overview.action)
+		}
+	})
+
+	t.Run("prompts configuration when app is unconfigured despite stale local repo", func(t *testing.T) {
+		m := baseModel(nil)
+		m.mode = viewStatus
+		m.settings = config.Settings{DotsRepo: "/tmp/stale-dotfiles"}
+		m.dotsSyncAvailCached = app.DotsSyncAvailability{Reason: app.DotsSyncAvailabilityNoRepo}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+		m.dotsGitStatus = " M dotfiles/nvim/init.lua"
+
+		row, ok := statusDotfilesAttentionRow(m)
+		if !ok {
+			t.Fatal("expected dotfiles attention row")
+		}
+		if row.action.kind != statusActionOpenSettings || row.action.settingsRow != settingsRowDotsRepo {
+			t.Fatalf("attention action = %v, want dots repo settings", row.action)
+		}
+		if !strings.Contains(stripANSIEscapeSequences(row.value), "not set") {
+			t.Fatalf("attention value should use app-backed unconfigured state: %#v", row)
+		}
+	})
+
+	t.Run("syncs when app is enabled despite stale local disabled flag", func(t *testing.T) {
+		m, repoDir := newDotsModelForCmds(t)
+		m.mode = viewStatus
+		m.settings = config.Settings{DotsRepo: repoDir, DotsDisabled: config.BoolPtr(true)}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+
+		row, ok := statusDotfilesAttentionRow(m)
+		if !ok {
+			t.Fatal("expected dotfiles attention row")
+		}
+		if row.action.kind != statusActionSyncDots {
+			t.Fatalf("attention action = %v, want sync dots from app-backed enabled state", row.action)
+		}
+		if strings.Contains(stripANSIEscapeSequences(row.value), "disabled") {
+			t.Fatalf("attention value should not use stale disabled setting: %#v", row)
+		}
+	})
+
+	t.Run("details render repo path from app-backed availability despite stale local repo", func(t *testing.T) {
+		m := baseModel(nil)
+		m.mode = viewStatus
+		m.width = 100
+		m.settings = config.Settings{DotsRepo: "/tmp/stale-dotfiles"}
+		m.dotsSyncAvailCached = app.DotsSyncAvailability{Configured: true, Reason: app.DotsSyncAvailabilityReady, RepoPath: "/repo/current-dotfiles"}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}}}
+		m.statusCursor = statusRowIndex(statusRows(m), "Dotfiles")
+
+		out := stripANSIEscapeSequences(renderStatus(m))
+
+		if !strings.Contains(out, "repo /repo/current-dotfiles") || strings.Contains(out, "/tmp/stale-dotfiles") {
+			t.Fatalf("dashboard details should show app-backed repo path, got:\n%s", out)
+		}
+	})
+
+	t.Run("prompts configuration when app availability is unknown despite stale local repo", func(t *testing.T) {
+		m := baseModel(nil)
+		m.app = &app.App{}
+		m.mode = viewStatus
+		m.settings = config.Settings{DotsRepo: "/tmp/stale-dotfiles"}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+		m.dotsGitStatus = " M dotfiles/nvim/init.lua"
+
+		row, ok := statusDotfilesAttentionRow(m)
+		if !ok {
+			t.Fatal("expected dotfiles attention row")
+		}
+		if row.action.kind != statusActionOpenSettings || row.action.settingsRow != settingsRowDotsRepo {
+			t.Fatalf("attention action = %v, want dots repo settings", row.action)
+		}
+		if !strings.Contains(stripANSIEscapeSequences(row.value), "not set") {
+			t.Fatalf("attention value should not derive availability from stale local settings: %#v", row)
+		}
+	})
+
+	t.Run("prompts configuration without app cache despite stale local repo", func(t *testing.T) {
+		m := baseModel(nil)
+		m.mode = viewStatus
+		m.settings = config.Settings{DotsRepo: "/tmp/stale-dotfiles"}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+		m.dotsGitStatus = " M dotfiles/nvim/init.lua"
+
+		row, ok := statusDotfilesAttentionRow(m)
+		if !ok {
+			t.Fatal("expected dotfiles attention row")
+		}
+		if row.action.kind != statusActionOpenSettings || row.action.settingsRow != settingsRowDotsRepo {
+			t.Fatalf("attention action = %v, want dots repo settings", row.action)
+		}
+		if !strings.Contains(stripANSIEscapeSequences(row.value), "not set") {
+			t.Fatalf("attention value should not derive availability from stale local settings without cache: %#v", row)
+		}
+	})
+}
+
+func TestDashboardAutomationIconUsesCachedDotsAvailability(t *testing.T) {
+	t.Run("healthy when app is configured despite stale empty settings", func(t *testing.T) {
+		m, _ := newDotsModelForCmds(t)
+		m.settings = config.Settings{}
+		m.dotsReminderService = &app.DotsReminderService{Installed: true}
+
+		icon, _ := statusAutomationIcon(m)
+
+		if icon != iconInstalled {
+			t.Fatalf("automation icon = %q, want healthy from app-backed availability", icon)
+		}
+	})
+
+	t.Run("warns when app is unconfigured despite stale local repo", func(t *testing.T) {
+		m := baseModel(nil)
+		m.settings = config.Settings{DotsRepo: "/tmp/stale-dotfiles"}
+		m.dotsSyncAvailCached = app.DotsSyncAvailability{Reason: app.DotsSyncAvailabilityNoRepo}
+		m.dotsReminderService = &app.DotsReminderService{Installed: true}
+
+		icon, _ := statusAutomationIcon(m)
+
+		if icon != iconFailed {
+			t.Fatalf("automation icon = %q, want warning from app-backed unconfigured state", icon)
+		}
+	})
 }
 
 func TestDashboardRowsUseMiddleSummaryColumn(t *testing.T) {
@@ -5896,7 +6186,7 @@ func TestDashboardDataRowsShowLoadingWithCurrentSnapshot(t *testing.T) {
 	t.Run("dotfiles", func(t *testing.T) {
 		m := baseModel(nil)
 		m.mode = viewStatus
-		m.settings.DotsRepo = "/repo/dotfiles"
+		m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
 		m.dotsLoading = true
 		m.progressText = "Syncing dots 1/2"
 		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 3}}}
@@ -5954,7 +6244,7 @@ func TestDashboardRowsUseSharedStatusIcons(t *testing.T) {
 			{Name: "certifi", Provider: "python", Installed: true, Tracked: true},
 		})
 		m.mode = viewStatus
-		m.settings.DotsRepo = "/repo/dotfiles"
+		setDotsRepoForTest(&m, "/repo/dotfiles")
 		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 		m.dotsReminderServiceErr = "read service file: denied"
 		m.ignoreSet = map[string]bool{"certifi": true}
@@ -5981,7 +6271,7 @@ func TestDashboardRowsUseSharedStatusIcons(t *testing.T) {
 	t.Run("all clear", func(t *testing.T) {
 		m := baseModel(nil)
 		m.mode = viewStatus
-		m.settings.DotsRepo = "/repo/dotfiles"
+		m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
 		m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}}}
 
 		rows := statusRows(m)
@@ -6003,12 +6293,11 @@ func TestDashboardFooterBulkActions(t *testing.T) {
 	})
 
 	t.Run("reconcile opens planned operations", func(t *testing.T) {
-		m := baseModel([]*database.ToolCache{
+		m, _ := dashboardDotsAppModel(t, []*database.ToolCache{
 			{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
 			{Name: "fd", Provider: "brew", Installed: false, Tracked: true},
 		})
 		m.mode = viewStatus
-		m.settings.DotsRepo = "/repo/dotfiles"
 		m.dotsGitStatus = " M dotfiles/zsh/.zshrc"
 		got := drive(m, pressRune('A'))
 		if !got.dashboardReconcilePlanOpen || !got.dashboardReconcilePlanSelected[dashboardReconcilePlanSyncTools] {
@@ -6058,9 +6347,8 @@ func TestDashboardFooterBulkActions(t *testing.T) {
 	})
 
 	t.Run("confirmed reconcile starts first operation and queues the rest", func(t *testing.T) {
-		m := baseModel([]*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}})
+		m, _ := dashboardDotsAppModel(t, []*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}})
 		m.mode = viewStatus
-		m.settings.DotsRepo = "/repo/dotfiles"
 		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 		got := drive(m, pressRune('A'), pressEnter())
 		if !got.loading || !got.bulkPendingKeys[toolKey("fd", "brew")] {
@@ -6080,9 +6368,8 @@ func TestDashboardFooterBulkActions(t *testing.T) {
 	})
 
 	t.Run("reconcile skips queued operations that became clean", func(t *testing.T) {
-		m := baseModel([]*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}})
+		m, _ := dashboardDotsAppModel(t, []*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}})
 		m.mode = viewStatus
-		m.settings.DotsRepo = "/repo/dotfiles"
 		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 		got := drive(m, pressRune('A'), pressEnter())
 		got.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}}}
@@ -6096,9 +6383,8 @@ func TestDashboardFooterBulkActions(t *testing.T) {
 	})
 
 	t.Run("deselected reconcile operation is skipped", func(t *testing.T) {
-		m := baseModel([]*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}})
+		m, _ := dashboardDotsAppModel(t, []*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}})
 		m.mode = viewStatus
-		m.settings.DotsRepo = "/repo/dotfiles"
 		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 		got := drive(m, pressRune('A'), pressRune(' '), pressEnter())
 		if got.loading || got.bulkPendingKeys[toolKey("fd", "brew")] {
@@ -6110,9 +6396,8 @@ func TestDashboardFooterBulkActions(t *testing.T) {
 	})
 
 	t.Run("dirty dotfiles row can start commit", func(t *testing.T) {
-		m := baseModel(nil)
+		m, _ := dashboardDotsAppModel(t, nil)
 		m.mode = viewStatus
-		m.settings.DotsRepo = "/repo/dotfiles"
 		m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}}}
 		m.dotsGitStatus = " M zsh/.zshrc"
 		rows := statusRows(m)
@@ -6158,14 +6443,14 @@ func TestStatusToolCountsIncludesDiscoveredTools(t *testing.T) {
 	m.rebuildDiscoveredKeys()
 
 	counts := statusToolCounts(m)
-	if counts.updates != 1 {
-		t.Fatalf("updates = %d, want 1", counts.updates)
+	if counts.Updates != 1 {
+		t.Fatalf("updates = %d, want 1", counts.Updates)
 	}
-	if counts.outOfSync != 1 {
-		t.Fatalf("outOfSync = %d, want 1 discovered orphan", counts.outOfSync)
+	if counts.OutOfSync != 1 {
+		t.Fatalf("outOfSync = %d, want 1 discovered orphan", counts.OutOfSync)
 	}
-	if counts.installed != 2 {
-		t.Fatalf("installed = %d, want 2", counts.installed)
+	if counts.Installed != 2 {
+		t.Fatalf("installed = %d, want 2", counts.Installed)
 	}
 }
 
@@ -6452,76 +6737,6 @@ func TestRenderFilePickerPopup_BoundedBrowsingMode(t *testing.T) {
 	}
 	if !strings.Contains(popup, "enter") || !strings.Contains(popup, "esc") {
 		t.Fatalf("file picker popup missing footer hints:\n%s", popup)
-	}
-}
-
-// ── model.go utility functions ────────────────────────────────────────────────
-
-func TestBuildSetupProviders_WithDisabled(t *testing.T) {
-	rows := buildSetupProvidersFromManagers(
-		map[string]string{},
-		nil,
-		nil,
-		config.Settings{DisabledProviders: []string{"node"}},
-	)
-	for _, r := range rows {
-		if r.name == "node" && r.enabled {
-			t.Error("expected 'node' to be disabled")
-		}
-	}
-}
-
-func TestBuildSetupProviders_LabelsReflectManagers(t *testing.T) {
-	rows := buildSetupProvidersFromManagers(
-		map[string]string{"system": "apt"},
-		[]string{"uv", "pip3"},
-		[]string{"bun", "pnpm"},
-		config.Settings{},
-	)
-	for _, r := range rows {
-		switch r.name {
-		case "system":
-			if !strings.Contains(r.label, "apt") {
-				t.Errorf("expected 'apt' in system label, got: %q", r.label)
-			}
-		case "node":
-			if !strings.Contains(r.label, "bun") {
-				t.Errorf("expected 'bun' in node label, got: %q", r.label)
-			}
-		case "python":
-			if !strings.Contains(r.label, "uv") {
-				t.Errorf("expected 'uv' in python label, got: %q", r.label)
-			}
-		}
-	}
-}
-
-func TestIsNodeProviderEnabled_True(t *testing.T) {
-	rows := []setupProviderRow{
-		{name: "system", enabled: true},
-		{name: "node", enabled: true},
-	}
-	if !isNodeProviderEnabled(rows) {
-		t.Error("expected isNodeProviderEnabled=true when node is enabled")
-	}
-}
-
-func TestIsNodeProviderEnabled_False(t *testing.T) {
-	rows := []setupProviderRow{
-		{name: "system", enabled: true},
-		{name: "node", enabled: false},
-	}
-	if isNodeProviderEnabled(rows) {
-		t.Error("expected isNodeProviderEnabled=false when node is disabled")
-	}
-}
-
-func TestIsNodeProviderEnabled_NoNodeRow(t *testing.T) {
-	rows := []setupProviderRow{
-		{name: "system", enabled: true},
-	}
-	if isNodeProviderEnabled(rows) {
-		t.Error("expected isNodeProviderEnabled=false when no node row")
 	}
 }
 

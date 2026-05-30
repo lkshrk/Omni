@@ -135,10 +135,11 @@ func TestConsolidate_PipToPythonUV(t *testing.T) {
 		t.Fatalf("saving config: %v", err)
 	}
 
-	result, err := a.Consolidate(context.Background(), "python", "uv", nil)
+	stateResult, err := a.ConsolidateWithState(context.Background(), "python", "uv", nil)
 	if err != nil {
-		t.Fatalf("Consolidate: %v", err)
+		t.Fatalf("ConsolidateWithState: %v", err)
 	}
+	result := stateResult.Result
 
 	if len(result.Migrated) != 2 {
 		t.Errorf("Migrated = %d, want 2", len(result.Migrated))
@@ -151,6 +152,20 @@ func TestConsolidate_PipToPythonUV(t *testing.T) {
 	}
 	if !result.SettingsUpdated {
 		t.Error("SettingsUpdated should be true")
+	}
+	toolKey := "black\x00python"
+	if _, ok := stateResult.State.ToolMemberships[toolKey]; !ok {
+		t.Fatalf("ToolMemberships[%q] missing after consolidate: %v", toolKey, stateResult.State.ToolMemberships)
+	}
+	found := false
+	for _, tool := range stateResult.Tools {
+		if tool.Name == "black" && tool.Provider == "python" && tool.Installed {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("Tools = %+v, want installed black/python", stateResult.Tools)
 	}
 
 	updated, err := config.Load(cfgPath)

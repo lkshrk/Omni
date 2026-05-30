@@ -10,6 +10,27 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
+func TestCurrentMachineGroupNameUsesOmniHostname(t *testing.T) {
+	tests := []struct {
+		name string
+		env  string
+		want string
+	}{
+		{name: "trims domain and space", env: "  workstation.local  ", want: "workstation"},
+		{name: "keeps plain hostname", env: "mymachine", want: "mymachine"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("OMNI_HOSTNAME", tt.env)
+
+			if got := app.CurrentMachineGroupName(); got != tt.want {
+				t.Fatalf("CurrentMachineGroupName = %q, want %s", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestEnsureHostCreatesSpecialGroupAndHostEntry(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 
@@ -91,6 +112,157 @@ func TestInitRepairsLegacyCurrentHostGroup(t *testing.T) {
 	}
 }
 
+func TestHostSummariesReturnSortedDisplayFields(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "beta.local")
+	a, cfgPath := newImportApp(t)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Groups: []*config.GroupConfig{
+			{Name: "beta", Special: "host"},
+			{Name: "zeta", Special: "host"},
+			{Name: "base"},
+			{Name: "tools"},
+			{Name: "work"},
+		},
+		Hosts: map[string][]string{
+			"zeta": {"work", "base"},
+			"beta": {"tools", "base"},
+		},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	summaries, err := a.HostSummaries()
+	if err != nil {
+		t.Fatalf("HostSummaries: %v", err)
+	}
+
+	if len(summaries) != 2 {
+		t.Fatalf("got %d summaries, want 2", len(summaries))
+	}
+	if summaries[0].Name != "beta" || !summaries[0].Active || !slices.Equal(summaries[0].Groups, []string{"base", "tools"}) {
+		t.Fatalf("summaries[0] = %+v, want active beta with [base tools]", summaries[0])
+	}
+	if summaries[1].Name != "zeta" || summaries[1].Active || !slices.Equal(summaries[1].Groups, []string{"base", "work"}) {
+		t.Fatalf("summaries[1] = %+v, want inactive zeta with [base work]", summaries[1])
+	}
+}
+
+func TestPrioritizedHostSummariesMoveActiveHostFirst(t *testing.T) {
+	info := &app.HostInfo{
+		Active: "work",
+		Hosts: map[string]config.HostAssignment{
+			"alpha": {Groups: []string{"zeta", "base"}},
+			"work":  {Groups: []string{"dev", "base"}},
+			"zeta":  {Groups: []string{"ops"}},
+		},
+	}
+
+	summaries := app.PrioritizedHostSummaries(info)
+
+	wantNames := []string{"work", "alpha", "zeta"}
+	if len(summaries) != len(wantNames) {
+		t.Fatalf("got %d summaries, want %d", len(summaries), len(wantNames))
+	}
+	for i, want := range wantNames {
+		if summaries[i].Name != want {
+			t.Fatalf("summaries[%d].Name = %q, want %q", i, summaries[i].Name, want)
+		}
+	}
+	if !summaries[0].Active {
+		t.Fatalf("summaries[0] = %+v, want active host first", summaries[0])
+	}
+	if !slices.Equal(summaries[0].Groups, []string{"base", "dev"}) {
+		t.Fatalf("summaries[0].Groups = %v, want [base dev]", summaries[0].Groups)
+	}
+}
+
+func TestSetupCopyHostNamesUsesPrioritizedHosts(t *testing.T) {
+	info := &app.HostInfo{
+		Active: "work",
+		Hosts: map[string]config.HostAssignment{
+			"alpha": {Groups: []string{"base"}},
+			"work":  {Groups: []string{"dev"}},
+			"zeta":  {Groups: []string{"ops"}},
+		},
+	}
+
+	got := app.SetupCopyHostNames(info)
+	want := []string{"work", "alpha", "zeta"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("SetupCopyHostNames = %v, want %v", got, want)
+	}
+	if got := app.SetupCopyHostNames(nil); len(got) != 0 {
+		t.Fatalf("SetupCopyHostNames(nil) = %v, want empty", got)
+	}
+}
+
+func TestSetupHostAlreadyConfiguredRequiresActiveExistingHost(t *testing.T) {
+	info := &app.HostInfo{
+		Active: "work",
+		Hosts: map[string]config.HostAssignment{
+			"other": {Groups: []string{"base"}},
+			"work":  {Groups: []string{"dev"}},
+		},
+	}
+
+	if !app.SetupHostAlreadyConfigured(info, "work") {
+		t.Fatal("SetupHostAlreadyConfigured(active host) = false, want true")
+	}
+	if app.SetupHostAlreadyConfigured(info, "other") {
+		t.Fatal("SetupHostAlreadyConfigured(existing inactive host) = true, want false")
+	}
+	if app.SetupHostAlreadyConfigured(info, "missing") {
+		t.Fatal("SetupHostAlreadyConfigured(missing host) = true, want false")
+	}
+	if app.SetupHostAlreadyConfigured(nil, "work") {
+		t.Fatal("SetupHostAlreadyConfigured(nil) = true, want false")
+	}
+}
+
+func TestHostNamesForGroupReturnsSortedHosts(t *testing.T) {
+	info := &app.HostInfo{
+		Hosts: map[string]config.HostAssignment{
+			"zeta":  {Groups: []string{"work", "base"}},
+			"alpha": {Groups: []string{"base"}},
+			"beta":  {Groups: []string{"work"}},
+		},
+	}
+
+	hosts := app.HostNamesForGroup(info, "work")
+
+	if !slices.Equal(hosts, []string{"beta", "zeta"}) {
+		t.Fatalf("HostNamesForGroup = %v, want [beta zeta]", hosts)
+	}
+}
+
+func TestHasHostAssignmentsReportsConfiguredHosts(t *testing.T) {
+	a, cfgPath := newImportApp(t)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{}); err != nil {
+		t.Fatalf("config.Save empty: %v", err)
+	}
+	hasHosts, err := a.HasHostAssignments()
+	if err != nil {
+		t.Fatalf("HasHostAssignments empty: %v", err)
+	}
+	if hasHosts {
+		t.Fatal("HasHostAssignments empty config = true, want false")
+	}
+
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Groups: []*config.GroupConfig{{Name: "laptop", Special: "host"}},
+		Hosts:  map[string][]string{"laptop": {}},
+	}); err != nil {
+		t.Fatalf("config.Save host: %v", err)
+	}
+	hasHosts, err = a.HasHostAssignments()
+	if err != nil {
+		t.Fatalf("HasHostAssignments host: %v", err)
+	}
+	if !hasHosts {
+		t.Fatal("HasHostAssignments configured host = false, want true")
+	}
+}
+
 func TestSetHostGroupsPersistsReusableGroups(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 	if err := a.CreateGroup("work"); err != nil {
@@ -113,6 +285,99 @@ func TestSetHostGroupsPersistsReusableGroups(t *testing.T) {
 	}
 	if got := cfg.Hosts["testhost"]; !slices.Equal(got, []string{"base", "dev", "work"}) {
 		t.Fatalf("hosts[testhost] = %v, want [base dev work]", got)
+	}
+}
+
+func TestSetHostGroupsWithCreatedCreatesSelectedDraftGroups(t *testing.T) {
+	a, cfgPath := newImportApp(t)
+
+	if err := a.SetHostGroupsWithCreated("testhost", []string{"work"}, []string{"unused", "work"}); err != nil {
+		t.Fatalf("SetHostGroupsWithCreated: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got := cfg.Hosts["testhost"]; !slices.Equal(got, []string{"work"}) {
+		t.Fatalf("hosts[testhost] = %v, want [work]", got)
+	}
+	if group := findHostTestGroup(cfg.Groups, "work"); group == nil || group.IsHost() {
+		t.Fatalf("work group = %#v, want reusable group", group)
+	}
+	if group := findHostTestGroup(cfg.Groups, "unused"); group != nil {
+		t.Fatalf("unused draft group was created: %#v", group)
+	}
+}
+
+func TestHostGroupMutationsWithStateReturnUpdatedState(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "current.local")
+	a, cfgPath := newImportApp(t)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Groups: []*config.GroupConfig{
+			{Name: "current", Special: "host"},
+			{Name: "work"},
+		},
+		Hosts: map[string][]string{"current": {"work"}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	created, err := a.CreateGroupWithState(context.Background(), "newgroup")
+	if err != nil {
+		t.Fatalf("CreateGroupWithState: %v", err)
+	}
+	if !slices.Contains(created.GroupNames, "newgroup") {
+		t.Fatalf("GroupNames = %v, want newgroup", created.GroupNames)
+	}
+	if got := created.HostInfo.Hosts["current"].Groups; !slices.Contains(got, "newgroup") {
+		t.Fatalf("current host groups = %v, want newgroup", got)
+	}
+
+	added, err := a.AddGroupToHostWithState(context.Background(), "other", "newgroup")
+	if err != nil {
+		t.Fatalf("AddGroupToHostWithState: %v", err)
+	}
+	if got := added.HostInfo.Hosts["other"].Groups; !slices.Contains(got, "newgroup") {
+		t.Fatalf("other host groups = %v, want newgroup", got)
+	}
+
+	removed, err := a.RemoveGroupFromHostWithState(context.Background(), "other", "newgroup")
+	if err != nil {
+		t.Fatalf("RemoveGroupFromHostWithState: %v", err)
+	}
+	if got := removed.HostInfo.Hosts["other"].Groups; slices.Contains(got, "newgroup") {
+		t.Fatalf("other host groups = %v, want newgroup removed", got)
+	}
+
+	set, err := a.SetHostGroupsWithState(context.Background(), "current", []string{"fresh"}, []string{"fresh"})
+	if err != nil {
+		t.Fatalf("SetHostGroupsWithState: %v", err)
+	}
+	if !slices.Contains(set.GroupNames, "fresh") {
+		t.Fatalf("GroupNames = %v, want fresh", set.GroupNames)
+	}
+	if got := set.HostInfo.Hosts["current"].Groups; !slices.Equal(got, []string{"fresh"}) {
+		t.Fatalf("current host groups = %v, want [fresh]", got)
+	}
+
+	renamed, err := a.RenameHostWithState(context.Background(), "other", "renamed")
+	if err != nil {
+		t.Fatalf("RenameHostWithState: %v", err)
+	}
+	if _, ok := renamed.HostInfo.Hosts["other"]; ok {
+		t.Fatalf("HostInfo still contains other: %#v", renamed.HostInfo.Hosts)
+	}
+	if _, ok := renamed.HostInfo.Hosts["renamed"]; !ok {
+		t.Fatalf("HostInfo = %#v, want renamed host", renamed.HostInfo.Hosts)
+	}
+
+	deleted, err := a.RemoveHostWithState(context.Background(), "renamed")
+	if err != nil {
+		t.Fatalf("RemoveHostWithState: %v", err)
+	}
+	if _, ok := deleted.HostInfo.Hosts["renamed"]; ok {
+		t.Fatalf("HostInfo still contains renamed: %#v", deleted.HostInfo.Hosts)
 	}
 }
 

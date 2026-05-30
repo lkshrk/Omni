@@ -316,7 +316,13 @@ func TestBackupLocalPathFrom_GitTrackedOnly(t *testing.T) {
 
 func runGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	baseArgs := []string{
+		"-C", dir,
+		"-c", "commit.gpgsign=false",
+		"-c", "tag.gpgsign=false",
+		"-c", "core.hooksPath=" + os.DevNull,
+	}
+	cmd := exec.Command("git", append(baseArgs, args...)...)
 	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)

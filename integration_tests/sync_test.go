@@ -5,6 +5,8 @@ package integration_test
 import (
 	"context"
 	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,6 +37,60 @@ func brewInfoJSON(pkgs map[string]string) string {
 const brewInfoEmpty = `{"formulae":[],"casks":[]}`
 const brewOutdatedEmpty = `{"formulae":[],"casks":[]}`
 
+func brewFormulaNames(pkgs map[string]string) []string {
+	names := make([]string, 0, len(pkgs))
+	for name := range pkgs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func brewLeavesOutput(pkgs map[string]string) string {
+	names := brewFormulaNames(pkgs)
+	if len(names) == 0 {
+		return ""
+	}
+	return strings.Join(names, "\n") + "\n"
+}
+
+func brewListVersionsOutput(pkgs map[string]string) string {
+	names := brewFormulaNames(pkgs)
+	lines := make([]string, 0, len(names))
+	for _, name := range names {
+		lines = append(lines, name+" "+pkgs[name])
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
+func brewInstalledFormulaRules(pkgs map[string]string) []executor.MatchRule {
+	rules := []executor.MatchRule{
+		{Pattern: "brew info --json=v2 --installed", Response: executor.MockCall{Stdout: brewInfoJSON(pkgs)}},
+		{Pattern: "brew leaves --installed-on-request", Response: executor.MockCall{Stdout: brewLeavesOutput(pkgs)}},
+		{Pattern: "brew list --cask", Response: executor.MockCall{}},
+		{Pattern: "brew list --versions --cask", Response: executor.MockCall{}},
+	}
+	if len(pkgs) > 0 {
+		rules = append(rules, executor.MatchRule{
+			Pattern:  "brew list --versions",
+			Response: executor.MockCall{Stdout: brewListVersionsOutput(pkgs)},
+		})
+	}
+	return rules
+}
+
+func newBrewMatchMock(preInstalled map[string]string, rules ...executor.MatchRule) *executor.MatchMockExecutor {
+	all := []executor.MatchRule{
+		{Pattern: "brew --version", Response: executor.MockCall{Stdout: "Homebrew 4.0.0"}},
+	}
+	all = append(all, rules...)
+	all = append(all, brewInstalledFormulaRules(preInstalled)...)
+	return executor.NewMatchMock(all...)
+}
+
 // ─── pip list helper ───────────────────────────────────────────────────────
 
 func pipListOutput(pkgs map[string]string) string {
@@ -53,8 +109,7 @@ func pipListOutput(pkgs map[string]string) string {
 // ─── Syncer-level integration tests ───────────────────────────────────────
 
 func TestSync_InstallsMissingBrewTool(t *testing.T) {
-	mock := executor.NewMatchMock(
-		executor.MatchRule{Pattern: "brew --version", Response: executor.MockCall{Stdout: "Homebrew 4.0.0"}},
+	mock := newBrewMatchMock(nil,
 		executor.MatchRule{Pattern: "brew info --json=v2 --installed", Response: executor.MockCall{Stdout: brewInfoEmpty}},
 		executor.MatchRule{Pattern: "brew outdated --json=v2", Response: executor.MockCall{Stdout: brewOutdatedEmpty}},
 		executor.MatchRule{Pattern: "brew install ripgrep", Response: executor.MockCall{}},
@@ -75,11 +130,7 @@ func TestSync_InstallsMissingBrewTool(t *testing.T) {
 }
 
 func TestSync_SkipsAlreadyInstalledTool(t *testing.T) {
-	mock := executor.NewMatchMock(
-		executor.MatchRule{Pattern: "brew --version", Response: executor.MockCall{Stdout: "Homebrew 4.0.0"}},
-		executor.MatchRule{Pattern: "brew info --json=v2 --installed", Response: executor.MockCall{
-			Stdout: brewInfoJSON(map[string]string{"ripgrep": "14.1.0"}),
-		}},
+	mock := newBrewMatchMock(map[string]string{"ripgrep": "14.1.0"},
 		executor.MatchRule{Pattern: "brew outdated --json=v2", Response: executor.MockCall{Stdout: brewOutdatedEmpty}},
 	)
 	ta := newTestStackWithMock(t, mock)
@@ -115,8 +166,7 @@ func TestSync_ProviderUnavailable(t *testing.T) {
 }
 
 func TestSync_MultipleBrewTools(t *testing.T) {
-	mock := executor.NewMatchMock(
-		executor.MatchRule{Pattern: "brew --version", Response: executor.MockCall{Stdout: "Homebrew 4.0.0"}},
+	mock := newBrewMatchMock(nil,
 		executor.MatchRule{Pattern: "brew info --json=v2 --installed", Response: executor.MockCall{Stdout: brewInfoEmpty}},
 		executor.MatchRule{Pattern: "brew outdated --json=v2", Response: executor.MockCall{Stdout: brewOutdatedEmpty}},
 		executor.MatchRule{Pattern: "brew install ripgrep", Response: executor.MockCall{}},
@@ -138,8 +188,7 @@ func TestSync_MultipleBrewTools(t *testing.T) {
 }
 
 func TestSync_DryRun_DoesNotInstall(t *testing.T) {
-	mock := executor.NewMatchMock(
-		executor.MatchRule{Pattern: "brew --version", Response: executor.MockCall{Stdout: "Homebrew 4.0.0"}},
+	mock := newBrewMatchMock(nil,
 		executor.MatchRule{Pattern: "brew info --json=v2 --installed", Response: executor.MockCall{Stdout: brewInfoEmpty}},
 		executor.MatchRule{Pattern: "brew outdated --json=v2", Response: executor.MockCall{Stdout: brewOutdatedEmpty}},
 	)
@@ -154,8 +203,7 @@ func TestSync_DryRun_DoesNotInstall(t *testing.T) {
 }
 
 func TestSync_Progress_ReceivesMessages(t *testing.T) {
-	mock := executor.NewMatchMock(
-		executor.MatchRule{Pattern: "brew --version", Response: executor.MockCall{Stdout: "Homebrew 4.0.0"}},
+	mock := newBrewMatchMock(nil,
 		executor.MatchRule{Pattern: "brew info --json=v2 --installed", Response: executor.MockCall{Stdout: brewInfoEmpty}},
 		executor.MatchRule{Pattern: "brew outdated --json=v2", Response: executor.MockCall{Stdout: brewOutdatedEmpty}},
 		executor.MatchRule{Pattern: "brew install ripgrep", Response: executor.MockCall{}},
@@ -177,8 +225,7 @@ func TestSync_Progress_ReceivesMessages(t *testing.T) {
 }
 
 func TestSync_MarksToolInstalledInDB(t *testing.T) {
-	mock := executor.NewMatchMock(
-		executor.MatchRule{Pattern: "brew --version", Response: executor.MockCall{Stdout: "Homebrew 4.0.0"}},
+	mock := newBrewMatchMock(nil,
 		executor.MatchRule{Pattern: "brew info --json=v2 --installed", Response: executor.MockCall{Stdout: brewInfoEmpty}},
 		executor.MatchRule{Pattern: "brew outdated --json=v2", Response: executor.MockCall{Stdout: brewOutdatedEmpty}},
 		executor.MatchRule{Pattern: "brew install ripgrep", Response: executor.MockCall{}},
@@ -204,8 +251,7 @@ func TestSync_MarksToolInstalledInDB(t *testing.T) {
 }
 
 func TestSync_InstallFailure_RecordedAsError(t *testing.T) {
-	mock := executor.NewMatchMock(
-		executor.MatchRule{Pattern: "brew --version", Response: executor.MockCall{Stdout: "Homebrew 4.0.0"}},
+	mock := newBrewMatchMock(nil,
 		executor.MatchRule{Pattern: "brew info --json=v2 --installed", Response: executor.MockCall{Stdout: brewInfoEmpty}},
 		executor.MatchRule{Pattern: "brew outdated --json=v2", Response: executor.MockCall{Stdout: brewOutdatedEmpty}},
 		executor.MatchRule{Pattern: "brew install ripgrep", Response: executor.MockCall{Err: errNotExist, Stderr: "formula not found"}},
@@ -246,12 +292,7 @@ func TestSync_PipTool(t *testing.T) {
 }
 
 func TestSync_DoesNotRefreshOutdatedState(t *testing.T) {
-	mock := executor.NewMatchMock(
-		executor.MatchRule{Pattern: "brew --version", Response: executor.MockCall{Stdout: "Homebrew 4.0.0"}},
-		executor.MatchRule{Pattern: "brew info --json=v2 --installed", Response: executor.MockCall{
-			Stdout: brewInfoJSON(map[string]string{"ripgrep": "14.0.0"}),
-		}},
-	)
+	mock := newBrewMatchMock(map[string]string{"ripgrep": "14.0.0"})
 	ta := newTestStackWithMock(t, mock)
 	cfg := simpleConfig("ripgrep", "brew")
 
@@ -389,18 +430,14 @@ func TestApp_Uninstall_CallsProviderAndUpdatesDB(t *testing.T) {
 }
 
 func TestApp_Upgrade_CallsProviderAndUpdatesVersion(t *testing.T) {
-	// MockExecutor (sequential) — install then upgrade call different IsInstalled responses.
-	installMock := &executor.MockExecutor{Responses: []executor.MockCall{
-		{Stdout: "Homebrew 4.0.0"},   // brew --version (Available)
-		{},                           // brew install ripgrep
-		{Stdout: "ripgrep 14.0.0\n"}, // brew list --versions ripgrep (after install)
-		{},                           // brew upgrade ripgrep
-		{Stdout: "ripgrep 14.1.0\n"}, // brew list --versions ripgrep (after upgrade)
-		{Stdout: "Homebrew 4.0.0"},   // brew --version (post-upgrade outdated refresh)
-		{},                           // brew update
-		{Stdout: brewOutdatedEmpty},  // brew outdated --json=v2
-	}}
-	a, _ := newAppWithBrew(t, installMock)
+	mock := newBrewMatchMock(nil,
+		executor.MatchRule{Pattern: "brew install ripgrep", Response: executor.MockCall{}},
+		executor.MatchRule{Pattern: "brew list --versions ripgrep", Response: executor.MockCall{Stdout: "ripgrep 14.1.0\n"}},
+		executor.MatchRule{Pattern: "brew upgrade --formula ripgrep", Response: executor.MockCall{}},
+		executor.MatchRule{Pattern: "brew update", Response: executor.MockCall{}},
+		executor.MatchRule{Pattern: "brew outdated --json=v2", Response: executor.MockCall{Stdout: brewOutdatedEmpty}},
+	)
+	a, _ := newAppWithBrew(t, mock)
 	ctx := context.Background()
 
 	if err := a.Install(ctx, "ripgrep", "brew"); err != nil {
@@ -420,13 +457,12 @@ func TestApp_Upgrade_CallsProviderAndUpdatesVersion(t *testing.T) {
 }
 
 func TestApp_UpgradeAll_OnlyUpgradesOutdatedTools(t *testing.T) {
-	mock := executor.NewMatchMock(
-		executor.MatchRule{Pattern: "brew --version", Response: executor.MockCall{Stdout: "Homebrew 4.0.0"}},
+	mock := newBrewMatchMock(nil,
 		executor.MatchRule{Pattern: "brew install ripgrep", Response: executor.MockCall{}},
 		executor.MatchRule{Pattern: "brew install git", Response: executor.MockCall{}},
 		executor.MatchRule{Pattern: "brew list --versions ripgrep", Response: executor.MockCall{Stdout: "ripgrep 14.0.0\n"}},
 		executor.MatchRule{Pattern: "brew list --versions git", Response: executor.MockCall{Stdout: "git 2.43.0\n"}},
-		executor.MatchRule{Pattern: "brew upgrade ripgrep", Response: executor.MockCall{}},
+		executor.MatchRule{Pattern: "brew upgrade --formula ripgrep", Response: executor.MockCall{}},
 		executor.MatchRule{Pattern: "brew update", Response: executor.MockCall{}},
 		executor.MatchRule{Pattern: "brew outdated --json=v2", Response: executor.MockCall{Stdout: brewOutdatedEmpty}},
 	)
@@ -450,13 +486,12 @@ func TestApp_UpgradeAll_OnlyUpgradesOutdatedTools(t *testing.T) {
 		t.Fatalf("UpgradeAll: %v", err)
 	}
 
-	mock.AssertCalled(t, "brew upgrade ripgrep")
-	mock.MustHaveCalledN(t, "brew upgrade git", 0)
+	mock.AssertCalled(t, "brew upgrade --formula ripgrep")
+	mock.MustHaveCalledN(t, "brew upgrade --formula git", 0)
 }
 
 func TestApp_Sync_FullRoundTrip(t *testing.T) {
-	mock := executor.NewMatchMock(
-		executor.MatchRule{Pattern: "brew --version", Response: executor.MockCall{Stdout: "Homebrew 4.0.0"}},
+	mock := newBrewMatchMock(nil,
 		executor.MatchRule{Pattern: "brew info --json=v2 --installed", Response: executor.MockCall{Stdout: brewInfoEmpty}},
 		executor.MatchRule{Pattern: "brew outdated --json=v2", Response: executor.MockCall{Stdout: brewOutdatedEmpty}},
 		executor.MatchRule{Pattern: "brew install ripgrep", Response: executor.MockCall{}},
@@ -493,11 +528,7 @@ func TestApp_Sync_FullRoundTrip(t *testing.T) {
 }
 
 func TestApp_Sync_MixedStates(t *testing.T) {
-	mock := executor.NewMatchMock(
-		executor.MatchRule{Pattern: "brew --version", Response: executor.MockCall{Stdout: "Homebrew 4.0.0"}},
-		executor.MatchRule{Pattern: "brew info --json=v2 --installed", Response: executor.MockCall{
-			Stdout: brewInfoJSON(map[string]string{"ripgrep": "14.1.0"}),
-		}},
+	mock := newBrewMatchMock(map[string]string{"ripgrep": "14.1.0"},
 		executor.MatchRule{Pattern: "brew outdated --json=v2", Response: executor.MockCall{Stdout: brewOutdatedEmpty}},
 		executor.MatchRule{Pattern: "brew install git", Response: executor.MockCall{}},
 		executor.MatchRule{Pattern: "brew list --versions git", Response: executor.MockCall{Stdout: "git 2.43.0\n"}},
@@ -560,12 +591,7 @@ func TestApp_ListTools_ReflectsDBState(t *testing.T) {
 }
 
 func TestApp_Import_DiscoversInstalledTools(t *testing.T) {
-	mock := executor.NewMatchMock(
-		executor.MatchRule{Pattern: "brew --version", Response: executor.MockCall{Stdout: "Homebrew 4.0.0"}},
-		executor.MatchRule{Pattern: "brew info --json=v2 --installed", Response: executor.MockCall{
-			Stdout: `{"formulae":[{"full_name":"ripgrep","installed":[{"version":"14.1.0","installed_on_request":true}]}],"casks":[]}`,
-		}},
-	)
+	mock := newBrewMatchMock(map[string]string{"ripgrep": "14.1.0"})
 	a, cfgPath := newAppWithBrew(t, mock)
 
 	root := rootWithTestHostGroup(
@@ -629,8 +655,7 @@ func TestApp_Uninstall_PipTool(t *testing.T) {
 }
 
 func TestApp_Sync_BrewCask(t *testing.T) {
-	mock := executor.NewMatchMock(
-		executor.MatchRule{Pattern: "brew --version", Response: executor.MockCall{Stdout: "Homebrew 4.0.0"}},
+	mock := newBrewMatchMock(nil,
 		executor.MatchRule{Pattern: "brew info --json=v2 --installed", Response: executor.MockCall{Stdout: brewInfoEmpty}},
 		executor.MatchRule{Pattern: "brew outdated --json=v2", Response: executor.MockCall{Stdout: brewOutdatedEmpty}},
 		executor.MatchRule{Pattern: "brew install warp", Response: executor.MockCall{}},

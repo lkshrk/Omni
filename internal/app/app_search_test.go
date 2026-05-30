@@ -93,3 +93,37 @@ func TestListDiscovered_HidesUnattributedLegacyRows(t *testing.T) {
 		t.Fatalf("ListTools = %+v, want only attributed brew-backed jq", tools)
 	}
 }
+
+func TestToolDisplaySnapshotReturnsToolsDiscoveredAndManager(t *testing.T) {
+	ctx := context.Background()
+	brew := &stubProvider{name: "brew", available: true}
+	system := &lifecycleProvider{stubProvider: stubProvider{name: "system", available: true}, resolvedName: "brew"}
+	a, cfgPath := newImportApp(t, system, brew)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("ripgrep", "system")),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("ripgrep"),
+		}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	if err := a.DB().UpsertDiscoveredBatch(ctx, []database.DiscoveredUpsert{
+		{Name: "jq", Provider: "system", InstalledWith: "brew", Version: "1.7.0"},
+	}); err != nil {
+		t.Fatalf("UpsertDiscoveredBatch: %v", err)
+	}
+
+	snapshot, err := a.ToolDisplaySnapshot(ctx)
+	if err != nil {
+		t.Fatalf("ToolDisplaySnapshot: %v", err)
+	}
+	if len(snapshot.Tools) != 1 || snapshot.Tools[0].Name != "jq" {
+		t.Fatalf("Tools = %+v, want jq", snapshot.Tools)
+	}
+	if len(snapshot.Discovered) != 1 || snapshot.Discovered[0].Name != "jq" {
+		t.Fatalf("Discovered = %+v, want jq", snapshot.Discovered)
+	}
+	if snapshot.EffectiveSystemManager != "brew" {
+		t.Fatalf("EffectiveSystemManager = %q, want brew", snapshot.EffectiveSystemManager)
+	}
+}

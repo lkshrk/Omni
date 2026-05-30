@@ -3,7 +3,7 @@ exec chmod 755 bin/brew bin/apt bin/apk bin/dnf bin/pacman bin/zypper bin/pip bi
 env PATH=$WORK/bin:$PATH
 
 exec omni --config settings.json tools refresh
-stdout 'Refreshing tools 1/1: brew/ripgrep'
+stdout 'Scanning system/brew… \(1/1\)'
 stdout 'Checking updates 1/1: brew/ripgrep'
 stdout 'Finding local tools [0-9]+/[0-9]+:'
 stdout 'Refreshing descriptions 1/1: brew/ripgrep'
@@ -23,36 +23,48 @@ case "${1:-}" in
   --version)
     echo "Homebrew 4.0.0"
     ;;
-  info)
-    if [ "${2:-}" = "--json=v2" ] && [ "${3:-}" = "--installed" ]; then
-      printf '{"formulae":[{"name":"ripgrep","full_name":"ripgrep","desc":"fast grep","installed":[{"version":"14.0.0","installed_on_request":true}]}],"casks":[]}\n'
-      exit 0
-    fi
+	  info)
+	    if [ "${2:-}" = "--json=v2" ] && [ "${3:-}" = "--installed" ]; then
+	      printf '{"formulae":[{"name":"ripgrep","full_name":"ripgrep","desc":"fast grep","installed":[{"version":"14.0.0","installed_on_request":true}]}],"casks":[]}\n'
+	      exit 0
+	    fi
     if [ "${2:-}" = "--json=v2" ]; then
       printf '{"formulae":[{"name":"ripgrep","full_name":"ripgrep","desc":"fast grep","installed":[]}],"casks":[]}\n'
       exit 0
-    fi
-    printf '{"formulae":[],"casks":[]}\n'
-    ;;
-  update)
-    ;;
+	    fi
+	    printf '{"formulae":[],"casks":[]}\n'
+	    ;;
+	  leaves)
+	    if [ "${2:-}" = "--installed-on-request" ]; then
+	      echo "ripgrep"
+	    fi
+	    ;;
+	  update)
+	    ;;
   outdated)
     printf '{"formulae":[{"name":"ripgrep","current_version":"15.0.0"}],"casks":[]}\n'
     ;;
-  list)
-    shift
-    if [ "${1:-}" = "--versions" ]; then
-      shift
-      if [ "${1:-}" = "--cask" ]; then
-        shift
-      fi
-      if [ "${1:-}" = "ripgrep" ]; then
-        echo "ripgrep 14.0.0"
-        exit 0
-      fi
-    fi
-    exit 1
-    ;;
+	  list)
+	    shift
+	    if [ "${1:-}" = "--cask" ]; then
+	      exit 0
+	    fi
+	    if [ "${1:-}" = "--versions" ]; then
+	      shift
+	      if [ "${1:-}" = "--cask" ]; then
+	        shift
+	      fi
+	      found=0
+	      for pkg in "$@"; do
+	        if [ "$pkg" = "ripgrep" ]; then
+	          echo "ripgrep 14.0.0"
+	          found=1
+	        fi
+	      done
+	      [ "$found" -eq 1 ] && exit 0
+	    fi
+	    exit 1
+	    ;;
 esac
 
 -- bin/apt --

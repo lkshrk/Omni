@@ -9,6 +9,7 @@ import (
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/provider"
 )
 
@@ -289,6 +290,53 @@ func TestSetToolHostInstallSpec_WritesHostOverride(t *testing.T) {
 	}
 }
 
+func TestSetToolProviderScopeWithStateReturnsToolsAndPins(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "linuxbox.example.com")
+	ctx := context.Background()
+	a, cfgPath := newImportApp(t)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools:  logicalToolSpecs(logicalTool("typescript", "node")),
+		Groups: []*config.GroupConfig{testHostToolGroup("typescript")},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name:          "typescript",
+		Provider:      "node",
+		Package:       "typescript",
+		Installed:     true,
+		InstalledWith: "npm",
+		Tracked:       true,
+	}); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+
+	result, err := a.SetToolProviderScopeWithState(ctx, "typescript", app.ToolProviderScopeOptions{
+		Kind:         app.ToolProviderScopeTool,
+		ProviderName: "node",
+		Package:      "typescript",
+		InstallWith:  "pnpm",
+	})
+	if err != nil {
+		t.Fatalf("SetToolProviderScopeWithState: %v", err)
+	}
+
+	if got := result.ScopeDisplay.ToolProviderPins["typescript"]; got != "pnpm" {
+		t.Fatalf("ToolProviderPins[typescript] = %q, want pnpm", got)
+	}
+	if len(result.Tools) != 1 || result.Tools[0].Name != "typescript" {
+		t.Fatalf("Tools = %v, want typescript", toolNames(result.Tools))
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	spec := cfg.Tools["typescript"]
+	if spec.Provider != "node" || spec.InstallWith != "pnpm" {
+		t.Fatalf("provider scope was not persisted: %+v", spec)
+	}
+}
+
 func TestClearToolInstallOverride_RemovesEffectiveHostOverride(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "linuxbox.example.com")
 	a, cfgPath := newImportApp(t)
@@ -324,6 +372,60 @@ func TestClearToolInstallOverride_RemovesEffectiveHostOverride(t *testing.T) {
 	}
 	if cfg.Tools["typescript"].InstallWith != "" {
 		t.Fatalf("default install_with = %q, want cleared", cfg.Tools["typescript"].InstallWith)
+	}
+}
+
+func TestClearProviderOverrideWithStateReturnsToolsAndPins(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "linuxbox.example.com")
+	ctx := context.Background()
+	brew := &lifecycleProvider{stubProvider: stubProvider{name: "brew", available: true}}
+	system := &lifecycleProvider{
+		stubProvider: stubProvider{name: "system", available: true},
+		resolvedName: "brew",
+		installed:    true,
+		version:      "1.0.0",
+	}
+	a, cfgPath := newImportApp(t, brew, system)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools:  logicalToolSpecs(logicalFixtureTool{Name: "ripgrep", Provider: "system", InstallWith: "brew"}),
+		Groups: []*config.GroupConfig{testHostToolGroup("ripgrep")},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name:          "ripgrep",
+		Provider:      "system",
+		Package:       "ripgrep",
+		Installed:     true,
+		InstalledWith: "brew",
+		Tracked:       true,
+	}); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+
+	result, err := a.ClearProviderOverrideWithState(ctx, "ripgrep", "system", "")
+	if err != nil {
+		t.Fatalf("ClearProviderOverrideWithState: %v", err)
+	}
+
+	if result.Cleared.InstallWith != "brew" {
+		t.Fatalf("cleared = %+v, want brew", result.Cleared)
+	}
+	if result.FromProvider != "brew" || result.ToProvider != "system" {
+		t.Fatalf("from/to = %q/%q, want brew/system", result.FromProvider, result.ToProvider)
+	}
+	if _, ok := result.ScopeDisplay.ToolProviderPins["ripgrep"]; ok {
+		t.Fatalf("provider pins = %v, want ripgrep cleared", result.ScopeDisplay.ToolProviderPins)
+	}
+	if len(result.Tools) != 1 || result.Tools[0].Name != "ripgrep" {
+		t.Fatalf("Tools = %v, want ripgrep", toolNames(result.Tools))
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if cfg.Tools["ripgrep"].InstallWith != "" {
+		t.Fatalf("install_with = %q, want cleared", cfg.Tools["ripgrep"].InstallWith)
 	}
 }
 

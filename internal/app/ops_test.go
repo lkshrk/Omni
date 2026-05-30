@@ -12,6 +12,7 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/provider"
+	syncprogress "github.com/lkshrk/omni/internal/sync"
 )
 
 // searchStub extends stubProvider with the optional Searcher interface.
@@ -198,6 +199,40 @@ func TestInstall_UsesLogicalPackageAndInstallWith(t *testing.T) {
 	}
 	if cached.Version.String != "14.1.0" {
 		t.Fatalf("cache version = %q, want 14.1.0", cached.Version.String)
+	}
+}
+
+func TestInstallWithStateReturnsUpdatedToolsAndGroups(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost.local")
+	brew := &stubProvider{name: "brew", available: true}
+	a, cfgPath := newImportApp(t, brew)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
+		Groups: []*config.GroupConfig{
+			{Name: "testhost", Special: "host", Tools: groupTools("ripgrep")},
+		},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	result, err := a.InstallWithState(context.Background(), "ripgrep", "system")
+	if err != nil {
+		t.Fatalf("InstallWithState: %v", err)
+	}
+
+	toolKey := "ripgrep\x00system"
+	if _, ok := result.State.ToolMemberships[toolKey]; !ok {
+		t.Fatalf("ToolMemberships[%q] missing after install: %v", toolKey, result.State.ToolMemberships)
+	}
+	found := false
+	for _, tool := range result.Tools {
+		if tool.Name == "ripgrep" && tool.Provider == "system" && tool.Installed {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("Tools = %+v, want installed ripgrep/system", result.Tools)
 	}
 }
 
@@ -404,6 +439,58 @@ func TestUninstall_UnknownProvider(t *testing.T) {
 	}
 }
 
+func TestUninstallWithStateReturnsUpdatedToolsAndGroups(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost.local")
+	stub := &stubProvider{
+		name:      "brew",
+		available: true,
+		installed: []provider.InstalledTool{
+			installedTool("fd", "1.0.0", "brew"),
+			installedTool("ripgrep", "1.0.0", "brew"),
+		},
+	}
+	a, cfgPath := newImportApp(t, stub)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(
+			logicalTool("fd", "brew"),
+			logicalTool("ripgrep", "brew"),
+		),
+		Groups: []*config.GroupConfig{
+			{Name: "testhost", Special: "host", Tools: groupTools("fd", "ripgrep")},
+		},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	if err := a.RefreshInstalled(context.Background(), nil); err != nil {
+		t.Fatalf("RefreshInstalled: %v", err)
+	}
+
+	result, err := a.UninstallWithState(context.Background(), "ripgrep", "brew")
+	if err != nil {
+		t.Fatalf("UninstallWithState: %v", err)
+	}
+
+	deletedKey := "ripgrep\x00system"
+	if _, ok := result.State.ToolGroups[deletedKey]; ok {
+		t.Fatalf("ToolGroups[%q] still present after uninstall: %v", deletedKey, result.State.ToolGroups)
+	}
+	if _, ok := result.State.ToolMemberships[deletedKey]; ok {
+		t.Fatalf("ToolMemberships[%q] still present after uninstall: %v", deletedKey, result.State.ToolMemberships)
+	}
+	foundFD := false
+	for _, tool := range result.Tools {
+		if tool.Name == "fd" && tool.Provider == "system" {
+			foundFD = true
+		}
+		if tool.Name == "ripgrep" {
+			t.Fatalf("Tools include deleted ripgrep: %+v", result.Tools)
+		}
+	}
+	if !foundFD {
+		t.Fatalf("Tools = %+v, want remaining fd/system", result.Tools)
+	}
+}
+
 func TestRemoveToolFromConfig_RemovesMissingConfiguredTool(t *testing.T) {
 	stub := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, stub)
@@ -439,6 +526,66 @@ func TestRemoveToolFromConfig_RemovesMissingConfiguredTool(t *testing.T) {
 	}
 	if len(tools) != 0 {
 		t.Fatalf("cache tools = %+v, want removed", tools)
+	}
+}
+
+func TestRemoveToolFromConfigWithStateReturnsUpdatedToolsAndGroups(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost.local")
+	stub := &stubProvider{
+		name:      "brew",
+		available: true,
+		installed: []provider.InstalledTool{
+			installedTool("fd", "1.0.0", "brew"),
+		},
+	}
+	a, cfgPath := newImportApp(t, stub)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(
+			logicalTool("fd", "brew"),
+			logicalTool("ripgrep", "brew"),
+		),
+		Groups: []*config.GroupConfig{
+			{Name: "testhost", Special: "host", Tools: groupTools("fd", "ripgrep")},
+		},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	if err := a.RefreshInstalled(context.Background(), nil); err != nil {
+		t.Fatalf("RefreshInstalled: %v", err)
+	}
+	if err := a.DB().Upsert(context.Background(), &database.ToolCache{
+		Name:      "ripgrep",
+		Provider:  "system",
+		Package:   "ripgrep",
+		Installed: false,
+		Tracked:   true,
+	}); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+
+	result, err := a.RemoveToolFromConfigWithState(context.Background(), "ripgrep", "brew")
+	if err != nil {
+		t.Fatalf("RemoveToolFromConfigWithState: %v", err)
+	}
+
+	deletedKey := "ripgrep\x00system"
+	if _, ok := result.State.ToolGroups[deletedKey]; ok {
+		t.Fatalf("ToolGroups[%q] still present after config delete: %v", deletedKey, result.State.ToolGroups)
+	}
+	if _, ok := result.State.ToolMemberships[deletedKey]; ok {
+		t.Fatalf("ToolMemberships[%q] still present after config delete: %v", deletedKey, result.State.ToolMemberships)
+	}
+	foundFD := false
+	for _, tool := range result.Tools {
+		if tool.Name == "fd" && tool.Provider == "system" {
+			foundFD = true
+		}
+		if tool.Name == "ripgrep" {
+			t.Fatalf("Tools include deleted ripgrep: %+v", result.Tools)
+		}
+	}
+	if !foundFD {
+		t.Fatalf("Tools = %+v, want remaining fd/system", result.Tools)
 	}
 }
 
@@ -480,6 +627,42 @@ func TestUpgrade_Success(t *testing.T) {
 	if err := a.Upgrade(context.Background(), "ripgrep", "brew"); err != nil {
 		t.Fatalf("Upgrade: %v", err)
 	}
+}
+
+func TestUpgradeWithStateReturnsUpdatedTools(t *testing.T) {
+	node := &managerUpgradeStub{stubProvider: stubProvider{name: "node", available: true}, verifyInstalled: true}
+	a, _ := newImportApp(t, node)
+	ctx := context.Background()
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name:          "typescript",
+		Provider:      "node",
+		Package:       "typescript",
+		Installed:     true,
+		InstalledWith: "npm",
+		Outdated:      true,
+		Tracked:       true,
+	}); err != nil {
+		t.Fatalf("seed tool: %v", err)
+	}
+
+	result, err := a.UpgradeWithState(ctx, "typescript", "node")
+	if err != nil {
+		t.Fatalf("UpgradeWithState: %v", err)
+	}
+
+	for _, tool := range result.Tools {
+		if tool.Name != "typescript" || tool.Provider != "node" {
+			continue
+		}
+		if tool.Outdated {
+			t.Fatalf("upgraded tool remains outdated: %+v", tool)
+		}
+		if tool.Version.String != "npm-version" {
+			t.Fatalf("version = %q, want npm-version", tool.Version.String)
+		}
+		return
+	}
+	t.Fatalf("Tools = %+v, want upgraded typescript/node", result.Tools)
 }
 
 func TestUpgrade_UnknownProvider(t *testing.T) {
@@ -539,6 +722,19 @@ func (s *managerUpgradeStub) OutdatedByManager(_ context.Context) (map[string]ma
 		return nil, s.outdatedErr
 	}
 	return s.outdatedByManager, nil
+}
+
+type clearingManagerUpgradeStub struct {
+	managerUpgradeStub
+	outdatedCalls int
+}
+
+func (s *clearingManagerUpgradeStub) OutdatedByManager(_ context.Context) (map[string]map[string]string, error) {
+	s.outdatedCalls++
+	if s.outdatedCalls == 1 {
+		return map[string]map[string]string{"npm": {"typescript": "5.0.0"}}, nil
+	}
+	return map[string]map[string]string{"npm": {}}, nil
 }
 
 func TestUpgrade_UsesInstalledWithManager(t *testing.T) {
@@ -705,6 +901,47 @@ func TestUpgradeAll_OnlyUpgradesOutdated(t *testing.T) {
 	}
 }
 
+func TestUpgradeAllDetailedWithStateReturnsUpdatedTools(t *testing.T) {
+	node := &clearingManagerUpgradeStub{
+		managerUpgradeStub: managerUpgradeStub{
+			stubProvider:    stubProvider{name: "node", available: true},
+			verifyInstalled: true,
+		},
+	}
+	a, _ := newImportApp(t, node)
+	ctx := context.Background()
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name:          "typescript",
+		Provider:      "node",
+		Package:       "typescript",
+		Installed:     true,
+		InstalledWith: "npm",
+		Outdated:      true,
+		LatestVersion: sql.NullString{String: "5.0.0", Valid: true},
+		Tracked:       true,
+	}); err != nil {
+		t.Fatalf("seed tool: %v", err)
+	}
+
+	result, err := a.UpgradeAllDetailedWithState(ctx, nil, nil, app.UpgradeAllOptions{})
+	if err != nil {
+		t.Fatalf("UpgradeAllDetailedWithState: %v", err)
+	}
+	if result.Result == nil || len(result.Result.Upgraded) != 1 || result.Result.Upgraded[0] != "typescript" {
+		t.Fatalf("UpgradeAll result = %+v, want typescript upgraded", result.Result)
+	}
+	for _, tool := range result.Tools {
+		if tool.Name != "typescript" || tool.Provider != "node" {
+			continue
+		}
+		if tool.Outdated {
+			t.Fatalf("typescript remains outdated in returned tools: %+v", tool)
+		}
+		return
+	}
+	t.Fatalf("Tools = %+v, want typescript/node", result.Tools)
+}
+
 func TestUpgradeAll_NothingOutdated(t *testing.T) {
 	stub := &stubProvider{name: "brew", available: true}
 	a, _ := newImportApp(t, stub)
@@ -779,7 +1016,14 @@ func TestReconcile_SyncsAndUpgradesTools(t *testing.T) {
 		t.Fatalf("UpdateOutdated: %v", err)
 	}
 
-	result, err := a.Reconcile(ctx, app.ReconcileOptions{})
+	var upgradeTargets []string
+	result, err := a.Reconcile(ctx, app.ReconcileOptions{
+		ToolProgress: func(event syncprogress.ProgressEvent) {
+			if strings.HasPrefix(event.Message, "Upgrading ripgrep") {
+				upgradeTargets = append(upgradeTargets, event.TargetVersion)
+			}
+		},
+	})
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -791,6 +1035,9 @@ func TestReconcile_SyncsAndUpgradesTools(t *testing.T) {
 	}
 	if got := len(result.UpgradeAll.Upgraded); got != 1 {
 		t.Fatalf("upgraded count = %d, want 1", got)
+	}
+	if len(upgradeTargets) != 1 || upgradeTargets[0] != "2.0.0" {
+		t.Fatalf("upgrade target versions = %#v, want [2.0.0]", upgradeTargets)
 	}
 	foundFD := false
 	for _, installed := range stub.installed {
@@ -938,6 +1185,41 @@ func TestSearch_FansOut(t *testing.T) {
 	}
 	if results[0].Provider != "system" || results[0].SourceProvider != "brew" {
 		t.Fatalf("Search provider = %q source = %q, want system source brew", results[0].Provider, results[0].SourceProvider)
+	}
+}
+
+func TestSearchResultDisplayProviderKeepsConcreteWithinSameEcosystem(t *testing.T) {
+	tests := []struct {
+		name string
+		in   provider.SearchResult
+		want string
+	}{
+		{
+			name: "system result from brew",
+			in:   provider.SearchResult{Provider: "system", SourceProvider: "brew"},
+			want: "brew",
+		},
+		{
+			name: "python result from pip",
+			in:   provider.SearchResult{Provider: "python", SourceProvider: "pip"},
+			want: "pip",
+		},
+		{
+			name: "same provider",
+			in:   provider.SearchResult{Provider: "brew", SourceProvider: "brew"},
+		},
+		{
+			name: "different ecosystem",
+			in:   provider.SearchResult{Provider: "python", SourceProvider: "brew"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := app.SearchResultDisplayProvider(tt.in); got != tt.want {
+				t.Fatalf("SearchResultDisplayProvider = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -1429,5 +1711,40 @@ func TestInstall_AutoResolveFromSettings(t *testing.T) {
 	}
 	if len(tools) != 1 || tools[0].Provider != "node" {
 		t.Errorf("DB = %v, want typescript/node", tools)
+	}
+}
+
+func TestDefaultInstallProviderUsesSettingsPriority(t *testing.T) {
+	brew := &stubProvider{name: "brew", available: true}
+	node := &stubProvider{name: "node", available: true}
+	a, _ := newImportApp(t, brew, node)
+
+	settings := config.Settings{}
+	settings.SetEcosystemPriority("system", []string{"node", "brew"})
+	if err := a.SaveSettings(context.Background(), settings); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+
+	got, err := a.DefaultInstallProvider(context.Background())
+	if err != nil {
+		t.Fatalf("DefaultInstallProvider: %v", err)
+	}
+	if got != "node" {
+		t.Fatalf("DefaultInstallProvider = %q, want node", got)
+	}
+}
+
+func TestDefaultInstallProviderNoAvailableProvider(t *testing.T) {
+	a, _ := newImportApp(t)
+
+	settings := config.Settings{}
+	settings.SetEcosystemPriority("system", []string{"__nonexistent__"})
+	if err := a.SaveSettings(context.Background(), settings); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+
+	_, err := a.DefaultInstallProvider(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "no provider available") {
+		t.Fatalf("DefaultInstallProvider err = %v, want no provider available", err)
 	}
 }

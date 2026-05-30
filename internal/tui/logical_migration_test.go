@@ -224,7 +224,7 @@ func TestLogicalMigration_SearchInstallEnterAsksGroup(t *testing.T) {
 }
 
 func TestLogicalMigration_SearchInstallAndAddPrivilegedOpensAdminTerminal(t *testing.T) {
-	prov := &okProvider{name: "system"}
+	prov := &okProvider{name: "apt"}
 	a, _ := newCmdApp(t, prov, nil)
 
 	m := modelForCmds(a)
@@ -271,18 +271,22 @@ func TestLogicalMigration_SearchInstallAndAddPrivilegedOpensAdminTerminal(t *tes
 }
 
 func TestLogicalMigration_AdminTerminalInstallAndAddPersistsGroup(t *testing.T) {
-	prov := &okProvider{name: "system"}
-	a, cfgPath := newCmdApp(t, prov, nil)
+	system := &okProvider{name: "system"}
+	brew := &okProvider{name: "brew"}
+	a := newSearchCmdApp(t, system, brew)
+	cfgPath := a.ConfigPath
 	m := modelForCmds(a)
 
 	msg := m.doCompleteAdminTerminalAction(adminTerminalState{
-		action:       provider.PrivilegeActionInstall,
-		name:         "vim",
-		providerName: "system",
-		pkg:          "vim",
-		rowKey:       toolKey("vim", "system"),
-		addToConfig:  true,
-		addGroup:     "work",
+		action:        provider.PrivilegeActionInstall,
+		name:          "vim",
+		providerName:  "system",
+		pkg:           "vim",
+		installedWith: "brew",
+		options:       map[string]string{"brew_kind": "formula"},
+		rowKey:        toolKey("vim", "system"),
+		addToConfig:   true,
+		addGroup:      "work",
 	})()
 	got, ok := msg.(opCompleteMsg)
 	if !ok {
@@ -305,6 +309,13 @@ func TestLogicalMigration_AdminTerminalInstallAndAddPersistsGroup(t *testing.T) 
 	work := groupByName(cfg, "work")
 	if work == nil || !groupHasTool(work, "vim") {
 		t.Fatalf("work group does not contain vim: %+v", cfg.Groups)
+	}
+	spec := cfg.Tools["vim"]
+	if spec.InstallWith != "brew" {
+		t.Fatalf("install_with = %q, want brew", spec.InstallWith)
+	}
+	if spec.Options["brew_kind"] != "formula" {
+		t.Fatalf("Options[brew_kind] = %q, want formula", spec.Options["brew_kind"])
 	}
 }
 

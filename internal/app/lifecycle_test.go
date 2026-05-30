@@ -4,13 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/executor"
 	"github.com/lkshrk/omni/internal/provider"
+	brewprovider "github.com/lkshrk/omni/internal/provider/brew"
 )
 
 type lifecycleProvider struct {
@@ -112,6 +116,50 @@ func TestCompleteExternalToolAction_UpgradeVerifiesAndClearsOutdated(t *testing.
 	}
 }
 
+func TestUpgrade_SystemBrewFormulaUsesFormulaMode(t *testing.T) {
+	ctx := context.Background()
+	exec := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "brew list --versions flux", Response: executor.MockCall{Stdout: "flux 2.8.8\n"}},
+		executor.MatchRule{Pattern: "brew upgrade --formula fluxcd/tap/flux", Response: executor.MockCall{}},
+		executor.MatchRule{Pattern: "brew --version", Response: executor.MockCall{Stdout: "Homebrew 4.4.0\n"}},
+		executor.MatchRule{Pattern: "brew outdated --json=v2", Response: executor.MockCall{Stdout: `{"formulae":[],"casks":[]}`}},
+	).WithFallback(executor.MockCall{Err: errors.New("unexpected brew command")})
+	brew := brewprovider.New(exec)
+	system := &lifecycleProvider{stubProvider: stubProvider{name: "system", available: true}, resolvedName: "brew"}
+	a, cfgPath := newImportApp(t, brew, system)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalToolPackage("flux", "system", "fluxcd/tap/flux")),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("flux"),
+		}},
+	}); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name:          "flux",
+		Provider:      "system",
+		Package:       "fluxcd/tap/flux",
+		Installed:     true,
+		InstalledWith: "brew",
+		Outdated:      true,
+		Version:       sql.NullString{String: "2.8.8", Valid: true},
+		LastChecked:   time.Now(),
+	}); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+
+	if err := a.Upgrade(ctx, "flux", "system"); err != nil {
+		t.Fatalf("Upgrade: %v", err)
+	}
+
+	if calls := exec.CallsMatching("brew upgrade --formula fluxcd/tap/flux"); len(calls) != 1 {
+		t.Fatalf("formula upgrade calls = %+v, want one brew upgrade --formula fluxcd/tap/flux", calls)
+	}
+	if calls := exec.CallsMatching("brew upgrade flux"); len(calls) != 0 {
+		t.Fatalf("bare upgrade calls = %+v, want none", calls)
+	}
+}
+
 func TestCompleteExternalToolAction_UninstallRemovesConfigAndCache(t *testing.T) {
 	ctx := context.Background()
 	brew := &lifecycleProvider{stubProvider: stubProvider{name: "brew", available: true}}
@@ -153,6 +201,142 @@ func TestCompleteExternalToolAction_UninstallRemovesConfigAndCache(t *testing.T)
 	}
 	if len(gotCfg.Groups) != 1 || len(gotCfg.Groups[0].Tools) != 0 {
 		t.Fatalf("group tools after uninstall = %+v, want parsec removed", gotCfg.Groups)
+	}
+}
+
+func TestCompleteExternalToolActionWithState_InstallAndAddReturnsState(t *testing.T) {
+	ctx := context.Background()
+	system := &lifecycleProvider{
+		stubProvider: stubProvider{name: "system", available: true},
+		installed:    true,
+		version:      "9.1.0",
+	}
+	a, cfgPath := newImportApp(t, system)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{}); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+
+	result, err := a.CompleteExternalToolActionWithState(ctx, app.CompleteExternalToolActionOptions{
+		Action:       provider.PrivilegeActionInstall,
+		Name:         "vim",
+		ProviderName: "system",
+		Package:      "vim",
+		AddToConfig:  true,
+		GroupName:    "work",
+		AssignHosts:  []string{"desktop"},
+	})
+	if err != nil {
+		t.Fatalf("CompleteExternalToolActionWithState: %v", err)
+	}
+	if len(result.Tools) != 1 || result.Tools[0].Name != "vim" || !result.Tools[0].Tracked {
+		t.Fatalf("Tools = %+v, want tracked vim", result.Tools)
+	}
+	key := "vim\x00system"
+	if result.GroupState == nil {
+		t.Fatal("GroupState is nil")
+	}
+	if got := result.GroupState.ToolGroups[key]; got != "work" {
+		t.Fatalf("ToolGroups[%q] = %q, want work", key, got)
+	}
+	if !slices.Contains(result.GroupState.ToolMemberships[key], "work") {
+		t.Fatalf("ToolMemberships[%q] = %v, want work", key, result.GroupState.ToolMemberships[key])
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("loading config: %v", err)
+	}
+	if !slices.Contains(cfg.Hosts[testShortHostname()], "work") {
+		t.Fatalf("current host groups = %v, want work", cfg.Hosts[testShortHostname()])
+	}
+	if !slices.Contains(cfg.Hosts["desktop"], "work") {
+		t.Fatalf("desktop host groups = %v, want work", cfg.Hosts["desktop"])
+	}
+}
+
+func TestCompleteExternalToolActionWithState_PersistsInstallOptions(t *testing.T) {
+	ctx := context.Background()
+	system := &lifecycleProvider{stubProvider: stubProvider{name: "system", available: true}}
+	brew := &lifecycleProvider{
+		stubProvider: stubProvider{name: "brew", available: true},
+		installed:    true,
+		version:      "1.2.3",
+	}
+	a, cfgPath := newImportApp(t, system, brew)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{}); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+
+	_, err := a.CompleteExternalToolActionWithState(ctx, app.CompleteExternalToolActionOptions{
+		Action:        provider.PrivilegeActionInstall,
+		Name:          "visual-studio-code",
+		ProviderName:  "system",
+		Package:       "visual-studio-code",
+		InstalledWith: "brew",
+		Options:       map[string]string{"brew_kind": "cask"},
+		AddToConfig:   true,
+		GroupName:     "work",
+	})
+	if err != nil {
+		t.Fatalf("CompleteExternalToolActionWithState: %v", err)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	spec := cfg.Tools["visual-studio-code"]
+	if spec.Provider != "system" || spec.InstallWith != "brew" {
+		t.Fatalf("spec provider/install_with = %q/%q, want system/brew", spec.Provider, spec.InstallWith)
+	}
+	if spec.Options["brew_kind"] != "cask" {
+		t.Fatalf("spec.Options[brew_kind] = %q, want cask", spec.Options["brew_kind"])
+	}
+}
+
+func TestCompleteExternalToolActionWithState_UninstallReturnsState(t *testing.T) {
+	ctx := context.Background()
+	brew := &lifecycleProvider{stubProvider: stubProvider{name: "brew", available: true}}
+	a, cfgPath := newImportApp(t, brew)
+	cfg := &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("parsec", "system")),
+		Groups: []*config.GroupConfig{{
+			Name:  "testhost",
+			Tools: groupTools("parsec"),
+		}},
+	}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name:          "parsec",
+		Provider:      "system",
+		Package:       "parsec",
+		Installed:     true,
+		InstalledWith: "brew",
+		LastChecked:   time.Now(),
+	}); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+
+	result, err := a.CompleteExternalToolActionWithState(ctx, app.CompleteExternalToolActionOptions{
+		Action:        provider.PrivilegeActionUninstall,
+		Name:          "parsec",
+		ProviderName:  "system",
+		Package:       "parsec",
+		InstalledWith: "brew",
+	})
+	if err != nil {
+		t.Fatalf("CompleteExternalToolActionWithState: %v", err)
+	}
+	if len(result.Tools) != 0 {
+		t.Fatalf("Tools = %+v, want empty after uninstall", result.Tools)
+	}
+	if result.GroupState == nil {
+		t.Fatal("GroupState is nil")
+	}
+	key := "parsec\x00system"
+	if got := result.GroupState.ToolMemberships[key]; len(got) != 0 {
+		t.Fatalf("ToolMemberships[%q] = %v, want removed", key, got)
 	}
 }
 

@@ -5,10 +5,10 @@ exec chmod 755 bin/pnpm
 env PATH=$WORK/bin:$PATH
 
 exec omni --config settings.json tools import --provider node --group work
-stdout 'Imported 1 tool\(s\):'
+stdout 'Imported 1 tool:'
 stdout 'typescript'
 stdout '\(node\) 5.4.0'
-stdout 'Skipped 1 already configured tool\(s\)'
+stdout 'Skipped 1 already configured tool'
 exec grep '"typescript"' settings.json
 stdout '"typescript"'
 exec grep '"name": "work"' settings.json

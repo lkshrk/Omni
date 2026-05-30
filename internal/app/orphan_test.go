@@ -262,6 +262,41 @@ func TestSyncAll_ClaimsDiscoveredToHostnameGroupAndSyncs(t *testing.T) {
 	}
 }
 
+func TestSyncAllWithStateReturnsUpdatedToolsAndGroups(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	brew := &lifecycleProvider{stubProvider: stubProvider{name: "brew", available: true}, installed: true}
+	system := &lifecycleProvider{
+		stubProvider: stubProvider{name: "system", available: true},
+		resolvedName: "brew",
+		installed:    true,
+	}
+	a, cfgPath := newImportApp(t, brew, system)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{testHostGroup()}}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	discovered := []*database.ToolCache{
+		{Name: "fzf", Provider: "system", Package: "fzf", InstalledWith: "brew", Installed: true, Tracked: false},
+	}
+
+	result, err := a.SyncAllWithState(context.Background(), app.SyncAllOptions{Discovered: discovered})
+	if err != nil {
+		t.Fatalf("SyncAllWithState: %v", err)
+	}
+	if result.Result == nil || !slices.Equal(result.Result.ClaimedNames, []string{"fzf"}) {
+		t.Fatalf("SyncAll result = %+v, want claimed fzf", result.Result)
+	}
+	toolKey := "fzf\x00system"
+	if got := result.State.ToolMemberships[toolKey]; !slices.Equal(got, []string{"testhost"}) {
+		t.Fatalf("ToolMemberships[%q] = %v, want [testhost]", toolKey, got)
+	}
+	for _, tool := range result.Tools {
+		if tool.Name == "fzf" && tool.Provider == "system" && tool.Installed {
+			return
+		}
+	}
+	t.Fatalf("Tools = %+v, want installed fzf/system", result.Tools)
+}
+
 func TestSyncAll_ClaimsMultipleDiscoveredTools(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	brew := &lifecycleProvider{stubProvider: stubProvider{name: "brew", available: true}, installed: true}

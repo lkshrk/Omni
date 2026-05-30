@@ -127,9 +127,8 @@ func cliTestHostGroup(names ...string) *config.GroupConfig {
 }
 
 // executeCmd sets the final args on cmd, captures stdout, runs Execute, and
-// returns (stdout, stderr, err).  Note: for commands that print to Stdout via
-// fmt.Println (not cmd.OutOrStdout()), stdout capture does not work — those
-// tests check the error return and config state instead.
+// returns (stdout, err). Some tests still check only errors and config state
+// when stdout content is not part of the behavior under test.
 func executeCmd(t *testing.T, cmd *cobra.Command, args ...string) (stdout string, err error) {
 	t.Helper()
 	buf := &bytes.Buffer{}
@@ -867,8 +866,7 @@ func TestList_NoConfig_PrintsHelpfulMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list with host and empty config: %v", err)
 	}
-	// DB is empty, should print "No tools in cache" (via fmt.Println to os.Stdout).
-	// Command should return nil — that's the primary assertion.
+	// DB is empty; command returning nil is the primary assertion.
 }
 
 func TestList_NoConfigFile_WithoutHost_RequiresHost(t *testing.T) {
@@ -906,7 +904,7 @@ func TestList_EmptyConfig_PrintsNoToolsMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list with empty config: %v", err)
 	}
-	// Command returned nil — DB is empty, "No tools in cache" printed to os.Stdout.
+	// Command returned nil; DB is empty and the list output path is exercised.
 }
 
 // ─── providers command ────────────────────────────────────────────────────────
@@ -925,7 +923,7 @@ func TestProviders_PrintsHeader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("providers: %v", err)
 	}
-	// providers uses fmt.Printf which prints to os.Stdout, but command returned nil.
+	// Command returning nil is the primary assertion for this smoke path.
 }
 
 // ─── hosts commands ──────────────────────────────────────────────────────────
@@ -953,6 +951,44 @@ func TestHostsEnsure_CreatesHostGroup(t *testing.T) {
 	group := cliTestGroup(cfg, "myhost")
 	if group == nil || !group.IsHost() {
 		t.Fatalf("host group = %+v, want protected host group", group)
+	}
+}
+
+func TestHostsList_PrintsSortedSummaries(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "beta.local")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	withConfig(t, cfgPath, &config.RootConfig{
+		Groups: []*config.GroupConfig{
+			{Name: "beta", Special: "host"},
+			{Name: "zeta", Special: "host"},
+			{Name: "base"},
+			{Name: "tools"},
+			{Name: "work"},
+		},
+		Hosts: map[string][]string{
+			"zeta": {"work", "base"},
+			"beta": {"tools", "base"},
+		},
+	})
+
+	cmd := NewRootCmd()
+	outBuf := &bytes.Buffer{}
+	cmd.SetOut(outBuf)
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "hosts", "list"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("hosts list: %v", err)
+	}
+
+	out := outBuf.String()
+	beta := strings.Index(out, "* beta")
+	zeta := strings.Index(out, "  zeta")
+	if beta < 0 || zeta < 0 || beta > zeta {
+		t.Fatalf("hosts output order/active marker = %q, want active beta before zeta", out)
+	}
+	if !strings.Contains(out, "[base, tools]") || !strings.Contains(out, "[base, work]") {
+		t.Fatalf("hosts output = %q, want sorted group lists", out)
 	}
 }
 
@@ -1728,38 +1764,6 @@ func TestVersion_IsDev(t *testing.T) {
 	}
 }
 
-// ─── init helpers ─────────────────────────────────────────────────────────────
-
-func TestSortedHostNames_Empty(t *testing.T) {
-	got := sortedHostNames(nil)
-	if len(got) != 0 {
-		t.Errorf("sortedHostNames(nil) = %v, want []", got)
-	}
-	got = sortedHostNames(map[string]config.HostAssignment{})
-	if len(got) != 0 {
-		t.Errorf("sortedHostNames({}) = %v, want []", got)
-	}
-}
-
-func TestSortedHostNames_Sorted(t *testing.T) {
-	hosts := map[string]config.HostAssignment{
-		"zebra":   {},
-		"alpha":   {},
-		"beta":    {},
-		"charlie": {},
-	}
-	got := sortedHostNames(hosts)
-	want := []string{"alpha", "beta", "charlie", "zebra"}
-	if len(got) != len(want) {
-		t.Fatalf("sortedHostNames len = %d, want %d", len(got), len(want))
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("sortedHostNames[%d] = %q, want %q", i, got[i], want[i])
-		}
-	}
-}
-
 // ─── consolidate command error paths ─────────────────────────────────────────
 
 func TestConsolidate_MutuallyExclusive_ToAndArgs(t *testing.T) {
@@ -2189,31 +2193,6 @@ func TestPromptSatisfiedGroups_NoSatisfiedGroups_NoCalls(t *testing.T) {
 	}
 }
 
-// ─── detectManager ────────────────────────────────────────────────────────────
-
-func TestDetectManager_NotFound(t *testing.T) {
-	// A binary that certainly doesn't exist in PATH.
-	got := detectManager("__nonexistent_binary_xyz_123__", "__another_fake_abc__")
-	if got != "" {
-		t.Errorf("detectManager with nonexistent binaries = %q, want empty", got)
-	}
-}
-
-func TestDetectManager_Empty(t *testing.T) {
-	got := detectManager()
-	if got != "" {
-		t.Errorf("detectManager() = %q, want empty", got)
-	}
-}
-
-func TestDetectManager_FirstFound(t *testing.T) {
-	// "sh" is always available on unix systems.
-	got := detectManager("__nonexistent__", "sh")
-	if got != "sh" {
-		t.Errorf("detectManager should return sh, got %q", got)
-	}
-}
-
 // ─── consolidate ecosystem mode without dry-run ───────────────────────────────
 
 func TestConsolidate_EcosystemMode_EmptyConfig_NothingToMigrate(t *testing.T) {
@@ -2443,8 +2422,7 @@ func TestInit_CallsProviderDetection(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	// The init command should have printed "Config already exists" (via fmt.Printf/Println,
-	// which goes to os.Stdout, not cmd.OutOrStdout()).
+	// The init command should have printed "Config already exists".
 }
 
 // ─── consolidate: all tools on node/python ────────────────────────────────────
@@ -2594,6 +2572,53 @@ func TestConsolidate_EcosystemDryRun_WithPythonTools(t *testing.T) {
 	err := cmd.Execute()
 	if err != nil {
 		t.Fatalf("consolidate --dry-run python uv with pip tools: %v", err)
+	}
+}
+
+func TestConsolidate_EcosystemDryRun_ASCIISymbolModeUsesCommandOutput(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	t.Setenv("NO_EMOJI", "1")
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("LC_ALL", "")
+	t.Setenv("LC_CTYPE", "")
+	t.Setenv("LANG", "en_US.UTF-8")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	withConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"black": {Provider: "python", InstallWith: "pip"},
+		},
+		Groups: []*config.GroupConfig{{
+			Name:    "testhost",
+			Special: "host",
+			Tools:   []config.ToolEntry{{Name: "black"}},
+		}},
+	})
+	withHost(t, cfgPath)
+
+	cmd := NewRootCmd()
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "consolidate", "--dry-run", "python", "uv"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("consolidate --dry-run python uv: %v", err)
+	}
+
+	output := out.String()
+	if output == "" {
+		t.Fatal("expected consolidate dry-run output to use the command output writer")
+	}
+	for _, bad := range []string{"—", "→", "✓", "✗", "…", "─"} {
+		if strings.Contains(output, bad) {
+			t.Fatalf("consolidate output contains %q in ASCII symbol mode:\n%s", bad, output)
+		}
+	}
+	if !strings.Contains(output, "Dry-run - consolidating python tools > uv") {
+		t.Fatalf("consolidate output did not rewrite dry-run symbols:\n%s", output)
+	}
+	if !strings.Contains(output, "> would migrate: black") {
+		t.Fatalf("consolidate output did not rewrite migration marker:\n%s", output)
 	}
 }
 
@@ -4953,7 +4978,7 @@ func TestList_WithInstalledToolAndVersion_PrintsVersion(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("list with versioned tool: %v", err)
 	}
-	// Output goes to os.Stdout (list.go uses fmt.Printf). Exercise covers version.Valid branch.
+	// Exercise covers the version.Valid branch.
 }
 
 // ─── NewRootCmd default config path (no --config flag) ────────────────────────
@@ -5206,8 +5231,6 @@ func TestInit_FullFlow_WithMockedStdin(t *testing.T) {
 	withMockStdin(t, stdinInput, func() {
 		cmd := NewRootCmd()
 		cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "init", "--no-import"})
-		// May fail at various points (e.g. if detectManager requires real binaries),
-		// but exercises the non-interactive parts of newInitCmd.
 		_ = cmd.Execute()
 	})
 }
@@ -5323,7 +5346,7 @@ func TestRunDotsInitSection_EmptyPath_Skips(t *testing.T) {
 	}
 
 	withMockStdin(t, "\n", func() {
-		err := runDotsInitSection(a)
+		err := runDotsInitSection(context.Background(), a)
 		if err != nil {
 			t.Errorf("runDotsInitSection with empty path: %v", err)
 		}
@@ -5348,7 +5371,7 @@ func TestRunDotsInitSection_ValidPath_NoEntries(t *testing.T) {
 	// Stdin: repo path, then empty line for non-standard paths (finish).
 	stdinInput := repoDir + "\n\n"
 	withMockStdin(t, stdinInput, func() {
-		_ = runDotsInitSection(a)
+		_ = runDotsInitSection(context.Background(), a)
 		// May fail if SaveSettings fails — tolerate errors.
 	})
 }
@@ -5386,7 +5409,7 @@ func TestRunDotsInitSection_RelativePath_NormalizesToAbsolute(t *testing.T) {
 	})
 
 	withMockStdin(t, repoName+"\n", func() {
-		if err := runDotsInitSection(a); err != nil {
+		if err := runDotsInitSection(context.Background(), a); err != nil {
 			t.Fatalf("runDotsInitSection: %v", err)
 		}
 	})
@@ -5418,7 +5441,7 @@ func TestRunDotsInitSection_ExpandsEnvironmentVariablePath(t *testing.T) {
 	legacyPath := "$HOME/dotsrepo"
 
 	withMockStdin(t, legacyPath+"\n", func() {
-		if err := runDotsInitSection(a); err != nil {
+		if err := runDotsInitSection(context.Background(), a); err != nil {
 			t.Fatalf("runDotsInitSection: %v", err)
 		}
 	})
@@ -5446,7 +5469,7 @@ func TestRunDotsInitSection_InvalidPath(t *testing.T) {
 
 	nonExistentPath := filepath.Join(t.TempDir(), "does_not_exist")
 	withMockStdin(t, nonExistentPath+"\n", func() {
-		err := runDotsInitSection(a)
+		err := runDotsInitSection(context.Background(), a)
 		// Should return error for non-existent path.
 		if err == nil {
 			t.Error("expected error for non-existent repo path")
@@ -5485,7 +5508,7 @@ func TestRunDotsInitSection_UnsupportedTildePrefix_DoesNotExpand(t *testing.T) {
 	})
 
 	withMockStdin(t, "~nobody/.config\n", func() {
-		err := runDotsInitSection(a)
+		err := runDotsInitSection(context.Background(), a)
 		if err == nil {
 			t.Fatal("expected error for unsupported ~user prefix")
 		}
@@ -5516,7 +5539,7 @@ func TestRunDotsInitSection_WithDiscoverableEntries(t *testing.T) {
 	// Stdin: repo path, "y" to add all entries, then empty line for non-standard paths.
 	stdinInput := repoDir + "\ny\n\n"
 	withMockStdin(t, stdinInput, func() {
-		_ = runDotsInitSection(a)
+		_ = runDotsInitSection(context.Background(), a)
 	})
 }
 
@@ -5540,7 +5563,7 @@ func TestRunDotsInitSection_WithEntries_PickIndividually(t *testing.T) {
 	// Stdin: repo path, "n" to not add all, "y" to add nvim individually, then empty.
 	stdinInput := repoDir + "\nn\ny\n\n"
 	withMockStdin(t, stdinInput, func() {
-		_ = runDotsInitSection(a)
+		_ = runDotsInitSection(context.Background(), a)
 	})
 }
 
@@ -5559,6 +5582,6 @@ func TestRunDotsInitSection_NonStandardPath_Nonexistent(t *testing.T) {
 	// Stdin: repo path (no entries), then a nonexistent extra path, then empty.
 	stdinInput := repoDir + "\n/nonexistent/path/xyz\n\n"
 	withMockStdin(t, stdinInput, func() {
-		_ = runDotsInitSection(a)
+		_ = runDotsInitSection(context.Background(), a)
 	})
 }

@@ -3,11 +3,13 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/lipgloss/v2"
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/database"
 )
 
 // ── truncatePath ──────────────────────────────────────────────────────────────
@@ -35,6 +37,31 @@ func TestTruncatePath(t *testing.T) {
 				t.Errorf("truncatePath(%q, %d) = %q, want %q", tt.input, tt.maxW, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestViewAppliesASCIISymbolMode(t *testing.T) {
+	t.Setenv("NO_EMOJI", "1")
+	t.Setenv("TERM", "xterm-256color")
+	t.Setenv("LC_ALL", "")
+	t.Setenv("LC_CTYPE", "")
+	t.Setenv("LANG", "en_US.UTF-8")
+
+	m := baseModel([]*database.ToolCache{{
+		Name:      "git",
+		Provider:  "system",
+		Installed: true,
+		Tracked:   true,
+	}})
+
+	out := m.View().Content
+	for _, bad := range []string{"✓", "✗", "…", "→", "─"} {
+		if strings.Contains(out, bad) {
+			t.Fatalf("View contains %q in ASCII symbol mode:\n%s", bad, out)
+		}
+	}
+	if !strings.Contains(out, "v") {
+		t.Fatalf("View should contain ASCII success marker, got:\n%s", out)
 	}
 }
 
@@ -155,8 +182,7 @@ func TestRenderDots_NotConfigured(t *testing.T) {
 
 func TestRenderDots_Disabled(t *testing.T) {
 	m := baseModel(nil)
-	disabled := true
-	m.settings.DotsDisabled = &disabled
+	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles", DotsDisabled: config.BoolPtr(true)})
 	out := renderDots(m)
 	if !strings.Contains(out, "disabled") {
 		t.Errorf("expected 'disabled' in output, got:\n%s", out)
@@ -169,9 +195,77 @@ func TestRenderDots_Disabled(t *testing.T) {
 	}
 }
 
+func TestRenderDotsUsesCachedDotsAvailability(t *testing.T) {
+	t.Run("renders entries when app is configured despite stale empty settings", func(t *testing.T) {
+		m := baseModel(nil)
+		m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
+		m.settings = config.Settings{}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: app.DotStateSynced}}
+
+		out := renderDots(m)
+
+		if strings.Contains(out, "No dotfiles repo configured yet.") || !strings.Contains(out, "nvim") {
+			t.Fatalf("renderDots should use app-backed configured state, got:\n%s", out)
+		}
+	})
+
+	t.Run("renders setup when app is unconfigured despite stale local repo", func(t *testing.T) {
+		m := baseModel(nil)
+		m.settings = config.Settings{DotsRepo: "/tmp/stale-dotfiles"}
+		m.dotsSyncAvailCached = app.DotsSyncAvailability{Reason: app.DotsSyncAvailabilityNoRepo}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: app.DotStateSynced}}
+
+		out := renderDots(m)
+
+		if !strings.Contains(out, "No dotfiles repo configured yet.") || strings.Contains(out, "nvim") {
+			t.Fatalf("renderDots should use app-backed unconfigured state, got:\n%s", out)
+		}
+	})
+
+	t.Run("renders entries when app is enabled despite stale local disabled flag", func(t *testing.T) {
+		m := baseModel(nil)
+		m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
+		m.settings = config.Settings{DotsRepo: "/repo/dotfiles", DotsDisabled: config.BoolPtr(true)}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: app.DotStateSynced}}
+
+		out := renderDots(m)
+
+		if strings.Contains(out, "Dotfile sync is disabled") || !strings.Contains(out, "nvim") {
+			t.Fatalf("renderDots should use app-backed enabled state, got:\n%s", out)
+		}
+	})
+
+	t.Run("renders repo path from app-backed availability despite stale local repo", func(t *testing.T) {
+		m := baseModel(nil)
+		m.width = 120
+		m.settings = config.Settings{DotsRepo: "/tmp/stale-dotfiles"}
+		m.dotsSyncAvailCached = app.DotsSyncAvailability{Configured: true, Reason: app.DotsSyncAvailabilityReady, RepoPath: "/repo/current-dotfiles"}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: app.DotStateSynced}}
+
+		out := stripANSIEscapeSequences(renderDots(m))
+
+		if !strings.Contains(out, "/repo/current-dotfiles") || strings.Contains(out, "/tmp/stale-dotfiles") {
+			t.Fatalf("renderDots should show app-backed repo path, got:\n%s", out)
+		}
+	})
+
+	t.Run("renders setup when app availability is unknown despite stale local repo", func(t *testing.T) {
+		m := baseModel(nil)
+		m.app = &app.App{}
+		m.settings = config.Settings{DotsRepo: "/tmp/stale-dotfiles"}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: app.DotStateSynced}}
+
+		out := stripANSIEscapeSequences(renderDots(m))
+
+		if !strings.Contains(out, "No dotfiles repo configured yet.") || strings.Contains(out, "/tmp/stale-dotfiles") || strings.Contains(out, "nvim") {
+			t.Fatalf("renderDots should not derive availability from stale local settings, got:\n%s", out)
+		}
+	})
+}
+
 func TestRenderDots_LoadingKeepsExistingTable(t *testing.T) {
 	m := baseModel(nil)
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoading = true
 	m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: app.DotStateSynced}}
 	out := renderDots(m)
@@ -186,7 +280,7 @@ func TestRenderDots_LoadingKeepsExistingTable(t *testing.T) {
 func TestRenderDots_HistorySection(t *testing.T) {
 	m := baseModel(nil)
 	m.width = 100
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: app.DotStateSynced}}
 
 	out := renderDots(m)
@@ -197,10 +291,22 @@ func TestRenderDots_HistorySection(t *testing.T) {
 	m.dotsHistory = []app.DotsHistoryEntry{{
 		Operation: "sync",
 		Status:    "success",
-		Summary:   "sync completed with 2 dotfile ops",
+		Summary:   "sync completed: no changes, 2 dotfiles unchanged",
+		Time:      time.Date(2026, 1, 2, 3, 4, 0, 0, time.Local),
+	}, {
+		Operation: "sync",
+		Status:    "success",
+		Summary:   "sync completed: 1 dotfile changed, 1 dotfile unchanged",
+		Time:      time.Date(2026, 1, 2, 3, 5, 0, 0, time.Local),
 	}}
 	out = renderDots(m)
-	for _, want := range []string{"History", "sync: success", "sync completed with 2 dotfile ops"} {
+	for _, want := range []string{
+		"History",
+		"01-02 03:04 sync: success",
+		"01-02 03:05 sync: success",
+		"sync completed: no changes, 2 dotfiles unchanged",
+		"sync completed: 1 dotfile changed, 1 dotfile unchanged",
+	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("history section missing %q:\n%s", want, out)
 		}
@@ -211,7 +317,7 @@ func TestRenderDots_IgnoredSectionVisible(t *testing.T) {
 	m := baseModel(nil)
 	m.width = 100
 	m.height = 24
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "kitty",
 		TargetPath: "~/.config/kitty",
@@ -231,7 +337,7 @@ func TestRenderDots_RemoveConfirmHasNoCancelHint(t *testing.T) {
 	m.width = 100
 	m.height = 24
 	m.mode = viewDots
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
@@ -267,7 +373,7 @@ func TestRenderDots_RemoveConfirmHasNoCancelHint(t *testing.T) {
 
 func TestRenderDots_Empty(t *testing.T) {
 	m := baseModel(nil)
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	out := renderDots(m)
 	if !strings.Contains(out, "sync all") {
@@ -280,7 +386,7 @@ func TestRenderDots_Empty(t *testing.T) {
 
 func TestRenderDots_WithEntries(t *testing.T) {
 	m := baseModel(nil)
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
 	m.dotsExpandedState = app.DotStateSynced
@@ -320,7 +426,7 @@ func TestRenderDots_SectionsUseSharedListSpacing(t *testing.T) {
 	m := baseModel(nil)
 	m.width = 100
 	m.height = 30
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{
 		{Name: "nvim", TargetPath: "~/.config/nvim", State: app.DotStateSynced},
@@ -379,7 +485,7 @@ func TestRenderDots_IgnoredSectionChildrenStatus(t *testing.T) {
 	m := baseModel(nil)
 	m.width = 100
 	m.height = 40
-	m.settings.DotsRepo = "/repo"
+	setDotsRepoForTest(&m, "/repo")
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{
 		{Name: "zsh", TargetPath: "~/.zsh", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}},
@@ -462,7 +568,7 @@ func TestRenderDots_RepoInlineBeforeSections(t *testing.T) {
 	m := baseModel(nil)
 	m.width = 100
 	m.height = 30
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{
 		{Name: "nvim", TargetPath: "~/.config/nvim", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}},
@@ -493,7 +599,7 @@ func TestRenderDots_DirtyRepoShowsCommitHint(t *testing.T) {
 	m := baseModel(nil)
 	m.width = 100
 	m.height = 30
-	m.settings.DotsRepo = "/repo"
+	setDotsRepoForTest(&m, "/repo")
 	m.dotsLoaded = true
 	m.dotsGitStatus = "M config.toml"
 	m.dotsEntries = []app.DotStatus{
@@ -508,7 +614,7 @@ func TestRenderDots_DirtyRepoShowsCommitHint(t *testing.T) {
 func TestRenderDots_ChildNamesShareNameColumnWidth(t *testing.T) {
 	m := baseModel(nil)
 	m.width = 140
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
 	m.dotsExpandedState = app.DotStateSynced
@@ -542,10 +648,57 @@ func TestRenderDots_ChildNamesShareNameColumnWidth(t *testing.T) {
 	}
 }
 
+func TestRenderDots_ChildRowsIndentNamesInsideNameColumn(t *testing.T) {
+	m := baseModel(nil)
+	m.width = 140
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
+	m.dotsLoaded = true
+	m.dotsExpandedName = "nvim"
+	m.dotsExpandedState = app.DotStateSynced
+	m.dotsCursor = -1
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		Health:     app.HealthOK,
+		State:      app.DotStateSynced,
+		Children: []app.DotChild{{
+			Name:    "lua",
+			RelPath: "lua",
+			Path:    "~/.config/nvim/lua",
+			IsDir:   true,
+		}},
+	}}
+
+	out := renderDots(m)
+	parentLine := renderedLineContaining(out, "nvim")
+	childLine := renderedLineContaining(out, "lua")
+	if parentLine == "" || childLine == "" {
+		t.Fatalf("missing expected dots rows:\n%s", out)
+	}
+	parentNameCol := visualColumnOf(parentLine, "nvim")
+	childNameCol := visualColumnOf(childLine, "lua")
+	if parentNameCol < 0 || childNameCol < 0 {
+		t.Fatalf("missing name columns:\nparent=%q\nchild=%q", parentLine, childLine)
+	}
+	const wantChildIndent = 2
+	if got, want := childNameCol-parentNameCol, wantChildIndent; got != want {
+		t.Fatalf("child name indent = %d, want %d:\nparent=%q\nchild=%q", got, want, parentLine, childLine)
+	}
+
+	parentTargetCol := visualColumnOf(parentLine, "~/.config/nvim")
+	childTargetCol := visualColumnOf(childLine, "~/.config/nvim/lua")
+	if parentTargetCol < 0 || childTargetCol < 0 {
+		t.Fatalf("missing target columns:\nparent=%q\nchild=%q", parentLine, childLine)
+	}
+	if parentTargetCol != childTargetCol {
+		t.Fatalf("target columns not aligned:\nparent=%q\nchild=%q", parentLine, childLine)
+	}
+}
+
 func TestRenderDots_ChildRowsUseParentStatusAndFileCountColumn(t *testing.T) {
 	m := baseModel(nil)
 	m.width = 120
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
 	m.dotsExpandedState = app.DotStateSynced
@@ -580,7 +733,7 @@ func TestRenderDots_ChildRowsUseParentStatusAndFileCountColumn(t *testing.T) {
 func TestRenderDots_ChildRowsUseChildStateColor(t *testing.T) {
 	m := baseModel(nil)
 	m.width = 140
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
 	m.dotsExpandedState = app.DotStateSynced
@@ -617,7 +770,7 @@ func TestRenderDots_ChildRowsUseChildStateColor(t *testing.T) {
 func TestRenderDots_CountColumnsAreSeparateAndRightAligned(t *testing.T) {
 	m := baseModel(nil)
 	m.width = 140
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "alpha",
@@ -684,7 +837,7 @@ func TestDotRatioStyleReflectsSyncCoverage(t *testing.T) {
 func TestRenderDots_ChildRowsUseChildStatusWhenPresent(t *testing.T) {
 	m := baseModel(nil)
 	m.width = 120
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
 	m.dotsExpandedState = app.DotStateConflict
@@ -722,7 +875,7 @@ func TestRenderDots_ChildRowsUseChildStatusWhenPresent(t *testing.T) {
 func TestRenderDots_RightColumnsKeepStableWidthAndRightMargin(t *testing.T) {
 	m := baseModel(nil)
 	m.width = 110
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
 	m.dotsExpandedState = app.DotStateSynced
@@ -771,7 +924,7 @@ func TestRenderDots_RightColumnsFitContentAcrossSections(t *testing.T) {
 	m := baseModel(nil)
 	m.width = 140
 	m.height = 24
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "conflicted",
@@ -809,7 +962,7 @@ func TestRenderDots_RightColumnsFitContentAcrossSections(t *testing.T) {
 
 func TestRenderDots_TransientUntrackedConflictShowsAsOutOfSync(t *testing.T) {
 	m := baseModel(nil)
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "claude",
@@ -837,7 +990,7 @@ func TestRenderDots_TransientUntrackedConflictShowsAsOutOfSync(t *testing.T) {
 
 func TestRenderDots_ConflictInfersResolveActionsWithoutExplicitActions(t *testing.T) {
 	m := baseModel(nil)
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
@@ -856,7 +1009,7 @@ func TestRenderDots_ConflictInfersResolveActionsWithoutExplicitActions(t *testin
 
 func TestRenderDots_ConflictDirectoryShowsExpandHint(t *testing.T) {
 	m := baseModel(nil)
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
@@ -894,7 +1047,7 @@ func TestRenderDots_OutOfSyncSyncHintNamesResolutionSide(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := baseModel(nil)
-			m.settings.DotsRepo = "/home/user/dotfiles"
+			setDotsRepoForTest(&m, "/home/user/dotfiles")
 			m.dotsLoaded = true
 			m.dotsEntries = []app.DotStatus{{
 				Name:       "nvim",
@@ -912,7 +1065,7 @@ func TestRenderDots_OutOfSyncSyncHintNamesResolutionSide(t *testing.T) {
 
 func TestRenderDots_LocalOnlyDirectoryShowsExpandHint(t *testing.T) {
 	m := baseModel(nil)
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
@@ -938,7 +1091,7 @@ func TestRenderDots_LocalOnlyDirectoryShowsExpandHint(t *testing.T) {
 
 func TestRenderDots_SubdirectoryShowsExpandHint(t *testing.T) {
 	m := baseModel(nil)
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
 	m.dotsExpandedState = app.DotStateConflict
@@ -976,7 +1129,7 @@ func TestRenderDots_ScrollKeepsSelectedRowHintsVisibleAtBottom(t *testing.T) {
 	m := baseModel(nil)
 	m.width = 100
 	m.height = 8
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	for i := range 8 {
 		name := "dot0" + string(rune('0'+i))
@@ -1005,7 +1158,7 @@ func TestRenderDots_ScrollKeepsSelectedRowHintsVisibleAtBottom(t *testing.T) {
 
 func TestRenderDots_IgnoreConfirmRendersInlineAction(t *testing.T) {
 	m := baseModel(nil)
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
 	m.dotsExpandedState = app.DotStateSynced
@@ -1033,7 +1186,7 @@ func TestRenderDots_IgnoreConfirmRendersInlineAction(t *testing.T) {
 
 func TestRenderDots_WithConflict(t *testing.T) {
 	m := baseModel(nil)
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{
 		{Name: "tmux", TargetPath: "~/.tmux.conf", Health: app.HealthConflict},
@@ -1046,7 +1199,7 @@ func TestRenderDots_WithConflict(t *testing.T) {
 
 func TestRenderDots_GitStatusDirty(t *testing.T) {
 	m := baseModel(nil)
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{
 		{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK},
@@ -1060,7 +1213,7 @@ func TestRenderDots_GitStatusDirty(t *testing.T) {
 
 func TestRenderDots_DotsRepoDisplayed(t *testing.T) {
 	m := baseModel(nil)
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{
 		{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK},
@@ -1074,7 +1227,7 @@ func TestRenderDots_DotsRepoDisplayed(t *testing.T) {
 func TestRenderDots_UsesHomeAliasForUserPaths(t *testing.T) {
 	t.Setenv("HOME", "/home/user")
 	m := baseModel(nil)
-	m.settings.DotsRepo = "/home/user/dotfiles"
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
 	m.dotsExpandedState = app.DotStateSynced
@@ -1275,7 +1428,7 @@ func TestRenderDots_NoPanic(t *testing.T) {
 			name: "zero value model with DotsRepo",
 			fn: func() Model {
 				m := baseModel(nil)
-				m.settings.DotsRepo = "/tmp/dots"
+				setDotsRepoForTest(&m, "/tmp/dots")
 				m.dotsLoaded = true
 				return m
 			},
@@ -1284,7 +1437,7 @@ func TestRenderDots_NoPanic(t *testing.T) {
 			name: "no source health",
 			fn: func() Model {
 				m := baseModel(nil)
-				m.settings.DotsRepo = "/tmp/dots"
+				setDotsRepoForTest(&m, "/tmp/dots")
 				m.dotsLoaded = true
 				m.dotsEntries = []app.DotStatus{
 					{Name: "fish", TargetPath: "~/.config/fish", Health: app.HealthNoSource},
@@ -1296,7 +1449,7 @@ func TestRenderDots_NoPanic(t *testing.T) {
 			name: "cursor mid-list",
 			fn: func() Model {
 				m := baseModel(nil)
-				m.settings.DotsRepo = "/tmp/dots"
+				setDotsRepoForTest(&m, "/tmp/dots")
 				m.dotsLoaded = true
 				m.dotsEntries = []app.DotStatus{
 					{Name: "a", TargetPath: "~/.a", Health: app.HealthOK},
@@ -1311,7 +1464,7 @@ func TestRenderDots_NoPanic(t *testing.T) {
 			name: "confirm delete overlay",
 			fn: func() Model {
 				m := baseModel(nil)
-				m.settings.DotsRepo = "/tmp/dots"
+				setDotsRepoForTest(&m, "/tmp/dots")
 				m.dotsLoaded = true
 				m.dotsEntries = []app.DotStatus{
 					{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK},
@@ -1327,7 +1480,7 @@ func TestRenderDots_NoPanic(t *testing.T) {
 				m := baseModel(nil)
 				disabled := true
 				m.settings.DotsDisabled = &disabled
-				m.settings.DotsRepo = "/tmp/dots"
+				setDotsRepoForTest(&m, "/tmp/dots")
 				return m
 			},
 		},
@@ -1345,68 +1498,13 @@ func TestRenderDots_NoPanic(t *testing.T) {
 	}
 }
 
-// ── sortDotsEntries ───────────────────────────────────────────────────────────
-
-func TestSortDotsEntries_Order(t *testing.T) {
-	entries := []app.DotStatus{
-		{Name: "zsh", Health: app.HealthOK},
-		{Name: "nvim", Health: app.HealthMissing},
-		{Name: "tmux", Health: app.HealthConflict},
-		{Name: "fish", Health: app.HealthNoSource},
-	}
-	sortDotsEntries(entries)
-	// conflict must come first
-	if entries[0].Health != app.HealthConflict {
-		t.Errorf("expected conflict first, got %q", entries[0].Health)
-	}
-	// ok must come last
-	if entries[len(entries)-1].Health != app.HealthOK {
-		t.Errorf("expected ok last, got %q", entries[len(entries)-1].Health)
-	}
-}
-
-func TestSortDotsEntries_AlphaWithinBucket(t *testing.T) {
-	entries := []app.DotStatus{
-		{Name: "z-vim", Health: app.HealthOK},
-		{Name: "a-vim", Health: app.HealthOK},
-		{Name: "m-vim", Health: app.HealthOK},
-	}
-	sortDotsEntries(entries)
-	if entries[0].Name != "a-vim" {
-		t.Errorf("expected 'a-vim' first within ok bucket, got %q", entries[0].Name)
-	}
-	if entries[2].Name != "z-vim" {
-		t.Errorf("expected 'z-vim' last within ok bucket, got %q", entries[2].Name)
-	}
-}
-
-// ── dotsSortKey ───────────────────────────────────────────────────────────────
-
-func TestDotsSortKey(t *testing.T) {
-	// conflict < missing/no-source < ok/unknown
-	conflictKey := dotsSortKey(app.HealthConflict)
-	missingKey := dotsSortKey(app.HealthMissing)
-	noSourceKey := dotsSortKey(app.HealthNoSource)
-	okKey := dotsSortKey(app.HealthOK)
-
-	if conflictKey >= missingKey {
-		t.Errorf("conflict key (%d) should be < missing key (%d)", conflictKey, missingKey)
-	}
-	if missingKey > okKey {
-		t.Errorf("missing key (%d) should be <= ok key (%d)", missingKey, okKey)
-	}
-	if noSourceKey > okKey {
-		t.Errorf("no-source key (%d) should be <= ok key (%d)", noSourceKey, okKey)
-	}
-}
-
 // ── renderDots with settings.DotsDisabled false-value pointer ────────────────
 
 func TestRenderDots_DotsDisabledFalse(t *testing.T) {
 	m := baseModel(nil)
 	disabled := false
 	m.settings.DotsDisabled = &disabled
-	m.settings.DotsRepo = ""
+	setDotsRepoForTest(&m, "")
 	out := renderDots(m)
 	// Should show "not configured" not "disabled"
 	if strings.Contains(out, "disabled") {
@@ -1419,7 +1517,7 @@ func TestRenderDots_DotsDisabledFalse(t *testing.T) {
 func TestRenderDots_NilDotsDisabled(t *testing.T) {
 	m := baseModel(nil)
 	m.settings.DotsDisabled = nil // ensure nil is handled
-	m.settings.DotsRepo = "/tmp/dots"
+	setDotsRepoForTest(&m, "/tmp/dots")
 	m.dotsLoaded = true
 	// Should not panic.
 	defer func() {
@@ -1434,7 +1532,7 @@ func TestRenderDots_NilDotsDisabled(t *testing.T) {
 
 func TestRenderDots_ConfirmOverwrite(t *testing.T) {
 	m := baseModel(nil)
-	m.settings.DotsRepo = "/tmp/dots"
+	setDotsRepoForTest(&m, "/tmp/dots")
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{
 		{
@@ -1498,7 +1596,7 @@ func TestPlaceOverlay_NoPanic_Variants(t *testing.T) {
 
 func TestRenderDots_LongPathTruncated(t *testing.T) {
 	m := baseModel(nil)
-	m.settings.DotsRepo = "/tmp/dots"
+	setDotsRepoForTest(&m, "/tmp/dots")
 	m.dotsLoaded = true
 	longPath := strings.Repeat("/very/long/path/segment", 10)
 	m.dotsEntries = []app.DotStatus{
@@ -1515,7 +1613,7 @@ func TestRenderDots_NarrowWidthFitsRows(t *testing.T) {
 	m := baseModel(nil)
 	m.width = 44
 	m.height = 12
-	m.settings.DotsRepo = "/home/user/a/very/long/dotfiles/repository/path"
+	setDotsRepoForTest(&m, "/home/user/a/very/long/dotfiles/repository/path")
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "very-long-dot-entry-name",
@@ -1543,7 +1641,7 @@ func TestRenderDots_DotsDisabledTrue(t *testing.T) {
 	m := baseModel(nil)
 	b := true
 	m.settings.DotsDisabled = &b
-	m.settings.DotsRepo = "/tmp/dots"
+	setDotsRepoForTest(&m, "/tmp/dots")
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{
 		{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK},
@@ -1570,7 +1668,7 @@ func ignoredSectionModel() Model {
 	m := baseModel(nil)
 	m.width = 120
 	m.height = 40
-	m.settings.DotsRepo = "/repo"
+	setDotsRepoForTest(&m, "/repo")
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{
 		{

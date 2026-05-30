@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
@@ -98,6 +99,43 @@ func TestLoadTools_HappyPath(t *testing.T) {
 	}
 }
 
+func TestLoadTools_IncludesCachedDotsState(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "settings.json")
+	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{DotsRepo: filepath.Join(dir, "dots")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	a := app.New(cfgPath)
+	a.CacheDir = dir
+	if err := a.InitTestMode(context.Background()); err != nil {
+		t.Fatalf("App.InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	observed := time.Date(2026, 5, 29, 11, 0, 0, 0, time.UTC)
+	if err := a.DB().ReplaceDotsSnapshot(context.Background(), []*database.DotStatusCache{{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		Health:     string(app.HealthOK),
+		State:      string(app.DotStateSynced),
+		ObservedAt: observed,
+	}}, "M dotfiles/nvim", 0, observed); err != nil {
+		t.Fatalf("ReplaceDotsSnapshot: %v", err)
+	}
+
+	got, ok := loadTools(a, context.Background())().(toolsLoadedMsg)
+	if !ok {
+		t.Fatalf("loadTools returned non-tools message")
+	}
+	if got.dotsState == nil || !got.dotsState.Loaded {
+		t.Fatalf("dotsState = %+v, want loaded cached state", got.dotsState)
+	}
+	if len(got.dotsState.Entries) != 1 || got.dotsState.Entries[0].Name != "nvim" || got.dotsState.GitStatus != "M dotfiles/nvim" {
+		t.Fatalf("dotsState = %+v, want cached nvim and git status", got.dotsState)
+	}
+}
+
 // TestLoadTools_NoConfig verifies that loadTools returns noConfig=true when
 // there is no settings.json file.
 func TestLoadTools_NoConfig(t *testing.T) {
@@ -159,16 +197,11 @@ func TestLoadTools_WithGroups(t *testing.T) {
 	if got.err != nil {
 		t.Errorf("unexpected error: %v", got.err)
 	}
-	// configuredProviders should include the logical provider.
-	found := false
-	for _, p := range got.configuredProviders {
-		if p == "system" {
-			found = true
-			break
-		}
+	if !slices.Contains(got.groupNames, "work") {
+		t.Errorf("groupNames = %v, expected to contain work", got.groupNames)
 	}
-	if !found {
-		t.Errorf("configuredProviders = %v, expected to contain 'system'", got.configuredProviders)
+	if group := got.toolGroups["ripgrep\x00system"]; group != "work" {
+		t.Errorf("toolGroups[ripgrep/system] = %q, want work", group)
 	}
 }
 
@@ -242,6 +275,41 @@ func TestLoadTools_WithHost(t *testing.T) {
 	}
 	if got.hostInfo == nil || got.hostInfo.Active == "" {
 		t.Fatalf("hostInfo = %#v, want active host", got.hostInfo)
+	}
+}
+
+func TestLoadTools_ConfiguredHostWithoutBootstrapMarkerStaysOnDashboard(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "settings.json")
+	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
+		Groups: []*config.GroupConfig{{Name: shortHostname(), Special: "host"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	a := app.New(cfgPath)
+	a.CacheDir = dir
+	if err := a.InitTestMode(context.Background()); err != nil {
+		t.Fatalf("App.InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	msg, ok := loadTools(a, context.Background())().(toolsLoadedMsg)
+	if !ok {
+		t.Fatalf("loadTools returned non-tools message")
+	}
+	if msg.noConfig || msg.noHost {
+		t.Fatalf("startup flags noConfig=%v noHost=%v, want configured host", msg.noConfig, msg.noHost)
+	}
+
+	m := baseModel(nil)
+	m.mode = viewStatus
+	m.loading = true
+	got := drive(m, msg)
+	if got.mode != viewStatus {
+		t.Fatalf("mode = %v, want viewStatus", got.mode)
+	}
+	if got.setupStep != 0 {
+		t.Fatalf("setupStep = %d, want 0", got.setupStep)
 	}
 }
 

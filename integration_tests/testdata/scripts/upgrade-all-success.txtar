@@ -5,10 +5,10 @@ env PATH=$WORK/bin:$PATH
 exec omni-seed-cache ripgrep system ripgrep 14.0.0 15.0.0 brew
 exec omni-seed-cache fd system fd 9.0.0 10.0.0 brew
 exec omni --config settings.json tools upgrade --all
-stdout 'upgrading ripgrep'
-stdout 'upgraded: ripgrep \(system\)'
-stdout 'upgrading fd'
-stdout 'upgraded: fd \(system\)'
+stdout 'upgrading ripgrep \(15.0.0\)'
+stdout 'upgraded: ripgrep \(15.0.0\) \(system\)'
+stdout 'upgrading fd \(10.0.0\)'
+stdout 'upgraded: fd \(10.0.0\) \(system\)'
 exec test -f .omni-cache/fake-brew/ripgrep-upgraded
 exec test -f .omni-cache/fake-brew/fd-upgraded
 
@@ -24,30 +24,47 @@ case "${1:-}" in
   --version)
     echo "Homebrew 4.0.0"
     ;;
-  upgrade)
-    : > "$state/$2"
-    : > "$state/$2-upgraded"
-    echo "2.0.0" > "$state/$2.version"
-    ;;
-  list)
-    shift
-    if [ "${1:-}" = "--versions" ]; then
-      shift
-      if [ "${1:-}" = "--cask" ]; then
-        shift
-      fi
-      pkg="${1:-}"
-      if [ -f "$state/$pkg" ]; then
-        version="2.0.0"
-        if [ -f "$state/$pkg.version" ]; then
-          version="$(cat "$state/$pkg.version")"
-        fi
-        echo "$pkg $version"
-        exit 0
-      fi
-    fi
-    exit 1
-    ;;
+	  upgrade)
+	    shift
+	    if [ "${1:-}" = "--formula" ] || [ "${1:-}" = "--cask" ]; then
+	      shift
+	    fi
+	    : > "$state/$1"
+	    : > "$state/$1-upgraded"
+	    echo "2.0.0" > "$state/$1.version"
+	    ;;
+	  leaves)
+	    if [ "${2:-}" = "--installed-on-request" ]; then
+	      for pkg in ripgrep fd; do
+	        [ -f "$state/$pkg" ] && echo "$pkg"
+	      done
+	    fi
+	    ;;
+	  list)
+	    shift
+	    if [ "${1:-}" = "--cask" ]; then
+	      exit 0
+	    fi
+	    if [ "${1:-}" = "--versions" ]; then
+	      shift
+	      if [ "${1:-}" = "--cask" ]; then
+	        shift
+	      fi
+	      found=0
+	      for pkg in "$@"; do
+	        if [ -f "$state/$pkg" ]; then
+	          version="2.0.0"
+	          if [ -f "$state/$pkg.version" ]; then
+	            version="$(cat "$state/$pkg.version")"
+	          fi
+	          echo "$pkg $version"
+	          found=1
+	        fi
+	      done
+	      [ "$found" -eq 1 ] && exit 0
+	    fi
+	    exit 1
+	    ;;
   info)
     echo '{"formulae":[],"casks":[]}'
     ;;

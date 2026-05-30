@@ -392,6 +392,40 @@ func TestRefreshProviderInstalledWithProgress_ReportsEachTool(t *testing.T) {
 	}
 }
 
+func TestRefreshProviderInstalledWithProgress_ReportsConcreteEcosystemLabel(t *testing.T) {
+	prov := &bulkConcreteStub{
+		bulkCheckingStub: bulkCheckingStub{
+			stubProvider: stubProvider{name: "node", available: true},
+			bulk:         map[string]string{"typescript": "5.4.0"},
+		},
+		concreteName: "bun",
+	}
+	a, cfgPath := newImportApp(t, prov)
+
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("typescript", "node")),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("typescript"),
+		}},
+	}); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+
+	var events []app.RefreshInstalledProgressEvent
+	if err := a.RefreshProviderInstalledWithProgress(context.Background(), "node", func(event app.RefreshInstalledProgressEvent) {
+		events = append(events, event)
+	}); err != nil {
+		t.Fatalf("RefreshProviderInstalledWithProgress: %v", err)
+	}
+
+	if len(events) != 1 {
+		t.Fatalf("events len = %d, want 1: %#v", len(events), events)
+	}
+	if events[0].Provider != "node" || events[0].ProviderLabel != "node/bun" {
+		t.Fatalf("event = %#v, want raw node with label node/bun", events[0])
+	}
+}
+
 type cancelingBulkStub struct {
 	bulkCheckingStub
 	cancel context.CancelFunc

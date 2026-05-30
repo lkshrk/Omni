@@ -12,7 +12,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/provider"
 )
 
@@ -274,92 +273,5 @@ func TestVisibleAdminTerminalOutputLines_TruncatesWithIndicator(t *testing.T) {
 	}
 	if got[0] != "..." || got[1] != "three" {
 		t.Fatalf("lines = %#v, want truncation indicator and newest line", got)
-	}
-}
-
-func TestAdminTerminalCommand_SudoBackedProviders(t *testing.T) {
-	plan := provider.PrivilegePlan{Requirement: provider.PrivilegeRequired, Reason: "package manager needs sudo/root access"}
-	m := Model{effectiveSystemManager: "apt"}
-	tests := []struct {
-		name   string
-		action provider.PrivilegeAction
-		tool   database.ToolCache
-		want   string
-	}{
-		{
-			name:   "apt install",
-			action: provider.PrivilegeActionInstall,
-			tool:   database.ToolCache{Name: "vim", Provider: "apt", Package: "vim"},
-			want:   "apt-get install -y vim",
-		},
-		{
-			name:   "apk uninstall",
-			action: provider.PrivilegeActionUninstall,
-			tool:   database.ToolCache{Name: "vim", Provider: "apk", Package: "vim"},
-			want:   "apk del vim",
-		},
-		{
-			name:   "dnf upgrade",
-			action: provider.PrivilegeActionUpgrade,
-			tool:   database.ToolCache{Name: "vim", Provider: "dnf", Package: "vim"},
-			want:   "dnf upgrade -y vim",
-		},
-		{
-			name:   "pacman upgrade",
-			action: provider.PrivilegeActionUpgrade,
-			tool:   database.ToolCache{Name: "vim", Provider: "pacman", Package: "vim"},
-			want:   "pacman -S --noconfirm vim",
-		},
-		{
-			name:   "zypper uninstall",
-			action: provider.PrivilegeActionUninstall,
-			tool:   database.ToolCache{Name: "vim", Provider: "zypper", Package: "vim"},
-			want:   "zypper remove -y vim",
-		},
-		{
-			name:   "system install resolves to apt",
-			action: provider.PrivilegeActionInstall,
-			tool:   database.ToolCache{Name: "vim", Provider: "system", Package: "vim"},
-			want:   "apt-get install -y vim",
-		},
-		{
-			name:   "system uninstall uses installed manager",
-			action: provider.PrivilegeActionUninstall,
-			tool:   database.ToolCache{Name: "vim", Provider: "system", Package: "vim", InstalledWith: "dnf"},
-			want:   "dnf remove -y vim",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cmd, args, ok := m.adminTerminalCommand(tt.action, &tt.tool, plan)
-			if !ok {
-				t.Fatal("adminTerminalCommand ok = false")
-			}
-			if got := shellJoin(append([]string{cmd}, args...)); got != expectedInteractiveAdminDisplay(tt.want) {
-				t.Fatalf("display = %q, want %q", got, expectedInteractiveAdminDisplay(tt.want))
-			}
-		})
-	}
-}
-
-func TestAdminTerminalCommand_UnsupportedProvider(t *testing.T) {
-	m := Model{}
-	plan := provider.PrivilegePlan{Requirement: provider.PrivilegeRequired, Reason: "package manager needs sudo/root access"}
-	tool := database.ToolCache{Name: "vim", Provider: "pip", Package: "vim"}
-	if _, _, ok := m.adminTerminalCommand(provider.PrivilegeActionInstall, &tool, plan); ok {
-		t.Fatal("adminTerminalCommand ok = true for unsupported provider")
-	}
-}
-
-func TestAdminTerminalCommand_SystemCanUsePlanReasonWhenResolutionMissing(t *testing.T) {
-	m := Model{}
-	plan := provider.PrivilegePlan{Requirement: provider.PrivilegeRequired, Reason: "dnf install vim"}
-	tool := database.ToolCache{Name: "vim", Provider: "system", Package: "vim"}
-	cmd, args, ok := m.adminTerminalCommand(provider.PrivilegeActionInstall, &tool, plan)
-	if !ok {
-		t.Fatal("adminTerminalCommand ok = false")
-	}
-	if got := shellJoin(append([]string{cmd}, args...)); got != expectedInteractiveAdminDisplay("dnf install -y vim") {
-		t.Fatalf("display = %q", got)
 	}
 }

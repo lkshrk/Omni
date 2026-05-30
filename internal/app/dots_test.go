@@ -2,6 +2,7 @@ package app_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -508,6 +509,69 @@ func TestDotsSetEntryIgnored_NormalizesHomePath(t *testing.T) {
 	}
 }
 
+func TestDotsSetEntryIgnored_UntracksConfiguredDotAndKeepsLocalCopy(t *testing.T) {
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := os.Getenv("HOME")
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	target := filepath.Join(home, ".zshrc")
+	source := filepath.Join(dotsContentDir(repoDir), "zshrc", ".zshrc")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("repo zshrc\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(source, target); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	cfg.Hosts = map[string][]string{"testhost": {"work"}}
+	cfg.Groups = append(cfg.Groups,
+		&config.GroupConfig{Name: "testhost", Special: "host"},
+		&config.GroupConfig{
+			Name: "work",
+			Dots: []config.DotEntry{{Name: "zshrc", Path: "~/.zshrc"}},
+		},
+	)
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if err := a.DotsSetEntryIgnored("zshrc", "~/.zshrc", true); err != nil {
+		t.Fatalf("DotsSetEntryIgnored: %v", err)
+	}
+
+	cfg, err = config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if group := findDotsTestGroup(cfg.Groups, "work"); group != nil && containsDotsTestEntry(group.Dots, "zshrc") {
+		t.Fatalf("work dots = %#v, want zshrc removed from tracked group", group.Dots)
+	}
+	hostGroup := findDotsTestGroup(cfg.Groups, "testhost")
+	if hostGroup == nil || len(hostGroup.Dots) != 1 || hostGroup.Dots[0].Name != "zshrc" || !hostGroup.Dots[0].Ignored {
+		t.Fatalf("host dots = %#v, want ignored zshrc entry", hostGroup)
+	}
+	info, err := os.Lstat(target)
+	if err != nil {
+		t.Fatalf("Lstat target: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("%s is still a symlink, want real local file", target)
+	}
+	content, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("ReadFile target: %v", err)
+	}
+	if got := string(content); got != "repo zshrc\n" {
+		t.Fatalf("local target content = %q, want repo copy", got)
+	}
+}
+
 func TestDiscoverDotsStatus_AddsTransientCandidates(t *testing.T) {
 	a, _, _ := newDotsApp(t)
 	home := t.TempDir()
@@ -674,6 +738,840 @@ func TestDiscoverDotsStatus_CountExcludesIgnoredAndTracked(t *testing.T) {
 	}
 }
 
+func TestRefreshDotsStatePersistsCachedSnapshot(t *testing.T) {
+	a, _, repoDir := newDotsApp(t)
+	if err := os.MkdirAll(filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim", "init.lua"), []byte("set number"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := a.RefreshDotsState(context.Background())
+	if err != nil {
+		t.Fatalf("RefreshDotsState: %v", err)
+	}
+	if state == nil || state.DiscoveredCount != 1 {
+		t.Fatalf("RefreshDotsState = %+v, want one discovered candidate", state)
+	}
+	var refreshed app.DotStatus
+	for _, entry := range state.Entries {
+		if entry.Name == "nvim" {
+			refreshed = entry
+			break
+		}
+	}
+	if refreshed.Name == "" || refreshed.State != app.DotStateRepoOnly || len(refreshed.Children) == 0 {
+		t.Fatalf("refreshed nvim = %+v, want repo-only entry with children", refreshed)
+	}
+
+	cached, err := a.CachedDotsState(context.Background())
+	if err != nil {
+		t.Fatalf("CachedDotsState: %v", err)
+	}
+	if cached == nil || !cached.Loaded || cached.DiscoveredCount != 1 {
+		t.Fatalf("CachedDotsState = %+v, want loaded cached candidate", cached)
+	}
+	var persisted app.DotStatus
+	for _, entry := range cached.Entries {
+		if entry.Name == "nvim" {
+			persisted = entry
+			break
+		}
+	}
+	if persisted.State != app.DotStateRepoOnly || len(persisted.Children) != len(refreshed.Children) {
+		t.Fatalf("persisted nvim = %+v, want cached repo-only entry matching refreshed children", persisted)
+	}
+}
+
+func TestRefreshDotsStateIncludesDotMemberships(t *testing.T) {
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.MkdirAll(filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}}, home)
+
+	state, err := a.RefreshDotsState(context.Background())
+	if err != nil {
+		t.Fatalf("RefreshDotsState: %v", err)
+	}
+	if !reflect.DeepEqual(state.DotMemberships["nvim"], []string{dotsTestHostGroupName()}) {
+		t.Fatalf("dot memberships = %v, want nvim in host group", state.DotMemberships)
+	}
+}
+
+func TestQueryDotsStatusPersistsCachedSnapshot(t *testing.T) {
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte("set number"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	zshSource := filepath.Join(dotsContentDir(repoDir), "zshrc", ".zshrc")
+	if err := os.MkdirAll(filepath.Dir(zshSource), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(zshSource, []byte("export PATH=$PATH"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(home, ".config", "nvim")
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{Name: "nvim", Path: target},
+		{Name: "zshrc", Path: filepath.Join(home, ".zshrc")},
+	}, home)
+
+	result, err := a.QueryDotsStatus(context.Background(), app.DotsQueryOptions{Name: "nvim"})
+	if err != nil {
+		t.Fatalf("QueryDotsStatus: %v", err)
+	}
+	if len(result.Entries) != 1 || result.Entries[0].Name != "nvim" {
+		t.Fatalf("QueryDotsStatus entries = %#v, want nvim only", result.Entries)
+	}
+	cached, err := a.CachedDotsState(context.Background())
+	if err != nil {
+		t.Fatalf("CachedDotsState: %v", err)
+	}
+	if cached == nil || !cached.Loaded {
+		t.Fatalf("CachedDotsState = %+v, want loaded snapshot after status query", cached)
+	}
+	if !hasDotStatusNamed(cached.Entries, "nvim") || !hasDotStatusNamed(cached.Entries, "zshrc") {
+		t.Fatalf("cached entries = %#v, want unfiltered nvim and zshrc snapshot", cached.Entries)
+	}
+}
+
+func TestDotsSyncContextPersistsCachedSnapshot(t *testing.T) {
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte("-- cfg"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(home, ".config", "nvim")
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{{Name: "nvim", Path: target}}, home)
+
+	if _, err := a.DotsSyncContext(context.Background(), dots.SyncOptions{}); err != nil {
+		t.Fatalf("DotsSyncContext: %v", err)
+	}
+	cached, err := a.CachedDotsState(context.Background())
+	if err != nil {
+		t.Fatalf("CachedDotsState: %v", err)
+	}
+	var synced app.DotStatus
+	for _, entry := range cached.Entries {
+		if entry.Name == "nvim" {
+			synced = entry
+			break
+		}
+	}
+	if !cached.Loaded || synced.State != app.DotStateSynced {
+		t.Fatalf("CachedDotsState = %+v, want synced nvim snapshot", cached)
+	}
+}
+
+func TestDotsSyncWithStateReturnsRefreshedSnapshot(t *testing.T) {
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte("-- cfg"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{{Name: "nvim", Path: filepath.Join(home, ".config", "nvim")}}, home)
+
+	all, err := a.DotsSyncContextWithState(context.Background(), dots.SyncOptions{})
+	if err != nil {
+		t.Fatalf("DotsSyncContextWithState: %v", err)
+	}
+	if all == nil || all.State == nil || !all.State.Loaded || !hasDotStatusNamed(all.State.Entries, "nvim") {
+		t.Fatalf("DotsSyncContextWithState = %+v, want loaded nvim state", all)
+	}
+
+	entry, err := a.DotsSyncEntryWithState(context.Background(), "nvim", dots.SyncOptions{})
+	if err != nil {
+		t.Fatalf("DotsSyncEntryWithState: %v", err)
+	}
+	if entry == nil || entry.State == nil || !entry.State.Loaded || !hasDotStatusNamed(entry.State.Entries, "nvim") {
+		t.Fatalf("DotsSyncEntryWithState = %+v, want loaded nvim state", entry)
+	}
+}
+
+func TestDotsSyncWithStateProgressReturnsRefreshedSnapshots(t *testing.T) {
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte("-- cfg"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{{Name: "nvim", Path: filepath.Join(home, ".config", "nvim")}}, home)
+
+	var progress []app.DotsOperationStateProgressEvent
+	result, err := a.DotsSyncContextWithStateProgress(context.Background(), dots.SyncOptions{}, func(event app.DotsOperationStateProgressEvent) {
+		if event.Done {
+			progress = append(progress, event)
+		}
+	})
+	if err != nil {
+		t.Fatalf("DotsSyncContextWithStateProgress: %v", err)
+	}
+	if result == nil || result.State == nil || !result.State.Loaded || !hasDotStatusNamed(result.State.Entries, "nvim") {
+		t.Fatalf("DotsSyncContextWithStateProgress = %+v, want loaded final nvim state", result)
+	}
+	if len(progress) != 1 {
+		t.Fatalf("progress events = %d, want one done event", len(progress))
+	}
+	if progress[0].Entry != "nvim" || !progress[0].Done || progress[0].Text == "" {
+		t.Fatalf("progress event = %+v, want named done event with display text", progress[0])
+	}
+	status := requireDotsStateWithEntry(t, progress[0].State, "nvim")
+	if status.State != app.DotStateSynced {
+		t.Fatalf("progress state = %q, want synced", status.State)
+	}
+}
+
+func TestSaveDotsRepoAndSyncUsesSavedRepo(t *testing.T) {
+	if _, err := exec.LookPath("stow"); err != nil {
+		t.Skip("stow not installed")
+	}
+	t.Setenv("OMNI_HOSTNAME", "dotspickertest")
+	ctx := context.Background()
+	cfgDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	oldRepo := t.TempDir()
+	newRepo := t.TempDir()
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	targetDir := filepath.Join(homeDir, ".config", "picked")
+	target := filepath.Join(targetDir, "settings.json")
+	source := filepath.Join(dotsContentDir(newRepo), "picked", ".config", "picked", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("selected repo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(homeDir, ".config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{AutoImport: true},
+		HostSettings: map[string]config.Settings{
+			"dotspickertest": {DotsRepo: oldRepo},
+		},
+		Groups: []*config.GroupConfig{{Name: dotsTestHostGroupName(), Special: "host", Dots: []config.DotEntry{{Name: "picked", Path: "~/.config/picked"}}}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	a := app.New(cfgPath)
+	a.CacheDir = cfgDir
+	if err := a.InitTestMode(ctx); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	result, err := a.SaveDotsRepoAndSync(ctx, newRepo, dots.SyncOptions{})
+	if err != nil {
+		t.Fatalf("SaveDotsRepoAndSync: %v", err)
+	}
+	status := requireDotsStateWithEntry(t, result.State, "picked")
+	if status.State != app.DotStateSynced {
+		t.Fatalf("picked state = %q, want synced", status.State)
+	}
+	if !result.HasSettings {
+		t.Fatal("result should include saved settings")
+	}
+	if result.Settings.DotsRepo != newRepo {
+		t.Fatalf("result settings DotsRepo = %q, want selected repo %q", result.Settings.DotsRepo, newRepo)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("target was not populated from selected repo: %v", err)
+	}
+	if string(got) != "selected repo" {
+		t.Fatalf("target content = %q, want selected repo content", string(got))
+	}
+	settings, err := a.LoadSettings()
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+	if settings.DotsRepo != newRepo {
+		t.Fatalf("DotsRepo = %q, want selected repo %q", settings.DotsRepo, newRepo)
+	}
+	if !settings.AutoImport {
+		t.Fatal("AutoImport should be preserved from current config")
+	}
+}
+
+func TestDotsMutationWithStateReturnsRefreshedSnapshots(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("add", func(t *testing.T) {
+		a, _, _ := newDotsApp(t)
+		target := filepath.Join(os.Getenv("HOME"), ".zshrc")
+		if err := os.WriteFile(target, []byte("export PATH=$PATH\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		result, err := a.DotsAddWithState(ctx, target, app.DotsAddOptions{Name: "zshrc", Adopt: true})
+		if err != nil {
+			t.Fatalf("DotsAddWithState: %v", err)
+		}
+		status := requireDotsStateWithEntry(t, result.State, "zshrc")
+		if status.State != app.DotStateSynced {
+			t.Fatalf("zshrc state = %q, want synced", status.State)
+		}
+	})
+
+	t.Run("delete", func(t *testing.T) {
+		a, cfgDir, repoDir := newDotsApp(t)
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
+		if err := os.MkdirAll(srcDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte("-- cfg"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{{Name: "nvim", Path: filepath.Join(home, ".config", "nvim")}}, home)
+		if _, err := a.DotsSyncContext(ctx, dots.SyncOptions{}); err != nil {
+			t.Fatalf("DotsSyncContext: %v", err)
+		}
+
+		result, err := a.DotsDeleteWithState(ctx, "nvim", app.DotsDeleteOptions{KeepLocal: true})
+		if err != nil {
+			t.Fatalf("DotsDeleteWithState: %v", err)
+		}
+		status := requireDotsStateWithEntry(t, result.State, "nvim")
+		if result.State.DiscoveredCount != 1 || status.Group != "" || status.State != app.DotStateLocalOnly {
+			t.Fatalf("DotsDeleteWithState state = %+v, want untracked local nvim candidate", result.State)
+		}
+	})
+
+	t.Run("resolve", func(t *testing.T) {
+		a, cfgDir, repoDir := newDotsApp(t)
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
+		if err := os.MkdirAll(srcDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte("-- repo"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		target := filepath.Join(home, ".config", "nvim")
+		if err := os.MkdirAll(target, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(target, "init.lua"), []byte("-- local"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		setDotTestModTime(t, filepath.Join(srcDir, "init.lua"), time.Unix(1_700_000_000, 0).Add(time.Hour))
+		setDotTestModTime(t, filepath.Join(target, "init.lua"), time.Unix(1_700_000_000, 0))
+		writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{{Name: "nvim", Path: target}}, home)
+
+		result, err := a.DotsResolveConflictWithState(ctx, "nvim", app.DotResolveUseRepo)
+		if err != nil {
+			t.Fatalf("DotsResolveConflictWithState: %v", err)
+		}
+		if len(result.Ops) != 1 || result.Ops[0].Kind != dots.OpRepair {
+			t.Fatalf("ops = %v, want OpRepair", result.Ops)
+		}
+		requireDotsStateWithEntry(t, result.State, "nvim")
+	})
+
+	t.Run("ignore", func(t *testing.T) {
+		a, cfgDir, repoDir := newDotsApp(t)
+		home := os.Getenv("HOME")
+		writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{{Name: "nvim", Path: filepath.Join(home, ".config", "nvim")}}, home)
+
+		result, err := a.DotsAddIgnorePatternWithState(ctx, "nvim", "*.log")
+		if err != nil {
+			t.Fatalf("DotsAddIgnorePatternWithState: %v", err)
+		}
+		requireDotsStateWithEntry(t, result.State, "nvim")
+	})
+
+	t.Run("include ignored path", func(t *testing.T) {
+		a, cfgDir, repoDir := newDotsApp(t)
+		home := os.Getenv("HOME")
+		writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{{
+			Name:   "claude",
+			Path:   filepath.Join(home, ".claude"),
+			Ignore: []string{"projects/**"},
+		}}, home)
+
+		result, err := a.DotsIncludeIgnoredPathWithState(ctx, "claude", "projects/session.json")
+		if err != nil {
+			t.Fatalf("DotsIncludeIgnoredPathWithState: %v", err)
+		}
+		requireDotsStateWithEntry(t, result.State, "claude")
+	})
+
+	t.Run("entry ignored", func(t *testing.T) {
+		a, _, _ := newDotsApp(t)
+		target := filepath.Join(os.Getenv("HOME"), ".config", "kitty")
+		if err := os.MkdirAll(target, 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		result, err := a.DotsSetEntryIgnoredWithState(ctx, "kitty", target, true)
+		if err != nil {
+			t.Fatalf("DotsSetEntryIgnoredWithState: %v", err)
+		}
+		status := requireDotsStateWithEntry(t, result.State, "kitty")
+		if status.State != app.DotStateIgnored {
+			t.Fatalf("kitty state = %q, want ignored", status.State)
+		}
+	})
+}
+
+func TestDotsIgnoreWithStateDoesNotRefreshCacheAfterCanceledContext(t *testing.T) {
+	canceledContext := func() context.Context {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		return ctx
+	}
+	tests := []struct {
+		name   string
+		run    func(t *testing.T, a *app.App, cfgDir, repoDir string) (string, error)
+		assert func(t *testing.T, cfg *config.RootConfig)
+	}{
+		{
+			name: "add ignore pattern",
+			run: func(t *testing.T, a *app.App, cfgDir, repoDir string) (string, error) {
+				home := os.Getenv("HOME")
+				cfgPath := writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{{Name: "nvim", Path: filepath.Join(home, ".config", "nvim")}}, home)
+				_, err := a.DotsAddIgnorePatternWithState(canceledContext(), "nvim", "*.log")
+				return cfgPath, err
+			},
+			assert: func(t *testing.T, cfg *config.RootConfig) {
+				if got := cfg.Groups[0].Dots[0].Ignore; len(got) != 1 || got[0] != "*.log" {
+					t.Fatalf("ignore = %v, want persisted [*.log]", got)
+				}
+			},
+		},
+		{
+			name: "include ignored path",
+			run: func(t *testing.T, a *app.App, cfgDir, repoDir string) (string, error) {
+				home := os.Getenv("HOME")
+				cfgPath := writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{{
+					Name:   "claude",
+					Path:   filepath.Join(home, ".claude"),
+					Ignore: []string{"projects/**"},
+				}}, home)
+				_, err := a.DotsIncludeIgnoredPathWithState(canceledContext(), "claude", "projects/session.json")
+				return cfgPath, err
+			},
+			assert: func(t *testing.T, cfg *config.RootConfig) {
+				if !testContainsString(cfg.Groups[0].Dots[0].Ignore, "!/projects/session.json") {
+					t.Fatalf("ignore = %v, want persisted include override", cfg.Groups[0].Dots[0].Ignore)
+				}
+			},
+		},
+		{
+			name: "entry ignored",
+			run: func(t *testing.T, a *app.App, cfgDir, repoDir string) (string, error) {
+				home := os.Getenv("HOME")
+				target := filepath.Join(home, ".config", "kitty")
+				if err := os.MkdirAll(target, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				cfgPath := writeGroupWithDots(t, cfgDir, repoDir, nil, home)
+				_, err := a.DotsSetEntryIgnoredWithState(canceledContext(), "kitty", target, true)
+				return cfgPath, err
+			},
+			assert: func(t *testing.T, cfg *config.RootConfig) {
+				if len(cfg.Groups) == 0 || len(cfg.Groups[0].Dots) != 1 || cfg.Groups[0].Dots[0].Name != "kitty" || !cfg.Groups[0].Dots[0].Ignored {
+					t.Fatalf("groups = %#v, want persisted ignored kitty entry", cfg.Groups)
+				}
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			a, cfgDir, repoDir := newDotsApp(t)
+			cfgPath, err := tc.run(t, a, cfgDir, repoDir)
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("%s error = %v, want context.Canceled", tc.name, err)
+			}
+			cfg, err := config.Load(cfgPath)
+			if err != nil {
+				t.Fatalf("config.Load: %v", err)
+			}
+			tc.assert(t, cfg)
+			cached, err := a.CachedDotsState(context.Background())
+			if err != nil {
+				t.Fatalf("CachedDotsState: %v", err)
+			}
+			if cached.Loaded {
+				t.Fatalf("CachedDotsState = %+v, want no background refresh after canceled context", cached)
+			}
+		})
+	}
+}
+
+func TestDotsDiscoveredOperationWithStateReturnsRefreshedSnapshot(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("sync", func(t *testing.T) {
+		a, _, repoDir := newDotsApp(t)
+		srcDir := filepath.Join(dotsContentDir(repoDir), "claude", ".claude")
+		if err := os.MkdirAll(srcDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(srcDir, "settings.json"), []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		result, err := a.DotsSyncDiscoveredWithState(ctx, "claude", "work")
+		if err != nil {
+			t.Fatalf("DotsSyncDiscoveredWithState: %v", err)
+		}
+		if result.Added.Name != "claude" {
+			t.Fatalf("added = %+v, want claude", result.Added)
+		}
+		status := requireDotsStateWithEntry(t, result.State, "claude")
+		if result.State.DiscoveredCount != 0 || status.Group != "work" {
+			t.Fatalf("DotsSyncDiscoveredWithState state = %+v, want tracked claude in work", result.State)
+		}
+	})
+
+	t.Run("resolve", func(t *testing.T) {
+		a, _, repoDir := newDotsApp(t)
+		home := os.Getenv("HOME")
+		srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
+		if err := os.MkdirAll(srcDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte("-- repo"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		target := filepath.Join(home, ".config", "nvim")
+		if err := os.MkdirAll(target, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(target, "init.lua"), []byte("-- local"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		setDotTestModTime(t, filepath.Join(srcDir, "init.lua"), time.Unix(1_700_000_000, 0).Add(time.Hour))
+		setDotTestModTime(t, filepath.Join(target, "init.lua"), time.Unix(1_700_000_000, 0))
+
+		result, err := a.DotsResolveDiscoveredWithState(ctx, "nvim", "", app.DotResolveUseRepo)
+		if err != nil {
+			t.Fatalf("DotsResolveDiscoveredWithState: %v", err)
+		}
+		if result.Added.Name != "nvim" {
+			t.Fatalf("added = %+v, want nvim", result.Added)
+		}
+		requireDotsStateWithEntry(t, result.State, "nvim")
+	})
+}
+
+func TestDotsVariantWithStateReturnsRefreshedSnapshot(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("add", func(t *testing.T) {
+		t.Setenv("OMNI_HOSTNAME", "work")
+		a, cfgDir, repoDir := newDotsApp(t)
+		source := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim", "init.lua")
+		if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(source, []byte("default"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}}, "")
+
+		result, err := a.DotsAddHostVariantWithState(ctx, "nvim", app.DotsAddVariantOptions{Host: "work.local"})
+		if err != nil {
+			t.Fatalf("DotsAddHostVariantWithState: %v", err)
+		}
+		if result.Info.Host != "work" || result.Info.Package != "nvim@work" {
+			t.Fatalf("variant info = %+v, want work nvim@work", result.Info)
+		}
+		requireDotsStateWithEntry(t, result.State, "nvim")
+	})
+
+	t.Run("remove", func(t *testing.T) {
+		t.Setenv("OMNI_HOSTNAME", "laptop")
+		a, cfgDir, repoDir := newDotsApp(t)
+		defaultSource := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim", "init.lua")
+		variantSource := filepath.Join(dotsContentDir(repoDir), "nvim@work", ".config", "nvim", "init.lua")
+		if err := os.MkdirAll(filepath.Dir(defaultSource), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(variantSource), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(defaultSource, []byte("default"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(variantSource, []byte("work"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{{
+			Name: "nvim",
+			Path: "~/.config/nvim",
+			Hosts: map[string]config.DotVariant{
+				"work": {Package: "nvim@work"},
+			},
+		}}, "")
+
+		result, err := a.DotsRemoveHostVariantWithState(ctx, "nvim", app.DotsRemoveVariantOptions{Host: "work.local"})
+		if err != nil {
+			t.Fatalf("DotsRemoveHostVariantWithState: %v", err)
+		}
+		if result.Info.Host != "work" || result.Info.Package != "nvim@work" {
+			t.Fatalf("variant info = %+v, want work nvim@work", result.Info)
+		}
+		requireDotsStateWithEntry(t, result.State, "nvim")
+	})
+}
+
+func TestDotsAddPersistsCachedSnapshot(t *testing.T) {
+	a, _, _ := newDotsApp(t)
+	home := os.Getenv("HOME")
+	target := filepath.Join(home, ".zshrc")
+	if err := os.WriteFile(target, []byte("export PATH=$PATH\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := a.DotsAdd(context.Background(), target, app.DotsAddOptions{Name: "zshrc", Adopt: true}); err != nil {
+		t.Fatalf("DotsAdd: %v", err)
+	}
+	cached, err := a.CachedDotsState(context.Background())
+	if err != nil {
+		t.Fatalf("CachedDotsState: %v", err)
+	}
+	var status app.DotStatus
+	for _, entry := range cached.Entries {
+		if entry.Name == "zshrc" {
+			status = entry
+			break
+		}
+	}
+	if !cached.Loaded || status.State != app.DotStateSynced {
+		t.Fatalf("CachedDotsState = %+v, want synced zshrc snapshot", cached)
+	}
+}
+
+func TestDotsDeleteRefreshesCachedSnapshot(t *testing.T) {
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte("-- cfg"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{Name: "nvim", Path: filepath.Join(home, ".config", "nvim")},
+	}, home)
+	if _, err := a.DotsSyncContext(context.Background(), dots.SyncOptions{}); err != nil {
+		t.Fatalf("DotsSyncContext: %v", err)
+	}
+	cached, err := a.CachedDotsState(context.Background())
+	if err != nil {
+		t.Fatalf("CachedDotsState before delete: %v", err)
+	}
+	if !hasDotStatusNamed(cached.Entries, "nvim") {
+		t.Fatalf("cached entries before delete = %#v, want nvim", cached.Entries)
+	}
+
+	if err := a.DotsDeleteWithOptions(context.Background(), "nvim", app.DotsDeleteOptions{KeepLocal: true}); err != nil {
+		t.Fatalf("DotsDeleteWithOptions: %v", err)
+	}
+	cached, err = a.CachedDotsState(context.Background())
+	if err != nil {
+		t.Fatalf("CachedDotsState after delete: %v", err)
+	}
+	var candidate app.DotStatus
+	for _, entry := range cached.Entries {
+		if entry.Name == "nvim" {
+			candidate = entry
+			break
+		}
+	}
+	if !cached.Loaded || cached.DiscoveredCount != 1 || candidate.Group != "" || candidate.State != app.DotStateLocalOnly {
+		t.Fatalf("CachedDotsState = %+v, want untracked local nvim candidate after delete", cached)
+	}
+}
+
+func TestDotsAddDiscoveredEntryContextPersistsCachedSnapshot(t *testing.T) {
+	a, _, repoDir := newDotsApp(t)
+	srcDir := filepath.Join(dotsContentDir(repoDir), "claude", ".claude")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "settings.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before, err := a.RefreshDotsState(context.Background())
+	if err != nil {
+		t.Fatalf("RefreshDotsState: %v", err)
+	}
+	if before.DiscoveredCount != 1 {
+		t.Fatalf("RefreshDotsState DiscoveredCount = %d, want discovered claude", before.DiscoveredCount)
+	}
+
+	if _, err := a.DotsAddDiscoveredEntryContext(context.Background(), "claude", "work"); err != nil {
+		t.Fatalf("DotsAddDiscoveredEntryContext: %v", err)
+	}
+	cached, err := a.CachedDotsState(context.Background())
+	if err != nil {
+		t.Fatalf("CachedDotsState: %v", err)
+	}
+	var tracked app.DotStatus
+	for _, entry := range cached.Entries {
+		if entry.Name == "claude" {
+			tracked = entry
+			break
+		}
+	}
+	if !cached.Loaded || cached.DiscoveredCount != 0 || tracked.Group != "work" {
+		t.Fatalf("CachedDotsState = %+v, want tracked claude in work group", cached)
+	}
+}
+
+func TestDotsSetEntryIgnoredPersistsCachedSnapshot(t *testing.T) {
+	a, _, _ := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	target := filepath.Join(home, ".config", "kitty")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	before, err := a.RefreshDotsState(context.Background())
+	if err != nil {
+		t.Fatalf("RefreshDotsState: %v", err)
+	}
+	if before.DiscoveredCount != 1 {
+		t.Fatalf("RefreshDotsState DiscoveredCount = %d, want discovered kitty", before.DiscoveredCount)
+	}
+
+	if err := a.DotsSetEntryIgnored("kitty", target, true); err != nil {
+		t.Fatalf("DotsSetEntryIgnored: %v", err)
+	}
+	cached, err := a.CachedDotsState(context.Background())
+	if err != nil {
+		t.Fatalf("CachedDotsState: %v", err)
+	}
+	var ignored app.DotStatus
+	for _, entry := range cached.Entries {
+		if entry.Name == "kitty" {
+			ignored = entry
+			break
+		}
+	}
+	if !cached.Loaded || cached.DiscoveredCount != 0 || ignored.State != app.DotStateIgnored {
+		t.Fatalf("CachedDotsState = %+v, want ignored kitty snapshot", cached)
+	}
+}
+
+func TestSetDotGroupsPersistsCachedSnapshot(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte("-- cfg"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{Name: "nvim", Path: filepath.Join(home, ".config", "nvim")},
+	}, home)
+	if _, err := a.QueryDotsStatus(context.Background(), app.DotsQueryOptions{}); err != nil {
+		t.Fatalf("QueryDotsStatus: %v", err)
+	}
+
+	change, err := a.SetDotGroupsWithState(context.Background(), "nvim", []string{"work"}, []string{"work"}, "testhost")
+	if err != nil {
+		t.Fatalf("SetDotGroups: %v", err)
+	}
+	if !reflect.DeepEqual(change.DotMemberships["nvim"], []string{"work"}) {
+		t.Fatalf("dot memberships = %v, want nvim in work", change.DotMemberships)
+	}
+	if change.DotsState == nil {
+		t.Fatal("DotsState is nil, want refreshed state")
+	}
+	cached, err := a.CachedDotsState(context.Background())
+	if err != nil {
+		t.Fatalf("CachedDotsState: %v", err)
+	}
+	var moved app.DotStatus
+	for _, entry := range cached.Entries {
+		if entry.Name == "nvim" {
+			moved = entry
+			break
+		}
+	}
+	if !cached.Loaded || moved.Group != "work" {
+		t.Fatalf("CachedDotsState = %+v, want nvim moved to work group", cached)
+	}
+}
+
+func hasDotStatusNamed(entries []app.DotStatus, name string) bool {
+	for _, entry := range entries {
+		if entry.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func requireDotsStateWithEntry(t *testing.T, state *app.DotsState, name string) app.DotStatus {
+	t.Helper()
+	if state == nil || !state.Loaded {
+		t.Fatalf("DotsState = %+v, want loaded state", state)
+	}
+	for _, entry := range state.Entries {
+		if entry.Name == name {
+			return entry
+		}
+	}
+	t.Fatalf("DotsState entries = %#v, want %q", state.Entries, name)
+	return app.DotStatus{}
+}
+
 func TestDotGroupMemberships_UpdateConfigAndListOnce(t *testing.T) {
 	a, cfgDir, repoDir := newDotsApp(t)
 	home := t.TempDir()
@@ -751,6 +1649,227 @@ func TestMoveDotToGroup_MovesBetweenReusableGroups(t *testing.T) {
 	group := findDotsTestGroup(updated.Groups, "gaming")
 	if group == nil || len(group.Dots) != 1 || group.Dots[0].Name != "com.corsair" {
 		t.Fatalf("gaming group = %+v, want com.corsair dot", group)
+	}
+}
+
+func TestSetDotGroupsPersistsExactMembershipsAndHostAssignment(t *testing.T) {
+	a, cfgDir, _ := newDotsApp(t)
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	host := dotsTestHostGroupName()
+
+	rootCfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	rootCfg.Groups = []*config.GroupConfig{
+		{Name: host, Special: "host", Dots: []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}}},
+		{Name: "work"},
+	}
+	rootCfg.Hosts = map[string][]string{host: {}}
+	if err := saveAppConfig(t, cfgPath, rootCfg); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if _, err := a.SetDotGroups("nvim", []string{"work"}, nil, host); err != nil {
+		t.Fatalf("SetDotGroups: %v", err)
+	}
+
+	memberships, err := a.DotMembershipMap(context.Background())
+	if err != nil {
+		t.Fatalf("DotMembershipMap: %v", err)
+	}
+	if !reflect.DeepEqual(memberships["nvim"], []string{"work"}) {
+		t.Fatalf("memberships = %v, want [work]", memberships["nvim"])
+	}
+	updated, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load updated: %v", err)
+	}
+	if !reflect.DeepEqual(updated.Hosts[host], []string{"work"}) {
+		t.Fatalf("hosts[%s] = %v, want [work]", host, updated.Hosts[host])
+	}
+}
+
+func TestSetDotGroupsEmptyActiveHostDoesNotAssignLocalhost(t *testing.T) {
+	a, cfgDir, _ := newDotsApp(t)
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	host := dotsTestHostGroupName()
+
+	rootCfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	rootCfg.Groups = []*config.GroupConfig{
+		{Name: host, Special: "host"},
+		{Name: "work", Dots: []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}}},
+	}
+	rootCfg.Hosts = map[string][]string{host: {"work"}}
+	if err := saveAppConfig(t, cfgPath, rootCfg); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if _, err := a.SetDotGroups("nvim", []string{host}, nil, ""); err != nil {
+		t.Fatalf("SetDotGroups: %v", err)
+	}
+
+	updated, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load updated: %v", err)
+	}
+	if _, ok := updated.Hosts["localhost"]; ok {
+		t.Fatalf("unexpected localhost host assignment: %+v", updated.Hosts)
+	}
+	hostGroup := findDotsTestGroup(updated.Groups, host)
+	if hostGroup == nil || !containsDotsTestEntry(hostGroup.Dots, "nvim") {
+		t.Fatalf("host group %q missing moved nvim entry: %+v", host, updated.Groups)
+	}
+}
+
+func TestDotGroupsQueryAndNoopRemoveAtAppBoundary(t *testing.T) {
+	a, cfgDir, _ := newDotsApp(t)
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+
+	rootCfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	rootCfg.Groups = []*config.GroupConfig{
+		{Name: "work", Dots: []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}}},
+	}
+	if err := saveAppConfig(t, cfgPath, rootCfg); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	groups, err := a.DotGroups("nvim")
+	if err != nil {
+		t.Fatalf("DotGroups: %v", err)
+	}
+	if !reflect.DeepEqual(groups, []string{"work"}) {
+		t.Fatalf("DotGroups = %v, want work", groups)
+	}
+
+	change, err := a.RemoveDotGroupsWithState(context.Background(), "nvim", []string{"missing"})
+	if err != nil {
+		t.Fatalf("RemoveDotGroups: %v", err)
+	}
+	if !reflect.DeepEqual(change.DotMemberships["nvim"], []string{"work"}) {
+		t.Fatalf("dot memberships = %v, want nvim in work", change.DotMemberships)
+	}
+
+	updated, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load updated: %v", err)
+	}
+	workGroup := findDotsTestGroup(updated.Groups, "work")
+	if workGroup == nil || !containsDotsTestEntry(workGroup.Dots, "nvim") {
+		t.Fatalf("groups after RemoveDotGroups = %+v, want nvim in work", updated.Groups)
+	}
+}
+
+func TestRemoveDotGroupsRejectsLastMembership(t *testing.T) {
+	a, cfgDir, _ := newDotsApp(t)
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+
+	rootCfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	rootCfg.Groups = []*config.GroupConfig{
+		{Name: "work", Dots: []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}}},
+	}
+	if err := saveAppConfig(t, cfgPath, rootCfg); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if _, err := a.RemoveDotGroups("nvim", []string{"work"}); err == nil || !strings.Contains(err.Error(), "needs at least one group") {
+		t.Fatalf("RemoveDotGroups err = %v, want last-membership guard", err)
+	}
+}
+
+func TestRemoveDotGroupsNormalizesRequestedGroups(t *testing.T) {
+	a, cfgDir, _ := newDotsApp(t)
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+
+	rootCfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	rootCfg.Groups = []*config.GroupConfig{
+		{Name: "work", Dots: []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}}},
+	}
+	if err := saveAppConfig(t, cfgPath, rootCfg); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	change, err := a.RemoveDotGroups("nvim", []string{" missing ", "missing", ""})
+	if err != nil {
+		t.Fatalf("RemoveDotGroups: %v", err)
+	}
+	if !reflect.DeepEqual(change.DotMemberships["nvim"], []string{"work"}) {
+		t.Fatalf("dot memberships = %v, want work", change.DotMemberships["nvim"])
+	}
+}
+
+func TestNormalizeGroupNamesTrimsDedupesAndSorts(t *testing.T) {
+	got := app.NormalizeGroupNames([]string{" work ", "base", "work", "", "base"})
+	if !reflect.DeepEqual(got, []string{"base", "work"}) {
+		t.Fatalf("NormalizeGroupNames = %v, want [base work]", got)
+	}
+}
+
+func TestSetGroupDotsAppliesEditorDiff(t *testing.T) {
+	a, cfgDir, _ := newDotsApp(t)
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	host := dotsTestHostGroupName()
+
+	rootCfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	rootCfg.Groups = []*config.GroupConfig{
+		{Name: host, Special: "host", Dots: []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}}},
+		{Name: "work", Dots: []config.DotEntry{{Name: "zsh", Path: "~/.zshrc"}}},
+	}
+	rootCfg.Hosts = map[string][]string{host: {"work"}}
+	if err := saveAppConfig(t, cfgPath, rootCfg); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	change, err := a.SetGroupDotsWithState(
+		context.Background(),
+		"work",
+		map[string]bool{"nvim": true, "zsh": false},
+		map[string]bool{"nvim": false, "zsh": true},
+	)
+	if err != nil {
+		t.Fatalf("SetGroupDots: %v", err)
+	}
+	if change.Changed != 2 {
+		t.Fatalf("changed = %d, want 2", change.Changed)
+	}
+	if !reflect.DeepEqual(change.DotMemberships["nvim"], []string{"work"}) {
+		t.Fatalf("dot memberships = %v, want nvim in work", change.DotMemberships)
+	}
+	if change.DotsState == nil {
+		t.Fatal("DotsState is nil, want refreshed state")
+	}
+	if !reflect.DeepEqual(change.DotsState.DotMemberships["nvim"], []string{"work"}) {
+		t.Fatalf("state dot memberships = %v, want nvim in work", change.DotsState.DotMemberships)
+	}
+
+	updated, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load updated: %v", err)
+	}
+	work := findDotsTestGroup(updated.Groups, "work")
+	if work == nil {
+		t.Fatal("missing work group")
+	}
+	if !containsDotsTestEntry(work.Dots, "nvim") {
+		t.Fatalf("nvim should be added to work dots: %+v", work.Dots)
+	}
+	if containsDotsTestEntry(work.Dots, "zsh") {
+		t.Fatalf("zsh should be removed from work dots: %+v", work.Dots)
 	}
 }
 
@@ -972,6 +2091,15 @@ func findDotsTestGroup(groups []*config.GroupConfig, name string) *config.GroupC
 	return nil
 }
 
+func containsDotsTestEntry(entries []config.DotEntry, name string) bool {
+	for _, entry := range entries {
+		if entry.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func dotsTestHostGroupName() string {
 	hostname := os.Getenv("OMNI_HOSTNAME")
 	if hostname == "" {
@@ -1144,6 +2272,32 @@ func TestDotsAddIgnorePattern_AppendsToExistingEntry(t *testing.T) {
 	}
 }
 
+func TestDotsAddIgnorePatternAllowsMissingConfiguredRepo(t *testing.T) {
+	a, cfgPath := newImportApp(t)
+	missingRepo := filepath.Join(t.TempDir(), "missing-dotfiles")
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{DotsRepo: missingRepo},
+		Groups: []*config.GroupConfig{{
+			Dots: []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}},
+		}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if err := a.DotsAddIgnorePattern("nvim", "*.log"); err != nil {
+		t.Fatalf("DotsAddIgnorePattern: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	got := cfg.Groups[0].Dots[0].Ignore
+	if len(got) != 1 || got[0] != "*.log" {
+		t.Fatalf("ignore = %v, want [*.log]", got)
+	}
+}
+
 func TestDotsAddIgnorePattern_DuplicateIsNoop(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -1189,6 +2343,93 @@ func TestDotsDeleteIgnorePattern_RemovesExistingEntry(t *testing.T) {
 	got := cfg.Groups[0].Dots[0].Ignore
 	if len(got) != 1 || got[0] != "*.log" {
 		t.Fatalf("ignore = %v, want [*.log]", got)
+	}
+}
+
+func TestDotsIncludeIgnoredPath_AppendsIncludeOverrideForBroadIgnore(t *testing.T) {
+	a, cfgPath := newImportApp(t)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{DotsRepo: t.TempDir()},
+		Groups: []*config.GroupConfig{{
+			Dots: []config.DotEntry{{Name: "claude", Path: "~/.claude", Ignore: []string{"*", "!/settings.json"}}},
+		}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if err := a.DotsIncludeIgnoredPath("claude", "projects/session.json"); err != nil {
+		t.Fatalf("DotsIncludeIgnoredPath: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	got := cfg.Groups[0].Dots[0].Ignore
+	if !testContainsString(got, "!/projects/session.json") {
+		t.Fatalf("ignore = %v, want include override for projects/session.json", got)
+	}
+	patterns := append(dots.DefaultIgnores(), got...)
+	if dots.ShouldIgnorePath("projects/session.json", "session.json", patterns) {
+		t.Fatalf("projects/session.json still ignored by %v", got)
+	}
+}
+
+func TestDotsIncludeIgnoredPath_RemovesExactPatternWhenEnough(t *testing.T) {
+	a, cfgPath := newImportApp(t)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{DotsRepo: t.TempDir()},
+		Groups: []*config.GroupConfig{{
+			Dots: []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim", Ignore: []string{"custom-state", "*.log"}}},
+		}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if err := a.DotsIncludeIgnoredPath("nvim", "custom-state"); err != nil {
+		t.Fatalf("DotsIncludeIgnoredPath: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	got := cfg.Groups[0].Dots[0].Ignore
+	if testContainsString(got, "custom-state") || testContainsString(got, "!/custom-state") {
+		t.Fatalf("ignore = %v, want custom-state removed without include override", got)
+	}
+	if len(got) != 1 || got[0] != "*.log" {
+		t.Fatalf("ignore = %v, want [*.log]", got)
+	}
+}
+
+func TestDotsIncludeIgnoredPath_MovesShadowedIncludeAfterBroadIgnore(t *testing.T) {
+	a, cfgPath := newImportApp(t)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{DotsRepo: t.TempDir()},
+		Groups: []*config.GroupConfig{{
+			Dots: []config.DotEntry{{Name: "claude", Path: "~/.claude", Ignore: []string{"!/projects/session.json", "*"}}},
+		}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if err := a.DotsIncludeIgnoredPath("claude", "projects/session.json"); err != nil {
+		t.Fatalf("DotsIncludeIgnoredPath: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	got := cfg.Groups[0].Dots[0].Ignore
+	wantLast := "!/projects/session.json"
+	if len(got) == 0 || got[len(got)-1] != wantLast {
+		t.Fatalf("ignore = %v, want %q moved after broad ignore", got, wantLast)
+	}
+	patterns := append(dots.DefaultIgnores(), got...)
+	if dots.ShouldIgnorePath("projects/session.json", "session.json", patterns) {
+		t.Fatalf("projects/session.json still ignored by %v", got)
 	}
 }
 
@@ -1604,6 +2845,45 @@ func TestDotsList_UsesHostVariantPackage(t *testing.T) {
 	wantSource := filepath.Join(dotsContentDir(repoDir), "nvim-work", ".config", "nvim")
 	if got := statuses[0].SourcePath; got != wantSource {
 		t.Fatalf("SourcePath = %q, want %q", got, wantSource)
+	}
+}
+
+func TestDotsHasActiveHostVariant(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "work.local")
+	a, cfgDir, repoDir := newDotsApp(t)
+
+	source := filepath.Join(dotsContentDir(repoDir), "nvim-work", ".config", "nvim", "init.lua")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("work"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{
+			Name: "nvim",
+			Path: "~/.config/nvim",
+			Hosts: map[string]config.DotVariant{
+				"work": {Package: "nvim-work"},
+			},
+		},
+		{Name: "tmux", Path: "~/.tmux.conf"},
+	}, "")
+
+	hasVariant, err := a.DotsHasActiveHostVariant("nvim")
+	if err != nil {
+		t.Fatalf("DotsHasActiveHostVariant(nvim): %v", err)
+	}
+	if !hasVariant {
+		t.Fatal("DotsHasActiveHostVariant(nvim) = false, want true")
+	}
+
+	hasVariant, err = a.DotsHasActiveHostVariant("tmux")
+	if err != nil {
+		t.Fatalf("DotsHasActiveHostVariant(tmux): %v", err)
+	}
+	if hasVariant {
+		t.Fatal("DotsHasActiveHostVariant(tmux) = true, want false")
 	}
 }
 
@@ -3604,6 +4884,63 @@ func TestDotsStatus_DoesNotCreateContentDir(t *testing.T) {
 	}
 }
 
+func TestDotsCommitRefreshesCachedGitStatus(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	ctx := context.Background()
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := os.Getenv("HOME")
+	sourceFile := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim", "init.lua")
+	if err := os.MkdirAll(filepath.Dir(sourceFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourceFile, []byte("-- seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}}, home)
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, string(out))
+		}
+	}
+	git("init")
+	git("config", "user.email", "t@t.com")
+	git("config", "user.name", "T")
+	git("config", "commit.gpgsign", "false")
+	git("config", "tag.gpgsign", "false")
+	git("add", "dotfiles")
+	git("commit", "-m", "seed")
+	if err := os.WriteFile(sourceFile, []byte("-- changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dirty, err := a.RefreshDotsState(ctx)
+	if err != nil {
+		t.Fatalf("RefreshDotsState: %v", err)
+	}
+	if strings.TrimSpace(dirty.GitStatus) == "" {
+		t.Fatalf("RefreshDotsState GitStatus = %q, want dirty repo before commit", dirty.GitStatus)
+	}
+
+	committed, err := a.DotsCommitWithState(ctx, "dots: cache refresh")
+	if err != nil {
+		t.Fatalf("DotsCommitWithState: %v", err)
+	}
+	if committed == nil || committed.State == nil || !committed.State.Loaded || strings.TrimSpace(committed.State.GitStatus) != "" {
+		t.Fatalf("DotsCommitWithState = %+v, want clean loaded state", committed)
+	}
+	cached, err := a.CachedDotsState(ctx)
+	if err != nil {
+		t.Fatalf("CachedDotsState: %v", err)
+	}
+	if !cached.Loaded || strings.TrimSpace(cached.GitStatus) != "" {
+		t.Fatalf("CachedDotsState = %+v, want clean git status after commit", cached)
+	}
+}
+
 func TestDotsStatus_NotConfigured(t *testing.T) {
 	cfgDir := t.TempDir()
 	a := app.New(filepath.Join(cfgDir, "settings.json"))
@@ -3665,6 +5002,8 @@ func TestDotsPullAndPush_WithGitRemote(t *testing.T) {
 		t.Helper()
 		gitCmd(dir, "config", "user.email", "test@example.com")
 		gitCmd(dir, "config", "user.name", "Test")
+		gitCmd(dir, "config", "commit.gpgsign", "false")
+		gitCmd(dir, "config", "tag.gpgsign", "false")
 	}
 
 	remoteDir := filepath.Join(t.TempDir(), "remote.git")
@@ -3703,8 +5042,12 @@ func TestDotsPullAndPush_WithGitRemote(t *testing.T) {
 	gitCmd(otherDir, "commit", "-m", "remote-change")
 	gitCmd(otherDir, "push")
 
-	if _, err := a.DotsPull(context.Background()); err != nil {
-		t.Fatalf("DotsPull: %v", err)
+	pulled, err := a.DotsPullWithState(context.Background())
+	if err != nil {
+		t.Fatalf("DotsPullWithState: %v", err)
+	}
+	if pulled == nil || pulled.State == nil || !pulled.State.Loaded || !hasDotStatusNamed(pulled.State.Entries, "nvim") {
+		t.Fatalf("DotsPullWithState = %+v, want loaded nvim state", pulled)
 	}
 	localFile := filepath.Join(home, ".config", "nvim", "init.lua")
 	if got, err := os.ReadFile(localFile); err != nil || string(got) != "-- remote change\n" {
@@ -3715,8 +5058,12 @@ func TestDotsPullAndPush_WithGitRemote(t *testing.T) {
 	if err := os.WriteFile(repoFile, []byte("-- local change\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.DotsPush(context.Background(), "dots: local change"); err != nil {
-		t.Fatalf("DotsPush: %v", err)
+	pushed, err := a.DotsPushWithState(context.Background(), "dots: local change")
+	if err != nil {
+		t.Fatalf("DotsPushWithState: %v", err)
+	}
+	if pushed == nil || pushed.State == nil || !pushed.State.Loaded || !hasDotStatusNamed(pushed.State.Entries, "nvim") {
+		t.Fatalf("DotsPushWithState = %+v, want loaded nvim state", pushed)
 	}
 	verifyDir := filepath.Join(t.TempDir(), "verify")
 	gitCmd("", "clone", remoteDir, verifyDir)
@@ -3878,6 +5225,8 @@ func TestDotsGitConfig_AutoCommit(t *testing.T) {
 	gitCmd("init", "-q")
 	gitCmd("config", "user.email", "test@example.com")
 	gitCmd("config", "user.name", "Test")
+	gitCmd("config", "commit.gpgsign", "false")
+	gitCmd("config", "tag.gpgsign", "false")
 
 	// Create a "live" config file under a fake home .config dir.
 	home := t.TempDir()
@@ -3928,6 +5277,8 @@ func TestDotsGitConfig_AutoPush(t *testing.T) {
 	gitCmd(repoDir, "init", "-q")
 	gitCmd(repoDir, "config", "user.email", "test@example.com")
 	gitCmd(repoDir, "config", "user.name", "Test")
+	gitCmd(repoDir, "config", "commit.gpgsign", "false")
+	gitCmd(repoDir, "config", "tag.gpgsign", "false")
 	gitCmd(repoDir, "remote", "add", "origin", remoteDir)
 	gitCmd(repoDir, "commit", "--allow-empty", "-m", "init")
 	gitCmd(repoDir, "push", "-u", "origin", "HEAD")
@@ -4153,6 +5504,8 @@ func TestDotsResolveConflict_UseLocalCommitsRepoCopiesLocalAndRelinks(t *testing
 	gitCmd("init", "-q")
 	gitCmd("config", "user.email", "test@example.com")
 	gitCmd("config", "user.name", "Test")
+	gitCmd("config", "commit.gpgsign", "false")
+	gitCmd("config", "tag.gpgsign", "false")
 
 	srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
 	if err := os.MkdirAll(srcDir, 0o755); err != nil {
