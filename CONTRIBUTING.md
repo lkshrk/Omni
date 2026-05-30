@@ -1,178 +1,126 @@
 # Contributing to omni
 
-## Adding a New Provider
+This project keeps durable behavior behind `internal/app`, then exposes it
+through both CLI and TUI surfaces. Keep changes small, covered, and aligned with
+the existing JSON config model.
 
-A provider is any package manager you want `omni` to manage (e.g. `cargo`, `apt`, `winget`).
+## Development Loop
 
-### Step 1 — Implement the interface
-
-Create a new package under `internal/provider/<name>/`:
-
-```go
-// internal/provider/cargo/cargo.go
-package cargo
-
-import (
-    "context"
-    "fmt"
-    "strings"
-
-    "github.com/lkshrk/omni/internal/executor"
-    "github.com/lkshrk/omni/internal/provider"
-)
-
-type Cargo struct {
-    exec executor.Executor
-}
-
-func New(exec executor.Executor) *Cargo { return &Cargo{exec: exec} }
-
-func (c *Cargo) Name() string        { return "cargo" }
-func (c *Cargo) Description() string { return "Rust package manager (cargo install)" }
-
-func (c *Cargo) Available(ctx context.Context) (bool, error) {
-    _, _, err := c.exec.Run(ctx, "cargo", "--version")
-    return err == nil, nil
-}
-
-func (c *Cargo) Install(ctx context.Context, t provider.Tool) error {
-    pkg := t.Package
-    if pkg == "" { pkg = t.Name }
-    _, stderr, err := c.exec.Run(ctx, "cargo", "install", pkg)
-    if err != nil {
-        return fmt.Errorf("cargo install %s: %s: %w", pkg, stderr, err)
-    }
-    return nil
-}
-
-func (c *Cargo) Uninstall(ctx context.Context, t provider.Tool) error {
-    pkg := t.Package
-    if pkg == "" { pkg = t.Name }
-    _, stderr, err := c.exec.Run(ctx, "cargo", "uninstall", pkg)
-    if err != nil {
-        return fmt.Errorf("cargo uninstall %s: %s: %w", pkg, stderr, err)
-    }
-    return nil
-}
-
-func (c *Cargo) Upgrade(ctx context.Context, t provider.Tool) error {
-    return c.Install(ctx, t) // cargo install upgrades in-place
-}
-
-func (c *Cargo) IsInstalled(ctx context.Context, t provider.Tool) (bool, string, error) {
-    pkg := t.Package
-    if pkg == "" { pkg = t.Name }
-    stdout, _, err := c.exec.Run(ctx, "cargo", "install", "--list")
-    if err != nil {
-        return false, "", fmt.Errorf("cargo install --list: %w", err)
-    }
-    for _, line := range strings.Split(stdout, "\n") {
-        if strings.HasPrefix(line, pkg+" ") || strings.HasPrefix(line, pkg+"@") {
-            parts := strings.Fields(line)
-            if len(parts) >= 2 {
-                return true, strings.Trim(parts[1], "v:"), nil
-            }
-            return true, "", nil
-        }
-    }
-    return false, "", nil
-}
-
-func (c *Cargo) ListInstalled(ctx context.Context) ([]provider.InstalledTool, error) {
-    stdout, _, err := c.exec.Run(ctx, "cargo", "install", "--list")
-    if err != nil {
-        return nil, fmt.Errorf("cargo install --list: %w", err)
-    }
-    var tools []provider.InstalledTool
-    for _, line := range strings.Split(stdout, "\n") {
-        if line == "" || strings.HasPrefix(line, " ") { continue }
-        parts := strings.Fields(line)
-        if len(parts) < 1 { continue }
-        name := parts[0]
-        ver := ""
-        if len(parts) >= 2 { ver = strings.Trim(parts[1], "v:") }
-        tools = append(tools, provider.InstalledTool{
-            Tool:    provider.Tool{Name: name, Provider: "cargo", Package: name},
-            Version: ver,
-        })
-    }
-    return tools, nil
-}
-```
-
-### Step 2 — Write tests
-
-Create `internal/provider/cargo/cargo_test.go` using `MockExecutor`:
-
-```go
-package cargo_test
-
-import (
-    "context"
-    "testing"
-
-    "github.com/stretchr/testify/assert"
-    "github.com/stretchr/testify/require"
-
-    "github.com/lkshrk/omni/internal/executor"
-    "github.com/lkshrk/omni/internal/provider"
-    "github.com/lkshrk/omni/internal/provider/cargo"
-)
-
-func TestAvailable_True(t *testing.T) {
-    mock := executor.NewMockExecutor()
-    mock.AddRule("cargo", []string{"--version"}, "cargo 1.78.0", "", nil)
-    c := cargo.New(mock)
-    ok, err := c.Available(context.Background())
-    require.NoError(t, err)
-    assert.True(t, ok)
-}
-
-func TestIsInstalled_Found(t *testing.T) {
-    mock := executor.NewMockExecutor()
-    mock.AddRule("cargo", []string{"install", "--list"}, "ripgrep v14.1.0:\n    rg\n", "", nil)
-    c := cargo.New(mock)
-    ok, ver, err := c.IsInstalled(context.Background(), provider.Tool{Name: "ripgrep"})
-    require.NoError(t, err)
-    assert.True(t, ok)
-    assert.Equal(t, "14.1.0", ver)
-}
-```
-
-### Step 3 — Register the provider
-
-In `cmd/omni/main.go`, add two lines:
-
-```go
-import "github.com/lkshrk/omni/internal/provider/cargo"
-
-// inside main(), after the other Register calls:
-registry.Register(cargo.New(exec))
-```
-
-That's it — `omni` will now recognise `provider = "cargo"` in `tools.toml`.
-
----
-
-## Running Tests
-
-```bash
-# Unit tests
-make test
-
-# Integration tests (isolated Docker only)
-make test-integration
-
-# Both: unit tests locally, integration tests isolated in Docker
-make test-all
-
-# Lint
+```sh
+make build
 make lint
+make test
 ```
+
+Integration coverage must use the isolated target:
+
+```sh
+make test-integration
+```
+
+Do not run integration fixtures directly against your real home directory or
+real package-manager state. For docs-only changes, use the docs checks in
+[docs/documentation-maintenance.md](docs/documentation-maintenance.md).
 
 ## Code Style
 
-- Standard `gofmt` + `goimports` formatting
-- Accept interfaces, return structs
-- Wrap errors with `fmt.Errorf("context: %w", err)`
-- Table-driven tests; `-race` flag always on
+- Use standard `gofmt` and `goimports` formatting.
+- Keep user-visible durable behavior in `internal/app` first.
+- Add or update focused tests at the app boundary before CLI/TUI routing tests.
+- Wrap errors with context, usually `fmt.Errorf("context: %w", err)`.
+- Do not silently discard errors with `_ = someFunc()` or `_, _ = someFunc()`.
+  The only acceptable ignored errors are deferred cleanup/no-op cases where the
+  code makes that intent explicit.
+- Prefer existing helpers and project patterns before adding new abstractions or
+  dependencies.
+
+## Config Model
+
+Omni uses JSON config in `settings.json`; it does not use TOML config.
+
+Common shape:
+
+```json
+{
+  "version": 1,
+  "settings": {},
+  "tools": {
+    "ripgrep": { "provider": "system" }
+  },
+  "groups": [
+    { "name": "dev", "tools": ["ripgrep"] }
+  ],
+  "hosts": {
+    "workstation": ["dev"]
+  }
+}
+```
+
+Prefer portable providers in config:
+
+- `system`
+- `node`
+- `python`
+
+Use concrete managers such as `brew`, `apt`, `uv`, or `pip3` as
+`install_with` pins only when a specific manager is required.
+
+## Adding Or Changing Providers
+
+Provider registration lives in `internal/app.App.initProviderRegistry`. Concrete
+providers are always registered so Omni can inspect installed state. Ecosystem
+providers are registered unless disabled for the current host.
+
+When adding a provider:
+
+1. Implement the provider package under `internal/provider/<name>/`.
+2. Add provider tests next to the package.
+3. Register it in `internal/app.App.initProviderRegistry`.
+4. Add provider metadata in `internal/provider/catalog.go`.
+5. Update docs under `docs/providers.md`, `docs/architecture.md`, and the
+   schema/docs pages if config values change.
+
+Concrete providers should implement only the capabilities they can support
+reliably. If a manager can bulk-list installed, outdated, or described packages,
+prefer the bulk interface over serial command calls.
+
+## CLI/TUI Parity
+
+For user-visible mutations:
+
+1. Add the shared operation in `internal/app`.
+2. Add app-level tests for config, cache, provider calls, and filesystem
+   effects.
+3. Wire the CLI command or flag.
+4. Wire the TUI action to the same app operation.
+5. Keep CLI/TUI tests focused on routing, confirmation, key handling, output,
+   and rendering.
+
+TUI-only behavior is acceptable for presentation, navigation, onboarding, and
+interactive affordances. Durable actions that mutate config, providers, the DB,
+or the filesystem need a CLI equivalent or a documented exception.
+
+## Documentation
+
+Docs live under `docs/` and are served with MkDocs Material on GitHub Pages.
+Use `uv` for docs dependencies:
+
+```sh
+python3 -m venv .tmp/docs-venv
+uv pip install --python .tmp/docs-venv/bin/python -r docs/requirements.txt
+.tmp/docs-venv/bin/mkdocs build --strict
+```
+
+When command behavior changes, update both the task guide and reference page:
+
+- task guide: `docs/tools.md`, `docs/dotfiles.md`, `docs/providers.md`, or
+  another user-facing guide
+- reference: `docs/cli.md` and `docs/command-matrix.md`
+- config shape: `docs/configuration.md`, `docs/schema-reference.md`, and
+  `spec/omni.settings.v1.schema.json`
+
+## Commit Discipline
+
+Use Conventional Commit subjects and keep unrelated changes in separate commits.
+Do not commit local agent notes, scratch plans, generated private state, or
+machine-specific caches.

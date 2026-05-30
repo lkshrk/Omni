@@ -3,6 +3,9 @@
 This matrix tracks representative coverage for every user-visible action in
 `internal/actions/catalog.go`.
 
+This is a contributor release checklist, not an end-user guide. For operational
+command risk, use [Command Matrix](command-matrix.md).
+
 Status meanings:
 
 - `yes`: representative happy path and important routing/error behavior exist.
