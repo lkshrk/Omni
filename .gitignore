@@ -2,6 +2,7 @@
 .worktrees/
 bin/
 .tmp/
+site/
 
 # Database files
 *.db
@@ -42,6 +43,7 @@ GEMINI.md
 .roo/
 .roomodes
 .leankg/
+.wolf/
 
 # Go
 vendor/

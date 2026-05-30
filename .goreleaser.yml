@@ -52,6 +52,8 @@ nfpms:
       - archlinux
       - deb
       - rpm
+    dependencies:
+      - stow
 
 brews:
   - name: omni
@@ -63,6 +65,8 @@ brews:
     homepage: https://github.com/lkshrk/omni
     description: Manage all your dev tools from a single JSON config file.
     license: MIT
+    dependencies:
+      - name: stow
     install: |
       bin.install "omni"
     test: |

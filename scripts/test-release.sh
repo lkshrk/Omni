@@ -5,6 +5,18 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
+assert_goreleaser_declares_stow_dependencies() {
+  local config="$ROOT/.goreleaser.yml"
+  if ! grep -q '^      - stow$' "$config"; then
+    echo "goreleaser Linux packages must declare stow as a dependency" >&2
+    exit 1
+  fi
+  if ! grep -q '^      - name: stow$' "$config"; then
+    echo "goreleaser Homebrew formula must declare stow as a dependency" >&2
+    exit 1
+  fi
+}
+
 FAKEBIN="$TMPDIR/bin"
 mkdir -p "$FAKEBIN"
 
@@ -26,6 +38,7 @@ if [[ -n "${OMNI_RELEASE_TEST_ADVANCE_ORIGIN:-}" ]]; then
   git -C "$advance_dir/repo" config user.email "release-test@example.invalid"
   git -C "$advance_dir/repo" config commit.gpgsign false
   git -C "$advance_dir/repo" config tag.gpgsign false
+  git -C "$advance_dir/repo" config core.hooksPath /dev/null
   printf 'concurrent change\n' > "$advance_dir/repo/concurrent.txt"
   git -C "$advance_dir/repo" add concurrent.txt
   git -C "$advance_dir/repo" commit -m "chore: concurrent change" >/dev/null
@@ -46,6 +59,7 @@ setup_repo() {
   git -C "$work" config user.email "release-test@example.invalid"
   git -C "$work" config commit.gpgsign false
   git -C "$work" config tag.gpgsign false
+  git -C "$work" config core.hooksPath /dev/null
 
   mkdir -p "$work/docs/assets"
   printf 'initial demo\n' > "$work/docs/assets/omni-demo.gif"
@@ -167,6 +181,7 @@ scenario_origin_advance_aborts_before_tag() {
 }
 
 scenario_published_head_gets_new_demo_commit
+assert_goreleaser_declares_stow_dependencies
 scenario_unpushed_release_commit_gets_amended
 scenario_origin_advance_aborts_before_tag
 
