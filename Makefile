@@ -3,7 +3,9 @@ BINARY   := omni
 CMD_PATH := ./cmd/omni
 DEMO_TAPE := demo/omni-demo.tape
 DEMO_GIF  := docs/assets/omni-demo.gif
-LIVE_GOCACHE ?= $(CURDIR)/.tmp/go-build
+TMP_DIR     ?= $(CURDIR)/.tmp
+TMP_MAX_MB  ?= 2048
+LIVE_GOCACHE ?= $(TMP_DIR)/go-build
 DEV_DIR     ?= /private/tmp/omni-dev
 DEV_HOST    ?= devhost
 DEV_CONFIG  ?= $(DEV_DIR)/settings.json
@@ -16,7 +18,7 @@ ARGS        ?= --help
 GIT_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS     := -X $(MODULE)/internal/cli.Version=$(GIT_VERSION)
 
-.PHONY: build run tui-live tui-dev cli cli-live cli-dev dev-bootstrap test test-scripts test-package-managers test-all test-integration-build test-integration lint clean clean-cache clean-docker install gen-schema demo-gif
+.PHONY: build run tui-live tui-dev cli cli-live cli-dev dev-bootstrap test test-scripts test-package-managers test-all test-integration-build test-integration lint clean clean-cache clean-docker prune-tmp install gen-schema demo-gif
 
 ## build: compile the binary to ./bin/omni
 build:
@@ -27,7 +29,7 @@ build:
 run: tui-live
 
 ## tui-live: run the TUI with live/default config and cache
-tui-live:
+tui-live: prune-tmp
 	@mkdir -p "$(LIVE_GOCACHE)"
 	GOCACHE="$(LIVE_GOCACHE)" go run -ldflags "$(LDFLAGS)" $(CMD_PATH)
 
@@ -39,7 +41,7 @@ tui-dev: dev-bootstrap
 cli: cli-dev
 
 ## cli-live: run the CLI with live/default config and cache; pass ARGS="..."
-cli-live:
+cli-live: prune-tmp
 	@mkdir -p "$(LIVE_GOCACHE)"
 	GOCACHE="$(LIVE_GOCACHE)" go run -ldflags "$(LDFLAGS)" $(CMD_PATH) $(ARGS)
 
@@ -71,6 +73,7 @@ demo-gif:
 
 ## test: run unit tests with race detector and script regressions
 test: test-scripts
+	$(MAKE) --no-print-directory prune-tmp
 	$(TEST_SAFE) go clean -testcache
 	$(TEST_SAFE) go test -race -trimpath ./...
 
@@ -79,20 +82,20 @@ test-scripts:
 	$(TEST_SAFE) bash scripts/test-release.sh
 
 ## test-package-managers: run real package-manager provider tests in minimal distro containers
-test-package-managers:
-	@mkdir -p .tmp/pm-tests
-	GOCACHE=$$(pwd)/.tmp/go-build CGO_ENABLED=0 GOOS=linux GOARCH=$$(go env GOARCH) go test -tags=pmcontainer -c ./internal/provider/apt -o .tmp/pm-tests/apt.test
-	docker run --rm -e OMNI_PMCONTAINER=1 -e OMNI_PMCONTAINER_PROVIDER=apt -v "$$(pwd)/.tmp/pm-tests/apt.test:/apt.test:ro" debian:bookworm-slim /apt.test -test.v
-	GOCACHE=$$(pwd)/.tmp/go-build CGO_ENABLED=0 GOOS=linux GOARCH=$$(go env GOARCH) go test -tags=pmcontainer -c ./internal/provider/apk -o .tmp/pm-tests/apk.test
-	docker run --rm -e OMNI_PMCONTAINER=1 -e OMNI_PMCONTAINER_PROVIDER=apk -v "$$(pwd)/.tmp/pm-tests/apk.test:/apk.test:ro" alpine:3.20 /apk.test -test.v
-	GOCACHE=$$(pwd)/.tmp/go-build CGO_ENABLED=0 GOOS=linux GOARCH=$$(go env GOARCH) go test -tags=pmcontainer -c ./internal/provider/brew -o .tmp/pm-tests/brew.test
-	docker run --rm -e OMNI_PMCONTAINER=1 -e OMNI_PMCONTAINER_PROVIDER=brew -v "$$(pwd)/.tmp/pm-tests/brew.test:/brew.test:ro" homebrew/brew:latest /brew.test -test.v
-	GOCACHE=$$(pwd)/.tmp/go-build CGO_ENABLED=0 GOOS=linux GOARCH=$$(go env GOARCH) go test -tags=pmcontainer -c ./internal/provider/dnf -o .tmp/pm-tests/dnf.test
-	docker run --rm -e OMNI_PMCONTAINER=1 -e OMNI_PMCONTAINER_PROVIDER=dnf -v "$$(pwd)/.tmp/pm-tests/dnf.test:/dnf.test:ro" fedora:42 /dnf.test -test.v
-	GOCACHE=$$(pwd)/.tmp/go-build CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go test -tags=pmcontainer -c ./internal/provider/pacman -o .tmp/pm-tests/pacman.test
-	docker run --rm --platform linux/amd64 -e OMNI_PMCONTAINER=1 -e OMNI_PMCONTAINER_PROVIDER=pacman -v "$$(pwd)/.tmp/pm-tests/pacman.test:/pacman.test:ro" archlinux/archlinux:base /pacman.test -test.v
-	GOCACHE=$$(pwd)/.tmp/go-build CGO_ENABLED=0 GOOS=linux GOARCH=$$(go env GOARCH) go test -tags=pmcontainer -c ./internal/provider/zypper -o .tmp/pm-tests/zypper.test
-	docker run --rm -e OMNI_PMCONTAINER=1 -e OMNI_PMCONTAINER_PROVIDER=zypper -v "$$(pwd)/.tmp/pm-tests/zypper.test:/zypper.test:ro" opensuse/leap:15.6 /zypper.test -test.v
+test-package-managers: prune-tmp
+	@mkdir -p "$(TMP_DIR)/pm-tests"
+	GOCACHE="$(TMP_DIR)/go-build" CGO_ENABLED=0 GOOS=linux GOARCH=$$(go env GOARCH) go test -tags=pmcontainer -c ./internal/provider/apt -o "$(TMP_DIR)/pm-tests/apt.test"
+	docker run --rm -e OMNI_PMCONTAINER=1 -e OMNI_PMCONTAINER_PROVIDER=apt -v "$(TMP_DIR)/pm-tests/apt.test:/apt.test:ro" debian:bookworm-slim /apt.test -test.v
+	GOCACHE="$(TMP_DIR)/go-build" CGO_ENABLED=0 GOOS=linux GOARCH=$$(go env GOARCH) go test -tags=pmcontainer -c ./internal/provider/apk -o "$(TMP_DIR)/pm-tests/apk.test"
+	docker run --rm -e OMNI_PMCONTAINER=1 -e OMNI_PMCONTAINER_PROVIDER=apk -v "$(TMP_DIR)/pm-tests/apk.test:/apk.test:ro" alpine:3.20 /apk.test -test.v
+	GOCACHE="$(TMP_DIR)/go-build" CGO_ENABLED=0 GOOS=linux GOARCH=$$(go env GOARCH) go test -tags=pmcontainer -c ./internal/provider/brew -o "$(TMP_DIR)/pm-tests/brew.test"
+	docker run --rm -e OMNI_PMCONTAINER=1 -e OMNI_PMCONTAINER_PROVIDER=brew -v "$(TMP_DIR)/pm-tests/brew.test:/brew.test:ro" homebrew/brew:latest /brew.test -test.v
+	GOCACHE="$(TMP_DIR)/go-build" CGO_ENABLED=0 GOOS=linux GOARCH=$$(go env GOARCH) go test -tags=pmcontainer -c ./internal/provider/dnf -o "$(TMP_DIR)/pm-tests/dnf.test"
+	docker run --rm -e OMNI_PMCONTAINER=1 -e OMNI_PMCONTAINER_PROVIDER=dnf -v "$(TMP_DIR)/pm-tests/dnf.test:/dnf.test:ro" fedora:42 /dnf.test -test.v
+	GOCACHE="$(TMP_DIR)/go-build" CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go test -tags=pmcontainer -c ./internal/provider/pacman -o "$(TMP_DIR)/pm-tests/pacman.test"
+	docker run --rm --platform linux/amd64 -e OMNI_PMCONTAINER=1 -e OMNI_PMCONTAINER_PROVIDER=pacman -v "$(TMP_DIR)/pm-tests/pacman.test:/pacman.test:ro" archlinux/archlinux:base /pacman.test -test.v
+	GOCACHE="$(TMP_DIR)/go-build" CGO_ENABLED=0 GOOS=linux GOARCH=$$(go env GOARCH) go test -tags=pmcontainer -c ./internal/provider/zypper -o "$(TMP_DIR)/pm-tests/zypper.test"
+	docker run --rm -e OMNI_PMCONTAINER=1 -e OMNI_PMCONTAINER_PROVIDER=zypper -v "$(TMP_DIR)/pm-tests/zypper.test:/zypper.test:ro" opensuse/leap:15.6 /zypper.test -test.v
 
 ## test-all: run unit tests locally and integration tests in Docker
 test-all: test test-integration
@@ -106,9 +109,9 @@ test-integration: test-integration-build
 	@docker builder prune --keep-storage=2g -f >/dev/null 2>&1 || true
 
 ## lint: run golangci-lint
-lint:
-	@mkdir -p .tmp/go-build .tmp/golangci-lint
-	@GOCACHE=$${GOCACHE:-$$(pwd)/.tmp/go-build} GOLANGCI_LINT_CACHE=$${GOLANGCI_LINT_CACHE:-$$(pwd)/.tmp/golangci-lint} golangci-lint run
+lint: prune-tmp
+	@mkdir -p "$(TMP_DIR)/go-build" "$(TMP_DIR)/golangci-lint"
+	@GOCACHE=$${GOCACHE:-$(TMP_DIR)/go-build} GOLANGCI_LINT_CACHE=$${GOLANGCI_LINT_CACHE:-$(TMP_DIR)/golangci-lint} golangci-lint run
 
 ## clean: remove build artifacts and caches
 clean: clean-cache clean-docker
@@ -117,6 +120,17 @@ clean: clean-cache clean-docker
 ## clean-cache: prune Go build and test caches
 clean-cache:
 	go clean -cache -testcache
+	rm -rf "$(TMP_DIR)/go-build" "$(TMP_DIR)/go-mod" "$(TMP_DIR)/golangci-lint" "$(TMP_DIR)/pm-tests" "$(TMP_DIR)/uv-cache"
+
+## prune-tmp: remove repo-local caches when .tmp exceeds TMP_MAX_MB
+prune-tmp:
+	@if [ -d "$(TMP_DIR)" ]; then \
+		size=$$(du -sm "$(TMP_DIR)" 2>/dev/null | awk '{print $$1}'); \
+		if [ "$${size:-0}" -gt "$(TMP_MAX_MB)" ]; then \
+			echo "pruning $(TMP_DIR) ($${size}MB > $(TMP_MAX_MB)MB)"; \
+			rm -rf "$(TMP_DIR)/go-build" "$(TMP_DIR)/go-mod" "$(TMP_DIR)/golangci-lint" "$(TMP_DIR)/pm-tests" "$(TMP_DIR)/uv-cache"; \
+		fi; \
+	fi
 
 ## clean-docker: prune Docker BuildKit build cache
 clean-docker:

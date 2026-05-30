@@ -85,6 +85,35 @@ func TestSafeRunnerCleansReadOnlyGoModuleCache(t *testing.T) {
 	}
 }
 
+func TestMakePruneTmpBoundsRepoCaches(t *testing.T) {
+	root := repoRoot(t)
+	work := t.TempDir()
+	makefile, err := os.ReadFile(filepath.Join(root, "Makefile"))
+	if err != nil {
+		t.Fatalf("reading Makefile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "Makefile"), makefile, 0o644); err != nil {
+		t.Fatalf("writing Makefile fixture: %v", err)
+	}
+	cacheDir := filepath.Join(work, ".tmp", "go-build")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatalf("creating cache dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cacheDir, "cache-entry"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("writing cache entry: %v", err)
+	}
+
+	cmd := exec.Command("make", "prune-tmp", "TMP_MAX_MB=0")
+	cmd.Dir = work
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("prune-tmp should remove oversized repo caches: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(cacheDir); !os.IsNotExist(err) {
+		t.Fatalf("cache dir should be pruned, stat error = %v", err)
+	}
+}
+
 func shouldSkipDir(rel, name string) bool {
 	if rel == "." {
 		return false
