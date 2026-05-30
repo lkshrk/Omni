@@ -16,6 +16,7 @@ fi
 
 cleanup() {
 	if [ -n "$created_root" ]; then
+		chmod -R u+w "$root" 2>/dev/null || true
 		rm -rf "$root"
 	fi
 }

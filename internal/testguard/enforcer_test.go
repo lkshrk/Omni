@@ -2,6 +2,7 @@ package testguard
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -71,6 +72,16 @@ func TestSafeRunnerDisablesGoTelemetry(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "go telemetry off") {
 		t.Fatal("safe runner should disable Go telemetry inside isolated HOME before running tests")
+	}
+}
+
+func TestSafeRunnerCleansReadOnlyGoModuleCache(t *testing.T) {
+	root := repoRoot(t)
+	cmd := exec.Command("bash", filepath.Join(root, "scripts", "run-test-safe.sh"), "bash", "-c", `mkdir -p "$HOME/go/pkg/mod/example"; touch "$HOME/go/pkg/mod/example/go.mod"; chmod -R a-w "$HOME/go/pkg/mod"`)
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("safe runner should clean read-only Go module cache: %v\n%s", err, out)
 	}
 }
 
