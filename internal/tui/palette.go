@@ -45,7 +45,7 @@ func buildPalette(m Model) []palCmd {
 		},
 	}
 
-	if m.settings.DotsRepo != "" {
+	if m.dotsConfiguredCached {
 		dotsPull := actions.MustPalette(actions.DotsPull)
 		dotsCommit := actions.MustPalette(actions.DotsCommit)
 		dotsPush := actions.MustPalette(actions.DotsPush)

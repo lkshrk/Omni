@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/lkshrk/omni/internal/config"
 )
@@ -107,9 +108,10 @@ func (c DotFileCounts) Total() int {
 
 // DotsStatusResult bundles symlink health with the git status string.
 type DotsStatusResult struct {
-	Entries         []DotStatus `json:"entries"`
-	GitStatus       string      `json:"git_status"` // output of "git status --short" in the dots repo
-	DiscoveredCount int         `json:"discovered_count,omitempty"`
+	Entries         []DotStatus         `json:"entries"`
+	GitStatus       string              `json:"git_status"` // output of "git status --short" in the dots repo
+	DotMemberships  map[string][]string `json:"-"`
+	DiscoveredCount int                 `json:"discovered_count,omitempty"`
 }
 
 type DotsQueryOptions struct {
@@ -124,6 +126,21 @@ const (
 	DotResolveUseLocal DotsResolveStrategy = "use-local"
 )
 
+type DotsSyncAvailabilityReason string
+
+const (
+	DotsSyncAvailabilityReady    DotsSyncAvailabilityReason = "ready"
+	DotsSyncAvailabilityNoRepo   DotsSyncAvailabilityReason = "no-repo"
+	DotsSyncAvailabilityDisabled DotsSyncAvailabilityReason = "disabled"
+	DotsSyncAvailabilityUnknown  DotsSyncAvailabilityReason = "unknown"
+)
+
+type DotsSyncAvailability struct {
+	Configured bool
+	Reason     DotsSyncAvailabilityReason
+	RepoPath   string
+}
+
 const (
 	dotsContentDirName  = "dotfiles"
 	dotChildrenMaxDepth = 4
@@ -133,7 +150,40 @@ const (
 
 // DotsConfigured reports whether dots_repo is set in settings.json.
 func (a *App) DotsConfigured() bool {
-	return a.dotsRepoPath() != ""
+	return DotsConfiguredInSettings(config.Settings{DotsRepo: a.dotsRepoPath()})
+}
+
+// DotsConfiguredInSettings reports whether settings contains a dots repo path.
+func DotsConfiguredInSettings(settings config.Settings) bool {
+	return strings.TrimSpace(settings.DotsRepo) != ""
+}
+
+// DotsSyncAvailabilityInSettings reports dotfile sync availability from settings.
+func DotsSyncAvailabilityInSettings(settings config.Settings) DotsSyncAvailability {
+	repoPath := strings.TrimSpace(settings.DotsRepo)
+	if !DotsConfiguredInSettings(settings) {
+		return DotsSyncAvailability{Reason: DotsSyncAvailabilityNoRepo}
+	}
+	if config.BoolVal(settings.DotsDisabled) {
+		return DotsSyncAvailability{Reason: DotsSyncAvailabilityDisabled, RepoPath: repoPath}
+	}
+	return DotsSyncAvailability{Configured: true, Reason: DotsSyncAvailabilityReady, RepoPath: repoPath}
+}
+
+func (a *App) DotsSyncAvailability() (DotsSyncAvailability, error) {
+	cfg, err := a.loadConfig()
+	if err != nil {
+		return DotsSyncAvailability{Reason: DotsSyncAvailabilityUnknown}, err
+	}
+	return DotsSyncAvailabilityInSettings(a.effectiveSettings(cfg)), nil
+}
+
+func (a *App) DotsSyncConfigured() (bool, error) {
+	availability, err := a.DotsSyncAvailability()
+	if err != nil {
+		return false, err
+	}
+	return availability.Configured, nil
 }
 
 func (a *App) requireDotsEnabled(rootCfg *config.RootConfig) error {

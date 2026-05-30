@@ -10,7 +10,6 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/provider"
 )
 
 func renderGroupDeletePopup(m Model) string {
@@ -109,28 +108,26 @@ func renderGroups(m Model) string {
 		)
 	}
 
-	names := sortedHostNames(m.hostInfo)
+	hosts := app.PrioritizedHostSummaries(m.hostInfo)
 	allGroupNames := buildAllGroupNames(m.groupNames)
 	groupCounts := toolCountsByGroup(m)
 	groupDots := dotCountsByGroup(m)
-	cols := groupAssignmentTableColumnWidths(names, m.hostInfo, allGroupNames, groupCounts, groupDots)
+	cols := groupAssignmentTableColumnWidths(hosts, allGroupNames, groupCounts, groupDots)
 
 	assignmentSection := sectionedTabSection{
 		title:            "Group Assignments",
 		blankAfterHeader: false,
 	}
-	if len(names) == 0 {
+	if len(hosts) == 0 {
 		assignmentSection.empty = []string{
 			p.styleHelp.Render("  No host assignments configured."),
 			p.styleHelp.Render("  Onboarding creates this machine's host assignment."),
 		}
 	} else {
-		for i, name := range names {
-			prof := m.hostInfo.Hosts[name]
-			hostGroups := append([]string(nil), prof.Groups...)
-			sort.Strings(hostGroups)
-			groupBadge := compactHostAssignmentList(name, hostGroups)
-			hostBadge := hostStatusLabel(m.hostInfo, name)
+		for i, host := range hosts {
+			name := host.Name
+			groupBadge := compactHostAssignmentList(name, host.Groups)
+			hostBadge := hostStatusLabel(host)
 			nameLabel := name
 			hostSelected := m.assignmentSection == 0 && i == m.hostCursor && !m.cursorHidden
 			if hostSelected {
@@ -153,7 +150,7 @@ func renderGroups(m Model) string {
 					continue
 				}
 
-				hostTools, hostDots := hostAssignmentCounts(m, name, prof.Groups)
+				hostTools, hostDots := hostAssignmentCounts(m, name, host.Groups)
 				localStats := fmt.Sprintf("current host: %s, %s",
 					compactCount(hostTools, "tool"),
 					compactCount(hostDots, "dotfile"),
@@ -245,7 +242,7 @@ func renderGroups(m Model) string {
 				details := []string{}
 				if isProtectedGroupName(gn) {
 					details = append(details, p.styleProvider.Render(detailPrefix+"host bound group"))
-				} else if hosts := hostsForGroup(m.hostInfo, gn); len(hosts) > 0 {
+				} else if hosts := app.HostNamesForGroup(m.hostInfo, gn); len(hosts) > 0 {
 					details = append(details, p.styleHelp.Render(detailPrefix+"hosts: "+strings.Join(hosts, ", ")))
 				}
 				details = append(details, renderContextHints(m, hintCtxGroupDefault, hintPrefix))
@@ -289,13 +286,12 @@ type groupAssignmentTableColumns struct {
 	tail int
 }
 
-func groupAssignmentTableColumnWidths(hostNames []string, info *app.HostInfo, groupNames []string, groupCounts, groupDots map[string]int) groupAssignmentTableColumns {
+func groupAssignmentTableColumnWidths(hosts []app.HostSummary, groupNames []string, groupCounts, groupDots map[string]int) groupAssignmentTableColumns {
 	cols := groupAssignmentTableColumns{name: 20, mid: len("assigned groups"), tail: len("status")}
-	for _, name := range hostNames {
-		host := info.Hosts[name]
-		cols.name = max(cols.name, lipgloss.Width(name))
-		cols.mid = max(cols.mid, lipgloss.Width(compactHostAssignmentList(name, host.Groups)))
-		cols.tail = max(cols.tail, lipgloss.Width(hostStatusLabel(info, name)))
+	for _, host := range hosts {
+		cols.name = max(cols.name, lipgloss.Width(host.Name))
+		cols.mid = max(cols.mid, lipgloss.Width(compactHostAssignmentList(host.Name, host.Groups)))
+		cols.tail = max(cols.tail, lipgloss.Width(hostStatusLabel(host)))
 	}
 	for _, name := range groupNames {
 		cols.name = max(cols.name, lipgloss.Width(rowContentInset()+groupDisplayName(name)))
@@ -429,29 +425,11 @@ func compactGroupList(groups []string) string {
 	return fmt.Sprintf("%s, %s, %s +%d", groups[0], groups[1], groups[2], len(groups)-3)
 }
 
-func hostStatusLabel(info *app.HostInfo, name string) string {
-	if info != nil && name == info.Active {
+func hostStatusLabel(host app.HostSummary) string {
+	if host.Active {
 		return "this host"
 	}
 	return ""
-}
-
-func sortedHostNames(info *app.HostInfo) []string {
-	if info == nil || len(info.Hosts) == 0 {
-		return nil
-	}
-	names := make([]string, 0, len(info.Hosts))
-	for n := range info.Hosts {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	if info.Active != "" {
-		if idx := slices.Index(names, info.Active); idx > 0 {
-			copy(names[1:idx+1], names[:idx])
-			names[0] = info.Active
-		}
-	}
-	return names
 }
 
 func compactCount(n int, label string) string {
@@ -459,61 +437,6 @@ func compactCount(n int, label string) string {
 		return fmt.Sprintf("1 %s", label)
 	}
 	return fmt.Sprintf("%d %ss", n, label)
-}
-
-func hostsForGroup(info *app.HostInfo, group string) []string {
-	if info == nil {
-		return nil
-	}
-	var hosts []string
-	for name, host := range info.Hosts {
-		if slices.Contains(host.Groups, group) {
-			hosts = append(hosts, name)
-		}
-	}
-	sort.Strings(hosts)
-	return hosts
-}
-
-// toggleProvider toggles name in the DisabledProviders slice. If name is in
-// the slice it is removed; otherwise it is appended. Returns the updated slice.
-func toggleProvider(disabled []string, name string) []string {
-	for i, d := range disabled {
-		if d == name {
-			// Remove: swap with last and trim.
-			out := make([]string, len(disabled)-1)
-			copy(out, disabled[:i])
-			copy(out[i:], disabled[i+1:])
-			return out
-		}
-	}
-	return append(append([]string(nil), disabled...), name)
-}
-
-func cycleNodeManager(current string) string {
-	return cycleManager(current, provider.BuiltinSettingsManagerNames(provider.EcosystemNode))
-}
-
-func cyclePythonManager(current string) string {
-	return cycleManager(current, provider.BuiltinSettingsManagerNames(provider.EcosystemPython))
-}
-
-func cycleManager(current string, options []string) string {
-	if len(options) == 0 {
-		return ""
-	}
-	if current == "" {
-		return options[0]
-	}
-	for i, option := range options {
-		if current == option {
-			if i+1 < len(options) {
-				return options[i+1]
-			}
-			return ""
-		}
-	}
-	return ""
 }
 
 const groupPickerNewSentinel = "+ new group…"

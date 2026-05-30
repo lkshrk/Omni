@@ -33,6 +33,7 @@ func (a *App) DotsResolveConflict(ctx context.Context, name string, strategy Dot
 	}
 	defer func() {
 		a.recordDotsHistoryResult(ctx, "resolve "+string(strategy), name, repoPath, ops, err, false)
+		a.refreshDotsStateAfterSuccess(ctx, &err, false)
 	}()
 	stowPath, err := ensureDotsContentPath(repoPath)
 	if err != nil {

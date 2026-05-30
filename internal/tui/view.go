@@ -7,6 +7,8 @@ import (
 	"charm.land/bubbles/v2/help"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	textutil "github.com/lkshrk/omni/internal/text"
 )
 
 const (
@@ -37,7 +39,7 @@ func newHelp() help.Model {
 
 // View renders the full TUI and satisfies the tea.Model interface.
 func (m Model) View() tea.View {
-	v := tea.NewView(m.viewString())
+	v := tea.NewView(textutil.SymbolsFromEnv().Apply(m.viewString()))
 	v.AltScreen = true
 	v.WindowTitle = m.windowTitle()
 	v.ReportFocus = true

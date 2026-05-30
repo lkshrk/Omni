@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/provider"
 )
@@ -205,7 +206,7 @@ func (m *Model) runGroupPickerAction(group string, cmds *[]tea.Cmd) bool {
 			}
 			startOp(m, "Installing "+t.Name+"…")
 			m.startRowOperation(t.Name, t.Provider, m.statusMsg)
-			*cmds = append(*cmds, m.spinner.Tick, m.doInstallAndAdd(t.Name, t.Provider, claimGroup, activeHost))
+			*cmds = append(*cmds, m.spinner.Tick, m.doInstallAndAddTool(&t, claimGroup, activeHost))
 			return false
 		}
 		startOp(m, "Adding "+t.Name+" to config…")
@@ -448,11 +449,11 @@ func (m *Model) saveGroupMembershipPicker(cmds *[]tea.Cmd) {
 		m.finishGroupMembershipPicker()
 		return
 	}
-	if sameStringSet(m.pickerOriginalGroups, next) {
+	if !app.GroupMembershipsChanged(next, m.pickerOriginalGroups) {
 		m.finishGroupMembershipPicker()
 		return
 	}
-	created := createdMembershipGroups(m.pickerCreatedGroups, next)
+	created := app.CreatedMembershipGroups(m.pickerCreatedGroups, next)
 	host := ""
 	if m.hostInfo != nil {
 		host = m.hostInfo.Active
@@ -466,29 +467,6 @@ func (m *Model) saveGroupMembershipPicker(cmds *[]tea.Cmd) {
 		*cmds = append(*cmds, m.spinner.Tick, m.doSetToolGroupMemberships(name, m.pickerOriginalGroups, next, created, host))
 	}
 	m.finishGroupMembershipPicker()
-}
-
-func createdMembershipGroups(created, memberships []string) []string {
-	membershipSet := stringSet(memberships)
-	var out []string
-	for _, group := range created {
-		if membershipSet[group] {
-			out = append(out, group)
-		}
-	}
-	slices.Sort(out)
-	return out
-}
-
-func sameStringSet(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	ac := append([]string(nil), a...)
-	bc := append([]string(nil), b...)
-	slices.Sort(ac)
-	slices.Sort(bc)
-	return slices.Equal(ac, bc)
 }
 
 func (m *Model) handleScopePickerKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {

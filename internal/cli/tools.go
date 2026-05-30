@@ -8,6 +8,7 @@ import (
 
 	"github.com/lkshrk/omni/internal/actions"
 	appcore "github.com/lkshrk/omni/internal/app"
+	textutil "github.com/lkshrk/omni/internal/text"
 )
 
 func newToolsCmd(state *rootState) *cobra.Command {
@@ -49,7 +50,7 @@ func newToolsSetCmd(state *rootState) *cobra.Command {
 		Use:   "set <name>",
 		Short: "Create or update a logical tool spec",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireProvider(providerName); err != nil {
 				return err
 			}
@@ -74,15 +75,15 @@ func newToolsSetCmd(state *rootState) *cobra.Command {
 			}
 			if packageName == "" && installWith == "" {
 				if hostScope {
-					fmt.Printf("Set host override for logical tool %q with provider %q.\n", args[0], providerName)
+					fmt.Fprintf(cmdOut(cmd), "Set host override for logical tool %q with provider %q.\n", args[0], providerName)
 				} else {
-					fmt.Printf("Set logical tool %q with provider %q.\n", args[0], providerName)
+					fmt.Fprintf(cmdOut(cmd), "Set logical tool %q with provider %q.\n", args[0], providerName)
 				}
 			} else {
 				if hostScope {
-					fmt.Printf("Set host override for logical tool %q with %s.\n", args[0], details)
+					fmt.Fprintf(cmdOut(cmd), "Set host override for logical tool %q with %s.\n", args[0], details)
 				} else {
-					fmt.Printf("Set logical tool %q with %s.\n", args[0], details)
+					fmt.Fprintf(cmdOut(cmd), "Set logical tool %q with %s.\n", args[0], details)
 				}
 			}
 			return nil
@@ -111,7 +112,7 @@ func newToolsDeleteSpecCmd(state *rootState) *cobra.Command {
 			if err := state.app.RemoveLogicalTool(cmd.Context(), args[0]); err != nil {
 				return err
 			}
-			fmt.Printf("Deleted logical tool %q.\n", args[0])
+			fmt.Fprintf(cmdOut(cmd), "Deleted logical tool %q.\n", args[0])
 			return nil
 		},
 	}
@@ -140,13 +141,14 @@ func newToolsNormalizeCmd(state *rootState) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			out := cmdOut(cmd)
 			if len(normalized) == 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "No default provider overrides to normalize.")
+				fmt.Fprintln(out, "No default provider overrides to normalize.")
 				return nil
 			}
 			if dryRun {
-				fmt.Fprintf(cmd.OutOrStdout(), "Would normalize %d %s:\n", len(normalized), providerOverrideNoun(len(normalized)))
-				printNormalizedOverrides(cmd.OutOrStdout(), normalized)
+				fmt.Fprintf(out, "Would normalize %s:\n", textutil.PluralCount(len(normalized), "provider override", "provider overrides"))
+				printNormalizedOverrides(out, normalized)
 				return nil
 			}
 
@@ -161,21 +163,14 @@ func newToolsNormalizeCmd(state *rootState) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Normalized %d %s:\n", len(normalized), providerOverrideNoun(len(normalized)))
-			printNormalizedOverrides(cmd.OutOrStdout(), normalized)
+			fmt.Fprintf(out, "Normalized %s:\n", textutil.PluralCount(len(normalized), "provider override", "provider overrides"))
+			printNormalizedOverrides(out, normalized)
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&defaultOverrides, "default-overrides", false, "remove install-with values that only restate resolved ecosystem defaults")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show provider overrides that would be normalized without writing config")
 	return cmd
-}
-
-func providerOverrideNoun(count int) string {
-	if count == 1 {
-		return "provider override"
-	}
-	return "provider overrides"
 }
 
 func printNormalizedOverrides(out io.Writer, overrides []appcore.NormalizedInstallOverride) {
@@ -193,11 +188,11 @@ func newToolsIgnoreCmd(state *rootState) *cobra.Command {
 		Use:   "ignore <name>",
 		Short: "Ignore a logical tool everywhere",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := state.app.SetToolIgnore(args[0], true); err != nil {
 				return err
 			}
-			fmt.Printf("Ignored logical tool %q.\n", args[0])
+			fmt.Fprintf(cmdOut(cmd), "Ignored logical tool %q.\n", args[0])
 			return nil
 		},
 	}
@@ -210,11 +205,11 @@ func newToolsUnignoreCmd(state *rootState) *cobra.Command {
 		Use:   "unignore <name>",
 		Short: "Stop ignoring a logical tool everywhere",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := state.app.SetToolIgnore(args[0], false); err != nil {
 				return err
 			}
-			fmt.Printf("Unignored logical tool %q.\n", args[0])
+			fmt.Fprintf(cmdOut(cmd), "Unignored logical tool %q.\n", args[0])
 			return nil
 		},
 	}

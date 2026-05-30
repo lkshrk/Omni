@@ -7,7 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/app"
 )
 
 func (m *Model) handleDescRefreshDoneMsg(msg descRefreshDoneMsg) tea.Cmd {
@@ -144,17 +144,20 @@ func (m *Model) handleRefreshToolProgress(msg progressMsg) {
 	}
 	m.providerScanToolDone[providerName]++
 	if m.refreshToolTotal == 0 {
-		m.refreshToolTotal = sumProviderToolCounts(m.providerScanToolCounts)
+		m.refreshToolTotal = app.RefreshProviderScanCountTotal(m.providerScanToolCounts)
 	}
 	m.refreshToolDone++
 	if m.refreshToolTotal > 0 && m.refreshToolDone > m.refreshToolTotal {
 		m.refreshToolDone = m.refreshToolTotal
 	}
-	active := providerName
+	active := app.RefreshProviderScanLabel(providerName, m.providerScanLabels)
+	if label := strings.TrimSpace(msg.refreshProviderLabel); label != "" && (label != providerName || active == providerName) {
+		active = label
+	}
 	if msg.refreshToolName != "" {
 		active += "/" + msg.refreshToolName
 	}
-	m.progressText = refreshToolProgressText(active, m.refreshToolDone, m.refreshToolTotal)
+	m.progressText = app.RefreshToolProgressStatus(active, "", m.refreshToolDone, m.refreshToolTotal)
 }
 
 func (m *Model) handleProgressStreamClosedMsg(msg progressStreamClosedMsg) {
@@ -531,12 +534,14 @@ func (m *Model) handleSettingsSavedMsg(msg settingsSavedMsg) []tea.Cmd {
 		return nil
 	}
 	if msg.gen != 0 && m.settingsSaveQueued {
-		snapshot := m.settingsSaveQueuedSnapshot
+		changes := append([]app.SettingsChange(nil), m.settingsSaveQueuedChanges...)
 		gen := m.settingsSaveQueuedGen
 		m.settingsSaveQueued = false
-		m.settingsSaveQueuedSnapshot = config.Settings{}
+		m.settingsSaveQueuedChanges = nil
 		m.settingsSaveQueuedGen = 0
-		return []tea.Cmd{m.startSettingsSave(snapshot, gen)}
+		if len(changes) > 0 {
+			return []tea.Cmd{m.startSettingsChangeSave(changes, gen)}
+		}
 	}
 	if msg.gen != 0 {
 		m.settingsSaveRunning = false
@@ -544,6 +549,9 @@ func (m *Model) handleSettingsSavedMsg(msg settingsSavedMsg) []tea.Cmd {
 	}
 	if msg.err != nil {
 		return []tea.Cmd{setStatus(m, "✗ "+msg.err.Error(), true)}
+	}
+	if msg.hasSettings {
+		m.setSettings(msg.settings)
 	}
 	return []tea.Cmd{setStatus(m, "✓ settings saved", false)}
 }
@@ -555,7 +563,7 @@ func (m *Model) handleDotsServiceChangedMsg(msg dotsServiceChangedMsg) []tea.Cmd
 	case dotsReminderServiceKind:
 		name = "reminder"
 		if msg.err != nil {
-			m.dotsReminderInterval = dotsReminderIntervalFromService(m.dotsReminderService)
+			m.dotsReminderInterval = app.DotsReminderInterval(m.dotsReminderService)
 			break
 		}
 		if msg.reminder != nil {
@@ -568,7 +576,7 @@ func (m *Model) handleDotsServiceChangedMsg(msg dotsServiceChangedMsg) []tea.Cmd
 	case dotsWatchServiceKind:
 		name = "watch"
 		if msg.err != nil {
-			m.dotsWatchDebounce = dotsWatchDebounceFromService(m.dotsWatchService)
+			m.dotsWatchDebounce = app.DotsWatchDebounce(m.dotsWatchService)
 			m.dotsWatchDebounceNext = 0
 			break
 		}
@@ -690,7 +698,7 @@ func (m *Model) handleHostGroupChangedMsg(msg hostGroupChangedMsg) []tea.Cmd {
 		m.toolGroups = msg.toolGroups
 		refreshed = true
 	} else if msg.info != nil && m.toolMemberships != nil {
-		m.toolGroups = compactToolGroupMapForHost(m.toolMemberships, msg.info)
+		m.toolGroups = app.ToolGroupLabels(m.toolMemberships, msg.info)
 		refreshed = true
 	}
 	statusText := msg.detail
@@ -845,11 +853,7 @@ func (m *Model) handleMigrateProviderDoneMsg(msg migrateProviderDoneMsg) []tea.C
 }
 
 func claimSuccessStatus(msg claimDoneMsg) string {
-	group := msg.groupName
-	if group == "" {
-		group = shortHostname()
-	}
-	return "✓ added " + msg.name + " to config (" + group + ")"
+	return app.ClaimSuccessStatusText(msg.name, msg.groupName)
 }
 
 func migrateProviderSuccessStatus(msg migrateProviderDoneMsg) string {

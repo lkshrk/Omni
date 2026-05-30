@@ -8,7 +8,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/app"
 )
 
 func (m *Model) promptForStowInstall(action stowInstallAction) bool {
@@ -82,7 +82,7 @@ func (m *Model) handleStowInstallDoneMsg(msg stowInstallDoneMsg) []tea.Cmd {
 	if msg.err != nil {
 		if msg.action == stowInstallDotsWatch {
 			m.dotsWatchDebounceNext = 0
-			m.dotsWatchDebounce = dotsWatchDebounceFromService(m.dotsWatchService)
+			m.dotsWatchDebounce = app.DotsWatchDebounce(m.dotsWatchService)
 		}
 		cmds := []tea.Cmd{setStatus(m, "✗ "+msg.err.Error(), true)}
 		if msg.action == stowInstallLaunchSync {
@@ -106,11 +106,11 @@ func (m *Model) resumeStowInstallAction(action stowInstallAction) []tea.Cmd {
 		m.beginDotsOperation("Enabling dots...")
 		cmds = append(cmds, m.spinner.Tick, m.doEnableDots())
 	case stowInstallSaveSettingsSync:
-		m.settings = m.stowInstallSettings
+		repo := m.stowInstallDotsRepo
+		m.stowInstallDotsRepo = ""
 		m.dotsLoaded = false
 		m.beginDotsOperation("Syncing dots...")
-		cmds = append(cmds, m.spinner.Tick, m.doSaveSettingsAndDotsSync(m.stowInstallSettings))
-		m.stowInstallSettings = config.Settings{}
+		cmds = append(cmds, m.spinner.Tick, m.doSaveDotsRepoAndSync(repo))
 	case stowInstallSetupDotsRepo:
 		path := m.stowInstallPath
 		m.stowInstallPath = ""

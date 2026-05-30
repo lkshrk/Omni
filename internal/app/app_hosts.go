@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/provider"
 )
 
@@ -30,12 +32,61 @@ type HostInfo struct {
 	Active string
 }
 
+type HostSummary struct {
+	Name   string
+	Active bool
+	Groups []string
+}
+
+func PrioritizedHostSummaries(info *HostInfo) []HostSummary {
+	return hostSummariesFromInfo(info, true)
+}
+
+func SetupCopyHostNames(info *HostInfo) []string {
+	hosts := PrioritizedHostSummaries(info)
+	names := make([]string, 0, len(hosts))
+	for _, host := range hosts {
+		names = append(names, host.Name)
+	}
+	return names
+}
+
+func SetupHostAlreadyConfigured(info *HostInfo, name string) bool {
+	if info == nil || info.Active != name {
+		return false
+	}
+	_, ok := info.Hosts[name]
+	return ok
+}
+
+func HostNamesForGroup(info *HostInfo, group string) []string {
+	if info == nil {
+		return nil
+	}
+	var hosts []string
+	for name, host := range info.Hosts {
+		if slices.Contains(host.Groups, group) {
+			hosts = append(hosts, name)
+		}
+	}
+	sort.Strings(hosts)
+	return hosts
+}
+
 func (a *App) HostStatus() (*HostInfo, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
 		return nil, err
 	}
 	return a.hostStatusFromConfig(cfg), nil
+}
+
+func (a *App) HasHostAssignments() (bool, error) {
+	info, err := a.HostStatus()
+	if err != nil {
+		return false, err
+	}
+	return len(info.Hosts) > 0, nil
 }
 
 func (a *App) hostStatusFromConfig(cfg *config.RootConfig) *HostInfo {
@@ -52,6 +103,42 @@ func (a *App) hostStatusFromConfig(cfg *config.RootConfig) *HostInfo {
 		hosts[active] = host
 	}
 	return &HostInfo{Hosts: hosts, Active: active}
+}
+
+func (a *App) HostSummaries() ([]HostSummary, error) {
+	info, err := a.HostStatus()
+	if err != nil {
+		return nil, err
+	}
+	return hostSummariesFromInfo(info, false), nil
+}
+
+func hostSummariesFromInfo(info *HostInfo, activeFirst bool) []HostSummary {
+	if info == nil || len(info.Hosts) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(info.Hosts))
+	for name := range info.Hosts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	if activeFirst && info.Active != "" {
+		if idx := slices.Index(names, info.Active); idx > 0 {
+			copy(names[1:idx+1], names[:idx])
+			names[0] = info.Active
+		}
+	}
+	summaries := make([]HostSummary, 0, len(names))
+	for _, name := range names {
+		groups := append([]string(nil), info.Hosts[name].Groups...)
+		sort.Strings(groups)
+		summaries = append(summaries, HostSummary{
+			Name:   name,
+			Active: name == info.Active,
+			Groups: groups,
+		})
+	}
+	return summaries
 }
 
 func (a *App) repairCurrentHostEntry() error {
@@ -137,6 +224,12 @@ func (a *App) RenameHost(oldName, newName string) error {
 		cfg.Hosts[newName] = append([]string(nil), groups...)
 		delete(cfg.Hosts, oldName)
 		return nil
+	})
+}
+
+func (a *App) RenameHostWithState(ctx context.Context, oldName, newName string) (*ToolGroupState, error) {
+	return a.toolGroupStateAfter(ctx, func() error {
+		return a.RenameHost(oldName, newName)
 	})
 }
 
@@ -330,24 +423,7 @@ func removeHostScopedConfig(cfg *config.RootConfig, hostname string) {
 }
 
 func (a *App) SetHostGroups(hostname string, groups []string) error {
-	hostname = strings.TrimSpace(machineGroupName(hostname))
-	if hostname == "" {
-		return fmt.Errorf("hostname is required")
-	}
-	return a.withConfig(func(cfg *config.RootConfig) error {
-		if _, err := ensureHostGroupInConfig(cfg, hostname); err != nil {
-			return err
-		}
-		if cfg.Hosts == nil {
-			cfg.Hosts = make(map[string][]string)
-		}
-		filtered, err := reusableHostGroupsInConfig(cfg, hostname, groups)
-		if err != nil {
-			return err
-		}
-		cfg.Hosts[hostname] = filtered
-		return nil
-	})
+	return a.setHostGroups(hostname, groups, nil)
 }
 
 func reusableHostGroupsInConfig(cfg *config.RootConfig, hostname string, groups []string) ([]string, error) {
@@ -404,6 +480,12 @@ func (a *App) AddGroupToHost(hostname, group string) error {
 	})
 }
 
+func (a *App) AddGroupToHostWithState(ctx context.Context, hostname, group string) (*ToolGroupState, error) {
+	return a.toolGroupStateAfter(ctx, func() error {
+		return a.AddGroupToHost(hostname, group)
+	})
+}
+
 func (a *App) RemoveGroupFromHost(hostname, group string) error {
 	hostname = strings.TrimSpace(machineGroupName(hostname))
 	group = strings.TrimSpace(group)
@@ -426,6 +508,12 @@ func (a *App) RemoveGroupFromHost(hostname, group string) error {
 	})
 }
 
+func (a *App) RemoveGroupFromHostWithState(ctx context.Context, hostname, group string) (*ToolGroupState, error) {
+	return a.toolGroupStateAfter(ctx, func() error {
+		return a.RemoveGroupFromHost(hostname, group)
+	})
+}
+
 func (a *App) RemoveHost(hostname string) error {
 	hostname = strings.TrimSpace(machineGroupName(hostname))
 	if hostname == "" {
@@ -443,6 +531,12 @@ func (a *App) RemoveHost(hostname string) error {
 		}
 		cfg.Groups = filtered
 		return nil
+	})
+}
+
+func (a *App) RemoveHostWithState(ctx context.Context, hostname string) (*ToolGroupState, error) {
+	return a.toolGroupStateAfter(ctx, func() error {
+		return a.RemoveHost(hostname)
 	})
 }
 
@@ -602,6 +696,15 @@ func (a *App) CreateGroup(name string) error {
 	})
 }
 
+func (a *App) CreateGroupWithState(ctx context.Context, name string) (*ToolGroupState, error) {
+	return a.toolGroupStateAfter(ctx, func() error {
+		if err := a.CreateGroup(name); err != nil {
+			return err
+		}
+		return a.AddGroupToHost(currentMachineGroupName(), name)
+	})
+}
+
 func (a *App) RenameGroup(oldName, newName string) error {
 	newName = strings.TrimSpace(newName)
 	if oldName == "" {
@@ -644,9 +747,20 @@ func (a *App) RenameGroup(oldName, newName string) error {
 	})
 }
 
+func (a *App) RenameGroupWithState(ctx context.Context, oldName, newName string) (*ToolGroupState, error) {
+	return a.toolGroupStateAfter(ctx, func() error {
+		return a.RenameGroup(oldName, newName)
+	})
+}
+
 type DeleteGroupOptions struct {
 	MoveTo      string
 	DeleteTools bool
+}
+
+type ToolGroupMutationState struct {
+	Tools []*database.ToolCache
+	State *ToolGroupState
 }
 
 func (a *App) GroupContentCounts(name string) (tools, dots int, err error) {
@@ -754,6 +868,46 @@ func (a *App) DeleteGroup(ctx context.Context, name string, opts DeleteGroupOpti
 		return err
 	}
 	return a.deleteCachedLogicalTools(ctx, deletedLogicalTools)
+}
+
+func (a *App) DeleteGroupWithState(ctx context.Context, name string, opts DeleteGroupOptions) (*ToolGroupMutationState, error) {
+	return a.toolGroupMutationStateAfter(ctx, func() error {
+		return a.DeleteGroup(ctx, name, opts)
+	})
+}
+
+func (a *App) DeleteGroupWithDefaultMoveTarget(ctx context.Context, name string, deleteTools bool) (*ToolGroupMutationState, error) {
+	opts := DeleteGroupOptions{MoveTo: currentMachineGroupName()}
+	if deleteTools {
+		opts = DeleteGroupOptions{DeleteTools: true}
+	}
+	return a.DeleteGroupWithState(ctx, name, opts)
+}
+
+func (a *App) toolGroupStateAfter(ctx context.Context, mutate func() error) (*ToolGroupState, error) {
+	if err := mutate(); err != nil {
+		return nil, err
+	}
+	return a.ToolGroupState(ctx)
+}
+
+func (a *App) toolGroupMutationStateAfter(ctx context.Context, mutate func() error) (*ToolGroupMutationState, error) {
+	if err := mutate(); err != nil {
+		return nil, err
+	}
+	return a.toolGroupMutationState(ctx)
+}
+
+func (a *App) toolGroupMutationState(ctx context.Context) (*ToolGroupMutationState, error) {
+	state, err := a.ToolGroupState(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tools, err := a.ListTools(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	return &ToolGroupMutationState{Tools: tools, State: state}, nil
 }
 
 // ClaimFromMachineGroup assigns groupName to the current host and removes from

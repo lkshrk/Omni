@@ -208,6 +208,71 @@ func (a *App) MigrateInstallation(ctx context.Context, name, installedWith, conf
 	return result, nil
 }
 
+type ProviderRepairStateResult struct {
+	Result *SwitchResult
+	Tools  []*database.ToolCache
+}
+
+func (a *App) SwitchWithState(ctx context.Context, name, fromProvider, toProvider string) (*ProviderRepairStateResult, error) {
+	result, err := a.Switch(ctx, name, fromProvider, toProvider)
+	if err != nil {
+		return &ProviderRepairStateResult{Result: result}, err
+	}
+	return a.providerRepairState(ctx, result)
+}
+
+func (a *App) ApplyProviderSolutionWithState(ctx context.Context, name, fromProvider string, solution provider.ErrorSolution) (*ProviderRepairStateResult, error) {
+	target := solution.TargetProvider
+	if target == "" {
+		return nil, fmt.Errorf("missing target provider")
+	}
+	return a.SwitchWithState(ctx, name, fromProvider, target)
+}
+
+func FirstApplicableProviderSolution(actionErr *provider.ActionError) (provider.ErrorSolution, bool) {
+	idx := FirstApplicableProviderSolutionIndex(actionErr)
+	if idx < 0 {
+		return provider.ErrorSolution{}, false
+	}
+	return actionErr.Solutions[idx], true
+}
+
+func FirstApplicableProviderSolutionIndex(actionErr *provider.ActionError) int {
+	if actionErr == nil {
+		return -1
+	}
+	for i, solution := range actionErr.Solutions {
+		if solution.Action == provider.ErrorSolutionActionSwitchProvider && solution.TargetProvider != "" {
+			return i
+		}
+	}
+	return -1
+}
+
+func (a *App) MigrateInstallationWithState(ctx context.Context, name, installedWith, configProv string) (*ProviderRepairStateResult, error) {
+	result, err := a.MigrateInstallation(ctx, name, installedWith, configProv)
+	if err != nil {
+		return &ProviderRepairStateResult{Result: result}, err
+	}
+	return a.providerRepairState(ctx, result)
+}
+
+func (a *App) providerRepairState(ctx context.Context, result *SwitchResult) (*ProviderRepairStateResult, error) {
+	state := &ProviderRepairStateResult{Result: result}
+	if err := a.RefreshInstalled(ctx, nil); err != nil {
+		return state, fmt.Errorf("refresh installed: %w", err)
+	}
+	if err := a.RefreshDescriptions(ctx, 0); err != nil {
+		return state, fmt.Errorf("refresh descriptions: %w", err)
+	}
+	var err error
+	state.Tools, err = a.ListTools(ctx, "")
+	if err != nil {
+		return state, fmt.Errorf("list tools: %w", err)
+	}
+	return state, nil
+}
+
 func (a *App) migrateSameProviderBackend(ctx context.Context, name, installedWith, configProv string) (*SwitchResult, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -319,6 +384,51 @@ func (a *App) ReinstallWithDefaultAfterClearingInstallOverride(ctx context.Conte
 		return result, cleared, fmt.Errorf("refreshing descriptions after reinstall: %w", err)
 	}
 	return result, cleared, nil
+}
+
+type ClearProviderOverrideStateResult struct {
+	Result       *SwitchResult
+	Cleared      ClearInstallOverrideResult
+	FromProvider string
+	ToProvider   string
+	Tools        []*database.ToolCache
+	ScopeDisplay *ToolScopeDisplayState
+}
+
+func (a *App) ClearProviderOverrideWithState(ctx context.Context, name, configProv, installedWith string) (*ClearProviderOverrideStateResult, error) {
+	state := &ClearProviderOverrideStateResult{
+		FromProvider: installedWith,
+		ToProvider:   configProv,
+	}
+	var err error
+	if installedWith != "" {
+		state.Result, state.Cleared, err = a.ReinstallWithDefaultAfterClearingInstallOverride(ctx, name, configProv)
+	} else {
+		state.Cleared, err = a.ClearToolInstallOverride(ctx, name, configProv)
+		if err == nil {
+			if refreshErr := a.RefreshInstalled(ctx, nil); refreshErr != nil {
+				err = fmt.Errorf("refresh installed: %w", refreshErr)
+			}
+		}
+	}
+	if state.Result != nil {
+		state.FromProvider = state.Result.FromProvider
+		state.ToProvider = state.Result.ToProvider
+	} else if state.FromProvider == "" {
+		state.FromProvider = state.Cleared.InstallWith
+	}
+	if err != nil {
+		return state, err
+	}
+	state.Tools, err = a.ListTools(ctx, "")
+	if err != nil {
+		return state, fmt.Errorf("list tools: %w", err)
+	}
+	state.ScopeDisplay, err = a.ToolScopeDisplayState(ctx)
+	if err != nil {
+		return state, err
+	}
+	return state, nil
 }
 
 func (a *App) toolSpecSnapshot(name string) (config.ToolSpec, bool, error) {

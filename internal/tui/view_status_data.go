@@ -6,112 +6,26 @@ import (
 	"strings"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/database"
+	textutil "github.com/lkshrk/omni/internal/text"
 )
 
-type statusToolSummary struct {
-	tracked        int
-	updates        int
-	outOfSync      int
-	installed      int
-	available      int
-	ignored        int
-	updateNames    []string
-	outOfSyncNames []string
-	installedNames []string
-	availableNames []string
-	ignoredNames   []string
-}
-
-func statusToolCounts(m Model) statusToolSummary {
-	var counts statusToolSummary
-	seen := make(map[string]bool, len(m.allTools)+len(m.discoveredTools))
-	for _, tool := range m.allTools {
-		if tool == nil {
-			continue
-		}
-		statusAccumulateTool(&counts, m, tool)
-		seen[toolKey(tool.Name, tool.Provider)] = true
-	}
-	for _, tool := range m.discoveredTools {
-		if tool == nil || seen[toolKey(tool.Name, tool.Provider)] {
-			continue
-		}
-		statusAccumulateTool(&counts, m, tool)
-	}
-	sort.Strings(counts.updateNames)
-	sort.Strings(counts.outOfSyncNames)
-	sort.Strings(counts.installedNames)
-	sort.Strings(counts.availableNames)
-	sort.Strings(counts.ignoredNames)
-	return counts
-}
-
-func statusAccumulateTool(counts *statusToolSummary, m Model, tool *database.ToolCache) {
-	if tool.Tracked {
-		counts.tracked++
-	}
-	if tool.Installed {
-		counts.installed++
-		counts.installedNames = append(counts.installedNames, statusToolName(tool))
-	}
-	switch m.displaySection(tool) {
-	case sectionUpdates:
-		counts.updates++
-		counts.updateNames = append(counts.updateNames, statusToolUpdateName(tool))
-	case sectionOutOfSync:
-		counts.outOfSync++
-		counts.outOfSyncNames = append(counts.outOfSyncNames, statusToolSyncIssueName(m, tool))
-	case sectionAvailable:
-		counts.available++
-		counts.availableNames = append(counts.availableNames, statusToolName(tool))
-	case sectionIgnored:
-		counts.ignored++
-		counts.ignoredNames = append(counts.ignoredNames, statusToolName(tool))
-	}
-}
-
-func statusToolName(tool *database.ToolCache) string {
-	if tool == nil {
-		return ""
-	}
-	return tool.Name
-}
-
-func statusToolUpdateName(tool *database.ToolCache) string {
-	if tool == nil {
-		return ""
-	}
-	latest := strings.TrimSpace(tool.LatestVersion.String)
-	if !tool.LatestVersion.Valid || latest == "" {
-		latest = "?"
-	}
-	if latest == "?" {
-		return tool.Name
-	}
-	return fmt.Sprintf("%s (%s)", tool.Name, latest)
-}
-
-func statusToolSyncIssueName(m Model, tool *database.ToolCache) string {
-	name := statusToolName(tool)
-	switch m.syncStatusOf(tool) {
-	case syncMissing:
-		return name + " missing"
-	case syncOrphan:
-		return name + " local only"
-	case syncWrongProv:
-		return name + " provider mismatch"
-	default:
-		return name
-	}
+func statusToolCounts(m Model) app.DashboardToolSummary {
+	return app.BuildDashboardToolSummary(app.DashboardToolSummaryInput{
+		Tools:                  m.allTools,
+		DiscoveredTools:        m.discoveredTools,
+		IgnoredTools:           dashboardIgnoredTools(m),
+		ToolProviderPins:       m.toolProviderPins,
+		EffectiveSystemManager: m.effectiveSystemManager,
+		EffectivePythonManager: m.effectivePythonManager,
+		EffectiveNodeManager:   m.effectiveNodeManager,
+	})
 }
 
 func statusCountValue(m Model, count int, singular, plural, empty string) string {
 	if count == 0 {
 		return m.palette.styleInstalled.Render(empty)
 	}
-	return m.palette.styleOutdated.Render(pluralCount(count, singular, plural))
+	return m.palette.styleOutdated.Render(textutil.PluralCount(count, singular, plural))
 }
 
 func statusLoadingValue(m Model, label string) string {
@@ -132,13 +46,6 @@ func statusStaleSummary(activity, fallback string, hasData bool) string {
 		return activity + " · " + fallback
 	}
 	return activity
-}
-
-func pluralCount(count int, singular, plural string) string {
-	if count == 1 {
-		return fmt.Sprintf("1 %s", singular)
-	}
-	return fmt.Sprintf("%d %s", count, plural)
 }
 
 func statusToolsLoading(m Model) bool {
@@ -166,48 +73,48 @@ func statusToolsActivityText(m Model) string {
 	return activityLabel(m)
 }
 
-func statusToolsOverviewValue(m Model, counts statusToolSummary) string {
-	if counts.tracked == 0 {
+func statusToolsOverviewValue(m Model, counts app.DashboardToolSummary) string {
+	if counts.Tracked == 0 {
 		return m.palette.styleHelp.Render("no tools")
 	}
-	if counts.updates > 0 {
-		return m.palette.styleOutdated.Render(pluralCount(counts.updates, "update", "updates"))
+	if counts.Updates > 0 {
+		return m.palette.styleOutdated.Render(textutil.PluralCount(counts.Updates, "update", "updates"))
 	}
-	return m.palette.styleProvider.Render(pluralCount(counts.tracked, "tracked", "tracked"))
+	return m.palette.styleProvider.Render(textutil.PluralCount(counts.Tracked, "tracked", "tracked"))
 }
 
-func statusToolsOverviewSummary(counts statusToolSummary) string {
-	if counts.tracked == 0 {
+func statusToolsOverviewSummary(counts app.DashboardToolSummary) string {
+	if counts.Tracked == 0 {
 		return "No tools configured for this host."
 	}
-	parts := []string{pluralCount(counts.installed, "installed locally", "installed locally")}
-	if counts.available > 0 {
-		parts = append(parts, pluralCount(counts.available, "available", "available"))
+	parts := []string{textutil.PluralCount(counts.Installed, "installed locally", "installed locally")}
+	if counts.Available > 0 {
+		parts = append(parts, textutil.PluralCount(counts.Available, "available", "available"))
 	}
-	if counts.outOfSync > 0 {
-		parts = append(parts, pluralCount(counts.outOfSync, "sync issue", "sync issues"))
+	if counts.OutOfSync > 0 {
+		parts = append(parts, textutil.PluralCount(counts.OutOfSync, "sync issue", "sync issues"))
 	}
 	return strings.Join(parts, ", ")
 }
 
-func statusToolsOverviewDetails(m Model, counts statusToolSummary) []string {
+func statusToolsOverviewDetails(m Model, counts app.DashboardToolSummary) []string {
 	details := []string{
-		statusDetailLine(m, pluralCount(counts.tracked, "tracked tool", "tracked tools")),
-		statusDetailLine(m, pluralCount(counts.installed, "installed locally", "installed locally")),
+		statusDetailLine(m, textutil.PluralCount(counts.Tracked, "tracked tool", "tracked tools")),
+		statusDetailLine(m, textutil.PluralCount(counts.Installed, "installed locally", "installed locally")),
 	}
-	if counts.available > 0 {
-		details = append(details, statusDetailLine(m, pluralCount(counts.available, "available tool", "available tools")))
+	if counts.Available > 0 {
+		details = append(details, statusDetailLine(m, textutil.PluralCount(counts.Available, "available tool", "available tools")))
 	}
-	if counts.updates > 0 {
-		details = append(details, statusDetailLine(m, pluralCount(counts.updates, "pending update", "pending updates")))
+	if counts.Updates > 0 {
+		details = append(details, statusDetailLine(m, textutil.PluralCount(counts.Updates, "pending update", "pending updates")))
 	}
-	if counts.outOfSync > 0 {
-		details = append(details, statusDetailLine(m, pluralCount(counts.outOfSync, "sync issue", "sync issues")))
+	if counts.OutOfSync > 0 {
+		details = append(details, statusDetailLine(m, textutil.PluralCount(counts.OutOfSync, "sync issue", "sync issues")))
 	}
 	return details
 }
 
-func statusToolSyncDetails(m Model, counts statusToolSummary) []string {
+func statusToolSyncDetails(m Model, counts app.DashboardToolSummary) []string {
 	var details []string
 	if statusDashboardToolSyncBusy(m) {
 		details = append(details, statusActivityDetailLine(m, statusToolsActivityText(m), true))
@@ -215,78 +122,43 @@ func statusToolSyncDetails(m Model, counts statusToolSummary) []string {
 			details = append(details, statusDetailLine(m, "queued: "+statusInlineNames(statusToolSyncQueuedNames(m), 5)))
 		}
 	}
-	if counts.outOfSync == 0 {
+	if counts.OutOfSync == 0 {
 		if len(details) == 0 {
 			return statusDetailLines(m, "All tracked tools match this host.")
 		}
 		return details
 	}
-	details = append(details, statusDetailLine(m, "Issues: "+statusInlineNames(counts.outOfSyncNames, 5)))
-	if len(counts.outOfSyncNames) > 5 {
-		details = append(details, statusDetailLine(m, fmt.Sprintf("+%d more", len(counts.outOfSyncNames)-5)))
+	details = append(details, statusDetailLine(m, "Issues: "+statusInlineNames(counts.OutOfSyncNames, 5)))
+	if len(counts.OutOfSyncNames) > 5 {
+		details = append(details, statusDetailLine(m, fmt.Sprintf("+%d more", len(counts.OutOfSyncNames)-5)))
 	}
 	return details
 }
 
 func statusToolSyncQueuedNames(m Model) []string {
-	names := make([]string, 0, len(m.bulkPendingKeys))
-	seen := make(map[string]bool, len(m.allTools)+len(m.discoveredTools))
-	visit := func(tool *database.ToolCache) {
-		if tool == nil {
-			return
-		}
-		key := toolKey(tool.Name, tool.Provider)
-		if seen[key] || !m.bulkPendingKeys[key] {
-			return
-		}
-		seen[key] = true
-		if m.displaySection(tool) == sectionOutOfSync || !tool.Installed {
-			names = append(names, statusToolSyncIssueName(m, tool))
-		}
-	}
-	for _, tool := range m.allTools {
-		visit(tool)
-	}
-	for _, tool := range m.discoveredTools {
-		visit(tool)
-	}
-	sort.Strings(names)
-	return names
+	return app.DashboardToolSyncQueuedNames(dashboardToolActivityInput(m))
 }
 
 func statusUpgradeNames(m Model) ([]string, []string) {
-	active := make([]string, 0, len(m.upgradingKeys))
-	waiting := make([]string, 0, len(m.bulkPendingKeys))
-	seen := make(map[string]bool, len(m.allTools)+len(m.discoveredTools))
-	visit := func(tool *database.ToolCache) {
-		if tool == nil {
-			return
-		}
-		key := toolKey(tool.Name, tool.Provider)
-		if seen[key] {
-			return
-		}
-		seen[key] = true
-		if m.displaySection(tool) != sectionUpdates {
-			return
-		}
-		name := statusToolUpdateName(tool)
-		switch {
-		case m.upgradingKeys[key] || m.rowOpKey == key:
-			active = append(active, name)
-		case m.bulkPendingKeys[key]:
-			waiting = append(waiting, name)
-		}
+	return app.DashboardUpgradeNames(dashboardToolActivityInput(m))
+}
+
+func dashboardToolActivityInput(m Model) app.DashboardToolActivityInput {
+	return app.DashboardToolActivityInput{
+		Tools:                  m.allTools,
+		DiscoveredTools:        m.discoveredTools,
+		IgnoredTools:           dashboardIgnoredTools(m),
+		PendingKeys:            m.bulkPendingKeys,
+		ActiveKeys:             m.upgradingKeys,
+		RowKey:                 m.rowOpKey,
+		Loading:                m.loading,
+		UpgradeBusy:            len(m.upgradingKeys) > 0,
+		ProgressText:           m.progressText,
+		ToolProviderPins:       m.toolProviderPins,
+		EffectiveSystemManager: m.effectiveSystemManager,
+		EffectivePythonManager: m.effectivePythonManager,
+		EffectiveNodeManager:   m.effectiveNodeManager,
 	}
-	for _, tool := range m.allTools {
-		visit(tool)
-	}
-	for _, tool := range m.discoveredTools {
-		visit(tool)
-	}
-	sort.Strings(active)
-	sort.Strings(waiting)
-	return active, waiting
 }
 
 func statusUpgradeSummary(active, waiting, updates []string) string {
@@ -311,7 +183,7 @@ func statusUpgradeValue(m Model, active, waiting []string) string {
 	case len(active) > 0:
 		return m.palette.styleStatus.Render(fmt.Sprintf("%s %d active / %d queued", iconPending, len(active), len(waiting)))
 	case len(waiting) > 0:
-		return m.palette.styleStatus.Render(iconPending + " " + pluralCount(len(waiting), "queued", "queued"))
+		return m.palette.styleStatus.Render(iconPending + " " + textutil.PluralCount(len(waiting), "queued", "queued"))
 	default:
 		return m.palette.styleStatus.Render(iconPending + " updating")
 	}
@@ -422,83 +294,103 @@ func statusDotsActivityText(m Model) string {
 }
 
 func statusDashboardDotsSyncActionable(m Model) bool {
-	if config.BoolVal(m.settings.DotsDisabled) || strings.TrimSpace(m.settings.DotsRepo) == "" {
-		return false
-	}
-	if m.dotsLoading || m.dotsPreparing {
-		return false
-	}
-	return dotHeaderCounts(m.dotsEntries).OutOfSync > 0
+	return statusDashboardPlanHasStep(m, app.ReconcileStepSyncDots)
 }
 
 func statusDashboardToolSyncActionable(m Model) bool {
-	return countSyncAllProgressItems(m.allTools, m.discoveredTools) > 0
+	return statusDashboardPlanHasStep(m, app.ReconcileStepSyncTools)
 }
 
 func statusDashboardToolSyncBusy(m Model) bool {
-	if !m.loading || len(m.upgradingKeys) > 0 {
-		return false
-	}
-	if len(statusToolSyncQueuedNames(m)) > 0 {
-		return true
-	}
-	text := strings.ToLower(strings.TrimSpace(m.progressText))
-	return strings.Contains(text, "sync") || strings.Contains(text, "install") || strings.Contains(text, "add")
+	return app.DashboardToolSyncBusy(dashboardToolActivityInput(m))
 }
 
 func statusDashboardUpgradeActionable(m Model) bool {
-	return statusToolCounts(m).updates > 0 && len(m.upgradingKeys) == 0
+	return statusDashboardPlanHasStep(m, app.ReconcileStepUpgradeTools)
 }
 
 func statusDashboardDotsCommitActionable(m Model) bool {
-	return !config.BoolVal(m.settings.DotsDisabled) &&
-		strings.TrimSpace(m.settings.DotsRepo) != "" &&
-		!m.dotsLoading &&
-		!m.dotsPreparing &&
-		strings.TrimSpace(m.dotsGitStatus) != ""
+	return statusDashboardPlanHasStep(m, app.ReconcileStepCommitDots)
 }
 
 func statusDashboardReconcileActionable(m Model) bool {
-	return statusDashboardToolSyncActionable(m) ||
-		statusDashboardUpgradeActionable(m) ||
-		statusDashboardDotsSyncActionable(m) ||
-		statusDashboardDotsCommitActionable(m) ||
-		statusDashboardFixIgnoreActionable(m)
+	return len(dashboardReconcilePlanItems(m)) > 0
 }
 
 func statusDashboardFixIgnoreActionable(m Model) bool {
-	return doctorHasIgnoreFindings(m)
+	return statusDashboardPlanHasStep(m, app.ReconcileStepFixIgnore)
+}
+
+func statusDashboardPlanHasStep(m Model, id app.DashboardReconcileStepID) bool {
+	return app.DashboardReconcilePlanHasStep(dashboardReconcilePlanItems(m), id)
 }
 
 func doctorHasIgnoreFindings(m Model) bool {
-	if m.doctorResult == nil {
-		return false
-	}
-	for _, check := range m.doctorResult.Checks {
-		if check.ID == "dots.ignore" && check.Status == app.DoctorStatusWarn {
-			return true
-		}
-	}
-	return false
+	_, ok := app.DotsIgnoreFinding(m.doctorResult)
+	return ok
 }
 
-func statusFixIgnorePlanDetail(m Model) string {
-	if m.doctorResult == nil {
-		return ""
+func dashboardReconcilePlanInput(m Model) app.DashboardReconcilePlanInput {
+	return app.DashboardReconcilePlanInput{
+		Tools:           m.allTools,
+		DiscoveredTools: m.discoveredTools,
+		IgnoredTools:    dashboardIgnoredTools(m),
+		UpgradeBusy:     len(m.upgradingKeys) > 0,
+		DotsConfigured:  m.dotsSyncAvailCached.Configured,
+		DotsDisabled:    m.dotsSyncAvailCached.Reason == app.DotsSyncAvailabilityDisabled,
+		DotsBusy:        m.dotsLoading || m.dotsPreparing,
+		DotsEntries:     m.dotsEntries,
+		DotsGitStatus:   m.dotsGitStatus,
+		Doctor:          m.doctorResult,
 	}
-	for _, check := range m.doctorResult.Checks {
-		if check.ID == "dots.ignore" && check.Status == app.DoctorStatusWarn {
-			return check.Message
+}
+
+func dashboardIgnoredTools(m Model) map[string]bool {
+	if len(m.ignoreSet) == 0 && len(m.ignoreLabels) == 0 {
+		return nil
+	}
+	ignored := make(map[string]bool, len(m.ignoreSet)+len(m.ignoreLabels))
+	for name, ok := range m.ignoreSet {
+		if ok {
+			ignored[name] = true
 		}
 	}
-	return ""
+	for name, label := range m.ignoreLabels {
+		if strings.TrimSpace(label) != "" {
+			ignored[name] = true
+		}
+	}
+	return ignored
+}
+
+func dotsViewAvailability(m Model) app.DotsSyncAvailability {
+	availability := m.dotsSyncAvailCached
+	switch availability.Reason {
+	case app.DotsSyncAvailabilityReady, app.DotsSyncAvailabilityNoRepo, app.DotsSyncAvailabilityDisabled, app.DotsSyncAvailabilityUnknown:
+		return availability
+	default:
+		return app.DotsSyncAvailability{Reason: app.DotsSyncAvailabilityNoRepo}
+	}
+}
+
+func dotsViewDisabled(m Model) bool {
+	return dotsViewAvailability(m).Reason == app.DotsSyncAvailabilityDisabled
+}
+
+func dotsViewUnconfigured(m Model) bool {
+	return dotsViewAvailability(m).Reason == app.DotsSyncAvailabilityNoRepo
+}
+
+func dotsViewBlocked(m Model) bool {
+	reason := dotsViewAvailability(m).Reason
+	return reason == app.DotsSyncAvailabilityNoRepo || reason == app.DotsSyncAvailabilityDisabled
 }
 
 func statusDotfilesOverviewValue(m Model, counts app.DotFileCounts) string {
 	switch {
-	case config.BoolVal(m.settings.DotsDisabled):
+	case dotsViewDisabled(m):
 		return m.palette.styleHelp.Render("disabled")
-	case strings.TrimSpace(m.settings.DotsRepo) == "":
+	case dotsViewUnconfigured(m):
 		return m.palette.styleHelp.Render("not set")
 	case counts.OutOfSync > 0:
 		return m.palette.styleOutdated.Render(dotRatioText(counts))
@@ -513,9 +405,9 @@ func statusDotfilesOverviewValue(m Model, counts app.DotFileCounts) string {
 
 func statusDotOverviewSummary(m Model, counts app.DotFileCounts) string {
 	switch {
-	case config.BoolVal(m.settings.DotsDisabled):
+	case dotsViewDisabled(m):
 		return "Dotfile sync disabled for this host."
-	case strings.TrimSpace(m.settings.DotsRepo) == "":
+	case dotsViewUnconfigured(m):
 		return "Set dots_repo to use dotfiles."
 	default:
 		return statusDotSummary(counts, m.dotsGitStatus)
@@ -524,9 +416,9 @@ func statusDotOverviewSummary(m Model, counts app.DotFileCounts) string {
 
 func statusDotOverviewDetails(m Model, counts app.DotFileCounts) []string {
 	switch {
-	case config.BoolVal(m.settings.DotsDisabled):
+	case dotsViewDisabled(m):
 		return statusDetailLines(m, "Dotfile sync disabled for this host.")
-	case strings.TrimSpace(m.settings.DotsRepo) == "":
+	case dotsViewUnconfigured(m):
 		return statusDetailLines(m, "Set dots_repo to use dotfiles.")
 	default:
 		return statusDotDetails(m, counts)
@@ -561,7 +453,7 @@ func statusDotDetails(m Model, counts app.DotFileCounts) []string {
 		}
 	}
 	details = append(details, statusDotsHistoryDetails(m)...)
-	if repo := strings.TrimSpace(m.settings.DotsRepo); repo != "" {
+	if repo := strings.TrimSpace(dotsRepoPathForView(m)); repo != "" {
 		details = append(details, statusDetailLine(m, "repo "+repo))
 	}
 	if len(details) == 0 {
@@ -602,7 +494,7 @@ func statusDotsActiveQueuedNames(m Model) ([]string, []string) {
 func statusDotAttentionSummary(counts app.DotFileCounts, gitStatus string) string {
 	var parts []string
 	if counts.OutOfSync > 0 {
-		parts = append(parts, pluralCount(counts.OutOfSync, "out-of-sync entry", "out-of-sync entries"))
+		parts = append(parts, textutil.PluralCount(counts.OutOfSync, "out-of-sync entry", "out-of-sync entries"))
 	}
 	if strings.TrimSpace(gitStatus) != "" {
 		parts = append(parts, "repo dirty")
@@ -628,7 +520,7 @@ func statusDotAttentionDetails(m Model, counts app.DotFileCounts) []string {
 		}
 	}
 	if counts.OutOfSync > 0 {
-		details = append(details, statusDetailLine(m, pluralCount(counts.OutOfSync, "entry out of sync", "entries out of sync")))
+		details = append(details, statusDetailLine(m, textutil.PluralCount(counts.OutOfSync, "entry out of sync", "entries out of sync")))
 	}
 	if strings.TrimSpace(m.dotsGitStatus) != "" {
 		lines, overflow := truncatedGitStatus(m.dotsGitStatus, 3)
@@ -657,39 +549,26 @@ func statusDotIgnoredSuffix(counts app.DotFileCounts) string {
 }
 
 func statusAutomationNeedsAttention(m Model) bool {
-	if strings.TrimSpace(m.dotsReminderServiceErr) != "" || strings.TrimSpace(m.dotsWatchServiceErr) != "" {
-		return true
-	}
-	if !statusAnyAutomationInstalled(m) {
-		return false
-	}
-	return strings.TrimSpace(m.settings.DotsRepo) == "" || config.BoolVal(m.settings.DotsDisabled)
+	return dashboardDotsAutomationStatus(m).NeedsAttention
 }
 
 func statusAnyAutomationInstalled(m Model) bool {
-	return (m.dotsReminderService != nil && m.dotsReminderService.Installed) ||
-		(m.dotsWatchService != nil && m.dotsWatchService.Installed)
+	return dashboardDotsAutomationStatus(m).Installed > 0
 }
 
 func statusAutomationValue(m Model) string {
 	if m.dotsServicesRefreshing {
 		return statusLoadingValue(m, "loading")
 	}
-	if strings.TrimSpace(m.dotsReminderServiceErr) != "" || strings.TrimSpace(m.dotsWatchServiceErr) != "" {
+	status := dashboardDotsAutomationStatus(m)
+	if status.HasError {
 		return m.palette.styleOutdated.Render("[warn]")
 	}
-	if statusAnyAutomationInstalled(m) && (strings.TrimSpace(m.settings.DotsRepo) == "" || config.BoolVal(m.settings.DotsDisabled)) {
+	if status.Blocked {
 		return m.palette.styleOutdated.Render("[blocked]")
 	}
-	installed := 0
-	if m.dotsReminderService != nil && m.dotsReminderService.Installed {
-		installed++
-	}
-	if m.dotsWatchService != nil && m.dotsWatchService.Installed {
-		installed++
-	}
-	text := fmt.Sprintf("[%d/2 ON]", installed)
-	switch installed {
+	text := fmt.Sprintf("[%d/2 ON]", status.Installed)
+	switch status.Installed {
 	case 2:
 		return m.palette.styleInstalled.Render(text)
 	case 1:
@@ -703,16 +582,9 @@ func statusAutomationSummary(m Model) string {
 	parts := []string{statusReminderAutomationSummary(m), statusWatchAutomationSummary(m)}
 	summary := strings.Join(parts, " · ")
 	if m.dotsServicesRefreshing {
-		return statusStaleSummary("Refreshing service status…", summary, statusAnyAutomationKnown(m))
+		return statusStaleSummary("Refreshing service status…", summary, dashboardDotsAutomationStatus(m).Known)
 	}
 	return summary
-}
-
-func statusAnyAutomationKnown(m Model) bool {
-	return m.dotsReminderService != nil ||
-		m.dotsWatchService != nil ||
-		strings.TrimSpace(m.dotsReminderServiceErr) != "" ||
-		strings.TrimSpace(m.dotsWatchServiceErr) != ""
 }
 
 func statusReminderAutomationSummary(m Model) string {
@@ -723,7 +595,7 @@ func statusReminderAutomationSummary(m Model) string {
 	if service == nil || !service.Installed {
 		return "Reminder [OFF]"
 	}
-	return fmt.Sprintf("Reminder [ON] %s notify %s", formatSettingsDuration(dotsReminderIntervalFromService(service)), onOffText(service.Notify))
+	return fmt.Sprintf("Reminder [ON] %s notify %s", formatSettingsDuration(app.DotsReminderInterval(service)), onOffText(service.Notify))
 }
 
 func statusWatchAutomationSummary(m Model) string {
@@ -734,7 +606,7 @@ func statusWatchAutomationSummary(m Model) string {
 	if service == nil || !service.Installed {
 		return "Watch [OFF]"
 	}
-	return "Watch [ON] debounce " + formatSettingsDuration(dotsWatchDebounceFromService(service))
+	return "Watch [ON] debounce " + formatSettingsDuration(app.DotsWatchDebounce(service))
 }
 
 func statusAutomationDetails(m Model) []string {
@@ -760,7 +632,7 @@ func statusReminderAutomationDetail(m Model) string {
 	}
 	return fmt.Sprintf("Reminder [ON] %s every %s notify %s",
 		statusServicePlatform(service.Platform),
-		formatSettingsDuration(dotsReminderIntervalFromService(service)),
+		formatSettingsDuration(app.DotsReminderInterval(service)),
 		onOffText(service.Notify),
 	)
 }
@@ -775,7 +647,7 @@ func statusWatchAutomationDetail(m Model) string {
 	}
 	return fmt.Sprintf("Watch [ON] %s debounce %s",
 		statusServicePlatform(service.Platform),
-		formatSettingsDuration(dotsWatchDebounceFromService(service)),
+		formatSettingsDuration(app.DotsWatchDebounce(service)),
 	)
 }
 
@@ -791,10 +663,10 @@ func statusDoctorAttentionSummary(m Model, labels []string) string {
 	s := m.doctorResult.Summary
 	var parts []string
 	if s.Fail > 0 {
-		parts = append(parts, pluralCount(s.Fail, "fail", "fail"))
+		parts = append(parts, textutil.PluralCount(s.Fail, "fail", "fail"))
 	}
 	if s.Warn > 0 {
-		parts = append(parts, pluralCount(s.Warn, "warn", "warn"))
+		parts = append(parts, textutil.PluralCount(s.Warn, "warn", "warn"))
 	}
 	if len(labels) > 0 {
 		parts = append(parts, statusInlineNames(labels, 3))
@@ -803,14 +675,25 @@ func statusDoctorAttentionSummary(m Model, labels []string) string {
 }
 
 func statusDotsServiceReadinessWarnings(m Model) []string {
-	var details []string
-	if strings.TrimSpace(m.settings.DotsRepo) == "" {
-		details = append(details, statusDetailLine(m, "Blocked: dots_repo is not configured."))
-	}
-	if config.BoolVal(m.settings.DotsDisabled) {
-		details = append(details, statusDetailLine(m, "Blocked: dotfile sync is disabled for this host."))
+	warnings := dashboardDotsAutomationStatus(m).ReadinessWarnings
+	details := make([]string, 0, len(warnings))
+	for _, warning := range warnings {
+		details = append(details, statusDetailLine(m, warning))
 	}
 	return details
+}
+
+func dashboardDotsAutomationStatus(m Model) app.DashboardDotsAutomationStatus {
+	return app.BuildDashboardDotsAutomationStatus(app.DashboardDotsAutomationInput{
+		Services: app.DotsServicesStatus{
+			Reminder:      m.dotsReminderService,
+			ReminderError: m.dotsReminderServiceErr,
+			Watch:         m.dotsWatchService,
+			WatchError:    m.dotsWatchServiceErr,
+		},
+		DotsConfigured: m.dotsConfiguredCached,
+		DotsDisabled:   m.dotsSyncAvailCached.Reason == app.DotsSyncAvailabilityDisabled,
+	})
 }
 
 func onOffText(enabled bool) string {

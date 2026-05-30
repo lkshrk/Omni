@@ -89,8 +89,9 @@ type SyncOptions struct {
 	DryRun bool
 	// EntryOrder optionally names entries in the preferred sync/progress order.
 	// Entries not listed keep their relative order after the ordered entries.
-	EntryOrder []string
-	Progress   func(SyncProgressEvent)
+	EntryOrder               []string
+	SuppressUnchangedHistory bool
+	Progress                 func(SyncProgressEvent)
 }
 
 // UnlinkOptions configures the behaviour of Manager.UnlinkAll.

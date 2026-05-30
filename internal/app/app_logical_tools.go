@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/provider"
 )
 
@@ -113,27 +114,7 @@ func (a *App) MoveToolToGroup(name, groupName string) error {
 	groupName = compatibilityGroupName(groupName)
 
 	return a.withConfig(func(cfg *config.RootConfig) error {
-		if _, ok := cfg.Tools[name]; !ok {
-			return fmt.Errorf("logical tool %q not found; run 'omni tools set %s --provider <ecosystem-provider>' first", name, name)
-		}
-		changed := false
-		for _, existing := range cfg.Groups {
-			if existing == nil || existing.BaseName() == groupName {
-				continue
-			}
-			if filterToolMemberships(existing, name) {
-				changed = true
-			}
-		}
-		group := ensureGroupInConfig(cfg, groupName)
-		if containsToolMembership(group.Tools, name) {
-			if changed {
-				return nil
-			}
-			return errSkipSave
-		}
-		group.Tools = append(group.Tools, config.ToolEntry{Name: name})
-		return nil
+		return moveToolToGroupInConfig(cfg, name, groupName)
 	})
 }
 
@@ -146,14 +127,7 @@ func (a *App) RemoveToolFromGroup(name, groupName string) error {
 	groupName = compatibilityGroupName(groupName)
 
 	return a.withConfig(func(cfg *config.RootConfig) error {
-		group := findGroupInConfig(cfg, groupName)
-		if group == nil {
-			return fmt.Errorf("group %q not found", groupName)
-		}
-		if !filterToolMemberships(group, name) {
-			return errSkipSave
-		}
-		return nil
+		return removeToolFromGroupInConfig(cfg, name, groupName)
 	})
 }
 
@@ -171,6 +145,73 @@ func (a *App) SetToolIgnore(name string, ignored bool) error {
 		cfg.Tools[name] = spec
 		return nil
 	})
+}
+
+type ToolIgnoreScopeKind string
+
+const (
+	ToolIgnoreScopeTool  ToolIgnoreScopeKind = "tool"
+	ToolIgnoreScopeGroup ToolIgnoreScopeKind = "group"
+	ToolIgnoreScopeHost  ToolIgnoreScopeKind = "host"
+)
+
+type ToolIgnoreScopeChange struct {
+	Kind    ToolIgnoreScopeKind
+	Group   string
+	Ignored bool
+}
+
+type ToolIgnoreScopesChange struct {
+	Ignored          bool
+	HostScopeChanged bool
+	Tools            []*database.ToolCache
+	ScopeDisplay     *ToolScopeDisplayState
+}
+
+func (a *App) SetToolIgnoreScopesWithState(ctx context.Context, name string, changes []ToolIgnoreScopeChange) (*ToolIgnoreScopesChange, error) {
+	hostChanged := false
+	for _, change := range changes {
+		var err error
+		switch change.Kind {
+		case ToolIgnoreScopeTool:
+			err = a.SetToolIgnore(name, change.Ignored)
+		case ToolIgnoreScopeGroup:
+			err = a.SetGroupIgnore(change.Group, name, change.Ignored)
+		case ToolIgnoreScopeHost:
+			hostChanged = true
+			err = a.SetGlobalToolIgnore(name, change.Ignored)
+		default:
+			err = fmt.Errorf("unknown ignore scope %q", change.Kind)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	tools, err := a.ListTools(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	var hostIgnore []string
+	info, err := a.HostStatus()
+	if err != nil {
+		return nil, err
+	}
+	if info != nil && info.Active != "" {
+		if host, ok := info.Hosts[info.Active]; ok {
+			hostIgnore = host.Ignore
+		}
+	}
+	scopeDisplay, err := a.ToolScopeDisplayStateWithFallback(ctx, hostIgnore)
+	if err != nil {
+		return nil, err
+	}
+	return &ToolIgnoreScopesChange{
+		Ignored:          scopeDisplay.IgnoreLabels[name] != "",
+		HostScopeChanged: hostChanged,
+		Tools:            tools,
+		ScopeDisplay:     scopeDisplay,
+	}, nil
 }
 
 func (a *App) SetGroupIgnore(groupName, name string, ignored bool) error {
@@ -193,6 +234,95 @@ func (a *App) SetToolHostInstallSpec(name, providerName, packageName, installWit
 
 func (a *App) SetToolDefaultInstallSpec(name, providerName, packageName, installWith string) error {
 	return a.setToolInstallSpec(name, "", providerName, packageName, installWith)
+}
+
+type ToolProviderScopeKind string
+
+const (
+	ToolProviderScopeHost      ToolProviderScopeKind = "provider-host"
+	ToolProviderScopeTool      ToolProviderScopeKind = "provider-tool"
+	ToolProviderScopeEcosystem ToolProviderScopeKind = "provider-ecosystem"
+)
+
+type ToolProviderScopeOptions struct {
+	Kind         ToolProviderScopeKind
+	ProviderName string
+	Package      string
+	InstallWith  string
+}
+
+type ToolProviderScopeChoice struct {
+	Kind   ToolProviderScopeKind
+	Label  string
+	Detail string
+}
+
+type ToolProviderScopeChange struct {
+	Tools        []*database.ToolCache
+	ScopeDisplay *ToolScopeDisplayState
+}
+
+func DefaultToolProviderScopeChoices(t *database.ToolCache) []ToolProviderScopeChoice {
+	return toolProviderScopeChoices(t, provider.BuiltinEcosystemFor, provider.BuiltinIsEcosystem)
+}
+
+func (a *App) ToolProviderScopeChoices(t *database.ToolCache) []ToolProviderScopeChoice {
+	return toolProviderScopeChoices(t, a.providerEcosystem, a.knownEcosystemProvider)
+}
+
+func toolProviderScopeChoices(
+	t *database.ToolCache,
+	ecosystemFor func(string) (string, bool),
+	isEcosystem func(string) bool,
+) []ToolProviderScopeChoice {
+	if t == nil || t.InstalledWith == "" {
+		return []ToolProviderScopeChoice{{Kind: ToolProviderScopeHost, Label: "installed provider unknown", Detail: "refresh first"}}
+	}
+	choices := []ToolProviderScopeChoice{
+		{Kind: ToolProviderScopeHost, Label: "this tool on this host", Detail: t.InstalledWith},
+		{Kind: ToolProviderScopeTool, Label: "this tool everywhere", Detail: t.InstalledWith},
+	}
+	if ecosystem, ok := ecosystemFor(t.Provider); ok && isEcosystem(ecosystem) {
+		choices = append(choices, ToolProviderScopeChoice{
+			Kind:   ToolProviderScopeEcosystem,
+			Label:  ecosystem + " manager on this host",
+			Detail: t.InstalledWith,
+		})
+	}
+	return choices
+}
+
+func (a *App) SetToolProviderScopeWithState(ctx context.Context, name string, opts ToolProviderScopeOptions) (*ToolProviderScopeChange, error) {
+	if opts.InstallWith == "" {
+		return nil, fmt.Errorf("installed provider is unknown")
+	}
+	var err error
+	switch opts.Kind {
+	case ToolProviderScopeHost:
+		err = a.SetToolHostInstallSpec(name, opts.ProviderName, opts.Package, opts.InstallWith)
+	case ToolProviderScopeTool:
+		err = a.SetToolDefaultInstallSpec(name, opts.ProviderName, opts.Package, opts.InstallWith)
+	case ToolProviderScopeEcosystem:
+		err = a.PinEcosystemForHost(ctx, opts.ProviderName, opts.InstallWith)
+	default:
+		err = fmt.Errorf("unknown provider scope %q", opts.Kind)
+	}
+	if err != nil {
+		return nil, err
+	}
+	tools, err := a.ListTools(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	scopeDisplay, err := a.ToolScopeDisplayState(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if scopeDisplay.ToolProviderPins == nil {
+		scopeDisplay.ToolProviderPins = make(map[string]string)
+	}
+	scopeDisplay.ToolProviderPins[name] = opts.InstallWith
+	return &ToolProviderScopeChange{Tools: tools, ScopeDisplay: scopeDisplay}, nil
 }
 
 // ClearToolInstallOverride removes the effective install_with override for a

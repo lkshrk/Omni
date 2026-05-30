@@ -38,6 +38,7 @@ func (a *App) DotsAdd(ctx context.Context, path string, opts DotsAddOptions) (op
 	historyEntry := ""
 	defer func() {
 		a.recordDotsHistoryResult(ctx, "add", historyEntry, repoPath, ops, err, false)
+		a.refreshDotsStateAfterSuccess(ctx, &err, false)
 	}()
 
 	abs, err := expandAndStat(path)
@@ -200,6 +201,19 @@ func (a *App) DotsListVariants(name string) ([]DotVariantInfo, error) {
 		})
 	}
 	return variants, nil
+}
+
+func (a *App) DotsHasActiveHostVariant(name string) (bool, error) {
+	variants, err := a.DotsListVariants(name)
+	if err != nil {
+		return false, err
+	}
+	for _, variant := range variants {
+		if variant.Active && !variant.Default {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (a *App) DotsAddHostVariant(ctx context.Context, name string, opts DotsAddVariantOptions) (DotVariantInfo, []dots.Op, error) {

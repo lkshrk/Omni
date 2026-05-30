@@ -29,47 +29,17 @@ const (
 )
 
 type RefreshInstalledProgressEvent struct {
-	Provider string
-	Name     string
-	Index    int
-	Total    int
+	Provider      string
+	ProviderLabel string
+	Name          string
+	Index         int
+	Total         int
 }
 
 type RefreshDiscoveredProgressEvent struct {
 	Provider string
 	Index    int
 	Total    int
-}
-
-func RefreshInstalledProgressText(event RefreshInstalledProgressEvent) string {
-	total := event.Total
-	if total <= 0 {
-		total = event.Index
-	}
-	index := event.Index
-	if index < 0 {
-		index = 0
-	}
-	providerName := event.Provider
-	if providerName == "" {
-		providerName = "tool"
-	}
-	return fmt.Sprintf("Refreshing tools %d/%d: %s/%s…", index, total, providerName, event.Name)
-}
-
-func RefreshDiscoveredProgressText(event RefreshDiscoveredProgressEvent) string {
-	total := event.Total
-	if total <= 0 {
-		total = event.Index
-	}
-	index := event.Index
-	if index < 0 {
-		index = 0
-	}
-	if event.Provider == "" {
-		return fmt.Sprintf("Finding local tools %d/%d…", index, total)
-	}
-	return fmt.Sprintf("Finding local tools %d/%d: %s…", index, total, event.Provider)
 }
 
 type ToolListOptions struct {
@@ -102,33 +72,12 @@ func (a *App) ListTools(ctx context.Context, providerFilter string) ([]*database
 	return tools, nil
 }
 
-func (a *App) ConfiguredProviders(ctx context.Context) ([]string, error) {
-	counts, err := a.ConfiguredProviderToolCounts(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return configuredProvidersFromCounts(counts), nil
-}
-
 func configuredProvidersFromCounts(counts map[string]int) []string {
 	providers := make([]string, 0, len(counts))
 	for p := range counts {
 		providers = append(providers, p)
 	}
 	return providers
-}
-
-func (a *App) ConfiguredProviderToolCounts(ctx context.Context) (map[string]int, error) {
-	cfg, err := a.loadConfig()
-	if err != nil {
-		return nil, err
-	}
-	return a.configuredProviderToolCountsFromConfig(ctx, cfg), nil
-}
-
-func (a *App) configuredProviderToolCountsFromConfig(ctx context.Context, cfg *config.RootConfig) map[string]int {
-	resolved, _ := a.resolveTools(ctx, cfg, cfg.Groups)
-	return a.configuredProviderToolCountsFromResolved(resolved)
 }
 
 func (a *App) configuredProviderToolCountsFromResolved(tools []resolvedTool) map[string]int {
@@ -444,6 +393,15 @@ func installedOwnerUpsertWithMetadata(t config.ToolEntry, owner string, installe
 	return upsert
 }
 
+func resolvedProviderConcreteName(ctx context.Context, p provider.Provider) string {
+	if cr, ok := p.(provider.ConcreteResolver); ok {
+		if concrete, err := cr.ResolvedName(ctx); err == nil {
+			return concrete
+		}
+	}
+	return ""
+}
+
 func applyPrivilegeMetadata(upsert *database.ToolCache, plan provider.PrivilegePlan) {
 	if upsert == nil || !plan.RequiresPrivilege() {
 		return
@@ -463,25 +421,34 @@ func installedMapFromMetadata(metadata map[string]provider.InstalledMetadata) ma
 }
 
 func classifyToolState(t *database.ToolCache, ignoreSet map[string]struct{}, resolved map[string]string) ToolListState {
+	if t == nil {
+		return ToolStateMissing
+	}
 	if t.FailedAt != nil {
 		return ToolStateFailed
 	}
-	if _, ignored := ignoreSet[t.Name]; ignored {
+	_, ignored := ignoreSet[t.Name]
+	classification := ClassifyToolView(t, ToolClassificationContext{
+		Ignored:                ignored,
+		EffectiveSystemManager: resolved[provider.EcosystemSystem],
+		EffectivePythonManager: resolved[provider.EcosystemPython],
+		EffectiveNodeManager:   resolved[provider.EcosystemNode],
+	})
+	if classification.Section == ToolViewSectionIgnored {
 		return ToolStateIgnored
 	}
-	if t.Installed && t.Outdated {
+	if classification.Section == ToolViewSectionUpdates {
 		return ToolStateOutdated
 	}
-	if !t.Tracked {
+	switch classification.SyncStatus {
+	case ToolSyncUnclaimed:
 		return ToolStateUnclaimed
-	}
-	if t.Tracked && !t.Installed {
+	case ToolSyncMissing:
 		return ToolStateMissing
-	}
-	if concrete := resolved[t.Provider]; concrete != "" && t.InstalledWith != "" && t.InstalledWith != concrete {
+	case ToolSyncWrongProvider:
 		return ToolStateOutOfSync
 	}
-	if t.Installed {
+	if classification.Section == ToolViewSectionInstalled {
 		return ToolStateInstalled
 	}
 	return ToolStateMissing
@@ -520,8 +487,8 @@ func toolStateMatches(state, filter ToolListState) bool {
 // RefreshInstalled updates the DB install status for every configured tool
 // using the provider's current state. Does not install missing tools.
 // Best-effort: errors on individual providers or tools are silently skipped.
-// The optional progress callback is called with configured tool progress
-// (e.g. "Refreshing tools 3/12: brew/git…"); pass nil to omit progress.
+// The optional progress callback is called with provider scan progress
+// (e.g. "Scanning system/brew… (1/3)"); pass nil to omit progress.
 func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error {
 	defer profile.Start("app.refresh.installed.total")()
 
@@ -547,35 +514,13 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 		return err
 	}
 
-	// Build a set of providers that have tools in config — used to skip
-	// provider work that cannot affect any configured tool.
-	configProviders := make(map[string]bool, len(tools))
-	for _, t := range tools {
-		configProviders[a.operationProviderName(t)] = true
-	}
-
 	// Resolve availability once in parallel; reuse the result for both the
 	// scanTotal count and the main scan loop below to avoid two Available
 	// passes per provider.
 	stop = profile.Start("app.refresh.installed.available_providers")
 	available := a.availableProviders(ctx)
 	stop()
-	toolIdx := 0
-	emitTool := func(t config.ToolEntry, opProvider string) {
-		if progress == nil {
-			return
-		}
-		toolIdx++
-		if opProvider == "" {
-			opProvider = t.Provider
-		}
-		progress(RefreshInstalledProgressText(RefreshInstalledProgressEvent{
-			Provider: opProvider,
-			Name:     t.Name,
-			Index:    toolIdx,
-			Total:    len(tools),
-		}))
-	}
+	scanProgress := a.newRefreshInstalledScanProgress(ctx, progress, tools, available)
 
 	// Build installed map per provider using bulk check where available.
 	// multiMaps: provider → name → InstalledEntry (per-tool manager attribution).
@@ -591,6 +536,7 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 	// single failing backend doesn't block discovery for others.
 	stop = profile.Start("app.refresh.installed.bulk_maps")
 	for _, p := range available {
+		scanProgress.emitProvider(p.Name())
 		// MultiManagerBulkChecker takes priority: probes all backends for per-tool attribution.
 		if mbc, ok := p.(provider.MultiManagerBulkChecker); ok {
 			entries, err := mbc.InstalledByManager(ctx)
@@ -625,7 +571,9 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 		// implement ConcreteResolver; concrete providers are their own backend.
 		installedWith := p.Name()
 		if cr, ok := p.(provider.ConcreteResolver); ok {
-			if name, resolveErr := cr.ResolvedName(ctx); resolveErr == nil && name != "" {
+			if name, cached := scanProgress.resolvedProviderName(p.Name()); cached {
+				installedWith = name
+			} else if name, resolveErr := cr.ResolvedName(ctx); resolveErr == nil && name != "" {
 				installedWith = name
 			} else {
 				installedWith = "" // prefer unknown over stale ecosystem name
@@ -642,7 +590,6 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 		keys := toolEntryLookupKeys(t)
 
 		opProvider := a.operationProviderName(t)
-		emitTool(t, opProvider)
 		if owner := cachedOwners[resolvedToolKey(t)]; owner != "" && owner != opProvider && t.InstallWith == "" {
 			if upsert, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, installedMaps, metadataMaps); handled {
 				if upsert == nil {
@@ -698,6 +645,7 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 		if !avail {
 			continue
 		}
+		scanProgress.emitProvider(opProvider)
 		installed, ver, err := a.isInstalledWithEntry(ctx, p, opProvider, t)
 		if err != nil {
 			continue
@@ -726,6 +674,89 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 	}
 	stop()
 	return nil
+}
+
+type refreshInstalledScanProgress struct {
+	progress         func(string)
+	index            int
+	total            int
+	labelsByProvider map[string][]string
+	emitted          map[string]bool
+	resolvedConcrete map[string]string
+}
+
+func (a *App) newRefreshInstalledScanProgress(ctx context.Context, progress func(string), tools []config.ToolEntry, available []provider.Provider) *refreshInstalledScanProgress {
+	scan := &refreshInstalledScanProgress{progress: progress}
+	if progress == nil {
+		return scan
+	}
+	availableByName := make(map[string]provider.Provider, len(available))
+	for _, p := range available {
+		availableByName[p.Name()] = p
+	}
+	scan.labelsByProvider = make(map[string][]string)
+	scan.emitted = make(map[string]bool)
+	scan.resolvedConcrete = make(map[string]string)
+	seenLabels := make(map[string]bool)
+	for _, t := range tools {
+		opProvider := a.operationProviderName(t)
+		if opProvider == "" {
+			continue
+		}
+		p := availableByName[opProvider]
+		if p == nil {
+			continue
+		}
+		label := a.refreshInstalledScanLabel(ctx, t, opProvider, p, scan.resolvedConcrete)
+		if label == "" || seenLabels[label] {
+			continue
+		}
+		seenLabels[label] = true
+		scan.labelsByProvider[opProvider] = append(scan.labelsByProvider[opProvider], label)
+		scan.total++
+	}
+	return scan
+}
+
+func (p *refreshInstalledScanProgress) emitProvider(providerName string) {
+	if p == nil || p.progress == nil {
+		return
+	}
+	for _, label := range p.labelsByProvider[providerName] {
+		if p.emitted[label] {
+			continue
+		}
+		p.emitted[label] = true
+		p.index++
+		p.progress(RefreshProviderScanProgressText(label, p.index, p.total))
+	}
+}
+
+func (p *refreshInstalledScanProgress) resolvedProviderName(providerName string) (string, bool) {
+	if p == nil || p.resolvedConcrete == nil {
+		return "", false
+	}
+	name, ok := p.resolvedConcrete[providerName]
+	return name, ok
+}
+
+func (a *App) refreshInstalledScanLabel(ctx context.Context, t config.ToolEntry, opProvider string, p provider.Provider, resolvedConcrete map[string]string) string {
+	if t.Provider != "" && t.InstallWith != "" && t.InstallWith != t.Provider && a.registry.IsEcosystemProvider(t.Provider) {
+		return ProviderScanDisplayLabel(t.Provider, t.InstallWith)
+	}
+	if concrete, ok := resolvedConcrete[opProvider]; ok {
+		return ProviderScanDisplayLabel(opProvider, concrete)
+	}
+	if cr, ok := p.(provider.ConcreteResolver); ok {
+		concrete, err := cr.ResolvedName(ctx)
+		if err != nil {
+			resolvedConcrete[opProvider] = ""
+			return opProvider
+		}
+		resolvedConcrete[opProvider] = concrete
+		return ProviderScanDisplayLabel(opProvider, concrete)
+	}
+	return opProvider
 }
 
 // RefreshProviderInstalled updates the DB install status for all configured tools
@@ -773,15 +804,17 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 	if !avail {
 		return nil
 	}
+	providerLabel := ProviderScanDisplayLabel(provName, resolvedProviderConcreteName(ctx, p))
 	emitTool := func(index int, t config.ToolEntry) {
 		if progress == nil {
 			return
 		}
 		progress(RefreshInstalledProgressEvent{
-			Provider: provName,
-			Name:     t.Name,
-			Index:    index + 1,
-			Total:    len(provTools),
+			Provider:      provName,
+			ProviderLabel: providerLabel,
+			Name:          t.Name,
+			Index:         index + 1,
+			Total:         len(provTools),
 		})
 	}
 	writeCtx := context.WithoutCancel(ctx)
@@ -1130,6 +1163,28 @@ func (a *App) ListDiscovered(ctx context.Context) ([]*database.ToolCache, error)
 	return a.listDiscoveredFromConfig(ctx, cfg, a.ResolvedEcosystemProviders(ctx))
 }
 
+type ToolDisplaySnapshot struct {
+	Tools                  []*database.ToolCache
+	Discovered             []*database.ToolCache
+	EffectiveSystemManager string
+}
+
+func (a *App) ToolDisplaySnapshot(ctx context.Context) (*ToolDisplaySnapshot, error) {
+	tools, err := a.ListTools(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	discovered, err := a.ListDiscovered(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &ToolDisplaySnapshot{
+		Tools:                  tools,
+		Discovered:             discovered,
+		EffectiveSystemManager: a.EffectiveSystemManager(ctx),
+	}, nil
+}
+
 func (a *App) listDiscoveredFromConfig(ctx context.Context, cfg *config.RootConfig, ecosystemProviders map[string]string) ([]*database.ToolCache, error) {
 	discovered, err := a.readDB().ListDiscovered(ctx)
 	if err != nil {
@@ -1398,6 +1453,16 @@ func (a *App) Search(ctx context.Context, query, providerFilter string) ([]provi
 		errs = append(errs, err)
 	}
 	return results, errors.Join(errs...)
+}
+
+func SearchResultDisplayProvider(r provider.SearchResult) string {
+	if r.SourceProvider == "" || r.SourceProvider == r.Provider {
+		return ""
+	}
+	if ToolProviderEcosystem(r.SourceProvider) != ToolProviderEcosystem(r.Provider) {
+		return ""
+	}
+	return r.SourceProvider
 }
 
 func (a *App) cacheSearchMetadata(ctx context.Context, results []provider.SearchResult) error {

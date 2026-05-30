@@ -9,7 +9,6 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/provider"
 )
 
@@ -51,6 +50,7 @@ type settingsRowMeta struct {
 	section string
 	hint    hintContext
 	danger  bool
+	action  app.SettingsActionID
 }
 
 var settingsRows = []settingsRowMeta{
@@ -58,6 +58,7 @@ var settingsRows = []settingsRowMeta{
 		label:   "Import Installed Tools",
 		section: "Tools",
 		hint:    hintCtxSettingsToggle,
+		action:  app.SettingsActionToggleAutoImport,
 	},
 	settingsRowSystemPriority: {
 		label:   "System Provider Order",
@@ -68,26 +69,31 @@ var settingsRows = []settingsRowMeta{
 		label:   "Track System",
 		section: "Tools",
 		hint:    hintCtxSettingsToggle,
+		action:  app.SettingsActionToggleSystemProvider,
 	},
 	settingsRowNodeProvider: {
 		label:   "Track Node",
 		section: "Tools",
 		hint:    hintCtxSettingsToggle,
+		action:  app.SettingsActionToggleNodeProvider,
 	},
 	settingsRowPythonProvider: {
 		label:   "Track Python",
 		section: "Tools",
 		hint:    hintCtxSettingsToggle,
+		action:  app.SettingsActionTogglePythonProvider,
 	},
 	settingsRowNodeManager: {
 		label:   "Node Manager",
 		section: "Managers",
 		hint:    hintCtxSettingsToggle,
+		action:  app.SettingsActionCycleNodeManager,
 	},
 	settingsRowPythonManager: {
 		label:   "Python Manager",
 		section: "Managers",
 		hint:    hintCtxSettingsToggle,
+		action:  app.SettingsActionCyclePythonManager,
 	},
 	settingsRowDotsRepo: {
 		label:   "Repository",
@@ -128,11 +134,13 @@ var settingsRows = []settingsRowMeta{
 		label:   "Commit Changes",
 		section: "Dotfiles",
 		hint:    hintCtxSettingsToggle,
+		action:  app.SettingsActionToggleDotsCommit,
 	},
 	settingsRowDotsPush: {
 		label:   "Push Changes",
 		section: "Dotfiles",
 		hint:    hintCtxSettingsToggle,
+		action:  app.SettingsActionToggleDotsPush,
 	},
 	settingsRowDoctor: {
 		label:   "Run Doctor",
@@ -170,28 +178,22 @@ type settingsDurationChoice struct {
 	value time.Duration
 }
 
-var reminderIntervalChoices = []settingsDurationChoice{
-	{label: "15m", value: 15 * time.Minute},
-	{label: "30m", value: 30 * time.Minute},
-	{label: "1h", value: time.Hour},
-	{label: "4h", value: 4 * time.Hour},
-	{label: "12h", value: 12 * time.Hour},
-	{label: "24h", value: 24 * time.Hour},
-	{label: "48h", value: 48 * time.Hour},
-	{label: "7d", value: 7 * 24 * time.Hour},
-}
-
-var watchDebounceChoices = []settingsDurationChoice{
-	{label: "500ms", value: 500 * time.Millisecond},
-	{label: "1s", value: time.Second},
-	{label: "2s", value: 2 * time.Second},
-	{label: "5s", value: 5 * time.Second},
-	{label: "10s", value: 10 * time.Second},
-	{label: "30s", value: 30 * time.Second},
-}
-
 func formatSettingLabel(label string) string {
 	return fmt.Sprintf("%-*s", settingLabelWidth, label)
+}
+
+func settingsManagerHelp(a *app.App, ecosystem string) string {
+	if a == nil {
+		return app.DefaultSettingsManagerHelp(ecosystem)
+	}
+	return a.SettingsManagerHelp(ecosystem)
+}
+
+func settingsProviderHelp(a *app.App, ecosystem string) string {
+	if a == nil {
+		return app.DefaultSettingsProviderHelp(ecosystem)
+	}
+	return a.SettingsProviderHelp(ecosystem)
 }
 
 func renderSettings(m Model) string {
@@ -276,7 +278,7 @@ func renderSettings(m Model) string {
 	}
 
 	serviceHelp := func(name string, installed bool, statusErr string, enableCopy string) string {
-		if strings.TrimSpace(m.settings.DotsRepo) == "" {
+		if dotsViewUnconfigured(m) {
 			return p.styleHelp.Render("Set a dotfiles repository before enabling " + name + ".")
 		}
 		if statusErr != "" {
@@ -298,14 +300,7 @@ func renderSettings(m Model) string {
 		return p.styleHelp.Render("Choose the " + name + " service value used on the next enable.")
 	}
 
-	providerEnabled := func(name string) bool {
-		for _, d := range m.settings.DisabledProviders {
-			if d == name {
-				return false
-			}
-		}
-		return true
-	}
+	providerState := app.SettingsProviderStateFrom(m.settings)
 
 	rows := []settingRow{
 		settingsRowAutoImport: {
@@ -315,44 +310,44 @@ func renderSettings(m Model) string {
 		},
 		settingsRowSystemPriority: {
 			settingsRowMeta: settingsRows[settingsRowSystemPriority],
-			value:           priorityVal(m.systemPriorityDisplay(m.settings.EcosystemPriority(provider.EcosystemSystem))),
+			value:           priorityVal(m.systemPriorityDisplay(providerState.SystemPriority)),
 			help:            p.styleHelp.Render("Concrete system managers tried for system tools without an install_with override."),
 		},
 		settingsRowSystemProvider: {
 			settingsRowMeta: settingsRows[settingsRowSystemProvider],
-			value:           onOff(providerEnabled(provider.EcosystemSystem)),
-			help:            p.styleHelp.Render("Track system tools on this machine (brew/apt/dnf/...)."),
+			value:           onOff(providerState.SystemEnabled),
+			help:            p.styleHelp.Render(settingsProviderHelp(m.app, provider.EcosystemSystem)),
 		},
 		settingsRowNodeProvider: {
 			settingsRowMeta: settingsRows[settingsRowNodeProvider],
-			value:           onOff(providerEnabled(provider.EcosystemNode)),
-			help:            p.styleHelp.Render("Track node tools on this machine (bun/pnpm/npm)."),
+			value:           onOff(providerState.NodeEnabled),
+			help:            p.styleHelp.Render(settingsProviderHelp(m.app, provider.EcosystemNode)),
 		},
 		settingsRowPythonProvider: {
 			settingsRowMeta: settingsRows[settingsRowPythonProvider],
-			value:           onOff(providerEnabled(provider.EcosystemPython)),
-			help:            p.styleHelp.Render("Track python tools on this machine (uv/pip3)."),
+			value:           onOff(providerState.PythonEnabled),
+			help:            p.styleHelp.Render(settingsProviderHelp(m.app, provider.EcosystemPython)),
 		},
 		settingsRowNodeManager: {
 			settingsRowMeta: settingsRows[settingsRowNodeManager],
-			value:           nodeVal(m.settings.EcosystemManager(provider.EcosystemNode)),
-			help:            p.styleHelp.Render("JS package manager (auto = bun preferred, then pnpm, then npm)."),
+			value:           nodeVal(providerState.NodeManager),
+			help:            p.styleHelp.Render(settingsManagerHelp(m.app, provider.EcosystemNode)),
 		},
 		settingsRowPythonManager: {
 			settingsRowMeta: settingsRows[settingsRowPythonManager],
-			value:           nodeVal(m.settings.EcosystemManager(provider.EcosystemPython)),
-			help:            p.styleHelp.Render("Python tool manager (auto = uv preferred, then pip3)."),
+			value:           nodeVal(providerState.PythonManager),
+			help:            p.styleHelp.Render(settingsManagerHelp(m.app, provider.EcosystemPython)),
 		},
 		settingsRowDotsRepo: {
 			settingsRowMeta: settingsRows[settingsRowDotsRepo],
-			value:           dotsRepoVal(m.settings.DotsRepo),
+			value:           dotsRepoVal(dotsRepoPathForView(m)),
 			help:            p.styleHelp.Render("Path to your dotfiles git repository."),
 		},
 		settingsRowDotsSync: {
 			settingsRowMeta: settingsRows[settingsRowDotsSync],
-			value:           onOff(!config.BoolVal(m.settings.DotsDisabled)),
+			value:           onOff(!dotsViewDisabled(m)),
 			help: func() string {
-				if config.BoolVal(m.settings.DotsDisabled) {
+				if dotsViewDisabled(m) {
 					return p.styleHelp.Render("Re-enable dotfile sync and restore managed symlinks.")
 				}
 				return p.styleHelp.Render("Disable sync: remove managed symlinks and copy files back locally.")
@@ -529,13 +524,14 @@ func renderSettings(m Model) string {
 			if i == settingsRowDotsServices {
 				write(renderDotsServiceDashboard(m, detailPrefix) + "\n")
 			} else if i == settingsRowDoctor && (m.doctorResult != nil || m.doctorErr != "") {
-				write(renderDoctorDashboard(m, detailPrefix) + "\n")
+				write(renderScrollableSettingsDoctorDashboard(m, detailPrefix) + "\n")
 			} else {
 				write(detailPrefix + row.help + "\n")
 			}
 			if hints := renderContextHints(m, settingsRowHintContext(i), hintPrefix); hints != "" {
 				write(hints + "\n")
 			}
+			buf.markCursorEnd()
 		}
 	}
 
@@ -600,13 +596,19 @@ func renderDotsWatchServiceDashboardLine(m Model, prefix string) string {
 		"  " + p.styleHelp.Render("debounce "+formatSettingsDuration(service.Debounce))
 }
 
-func renderDoctorDashboard(m Model, prefix string) string {
+func renderScrollableSettingsDoctorDashboard(m Model, prefix string) string {
+	lines := renderDoctorDashboardLines(m, prefix)
+	lines = settingsDetailWindow(m, lines, prefix, m.settingsDetailScroll, settingsDetailWindowHeight(m))
+	return strings.Join(lines, "\n")
+}
+
+func renderDoctorDashboardLines(m Model, prefix string) []string {
 	p := m.palette
 	if m.doctorErr != "" {
-		return prefix + p.styleMissing.Render("Doctor failed") + p.styleHelp.Render("  "+m.doctorErr)
+		return []string{prefix + p.styleMissing.Render("Doctor failed") + p.styleHelp.Render("  "+m.doctorErr)}
 	}
 	if m.doctorResult == nil {
-		return prefix + p.styleHelp.Render("Run doctor to collect diagnostics.")
+		return []string{prefix + p.styleHelp.Render("Run doctor to collect diagnostics.")}
 	}
 	lines := []string{
 		prefix + p.styleHelp.Render(fmt.Sprintf("Summary  %d ok  %d warn  %d fail", m.doctorResult.Summary.OK, m.doctorResult.Summary.Warn, m.doctorResult.Summary.Fail)),
@@ -615,7 +617,35 @@ func renderDoctorDashboard(m Model, prefix string) string {
 		lines = append(lines, renderDoctorCheckLine(m, prefix, check))
 		lines = append(lines, renderDoctorCheckDetails(m, prefix, check)...)
 	}
-	return strings.Join(lines, "\n")
+	return lines
+}
+
+func settingsDetailWindow(m Model, lines []string, prefix string, offset int, maxLines int) []string {
+	if maxLines <= 0 || len(lines) <= maxLines {
+		return lines
+	}
+	offset = clampRange(offset, 0, len(lines)-maxLines)
+	out := append([]string(nil), lines[offset:offset+maxLines]...)
+	if maxLines >= 3 {
+		if offset > 0 {
+			out[0] = prefix + m.palette.styleHelp.Render("…")
+		}
+		if offset+maxLines < len(lines) {
+			out[len(out)-1] = prefix + m.palette.styleHelp.Render("…")
+		}
+	}
+	return out
+}
+
+func (m Model) settingsDetailScrollMax() int {
+	if m.settingsCursor != settingsRowDoctor || (m.doctorResult == nil && m.doctorErr == "") {
+		return 0
+	}
+	return max(len(renderDoctorDashboardLines(m, textRowContentPrefix()))-settingsDetailWindowHeight(m), 0)
+}
+
+func settingsDetailWindowHeight(m Model) int {
+	return max(listAvailableHeight(m)-4, 1)
 }
 
 func renderDoctorCheckLine(m Model, prefix string, check app.DoctorCheck) string {
@@ -671,14 +701,14 @@ func (m Model) currentDotsReminderInterval() time.Duration {
 	if m.dotsReminderInterval > 0 {
 		return m.dotsReminderInterval
 	}
-	return dotsReminderIntervalFromService(m.dotsReminderService)
+	return app.DotsReminderInterval(m.dotsReminderService)
 }
 
 func (m Model) currentDotsWatchDebounce() time.Duration {
 	if m.dotsWatchDebounce > 0 {
 		return m.dotsWatchDebounce
 	}
-	return dotsWatchDebounceFromService(m.dotsWatchService)
+	return app.DotsWatchDebounce(m.dotsWatchService)
 }
 
 func (m Model) dotsWatchDebounceForServiceInstall() time.Duration {
@@ -688,31 +718,20 @@ func (m Model) dotsWatchDebounceForServiceInstall() time.Duration {
 	return m.currentDotsWatchDebounce()
 }
 
-func dotsReminderIntervalFromService(service *app.DotsReminderService) time.Duration {
-	if service != nil && service.Interval > 0 {
-		return service.Interval
-	}
-	return app.DefaultDotsReminderInterval()
-}
-
-func dotsWatchDebounceFromService(service *app.DotsWatchService) time.Duration {
-	if service != nil && service.Debounce > 0 {
-		return service.Debounce
-	}
-	return app.DefaultDotsWatchDebounce()
-}
-
 func settingsDurationChoicesForRow(row int, current time.Duration) []settingsDurationChoice {
-	var base []settingsDurationChoice
+	var base []time.Duration
 	switch row {
 	case settingsRowDotsReminderInterval:
-		base = reminderIntervalChoices
+		base = app.DotsReminderIntervalChoices()
 	case settingsRowDotsWatchDebounce:
-		base = watchDebounceChoices
+		base = app.DotsWatchDebounceChoices()
 	default:
 		return nil
 	}
-	choices := append([]settingsDurationChoice(nil), base...)
+	choices := make([]settingsDurationChoice, 0, len(base)+1)
+	for _, value := range base {
+		choices = append(choices, settingsDurationChoice{label: formatSettingsDuration(value), value: value})
+	}
 	if current > 0 && !settingsDurationChoicesContain(choices, current) {
 		choices = append(choices, settingsDurationChoice{label: formatSettingsDuration(current), value: current})
 		sort.Slice(choices, func(i, j int) bool { return choices[i].value < choices[j].value })

@@ -8,7 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/dots"
 )
 
 func (m *Model) handleStatusKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
@@ -89,7 +89,7 @@ func (m *Model) startDashboardRefresh(cmds *[]tea.Cmd) {
 		m.dotsServicesRefreshing = true
 		*cmds = append(*cmds, m.doRefreshDotsServices(), m.doRefreshDotsHistory())
 	}
-	if m.app != nil && m.settings.DotsRepo != "" && !config.BoolVal(m.settings.DotsDisabled) && !m.dotsLoading && !m.dotsPreparing {
+	if m.dotsSyncConfigured() && !m.dotsLoading && !m.dotsPreparing {
 		m.beginDotsOperation("Refreshing dashboard…")
 		*cmds = append(*cmds, m.spinner.Tick, m.doLoadDots())
 	}
@@ -144,7 +144,7 @@ func (m *Model) openDashboardReconcilePlan() {
 	m.dashboardReconcilePlanCursor = clampIndex(m.dashboardReconcilePlanCursor, len(items))
 	m.dashboardReconcilePlanSelected = make(map[dashboardReconcilePlanKind]bool, len(items))
 	for _, item := range items {
-		m.dashboardReconcilePlanSelected[item.kind] = true
+		m.dashboardReconcilePlanSelected[item.ID] = true
 	}
 	clearStatus(m)
 }
@@ -164,10 +164,10 @@ func (m *Model) toggleDashboardReconcilePlanItem(items []dashboardReconcilePlanI
 	if m.dashboardReconcilePlanSelected == nil {
 		m.dashboardReconcilePlanSelected = make(map[dashboardReconcilePlanKind]bool, len(items))
 		for _, item := range items {
-			m.dashboardReconcilePlanSelected[item.kind] = true
+			m.dashboardReconcilePlanSelected[item.ID] = true
 		}
 	}
-	m.dashboardReconcilePlanSelected[item.kind] = !m.dashboardReconcilePlanSelected[item.kind]
+	m.dashboardReconcilePlanSelected[item.ID] = !m.dashboardReconcilePlanSelected[item.ID]
 }
 
 func (m *Model) runDashboardReconcilePlan(items []dashboardReconcilePlanItem, cmds *[]tea.Cmd) {
@@ -178,8 +178,8 @@ func (m *Model) runDashboardReconcilePlan(items []dashboardReconcilePlanItem, cm
 	}
 	queue := make([]dashboardReconcilePlanKind, 0, len(items))
 	for _, item := range items {
-		if m.dashboardReconcilePlanSelected[item.kind] {
-			queue = append(queue, item.kind)
+		if m.dashboardReconcilePlanSelected[item.ID] {
+			queue = append(queue, item.ID)
 		}
 	}
 	if len(queue) == 0 {
@@ -278,39 +278,46 @@ func (m *Model) cancelDashboardReconcile() {
 }
 
 func (m *Model) startDashboardDotsSync(cmds *[]tea.Cmd) {
+	availability := m.dotsSyncAvailability()
 	switch {
 	case m.dotsLoading:
 		return
-	case config.BoolVal(m.settings.DotsDisabled):
-		*cmds = append(*cmds, setStatus(m, "dotfile sync is disabled for this host", true))
-		return
-	case m.settings.DotsRepo == "":
-		*cmds = append(*cmds, setStatus(m, "set dots_repo before syncing dotfiles", true))
+	case !availability.Configured:
+		*cmds = append(*cmds, setStatus(m, dashboardDotsUnavailableMessage("syncing", availability), true))
 		return
 	}
 	m.beginDotsOperation("Syncing dots…")
 	total := m.markDotsPendingSyncAll()
-	setActivityStatus(m, dotsSyncProgressText("", 0, total, false, nil))
+	setActivityStatus(m, app.DotsSyncActivityProgressText(dots.SyncProgressEvent{Total: total}))
 	order := dotsSyncAllEntryOrder(*m)
 	ch := m.beginDotsProgressStream()
 	*cmds = append(*cmds, m.spinner.Tick, m.doDotsSyncOnlyWithProgress(ch, order), waitForDotsProgress(ch, m.dotsOpGen))
 }
 
 func (m *Model) startDashboardDotsCommit(cmds *[]tea.Cmd) {
+	availability := m.dotsSyncAvailability()
 	switch {
 	case m.dotsLoading:
 		return
-	case config.BoolVal(m.settings.DotsDisabled):
-		*cmds = append(*cmds, setStatus(m, "dotfile sync is disabled for this host", true))
-		return
-	case m.settings.DotsRepo == "":
-		*cmds = append(*cmds, setStatus(m, "set dots_repo before committing dotfiles", true))
+	case !availability.Configured:
+		*cmds = append(*cmds, setStatus(m, dashboardDotsUnavailableMessage("committing", availability), true))
 		return
 	case strings.TrimSpace(m.dotsGitStatus) == "":
 		return
 	}
 	m.beginDotsOperation("Committing dots…")
 	*cmds = append(*cmds, m.spinner.Tick, m.doDotsCommit())
+}
+
+func dashboardDotsUnavailableMessage(action string, availability app.DotsSyncAvailability) string {
+	switch availability.Reason {
+	case app.DotsSyncAvailabilityDisabled:
+		return "dotfile sync is disabled for this host"
+	case app.DotsSyncAvailabilityNoRepo:
+		return fmt.Sprintf("set dots_repo before %s dotfiles", action)
+	default:
+		return "dotfile sync is not configured for this host"
+	}
 }
 
 func (m *Model) startDashboardFixIgnore(cmds *[]tea.Cmd) {
@@ -325,7 +332,7 @@ func (m *Model) startDashboardFixIgnore(cmds *[]tea.Cmd) {
 }
 
 func (m *Model) startDashboardUpgradeAll(cmds *[]tea.Cmd) {
-	if len(m.upgradingKeys) > 0 || statusToolCounts(*m).updates == 0 {
+	if len(m.upgradingKeys) > 0 || statusToolCounts(*m).Updates == 0 {
 		return
 	}
 	if m.upgradingKeys == nil {
@@ -343,10 +350,10 @@ func (m *Model) handleDotsServicesStatusMsg(msg dotsServicesStatusMsg) {
 	m.dotsServicesRefreshing = false
 	m.dotsReminderService = msg.reminder
 	m.dotsReminderServiceErr = msg.reminderErr
-	m.dotsReminderInterval = dotsReminderIntervalFromService(msg.reminder)
+	m.dotsReminderInterval = app.DotsReminderInterval(msg.reminder)
 	m.dotsWatchService = msg.watch
 	m.dotsWatchServiceErr = msg.watchErr
-	m.dotsWatchDebounce = dotsWatchDebounceFromService(msg.watch)
+	m.dotsWatchDebounce = app.DotsWatchDebounce(msg.watch)
 	m.dotsWatchDebounceNext = 0
 }
 
@@ -469,8 +476,7 @@ func (m *Model) selectFirstDotsIssue() {
 		if row.isChild {
 			continue
 		}
-		state := dotStatusState(row.entry)
-		if state != app.DotStateSynced && state != app.DotStateIgnored {
+		if app.DotStatusNeedsAttention(row.entry) {
 			m.dotsCursor = i
 			m.syncDotsExpandedName(visible)
 			return
@@ -482,5 +488,5 @@ func (m *Model) selectFirstDotsIssue() {
 
 func (m *Model) openStatusSettings(row int, cmds *[]tea.Cmd) {
 	m.switchMainTab(viewSettings, cmds)
-	m.settingsCursor = clampIndex(row, numSettingRows)
+	m.setSettingsCursor(row)
 }

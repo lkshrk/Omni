@@ -12,7 +12,6 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/profile"
-	"github.com/lkshrk/omni/internal/provider"
 	gosync "github.com/lkshrk/omni/internal/sync"
 )
 
@@ -111,85 +110,6 @@ func toolProgressUpdate(gen int, event gosync.ProgressEvent) progressUpdate {
 		update.rowStatus = event.Message
 	}
 	return update
-}
-
-func countSyncAllProgressItems(tools []*database.ToolCache, discovered []*database.ToolCache) int {
-	count := 0
-	for _, t := range tools {
-		if t != nil && t.Tracked && !t.Installed {
-			count++
-		}
-	}
-	for _, t := range discovered {
-		if t != nil && t.Name != "" && t.Provider != "" {
-			count++
-		}
-	}
-	return count
-}
-
-func syncAllPhaseProgressText(phase string, total int) string {
-	label := strings.TrimSpace(strings.TrimSuffix(phase, "…"))
-	switch label {
-	case "reading installed packages":
-		label = "checking installed state"
-	case "checking providers":
-		label = "checking providers"
-	}
-	if label == "" {
-		label = "checking installed state"
-	}
-	if total > 0 {
-		return fmt.Sprintf("Syncing tools 0/%d: %s…", total, label)
-	}
-	return "Syncing tools: " + label + "…"
-}
-
-func syncAllToolProgressText(event gosync.ProgressEvent, current, total int) string {
-	label := syncAllToolProgressLabel(event)
-	if total > 0 {
-		return fmt.Sprintf("Syncing tools %d/%d: %s", current, total, label)
-	}
-	return "Syncing tools: " + label
-}
-
-func syncAllToolProgressLabel(event gosync.ProgressEvent) string {
-	name := event.Tool.Name
-	message := strings.TrimSpace(strings.TrimSuffix(event.Message, "…"))
-	switch {
-	case strings.HasPrefix(message, "Adding "):
-		return "adding discovered " + name + " to config…"
-	case strings.HasPrefix(message, "Added "):
-		return "added discovered " + name + " to config"
-	case strings.HasPrefix(message, "Would add "):
-		return "would add discovered " + name + " to config"
-	case strings.HasPrefix(message, "Failed adding "):
-		return "failed adding discovered " + name + " to config"
-	case strings.HasPrefix(message, "Installing "):
-		return "installing missing " + name + "…"
-	case strings.HasPrefix(message, "Installed "):
-		return "installed missing " + name
-	case strings.HasPrefix(message, "Admin approval needed for "):
-		return "admin approval needed for " + name
-	case strings.HasPrefix(message, "Skipped installing "):
-		if progressEventNeedsAdmin(event) {
-			return "admin approval needed for " + name
-		}
-		return "skipped missing " + name
-	case strings.HasPrefix(message, "Failed installing "):
-		return "failed installing missing " + name
-	case strings.HasPrefix(message, "Cancelled installing "):
-		return "cancelled installing missing " + name
-	default:
-		if message == "" {
-			return name
-		}
-		return strings.ToLower(message)
-	}
-}
-
-func progressEventNeedsAdmin(event gosync.ProgressEvent) bool {
-	return event.Err != nil && isPrivilegedInstallFailure(event.Err.Error())
 }
 
 func isContextCanceled(err error) bool {
@@ -321,7 +241,7 @@ func (m *Model) doSyncWithProgress(ch chan progressUpdate, gen int) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
 	return func() tea.Msg {
 		defer close(ch)
-		result, err := a.Sync(ctx, gosync.SyncOptions{
+		stateResult, err := a.SyncWithState(ctx, gosync.SyncOptions{
 			Progress: func(s string) {
 				sendProgress(ch, gen, s)
 			},
@@ -330,33 +250,37 @@ func (m *Model) doSyncWithProgress(ch chan progressUpdate, gen int) tea.Cmd {
 			},
 			SkipPrivileged: true,
 		})
+		if stateResult == nil {
+			if err == nil {
+				err = fmt.Errorf("sync result unavailable")
+			}
+			return progressDoneMsg{gen: gen, err: err}
+		}
+		result := stateResult.Result
 		if result == nil {
 			if err == nil {
 				err = fmt.Errorf("sync result unavailable")
 			}
 			return progressDoneMsg{gen: gen, err: err}
 		}
-		installed := result.Installed()
-		msg := "install complete"
-		if len(installed) > 0 {
-			msg = fmt.Sprintf("install complete — %d installed", len(installed))
-		}
-		tools, _ := a.ListTools(ctx, "") // non-fatal: sync succeeded; stale list retained if refresh fails
-		rowErrors := syncResultRowErrors(result)
-		rowActionErrors := syncResultRowActionErrors(result)
-		privilegedActions := syncResultPrivilegedActions(result)
-		if len(rowErrors) > 0 {
-			msg = bulkCompletionMessage(msg, rowErrors, privilegedActions)
+		msg := app.SyncResultSummaryText(result, "install complete")
+		groupState := stateResult.State
+		rows := app.SyncFailureRows(result)
+		if len(rows.RowErrors) > 0 {
+			msg = app.BulkToolFailureSummaryText(msg, rows)
 			err = nil
 		}
 		return progressDoneMsg{
 			gen:                     gen,
 			message:                 msg,
 			err:                     err,
-			tools:                   tools,
-			rowErrors:               rowErrors,
-			rowActionErrors:         rowActionErrors,
-			promptPrivilegedActions: privilegedActions,
+			tools:                   stateResult.Tools,
+			groupNames:              groupState.GroupNames,
+			toolGroups:              groupState.ToolGroups,
+			toolMemberships:         groupState.ToolMemberships,
+			rowErrors:               rows.RowErrors,
+			rowActionErrors:         rows.RowActionErrors,
+			promptPrivilegedActions: rows.PrivilegedActions,
 		}
 	}
 }
@@ -365,16 +289,16 @@ func (m *Model) doSyncWithProgress(ch chan progressUpdate, gen int) tea.Cmd {
 // discovered local tools to this machine's hostname group.
 func (m *Model) doSyncAllWithProgress(ch chan progressUpdate, gen int, discovered []*database.ToolCache) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
-	total := countSyncAllProgressItems(m.allTools, discovered)
+	total := app.SyncAllProgressTotal(m.allTools, discovered)
 	return func() tea.Msg {
 		defer close(ch)
 		current := 0
 		started := make(map[string]bool)
-		result, err := a.SyncAll(ctx, app.SyncAllOptions{
+		stateResult, err := a.SyncAllWithState(ctx, app.SyncAllOptions{
 			Discovered:     discovered,
 			SkipPrivileged: true,
 			Progress: func(s string) {
-				sendProgress(ch, gen, syncAllPhaseProgressText(s, total))
+				sendProgress(ch, gen, app.SyncAllPhaseProgressText(s, total))
 			},
 			ToolProgress: func(event gosync.ProgressEvent) {
 				key := toolKey(event.Tool.Name, event.Tool.Provider)
@@ -387,21 +311,24 @@ func (m *Model) doSyncAllWithProgress(ch chan progressUpdate, gen int, discovere
 					current++
 					started[key] = true
 				}
-				m.sendSyncAllToolProgressUpdate(ch, gen, event, syncAllToolProgressText(event, current, total))
+				m.sendSyncAllToolProgressUpdate(ch, gen, event, app.SyncAllToolProgressText(event, current, total))
 			},
 		})
-
-		tools, _ := a.ListTools(ctx, "")
-		groupNames, toolGroups, memberships := m.reloadToolGroups()
+		if stateResult == nil {
+			if err == nil {
+				err = fmt.Errorf("sync result unavailable")
+			}
+			return progressDoneMsg{gen: gen, err: err}
+		}
+		result := stateResult.Result
+		groupState := stateResult.State
 		claimedNames := syncAllClaimedNames(result)
-		msg := syncAllMessage(result, len(claimedNames))
-		rowErrors := syncAllRowErrors(result)
-		rowActionErrors := syncAllRowActionErrors(result)
-		privilegedActions := syncAllPrivilegedActions(result)
-		if len(rowErrors) > 0 {
-			msg = bulkCompletionMessage(msg, rowErrors, privilegedActions)
+		msg := app.SyncAllSummaryText(result, "sync complete")
+		rows := app.SyncAllFailureRows(result)
+		if len(rows.RowErrors) > 0 {
+			msg = app.BulkToolFailureSummaryText(msg, rows)
 			// SyncAll returns errors.Join(claimErr, syncErr); each joined error
-			// is already represented in result.Failures (and therefore rowErrors).
+			// is already represented in result.Failures and rows.RowErrors.
 			// Clear err so the status bar shows the summary message instead of
 			// duplicating per-tool failures already attached to row entries.
 			err = nil
@@ -410,14 +337,14 @@ func (m *Model) doSyncAllWithProgress(ch chan progressUpdate, gen int, discovere
 			gen:                     gen,
 			message:                 msg,
 			err:                     err,
-			tools:                   tools,
+			tools:                   stateResult.Tools,
 			claimedNames:            claimedNames,
-			toolGroups:              toolGroups,
-			toolMemberships:         memberships,
-			groupNames:              groupNames,
-			rowErrors:               rowErrors,
-			rowActionErrors:         rowActionErrors,
-			promptPrivilegedActions: privilegedActions,
+			toolGroups:              groupState.ToolGroups,
+			toolMemberships:         groupState.ToolMemberships,
+			groupNames:              groupState.GroupNames,
+			rowErrors:               rows.RowErrors,
+			rowActionErrors:         rows.RowActionErrors,
+			promptPrivilegedActions: rows.PrivilegedActions,
 		}
 	}
 }
@@ -427,146 +354,6 @@ func syncAllClaimedNames(result *app.SyncAllResult) []string {
 		return nil
 	}
 	return result.ClaimedNames
-}
-
-func syncAllRowErrors(result *app.SyncAllResult) map[string]string {
-	if result == nil || len(result.Failures) == 0 {
-		return nil
-	}
-	return bulkToolErrorsToRowErrors(result.Failures)
-}
-
-func syncAllPrivilegedActions(result *app.SyncAllResult) map[string]provider.PrivilegeAction {
-	if result == nil {
-		return nil
-	}
-	return syncResultPrivilegedActions(result.SyncResult)
-}
-
-func (m *Model) reloadToolGroups() ([]string, map[string]string, map[string][]string) {
-	groups, _ := m.app.Groups(m.ctx)
-	memberships, _ := m.app.ToolMembershipMap(m.ctx)
-	return buildGroupNames(groups), compactToolGroupMapForHost(memberships, m.hostInfo), memberships
-}
-
-func (m *Model) reloadToolContext() ([]string, map[string]string, map[string][]string, *app.HostInfo) {
-	groups, _ := m.app.Groups(m.ctx)
-	memberships, _ := m.app.ToolMembershipMap(m.ctx)
-	info, _ := m.app.HostStatus()
-	if info == nil {
-		info = m.hostInfo
-	}
-	return buildGroupNames(groups), compactToolGroupMapForHost(memberships, info), memberships, info
-}
-
-func syncResultRowErrors(result *gosync.SyncResult) map[string]string {
-	if result == nil {
-		return nil
-	}
-	failed := result.Failed()
-	rowErrors := make(map[string]string, len(failed))
-	for _, op := range failed {
-		if op.Err == nil || op.Tool.Name == "" || op.Tool.Provider == "" {
-			continue
-		}
-		if isContextCanceled(op.Err) {
-			continue
-		}
-		rowErrors[toolKey(op.Tool.Name, op.Tool.Provider)] = op.Err.Error()
-	}
-	if len(rowErrors) == 0 {
-		return nil
-	}
-	return rowErrors
-}
-
-func syncResultRowActionErrors(result *gosync.SyncResult) map[string]*provider.ActionError {
-	if result == nil {
-		return nil
-	}
-	failed := result.Failed()
-	rowActionErrors := make(map[string]*provider.ActionError, len(failed))
-	for _, op := range failed {
-		if op.Err == nil || op.Tool.Name == "" || op.Tool.Provider == "" || isContextCanceled(op.Err) {
-			continue
-		}
-		if actionErr, ok := provider.ActionErrorFrom(op.Err); ok {
-			rowActionErrors[toolKey(op.Tool.Name, op.Tool.Provider)] = actionErr
-		}
-	}
-	if len(rowActionErrors) == 0 {
-		return nil
-	}
-	return rowActionErrors
-}
-
-func syncResultPrivilegedActions(result *gosync.SyncResult) map[string]provider.PrivilegeAction {
-	if result == nil {
-		return nil
-	}
-	actions := make(map[string]provider.PrivilegeAction)
-	for _, op := range result.Failed() {
-		action, ok := syncOpPrivilegedAction(op)
-		if !ok || op.Tool.Name == "" || op.Tool.Provider == "" {
-			continue
-		}
-		actions[toolKey(op.Tool.Name, op.Tool.Provider)] = action
-	}
-	if len(actions) == 0 {
-		return nil
-	}
-	return actions
-}
-
-func syncOpPrivilegedAction(op gosync.SyncOp) (provider.PrivilegeAction, bool) {
-	if op.Err == nil || isContextCanceled(op.Err) || !isPrivilegedInstallFailure(op.Err.Error()) {
-		return "", false
-	}
-	switch op.Kind {
-	case gosync.OpInstall, gosync.OpFailed:
-		return provider.PrivilegeActionInstall, true
-	case gosync.OpUninstall:
-		return provider.PrivilegeActionUninstall, true
-	default:
-		return "", false
-	}
-}
-
-func bulkCompletionMessage(base string, rowErrors map[string]string, privilegedActions map[string]provider.PrivilegeAction) string {
-	if len(rowErrors) == 0 {
-		return base
-	}
-	adminNeeded := 0
-	for key := range rowErrors {
-		if _, ok := privilegedActions[key]; ok {
-			adminNeeded++
-		}
-	}
-	failed := len(rowErrors) - adminNeeded
-	switch {
-	case adminNeeded > 0 && failed > 0:
-		return fmt.Sprintf("%s, %d need admin approval, %d failed", base, adminNeeded, failed)
-	case adminNeeded > 0:
-		return fmt.Sprintf("%s, %d need admin approval", base, adminNeeded)
-	default:
-		return fmt.Sprintf("%s, %d failed", base, len(rowErrors))
-	}
-}
-
-func syncAllMessage(result *app.SyncAllResult, claimed int) string {
-	installed := 0
-	normalized := 0
-	if result != nil && result.SyncResult != nil {
-		installed = len(result.SyncResult.Installed())
-	}
-	if result != nil {
-		normalized = len(result.NormalizedProviderOverrides)
-	}
-	msg := fmt.Sprintf("sync complete — %d installed, %d added to config", installed, claimed)
-	if normalized > 0 {
-		msg = fmt.Sprintf("%s, %d provider overrides normalized", msg, normalized)
-	}
-	return msg
 }
 
 // doSaveNodeManager persists the chosen node manager to host_settings.
@@ -603,9 +390,10 @@ func (m *Model) doScanProvider(provName string, gen int, progressCh chan progres
 		installCtx, cancelInstall := context.WithTimeout(ctx, 45*time.Second)
 		installErr := a.RefreshProviderInstalledWithProgress(installCtx, provName, func(event app.RefreshInstalledProgressEvent) {
 			sendProgressUpdate(progressCh, progressUpdate{
-				gen:             progressGen,
-				refreshProvider: event.Provider,
-				refreshToolName: event.Name,
+				gen:                  progressGen,
+				refreshProvider:      event.Provider,
+				refreshProviderLabel: event.ProviderLabel,
+				refreshToolName:      event.Name,
 			})
 		})
 		cancelInstall()
@@ -623,15 +411,14 @@ func (m *Model) doFetchFinalTools(gen int) tea.Cmd {
 	return func() tea.Msg {
 		defer profile.Start("tui.refresh.installed.final_tools")()
 
-		tools, err := a.ListTools(ctx, "")
+		snapshot, err := a.ToolDisplaySnapshot(ctx)
 		if err != nil {
 			return allProvidersDoneMsg{gen: gen, err: err}
 		}
-		ecosystemMap := a.ResolvedEcosystemProviders(ctx)
 		return allProvidersDoneMsg{
 			gen:                    gen,
-			tools:                  tools,
-			effectiveSystemManager: ecosystemMap[provider.EcosystemSystem],
+			tools:                  snapshot.Tools,
+			effectiveSystemManager: snapshot.EffectiveSystemManager,
 		}
 	}
 }
@@ -653,15 +440,14 @@ func (m *Model) doFetchOutdatedTools(gen int) tea.Cmd {
 	return func() tea.Msg {
 		defer profile.Start("tui.refresh.outdated.final_tools")()
 
-		tools, err := a.ListTools(ctx, "")
+		snapshot, err := a.ToolDisplaySnapshot(ctx)
 		if err != nil {
 			return outdatedProvidersDoneMsg{gen: gen, err: err}
 		}
-		ecosystemMap := a.ResolvedEcosystemProviders(ctx)
 		return outdatedProvidersDoneMsg{
 			gen:                    gen,
-			tools:                  tools,
-			effectiveSystemManager: ecosystemMap[provider.EcosystemSystem],
+			tools:                  snapshot.Tools,
+			effectiveSystemManager: snapshot.EffectiveSystemManager,
 		}
 	}
 }
@@ -682,11 +468,11 @@ func (m *Model) doRefreshDiscovered(gen int, progressCh chan progressUpdate, pro
 		}); err != nil {
 			return discoveredRefreshedMsg{gen: gen, err: err}
 		}
-		discovered, err := a.ListDiscovered(ctx)
+		snapshot, err := a.ToolDisplaySnapshot(ctx)
 		if err != nil {
 			return discoveredRefreshedMsg{gen: gen, err: err}
 		}
-		return discoveredRefreshedMsg{gen: gen, discovered: discovered}
+		return discoveredRefreshedMsg{gen: gen, discovered: snapshot.Discovered}
 	}
 }
 
@@ -713,22 +499,23 @@ func (m *Model) doRefreshDescriptions(gen int, progressCh chan progressUpdate, p
 		}); err != nil {
 			return descRefreshDoneMsg{gen: gen, err: err}
 		}
-		// Non-fatal: stale descriptions remain visible if either snapshot read fails.
-		tools, _ := a.ListTools(ctx, "")
-		discovered, _ := a.ListDiscovered(ctx)
-		return descRefreshDoneMsg{gen: gen, tools: tools, discovered: discovered}
+		snapshot, err := a.ToolDisplaySnapshot(ctx)
+		if err != nil {
+			return descRefreshDoneMsg{gen: gen, err: err}
+		}
+		return descRefreshDoneMsg{gen: gen, tools: snapshot.Tools, discovered: snapshot.Discovered}
 	}
 }
 
 // doUpgradeAll upgrades every outdated tool with progress streaming.
 func (m *Model) doUpgradeAll(ch chan progressUpdate, gen int) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
-	total := countUpgradeableTools(m.allTools)
+	total := app.UpgradeAllProgressTotal(m.allTools)
 	return func() tea.Msg {
 		defer close(ch)
 		current := 0
 		started := make(map[string]int)
-		result, err := a.UpgradeAllDetailedWithOptions(ctx, nil, func(event gosync.ProgressEvent) {
+		stateResult, err := a.UpgradeAllDetailedWithState(ctx, nil, func(event gosync.ProgressEvent) {
 			key := toolKey(event.Tool.Name, event.Tool.Provider)
 			if !event.Done && event.Err == nil {
 				if _, ok := started[key]; !ok {
@@ -741,127 +528,51 @@ func (m *Model) doUpgradeAll(ch chan progressUpdate, gen int) tea.Cmd {
 					started[key] = current
 				}
 			}
-			m.sendUpgradeAllToolProgressUpdate(ch, gen, event, upgradeAllProgressText(event, started[key], total))
+			m.sendUpgradeAllToolProgressUpdate(ch, gen, event, app.UpgradeAllProgressText(event, started[key], total))
 		}, app.UpgradeAllOptions{SkipPrivileged: true})
-		tools, _ := a.ListTools(ctx, "") // non-fatal: upgrade succeeded; stale list retained if refresh fails
-		rowErrors := upgradeAllRowErrors(result)
-		rowActionErrors := upgradeAllRowActionErrors(result)
-		privilegedActions := upgradeAllPrivilegedActions(result)
-		if len(rowErrors) > 0 {
-			return progressDoneMsg{gen: gen, key: "*", message: bulkCompletionMessage("upgrades complete", rowErrors, privilegedActions), tools: tools, rowErrors: rowErrors, rowActionErrors: rowActionErrors, promptPrivilegedActions: privilegedActions}
+		if stateResult == nil {
+			if err == nil {
+				err = fmt.Errorf("upgrade result unavailable")
+			}
+			return progressDoneMsg{gen: gen, key: "*", err: err}
+		}
+		result := stateResult.Result
+		tools := stateResult.Tools
+		groupState := stateResult.State
+		rows := app.UpgradeAllFailureRows(result)
+		if len(rows.RowErrors) > 0 {
+			return progressDoneMsg{
+				gen:                     gen,
+				key:                     "*",
+				message:                 app.BulkToolFailureSummaryText("upgrades complete", rows),
+				tools:                   tools,
+				groupNames:              groupState.GroupNames,
+				toolGroups:              groupState.ToolGroups,
+				toolMemberships:         groupState.ToolMemberships,
+				rowErrors:               rows.RowErrors,
+				rowActionErrors:         rows.RowActionErrors,
+				promptPrivilegedActions: rows.PrivilegedActions,
+			}
 		}
 		if err != nil {
-			return progressDoneMsg{gen: gen, key: "*", err: err, tools: tools}
+			return progressDoneMsg{
+				gen:             gen,
+				key:             "*",
+				err:             err,
+				tools:           tools,
+				groupNames:      groupState.GroupNames,
+				toolGroups:      groupState.ToolGroups,
+				toolMemberships: groupState.ToolMemberships,
+			}
 		}
-		return progressDoneMsg{gen: gen, key: "*", message: "upgrades complete", tools: tools}
-	}
-}
-
-func countUpgradeableTools(tools []*database.ToolCache) int {
-	count := 0
-	for _, t := range tools {
-		if t != nil && t.Installed && t.Outdated {
-			count++
+		return progressDoneMsg{
+			gen:             gen,
+			key:             "*",
+			message:         "upgrades complete",
+			tools:           tools,
+			groupNames:      groupState.GroupNames,
+			toolGroups:      groupState.ToolGroups,
+			toolMemberships: groupState.ToolMemberships,
 		}
 	}
-	return count
-}
-
-func upgradeAllProgressText(event gosync.ProgressEvent, current, total int) string {
-	label := upgradeAllProgressLabel(event)
-	if total > 0 {
-		return fmt.Sprintf("Upgrading tools %d/%d: %s", current, total, label)
-	}
-	return "Upgrading tools: " + label
-}
-
-func upgradeAllProgressLabel(event gosync.ProgressEvent) string {
-	name := event.Tool.Name
-	message := strings.TrimSpace(strings.TrimSuffix(event.Message, "…"))
-	switch {
-	case strings.HasPrefix(message, "Upgrading "):
-		return name + "…"
-	case strings.HasPrefix(message, "Upgraded "):
-		return name + " upgraded"
-	case strings.HasPrefix(message, "Admin approval needed for "):
-		return name + " needs admin approval"
-	case strings.HasPrefix(message, "Skipped upgrading "):
-		if progressEventNeedsAdmin(event) {
-			return name + " needs admin approval"
-		}
-		return name + " skipped"
-	case strings.HasPrefix(message, "Failed upgrading "):
-		return name + " failed"
-	default:
-		if message == "" {
-			return name
-		}
-		return strings.ToLower(message)
-	}
-}
-
-func upgradeAllRowErrors(result *app.UpgradeAllResult) map[string]string {
-	if result == nil || len(result.Failures) == 0 {
-		return nil
-	}
-	return bulkToolErrorsToRowErrors(result.Failures)
-}
-
-func upgradeAllRowActionErrors(result *app.UpgradeAllResult) map[string]*provider.ActionError {
-	if result == nil || len(result.Failures) == 0 {
-		return nil
-	}
-	return bulkToolErrorsToRowActionErrors(result.Failures)
-}
-
-func upgradeAllPrivilegedActions(result *app.UpgradeAllResult) map[string]provider.PrivilegeAction {
-	if result == nil || len(result.Failures) == 0 {
-		return nil
-	}
-	actions := make(map[string]provider.PrivilegeAction, len(result.Failures))
-	for _, failure := range result.Failures {
-		if failure.Name == "" || failure.Provider == "" || !isPrivilegedInstallFailure(failure.Message) {
-			continue
-		}
-		actions[toolKey(failure.Name, failure.Provider)] = provider.PrivilegeActionUpgrade
-	}
-	if len(actions) == 0 {
-		return nil
-	}
-	return actions
-}
-
-func syncAllRowActionErrors(result *app.SyncAllResult) map[string]*provider.ActionError {
-	if result == nil || len(result.Failures) == 0 {
-		return nil
-	}
-	return bulkToolErrorsToRowActionErrors(result.Failures)
-}
-
-func bulkToolErrorsToRowErrors(failures []app.BulkToolError) map[string]string {
-	rowErrors := make(map[string]string, len(failures))
-	for _, failure := range failures {
-		if failure.Name == "" || failure.Provider == "" || failure.Message == "" {
-			continue
-		}
-		rowErrors[toolKey(failure.Name, failure.Provider)] = failure.Message
-	}
-	if len(rowErrors) == 0 {
-		return nil
-	}
-	return rowErrors
-}
-
-func bulkToolErrorsToRowActionErrors(failures []app.BulkToolError) map[string]*provider.ActionError {
-	rowActionErrors := make(map[string]*provider.ActionError, len(failures))
-	for _, failure := range failures {
-		if failure.Name == "" || failure.Provider == "" || failure.ActionError == nil {
-			continue
-		}
-		rowActionErrors[toolKey(failure.Name, failure.Provider)] = failure.ActionError
-	}
-	if len(rowActionErrors) == 0 {
-		return nil
-	}
-	return rowActionErrors
 }

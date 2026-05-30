@@ -26,10 +26,31 @@ const (
 	dotsWatchRestartDelaySecs = 10
 )
 
+var dotsWatchDebounceChoices = []time.Duration{
+	500 * time.Millisecond,
+	time.Second,
+	2 * time.Second,
+	5 * time.Second,
+	10 * time.Second,
+	30 * time.Second,
+}
+
 // DefaultDotsWatchDebounce is the debounce used when no watcher debounce is
 // specified.
 func DefaultDotsWatchDebounce() time.Duration {
 	return defaultDotsWatchDebounce
+}
+
+// DotsWatchDebounceChoices returns preset debounce values for watch controls.
+func DotsWatchDebounceChoices() []time.Duration {
+	return append([]time.Duration(nil), dotsWatchDebounceChoices...)
+}
+
+func DotsWatchDebounce(service *DotsWatchService) time.Duration {
+	if service != nil && service.Debounce > 0 {
+		return service.Debounce
+	}
+	return DefaultDotsWatchDebounce()
 }
 
 // DotsWatchOptions configures the long-running dotfile watcher.

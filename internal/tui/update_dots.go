@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -10,7 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/dots"
 )
 
 func (m *Model) beginDotsOperation(status string) {
@@ -67,52 +66,13 @@ func (m *Model) clearDotsProgressState() {
 }
 
 func (m *Model) markDotsPendingSyncAll() int {
-	pending := make(map[string]bool)
-	for _, entry := range m.dotsEntries {
-		if entry.Name == "" || isTransientDotCandidate(entry) {
-			continue
-		}
-		switch dotStatusState(entry) {
-		case app.DotStateIgnored, app.DotStateInactive, app.DotStateDisabled:
-			continue
-		}
-		pending[entry.Name] = true
-	}
+	pending := app.DotSyncAllPendingNames(m.dotsEntries)
 	m.dotsPendingNames = pending
 	return len(pending)
 }
 
 func dotsSyncAllEntryOrder(m Model) []string {
-	entries := filteredDotsEntries(m)
-	order := make([]string, 0, len(entries))
-	for _, section := range dotsSections(entries) {
-		for _, entry := range section.entries {
-			if entry.Name != "" {
-				order = append(order, entry.Name)
-			}
-		}
-	}
-	return order
-}
-
-func dotsSyncProgressText(name string, index, total int, done bool, err error) string {
-	if total <= 0 {
-		total = index
-	}
-	if index < 0 {
-		index = 0
-	}
-	progress := fmt.Sprintf("%d/%d", index, total)
-	switch {
-	case name == "":
-		return "Syncing dots " + progress + "…"
-	case err != nil:
-		return fmt.Sprintf("Syncing dots %s: %s failed", progress, name)
-	case done:
-		return fmt.Sprintf("Synced dots %s: %s", progress, name)
-	default:
-		return fmt.Sprintf("Syncing dots %s: %s…", progress, name)
-	}
+	return app.DotSyncAllEntryOrder(filteredDotsEntries(m))
 }
 
 func (m *Model) handleDotsSubmodeKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
@@ -187,7 +147,7 @@ func (m *Model) handleDotsNavigationKeyMsg(msg tea.KeyPressMsg, visible []dotsVi
 		if msg.IsRepeat {
 			return true
 		}
-		if config.BoolVal(m.settings.DotsDisabled) {
+		if m.dotsSyncAvailability().Reason == app.DotsSyncAvailabilityDisabled {
 			return true
 		}
 		m.filePickerForDotAdd = true
@@ -227,7 +187,7 @@ func (m *Model) syncDotsExpandedName(visible []dotsVisibleRow) {
 		found := false
 		var expanded app.DotStatus
 		for _, row := range visible {
-			if !row.isChild && row.entry.Name == m.dotsExpandedName && dotStatusState(row.entry) == m.dotsExpandedState {
+			if !row.isChild && row.entry.Name == m.dotsExpandedName && app.DotStatusState(row.entry) == m.dotsExpandedState {
 				found = true
 				expanded = row.entry
 				break
@@ -252,7 +212,7 @@ func (m *Model) moveDotsCursor(delta int, visible []dotsVisibleRow) {
 	n := len(visible)
 	next := (m.dotsCursor + delta + n) % n
 	target := visible[next]
-	if m.dotsExpandedName != "" && (target.entry.Name != m.dotsExpandedName || dotStatusState(target.entry) != m.dotsExpandedState) {
+	if m.dotsExpandedName != "" && (target.entry.Name != m.dotsExpandedName || app.DotStatusState(target.entry) != m.dotsExpandedState) {
 		m.clearDotsExpandedChildren(m.dotsExpandedName)
 		m.dotsExpandedName = ""
 		rows := dotsVisibleRows(*m)
@@ -338,7 +298,7 @@ func (m *Model) clearDotsConfirmState() {
 func (m *Model) handleDotsActionKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibleRow) []tea.Cmd {
 	var cmds []tea.Cmd
 
-	if config.BoolVal(m.settings.DotsDisabled) {
+	if m.dotsSyncAvailability().Reason == app.DotsSyncAvailabilityDisabled {
 		switch {
 		case key.Matches(msg, m.keys.Confirm):
 			cmds = append(cmds, m.handleDotsConfirmKeyMsg(visible)...)
@@ -385,11 +345,11 @@ func (m *Model) handleDotsActionKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibl
 			break
 		}
 		entry := row.entry
-		if !dotHasAction(entry, app.DotActionSync) {
+		if !app.DotStatusHasAction(entry, app.DotActionSync) {
 			break
 		}
 		m.beginDotsOperation("Syncing " + entry.Name + "…")
-		if isTransientDotCandidate(entry) {
+		if app.DotStatusTransientCandidate(entry) {
 			cmds = append(cmds, m.spinner.Tick, m.doDotsSyncDiscovered(entry))
 		} else {
 			cmds = append(cmds, m.spinner.Tick, m.doDotsSyncEntry(entry.Name))
@@ -400,7 +360,7 @@ func (m *Model) handleDotsActionKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibl
 		}
 		m.beginDotsOperation("Syncing dots…")
 		total := m.markDotsPendingSyncAll()
-		setActivityStatus(m, dotsSyncProgressText("", 0, total, false, nil))
+		setActivityStatus(m, app.DotsSyncActivityProgressText(dots.SyncProgressEvent{Total: total}))
 		order := dotsSyncAllEntryOrder(*m)
 		ch := m.beginDotsProgressStream()
 		cmds = append(cmds, m.spinner.Tick, m.doDotsSyncOnlyWithProgress(ch, order), waitForDotsProgress(ch, m.dotsOpGen))
@@ -437,15 +397,10 @@ func (m *Model) handleDotsActionKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibl
 }
 
 func dotsVariantEligible(row dotsVisibleRow) bool {
-	if row.isChild || row.entry.Name == "" || isTransientDotCandidate(row.entry) {
+	if row.isChild {
 		return false
 	}
-	switch dotStatusState(row.entry) {
-	case app.DotStateIgnored, app.DotStateInactive, app.DotStateDisabled:
-		return false
-	default:
-		return true
-	}
+	return app.DotStatusVariantEligible(row.entry)
 }
 
 func (m *Model) handleDotsVariantKeyMsg(visible []dotsVisibleRow) []tea.Cmd {
@@ -458,12 +413,12 @@ func (m *Model) handleDotsVariantKeyMsg(visible []dotsVisibleRow) []tea.Cmd {
 		return cmds
 	}
 	mode := dotsVariantCreate
-	variants, err := m.app.DotsListVariants(row.entry.Name)
+	hasActiveVariant, err := m.app.DotsHasActiveHostVariant(row.entry.Name)
 	if err != nil {
 		cmds = append(cmds, setStatus(m, "✗ "+err.Error(), true))
 		return cmds
 	}
-	if _, ok := activeHostDotVariant(variants); ok {
+	if hasActiveVariant {
 		mode = dotsVariantRemove
 	}
 	m.dotsConfirmIdx = -1
@@ -474,15 +429,6 @@ func (m *Model) handleDotsVariantKeyMsg(visible []dotsVisibleRow) []tea.Cmd {
 	m.dotsVariantMode = mode
 	cmds = append(cmds, m.armConfirmationTimeout())
 	return cmds
-}
-
-func activeHostDotVariant(variants []app.DotVariantInfo) (app.DotVariantInfo, bool) {
-	for _, variant := range variants {
-		if variant.Active && !variant.Default {
-			return variant, true
-		}
-	}
-	return app.DotVariantInfo{}, false
 }
 
 func (m *Model) handleDotsVariantChoiceKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibleRow) []tea.Cmd {
@@ -560,7 +506,7 @@ func (m *Model) handleDotsToggleKeyMsg(visible []dotsVisibleRow) {
 	if len(row.entry.Children) == 0 {
 		return
 	}
-	state := dotStatusState(row.entry)
+	state := app.DotStatusState(row.entry)
 	if m.dotsExpandedName == name && m.dotsExpandedState == state {
 		m.clearDotsExpandedChildren(name)
 		m.dotsExpandedName = ""
@@ -585,10 +531,6 @@ func (m *Model) openDotGroupMembershipPicker(visible []dotsVisibleRow) {
 		return
 	}
 	name := row.entry.Name
-	memberships, err := m.app.DotMembershipMap(m.ctx)
-	if err == nil && memberships != nil {
-		m.dotMemberships = memberships
-	}
 	if len(m.dotMemberships[name]) == 0 {
 		return
 	}
@@ -605,21 +547,15 @@ func (m *Model) openDotGroupMembershipPicker(visible []dotsVisibleRow) {
 func (m *Model) handleDotsConfirmKeyMsg(visible []dotsVisibleRow) []tea.Cmd {
 	var cmds []tea.Cmd
 
-	if config.BoolVal(m.settings.DotsDisabled) {
-		if m.settings.DotsRepo == "" {
-			m.mode = viewSetup
-			m.setupBackgroundMode = viewDots
-			m.setupStep = 5
-		} else {
-			if m.promptForStowInstall(stowInstallEnableDots) {
-				return cmds
-			}
-			m.beginDotsOperation("Enabling dots…")
-			cmds = append(cmds, m.spinner.Tick, m.doEnableDots())
+	switch m.dotsSyncAvailability().Reason {
+	case app.DotsSyncAvailabilityDisabled:
+		if m.promptForStowInstall(stowInstallEnableDots) {
+			return cmds
 		}
+		m.beginDotsOperation("Enabling dots…")
+		cmds = append(cmds, m.spinner.Tick, m.doEnableDots())
 		return cmds
-	}
-	if m.settings.DotsRepo == "" {
+	case app.DotsSyncAvailabilityNoRepo:
 		m.mode = viewSetup
 		m.setupBackgroundMode = viewDots
 		m.setupStep = 5
@@ -638,10 +574,10 @@ func (m *Model) handleDotsResolveKeyMsg(visible []dotsVisibleRow, strategy app.D
 		return cmds
 	}
 	entry := row.entry
-	if strategy == app.DotResolveUseRepo && !dotHasAction(entry, app.DotActionUseRepo) {
+	if strategy == app.DotResolveUseRepo && !app.DotStatusHasAction(entry, app.DotActionUseRepo) {
 		return cmds
 	}
-	if strategy == app.DotResolveUseLocal && !dotHasAction(entry, app.DotActionUseLocal) {
+	if strategy == app.DotResolveUseLocal && !app.DotStatusHasAction(entry, app.DotActionUseLocal) {
 		return cmds
 	}
 	idx := &m.dotsOverwriteIdx
@@ -656,7 +592,7 @@ func (m *Model) handleDotsResolveKeyMsg(visible []dotsVisibleRow, strategy app.D
 		m.dotsOverwriteIdx = -1
 		m.dotsLocalIdx = -1
 		m.beginDotsOperation("Using " + label + " for " + name + "…")
-		if isTransientDotCandidate(entry) {
+		if app.DotStatusTransientCandidate(entry) {
 			cmds = append(cmds, m.spinner.Tick, m.doDotsResolveDiscovered(entry, strategy))
 		} else {
 			cmds = append(cmds, m.spinner.Tick, m.doDotsResolve(name, strategy))
@@ -681,7 +617,7 @@ func (m *Model) handleDotsDeleteKeyMsg(visible []dotsVisibleRow) []tea.Cmd {
 	if visible[m.dotsCursor].isChild {
 		return cmds
 	}
-	if !dotHasAction(visible[m.dotsCursor].entry, app.DotActionRemove) {
+	if !app.DotStatusHasAction(visible[m.dotsCursor].entry, app.DotActionRemove) {
 		return cmds
 	}
 	m.dotsConfirmIdx = m.dotsCursor
@@ -738,7 +674,7 @@ func (m *Model) handleDotsIgnoreActionKeyMsg(visible []dotsVisibleRow) []tea.Cmd
 		if row.isChild && row.child.Ignored {
 			m.beginDotsOperation("Including " + pattern + "…")
 			cmds = append(cmds, m.spinner.Tick, m.doDotsIgnore(row.entry.Name, pattern, false))
-		} else if !row.isChild && dotStatusState(row.entry) == app.DotStateIgnored {
+		} else if !row.isChild && app.DotStatusIgnored(row.entry) {
 			if len(row.entry.Children) > 0 {
 				// Merged ignored-child tree: expand to show individual children
 				// instead of toggling the entire entry.
@@ -746,7 +682,7 @@ func (m *Model) handleDotsIgnoreActionKeyMsg(visible []dotsVisibleRow) []tea.Cmd
 				m.dotsConfirmIdx = -1
 				m.dotsOverwriteIdx = -1
 				m.dotsLocalIdx = -1
-				entryState := dotStatusState(row.entry)
+				entryState := app.DotStatusState(row.entry)
 				if m.dotsExpandedName == row.entry.Name && m.dotsExpandedState == entryState {
 					m.clearDotsExpandedChildren(row.entry.Name)
 					m.dotsExpandedName = ""

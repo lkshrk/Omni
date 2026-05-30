@@ -1,10 +1,9 @@
 package tui
 
 import (
-	"context"
-	"errors"
-
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/lkshrk/omni/internal/app"
 )
 
 func (m *Model) handleProviderScannedMsg(msg providerScannedMsg) []tea.Cmd {
@@ -19,18 +18,18 @@ func (m *Model) handleProviderScannedMsg(msg providerScannedMsg) []tea.Cmd {
 	m.finishProviderRefreshProgress(msg.provider)
 	delete(m.scanningProviders, msg.provider)
 	if msg.err != nil {
-		status := providerScanFailureStatus(msg.provider, msg.err)
+		status := app.ProviderScanFailureStatus(msg.provider, msg.err)
 		if !m.collectLaunchBatchError(status) {
 			cmds = append(cmds, setStatus(m, status, true))
 		}
 	}
 	if len(m.scanningProviders) > 0 && (msg.err == nil || m.launchBatchActive) {
-		setActivityStatus(m, toolRefreshStatus(m.scanningProviders, m.refreshToolDone, m.refreshToolTotal))
+		setActivityStatus(m, m.toolRefreshStatus(m.refreshToolDone, m.refreshToolTotal))
 	}
 	// When the last provider finishes: fetch one consistent snapshot now that
 	// all upserts are done, and kick off the orphan scan in parallel.
 	if len(m.scanningProviders) == 0 {
-		outdatedProviders := providerNamesFromCounts(m.providerScanToolCounts)
+		outdatedProviders := app.RefreshProviderScanProviderNames(m.providerScanToolCounts)
 		if len(outdatedProviders) == 0 && msg.provider != "" {
 			outdatedProviders = []string{msg.provider}
 		}
@@ -40,6 +39,7 @@ func (m *Model) handleProviderScannedMsg(msg providerScannedMsg) []tea.Cmd {
 		setActivityStatus(m, "Finding local tools…")
 		m.providerScanToolCounts = nil
 		m.providerScanToolDone = nil
+		m.providerScanLabels = nil
 		m.refreshToolDone = 0
 		m.refreshToolTotal = 0
 		if m.progressCh != nil {
@@ -56,16 +56,6 @@ func (m *Model) handleProviderScannedMsg(msg providerScannedMsg) []tea.Cmd {
 	}
 
 	return cmds
-}
-
-func providerNamesFromCounts(counts map[string]int) []string {
-	names := make([]string, 0, len(counts))
-	for name := range counts {
-		if name != "" {
-			names = append(names, name)
-		}
-	}
-	return names
 }
 
 func (m *Model) startProviderOutdatedChecks(providers []string, gen int) []tea.Cmd {
@@ -89,7 +79,7 @@ func (m *Model) startProviderOutdatedChecks(providers []string, gen int) []tea.C
 
 func (m *Model) finishProviderRefreshProgress(providerName string) {
 	if m.refreshToolTotal == 0 {
-		m.refreshToolTotal = sumProviderToolCounts(m.providerScanToolCounts)
+		m.refreshToolTotal = app.RefreshProviderScanCountTotal(m.providerScanToolCounts)
 	}
 	expected := m.providerScanToolCounts[providerName]
 	if expected <= 0 {
@@ -107,13 +97,6 @@ func (m *Model) finishProviderRefreshProgress(providerName string) {
 		m.refreshToolDone = m.refreshToolTotal
 	}
 	m.providerScanToolDone[providerName] = expected
-}
-
-func providerScanFailureStatus(provider string, err error) string {
-	if errors.Is(err, context.DeadlineExceeded) {
-		return "scan timed out for " + provider
-	}
-	return "scan failed for " + provider + ": " + err.Error()
 }
 
 func (m *Model) handleAllProvidersDoneMsg(msg allProvidersDoneMsg) tea.Cmd {
@@ -155,7 +138,7 @@ func (m *Model) handleProviderOutdatedCheckedMsg(msg providerOutdatedCheckedMsg)
 	}
 	delete(m.outdatedProviders, msg.provider)
 	if msg.err != nil {
-		cmds = append(cmds, setStatus(m, providerScanFailureStatus(msg.provider, msg.err), true))
+		cmds = append(cmds, setStatus(m, app.ProviderScanFailureStatus(msg.provider, msg.err), true))
 	}
 	if len(m.outdatedProviders) > 0 {
 		if !m.providerSnapshotRefreshing && !m.discoveryRefreshing {

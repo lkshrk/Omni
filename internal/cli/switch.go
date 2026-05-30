@@ -40,9 +40,9 @@ Examples:
 				if err != nil {
 					return err
 				}
-				fmt.Printf("✓ reinstalled %s with default provider %s\n", name, result.ToProvider)
+				fmt.Fprintf(cmdOut(cmd), "✓ reinstalled %s with default provider %s\n", name, result.ToProvider)
 				if result.UninstallWarning != nil {
-					fmt.Printf("  warning: could not remove old %s installation: %v\n", result.FromProvider, result.UninstallWarning)
+					fmt.Fprintf(cmdOut(cmd), "  warning: could not remove old %s installation: %v\n", result.FromProvider, result.UninstallWarning)
 				}
 				return nil
 			}
@@ -56,9 +56,9 @@ Examples:
 			if err != nil {
 				return err
 			}
-			fmt.Printf("✓ switched %s: %s → %s\n", name, fromProvider, toProvider)
+			fmt.Fprintf(cmdOut(cmd), "✓ switched %s: %s → %s\n", name, fromProvider, toProvider)
 			if result.UninstallWarning != nil {
-				fmt.Printf("  warning: could not remove old %s installation: %v\n", fromProvider, result.UninstallWarning)
+				fmt.Fprintf(cmdOut(cmd), "  warning: could not remove old %s installation: %v\n", fromProvider, result.UninstallWarning)
 			}
 			return nil
 		},

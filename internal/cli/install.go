@@ -6,7 +6,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/lkshrk/omni/internal/actions"
+	"github.com/lkshrk/omni/internal/app"
 	gosync "github.com/lkshrk/omni/internal/sync"
+	textutil "github.com/lkshrk/omni/internal/text"
 )
 
 func newInstallCmd(state *rootState) *cobra.Command {
@@ -36,21 +38,17 @@ bootstrap or host assignment:
 			}
 			name := args[0]
 			if providerName == "" {
-				settings, err := state.app.LoadSettings()
+				resolved, err := state.app.DefaultInstallProvider(cmd.Context())
 				if err != nil {
-					return fmt.Errorf("loading settings: %w", err)
-				}
-				resolved, err := state.app.ResolveProvider(cmd.Context(), settings.EcosystemPriority("system"))
-				if err != nil {
-					return fmt.Errorf("no provider available; use --provider to specify one")
+					return err
 				}
 				providerName = resolved
-				fmt.Printf("auto-selected provider: %s\n", providerName)
+				fmt.Fprintf(cmdOut(cmd), "auto-selected provider: %s\n", providerName)
 			}
 			if err := state.app.Install(cmd.Context(), name, providerName); err != nil {
 				return err
 			}
-			fmt.Printf("✓ installed %s (%s)\n", name, providerName)
+			fmt.Fprintf(cmdOut(cmd), "✓ installed %s (%s)\n", name, providerName)
 
 			// After each install, check if any unselected reusable group is now
 			// fully satisfied and offer to add it to the active host.
@@ -82,17 +80,17 @@ func runInstallGroup(cmd *cobra.Command, state *rootState, group string) error {
 	opts := gosync.SyncOptions{
 		Group: group,
 		Progress: func(msg string) {
-			fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", msg)
+			fmt.Fprintf(cmdOut(cmd), "  %s\n", msg)
 		},
 		ToolProgress: func(event gosync.ProgressEvent) {
 			if !event.Done {
 				return
 			}
 			if event.Err != nil {
-				fmt.Fprintf(cmd.OutOrStdout(), "  ✗ failed: %s (%s): %v\n", event.Tool.Name, event.Tool.Provider, event.Err)
+				fmt.Fprintf(cmdOut(cmd), "  ✗ failed: %s (%s): %v\n", event.Tool.Name, event.Tool.Provider, event.Err)
 				return
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "  ✓ installed: %s (%s)\n", event.Tool.Name, event.Tool.Provider)
+			fmt.Fprintf(cmdOut(cmd), "  ✓ installed: %s (%s)\n", event.Tool.Name, event.Tool.Provider)
 		},
 	}
 	result, err := state.app.Sync(cmd.Context(), opts)
@@ -100,36 +98,30 @@ func runInstallGroup(cmd *cobra.Command, state *rootState, group string) error {
 		return err
 	}
 
-	installed := result.Installed()
-	failed := result.Failed()
-	already := result.Skipped()
-	var unavailable []gosync.SyncOp
-	for _, op := range result.Ops {
-		if op.Kind == gosync.OpProviderUnavailable {
-			unavailable = append(unavailable, op)
-		}
-	}
+	summary := app.SummarizeSyncResult(result)
 
 	out := cmd.OutOrStdout()
-	for _, op := range unavailable {
-		fmt.Fprintf(out, "  ! provider unavailable: %s (skipping %s)\n", op.Tool.Provider, op.Tool.Name)
+	for _, line := range app.SyncProviderUnavailableLines(result) {
+		fmt.Fprintf(out, "  ! %s\n", line)
 	}
-	if len(installed) > 0 {
-		fmt.Fprintf(out, "\n%d tool(s) installed.\n", len(installed))
+	lines := app.SyncResultSummaryLines(result, app.SyncResultSummaryLineOptions{
+		IncludeInstalled:        true,
+		IncludeAlreadyInstalled: true,
+		IncludeFailed:           true,
+	})
+	if summary.Installed > 0 && len(lines) > 0 {
+		fmt.Fprintln(out)
 	}
-	if len(already) > 0 {
-		fmt.Fprintf(out, "%d tool(s) already installed.\n", len(already))
+	for _, line := range lines {
+		fmt.Fprintln(out, line)
 	}
-	if len(failed) > 0 {
-		fmt.Fprintf(out, "%d tool(s) failed.\n", len(failed))
+	if len(summary.ProviderUnavailable) > 0 {
+		return fmt.Errorf("%s unavailable", textutil.PluralCount(len(summary.ProviderUnavailable), "tool", "tools"))
 	}
-	if len(unavailable) > 0 {
-		return fmt.Errorf("%d tool(s) unavailable", len(unavailable))
+	if summary.Failed > 0 {
+		return fmt.Errorf("%s failed", textutil.PluralCount(summary.Failed, "tool", "tools"))
 	}
-	if len(failed) > 0 {
-		return fmt.Errorf("%d tool(s) failed", len(failed))
-	}
-	if len(installed) == 0 && len(failed) == 0 && len(already) == 0 && len(unavailable) == 0 {
+	if summary.Installed == 0 && summary.Failed == 0 && summary.AlreadyInstalled == 0 && len(summary.ProviderUnavailable) == 0 {
 		fmt.Fprintln(out, "No tools in group or nothing to install.")
 	}
 	return nil

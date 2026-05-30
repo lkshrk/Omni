@@ -8,8 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/provider"
 )
 
 type setupActivationOption struct {
@@ -57,7 +55,13 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 		// Config exists but no host entry matches this machine. Keep the
 		// background list as the pre-onboarding snapshot; fresh scans/reloads run
 		// only after onboarding exits.
-		m.settings = msg.settings
+		m.setSettings(msg.settings)
+		if msg.dotsConfiguredKnown {
+			m.dotsConfiguredCached = msg.dotsConfigured
+		}
+		if msg.dotsSyncAvailKnown {
+			m.dotsSyncAvailCached = msg.dotsSyncAvail
+		}
 		m.taps = msg.taps
 		m.groupNames = msg.groupNames
 		m.toolMemberships = msg.toolMemberships
@@ -67,10 +71,10 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 		m.effectiveSystemManager = msg.effectiveSystemManager
 		m.dotsReminderService = msg.dotsReminderService
 		m.dotsReminderServiceErr = msg.dotsReminderServiceErr
-		m.dotsReminderInterval = dotsReminderIntervalFromService(msg.dotsReminderService)
+		m.dotsReminderInterval = app.DotsReminderInterval(msg.dotsReminderService)
 		m.dotsWatchService = msg.dotsWatchService
 		m.dotsWatchServiceErr = msg.dotsWatchServiceErr
-		m.dotsWatchDebounce = dotsWatchDebounceFromService(msg.dotsWatchService)
+		m.dotsWatchDebounce = app.DotsWatchDebounce(msg.dotsWatchService)
 		m.dotsHistory = append([]app.DotsHistoryEntry(nil), msg.dotsHistory...)
 		m.dotsHistoryErr = msg.dotsHistoryErr
 		m.hostInfo = msg.hostInfo
@@ -93,7 +97,13 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 	m.allTools = msg.tools
 	m.discoveredTools = msg.discovered
 	m.rebuildDiscoveredKeys()
-	m.settings = msg.settings
+	m.setSettings(msg.settings)
+	if msg.dotsConfiguredKnown {
+		m.dotsConfiguredCached = msg.dotsConfigured
+	}
+	if msg.dotsSyncAvailKnown {
+		m.dotsSyncAvailCached = msg.dotsSyncAvail
+	}
 	m.taps = msg.taps
 	m.groupNames = msg.groupNames
 	m.toolGroups = msg.toolGroups
@@ -103,20 +113,21 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 	m.toolIgnoreSet = msg.toolIgnoreSet
 	m.groupIgnoreSet = msg.groupIgnoreSet
 	m.toolProviderPins = msg.toolProviderPins
-	m.configuredProviders = append([]string(nil), msg.configuredProviders...)
-	m.providerToolCounts = copyStringIntMap(msg.providerToolCounts)
 	m.effectivePythonManager = msg.effectivePythonManager
 	m.effectiveNodeManager = msg.effectiveNodeManager
 	m.effectiveSystemManager = msg.effectiveSystemManager
 	m.stowInstalled = msg.stowInstalled
 	m.dotsReminderService = msg.dotsReminderService
 	m.dotsReminderServiceErr = msg.dotsReminderServiceErr
-	m.dotsReminderInterval = dotsReminderIntervalFromService(msg.dotsReminderService)
+	m.dotsReminderInterval = app.DotsReminderInterval(msg.dotsReminderService)
 	m.dotsWatchService = msg.dotsWatchService
 	m.dotsWatchServiceErr = msg.dotsWatchServiceErr
-	m.dotsWatchDebounce = dotsWatchDebounceFromService(msg.dotsWatchService)
+	m.dotsWatchDebounce = app.DotsWatchDebounce(msg.dotsWatchService)
 	m.dotsHistory = append([]app.DotsHistoryEntry(nil), msg.dotsHistory...)
 	m.dotsHistoryErr = msg.dotsHistoryErr
+	if msg.dotsState != nil && msg.dotsState.Loaded {
+		m.applyDotsSnapshot(append([]app.DotStatus(nil), msg.dotsState.Entries...), msg.dotsState.GitStatus, msg.dotMemberships)
+	}
 	if len(msg.ecosystemProviders) > 0 {
 		m.providerNames = append([]string(nil), msg.ecosystemProviders...)
 	}
@@ -129,13 +140,6 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 		m.consolidateOptions = m.app.ConsolidateOptions()
 	}
 	m.applyFilter()
-	if msg.bootstrapRequired && !m.setupComplete {
-		m.mode = viewSetup
-		m.setupBackgroundMode = viewStatus
-		m.setupActivationIdx = 0
-		m.setupStep = 10
-		return cmds
-	}
 	if m.setupBackgroundMode == viewDots {
 		m.mode = viewDots
 		m.setupBackgroundMode = viewStatus
@@ -151,12 +155,12 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 
 	skipLaunchDotsSync := m.skipLaunchDotsSyncOnce
 	m.skipLaunchDotsSyncOnce = false
-	if m.settings.DotsRepo != "" && !config.BoolVal(m.settings.DotsDisabled) && !m.dotsLoading && !skipLaunchDotsSync {
+	if m.dotsSyncConfigured() && !m.dotsLoading && !skipLaunchDotsSync {
 		if m.promptForStowInstall(stowInstallLaunchSync) {
 			return cmds
 		}
 		m.beginDotsOperation("Syncing dots…")
-		cmds = append(cmds, m.spinner.Tick, m.doDotsSyncOnly())
+		cmds = append(cmds, m.spinner.Tick, m.doLaunchDotsSyncOnly())
 	}
 
 	cmds = append(cmds, m.startPostLoadBackgroundTasks()...)
@@ -168,6 +172,21 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 	}
 	m.finishSetupReloadIfIdle()
 	return cmds
+}
+
+func (m *Model) dotsSyncConfigured() bool {
+	return m.dotsSyncAvailability().Configured
+}
+
+func (m *Model) dotsConfigured() bool {
+	return m.dotsConfiguredCached
+}
+
+func (m *Model) dotsSyncAvailability() app.DotsSyncAvailability {
+	if m.dotsSyncAvailCached.Reason == "" && !m.dotsSyncAvailCached.Configured {
+		return app.DotsSyncAvailability{Reason: app.DotsSyncAvailabilityUnknown}
+	}
+	return m.dotsSyncAvailCached
 }
 
 func (m *Model) handleSetupImportDoneMsg(msg setupImportDoneMsg) []tea.Cmd {
@@ -344,23 +363,24 @@ func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			}
 		case key.Matches(msg, m.keys.Toggle):
 			if m.setupProviderIdx >= 0 && m.setupProviderIdx < len(m.setupProviders) {
-				m.setupProviders[m.setupProviderIdx].enabled = !m.setupProviders[m.setupProviderIdx].enabled
+				m.setupProviders[m.setupProviderIdx].Enabled = !m.setupProviders[m.setupProviderIdx].Enabled
 			}
 		case key.Matches(msg, m.keys.Confirm):
 			m.confirmSetupProviders(&cmds)
 		}
 	case 3: // Node manager selection
+		choices := m.setupNodeManagerChoices()
 		switch {
 		case key.Matches(msg, m.keys.Up):
 			if m.setupNodeMgrIdx > 0 {
 				m.setupNodeMgrIdx--
 			}
 		case key.Matches(msg, m.keys.Down):
-			if m.setupNodeMgrIdx < len(nodeMgrChoices)-1 {
+			if m.setupNodeMgrIdx < len(choices)-1 {
 				m.setupNodeMgrIdx++
 			}
 		case key.Matches(msg, m.keys.Confirm):
-			chosen := nodeMgrChoices[m.setupNodeMgrIdx].value
+			chosen := choices[m.setupNodeMgrIdx].Value
 			if chosen == "" {
 				m.startSetupHostCreation(&cmds)
 			} else {
@@ -474,7 +494,7 @@ func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 				startOp(m, "Syncing tools…")
 				cmds = append(cmds, m.spinner.Tick, m.doSetupBootstrapTools())
 			case 2:
-				if strings.TrimSpace(m.settings.DotsRepo) == "" || config.BoolVal(m.settings.DotsDisabled) {
+				if !m.dotsSyncConfigured() {
 					cmds = append(cmds, setStatus(m, "dotfile sync is not configured for this host", true))
 					break
 				}
@@ -495,12 +515,7 @@ func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 }
 
 func (m *Model) confirmSetupProviders(cmds *[]tea.Cmd) {
-	var disabled []string
-	for _, row := range m.setupProviders {
-		if !row.enabled {
-			disabled = append(disabled, row.name)
-		}
-	}
+	disabled := app.SetupDisabledProviders(m.setupProviders)
 	if m.setupStep == 1 {
 		m.loading = true
 		startOp(m, "Importing tools…")
@@ -517,94 +532,32 @@ func (m *Model) confirmSetupProviders(cmds *[]tea.Cmd) {
 }
 
 func (m *Model) startCurrentProviderScans() []tea.Cmd {
-	var cmds []tea.Cmd
-
-	// Use the UNION of DB-row providers and config-declared providers so scans
-	// run on first launch after import. Import() writes JSON config, not DB rows.
-	m.scanningProviders = m.currentProviderScanSet()
-	m.providerScanToolCounts = m.currentProviderScanToolCounts()
+	if m.app == nil {
+		return nil
+	}
+	plan, err := m.app.CurrentRefreshProviderScanPlan(m.ctx)
+	if err != nil {
+		return []tea.Cmd{setStatus(m, "✗ "+err.Error(), true)}
+	}
+	m.scanningProviders = plan.ProviderSet()
+	m.providerScanToolCounts = plan.CountsByProvider()
+	m.providerScanLabels = plan.LabelsByProvider()
 	m.providerScanToolDone = make(map[string]int, len(m.providerScanToolCounts))
 	m.refreshToolDone = 0
-	m.refreshToolTotal = sumProviderToolCounts(m.providerScanToolCounts)
+	m.refreshToolTotal = plan.Total()
 	if len(m.scanningProviders) == 0 {
 		return nil
 	}
-	setActivityStatus(m, toolRefreshStatus(m.scanningProviders, m.refreshToolDone, m.refreshToolTotal))
+	setActivityStatus(m, m.toolRefreshStatus(m.refreshToolDone, m.refreshToolTotal))
 	ch, progressGen := m.beginProgressStream()
 	m.scanGen++
 	gen := m.scanGen
+	var cmds []tea.Cmd
 	cmds = append(cmds, m.spinner.Tick, waitForProgress(ch, progressGen))
-	for prov := range m.scanningProviders {
+	for _, prov := range plan.ProviderNames() {
 		cmds = append(cmds, m.doScanProvider(prov, gen, ch, progressGen))
 	}
 	return cmds
-}
-
-func (m Model) currentProviderScanSet() map[string]bool {
-	providers := make(map[string]bool)
-	for _, p := range m.configuredProviders {
-		if m.providerScanCoveredByConfiguredEcosystem(p) {
-			continue
-		}
-		providers[p] = true
-	}
-	for _, t := range m.allTools {
-		if m.providerScanCoveredByConfiguredEcosystem(t.Provider) {
-			continue
-		}
-		providers[t.Provider] = true
-	}
-	return providers
-}
-
-func (m Model) currentProviderScanToolCounts() map[string]int {
-	counts := make(map[string]int, len(m.scanningProviders))
-	for prov := range m.scanningProviders {
-		count := m.providerToolCounts[prov]
-		if count == 0 {
-			for _, t := range m.allTools {
-				if t == nil || !t.Tracked || t.Provider != prov {
-					continue
-				}
-				count++
-			}
-		}
-		if count == 0 {
-			count = 1
-		}
-		counts[prov] = count
-	}
-	return counts
-}
-
-func sumProviderToolCounts(counts map[string]int) int {
-	total := 0
-	for _, count := range counts {
-		if count > 0 {
-			total += count
-		}
-	}
-	return total
-}
-
-func (m Model) providerScanCoveredByConfiguredEcosystem(prov string) bool {
-	if prov == "" {
-		return true
-	}
-	configured := make(map[string]bool, len(m.configuredProviders))
-	for _, name := range m.configuredProviders {
-		configured[name] = true
-	}
-	switch prov {
-	case m.effectiveSystemManager:
-		return configured[provider.EcosystemSystem]
-	case m.effectiveNodeManager:
-		return configured[provider.EcosystemNode]
-	case m.effectivePythonManager:
-		return configured[provider.EcosystemPython]
-	default:
-		return false
-	}
 }
 
 func (m *Model) startPostLoadBackgroundTasks() []tea.Cmd {
@@ -638,7 +591,7 @@ func (m *Model) finishSetupReload() {
 }
 
 func (m *Model) advanceSetupPastProviders(cmds *[]tea.Cmd) {
-	if isNodeProviderEnabled(m.setupProviders) {
+	if app.SetupNodeProviderEnabled(m.setupProviders) {
 		m.setupStep = 3
 		return
 	}
@@ -652,12 +605,10 @@ func (m *Model) startSetupHostCreation(cmds *[]tea.Cmd) {
 	}
 	m.settingsInput.Blur()
 	m.setupStep = 5
-	if m.hostInfo != nil && m.hostInfo.Active == name {
-		if _, ok := m.hostInfo.Hosts[name]; ok {
-			m.setupHostReturnStep = 0
-			m.hostRequired = false
-			return
-		}
+	if app.SetupHostAlreadyConfigured(m.hostInfo, name) {
+		m.setupHostReturnStep = 0
+		m.hostRequired = false
+		return
 	}
 	m.loading = true
 	startOp(m, "Preparing this machine…")
@@ -665,11 +616,11 @@ func (m *Model) startSetupHostCreation(cmds *[]tea.Cmd) {
 }
 
 func (m *Model) defaultSetupHostName() string {
-	return shortHostname()
+	return app.DefaultSetupHostName()
 }
 
 func (m Model) setupCopyHostNames() []string {
-	return sortedHostNames(m.hostInfo)
+	return app.SetupCopyHostNames(m.hostInfo)
 }
 
 func (m *Model) startSetupGroupSelection(cmds *[]tea.Cmd) {
@@ -684,37 +635,11 @@ func (m *Model) startSetupGroupSelection(cmds *[]tea.Cmd) {
 }
 
 func (m *Model) initSetupGroupDraft() {
-	draft := make(map[string]bool, len(m.groupNames))
-	for _, group := range m.groupNames {
-		draft[group] = false
-	}
-	if m.hostInfo != nil {
-		host := m.hostInfo.Active
-		if host == "" {
-			host = shortHostname()
-		}
-		if assignment, ok := m.hostInfo.Hosts[host]; ok {
-			for _, group := range assignment.Groups {
-				if _, exists := draft[group]; exists {
-					draft[group] = true
-				}
-			}
-		}
-	}
-	m.setupGroupDraft = draft
+	m.setupGroupDraft = app.SetupHostGroupDraft(m.groupNames, m.hostInfo)
 }
 
 func (m Model) setupSelectedGroups() []string {
-	if len(m.groupNames) == 0 || len(m.setupGroupDraft) == 0 {
-		return nil
-	}
-	groups := make([]string, 0, len(m.groupNames))
-	for _, group := range m.groupNames {
-		if m.setupGroupDraft[group] {
-			groups = append(groups, group)
-		}
-	}
-	return groups
+	return app.SetupSelectedHostGroups(m.groupNames, m.setupGroupDraft)
 }
 
 func (m *Model) finishSetupWithReload(cmds *[]tea.Cmd) {
@@ -742,11 +667,7 @@ func (m *Model) markBootstrapComplete(cmds *[]tea.Cmd) {
 	if m.app == nil {
 		return
 	}
-	host := shortHostname()
-	if m.hostInfo != nil && m.hostInfo.Active != "" {
-		host = m.hostInfo.Active
-	}
-	if err := m.app.MarkHostBootstrapCompleted(m.ctx, host); err != nil {
+	if err := m.app.MarkCurrentHostBootstrapCompleted(m.ctx); err != nil {
 		*cmds = append(*cmds, setStatus(m, "✗ bootstrap marker: "+err.Error(), true))
 	}
 }

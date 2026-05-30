@@ -12,6 +12,7 @@ import (
 
 	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/dots"
+	textutil "github.com/lkshrk/omni/internal/text"
 )
 
 // dotsHistoryIDCounter ensures unique IDs even when two operations
@@ -24,6 +25,8 @@ const (
 )
 
 type dotsHistorySuppressKey struct{}
+
+type dotsHistorySuppressUnchangedKey struct{}
 
 // DotsHistoryEntry is a machine-local recovery trail for a dotfile operation.
 // It intentionally lives in the cache DB instead of settings.json because it
@@ -50,12 +53,51 @@ type DotsHistoryOp struct {
 	Error string `json:"error,omitempty"`
 }
 
+type DotsWatchSyncOpCounts struct {
+	Changes   int
+	Conflicts int
+}
+
+func CountDotsWatchSyncOps(ops []dots.Op) DotsWatchSyncOpCounts {
+	var counts DotsWatchSyncOpCounts
+	for _, op := range ops {
+		switch op.Kind {
+		case dots.OpLink, dots.OpRepair, dots.OpAdopt, dots.OpUnlink, dots.OpUnlinkSkip, dots.OpUnlinkConflict:
+			counts.Changes++
+		case dots.OpConflict:
+			counts.Conflicts++
+		}
+	}
+	return counts
+}
+
+func DotsDisableDetail(ops []dots.Op) string {
+	if len(ops) == 0 {
+		return "dots disabled"
+	}
+	var unlinked, conflicts int
+	for _, op := range ops {
+		switch op.Kind {
+		case dots.OpUnlink:
+			unlinked++
+		case dots.OpUnlinkConflict:
+			conflicts++
+		}
+	}
+	detail := fmt.Sprintf("%d unlinked", unlinked)
+	if conflicts > 0 {
+		detail += fmt.Sprintf(", %d conflicts", conflicts)
+	}
+	return detail
+}
+
 // RecentDotsHistory returns recent dotfile operation records, newest first.
 func (a *App) RecentDotsHistory(ctx context.Context, limit int) ([]DotsHistoryEntry, error) {
 	entries, err := a.readDotsHistory(ctx)
 	if err != nil {
 		return nil, err
 	}
+	entries = normalizeDotsHistoryEntries(entries)
 	if limit > 0 && len(entries) > limit {
 		entries = entries[:limit]
 	}
@@ -66,6 +108,10 @@ func suppressDotsHistory(ctx context.Context) context.Context {
 	return context.WithValue(ctx, dotsHistorySuppressKey{}, true)
 }
 
+func suppressUnchangedDotsHistory(ctx context.Context) context.Context {
+	return context.WithValue(ctx, dotsHistorySuppressUnchangedKey{}, true)
+}
+
 func dotsHistorySuppressed(ctx context.Context) bool {
 	if ctx == nil {
 		return false
@@ -74,8 +120,16 @@ func dotsHistorySuppressed(ctx context.Context) bool {
 	return suppressed
 }
 
+func unchangedDotsHistorySuppressed(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	suppressed, _ := ctx.Value(dotsHistorySuppressUnchangedKey{}).(bool)
+	return suppressed
+}
+
 func (a *App) recordDotsHistoryResult(ctx context.Context, operation, entry, repoPath string, ops []dots.Op, opErr error, dryRun bool) {
-	if dryRun || dotsHistorySuppressed(ctx) || a.readDB() == nil {
+	if dryRun || dotsHistorySuppressed(ctx) || (unchangedDotsHistorySuppressed(ctx) && dotsHistoryUnchangedSuccess(ops, opErr)) || a.readDB() == nil {
 		return
 	}
 	historyCtx := context.WithoutCancel(ctx)
@@ -157,6 +211,18 @@ func dotsHistoryStatus(ops []dots.Op, opErr error) string {
 	return "failed"
 }
 
+func dotsHistoryUnchangedSuccess(ops []dots.Op, opErr error) bool {
+	if opErr != nil {
+		return false
+	}
+	for _, op := range ops {
+		if op.Kind != dots.OpSkip && op.Kind != dots.OpUnlinkSkip {
+			return false
+		}
+	}
+	return true
+}
+
 func dotsHistorySummary(operation string, ops []dots.Op, opErr error) string {
 	if opErr != nil {
 		return operation + " failed"
@@ -164,7 +230,59 @@ func dotsHistorySummary(operation string, ops []dots.Op, opErr error) string {
 	if len(ops) == 0 {
 		return operation + " completed"
 	}
-	return fmt.Sprintf("%s completed with %s", operation, dotsHistoryPlural(len(ops), "dotfile op", "dotfile ops"))
+	changed, unchanged := dotsHistoryOpCounts(ops)
+	return dotsHistoryCountsSummary(operation, changed, unchanged)
+}
+
+func dotsHistoryCountsSummary(operation string, changed, unchanged int) string {
+	switch {
+	case changed == 0:
+		return fmt.Sprintf("%s completed: no changes, %s unchanged", operation, textutil.PluralCount(unchanged, "dotfile", "dotfiles"))
+	case unchanged == 0:
+		return fmt.Sprintf("%s completed: %s changed", operation, textutil.PluralCount(changed, "dotfile", "dotfiles"))
+	default:
+		return fmt.Sprintf("%s completed: %s changed, %s unchanged", operation,
+			textutil.PluralCount(changed, "dotfile", "dotfiles"),
+			textutil.PluralCount(unchanged, "dotfile", "dotfiles"))
+	}
+}
+
+func normalizeDotsHistoryEntries(entries []DotsHistoryEntry) []DotsHistoryEntry {
+	for i := range entries {
+		entries[i] = normalizeDotsHistoryEntry(entries[i])
+	}
+	return entries
+}
+
+func normalizeDotsHistoryEntry(entry DotsHistoryEntry) DotsHistoryEntry {
+	if entry.Status != "success" || len(entry.Ops) == 0 {
+		return entry
+	}
+	changed, unchanged := dotsHistoryStoredOpCounts(entry.Ops)
+	entry.Summary = dotsHistoryCountsSummary(entry.Operation, changed, unchanged)
+	return entry
+}
+
+func dotsHistoryOpCounts(ops []dots.Op) (changed, unchanged int) {
+	for _, op := range ops {
+		if op.Kind == dots.OpSkip || op.Kind == dots.OpUnlinkSkip {
+			unchanged++
+			continue
+		}
+		changed++
+	}
+	return changed, unchanged
+}
+
+func dotsHistoryStoredOpCounts(ops []DotsHistoryOp) (changed, unchanged int) {
+	for _, op := range ops {
+		if op.Kind == "skip" || op.Kind == "unlink:skip" {
+			unchanged++
+			continue
+		}
+		changed++
+	}
+	return changed, unchanged
 }
 
 func dotsHistoryOps(ops []dots.Op) []DotsHistoryOp {
@@ -186,11 +304,4 @@ func dotsHistoryOps(ops []dots.Op) []DotsHistoryOp {
 		out = append(out, item)
 	}
 	return out
-}
-
-func dotsHistoryPlural(count int, singular, plural string) string {
-	if count == 1 {
-		return fmt.Sprintf("%d %s", count, singular)
-	}
-	return fmt.Sprintf("%d %s", count, plural)
 }

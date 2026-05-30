@@ -6,8 +6,8 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/lkshrk/omni/internal/actions"
+	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/database"
-	"github.com/lkshrk/omni/internal/provider"
 	"github.com/lkshrk/omni/internal/text"
 )
 
@@ -174,14 +174,6 @@ func pillText(label string, active bool) string {
 		return "[" + label + "]"
 	}
 	return " " + label + " "
-}
-
-// providerEcosystem returns the ecosystem name for a raw provider value.
-func providerEcosystem(raw string) string {
-	if ecosystem, ok := provider.BuiltinEcosystemFor(raw); ok {
-		return ecosystem
-	}
-	return raw
 }
 
 func renderList(m Model) string {
@@ -620,24 +612,7 @@ func packageAlias(t *database.ToolCache) string {
 }
 
 func toolHasPrivilegeMarker(t *database.ToolCache, systemBin string) bool {
-	if t == nil {
-		return false
-	}
-	if t.Privilege != "" {
-		return true
-	}
-	if isSudoBackedProvider(t.Provider) || isSudoBackedProvider(t.InstalledWith) {
-		return true
-	}
-	return t.Provider == provider.EcosystemSystem && isSudoBackedProvider(systemBin)
-}
-
-func isSudoBackedProvider(name string) bool {
-	switch name {
-	case "apt", "apk", "dnf", "pacman", "zypper":
-		return true
-	}
-	return false
+	return app.ToolHasPrivilegeMarker(t, app.ToolClassificationContext{EffectiveSystemManager: systemBin})
 }
 
 func compactVersion(version string) string {
@@ -783,12 +758,12 @@ func renderProviderColWithExplicit(p palette, raw, installedWith, explicitWith, 
 }
 
 func providerMetaStyle(p palette, meta string) lipgloss.Style {
-	switch meta {
-	case provider.EcosystemSystem:
+	switch app.ToolProviderDisplayRoleFor(meta) {
+	case app.ToolProviderDisplayRoleSystem:
 		return p.styleProviderSystem
-	case provider.EcosystemNode:
+	case app.ToolProviderDisplayRoleNode:
 		return p.styleProvider
-	case provider.EcosystemPython:
+	case app.ToolProviderDisplayRolePython:
 		return p.styleProviderLinux
 	default:
 		return p.styleNormal
@@ -826,45 +801,26 @@ func providerParts(raw, installedWith, systemBin, pythonBin, nodeBin string) (me
 }
 
 func providerPartsWithExplicit(raw, installedWith, explicitWith, systemBin, pythonBin, nodeBin string) (meta, concrete string, isOverride bool) {
-	ecosystem, ok := provider.BuiltinEcosystemFor(raw)
-	if !ok {
-		return raw, "", false
-	}
-	if !provider.BuiltinIsEcosystem(raw) {
-		return ecosystem, concreteProviderLabel(ecosystem, raw), true
-	}
-	c := installedWith
-	if c == "" || c == raw {
-		c = explicitWith
-	}
-	if c == "" || c == raw {
-		switch ecosystem {
-		case provider.EcosystemSystem:
-			c = systemBin
-		case provider.EcosystemPython:
-			c = pythonBin
-		case provider.EcosystemNode:
-			c = nodeBin
-		}
-	}
-	if c == raw {
-		c = ""
-	}
-	return ecosystem, c, explicitWith != "" && c == explicitWith
-}
-
-func concreteProviderLabel(ecosystem, raw string) string {
-	if opt, ok := provider.BuiltinManagerOption(ecosystem, raw); ok && opt.SettingsValue != "" {
-		return opt.SettingsValue
-	}
-	return raw
+	parts := app.ToolProviderDisplayParts(app.ToolProviderDisplayInput{
+		Provider:               raw,
+		InstalledWith:          installedWith,
+		ExplicitProvider:       explicitWith,
+		EffectiveSystemManager: systemBin,
+		EffectivePythonManager: pythonBin,
+		EffectiveNodeManager:   nodeBin,
+	})
+	return parts.Meta, parts.Concrete, parts.Override
 }
 
 func providerLabelForToolWithPin(t *database.ToolCache, providerPin, systemBin, pythonBin, nodeBin string) string {
-	if t != nil && t.Installed && t.InstalledWith == "" && providerPin == "" {
-		return providerLabel(t.Provider, t.InstalledWith, "", "", "")
+	if t == nil {
+		return ""
 	}
-	return providerLabelWithExplicit(t.Provider, t.InstalledWith, providerPin, systemBin, pythonBin, nodeBin)
+	return app.ToolProviderDisplayForTool(t, providerPin, app.ToolClassificationContext{
+		EffectiveSystemManager: systemBin,
+		EffectivePythonManager: pythonBin,
+		EffectiveNodeManager:   nodeBin,
+	}).Label()
 }
 
 func providerDisplayTextForToolWithPin(t *database.ToolCache, providerPin, systemBin, pythonBin, nodeBin string) string {
@@ -877,14 +833,14 @@ func providerLabel(raw, installedWith, systemBin, pythonBin, nodeBin string) str
 }
 
 func providerLabelWithExplicit(raw, installedWith, explicitWith, systemBin, pythonBin, nodeBin string) string {
-	meta, concrete, isOverride := providerPartsWithExplicit(raw, installedWith, explicitWith, systemBin, pythonBin, nodeBin)
-	if concrete == "" {
-		return meta
-	}
-	if isOverride {
-		concrete += "!"
-	}
-	return meta + "(" + concrete + ")"
+	return app.ToolProviderDisplayLabel(app.ToolProviderDisplayInput{
+		Provider:               raw,
+		InstalledWith:          installedWith,
+		ExplicitProvider:       explicitWith,
+		EffectiveSystemManager: systemBin,
+		EffectivePythonManager: pythonBin,
+		EffectiveNodeManager:   nodeBin,
+	})
 }
 
 func providerPinForTool(t *database.ToolCache, providerPins map[string]string) string {
@@ -998,22 +954,7 @@ func providerMismatchDetailLine(m Model, t *database.ToolCache, prefix string) s
 }
 
 func desiredConcreteProviderForTool(m Model, t *database.ToolCache) (string, string) {
-	if t == nil {
-		return "", ""
-	}
-	if pin := providerPinForTool(t, m.toolProviderPins); pin != "" {
-		return pin, "configured"
-	}
-	switch t.Provider {
-	case provider.EcosystemSystem:
-		return m.effectiveSystemManager, "default"
-	case provider.EcosystemPython:
-		return m.effectivePythonManager, "default"
-	case provider.EcosystemNode:
-		return m.effectiveNodeManager, "default"
-	default:
-		return "", ""
-	}
+	return app.DesiredConcreteProviderForTool(t, toolClassificationContext(m, t))
 }
 
 func rowActionErrorAdviceLines(m Model, t *database.ToolCache, prefix string, wrapWidth int) []string {
@@ -1025,7 +966,7 @@ func rowActionErrorAdviceLines(m Model, t *database.ToolCache, prefix string, wr
 		return nil
 	}
 	p := m.palette
-	applicableIdx := firstApplicableSolutionIndex(actionErr)
+	applicableIdx := app.FirstApplicableProviderSolutionIndex(actionErr)
 	var lines []string
 	for i, solution := range actionErr.Solutions {
 		if i >= 2 {

@@ -1,12 +1,12 @@
 package tui
 
 import (
-	"sort"
-	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/lipgloss/v2"
+
+	"github.com/lkshrk/omni/internal/app"
 )
 
 // tabKeyMap wraps Model and implements key.Map with tab-aware ShortHelp.
@@ -129,7 +129,7 @@ func activityLabel(m Model) string {
 	case m.searching:
 		return "Searching…"
 	case len(m.scanningProviders) > 0:
-		return toolRefreshStatus(m.scanningProviders, m.refreshToolDone, m.refreshToolTotal)
+		return m.toolRefreshStatus(m.refreshToolDone, m.refreshToolTotal)
 	case m.providerSnapshotRefreshing || m.discoveryRefreshing:
 		return "Finding local tools…"
 	case len(m.outdatedProviders) > 0 || m.outdatedSnapshotRefreshing:
@@ -146,33 +146,9 @@ func activityLabel(m Model) string {
 }
 
 func toolRefreshStatus(providers map[string]bool, done, total int) string {
-	names := make([]string, 0, len(providers))
-	for p := range providers {
-		if p != "" {
-			names = append(names, p)
-		}
-	}
-	sort.Strings(names)
-	if done < 0 {
-		done = 0
-	}
-	if done > total {
-		done = total
-	}
-	status := "Refreshing tools…"
-	if total > 0 {
-		status += " " + strconv.Itoa(done) + "/" + strconv.Itoa(total)
-	}
-	if len(names) == 0 || total <= 0 {
-		return status
-	}
-	return status + ": " + strings.Join(names, ", ")
+	return app.RefreshToolsStatus(app.RefreshProviderScanLabels(providers, nil), done, total)
 }
 
-func refreshToolProgressText(active string, done, total int) string {
-	status := toolRefreshStatus(nil, done, total)
-	if active == "" || total <= 0 {
-		return status
-	}
-	return status + ": " + active
+func (m Model) toolRefreshStatus(done, total int) string {
+	return app.RefreshToolsStatus(app.RefreshProviderScanLabels(m.scanningProviders, m.providerScanLabels), done, total)
 }

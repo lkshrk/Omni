@@ -9,7 +9,6 @@ import (
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/database"
-	"github.com/lkshrk/omni/internal/provider"
 )
 
 func renderScopePicker(m Model) string {
@@ -493,7 +492,7 @@ func groupToolRows(m Model) []groupToolRow {
 		if t == nil || !t.Tracked || t.Name == "" {
 			continue
 		}
-		if providerFilter != "" && providerEcosystem(t.Provider) != providerFilter {
+		if providerFilter != "" && app.ToolProviderEcosystem(t.Provider) != providerFilter {
 			continue
 		}
 		if query != "" && !strings.Contains(strings.ToLower(t.Name), query) && !strings.Contains(strings.ToLower(t.Package), query) {
@@ -527,17 +526,7 @@ func groupToolRows(m Model) []groupToolRow {
 }
 
 func groupDotNames(m Model) []string {
-	seen := make(map[string]bool)
-	names := make([]string, 0, len(m.dotMemberships))
-	for name := range m.dotMemberships {
-		if name == "" || seen[name] {
-			continue
-		}
-		seen[name] = true
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
+	return app.DotMembershipNames(m.dotMemberships)
 }
 
 func groupDotRows(m Model) []groupDotRow {
@@ -548,8 +537,8 @@ func groupDotRows(m Model) []groupDotRow {
 			continue
 		}
 		current, exists := statusByName[entry.Name]
-		currentIgnored := exists && dotStatusState(current) == app.DotStateIgnored
-		entryIgnored := dotStatusState(entry) == app.DotStateIgnored
+		currentIgnored := exists && app.DotStatusIgnored(current)
+		entryIgnored := app.DotStatusIgnored(entry)
 		if !exists || currentIgnored && !entryIgnored {
 			statusByName[entry.Name] = entry
 		}
@@ -563,7 +552,7 @@ func groupDotRows(m Model) []groupDotRow {
 			continue
 		}
 		enabled := m.groupDotsEditor.membership[name]
-		ignored := dotStatusState(status) == app.DotStateIgnored
+		ignored := app.DotStatusIgnored(status)
 		section := groupDotSectionDisabled
 		switch {
 		case ignored:
@@ -592,7 +581,7 @@ func groupToolProviders(m Model) []string {
 	if len(m.providerNames) > 0 {
 		return append([]string(nil), m.providerNames...)
 	}
-	return provider.BuiltinEcosystemNames()
+	return m.ecosystemProviderNames()
 }
 
 func groupToolsProviderFilter(m Model) string {
@@ -684,15 +673,24 @@ func ignoreScopeOptions(m Model, t *database.ToolCache) []scopeOption {
 }
 
 func providerScopeOptions(t *database.ToolCache) []scopeOption {
-	if t == nil || t.InstalledWith == "" {
-		return []scopeOption{{kind: "provider-host", label: "installed provider unknown", detail: "refresh first"}}
+	return providerScopeOptionsFromChoices(app.DefaultToolProviderScopeChoices(t))
+}
+
+func (m Model) providerScopeOptions(t *database.ToolCache) []scopeOption {
+	if m.app == nil {
+		return providerScopeOptions(t)
 	}
-	options := []scopeOption{
-		{kind: "provider-host", label: "this tool on this host", detail: t.InstalledWith},
-		{kind: "provider-tool", label: "this tool everywhere", detail: t.InstalledWith},
-	}
-	if ecosystem, ok := provider.BuiltinEcosystemFor(t.Provider); ok && provider.BuiltinIsEcosystem(ecosystem) {
-		options = append(options, scopeOption{kind: "provider-ecosystem", label: ecosystem + " manager on this host", detail: t.InstalledWith})
+	return providerScopeOptionsFromChoices(m.app.ToolProviderScopeChoices(t))
+}
+
+func providerScopeOptionsFromChoices(choices []app.ToolProviderScopeChoice) []scopeOption {
+	options := make([]scopeOption, 0, len(choices))
+	for _, choice := range choices {
+		options = append(options, scopeOption{
+			kind:   string(choice.Kind),
+			label:  choice.Label,
+			detail: choice.Detail,
+		})
 	}
 	return options
 }

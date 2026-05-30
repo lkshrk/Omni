@@ -83,6 +83,7 @@ type SearchResult struct {
 	Description    string
 	Provider       string // provider suitable for config/install after app-layer normalization
 	SourceProvider string // provider that produced the registry result
+	Options        map[string]string
 	Privilege      PrivilegePlan
 }
 

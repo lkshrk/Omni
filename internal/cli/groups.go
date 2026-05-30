@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/lkshrk/omni/internal/app"
+	textutil "github.com/lkshrk/omni/internal/text"
 )
 
 func newGroupsCmd(state *rootState) *cobra.Command {
@@ -15,21 +16,20 @@ func newGroupsCmd(state *rootState) *cobra.Command {
 		Long: `Groups lists every group defined in settings.json together with
 how many tools each group contains.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			groups, err := state.app.Groups(cmd.Context())
+			groups, err := state.app.GroupSummaries(cmd.Context())
 			if err != nil {
 				return err
 			}
 			if len(groups) == 0 {
-				fmt.Println("No groups found. Run 'omni add' to create one.")
+				fmt.Fprintln(cmdOut(cmd), "No groups found. Run 'omni add' to create one.")
 				return nil
 			}
 			for _, g := range groups {
-				name := g.GroupName()
 				desc := ""
 				if g.Description != "" {
 					desc = "  — " + g.Description
 				}
-				fmt.Printf("  %-20s %2d tool(s)%s\n", name, len(g.Tools), desc)
+				fmt.Fprintf(cmdOut(cmd), "  %-20s %s%s\n", g.Name, textutil.PluralCount(g.ToolCount, "tool", "tools"), desc)
 			}
 			return nil
 		},
@@ -51,11 +51,11 @@ func newGroupsCreateCmd(state *rootState) *cobra.Command {
 		Use:   "create <name>",
 		Short: "Create an empty tool group",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := state.app.CreateGroup(args[0]); err != nil {
 				return err
 			}
-			fmt.Printf("Created group %q.\n", args[0])
+			fmt.Fprintf(cmdOut(cmd), "Created group %q.\n", args[0])
 			return nil
 		},
 	}
@@ -66,11 +66,11 @@ func newGroupsRenameCmd(state *rootState) *cobra.Command {
 		Use:   "rename <old> <new>",
 		Short: "Rename a tool group",
 		Args:  cobra.ExactArgs(2),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := state.app.RenameGroup(args[0], args[1]); err != nil {
 				return err
 			}
-			fmt.Printf("Renamed group %q to %q.\n", args[0], args[1])
+			fmt.Fprintf(cmdOut(cmd), "Renamed group %q to %q.\n", args[0], args[1])
 			return nil
 		},
 	}
@@ -129,7 +129,7 @@ func newGroupsDeleteCmd(state *rootState) *cobra.Command {
 			if err := state.app.DeleteGroup(cmd.Context(), args[0], opts); err != nil {
 				return err
 			}
-			fmt.Printf("Deleted group %q.\n", args[0])
+			fmt.Fprintf(cmdOut(cmd), "Deleted group %q.\n", args[0])
 			return nil
 		},
 	}
@@ -162,7 +162,7 @@ func runGroupsMoveTool(cmd *cobra.Command, state *rootState, args []string) erro
 	if err := state.app.MoveToolToGroup(args[1], args[0]); err != nil {
 		return err
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "Moved %q to group %q.\n", args[1], args[0])
+	fmt.Fprintf(cmdOut(cmd), "Moved %q to group %q.\n", args[1], args[0])
 	return nil
 }
 
@@ -171,11 +171,11 @@ func newGroupsIgnoreToolCmd(state *rootState) *cobra.Command {
 		Use:   "ignore-tool <group> <tool>",
 		Short: "Ignore a logical tool in one group",
 		Args:  cobra.ExactArgs(2),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := state.app.SetGroupIgnore(args[0], args[1], true); err != nil {
 				return err
 			}
-			fmt.Printf("Ignored %q in group %q.\n", args[1], args[0])
+			fmt.Fprintf(cmdOut(cmd), "Ignored %q in group %q.\n", args[1], args[0])
 			return nil
 		},
 	}
@@ -193,11 +193,11 @@ func newGroupsUnignoreToolCmd(state *rootState) *cobra.Command {
 		Use:   "unignore-tool <group> <tool>",
 		Short: "Stop ignoring a logical tool in one group",
 		Args:  cobra.ExactArgs(2),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := state.app.SetGroupIgnore(args[0], args[1], false); err != nil {
 				return err
 			}
-			fmt.Printf("Unignored %q in group %q.\n", args[1], args[0])
+			fmt.Fprintf(cmdOut(cmd), "Unignored %q in group %q.\n", args[1], args[0])
 			return nil
 		},
 	}
@@ -215,11 +215,11 @@ func newGroupsRemoveToolCmd(state *rootState) *cobra.Command {
 		Use:   "remove-tool <group> <tool>",
 		Short: "Remove a logical tool membership from a group",
 		Args:  cobra.ExactArgs(2),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := state.app.RemoveToolFromGroup(args[1], args[0]); err != nil {
 				return err
 			}
-			fmt.Printf("Removed %q from group %q.\n", args[1], args[0])
+			fmt.Fprintf(cmdOut(cmd), "Removed %q from group %q.\n", args[1], args[0])
 			return nil
 		},
 	}

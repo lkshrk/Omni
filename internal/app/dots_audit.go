@@ -59,24 +59,9 @@ func (a *App) DotsFixIgnorePatterns() ([]string, error) {
 			if len(entry.Ignore) == 0 {
 				continue
 			}
-			findings := dots.AuditIgnoreList(entry.Ignore)
-			if len(findings) == 0 {
+			cleaned, changed := cleanIgnoreList(entry.Ignore)
+			if !changed {
 				continue
-			}
-			removeSet := make(map[int]struct{})
-			for _, f := range findings {
-				// All current check types are auto-fixable: the dead
-				// pattern is always at Indices[0].
-				removeSet[f.Indices[0]] = struct{}{}
-			}
-			if len(removeSet) == 0 {
-				continue
-			}
-			cleaned := make([]string, 0, len(entry.Ignore)-len(removeSet))
-			for i, p := range entry.Ignore {
-				if _, remove := removeSet[i]; !remove {
-					cleaned = append(cleaned, p)
-				}
 			}
 			entry.Ignore = cleaned
 			modified = append(modified, entry.Name)
@@ -89,4 +74,36 @@ func (a *App) DotsFixIgnorePatterns() ([]string, error) {
 		return nil, fmt.Errorf("save config: %w", err)
 	}
 	return modified, nil
+}
+
+func cleanIgnoreList(patterns []string) ([]string, bool) {
+	cleaned := append([]string(nil), patterns...)
+	changed := false
+	for {
+		findings := dots.AuditIgnoreList(cleaned)
+		if len(findings) == 0 {
+			return cleaned, changed
+		}
+		removeSet := make(map[int]struct{})
+		for _, f := range findings {
+			if len(f.Indices) == 0 {
+				continue
+			}
+			removeSet[f.Indices[0]] = struct{}{}
+		}
+		if len(removeSet) == 0 {
+			return cleaned, changed
+		}
+		next := make([]string, 0, len(cleaned)-len(removeSet))
+		for i, p := range cleaned {
+			if _, remove := removeSet[i]; !remove {
+				next = append(next, p)
+			}
+		}
+		if len(next) == len(cleaned) {
+			return cleaned, changed
+		}
+		cleaned = next
+		changed = true
+	}
 }

@@ -20,7 +20,7 @@ func newSearchCmd(state *rootState) *cobra.Command {
 				return err
 			}
 			if len(results) == 0 {
-				fmt.Println("No results found.")
+				fmt.Fprintln(cmdOut(cmd), "No results found.")
 				return nil
 			}
 			const descWidth = 40                         // match name column width
@@ -32,11 +32,11 @@ func newSearchCmd(state *rootState) *cobra.Command {
 				}
 				descLines := wrapText(r.Description, descWidth)
 				if len(descLines) == 0 {
-					fmt.Printf("%-40s %-12s %-8s\n", r.Name, ver, r.Provider)
+					fmt.Fprintf(cmdOut(cmd), "%-40s %-12s %-8s\n", r.Name, ver, r.Provider)
 				} else {
-					fmt.Printf("%-40s %-12s %-8s %s\n", r.Name, ver, r.Provider, descLines[0])
+					fmt.Fprintf(cmdOut(cmd), "%-40s %-12s %-8s %s\n", r.Name, ver, r.Provider, descLines[0])
 					for _, dl := range descLines[1:] {
-						fmt.Printf("%s%s\n", indent, dl)
+						fmt.Fprintf(cmdOut(cmd), "%s%s\n", indent, dl)
 					}
 				}
 			}

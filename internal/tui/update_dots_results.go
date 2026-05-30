@@ -62,6 +62,9 @@ func (m *Model) handleDotsSyncedMsg(msg dotsSyncedMsg) []tea.Cmd {
 	if msg.entries != nil {
 		m.applyDotsSnapshot(msg.entries, msg.gitStatus, msg.dotMemberships)
 	}
+	if msg.hasSettings {
+		m.setSettings(msg.settings)
+	}
 	if msg.err != nil {
 		if !m.collectLaunchBatchError(msg.err.Error()) {
 			cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
@@ -153,7 +156,7 @@ func (m *Model) clearDotsFilters() {
 
 func (m *Model) selectFirstDiscoveredDotCandidate() {
 	for i, row := range dotsVisibleRows(*m) {
-		if row.isChild || !isTransientDotCandidate(row.entry) {
+		if row.isChild || !app.DotStatusTransientCandidate(row.entry) {
 			continue
 		}
 		m.dotsCursor = i
@@ -324,7 +327,7 @@ func (m *Model) applyDotsSnapshot(entries []app.DotStatus, gitStatus string, mem
 	m.dotsIgnoreIdx = -1
 	m.dotsVariantIdx = -1
 	m.dotsVariantMode = dotsVariantNone
-	sortDotsEntries(entries)
+	app.SortDotStatuses(entries)
 	m.dotsEntries = entries
 	m.dotsGitStatus = gitStatus
 	if memberships != nil {
@@ -334,7 +337,7 @@ func (m *Model) applyDotsSnapshot(entries []app.DotStatus, gitStatus string, mem
 }
 
 func (m *Model) prepareDotsSnapshotOnLaunch(cmds *[]tea.Cmd) {
-	if m.app == nil || m.settings.DotsRepo == "" || m.dotsLoaded || m.dotsPreparing {
+	if !m.dotsConfigured() || m.dotsLoaded || m.dotsPreparing {
 		return
 	}
 	m.dotsPreparing = true
@@ -347,14 +350,14 @@ func (m *Model) doLoadDots() tea.Cmd {
 	a := m.app
 	ctx, gen := m.currentDotsOperation()
 	return func() tea.Msg {
-		result, err := a.DiscoverDotsStatus(ctx)
+		result, err := a.RefreshDotsState(ctx)
 		if err != nil {
 			if result != nil {
-				return dotsLoadedMsg{gen: gen, entries: result.Entries, gitStatus: result.GitStatus, dotMemberships: loadDotMemberships(a, ctx), err: err}
+				return dotsLoadedMsg{gen: gen, entries: result.Entries, gitStatus: result.GitStatus, dotMemberships: result.DotMemberships, err: err}
 			}
 			return dotsLoadedMsg{gen: gen, err: err}
 		}
-		return dotsLoadedMsg{gen: gen, entries: result.Entries, gitStatus: result.GitStatus, dotMemberships: loadDotMemberships(a, ctx)}
+		return dotsLoadedMsg{gen: gen, entries: result.Entries, gitStatus: result.GitStatus, dotMemberships: result.DotMemberships}
 	}
 }
 
@@ -376,38 +379,42 @@ func (m *Model) doDotsSyncOnly() tea.Cmd {
 }
 
 func (m *Model) doDotsSyncOnlyWithProgress(progressCh chan dotsProgressUpdate, entryOrder []string) tea.Cmd {
+	return m.doDotsSyncOnlyWithOptions(progressCh, entryOrder, false)
+}
+
+func (m *Model) doLaunchDotsSyncOnly() tea.Cmd {
+	return m.doDotsSyncOnlyWithOptions(nil, nil, true)
+}
+
+func (m *Model) doDotsSyncOnlyWithOptions(progressCh chan dotsProgressUpdate, entryOrder []string, suppressUnchangedHistory bool) tea.Cmd {
 	a := m.app
 	ctx, gen := m.currentDotsOperation()
 	return func() tea.Msg {
 		if progressCh != nil {
 			defer close(progressCh)
 		}
-		opts := dots.SyncOptions{EntryOrder: append([]string(nil), entryOrder...)}
+		opts := dots.SyncOptions{
+			EntryOrder:               append([]string(nil), entryOrder...),
+			SuppressUnchangedHistory: suppressUnchangedHistory,
+		}
+		var progress func(app.DotsOperationStateProgressEvent)
 		if progressCh != nil {
-			opts.Progress = func(event dots.SyncProgressEvent) {
+			progress = func(event app.DotsOperationStateProgressEvent) {
 				update := dotsProgressUpdate{
 					gen:  gen,
-					text: dotsSyncProgressText(event.Entry, event.Index, event.Total, event.Done, event.Err),
+					text: event.Text,
 					name: event.Entry,
 					done: event.Done,
 				}
-				if event.Done {
-					update.entries, update.gitStatus, update.dotMemberships, _ = refreshDotsSnapshot(a, ctx)
+				if event.Done && event.State != nil {
+					update.entries, update.gitStatus, update.dotMemberships = dotsSnapshot(event.State)
 				}
 				sendDotsProgressUpdate(progressCh, update)
 			}
 		}
-		// Capture sync error but always refresh status so health reflects
-		// conflict state even after a partial stow failure.
-		_, syncErr := a.DotsSyncContext(ctx, opts)
-		result, err := a.DiscoverDotsStatus(ctx)
-		if err != nil {
-			if result != nil {
-				return dotsSyncedMsg{gen: gen, entries: result.Entries, gitStatus: result.GitStatus, dotMemberships: loadDotMemberships(a, ctx), err: combineDotsErrors(syncErr, err)}
-			}
-			return dotsSyncedMsg{gen: gen, err: combineDotsErrors(syncErr, err)}
-		}
-		return dotsSyncedMsg{gen: gen, entries: result.Entries, gitStatus: result.GitStatus, dotMemberships: loadDotMemberships(a, ctx), err: syncErr}
+		result, err := a.DotsSyncContextWithStateProgress(ctx, opts, progress)
+		entries, gitStatus, memberships := dotsSnapshotFromState(result)
+		return dotsSyncedMsg{gen: gen, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: err}
 	}
 }
 
@@ -415,15 +422,9 @@ func (m *Model) doDotsSyncEntry(name string) tea.Cmd {
 	a := m.app
 	ctx, gen := m.currentDotsOperation()
 	return func() tea.Msg {
-		_, syncErr := a.DotsSyncEntry(ctx, name, dots.SyncOptions{})
-		result, err := a.DiscoverDotsStatus(ctx)
-		if err != nil {
-			if result != nil {
-				return dotsSyncedMsg{gen: gen, entries: result.Entries, gitStatus: result.GitStatus, dotMemberships: loadDotMemberships(a, ctx), err: combineDotsErrors(syncErr, err)}
-			}
-			return dotsSyncedMsg{gen: gen, err: combineDotsErrors(syncErr, err)}
-		}
-		return dotsSyncedMsg{gen: gen, entries: result.Entries, gitStatus: result.GitStatus, dotMemberships: loadDotMemberships(a, ctx), err: syncErr}
+		result, err := a.DotsSyncEntryWithState(ctx, name, dots.SyncOptions{})
+		entries, gitStatus, memberships := dotsSnapshotFromState(result)
+		return dotsSyncedMsg{gen: gen, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: err}
 	}
 }
 
@@ -431,17 +432,9 @@ func (m *Model) doDotsSyncDiscovered(status app.DotStatus) tea.Cmd {
 	a := m.app
 	ctx, gen := m.currentDotsOperation()
 	return func() tea.Msg {
-		added, addErr := a.DotsAddDiscoveredEntry(status.Name, status.Group)
-		name := added.Name
-		if name == "" {
-			name = status.Name
-		}
-		var syncErr error
-		if addErr == nil {
-			_, syncErr = a.DotsSyncEntry(ctx, name, dots.SyncOptions{})
-		}
-		entries, gitStatus, memberships, err := refreshDotsSnapshot(a, ctx)
-		return dotsSyncedMsg{gen: gen, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: combineDotsErrors(combineDotsErrors(addErr, syncErr), err)}
+		result, err := a.DotsSyncDiscoveredWithState(ctx, status.Name, status.Group)
+		entries, gitStatus, memberships := dotsSnapshotFromDiscoveredState(result)
+		return dotsSyncedMsg{gen: gen, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: err}
 	}
 }
 
@@ -451,13 +444,13 @@ func (m *Model) doDotsRefresh() tea.Cmd {
 	a := m.app
 	ctx, gen := m.currentDotsOperation()
 	return func() tea.Msg {
-		result, err := a.DiscoverDotsStatus(ctx)
+		result, err := a.RefreshDotsState(ctx)
 		if result != nil {
 			return dotsDiscoveredMsg{
 				gen:             gen,
 				entries:         result.Entries,
 				gitStatus:       result.GitStatus,
-				dotMemberships:  loadDotMemberships(a, ctx),
+				dotMemberships:  result.DotMemberships,
 				discoveredCount: result.DiscoveredCount,
 				err:             err,
 			}
@@ -466,31 +459,37 @@ func (m *Model) doDotsRefresh() tea.Cmd {
 	}
 }
 
-func combineDotsErrors(primary, secondary error) error {
-	switch {
-	case primary == nil:
-		return secondary
-	case secondary == nil:
-		return primary
-	default:
-		return fmt.Errorf("%v; %w", primary, secondary)
-	}
-}
-
 func refreshDotsSnapshot(a *app.App, ctx context.Context) ([]app.DotStatus, string, map[string][]string, error) {
-	result, err := a.DiscoverDotsStatus(ctx)
+	result, err := a.RefreshDotsState(ctx)
 	if result == nil {
 		return nil, "", nil, err
 	}
-	return result.Entries, result.GitStatus, loadDotMemberships(a, ctx), err
+	return result.Entries, result.GitStatus, result.DotMemberships, err
 }
 
-func loadDotMemberships(a *app.App, ctx context.Context) map[string][]string {
-	memberships, err := a.DotMembershipMap(ctx)
-	if err != nil {
-		return nil
+func dotsSnapshotFromState(result *app.DotsOperationStateResult) ([]app.DotStatus, string, map[string][]string) {
+	if result == nil || result.State == nil {
+		return nil, "", nil
 	}
-	return memberships
+	return dotsSnapshot(result.State)
+}
+
+func dotsSnapshotFromDiscoveredState(result *app.DotsDiscoveredOperationStateResult) ([]app.DotStatus, string, map[string][]string) {
+	if result == nil || result.State == nil {
+		return nil, "", nil
+	}
+	return dotsSnapshot(result.State)
+}
+
+func dotsSnapshotFromVariantState(result *app.DotsVariantStateResult) ([]app.DotStatus, string, map[string][]string) {
+	if result == nil || result.State == nil {
+		return nil, "", nil
+	}
+	return dotsSnapshot(result.State)
+}
+
+func dotsSnapshot(state *app.DotsState) ([]app.DotStatus, string, map[string][]string) {
+	return state.Entries, state.GitStatus, state.DotMemberships
 }
 
 func (m *Model) doRefreshDotsHistory() tea.Cmd {
@@ -528,11 +527,9 @@ func (m *Model) doDotsPull() tea.Cmd {
 	a := m.app
 	ctx, gen := m.currentDotsOperation()
 	return func() tea.Msg {
-		// Capture pull/sync error but always refresh status so health reflects
-		// any conflicts introduced by the pull.
-		_, pullErr := a.DotsPull(ctx)
-		entries, gitStatus, memberships, err := refreshDotsSnapshot(a, ctx)
-		return dotsPulledMsg{gen: gen, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: combineDotsErrors(pullErr, err)}
+		result, err := a.DotsPullWithState(ctx)
+		entries, gitStatus, memberships := dotsSnapshotFromState(result)
+		return dotsPulledMsg{gen: gen, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: err}
 	}
 }
 
@@ -541,9 +538,9 @@ func (m *Model) doDotsPush() tea.Cmd {
 	a := m.app
 	ctx, gen := m.currentDotsOperation()
 	return func() tea.Msg {
-		pushErr := a.DotsPush(ctx, "")
-		entries, gitStatus, memberships, err := refreshDotsSnapshot(a, ctx)
-		return dotsPushedMsg{gen: gen, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: combineDotsErrors(pushErr, err)}
+		result, err := a.DotsPushWithState(ctx, "")
+		entries, gitStatus, memberships := dotsSnapshotFromState(result)
+		return dotsPushedMsg{gen: gen, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: err}
 	}
 }
 
@@ -552,9 +549,9 @@ func (m *Model) doDotsCommit() tea.Cmd {
 	a := m.app
 	ctx, gen := m.currentDotsOperation()
 	return func() tea.Msg {
-		commitErr := a.DotsCommit(ctx, "")
-		entries, gitStatus, memberships, err := refreshDotsSnapshot(a, ctx)
-		return dotsCommittedMsg{gen: gen, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: combineDotsErrors(commitErr, err)}
+		result, err := a.DotsCommitWithState(ctx, "")
+		entries, gitStatus, memberships := dotsSnapshotFromState(result)
+		return dotsCommittedMsg{gen: gen, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: err}
 	}
 }
 
@@ -568,9 +565,9 @@ func (m *Model) doDotsResolve(name string, strategy app.DotsResolveStrategy) tea
 	a := m.app
 	ctx, gen := m.currentDotsOperation()
 	return func() tea.Msg {
-		_, resolveErr := a.DotsResolveConflict(ctx, name, strategy)
-		entries, gitStatus, memberships, err := refreshDotsSnapshot(a, ctx)
-		return dotsFixedMsg{gen: gen, name: name, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: combineDotsErrors(resolveErr, err)}
+		result, err := a.DotsResolveConflictWithState(ctx, name, strategy)
+		entries, gitStatus, memberships := dotsSnapshotFromState(result)
+		return dotsFixedMsg{gen: gen, name: name, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: err}
 	}
 }
 
@@ -578,17 +575,13 @@ func (m *Model) doDotsResolveDiscovered(status app.DotStatus, strategy app.DotsR
 	a := m.app
 	ctx, gen := m.currentDotsOperation()
 	return func() tea.Msg {
-		added, addErr := a.DotsAddDiscoveredEntry(status.Name, status.Group)
-		name := added.Name
-		if name == "" {
-			name = status.Name
+		result, err := a.DotsResolveDiscoveredWithState(ctx, status.Name, status.Group, strategy)
+		name := status.Name
+		if result != nil && result.Added.Name != "" {
+			name = result.Added.Name
 		}
-		var resolveErr error
-		if addErr == nil {
-			_, resolveErr = a.DotsResolveConflict(ctx, name, strategy)
-		}
-		entries, gitStatus, memberships, err := refreshDotsSnapshot(a, ctx)
-		return dotsFixedMsg{gen: gen, name: name, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: combineDotsErrors(combineDotsErrors(addErr, resolveErr), err)}
+		entries, gitStatus, memberships := dotsSnapshotFromDiscoveredState(result)
+		return dotsFixedMsg{gen: gen, name: name, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: err}
 	}
 }
 
@@ -598,9 +591,9 @@ func (m *Model) doDotsAdd(absPath, rawPath, group string) tea.Cmd {
 	a := m.app
 	ctx, gen := m.currentDotsOperation()
 	return func() tea.Msg {
-		_, addErr := a.DotsAdd(ctx, absPath, app.DotsAddOptions{Adopt: true, Group: group})
-		entries, gitStatus, memberships, err := refreshDotsSnapshot(a, ctx)
-		return dotsAddedMsg{gen: gen, path: rawPath, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: combineDotsErrors(addErr, err)}
+		result, err := a.DotsAddWithState(ctx, absPath, app.DotsAddOptions{Adopt: true, Group: group})
+		entries, gitStatus, memberships := dotsSnapshotFromState(result)
+		return dotsAddedMsg{gen: gen, path: rawPath, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: err}
 	}
 }
 
@@ -609,14 +602,15 @@ func (m *Model) doDotsIgnore(name, pattern string, ignored bool) tea.Cmd {
 	a := m.app
 	ctx, gen := m.currentDotsOperation()
 	return func() tea.Msg {
+		var result *app.DotsOperationStateResult
 		var err error
 		if ignored {
-			err = a.DotsAddIgnorePattern(name, pattern)
+			result, err = a.DotsAddIgnorePatternWithState(ctx, name, pattern)
 		} else {
-			err = a.DotsRemoveIgnorePattern(name, pattern)
+			result, err = a.DotsIncludeIgnoredPathWithState(ctx, name, pattern)
 		}
-		entries, gitStatus, memberships, refreshErr := refreshDotsSnapshot(a, ctx)
-		return dotsIgnoredMsg{gen: gen, name: name, pattern: pattern, ignored: ignored, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: combineDotsErrors(err, refreshErr)}
+		entries, gitStatus, memberships := dotsSnapshotFromState(result)
+		return dotsIgnoredMsg{gen: gen, name: name, pattern: pattern, ignored: ignored, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: err}
 	}
 }
 
@@ -628,9 +622,9 @@ func (m *Model) doDotsEntryIgnore(status app.DotStatus, ignored bool) tea.Cmd {
 		if path == "" {
 			path = status.TargetPath
 		}
-		ignoreErr := a.DotsSetEntryIgnored(status.Name, path, ignored)
-		entries, gitStatus, memberships, err := refreshDotsSnapshot(a, ctx)
-		return dotsIgnoredMsg{gen: gen, name: status.Name, pattern: status.Name, ignored: ignored, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: combineDotsErrors(ignoreErr, err)}
+		result, err := a.DotsSetEntryIgnoredWithState(ctx, status.Name, path, ignored)
+		entries, gitStatus, memberships := dotsSnapshotFromState(result)
+		return dotsIgnoredMsg{gen: gen, name: status.Name, pattern: status.Name, ignored: ignored, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: err}
 	}
 }
 
@@ -639,17 +633,21 @@ func (m *Model) doDotsVariantChange(req dotsVariantRequest) tea.Cmd {
 	ctx, gen := m.currentDotsOperation()
 	return func() tea.Msg {
 		var (
-			info  app.DotVariantInfo
-			opErr error
+			result *app.DotsVariantStateResult
+			info   app.DotVariantInfo
+			err    error
 		)
 		if req.remove {
-			info, opErr = a.DotsRemoveHostVariant(ctx, req.name, app.DotsRemoveVariantOptions{})
+			result, err = a.DotsRemoveHostVariantWithState(ctx, req.name, app.DotsRemoveVariantOptions{})
 		} else {
-			info, _, opErr = a.DotsAddHostVariant(ctx, req.name, app.DotsAddVariantOptions{
+			result, err = a.DotsAddHostVariantWithState(ctx, req.name, app.DotsAddVariantOptions{
 				Sync: true,
 			})
 		}
-		entries, gitStatus, memberships, err := refreshDotsSnapshot(a, ctx)
+		if result != nil {
+			info = result.Info
+		}
+		entries, gitStatus, memberships := dotsSnapshotFromVariantState(result)
 		return dotsVariantChangedMsg{
 			gen:            gen,
 			name:           req.name,
@@ -658,7 +656,7 @@ func (m *Model) doDotsVariantChange(req dotsVariantRequest) tea.Cmd {
 			entries:        entries,
 			gitStatus:      gitStatus,
 			dotMemberships: memberships,
-			err:            combineDotsErrors(opErr, err),
+			err:            err,
 		}
 	}
 }
@@ -668,8 +666,8 @@ func (m *Model) doDotsDelete(name string, keepLocal bool) tea.Cmd {
 	a := m.app
 	ctx, gen := m.currentDotsOperation()
 	return func() tea.Msg {
-		deleteErr := a.DotsDeleteWithOptions(ctx, name, app.DotsDeleteOptions{KeepLocal: keepLocal})
-		entries, gitStatus, memberships, err := refreshDotsSnapshot(a, ctx)
-		return dotsDeletedMsg{gen: gen, name: name, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: combineDotsErrors(deleteErr, err)}
+		result, err := a.DotsDeleteWithState(ctx, name, app.DotsDeleteOptions{KeepLocal: keepLocal})
+		entries, gitStatus, memberships := dotsSnapshotFromState(result)
+		return dotsDeletedMsg{gen: gen, name: name, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: err}
 	}
 }

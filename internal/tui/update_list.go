@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/provider"
 )
@@ -403,27 +404,7 @@ func (m Model) selectedRowApplicableSolution() (provider.ErrorSolution, bool) {
 	if actionErr == nil {
 		return provider.ErrorSolution{}, false
 	}
-	return firstApplicableSolution(actionErr)
-}
-
-func firstApplicableSolution(actionErr *provider.ActionError) (provider.ErrorSolution, bool) {
-	idx := firstApplicableSolutionIndex(actionErr)
-	if idx < 0 {
-		return provider.ErrorSolution{}, false
-	}
-	return actionErr.Solutions[idx], true
-}
-
-func firstApplicableSolutionIndex(actionErr *provider.ActionError) int {
-	if actionErr == nil {
-		return -1
-	}
-	for i, solution := range actionErr.Solutions {
-		if solution.Action == provider.ErrorSolutionActionSwitchProvider && solution.TargetProvider != "" {
-			return i
-		}
-	}
-	return -1
+	return app.FirstApplicableProviderSolution(actionErr)
 }
 
 func (m *Model) markBulkPendingUpdates() {
@@ -544,34 +525,17 @@ func (m *Model) openIgnoreScopePicker(t *database.ToolCache) {
 func (m *Model) openProviderScopePicker(t *database.ToolCache) {
 	m.mode = viewProviderScope
 	m.scopeCursor = 0
-	m.scopeOptions = providerScopeOptions(t)
+	m.scopeOptions = m.providerScopeOptions(t)
 	m.scopeTarget = *t
 	m.scopeTargetSet = true
 }
 
 func (m *Model) refreshInstalledProviders() []tea.Cmd {
-	var cmds []tea.Cmd
 	if len(m.scanningProviders) > 0 || len(m.outdatedProviders) > 0 || m.providerSnapshotRefreshing || m.outdatedSnapshotRefreshing {
-		return cmds
+		return nil
 	}
 	clearStatus(m)
-	m.scanningProviders = m.currentProviderScanSet()
-	m.providerScanToolCounts = m.currentProviderScanToolCounts()
-	m.providerScanToolDone = make(map[string]int, len(m.providerScanToolCounts))
-	m.refreshToolDone = 0
-	m.refreshToolTotal = sumProviderToolCounts(m.providerScanToolCounts)
-	if len(m.scanningProviders) == 0 {
-		return cmds
-	}
-	setActivityStatus(m, toolRefreshStatus(m.scanningProviders, m.refreshToolDone, m.refreshToolTotal))
-	ch, progressGen := m.beginProgressStream()
-	m.scanGen++
-	gen := m.scanGen
-	cmds = append(cmds, m.spinner.Tick, waitForProgress(ch, progressGen))
-	for prov := range m.scanningProviders {
-		cmds = append(cmds, m.doScanProvider(prov, gen, ch, progressGen))
-	}
-	return cmds
+	return m.startCurrentProviderScans()
 }
 
 func (m *Model) startToolSyncAllConfirmed(cmds *[]tea.Cmd) {

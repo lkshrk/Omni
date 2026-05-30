@@ -9,7 +9,6 @@ import (
 
 	"github.com/lkshrk/omni/internal/actions"
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
 )
 
@@ -284,7 +283,7 @@ func contextHintItems(m Model, ctx hintContext) []hintItem {
 		}
 	case hintCtxSettingsDotsSync:
 		desc := "disable"
-		if config.BoolVal(m.settings.DotsDisabled) {
+		if dotsViewDisabled(m) {
 			desc = "enable"
 		}
 		return []hintItem{
@@ -424,11 +423,11 @@ func dotsRowHintItems(m Model) []hintItem {
 	if hint, ok := dotsExpandHintItem(m, row); ok {
 		hints = append(hints, hint)
 	}
-	if config.BoolVal(m.settings.DotsDisabled) {
+	if dotsViewDisabled(m) {
 		return hints
 	}
-	if !row.isChild && dotHasAction(entry, app.DotActionSync) {
-		hints = append(hints, hintFromBindingDesc(m.keys.Sync, dotsSyncHintDesc(dotStatusState(entry))))
+	if !row.isChild && app.DotStatusHasAction(entry, app.DotActionSync) {
+		hints = append(hints, hintFromBindingDesc(m.keys.Sync, app.DotStatusSyncActionLabel(entry)))
 	}
 	if !row.isChild && len(m.dotMemberships[entry.Name]) > 0 {
 		hints = append(hints, hintFromBindingDesc(m.keys.MoveGroup, actions.MustTUILabel(actions.DotsEditGroups)))
@@ -436,20 +435,20 @@ func dotsRowHintItems(m Model) []hintItem {
 	if dotsVariantEligible(row) {
 		hints = append(hints, hintFromBinding(m.keys.DotVariant))
 	}
-	if row.isChild && dotHasAction(entry, app.DotActionIgnore) {
+	if row.isChild && app.DotStatusHasAction(entry, app.DotActionIgnore) {
 		desc := "ignore"
 		if row.child.Ignored {
 			desc = "include"
 		}
 		hints = append(hints, hintFromBindingDesc(m.keys.DotIgnore, desc))
-	} else if !row.isChild && (dotHasAction(entry, app.DotActionIgnore) || dotHasAction(entry, app.DotActionUnignore)) {
+	} else if !row.isChild && (app.DotStatusHasAction(entry, app.DotActionIgnore) || app.DotStatusHasAction(entry, app.DotActionUnignore)) {
 		desc := "ignore"
-		if dotStatusState(entry) == app.DotStateIgnored {
+		if app.DotStatusIgnored(entry) {
 			desc = "include"
 		}
 		hints = append(hints, hintFromBindingDesc(m.keys.DotIgnore, desc))
 	}
-	if !row.isChild && dotHasAction(entry, app.DotActionRemove) {
+	if !row.isChild && app.DotStatusHasAction(entry, app.DotActionRemove) {
 		hints = append(hints, hintFromBinding(m.keys.DotDelete))
 	}
 	return hints
@@ -466,26 +465,26 @@ func dotsConflictHintItems(m Model) []hintItem {
 	if hint, ok := dotsExpandHintItem(m, row); ok {
 		hints = append(hints, hint)
 	}
-	if config.BoolVal(m.settings.DotsDisabled) {
+	if dotsViewDisabled(m) {
 		return hints
 	}
-	if dotHasAction(entry, app.DotActionUseRepo) {
+	if app.DotStatusHasAction(entry, app.DotActionUseRepo) {
 		hints = append(hints, hintFromBindingDesc(m.keys.DotUseRepo, actions.MustTUILabel(actions.DotsResolveUseRepo)))
 	}
-	if dotHasAction(entry, app.DotActionUseLocal) {
+	if app.DotStatusHasAction(entry, app.DotActionUseLocal) {
 		hints = append(hints, hintFromBindingDesc(m.keys.DotUseLocal, actions.MustTUILabel(actions.DotsResolveUseLocal)))
 	}
 	if dotsVariantEligible(row) {
 		hints = append(hints, hintFromBinding(m.keys.DotVariant))
 	}
-	if dotHasAction(entry, app.DotActionIgnore) || dotHasAction(entry, app.DotActionUnignore) {
+	if app.DotStatusHasAction(entry, app.DotActionIgnore) || app.DotStatusHasAction(entry, app.DotActionUnignore) {
 		desc := "ignore"
-		if dotStatusState(entry) == app.DotStateIgnored {
+		if app.DotStatusIgnored(entry) {
 			desc = "include"
 		}
 		hints = append(hints, hintFromBindingDesc(m.keys.DotIgnore, desc))
 	}
-	if dotHasAction(entry, app.DotActionRemove) {
+	if app.DotStatusHasAction(entry, app.DotActionRemove) {
 		hints = append(hints, hintFromBinding(m.keys.DotDelete))
 	}
 	return hints
@@ -502,27 +501,12 @@ func dotsExpandHintItem(m Model, row dotsVisibleRow) (hintItem, bool) {
 	return hintFromBindingDesc(m.keys.Toggle, desc), true
 }
 
-func dotsSyncHintDesc(state app.DotState) string {
-	switch state {
-	case app.DotStateMissing:
-		return "use repo"
-	case app.DotStateBroken:
-		return "repair"
-	case app.DotStateLocalOnly:
-		return "use local"
-	case app.DotStateRepoOnly:
-		return "use repo"
-	default:
-		return "sync"
-	}
-}
-
 func dotsIgnoreConfirmHintItems(m Model) []hintItem {
 	visible := dotsVisibleRows(m)
 	desc := "confirm ignore"
 	if m.dotsCursor >= 0 && m.dotsCursor < len(visible) {
 		row := visible[m.dotsCursor]
-		if row.child.Ignored || dotStatusState(row.entry) == app.DotStateIgnored {
+		if row.child.Ignored || app.DotStatusIgnored(row.entry) {
 			desc = "confirm include"
 		}
 	}
@@ -594,7 +578,7 @@ func tabShortHelpBindings(m *Model) []key.Binding {
 	k := m.keys
 	switch m.mode {
 	case viewDots:
-		if config.BoolVal(m.settings.DotsDisabled) {
+		if dotsViewBlocked(*m) {
 			return footerBindings(k, nil, []key.Binding{k.Search})
 		}
 		return footerBindings(k, []key.Binding{k.DotAdd, k.DotRefresh, k.SyncAll}, []key.Binding{k.Search})
@@ -689,7 +673,7 @@ func tabFullHelpBindings(m *Model) [][]key.Binding {
 	common := []key.Binding{k.Top, k.Bottom, k.HalfPageUp, k.HalfPageDown, k.PageUp, k.PageDown, k.Tab, k.Search, k.Palette, k.Help, k.Quit}
 	switch m.mode {
 	case viewDots:
-		if config.BoolVal(m.settings.DotsDisabled) {
+		if dotsViewBlocked(*m) {
 			return [][]key.Binding{
 				common,
 				{k.Confirm, k.Back},
@@ -865,9 +849,9 @@ func helpActionGroups(m Model) []helpGroup {
 	k := m.keys
 	switch m.mode {
 	case viewDots:
-		if config.BoolVal(m.settings.DotsDisabled) {
+		if dotsViewBlocked(m) {
 			desc := "enable dots"
-			if m.settings.DotsRepo == "" {
+			if dotsViewUnconfigured(m) {
 				desc = "set up dots"
 			}
 			return []helpGroup{{items: []hintItem{
@@ -980,7 +964,7 @@ func helpLegendItems(m Model) []string {
 	p := m.palette
 	switch {
 	case m.mode == viewDots:
-		if config.BoolVal(m.settings.DotsDisabled) || m.settings.DotsRepo == "" {
+		if dotsViewBlocked(m) {
 			return nil
 		}
 		return []string{

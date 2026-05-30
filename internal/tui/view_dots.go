@@ -2,51 +2,13 @@ package tui
 
 import (
 	"fmt"
-	"sort"
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/config"
 )
-
-// dotsSortKey maps health → sort priority (lower = shown first).
-func dotsSortKey(h app.DotHealth) int {
-	switch h {
-	case app.HealthConflict:
-		return 0
-	case app.HealthMissing, app.HealthNoSource:
-		return 1
-	default:
-		return 2
-	}
-}
-
-func dotsStateSortKey(state app.DotState) int {
-	switch state {
-	case app.DotStateConflict, app.DotStateUntrackedConflict, app.DotStateAmbiguous:
-		return 0
-	case app.DotStateSynced:
-		return 2
-	case app.DotStateIgnored, app.DotStateInactive, app.DotStateDisabled:
-		return 3
-	default:
-		return 1
-	}
-}
-
-// sortDotsEntries sorts entries in-place: conflict → missing/no-source → ok,
-// then alphabetically within each bucket.
-func sortDotsEntries(entries []app.DotStatus) {
-	sort.SliceStable(entries, func(i, j int) bool {
-		ki, kj := dotsStateSortKey(dotStatusState(entries[i])), dotsStateSortKey(dotStatusState(entries[j]))
-		if ki != kj {
-			return ki < kj
-		}
-		return entries[i].Name < entries[j].Name
-	})
-}
 
 // dotsEntryNameColW returns the name-column width for the dots table.
 func dotsEntryNameColW(entries []app.DotStatus) int {
@@ -90,11 +52,6 @@ func filteredDotsEntries(m Model) []app.DotStatus {
 	return result
 }
 
-type dotsSection struct {
-	title   string
-	entries []app.DotStatus
-}
-
 type dotsVisibleRow struct {
 	entry   app.DotStatus
 	child   app.DotChild
@@ -104,14 +61,14 @@ type dotsVisibleRow struct {
 func dotsEntryMatchesExpanded(m Model, entry app.DotStatus) bool {
 	return m.dotsExpandedName != "" &&
 		entry.Name == m.dotsExpandedName &&
-		dotStatusState(entry) == m.dotsExpandedState
+		app.DotStatusState(entry) == m.dotsExpandedState
 }
 
 func dotsVisibleRows(m Model) []dotsVisibleRow {
 	entries := filteredDotsEntries(m)
 	rows := make([]dotsVisibleRow, 0, len(entries))
 	for _, section := range dotsSections(entries) {
-		for _, entry := range section.entries {
+		for _, entry := range section.Statuses {
 			rows = append(rows, dotsVisibleRow{entry: entry})
 			if !dotsEntryMatchesExpanded(m, entry) {
 				continue
@@ -157,46 +114,8 @@ func dotsRowExpanded(m Model, row dotsVisibleRow) bool {
 	return dotsEntryMatchesExpanded(m, row.entry)
 }
 
-func dotsSections(entries []app.DotStatus) []dotsSection {
-	sections := []dotsSection{
-		{title: "Conflict"},
-		{title: "Out Of Sync"},
-		{title: "Synced"},
-		{title: "Ignored"},
-	}
-	for _, entry := range entries {
-		switch dotsSectionSortKey(entry) {
-		case 0:
-			sections[0].entries = append(sections[0].entries, entry)
-		case 2:
-			sections[2].entries = append(sections[2].entries, entry)
-		case 3:
-			sections[3].entries = append(sections[3].entries, entry)
-		default:
-			sections[1].entries = append(sections[1].entries, entry)
-		}
-	}
-	return sections
-}
-
-func dotsSectionSortKey(status app.DotStatus) int {
-	if isTransientDotCandidate(status) {
-		return 1
-	}
-	return dotsStateSortKey(dotStatusState(status))
-}
-
-func isTransientDotCandidate(status app.DotStatus) bool {
-	state := dotStatusState(status)
-	if status.Group != "" {
-		return false
-	}
-	switch state {
-	case app.DotStateLocalOnly, app.DotStateRepoOnly, app.DotStateUntrackedConflict, app.DotStateUntrackedLinked, app.DotStateNoSource:
-		return true
-	default:
-		return false
-	}
+func dotsSections(entries []app.DotStatus) []app.DotStatusSection {
+	return app.DotStatusSections(entries)
 }
 
 func renderDots(m Model) string {
@@ -204,7 +123,7 @@ func renderDots(m Model) string {
 	var sb strings.Builder
 
 	// ── Disabled ──────────────────────────────────────────────────────────────
-	if config.BoolVal(m.settings.DotsDisabled) {
+	if dotsViewDisabled(m) {
 		sb.WriteString("\n")
 		sb.WriteString(p.styleHelp.Render("  Dotfile sync is disabled for this machine.") + "\n\n")
 		sb.WriteString(p.styleNormal.Render("  [enter] ") + p.styleHelp.Render("set up dotfiles from scratch"))
@@ -214,7 +133,7 @@ func renderDots(m Model) string {
 	}
 
 	// ── Not configured ────────────────────────────────────────────────────────
-	if m.settings.DotsRepo == "" {
+	if dotsViewUnconfigured(m) {
 		sb.WriteString("\n")
 		sb.WriteString(p.styleNormal.Render("  No dotfiles repo configured yet.") + "\n\n")
 		sb.WriteString(p.styleHelp.Render("  omni manages config symlinks from a local git repo,") + "\n")
@@ -250,7 +169,7 @@ func renderDots(m Model) string {
 	}
 
 	// ── Repo status (compact, not a list section) ───────────────────────────
-	if repoPath := m.settings.DotsRepo; repoPath != "" {
+	if repoPath := dotsRepoPathForView(m); repoPath != "" {
 		var gitPart string
 		if m.dotsGitStatus == "" {
 			gitPart = "  " + p.styleInstalled.Render("✓ clean")
@@ -305,7 +224,7 @@ func renderDots(m Model) string {
 	var renderChildRows func(e app.DotStatus, children []app.DotChild)
 	renderChildRows = func(e app.DotStatus, children []app.DotChild) {
 		for _, child := range children {
-			parentState := dotStatusState(e)
+			parentState := app.DotStatusState(e)
 			childStatus, childStatusStyle := dotChildStatusDisplay(p, child, parentState)
 			if inIgnoredSection && !child.Ignored {
 				childStatus = "-"
@@ -317,7 +236,7 @@ func renderDots(m Model) string {
 			childTargetPadded := renderCell(leftCell(childTarget, targetWidth))
 			isChildCursor := rowIndex == m.dotsCursor && !m.cursorHidden
 			childIgnoreConfirm := m.dotsIgnoreIdx == rowIndex
-			childRight := dotRightColumns(p, isChildCursor || childIgnoreConfirm, childStatusCol, childStatusStyle, dotChildCounts(child, dotStatusState(e)), cols.ratio, cols.ignore, "", cols.group)
+			childRight := dotRightColumns(p, isChildCursor || childIgnoreConfirm, childStatusCol, childStatusStyle, app.DotChildFileCounts(child, app.DotStatusState(e)), cols.ratio, cols.ignore, "", cols.group)
 			childLeft := func(iconStyle, nameStyle, targetStyle lipgloss.Style, iconText, childName, childTarget string) string {
 				return iconStyle.Render(iconText) +
 					iconNameGap +
@@ -352,16 +271,16 @@ func renderDots(m Model) string {
 		}
 	}
 	for _, section := range dotsSections(visible) {
-		if len(section.entries) == 0 {
+		if len(section.Statuses) == 0 {
 			continue
 		}
-		inIgnoredSection = section.title == "Ignored"
-		sections.Header(section.title)
-		for _, e := range section.entries {
-			iconStyle, icon, statusLabel := dotStateDisplay(p, dotStatusState(e))
+		inIgnoredSection = section.Title == "Ignored"
+		sections.Header(section.Title)
+		for _, e := range section.Statuses {
+			iconStyle, icon, statusLabel := dotStateDisplay(p, app.DotStatusState(e))
 			// Synthesized container entries in the Ignored section (not
 			// explicitly ignored themselves) get muted "-" status.
-			ignoredContainer := inIgnoredSection && !dotHasAction(e, app.DotActionUnignore)
+			ignoredContainer := inIgnoredSection && !app.DotStatusHasAction(e, app.DotActionUnignore)
 			if ignoredContainer {
 				statusLabel = "-"
 			}
@@ -373,7 +292,7 @@ func renderDots(m Model) string {
 				iconStyle = p.styleStatus
 				icon = iconPending
 			}
-			statusStyle := dotStatusTextStyle(p, dotStatusState(e))
+			statusStyle := dotStatusTextStyle(p, app.DotStatusState(e))
 			if ignoredContainer {
 				statusStyle = p.styleHelp
 			}
@@ -381,11 +300,11 @@ func renderDots(m Model) string {
 			nameCol := renderCell(leftCell(fitCellText(dotEntryDisplayName(m, e), cols.name), cols.name))
 			statusCol := renderCell(leftCell(fitCellText(statusLabel, cols.status), cols.status))
 			target := truncatePath(tildePath(e.TargetPath), targetWidth)
-			right := dotRightColumns(p, false, statusCol, statusStyle, dotEntryCounts(e), cols.ratio, cols.ignore, e.Group, cols.group)
+			right := dotRightColumns(p, false, statusCol, statusStyle, app.DotStatusFileCounts(e), cols.ratio, cols.ignore, e.Group, cols.group)
 
 			removingConfirm := m.dotsConfirmIdx == rowIndex
-			repoConfirm := m.dotsOverwriteIdx == rowIndex && dotHasAction(e, app.DotActionUseRepo)
-			localConfirm := m.dotsLocalIdx == rowIndex && dotHasAction(e, app.DotActionUseLocal)
+			repoConfirm := m.dotsOverwriteIdx == rowIndex && app.DotStatusHasAction(e, app.DotActionUseRepo)
+			localConfirm := m.dotsLocalIdx == rowIndex && app.DotStatusHasAction(e, app.DotActionUseLocal)
 			ignoreConfirm := m.dotsIgnoreIdx == rowIndex
 			variantCreate := m.dotsVariantIdx == rowIndex && m.dotsVariantMode == dotsVariantCreate
 			variantRemove := m.dotsVariantIdx == rowIndex && m.dotsVariantMode == dotsVariantRemove
@@ -402,7 +321,7 @@ func renderDots(m Model) string {
 					nameStyle.Render(nameCol) +
 					targetStyle.Render(nameTargetGap+targetPadded)
 			}
-			activeRight := dotRightColumns(p, true, statusCol, statusStyle, dotEntryCounts(e), cols.ratio, cols.ignore, e.Group, cols.group)
+			activeRight := dotRightColumns(p, true, statusCol, statusStyle, app.DotStatusFileCounts(e), cols.ratio, cols.ignore, e.Group, cols.group)
 
 			switch {
 			case removingConfirm:
@@ -438,7 +357,7 @@ func renderDots(m Model) string {
 			case isCursor:
 				left := rowLeft(iconStyle.Bold(true), p.styleActiveText, p.styleHelp.Bold(true))
 				write(renderDotsRow(true, left, activeRight) + "\n")
-				if dotHasAction(e, app.DotActionUseRepo) || dotHasAction(e, app.DotActionUseLocal) {
+				if app.DotStatusHasAction(e, app.DotActionUseRepo) || app.DotStatusHasAction(e, app.DotActionUseLocal) {
 					write(renderDotsContextHints(m, hintCtxDotsConflict, hintPrefix, m.width) + "\n")
 					buf.markCursorEnd()
 				} else {
@@ -465,6 +384,17 @@ func renderDots(m Model) string {
 	return buf.render(listAvailableHeight(m))
 }
 
+func dotsRepoPathForView(m Model) string {
+	availability := dotsViewAvailability(m)
+	if availability.Reason == app.DotsSyncAvailabilityNoRepo {
+		return ""
+	}
+	if strings.TrimSpace(availability.RepoPath) != "" {
+		return availability.RepoPath
+	}
+	return ""
+}
+
 func renderDotsHistorySection(m Model, write func(string), sections *listSectionWriter) {
 	if len(m.dotsHistory) == 0 && strings.TrimSpace(m.dotsHistoryErr) == "" {
 		return
@@ -484,11 +414,22 @@ func renderDotsHistorySection(m Model, write func(string), sections *listSection
 }
 
 func dotsHistoryDashboardLine(entry app.DotsHistoryEntry) string {
-	return "last " + dotsHistoryEntryText(entry)
+	return "last " + dotsHistoryTabLine(entry)
 }
 
 func dotsHistoryTabLine(entry app.DotsHistoryEntry) string {
-	return dotsHistoryEntryText(entry)
+	text := dotsHistoryEntryText(entry)
+	if label := dotsHistoryTimeLabel(entry.Time); label != "" {
+		return label + " " + text
+	}
+	return text
+}
+
+func dotsHistoryTimeLabel(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Local().Format("01-02 15:04")
 }
 
 func dotsHistoryEntryText(entry app.DotsHistoryEntry) string {
@@ -581,24 +522,6 @@ func dotHealthDisplay(p palette, h app.DotHealth) (lipgloss.Style, string, strin
 	}
 }
 
-func dotStatusState(status app.DotStatus) app.DotState {
-	if status.State != "" {
-		return status.State
-	}
-	switch status.Health {
-	case app.HealthOK:
-		return app.DotStateSynced
-	case app.HealthMissing:
-		return app.DotStateMissing
-	case app.HealthConflict:
-		return app.DotStateConflict
-	case app.HealthNoSource:
-		return app.DotStateNoSource
-	default:
-		return app.DotState(status.Health)
-	}
-}
-
 func dotStateDisplay(p palette, state app.DotState) (lipgloss.Style, string, string) {
 	switch state {
 	case app.DotStateSynced:
@@ -676,6 +599,7 @@ const (
 	dotKindFolderExpandedIcon  = "▾"
 	dotKindFolderEmptyIcon     = "▹"
 	dotVariantIcon             = "◇"
+	dotChildIndent             = "  "
 )
 
 func dotEntryDisplayName(m Model, entry app.DotStatus) string {
@@ -691,7 +615,7 @@ func dotChildDisplayName(m Model, entry app.DotStatus, child app.DotChild) strin
 	if depth < 1 {
 		depth = 1
 	}
-	return strings.Repeat("  ", depth-1) + dotChildKindIcon(m, entry, child) + " " + child.Name
+	return strings.Repeat(dotChildIndent, depth) + dotChildKindIcon(m, entry, child) + " " + child.Name
 }
 
 func dotEntryKindIcon(m Model, entry app.DotStatus) string {
@@ -735,11 +659,11 @@ func dotsTableColumnWidths(p palette, m Model, entries []app.DotStatus) dotsTabl
 		ratio:  dotsRatioColW,
 	}
 	for _, entry := range entries {
-		state := dotStatusState(entry)
+		state := app.DotStatusState(entry)
 		_, _, statusLabel := dotStateDisplay(p, state)
 		cols.name = max(cols.name, lipgloss.Width(dotEntryDisplayName(m, entry)))
 		cols.status = max(cols.status, lipgloss.Width(statusLabel))
-		counts := dotEntryCounts(entry)
+		counts := app.DotStatusFileCounts(entry)
 		cols.ratio = max(cols.ratio, lipgloss.Width(dotRatioText(counts)))
 		if ignored := dotIgnoredText(counts); ignored != "" {
 			cols.ignore = max(cols.ignore, dotsIgnoredColW, lipgloss.Width(ignored))
@@ -749,7 +673,7 @@ func dotsTableColumnWidths(p palette, m Model, entries []app.DotStatus) dotsTabl
 		}
 		visitDotChildren(entry.Children, func(child app.DotChild) {
 			childStatus, _ := dotChildStatusDisplay(p, child, state)
-			counts := dotChildCounts(child, state)
+			counts := app.DotChildFileCounts(child, state)
 			cols.name = max(cols.name, lipgloss.Width(dotChildDisplayName(m, entry, child)))
 			cols.status = max(cols.status, lipgloss.Width(childStatus))
 			cols.ratio = max(cols.ratio, lipgloss.Width(dotRatioText(counts)))
@@ -821,30 +745,6 @@ func dotGroupBadge(group string) string {
 	return "[" + group + "]"
 }
 
-func dotEntryCounts(entry app.DotStatus) app.DotFileCounts {
-	if entry.Counts.Total() > 0 || entry.FileCount <= 0 {
-		return entry.Counts
-	}
-	if dotStatusState(entry) == app.DotStateSynced {
-		return app.DotFileCounts{Synced: entry.FileCount}
-	}
-	return app.DotFileCounts{OutOfSync: entry.FileCount}
-}
-
-func dotChildCounts(child app.DotChild, parentState app.DotState) app.DotFileCounts {
-	if child.Counts.Total() > 0 || child.FileCount <= 0 {
-		return child.Counts
-	}
-	state := parentState
-	if child.State != "" {
-		state = child.State
-	}
-	if state == app.DotStateSynced {
-		return app.DotFileCounts{Synced: child.FileCount}
-	}
-	return app.DotFileCounts{OutOfSync: child.FileCount}
-}
-
 func dotRatioText(counts app.DotFileCounts) string {
 	managed := counts.Managed()
 	if managed == 0 {
@@ -911,31 +811,4 @@ func dotSyncedStyle(p palette, selected bool) lipgloss.Style {
 		style = style.Bold(true)
 	}
 	return style
-}
-
-func dotHasAction(status app.DotStatus, action app.DotAction) bool {
-	for _, candidate := range status.Actions {
-		if candidate == action {
-			return true
-		}
-	}
-	if len(status.Actions) > 0 {
-		return false
-	}
-	switch dotStatusState(status) {
-	case app.DotStateMissing, app.DotStateBroken, app.DotStateModified, app.DotStateLocalOnly, app.DotStateRepoOnly, app.DotStateUntrackedConflict:
-		if dotStatusState(status) == app.DotStateUntrackedConflict {
-			return action == app.DotActionUseRepo || action == app.DotActionUseLocal || action == app.DotActionIgnore
-		}
-		return action == app.DotActionSync || action == app.DotActionRemove || action == app.DotActionIgnore
-	case app.DotStateSynced:
-		return action == app.DotActionRemove || action == app.DotActionIgnore
-	case app.DotStateConflict:
-		return action == app.DotActionUseRepo || action == app.DotActionUseLocal || action == app.DotActionRemove || action == app.DotActionIgnore
-	case app.DotStateNoSource:
-		return action == app.DotActionRemove || action == app.DotActionIgnore
-	case app.DotStateIgnored:
-		return action == app.DotActionUnignore || action == app.DotActionRemove
-	}
-	return false
 }

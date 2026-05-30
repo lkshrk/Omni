@@ -10,7 +10,6 @@ import (
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/provider"
 )
 
 func renderSetup(m Model) string {
@@ -32,8 +31,8 @@ func renderSetup(m Model) string {
 		body = renderProviderPickerStep(m, m.setupStep)
 	case 3:
 		var options []setupOption
-		for i, c := range nodeMgrChoices {
-			options = append(options, setupOption{Label: c.label, Detail: c.desc, Selected: i == m.setupNodeMgrIdx})
+		for i, c := range m.setupNodeManagerChoices() {
+			options = append(options, setupOption{Label: c.Label, Detail: c.Description, Selected: i == m.setupNodeMgrIdx})
 		}
 		body = renderSetupPanel(m, setupPanel{
 			Lead: "Choose a Node.js package manager.",
@@ -143,16 +142,14 @@ func renderSetup(m Model) string {
 		for i, opt := range setupActivationOptions {
 			options = append(options, setupOption{Label: opt.label, Detail: opt.detail, Selected: i == m.setupActivationIdx})
 		}
-		host := shortHostname()
+		activation := app.SetupActivationHostSummary(m.hostInfo)
+		host := activation.Host
 		groupSummary := "no reusable groups"
-		if m.hostInfo != nil && m.hostInfo.Active != "" {
-			host = m.hostInfo.Active
-			if assignment, ok := m.hostInfo.Hosts[host]; ok && len(assignment.Groups) > 0 {
-				groupSummary = compactGroupList(assignment.Groups)
-			}
+		if len(activation.Groups) > 0 {
+			groupSummary = compactGroupList(activation.Groups)
 		}
 		dotsSummary := "dotfiles disabled"
-		if strings.TrimSpace(m.settings.DotsRepo) != "" && !config.BoolVal(m.settings.DotsDisabled) {
+		if dotsViewAvailability(m).Configured {
 			dotsSummary = "dotfiles enabled"
 		}
 		body = renderSetupPanel(m, setupPanel{
@@ -423,11 +420,11 @@ func renderToolsHeaderInfo(m Model) string {
 }
 
 func renderDotsHeaderInfo(m Model) string {
-	if config.BoolVal(m.settings.DotsDisabled) {
+	if dotsViewBlocked(m) {
 		return ""
 	}
 	p := m.palette
-	counts := dotHeaderCounts(m.dotsEntries)
+	counts := app.DotStatusesFileCounts(m.dotsEntries)
 	parts := []string{"  " + dotRatioText(counts)}
 	if ignored := dotIgnoredText(counts); ignored != "" {
 		parts = append(parts, ignored)
@@ -438,35 +435,21 @@ func renderDotsHeaderInfo(m Model) string {
 	return renderHeaderInfoText(p, strings.Join(parts, " "))
 }
 
-func dotHeaderCounts(entries []app.DotStatus) app.DotFileCounts {
-	var total app.DotFileCounts
-	for _, entry := range entries {
-		if dotStatusState(entry) == app.DotStateIgnored {
-			continue
-		}
-		counts := dotEntryCounts(entry)
-		total.Synced += counts.Synced
-		total.OutOfSync += counts.OutOfSync
-		total.Ignored += counts.Ignored
-	}
-	return total
-}
-
 func renderGroupsHeaderInfo(m Model) string {
 	groups := len(buildAllGroupNames(m.groupNames))
-	hosts := len(sortedHostNames(m.hostInfo))
+	hosts := len(app.PrioritizedHostSummaries(m.hostInfo))
 	return renderHeaderInfoText(m.palette, "  "+compactCount(groups, "group")+"  "+compactCount(hosts, "host"))
 }
 
 func renderSettingsHeaderInfo(m Model) string {
-	enabled := 3 - disabledEcosystemProviderCount(m.settings.DisabledProviders)
+	summary := m.settingsProviderSummary(m.settings)
 	dotsLabel := "dots unset"
-	if config.BoolVal(m.settings.DotsDisabled) {
+	if dotsViewDisabled(m) {
 		dotsLabel = "dots off"
-	} else if m.settings.DotsRepo != "" {
+	} else if dotsViewAvailability(m).Configured {
 		dotsLabel = "dots on"
 	}
-	return renderHeaderInfoText(m.palette, fmt.Sprintf("  %d/3 providers  %s", enabled, dotsLabel))
+	return renderHeaderInfoText(m.palette, fmt.Sprintf("  %d/%d providers  %s", summary.Enabled, summary.Total, dotsLabel))
 }
 
 func renderStatusHeaderInfo(m Model) string {
@@ -493,15 +476,11 @@ func renderHeaderInfoText(p palette, text string) string {
 	return lipgloss.NewStyle().Foreground(p.colMuted).Render(text)
 }
 
-func disabledEcosystemProviderCount(disabled []string) int {
-	seen := make(map[string]bool, 3)
-	for _, name := range disabled {
-		switch name {
-		case provider.EcosystemSystem, provider.EcosystemNode, provider.EcosystemPython:
-			seen[name] = true
-		}
+func (m Model) settingsProviderSummary(settings config.Settings) app.SettingsProviderSummary {
+	if m.app == nil {
+		return app.DefaultSettingsProviderSummary(settings)
 	}
-	return len(seen)
+	return m.app.SettingsProviderSummary(settings)
 }
 
 func renderTabs(m Model) string {
@@ -624,9 +603,9 @@ func renderProviderPickerStep(m Model, step int) string {
 	spCursor := m.setupProviderIdx
 	options := make([]setupOption, 0, len(m.setupProviders))
 	for i, row := range m.setupProviders {
-		enabled := row.enabled
+		enabled := row.Enabled
 		options = append(options, setupOption{
-			Label:    row.label,
+			Label:    row.Label,
 			Selected: i == spCursor,
 			Checked:  &enabled,
 		})

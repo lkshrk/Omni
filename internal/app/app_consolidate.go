@@ -35,6 +35,12 @@ type ConsolidateResult struct {
 	SettingsUpdated   bool
 }
 
+type ConsolidateStateResult struct {
+	Result *ConsolidateResult
+	Tools  []*database.ToolCache
+	State  *ToolGroupState
+}
+
 type EcosystemMigration struct {
 	Ecosystem string
 	Manager   string
@@ -194,6 +200,15 @@ func (a *App) ConsolidatePlan(ctx context.Context, ecosystem, manager string) (*
 // Consolidate switches all tools in ecosystem to manager.
 func (a *App) Consolidate(ctx context.Context, ecosystem, manager string, progress func(string)) (*ConsolidateResult, error) {
 	return a.runConsolidate(ctx, ecosystem, manager, false, progress)
+}
+
+func (a *App) ConsolidateWithState(ctx context.Context, ecosystem, manager string, progress func(string)) (*ConsolidateStateResult, error) {
+	result, err := a.Consolidate(ctx, ecosystem, manager, progress)
+	state, stateErr := a.toolGroupMutationState(ctx)
+	if stateErr != nil {
+		return nil, stateErr
+	}
+	return &ConsolidateStateResult{Result: result, Tools: state.Tools, State: state.State}, err
 }
 
 func (a *App) runConsolidate(ctx context.Context, ecosystem, manager string, dryRun bool, progress func(string)) (*ConsolidateResult, error) {

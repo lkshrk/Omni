@@ -6,6 +6,7 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/profile"
+	"github.com/lkshrk/omni/internal/provider"
 )
 
 // StartupSnapshot groups the read-heavy app state the TUI needs for its first
@@ -16,28 +17,53 @@ type StartupSnapshot struct {
 	Settings               config.Settings
 	Taps                   []string
 	Groups                 []*config.GroupConfig
+	GroupNames             []string
 	HostInfo               *HostInfo
 	ToolMemberships        map[string][]string
+	ToolGroups             map[string]string
 	DotMemberships         map[string][]string
+	IgnoreLabels           map[string]string
 	GlobalIgnoredTools     []string
 	ToolIgnores            map[string]bool
+	GroupIgnores           map[string]map[string]bool
 	ToolProviderPins       map[string]string
 	EffectivePythonManager string
 	EffectiveNodeManager   string
-	AllPythonManagers      []string
-	AllNodeManagers        []string
+	EffectiveSystemManager string
 	EcosystemProviders     map[string]string
 	StowInstalled          bool
 	DotsReminderService    *DotsReminderService
 	DotsReminderServiceErr error
 	DotsWatchService       *DotsWatchService
 	DotsWatchServiceErr    error
+	DotsConfigured         bool
+	DotsSyncAvailability   DotsSyncAvailability
 	DotsHistory            []DotsHistoryEntry
 	DotsHistoryErr         error
-	BootstrapRequired      bool
+	DotsState              *DotsState
+	SetupProviders         []SetupProviderOption
 	EcosystemProviderNames []string
-	ConfiguredProviders    []string
-	ProviderToolCounts     map[string]int
+}
+
+type ToolScopeState struct {
+	GlobalIgnoredTools []string
+	HostIgnoredTools   []string
+	ToolIgnores        map[string]bool
+	ToolProviderPins   map[string]string
+}
+
+type ToolScopeDisplayState struct {
+	IgnoreLabels     map[string]string
+	ToolIgnores      map[string]bool
+	GroupIgnores     map[string]map[string]bool
+	ToolProviderPins map[string]string
+}
+
+type ToolGroupState struct {
+	GroupNames      []string
+	ToolGroups      map[string]string
+	ToolMemberships map[string][]string
+	HostInfo        *HostInfo
 }
 
 func (a *App) StartupSnapshot(ctx context.Context) (*StartupSnapshot, error) {
@@ -64,22 +90,14 @@ func (a *App) StartupSnapshot(ctx context.Context) (*StartupSnapshot, error) {
 	stop = profile.Start("app.startup.config_state")
 	settings := a.effectiveSettings(cfg)
 	hostInfo := a.hostStatusFromConfig(cfg)
-	bootstrapRequired := false
 	stop()
-	if hostInfo != nil && hostInfo.Active != "" {
-		stop = profile.Start("app.startup.host_bootstrap")
-		completed, err := a.HostBootstrapCompleted(ctx, hostInfo.Active)
-		stop()
-		if err != nil {
-			return nil, err
-		}
-		bootstrapRequired = !completed
-	}
 
 	stop = profile.Start("app.startup.resolve_tools")
 	resolved, _ := a.resolveTools(ctx, cfg, cfg.Groups)
-	providerToolCounts := a.configuredProviderToolCountsFromResolved(resolved)
-	toolIgnores, toolProviderPins := a.toolScopeFromConfig(cfg)
+	toolMemberships := toolMembershipMapFromResolved(resolved)
+	toolGroupState := a.toolGroupStateFromConfigAndMemberships(cfg, toolMemberships, hostInfo)
+	toolScopeState := a.toolScopeStateFromConfig(cfg)
+	toolScopeDisplayState := BuildToolScopeDisplayState(toolScopeState)
 	stop()
 
 	stop = profile.Start("app.startup.effective_managers")
@@ -88,6 +106,7 @@ func (a *App) StartupSnapshot(ctx context.Context) (*StartupSnapshot, error) {
 
 	stop = profile.Start("app.startup.available_managers")
 	allPyBins, allNodeBins := a.allAvailableManagersFromSettings(settings)
+	setupProviders := SetupProviderOptionsFromManagers(ecosystemProviders, allPyBins, allNodeBins, settings)
 	stop()
 
 	stop = profile.Start("app.startup.dots_reminder_status")
@@ -101,6 +120,13 @@ func (a *App) StartupSnapshot(ctx context.Context) (*StartupSnapshot, error) {
 	stop = profile.Start("app.startup.dots_history")
 	dotsHistory, dotsHistoryErr := a.RecentDotsHistory(ctx, 3)
 	stop()
+
+	stop = profile.Start("app.startup.dots_state")
+	dotsState, err := a.CachedDotsState(ctx)
+	stop()
+	if err != nil {
+		return nil, err
+	}
 
 	stop = profile.Start("app.startup.list_discovered")
 	discovered, _ := a.listDiscoveredFromConfig(ctx, cfg, ecosystemProviders)
@@ -120,29 +146,175 @@ func (a *App) StartupSnapshot(ctx context.Context) (*StartupSnapshot, error) {
 		Settings:               settings,
 		Taps:                   collectTaps(cfg.Groups),
 		Groups:                 append([]*config.GroupConfig(nil), cfg.Groups...),
+		GroupNames:             toolGroupState.GroupNames,
 		HostInfo:               hostInfo,
-		ToolMemberships:        toolMembershipMapFromResolved(resolved),
+		ToolMemberships:        toolMemberships,
+		ToolGroups:             toolGroupState.ToolGroups,
 		DotMemberships:         dotMembershipMapFromConfig(cfg),
-		GlobalIgnoredTools:     append([]string(nil), cfg.Ignore.Tools...),
-		ToolIgnores:            toolIgnores,
-		ToolProviderPins:       toolProviderPins,
+		IgnoreLabels:           toolScopeDisplayState.IgnoreLabels,
+		GlobalIgnoredTools:     toolScopeState.GlobalIgnoredTools,
+		ToolIgnores:            toolScopeDisplayState.ToolIgnores,
+		GroupIgnores:           toolScopeDisplayState.GroupIgnores,
+		ToolProviderPins:       toolScopeDisplayState.ToolProviderPins,
 		EffectivePythonManager: pythonBin,
 		EffectiveNodeManager:   nodeBin,
-		AllPythonManagers:      allPyBins,
-		AllNodeManagers:        allNodeBins,
+		EffectiveSystemManager: ecosystemProviders[provider.EcosystemSystem],
 		EcosystemProviders:     ecosystemProviders,
 		StowInstalled:          stowInstalled,
 		DotsReminderService:    dotsReminderService,
 		DotsReminderServiceErr: dotsReminderServiceErr,
 		DotsWatchService:       dotsWatchService,
 		DotsWatchServiceErr:    dotsWatchServiceErr,
+		DotsConfigured:         DotsConfiguredInSettings(settings),
+		DotsSyncAvailability:   DotsSyncAvailabilityInSettings(settings),
 		DotsHistory:            dotsHistory,
 		DotsHistoryErr:         dotsHistoryErr,
-		BootstrapRequired:      bootstrapRequired,
+		DotsState:              dotsState,
+		SetupProviders:         setupProviders,
 		EcosystemProviderNames: ecosystemProviderNames,
-		ConfiguredProviders:    configuredProvidersFromCounts(providerToolCounts),
-		ProviderToolCounts:     providerToolCounts,
 	}, nil
+}
+
+func (a *App) CreateEmptyConfigStartupState(ctx context.Context) (*StartupSnapshot, error) {
+	if err := a.CreateEmptyConfig(); err != nil {
+		return nil, err
+	}
+	return a.StartupSnapshot(ctx)
+}
+
+func (a *App) ToolGroupState(ctx context.Context) (*ToolGroupState, error) {
+	cfg, err := a.loadConfig()
+	if err != nil {
+		return nil, err
+	}
+	memberships := a.toolMembershipMapFromConfig(ctx, cfg)
+	hostInfo := a.hostStatusFromConfig(cfg)
+	return a.toolGroupStateFromConfigAndMemberships(cfg, memberships, hostInfo), nil
+}
+
+func (a *App) toolGroupStateFromConfigAndMemberships(cfg *config.RootConfig, memberships map[string][]string, hostInfo *HostInfo) *ToolGroupState {
+	return &ToolGroupState{
+		GroupNames:      reusableGroupNames(cfg.Groups),
+		ToolGroups:      ToolGroupLabelsForHost(memberships, hostInfo, currentMachineGroupName()),
+		ToolMemberships: memberships,
+		HostInfo:        hostInfo,
+	}
+}
+
+func (a *App) ToolScopeState(_ context.Context) (*ToolScopeState, error) {
+	cfg, err := a.loadConfig()
+	if err != nil {
+		return nil, err
+	}
+	return a.toolScopeStateFromConfig(cfg), nil
+}
+
+func (a *App) ToolScopeDisplayState(ctx context.Context) (*ToolScopeDisplayState, error) {
+	state, err := a.ToolScopeState(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return BuildToolScopeDisplayState(state), nil
+}
+
+func (a *App) ToolScopeDisplayStateWithFallback(ctx context.Context, fallbackHostIgnore []string) (*ToolScopeDisplayState, error) {
+	state, err := a.ToolScopeState(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return buildToolScopeDisplayStateWithFallback(state, fallbackHostIgnore), nil
+}
+
+func BuildToolScopeDisplayState(state *ToolScopeState) *ToolScopeDisplayState {
+	return buildToolScopeDisplayStateWithFallback(state, nil)
+}
+
+func buildToolScopeDisplayStateWithFallback(state *ToolScopeState, fallbackHostIgnore []string) *ToolScopeDisplayState {
+	if state == nil {
+		state = &ToolScopeState{}
+	}
+	if len(state.HostIgnoredTools) == 0 && len(fallbackHostIgnore) > 0 {
+		stateCopy := *state
+		stateCopy.HostIgnoredTools = append([]string(nil), fallbackHostIgnore...)
+		state = &stateCopy
+	}
+	return &ToolScopeDisplayState{
+		IgnoreLabels:     ignoreLabelsFromScopeState(state),
+		ToolIgnores:      toolIgnoresFromScopeState(state.ToolIgnores),
+		GroupIgnores:     groupIgnoresFromScopeState(state.GlobalIgnoredTools),
+		ToolProviderPins: toolProviderPinsFromScopeState(state.ToolProviderPins),
+	}
+}
+
+func ignoreLabelsFromScopeState(state *ToolScopeState) map[string]string {
+	labels := make(map[string]string)
+	for _, name := range state.HostIgnoredTools {
+		if name != "" {
+			labels[name] = "global"
+		}
+	}
+	for _, name := range state.GlobalIgnoredTools {
+		if name != "" {
+			labels[name] = "global"
+		}
+	}
+	for name, ignored := range state.ToolIgnores {
+		if ignored {
+			labels[name] = "tool"
+		}
+	}
+	return labels
+}
+
+func toolIgnoresFromScopeState(toolIgnores map[string]bool) map[string]bool {
+	toolIgnoreCopy := make(map[string]bool, len(toolIgnores))
+	for name, ignored := range toolIgnores {
+		if ignored {
+			toolIgnoreCopy[name] = true
+		}
+	}
+	return toolIgnoreCopy
+}
+
+func groupIgnoresFromScopeState(globalIgnoredTools []string) map[string]map[string]bool {
+	groupIgnores := make(map[string]map[string]bool)
+	for _, name := range globalIgnoredTools {
+		if name == "" {
+			continue
+		}
+		if groupIgnores[name] == nil {
+			groupIgnores[name] = make(map[string]bool)
+		}
+		groupIgnores[name]["global"] = true
+	}
+	return groupIgnores
+}
+
+func toolProviderPinsFromScopeState(pins map[string]string) map[string]string {
+	pinCopy := make(map[string]string, len(pins))
+	for name, pin := range pins {
+		if pin != "" {
+			pinCopy[name] = pin
+		}
+	}
+	return pinCopy
+}
+
+func (a *App) toolScopeStateFromConfig(cfg *config.RootConfig) *ToolScopeState {
+	hostInfo := a.hostStatusFromConfig(cfg)
+	var hostIgnored []string
+	if hostInfo != nil && hostInfo.Active != "" {
+		if host, ok := hostInfo.Hosts[hostInfo.Active]; ok {
+			hostIgnored = append([]string(nil), host.Ignore...)
+		}
+	}
+	toolIgnores, toolProviderPins := a.toolScopeFromConfig(cfg)
+	return &ToolScopeState{
+		GlobalIgnoredTools: append([]string(nil), cfg.Ignore.Tools...),
+		HostIgnoredTools:   hostIgnored,
+		ToolIgnores:        toolIgnores,
+		ToolProviderPins:   toolProviderPins,
+	}
 }
 
 func (a *App) toolScopeFromConfig(cfg *config.RootConfig) (map[string]bool, map[string]string) {

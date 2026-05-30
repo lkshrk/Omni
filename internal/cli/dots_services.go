@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/dots"
 	"github.com/lkshrk/omni/internal/executor"
 )
 
@@ -338,16 +337,16 @@ func printDotsWatchSyncResult(cmd *cobra.Command, result app.DotsWatchSyncResult
 	if event == "" {
 		event = "filesystem change"
 	}
-	changes, conflicts := countDotWatchOps(result.Ops)
+	counts := app.CountDotsWatchSyncOps(result.Ops)
 	if result.Err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Dotfile sync failed after %s: %v\n", event, result.Err)
 		return
 	}
 	switch {
-	case conflicts > 0:
-		fmt.Fprintf(cmd.ErrOrStderr(), "Dotfile sync found %d conflict(s) after %s.\n", conflicts, event)
-	case changes > 0:
-		fmt.Fprintf(cmd.OutOrStdout(), "Synced dotfiles after %s (%d change(s)).\n", event, changes)
+	case counts.Conflicts > 0:
+		fmt.Fprintf(cmd.ErrOrStderr(), "Dotfile sync found %d conflict(s) after %s.\n", counts.Conflicts, event)
+	case counts.Changes > 0:
+		fmt.Fprintf(cmd.OutOrStdout(), "Synced dotfiles after %s (%d change(s)).\n", event, counts.Changes)
 	default:
 		fmt.Fprintf(cmd.OutOrStdout(), "Checked dotfiles after %s; no changes.\n", event)
 	}
@@ -414,18 +413,6 @@ func printDotsServicesStatus(cmd *cobra.Command, status app.DotsServicesStatus) 
 			fmt.Fprintf(cmd.OutOrStdout(), "  %s\n", file)
 		}
 	}
-}
-
-func countDotWatchOps(ops []dots.Op) (changes, conflicts int) {
-	for _, op := range ops {
-		switch op.Kind {
-		case dots.OpLink, dots.OpRepair, dots.OpAdopt, dots.OpUnlink, dots.OpUnlinkSkip, dots.OpUnlinkConflict:
-			changes++
-		case dots.OpConflict:
-			conflicts++
-		}
-	}
-	return changes, conflicts
 }
 
 func appleScriptString(value string) string {

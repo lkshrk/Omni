@@ -9,7 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/config"
+	textutil "github.com/lkshrk/omni/internal/text"
 )
 
 const statusLabelWidth = 18
@@ -56,11 +56,7 @@ type statusListRow struct {
 	muted     bool
 }
 
-type dashboardReconcilePlanItem struct {
-	kind   dashboardReconcilePlanKind
-	label  string
-	detail string
-}
+type dashboardReconcilePlanItem = app.DashboardReconcilePlanStep
 
 func renderStatus(m Model) string {
 	rows := statusRows(m)
@@ -85,7 +81,7 @@ func renderDashboardReconcilePlanPopup(m Model) string {
 	rows := make([]pickerChoiceRow, 0, len(items))
 	for i, item := range items {
 		selected := i == m.dashboardReconcilePlanCursor
-		checked := dashboardReconcilePlanItemSelected(m, item.kind)
+		checked := dashboardReconcilePlanItemSelected(m, item.ID)
 		style := p.styleNormal
 		if !checked {
 			style = p.styleHelp
@@ -93,8 +89,8 @@ func renderDashboardReconcilePlanPopup(m Model) string {
 		rows = append(rows, pickerChoiceRow{
 			selected: selected,
 			mark:     dashboardReconcilePlanMark(checked),
-			label:    item.label,
-			detail:   item.detail,
+			label:    item.Label,
+			detail:   item.Detail,
 			style:    style,
 		})
 	}
@@ -132,94 +128,14 @@ func dashboardReconcilePlanColumnWidths(items []dashboardReconcilePlanItem) (int
 	labelW := 0
 	detailW := 0
 	for _, item := range items {
-		labelW = max(labelW, lipgloss.Width(item.label))
-		detailW = max(detailW, lipgloss.Width(item.detail))
+		labelW = max(labelW, lipgloss.Width(item.Label))
+		detailW = max(detailW, lipgloss.Width(item.Detail))
 	}
 	return max(labelW, 12), detailW
 }
 
 func dashboardReconcilePlanItems(m Model) []dashboardReconcilePlanItem {
-	items := make([]dashboardReconcilePlanItem, 0, 4)
-	if statusDashboardToolSyncActionable(m) {
-		items = append(items, dashboardReconcilePlanItem{
-			kind:   dashboardReconcilePlanSyncTools,
-			label:  "Sync tools",
-			detail: dashboardToolSyncPlanDetail(m),
-		})
-	}
-	if statusDashboardUpgradeActionable(m) {
-		counts := statusToolCounts(m)
-		items = append(items, dashboardReconcilePlanItem{
-			kind:   dashboardReconcilePlanUpgradeTools,
-			label:  "Upgrade tools",
-			detail: pluralCount(counts.updates, "outdated tool", "outdated tools"),
-		})
-	}
-	if statusDashboardDotsSyncActionable(m) {
-		counts := dotHeaderCounts(m.dotsEntries)
-		items = append(items, dashboardReconcilePlanItem{
-			kind:   dashboardReconcilePlanSyncDots,
-			label:  "Sync dotfiles",
-			detail: pluralCount(counts.OutOfSync, "out-of-sync entry", "out-of-sync entries"),
-		})
-	}
-	if statusDashboardDotsCommitActionable(m) {
-		items = append(items, dashboardReconcilePlanItem{
-			kind:   dashboardReconcilePlanCommitDots,
-			label:  "Commit dotfiles",
-			detail: statusDotsCommitPlanDetail(m),
-		})
-	}
-	if statusDashboardFixIgnoreActionable(m) {
-		items = append(items, dashboardReconcilePlanItem{
-			kind:   dashboardReconcilePlanFixIgnore,
-			label:  "Fix ignore patterns",
-			detail: statusFixIgnorePlanDetail(m),
-		})
-	}
-	return items
-}
-
-func dashboardToolSyncPlanDetail(m Model) string {
-	missing, discovered := dashboardToolSyncPlanCounts(m)
-	parts := make([]string, 0, 2)
-	if missing > 0 {
-		parts = append(parts, "install "+pluralCount(missing, "missing tool", "missing tools"))
-	}
-	if discovered > 0 {
-		parts = append(parts, "add "+pluralCount(discovered, "local tool", "local tools"))
-	}
-	return strings.Join(parts, ", ")
-}
-
-func dashboardToolSyncPlanCounts(m Model) (int, int) {
-	missing := 0
-	for _, tool := range m.allTools {
-		if tool != nil && tool.Tracked && !tool.Installed {
-			missing++
-		}
-	}
-	discovered := 0
-	for _, tool := range m.discoveredTools {
-		if tool != nil && tool.Name != "" && tool.Provider != "" {
-			discovered++
-		}
-	}
-	return missing, discovered
-}
-
-func statusDotsCommitPlanDetail(m Model) string {
-	lines := strings.Split(strings.TrimSpace(m.dotsGitStatus), "\n")
-	count := 0
-	for _, line := range lines {
-		if strings.TrimSpace(line) != "" {
-			count++
-		}
-	}
-	if count == 0 {
-		return "no repo changes"
-	}
-	return pluralCount(count, "repo change", "repo changes")
+	return app.DashboardReconcilePlan(dashboardReconcilePlanInput(m))
 }
 
 func dashboardReconcilePlanItemSelected(m Model, kind dashboardReconcilePlanKind) bool {
@@ -275,12 +191,12 @@ func statusSections(m Model, rows []statusListRow) []sectionedTabSection {
 	return sections
 }
 
-func statusAttentionRows(m Model, counts statusToolSummary) []statusListRow {
+func statusAttentionRows(m Model, counts app.DashboardToolSummary) []statusListRow {
 	rows := make([]statusListRow, 0, 5)
 	if row, ok := statusUpdatesRow(m, counts); ok {
 		rows = append(rows, row)
 	}
-	if counts.outOfSync > 0 {
+	if counts.OutOfSync > 0 {
 		rows = append(rows, statusToolSyncAttentionRow(m, counts))
 	}
 	if row, ok := statusDotfilesAttentionRow(m); ok {
@@ -401,6 +317,8 @@ func statusDoctorCheckAction(check app.DoctorCheck) statusAction {
 			return statusAction{kind: statusActionOpenSettings, settingsRow: settingsRowDotsRepo, desc: "open dotfile settings"}
 		}
 		return doctorDotsAction(check)
+	case "dots.ignore":
+		return statusAction{kind: statusActionFixIgnore, desc: "fix ignore patterns"}
 	case "services":
 		return statusAction{kind: statusActionOpenSettings, settingsRow: settingsRowDotsServices, desc: "open service settings"}
 	case "cache":
@@ -452,7 +370,7 @@ func doctorDetailHint(checkID, detail string) string {
 	}
 }
 
-func statusOverviewRows(m Model, counts statusToolSummary) []statusListRow {
+func statusOverviewRows(m Model, counts app.DashboardToolSummary) []statusListRow {
 	return []statusListRow{
 		statusToolsOverviewRow(m, counts),
 		statusToolSyncOverviewRow(m, counts),
@@ -461,17 +379,17 @@ func statusOverviewRows(m Model, counts statusToolSummary) []statusListRow {
 	}
 }
 
-func statusQuietRows(m Model, counts statusToolSummary) []statusListRow {
+func statusQuietRows(m Model, counts app.DashboardToolSummary) []statusListRow {
 	var rows []statusListRow
-	if counts.ignored > 0 {
+	if counts.Ignored > 0 {
 		rows = append(rows, statusIgnoredRow(m, counts))
 	}
 	return rows
 }
 
-func statusAllClearRow(m Model, counts statusToolSummary) statusListRow {
+func statusAllClearRow(m Model, counts app.DashboardToolSummary) statusListRow {
 	summary := "Tools current, dotfiles synced, automation ok."
-	if counts.tracked == 0 {
+	if counts.Tracked == 0 {
 		summary = "No attention items detected."
 	}
 	return statusListRow{
@@ -485,19 +403,19 @@ func statusAllClearRow(m Model, counts statusToolSummary) statusListRow {
 	}
 }
 
-func statusUpdatesRow(m Model, counts statusToolSummary) (statusListRow, bool) {
+func statusUpdatesRow(m Model, counts app.DashboardToolSummary) (statusListRow, bool) {
 	active, waiting := statusUpgradeNames(m)
-	if counts.updates == 0 && len(active) == 0 && len(waiting) == 0 && !m.upgradingKeys["*"] {
+	if counts.Updates == 0 && len(active) == 0 && len(waiting) == 0 && !m.upgradingKeys["*"] {
 		return statusListRow{}, false
 	}
-	value := statusCountValue(m, counts.updates, "update", "updates", "current")
-	summary := statusSampleSummary(counts.updateNames, "No outdated tools.")
-	details := statusOverflowDetails(m, counts.updateNames)
+	value := statusCountValue(m, counts.Updates, "update", "updates", "current")
+	summary := statusSampleSummary(counts.UpdateNames, "No outdated tools.")
+	details := statusOverflowDetails(m, counts.UpdateNames)
 	action := statusAction{kind: statusActionUpgradeTools, desc: "upgrade all tools"}
 	icon, iconStyle := statusRowWarningIcon(m)
 	if len(active) > 0 || len(waiting) > 0 || m.upgradingKeys["*"] {
-		summary = statusUpgradeSummary(active, waiting, counts.updateNames)
-		details = statusUpgradeDetails(m, active, waiting, counts.updateNames)
+		summary = statusUpgradeSummary(active, waiting, counts.UpdateNames)
+		details = statusUpgradeDetails(m, active, waiting, counts.UpdateNames)
 		value = statusUpgradeValue(m, active, waiting)
 		action = statusAction{kind: statusActionOpenToolsSection, toolSection: sectionUpdates, desc: "open updates"}
 		icon, iconStyle = statusRowWorkingIcon(m, len(active) > 0)
@@ -514,15 +432,15 @@ func statusUpdatesRow(m Model, counts statusToolSummary) (statusListRow, bool) {
 	}, true
 }
 
-func statusToolSyncAttentionRow(m Model, counts statusToolSummary) statusListRow {
+func statusToolSyncAttentionRow(m Model, counts app.DashboardToolSummary) statusListRow {
 	action := statusAction{kind: statusActionOpenToolsSection, toolSection: sectionOutOfSync, desc: "open sync issues"}
-	value := statusCountValue(m, counts.outOfSync, "issue", "issues", "in sync")
-	summary := statusSampleSummary(counts.outOfSyncNames, "All tracked tools match this host.")
+	value := statusCountValue(m, counts.OutOfSync, "issue", "issues", "in sync")
+	summary := statusSampleSummary(counts.OutOfSyncNames, "All tracked tools match this host.")
 	details := statusToolSyncDetails(m, counts)
 	icon, iconStyle := statusRowWarningIcon(m)
 	if statusDashboardToolSyncBusy(m) {
 		value = statusLoadingValue(m, "syncing")
-		summary = statusStaleSummary(statusToolsActivityText(m), summary, counts.outOfSync > 0)
+		summary = statusStaleSummary(statusToolsActivityText(m), summary, counts.OutOfSync > 0)
 		icon, iconStyle = statusRowWorkingIcon(m, m.rowOpKey != "" || strings.TrimSpace(m.progressText) != "")
 	}
 	if statusDashboardToolSyncActionable(m) && !statusToolsLoading(m) {
@@ -540,27 +458,27 @@ func statusToolSyncAttentionRow(m Model, counts statusToolSummary) statusListRow
 	}
 }
 
-func statusIgnoredRow(m Model, counts statusToolSummary) statusListRow {
+func statusIgnoredRow(m Model, counts app.DashboardToolSummary) statusListRow {
 	return statusListRow{
 		section:   statusSectionQuiet,
 		icon:      iconIgnored,
 		iconStyle: m.palette.styleHelp,
 		label:     "Ignored Tools",
-		value:     m.palette.styleHelp.Render(pluralCount(counts.ignored, "ignored", "ignored")),
-		summary:   statusSampleSummary(counts.ignoredNames, "No ignored tools."),
-		details:   statusOverflowDetails(m, counts.ignoredNames),
+		value:     m.palette.styleHelp.Render(textutil.PluralCount(counts.Ignored, "ignored", "ignored")),
+		summary:   statusSampleSummary(counts.IgnoredNames, "No ignored tools."),
+		details:   statusOverflowDetails(m, counts.IgnoredNames),
 		action:    statusAction{kind: statusActionOpenToolsSection, toolSection: sectionIgnored, desc: "open ignored tools"},
 		muted:     true,
 	}
 }
 
-func statusToolsOverviewRow(m Model, counts statusToolSummary) statusListRow {
+func statusToolsOverviewRow(m Model, counts app.DashboardToolSummary) statusListRow {
 	summary := statusToolsOverviewSummary(counts)
 	value := statusToolsOverviewValue(m, counts)
 	icon, iconStyle := statusToolsOverviewIcon(m, counts)
 	if activity := statusToolsActivityText(m); activity != "" {
 		value = statusLoadingValue(m, "loading")
-		summary = statusStaleSummary(activity, summary, counts.tracked+counts.installed+counts.available > 0)
+		summary = statusStaleSummary(activity, summary, counts.Tracked+counts.Installed+counts.Available > 0)
 		icon, iconStyle = statusRowWorkingIcon(m, len(m.upgradingKeys) > 0 || m.rowOpKey != "" || strings.TrimSpace(m.progressText) != "")
 	}
 	return statusListRow{
@@ -575,15 +493,15 @@ func statusToolsOverviewRow(m Model, counts statusToolSummary) statusListRow {
 	}
 }
 
-func statusToolSyncOverviewRow(m Model, counts statusToolSummary) statusListRow {
-	summary := statusSampleSummary(counts.outOfSyncNames, "All tracked tools match this host.")
-	value := statusCountValue(m, counts.outOfSync, "issue", "issues", "in sync")
+func statusToolSyncOverviewRow(m Model, counts app.DashboardToolSummary) statusListRow {
+	summary := statusSampleSummary(counts.OutOfSyncNames, "All tracked tools match this host.")
+	value := statusCountValue(m, counts.OutOfSync, "issue", "issues", "in sync")
 	icon, iconStyle := statusToolSyncIcon(m, counts)
 	if activity := statusToolsActivityText(m); activity != "" {
 		value = statusLoadingValue(m, "checking")
 		// Keep the fallback summary instead of repeating the scan activity
 		// text that the Tools row already shows.
-		if counts.outOfSync > 0 {
+		if counts.OutOfSync > 0 {
 			summary = statusStaleSummary(activity, summary, true)
 		}
 		if statusDashboardToolSyncBusy(m) {
@@ -608,10 +526,9 @@ func statusToolSyncOverviewRow(m Model, counts statusToolSummary) statusListRow 
 
 func statusDotfilesAttentionRow(m Model) (statusListRow, bool) {
 	p := m.palette
-	repo := strings.TrimSpace(m.settings.DotsRepo)
-	counts := dotHeaderCounts(m.dotsEntries)
+	counts := app.DotStatusesFileCounts(m.dotsEntries)
 
-	if config.BoolVal(m.settings.DotsDisabled) {
+	if dotsViewDisabled(m) {
 		icon, iconStyle := statusRowFailureIcon(m)
 		return statusListRow{
 			section:   statusSectionAttention,
@@ -624,7 +541,7 @@ func statusDotfilesAttentionRow(m Model) (statusListRow, bool) {
 			action:    statusAction{kind: statusActionOpenSettings, settingsRow: settingsRowDotsSync, desc: "open dotfile sync setting"},
 		}, true
 	}
-	if repo == "" {
+	if dotsViewUnconfigured(m) {
 		return statusListRow{
 			section:   statusSectionAttention,
 			icon:      iconFailed,
@@ -645,7 +562,7 @@ func statusDotfilesAttentionRow(m Model) (statusListRow, bool) {
 	value := p.styleOutdated.Render("dirty")
 	icon, iconStyle := statusRowWarningIcon(m)
 	if counts.OutOfSync > 0 {
-		value = p.styleOutdated.Render(pluralCount(counts.OutOfSync, "issue", "issues"))
+		value = p.styleOutdated.Render(textutil.PluralCount(counts.OutOfSync, "issue", "issues"))
 		if m.dotsLoading || m.dotsPreparing {
 			value = statusLoadingValue(m, "syncing")
 			icon, iconStyle = statusRowWorkingIcon(m, m.dotsActiveName != "" || strings.TrimSpace(m.progressText) != "")
@@ -669,11 +586,11 @@ func statusDotfilesAttentionRow(m Model) (statusListRow, bool) {
 }
 
 func statusDotfilesOverviewRow(m Model) statusListRow {
-	counts := dotHeaderCounts(m.dotsEntries)
+	counts := app.DotStatusesFileCounts(m.dotsEntries)
 	action := statusAction{kind: statusActionOpenDots, desc: "open dotfiles"}
-	if config.BoolVal(m.settings.DotsDisabled) {
+	if dotsViewDisabled(m) {
 		action = statusAction{kind: statusActionOpenSettings, settingsRow: settingsRowDotsSync, desc: "open dotfile sync setting"}
-	} else if strings.TrimSpace(m.settings.DotsRepo) == "" {
+	} else if dotsViewUnconfigured(m) {
 		action = statusAction{kind: statusActionOpenSettings, settingsRow: settingsRowDotsRepo, desc: "set repository"}
 	}
 	summary := statusDotOverviewSummary(m, counts)
@@ -779,19 +696,19 @@ func statusRowWorkingIcon(m Model, active bool) (string, lipgloss.Style) {
 	return iconPending, m.palette.styleStatus
 }
 
-func statusToolsOverviewIcon(m Model, counts statusToolSummary) (string, lipgloss.Style) {
+func statusToolsOverviewIcon(m Model, counts app.DashboardToolSummary) (string, lipgloss.Style) {
 	switch {
-	case counts.tracked == 0:
+	case counts.Tracked == 0:
 		return statusRowQuietIcon(m)
-	case counts.updates > 0 || counts.outOfSync > 0:
+	case counts.Updates > 0 || counts.OutOfSync > 0:
 		return statusRowWarningIcon(m)
 	default:
 		return statusRowOKIcon(m)
 	}
 }
 
-func statusToolSyncIcon(m Model, counts statusToolSummary) (string, lipgloss.Style) {
-	if counts.outOfSync > 0 {
+func statusToolSyncIcon(m Model, counts app.DashboardToolSummary) (string, lipgloss.Style) {
+	if counts.OutOfSync > 0 {
 		return statusRowWarningIcon(m)
 	}
 	return statusRowOKIcon(m)
@@ -799,7 +716,7 @@ func statusToolSyncIcon(m Model, counts statusToolSummary) (string, lipgloss.Sty
 
 func statusDotfilesOverviewIcon(m Model, counts app.DotFileCounts) (string, lipgloss.Style) {
 	switch {
-	case config.BoolVal(m.settings.DotsDisabled) || strings.TrimSpace(m.settings.DotsRepo) == "" || statusDotfilesNotLoaded(m, counts):
+	case dotsViewBlocked(m) || statusDotfilesNotLoaded(m, counts):
 		return statusRowQuietIcon(m)
 	case counts.OutOfSync > 0 || strings.TrimSpace(m.dotsGitStatus) != "":
 		return statusRowWarningIcon(m)
@@ -814,7 +731,7 @@ func statusAutomationIcon(m Model) (string, lipgloss.Style) {
 		return statusRowWorkingIcon(m, false)
 	case strings.TrimSpace(m.dotsReminderServiceErr) != "" || strings.TrimSpace(m.dotsWatchServiceErr) != "":
 		return statusRowWarningIcon(m)
-	case statusAnyAutomationInstalled(m) && (strings.TrimSpace(m.settings.DotsRepo) == "" || config.BoolVal(m.settings.DotsDisabled)):
+	case statusAnyAutomationInstalled(m) && dotsViewBlocked(m):
 		return statusRowWarningIcon(m)
 	case statusAnyAutomationInstalled(m):
 		return statusRowOKIcon(m)

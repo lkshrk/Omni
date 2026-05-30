@@ -188,7 +188,7 @@ func (m *Model) switchMainTab(target viewMode, cmds *[]tea.Cmd) bool {
 	m.cancelConfirmationForGlobalNavigation()
 	m.cursorHidden = true
 	m.mode = target
-	if target == viewDots && m.settings.DotsRepo != "" && !m.dotsLoaded && !m.dotsLoading && !m.dotsPreparing {
+	if target == viewDots && m.dotsConfigured() && !m.dotsLoaded && !m.dotsLoading && !m.dotsPreparing {
 		m.beginDotsOperation("Loading dots…")
 		*cmds = append(*cmds, m.spinner.Tick, m.doLoadDots())
 	}

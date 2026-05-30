@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -244,8 +245,14 @@ func (a *App) BootstrapDotsEntries() ([]config.DotEntry, error) {
 // DotsAddDiscoveredEntry persists one currently discovered dotfile candidate to
 // a config group without adopting, linking, or otherwise mutating local files.
 func (a *App) DotsAddDiscoveredEntry(nameOrPath, groupName string) (config.DotEntry, error) {
-	var added config.DotEntry
-	err := a.withConfig(func(rootCfg *config.RootConfig) error {
+	return a.DotsAddDiscoveredEntryContext(context.Background(), nameOrPath, groupName)
+}
+
+func (a *App) DotsAddDiscoveredEntryContext(ctx context.Context, nameOrPath, groupName string) (added config.DotEntry, err error) {
+	defer func() {
+		a.refreshDotsStateAfterSuccess(ctx, &err, false)
+	}()
+	err = a.withConfig(func(rootCfg *config.RootConfig) error {
 		if err := a.requireDotsEnabled(rootCfg); err != nil {
 			return err
 		}

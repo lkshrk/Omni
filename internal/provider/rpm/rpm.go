@@ -10,7 +10,10 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-const listQueryFormat = "%{NAME}\\t%{VERSION}-%{RELEASE}\\n"
+const (
+	listQueryFormat    = "%{NAME}\\t%{VERSION}-%{RELEASE}\\n"
+	summaryQueryFormat = "%{NAME}\\t%{SUMMARY}\\n"
+)
 
 func IsInstalled(ctx context.Context, exec executor.Executor, pkg string) (bool, string, error) {
 	stdout, _, err := exec.Run(ctx, "rpm", "-q", "--queryformat", "%{VERSION}-%{RELEASE}", pkg)
@@ -59,12 +62,56 @@ func InstalledMap(ctx context.Context, exec executor.Executor) (map[string]strin
 	return m, nil
 }
 
+func Summaries(ctx context.Context, exec executor.Executor, tools []provider.Tool) (map[string]string, error) {
+	if len(tools) == 0 {
+		return nil, nil
+	}
+	args := make([]string, 0, len(tools)+3)
+	args = append(args, "-q", "--queryformat", summaryQueryFormat)
+	for _, tool := range tools {
+		args = append(args, tool.EffectivePackage())
+	}
+	stdout, _, err := exec.Run(ctx, "rpm", args...)
+	summaries := ParseSummaryLines(stdout)
+	if err != nil && len(summaries) == 0 && !isRPMMissOutput(stdout) {
+		return nil, fmt.Errorf("rpm summaries: %w", err)
+	}
+	return summaries, nil
+}
+
+func Summary(ctx context.Context, exec executor.Executor, pkg string) (string, error) {
+	stdout, _, err := exec.Run(ctx, "rpm", "-q", "--queryformat", "%{SUMMARY}", pkg)
+	desc := strings.TrimSpace(stdout)
+	if err != nil {
+		if isRPMMissOutput(desc) {
+			return "", nil
+		}
+		return "", fmt.Errorf("rpm summary %s: %w", pkg, err)
+	}
+	if isRPMMissOutput(desc) {
+		return "", nil
+	}
+	return desc, nil
+}
+
 func ParseListLine(line string) (name, version string) {
 	fields := strings.SplitN(line, "\t", 2)
 	if len(fields) < 2 {
 		return "", ""
 	}
 	return strings.TrimSpace(fields[0]), strings.TrimSpace(fields[1])
+}
+
+func ParseSummaryLines(output string) map[string]string {
+	m := make(map[string]string)
+	for _, line := range strings.Split(output, "\n") {
+		name, summary := ParseListLine(line)
+		if name == "" || summary == "" {
+			continue
+		}
+		m[name] = summary
+	}
+	return m
 }
 
 func ParseInfoSummaries(output string) map[string]string {
@@ -105,6 +152,16 @@ func ParseInfoSummary(output string) string {
 		}
 	}
 	return ""
+}
+
+func isRPMMissOutput(output string) bool {
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.HasPrefix(line, "package ") {
+			return false
+		}
+	}
+	return strings.TrimSpace(output) != ""
 }
 
 func listInstalledOutput(ctx context.Context, exec executor.Executor) (string, error) {
