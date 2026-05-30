@@ -3,10 +3,10 @@ exec chmod 755 bin/brew bin/apt bin/apk bin/dnf bin/pacman bin/zypper bin/pip bi
 env PATH=$WORK/bin:$PATH
 
 exec omni --config settings.json tools import --provider brew --group testhost
-stdout 'Imported 1 tool\(s\):'
+stdout 'Imported 1 tool:'
 stdout 'fd'
 ! stdout 'ripgrep'
-stdout 'Skipped 1 already configured tool\(s\)'
+stdout 'Skipped 1 already configured tool'
 exec grep '"fd"' settings.json
 
 exec omni --config settings.json tools refresh
@@ -19,13 +19,12 @@ stdout '"name":"fd"'
 exec omni-seed-cache ripgrep system ripgrep 14.0.0 15.0.0 brew
 exec omni-seed-cache fd system fd 9.0.0 10.0.0 brew
 exec omni --config settings.json tools upgrade --all
-stdout 'upgrading fd'
-stdout 'upgraded: fd \(system\)'
+stdout 'upgrading fd \(10.0.0\)'
+stdout 'upgraded: fd \(10.0.0\) \(system\)'
 ! stdout 'ripgrep'
 exec test -f .omni-cache/fake-brew/fd-upgraded
 ! exec test -f .omni-cache/fake-brew/ripgrep-upgraded
-! exec grep 'upgrade ripgrep' .omni-cache/fake-brew/calls
-! exec grep 'list --versions ripgrep' .omni-cache/fake-brew/calls
+! exec grep 'upgrade .*ripgrep' .omni-cache/fake-brew/calls
 ! exec grep 'info --json=v2 ripgrep' .omni-cache/fake-brew/calls
 
 -- bin/brew --
@@ -38,11 +37,11 @@ case "${1:-}" in
   --version)
     echo "Homebrew 4.0.0"
     ;;
-  info)
-    if [ "${2:-}" = "--json=v2" ] && [ "${3:-}" = "--installed" ]; then
-      printf '{"formulae":[{"name":"ripgrep","full_name":"ripgrep","desc":"fast grep","installed":[{"version":"14.0.0","installed_on_request":true}]},{"name":"fd","full_name":"fd","desc":"fast find","installed":[{"version":"9.0.0","installed_on_request":true}]}],"casks":[]}\n'
-      exit 0
-    fi
+	  info)
+	    if [ "${2:-}" = "--json=v2" ] && [ "${3:-}" = "--installed" ]; then
+	      printf '{"formulae":[{"name":"ripgrep","full_name":"ripgrep","desc":"fast grep","installed":[{"version":"14.0.0","installed_on_request":true}]},{"name":"fd","full_name":"fd","desc":"fast find","installed":[{"version":"9.0.0","installed_on_request":true}]}],"casks":[]}\n'
+	      exit 0
+	    fi
     if [ "${2:-}" = "--json=v2" ]; then
       shift 2
       formulae=""
@@ -56,11 +55,17 @@ case "${1:-}" in
       done
       printf '{"formulae":[%s],"casks":[]}\n' "$formulae"
       exit 0
-    fi
-    printf '{"formulae":[],"casks":[]}\n'
-    ;;
-  update)
-    ;;
+	    fi
+	    printf '{"formulae":[],"casks":[]}\n'
+	    ;;
+	  leaves)
+	    if [ "${2:-}" = "--installed-on-request" ]; then
+	      echo "ripgrep"
+	      echo "fd"
+	    fi
+	    ;;
+	  update)
+	    ;;
   outdated)
     formulae='{"name":"ripgrep","current_version":"15.0.0"}'
     if [ ! -f "$state/fd-upgraded" ]; then
@@ -69,28 +74,44 @@ case "${1:-}" in
     printf '{"formulae":[%s],"casks":[]}\n' "$formulae"
     ;;
   upgrade)
-    : > "$state/$2-upgraded"
-    echo "10.0.0" > "$state/$2.version"
-    ;;
-  list)
     shift
-    if [ "${1:-}" = "--versions" ]; then
+    if [ "${1:-}" = "--formula" ] || [ "${1:-}" = "--cask" ]; then
       shift
-      if [ "${1:-}" = "--cask" ]; then
-        shift
-      fi
-      pkg="${1:-}"
-      if [ "$pkg" = "fd" ]; then
-        version="9.0.0"
-        if [ -f "$state/fd.version" ]; then
-          version="$(cat "$state/fd.version")"
-        fi
-        echo "fd $version"
-        exit 0
-      fi
     fi
-    exit 1
+    : > "$state/$1-upgraded"
+    echo "10.0.0" > "$state/$1.version"
     ;;
+	  list)
+	    shift
+	    if [ "${1:-}" = "--cask" ]; then
+	      exit 0
+	    fi
+	    if [ "${1:-}" = "--versions" ]; then
+	      shift
+	      if [ "${1:-}" = "--cask" ]; then
+	        shift
+	      fi
+	      found=0
+	      for pkg in "$@"; do
+	        case "$pkg" in
+	          ripgrep)
+	            echo "ripgrep 14.0.0"
+	            found=1
+	            ;;
+	          fd)
+	            version="9.0.0"
+	            if [ -f "$state/fd.version" ]; then
+	              version="$(cat "$state/fd.version")"
+	            fi
+	            echo "fd $version"
+	            found=1
+	            ;;
+	        esac
+	      done
+	      [ "$found" -eq 1 ] && exit 0
+	    fi
+	    exit 1
+	    ;;
 esac
 
 -- bin/apt --

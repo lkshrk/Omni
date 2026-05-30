@@ -270,16 +270,11 @@ func TestRefreshInstalled_EmptyConfig_Noop(t *testing.T) {
 	prov := &stubProvider{name: "brew", available: true}
 	a, _ := newImportApp(t, prov)
 
-	// No config file → RefreshInstalled is a noop, returns nil.
 	if err := a.RefreshInstalled(context.Background(), nil); err != nil {
 		t.Fatalf("RefreshInstalled on empty config: %v", err)
 	}
 }
 
-// ── TestRefreshInstalled_Progress_BulkProvider ────────────────────────────────
-
-// TestRefreshInstalled_Progress_BulkProvider verifies that the progress callback
-// reports configured tool progress for a BulkChecker provider.
 func TestRefreshInstalled_Progress_BulkProvider(t *testing.T) {
 	prov := &bulkCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
@@ -306,7 +301,7 @@ func TestRefreshInstalled_Progress_BulkProvider(t *testing.T) {
 	if len(msgs) == 0 {
 		t.Fatal("progress callback never called")
 	}
-	want := "Refreshing tools 1/1: brew/ripgrep…"
+	want := "Scanning brew… (1/1)"
 	if msgs[len(msgs)-1] != want {
 		t.Errorf("progress msgs = %v, want final entry %q", msgs, want)
 	}
@@ -343,7 +338,7 @@ func TestRefreshInstalled_Progress_SlowPath(t *testing.T) {
 	if len(msgs) == 0 {
 		t.Fatal("progress callback never called for slow-path provider")
 	}
-	want := "Refreshing tools 1/1: pip/black…"
+	want := "Scanning pip… (1/1)"
 	if msgs[len(msgs)-1] != want {
 		t.Errorf("progress msgs = %v, want final entry %q", msgs, want)
 	}
@@ -421,10 +416,6 @@ func TestRefreshInstalled_BulkPath_ConcreteResolver(t *testing.T) {
 	}
 }
 
-// ── TestRefreshInstalled_Progress_XofY ───────────────────────────────────────
-
-// TestRefreshInstalled_Progress_XofY verifies that progress counts configured
-// tools, not providers.
 func TestRefreshInstalled_Progress_XofY(t *testing.T) {
 	brew := &bulkCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
@@ -457,9 +448,64 @@ func TestRefreshInstalled_Progress_XofY(t *testing.T) {
 	if len(msgs) != 2 {
 		t.Fatalf("got %d progress messages, want 2: %v", len(msgs), msgs)
 	}
-	want := []string{
-		"Refreshing tools 1/2: brew/ripgrep…",
-		"Refreshing tools 2/2: pip/black…",
+	seen := map[string]bool{}
+	seenIndexes := map[string]bool{}
+	for _, msg := range msgs {
+		switch {
+		case strings.Contains(msg, "Scanning brew…"):
+			seen["brew"] = true
+		case strings.Contains(msg, "Scanning pip…"):
+			seen["pip"] = true
+		default:
+			t.Errorf("unexpected progress message %q", msg)
+		}
+		switch {
+		case strings.Contains(msg, "(1/2)"):
+			seenIndexes["1"] = true
+		case strings.Contains(msg, "(2/2)"):
+			seenIndexes["2"] = true
+		default:
+			t.Errorf("progress message %q missing 1/2 or 2/2 index", msg)
+		}
+	}
+	if !seen["brew"] || !seen["pip"] {
+		t.Errorf("progress messages = %v, want brew and pip scans", msgs)
+	}
+	if !seenIndexes["1"] || !seenIndexes["2"] {
+		t.Errorf("progress messages = %v, want 1/2 and 2/2 indexes", msgs)
+	}
+}
+
+func TestRefreshInstalled_Progress_ConcreteMetaProviderLabelDedupes(t *testing.T) {
+	node := &bulkConcreteStub{
+		bulkCheckingStub: bulkCheckingStub{
+			stubProvider: stubProvider{name: "node", available: true},
+			bulk:         map[string]string{"typescript": "5.4.0"},
+		},
+		concreteName: "bun",
+	}
+	a, cfgPath := newImportApp(t, node)
+
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(
+			logicalTool("typescript", "node"),
+			logicalFixtureTool{Name: "eslint", Provider: "node", InstallWith: "bun"},
+		),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("typescript", "eslint"),
+		}},
+	}); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+
+	var msgs []string
+	if err := a.RefreshInstalled(context.Background(), func(s string) { msgs = append(msgs, s) }); err != nil {
+		t.Fatalf("RefreshInstalled: %v", err)
+	}
+
+	want := []string{"Scanning node/bun… (1/1)"}
+	if len(msgs) != len(want) {
+		t.Fatalf("got progress messages %v, want %v", msgs, want)
 	}
 	for i, msg := range msgs {
 		if msg != want[i] {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/provider"
 )
 
 // ─── RenameGroup ──────────────────────────────────────────────────────────────
@@ -101,6 +102,46 @@ func TestRenameGroup_UpdatesHostReferences(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("host groups = %v, want to include 'development'", groups)
+	}
+}
+
+func TestRenameGroupWithStateReturnsUpdatedGroupState(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost.local")
+	a, cfgPath := newImportApp(t, &stubProvider{name: "brew", available: true})
+
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(
+			logicalTool("ripgrep", "brew"),
+			logicalTool("go", "brew"),
+		),
+		Groups: []*config.GroupConfig{
+			{Name: "testhost", Special: "host", Tools: groupTools("ripgrep")},
+			{Name: "dev", Tools: groupTools("go")},
+		},
+		Hosts: map[string][]string{"testhost": {"dev"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := a.RenameGroupWithState(context.Background(), "dev", "development")
+	if err != nil {
+		t.Fatalf("RenameGroupWithState: %v", err)
+	}
+	if slices.Contains(state.GroupNames, "dev") || !slices.Contains(state.GroupNames, "development") {
+		t.Fatalf("GroupNames = %v, want development and no dev", state.GroupNames)
+	}
+	toolKey := "go\x00system"
+	if got := state.ToolGroups[toolKey]; got != "development" {
+		t.Fatalf("ToolGroups[%q] = %q, want development", toolKey, got)
+	}
+	if got := state.ToolMemberships[toolKey]; !slices.Equal(got, []string{"development"}) {
+		t.Fatalf("ToolMemberships[%q] = %v, want [development]", toolKey, got)
+	}
+	if state.HostInfo == nil || state.HostInfo.Active != "testhost" {
+		t.Fatalf("HostInfo = %#v, want active testhost", state.HostInfo)
+	}
+	if got := state.HostInfo.Hosts["testhost"].Groups; !slices.Equal(got, []string{"development"}) {
+		t.Fatalf("host groups = %v, want [development]", got)
 	}
 }
 
@@ -215,6 +256,82 @@ func TestDeleteGroup_HappyPath_MovesToolsToHost(t *testing.T) {
 	}
 	if !names["rust"] {
 		t.Error("host group missing moved tool 'rust'")
+	}
+}
+
+func TestDeleteGroupWithStateReturnsUpdatedToolsAndGroups(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost.local")
+	a, cfgPath := newImportApp(t, &stubProvider{
+		name:      "brew",
+		available: true,
+		installed: []provider.InstalledTool{
+			installedTool("go", "1.0.0", "brew"),
+			installedTool("ripgrep", "1.0.0", "brew"),
+		},
+	})
+
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(
+			logicalTool("go", "brew"),
+			logicalTool("ripgrep", "brew"),
+		),
+		Groups: []*config.GroupConfig{
+			{Name: "testhost", Special: "host", Tools: groupTools("ripgrep")},
+			{Name: "dev", Tools: groupTools("go")},
+		},
+		Hosts: map[string][]string{"testhost": {"dev"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.RefreshInstalled(context.Background(), nil); err != nil {
+		t.Fatalf("RefreshInstalled: %v", err)
+	}
+
+	result, err := a.DeleteGroupWithState(context.Background(), "dev", app.DeleteGroupOptions{MoveTo: "testhost"})
+	if err != nil {
+		t.Fatalf("DeleteGroupWithState: %v", err)
+	}
+	if result.State == nil {
+		t.Fatal("State is nil")
+	}
+	if slices.Contains(result.State.GroupNames, "dev") {
+		t.Fatalf("GroupNames = %v, want no dev", result.State.GroupNames)
+	}
+	toolKey := "go\x00system"
+	if got := result.State.ToolMemberships[toolKey]; !slices.Equal(got, []string{"testhost"}) {
+		t.Fatalf("ToolMemberships[%q] = %v, want [testhost]", toolKey, got)
+	}
+	foundGo := false
+	for _, tool := range result.Tools {
+		if tool.Name == "go" && tool.Provider == "system" {
+			foundGo = true
+			break
+		}
+	}
+	if !foundGo {
+		t.Fatalf("Tools = %#v, want logical go tool", result.Tools)
+	}
+}
+
+func TestDeleteGroupWithDefaultMoveTargetUsesCurrentHost(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost.local")
+	a, cfgPath := newImportApp(t)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("go", "brew")),
+		Groups: []*config.GroupConfig{
+			{Name: "testhost", Special: "host"},
+			{Name: "dev", Tools: groupTools("go")},
+		},
+		Hosts: map[string][]string{"testhost": {"dev"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := a.DeleteGroupWithDefaultMoveTarget(context.Background(), "dev", false)
+	if err != nil {
+		t.Fatalf("DeleteGroupWithDefaultMoveTarget: %v", err)
+	}
+	if got := result.State.ToolMemberships["go\x00system"]; !slices.Equal(got, []string{"testhost"}) {
+		t.Fatalf("ToolMemberships go = %v, want [testhost]", got)
 	}
 }
 

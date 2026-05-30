@@ -43,6 +43,31 @@ func (p *okProvider) IsInstalled(_ context.Context, _ provider.Tool) (bool, stri
 func (p *okProvider) ListInstalled(_ context.Context) ([]provider.InstalledTool, error) {
 	return nil, nil
 }
+func (p *okProvider) PrivilegeCommand(action provider.PrivilegeAction, tool provider.Tool) (string, []string, bool) {
+	pkg := tool.EffectivePackage()
+	switch p.name {
+	case "brew":
+		verb := "uninstall"
+		switch action {
+		case provider.PrivilegeActionInstall:
+			verb = "install"
+		case provider.PrivilegeActionUpgrade:
+			verb = "upgrade"
+		}
+		return "brew", []string{verb, "--cask", pkg}, true
+	case "apt":
+		switch action {
+		case provider.PrivilegeActionInstall:
+			return "apt-get", []string{"install", "-y", pkg}, true
+		case provider.PrivilegeActionUpgrade:
+			return "apt-get", []string{"install", "--only-upgrade", "-y", pkg}, true
+		default:
+			return "apt-get", []string{"remove", "-y", pkg}, true
+		}
+	default:
+		return "", nil, false
+	}
+}
 
 type privilegedOKProvider struct {
 	okProvider
@@ -51,6 +76,10 @@ type privilegedOKProvider struct {
 
 func (p *privilegedOKProvider) PrivilegePlan(_ context.Context, _ provider.PrivilegeAction, _ provider.Tool) (provider.PrivilegePlan, error) {
 	return p.plan, nil
+}
+
+func (p *privilegedOKProvider) PrivilegeCommand(action provider.PrivilegeAction, tool provider.Tool) (string, []string, bool) {
+	return p.okProvider.PrivilegeCommand(action, tool)
 }
 
 type privilegedMissingProvider struct {
@@ -815,7 +844,7 @@ func TestUpgradeAllProgressText_DeduplicatesBulkVerb(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := upgradeAllProgressText(gosync.ProgressEvent{Tool: tool, Message: tt.message, Err: tt.err}, 1, 2)
+			got := app.UpgradeAllProgressText(gosync.ProgressEvent{Tool: tool, Message: tt.message, Err: tt.err}, 1, 2)
 			if got != tt.want {
 				t.Fatalf("upgradeAllProgressText = %q, want %q", got, tt.want)
 			}
@@ -1246,13 +1275,13 @@ func TestDoSetDotGroupMemberships_ExistingGroupJoinsHost(t *testing.T) {
 	}
 }
 
-// ── doSaveSettings ────────────────────────────────────────────────────────────
+// ── doSaveSettingsChange ──────────────────────────────────────────────────────
 
-func TestDoSaveSettings_Success(t *testing.T) {
+func TestDoSaveSettingsChange_Success(t *testing.T) {
 	prov := &okProvider{name: "brew"}
-	a, _ := newCmdApp(t, prov, nil)
+	a, cfgPath := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
-	msg := m.doSaveSettings()()
+	msg := m.doSaveSettingsChange(app.ToggleSettingBool("auto_import"))()
 	got, ok := msg.(settingsSavedMsg)
 	if !ok {
 		t.Fatalf("expected settingsSavedMsg, got %T", msg)
@@ -1260,30 +1289,38 @@ func TestDoSaveSettings_Success(t *testing.T) {
 	if got.err != nil {
 		t.Errorf("unexpected error: %v", got.err)
 	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if !cfg.Settings.AutoImport {
+		t.Fatal("auto_import should be toggled on")
+	}
 }
 
-func TestDoSaveSettings_QueuesLatestSnapshot(t *testing.T) {
+func TestDoSaveSettingsChange_QueuesPendingChanges(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "savequeuetest")
 	prov := &okProvider{name: "brew"}
 	a, cfgPath := newCmdApp(t, prov, nil)
+	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{AutoImport: true},
+		Groups:   []*config.GroupConfig{tuiTestHostGroup()},
+	}); err != nil {
+		t.Fatalf("saveTUIConfig: %v", err)
+	}
 	m := modelForCmds(a)
 
-	m.settings.AutoImport = true
-	first := m.doSaveSettings()
+	first := m.doSaveSettingsChange(app.ToggleSettingBool("dots_git.auto_push"))
 	if first == nil {
 		t.Fatal("first save should start immediately")
 	}
-	m.settings.AutoImport = false
-	m.settings.DisabledProviders = []string{provider.EcosystemNode}
-	m.settings.SetEcosystemManager(provider.EcosystemNode, "pnpm")
-	second := m.doSaveSettings()
+	second := m.doSaveSettingsChange(app.SetSettingValue("node.manager", "pnpm"))
 	if second != nil {
 		t.Fatal("second save should queue while first save is running")
 	}
 	if !m.settingsSaveQueued {
-		t.Fatal("latest settings snapshot should be queued")
+		t.Fatal("pending settings change should be queued")
 	}
-	m.settings.SetEcosystemManager(provider.EcosystemNode, "npm")
 
 	firstMsg, ok := first().(settingsSavedMsg)
 	if !ok {
@@ -1310,18 +1347,18 @@ func TestDoSaveSettings_QueuesLatestSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	if cfg.Settings.AutoImport {
-		t.Fatal("final settings should come from latest queued snapshot")
+	if !cfg.Settings.AutoImport {
+		t.Fatal("auto_import should be preserved from current config")
+	}
+	if !cfg.Settings.DotsGit.AutoPush {
+		t.Fatal("dots_git.auto_push should be persisted by first change")
 	}
 	settings, err := a.LoadSettings()
 	if err != nil {
 		t.Fatalf("LoadSettings: %v", err)
 	}
-	if !slices.Contains(settings.DisabledProviders, provider.EcosystemNode) {
-		t.Fatalf("DisabledProviders = %v, want latest queued node disable", settings.DisabledProviders)
-	}
 	if got := settings.EcosystemManager(provider.EcosystemNode); got != "pnpm" {
-		t.Fatalf("node manager = %q, want queued snapshot pnpm", got)
+		t.Fatalf("node manager = %q, want queued change pnpm", got)
 	}
 }
 
@@ -1612,6 +1649,45 @@ func TestSettingsRowActionsPersistExpectedConfigFields(t *testing.T) {
 	}
 }
 
+func TestSettingsRowActionDoesNotOverwriteConfigWithStaleModel(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "stalesettingstest")
+	prov := &okProvider{name: "brew"}
+	a, cfgPath := newCmdApp(t, prov, nil)
+	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{AutoImport: true},
+		Groups:   []*config.GroupConfig{tuiTestHostGroup()},
+	}); err != nil {
+		t.Fatalf("saveTUIConfig: %v", err)
+	}
+	m := modelForCmds(a)
+	m.settings = config.Settings{}
+	m.settingsCursor = settingsRowNodeManager
+
+	var cmds []tea.Cmd
+	m.handleSettingsRowAction(&cmds)
+	if len(cmds) != 1 {
+		t.Fatalf("node manager row produced %d save commands, want 1", len(cmds))
+	}
+	msg, ok := cmds[0]().(settingsSavedMsg)
+	if !ok {
+		t.Fatalf("save command returned %T, want settingsSavedMsg", msg)
+	}
+	if msg.err != nil {
+		t.Fatalf("save command failed: %v", msg.err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if !cfg.Settings.AutoImport {
+		t.Fatal("settings.auto_import was overwritten from stale TUI model")
+	}
+	if got := cfg.HostSettings["stalesettingstest"].EcosystemManager("node"); got != "bun" {
+		t.Fatalf("node manager = %q, want bun", got)
+	}
+}
+
 // ── doConsolidate ─────────────────────────────────────────────────────────────
 
 func TestDoConsolidate_Success(t *testing.T) {
@@ -1693,40 +1769,8 @@ func TestToolProgressUpdate_ContextCanceledCompletesWithoutRowError(t *testing.T
 	}
 }
 
-func TestSyncResultRowErrors_SkipsContextCanceled(t *testing.T) {
-	result := &gosync.SyncResult{Ops: []gosync.SyncOp{
-		{
-			Tool: provider.Tool{Name: "ripgrep", Provider: "brew"},
-			Kind: gosync.OpFailed,
-			Err:  context.Canceled,
-		},
-		{
-			Tool: provider.Tool{Name: "jq", Provider: "brew"},
-			Kind: gosync.OpFailed,
-			Err:  errors.New("install failed"),
-		},
-	}}
-
-	got := syncResultRowErrors(result)
-	if _, ok := got[toolKey("ripgrep", "brew")]; ok {
-		t.Fatalf("cancelled op should not create a row error, got %#v", got)
-	}
-	if got[toolKey("jq", "brew")] != "install failed" {
-		t.Fatalf("rowErrors = %#v, want jq install failure", got)
-	}
-}
-
-func TestSyncAllProgressText_CountsAddAndInstallOnly(t *testing.T) {
-	discovered := []*database.ToolCache{{Name: "fzf", Provider: "brew", Installed: true}}
-	tools := []*database.ToolCache{
-		{Name: "bat", Provider: "brew", Tracked: true, Installed: false},
-		{Name: "ripgrep", Provider: "brew", Tracked: true, Installed: true, Outdated: true},
-	}
-	if got := countSyncAllProgressItems(tools, discovered); got != 2 {
-		t.Fatalf("countSyncAllProgressItems = %d, want 2", got)
-	}
-
-	addText := syncAllToolProgressText(gosync.ProgressEvent{
+func TestSyncAllProgressText_AddAndInstallOnly(t *testing.T) {
+	addText := app.SyncAllToolProgressText(gosync.ProgressEvent{
 		Tool:    provider.Tool{Name: "fzf", Provider: "brew"},
 		Message: "Adding fzf to config…",
 	}, 1, 2)
@@ -1734,7 +1778,7 @@ func TestSyncAllProgressText_CountsAddAndInstallOnly(t *testing.T) {
 		t.Fatalf("add progress text = %q", addText)
 	}
 
-	installText := syncAllToolProgressText(gosync.ProgressEvent{
+	installText := app.SyncAllToolProgressText(gosync.ProgressEvent{
 		Tool:    provider.Tool{Name: "bat", Provider: "brew"},
 		Message: "Installing bat…",
 	}, 2, 2)
@@ -1841,47 +1885,6 @@ func TestDoSyncWithProgress_Installed(t *testing.T) {
 	}
 }
 
-// ── buildToolGroups ───────────────────────────────────────────────────────────
-
-func TestBuildToolGroups_MapsToGroupName(t *testing.T) {
-	groups := []*config.GroupConfig{
-		{
-			Name: "work",
-			Tools: []config.ToolEntry{
-				{Name: "slack"},
-				{Name: "zoom"},
-			},
-		},
-	}
-	tg := buildToolGroups(groups)
-	if tg[toolKey("slack", "")] != "work" {
-		t.Errorf("slack group = %q, want work", tg[toolKey("slack", "")])
-	}
-	if tg[toolKey("zoom", "")] != "work" {
-		t.Errorf("zoom group = %q, want work", tg[toolKey("zoom", "")])
-	}
-}
-
-func TestBuildGroupNames_SortsNonBaseGroups(t *testing.T) {
-	groups := []*config.GroupConfig{
-		{Name: "work"},
-		{},
-		{Name: "apps"},
-		{Name: "personal"},
-	}
-
-	got := buildGroupNames(groups)
-	want := []string{"apps", "personal", "work"}
-	if len(got) != len(want) {
-		t.Fatalf("buildGroupNames len = %d, want %d (%v)", len(got), len(want), got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("buildGroupNames[%d] = %q, want %q (all: %v)", i, got[i], want[i], got)
-		}
-	}
-}
-
 func TestBuildAllGroupNames_PutsHostBeforeNamedGroups(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "host")
 	got := buildAllGroupNames([]string{"work", "apps", "personal"})
@@ -1918,7 +1921,9 @@ func newDotsModelForCmds(t *testing.T) (Model, string) {
 		t.Fatalf("InitTestMode: %v", err)
 	}
 	t.Cleanup(func() { _ = a.Close() })
-	return modelForCmds(a), repoDir
+	m := modelForCmds(a)
+	m.setSettings(config.Settings{DotsRepo: repoDir})
+	return m, repoDir
 }
 
 // ── doLoadDots ────────────────────────────────────────────────────────────────
@@ -2010,7 +2015,7 @@ func TestDoRefreshDotsHistory_ReadsRecentAppHistory(t *testing.T) {
 	m := modelForCmds(a)
 	m.width = 100
 	m.height = 24
-	m.settings = config.Settings{DotsRepo: repoDir}
+	m.setSettings(config.Settings{DotsRepo: repoDir})
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: app.DotStateSynced}}
 	m.dotsConfirmIdx = -1
@@ -2067,7 +2072,7 @@ func TestDoDotsSyncOnly_Success(t *testing.T) {
 	}
 }
 
-func TestDoSaveSettingsAndDotsSync_SavesRepoBeforeSync(t *testing.T) {
+func TestDoSaveDotsRepoAndSync_SavesRepoBeforeSync(t *testing.T) {
 	if _, err := exec.LookPath("stow"); err != nil {
 		t.Skip("stow not installed")
 	}
@@ -2092,6 +2097,7 @@ func TestDoSaveSettingsAndDotsSync_SavesRepoBeforeSync(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{AutoImport: true},
 		HostSettings: map[string]config.Settings{
 			"dotspickertest": {DotsRepo: oldRepo},
 		},
@@ -2110,7 +2116,7 @@ func TestDoSaveSettingsAndDotsSync_SavesRepoBeforeSync(t *testing.T) {
 	m.settings = config.Settings{DotsRepo: newRepo, DotsDisabled: config.BoolPtr(false)}
 	m.beginDotsOperation("Syncing dots…")
 
-	msg := m.doSaveSettingsAndDotsSync(m.settings)()
+	msg := m.doSaveDotsRepoAndSync(newRepo)()
 	got, ok := msg.(dotsSyncedMsg)
 	if !ok {
 		t.Fatalf("expected dotsSyncedMsg, got %T", msg)
@@ -2149,6 +2155,9 @@ func TestDoSaveSettingsAndDotsSync_SavesRepoBeforeSync(t *testing.T) {
 	}
 	if settings.DotsRepo != newRepo {
 		t.Fatalf("DotsRepo = %q, want selected repo %q", settings.DotsRepo, newRepo)
+	}
+	if !settings.AutoImport {
+		t.Fatal("AutoImport should be preserved from current config")
 	}
 }
 
@@ -2323,6 +2332,58 @@ func TestDoDotsVariantChange_AddsAndRemovesCurrentHostVariant(t *testing.T) {
 	}
 }
 
+func TestHandleDotsVariantKeyMsg_UsesAppActiveHostVariant(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "laptop.local")
+	cfgDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	repoDir := t.TempDir()
+
+	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{DotsRepo: repoDir},
+		Groups: []*config.GroupConfig{{
+			Name:    "laptop",
+			Special: "host",
+			Dots: []config.DotEntry{
+				{
+					Name: "nvim",
+					Path: "~/.config/nvim",
+					Hosts: map[string]config.DotVariant{
+						"laptop": {Package: "nvim@laptop"},
+					},
+				},
+				{Name: "tmux", Path: "~/.tmux.conf"},
+			},
+		}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	a := app.New(cfgPath)
+	a.CacheDir = cfgDir
+	if err := a.InitTestMode(context.Background()); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	m := modelForCmds(a)
+	visible := []dotsVisibleRow{
+		{entry: app.DotStatus{Name: "nvim", State: app.DotStateSynced}},
+		{entry: app.DotStatus{Name: "tmux", State: app.DotStateSynced}},
+	}
+
+	m.dotsCursor = 0
+	cmds := m.handleDotsVariantKeyMsg(visible)
+	if len(cmds) == 0 || m.dotsVariantIdx != 0 || m.dotsVariantMode != dotsVariantRemove {
+		t.Fatalf("active host variant mode = idx %d mode %d cmds %d, want remove prompt at idx 0", m.dotsVariantIdx, m.dotsVariantMode, len(cmds))
+	}
+
+	m.dotsCursor = 1
+	cmds = m.handleDotsVariantKeyMsg(visible)
+	if len(cmds) == 0 || m.dotsVariantIdx != 1 || m.dotsVariantMode != dotsVariantCreate {
+		t.Fatalf("default variant mode = idx %d mode %d cmds %d, want create prompt at idx 1", m.dotsVariantIdx, m.dotsVariantMode, len(cmds))
+	}
+}
+
 func TestHandleToolsLoadedMsg_DotsRepoStartsSyncAll(t *testing.T) {
 	m, repoDir := newDotsModelForCmds(t)
 	cmds := m.handleToolsLoadedMsg(toolsLoadedMsg{settings: config.Settings{DotsRepo: repoDir}, stowInstalled: true})
@@ -2349,6 +2410,208 @@ func TestHandleToolsLoadedMsg_DotsRepoStartsSyncAll(t *testing.T) {
 	}
 	if !sawSync {
 		t.Fatalf("startup should dispatch dots sync-all command, got %d commands without dotsSyncedMsg", len(cmds))
+	}
+}
+
+func TestHandleToolsLoadedMsg_UsesCachedDotsSyncConfiguredForLaunchSync(t *testing.T) {
+	m, repoDir := newDotsModelForCmds(t)
+	if err := saveTUIConfig(t, m.app.ConfigPath, &config.RootConfig{
+		Settings: config.Settings{
+			DotsRepo:     repoDir,
+			DotsDisabled: config.BoolPtr(true),
+		},
+	}); err != nil {
+		t.Fatalf("config.Save disabled dots: %v", err)
+	}
+
+	m.handleToolsLoadedMsg(toolsLoadedMsg{
+		settings:            config.Settings{DotsRepo: repoDir},
+		stowInstalled:       true,
+		dotsConfigured:      true,
+		dotsConfiguredKnown: true,
+		dotsSyncAvail:       app.DotsSyncAvailability{Reason: app.DotsSyncAvailabilityDisabled, RepoPath: repoDir},
+		dotsSyncAvailKnown:  true,
+	})
+	if m.dotsLoading {
+		t.Fatal("launch dots sync should use cached dots availability instead of stale message settings")
+	}
+}
+
+func TestHandleSetupKeyMsg_UsesCachedDotsSyncConfiguredForBootstrapDots(t *testing.T) {
+	m, repoDir := newDotsModelForCmds(t)
+	if err := saveTUIConfig(t, m.app.ConfigPath, &config.RootConfig{
+		Settings: config.Settings{
+			DotsRepo:     repoDir,
+			DotsDisabled: config.BoolPtr(true),
+		},
+	}); err != nil {
+		t.Fatalf("config.Save disabled dots: %v", err)
+	}
+	m.mode = viewSetup
+	m.setupStep = 10
+	m.setupActivationIdx = 2
+	m.settings = config.Settings{DotsRepo: repoDir}
+	cacheDotsAvailability(&m, app.DotsSyncAvailability{Reason: app.DotsSyncAvailabilityDisabled, RepoPath: repoDir})
+	m.stowInstalled = true
+
+	_, quit := m.handleSetupKeyMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if quit {
+		t.Fatal("bootstrap dots activation should not quit")
+	}
+	if !m.statusIsErr || !strings.Contains(m.statusMsg, "dotfile sync is not configured") {
+		t.Fatalf("status = %q err=%v, want cached dots disabled error", m.statusMsg, m.statusIsErr)
+	}
+	if m.loading {
+		t.Fatal("bootstrap dots sync should not start when cached dots availability reports disabled")
+	}
+}
+
+func TestStartDashboardRefresh_UsesCachedDotsSyncConfigured(t *testing.T) {
+	m, repoDir := newDotsModelForCmds(t)
+	if err := saveTUIConfig(t, m.app.ConfigPath, &config.RootConfig{
+		Settings: config.Settings{
+			DotsRepo:     repoDir,
+			DotsDisabled: config.BoolPtr(true),
+		},
+	}); err != nil {
+		t.Fatalf("config.Save disabled dots: %v", err)
+	}
+	m.settings = config.Settings{DotsRepo: repoDir}
+	cacheDotsAvailability(&m, app.DotsSyncAvailability{Reason: app.DotsSyncAvailabilityDisabled, RepoPath: repoDir})
+
+	var cmds []tea.Cmd
+	m.startDashboardRefresh(&cmds)
+	if m.dotsLoading || m.dotsPreparing {
+		t.Fatalf("dashboard refresh should use cached dots availability, dotsLoading=%v dotsPreparing=%v", m.dotsLoading, m.dotsPreparing)
+	}
+}
+
+func TestPrepareDotsSnapshotOnLaunch_UsesCachedDotsConfigured(t *testing.T) {
+	m, _ := newDotsModelForCmds(t)
+	m.settings = config.Settings{}
+
+	var cmds []tea.Cmd
+	m.prepareDotsSnapshotOnLaunch(&cmds)
+	if !m.dotsPreparing || len(cmds) == 0 {
+		t.Fatalf("launch dots snapshot should use cached dots configured state, preparing=%v cmds=%d", m.dotsPreparing, len(cmds))
+	}
+}
+
+func TestPrepareDotsSnapshotOnLaunch_SkipsWhenCachedDotsUnconfigured(t *testing.T) {
+	prov := &okProvider{name: "brew"}
+	a, _ := newCmdApp(t, prov, nil)
+	m := modelForCmds(a)
+	m.settings = config.Settings{DotsRepo: "/stale/dotfiles"}
+
+	var cmds []tea.Cmd
+	m.prepareDotsSnapshotOnLaunch(&cmds)
+	if m.dotsPreparing || len(cmds) != 0 {
+		t.Fatalf("launch dots snapshot should use cached dots configured state, preparing=%v cmds=%d", m.dotsPreparing, len(cmds))
+	}
+}
+
+func TestStartDashboardDotsSync_UsesCachedDotsSyncAvailability(t *testing.T) {
+	m, repoDir := newDotsModelForCmds(t)
+	m.settings = config.Settings{
+		DotsRepo:     repoDir,
+		DotsDisabled: config.BoolPtr(true),
+	}
+
+	var cmds []tea.Cmd
+	m.startDashboardDotsSync(&cmds)
+	if !m.dotsLoading {
+		t.Fatal("dashboard dots sync should use cached availability instead of stale local disabled setting")
+	}
+}
+
+func TestStartDashboardDotsSync_BlocksWhenCachedDotsSyncDisabled(t *testing.T) {
+	m, repoDir := newDotsModelForCmds(t)
+	if err := saveTUIConfig(t, m.app.ConfigPath, &config.RootConfig{
+		Settings: config.Settings{
+			DotsRepo:     repoDir,
+			DotsDisabled: config.BoolPtr(true),
+		},
+	}); err != nil {
+		t.Fatalf("config.Save disabled dots: %v", err)
+	}
+	m.settings = config.Settings{DotsRepo: repoDir}
+	cacheDotsAvailability(&m, app.DotsSyncAvailability{Reason: app.DotsSyncAvailabilityDisabled, RepoPath: repoDir})
+
+	var cmds []tea.Cmd
+	m.startDashboardDotsSync(&cmds)
+	if m.dotsLoading {
+		t.Fatal("dashboard dots sync should not start when cached availability reports disabled")
+	}
+	if !m.statusIsErr || !strings.Contains(m.statusMsg, "disabled") {
+		t.Fatalf("status = %q err=%v, want disabled error", m.statusMsg, m.statusIsErr)
+	}
+}
+
+func TestStartDashboardDotsCommit_UsesCachedDotsSyncAvailability(t *testing.T) {
+	m, repoDir := newDotsModelForCmds(t)
+	m.settings = config.Settings{
+		DotsRepo:     repoDir,
+		DotsDisabled: config.BoolPtr(true),
+	}
+	m.dotsGitStatus = "M file"
+
+	var cmds []tea.Cmd
+	m.startDashboardDotsCommit(&cmds)
+	if !m.dotsLoading {
+		t.Fatal("dashboard dots commit should use cached availability instead of stale local disabled setting")
+	}
+}
+
+func TestStartDashboardDotsCommit_BlocksWhenCachedDotsSyncDisabled(t *testing.T) {
+	m, repoDir := newDotsModelForCmds(t)
+	if err := saveTUIConfig(t, m.app.ConfigPath, &config.RootConfig{
+		Settings: config.Settings{
+			DotsRepo:     repoDir,
+			DotsDisabled: config.BoolPtr(true),
+		},
+	}); err != nil {
+		t.Fatalf("config.Save disabled dots: %v", err)
+	}
+	m.settings = config.Settings{DotsRepo: repoDir}
+	cacheDotsAvailability(&m, app.DotsSyncAvailability{Reason: app.DotsSyncAvailabilityDisabled, RepoPath: repoDir})
+	m.dotsGitStatus = "M file"
+
+	var cmds []tea.Cmd
+	m.startDashboardDotsCommit(&cmds)
+	if m.dotsLoading {
+		t.Fatal("dashboard dots commit should not start when cached availability reports disabled")
+	}
+	if !m.statusIsErr || !strings.Contains(m.statusMsg, "disabled") {
+		t.Fatalf("status = %q err=%v, want disabled error", m.statusMsg, m.statusIsErr)
+	}
+}
+
+func TestHandleToolsLoadedMsg_LaunchDotsSyncDoesNotRecordUnchangedHistory(t *testing.T) {
+	m, repoDir := newDotsModelForCmds(t)
+	cmds := m.handleToolsLoadedMsg(toolsLoadedMsg{settings: config.Settings{DotsRepo: repoDir}, stowInstalled: true})
+	sawSync := false
+	for _, cmd := range cmds {
+		if cmd == nil {
+			continue
+		}
+		msg, ok := cmd().(dotsSyncedMsg)
+		if !ok {
+			continue
+		}
+		sawSync = true
+		if msg.err != nil {
+			t.Fatalf("launch dots sync err = %v", msg.err)
+		}
+	}
+	if !sawSync {
+		t.Fatalf("startup should dispatch dots sync-all command, got %d commands without dotsSyncedMsg", len(cmds))
+	}
+	history, err := m.app.RecentDotsHistory(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("RecentDotsHistory: %v", err)
+	}
+	if len(history) != 0 {
+		t.Fatalf("unchanged launch sync should not record dots history, got %+v", history)
 	}
 }
 
@@ -2396,8 +2659,7 @@ func TestHandleToolsLoadedMsg_DotsRepoPromptsForStowBeforeScans(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	m, repoDir := newDotsModelForCmds(t)
 	cmds := m.handleToolsLoadedMsg(toolsLoadedMsg{
-		settings:            config.Settings{DotsRepo: repoDir},
-		configuredProviders: []string{"brew"},
+		settings: config.Settings{DotsRepo: repoDir},
 	})
 	if !m.stowInstallPrompt {
 		t.Fatal("stowInstallPrompt should open when dots sync is enabled and stow is missing")

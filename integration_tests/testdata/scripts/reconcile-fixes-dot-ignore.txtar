@@ -1,0 +1,33 @@
+# omni reconcile --yes cleans audited dotfile ignore patterns.
+exec omni --yes --config settings.json reconcile --skip-privileged
+stdout 'syncing tools'
+stdout 'upgrading tools'
+stdout 'fixed dotfile ignore patterns: claude'
+stdout 'Reconcile complete .* 0 installed, 0 added to config, 0 upgraded'
+
+exec grep '"!/settings.json"' settings.json
+! exec grep '"!/skills/"' settings.json
+! exec grep '"skills"' settings.json
+! exec grep '"!/hooks/"' settings.json
+! exec grep '"hooks"' settings.json
+
+-- settings.json --
+{
+  "settings": {
+    "disabled_providers": ["system", "node", "python"]
+  },
+  "hosts": { "testhost": [] },
+  "groups": [
+    {
+      "name": "testhost",
+      "special": "host",
+      "dots": [
+        {
+          "name": "claude",
+          "path": "~/.claude",
+          "ignore": ["*", "!/settings.json", "!/skills/", "skills", "!/hooks/", "hooks"]
+        }
+      ]
+    }
+  ]
+}

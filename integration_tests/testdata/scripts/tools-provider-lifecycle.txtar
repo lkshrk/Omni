@@ -48,28 +48,54 @@ case "${1:-}" in
   uninstall)
     rm -f "$state/$2"
     ;;
-  upgrade)
-    : > "$state/$2-upgraded"
-    ;;
-  list)
-    shift
-    if [ "${1:-}" = "--versions" ]; then
-      shift
-      if [ "${1:-}" = "--cask" ]; then
-        shift
-      fi
-      pkg="${1:-}"
-      if [ -f "$state/$pkg" ]; then
-        echo "$pkg 1.0.0"
-        exit 0
-      fi
-    fi
-    exit 1
-    ;;
-  info)
-    echo '{"formulae":[],"casks":[]}'
-    ;;
-esac
+	  upgrade)
+	    shift
+	    if [ "${1:-}" = "--formula" ] || [ "${1:-}" = "--cask" ]; then
+	      shift
+	    fi
+	    : > "$state/$1-upgraded"
+	    ;;
+	  leaves)
+	    if [ "${2:-}" = "--installed-on-request" ]; then
+	      for pkg in "$state"/*; do
+	        [ -f "$pkg" ] || continue
+	        case "$pkg" in
+	          *-upgraded|*.version) continue ;;
+	        esac
+	        basename "$pkg"
+	      done
+	    fi
+	    ;;
+	  list)
+	    shift
+	    if [ "${1:-}" = "--cask" ]; then
+	      exit 0
+	    fi
+	    if [ "${1:-}" = "--versions" ]; then
+	      shift
+	      if [ "${1:-}" = "--cask" ]; then
+	        shift
+	      fi
+	      found=0
+	      for pkg in "$@"; do
+	        if [ -f "$state/$pkg" ]; then
+	          echo "$pkg 1.0.0"
+	          found=1
+	        fi
+	      done
+	      [ "$found" -eq 1 ] && exit 0
+	    fi
+	    exit 1
+	    ;;
+	  info)
+	    echo '{"formulae":[],"casks":[]}'
+	    ;;
+	  update)
+	    ;;
+	  outdated)
+	    echo '{"formulae":[],"casks":[]}'
+	    ;;
+	esac
 
 -- bin/pip3 --
 #!/usr/bin/env sh

@@ -16,6 +16,15 @@ func TestSystemPrivilegePlan_RequiresPrivilege(t *testing.T) {
 	}
 }
 
+func TestSystemPrivilegePlanProvider(t *testing.T) {
+	if got := SystemPrivilegePlanProvider(SystemPrivilegePlan("dnf", PrivilegeActionInstall, Tool{Name: "vim"})); got != "dnf" {
+		t.Fatalf("SystemPrivilegePlanProvider = %q, want dnf", got)
+	}
+	if got := SystemPrivilegePlanProvider(PrivilegePlan{Reason: "package manager needs sudo/root access"}); got != "" {
+		t.Fatalf("SystemPrivilegePlanProvider = %q, want empty for generic reason", got)
+	}
+}
+
 func TestClassifyPrivilegeError(t *testing.T) {
 	for _, tc := range []struct {
 		name string

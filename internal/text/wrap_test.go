@@ -84,3 +84,15 @@ func TestWrapText_SingleLongWord_NoBreak(t *testing.T) {
 		t.Errorf("WrapText (long word) = %v, want [superlongword]", out)
 	}
 }
+
+func TestPluralCount(t *testing.T) {
+	if got := PluralCount(1, "tool", "tools"); got != "1 tool" {
+		t.Fatalf("PluralCount singular = %q, want 1 tool", got)
+	}
+	if got := PluralCount(2, "tool", "tools"); got != "2 tools" {
+		t.Fatalf("PluralCount plural = %q, want 2 tools", got)
+	}
+	if got := PluralCount(0, "tool", "tools"); got != "0 tools" {
+		t.Fatalf("PluralCount zero = %q, want 0 tools", got)
+	}
+}

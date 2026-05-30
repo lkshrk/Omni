@@ -91,6 +91,72 @@ func TestLocalState_UpsertAndGet(t *testing.T) {
 	}
 }
 
+func TestDotsSnapshot_ReplaceAndGet(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	observed := time.Date(2026, 5, 29, 10, 15, 0, 0, time.UTC)
+
+	err := db.ReplaceDotsSnapshot(ctx, []*database.DotStatusCache{
+		{
+			Name:         "nvim",
+			Package:      "nvim",
+			SourcePath:   "/repo/dotfiles/nvim/.config/nvim",
+			TargetPath:   "/home/test/.config/nvim",
+			ConfigPath:   "~/.config/nvim",
+			Health:       "conflict",
+			State:        "conflict",
+			ActionsJSON:  `["use-repo","use-local"]`,
+			Group:        "base",
+			FileCount:    2,
+			CountsJSON:   `{"synced":1,"out_of_sync":1}`,
+			IsDir:        true,
+			ChildrenJSON: `[{"name":"init.lua","rel_path":"init.lua","path":"/home/test/.config/nvim/init.lua","state":"conflict","is_dir":false}]`,
+			Position:     0,
+			ObservedAt:   observed,
+		},
+	}, "M dotfiles/nvim/.config/nvim/init.lua", 1, observed)
+	if err != nil {
+		t.Fatalf("ReplaceDotsSnapshot: %v", err)
+	}
+
+	snapshot, ok, err := db.GetDotsSnapshot(ctx)
+	if err != nil {
+		t.Fatalf("GetDotsSnapshot: %v", err)
+	}
+	if !ok {
+		t.Fatal("GetDotsSnapshot ok = false, want true")
+	}
+	if snapshot.GitStatus != "M dotfiles/nvim/.config/nvim/init.lua" || snapshot.DiscoveredCount != 1 || !snapshot.ObservedAt.Equal(observed) {
+		t.Fatalf("snapshot meta = %+v, want git status, discovered count, and observed time", snapshot)
+	}
+	if len(snapshot.Entries) != 1 {
+		t.Fatalf("snapshot entries = %d, want 1", len(snapshot.Entries))
+	}
+	got := snapshot.Entries[0]
+	if got.Name != "nvim" || got.State != "conflict" || got.ActionsJSON != `["use-repo","use-local"]` || got.ChildrenJSON == "" {
+		t.Fatalf("snapshot entry = %+v, want persisted nvim conflict with JSON fields", got)
+	}
+
+	replacementTime := observed.Add(time.Minute)
+	if err := db.ReplaceDotsSnapshot(ctx, []*database.DotStatusCache{{
+		Name:       "zsh",
+		Package:    "zsh",
+		TargetPath: "/home/test/.zshrc",
+		Health:     "ok",
+		State:      "synced",
+		ObservedAt: replacementTime,
+	}}, "", 0, replacementTime); err != nil {
+		t.Fatalf("ReplaceDotsSnapshot replacement: %v", err)
+	}
+	snapshot, ok, err = db.GetDotsSnapshot(ctx)
+	if err != nil {
+		t.Fatalf("GetDotsSnapshot replacement: %v", err)
+	}
+	if !ok || len(snapshot.Entries) != 1 || snapshot.Entries[0].Name != "zsh" {
+		t.Fatalf("replacement snapshot = ok:%v %+v, want only zsh", ok, snapshot)
+	}
+}
+
 func TestMarkPrivilegeRequired_PersistsAndSurvivesRefreshUpsert(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)

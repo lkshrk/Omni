@@ -113,6 +113,28 @@ func TestSaveNodeManager_EmptyString(t *testing.T) {
 	}
 }
 
+func TestSaveNodeManager_RejectsInvalidManager(t *testing.T) {
+	a, cfgPath := newImportApp(t)
+	if err := a.SaveNodeManager(context.Background(), "bun"); err != nil {
+		t.Fatalf("SaveNodeManager(bun): %v", err)
+	}
+
+	err := a.SaveNodeManager(context.Background(), "uv")
+	if err == nil {
+		t.Fatal("SaveNodeManager(uv) succeeded, want validation error")
+	}
+
+	cfg, loadErr := config.Load(cfgPath)
+	if loadErr != nil {
+		t.Fatalf("config.Load: %v", loadErr)
+	}
+	hostname, _ := os.Hostname()
+	short := shortHostnameForTest(hostname)
+	if got := cfg.HostSettings[short].EcosystemManager("node"); got != "bun" {
+		t.Fatalf("node manager = %q after invalid save, want bun", got)
+	}
+}
+
 // TestSaveNodeManager_ConfigFileUnwritable verifies that SaveNodeManager
 // returns an error when the config file cannot be written.
 func TestSaveNodeManager_ConfigFileUnwritable(t *testing.T) {

@@ -127,3 +127,39 @@ func TestSync_NoTapsConfigured_NoTapCalls(t *testing.T) {
 		t.Errorf("no taps in config, Tap should not be called, got %v", stub.tapsCalled)
 	}
 }
+
+func TestSyncWithStateReturnsUpdatedToolsAndGroups(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost.local")
+	brew := &installTracker{stubProvider: stubProvider{name: "brew", available: true}}
+	a, cfgPath := newImportApp(t, brew)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
+		Groups: []*config.GroupConfig{
+			{Name: "testhost", Special: "host", Tools: groupTools("ripgrep")},
+		},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	result, err := a.SyncWithState(context.Background(), sync.SyncOptions{})
+	if err != nil {
+		t.Fatalf("SyncWithState: %v", err)
+	}
+	if result.Result == nil || len(result.Result.Installed()) != 1 {
+		t.Fatalf("Sync result = %+v, want one installed tool", result.Result)
+	}
+	toolKey := "ripgrep\x00system"
+	if _, ok := result.State.ToolMemberships[toolKey]; !ok {
+		t.Fatalf("ToolMemberships[%q] missing after sync: %v", toolKey, result.State.ToolMemberships)
+	}
+	found := false
+	for _, tool := range result.Tools {
+		if tool.Name == "ripgrep" && tool.Provider == "system" && tool.Installed {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("Tools = %+v, want installed ripgrep/system", result.Tools)
+	}
+}

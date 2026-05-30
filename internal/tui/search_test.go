@@ -88,7 +88,7 @@ func TestDoSearch_ReturnsResults(t *testing.T) {
 	prov := &searchProvider{
 		name: "brew",
 		results: []provider.SearchResult{
-			{Name: "ripgrep", Provider: "brew", Version: "14.1.0", Description: "fast grep"},
+			{Name: "ripgrep", Provider: "brew", Version: "14.1.0", Description: "fast grep", Options: map[string]string{"brew_kind": "formula"}},
 			{Name: "fd", Provider: "brew", Version: "10.0.0", Description: "fast find"},
 		},
 	}
@@ -124,6 +124,9 @@ func TestDoSearch_ReturnsResults(t *testing.T) {
 	}
 	if got.tools[0].InstalledWith != "brew" {
 		t.Errorf("tools[0].InstalledWith = %q, want brew search source for display", got.tools[0].InstalledWith)
+	}
+	if got.tools[0].Options["brew_kind"] != "formula" {
+		t.Errorf("tools[0].Options[brew_kind] = %q, want formula", got.tools[0].Options["brew_kind"])
 	}
 	if got.tools[1].Name != "fd" {
 		t.Errorf("tools[1].Name = %q, want fd", got.tools[1].Name)

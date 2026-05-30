@@ -9,6 +9,7 @@ import (
 
 	"github.com/lkshrk/omni/internal/actions"
 	"github.com/lkshrk/omni/internal/app"
+	"github.com/lkshrk/omni/internal/config"
 )
 
 func TestActionCatalogMatchesDefaultKeyMap(t *testing.T) {
@@ -151,8 +152,7 @@ func TestDurableTUIActionsAreCataloged(t *testing.T) {
 }
 
 func TestPaletteActionCatalogCommandsExist(t *testing.T) {
-	m := baseModel(nil)
-	m.settings.DotsRepo = "/repo"
+	m, _ := newDotsModelForCmds(t)
 	m.consolidateOptions = []app.EcosystemMigration{{Ecosystem: "node", Manager: "bun"}}
 	got := map[string]string{}
 	for _, cmd := range buildPalette(m) {
@@ -179,6 +179,44 @@ func TestPaletteActionCatalogCommandsExist(t *testing.T) {
 	if got[consolidate] != paletteDescription(actions.MustPalette(actions.ToolConsolidate), "bun", "node") {
 		t.Fatalf("missing dynamic consolidate palette entry %q", consolidate)
 	}
+}
+
+func TestBuildPalette_UsesAppBackedDotsConfiguredState(t *testing.T) {
+	t.Run("includes dots commands when app is configured despite stale local settings", func(t *testing.T) {
+		m, _ := newDotsModelForCmds(t)
+		m.settings = config.Settings{}
+
+		got := paletteNames(buildPalette(m))
+
+		for _, id := range []actions.ID{actions.DotsPull, actions.DotsCommit, actions.DotsPush, actions.DotsSync} {
+			name := paletteCommandName(actions.MustPalette(id))
+			if !got[name] {
+				t.Fatalf("missing palette command %q", name)
+			}
+		}
+	})
+
+	t.Run("omits dots commands when app is unconfigured despite stale local settings", func(t *testing.T) {
+		m := modelForCmds(newCmdAppNoConfig(t, &okProvider{name: "brew"}))
+		m.settings = config.Settings{DotsRepo: "/tmp/stale-dotfiles"}
+
+		got := paletteNames(buildPalette(m))
+
+		for _, id := range []actions.ID{actions.DotsPull, actions.DotsCommit, actions.DotsPush, actions.DotsSync} {
+			name := paletteCommandName(actions.MustPalette(id))
+			if got[name] {
+				t.Fatalf("unexpected palette command %q", name)
+			}
+		}
+	})
+}
+
+func paletteNames(cmds []palCmd) map[string]bool {
+	out := make(map[string]bool, len(cmds))
+	for _, cmd := range cmds {
+		out[cmd.name] = true
+	}
+	return out
 }
 
 func toolActionTUIKey(t *testing.T, id actions.ID) string {

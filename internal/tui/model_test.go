@@ -16,6 +16,8 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/dots"
+	"github.com/lkshrk/omni/internal/provider"
 )
 
 // baseModel returns an already-loaded model with the given tools.
@@ -53,6 +55,44 @@ func baseModel(tools []*database.ToolCache) Model {
 	return m
 }
 
+func shortHostname() string {
+	return app.CurrentMachineGroupName()
+}
+
+func TestDotsAvailabilityHelpersUseCachedSnapshot(t *testing.T) {
+	m := baseModel(nil)
+	cacheDotsAvailability(&m, app.DotsSyncAvailability{
+		Configured: true,
+		Reason:     app.DotsSyncAvailabilityReady,
+		RepoPath:   "/repo/current-dotfiles",
+	})
+
+	if !m.dotsConfigured() {
+		t.Fatal("dotsConfigured should use cached app-backed availability without requiring an app")
+	}
+	if got := m.dotsSyncAvailability(); got != m.dotsSyncAvailCached {
+		t.Fatalf("dotsSyncAvailability = %+v, want cached %+v", got, m.dotsSyncAvailCached)
+	}
+}
+
+func cacheDotsAvailability(m *Model, availability app.DotsSyncAvailability) {
+	m.dotsSyncAvailCached = availability
+	m.dotsConfiguredCached = availability.Configured || strings.TrimSpace(availability.RepoPath) != ""
+}
+
+func setDotsRepoForTest(m *Model, repo string) {
+	settings := m.settings
+	settings.DotsRepo = repo
+	m.setSettings(settings)
+}
+
+func setDotsDisabledForTest(m *Model, repo string, disabled bool) {
+	settings := m.settings
+	settings.DotsRepo = repo
+	settings.DotsDisabled = config.BoolPtr(disabled)
+	m.setSettings(settings)
+}
+
 // drive feeds messages sequentially into a model and returns the final state.
 func drive(m Model, msgs ...tea.Msg) Model {
 	var tm tea.Model = m
@@ -78,6 +118,74 @@ func threeTools() []*database.ToolCache {
 		{Name: "git", Provider: "brew"},
 		{Name: "node", Provider: "npm"},
 		{Name: "python", Provider: "pip"},
+	}
+}
+
+type scanPlanProvider struct {
+	name     string
+	concrete string
+}
+
+func (p *scanPlanProvider) Name() string                              { return p.name }
+func (p *scanPlanProvider) Description() string                       { return p.name + " stub" }
+func (p *scanPlanProvider) Available(_ context.Context) (bool, error) { return true, nil }
+func (p *scanPlanProvider) Install(_ context.Context, _ provider.Tool) error {
+	return nil
+}
+func (p *scanPlanProvider) Uninstall(_ context.Context, _ provider.Tool) error {
+	return nil
+}
+func (p *scanPlanProvider) Upgrade(_ context.Context, _ provider.Tool) error {
+	return nil
+}
+func (p *scanPlanProvider) IsInstalled(_ context.Context, _ provider.Tool) (bool, string, error) {
+	return false, "", nil
+}
+func (p *scanPlanProvider) ListInstalled(_ context.Context) ([]provider.InstalledTool, error) {
+	return nil, nil
+}
+func (p *scanPlanProvider) ResolvedName(_ context.Context) (string, error) {
+	return p.concrete, nil
+}
+
+func newScanPlanTestApp(t *testing.T, providers ...provider.Provider) *app.App {
+	t.Helper()
+	dir := t.TempDir()
+	a := app.New(filepath.Join(dir, "settings.json"))
+	a.CacheDir = dir
+	providerName := "system"
+	if len(providers) > 0 {
+		providerName = providers[0].Name()
+	}
+	saveScanPlanTestConfig(t, a, config.Settings{}, providerName)
+	if err := a.InitTestMode(context.Background(), providers...); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	return a
+}
+
+func saveScanPlanTestConfig(t *testing.T, a *app.App, settings config.Settings, providerName string) {
+	t.Helper()
+	host := shortHostname()
+	configProvider := providerName
+	installWith := ""
+	if ecosystem := tuiFixtureEcosystem(providerName); ecosystem != "" {
+		configProvider = ecosystem
+		installWith = providerName
+	}
+	if err := saveTUIConfig(t, a.ConfigPath, &config.RootConfig{
+		Settings: settings,
+		Tools: map[string]config.ToolSpec{
+			"git": {Provider: configProvider, InstallWith: installWith},
+		},
+		Hosts: map[string][]string{host: {"dev"}},
+		Groups: []*config.GroupConfig{
+			{Name: host, Special: "host"},
+			{Name: "dev", Tools: []config.ToolEntry{{Name: "git"}}},
+		},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
 	}
 }
 
@@ -383,6 +491,26 @@ func TestModel_EnterKey(t *testing.T) {
 }
 
 func TestModel_ToolsLoadedMsg(t *testing.T) {
+	newLoadingDotsModel := func(t *testing.T) (Model, string) {
+		t.Helper()
+		m, repoDir := newDotsModelForCmds(t)
+		m.loading = true
+		m.mode = viewStatus
+		return m, repoDir
+	}
+	newLoadingDotsScanModel := func(t *testing.T) (Model, string) {
+		t.Helper()
+		repoDir := t.TempDir()
+		t.Setenv("HOME", t.TempDir())
+		a := newScanPlanTestApp(t, &scanPlanProvider{name: "brew"})
+		saveScanPlanTestConfig(t, a, config.Settings{DotsRepo: repoDir}, "brew")
+		m := modelForCmds(a)
+		m.setSettings(config.Settings{DotsRepo: repoDir})
+		m.loading = true
+		m.mode = viewStatus
+		return m, repoDir
+	}
+
 	t.Run("success clears loading and populates tools", func(t *testing.T) {
 		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true}
 		got := drive(m, toolsLoadedMsg{tools: threeTools()})
@@ -407,8 +535,8 @@ func TestModel_ToolsLoadedMsg(t *testing.T) {
 	})
 
 	t.Run("success with dots repo starts background dots refresh", func(t *testing.T) {
-		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true}
-		got := drive(m, toolsLoadedMsg{tools: threeTools(), settings: config.Settings{DotsRepo: "/tmp/dots"}})
+		m, repoDir := newLoadingDotsModel(t)
+		got := drive(m, toolsLoadedMsg{tools: threeTools(), settings: config.Settings{DotsRepo: repoDir}})
 		if got.mode != viewStatus {
 			t.Errorf("mode = %v, want viewStatus after successful load", got.mode)
 		}
@@ -417,11 +545,34 @@ func TestModel_ToolsLoadedMsg(t *testing.T) {
 		}
 	})
 
-	t.Run("launch batch status follows latest bulk activity", func(t *testing.T) {
-		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true, width: 100, setupReloading: true}
+	t.Run("success applies cached dots state before background refresh", func(t *testing.T) {
+		m, repoDir := newLoadingDotsModel(t)
 		got := drive(m, toolsLoadedMsg{
-			settings:            config.Settings{DotsRepo: "/tmp/dots"},
-			configuredProviders: []string{"brew"},
+			tools:    threeTools(),
+			settings: config.Settings{DotsRepo: repoDir},
+			dotsState: &app.DotsState{
+				Loaded:    true,
+				GitStatus: "M dotfiles/nvim",
+				Entries:   []app.DotStatus{{Name: "nvim", State: app.DotStateSynced, Health: app.HealthOK}},
+			},
+		})
+		if len(got.dotsEntries) != 1 || got.dotsEntries[0].Name != "nvim" {
+			t.Fatalf("dotsEntries = %+v, want cached nvim", got.dotsEntries)
+		}
+		if got.dotsGitStatus != "M dotfiles/nvim" {
+			t.Fatalf("dotsGitStatus = %q, want cached git status", got.dotsGitStatus)
+		}
+		if !got.dotsLoading {
+			t.Fatal("background dots refresh should still start after applying cached state")
+		}
+	})
+
+	t.Run("launch batch status follows latest bulk activity", func(t *testing.T) {
+		m, repoDir := newLoadingDotsScanModel(t)
+		m.width = 100
+		m.setupReloading = true
+		got := drive(m, toolsLoadedMsg{
+			settings: config.Settings{DotsRepo: repoDir},
 		})
 		if got.statusMsg != "Syncing dots…" {
 			t.Fatalf("statusMsg = %q, want initial dots operation status", got.statusMsg)
@@ -456,10 +607,10 @@ func TestModel_ToolsLoadedMsg(t *testing.T) {
 	})
 
 	t.Run("launch batch reports dots and provider errors after all startup work finishes", func(t *testing.T) {
-		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true, setupReloading: true}
+		m, repoDir := newLoadingDotsScanModel(t)
+		m.setupReloading = true
 		got := drive(m, toolsLoadedMsg{
-			settings:            config.Settings{DotsRepo: "/tmp/dots"},
-			configuredProviders: []string{"brew"},
+			settings: config.Settings{DotsRepo: repoDir},
 		})
 		if !got.launchBatchActive {
 			t.Fatal("launchBatchActive should be true while startup dots sync and provider scans are running")
@@ -492,8 +643,9 @@ func TestModel_ToolsLoadedMsg(t *testing.T) {
 	})
 
 	t.Run("successful launch batch clears stale dots activity status", func(t *testing.T) {
-		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true, setupReloading: true}
-		got := drive(m, toolsLoadedMsg{settings: config.Settings{DotsRepo: "/tmp/dots"}})
+		m, repoDir := newLoadingDotsModel(t)
+		m.setupReloading = true
+		got := drive(m, toolsLoadedMsg{settings: config.Settings{DotsRepo: repoDir}})
 		if !got.launchBatchActive {
 			t.Fatal("launchBatchActive should be true while startup dots sync is running")
 		}
@@ -512,8 +664,7 @@ func TestModel_ToolsLoadedMsg(t *testing.T) {
 	t.Run("normal launch does not activate launch batch", func(t *testing.T) {
 		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true}
 		got := drive(m, toolsLoadedMsg{
-			settings:            config.Settings{DotsRepo: "/tmp/dots"},
-			configuredProviders: []string{"brew"},
+			settings: config.Settings{DotsRepo: "/tmp/dots"},
 		})
 		if got.launchBatchActive {
 			t.Fatal("launchBatchActive should be false on normal launch (non-bootstrap)")
@@ -521,8 +672,10 @@ func TestModel_ToolsLoadedMsg(t *testing.T) {
 	})
 
 	t.Run("success with dots reload target preserves dots tab", func(t *testing.T) {
-		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true, mode: viewDots, setupBackgroundMode: viewDots}
-		got := drive(m, toolsLoadedMsg{tools: threeTools(), settings: config.Settings{DotsRepo: "/tmp/dots"}})
+		m, repoDir := newLoadingDotsModel(t)
+		m.mode = viewDots
+		m.setupBackgroundMode = viewDots
+		got := drive(m, toolsLoadedMsg{tools: threeTools(), settings: config.Settings{DotsRepo: repoDir}})
 		if got.mode != viewDots {
 			t.Errorf("mode = %v, want viewDots after dots-targeted reload", got.mode)
 		}
@@ -558,9 +711,8 @@ func TestModel_ToolsLoadedMsg(t *testing.T) {
 		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true}
 		m.allTools = []*database.ToolCache{{Name: "snapshot", Provider: "brew"}}
 		cmds := m.handleToolsLoadedMsg(toolsLoadedMsg{
-			tools:               threeTools(),
-			noHost:              true,
-			configuredProviders: []string{"brew"},
+			tools:  threeTools(),
+			noHost: true,
 		})
 		if m.mode != viewSetup {
 			t.Errorf("mode = %v, want viewSetup", m.mode)
@@ -851,8 +1003,10 @@ func TestModel_KeysIgnoredWhileLoading(t *testing.T) {
 
 func TestStartCurrentProviderScans_DedupesConcreteCoveredByEcosystem(t *testing.T) {
 	m := baseModel([]*database.ToolCache{{Name: "git", Provider: "brew"}})
-	m.configuredProviders = []string{"system", "brew"}
-	m.effectiveSystemManager = "brew"
+	m.app = newScanPlanTestApp(t,
+		&scanPlanProvider{name: "system", concrete: "brew"},
+		&scanPlanProvider{name: "brew"},
+	)
 
 	cmds := m.startCurrentProviderScans()
 	if len(cmds) != 3 {
@@ -861,6 +1015,9 @@ func TestStartCurrentProviderScans_DedupesConcreteCoveredByEcosystem(t *testing.
 	if len(m.scanningProviders) != 1 || !m.scanningProviders["system"] {
 		t.Fatalf("scanningProviders = %v, want only logical system scan", m.scanningProviders)
 	}
+	if m.progressText != "Refreshing tools… 0/1: system/brew" {
+		t.Fatalf("progressText = %q, want concrete ecosystem scan label", m.progressText)
+	}
 }
 
 func TestRefreshInstalledProviders_DedupesConcreteCoveredByEcosystem(t *testing.T) {
@@ -868,8 +1025,10 @@ func TestRefreshInstalledProviders_DedupesConcreteCoveredByEcosystem(t *testing.
 		{Name: "fd", Provider: "system", InstalledWith: "brew"},
 		{Name: "git", Provider: "brew"},
 	})
-	m.configuredProviders = []string{"system", "brew"}
-	m.effectiveSystemManager = "brew"
+	m.app = newScanPlanTestApp(t,
+		&scanPlanProvider{name: "system", concrete: "brew"},
+		&scanPlanProvider{name: "brew"},
+	)
 
 	cmds := m.refreshInstalledProviders()
 	if len(cmds) != 3 {
@@ -877,6 +1036,9 @@ func TestRefreshInstalledProviders_DedupesConcreteCoveredByEcosystem(t *testing.
 	}
 	if len(m.scanningProviders) != 1 || !m.scanningProviders["system"] {
 		t.Fatalf("scanningProviders = %v, want only logical system scan", m.scanningProviders)
+	}
+	if m.progressText != "Refreshing tools… 0/1: system/brew" {
+		t.Fatalf("progressText = %q, want concrete ecosystem scan label", m.progressText)
 	}
 }
 
@@ -1071,21 +1233,6 @@ func TestCountSection(t *testing.T) {
 	}
 	if got := m.countSection(sectionOutOfSync); got != 2 {
 		t.Errorf("countSection(outOfSync/missing) = %d, want 2", got)
-	}
-}
-
-func TestCycleNodeManager(t *testing.T) {
-	if got := cycleNodeManager(""); got != "bun" {
-		t.Errorf("cycleNodeManager(\"\") = %q, want bun", got)
-	}
-	if got := cycleNodeManager("bun"); got != "pnpm" {
-		t.Errorf("cycleNodeManager(\"bun\") = %q, want pnpm", got)
-	}
-	if got := cycleNodeManager("pnpm"); got != "npm" {
-		t.Errorf("cycleNodeManager(\"pnpm\") = %q, want npm", got)
-	}
-	if got := cycleNodeManager("npm"); got != "" {
-		t.Errorf("cycleNodeManager(\"npm\") = %q, want \"\"", got)
 	}
 }
 
@@ -1286,6 +1433,10 @@ func TestModel_SettingsVisibleRowsMutateExpectedFields(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.row == settingsRowDotsSync {
+				tc.assert(t, drive(settingsDotsSyncReadyModel(t), tc.action))
+				return
+			}
 			base := baseModel(nil)
 			base.settings.DotsRepo = "~/dotfiles"
 			msgs := append(toSettingsRow(tc.row), tc.action)
@@ -1296,9 +1447,8 @@ func TestModel_SettingsVisibleRowsMutateExpectedFields(t *testing.T) {
 
 func TestModel_SettingsReminderToggleStartsServiceCommand(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "remindertoggle")
-	a, _ := newCmdApp(t, &okProvider{name: "brew"}, nil)
-	m := modelForCmds(a)
-	m.settings.DotsRepo = "/tmp/dotfiles"
+	m, repoDir := newDotsModelForCmds(t)
+	m.settings.DotsRepo = repoDir
 	m.settingsCursor = settingsRowDotsReminder
 	m.dotsReminderService = &app.DotsReminderService{Installed: false}
 
@@ -1319,9 +1469,8 @@ func TestModel_SettingsReminderToggleStartsServiceCommand(t *testing.T) {
 func TestModel_SettingsWatchTogglePromptsForStow(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "watchtoggle")
 	t.Setenv("PATH", t.TempDir())
-	a, _ := newCmdApp(t, &okProvider{name: "brew"}, nil)
-	m := modelForCmds(a)
-	m.settings.DotsRepo = "/tmp/dotfiles"
+	m, repoDir := newDotsModelForCmds(t)
+	m.settings.DotsRepo = repoDir
 	m.settingsCursor = settingsRowDotsWatch
 	m.dotsWatchService = &app.DotsWatchService{Installed: false}
 
@@ -1358,6 +1507,50 @@ func TestModel_SettingsServiceToggleRequiresDotsRepo(t *testing.T) {
 	if len(cmds) != 1 {
 		t.Fatalf("service toggle without repo commands = %d, want status clear timer", len(cmds))
 	}
+}
+
+func TestModel_SettingsServiceTogglesUseAppDotsConfig(t *testing.T) {
+	t.Run("reminder starts when app is configured despite stale local settings", func(t *testing.T) {
+		m, _ := newDotsModelForCmds(t)
+		m.settings = config.Settings{}
+		m.settingsCursor = settingsRowDotsReminder
+		m.dotsReminderService = &app.DotsReminderService{Installed: false}
+
+		var cmds []tea.Cmd
+		m.handleSettingsRowAction(&cmds)
+
+		if !m.loading {
+			t.Fatal("reminder toggle should use app dots config and start loading")
+		}
+		if !strings.Contains(m.statusMsg, "Enabling dotfile reminders") {
+			t.Fatalf("statusMsg = %q, want enabling reminder status", m.statusMsg)
+		}
+		if len(cmds) != 2 {
+			t.Fatalf("reminder toggle commands = %d, want spinner + service command", len(cmds))
+		}
+	})
+
+	t.Run("watch is blocked when app is unconfigured despite stale local repo", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir())
+		a := newCmdAppNoConfig(t, &okProvider{name: "brew"})
+		m := modelForCmds(a)
+		m.settings = config.Settings{DotsRepo: "/tmp/stale-dotfiles"}
+		m.settingsCursor = settingsRowDotsWatch
+		m.dotsWatchService = &app.DotsWatchService{Installed: false}
+
+		var cmds []tea.Cmd
+		m.handleSettingsRowAction(&cmds)
+
+		if m.loading || m.stowInstallPrompt {
+			t.Fatalf("watch toggle should not start from stale local repo, loading=%v stowPrompt=%v", m.loading, m.stowInstallPrompt)
+		}
+		if m.statusMsg != "Dots not configured." {
+			t.Fatalf("statusMsg = %q, want dots not configured", m.statusMsg)
+		}
+		if len(cmds) != 1 {
+			t.Fatalf("watch toggle commands = %d, want status clear timer", len(cmds))
+		}
+	})
 }
 
 func TestModel_SettingsReminderIntervalPickerSetsPendingValue(t *testing.T) {
@@ -1590,6 +1783,30 @@ func TestModel_DotsRepoEdit(t *testing.T) {
 		}
 	})
 
+	t.Run("file picker starts from app repo when local settings are stale", func(t *testing.T) {
+		appRepo := filepath.Join(t.TempDir(), "current-dotfiles")
+		staleRepo := filepath.Join(t.TempDir(), "stale-dotfiles")
+		mustMkdir(t, appRepo)
+		mustMkdir(t, staleRepo)
+
+		m := baseModel(nil)
+		m.mode = viewSettings
+		m.settingsCursor = settingsRowDotsRepo
+		m.settings = config.Settings{DotsRepo: staleRepo}
+		cacheDotsAvailability(&m, app.DotsSyncAvailability{
+			Configured: true,
+			Reason:     app.DotsSyncAvailabilityReady,
+			RepoPath:   appRepo,
+		})
+
+		var cmds []tea.Cmd
+		m.handleSettingsEditAction(&cmds)
+
+		if got := m.dotsFilePicker.CurrentDirectory(); got != appRepo {
+			t.Fatalf("file picker current directory = %q, want app repo %q", got, appRepo)
+		}
+	})
+
 	t.Run("space on row 7 is no-op", func(t *testing.T) {
 		msgs := append(toRow4(), pressRune(' '))
 		m := drive(baseModel(nil), msgs...)
@@ -1683,7 +1900,7 @@ func TestModel_ProviderSubtabs(t *testing.T) {
 		m.providerTabIdx = sysIdx
 		m.applyFilter()
 		for _, t2 := range m.visibleTools {
-			if providerEcosystem(t2.Provider) != "system" {
+			if app.ToolProviderEcosystem(t2.Provider) != "system" {
 				t.Errorf("visibleTools contains non-system tool %q (provider %q)", t2.Name, t2.Provider)
 			}
 		}
@@ -1705,7 +1922,7 @@ func TestModel_ProviderSubtabs(t *testing.T) {
 		}
 		m.applyFilter()
 		for _, t2 := range m.visibleTools {
-			if providerEcosystem(t2.Provider) != "python" {
+			if app.ToolProviderEcosystem(t2.Provider) != "python" {
 				t.Errorf("search result %q (provider %q) leaked through python filter", t2.Name, t2.Provider)
 			}
 		}
@@ -1840,7 +2057,7 @@ func TestModel_DotsRootRowsOpenGroupMembershipPicker(t *testing.T) {
 	cfgPath := filepath.Join(dir, "settings.json")
 	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
 		Groups: []*config.GroupConfig{
-			{Name: shortHostname(), Special: "host", Dots: []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}}},
+			{Name: shortHostname(), Special: "host"},
 			{Name: "work"},
 		},
 	}); err != nil {
@@ -1859,6 +2076,7 @@ func TestModel_DotsRootRowsOpenGroupMembershipPicker(t *testing.T) {
 	m.settings.DotsRepo = "/repo"
 	m.dotsLoaded = true
 	m.groupNames = []string{shortHostname(), "work"}
+	m.dotMemberships = map[string][]string{"nvim": {shortHostname()}}
 	m.dotsEntries = []app.DotStatus{{
 		Name:    "nvim",
 		State:   app.DotStateSynced,
@@ -2359,9 +2577,9 @@ func TestModel_SetupStep1_YSetsLoading(t *testing.T) {
 		setupStep:     1,
 		upgradingKeys: make(map[string]bool),
 	}
-	m.setupProviders = []setupProviderRow{
-		{name: "system", label: "system", enabled: true},
-		{name: "node", label: "node", enabled: true},
+	m.setupProviders = []app.SetupProviderOption{
+		{Name: "system", Label: "system", Enabled: true},
+		{Name: "node", Label: "node", Enabled: true},
 	}
 	got := drive(m, pressEnter())
 	if !got.loading {
@@ -2379,96 +2597,17 @@ func TestModel_SetupStep1_SpaceTogglesProvider(t *testing.T) {
 		mode:          viewSetup,
 		setupStep:     1,
 		upgradingKeys: make(map[string]bool),
-		setupProviders: []setupProviderRow{
-			{name: "system", label: "system", enabled: true},
-			{name: "node", label: "node", enabled: true},
+		setupProviders: []app.SetupProviderOption{
+			{Name: "system", Label: "system", Enabled: true},
+			{Name: "node", Label: "node", Enabled: true},
 		},
 	}
 	got := drive(m, pressRune(' '))
-	if got.setupProviders[0].enabled {
+	if got.setupProviders[0].Enabled {
 		t.Error("expected first provider toggled off after space")
 	}
-	if !got.setupProviders[1].enabled {
+	if !got.setupProviders[1].Enabled {
 		t.Error("second provider should remain enabled")
-	}
-}
-
-// ─── buildSetupProvidersFromManagers ─────────────────────────────────────────
-
-func TestBuildSetupProviders_MultipleBins(t *testing.T) {
-	rows := buildSetupProvidersFromManagers(
-		map[string]string{"system": "brew"},
-		[]string{"uv"},
-		[]string{"pnpm", "npm"},
-		config.Settings{},
-	)
-	if len(rows) != 3 {
-		t.Fatalf("want 3 rows, got %d", len(rows))
-	}
-	if rows[0].label != "system(brew)" {
-		t.Errorf("system label = %q, want system(brew)", rows[0].label)
-	}
-	if rows[1].label != "node(pnpm • npm)" {
-		t.Errorf("node label = %q, want node(pnpm • npm)", rows[1].label)
-	}
-	if rows[2].label != "python(uv)" {
-		t.Errorf("python label = %q, want python(uv)", rows[2].label)
-	}
-}
-
-func TestBuildSetupProviders_SingleBin(t *testing.T) {
-	rows := buildSetupProvidersFromManagers(map[string]string{}, []string{"pip3"}, []string{"bun"}, config.Settings{})
-	if rows[1].label != "node(bun)" {
-		t.Errorf("node label = %q, want node(bun)", rows[1].label)
-	}
-	if rows[2].label != "python(pip3)" {
-		t.Errorf("python label = %q, want python(pip3)", rows[2].label)
-	}
-}
-
-func TestBuildSetupProviders_NoBins(t *testing.T) {
-	rows := buildSetupProvidersFromManagers(map[string]string{}, nil, nil, config.Settings{})
-	for _, row := range rows {
-		if row.label != row.name {
-			t.Errorf("%s: label %q should equal name when no bins detected", row.name, row.label)
-		}
-		if !row.enabled {
-			t.Errorf("%s: expected enabled=true", row.name)
-		}
-	}
-}
-
-func TestBuildSetupProviders_AllEnabled(t *testing.T) {
-	rows := buildSetupProvidersFromManagers(map[string]string{"system": "apt"}, []string{"uv"}, []string{"npm"}, config.Settings{})
-	for _, row := range rows {
-		if !row.enabled {
-			t.Errorf("%s: expected enabled=true by default", row.name)
-		}
-	}
-}
-
-func TestBuildSetupProviders_RespectsDisabledProviders(t *testing.T) {
-	settings := config.Settings{DisabledProviders: []string{"node", "python"}}
-	rows := buildSetupProvidersFromManagers(
-		map[string]string{"system": "brew"},
-		[]string{"uv"},
-		[]string{"npm"},
-		settings,
-	)
-	if len(rows) != 3 {
-		t.Fatalf("want 3 rows, got %d", len(rows))
-	}
-	// system is not in DisabledProviders — should be enabled.
-	if !rows[0].enabled {
-		t.Errorf("system: expected enabled=true (not in DisabledProviders)")
-	}
-	// node is in DisabledProviders — should be disabled.
-	if rows[1].enabled {
-		t.Errorf("node: expected enabled=false (in DisabledProviders)")
-	}
-	// python is in DisabledProviders — should be disabled.
-	if rows[2].enabled {
-		t.Errorf("python: expected enabled=false (in DisabledProviders)")
 	}
 }
 
@@ -2623,6 +2762,42 @@ func TestModel_ProgressMsg_AdvancesRefreshToolProgress(t *testing.T) {
 	}
 }
 
+func TestModel_ProgressMsg_UsesConcreteEcosystemScanLabel(t *testing.T) {
+	m := baseModel(nil)
+	m.progressGen = 4
+	m.scanningProviders = map[string]bool{"node": true}
+	m.providerScanToolCounts = map[string]int{"node": 2}
+	m.providerScanToolDone = map[string]int{}
+	m.providerScanLabels = map[string]string{"node": "node/bun"}
+	m.refreshToolTotal = 2
+
+	got := drive(m, progressMsg{gen: 4, refreshProvider: "node", refreshToolName: "typescript"})
+
+	if got.progressText != "Refreshing tools… 1/2: node/bun/typescript" {
+		t.Fatalf("progressText = %q, want concrete ecosystem tool progress", got.progressText)
+	}
+}
+
+func TestModel_ProgressMsg_UsesProgressEventProviderLabel(t *testing.T) {
+	m := baseModel(nil)
+	m.progressGen = 4
+	m.scanningProviders = map[string]bool{"node": true}
+	m.providerScanToolCounts = map[string]int{"node": 2}
+	m.providerScanToolDone = map[string]int{}
+	m.refreshToolTotal = 2
+
+	got := drive(m, progressMsg{
+		gen:                  4,
+		refreshProvider:      "node",
+		refreshProviderLabel: "node/bun",
+		refreshToolName:      "typescript",
+	})
+
+	if got.progressText != "Refreshing tools… 1/2: node/bun/typescript" {
+		t.Fatalf("progressText = %q, want event provider label", got.progressText)
+	}
+}
+
 func TestModel_ProgressMsg_RefreshesFinishedToolBeforeBatchDone(t *testing.T) {
 	m := baseModel([]*database.ToolCache{
 		{Name: "ripgrep", Provider: "system", Installed: false, Tracked: true},
@@ -2765,18 +2940,6 @@ func TestModel_ProgressDoneMsg_Success(t *testing.T) {
 	}
 }
 
-func TestCloneSettingsSnapshot_PreservesExplicitEmptyDisabledProviders(t *testing.T) {
-	in := config.Settings{DisabledProviders: []string{}}
-	got := cloneSettingsSnapshot(in)
-	if got.DisabledProviders == nil {
-		t.Fatal("DisabledProviders = nil, want explicit empty slice")
-	}
-	got.DisabledProviders = append(got.DisabledProviders, "node")
-	if len(in.DisabledProviders) != 0 {
-		t.Fatalf("snapshot aliases input DisabledProviders, input now %v", in.DisabledProviders)
-	}
-}
-
 func TestModel_ProgressDoneMsg_IgnoresStaleGeneration(t *testing.T) {
 	m := baseModel(nil)
 	m.progressGen = 2
@@ -2881,7 +3044,7 @@ func TestProviderScanFailureStatus_DeadlineIsConcise(t *testing.T) {
 		errors.New("upserting installed status for system/fd: context deadline exceeded"),
 		context.DeadlineExceeded,
 	)
-	got := providerScanFailureStatus("system", err)
+	got := app.ProviderScanFailureStatus("system", err)
 	if got != "scan timed out for system" {
 		t.Fatalf("status = %q, want concise timeout", got)
 	}
@@ -2943,22 +3106,6 @@ func TestModel_GroupChangedMsg_Error(t *testing.T) {
 	got := drive(m, groupChangedMsg{err: errors.New("file not found")})
 	if !stringContains(got.statusMsg, "file not found") {
 		t.Errorf("statusMsg = %q, want error text", got.statusMsg)
-	}
-}
-
-// ─── cyclePythonManager ───────────────────────────────────────────────────────
-
-func TestCyclePythonManager(t *testing.T) {
-	tests := []struct{ in, want string }{
-		{"", "uv"},
-		{"uv", "pip3"},
-		{"pip3", ""},
-		{"other", ""},
-	}
-	for _, tt := range tests {
-		if got := cyclePythonManager(tt.in); got != tt.want {
-			t.Errorf("cyclePythonManager(%q) = %q, want %q", tt.in, got, tt.want)
-		}
 	}
 }
 
@@ -3027,11 +3174,11 @@ func TestModel_PaletteDotsCommandsStartDotsOperations(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			m := baseModel(nil)
+			m, _ := newDotsModelForCmds(t)
 			m.mode = viewCommand
+			m.commandInput = textinput.New()
 			m.commandInput.Focus()
 			m.commandCursor = -1
-			m.settings.DotsRepo = "/repo/dotfiles"
 			m.commandSuggestions = []palCmd{mustPaletteCommand(t, m, tc.name)}
 
 			got := drive(m, pressEnter())
@@ -3068,7 +3215,7 @@ func dotsModel() Model {
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.dotsLoaded = true
-	m.settings.DotsRepo = "/repo/dotfiles"
+	setDotsRepoForTest(&m, "/repo/dotfiles")
 	m.dotsEntries = []app.DotStatus{
 		{Name: "gitconfig", SourcePath: "/repo/gitconfig", TargetPath: "~/.gitconfig", Health: app.HealthConflict, State: app.DotStateConflict, Actions: []app.DotAction{app.DotActionUseRepo, app.DotActionUseLocal, app.DotActionRemove, app.DotActionIgnore}},
 		{Name: "zshrc", SourcePath: "/repo/zshrc", TargetPath: "~/.zshrc", Health: app.HealthMissing, State: app.DotStateMissing, Actions: []app.DotAction{app.DotActionSync, app.DotActionRemove, app.DotActionIgnore}},
@@ -3167,7 +3314,7 @@ func TestModel_DotsProgressMsgUpdatesRowStateAndSnapshot(t *testing.T) {
 
 	got := drive(m, dotsProgressMsg{
 		gen:  gen,
-		text: dotsSyncProgressText("nvim", 1, 2, false, nil),
+		text: app.DotsSyncActivityProgressText(dots.SyncProgressEvent{Entry: "nvim", Index: 1, Total: 2}),
 		name: "nvim",
 	})
 	if got.dotsActiveName != "nvim" {
@@ -3182,7 +3329,7 @@ func TestModel_DotsProgressMsgUpdatesRowStateAndSnapshot(t *testing.T) {
 
 	got = drive(got, dotsProgressMsg{
 		gen:     gen,
-		text:    dotsSyncProgressText("nvim", 1, 2, true, nil),
+		text:    app.DotsSyncActivityProgressText(dots.SyncProgressEvent{Entry: "nvim", Index: 1, Total: 2, Done: true}),
 		name:    "nvim",
 		done:    true,
 		entries: []app.DotStatus{{Name: "nvim", State: app.DotStateSynced}},
@@ -3833,23 +3980,15 @@ func TestDangerZone_SettingsCursor(t *testing.T) {
 	})
 
 	t.Run("sync row with DotsRepo asks keep-local choice", func(t *testing.T) {
-		base := baseModel(nil)
-		base.settings.DotsRepo = "~/dotfiles"
-		msgs := append(toSettings(), nj(settingsRowDotsSync)...)
-		msgs = append(msgs, pressEnter())
-		m := drive(base, msgs...)
+		m := openSettingsDotsSyncChoice(t)
 		if m.dangerConfirmRow != settingsRowDotsSync {
 			t.Errorf("dangerConfirmRow = %d, want %d", m.dangerConfirmRow, settingsRowDotsSync)
 		}
 	})
 
 	t.Run("keep-local choice ignores arrow keys", func(t *testing.T) {
-		base := baseModel(nil)
-		base.settings.DotsRepo = "~/dotfiles"
-		msgs := append(toSettings(), nj(settingsRowDotsSync)...)
 		right := tea.KeyPressMsg{Code: tea.KeyRight}
-		msgs = append(msgs, pressEnter(), right)
-		m := drive(base, msgs...)
+		m := drive(openSettingsDotsSyncChoice(t), right)
 		if m.loading {
 			t.Error("right arrow should not confirm dots disable")
 		}
@@ -3859,11 +3998,7 @@ func TestDangerZone_SettingsCursor(t *testing.T) {
 	})
 
 	t.Run("keep-local choice enter does not confirm", func(t *testing.T) {
-		base := baseModel(nil)
-		base.settings.DotsRepo = "~/dotfiles"
-		msgs := append(toSettings(), nj(settingsRowDotsSync)...)
-		msgs = append(msgs, pressEnter(), pressEnter())
-		m := drive(base, msgs...)
+		m := drive(openSettingsDotsSyncChoice(t), pressEnter())
 		if m.loading {
 			t.Error("enter should not confirm dots disable")
 		}
@@ -3937,6 +4072,18 @@ func TestActivityLabel_Branches(t *testing.T) {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestActivityLabel_ScanningUsesConcreteEcosystemLabel(t *testing.T) {
+	m := Model{
+		scanningProviders:  map[string]bool{"system": true},
+		providerScanLabels: map[string]string{"system": "system/brew"},
+		refreshToolTotal:   1,
+	}
+
+	if got := activityLabel(m); got != "Refreshing tools… 0/1: system/brew" {
+		t.Fatalf("activityLabel = %q, want concrete ecosystem scan label", got)
 	}
 }
 
@@ -4014,36 +4161,6 @@ func TestWindowTitle_Modes(t *testing.T) {
 			t.Errorf("mode %d: got %q, want %q", tc.mode, got, tc.want)
 		}
 	}
-}
-
-// ─── shortHostname ───────────────────────────────────────────────────────────
-
-func TestShortHostname_OmniHostnameEnvTrimsDot(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "myhost.local.example.com")
-	if got := shortHostname(); got != "myhost" {
-		t.Errorf("got %q, want myhost", got)
-	}
-}
-
-func TestShortHostname_OmniHostnameEnvTrimsSpace(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "  myhost.local  ")
-	if got := shortHostname(); got != "myhost" {
-		t.Errorf("got %q, want myhost", got)
-	}
-}
-
-func TestShortHostname_OmniHostnameNoDot(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "mymachine")
-	if got := shortHostname(); got != "mymachine" {
-		t.Errorf("got %q, want mymachine", got)
-	}
-}
-
-func TestShortHostname_OmniHostnameEmpty_FallsBackToOsHostname(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "")
-	// Can't assert exact value (machine-dependent), just verify no panic and type.
-	got := shortHostname()
-	_ = got
 }
 
 func TestDefaultSetupHostName_NoHostsUsesHostname(t *testing.T) {
@@ -4489,8 +4606,7 @@ func TestWrapAround_GroupsTab_DownWrapsToHosts(t *testing.T) {
 // (viewList, the default) starts the dots commit operation when DotsRepo is set
 // and dotsGitStatus is non-empty.
 func TestGlobalDotsCommit_FromToolsTab(t *testing.T) {
-	m := baseModel(nil)
-	m.settings.DotsRepo = "/repo/dotfiles"
+	m, _ := newDotsModelForCmds(t)
 	m.dotsGitStatus = "M somefile"
 
 	got := drive(m, pressRune('C'))
@@ -4503,7 +4619,9 @@ func TestGlobalDotsCommit_FromToolsTab(t *testing.T) {
 // TestGlobalDotsCommit_FromDotsTab verifies that pressing C while on the dots
 // tab also starts the commit operation.
 func TestGlobalDotsCommit_FromDotsTab(t *testing.T) {
-	m := dotsModel()
+	m, _ := newDotsModelForCmds(t)
+	m.mode = viewDots
+	m.dotsLoaded = true
 	m.dotsGitStatus = "M somefile"
 
 	got := drive(m, pressRune('C'))
@@ -4516,8 +4634,7 @@ func TestGlobalDotsCommit_FromDotsTab(t *testing.T) {
 // TestGlobalDotsCommit_FromSettingsTab verifies that pressing C while on the
 // settings tab also starts the commit operation.
 func TestGlobalDotsCommit_FromSettingsTab(t *testing.T) {
-	m := baseModel(nil)
-	m.settings.DotsRepo = "/repo/dotfiles"
+	m, _ := newDotsModelForCmds(t)
 	m.dotsGitStatus = "M somefile"
 	msgs := toSettings()
 	msgs = append(msgs, pressRune('C'))
@@ -4532,8 +4649,10 @@ func TestGlobalDotsCommit_FromSettingsTab(t *testing.T) {
 // TestGlobalDotsCommit_NoRepoShowsError verifies that pressing C when DotsRepo
 // is empty sets an error status and does not start a commit operation.
 func TestGlobalDotsCommit_NoRepoShowsError(t *testing.T) {
-	m := baseModel(nil)
-	// DotsRepo is empty by default
+	prov := &okProvider{name: "brew"}
+	a, _ := newCmdApp(t, prov, nil)
+	m := modelForCmds(a)
+	cacheDotsAvailability(&m, app.DotsSyncAvailability{Reason: app.DotsSyncAvailabilityNoRepo})
 
 	got := drive(m, pressRune('C'))
 
@@ -4551,9 +4670,11 @@ func TestGlobalDotsCommit_NoRepoShowsError(t *testing.T) {
 // TestGlobalDotsCommit_DisabledShowsError verifies that pressing C when dots
 // sync is disabled sets an error status and does not start a commit operation.
 func TestGlobalDotsCommit_DisabledShowsError(t *testing.T) {
-	m := baseModel(nil)
-	m.settings.DotsRepo = "/repo/dotfiles"
-	m.settings.DotsDisabled = config.BoolPtr(true)
+	m, _ := newDotsModelForCmds(t)
+	if err := m.app.SaveDotsDisabled(context.Background(), true); err != nil {
+		t.Fatalf("SaveDotsDisabled: %v", err)
+	}
+	cacheDotsAvailability(&m, app.DotsSyncAvailability{Reason: app.DotsSyncAvailabilityDisabled, RepoPath: m.settings.DotsRepo})
 	m.dotsGitStatus = "M somefile"
 
 	got := drive(m, pressRune('C'))
@@ -4573,8 +4694,7 @@ func TestGlobalDotsCommit_DisabledShowsError(t *testing.T) {
 // dotsGitStatus is empty (nothing to commit) is a no-op: no operation starts
 // and no error status is shown.
 func TestGlobalDotsCommit_NothingToCommit(t *testing.T) {
-	m := baseModel(nil)
-	m.settings.DotsRepo = "/repo/dotfiles"
+	m, _ := newDotsModelForCmds(t)
 	m.dotsGitStatus = "" // nothing to commit
 
 	got := drive(m, pressRune('C'))

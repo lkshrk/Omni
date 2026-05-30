@@ -715,15 +715,29 @@ func TestModelFilePickerAcceptsTypedCompletedPath(t *testing.T) {
 		pressEnter(),
 	)
 
-	if got.settings.DotsRepo != selected {
-		t.Fatalf("settings.DotsRepo = %q, want %q", got.settings.DotsRepo, selected)
+	if got.settings.DotsRepo != "" {
+		t.Fatalf("settings.DotsRepo = %q, want unchanged until app result", got.settings.DotsRepo)
 	}
 	if got.showFilePicker {
 		t.Fatal("picker should close after accepting path")
 	}
+	if !got.dotsLoading {
+		t.Fatal("dots operation should start after accepting path")
+	}
 }
 
-func TestModelFilePickerStoresDotsRepoWithHomeAlias(t *testing.T) {
+func TestTildePathUsesHomeAlias(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	selected := filepath.Join(home, "dotfiles")
+	mustMkdir(t, selected)
+
+	if got := tildePath(selected); got != "~/dotfiles" {
+		t.Fatalf("tildePath() = %q, want ~/dotfiles", got)
+	}
+}
+
+func TestModelFilePickerDefersDotsRepoSettingsToAppResult(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	selected := filepath.Join(home, "dotfiles")
@@ -731,10 +745,18 @@ func TestModelFilePickerStoresDotsRepoWithHomeAlias(t *testing.T) {
 
 	m := baseModel(nil)
 	m.mode = viewSettings
-	m.acceptFilePickerPath(selected)
+	m.settings.DotsRepo = "~/old-dotfiles"
 
-	if m.settings.DotsRepo != "~/dotfiles" {
-		t.Fatalf("settings.DotsRepo = %q, want ~/dotfiles", m.settings.DotsRepo)
+	cmds := m.acceptFilePickerPath(selected)
+
+	if m.settings.DotsRepo != "~/old-dotfiles" {
+		t.Fatalf("settings.DotsRepo = %q, want unchanged until app result", m.settings.DotsRepo)
+	}
+	if !m.dotsLoading {
+		t.Fatal("dots operation should start after accepting the repo path")
+	}
+	if len(cmds) == 0 {
+		t.Fatal("accepting the repo path should queue the app save/sync command")
 	}
 }
 

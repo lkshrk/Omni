@@ -395,6 +395,10 @@ func TestDotsWatch_SyncsAfterManagedSymlinkReplaced(t *testing.T) {
 	if err := os.WriteFile(sourceFile, []byte("setopt prompt_subst\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	oldSourceTime := time.Unix(1_700_000_000, 0)
+	if err := os.Chtimes(sourceFile, oldSourceTime, oldSourceTime); err != nil {
+		t.Fatalf("Chtimes source file: %v", err)
+	}
 	targetDir := filepath.Join(home, ".config", "zsh")
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		t.Fatal(err)

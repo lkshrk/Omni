@@ -24,33 +24,54 @@ case "${1:-}" in
   --version)
     echo "Homebrew 4.0.0"
     ;;
-  info)
-    if [ "${2:-}" = "--json=v2" ] && [ "${3:-}" = "--installed" ]; then
-      printf '{"formulae":[{"name":"fzf","full_name":"fzf","desc":"fuzzy finder","installed":[{"version":"0.61.1","installed_on_request":true}]}],"casks":[]}\n'
-      exit 0
-    fi
-    printf '{"formulae":[],"casks":[]}\n'
-    ;;
-  list)
-    shift
-    if [ "${1:-}" = "--versions" ]; then
-      shift
-      if [ "${1:-}" = "--cask" ]; then
-        shift
-      fi
-      pkg="${1:-}"
-      case "$pkg" in
-        fzf)
-          echo "fzf 0.61.1"
-          exit 0
-          ;;
-      esac
-    fi
-    exit 1
-    ;;
-  install)
-    : > "$state/$2"
-    ;;
+	  info)
+	    if [ "${2:-}" = "--json=v2" ] && [ "${3:-}" = "--installed" ]; then
+	      printf '{"formulae":[{"name":"fzf","full_name":"fzf","desc":"fuzzy finder","installed":[{"version":"0.61.1","installed_on_request":true}]}],"casks":[]}\n'
+	      exit 0
+	    fi
+	    printf '{"formulae":[],"casks":[]}\n'
+	    ;;
+	  leaves)
+	    if [ "${2:-}" = "--installed-on-request" ]; then
+	      echo "fzf"
+	      echo "fd"
+	    fi
+	    ;;
+	  list)
+	    shift
+	    if [ "${1:-}" = "--cask" ]; then
+	      exit 0
+	    fi
+	    if [ "${1:-}" = "--versions" ]; then
+	      shift
+	      if [ "${1:-}" = "--cask" ]; then
+	        shift
+	      fi
+	      found=0
+	      for pkg in "$@"; do
+	        case "$pkg" in
+	          fzf)
+	            echo "fzf 0.61.1"
+	            found=1
+	            ;;
+	          fd)
+	            echo "fd 10.2.0"
+	            found=1
+	            ;;
+	        esac
+	      done
+	      [ "$found" -eq 1 ] && exit 0
+	    fi
+	    exit 1
+	    ;;
+	  update)
+	    ;;
+	  outdated)
+	    printf '{"formulae":[],"casks":[]}\n'
+	    ;;
+	  install)
+	    : > "$state/$2"
+	    ;;
 esac
 
 -- bin/apt --
@@ -87,9 +108,11 @@ exit 1
     "disabled_providers": ["node", "python"]
   },
   "hosts": { "testhost": [] },
-  "tools": {},
-  "groups": [
-    { "name": "testhost", "special": "host", "tools": [] },
-    { "name": "dev", "tools": [] }
-  ]
+	  "tools": {
+	    "fd": { "provider": "system", "install_with": "brew" }
+	  },
+	  "groups": [
+	    { "name": "testhost", "special": "host", "tools": ["fd"] },
+	    { "name": "dev", "tools": [] }
+	  ]
 }

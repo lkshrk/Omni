@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/provider"
@@ -77,6 +78,99 @@ func TestSwitch_Success(t *testing.T) {
 	tools := toolsFromConfig(updated)
 	if len(tools) != 1 || tools[0].Provider != "python" || tools[0].InstallWith != "pip" {
 		t.Errorf("config tool = %+v after switch, want provider python install_with pip", tools[0])
+	}
+}
+
+func TestSwitchWithStateReturnsUpdatedTools(t *testing.T) {
+	ctx := context.Background()
+	brew := &stubProvider{name: "brew", available: true}
+	pip := &describingProvider{stubProvider: stubProvider{name: "pip", available: true}}
+	a, cfgPath := newImportApp(t, brew, pip)
+
+	cfg := &config.RootConfig{
+		Tools:  logicalToolSpecs(logicalTool("black", "brew")),
+		Groups: []*config.GroupConfig{testHostToolGroup("black")},
+	}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+
+	result, err := a.SwitchWithState(ctx, "black", "brew", "pip")
+	if err != nil {
+		t.Fatalf("SwitchWithState: %v", err)
+	}
+	if result.Result == nil || result.Result.FromProvider != "brew" || result.Result.ToProvider != "pip" {
+		t.Fatalf("Result = %+v, want brew -> pip", result.Result)
+	}
+	if len(result.Tools) != 1 || result.Tools[0].Name != "black" {
+		t.Fatalf("Tools = %v, want black only", toolNames(result.Tools))
+	}
+	tool := result.Tools[0]
+	if tool.Provider != "python" || tool.InstalledWith != "pip" {
+		t.Fatalf("tool provider = %s/%s, want python/pip", tool.Provider, tool.InstalledWith)
+	}
+	if !tool.Description.Valid || tool.Description.String != "description of black" {
+		t.Fatalf("description = %+v, want refreshed description", tool.Description)
+	}
+}
+
+func TestFirstApplicableProviderSolutionSelectsSwitchProviderTarget(t *testing.T) {
+	actionErr := &provider.ActionError{Solutions: []provider.ErrorSolution{
+		{Label: "Run manually", Command: "omni switch black --from python --to uv"},
+		{Action: provider.ErrorSolutionActionSwitchProvider},
+		{Action: provider.ErrorSolutionActionSwitchProvider, TargetProvider: "uv"},
+	}}
+
+	solution, ok := app.FirstApplicableProviderSolution(actionErr)
+	if !ok {
+		t.Fatal("FirstApplicableProviderSolution ok = false, want true")
+	}
+	if solution.TargetProvider != "uv" {
+		t.Fatalf("TargetProvider = %q, want uv", solution.TargetProvider)
+	}
+	if idx := app.FirstApplicableProviderSolutionIndex(actionErr); idx != 2 {
+		t.Fatalf("FirstApplicableProviderSolutionIndex = %d, want 2", idx)
+	}
+}
+
+func TestApplyProviderSolutionWithStateSwitchesTargetProvider(t *testing.T) {
+	ctx := context.Background()
+	brew := &stubProvider{name: "brew", available: true}
+	pip := &describingProvider{stubProvider: stubProvider{name: "pip", available: true}}
+	a, cfgPath := newImportApp(t, brew, pip)
+
+	cfg := &config.RootConfig{
+		Tools:  logicalToolSpecs(logicalTool("black", "brew")),
+		Groups: []*config.GroupConfig{testHostToolGroup("black")},
+	}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+
+	result, err := a.ApplyProviderSolutionWithState(ctx, "black", "brew", provider.ErrorSolution{
+		Action:         provider.ErrorSolutionActionSwitchProvider,
+		TargetProvider: "pip",
+	})
+	if err != nil {
+		t.Fatalf("ApplyProviderSolutionWithState: %v", err)
+	}
+	if result.Result == nil || result.Result.FromProvider != "brew" || result.Result.ToProvider != "pip" {
+		t.Fatalf("Result = %+v, want brew -> pip", result.Result)
+	}
+	if len(result.Tools) != 1 || result.Tools[0].Provider != "python" || result.Tools[0].InstalledWith != "pip" {
+		t.Fatalf("Tools = %+v, want python/pip", result.Tools)
+	}
+}
+
+func TestApplyProviderSolutionWithStateRejectsMissingTarget(t *testing.T) {
+	a, _ := newImportApp(t, &stubProvider{name: "brew", available: true})
+
+	_, err := a.ApplyProviderSolutionWithState(context.Background(), "black", "brew", provider.ErrorSolution{})
+	if err == nil {
+		t.Fatal("ApplyProviderSolutionWithState error = nil, want missing target error")
+	}
+	if !strings.Contains(err.Error(), "missing target provider") {
+		t.Fatalf("error = %q, want missing target provider", err)
 	}
 }
 
@@ -467,6 +561,39 @@ func TestMigrateInstallation_InstalledWithRegistered(t *testing.T) {
 	tools := toolsFromConfig(updated)
 	if len(tools) != 1 || tools[0].Provider != "python" || tools[0].InstallWith != "pip" {
 		t.Errorf("tool = %+v after migration, want python via pip", tools[0])
+	}
+}
+
+func TestMigrateInstallationWithStateReturnsUpdatedTools(t *testing.T) {
+	ctx := context.Background()
+	pip := &describingProvider{stubProvider: stubProvider{name: "pip", available: true}}
+	brew := &stubProvider{name: "brew", available: true}
+	a, cfgPath := newImportApp(t, pip, brew)
+
+	cfg := &config.RootConfig{
+		Tools:  logicalToolSpecs(logicalTool("black", "pip")),
+		Groups: []*config.GroupConfig{testHostToolGroup("black")},
+	}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+
+	result, err := a.MigrateInstallationWithState(ctx, "black", "brew", "python")
+	if err != nil {
+		t.Fatalf("MigrateInstallationWithState: %v", err)
+	}
+	if result.Result == nil || result.Result.FromProvider != "brew" || result.Result.ToProvider != "pip" {
+		t.Fatalf("Result = %+v, want brew -> pip", result.Result)
+	}
+	if len(result.Tools) != 1 || result.Tools[0].Name != "black" {
+		t.Fatalf("Tools = %v, want black only", toolNames(result.Tools))
+	}
+	tool := result.Tools[0]
+	if tool.Provider != "python" || tool.InstalledWith != "pip" {
+		t.Fatalf("tool provider = %s/%s, want python/pip", tool.Provider, tool.InstalledWith)
+	}
+	if !tool.Description.Valid || tool.Description.String != "description of black" {
+		t.Fatalf("description = %+v, want refreshed description", tool.Description)
 	}
 }
 

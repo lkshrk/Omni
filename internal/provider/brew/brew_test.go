@@ -189,6 +189,30 @@ func TestInstall_Success(t *testing.T) {
 	}
 }
 
+func TestInstall_UsesFormulaKindOption(t *testing.T) {
+	p, m := newBrew(executor.MockCall{Stdout: "==> Installed"})
+	tl := tool("flux")
+	tl.Options = map[string]string{"brew_kind": "formula"}
+	if err := p.Install(context.Background(), tl); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if got := strings.Join(m.Calls[0].Args, " "); got != "install --formula flux" {
+		t.Fatalf("brew args = %q, want install --formula flux", got)
+	}
+}
+
+func TestInstall_UsesCaskKindOption(t *testing.T) {
+	p, m := newBrew(executor.MockCall{Stdout: "==> Installed"})
+	tl := tool("visual-studio-code")
+	tl.Options = map[string]string{"brew_kind": "cask"}
+	if err := p.Install(context.Background(), tl); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if got := strings.Join(m.Calls[0].Args, " "); got != "install --cask visual-studio-code" {
+		t.Fatalf("brew args = %q, want install --cask visual-studio-code", got)
+	}
+}
+
 func TestInstall_Error(t *testing.T) {
 	p, _ := newBrew(executor.MockCall{Err: errors.New("exit 1"), Stderr: "formula not found"})
 	err := p.Install(context.Background(), tool("nonexistent"))
@@ -269,14 +293,13 @@ func TestListInstalled_TapPackage(t *testing.T) {
 }
 
 func TestInstalledMetadataMap_CaskPkgutilRequiresPrivilege(t *testing.T) {
-	caskInfo := `{"formulae":[],"casks":[` +
-		`{"token":"parsec","installed":"150-103a","artifacts":[{"uninstall":[{"quit":"tv.parsec.www","pkgutil":"tv.parsec.www"}]},{"pkg":["parsec-macos.pkg"]}]}` +
+	installedInfo := `{"formulae":[{"name":"ripgrep","full_name":"ripgrep","installed":[{"version":"14.1.1","installed_on_request":true}]}],"casks":[` +
+		`{"token":"parsec","installed":"150-103a","artifacts":[{"uninstall":[{"quit":"tv.parsec.www","pkgutil":"tv.parsec.www"}]},{"pkg":["parsec-macos.pkg"]}]},` +
+		`{"token":"normal-app","installed":"1.0.0"}` +
 		`]}`
 	p, m := newBrew(
-		executor.MockCall{Stdout: "ripgrep\n"},
-		executor.MockCall{Stdout: "ripgrep 14.1.1\n"},
+		executor.MockCall{Stdout: installedInfo},
 		executor.MockCall{Stdout: "parsec\n"},
-		executor.MockCall{Stdout: caskInfo},
 	)
 
 	got, err := p.InstalledMetadataMap(context.Background())
@@ -296,8 +319,13 @@ func TestInstalledMetadataMap_CaskPkgutilRequiresPrivilege(t *testing.T) {
 	if !strings.Contains(parsec.Privilege.Reason, "pkgutil") {
 		t.Fatalf("parsec privilege reason = %q, want pkgutil", parsec.Privilege.Reason)
 	}
-	if len(m.Calls) != 4 || strings.Join(m.Calls[3].Args, " ") != "info --json=v2 --cask parsec" {
-		t.Fatalf("calls = %+v, want cask-only info metadata lookup", m.Calls)
+	if _, ok := got["normal-app"]; ok {
+		t.Fatalf("metadata included non-Homebrew cask artifact: %+v", got["normal-app"])
+	}
+	if len(m.Calls) != 2 ||
+		strings.Join(m.Calls[0].Args, " ") != "info --json=v2 --installed" ||
+		strings.Join(m.Calls[1].Args, " ") != "list --cask" {
+		t.Fatalf("calls = %+v, want installed info plus cask ownership filter", m.Calls)
 	}
 }
 
@@ -404,8 +432,14 @@ func TestSearch_ReturnsFormulaeAndCasks(t *testing.T) {
 	if results[0].Provider != "brew" {
 		t.Errorf("results[0].Provider = %q, want brew", results[0].Provider)
 	}
+	if results[0].Options["brew_kind"] != "formula" {
+		t.Errorf("results[0].Options[brew_kind] = %q, want formula", results[0].Options["brew_kind"])
+	}
 	if results[2].Name != "batman" {
 		t.Errorf("results[2].Name = %q, want batman cask", results[2].Name)
+	}
+	if results[2].Options["brew_kind"] != "cask" {
+		t.Errorf("results[2].Options[brew_kind] = %q, want cask", results[2].Options["brew_kind"])
 	}
 	if results[0].Description != "cat clone with wings" {
 		t.Errorf("results[0].Description = %q, want enriched formula description", results[0].Description)
@@ -482,17 +516,67 @@ func TestDescription_NonEmpty(t *testing.T) {
 // --- Upgrade ---
 
 func TestUpgrade_Success(t *testing.T) {
-	p, m := newBrew(executor.MockCall{})
+	p, m := newBrew(
+		executor.MockCall{},
+		executor.MockCall{},
+		executor.MockCall{},
+	)
 	if err := p.Upgrade(context.Background(), tool("ripgrep")); err != nil {
 		t.Fatalf("Upgrade: %v", err)
 	}
-	if len(m.Calls) != 1 || m.Calls[0].Args[0] != "upgrade" {
-		t.Errorf("expected 'brew upgrade', got %+v", m.Calls)
+	if len(m.Calls) != 3 {
+		t.Fatalf("calls = %+v, want formula probe, cask probe, upgrade fallback", m.Calls)
+	}
+	if got := strings.Join(m.Calls[2].Args, " "); got != "upgrade ripgrep" {
+		t.Fatalf("upgrade args = %q, want upgrade ripgrep", got)
+	}
+}
+
+func TestUpgrade_DisambiguatesInstalledFormula(t *testing.T) {
+	p, m := newBrew(
+		executor.MockCall{Stdout: "flux 2.8.8\n"},
+		executor.MockCall{},
+	)
+	if err := p.Upgrade(context.Background(), tool("flux")); err != nil {
+		t.Fatalf("Upgrade: %v", err)
+	}
+	if len(m.Calls) != 2 {
+		t.Fatalf("calls = %+v, want formula probe then formula upgrade", m.Calls)
+	}
+	if got := strings.Join(m.Calls[0].Args, " "); got != "list --versions flux" {
+		t.Fatalf("probe args = %q, want list --versions flux", got)
+	}
+	if got := strings.Join(m.Calls[1].Args, " "); got != "upgrade --formula flux" {
+		t.Fatalf("upgrade args = %q, want upgrade --formula flux", got)
+	}
+}
+
+func TestUpgrade_DisambiguatesInstalledCask(t *testing.T) {
+	p, m := newBrew(
+		executor.MockCall{},
+		executor.MockCall{Stdout: "iterm2 3.4.23\n"},
+		executor.MockCall{},
+	)
+	if err := p.Upgrade(context.Background(), tool("iterm2")); err != nil {
+		t.Fatalf("Upgrade: %v", err)
+	}
+	if len(m.Calls) != 3 {
+		t.Fatalf("calls = %+v, want formula probe, cask probe, cask upgrade", m.Calls)
+	}
+	if got := strings.Join(m.Calls[1].Args, " "); got != "list --versions --cask iterm2" {
+		t.Fatalf("cask probe args = %q, want list --versions --cask iterm2", got)
+	}
+	if got := strings.Join(m.Calls[2].Args, " "); got != "upgrade --cask iterm2" {
+		t.Fatalf("upgrade args = %q, want upgrade --cask iterm2", got)
 	}
 }
 
 func TestUpgrade_Error(t *testing.T) {
-	p, _ := newBrew(executor.MockCall{Err: errors.New("exit 1"), Stderr: "formula not found"})
+	p, _ := newBrew(
+		executor.MockCall{},
+		executor.MockCall{},
+		executor.MockCall{Err: errors.New("exit 1"), Stderr: "formula not found"},
+	)
 	if err := p.Upgrade(context.Background(), tool("bad")); err == nil {
 		t.Fatal("expected error from failed upgrade")
 	}
@@ -501,9 +585,12 @@ func TestUpgrade_Error(t *testing.T) {
 // --- InstalledMap ---
 
 func TestInstalledMap_ReturnsFormulae(t *testing.T) {
+	installedInfo := `{"formulae":[` +
+		`{"name":"git","full_name":"git","installed":[{"version":"2.43.0","installed_on_request":true}]},` +
+		`{"name":"dep","full_name":"dep","installed":[{"version":"1.0.0","installed_on_request":false}]}` +
+		`],"casks":[]}`
 	p, m := newBrew(
-		executor.MockCall{Stdout: "git\n"},
-		executor.MockCall{Stdout: "git 2.43.0\n"},
+		executor.MockCall{Stdout: installedInfo},
 		executor.MockCall{},
 	)
 	got, err := p.InstalledMap(context.Background())
@@ -516,19 +603,18 @@ func TestInstalledMap_ReturnsFormulae(t *testing.T) {
 	if _, ok := got["dep"]; ok {
 		t.Errorf("transitive formula dep should not be in map: %v", got)
 	}
-	if len(m.Calls) != 3 || strings.Join(m.Calls[0].Args, " ") != "leaves --installed-on-request" ||
-		strings.Join(m.Calls[1].Args, " ") != "list --versions git" ||
-		strings.Join(m.Calls[2].Args, " ") != "list --cask" {
-		t.Fatalf("calls = %+v, want fast leaves/list installed scan", m.Calls)
+	if len(m.Calls) != 2 ||
+		strings.Join(m.Calls[0].Args, " ") != "info --json=v2 --installed" ||
+		strings.Join(m.Calls[1].Args, " ") != "list --cask" {
+		t.Fatalf("calls = %+v, want fast installed info scan plus cask filter", m.Calls)
 	}
 }
 
 func TestInstalledMap_IncludesCasks(t *testing.T) {
-	caskInfo := `{"formulae":[],"casks":[{"token":"iterm2","installed":"3.4.23"}]}`
+	caskInfo := `{"formulae":[],"casks":[{"token":"iterm2","installed":"3.4.23"},{"token":"normal-app","installed":"1.0.0"}]}`
 	p, _ := newBrew(
-		executor.MockCall{},
-		executor.MockCall{Stdout: "iterm2\n"},
 		executor.MockCall{Stdout: caskInfo},
+		executor.MockCall{Stdout: "iterm2\n"},
 	)
 	got, err := p.InstalledMap(context.Background())
 	if err != nil {
@@ -536,6 +622,9 @@ func TestInstalledMap_IncludesCasks(t *testing.T) {
 	}
 	if got["iterm2"] != "3.4.23" {
 		t.Errorf("map[iterm2] = %q, want 3.4.23", got["iterm2"])
+	}
+	if _, ok := got["normal-app"]; ok {
+		t.Fatalf("InstalledMap included non-Homebrew cask artifact: %v", got)
 	}
 }
 
@@ -546,10 +635,12 @@ func TestInstalledMap_Error(t *testing.T) {
 	}
 }
 
-func TestListInstalled_ReturnsFormulaeOnly(t *testing.T) {
+func TestListInstalled_ReturnsFormulaeAndBrewCasks(t *testing.T) {
 	p, _ := newBrew(
 		executor.MockCall{Stdout: "homebrew/core/git\nasmvik/formulae/yabai\n"},
 		executor.MockCall{Stdout: "homebrew/core/git 2.43.0\nasmvik/formulae/yabai 7.1.0\n"},
+		executor.MockCall{Stdout: "iterm2\n"},
+		executor.MockCall{Stdout: "iterm2 3.4.23\n"},
 	)
 	got, err := p.ListInstalled(context.Background())
 	if err != nil {
@@ -565,8 +656,8 @@ func TestListInstalled_ReturnsFormulaeOnly(t *testing.T) {
 	if byName["yabai"].Package != "asmvik/formulae/yabai" || byName["yabai"].Version != "7.1.0" {
 		t.Fatalf("yabai = %+v, want tap-qualified package and version", byName["yabai"])
 	}
-	if _, ok := byName["iterm2"]; ok {
-		t.Fatalf("ListInstalled included cask iterm2: %+v", byName["iterm2"])
+	if byName["iterm2"].Package != "iterm2" || byName["iterm2"].Version != "3.4.23" {
+		t.Fatalf("iterm2 = %+v, want brew-installed cask and version", byName["iterm2"])
 	}
 }
 

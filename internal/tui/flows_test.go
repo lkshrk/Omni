@@ -100,8 +100,11 @@ package tui
 //  UC-73  dotsFixedMsg clears overwriteIdx
 
 import (
+	"context"
 	"database/sql"
 	"errors"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -155,6 +158,25 @@ func nj(n int) []tea.Msg {
 	return msgs
 }
 
+func settingsDotsSyncReadyModel(t *testing.T) Model {
+	t.Helper()
+	m, repoDir := newDotsModelForCmds(t)
+	if err := m.app.SaveDotsDisabled(context.Background(), false); err != nil {
+		t.Fatalf("SaveDotsDisabled: %v", err)
+	}
+	m.settings = config.Settings{DotsRepo: repoDir}
+	m.mode = viewSettings
+	m.settingsCursor = settingsRowDotsSync
+	m.dangerConfirmRow = -1
+	m.stowInstalled = true
+	return m
+}
+
+func openSettingsDotsSyncChoice(t *testing.T) Model {
+	t.Helper()
+	return drive(settingsDotsSyncReadyModel(t), pressEnter())
+}
+
 // setupStep1Model builds a model stuck at setup step 1 with two provider rows.
 func setupStep1Model() Model {
 	m := Model{
@@ -166,9 +188,9 @@ func setupStep1Model() Model {
 		mode:          viewSetup,
 		setupStep:     1,
 		upgradingKeys: make(map[string]bool),
-		setupProviders: []setupProviderRow{
-			{name: "system", label: "system", enabled: true},
-			{name: "node", label: "node", enabled: true},
+		setupProviders: []app.SetupProviderOption{
+			{Name: "system", Label: "system", Enabled: true},
+			{Name: "node", Label: "node", Enabled: true},
 		},
 	}
 	return m
@@ -571,6 +593,7 @@ func TestFlow_UC14_LowercaseSyncNoopOnTools(t *testing.T) {
 
 func TestFlow_UC15_RefreshKey(t *testing.T) {
 	m := baseModel(oneInstalled())
+	m.app = newScanPlanTestApp(t, &scanPlanProvider{name: "brew"})
 	m.upgradingKeys = make(map[string]bool)
 	got := drive(m, pressRune('R'))
 	if len(got.scanningProviders) == 0 {
@@ -804,6 +827,32 @@ func TestFlow_UC24_TabCycle(t *testing.T) {
 		}
 	})
 
+	t.Run("list → dots loads from app config", func(t *testing.T) {
+		m, _ := newDotsModelForCmds(t)
+		m.settings = config.Settings{}
+		got := drive(m, pressTab())
+		if got.mode != viewDots {
+			t.Fatalf("mode = %v, want viewDots", got.mode)
+		}
+		if !got.dotsLoading {
+			t.Fatal("dotsLoading should start from app DotsConfigured despite stale local settings")
+		}
+	})
+
+	t.Run("list → dots skips stale local repo when app is unconfigured", func(t *testing.T) {
+		prov := &okProvider{name: "brew"}
+		a, _ := newCmdApp(t, prov, nil)
+		m := modelForCmds(a)
+		m.settings = config.Settings{DotsRepo: "/stale/dotfiles"}
+		got := drive(m, pressTab())
+		if got.mode != viewDots {
+			t.Fatalf("mode = %v, want viewDots", got.mode)
+		}
+		if got.dotsLoading {
+			t.Fatal("dotsLoading should not start from stale local settings when app has no dots repo")
+		}
+	})
+
 	t.Run("dots → groups", func(t *testing.T) {
 		got := drive(baseModel(nil), pressTab(), pressTab())
 		if got.mode != viewGroups {
@@ -930,9 +979,13 @@ func TestFlow_UC24_ClickToolFilters(t *testing.T) {
 }
 
 func TestDotsRepoSetupFromDotsTabKeepsDotsContext(t *testing.T) {
+	prov := &okProvider{name: "brew"}
+	a, _ := newCmdApp(t, prov, nil)
 	m := baseModel(nil)
+	m.app = a
+	m.ctx = context.Background()
 	m.mode = viewDots
-	m.settings.DotsRepo = ""
+	cacheDotsAvailability(&m, app.DotsSyncAvailability{Reason: app.DotsSyncAvailabilityNoRepo})
 
 	got := drive(m, pressEnter())
 	if got.mode != viewSetup {
@@ -949,7 +1002,7 @@ func TestDotsRepoSetupFromDotsTabKeepsDotsContext(t *testing.T) {
 func TestDotsEmptyStateEnterDoesNotStartOnboarding(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewDots
-	m.settings.DotsRepo = "/tmp/dots"
+	setDotsRepoForTest(&m, "/tmp/dots")
 	m.dotsLoaded = true
 
 	got := drive(m, pressEnter())
@@ -1030,10 +1083,10 @@ func TestFlow_UC26_SetupStep0(t *testing.T) {
 func TestFlow_UC27_SetupStep1(t *testing.T) {
 	t.Run("space toggles first provider off", func(t *testing.T) {
 		got := drive(setupStep1Model(), pressRune(' '))
-		if got.setupProviders[0].enabled {
+		if got.setupProviders[0].Enabled {
 			t.Error("first provider should be toggled off after space")
 		}
-		if !got.setupProviders[1].enabled {
+		if !got.setupProviders[1].Enabled {
 			t.Error("second provider should remain enabled")
 		}
 	})
@@ -1126,19 +1179,18 @@ func TestFlow_UC29_ToolsLoadedMsg(t *testing.T) {
 		}
 	})
 
-	t.Run("configured host first launch enters bootstrap activation", func(t *testing.T) {
+	t.Run("configured host first launch stays on dashboard", func(t *testing.T) {
 		got := drive(loadingModel(), toolsLoadedMsg{
-			tools:             threeTools(),
-			bootstrapRequired: true,
+			tools: threeTools(),
 			hostInfo: &app.HostInfo{Active: "testhost", Hosts: map[string]config.HostAssignment{
 				"testhost": {},
 			}},
 		})
-		if got.mode != viewSetup {
-			t.Errorf("mode = %v, want viewSetup", got.mode)
+		if got.mode != viewStatus {
+			t.Errorf("mode = %v, want viewStatus", got.mode)
 		}
-		if got.setupStep != 10 {
-			t.Errorf("setupStep = %d, want 10", got.setupStep)
+		if got.setupStep != 0 {
+			t.Errorf("setupStep = %d, want 0", got.setupStep)
 		}
 	})
 
@@ -1216,7 +1268,7 @@ func TestFlow_UC32_SettingsOpenFilePicker(t *testing.T) {
 
 func TestFlow_UC33_FilePickerEscCloses(t *testing.T) {
 	m := baseModel(nil)
-	m.settings.DotsRepo = "~/dotfiles"
+	setDotsRepoForTest(&m, "~/dotfiles")
 	msgs := append(toSettings(), nj(7)...)
 	msgs = append(msgs, pressEnter(), pressEsc())
 	got := drive(m, msgs...)
@@ -1294,13 +1346,58 @@ func TestFlow_UC34_DangerZoneConfirm(t *testing.T) {
 	})
 
 	t.Run("sync row with DotsRepo asks keep-local choice", func(t *testing.T) {
-		base := baseModel(nil)
-		base.settings.DotsRepo = "~/dotfiles"
-		msgs := append(toSettings(), nj(settingsRowDotsSync)...)
-		msgs = append(msgs, pressEnter())
-		got := drive(base, msgs...)
+		got := openSettingsDotsSyncChoice(t)
 		if got.dangerConfirmRow != settingsRowDotsSync {
 			t.Errorf("dangerConfirmRow = %d, want %d", got.dangerConfirmRow, settingsRowDotsSync)
+		}
+	})
+
+	t.Run("sync row uses app enabled despite stale local disabled setting", func(t *testing.T) {
+		base, repoDir := newDotsModelForCmds(t)
+		if err := base.app.SaveDotsDisabled(context.Background(), false); err != nil {
+			t.Fatalf("SaveDotsDisabled: %v", err)
+		}
+		base.settings = config.Settings{
+			DotsRepo:     repoDir,
+			DotsDisabled: config.BoolPtr(true),
+		}
+		availability, err := base.app.DotsSyncAvailability()
+		if err != nil {
+			t.Fatalf("DotsSyncAvailability: %v", err)
+		}
+		if availability.Reason != app.DotsSyncAvailabilityReady {
+			t.Fatalf("app availability = %+v, want ready", availability)
+		}
+		base.mode = viewSettings
+		base.settingsCursor = settingsRowDotsSync
+		base.dangerConfirmRow = -1
+		base.stowInstalled = true
+		got := drive(base, pressEnter())
+		if got.dotsLoading {
+			t.Fatalf("settings dots sync row should not enable dots when app config is already enabled: status=%q danger=%d", got.statusMsg, got.dangerConfirmRow)
+		}
+		if got.dangerConfirmRow != settingsRowDotsSync {
+			t.Fatalf("dangerConfirmRow = %d, want %d", got.dangerConfirmRow, settingsRowDotsSync)
+		}
+	})
+
+	t.Run("sync row uses app disabled despite stale local enabled setting", func(t *testing.T) {
+		base, repoDir := newDotsModelForCmds(t)
+		if err := base.app.SaveDotsDisabled(context.Background(), true); err != nil {
+			t.Fatalf("SaveDotsDisabled: %v", err)
+		}
+		base.settings = config.Settings{DotsRepo: repoDir}
+		cacheDotsAvailability(&base, app.DotsSyncAvailability{Reason: app.DotsSyncAvailabilityDisabled, RepoPath: repoDir})
+		base.mode = viewSettings
+		base.settingsCursor = settingsRowDotsSync
+		base.dangerConfirmRow = -1
+		base.stowInstalled = true
+		got := drive(base, pressEnter())
+		if got.dangerConfirmRow == settingsRowDotsSync {
+			t.Fatal("settings dots sync row should enable dots instead of asking to disable when app config is disabled")
+		}
+		if !got.dotsLoading || !strings.Contains(got.statusMsg, "Enabling dots") {
+			t.Fatalf("dotsLoading=%v status=%q, want enabling dots operation", got.dotsLoading, got.statusMsg)
 		}
 	})
 }
@@ -1309,11 +1406,7 @@ func TestFlow_UC34_DangerZoneConfirm(t *testing.T) {
 
 func TestFlow_UC35_DangerDotsDisableKeepLocalChoice(t *testing.T) {
 	openChoice := func() Model {
-		base := baseModel(nil)
-		base.settings.DotsRepo = "~/dotfiles"
-		msgs := append(toSettings(), nj(settingsRowDotsSync)...)
-		msgs = append(msgs, pressEnter())
-		return drive(base, msgs...)
+		return openSettingsDotsSyncChoice(t)
 	}
 
 	t.Run("y confirms disable and keeps local files", func(t *testing.T) {
@@ -1620,7 +1713,7 @@ func TestFlow_UC43_DotsDeleteConfirm(t *testing.T) {
 		m := baseModel(nil)
 		m.mode = viewDots
 		m.dotsLoaded = true
-		m.settings.DotsRepo = "/repo"
+		setDotsRepoForTest(&m, "/repo")
 		got := drive(m, pressRune('d'))
 		if got.dotsConfirmIdx != -1 {
 			t.Errorf("dotsConfirmIdx = %d, want -1 on empty list", got.dotsConfirmIdx)
@@ -1654,10 +1747,24 @@ func TestFlow_UC44_DotsSyncKey(t *testing.T) {
 }
 
 func TestFlow_DotsDisabledBlocksMutatingKeys(t *testing.T) {
-	disabledModel := func() Model {
+	appBackedDotsModel := func(t *testing.T) Model {
+		t.Helper()
+		appModel, repoDir := newDotsModelForCmds(t)
 		m := dotsModel()
-		m.settings.DotsDisabled = config.BoolPtr(true)
+		m.app = appModel.app
+		m.ctx = appModel.ctx
+		m.settings = config.Settings{DotsRepo: repoDir}
+		cacheDotsAvailability(&m, app.DotsSyncAvailability{Configured: true, Reason: app.DotsSyncAvailabilityReady, RepoPath: repoDir})
 		m.dotMemberships = map[string][]string{"gitconfig": {"default"}}
+		return m
+	}
+	disabledModel := func(t *testing.T) Model {
+		t.Helper()
+		m := appBackedDotsModel(t)
+		if err := m.app.SaveDotsDisabled(context.Background(), true); err != nil {
+			t.Fatalf("SaveDotsDisabled: %v", err)
+		}
+		cacheDotsAvailability(&m, app.DotsSyncAvailability{Reason: app.DotsSyncAvailabilityDisabled, RepoPath: m.settings.DotsRepo})
 		return m
 	}
 
@@ -1677,7 +1784,7 @@ func TestFlow_DotsDisabledBlocksMutatingKeys(t *testing.T) {
 		{name: "ignore", msg: pressRune('x')},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := drive(disabledModel(), tc.msg)
+			got := drive(disabledModel(t), tc.msg)
 			if got.mode != viewDots {
 				t.Fatalf("mode = %v, want viewDots", got.mode)
 			}
@@ -1692,11 +1799,21 @@ func TestFlow_DotsDisabledBlocksMutatingKeys(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("enabled app ignores stale local disabled setting", func(t *testing.T) {
+		m := appBackedDotsModel(t)
+		m.settings.DotsDisabled = config.BoolPtr(true)
+		m.dotsCursor = 1
+		got := drive(m, pressRune('s'))
+		if !got.dotsLoading {
+			t.Fatal("syncable dots row should start when app config enables dots despite stale local disabled setting")
+		}
+	})
 }
 
 func TestRender_DotsDisabledHidesMutatingHints(t *testing.T) {
 	m := dotsModel()
-	m.settings.DotsDisabled = config.BoolPtr(true)
+	setDotsDisabledForTest(&m, "/repo/dotfiles", true)
 	m.dotMemberships = map[string][]string{"gitconfig": {"default"}}
 
 	footer := tabShortHelpBindings(&m)
@@ -1723,6 +1840,27 @@ func TestRender_DotsDisabledHidesMutatingHints(t *testing.T) {
 	}
 }
 
+func TestRender_DotsHintsUseCachedDotsAvailability(t *testing.T) {
+	m := dotsModel()
+	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
+	m.settings.DotsDisabled = config.BoolPtr(true)
+	m.dotMemberships = map[string][]string{"gitconfig": {"default"}}
+
+	rowHints := dotsConflictHintItems(m)
+	if !slices.ContainsFunc(rowHints, func(h hintItem) bool { return h.desc == "use repo" }) {
+		t.Fatalf("enabled app should show use-repo hint despite stale disabled setting: %#v", rowHints)
+	}
+
+	m = dotsModel()
+	m.settings = config.Settings{DotsRepo: "/tmp/stale-dotfiles"}
+	m.dotsSyncAvailCached = app.DotsSyncAvailability{Reason: app.DotsSyncAvailabilityNoRepo}
+
+	help := helpActionGroups(m)
+	if len(help) != 1 || len(help[0].items) != 1 || help[0].items[0].desc != "set up dots" {
+		t.Fatalf("unconfigured app should show setup-only dots help despite stale repo: %#v", help)
+	}
+}
+
 // ── UC-45 Dots tab: explicit conflict choice ──────────────────────────────────
 
 func TestFlow_UC45_DotsConflictOverwrite(t *testing.T) {
@@ -1730,7 +1868,7 @@ func TestFlow_UC45_DotsConflictOverwrite(t *testing.T) {
 		m := baseModel(nil)
 		m.mode = viewDots
 		m.dotsLoaded = true
-		m.settings.DotsRepo = "/repo"
+		setDotsRepoForTest(&m, "/repo")
 		m.dotsEntries = []app.DotStatus{
 			{Name: "gitconfig", Health: app.HealthConflict, State: app.DotStateConflict, Actions: []app.DotAction{app.DotActionUseRepo, app.DotActionUseLocal, app.DotActionRemove}},
 		}
@@ -1778,7 +1916,7 @@ func TestFlow_UC45_DotsConflictOverwrite(t *testing.T) {
 		m := baseModel(nil)
 		m.mode = viewDots
 		m.dotsLoaded = true
-		m.settings.DotsRepo = "/repo"
+		setDotsRepoForTest(&m, "/repo")
 		m.dotsEntries = []app.DotStatus{
 			{Name: "claude", State: app.DotStateUntrackedConflict, Actions: []app.DotAction{app.DotActionUseRepo, app.DotActionUseLocal, app.DotActionIgnore}},
 		}
@@ -1800,7 +1938,7 @@ func TestFlow_UC45_DotsConflictOverwrite(t *testing.T) {
 		m := baseModel(nil)
 		m.mode = viewDots
 		m.dotsLoaded = true
-		m.settings.DotsRepo = "/repo"
+		setDotsRepoForTest(&m, "/repo")
 		m.dotsEntries = []app.DotStatus{{Name: "nvim", Health: app.HealthOK, State: app.DotStateSynced}}
 		got := drive(m, pressRune('u'))
 		if got.dotsOverwriteIdx != -1 {
@@ -1815,7 +1953,7 @@ func TestFlow_DotsSynthesizedIgnoredChildUnignore(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.dotsLoaded = true
-	m.settings.DotsRepo = "/repo"
+	setDotsRepoForTest(&m, "/repo")
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
@@ -1852,7 +1990,7 @@ func TestFlow_DotsMergedIgnoredExpandCollapse(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.dotsLoaded = true
-	m.settings.DotsRepo = "/repo"
+	setDotsRepoForTest(&m, "/repo")
 	m.dotsEntries = []app.DotStatus{
 		{
 			Name:   "nvim",
@@ -1905,7 +2043,7 @@ func TestFlow_DotsExpandIgnoredDoesNotExpandSyncedSameName(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.dotsLoaded = true
-	m.settings.DotsRepo = "/repo"
+	setDotsRepoForTest(&m, "/repo")
 
 	syncedEntry := app.DotStatus{
 		Name:   "nvim",
@@ -1954,7 +2092,7 @@ func TestFlow_DotsMergedIgnoredNestedExpand(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.dotsLoaded = true
-	m.settings.DotsRepo = "/repo"
+	setDotsRepoForTest(&m, "/repo")
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
@@ -1992,12 +2130,32 @@ func TestFlow_DotsMergedIgnoredNestedExpand(t *testing.T) {
 }
 
 func TestFlow_DotsMergedIgnoredChildUnignoreDispatch(t *testing.T) {
-	// Pressing x on an ignored child within a merged entry dispatches
-	// the ignore-pattern removal, not the whole-entry toggle.
+	cfgDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	repoDir := t.TempDir()
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	group := tuiTestHostGroup()
+	group.Dots = []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim", Ignore: []string{"*", "!/init.lua"}}}
+	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{DotsRepo: repoDir},
+		Groups:   []*config.GroupConfig{group},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	a := app.New(cfgPath)
+	a.CacheDir = cfgDir
+	if err := a.InitTestMode(context.Background()); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
 	m := baseModel(nil)
+	m.app = a
+	m.ctx = context.Background()
 	m.mode = viewDots
 	m.dotsLoaded = true
-	m.settings.DotsRepo = "/repo"
+	setDotsRepoForTest(&m, repoDir)
 	m.dotsExpandedName = "nvim"
 	m.dotsExpandedState = app.DotStateIgnored
 	m.dotsEntries = []app.DotStatus{{
@@ -2016,13 +2174,38 @@ func TestFlow_DotsMergedIgnoredChildUnignoreDispatch(t *testing.T) {
 	if got.dotsIgnoreIdx != 1 {
 		t.Fatalf("dotsIgnoreIdx = %d, want 1 (child row confirmation)", got.dotsIgnoreIdx)
 	}
+
+	next, cmd := got.Update(pressRune('x'))
+	got = next.(Model)
+	if !got.dotsLoading {
+		t.Fatal("dotsLoading = false, want include operation started")
+	}
+	msg := runLastBatchCommand(t, cmd)
+	ignored, ok := msg.(dotsIgnoredMsg)
+	if !ok {
+		t.Fatalf("second x returned %T, want dotsIgnoredMsg", msg)
+	}
+	if ignored.err != nil {
+		t.Fatalf("dotsIgnoredMsg err = %v", ignored.err)
+	}
+	if ignored.ignored {
+		t.Fatal("dotsIgnoredMsg ignored = true, want include")
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	gotIgnore := cfg.Groups[0].Dots[0].Ignore
+	if !slices.Contains(gotIgnore, "!/node_modules") {
+		t.Fatalf("ignore = %v, want !/node_modules include override", gotIgnore)
+	}
 }
 
 func TestFlow_DotsChildRowsCanBeIgnored(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.dotsLoaded = true
-	m.settings.DotsRepo = "/repo"
+	setDotsRepoForTest(&m, "/repo")
 	m.dotsExpandedName = "nvim"
 	m.dotsExpandedState = app.DotStateSynced
 	m.dotsEntries = []app.DotStatus{{
@@ -2047,7 +2230,7 @@ func TestFlow_DotsExpansionUsesSpaceAndNavigationDoesNotAutoExpand(t *testing.T)
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.dotsLoaded = true
-	m.settings.DotsRepo = "/repo"
+	setDotsRepoForTest(&m, "/repo")
 	m.dotsEntries = []app.DotStatus{
 		{
 			Name:   "alpha",
@@ -2104,7 +2287,7 @@ func TestFlow_DotsOutOfSyncDirectoryCanExpand(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.dotsLoaded = true
-	m.settings.DotsRepo = "/repo"
+	setDotsRepoForTest(&m, "/repo")
 	m.dotsEntries = []app.DotStatus{{
 		Name:    "nvim",
 		State:   app.DotStateConflict,
@@ -2130,7 +2313,7 @@ func TestFlow_DotsSubdirectoryCanExpand(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.dotsLoaded = true
-	m.settings.DotsRepo = "/repo"
+	setDotsRepoForTest(&m, "/repo")
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
@@ -2650,6 +2833,26 @@ func TestFlow_UC54_DotsMsgs(t *testing.T) {
 		}
 	})
 
+	t.Run("dotsSyncedMsg applies app returned settings", func(t *testing.T) {
+		base := baseModel(nil)
+		base.dotsLoading = true
+		base.dotsOpGen = 1
+		base.settings = config.Settings{DotsRepo: "/old"}
+
+		got := drive(base, dotsSyncedMsg{
+			gen:         1,
+			settings:    config.Settings{DotsRepo: "/new"},
+			hasSettings: true,
+		})
+
+		if got.settings.DotsRepo != "/new" {
+			t.Fatalf("settings.DotsRepo = %q, want app returned settings", got.settings.DotsRepo)
+		}
+		if !got.dotsSyncAvailCached.Configured {
+			t.Fatal("dots availability cache should be updated from app returned settings")
+		}
+	})
+
 	t.Run("dotsSyncedMsg error still updates conflict entries", func(t *testing.T) {
 		entries := []app.DotStatus{{Name: "nvim", Health: app.HealthConflict, State: app.DotStateConflict}}
 		got := drive(baseModel(nil), dotsSyncedMsg{entries: entries, err: errors.New("dots sync: nvim: requires choosing use repo version or use local version")})
@@ -3022,6 +3225,45 @@ func TestFlow_UC64_MouseWheelScroll(t *testing.T) {
 		got := drive(m, tea.MouseWheelMsg{Button: tea.MouseWheelDown})
 		if got.settingsCursor != 1 {
 			t.Errorf("settingsCursor = %d, want 1 after wheel down", got.settingsCursor)
+		}
+	})
+
+	t.Run("settings doctor wheel scrolls result", func(t *testing.T) {
+		m := baseModel(nil)
+		m.mode = viewSettings
+		m.height = 18
+		m.settingsCursor = settingsRowDoctor
+		checks := make([]app.DoctorCheck, 12)
+		for i := range checks {
+			checks[i] = app.DoctorCheck{
+				Label:   "Check " + string(rune('A'+i)),
+				Status:  app.DoctorStatusOK,
+				Message: "ok",
+			}
+		}
+		m.doctorResult = &app.DoctorResult{
+			Summary: app.DoctorSummary{OK: len(checks)},
+			Checks:  checks,
+		}
+		before := stripANSIEscapeSequences(renderSettings(m))
+		if strings.Contains(before, "Check L") {
+			t.Fatalf("test setup should start above the final check:\n%s", before)
+		}
+
+		got := drive(m,
+			tea.MouseWheelMsg{Button: tea.MouseWheelDown},
+			tea.MouseWheelMsg{Button: tea.MouseWheelDown},
+			tea.MouseWheelMsg{Button: tea.MouseWheelDown},
+			tea.MouseWheelMsg{Button: tea.MouseWheelDown},
+			tea.MouseWheelMsg{Button: tea.MouseWheelDown},
+			tea.MouseWheelMsg{Button: tea.MouseWheelDown},
+		)
+		if got.settingsCursor != settingsRowDoctor {
+			t.Fatalf("settingsCursor = %d, want doctor row", got.settingsCursor)
+		}
+		after := stripANSIEscapeSequences(renderSettings(got))
+		if !strings.Contains(after, "Check L") {
+			t.Fatalf("doctor result should scroll to the final check:\n%s", after)
 		}
 	})
 

@@ -10,7 +10,7 @@ import (
 )
 
 func TestDescribe_Success(t *testing.T) {
-	out := "Name         : ripgrep\nVersion      : 14.1.1\nSummary      : Search tool like grep and The Silver Searcher\nDescription  : ripgrep is a line-oriented search tool\n"
+	out := "Search tool like grep and The Silver Searcher"
 	p, _ := newDNF(executor.MockCall{Stdout: out})
 	desc, err := p.Describe(context.Background(), tool("ripgrep"))
 	if err != nil {
@@ -29,8 +29,8 @@ func TestDescribe_Error(t *testing.T) {
 }
 
 func TestDescribe_NotFound(t *testing.T) {
-	out := "Name         : ripgrep\nVersion      : 14.1.1\n"
-	p, _ := newDNF(executor.MockCall{Stdout: out})
+	out := "package ripgrep is not installed\n"
+	p, _ := newDNF(executor.MockCall{Stdout: out, Err: errors.New("exit 1")})
 	desc, err := p.Describe(context.Background(), tool("ripgrep"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -41,7 +41,7 @@ func TestDescribe_NotFound(t *testing.T) {
 }
 
 func TestBulkDescribe_Success(t *testing.T) {
-	out := "Name         : ripgrep\nSummary      : Fast grep alternative\n\nName         : curl\nSummary      : Command line URL tool\n"
+	out := "ripgrep\tFast grep alternative\ncurl\tCommand line URL tool\n"
 	p, _ := newDNF(executor.MockCall{Stdout: out})
 	m, err := p.BulkDescribe(context.Background(), []provider.Tool{tool("ripgrep"), tool("curl")})
 	if err != nil {
@@ -52,6 +52,25 @@ func TestBulkDescribe_Success(t *testing.T) {
 	}
 	if m["curl"] != "Command line URL tool" {
 		t.Errorf("curl = %q", m["curl"])
+	}
+}
+
+func TestBulkDescribe_DoesNotCallDNFInfoForPartialLocalSummaries(t *testing.T) {
+	out := "package missing is not installed\nripgrep\tFast grep alternative\n"
+	p, m := newDNF(executor.MockCall{Stdout: out, Err: errors.New("exit 1")})
+
+	desc, err := p.BulkDescribe(context.Background(), []provider.Tool{tool("ripgrep"), tool("missing")})
+	if err != nil {
+		t.Fatalf("BulkDescribe: %v", err)
+	}
+	if desc["ripgrep"] != "Fast grep alternative" {
+		t.Fatalf("ripgrep = %q", desc["ripgrep"])
+	}
+	if _, ok := desc["missing"]; ok {
+		t.Fatalf("missing package should not have a summary: %v", desc)
+	}
+	if len(m.Calls) != 1 || m.Calls[0].Name != "rpm" {
+		t.Fatalf("calls = %+v, want one rpm call", m.Calls)
 	}
 }
 

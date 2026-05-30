@@ -37,9 +37,9 @@ func setupStep2Model() Model {
 		mode:          viewSetup,
 		setupStep:     2,
 		upgradingKeys: make(map[string]bool),
-		setupProviders: []setupProviderRow{
-			{name: "system", label: "system", enabled: true},
-			{name: "node", label: "node", enabled: true},
+		setupProviders: []app.SetupProviderOption{
+			{Name: "system", Label: "system", Enabled: true},
+			{Name: "node", Label: "node", Enabled: true},
 		},
 		dangerConfirmRow: -1,
 		dotsConfirmIdx:   -1,
@@ -607,9 +607,10 @@ func TestFlow2_UC76_SetupStep5(t *testing.T) {
 
 	t.Run("post-onboarding reload waits for provider and discovery refresh", func(t *testing.T) {
 		m := setupStep5Model()
+		m.app = newScanPlanTestApp(t, &scanPlanProvider{name: "brew"})
 		m.setupReloading = true
 		m.loading = true
-		got := drive(m, toolsLoadedMsg{configuredProviders: []string{"brew"}})
+		got := drive(m, toolsLoadedMsg{})
 		if !got.setupReloading {
 			t.Fatal("setupReloading should stay visible while provider refreshes run")
 		}
@@ -756,7 +757,7 @@ func TestFlow2_UC78_SetupImportDoneMsg(t *testing.T) {
 	// loadingSetup(1) has no setupProviders, so node is not enabled → creates host.
 	m := loadingSetup(1)
 	m.allTools = []*database.ToolCache{{Name: "snapshot", Provider: "brew"}}
-	got := drive(m, setupImportDoneMsg{added: 2, tools: threeTools()})
+	got := drive(m, setupImportDoneMsg{added: 2})
 	if got.setupStep == 4 {
 		t.Fatalf("setupStep = %d, host confirmation screen should not be shown", got.setupStep)
 	}
@@ -820,7 +821,7 @@ func TestFlow2_SetupErrorsStayOnCurrentStep(t *testing.T) {
 
 	t.Run("import failure stays on import step", func(t *testing.T) {
 		m := loadingSetup(1)
-		m.setupProviders = []setupProviderRow{{name: "node", enabled: true}}
+		m.setupProviders = []app.SetupProviderOption{{Name: "node", Enabled: true}}
 
 		got := drive(m, setupImportDoneMsg{err: setupErr})
 
@@ -895,8 +896,8 @@ func TestFlow2_UC82_FilePickerPickSettings(t *testing.T) {
 	if got.showFilePicker {
 		t.Error("showFilePicker should be false after picking path in settings")
 	}
-	if got.settings.DotsRepo != tmp {
-		t.Errorf("settings.DotsRepo = %q, want %q", got.settings.DotsRepo, tmp)
+	if got.settings.DotsRepo != "" {
+		t.Errorf("settings.DotsRepo = %q, want unchanged until app result", got.settings.DotsRepo)
 	}
 	if !got.dotsLoading {
 		t.Error("dotsLoading should be true after saving DotsRepo")
@@ -950,7 +951,6 @@ func TestFlow2_UC86_SettingsNodeManager(t *testing.T) {
 	msgs := append(toSettings(), nj(5)...)
 	msgs = append(msgs, pressRune(' '))
 	got := drive(baseModel(nil), msgs...)
-	// cycleNodeManager("") → first non-empty value.
 	if got.settings.EcosystemManager("node") == "" {
 		t.Error("node manager should be non-empty after cycling from row 5")
 	}
@@ -1036,12 +1036,7 @@ func TestFlow2_UC92_DangerResetCache(t *testing.T) {
 
 // UC-93: Dots sync row: keep-local choice fires.
 func TestFlow2_UC93_DangerDisableDots(t *testing.T) {
-	base := baseModel(nil)
-	base.settings.DotsRepo = "~/dotfiles"
-	msgs := append(toSettings(), nj(settingsRowDotsSync)...)
-	msgs = append(msgs, pressEnter())   // asks keep-local choice
-	msgs = append(msgs, pressRune('y')) // fires doDisableDots keeping local files
-	got := drive(base, msgs...)
+	got := drive(openSettingsDotsSyncChoice(t), pressRune('y')) // fires doDisableDots keeping local files
 	if !got.loading {
 		t.Error("loading should be true after confirming disable dots")
 	}
@@ -1139,7 +1134,7 @@ func TestFlow2_HostRowSpaceActivatesHighlightedHost(t *testing.T) {
 	m.hostInfo.Active = "alpha"
 	m.hostInfo.Hosts["beta"] = config.HostAssignment{Groups: []string{"personal"}, Ignore: []string{"fd"}}
 	m.toolMemberships = map[string][]string{key: {"work", "personal"}}
-	m.toolGroups = compactToolGroupMapForHost(m.toolMemberships, m.hostInfo)
+	m.toolGroups = app.ToolGroupLabelsForHost(m.toolMemberships, m.hostInfo, shortHostname())
 	m.ignoreLabels = map[string]string{"old": "host"}
 	m.hostCursor = 1
 	m.groupFilter = "work"
@@ -2695,9 +2690,8 @@ func TestFlow2_UC143_SetupStep2NodeDisabled(t *testing.T) {
 		mode:          viewSetup,
 		setupStep:     2,
 		upgradingKeys: make(map[string]bool),
-		setupProviders: []setupProviderRow{
-			{name: "system", label: "system", enabled: true},
-			// node not present → isNodeProviderEnabled returns false
+		setupProviders: []app.SetupProviderOption{
+			{Name: "system", Label: "system", Enabled: true},
 		},
 		dangerConfirmRow: -1,
 		dotsConfirmIdx:   -1,

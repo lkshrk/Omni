@@ -354,8 +354,9 @@ func TestCompleteSettingsKeys_EmptyPrefix(t *testing.T) {
 	if dir != cobra.ShellCompDirectiveNoFileComp {
 		t.Fatalf("expected NoFileComp, got %v", dir)
 	}
-	if len(names) != len(knownSettingsKeys) {
-		t.Fatalf("expected %d keys, got %d", len(knownSettingsKeys), len(names))
+	want := app.SettingKeyCandidates("")
+	if len(names) != len(want) {
+		t.Fatalf("expected %d keys, got %d", len(want), len(names))
 	}
 }
 

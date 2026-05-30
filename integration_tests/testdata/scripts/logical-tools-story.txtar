@@ -65,12 +65,20 @@ stdout '"jq"'
 -- bin/brew --
 #!/bin/sh
 case "$1" in
+  leaves)
+    ;;
   info)
     # Return empty JSON for --json=v2 calls
     echo '{"formulae":[],"casks":[]}'
     ;;
   list)
+    if [ "${2:-}" = "--cask" ]; then
+      exit 0
+    fi
     echo ""
+    ;;
+  outdated)
+    echo '{"formulae":[],"casks":[]}'
     ;;
   *)
     exit 0
