@@ -298,6 +298,12 @@ type dotsLoadedMsg struct {
 	err            error
 }
 
+type dotsPeekLoadedMsg struct {
+	gen    int
+	result app.DotsPeekResult
+	err    error
+}
+
 // dotsPreparedMsg is sent when the launch-time, non-mutating dots snapshot is fetched.
 type dotsPreparedMsg struct {
 	gen            int

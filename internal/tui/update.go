@@ -32,7 +32,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.FocusMsg:
 		m.focused = true
 		// Re-kick the spinner tick chain if any activity is still ongoing.
-		if m.loading || len(m.scanningProviders) > 0 || len(m.outdatedProviders) > 0 || m.providerSnapshotRefreshing || m.outdatedSnapshotRefreshing || m.discoveryRefreshing || m.descRefreshing || m.dotsLoading || m.searching || len(m.upgradingKeys) > 0 {
+		if m.loading || len(m.scanningProviders) > 0 || len(m.outdatedProviders) > 0 || m.providerSnapshotRefreshing || m.outdatedSnapshotRefreshing || m.discoveryRefreshing || m.descRefreshing || m.dotsLoading || m.dotsPeekLoading || m.searching || len(m.upgradingKeys) > 0 {
 			cmds = append(cmds, m.spinner.Tick)
 		}
 
@@ -69,7 +69,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case spinner.TickMsg:
 		// Only reschedule while focused — avoids burning CPU in the background.
-		if m.focused && (m.loading || len(m.scanningProviders) > 0 || len(m.outdatedProviders) > 0 || m.providerSnapshotRefreshing || m.outdatedSnapshotRefreshing || m.discoveryRefreshing || m.descRefreshing || m.dotsLoading || m.searching || len(m.upgradingKeys) > 0) {
+		if m.focused && (m.loading || len(m.scanningProviders) > 0 || len(m.outdatedProviders) > 0 || m.providerSnapshotRefreshing || m.outdatedSnapshotRefreshing || m.discoveryRefreshing || m.descRefreshing || m.dotsLoading || m.dotsPeekLoading || m.searching || len(m.upgradingKeys) > 0) {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			cmds = append(cmds, cmd)
@@ -230,6 +230,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dotsLoadedMsg:
 		cmds = append(cmds, m.handleDotsLoadedMsg(msg)...)
 
+	case dotsPeekLoadedMsg:
+		cmds = append(cmds, m.handleDotsPeekLoadedMsg(msg)...)
+
 	case dotsPreparedMsg:
 		cmds = append(cmds, m.handleDotsPreparedMsg(msg)...)
 
@@ -352,6 +355,10 @@ func (m *Model) handleMouseWheelMsg(msg tea.MouseWheelMsg) bool {
 	default:
 		return false
 	}
+	if m.dotsPeek != nil {
+		m.scrollDotsPeekBy(delta)
+		return true
+	}
 	m.scrollBy(delta)
 	return true
 }
@@ -392,6 +399,13 @@ func (m *Model) scrollDotsBy(delta int) {
 	m.dotsCursor = clampIndex(m.dotsCursor+delta, len(visible))
 	m.syncDotsExpandedName(visible)
 	m.clearDotsConfirmState()
+}
+
+func (m *Model) scrollDotsPeekBy(delta int) {
+	if m.dotsPeek == nil || delta == 0 {
+		return
+	}
+	m.dotsPeek.scroll = clampRange(m.dotsPeek.scroll+delta, 0, dotsPeekMaxScroll(*m))
 }
 
 func (m *Model) scrollSettingsBy(delta int) {

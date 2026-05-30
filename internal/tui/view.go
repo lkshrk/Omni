@@ -161,6 +161,14 @@ func (m Model) viewString() string {
 		return placePopup(bg, m, content, frame)
 	}
 
+	if m.mode == viewDots && (m.dotsPeek != nil || m.dotsPeekLoading) {
+		bgModel := m
+		bgModel.dotsPeek = nil
+		bgModel.dotsPeekLoading = false
+		bg := bgModel.viewString()
+		return placePopup(bg, m, renderDotsPeekPopup(m), dotsPeekPopupFrame(m))
+	}
+
 	if m.mode == viewIgnoreScope {
 		bgModel := m
 		bgModel.mode = viewList

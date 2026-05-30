@@ -99,6 +99,11 @@ type dotsVariantRequest struct {
 	remove bool
 }
 
+type dotsPeekState struct {
+	result app.DotsPeekResult
+	scroll int
+}
+
 type groupToolSection int
 
 const (
@@ -430,6 +435,9 @@ type Model struct {
 	dotsIgnoreIdx          int // index of child path pending ignore/include confirm; -1 = none
 	dotsVariantIdx         int // index of entry pending host variant choice/removal; -1 = none
 	dotsVariantMode        dotsVariantMode
+	dotsPeek               *dotsPeekState
+	dotsPeekLoading        bool
+	dotsPeekGen            int
 	dotsSearchActive       bool // true when dots search bar is open
 	filePickerForDotAdd    bool // true when file picker opened for "add path" on dots tab
 	stowInstalled          bool

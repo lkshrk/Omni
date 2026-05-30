@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -3222,6 +3223,287 @@ func dotsModel() Model {
 		{Name: "nvim", SourcePath: "/repo/nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: app.DotStateSynced, Actions: []app.DotAction{app.DotActionRemove, app.DotActionIgnore}},
 	}
 	return m
+}
+
+func dotsPeekFileModel(t *testing.T) (Model, string, string) {
+	t.Helper()
+	cfgDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	repoDir := t.TempDir()
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{DotsRepo: repoDir},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	a := app.New(cfgPath)
+	a.CacheDir = cfgDir
+	if err := a.InitTestMode(context.Background()); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	repoPath := filepath.Join(repoDir, "dotfiles", "gitconfig", ".gitconfig")
+	localPath := filepath.Join(homeDir, ".gitconfig")
+	mustWriteTUIDotFile(t, repoPath, "[user]\n\tname = repo\n")
+	mustWriteTUIDotFile(t, localPath, "[user]\n\tname = local\n")
+
+	m := baseModel(nil)
+	m.app = a
+	m.ctx = context.Background()
+	m.mode = viewDots
+	m.dotsLoaded = true
+	m.stowInstalled = true
+	setDotsRepoForTest(&m, repoDir)
+	cacheDotsAvailability(&m, app.DotsSyncAvailability{Configured: true, Reason: app.DotsSyncAvailabilityReady, RepoPath: repoDir})
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "gitconfig",
+		SourcePath: repoPath,
+		TargetPath: localPath,
+		Health:     app.HealthConflict,
+		State:      app.DotStateConflict,
+	}}
+	return m, repoPath, localPath
+}
+
+func TestDotsEnterPeeksSelectedFile(t *testing.T) {
+	m, repoPath, localPath := dotsPeekFileModel(t)
+
+	tm, cmd := m.Update(pressEnter())
+	got := tm.(Model)
+	if cmd == nil {
+		t.Fatal("enter returned nil command, want peek command")
+	}
+	if !got.dotsPeekLoading {
+		t.Fatal("dotsPeekLoading = false, want true while command runs")
+	}
+	msg := cmd()
+	if _, ok := msg.(dotsPeekLoadedMsg); !ok {
+		t.Fatalf("command msg = %T, want dotsPeekLoadedMsg", msg)
+	}
+	got = drive(got, msg)
+	if got.dotsPeekLoading {
+		t.Fatal("dotsPeekLoading = true after loaded message")
+	}
+	if got.dotsPeek == nil {
+		t.Fatal("dotsPeek = nil, want popup state")
+	}
+	if got.dotsPeek.result.Mode != app.DotsPeekModeDiff {
+		t.Fatalf("peek mode = %q, want %q", got.dotsPeek.result.Mode, app.DotsPeekModeDiff)
+	}
+	if !strings.Contains(got.dotsPeek.result.Content, "--- repo\t"+repoPath) ||
+		!strings.Contains(got.dotsPeek.result.Content, "+++ local\t"+localPath) {
+		t.Fatalf("diff labels missing:\n%s", got.dotsPeek.result.Content)
+	}
+}
+
+func TestDotsSpacePeeksSelectedFile(t *testing.T) {
+	m, repoPath, localPath := dotsPeekFileModel(t)
+
+	tm, cmd := m.Update(pressRune(' '))
+	got := tm.(Model)
+	if cmd == nil {
+		t.Fatal("space returned nil command, want peek command")
+	}
+	if !got.dotsPeekLoading {
+		t.Fatal("dotsPeekLoading = false, want true while command runs")
+	}
+	msg := cmd()
+	if _, ok := msg.(dotsPeekLoadedMsg); !ok {
+		t.Fatalf("command msg = %T, want dotsPeekLoadedMsg", msg)
+	}
+	got = drive(got, msg)
+	if got.dotsPeek == nil {
+		t.Fatal("dotsPeek = nil, want popup state")
+	}
+	if !strings.Contains(got.dotsPeek.result.Content, "--- repo\t"+repoPath) ||
+		!strings.Contains(got.dotsPeek.result.Content, "+++ local\t"+localPath) {
+		t.Fatalf("diff labels missing:\n%s", got.dotsPeek.result.Content)
+	}
+}
+
+func TestDotsSpaceExpandsDirectoryRows(t *testing.T) {
+	m := dotsModel()
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		Health:     app.HealthOK,
+		State:      app.DotStateSynced,
+		IsDir:      true,
+		Children: []app.DotChild{{
+			Name:    "init.lua",
+			RelPath: "init.lua",
+			Path:    "~/.config/nvim/init.lua",
+			State:   app.DotStateSynced,
+		}},
+	}}
+
+	got := drive(m, pressRune(' '))
+	if got.dotsExpandedName != "nvim" {
+		t.Fatalf("expanded name = %q, want nvim", got.dotsExpandedName)
+	}
+	if got.dotsPeek != nil || got.dotsPeekLoading {
+		t.Fatalf("dots peek opened for directory: state=%+v loading=%v", got.dotsPeek, got.dotsPeekLoading)
+	}
+}
+
+func TestDotsPrimaryActionDoesNotPeekEmptyDirectory(t *testing.T) {
+	base, _, _ := dotsPeekFileModel(t)
+	base.dotsEntries = []app.DotStatus{{
+		Name:       "empty",
+		SourcePath: filepath.Join(base.settings.DotsRepo, "dotfiles", "empty"),
+		TargetPath: filepath.Join(os.Getenv("HOME"), ".config", "empty"),
+		Health:     app.HealthOK,
+		State:      app.DotStateSynced,
+		IsDir:      true,
+	}}
+
+	for _, tc := range []struct {
+		name string
+		key  tea.Msg
+	}{
+		{name: "space", key: pressRune(' ')},
+		{name: "enter", key: pressEnter()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tm, cmd := base.Update(tc.key)
+			got := tm.(Model)
+			if cmd != nil {
+				t.Fatal("empty directory returned command, want no peek command")
+			}
+			if got.dotsPeekLoading || got.dotsPeek != nil {
+				t.Fatalf("empty directory opened peek: loading=%v state=%+v", got.dotsPeekLoading, got.dotsPeek)
+			}
+		})
+	}
+}
+
+func TestDotsRowHintsUseSpaceAsContextAction(t *testing.T) {
+	m := dotsModel()
+	got := dotsPrimaryHintItem(m, dotsVisibleRows(m)[0])
+	if got.key != "space" || got.desc != "peek" {
+		t.Fatalf("file hint = %+v, want space peek", got)
+	}
+
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		Health:     app.HealthOK,
+		State:      app.DotStateSynced,
+		IsDir:      true,
+		Children:   []app.DotChild{{Name: "init.lua", RelPath: "init.lua", Path: "~/.config/nvim/init.lua"}},
+	}}
+	got = dotsPrimaryHintItem(m, dotsVisibleRows(m)[0])
+	if got.key != "space" || got.desc != "expand" {
+		t.Fatalf("directory hint = %+v, want space expand", got)
+	}
+
+	m.dotsEntries[0].Children = nil
+	got = dotsPrimaryHintItem(m, dotsVisibleRows(m)[0])
+	if got.key != "space" || got.desc != "expand" {
+		t.Fatalf("empty directory hint = %+v, want space expand", got)
+	}
+}
+
+func TestDotsPeekPopupLabelsRepoAndLocalSources(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.width = 100
+	m.height = 30
+	m.dotsPeek = &dotsPeekState{result: app.DotsPeekResult{
+		Title: "gitconfig",
+		Mode:  app.DotsPeekModeDiff,
+		Repo: app.DotsPeekSide{
+			Source: app.DotsPeekSourceRepo,
+			Label:  "repo",
+			Path:   "/repo/gitconfig",
+			Exists: true,
+			Size:   12,
+		},
+		Local: app.DotsPeekSide{
+			Source: app.DotsPeekSourceLocal,
+			Label:  "local",
+			Path:   "/home/me/.gitconfig",
+			Exists: true,
+			Size:   13,
+		},
+		Content: "--- repo\t/repo/gitconfig\n+++ local\t/home/me/.gitconfig\n@@ -1 +1 @@\n-a\n+b\n",
+	}}
+
+	out := renderDotsPeekPopup(m)
+	for _, want := range []string{
+		"repo source",
+		"local source",
+		"/repo/gitconfig",
+		"/home/me/.gitconfig",
+		"--- repo",
+		"+++ local",
+		"esc",
+		"close",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("popup missing %q:\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{"j/k", "scroll", "pgup", "pgdn", "page"} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("popup contains navigation footer hint %q:\n%s", unwanted, out)
+		}
+	}
+}
+
+func TestDotsPeekPopupTitleUsesHomeAliasedTargetPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	m := baseModel(nil)
+	m.dotsPeek = &dotsPeekState{result: app.DotsPeekResult{
+		Title: "gitconfig",
+		Local: app.DotsPeekSide{Path: filepath.Join(home, ".gitconfig")},
+		Repo:  app.DotsPeekSide{Path: "/repo/gitconfig"},
+	}}
+
+	if got := dotsPeekPopupTitle(m); got != "Peek: ~/.gitconfig" {
+		t.Fatalf("dotsPeekPopupTitle() = %q, want %q", got, "Peek: ~/.gitconfig")
+	}
+}
+
+func TestDotsPeekEscClosesPopup(t *testing.T) {
+	m := dotsModel()
+	m.dotsPeek = &dotsPeekState{result: app.DotsPeekResult{Title: "gitconfig", Mode: app.DotsPeekModeText, Content: "body"}}
+
+	got := drive(m, pressEsc())
+	if got.dotsPeek != nil {
+		t.Fatalf("dotsPeek = %+v, want nil", got.dotsPeek)
+	}
+}
+
+func TestDotsPeekEscWhileLoadingIgnoresLateResult(t *testing.T) {
+	m := dotsModel()
+	m.dotsPeekLoading = true
+	m.dotsPeekGen = 1
+
+	got := drive(m,
+		pressEsc(),
+		dotsPeekLoadedMsg{gen: 1, result: app.DotsPeekResult{Title: "gitconfig", Mode: app.DotsPeekModeText, Content: "body"}},
+	)
+	if got.dotsPeekLoading {
+		t.Fatal("dotsPeekLoading = true, want false")
+	}
+	if got.dotsPeek != nil {
+		t.Fatalf("dotsPeek = %+v, want nil after stale result", got.dotsPeek)
+	}
+}
+
+func mustWriteTUIDotFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q): %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q): %v", path, err)
+	}
 }
 
 func dotsVariantFlowModel(t *testing.T, withVariant bool) Model {

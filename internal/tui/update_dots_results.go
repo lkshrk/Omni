@@ -30,6 +30,18 @@ func (m *Model) handleDotsLoadedMsg(msg dotsLoadedMsg) []tea.Cmd {
 	return cmds
 }
 
+func (m *Model) handleDotsPeekLoadedMsg(msg dotsPeekLoadedMsg) []tea.Cmd {
+	if msg.gen != m.dotsPeekGen || !m.dotsPeekLoading {
+		return nil
+	}
+	m.dotsPeekLoading = false
+	if msg.err != nil {
+		return []tea.Cmd{setStatus(m, "✗ "+msg.err.Error(), true)}
+	}
+	m.dotsPeek = &dotsPeekState{result: msg.result}
+	return nil
+}
+
 func (m *Model) handleDotsPreparedMsg(msg dotsPreparedMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 
