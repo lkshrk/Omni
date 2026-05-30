@@ -75,7 +75,7 @@ func renderFooterStatusOnly(status string, contentW int) string {
 func renderFooterStatusLayer(m Model, maxWidth int) string {
 	p := m.palette
 	switch {
-	case m.loading || m.dotsLoading || m.doctorRunning || m.searching || len(m.scanningProviders) > 0 || len(m.outdatedProviders) > 0 || m.providerSnapshotRefreshing || m.outdatedSnapshotRefreshing || m.discoveryRefreshing || m.descRefreshing || len(m.upgradingKeys) > 0:
+	case m.loading || m.dotsLoading || m.dotsPeekLoading || m.doctorRunning || m.searching || len(m.scanningProviders) > 0 || len(m.outdatedProviders) > 0 || m.providerSnapshotRefreshing || m.outdatedSnapshotRefreshing || m.discoveryRefreshing || m.descRefreshing || len(m.upgradingKeys) > 0:
 		text := m.progressText
 		progress := text != ""
 		if text == "" {
@@ -138,6 +138,8 @@ func activityLabel(m Model) string {
 		return "Refreshing tool descriptions…"
 	case m.dotsLoading:
 		return "Loading dots…"
+	case m.dotsPeekLoading:
+		return "Opening dotfile…"
 	case m.doctorRunning:
 		return "Running doctor…"
 	default:

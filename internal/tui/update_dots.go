@@ -77,6 +77,8 @@ func dotsSyncAllEntryOrder(m Model) []string {
 
 func (m *Model) handleDotsSubmodeKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
 	switch {
+	case m.dotsPeek != nil || m.dotsPeekLoading:
+		return true, m.handleDotsPeekKeyMsg(msg)
 	case m.dotsSearchActive:
 		return true, m.handleDotsSearchKeyMsg(msg)
 	default:
@@ -304,7 +306,7 @@ func (m *Model) handleDotsActionKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibl
 			cmds = append(cmds, m.handleDotsConfirmKeyMsg(visible)...)
 		case key.Matches(msg, m.keys.Toggle):
 			if !msg.IsRepeat {
-				m.handleDotsToggleKeyMsg(visible)
+				_ = m.handleDotsToggleKeyMsg(visible)
 			}
 		default:
 			m.clearDotsConfirmState()
@@ -335,7 +337,7 @@ func (m *Model) handleDotsActionKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibl
 		if msg.IsRepeat {
 			break
 		}
-		m.handleDotsToggleKeyMsg(visible)
+		cmds = append(cmds, m.handleDotsToggleKeyMsg(visible)...)
 	case key.Matches(msg, m.keys.Sync):
 		if msg.IsRepeat || len(visible) == 0 || m.dotsCursor >= len(visible) {
 			break
@@ -475,17 +477,20 @@ func (m *Model) startDotsVariantChange(req dotsVariantRequest) []tea.Cmd {
 	return cmds
 }
 
-func (m *Model) handleDotsToggleKeyMsg(visible []dotsVisibleRow) {
+func (m *Model) handleDotsToggleKeyMsg(visible []dotsVisibleRow) []tea.Cmd {
 	if len(visible) == 0 || m.dotsCursor < 0 || m.dotsCursor >= len(visible) {
-		return
+		return nil
 	}
 	m.clearDotsConfirmState()
 	row := visible[m.dotsCursor]
 	name := row.entry.Name
+	if !dotsRowIsDir(row) {
+		return m.startDotsPeek(row)
+	}
+	if !dotsRowExpandable(row) {
+		return nil
+	}
 	if row.isChild {
-		if !dotsRowExpandable(row) {
-			return
-		}
 		if m.dotsExpandedChildren == nil {
 			m.dotsExpandedChildren = make(map[string]bool)
 		}
@@ -501,22 +506,20 @@ func (m *Model) handleDotsToggleKeyMsg(visible []dotsVisibleRow) {
 		if idx := dotsRowIndex(dotsVisibleRows(*m), row); idx >= 0 {
 			m.dotsCursor = idx
 		}
-		return
-	}
-	if len(row.entry.Children) == 0 {
-		return
+		return nil
 	}
 	state := app.DotStatusState(row.entry)
 	if m.dotsExpandedName == name && m.dotsExpandedState == state {
 		m.clearDotsExpandedChildren(name)
 		m.dotsExpandedName = ""
-		return
+		return nil
 	}
 	if m.dotsExpandedName != "" {
 		m.clearDotsExpandedChildren(m.dotsExpandedName)
 	}
 	m.dotsExpandedName = name
 	m.dotsExpandedState = state
+	return nil
 }
 
 func (m *Model) openDotGroupMembershipPicker(visible []dotsVisibleRow) {
@@ -561,7 +564,70 @@ func (m *Model) handleDotsConfirmKeyMsg(visible []dotsVisibleRow) []tea.Cmd {
 		m.setupStep = 5
 		return cmds
 	}
+	if len(visible) == 0 || m.dotsCursor < 0 || m.dotsCursor >= len(visible) {
+		return cmds
+	}
+	row := visible[m.dotsCursor]
+	if dotsRowIsDir(row) {
+		return m.handleDotsToggleKeyMsg(visible)
+	}
+	cmds = append(cmds, m.startDotsPeek(row)...)
 	return cmds
+}
+
+func (m *Model) startDotsPeek(row dotsVisibleRow) []tea.Cmd {
+	if m.app == nil {
+		return nil
+	}
+	m.clearDotsConfirmState()
+	m.dotsPeek = nil
+	m.dotsPeekLoading = true
+	m.dotsPeekGen++
+	gen := m.dotsPeekGen
+	req := app.DotsPeekRequest{Entry: row.entry}
+	if row.isChild {
+		child := row.child
+		req.Child = &child
+	}
+	ctx := m.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return []tea.Cmd{func() tea.Msg {
+		result, err := m.app.DotsPeek(ctx, req)
+		return dotsPeekLoadedMsg{gen: gen, result: result, err: err}
+	}}
+}
+
+func (m *Model) handleDotsPeekKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
+	if key.Matches(msg, m.keys.Back) {
+		m.dotsPeekGen++
+		m.dotsPeek = nil
+		m.dotsPeekLoading = false
+		return nil
+	}
+	if m.dotsPeek == nil {
+		return nil
+	}
+	switch {
+	case key.Matches(msg, m.keys.Up):
+		m.scrollDotsPeekBy(-1)
+	case key.Matches(msg, m.keys.Down):
+		m.scrollDotsPeekBy(1)
+	case key.Matches(msg, m.keys.HalfPageUp):
+		m.scrollDotsPeekBy(-max(dotsPeekBodyHeight(*m), 1) / 2)
+	case key.Matches(msg, m.keys.HalfPageDown):
+		m.scrollDotsPeekBy(max(dotsPeekBodyHeight(*m), 1) / 2)
+	case key.Matches(msg, m.keys.PageUp):
+		m.scrollDotsPeekBy(-max(dotsPeekBodyHeight(*m), 1))
+	case key.Matches(msg, m.keys.PageDown):
+		m.scrollDotsPeekBy(max(dotsPeekBodyHeight(*m), 1))
+	case key.Matches(msg, m.keys.Top):
+		m.dotsPeek.scroll = 0
+	case key.Matches(msg, m.keys.Bottom):
+		m.dotsPeek.scroll = dotsPeekMaxScroll(*m)
+	}
+	return nil
 }
 
 func (m *Model) handleDotsResolveKeyMsg(visible []dotsVisibleRow, strategy app.DotsResolveStrategy) []tea.Cmd {

@@ -420,9 +420,7 @@ func dotsRowHintItems(m Model) []hintItem {
 	row := visible[m.dotsCursor]
 	entry := row.entry
 	hints := make([]hintItem, 0, 4)
-	if hint, ok := dotsExpandHintItem(m, row); ok {
-		hints = append(hints, hint)
-	}
+	hints = append(hints, dotsPrimaryHintItem(m, row))
 	if dotsViewDisabled(m) {
 		return hints
 	}
@@ -462,9 +460,7 @@ func dotsConflictHintItems(m Model) []hintItem {
 	row := visible[m.dotsCursor]
 	entry := row.entry
 	hints := make([]hintItem, 0, 4)
-	if hint, ok := dotsExpandHintItem(m, row); ok {
-		hints = append(hints, hint)
-	}
+	hints = append(hints, dotsPrimaryHintItem(m, row))
 	if dotsViewDisabled(m) {
 		return hints
 	}
@@ -490,15 +486,15 @@ func dotsConflictHintItems(m Model) []hintItem {
 	return hints
 }
 
-func dotsExpandHintItem(m Model, row dotsVisibleRow) (hintItem, bool) {
-	if !dotsRowExpandable(row) {
-		return hintItem{}, false
+func dotsPrimaryHintItem(m Model, row dotsVisibleRow) hintItem {
+	if dotsRowIsDir(row) {
+		desc := "expand"
+		if dotsRowExpanded(m, row) {
+			desc = "collapse"
+		}
+		return hintFromBindingDesc(m.keys.Toggle, desc)
 	}
-	desc := "expand"
-	if dotsRowExpanded(m, row) {
-		desc = "collapse"
-	}
-	return hintFromBindingDesc(m.keys.Toggle, desc), true
+	return hintFromBindingDesc(m.keys.Toggle, "peek")
 }
 
 func dotsIgnoreConfirmHintItems(m Model) []hintItem {

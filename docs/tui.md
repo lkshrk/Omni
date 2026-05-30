@@ -48,6 +48,8 @@ repo status. It supports:
 - sync one entry or all entries
 - adopt local content into the repo
 - choose repo or local content for conflicts
+- press Space on a file to peek without leaving the TUI; differing repo/local files open as a
+  `repo -> local` unified diff with `repo source` and `local source` labels
 - move entries between groups
 - add and remove host variants
 - manage ignored paths

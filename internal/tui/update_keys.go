@@ -71,6 +71,11 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 		return *m, cmd
 	}
 
+	if m.mode == viewDots && (m.dotsPeek != nil || m.dotsPeekLoading) {
+		cmds = append(cmds, m.handleDotsPeekKeyMsg(msg)...)
+		return *m, tea.Batch(cmds...)
+	}
+
 	if m.handleTabKeyMsg(msg, &cmds) {
 		return *m, tea.Batch(cmds...)
 	}
