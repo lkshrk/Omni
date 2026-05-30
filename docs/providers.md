@@ -35,6 +35,21 @@ That keeps the config portable across macOS and Linux machines.
 `pip` is accepted as a Python manager alias for compatibility, but persisted
 settings use `pip3`.
 
+## Update Date Metadata
+
+Update quarantine uses only package-manager or package-registry metadata. Omni
+currently records latest-version availability dates from:
+
+| Provider path | Metadata source |
+| --- | --- |
+| `node` via `bun`, `pnpm`, or `npm` | npm registry `time[version]` |
+| `python` via `uv`, `pip3`, or `pip` | PyPI release file `upload_time_iso_8601` |
+| `pip` concrete provider | PyPI release file `upload_time_iso_8601` |
+
+Other providers can still report outdated versions, but if quarantine is
+enabled and no PM date is available, Omni treats that update as blocked until
+you run the upgrade with `--force`.
+
 ## System Resolution
 
 The built-in `system` provider checks concrete managers in this order:

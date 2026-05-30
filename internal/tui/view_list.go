@@ -209,6 +209,8 @@ func renderList(m Model) string {
 		switch s {
 		case sectionUpdates:
 			return "Updates Available"
+		case sectionQuarantined:
+			return "Quarantined Updates"
 		case sectionOutOfSync:
 			return "Out of Sync"
 		case sectionInstalled:

@@ -78,6 +78,7 @@ func (a *App) DotNameCandidates(prefix string) ([]string, error) {
 
 var settingCandidateKeys = []string{
 	"auto_import",
+	"update_quarantine",
 	"node.manager",
 	"python.manager",
 	"system.priority",
@@ -86,6 +87,7 @@ var settingCandidateKeys = []string{
 	"dots_git.auto_commit",
 	"dots_git.auto_push",
 	"disabled_providers",
+	"provider_update_quarantine",
 }
 
 func SettingKeys() []string {

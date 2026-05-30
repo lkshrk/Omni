@@ -43,6 +43,7 @@ func newToolsSetCmd(state *rootState) *cobra.Command {
 	var providerName string
 	var packageName string
 	var installWith string
+	var quarantine string
 	var hostScope bool
 	var globalScope bool
 
@@ -51,18 +52,32 @@ func newToolsSetCmd(state *rootState) *cobra.Command {
 		Short: "Create or update a logical tool spec",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := requireProvider(providerName); err != nil {
-				return err
-			}
 			if hostScope && globalScope {
 				return fmt.Errorf("use either --host or --global, not both")
 			}
+			if hostScope && quarantine != "" {
+				return fmt.Errorf("--quarantine is tool-wide; do not combine it with --host")
+			}
+			if providerName == "" && (packageName != "" || installWith != "") {
+				return fmt.Errorf("--provider is required when setting package or install-with")
+			}
+			name := args[0]
 			if hostScope {
-				if err := state.app.SetToolHostInstallSpec(args[0], providerName, packageName, installWith); err != nil {
+				if err := requireProvider(providerName); err != nil {
 					return err
 				}
-			} else {
-				if err := state.app.SetTool(args[0], providerName, packageName, installWith); err != nil {
+				if err := state.app.SetToolHostInstallSpec(name, providerName, packageName, installWith); err != nil {
+					return err
+				}
+			} else if providerName != "" {
+				if err := state.app.SetTool(name, providerName, packageName, installWith); err != nil {
+					return err
+				}
+			} else if quarantine == "" {
+				return requireProvider(providerName)
+			}
+			if quarantine != "" {
+				if err := state.app.SetToolQuarantine(name, quarantine); err != nil {
 					return err
 				}
 			}
@@ -73,17 +88,24 @@ func newToolsSetCmd(state *rootState) *cobra.Command {
 			if installWith != "" {
 				details += fmt.Sprintf(" via %q", installWith)
 			}
-			if packageName == "" && installWith == "" {
+			if quarantine != "" {
+				details += fmt.Sprintf(" with quarantine %q", quarantine)
+			}
+			if providerName == "" {
+				fmt.Fprintf(cmdOut(cmd), "Set logical tool %q quarantine to %q.\n", name, quarantine)
+				return nil
+			}
+			if packageName == "" && installWith == "" && quarantine == "" {
 				if hostScope {
-					fmt.Fprintf(cmdOut(cmd), "Set host override for logical tool %q with provider %q.\n", args[0], providerName)
+					fmt.Fprintf(cmdOut(cmd), "Set host override for logical tool %q with provider %q.\n", name, providerName)
 				} else {
-					fmt.Fprintf(cmdOut(cmd), "Set logical tool %q with provider %q.\n", args[0], providerName)
+					fmt.Fprintf(cmdOut(cmd), "Set logical tool %q with provider %q.\n", name, providerName)
 				}
 			} else {
 				if hostScope {
-					fmt.Fprintf(cmdOut(cmd), "Set host override for logical tool %q with %s.\n", args[0], details)
+					fmt.Fprintf(cmdOut(cmd), "Set host override for logical tool %q with %s.\n", name, details)
 				} else {
-					fmt.Fprintf(cmdOut(cmd), "Set logical tool %q with %s.\n", args[0], details)
+					fmt.Fprintf(cmdOut(cmd), "Set logical tool %q with %s.\n", name, details)
 				}
 			}
 			return nil
@@ -92,6 +114,7 @@ func newToolsSetCmd(state *rootState) *cobra.Command {
 	addProviderFlag(cmd, &providerName, "ecosystem provider for the logical tool")
 	cmd.Flags().StringVar(&packageName, "package", "", "package name to install when it differs from the logical name")
 	cmd.Flags().StringVar(&installWith, "install-with", "", "concrete provider or manager to use for this tool")
+	cmd.Flags().StringVar(&quarantine, "quarantine", "", "tool update quarantine duration, 0, or exempt")
 	cmd.Flags().BoolVar(&globalScope, "global", false, "write the default logical tool install spec")
 	cmd.Flags().BoolVar(&hostScope, "host", false, "write a host override for this machine")
 	cmd.ValidArgsFunction = completeToolNames(state)

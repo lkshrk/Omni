@@ -22,6 +22,7 @@ spec:
 omni tools set ripgrep --provider system
 omni tools set typescript --provider node --package typescript
 omni tools set black --provider python
+omni tools set ripgrep --quarantine exempt
 ```
 
 Assign the logical tool to a group:
@@ -95,10 +96,15 @@ you want the active host's configured desired state applied.
 ```sh
 omni tools upgrade ripgrep
 omni tools upgrade --all
+omni tools upgrade --all --force
 ```
 
 Upgrade uses the concrete manager recorded in cache when available. That avoids
 uninstalling with one manager after a different manager installed the package.
+When `settings.update_quarantine` is set, upgrades are skipped until the package
+manager's own metadata says the latest version is older than the configured
+duration. Missing PM date metadata blocks the update; `--force` is the explicit
+bypass for both single-tool and `--all` upgrades.
 
 If ownership looks wrong after manual package-manager work, run:
 

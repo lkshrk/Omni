@@ -11,11 +11,12 @@ import (
 type ToolViewSection string
 
 const (
-	ToolViewSectionUpdates   ToolViewSection = "updates"
-	ToolViewSectionOutOfSync ToolViewSection = "out-of-sync"
-	ToolViewSectionInstalled ToolViewSection = "installed"
-	ToolViewSectionIgnored   ToolViewSection = "ignored"
-	ToolViewSectionAvailable ToolViewSection = "available"
+	ToolViewSectionUpdates     ToolViewSection = "updates"
+	ToolViewSectionQuarantined ToolViewSection = "quarantined"
+	ToolViewSectionOutOfSync   ToolViewSection = "out-of-sync"
+	ToolViewSectionInstalled   ToolViewSection = "installed"
+	ToolViewSectionIgnored     ToolViewSection = "ignored"
+	ToolViewSectionAvailable   ToolViewSection = "available"
 )
 
 type ToolSyncStatus string
@@ -317,6 +318,9 @@ func toolViewSection(tool *database.ToolCache, context ToolClassificationContext
 	if context.Ignored {
 		return ToolViewSectionIgnored
 	}
+	if tool.Installed && tool.Outdated && tool.UpdateBlocked != "" {
+		return ToolViewSectionQuarantined
+	}
 	if tool.Installed && tool.Outdated {
 		return ToolViewSectionUpdates
 	}
@@ -412,15 +416,17 @@ func toolViewSectionOrder(section ToolViewSection) int {
 	switch section {
 	case ToolViewSectionUpdates:
 		return 0
-	case ToolViewSectionOutOfSync:
+	case ToolViewSectionQuarantined:
 		return 1
-	case ToolViewSectionInstalled:
+	case ToolViewSectionOutOfSync:
 		return 2
+	case ToolViewSectionInstalled:
+		return 3
 	case ToolViewSectionAvailable:
-		return 3
-	case ToolViewSectionIgnored:
 		return 4
+	case ToolViewSectionIgnored:
+		return 5
 	default:
-		return 3
+		return 4
 	}
 }

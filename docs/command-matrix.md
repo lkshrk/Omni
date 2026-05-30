@@ -79,8 +79,8 @@ Bootstrap flags:
 | `omni tools sync [group]` | yes | Packages, cache | `--dry-run` |
 | `omni tools sync --prune` | yes | Packages, cache | `--dry-run` |
 | `omni tools sync --all` | yes | Config, packages, cache | `--dry-run` |
-| `omni tools upgrade [tool]` | yes | Packages, cache | `omni tools list [tool]` |
-| `omni tools upgrade --all` | yes | Packages, cache | `omni tools list` |
+| `omni tools upgrade [tool]` | yes | Packages, cache | `omni tools list [tool]`; `--force` bypasses update quarantine |
+| `omni tools upgrade --all` | yes | Packages, cache | `omni tools list`; `--force` bypasses update quarantine |
 | `omni tools delete <tool>` | yes | Config, packages, cache | `omni tools list <tool>` |
 | `omni tools import` | yes | Config | `--dry-run` |
 | `omni tools switch <tool>` | yes | Config, packages, cache | `omni tools list <tool>` |

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/lkshrk/omni/internal/executor"
 )
@@ -128,6 +129,14 @@ type InstalledEntry struct {
 	ConcreteManager string // e.g. "uv", "pip3", "pip"
 }
 
+// OutdatedInfo describes a PM-reported update, including optional PM metadata
+// for the latest version.
+type OutdatedInfo struct {
+	LatestVersion string
+	AvailableAt   *time.Time
+	DateSource    string
+}
+
 // MultiManagerBulkChecker is optionally implemented by ecosystem providers that
 // delegate to multiple concrete backends (e.g. python → uv/pip3/pip).
 // Unlike BulkChecker (which only probes the currently-active backend),
@@ -145,11 +154,23 @@ type OutdatedChecker interface {
 	OutdatedMap(ctx context.Context) (map[string]string, error)
 }
 
+// OutdatedInfoChecker is optionally implemented by providers that can attach
+// package-manager metadata to outdated results.
+type OutdatedInfoChecker interface {
+	OutdatedInfoMap(ctx context.Context) (map[string]OutdatedInfo, error)
+}
+
 // ManagerOutdatedChecker is optionally implemented by ecosystem providers that
 // can attribute outdated packages to their concrete managers.
 type ManagerOutdatedChecker interface {
 	// OutdatedByManager returns manager→lowercase-name→latestVersion.
 	OutdatedByManager(ctx context.Context) (map[string]map[string]string, error)
+}
+
+// ManagerOutdatedInfoChecker is optionally implemented by ecosystem providers
+// that can preserve manager attribution and PM update metadata.
+type ManagerOutdatedInfoChecker interface {
+	OutdatedInfoByManager(ctx context.Context) (map[string]map[string]OutdatedInfo, error)
 }
 
 // ManagerUpgrader is optionally implemented by ecosystem providers that can upgrade

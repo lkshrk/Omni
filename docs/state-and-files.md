@@ -6,7 +6,7 @@ Omni has two durable sources of truth and one disposable local cache.
 | --- | --- | --- | --- |
 | Config | `~/.config/omni/settings.json` | yes | Tools, groups, hosts, settings, and dotfile declarations. |
 | Dotfiles repo | configured by `settings.dots_repo` | yes | Git repo containing GNU Stow packages. |
-| Cache | `~/.cache/omni/omni.db` | no | Observed installed tools, outdated state, privilege metadata, and local history. |
+| Cache | `~/.cache/omni/omni.db` | no | Observed installed tools, outdated state, PM update-date metadata, privilege metadata, and local history. |
 
 If those sources disagree, prefer `settings.json` and the dotfiles repo. The
 cache can be rebuilt.

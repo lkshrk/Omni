@@ -44,11 +44,12 @@ const (
 type section int
 
 const (
-	sectionUpdates   section = iota // 0 - tools with updates available
-	sectionOutOfSync                // 1 - config-missing / orphan / wrong-provider
-	sectionInstalled                // 2 - installed, up-to-date
-	sectionAvailable                // 3 - available to install (declared in config or found via search)
-	sectionIgnored                  // 4 - in the active host's ignore list (rendered last, dimmed)
+	sectionUpdates     section = iota // 0 - tools with updates available
+	sectionQuarantined                // 1 - tools with deferred updates
+	sectionOutOfSync                  // 2 - config-missing / orphan / wrong-provider
+	sectionInstalled                  // 3 - installed, up-to-date
+	sectionAvailable                  // 4 - available to install (declared in config or found via search)
+	sectionIgnored                    // 5 - in the active host's ignore list (rendered last, dimmed)
 )
 
 // syncStatus is the out-of-sync sub-category for a tool in sectionOutOfSync.
@@ -810,6 +811,8 @@ func sectionFromToolView(sectionName app.ToolViewSection) section {
 	switch sectionName {
 	case app.ToolViewSectionUpdates:
 		return sectionUpdates
+	case app.ToolViewSectionQuarantined:
+		return sectionQuarantined
 	case app.ToolViewSectionOutOfSync:
 		return sectionOutOfSync
 	case app.ToolViewSectionInstalled:

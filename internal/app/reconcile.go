@@ -15,6 +15,7 @@ import (
 type ReconcileOptions struct {
 	CommitMessage  string
 	SkipPrivileged bool
+	Force          bool
 	Progress       func(string)
 	ToolProgress   func(isync.ProgressEvent)
 }
@@ -34,6 +35,7 @@ type ReconcileSummary struct {
 	Installed     int
 	Claimed       int
 	Upgraded      int
+	Quarantined   int
 	DotOps        int
 	DotsCommitted bool
 	DotsSkipped   string
@@ -59,7 +61,9 @@ func SummarizeReconcile(result *ReconcileResult) ReconcileSummary {
 		DotsSkipped:   result.DotsSkipped,
 	}
 	if result.UpgradeAll != nil {
-		summary.Upgraded = len(result.UpgradeAll.Upgraded)
+		upgradeSummary := SummarizeUpgradeAll(result.UpgradeAll)
+		summary.Upgraded = upgradeSummary.Upgraded
+		summary.Quarantined = upgradeSummary.Quarantined
 	}
 	return summary
 }
@@ -115,6 +119,7 @@ func (a *App) Reconcile(ctx context.Context, opts ReconcileOptions) (*ReconcileR
 	a.reconcileProgress(opts, "upgrading tools...")
 	upgradeResult, err := a.UpgradeAllDetailedWithOptions(ctx, opts.Progress, opts.ToolProgress, UpgradeAllOptions{
 		SkipPrivileged: opts.SkipPrivileged,
+		Force:          opts.Force,
 	})
 	result.UpgradeAll = upgradeResult
 	if err != nil {

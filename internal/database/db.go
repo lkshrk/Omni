@@ -22,25 +22,29 @@ import (
 type ToolCache struct {
 	bun.BaseModel `bun:"table:tool_cache,alias:tc"`
 
-	ID              int64             `bun:"id,pk,autoincrement"`
-	Name            string            `bun:"name,notnull"`
-	Provider        string            `bun:"provider,notnull"`
-	Package         string            `bun:"package,notnull"`
-	Installed       bool              `bun:"installed,notnull,default:false"`
-	InstalledWith   string            `bun:"installed_with,notnull,default:''"`
-	Version         sql.NullString    `bun:"version"`
-	Outdated        bool              `bun:"outdated,notnull,default:false"`
-	LatestVersion   sql.NullString    `bun:"latest_version"`
-	Description     sql.NullString    `bun:"description"`
-	LastChecked     time.Time         `bun:"last_checked,notnull"`
-	FailedAt        *time.Time        `bun:"failed_at"`
-	FailureCount    int               `bun:"failure_count,notnull,default:0"`
-	LastError       sql.NullString    `bun:"last_error"`
-	Tracked         bool              `bun:"tracked,notnull,default:true"`
-	Privilege       string            `bun:"privilege,notnull,default:''"`
-	PrivilegeReason sql.NullString    `bun:"privilege_reason"`
-	PrivilegeAt     *time.Time        `bun:"privilege_at"`
-	Options         map[string]string `bun:"-"`
+	ID                 int64             `bun:"id,pk,autoincrement"`
+	Name               string            `bun:"name,notnull"`
+	Provider           string            `bun:"provider,notnull"`
+	Package            string            `bun:"package,notnull"`
+	Installed          bool              `bun:"installed,notnull,default:false"`
+	InstalledWith      string            `bun:"installed_with,notnull,default:''"`
+	Version            sql.NullString    `bun:"version"`
+	Outdated           bool              `bun:"outdated,notnull,default:false"`
+	LatestVersion      sql.NullString    `bun:"latest_version"`
+	Description        sql.NullString    `bun:"description"`
+	LastChecked        time.Time         `bun:"last_checked,notnull"`
+	FailedAt           *time.Time        `bun:"failed_at"`
+	FailureCount       int               `bun:"failure_count,notnull,default:0"`
+	LastError          sql.NullString    `bun:"last_error"`
+	Tracked            bool              `bun:"tracked,notnull,default:true"`
+	Privilege          string            `bun:"privilege,notnull,default:''"`
+	PrivilegeReason    sql.NullString    `bun:"privilege_reason"`
+	PrivilegeAt        *time.Time        `bun:"privilege_at"`
+	Options            map[string]string `bun:"-"`
+	UpdateBlocked      string            `bun:"-"`
+	UpdateBlockedUntil *time.Time        `bun:"-"`
+	UpdateAvailableAt  *time.Time        `bun:"-"`
+	UpdateDateSource   string            `bun:"-"`
 }
 
 // ToolMetadata is provider registry metadata cached independently from
@@ -57,6 +61,21 @@ type ToolMetadata struct {
 	Privilege       string         `bun:"privilege,notnull,default:''"`
 	PrivilegeReason sql.NullString `bun:"privilege_reason"`
 	UpdatedAt       time.Time      `bun:"updated_at,notnull"`
+}
+
+// UpdateMetadata is package-manager metadata for a concrete package version.
+// It is keyed by the concrete provider/manager because availability timestamps
+// are only meaningful for the PM that reported them.
+type UpdateMetadata struct {
+	bun.BaseModel `bun:"table:update_metadata,alias:um"`
+
+	ID          int64     `bun:"id,pk,autoincrement"`
+	Provider    string    `bun:"provider,notnull"`
+	Package     string    `bun:"package,notnull"`
+	Version     string    `bun:"version,notnull"`
+	AvailableAt time.Time `bun:"available_at,notnull"`
+	DateSource  string    `bun:"date_source,notnull"`
+	CheckedAt   time.Time `bun:"checked_at,notnull"`
 }
 
 // LocalState stores machine-local app markers. These rows are intentionally in
@@ -197,6 +216,13 @@ func (db *DB) Migrate(ctx context.Context) error {
 		return fmt.Errorf("creating tool_metadata table: %w", err)
 	}
 	_, err = db.bun.NewCreateTable().
+		Model((*UpdateMetadata)(nil)).
+		IfNotExists().
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("creating update_metadata table: %w", err)
+	}
+	_, err = db.bun.NewCreateTable().
 		Model((*LocalState)(nil)).
 		IfNotExists().
 		Exec(ctx)
@@ -229,6 +255,12 @@ func (db *DB) Migrate(ctx context.Context) error {
 		 ON tool_metadata (name, provider, package)`)
 	if err != nil {
 		return fmt.Errorf("creating metadata unique index: %w", err)
+	}
+	_, err = db.bun.ExecContext(ctx,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_update_metadata_provider_package_version
+		 ON update_metadata (provider, package, version)`)
+	if err != nil {
+		return fmt.Errorf("creating update metadata unique index: %w", err)
 	}
 	if _, err := db.bun.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_dot_status_cache_position ON dot_status_cache (position)`); err != nil {
 		return fmt.Errorf("creating dot status cache position index: %w", err)
@@ -446,6 +478,80 @@ func (db *DB) UpsertMetadataBatch(ctx context.Context, updates []MetadataUpdate)
 		}
 		return nil
 	})
+}
+
+func (db *DB) UpsertUpdateMetadata(ctx context.Context, metadata UpdateMetadata) error {
+	if strings.TrimSpace(metadata.Provider) == "" {
+		return fmt.Errorf("missing provider for update metadata")
+	}
+	if strings.TrimSpace(metadata.Package) == "" {
+		return fmt.Errorf("missing package for update metadata")
+	}
+	if strings.TrimSpace(metadata.Version) == "" {
+		return fmt.Errorf("missing version for update metadata")
+	}
+	if metadata.AvailableAt.IsZero() {
+		return fmt.Errorf("missing available_at for update metadata")
+	}
+	if metadata.CheckedAt.IsZero() {
+		metadata.CheckedAt = time.Now()
+	}
+	if _, err := db.bun.NewInsert().
+		Model(&metadata).
+		On("CONFLICT (provider, package, version) DO UPDATE").
+		Set("available_at = EXCLUDED.available_at").
+		Set("date_source = EXCLUDED.date_source").
+		Set("checked_at = EXCLUDED.checked_at").
+		Exec(ctx); err != nil {
+		return fmt.Errorf("upserting update metadata for %s/%s@%s: %w", metadata.Provider, metadata.Package, metadata.Version, err)
+	}
+	return nil
+}
+
+func (db *DB) UpsertUpdateMetadataBatch(ctx context.Context, updates []UpdateMetadata) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	return db.bun.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		for _, update := range updates {
+			if strings.TrimSpace(update.Provider) == "" {
+				return fmt.Errorf("missing provider for update metadata")
+			}
+			if strings.TrimSpace(update.Package) == "" {
+				return fmt.Errorf("missing package for update metadata")
+			}
+			if strings.TrimSpace(update.Version) == "" {
+				return fmt.Errorf("missing version for update metadata")
+			}
+			if update.AvailableAt.IsZero() {
+				return fmt.Errorf("missing available_at for update metadata")
+			}
+			if update.CheckedAt.IsZero() {
+				update.CheckedAt = time.Now()
+			}
+			if _, err := tx.NewInsert().
+				Model(&update).
+				On("CONFLICT (provider, package, version) DO UPDATE").
+				Set("available_at = EXCLUDED.available_at").
+				Set("date_source = EXCLUDED.date_source").
+				Set("checked_at = EXCLUDED.checked_at").
+				Exec(ctx); err != nil {
+				return fmt.Errorf("upserting update metadata for %s/%s@%s: %w", update.Provider, update.Package, update.Version, err)
+			}
+		}
+		return nil
+	})
+}
+
+func (db *DB) GetUpdateMetadata(ctx context.Context, providerName, pkg, version string) (*UpdateMetadata, error) {
+	var metadata UpdateMetadata
+	if err := db.bun.NewSelect().
+		Model(&metadata).
+		Where("provider = ? AND package = ? AND version = ?", providerName, pkg, version).
+		Scan(ctx); err != nil {
+		return nil, err
+	}
+	return &metadata, nil
 }
 
 // UpdateOutdated sets the outdated flag and latest version for a tool.

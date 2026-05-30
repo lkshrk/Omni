@@ -43,6 +43,10 @@ omni settings reset
 omni settings reset-cache
 ```
 
+If update quarantine is enabled, `tools upgrade --all` skips quarantined updates
+as a non-error. Use `--force` only when you intentionally want to bypass the
+quarantine or missing PM-date block.
+
 Use `--dry-run` where the command supports it:
 
 ```sh

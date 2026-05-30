@@ -2,14 +2,14 @@
 
 This page explains the shape of `settings.json`. For narrative examples, use
 [Configuration](configuration.md). For the machine-readable schema, use
-[`spec/omni.settings.v1.schema.json`](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v1.schema.json).
+[`spec/omni.settings.v2.schema.json`](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v2.schema.json).
 
 ## Root Object
 
 | Key | Type | Required | Description |
 | --- | --- | --- | --- |
 | `$schema` | string | no | Editor schema URI written by Omni. |
-| `version` | integer | yes | Settings format version. Current version is `1`. |
+| `version` | integer | yes | Settings format version. Current version is `2`. |
 | `settings` | object | no | Global defaults. |
 | `host_settings` | object | no | Per-host setting overrides. |
 | `tools` | object | no | Logical tool specs keyed by logical name. |
@@ -22,6 +22,8 @@ This page explains the shape of `settings.json`. For narrative examples, use
 | Key | Type | Description |
 | --- | --- | --- |
 | `auto_import` | boolean | Add newly discovered installed tools during scoped plain sync. Defaults to `false` when absent. |
+| `update_quarantine` | string | Duration to defer upgrades after PM-reported latest-version availability, such as `2d` or `48h`. Omitted or empty means disabled. |
+| `provider_update_quarantine` | object | Duration overrides keyed by logical provider or concrete provider/manager. |
 | `ecosystems` | object | Manager choices for `system`, `node`, and `python`. |
 | `dots_repo` | string | Local path to the dotfiles Git repo. |
 | `dots_disabled` | boolean | Disable dotfile sync for this settings scope. |
@@ -54,7 +56,8 @@ This page explains the shape of `settings.json`. For narrative examples, use
 ```
 
 Host settings can override `ecosystems`, `dots_repo`, `dots_disabled`, and
-`disabled_providers`. They do not override `auto_import` or `dots_git`.
+`disabled_providers`. They do not override `auto_import`,
+`update_quarantine`, `provider_update_quarantine`, or `dots_git`.
 
 ## `tools`
 
@@ -74,6 +77,7 @@ Host settings can override `ecosystems`, `dots_repo`, `dots_disabled`, and
 | `provider` | string | Portable ecosystem provider or concrete provider. Prefer `system`, `node`, or `python`. |
 | `package` | string | Provider package name. Defaults to the logical tool name. |
 | `install_with` | string | Concrete manager override for this tool. |
+| `quarantine` | string | Tool-specific update quarantine override. Use a duration, `0`, or `exempt`. |
 | `options` | object | Provider-specific key-value options. |
 | `taps` | array | Homebrew taps required before install. |
 | `ignore` | boolean | Keep the tool in config but skip management. |

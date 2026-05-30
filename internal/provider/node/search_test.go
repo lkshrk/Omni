@@ -2,10 +2,14 @@ package node
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/lkshrk/omni/internal/executor"
 )
@@ -76,4 +80,44 @@ func TestSearch_QueryEscaped(t *testing.T) {
 	if got != "text=hello+world&size=20" {
 		t.Errorf("query = %q, want text=hello+world&size=20", got)
 	}
+}
+
+func TestOutdatedInfoByManager_UsesNPMRegistryTime(t *testing.T) {
+	outdated := `{"typescript":{"latest":"5.4.0"}}`
+	client := staticJSONClient(`{"time":{"5.4.0":"2026-05-28T12:00:00.000Z"}}`)
+
+	m := executor.NewMatchMock().WithFallback(executor.MockCall{Err: errors.New("not found")})
+	m.AddRule(executor.MatchRule{Pattern: "pnpm --version", Response: executor.MockCall{Stdout: "10.0.0"}})
+	m.AddRule(executor.MatchRule{Pattern: "pnpm outdated -g --json", Response: executor.MockCall{Stdout: outdated, Err: errors.New("exit 1")}})
+	p := newWithRegistry(m, "pnpm", "https://registry.test", client)
+
+	got, err := p.OutdatedInfoByManager(context.Background())
+	if err != nil {
+		t.Fatalf("OutdatedInfoByManager: %v", err)
+	}
+	info := got["pnpm"]["typescript"]
+	if info.LatestVersion != "5.4.0" {
+		t.Fatalf("LatestVersion = %q, want 5.4.0", info.LatestVersion)
+	}
+	want := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
+	if info.AvailableAt == nil || !info.AvailableAt.Equal(want) || info.DateSource != "npm_registry_time" {
+		t.Fatalf("info = %+v, want npm registry time %s", info, want)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func staticJSONClient(body string) *http.Client {
+	return &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Request:    req,
+		}, nil
+	})}
 }

@@ -1,0 +1,85 @@
+# omni tools upgrade --all applies missing-metadata quarantine across providers
+exec omni-seed-cache apt-tool system apt-tool 1.0.0 2.0.0 apt
+exec omni-seed-cache apk-tool system apk-tool 1.0.0 2.0.0 apk
+exec omni-seed-cache brew-tool system brew-tool 1.0.0 2.0.0 brew
+exec omni-seed-cache dnf-tool system dnf-tool 1.0.0 2.0.0 dnf
+exec omni-seed-cache pacman-tool system pacman-tool 1.0.0 2.0.0 pacman
+exec omni-seed-cache zypper-tool system zypper-tool 1.0.0 2.0.0 zypper
+exec omni-seed-cache bun-tool node bun-tool 1.0.0 2.0.0 bun
+exec omni-seed-cache npm-tool node npm-tool 1.0.0 2.0.0 npm
+exec omni-seed-cache pnpm-tool node pnpm-tool 1.0.0 2.0.0 pnpm
+exec omni-seed-cache uv-tool python uv-tool 1.0.0 2.0.0 uv
+exec omni-seed-cache pip3-tool python pip3-tool 1.0.0 2.0.0 pip3
+exec omni-seed-cache pip-tool python pip-tool 1.0.0 2.0.0 pip
+exec omni-mark-outdated-refresh-fresh
+
+exec omni --config settings.json tools list --state blocked-metadata --format json
+stdout '"name":"apt-tool"'
+stdout '"name":"apk-tool"'
+stdout '"name":"brew-tool"'
+stdout '"name":"dnf-tool"'
+stdout '"name":"pacman-tool"'
+stdout '"name":"zypper-tool"'
+stdout '"name":"bun-tool"'
+stdout '"name":"npm-tool"'
+stdout '"name":"pnpm-tool"'
+stdout '"name":"uv-tool"'
+stdout '"name":"pip3-tool"'
+stdout '"name":"pip-tool"'
+
+exec omni --config settings.json tools upgrade --all
+stdout 'skipped: apt-tool \(2.0.0\) \(system\): update quarantined'
+stdout 'skipped: apk-tool \(2.0.0\) \(system\): update quarantined'
+stdout 'skipped: brew-tool \(2.0.0\) \(system\): update quarantined'
+stdout 'skipped: dnf-tool \(2.0.0\) \(system\): update quarantined'
+stdout 'skipped: pacman-tool \(2.0.0\) \(system\): update quarantined'
+stdout 'skipped: zypper-tool \(2.0.0\) \(system\): update quarantined'
+stdout 'skipped: bun-tool \(2.0.0\) \(node\): update quarantined'
+stdout 'skipped: npm-tool \(2.0.0\) \(node\): update quarantined'
+stdout 'skipped: pnpm-tool \(2.0.0\) \(node\): update quarantined'
+stdout 'skipped: uv-tool \(2.0.0\) \(python\): update quarantined'
+stdout 'skipped: pip3-tool \(2.0.0\) \(python\): update quarantined'
+stdout 'skipped: pip-tool \(2.0.0\) \(python\): update quarantined'
+stdout '12 updates quarantined\.'
+
+-- settings.json --
+{
+  "settings": {
+    "update_quarantine": "2d"
+  },
+  "hosts": { "testhost": [] },
+  "tools": {
+    "apt-tool": { "provider": "system", "install_with": "apt" },
+    "apk-tool": { "provider": "system", "install_with": "apk" },
+    "brew-tool": { "provider": "system", "install_with": "brew" },
+    "dnf-tool": { "provider": "system", "install_with": "dnf" },
+    "pacman-tool": { "provider": "system", "install_with": "pacman" },
+    "zypper-tool": { "provider": "system", "install_with": "zypper" },
+    "bun-tool": { "provider": "node", "install_with": "bun" },
+    "npm-tool": { "provider": "node", "install_with": "npm" },
+    "pnpm-tool": { "provider": "node", "install_with": "pnpm" },
+    "uv-tool": { "provider": "python", "install_with": "uv" },
+    "pip3-tool": { "provider": "python", "install_with": "pip3" },
+    "pip-tool": { "provider": "python", "install_with": "pip" }
+  },
+  "groups": [
+    {
+      "name": "testhost",
+      "special": "host",
+      "tools": [
+        "apt-tool",
+        "apk-tool",
+        "brew-tool",
+        "dnf-tool",
+        "pacman-tool",
+        "zypper-tool",
+        "bun-tool",
+        "npm-tool",
+        "pnpm-tool",
+        "uv-tool",
+        "pip3-tool",
+        "pip-tool"
+      ]
+    }
+  ]
+}

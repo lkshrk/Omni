@@ -58,6 +58,34 @@ func (s *managerOutdatedStub) OutdatedByManager(_ context.Context) (map[string]m
 	return s.byManager, nil
 }
 
+type managerOutdatedInfoStub struct {
+	stubProvider
+	byManager map[string]map[string]provider.OutdatedInfo
+	err       error
+}
+
+func (s *managerOutdatedInfoStub) OutdatedMap(_ context.Context) (map[string]string, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	out := make(map[string]string)
+	for _, m := range s.byManager {
+		for name, info := range m {
+			if _, exists := out[name]; !exists {
+				out[name] = info.LatestVersion
+			}
+		}
+	}
+	return out, nil
+}
+
+func (s *managerOutdatedInfoStub) OutdatedInfoByManager(_ context.Context) (map[string]map[string]provider.OutdatedInfo, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.byManager, nil
+}
+
 // TestRefreshProviderOutdated_UnknownProvider verifies that an unregistered
 // provider name is silently skipped (returns nil, no panic).
 func TestRefreshProviderOutdated_UnknownProvider(t *testing.T) {
@@ -216,6 +244,46 @@ func TestRefreshProviderOutdated_UsesInstalledWithManager(t *testing.T) {
 	}
 	if prettier.Outdated {
 		t.Fatalf("prettier.Outdated = true, want false because pnpm map had no update")
+	}
+}
+
+func TestRefreshProviderOutdated_PersistsManagerUpdateMetadata(t *testing.T) {
+	availableAt := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
+	prov := &managerOutdatedInfoStub{
+		stubProvider: stubProvider{name: "node", available: true},
+		byManager: map[string]map[string]provider.OutdatedInfo{
+			"npm": {
+				"typescript": {
+					LatestVersion: "5.4.0",
+					AvailableAt:   &availableAt,
+					DateSource:    "npm_registry_time",
+				},
+			},
+		},
+	}
+	a, _ := newImportApp(t, prov)
+	ctx := context.Background()
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name:          "typescript",
+		Provider:      "node",
+		Package:       "typescript",
+		Installed:     true,
+		InstalledWith: "npm",
+		LastChecked:   time.Now(),
+	}); err != nil {
+		t.Fatalf("db.Upsert: %v", err)
+	}
+
+	if err := a.RefreshProviderOutdated(ctx, "node"); err != nil {
+		t.Fatalf("RefreshProviderOutdated: %v", err)
+	}
+
+	metadata, err := a.DB().GetUpdateMetadata(ctx, "npm", "typescript", "5.4.0")
+	if err != nil {
+		t.Fatalf("GetUpdateMetadata: %v", err)
+	}
+	if !metadata.AvailableAt.Equal(availableAt) || metadata.DateSource != "npm_registry_time" {
+		t.Fatalf("metadata = %+v, want npm_registry_time at %s", metadata, availableAt)
 	}
 }
 

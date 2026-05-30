@@ -695,6 +695,10 @@ func (a *App) removeToolFromConfig(name, providerName string) error {
 
 // Upgrade upgrades a single tool in-place.
 func (a *App) Upgrade(ctx context.Context, name, providerName string) error {
+	return a.UpgradeWithOptions(ctx, name, providerName, UpgradeOptions{})
+}
+
+func (a *App) UpgradeWithOptions(ctx context.Context, name, providerName string, opts UpgradeOptions) error {
 	_, ok := a.registry.Get(providerName)
 	if !ok {
 		return fmt.Errorf("unknown provider %q", providerName)
@@ -733,6 +737,19 @@ func (a *App) Upgrade(ctx context.Context, name, providerName string) error {
 		}
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("load cached install owner for %s/%s: %w", providerName, name, err)
+	}
+	if !opts.Force && cached != nil {
+		cfg, cfgErr := a.loadConfig()
+		if cfgErr != nil {
+			return cfgErr
+		}
+		decision, decisionErr := a.updateQuarantineDecision(ctx, cfg, cached, time.Now())
+		if decisionErr != nil {
+			return decisionErr
+		}
+		if decision.Blocked {
+			return quarantineBlockedError(name, decision)
+		}
 	}
 
 	prov, opProvider, manager, ok := a.lifecycleProvider(providerName, installedWith)
@@ -833,7 +850,14 @@ func (a *App) UpgradeAllDetailedWithOptions(ctx context.Context, progress func(s
 	if err != nil {
 		return nil, fmt.Errorf("listing tools: %w", err)
 	}
+	cfg, err := a.loadConfig()
+	if err != nil {
+		return nil, err
+	}
 	tools = filterIgnoredToolCaches(tools, a.ignoredToolSetBestEffort())
+	if !opts.Force {
+		a.annotateUpdateQuarantine(ctx, cfg, tools)
+	}
 	result := &UpgradeAllResult{}
 	var errs []error
 	for _, t := range tools {
@@ -842,12 +866,29 @@ func (a *App) UpgradeAllDetailedWithOptions(ctx context.Context, progress func(s
 		}
 		targetVersion := toolTargetVersion(t)
 		displayName := ToolNameWithVersion(t.Name, targetVersion)
-		if progress != nil {
-			progress("upgrading " + displayName + "…")
-		}
 		tool := provider.Tool{Name: t.Name, Provider: t.Provider, Package: t.Package}
 		if tool.Package == "" {
 			tool.Package = t.Name
+		}
+		if !opts.Force && t.UpdateBlocked != "" {
+			if progress != nil {
+				progress("skipping " + displayName + " (update quarantined)…")
+			}
+			result.Quarantined = append(result.Quarantined, QuarantinedUpdate{
+				Name:         t.Name,
+				Provider:     t.Provider,
+				Package:      t.Package,
+				Version:      targetVersion,
+				Reason:       t.UpdateBlocked,
+				BlockedUntil: t.UpdateBlockedUntil,
+			})
+			if toolProgress != nil {
+				toolProgress(isync.ProgressEvent{Tool: tool, Message: "Skipped upgrading " + t.Name + ": update quarantined", TargetVersion: targetVersion, Done: true})
+			}
+			continue
+		}
+		if progress != nil {
+			progress("upgrading " + displayName + "…")
 		}
 		if toolProgress != nil {
 			toolProgress(isync.ProgressEvent{Tool: tool, Message: "Upgrading " + t.Name + "…", TargetVersion: targetVersion})
@@ -870,7 +911,7 @@ func (a *App) UpgradeAllDetailedWithOptions(ctx context.Context, progress func(s
 				continue
 			}
 		}
-		if err := a.Upgrade(ctx, t.Name, t.Provider); err != nil {
+		if err := a.UpgradeWithOptions(ctx, t.Name, t.Provider, UpgradeOptions{Force: opts.Force}); err != nil {
 			if toolProgress != nil {
 				toolProgress(isync.ProgressEvent{Tool: tool, Message: "Failed upgrading " + t.Name, TargetVersion: targetVersion, Err: err, Done: true})
 			}

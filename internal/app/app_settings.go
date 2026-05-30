@@ -37,15 +37,17 @@ func (a *App) QuerySettings(key string) (map[string]any, error) {
 		return nil, err
 	}
 	values := map[string]any{
-		"auto_import":          settings.AutoImport,
-		"node.manager":         settings.EcosystemManager(provider.EcosystemNode),
-		"python.manager":       settings.EcosystemManager(provider.EcosystemPython),
-		"system.priority":      settings.EcosystemPriority(provider.EcosystemSystem),
-		"dots_repo":            settings.DotsRepo,
-		"dots_disabled":        settings.DotsDisabled,
-		"dots_git.auto_commit": settings.DotsGit.AutoCommit,
-		"dots_git.auto_push":   settings.DotsGit.AutoPush,
-		"disabled_providers":   settings.DisabledProviders,
+		"auto_import":                settings.AutoImport,
+		"update_quarantine":          settings.UpdateQuarantine,
+		"provider_update_quarantine": settings.ProviderUpdateQuarantine,
+		"node.manager":               settings.EcosystemManager(provider.EcosystemNode),
+		"python.manager":             settings.EcosystemManager(provider.EcosystemPython),
+		"system.priority":            settings.EcosystemPriority(provider.EcosystemSystem),
+		"dots_repo":                  settings.DotsRepo,
+		"dots_disabled":              settings.DotsDisabled,
+		"dots_git.auto_commit":       settings.DotsGit.AutoCommit,
+		"dots_git.auto_push":         settings.DotsGit.AutoPush,
+		"disabled_providers":         settings.DisabledProviders,
 	}
 	if key == "" {
 		return values, nil
@@ -273,6 +275,20 @@ func (a *App) ApplySettingsChange(_ context.Context, settings config.Settings, c
 
 func (a *App) applySettingValue(settings *config.Settings, key, value string) (string, error) {
 	canonical := CanonicalSettingKey(key)
+	if strings.HasPrefix(canonical, "provider_update_quarantine.") {
+		providerName := strings.TrimPrefix(canonical, "provider_update_quarantine.")
+		if providerName == "" {
+			return "", fmt.Errorf("missing provider for %q", key)
+		}
+		if _, err := parseQuarantineDuration(value); err != nil {
+			return "", err
+		}
+		if settings.ProviderUpdateQuarantine == nil {
+			settings.ProviderUpdateQuarantine = make(map[string]string)
+		}
+		settings.ProviderUpdateQuarantine[providerName] = value
+		return canonical, nil
+	}
 	switch canonical {
 	case "auto_import":
 		parsed, err := parseSettingBool(canonical, value)
@@ -280,6 +296,11 @@ func (a *App) applySettingValue(settings *config.Settings, key, value string) (s
 			return "", err
 		}
 		settings.AutoImport = parsed
+	case "update_quarantine":
+		if _, err := parseQuarantineDuration(value); err != nil {
+			return "", err
+		}
+		settings.UpdateQuarantine = value
 	case provider.EcosystemNode + ".manager":
 		manager, err := a.parseSettingManager(provider.EcosystemNode, value)
 		if err != nil {
@@ -642,6 +663,17 @@ func cloneSettingsStringSlice(in []string) []string {
 	return append([]string{}, in...)
 }
 
+func cloneSettingsStringMap(in map[string]string) map[string]string {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
 func settingsProviderSummary(settings config.Settings, providers []string) SettingsProviderSummary {
 	providerSet := make(map[string]struct{}, len(providers))
 	for _, name := range providers {
@@ -860,8 +892,10 @@ func (a *App) SaveSettings(_ context.Context, s config.Settings) error {
 
 		return patchDoc{
 			Settings: config.Settings{
-				AutoImport: s.AutoImport,
-				DotsGit:    s.DotsGit,
+				AutoImport:               s.AutoImport,
+				UpdateQuarantine:         s.UpdateQuarantine,
+				ProviderUpdateQuarantine: cloneSettingsStringMap(s.ProviderUpdateQuarantine),
+				DotsGit:                  s.DotsGit,
 			},
 			HostSettings: hostSettingsPatchDoc(cfg.HostSettings),
 		}, nil

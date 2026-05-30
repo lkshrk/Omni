@@ -80,12 +80,14 @@ Common tool flags:
 | --- | --- | --- |
 | `--provider <provider>` | `add`, `set`, `install`, `list`, `search`, `sync`, `switch --reinstall-default` | Select or filter a provider. |
 | `--install-with <manager>` | `add`, `set` | Pin a logical tool to a concrete manager. |
+| `--quarantine <duration>` | `set` | Set a tool-level update quarantine duration, `0`, or `exempt`. |
 | `--group <group>` | `add`, `install`, `sync`, `import`, `list` | Assign, target, or filter by group. |
 | `--host` | `set` | Boolean flag; write the override for the current active host. It does not take a hostname value. |
 | `--global` | `set` | Write the default logical install spec. |
 | `--dry-run` | `sync`, `import`, `consolidate`, `normalize` | Preview supported changes. |
 | `--prune` | `sync` | Remove local installations no longer in config. Cannot be combined with `sync --all`. |
 | `--all` | `sync`, `upgrade` | Bulk mode for the command. For sync, also claims discovered tools. |
+| `--force` | `upgrade`, `reconcile` | Bypass update quarantine for upgrades. |
 | `--from <provider>`, `--to <provider>` | `switch` | Move one tool between providers. |
 | `--reinstall-default` | `switch` | Reinstall one tool with its configured default provider. |
 

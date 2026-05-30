@@ -206,6 +206,28 @@ func (p *Provider) OutdatedMap(ctx context.Context) (map[string]string, error) {
 	return m, nil
 }
 
+// OutdatedInfoMap returns outdated package versions plus PyPI upload timestamps
+// for the latest version when PyPI exposes them.
+func (p *Provider) OutdatedInfoMap(ctx context.Context) (map[string]provider.OutdatedInfo, error) {
+	outdated, err := p.OutdatedMap(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]provider.OutdatedInfo, len(outdated))
+	for name, latest := range outdated {
+		info := provider.OutdatedInfo{LatestVersion: latest}
+		if availableAt, err := p.pypiVersionAvailableAt(ctx, name, latest); err == nil && availableAt != nil {
+			info.AvailableAt = availableAt
+			info.DateSource = "pypi_upload_time"
+		}
+		result[name] = info
+	}
+	if len(result) == 0 {
+		return nil, nil
+	}
+	return result, nil
+}
+
 // BulkDescribe fetches descriptions for multiple tools via a single `pip show` call.
 // Implements provider.BulkDescriber.
 func (p *Provider) BulkDescribe(ctx context.Context, tools []provider.Tool) (map[string]string, error) {
@@ -287,6 +309,62 @@ type pypiInfoResponse struct {
 		Version string `json:"version"`
 		Summary string `json:"summary"`
 	} `json:"info"`
+	Releases map[string][]struct {
+		UploadTime        string `json:"upload_time"`
+		UploadTimeISO8601 string `json:"upload_time_iso_8601"`
+	} `json:"releases"`
+}
+
+func (p *Provider) pypiVersionAvailableAt(ctx context.Context, pkg, version string) (*time.Time, error) {
+	if pkg == "" || version == "" {
+		return nil, nil
+	}
+	var payload pypiInfoResponse
+	status, err := provider.FetchJSON(ctx, p.httpClient, p.pypiURL+"/pypi/"+url.PathEscape(pkg)+"/json", &payload)
+	if status == 0 {
+		return nil, fmt.Errorf("PyPI release metadata: %w", err)
+	}
+	if err != nil || status != http.StatusOK {
+		return nil, nil
+	}
+	return pypiReleaseAvailableAt(payload.Releases[version]), nil
+}
+
+func pypiReleaseAvailableAt(files []struct {
+	UploadTime        string `json:"upload_time"`
+	UploadTimeISO8601 string `json:"upload_time_iso_8601"`
+}) *time.Time {
+	var earliest *time.Time
+	for _, file := range files {
+		uploadedAt, ok := parsePyPIUploadTime(file.UploadTimeISO8601)
+		if !ok {
+			uploadedAt, ok = parsePyPIUploadTime(file.UploadTime)
+		}
+		if !ok {
+			continue
+		}
+		if earliest == nil || uploadedAt.Before(*earliest) {
+			t := uploadedAt
+			earliest = &t
+		}
+	}
+	return earliest
+}
+
+func parsePyPIUploadTime(raw string) (time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02T15:04:05"} {
+		if t, err := time.Parse(layout, raw); err == nil {
+			if layout == "2006-01-02T15:04:05" {
+				t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
+			}
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // Search looks up an exact package name on PyPI.

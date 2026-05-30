@@ -16,7 +16,7 @@ See [State And Files](state-and-files.md) for config path priority, cache path
 priority, environment variables, backups, and disposable cache behavior.
 
 The schema lives in
-[spec/omni.settings.v1.schema.json](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v1.schema.json).
+[spec/omni.settings.v2.schema.json](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v2.schema.json).
 
 ## Smallest Valid File
 
@@ -24,7 +24,7 @@ The smallest legal file is:
 
 ```json
 {
-  "version": 1
+  "version": 2
 }
 ```
 
@@ -37,8 +37,8 @@ automatically by Omni config writes.
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v1.schema.json",
-  "version": 1,
+  "$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v2.schema.json",
+  "version": 2,
   "settings": {
     "ecosystems": {
       "node": { "manager": "bun" },
@@ -85,6 +85,11 @@ automatically by Omni config writes.
 {
   "settings": {
     "auto_import": false,
+    "update_quarantine": "2d",
+    "provider_update_quarantine": {
+      "npm": "1d",
+      "python": "3d"
+    },
     "dots_repo": "~/dotfiles",
     "dots_git": {
       "auto_commit": false,
@@ -104,6 +109,8 @@ Common keys:
 | Key | Description |
 | --- | --- |
 | `auto_import` | Add newly discovered installed tools during scoped plain sync. Defaults to `false`. |
+| `update_quarantine` | Defer upgrades until the PM-reported latest-version availability date is older than this duration. Empty or omitted disables quarantine. |
+| `provider_update_quarantine` | Duration overrides keyed by logical provider (`node`) or concrete provider/manager (`npm`, `uv`, `pip3`). Concrete keys win. |
 | `dots_repo` | Local path to the Git-backed dotfiles repo. |
 | `dots_git.auto_commit` | Commit dotfile repo changes after add/remove flows. |
 | `dots_git.auto_push` | Push dotfile repo changes after add/remove flows. |
@@ -147,8 +154,9 @@ Host settings override selected global settings for one machine:
 ```
 
 Host-specific fields include `ecosystems`, `dots_repo`, `dots_disabled`, and
-`disabled_providers`. Global fields such as `auto_import` and `dots_git` are not
-host overrides.
+`disabled_providers`. Global fields such as `auto_import`,
+`update_quarantine`, `provider_update_quarantine`, and `dots_git` are not host
+overrides.
 
 ## Tool Specs
 
@@ -178,6 +186,7 @@ Fields:
 | `provider` | Portable provider such as `system`, `node`, or `python`. |
 | `package` | Package name when it differs from the logical name. |
 | `install_with` | Concrete manager override for this tool. |
+| `quarantine` | Tool-specific update quarantine override. Use `2d`/`48h`, `0`, or `exempt`. |
 | `taps` | Homebrew taps required before install. |
 | `variants` | Alternate install candidates tried in order. |
 | `hosts` | Host-specific install overrides. |

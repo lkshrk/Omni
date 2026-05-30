@@ -84,6 +84,7 @@ func TestCompletionCandidatesFilterAppState(t *testing.T) {
 func TestSettingKeysExposeCanonicalOrder(t *testing.T) {
 	want := []string{
 		"auto_import",
+		"update_quarantine",
 		"node.manager",
 		"python.manager",
 		"system.priority",
@@ -92,6 +93,7 @@ func TestSettingKeysExposeCanonicalOrder(t *testing.T) {
 		"dots_git.auto_commit",
 		"dots_git.auto_push",
 		"disabled_providers",
+		"provider_update_quarantine",
 	}
 	got := app.SettingKeys()
 	if !slices.Equal(got, want) {

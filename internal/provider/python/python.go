@@ -514,6 +514,55 @@ func (p *Provider) OutdatedByManager(ctx context.Context) (map[string]map[string
 	return result, nil
 }
 
+// OutdatedInfoMap returns outdated package versions plus PyPI upload timestamps
+// when available.
+func (p *Provider) OutdatedInfoMap(ctx context.Context) (map[string]provider.OutdatedInfo, error) {
+	byManager, err := p.OutdatedInfoByManager(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]provider.OutdatedInfo)
+	for _, m := range byManager {
+		for name, info := range m {
+			if _, exists := result[name]; !exists {
+				result[name] = info
+			}
+		}
+	}
+	if len(result) == 0 {
+		return nil, nil
+	}
+	return result, nil
+}
+
+// OutdatedInfoByManager preserves uv/pip attribution and enriches latest
+// versions with PyPI release upload metadata.
+func (p *Provider) OutdatedInfoByManager(ctx context.Context) (map[string]map[string]provider.OutdatedInfo, error) {
+	byManager, err := p.OutdatedByManager(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]map[string]provider.OutdatedInfo, len(byManager))
+	for manager, outdated := range byManager {
+		infos := make(map[string]provider.OutdatedInfo, len(outdated))
+		for name, latest := range outdated {
+			info := provider.OutdatedInfo{LatestVersion: latest}
+			if availableAt, err := p.pypiVersionAvailableAt(ctx, name, latest); err == nil && availableAt != nil {
+				info.AvailableAt = availableAt
+				info.DateSource = "pypi_upload_time"
+			}
+			infos[name] = info
+		}
+		if len(infos) > 0 {
+			result[manager] = infos
+		}
+	}
+	if len(result) == 0 {
+		return nil, nil
+	}
+	return result, nil
+}
+
 // Describe fetches a one-line description from PyPI.
 func (p *Provider) Describe(ctx context.Context, tool provider.Tool) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
@@ -538,6 +587,68 @@ func (p *Provider) Describe(ctx context.Context, tool provider.Tool) (string, er
 		return "", nil
 	}
 	return payload.Info.Summary, nil
+}
+
+type pypiInfoResponse struct {
+	Info struct {
+		Summary string `json:"summary"`
+	} `json:"info"`
+	Releases map[string][]struct {
+		UploadTime        string `json:"upload_time"`
+		UploadTimeISO8601 string `json:"upload_time_iso_8601"`
+	} `json:"releases"`
+}
+
+func (p *Provider) pypiVersionAvailableAt(ctx context.Context, pkg, version string) (*time.Time, error) {
+	if pkg == "" || version == "" {
+		return nil, nil
+	}
+	var payload pypiInfoResponse
+	status, err := provider.FetchJSON(ctx, p.httpClient, p.pypiURL+"/pypi/"+url.PathEscape(pkg)+"/json", &payload)
+	if status == 0 {
+		return nil, fmt.Errorf("PyPI release metadata: %w", err)
+	}
+	if err != nil || status != http.StatusOK {
+		return nil, nil
+	}
+	return pypiReleaseAvailableAt(payload.Releases[version]), nil
+}
+
+func pypiReleaseAvailableAt(files []struct {
+	UploadTime        string `json:"upload_time"`
+	UploadTimeISO8601 string `json:"upload_time_iso_8601"`
+}) *time.Time {
+	var earliest *time.Time
+	for _, file := range files {
+		uploadedAt, ok := parsePyPIUploadTime(file.UploadTimeISO8601)
+		if !ok {
+			uploadedAt, ok = parsePyPIUploadTime(file.UploadTime)
+		}
+		if !ok {
+			continue
+		}
+		if earliest == nil || uploadedAt.Before(*earliest) {
+			t := uploadedAt
+			earliest = &t
+		}
+	}
+	return earliest
+}
+
+func parsePyPIUploadTime(raw string) (time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02T15:04:05"} {
+		if t, err := time.Parse(layout, raw); err == nil {
+			if layout == "2006-01-02T15:04:05" {
+				t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC)
+			}
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // BulkDescribe fetches descriptions for multiple tools via a single show command.

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -14,6 +15,7 @@ func newUpgradeCmd(state *rootState) *cobra.Command {
 	var (
 		providerName string
 		all          bool
+		force        bool
 	)
 
 	cmd := &cobra.Command{
@@ -36,7 +38,7 @@ Examples:
 					return fmt.Errorf("--all and a tool name are mutually exclusive")
 				}
 				out := cmdOut(cmd)
-				result, err := a.UpgradeAllDetailed(ctx, func(msg string) {
+				result, err := a.UpgradeAllDetailedWithOptions(ctx, func(msg string) {
 					fmt.Fprintf(out, "  %s\n", msg)
 				}, func(event syncprogress.ProgressEvent) {
 					if !event.Done {
@@ -47,13 +49,20 @@ Examples:
 						fmt.Fprintf(out, "  ! failed: %s (%s): %v\n", name, event.Tool.Provider, event.Err)
 						return
 					}
+					if strings.HasPrefix(strings.TrimSpace(event.Message), "Skipped upgrading ") {
+						fmt.Fprintf(out, "  - skipped: %s (%s): update quarantined\n", name, event.Tool.Provider)
+						return
+					}
 					fmt.Fprintf(out, "  ✓ upgraded: %s (%s)\n", name, event.Tool.Provider)
-				})
+				}, app.UpgradeAllOptions{Force: force})
 				if err != nil {
 					return err
 				}
-				if result == nil || len(result.Upgraded)+len(result.Failures) == 0 {
+				if result == nil || len(result.Upgraded)+len(result.Failures)+len(result.Quarantined) == 0 {
 					fmt.Fprintln(out, "Nothing to upgrade.")
+				}
+				for _, line := range app.UpgradeAllSummaryLines(result) {
+					fmt.Fprintln(out, line)
 				}
 				return nil
 			}
@@ -65,7 +74,7 @@ Examples:
 			if err := requireProvider(providerName); err != nil {
 				return err
 			}
-			if err := a.Upgrade(ctx, name, providerName); err != nil {
+			if err := a.UpgradeWithOptions(ctx, name, providerName, app.UpgradeOptions{Force: force}); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmdOut(cmd), "✓ upgraded %s (%s)\n", name, providerName)
@@ -75,6 +84,7 @@ Examples:
 
 	addProviderFlag(cmd, &providerName, "provider to use")
 	cmd.Flags().BoolVar(&all, "all", false, actions.MustDescription(actions.ToolUpdateAll))
+	cmd.Flags().BoolVar(&force, "force", false, "bypass update quarantine")
 	cmd.ValidArgsFunction = completeToolNames(state)
 	return cmd
 }

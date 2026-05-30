@@ -19,13 +19,15 @@ import (
 type ToolListState string
 
 const (
-	ToolStateInstalled ToolListState = "installed"
-	ToolStateMissing   ToolListState = "missing"
-	ToolStateOutdated  ToolListState = "outdated"
-	ToolStateIgnored   ToolListState = "ignored"
-	ToolStateUnclaimed ToolListState = "unclaimed"
-	ToolStateOutOfSync ToolListState = "out-of-sync"
-	ToolStateFailed    ToolListState = "failed"
+	ToolStateInstalled       ToolListState = "installed"
+	ToolStateMissing         ToolListState = "missing"
+	ToolStateOutdated        ToolListState = "outdated"
+	ToolStateQuarantined     ToolListState = "quarantined"
+	ToolStateBlockedMetadata ToolListState = "blocked-metadata"
+	ToolStateIgnored         ToolListState = "ignored"
+	ToolStateUnclaimed       ToolListState = "unclaimed"
+	ToolStateOutOfSync       ToolListState = "out-of-sync"
+	ToolStateFailed          ToolListState = "failed"
 )
 
 type RefreshInstalledProgressEvent struct {
@@ -69,6 +71,7 @@ func (a *App) ListTools(ctx context.Context, providerFilter string) ([]*database
 	if cfgErr != nil {
 		return filterIgnoredToolCaches(tools, nil), nil
 	}
+	a.annotateUpdateQuarantine(ctx, cfg, tools)
 	return tools, nil
 }
 
@@ -139,6 +142,7 @@ func (a *App) QueryTools(ctx context.Context, opts ToolListOptions) ([]ToolListI
 	if err != nil {
 		return nil, err
 	}
+	a.annotateUpdateQuarantine(ctx, cfg, tools)
 	if opts.Provider != "" {
 		filtered := tools[:0]
 		for _, tool := range tools {
@@ -440,6 +444,12 @@ func classifyToolState(t *database.ToolCache, ignoreSet map[string]struct{}, res
 	if classification.Section == ToolViewSectionUpdates {
 		return ToolStateOutdated
 	}
+	if t.UpdateBlocked == UpdateBlockMetadataMissing {
+		return ToolStateBlockedMetadata
+	}
+	if classification.Section == ToolViewSectionQuarantined {
+		return ToolStateQuarantined
+	}
 	switch classification.SyncStatus {
 	case ToolSyncUnclaimed:
 		return ToolStateUnclaimed
@@ -464,6 +474,10 @@ func normalizeToolState(raw string) (ToolListState, error) {
 		return ToolStateMissing, nil
 	case "outdated", "update", "updates":
 		return ToolStateOutdated, nil
+	case "quarantined", "quarantine":
+		return ToolStateQuarantined, nil
+	case "blocked-metadata", "metadata-blocked", "metadata":
+		return ToolStateBlockedMetadata, nil
 	case "ignored", "ignore":
 		return ToolStateIgnored, nil
 	case "unclaimed", "orphan", "orphans":

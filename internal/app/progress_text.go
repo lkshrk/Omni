@@ -163,6 +163,12 @@ type SyncAllSummary struct {
 	NormalizedProviderOverrides int
 }
 
+type UpgradeAllSummary struct {
+	Upgraded    int
+	Quarantined int
+	Failed      int
+}
+
 type SyncResultSummary struct {
 	Installed           int
 	Failed              int
@@ -412,6 +418,32 @@ func SyncAllSummaryText(result *SyncAllResult, prefix string) string {
 	return status
 }
 
+func SummarizeUpgradeAll(result *UpgradeAllResult) UpgradeAllSummary {
+	if result == nil {
+		return UpgradeAllSummary{}
+	}
+	return UpgradeAllSummary{
+		Upgraded:    len(result.Upgraded),
+		Quarantined: len(result.Quarantined),
+		Failed:      len(result.Failures),
+	}
+}
+
+func UpgradeAllSummaryLines(result *UpgradeAllResult) []string {
+	summary := SummarizeUpgradeAll(result)
+	lines := make([]string, 0, 3)
+	if summary.Upgraded > 0 {
+		lines = append(lines, textutil.PluralCount(summary.Upgraded, "tool", "tools")+" upgraded.")
+	}
+	if summary.Quarantined > 0 {
+		lines = append(lines, textutil.PluralCount(summary.Quarantined, "update", "updates")+" quarantined.")
+	}
+	if summary.Failed > 0 {
+		lines = append(lines, textutil.PluralCount(summary.Failed, "tool", "tools")+" failed.")
+	}
+	return lines
+}
+
 func ConsolidateSummaryText(result *ConsolidateResult, target string) string {
 	if result == nil {
 		return ""
@@ -446,6 +478,9 @@ func ReconcileSummaryText(result *ReconcileResult, prefix string) string {
 		summary.Claimed,
 		summary.Upgraded,
 	)
+	if summary.Quarantined > 0 {
+		status += ", " + textutil.PluralCount(summary.Quarantined, "update", "updates") + " quarantined"
+	}
 	if summary.DotOps > 0 {
 		status += ", " + textutil.PluralCount(summary.DotOps, "dotfile op", "dotfile ops")
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"sort"
+	"strings"
 
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
@@ -66,6 +67,29 @@ func (a *App) SetTool(name, providerName, packageName, installWith string) error
 		spec.Provider = providerName
 		spec.Package = packageName
 		spec.InstallWith = installWith
+		cfg.Tools[name] = spec
+		return nil
+	})
+}
+
+func (a *App) SetToolQuarantine(name, quarantine string) error {
+	if name == "" {
+		return fmt.Errorf("tool name is required")
+	}
+	if quarantine != "" && !strings.EqualFold(quarantine, toolQuarantineExempt) {
+		if _, err := parseQuarantineDuration(quarantine); err != nil {
+			return err
+		}
+	}
+	return a.withConfig(func(cfg *config.RootConfig) error {
+		if cfg.Tools == nil {
+			return fmt.Errorf("logical tool %q not found", name)
+		}
+		spec, ok := cfg.Tools[name]
+		if !ok {
+			return fmt.Errorf("logical tool %q not found", name)
+		}
+		spec.Quarantine = quarantine
 		cfg.Tools[name] = spec
 		return nil
 	})

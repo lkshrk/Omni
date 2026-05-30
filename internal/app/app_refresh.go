@@ -98,7 +98,7 @@ func (a *App) RefreshOutdated(ctx context.Context, progress func(string)) error 
 	}
 
 	stop = profile.Start("app.refresh.outdated.provider_maps")
-	outdatedByProv, outdatedByManager := a.outdatedMapsForProvidersBestEffort(ctx, neededProviders)
+	outdatedByProv, outdatedByManager, updateMetadata := a.outdatedMapsForProvidersBestEffort(ctx, neededProviders)
 	stop()
 
 	stop = profile.Start("app.refresh.outdated.build_updates")
@@ -132,13 +132,18 @@ func (a *App) RefreshOutdated(ctx context.Context, progress func(string)) error 
 		stop()
 		return fmt.Errorf("updating outdated status: %w", err)
 	}
+	if err := a.readDB().UpsertUpdateMetadataBatch(writeCtx, updateMetadata); err != nil {
+		stop()
+		return fmt.Errorf("updating update metadata: %w", err)
+	}
 	stop()
 	return nil
 }
 
-func (a *App) outdatedMapsForProvidersBestEffort(ctx context.Context, providerNames map[string]struct{}) (map[string]map[string]string, map[string]map[string]map[string]string) {
+func (a *App) outdatedMapsForProvidersBestEffort(ctx context.Context, providerNames map[string]struct{}) (map[string]map[string]string, map[string]map[string]map[string]string, []database.UpdateMetadata) {
 	outdatedByProv := make(map[string]map[string]string)
 	outdatedByManager := make(map[string]map[string]map[string]string)
+	var updateMetadata []database.UpdateMetadata
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for provName := range providerNames {
@@ -146,14 +151,14 @@ func (a *App) outdatedMapsForProvidersBestEffort(ctx context.Context, providerNa
 		if !ok {
 			continue
 		}
-		if _, ok := p.(provider.OutdatedChecker); !ok {
+		if !providerSupportsOutdatedRefresh(p) {
 			continue
 		}
 		provName := provName
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			m, byManager, ok, err := a.outdatedMapsForProvider(ctx, provName)
+			m, byManager, metadata, ok, err := a.outdatedMapsForProvider(ctx, provName)
 			if err != nil || !ok {
 				return
 			}
@@ -162,11 +167,12 @@ func (a *App) outdatedMapsForProvidersBestEffort(ctx context.Context, providerNa
 			if byManager != nil {
 				outdatedByManager[provName] = byManager
 			}
+			updateMetadata = append(updateMetadata, metadata...)
 			mu.Unlock()
 		}()
 	}
 	wg.Wait()
-	return outdatedByProv, outdatedByManager
+	return outdatedByProv, outdatedByManager, updateMetadata
 }
 
 // RefreshProviderOutdated queries outdated status for a single named provider and
@@ -208,14 +214,16 @@ func (a *App) RefreshProviderOutdated(ctx context.Context, provName string) erro
 	}
 	outdatedByProv := make(map[string]map[string]string)
 	outdatedByManager := make(map[string]map[string]map[string]string)
+	updateMetadata := make([]database.UpdateMetadata, 0)
 	if _, needed := neededLookups[provName]; needed {
-		if m, byManager, ok, err := a.outdatedMapsForProvider(ctx, provName); err != nil {
+		if m, byManager, metadata, ok, err := a.outdatedMapsForProvider(ctx, provName); err != nil {
 			return err
 		} else if ok {
 			outdatedByProv[provName] = m
 			if byManager != nil {
 				outdatedByManager[provName] = byManager
 			}
+			updateMetadata = append(updateMetadata, metadata...)
 		}
 	}
 	ensureOutdated := func(providerName string) bool {
@@ -225,7 +233,7 @@ func (a *App) RefreshProviderOutdated(ctx context.Context, provName string) erro
 		if _, ok := outdatedByProv[providerName]; ok {
 			return true
 		}
-		m, byManager, ok, err := a.outdatedMapsForProvider(ctx, providerName)
+		m, byManager, metadata, ok, err := a.outdatedMapsForProvider(ctx, providerName)
 		if err != nil {
 			return false
 		}
@@ -236,6 +244,7 @@ func (a *App) RefreshProviderOutdated(ctx context.Context, provName string) erro
 		if byManager != nil {
 			outdatedByManager[providerName] = byManager
 		}
+		updateMetadata = append(updateMetadata, metadata...)
 		return true
 	}
 	updates := make([]database.OutdatedUpdate, 0, len(targetTools))
@@ -257,36 +266,65 @@ func (a *App) RefreshProviderOutdated(ctx context.Context, provName string) erro
 	if err := a.readDB().UpdateOutdatedBatch(writeCtx, updates); err != nil {
 		return fmt.Errorf("updating outdated status for %s: %w", provName, err)
 	}
+	if err := a.readDB().UpsertUpdateMetadataBatch(writeCtx, updateMetadata); err != nil {
+		return fmt.Errorf("updating update metadata for %s: %w", provName, err)
+	}
 	return nil
 }
 
-func (a *App) outdatedMapsForProvider(ctx context.Context, providerName string) (map[string]string, map[string]map[string]string, bool, error) {
+func (a *App) outdatedMapsForProvider(ctx context.Context, providerName string) (map[string]string, map[string]map[string]string, []database.UpdateMetadata, bool, error) {
 	defer profile.Start("app.refresh.outdated.map." + providerName)()
 
 	p, ok := a.registry.Get(providerName)
 	if !ok {
-		return nil, nil, false, nil
+		return nil, nil, nil, false, nil
 	}
-	oc, ok := p.(provider.OutdatedChecker)
-	if !ok {
-		return nil, nil, false, nil
+	if !providerSupportsOutdatedRefresh(p) {
+		return nil, nil, nil, false, nil
 	}
 	avail, err := p.Available(ctx)
 	if err != nil || !avail {
-		return nil, nil, false, nil
+		return nil, nil, nil, false, nil
+	}
+	if moc, ok := p.(provider.ManagerOutdatedInfoChecker); ok {
+		byManager, err := moc.OutdatedInfoByManager(ctx)
+		if err != nil {
+			return nil, nil, nil, false, fmt.Errorf("checking outdated tools for %s: %w", providerName, err)
+		}
+		return flattenOutdatedInfoManagers(byManager), outdatedInfoManagersToVersions(byManager), updateMetadataForManagerInfo(byManager), true, nil
+	}
+	if oc, ok := p.(provider.OutdatedInfoChecker); ok {
+		m, err := oc.OutdatedInfoMap(ctx)
+		if err != nil {
+			return nil, nil, nil, false, fmt.Errorf("checking outdated tools for %s: %w", providerName, err)
+		}
+		return outdatedInfoMapToVersions(m), nil, updateMetadataForInfo(providerName, m), true, nil
 	}
 	if moc, ok := p.(provider.ManagerOutdatedChecker); ok {
 		byManager, err := moc.OutdatedByManager(ctx)
 		if err != nil {
-			return nil, nil, false, fmt.Errorf("checking outdated tools for %s: %w", providerName, err)
+			return nil, nil, nil, false, fmt.Errorf("checking outdated tools for %s: %w", providerName, err)
 		}
-		return flattenOutdatedManagers(byManager), byManager, true, nil
+		return flattenOutdatedManagers(byManager), byManager, nil, true, nil
+	}
+	oc, ok := p.(provider.OutdatedChecker)
+	if !ok {
+		return nil, nil, nil, false, nil
 	}
 	m, err := oc.OutdatedMap(ctx)
 	if err != nil {
-		return nil, nil, false, fmt.Errorf("checking outdated tools for %s: %w", providerName, err)
+		return nil, nil, nil, false, fmt.Errorf("checking outdated tools for %s: %w", providerName, err)
 	}
-	return m, nil, true, nil
+	return m, nil, nil, true, nil
+}
+
+func providerSupportsOutdatedRefresh(p provider.Provider) bool {
+	switch p.(type) {
+	case provider.ManagerOutdatedInfoChecker, provider.OutdatedInfoChecker, provider.ManagerOutdatedChecker, provider.OutdatedChecker:
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *App) outdatedLookupProvider(t *database.ToolCache) string {
@@ -317,6 +355,82 @@ func flattenOutdatedManagers(byManager map[string]map[string]string) map[string]
 		}
 	}
 	return out
+}
+
+func flattenOutdatedInfoManagers(byManager map[string]map[string]provider.OutdatedInfo) map[string]string {
+	if len(byManager) == 0 {
+		return nil
+	}
+	out := make(map[string]string)
+	for _, m := range byManager {
+		for name, info := range m {
+			if _, exists := out[name]; !exists && info.LatestVersion != "" {
+				out[name] = info.LatestVersion
+			}
+		}
+	}
+	return out
+}
+
+func outdatedInfoManagersToVersions(byManager map[string]map[string]provider.OutdatedInfo) map[string]map[string]string {
+	if len(byManager) == 0 {
+		return nil
+	}
+	out := make(map[string]map[string]string, len(byManager))
+	for manager, m := range byManager {
+		versions := outdatedInfoMapToVersions(m)
+		if len(versions) > 0 {
+			out[manager] = versions
+		}
+	}
+	return out
+}
+
+func outdatedInfoMapToVersions(in map[string]provider.OutdatedInfo) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for name, info := range in {
+		if info.LatestVersion != "" {
+			out[name] = info.LatestVersion
+		}
+	}
+	return out
+}
+
+func updateMetadataForManagerInfo(byManager map[string]map[string]provider.OutdatedInfo) []database.UpdateMetadata {
+	var updates []database.UpdateMetadata
+	for manager, m := range byManager {
+		updates = append(updates, updateMetadataForInfo(manager, m)...)
+	}
+	return updates
+}
+
+func updateMetadataForInfo(providerName string, infoByPackage map[string]provider.OutdatedInfo) []database.UpdateMetadata {
+	if providerName == "" || len(infoByPackage) == 0 {
+		return nil
+	}
+	now := time.Now()
+	updates := make([]database.UpdateMetadata, 0, len(infoByPackage))
+	for pkg, info := range infoByPackage {
+		if pkg == "" || info.LatestVersion == "" || info.AvailableAt == nil || info.AvailableAt.IsZero() {
+			continue
+		}
+		source := strings.TrimSpace(info.DateSource)
+		if source == "" {
+			source = "package-manager"
+		}
+		updates = append(updates, database.UpdateMetadata{
+			Provider:    providerName,
+			Package:     pkg,
+			Version:     info.LatestVersion,
+			AvailableAt: *info.AvailableAt,
+			DateSource:  source,
+			CheckedAt:   now,
+		})
+	}
+	return updates
 }
 
 func outdatedForTool(t *database.ToolCache, flat map[string]string, byManager map[string]map[string]string) (string, bool) {
