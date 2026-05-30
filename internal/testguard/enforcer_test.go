@@ -46,6 +46,34 @@ func TestEveryTestPackageImportsGuard(t *testing.T) {
 	}
 }
 
+func TestMakeTestTargetsUseSafeRunner(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "Makefile"))
+	if err != nil {
+		t.Fatalf("reading Makefile: %v", err)
+	}
+	makefile := string(data)
+	for _, want := range []string{
+		"TEST_SAFE   := bash scripts/run-test-safe.sh",
+		"$(TEST_SAFE) bash scripts/test-release.sh",
+		"$(TEST_SAFE) go clean -testcache",
+		"$(TEST_SAFE) go test -race -trimpath ./...",
+	} {
+		if !strings.Contains(makefile, want) {
+			t.Fatalf("Makefile test target is missing safe runner command %q", want)
+		}
+	}
+}
+
+func TestSafeRunnerDisablesGoTelemetry(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(repoRoot(t), "scripts", "run-test-safe.sh"))
+	if err != nil {
+		t.Fatalf("reading safe runner: %v", err)
+	}
+	if !strings.Contains(string(data), "go telemetry off") {
+		t.Fatal("safe runner should disable Go telemetry inside isolated HOME before running tests")
+	}
+}
+
 func shouldSkipDir(rel, name string) bool {
 	if rel == "." {
 		return false

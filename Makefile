@@ -9,6 +9,7 @@ DEV_HOST    ?= devhost
 DEV_CONFIG  ?= $(DEV_DIR)/settings.json
 DEV_CACHE   ?= $(DEV_DIR)/cache
 DEV_GOCACHE ?= $(DEV_DIR)/go-build
+TEST_SAFE   := bash scripts/run-test-safe.sh
 ARGS        ?= --help
 
 # Embed version from git tags; fall back to "dev" on untagged repos.
@@ -70,12 +71,12 @@ demo-gif:
 
 ## test: run unit tests with race detector and script regressions
 test: test-scripts
-	go clean -testcache
-	go test -race -trimpath ./...
+	$(TEST_SAFE) go clean -testcache
+	$(TEST_SAFE) go test -race -trimpath ./...
 
 ## test-scripts: run shell-script regression tests
 test-scripts:
-	bash scripts/test-release.sh
+	$(TEST_SAFE) bash scripts/test-release.sh
 
 ## test-package-managers: run real package-manager provider tests in minimal distro containers
 test-package-managers:

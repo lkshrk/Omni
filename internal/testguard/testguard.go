@@ -51,9 +51,6 @@ func EnsureSafeEnv() error {
 			return
 		}
 		setSafeEnv := func(key, path string) {
-			if current := os.Getenv(key); current != "" && PathInTempRoot(current) {
-				return
-			}
 			if err := os.Setenv(key, path); err != nil && ensureErr == nil {
 				ensureErr = fmt.Errorf("setting %s for local test sandbox: %w", key, err)
 			}
@@ -62,6 +59,7 @@ func EnsureSafeEnv() error {
 		setSafeEnv("XDG_CONFIG_HOME", filepath.Join(root, "xdg-config"))
 		setSafeEnv("XDG_CACHE_HOME", filepath.Join(root, "xdg-cache"))
 		setSafeEnv("OMNI_CACHE_DIR", filepath.Join(root, "omni-cache"))
+		setSafeEnv("OMNI_CONFIG", filepath.Join(root, "xdg-config", "omni", "settings.json"))
 	})
 	return ensureErr
 }
