@@ -63,9 +63,11 @@ Run 'omni bootstrap' on every new machine to reproduce your environment.`,
 				return runExistingConfigBootstrap(cmd, state, a)
 			}
 
+			updateQuarantine := promptBootstrapUpdateQuarantine(state)
 			applied, err := a.ApplyBootstrap(ctx, app.BootstrapApplyOptions{
-				NodeManager:   plan.NodeManager,
-				PythonManager: plan.PythonManager,
+				NodeManager:      plan.NodeManager,
+				PythonManager:    plan.PythonManager,
+				UpdateQuarantine: updateQuarantine,
 			})
 			if err != nil {
 				return err
@@ -80,6 +82,9 @@ Run 'omni bootstrap' on every new machine to reproduce your environment.`,
 				if applied.PythonManager != "" {
 					fmt.Fprintf(out, "  python.manager = %s\n", applied.PythonManager)
 				}
+			}
+			if updateQuarantine != "" {
+				fmt.Fprintf(out, "  update_quarantine = %s\n", updateQuarantine)
 			}
 			fmt.Fprintln(out)
 			printBootstrapHost(applied.Host)
@@ -144,6 +149,20 @@ Run 'omni bootstrap' on every new machine to reproduce your environment.`,
 	cmd.Flags().BoolVar(&flagNoImport, "no-import", false, "skip importing installed tools")
 	cmd.Flags().StringVar(&flagImportConfig, "import-config", "", "import an existing settings.json before bootstrapping")
 	return cmd
+}
+
+func promptBootstrapUpdateQuarantine(state *rootState) string {
+	if state != nil && state.yes {
+		return ""
+	}
+	if !promptYesNo(nil, "Enable update quarantine for newly released tool versions?", false) {
+		return ""
+	}
+	value, ok := promptText("Update quarantine duration:", "2d")
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(value)
 }
 
 func maybeImportExistingConfig(_ context.Context, state *rootState, a *app.App, importPath string) (bool, error) {

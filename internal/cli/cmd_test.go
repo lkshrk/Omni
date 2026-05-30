@@ -1706,6 +1706,24 @@ func TestRequireActiveHost_NonExemptCommand_NoHost_ReturnsError(t *testing.T) {
 	}
 }
 
+func TestRequireActiveHost_UpgradeForceNoHost_ReturnsError(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	withConfig(t, cfgPath, &config.RootConfig{})
+
+	cmd := NewRootCmd()
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "upgrade", "--all", "--force"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Error("expected error when upgrade --force has no active host")
+	}
+	if !strings.Contains(err.Error(), "no host configuration") {
+		t.Errorf("expected 'no host configuration', got: %v", err)
+	}
+}
+
 func TestRequireActiveHost_NonExemptCommand_WithHost_Passes(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -3089,6 +3107,42 @@ func TestToolsSet_CreatesLogicalSpec(t *testing.T) {
 	spec := cfg.Tools["ripgrep"]
 	if spec.Provider != "system" || spec.Package != "rg" || spec.InstallWith != "brew" {
 		t.Fatalf("spec = %+v, want provider system package rg install_with brew", spec)
+	}
+}
+
+func TestToolsSet_QuarantineOnlyUpdatesExistingSpec(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	withConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"ripgrep": {Provider: "system", InstallWith: "brew", Package: "rg"},
+		},
+	})
+	withHost(t, cfgPath)
+
+	cmd := NewRootCmd()
+	cmd.SetArgs([]string{
+		"--config", cfgPath,
+		"--cache-dir", cacheDir,
+		"tools", "set", "ripgrep",
+		"--quarantine", "exempt",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("tools set --quarantine: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	spec := cfg.Tools["ripgrep"]
+	if spec.Quarantine != "exempt" {
+		t.Fatalf("Quarantine = %q, want exempt", spec.Quarantine)
+	}
+	if spec.Provider != "system" || spec.Package != "rg" || spec.InstallWith != "brew" {
+		t.Fatalf("spec = %+v, want existing provider/package/install_with preserved", spec)
 	}
 }
 

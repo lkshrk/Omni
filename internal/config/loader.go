@@ -243,6 +243,7 @@ type configMigration struct {
 
 var configMigrations = []configMigration{
 	{from: 0, to: 1, apply: migrateConfigV0ToV1, applyRaw: migrateRawConfigV0ToV1},
+	{from: 1, to: 2, apply: migrateConfigV1ToV2, applyRaw: migrateRawConfigV1ToV2},
 }
 
 func configMigrationFrom(version int) (configMigration, bool) {
@@ -261,6 +262,16 @@ func migrateConfigV0ToV1(cfg *RootConfig) error {
 
 func migrateRawConfigV0ToV1(raw map[string]json.RawMessage) error {
 	raw["version"] = json.RawMessage(`1`)
+	return nil
+}
+
+func migrateConfigV1ToV2(cfg *RootConfig) error {
+	cfg.Version = 2
+	return nil
+}
+
+func migrateRawConfigV1ToV2(raw map[string]json.RawMessage) error {
+	raw["version"] = json.RawMessage(`2`)
 	return nil
 }
 
@@ -551,6 +562,7 @@ func normalizedCopy(cfg *RootConfig) RootConfig {
 
 func cloneSettings(settings Settings) Settings {
 	settings.DisabledProviders = cloneStringSlice(settings.DisabledProviders)
+	settings.ProviderUpdateQuarantine = cloneStringMap(settings.ProviderUpdateQuarantine)
 	if settings.Ecosystems != nil {
 		ecosystems := make(map[string]EcosystemSettings, len(settings.Ecosystems))
 		for name, eco := range settings.Ecosystems {

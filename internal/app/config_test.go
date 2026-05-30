@@ -263,6 +263,27 @@ func TestSetToolAndGroupIgnoreScopes(t *testing.T) {
 	}
 }
 
+func TestSetToolQuarantine_PersistsToolOverride(t *testing.T) {
+	a, cfgPath := newImportApp(t)
+	rootCfg := &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
+	}
+	if err := saveAppConfig(t, cfgPath, rootCfg); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if err := a.SetToolQuarantine("ripgrep", "exempt"); err != nil {
+		t.Fatalf("SetToolQuarantine: %v", err)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got := cfg.Tools["ripgrep"].Quarantine; got != "exempt" {
+		t.Fatalf("quarantine = %q, want exempt", got)
+	}
+}
+
 func TestSetToolHostInstallSpec_WritesHostOverride(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "linuxbox.example.com")
 	a, cfgPath := newImportApp(t)

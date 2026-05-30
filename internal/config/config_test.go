@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -185,7 +186,7 @@ func TestNormalizeFile_PersistsOrderAndPreservesUnknownKeys(t *testing.T) {
 	if !strings.Contains(string(data), `"future": {`) {
 		t.Fatalf("NormalizeFile did not preserve unknown top-level key:\n%s", data)
 	}
-	if !strings.Contains(string(data), `"version": 1`) {
+	if !strings.Contains(string(data), `"version": `+strconv.Itoa(config.CurrentVersion)) {
 		t.Fatalf("NormalizeFile did not persist config version:\n%s", data)
 	}
 	cfg, err := config.Load(path)
@@ -226,7 +227,7 @@ func TestNormalizeFile_PersistsLegacyVersionWithoutOrderChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := string(data)
-	if !strings.Contains(content, `"version": 1`) {
+	if !strings.Contains(content, `"version": `+strconv.Itoa(config.CurrentVersion)) {
 		t.Fatalf("NormalizeFile did not write version:\n%s", content)
 	}
 	if !strings.Contains(content, `"future": {`) {
@@ -267,7 +268,7 @@ func TestSave_InjectsSchemaAndVersion(t *testing.T) {
 	if !strings.Contains(content, config.SchemaURL) {
 		t.Errorf("Save did not inject SchemaURL %q", config.SchemaURL)
 	}
-	if !strings.Contains(content, `"version": 1`) {
+	if !strings.Contains(content, `"version": `+strconv.Itoa(config.CurrentVersion)) {
 		t.Error("Save did not inject current config version")
 	}
 	// $schema must be the very first key so editors pick it up immediately.
@@ -277,7 +278,7 @@ func TestSave_InjectsSchemaAndVersion(t *testing.T) {
 	if !strings.HasPrefix(strings.TrimSpace(content), `{`+"\n"+`  "$schema"`) {
 		t.Errorf("$schema is not the first key; got:\n%s", content[:min(len(content), 80)])
 	}
-	if !strings.HasPrefix(strings.TrimSpace(content), "{\n  \"$schema\":") || !strings.Contains(content[:min(len(content), 120)], "\n  \"version\": 1") {
+	if !strings.HasPrefix(strings.TrimSpace(content), "{\n  \"$schema\":") || !strings.Contains(content[:min(len(content), 120)], "\n  \"version\": "+strconv.Itoa(config.CurrentVersion)) {
 		t.Errorf("version is not stamped near the top; got:\n%s", content[:min(len(content), 120)])
 	}
 }
@@ -299,7 +300,7 @@ func TestPatch_InjectsSchemaAndVersion(t *testing.T) {
 	if !strings.Contains(content, config.SchemaURL) {
 		t.Error("Patch did not inject $schema")
 	}
-	if !strings.Contains(content, `"version": 1`) {
+	if !strings.Contains(content, `"version": `+strconv.Itoa(config.CurrentVersion)) {
 		t.Error("Patch did not inject current config version")
 	}
 	// Patch explicitly reconstructs output with $schema first (map iteration order
@@ -308,7 +309,7 @@ func TestPatch_InjectsSchemaAndVersion(t *testing.T) {
 	if !strings.HasPrefix(strings.TrimSpace(content), `{`+"\n"+`  "$schema"`) {
 		t.Errorf("$schema is not the first key after Patch; got:\n%s", content[:min(len(content), 80)])
 	}
-	if !strings.Contains(content[:min(len(content), 120)], "\n  \"version\": 1") {
+	if !strings.Contains(content[:min(len(content), 120)], "\n  \"version\": "+strconv.Itoa(config.CurrentVersion)) {
 		t.Errorf("version is not stamped near the top after Patch; got:\n%s", content[:min(len(content), 120)])
 	}
 }

@@ -10,7 +10,7 @@ import (
 
 // CurrentVersion is the latest settings.json format version understood by omni.
 // Version 0 is the legacy unversioned format.
-const CurrentVersion = 1
+const CurrentVersion = 2
 
 // ToolEntry is the resolved execution form for a logical tool.
 //
@@ -91,6 +91,7 @@ type ToolSpec struct {
 	Provider    string                     `json:"provider"`
 	Package     string                     `json:"package,omitempty"`
 	InstallWith string                     `json:"install_with,omitempty"`
+	Quarantine  string                     `json:"quarantine,omitempty"`
 	Options     map[string]string          `json:"options,omitempty"`
 	Taps        []string                   `json:"taps,omitempty"`
 	Ignore      bool                       `json:"ignore,omitempty"`
@@ -124,6 +125,12 @@ type EcosystemSettings struct {
 type Settings struct {
 	// AutoImport adds newly discovered installed tools to the config on every sync.
 	AutoImport bool `json:"auto_import,omitempty"`
+	// UpdateQuarantine defers updates until the package-manager reported
+	// availability timestamp is older than this duration (for example "2d").
+	UpdateQuarantine string `json:"update_quarantine,omitempty"`
+	// ProviderUpdateQuarantine overrides UpdateQuarantine by logical provider,
+	// concrete provider, or concrete manager. Concrete values win in app logic.
+	ProviderUpdateQuarantine map[string]string `json:"provider_update_quarantine,omitempty"`
 	// Ecosystems holds settings for portable ecosystem providers such as system,
 	// node, and python.
 	Ecosystems map[string]EcosystemSettings `json:"ecosystems,omitempty"`

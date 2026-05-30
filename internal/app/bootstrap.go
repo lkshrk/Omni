@@ -27,8 +27,9 @@ type BootstrapPlan struct {
 }
 
 type BootstrapApplyOptions struct {
-	NodeManager   string
-	PythonManager string
+	NodeManager      string
+	PythonManager    string
+	UpdateQuarantine string
 }
 
 type BootstrapHostResult struct {
@@ -105,10 +106,17 @@ func (a *App) ApplyBootstrap(ctx context.Context, opts BootstrapApplyOptions) (B
 		return BootstrapApplyResult{}, fmt.Errorf("creating config: %w", err)
 	}
 
-	if opts.NodeManager != "" || opts.PythonManager != "" {
+	if opts.UpdateQuarantine != "" {
+		if _, err := parseQuarantineDuration(opts.UpdateQuarantine); err != nil {
+			return BootstrapApplyResult{}, fmt.Errorf("update quarantine: %w", err)
+		}
+	}
+
+	if opts.NodeManager != "" || opts.PythonManager != "" || opts.UpdateQuarantine != "" {
 		var settings config.Settings
 		settings.SetEcosystemManager(provider.EcosystemNode, opts.NodeManager)
 		settings.SetEcosystemManager(provider.EcosystemPython, opts.PythonManager)
+		settings.UpdateQuarantine = opts.UpdateQuarantine
 		if err := a.SaveSettings(ctx, settings); err != nil {
 			return BootstrapApplyResult{}, fmt.Errorf("saving settings: %w", err)
 		}

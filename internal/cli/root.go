@@ -182,9 +182,12 @@ func requireActiveHost(cmd *cobra.Command, a *app.App) error {
 		if f := c.Flags().Lookup("group"); f != nil && f.Changed {
 			return nil
 		}
-		// An explicit --force flag opts out of host enforcement.
-		if f := c.Flags().Lookup("force"); f != nil && f.Changed {
-			return nil
+		// Install's --force opts out of host enforcement. Other commands use
+		// --force for command-local behavior such as update-quarantine bypasses.
+		if commandInChain(cmd, "install") {
+			if f := c.Flags().Lookup("force"); f != nil && f.Changed {
+				return nil
+			}
 		}
 	}
 	return a.RequireActiveHost()

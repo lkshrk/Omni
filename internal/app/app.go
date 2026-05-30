@@ -140,8 +140,9 @@ type BulkToolError struct {
 }
 
 type UpgradeAllResult struct {
-	Upgraded []string
-	Failures []BulkToolError
+	Upgraded    []string
+	Quarantined []QuarantinedUpdate
+	Failures    []BulkToolError
 }
 
 type UpgradeAllStateResult struct {
@@ -152,6 +153,7 @@ type UpgradeAllStateResult struct {
 
 type UpgradeAllOptions struct {
 	SkipPrivileged bool
+	Force          bool
 }
 
 // New creates an App targeting configPath (the full path to settings.json).

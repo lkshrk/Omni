@@ -415,6 +415,55 @@ func (p *Provider) OutdatedByManager(ctx context.Context) (map[string]map[string
 	return nil, nil
 }
 
+// OutdatedInfoMap returns outdated package versions plus npm registry
+// publish timestamps when available.
+func (p *Provider) OutdatedInfoMap(ctx context.Context) (map[string]provider.OutdatedInfo, error) {
+	byManager, err := p.OutdatedInfoByManager(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]provider.OutdatedInfo)
+	for _, m := range byManager {
+		for name, info := range m {
+			if _, exists := result[name]; !exists {
+				result[name] = info
+			}
+		}
+	}
+	if len(result) == 0 {
+		return nil, nil
+	}
+	return result, nil
+}
+
+// OutdatedInfoByManager preserves concrete manager attribution and enriches
+// latest versions with npm registry time[version] metadata.
+func (p *Provider) OutdatedInfoByManager(ctx context.Context) (map[string]map[string]provider.OutdatedInfo, error) {
+	byManager, err := p.OutdatedByManager(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]map[string]provider.OutdatedInfo, len(byManager))
+	for manager, outdated := range byManager {
+		infos := make(map[string]provider.OutdatedInfo, len(outdated))
+		for name, latest := range outdated {
+			info := provider.OutdatedInfo{LatestVersion: latest}
+			if availableAt, err := p.npmVersionPublishedAt(ctx, name, latest); err == nil && availableAt != nil {
+				info.AvailableAt = availableAt
+				info.DateSource = "npm_registry_time"
+			}
+			infos[name] = info
+		}
+		if len(infos) > 0 {
+			result[manager] = infos
+		}
+	}
+	if len(result) == 0 {
+		return nil, nil
+	}
+	return result, nil
+}
+
 func (p *Provider) outdatedMapForManager(ctx context.Context, m *mgr) (map[string]string, error) {
 	stdout, stderr, err := p.exec.Run(ctx, m.binary, "outdated", "-g", "--json")
 	stdout = strings.TrimSpace(stdout)
@@ -469,8 +518,33 @@ func parseBunOutdatedMap(stdout string) map[string]string {
 
 // npmPackageResponse is the relevant subset of GET /registry.npmjs.org/<pkg>.
 type npmPackageResponse struct {
-	Description string `json:"description"`
-	Readme      string `json:"readme"`
+	Description string            `json:"description"`
+	Readme      string            `json:"readme"`
+	Time        map[string]string `json:"time"`
+}
+
+func (p *Provider) npmVersionPublishedAt(ctx context.Context, pkg, version string) (*time.Time, error) {
+	if pkg == "" || version == "" {
+		return nil, nil
+	}
+	endpoint := p.registryURL + "/" + url.PathEscape(pkg)
+	var payload npmPackageResponse
+	status, err := provider.FetchJSON(ctx, p.httpClient, endpoint, &payload)
+	if status == 0 {
+		return nil, fmt.Errorf("npm registry time: %w", err)
+	}
+	if err != nil || status != http.StatusOK {
+		return nil, nil
+	}
+	raw := strings.TrimSpace(payload.Time[version])
+	if raw == "" {
+		return nil, nil
+	}
+	publishedAt, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return nil, nil
+	}
+	return &publishedAt, nil
 }
 
 // Describe fetches a one-line description from the npm registry.

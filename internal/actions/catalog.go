@@ -145,7 +145,7 @@ var Lifecycle = []Action{
 		RequiresConfirm:    true,
 		ConfirmDescription: "Reconcile this host: sync tools, upgrade tools, sync dotfiles, and commit dotfile changes?",
 		TUI:                &TUIBinding{KeyMapField: "Reconcile", DefaultKey: "A", Label: "reconcile all", Description: "Review and run all safe host lifecycle fixes.", ConfirmDescription: "reconcile all"},
-		CLI:                []CLIBinding{{Command: []string{"reconcile"}, Flags: []string{"--message", "--skip-privileged"}}},
+		CLI:                []CLIBinding{{Command: []string{"reconcile"}, Flags: []string{"--message", "--skip-privileged", "--force"}}},
 		Palette:            &PaletteBinding{Command: []string{"reconcile"}, Description: "sync, upgrade, repair dotfiles, and commit changes"},
 		PaletteEligible:    true,
 	},
@@ -211,7 +211,7 @@ var Tools = []Action{
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresToolName},
 		TUI:             &TUIBinding{KeyMapField: "Upgrade", DefaultKey: "u", Label: "upgrade", Description: "Upgrade the selected outdated tool."},
-		CLI:             []CLIBinding{{Command: []string{"tools", "upgrade"}, Flags: []string{"--provider"}}},
+		CLI:             []CLIBinding{{Command: []string{"tools", "upgrade"}, Flags: []string{"--provider", "--force"}}},
 	},
 	{
 		ID:              ToolUpdateAll,
@@ -222,7 +222,7 @@ var Tools = []Action{
 		LongDescription: "Upgrade every outdated installed tool currently tracked in the local cache.",
 		Mutates:         true,
 		TUI:             &TUIBinding{KeyMapField: "UpgradeAll", DefaultKey: "U", Label: "upgrade all", Description: "Upgrade every visible outdated tool."},
-		CLI:             []CLIBinding{{Command: []string{"tools", "upgrade"}, Flags: []string{"--all"}}},
+		CLI:             []CLIBinding{{Command: []string{"tools", "upgrade"}, Flags: []string{"--all", "--force"}}},
 	},
 	{
 		ID:                 ToolSyncAll,
@@ -292,7 +292,7 @@ var Tools = []Action{
 		Requirements:    []Requirement{RequiresToolName, RequiresProviderScope},
 		TUI:             &TUIBinding{KeyMapField: "PinProvider", DefaultKey: "p", Label: "pin provider", Description: "Pin or remove provider settings for the selected tool."},
 		CLI: []CLIBinding{
-			{Command: []string{"tools", "set"}, Flags: []string{"--provider", "--install-with", "--global", "--host"}},
+			{Command: []string{"tools", "set"}, Flags: []string{"--provider", "--install-with", "--global", "--host", "--quarantine"}},
 		},
 	},
 	{
@@ -342,7 +342,7 @@ var Tools = []Action{
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresToolName, RequiresEcosystemProvider},
 		TUI:             &TUIBinding{KeyMapField: "PinProvider", DefaultKey: "p", Label: "set tool spec", Description: "Edit provider and package settings for the selected tool."},
-		CLI:             []CLIBinding{{Command: []string{"tools", "set"}, Flags: []string{"--provider", "--package", "--install-with", "--host", "--global"}}},
+		CLI:             []CLIBinding{{Command: []string{"tools", "set"}, Flags: []string{"--provider", "--package", "--install-with", "--host", "--global", "--quarantine"}}},
 	},
 	{
 		ID:                 ToolDeleteSpec,

@@ -3,10 +3,13 @@ package pip
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/lkshrk/omni/internal/executor"
 )
@@ -94,4 +97,44 @@ func TestSearch_URLPathEscapesQuery(t *testing.T) {
 	if gotPath != want {
 		t.Errorf("path = %q, want %q", gotPath, want)
 	}
+}
+
+func TestOutdatedInfoMap_UsesPyPIUploadTime(t *testing.T) {
+	client := staticJSONClient(`{"releases":{"24.3.0":[{"upload_time_iso_8601":"2026-05-28T12:00:00.000Z"},{"upload_time_iso_8601":"2026-05-28T12:05:00.000Z"}]}}`)
+
+	m := executor.NewMatchMock(executor.MatchRule{
+		Pattern:  "pip3 list --outdated --format=json",
+		Response: executor.MockCall{Stdout: `[{"name":"black","latest_version":"24.3.0"}]`},
+	})
+	p := newWithPyPI(m, "https://pypi.test", client)
+
+	got, err := p.OutdatedInfoMap(context.Background())
+	if err != nil {
+		t.Fatalf("OutdatedInfoMap: %v", err)
+	}
+	info := got["black"]
+	if info.LatestVersion != "24.3.0" {
+		t.Fatalf("LatestVersion = %q, want 24.3.0", info.LatestVersion)
+	}
+	want := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
+	if info.AvailableAt == nil || !info.AvailableAt.Equal(want) || info.DateSource != "pypi_upload_time" {
+		t.Fatalf("info = %+v, want PyPI upload time %s", info, want)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func staticJSONClient(body string) *http.Client {
+	return &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Request:    req,
+		}, nil
+	})}
 }

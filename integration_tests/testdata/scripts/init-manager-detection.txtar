@@ -29,6 +29,7 @@ stdout '"testhost"'
 
 -- init-input --
 n
+n
 
 
 -- bin/extract-testscript-bin --

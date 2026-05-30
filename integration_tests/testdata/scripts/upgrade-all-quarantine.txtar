@@ -1,0 +1,88 @@
+# omni tools upgrade --all skips quarantined updates unless --force is used
+exec chmod 755 bin/brew
+env PATH=$WORK/bin:$PATH
+
+exec omni-seed-cache ripgrep system ripgrep 14.0.0 15.0.0 brew
+exec omni-seed-update-metadata brew ripgrep 15.0.0 1h
+
+exec omni --config settings.json tools upgrade --all
+stdout 'skipped: ripgrep \(15.0.0\) \(system\): update quarantined'
+stdout '1 update quarantined\.'
+! exec test -f .omni-cache/fake-brew/ripgrep-upgraded
+
+exec omni --config settings.json tools upgrade --all --force
+stdout 'upgrading ripgrep \(15.0.0\)'
+stdout 'upgraded: ripgrep \(15.0.0\) \(system\)'
+exec test -f .omni-cache/fake-brew/ripgrep-upgraded
+
+-- bin/brew --
+#!/usr/bin/env sh
+set -eu
+state="${OMNI_CACHE_DIR}/fake-brew"
+mkdir -p "$state"
+case "${1:-}" in
+  --version)
+    echo "Homebrew 4.0.0"
+    ;;
+  upgrade)
+    shift
+    if [ "${1:-}" = "--formula" ] || [ "${1:-}" = "--cask" ]; then
+      shift
+    fi
+    : > "$state/$1"
+    : > "$state/$1-upgraded"
+    echo "15.0.0" > "$state/$1.version"
+    ;;
+  leaves)
+    if [ "${2:-}" = "--installed-on-request" ]; then
+      [ -f "$state/ripgrep" ] && echo "ripgrep"
+    fi
+    ;;
+  list)
+    shift
+    if [ "${1:-}" = "--cask" ]; then
+      exit 0
+    fi
+    if [ "${1:-}" = "--versions" ]; then
+      shift
+      if [ "${1:-}" = "--cask" ]; then
+        shift
+      fi
+      for pkg in "$@"; do
+        if [ "$pkg" = "ripgrep" ]; then
+          version="14.0.0"
+          if [ -f "$state/ripgrep.version" ]; then
+            version="$(cat "$state/ripgrep.version")"
+          fi
+          echo "ripgrep $version"
+          exit 0
+        fi
+      done
+    fi
+    exit 1
+    ;;
+  info)
+    echo '{"formulae":[],"casks":[]}'
+    ;;
+  outdated)
+    if [ ! -f "$state/ripgrep-upgraded" ]; then
+      echo '{"formulae":[{"name":"ripgrep","current_version":"15.0.0"}],"casks":[]}'
+      exit 0
+    fi
+    echo '{"formulae":[],"casks":[]}'
+    ;;
+esac
+
+-- settings.json --
+{
+  "settings": {
+    "update_quarantine": "2d"
+  },
+  "hosts": { "testhost": [] },
+  "tools": {
+    "ripgrep": { "provider": "system", "install_with": "brew" }
+  },
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": ["ripgrep"] }
+  ]
+}

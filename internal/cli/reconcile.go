@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -14,6 +15,7 @@ func newReconcileCmd(state *rootState) *cobra.Command {
 	var (
 		message        string
 		skipPrivileged bool
+		force          bool
 	)
 
 	cmd := &cobra.Command{
@@ -29,6 +31,7 @@ func newReconcileCmd(state *rootState) *cobra.Command {
 			result, err := state.app.Reconcile(cmd.Context(), app.ReconcileOptions{
 				CommitMessage:  message,
 				SkipPrivileged: skipPrivileged,
+				Force:          force,
 				Progress: func(msg string) {
 					fmt.Fprintf(out, "  %s\n", msg)
 				},
@@ -41,6 +44,10 @@ func newReconcileCmd(state *rootState) *cobra.Command {
 						fmt.Fprintf(out, "  ! failed: %s (%s): %v\n", name, event.Tool.Provider, event.Err)
 						return
 					}
+					if strings.HasPrefix(strings.TrimSpace(event.Message), "Skipped upgrading ") {
+						fmt.Fprintf(out, "  - skipped: %s (%s): update quarantined\n", name, event.Tool.Provider)
+						return
+					}
 					fmt.Fprintf(out, "  ✓ done: %s (%s)\n", name, event.Tool.Provider)
 				},
 			})
@@ -50,6 +57,7 @@ func newReconcileCmd(state *rootState) *cobra.Command {
 	}
 	cmd.Flags().StringVarP(&message, "message", "m", "", "Dotfile commit message (default: auto-generated)")
 	cmd.Flags().BoolVar(&skipPrivileged, "skip-privileged", false, "skip package actions that need sudo/root access")
+	cmd.Flags().BoolVar(&force, "force", false, "bypass update quarantine for tool upgrades")
 	return cmd
 }
 
