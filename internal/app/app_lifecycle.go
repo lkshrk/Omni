@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/executor"
 	"github.com/lkshrk/omni/internal/provider"
 	isync "github.com/lkshrk/omni/internal/sync"
 )
@@ -93,6 +95,15 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 			return nil, perr
 		}
 		result = pass1
+
+		// A manager installed by a script in pass 1 may land in a dir not yet on
+		// PATH; refresh from the login shell so pass-2 dependents can find it.
+		refreshPathAfterScriptInstalls(ctx, executor.New(), pass1, func(p string) {
+			if err := os.Setenv("PATH", p); err != nil {
+				// best effort: pass-2 dependents fall back to the existing PATH
+				return
+			}
+		})
 
 		// Pass 2: union keeps bootstrap providers in the desired set so they
 		// are not pruned when the user runs --prune.
@@ -1400,4 +1411,47 @@ func mergeProviderResults(pass1, pass2 *isync.SyncResult, providerTools []config
 	// SatisfiedGroups is populated by the caller after merge; pass2's value (nil here) is a placeholder.
 	merged.SatisfiedGroups = pass2.SatisfiedGroups
 	return merged
+}
+
+// refreshPathAfterScriptInstalls re-reads the login shell's PATH and applies it
+// via setenv when pass 1 installed a script-provider tool, so pass-2 dependents
+// see a manager the script placed in a dir not yet on the process PATH.
+func refreshPathAfterScriptInstalls(ctx context.Context, exec executor.Executor, pass1 *isync.SyncResult, setenv func(string)) {
+	if runtime.GOOS == "windows" || !pass1InstalledScriptTool(pass1) {
+		return
+	}
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "/bin/sh"
+	}
+	// printf is POSIX; `echo -n` prints a literal "-n" under dash (/bin/sh).
+	stdout, _, err := exec.Run(ctx, shell, "-lic", `printf '%s' "$PATH"`)
+	if err != nil {
+		return
+	}
+	if newPath := lastNonEmptyLine(stdout); newPath != "" {
+		setenv(newPath)
+	}
+}
+
+func pass1InstalledScriptTool(pass1 *isync.SyncResult) bool {
+	if pass1 == nil {
+		return false
+	}
+	for _, op := range pass1.Ops {
+		if op.Kind == isync.OpInstall && op.Tool.Provider == "script" {
+			return true
+		}
+	}
+	return false
+}
+
+func lastNonEmptyLine(s string) string {
+	lines := strings.Split(s, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if line := strings.TrimSpace(lines[i]); line != "" {
+			return line
+		}
+	}
+	return ""
 }

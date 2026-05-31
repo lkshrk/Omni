@@ -474,6 +474,18 @@ func TestBackupConfigOnLaunch_CopiesExistingFile(t *testing.T) {
 	}
 }
 
+func TestInitProviderRegistry_RegistersScript(t *testing.T) {
+	a := &App{}
+	a.initProviderRegistry(config.Settings{})
+	p, ok := a.registry.Get("script")
+	if !ok {
+		t.Fatal("script provider not registered")
+	}
+	if p.Name() != "script" {
+		t.Errorf("registered provider Name() = %q, want script", p.Name())
+	}
+}
+
 func TestBackupConfigOnLaunch_MissingSourceIsNoOp(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "settings.json")

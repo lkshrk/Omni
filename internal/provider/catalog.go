@@ -61,6 +61,7 @@ var builtinMetadata = map[string]Metadata{
 		DisplayOrder:        320,
 		DefaultInstallOrder: 40,
 	},
+	"script": {Kind: ProviderKindConcrete, DisplayOrder: 400},
 }
 
 var systemProviderPriority = []string{"apt", "apk", "dnf", "zypper", "pacman", "brew"}

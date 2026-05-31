@@ -440,6 +440,9 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 	}
 	validateInstall := func(path string, spec ToolInstallSpec) []ValidationError {
 		var errs []ValidationError
+		if spec.Provider == "script" {
+			return validateScriptSpec(path, spec)
+		}
 		if spec.Provider == "" {
 			errs = append(errs, ValidationError{Path: path + ".provider", Message: "provider is required"})
 		} else if len(providerSet) > 0 {
@@ -645,6 +648,9 @@ func validateDotPackageName(name string) error {
 // providers install through concrete managers, so the ecosystem-only rule does
 // not apply.
 func validateProviderSpec(path string, spec ToolInstallSpec, providerSet map[string]struct{}) []ValidationError {
+	if spec.Provider == "script" {
+		return validateScriptSpec(path, spec)
+	}
 	var errs []ValidationError
 	if spec.Provider == "" {
 		errs = append(errs, ValidationError{Path: path + ".provider", Message: "provider is required"})
@@ -657,6 +663,25 @@ func validateProviderSpec(path string, spec ToolInstallSpec, providerSet map[str
 		if _, ok := providerSet[spec.InstallWith]; !ok {
 			errs = append(errs, ValidationError{Path: path + ".install_with", Message: fmt.Sprintf("unknown concrete provider/manager %q", spec.InstallWith)})
 		}
+	}
+	return errs
+}
+
+// validateScriptSpec enforces the script provider's option contract: a
+// non-empty install command, and at least one detection mechanism.
+func validateScriptSpec(path string, spec ToolInstallSpec) []ValidationError {
+	var errs []ValidationError
+	if strings.TrimSpace(spec.Options["install"]) == "" {
+		errs = append(errs, ValidationError{
+			Path:    path + ".options.install",
+			Message: "script provider requires a non-empty install command",
+		})
+	}
+	if strings.TrimSpace(spec.Options["detect"]) == "" && strings.TrimSpace(spec.Options["check"]) == "" {
+		errs = append(errs, ValidationError{
+			Path:    path + ".options",
+			Message: "script provider requires options.detect or options.check",
+		})
 	}
 	return errs
 }
