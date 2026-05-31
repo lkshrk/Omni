@@ -571,6 +571,7 @@ func cloneSettings(settings Settings) Settings {
 		}
 		settings.Ecosystems = ecosystems
 	}
+	settings.Providers = cloneProviders(settings.Providers)
 	return settings
 }
 
@@ -588,6 +589,44 @@ func cloneStringMap(in map[string]string) map[string]string {
 	out := make(map[string]string, len(in))
 	for k, v := range in {
 		out[k] = v
+	}
+	return out
+}
+
+func cloneProviders(in []ProviderEntry) []ProviderEntry {
+	if in == nil {
+		return nil
+	}
+	out := make([]ProviderEntry, len(in))
+	for i, p := range in {
+		p.Options = cloneStringMap(p.Options)
+		p.Variants = cloneInstallSpecs(p.Variants)
+		p.Hosts = cloneInstallSpecMap(p.Hosts)
+		out[i] = p
+	}
+	return out
+}
+
+func cloneInstallSpecs(in []ToolInstallSpec) []ToolInstallSpec {
+	if in == nil {
+		return nil
+	}
+	out := make([]ToolInstallSpec, len(in))
+	for i, s := range in {
+		s.Options = cloneStringMap(s.Options)
+		out[i] = s
+	}
+	return out
+}
+
+func cloneInstallSpecMap(in map[string]ToolInstallSpec) map[string]ToolInstallSpec {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]ToolInstallSpec, len(in))
+	for k, s := range in {
+		s.Options = cloneStringMap(s.Options)
+		out[k] = s
 	}
 	return out
 }

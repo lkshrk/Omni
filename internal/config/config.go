@@ -116,6 +116,33 @@ func (s ToolSpec) ToToolEntry(logicalName string, install ToolInstallSpec) ToolE
 	}
 }
 
+// ProviderEntry is a self-contained, ordered bootstrap provider. It mirrors
+// ToolSpec (default spec + Variants + Hosts) but carries its own Name, since
+// Settings.Providers is a list (not a name-keyed map like Tools). Unlike
+// ToolEntry, ProviderEntry serializes as a full object.
+type ProviderEntry struct {
+	Name        string                     `json:"name"`
+	Provider    string                     `json:"provider"`
+	Package     string                     `json:"package,omitempty"`
+	InstallWith string                     `json:"install_with,omitempty"`
+	Options     map[string]string          `json:"options,omitempty"`
+	Variants    []ToolInstallSpec          `json:"variants,omitempty"`
+	Hosts       map[string]ToolInstallSpec `json:"hosts,omitempty"`
+}
+
+// ToToolSpec adapts a provider entry to the ToolSpec resolution shape so it can
+// reuse the tool install-spec resolver (Hosts → Variants-by-availability → default).
+func (p ProviderEntry) ToToolSpec() ToolSpec {
+	return ToolSpec{
+		Provider:    p.Provider,
+		Package:     p.Package,
+		InstallWith: p.InstallWith,
+		Options:     p.Options,
+		Variants:    p.Variants,
+		Hosts:       p.Hosts,
+	}
+}
+
 type EcosystemSettings struct {
 	Manager  string   `json:"manager,omitempty"`
 	Priority []string `json:"priority,omitempty"`
@@ -146,6 +173,9 @@ type Settings struct {
 	// DisabledProviders lists ecosystem provider names ("system", "node", "python")
 	// that are disabled on this machine. Stored in host_settings, not global settings.
 	DisabledProviders []string `json:"disabled_providers,omitempty"`
+	// Providers is an ordered list of bootstrap providers installed before the
+	// rest of a sync, in list order. Each entry is self-contained.
+	Providers []ProviderEntry `json:"providers,omitempty"`
 }
 
 func (s Settings) Ecosystem(name string) EcosystemSettings {
@@ -336,6 +366,11 @@ func (c *RootConfig) EffectiveSettings(shortHostname string) Settings {
 	// means "enable all ecosystem providers on this host".
 	if hs.DisabledProviders != nil {
 		s.DisabledProviders = cloneStringSlice(hs.DisabledProviders)
+	}
+	// Providers: nil host list means "inherit global"; a non-nil host list
+	// (including empty) replaces the global list entirely.
+	if hs.Providers != nil {
+		s.Providers = cloneProviders(hs.Providers)
 	}
 	return s
 }
@@ -559,6 +594,23 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 			}
 		}
 	}
+	for i, p := range cfg.Settings.Providers {
+		base := fmt.Sprintf("$.settings.providers[%d]", i)
+		if strings.TrimSpace(p.Name) == "" {
+			errs = append(errs, ValidationError{Path: base + ".name", Message: "provider name is required"})
+		}
+		errs = append(errs, validateProviderSpec(base, p.ToToolSpec().DefaultInstallSpec(), providerSet)...)
+		for j, variant := range p.Variants {
+			errs = append(errs, validateProviderSpec(fmt.Sprintf("%s.variants[%d]", base, j), variant, providerSet)...)
+		}
+		for host, override := range p.Hosts {
+			if strings.TrimSpace(host) == "" {
+				errs = append(errs, ValidationError{Path: base + ".hosts", Message: "host name is required"})
+			}
+			errs = append(errs, validateProviderSpec(fmt.Sprintf("%s.hosts.%q", base, host), override, providerSet)...)
+		}
+	}
+
 	for i, ignored := range cfg.Ignore.Tools {
 		if strings.TrimSpace(ignored) == "" {
 			errs = append(errs, ValidationError{Path: fmt.Sprintf("$.ignore.tools[%d]", i), Message: "tool name is required"})
@@ -586,6 +638,27 @@ func validateDotPackageName(name string) error {
 		return fmt.Errorf("invalid package name %q: path separators are not allowed", name)
 	}
 	return nil
+}
+
+// validateProviderSpec validates one bootstrap-provider install spec. Unlike the
+// tool validateInstall closure, it accepts concrete providers (brew, uv, bun):
+// providers install through concrete managers, so the ecosystem-only rule does
+// not apply.
+func validateProviderSpec(path string, spec ToolInstallSpec, providerSet map[string]struct{}) []ValidationError {
+	var errs []ValidationError
+	if spec.Provider == "" {
+		errs = append(errs, ValidationError{Path: path + ".provider", Message: "provider is required"})
+	} else if len(providerSet) > 0 {
+		if _, ok := providerSet[spec.Provider]; !ok {
+			errs = append(errs, ValidationError{Path: path + ".provider", Message: fmt.Sprintf("unknown provider %q", spec.Provider)})
+		}
+	}
+	if spec.InstallWith != "" && len(providerSet) > 0 {
+		if _, ok := providerSet[spec.InstallWith]; !ok {
+			errs = append(errs, ValidationError{Path: path + ".install_with", Message: fmt.Sprintf("unknown concrete provider/manager %q", spec.InstallWith)})
+		}
+	}
+	return errs
 }
 
 func recordDotPackageUsage(errs []ValidationError, packages map[string]string, path, pkg, logicalName string) []ValidationError {
