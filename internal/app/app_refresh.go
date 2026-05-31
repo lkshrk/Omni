@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -40,7 +41,7 @@ func (a *App) refreshOutdatedIfStale(ctx context.Context, progress func(string))
 	if a.refreshRecent(ctx, stateKeyRefreshOutdated) {
 		return nil
 	}
-	if err := a.RefreshOutdated(ctx, progress); err != nil {
+	if err := a.RefreshOutdated(ctx, false, progress); err != nil {
 		return err
 	}
 	return a.markRefreshed(ctx, stateKeyRefreshOutdated)
@@ -76,7 +77,10 @@ type descriptionPendingTool struct {
 }
 
 // RefreshOutdated queries each provider's OutdatedMap and writes results to the DB.
-func (a *App) RefreshOutdated(ctx context.Context, progress func(string)) error {
+// When refreshMetadata is true (user-initiated refresh), providers with a stale
+// local index are refreshed first; passive background scans pass false to avoid
+// the network latency.
+func (a *App) RefreshOutdated(ctx context.Context, refreshMetadata bool, progress func(string)) error {
 	defer profile.Start("app.refresh.outdated.total")()
 
 	stop := profile.Start("app.refresh.outdated.list_tools")
@@ -95,6 +99,12 @@ func (a *App) RefreshOutdated(ctx context.Context, progress func(string)) error 
 	}
 	if len(neededProviders) == 0 {
 		return nil
+	}
+
+	if refreshMetadata {
+		stop = profile.Start("app.refresh.outdated.metadata")
+		a.refreshProviderMetadataBestEffort(ctx, neededProviders)
+		stop()
 	}
 
 	stop = profile.Start("app.refresh.outdated.provider_maps")
@@ -175,9 +185,32 @@ func (a *App) outdatedMapsForProvidersBestEffort(ctx context.Context, providerNa
 	return outdatedByProv, outdatedByManager, updateMetadata
 }
 
+// refreshProviderMetadataBestEffort refreshes the locally-cached package index
+// for providers that support it (e.g. `brew update`), so OutdatedMap can see
+// newly published versions. Failures are logged and ignored: a stale index is
+// better than a failed scan, and the refresh is purely an accuracy improvement.
+func (a *App) refreshProviderMetadataBestEffort(ctx context.Context, providerNames map[string]struct{}) {
+	for name := range providerNames {
+		p, ok := a.registry.Get(name)
+		if !ok {
+			continue
+		}
+		mr, ok := p.(provider.MetadataRefresher)
+		if !ok {
+			continue
+		}
+		if avail, err := p.Available(ctx); err != nil || !avail {
+			continue
+		}
+		if err := mr.RefreshMetadata(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: omni: refresh %s metadata: %v\n", name, err)
+		}
+	}
+}
+
 // RefreshProviderOutdated queries outdated status for a single named provider and
 // writes results to the DB.
-func (a *App) RefreshProviderOutdated(ctx context.Context, provName string) error {
+func (a *App) RefreshProviderOutdated(ctx context.Context, provName string, refreshMetadata bool) error {
 	defer profile.Start("app.refresh.outdated.provider." + provName)()
 
 	tools, err := a.readDB().List(ctx)
@@ -211,6 +244,9 @@ func (a *App) RefreshProviderOutdated(ctx context.Context, provName string) erro
 	}
 	if len(neededLookups) == 0 {
 		return nil
+	}
+	if refreshMetadata {
+		a.refreshProviderMetadataBestEffort(ctx, neededLookups)
 	}
 	outdatedByProv := make(map[string]map[string]string)
 	outdatedByManager := make(map[string]map[string]map[string]string)

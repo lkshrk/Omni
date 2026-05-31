@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -28,6 +29,19 @@ func (s *provOutdatedStub) OutdatedMap(_ context.Context) (map[string]string, er
 		return nil, s.outdatedErr
 	}
 	return s.outdatedMap, nil
+}
+
+// metadataRefreshStub extends provOutdatedStub with MetadataRefresher, counting
+// how often RefreshMetadata is invoked so tests can assert the user-initiated
+// gate (refreshMetadata bool) actually controls the index refresh.
+type metadataRefreshStub struct {
+	provOutdatedStub
+	refreshes int32
+}
+
+func (s *metadataRefreshStub) RefreshMetadata(_ context.Context) error {
+	atomic.AddInt32(&s.refreshes, 1)
+	return nil
 }
 
 type managerOutdatedStub struct {
@@ -90,7 +104,7 @@ func (s *managerOutdatedInfoStub) OutdatedInfoByManager(_ context.Context) (map[
 // provider name is silently skipped (returns nil, no panic).
 func TestRefreshProviderOutdated_UnknownProvider(t *testing.T) {
 	a, _ := newImportApp(t)
-	if err := a.RefreshProviderOutdated(context.Background(), "nonexistent"); err != nil {
+	if err := a.RefreshProviderOutdated(context.Background(), "nonexistent", false); err != nil {
 		t.Errorf("RefreshProviderOutdated with unknown provider: %v", err)
 	}
 }
@@ -100,7 +114,7 @@ func TestRefreshProviderOutdated_UnknownProvider(t *testing.T) {
 func TestRefreshProviderOutdated_ProviderNotOutdatedChecker(t *testing.T) {
 	prov := &stubProvider{name: "brew", available: true}
 	a, _ := newImportApp(t, prov)
-	if err := a.RefreshProviderOutdated(context.Background(), "brew"); err != nil {
+	if err := a.RefreshProviderOutdated(context.Background(), "brew", false); err != nil {
 		t.Errorf("RefreshProviderOutdated non-OutdatedChecker: %v", err)
 	}
 }
@@ -113,7 +127,7 @@ func TestRefreshProviderOutdated_UnavailableProvider(t *testing.T) {
 		outdatedMap:  map[string]string{"ripgrep": "15.0.0"},
 	}
 	a, _ := newImportApp(t, prov)
-	if err := a.RefreshProviderOutdated(context.Background(), "brew"); err != nil {
+	if err := a.RefreshProviderOutdated(context.Background(), "brew", false); err != nil {
 		t.Errorf("RefreshProviderOutdated unavailable: %v", err)
 	}
 }
@@ -134,7 +148,7 @@ func TestRefreshProviderOutdated_ReturnsOutdatedMapError(t *testing.T) {
 		t.Fatalf("config.Save: %v", err)
 	}
 
-	err := a.RefreshProviderOutdated(context.Background(), "brew")
+	err := a.RefreshProviderOutdated(context.Background(), "brew", false)
 	if err == nil {
 		t.Fatal("RefreshProviderOutdated returned nil, want provider error")
 	}
@@ -162,8 +176,48 @@ func TestRefreshProviderOutdated_NoOutdatedTools(t *testing.T) {
 		t.Fatalf("config.Save: %v", err)
 	}
 
-	if err := a.RefreshProviderOutdated(context.Background(), "brew"); err != nil {
+	if err := a.RefreshProviderOutdated(context.Background(), "brew", false); err != nil {
 		t.Errorf("RefreshProviderOutdated (empty map): %v", err)
+	}
+}
+
+func newMetadataRefreshApp(t *testing.T) (*app.App, *metadataRefreshStub) {
+	t.Helper()
+	prov := &metadataRefreshStub{provOutdatedStub: provOutdatedStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		outdatedMap:  map[string]string{},
+	}}
+	a, cfgPath := newImportApp(t, prov)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools:  logicalToolSpecs(logicalTool("ripgrep", "brew")),
+		Groups: []*config.GroupConfig{{Tools: groupTools("ripgrep")}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	return a, prov
+}
+
+// TestRefreshProviderOutdated_RefreshMetadataTrue verifies a user-initiated
+// refresh refreshes the provider's local index before checking outdated status.
+func TestRefreshProviderOutdated_RefreshMetadataTrue(t *testing.T) {
+	a, prov := newMetadataRefreshApp(t)
+	if err := a.RefreshProviderOutdated(context.Background(), "brew", true); err != nil {
+		t.Fatalf("RefreshProviderOutdated: %v", err)
+	}
+	if got := atomic.LoadInt32(&prov.refreshes); got != 1 {
+		t.Fatalf("RefreshMetadata calls = %d, want 1", got)
+	}
+}
+
+// TestRefreshProviderOutdated_RefreshMetadataFalse verifies a passive scan does
+// not pay the index-refresh cost.
+func TestRefreshProviderOutdated_RefreshMetadataFalse(t *testing.T) {
+	a, prov := newMetadataRefreshApp(t)
+	if err := a.RefreshProviderOutdated(context.Background(), "brew", false); err != nil {
+		t.Fatalf("RefreshProviderOutdated: %v", err)
+	}
+	if got := atomic.LoadInt32(&prov.refreshes); got != 0 {
+		t.Fatalf("RefreshMetadata calls = %d, want 0", got)
 	}
 }
 
@@ -189,7 +243,7 @@ func TestRefreshProviderOutdated_MarksOutdated(t *testing.T) {
 		t.Fatalf("RefreshInstalled seed: %v", err)
 	}
 
-	if err := a.RefreshProviderOutdated(context.Background(), "brew"); err != nil {
+	if err := a.RefreshProviderOutdated(context.Background(), "brew", false); err != nil {
 		t.Errorf("RefreshProviderOutdated: %v", err)
 	}
 
@@ -227,7 +281,7 @@ func TestRefreshProviderOutdated_UsesInstalledWithManager(t *testing.T) {
 		}
 	}
 
-	if err := a.RefreshProviderOutdated(context.Background(), "node"); err != nil {
+	if err := a.RefreshProviderOutdated(context.Background(), "node", false); err != nil {
 		t.Fatalf("RefreshProviderOutdated: %v", err)
 	}
 
@@ -274,7 +328,7 @@ func TestRefreshProviderOutdated_PersistsManagerUpdateMetadata(t *testing.T) {
 		t.Fatalf("db.Upsert: %v", err)
 	}
 
-	if err := a.RefreshProviderOutdated(ctx, "node"); err != nil {
+	if err := a.RefreshProviderOutdated(ctx, "node", false); err != nil {
 		t.Fatalf("RefreshProviderOutdated: %v", err)
 	}
 
@@ -310,7 +364,7 @@ func TestRefreshProviderOutdated_UsesFullSlashPackage(t *testing.T) {
 		t.Fatalf("db.Upsert: %v", err)
 	}
 
-	if err := a.RefreshProviderOutdated(context.Background(), "node"); err != nil {
+	if err := a.RefreshProviderOutdated(context.Background(), "node", false); err != nil {
 		t.Fatalf("RefreshProviderOutdated: %v", err)
 	}
 
@@ -342,7 +396,7 @@ func TestRefreshProviderOutdated_UsesRegisteredInstalledWithOwner(t *testing.T) 
 		t.Fatalf("seed cache: %v", err)
 	}
 
-	if err := a.RefreshProviderOutdated(ctx, "system"); err != nil {
+	if err := a.RefreshProviderOutdated(ctx, "system", false); err != nil {
 		t.Fatalf("RefreshProviderOutdated: %v", err)
 	}
 

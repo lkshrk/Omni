@@ -429,7 +429,7 @@ func (m *Model) doCheckProviderOutdated(provName string, gen int) tea.Cmd {
 		defer profile.Start("tui.refresh.outdated.provider." + provName)()
 
 		outdatedCtx, cancelOutdated := context.WithTimeout(ctx, 45*time.Second)
-		outdatedErr := a.RefreshProviderOutdated(outdatedCtx, provName)
+		outdatedErr := a.RefreshProviderOutdated(outdatedCtx, provName, true)
 		cancelOutdated()
 		return providerOutdatedCheckedMsg{gen: gen, provider: provName, err: outdatedErr}
 	}

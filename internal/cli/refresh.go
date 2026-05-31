@@ -25,7 +25,7 @@ func newRefreshCmd(state *rootState) *cobra.Command {
 			if err := state.app.RefreshInstalled(ctx, progress); err != nil {
 				return fmt.Errorf("refreshing installed state: %w", err)
 			}
-			if err := state.app.RefreshOutdated(ctx, progress); err != nil {
+			if err := state.app.RefreshOutdated(ctx, true, progress); err != nil {
 				return fmt.Errorf("refreshing update state: %w", err)
 			}
 			if err := state.app.RefreshDiscoveredWithProgress(ctx, func(event app.RefreshDiscoveredProgressEvent) {

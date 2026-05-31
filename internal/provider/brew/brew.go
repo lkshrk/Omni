@@ -538,6 +538,19 @@ func (p *Provider) BulkDescribe(ctx context.Context, tools []provider.Tool) (map
 	return m, nil
 }
 
+// RefreshMetadata runs `brew update` to pull the latest formula and tap index
+// so OutdatedMap can detect newly published versions, including those in
+// personal taps that brew does not auto-refresh on `brew outdated`.
+func (p *Provider) RefreshMetadata(ctx context.Context) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, stderr, err := p.exec.Run(ctx, "brew", "update", "--quiet")
+	if err != nil {
+		return fmt.Errorf("brew update: %w\n%s", err, strings.TrimSpace(stderr))
+	}
+	return nil
+}
+
 func (p *Provider) Tap(ctx context.Context, name string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()

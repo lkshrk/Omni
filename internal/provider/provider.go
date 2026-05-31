@@ -147,6 +147,15 @@ type MultiManagerBulkChecker interface {
 	InstalledByManager(ctx context.Context) (map[string]InstalledEntry, error)
 }
 
+// MetadataRefresher is optionally implemented by providers whose outdated
+// detection relies on a locally-cached package index that can go stale (e.g.
+// Homebrew taps). Refreshing pulls the latest index so OutdatedMap sees newly
+// published versions. Callers invoke it only for user-initiated refreshes, not
+// passive background scans, because it incurs network latency.
+type MetadataRefresher interface {
+	RefreshMetadata(ctx context.Context) error
+}
+
 // OutdatedChecker is optionally implemented by providers that can return all
 // outdated tools in a single call.
 type OutdatedChecker interface {

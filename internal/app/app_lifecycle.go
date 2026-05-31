@@ -846,7 +846,7 @@ func (a *App) refreshOutdatedAfterUpgrade(ctx context.Context, name, providerNam
 	if lookupProvider == "" {
 		return nil
 	}
-	return a.RefreshProviderOutdated(ctx, lookupProvider)
+	return a.RefreshProviderOutdated(ctx, lookupProvider, false)
 }
 
 func installedWithForLifecycle(opProvider, manager string) string {

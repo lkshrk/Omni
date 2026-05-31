@@ -663,6 +663,23 @@ func TestListInstalled_ReturnsFormulaeAndBrewCasks(t *testing.T) {
 
 // --- OutdatedMap ---
 
+func TestRefreshMetadata_RunsBrewUpdate(t *testing.T) {
+	p, m := newBrew(executor.MockCall{})
+	if err := p.RefreshMetadata(context.Background()); err != nil {
+		t.Fatalf("RefreshMetadata: %v", err)
+	}
+	if len(m.Calls) != 1 || strings.Join(m.Calls[0].Args, " ") != "update --quiet" {
+		t.Fatalf("calls = %+v, want brew update --quiet", m.Calls)
+	}
+}
+
+func TestRefreshMetadata_PropagatesError(t *testing.T) {
+	p, _ := newBrew(executor.MockCall{Err: errors.New("network down")})
+	if err := p.RefreshMetadata(context.Background()); err == nil {
+		t.Fatal("RefreshMetadata: want error, got nil")
+	}
+}
+
 func TestOutdatedMap_ReturnsFormulae(t *testing.T) {
 	out := `{"formulae":[{"name":"git","current_version":"2.44.0"}],"casks":[]}`
 	p, m := newBrew(executor.MockCall{Stdout: out})
