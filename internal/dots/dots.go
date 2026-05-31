@@ -116,6 +116,7 @@ type ResolvedEntry struct {
 	TargetPath string   // absolute path of target (dir or file)
 	Ignored    bool     // true when present only to suppress management
 	Ignore     []string // combined built-in + per-entry patterns
+	OnConflict string   // automatic sync conflict policy: "", "use_repo", "use_local"
 }
 
 // Manager holds a resolved set of dot entries and the stow package root.
@@ -191,6 +192,7 @@ func New(repoPath string, entries []config.DotEntry) (*Manager, error) {
 			TargetPath: dstAbs,
 			Ignored:    e.Ignored,
 			Ignore:     ignorePatterns,
+			OnConflict: e.OnConflict,
 		})
 	}
 

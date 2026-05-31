@@ -3409,6 +3409,49 @@ func TestDotsSyncEntry_ConflictRequiresChoice(t *testing.T) {
 	}
 }
 
+func TestDotsSyncEntry_OnConflictUseRepoAutoResolves(t *testing.T) {
+	if _, err := exec.LookPath("stow"); err != nil {
+		t.Skip("stow not available")
+	}
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	srcDir := filepath.Join(dotsContentDir(repoDir), "codex", ".config", "codex")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "config.toml"), []byte("-- repo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Local target diverged from the repo (the recurring codex case).
+	targetDir := filepath.Join(home, ".config", "codex")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(targetDir, "config.toml"), []byte("-- local"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Repo newer than the divergent local file: classifies as a conflict
+	// (a newer local would auto-adopt instead).
+	setDotTestModTime(t, filepath.Join(srcDir, "config.toml"), time.Unix(1_700_000_000, 0).Add(time.Hour))
+	setDotTestModTime(t, filepath.Join(targetDir, "config.toml"), time.Unix(1_700_000_000, 0))
+
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{Name: "codex", Path: targetDir, OnConflict: "use_repo"},
+	}, home)
+
+	ops, err := a.DotsSyncEntry(context.Background(), "codex", dots.SyncOptions{})
+	if err != nil {
+		t.Fatalf("DotsSyncEntry with on_conflict=use_repo: unexpected error: %v", err)
+	}
+	if len(ops) != 1 || ops[0].Kind != dots.OpRepair {
+		t.Fatalf("ops = %v, want OpRepair", ops)
+	}
+	assertSymlinkResolvesTo(t, filepath.Join(targetDir, "config.toml"), filepath.Join(srcDir, "config.toml"))
+}
+
 func TestDotsList_HealthOK(t *testing.T) {
 	a, cfgDir, repoDir := newDotsApp(t)
 	home := t.TempDir()

@@ -369,6 +369,20 @@ func syncResolvedDotEntry(ctx context.Context, repoPath, stowPath string, entry 
 			}
 			return []dots.Op{{Kind: dots.OpRepair, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}}, nil
 		}
+		if state == DotStateConflict {
+			switch entry.OnConflict {
+			case "use_repo":
+				if opts.DryRun {
+					return []dots.Op{{Kind: dots.OpDryRepair, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}}, nil
+				}
+				return resolveDotUseRepo(ctx, stowPath, entry)
+			case "use_local":
+				if opts.DryRun {
+					return []dots.Op{{Kind: dots.OpDryAdopt, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}}, nil
+				}
+				return resolveDotUseLocal(ctx, repoPath, stowPath, entry)
+			}
+		}
 		err := fmt.Errorf("requires choosing use repo version or use local version")
 		return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}}, err
 	default:

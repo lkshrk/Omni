@@ -249,6 +249,11 @@ type DotEntry struct {
 	Ignored bool `json:"ignored,omitempty"`
 	// Ignore holds glob patterns for files to skip within this entry.
 	Ignore []string `json:"ignore,omitempty"`
+	// OnConflict sets an automatic conflict resolution for this entry during sync.
+	// Empty means manual resolution (sync errors on conflict). "use_repo" relinks
+	// the repo version over the local target; "use_local" adopts the local content
+	// into the repo. Useful for files an external tool constantly rewrites.
+	OnConflict string `json:"on_conflict,omitempty"`
 }
 
 // EffectivePackage returns the default stow package directory for this dot.
@@ -550,6 +555,11 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 				}
 			}
 			errs = recordDotPackageUsage(errs, dotPackages, path+".package", defaultPackage, dot.Name)
+			switch dot.OnConflict {
+			case "", "use_repo", "use_local":
+			default:
+				errs = append(errs, ValidationError{Path: path + ".on_conflict", Message: fmt.Sprintf("invalid on_conflict %q: want \"use_repo\" or \"use_local\"", dot.OnConflict)})
+			}
 			for host, variant := range dot.Hosts {
 				hostPath := fmt.Sprintf("%s.hosts.%q", path, host)
 				if strings.TrimSpace(host) == "" {
