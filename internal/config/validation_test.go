@@ -336,6 +336,38 @@ func TestValidateRoot_DotRejectsPathLikePackage(t *testing.T) {
 	}
 }
 
+func TestValidateRoot_DotRejectsInvalidOnConflict(t *testing.T) {
+	cfg := &config.RootConfig{
+		Groups: []*config.GroupConfig{{
+			Name: "base",
+			Dots: []config.DotEntry{{
+				Name:       "codex",
+				Path:       "~/.config/codex",
+				OnConflict: "yolo",
+			}},
+		}},
+	}
+	errs := config.ValidateRoot(cfg, config.ProviderValidation{})
+	if !containsErrorMessage(errs, `invalid on_conflict "yolo"`) {
+		t.Errorf("expected invalid on_conflict error, got %v", errs)
+	}
+}
+
+func TestValidateRoot_DotAcceptsValidOnConflict(t *testing.T) {
+	for _, v := range []string{"", "use_repo", "use_local"} {
+		cfg := &config.RootConfig{
+			Groups: []*config.GroupConfig{{
+				Name: "base",
+				Dots: []config.DotEntry{{Name: "codex", Path: "~/.config/codex", OnConflict: v}},
+			}},
+		}
+		errs := config.ValidateRoot(cfg, config.ProviderValidation{})
+		if containsErrorMessage(errs, "on_conflict") {
+			t.Errorf("on_conflict=%q rejected unexpectedly: %v", v, errs)
+		}
+	}
+}
+
 func TestValidateRoot_HostReferencesMissingGroup(t *testing.T) {
 	cfg := &config.RootConfig{
 		Tools:  map[string]config.ToolSpec{"a": {Provider: "brew"}},
