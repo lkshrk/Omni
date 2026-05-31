@@ -514,6 +514,40 @@ func TestInstalledByManager_AvailableManagerListFailureReturnsError(t *testing.T
 	}
 }
 
+func TestInstalledByManager_BunEmptyGlobalTolerated(t *testing.T) {
+	// bun exits non-zero when the global install dir is empty (fresh workspace).
+	// That must not abort the sync — treat it as "no globals", not a fatal error.
+	m := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "bun --version", Response: executor.MockCall{Stdout: "1.3.8"}},
+		executor.MatchRule{Pattern: "bun pm ls -g", Response: executor.MockCall{Err: errors.New("exit status 1")}},
+		executor.MatchRule{Pattern: "pnpm --version", Response: executor.MockCall{Err: errors.New("not found")}},
+		executor.MatchRule{Pattern: "npm --version", Response: executor.MockCall{Err: errors.New("not found")}},
+	)
+	p := node.New(m, "")
+	got, err := p.InstalledByManager(context.Background())
+	if err != nil {
+		t.Fatalf("InstalledByManager error = %v, want nil (bun empty global tolerated)", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("got %d entries, want 0", len(got))
+	}
+}
+
+func TestInstalledMap_BunEmptyGlobalTolerated(t *testing.T) {
+	m := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "bun --version", Response: executor.MockCall{Stdout: "1.3.8"}},
+		executor.MatchRule{Pattern: "bun pm ls -g", Response: executor.MockCall{Err: errors.New("exit status 1")}},
+	)
+	p := node.New(m, "bun")
+	got, err := p.InstalledMap(context.Background())
+	if err != nil {
+		t.Fatalf("InstalledMap error = %v, want nil (bun empty global tolerated)", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("got %d entries, want 0", len(got))
+	}
+}
+
 // --- OutdatedMap ---
 
 func TestOutdatedMap_Empty(t *testing.T) {

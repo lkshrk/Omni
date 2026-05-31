@@ -27,17 +27,19 @@ type mgr struct {
 	upgradeWithLatestTag bool
 	listGlobal           []string // lists all global packages
 	filterByPkg          bool     // whether listGlobal accepts a package name to narrow output
+	emptyExitNonZero     bool     // listGlobal exits non-zero when no globals are installed (bun)
 }
 
 // supported is ordered by auto-detect preference (bun → pnpm → npm).
 var supported = []mgr{
 	{
-		binary:      "bun",
-		install:     []string{"add", "-g"},
-		uninstall:   []string{"remove", "-g"},
-		upgrade:     []string{"update", "-g", "--latest"},
-		listGlobal:  []string{"pm", "ls", "-g"},
-		filterByPkg: false, // bun pm ls -g does not accept a package filter
+		binary:           "bun",
+		install:          []string{"add", "-g"},
+		uninstall:        []string{"remove", "-g"},
+		upgrade:          []string{"update", "-g", "--latest"},
+		listGlobal:       []string{"pm", "ls", "-g"},
+		filterByPkg:      false, // bun pm ls -g does not accept a package filter
+		emptyExitNonZero: true,  // bun pm ls -g exits 1 when the global dir is empty
 	},
 	{
 		binary:      "pnpm",
@@ -280,6 +282,9 @@ func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) 
 	}
 	stdout, _, err := p.exec.Run(ctx, m.binary, m.listGlobal...)
 	if err != nil {
+		if m.emptyExitNonZero {
+			return map[string]string{}, nil // empty global dir; nothing installed
+		}
 		return nil, fmt.Errorf("%s: %w", cmdStr(m.binary, m.listGlobal), err)
 	}
 	result := make(map[string]string)
@@ -312,6 +317,9 @@ func (p *Provider) InstalledByManager(ctx context.Context) (map[string]provider.
 		}
 		stdout, _, err := p.exec.Run(ctx, m.binary, m.listGlobal...)
 		if err != nil {
+			if m.emptyExitNonZero {
+				return nil // empty global dir; nothing to attribute
+			}
 			return fmt.Errorf("%s: %w", cmdStr(m.binary, m.listGlobal), err)
 		}
 		for _, line := range strings.Split(stdout, "\n") {
