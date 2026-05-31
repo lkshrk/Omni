@@ -1,0 +1,29 @@
+# script provider: install via custom shell command, idempotency via check probe
+exec omni --config settings.json hosts ensure testhost
+
+# First sync: check fails (marker absent) → install runs → marker created.
+exec omni --config settings.json tools sync
+stdout 'done: mytool \(script\)'
+exec test -f installed-marker
+
+# Second sync: check passes (marker present) → already installed, install NOT re-run.
+exec omni --config settings.json tools sync
+stdout 'already installed: mytool \(script\)'
+! stdout 'done: mytool \(script\)'
+
+-- settings.json --
+{
+  "tools": {
+    "mytool": {
+      "provider": "script",
+      "options": {
+        "install": "touch installed-marker",
+        "check": "test -f installed-marker"
+      }
+    }
+  },
+  "hosts": { "testhost": [] },
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": ["mytool"] }
+  ]
+}

@@ -29,6 +29,7 @@ import (
 	pacmanpkg "github.com/lkshrk/omni/internal/provider/pacman"
 	"github.com/lkshrk/omni/internal/provider/pip"
 	"github.com/lkshrk/omni/internal/provider/python"
+	"github.com/lkshrk/omni/internal/provider/script"
 	systempkg "github.com/lkshrk/omni/internal/provider/system"
 	zypppkg "github.com/lkshrk/omni/internal/provider/zypper"
 	isync "github.com/lkshrk/omni/internal/sync"
@@ -264,6 +265,7 @@ func (a *App) initProviderRegistry(settings config.Settings) {
 		a.registry.RegisterWithMetadata(p, provider.BuiltinMetadata(p.Name()))
 	}
 	a.registry.RegisterWithMetadata(pip.New(exec), provider.BuiltinMetadata("pip"))
+	a.registry.RegisterWithMetadata(script.New(exec), provider.BuiltinMetadata("script"))
 
 	// ecosystem providers — skipped when the user has disabled them on this machine.
 	disabledSet := make(map[string]bool, len(settings.DisabledProviders))
