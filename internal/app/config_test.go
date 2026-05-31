@@ -588,7 +588,7 @@ func TestRefreshOutdated_SetsOutdatedFlag(t *testing.T) {
 	}
 
 	var progress []string
-	if err := a.RefreshOutdated(ctx, func(s string) { progress = append(progress, s) }); err != nil {
+	if err := a.RefreshOutdated(ctx, false, func(s string) { progress = append(progress, s) }); err != nil {
 		t.Fatalf("RefreshOutdated: %v", err)
 	}
 
@@ -619,7 +619,7 @@ func TestRefreshOutdated_NoOutdatedChecker(t *testing.T) {
 	if err := a.Install(ctx, "git", "brew"); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
-	if err := a.RefreshOutdated(ctx, nil); err != nil {
+	if err := a.RefreshOutdated(ctx, false, nil); err != nil {
 		t.Fatalf("RefreshOutdated (no checker): %v", err)
 	}
 	// Tool should remain not-outdated.

@@ -282,10 +282,10 @@ func TestOutdatedRefreshSkipsIgnoredTools(t *testing.T) {
 		t.Fatalf("seed cache: %v", err)
 	}
 
-	if err := a.RefreshOutdated(ctx, nil); err != nil {
+	if err := a.RefreshOutdated(ctx, false, nil); err != nil {
 		t.Fatalf("RefreshOutdated: %v", err)
 	}
-	if err := a.RefreshProviderOutdated(ctx, "brew"); err != nil {
+	if err := a.RefreshProviderOutdated(ctx, "brew", false); err != nil {
 		t.Fatalf("RefreshProviderOutdated: %v", err)
 	}
 	if stub.outdatedMapCalls != 0 {
