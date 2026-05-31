@@ -66,17 +66,50 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 		return nil, err
 	}
 
+	opts.IgnoreList = cfg.Ignore.Tools
+
 	// Build a flat config view for the syncer; logical tools are deduplicated
 	// by the resolver across group memberships.
 	flatCfg := &config.Config{Tools: resolvedTools, Settings: cfg.Settings}
 
-	opts.IgnoreList = cfg.Ignore.Tools
+	// Two-pass provider-first sync:
+	//   Pass 1 — install bootstrap providers (Settings.Providers) first,
+	//             unconditionally, with no prune / group / provider filter.
+	//   Pass 2 — install the rest with the caller's original options; the
+	//             union of group tools + provider tools ensures bootstrap
+	//             providers are not pruned as orphans.
+	providerTools := a.buildProviderTools(ctx, cfg)
 
-	// Construct syncer per call so Sync always sees the current *database.DB,
-	// avoiding stale references after ResetCache rotates the connection.
-	result, err := isync.New(a.registry, a.readDB()).Sync(ctx, flatCfg, opts)
-	if err != nil {
-		return result, err
+	var result *isync.SyncResult
+	if len(providerTools) > 0 {
+		pass1Opts := opts
+		pass1Opts.Prune = false
+		pass1Opts.Group = ""
+		pass1Opts.Provider = ""
+		pass1Opts.RetryFailed = false
+		providerCfg := &config.Config{Tools: providerTools, Settings: cfg.Settings}
+		pass1, perr := isync.New(a.registry, a.readDB()).Sync(ctx, providerCfg, pass1Opts)
+		if perr != nil {
+			return nil, perr
+		}
+		result = pass1
+
+		// Pass 2: union keeps bootstrap providers in the desired set so they
+		// are not pruned when the user runs --prune.
+		pass2Tools := unionToolEntries(resolvedTools, providerTools)
+		flatCfg = &config.Config{Tools: pass2Tools, Settings: cfg.Settings}
+	}
+
+	pass2, syncErr := isync.New(a.registry, a.readDB()).Sync(ctx, flatCfg, opts)
+	if syncErr != nil {
+		return nil, syncErr
+	}
+
+	if result == nil {
+		// No provider tools — single-pass behaviour (no providers configured).
+		result = pass2
+	} else {
+		result = mergeProviderResults(result, pass2, providerTools)
 	}
 	result.Warnings = append(result.Warnings, warnings...)
 
@@ -1292,4 +1325,79 @@ func containsToolMembership(tools []config.ToolEntry, name string) bool {
 		}
 	}
 	return false
+}
+
+// ─── Provider-first helpers ───────────────────────────────────────────────────
+
+// buildProviderTools resolves Settings.Providers (via effectiveSettings, which
+// applies host overrides) into syncer tool entries in list order, reusing the
+// install-spec resolver so host overrides, variants, and availability caching
+// all apply.
+func (a *App) buildProviderTools(ctx context.Context, cfg *config.RootConfig) []config.ToolEntry {
+	providers := a.effectiveSettings(cfg).Providers
+	if len(providers) == 0 {
+		return nil
+	}
+	availability := make(map[string]bool)
+	tools := make([]config.ToolEntry, 0, len(providers))
+	for _, p := range providers {
+		spec := p.ToToolSpec()
+		install := a.resolveInstallSpecWithAvailability(ctx, p.Name, spec, availability)
+		tools = append(tools, spec.ToToolEntry(p.Name, install))
+	}
+	return tools
+}
+
+// unionToolEntries returns base followed by any extra entries whose Name is
+// not already present in base. Name alone is used for deduplication because
+// provider-tool names are unique (each provider has exactly one name) and
+// the provider/package fields may differ between the resolved group entry and
+// the provider-tools entry (the provider-tool entry wins via base).
+func unionToolEntries(base, extra []config.ToolEntry) []config.ToolEntry {
+	if len(extra) == 0 {
+		out := make([]config.ToolEntry, len(base))
+		copy(out, base)
+		return out
+	}
+	seen := make(map[string]struct{}, len(base)+len(extra))
+	out := make([]config.ToolEntry, 0, len(base)+len(extra))
+	for _, t := range base {
+		if _, ok := seen[t.Name]; !ok {
+			seen[t.Name] = struct{}{}
+			out = append(out, t)
+		}
+	}
+	for _, t := range extra {
+		if _, ok := seen[t.Name]; !ok {
+			seen[t.Name] = struct{}{}
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// mergeProviderResults concatenates pass-1 (provider) ops with pass-2 (group)
+// ops, dropping any pass-2 op whose tool name matches a bootstrap provider
+// (pass-1 already owns that identity). Warnings from both passes are
+// concatenated; SatisfiedGroups comes from pass 2 (group membership context).
+func mergeProviderResults(pass1, pass2 *isync.SyncResult, providerTools []config.ToolEntry) *isync.SyncResult {
+	// Index provider names; dedup on Name only (see unionToolEntries rationale).
+	providerNames := make(map[string]struct{}, len(providerTools))
+	for _, t := range providerTools {
+		providerNames[t.Name] = struct{}{}
+	}
+	merged := &isync.SyncResult{}
+	merged.Ops = append(merged.Ops, pass1.Ops...)
+	for _, op := range pass2.Ops {
+		if _, ok := providerNames[op.Tool.Name]; ok {
+			// Pass 1 already recorded this provider's outcome; skip the duplicate.
+			continue
+		}
+		merged.Ops = append(merged.Ops, op)
+	}
+	merged.Warnings = append(merged.Warnings, pass1.Warnings...)
+	merged.Warnings = append(merged.Warnings, pass2.Warnings...)
+	// SatisfiedGroups is populated by the caller after merge; pass2's value (nil here) is a placeholder.
+	merged.SatisfiedGroups = pass2.SatisfiedGroups
+	return merged
 }

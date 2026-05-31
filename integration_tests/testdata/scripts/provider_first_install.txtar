@@ -1,0 +1,158 @@
+# provider-first install: bootstrap provider (uv via brew) installs before dependent tool (ruff via python/uv)
+exec chmod 755 bin/brew bin/uv bin/pip3 bin/pip bin/apt bin/apk bin/dnf bin/pacman bin/zypper
+env PATH=$WORK/bin:$PATH
+
+exec omni --config settings.json hosts ensure testhost
+
+# Run sync: pass 1 installs uv via brew, pass 2 installs ruff via python (uv).
+exec omni --config settings.json tools sync
+stdout 'done: uv \(brew\)'
+stdout 'done: ruff \(python\)'
+
+# Verify brew recorded installing uv (sentinel file written by fake brew).
+exec test -f .omni-cache/fake-brew/uv
+
+# Verify uv recorded installing ruff (sentinel file written by fake uv).
+exec test -f .omni-cache/fake-uv/ruff
+
+-- bin/brew --
+#!/bin/sh
+set -eu
+state="${OMNI_CACHE_DIR}/fake-brew"
+mkdir -p "$state"
+case "${1:-}" in
+  --version)
+    echo "Homebrew 4.0.0"
+    ;;
+  info)
+    if [ "${2:-}" = "--json=v2" ] && [ "${3:-}" = "--installed" ]; then
+      # Report uv as installed if the sentinel exists.
+      if [ -f "$state/uv" ]; then
+        printf '{"formulae":[{"name":"uv","full_name":"uv","desc":"Python package manager","installed":[{"version":"0.4.0","installed_on_request":true}]}],"casks":[]}\n'
+      else
+        printf '{"formulae":[],"casks":[]}\n'
+      fi
+      exit 0
+    fi
+    printf '{"formulae":[],"casks":[]}\n'
+    ;;
+  leaves)
+    if [ "${2:-}" = "--installed-on-request" ]; then
+      if [ -f "$state/uv" ]; then
+        echo "uv"
+      fi
+    fi
+    ;;
+  list)
+    shift
+    if [ "${1:-}" = "--cask" ]; then
+      exit 0
+    fi
+    if [ "${1:-}" = "--versions" ]; then
+      shift
+      if [ "${1:-}" = "--cask" ]; then
+        shift
+      fi
+      found=0
+      for pkg in "$@"; do
+        case "$pkg" in
+          uv)
+            if [ -f "$state/uv" ]; then
+              echo "uv 0.4.0"
+              found=1
+            fi
+            ;;
+        esac
+      done
+      [ "$found" -eq 1 ] && exit 0
+    fi
+    exit 1
+    ;;
+  update)
+    ;;
+  outdated)
+    printf '{"formulae":[],"casks":[]}\n'
+    ;;
+  install)
+    : > "$state/$2"
+    ;;
+  uninstall)
+    rm -f "$state/$2"
+    ;;
+esac
+
+-- bin/uv --
+#!/bin/sh
+set -eu
+state="${OMNI_CACHE_DIR}/fake-uv"
+mkdir -p "$state"
+case "${1:-}" in
+  --version)
+    echo "uv 0.4.0 (fake)"
+    ;;
+  tool)
+    case "${2:-}" in
+      install)
+        pkg="${3:-}"
+        # Strip version suffix (e.g. ruff@latest -> ruff)
+        pkg="${pkg%%@*}"
+        : > "$state/$pkg"
+        ;;
+      uninstall)
+        rm -f "$state/${3:-}"
+        ;;
+      list)
+        # Emit installed tools in "name version" format parsed by parseUVToolList.
+        for f in "$state"/*; do
+          [ -f "$f" ] || continue
+          echo "$(basename "$f") 0.1.0"
+        done
+        ;;
+    esac
+    ;;
+esac
+
+-- bin/pip3 --
+#!/bin/sh
+exit 1
+
+-- bin/pip --
+#!/bin/sh
+exit 1
+
+-- bin/apt --
+#!/bin/sh
+exit 1
+
+-- bin/apk --
+#!/bin/sh
+exit 1
+
+-- bin/dnf --
+#!/bin/sh
+exit 1
+
+-- bin/pacman --
+#!/bin/sh
+exit 1
+
+-- bin/zypper --
+#!/bin/sh
+exit 1
+
+-- settings.json --
+{
+  "settings": {
+    "providers": [
+      { "name": "uv", "provider": "brew" }
+    ],
+    "disabled_providers": ["node"]
+  },
+  "hosts": { "testhost": [] },
+  "tools": {
+    "ruff": { "provider": "python" }
+  },
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": ["ruff"] }
+  ]
+}
