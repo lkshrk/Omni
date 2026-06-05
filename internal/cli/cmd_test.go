@@ -3146,6 +3146,73 @@ func TestToolsSet_QuarantineOnlyUpdatesExistingSpec(t *testing.T) {
 	}
 }
 
+func TestToolsFallbackFromGitHub_PersistsUnresolvedFallback(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	withConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"rg": {Provider: "system", InstallWith: "apt"},
+		},
+	})
+	withHost(t, cfgPath)
+
+	var out bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{
+		"--config", cfgPath,
+		"--cache-dir", cacheDir,
+		"tools", "fallback", "rg",
+		"--from-github", "BurntSushi/ripgrep",
+	})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("tools fallback: %v", err)
+	}
+	if !strings.Contains(out.String(), `Configured fallback for logical tool "rg" from gh BurntSushi/ripgrep.`) {
+		t.Fatalf("output = %q, want configured fallback", out.String())
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	fallback := cfg.Tools["rg"].Fallback
+	if fallback == nil {
+		t.Fatal("fallback missing")
+	}
+	if fallback.Source.Type != config.FallbackSourceGitHub ||
+		fallback.Source.Owner != "BurntSushi" ||
+		fallback.Source.Repo != "ripgrep" ||
+		fallback.Status != config.FallbackStatusUnresolved {
+		t.Fatalf("fallback = %+v, want unresolved gh BurntSushi/ripgrep", fallback)
+	}
+	if fallback.Commands.Check != "command -v rg" {
+		t.Fatalf("check command = %q, want command -v rg", fallback.Commands.Check)
+	}
+}
+
+func TestToolsFallbackRequiresGitHubSource(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	withConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"rg": {Provider: "system", InstallWith: "apt"},
+		},
+	})
+	withHost(t, cfgPath)
+
+	cmd := NewRootCmd()
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "fallback", "rg"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "tools fallback requires --from-github owner/repo") {
+		t.Fatalf("tools fallback err = %v, want --from-github requirement", err)
+	}
+}
+
 func TestToolsSet_RequiresProvider(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()

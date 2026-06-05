@@ -18,6 +18,7 @@ func newToolsCmd(state *rootState) *cobra.Command {
 	}
 	cmd.AddCommand(
 		newToolsSetCmd(state),
+		newToolsFallbackCmd(state),
 		newToolsDeleteSpecCmd(state),
 		newToolsNormalizeCmd(state),
 		newToolsIgnoreCmd(state),
@@ -36,6 +37,29 @@ func newToolsCmd(state *rootState) *cobra.Command {
 		newProvidersCmd(state),
 		newListCmd(state),
 	)
+	return cmd
+}
+
+func newToolsFallbackCmd(state *rootState) *cobra.Command {
+	var fromGitHub string
+
+	cmd := &cobra.Command{
+		Use:   "fallback <name>",
+		Short: actions.MustDescription(actions.ToolFallback),
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if fromGitHub == "" {
+				return fmt.Errorf("tools fallback requires --from-github owner/repo")
+			}
+			if err := state.app.SaveToolFallbackFromGitHub(cmd.Context(), args[0], fromGitHub); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmdOut(cmd), "Configured fallback for logical tool %q from gh %s.\n", args[0], fromGitHub)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&fromGitHub, "from-github", "", "GitHub repository to use as fallback source (owner/repo)")
+	cmd.ValidArgsFunction = completeToolNames(state)
 	return cmd
 }
 

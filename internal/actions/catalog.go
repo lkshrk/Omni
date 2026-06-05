@@ -21,6 +21,7 @@ const (
 	ToolRefresh                    ID = "tools.refresh"
 	ToolConsolidate                ID = "tools.consolidate"
 	ToolSetSpec                    ID = "tools.set_spec"
+	ToolFallback                   ID = "tools.fallback"
 	ToolDeleteSpec                 ID = "tools.delete_spec"
 	ToolNormalizeProviderOverrides ID = "tools.normalize_provider_overrides"
 	ToolImport                     ID = "tools.import"
@@ -343,6 +344,18 @@ var Tools = []Action{
 		Requirements:    []Requirement{RequiresToolName, RequiresEcosystemProvider},
 		TUI:             &TUIBinding{KeyMapField: "PinProvider", DefaultKey: "p", Label: "set tool spec", Description: "Edit provider and package settings for the selected tool."},
 		CLI:             []CLIBinding{{Command: []string{"tools", "set"}, Flags: []string{"--provider", "--package", "--install-with", "--host", "--global", "--quarantine"}}},
+	},
+	{
+		ID:              ToolFallback,
+		Domain:          "tools",
+		Scope:           ScopeRow,
+		Label:           "set fallback",
+		Description:     "Configure a fallback source for a logical system tool.",
+		LongDescription: "Configure a fallback source for a logical system tool when the target machine's native package manager cannot provide it.",
+		Mutates:         true,
+		Requirements:    []Requirement{RequiresToolName},
+		CLI:             []CLIBinding{{Command: []string{"tools", "fallback"}, Flags: []string{"--from-github"}}},
+		CLIOnlyReason:   "TUI fallback editing is tracked as a separate interactive form.",
 	},
 	{
 		ID:                 ToolDeleteSpec,
