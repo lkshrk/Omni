@@ -398,6 +398,39 @@ func TestDoDelete_DeletesConfigEntry(t *testing.T) {
 	}
 }
 
+func TestDoSaveFallback_PersistsGitHubFallback(t *testing.T) {
+	prov := &okProvider{name: "apt"}
+	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("rg", "apt")})
+	m := modelForCmds(a)
+
+	msg := m.doSaveFallback("rg", "BurntSushi/ripgrep")()
+	got, ok := msg.(fallbackSavedMsg)
+	if !ok {
+		t.Fatalf("expected fallbackSavedMsg, got %T", msg)
+	}
+	if got.err != nil {
+		t.Fatalf("doSaveFallback: %v", got.err)
+	}
+	if fallback := got.toolFallbacks["rg"]; fallback.Source.Owner != "BurntSushi" || fallback.Source.Repo != "ripgrep" {
+		t.Fatalf("msg.toolFallbacks = %+v, want rg BurntSushi/ripgrep", got.toolFallbacks)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	fallback := cfg.Tools["rg"].Fallback
+	if fallback == nil {
+		t.Fatal("fallback missing from config")
+	}
+	if fallback.Source.Type != config.FallbackSourceGitHub ||
+		fallback.Source.Owner != "BurntSushi" ||
+		fallback.Source.Repo != "ripgrep" ||
+		fallback.Status != config.FallbackStatusUnresolved {
+		t.Fatalf("fallback = %+v, want unresolved gh BurntSushi/ripgrep", fallback)
+	}
+}
+
 func TestDoDelete_RefreshesToolMembershipState(t *testing.T) {
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})

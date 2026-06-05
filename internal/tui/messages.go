@@ -21,6 +21,7 @@ type toolsLoadedMsg struct {
 	toolIgnoreSet          map[string]bool
 	groupIgnoreSet         map[string]map[string]bool
 	toolProviderPins       map[string]string
+	toolFallbacks          map[string]config.FallbackSpec
 	hostInfo               *app.HostInfo
 	ignoreList             []string // tool names ignored by the active host
 	dotsHistory            []app.DotsHistoryEntry
@@ -513,6 +514,13 @@ type migrateProviderDoneMsg struct {
 	tools                   []*database.ToolCache
 	toolProviderPins        map[string]string
 	clearedProviderOverride bool
+}
+
+type fallbackSavedMsg struct {
+	err           error
+	name          string
+	repo          string
+	toolFallbacks map[string]config.FallbackSpec
 }
 
 // dotsIgnoredMsg is sent after a dots ignore/include operation completes.

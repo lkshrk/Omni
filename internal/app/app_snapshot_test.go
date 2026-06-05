@@ -110,6 +110,10 @@ func TestToolScopeStateBuildsIgnoredToolsAndProviderPins(t *testing.T) {
 			"ripgrep": {
 				Provider:    "system",
 				InstallWith: "brew",
+				Fallback: &config.FallbackSpec{
+					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+					Status: config.FallbackStatusUnresolved,
+				},
 				Hosts: map[string]config.ToolInstallSpec{
 					host: {Provider: "system", InstallWith: "apt"},
 				},
@@ -139,6 +143,9 @@ func TestToolScopeStateBuildsIgnoredToolsAndProviderPins(t *testing.T) {
 	}
 	if got := state.ToolProviderPins["ripgrep"]; got != "apt" {
 		t.Fatalf("tool provider pins = %v, want ripgrep=apt", state.ToolProviderPins)
+	}
+	if got := state.ToolFallbacks["ripgrep"]; got.Source.Owner != "BurntSushi" || got.Source.Repo != "ripgrep" {
+		t.Fatalf("tool fallbacks = %+v, want ripgrep BurntSushi/ripgrep", state.ToolFallbacks)
 	}
 }
 

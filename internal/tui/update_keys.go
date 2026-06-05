@@ -116,6 +116,8 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 		cmds = append(cmds, m.handleGroupDotsKeyMsg(msg)...)
 	case viewIgnoreScope, viewProviderScope:
 		cmds = append(cmds, m.handleScopePickerKeyMsg(msg)...)
+	case viewFallbackEditor:
+		cmds = append(cmds, m.handleFallbackEditorKeyMsg(msg)...)
 	case viewSettings:
 		cmds = append(cmds, m.handleSettingsKeyMsg(msg)...)
 	case viewStatus:

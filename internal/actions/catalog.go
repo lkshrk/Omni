@@ -354,8 +354,8 @@ var Tools = []Action{
 		LongDescription: "Configure a fallback source for a logical system tool when the target machine's native package manager cannot provide it.",
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresToolName},
+		TUI:             &TUIBinding{KeyMapField: "Fallback", DefaultKey: "f", Label: "set fallback", Description: "Configure a fallback source for the selected system tool."},
 		CLI:             []CLIBinding{{Command: []string{"tools", "fallback"}, Flags: []string{"--from-github"}}},
-		CLIOnlyReason:   "TUI fallback editing is tracked as a separate interactive form.",
 	},
 	{
 		ID:                 ToolDeleteSpec,

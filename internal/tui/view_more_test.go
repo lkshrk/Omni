@@ -3876,7 +3876,7 @@ func TestProviderLabelForToolWithPinMarksExplicitOverride(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := providerLabelForToolWithPin(tc.tool, tc.pin, tc.systemBin, tc.pythonBin, tc.nodeBin)
+			got := providerLabelForToolWithPin(tc.tool, tc.pin, "", tc.systemBin, tc.pythonBin, tc.nodeBin)
 			if got != tc.want {
 				t.Fatalf("providerLabelForToolWithPin = %q, want %q", got, tc.want)
 			}
@@ -3897,7 +3897,7 @@ func TestInlineDetailLines_WrongProviderShowsActualAndExpected(t *testing.T) {
 	m.toolProviderPins = map[string]string{"typescript": "npm"}
 	m.applyFilter()
 
-	cols := newColWidthsWithProviderPins(m.visibleTools, nil, nil, m.toolProviderPins, "", "", m.effectiveNodeManager, 100)
+	cols := newColWidthsWithProviderPins(m.visibleTools, nil, nil, m.toolProviderPins, nil, "", "", m.effectiveNodeManager, 100)
 	lines := inlineDetailLines(m, 100, cols)
 	got := stripANSIEscapeSequences(strings.Join(lines, "\n"))
 	want := "wrong provider: installed with bun, expected configured npm"
@@ -3919,6 +3919,60 @@ func TestToolInlineHints_PinnedProviderOffersRemoveOverride(t *testing.T) {
 	if hints[0].key != m.keys.PinProvider.Help().Key || hints[0].desc != "remove override" {
 		t.Fatalf("first hint = %+v, want p remove override", hints[0])
 	}
+}
+
+func TestToolInlineHints_FallbackEligibleSystemToolOffersFallback(t *testing.T) {
+	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: false, Tracked: true}
+	m := baseModel([]*database.ToolCache{tool})
+
+	hints := toolInlineHints(m, tool)
+	if !hasHint(hints, m.keys.Fallback.Help().Key, actions.MustTUILabel(actions.ToolFallback)) {
+		t.Fatalf("hints = %+v, want fallback action", hints)
+	}
+}
+
+func TestToolInlineHints_NativeInstalledSystemToolHidesFallback(t *testing.T) {
+	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: true, InstalledWith: "apt", Tracked: true}
+	m := baseModel([]*database.ToolCache{tool})
+
+	hints := toolInlineHints(m, tool)
+	if hasHintKey(hints, m.keys.Fallback.Help().Key) {
+		t.Fatalf("hints = %+v, did not expect fallback action for native installed tool", hints)
+	}
+}
+
+func TestRenderList_ConfiguredGitHubFallbackShowsGHStatus(t *testing.T) {
+	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: false, Tracked: true}
+	m := baseModel([]*database.ToolCache{tool})
+	m.toolFallbacks = map[string]config.FallbackSpec{
+		"rg": {
+			Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+			Status: config.FallbackStatusUnresolved,
+		},
+	}
+
+	out := stripANSIEscapeSequences(renderList(m))
+	if !strings.Contains(out, "system(gh?)") {
+		t.Fatalf("rendered list = %q, want system(gh?)", out)
+	}
+}
+
+func hasHint(hints []hintItem, key, desc string) bool {
+	for _, hint := range hints {
+		if hint.key == key && hint.desc == desc {
+			return true
+		}
+	}
+	return false
+}
+
+func hasHintKey(hints []hintItem, key string) bool {
+	for _, hint := range hints {
+		if hint.key == key {
+			return true
+		}
+	}
+	return false
 }
 
 func TestProviderParts_System(t *testing.T) {

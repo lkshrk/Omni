@@ -36,6 +36,7 @@ const (
 	viewGroupDots                       // group dotfile membership editor
 	viewIgnoreScope                     // explicit ignore scope picker
 	viewProviderScope                   // explicit provider pin scope picker
+	viewFallbackEditor                  // GitHub fallback source editor
 	viewAdminTerminal                   // privileged package action terminal handoff
 	viewDots                            // dotfiles management tab
 )
@@ -267,6 +268,7 @@ type Model struct {
 	toolIgnoreSet    map[string]bool
 	groupIgnoreSet   map[string]map[string]bool
 	toolProviderPins map[string]string
+	toolFallbacks    map[string]config.FallbackSpec
 
 	// provider filter — [All] [system] [node] [python] …
 	providerNames  []string // ordered ecosystem provider names from the app/provider registry
@@ -341,6 +343,8 @@ type Model struct {
 	scopeCursor           int
 	scopeTarget           database.ToolCache
 	scopeTargetSet        bool
+	fallbackTarget        database.ToolCache
+	fallbackTargetSet     bool
 
 	// setup wizard step (0 = create config?, 1 = import tools?, 2 = provider
 	// selection, 3 = node manager, 4 = unused, 5 = enable dotfiles?, 6 = dots
@@ -627,6 +631,7 @@ func toolsLoadedMsgFromStartupState(snapshot *app.StartupSnapshot) toolsLoadedMs
 		toolIgnoreSet:          snapshot.ToolIgnores,
 		groupIgnoreSet:         snapshot.GroupIgnores,
 		toolProviderPins:       snapshot.ToolProviderPins,
+		toolFallbacks:          snapshot.ToolFallbacks,
 		hostInfo:               hostInfo,
 		ignoreList:             ignoreList,
 		dotsHistory:            snapshot.DotsHistory,

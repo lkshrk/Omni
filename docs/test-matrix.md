@@ -34,7 +34,7 @@ key routing, modal state, rendering, and async result handling.
 | `tools.refresh` | yes | yes | yes | yes | - |
 | `tools.consolidate` | yes | yes | yes | yes | - |
 | `tools.set_spec` | yes | yes | yes | yes | - |
-| `tools.fallback` | yes | yes | yes | n/a | TUI fallback editor is tracked separately |
+| `tools.fallback` | yes | yes | yes | yes | - |
 | `tools.delete_spec` | yes | yes | yes | yes | - |
 | `tools.normalize_provider_overrides` | yes | yes | yes | n/a | - |
 | `tools.import` | yes | yes | yes | yes | - |

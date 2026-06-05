@@ -28,6 +28,7 @@ type KeyMap struct {
 	Claim           key.Binding // c — add orphan tool to config
 	Ignore          key.Binding // x — ignore / un-ignore
 	MigrateProvider key.Binding // r — reinstall with default provider
+	Fallback        key.Binding // f — configure fallback source
 	ApplySolution   key.Binding // a — apply selected provider remedy
 	Reconcile       key.Binding // A — reconcile all safe host lifecycle fixes
 	NewGroup        key.Binding // n — new group
@@ -80,7 +81,7 @@ func (k KeyMap) ShortHelp() []key.Binding {
 func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Top, k.Bottom, k.HalfPageUp, k.HalfPageDown, k.PageUp, k.PageDown, k.Tab},
-		{k.Install, k.Upgrade, k.UpgradeAll, k.SyncAll, k.DotCommit, k.Claim, k.MoveGroup, k.PinProvider, k.MigrateProvider, k.Ignore, k.Delete, k.Refresh},
+		{k.Install, k.Upgrade, k.UpgradeAll, k.SyncAll, k.DotCommit, k.Claim, k.MoveGroup, k.PinProvider, k.MigrateProvider, k.Fallback, k.Ignore, k.Delete, k.Refresh},
 		{k.DotRefresh, k.DotAdd, k.DotDelete, k.DotVariant, k.DotIgnore, k.DotUseRepo, k.DotUseLocal, k.Reconcile, k.ApplySolution},
 		{k.Search, k.PrevTab, k.NextTab, k.GroupPrev, k.GroupNext, k.Palette, k.NewGroup, k.HostGroups, k.GroupTools, k.GroupDots, k.Rename, k.Help, k.Quit},
 	}
@@ -150,6 +151,10 @@ func DefaultKeyMap() KeyMap {
 		MigrateProvider: key.NewBinding(
 			key.WithKeys("r"),
 			key.WithHelp("r", actions.MustTUILabel(actions.ToolReinstallDefault)),
+		),
+		Fallback: key.NewBinding(
+			key.WithKeys("f"),
+			key.WithHelp("f", actions.MustTUILabel(actions.ToolFallback)),
 		),
 		ApplySolution: key.NewBinding(
 			key.WithKeys("a"),

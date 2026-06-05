@@ -236,6 +236,15 @@ func (m *Model) handleListActionKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 				m.openProviderScopePicker(t)
 			}
 		}
+	case key.Matches(msg, m.keys.Fallback):
+		if msg.IsRepeat {
+			break
+		}
+		if t := m.selectedTool(); t != nil {
+			if cmd := m.openFallbackEditor(t); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
 	case key.Matches(msg, m.keys.MigrateProvider):
 		if msg.IsRepeat {
 			break
