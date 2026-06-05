@@ -179,6 +179,11 @@ func buildWithID(id string) *schema {
 							provider.EcosystemPython: map[string]any{"manager": firstString(provider.BuiltinManagerNames(provider.EcosystemPython))},
 						}},
 					},
+					"fallback_bin_dir": {
+						Description: "Default directory for fallback-installed binaries. Omni warns when this directory is not on PATH.",
+						Type:        "string",
+						Examples:    []any{"~/.local/share/omni/fallback/bin"},
+					},
 					"dots_repo": {
 						Description: "Per-machine path to the dotfiles git repository (~ is expanded).",
 						Type:        "string",
@@ -347,6 +352,10 @@ func buildWithID(id string) *schema {
 							map[string]any{"linuxbox": map[string]any{"provider": provider.EcosystemNode, "package": "ripgrep"}},
 						},
 					},
+					"fallback": {
+						Description: "Global fallback recipe used only when this system tool is unavailable from the target system package manager.",
+						Ref:         "#/$defs/FallbackSpec",
+					},
 				},
 				AdditionalProperties: false,
 			},
@@ -377,6 +386,166 @@ func buildWithID(id string) *schema {
 						Description:          "Provider-specific install options (key-value pairs).",
 						Type:                 "object",
 						AdditionalProperties: &schema{Type: "string"},
+					},
+				},
+				AdditionalProperties: false,
+			},
+			"FallbackSpec": {
+				Description: "A best-effort non-provider install recipe for a system tool.",
+				Type:        "object",
+				Required:    []string{"source"},
+				Properties: map[string]*schema{
+					"source": {
+						Description: "Source metadata for the fallback recipe.",
+						Ref:         "#/$defs/FallbackSource",
+					},
+					"status": {
+						Description: "Resolver or install verification state for this fallback recipe.",
+						Type:        "string",
+						Enum: []any{
+							config.FallbackStatusUnresolved,
+							config.FallbackStatusUnverified,
+							config.FallbackStatusVerified,
+							config.FallbackStatusFailed,
+						},
+						Default:  config.FallbackStatusUnverified,
+						Examples: []any{config.FallbackStatusUnverified},
+					},
+					"binary": {
+						Description: "Primary executable name installed or checked by this fallback.",
+						Type:        "string",
+						MinLength:   1,
+						Examples:    []any{"rg"},
+					},
+					"bin_dir": {
+						Description: "Tool-specific binary directory override. Defaults to settings.fallback_bin_dir.",
+						Type:        "string",
+						Examples:    []any{"~/.local/share/omni/fallback/bin"},
+					},
+					"release_channel": {
+						Description: "Release channel preference. Empty means stable releases only unless no stable release exists.",
+						Type:        "string",
+						Examples:    []any{"stable", "prerelease"},
+					},
+					"recipe": {
+						Description: "Structured recipe metadata used to generate or edit fallback commands.",
+						Ref:         "#/$defs/FallbackRecipe",
+					},
+					"platforms": {
+						Description:          "Optional OS/architecture-specific release asset overrides keyed by os/arch.",
+						Type:                 "object",
+						AdditionalProperties: ref("#/$defs/FallbackPlatform"),
+						Examples: []any{
+							map[string]any{"linux/amd64": map[string]any{"asset_pattern": "ripgrep-{version}-x86_64-unknown-linux-musl.tar.gz"}},
+						},
+					},
+					"commands": {
+						Description: "User-editable fallback lifecycle shell commands.",
+						Ref:         "#/$defs/FallbackCommands",
+					},
+				},
+				AdditionalProperties: false,
+			},
+			"FallbackSource": {
+				Description: "Where a fallback recipe came from.",
+				Type:        "object",
+				Required:    []string{"type"},
+				Properties: map[string]*schema{
+					"type": {
+						Description: "Fallback source kind.",
+						Type:        "string",
+						Enum:        []any{config.FallbackSourceGitHub},
+						Examples:    []any{config.FallbackSourceGitHub},
+					},
+					"owner": {
+						Description: "GitHub repository owner for github sources.",
+						Type:        "string",
+						MinLength:   1,
+						Examples:    []any{"BurntSushi"},
+					},
+					"repo": {
+						Description: "GitHub repository name for github sources.",
+						Type:        "string",
+						MinLength:   1,
+						Examples:    []any{"ripgrep"},
+					},
+					"url": {
+						Description: "Source URL, when known.",
+						Type:        "string",
+						Examples:    []any{"https://github.com/BurntSushi/ripgrep"},
+					},
+				},
+				AdditionalProperties: false,
+			},
+			"FallbackRecipe": {
+				Description: "Structured fallback recipe metadata.",
+				Type:        "object",
+				Properties: map[string]*schema{
+					"type": {
+						Description: "Fallback recipe kind.",
+						Type:        "string",
+						Enum:        []any{config.FallbackRecipeGitHubReleaseAsset, config.FallbackRecipeRawCommands},
+						Examples:    []any{config.FallbackRecipeGitHubReleaseAsset},
+					},
+					"asset_pattern": {
+						Description: "Release asset match pattern using fallback template variables.",
+						Type:        "string",
+						Examples:    []any{"ripgrep-{version}-{os}-{arch}.tar.gz"},
+					},
+					"binary_path": {
+						Description: "Path to the executable inside the downloaded asset, when extraction is needed.",
+						Type:        "string",
+						Examples:    []any{"rg"},
+					},
+					"checksum": {
+						Description: "Checksum to verify the matched release asset when confidently known.",
+						Type:        "string",
+					},
+				},
+				AdditionalProperties: false,
+			},
+			"FallbackPlatform": {
+				Description: "OS/architecture-specific release asset metadata.",
+				Type:        "object",
+				Properties: map[string]*schema{
+					"asset_pattern": {
+						Description: "Release asset match pattern for this platform.",
+						Type:        "string",
+					},
+					"binary_path": {
+						Description: "Path to the executable inside the downloaded asset for this platform.",
+						Type:        "string",
+					},
+					"checksum": {
+						Description: "Checksum for the matched release asset on this platform.",
+						Type:        "string",
+					},
+				},
+				AdditionalProperties: false,
+			},
+			"FallbackCommands": {
+				Description: "User-editable fallback lifecycle commands.",
+				Type:        "object",
+				Properties: map[string]*schema{
+					"install": {
+						Description: "Install command run by fallback sync/install.",
+						Type:        "string",
+					},
+					"check": {
+						Description: "Command that verifies the fallback is installed and usable.",
+						Type:        "string",
+					},
+					"uninstall": {
+						Description: "Optional uninstall command. If absent, uninstall is reported as unavailable.",
+						Type:        "string",
+					},
+					"upgrade": {
+						Description: "Optional upgrade command. If absent, install may be reused for upgrades.",
+						Type:        "string",
+					},
+					"version": {
+						Description: "Optional version command used to display installed fallback version.",
+						Type:        "string",
 					},
 				},
 				AdditionalProperties: false,

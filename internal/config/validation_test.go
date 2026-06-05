@@ -222,6 +222,119 @@ func TestValidateRoot_InstallWithWrongEcosystemRejected(t *testing.T) {
 	}
 }
 
+func TestValidateRoot_ToolFallbackAcceptsGitHubSystemTool(t *testing.T) {
+	cfg := &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"rg": {
+				Provider: "system",
+				Fallback: &config.FallbackSpec{
+					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+					Status: config.FallbackStatusUnverified,
+					Binary: "rg",
+					Recipe: config.FallbackRecipe{Type: config.FallbackRecipeGitHubReleaseAsset, AssetPattern: "ripgrep-{version}-{os}-{arch}.tar.gz"},
+					Commands: config.FallbackCommands{
+						Check: "command -v rg",
+					},
+				},
+			},
+		},
+	}
+	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"system"}})
+	if len(errs) != 0 {
+		t.Errorf("valid fallback produced errors: %v", errs)
+	}
+}
+
+func TestValidateRoot_ToolFallbackRejectsNonSystemTool(t *testing.T) {
+	cfg := &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"eslint": {
+				Provider: "node",
+				Fallback: &config.FallbackSpec{
+					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "eslint", Repo: "eslint"},
+					Status: config.FallbackStatusUnresolved,
+				},
+			},
+		},
+	}
+	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"node"}})
+	if !containsErrorMessage(errs, "fallback is only supported for system tools") {
+		t.Errorf("expected non-system fallback error, got %v", errs)
+	}
+}
+
+func TestValidateRoot_ToolFallbackRequiresGitHubOwnerAndRepo(t *testing.T) {
+	cfg := &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"rg": {
+				Provider: "system",
+				Fallback: &config.FallbackSpec{
+					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Repo: "ripgrep"},
+					Status: config.FallbackStatusUnresolved,
+				},
+			},
+		},
+	}
+	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"system"}})
+	if !containsErrorMessage(errs, "github fallback source requires owner and repo") {
+		t.Errorf("expected github owner/repo error, got %v", errs)
+	}
+}
+
+func TestValidateRoot_ToolFallbackUnresolvedCanOmitCheck(t *testing.T) {
+	cfg := &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"rg": {
+				Provider: "system",
+				Fallback: &config.FallbackSpec{
+					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+					Status: config.FallbackStatusUnresolved,
+				},
+			},
+		},
+	}
+	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"system"}})
+	if len(errs) != 0 {
+		t.Errorf("unresolved fallback without check produced errors: %v", errs)
+	}
+}
+
+func TestValidateRoot_ToolFallbackRequiresCheckWhenUsable(t *testing.T) {
+	cfg := &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"rg": {
+				Provider: "system",
+				Fallback: &config.FallbackSpec{
+					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+					Status: config.FallbackStatusUnverified,
+				},
+			},
+		},
+	}
+	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"system"}})
+	if !containsErrorMessage(errs, "fallback check command is required unless status is unresolved") {
+		t.Errorf("expected fallback check error, got %v", errs)
+	}
+}
+
+func TestValidateRoot_ToolFallbackRejectsUnknownStatus(t *testing.T) {
+	cfg := &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"rg": {
+				Provider: "system",
+				Fallback: &config.FallbackSpec{
+					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+					Status: "desperate",
+				},
+			},
+		},
+	}
+	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"system"}})
+	if !containsErrorMessage(errs, `unknown fallback status "desperate"`) {
+		t.Errorf("expected unknown status error, got %v", errs)
+	}
+}
+
 func TestValidateRoot_NilGroupRejected(t *testing.T) {
 	cfg := &config.RootConfig{
 		Tools:  map[string]config.ToolSpec{"a": {Provider: "brew"}},
