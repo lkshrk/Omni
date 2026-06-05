@@ -92,6 +92,19 @@ type LocalState struct {
 	UpdatedAt time.Time `bun:"updated_at,notnull"`
 }
 
+// PackageAvailability stores explicit provider/package availability probes.
+type PackageAvailability struct {
+	bun.BaseModel `bun:"table:package_availability,alias:pa"`
+
+	ID        int64     `bun:"id,pk,autoincrement"`
+	Name      string    `bun:"name,notnull"`
+	Provider  string    `bun:"provider,notnull"`
+	Package   string    `bun:"package,notnull"`
+	Available bool      `bun:"available,notnull,default:false"`
+	Reason    string    `bun:"reason,notnull,default:''"`
+	CheckedAt time.Time `bun:"checked_at,notnull"`
+}
+
 type DotStatusCache struct {
 	bun.BaseModel `bun:"table:dot_status_cache,alias:dsc"`
 
@@ -238,6 +251,13 @@ func (db *DB) Migrate(ctx context.Context) error {
 		return fmt.Errorf("creating local_state table: %w", err)
 	}
 	_, err = db.bun.NewCreateTable().
+		Model((*PackageAvailability)(nil)).
+		IfNotExists().
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("creating package_availability table: %w", err)
+	}
+	_, err = db.bun.NewCreateTable().
 		Model((*DotStatusCache)(nil)).
 		IfNotExists().
 		Exec(ctx)
@@ -272,6 +292,12 @@ func (db *DB) Migrate(ctx context.Context) error {
 	}
 	if _, err := db.bun.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_dot_status_cache_position ON dot_status_cache (position)`); err != nil {
 		return fmt.Errorf("creating dot status cache position index: %w", err)
+	}
+	_, err = db.bun.ExecContext(ctx,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_package_availability_name_provider_package
+		 ON package_availability (name, provider, package)`)
+	if err != nil {
+		return fmt.Errorf("creating package availability unique index: %w", err)
 	}
 	// Add columns introduced after initial schema; duplicate-column errors are
 	// expected (column already created by the CREATE TABLE above) and suppressed.
@@ -737,6 +763,48 @@ func (db *DB) SetState(ctx context.Context, key, value string) error {
 		return fmt.Errorf("setting local state %q: %w", key, err)
 	}
 	return nil
+}
+
+func (db *DB) UpsertPackageAvailability(ctx context.Context, availability PackageAvailability) error {
+	if strings.TrimSpace(availability.Name) == "" {
+		return fmt.Errorf("missing name for package availability")
+	}
+	if err := requirePackage(availability.Name, availability.Provider, availability.Package); err != nil {
+		return err
+	}
+	if availability.CheckedAt.IsZero() {
+		availability.CheckedAt = time.Now().UTC()
+	}
+	if availability.Available {
+		availability.Reason = ""
+	}
+	_, err := db.bun.NewInsert().
+		Model(&availability).
+		On("CONFLICT (name, provider, package) DO UPDATE").
+		Set("available = EXCLUDED.available").
+		Set("reason = EXCLUDED.reason").
+		Set("checked_at = EXCLUDED.checked_at").
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("upserting package availability %s/%s: %w", availability.Provider, availability.Name, err)
+	}
+	return nil
+}
+
+func (db *DB) GetPackageAvailability(ctx context.Context, name, provider, pkg string) (*PackageAvailability, error) {
+	if err := requirePackage(name, provider, pkg); err != nil {
+		return nil, err
+	}
+	availability := new(PackageAvailability)
+	err := db.bun.NewSelect().
+		Model(availability).
+		Where("name = ? AND provider = ? AND package = ?", name, provider, pkg).
+		Limit(1).
+		Scan(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("getting package availability %s/%s: %w", provider, name, err)
+	}
+	return availability, nil
 }
 
 func (db *DB) ReplaceDotsSnapshot(ctx context.Context, entries []*DotStatusCache, gitStatus string, discoveredCount int, observedAt time.Time) error {
