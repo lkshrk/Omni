@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -28,6 +29,7 @@ func TestMain(m *testing.M) {
 		"omni":                             func() int { cli.Execute(); return 0 },
 		"omni-mark-outdated-refresh-fresh": markOutdatedRefreshFreshMain,
 		"omni-seed-cache":                  seedCacheMain,
+		"omni-seed-package-availability":   seedPackageAvailabilityMain,
 		"omni-seed-update-metadata":        seedUpdateMetadataMain,
 	}))
 }
@@ -123,6 +125,55 @@ func seedUpdateMetadataMain() int {
 		CheckedAt:   time.Now(),
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "seed update metadata: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func seedPackageAvailabilityMain() int {
+	args := os.Args[1:]
+	if len(args) < 4 || len(args) > 5 {
+		fmt.Fprintln(os.Stderr, "usage: omni-seed-package-availability <name> <provider> <package> <available> [reason]")
+		return 2
+	}
+	cacheDir := os.Getenv("OMNI_CACHE_DIR")
+	if cacheDir == "" {
+		fmt.Fprintln(os.Stderr, "OMNI_CACHE_DIR is required")
+		return 2
+	}
+	available, err := strconv.ParseBool(args[3])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "parse available: %v\n", err)
+		return 2
+	}
+	reason := ""
+	if len(args) == 5 {
+		reason = args[4]
+	}
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "create cache dir: %v\n", err)
+		return 1
+	}
+	db, err := database.Open(filepath.Join(cacheDir, "omni.db"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "open db: %v\n", err)
+		return 1
+	}
+	defer db.Close()
+	ctx := context.Background()
+	if err := db.Migrate(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "migrate db: %v\n", err)
+		return 1
+	}
+	if err := db.UpsertPackageAvailability(ctx, database.PackageAvailability{
+		Name:      args[0],
+		Provider:  args[1],
+		Package:   args[2],
+		Available: available,
+		Reason:    reason,
+		CheckedAt: time.Now(),
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "seed package availability: %v\n", err)
 		return 1
 	}
 	return 0

@@ -260,6 +260,7 @@ func fallbackPackage(name string, spec config.ToolSpec) string {
 
 func parseGitHubRepo(repo string) (string, string, error) {
 	repo = strings.TrimSpace(repo)
+	repo = strings.TrimPrefix(repo, "git@github.com:")
 	repo = strings.TrimPrefix(repo, "https://")
 	repo = strings.TrimPrefix(repo, "http://")
 	repo = strings.TrimPrefix(repo, "github.com/")
