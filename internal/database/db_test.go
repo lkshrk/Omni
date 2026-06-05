@@ -91,6 +91,50 @@ func TestLocalState_UpsertAndGet(t *testing.T) {
 	}
 }
 
+func TestPackageAvailability_UpsertAndGet(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	checkedAt := time.Date(2026, 6, 5, 20, 0, 0, 0, time.UTC)
+
+	if _, err := db.GetPackageAvailability(ctx, "rg", "apt", "ripgrep"); err == nil || !strings.Contains(err.Error(), sql.ErrNoRows.Error()) {
+		t.Fatalf("GetPackageAvailability missing err = %v, want sql.ErrNoRows", err)
+	}
+	if err := db.UpsertPackageAvailability(ctx, database.PackageAvailability{
+		Name:      "rg",
+		Provider:  "apt",
+		Package:   "ripgrep",
+		Available: false,
+		Reason:    "apt-cache policy found no candidate",
+		CheckedAt: checkedAt,
+	}); err != nil {
+		t.Fatalf("UpsertPackageAvailability unavailable: %v", err)
+	}
+	got, err := db.GetPackageAvailability(ctx, "rg", "apt", "ripgrep")
+	if err != nil {
+		t.Fatalf("GetPackageAvailability: %v", err)
+	}
+	if got.Available || got.Reason != "apt-cache policy found no candidate" || !got.CheckedAt.Equal(checkedAt) {
+		t.Fatalf("availability = %+v, want unavailable reason and checked_at", got)
+	}
+
+	if err := db.UpsertPackageAvailability(ctx, database.PackageAvailability{
+		Name:      "rg",
+		Provider:  "apt",
+		Package:   "ripgrep",
+		Available: true,
+		CheckedAt: checkedAt.Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("UpsertPackageAvailability available: %v", err)
+	}
+	got, err = db.GetPackageAvailability(ctx, "rg", "apt", "ripgrep")
+	if err != nil {
+		t.Fatalf("GetPackageAvailability after update: %v", err)
+	}
+	if !got.Available || got.Reason != "" || !got.CheckedAt.Equal(checkedAt.Add(time.Hour)) {
+		t.Fatalf("availability after update = %+v, want available and reason cleared", got)
+	}
+}
+
 func TestDotsSnapshot_ReplaceAndGet(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
