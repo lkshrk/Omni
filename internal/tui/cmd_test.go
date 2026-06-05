@@ -431,6 +431,66 @@ func TestDoSaveFallback_PersistsGitHubFallback(t *testing.T) {
 	}
 }
 
+func TestDoSaveFallbackEditor_PersistsStructuredRecipe(t *testing.T) {
+	prov := &okProvider{name: "apt"}
+	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("rg", "apt")})
+	m := modelForCmds(a)
+	m.fallbackEditor = fallbackEditorState{
+		fields: map[fallbackEditorFieldID]string{
+			fallbackFieldRepo:           "git@github.com:BurntSushi/ripgrep.git",
+			fallbackFieldBinary:         "rg",
+			fallbackFieldBinDir:         "~/.local/share/omni/fallback/bin",
+			fallbackFieldAssetPattern:   "ripgrep-{version}-{os}-{arch}.tar.gz",
+			fallbackFieldInstallCommand: "install rg",
+			fallbackFieldCheckCommand:   "test -x {{bin_dir}}/{{binary}}",
+			fallbackFieldUninstall:      "rm -f {{bin_dir}}/{{binary}}",
+			fallbackFieldUpgrade:        "upgrade rg",
+			fallbackFieldVersion:        "{{binary}} --version",
+			fallbackFieldReleaseChannel: "stable",
+		},
+	}
+
+	msg := m.doSaveFallbackEditor("rg")()
+	got, ok := msg.(fallbackSavedMsg)
+	if !ok {
+		t.Fatalf("expected fallbackSavedMsg, got %T", msg)
+	}
+	if got.err != nil {
+		t.Fatalf("doSaveFallbackEditor: %v", got.err)
+	}
+	if fallback := got.toolFallbacks["rg"]; fallback.Source.Owner != "BurntSushi" || fallback.Source.Repo != "ripgrep" {
+		t.Fatalf("msg.toolFallbacks = %+v, want rg BurntSushi/ripgrep", got.toolFallbacks)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	fallback := cfg.Tools["rg"].Fallback
+	if fallback == nil {
+		t.Fatal("fallback missing from config")
+	}
+	if fallback.Source.Owner != "BurntSushi" || fallback.Source.Repo != "ripgrep" || fallback.Source.URL != "https://github.com/BurntSushi/ripgrep" {
+		t.Fatalf("source = %+v, want normalized GitHub source", fallback.Source)
+	}
+	if fallback.Status != config.FallbackStatusUnverified {
+		t.Fatalf("status = %q, want unverified", fallback.Status)
+	}
+	if fallback.Binary != "rg" || fallback.BinDir != "~/.local/share/omni/fallback/bin" || fallback.ReleaseChannel != "stable" {
+		t.Fatalf("fallback identity = %+v, want binary/bin dir/release channel", fallback)
+	}
+	if fallback.Recipe.Type != config.FallbackRecipeGitHubReleaseAsset || fallback.Recipe.AssetPattern != "ripgrep-{version}-{os}-{arch}.tar.gz" {
+		t.Fatalf("recipe = %+v, want github release asset pattern", fallback.Recipe)
+	}
+	if fallback.Commands.Install != "install rg" ||
+		fallback.Commands.Check != "test -x {{bin_dir}}/{{binary}}" ||
+		fallback.Commands.Uninstall != "rm -f {{bin_dir}}/{{binary}}" ||
+		fallback.Commands.Upgrade != "upgrade rg" ||
+		fallback.Commands.Version != "{{binary}} --version" {
+		t.Fatalf("commands = %+v, want structured editor commands", fallback.Commands)
+	}
+}
+
 func TestDoDelete_RefreshesToolMembershipState(t *testing.T) {
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
