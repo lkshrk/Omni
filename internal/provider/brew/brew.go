@@ -139,9 +139,15 @@ type brewInfoOutput struct {
 }
 
 type brewFormulaInfo struct {
-	Name      string `json:"name"`
-	FullName  string `json:"full_name"`
-	Desc      string `json:"desc"`
+	Name     string `json:"name"`
+	FullName string `json:"full_name"`
+	Desc     string `json:"desc"`
+	Homepage string `json:"homepage"`
+	URLs     struct {
+		Stable struct {
+			URL string `json:"url"`
+		} `json:"stable"`
+	} `json:"urls"`
 	Installed []struct {
 		Version            string `json:"version"`
 		InstalledOnRequest bool   `json:"installed_on_request"`
@@ -151,6 +157,8 @@ type brewFormulaInfo struct {
 type brewCaskInfo struct {
 	Token     string                       `json:"token"`
 	Desc      string                       `json:"desc"`
+	Homepage  string                       `json:"homepage"`
+	URL       string                       `json:"url"`
 	Installed string                       `json:"installed"` // installed version string
 	Artifacts []map[string]json.RawMessage `json:"artifacts"`
 }
@@ -311,7 +319,10 @@ func (p *Provider) InstalledMetadataMap(ctx context.Context) (map[string]provide
 		if name == "" {
 			continue
 		}
-		metadata[strings.ToLower(name)] = provider.InstalledMetadata{Version: f.Installed[0].Version}
+		metadata[strings.ToLower(name)] = provider.InstalledMetadata{
+			Version: f.Installed[0].Version,
+			Source:  brewSourceHint(f.Homepage, f.URLs.Stable.URL),
+		}
 	}
 
 	seenCasks := make(map[string]struct{}, len(caskTokens))
@@ -323,7 +334,7 @@ func (p *Provider) InstalledMetadataMap(ctx context.Context) (map[string]provide
 		if _, ok := caskTokens[key]; !ok {
 			continue
 		}
-		entry := provider.InstalledMetadata{Version: c.Installed}
+		entry := provider.InstalledMetadata{Version: c.Installed, Source: brewSourceHint(c.Homepage, c.URL)}
 		if plan := c.privilegePlan(provider.PrivilegeActionUninstall); plan.RequiresPrivilege() {
 			entry.Privilege = plan
 		}
@@ -663,14 +674,21 @@ func (p *Provider) enrichSearchResults(ctx context.Context, results []provider.S
 		return
 	}
 	descriptions := make(map[string]string, len(out.Formulae)+len(out.Casks))
+	sources := make(map[string]provider.SourceMetadata, len(out.Formulae)+len(out.Casks))
 	privileges := make(map[string]provider.PrivilegePlan, len(out.Casks))
 	for _, f := range out.Formulae {
 		name := f.Name
 		if name == "" {
 			name = formulaName(f.FullName)
 		}
-		if name != "" && f.Desc != "" {
-			descriptions[strings.ToLower(name)] = f.Desc
+		if name != "" {
+			key := strings.ToLower(name)
+			if f.Desc != "" {
+				descriptions[key] = f.Desc
+			}
+			if source := brewSourceHint(f.Homepage, f.URLs.Stable.URL); source.Type != "" {
+				sources[key] = source
+			}
 		}
 	}
 	for _, c := range out.Casks {
@@ -681,6 +699,9 @@ func (p *Provider) enrichSearchResults(ctx context.Context, results []provider.S
 		if c.Desc != "" {
 			descriptions[key] = c.Desc
 		}
+		if source := brewSourceHint(c.Homepage, c.URL); source.Type != "" {
+			sources[key] = source
+		}
 		if plan := c.privilegePlan(provider.PrivilegeActionInstall); plan.RequiresPrivilege() {
 			privileges[key] = plan
 		}
@@ -690,9 +711,56 @@ func (p *Provider) enrichSearchResults(ctx context.Context, results []provider.S
 		if desc := descriptions[key]; desc != "" {
 			results[i].Description = desc
 		}
+		if source := sources[key]; source.Type != "" {
+			results[i].Source = source
+		}
 		if plan := privileges[key]; plan.RequiresPrivilege() {
 			results[i].Privilege = plan
 		}
+	}
+}
+
+func brewSourceHint(values ...string) provider.SourceMetadata {
+	for _, value := range values {
+		source := githubSourceHint(value)
+		if source.Type != "" {
+			return source
+		}
+	}
+	return provider.SourceMetadata{}
+}
+
+func githubSourceHint(raw string) provider.SourceMetadata {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return provider.SourceMetadata{}
+	}
+	value = strings.TrimPrefix(value, "git+")
+	value = strings.TrimPrefix(value, "https://")
+	value = strings.TrimPrefix(value, "http://")
+	value = strings.TrimPrefix(value, "git@")
+	value = strings.TrimPrefix(value, "www.")
+	switch {
+	case strings.HasPrefix(value, "github.com:"):
+		value = strings.TrimPrefix(value, "github.com:")
+	case strings.HasPrefix(value, "github.com/"):
+		value = strings.TrimPrefix(value, "github.com/")
+	default:
+		return provider.SourceMetadata{}
+	}
+	parts := strings.Split(value, "/")
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return provider.SourceMetadata{}
+	}
+	repo := strings.TrimSuffix(parts[1], ".git")
+	if repo == "" {
+		return provider.SourceMetadata{}
+	}
+	return provider.SourceMetadata{
+		Type:  provider.SourceTypeGitHub,
+		Owner: parts[0],
+		Repo:  repo,
+		URL:   "https://github.com/" + parts[0] + "/" + repo,
 	}
 }
 

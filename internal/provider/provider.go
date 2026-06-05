@@ -84,8 +84,19 @@ type SearchResult struct {
 	Description    string
 	Provider       string // provider suitable for config/install after app-layer normalization
 	SourceProvider string // provider that produced the registry result
+	Source         SourceMetadata
 	Options        map[string]string
 	Privilege      PrivilegePlan
+}
+
+const SourceTypeGitHub = "github"
+
+// SourceMetadata describes an upstream/source repository hint reported by a provider.
+type SourceMetadata struct {
+	Type  string
+	Owner string
+	Repo  string
+	URL   string
 }
 
 // Searcher is implemented by providers that support registry search.
@@ -114,6 +125,7 @@ type BulkChecker interface {
 type InstalledMetadata struct {
 	Version   string
 	Privilege PrivilegePlan
+	Source    SourceMetadata
 }
 
 // MetadataBulkChecker is optionally implemented by providers whose installed

@@ -416,6 +416,21 @@ func applyPrivilegeMetadata(upsert *database.ToolCache, plan provider.PrivilegeP
 	upsert.PrivilegeAt = &now
 }
 
+func installedSourceMetadataUpdate(t config.ToolEntry, entry provider.InstalledMetadata) (database.MetadataUpdate, bool) {
+	if strings.TrimSpace(entry.Source.Type) == "" {
+		return database.MetadataUpdate{}, false
+	}
+	return database.MetadataUpdate{
+		Name:        t.Name,
+		Provider:    t.Provider,
+		Package:     t.EffectivePackage(),
+		SourceType:  strings.TrimSpace(entry.Source.Type),
+		SourceOwner: strings.TrimSpace(entry.Source.Owner),
+		SourceRepo:  strings.TrimSpace(entry.Source.Repo),
+		SourceURL:   strings.TrimSpace(entry.Source.URL),
+	}, true
+}
+
 func installedMapFromMetadata(metadata map[string]provider.InstalledMetadata) map[string]string {
 	m := make(map[string]string, len(metadata))
 	for name, entry := range metadata {
@@ -600,6 +615,7 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 
 	stop = profile.Start("app.refresh.installed.resolve_installed")
 	upserts := make([]*database.ToolCache, 0, len(tools))
+	metadataUpdates := make([]database.MetadataUpdate, 0)
 	for _, t := range tools {
 		keys := toolEntryLookupKeys(t)
 
@@ -642,6 +658,9 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 			}
 			if metadata, ok := provider.LookupInstalledMetadata(metadataMaps[opProvider], keys); ok {
 				applyPrivilegeMetadata(upsert, metadata.Privilege)
+				if update, ok := installedSourceMetadataUpdate(t, metadata); ok {
+					metadataUpdates = append(metadataUpdates, update)
+				}
 			}
 			upserts = append(upserts, upsert)
 			continue
@@ -681,6 +700,10 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 	if err := a.readDB().UpsertBatch(writeCtx, upserts); err != nil {
 		stop()
 		return fmt.Errorf("upserting installed status: %w", err)
+	}
+	if err := a.readDB().UpsertMetadataBatch(writeCtx, metadataUpdates); err != nil {
+		stop()
+		return fmt.Errorf("upserting installed metadata: %w", err)
 	}
 	if err := a.reconcileResolvedTools(writeCtx, tools); err != nil {
 		stop()
@@ -833,9 +856,13 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 	}
 	writeCtx := context.WithoutCancel(ctx)
 	upserts := make([]*database.ToolCache, 0, len(provTools))
+	metadataUpdates := make([]database.MetadataUpdate, 0)
 	flushUpserts := func() error {
 		if err := a.readDB().UpsertBatch(writeCtx, upserts); err != nil {
 			return fmt.Errorf("upserting installed status for %s: %w", provName, err)
+		}
+		if err := a.readDB().UpsertMetadataBatch(writeCtx, metadataUpdates); err != nil {
+			return fmt.Errorf("upserting metadata for %s: %w", provName, err)
 		}
 		return nil
 	}
@@ -932,6 +959,9 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 				}
 				if entry, ok := provider.LookupInstalledMetadata(metadata, keys); ok {
 					applyPrivilegeMetadata(upsert, entry.Privilege)
+					if update, ok := installedSourceMetadataUpdate(t, entry); ok {
+						metadataUpdates = append(metadataUpdates, update)
+					}
 				}
 				upserts = append(upserts, upsert)
 			}
@@ -1493,12 +1523,16 @@ func (a *App) cacheSearchMetadata(ctx context.Context, results []provider.Search
 			Package:     name,
 			Version:     strings.TrimSpace(r.Version),
 			Description: strings.TrimSpace(r.Description),
+			SourceType:  strings.TrimSpace(r.Source.Type),
+			SourceOwner: strings.TrimSpace(r.Source.Owner),
+			SourceRepo:  strings.TrimSpace(r.Source.Repo),
+			SourceURL:   strings.TrimSpace(r.Source.URL),
 		}
 		if r.Privilege.RequiresPrivilege() {
 			u.Privilege = string(r.Privilege.Requirement)
 			u.PrivilegeReason = strings.TrimSpace(r.Privilege.Reason)
 		}
-		if u.Version == "" && u.Description == "" && u.Privilege == "" {
+		if u.Version == "" && u.Description == "" && u.Privilege == "" && u.SourceType == "" {
 			continue
 		}
 		updates = append(updates, u)

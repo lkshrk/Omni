@@ -408,11 +408,11 @@ func TestIsTapped_False(t *testing.T) {
 func TestSearch_ReturnsFormulaeAndCasks(t *testing.T) {
 	info := `{
 		"formulae": [
-			{"name": "bat", "desc": "cat clone with wings"},
+			{"name": "bat", "desc": "cat clone with wings", "homepage": "https://github.com/sharkdp/bat"},
 			{"name": "bat-extras", "desc": "extra scripts"}
 		],
 		"casks": [
-			{"token": "batman", "desc": "dark knight app", "artifacts": [{"pkg": ["Batman.pkg"]}]}
+			{"token": "batman", "desc": "dark knight app", "homepage": "https://github.com/example/batman", "artifacts": [{"pkg": ["Batman.pkg"]}]}
 		]
 	}`
 	p, m := newBrew(
@@ -446,6 +446,12 @@ func TestSearch_ReturnsFormulaeAndCasks(t *testing.T) {
 	}
 	if results[2].Description != "dark knight app" {
 		t.Errorf("results[2].Description = %q, want enriched cask description", results[2].Description)
+	}
+	if results[0].Source.Type != provider.SourceTypeGitHub || results[0].Source.Owner != "sharkdp" || results[0].Source.Repo != "bat" {
+		t.Fatalf("results[0].Source = %+v, want github sharkdp/bat", results[0].Source)
+	}
+	if results[2].Source.Owner != "example" || results[2].Source.Repo != "batman" {
+		t.Fatalf("results[2].Source = %+v, want example/batman", results[2].Source)
 	}
 	if results[2].Privilege.Requirement != provider.PrivilegeMaybe {
 		t.Fatalf("results[2].Privilege = %+v, want maybe", results[2].Privilege)
@@ -607,6 +613,24 @@ func TestInstalledMap_ReturnsFormulae(t *testing.T) {
 		strings.Join(m.Calls[0].Args, " ") != "info --json=v2 --installed" ||
 		strings.Join(m.Calls[1].Args, " ") != "list --cask" {
 		t.Fatalf("calls = %+v, want fast installed info scan plus cask filter", m.Calls)
+	}
+}
+
+func TestInstalledMetadataMap_IncludesFormulaSource(t *testing.T) {
+	installedInfo := `{"formulae":[` +
+		`{"name":"ripgrep","full_name":"ripgrep","homepage":"https://github.com/BurntSushi/ripgrep","installed":[{"version":"14.1.1","installed_on_request":true}]}` +
+		`],"casks":[]}`
+	p, _ := newBrew(
+		executor.MockCall{Stdout: installedInfo},
+		executor.MockCall{},
+	)
+	got, err := p.InstalledMetadataMap(context.Background())
+	if err != nil {
+		t.Fatalf("InstalledMetadataMap: %v", err)
+	}
+	source := got["ripgrep"].Source
+	if source.Type != provider.SourceTypeGitHub || source.Owner != "BurntSushi" || source.Repo != "ripgrep" {
+		t.Fatalf("source = %+v, want github BurntSushi/ripgrep", source)
 	}
 }
 

@@ -99,6 +99,12 @@ func TestRefreshInstalled_MetadataBulkPath_PersistsPrivilege(t *testing.T) {
 					Requirement: provider.PrivilegeMaybe,
 					Reason:      "brew cask parsec uses pkgutil uninstall",
 				},
+				Source: provider.SourceMetadata{
+					Type:  provider.SourceTypeGitHub,
+					Owner: "parsec-cloud",
+					Repo:  "parsec-app",
+					URL:   "https://github.com/parsec-cloud/parsec-app",
+				},
 			},
 		},
 	}
@@ -129,6 +135,13 @@ func TestRefreshInstalled_MetadataBulkPath_PersistsPrivilege(t *testing.T) {
 	}
 	if cached.PrivilegeAt == nil {
 		t.Fatal("PrivilegeAt should be set")
+	}
+	meta, err := a.DB().GetMetadata(context.Background(), "parsec", "system", "parsec")
+	if err != nil {
+		t.Fatalf("GetMetadata parsec: %v", err)
+	}
+	if meta.SourceType != provider.SourceTypeGitHub || meta.SourceOwner != "parsec-cloud" || meta.SourceRepo != "parsec-app" {
+		t.Fatalf("metadata source = %s/%s/%s, want github/parsec-cloud/parsec-app", meta.SourceType, meta.SourceOwner, meta.SourceRepo)
 	}
 }
 
