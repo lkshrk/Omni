@@ -416,7 +416,7 @@ func groupToolsColumnWidths(m Model, rows []groupToolRow) (int, int) {
 			continue
 		}
 		nameW = max(nameW, lipgloss.Width(nameDisplayText(row.tool)))
-		providerW = max(providerW, lipgloss.Width(providerLabelForToolWithPin(row.tool, providerPinForTool(row.tool, m.toolProviderPins), m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager)))
+		providerW = max(providerW, lipgloss.Width(providerLabelForToolWithPin(row.tool, providerPinForTool(row.tool, m.toolProviderPins), "", m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager)))
 	}
 	return nameW, providerW
 }
@@ -427,7 +427,7 @@ func groupToolsSecondaryWidth(m Model, rows []groupToolRow) int {
 		if row.tool == nil {
 			continue
 		}
-		w := lipgloss.Width(providerLabelForToolWithPin(row.tool, providerPinForTool(row.tool, m.toolProviderPins), m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager))
+		w := lipgloss.Width(providerLabelForToolWithPin(row.tool, providerPinForTool(row.tool, m.toolProviderPins), "", m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager))
 		if toolHasPrivilegeMarker(row.tool, m.effectiveSystemManager) {
 			w += lipgloss.Width(iconPrivileged) + listColumnGap
 		}
@@ -448,7 +448,7 @@ func renderHostGroupToolSecondary(m Model, row groupToolRow, width int, selected
 	}
 	p := m.palette
 	providerPin := providerPinForTool(row.tool, m.toolProviderPins)
-	providerLabel := providerLabelForToolWithPin(row.tool, providerPin, m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager)
+	providerLabel := providerLabelForToolWithPin(row.tool, providerPin, "", m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager)
 	privW := 0
 	if toolHasPrivilegeMarker(row.tool, m.effectiveSystemManager) {
 		privW = lipgloss.Width(iconPrivileged)
@@ -457,7 +457,7 @@ func renderHostGroupToolSecondary(m Model, row groupToolRow, width int, selected
 	if privW > 0 {
 		privGap = listColumnGap
 	}
-	providerW := min(lipgloss.Width(providerDisplayTextForToolWithPin(row.tool, providerPin, m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager)), max(width-privW-privGap, 1))
+	providerW := min(lipgloss.Width(providerDisplayTextForToolWithPin(row.tool, providerPin, "", m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager)), max(width-privW-privGap, 1))
 	priv := renderPrivilegeCol(privW > 0, privW, listRowColumnStyle(selected, p.styleHelp))
 	provider := renderProviderColWithExplicit(p, row.tool.Provider, row.tool.InstalledWith, providerPin, m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager, providerLabel, providerW, selected, false)
 	rendered := renderCellGroup(privilegeProviderCells(priv, privW, provider, providerW), listColumnGap)

@@ -65,6 +65,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case viewCommand:
 			m.commandInput.SetValue(m.commandInput.Value() + msg.Content)
 			m.commandSuggestions = filterPalette(buildPalette(m), m.commandInput.Value())
+		case viewFallbackEditor:
+			m.settingsInput.SetValue(m.settingsInput.Value() + msg.Content)
 		}
 
 	case spinner.TickMsg:
@@ -271,6 +273,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case migrateProviderDoneMsg:
 		cmds = append(cmds, m.handleMigrateProviderDoneMsg(msg)...)
+
+	case fallbackSavedMsg:
+		cmds = append(cmds, m.handleFallbackSavedMsg(msg)...)
 
 	case tea.KeyPressMsg:
 		return m.handleKeyPressMsg(msg, cmds)

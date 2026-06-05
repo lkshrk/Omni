@@ -7,6 +7,7 @@ import (
 
 	"github.com/lkshrk/omni/internal/actions"
 	"github.com/lkshrk/omni/internal/app"
+	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/text"
 )
@@ -223,7 +224,7 @@ func renderList(m Model) string {
 	}
 
 	// Pre-compute column widths then detail lines (detail needs cols for wrap width).
-	cols := newColWidthsWithProviderPins(m.visibleTools, m.toolGroups, visibleGroupNames(m), m.toolProviderPins, m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager, m.width)
+	cols := newColWidthsWithProviderPins(m.visibleTools, m.toolGroups, visibleGroupNames(m), m.toolProviderPins, m.toolFallbacks, m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager, m.width)
 	cols = fitToolColumnsForRowErrors(cols, m.visibleTools, m.rowErrors)
 	detail := inlineDetailLines(m, m.width, cols)
 
@@ -259,7 +260,7 @@ func renderList(m Model) string {
 		isIgnored := sec == sectionIgnored
 		ss := m.syncStatusOf(t)
 		isCursor := i == m.cursor && !m.cursorHidden
-		line := renderToolRowWithProviderPin(p, t, cols, spinnerView, group, providerPinForTool(t, m.toolProviderPins), m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager, isIgnored, isCursor, ss, rowActionErrorStatus(m, t))
+		line := renderToolRowWithProviderPin(p, t, cols, spinnerView, group, providerPinForTool(t, m.toolProviderPins), fallbackConcreteForTool(t, m.toolFallbacks), m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager, isIgnored, isCursor, ss, rowActionErrorStatus(m, t))
 		if isCursor {
 			cursorRow = len(rows)
 			rows = append(rows, displayRow{text: selectedRowPrefix(p) + line, toolIdx: i})
@@ -333,10 +334,10 @@ type colWidths struct {
 // groupNames is the list of reusable group names; when non-empty the group
 // column is always reserved so it does not flicker in/out as filters change.
 func newColWidths(tools []*database.ToolCache, toolGroups map[string]string, groupNames []string, systemBin, pythonBin, nodeBin string, screenW int) colWidths {
-	return newColWidthsWithProviderPins(tools, toolGroups, groupNames, nil, systemBin, pythonBin, nodeBin, screenW)
+	return newColWidthsWithProviderPins(tools, toolGroups, groupNames, nil, nil, systemBin, pythonBin, nodeBin, screenW)
 }
 
-func newColWidthsWithProviderPins(tools []*database.ToolCache, toolGroups map[string]string, groupNames []string, providerPins map[string]string, systemBin, pythonBin, nodeBin string, screenW int) colWidths {
+func newColWidthsWithProviderPins(tools []*database.ToolCache, toolGroups map[string]string, groupNames []string, providerPins map[string]string, fallbacks map[string]config.FallbackSpec, systemBin, pythonBin, nodeBin string, screenW int) colWidths {
 	cols := colWidths{name: 20, prov: 8, ver: len("missing"), screenW: screenW}
 
 	// Seed group column width from all known reusable group names so
@@ -353,7 +354,7 @@ func newColWidthsWithProviderPins(tools []*database.ToolCache, toolGroups map[st
 		if n := lipgloss.Width(nameDisplayText(t)); n > cols.name {
 			cols.name = n
 		}
-		if n := lipgloss.Width(providerDisplayTextForToolWithPin(t, providerPinForTool(t, providerPins), systemBin, pythonBin, nodeBin)); n > cols.prov {
+		if n := lipgloss.Width(providerDisplayTextForToolWithPin(t, providerPinForTool(t, providerPins), fallbackConcreteForTool(t, fallbacks), systemBin, pythonBin, nodeBin)); n > cols.prov {
 			cols.prov = n
 		}
 		if toolHasPrivilegeMarker(t, systemBin) {
@@ -444,14 +445,14 @@ func displayVersionText(t *database.ToolCache) string {
 }
 
 func renderToolRow(p palette, t *database.ToolCache, cols colWidths, spinnerView, group, systemBin, pythonBin, nodeBin string, ignored, selected bool, ss syncStatus, rowErrValues ...string) string {
-	return renderToolRowWithProviderPin(p, t, cols, spinnerView, group, "", systemBin, pythonBin, nodeBin, ignored, selected, ss, rowErrValues...)
+	return renderToolRowWithProviderPin(p, t, cols, spinnerView, group, "", "", systemBin, pythonBin, nodeBin, ignored, selected, ss, rowErrValues...)
 }
 
-func renderToolRowWithProviderPin(p palette, t *database.ToolCache, cols colWidths, spinnerView, group, providerPin, systemBin, pythonBin, nodeBin string, ignored, selected bool, ss syncStatus, rowErrValues ...string) string {
-	label := providerLabelForToolWithPin(t, providerPin, systemBin, pythonBin, nodeBin)
+func renderToolRowWithProviderPin(p palette, t *database.ToolCache, cols colWidths, spinnerView, group, providerPin, fallbackConcrete, systemBin, pythonBin, nodeBin string, ignored, selected bool, ss syncStatus, rowErrValues ...string) string {
+	label := providerLabelForToolWithPin(t, providerPin, fallbackConcrete, systemBin, pythonBin, nodeBin)
 	privileged := toolHasPrivilegeMarker(t, systemBin)
 	provSystemBin, provPythonBin, provNodeBin := systemBin, pythonBin, nodeBin
-	if t.Installed && t.InstalledWith == "" && providerPin == "" {
+	if t.Installed && t.InstalledWith == "" && providerPin == "" && fallbackConcrete == "" {
 		provSystemBin, provPythonBin, provNodeBin = "", "", ""
 	}
 	rowErr := ""
@@ -533,7 +534,11 @@ func renderToolRowWithProviderPin(p palette, t *database.ToolCache, cols colWidt
 	}
 	name := renderNameCell(p, nameStyle, t, rowErr, cols.name, selected)
 	priv := renderPrivilegeCol(privileged, cols.priv, emphasis(p.styleHelp))
-	prov := renderProviderColWithExplicit(p, t.Provider, t.InstalledWith, providerPin, provSystemBin, provPythonBin, provNodeBin, label, cols.prov, selected, ss == syncWrongProv)
+	displayInstalledWith := t.InstalledWith
+	if fallbackConcrete != "" {
+		displayInstalledWith = fallbackConcrete
+	}
+	prov := renderProviderColWithExplicit(p, t.Provider, displayInstalledWith, providerPin, provSystemBin, provPythonBin, provNodeBin, label, cols.prov, selected, ss == syncWrongProv)
 
 	var ver string
 	switch {
@@ -814,19 +819,26 @@ func providerPartsWithExplicit(raw, installedWith, explicitWith, systemBin, pyth
 	return parts.Meta, parts.Concrete, parts.Override
 }
 
-func providerLabelForToolWithPin(t *database.ToolCache, providerPin, systemBin, pythonBin, nodeBin string) string {
+func providerLabelForToolWithPin(t *database.ToolCache, providerPin, fallbackConcrete, systemBin, pythonBin, nodeBin string) string {
 	if t == nil {
 		return ""
 	}
-	return app.ToolProviderDisplayForTool(t, providerPin, app.ToolClassificationContext{
+	installedWith := t.InstalledWith
+	if fallbackConcrete != "" {
+		installedWith = fallbackConcrete
+	}
+	return app.ToolProviderDisplayLabel(app.ToolProviderDisplayInput{
+		Provider:               t.Provider,
+		InstalledWith:          installedWith,
+		ExplicitProvider:       providerPin,
 		EffectiveSystemManager: systemBin,
 		EffectivePythonManager: pythonBin,
 		EffectiveNodeManager:   nodeBin,
-	}).Label()
+	})
 }
 
-func providerDisplayTextForToolWithPin(t *database.ToolCache, providerPin, systemBin, pythonBin, nodeBin string) string {
-	return providerLabelForToolWithPin(t, providerPin, systemBin, pythonBin, nodeBin)
+func providerDisplayTextForToolWithPin(t *database.ToolCache, providerPin, fallbackConcrete, systemBin, pythonBin, nodeBin string) string {
+	return providerLabelForToolWithPin(t, providerPin, fallbackConcrete, systemBin, pythonBin, nodeBin)
 }
 
 // providerLabel converts a raw provider DB value to a human-readable label.

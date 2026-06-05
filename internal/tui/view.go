@@ -183,6 +183,14 @@ func (m Model) viewString() string {
 		return placePopup(bg, m, renderScopePicker(m), scopePickerPopupFrame(m, popupTitleForScopeTool(m, "Pin Provider")))
 	}
 
+	if m.mode == viewFallbackEditor {
+		bgModel := m
+		bgModel.mode = viewList
+		bgModel.fallbackTargetSet = false
+		bg := bgModel.viewString()
+		return placePopup(bg, m, renderFallbackEditorPopup(m), fallbackEditorPopupFrame(m))
+	}
+
 	if m.mode == viewAdminTerminal {
 		bgModel := m
 		bgModel.adminTerminal = nil

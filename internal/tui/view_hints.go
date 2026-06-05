@@ -561,6 +561,9 @@ func toolInlineHints(m Model, t *database.ToolCache) []hintItem {
 	if showIgnore {
 		hints = append(hints, hintFromBinding(m.keys.Ignore))
 	}
+	if toolFallbackEligible(t) {
+		hints = append(hints, hintFromBinding(m.keys.Fallback))
+	}
 	if showDelete {
 		hints = append(hints, hintFromBinding(m.keys.Delete))
 	}
