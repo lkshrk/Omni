@@ -128,6 +128,76 @@ func TestImportConfigFile_RejectsMalformedSource(t *testing.T) {
 	}
 }
 
+func TestSaveToolFallback_PersistsRecipeWithoutInstalling(t *testing.T) {
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("rg", "system")),
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	err := a.SaveToolFallback(context.Background(), "rg", config.FallbackSpec{
+		Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+		Status: config.FallbackStatusUnverified,
+		Binary: "rg",
+		Recipe: config.FallbackRecipe{Type: config.FallbackRecipeGitHubReleaseAsset, AssetPattern: "ripgrep-{version}-{os}-{arch}.tar.gz"},
+		Commands: config.FallbackCommands{
+			Install: "install rg",
+			Check:   "command -v rg",
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveToolFallback: %v", err)
+	}
+
+	got, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	fallback := got.Tools["rg"].Fallback
+	if fallback == nil {
+		t.Fatal("fallback was not persisted")
+	}
+	if fallback.Source.Owner != "BurntSushi" || fallback.Source.Repo != "ripgrep" || fallback.Commands.Check != "command -v rg" {
+		t.Fatalf("fallback = %+v, want ripgrep GitHub recipe with check", fallback)
+	}
+	tools, err := a.ListTools(context.Background(), "")
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(tools) != 0 {
+		t.Fatalf("SaveToolFallback should not install or refresh DB rows, got %d tools", len(tools))
+	}
+}
+
+func TestSaveToolFallback_RejectsMissingTool(t *testing.T) {
+	a, _ := newImportApp(t, &stubProvider{name: "system", available: true})
+	err := a.SaveToolFallback(context.Background(), "ghost", config.FallbackSpec{
+		Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+		Status: config.FallbackStatusUnresolved,
+	})
+	if err == nil || !strings.Contains(err.Error(), `tool "ghost" not found`) {
+		t.Fatalf("SaveToolFallback err = %v, want missing tool", err)
+	}
+}
+
+func TestSaveToolFallback_RejectsNonSystemTool(t *testing.T) {
+	a, cfgPath := newImportApp(t, &stubProvider{name: "node", available: true})
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("eslint", "node")),
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	err := a.SaveToolFallback(context.Background(), "eslint", config.FallbackSpec{
+		Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "eslint", Repo: "eslint"},
+		Status: config.FallbackStatusUnresolved,
+	})
+	if err == nil || !strings.Contains(err.Error(), "fallback is only supported for system tools") {
+		t.Fatalf("SaveToolFallback err = %v, want system-only validation", err)
+	}
+}
+
 func TestImportConfigFile_RejectsActiveConfigSource(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{}); err != nil {
