@@ -21,6 +21,7 @@ import (
 	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/dots"
 	"github.com/lkshrk/omni/internal/provider"
+	textutil "github.com/lkshrk/omni/internal/text"
 )
 
 // ─── test harness ─────────────────────────────────────────────────────────────
@@ -663,13 +664,14 @@ func TestPrintDotsTable_FormatsCorrectly(t *testing.T) {
 	if !strings.Contains(output, "nvim") {
 		t.Error("expected nvim in output")
 	}
-	if !strings.Contains(output, "✓") {
+	symbols := textutil.SymbolsFromEnv()
+	if !strings.Contains(output, symbols.Apply("✓")) {
 		t.Error("expected ✓ icon for synced state")
 	}
 	if !strings.Contains(output, "!") {
 		t.Error("expected ! icon for out-of-sync state")
 	}
-	if !strings.Contains(output, "✗") {
+	if !strings.Contains(output, symbols.Apply("✗")) {
 		t.Error("expected ✗ icon for conflict state")
 	}
 	if !strings.Contains(output, "?") {
