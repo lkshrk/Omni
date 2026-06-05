@@ -40,6 +40,20 @@ tools. Typical actions include:
 Rows use ecosystem labels such as `system(brew)`, `node(bun)`, and `python(uv)`
 when the concrete manager is known.
 
+Fallback-capable `system` rows can show GitHub source labels:
+
+| Label | Meaning |
+| --- | --- |
+| `system(gh)` | Installed through a verified GitHub fallback. |
+| `system(gh?)` | A GitHub fallback exists but is unverified. |
+| `system(gh!)` | The fallback is unresolved or failed and needs editing. |
+
+The `f fallback` row action opens the fallback editor for eligible configured
+`system` tools. Saving from the TUI writes fallback config only; it does not
+install immediately. Run sync or install afterward to apply the saved recipe
+when the native package manager cannot provide the tool. Native-installed rows
+hide fallback labels and actions.
+
 ## Dots Tab
 
 The Dots tab shows dot entries, sync health, conflict state, ignored paths, and

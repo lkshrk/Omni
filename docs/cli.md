@@ -56,6 +56,7 @@ mutability, dry-run support, and safer first steps.
 | --- | --- |
 | `omni tools list [tool]` | List tools and install status. |
 | `omni tools set <name>` | Create or update a logical tool spec. |
+| `omni tools fallback <tool>` | Save or edit a GitHub fallback source for a configured `system` tool. |
 | `omni tools delete-spec <name>` | Delete a logical tool spec and memberships. |
 | `omni tools add <package>` | Add a tool to config. |
 | `omni tools install [tool]` | Install one missing tool. |
@@ -79,6 +80,7 @@ Common tool flags:
 | Flag | Commands | Description |
 | --- | --- | --- |
 | `--provider <provider>` | `add`, `set`, `install`, `list`, `search`, `sync`, `switch --reinstall-default` | Select or filter a provider. |
+| `--from-github <owner/repo>` | `fallback` | Save a GitHub fallback source. This is config-only and does not install. |
 | `--install-with <manager>` | `add`, `set` | Pin a logical tool to a concrete manager. |
 | `--quarantine <duration>` | `set` | Set a tool-level update quarantine duration, `0`, or `exempt`. |
 | `--group <group>` | `add`, `install`, `sync`, `import`, `list` | Assign, target, or filter by group. |

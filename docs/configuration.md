@@ -16,7 +16,7 @@ See [State And Files](state-and-files.md) for config path priority, cache path
 priority, environment variables, backups, and disposable cache behavior.
 
 The schema lives in
-[spec/omni.settings.v2.schema.json](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v2.schema.json).
+[spec/omni.settings.v3.schema.json](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v3.schema.json).
 
 ## Smallest Valid File
 
@@ -24,7 +24,7 @@ The smallest legal file is:
 
 ```json
 {
-  "version": 2
+  "version": 3
 }
 ```
 
@@ -37,9 +37,10 @@ automatically by Omni config writes.
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v2.schema.json",
-  "version": 2,
+  "$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v3.schema.json",
+  "version": 3,
   "settings": {
+    "fallback_bin_dir": "~/.local/share/omni/fallback/bin",
     "ecosystems": {
       "node": { "manager": "bun" },
       "python": { "manager": "uv" }
@@ -114,6 +115,7 @@ Common keys:
 | `dots_repo` | Local path to the Git-backed dotfiles repo. |
 | `dots_git.auto_commit` | Commit dotfile repo changes after add/remove flows. |
 | `dots_git.auto_push` | Push dotfile repo changes after add/remove flows. |
+| `fallback_bin_dir` | Default directory for fallback-installed binaries. Omni warns if it is not on `PATH`; it does not edit shell files automatically. |
 | `ecosystems.node.manager` | `bun`, `pnpm`, or `npm`. |
 | `ecosystems.python.manager` | `uv` or `pip3`. |
 | `ecosystems.system.priority` | Concrete manager resolution order for `system`. |
@@ -172,6 +174,25 @@ overrides.
       "provider": "node",
       "package": "typescript"
     },
+    "rg": {
+      "provider": "system",
+      "package": "ripgrep",
+      "fallback": {
+        "source": {
+          "type": "github",
+          "owner": "BurntSushi",
+          "repo": "ripgrep",
+          "url": "https://github.com/BurntSushi/ripgrep"
+        },
+        "status": "unverified",
+        "binary": "rg",
+        "commands": {
+          "install": "install rg",
+          "check": "command -v rg",
+          "uninstall": "rm -f ~/.local/share/omni/fallback/bin/rg"
+        }
+      }
+    },
     "black": {
       "provider": "python"
     }
@@ -191,6 +212,23 @@ Fields:
 | `variants` | Alternate install candidates tried in order. |
 | `hosts` | Host-specific install overrides. |
 | `ignore` | Keep the spec but skip management. |
+| `fallback` | GitHub fallback recipe for `system` tools when the current concrete system manager cannot provide the package. |
+
+Fallback fields:
+
+| Field | Description |
+| --- | --- |
+| `source.type` | Currently `github`. |
+| `source.owner`, `source.repo`, `source.url` | Source repository provenance. |
+| `status` | `unresolved`, `unverified`, `verified`, or `failed`. |
+| `binary` | Expected command name after install. |
+| `bin_dir` | Optional per-tool override for `settings.fallback_bin_dir`. |
+| `release_channel` | Optional release channel metadata for future resolver/editor use. |
+| `recipe` and `platforms` | Structured release asset metadata when available. |
+| `commands.install` | Shell command used by fallback install. Required for usable fallbacks. |
+| `commands.check` | Shell command used to verify install. Required unless status is `unresolved`. |
+| `commands.uninstall` | Optional shell command for fallback uninstall. If absent, uninstall is unavailable. |
+| `commands.upgrade` | Optional shell command for fallback upgrade. If absent, Omni reuses `install`. |
 
 ## Groups And Hosts
 

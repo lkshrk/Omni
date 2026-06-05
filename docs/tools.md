@@ -91,6 +91,42 @@ whether an import into the machine group runs after the group sync.
 Use `tools install <tool>` for a single explicit install. Use `tools sync` when
 you want the active host's configured desired state applied.
 
+## Fallbacks
+
+Fallbacks let a configured `system` tool install from GitHub when the current
+system package manager cannot provide it. They are not a general package search
+path and they are only used for logical tools that already exist in config.
+
+Save a GitHub fallback source explicitly:
+
+```sh
+omni tools fallback rg --from-github BurntSushi/ripgrep
+```
+
+This writes `settings.json` only. It does not install the tool immediately.
+Later `tools install <tool>` and `tools sync` still try the native system
+manager first. They use the saved fallback only when Omni has explicit cached
+evidence that the concrete manager, such as `apt` or `dnf`, cannot provide the
+configured package.
+
+Fallback states:
+
+| State | Meaning |
+| --- | --- |
+| `unresolved` | Source is known, but no usable install/check recipe is saved yet. Sync skips it. |
+| `unverified` | A usable recipe exists, but it has not passed install/check on this host. |
+| `verified` | The fallback install/check succeeded. |
+| `failed` | The fallback install or check failed. Normal sync does not retry it. |
+
+`tools sync --dry-run` can show a planned fallback install when native package
+availability is known to be missing. `tools sync --retry-failed` can rerun a
+previously failed fallback recipe unchanged. If the native manager becomes able
+to install the package again, native install remains the preferred path.
+
+Fallback uninstall is available only when the recipe has an uninstall command.
+Without one, Omni reports that uninstall is not available instead of guessing
+how to remove files.
+
 ## Upgrade
 
 ```sh
@@ -101,6 +137,9 @@ omni tools upgrade --all --force
 
 Upgrade uses the concrete manager recorded in cache when available. That avoids
 uninstalling with one manager after a different manager installed the package.
+Fallback-installed `system(gh)` tools use the saved fallback upgrade command,
+or the install command when no separate upgrade command exists, then run the
+required check command again.
 When `settings.update_quarantine` is set, upgrades are skipped until the package
 manager's own metadata says the latest version is older than the configured
 duration. Missing PM date metadata blocks the update; `--force` is the explicit
