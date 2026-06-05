@@ -39,6 +39,27 @@ func (a *App) SaveToolFallback(_ context.Context, name string, fallback config.F
 	})
 }
 
+func (a *App) SaveToolFallbackFromGitHub(ctx context.Context, name, repo string) error {
+	owner, repoName, err := parseGitHubRepo(repo)
+	if err != nil {
+		return err
+	}
+	binary := strings.TrimSpace(name)
+	return a.SaveToolFallback(ctx, name, config.FallbackSpec{
+		Source: config.FallbackSource{
+			Type:  config.FallbackSourceGitHub,
+			Owner: owner,
+			Repo:  repoName,
+			URL:   "https://github.com/" + owner + "/" + repoName,
+		},
+		Status: config.FallbackStatusUnresolved,
+		Binary: binary,
+		Commands: config.FallbackCommands{
+			Check: "command -v " + binary,
+		},
+	})
+}
+
 func (a *App) InstallToolFallback(ctx context.Context, name string) error {
 	spec, fallback, err := a.configuredFallback(name)
 	if err != nil {
@@ -172,4 +193,18 @@ func fallbackPackage(name string, spec config.ToolSpec) string {
 		return spec.Package
 	}
 	return name
+}
+
+func parseGitHubRepo(repo string) (string, string, error) {
+	repo = strings.TrimSpace(repo)
+	repo = strings.TrimPrefix(repo, "https://")
+	repo = strings.TrimPrefix(repo, "http://")
+	repo = strings.TrimPrefix(repo, "github.com/")
+	repo = strings.TrimPrefix(repo, "www.github.com/")
+	repo = strings.TrimSuffix(repo, ".git")
+	parts := strings.Split(repo, "/")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return "", "", fmt.Errorf("github repo must be owner/repo")
+	}
+	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), nil
 }

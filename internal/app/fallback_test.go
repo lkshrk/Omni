@@ -118,3 +118,44 @@ func TestUninstallToolFallback_ReportsUnavailableWithoutCommand(t *testing.T) {
 		t.Fatalf("UninstallToolFallback err = %v, want unavailable", err)
 	}
 }
+
+func TestSaveToolFallbackFromGitHub_PersistsUnresolvedSource(t *testing.T) {
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("rg", "system")),
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if err := a.SaveToolFallbackFromGitHub(context.Background(), "rg", "BurntSushi/ripgrep"); err != nil {
+		t.Fatalf("SaveToolFallbackFromGitHub: %v", err)
+	}
+	got, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	fallback := got.Tools["rg"].Fallback
+	if fallback == nil {
+		t.Fatal("fallback missing")
+	}
+	if fallback.Status != config.FallbackStatusUnresolved || fallback.Source.Owner != "BurntSushi" || fallback.Source.Repo != "ripgrep" {
+		t.Fatalf("fallback = %+v, want unresolved BurntSushi/ripgrep source", fallback)
+	}
+	if fallback.Binary != "rg" || fallback.Commands.Check != "command -v rg" {
+		t.Fatalf("fallback binary/check = %q/%q, want rg command check", fallback.Binary, fallback.Commands.Check)
+	}
+}
+
+func TestSaveToolFallbackFromGitHub_RejectsInvalidRepo(t *testing.T) {
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("rg", "system")),
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	err := a.SaveToolFallbackFromGitHub(context.Background(), "rg", "not-a-repo")
+	if err == nil || !strings.Contains(err.Error(), "github repo must be owner/repo") {
+		t.Fatalf("SaveToolFallbackFromGitHub err = %v, want repo validation", err)
+	}
+}
