@@ -67,6 +67,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.commandSuggestions = filterPalette(buildPalette(m), m.commandInput.Value())
 		case viewFallbackEditor:
 			m.settingsInput.SetValue(m.settingsInput.Value() + msg.Content)
+			m.saveFallbackEditorInput()
 		}
 
 	case spinner.TickMsg:

@@ -345,6 +345,7 @@ type Model struct {
 	scopeTargetSet        bool
 	fallbackTarget        database.ToolCache
 	fallbackTargetSet     bool
+	fallbackEditor        fallbackEditorState
 
 	// setup wizard step (0 = create config?, 1 = import tools?, 2 = provider
 	// selection, 3 = node manager, 4 = unused, 5 = enable dotfiles?, 6 = dots

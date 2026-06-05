@@ -3972,6 +3972,87 @@ func TestRenderList_ConfiguredGitHubFallbackShowsGHStatus(t *testing.T) {
 	}
 }
 
+func TestRenderFallbackEditorPopup_ShowsStructuredFallbackFields(t *testing.T) {
+	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: false, Tracked: true}
+	m := baseModel([]*database.ToolCache{tool})
+	m.mode = viewFallbackEditor
+	m.fallbackTarget = *tool
+	m.fallbackTargetSet = true
+	m.fallbackEditor = fallbackEditorState{
+		fields: map[fallbackEditorFieldID]string{
+			fallbackFieldRepo:           "BurntSushi/ripgrep",
+			fallbackFieldBinary:         "rg",
+			fallbackFieldBinDir:         "~/.local/share/omni/fallback/bin",
+			fallbackFieldAssetPattern:   "ripgrep-{version}-{os}-{arch}.tar.gz",
+			fallbackFieldInstallCommand: "install rg",
+			fallbackFieldCheckCommand:   "command -v rg",
+			fallbackFieldUninstall:      "",
+			fallbackFieldUpgrade:        "",
+			fallbackFieldVersion:        "rg --version",
+			fallbackFieldReleaseChannel: "stable",
+		},
+	}
+
+	out := stripANSIEscapeSequences(renderFallbackEditorPopup(m))
+	for _, want := range []string{
+		"status",
+		"gh?",
+		"repo",
+		"BurntSushi/ripgrep",
+		"binary",
+		"rg",
+		"bin dir",
+		"asset",
+		"install",
+		"check",
+		"uninstall",
+		"upgrade",
+		"version",
+		"channel",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("popup = %q, want %q", out, want)
+		}
+	}
+}
+
+func TestOpenFallbackEditor_PrefillsExistingRecipe(t *testing.T) {
+	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: false, Tracked: true}
+	m := baseModel([]*database.ToolCache{tool})
+	m.toolFallbacks = map[string]config.FallbackSpec{
+		"rg": {
+			Source:         config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+			Status:         config.FallbackStatusUnverified,
+			Binary:         "rg",
+			BinDir:         "~/.local/share/omni/fallback/bin",
+			ReleaseChannel: "stable",
+			Recipe:         config.FallbackRecipe{Type: config.FallbackRecipeGitHubReleaseAsset, AssetPattern: "ripgrep-{version}-{os}-{arch}.tar.gz"},
+			Commands: config.FallbackCommands{
+				Install:   "install rg",
+				Check:     "test -x {{bin_dir}}/{{binary}}",
+				Uninstall: "rm -f {{bin_dir}}/{{binary}}",
+				Upgrade:   "upgrade rg",
+				Version:   "{{binary}} --version",
+			},
+		},
+	}
+
+	if cmd := m.openFallbackEditor(tool); cmd == nil {
+		t.Fatal("openFallbackEditor returned nil command")
+	}
+	if m.mode != viewFallbackEditor {
+		t.Fatalf("mode = %v, want fallback editor", m.mode)
+	}
+	fields := m.fallbackEditor.fields
+	if fields[fallbackFieldRepo] != "BurntSushi/ripgrep" ||
+		fields[fallbackFieldInstallCommand] != "install rg" ||
+		fields[fallbackFieldCheckCommand] != "test -x {{bin_dir}}/{{binary}}" ||
+		fields[fallbackFieldUninstall] != "rm -f {{bin_dir}}/{{binary}}" ||
+		fields[fallbackFieldReleaseChannel] != "stable" {
+		t.Fatalf("fallback editor fields = %#v, want existing recipe values", fields)
+	}
+}
+
 func hasHint(hints []hintItem, key, desc string) bool {
 	for _, hint := range hints {
 		if hint.key == key && hint.desc == desc {

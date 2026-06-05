@@ -60,6 +60,20 @@ func (a *App) SaveToolFallbackFromGitHub(ctx context.Context, name, repo string)
 	})
 }
 
+func (a *App) SaveToolFallbackFromGitHubSpec(ctx context.Context, name, repo string, fallback config.FallbackSpec) error {
+	owner, repoName, err := parseGitHubRepo(repo)
+	if err != nil {
+		return err
+	}
+	fallback.Source = config.FallbackSource{
+		Type:  config.FallbackSourceGitHub,
+		Owner: owner,
+		Repo:  repoName,
+		URL:   "https://github.com/" + owner + "/" + repoName,
+	}
+	return a.SaveToolFallback(ctx, name, fallback)
+}
+
 func (a *App) InstallToolFallback(ctx context.Context, name string) error {
 	spec, fallback, err := a.configuredFallback(name)
 	if err != nil {

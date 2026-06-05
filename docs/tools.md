@@ -109,6 +109,11 @@ manager first. They use the saved fallback only when Omni has explicit cached
 evidence that the concrete manager, such as `apt` or `dnf`, cannot provide the
 configured package.
 
+Use `f fallback` in the TUI to edit the materialized recipe after choosing a
+GitHub source. The TUI editor exposes the repo, binary, bin dir, asset pattern,
+install/check/uninstall/upgrade/version commands, and release channel directly.
+Saving remains config-only.
+
 Fallback states:
 
 | State | Meaning |

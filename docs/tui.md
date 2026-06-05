@@ -49,7 +49,9 @@ Fallback-capable `system` rows can show GitHub source labels:
 | `system(gh!)` | The fallback is unresolved or failed and needs editing. |
 
 The `f fallback` row action opens the fallback editor for eligible configured
-`system` tools. Saving from the TUI writes fallback config only; it does not
+`system` tools. The editor is a structured form for the GitHub repo, binary,
+bin dir, asset pattern, install/check/uninstall/upgrade/version commands, and
+release channel. Saving from the TUI writes fallback config only; it does not
 install immediately. Run sync or install afterward to apply the saved recipe
 when the native package manager cannot provide the tool. Native-installed rows
 hide fallback labels and actions.
