@@ -67,21 +67,24 @@ func (a *App) InstallToolFallback(ctx context.Context, name string) error {
 	}
 	if err := a.runFallbackCommand(ctx, name, "install", fallback.Commands.Install); err != nil {
 		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
+		_ = a.readDB().MarkFailed(ctx, name, spec.Provider, fallbackPackage(name, spec), err.Error())
 		return err
 	}
 	installed, err := a.CheckToolFallback(ctx, name)
 	if err != nil {
 		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
+		_ = a.readDB().MarkFailed(ctx, name, spec.Provider, fallbackPackage(name, spec), err.Error())
 		return err
 	}
 	if !installed {
 		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
+		_ = a.readDB().MarkFailed(ctx, name, spec.Provider, fallbackPackage(name, spec), "fallback install verification failed")
 		return fmt.Errorf("fallback install verification failed for %s: check command did not pass", name)
 	}
 	if err := a.setToolFallbackStatus(name, config.FallbackStatusVerified); err != nil {
 		return err
 	}
-	return a.readDB().Upsert(ctx, &database.ToolCache{
+	if err := a.readDB().Upsert(ctx, &database.ToolCache{
 		Name:          name,
 		Provider:      spec.Provider,
 		Package:       fallbackPackage(name, spec),
@@ -89,7 +92,10 @@ func (a *App) InstallToolFallback(ctx context.Context, name string) error {
 		InstalledWith: fallbackInstalledWith(fallback),
 		Version:       sql.NullString{},
 		LastChecked:   time.Now(),
-	})
+	}); err != nil {
+		return err
+	}
+	return a.readDB().UpdateOutdated(ctx, name, spec.Provider, fallbackPackage(name, spec), false, "")
 }
 
 func (a *App) CheckToolFallback(ctx context.Context, name string) (bool, error) {
@@ -106,7 +112,7 @@ func (a *App) CheckToolFallback(ctx context.Context, name string) (bool, error) 
 }
 
 func (a *App) UpgradeToolFallback(ctx context.Context, name string) error {
-	_, fallback, err := a.configuredFallback(name)
+	spec, fallback, err := a.configuredFallback(name)
 	if err != nil {
 		return err
 	}
@@ -114,7 +120,34 @@ func (a *App) UpgradeToolFallback(ctx context.Context, name string) error {
 	if strings.TrimSpace(command) == "" {
 		command = fallback.Commands.Install
 	}
-	return a.runFallbackCommand(ctx, name, "upgrade", command)
+	if err := a.runFallbackCommand(ctx, name, "upgrade", command); err != nil {
+		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
+		return err
+	}
+	installed, err := a.CheckToolFallback(ctx, name)
+	if err != nil {
+		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
+		return err
+	}
+	if !installed {
+		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
+		return fmt.Errorf("fallback upgrade verification failed for %s: check command did not pass", name)
+	}
+	if err := a.setToolFallbackStatus(name, config.FallbackStatusVerified); err != nil {
+		return err
+	}
+	if err := a.readDB().Upsert(ctx, &database.ToolCache{
+		Name:          name,
+		Provider:      spec.Provider,
+		Package:       fallbackPackage(name, spec),
+		Installed:     true,
+		InstalledWith: fallbackInstalledWith(fallback),
+		Version:       sql.NullString{},
+		LastChecked:   time.Now(),
+	}); err != nil {
+		return err
+	}
+	return a.readDB().UpdateOutdated(ctx, name, spec.Provider, fallbackPackage(name, spec), false, "")
 }
 
 func (a *App) UninstallToolFallback(ctx context.Context, name string) error {
@@ -179,6 +212,36 @@ func (a *App) setToolFallbackStatus(name, status string) error {
 		cfg.Tools[name] = spec
 		return nil
 	})
+}
+
+func (a *App) automaticFallbackUsableForTool(name string, allowFailed bool) (bool, error) {
+	_, fallback, err := a.configuredFallback(name)
+	if err == nil {
+		return automaticFallbackUsable(fallback, allowFailed), nil
+	}
+	if strings.Contains(err.Error(), "has no fallback") {
+		return false, nil
+	}
+	return false, err
+}
+
+func automaticFallbackUsable(fallback *config.FallbackSpec, allowFailed bool) bool {
+	if fallback == nil {
+		return false
+	}
+	switch fallback.Status {
+	case config.FallbackStatusFailed:
+		if !allowFailed {
+			return false
+		}
+	case config.FallbackStatusUnresolved:
+		return false
+	}
+	return strings.TrimSpace(fallback.Commands.Install) != "" && strings.TrimSpace(fallback.Commands.Check) != ""
+}
+
+func fallbackLifecycleOwner(installedWith string) bool {
+	return installedWith == fallbackInstalledWithGitHub || installedWith == "fallback"
 }
 
 func fallbackInstalledWith(fallback *config.FallbackSpec) string {
