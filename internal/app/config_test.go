@@ -170,6 +170,48 @@ func TestSaveToolFallback_PersistsRecipeWithoutInstalling(t *testing.T) {
 	}
 }
 
+func TestSaveToolFallbackFromGitHubSpec_NormalizesSourceAndPersistsRecipe(t *testing.T) {
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("rg", "system")),
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	err := a.SaveToolFallbackFromGitHubSpec(context.Background(), "rg", "git@github.com:BurntSushi/ripgrep.git", config.FallbackSpec{
+		Status:         config.FallbackStatusUnverified,
+		Binary:         "rg",
+		BinDir:         "~/.local/share/omni/fallback/bin",
+		ReleaseChannel: "stable",
+		Recipe:         config.FallbackRecipe{Type: config.FallbackRecipeGitHubReleaseAsset, AssetPattern: "ripgrep-{version}-{os}-{arch}.tar.gz"},
+		Commands: config.FallbackCommands{
+			Install: "install rg",
+			Check:   "command -v rg",
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveToolFallbackFromGitHubSpec: %v", err)
+	}
+
+	got, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	fallback := got.Tools["rg"].Fallback
+	if fallback == nil {
+		t.Fatal("fallback was not persisted")
+	}
+	if fallback.Source.Type != config.FallbackSourceGitHub ||
+		fallback.Source.Owner != "BurntSushi" ||
+		fallback.Source.Repo != "ripgrep" ||
+		fallback.Source.URL != "https://github.com/BurntSushi/ripgrep" {
+		t.Fatalf("source = %+v, want normalized GitHub source", fallback.Source)
+	}
+	if fallback.Binary != "rg" || fallback.Commands.Install != "install rg" || fallback.Commands.Check != "command -v rg" {
+		t.Fatalf("fallback = %+v, want recipe preserved", fallback)
+	}
+}
+
 func TestSaveToolFallback_RejectsMissingTool(t *testing.T) {
 	a, _ := newImportApp(t, &stubProvider{name: "system", available: true})
 	err := a.SaveToolFallback(context.Background(), "ghost", config.FallbackSpec{
