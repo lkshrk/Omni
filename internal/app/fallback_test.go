@@ -598,6 +598,30 @@ func TestSaveToolFallbackFromGitHub_PersistsUnresolvedSource(t *testing.T) {
 	}
 }
 
+func TestSaveToolFallbackFromGitHub_NormalizesSSHRepoURL(t *testing.T) {
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("rg", "system")),
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if err := a.SaveToolFallbackFromGitHub(context.Background(), "rg", "git@github.com:BurntSushi/ripgrep.git"); err != nil {
+		t.Fatalf("SaveToolFallbackFromGitHub: %v", err)
+	}
+	got, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	fallback := got.Tools["rg"].Fallback
+	if fallback == nil {
+		t.Fatal("fallback missing")
+	}
+	if fallback.Source.Owner != "BurntSushi" || fallback.Source.Repo != "ripgrep" || fallback.Source.URL != "https://github.com/BurntSushi/ripgrep" {
+		t.Fatalf("fallback source = %+v, want normalized BurntSushi/ripgrep", fallback.Source)
+	}
+}
+
 func TestSaveToolFallbackFromGitHub_RejectsInvalidRepo(t *testing.T) {
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
