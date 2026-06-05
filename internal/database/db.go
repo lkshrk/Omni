@@ -58,6 +58,10 @@ type ToolMetadata struct {
 	Package         string         `bun:"package,notnull"`
 	Version         sql.NullString `bun:"version"`
 	Description     sql.NullString `bun:"description"`
+	SourceType      string         `bun:"source_type,notnull,default:''"`
+	SourceOwner     string         `bun:"source_owner,notnull,default:''"`
+	SourceRepo      string         `bun:"source_repo,notnull,default:''"`
+	SourceURL       sql.NullString `bun:"source_url"`
 	Privilege       string         `bun:"privilege,notnull,default:''"`
 	PrivilegeReason sql.NullString `bun:"privilege_reason"`
 	UpdatedAt       time.Time      `bun:"updated_at,notnull"`
@@ -135,6 +139,10 @@ type MetadataUpdate struct {
 	Package         string
 	Version         string
 	Description     string
+	SourceType      string
+	SourceOwner     string
+	SourceRepo      string
+	SourceURL       string
 	Privilege       string
 	PrivilegeReason string
 }
@@ -289,6 +297,23 @@ func (db *DB) Migrate(ctx context.Context) error {
 		{"privilege_at", "DATETIME"},
 	} {
 		if err := addCol(c.col, c.def); err != nil {
+			return err
+		}
+	}
+	addMetaCol := func(col, def string) error {
+		_, e := db.bun.ExecContext(ctx, "ALTER TABLE tool_metadata ADD COLUMN "+col+" "+def)
+		if e != nil && !strings.Contains(e.Error(), "duplicate column") && !strings.Contains(e.Error(), "already has column") {
+			return fmt.Errorf("adding metadata column %s: %w", col, e)
+		}
+		return nil
+	}
+	for _, c := range []struct{ col, def string }{
+		{"source_type", "TEXT NOT NULL DEFAULT ''"},
+		{"source_owner", "TEXT NOT NULL DEFAULT ''"},
+		{"source_repo", "TEXT NOT NULL DEFAULT ''"},
+		{"source_url", "TEXT"},
+	} {
+		if err := addMetaCol(c.col, c.def); err != nil {
 			return err
 		}
 	}
@@ -450,19 +475,37 @@ func (db *DB) UpsertMetadataBatch(ctx context.Context, updates []MetadataUpdate)
 			}
 			version := sql.NullString{String: u.Version, Valid: u.Version != ""}
 			description := sql.NullString{String: u.Description, Valid: u.Description != ""}
+			sourceURL := sql.NullString{String: u.SourceURL, Valid: u.SourceURL != ""}
 			privilegeReason := sql.NullString{String: u.PrivilegeReason, Valid: u.PrivilegeReason != ""}
 			if _, err := tx.ExecContext(ctx,
 				`INSERT INTO tool_metadata (
 				     name, provider, package, version, description,
+				     source_type, source_owner, source_repo, source_url,
 				     privilege, privilege_reason, updated_at
 				 )
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				 ON CONFLICT (name, provider, package) DO UPDATE SET
 				     description = CASE
 				         WHEN EXCLUDED.description IS NOT NULL AND EXCLUDED.description != '' THEN EXCLUDED.description
 				         ELSE tool_metadata.description
 				     END,
 				     version = CASE WHEN EXCLUDED.version IS NOT NULL THEN EXCLUDED.version ELSE tool_metadata.version END,
+				     source_type = CASE
+				         WHEN EXCLUDED.source_type != '' THEN EXCLUDED.source_type
+				         ELSE tool_metadata.source_type
+				     END,
+				     source_owner = CASE
+				         WHEN EXCLUDED.source_type != '' THEN EXCLUDED.source_owner
+				         ELSE tool_metadata.source_owner
+				     END,
+				     source_repo = CASE
+				         WHEN EXCLUDED.source_type != '' THEN EXCLUDED.source_repo
+				         ELSE tool_metadata.source_repo
+				     END,
+				     source_url = CASE
+				         WHEN EXCLUDED.source_url IS NOT NULL AND EXCLUDED.source_url != '' THEN EXCLUDED.source_url
+				         ELSE tool_metadata.source_url
+				     END,
 				     privilege = CASE
 				         WHEN EXCLUDED.privilege != '' THEN EXCLUDED.privilege
 				         ELSE tool_metadata.privilege
@@ -472,7 +515,9 @@ func (db *DB) UpsertMetadataBatch(ctx context.Context, updates []MetadataUpdate)
 				         ELSE tool_metadata.privilege_reason
 				     END,
 				     updated_at = EXCLUDED.updated_at`,
-				u.Name, u.Provider, u.Package, version, description, u.Privilege, privilegeReason, now); err != nil {
+				u.Name, u.Provider, u.Package, version, description,
+				u.SourceType, u.SourceOwner, u.SourceRepo, sourceURL,
+				u.Privilege, privilegeReason, now); err != nil {
 				return fmt.Errorf("upserting metadata for %s/%s: %w", u.Provider, u.Name, err)
 			}
 		}

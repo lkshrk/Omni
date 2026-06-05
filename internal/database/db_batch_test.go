@@ -88,6 +88,33 @@ func TestUpsertBatch_UpdatesExistingRows(t *testing.T) {
 	}
 }
 
+func TestUpsertMetadataBatch_StoresSourceHints(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+
+	if err := db.UpsertMetadataBatch(ctx, []database.MetadataUpdate{{
+		Name:        "ripgrep",
+		Provider:    "system",
+		Package:     "ripgrep",
+		SourceType:  "github",
+		SourceOwner: "BurntSushi",
+		SourceRepo:  "ripgrep",
+		SourceURL:   "https://github.com/BurntSushi/ripgrep",
+	}}); err != nil {
+		t.Fatalf("UpsertMetadataBatch: %v", err)
+	}
+	meta, err := db.GetMetadata(ctx, "ripgrep", "system", "ripgrep")
+	if err != nil {
+		t.Fatalf("GetMetadata: %v", err)
+	}
+	if meta.SourceType != "github" || meta.SourceOwner != "BurntSushi" || meta.SourceRepo != "ripgrep" {
+		t.Fatalf("source hint = %s/%s/%s, want github/BurntSushi/ripgrep", meta.SourceType, meta.SourceOwner, meta.SourceRepo)
+	}
+	if !meta.SourceURL.Valid || meta.SourceURL.String != "https://github.com/BurntSushi/ripgrep" {
+		t.Fatalf("SourceURL = %+v, want GitHub URL", meta.SourceURL)
+	}
+}
+
 func TestUpsertBatch_PreservesFailureStateWhenStillMissing(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)

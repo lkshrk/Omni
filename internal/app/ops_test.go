@@ -1236,6 +1236,12 @@ func TestSearch_CachesResultMetadata(t *testing.T) {
 				Requirement: provider.PrivilegeMaybe,
 				Reason:      "cask may run installer package",
 			},
+			Source: provider.SourceMetadata{
+				Type:  provider.SourceTypeGitHub,
+				Owner: "BurntSushi",
+				Repo:  "ripgrep",
+				URL:   "https://github.com/BurntSushi/ripgrep",
+			},
 		}},
 	}
 	a, _ := newImportApp(t, s)
@@ -1260,6 +1266,9 @@ func TestSearch_CachesResultMetadata(t *testing.T) {
 	}
 	if meta.Privilege != string(provider.PrivilegeMaybe) {
 		t.Fatalf("metadata privilege = %q, want maybe", meta.Privilege)
+	}
+	if meta.SourceType != provider.SourceTypeGitHub || meta.SourceOwner != "BurntSushi" || meta.SourceRepo != "ripgrep" {
+		t.Fatalf("metadata source = %s/%s/%s, want github/BurntSushi/ripgrep", meta.SourceType, meta.SourceOwner, meta.SourceRepo)
 	}
 
 	tools, err := a.ListTools(ctx, "")
