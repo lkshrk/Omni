@@ -63,6 +63,8 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 	for _, t := range resolvedDetailed {
 		resolvedTools = append(resolvedTools, t.entry)
 	}
+	var fallbackOps []isync.SyncOp
+	resolvedTools, fallbackOps = a.syncNativeUnavailableFallbacks(ctx, resolvedTools, opts)
 	taps := collectResolvedTaps(resolvedDetailed)
 	if err = a.syncTaps(ctx, taps, opts.DryRun); err != nil {
 		return nil, err
@@ -122,6 +124,7 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 	} else {
 		result = mergeProviderResults(result, pass2, providerTools)
 	}
+	result.Ops = append(result.Ops, fallbackOps...)
 	result.Warnings = append(result.Warnings, warnings...)
 
 	if !opts.DryRun {
@@ -147,6 +150,91 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 		}
 	}
 	return result, nil
+}
+
+func (a *App) syncNativeUnavailableFallbacks(ctx context.Context, tools []config.ToolEntry, opts isync.SyncOptions) ([]config.ToolEntry, []isync.SyncOp) {
+	filtered := make([]config.ToolEntry, 0, len(tools))
+	var ops []isync.SyncOp
+	for _, entry := range tools {
+		opProvider := a.operationProviderName(entry)
+		prov, ok := a.registry.Get(opProvider)
+		if !ok {
+			filtered = append(filtered, entry)
+			continue
+		}
+		unavailable, availabilityProvider, reason, err := a.nativePackageUnavailable(ctx, entry, prov, opProvider)
+		if err != nil || !unavailable {
+			filtered = append(filtered, entry)
+			continue
+		}
+		tool := provider.Tool{Name: entry.Name, Provider: entry.Provider, Package: entry.EffectivePackage(), Options: entry.Options}
+		if opts.RetryFailed && !a.cachedFailureExists(ctx, entry) {
+			filtered = append(filtered, entry)
+			continue
+		}
+		fallbackUsable, fallbackErr := a.automaticFallbackUsableForTool(entry.Name, opts.RetryFailed)
+		if fallbackErr != nil {
+			ops = append(ops, isync.SyncOp{Tool: tool, Kind: isync.OpFailed, Err: fallbackErr})
+			continue
+		}
+		if !fallbackUsable {
+			msg := fmt.Sprintf("native package %s is unavailable from %s", entry.EffectivePackage(), availabilityProvider)
+			if strings.TrimSpace(reason) != "" {
+				msg += ": " + strings.TrimSpace(reason)
+			}
+			ops = append(ops, isync.SyncOp{Tool: tool, Kind: isync.OpFailed, Err: fmt.Errorf("%s; edit fallback before retrying", msg)})
+			continue
+		}
+		if opts.DryRun {
+			ops = append(ops, isync.SyncOp{Tool: tool, Kind: isync.OpInstall})
+			continue
+		}
+		if installed, version := a.fallbackInstalledCached(ctx, entry); installed {
+			ops = append(ops, isync.SyncOp{Tool: tool, Kind: isync.OpAlreadyInstalled, Version: version})
+			continue
+		}
+		if opts.Progress != nil {
+			opts.Progress("installing " + entry.Name + " with fallback…")
+		}
+		if opts.ToolProgress != nil {
+			opts.ToolProgress(isync.ProgressEvent{Tool: tool, Message: "Installing " + entry.Name + " with fallback…"})
+		}
+		if err := a.InstallToolFallback(ctx, entry.Name); err != nil {
+			ops = append(ops, isync.SyncOp{Tool: tool, Kind: isync.OpFailed, Err: err})
+			if markErr := a.readDB().MarkFailed(ctx, entry.Name, entry.Provider, entry.EffectivePackage(), err.Error()); markErr != nil {
+				ops[len(ops)-1].Err = fmt.Errorf("%w (failed to record fallback failure: %v)", err, markErr)
+			}
+			if opts.ToolProgress != nil {
+				opts.ToolProgress(isync.ProgressEvent{Tool: tool, Message: "Failed installing " + entry.Name + " with fallback", Err: err, Done: true})
+			}
+			continue
+		}
+		ops = append(ops, isync.SyncOp{Tool: tool, Kind: isync.OpInstall})
+		if opts.ToolProgress != nil {
+			opts.ToolProgress(isync.ProgressEvent{Tool: tool, Message: "Installed " + entry.Name + " with fallback", Done: true})
+		}
+	}
+	return filtered, ops
+}
+
+func (a *App) cachedFailureExists(ctx context.Context, entry config.ToolEntry) bool {
+	cached, err := a.readDB().Get(ctx, entry.Name, entry.Provider, entry.EffectivePackage())
+	return err == nil && cached != nil && cached.FailedAt != nil
+}
+
+func (a *App) fallbackInstalledCached(ctx context.Context, entry config.ToolEntry) (bool, string) {
+	cached, err := a.readDB().Get(ctx, entry.Name, entry.Provider, entry.EffectivePackage())
+	if err != nil || cached == nil || !cached.Installed || !fallbackLifecycleOwner(cached.InstalledWith) {
+		return false, ""
+	}
+	installed, err := a.CheckToolFallback(ctx, entry.Name)
+	if err != nil || !installed {
+		return false, ""
+	}
+	if cached.Version.Valid {
+		return true, cached.Version.String
+	}
+	return true, ""
 }
 
 func (a *App) SyncWithState(ctx context.Context, opts isync.SyncOptions) (*SyncStateResult, error) {
@@ -466,6 +554,22 @@ func (a *App) Install(ctx context.Context, name, providerName string) error {
 			return fmt.Errorf("provider %q is not available on this system", opProvider)
 		}
 		tool := a.operationTool(t, opProvider)
+		if unavailable, availabilityProvider, reason, err := a.nativePackageUnavailable(ctx, t, prov, opProvider); err != nil {
+			return err
+		} else if unavailable {
+			fallbackUsable, err := a.automaticFallbackUsableForTool(t.Name, false)
+			if err != nil {
+				return err
+			}
+			if fallbackUsable {
+				return a.InstallToolFallback(ctx, t.Name)
+			}
+			msg := fmt.Sprintf("native package %s is unavailable from %s", t.EffectivePackage(), availabilityProvider)
+			if strings.TrimSpace(reason) != "" {
+				msg += ": " + strings.TrimSpace(reason)
+			}
+			return fmt.Errorf("%s; edit fallback before retrying", msg)
+		}
 		if err := installWithProvider(ctx, prov, tool, t.InstallWith); err != nil {
 			a.recordPrivilegeError(ctx, t.Name, t.Provider, t.EffectivePackage(), err)
 			return err
@@ -524,6 +628,21 @@ func (a *App) Install(ctx context.Context, name, providerName string) error {
 		Version:       sql.NullString{String: ver, Valid: ver != ""},
 		LastChecked:   time.Now(),
 	})
+}
+
+func (a *App) nativePackageUnavailable(ctx context.Context, t config.ToolEntry, prov provider.Provider, opProvider string) (bool, string, string, error) {
+	availabilityProvider := installedWithForOperation(ctx, prov, opProvider, t.InstallWith)
+	if availabilityProvider == "" {
+		availabilityProvider = opProvider
+	}
+	availability, err := a.readDB().GetPackageAvailability(ctx, t.Name, availabilityProvider, t.EffectivePackage())
+	if err == nil {
+		return !availability.Available, availabilityProvider, availability.Reason, nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, availabilityProvider, "", nil
+	}
+	return false, availabilityProvider, "", err
 }
 
 func (a *App) InstallWithState(ctx context.Context, name, providerName string) (*ToolGroupMutationState, error) {
@@ -628,6 +747,12 @@ func (a *App) Uninstall(ctx context.Context, name, providerName string) error {
 		}
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("load cached install owner for %s/%s: %w", providerName, name, err)
+	}
+	if fallbackLifecycleOwner(installedWith) {
+		if err := a.UninstallToolFallback(ctx, name); err != nil {
+			return err
+		}
+		return a.removeToolFromConfig(name, providerName)
 	}
 	prov, opProvider, manager, ok := a.lifecycleProvider(providerName, installedWith)
 	if !ok {
@@ -781,6 +906,9 @@ func (a *App) UpgradeWithOptions(ctx context.Context, name, providerName string,
 		}
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("load cached install owner for %s/%s: %w", providerName, name, err)
+	}
+	if fallbackLifecycleOwner(installedWith) {
+		return a.UpgradeToolFallback(ctx, name)
 	}
 	if !opts.Force && cached != nil {
 		cfg, cfgErr := a.loadConfig()
