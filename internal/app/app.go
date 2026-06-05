@@ -41,9 +41,10 @@ type App struct {
 	CacheDir   string // where omni.db lives; derived from XDG_CACHE_HOME when empty
 	DBPath     string
 
-	db       *database.DB
-	registry *provider.Registry
-	testMode bool
+	db           *database.DB
+	registry     *provider.Registry
+	fallbackExec executor.Executor
+	testMode     bool
 
 	// configMu serialises all read-modify-write cycles on settings.json. Held
 	// for the duration of withConfig; read-only loadConfig calls do not need it.
@@ -243,6 +244,7 @@ func (a *App) InitReadOnly(_ context.Context) error {
 
 func (a *App) initProviderRegistry(settings config.Settings) {
 	exec := executor.New()
+	a.fallbackExec = exec
 	a.registry = provider.NewRegistry()
 
 	// concrete providers — always registered regardless of disabled_providers.
