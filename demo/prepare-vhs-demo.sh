@@ -165,7 +165,7 @@ JSON
     ;;
   info)
     cat <<'JSON'
-{"formulae":[{"name":"ripgrep","full_name":"ripgrep","desc":"fast recursive search","installed":[{"version":"14.1.1","installed_on_request":true}]},{"name":"git","full_name":"git","desc":"distributed version control","installed":[{"version":"2.49.0","installed_on_request":true}]},{"name":"fd","full_name":"fd","desc":"friendly find replacement","installed":[]},{"name":"kubectl","full_name":"kubectl","desc":"Kubernetes CLI","installed":[{"version":"1.32.0","installed_on_request":true}]},{"name":"terraform","full_name":"terraform","desc":"Infrastructure as code","installed":[]},{"name":"jq","full_name":"jq","desc":"JSON processor","installed":[{"version":"1.8.0","installed_on_request":true}]},{"name":"bat","full_name":"bat","desc":"better cat","installed":[{"version":"0.24.0","installed_on_request":true}]},{"name":"fzf","full_name":"fzf","desc":"fuzzy finder","installed":[{"version":"0.56.0","installed_on_request":true}]},{"name":"helm","full_name":"helm","desc":"Kubernetes package manager","installed":[]},{"name":"docker","full_name":"docker","desc":"container runtime","installed":[{"version":"27.3.1","installed_on_request":true}]},{"name":"gh","full_name":"gh","desc":"GitHub CLI","installed":[{"version":"2.66.0","installed_on_request":true}]},{"name":"awscli","full_name":"awscli","desc":"AWS CLI tooling","installed":[]},{"name":"go","full_name":"go","desc":"Go toolchain","installed":[{"version":"1.23.6","installed_on_request":true}]},{"name":"htop","full_name":"htop","desc":"interactive process viewer","installed":[{"version":"3.3.0","installed_on_request":true}]},{"name":"starship","full_name":"starship","desc":"shell prompt","installed":[{"version":"1.22.0","installed_on_request":true}]}],"casks":[{"token":"slack","desc":"team chat","installed":"4.37.101"},{"token":"parsec","desc":"low-latency remote desktop","installed":"150-95","artifacts":[{"pkg":["Parsec.pkg"]},{"uninstall":{"pkgutil":"com.parsec.Parsec"}}]},{"token":"zoom","desc":"video meetings","installed":"6.1.0"}]}
+{"formulae":[{"name":"ripgrep","full_name":"ripgrep","desc":"fast recursive search","installed":[{"version":"14.1.1","installed_on_request":true}]},{"name":"git","full_name":"git","desc":"distributed version control","installed":[{"version":"2.49.0","installed_on_request":true}]},{"name":"fd","full_name":"fd","desc":"friendly find replacement","installed":[]},{"name":"kubectl","full_name":"kubectl","desc":"Kubernetes CLI","installed":[{"version":"1.32.0","installed_on_request":true}]},{"name":"terraform","full_name":"terraform","desc":"Infrastructure as code","installed":[]},{"name":"jq","full_name":"jq","desc":"JSON processor","installed":[{"version":"1.8.0","installed_on_request":true}]},{"name":"bat","full_name":"bat","desc":"better cat","installed":[{"version":"0.24.0","installed_on_request":true}]},{"name":"fzf","full_name":"fzf","desc":"fuzzy finder","installed":[{"version":"0.56.0","installed_on_request":true}]},{"name":"helm","full_name":"helm","desc":"Kubernetes package manager","installed":[]},{"name":"gh","full_name":"gh","desc":"GitHub CLI","installed":[{"version":"2.66.0","installed_on_request":true}]},{"name":"awscli","full_name":"awscli","desc":"AWS CLI tooling","installed":[]},{"name":"go","full_name":"go","desc":"Go toolchain","installed":[{"version":"1.23.6","installed_on_request":true}]},{"name":"htop","full_name":"htop","desc":"interactive process viewer","installed":[{"version":"3.3.0","installed_on_request":true}]},{"name":"starship","full_name":"starship","desc":"shell prompt","installed":[{"version":"1.22.0","installed_on_request":true}]}],"casks":[{"token":"slack","desc":"team chat","installed":"4.37.101"},{"token":"parsec","desc":"low-latency remote desktop","installed":"150-95","artifacts":[{"pkg":["Parsec.pkg"]},{"uninstall":{"pkgutil":"com.parsec.Parsec"}}]},{"token":"zoom","desc":"video meetings","installed":"6.1.0"},{"token":"docker-desktop","desc":"Docker Desktop","installed":"4.76.0"}]}
 JSON
     ;;
   search)
@@ -181,6 +181,13 @@ JSON
     esac
     ;;
   list)
+    if [ "${2:-}" = "--cask" ]; then
+      echo "slack"
+      echo "parsec"
+      echo "zoom"
+      echo "docker-desktop"
+      exit 0
+    fi
     name="${@: -1}"
     case "$name" in
       ripgrep) echo "ripgrep 14.1.1" ;;
@@ -189,7 +196,7 @@ JSON
       jq) echo "jq 1.8.0" ;;
       bat) echo "bat 0.24.0" ;;
       fzf) echo "fzf 0.56.0" ;;
-      docker) echo "docker 27.3.1" ;;
+      docker-desktop) echo "docker-desktop 4.76.0" ;;
       gh) echo "gh 2.66.0" ;;
       go) echo "go 1.23.6" ;;
       htop) echo "htop 3.3.0" ;;
@@ -447,7 +454,7 @@ cat > "$root/settings.json" <<EOF
     "jq": { "provider": "system", "package": "jq" },
     "bat": { "provider": "system", "package": "bat" },
     "fzf": { "provider": "system", "package": "fzf" },
-    "docker": { "provider": "system", "package": "docker" },
+    "docker": { "provider": "system", "package": "docker-desktop" },
     "gh": { "provider": "system", "package": "gh" },
     "go": { "provider": "system", "package": "go" },
     "starship": { "provider": "system", "package": "starship" }
@@ -616,7 +623,7 @@ VALUES
   ('jq', 'system', 'jq', 1, 'brew', '1.8.0', 0, NULL, 'JSON processor', CURRENT_TIMESTAMP, 1),
   ('bat', 'system', 'bat', 1, 'brew', '0.24.0', 0, NULL, 'better cat', CURRENT_TIMESTAMP, 1),
   ('fzf', 'system', 'fzf', 1, 'brew', '0.56.0', 0, NULL, 'fuzzy finder', CURRENT_TIMESTAMP, 1),
-  ('docker', 'system', 'docker', 1, 'brew', '27.3.1', 0, NULL, 'container runtime', CURRENT_TIMESTAMP, 1),
+  ('docker', 'system', 'docker-desktop', 1, 'brew', '4.76.0', 0, NULL, 'Docker Desktop', CURRENT_TIMESTAMP, 1),
   ('gh', 'system', 'gh', 1, 'brew', '2.66.0', 0, NULL, 'GitHub CLI', CURRENT_TIMESTAMP, 1),
   ('go', 'system', 'go', 1, 'brew', '1.23.6', 0, NULL, 'Go toolchain', CURRENT_TIMESTAMP, 1),
   ('starship', 'system', 'starship', 1, 'brew', '1.22.0', 0, NULL, 'shell prompt', CURRENT_TIMESTAMP, 1),
