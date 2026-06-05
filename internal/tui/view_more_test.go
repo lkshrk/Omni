@@ -3942,18 +3942,33 @@ func TestToolInlineHints_NativeInstalledSystemToolHidesFallback(t *testing.T) {
 }
 
 func TestRenderList_ConfiguredGitHubFallbackShowsGHStatus(t *testing.T) {
-	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: false, Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
-	m.toolFallbacks = map[string]config.FallbackSpec{
-		"rg": {
-			Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
-			Status: config.FallbackStatusUnresolved,
-		},
+	tests := []struct {
+		name   string
+		status string
+		want   string
+	}{
+		{name: "verified", status: config.FallbackStatusVerified, want: "system(gh)"},
+		{name: "unverified", status: config.FallbackStatusUnverified, want: "system(gh?)"},
+		{name: "unresolved", status: config.FallbackStatusUnresolved, want: "system(gh!)"},
+		{name: "failed", status: config.FallbackStatusFailed, want: "system(gh!)"},
 	}
 
-	out := stripANSIEscapeSequences(renderList(m))
-	if !strings.Contains(out, "system(gh?)") {
-		t.Fatalf("rendered list = %q, want system(gh?)", out)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: false, Tracked: true}
+			m := baseModel([]*database.ToolCache{tool})
+			m.toolFallbacks = map[string]config.FallbackSpec{
+				"rg": {
+					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+					Status: tt.status,
+				},
+			}
+
+			out := stripANSIEscapeSequences(renderList(m))
+			if !strings.Contains(out, tt.want) {
+				t.Fatalf("rendered list = %q, want %s", out, tt.want)
+			}
+		})
 	}
 }
 

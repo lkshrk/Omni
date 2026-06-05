@@ -139,7 +139,7 @@ func fallbackConcreteLabel(fallback config.FallbackSpec) string {
 	switch fallback.Status {
 	case config.FallbackStatusVerified:
 		return "gh"
-	case config.FallbackStatusFailed:
+	case config.FallbackStatusUnresolved, config.FallbackStatusFailed:
 		return "gh!"
 	default:
 		return "gh?"
