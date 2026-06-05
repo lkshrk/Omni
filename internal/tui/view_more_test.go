@@ -4053,6 +4053,45 @@ func TestOpenFallbackEditor_PrefillsExistingRecipe(t *testing.T) {
 	}
 }
 
+func TestFallbackEditorKeyboardNavigationPersistsActiveField(t *testing.T) {
+	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: false, Tracked: true}
+	m := baseModel([]*database.ToolCache{tool})
+	if cmd := m.openFallbackEditor(tool); cmd == nil {
+		t.Fatal("openFallbackEditor returned nil command")
+	}
+	m.settingsInput.SetValue("BurntSushi/ripgrep")
+
+	var tm tea.Model = m
+	tm, _ = tm.Update(pressTab())
+	got := tm.(Model)
+	if got.mode != viewFallbackEditor {
+		t.Fatalf("mode after tab = %v, want fallback editor", got.mode)
+	}
+	if got.fallbackEditor.cursor != 1 {
+		t.Fatalf("cursor after tab = %d, want binary field", got.fallbackEditor.cursor)
+	}
+	if got.fallbackEditor.fields[fallbackFieldRepo] != "BurntSushi/ripgrep" {
+		t.Fatalf("repo field = %q, want persisted active field", got.fallbackEditor.fields[fallbackFieldRepo])
+	}
+	if got.settingsInput.Value() != "rg" {
+		t.Fatalf("binary input = %q, want rg", got.settingsInput.Value())
+	}
+
+	got.settingsInput.SetValue("ripgrep")
+	tm = got
+	tm, _ = tm.Update(pressShiftTab())
+	got = tm.(Model)
+	if got.fallbackEditor.cursor != 0 {
+		t.Fatalf("cursor after shift+tab = %d, want repo field", got.fallbackEditor.cursor)
+	}
+	if got.fallbackEditor.fields[fallbackFieldBinary] != "ripgrep" {
+		t.Fatalf("binary field = %q, want persisted edited binary", got.fallbackEditor.fields[fallbackFieldBinary])
+	}
+	if got.settingsInput.Value() != "BurntSushi/ripgrep" {
+		t.Fatalf("repo input = %q, want previous repo", got.settingsInput.Value())
+	}
+}
+
 func hasHint(hints []hintItem, key, desc string) bool {
 	for _, hint := range hints {
 		if hint.key == key && hint.desc == desc {

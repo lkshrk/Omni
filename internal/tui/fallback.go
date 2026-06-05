@@ -86,12 +86,12 @@ func (m *Model) handleFallbackEditorKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		m.closeFallbackEditor()
 		return nil
 	}
-	if msg.Code == tea.KeyTab {
-		m.moveFallbackEditorCursor(1)
+	if msg.Code == tea.KeyTab && (msg.Mod.Contains(tea.ModShift) || msg.String() == "shift+tab") {
+		m.moveFallbackEditorCursor(-1)
 		return nil
 	}
-	if msg.String() == "shift+tab" {
-		m.moveFallbackEditorCursor(-1)
+	if msg.Code == tea.KeyTab {
+		m.moveFallbackEditorCursor(1)
 		return nil
 	}
 	if key.Matches(msg, m.keys.Up) {

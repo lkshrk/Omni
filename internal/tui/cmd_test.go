@@ -491,6 +491,32 @@ func TestDoSaveFallbackEditor_PersistsStructuredRecipe(t *testing.T) {
 	}
 }
 
+func TestDoSaveFallbackEditor_InvalidRepoReturnsError(t *testing.T) {
+	prov := &okProvider{name: "apt"}
+	a, _ := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("rg", "apt")})
+	m := modelForCmds(a)
+	m.fallbackEditor = fallbackEditorState{
+		fields: map[fallbackEditorFieldID]string{
+			fallbackFieldRepo:           "not-a-repo",
+			fallbackFieldBinary:         "rg",
+			fallbackFieldInstallCommand: "install rg",
+			fallbackFieldCheckCommand:   "command -v rg",
+		},
+	}
+
+	msg := m.doSaveFallbackEditor("rg")()
+	got, ok := msg.(fallbackSavedMsg)
+	if !ok {
+		t.Fatalf("expected fallbackSavedMsg, got %T", msg)
+	}
+	if got.err == nil || !strings.Contains(got.err.Error(), "github repo must be owner/repo") {
+		t.Fatalf("doSaveFallbackEditor err = %v, want invalid repo", got.err)
+	}
+	if len(got.toolFallbacks) != 0 {
+		t.Fatalf("toolFallbacks = %+v, want none on invalid repo", got.toolFallbacks)
+	}
+}
+
 func TestDoDelete_RefreshesToolMembershipState(t *testing.T) {
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
