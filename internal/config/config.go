@@ -10,7 +10,26 @@ import (
 
 // CurrentVersion is the latest settings.json format version understood by omni.
 // Version 0 is the legacy unversioned format.
-const CurrentVersion = 2
+const CurrentVersion = 3
+
+const (
+	// FallbackSourceGitHub identifies a fallback recipe sourced from a GitHub repository.
+	FallbackSourceGitHub = "github"
+
+	// FallbackStatusUnresolved means a source is known but no usable recipe exists yet.
+	FallbackStatusUnresolved = "unresolved"
+	// FallbackStatusUnverified means a recipe exists but has not completed successfully.
+	FallbackStatusUnverified = "unverified"
+	// FallbackStatusVerified means a recipe completed and its check command passed.
+	FallbackStatusVerified = "verified"
+	// FallbackStatusFailed means a recipe was attempted and failed.
+	FallbackStatusFailed = "failed"
+
+	// FallbackRecipeGitHubReleaseAsset installs from a matched GitHub release asset.
+	FallbackRecipeGitHubReleaseAsset = "github_release_asset"
+	// FallbackRecipeRawCommands runs user-editable shell commands.
+	FallbackRecipeRawCommands = "raw_commands"
+)
 
 // ToolEntry is the resolved execution form for a logical tool.
 //
@@ -86,6 +105,50 @@ func (s ToolInstallSpec) EffectivePackage(logicalName string) string {
 	return logicalName
 }
 
+// FallbackSource describes where a fallback recipe came from.
+type FallbackSource struct {
+	Type  string `json:"type"`
+	Owner string `json:"owner,omitempty"`
+	Repo  string `json:"repo,omitempty"`
+	URL   string `json:"url,omitempty"`
+}
+
+// FallbackRecipe describes structured metadata used to build install commands.
+type FallbackRecipe struct {
+	Type         string `json:"type,omitempty"`
+	AssetPattern string `json:"asset_pattern,omitempty"`
+	BinaryPath   string `json:"binary_path,omitempty"`
+	Checksum     string `json:"checksum,omitempty"`
+}
+
+// FallbackPlatform overrides release-asset matching for one OS/architecture key.
+type FallbackPlatform struct {
+	AssetPattern string `json:"asset_pattern,omitempty"`
+	BinaryPath   string `json:"binary_path,omitempty"`
+	Checksum     string `json:"checksum,omitempty"`
+}
+
+// FallbackCommands contains user-editable shell commands for fallback lifecycle actions.
+type FallbackCommands struct {
+	Install   string `json:"install,omitempty"`
+	Check     string `json:"check,omitempty"`
+	Uninstall string `json:"uninstall,omitempty"`
+	Upgrade   string `json:"upgrade,omitempty"`
+	Version   string `json:"version,omitempty"`
+}
+
+// FallbackSpec defines a best-effort non-provider install recipe for a system tool.
+type FallbackSpec struct {
+	Source         FallbackSource              `json:"source"`
+	Status         string                      `json:"status,omitempty"`
+	Binary         string                      `json:"binary,omitempty"`
+	BinDir         string                      `json:"bin_dir,omitempty"`
+	ReleaseChannel string                      `json:"release_channel,omitempty"`
+	Recipe         FallbackRecipe              `json:"recipe,omitempty"`
+	Platforms      map[string]FallbackPlatform `json:"platforms,omitempty"`
+	Commands       FallbackCommands            `json:"commands,omitempty"`
+}
+
 // ToolSpec defines one logical tool and its default install spec.
 type ToolSpec struct {
 	Provider    string                     `json:"provider"`
@@ -97,6 +160,7 @@ type ToolSpec struct {
 	Ignore      bool                       `json:"ignore,omitempty"`
 	Variants    []ToolInstallSpec          `json:"variants,omitempty"`
 	Hosts       map[string]ToolInstallSpec `json:"hosts,omitempty"`
+	Fallback    *FallbackSpec              `json:"fallback,omitempty"`
 }
 
 // DefaultInstallSpec returns the default install candidate for this logical tool.
@@ -161,6 +225,8 @@ type Settings struct {
 	// Ecosystems holds settings for portable ecosystem providers such as system,
 	// node, and python.
 	Ecosystems map[string]EcosystemSettings `json:"ecosystems,omitempty"`
+	// FallbackBinDir is the default directory for fallback-installed binaries.
+	FallbackBinDir string `json:"fallback_bin_dir,omitempty"`
 	// DotsRepo is the per-machine path to the dotfiles git repository.
 	DotsRepo string `json:"dots_repo,omitempty"`
 	// DotsDisabled is true when the user has explicitly opted out of dotfile sync
@@ -481,6 +547,7 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 			errs = append(errs, ValidationError{Path: "$.tools", Message: "tool name is required"})
 		}
 		errs = append(errs, validateInstall(path, spec.DefaultInstallSpec())...)
+		errs = append(errs, validateFallback(path+".fallback", spec.Provider, spec.Fallback)...)
 		for i, variant := range spec.Variants {
 			errs = append(errs, validateInstall(fmt.Sprintf("%s.variants[%d]", path, i), variant)...)
 		}
@@ -636,6 +703,40 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 		if strings.TrimSpace(ignored) == "" {
 			errs = append(errs, ValidationError{Path: fmt.Sprintf("$.ignore.dots[%d]", i), Message: "dotfile name is required"})
 		}
+	}
+	return errs
+}
+
+func validateFallback(path, provider string, fallback *FallbackSpec) []ValidationError {
+	if fallback == nil {
+		return nil
+	}
+	var errs []ValidationError
+	if provider != "system" {
+		errs = append(errs, ValidationError{Path: path, Message: "fallback is only supported for system tools"})
+	}
+	switch fallback.Source.Type {
+	case "":
+		errs = append(errs, ValidationError{Path: path + ".source.type", Message: "fallback source type is required"})
+	case FallbackSourceGitHub:
+		if strings.TrimSpace(fallback.Source.Owner) == "" || strings.TrimSpace(fallback.Source.Repo) == "" {
+			errs = append(errs, ValidationError{Path: path + ".source", Message: "github fallback source requires owner and repo"})
+		}
+	default:
+		errs = append(errs, ValidationError{Path: path + ".source.type", Message: fmt.Sprintf("unknown fallback source type %q", fallback.Source.Type)})
+	}
+
+	status := fallback.Status
+	if status == "" {
+		status = FallbackStatusUnverified
+	}
+	switch status {
+	case FallbackStatusUnresolved, FallbackStatusUnverified, FallbackStatusVerified, FallbackStatusFailed:
+	default:
+		errs = append(errs, ValidationError{Path: path + ".status", Message: fmt.Sprintf("unknown fallback status %q", fallback.Status)})
+	}
+	if status != FallbackStatusUnresolved && strings.TrimSpace(fallback.Commands.Check) == "" {
+		errs = append(errs, ValidationError{Path: path + ".commands.check", Message: "fallback check command is required unless status is unresolved"})
 	}
 	return errs
 }

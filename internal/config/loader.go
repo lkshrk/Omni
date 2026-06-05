@@ -244,6 +244,7 @@ type configMigration struct {
 var configMigrations = []configMigration{
 	{from: 0, to: 1, apply: migrateConfigV0ToV1, applyRaw: migrateRawConfigV0ToV1},
 	{from: 1, to: 2, apply: migrateConfigV1ToV2, applyRaw: migrateRawConfigV1ToV2},
+	{from: 2, to: 3, apply: migrateConfigV2ToV3, applyRaw: migrateRawConfigV2ToV3},
 }
 
 func configMigrationFrom(version int) (configMigration, bool) {
@@ -272,6 +273,16 @@ func migrateConfigV1ToV2(cfg *RootConfig) error {
 
 func migrateRawConfigV1ToV2(raw map[string]json.RawMessage) error {
 	raw["version"] = json.RawMessage(`2`)
+	return nil
+}
+
+func migrateConfigV2ToV3(cfg *RootConfig) error {
+	cfg.Version = 3
+	return nil
+}
+
+func migrateRawConfigV2ToV3(raw map[string]json.RawMessage) error {
+	raw["version"] = json.RawMessage(`3`)
 	return nil
 }
 
