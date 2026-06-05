@@ -2,14 +2,14 @@
 
 This page explains the shape of `settings.json`. For narrative examples, use
 [Configuration](configuration.md). For the machine-readable schema, use
-[`spec/omni.settings.v2.schema.json`](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v2.schema.json).
+[`spec/omni.settings.v3.schema.json`](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v3.schema.json).
 
 ## Root Object
 
 | Key | Type | Required | Description |
 | --- | --- | --- | --- |
 | `$schema` | string | no | Editor schema URI written by Omni. |
-| `version` | integer | yes | Settings format version. Current version is `2`. |
+| `version` | integer | yes | Settings format version. Current version is `3`. |
 | `settings` | object | no | Global defaults. |
 | `host_settings` | object | no | Per-host setting overrides. |
 | `tools` | object | no | Logical tool specs keyed by logical name. |
@@ -29,6 +29,7 @@ This page explains the shape of `settings.json`. For narrative examples, use
 | `dots_disabled` | boolean | Disable dotfile sync for this settings scope. |
 | `dots_git` | object | Dotfiles repo commit/push behavior. |
 | `disabled_providers` | array | Ecosystem providers disabled for this settings scope. |
+| `fallback_bin_dir` | string | Default directory for fallback-installed binaries. |
 
 ### `settings.ecosystems`
 
@@ -83,6 +84,26 @@ Host settings can override `ecosystems`, `dots_repo`, `dots_disabled`, and
 | `ignore` | boolean | Keep the tool in config but skip management. |
 | `variants` | array | Alternate install candidates tried in order. |
 | `hosts` | object | Host-specific install overrides. |
+| `fallback` | object | GitHub fallback recipe for `system` tools when the current concrete system manager cannot provide the package. |
+
+### `tools.<name>.fallback`
+
+Fallbacks are saved on the logical tool. They are used only after the native
+system package manager is known unavailable for the configured package.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `source` | object | Source repository provenance. `source.type` is currently `github`. |
+| `status` | string | `unresolved`, `unverified`, `verified`, or `failed`. |
+| `binary` | string | Expected command name after install. |
+| `bin_dir` | string | Optional per-tool fallback binary directory override. |
+| `release_channel` | string | Optional release channel metadata. |
+| `recipe` | object | Structured recipe metadata, such as release asset pattern and checksum. |
+| `platforms` | object | Optional OS/architecture-specific recipe overrides. |
+| `commands.install` | string | Install command for usable fallbacks. |
+| `commands.check` | string | Required verification command unless the fallback is `unresolved`. |
+| `commands.uninstall` | string | Optional uninstall command. If absent, uninstall is unavailable. |
+| `commands.upgrade` | string | Optional upgrade command. If absent, install is reused for upgrade. |
 
 ## `groups`
 

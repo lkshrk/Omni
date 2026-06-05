@@ -104,4 +104,4 @@ notes. Release automation is CI-gated by commit SHA.
 - [Documentation maintenance](documentation-maintenance.md)
 - [Test matrix](test-matrix.md)
 - [Contributing guide](https://github.com/lkshrk/omni/blob/main/CONTRIBUTING.md)
-- [Settings schema](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v2.schema.json)
+- [Settings schema](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v3.schema.json)

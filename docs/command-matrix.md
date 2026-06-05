@@ -72,6 +72,7 @@ Bootstrap flags:
 | `omni tools providers` | yes | Read-only | already read-only |
 | `omni tools refresh` | yes | Cache | `omni tools list` |
 | `omni tools set <name>` | yes | Config | `omni settings show` |
+| `omni tools fallback <tool>` | yes | Config | `omni tools list <tool>` |
 | `omni tools delete-spec <name>` | yes | Config | `omni tools list <name>` |
 | `omni tools normalize --default-overrides` | yes | Config | `--dry-run` |
 | `omni tools add <package>` | yes | Config | `omni tools search <package>` |
@@ -98,6 +99,7 @@ Important flags:
 | `--group` | `install`, `sync`, `import`, `list`, `add` | Target, filter, or assign a reusable group explicitly. |
 | `--force` | `install` | Skip bootstrap and host assignment checks for an explicit install path. |
 | `--provider` | `add`, `set`, `install`, `list`, `search`, `sync`, `switch --reinstall-default` | Scope command behavior to one provider where supported. |
+| `--from-github` | `fallback` | Save a GitHub fallback source as `owner/repo`. Does not install. |
 | `--install-with` | `add`, `set` | Pin one logical tool to a concrete manager. |
 | `--host` | `set` | Boolean flag; write a host-specific tool override for the current host. |
 | `--from`, `--to` | `switch` | Move one tool between concrete managers or providers. |
