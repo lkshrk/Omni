@@ -234,6 +234,70 @@ func TestSync_UsesFallbackWhenNativePackageUnavailable(t *testing.T) {
 	}
 }
 
+func TestSync_UsesFallbackRecipeSavedFromGitHubSpec(t *testing.T) {
+	ctx := context.Background()
+	system := &lifecycleProvider{
+		stubProvider: stubProvider{name: "system", available: true},
+		resolvedName: "apt",
+	}
+	apt := &lifecycleProvider{stubProvider: stubProvider{name: "apt", available: true}}
+	fallbackExec := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "sh -c editor install rg", Response: executor.MockCall{}},
+		executor.MatchRule{Pattern: "sh -c editor check rg", Response: executor.MockCall{}},
+	).WithFallback(executor.MockCall{Err: errors.New("unexpected fallback command")})
+	a, cfgPath := newImportApp(t, system, apt)
+	a.SetFallbackExecutor(fallbackExec)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"rg": {
+				Provider: "system",
+				Package:  "ripgrep",
+			},
+		},
+		Groups: []*config.GroupConfig{{Tools: []config.ToolEntry{{Name: "rg"}}}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	if err := a.SaveToolFallbackFromGitHubSpec(ctx, "rg", "BurntSushi/ripgrep", config.FallbackSpec{
+		Status: config.FallbackStatusUnverified,
+		Binary: "rg",
+		Commands: config.FallbackCommands{
+			Install: "editor install rg",
+			Check:   "editor check rg",
+		},
+	}); err != nil {
+		t.Fatalf("SaveToolFallbackFromGitHubSpec: %v", err)
+	}
+	if err := a.DB().UpsertPackageAvailability(ctx, database.PackageAvailability{
+		Name:      "rg",
+		Provider:  "apt",
+		Package:   "ripgrep",
+		Available: false,
+		Reason:    "no candidate",
+	}); err != nil {
+		t.Fatalf("seed package availability: %v", err)
+	}
+
+	result, err := a.Sync(ctx, isync.SyncOptions{})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	fallbackExec.AssertCalled(t, "sh -c editor install rg")
+	fallbackExec.AssertCalled(t, "sh -c editor check rg")
+	if installed := result.Installed(); len(installed) != 1 || installed[0].Tool.Name != "rg" {
+		t.Fatalf("installed ops = %+v, want fallback install op for rg", installed)
+	}
+	got, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	fallback := got.Tools["rg"].Fallback
+	if fallback == nil || fallback.Status != config.FallbackStatusVerified {
+		t.Fatalf("fallback = %+v, want verified saved editor recipe", fallback)
+	}
+}
+
 func TestSync_DryRunPlansFallbackWhenNativePackageUnavailable(t *testing.T) {
 	ctx := context.Background()
 	system := &lifecycleProvider{
