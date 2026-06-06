@@ -4,15 +4,21 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/dots"
 	"github.com/lkshrk/omni/internal/executor"
 )
 
 const fallbackInstalledWithGitHub = "gh"
+
+var fallbackTemplatePattern = regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}`)
 
 func (a *App) SetFallbackExecutor(exec executor.Executor) {
 	a.fallbackExec = exec
@@ -79,7 +85,7 @@ func (a *App) InstallToolFallback(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	if err := a.runFallbackCommand(ctx, name, "install", fallback.Commands.Install); err != nil {
+	if err := a.runFallbackCommand(ctx, name, "install", spec, fallback, fallback.Commands.Install); err != nil {
 		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
 		_ = a.readDB().MarkFailed(ctx, name, spec.Provider, fallbackPackage(name, spec), err.Error())
 		return err
@@ -113,13 +119,17 @@ func (a *App) InstallToolFallback(ctx context.Context, name string) error {
 }
 
 func (a *App) CheckToolFallback(ctx context.Context, name string) (bool, error) {
-	_, fallback, err := a.configuredFallback(name)
+	spec, fallback, err := a.configuredFallback(name)
 	if err != nil {
 		return false, err
 	}
 	command := strings.TrimSpace(fallback.Commands.Check)
 	if command == "" {
 		return false, fmt.Errorf("fallback %s: missing check command", name)
+	}
+	command, err = a.renderFallbackCommand(name, spec, fallback, command)
+	if err != nil {
+		return false, err
 	}
 	_, _, err = a.fallbackExecutor().Run(ctx, "sh", "-c", command)
 	return err == nil, nil
@@ -134,7 +144,7 @@ func (a *App) UpgradeToolFallback(ctx context.Context, name string) error {
 	if strings.TrimSpace(command) == "" {
 		command = fallback.Commands.Install
 	}
-	if err := a.runFallbackCommand(ctx, name, "upgrade", command); err != nil {
+	if err := a.runFallbackCommand(ctx, name, "upgrade", spec, fallback, command); err != nil {
 		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
 		return err
 	}
@@ -172,7 +182,7 @@ func (a *App) UninstallToolFallback(ctx context.Context, name string) error {
 	if strings.TrimSpace(fallback.Commands.Uninstall) == "" {
 		return fmt.Errorf("fallback uninstall is not available for %s", name)
 	}
-	if err := a.runFallbackCommand(ctx, name, "uninstall", fallback.Commands.Uninstall); err != nil {
+	if err := a.runFallbackCommand(ctx, name, "uninstall", spec, fallback, fallback.Commands.Uninstall); err != nil {
 		return err
 	}
 	return a.readDB().Delete(ctx, name, spec.Provider, fallbackPackage(name, spec))
@@ -197,16 +207,102 @@ func (a *App) configuredFallback(name string) (config.ToolSpec, *config.Fallback
 	return spec, spec.Fallback, nil
 }
 
-func (a *App) runFallbackCommand(ctx context.Context, name, action, command string) error {
+func (a *App) runFallbackCommand(ctx context.Context, name, action string, spec config.ToolSpec, fallback *config.FallbackSpec, command string) error {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return fmt.Errorf("fallback %s: missing %s command", name, action)
 	}
-	_, stderr, err := a.fallbackExecutor().Run(ctx, "sh", "-c", command)
+	rendered, err := a.renderFallbackCommand(name, spec, fallback, command)
+	if err != nil {
+		return err
+	}
+	_, stderr, err := a.fallbackExecutor().Run(ctx, "sh", "-c", rendered)
 	if err != nil {
 		return fmt.Errorf("fallback %s %s: %w (stderr: %s)", name, action, err, strings.TrimSpace(stderr))
 	}
 	return nil
+}
+
+func (a *App) renderFallbackCommand(name string, spec config.ToolSpec, fallback *config.FallbackSpec, command string) (string, error) {
+	vars, err := a.fallbackCommandVars(name, spec, fallback)
+	if err != nil {
+		return "", err
+	}
+	var renderErr error
+	rendered := fallbackTemplatePattern.ReplaceAllStringFunc(command, func(match string) string {
+		if renderErr != nil {
+			return match
+		}
+		parts := fallbackTemplatePattern.FindStringSubmatch(match)
+		value, ok := vars[parts[1]]
+		if !ok {
+			renderErr = fmt.Errorf("fallback %s: unknown fallback template variable %q", name, parts[1])
+			return match
+		}
+		return value
+	})
+	if renderErr != nil {
+		return "", renderErr
+	}
+	return rendered, nil
+}
+
+func (a *App) fallbackCommandVars(name string, spec config.ToolSpec, fallback *config.FallbackSpec) (map[string]string, error) {
+	binary := strings.TrimSpace(fallback.Binary)
+	if binary == "" {
+		binary = name
+	}
+	cacheDir, err := a.fallbackCacheDir()
+	if err != nil {
+		return nil, err
+	}
+	binDir, err := a.fallbackBinDir(fallback, cacheDir)
+	if err != nil {
+		return nil, err
+	}
+	repo := ""
+	if fallback.Source.Owner != "" && fallback.Source.Repo != "" {
+		repo = fallback.Source.Owner + "/" + fallback.Source.Repo
+	}
+	return map[string]string{
+		"arch":       runtime.GOARCH,
+		"asset_path": filepath.Join(cacheDir, fallbackPackage(name, spec)),
+		"binary":     binary,
+		"bin_dir":    binDir,
+		"cache_dir":  cacheDir,
+		"os":         runtime.GOOS,
+		"repo":       repo,
+		"version":    "",
+	}, nil
+}
+
+func (a *App) fallbackCacheDir() (string, error) {
+	root := strings.TrimSpace(a.CacheDir)
+	if root == "" {
+		root = a.configDir()
+	}
+	root, err := dots.ExpandTilde(root)
+	if err != nil {
+		return "", fmt.Errorf("resolving fallback cache dir: %w", err)
+	}
+	return filepath.Join(root, "fallback"), nil
+}
+
+func (a *App) fallbackBinDir(fallback *config.FallbackSpec, cacheDir string) (string, error) {
+	binDir := strings.TrimSpace(fallback.BinDir)
+	if binDir == "" {
+		if cfg, err := a.loadConfig(); err == nil {
+			binDir = strings.TrimSpace(a.effectiveSettings(cfg).FallbackBinDir)
+		}
+	}
+	if binDir == "" {
+		binDir = filepath.Join(cacheDir, "bin")
+	}
+	expanded, err := dots.ExpandTilde(binDir)
+	if err != nil {
+		return "", fmt.Errorf("resolving fallback bin dir: %w", err)
+	}
+	return expanded, nil
 }
 
 func (a *App) fallbackExecutor() executor.Executor {
