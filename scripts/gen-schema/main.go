@@ -77,6 +77,8 @@ func buildWithID(id string) *schema {
 	ecosystemNames := stringsToAny(provider.BuiltinEcosystemNames())
 	managerNames := stringsToAny(provider.BuiltinSettingsManagerNames(provider.EcosystemNode))
 	managerNames = append(managerNames, stringsToAny(provider.BuiltinSettingsManagerNames(provider.EcosystemPython))...)
+	providerNames := stringsToAny(provider.BuiltinConcreteEcosystemNames())
+	providerNames = append(providerNames, "script")
 	installWithNames := stringsToAny(provider.BuiltinConcreteEcosystemNames())
 	installWithExamples := stringsToAny(exampleInstallWithNames())
 	systemPriority := stringsToAny(provider.BuiltinSystemProviderPriorityNames())
@@ -137,10 +139,9 @@ func buildWithID(id string) *schema {
 				Examples: []any{
 					map[string]any{
 						"ripgrep": map[string]any{
-							"provider": provider.EcosystemSystem,
-							"package":  "ripgrep",
-							"variants": []any{
-								map[string]any{"provider": provider.EcosystemNode, "package": "ripgrep"},
+							"providers": []any{
+								map[string]any{"provider": "brew", "package": "ripgrep"},
+								map[string]any{"provider": "apt", "package": "ripgrep"},
 							},
 						},
 					},
@@ -301,18 +302,28 @@ func buildWithID(id string) *schema {
 				AdditionalProperties: false,
 			},
 			"ToolSpec": {
-				Description: "A logical tool spec. Provider identifies the portable ecosystem; variants and hosts define alternate install candidates.",
+				Description: "A logical tool spec. Providers define concrete install candidates; legacy provider, variants, and hosts fields are migrated on load.",
 				Type:        "object",
-				Required:    []string{"provider"},
 				Properties: map[string]*schema{
+					"providers": {
+						Description: "Concrete provider candidates for this logical tool, in priority order.",
+						Type:        "array",
+						Items:       ref("#/$defs/ToolInstallSpec"),
+						Examples: []any{
+							[]any{
+								map[string]any{"provider": "brew", "package": "ripgrep"},
+								map[string]any{"provider": "apt", "package": "ripgrep"},
+							},
+						},
+					},
 					"provider": {
-						Description: "Portable ecosystem provider for this logical tool.",
+						Description: "Legacy provider field accepted for migration. Use providers[] for new config.",
 						Type:        "string",
-						Enum:        ecosystemNames,
-						Examples:    []any{provider.EcosystemSystem},
+						Enum:        providerNames,
+						Examples:    []any{"brew"},
 					},
 					"install_with": {
-						Description: "Concrete provider or manager used for this logical tool on matching hosts. Omit to use ecosystem settings/resolution.",
+						Description: "Legacy concrete provider or manager pin accepted for migration. Use providers[].provider for new config.",
 						Type:        "string",
 						Enum:        installWithNames,
 						Examples:    installWithExamples,
@@ -355,7 +366,7 @@ func buildWithID(id string) *schema {
 						Type:                 "object",
 						AdditionalProperties: ref("#/$defs/ToolInstallSpec"),
 						Examples: []any{
-							map[string]any{"linuxbox": map[string]any{"provider": provider.EcosystemNode, "package": "ripgrep"}},
+							map[string]any{"linuxbox": map[string]any{"provider": "apt", "package": "ripgrep"}},
 						},
 					},
 					"fallback": {
@@ -371,13 +382,13 @@ func buildWithID(id string) *schema {
 				Required:    []string{"provider"},
 				Properties: map[string]*schema{
 					"provider": {
-						Description: "Portable ecosystem provider for this install candidate.",
+						Description: "Concrete provider or manager for this install candidate.",
 						Type:        "string",
-						Enum:        ecosystemNames,
-						Examples:    []any{provider.EcosystemNode},
+						Enum:        providerNames,
+						Examples:    []any{"npm"},
 					},
 					"install_with": {
-						Description: "Concrete provider or manager used for this install candidate. Omit to use ecosystem settings/resolution.",
+						Description: "Legacy concrete provider or manager pin accepted for migration. New providers[] entries should put the concrete value in provider.",
 						Type:        "string",
 						Enum:        installWithNames,
 						Examples:    firstNAny(installWithExamples, 1),

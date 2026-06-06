@@ -97,12 +97,12 @@ func TestToolProviderScopeChoices_PlansEcosystemChoice(t *testing.T) {
 	}
 }
 
-func TestSetTool_RejectsMetaProviderWithoutConcrete(t *testing.T) {
+func TestSetTool_RejectsEcosystemProviderWithoutConcrete(t *testing.T) {
 	a, _ := newImportApp(t)
 
 	err := a.SetTool("ripgrep", "system", "ripgrep", "")
 	if err == nil {
-		t.Fatal("SetTool accepted meta provider without concrete provider")
+		t.Fatal("SetTool accepted ecosystem provider without concrete provider")
 	}
 	if got := err.Error(); got != `provider "system" requires a concrete provider` {
 		t.Fatalf("error = %q", got)

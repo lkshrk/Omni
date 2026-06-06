@@ -2,14 +2,14 @@
 
 This page explains the shape of `settings.json`. For narrative examples, use
 [Configuration](configuration.md). For the machine-readable schema, use
-[`spec/omni.settings.v6.schema.json`](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v6.schema.json).
+[`spec/omni.settings.v7.schema.json`](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v7.schema.json).
 
 ## Root Object
 
 | Key | Type | Required | Description |
 | --- | --- | --- | --- |
 | `$schema` | string | no | Editor schema URI written by Omni. |
-| `version` | integer | yes | Settings format version. Current version is `6`. |
+| `version` | integer | yes | Settings format version. Current version is `7`. |
 | `settings` | object | no | Global defaults. |
 | `host_settings` | object | no | Per-host setting overrides. |
 | `tools` | object | no | Logical tool specs keyed by logical name. |
@@ -35,7 +35,7 @@ This page explains the shape of `settings.json`. For narrative examples, use
 ### `settings.ecosystems` (legacy)
 
 `settings.ecosystems` remains in the schema so older configs can load and
-migrate. New v6 config should use `provider_priority`, bootstrap
+migrate. New v7 config should use `provider_priority`, bootstrap
 `settings.providers`, and tool-level `providers[]`.
 
 | Ecosystem | Fields | Accepted values |

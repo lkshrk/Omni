@@ -38,7 +38,7 @@ exit 1
 
 -- settings.json --
 {
-  "version": 6,
+  "version": 7,
   "hosts": { "testhost": [] },
   "tools": {
     "eslint": { "providers": [{ "provider": "npm" }] }

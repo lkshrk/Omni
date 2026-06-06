@@ -193,7 +193,7 @@ func TestValidateRoot_ProviderEntriesAcceptConcreteProvidersWhenEcosystemsListed
 	}
 }
 
-func TestValidateRoot_MetaProviderEntryRejected(t *testing.T) {
+func TestValidateRoot_EcosystemProviderEntryRejected(t *testing.T) {
 	cfg := &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"ripgrep": {Providers: []config.ToolInstallSpec{{Provider: "system"}}},
@@ -203,8 +203,8 @@ func TestValidateRoot_MetaProviderEntryRejected(t *testing.T) {
 		Known:      []string{"system", "brew"},
 		Ecosystems: []string{"system"},
 	})
-	if !containsErrorMessage(errs, "meta provider") {
-		t.Errorf("expected meta-provider error, got %v", errs)
+	if !containsErrorMessage(errs, "ecosystem provider") {
+		t.Errorf("expected ecosystem-provider error, got %v", errs)
 	}
 }
 

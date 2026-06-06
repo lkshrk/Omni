@@ -136,7 +136,7 @@ func newToolsSetCmd(state *rootState) *cobra.Command {
 			return nil
 		},
 	}
-	addProviderFlag(cmd, &providerName, "ecosystem provider for the logical tool")
+	addProviderFlag(cmd, &providerName, "provider candidate for the logical tool")
 	cmd.Flags().StringVar(&packageName, "package", "", "package name to install when it differs from the logical name")
 	cmd.Flags().StringVar(&installWith, "install-with", "", "concrete provider or manager to use for this tool")
 	cmd.Flags().StringVar(&quarantine, "quarantine", "", "tool update quarantine duration, 0, or exempt")

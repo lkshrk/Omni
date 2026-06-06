@@ -118,7 +118,7 @@ ignored so it stays visible without participating in normal sync.
 Disable providers per host when a machine should never use them:
 
 ```sh
-omni settings disable-provider pip
+omni settings disable-provider python
 ```
 
 Equivalent host setting:
@@ -127,7 +127,7 @@ Equivalent host setting:
 {
   "host_settings": {
     "server": {
-      "disabled_providers": ["pip"]
+      "disabled_providers": ["python"]
     }
   }
 }

@@ -10,7 +10,7 @@ import (
 
 // CurrentVersion is the latest settings.json format version understood by omni.
 // Version 0 is the legacy unversioned format.
-const CurrentVersion = 6
+const CurrentVersion = 7
 
 const (
 	// FallbackSourceGitHub identifies a fallback recipe sourced from a GitHub repository.
@@ -542,7 +542,7 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 			if _, ok := providerSet[spec.Provider]; !ok {
 				errs = append(errs, ValidationError{Path: path + ".provider", Message: fmt.Sprintf("unknown provider %q", spec.Provider)})
 			} else if _, ok := ecosystemSet[spec.Provider]; ok {
-				errs = append(errs, ValidationError{Path: path + ".provider", Message: fmt.Sprintf("meta provider %q is not supported in tools providers", spec.Provider)})
+				errs = append(errs, ValidationError{Path: path + ".provider", Message: fmt.Sprintf("ecosystem provider %q is not supported in tools providers", spec.Provider)})
 			}
 		}
 		if spec.InstallWith != "" && !allowInstallWith {
