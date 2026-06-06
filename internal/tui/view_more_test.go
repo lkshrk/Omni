@@ -4092,6 +4092,74 @@ func TestFallbackEditorKeyboardNavigationPersistsActiveField(t *testing.T) {
 	}
 }
 
+func TestFallbackEditorEnterWithEmptyRepoStaysOpen(t *testing.T) {
+	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: false, Tracked: true}
+	m := baseModel([]*database.ToolCache{tool})
+	if cmd := m.openFallbackEditor(tool); cmd == nil {
+		t.Fatal("openFallbackEditor returned nil command")
+	}
+	m.settingsInput.SetValue("")
+
+	var tm tea.Model = m
+	tm, cmd := tm.Update(pressEnter())
+	got := tm.(Model)
+	if cmd != nil {
+		t.Fatal("enter with empty repo returned command, want no save")
+	}
+	if got.mode != viewFallbackEditor {
+		t.Fatalf("mode = %v, want fallback editor", got.mode)
+	}
+	if got.loading {
+		t.Fatal("loading = true, want no save started")
+	}
+}
+
+func TestFallbackEditorPastePersistsActiveField(t *testing.T) {
+	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: false, Tracked: true}
+	m := baseModel([]*database.ToolCache{tool})
+	if cmd := m.openFallbackEditor(tool); cmd == nil {
+		t.Fatal("openFallbackEditor returned nil command")
+	}
+
+	var tm tea.Model = m
+	tm, _ = tm.Update(tea.PasteMsg{Content: "BurntSushi/ripgrep"})
+	got := tm.(Model)
+	if got.fallbackEditor.fields[fallbackFieldRepo] != "BurntSushi/ripgrep" {
+		t.Fatalf("repo field = %q, want pasted repo", got.fallbackEditor.fields[fallbackFieldRepo])
+	}
+}
+
+func TestRenderFallbackEditorPopup_LongCommandsFitNarrowFrame(t *testing.T) {
+	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: false, Tracked: true}
+	m := baseModel([]*database.ToolCache{tool})
+	m.width = 52
+	m.mode = viewFallbackEditor
+	m.fallbackTarget = *tool
+	m.fallbackTargetSet = true
+	m.fallbackEditor = fallbackEditorState{
+		fields: map[fallbackEditorFieldID]string{
+			fallbackFieldRepo:           "BurntSushi/ripgrep",
+			fallbackFieldBinary:         "rg",
+			fallbackFieldBinDir:         "~/.local/share/omni/fallback/bin",
+			fallbackFieldAssetPattern:   "ripgrep-{version}-{os}-{arch}.tar.gz",
+			fallbackFieldInstallCommand: "curl -fsSL https://github.com/BurntSushi/ripgrep/releases/download/{{version}}/ripgrep.tar.gz | tar -xz -C {{bin_dir}}",
+			fallbackFieldCheckCommand:   "test -x {{bin_dir}}/{{binary}} && {{bin_dir}}/{{binary}} --version",
+			fallbackFieldUninstall:      "rm -f {{bin_dir}}/{{binary}}",
+			fallbackFieldUpgrade:        "curl -fsSL https://github.com/BurntSushi/ripgrep/releases/latest/download/ripgrep.tar.gz | tar -xz -C {{bin_dir}}",
+			fallbackFieldVersion:        "{{bin_dir}}/{{binary}} --version",
+			fallbackFieldReleaseChannel: "stable",
+		},
+	}
+
+	frame := fallbackEditorPopupFrame(m)
+	out := stripANSIEscapeSequences(renderPopupFrame(m.palette, renderFallbackEditorPopup(m), frame))
+	for _, line := range strings.Split(out, "\n") {
+		if width := lipgloss.Width(line); width > frame.Width {
+			t.Fatalf("line width = %d > frame width %d:\n%s", width, frame.Width, out)
+		}
+	}
+}
+
 func hasHint(hints []hintItem, key, desc string) bool {
 	for _, hint := range hints {
 		if hint.key == key && hint.desc == desc {
