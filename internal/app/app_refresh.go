@@ -440,34 +440,6 @@ func (a *App) githubFallbackOutdatedUpdatesBestEffort(ctx context.Context, tools
 	return updates
 }
 
-func githubFallbackHasSavedReleaseMetadata(fallback *config.FallbackSpec) bool {
-	if fallback == nil {
-		return false
-	}
-	if fallback.Source.Type != config.FallbackSourceGitHub {
-		return false
-	}
-	if strings.TrimSpace(fallback.Source.Owner) == "" || strings.TrimSpace(fallback.Source.Repo) == "" {
-		return false
-	}
-	recipe := fallback.Recipe
-	if recipe.Type != config.FallbackRecipeGitHubReleaseAsset {
-		return false
-	}
-	if strings.TrimSpace(recipe.ReleaseID) == "" ||
-		strings.TrimSpace(recipe.TagName) == "" ||
-		strings.TrimSpace(recipe.PublishedAt) == "" ||
-		strings.TrimSpace(recipe.AssetID) == "" ||
-		strings.TrimSpace(recipe.AssetName) == "" ||
-		strings.TrimSpace(recipe.AssetDownloadURL) == "" {
-		return false
-	}
-	if _, err := normalizedGitHubPublishedAt(recipe.PublishedAt); err != nil {
-		return false
-	}
-	return true
-}
-
 func githubPublishedAtAfter(latest, saved string) bool {
 	latestTime, err := time.Parse(time.RFC3339, strings.TrimSpace(latest))
 	if err != nil {

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -124,11 +125,15 @@ func (a *App) CheckToolFallback(ctx context.Context, name string) (bool, error) 
 	if err != nil {
 		return false, err
 	}
+	return a.checkToolFallbackWithSpec(ctx, name, spec, fallback)
+}
+
+func (a *App) checkToolFallbackWithSpec(ctx context.Context, name string, spec config.ToolSpec, fallback *config.FallbackSpec) (bool, error) {
 	command := strings.TrimSpace(fallback.Commands.Check)
 	if command == "" {
 		return false, fmt.Errorf("fallback %s: missing check command", name)
 	}
-	command, err = a.renderFallbackCommand(name, spec, fallback, command)
+	command, err := a.renderFallbackCommand(name, spec, fallback, command)
 	if err != nil {
 		return false, err
 	}
@@ -141,15 +146,20 @@ func (a *App) UpgradeToolFallback(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	command := fallback.Commands.Upgrade
-	if strings.TrimSpace(command) == "" {
-		command = fallback.Commands.Install
-	}
-	if err := a.runFallbackCommand(ctx, name, "upgrade", spec, fallback, command); err != nil {
+	upgradeFallback, refreshed, err := a.githubFallbackUpgradeCandidate(ctx, name, spec, fallback)
+	if err != nil {
 		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
 		return err
 	}
-	installed, err := a.CheckToolFallback(ctx, name)
+	command := upgradeFallback.Commands.Upgrade
+	if strings.TrimSpace(command) == "" {
+		command = upgradeFallback.Commands.Install
+	}
+	if err := a.runFallbackCommand(ctx, name, "upgrade", spec, upgradeFallback, command); err != nil {
+		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
+		return err
+	}
+	installed, err := a.checkToolFallbackWithSpec(ctx, name, spec, upgradeFallback)
 	if err != nil {
 		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
 		return err
@@ -158,21 +168,55 @@ func (a *App) UpgradeToolFallback(ctx context.Context, name string) error {
 		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
 		return fmt.Errorf("fallback upgrade verification failed for %s: check command did not pass", name)
 	}
-	if err := a.setToolFallbackStatus(name, config.FallbackStatusVerified); err != nil {
-		return err
+	if refreshed {
+		verified := *upgradeFallback
+		verified.Status = config.FallbackStatusVerified
+		if err := a.SaveToolFallback(ctx, name, verified); err != nil {
+			return err
+		}
+	} else {
+		if err := a.setToolFallbackStatus(name, config.FallbackStatusVerified); err != nil {
+			return err
+		}
 	}
 	if err := a.readDB().Upsert(ctx, &database.ToolCache{
 		Name:          name,
 		Provider:      spec.Provider,
 		Package:       fallbackPackage(name, spec),
 		Installed:     true,
-		InstalledWith: fallbackInstalledWith(fallback),
+		InstalledWith: fallbackInstalledWith(upgradeFallback),
 		Version:       sql.NullString{},
 		LastChecked:   time.Now(),
 	}); err != nil {
 		return err
 	}
 	return a.readDB().UpdateOutdated(ctx, name, spec.Provider, fallbackPackage(name, spec), false, "")
+}
+
+func (a *App) githubFallbackUpgradeCandidate(ctx context.Context, name string, spec config.ToolSpec, fallback *config.FallbackSpec) (*config.FallbackSpec, bool, error) {
+	if !githubFallbackHasSavedReleaseMetadata(fallback) {
+		return fallback, false, nil
+	}
+	cached, err := a.readDB().Get(ctx, name, spec.Provider, fallbackPackage(name, spec))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fallback, false, nil
+		}
+		return nil, false, err
+	}
+	if !cached.Installed || cached.InstalledWith != fallbackInstalledWithGitHub || !cached.Outdated {
+		return fallback, false, nil
+	}
+	resolved, ok, err := a.resolveGitHubFallback(ctx, name, strings.TrimSpace(fallback.Source.Owner), strings.TrimSpace(fallback.Source.Repo))
+	if err != nil {
+		return nil, false, err
+	}
+	if !ok {
+		return nil, false, fmt.Errorf("github fallback %s/%s: no supported release asset for %s on %s/%s", strings.TrimSpace(fallback.Source.Owner), strings.TrimSpace(fallback.Source.Repo), name, runtime.GOOS, runtime.GOARCH)
+	}
+	resolved.Source = fallback.Source
+	resolved.BinDir = fallback.BinDir
+	return &resolved, true, nil
 }
 
 func (a *App) UninstallToolFallback(ctx context.Context, name string) error {
