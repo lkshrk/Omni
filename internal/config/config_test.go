@@ -104,6 +104,109 @@ func TestLoad_RejectsFutureConfigVersion(t *testing.T) {
 	}
 }
 
+func TestCurrentVersionIncludesGitHubFallbackReleaseMetadata(t *testing.T) {
+	const wantVersion = 4
+	if config.CurrentVersion < wantVersion {
+		t.Fatalf("CurrentVersion = %d, want at least %d for GitHub fallback release metadata", config.CurrentVersion, wantVersion)
+	}
+}
+
+func TestFallbackRecipeGitHubReleaseMetadataRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	original := &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"gh": {
+				Provider: "system",
+				Fallback: &config.FallbackSpec{
+					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "cli", Repo: "cli"},
+					Status: config.FallbackStatusUnverified,
+					Binary: "gh",
+					Recipe: config.FallbackRecipe{
+						Type:             config.FallbackRecipeGitHubReleaseAsset,
+						AssetPattern:     "gh_2.93.0_macOS_arm64.zip",
+						ReleaseID:        "330388700",
+						TagName:          "v2.93.0",
+						PublishedAt:      "2026-05-27T17:47:41Z",
+						AssetID:          "431301800",
+						AssetName:        "gh_2.93.0_macOS_arm64.zip",
+						AssetDownloadURL: "https://github.com/cli/cli/releases/download/v2.93.0/gh_2.93.0_macOS_arm64.zip",
+					},
+				},
+			},
+		},
+		Groups: []*config.GroupConfig{{Tools: []config.ToolEntry{{Name: "gh"}}}},
+	}
+
+	if err := config.Save(path, original); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	recipe := loaded.Tools["gh"].Fallback.Recipe
+	if recipe.ReleaseID != "330388700" {
+		t.Fatalf("release_id = %q, want 330388700", recipe.ReleaseID)
+	}
+	if recipe.TagName != "v2.93.0" {
+		t.Fatalf("tag_name = %q, want v2.93.0", recipe.TagName)
+	}
+	if recipe.PublishedAt != "2026-05-27T17:47:41Z" {
+		t.Fatalf("published_at = %q, want GitHub release published_at", recipe.PublishedAt)
+	}
+	if recipe.AssetID != "431301800" {
+		t.Fatalf("asset_id = %q, want 431301800", recipe.AssetID)
+	}
+	if recipe.AssetName != "gh_2.93.0_macOS_arm64.zip" {
+		t.Fatalf("asset_name = %q, want gh_2.93.0_macOS_arm64.zip", recipe.AssetName)
+	}
+	if recipe.AssetDownloadURL != "https://github.com/cli/cli/releases/download/v2.93.0/gh_2.93.0_macOS_arm64.zip" {
+		t.Fatalf("asset_download_url = %q, want matched GitHub asset URL", recipe.AssetDownloadURL)
+	}
+}
+
+func TestLoad_MigratesOldFallbackWithoutSynthesizingGitHubReleaseMetadata(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	raw := `{
+  "version": 3,
+  "tools": {
+    "gh": {
+      "provider": "system",
+      "fallback": {
+        "source": {"type": "github", "owner": "cli", "repo": "cli"},
+        "status": "unverified",
+        "binary": "gh",
+        "recipe": {
+          "type": "github_release_asset",
+          "asset_pattern": "gh_2.93.0_macOS_arm64.zip"
+        },
+        "commands": {
+          "check": "command -v gh"
+        }
+      }
+    }
+  },
+  "groups": [{"tools": ["gh"]}]
+}`
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Version != config.CurrentVersion {
+		t.Fatalf("version = %d, want %d", cfg.Version, config.CurrentVersion)
+	}
+	recipe := cfg.Tools["gh"].Fallback.Recipe
+	if recipe.ReleaseID != "" || recipe.TagName != "" || recipe.PublishedAt != "" || recipe.AssetID != "" || recipe.AssetName != "" || recipe.AssetDownloadURL != "" {
+		t.Fatalf("legacy fallback metadata = %+v, want no synthesized GitHub release metadata", recipe)
+	}
+}
+
 func TestLoad_OldGroupToolObjectRejected(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")

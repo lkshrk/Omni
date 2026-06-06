@@ -52,14 +52,11 @@ func (a *App) SaveToolFallbackFromGitHub(ctx context.Context, name, repo string)
 	}
 	binary := strings.TrimSpace(name)
 	fallback, resolved, err := a.resolveGitHubFallback(ctx, name, owner, repoName)
-	if err != nil || !resolved {
-		fallback = config.FallbackSpec{
-			Status: config.FallbackStatusUnresolved,
-			Binary: binary,
-			Commands: config.FallbackCommands{
-				Check: "command -v " + binary,
-			},
-		}
+	if err != nil {
+		return err
+	}
+	if !resolved {
+		return fmt.Errorf("github fallback %s/%s: no supported release asset for %s on %s/%s", owner, repoName, binary, runtime.GOOS, runtime.GOARCH)
 	}
 	fallback.Source = config.FallbackSource{
 		Type:  config.FallbackSourceGitHub,
