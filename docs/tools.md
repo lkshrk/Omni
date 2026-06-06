@@ -110,6 +110,10 @@ repo argument can be omitted:
 omni tools fallback rg
 ```
 
+Accepted GitHub repo forms are `owner/repo`, `github.com/owner/repo`, `https://github.com/owner/repo`,
+`https://github.com/owner/repo.git`, and `git@github.com:owner/repo.git`.
+Browser URLs with extra paths, queries, or fragments are rejected.
+
 This resolves the latest stable GitHub release, selects an asset for the
 current OS/architecture, and writes `settings.json` only. It does not install
 the tool immediately. Resolution is strict: if Omni cannot read the release

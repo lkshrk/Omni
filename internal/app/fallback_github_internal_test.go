@@ -21,3 +21,41 @@ func TestBestGitHubReleaseAsset_PrefersExtractableArchive(t *testing.T) {
 		t.Fatalf("asset = %q, want extractable tar.gz", asset.Name)
 	}
 }
+
+func TestParseGitHubRepo(t *testing.T) {
+	tests := []struct {
+		in        string
+		wantOwner string
+		wantRepo  string
+		wantErr   bool
+	}{
+		{in: "cli/cli", wantOwner: "cli", wantRepo: "cli"},
+		{in: "https://github.com/cli/cli", wantOwner: "cli", wantRepo: "cli"},
+		{in: "https://github.com/cli/cli.git", wantOwner: "cli", wantRepo: "cli"},
+		{in: "github.com/cli/cli", wantOwner: "cli", wantRepo: "cli"},
+		{in: "git@github.com:cli/cli.git", wantOwner: "cli", wantRepo: "cli"},
+		{in: "https://www.github.com/cli/cli", wantOwner: "cli", wantRepo: "cli"},
+		{in: "https://gitlab.com/cli/cli", wantErr: true},
+		{in: "https://github.com/cli/cli/releases", wantErr: true},
+		{in: "https://github.com/cli/cli?tab=readme", wantErr: true},
+		{in: "https://github.com/cli/cli#readme", wantErr: true},
+		{in: "git@github.com:cli/cli.git?ref=main", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			owner, repo, err := parseGitHubRepo(tt.in)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("parseGitHubRepo(%q) err = nil, want error", tt.in)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseGitHubRepo(%q): %v", tt.in, err)
+			}
+			if owner != tt.wantOwner || repo != tt.wantRepo {
+				t.Fatalf("parseGitHubRepo(%q) = %s/%s, want %s/%s", tt.in, owner, repo, tt.wantOwner, tt.wantRepo)
+			}
+		})
+	}
+}

@@ -240,6 +240,9 @@ current platform. If `--from-github` is omitted, Omni uses the tool's `git`
 value when it is a GitHub URL. If resolution fails, the existing config is
 unchanged. The command is config-only; install, sync, and upgrade decide later
 whether to use the saved `system(gh)` recipe.
+Accepted GitHub repo forms are `owner/repo`, `github.com/owner/repo`, `https://github.com/owner/repo`,
+`https://github.com/owner/repo.git`, and `git@github.com:owner/repo.git`.
+Browser URLs with extra paths, queries, or fragments are rejected.
 
 ## Groups And Hosts
 

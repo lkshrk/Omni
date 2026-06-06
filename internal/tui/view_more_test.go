@@ -4072,6 +4072,31 @@ func TestOpenFallbackEditor_PrefillsConfiguredGit(t *testing.T) {
 	}
 }
 
+func TestFallbackRepoFromToolGit(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{in: "https://github.com/cli/cli", want: "cli/cli"},
+		{in: "https://github.com/cli/cli.git", want: "cli/cli"},
+		{in: "github.com/cli/cli", want: "cli/cli"},
+		{in: "git@github.com:cli/cli.git", want: "cli/cli"},
+		{in: "https://www.github.com/cli/cli", want: "cli/cli"},
+		{in: "https://gitlab.com/cli/cli", want: ""},
+		{in: "https://github.com/cli/cli/releases", want: ""},
+		{in: "https://github.com/cli/cli?tab=readme", want: ""},
+		{in: "https://github.com/cli/cli#readme", want: ""},
+		{in: "git@github.com:cli/cli.git?ref=main", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			if got := fallbackRepoFromToolGit(tt.in); got != tt.want {
+				t.Fatalf("fallbackRepoFromToolGit(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFallbackEditorKeyboardNavigationPersistsActiveField(t *testing.T) {
 	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: false, Tracked: true}
 	m := baseModel([]*database.ToolCache{tool})
