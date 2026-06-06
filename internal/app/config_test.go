@@ -169,6 +169,34 @@ func TestSaveToolFallback_PersistsRecipeWithoutInstalling(t *testing.T) {
 	}
 }
 
+func TestSaveToolFallback_RejectsUnknownTemplateVariable(t *testing.T) {
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("rg", "system")),
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	err := a.SaveToolFallback(context.Background(), "rg", config.FallbackSpec{
+		Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+		Status: config.FallbackStatusUnverified,
+		Commands: config.FallbackCommands{
+			Install: "install {{missing}}",
+			Check:   "command -v {{binary}}",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), `unknown fallback template variable "missing"`) {
+		t.Fatalf("SaveToolFallback err = %v, want unknown template variable", err)
+	}
+	got, loadErr := config.Load(cfgPath)
+	if loadErr != nil {
+		t.Fatalf("config.Load: %v", loadErr)
+	}
+	if fallback := got.Tools["rg"].Fallback; fallback != nil {
+		t.Fatalf("fallback = %+v, want no invalid template saved", fallback)
+	}
+}
+
 func TestSaveToolFallbackFromGitHubSpec_NormalizesSourceAndPersistsRecipe(t *testing.T) {
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
