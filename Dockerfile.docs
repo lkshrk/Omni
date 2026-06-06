@@ -1,0 +1,18 @@
+# syntax=docker/dockerfile:1.23
+
+FROM python:3.13-alpine AS docs-deps
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_ROOT_USER_ACTION=ignore
+
+WORKDIR /app
+
+COPY docs/requirements.txt /tmp/docs-requirements.txt
+RUN pip install --no-cache-dir -r /tmp/docs-requirements.txt
+
+FROM docs-deps AS docs-build
+
+COPY mkdocs.yml ./
+COPY docs ./docs
+
+RUN mkdocs build --strict

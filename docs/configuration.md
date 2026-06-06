@@ -16,7 +16,7 @@ See [State And Files](state-and-files.md) for config path priority, cache path
 priority, environment variables, backups, and disposable cache behavior.
 
 The schema lives in
-[spec/omni.settings.v3.schema.json](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v3.schema.json).
+[spec/omni.settings.v4.schema.json](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v4.schema.json).
 
 ## Smallest Valid File
 
@@ -24,7 +24,7 @@ The smallest legal file is:
 
 ```json
 {
-  "version": 3
+  "version": 4
 }
 ```
 
@@ -37,8 +37,8 @@ automatically by Omni config writes.
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v3.schema.json",
-  "version": 3,
+  "$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v4.schema.json",
+  "version": 4,
   "settings": {
     "fallback_bin_dir": "~/.local/share/omni/fallback/bin",
     "ecosystems": {
@@ -225,10 +225,18 @@ Fallback fields:
 | `bin_dir` | Optional per-tool override for `settings.fallback_bin_dir`. |
 | `release_channel` | Optional release channel metadata for future resolver/editor use. |
 | `recipe` and `platforms` | Structured release asset metadata when available. |
+| `recipe.release_id`, `recipe.tag_name`, `recipe.published_at` | Generated GitHub release provenance and update-detection metadata. Leave alone unless editing manually. |
+| `recipe.asset_id`, `recipe.asset_name`, `recipe.asset_download_url` | Generated current-platform asset provenance and download metadata. Leave alone unless editing manually. |
 | `commands.install` | Shell command used by fallback install. Required for usable fallbacks. |
 | `commands.check` | Shell command used to verify install. Required unless status is `unresolved`. |
 | `commands.uninstall` | Optional shell command for fallback uninstall. If absent, uninstall is unavailable. |
 | `commands.upgrade` | Optional shell command for fallback upgrade. If absent, Omni reuses `install`. |
+
+`omni tools fallback <tool> --from-github owner/repo` writes the fallback only
+after resolving latest stable release metadata and a supported asset for the
+current platform. If resolution fails, the existing config is unchanged. The
+command is config-only; install, sync, and upgrade decide later whether to use
+the saved `system(gh)` recipe.
 
 ## Groups And Hosts
 

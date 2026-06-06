@@ -62,23 +62,19 @@ omni <command> --help
 
 ## Local Build
 
-Install dependencies:
+Build strictly in Docker:
 
 ```sh
-python3 -m venv .tmp/docs-venv
-UV_CACHE_DIR=.tmp/uv-cache uv pip install --python .tmp/docs-venv/bin/python -r docs/requirements.txt
+make docs-build
 ```
 
-Build strictly:
+If Docker is not on `PATH`, pass `DOCKER=/path/to/docker`.
+
+For iterative local serving, install `docs/requirements.txt` in your own Python
+environment and run:
 
 ```sh
-.tmp/docs-venv/bin/mkdocs build --strict
-```
-
-Serve locally:
-
-```sh
-.tmp/docs-venv/bin/mkdocs serve
+mkdocs serve
 ```
 
 ## Link And Structure Scan
