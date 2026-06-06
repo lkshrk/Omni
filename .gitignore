@@ -31,6 +31,8 @@ Desktop.ini
 CLAUDE.md
 AGENTS.md
 GEMINI.md
+.agents/
+.codex/
 .claudeignore
 .claude/
 .omc/
