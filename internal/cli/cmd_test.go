@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -3188,6 +3190,54 @@ func TestToolsFallbackFromGitHub_ResolverFailurePreservesConfig(t *testing.T) {
 	}
 	if spec.Fallback != nil {
 		t.Fatalf("fallback = %+v, want no unresolved draft saved", spec.Fallback)
+	}
+}
+
+func TestToolsFallbackUsesConfiguredGit(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/cli/cli/releases/latest" {
+			t.Fatalf("unexpected GitHub API path %q", r.URL.Path)
+		}
+		http.ServeFile(w, r, "../app/testdata/github_cli_latest_release.json")
+	}))
+	defer server.Close()
+	t.Setenv("OMNI_GITHUB_API_BASE", server.URL)
+
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	withConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"gh": {Provider: "system", Git: "https://github.com/cli/cli"},
+		},
+	})
+	withHost(t, cfgPath)
+
+	var out bytes.Buffer
+	cmd := NewRootCmd()
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "fallback", "gh"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("tools fallback: %v", err)
+	}
+	if !strings.Contains(out.String(), `Configured fallback for logical tool "gh" from gh configured git.`) {
+		t.Fatalf("output = %q, want configured git success summary", out.String())
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	fallback := cfg.Tools["gh"].Fallback
+	if fallback == nil {
+		t.Fatal("fallback missing")
+	}
+	if fallback.Source.Owner != "cli" || fallback.Source.Repo != "cli" {
+		t.Fatalf("source = %+v, want cli/cli", fallback.Source)
+	}
+	if fallback.Recipe.TagName != "v2.93.0" || fallback.Recipe.PublishedAt != "2026-05-27T17:47:41Z" {
+		t.Fatalf("recipe metadata = tag %q published_at %q, want fixture release", fallback.Recipe.TagName, fallback.Recipe.PublishedAt)
 	}
 }
 
