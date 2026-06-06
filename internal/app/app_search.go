@@ -1255,9 +1255,22 @@ func (a *App) listToolsFromConfig(ctx context.Context, cfg *config.RootConfig, p
 	if cfg == nil {
 		return tools, nil
 	}
+	configured := a.configuredToolCacheKeys(ctx, cfg)
 	scope := a.discoveryProviderScope(ctx, cfg, ecosystemProviders)
-	tools = filterUntrackedToolCachesByScope(tools, scope)
+	tools = filterToolCachesByConfigAndScope(tools, configured, scope)
 	return filterIgnoredToolCaches(tools, ignoredToolSet(cfg)), nil
+}
+
+func (a *App) configuredToolCacheKeys(ctx context.Context, cfg *config.RootConfig) map[string]struct{} {
+	entries, _ := a.resolvedToolEntries(ctx, cfg, cfg.Groups)
+	keys := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		keys[resolvedToolKey(entry)] = struct{}{}
+		if entry.InstallWith != "" && entry.InstallWith != entry.Provider {
+			keys[NewToolKey(entry.Name, entry.InstallWith, entry.EffectivePackage()).String()] = struct{}{}
+		}
+	}
+	return keys
 }
 
 type discoveryScope struct {
@@ -1399,13 +1412,20 @@ func filterDiscoveredByScope(discovered []*database.ToolCache, scope discoverySc
 	return out
 }
 
-func filterUntrackedToolCachesByScope(tools []*database.ToolCache, scope discoveryScope) []*database.ToolCache {
+func filterToolCachesByConfigAndScope(tools []*database.ToolCache, configured map[string]struct{}, scope discoveryScope) []*database.ToolCache {
 	if len(tools) == 0 {
 		return tools
 	}
 	out := tools[:0]
 	for _, tool := range tools {
 		if tool == nil {
+			continue
+		}
+		key := NewToolKey(tool.Name, tool.Provider, tool.Package).String()
+		if tool.Tracked && len(configured) > 0 {
+			if _, ok := configured[key]; ok {
+				out = append(out, tool)
+			}
 			continue
 		}
 		if tool.Tracked || scope.allowsDiscovered(tool.Provider, tool.InstalledWith) {
