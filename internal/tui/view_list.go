@@ -535,10 +535,11 @@ func renderToolRowWithProviderPin(p palette, t *database.ToolCache, cols colWidt
 	name := renderNameCell(p, nameStyle, t, rowErr, cols.name, selected)
 	priv := renderPrivilegeCol(privileged, cols.priv, emphasis(p.styleHelp))
 	displayInstalledWith := t.InstalledWith
+	displayProvider := providerForFallbackDisplay(t.Provider, fallbackConcrete)
 	if fallbackConcrete != "" {
 		displayInstalledWith = fallbackConcrete
 	}
-	prov := renderProviderColWithExplicit(p, t.Provider, displayInstalledWith, providerPin, provSystemBin, provPythonBin, provNodeBin, label, cols.prov, selected, ss == syncWrongProv)
+	prov := renderProviderColWithExplicit(p, displayProvider, displayInstalledWith, providerPin, provSystemBin, provPythonBin, provNodeBin, label, cols.prov, selected, ss == syncWrongProv)
 
 	var ver string
 	switch {
@@ -823,18 +824,31 @@ func providerLabelForToolWithPin(t *database.ToolCache, providerPin, fallbackCon
 	if t == nil {
 		return ""
 	}
+	providerName := providerForFallbackDisplay(t.Provider, fallbackConcrete)
 	installedWith := t.InstalledWith
 	if fallbackConcrete != "" {
 		installedWith = fallbackConcrete
 	}
 	return app.ToolProviderDisplayLabel(app.ToolProviderDisplayInput{
-		Provider:               t.Provider,
+		Provider:               providerName,
 		InstalledWith:          installedWith,
 		ExplicitProvider:       providerPin,
 		EffectiveSystemManager: systemBin,
 		EffectivePythonManager: pythonBin,
 		EffectiveNodeManager:   nodeBin,
 	})
+}
+
+func providerForFallbackDisplay(providerName, fallbackConcrete string) string {
+	if fallbackConcrete == "" {
+		return providerName
+	}
+	switch role := app.ToolProviderDisplayRoleFor(providerName); role {
+	case app.ToolProviderDisplayRoleSystem, app.ToolProviderDisplayRoleNode, app.ToolProviderDisplayRolePython:
+		return string(role)
+	default:
+		return providerName
+	}
 }
 
 func providerDisplayTextForToolWithPin(t *database.ToolCache, providerPin, fallbackConcrete, systemBin, pythonBin, nodeBin string) string {

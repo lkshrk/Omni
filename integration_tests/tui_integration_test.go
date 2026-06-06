@@ -5,6 +5,7 @@ package integration_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"github.com/creack/pty"
 
 	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/database"
 )
 
 func TestTUIConfiguredHostStartsDashboard(t *testing.T) {
@@ -38,6 +40,85 @@ func TestTUIConfiguredHostStartsDashboard(t *testing.T) {
 	}
 	if strings.Contains(strings.ToLower(screen), "setup") {
 		t.Fatalf("configured host opened setup instead of dashboard; screen:\n%s", screen)
+	}
+}
+
+func TestTUIFallbackProviderListSmoke(t *testing.T) {
+	bin := buildOmniBinary(t)
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	cache := filepath.Join(root, "cache")
+	configPath := filepath.Join(root, "settings.json")
+	env := isolatedTUIEnv(home, cache)
+
+	if err := os.MkdirAll(cache, 0o755); err != nil {
+		t.Fatalf("create cache: %v", err)
+	}
+	if err := config.Save(configPath, &config.RootConfig{
+		Version:  config.CurrentVersion,
+		Settings: config.Settings{DisabledProviders: []string{"node", "python", "pip"}},
+		Tools: map[string]config.ToolSpec{
+			"rg": {
+				Providers: []config.ToolInstallSpec{{Provider: "apt", Package: "rg"}},
+				Fallback: &config.FallbackSpec{
+					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+					Status: config.FallbackStatusUnverified,
+					Binary: "rg",
+					Commands: config.FallbackCommands{
+						Install: "install rg",
+						Check:   "command -v rg",
+					},
+				},
+			},
+			"jq": {
+				Providers: []config.ToolInstallSpec{{Provider: "apt", Package: "jq"}},
+				Fallback: &config.FallbackSpec{
+					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "jqlang", Repo: "jq"},
+					Status: config.FallbackStatusVerified,
+					Commands: config.FallbackCommands{
+						Check: "command -v jq",
+					},
+				},
+			},
+		},
+		Hosts: map[string][]string{"testhost": {"dev"}},
+		Groups: []*config.GroupConfig{
+			{Name: "testhost", Special: "host"},
+			{Name: "dev", Tools: []config.ToolEntry{{Name: "rg"}, {Name: "jq"}}},
+		},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	seedTUIToolCache(t, cache,
+		&database.ToolCache{Name: "rg", Provider: "apt", Package: "rg", Installed: false, Tracked: true},
+		&database.ToolCache{Name: "jq", Provider: "apt", Package: "jq", Installed: true, InstalledWith: "apt", Version: sql.NullString{String: "1.7", Valid: true}, Tracked: true},
+	)
+	listOut := runOmniOutput(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "tools", "list")
+	if !strings.Contains(listOut, "rg") || !strings.Contains(listOut, "jq") {
+		t.Fatalf("seeded tools are not visible through app list:\n%s", listOut)
+	}
+
+	screen := runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(tty *os.File, capture *lockedBuffer) string {
+		waitForRequiredScreen(t, capture, 6*time.Second, func(text string) bool {
+			return strings.Contains(text, "Dashboard") && strings.Contains(text, "Tools")
+		}, "TUI did not render main tabs")
+		writeTUIKeys(t, tty, "\t")
+		toolsScreen := waitForRequiredScreen(t, capture, 8*time.Second, func(text string) bool {
+			return strings.Contains(text, "rg") &&
+				strings.Contains(text, "system(gh?)") &&
+				strings.Contains(text, "jq") &&
+				strings.Contains(text, "system(apt!)")
+		}, "TUI did not render provider-list fallback/native tool states")
+		writeTUIKeys(t, tty, "f")
+		editorScreen := waitForRequiredScreen(t, capture, 8*time.Second, func(text string) bool {
+			return strings.Contains(text, "Set Fallback: rg") &&
+				strings.Contains(text, "BurntSushi/ripgrep") &&
+				strings.Contains(text, "install rg")
+		}, "TUI did not open fallback editor for missing provider-list tool")
+		return toolsScreen + "\n" + editorScreen
+	})
+	if strings.Contains(strings.ToLower(screen), "error") {
+		t.Fatalf("TUI showed an error during fallback/provider-list smoke; screen:\n%s", screen)
 	}
 }
 
@@ -244,6 +325,11 @@ func runCommand(t *testing.T, dir string, env []string, name string, args ...str
 
 func runOmniCommand(t *testing.T, bin, dir string, env []string, args ...string) {
 	t.Helper()
+	_ = runOmniOutput(t, bin, dir, env, args...)
+}
+
+func runOmniOutput(t *testing.T, bin, dir string, env []string, args ...string) string {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, args...)
@@ -252,6 +338,32 @@ func runOmniCommand(t *testing.T, bin, dir string, env []string, args ...string)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("omni %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return string(out)
+}
+
+func seedTUIToolCache(t *testing.T, cache string, tools ...*database.ToolCache) {
+	t.Helper()
+	db, err := database.Open(filepath.Join(cache, "omni.db"))
+	if err != nil {
+		t.Fatalf("open TUI cache db: %v", err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatalf("migrate TUI cache db: %v", err)
+	}
+	now := time.Now().UTC()
+	for _, tool := range tools {
+		if tool.Package == "" {
+			tool.Package = tool.Name
+		}
+		if tool.LastChecked.IsZero() {
+			tool.LastChecked = now
+		}
+		if err := db.Upsert(ctx, tool); err != nil {
+			t.Fatalf("seed TUI tool cache %s/%s: %v", tool.Provider, tool.Name, err)
+		}
 	}
 }
 

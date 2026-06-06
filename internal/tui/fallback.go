@@ -12,7 +12,6 @@ import (
 
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
-	"github.com/lkshrk/omni/internal/provider"
 )
 
 type fallbackEditorFieldID string
@@ -55,14 +54,27 @@ var fallbackEditorFields = []fallbackEditorField{
 }
 
 func toolFallbackEligible(t *database.ToolCache) bool {
-	if t == nil || t.Provider != provider.EcosystemSystem {
+	if t == nil {
 		return false
 	}
 	return !t.Installed || t.InstalledWith == "gh"
 }
 
-func (m *Model) openFallbackEditor(t *database.ToolCache) tea.Cmd {
+func (m Model) toolFallbackActionEligible(t *database.ToolCache) bool {
 	if !toolFallbackEligible(t) {
+		return false
+	}
+	if t.Provider == "system" {
+		return true
+	}
+	if _, ok := m.toolFallbacks[t.Name]; ok {
+		return true
+	}
+	return fallbackRepoFromToolGit(m.toolGit[t.Name]) != ""
+}
+
+func (m *Model) openFallbackEditor(t *database.ToolCache) tea.Cmd {
+	if !m.toolFallbackActionEligible(t) {
 		return nil
 	}
 	m.fallbackTarget = *t
