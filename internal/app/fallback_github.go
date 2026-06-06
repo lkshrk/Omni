@@ -113,7 +113,7 @@ func (a *App) fetchLatestGitHubRelease(ctx context.Context, owner, repoName stri
 	}
 	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode == http.StatusNotFound {
-		return githubRelease{}, nil
+		return githubRelease{}, fmt.Errorf("github latest release not found for %s/%s", owner, repoName)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return githubRelease{}, fmt.Errorf("github release lookup failed: %s", resp.Status)

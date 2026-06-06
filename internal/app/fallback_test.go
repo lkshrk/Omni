@@ -1028,8 +1028,15 @@ func TestSaveToolFallbackFromGitHub_ResolverFailureDoesNotSaveFallback(t *testin
 		t.Fatalf("config.Save: %v", err)
 	}
 
-	if err := a.SaveToolFallbackFromGitHub(context.Background(), "rg", "BurntSushi/ripgrep"); err == nil {
+	err := a.SaveToolFallbackFromGitHub(context.Background(), "rg", "BurntSushi/ripgrep")
+	if err == nil {
 		t.Fatal("SaveToolFallbackFromGitHub err = nil, want resolver failure")
+	}
+	if !strings.Contains(err.Error(), "github latest release not found for BurntSushi/ripgrep") {
+		t.Fatalf("SaveToolFallbackFromGitHub err = %v, want not found error", err)
+	}
+	if strings.Contains(err.Error(), "published_at") {
+		t.Fatalf("SaveToolFallbackFromGitHub err = %v, want no misleading published_at error", err)
 	}
 	got, err := config.Load(cfgPath)
 	if err != nil {
