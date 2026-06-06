@@ -122,6 +122,64 @@ func TestTUIFallbackProviderListSmoke(t *testing.T) {
 	}
 }
 
+func TestTUIFallbackEditorPrefillsConfiguredGitHint(t *testing.T) {
+	bin := buildOmniBinary(t)
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	cache := filepath.Join(root, "cache")
+	configPath := filepath.Join(root, "settings.json")
+	env := isolatedTUIEnv(home, cache)
+
+	if err := os.MkdirAll(cache, 0o755); err != nil {
+		t.Fatalf("create cache: %v", err)
+	}
+	if err := config.Save(configPath, &config.RootConfig{
+		Version:  config.CurrentVersion,
+		Settings: config.Settings{DisabledProviders: []string{"node", "python", "pip"}},
+		Tools: map[string]config.ToolSpec{
+			"rg": {
+				Providers: []config.ToolInstallSpec{{Provider: "apt", Package: "rg"}},
+				Git:       "https://github.com/BurntSushi/ripgrep",
+			},
+		},
+		Hosts: map[string][]string{"testhost": {"dev"}},
+		Groups: []*config.GroupConfig{
+			{Name: "testhost", Special: "host"},
+			{Name: "dev", Tools: []config.ToolEntry{{Name: "rg"}}},
+		},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	seedTUIToolCache(t, cache,
+		&database.ToolCache{Name: "rg", Provider: "apt", Package: "rg", Installed: false, Tracked: true},
+	)
+	listOut := runOmniOutput(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "tools", "list")
+	if !strings.Contains(listOut, "rg") {
+		t.Fatalf("seeded tool is not visible through app list:\n%s", listOut)
+	}
+
+	screen := runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(tty *os.File, capture *lockedBuffer) string {
+		waitForRequiredScreen(t, capture, 6*time.Second, func(text string) bool {
+			return strings.Contains(text, "Dashboard") && strings.Contains(text, "Tools")
+		}, "TUI did not render main tabs")
+		writeTUIKeys(t, tty, "\t")
+		toolsScreen := waitForRequiredScreen(t, capture, 8*time.Second, func(text string) bool {
+			return strings.Contains(text, "rg") &&
+				strings.Contains(text, "system(apt!)") &&
+				!strings.Contains(text, "system(gh?)")
+		}, "TUI did not render provider-list tool without fallback status")
+		writeTUIKeys(t, tty, "f")
+		editorScreen := waitForRequiredScreen(t, capture, 8*time.Second, func(text string) bool {
+			return strings.Contains(text, "Set Fallback: rg") &&
+				strings.Contains(text, "BurntSushi/ripgrep")
+		}, "TUI did not prefill fallback editor from configured git hint")
+		return toolsScreen + "\n" + editorScreen
+	})
+	if strings.Contains(strings.ToLower(screen), "error") {
+		t.Fatalf("TUI showed an error during configured-git fallback smoke; screen:\n%s", screen)
+	}
+}
+
 func TestTUIIncludesStaticIgnoredDotCandidate(t *testing.T) {
 	bin := buildOmniBinary(t)
 	root := t.TempDir()
