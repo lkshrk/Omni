@@ -1,24 +1,17 @@
-# tools fallback stores an unresolved GitHub fallback recipe
+# tools fallback requires a resolvable GitHub release asset and preserves config on resolver failure
 env OMNI_GITHUB_API_BASE=http://127.0.0.1:1
 exec omni --config settings.json hosts ensure testhost
 
 exec omni --config settings.json tools set rg --provider system --install-with apt
 stdout 'Set logical tool "rg"'
 
-exec omni --config settings.json tools fallback rg --from-github BurntSushi/ripgrep
-stdout 'Configured fallback for logical tool "rg" from gh BurntSushi/ripgrep.'
-exec grep '"fallback"' settings.json
-stdout '"fallback"'
-exec grep '"type": "github"' settings.json
-stdout '"type": "github"'
-exec grep '"owner": "BurntSushi"' settings.json
-stdout '"owner": "BurntSushi"'
-exec grep '"repo": "ripgrep"' settings.json
-stdout '"repo": "ripgrep"'
-exec grep '"status": "unresolved"' settings.json
-stdout '"status": "unresolved"'
-exec grep '"check": "command -v rg"' settings.json
-stdout '"check": "command -v rg"'
+! exec omni --config settings.json tools fallback rg --from-github BurntSushi/ripgrep
+stderr '/repos/BurntSushi/ripgrep/releases/latest'
+exec grep '"provider": "system"' settings.json
+stdout '"provider": "system"'
+exec grep '"install_with": "apt"' settings.json
+stdout '"install_with": "apt"'
+! exec grep '"fallback"' settings.json
 
 ! exec omni --config settings.json tools fallback rg
 stderr 'tools fallback requires --from-github owner/repo'

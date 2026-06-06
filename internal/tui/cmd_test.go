@@ -398,7 +398,7 @@ func TestDoDelete_DeletesConfigEntry(t *testing.T) {
 	}
 }
 
-func TestDoSaveFallback_PersistsGitHubFallback(t *testing.T) {
+func TestDoSaveFallback_ResolverFailurePreservesConfig(t *testing.T) {
 	t.Setenv("OMNI_GITHUB_API_BASE", "http://127.0.0.1:1")
 	prov := &okProvider{name: "apt"}
 	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("rg", "apt")})
@@ -409,26 +409,23 @@ func TestDoSaveFallback_PersistsGitHubFallback(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected fallbackSavedMsg, got %T", msg)
 	}
-	if got.err != nil {
-		t.Fatalf("doSaveFallback: %v", got.err)
+	if got.err == nil || !strings.Contains(got.err.Error(), "/repos/BurntSushi/ripgrep/releases/latest") {
+		t.Fatalf("doSaveFallback err = %v, want GitHub resolver failure", got.err)
 	}
-	if fallback := got.toolFallbacks["rg"]; fallback.Source.Owner != "BurntSushi" || fallback.Source.Repo != "ripgrep" {
-		t.Fatalf("msg.toolFallbacks = %+v, want rg BurntSushi/ripgrep", got.toolFallbacks)
+	if len(got.toolFallbacks) != 0 {
+		t.Fatalf("toolFallbacks = %+v, want no unresolved draft on resolver failure", got.toolFallbacks)
 	}
 
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	fallback := cfg.Tools["rg"].Fallback
-	if fallback == nil {
-		t.Fatal("fallback missing from config")
+	spec := cfg.Tools["rg"]
+	if spec.Provider != "system" || spec.InstallWith != "apt" {
+		t.Fatalf("spec = %+v, want existing tool config preserved", spec)
 	}
-	if fallback.Source.Type != config.FallbackSourceGitHub ||
-		fallback.Source.Owner != "BurntSushi" ||
-		fallback.Source.Repo != "ripgrep" ||
-		fallback.Status != config.FallbackStatusUnresolved {
-		t.Fatalf("fallback = %+v, want unresolved gh BurntSushi/ripgrep", fallback)
+	if spec.Fallback != nil {
+		t.Fatalf("fallback = %+v, want no unresolved draft saved", spec.Fallback)
 	}
 }
 
