@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -443,11 +444,30 @@ func fallbackPackage(name string, spec config.ToolSpec) string {
 
 func parseGitHubRepo(repo string) (string, string, error) {
 	repo = strings.TrimSpace(repo)
-	repo = strings.TrimPrefix(repo, "git@github.com:")
-	repo = strings.TrimPrefix(repo, "https://")
-	repo = strings.TrimPrefix(repo, "http://")
+	if strings.ContainsAny(repo, "?#") {
+		return "", "", fmt.Errorf("github repo must be owner/repo")
+	}
+	if strings.HasPrefix(repo, "git@github.com:") {
+		return parseGitHubRepoPath(strings.TrimPrefix(repo, "git@github.com:"))
+	}
+	if strings.HasPrefix(repo, "http://") || strings.HasPrefix(repo, "https://") {
+		parsed, err := url.Parse(repo)
+		if err != nil || parsed.Host == "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return "", "", fmt.Errorf("github repo must be owner/repo")
+		}
+		host := strings.TrimPrefix(strings.ToLower(parsed.Host), "www.")
+		if host != "github.com" {
+			return "", "", fmt.Errorf("github repo must be owner/repo")
+		}
+		return parseGitHubRepoPath(parsed.Path)
+	}
 	repo = strings.TrimPrefix(repo, "github.com/")
 	repo = strings.TrimPrefix(repo, "www.github.com/")
+	return parseGitHubRepoPath(repo)
+}
+
+func parseGitHubRepoPath(repo string) (string, string, error) {
+	repo = strings.Trim(strings.TrimSpace(repo), "/")
 	repo = strings.TrimSuffix(repo, ".git")
 	parts := strings.Split(repo, "/")
 	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {

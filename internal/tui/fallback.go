@@ -295,10 +295,21 @@ func fallbackRepoFromToolGit(git string) string {
 	if git == "" {
 		return ""
 	}
+	if strings.ContainsAny(git, "?#") {
+		return ""
+	}
 	if strings.HasPrefix(git, "git@github.com:") {
 		repo := strings.TrimSuffix(strings.TrimPrefix(git, "git@github.com:"), ".git")
 		parts := strings.Split(strings.Trim(repo, "/"), "/")
-		if len(parts) >= 2 && parts[0] != "" && parts[1] != "" {
+		if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+			return parts[0] + "/" + parts[1]
+		}
+		return ""
+	}
+	if strings.HasPrefix(git, "github.com/") || strings.HasPrefix(git, "www.github.com/") {
+		path := strings.TrimPrefix(strings.TrimPrefix(git, "github.com/"), "www.github.com/")
+		parts := strings.Split(strings.Trim(strings.TrimSuffix(path, ".git"), "/"), "/")
+		if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
 			return parts[0] + "/" + parts[1]
 		}
 		return ""
@@ -307,12 +318,16 @@ func fallbackRepoFromToolGit(git string) string {
 	if err != nil || parsed.Host == "" {
 		return ""
 	}
-	if !strings.EqualFold(parsed.Host, "github.com") {
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
+		return ""
+	}
+	host := strings.TrimPrefix(strings.ToLower(parsed.Host), "www.")
+	if host != "github.com" {
 		return ""
 	}
 	path := strings.Trim(strings.TrimSuffix(parsed.Path, ".git"), "/")
 	parts := strings.Split(path, "/")
-	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return ""
 	}
 	return parts[0] + "/" + parts[1]
