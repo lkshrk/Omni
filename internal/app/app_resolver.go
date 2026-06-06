@@ -93,6 +93,19 @@ func (a *App) resolvedToolEntries(ctx context.Context, cfg *config.RootConfig, g
 	return tools, warnings
 }
 
+func (a *App) currentResolvedTools(ctx context.Context, cfg *config.RootConfig) ([]resolvedTool, []string) {
+	return a.resolveTools(ctx, cfg, a.currentToolGroups(cfg))
+}
+
+func (a *App) currentResolvedToolEntries(ctx context.Context, cfg *config.RootConfig) ([]config.ToolEntry, []string) {
+	resolved, warnings := a.currentResolvedTools(ctx, cfg)
+	tools := make([]config.ToolEntry, 0, len(resolved))
+	for _, t := range resolved {
+		tools = append(tools, t.entry)
+	}
+	return tools, warnings
+}
+
 func (a *App) currentToolGroups(cfg *config.RootConfig) []*config.GroupConfig {
 	groups, _ := a.currentToolGroupsWithAuthority(cfg)
 	return groups

@@ -33,7 +33,7 @@ func (a *App) CurrentRefreshProviderScanPlan(ctx context.Context) (RefreshProvid
 	if err != nil {
 		return RefreshProviderScanPlan{}, err
 	}
-	resolved, _ := a.resolveTools(ctx, cfg, a.currentToolGroups(cfg))
+	resolved, _ := a.currentResolvedTools(ctx, cfg)
 	providerToolCounts := a.configuredProviderToolCountsFromResolved(resolved)
 	return newRefreshProviderScanPlan(tools, configuredProvidersFromCounts(providerToolCounts), providerToolCounts, resolvedEcosystems), nil
 }

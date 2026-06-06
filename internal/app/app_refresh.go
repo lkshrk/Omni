@@ -231,7 +231,7 @@ func (a *App) RefreshProviderOutdated(ctx context.Context, provName string, refr
 		}
 	}
 	if cfg, cfgErr := a.loadConfig(); cfgErr == nil {
-		resolved, _ := a.resolvedToolEntries(ctx, cfg, a.currentToolGroups(cfg))
+		resolved, _ := a.currentResolvedToolEntries(ctx, cfg)
 		for _, entry := range resolved {
 			opProvider := a.operationProviderName(entry)
 			if entry.Provider != provName && opProvider != provName && entry.InstallWith != provName {
@@ -564,7 +564,7 @@ func (a *App) RefreshDescriptionsWithProgress(ctx context.Context, _ time.Durati
 	stop = profile.Start("app.refresh.descriptions.queue")
 	byProvider := make(map[string][]descriptionPendingTool)
 	queued := make(map[string]bool)
-	tools, _ := a.resolvedToolEntries(ctx, cfg, a.currentToolGroups(cfg))
+	tools, _ := a.currentResolvedToolEntries(ctx, cfg)
 	for _, e := range tools {
 		if ctx.Err() != nil {
 			return ctx.Err()
