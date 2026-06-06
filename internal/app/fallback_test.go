@@ -744,6 +744,65 @@ func TestInstall_DoesNotRetryFailedFallbackWhenNativePackageUnavailable(t *testi
 	}
 }
 
+func TestInstall_DoesNotUseFallbackForMixedRouteSkips(t *testing.T) {
+	ctx := context.Background()
+	apt := &lifecycleProvider{stubProvider: stubProvider{name: "apt", available: true}}
+	brew := &lifecycleProvider{stubProvider: stubProvider{name: "brew", available: false}}
+	fallbackExec := executor.NewMatchMock().WithFallback(executor.MockCall{})
+	a, cfgPath := newImportApp(t, apt, brew)
+	a.SetFallbackExecutor(fallbackExec)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"rg": {
+				Providers: []config.ToolInstallSpec{
+					{Provider: "apt", Package: "ripgrep"},
+					{Provider: "brew", Package: "ripgrep"},
+				},
+				Fallback: &config.FallbackSpec{
+					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+					Status: config.FallbackStatusUnverified,
+					Commands: config.FallbackCommands{
+						Install: "install rg",
+						Check:   "command -v rg",
+					},
+				},
+			},
+		},
+		Groups: []*config.GroupConfig{{Tools: []config.ToolEntry{{Name: "rg"}}}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	if err := a.DB().UpsertPackageAvailability(ctx, database.PackageAvailability{
+		Name:      "rg",
+		Provider:  "apt",
+		Package:   "ripgrep",
+		Available: false,
+		Reason:    "no apt candidate",
+	}); err != nil {
+		t.Fatalf("seed package availability: %v", err)
+	}
+
+	err := a.Install(ctx, "rg", "apt")
+	if err == nil {
+		t.Fatal("Install err = nil, want unavailable route diagnostic")
+	}
+	for _, want := range []string{
+		"native install candidates unavailable for rg",
+		"apt/ripgrep unavailable: no apt candidate",
+		"brew/ripgrep provider unavailable",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Install err = %v, want %q", err, want)
+		}
+	}
+	if fallbackExec.CallCount() != 0 {
+		t.Fatalf("fallback command count = %d, want no fallback install", fallbackExec.CallCount())
+	}
+	if len(apt.stubProvider.installed) != 0 || len(brew.stubProvider.installed) != 0 {
+		t.Fatalf("installed = apt:%+v brew:%+v, want no native install", apt.stubProvider.installed, brew.stubProvider.installed)
+	}
+}
+
 func TestUninstall_UsesFallbackUninstallForGitHubInstall(t *testing.T) {
 	ctx := context.Background()
 	fallbackExec := executor.NewMatchMock(
