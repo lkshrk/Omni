@@ -51,19 +51,23 @@ func (a *App) SaveToolFallbackFromGitHub(ctx context.Context, name, repo string)
 		return err
 	}
 	binary := strings.TrimSpace(name)
-	return a.SaveToolFallback(ctx, name, config.FallbackSpec{
-		Source: config.FallbackSource{
-			Type:  config.FallbackSourceGitHub,
-			Owner: owner,
-			Repo:  repoName,
-			URL:   "https://github.com/" + owner + "/" + repoName,
-		},
-		Status: config.FallbackStatusUnresolved,
-		Binary: binary,
-		Commands: config.FallbackCommands{
-			Check: "command -v " + binary,
-		},
-	})
+	fallback, resolved, err := a.resolveGitHubFallback(ctx, name, owner, repoName)
+	if err != nil || !resolved {
+		fallback = config.FallbackSpec{
+			Status: config.FallbackStatusUnresolved,
+			Binary: binary,
+			Commands: config.FallbackCommands{
+				Check: "command -v " + binary,
+			},
+		}
+	}
+	fallback.Source = config.FallbackSource{
+		Type:  config.FallbackSourceGitHub,
+		Owner: owner,
+		Repo:  repoName,
+		URL:   "https://github.com/" + owner + "/" + repoName,
+	}
+	return a.SaveToolFallback(ctx, name, fallback)
 }
 
 func (a *App) SaveToolFallbackFromGitHubSpec(ctx context.Context, name, repo string, fallback config.FallbackSpec) error {
@@ -264,9 +268,13 @@ func (a *App) fallbackCommandVars(name string, spec config.ToolSpec, fallback *c
 	if fallback.Source.Owner != "" && fallback.Source.Repo != "" {
 		repo = fallback.Source.Owner + "/" + fallback.Source.Repo
 	}
+	assetPath := filepath.Join(cacheDir, fallbackPackage(name, spec))
+	if assetName := strings.TrimSpace(fallback.Recipe.AssetPattern); assetName != "" {
+		assetPath = filepath.Join(cacheDir, filepath.Base(assetName))
+	}
 	return map[string]string{
 		"arch":       runtime.GOARCH,
-		"asset_path": filepath.Join(cacheDir, fallbackPackage(name, spec)),
+		"asset_path": assetPath,
 		"binary":     binary,
 		"bin_dir":    binDir,
 		"cache_dir":  cacheDir,

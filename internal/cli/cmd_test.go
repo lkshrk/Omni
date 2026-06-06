@@ -3150,6 +3150,7 @@ func TestToolsSet_QuarantineOnlyUpdatesExistingSpec(t *testing.T) {
 
 func TestToolsFallbackFromGitHub_PersistsUnresolvedFallback(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
+	t.Setenv("OMNI_GITHUB_API_BASE", "http://127.0.0.1:1")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
