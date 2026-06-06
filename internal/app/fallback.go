@@ -22,6 +22,17 @@ const fallbackInstalledWithGitHub = "gh"
 
 var fallbackTemplatePattern = regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}`)
 
+var fallbackTemplateVariables = map[string]struct{}{
+	"arch":       {},
+	"asset_path": {},
+	"binary":     {},
+	"bin_dir":    {},
+	"cache_dir":  {},
+	"os":         {},
+	"repo":       {},
+	"version":    {},
+}
+
 func (a *App) SetFallbackExecutor(exec executor.Executor) {
 	a.fallbackExec = exec
 }
@@ -32,6 +43,9 @@ func (a *App) SaveToolFallback(_ context.Context, name string, fallback config.F
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return fmt.Errorf("tool name is required")
+	}
+	if err := validateFallbackCommandTemplates(name, fallback.Commands); err != nil {
+		return err
 	}
 	return a.withConfig(func(cfg *config.RootConfig) error {
 		if cfg.Tools == nil {
@@ -315,6 +329,20 @@ func (a *App) renderFallbackCommand(name string, spec config.ToolSpec, fallback 
 		return "", renderErr
 	}
 	return rendered, nil
+}
+
+func validateFallbackCommandTemplates(name string, commands config.FallbackCommands) error {
+	for _, command := range []string{commands.Install, commands.Check, commands.Uninstall, commands.Upgrade, commands.Version} {
+		for _, match := range fallbackTemplatePattern.FindAllStringSubmatch(command, -1) {
+			if len(match) < 2 {
+				continue
+			}
+			if _, ok := fallbackTemplateVariables[match[1]]; !ok {
+				return fmt.Errorf("fallback %s: unknown fallback template variable %q", name, match[1])
+			}
+		}
+	}
+	return nil
 }
 
 func (a *App) fallbackCommandVars(name string, spec config.ToolSpec, fallback *config.FallbackSpec) (map[string]string, error) {

@@ -525,6 +525,39 @@ func TestDoSaveFallbackEditor_InvalidRepoReturnsError(t *testing.T) {
 	}
 }
 
+func TestDoSaveFallbackEditor_InvalidTemplateReturnsError(t *testing.T) {
+	prov := &okProvider{name: "apt"}
+	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("rg", "apt")})
+	m := modelForCmds(a)
+	m.fallbackEditor = fallbackEditorState{
+		fields: map[fallbackEditorFieldID]string{
+			fallbackFieldRepo:           "BurntSushi/ripgrep",
+			fallbackFieldBinary:         "rg",
+			fallbackFieldInstallCommand: "install {{missing}}",
+			fallbackFieldCheckCommand:   "command -v {{binary}}",
+		},
+	}
+
+	msg := m.doSaveFallbackEditor("rg")()
+	got, ok := msg.(fallbackSavedMsg)
+	if !ok {
+		t.Fatalf("expected fallbackSavedMsg, got %T", msg)
+	}
+	if got.err == nil || !strings.Contains(got.err.Error(), `unknown fallback template variable "missing"`) {
+		t.Fatalf("doSaveFallbackEditor err = %v, want unknown template variable", got.err)
+	}
+	if len(got.toolFallbacks) != 0 {
+		t.Fatalf("toolFallbacks = %+v, want none on invalid template", got.toolFallbacks)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if fallback := cfg.Tools["rg"].Fallback; fallback != nil {
+		t.Fatalf("fallback = %+v, want no invalid template saved", fallback)
+	}
+}
+
 func TestDoDelete_RefreshesToolMembershipState(t *testing.T) {
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
