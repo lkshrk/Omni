@@ -34,6 +34,7 @@ type resolvedTool struct {
 	entry       config.ToolEntry
 	memberships []string
 	taps        []string
+	route       installRoute
 }
 
 type installRouteKind string
@@ -58,9 +59,10 @@ type installRouteSkip struct {
 }
 
 type installRoute struct {
-	Kind    installRouteKind
-	Install config.ToolInstallSpec
-	Skipped []installRouteSkip
+	Kind               installRouteKind
+	Install            config.ToolInstallSpec
+	Skipped            []installRouteSkip
+	FallbackConfigured bool
 }
 
 func (a *App) resolveTools(ctx context.Context, cfg *config.RootConfig, groups []*config.GroupConfig) ([]resolvedTool, []string) {
@@ -97,7 +99,8 @@ func (a *App) resolveTools(ctx context.Context, cfg *config.RootConfig, groups [
 			warnings = append(warnings, fmt.Sprintf("tool %q is referenced by a group but has no logical spec", name))
 			continue
 		}
-		install := a.resolveInstallSpecWithAvailability(ctx, name, spec, availability)
+		route := a.planInstallRoute(ctx, name, spec, availability)
+		install := route.Install
 		entry := spec.ToToolEntry(name, install)
 		if toolNameIgnored(ignored, name) || entry.Ignore {
 			continue
@@ -106,6 +109,7 @@ func (a *App) resolveTools(ctx context.Context, cfg *config.RootConfig, groups [
 			entry:       entry,
 			memberships: memberships[name],
 			taps:        append([]string(nil), spec.Taps...),
+			route:       route,
 		})
 	}
 	return resolved, warnings
@@ -159,11 +163,11 @@ func (a *App) resolveInstallSpecWithAvailability(ctx context.Context, logicalNam
 func (a *App) planInstallRoute(ctx context.Context, logicalName string, spec config.ToolSpec, availability map[string]bool) installRoute {
 	hostname := currentHostname()
 	if install, ok := spec.Hosts[hostname]; ok {
-		return installRoute{Kind: installRouteNative, Install: install}
+		return installRoute{Kind: installRouteNative, Install: normalizeInstallRouteCandidate(logicalName, spec, install), FallbackConfigured: spec.Fallback != nil}
 	}
 	if short := shortHostname(hostname); short != hostname {
 		if install, ok := spec.Hosts[short]; ok {
-			return installRoute{Kind: installRouteNative, Install: install}
+			return installRoute{Kind: installRouteNative, Install: normalizeInstallRouteCandidate(logicalName, spec, install), FallbackConfigured: spec.Fallback != nil}
 		}
 	}
 
@@ -174,8 +178,9 @@ func (a *App) planInstallRoute(ctx context.Context, logicalName string, spec con
 	}
 	skipped := make([]installRouteSkip, 0, len(candidates))
 	for _, candidate := range candidates {
+		candidate = normalizeInstallRouteCandidate(logicalName, spec, candidate)
 		if usable, skip := a.installCandidateUsableCached(ctx, logicalName, candidate, availability); usable {
-			return installRoute{Kind: installRouteNative, Install: candidate, Skipped: skipped}
+			return installRoute{Kind: installRouteNative, Install: candidate, Skipped: skipped, FallbackConfigured: spec.Fallback != nil}
 		} else {
 			skipped = append(skipped, skip)
 		}
@@ -185,9 +190,16 @@ func (a *App) planInstallRoute(ctx context.Context, logicalName string, spec con
 		if spec.Fallback != nil && allInstallRouteSkipsArePackageUnavailable(skipped, len(candidates)) {
 			kind = installRouteFallbackEligible
 		}
-		return installRoute{Kind: kind, Install: candidates[0], Skipped: skipped}
+		return installRoute{Kind: kind, Install: normalizeInstallRouteCandidate(logicalName, spec, candidates[0]), Skipped: skipped, FallbackConfigured: spec.Fallback != nil}
 	}
-	return installRoute{Kind: installRouteUnavailable, Install: defaultSpec}
+	return installRoute{Kind: installRouteUnavailable, Install: normalizeInstallRouteCandidate(logicalName, spec, defaultSpec), FallbackConfigured: spec.Fallback != nil}
+}
+
+func normalizeInstallRouteCandidate(logicalName string, spec config.ToolSpec, install config.ToolInstallSpec) config.ToolInstallSpec {
+	if install.Package == "" && spec.Package != "" {
+		install.Package = spec.Package
+	}
+	return install
 }
 
 func allInstallRouteSkipsArePackageUnavailable(skipped []installRouteSkip, candidates int) bool {

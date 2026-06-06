@@ -59,12 +59,12 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 	// Resolve once and derive both the entry list (for the syncer) and the
 	// detailed view (for tap collection) from the same pass.
 	resolvedDetailed, warnings := a.resolveTools(ctx, cfg, groups)
+	var fallbackOps []isync.SyncOp
+	resolvedDetailed, fallbackOps = a.syncNativeUnavailableFallbacks(ctx, resolvedDetailed, opts)
 	resolvedTools := make([]config.ToolEntry, 0, len(resolvedDetailed))
 	for _, t := range resolvedDetailed {
 		resolvedTools = append(resolvedTools, t.entry)
 	}
-	var fallbackOps []isync.SyncOp
-	resolvedTools, fallbackOps = a.syncNativeUnavailableFallbacks(ctx, resolvedTools, opts)
 	taps := collectResolvedTaps(resolvedDetailed)
 	if err = a.syncTaps(ctx, taps, opts.DryRun); err != nil {
 		return nil, err
@@ -152,24 +152,26 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 	return result, nil
 }
 
-func (a *App) syncNativeUnavailableFallbacks(ctx context.Context, tools []config.ToolEntry, opts isync.SyncOptions) ([]config.ToolEntry, []isync.SyncOp) {
-	filtered := make([]config.ToolEntry, 0, len(tools))
+func (a *App) syncNativeUnavailableFallbacks(ctx context.Context, tools []resolvedTool, opts isync.SyncOptions) ([]resolvedTool, []isync.SyncOp) {
+	filtered := make([]resolvedTool, 0, len(tools))
 	var ops []isync.SyncOp
-	for _, entry := range tools {
-		opProvider := a.operationProviderName(entry)
-		prov, ok := a.registry.Get(opProvider)
-		if !ok {
-			filtered = append(filtered, entry)
-			continue
-		}
-		unavailable, availabilityProvider, reason, err := a.nativePackageUnavailable(ctx, entry, prov, opProvider)
-		if err != nil || !unavailable {
-			filtered = append(filtered, entry)
+	for _, resolved := range tools {
+		entry := resolved.entry
+		if resolved.route.Kind == installRouteNative {
+			filtered = append(filtered, resolved)
 			continue
 		}
 		tool := provider.Tool{Name: entry.Name, Provider: entry.Provider, Package: entry.EffectivePackage(), Options: entry.Options}
+		if resolved.route.Kind == installRouteUnavailable && resolved.route.FallbackConfigured {
+			ops = append(ops, isync.SyncOp{Tool: tool, Kind: isync.OpFailed, Err: errors.New(installRouteUnavailableMessage(entry.Name, resolved.route))})
+			continue
+		}
+		if resolved.route.Kind == installRouteUnavailable {
+			filtered = append(filtered, resolved)
+			continue
+		}
 		if opts.RetryFailed && !a.cachedFailureExists(ctx, entry) {
-			filtered = append(filtered, entry)
+			filtered = append(filtered, resolved)
 			continue
 		}
 		fallbackUsable, fallbackErr := a.automaticFallbackUsableForTool(entry.Name, opts.RetryFailed)
@@ -178,10 +180,7 @@ func (a *App) syncNativeUnavailableFallbacks(ctx context.Context, tools []config
 			continue
 		}
 		if !fallbackUsable {
-			msg := fmt.Sprintf("native package %s is unavailable from %s", entry.EffectivePackage(), availabilityProvider)
-			if strings.TrimSpace(reason) != "" {
-				msg += ": " + strings.TrimSpace(reason)
-			}
+			msg := installRouteUnavailableMessage(entry.Name, resolved.route)
 			ops = append(ops, isync.SyncOp{Tool: tool, Kind: isync.OpFailed, Err: fmt.Errorf("%s; edit fallback before retrying", msg)})
 			continue
 		}
@@ -235,6 +234,37 @@ func (a *App) fallbackInstalledCached(ctx context.Context, entry config.ToolEntr
 		return true, cached.Version.String
 	}
 	return true, ""
+}
+
+func installRouteUnavailableMessage(name string, route installRoute) string {
+	if len(route.Skipped) == 1 && route.Skipped[0].Reason == installRouteSkipPackageUnavailable {
+		skip := route.Skipped[0]
+		msg := fmt.Sprintf("native package %s is unavailable from %s", skip.Install.EffectivePackage(name), skip.Install.Provider)
+		if strings.TrimSpace(skip.Detail) != "" {
+			msg += ": " + strings.TrimSpace(skip.Detail)
+		}
+		return msg
+	}
+	parts := make([]string, 0, len(route.Skipped))
+	for _, skip := range route.Skipped {
+		pkg := skip.Install.EffectivePackage(name)
+		switch skip.Reason {
+		case installRouteSkipPackageUnavailable:
+			part := fmt.Sprintf("%s/%s unavailable", skip.Install.Provider, pkg)
+			if strings.TrimSpace(skip.Detail) != "" {
+				part += ": " + strings.TrimSpace(skip.Detail)
+			}
+			parts = append(parts, part)
+		case installRouteSkipProviderUnavailable:
+			parts = append(parts, fmt.Sprintf("%s/%s provider unavailable", skip.Install.Provider, pkg))
+		default:
+			parts = append(parts, fmt.Sprintf("%s/%s unavailable", skip.Install.Provider, pkg))
+		}
+	}
+	if len(parts) == 0 {
+		return fmt.Sprintf("no native install route is available for %s", name)
+	}
+	return fmt.Sprintf("native install candidates unavailable for %s: %s", name, strings.Join(parts, "; "))
 }
 
 func (a *App) SyncWithState(ctx context.Context, opts isync.SyncOptions) (*SyncStateResult, error) {
@@ -554,9 +584,10 @@ func (a *App) Install(ctx context.Context, name, providerName string) error {
 	} else if ignored {
 		return fmt.Errorf("tool %q is ignored", name)
 	}
-	if t, opProvider, ok, err := a.configuredOperationTool(ctx, name, providerName); err != nil {
+	if resolved, opProvider, ok, err := a.configuredOperationResolvedTool(ctx, name, providerName); err != nil {
 		return err
 	} else if ok {
+		t := resolved.entry
 		prov, ok := a.registry.Get(opProvider)
 		if !ok {
 			return fmt.Errorf("unknown provider %q", opProvider)
@@ -569,9 +600,8 @@ func (a *App) Install(ctx context.Context, name, providerName string) error {
 			return fmt.Errorf("provider %q is not available on this system", opProvider)
 		}
 		tool := a.operationTool(t, opProvider)
-		if unavailable, availabilityProvider, reason, err := a.nativePackageUnavailable(ctx, t, prov, opProvider); err != nil {
-			return err
-		} else if unavailable {
+		switch resolved.route.Kind {
+		case installRouteFallbackEligible:
 			fallbackUsable, err := a.automaticFallbackUsableForTool(t.Name, false)
 			if err != nil {
 				return err
@@ -579,11 +609,9 @@ func (a *App) Install(ctx context.Context, name, providerName string) error {
 			if fallbackUsable {
 				return a.InstallToolFallback(ctx, t.Name)
 			}
-			msg := fmt.Sprintf("native package %s is unavailable from %s", t.EffectivePackage(), availabilityProvider)
-			if strings.TrimSpace(reason) != "" {
-				msg += ": " + strings.TrimSpace(reason)
-			}
-			return fmt.Errorf("%s; edit fallback before retrying", msg)
+			return fmt.Errorf("%s; edit fallback before retrying", installRouteUnavailableMessage(t.Name, resolved.route))
+		case installRouteUnavailable:
+			return fmt.Errorf("%s; edit fallback before retrying", installRouteUnavailableMessage(t.Name, resolved.route))
 		}
 		if err := installWithProvider(ctx, prov, tool, t.InstallWith); err != nil {
 			a.recordPrivilegeError(ctx, t.Name, t.Provider, t.EffectivePackage(), err)
@@ -677,21 +705,6 @@ func disabledProviderSet(groups ...[]string) map[string]bool {
 	return disabled
 }
 
-func (a *App) nativePackageUnavailable(ctx context.Context, t config.ToolEntry, prov provider.Provider, opProvider string) (bool, string, string, error) {
-	availabilityProvider := installedWithForOperation(ctx, prov, opProvider, t.InstallWith)
-	if availabilityProvider == "" {
-		availabilityProvider = opProvider
-	}
-	availability, err := a.readDB().GetPackageAvailability(ctx, t.Name, availabilityProvider, t.EffectivePackage())
-	if err == nil {
-		return !availability.Available, availabilityProvider, availability.Reason, nil
-	}
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, availabilityProvider, "", nil
-	}
-	return false, availabilityProvider, "", err
-}
-
 func (a *App) InstallWithState(ctx context.Context, name, providerName string) (*ToolGroupMutationState, error) {
 	return a.toolGroupMutationStateAfter(ctx, func() error {
 		return a.Install(ctx, name, providerName)
@@ -699,30 +712,38 @@ func (a *App) InstallWithState(ctx context.Context, name, providerName string) (
 }
 
 func (a *App) configuredOperationTool(ctx context.Context, name, providerName string) (config.ToolEntry, string, bool, error) {
+	resolved, opProvider, ok, err := a.configuredOperationResolvedTool(ctx, name, providerName)
+	if err != nil || !ok {
+		return config.ToolEntry{}, opProvider, ok, err
+	}
+	return resolved.entry, opProvider, true, nil
+}
+
+func (a *App) configuredOperationResolvedTool(ctx context.Context, name, providerName string) (resolvedTool, string, bool, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
-		return config.ToolEntry{}, "", false, fmt.Errorf("loading config: %w", err)
+		return resolvedTool{}, "", false, fmt.Errorf("loading config: %w", err)
 	}
-	tools, _ := a.currentResolvedToolEntries(ctx, cfg)
-	var matches []config.ToolEntry
+	tools, _ := a.currentResolvedTools(ctx, cfg)
+	var matches []resolvedTool
 	for _, t := range tools {
-		if t.Name != name {
+		if t.entry.Name != name {
 			continue
 		}
-		if providerName != "" && !a.installSpecMatchesProvider(ctx, config.ToolInstallSpec{Provider: t.Provider, InstallWith: t.InstallWith}, providerName) {
+		if providerName != "" && !a.installSpecMatchesProvider(ctx, config.ToolInstallSpec{Provider: t.entry.Provider, InstallWith: t.entry.InstallWith}, providerName) {
 			continue
 		}
 		matches = append(matches, t)
 	}
 	if len(matches) == 0 {
-		return config.ToolEntry{}, "", false, nil
+		return resolvedTool{}, "", false, nil
 	}
 	if len(matches) > 1 && providerName == "" {
-		return config.ToolEntry{}, "", false, fmt.Errorf("tool %q has multiple resolved providers; pass --provider", name)
+		return resolvedTool{}, "", false, fmt.Errorf("tool %q has multiple resolved providers; pass --provider", name)
 	}
-	t := matches[0]
-	opProvider := a.operationProviderName(t)
-	return t, opProvider, true, nil
+	resolved := matches[0]
+	opProvider := a.operationProviderName(resolved.entry)
+	return resolved, opProvider, true, nil
 }
 
 func installedWithForOperation(ctx context.Context, prov provider.Provider, opProvider, installWith string) string {
