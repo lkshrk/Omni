@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/provider"
 )
 
@@ -80,5 +82,100 @@ func TestResolveToolsCachesProviderAvailabilityPerPass(t *testing.T) {
 	_, _ = a.resolveTools(ctx, cfg, cfg.Groups)
 	if unavailable.calls != 2 || available.calls != 2 {
 		t.Fatalf("availability cache escaped pass: missing=%d available=%d, want 2/2", unavailable.calls, available.calls)
+	}
+}
+
+func TestPlanInstallRoute_SelectsLaterCandidateWhenPackageUnavailable(t *testing.T) {
+	ctx := context.Background()
+	apt := &availabilityCountingProvider{name: "apt", available: true}
+	brew := &availabilityCountingProvider{name: "brew", available: true}
+	a := New(filepath.Join(t.TempDir(), "settings.json"))
+	if err := a.InitTestMode(ctx, apt, brew); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	defer a.Close() //nolint:errcheck
+	if err := a.DB().UpsertPackageAvailability(ctx, database.PackageAvailability{
+		Name:      "rg",
+		Provider:  "apt",
+		Package:   "ripgrep",
+		Available: false,
+		Reason:    "no apt candidate",
+		CheckedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("seed apt availability: %v", err)
+	}
+	if err := a.DB().UpsertPackageAvailability(ctx, database.PackageAvailability{
+		Name:      "rg",
+		Provider:  "brew",
+		Package:   "ripgrep",
+		Available: true,
+		CheckedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("seed brew availability: %v", err)
+	}
+
+	route := a.planInstallRoute(ctx, "rg", config.ToolSpec{
+		Providers: []config.ToolInstallSpec{
+			{Provider: "apt", Package: "ripgrep"},
+			{Provider: "brew", Package: "ripgrep"},
+		},
+	}, make(map[string]bool))
+
+	if route.Kind != installRouteNative {
+		t.Fatalf("route kind = %q, want native", route.Kind)
+	}
+	if route.Install.Provider != "brew" {
+		t.Fatalf("route install = %+v, want brew candidate", route.Install)
+	}
+	if len(route.Skipped) != 1 || route.Skipped[0].Reason != installRouteSkipPackageUnavailable || route.Skipped[0].Install.Provider != "apt" {
+		t.Fatalf("skipped = %+v, want apt package-unavailable skip", route.Skipped)
+	}
+}
+
+func TestPlanInstallRoute_MarksFallbackEligibleWhenAllNativeCandidatesUnavailable(t *testing.T) {
+	ctx := context.Background()
+	apt := &availabilityCountingProvider{name: "apt", available: true}
+	brew := &availabilityCountingProvider{name: "brew", available: true}
+	a := New(filepath.Join(t.TempDir(), "settings.json"))
+	if err := a.InitTestMode(ctx, apt, brew); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	defer a.Close() //nolint:errcheck
+	for _, providerName := range []string{"apt", "brew"} {
+		if err := a.DB().UpsertPackageAvailability(ctx, database.PackageAvailability{
+			Name:      "rg",
+			Provider:  providerName,
+			Package:   "ripgrep",
+			Available: false,
+			Reason:    "no " + providerName + " candidate",
+			CheckedAt: time.Now(),
+		}); err != nil {
+			t.Fatalf("seed %s availability: %v", providerName, err)
+		}
+	}
+
+	route := a.planInstallRoute(ctx, "rg", config.ToolSpec{
+		Providers: []config.ToolInstallSpec{
+			{Provider: "apt", Package: "ripgrep"},
+			{Provider: "brew", Package: "ripgrep"},
+		},
+		Fallback: &config.FallbackSpec{
+			Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+			Status: config.FallbackStatusUnverified,
+			Commands: config.FallbackCommands{
+				Install: "install rg",
+				Check:   "command -v rg",
+			},
+		},
+	}, make(map[string]bool))
+
+	if route.Kind != installRouteFallbackEligible {
+		t.Fatalf("route kind = %q, want fallback eligible", route.Kind)
+	}
+	if route.Install.Provider != "apt" {
+		t.Fatalf("route install = %+v, want first candidate for fallback cache identity", route.Install)
+	}
+	if len(route.Skipped) != 2 {
+		t.Fatalf("skipped = %+v, want both native candidates skipped", route.Skipped)
 	}
 }

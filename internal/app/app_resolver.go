@@ -36,6 +36,33 @@ type resolvedTool struct {
 	taps        []string
 }
 
+type installRouteKind string
+
+const (
+	installRouteNative           installRouteKind = "native"
+	installRouteFallbackEligible installRouteKind = "fallback"
+	installRouteUnavailable      installRouteKind = "unavailable"
+)
+
+type installRouteSkipReason string
+
+const (
+	installRouteSkipProviderUnavailable installRouteSkipReason = "provider-unavailable"
+	installRouteSkipPackageUnavailable  installRouteSkipReason = "package-unavailable"
+)
+
+type installRouteSkip struct {
+	Install config.ToolInstallSpec
+	Reason  installRouteSkipReason
+	Detail  string
+}
+
+type installRoute struct {
+	Kind    installRouteKind
+	Install config.ToolInstallSpec
+	Skipped []installRouteSkip
+}
+
 func (a *App) resolveTools(ctx context.Context, cfg *config.RootConfig, groups []*config.GroupConfig) ([]resolvedTool, []string) {
 	if cfg == nil {
 		return nil, nil
@@ -126,13 +153,17 @@ func (a *App) resolveInstallSpec(ctx context.Context, logicalName string, spec c
 }
 
 func (a *App) resolveInstallSpecWithAvailability(ctx context.Context, logicalName string, spec config.ToolSpec, availability map[string]bool) config.ToolInstallSpec {
+	return a.planInstallRoute(ctx, logicalName, spec, availability).Install
+}
+
+func (a *App) planInstallRoute(ctx context.Context, logicalName string, spec config.ToolSpec, availability map[string]bool) installRoute {
 	hostname := currentHostname()
 	if install, ok := spec.Hosts[hostname]; ok {
-		return install
+		return installRoute{Kind: installRouteNative, Install: install}
 	}
 	if short := shortHostname(hostname); short != hostname {
 		if install, ok := spec.Hosts[short]; ok {
-			return install
+			return installRoute{Kind: installRouteNative, Install: install}
 		}
 	}
 
@@ -141,29 +172,51 @@ func (a *App) resolveInstallSpecWithAvailability(ctx context.Context, logicalNam
 	if len(candidates) == 0 {
 		candidates = append([]config.ToolInstallSpec{defaultSpec}, spec.Variants...)
 	}
+	skipped := make([]installRouteSkip, 0, len(candidates))
 	for _, candidate := range candidates {
-		if a.installCandidateUsableCached(ctx, logicalName, candidate, availability) {
-			return candidate
+		if usable, skip := a.installCandidateUsableCached(ctx, logicalName, candidate, availability); usable {
+			return installRoute{Kind: installRouteNative, Install: candidate, Skipped: skipped}
+		} else {
+			skipped = append(skipped, skip)
 		}
 	}
 	if len(candidates) > 0 {
-		return candidates[0]
+		kind := installRouteUnavailable
+		if spec.Fallback != nil && allInstallRouteSkipsArePackageUnavailable(skipped, len(candidates)) {
+			kind = installRouteFallbackEligible
+		}
+		return installRoute{Kind: kind, Install: candidates[0], Skipped: skipped}
 	}
-	return defaultSpec
+	return installRoute{Kind: installRouteUnavailable, Install: defaultSpec}
 }
 
-func (a *App) installCandidateUsableCached(ctx context.Context, logicalName string, candidate config.ToolInstallSpec, availability map[string]bool) bool {
-	if !a.providerUsableCached(ctx, candidate.Provider, availability) {
+func allInstallRouteSkipsArePackageUnavailable(skipped []installRouteSkip, candidates int) bool {
+	if len(skipped) != candidates || candidates == 0 {
 		return false
+	}
+	for _, skip := range skipped {
+		if skip.Reason != installRouteSkipPackageUnavailable {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *App) installCandidateUsableCached(ctx context.Context, logicalName string, candidate config.ToolInstallSpec, availability map[string]bool) (bool, installRouteSkip) {
+	if !a.providerUsableCached(ctx, candidate.Provider, availability) {
+		return false, installRouteSkip{Install: candidate, Reason: installRouteSkipProviderUnavailable}
 	}
 	pkg := candidate.EffectivePackage(logicalName)
 	cached, err := a.readDB().GetPackageAvailability(ctx, logicalName, candidate.Provider, pkg)
 	if err == nil {
-		return cached.Available
+		if cached.Available {
+			return true, installRouteSkip{}
+		}
+		return false, installRouteSkip{Install: candidate, Reason: installRouteSkipPackageUnavailable, Detail: cached.Reason}
 	}
 	// Only an explicit unavailable package probe blocks a candidate. Missing or
 	// unreadable availability should still try native before considering fallback.
-	return true
+	return true, installRouteSkip{}
 }
 
 func (a *App) providerUsableCached(ctx context.Context, providerName string, availability map[string]bool) bool {
