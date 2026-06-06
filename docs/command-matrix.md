@@ -99,7 +99,7 @@ Important flags:
 | `--group` | `install`, `sync`, `import`, `list`, `add` | Target, filter, or assign a reusable group explicitly. |
 | `--force` | `install` | Skip bootstrap and host assignment checks for an explicit install path. |
 | `--provider` | `add`, `set`, `install`, `list`, `search`, `sync`, `switch --reinstall-default` | Scope command behavior to one provider where supported. |
-| `--from-github` | `fallback` | Save a GitHub fallback source as `owner/repo`. Does not install. |
+| `--from-github` | `fallback` | Resolve and save a GitHub fallback recipe from `owner/repo`. Strict, config-only, and does not install. |
 | `--install-with` | `add`, `set` | Pin one logical tool to a concrete manager. |
 | `--host` | `set` | Boolean flag; write a host-specific tool override for the current host. |
 | `--from`, `--to` | `switch` | Move one tool between concrete managers or providers. |

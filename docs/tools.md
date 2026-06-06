@@ -97,17 +97,23 @@ Fallbacks let a configured `system` tool install from GitHub when the current
 system package manager cannot provide it. They are not a general package search
 path and they are only used for logical tools that already exist in config.
 
-Save a GitHub fallback source explicitly:
+Generate a GitHub fallback explicitly:
 
 ```sh
 omni tools fallback rg --from-github BurntSushi/ripgrep
 ```
 
-This writes `settings.json` only. It does not install the tool immediately.
+This resolves the latest stable GitHub release, selects an asset for the
+current OS/architecture, and writes `settings.json` only. It does not install
+the tool immediately. Resolution is strict: if Omni cannot read the release
+metadata or cannot find a supported current-platform asset, the command fails
+and leaves the existing config unchanged.
+
 Later `tools install <tool>` and `tools sync` still try the native system
 manager first. They use the saved fallback only when Omni has explicit cached
 evidence that the concrete manager, such as `apt` or `dnf`, cannot provide the
-configured package.
+configured package. GitHub fallback is not a normal background search path and
+does not make `gh` the preferred package manager for native-owned rows.
 
 Use `f fallback` in the TUI to edit the materialized recipe after choosing a
 GitHub source. The TUI editor exposes the repo, binary, bin dir, asset pattern,
@@ -128,6 +134,13 @@ availability is known to be missing. `tools sync --retry-failed` can rerun a
 previously failed fallback recipe unchanged. If the native manager becomes able
 to install the package again, native install remains the preferred path.
 
+Refresh/update detection applies only to fallback-installed `system(gh)` rows
+with complete saved GitHub release metadata. Omni marks the tool outdated only
+when the latest GitHub release has a strictly newer `published_at` timestamp and
+also has a supported asset for the current platform. Same, older, incomplete,
+or unsupported latest releases do not mark the row outdated. Native-owned rows
+are still handled by their native providers.
+
 Fallback uninstall is available only when the recipe has an uninstall command.
 Without one, Omni reports that uninstall is not available instead of guessing
 how to remove files.
@@ -142,9 +155,13 @@ omni tools upgrade --all --force
 
 Upgrade uses the concrete manager recorded in cache when available. That avoids
 uninstalling with one manager after a different manager installed the package.
-Fallback-installed `system(gh)` tools use the saved fallback upgrade command,
-or the install command when no separate upgrade command exists, then run the
-required check command again.
+Fallback-installed `system(gh)` tools marked outdated re-resolve the latest
+GitHub release in memory before upgrade, then use the refreshed upgrade command
+or install command and run the required check command again. Omni persists the
+refreshed recipe only after the upgrade and check both succeed. If release
+lookup, upgrade, or check fails, the old recipe stays in config, status becomes
+`failed`, and the outdated marker remains so an explicit retry can use the same
+state.
 When `settings.update_quarantine` is set, upgrades are skipped until the package
 manager's own metadata says the latest version is older than the configured
 duration. Missing PM date metadata blocks the update; `--force` is the explicit

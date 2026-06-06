@@ -56,25 +56,24 @@ version just because generated schema output changed.
 
 ## Documentation
 
-Local docs commands use `uv`.
-
-Install docs dependencies:
-
-```sh
-python3 -m venv .tmp/docs-venv
-uv pip install --python .tmp/docs-venv/bin/python -r docs/requirements.txt
-```
-
-Serve locally:
-
-```sh
-.tmp/docs-venv/bin/mkdocs serve
-```
+Strict docs builds run in the docs Docker image.
 
 Build strictly:
 
 ```sh
-.tmp/docs-venv/bin/mkdocs build --strict
+make docs-build
+```
+
+If Docker Desktop is installed but `docker` is not on `PATH`, pass the binary:
+
+```sh
+make docs-build DOCKER=/Applications/Docker.app/Contents/Resources/bin/docker
+```
+
+For iterative local serving, install MkDocs into your own environment and run:
+
+```sh
+mkdocs serve
 ```
 
 The `Docs` GitHub Actions workflow builds the MkDocs site on pull requests and
@@ -104,4 +103,4 @@ notes. Release automation is CI-gated by commit SHA.
 - [Documentation maintenance](documentation-maintenance.md)
 - [Test matrix](test-matrix.md)
 - [Contributing guide](https://github.com/lkshrk/omni/blob/main/CONTRIBUTING.md)
-- [Settings schema](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v3.schema.json)
+- [Settings schema](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v4.schema.json)

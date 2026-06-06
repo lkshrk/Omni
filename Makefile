@@ -13,12 +13,13 @@ DEV_CACHE   ?= $(DEV_DIR)/cache
 DEV_GOCACHE ?= $(DEV_DIR)/go-build
 TEST_SAFE   := bash scripts/run-test-safe.sh
 ARGS        ?= --help
+DOCKER      ?= docker
 
 # Embed version from git tags; fall back to "dev" on untagged repos.
 GIT_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS     := -X $(MODULE)/internal/cli.Version=$(GIT_VERSION)
 
-.PHONY: build run tui-live tui-dev cli cli-live cli-dev dev-bootstrap test test-scripts test-package-managers test-all test-integration-build test-integration lint clean clean-cache clean-docker prune-tmp install gen-schema demo-gif
+.PHONY: build run tui-live tui-dev cli cli-live cli-dev dev-bootstrap test test-scripts test-package-managers test-all test-integration-build test-integration docs-build lint clean clean-cache clean-docker prune-tmp install gen-schema demo-gif
 
 ## build: compile the binary to ./bin/omni
 build:
@@ -108,6 +109,10 @@ test-integration-build:
 test-integration: test-integration-build
 	@docker builder prune --keep-storage=2g -f >/dev/null 2>&1 || true
 
+## docs-build: build the documentation site in a minimal Docker image
+docs-build:
+	$(DOCKER) build -f Dockerfile.docs --target docs-build --output=type=cacheonly .
+
 ## lint: run golangci-lint
 lint: prune-tmp
 	@mkdir -p "$(TMP_DIR)/go-build" "$(TMP_DIR)/golangci-lint"
@@ -120,7 +125,7 @@ clean: clean-cache clean-docker
 ## clean-cache: prune Go build and test caches
 clean-cache:
 	go clean -cache -testcache
-	rm -rf "$(TMP_DIR)/go-build" "$(TMP_DIR)/go-mod" "$(TMP_DIR)/golangci-lint" "$(TMP_DIR)/pm-tests" "$(TMP_DIR)/uv-cache"
+	rm -rf "$(TMP_DIR)/go-build" "$(TMP_DIR)/go-mod" "$(TMP_DIR)/golangci-lint" "$(TMP_DIR)/pm-tests" "$(TMP_DIR)/uv-cache" "$(TMP_DIR)/docs-venv"
 
 ## prune-tmp: remove repo-local caches when .tmp exceeds TMP_MAX_MB
 prune-tmp:

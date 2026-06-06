@@ -80,7 +80,7 @@ Common tool flags:
 | Flag | Commands | Description |
 | --- | --- | --- |
 | `--provider <provider>` | `add`, `set`, `install`, `list`, `search`, `sync`, `switch --reinstall-default` | Select or filter a provider. |
-| `--from-github <owner/repo>` | `fallback` | Save a GitHub fallback source. This is config-only and does not install. |
+| `--from-github <owner/repo>` | `fallback` | Resolve and save a GitHub fallback recipe. This is strict, config-only, and does not install. |
 | `--install-with <manager>` | `add`, `set` | Pin a logical tool to a concrete manager. |
 | `--quarantine <duration>` | `set` | Set a tool-level update quarantine duration, `0`, or `exempt`. |
 | `--group <group>` | `add`, `install`, `sync`, `import`, `list` | Assign, target, or filter by group. |
