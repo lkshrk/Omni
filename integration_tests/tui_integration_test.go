@@ -173,10 +173,26 @@ func TestTUIFallbackEditorPrefillsConfiguredGitHint(t *testing.T) {
 			return strings.Contains(text, "Set Fallback: rg") &&
 				strings.Contains(text, "BurntSushi/ripgrep")
 		}, "TUI did not prefill fallback editor from configured git hint")
-		return toolsScreen + "\n" + editorScreen
+		writeTUIKeys(t, tty, "\r")
+		savedScreen := waitForRequiredScreen(t, capture, 8*time.Second, func(text string) bool {
+			return strings.Contains(text, "fallback saved for rg from gh BurntSushi/ripgrep")
+		}, "TUI did not save fallback from configured git hint")
+		return toolsScreen + "\n" + editorScreen + "\n" + savedScreen
 	})
 	if strings.Contains(strings.ToLower(screen), "error") {
 		t.Fatalf("TUI showed an error during configured-git fallback smoke; screen:\n%s", screen)
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("load config after fallback save: %v", err)
+	}
+	fallback := cfg.Tools["rg"].Fallback
+	if fallback == nil ||
+		fallback.Source.Type != config.FallbackSourceGitHub ||
+		fallback.Source.Owner != "BurntSushi" ||
+		fallback.Source.Repo != "ripgrep" ||
+		fallback.Status != config.FallbackStatusUnresolved {
+		t.Fatalf("saved fallback = %+v, want unresolved GitHub fallback for BurntSushi/ripgrep", fallback)
 	}
 }
 
