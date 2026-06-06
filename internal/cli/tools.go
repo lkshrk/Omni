@@ -48,13 +48,14 @@ func newToolsFallbackCmd(state *rootState) *cobra.Command {
 		Short: actions.MustDescription(actions.ToolFallback),
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if fromGitHub == "" {
-				return fmt.Errorf("tools fallback requires --from-github owner/repo")
-			}
 			if err := state.app.SaveToolFallbackFromGitHub(cmd.Context(), args[0], fromGitHub); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmdOut(cmd), "Configured fallback for logical tool %q from gh %s.\n", args[0], fromGitHub)
+			source := fromGitHub
+			if source == "" {
+				source = "configured git"
+			}
+			fmt.Fprintf(cmdOut(cmd), "Configured fallback for logical tool %q from gh %s.\n", args[0], source)
 			return nil
 		},
 	}

@@ -579,7 +579,7 @@ func (a *App) Install(ctx context.Context, name, providerName string) error {
 			return err
 		}
 		installedWith := installedWithForOperation(ctx, prov, opProvider, t.InstallWith)
-		return a.readDB().Upsert(ctx, &database.ToolCache{
+		if err := a.readDB().Upsert(ctx, &database.ToolCache{
 			Name:          t.Name,
 			Provider:      t.Provider,
 			Package:       t.EffectivePackage(),
@@ -587,7 +587,10 @@ func (a *App) Install(ctx context.Context, name, providerName string) error {
 			InstalledWith: installedWith,
 			Version:       sql.NullString{String: ver, Valid: ver != ""},
 			LastChecked:   time.Now(),
-		})
+		}); err != nil {
+			return err
+		}
+		return a.enrichToolGitFromInstalledProviderMetadata(ctx, t, prov, installedWith)
 	}
 
 	if providerName == "" {
@@ -1241,6 +1244,9 @@ func (a *App) Add(ctx context.Context, providerName, pkg, name, groupName, insta
 		}
 		return nil
 	}); err != nil {
+		return err
+	}
+	if err := a.enrichToolGitFromCachedMetadata(ctx, name, providerName, pkg); err != nil {
 		return err
 	}
 	// Promote any existing orphan DB row to config-tracked so the UI reflects

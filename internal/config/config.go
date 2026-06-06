@@ -10,7 +10,7 @@ import (
 
 // CurrentVersion is the latest settings.json format version understood by omni.
 // Version 0 is the legacy unversioned format.
-const CurrentVersion = 4
+const CurrentVersion = 5
 
 const (
 	// FallbackSourceGitHub identifies a fallback recipe sourced from a GitHub repository.
@@ -160,6 +160,7 @@ type ToolSpec struct {
 	Provider    string                     `json:"provider"`
 	Package     string                     `json:"package,omitempty"`
 	InstallWith string                     `json:"install_with,omitempty"`
+	Git         string                     `json:"git,omitempty"`
 	Quarantine  string                     `json:"quarantine,omitempty"`
 	Options     map[string]string          `json:"options,omitempty"`
 	Taps        []string                   `json:"taps,omitempty"`

@@ -14,7 +14,7 @@ stdout '"install_with": "apt"'
 ! exec grep '"fallback"' settings.json
 
 ! exec omni --config settings.json tools fallback rg
-stderr 'tools fallback requires --from-github owner/repo'
+stderr 'tools fallback requires --from-github owner/repo or a GitHub git URL in tool config'
 
 -- settings.json --
 {}

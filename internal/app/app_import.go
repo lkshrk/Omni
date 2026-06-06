@@ -99,6 +99,12 @@ func (a *App) Import(ctx context.Context, opts ImportOptions) (*ImportResult, er
 			if err != nil {
 				return fmt.Errorf("listing %s: %w", p.Name(), err)
 			}
+			metadata := map[string]provider.InstalledMetadata{}
+			if mbc, ok := p.(provider.MetadataBulkChecker); ok {
+				if m, metadataErr := mbc.InstalledMetadataMap(ctx); metadataErr == nil {
+					metadata = m
+				}
+			}
 			for _, t := range installed {
 				configProvider := a.searchResultConfigProvider(p.Name())
 				if revEcosystem != nil {
@@ -132,6 +138,12 @@ func (a *App) Import(ctx context.Context, opts ImportOptions) (*ImportResult, er
 					spec := cfg.Tools[t.Name]
 					spec.Provider = configProvider
 					spec.InstallWith = installWith
+					metadataEntry := config.ToolEntry{Name: t.Name, Provider: configProvider, Package: t.Package}
+					if entry, ok := provider.LookupInstalledMetadata(metadata, toolEntryLookupKeys(metadataEntry)); ok {
+						if git := gitURLFromSourceMetadata(entry.Source); git != "" {
+							spec.Git = git
+						}
+					}
 					if cliSet, hasCLISet := cliSets[p.Name()]; hasCLISet && !cliSet[t.Name] {
 						spec.Ignore = true
 					}

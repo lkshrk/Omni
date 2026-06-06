@@ -47,7 +47,7 @@ func (a *App) SaveToolFallback(_ context.Context, name string, fallback config.F
 }
 
 func (a *App) SaveToolFallbackFromGitHub(ctx context.Context, name, repo string) error {
-	owner, repoName, err := parseGitHubRepo(repo)
+	owner, repoName, err := a.githubRepoForTool(ctx, name, repo)
 	if err != nil {
 		return err
 	}
@@ -66,6 +66,30 @@ func (a *App) SaveToolFallbackFromGitHub(ctx context.Context, name, repo string)
 		URL:   "https://github.com/" + owner + "/" + repoName,
 	}
 	return a.SaveToolFallback(ctx, name, fallback)
+}
+
+func (a *App) githubRepoForTool(_ context.Context, name, repo string) (string, string, error) {
+	repo = strings.TrimSpace(repo)
+	if repo != "" {
+		return parseGitHubRepo(repo)
+	}
+	name = strings.TrimSpace(name)
+	cfg, err := a.loadConfig()
+	if err != nil {
+		return "", "", err
+	}
+	spec, ok := cfg.Tools[name]
+	if !ok {
+		return "", "", fmt.Errorf("tool %q not found", name)
+	}
+	if strings.TrimSpace(spec.Git) == "" {
+		return "", "", fmt.Errorf("tools fallback requires --from-github owner/repo or a GitHub git URL in tool config")
+	}
+	owner, repoName, err := parseGitHubRepo(spec.Git)
+	if err != nil {
+		return "", "", fmt.Errorf("tool %q git URL is not a GitHub repo; pass --from-github owner/repo", name)
+	}
+	return owner, repoName, nil
 }
 
 func (a *App) SaveToolFallbackFromGitHubSpec(ctx context.Context, name, repo string, fallback config.FallbackSpec) error {

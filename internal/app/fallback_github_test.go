@@ -92,6 +92,53 @@ func TestSaveToolFallbackFromGitHub_ResolvesReleaseAssetFromGitHubAPI(t *testing
 	}
 }
 
+func TestSaveToolFallbackFromGitHub_UsesConfiguredGitWhenRepoOmitted(t *testing.T) {
+	ctx := context.Background()
+	currentPlatformGitHubCLIAsset(t)
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/repos/cli/cli/releases/latest" {
+			t.Fatalf("unexpected GitHub API path %q", req.URL.Path)
+		}
+		body, err := os.Open("testdata/github_cli_latest_release.json")
+		if err != nil {
+			return nil, err
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Body:       body,
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})}
+
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a.SetGitHubFallbackAPIForTest("https://api.github.test", client)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"gh": {Provider: "system", Git: "https://github.com/cli/cli"},
+		},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if err := a.SaveToolFallbackFromGitHub(ctx, "gh", ""); err != nil {
+		t.Fatalf("SaveToolFallbackFromGitHub: %v", err)
+	}
+
+	got, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	fallback := got.Tools["gh"].Fallback
+	if fallback == nil {
+		t.Fatal("fallback missing")
+	}
+	if fallback.Source.Owner != "cli" || fallback.Source.Repo != "cli" {
+		t.Fatalf("source = %+v, want configured git cli/cli", fallback.Source)
+	}
+}
+
 func TestSaveToolFallbackFromGitHub_RejectsReleaseWithoutPublishedAtAndPreservesConfig(t *testing.T) {
 	ctx := context.Background()
 	expectedAsset := currentPlatformGitHubCLIAsset(t)
