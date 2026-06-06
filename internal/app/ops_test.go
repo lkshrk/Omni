@@ -1744,6 +1744,34 @@ func TestInstall_AutoResolveFromSettings(t *testing.T) {
 	}
 }
 
+func TestInstall_AutoResolveFromSettingsSkipsUnavailablePriority(t *testing.T) {
+	brew := &stubProvider{name: "brew", available: true}
+	npm := &stubProvider{name: "npm", available: false}
+	a, _ := newImportApp(t, npm, brew)
+
+	settings := config.Settings{ProviderPriority: []string{"npm", "brew"}}
+	if err := a.SaveSettings(context.Background(), settings); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+
+	if err := a.Install(context.Background(), "ripgrep", ""); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	tools, err := a.ListTools(context.Background(), "")
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(tools) != 1 || tools[0].Provider != "brew" {
+		t.Errorf("DB = %v, want ripgrep/brew after unavailable npm", tools)
+	}
+	if len(npm.installed) != 0 {
+		t.Fatalf("npm installed = %+v, want no install attempt on unavailable priority provider", npm.installed)
+	}
+	if len(brew.installed) != 1 || brew.installed[0].Name != "ripgrep" {
+		t.Fatalf("brew installed = %+v, want ripgrep", brew.installed)
+	}
+}
+
 func TestDefaultInstallProviderUsesSettingsPriority(t *testing.T) {
 	brew := &stubProvider{name: "brew", available: true}
 	npm := &stubProvider{name: "npm", available: true}

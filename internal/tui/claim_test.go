@@ -384,7 +384,7 @@ func (p *installOptionCaptureProvider) Install(_ context.Context, tool provider.
 
 func TestDoInstallAndAddTool_PassesSearchOptions(t *testing.T) {
 	brew := &installOptionCaptureProvider{okProvider: okProvider{name: "brew"}}
-	a := newSearchCmdApp(t, brew)
+	a, cfgPath := newCmdApp(t, brew, nil)
 	m := modelForCmds(a)
 	row := &database.ToolCache{
 		Name:     "visual-studio-code",
@@ -409,6 +409,14 @@ func TestDoInstallAndAddTool_PassesSearchOptions(t *testing.T) {
 	}
 	if installed.Options["brew_kind"] != "cask" {
 		t.Fatalf("installed.Options[brew_kind] = %q, want cask", installed.Options["brew_kind"])
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	spec := cfg.Tools["visual-studio-code"]
+	if len(spec.Providers) != 1 || spec.Providers[0].Provider != "brew" || spec.Providers[0].Options["brew_kind"] != "cask" {
+		t.Fatalf("config tool spec = %+v, want brew cask provider-list entry", spec)
 	}
 }
 
