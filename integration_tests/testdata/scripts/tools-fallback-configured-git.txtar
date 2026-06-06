@@ -1,0 +1,31 @@
+# tools fallback can resolve a GitHub source from configured tool git metadata
+exec omni-tools-fallback-configured-git --config settings.json tools fallback gh
+stdout 'Configured fallback for logical tool "gh" from gh configured git.'
+
+exec grep '"git": "https://github.com/cli/cli"' settings.json
+stdout '"git": "https://github.com/cli/cli"'
+exec grep '"owner": "cli"' settings.json
+stdout '"owner": "cli"'
+exec grep '"repo": "cli"' settings.json
+stdout '"repo": "cli"'
+exec grep '"tag_name": "v2.93.0"' settings.json
+stdout '"tag_name": "v2.93.0"'
+exec grep '"published_at": "2026-05-27T17:47:41Z"' settings.json
+stdout '"published_at": "2026-05-27T17:47:41Z"'
+exec grep '"status": "unverified"' settings.json
+stdout '"status": "unverified"'
+
+-- settings.json --
+{
+  "version": 5,
+  "tools": {
+    "gh": {
+      "provider": "system",
+      "git": "https://github.com/cli/cli"
+    }
+  },
+  "hosts": { "testhost": [] },
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": ["gh"] }
+  ]
+}
