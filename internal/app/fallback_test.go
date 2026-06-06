@@ -465,6 +465,58 @@ func TestSync_UsesFallbackOnlyWhenAllNativeCandidatesUnavailable(t *testing.T) {
 	}
 }
 
+func TestSync_DoesNotUseFallbackWhenProviderUnavailable(t *testing.T) {
+	ctx := context.Background()
+	apt := &stubProvider{name: "apt", available: false}
+	fallbackExec := executor.NewMatchMock().WithFallback(executor.MockCall{})
+	a, cfgPath := newImportApp(t, apt)
+	a.SetFallbackExecutor(fallbackExec)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"rg": {
+				Providers: []config.ToolInstallSpec{
+					{Provider: "apt", Package: "ripgrep"},
+				},
+				Fallback: &config.FallbackSpec{
+					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+					Status: config.FallbackStatusUnverified,
+					Commands: config.FallbackCommands{
+						Install: "install rg",
+						Check:   "command -v rg",
+					},
+				},
+			},
+		},
+		Groups: []*config.GroupConfig{{Tools: []config.ToolEntry{{Name: "rg"}}}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	if err := a.DB().UpsertPackageAvailability(ctx, database.PackageAvailability{
+		Name:      "rg",
+		Provider:  "apt",
+		Package:   "ripgrep",
+		Available: false,
+		Reason:    "no apt candidate",
+	}); err != nil {
+		t.Fatalf("seed apt package availability: %v", err)
+	}
+
+	result, err := a.Sync(ctx, isync.SyncOptions{})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	if fallbackExec.CallCount() != 0 {
+		t.Fatalf("fallback command count = %d, want no fallback when provider is unavailable", fallbackExec.CallCount())
+	}
+	if installed := result.Installed(); len(installed) != 0 {
+		t.Fatalf("installed ops = %+v, want no fallback install", installed)
+	}
+	if failed := result.Failed(); len(failed) != 1 || failed[0].Tool.Name != "rg" {
+		t.Fatalf("failed ops = %+v, want provider unavailable failure for rg", failed)
+	}
+}
+
 func TestSync_UsesFallbackRecipeSavedFromGitHubSpec(t *testing.T) {
 	ctx := context.Background()
 	system := &lifecycleProvider{

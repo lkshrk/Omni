@@ -1,12 +1,12 @@
 # tools sync uses a configured fallback when native package availability is cached unavailable
-exec chmod 755 bin/apt
+exec chmod 755 bin/apt-get
 env PATH=$WORK/bin:$PATH
 
 exec omni --config settings.json hosts ensure testhost
 exec omni-seed-package-availability rg apt rg false 'no candidate'
 
 exec omni --config settings.json tools sync
-stdout 'done: rg \(apt\)'
+stdout 'installed: rg \(apt\)'
 exec test -f .omni-cache/fallback/rg
 exec grep '"status": "verified"' settings.json
 stdout '"status": "verified"'
@@ -15,7 +15,7 @@ stdout '"status": "verified"'
 exec omni --config settings.json tools sync
 stdout 'already installed: rg \(apt\)'
 
--- bin/apt --
+-- bin/apt-get --
 #!/bin/sh
 set -eu
 case "${1:-}" in
