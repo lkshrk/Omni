@@ -3941,6 +3941,38 @@ func TestToolInlineHints_NativeInstalledSystemToolHidesFallback(t *testing.T) {
 	}
 }
 
+func TestFallbackKey_NativeInstalledSystemToolNoOp(t *testing.T) {
+	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: true, InstalledWith: "apt", Tracked: true}
+	m := baseModel([]*database.ToolCache{tool})
+
+	got := drive(m, pressRune('f'))
+	if got.mode == viewFallbackEditor || got.fallbackTargetSet {
+		t.Fatalf("fallback editor opened for native-installed tool: mode=%v targetSet=%v", got.mode, got.fallbackTargetSet)
+	}
+	if got.loading {
+		t.Fatal("fallback key should not start an operation for native-installed tool")
+	}
+}
+
+func TestFallbackKey_GitHubInstalledSystemToolOpensEditor(t *testing.T) {
+	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: true, InstalledWith: "gh", Tracked: true}
+	m := baseModel([]*database.ToolCache{tool})
+	m.toolFallbacks = map[string]config.FallbackSpec{
+		"rg": {
+			Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+			Status: config.FallbackStatusVerified,
+		},
+	}
+
+	got := drive(m, pressRune('f'))
+	if got.mode != viewFallbackEditor || !got.fallbackTargetSet {
+		t.Fatalf("fallback editor state = mode:%v targetSet:%v, want editor open", got.mode, got.fallbackTargetSet)
+	}
+	if got.fallbackEditor.fields[fallbackFieldRepo] != "BurntSushi/ripgrep" {
+		t.Fatalf("repo field = %q, want existing fallback repo", got.fallbackEditor.fields[fallbackFieldRepo])
+	}
+}
+
 func TestRenderList_ConfiguredGitHubFallbackShowsGHStatus(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -3969,6 +4001,25 @@ func TestRenderList_ConfiguredGitHubFallbackShowsGHStatus(t *testing.T) {
 				t.Fatalf("rendered list = %q, want %s", out, tt.want)
 			}
 		})
+	}
+}
+
+func TestRenderList_ConfiguredGitHubFallbackHidesGHStatusForNativeInstalledTool(t *testing.T) {
+	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: true, InstalledWith: "apt", Tracked: true}
+	m := baseModel([]*database.ToolCache{tool})
+	m.toolFallbacks = map[string]config.FallbackSpec{
+		"rg": {
+			Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+			Status: config.FallbackStatusVerified,
+		},
+	}
+
+	out := stripANSIEscapeSequences(renderList(m))
+	if strings.Contains(out, "gh") {
+		t.Fatalf("rendered list = %q, want native installed provider without gh fallback status", out)
+	}
+	if !strings.Contains(out, "system(apt)") {
+		t.Fatalf("rendered list = %q, want native installed provider label", out)
 	}
 }
 
