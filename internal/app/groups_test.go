@@ -223,15 +223,15 @@ func TestAdd_ToNamedGroup_AppendsIfExists(t *testing.T) {
 func TestAddWithStateAssignsGroupHostsAndReturnsState(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost.example")
 	ctx := context.Background()
-	stub := &stubProvider{name: "system", available: true}
+	stub := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, stub)
 
-	if err := a.DB().UpsertDiscovered(ctx, "ripgrep", "system", "brew", "14.1.0"); err != nil {
+	if err := a.DB().UpsertDiscovered(ctx, "ripgrep", "brew", "brew", "14.1.0"); err != nil {
 		t.Fatalf("UpsertDiscovered: %v", err)
 	}
 
 	result, err := a.AddWithState(ctx, app.AddToolOptions{
-		ProviderName: "system",
+		ProviderName: "brew",
 		Package:      "ripgrep",
 		Name:         "ripgrep",
 		GroupName:    "work",
@@ -241,7 +241,7 @@ func TestAddWithStateAssignsGroupHostsAndReturnsState(t *testing.T) {
 		t.Fatalf("AddWithState: %v", err)
 	}
 
-	key := "ripgrep\x00system"
+	key := "ripgrep\x00brew"
 	if result.State.ToolGroups[key] != "work" {
 		t.Fatalf("ToolGroups[%q] = %q, want work", key, result.State.ToolGroups[key])
 	}
@@ -253,7 +253,7 @@ func TestAddWithStateAssignsGroupHostsAndReturnsState(t *testing.T) {
 
 	found := false
 	for _, tool := range result.Tools {
-		if tool.Name == "ripgrep" && tool.Provider == "system" {
+		if tool.Name == "ripgrep" && tool.Provider == "brew" {
 			found = true
 			if !tool.Tracked {
 				t.Fatalf("claimed tool row Tracked = false, want true")
@@ -261,7 +261,7 @@ func TestAddWithStateAssignsGroupHostsAndReturnsState(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("returned tools missing ripgrep/system: %+v", result.Tools)
+		t.Fatalf("returned tools missing ripgrep/brew: %+v", result.Tools)
 	}
 
 	cfg, err := config.Load(cfgPath)
@@ -279,11 +279,11 @@ func TestAddWithStateAssignsGroupHostsAndReturnsState(t *testing.T) {
 func TestInstallAndAddWithStateReturnsUpdatedState(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost.example")
 	ctx := context.Background()
-	system := &installTracker{stubProvider: stubProvider{name: "system", available: true}}
-	a, _ := newImportApp(t, system)
+	brew := &installTracker{stubProvider: stubProvider{name: "brew", available: true}}
+	a, _ := newImportApp(t, brew)
 
 	result, err := a.InstallAndAddWithState(ctx, app.AddToolOptions{
-		ProviderName: "system",
+		ProviderName: "brew",
 		Package:      "ripgrep",
 		Name:         "ripgrep",
 		GroupName:    "work",
@@ -291,11 +291,11 @@ func TestInstallAndAddWithStateReturnsUpdatedState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InstallAndAddWithState: %v", err)
 	}
-	if len(system.installCalled) != 1 || system.installCalled[0] != "ripgrep" {
-		t.Fatalf("installCalled = %v, want [ripgrep]", system.installCalled)
+	if len(brew.installCalled) != 1 || brew.installCalled[0] != "ripgrep" {
+		t.Fatalf("installCalled = %v, want [ripgrep]", brew.installCalled)
 	}
 
-	key := "ripgrep\x00system"
+	key := "ripgrep\x00brew"
 	if result.State.ToolGroups[key] != "work" {
 		t.Fatalf("ToolGroups[%q] = %q, want work", key, result.State.ToolGroups[key])
 	}
@@ -305,29 +305,27 @@ func TestInstallAndAddWithStateReturnsUpdatedState(t *testing.T) {
 	assertHostAssignedToGroup(t, result.State.HostInfo, "testhost", "work")
 
 	for _, tool := range result.Tools {
-		if tool.Name == "ripgrep" && tool.Provider == "system" {
+		if tool.Name == "ripgrep" && tool.Provider == "brew" {
 			if !tool.Installed || !tool.Tracked {
 				t.Fatalf("installed tool row = %+v, want installed tracked", tool)
 			}
 			return
 		}
 	}
-	t.Fatalf("returned tools missing ripgrep/system: %+v", result.Tools)
+	t.Fatalf("returned tools missing ripgrep/brew: %+v", result.Tools)
 }
 
 func TestInstallAndAddWithStatePersistsAndPassesOptions(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost.example")
 	ctx := context.Background()
-	system := &stubProvider{name: "system", available: true}
 	brew := &installCaptureStub{stubProvider: stubProvider{name: "brew", available: true}}
-	a, cfgPath := newImportApp(t, system, brew)
+	a, cfgPath := newImportApp(t, brew)
 
 	_, err := a.InstallAndAddWithState(ctx, app.AddToolOptions{
-		ProviderName: "system",
+		ProviderName: "brew",
 		Package:      "visual-studio-code",
 		Name:         "visual-studio-code",
 		GroupName:    "work",
-		InstallWith:  "brew",
 		Options:      map[string]string{"brew_kind": "cask"},
 	})
 	if err != nil {
@@ -349,11 +347,11 @@ func TestInstallAndAddWithStatePersistsAndPassesOptions(t *testing.T) {
 		t.Fatalf("config.Load: %v", err)
 	}
 	spec := cfg.Tools["visual-studio-code"]
-	if spec.Provider != "system" || spec.InstallWith != "brew" {
-		t.Fatalf("spec provider/install_with = %q/%q, want system/brew", spec.Provider, spec.InstallWith)
+	if len(spec.Providers) != 1 || spec.Providers[0].Provider != "brew" {
+		t.Fatalf("spec providers = %+v, want brew", spec.Providers)
 	}
-	if spec.Options["brew_kind"] != "cask" {
-		t.Fatalf("spec.Options[brew_kind] = %q, want cask", spec.Options["brew_kind"])
+	if spec.Providers[0].Options["brew_kind"] != "cask" {
+		t.Fatalf("spec provider options[brew_kind] = %q, want cask", spec.Providers[0].Options["brew_kind"])
 	}
 }
 

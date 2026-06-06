@@ -1386,6 +1386,9 @@ func (a *App) discoveryProviderScope(ctx context.Context, cfg *config.RootConfig
 }
 
 func discoveryScopeInstallSpecs(spec config.ToolSpec) []config.ToolInstallSpec {
+	if len(spec.Providers) > 0 {
+		return append([]config.ToolInstallSpec(nil), spec.Providers...)
+	}
 	hostname := currentHostname()
 	if install, ok := spec.Hosts[hostname]; ok {
 		return []config.ToolInstallSpec{install}
@@ -1610,15 +1613,6 @@ func (a *App) searchProviderMatches(providerName, filter string) bool {
 }
 
 func (a *App) searchResultConfigProvider(providerName string) string {
-	if a.registry.IsEcosystemProvider(providerName) {
-		return providerName
-	}
-	if meta, ok := a.registry.Metadata(providerName); ok && meta.Ecosystem != "" {
-		return meta.Ecosystem
-	}
-	if ecosystem, ok := a.providerEcosystem(providerName); ok && ecosystem != providerName {
-		return ecosystem
-	}
 	return providerName
 }
 

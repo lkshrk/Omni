@@ -33,23 +33,23 @@ tools. Typical actions include:
 - upgrade outdated tools
 - add discovered tools to config
 - move tools between groups
-- reinstall with the default manager
+- reinstall with the default provider
 - ignore or remove tools
 - refresh provider state
 
-Rows use ecosystem labels such as `system(brew)`, `node(bun)`, and `python(uv)`
-when the concrete manager is known.
+Rows show the configured provider and can mark drift when observed ownership
+differs from the configured provider.
 
-Fallback-capable `system` rows can show GitHub source labels:
+Fallback-capable rows can show GitHub source labels:
 
 | Label | Meaning |
 | --- | --- |
-| `system(gh)` | Installed through a verified GitHub fallback. |
-| `system(gh?)` | A GitHub fallback exists but is unverified. |
-| `system(gh!)` | The fallback is unresolved or failed and needs editing. |
+| `gh` | Installed through a verified GitHub fallback. |
+| `gh?` | A GitHub fallback exists but is unverified. |
+| `gh!` | The fallback is unresolved or failed and needs editing. |
 
 The `f fallback` row action opens the fallback editor for eligible configured
-`system` tools. The editor is a structured form for the GitHub repo, binary,
+tools. The editor is a structured form for the GitHub repo, binary,
 bin dir, asset pattern, install/check/uninstall/upgrade/version commands, and
 release channel. Saving from the TUI writes fallback config only; it does not
 install immediately. Run sync or install afterward to apply the saved recipe

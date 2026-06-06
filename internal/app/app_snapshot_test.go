@@ -16,8 +16,8 @@ func TestStartupSnapshotBuildsConfigDerivedState(t *testing.T) {
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Settings: config.Settings{AutoImport: true},
 		Tools: map[string]config.ToolSpec{
-			"ripgrep": {Provider: "system", InstallWith: "brew"},
-			"fd":      {Provider: "system", InstallWith: "brew", Ignore: true},
+			"ripgrep": {Providers: []config.ToolInstallSpec{{Provider: "brew"}}},
+			"fd":      {Providers: []config.ToolInstallSpec{{Provider: "brew"}}, Ignore: true},
 		},
 		Hosts: map[string][]string{host: {"dev"}},
 		Ignore: config.GlobalIgnore{
@@ -52,7 +52,7 @@ func TestStartupSnapshotBuildsConfigDerivedState(t *testing.T) {
 	if got := snapshot.HostInfo.Hosts[host].Ignore; !slices.Contains(got, "fd") {
 		t.Fatalf("snapshot active host ignore = %v, want fd", got)
 	}
-	memberships := snapshot.ToolMemberships["ripgrep\x00system"]
+	memberships := snapshot.ToolMemberships["ripgrep\x00brew"]
 	if !slices.Contains(memberships, "dev") {
 		t.Fatalf("tool memberships = %v, want dev", memberships)
 	}
@@ -68,8 +68,8 @@ func TestStartupSnapshotBuildsConfigDerivedState(t *testing.T) {
 	if !snapshot.GroupIgnores["fd"]["global"] {
 		t.Fatalf("group ignores = %v, want fd global", snapshot.GroupIgnores)
 	}
-	if got := snapshot.ToolProviderPins["ripgrep"]; got != "brew" {
-		t.Fatalf("tool provider pins = %v, want ripgrep=brew", snapshot.ToolProviderPins)
+	if got := snapshot.ToolProviderPins["ripgrep"]; got != "" {
+		t.Fatalf("tool provider pins = %v, want no ripgrep pin", snapshot.ToolProviderPins)
 	}
 }
 
@@ -141,8 +141,8 @@ func TestToolScopeStateBuildsIgnoredToolsAndProviderPins(t *testing.T) {
 	if !state.ToolIgnores["fd"] {
 		t.Fatalf("tool ignores = %v, want fd", state.ToolIgnores)
 	}
-	if got := state.ToolProviderPins["ripgrep"]; got != "apt" {
-		t.Fatalf("tool provider pins = %v, want ripgrep=apt", state.ToolProviderPins)
+	if got := state.ToolProviderPins["ripgrep"]; got != "" {
+		t.Fatalf("tool provider pins = %v, want no ripgrep pin", state.ToolProviderPins)
 	}
 	if got := state.ToolFallbacks["ripgrep"]; got.Source.Owner != "BurntSushi" || got.Source.Repo != "ripgrep" {
 		t.Fatalf("tool fallbacks = %+v, want ripgrep BurntSushi/ripgrep", state.ToolFallbacks)
@@ -153,22 +153,11 @@ func TestToolScopeDisplayStateBuildsTUIDerivedScopeMaps(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 	host := testShortHostname()
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: map[string]config.ToolSpec{
-			"fd": {
-				Provider: "system",
-				Ignore:   true,
-			},
-			"jq": {
-				Provider: "system",
-			},
-			"ripgrep": {
-				Provider:    "system",
-				InstallWith: "brew",
-				Hosts: map[string]config.ToolInstallSpec{
-					host: {Provider: "system", InstallWith: "apt"},
-				},
-			},
-		},
+		Tools: logicalToolSpecs(
+			logicalFixtureTool{Name: "fd", Provider: "brew", Ignore: true},
+			logicalTool("jq", "brew"),
+			logicalTool("ripgrep", "brew"),
+		),
 		Hosts: map[string][]string{host: {}},
 		Ignore: config.GlobalIgnore{
 			Tools: []string{"fd", "jq"},
@@ -194,8 +183,8 @@ func TestToolScopeDisplayStateBuildsTUIDerivedScopeMaps(t *testing.T) {
 	if !state.GroupIgnores["fd"]["global"] || !state.GroupIgnores["jq"]["global"] {
 		t.Fatalf("group ignores = %v, want fd/jq global entries", state.GroupIgnores)
 	}
-	if got := state.ToolProviderPins["ripgrep"]; got != "apt" {
-		t.Fatalf("tool provider pins = %v, want ripgrep=apt", state.ToolProviderPins)
+	if got := state.ToolProviderPins["ripgrep"]; got != "" {
+		t.Fatalf("tool provider pins = %v, want no ripgrep pin", state.ToolProviderPins)
 	}
 }
 
@@ -218,9 +207,7 @@ func TestToolScopeDisplayStateWithFallbackUsesFallbackOnlyWhenLoadedHostIgnoresA
 	}
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: map[string]config.ToolSpec{
-			"current-host": {Provider: "system"},
-		},
+		Tools: logicalToolSpecs(logicalTool("current-host", "brew")),
 		Hosts: map[string][]string{host: {}},
 		Ignore: config.GlobalIgnore{
 			Tools: []string{"current-host"},
@@ -246,10 +233,7 @@ func TestToolGroupStateBuildsHostFilteredLabelsAndGroupNames(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 	host := testShortHostname()
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: map[string]config.ToolSpec{
-			"ripgrep": {Provider: "system"},
-			"fd":      {Provider: "system"},
-		},
+		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew"), logicalTool("fd", "brew")),
 		Hosts: map[string][]string{host: {"work"}},
 		Groups: []*config.GroupConfig{
 			{Name: host, Special: "host"},
@@ -268,13 +252,13 @@ func TestToolGroupStateBuildsHostFilteredLabelsAndGroupNames(t *testing.T) {
 	if !slices.Equal(state.GroupNames, []string{"apps", "inactive", "work"}) {
 		t.Fatalf("group names = %v, want apps/inactive/work", state.GroupNames)
 	}
-	if got := state.ToolGroups["ripgrep\x00system"]; got != "work" {
+	if got := state.ToolGroups["ripgrep\x00brew"]; got != "work" {
 		t.Fatalf("tool groups = %v, want ripgrep=work", state.ToolGroups)
 	}
-	if got := state.ToolGroups["fd\x00system"]; got != "" {
+	if got := state.ToolGroups["fd\x00brew"]; got != "" {
 		t.Fatalf("tool groups = %v, want fd hidden from active host labels", state.ToolGroups)
 	}
-	if got := state.ToolMemberships["fd\x00system"]; !slices.Contains(got, "inactive") {
+	if got := state.ToolMemberships["fd\x00brew"]; !slices.Contains(got, "inactive") {
 		t.Fatalf("tool memberships = %v, want inactive", got)
 	}
 	if state.HostInfo == nil || state.HostInfo.Active != host {

@@ -107,8 +107,8 @@ omni tools consolidate python uv --dry-run
 Apply:
 
 ```sh
-omni settings set python.manager uv
-omni tools consolidate python uv
+omni settings set provider_priority uv,pip,brew,apt
+omni tools set black --provider uv
 ```
 
 Verify:
@@ -118,8 +118,8 @@ omni tools refresh
 omni tools list
 ```
 
-If one tool must stay on the old manager, pin that tool with `install_with`
-instead of reverting the ecosystem default.
+If one tool must stay on another manager, keep that tool's provider entry on
+the concrete provider it should use.
 
 ## Install Or Prune A Group Safely
 

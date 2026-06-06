@@ -204,11 +204,7 @@ func TestCopyHostConfigToCurrentHost(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "desk.example.com")
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: map[string]config.ToolSpec{
-			"fd": {Provider: "system", Hosts: map[string]config.ToolInstallSpec{
-				"alpha": {Provider: "system", Package: "fd-find"},
-			}},
-		},
+		Tools: logicalToolSpecs(logicalToolPackage("fd", "brew", "fd-find")),
 		HostSettings: map[string]config.Settings{
 			"alpha": {DotsRepo: "/alpha/dots", DisabledProviders: []string{"node"}},
 		},
@@ -241,9 +237,6 @@ func TestCopyHostConfigToCurrentHost(t *testing.T) {
 	}
 	if cfg.HostSettings["desk"].DotsRepo != "/alpha/dots" {
 		t.Fatalf("desk dots repo = %q, want copied source", cfg.HostSettings["desk"].DotsRepo)
-	}
-	if got := cfg.Tools["fd"].Hosts["desk"].Package; got != "fd-find" {
-		t.Fatalf("desk fd package = %q, want fd-find", got)
 	}
 }
 

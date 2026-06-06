@@ -10,7 +10,7 @@ import (
 
 // CurrentVersion is the latest settings.json format version understood by omni.
 // Version 0 is the legacy unversioned format.
-const CurrentVersion = 5
+const CurrentVersion = 6
 
 const (
 	// FallbackSourceGitHub identifies a fallback recipe sourced from a GitHub repository.
@@ -93,6 +93,7 @@ func (e ToolEntry) EffectivePackage() string {
 type ToolInstallSpec struct {
 	Provider    string            `json:"provider"`
 	Package     string            `json:"package,omitempty"`
+	Bin         string            `json:"bin,omitempty"`
 	InstallWith string            `json:"install_with,omitempty"`
 	Options     map[string]string `json:"options,omitempty"`
 }
@@ -157,7 +158,9 @@ type FallbackSpec struct {
 
 // ToolSpec defines one logical tool and its default install spec.
 type ToolSpec struct {
-	Provider    string                     `json:"provider"`
+	Type        string                     `json:"type,omitempty"`
+	Providers   []ToolInstallSpec          `json:"providers,omitempty"`
+	Provider    string                     `json:"provider,omitempty"`
 	Package     string                     `json:"package,omitempty"`
 	InstallWith string                     `json:"install_with,omitempty"`
 	Git         string                     `json:"git,omitempty"`
@@ -172,15 +175,22 @@ type ToolSpec struct {
 
 // DefaultInstallSpec returns the default install candidate for this logical tool.
 func (s ToolSpec) DefaultInstallSpec() ToolInstallSpec {
+	if len(s.Providers) > 0 {
+		return s.Providers[0]
+	}
 	return ToolInstallSpec{Provider: s.Provider, Package: s.Package, InstallWith: s.InstallWith, Options: s.Options}
 }
 
 // ToToolEntry resolves this spec into the syncer's flat tool shape.
 func (s ToolSpec) ToToolEntry(logicalName string, install ToolInstallSpec) ToolEntry {
+	packageName := install.EffectivePackage(logicalName)
+	if install.Package == "" && s.Package != "" {
+		packageName = s.Package
+	}
 	return ToolEntry{
 		Name:        logicalName,
 		Provider:    install.Provider,
-		Package:     install.EffectivePackage(logicalName),
+		Package:     packageName,
 		InstallWith: install.InstallWith,
 		Ignore:      s.Ignore,
 		Options:     install.Options,
@@ -246,6 +256,8 @@ type Settings struct {
 	// DisabledProviders lists ecosystem provider names ("system", "node", "python")
 	// that are disabled on this machine. Stored in host_settings, not global settings.
 	DisabledProviders []string `json:"disabled_providers,omitempty"`
+	// ProviderPriority ranks concrete providers for this host.
+	ProviderPriority []string `json:"provider_priority,omitempty"`
 	// Providers is an ordered list of bootstrap providers installed before the
 	// rest of a sync, in list order. Each entry is self-contained.
 	Providers []ProviderEntry `json:"providers,omitempty"`
@@ -445,6 +457,9 @@ func (c *RootConfig) EffectiveSettings(shortHostname string) Settings {
 	if hs.DisabledProviders != nil {
 		s.DisabledProviders = cloneStringSlice(hs.DisabledProviders)
 	}
+	if hs.ProviderPriority != nil {
+		s.ProviderPriority = cloneStringSlice(hs.ProviderPriority)
+	}
 	// Providers: nil host list means "inherit global"; a non-nil host list
 	// (including empty) replaces the global list entirely.
 	if hs.Providers != nil {
@@ -516,7 +531,7 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 	for _, p := range providers.Ecosystems {
 		ecosystemSet[p] = struct{}{}
 	}
-	validateInstall := func(path string, spec ToolInstallSpec) []ValidationError {
+	validateInstall := func(path string, spec ToolInstallSpec, allowInstallWith bool) []ValidationError {
 		var errs []ValidationError
 		if spec.Provider == "script" {
 			return validateScriptSpec(path, spec)
@@ -526,13 +541,13 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 		} else if len(providerSet) > 0 {
 			if _, ok := providerSet[spec.Provider]; !ok {
 				errs = append(errs, ValidationError{Path: path + ".provider", Message: fmt.Sprintf("unknown provider %q", spec.Provider)})
-			} else if len(ecosystemSet) > 0 {
-				if _, ok := ecosystemSet[spec.Provider]; !ok {
-					errs = append(errs, ValidationError{Path: path + ".provider", Message: fmt.Sprintf("provider %q is not an ecosystem provider", spec.Provider)})
-				}
+			} else if _, ok := ecosystemSet[spec.Provider]; ok {
+				errs = append(errs, ValidationError{Path: path + ".provider", Message: fmt.Sprintf("meta provider %q is not supported in tools providers", spec.Provider)})
 			}
 		}
-		if spec.InstallWith != "" && len(providerSet) > 0 {
+		if spec.InstallWith != "" && !allowInstallWith {
+			errs = append(errs, ValidationError{Path: path + ".install_with", Message: "install_with is not supported on provider entries"})
+		} else if spec.InstallWith != "" && len(providerSet) > 0 {
 			if _, ok := providerSet[spec.InstallWith]; !ok {
 				errs = append(errs, ValidationError{Path: path + ".install_with", Message: fmt.Sprintf("unknown concrete provider/manager %q", spec.InstallWith)})
 			} else if len(ecosystemSet) > 0 {
@@ -553,16 +568,22 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 		if strings.TrimSpace(name) == "" {
 			errs = append(errs, ValidationError{Path: "$.tools", Message: "tool name is required"})
 		}
-		errs = append(errs, validateInstall(path, spec.DefaultInstallSpec())...)
-		errs = append(errs, validateFallback(path+".fallback", spec.Provider, spec.Fallback)...)
+		if len(spec.Providers) > 0 {
+			for i, provider := range spec.Providers {
+				errs = append(errs, validateInstall(fmt.Sprintf("%s.providers[%d]", path, i), provider, false)...)
+			}
+		} else if spec.Provider != "" || spec.Package != "" || spec.InstallWith != "" || len(spec.Options) > 0 {
+			errs = append(errs, validateInstall(path, spec.DefaultInstallSpec(), true)...)
+		}
+		errs = append(errs, validateFallback(path+".fallback", spec.Fallback)...)
 		for i, variant := range spec.Variants {
-			errs = append(errs, validateInstall(fmt.Sprintf("%s.variants[%d]", path, i), variant)...)
+			errs = append(errs, validateInstall(fmt.Sprintf("%s.variants[%d]", path, i), variant, true)...)
 		}
 		for host, override := range spec.Hosts {
 			if strings.TrimSpace(host) == "" {
 				errs = append(errs, ValidationError{Path: path + ".hosts", Message: "host name is required"})
 			}
-			errs = append(errs, validateInstall(fmt.Sprintf("%s.hosts.%q", path, host), override)...)
+			errs = append(errs, validateInstall(fmt.Sprintf("%s.hosts.%q", path, host), override, true)...)
 		}
 	}
 
@@ -714,14 +735,11 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 	return errs
 }
 
-func validateFallback(path, provider string, fallback *FallbackSpec) []ValidationError {
+func validateFallback(path string, fallback *FallbackSpec) []ValidationError {
 	if fallback == nil {
 		return nil
 	}
 	var errs []ValidationError
-	if provider != "system" {
-		errs = append(errs, ValidationError{Path: path, Message: "fallback is only supported for system tools"})
-	}
 	switch fallback.Source.Type {
 	case "":
 		errs = append(errs, ValidationError{Path: path + ".source.type", Message: "fallback source type is required"})

@@ -104,12 +104,13 @@ exit 1
 
 -- settings.json --
 {
+  "version": 6,
   "settings": {
     "disabled_providers": ["node", "python"]
   },
   "hosts": { "testhost": [] },
 	  "tools": {
-	    "fd": { "provider": "system", "install_with": "brew" }
+	    "fd": { "providers": [{ "provider": "brew" }] }
 	  },
 	  "groups": [
 	    { "name": "testhost", "special": "host", "tools": ["fd"] },

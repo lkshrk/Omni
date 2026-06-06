@@ -39,7 +39,7 @@ func TestSync_AddsMissingTaps(t *testing.T) {
 
 	cfg := &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
-			"terraform": {Provider: "system", Package: "hashicorp/tap/terraform", InstallWith: "brew", Taps: []string{"hashicorp/tap"}},
+			"terraform": {Provider: "brew", Package: "hashicorp/tap/terraform", InstallWith: "brew", Taps: []string{"hashicorp/tap"}},
 		},
 		Groups: []*config.GroupConfig{{
 			Tools: []config.ToolEntry{{Name: "terraform"}},
@@ -64,7 +64,7 @@ func TestSync_SkipsAlreadyTapped(t *testing.T) {
 
 	cfg := &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
-			"terraform": {Provider: "system", Package: "hashicorp/tap/terraform", InstallWith: "brew", Taps: []string{"hashicorp/tap"}},
+			"terraform": {Provider: "brew", Package: "hashicorp/tap/terraform", InstallWith: "brew", Taps: []string{"hashicorp/tap"}},
 		},
 		Groups: []*config.GroupConfig{{
 			Tools: []config.ToolEntry{{Name: "terraform"}},
@@ -148,13 +148,13 @@ func TestSyncWithStateReturnsUpdatedToolsAndGroups(t *testing.T) {
 	if result.Result == nil || len(result.Result.Installed()) != 1 {
 		t.Fatalf("Sync result = %+v, want one installed tool", result.Result)
 	}
-	toolKey := "ripgrep\x00system"
+	toolKey := "ripgrep\x00brew"
 	if _, ok := result.State.ToolMemberships[toolKey]; !ok {
 		t.Fatalf("ToolMemberships[%q] missing after sync: %v", toolKey, result.State.ToolMemberships)
 	}
 	found := false
 	for _, tool := range result.Tools {
-		if tool.Name == "ripgrep" && tool.Provider == "system" && tool.Installed {
+		if tool.Name == "ripgrep" && tool.Provider == "brew" && tool.Installed {
 			found = true
 			break
 		}

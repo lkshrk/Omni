@@ -1002,47 +1002,6 @@ func TestModel_KeysIgnoredWhileLoading(t *testing.T) {
 	}
 }
 
-func TestStartCurrentProviderScans_DedupesConcreteCoveredByEcosystem(t *testing.T) {
-	m := baseModel([]*database.ToolCache{{Name: "git", Provider: "brew"}})
-	m.app = newScanPlanTestApp(t,
-		&scanPlanProvider{name: "system", concrete: "brew"},
-		&scanPlanProvider{name: "brew"},
-	)
-
-	cmds := m.startCurrentProviderScans()
-	if len(cmds) != 3 {
-		t.Fatalf("scan commands = %d, want spinner, progress wait, and one provider scan", len(cmds))
-	}
-	if len(m.scanningProviders) != 1 || !m.scanningProviders["system"] {
-		t.Fatalf("scanningProviders = %v, want only logical system scan", m.scanningProviders)
-	}
-	if m.progressText != "Refreshing tools… 0/1: system/brew" {
-		t.Fatalf("progressText = %q, want concrete ecosystem scan label", m.progressText)
-	}
-}
-
-func TestRefreshInstalledProviders_DedupesConcreteCoveredByEcosystem(t *testing.T) {
-	m := baseModel([]*database.ToolCache{
-		{Name: "fd", Provider: "system", InstalledWith: "brew"},
-		{Name: "git", Provider: "brew"},
-	})
-	m.app = newScanPlanTestApp(t,
-		&scanPlanProvider{name: "system", concrete: "brew"},
-		&scanPlanProvider{name: "brew"},
-	)
-
-	cmds := m.refreshInstalledProviders()
-	if len(cmds) != 3 {
-		t.Fatalf("scan commands = %d, want spinner, progress wait, and one provider scan", len(cmds))
-	}
-	if len(m.scanningProviders) != 1 || !m.scanningProviders["system"] {
-		t.Fatalf("scanningProviders = %v, want only logical system scan", m.scanningProviders)
-	}
-	if m.progressText != "Refreshing tools… 0/1: system/brew" {
-		t.Fatalf("progressText = %q, want concrete ecosystem scan label", m.progressText)
-	}
-}
-
 func TestModel_SettingsTab(t *testing.T) {
 	// Tab order: Dashboard → Tools → Dots → Groups → Settings → Dashboard.
 	// Within Groups, j/k cascades through sections; Tab switches main tabs.

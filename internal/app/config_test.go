@@ -9,7 +9,6 @@ import (
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/provider"
 )
 
@@ -223,10 +222,10 @@ func TestSaveToolFallback_RejectsMissingTool(t *testing.T) {
 	}
 }
 
-func TestSaveToolFallback_RejectsNonSystemTool(t *testing.T) {
-	a, cfgPath := newImportApp(t, &stubProvider{name: "node", available: true})
+func TestSaveToolFallback_PersistsForConcreteProviderTool(t *testing.T) {
+	a, cfgPath := newImportApp(t, &stubProvider{name: "npm", available: true})
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: logicalToolSpecs(logicalTool("eslint", "node")),
+		Tools: logicalToolSpecs(logicalTool("eslint", "npm")),
 	}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
@@ -235,8 +234,15 @@ func TestSaveToolFallback_RejectsNonSystemTool(t *testing.T) {
 		Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "eslint", Repo: "eslint"},
 		Status: config.FallbackStatusUnresolved,
 	})
-	if err == nil || !strings.Contains(err.Error(), "fallback is only supported for system tools") {
-		t.Fatalf("SaveToolFallback err = %v, want system-only validation", err)
+	if err != nil {
+		t.Fatalf("SaveToolFallback: %v", err)
+	}
+	got, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got.Tools["eslint"].Fallback == nil {
+		t.Fatal("fallback was not persisted for concrete provider tool")
 	}
 }
 
@@ -340,7 +346,7 @@ func TestToolMembershipMap_ReturnsSingleOwnerMembership(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToolMembershipMap: %v", err)
 	}
-	memberships := got["ripgrep\x00system"]
+	memberships := got["ripgrep\x00brew"]
 	want := "work"
 	if strings.Join(memberships, ",") != want {
 		t.Fatalf("memberships = %v, want [%s]", memberships, want)
@@ -393,285 +399,6 @@ func TestSetToolQuarantine_PersistsToolOverride(t *testing.T) {
 	}
 	if got := cfg.Tools["ripgrep"].Quarantine; got != "exempt" {
 		t.Fatalf("quarantine = %q, want exempt", got)
-	}
-}
-
-func TestSetToolHostInstallSpec_WritesHostOverride(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "linuxbox.example.com")
-	a, cfgPath := newImportApp(t)
-	rootCfg := &config.RootConfig{
-		Tools:  logicalToolSpecs(logicalTool("typescript", "node")),
-		Groups: []*config.GroupConfig{testHostToolGroup("typescript")},
-	}
-	if err := saveAppConfig(t, cfgPath, rootCfg); err != nil {
-		t.Fatalf("config.Save: %v", err)
-	}
-
-	if err := a.SetToolHostInstallSpec("typescript", "node", "typescript", "pnpm"); err != nil {
-		t.Fatalf("SetToolHostInstallSpec: %v", err)
-	}
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	override, ok := cfg.Tools["typescript"].Hosts["linuxbox"]
-	if !ok {
-		t.Fatalf("expected linuxbox host override, got %#v", cfg.Tools["typescript"].Hosts)
-	}
-	if override.Provider != "node" || override.InstallWith != "pnpm" {
-		t.Fatalf("override = %+v, want node via pnpm", override)
-	}
-}
-
-func TestSetToolProviderScopeWithStateReturnsToolsAndPins(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "linuxbox.example.com")
-	ctx := context.Background()
-	a, cfgPath := newImportApp(t)
-	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools:  logicalToolSpecs(logicalTool("typescript", "node")),
-		Groups: []*config.GroupConfig{testHostToolGroup("typescript")},
-	}); err != nil {
-		t.Fatalf("config.Save: %v", err)
-	}
-	if err := a.DB().Upsert(ctx, &database.ToolCache{
-		Name:          "typescript",
-		Provider:      "node",
-		Package:       "typescript",
-		Installed:     true,
-		InstalledWith: "npm",
-		Tracked:       true,
-	}); err != nil {
-		t.Fatalf("seed cache: %v", err)
-	}
-
-	result, err := a.SetToolProviderScopeWithState(ctx, "typescript", app.ToolProviderScopeOptions{
-		Kind:         app.ToolProviderScopeTool,
-		ProviderName: "node",
-		Package:      "typescript",
-		InstallWith:  "pnpm",
-	})
-	if err != nil {
-		t.Fatalf("SetToolProviderScopeWithState: %v", err)
-	}
-
-	if got := result.ScopeDisplay.ToolProviderPins["typescript"]; got != "pnpm" {
-		t.Fatalf("ToolProviderPins[typescript] = %q, want pnpm", got)
-	}
-	if len(result.Tools) != 1 || result.Tools[0].Name != "typescript" {
-		t.Fatalf("Tools = %v, want typescript", toolNames(result.Tools))
-	}
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	spec := cfg.Tools["typescript"]
-	if spec.Provider != "node" || spec.InstallWith != "pnpm" {
-		t.Fatalf("provider scope was not persisted: %+v", spec)
-	}
-}
-
-func TestClearToolInstallOverride_RemovesEffectiveHostOverride(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "linuxbox.example.com")
-	a, cfgPath := newImportApp(t)
-	rootCfg := &config.RootConfig{
-		Tools: map[string]config.ToolSpec{
-			"typescript": {
-				Provider:    "node",
-				InstallWith: "npm",
-				Hosts: map[string]config.ToolInstallSpec{
-					"linuxbox": {Provider: "node", InstallWith: "pnpm"},
-				},
-			},
-		},
-		Groups: []*config.GroupConfig{testHostToolGroup("typescript")},
-	}
-	if err := saveAppConfig(t, cfgPath, rootCfg); err != nil {
-		t.Fatalf("config.Save: %v", err)
-	}
-
-	cleared, err := a.ClearToolInstallOverride(context.Background(), "typescript", "node")
-	if err != nil {
-		t.Fatalf("ClearToolInstallOverride: %v", err)
-	}
-	if cleared.Scope != "host" || cleared.InstallWith != "pnpm" {
-		t.Fatalf("cleared = %+v, want host/pnpm", cleared)
-	}
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	if _, ok := cfg.Tools["typescript"].Hosts["linuxbox"]; ok {
-		t.Fatalf("host override still present: %+v", cfg.Tools["typescript"].Hosts)
-	}
-	if cfg.Tools["typescript"].InstallWith != "" {
-		t.Fatalf("default install_with = %q, want cleared", cfg.Tools["typescript"].InstallWith)
-	}
-}
-
-func TestClearProviderOverrideWithStateReturnsToolsAndPins(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "linuxbox.example.com")
-	ctx := context.Background()
-	brew := &lifecycleProvider{stubProvider: stubProvider{name: "brew", available: true}}
-	system := &lifecycleProvider{
-		stubProvider: stubProvider{name: "system", available: true},
-		resolvedName: "brew",
-		installed:    true,
-		version:      "1.0.0",
-	}
-	a, cfgPath := newImportApp(t, brew, system)
-	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools:  logicalToolSpecs(logicalFixtureTool{Name: "ripgrep", Provider: "system", InstallWith: "brew"}),
-		Groups: []*config.GroupConfig{testHostToolGroup("ripgrep")},
-	}); err != nil {
-		t.Fatalf("config.Save: %v", err)
-	}
-	if err := a.DB().Upsert(ctx, &database.ToolCache{
-		Name:          "ripgrep",
-		Provider:      "system",
-		Package:       "ripgrep",
-		Installed:     true,
-		InstalledWith: "brew",
-		Tracked:       true,
-	}); err != nil {
-		t.Fatalf("seed cache: %v", err)
-	}
-
-	result, err := a.ClearProviderOverrideWithState(ctx, "ripgrep", "system", "")
-	if err != nil {
-		t.Fatalf("ClearProviderOverrideWithState: %v", err)
-	}
-
-	if result.Cleared.InstallWith != "brew" {
-		t.Fatalf("cleared = %+v, want brew", result.Cleared)
-	}
-	if result.FromProvider != "brew" || result.ToProvider != "system" {
-		t.Fatalf("from/to = %q/%q, want brew/system", result.FromProvider, result.ToProvider)
-	}
-	if _, ok := result.ScopeDisplay.ToolProviderPins["ripgrep"]; ok {
-		t.Fatalf("provider pins = %v, want ripgrep cleared", result.ScopeDisplay.ToolProviderPins)
-	}
-	if len(result.Tools) != 1 || result.Tools[0].Name != "ripgrep" {
-		t.Fatalf("Tools = %v, want ripgrep", toolNames(result.Tools))
-	}
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	if cfg.Tools["ripgrep"].InstallWith != "" {
-		t.Fatalf("install_with = %q, want cleared", cfg.Tools["ripgrep"].InstallWith)
-	}
-}
-
-func TestClearToolInstallOverride_RemovesDefaultOverride(t *testing.T) {
-	a, cfgPath := newImportApp(t)
-	rootCfg := &config.RootConfig{
-		Tools:  logicalToolSpecs(logicalFixtureTool{Name: "black", Provider: "python", InstallWith: "pip3"}),
-		Groups: []*config.GroupConfig{testHostToolGroup("black")},
-	}
-	if err := saveAppConfig(t, cfgPath, rootCfg); err != nil {
-		t.Fatalf("config.Save: %v", err)
-	}
-
-	cleared, err := a.ClearToolInstallOverride(context.Background(), "black", "python")
-	if err != nil {
-		t.Fatalf("ClearToolInstallOverride: %v", err)
-	}
-	if cleared.Scope != "tool" || cleared.InstallWith != "pip3" {
-		t.Fatalf("cleared = %+v, want tool/pip3", cleared)
-	}
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	if cfg.Tools["black"].InstallWith != "" {
-		t.Fatalf("install_with = %q, want cleared", cfg.Tools["black"].InstallWith)
-	}
-}
-
-func TestNormalizeDefaultInstallOverrides_DryRunAndApply(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "linuxbox.example.com")
-	brew := &lifecycleProvider{stubProvider: stubProvider{name: "brew", available: true}}
-	system := &lifecycleProvider{
-		stubProvider: stubProvider{name: "system", available: true},
-		resolvedName: "brew",
-	}
-	a, cfgPath := newImportApp(t, brew, system)
-	rootCfg := &config.RootConfig{
-		Tools: map[string]config.ToolSpec{
-			"ripgrep": {Provider: "system", InstallWith: "brew"},
-			"jq":      {Provider: "system", InstallWith: "apt"},
-			"bat": {
-				Provider: "system",
-				Hosts: map[string]config.ToolInstallSpec{
-					"linuxbox": {Provider: "system", InstallWith: "brew"},
-				},
-			},
-			"fd": {
-				Provider: "system",
-				Hosts: map[string]config.ToolInstallSpec{
-					"other": {Provider: "system", InstallWith: "brew"},
-				},
-			},
-		},
-		Groups: []*config.GroupConfig{testHostToolGroup("ripgrep", "jq", "bat", "fd")},
-	}
-	if err := saveAppConfig(t, cfgPath, rootCfg); err != nil {
-		t.Fatalf("config.Save: %v", err)
-	}
-
-	dryRun, err := a.NormalizeDefaultInstallOverrides(context.Background(), app.NormalizeInstallOverridesOptions{
-		IncludeDefaults:    true,
-		IncludeCurrentHost: true,
-		DryRun:             true,
-	})
-	if err != nil {
-		t.Fatalf("NormalizeDefaultInstallOverrides dry-run: %v", err)
-	}
-	if len(dryRun) != 2 {
-		t.Fatalf("dry-run normalized = %+v, want 2 entries", dryRun)
-	}
-	unchanged, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	if unchanged.Tools["ripgrep"].InstallWith != "brew" {
-		t.Fatalf("dry-run changed ripgrep install_with to %q", unchanged.Tools["ripgrep"].InstallWith)
-	}
-	if unchanged.Tools["bat"].Hosts["linuxbox"].InstallWith != "brew" {
-		t.Fatalf("dry-run changed bat host override to %+v", unchanged.Tools["bat"].Hosts["linuxbox"])
-	}
-
-	applied, err := a.NormalizeDefaultInstallOverrides(context.Background(), app.NormalizeInstallOverridesOptions{
-		IncludeDefaults:    true,
-		IncludeCurrentHost: true,
-	})
-	if err != nil {
-		t.Fatalf("NormalizeDefaultInstallOverrides apply: %v", err)
-	}
-	if len(applied) != 2 {
-		t.Fatalf("applied normalized = %+v, want 2 entries", applied)
-	}
-	if applied[0].Name != "bat" || applied[0].Scope != "host" || applied[0].Host != "linuxbox" {
-		t.Fatalf("first normalized entry = %+v, want bat host/linuxbox", applied[0])
-	}
-	if applied[1].Name != "ripgrep" || applied[1].Scope != "tool" {
-		t.Fatalf("second normalized entry = %+v, want ripgrep tool", applied[1])
-	}
-	updated, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	if updated.Tools["ripgrep"].InstallWith != "" {
-		t.Fatalf("ripgrep install_with = %q, want cleared", updated.Tools["ripgrep"].InstallWith)
-	}
-	if updated.Tools["jq"].InstallWith != "apt" {
-		t.Fatalf("jq install_with = %q, want preserved apt pin", updated.Tools["jq"].InstallWith)
-	}
-	if _, ok := updated.Tools["bat"].Hosts["linuxbox"]; ok {
-		t.Fatalf("bat host override still present: %+v", updated.Tools["bat"].Hosts)
-	}
-	if updated.Tools["fd"].Hosts["other"].InstallWith != "brew" {
-		t.Fatalf("fd other-host override = %+v, want preserved", updated.Tools["fd"].Hosts["other"])
 	}
 }
 

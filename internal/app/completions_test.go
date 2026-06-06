@@ -93,6 +93,7 @@ func TestSettingKeysExposeCanonicalOrder(t *testing.T) {
 		"dots_git.auto_commit",
 		"dots_git.auto_push",
 		"disabled_providers",
+		"provider_priority",
 		"provider_update_quarantine",
 	}
 	got := app.SettingKeys()

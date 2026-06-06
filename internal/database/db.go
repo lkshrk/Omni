@@ -144,6 +144,7 @@ type DotsSnapshot struct {
 }
 
 const dotsSnapshotMetaKey = "current"
+const providerListCacheClearStateKey = "migration.provider_list_cache_cleared"
 
 // MetadataUpdate is registry metadata learned without changing install state.
 type MetadataUpdate struct {
@@ -355,7 +356,24 @@ func (db *DB) Migrate(ctx context.Context) error {
 			return fmt.Errorf("creating index %s: %w", idx.name, err)
 		}
 	}
-	return db.migrateExistingToolMetadata(ctx)
+	if err := db.migrateExistingToolMetadata(ctx); err != nil {
+		return err
+	}
+	return db.clearProviderDerivedCacheForProviderList(ctx)
+}
+
+func (db *DB) clearProviderDerivedCacheForProviderList(ctx context.Context) error {
+	if _, err := db.GetState(ctx, providerListCacheClearStateKey); err == nil {
+		return nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	for _, table := range []string{"tool_cache", "tool_metadata", "package_availability", "update_metadata"} {
+		if _, err := db.bun.ExecContext(ctx, "DELETE FROM "+table); err != nil {
+			return fmt.Errorf("clearing %s for provider-list migration: %w", table, err)
+		}
+	}
+	return db.SetState(ctx, providerListCacheClearStateKey, "1")
 }
 
 func (db *DB) migrateExistingToolMetadata(ctx context.Context) error {

@@ -2,15 +2,13 @@
 env OMNI_GITHUB_API_BASE=http://127.0.0.1:1
 exec omni --config settings.json hosts ensure testhost
 
-exec omni --config settings.json tools set rg --provider system --install-with apt
+exec omni --config settings.json tools set rg --provider apt
 stdout 'Set logical tool "rg"'
 
 ! exec omni --config settings.json tools fallback rg --from-github BurntSushi/ripgrep
 stderr '/repos/BurntSushi/ripgrep/releases/latest'
-exec grep '"provider": "system"' settings.json
-stdout '"provider": "system"'
-exec grep '"install_with": "apt"' settings.json
-stdout '"install_with": "apt"'
+exec grep '"provider": "apt"' settings.json
+stdout '"provider": "apt"'
 ! exec grep '"fallback"' settings.json
 
 ! exec omni --config settings.json tools fallback rg

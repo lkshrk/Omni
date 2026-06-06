@@ -48,6 +48,7 @@ func (a *App) QuerySettings(key string) (map[string]any, error) {
 		"dots_git.auto_commit":       settings.DotsGit.AutoCommit,
 		"dots_git.auto_push":         settings.DotsGit.AutoPush,
 		"disabled_providers":         settings.DisabledProviders,
+		"provider_priority":          settings.ProviderPriority,
 	}
 	if key == "" {
 		return values, nil
@@ -820,6 +821,7 @@ type hostSettingsPatch struct {
 	DotsRepo          string                              `json:"dots_repo,omitempty"`
 	DotsDisabled      *bool                               `json:"dots_disabled,omitempty"`
 	DisabledProviders *[]string                           `json:"disabled_providers,omitempty"`
+	ProviderPriority  []string                            `json:"provider_priority,omitempty"`
 }
 
 func hostSettingsPatchDoc(in map[string]config.Settings) map[string]hostSettingsPatch {
@@ -829,8 +831,9 @@ func hostSettingsPatchDoc(in map[string]config.Settings) map[string]hostSettings
 	out := make(map[string]hostSettingsPatch, len(in))
 	for host, settings := range in {
 		patch := hostSettingsPatch{
-			Ecosystems: cloneEcosystemSettings(settings.Ecosystems),
-			DotsRepo:   settings.DotsRepo,
+			Ecosystems:       cloneEcosystemSettings(settings.Ecosystems),
+			DotsRepo:         settings.DotsRepo,
+			ProviderPriority: append([]string(nil), settings.ProviderPriority...),
 		}
 		if settings.DotsDisabled != nil {
 			dotsDisabled := *settings.DotsDisabled
@@ -862,8 +865,8 @@ func (a *App) patchConfigLocked(patch func(*config.RootConfig) (any, error)) err
 
 // SaveSettings writes settings to settings.json, splitting global and host-specific fields.
 // Global fields (AutoImport, DotsGit) are written to the top-level "settings" block.
-// Host-specific fields (Ecosystems, DotsRepo, DisabledProviders) are written to
-// host_settings[shortHostname].
+// Host-specific fields (Ecosystems, DotsRepo, DisabledProviders, ProviderPriority)
+// are written to host_settings[shortHostname].
 //
 // Uses config.Patch for both keys so any unknown top-level keys in settings.json
 // (e.g. user-added custom keys) are preserved exactly as-is.
@@ -888,6 +891,7 @@ func (a *App) SaveSettings(_ context.Context, s config.Settings) error {
 		hs.DotsRepo = normalisePath(s.DotsRepo)
 		hs.DotsDisabled = s.DotsDisabled // *bool: nil means "not configured"
 		hs.DisabledProviders = cloneSettingsStringSlice(s.DisabledProviders)
+		hs.ProviderPriority = cloneSettingsStringSlice(s.ProviderPriority)
 		cfg.HostSettings[hostname] = hs
 
 		return patchDoc{

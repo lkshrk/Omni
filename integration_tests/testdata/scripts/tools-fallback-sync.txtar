@@ -6,14 +6,14 @@ exec omni --config settings.json hosts ensure testhost
 exec omni-seed-package-availability rg apt rg false 'no candidate'
 
 exec omni --config settings.json tools sync
-stdout 'done: rg \(system\)'
+stdout 'done: rg \(apt\)'
 exec test -f .omni-cache/fallback/rg
 exec grep '"status": "verified"' settings.json
 stdout '"status": "verified"'
 
 # A second sync should verify the fallback-owned binary and skip reinstall.
 exec omni --config settings.json tools sync
-stdout 'already installed: rg \(system\)'
+stdout 'already installed: rg \(apt\)'
 
 -- bin/apt --
 #!/bin/sh
@@ -29,13 +29,13 @@ esac
 
 -- settings.json --
 {
+  "version": 6,
   "settings": {
-    "disabled_providers": ["node", "python"]
+    "disabled_providers": ["npm", "pip"]
   },
   "tools": {
     "rg": {
-      "provider": "system",
-      "install_with": "apt",
+      "providers": [{ "provider": "apt" }],
       "fallback": {
         "source": {
           "type": "github",

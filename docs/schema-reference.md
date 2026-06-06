@@ -2,14 +2,14 @@
 
 This page explains the shape of `settings.json`. For narrative examples, use
 [Configuration](configuration.md). For the machine-readable schema, use
-[`spec/omni.settings.v5.schema.json`](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v5.schema.json).
+[`spec/omni.settings.v6.schema.json`](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v6.schema.json).
 
 ## Root Object
 
 | Key | Type | Required | Description |
 | --- | --- | --- | --- |
 | `$schema` | string | no | Editor schema URI written by Omni. |
-| `version` | integer | yes | Settings format version. Current version is `5`. |
+| `version` | integer | yes | Settings format version. Current version is `6`. |
 | `settings` | object | no | Global defaults. |
 | `host_settings` | object | no | Per-host setting overrides. |
 | `tools` | object | no | Logical tool specs keyed by logical name. |
@@ -24,14 +24,19 @@ This page explains the shape of `settings.json`. For narrative examples, use
 | `auto_import` | boolean | Add newly discovered installed tools during scoped plain sync. Defaults to `false` when absent. |
 | `update_quarantine` | string | Duration to defer upgrades after PM-reported latest-version availability, such as `2d` or `48h`. Omitted or empty means disabled. |
 | `provider_update_quarantine` | object | Duration overrides keyed by logical provider or concrete provider/manager. |
-| `ecosystems` | object | Manager choices for `system`, `node`, and `python`. |
+| `provider_priority` | array | Preferred concrete provider order for provider selection flows. |
+| `ecosystems` | object | Legacy manager choices migrated to provider lists on load. |
 | `dots_repo` | string | Local path to the dotfiles Git repo. |
 | `dots_disabled` | boolean | Disable dotfile sync for this settings scope. |
 | `dots_git` | object | Dotfiles repo commit/push behavior. |
-| `disabled_providers` | array | Ecosystem providers disabled for this settings scope. |
+| `disabled_providers` | array | Providers disabled for this settings scope. |
 | `fallback_bin_dir` | string | Default directory for fallback-installed binaries. |
 
-### `settings.ecosystems`
+### `settings.ecosystems` (legacy)
+
+`settings.ecosystems` remains in the schema so older configs can load and
+migrate. New v6 config should use `provider_priority`, bootstrap
+`settings.providers`, and tool-level `providers[]`.
 
 | Ecosystem | Fields | Accepted values |
 | --- | --- | --- |
@@ -48,16 +53,14 @@ This page explains the shape of `settings.json`. For narrative examples, use
   "host_settings": {
     "workstation": {
       "dots_repo": "~/src/dotfiles",
-      "ecosystems": {
-        "node": { "manager": "pnpm" }
-      }
+      "provider_priority": ["apt", "brew", "npm", "pip"]
     }
   }
 }
 ```
 
-Host settings can override `ecosystems`, `dots_repo`, `dots_disabled`, and
-`disabled_providers`. They do not override `auto_import`,
+Host settings can override `provider_priority`, `dots_repo`, `dots_disabled`,
+and `disabled_providers`. They do not override `auto_import`,
 `update_quarantine`, `provider_update_quarantine`, or `dots_git`.
 
 ## `tools`
@@ -67,17 +70,18 @@ Host settings can override `ecosystems`, `dots_repo`, `dots_disabled`, and
 ```json
 {
   "tools": {
-    "ripgrep": { "provider": "system", "git": "https://github.com/BurntSushi/ripgrep" },
-    "typescript": { "provider": "node", "package": "typescript" }
+    "ripgrep": { "providers": [{ "provider": "brew" }], "git": "https://github.com/BurntSushi/ripgrep" },
+    "typescript": { "providers": [{ "provider": "npm", "package": "typescript" }] }
   }
 }
 ```
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `provider` | string | Portable ecosystem provider or concrete provider. Prefer `system`, `node`, or `python`. |
-| `package` | string | Provider package name. Defaults to the logical tool name. |
-| `install_with` | string | Concrete manager override for this tool. |
+| `providers` | array | Ordered concrete provider candidates. |
+| `providers[].provider` | string | Concrete provider such as `brew`, `apt`, `npm`, or `pip`. |
+| `providers[].package` | string | Provider package name. Defaults to the logical tool name. |
+| `providers[].bin` | string | Optional binary name when it differs from package/logical name. |
 | `git` | string | Upstream git repository URL. Brew metadata and install-from-search can populate GitHub URLs here for later fallback setup. |
 | `quarantine` | string | Tool-specific update quarantine override. Use a duration, `0`, or `exempt`. |
 | `options` | object | Provider-specific key-value options. |
@@ -85,7 +89,7 @@ Host settings can override `ecosystems`, `dots_repo`, `dots_disabled`, and
 | `ignore` | boolean | Keep the tool in config but skip management. |
 | `variants` | array | Alternate install candidates tried in order. |
 | `hosts` | object | Host-specific install overrides. |
-| `fallback` | object | GitHub fallback recipe for `system` tools when the current concrete system manager cannot provide the package. |
+| `fallback` | object | GitHub fallback recipe used when no configured native provider can provide the package. |
 
 ### `tools.<name>.fallback`
 
@@ -98,7 +102,7 @@ leaves existing config unchanged.
 Accepted GitHub repo forms are `owner/repo`, `github.com/owner/repo`, `https://github.com/owner/repo`,
 `https://github.com/owner/repo.git`, and `git@github.com:owner/repo.git`.
 Browser URLs with extra paths, queries, or fragments are rejected.
-Fallbacks are used only after the native system package manager is known
+Fallbacks are used only after the configured native provider is known
 unavailable for the configured package.
 
 | Field | Type | Description |
@@ -125,7 +129,7 @@ The `recipe.release_id`, `recipe.tag_name`, `recipe.published_at`,
 `recipe.asset_id`, `recipe.asset_name`, and `recipe.asset_download_url` fields
 are generated provenance/update fields. Leave them alone unless you are
 manually editing the fallback recipe and understand that incomplete metadata
-disables GitHub fallback update detection for installed `system(gh)` rows.
+disables GitHub fallback update detection for installed fallback rows.
 
 ## `groups`
 

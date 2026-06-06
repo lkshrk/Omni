@@ -24,7 +24,7 @@ func searchResultModel(tools []*database.ToolCache) Model {
 func TestLogicalMigration_SearchResultAddToConfigOpensGroupPicker(t *testing.T) {
 	m := searchResultModel([]*database.ToolCache{{
 		Name:     "ripgrep",
-		Provider: "system",
+		Provider: "brew",
 		Tracked:  false,
 	}})
 
@@ -44,13 +44,13 @@ func TestLogicalMigration_SearchResultAddToConfigOpensGroupPicker(t *testing.T) 
 }
 
 func TestLogicalMigration_SearchResultGroupSelectionAddsExplicitGroup(t *testing.T) {
-	prov := &okProvider{name: "system"}
+	prov := &okProvider{name: "brew"}
 	a, cfgPath := newCmdApp(t, prov, nil)
 
 	m := modelForCmds(a)
 	m.searchTools = []*database.ToolCache{{
 		Name:     "ripgrep",
-		Provider: "system",
+		Provider: "brew",
 		Tracked:  false,
 	}}
 	m.groupNames = []string{"work"}
@@ -106,8 +106,8 @@ func TestLogicalMigration_SearchResultGroupSelectionAddsExplicitGroup(t *testing
 	if !ok {
 		t.Fatalf("ripgrep logical spec missing from config: %+v", cfg.Tools)
 	}
-	if spec.Provider != "system" {
-		t.Fatalf("ripgrep provider = %q, want system", spec.Provider)
+	if len(spec.Providers) != 1 || spec.Providers[0].Provider != "brew" {
+		t.Fatalf("ripgrep providers = %+v, want brew", spec.Providers)
 	}
 	work := groupByName(cfg, "work")
 	if work == nil || !groupHasTool(work, "ripgrep") {
@@ -116,11 +116,11 @@ func TestLogicalMigration_SearchResultGroupSelectionAddsExplicitGroup(t *testing
 }
 
 func TestLogicalMigration_SearchInstallAndAddPersistsLogicalProvider(t *testing.T) {
-	prov := &okProvider{name: "system"}
+	prov := &okProvider{name: "brew"}
 	a, cfgPath := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
 
-	msg := m.doInstallAndAdd("ripgrep", "system")()
+	msg := m.doInstallAndAdd("ripgrep", "brew")()
 	got, ok := msg.(opCompleteMsg)
 	if !ok {
 		t.Fatalf("expected opCompleteMsg, got %T", msg)
@@ -137,8 +137,8 @@ func TestLogicalMigration_SearchInstallAndAddPersistsLogicalProvider(t *testing.
 	if !ok {
 		t.Fatalf("ripgrep logical spec missing from config: %+v", cfg.Tools)
 	}
-	if spec.Provider != "system" || spec.InstallWith != "" {
-		t.Fatalf("ripgrep spec = %+v, want provider system without install_with pin", spec)
+	if len(spec.Providers) != 1 || spec.Providers[0].Provider != "brew" {
+		t.Fatalf("ripgrep spec = %+v, want provider-list brew entry", spec)
 	}
 	host := groupByName(cfg, shortHostname())
 	if host == nil || !groupHasTool(host, "ripgrep") {
@@ -147,13 +147,13 @@ func TestLogicalMigration_SearchInstallAndAddPersistsLogicalProvider(t *testing.
 }
 
 func TestLogicalMigration_SearchInstallAndAddAsksGroup(t *testing.T) {
-	prov := &okProvider{name: "system"}
+	prov := &okProvider{name: "brew"}
 	a, cfgPath := newCmdApp(t, prov, nil)
 
 	m := modelForCmds(a)
 	m.searchTools = []*database.ToolCache{{
 		Name:     "ripgrep",
-		Provider: "system",
+		Provider: "brew",
 		Tracked:  false,
 	}}
 	m.groupNames = []string{"work"}
@@ -210,7 +210,7 @@ func TestLogicalMigration_SearchInstallAndAddAsksGroup(t *testing.T) {
 func TestLogicalMigration_SearchInstallEnterAsksGroup(t *testing.T) {
 	m := searchResultModel([]*database.ToolCache{{
 		Name:     "ripgrep",
-		Provider: "system",
+		Provider: "brew",
 		Tracked:  false,
 	}})
 
@@ -230,7 +230,7 @@ func TestLogicalMigration_SearchInstallAndAddPrivilegedOpensAdminTerminal(t *tes
 	m := modelForCmds(a)
 	m.searchTools = []*database.ToolCache{{
 		Name:            "vim",
-		Provider:        "system",
+		Provider:        "apt",
 		Package:         "vim",
 		Tracked:         false,
 		Privilege:       string(provider.PrivilegeRequired),
@@ -271,22 +271,20 @@ func TestLogicalMigration_SearchInstallAndAddPrivilegedOpensAdminTerminal(t *tes
 }
 
 func TestLogicalMigration_AdminTerminalInstallAndAddPersistsGroup(t *testing.T) {
-	system := &okProvider{name: "system"}
 	brew := &okProvider{name: "brew"}
-	a := newSearchCmdApp(t, system, brew)
+	a := newSearchCmdApp(t, brew)
 	cfgPath := a.ConfigPath
 	m := modelForCmds(a)
 
 	msg := m.doCompleteAdminTerminalAction(adminTerminalState{
-		action:        provider.PrivilegeActionInstall,
-		name:          "vim",
-		providerName:  "system",
-		pkg:           "vim",
-		installedWith: "brew",
-		options:       map[string]string{"brew_kind": "formula"},
-		rowKey:        toolKey("vim", "system"),
-		addToConfig:   true,
-		addGroup:      "work",
+		action:       provider.PrivilegeActionInstall,
+		name:         "vim",
+		providerName: "brew",
+		pkg:          "vim",
+		options:      map[string]string{"brew_kind": "formula"},
+		rowKey:       toolKey("vim", "brew"),
+		addToConfig:  true,
+		addGroup:     "work",
 	})()
 	got, ok := msg.(opCompleteMsg)
 	if !ok {
@@ -298,8 +296,8 @@ func TestLogicalMigration_AdminTerminalInstallAndAddPersistsGroup(t *testing.T) 
 	if got.message != "installed vim and added to config" {
 		t.Fatalf("message = %q, want install-and-add success", got.message)
 	}
-	if !slices.Contains(got.removeDiscoveredKeys, toolKey("vim", "system")) {
-		t.Fatalf("removeDiscoveredKeys = %v, want vim/system", got.removeDiscoveredKeys)
+	if !slices.Contains(got.removeDiscoveredKeys, toolKey("vim", "brew")) {
+		t.Fatalf("removeDiscoveredKeys = %v, want vim/brew", got.removeDiscoveredKeys)
 	}
 
 	cfg, err := config.Load(cfgPath)
@@ -311,11 +309,11 @@ func TestLogicalMigration_AdminTerminalInstallAndAddPersistsGroup(t *testing.T) 
 		t.Fatalf("work group does not contain vim: %+v", cfg.Groups)
 	}
 	spec := cfg.Tools["vim"]
-	if spec.InstallWith != "brew" {
-		t.Fatalf("install_with = %q, want brew", spec.InstallWith)
+	if len(spec.Providers) != 1 || spec.Providers[0].Provider != "brew" {
+		t.Fatalf("providers = %+v, want brew", spec.Providers)
 	}
-	if spec.Options["brew_kind"] != "formula" {
-		t.Fatalf("Options[brew_kind] = %q, want formula", spec.Options["brew_kind"])
+	if spec.Providers[0].Options["brew_kind"] != "formula" {
+		t.Fatalf("providers[0].Options[brew_kind] = %q, want formula", spec.Providers[0].Options["brew_kind"])
 	}
 }
 

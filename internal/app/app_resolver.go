@@ -137,11 +137,17 @@ func (a *App) resolveInstallSpecWithAvailability(ctx context.Context, logicalNam
 	}
 
 	defaultSpec := spec.DefaultInstallSpec()
-	candidates := append([]config.ToolInstallSpec{defaultSpec}, spec.Variants...)
+	candidates := append([]config.ToolInstallSpec(nil), spec.Providers...)
+	if len(candidates) == 0 {
+		candidates = append([]config.ToolInstallSpec{defaultSpec}, spec.Variants...)
+	}
 	for _, candidate := range candidates {
 		if a.providerUsableCached(ctx, candidate.Provider, availability) {
 			return candidate
 		}
+	}
+	if len(candidates) > 0 {
+		return candidates[0]
 	}
 	return defaultSpec
 }
@@ -224,12 +230,6 @@ func (a *App) isInstalledWithEntry(ctx context.Context, prov provider.Provider, 
 }
 
 func (a *App) logicalInstallTarget(providerName string) (configProvider, installWith string) {
-	if a.knownEcosystemProvider(providerName) {
-		return providerName, ""
-	}
-	if ecosystem, ok := a.providerEcosystem(providerName); ok && ecosystem != providerName {
-		return ecosystem, providerName
-	}
 	return providerName, ""
 }
 

@@ -122,12 +122,9 @@ func tuiTool(name, providerName string) tuiFixtureTool {
 }
 
 func tuiToolSpec(providerName string) config.ToolSpec {
-	spec := config.ToolSpec{Provider: providerName}
-	if ecosystem := tuiFixtureEcosystem(providerName); ecosystem != "" {
-		spec.Provider = ecosystem
-		spec.InstallWith = providerName
+	return config.ToolSpec{
+		Providers: []config.ToolInstallSpec{{Provider: tuiFixtureProvider(providerName)}},
 	}
-	return spec
 }
 
 func tuiTestHostGroup(names ...string) *config.GroupConfig {
@@ -248,6 +245,19 @@ func tuiFixtureEcosystem(providerName string) string {
 		return "node"
 	default:
 		return ""
+	}
+}
+
+func tuiFixtureProvider(providerName string) string {
+	switch providerName {
+	case "system":
+		return "brew"
+	case "node":
+		return "npm"
+	case "python", "pip3":
+		return "pip"
+	default:
+		return providerName
 	}
 }
 
@@ -421,7 +431,7 @@ func TestDoSaveFallback_ResolverFailurePreservesConfig(t *testing.T) {
 		t.Fatalf("config.Load: %v", err)
 	}
 	spec := cfg.Tools["rg"]
-	if spec.Provider != "system" || spec.InstallWith != "apt" {
+	if len(spec.Providers) != 1 || spec.Providers[0].Provider != "apt" {
 		t.Fatalf("spec = %+v, want existing tool config preserved", spec)
 	}
 	if spec.Fallback != nil {
@@ -519,12 +529,12 @@ func TestDoDelete_RefreshesToolMembershipState(t *testing.T) {
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
 	m := modelForCmds(a)
-	key := toolKey("ripgrep", "system")
+	key := toolKey("ripgrep", "brew")
 	m.toolGroups = map[string]string{key: "base"}
 	m.toolMemberships = map[string][]string{key: {"base"}}
 	if err := a.DB().Upsert(context.Background(), &database.ToolCache{
 		Name:      "ripgrep",
-		Provider:  "system",
+		Provider:  "brew",
 		Package:   "ripgrep",
 		Installed: true,
 		Tracked:   true,
@@ -762,7 +772,7 @@ func TestDoSyncAllWithProgress_PrivilegedInstallOpensAdminTerminal(t *testing.T)
 	if done.err != nil {
 		t.Fatalf("unexpected error: %v", done.err)
 	}
-	if done.promptPrivilegedActions[toolKey("vim", provider.EcosystemSystem)] != provider.PrivilegeActionInstall {
+	if done.promptPrivilegedActions[toolKey("vim", "apt")] != provider.PrivilegeActionInstall {
 		t.Fatalf("promptPrivilegedActions = %#v, want vim install prompt", done.promptPrivilegedActions)
 	}
 
@@ -770,8 +780,8 @@ func TestDoSyncAllWithProgress_PrivilegedInstallOpensAdminTerminal(t *testing.T)
 	if got.mode != viewAdminTerminal || got.adminTerminal == nil {
 		t.Fatalf("mode=%v adminTerminal=%v, want admin terminal prompt", got.mode, got.adminTerminal != nil)
 	}
-	if got.adminTerminal.name != "vim" || got.adminTerminal.providerName != provider.EcosystemSystem {
-		t.Fatalf("admin terminal target = %s/%s, want vim/system", got.adminTerminal.providerName, got.adminTerminal.name)
+	if got.adminTerminal.name != "vim" || got.adminTerminal.providerName != "apt" {
+		t.Fatalf("admin terminal target = %s/%s, want vim/apt", got.adminTerminal.providerName, got.adminTerminal.name)
 	}
 	if got.adminTerminal.display != expectedInteractiveAdminDisplay("apt-get install -y vim") {
 		t.Fatalf("display command = %q", got.adminTerminal.display)
@@ -779,7 +789,7 @@ func TestDoSyncAllWithProgress_PrivilegedInstallOpensAdminTerminal(t *testing.T)
 	if got.statusMsg != "" || got.statusIsErr {
 		t.Fatalf("status=%q err=%v, want prompt to own status", got.statusMsg, got.statusIsErr)
 	}
-	if got.rowErrors[toolKey("vim", provider.EcosystemSystem)] != "admin approval required to install" {
+	if got.rowErrors[toolKey("vim", "apt")] != "admin approval required to install" {
 		t.Fatalf("rowErrors = %#v, want admin approval row error retained", got.rowErrors)
 	}
 }
@@ -1273,7 +1283,7 @@ func TestDoSetToolGroupMemberships_ExistingGroupJoinsHost(t *testing.T) {
 	if got.err != nil {
 		t.Fatalf("unexpected error: %v", got.err)
 	}
-	key := toolKey("ripgrep", "system")
+	key := toolKey("ripgrep", "brew")
 	if got.toolGroups[key] != "work" {
 		t.Fatalf("toolGroups[%q] = %q, want work", key, got.toolGroups[key])
 	}
@@ -1288,7 +1298,7 @@ func TestDoSetToolGroupMemberships_ExistingGroupJoinsHost(t *testing.T) {
 
 	rowModel := baseModel([]*database.ToolCache{{
 		Name:     "ripgrep",
-		Provider: "system",
+		Provider: "brew",
 		Tracked:  true,
 	}})
 	rowModel.toolGroups = got.toolGroups

@@ -282,6 +282,7 @@ func copyHostSettings(cfg *config.RootConfig, sourceName, targetName string) {
 
 func cloneHostSettings(settings config.Settings) config.Settings {
 	settings.DisabledProviders = append([]string(nil), settings.DisabledProviders...)
+	settings.ProviderPriority = append([]string(nil), settings.ProviderPriority...)
 	if settings.DotsDisabled != nil {
 		dotsDisabled := *settings.DotsDisabled
 		settings.DotsDisabled = &dotsDisabled
@@ -593,10 +594,6 @@ func (a *App) syncOrphansToMachineGroup(ctx context.Context, activeGroups []*con
 			}
 			for _, t := range installed {
 				configProvider := a.searchResultConfigProvider(p.Name())
-				if eco, ok := revEcosystem[p.Name()]; ok {
-					configProvider = eco
-				}
-				installWith := configInstallWithForConcreteProvider(configProvider, p.Name(), resolvedEcosystems)
 				key := configProvider + "\x00" + t.Name
 				if _, ok := covered[key]; ok {
 					continue
@@ -608,8 +605,14 @@ func (a *App) syncOrphansToMachineGroup(ctx context.Context, activeGroups []*con
 					cfg.Tools = make(map[string]config.ToolSpec)
 				}
 				spec := cfg.Tools[t.Name]
-				spec.Provider = configProvider
-				spec.InstallWith = installWith
+				spec.Providers = upsertToolProvider(spec.Providers, config.ToolInstallSpec{
+					Provider: configProvider,
+					Package:  t.Package,
+				})
+				spec.Provider = ""
+				spec.Package = ""
+				spec.InstallWith = ""
+				spec.Options = nil
 				cfg.Tools[t.Name] = spec
 				orphans = append(orphans, config.ToolEntry{Name: t.Name})
 				covered[key] = struct{}{}

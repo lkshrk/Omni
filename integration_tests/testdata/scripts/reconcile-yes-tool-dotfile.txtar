@@ -17,8 +17,8 @@ exec cp changed/init.lua $WORK/home/dotfiles/dotfiles/nvim/.config/nvim/init.lua
 
 exec omni --yes --config settings.json reconcile --skip-privileged -m 'dots: reconcile commit'
 stdout 'syncing tools'
-stdout 'Scanning system/brew… \(1/1\)'
-stdout 'done: fd \(system\)'
+stdout 'Scanning brew… \(1/1\)'
+stdout 'done: fd \(brew\)'
 stdout 'syncing dotfiles'
 stdout 'committing dotfiles'
 stdout 'Reconcile complete .* 1 installed, 0 added to config, 0 upgraded, .* dotfile op, dotfiles committed\.'
@@ -114,8 +114,9 @@ exit 1
 
 -- settings.json --
 {
+  "version": 6,
   "settings": {
-    "disabled_providers": ["node", "python"]
+    "disabled_providers": ["npm", "pip"]
   },
   "host_settings": {
     "testhost": {
@@ -124,7 +125,7 @@ exit 1
   },
   "hosts": { "testhost": [] },
   "tools": {
-    "fd": { "provider": "system", "install_with": "brew" }
+    "fd": { "providers": [{ "provider": "brew" }] }
   },
   "groups": [
     {

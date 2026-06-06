@@ -12,8 +12,8 @@ stdout 'Bootstrap complete'
 
 exec grep '"ripgrep"' settings.json
 stdout '"ripgrep"'
-exec grep '"manager": "pnpm"' settings.json
-stdout '"manager": "pnpm"'
+exec grep '"version": 6' settings.json
+stdout '"version": 6'
 exec grep '"testhost"' settings.json
 stdout '"testhost"'
 exec grep '"work"' settings.json
@@ -31,8 +31,8 @@ stdout 'Bootstrap complete'
 
 exec grep '"fd"' prompted-settings.json
 stdout '"fd"'
-exec grep '"manager": "uv"' prompted-settings.json
-stdout '"manager": "uv"'
+exec grep '"version": 6' prompted-settings.json
+stdout '"version": 6'
 exec grep '"testhost"' prompted-settings.json
 stdout '"testhost"'
 exec grep '"promptwork"' prompted-settings.json

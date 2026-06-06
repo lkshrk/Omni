@@ -33,7 +33,7 @@ func TestMigrate_Idempotent(t *testing.T) {
 	}
 }
 
-func TestMigrate_CopiesExistingToolMetadata(t *testing.T) {
+func TestMigrate_ClearsProviderDerivedCacheOnce(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
 
@@ -44,21 +44,63 @@ func TestMigrate_CopiesExistingToolMetadata(t *testing.T) {
 		 )
 		 VALUES (?, ?, ?, FALSE, ?, ?, ?, CURRENT_TIMESTAMP)`,
 		"parsec", "system", "parsec", "remote desktop", "maybe", "cask may run installer package"); err != nil {
-		t.Fatalf("seed legacy metadata: %v", err)
+		t.Fatalf("seed tool cache: %v", err)
+	}
+	if _, err := db.Bun().ExecContext(ctx,
+		`INSERT INTO tool_metadata (name, provider, package, updated_at)
+		 VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
+		"fd", "brew", "fd"); err != nil {
+		t.Fatalf("seed tool metadata: %v", err)
+	}
+	if err := db.UpsertPackageAvailability(ctx, database.PackageAvailability{
+		Name: "rg", Provider: "apt", Package: "ripgrep", Available: false, CheckedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed package availability: %v", err)
+	}
+	if err := db.UpsertUpdateMetadata(ctx, database.UpdateMetadata{
+		Provider: "npm", Package: "typescript", Version: "5.8.0", AvailableAt: time.Now().UTC(), DateSource: "registry", CheckedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed update metadata: %v", err)
+	}
+	if err := db.SetState(ctx, "bootstrap.testhost", "complete"); err != nil {
+		t.Fatalf("seed local state: %v", err)
+	}
+	if _, err := db.Bun().ExecContext(ctx, `DELETE FROM local_state WHERE key = 'migration.provider_list_cache_cleared'`); err != nil {
+		t.Fatalf("reset migration marker: %v", err)
 	}
 	if err := db.Migrate(ctx); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
 
-	meta, err := db.GetMetadata(ctx, "parsec", "system", "parsec")
+	for _, table := range []string{"tool_cache", "tool_metadata", "package_availability", "update_metadata"} {
+		var count int
+		if err := db.Bun().NewRaw("SELECT count(*) FROM "+table).Scan(ctx, &count); err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		if count != 0 {
+			t.Fatalf("%s count = %d, want 0", table, count)
+		}
+	}
+	state, err := db.GetState(ctx, "bootstrap.testhost")
 	if err != nil {
-		t.Fatalf("GetMetadata: %v", err)
+		t.Fatalf("GetState bootstrap.testhost: %v", err)
 	}
-	if !meta.Description.Valid || meta.Description.String != "remote desktop" {
-		t.Fatalf("description = %+v, want remote desktop", meta.Description)
+	if state != "complete" {
+		t.Fatalf("local state = %q, want complete", state)
 	}
-	if meta.Privilege != "maybe" {
-		t.Fatalf("privilege = %q, want maybe", meta.Privilege)
+
+	if err := db.Upsert(ctx, &database.ToolCache{Name: "jq", Provider: "brew", Package: "jq", Installed: true, LastChecked: time.Now().UTC()}); err != nil {
+		t.Fatalf("seed after marker: %v", err)
+	}
+	if err := db.Migrate(ctx); err != nil {
+		t.Fatalf("second Migrate: %v", err)
+	}
+	var count int
+	if err := db.Bun().NewRaw("SELECT count(*) FROM tool_cache WHERE name = 'jq'").Scan(ctx, &count); err != nil {
+		t.Fatalf("count jq: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("jq count after second migrate = %d, want 1", count)
 	}
 }
 

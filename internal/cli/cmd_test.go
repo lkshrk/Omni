@@ -543,7 +543,7 @@ func TestToolsSetHostFlag_WritesHostOverride(t *testing.T) {
 	cacheDir := t.TempDir()
 	withConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
-			"black": {Provider: "system", InstallWith: "brew"},
+			"black": {Providers: []config.ToolInstallSpec{{Provider: "brew"}}},
 		},
 		Groups: []*config.GroupConfig{cliTestHostGroup("black")},
 	})
@@ -557,7 +557,7 @@ func TestToolsSetHostFlag_WritesHostOverride(t *testing.T) {
 	t.Cleanup(func() { _ = a.Close() })
 
 	cmd := newToolsCmd(&rootState{app: a, yes: true})
-	cmd.SetArgs([]string{"set", "black", "--provider", "python", "--install-with", "pip", "--host"})
+	cmd.SetArgs([]string{"set", "black", "--provider", "pip", "--host"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("tools set --host: %v", err)
 	}
@@ -567,8 +567,8 @@ func TestToolsSetHostFlag_WritesHostOverride(t *testing.T) {
 		t.Fatalf("config.Load: %v", err)
 	}
 	override := cfg.Tools["black"].Hosts["testhost"]
-	if override.Provider != "python" || override.InstallWith != "pip" {
-		t.Fatalf("black host override = %+v, want python via pip", override)
+	if override.Provider != "pip" || override.InstallWith != "" {
+		t.Fatalf("black host override = %+v, want pip without install_with", override)
 	}
 }
 
@@ -579,7 +579,7 @@ func TestSwitchReinstallDefaultFlag_InstallsConfiguredProvider(t *testing.T) {
 	cacheDir := t.TempDir()
 	withConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
-			"black": {Provider: "python", InstallWith: "pip"},
+			"black": {Providers: []config.ToolInstallSpec{{Provider: "pip"}}},
 		},
 		Groups: []*config.GroupConfig{cliTestHostGroup("black")},
 	})
@@ -596,7 +596,8 @@ func TestSwitchReinstallDefaultFlag_InstallsConfiguredProvider(t *testing.T) {
 	t.Cleanup(func() { _ = a.Close() })
 	if err := a.DB().Upsert(context.Background(), &database.ToolCache{
 		Name:          "black",
-		Provider:      "python",
+		Provider:      "pip",
+		Package:       "black",
 		Installed:     true,
 		InstalledWith: "brew",
 	}); err != nil {
@@ -2639,9 +2640,6 @@ func TestConsolidate_EcosystemDryRun_ASCIISymbolModeUsesCommandOutput(t *testing
 	if !strings.Contains(output, "Dry-run - consolidating python tools > uv") {
 		t.Fatalf("consolidate output did not rewrite dry-run symbols:\n%s", output)
 	}
-	if !strings.Contains(output, "> would migrate: black") {
-		t.Fatalf("consolidate output did not rewrite migration marker:\n%s", output)
-	}
 }
 
 // ─── sync: warnings output ────────────────────────────────────────────────────
@@ -3096,9 +3094,8 @@ func TestToolsSet_CreatesLogicalSpec(t *testing.T) {
 		"--config", cfgPath,
 		"--cache-dir", cacheDir,
 		"tools", "set", "ripgrep",
-		"--provider", "system",
+		"--provider", "brew",
 		"--package", "rg",
-		"--install-with", "brew",
 	})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("tools set: %v", err)
@@ -3109,8 +3106,8 @@ func TestToolsSet_CreatesLogicalSpec(t *testing.T) {
 		t.Fatalf("config.Load: %v", err)
 	}
 	spec := cfg.Tools["ripgrep"]
-	if spec.Provider != "system" || spec.Package != "rg" || spec.InstallWith != "brew" {
-		t.Fatalf("spec = %+v, want provider system package rg install_with brew", spec)
+	if len(spec.Providers) != 1 || spec.Providers[0].Provider != "brew" || spec.Providers[0].Package != "rg" || spec.Provider != "" || spec.InstallWith != "" {
+		t.Fatalf("spec = %+v, want provider-list brew package rg", spec)
 	}
 }
 
@@ -3121,7 +3118,7 @@ func TestToolsSet_QuarantineOnlyUpdatesExistingSpec(t *testing.T) {
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
-			"ripgrep": {Provider: "system", InstallWith: "brew", Package: "rg"},
+			"ripgrep": {Providers: []config.ToolInstallSpec{{Provider: "brew", Package: "rg"}}},
 		},
 	})
 	withHost(t, cfgPath)
@@ -3145,8 +3142,8 @@ func TestToolsSet_QuarantineOnlyUpdatesExistingSpec(t *testing.T) {
 	if spec.Quarantine != "exempt" {
 		t.Fatalf("Quarantine = %q, want exempt", spec.Quarantine)
 	}
-	if spec.Provider != "system" || spec.Package != "rg" || spec.InstallWith != "brew" {
-		t.Fatalf("spec = %+v, want existing provider/package/install_with preserved", spec)
+	if len(spec.Providers) != 1 || spec.Providers[0].Provider != "brew" || spec.Providers[0].Package != "rg" {
+		t.Fatalf("spec = %+v, want existing provider-list preserved", spec)
 	}
 }
 
@@ -3158,7 +3155,7 @@ func TestToolsFallbackFromGitHub_ResolverFailurePreservesConfig(t *testing.T) {
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	withConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
-			"rg": {Provider: "system", InstallWith: "apt"},
+			"rg": {Providers: []config.ToolInstallSpec{{Provider: "apt"}}},
 		},
 	})
 	withHost(t, cfgPath)
@@ -3185,7 +3182,7 @@ func TestToolsFallbackFromGitHub_ResolverFailurePreservesConfig(t *testing.T) {
 		t.Fatalf("config.Load: %v", err)
 	}
 	spec := cfg.Tools["rg"]
-	if spec.Provider != "system" || spec.InstallWith != "apt" {
+	if len(spec.Providers) != 1 || spec.Providers[0].Provider != "apt" || spec.Provider != "" || spec.InstallWith != "" {
 		t.Fatalf("spec = %+v, want existing tool config preserved", spec)
 	}
 	if spec.Fallback != nil {
@@ -3347,90 +3344,6 @@ func TestToolsDeleteSpec_RejectsProviderTool(t *testing.T) {
 		}
 	}
 	t.Fatalf("npm membership was removed despite protected provider guard: %+v", cfg.Groups)
-}
-
-func TestToolsNormalizeDefaultOverrides_DryRun(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{
-		Tools: map[string]config.ToolSpec{
-			"ripgrep": {Provider: "system", InstallWith: "brew"},
-			"jq":      {Provider: "system", InstallWith: "apt"},
-		},
-		Groups: []*config.GroupConfig{cliTestHostGroup("ripgrep", "jq")},
-	})
-	withHost(t, cfgPath)
-
-	cmd := NewRootCmd()
-	var out bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetArgs([]string{
-		"--config", cfgPath,
-		"--cache-dir", cacheDir,
-		"tools", "normalize",
-		"--default-overrides",
-		"--dry-run",
-	})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("tools normalize --dry-run: %v", err)
-	}
-	if !strings.Contains(out.String(), "Would normalize 1 provider override:") ||
-		!strings.Contains(out.String(), "  ripgrep: system via brew") {
-		t.Fatalf("output = %q, want dry-run normalized ripgrep", out.String())
-	}
-
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	if cfg.Tools["ripgrep"].InstallWith != "brew" {
-		t.Fatalf("dry-run changed install_with to %q", cfg.Tools["ripgrep"].InstallWith)
-	}
-}
-
-func TestToolsNormalizeDefaultOverrides_AppliesWithYes(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{
-		Tools: map[string]config.ToolSpec{
-			"ripgrep": {Provider: "system", InstallWith: "brew"},
-			"jq":      {Provider: "system", InstallWith: "apt"},
-		},
-		Groups: []*config.GroupConfig{cliTestHostGroup("ripgrep", "jq")},
-	})
-	withHost(t, cfgPath)
-
-	cmd := NewRootCmd()
-	var out bytes.Buffer
-	cmd.SetOut(&out)
-	cmd.SetArgs([]string{
-		"-y",
-		"--config", cfgPath,
-		"--cache-dir", cacheDir,
-		"tools", "normalize",
-		"--default-overrides",
-	})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("tools normalize: %v", err)
-	}
-	if !strings.Contains(out.String(), "Normalized 1 provider override:") {
-		t.Fatalf("output = %q, want normalized count", out.String())
-	}
-
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	if cfg.Tools["ripgrep"].InstallWith != "" {
-		t.Fatalf("ripgrep install_with = %q, want cleared", cfg.Tools["ripgrep"].InstallWith)
-	}
-	if cfg.Tools["jq"].InstallWith != "apt" {
-		t.Fatalf("jq install_with = %q, want preserved apt pin", cfg.Tools["jq"].InstallWith)
-	}
 }
 
 func TestGroupsMoveAndRemoveTool_ManageAssignments(t *testing.T) {
@@ -5209,19 +5122,18 @@ func TestSettingsShow_KeyAndJSON(t *testing.T) {
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
-	settings := config.Settings{DisabledProviders: []string{"system"}}
-	settings.SetEcosystemManager("node", "pnpm")
+	settings := config.Settings{DisabledProviders: []string{"system"}, ProviderPriority: []string{"npm", "brew"}}
 	withConfig(t, cfgPath, &config.RootConfig{Settings: settings})
 
 	cmd := NewRootCmd()
 	var out bytes.Buffer
 	cmd.SetOut(&out)
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "settings", "show", "node.manager", "--format", "json"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "settings", "show", "provider_priority", "--format", "json"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("settings show key json: %v", err)
 	}
-	if !strings.Contains(out.String(), `"node.manager":"pnpm"`) {
-		t.Fatalf("output = %q, want node.manager JSON", out.String())
+	if !strings.Contains(out.String(), `"provider_priority":["npm","brew"]`) {
+		t.Fatalf("output = %q, want provider_priority JSON", out.String())
 	}
 }
 
@@ -5230,19 +5142,18 @@ func TestSettingsGet_PrintsSingleValue(t *testing.T) {
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
-	settings := config.Settings{}
-	settings.SetEcosystemManager("python", "uv")
+	settings := config.Settings{ProviderPriority: []string{"uv", "pip"}}
 	withConfig(t, cfgPath, &config.RootConfig{Settings: settings})
 
 	cmd := NewRootCmd()
 	var out bytes.Buffer
 	cmd.SetOut(&out)
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "settings", "get", "python.manager"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "settings", "get", "provider_priority"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("settings get: %v", err)
 	}
-	if strings.TrimSpace(out.String()) != "uv" {
-		t.Fatalf("output = %q, want uv", out.String())
+	if strings.TrimSpace(out.String()) != "uv, pip" {
+		t.Fatalf("output = %q, want provider priority", out.String())
 	}
 }
 

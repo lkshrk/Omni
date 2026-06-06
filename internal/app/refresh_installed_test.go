@@ -123,7 +123,7 @@ func TestRefreshInstalled_MetadataBulkPath_PersistsPrivilege(t *testing.T) {
 		t.Fatalf("RefreshInstalled: %v", err)
 	}
 
-	cached, err := a.DB().Get(context.Background(), "parsec", "system", "parsec")
+	cached, err := a.DB().Get(context.Background(), "parsec", "brew", "parsec")
 	if err != nil {
 		t.Fatalf("Get parsec: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestRefreshInstalled_MetadataBulkPath_PersistsPrivilege(t *testing.T) {
 	if cached.PrivilegeAt == nil {
 		t.Fatal("PrivilegeAt should be set")
 	}
-	meta, err := a.DB().GetMetadata(context.Background(), "parsec", "system", "parsec")
+	meta, err := a.DB().GetMetadata(context.Background(), "parsec", "brew", "parsec")
 	if err != nil {
 		t.Fatalf("GetMetadata parsec: %v", err)
 	}
@@ -476,52 +476,6 @@ func TestRefreshInstalled_Progress_NilCallback(t *testing.T) {
 	}
 }
 
-// ── TestRefreshInstalled_BulkPath_ConcreteResolver ────────────────────────────
-
-// TestRefreshInstalled_BulkPath_ConcreteResolver verifies that ecosystem providers
-// which implement both BulkChecker and ConcreteResolver (e.g. "node" backed by
-// "bun") store the resolved concrete name in InstalledWith — not the ecosystem name.
-// Regression: previously the bulk fast-path always wrote t.Provider ("node")
-// as InstalledWith, causing syncWrongProv in the TUI for every node tool when
-// the effectiveNodeManager was "bun".
-func TestRefreshInstalled_BulkPath_ConcreteResolver(t *testing.T) {
-	prov := &bulkConcreteStub{
-		bulkCheckingStub: bulkCheckingStub{
-			stubProvider: stubProvider{name: "node", available: true},
-			bulk:         map[string]string{"typescript": "5.3.3"},
-		},
-		concreteName: "bun",
-	}
-	a, cfgPath := newImportApp(t, prov)
-
-	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: logicalToolSpecs(logicalTool("typescript", "node")),
-		Groups: []*config.GroupConfig{{
-			Tools: groupTools("typescript"),
-		}},
-	}); err != nil {
-		t.Fatalf("saving config: %v", err)
-	}
-
-	if err := a.RefreshInstalled(context.Background(), nil); err != nil {
-		t.Fatalf("RefreshInstalled: %v", err)
-	}
-
-	tools, err := a.ListTools(context.Background(), "")
-	if err != nil {
-		t.Fatalf("ListTools: %v", err)
-	}
-	if len(tools) != 1 {
-		t.Fatalf("got %d tools, want 1", len(tools))
-	}
-	if !tools[0].Installed {
-		t.Errorf("typescript.Installed = false, want true")
-	}
-	if tools[0].InstalledWith != "bun" {
-		t.Errorf("typescript.InstalledWith = %q, want %q (concrete backend)", tools[0].InstalledWith, "bun")
-	}
-}
-
 func TestRefreshInstalled_Progress_XofY(t *testing.T) {
 	brew := &bulkCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
@@ -582,46 +536,6 @@ func TestRefreshInstalled_Progress_XofY(t *testing.T) {
 	}
 }
 
-func TestRefreshInstalled_Progress_ConcreteMetaProviderLabelDedupes(t *testing.T) {
-	node := &bulkConcreteStub{
-		bulkCheckingStub: bulkCheckingStub{
-			stubProvider: stubProvider{name: "node", available: true},
-			bulk:         map[string]string{"typescript": "5.4.0"},
-		},
-		concreteName: "bun",
-	}
-	a, cfgPath := newImportApp(t, node)
-
-	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: logicalToolSpecs(
-			logicalTool("typescript", "node"),
-			logicalFixtureTool{Name: "eslint", Provider: "node", InstallWith: "bun"},
-		),
-		Groups: []*config.GroupConfig{{
-			Tools: groupTools("typescript", "eslint"),
-		}},
-	}); err != nil {
-		t.Fatalf("saving config: %v", err)
-	}
-
-	var msgs []string
-	if err := a.RefreshInstalled(context.Background(), func(s string) { msgs = append(msgs, s) }); err != nil {
-		t.Fatalf("RefreshInstalled: %v", err)
-	}
-
-	want := []string{"Scanning node/bun… (1/1)"}
-	if len(msgs) != len(want) {
-		t.Fatalf("got progress messages %v, want %v", msgs, want)
-	}
-	for i, msg := range msgs {
-		if msg != want[i] {
-			t.Errorf("progress message %d = %q, want %q", i, msg, want[i])
-		}
-	}
-}
-
-// ── TestRefreshInstalled_MultiManagerPath ─────────────────────────────────────
-
 // multiManagerStub implements provider.MultiManagerBulkChecker, returning
 // per-tool InstalledEntry values with distinct ConcreteManager attribution.
 type multiManagerStub struct {
@@ -633,78 +547,19 @@ func (s *multiManagerStub) InstalledByManager(_ context.Context) (map[string]pro
 	return s.entries, nil
 }
 
-// TestRefreshInstalled_MultiManagerPath_PerToolInstalledWith verifies that when
-// a provider implements MultiManagerBulkChecker, RefreshInstalled stores the
-// per-tool ConcreteManager as InstalledWith — not the provider name. This enables
-// WrongProv detection for tools installed by a non-effective backend (e.g. ruff
-// installed via pip3 when uv is the configured manager).
-func TestRefreshInstalled_MultiManagerPath_PerToolInstalledWith(t *testing.T) {
-	prov := &multiManagerStub{
-		stubProvider: stubProvider{name: "python", available: true},
-		entries: map[string]provider.InstalledEntry{
-			"black": {Version: "24.3.0", ConcreteManager: "uv"},
-			"ruff":  {Version: "0.4.0", ConcreteManager: "pip3"}, // installed by wrong manager
-		},
-	}
-	a, cfgPath := newImportApp(t, prov)
-
-	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: logicalToolSpecs(
-			logicalTool("black", "python"),
-			logicalTool("ruff", "python"),
-		),
-		Groups: []*config.GroupConfig{{
-			Tools: groupTools("black", "ruff"),
-		}},
-	}); err != nil {
-		t.Fatalf("saving config: %v", err)
-	}
-
-	if err := a.RefreshInstalled(context.Background(), nil); err != nil {
-		t.Fatalf("RefreshInstalled: %v", err)
-	}
-
-	tools, err := a.ListTools(context.Background(), "")
-	if err != nil {
-		t.Fatalf("ListTools: %v", err)
-	}
-	if len(tools) != 2 {
-		t.Fatalf("got %d tools, want 2", len(tools))
-	}
-
-	byName := make(map[string]*database.ToolCache, len(tools))
-	for _, tc := range tools {
-		byName[tc.Name] = tc
-	}
-
-	if byName["black"].InstalledWith != "uv" {
-		t.Errorf("black.InstalledWith = %q, want uv", byName["black"].InstalledWith)
-	}
-	if byName["ruff"].InstalledWith != "pip3" {
-		t.Errorf("ruff.InstalledWith = %q, want pip3 (enables WrongProv when effective=uv)", byName["ruff"].InstalledWith)
-	}
-	// Both tools are installed (ConcreteManager != "").
-	if !byName["black"].Installed {
-		t.Errorf("black.Installed = false, want true")
-	}
-	if !byName["ruff"].Installed {
-		t.Errorf("ruff.Installed = false, want true")
-	}
-}
-
 func TestRefreshInstalled_MultiManagerPath_UsesFullSlashPackage(t *testing.T) {
 	prov := &multiManagerStub{
-		stubProvider: stubProvider{name: "node", available: true},
+		stubProvider: stubProvider{name: "npm", available: true},
 		entries: map[string]provider.InstalledEntry{
 			"@playwright/test": {Version: "1.52.0", ConcreteManager: "npm"},
-			"test":             {Version: "0.0.1", ConcreteManager: "pnpm"},
+			"test":             {Version: "0.0.1", ConcreteManager: "npm"},
 		},
 	}
 	a, cfgPath := newImportApp(t, prov)
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(
-			logicalToolPackage("playwright-test", "node", "@playwright/test"),
+			logicalToolPackage("playwright-test", "npm", "@playwright/test"),
 		),
 		Groups: []*config.GroupConfig{{
 			Tools: groupTools("playwright-test"),
@@ -717,7 +572,7 @@ func TestRefreshInstalled_MultiManagerPath_UsesFullSlashPackage(t *testing.T) {
 		t.Fatalf("RefreshInstalled: %v", err)
 	}
 
-	got, err := a.DB().Get(context.Background(), "playwright-test", "node", "@playwright/test")
+	got, err := a.DB().Get(context.Background(), "playwright-test", "npm", "@playwright/test")
 	if err != nil {
 		t.Fatalf("Get playwright-test: %v", err)
 	}

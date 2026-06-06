@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"database/sql"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -18,7 +19,7 @@ import (
 func TestSetTool_UpsertsLogicalSpecWithoutMembership(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 
-	if err := a.SetTool("ripgrep", "system", "rg", "brew"); err != nil {
+	if err := a.SetTool("ripgrep", "brew", "rg", ""); err != nil {
 		t.Fatalf("SetTool: %v", err)
 	}
 
@@ -30,22 +31,51 @@ func TestSetTool_UpsertsLogicalSpecWithoutMembership(t *testing.T) {
 	if !ok {
 		t.Fatal("logical tool ripgrep not found")
 	}
-	if spec.Provider != "system" || spec.Package != "rg" || spec.InstallWith != "brew" {
-		t.Fatalf("spec = %+v, want provider system package rg install_with brew", spec)
+	wantProviders := []config.ToolInstallSpec{{Provider: "brew", Package: "rg"}}
+	if !reflect.DeepEqual(spec.Providers, wantProviders) {
+		t.Fatalf("providers = %+v, want %+v", spec.Providers, wantProviders)
+	}
+	if spec.Provider != "" || spec.Package != "" || spec.InstallWith != "" {
+		t.Fatalf("legacy spec fields = provider %q package %q install_with %q, want empty", spec.Provider, spec.Package, spec.InstallWith)
 	}
 	if len(cfg.Groups) != 0 {
 		t.Fatalf("SetTool should not add memberships, got groups %+v", cfg.Groups)
 	}
 }
 
-func TestSetTool_RejectsConcreteProvider(t *testing.T) {
+func TestSetTool_PromotesProviderToDefault(t *testing.T) {
+	a, cfgPath := newImportApp(t)
+
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"black": {Providers: []config.ToolInstallSpec{{Provider: "pip"}, {Provider: "uv"}}},
+		},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	if err := a.SetTool("black", "uv", "black", ""); err != nil {
+		t.Fatalf("SetTool: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	got := cfg.Tools["black"].Providers
+	want := []config.ToolInstallSpec{{Provider: "uv", Package: "black"}, {Provider: "pip"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("providers = %+v, want %+v", got, want)
+	}
+}
+
+func TestSetTool_RejectsMissingProvider(t *testing.T) {
 	a, _ := newImportApp(t)
 
-	err := a.SetTool("ripgrep", "brew", "ripgrep", "")
+	err := a.SetTool("ripgrep", "", "ripgrep", "")
 	if err == nil {
-		t.Fatal("SetTool accepted concrete provider")
+		t.Fatal("SetTool accepted empty provider")
 	}
-	if got := err.Error(); got != `provider "brew" is not an ecosystem provider` {
+	if got := err.Error(); got != "provider is required" {
 		t.Fatalf("error = %q", got)
 	}
 }
@@ -67,14 +97,14 @@ func TestToolProviderScopeChoices_PlansEcosystemChoice(t *testing.T) {
 	}
 }
 
-func TestSetTool_RejectsMismatchedInstallWith(t *testing.T) {
+func TestSetTool_RejectsMetaProviderWithoutConcrete(t *testing.T) {
 	a, _ := newImportApp(t)
 
-	err := a.SetTool("ripgrep", "node", "ripgrep", "brew")
+	err := a.SetTool("ripgrep", "system", "ripgrep", "")
 	if err == nil {
-		t.Fatal("SetTool accepted mismatched install_with")
+		t.Fatal("SetTool accepted meta provider without concrete provider")
 	}
-	if got := err.Error(); got != `install_with "brew" belongs to ecosystem "system", not "node"` {
+	if got := err.Error(); got != `provider "system" requires a concrete provider` {
 		t.Fatalf("error = %q", got)
 	}
 }
@@ -90,9 +120,7 @@ func TestMoveToolToGroup_RequiresLogicalSpec(t *testing.T) {
 func TestAddAndRemoveToolToGroup_UpdatesMembershipOnly(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: map[string]config.ToolSpec{
-			"ripgrep": {Provider: "system"},
-		},
+		Tools:  logicalToolSpecs(logicalTool("ripgrep", "brew")),
 		Groups: []*config.GroupConfig{{Name: "work"}},
 	}); err != nil {
 		t.Fatalf("config.Save: %v", err)
@@ -129,9 +157,7 @@ func TestAddAndRemoveToolToGroup_UpdatesMembershipOnly(t *testing.T) {
 func TestMoveToolToGroupMovesSingleOwnerMembership(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: map[string]config.ToolSpec{
-			"ripgrep": {Provider: "system"},
-		},
+		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
 		Groups: []*config.GroupConfig{
 			{Name: "testhost", Special: "host", Tools: []config.ToolEntry{{Name: "ripgrep"}}},
 			{Name: "work"},
@@ -161,7 +187,7 @@ func TestMoveToolToGroupMovesSingleOwnerMembership(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToolMembershipMap: %v", err)
 	}
-	if got := memberships["ripgrep\x00system"]; !slices.Equal(got, []string{"work"}) {
+	if got := memberships["ripgrep\x00brew"]; !slices.Equal(got, []string{"work"}) {
 		t.Fatalf("memberships = %v, want [work]", got)
 	}
 }
@@ -193,7 +219,7 @@ func TestSetToolGroupMembershipWithStateReturnsStateAfterAddAndRemove(t *testing
 	if err != nil {
 		t.Fatalf("SetToolGroupMembershipWithState add: %v", err)
 	}
-	toolKey := "ripgrep\x00system"
+	toolKey := "ripgrep\x00brew"
 	if got := added.State.ToolGroups[toolKey]; got != "work" {
 		t.Fatalf("ToolGroups[%q] = %q, want work", toolKey, got)
 	}
@@ -208,13 +234,13 @@ func TestSetToolGroupMembershipWithStateReturnsStateAfterAddAndRemove(t *testing
 	}
 	found := false
 	for _, tool := range added.Tools {
-		if tool.Name == "ripgrep" && tool.Provider == "system" {
+		if tool.Name == "ripgrep" && tool.Provider == "brew" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("Tools = %#v, want ripgrep/system", added.Tools)
+		t.Fatalf("Tools = %#v, want ripgrep/brew", added.Tools)
 	}
 
 	removed, err := a.SetToolGroupMembershipWithState(context.Background(), "ripgrep", "work", false)
@@ -297,7 +323,7 @@ func TestSetToolGroupsWithStateReturnsUpdatedToolsAndGroups(t *testing.T) {
 	if !slices.Contains(result.State.GroupNames, "work") {
 		t.Fatalf("GroupNames = %v, want work", result.State.GroupNames)
 	}
-	toolKey := "ripgrep\x00system"
+	toolKey := "ripgrep\x00brew"
 	if got := result.State.ToolGroups[toolKey]; got != "work" {
 		t.Fatalf("ToolGroups[%q] = %q, want work", toolKey, got)
 	}
@@ -309,13 +335,13 @@ func TestSetToolGroupsWithStateReturnsUpdatedToolsAndGroups(t *testing.T) {
 	}
 	found := false
 	for _, tool := range result.Tools {
-		if tool.Name == "ripgrep" && tool.Provider == "system" {
+		if tool.Name == "ripgrep" && tool.Provider == "brew" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("Tools = %#v, want ripgrep/system", result.Tools)
+		t.Fatalf("Tools = %#v, want ripgrep/brew", result.Tools)
 	}
 }
 
@@ -675,7 +701,7 @@ func TestSetGroupToolsWithStateReturnsDisplayState(t *testing.T) {
 	if result.Changed != 2 {
 		t.Fatalf("Changed = %d, want 2", result.Changed)
 	}
-	toolKey := "fd\x00system"
+	toolKey := "fd\x00brew"
 	if result.State == nil {
 		t.Fatal("State is nil")
 	}
@@ -729,10 +755,7 @@ func TestRemoveLogicalTool_RemovesMembershipsIgnoresAndCache(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 	ctx := context.Background()
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: map[string]config.ToolSpec{
-			"ripgrep": {Provider: "system"},
-			"fd":      {Provider: "system"},
-		},
+		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew"), logicalTool("fd", "brew")),
 		Groups: []*config.GroupConfig{
 			{Name: "tools", Tools: []config.ToolEntry{{Name: "ripgrep"}, {Name: "fd"}}},
 			{Name: "work"},
@@ -743,7 +766,7 @@ func TestRemoveLogicalTool_RemovesMembershipsIgnoresAndCache(t *testing.T) {
 	}
 	if err := a.DB().Upsert(ctx, &database.ToolCache{
 		Name:        "ripgrep",
-		Provider:    "system",
+		Provider:    "brew",
 		Package:     "ripgrep",
 		Installed:   true,
 		Version:     sql.NullString{String: "1.0.0", Valid: true},
@@ -754,7 +777,7 @@ func TestRemoveLogicalTool_RemovesMembershipsIgnoresAndCache(t *testing.T) {
 	}
 	if err := a.DB().Upsert(ctx, &database.ToolCache{
 		Name:        "fd",
-		Provider:    "system",
+		Provider:    "brew",
 		Package:     "fd",
 		Installed:   true,
 		Version:     sql.NullString{String: "9.0.0", Valid: true},
@@ -794,7 +817,7 @@ func TestRemoveLogicalTool_RemovesMembershipsIgnoresAndCache(t *testing.T) {
 			t.Fatalf("cache still has ripgrep: %+v", tool)
 		}
 	}
-	if _, err := a.DB().Get(ctx, "fd", "system", "fd"); err != nil {
+	if _, err := a.DB().Get(ctx, "fd", "brew", "fd"); err != nil {
 		t.Fatalf("unrelated fd cache row was removed: %v", err)
 	}
 }

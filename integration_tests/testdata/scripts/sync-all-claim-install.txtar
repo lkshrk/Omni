@@ -4,7 +4,7 @@ env PATH=$WORK/bin:$PATH
 
 exec omni --yes --config settings.json tools sync --all
 stdout 'claiming fzf'
-stdout 'done: fd \(system\)'
+stdout 'done: fd \(brew\)'
 stdout 'Sync all complete .* 1 installed, 1 added to config'
 exec test -f .omni-cache/fake-brew/fd
 exec grep '"fzf"' settings.json
@@ -105,12 +105,13 @@ exit 1
 
 -- settings.json --
 {
+  "version": 6,
   "settings": {
-    "disabled_providers": ["node", "python"]
+    "disabled_providers": ["npm", "pip"]
   },
   "hosts": { "testhost": [] },
   "tools": {
-    "fd": { "provider": "system", "install_with": "brew" }
+    "fd": { "providers": [{ "provider": "brew" }] }
   },
   "groups": [
     { "name": "testhost", "special": "host", "tools": ["fd"] }

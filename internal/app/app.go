@@ -269,6 +269,10 @@ func (a *App) initProviderRegistry(settings config.Settings) {
 	for _, p := range concreteProviders {
 		a.registry.RegisterWithMetadata(p, provider.BuiltinMetadata(p.Name()))
 	}
+	a.registry.RegisterWithMetadata(provider.Named("bun", node.New(exec, "bun")), provider.BuiltinMetadata("bun"))
+	a.registry.RegisterWithMetadata(provider.Named("pnpm", node.New(exec, "pnpm")), provider.BuiltinMetadata("pnpm"))
+	a.registry.RegisterWithMetadata(provider.Named("npm", node.New(exec, "npm")), provider.BuiltinMetadata("npm"))
+	a.registry.RegisterWithMetadata(provider.Named("uv", python.New(exec, "uv")), provider.BuiltinMetadata("uv"))
 	a.registry.RegisterWithMetadata(pip.New(exec), provider.BuiltinMetadata("pip"))
 	a.registry.RegisterWithMetadata(script.New(exec), provider.BuiltinMetadata("script"))
 

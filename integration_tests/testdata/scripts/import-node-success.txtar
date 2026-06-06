@@ -4,17 +4,17 @@ exec chmod 755 bin/bun
 exec chmod 755 bin/pnpm
 env PATH=$WORK/bin:$PATH
 
-exec omni --config settings.json tools import --provider node --group work
+exec omni --config settings.json tools import --provider npm --group work
 stdout 'Imported 1 tool:'
 stdout 'typescript'
-stdout '\(node\) 5.4.0'
+stdout '\(npm\) 5.4.0'
 stdout 'Skipped 1 already configured tool'
 exec grep '"typescript"' settings.json
 stdout '"typescript"'
 exec grep '"name": "work"' settings.json
 stdout '"name": "work"'
-exec grep '"provider": "node"' settings.json
-stdout '"provider": "node"'
+exec grep '"provider": "npm"' settings.json
+stdout '"provider": "npm"'
 
 -- bin/npm --
 #!/usr/bin/env sh
@@ -38,14 +38,10 @@ exit 1
 
 -- settings.json --
 {
-  "settings": {
-    "ecosystems": {
-      "node": { "manager": "npm" }
-    }
-  },
+  "version": 6,
   "hosts": { "testhost": [] },
   "tools": {
-    "eslint": { "provider": "node" }
+    "eslint": { "providers": [{ "provider": "npm" }] }
   },
   "groups": [
     { "name": "testhost", "special": "host", "tools": ["eslint"] }

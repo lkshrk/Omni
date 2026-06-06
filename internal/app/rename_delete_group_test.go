@@ -130,7 +130,7 @@ func TestRenameGroupWithStateReturnsUpdatedGroupState(t *testing.T) {
 	if slices.Contains(state.GroupNames, "dev") || !slices.Contains(state.GroupNames, "development") {
 		t.Fatalf("GroupNames = %v, want development and no dev", state.GroupNames)
 	}
-	toolKey := "go\x00system"
+	toolKey := "go\x00brew"
 	if got := state.ToolGroups[toolKey]; got != "development" {
 		t.Fatalf("ToolGroups[%q] = %q, want development", toolKey, got)
 	}
@@ -297,13 +297,13 @@ func TestDeleteGroupWithStateReturnsUpdatedToolsAndGroups(t *testing.T) {
 	if slices.Contains(result.State.GroupNames, "dev") {
 		t.Fatalf("GroupNames = %v, want no dev", result.State.GroupNames)
 	}
-	toolKey := "go\x00system"
+	toolKey := "go\x00brew"
 	if got := result.State.ToolMemberships[toolKey]; !slices.Equal(got, []string{"testhost"}) {
 		t.Fatalf("ToolMemberships[%q] = %v, want [testhost]", toolKey, got)
 	}
 	foundGo := false
 	for _, tool := range result.Tools {
-		if tool.Name == "go" && tool.Provider == "system" {
+		if tool.Name == "go" && tool.Provider == "brew" {
 			foundGo = true
 			break
 		}
@@ -330,7 +330,7 @@ func TestDeleteGroupWithDefaultMoveTargetUsesCurrentHost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteGroupWithDefaultMoveTarget: %v", err)
 	}
-	if got := result.State.ToolMemberships["go\x00system"]; !slices.Equal(got, []string{"testhost"}) {
+	if got := result.State.ToolMemberships["go\x00brew"]; !slices.Equal(got, []string{"testhost"}) {
 		t.Fatalf("ToolMemberships go = %v, want [testhost]", got)
 	}
 }
@@ -464,7 +464,7 @@ func TestDeleteGroup_DeleteToolsRejectsProviderTool(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: logicalToolSpecs(logicalFixtureTool{Name: "npm", Provider: "node", InstallWith: "npm"}),
+		Tools: logicalToolSpecs(logicalFixtureTool{Name: "npm", Provider: "npm", InstallWith: "npm"}),
 		Groups: []*config.GroupConfig{
 			testHostGroup(),
 			{Name: "dev", Tools: groupTools("npm")},

@@ -25,12 +25,12 @@ func TestInstallToolFallback_RunsInstallCheckAndUpdatesState(t *testing.T) {
 		executor.MatchRule{Pattern: "sh -c install rg", Response: executor.MockCall{}},
 		executor.MatchRule{Pattern: "sh -c command -v rg", Response: executor.MockCall{}},
 	).WithFallback(executor.MockCall{Err: context.DeadlineExceeded})
-	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
 	a.SetFallbackExecutor(mock)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"rg": {
-				Provider: "system",
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
 				Fallback: &config.FallbackSpec{
 					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
 					Status: config.FallbackStatusUnverified,
@@ -51,7 +51,7 @@ func TestInstallToolFallback_RunsInstallCheckAndUpdatesState(t *testing.T) {
 	mock.AssertCalled(t, "sh -c install rg")
 	mock.AssertCalled(t, "sh -c command -v rg")
 
-	cached, err := a.DB().Get(ctx, "rg", "system", "rg")
+	cached, err := a.DB().Get(ctx, "rg", "apt", "rg")
 	if err != nil {
 		t.Fatalf("Get rg: %v", err)
 	}
@@ -71,14 +71,14 @@ func TestInstallToolFallback_MaterializesTemplateRecipe(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
 	a.CacheDir = filepath.Join(t.TempDir(), "cache")
 	binDir := filepath.Join(home, ".local", "share", "omni", "fallback", "bin")
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Settings: config.Settings{FallbackBinDir: "~/.local/share/omni/fallback/bin"},
 		Tools: map[string]config.ToolSpec{
 			"rg": {
-				Provider: "system",
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
 				Fallback: &config.FallbackSpec{
 					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
 					Status: config.FallbackStatusUnverified,
@@ -105,7 +105,7 @@ func TestInstallToolFallback_MaterializesTemplateRecipe(t *testing.T) {
 	if info.Mode().Perm()&0o111 == 0 {
 		t.Fatalf("fallback binary mode = %v, want executable", info.Mode().Perm())
 	}
-	cached, err := a.DB().Get(ctx, "rg", "system", "rg")
+	cached, err := a.DB().Get(ctx, "rg", "apt", "rg")
 	if err != nil {
 		t.Fatalf("Get rg: %v", err)
 	}
@@ -124,12 +124,12 @@ func TestInstallToolFallback_MaterializesTemplateRecipe(t *testing.T) {
 func TestInstallToolFallback_RejectsUnknownTemplateVariable(t *testing.T) {
 	ctx := context.Background()
 	mock := executor.NewMatchMock().WithFallback(executor.MockCall{})
-	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
 	a.SetFallbackExecutor(mock)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"rg": {
-				Provider: "system",
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
 				Fallback: &config.FallbackSpec{
 					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
 					Status: config.FallbackStatusUnverified,
@@ -166,12 +166,12 @@ func TestInstallToolFallback_CheckFailureMarksFailed(t *testing.T) {
 		executor.MatchRule{Pattern: "sh -c install rg", Response: executor.MockCall{}},
 		executor.MatchRule{Pattern: "sh -c command -v rg", Response: executor.MockCall{Err: context.DeadlineExceeded}},
 	).WithFallback(executor.MockCall{})
-	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
 	a.SetFallbackExecutor(mock)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"rg": {
-				Provider: "system",
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
 				Fallback: &config.FallbackSpec{
 					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
 					Status: config.FallbackStatusUnverified,
@@ -221,8 +221,8 @@ func TestInstall_UsesFallbackWhenNativePackageUnavailable(t *testing.T) {
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"rg": {
-				Provider: "system",
-				Package:  "ripgrep",
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
+				Package:   "ripgrep",
 				Fallback: &config.FallbackSpec{
 					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
 					Status: config.FallbackStatusUnverified,
@@ -247,7 +247,7 @@ func TestInstall_UsesFallbackWhenNativePackageUnavailable(t *testing.T) {
 		t.Fatalf("seed package availability: %v", err)
 	}
 
-	if err := a.Install(ctx, "rg", "system"); err != nil {
+	if err := a.Install(ctx, "rg", "apt"); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
 
@@ -256,7 +256,7 @@ func TestInstall_UsesFallbackWhenNativePackageUnavailable(t *testing.T) {
 	}
 	fallbackExec.AssertCalled(t, "sh -c install rg")
 	fallbackExec.AssertCalled(t, "sh -c command -v rg")
-	cached, err := a.DB().Get(ctx, "rg", "system", "ripgrep")
+	cached, err := a.DB().Get(ctx, "rg", "apt", "ripgrep")
 	if err != nil {
 		t.Fatalf("Get rg: %v", err)
 	}
@@ -288,8 +288,8 @@ func TestSync_UsesFallbackWhenNativePackageUnavailable(t *testing.T) {
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"rg": {
-				Provider: "system",
-				Package:  "ripgrep",
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
+				Package:   "ripgrep",
 				Fallback: &config.FallbackSpec{
 					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
 					Status: config.FallbackStatusUnverified,
@@ -323,7 +323,7 @@ func TestSync_UsesFallbackWhenNativePackageUnavailable(t *testing.T) {
 	if installed := result.Installed(); len(installed) != 1 || installed[0].Tool.Name != "rg" {
 		t.Fatalf("installed ops = %+v, want fallback install op for rg", installed)
 	}
-	cached, err := a.DB().Get(ctx, "rg", "system", "ripgrep")
+	cached, err := a.DB().Get(ctx, "rg", "apt", "ripgrep")
 	if err != nil {
 		t.Fatalf("Get rg: %v", err)
 	}
@@ -348,8 +348,8 @@ func TestSync_UsesFallbackRecipeSavedFromGitHubSpec(t *testing.T) {
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"rg": {
-				Provider: "system",
-				Package:  "ripgrep",
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
+				Package:   "ripgrep",
 			},
 		},
 		Groups: []*config.GroupConfig{{Tools: []config.ToolEntry{{Name: "rg"}}}},
@@ -409,7 +409,7 @@ func TestSync_DryRunPlansFallbackWhenNativePackageUnavailable(t *testing.T) {
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"rg": {
-				Provider: "system",
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
 				Fallback: &config.FallbackSpec{
 					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
 					Status: config.FallbackStatusUnverified,
@@ -445,7 +445,7 @@ func TestSync_DryRunPlansFallbackWhenNativePackageUnavailable(t *testing.T) {
 	if installed := result.Installed(); len(installed) != 1 || installed[0].Tool.Name != "rg" {
 		t.Fatalf("dry-run installed ops = %+v, want planned fallback install for rg", installed)
 	}
-	if _, err := a.DB().Get(ctx, "rg", "system", "rg"); err == nil {
+	if _, err := a.DB().Get(ctx, "rg", "apt", "rg"); err == nil {
 		t.Fatal("dry-run wrote cache row, want no fallback install side effect")
 	}
 }
@@ -466,7 +466,7 @@ func TestSync_RetryFailedRerunsFailedFallback(t *testing.T) {
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"rg": {
-				Provider: "system",
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
 				Fallback: &config.FallbackSpec{
 					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
 					Status: config.FallbackStatusFailed,
@@ -490,7 +490,7 @@ func TestSync_RetryFailedRerunsFailedFallback(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed package availability: %v", err)
 	}
-	if err := a.DB().MarkFailed(ctx, "rg", "system", "rg", "previous fallback failure"); err != nil {
+	if err := a.DB().MarkFailed(ctx, "rg", "apt", "rg", "previous fallback failure"); err != nil {
 		t.Fatalf("seed failed row: %v", err)
 	}
 
@@ -503,7 +503,7 @@ func TestSync_RetryFailedRerunsFailedFallback(t *testing.T) {
 	if installed := result.Installed(); len(installed) != 1 || installed[0].Tool.Name != "rg" {
 		t.Fatalf("retry installed ops = %+v, want fallback retry install for rg", installed)
 	}
-	cached, err := a.DB().Get(ctx, "rg", "system", "rg")
+	cached, err := a.DB().Get(ctx, "rg", "apt", "rg")
 	if err != nil {
 		t.Fatalf("Get rg: %v", err)
 	}
@@ -525,7 +525,7 @@ func TestInstall_DoesNotRetryFailedFallbackWhenNativePackageUnavailable(t *testi
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"rg": {
-				Provider: "system",
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
 				Fallback: &config.FallbackSpec{
 					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
 					Status: config.FallbackStatusFailed,
@@ -550,7 +550,7 @@ func TestInstall_DoesNotRetryFailedFallbackWhenNativePackageUnavailable(t *testi
 		t.Fatalf("seed package availability: %v", err)
 	}
 
-	err := a.Install(ctx, "rg", "system")
+	err := a.Install(ctx, "rg", "apt")
 	if err == nil || !strings.Contains(err.Error(), "native package rg is unavailable from apt") {
 		t.Fatalf("Install err = %v, want native unavailable fallback skip", err)
 	}
@@ -564,12 +564,12 @@ func TestUninstall_UsesFallbackUninstallForGitHubInstall(t *testing.T) {
 	fallbackExec := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "sh -c uninstall rg", Response: executor.MockCall{}},
 	).WithFallback(executor.MockCall{Err: errors.New("unexpected fallback command")})
-	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
 	a.SetFallbackExecutor(fallbackExec)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"rg": {
-				Provider: "system",
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
 				Fallback: &config.FallbackSpec{
 					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
 					Status: config.FallbackStatusVerified,
@@ -586,7 +586,7 @@ func TestUninstall_UsesFallbackUninstallForGitHubInstall(t *testing.T) {
 	}
 	if err := a.DB().Upsert(ctx, &database.ToolCache{
 		Name:          "rg",
-		Provider:      "system",
+		Provider:      "apt",
 		Package:       "rg",
 		Installed:     true,
 		InstalledWith: "gh",
@@ -595,12 +595,12 @@ func TestUninstall_UsesFallbackUninstallForGitHubInstall(t *testing.T) {
 		t.Fatalf("seed cache: %v", err)
 	}
 
-	if err := a.Uninstall(ctx, "rg", "system"); err != nil {
+	if err := a.Uninstall(ctx, "rg", "apt"); err != nil {
 		t.Fatalf("Uninstall: %v", err)
 	}
 
 	fallbackExec.AssertCalled(t, "sh -c uninstall rg")
-	if _, err := a.DB().Get(ctx, "rg", "system", "rg"); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := a.DB().Get(ctx, "rg", "apt", "rg"); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("cache row err = %v, want sql.ErrNoRows", err)
 	}
 	got, err := config.Load(cfgPath)
@@ -614,11 +614,11 @@ func TestUninstall_UsesFallbackUninstallForGitHubInstall(t *testing.T) {
 
 func TestUninstall_FallbackWithoutScriptLeavesConfig(t *testing.T) {
 	ctx := context.Background()
-	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"rg": {
-				Provider: "system",
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
 				Fallback: &config.FallbackSpec{
 					Source:   config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
 					Status:   config.FallbackStatusVerified,
@@ -632,7 +632,7 @@ func TestUninstall_FallbackWithoutScriptLeavesConfig(t *testing.T) {
 	}
 	if err := a.DB().Upsert(ctx, &database.ToolCache{
 		Name:          "rg",
-		Provider:      "system",
+		Provider:      "apt",
 		Package:       "rg",
 		Installed:     true,
 		InstalledWith: "gh",
@@ -641,11 +641,11 @@ func TestUninstall_FallbackWithoutScriptLeavesConfig(t *testing.T) {
 		t.Fatalf("seed cache: %v", err)
 	}
 
-	err := a.Uninstall(ctx, "rg", "system")
+	err := a.Uninstall(ctx, "rg", "apt")
 	if err == nil || !strings.Contains(err.Error(), "fallback uninstall is not available") {
 		t.Fatalf("Uninstall err = %v, want unavailable fallback uninstall", err)
 	}
-	if _, err := a.DB().Get(ctx, "rg", "system", "rg"); err != nil {
+	if _, err := a.DB().Get(ctx, "rg", "apt", "rg"); err != nil {
 		t.Fatalf("cache row after failed uninstall: %v", err)
 	}
 	got, err := config.Load(cfgPath)
@@ -663,12 +663,12 @@ func TestUpgrade_UsesFallbackForGitHubInstall(t *testing.T) {
 		executor.MatchRule{Pattern: "sh -c upgrade rg", Response: executor.MockCall{}},
 		executor.MatchRule{Pattern: "sh -c command -v rg", Response: executor.MockCall{}},
 	).WithFallback(executor.MockCall{Err: errors.New("unexpected fallback command")})
-	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
 	a.SetFallbackExecutor(fallbackExec)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"rg": {
-				Provider: "system",
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
 				Fallback: &config.FallbackSpec{
 					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
 					Status: config.FallbackStatusVerified,
@@ -685,7 +685,7 @@ func TestUpgrade_UsesFallbackForGitHubInstall(t *testing.T) {
 	}
 	if err := a.DB().Upsert(ctx, &database.ToolCache{
 		Name:          "rg",
-		Provider:      "system",
+		Provider:      "apt",
 		Package:       "rg",
 		Installed:     true,
 		InstalledWith: "gh",
@@ -695,13 +695,13 @@ func TestUpgrade_UsesFallbackForGitHubInstall(t *testing.T) {
 		t.Fatalf("seed cache: %v", err)
 	}
 
-	if err := a.Upgrade(ctx, "rg", "system"); err != nil {
+	if err := a.Upgrade(ctx, "rg", "apt"); err != nil {
 		t.Fatalf("Upgrade: %v", err)
 	}
 
 	fallbackExec.AssertCalled(t, "sh -c upgrade rg")
 	fallbackExec.AssertCalled(t, "sh -c command -v rg")
-	cached, err := a.DB().Get(ctx, "rg", "system", "rg")
+	cached, err := a.DB().Get(ctx, "rg", "apt", "rg")
 	if err != nil {
 		t.Fatalf("Get rg: %v", err)
 	}
@@ -715,7 +715,7 @@ func TestUpgradeToolFallback_GitHubOutdatedRefreshesRecipeBeforeUpgrade(t *testi
 	latestAsset := currentPlatformGitHubCLIAsset(t)
 	calls := int32(0)
 	fallbackExec := executor.NewMatchMock().WithFallback(executor.MockCall{})
-	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
 	a.SetFallbackExecutor(fallbackExec)
 	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubFallbackLatestReleaseClient(t, &calls, func() io.ReadCloser {
 		body, err := os.Open("testdata/github_cli_latest_release.json")
@@ -727,8 +727,8 @@ func TestUpgradeToolFallback_GitHubOutdatedRefreshesRecipeBeforeUpgrade(t *testi
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"gh": {
-				Provider: "system",
-				Fallback: oldGitHubCLIFallbackSpec(),
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
+				Fallback:  oldGitHubCLIFallbackSpec(),
 			},
 		},
 		Groups: []*config.GroupConfig{{Tools: groupTools("gh")}},
@@ -776,7 +776,7 @@ func TestUpgradeToolFallback_GitHubRefreshFailureKeepsOldRecipeAndOutdatedRow(t 
 	fallbackExec := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "sh -c mkdir -p", Response: executor.MockCall{Err: errors.New("download failed"), Stderr: "curl failed"}},
 	).WithFallback(executor.MockCall{})
-	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
 	a.SetFallbackExecutor(fallbackExec)
 	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubFallbackLatestReleaseClient(t, &calls, func() io.ReadCloser {
 		body, err := os.Open("testdata/github_cli_latest_release.json")
@@ -788,8 +788,8 @@ func TestUpgradeToolFallback_GitHubRefreshFailureKeepsOldRecipeAndOutdatedRow(t 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"gh": {
-				Provider: "system",
-				Fallback: oldGitHubCLIFallbackSpec(),
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
+				Fallback:  oldGitHubCLIFallbackSpec(),
 			},
 		},
 		Groups: []*config.GroupConfig{{Tools: groupTools("gh")}},
@@ -838,7 +838,7 @@ func TestUpgradeToolFallback_GitHubRefreshCheckFailureKeepsOldRecipeAndOutdatedR
 		executor.MatchRule{Pattern: "sh -c mkdir -p", Response: executor.MockCall{}},
 		executor.MatchRule{Pattern: "sh -c test -x", Response: executor.MockCall{Err: errors.New("missing refreshed binary")}},
 	).WithFallback(executor.MockCall{})
-	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
 	a.SetFallbackExecutor(fallbackExec)
 	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubFallbackLatestReleaseClient(t, &calls, func() io.ReadCloser {
 		body, err := os.Open("testdata/github_cli_latest_release.json")
@@ -850,8 +850,8 @@ func TestUpgradeToolFallback_GitHubRefreshCheckFailureKeepsOldRecipeAndOutdatedR
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"gh": {
-				Provider: "system",
-				Fallback: oldGitHubCLIFallbackSpec(),
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
+				Fallback:  oldGitHubCLIFallbackSpec(),
 			},
 		},
 		Groups: []*config.GroupConfig{{Tools: groupTools("gh")}},
@@ -893,7 +893,7 @@ func TestUpgradeToolFallback_GitHubResolverFailureKeepsOldRecipeAndOutdatedRow(t
 	ctx := context.Background()
 	calls := int32(0)
 	fallbackExec := executor.NewMatchMock().WithFallback(executor.MockCall{Err: errors.New("unexpected fallback command")})
-	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
 	a.SetFallbackExecutor(fallbackExec)
 	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubFallbackLatestReleaseClient(t, &calls, func() io.ReadCloser {
 		return githubFallbackReleaseBody(
@@ -906,8 +906,8 @@ func TestUpgradeToolFallback_GitHubResolverFailureKeepsOldRecipeAndOutdatedRow(t
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"gh": {
-				Provider: "system",
-				Fallback: oldGitHubCLIFallbackSpec(),
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
+				Fallback:  oldGitHubCLIFallbackSpec(),
 			},
 		},
 		Groups: []*config.GroupConfig{{Tools: groupTools("gh")}},
@@ -962,7 +962,7 @@ func TestUpgradeToolFallback_GitHubNotOutdatedUsesSavedRecipeWithoutReleaseLooku
 		executor.MatchRule{Pattern: "sh -c curl -fsSL https://github.com/cli/cli/releases/download/v2.92.0/gh_2.92.0_old.zip", Response: executor.MockCall{}},
 		executor.MatchRule{Pattern: "sh -c command -v gh", Response: executor.MockCall{}},
 	).WithFallback(executor.MockCall{Err: errors.New("unexpected fallback command")})
-	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
 	a.SetFallbackExecutor(fallbackExec)
 	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubFallbackLatestReleaseClient(t, nil, func() io.ReadCloser {
 		t.Fatal("GitHub latest release endpoint should not be called when the row is not marked outdated")
@@ -971,8 +971,8 @@ func TestUpgradeToolFallback_GitHubNotOutdatedUsesSavedRecipeWithoutReleaseLooku
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"gh": {
-				Provider: "system",
-				Fallback: oldGitHubCLIFallbackSpec(),
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
+				Fallback:  oldGitHubCLIFallbackSpec(),
 			},
 		},
 		Groups: []*config.GroupConfig{{Tools: groupTools("gh")}},
@@ -997,11 +997,11 @@ func TestUpgradeToolFallback_GitHubNotOutdatedUsesSavedRecipeWithoutReleaseLooku
 }
 
 func TestUninstallToolFallback_ReportsUnavailableWithoutCommand(t *testing.T) {
-	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"rg": {
-				Provider: "system",
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
 				Fallback: &config.FallbackSpec{
 					Source:   config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
 					Status:   config.FallbackStatusUnverified,
@@ -1020,7 +1020,7 @@ func TestUninstallToolFallback_ReportsUnavailableWithoutCommand(t *testing.T) {
 }
 
 func TestSaveToolFallbackFromGitHub_ResolverFailureDoesNotSaveFallback(t *testing.T) {
-	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
 	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubNotFoundClient())
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("rg", "system")),
@@ -1066,7 +1066,7 @@ func TestSaveToolFallbackFromGitHub_NormalizesSSHRepoURL(t *testing.T) {
 		}, nil
 	})}
 
-	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
 	a.SetGitHubFallbackAPIForTest("https://api.github.test", client)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("gh", "system")),
@@ -1091,7 +1091,7 @@ func TestSaveToolFallbackFromGitHub_NormalizesSSHRepoURL(t *testing.T) {
 }
 
 func TestSaveToolFallbackFromGitHub_RejectsInvalidRepo(t *testing.T) {
-	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("rg", "system")),
 	}); err != nil {
@@ -1137,7 +1137,7 @@ func seedGitHubFallbackUpgradeCacheRow(t *testing.T, db *database.DB, outdated b
 	ctx := context.Background()
 	if err := db.Upsert(ctx, &database.ToolCache{
 		Name:          "gh",
-		Provider:      "system",
+		Provider:      "apt",
 		Package:       "gh",
 		Installed:     true,
 		InstalledWith: "gh",
@@ -1147,7 +1147,7 @@ func seedGitHubFallbackUpgradeCacheRow(t *testing.T, db *database.DB, outdated b
 		t.Fatalf("seed cache: %v", err)
 	}
 	if outdated || latestVersion != "" {
-		if err := db.UpdateOutdated(ctx, "gh", "system", "gh", outdated, latestVersion); err != nil {
+		if err := db.UpdateOutdated(ctx, "gh", "apt", "gh", outdated, latestVersion); err != nil {
 			t.Fatalf("seed outdated state: %v", err)
 		}
 	}

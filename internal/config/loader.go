@@ -247,6 +247,7 @@ var configMigrations = []configMigration{
 	{from: 2, to: 3, apply: migrateConfigV2ToV3, applyRaw: migrateRawConfigV2ToV3},
 	{from: 3, to: 4, apply: migrateConfigV3ToV4, applyRaw: migrateRawConfigV3ToV4},
 	{from: 4, to: 5, apply: migrateConfigV4ToV5, applyRaw: migrateRawConfigV4ToV5},
+	{from: 5, to: 6, apply: migrateConfigV5ToV6, applyRaw: migrateRawConfigV5ToV6},
 }
 
 func configMigrationFrom(version int) (configMigration, bool) {
@@ -306,6 +307,112 @@ func migrateConfigV4ToV5(cfg *RootConfig) error {
 func migrateRawConfigV4ToV5(raw map[string]json.RawMessage) error {
 	raw["version"] = json.RawMessage(`5`)
 	return nil
+}
+
+func migrateConfigV5ToV6(cfg *RootConfig) error {
+	for name, spec := range cfg.Tools {
+		spec.Providers = migrateToolProviders(spec)
+		spec.Provider = ""
+		spec.Package = ""
+		spec.InstallWith = ""
+		spec.Options = nil
+		spec.Variants = nil
+		spec.Hosts = nil
+		cfg.Tools[name] = spec
+	}
+	cfg.Settings.Ecosystems = nil
+	for host, settings := range cfg.HostSettings {
+		settings.Ecosystems = nil
+		cfg.HostSettings[host] = settings
+	}
+	cfg.Version = 6
+	return nil
+}
+
+func migrateRawConfigV5ToV6(raw map[string]json.RawMessage) error {
+	unknown := make(map[string]json.RawMessage, len(raw))
+	for key, value := range raw {
+		unknown[key] = value
+	}
+	var cfg RootConfig
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return err
+	}
+	if err := migrateConfigV5ToV6(&cfg); err != nil {
+		return err
+	}
+	next, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	var nextRaw map[string]json.RawMessage
+	if err := json.Unmarshal(next, &nextRaw); err != nil {
+		return err
+	}
+	for key := range raw {
+		delete(raw, key)
+	}
+	for key, value := range unknown {
+		raw[key] = value
+	}
+	for key, value := range nextRaw {
+		raw[key] = value
+	}
+	return nil
+}
+
+func migrateToolProviders(spec ToolSpec) []ToolInstallSpec {
+	out := make([]ToolInstallSpec, 0, 1+len(spec.Variants))
+	add := func(candidate ToolInstallSpec) {
+		candidate.Provider = concreteLegacyProvider(candidate.Provider, candidate.InstallWith)
+		candidate.InstallWith = ""
+		if candidate.Provider == "" {
+			return
+		}
+		for _, existing := range out {
+			if existing.Provider == candidate.Provider && existing.EffectivePackage("") == candidate.EffectivePackage("") {
+				return
+			}
+		}
+		out = append(out, candidate)
+	}
+	add(ToolInstallSpec{
+		Provider:    spec.Provider,
+		Package:     spec.Package,
+		InstallWith: spec.InstallWith,
+		Options:     spec.Options,
+	})
+	for _, variant := range spec.Variants {
+		add(variant)
+	}
+	return out
+}
+
+func concreteLegacyProvider(provider, installWith string) string {
+	if normalized := normalizeConcreteProvider(installWith); normalized != "" {
+		return normalized
+	}
+	switch provider {
+	case "system", "node", "python":
+		return ""
+	default:
+		return normalizeConcreteProvider(provider)
+	}
+}
+
+func normalizeConcreteProvider(provider string) string {
+	switch provider {
+	case "", "system", "node", "python":
+		return ""
+	case "pip3":
+		return "pip"
+	default:
+		return provider
+	}
 }
 
 // Normalize sorts order-insensitive config collections in place.
@@ -407,7 +514,9 @@ func PatchRaw(path string, patch map[string]json.RawMessage) error {
 		return err
 	}
 	raw := make(map[string]json.RawMessage)
+	exists := false
 	if data, err := os.ReadFile(path); err == nil {
+		exists = true
 		if err := json.Unmarshal(data, &raw); err != nil {
 			return fmt.Errorf("parsing existing config: %w", err)
 		}
@@ -424,6 +533,9 @@ func PatchRaw(path string, patch map[string]json.RawMessage) error {
 			continue
 		}
 		raw[k] = v
+	}
+	if !exists {
+		raw["version"] = json.RawMessage(fmt.Sprintf("%d", CurrentVersion))
 	}
 	delete(raw, "$schema")
 	if err := migrateRawVersion(raw); err != nil {
@@ -521,6 +633,9 @@ func isJSONNull(v json.RawMessage) bool {
 func Save(path string, cfg *RootConfig) error {
 	// Stamp schema URL without mutating the caller's struct.
 	stamped := normalizedCopy(cfg)
+	if stamped.Version == 0 && rootUsesCurrentProviderLists(stamped) {
+		stamped.Version = CurrentVersion
+	}
 	if _, err := Migrate(&stamped); err != nil {
 		return err
 	}
@@ -531,6 +646,23 @@ func Save(path string, cfg *RootConfig) error {
 	}
 	data = append(data, '\n') // trailing newline
 	return atomicWrite(path, data)
+}
+
+func rootUsesCurrentProviderLists(cfg RootConfig) bool {
+	for _, spec := range cfg.Tools {
+		if len(spec.Providers) > 0 {
+			return true
+		}
+	}
+	if len(cfg.Settings.ProviderPriority) > 0 {
+		return true
+	}
+	for _, settings := range cfg.HostSettings {
+		if len(settings.ProviderPriority) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizedCopy(cfg *RootConfig) RootConfig {
@@ -565,6 +697,10 @@ func normalizedCopy(cfg *RootConfig) RootConfig {
 	for name, spec := range cfg.Tools {
 		spec.Options = cloneStringMap(spec.Options)
 		spec.Taps = append([]string(nil), spec.Taps...)
+		spec.Providers = append([]ToolInstallSpec(nil), spec.Providers...)
+		for i := range spec.Providers {
+			spec.Providers[i].Options = cloneStringMap(spec.Providers[i].Options)
+		}
 		spec.Variants = append([]ToolInstallSpec(nil), spec.Variants...)
 		for i := range spec.Variants {
 			spec.Variants[i].Options = cloneStringMap(spec.Variants[i].Options)
@@ -595,6 +731,7 @@ func normalizedCopy(cfg *RootConfig) RootConfig {
 
 func cloneSettings(settings Settings) Settings {
 	settings.DisabledProviders = cloneStringSlice(settings.DisabledProviders)
+	settings.ProviderPriority = cloneStringSlice(settings.ProviderPriority)
 	settings.ProviderUpdateQuarantine = cloneStringMap(settings.ProviderUpdateQuarantine)
 	if settings.Ecosystems != nil {
 		ecosystems := make(map[string]EcosystemSettings, len(settings.Ecosystems))

@@ -42,11 +42,11 @@ func redirectToReadOnlyConfig(t *testing.T, a *app.App) {
 // ── doClaim ───────────────────────────────────────────────────────────────────
 
 func TestDoClaim_Success(t *testing.T) {
-	prov := &okProvider{name: "system"}
+	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
 
-	msg := m.doClaim("ripgrep", "system", "work")()
+	msg := m.doClaim("ripgrep", "brew", "work")()
 	got, ok := msg.(claimDoneMsg)
 	if !ok {
 		t.Fatalf("expected claimDoneMsg, got %T", msg)
@@ -64,14 +64,14 @@ func TestDoClaim_Success(t *testing.T) {
 }
 
 func TestDoClaim_RefreshesToolMembershipState(t *testing.T) {
-	prov := &okProvider{name: "system"}
+	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
-	key := toolKey("ripgrep", "system")
+	key := toolKey("ripgrep", "brew")
 	m.toolGroups = map[string]string{key: ""}
 	m.toolMemberships = map[string][]string{}
 
-	msg := m.doClaim("ripgrep", "system", "work")()
+	msg := m.doClaim("ripgrep", "brew", "work")()
 	got, ok := msg.(claimDoneMsg)
 	if !ok {
 		t.Fatalf("expected claimDoneMsg, got %T", msg)
@@ -154,12 +154,12 @@ func TestHandleClaimDoneMsg_RemovesDiscoveredBeforeFiltering(t *testing.T) {
 
 func TestDoClaim_AddError(t *testing.T) {
 	// Redirect ConfigPath to a read-only directory so Add's saveConfig fails.
-	prov := &okProvider{name: "system"}
+	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	redirectToReadOnlyConfig(t, a)
 
 	m := modelForCmds(a)
-	msg := m.doClaim("bat", "system", "")()
+	msg := m.doClaim("bat", "brew", "")()
 	got, ok := msg.(claimDoneMsg)
 	if !ok {
 		t.Fatalf("expected claimDoneMsg, got %T", msg)
@@ -257,31 +257,6 @@ func TestDoSetIgnoreScope_GroupSuccess(t *testing.T) {
 
 // ── doInstallAndAdd ───────────────────────────────────────────────────────────
 
-// TestDoInstallAndAdd_AddRejectsConcrete verifies that passing a concrete
-// provider name (e.g. "brew") to Add returns the partial-success error path:
-// install runs, Add rejects the provider as non-ecosystem, and the resulting
-// opCompleteMsg surfaces the failure via err — not as a green ✓ message.
-func TestDoInstallAndAdd_AddRejectsConcrete(t *testing.T) {
-	prov := &okProvider{name: "brew"}
-	a, _ := newCmdApp(t, prov, nil)
-	m := modelForCmds(a)
-
-	msg := m.doInstallAndAdd("ripgrep", "brew")()
-	got, ok := msg.(opCompleteMsg)
-	if !ok {
-		t.Fatalf("expected opCompleteMsg, got %T", msg)
-	}
-	if got.err == nil {
-		t.Fatal("expected err for partial-success (install ok, Add rejected concrete provider)")
-	}
-	if !strings.Contains(got.err.Error(), "ripgrep") {
-		t.Errorf("err %q does not mention ripgrep", got.err.Error())
-	}
-	if !strings.Contains(got.err.Error(), "config save failed") {
-		t.Errorf("err %q does not mention config save failure", got.err.Error())
-	}
-}
-
 func TestDoInstallAndAdd_InstallError(t *testing.T) {
 	prov := &errProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
@@ -324,12 +299,12 @@ func TestDoInstallAndAdd_AddError(t *testing.T) {
 }
 
 func TestDoInstallAndAdd_RefreshesToolMembershipState(t *testing.T) {
-	prov := &okProvider{name: "system"}
+	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
-	key := toolKey("ripgrep", "system")
+	key := toolKey("ripgrep", "brew")
 
-	msg := m.doInstallAndAdd("ripgrep", "system", "work")()
+	msg := m.doInstallAndAdd("ripgrep", "brew", "work")()
 	got, ok := msg.(opCompleteMsg)
 	if !ok {
 		t.Fatalf("expected opCompleteMsg, got %T", msg)
@@ -337,8 +312,8 @@ func TestDoInstallAndAdd_RefreshesToolMembershipState(t *testing.T) {
 	if got.err != nil {
 		t.Fatalf("unexpected error: %v", got.err)
 	}
-	if !slices.Contains(got.removeDiscoveredKeys, toolKey("ripgrep", "system")) {
-		t.Fatalf("removeDiscoveredKeys = %v, want ripgrep/system", got.removeDiscoveredKeys)
+	if !slices.Contains(got.removeDiscoveredKeys, toolKey("ripgrep", "brew")) {
+		t.Fatalf("removeDiscoveredKeys = %v, want ripgrep/brew", got.removeDiscoveredKeys)
 	}
 	if got.toolGroups[key] != "work" {
 		t.Fatalf("install-and-add toolGroups[%q] = %q, want work", key, got.toolGroups[key])
@@ -358,11 +333,11 @@ func TestDoInstallAndAdd_RefreshesToolMembershipState(t *testing.T) {
 
 func TestDoInstallAndAdd_PreservesCachedSearchMetadata(t *testing.T) {
 	ctx := context.Background()
-	prov := &okProvider{name: "system"}
+	prov := &okProvider{name: "brew"}
 	a, cfgPath := newCmdApp(t, prov, nil)
 	if err := a.DB().UpsertMetadataBatch(ctx, []database.MetadataUpdate{{
 		Name:        "ripgrep",
-		Provider:    "system",
+		Provider:    "brew",
 		Package:     "ripgrep",
 		Description: "fast grep",
 		SourceType:  provider.SourceTypeGitHub,
@@ -374,7 +349,7 @@ func TestDoInstallAndAdd_PreservesCachedSearchMetadata(t *testing.T) {
 	}
 	m := modelForCmds(a)
 
-	msg := m.doInstallAndAdd("ripgrep", "system")()
+	msg := m.doInstallAndAdd("ripgrep", "brew")()
 	got, ok := msg.(opCompleteMsg)
 	if !ok {
 		t.Fatalf("expected opCompleteMsg, got %T", msg)
@@ -408,15 +383,13 @@ func (p *installOptionCaptureProvider) Install(_ context.Context, tool provider.
 }
 
 func TestDoInstallAndAddTool_PassesSearchOptions(t *testing.T) {
-	system := &okProvider{name: "system"}
 	brew := &installOptionCaptureProvider{okProvider: okProvider{name: "brew"}}
-	a := newSearchCmdApp(t, system, brew)
+	a := newSearchCmdApp(t, brew)
 	m := modelForCmds(a)
 	row := &database.ToolCache{
-		Name:          "visual-studio-code",
-		Provider:      "system",
-		InstalledWith: "brew",
-		Options:       map[string]string{"brew_kind": "cask"},
+		Name:     "visual-studio-code",
+		Provider: "brew",
+		Options:  map[string]string{"brew_kind": "cask"},
 	}
 
 	msg := m.doInstallAndAddTool(row, "work")()
@@ -495,7 +468,7 @@ func TestDoSetProviderScope_ToolSuccess(t *testing.T) {
 	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
 	m := modelForCmds(a)
 
-	msg := m.doSetProviderScope("ripgrep", scopeOption{kind: "provider-tool", label: "this tool everywhere"}, &database.ToolCache{Name: "ripgrep", Provider: "system", Package: "ripgrep", InstalledWith: "brew"})()
+	msg := m.doSetProviderScope("ripgrep", scopeOption{kind: "provider-tool", label: "this tool everywhere"}, &database.ToolCache{Name: "ripgrep", Provider: "brew", Package: "ripgrep", InstalledWith: "brew"})()
 	got, ok := msg.(opCompleteMsg)
 	if !ok {
 		t.Fatalf("expected opCompleteMsg, got %T", msg)
@@ -514,7 +487,7 @@ func TestDoSetProviderScope_ToolSuccess(t *testing.T) {
 		t.Fatalf("config.Load: %v", err)
 	}
 	spec := cfg.Tools["ripgrep"]
-	if spec.Provider != "system" || spec.InstallWith != "brew" {
+	if len(spec.Providers) != 1 || spec.Providers[0].Provider != "brew" || spec.Providers[0].Package != "ripgrep" {
 		t.Fatalf("provider scope was not persisted: %+v", spec)
 	}
 }
@@ -524,7 +497,7 @@ func TestDoSetProviderScope_PersistsPackageAlias(t *testing.T) {
 	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
 	m := modelForCmds(a)
 
-	msg := m.doSetProviderScope("ripgrep", scopeOption{kind: "provider-tool", label: "this tool everywhere"}, &database.ToolCache{Name: "ripgrep", Provider: "system", Package: "rg", InstalledWith: "brew"})()
+	msg := m.doSetProviderScope("ripgrep", scopeOption{kind: "provider-tool", label: "this tool everywhere"}, &database.ToolCache{Name: "ripgrep", Provider: "brew", Package: "rg", InstalledWith: "brew"})()
 	got, ok := msg.(opCompleteMsg)
 	if !ok {
 		t.Fatalf("expected opCompleteMsg, got %T", msg)
@@ -538,7 +511,7 @@ func TestDoSetProviderScope_PersistsPackageAlias(t *testing.T) {
 		t.Fatalf("config.Load: %v", err)
 	}
 	spec := cfg.Tools["ripgrep"]
-	if spec.Provider != "system" || spec.Package != "rg" || spec.InstallWith != "brew" {
+	if len(spec.Providers) != 1 || spec.Providers[0].Provider != "brew" || spec.Providers[0].Package != "rg" {
 		t.Fatalf("provider scope with package alias was not persisted: %+v", spec)
 	}
 }

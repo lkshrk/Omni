@@ -74,8 +74,8 @@ func TestListDiscovered_HidesUnattributedLegacyRows(t *testing.T) {
 		t.Fatalf("config.Save: %v", err)
 	}
 	if err := a.DB().UpsertDiscoveredBatch(context.Background(), []database.DiscoveredUpsert{
-		{Name: "jq", Provider: "system", InstalledWith: "brew", Version: "1.7.0"},
-		{Name: "utm", Provider: "system", Version: "4.5.0"},
+		{Name: "jq", Provider: "brew", InstalledWith: "brew", Version: "1.7.0"},
+		{Name: "utm", Provider: "brew", Version: "4.5.0"},
 	}); err != nil {
 		t.Fatalf("UpsertDiscoveredBatch: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestListTools_HidesTrackedRowsRemovedFromConfig(t *testing.T) {
 	}
 	if err := a.DB().Upsert(ctx, &database.ToolCache{
 		Name:          "docker",
-		Provider:      "system",
+		Provider:      "brew",
 		Package:       "docker-desktop",
 		Installed:     true,
 		InstalledWith: "brew",
@@ -121,7 +121,7 @@ func TestListTools_HidesTrackedRowsRemovedFromConfig(t *testing.T) {
 	}
 	if err := a.DB().Upsert(ctx, &database.ToolCache{
 		Name:          "ripgrep",
-		Provider:      "system",
+		Provider:      "brew",
 		Package:       "ripgrep",
 		Installed:     true,
 		InstalledWith: "brew",
@@ -141,21 +141,18 @@ func TestListTools_HidesTrackedRowsRemovedFromConfig(t *testing.T) {
 func TestListToolsAndRefreshUseActiveHostGroups(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "Topaz.local")
 	ctx := context.Background()
-	system := &lifecycleProvider{
-		stubProvider: stubProvider{
-			name:      "system",
-			available: true,
-			installed: []provider.InstalledTool{
-				installedTool("ripgrep", "14.1.0", "system"),
-			},
+	brew := &stubProvider{
+		name:      "brew",
+		available: true,
+		installed: []provider.InstalledTool{
+			installedTool("ripgrep", "14.1.0", "brew"),
 		},
-		resolvedName: "brew",
 	}
-	a, cfgPath := newImportApp(t, system, &stubProvider{name: "brew", available: true})
+	a, cfgPath := newImportApp(t, brew)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(
-			logicalTool("docker", "system"),
-			logicalTool("ripgrep", "system"),
+			logicalTool("docker", "brew"),
+			logicalTool("ripgrep", "brew"),
 		),
 		Hosts: map[string][]string{
 			"Topaz": {"dev"},
@@ -171,11 +168,10 @@ func TestListToolsAndRefreshUseActiveHostGroups(t *testing.T) {
 		t.Fatalf("config.Save: %v", err)
 	}
 	if err := a.DB().Upsert(ctx, &database.ToolCache{
-		Name:          "docker",
-		Provider:      "system",
-		Package:       "docker",
-		Installed:     false,
-		InstalledWith: "brew",
+		Name:      "docker",
+		Provider:  "brew",
+		Package:   "docker",
+		Installed: false,
 	}); err != nil {
 		t.Fatalf("Upsert stale docker: %v", err)
 	}
@@ -201,7 +197,7 @@ func TestListToolsAndRefreshUseActiveHostGroups(t *testing.T) {
 	if err := a.RefreshInstalled(ctx, nil); err != nil {
 		t.Fatalf("RefreshInstalled: %v", err)
 	}
-	docker, err := a.DB().Get(ctx, "docker", "system", "docker")
+	docker, err := a.DB().Get(ctx, "docker", "brew", "docker")
 	if err != nil {
 		t.Fatalf("Get docker cache row: %v", err)
 	}
@@ -231,7 +227,7 @@ func TestToolDisplaySnapshotReturnsToolsDiscoveredAndManager(t *testing.T) {
 		t.Fatalf("config.Save: %v", err)
 	}
 	if err := a.DB().UpsertDiscoveredBatch(ctx, []database.DiscoveredUpsert{
-		{Name: "jq", Provider: "system", InstalledWith: "brew", Version: "1.7.0"},
+		{Name: "jq", Provider: "brew", InstalledWith: "brew", Version: "1.7.0"},
 	}); err != nil {
 		t.Fatalf("UpsertDiscoveredBatch: %v", err)
 	}

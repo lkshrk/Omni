@@ -123,8 +123,8 @@ Important invariants:
 
 - groups store logical tool names, not full install objects
 - the `tools` map stores install specs for logical tools
-- `package` defaults to the logical tool name
-- `install_with` is a concrete-manager override
+- `providers[].package` defaults to the logical tool name
+- tool providers are concrete provider candidates
 - cache `installed_with` records observed ownership
 
 ## Dotfile Lifecycle

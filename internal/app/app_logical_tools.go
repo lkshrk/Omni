@@ -46,16 +46,8 @@ func (a *App) SetTool(name, providerName, packageName, installWith string) error
 	if name == "" {
 		return fmt.Errorf("tool name is required")
 	}
-	if providerName == "" {
-		return fmt.Errorf("provider is required")
-	}
-	if !a.knownProvider(providerName) {
-		return fmt.Errorf("unknown provider %q", providerName)
-	}
-	if !a.knownEcosystemProvider(providerName) {
-		return fmt.Errorf("provider %q is not an ecosystem provider", providerName)
-	}
-	if err := a.validateInstallWith(providerName, installWith); err != nil {
+	entry, err := a.providerEntryFromLegacyArgs(providerName, packageName, installWith, nil)
+	if err != nil {
 		return err
 	}
 
@@ -64,12 +56,66 @@ func (a *App) SetTool(name, providerName, packageName, installWith string) error
 			cfg.Tools = make(map[string]config.ToolSpec)
 		}
 		spec := cfg.Tools[name]
-		spec.Provider = providerName
-		spec.Package = packageName
-		spec.InstallWith = installWith
+		spec.Providers = upsertToolProviderFirst(spec.Providers, entry)
+		spec.Provider = ""
+		spec.Package = ""
+		spec.InstallWith = ""
+		spec.Options = nil
 		cfg.Tools[name] = spec
 		return nil
 	})
+}
+
+func (a *App) providerEntryFromLegacyArgs(providerName, packageName, installWith string, options map[string]string) (config.ToolInstallSpec, error) {
+	if providerName == "" {
+		return config.ToolInstallSpec{}, fmt.Errorf("provider is required")
+	}
+	if !a.knownProvider(providerName) {
+		return config.ToolInstallSpec{}, fmt.Errorf("unknown provider %q", providerName)
+	}
+	concrete := providerName
+	if a.knownEcosystemProvider(providerName) {
+		if installWith == "" {
+			return config.ToolInstallSpec{}, fmt.Errorf("provider %q requires a concrete provider", providerName)
+		}
+		concrete = installWith
+	}
+	if concrete == "pip3" {
+		concrete = "pip"
+	}
+	if !a.knownProvider(concrete) {
+		return config.ToolInstallSpec{}, fmt.Errorf("unknown concrete provider/manager %q", concrete)
+	}
+	if a.knownEcosystemProvider(concrete) {
+		return config.ToolInstallSpec{}, fmt.Errorf("provider %q must be concrete", concrete)
+	}
+	return config.ToolInstallSpec{Provider: concrete, Package: packageName, Options: cloneOptionMap(options)}, nil
+}
+
+func upsertToolProvider(providers []config.ToolInstallSpec, entry config.ToolInstallSpec) []config.ToolInstallSpec {
+	for i, existing := range providers {
+		if existing.Provider == entry.Provider {
+			providers[i] = entry
+			return providers
+		}
+	}
+	return append(providers, entry)
+}
+
+func upsertToolProviderFirst(providers []config.ToolInstallSpec, entry config.ToolInstallSpec) []config.ToolInstallSpec {
+	providers = upsertToolProvider(providers, entry)
+	for i, existing := range providers {
+		if existing.Provider != entry.Provider {
+			continue
+		}
+		if i == 0 {
+			return providers
+		}
+		copy(providers[1:i+1], providers[0:i])
+		providers[0] = existing
+		return providers
+	}
+	return providers
 }
 
 func (a *App) SetToolQuarantine(name, quarantine string) error {
@@ -551,18 +597,8 @@ func (a *App) setToolInstallSpec(name, host, providerName, packageName, installW
 	if name == "" {
 		return fmt.Errorf("tool name is required")
 	}
-	targetProvider, targetInstallWith := a.logicalInstallTarget(installWith)
-	if providerName != "" {
-		targetProvider = providerName
-		targetInstallWith = installWith
-	}
-	if targetProvider == "" {
-		return fmt.Errorf("provider is required")
-	}
-	if !a.knownEcosystemProvider(targetProvider) {
-		return fmt.Errorf("provider %q is not an ecosystem provider", targetProvider)
-	}
-	if err := a.validateInstallWith(targetProvider, targetInstallWith); err != nil {
+	entry, err := a.providerEntryFromLegacyArgs(providerName, packageName, installWith, nil)
+	if err != nil {
 		return err
 	}
 
@@ -571,23 +607,24 @@ func (a *App) setToolInstallSpec(name, host, providerName, packageName, installW
 		if !ok {
 			return fmt.Errorf("logical tool %q not found", name)
 		}
-		if packageName == "" {
-			packageName = spec.Package
+		if entry.Package == "" {
+			entry.Package = spec.DefaultInstallSpec().EffectivePackage(name)
+			if entry.Package == name {
+				entry.Package = ""
+			}
 		}
-		if packageName == name {
-			packageName = ""
-		}
-		install := config.ToolInstallSpec{Provider: targetProvider, Package: packageName, InstallWith: targetInstallWith, Options: spec.Options}
+		entry.Options = cloneOptionMap(spec.Options)
 		if host != "" {
 			if spec.Hosts == nil {
 				spec.Hosts = make(map[string]config.ToolInstallSpec)
 			}
-			spec.Hosts[host] = install
+			spec.Hosts[host] = entry
 		} else {
-			spec.Provider = install.Provider
-			spec.Package = install.Package
-			spec.InstallWith = install.InstallWith
-			spec.Options = install.Options
+			spec.Providers = upsertToolProvider(spec.Providers, entry)
+			spec.Provider = ""
+			spec.Package = ""
+			spec.InstallWith = ""
+			spec.Options = nil
 		}
 		cfg.Tools[name] = spec
 		return nil

@@ -206,12 +206,12 @@ func TestCompleteExternalToolAction_UninstallRemovesConfigAndCache(t *testing.T)
 
 func TestCompleteExternalToolActionWithState_InstallAndAddReturnsState(t *testing.T) {
 	ctx := context.Background()
-	system := &lifecycleProvider{
-		stubProvider: stubProvider{name: "system", available: true},
+	brew := &lifecycleProvider{
+		stubProvider: stubProvider{name: "brew", available: true},
 		installed:    true,
 		version:      "9.1.0",
 	}
-	a, cfgPath := newImportApp(t, system)
+	a, cfgPath := newImportApp(t, brew)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{}); err != nil {
 		t.Fatalf("saving config: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestCompleteExternalToolActionWithState_InstallAndAddReturnsState(t *testin
 	result, err := a.CompleteExternalToolActionWithState(ctx, app.CompleteExternalToolActionOptions{
 		Action:       provider.PrivilegeActionInstall,
 		Name:         "vim",
-		ProviderName: "system",
+		ProviderName: "brew",
 		Package:      "vim",
 		AddToConfig:  true,
 		GroupName:    "work",
@@ -231,7 +231,7 @@ func TestCompleteExternalToolActionWithState_InstallAndAddReturnsState(t *testin
 	if len(result.Tools) != 1 || result.Tools[0].Name != "vim" || !result.Tools[0].Tracked {
 		t.Fatalf("Tools = %+v, want tracked vim", result.Tools)
 	}
-	key := "vim\x00system"
+	key := "vim\x00brew"
 	if result.GroupState == nil {
 		t.Fatal("GroupState is nil")
 	}
@@ -256,26 +256,24 @@ func TestCompleteExternalToolActionWithState_InstallAndAddReturnsState(t *testin
 
 func TestCompleteExternalToolActionWithState_PersistsInstallOptions(t *testing.T) {
 	ctx := context.Background()
-	system := &lifecycleProvider{stubProvider: stubProvider{name: "system", available: true}}
 	brew := &lifecycleProvider{
 		stubProvider: stubProvider{name: "brew", available: true},
 		installed:    true,
 		version:      "1.2.3",
 	}
-	a, cfgPath := newImportApp(t, system, brew)
+	a, cfgPath := newImportApp(t, brew)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{}); err != nil {
 		t.Fatalf("saving config: %v", err)
 	}
 
 	_, err := a.CompleteExternalToolActionWithState(ctx, app.CompleteExternalToolActionOptions{
-		Action:        provider.PrivilegeActionInstall,
-		Name:          "visual-studio-code",
-		ProviderName:  "system",
-		Package:       "visual-studio-code",
-		InstalledWith: "brew",
-		Options:       map[string]string{"brew_kind": "cask"},
-		AddToConfig:   true,
-		GroupName:     "work",
+		Action:       provider.PrivilegeActionInstall,
+		Name:         "visual-studio-code",
+		ProviderName: "brew",
+		Package:      "visual-studio-code",
+		Options:      map[string]string{"brew_kind": "cask"},
+		AddToConfig:  true,
+		GroupName:    "work",
 	})
 	if err != nil {
 		t.Fatalf("CompleteExternalToolActionWithState: %v", err)
@@ -285,11 +283,11 @@ func TestCompleteExternalToolActionWithState_PersistsInstallOptions(t *testing.T
 		t.Fatalf("config.Load: %v", err)
 	}
 	spec := cfg.Tools["visual-studio-code"]
-	if spec.Provider != "system" || spec.InstallWith != "brew" {
-		t.Fatalf("spec provider/install_with = %q/%q, want system/brew", spec.Provider, spec.InstallWith)
+	if len(spec.Providers) != 1 || spec.Providers[0].Provider != "brew" {
+		t.Fatalf("spec providers = %+v, want brew", spec.Providers)
 	}
-	if spec.Options["brew_kind"] != "cask" {
-		t.Fatalf("spec.Options[brew_kind] = %q, want cask", spec.Options["brew_kind"])
+	if spec.Providers[0].Options["brew_kind"] != "cask" {
+		t.Fatalf("spec provider options[brew_kind] = %q, want cask", spec.Providers[0].Options["brew_kind"])
 	}
 }
 
@@ -385,91 +383,6 @@ func TestCompleteExternalToolAction_UninstallRejectsProviderTool(t *testing.T) {
 	}
 }
 
-func TestRefreshProviderInstalled_ManagerPinnedPersistsCheckedManager(t *testing.T) {
-	python := &lifecycleProvider{
-		stubProvider: stubProvider{name: "python", available: true},
-		resolvedName: "uv",
-		installed:    true,
-		version:      "24.4.0",
-	}
-	a, cfgPath := newImportApp(t, python)
-	cfg := &config.RootConfig{
-		Tools: logicalToolSpecs(logicalFixtureTool{Name: "black", Provider: "python", InstallWith: "pip3"}),
-		Groups: []*config.GroupConfig{{
-			Tools: groupTools("black"),
-		}},
-	}
-	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
-		t.Fatalf("saving config: %v", err)
-	}
-
-	if err := a.RefreshProviderInstalled(context.Background(), "python"); err != nil {
-		t.Fatalf("RefreshProviderInstalled: %v", err)
-	}
-
-	cached, err := a.DB().Get(context.Background(), "black", "python", "black")
-	if err != nil {
-		t.Fatalf("db.Get: %v", err)
-	}
-	if cached.InstalledWith != "pip3" {
-		t.Fatalf("InstalledWith = %q, want pip3", cached.InstalledWith)
-	}
-	if len(python.managerChecks) != 1 || python.managerChecks[0] != "pip3" {
-		t.Fatalf("manager checks = %v, want [pip3]", python.managerChecks)
-	}
-}
-
-func TestRefreshProviderInstalled_ManagerPinnedDoesNotDisableBulkForUnpinned(t *testing.T) {
-	python := &multiManagerLifecycleProvider{
-		lifecycleProvider: lifecycleProvider{
-			stubProvider: stubProvider{name: "python", available: true},
-			installed:    true,
-			version:      "6.0.0",
-		},
-		entries: map[string]provider.InstalledEntry{
-			"ruff": {Version: "0.4.0", ConcreteManager: "uv"},
-		},
-	}
-	a, cfgPath := newImportApp(t, python)
-	cfg := &config.RootConfig{
-		Tools: logicalToolSpecs(
-			logicalTool("ruff", "python"),
-			logicalFixtureTool{Name: "flake8", Provider: "python", InstallWith: "pip3"},
-		),
-		Groups: []*config.GroupConfig{{
-			Tools: groupTools("ruff", "flake8"),
-		}},
-	}
-	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
-		t.Fatalf("saving config: %v", err)
-	}
-
-	if err := a.RefreshProviderInstalled(context.Background(), "python"); err != nil {
-		t.Fatalf("RefreshProviderInstalled: %v", err)
-	}
-
-	ruff, err := a.DB().Get(context.Background(), "ruff", "python", "ruff")
-	if err != nil {
-		t.Fatalf("get ruff: %v", err)
-	}
-	flake8, err := a.DB().Get(context.Background(), "flake8", "python", "flake8")
-	if err != nil {
-		t.Fatalf("get flake8: %v", err)
-	}
-	if !ruff.Installed || ruff.InstalledWith != "uv" {
-		t.Fatalf("ruff installed/with = %v/%q, want true/uv", ruff.Installed, ruff.InstalledWith)
-	}
-	if !flake8.Installed || flake8.InstalledWith != "pip3" {
-		t.Fatalf("flake8 installed/with = %v/%q, want true/pip3", flake8.Installed, flake8.InstalledWith)
-	}
-	if len(python.managerChecks) != 1 || python.managerChecks[0] != "pip3" {
-		t.Fatalf("manager checks = %v, want [pip3]", python.managerChecks)
-	}
-	if len(python.installedChecks) != 1 || python.installedChecks[0].Name != "flake8" {
-		t.Fatalf("per-tool checks = %+v, want only flake8", python.installedChecks)
-	}
-}
-
 func TestUninstall_UsesRegisteredInstalledWithProvider(t *testing.T) {
 	system := &lifecycleProvider{stubProvider: stubProvider{name: "system", available: true}}
 	brew := &lifecycleProvider{stubProvider: stubProvider{name: "brew", available: true}}
@@ -503,76 +416,6 @@ func TestUninstall_UsesRegisteredInstalledWithProvider(t *testing.T) {
 	}
 	if len(system.uninstalled) != 0 {
 		t.Fatalf("system uninstalled = %+v, want no calls", system.uninstalled)
-	}
-}
-
-func TestInstall_ConcreteProviderRequestUsesConfiguredEcosystemTool(t *testing.T) {
-	system := &lifecycleProvider{
-		stubProvider: stubProvider{name: "system", available: true},
-		resolvedName: "brew",
-		installed:    true,
-		version:      "14.1.1",
-	}
-	brew := &lifecycleProvider{stubProvider: stubProvider{name: "brew", available: true}}
-	a, cfgPath := newImportApp(t, system, brew)
-	cfg := &config.RootConfig{
-		Tools: logicalToolSpecs(logicalToolPackage("ripgrep", "system", "rg")),
-		Groups: []*config.GroupConfig{{
-			Tools: groupTools("ripgrep"),
-		}},
-	}
-	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
-		t.Fatalf("saving config: %v", err)
-	}
-
-	if err := a.Install(context.Background(), "ripgrep", "brew"); err != nil {
-		t.Fatalf("Install: %v", err)
-	}
-
-	if _, err := a.DB().Get(context.Background(), "ripgrep", "system", "rg"); err != nil {
-		t.Fatalf("configured ecosystem cache row missing: %v", err)
-	}
-	if _, err := a.DB().Get(context.Background(), "ripgrep", "brew", "ripgrep"); err == nil {
-		t.Fatal("unexpected fallback concrete cache row for brew/ripgrep")
-	}
-	if len(brew.stubProvider.installed) != 0 {
-		t.Fatalf("brew direct install = %+v, want configured ecosystem path", brew.stubProvider.installed)
-	}
-}
-
-func TestUninstall_ConcreteProviderRequestUsesConfiguredEcosystemTool(t *testing.T) {
-	system := &lifecycleProvider{stubProvider: stubProvider{name: "system", available: true}, resolvedName: "brew"}
-	brew := &lifecycleProvider{stubProvider: stubProvider{name: "brew", available: true}}
-	a, cfgPath := newImportApp(t, system, brew)
-	cfg := &config.RootConfig{
-		Tools: logicalToolSpecs(logicalToolPackage("ripgrep", "system", "rg")),
-		Groups: []*config.GroupConfig{{
-			Tools: groupTools("ripgrep"),
-		}},
-	}
-	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
-		t.Fatalf("saving config: %v", err)
-	}
-	if err := a.DB().Upsert(context.Background(), &database.ToolCache{
-		Name:          "ripgrep",
-		Provider:      "system",
-		Package:       "rg",
-		Installed:     true,
-		InstalledWith: "brew",
-		LastChecked:   time.Now(),
-	}); err != nil {
-		t.Fatalf("db.Upsert: %v", err)
-	}
-
-	if err := a.Uninstall(context.Background(), "ripgrep", "brew"); err != nil {
-		t.Fatalf("Uninstall: %v", err)
-	}
-
-	if len(brew.uninstalled) != 1 || brew.uninstalled[0].Package != "rg" {
-		t.Fatalf("brew uninstalled = %+v, want package rg", brew.uninstalled)
-	}
-	if _, err := a.DB().Get(context.Background(), "ripgrep", "system", "rg"); !errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("configured cache row should be deleted, got err=%v", err)
 	}
 }
 

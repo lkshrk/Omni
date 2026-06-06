@@ -1,11 +1,13 @@
 package app_test
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/provider"
 )
 
 func saveAppConfig(t testing.TB, path string, cfg *config.RootConfig) error {
@@ -103,19 +105,27 @@ func logicalToolSpecs(tools ...logicalFixtureTool) map[string]config.ToolSpec {
 	specs := make(map[string]config.ToolSpec, len(tools))
 	for _, tool := range tools {
 		providerName := tool.Provider
-		installWith := tool.InstallWith
-		if ecosystem := testEcosystemForConcrete(providerName); ecosystem != "" {
-			providerName = ecosystem
-			if installWith == "" {
-				installWith = tool.Provider
-			}
+		if tool.InstallWith != "" {
+			providerName = tool.InstallWith
+		}
+		switch providerName {
+		case "system":
+			providerName = "brew"
+		case "node":
+			providerName = "npm"
+		case "python":
+			providerName = "pip"
+		}
+		if providerName == "pip3" {
+			providerName = "pip"
 		}
 		specs[tool.Name] = config.ToolSpec{
-			Provider:    providerName,
-			Package:     tool.Package,
-			InstallWith: installWith,
-			Options:     tool.Options,
-			Ignore:      tool.Ignore,
+			Providers: []config.ToolInstallSpec{{
+				Provider: providerName,
+				Package:  tool.Package,
+				Options:  tool.Options,
+			}},
+			Ignore: tool.Ignore,
 		}
 	}
 	return specs
@@ -127,4 +137,26 @@ func groupTools(names ...string) []config.ToolEntry {
 		tools = append(tools, config.ToolEntry{Name: name})
 	}
 	return tools
+}
+
+// installTracker wraps stubProvider and records Install calls.
+type installTracker struct {
+	stubProvider
+	installed     []provider.InstalledTool
+	installCalled []string
+}
+
+func (s *installTracker) Install(_ context.Context, t provider.Tool) error {
+	s.installCalled = append(s.installCalled, t.Name)
+	s.installed = append(s.installed, provider.InstalledTool{Tool: t})
+	return nil
+}
+
+func (s *installTracker) IsInstalled(ctx context.Context, t provider.Tool) (bool, string, error) {
+	for _, installed := range s.installed {
+		if installed.Tool.Name == t.Name && installed.Tool.Provider == t.Provider {
+			return true, installed.Version, nil
+		}
+	}
+	return s.stubProvider.IsInstalled(ctx, t)
 }

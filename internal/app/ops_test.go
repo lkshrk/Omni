@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -108,8 +109,10 @@ func hasTool(cfg *config.RootConfig, name, providerName string) bool {
 			if !ok {
 				return tool.Provider == providerName
 			}
-			if spec.Provider == providerName || spec.InstallWith == providerName {
-				return true
+			for _, install := range spec.Providers {
+				if install.Provider == providerName {
+					return true
+				}
 			}
 		}
 	}
@@ -174,13 +177,12 @@ func TestInstall_PostInstallVerificationFailureDoesNotMarkInstalled(t *testing.T
 	}
 }
 
-func TestInstall_UsesLogicalPackageAndInstallWith(t *testing.T) {
-	system := &stubProvider{name: "system", available: true}
+func TestInstall_UsesConfiguredPackageAndProvider(t *testing.T) {
 	brew := &installCaptureStub{stubProvider: stubProvider{name: "brew", available: true}, version: "14.1.0"}
-	a, cfgPath := newImportApp(t, system, brew)
+	a, cfgPath := newImportApp(t, brew)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(
-			logicalFixtureTool{Name: "ripgrep", Provider: "system", Package: "rg", InstallWith: "brew"},
+			logicalToolPackage("ripgrep", "brew", "rg"),
 		),
 		Groups: []*config.GroupConfig{
 			{Tools: groupTools("ripgrep")},
@@ -189,7 +191,7 @@ func TestInstall_UsesLogicalPackageAndInstallWith(t *testing.T) {
 		t.Fatalf("save config: %v", err)
 	}
 
-	if err := a.Install(context.Background(), "ripgrep", "system"); err != nil {
+	if err := a.Install(context.Background(), "ripgrep", "brew"); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
 
@@ -199,26 +201,19 @@ func TestInstall_UsesLogicalPackageAndInstallWith(t *testing.T) {
 	if got := brew.installed[0]; got.Name != "ripgrep" || got.Provider != "brew" || got.Package != "rg" {
 		t.Fatalf("installed tool = %+v, want ripgrep via brew package rg", got)
 	}
-	cached, err := a.DB().Get(context.Background(), "ripgrep", "system", "rg")
+	cached, err := a.DB().Get(context.Background(), "ripgrep", "brew", "rg")
 	if err != nil {
 		t.Fatalf("cache get: %v", err)
 	}
-	if !cached.Installed || cached.InstalledWith != "brew" {
-		t.Fatalf("cache installed=%v installed_with=%q, want true/brew", cached.Installed, cached.InstalledWith)
+	if !cached.Installed {
+		t.Fatalf("cache installed=%v, want true", cached.Installed)
 	}
 	if cached.Version.String != "14.1.0" {
 		t.Fatalf("cache version = %q, want 14.1.0", cached.Version.String)
 	}
 }
 
-func TestInstall_SystemResolvedToBrewPopulatesGit(t *testing.T) {
-	system := &concreteInstallStub{
-		installCaptureStub: installCaptureStub{
-			stubProvider: stubProvider{name: "system", available: true},
-			version:      "14.1.1",
-		},
-		concreteName: "brew",
-	}
+func TestInstall_BrewPopulatesGit(t *testing.T) {
 	brew := &metadataCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		metadata: map[string]provider.InstalledMetadata{
@@ -233,15 +228,15 @@ func TestInstall_SystemResolvedToBrewPopulatesGit(t *testing.T) {
 			},
 		},
 	}
-	a, cfgPath := newImportApp(t, system, brew)
+	a, cfgPath := newImportApp(t, brew)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools:  logicalToolSpecs(logicalTool("ripgrep", "system")),
+		Tools:  logicalToolSpecs(logicalTool("ripgrep", "brew")),
 		Groups: []*config.GroupConfig{{Tools: groupTools("ripgrep")}},
 	}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
 
-	if err := a.Install(context.Background(), "ripgrep", "system"); err != nil {
+	if err := a.Install(context.Background(), "ripgrep", "brew"); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
 
@@ -267,24 +262,24 @@ func TestInstallWithStateReturnsUpdatedToolsAndGroups(t *testing.T) {
 		t.Fatalf("config.Save: %v", err)
 	}
 
-	result, err := a.InstallWithState(context.Background(), "ripgrep", "system")
+	result, err := a.InstallWithState(context.Background(), "ripgrep", "brew")
 	if err != nil {
 		t.Fatalf("InstallWithState: %v", err)
 	}
 
-	toolKey := "ripgrep\x00system"
+	toolKey := "ripgrep\x00brew"
 	if _, ok := result.State.ToolMemberships[toolKey]; !ok {
 		t.Fatalf("ToolMemberships[%q] missing after install: %v", toolKey, result.State.ToolMemberships)
 	}
 	found := false
 	for _, tool := range result.Tools {
-		if tool.Name == "ripgrep" && tool.Provider == "system" && tool.Installed {
+		if tool.Name == "ripgrep" && tool.Provider == "brew" && tool.Installed {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("Tools = %+v, want installed ripgrep/system", result.Tools)
+		t.Fatalf("Tools = %+v, want installed ripgrep/brew", result.Tools)
 	}
 }
 
@@ -380,39 +375,13 @@ func TestUninstall_UsesConfiguredPackage(t *testing.T) {
 	}
 }
 
-func TestUninstall_UsesConfiguredInstallWithWhenCacheMissing(t *testing.T) {
-	node := &managerUninstallCaptureStub{
-		uninstallCaptureStub: uninstallCaptureStub{stubProvider: stubProvider{name: "node", available: true}},
-	}
-	a, cfgPath := newImportApp(t, node)
-	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: logicalToolSpecs(logicalFixtureTool{Name: "typescript", Provider: "node", InstallWith: "npm"}),
-		Groups: []*config.GroupConfig{{
-			Tools: groupTools("typescript"),
-		}},
-	}); err != nil {
-		t.Fatalf("config.Save: %v", err)
-	}
-
-	if err := a.Uninstall(context.Background(), "typescript", "node"); err != nil {
-		t.Fatalf("Uninstall: %v", err)
-	}
-
-	if len(node.managerUninstalls) != 1 || node.managerUninstalls[0] != "npm" {
-		t.Fatalf("manager uninstalls = %v, want [npm]", node.managerUninstalls)
-	}
-	if len(node.uninstalled) != 1 || node.uninstalled[0].Provider != "node" {
-		t.Fatalf("uninstalled tools = %+v, want one node tool", node.uninstalled)
-	}
-}
-
 func TestUninstall_RejectsProviderTool(t *testing.T) {
-	node := &managerUninstallCaptureStub{
-		uninstallCaptureStub: uninstallCaptureStub{stubProvider: stubProvider{name: "node", available: true}},
+	npm := &managerUninstallCaptureStub{
+		uninstallCaptureStub: uninstallCaptureStub{stubProvider: stubProvider{name: "npm", available: true}},
 	}
-	a, cfgPath := newImportApp(t, node)
+	a, cfgPath := newImportApp(t, npm)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: logicalToolSpecs(logicalFixtureTool{Name: "npm", Provider: "node", InstallWith: "npm"}),
+		Tools: logicalToolSpecs(logicalTool("npm", "npm")),
 		Groups: []*config.GroupConfig{{
 			Tools: groupTools("npm"),
 		}},
@@ -420,18 +389,18 @@ func TestUninstall_RejectsProviderTool(t *testing.T) {
 		t.Fatalf("config.Save: %v", err)
 	}
 
-	err := a.Uninstall(context.Background(), "npm", "node")
+	err := a.Uninstall(context.Background(), "npm", "npm")
 	if err == nil || !strings.Contains(err.Error(), "package manager/provider") {
 		t.Fatalf("Uninstall err = %v, want protected provider tool error", err)
 	}
-	if len(node.uninstalled) != 0 || len(node.managerUninstalls) != 0 {
-		t.Fatalf("uninstall calls = %+v manager calls = %+v, want none", node.uninstalled, node.managerUninstalls)
+	if len(npm.uninstalled) != 0 || len(npm.managerUninstalls) != 0 {
+		t.Fatalf("uninstall calls = %+v manager calls = %+v, want none", npm.uninstalled, npm.managerUninstalls)
 	}
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	if !hasTool(cfg, "npm", "node") {
+	if !hasTool(cfg, "npm", "npm") {
 		t.Fatalf("npm config entry was removed despite protected provider guard: %+v", cfg.Groups)
 	}
 }
@@ -522,7 +491,7 @@ func TestUninstallWithStateReturnsUpdatedToolsAndGroups(t *testing.T) {
 		t.Fatalf("UninstallWithState: %v", err)
 	}
 
-	deletedKey := "ripgrep\x00system"
+	deletedKey := "ripgrep\x00brew"
 	if _, ok := result.State.ToolGroups[deletedKey]; ok {
 		t.Fatalf("ToolGroups[%q] still present after uninstall: %v", deletedKey, result.State.ToolGroups)
 	}
@@ -531,7 +500,7 @@ func TestUninstallWithStateReturnsUpdatedToolsAndGroups(t *testing.T) {
 	}
 	foundFD := false
 	for _, tool := range result.Tools {
-		if tool.Name == "fd" && tool.Provider == "system" {
+		if tool.Name == "fd" && tool.Provider == "brew" {
 			foundFD = true
 		}
 		if tool.Name == "ripgrep" {
@@ -539,7 +508,7 @@ func TestUninstallWithStateReturnsUpdatedToolsAndGroups(t *testing.T) {
 		}
 	}
 	if !foundFD {
-		t.Fatalf("Tools = %+v, want remaining fd/system", result.Tools)
+		t.Fatalf("Tools = %+v, want remaining fd/brew", result.Tools)
 	}
 }
 
@@ -607,7 +576,7 @@ func TestRemoveToolFromConfigWithStateReturnsUpdatedToolsAndGroups(t *testing.T)
 	}
 	if err := a.DB().Upsert(context.Background(), &database.ToolCache{
 		Name:      "ripgrep",
-		Provider:  "system",
+		Provider:  "brew",
 		Package:   "ripgrep",
 		Installed: false,
 		Tracked:   true,
@@ -620,7 +589,7 @@ func TestRemoveToolFromConfigWithStateReturnsUpdatedToolsAndGroups(t *testing.T)
 		t.Fatalf("RemoveToolFromConfigWithState: %v", err)
 	}
 
-	deletedKey := "ripgrep\x00system"
+	deletedKey := "ripgrep\x00brew"
 	if _, ok := result.State.ToolGroups[deletedKey]; ok {
 		t.Fatalf("ToolGroups[%q] still present after config delete: %v", deletedKey, result.State.ToolGroups)
 	}
@@ -629,7 +598,7 @@ func TestRemoveToolFromConfigWithStateReturnsUpdatedToolsAndGroups(t *testing.T)
 	}
 	foundFD := false
 	for _, tool := range result.Tools {
-		if tool.Name == "fd" && tool.Provider == "system" {
+		if tool.Name == "fd" && tool.Provider == "brew" {
 			foundFD = true
 		}
 		if tool.Name == "ripgrep" {
@@ -637,15 +606,15 @@ func TestRemoveToolFromConfigWithStateReturnsUpdatedToolsAndGroups(t *testing.T)
 		}
 	}
 	if !foundFD {
-		t.Fatalf("Tools = %+v, want remaining fd/system", result.Tools)
+		t.Fatalf("Tools = %+v, want remaining fd/brew", result.Tools)
 	}
 }
 
 func TestRemoveToolFromConfig_RejectsProviderTool(t *testing.T) {
-	node := &stubProvider{name: "node", available: true}
-	a, cfgPath := newImportApp(t, node)
+	bun := &stubProvider{name: "bun", available: true}
+	a, cfgPath := newImportApp(t, bun)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: logicalToolSpecs(logicalFixtureTool{Name: "bun", Provider: "node", InstallWith: "bun"}),
+		Tools: logicalToolSpecs(logicalTool("bun", "bun")),
 		Groups: []*config.GroupConfig{{
 			Tools: groupTools("bun"),
 		}},
@@ -653,7 +622,7 @@ func TestRemoveToolFromConfig_RejectsProviderTool(t *testing.T) {
 		t.Fatalf("config.Save: %v", err)
 	}
 
-	err := a.RemoveToolFromConfig(context.Background(), "bun", "node")
+	err := a.RemoveToolFromConfig(context.Background(), "bun", "bun")
 	if err == nil || !strings.Contains(err.Error(), "package manager/provider") {
 		t.Fatalf("RemoveToolFromConfig err = %v, want protected provider tool error", err)
 	}
@@ -662,7 +631,7 @@ func TestRemoveToolFromConfig_RejectsProviderTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	if !hasTool(cfg, "bun", "node") {
+	if !hasTool(cfg, "bun", "bun") {
 		t.Fatalf("bun config entry was removed despite protected provider guard: %+v", cfg.Groups)
 	}
 }
@@ -864,38 +833,6 @@ func TestUpgrade_RechecksOutdatedAfterVerification(t *testing.T) {
 	}
 }
 
-func TestUpgrade_UsesConfiguredInstallWithWhenCacheMissing(t *testing.T) {
-	node := &managerUpgradeStub{stubProvider: stubProvider{name: "node", available: true}, verifyInstalled: true}
-	a, cfgPath := newImportApp(t, node)
-	ctx := context.Background()
-	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: logicalToolSpecs(logicalFixtureTool{Name: "typescript", Provider: "node", InstallWith: "npm"}),
-		Groups: []*config.GroupConfig{{
-			Tools: groupTools("typescript"),
-		}},
-	}); err != nil {
-		t.Fatalf("config.Save: %v", err)
-	}
-
-	if err := a.Upgrade(ctx, "typescript", "node"); err != nil {
-		t.Fatalf("Upgrade: %v", err)
-	}
-
-	if node.fallbackUpgrades != 0 {
-		t.Fatalf("fallback Upgrade called %d times, want manager-specific upgrade", node.fallbackUpgrades)
-	}
-	if len(node.managerUpgrades) != 1 || node.managerUpgrades[0] != "npm" {
-		t.Fatalf("manager upgrades = %v, want [npm]", node.managerUpgrades)
-	}
-	got, err := a.DB().Get(ctx, "typescript", "node", "typescript")
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if got.InstalledWith != "npm" || got.Version.String != "npm-version" {
-		t.Fatalf("cache installed_with/version = %q/%q, want npm/npm-version", got.InstalledWith, got.Version.String)
-	}
-}
-
 func TestUpgrade_VerificationFailureKeepsOutdatedState(t *testing.T) {
 	node := &managerUpgradeStub{stubProvider: stubProvider{name: "node", available: true}, verifyErr: errors.New("status failed")}
 	a, _ := newImportApp(t, node)
@@ -1039,18 +976,18 @@ func TestReconcile_SyncsAndUpgradesTools(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	stub := &reconcileUpgradeStub{
 		stubProvider: stubProvider{
-			name:      "system",
+			name:      "brew",
 			available: true,
 			installed: []provider.InstalledTool{
-				installedTool("ripgrep", "1.0.0", "system"),
+				installedTool("ripgrep", "1.0.0", "brew"),
 			},
 		},
 	}
 	a, cfgPath := newImportApp(t, stub)
 	if err := config.Save(cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
-			"fd":      {Provider: "system"},
-			"ripgrep": {Provider: "system"},
+			"fd":      {Providers: []config.ToolInstallSpec{{Provider: "brew"}}},
+			"ripgrep": {Providers: []config.ToolInstallSpec{{Provider: "brew"}}},
 		},
 		Hosts: map[string][]string{"testhost": {"base"}},
 		Groups: []*config.GroupConfig{
@@ -1064,7 +1001,7 @@ func TestReconcile_SyncsAndUpgradesTools(t *testing.T) {
 	if err := a.RefreshInstalled(ctx, nil); err != nil {
 		t.Fatalf("RefreshInstalled: %v", err)
 	}
-	if err := a.DB().UpdateOutdated(ctx, "ripgrep", "system", "ripgrep", true, "2.0.0"); err != nil {
+	if err := a.DB().UpdateOutdated(ctx, "ripgrep", "brew", "ripgrep", true, "2.0.0"); err != nil {
 		t.Fatalf("UpdateOutdated: %v", err)
 	}
 
@@ -1235,8 +1172,8 @@ func TestSearch_FansOut(t *testing.T) {
 	if len(results) != 1 || results[0].Name != "ripgrep" {
 		t.Errorf("Search = %v, want 1 result named ripgrep", results)
 	}
-	if results[0].Provider != "system" || results[0].SourceProvider != "brew" {
-		t.Fatalf("Search provider = %q source = %q, want system source brew", results[0].Provider, results[0].SourceProvider)
+	if results[0].Provider != "brew" || results[0].SourceProvider != "brew" {
+		t.Fatalf("Search provider = %q source = %q, want brew source brew", results[0].Provider, results[0].SourceProvider)
 	}
 }
 
@@ -1302,11 +1239,11 @@ func TestSearch_CachesResultMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
-	if len(results) != 1 || results[0].Provider != "system" {
-		t.Fatalf("Search results = %+v, want one system result", results)
+	if len(results) != 1 || results[0].Provider != "brew" {
+		t.Fatalf("Search results = %+v, want one brew result", results)
 	}
 
-	meta, err := a.DB().GetMetadata(ctx, "ripgrep", "system", "ripgrep")
+	meta, err := a.DB().GetMetadata(ctx, "ripgrep", "brew", "ripgrep")
 	if err != nil {
 		t.Fatalf("GetMetadata: %v", err)
 	}
@@ -1352,7 +1289,7 @@ func TestAdd_UsesCachedSearchSourceMetadataForGit(t *testing.T) {
 	if _, err := a.Search(ctx, "ripgrep", ""); err != nil {
 		t.Fatalf("Search: %v", err)
 	}
-	if err := a.Add(ctx, "system", "ripgrep", "ripgrep", "work", "brew"); err != nil {
+	if err := a.Add(ctx, "brew", "ripgrep", "ripgrep", "work", ""); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 
@@ -1381,28 +1318,28 @@ func TestSearch_ProviderFilter(t *testing.T) {
 		t.Fatalf("Search: %v", err)
 	}
 	for _, r := range results {
-		if r.Provider != "system" {
-			t.Errorf("got result provider %q, expected system config provider", r.Provider)
+		if r.Provider != "brew" {
+			t.Errorf("got result provider %q, expected brew", r.Provider)
 		}
 	}
 }
 
-func TestSearch_EcosystemProviderFilterUsesConcreteSearcher(t *testing.T) {
+func TestSearch_ConcreteProviderFilterUsesConcreteSearcher(t *testing.T) {
 	pip := &searchStub{
 		stubProvider: stubProvider{name: "pip", available: true},
 		results:      []provider.SearchResult{{Name: "black", Provider: "pip"}},
 	}
 	a, _ := newImportApp(t, pip)
 
-	results, err := a.Search(context.Background(), "black", "python")
+	results, err := a.Search(context.Background(), "black", "pip")
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
 	if len(results) != 1 {
 		t.Fatalf("Search returned %d results, want 1", len(results))
 	}
-	if results[0].Provider != "python" {
-		t.Fatalf("result provider = %q, want python", results[0].Provider)
+	if results[0].Provider != "pip" {
+		t.Fatalf("result provider = %q, want pip", results[0].Provider)
 	}
 }
 
@@ -1523,7 +1460,7 @@ func TestLoadSettings_MissingConfig(t *testing.T) {
 func TestLoadSettings_WithConfig(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Settings: testSettingsWithNodePython("bun", "uv"),
+		Settings: config.Settings{ProviderPriority: []string{"brew", "apt"}},
 	}); err != nil {
 		t.Fatalf("saving config: %v", err)
 	}
@@ -1532,8 +1469,8 @@ func TestLoadSettings_WithConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSettings: %v", err)
 	}
-	if s.EcosystemManager("node") != "bun" || s.EcosystemManager("python") != "uv" {
-		t.Errorf("Settings = %+v, want node=bun python=uv", s)
+	if !slices.Equal(s.ProviderPriority, []string{"brew", "apt"}) {
+		t.Errorf("Settings = %+v, want provider priority brew/apt", s)
 	}
 }
 
@@ -1786,12 +1723,11 @@ func TestInstall_AutoResolveNoneAvailable(t *testing.T) {
 
 func TestInstall_AutoResolveFromSettings(t *testing.T) {
 	brew := &stubProvider{name: "brew", available: true}
-	node := &stubProvider{name: "node", available: true}
-	a, _ := newImportApp(t, brew, node)
+	npm := &stubProvider{name: "npm", available: true}
+	a, _ := newImportApp(t, brew, npm)
 
-	// Configure settings to prefer "node".
-	settings := config.Settings{}
-	settings.SetEcosystemPriority("system", []string{"node", "brew"})
+	// Configure settings to prefer "npm".
+	settings := config.Settings{ProviderPriority: []string{"npm", "brew"}}
 	if err := a.SaveSettings(context.Background(), settings); err != nil {
 		t.Fatalf("SaveSettings: %v", err)
 	}
@@ -1803,18 +1739,17 @@ func TestInstall_AutoResolveFromSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	if len(tools) != 1 || tools[0].Provider != "node" {
-		t.Errorf("DB = %v, want typescript/node", tools)
+	if len(tools) != 1 || tools[0].Provider != "npm" {
+		t.Errorf("DB = %v, want typescript/npm", tools)
 	}
 }
 
 func TestDefaultInstallProviderUsesSettingsPriority(t *testing.T) {
 	brew := &stubProvider{name: "brew", available: true}
-	node := &stubProvider{name: "node", available: true}
-	a, _ := newImportApp(t, brew, node)
+	npm := &stubProvider{name: "npm", available: true}
+	a, _ := newImportApp(t, brew, npm)
 
-	settings := config.Settings{}
-	settings.SetEcosystemPriority("system", []string{"node", "brew"})
+	settings := config.Settings{ProviderPriority: []string{"npm", "brew"}}
 	if err := a.SaveSettings(context.Background(), settings); err != nil {
 		t.Fatalf("SaveSettings: %v", err)
 	}
@@ -1823,16 +1758,15 @@ func TestDefaultInstallProviderUsesSettingsPriority(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DefaultInstallProvider: %v", err)
 	}
-	if got != "node" {
-		t.Fatalf("DefaultInstallProvider = %q, want node", got)
+	if got != "npm" {
+		t.Fatalf("DefaultInstallProvider = %q, want npm", got)
 	}
 }
 
 func TestDefaultInstallProviderNoAvailableProvider(t *testing.T) {
 	a, _ := newImportApp(t)
 
-	settings := config.Settings{}
-	settings.SetEcosystemPriority("system", []string{"__nonexistent__"})
+	settings := config.Settings{ProviderPriority: []string{"__nonexistent__"}}
 	if err := a.SaveSettings(context.Background(), settings); err != nil {
 		t.Fatalf("SaveSettings: %v", err)
 	}
@@ -1840,5 +1774,27 @@ func TestDefaultInstallProviderNoAvailableProvider(t *testing.T) {
 	_, err := a.DefaultInstallProvider(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "no provider available") {
 		t.Fatalf("DefaultInstallProvider err = %v, want no provider available", err)
+	}
+}
+
+func TestDefaultInstallProviderSkipsDisabledProviders(t *testing.T) {
+	brew := &stubProvider{name: "brew", available: true}
+	npm := &stubProvider{name: "npm", available: true}
+	a, _ := newImportApp(t, brew, npm)
+
+	settings := config.Settings{
+		ProviderPriority:  []string{"brew", "npm"},
+		DisabledProviders: []string{"brew"},
+	}
+	if err := a.SaveSettings(context.Background(), settings); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+
+	got, err := a.DefaultInstallProvider(context.Background())
+	if err != nil {
+		t.Fatalf("DefaultInstallProvider: %v", err)
+	}
+	if got != "npm" {
+		t.Fatalf("DefaultInstallProvider = %q, want npm", got)
 	}
 }

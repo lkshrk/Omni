@@ -4,14 +4,14 @@ env PATH=$WORK/bin:$PATH
 exec omni --config settings.json hosts ensure testhost
 stdout 'Host "testhost" ensured.'
 
-exec omni --config settings.json tools set ripgrep --provider system --package ripgrep --install-with brew
+exec omni --config settings.json tools set ripgrep --provider brew --package ripgrep
 stdout 'Set logical tool "ripgrep"'
 exec omni --config settings.json groups move-tool testhost ripgrep
 stdout 'Moved "ripgrep" to group "testhost"'
 
-exec omni --config settings.json tools add fd --provider system --install-with brew --group work
+exec omni --config settings.json tools add fd --provider brew --group work
 stdout 'added fd'
-exec omni --config settings.json tools set typescript --provider node --package typescript --install-with npm
+exec omni --config settings.json tools set typescript --provider npm --package typescript
 stdout 'Set logical tool "typescript"'
 exec omni --config settings.json groups move-tool work typescript
 stdout 'Moved "typescript" to group "work"'
@@ -20,7 +20,7 @@ stdout 'Removed "typescript" from group "work"'
 exec omni --config settings.json groups move-tool testhost typescript
 stdout 'Moved "typescript" to group "testhost"'
 
-exec omni --config settings.json tools set jq --provider system --install-with brew
+exec omni --config settings.json tools set jq --provider brew
 stdout 'Set logical tool "jq"'
 exec omni --config settings.json groups move-tool archive jq
 stdout 'Moved "jq" to group "archive"'
@@ -30,7 +30,7 @@ stdout 'Deleted group "archive"'
 exec omni --config settings.json groups move-tool testhost fd
 stdout 'Moved "fd" to group "testhost"'
 
-exec omni --config settings.json tools set shellcheck --provider system --install-with brew
+exec omni --config settings.json tools set shellcheck --provider brew
 stdout 'Set logical tool "shellcheck"'
 exec omni --config settings.json groups move-tool scratch shellcheck
 stdout 'Moved "shellcheck" to group "scratch"'

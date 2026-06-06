@@ -33,19 +33,6 @@ type ImportedTool struct {
 // Import discovers installed tools and adds them to the config.
 // Tools already declared in any group are skipped.
 func (a *App) Import(ctx context.Context, opts ImportOptions) (*ImportResult, error) {
-	// When doing a full import (no explicit provider filter), build a reverse map
-	// from concrete provider name → ecosystem provider name so that tools found
-	// by e.g. "brew" are written into config as "system" when system→brew is
-	// the delegation.
-	resolvedEcosystems := a.ResolvedEcosystemProviders(ctx)
-	var revEcosystem map[string]string
-	if opts.Provider == "" {
-		revEcosystem = make(map[string]string)
-		for eco, concrete := range resolvedEcosystems {
-			revEcosystem[concrete] = eco
-		}
-	}
-
 	skipEcosystem := make(map[string]bool, len(opts.SkipEcosystemProviders))
 	for _, s := range opts.SkipEcosystemProviders {
 		skipEcosystem[s] = true
@@ -95,6 +82,9 @@ func (a *App) Import(ctx context.Context, opts ImportOptions) (*ImportResult, er
 			if opts.Provider != "" && p.Name() != opts.Provider {
 				return nil
 			}
+			if a.knownEcosystemProvider(p.Name()) {
+				return nil
+			}
 			installed, err := p.ListInstalled(ctx)
 			if err != nil {
 				return fmt.Errorf("listing %s: %w", p.Name(), err)
@@ -107,12 +97,6 @@ func (a *App) Import(ctx context.Context, opts ImportOptions) (*ImportResult, er
 			}
 			for _, t := range installed {
 				configProvider := a.searchResultConfigProvider(p.Name())
-				if revEcosystem != nil {
-					if eco, ok := revEcosystem[p.Name()]; ok {
-						configProvider = eco
-					}
-				}
-				installWith := configInstallWithForConcreteProvider(configProvider, p.Name(), resolvedEcosystems)
 				if skipEcosystem[configProvider] {
 					continue
 				}
@@ -136,9 +120,16 @@ func (a *App) Import(ctx context.Context, opts ImportOptions) (*ImportResult, er
 						cfg.Tools = make(map[string]config.ToolSpec)
 					}
 					spec := cfg.Tools[t.Name]
-					spec.Provider = configProvider
-					spec.InstallWith = installWith
-					metadataEntry := config.ToolEntry{Name: t.Name, Provider: configProvider, Package: t.Package}
+					providerName := configProvider
+					spec.Providers = upsertToolProvider(spec.Providers, config.ToolInstallSpec{
+						Provider: providerName,
+						Package:  t.Package,
+					})
+					spec.Provider = ""
+					spec.Package = ""
+					spec.InstallWith = ""
+					spec.Options = nil
+					metadataEntry := config.ToolEntry{Name: t.Name, Provider: providerName, Package: t.Package}
 					if entry, ok := provider.LookupInstalledMetadata(metadata, toolEntryLookupKeys(metadataEntry)); ok {
 						if git := gitURLFromSourceMetadata(entry.Source); git != "" {
 							spec.Git = git

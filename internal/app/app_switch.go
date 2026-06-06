@@ -86,10 +86,15 @@ func (a *App) Switch(ctx context.Context, name, fromProvider, toProvider string)
 			}
 		}
 
-		spec.Provider = targetProvider
-		spec.Package = pkg
-		spec.InstallWith = targetInstallWith
-		spec.Options = install.Options
+		spec.Providers = upsertToolProviderFirst(spec.Providers, config.ToolInstallSpec{
+			Provider: targetProvider,
+			Package:  pkg,
+			Options:  cloneOptionMap(install.Options),
+		})
+		spec.Provider = ""
+		spec.Package = ""
+		spec.InstallWith = ""
+		spec.Options = nil
 		cfg.Tools[name] = spec
 		return nil
 	})
@@ -455,6 +460,15 @@ func (a *App) restoreToolSpecSnapshot(name string, spec config.ToolSpec, found b
 }
 
 func (a *App) providerRepairTarget(ctx context.Context, name, configProv string) (providerRepairTarget, error) {
+	configuredProvider := configProv
+	if configuredProvider == "" {
+		if cfg, err := a.loadConfig(); err == nil {
+			if spec, ok := cfg.Tools[name]; ok {
+				install := a.resolveInstallSpec(ctx, name, spec)
+				configuredProvider = install.Provider
+			}
+		}
+	}
 	tools, err := a.ListTools(ctx, "")
 	if err != nil {
 		return providerRepairTarget{}, fmt.Errorf("listing tools: %w", err)
@@ -464,16 +478,27 @@ func (a *App) providerRepairTarget(ctx context.Context, name, configProv string)
 		if t.Name != name {
 			continue
 		}
-		if configProv != "" && t.Provider != configProv {
+		if configuredProvider != "" && t.Provider != configuredProvider {
 			continue
 		}
 		matches = append(matches, t)
 	}
 	if len(matches) == 0 {
-		if configProv != "" {
-			return providerRepairTarget{}, fmt.Errorf("tool %q with provider %q not found in cache", name, configProv)
+		raw, err := a.readDB().List(ctx)
+		if err != nil {
+			return providerRepairTarget{}, fmt.Errorf("listing raw cached tools: %w", err)
 		}
-		return providerRepairTarget{}, fmt.Errorf("tool %q not found in cache", name)
+		for _, t := range raw {
+			if t.Name == name && t.Installed {
+				matches = append(matches, t)
+			}
+		}
+		if len(matches) == 0 {
+			if configuredProvider != "" {
+				return providerRepairTarget{}, fmt.Errorf("tool %q with provider %q not found in cache", name, configuredProvider)
+			}
+			return providerRepairTarget{}, fmt.Errorf("tool %q not found in cache", name)
+		}
 	}
 	if len(matches) > 1 {
 		return providerRepairTarget{}, fmt.Errorf("tool %q has multiple cached providers; pass --provider to choose one", name)
@@ -482,7 +507,11 @@ func (a *App) providerRepairTarget(ctx context.Context, name, configProv string)
 	if t.InstalledWith == "" {
 		return providerRepairTarget{}, fmt.Errorf("installed provider for %q is unknown; refresh installed state first", name)
 	}
-	return providerRepairTarget{name: t.Name, configProv: t.Provider, installedWith: t.InstalledWith}, nil
+	targetProvider := configuredProvider
+	if targetProvider == "" {
+		targetProvider = t.Provider
+	}
+	return providerRepairTarget{name: t.Name, configProv: targetProvider, installedWith: t.InstalledWith}, nil
 }
 
 // migrateWrongProvider handles the syncWrongProv scenario: the tool is in config

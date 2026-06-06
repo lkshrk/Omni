@@ -1,16 +1,16 @@
 # omni tools upgrade --all applies missing-metadata quarantine across providers
-exec omni-seed-cache apt-tool system apt-tool 1.0.0 2.0.0 apt
-exec omni-seed-cache apk-tool system apk-tool 1.0.0 2.0.0 apk
-exec omni-seed-cache brew-tool system brew-tool 1.0.0 2.0.0 brew
-exec omni-seed-cache dnf-tool system dnf-tool 1.0.0 2.0.0 dnf
-exec omni-seed-cache pacman-tool system pacman-tool 1.0.0 2.0.0 pacman
-exec omni-seed-cache zypper-tool system zypper-tool 1.0.0 2.0.0 zypper
-exec omni-seed-cache bun-tool node bun-tool 1.0.0 2.0.0 bun
-exec omni-seed-cache npm-tool node npm-tool 1.0.0 2.0.0 npm
-exec omni-seed-cache pnpm-tool node pnpm-tool 1.0.0 2.0.0 pnpm
-exec omni-seed-cache uv-tool python uv-tool 1.0.0 2.0.0 uv
-exec omni-seed-cache pip3-tool python pip3-tool 1.0.0 2.0.0 pip3
-exec omni-seed-cache pip-tool python pip-tool 1.0.0 2.0.0 pip
+exec omni-seed-cache apt-tool apt apt-tool 1.0.0 2.0.0 apt
+exec omni-seed-cache apk-tool apk apk-tool 1.0.0 2.0.0 apk
+exec omni-seed-cache brew-tool brew brew-tool 1.0.0 2.0.0 brew
+exec omni-seed-cache dnf-tool dnf dnf-tool 1.0.0 2.0.0 dnf
+exec omni-seed-cache pacman-tool pacman pacman-tool 1.0.0 2.0.0 pacman
+exec omni-seed-cache zypper-tool zypper zypper-tool 1.0.0 2.0.0 zypper
+exec omni-seed-cache bun-tool bun bun-tool 1.0.0 2.0.0 bun
+exec omni-seed-cache npm-tool npm npm-tool 1.0.0 2.0.0 npm
+exec omni-seed-cache pnpm-tool pnpm pnpm-tool 1.0.0 2.0.0 pnpm
+exec omni-seed-cache uv-tool uv uv-tool 1.0.0 2.0.0 uv
+exec omni-seed-cache pip3-tool pip pip3-tool 1.0.0 2.0.0 pip3
+exec omni-seed-cache pip-tool pip pip-tool 1.0.0 2.0.0 pip
 exec omni-mark-outdated-refresh-fresh
 
 exec omni --config settings.json tools list --state blocked-metadata --format json
@@ -28,39 +28,40 @@ stdout '"name":"pip3-tool"'
 stdout '"name":"pip-tool"'
 
 exec omni --config settings.json tools upgrade --all
-stdout 'skipped: apt-tool \(2.0.0\) \(system\): update quarantined'
-stdout 'skipped: apk-tool \(2.0.0\) \(system\): update quarantined'
-stdout 'skipped: brew-tool \(2.0.0\) \(system\): update quarantined'
-stdout 'skipped: dnf-tool \(2.0.0\) \(system\): update quarantined'
-stdout 'skipped: pacman-tool \(2.0.0\) \(system\): update quarantined'
-stdout 'skipped: zypper-tool \(2.0.0\) \(system\): update quarantined'
-stdout 'skipped: bun-tool \(2.0.0\) \(node\): update quarantined'
-stdout 'skipped: npm-tool \(2.0.0\) \(node\): update quarantined'
-stdout 'skipped: pnpm-tool \(2.0.0\) \(node\): update quarantined'
-stdout 'skipped: uv-tool \(2.0.0\) \(python\): update quarantined'
-stdout 'skipped: pip3-tool \(2.0.0\) \(python\): update quarantined'
-stdout 'skipped: pip-tool \(2.0.0\) \(python\): update quarantined'
+stdout 'skipped: apt-tool \(2.0.0\) \(apt\): update quarantined'
+stdout 'skipped: apk-tool \(2.0.0\) \(apk\): update quarantined'
+stdout 'skipped: brew-tool \(2.0.0\) \(brew\): update quarantined'
+stdout 'skipped: dnf-tool \(2.0.0\) \(dnf\): update quarantined'
+stdout 'skipped: pacman-tool \(2.0.0\) \(pacman\): update quarantined'
+stdout 'skipped: zypper-tool \(2.0.0\) \(zypper\): update quarantined'
+stdout 'skipped: bun-tool \(2.0.0\) \(bun\): update quarantined'
+stdout 'skipped: npm-tool \(2.0.0\) \(npm\): update quarantined'
+stdout 'skipped: pnpm-tool \(2.0.0\) \(pnpm\): update quarantined'
+stdout 'skipped: uv-tool \(2.0.0\) \(uv\): update quarantined'
+stdout 'skipped: pip3-tool \(2.0.0\) \(pip\): update quarantined'
+stdout 'skipped: pip-tool \(2.0.0\) \(pip\): update quarantined'
 stdout '12 updates quarantined\.'
 
 -- settings.json --
 {
+  "version": 6,
   "settings": {
     "update_quarantine": "2d"
   },
   "hosts": { "testhost": [] },
   "tools": {
-    "apt-tool": { "provider": "system", "install_with": "apt" },
-    "apk-tool": { "provider": "system", "install_with": "apk" },
-    "brew-tool": { "provider": "system", "install_with": "brew" },
-    "dnf-tool": { "provider": "system", "install_with": "dnf" },
-    "pacman-tool": { "provider": "system", "install_with": "pacman" },
-    "zypper-tool": { "provider": "system", "install_with": "zypper" },
-    "bun-tool": { "provider": "node", "install_with": "bun" },
-    "npm-tool": { "provider": "node", "install_with": "npm" },
-    "pnpm-tool": { "provider": "node", "install_with": "pnpm" },
-    "uv-tool": { "provider": "python", "install_with": "uv" },
-    "pip3-tool": { "provider": "python", "install_with": "pip3" },
-    "pip-tool": { "provider": "python", "install_with": "pip" }
+    "apt-tool": { "providers": [{ "provider": "apt" }] },
+    "apk-tool": { "providers": [{ "provider": "apk" }] },
+    "brew-tool": { "providers": [{ "provider": "brew" }] },
+    "dnf-tool": { "providers": [{ "provider": "dnf" }] },
+    "pacman-tool": { "providers": [{ "provider": "pacman" }] },
+    "zypper-tool": { "providers": [{ "provider": "zypper" }] },
+    "bun-tool": { "providers": [{ "provider": "bun" }] },
+    "npm-tool": { "providers": [{ "provider": "npm" }] },
+    "pnpm-tool": { "providers": [{ "provider": "pnpm" }] },
+    "uv-tool": { "providers": [{ "provider": "uv" }] },
+    "pip3-tool": { "providers": [{ "provider": "pip" }] },
+    "pip-tool": { "providers": [{ "provider": "pip" }] }
   },
   "groups": [
     {

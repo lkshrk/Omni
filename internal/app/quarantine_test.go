@@ -31,8 +31,8 @@ func TestQueryTools_ClassifiesQuarantinedAndMetadataBlockedUpdates(t *testing.T)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Settings: config.Settings{UpdateQuarantine: "2d"},
 		Tools: logicalToolSpecs(
-			logicalTool("ripgrep", "system"),
-			logicalTool("fd", "system"),
+			logicalTool("ripgrep", "brew"),
+			logicalTool("fd", "brew"),
 		),
 		Groups: []*config.GroupConfig{{Name: "testhost", Special: "host", Tools: groupTools("ripgrep", "fd")}},
 		Hosts:  map[string][]string{"testhost": {}},
@@ -40,17 +40,17 @@ func TestQueryTools_ClassifiesQuarantinedAndMetadataBlockedUpdates(t *testing.T)
 		t.Fatalf("config.Save: %v", err)
 	}
 	for _, row := range []*database.ToolCache{
-		{Name: "ripgrep", Provider: "system", Package: "ripgrep", InstalledWith: "brew", Installed: true, Tracked: true},
-		{Name: "fd", Provider: "system", Package: "fd", InstalledWith: "brew", Installed: true, Tracked: true},
+		{Name: "ripgrep", Provider: "brew", Package: "ripgrep", InstalledWith: "brew", Installed: true, Tracked: true},
+		{Name: "fd", Provider: "brew", Package: "fd", InstalledWith: "brew", Installed: true, Tracked: true},
 	} {
 		if err := a.DB().Upsert(ctx, row); err != nil {
 			t.Fatalf("seed %s: %v", row.Name, err)
 		}
 	}
-	if err := a.DB().UpdateOutdated(ctx, "ripgrep", "system", "ripgrep", true, "15.0.0"); err != nil {
+	if err := a.DB().UpdateOutdated(ctx, "ripgrep", "brew", "ripgrep", true, "15.0.0"); err != nil {
 		t.Fatalf("outdated ripgrep: %v", err)
 	}
-	if err := a.DB().UpdateOutdated(ctx, "fd", "system", "fd", true, "10.0.0"); err != nil {
+	if err := a.DB().UpdateOutdated(ctx, "fd", "brew", "fd", true, "10.0.0"); err != nil {
 		t.Fatalf("outdated fd: %v", err)
 	}
 	if err := a.DB().UpsertUpdateMetadata(ctx, database.UpdateMetadata{
@@ -91,16 +91,15 @@ func TestQueryTools_UpdateQuarantinePolicyPrecedence(t *testing.T) {
 		Settings: config.Settings{
 			UpdateQuarantine: "2d",
 			ProviderUpdateQuarantine: map[string]string{
-				"brew":   "1d",
-				"system": "5d",
-				"node":   "5d",
+				"brew": "1d",
+				"npm":  "5d",
 			},
 		},
 		Tools: logicalToolSpecs(
-			logicalTool("concrete-wins", "system"),
-			logicalTool("tool-duration-wins", "system"),
-			logicalTool("tool-exempt-wins", "system"),
-			logicalTool("logical-provider-wins", "node"),
+			logicalTool("concrete-wins", "brew"),
+			logicalTool("tool-duration-wins", "brew"),
+			logicalTool("tool-exempt-wins", "brew"),
+			logicalTool("logical-provider-wins", "npm"),
 			logicalTool("global-applies", "pip"),
 		),
 		Groups: []*config.GroupConfig{{Name: "testhost", Special: "host", Tools: groupTools(
@@ -122,10 +121,10 @@ func TestQueryTools_UpdateQuarantinePolicyPrecedence(t *testing.T) {
 	}
 
 	for _, row := range []*database.ToolCache{
-		{Name: "concrete-wins", Provider: "system", Package: "concrete-wins", InstalledWith: "brew", Installed: true, Tracked: true},
-		{Name: "tool-duration-wins", Provider: "system", Package: "tool-duration-wins", InstalledWith: "brew", Installed: true, Tracked: true},
-		{Name: "tool-exempt-wins", Provider: "system", Package: "tool-exempt-wins", InstalledWith: "brew", Installed: true, Tracked: true},
-		{Name: "logical-provider-wins", Provider: "node", Package: "logical-provider-wins", Installed: true, Tracked: true},
+		{Name: "concrete-wins", Provider: "brew", Package: "concrete-wins", InstalledWith: "brew", Installed: true, Tracked: true},
+		{Name: "tool-duration-wins", Provider: "brew", Package: "tool-duration-wins", InstalledWith: "brew", Installed: true, Tracked: true},
+		{Name: "tool-exempt-wins", Provider: "brew", Package: "tool-exempt-wins", InstalledWith: "brew", Installed: true, Tracked: true},
+		{Name: "logical-provider-wins", Provider: "npm", Package: "logical-provider-wins", Installed: true, Tracked: true},
 		{Name: "global-applies", Provider: "pip", Package: "global-applies", Installed: true, Tracked: true},
 	} {
 		if err := a.DB().Upsert(ctx, row); err != nil {
@@ -212,7 +211,7 @@ func TestUpgrade_BlocksQuarantinedToolUnlessForced(t *testing.T) {
 	}
 	if err := a.DB().Upsert(ctx, &database.ToolCache{
 		Name:          "ripgrep",
-		Provider:      "system",
+		Provider:      "brew",
 		Package:       "ripgrep",
 		Installed:     true,
 		InstalledWith: "brew",
@@ -220,7 +219,7 @@ func TestUpgrade_BlocksQuarantinedToolUnlessForced(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed tool: %v", err)
 	}
-	if err := a.DB().UpdateOutdated(ctx, "ripgrep", "system", "ripgrep", true, "15.0.0"); err != nil {
+	if err := a.DB().UpdateOutdated(ctx, "ripgrep", "brew", "ripgrep", true, "15.0.0"); err != nil {
 		t.Fatalf("outdated ripgrep: %v", err)
 	}
 	if err := a.DB().UpsertUpdateMetadata(ctx, database.UpdateMetadata{
@@ -264,7 +263,7 @@ func TestUpgradeAll_SkipsQuarantinedUpdatesWithoutError(t *testing.T) {
 	}
 	if err := a.DB().Upsert(ctx, &database.ToolCache{
 		Name:          "ripgrep",
-		Provider:      "system",
+		Provider:      "brew",
 		Package:       "ripgrep",
 		Installed:     true,
 		InstalledWith: "brew",
@@ -272,7 +271,7 @@ func TestUpgradeAll_SkipsQuarantinedUpdatesWithoutError(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("seed tool: %v", err)
 	}
-	if err := a.DB().UpdateOutdated(ctx, "ripgrep", "system", "ripgrep", true, "15.0.0"); err != nil {
+	if err := a.DB().UpdateOutdated(ctx, "ripgrep", "brew", "ripgrep", true, "15.0.0"); err != nil {
 		t.Fatalf("outdated ripgrep: %v", err)
 	}
 	if err := a.DB().UpsertUpdateMetadata(ctx, database.UpdateMetadata{

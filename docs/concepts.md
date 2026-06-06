@@ -8,9 +8,9 @@ package manager that installs it.
 ```json
 {
   "tools": {
-    "typescript": { "provider": "node", "package": "typescript" },
-    "black": { "provider": "python" },
-    "ripgrep": { "provider": "system" }
+    "typescript": { "providers": [{ "provider": "npm", "package": "typescript" }] },
+    "black": { "providers": [{ "provider": "pip" }] },
+    "ripgrep": { "providers": [{ "provider": "brew" }] }
   }
 }
 ```
@@ -18,25 +18,21 @@ package manager that installs it.
 Groups reference logical tool names. Omni resolves each logical tool to an
 install spec when it syncs a host.
 
-## Ecosystem Providers
+## Providers
 
-Ecosystem providers are portable identities:
-
-- `system`
-- `node`
-- `python`
-
-Concrete managers are the actual package managers:
+Providers are the package managers or registries that install a tool:
 
 - `brew`, `apt`, `apk`, `dnf`, `pacman`, `zypper`
 - `bun`, `pnpm`, `npm`
-- `uv`, `pip3`
+- `uv`, `pip`
 
-Prefer ecosystem providers in config. Use `install_with` only when one tool
-must use a specific concrete manager.
+Each logical tool stores one or more concrete provider candidates in
+`providers[]`. The first entry is the default for normal install/sync. Search
+and bootstrap flows can discover candidates from configured providers and add
+high-confidence matches to this list.
 
-See [Providers](providers.md) for concrete resolution order, manager defaults,
-import normalization, and `install_with` decision rules.
+See [Providers](providers.md) for provider priority, import behavior, fallback,
+and concrete ownership rules.
 
 ## Groups
 
@@ -56,8 +52,8 @@ for machine-specific tools and dotfiles.
 ## Hosts
 
 The active host is the short hostname, or `OMNI_HOSTNAME` when set. Host
-settings can override manager choices, disabled providers, and the dotfiles repo
-without changing global config for every machine.
+settings can override provider priority, disabled providers, and the dotfiles
+repo without changing global config for every machine.
 
 ## Dot Entries
 

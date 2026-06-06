@@ -5101,46 +5101,6 @@ func TestInlineDetailLines_RowActionErrorShowsProviderSolution(t *testing.T) {
 	}
 }
 
-func TestHandleListActionKey_ApplyProviderSolutionStartsConsolidate(t *testing.T) {
-	a, _ := newCmdApp(t, &okProvider{name: "python"}, []tuiFixtureTool{tuiTool("pip", "pip3")})
-	tool := &database.ToolCache{Name: "pip", Provider: "python", Installed: true, Outdated: true, Tracked: true}
-	m := modelForCmds(a)
-	m.allTools = []*database.ToolCache{tool}
-	m.visibleTools = m.allTools
-	m.applyFilter()
-	err := provider.NewExternallyManagedPythonError("pip3", "upgrade", provider.Tool{Name: "pip", Provider: "python"}, nil, "", []provider.ErrorSolution{
-		{
-			Label:          "Reinstall this tool with uv",
-			Command:        "omni switch pip --from python --to uv",
-			Action:         provider.ErrorSolutionActionSwitchProvider,
-			TargetProvider: "uv",
-		},
-	})
-	m.setToolActionError(toolKey("pip", "python"), err.Error(), err)
-
-	cmds := m.handleListActionKeyMsg(pressRune('a').(tea.KeyPressMsg))
-	if len(cmds) == 0 {
-		t.Fatal("apply provider solution should return a command")
-	}
-	if !m.loading {
-		t.Fatal("apply provider solution should set loading")
-	}
-	if m.rowOpKey != toolKey("pip", "python") || !strings.Contains(m.rowOpStatus, "Applying fix") {
-		t.Fatalf("row operation = (%q, %q), want apply-fix status on selected row", m.rowOpKey, m.rowOpStatus)
-	}
-	msg := cmds[len(cmds)-1]()
-	done, ok := msg.(opCompleteMsg)
-	if !ok {
-		t.Fatalf("apply provider solution command returned %T, want opCompleteMsg", msg)
-	}
-	if done.err != nil {
-		t.Fatalf("apply provider solution command failed: %v", done.err)
-	}
-	if done.message != "reinstalled pip with uv" {
-		t.Fatalf("apply provider solution message = %q, want single-tool uv reinstall", done.message)
-	}
-}
-
 func TestRenderList_BulkPendingUsesWaitingIcon(t *testing.T) {
 	tool := &database.ToolCache{Name: "curl", Provider: "brew", Installed: true, Outdated: true, Tracked: true}
 	m := baseModel([]*database.ToolCache{tool})

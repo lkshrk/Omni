@@ -29,8 +29,8 @@ func TestRefreshOutdated_GitHubFallbackMarksOutdatedFromLatestRelease(t *testing
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"gh": {
-				Provider: "system",
-				Fallback: githubFallbackSpec("v2.92.0", "2026-05-01T00:00:00Z", asset),
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
+				Fallback:  githubFallbackSpec("v2.92.0", "2026-05-01T00:00:00Z", asset),
 			},
 		},
 		Groups: []*config.GroupConfig{{Tools: groupTools("gh")}},
@@ -60,8 +60,8 @@ func TestRefreshOutdated_GitHubFallbackClearsOutdatedWhenLatestNotNewer(t *testi
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"gh": {
-				Provider: "system",
-				Fallback: githubFallbackSpec("v2.93.0", "2026-05-27T17:47:41Z", asset),
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
+				Fallback:  githubFallbackSpec("v2.93.0", "2026-05-27T17:47:41Z", asset),
 			},
 		},
 		Groups: []*config.GroupConfig{{Tools: groupTools("gh")}},
@@ -91,8 +91,8 @@ func TestRefreshOutdated_GitHubFallbackSkipsLatestReleaseWithoutCurrentPlatformA
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"gh": {
-				Provider: "system",
-				Fallback: githubFallbackSpec("v2.93.0", "2026-05-27T17:47:41Z", asset),
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
+				Fallback:  githubFallbackSpec("v2.93.0", "2026-05-27T17:47:41Z", asset),
 			},
 		},
 		Groups: []*config.GroupConfig{{Tools: groupTools("gh")}},
@@ -122,8 +122,8 @@ func TestRefreshOutdated_GitHubFallbackSkipsIncompleteReleaseMetadata(t *testing
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"gh": {
-				Provider: "system",
-				Fallback: githubFallbackSpec("", "", currentPlatformGitHubCLIAsset(t)),
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
+				Fallback:  githubFallbackSpec("", "", currentPlatformGitHubCLIAsset(t)),
 			},
 		},
 		Groups: []*config.GroupConfig{{Tools: groupTools("gh")}},
@@ -156,8 +156,8 @@ func TestRefreshOutdated_GitHubFallbackIgnoresNativeOwnedRows(t *testing.T) {
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"gh": {
-				Provider: "system",
-				Fallback: githubFallbackSpec("v2.92.0", "2026-05-01T00:00:00Z", currentPlatformGitHubCLIAsset(t)),
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
+				Fallback:  githubFallbackSpec("v2.92.0", "2026-05-01T00:00:00Z", currentPlatformGitHubCLIAsset(t)),
 			},
 		},
 		Groups: []*config.GroupConfig{{Tools: groupTools("gh")}},
@@ -166,7 +166,7 @@ func TestRefreshOutdated_GitHubFallbackIgnoresNativeOwnedRows(t *testing.T) {
 	}
 	if err := a.DB().Upsert(ctx, &database.ToolCache{
 		Name:          "gh",
-		Provider:      "system",
+		Provider:      "apt",
 		Package:       "gh",
 		Installed:     true,
 		InstalledWith: "brew",
@@ -198,8 +198,8 @@ func TestRefreshProviderOutdated_GitHubFallbackMarksOutdatedFromLatestRelease(t 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"gh": {
-				Provider: "system",
-				Fallback: githubFallbackSpec("v2.92.0", "2026-05-01T00:00:00Z", asset),
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
+				Fallback:  githubFallbackSpec("v2.92.0", "2026-05-01T00:00:00Z", asset),
 			},
 		},
 		Groups: []*config.GroupConfig{{Tools: groupTools("gh")}},
@@ -208,7 +208,7 @@ func TestRefreshProviderOutdated_GitHubFallbackMarksOutdatedFromLatestRelease(t 
 	}
 	seedGitHubFallbackCacheRow(t, a.DB(), false)
 
-	if err := a.RefreshProviderOutdated(ctx, "system", false); err != nil {
+	if err := a.RefreshProviderOutdated(ctx, "apt", false); err != nil {
 		t.Fatalf("RefreshProviderOutdated: %v", err)
 	}
 
@@ -244,7 +244,7 @@ func seedGitHubFallbackCacheRow(t *testing.T, db *database.DB, outdated bool) {
 	t.Helper()
 	if err := db.Upsert(context.Background(), &database.ToolCache{
 		Name:          "gh",
-		Provider:      "system",
+		Provider:      "apt",
 		Package:       "gh",
 		Installed:     true,
 		InstalledWith: "gh",
@@ -254,7 +254,7 @@ func seedGitHubFallbackCacheRow(t *testing.T, db *database.DB, outdated bool) {
 		t.Fatalf("seed cache: %v", err)
 	}
 	if outdated {
-		if err := db.UpdateOutdated(context.Background(), "gh", "system", "gh", true, "old"); err != nil {
+		if err := db.UpdateOutdated(context.Background(), "gh", "apt", "gh", true, "old"); err != nil {
 			t.Fatalf("seed outdated state: %v", err)
 		}
 	}
@@ -262,7 +262,7 @@ func seedGitHubFallbackCacheRow(t *testing.T, db *database.DB, outdated bool) {
 
 func assertGitHubFallbackOutdated(t *testing.T, db *database.DB, wantOutdated bool, wantLatest string) {
 	t.Helper()
-	got, err := db.Get(context.Background(), "gh", "system", "gh")
+	got, err := db.Get(context.Background(), "gh", "apt", "gh")
 	if err != nil {
 		t.Fatalf("Get gh: %v", err)
 	}
