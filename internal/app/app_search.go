@@ -328,14 +328,14 @@ func refreshContextErr(ctx context.Context, err error) error {
 	return ctx.Err()
 }
 
-func (a *App) refreshWithCachedOwner(ctx context.Context, t config.ToolEntry, keys []string, owner string, installedMaps map[string]map[string]string, metadataMaps map[string]map[string]provider.InstalledMetadata) (*database.ToolCache, bool) {
+func (a *App) refreshWithCachedOwner(ctx context.Context, t config.ToolEntry, keys []string, owner string, installedMaps map[string]map[string]string, metadataMaps map[string]map[string]provider.InstalledMetadata) (*database.ToolCache, *database.MetadataUpdate, bool) {
 	ownerProv, ok := a.registry.Get(owner)
 	if !ok {
-		return nil, false
+		return nil, nil, false
 	}
 	available, err := ownerProv.Available(ctx)
 	if err != nil || !available {
-		return nil, true
+		return nil, nil, true
 	}
 	var (
 		installed bool
@@ -344,13 +344,13 @@ func (a *App) refreshWithCachedOwner(ctx context.Context, t config.ToolEntry, ke
 	if metadataMaps != nil {
 		if m, ok := metadataMaps[owner]; ok {
 			entry, installed := provider.LookupInstalledMetadata(m, keys)
-			return installedOwnerUpsertWithMetadata(t, owner, installed, entry), true
+			return installedOwnerUpsertWithMetadata(t, owner, installed, entry), installedSourceMetadataUpdatePtr(t, entry), true
 		}
 	}
 	if installedMaps != nil {
 		if m, ok := installedMaps[owner]; ok {
 			ver, installed = provider.LookupString(m, keys)
-			return installedOwnerUpsert(t, owner, installed, ver), true
+			return installedOwnerUpsert(t, owner, installed, ver), nil, true
 		}
 	}
 	if mbc, ok := ownerProv.(provider.MetadataBulkChecker); ok {
@@ -359,7 +359,7 @@ func (a *App) refreshWithCachedOwner(ctx context.Context, t config.ToolEntry, ke
 				metadataMaps[owner] = m
 			}
 			entry, installed := provider.LookupInstalledMetadata(m, keys)
-			return installedOwnerUpsertWithMetadata(t, owner, installed, entry), true
+			return installedOwnerUpsertWithMetadata(t, owner, installed, entry), installedSourceMetadataUpdatePtr(t, entry), true
 		}
 	}
 	if bc, ok := ownerProv.(provider.BulkChecker); ok {
@@ -368,15 +368,15 @@ func (a *App) refreshWithCachedOwner(ctx context.Context, t config.ToolEntry, ke
 				installedMaps[owner] = m
 			}
 			ver, installed = provider.LookupString(m, keys)
-			return installedOwnerUpsert(t, owner, installed, ver), true
+			return installedOwnerUpsert(t, owner, installed, ver), nil, true
 		}
 	}
 	tool := provider.Tool{Name: t.Name, Provider: owner, Package: t.EffectivePackage(), Options: t.Options}
 	installed, ver, err = ownerProv.IsInstalled(ctx, tool)
 	if err != nil {
-		return nil, true
+		return nil, nil, true
 	}
-	return installedOwnerUpsert(t, owner, installed, ver), true
+	return installedOwnerUpsert(t, owner, installed, ver), nil, true
 }
 
 func installedOwnerUpsert(t config.ToolEntry, owner string, installed bool, ver string) *database.ToolCache {
@@ -429,6 +429,14 @@ func installedSourceMetadataUpdate(t config.ToolEntry, entry provider.InstalledM
 		SourceRepo:  strings.TrimSpace(entry.Source.Repo),
 		SourceURL:   strings.TrimSpace(entry.Source.URL),
 	}, true
+}
+
+func installedSourceMetadataUpdatePtr(t config.ToolEntry, entry provider.InstalledMetadata) *database.MetadataUpdate {
+	update, ok := installedSourceMetadataUpdate(t, entry)
+	if !ok {
+		return nil
+	}
+	return &update
 }
 
 func installedMapFromMetadata(metadata map[string]provider.InstalledMetadata) map[string]string {
@@ -621,11 +629,14 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 
 		opProvider := a.operationProviderName(t)
 		if owner := cachedOwners[resolvedToolKey(t)]; owner != "" && owner != opProvider && t.InstallWith == "" {
-			if upsert, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, installedMaps, metadataMaps); handled {
+			if upsert, metadataUpdate, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, installedMaps, metadataMaps); handled {
 				if upsert == nil {
 					continue
 				}
 				upserts = append(upserts, upsert)
+				if metadataUpdate != nil {
+					metadataUpdates = append(metadataUpdates, *metadataUpdate)
+				}
 				continue
 			}
 		}
@@ -704,6 +715,10 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 	if err := a.readDB().UpsertMetadataBatch(writeCtx, metadataUpdates); err != nil {
 		stop()
 		return fmt.Errorf("upserting installed metadata: %w", err)
+	}
+	if err := a.enrichToolGitFromMetadataUpdates(writeCtx, metadataUpdates); err != nil {
+		stop()
+		return fmt.Errorf("updating tool git metadata: %w", err)
 	}
 	if err := a.reconcileResolvedTools(writeCtx, tools); err != nil {
 		stop()
@@ -864,6 +879,9 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 		if err := a.readDB().UpsertMetadataBatch(writeCtx, metadataUpdates); err != nil {
 			return fmt.Errorf("upserting metadata for %s: %w", provName, err)
 		}
+		if err := a.enrichToolGitFromMetadataUpdates(writeCtx, metadataUpdates); err != nil {
+			return fmt.Errorf("updating tool git metadata for %s: %w", provName, err)
+		}
 		return nil
 	}
 	ownerInstalledMaps := make(map[string]map[string]string)
@@ -878,11 +896,14 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 			emitTool(i, t)
 			keys := toolEntryLookupKeys(t)
 			if owner := cachedOwners[resolvedToolKey(t)]; owner != "" && owner != provName && t.InstallWith == "" {
-				if upsert, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, ownerInstalledMaps, ownerMetadataMaps); handled {
+				if upsert, metadataUpdate, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, ownerInstalledMaps, ownerMetadataMaps); handled {
 					if upsert == nil {
 						continue
 					}
 					upserts = append(upserts, upsert)
+					if metadataUpdate != nil {
+						metadataUpdates = append(metadataUpdates, *metadataUpdate)
+					}
 					continue
 				}
 			}
@@ -939,11 +960,14 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 				emitTool(i, t)
 				keys := toolEntryLookupKeys(t)
 				if owner := cachedOwners[resolvedToolKey(t)]; owner != "" && owner != provName && t.InstallWith == "" {
-					if upsert, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, ownerInstalledMaps, ownerMetadataMaps); handled {
+					if upsert, metadataUpdate, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, ownerInstalledMaps, ownerMetadataMaps); handled {
 						if upsert == nil {
 							continue
 						}
 						upserts = append(upserts, upsert)
+						if metadataUpdate != nil {
+							metadataUpdates = append(metadataUpdates, *metadataUpdate)
+						}
 						continue
 					}
 				}
@@ -987,11 +1011,14 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 				emitTool(i, t)
 				keys := toolEntryLookupKeys(t)
 				if owner := cachedOwners[resolvedToolKey(t)]; owner != "" && owner != provName && t.InstallWith == "" {
-					if upsert, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, ownerInstalledMaps, ownerMetadataMaps); handled {
+					if upsert, metadataUpdate, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, ownerInstalledMaps, ownerMetadataMaps); handled {
 						if upsert == nil {
 							continue
 						}
 						upserts = append(upserts, upsert)
+						if metadataUpdate != nil {
+							metadataUpdates = append(metadataUpdates, *metadataUpdate)
+						}
 						continue
 					}
 				}
@@ -1018,11 +1045,14 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 	for i, t := range provTools {
 		emitTool(i, t)
 		if owner := cachedOwners[resolvedToolKey(t)]; owner != "" && owner != provName && t.InstallWith == "" {
-			if upsert, handled := a.refreshWithCachedOwner(ctx, t, toolEntryLookupKeys(t), owner, ownerInstalledMaps, ownerMetadataMaps); handled {
+			if upsert, metadataUpdate, handled := a.refreshWithCachedOwner(ctx, t, toolEntryLookupKeys(t), owner, ownerInstalledMaps, ownerMetadataMaps); handled {
 				if upsert == nil {
 					continue
 				}
 				upserts = append(upserts, upsert)
+				if metadataUpdate != nil {
+					metadataUpdates = append(metadataUpdates, *metadataUpdate)
+				}
 				continue
 			}
 		}

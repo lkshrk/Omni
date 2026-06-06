@@ -103,6 +103,13 @@ Generate a GitHub fallback explicitly:
 omni tools fallback rg --from-github BurntSushi/ripgrep
 ```
 
+If the tool has `git: "https://github.com/owner/repo"` in `settings.json`, the
+repo argument can be omitted:
+
+```sh
+omni tools fallback rg
+```
+
 This resolves the latest stable GitHub release, selects an asset for the
 current OS/architecture, and writes `settings.json` only. It does not install
 the tool immediately. Resolution is strict: if Omni cannot read the release
@@ -114,6 +121,11 @@ manager first. They use the saved fallback only when Omni has explicit cached
 evidence that the concrete manager, such as `apt` or `dnf`, cannot provide the
 configured package. GitHub fallback is not a normal background search path and
 does not make `gh` the preferred package manager for native-owned rows.
+
+Omni may populate `tools.<name>.git` from Brew metadata refresh/import/install
+or from cached install-from-search metadata. That field is only upstream
+metadata; it does not create or run a fallback until the explicit fallback
+command is used.
 
 Use `f fallback` in the TUI to edit the materialized recipe after choosing a
 GitHub source. The TUI editor exposes the repo, binary, bin dir, asset pattern,

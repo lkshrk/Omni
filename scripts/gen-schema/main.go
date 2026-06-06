@@ -323,6 +323,12 @@ func buildWithID(id string) *schema {
 						MinLength:   1,
 						Examples:    []any{"ripgrep", "typescript"},
 					},
+					"git": {
+						Description: "Upstream git repository URL for this tool. Brew metadata refresh and install-from-search may populate GitHub URLs here for later fallback setup.",
+						Type:        "string",
+						MinLength:   1,
+						Examples:    []any{"https://github.com/BurntSushi/ripgrep"},
+					},
 					"options": {
 						Description:          "Provider-specific install options (key-value pairs).",
 						Type:                 "object",

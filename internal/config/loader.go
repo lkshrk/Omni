@@ -246,6 +246,7 @@ var configMigrations = []configMigration{
 	{from: 1, to: 2, apply: migrateConfigV1ToV2, applyRaw: migrateRawConfigV1ToV2},
 	{from: 2, to: 3, apply: migrateConfigV2ToV3, applyRaw: migrateRawConfigV2ToV3},
 	{from: 3, to: 4, apply: migrateConfigV3ToV4, applyRaw: migrateRawConfigV3ToV4},
+	{from: 4, to: 5, apply: migrateConfigV4ToV5, applyRaw: migrateRawConfigV4ToV5},
 }
 
 func configMigrationFrom(version int) (configMigration, bool) {
@@ -294,6 +295,16 @@ func migrateConfigV3ToV4(cfg *RootConfig) error {
 
 func migrateRawConfigV3ToV4(raw map[string]json.RawMessage) error {
 	raw["version"] = json.RawMessage(`4`)
+	return nil
+}
+
+func migrateConfigV4ToV5(cfg *RootConfig) error {
+	cfg.Version = 5
+	return nil
+}
+
+func migrateRawConfigV4ToV5(raw map[string]json.RawMessage) error {
+	raw["version"] = json.RawMessage(`5`)
 	return nil
 }
 

@@ -72,6 +72,15 @@ func (s *installCaptureStub) IsInstalled(_ context.Context, _ provider.Tool) (bo
 	return true, s.version, nil
 }
 
+type concreteInstallStub struct {
+	installCaptureStub
+	concreteName string
+}
+
+func (s *concreteInstallStub) ResolvedName(_ context.Context) (string, error) {
+	return s.concreteName, nil
+}
+
 type installVerifyStub struct {
 	stubProvider
 	verifyInstalled bool
@@ -199,6 +208,49 @@ func TestInstall_UsesLogicalPackageAndInstallWith(t *testing.T) {
 	}
 	if cached.Version.String != "14.1.0" {
 		t.Fatalf("cache version = %q, want 14.1.0", cached.Version.String)
+	}
+}
+
+func TestInstall_SystemResolvedToBrewPopulatesGit(t *testing.T) {
+	system := &concreteInstallStub{
+		installCaptureStub: installCaptureStub{
+			stubProvider: stubProvider{name: "system", available: true},
+			version:      "14.1.1",
+		},
+		concreteName: "brew",
+	}
+	brew := &metadataCheckingStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		metadata: map[string]provider.InstalledMetadata{
+			"ripgrep": {
+				Version: "14.1.1",
+				Source: provider.SourceMetadata{
+					Type:  provider.SourceTypeGitHub,
+					Owner: "BurntSushi",
+					Repo:  "ripgrep",
+					URL:   "https://github.com/BurntSushi/ripgrep",
+				},
+			},
+		},
+	}
+	a, cfgPath := newImportApp(t, system, brew)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools:  logicalToolSpecs(logicalTool("ripgrep", "system")),
+		Groups: []*config.GroupConfig{{Tools: groupTools("ripgrep")}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if err := a.Install(context.Background(), "ripgrep", "system"); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got := cfg.Tools["ripgrep"].Git; got != "https://github.com/BurntSushi/ripgrep" {
+		t.Fatalf("tool git = %q, want resolved Brew GitHub URL", got)
 	}
 }
 
@@ -1277,6 +1329,39 @@ func TestSearch_CachesResultMetadata(t *testing.T) {
 	}
 	if len(tools) != 0 {
 		t.Fatalf("ListTools returned %d metadata-only rows, want 0", len(tools))
+	}
+}
+
+func TestAdd_UsesCachedSearchSourceMetadataForGit(t *testing.T) {
+	ctx := context.Background()
+	s := &searchStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		results: []provider.SearchResult{{
+			Name:     "ripgrep",
+			Provider: "brew",
+			Source: provider.SourceMetadata{
+				Type:  provider.SourceTypeGitHub,
+				Owner: "BurntSushi",
+				Repo:  "ripgrep",
+				URL:   "https://github.com/BurntSushi/ripgrep",
+			},
+		}},
+	}
+	a, cfgPath := newImportApp(t, s)
+
+	if _, err := a.Search(ctx, "ripgrep", ""); err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if err := a.Add(ctx, "system", "ripgrep", "ripgrep", "work", "brew"); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got := cfg.Tools["ripgrep"].Git; got != "https://github.com/BurntSushi/ripgrep" {
+		t.Fatalf("tool git = %q, want cached search GitHub source", got)
 	}
 }
 

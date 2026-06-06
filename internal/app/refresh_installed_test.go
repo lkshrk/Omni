@@ -143,6 +143,99 @@ func TestRefreshInstalled_MetadataBulkPath_PersistsPrivilege(t *testing.T) {
 	if meta.SourceType != provider.SourceTypeGitHub || meta.SourceOwner != "parsec-cloud" || meta.SourceRepo != "parsec-app" {
 		t.Fatalf("metadata source = %s/%s/%s, want github/parsec-cloud/parsec-app", meta.SourceType, meta.SourceOwner, meta.SourceRepo)
 	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got := cfg.Tools["parsec"].Git; got != "https://github.com/parsec-cloud/parsec-app" {
+		t.Fatalf("tool git = %q, want GitHub source URL", got)
+	}
+}
+
+func TestRefreshInstalled_MetadataBulkPath_DoesNotOverwriteDifferentGit(t *testing.T) {
+	prov := &metadataCheckingStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		metadata: map[string]provider.InstalledMetadata{
+			"rg": {
+				Version: "14.1.1",
+				Source: provider.SourceMetadata{
+					Type:  provider.SourceTypeGitHub,
+					Owner: "BurntSushi",
+					Repo:  "ripgrep",
+					URL:   "https://github.com/BurntSushi/ripgrep",
+				},
+			},
+		},
+	}
+	a, cfgPath := newImportApp(t, prov)
+
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"rg": {Provider: "system", InstallWith: "brew", Git: "https://example.com/user-edited/rg"},
+		},
+		Groups: []*config.GroupConfig{{Tools: groupTools("rg")}},
+	}); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+
+	if err := a.RefreshInstalled(context.Background(), nil); err != nil {
+		t.Fatalf("RefreshInstalled: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got := cfg.Tools["rg"].Git; got != "https://example.com/user-edited/rg" {
+		t.Fatalf("tool git = %q, want user-provided value preserved", got)
+	}
+}
+
+func TestRefreshInstalled_CachedOwnerMetadataPopulatesGit(t *testing.T) {
+	system := &stubProvider{name: "system", available: true}
+	brew := &metadataCheckingStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		metadata: map[string]provider.InstalledMetadata{
+			"ripgrep": {
+				Version: "14.1.1",
+				Source: provider.SourceMetadata{
+					Type:  provider.SourceTypeGitHub,
+					Owner: "BurntSushi",
+					Repo:  "ripgrep",
+					URL:   "https://github.com/BurntSushi/ripgrep",
+				},
+			},
+		},
+	}
+	a, cfgPath := newImportApp(t, system, brew)
+
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools:  logicalToolSpecs(logicalTool("ripgrep", "system")),
+		Groups: []*config.GroupConfig{{Tools: groupTools("ripgrep")}},
+	}); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+	if err := a.DB().Upsert(context.Background(), &database.ToolCache{
+		Name:          "ripgrep",
+		Provider:      "system",
+		Package:       "ripgrep",
+		Installed:     true,
+		InstalledWith: "brew",
+	}); err != nil {
+		t.Fatalf("seed cache owner: %v", err)
+	}
+
+	if err := a.RefreshInstalled(context.Background(), nil); err != nil {
+		t.Fatalf("RefreshInstalled: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got := cfg.Tools["ripgrep"].Git; got != "https://github.com/BurntSushi/ripgrep" {
+		t.Fatalf("tool git = %q, want cached Brew owner GitHub URL", got)
+	}
 }
 
 func TestRefreshInstalled_BulkPath_MarksNotInstalled(t *testing.T) {

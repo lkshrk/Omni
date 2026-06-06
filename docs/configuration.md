@@ -16,7 +16,7 @@ See [State And Files](state-and-files.md) for config path priority, cache path
 priority, environment variables, backups, and disposable cache behavior.
 
 The schema lives in
-[spec/omni.settings.v4.schema.json](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v4.schema.json).
+[spec/omni.settings.v5.schema.json](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v5.schema.json).
 
 ## Smallest Valid File
 
@@ -24,7 +24,7 @@ The smallest legal file is:
 
 ```json
 {
-  "version": 4
+  "version": 5
 }
 ```
 
@@ -37,8 +37,8 @@ automatically by Omni config writes.
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v4.schema.json",
-  "version": 4,
+  "$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v5.schema.json",
+  "version": 5,
   "settings": {
     "fallback_bin_dir": "~/.local/share/omni/fallback/bin",
     "ecosystems": {
@@ -177,6 +177,7 @@ overrides.
     "rg": {
       "provider": "system",
       "package": "ripgrep",
+      "git": "https://github.com/BurntSushi/ripgrep",
       "fallback": {
         "source": {
           "type": "github",
@@ -207,6 +208,7 @@ Fields:
 | `provider` | Portable provider such as `system`, `node`, or `python`. |
 | `package` | Package name when it differs from the logical name. |
 | `install_with` | Concrete manager override for this tool. |
+| `git` | Upstream git repository URL. Brew metadata refresh/import/install and install-from-search may populate GitHub URLs here for later fallback setup. |
 | `quarantine` | Tool-specific update quarantine override. Use `2d`/`48h`, `0`, or `exempt`. |
 | `taps` | Homebrew taps required before install. |
 | `variants` | Alternate install candidates tried in order. |
@@ -234,9 +236,10 @@ Fallback fields:
 
 `omni tools fallback <tool> --from-github owner/repo` writes the fallback only
 after resolving latest stable release metadata and a supported asset for the
-current platform. If resolution fails, the existing config is unchanged. The
-command is config-only; install, sync, and upgrade decide later whether to use
-the saved `system(gh)` recipe.
+current platform. If `--from-github` is omitted, Omni uses the tool's `git`
+value when it is a GitHub URL. If resolution fails, the existing config is
+unchanged. The command is config-only; install, sync, and upgrade decide later
+whether to use the saved `system(gh)` recipe.
 
 ## Groups And Hosts
 

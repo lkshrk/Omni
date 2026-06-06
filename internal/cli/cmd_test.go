@@ -3206,8 +3206,8 @@ func TestToolsFallbackRequiresGitHubSource(t *testing.T) {
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "fallback", "rg"})
 	err := cmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), "tools fallback requires --from-github owner/repo") {
-		t.Fatalf("tools fallback err = %v, want --from-github requirement", err)
+	if err == nil || !strings.Contains(err.Error(), "tools fallback requires --from-github owner/repo or a GitHub git URL in tool config") {
+		t.Fatalf("tools fallback err = %v, want GitHub source requirement", err)
 	}
 }
 
