@@ -528,7 +528,7 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 		return err
 	}
 	stop = profile.Start("app.refresh.installed.resolve_tools")
-	tools, _ := a.resolvedToolEntries(ctx, cfg, a.currentToolGroups(cfg))
+	tools, _ := a.currentResolvedToolEntries(ctx, cfg)
 	stop()
 	if len(tools) == 0 {
 		stop = profile.Start("app.refresh.installed.reconcile")
@@ -813,7 +813,7 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 	if err != nil {
 		return err
 	}
-	tools, _ := a.resolvedToolEntries(ctx, cfg, a.currentToolGroups(cfg))
+	tools, _ := a.currentResolvedToolEntries(ctx, cfg)
 	cachedOwners, err := a.cachedInstalledOwners(ctx)
 	if err != nil {
 		return err
@@ -1406,7 +1406,7 @@ func filterDiscoveredByScope(discovered []*database.ToolCache, scope discoverySc
 		if tool == nil {
 			continue
 		}
-		if tool.Installed && scope.allowsDiscovered(tool.Provider, tool.InstalledWith) {
+		if discoveredToolAllowed(tool, scope) {
 			out = append(out, tool)
 		}
 	}
@@ -1429,11 +1429,15 @@ func filterToolCachesByConfigAndScope(tools []*database.ToolCache, configured ma
 			}
 			continue
 		}
-		if tool.Tracked || (tool.Installed && scope.allowsDiscovered(tool.Provider, tool.InstalledWith)) {
+		if tool.Tracked || discoveredToolAllowed(tool, scope) {
 			out = append(out, tool)
 		}
 	}
 	return out
+}
+
+func discoveredToolAllowed(tool *database.ToolCache, scope discoveryScope) bool {
+	return tool != nil && tool.Installed && scope.allowsDiscovered(tool.Provider, tool.InstalledWith)
 }
 
 func reverseEcosystemProviders(ecosystemProviders map[string]string) map[string]string {
