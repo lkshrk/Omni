@@ -96,7 +96,7 @@ func (a *App) StartupSnapshot(ctx context.Context) (*StartupSnapshot, error) {
 	stop()
 
 	stop = profile.Start("app.startup.resolve_tools")
-	resolved, _ := a.resolveTools(ctx, cfg, cfg.Groups)
+	resolved, _ := a.resolveTools(ctx, cfg, a.currentToolGroups(cfg))
 	toolMemberships := toolMembershipMapFromResolved(resolved)
 	toolGroupState := a.toolGroupStateFromConfigAndMemberships(cfg, toolMemberships, hostInfo)
 	toolScopeState := a.toolScopeStateFromConfig(cfg)

@@ -528,7 +528,7 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 		return err
 	}
 	stop = profile.Start("app.refresh.installed.resolve_tools")
-	tools, _ := a.resolvedToolEntries(ctx, cfg, cfg.Groups)
+	tools, _ := a.resolvedToolEntries(ctx, cfg, a.currentToolGroups(cfg))
 	stop()
 	if len(tools) == 0 {
 		stop = profile.Start("app.refresh.installed.reconcile")
@@ -813,7 +813,7 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 	if err != nil {
 		return err
 	}
-	tools, _ := a.resolvedToolEntries(ctx, cfg, cfg.Groups)
+	tools, _ := a.resolvedToolEntries(ctx, cfg, a.currentToolGroups(cfg))
 	cachedOwners, err := a.cachedInstalledOwners(ctx)
 	if err != nil {
 		return err
@@ -1255,14 +1255,15 @@ func (a *App) listToolsFromConfig(ctx context.Context, cfg *config.RootConfig, p
 	if cfg == nil {
 		return tools, nil
 	}
-	configured := a.configuredToolCacheKeys(ctx, cfg)
+	configured, authoritative := a.configuredToolCacheKeys(ctx, cfg)
 	scope := a.discoveryProviderScope(ctx, cfg, ecosystemProviders)
-	tools = filterToolCachesByConfigAndScope(tools, configured, scope)
+	tools = filterToolCachesByConfigAndScope(tools, configured, authoritative, scope)
 	return filterIgnoredToolCaches(tools, ignoredToolSet(cfg)), nil
 }
 
-func (a *App) configuredToolCacheKeys(ctx context.Context, cfg *config.RootConfig) map[string]struct{} {
-	entries, _ := a.resolvedToolEntries(ctx, cfg, cfg.Groups)
+func (a *App) configuredToolCacheKeys(ctx context.Context, cfg *config.RootConfig) (map[string]struct{}, bool) {
+	groups, hostAuthoritative := a.currentToolGroupsWithAuthority(cfg)
+	entries, _ := a.resolvedToolEntries(ctx, cfg, groups)
 	keys := make(map[string]struct{}, len(entries))
 	for _, entry := range entries {
 		keys[resolvedToolKey(entry)] = struct{}{}
@@ -1270,7 +1271,7 @@ func (a *App) configuredToolCacheKeys(ctx context.Context, cfg *config.RootConfi
 			keys[NewToolKey(entry.Name, entry.InstallWith, entry.EffectivePackage()).String()] = struct{}{}
 		}
 	}
-	return keys
+	return keys, (hostAuthoritative && len(cfg.Tools) > 0) || len(keys) > 0
 }
 
 type discoveryScope struct {
@@ -1330,7 +1331,7 @@ func (a *App) discoveryProviderScope(ctx context.Context, cfg *config.RootConfig
 		}
 	}
 	seen := make(map[string]struct{})
-	for _, group := range cfg.Groups {
+	for _, group := range a.currentToolGroups(cfg) {
 		if group == nil {
 			continue
 		}
@@ -1405,14 +1406,14 @@ func filterDiscoveredByScope(discovered []*database.ToolCache, scope discoverySc
 		if tool == nil {
 			continue
 		}
-		if scope.allowsDiscovered(tool.Provider, tool.InstalledWith) {
+		if tool.Installed && scope.allowsDiscovered(tool.Provider, tool.InstalledWith) {
 			out = append(out, tool)
 		}
 	}
 	return out
 }
 
-func filterToolCachesByConfigAndScope(tools []*database.ToolCache, configured map[string]struct{}, scope discoveryScope) []*database.ToolCache {
+func filterToolCachesByConfigAndScope(tools []*database.ToolCache, configured map[string]struct{}, authoritative bool, scope discoveryScope) []*database.ToolCache {
 	if len(tools) == 0 {
 		return tools
 	}
@@ -1422,13 +1423,13 @@ func filterToolCachesByConfigAndScope(tools []*database.ToolCache, configured ma
 			continue
 		}
 		key := NewToolKey(tool.Name, tool.Provider, tool.Package).String()
-		if tool.Tracked && len(configured) > 0 {
+		if tool.Tracked && authoritative {
 			if _, ok := configured[key]; ok {
 				out = append(out, tool)
 			}
 			continue
 		}
-		if tool.Tracked || scope.allowsDiscovered(tool.Provider, tool.InstalledWith) {
+		if tool.Tracked || (tool.Installed && scope.allowsDiscovered(tool.Provider, tool.InstalledWith)) {
 			out = append(out, tool)
 		}
 	}
