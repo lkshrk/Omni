@@ -200,8 +200,8 @@ func TestLoadTools_WithGroups(t *testing.T) {
 	if !slices.Contains(got.groupNames, "work") {
 		t.Errorf("groupNames = %v, expected to contain work", got.groupNames)
 	}
-	if group := got.toolGroups["ripgrep\x00system"]; group != "work" {
-		t.Errorf("toolGroups[ripgrep/system] = %q, want work", group)
+	if group := got.toolGroups["ripgrep\x00brew"]; group != "work" {
+		t.Errorf("toolGroups[ripgrep/brew] = %q, want work", group)
 	}
 }
 
@@ -211,7 +211,7 @@ func TestLoadTools_GroupDisplayIsScopedToActiveHost(t *testing.T) {
 	cfgPath := filepath.Join(dir, "settings.json")
 	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
-			"ripgrep": {Provider: "system", InstallWith: "brew"},
+			"ripgrep": {Providers: []config.ToolInstallSpec{{Provider: "brew"}}},
 		},
 		Groups: []*config.GroupConfig{
 			{Name: "testhost", Special: "host"},
@@ -234,7 +234,7 @@ func TestLoadTools_GroupDisplayIsScopedToActiveHost(t *testing.T) {
 	if !ok {
 		t.Fatalf("loadTools returned %T, want toolsLoadedMsg", msg)
 	}
-	key := toolKey("ripgrep", "system")
+	key := toolKey("ripgrep", "brew")
 	if got.toolGroups[key] != "work" {
 		t.Fatalf("display group = %q, want active-host group work (all memberships: %v)", got.toolGroups[key], got.toolMemberships[key])
 	}
@@ -519,11 +519,6 @@ func TestDoSetupCopyHostConfigFrom_CopiesSourceToCurrentHost(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
-		Tools: map[string]config.ToolSpec{
-			"fd": {Provider: "system", Hosts: map[string]config.ToolInstallSpec{
-				"alpha": {Provider: "system", Package: "fd-find"},
-			}},
-		},
 		HostSettings: map[string]config.Settings{
 			"alpha": {DotsRepo: "/alpha/dots", DisabledProviders: []string{"node"}},
 		},
@@ -566,9 +561,6 @@ func TestDoSetupCopyHostConfigFrom_CopiesSourceToCurrentHost(t *testing.T) {
 	}
 	if cfg.HostSettings["desk"].DotsRepo != "/alpha/dots" {
 		t.Fatalf("desk dots repo = %q, want copied source", cfg.HostSettings["desk"].DotsRepo)
-	}
-	if got := cfg.Tools["fd"].Hosts["desk"].Package; got != "fd-find" {
-		t.Fatalf("desk fd package = %q, want fd-find", got)
 	}
 }
 

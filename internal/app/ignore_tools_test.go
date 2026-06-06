@@ -81,7 +81,7 @@ func TestIgnoredToolsHiddenFromListAndQuery(t *testing.T) {
 	for _, name := range []string{"ripgrep", "bat", "fd"} {
 		if err := a.DB().Upsert(ctx, &database.ToolCache{
 			Name:          name,
-			Provider:      "system",
+			Provider:      "brew",
 			Package:       name,
 			Installed:     true,
 			InstalledWith: "brew",
@@ -90,7 +90,7 @@ func TestIgnoredToolsHiddenFromListAndQuery(t *testing.T) {
 			t.Fatalf("seed %s: %v", name, err)
 		}
 	}
-	if err := a.DB().UpdateOutdated(ctx, "ripgrep", "system", "ripgrep", true, "15.0.0"); err != nil {
+	if err := a.DB().UpdateOutdated(ctx, "ripgrep", "brew", "ripgrep", true, "15.0.0"); err != nil {
 		t.Fatalf("mark ripgrep outdated: %v", err)
 	}
 
@@ -130,7 +130,7 @@ func TestSetToolIgnoreScopesWithStateReturnsToolsAndScopeDisplay(t *testing.T) {
 	ctx := context.Background()
 	if err := a.DB().Upsert(ctx, &database.ToolCache{
 		Name:          "curl",
-		Provider:      "system",
+		Provider:      "brew",
 		Package:       "curl",
 		Installed:     true,
 		InstalledWith: "brew",
@@ -224,7 +224,7 @@ func TestRefreshInstalledSkipsIgnoredToolsAndUntracksStaleCache(t *testing.T) {
 	ctx := context.Background()
 	if err := a.DB().Upsert(ctx, &database.ToolCache{
 		Name:        "ripgrep",
-		Provider:    "system",
+		Provider:    "brew",
 		Package:     "ripgrep",
 		Installed:   true,
 		Version:     sql.NullString{String: "13.0.0", Valid: true},
@@ -240,7 +240,7 @@ func TestRefreshInstalledSkipsIgnoredToolsAndUntracksStaleCache(t *testing.T) {
 	if stub.installedMapCalls != 0 {
 		t.Fatalf("InstalledMap calls = %d, want ignored tool skipped", stub.installedMapCalls)
 	}
-	raw, err := a.DB().Get(ctx, "ripgrep", "system", "ripgrep")
+	raw, err := a.DB().Get(ctx, "ripgrep", "brew", "ripgrep")
 	if err != nil {
 		t.Fatalf("get raw cache: %v", err)
 	}
@@ -272,7 +272,7 @@ func TestOutdatedRefreshSkipsIgnoredTools(t *testing.T) {
 	ctx := context.Background()
 	if err := a.DB().Upsert(ctx, &database.ToolCache{
 		Name:          "ripgrep",
-		Provider:      "system",
+		Provider:      "brew",
 		Package:       "ripgrep",
 		Installed:     true,
 		InstalledWith: "brew",
@@ -291,7 +291,7 @@ func TestOutdatedRefreshSkipsIgnoredTools(t *testing.T) {
 	if stub.outdatedMapCalls != 0 {
 		t.Fatalf("OutdatedMap calls = %d, want ignored tool skipped", stub.outdatedMapCalls)
 	}
-	raw, err := a.DB().Get(ctx, "ripgrep", "system", "ripgrep")
+	raw, err := a.DB().Get(ctx, "ripgrep", "brew", "ripgrep")
 	if err != nil {
 		t.Fatalf("get raw cache: %v", err)
 	}
@@ -380,7 +380,7 @@ func TestUpgradePathsSkipIgnoredTools(t *testing.T) {
 	ctx := context.Background()
 	if err := a.DB().Upsert(ctx, &database.ToolCache{
 		Name:          "ripgrep",
-		Provider:      "system",
+		Provider:      "brew",
 		Package:       "ripgrep",
 		Installed:     true,
 		InstalledWith: "brew",

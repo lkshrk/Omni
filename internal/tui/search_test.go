@@ -119,11 +119,11 @@ func TestDoSearch_ReturnsResults(t *testing.T) {
 	if got.tools[0].Name != "ripgrep" {
 		t.Errorf("tools[0].Name = %q, want ripgrep", got.tools[0].Name)
 	}
-	if got.tools[0].Provider != "system" {
-		t.Errorf("tools[0].Provider = %q, want system", got.tools[0].Provider)
+	if got.tools[0].Provider != "brew" {
+		t.Errorf("tools[0].Provider = %q, want brew", got.tools[0].Provider)
 	}
-	if got.tools[0].InstalledWith != "brew" {
-		t.Errorf("tools[0].InstalledWith = %q, want brew search source for display", got.tools[0].InstalledWith)
+	if got.tools[0].InstalledWith != "" {
+		t.Errorf("tools[0].InstalledWith = %q, want empty concrete provider row", got.tools[0].InstalledWith)
 	}
 	if got.tools[0].Options["brew_kind"] != "formula" {
 		t.Errorf("tools[0].Options[brew_kind] = %q, want formula", got.tools[0].Options["brew_kind"])
@@ -138,13 +138,13 @@ func TestDoSearch_EcosystemFilterReturnsOnlyMatchingSearchResults(t *testing.T) 
 		name:    "brew",
 		results: []provider.SearchResult{{Name: "presenterm", Provider: "brew"}},
 	}
-	node := &searchProvider{
-		name:    "node",
-		results: []provider.SearchResult{{Name: "terminal-kit", Provider: "node"}},
+	npm := &searchProvider{
+		name:    "npm",
+		results: []provider.SearchResult{{Name: "terminal-kit", Provider: "npm"}},
 	}
-	a := newSearchCmdApp(t, brew, node)
+	a := newSearchCmdApp(t, brew, npm)
 	m := modelForCmds(a)
-	m.providerNames = []string{"system", "node", "python"}
+	m.providerNames = []string{"brew", "npm", "pip"}
 	m.providerTabIdx = 1
 
 	msg := m.doSearch(context.Background(), "term", 9)()
@@ -152,14 +152,14 @@ func TestDoSearch_EcosystemFilterReturnsOnlyMatchingSearchResults(t *testing.T) 
 	if !ok {
 		t.Fatalf("expected searchResultsMsg, got %T", msg)
 	}
-	if got.providerFilter != "system" {
-		t.Fatalf("providerFilter = %q, want system", got.providerFilter)
+	if got.providerFilter != "brew" {
+		t.Fatalf("providerFilter = %q, want brew", got.providerFilter)
 	}
 	if len(got.tools) != 1 {
-		t.Fatalf("tools = %d, want one system result: %+v", len(got.tools), got.tools)
+		t.Fatalf("tools = %d, want one brew result: %+v", len(got.tools), got.tools)
 	}
-	if got.tools[0].Name != "presenterm" || got.tools[0].Provider != "system" || got.tools[0].InstalledWith != "brew" {
-		t.Fatalf("tool = %+v, want presenterm system via brew", got.tools[0])
+	if got.tools[0].Name != "presenterm" || got.tools[0].Provider != "brew" || got.tools[0].InstalledWith != "" {
+		t.Fatalf("tool = %+v, want presenterm via brew", got.tools[0])
 	}
 }
 
@@ -284,7 +284,7 @@ func TestSearchResultsMsg_PartialErrorStillShowsResults(t *testing.T) {
 	got := drive(m, searchResultsMsg{
 		query: "pre",
 		gen:   2,
-		tools: []*database.ToolCache{{Name: "prettyping", Provider: "system"}},
+		tools: []*database.ToolCache{{Name: "prettyping", Provider: "brew"}},
 		err:   errors.New("registry timeout"),
 	})
 
@@ -405,7 +405,7 @@ func TestDoSearch_VersionAndDescriptionPopulated(t *testing.T) {
 	if !tc.Description.Valid || tc.Description.String != "JSON processor" {
 		t.Errorf("Description = %v, want {String:JSON processor, Valid:true}", tc.Description)
 	}
-	meta, err := a.DB().GetMetadata(context.Background(), "jq", "system", "jq")
+	meta, err := a.DB().GetMetadata(context.Background(), "jq", "brew", "jq")
 	if err != nil {
 		t.Fatalf("GetMetadata: %v", err)
 	}

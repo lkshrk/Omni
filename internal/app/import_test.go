@@ -196,8 +196,8 @@ func TestImport_ProviderFilter(t *testing.T) {
 	if len(result.Added) != 1 {
 		t.Errorf("Added = %d, want 1 (brew only)", len(result.Added))
 	}
-	if result.Added[0].Provider != "system" {
-		t.Errorf("Added[0].Provider = %q, want system", result.Added[0].Provider)
+	if result.Added[0].Provider != "brew" {
+		t.Errorf("Added[0].Provider = %q, want brew", result.Added[0].Provider)
 	}
 
 	cfg, err := config.Load(cfgPath)
@@ -248,13 +248,12 @@ func TestImport_EcosystemProvidersWithRegisteredDelegatesSkipped(t *testing.T) {
 		t.Fatalf("Import: %v", err)
 	}
 
-	// Only the concrete provider (brew) should contribute; system is skipped,
-	// and the imported config keeps logical provider identity.
+	// Only the concrete provider (brew) should contribute; system is skipped.
 	if len(result.Added) != 1 {
 		t.Errorf("Added = %d, want 1 (brew only, system ecosystem provider skipped)", len(result.Added))
 	}
-	if len(result.Added) > 0 && result.Added[0].Provider != "system" {
-		t.Errorf("Added[0].Provider = %q, want system", result.Added[0].Provider)
+	if len(result.Added) > 0 && result.Added[0].Provider != "brew" {
+		t.Errorf("Added[0].Provider = %q, want brew", result.Added[0].Provider)
 	}
 
 	cfg, _ := config.Load(cfgPath)
@@ -282,8 +281,8 @@ func TestImport_ResolvedDefaultConcreteDoesNotWriteInstallWith(t *testing.T) {
 	if len(result.Added) != 1 {
 		t.Fatalf("Added = %d, want 1", len(result.Added))
 	}
-	if result.Added[0].Provider != "system" {
-		t.Fatalf("Added[0].Provider = %q, want system", result.Added[0].Provider)
+	if result.Added[0].Provider != "brew" {
+		t.Fatalf("Added[0].Provider = %q, want brew", result.Added[0].Provider)
 	}
 
 	cfg, err := config.Load(cfgPath)
@@ -291,8 +290,8 @@ func TestImport_ResolvedDefaultConcreteDoesNotWriteInstallWith(t *testing.T) {
 		t.Fatalf("config.Load: %v", err)
 	}
 	spec := cfg.Tools["git"]
-	if spec.Provider != "system" || spec.InstallWith != "" {
-		t.Fatalf("git spec = %+v, want provider system without install_with", spec)
+	if len(spec.Providers) != 1 || spec.Providers[0].Provider != "brew" || spec.Provider != "" || spec.InstallWith != "" {
+		t.Fatalf("git spec = %+v, want brew provider entry without legacy fields", spec)
 	}
 }
 
@@ -310,8 +309,8 @@ func TestImport_EcosystemProviderExplicitFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Import: %v", err)
 	}
-	if len(result.Added) != 1 {
-		t.Errorf("Added = %d, want 1 (explicit ecosystem provider filter bypasses skip)", len(result.Added))
+	if len(result.Added) != 0 {
+		t.Errorf("Added = %d, want 0 (ecosystem providers are skipped)", len(result.Added))
 	}
 }
 

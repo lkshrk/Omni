@@ -58,8 +58,7 @@ omni tools refresh
 For ecosystem defaults:
 
 ```sh
-omni settings set node.manager bun
-omni settings set python.manager uv
+omni settings set provider_priority brew,apt,npm,pip
 ```
 
 ## Stow Missing
@@ -152,7 +151,7 @@ missing assignment target: pass --group <group> for non-interactive add
 Fix:
 
 ```sh
-omni tools add ripgrep --provider system --group "$(hostname -s)"
+omni tools add ripgrep --provider brew --group "$(hostname -s)"
 omni dots add ~/.config/nvim --group "$(hostname -s)" --adopt
 ```
 

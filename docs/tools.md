@@ -11,17 +11,17 @@ Use `tools add` when you want one command to create the logical spec and assign
 it to a group:
 
 ```sh
-omni tools add ripgrep --provider system --group "$(hostname -s)"
-omni tools add typescript --provider node --group dev
+omni tools add ripgrep --provider brew --group "$(hostname -s)"
+omni tools add typescript --provider npm --group dev
 ```
 
 Use `tools set` when you only want to create or update the logical install
 spec:
 
 ```sh
-omni tools set ripgrep --provider system
-omni tools set typescript --provider node --package typescript
-omni tools set black --provider python
+omni tools set ripgrep --provider brew
+omni tools set typescript --provider npm --package typescript
+omni tools set black --provider pip
 omni tools set ripgrep --quarantine exempt
 ```
 
@@ -50,7 +50,7 @@ omni tools sync
 
 ```sh
 omni tools search rg
-omni tools search typescript --provider node
+omni tools search typescript --provider npm
 ```
 
 Search uses provider registries where available. Results are best-effort because
@@ -93,9 +93,9 @@ you want the active host's configured desired state applied.
 
 ## Fallbacks
 
-Fallbacks let a configured `system` tool install from GitHub when the current
-system package manager cannot provide it. They are not a general package search
-path and they are only used for logical tools that already exist in config.
+Fallbacks let a configured tool install from GitHub when its native provider
+cannot provide it. They are not a general package search path and they are only
+used for logical tools that already exist in config.
 
 Generate a GitHub fallback explicitly:
 
@@ -150,7 +150,7 @@ availability is known to be missing. `tools sync --retry-failed` can rerun a
 previously failed fallback recipe unchanged. If the native manager becomes able
 to install the package again, native install remains the preferred path.
 
-Refresh/update detection applies only to fallback-installed `system(gh)` rows
+Refresh/update detection applies only to fallback-installed `gh` rows
 with complete saved GitHub release metadata. Omni marks the tool outdated only
 when the latest GitHub release has a strictly newer `published_at` timestamp and
 also has a supported asset for the current platform. Same, older, incomplete,
@@ -171,7 +171,7 @@ omni tools upgrade --all --force
 
 Upgrade uses the concrete manager recorded in cache when available. That avoids
 uninstalling with one manager after a different manager installed the package.
-Fallback-installed `system(gh)` tools marked outdated re-resolve the latest
+Fallback-installed `gh` tools marked outdated re-resolve the latest
 GitHub release in memory before upgrade, then use the refreshed upgrade command
 or install command and run the required check command again. Omni persists the
 refreshed recipe only after the upgrade and check both succeed. If release
@@ -192,17 +192,14 @@ omni tools refresh
 ## Provider Drift
 
 Use `reinstall with default` behavior when a logical tool is installed through a
-non-default manager inside the same ecosystem:
+different provider than the configured default:
 
 ```sh
 omni tools switch ripgrep --reinstall-default
 omni tools switch black --from brew --to pip
-omni tools consolidate python uv
-omni tools consolidate node bun
 ```
 
-Use `consolidate` when moving a whole ecosystem to one manager. Use `switch`
-with `--from` and `--to` for a targeted provider change, or
+Use `switch` with `--from` and `--to` for a targeted provider change, or
 `--reinstall-default` when the configured default is already correct.
 
 ## Ignore Tools
@@ -221,7 +218,7 @@ upgraded, or deleted by Omni.
 Use a host override when one machine needs a different install spec:
 
 ```sh
-omni tools set node --provider system --package nodejs --install-with apt --host
+omni tools set node --provider apt --package nodejs --host
 ```
 
 `--host` is a boolean flag; it writes an override for the current active host.

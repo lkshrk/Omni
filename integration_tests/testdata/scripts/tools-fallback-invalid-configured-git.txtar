@@ -8,10 +8,10 @@ stdout '"git": "https://github.com/cli/cli/releases\?expanded=true"'
 
 -- settings.json --
 {
-  "version": 5,
+  "version": 6,
   "tools": {
     "gh": {
-      "provider": "system",
+      "providers": [{ "provider": "brew" }],
       "git": "https://github.com/cli/cli/releases?expanded=true"
     }
   },

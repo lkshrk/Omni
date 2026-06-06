@@ -37,7 +37,7 @@ important machine.
 For one machine, add the tool directly to the machine group:
 
 ```sh
-omni tools add ripgrep --provider system --group "$(hostname -s)"
+omni tools add ripgrep --provider brew --group "$(hostname -s)"
 omni tools sync
 ```
 
@@ -46,13 +46,14 @@ assign the logical tool to that group:
 
 ```sh
 omni groups create dev
-omni tools set ripgrep --provider system
+omni tools set ripgrep --provider brew
 omni groups move-tool dev ripgrep
 omni tools sync
 ```
 
-`system` is portable. On macOS it usually resolves to Homebrew; on Linux it
-resolves to the first available system manager in the configured priority.
+Choose the concrete provider that should install the tool on this host.
+Provider priority controls which high-confidence search/bootstrap candidates
+Omni selects automatically.
 
 ## First Dotfile
 

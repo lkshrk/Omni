@@ -8,21 +8,15 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-func TestCurrentRefreshProviderScanPlan_DedupesConcreteCoveredByEcosystem(t *testing.T) {
-	system := &bulkConcreteStub{
-		bulkCheckingStub: bulkCheckingStub{
-			stubProvider: stubProvider{name: "system", available: true},
-		},
-		concreteName: "brew",
-	}
+func TestCurrentRefreshProviderScanPlan_GroupsConcreteProviderTools(t *testing.T) {
 	brew := &stubProvider{name: "brew", available: true}
-	a, cfgPath := newImportApp(t, system, brew)
+	a, cfgPath := newImportApp(t, brew)
 	host := testShortHostname()
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: map[string]config.ToolSpec{
-			"fd":  {Provider: "system"},
-			"git": {Provider: "system"},
-		},
+		Tools: logicalToolSpecs(
+			logicalTool("fd", "brew"),
+			logicalTool("git", "brew"),
+		),
 		Hosts: map[string][]string{host: {"dev"}},
 		Groups: []*config.GroupConfig{
 			{Name: host, Special: "host"},
@@ -38,11 +32,11 @@ func TestCurrentRefreshProviderScanPlan_DedupesConcreteCoveredByEcosystem(t *tes
 	}
 
 	if len(plan.Steps) != 1 {
-		t.Fatalf("steps = %#v, want one logical ecosystem scan", plan.Steps)
+		t.Fatalf("steps = %#v, want one concrete provider scan", plan.Steps)
 	}
 	step := plan.Steps[0]
-	if step.Provider != "system" || step.Label != "system/brew" || step.Count != 2 {
-		t.Fatalf("step = %#v, want system/brew count 2", step)
+	if step.Provider != "brew" || step.Label != "brew" || step.Count != 2 {
+		t.Fatalf("step = %#v, want brew count 2", step)
 	}
 	if total := plan.Total(); total != 2 {
 		t.Fatalf("total = %d, want 2", total)
@@ -70,14 +64,12 @@ func TestRefreshProviderScanProviderNamesFromCountsDropsEmptyProviders(t *testin
 	}
 }
 
-func TestCurrentRefreshProviderScanPlan_KeepsConcreteWhenNoConfiguredEcosystemCoversIt(t *testing.T) {
+func TestCurrentRefreshProviderScanPlan_KeepsConfiguredConcreteProvider(t *testing.T) {
 	brew := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, brew)
 	host := testShortHostname()
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: map[string]config.ToolSpec{
-			"git": {Provider: "system", InstallWith: "brew"},
-		},
+		Tools: logicalToolSpecs(logicalTool("git", "brew")),
 		Hosts: map[string][]string{host: {"dev"}},
 		Groups: []*config.GroupConfig{
 			{Name: host, Special: "host"},
@@ -102,19 +94,11 @@ func TestCurrentRefreshProviderScanPlan_KeepsConcreteWhenNoConfiguredEcosystemCo
 }
 
 func TestCurrentRefreshProviderScanPlanReadsCurrentAppState(t *testing.T) {
-	system := &bulkConcreteStub{
-		bulkCheckingStub: bulkCheckingStub{
-			stubProvider: stubProvider{name: "system", available: true},
-		},
-		concreteName: "brew",
-	}
 	brew := &stubProvider{name: "brew", available: true}
-	a, cfgPath := newImportApp(t, system, brew)
+	a, cfgPath := newImportApp(t, brew)
 	host := testShortHostname()
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: map[string]config.ToolSpec{
-			"git": {Provider: "system"},
-		},
+		Tools: logicalToolSpecs(logicalTool("git", "brew")),
 		Hosts: map[string][]string{host: {"dev"}},
 		Groups: []*config.GroupConfig{
 			{Name: host, Special: "host"},
@@ -130,10 +114,10 @@ func TestCurrentRefreshProviderScanPlanReadsCurrentAppState(t *testing.T) {
 	}
 
 	if len(plan.Steps) != 1 {
-		t.Fatalf("steps = %#v, want one logical ecosystem scan", plan.Steps)
+		t.Fatalf("steps = %#v, want one concrete provider scan", plan.Steps)
 	}
 	step := plan.Steps[0]
-	if step.Provider != "system" || step.Label != "system/brew" || step.Count != 1 {
-		t.Fatalf("step = %#v, want system/brew count 1", step)
+	if step.Provider != "brew" || step.Label != "brew" || step.Count != 1 {
+		t.Fatalf("step = %#v, want brew count 1", step)
 	}
 }

@@ -116,7 +116,7 @@ func TestSaveToolFallbackFromGitHub_UsesConfiguredGitWhenRepoOmitted(t *testing.
 	a.SetGitHubFallbackAPIForTest("https://api.github.test", client)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
-			"gh": {Provider: "system", Git: "https://github.com/cli/cli"},
+			"gh": {Providers: []config.ToolInstallSpec{{Provider: "brew"}}, Git: "https://github.com/cli/cli"},
 		},
 	}); err != nil {
 		t.Fatalf("config.Save: %v", err)
@@ -172,7 +172,7 @@ func TestSaveToolFallbackFromGitHub_RejectsReleaseWithoutPublishedAtAndPreserves
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"gh": {
-				Provider: "system",
+				Providers: []config.ToolInstallSpec{{Provider: "brew"}},
 				Fallback: &config.FallbackSpec{
 					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "old", Repo: "repo"},
 					Status: config.FallbackStatusUnverified,

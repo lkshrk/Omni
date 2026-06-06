@@ -62,25 +62,25 @@ func indexOf(log []string, want string) int {
 // declared in Settings.Providers is installed before any dependent tool that
 // relies on it.
 //
-// Scenario: uv (a concrete Python manager) is installed via brew in pass 1.
-// ruff (a Python tool installed via uv) is then installed in pass 2.
-// We assert brew:uv appears before python:ruff in the install log.
+// Scenario: uv is installed via brew in pass 1. ruff is then installed via the
+// configured concrete provider in pass 2. We assert brew:uv appears before
+// pip:ruff in the install log.
 func TestSync_InstallsProvidersBeforeDependents(t *testing.T) {
 	var mu sync.Mutex
 	var log []string
 	// "brew" installs the bootstrap provider "uv" (pass 1).
-	// "python" installs the dependent tool "ruff" (pass 2).
+	// "pip" installs the dependent tool "ruff" (pass 2).
 	brew := &recordingProvider{name: "brew", available: true, mu: &mu, log: &log}
-	python := &recordingProvider{name: "python", available: true, mu: &mu, log: &log}
-	a, cfgPath := newImportApp(t, brew, python)
+	pip := &recordingProvider{name: "pip", available: true, mu: &mu, log: &log}
+	a, cfgPath := newImportApp(t, brew, pip)
 
 	cfg := &config.RootConfig{
 		Settings: config.Settings{
 			// uv is a Python manager: install it via brew before other tools.
 			Providers: []config.ProviderEntry{{Name: "uv", Provider: "brew"}},
 		},
-		// ruff uses the python ecosystem provider.
-		Tools: map[string]config.ToolSpec{"ruff": {Provider: "python"}},
+		// ruff uses a concrete provider.
+		Tools: map[string]config.ToolSpec{"ruff": {Providers: []config.ToolInstallSpec{{Provider: "pip"}}}},
 		Groups: []*config.GroupConfig{{
 			Tools: []config.ToolEntry{{Name: "ruff"}},
 		}},
@@ -96,12 +96,12 @@ func TestSync_InstallsProvidersBeforeDependents(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	// Pass 1 installs the bootstrap provider (uv) via brew.
-	// Pass 2 installs ruff via python.
+	// Pass 2 installs ruff via pip.
 	// The log entry for the bootstrap provider uses the ProviderEntry.Name as the tool name.
 	iUV := indexOf(log, "brew:uv")
-	iRuff := indexOf(log, "python:ruff")
+	iRuff := indexOf(log, "pip:ruff")
 	if iUV < 0 || iRuff < 0 {
-		t.Fatalf("missing installs in log %v (want brew:uv and python:ruff)", log)
+		t.Fatalf("missing installs in log %v (want brew:uv and pip:ruff)", log)
 	}
 	if iUV > iRuff {
 		t.Errorf("bootstrap provider uv (log idx %d) installed after dependent ruff (log idx %d): %v", iUV, iRuff, log)

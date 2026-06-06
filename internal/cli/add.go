@@ -18,9 +18,9 @@ func newAddCmd(state *rootState) *cobra.Command {
 		Long: `Add creates a logical tool spec and adds its name to a group.
 
 Example:
-  omni add ripgrep --provider system
-  omni add typescript --provider node --install-with pnpm --name ts --group work
-  omni add slack --provider system --install-with brew --group work`,
+  omni add ripgrep --provider brew --group work
+  omni add typescript --provider npm --name ts --group work
+  omni add black --provider uv --group work`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pkg := args[0]

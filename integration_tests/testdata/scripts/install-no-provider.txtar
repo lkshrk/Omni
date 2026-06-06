@@ -1,7 +1,57 @@
 # omni tools install when no provider is available exits with an error
+exec chmod 755 bin/brew bin/apt bin/apk bin/dnf bin/pacman bin/zypper bin/bun bin/pnpm bin/npm bin/uv bin/pip bin/pip3
+env PATH=$WORK/bin:$PATH
 exec omni --config settings.json hosts ensure testhost
 ! exec omni --config settings.json tools install ripgrep
 stderr 'no provider available'
 
+-- bin/brew --
+#!/bin/sh
+exit 1
+
+-- bin/apt --
+#!/bin/sh
+exit 1
+
+-- bin/apk --
+#!/bin/sh
+exit 1
+
+-- bin/dnf --
+#!/bin/sh
+exit 1
+
+-- bin/pacman --
+#!/bin/sh
+exit 1
+
+-- bin/zypper --
+#!/bin/sh
+exit 1
+
+-- bin/npm --
+#!/bin/sh
+exit 1
+
+-- bin/bun --
+#!/bin/sh
+exit 1
+
+-- bin/pnpm --
+#!/bin/sh
+exit 1
+
+-- bin/uv --
+#!/bin/sh
+exit 1
+
+-- bin/pip --
+#!/bin/sh
+exit 1
+
+-- bin/pip3 --
+#!/bin/sh
+exit 1
+
 -- settings.json --
-{"settings": {"ecosystems": {"system": {"priority": ["__nonexistent__"]}}}}
+{"version": 6, "settings": {"disabled_providers": ["system", "node", "python", "brew", "apt", "apk", "dnf", "pacman", "zypper", "npm", "pip", "uv", "bun", "pnpm"]}}

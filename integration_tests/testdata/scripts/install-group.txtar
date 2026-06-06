@@ -30,7 +30,7 @@ stderr 'not found'
 {
   "version": 1,
   "tools": {
-    "ripgrep": { "provider": "system", "install_with": "brew" }
+    "ripgrep": { "providers": [{ "provider": "brew" }] }
   },
   "groups": [
     { "name": "devtools", "tools": ["ripgrep"] }

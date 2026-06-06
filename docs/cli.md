@@ -170,17 +170,15 @@ Common dot flags:
 | `omni settings show [key]` | Show effective settings for this host. |
 | `omni settings get <key>` | Show one effective setting. |
 | `omni settings set <key> <value>` | Set an Omni setting. |
-| `omni settings disable-provider <provider>` | Disable an ecosystem provider on this host. |
-| `omni settings enable-provider <provider>` | Enable an ecosystem provider on this host. |
+| `omni settings disable-provider <provider>` | Disable a provider on this host. |
+| `omni settings enable-provider <provider>` | Enable a provider on this host. |
 | `omni settings reset` | Reset global and current-host settings while preserving tools, groups, and hosts. |
 | `omni settings reset-cache` | Clear and reinitialize the local tool cache. |
 
 Common setting keys:
 
 - `auto_import`
-- `node.manager`
-- `python.manager`
-- `system.priority`
+- `provider_priority`
 - `dots_repo`
 - `dots_disabled`
 - `dots_git.auto_commit`

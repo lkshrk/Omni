@@ -21,13 +21,13 @@ func TestQueryTools_FiltersByNameStateAndGroup(t *testing.T) {
 		t.Fatalf("config.Save: %v", err)
 	}
 	ctx := context.Background()
-	if err := a.DB().Upsert(ctx, &database.ToolCache{Name: "ripgrep", Provider: "system", Package: "ripgrep", InstalledWith: "brew", Installed: true}); err != nil {
+	if err := a.DB().Upsert(ctx, &database.ToolCache{Name: "ripgrep", Provider: "brew", Package: "ripgrep", InstalledWith: "brew", Installed: true}); err != nil {
 		t.Fatalf("upsert ripgrep: %v", err)
 	}
-	if err := a.DB().UpdateOutdated(ctx, "ripgrep", "system", "ripgrep", true, "14.0.0"); err != nil {
+	if err := a.DB().UpdateOutdated(ctx, "ripgrep", "brew", "ripgrep", true, "14.0.0"); err != nil {
 		t.Fatalf("outdated ripgrep: %v", err)
 	}
-	if err := a.DB().Upsert(ctx, &database.ToolCache{Name: "bat", Provider: "system", Package: "bat", InstalledWith: "brew", Installed: false}); err != nil {
+	if err := a.DB().Upsert(ctx, &database.ToolCache{Name: "bat", Provider: "brew", Package: "bat", InstalledWith: "brew", Installed: false}); err != nil {
 		t.Fatalf("upsert bat: %v", err)
 	}
 
@@ -57,10 +57,10 @@ func TestQueryTools_HostIncludesMachineGroup(t *testing.T) {
 		t.Fatalf("config.Save: %v", err)
 	}
 	ctx := context.Background()
-	if err := a.DB().Upsert(ctx, &database.ToolCache{Name: "slack", Provider: "system", Package: "slack", InstalledWith: "brew", Installed: true, Tracked: true}); err != nil {
+	if err := a.DB().Upsert(ctx, &database.ToolCache{Name: "slack", Provider: "brew", Package: "slack", InstalledWith: "brew", Installed: true, Tracked: true}); err != nil {
 		t.Fatalf("upsert slack: %v", err)
 	}
-	if err := a.DB().Upsert(ctx, &database.ToolCache{Name: "fd", Provider: "system", Package: "fd", InstalledWith: "brew", Installed: true, Tracked: true}); err != nil {
+	if err := a.DB().Upsert(ctx, &database.ToolCache{Name: "fd", Provider: "brew", Package: "fd", InstalledWith: "brew", Installed: true, Tracked: true}); err != nil {
 		t.Fatalf("upsert fd: %v", err)
 	}
 

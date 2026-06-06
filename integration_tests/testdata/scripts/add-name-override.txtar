@@ -1,4 +1,4 @@
 # omni tools add with --name uses the override name in the confirmation message
 exec omni --config settings.json hosts ensure testhost
-exec omni --config settings.json tools add typescript --provider node --install-with npm --name ts --group testhost
+exec omni --config settings.json tools add typescript --provider npm --name ts --group testhost
 stdout 'added ts'

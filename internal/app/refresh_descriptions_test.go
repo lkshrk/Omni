@@ -166,7 +166,7 @@ func TestRefreshDescriptions_BulkDescriberMatchesPackageAlias(t *testing.T) {
 		t.Fatalf("RefreshDescriptions: %v", err)
 	}
 
-	got, err := a.DB().GetMetadata(context.Background(), "editor", "system", "neovim")
+	got, err := a.DB().GetMetadata(context.Background(), "editor", "apt", "neovim")
 	if err != nil {
 		t.Fatalf("metadata get: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestRefreshDescriptions_BulkDescriberMatchesPackageBasename(t *testing.T) {
 		t.Fatalf("RefreshDescriptions: %v", err)
 	}
 
-	got, err := a.DB().GetMetadata(context.Background(), "cloudflare-ddns", "system", "cloudflare/cloudflare/cloudflared")
+	got, err := a.DB().GetMetadata(context.Background(), "cloudflare-ddns", "brew", "cloudflare/cloudflare/cloudflared")
 	if err != nil {
 		t.Fatalf("metadata get: %v", err)
 	}
@@ -217,11 +217,11 @@ func TestRefreshDescriptions_BulkDescriberMatchesPackageBasename(t *testing.T) {
 }
 
 func TestRefreshDescriptions_BulkDescriberPrefersFullScopedPackage(t *testing.T) {
-	prov := &basenameBulkDescribingProvider{stubProvider: stubProvider{name: "node", available: true}}
+	prov := &basenameBulkDescribingProvider{stubProvider: stubProvider{name: "npm", available: true}}
 	a, cfgPath := newImportApp(t, prov)
 
 	cfg := &config.RootConfig{
-		Tools: logicalToolSpecs(logicalToolPackage("playwright", "node", "@playwright/test")),
+		Tools: logicalToolSpecs(logicalToolPackage("playwright", "npm", "@playwright/test")),
 		Groups: []*config.GroupConfig{{
 			Tools: groupTools("playwright"),
 		}},
@@ -234,7 +234,7 @@ func TestRefreshDescriptions_BulkDescriberPrefersFullScopedPackage(t *testing.T)
 		t.Fatalf("RefreshDescriptions: %v", err)
 	}
 
-	got, err := a.DB().GetMetadata(context.Background(), "playwright", "node", "@playwright/test")
+	got, err := a.DB().GetMetadata(context.Background(), "playwright", "npm", "@playwright/test")
 	if err != nil {
 		t.Fatalf("metadata get: %v", err)
 	}
@@ -284,11 +284,11 @@ func TestRefreshDescriptions_FallsBackForBulkMisses(t *testing.T) {
 	if got := prov.calls.Load(); got != 1 {
 		t.Fatalf("Describe fallback called %d times, want 1 missing tool", got)
 	}
-	rg, err := a.DB().GetMetadata(context.Background(), "ripgrep", "system", "ripgrep")
+	rg, err := a.DB().GetMetadata(context.Background(), "ripgrep", "brew", "ripgrep")
 	if err != nil {
 		t.Fatalf("metadata get ripgrep: %v", err)
 	}
-	fd, err := a.DB().GetMetadata(context.Background(), "fd", "system", "fd")
+	fd, err := a.DB().GetMetadata(context.Background(), "fd", "brew", "fd")
 	if err != nil {
 		t.Fatalf("metadata get fd: %v", err)
 	}
@@ -301,11 +301,11 @@ func TestRefreshDescriptions_FallsBackForBulkMisses(t *testing.T) {
 }
 
 func TestRefreshDescriptions_FetchesDiscoveredTools(t *testing.T) {
-	prov := &describingProvider{stubProvider: stubProvider{name: "node", available: true}}
+	prov := &describingProvider{stubProvider: stubProvider{name: "npm", available: true}}
 	a, _ := newImportApp(t, prov)
 	ctx := context.Background()
 
-	if err := a.DB().UpsertDiscovered(ctx, "playwright", "node", "pnpm", "1.52.0"); err != nil {
+	if err := a.DB().UpsertDiscovered(ctx, "playwright", "npm", "pnpm", "1.52.0"); err != nil {
 		t.Fatalf("seed discovered tool: %v", err)
 	}
 
@@ -313,7 +313,7 @@ func TestRefreshDescriptions_FetchesDiscoveredTools(t *testing.T) {
 		t.Fatalf("RefreshDescriptions: %v", err)
 	}
 
-	got, err := a.DB().Get(ctx, "playwright", "node", "playwright")
+	got, err := a.DB().Get(ctx, "playwright", "npm", "playwright")
 	if err != nil {
 		t.Fatalf("db get: %v", err)
 	}
@@ -326,12 +326,12 @@ func TestRefreshDescriptions_FetchesDiscoveredTools(t *testing.T) {
 }
 
 func TestRefreshDescriptions_FetchesConfiguredNodeRowsInstalledWithManager(t *testing.T) {
-	prov := &describingProvider{stubProvider: stubProvider{name: "node", available: true}}
+	prov := &describingProvider{stubProvider: stubProvider{name: "npm", available: true}}
 	a, cfgPath := newImportApp(t, prov)
 	ctx := context.Background()
 
 	cfg := &config.RootConfig{
-		Tools: logicalToolSpecs(logicalTool("pm2", "node")),
+		Tools: logicalToolSpecs(logicalTool("pm2", "npm")),
 		Groups: []*config.GroupConfig{{
 			Tools: groupTools("pm2"),
 		}},
@@ -341,7 +341,7 @@ func TestRefreshDescriptions_FetchesConfiguredNodeRowsInstalledWithManager(t *te
 	}
 	if err := a.DB().Upsert(ctx, &database.ToolCache{
 		Name:          "pm2",
-		Provider:      "node",
+		Provider:      "npm",
 		Package:       "pm2",
 		Installed:     true,
 		InstalledWith: "bun",
@@ -353,7 +353,7 @@ func TestRefreshDescriptions_FetchesConfiguredNodeRowsInstalledWithManager(t *te
 		t.Fatalf("RefreshDescriptions: %v", err)
 	}
 
-	got, err := a.DB().Get(ctx, "pm2", "node", "pm2")
+	got, err := a.DB().Get(ctx, "pm2", "npm", "pm2")
 	if err != nil {
 		t.Fatalf("db get: %v", err)
 	}
@@ -366,11 +366,11 @@ func TestRefreshDescriptions_FetchesConfiguredNodeRowsInstalledWithManager(t *te
 }
 
 func TestRefreshDescriptions_FetchesConcreteManagerCacheRows(t *testing.T) {
-	prov := &describingProvider{stubProvider: stubProvider{name: "node", available: true}}
+	prov := &describingProvider{stubProvider: stubProvider{name: "npm", available: true}}
 	a, _ := newImportApp(t, prov)
 	ctx := context.Background()
 
-	if err := a.DB().UpsertDiscovered(ctx, "playwright", "bun", "bun", "1.59.1"); err != nil {
+	if err := a.DB().UpsertDiscovered(ctx, "playwright", "npm", "npm", "1.59.1"); err != nil {
 		t.Fatalf("seed concrete manager row: %v", err)
 	}
 
@@ -378,15 +378,15 @@ func TestRefreshDescriptions_FetchesConcreteManagerCacheRows(t *testing.T) {
 		t.Fatalf("RefreshDescriptions: %v", err)
 	}
 
-	got, err := a.DB().Get(ctx, "playwright", "bun", "playwright")
+	got, err := a.DB().Get(ctx, "playwright", "npm", "playwright")
 	if err != nil {
 		t.Fatalf("db get: %v", err)
 	}
 	if !got.Description.Valid || got.Description.String != "description of playwright" {
 		t.Fatalf("description = %#v, want node registry description for concrete bun row", got.Description)
 	}
-	if got.Provider != "bun" || got.InstalledWith != "bun" {
-		t.Fatalf("cache identity = provider %q installed_with %q, want bun/bun", got.Provider, got.InstalledWith)
+	if got.Provider != "npm" || got.InstalledWith != "npm" {
+		t.Fatalf("cache identity = provider %q installed_with %q, want npm/npm", got.Provider, got.InstalledWith)
 	}
 }
 
@@ -412,12 +412,12 @@ func (d *concurrentDescribingProvider) Describe(_ context.Context, t provider.To
 }
 
 func TestRefreshDescriptions_IndividualFallbackIsBoundedConcurrent(t *testing.T) {
-	prov := &concurrentDescribingProvider{stubProvider: stubProvider{name: "node", available: true}}
+	prov := &concurrentDescribingProvider{stubProvider: stubProvider{name: "npm", available: true}}
 	a, cfgPath := newImportApp(t, prov)
 
 	var fixtureTools []logicalFixtureTool
 	for _, name := range []string{"a", "b", "c", "d", "e", "f", "g", "h"} {
-		fixtureTools = append(fixtureTools, logicalTool(name, "node"))
+		fixtureTools = append(fixtureTools, logicalTool(name, "npm"))
 	}
 	cfg := &config.RootConfig{
 		Tools:  logicalToolSpecs(fixtureTools...),

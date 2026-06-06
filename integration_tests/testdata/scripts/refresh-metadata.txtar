@@ -3,7 +3,7 @@ exec chmod 755 bin/brew bin/apt bin/apk bin/dnf bin/pacman bin/zypper bin/pip bi
 env PATH=$WORK/bin:$PATH
 
 exec omni --config settings.json tools refresh
-stdout 'Scanning system/brew… \(1/1\)'
+stdout 'Scanning brew… \(1/1\)'
 stdout 'Checking updates 1/1: brew/ripgrep'
 stdout 'Finding local tools [0-9]+/[0-9]+:'
 stdout 'Refreshing descriptions 1/1: brew/ripgrep'
@@ -97,12 +97,13 @@ exit 1
 
 -- settings.json --
 {
+  "version": 6,
   "settings": {
-    "disabled_providers": ["node", "python"]
+    "disabled_providers": ["npm", "pip"]
   },
   "hosts": { "testhost": [] },
   "tools": {
-    "ripgrep": { "provider": "system", "install_with": "brew" }
+    "ripgrep": { "providers": [{ "provider": "brew" }] }
   },
   "groups": [
     { "name": "testhost", "special": "host", "tools": ["ripgrep"] }

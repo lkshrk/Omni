@@ -4,25 +4,23 @@ exec chmod 755 bin/uv
 env PATH=$WORK/bin:$PATH
 
 exec omni --config settings.json hosts ensure testhost
-exec omni --config settings.json settings set python.manager pip3
-stdout 'python.manager = pip3'
-exec omni --config settings.json tools set black --provider python
-stdout 'Set logical tool "black" with provider "python"'
+exec omni --config settings.json tools set black --provider pip
+stdout 'Set logical tool "black" with provider "pip"'
 exec omni --config settings.json groups move-tool testhost black
 stdout 'Moved "black" to group "testhost"'
 
-exec omni --config settings.json tools install black --provider python
+exec omni --config settings.json tools install black --provider pip
 stdout 'installed black'
 exec test -f .omni-cache/fake-pip/black
-exec omni --config settings.json settings set python.manager uv
-stdout 'python.manager = uv'
+exec omni --config settings.json tools set black --provider uv
+stdout 'Set logical tool "black" with provider "uv"'
 
-exec omni -y --config settings.json tools switch black --reinstall-default --provider python
-stdout 'reinstalled black with default provider python'
+exec omni -y --config settings.json tools switch black --reinstall-default
+stdout 'reinstalled black with default provider uv'
 exec test -f .omni-cache/fake-uv/black
 exec test ! -f .omni-cache/fake-pip/black
 exec omni --config settings.json tools list black --format json
-stdout '"provider":"python"'
+stdout '"provider":"uv"'
 stdout '"installed_with":"uv"'
 
 -- bin/pip3 --

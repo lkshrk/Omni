@@ -16,7 +16,7 @@ See [State And Files](state-and-files.md) for config path priority, cache path
 priority, environment variables, backups, and disposable cache behavior.
 
 The schema lives in
-[spec/omni.settings.v5.schema.json](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v5.schema.json).
+[spec/omni.settings.v6.schema.json](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v6.schema.json).
 
 ## Smallest Valid File
 
@@ -24,7 +24,7 @@ The smallest legal file is:
 
 ```json
 {
-  "version": 5
+  "version": 6
 }
 ```
 
@@ -37,19 +37,16 @@ automatically by Omni config writes.
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v5.schema.json",
-  "version": 5,
+  "$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v6.schema.json",
+  "version": 6,
   "settings": {
     "fallback_bin_dir": "~/.local/share/omni/fallback/bin",
-    "ecosystems": {
-      "node": { "manager": "bun" },
-      "python": { "manager": "uv" }
-    }
+    "provider_priority": ["brew", "apt", "dnf", "zypper", "pacman", "apk", "npm", "pip"]
   },
   "tools": {
-    "ripgrep": { "provider": "system" },
-    "typescript": { "provider": "node" },
-    "black": { "provider": "python" }
+    "ripgrep": { "providers": [{ "provider": "brew" }] },
+    "typescript": { "providers": [{ "provider": "npm", "package": "typescript" }] },
+    "black": { "providers": [{ "provider": "pip" }] }
   },
   "hosts": {
     "workstation": ["dev"]
@@ -73,7 +70,7 @@ automatically by Omni config writes.
 | --- | --- |
 | `$schema` | Editor schema URI. Omni injects it on writes. |
 | `version` | Settings format version. |
-| `settings` | Global defaults for ecosystems, dotfiles, Git behavior, and imports. |
+| `settings` | Global defaults for providers, dotfiles, Git behavior, and imports. |
 | `host_settings` | Per-host overrides for selected settings. |
 | `tools` | Logical tool specs keyed by logical tool name. |
 | `groups` | Reusable and special host groups. |
@@ -89,18 +86,17 @@ automatically by Omni config writes.
     "update_quarantine": "2d",
     "provider_update_quarantine": {
       "npm": "1d",
-      "python": "3d"
+      "pip": "3d"
     },
+    "provider_priority": ["brew", "apt", "dnf", "zypper", "pacman", "apk", "npm", "pip"],
     "dots_repo": "~/dotfiles",
     "dots_git": {
       "auto_commit": false,
       "auto_push": false
     },
-    "ecosystems": {
-      "system": { "priority": ["apt", "apk", "dnf", "zypper", "pacman", "brew"] },
-      "node": { "manager": "bun" },
-      "python": { "manager": "uv" }
-    }
+    "providers": [
+      { "name": "uv", "provider": "brew" }
+    ]
   }
 }
 ```
@@ -111,26 +107,23 @@ Common keys:
 | --- | --- |
 | `auto_import` | Add newly discovered installed tools during scoped plain sync. Defaults to `false`. |
 | `update_quarantine` | Defer upgrades until the PM-reported latest-version availability date is older than this duration. Empty or omitted disables quarantine. |
-| `provider_update_quarantine` | Duration overrides keyed by logical provider (`node`) or concrete provider/manager (`npm`, `uv`, `pip3`). Concrete keys win. |
+| `provider_update_quarantine` | Duration overrides keyed by provider (`npm`, `pip`, `brew`). |
+| `provider_priority` | Preferred provider order for search/bootstrap choices and high-confidence auto selection. |
 | `dots_repo` | Local path to the Git-backed dotfiles repo. |
 | `dots_git.auto_commit` | Commit dotfile repo changes after add/remove flows. |
 | `dots_git.auto_push` | Push dotfile repo changes after add/remove flows. |
 | `fallback_bin_dir` | Default directory for fallback-installed binaries. Omni warns if it is not on `PATH`; it does not edit shell files automatically. |
-| `ecosystems.node.manager` | `bun`, `pnpm`, or `npm`. |
-| `ecosystems.python.manager` | `uv` or `pip3`. |
-| `ecosystems.system.priority` | Concrete manager resolution order for `system`. |
+| `providers` | Bootstrap provider tools installed before dependent tools. |
 
 Use CLI settings commands when possible:
 
 ```sh
 omni settings show
-omni settings get python.manager
-omni settings set python.manager uv
 omni settings set dots_repo ~/dotfiles
 ```
 
-See [Providers](providers.md) for the difference between ecosystem defaults,
-host manager overrides, and tool-level `install_with` pins.
+See [Providers](providers.md) for provider priority, candidate selection, and
+concrete ownership.
 
 `auto_import` does not control `omni tools sync --all` or `omni reconcile`.
 Those broad commands explicitly claim discovered installed tools into the
@@ -146,17 +139,15 @@ Host settings override selected global settings for one machine:
   "host_settings": {
     "workstation": {
       "dots_repo": "~/src/dotfiles",
-      "ecosystems": {
-        "node": { "manager": "pnpm" }
-      },
-      "disabled_providers": ["python"]
+      "provider_priority": ["apt", "brew", "npm", "pip"],
+      "disabled_providers": ["pip"]
     }
   }
 }
 ```
 
-Host-specific fields include `ecosystems`, `dots_repo`, `dots_disabled`, and
-`disabled_providers`. Global fields such as `auto_import`,
+Host-specific fields include `provider_priority`, `dots_repo`, `dots_disabled`,
+and `disabled_providers`. Global fields such as `auto_import`,
 `update_quarantine`, `provider_update_quarantine`, and `dots_git` are not host
 overrides.
 
@@ -166,17 +157,13 @@ overrides.
 {
   "tools": {
     "node": {
-      "provider": "system",
-      "package": "nodejs",
-      "install_with": "apt"
+      "providers": [{ "provider": "apt", "package": "nodejs" }]
     },
     "typescript": {
-      "provider": "node",
-      "package": "typescript"
+      "providers": [{ "provider": "npm", "package": "typescript" }]
     },
     "rg": {
-      "provider": "system",
-      "package": "ripgrep",
+      "providers": [{ "provider": "apt", "package": "ripgrep" }],
       "git": "https://github.com/BurntSushi/ripgrep",
       "fallback": {
         "source": {
@@ -195,7 +182,7 @@ overrides.
       }
     },
     "black": {
-      "provider": "python"
+      "providers": [{ "provider": "pip" }]
     }
   }
 }
@@ -205,16 +192,17 @@ Fields:
 
 | Field | Description |
 | --- | --- |
-| `provider` | Portable provider such as `system`, `node`, or `python`. |
-| `package` | Package name when it differs from the logical name. |
-| `install_with` | Concrete manager override for this tool. |
+| `providers` | Ordered concrete provider candidates for this logical tool. |
+| `providers[].provider` | Concrete provider such as `brew`, `apt`, `npm`, or `pip`. |
+| `providers[].package` | Package name when it differs from the logical name. |
+| `providers[].bin` | Optional binary name when the command differs from the package. |
 | `git` | Upstream git repository URL. Brew metadata refresh/import/install and install-from-search may populate GitHub URLs here for later fallback setup. |
 | `quarantine` | Tool-specific update quarantine override. Use `2d`/`48h`, `0`, or `exempt`. |
 | `taps` | Homebrew taps required before install. |
 | `variants` | Alternate install candidates tried in order. |
 | `hosts` | Host-specific install overrides. |
 | `ignore` | Keep the spec but skip management. |
-| `fallback` | GitHub fallback recipe for `system` tools when the current concrete system manager cannot provide the package. |
+| `fallback` | GitHub fallback recipe used when no configured native provider can provide the package. |
 
 Fallback fields:
 
@@ -239,7 +227,7 @@ after resolving latest stable release metadata and a supported asset for the
 current platform. If `--from-github` is omitted, Omni uses the tool's `git`
 value when it is a GitHub URL. If resolution fails, the existing config is
 unchanged. The command is config-only; install, sync, and upgrade decide later
-whether to use the saved `system(gh)` recipe.
+whether to use the saved GitHub fallback recipe.
 Accepted GitHub repo forms are `owner/repo`, `github.com/owner/repo`, `https://github.com/owner/repo`,
 `https://github.com/owner/repo.git`, and `git@github.com:owner/repo.git`.
 Browser URLs with extra paths, queries, or fragments are rejected.

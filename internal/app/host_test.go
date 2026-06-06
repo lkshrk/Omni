@@ -443,15 +443,7 @@ func TestActiveHostInfoAlwaysIncludesProtectedHostGroup(t *testing.T) {
 func TestRenameHostMovesSpecialHostGroup(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: map[string]config.ToolSpec{
-			"fd": {
-				Provider: "system",
-				Hosts: map[string]config.ToolInstallSpec{
-					"oldhost": {Provider: "system", InstallWith: "brew", Package: "fd-find"},
-					"other":   {Provider: "system", InstallWith: "apt"},
-				},
-			},
-		},
+		Tools: logicalToolSpecs(logicalToolPackage("fd", "brew", "fd-find")),
 		Groups: []*config.GroupConfig{
 			{
 				Name:    "oldhost",
@@ -520,36 +512,15 @@ func TestRenameHostMovesSpecialHostGroup(t *testing.T) {
 	if !config.BoolVal(cfg.HostSettings["newhost"].DotsDisabled) {
 		t.Fatal("renamed host settings lost dots_disabled")
 	}
-	fd := cfg.Tools["fd"]
-	if _, ok := fd.Hosts["oldhost"]; ok {
-		t.Fatal("old tool host override remained")
-	}
-	if got := fd.Hosts["newhost"]; got.InstallWith != "brew" || got.Package != "fd-find" {
-		t.Fatalf("fd newhost override = %#v, want brew fd-find", got)
-	}
-	if got := fd.Hosts["other"].InstallWith; got != "apt" {
-		t.Fatalf("fd other override install_with = %q, want apt", got)
-	}
 }
 
 func TestCopyHostConfigCopiesHostScopedSettingsAndOverrides(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: map[string]config.ToolSpec{
-			"fd": {
-				Provider: "system",
-				Hosts: map[string]config.ToolInstallSpec{
-					"laptop": {
-						Provider:    "system",
-						InstallWith: "brew",
-						Package:     "fd-find",
-						Options:     map[string]string{"scope": "source"},
-					},
-					"desktop": {Provider: "system", InstallWith: "apt", Package: "fd"},
-				},
-			},
-			"ripgrep": {Provider: "system", InstallWith: "brew"},
-		},
+		Tools: logicalToolSpecs(
+			logicalFixtureTool{Name: "fd", Provider: "brew", Package: "fd-find", Options: map[string]string{"scope": "source"}},
+			logicalTool("ripgrep", "brew"),
+		),
 		Groups: []*config.GroupConfig{
 			{Name: "laptop", Special: "host", Tools: groupTools("fd"), Dots: []config.DotEntry{{
 				Name: "private",
@@ -577,9 +548,7 @@ func TestCopyHostConfigCopiesHostScopedSettingsAndOverrides(t *testing.T) {
 				DotsRepo:          "~/dotfiles-laptop",
 				DotsDisabled:      config.BoolPtr(true),
 				DisabledProviders: []string{"node"},
-				Ecosystems: map[string]config.EcosystemSettings{
-					"system": {Priority: []string{"brew", "apt"}},
-				},
+				ProviderPriority:  []string{"brew", "apt"},
 			},
 			"desktop": {DotsRepo: "~/old-desktop"},
 		},
@@ -622,21 +591,12 @@ func TestCopyHostConfigCopiesHostScopedSettingsAndOverrides(t *testing.T) {
 	if !slices.Equal(settings.DisabledProviders, []string{"node"}) {
 		t.Fatalf("desktop disabled providers = %v, want [node]", settings.DisabledProviders)
 	}
-	if got := settings.EcosystemPriority("system"); !slices.Equal(got, []string{"brew", "apt"}) {
-		t.Fatalf("desktop system priority = %v, want [brew apt]", got)
+	if got := settings.ProviderPriority; !slices.Equal(got, []string{"brew", "apt"}) {
+		t.Fatalf("desktop provider priority = %v, want [brew apt]", got)
 	}
 	settings.DisabledProviders[0] = "python"
 	if cfg.HostSettings["laptop"].DisabledProviders[0] != "node" {
 		t.Fatal("copied host settings share slices with source settings")
-	}
-	fd := cfg.Tools["fd"]
-	if got := fd.Hosts["desktop"]; got.InstallWith != "brew" || got.Package != "fd-find" || got.Options["scope"] != "source" {
-		t.Fatalf("fd desktop override = %#v, want copied laptop override", got)
-	}
-	desktopOverride := fd.Hosts["desktop"]
-	desktopOverride.Options["scope"] = "mutated"
-	if cfg.Tools["fd"].Hosts["laptop"].Options["scope"] != "source" {
-		t.Fatal("copied tool host override shares options map with source override")
 	}
 	workGroup := findHostTestGroup(cfg.Groups, "work")
 	if workGroup == nil || len(workGroup.Dots) != 1 {
@@ -650,16 +610,7 @@ func TestCopyHostConfigCopiesHostScopedSettingsAndOverrides(t *testing.T) {
 func TestRemoveHostDeletesSpecialHostGroup(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: map[string]config.ToolSpec{
-			"fd": {
-				Provider: "system",
-				Hosts: map[string]config.ToolInstallSpec{
-					"laptop": {Provider: "system", InstallWith: "brew"},
-					"other":  {Provider: "system", InstallWith: "apt"},
-				},
-			},
-			"ripgrep": {Provider: "system", InstallWith: "brew"},
-		},
+		Tools: logicalToolSpecs(logicalTool("fd", "brew"), logicalTool("ripgrep", "brew")),
 		Groups: []*config.GroupConfig{
 			{
 				Name:    "laptop",
@@ -718,13 +669,6 @@ func TestRemoveHostDeletesSpecialHostGroup(t *testing.T) {
 	}
 	if got := cfg.HostSettings["other"].DotsRepo; got != "~/other-dotfiles" {
 		t.Fatalf("host_settings[other].dots_repo = %q, want preserved", got)
-	}
-	fd := cfg.Tools["fd"]
-	if _, ok := fd.Hosts["laptop"]; ok {
-		t.Fatal("fd laptop override remained after RemoveHost")
-	}
-	if got := fd.Hosts["other"].InstallWith; got != "apt" {
-		t.Fatalf("fd other override install_with = %q, want apt", got)
 	}
 	workGroup := findHostTestGroup(cfg.Groups, "work")
 	if workGroup == nil {

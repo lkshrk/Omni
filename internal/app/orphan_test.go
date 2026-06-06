@@ -39,16 +39,7 @@ func upsertInstalled(t *testing.T, db *database.DB, name, prov string) {
 }
 
 func testEcosystemForConcrete(providerName string) string {
-	switch providerName {
-	case "brew", "apt", "apk", "dnf", "pacman", "zypper":
-		return "system"
-	case "pip", "pip3", "uv":
-		return "python"
-	case "npm", "pnpm", "bun":
-		return "node"
-	default:
-		return ""
-	}
+	return ""
 }
 
 func TestCheckSatisfiedGroups_FullySatisfied(t *testing.T) {
@@ -266,7 +257,7 @@ func TestSyncAllWithStateReturnsUpdatedToolsAndGroups(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	brew := &lifecycleProvider{stubProvider: stubProvider{name: "brew", available: true}, installed: true}
 	system := &lifecycleProvider{
-		stubProvider: stubProvider{name: "system", available: true},
+		stubProvider: stubProvider{name: "brew", available: true},
 		resolvedName: "brew",
 		installed:    true,
 	}
@@ -275,7 +266,7 @@ func TestSyncAllWithStateReturnsUpdatedToolsAndGroups(t *testing.T) {
 		t.Fatalf("config.Save: %v", err)
 	}
 	discovered := []*database.ToolCache{
-		{Name: "fzf", Provider: "system", Package: "fzf", InstalledWith: "brew", Installed: true, Tracked: false},
+		{Name: "fzf", Provider: "brew", Package: "fzf", InstalledWith: "brew", Installed: true, Tracked: false},
 	}
 
 	result, err := a.SyncAllWithState(context.Background(), app.SyncAllOptions{Discovered: discovered})
@@ -285,23 +276,23 @@ func TestSyncAllWithStateReturnsUpdatedToolsAndGroups(t *testing.T) {
 	if result.Result == nil || !slices.Equal(result.Result.ClaimedNames, []string{"fzf"}) {
 		t.Fatalf("SyncAll result = %+v, want claimed fzf", result.Result)
 	}
-	toolKey := "fzf\x00system"
+	toolKey := "fzf\x00brew"
 	if got := result.State.ToolMemberships[toolKey]; !slices.Equal(got, []string{"testhost"}) {
 		t.Fatalf("ToolMemberships[%q] = %v, want [testhost]", toolKey, got)
 	}
 	for _, tool := range result.Tools {
-		if tool.Name == "fzf" && tool.Provider == "system" && tool.Installed {
+		if tool.Name == "fzf" && tool.Provider == "brew" && tool.Installed {
 			return
 		}
 	}
-	t.Fatalf("Tools = %+v, want installed fzf/system", result.Tools)
+	t.Fatalf("Tools = %+v, want installed fzf/brew", result.Tools)
 }
 
 func TestSyncAll_ClaimsMultipleDiscoveredTools(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	brew := &lifecycleProvider{stubProvider: stubProvider{name: "brew", available: true}, installed: true}
 	system := &lifecycleProvider{
-		stubProvider: stubProvider{name: "system", available: true},
+		stubProvider: stubProvider{name: "brew", available: true},
 		resolvedName: "brew",
 		installed:    true,
 	}
@@ -310,12 +301,12 @@ func TestSyncAll_ClaimsMultipleDiscoveredTools(t *testing.T) {
 		t.Fatalf("config.Save: %v", err)
 	}
 	discovered := []*database.ToolCache{
-		{Name: "fzf", Provider: "system", Package: "fzf", InstalledWith: "brew", Installed: true, Tracked: false},
-		{Name: "fd", Provider: "system", Package: "fd", InstalledWith: "brew", Installed: true, Tracked: false},
+		{Name: "fzf", Provider: "brew", Package: "fzf", InstalledWith: "brew", Installed: true, Tracked: false},
+		{Name: "fd", Provider: "brew", Package: "fd", InstalledWith: "brew", Installed: true, Tracked: false},
 	}
 	if err := a.DB().UpsertDiscoveredBatch(context.Background(), []database.DiscoveredUpsert{
-		{Name: "fzf", Provider: "system", InstalledWith: "brew", Version: "1.0.0"},
-		{Name: "fd", Provider: "system", InstalledWith: "brew", Version: "2.0.0"},
+		{Name: "fzf", Provider: "brew", InstalledWith: "brew", Version: "1.0.0"},
+		{Name: "fd", Provider: "brew", InstalledWith: "brew", Version: "2.0.0"},
 	}); err != nil {
 		t.Fatalf("UpsertDiscoveredBatch: %v", err)
 	}
@@ -357,7 +348,7 @@ func TestSyncAll_ClaimResolvedDefaultConcreteDoesNotWriteInstallWith(t *testing.
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	brew := &lifecycleProvider{stubProvider: stubProvider{name: "brew", available: true}, installed: true}
 	system := &lifecycleProvider{
-		stubProvider: stubProvider{name: "system", available: true},
+		stubProvider: stubProvider{name: "brew", available: true},
 		resolvedName: "brew",
 		installed:    true,
 	}
@@ -366,7 +357,7 @@ func TestSyncAll_ClaimResolvedDefaultConcreteDoesNotWriteInstallWith(t *testing.
 		t.Fatalf("config.Save: %v", err)
 	}
 	discovered := []*database.ToolCache{
-		{Name: "fzf", Provider: "system", InstalledWith: "brew", Installed: true, Tracked: false},
+		{Name: "fzf", Provider: "brew", InstalledWith: "brew", Installed: true, Tracked: false},
 	}
 
 	result, err := a.SyncAll(context.Background(), app.SyncAllOptions{Discovered: discovered})
@@ -381,61 +372,8 @@ func TestSyncAll_ClaimResolvedDefaultConcreteDoesNotWriteInstallWith(t *testing.
 		t.Fatalf("config.Load: %v", err)
 	}
 	spec := updated.Tools["fzf"]
-	if spec.Provider != "system" || spec.InstallWith != "" {
-		t.Fatalf("fzf spec = %+v, want provider system without install_with", spec)
-	}
-}
-
-func TestSyncAll_NormalizesHostDefaultInstallOverrides(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost.example.com")
-	brew := &lifecycleProvider{stubProvider: stubProvider{name: "brew", available: true}, installed: true}
-	system := &lifecycleProvider{
-		stubProvider: stubProvider{name: "system", available: true},
-		resolvedName: "brew",
-		installed:    true,
-	}
-	a, cfgPath := newImportApp(t, brew, system)
-	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: map[string]config.ToolSpec{
-			"ripgrep": {
-				Provider: "system",
-				Hosts: map[string]config.ToolInstallSpec{
-					"testhost": {Provider: "system", InstallWith: "brew"},
-				},
-			},
-			"jq": {
-				Provider:    "system",
-				InstallWith: "brew",
-				Hosts: map[string]config.ToolInstallSpec{
-					"testhost": {Provider: "system", InstallWith: "brew"},
-				},
-			},
-		},
-		Groups: []*config.GroupConfig{testHostToolGroup("ripgrep", "jq")},
-	}); err != nil {
-		t.Fatalf("config.Save: %v", err)
-	}
-
-	result, err := a.SyncAll(context.Background(), app.SyncAllOptions{Discovered: []*database.ToolCache{}})
-	if err != nil {
-		t.Fatalf("SyncAll: %v", err)
-	}
-	if len(result.NormalizedProviderOverrides) != 2 {
-		t.Fatalf("NormalizedProviderOverrides = %+v, want 2 entries", result.NormalizedProviderOverrides)
-	}
-	updated, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	if _, ok := updated.Tools["ripgrep"].Hosts["testhost"]; ok {
-		t.Fatalf("ripgrep host override still present: %+v", updated.Tools["ripgrep"].Hosts)
-	}
-	jq := updated.Tools["jq"]
-	if jq.InstallWith != "brew" {
-		t.Fatalf("jq global install_with = %q, want preserved brew", jq.InstallWith)
-	}
-	if jq.Hosts["testhost"].InstallWith != "" {
-		t.Fatalf("jq host install_with = %q, want cleared", jq.Hosts["testhost"].InstallWith)
+	if len(spec.Providers) != 1 || spec.Providers[0].Provider != "brew" {
+		t.Fatalf("fzf spec = %+v, want brew provider entry", spec)
 	}
 }
 

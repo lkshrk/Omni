@@ -75,12 +75,13 @@ esac
 
 -- settings.json --
 {
+  "version": 6,
   "settings": {
     "update_quarantine": "2d"
   },
   "hosts": { "testhost": [] },
   "tools": {
-    "ripgrep": { "provider": "system", "install_with": "brew" }
+    "ripgrep": { "providers": [{ "provider": "brew" }] }
   },
   "groups": [
     { "name": "testhost", "special": "host", "tools": ["ripgrep"] }

@@ -514,40 +514,6 @@ func TestRefreshProviderInstalledWithProgress_ReportsEachTool(t *testing.T) {
 	}
 }
 
-func TestRefreshProviderInstalledWithProgress_ReportsConcreteEcosystemLabel(t *testing.T) {
-	prov := &bulkConcreteStub{
-		bulkCheckingStub: bulkCheckingStub{
-			stubProvider: stubProvider{name: "node", available: true},
-			bulk:         map[string]string{"typescript": "5.4.0"},
-		},
-		concreteName: "bun",
-	}
-	a, cfgPath := newImportApp(t, prov)
-
-	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: logicalToolSpecs(logicalTool("typescript", "node")),
-		Groups: []*config.GroupConfig{{
-			Tools: groupTools("typescript"),
-		}},
-	}); err != nil {
-		t.Fatalf("saving config: %v", err)
-	}
-
-	var events []app.RefreshInstalledProgressEvent
-	if err := a.RefreshProviderInstalledWithProgress(context.Background(), "node", func(event app.RefreshInstalledProgressEvent) {
-		events = append(events, event)
-	}); err != nil {
-		t.Fatalf("RefreshProviderInstalledWithProgress: %v", err)
-	}
-
-	if len(events) != 1 {
-		t.Fatalf("events len = %d, want 1: %#v", len(events), events)
-	}
-	if events[0].Provider != "node" || events[0].ProviderLabel != "node/bun" {
-		t.Fatalf("event = %#v, want raw node with label node/bun", events[0])
-	}
-}
-
 type cancelingBulkStub struct {
 	bulkCheckingStub
 	cancel context.CancelFunc
@@ -589,7 +555,7 @@ func TestRefreshProviderInstalled_WritesAfterScanContextExpires(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	prov := &cancelingBulkStub{
 		bulkCheckingStub: bulkCheckingStub{
-			stubProvider: stubProvider{name: "system", available: true},
+			stubProvider: stubProvider{name: "brew", available: true},
 			bulk:         map[string]string{"fd": "9.0.0"},
 		},
 		cancel: cancel,
@@ -597,7 +563,7 @@ func TestRefreshProviderInstalled_WritesAfterScanContextExpires(t *testing.T) {
 	a, cfgPath := newImportApp(t, prov)
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: logicalToolSpecs(logicalTool("fd", "system")),
+		Tools: logicalToolSpecs(logicalTool("fd", "brew")),
 		Groups: []*config.GroupConfig{{
 			Tools: groupTools("fd"),
 		}},
@@ -605,10 +571,10 @@ func TestRefreshProviderInstalled_WritesAfterScanContextExpires(t *testing.T) {
 		t.Fatalf("config.Save: %v", err)
 	}
 
-	if err := a.RefreshProviderInstalled(ctx, "system"); err != nil {
+	if err := a.RefreshProviderInstalled(ctx, "brew"); err != nil {
 		t.Fatalf("RefreshProviderInstalled: %v", err)
 	}
-	got, err := a.DB().Get(context.Background(), "fd", "system", "fd")
+	got, err := a.DB().Get(context.Background(), "fd", "brew", "fd")
 	if err != nil {
 		t.Fatalf("DB.Get: %v", err)
 	}
@@ -619,13 +585,13 @@ func TestRefreshProviderInstalled_WritesAfterScanContextExpires(t *testing.T) {
 
 func TestRefreshProviderInstalled_ReturnsBulkScanDeadline(t *testing.T) {
 	prov := &errorBulkStub{
-		stubProvider: stubProvider{name: "system", available: true},
+		stubProvider: stubProvider{name: "brew", available: true},
 		err:          context.DeadlineExceeded,
 	}
 	a, cfgPath := newImportApp(t, prov)
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: logicalToolSpecs(logicalTool("fd", "system")),
+		Tools: logicalToolSpecs(logicalTool("fd", "brew")),
 		Groups: []*config.GroupConfig{{
 			Tools: groupTools("fd"),
 		}},
@@ -633,51 +599,9 @@ func TestRefreshProviderInstalled_ReturnsBulkScanDeadline(t *testing.T) {
 		t.Fatalf("config.Save: %v", err)
 	}
 
-	err := a.RefreshProviderInstalled(context.Background(), "system")
+	err := a.RefreshProviderInstalled(context.Background(), "brew")
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("RefreshProviderInstalled error = %v, want context deadline", err)
-	}
-}
-
-func TestRefreshProviderInstalled_ReusesConcreteOwnerBulkMap(t *testing.T) {
-	system := &countingBulkConcreteStub{
-		stubProvider: stubProvider{name: "system", available: true},
-		bulk:         map[string]string{"fd": "9.0.0"},
-		concreteName: "brew",
-	}
-	brew := &countingBulkConcreteStub{
-		stubProvider: stubProvider{name: "brew", available: true},
-		bulk:         map[string]string{"fd": "9.0.0"},
-	}
-	a, cfgPath := newImportApp(t, system, brew)
-
-	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: logicalToolSpecs(logicalTool("fd", "system")),
-		Groups: []*config.GroupConfig{{
-			Tools: groupTools("fd"),
-		}},
-	}); err != nil {
-		t.Fatalf("config.Save: %v", err)
-	}
-	if err := a.DB().Upsert(context.Background(), &database.ToolCache{
-		Name:          "fd",
-		Provider:      "system",
-		Package:       "fd",
-		Installed:     true,
-		InstalledWith: "brew",
-		Tracked:       true,
-	}); err != nil {
-		t.Fatalf("seed cache: %v", err)
-	}
-
-	if err := a.RefreshProviderInstalled(context.Background(), "system"); err != nil {
-		t.Fatalf("RefreshProviderInstalled: %v", err)
-	}
-	if system.calls != 1 {
-		t.Fatalf("system bulk calls = %d, want 1", system.calls)
-	}
-	if brew.calls != 0 {
-		t.Fatalf("brew owner bulk calls = %d, want 0 because system scan already resolved to brew", brew.calls)
 	}
 }
 
@@ -782,58 +706,19 @@ func TestRefreshProviderInstalled_UnavailableProvider(t *testing.T) {
 	}
 }
 
-// TestRefreshProviderInstalled_MultiManagerPath verifies the
-// MultiManagerBulkChecker path of RefreshProviderInstalled.
-func TestRefreshProviderInstalled_MultiManagerPath(t *testing.T) {
-	prov := &multiManagerStub{
-		stubProvider: stubProvider{name: "python", available: true},
-		entries: map[string]provider.InstalledEntry{
-			"black": {Version: "24.3.0", ConcreteManager: "uv"},
-		},
-	}
-	a, cfgPath := newImportApp(t, prov)
-
-	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: logicalToolSpecs(logicalTool("black", "python")),
-		Groups: []*config.GroupConfig{{
-			Tools: groupTools("black"),
-		}},
-	}); err != nil {
-		t.Fatalf("config.Save: %v", err)
-	}
-
-	if err := a.RefreshProviderInstalled(context.Background(), "python"); err != nil {
-		t.Fatalf("RefreshProviderInstalled multi-manager: %v", err)
-	}
-
-	tools, err := a.ListTools(context.Background(), "")
-	if err != nil {
-		t.Fatalf("ListTools: %v", err)
-	}
-	if len(tools) != 1 {
-		t.Fatalf("got %d tools, want 1", len(tools))
-	}
-	if !tools[0].Installed {
-		t.Errorf("black.Installed = false, want true")
-	}
-	if tools[0].InstalledWith != "uv" {
-		t.Errorf("black.InstalledWith = %q, want uv", tools[0].InstalledWith)
-	}
-}
-
 func TestRefreshProviderInstalled_MultiManagerPath_UsesFullSlashPackage(t *testing.T) {
 	prov := &multiManagerStub{
-		stubProvider: stubProvider{name: "node", available: true},
+		stubProvider: stubProvider{name: "npm", available: true},
 		entries: map[string]provider.InstalledEntry{
 			"@playwright/test": {Version: "1.52.0", ConcreteManager: "npm"},
-			"test":             {Version: "0.0.1", ConcreteManager: "pnpm"},
+			"test":             {Version: "0.0.1", ConcreteManager: "npm"},
 		},
 	}
 	a, cfgPath := newImportApp(t, prov)
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(
-			logicalToolPackage("playwright-test", "node", "@playwright/test"),
+			logicalToolPackage("playwright-test", "npm", "@playwright/test"),
 		),
 		Groups: []*config.GroupConfig{{
 			Tools: groupTools("playwright-test"),
@@ -842,62 +727,16 @@ func TestRefreshProviderInstalled_MultiManagerPath_UsesFullSlashPackage(t *testi
 		t.Fatalf("config.Save: %v", err)
 	}
 
-	if err := a.RefreshProviderInstalled(context.Background(), "node"); err != nil {
+	if err := a.RefreshProviderInstalled(context.Background(), "npm"); err != nil {
 		t.Fatalf("RefreshProviderInstalled multi-manager: %v", err)
 	}
 
-	got, err := a.DB().Get(context.Background(), "playwright-test", "node", "@playwright/test")
+	got, err := a.DB().Get(context.Background(), "playwright-test", "npm", "@playwright/test")
 	if err != nil {
 		t.Fatalf("Get playwright-test: %v", err)
 	}
 	if !got.Installed || got.InstalledWith != "npm" || got.Version.String != "1.52.0" {
 		t.Fatalf("cache = installed:%v owner:%q version:%q, want true/npm/1.52.0", got.Installed, got.InstalledWith, got.Version.String)
-	}
-}
-
-func TestRefreshProviderInstalled_PreservesCachedConcreteOwner(t *testing.T) {
-	brew := &bulkCheckingStub{
-		stubProvider: stubProvider{name: "brew", available: true},
-		bulk:         map[string]string{"ripgrep": "14.1.0"},
-	}
-	system := &bulkConcreteStub{
-		bulkCheckingStub: bulkCheckingStub{
-			stubProvider: stubProvider{name: "system", available: true},
-			bulk:         map[string]string{},
-		},
-		concreteName: "apt",
-	}
-	a, cfgPath := newImportApp(t, brew, system)
-	ctx := context.Background()
-	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: logicalToolSpecs(logicalTool("ripgrep", "system")),
-		Groups: []*config.GroupConfig{{
-			Tools: groupTools("ripgrep"),
-		}},
-	}); err != nil {
-		t.Fatalf("config.Save: %v", err)
-	}
-	if err := a.DB().Upsert(ctx, &database.ToolCache{
-		Name:          "ripgrep",
-		Provider:      "system",
-		Package:       "ripgrep",
-		Installed:     true,
-		InstalledWith: "brew",
-		Tracked:       true,
-	}); err != nil {
-		t.Fatalf("seed cache: %v", err)
-	}
-
-	if err := a.RefreshProviderInstalled(ctx, "system"); err != nil {
-		t.Fatalf("RefreshProviderInstalled: %v", err)
-	}
-
-	got, err := a.DB().Get(ctx, "ripgrep", "system", "ripgrep")
-	if err != nil {
-		t.Fatalf("cache get: %v", err)
-	}
-	if !got.Installed || got.InstalledWith != "brew" || got.Version.String != "14.1.0" {
-		t.Fatalf("cache installed/with/version = %v/%q/%q, want true/brew/14.1.0", got.Installed, got.InstalledWith, got.Version.String)
 	}
 }
 
@@ -946,48 +785,6 @@ func TestRefreshDiscovered_PopulatesDB(t *testing.T) {
 	}
 	if discovered[0].Name != "ripgrep" {
 		t.Errorf("discovered name = %q, want ripgrep", discovered[0].Name)
-	}
-}
-
-func TestRefreshDiscovered_MetaMappedToolKeepsConcreteInstalledWith(t *testing.T) {
-	brew := &listInstalledStub{
-		stubProvider: stubProvider{name: "brew", available: true},
-		installed: []provider.InstalledTool{
-			{Tool: provider.Tool{Name: "ripgrep", Provider: "brew"}, Version: "14.1.0"},
-		},
-	}
-	system := &bulkConcreteStub{
-		bulkCheckingStub: bulkCheckingStub{
-			stubProvider: stubProvider{name: "system", available: true},
-		},
-		concreteName: "brew",
-	}
-	a, cfgPath := newImportApp(t, brew, system)
-	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: logicalToolSpecs(logicalTool("git", "system")),
-		Groups: []*config.GroupConfig{{
-			Tools: groupTools("git"),
-		}},
-	}); err != nil {
-		t.Fatalf("config.Save: %v", err)
-	}
-
-	if err := a.RefreshDiscovered(context.Background()); err != nil {
-		t.Fatalf("RefreshDiscovered: %v", err)
-	}
-
-	discovered, err := a.ListDiscovered(context.Background())
-	if err != nil {
-		t.Fatalf("ListDiscovered: %v", err)
-	}
-	if len(discovered) != 1 {
-		t.Fatalf("got %d discovered tools, want 1", len(discovered))
-	}
-	if discovered[0].Provider != "system" {
-		t.Fatalf("Provider = %q, want system", discovered[0].Provider)
-	}
-	if discovered[0].InstalledWith != "brew" {
-		t.Fatalf("InstalledWith = %q, want brew", discovered[0].InstalledWith)
 	}
 }
 

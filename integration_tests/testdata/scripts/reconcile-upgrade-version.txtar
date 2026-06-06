@@ -2,10 +2,10 @@
 exec chmod 755 bin/brew
 env PATH=$WORK/bin:$PATH
 
-exec omni-seed-cache ripgrep system ripgrep 14.0.0 15.0.0 brew
+exec omni-seed-cache ripgrep brew ripgrep 14.0.0 15.0.0 brew
 exec omni --yes --config settings.json reconcile --skip-privileged
 stdout 'upgrading ripgrep \(15.0.0\)'
-stdout 'done: ripgrep \(15.0.0\) \(system\)'
+stdout 'done: ripgrep \(15.0.0\) \(brew\)'
 stdout 'Reconcile complete .* 0 installed, 0 added to config, 1 upgraded'
 exec test -f .omni-cache/fake-brew/ripgrep-upgraded
 
@@ -78,9 +78,10 @@ esac
 
 -- settings.json --
 {
+  "version": 6,
   "hosts": { "testhost": ["base"] },
   "tools": {
-    "ripgrep": { "provider": "system", "install_with": "brew" }
+    "ripgrep": { "providers": [{ "provider": "brew" }] }
   },
   "groups": [
     { "name": "testhost", "special": "host" },

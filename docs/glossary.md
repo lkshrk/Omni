@@ -46,10 +46,10 @@ package, optional host variants, and ignore patterns.
 
 See [Dotfiles](dotfiles.md).
 
-## Ecosystem Provider
+## Provider
 
-A portable provider identity in config: `system`, `node`, or `python`.
-Ecosystem providers delegate to concrete managers on each host.
+A concrete package manager or registry client in config, such as `brew`,
+`apt`, `npm`, or `pip`.
 
 See [Providers](providers.md).
 

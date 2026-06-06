@@ -29,16 +29,18 @@ func TestToolInstallSpec_EffectivePackage(t *testing.T) {
 
 func TestToolSpec_DefaultInstallSpec(t *testing.T) {
 	spec := config.ToolSpec{
-		Provider:    "brew",
-		Package:     "ripgrep",
-		InstallWith: "brew",
-		Options:     map[string]string{"k": "v"},
-		Taps:        []string{"homebrew/core"},
-		Ignore:      true,
+		Providers: []config.ToolInstallSpec{{
+			Provider: "brew",
+			Package:  "ripgrep",
+			Bin:      "rg",
+			Options:  map[string]string{"k": "v"},
+		}},
+		Taps:   []string{"homebrew/core"},
+		Ignore: true,
 	}
 	got := spec.DefaultInstallSpec()
-	if got.Provider != "brew" || got.Package != "ripgrep" || got.InstallWith != "brew" {
-		t.Errorf("DefaultInstallSpec did not copy provider/package/install_with: %+v", got)
+	if got.Provider != "brew" || got.Package != "ripgrep" || got.Bin != "rg" {
+		t.Errorf("DefaultInstallSpec did not copy provider/package/bin: %+v", got)
 	}
 	if got.Options["k"] != "v" {
 		t.Errorf("DefaultInstallSpec did not copy options: %+v", got.Options)
@@ -150,7 +152,7 @@ func TestValidateRoot_NilCfgReturnsNil(t *testing.T) {
 
 func TestValidateRoot_EmptyToolNameRejected(t *testing.T) {
 	cfg := &config.RootConfig{
-		Tools: map[string]config.ToolSpec{"   ": {Provider: "brew"}},
+		Tools: map[string]config.ToolSpec{"   ": {Providers: []config.ToolInstallSpec{{Provider: "brew"}}}},
 	}
 	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"brew"}})
 	if !containsErrorMessage(errs, "tool name is required") {
@@ -160,7 +162,7 @@ func TestValidateRoot_EmptyToolNameRejected(t *testing.T) {
 
 func TestValidateRoot_MissingProviderRejected(t *testing.T) {
 	cfg := &config.RootConfig{
-		Tools: map[string]config.ToolSpec{"ripgrep": {}}, // no provider
+		Tools: map[string]config.ToolSpec{"ripgrep": {Providers: []config.ToolInstallSpec{{}}}},
 	}
 	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"brew"}})
 	if !containsErrorMessage(errs, "provider is required") {
@@ -170,7 +172,7 @@ func TestValidateRoot_MissingProviderRejected(t *testing.T) {
 
 func TestValidateRoot_UnknownProviderRejected(t *testing.T) {
 	cfg := &config.RootConfig{
-		Tools: map[string]config.ToolSpec{"ripgrep": {Provider: "fakemgr"}},
+		Tools: map[string]config.ToolSpec{"ripgrep": {Providers: []config.ToolInstallSpec{{Provider: "fakemgr"}}}},
 	}
 	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"brew"}})
 	if !containsErrorMessage(errs, `unknown provider "fakemgr"`) {
@@ -178,47 +180,45 @@ func TestValidateRoot_UnknownProviderRejected(t *testing.T) {
 	}
 }
 
-func TestValidateRoot_NonEcosystemProviderRejectedWhenEcosystemsListed(t *testing.T) {
+func TestValidateRoot_ProviderEntriesAcceptConcreteProvidersWhenEcosystemsListed(t *testing.T) {
 	cfg := &config.RootConfig{
-		Tools: map[string]config.ToolSpec{"ripgrep": {Provider: "brew"}},
+		Tools: map[string]config.ToolSpec{"ripgrep": {Providers: []config.ToolInstallSpec{{Provider: "brew"}}}},
 	}
 	errs := config.ValidateRoot(cfg, config.ProviderValidation{
 		Known:      []string{"brew", "system"},
-		Ecosystems: []string{"system"}, // brew is not an ecosystem
+		Ecosystems: []string{"system"},
 	})
-	if !containsErrorMessage(errs, "is not an ecosystem provider") {
-		t.Errorf("expected ecosystem-only error, got %v", errs)
+	if len(errs) != 0 {
+		t.Errorf("concrete provider entry produced errors: %v", errs)
 	}
 }
 
-func TestValidateRoot_InstallWithEcosystemRejected(t *testing.T) {
+func TestValidateRoot_MetaProviderEntryRejected(t *testing.T) {
 	cfg := &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
-			"ripgrep": {Provider: "system", InstallWith: "system"},
+			"ripgrep": {Providers: []config.ToolInstallSpec{{Provider: "system"}}},
 		},
 	}
 	errs := config.ValidateRoot(cfg, config.ProviderValidation{
 		Known:      []string{"system", "brew"},
 		Ecosystems: []string{"system"},
 	})
-	if !containsErrorMessage(errs, "must be a concrete provider or manager") {
-		t.Errorf("expected install_with-not-concrete error, got %v", errs)
+	if !containsErrorMessage(errs, "meta provider") {
+		t.Errorf("expected meta-provider error, got %v", errs)
 	}
 }
 
-func TestValidateRoot_InstallWithWrongEcosystemRejected(t *testing.T) {
+func TestValidateRoot_InstallWithRejectedOnProviderEntry(t *testing.T) {
 	cfg := &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
-			"ripgrep": {Provider: "system", InstallWith: "pip"},
+			"ripgrep": {Providers: []config.ToolInstallSpec{{Provider: "brew", InstallWith: "apt"}}},
 		},
 	}
 	errs := config.ValidateRoot(cfg, config.ProviderValidation{
-		Known:              []string{"system", "brew", "pip"},
-		Ecosystems:         []string{"system", "python"},
-		ConcreteEcosystems: map[string]string{"pip": "python", "brew": "system"},
+		Known: []string{"brew", "apt"},
 	})
-	if !containsErrorMessage(errs, `belongs to ecosystem "python"`) {
-		t.Errorf("expected wrong-ecosystem error, got %v", errs)
+	if !containsErrorMessage(errs, "install_with is not supported") {
+		t.Errorf("expected install_with rejection, got %v", errs)
 	}
 }
 
@@ -226,7 +226,7 @@ func TestValidateRoot_ToolFallbackAcceptsGitHubSystemTool(t *testing.T) {
 	cfg := &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"rg": {
-				Provider: "system",
+				Providers: []config.ToolInstallSpec{{Provider: "brew"}},
 				Fallback: &config.FallbackSpec{
 					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
 					Status: config.FallbackStatusUnverified,
@@ -239,17 +239,17 @@ func TestValidateRoot_ToolFallbackAcceptsGitHubSystemTool(t *testing.T) {
 			},
 		},
 	}
-	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"system"}})
+	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"brew"}})
 	if len(errs) != 0 {
 		t.Errorf("valid fallback produced errors: %v", errs)
 	}
 }
 
-func TestValidateRoot_ToolFallbackRejectsNonSystemTool(t *testing.T) {
+func TestValidateRoot_ToolFallbackAcceptsAnyToolProvider(t *testing.T) {
 	cfg := &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"eslint": {
-				Provider: "node",
+				Providers: []config.ToolInstallSpec{{Provider: "npm"}},
 				Fallback: &config.FallbackSpec{
 					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "eslint", Repo: "eslint"},
 					Status: config.FallbackStatusUnresolved,
@@ -257,9 +257,9 @@ func TestValidateRoot_ToolFallbackRejectsNonSystemTool(t *testing.T) {
 			},
 		},
 	}
-	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"node"}})
-	if !containsErrorMessage(errs, "fallback is only supported for system tools") {
-		t.Errorf("expected non-system fallback error, got %v", errs)
+	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"npm"}})
+	if len(errs) != 0 {
+		t.Errorf("fallback on concrete provider tool produced errors: %v", errs)
 	}
 }
 
@@ -267,7 +267,7 @@ func TestValidateRoot_ToolFallbackRequiresGitHubOwnerAndRepo(t *testing.T) {
 	cfg := &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"rg": {
-				Provider: "system",
+				Providers: []config.ToolInstallSpec{{Provider: "brew"}},
 				Fallback: &config.FallbackSpec{
 					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Repo: "ripgrep"},
 					Status: config.FallbackStatusUnresolved,
@@ -275,7 +275,7 @@ func TestValidateRoot_ToolFallbackRequiresGitHubOwnerAndRepo(t *testing.T) {
 			},
 		},
 	}
-	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"system"}})
+	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"brew"}})
 	if !containsErrorMessage(errs, "github fallback source requires owner and repo") {
 		t.Errorf("expected github owner/repo error, got %v", errs)
 	}
@@ -285,7 +285,7 @@ func TestValidateRoot_ToolFallbackUnresolvedCanOmitCheck(t *testing.T) {
 	cfg := &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"rg": {
-				Provider: "system",
+				Providers: []config.ToolInstallSpec{{Provider: "brew"}},
 				Fallback: &config.FallbackSpec{
 					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
 					Status: config.FallbackStatusUnresolved,
@@ -293,7 +293,7 @@ func TestValidateRoot_ToolFallbackUnresolvedCanOmitCheck(t *testing.T) {
 			},
 		},
 	}
-	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"system"}})
+	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"brew"}})
 	if len(errs) != 0 {
 		t.Errorf("unresolved fallback without check produced errors: %v", errs)
 	}
@@ -303,7 +303,7 @@ func TestValidateRoot_ToolFallbackRequiresCheckWhenUsable(t *testing.T) {
 	cfg := &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"rg": {
-				Provider: "system",
+				Providers: []config.ToolInstallSpec{{Provider: "brew"}},
 				Fallback: &config.FallbackSpec{
 					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
 					Status: config.FallbackStatusUnverified,
@@ -311,7 +311,7 @@ func TestValidateRoot_ToolFallbackRequiresCheckWhenUsable(t *testing.T) {
 			},
 		},
 	}
-	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"system"}})
+	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"brew"}})
 	if !containsErrorMessage(errs, "fallback check command is required unless status is unresolved") {
 		t.Errorf("expected fallback check error, got %v", errs)
 	}
@@ -321,7 +321,7 @@ func TestValidateRoot_ToolFallbackRejectsUnknownStatus(t *testing.T) {
 	cfg := &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"rg": {
-				Provider: "system",
+				Providers: []config.ToolInstallSpec{{Provider: "brew"}},
 				Fallback: &config.FallbackSpec{
 					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
 					Status: "desperate",
@@ -329,7 +329,7 @@ func TestValidateRoot_ToolFallbackRejectsUnknownStatus(t *testing.T) {
 			},
 		},
 	}
-	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"system"}})
+	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"brew"}})
 	if !containsErrorMessage(errs, `unknown fallback status "desperate"`) {
 		t.Errorf("expected unknown status error, got %v", errs)
 	}

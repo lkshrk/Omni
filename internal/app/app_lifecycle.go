@@ -436,10 +436,10 @@ func (a *App) validateDiscoveredClaim(claim discoveredClaim) error {
 	if !a.knownProvider(claim.configProvider) {
 		return fmt.Errorf("unknown provider %q", claim.configProvider)
 	}
-	if !a.knownEcosystemProvider(claim.configProvider) {
-		return fmt.Errorf("provider %q is not an ecosystem provider", claim.configProvider)
+	if a.knownEcosystemProvider(claim.configProvider) {
+		return fmt.Errorf("provider %q must be concrete", claim.configProvider)
 	}
-	return a.validateInstallWith(claim.configProvider, claim.installWith)
+	return nil
 }
 
 func (a *App) addDiscoveredClaimsToConfig(groupName string, claims []discoveredClaim) error {
@@ -466,10 +466,25 @@ func (a *App) addDiscoveredClaimsToConfig(groupName string, claims []discoveredC
 			cfg.Tools = make(map[string]config.ToolSpec)
 		}
 		for _, claim := range claims {
+			if err := a.validateDiscoveredClaim(claim); err != nil {
+				return err
+			}
 			spec := cfg.Tools[claim.name]
-			spec.Provider = claim.configProvider
-			spec.Package = claim.pkg
-			spec.InstallWith = claim.installWith
+			providerName := claim.installWith
+			if providerName == "" {
+				providerName = claim.configProvider
+			}
+			if providerName == "pip3" {
+				providerName = "pip"
+			}
+			spec.Providers = upsertToolProvider(spec.Providers, config.ToolInstallSpec{
+				Provider: providerName,
+				Package:  claim.pkg,
+			})
+			spec.Provider = ""
+			spec.Package = ""
+			spec.InstallWith = ""
+			spec.Options = nil
 			cfg.Tools[claim.name] = spec
 			if !containsToolMembership(gc.Tools, claim.name) {
 				gc.Tools = append(gc.Tools, config.ToolEntry{Name: claim.name})
@@ -492,7 +507,7 @@ func (a *App) addDiscoveredClaimsToConfig(groupName string, claims []discoveredC
 
 // resolveProvider returns the first available provider from priority.
 // Falls back to the registry/catalog install priority when priority is empty.
-func (a *App) resolveProvider(ctx context.Context, priority []string) (string, error) {
+func (a *App) resolveProvider(ctx context.Context, priority []string, disabledProviders ...[]string) (string, error) {
 	if len(priority) == 0 {
 		if a.registry != nil {
 			priority = a.registry.DefaultInstallProviderNames()
@@ -501,7 +516,11 @@ func (a *App) resolveProvider(ctx context.Context, priority []string) (string, e
 			priority = provider.BuiltinDefaultInstallProviderNames()
 		}
 	}
+	disabled := disabledProviderSet(disabledProviders...)
 	for _, name := range priority {
+		if disabled[name] {
+			continue
+		}
 		p, ok := a.registry.Get(name)
 		if !ok {
 			continue
@@ -526,7 +545,7 @@ func (a *App) DefaultInstallProvider(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("loading settings: %w", err)
 	}
-	resolved, err := a.ResolveProvider(ctx, settings.EcosystemPriority("system"))
+	resolved, err := a.resolveProvider(ctx, defaultProviderPriority(settings), settings.DisabledProviders)
 	if err != nil {
 		return "", fmt.Errorf("no provider available; use --provider to specify one")
 	}
@@ -595,7 +614,7 @@ func (a *App) Install(ctx context.Context, name, providerName string) error {
 
 	if providerName == "" {
 		settings, _ := a.LoadSettings()
-		resolved, err := a.resolveProvider(ctx, settings.EcosystemPriority("system"))
+		resolved, err := a.resolveProvider(ctx, defaultProviderPriority(settings), settings.DisabledProviders)
 		if err != nil {
 			return err
 		}
@@ -631,6 +650,35 @@ func (a *App) Install(ctx context.Context, name, providerName string) error {
 		Version:       sql.NullString{String: ver, Valid: ver != ""},
 		LastChecked:   time.Now(),
 	})
+}
+
+func defaultProviderPriority(settings config.Settings) []string {
+	if len(settings.ProviderPriority) > 0 {
+		return append([]string(nil), settings.ProviderPriority...)
+	}
+	return settings.EcosystemPriority("system")
+}
+
+func disabledProviderSet(groups ...[]string) map[string]bool {
+	disabled := make(map[string]bool)
+	for _, names := range groups {
+		for _, name := range names {
+			if name == "" {
+				continue
+			}
+			disabled[name] = true
+			ecosystem, ok := provider.BuiltinEcosystemFor(name)
+			if !ok || ecosystem != name {
+				continue
+			}
+			for concrete, concreteEcosystem := range provider.BuiltinConcreteEcosystems() {
+				if concreteEcosystem == ecosystem {
+					disabled[concrete] = true
+				}
+			}
+		}
+	}
+	return disabled
 }
 
 func (a *App) nativePackageUnavailable(ctx context.Context, t config.ToolEntry, prov provider.Provider, opProvider string) (bool, string, string, error) {
@@ -1192,21 +1240,19 @@ func (a *App) Add(ctx context.Context, providerName, pkg, name, groupName, insta
 	if providerName == "" {
 		return fmt.Errorf("provider is required")
 	}
-	if !a.knownProvider(providerName) {
-		return fmt.Errorf("unknown provider %q", providerName)
-	}
-	if !a.knownEcosystemProvider(providerName) {
-		return fmt.Errorf("provider %q is not an ecosystem provider", providerName)
-	}
-	if err := a.validateInstallWith(providerName, installWith); err != nil {
-		return err
-	}
-
 	if name == "" {
 		name = pkg
 	}
 	if groupName == "" {
 		groupName = currentMachineGroupName()
+	}
+	var options map[string]string
+	if first, ok := firstOptionMap(optionMaps); ok {
+		options = first
+	}
+	entry, err := a.providerEntryFromLegacyArgs(providerName, pkg, installWith, options)
+	if err != nil {
+		return err
 	}
 
 	if err := a.withConfig(func(cfg *config.RootConfig) error {
@@ -1223,12 +1269,11 @@ func (a *App) Add(ctx context.Context, providerName, pkg, name, groupName, insta
 			cfg.Tools = make(map[string]config.ToolSpec)
 		}
 		spec := cfg.Tools[name]
-		spec.Provider = providerName
-		spec.Package = pkg
-		spec.InstallWith = installWith
-		if options, ok := firstOptionMap(optionMaps); ok {
-			spec.Options = cloneOptionMap(options)
-		}
+		spec.Providers = upsertToolProvider(spec.Providers, entry)
+		spec.Provider = ""
+		spec.Package = ""
+		spec.InstallWith = ""
+		spec.Options = nil
 		cfg.Tools[name] = spec
 		if !containsToolMembership(gc.Tools, name) {
 			gc.Tools = append(gc.Tools, config.ToolEntry{Name: name})
@@ -1246,13 +1291,13 @@ func (a *App) Add(ctx context.Context, providerName, pkg, name, groupName, insta
 	}); err != nil {
 		return err
 	}
-	if err := a.enrichToolGitFromCachedMetadata(ctx, name, providerName, pkg); err != nil {
+	if err := a.enrichToolGitFromCachedMetadata(ctx, name, entry.Provider, entry.Package); err != nil {
 		return err
 	}
 	// Promote any existing orphan DB row to config-tracked so the UI reflects
 	// the claim immediately without waiting for the next full loadTools cycle.
 	// No-op if the row doesn't exist yet.
-	return a.readDB().MarkTracked(ctx, name, providerName, pkg)
+	return a.readDB().MarkTracked(ctx, name, entry.Provider, entry.Package)
 }
 
 func (a *App) AddWithState(ctx context.Context, opts AddToolOptions) (*ToolGroupMutationState, error) {

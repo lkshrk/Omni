@@ -114,18 +114,18 @@ func (a *App) InstallToolFallback(ctx context.Context, name string) error {
 	}
 	if err := a.runFallbackCommand(ctx, name, "install", spec, fallback, fallback.Commands.Install); err != nil {
 		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
-		_ = a.readDB().MarkFailed(ctx, name, spec.Provider, fallbackPackage(name, spec), err.Error())
+		_ = a.readDB().MarkFailed(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec), err.Error())
 		return err
 	}
 	installed, err := a.CheckToolFallback(ctx, name)
 	if err != nil {
 		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
-		_ = a.readDB().MarkFailed(ctx, name, spec.Provider, fallbackPackage(name, spec), err.Error())
+		_ = a.readDB().MarkFailed(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec), err.Error())
 		return err
 	}
 	if !installed {
 		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
-		_ = a.readDB().MarkFailed(ctx, name, spec.Provider, fallbackPackage(name, spec), "fallback install verification failed")
+		_ = a.readDB().MarkFailed(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec), "fallback install verification failed")
 		return fmt.Errorf("fallback install verification failed for %s: check command did not pass", name)
 	}
 	if err := a.setToolFallbackStatus(name, config.FallbackStatusVerified); err != nil {
@@ -133,7 +133,7 @@ func (a *App) InstallToolFallback(ctx context.Context, name string) error {
 	}
 	if err := a.readDB().Upsert(ctx, &database.ToolCache{
 		Name:          name,
-		Provider:      spec.Provider,
+		Provider:      fallbackProvider(spec),
 		Package:       fallbackPackage(name, spec),
 		Installed:     true,
 		InstalledWith: fallbackInstalledWith(fallback),
@@ -142,7 +142,7 @@ func (a *App) InstallToolFallback(ctx context.Context, name string) error {
 	}); err != nil {
 		return err
 	}
-	return a.readDB().UpdateOutdated(ctx, name, spec.Provider, fallbackPackage(name, spec), false, "")
+	return a.readDB().UpdateOutdated(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec), false, "")
 }
 
 func (a *App) CheckToolFallback(ctx context.Context, name string) (bool, error) {
@@ -206,7 +206,7 @@ func (a *App) UpgradeToolFallback(ctx context.Context, name string) error {
 	}
 	if err := a.readDB().Upsert(ctx, &database.ToolCache{
 		Name:          name,
-		Provider:      spec.Provider,
+		Provider:      fallbackProvider(spec),
 		Package:       fallbackPackage(name, spec),
 		Installed:     true,
 		InstalledWith: fallbackInstalledWith(upgradeFallback),
@@ -215,14 +215,14 @@ func (a *App) UpgradeToolFallback(ctx context.Context, name string) error {
 	}); err != nil {
 		return err
 	}
-	return a.readDB().UpdateOutdated(ctx, name, spec.Provider, fallbackPackage(name, spec), false, "")
+	return a.readDB().UpdateOutdated(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec), false, "")
 }
 
 func (a *App) githubFallbackUpgradeCandidate(ctx context.Context, name string, spec config.ToolSpec, fallback *config.FallbackSpec) (*config.FallbackSpec, bool, error) {
 	if !githubFallbackHasSavedReleaseMetadata(fallback) {
 		return fallback, false, nil
 	}
-	cached, err := a.readDB().Get(ctx, name, spec.Provider, fallbackPackage(name, spec))
+	cached, err := a.readDB().Get(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return fallback, false, nil
@@ -255,7 +255,7 @@ func (a *App) UninstallToolFallback(ctx context.Context, name string) error {
 	if err := a.runFallbackCommand(ctx, name, "uninstall", spec, fallback, fallback.Commands.Uninstall); err != nil {
 		return err
 	}
-	return a.readDB().Delete(ctx, name, spec.Provider, fallbackPackage(name, spec))
+	return a.readDB().Delete(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec))
 }
 
 func (a *App) configuredFallback(name string) (config.ToolSpec, *config.FallbackSpec, error) {
@@ -436,10 +436,22 @@ func fallbackInstalledWith(fallback *config.FallbackSpec) string {
 }
 
 func fallbackPackage(name string, spec config.ToolSpec) string {
+	install := spec.DefaultInstallSpec()
+	if strings.TrimSpace(install.Package) != "" {
+		return install.Package
+	}
 	if strings.TrimSpace(spec.Package) != "" {
 		return spec.Package
 	}
 	return name
+}
+
+func fallbackProvider(spec config.ToolSpec) string {
+	install := spec.DefaultInstallSpec()
+	if strings.TrimSpace(install.Provider) != "" {
+		return install.Provider
+	}
+	return spec.Provider
 }
 
 func parseGitHubRepo(repo string) (string, string, error) {

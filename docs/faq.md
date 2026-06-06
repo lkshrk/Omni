@@ -1,45 +1,35 @@
 # FAQ
 
-## Why does Omni use `system`, `node`, and `python` instead of just `brew` or `uv`?
+## Why does Omni store provider lists instead of one provider?
 
-Those ecosystem providers keep config portable. A tool configured as `system`
-can install through `apt` on one machine and `brew` on another without changing
-the logical tool entry.
+Package names are not portable across package managers. Omni stores the
+concrete provider candidates it has actually learned for a logical tool, in
+priority order.
 
-Use concrete providers only when the concrete manager itself is the important
-part of the declaration.
+The first provider is the normal install target. Additional providers are
+high-confidence alternatives from search/import metadata.
 
-## When should I use `install_with`?
+## How do I prefer one provider over another?
 
-Use `install_with` for one exceptional tool. Use manager settings for ecosystem
-defaults.
-
-Good:
+Set provider priority globally or for one host:
 
 ```json
 {
-  "tools": {
-    "typescript": {
-      "provider": "node",
-      "install_with": "pnpm"
+  "host_settings": {
+    "server": {
+      "provider_priority": ["apt", "brew", "npm", "pip"]
     }
   }
 }
 ```
 
-Better for ecosystem-wide policy:
+## Why does a tool show a different installed provider?
 
-```sh
-omni settings set node.manager pnpm
-```
+The configured provider is desired state. The installed provider in cache is
+observed ownership from the machine. They can differ after manual package work,
+provider migration, or fallback install.
 
-## Why does a tool show `system(brew)` or `python(uv)`?
-
-The first name is the portable provider from config. The name in parentheses is
-the concrete manager Omni resolved or observed for this machine.
-
-That display is useful during migrations because it separates desired portable
-policy from local ownership evidence.
+Refresh first, then use switch/reinstall actions to repair drift.
 
 ## Why does Omni need a host before most tool commands?
 
@@ -90,13 +80,13 @@ omni tools sync
 `tools set` creates or updates only the logical tool spec:
 
 ```sh
-omni tools set ripgrep --provider system
+omni tools set ripgrep --provider brew
 ```
 
 `tools add` creates the spec and assigns it to a group in one flow:
 
 ```sh
-omni tools add ripgrep --provider system --group dev
+omni tools add ripgrep --provider brew --group dev
 ```
 
 In noninteractive scripts, pass `--group` to `tools add` so Omni does not need

@@ -88,10 +88,11 @@ esac
 
 -- settings.json --
 {
+  "version": 6,
   "hosts": { "testhost": [] },
   "tools": {
-    "ripgrep": { "provider": "system", "install_with": "brew" },
-    "fd": { "provider": "system", "install_with": "brew" }
+    "ripgrep": { "providers": [{ "provider": "brew" }] },
+    "fd": { "providers": [{ "provider": "brew" }] }
   },
   "groups": [
     { "name": "testhost", "special": "host", "tools": ["ripgrep", "fd"] }

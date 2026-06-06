@@ -23,22 +23,21 @@ omni reconcile
 Expected result: the new host has its own protected host group plus the reusable
 groups copied from `old-host`.
 
-## Add A Portable System Tool
+## Add A Tool
 
 ```sh
 omni groups create dev
-omni tools set ripgrep --provider system
+omni tools set ripgrep --provider brew
 omni groups move-tool dev ripgrep
 omni tools sync
 ```
 
-Expected result: Omni installs `ripgrep` through the current machine's concrete
-system manager, such as Homebrew on macOS or `apt` on Debian/Ubuntu.
+Expected result: Omni installs `ripgrep` through Homebrew.
 
 ## Add A Tool Whose Package Name Differs
 
 ```sh
-omni tools set node --provider system --package nodejs
+omni tools set node --provider apt --package nodejs
 omni groups move-tool dev node
 omni tools sync
 ```
@@ -46,16 +45,15 @@ omni tools sync
 Expected result: the logical tool is `node`, but the package manager receives
 `nodejs`.
 
-## Use A Specific Manager For One Tool
+## Use A Specific Provider For One Tool
 
 ```sh
-omni tools set typescript --provider node --package typescript --install-with pnpm
+omni tools set typescript --provider pnpm --package typescript
 omni groups move-tool dev typescript
 omni tools sync
 ```
 
-Expected result: this one tool uses `pnpm`, even if the default Node manager is
-`bun` or `npm`.
+Expected result: this one tool uses `pnpm`.
 
 ## Move Python Tools To uv
 

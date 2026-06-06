@@ -4,7 +4,7 @@ exec chmod 755 bin/bun
 exec chmod 755 bin/pnpm
 env PATH=$WORK/bin:$PATH
 
-exec omni --config settings.json tools import --provider node
+exec omni --config settings.json tools import --provider npm
 stdout 'Imported 1 tool:'
 stdout 'typescript'
 # tool must be added to the machine hostname group (testhost)
@@ -39,11 +39,6 @@ exit 1
 
 -- settings.json --
 {
-  "settings": {
-    "ecosystems": {
-      "node": { "manager": "npm" }
-    }
-  },
   "hosts": { "testhost": [] },
   "tools": {},
   "groups": [

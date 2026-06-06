@@ -81,8 +81,9 @@ func TestLoad_ValidConfig(t *testing.T) {
 	if cfg.Groups[0].Tools[0].Name != "ripgrep" {
 		t.Errorf("got name %q, want %q", cfg.Groups[0].Tools[0].Name, "ripgrep")
 	}
-	if cfg.Tools["ripgrep"].Provider != "brew" {
-		t.Errorf("ripgrep provider = %q, want brew", cfg.Tools["ripgrep"].Provider)
+	ripgrepProviders := cfg.Tools["ripgrep"].Providers
+	if len(ripgrepProviders) != 1 || ripgrepProviders[0].Provider != "brew" {
+		t.Errorf("ripgrep providers = %+v, want brew", ripgrepProviders)
 	}
 	if cfg.Version != config.CurrentVersion {
 		t.Fatalf("legacy config version = %d, want %d", cfg.Version, config.CurrentVersion)
@@ -473,21 +474,32 @@ func TestRoundTrip(t *testing.T) {
 	if len(got.Tools) != len(want.Tools) {
 		t.Fatalf("got %d memberships, want %d", len(got.Tools), len(want.Tools))
 	}
-	expectedProvider := map[string]string{"ripgrep": "system", "black": "python", "typescript": "node"}
-	expectedInstallWith := map[string]string{"ripgrep": "brew", "black": "pip"}
+	expectedProviders := map[string][]config.ToolInstallSpec{
+		"ripgrep": {{Provider: "brew"}},
+		"black":   {{Provider: "pip", Package: "black"}},
+		// No cheap local evidence is available for node without install_with.
+		"typescript": {},
+	}
 	for i, w := range want.Tools {
 		g := got.Tools[i]
 		if g.Name != w.Name || g.Provider != "" || g.Package != "" {
 			t.Errorf("membership[%d]: got %+v, want logical name %q", i, g, w.Name)
 		}
 		spec := loaded.Tools[w.Name]
-		if spec.Provider != expectedProvider[w.Name] || spec.Package != original.Tools[w.Name].Package || spec.InstallWith != expectedInstallWith[w.Name] {
-			t.Errorf("spec[%q]: got %+v, want provider=%q package=%q install_with=%q", w.Name, spec, expectedProvider[w.Name], original.Tools[w.Name].Package, expectedInstallWith[w.Name])
+		wantProviders := expectedProviders[w.Name]
+		if len(spec.Providers) != len(wantProviders) {
+			t.Errorf("spec[%q]: providers = %+v, want %+v", w.Name, spec.Providers, wantProviders)
+			continue
+		}
+		for j, wantProvider := range wantProviders {
+			if spec.Providers[j].Provider != wantProvider.Provider || spec.Providers[j].Package != wantProvider.Package {
+				t.Errorf("spec[%q].providers[%d] = %+v, want %+v", w.Name, j, spec.Providers[j], wantProvider)
+			}
 		}
 	}
 
 	// Modify, save again, reload.
-	loaded.Tools["jq"] = config.ToolSpec{Provider: "system", InstallWith: "brew"}
+	loaded.Tools["jq"] = config.ToolSpec{Providers: []config.ToolInstallSpec{{Provider: "brew"}}}
 	loaded.Groups[0].Tools = append(loaded.Groups[0].Tools, config.ToolEntry{Name: "jq"})
 	if err := config.Save(path, loaded); err != nil {
 		t.Fatalf("second Save: %v", err)

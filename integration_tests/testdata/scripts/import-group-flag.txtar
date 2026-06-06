@@ -4,7 +4,7 @@ exec chmod 755 bin/bun
 exec chmod 755 bin/pnpm
 env PATH=$WORK/bin:$PATH
 
-exec omni --config settings.json tools import --provider node --group dev
+exec omni --config settings.json tools import --provider npm --group dev
 stdout 'Imported 1 tool:'
 stdout 'typescript'
 exec grep '"name": "dev"' settings.json
@@ -35,11 +35,6 @@ exit 1
 
 -- settings.json --
 {
-  "settings": {
-    "ecosystems": {
-      "node": { "manager": "npm" }
-    }
-  },
   "hosts": { "testhost": [] },
   "tools": {},
   "groups": [
