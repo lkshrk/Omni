@@ -10,7 +10,7 @@ import (
 
 // CurrentVersion is the latest settings.json format version understood by omni.
 // Version 0 is the legacy unversioned format.
-const CurrentVersion = 3
+const CurrentVersion = 4
 
 const (
 	// FallbackSourceGitHub identifies a fallback recipe sourced from a GitHub repository.
@@ -115,10 +115,16 @@ type FallbackSource struct {
 
 // FallbackRecipe describes structured metadata used to build install commands.
 type FallbackRecipe struct {
-	Type         string `json:"type,omitempty"`
-	AssetPattern string `json:"asset_pattern,omitempty"`
-	BinaryPath   string `json:"binary_path,omitempty"`
-	Checksum     string `json:"checksum,omitempty"`
+	Type             string `json:"type,omitempty"`
+	AssetPattern     string `json:"asset_pattern,omitempty"`
+	BinaryPath       string `json:"binary_path,omitempty"`
+	Checksum         string `json:"checksum,omitempty"`
+	ReleaseID        string `json:"release_id,omitempty"`
+	TagName          string `json:"tag_name,omitempty"`
+	PublishedAt      string `json:"published_at,omitempty"`
+	AssetID          string `json:"asset_id,omitempty"`
+	AssetName        string `json:"asset_name,omitempty"`
+	AssetDownloadURL string `json:"asset_download_url,omitempty"`
 }
 
 // FallbackPlatform overrides release-asset matching for one OS/architecture key.

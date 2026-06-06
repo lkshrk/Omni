@@ -17,15 +17,18 @@ import (
 const defaultGitHubAPIBase = "https://api.github.com"
 
 type githubRelease struct {
-	TagName    string        `json:"tag_name"`
-	Draft      bool          `json:"draft"`
-	Prerelease bool          `json:"prerelease"`
-	Assets     []githubAsset `json:"assets"`
+	ID          json.Number   `json:"id"`
+	TagName     string        `json:"tag_name"`
+	PublishedAt string        `json:"published_at"`
+	Draft       bool          `json:"draft"`
+	Prerelease  bool          `json:"prerelease"`
+	Assets      []githubAsset `json:"assets"`
 }
 
 type githubAsset struct {
-	Name               string `json:"name"`
-	BrowserDownloadURL string `json:"browser_download_url"`
+	ID                 json.Number `json:"id"`
+	Name               string      `json:"name"`
+	BrowserDownloadURL string      `json:"browser_download_url"`
 }
 
 func (a *App) SetGitHubFallbackAPIForTest(baseURL string, client *http.Client) {
@@ -37,6 +40,18 @@ func (a *App) resolveGitHubFallback(ctx context.Context, name, owner, repoName s
 	release, err := a.fetchLatestGitHubRelease(ctx, owner, repoName)
 	if err != nil {
 		return config.FallbackSpec{}, false, err
+	}
+	publishedAt, err := normalizedGitHubPublishedAt(release.PublishedAt)
+	if err != nil {
+		return config.FallbackSpec{}, false, err
+	}
+	releaseID := strings.TrimSpace(release.ID.String())
+	if releaseID == "" {
+		return config.FallbackSpec{}, false, fmt.Errorf("github release %s/%s is missing id", owner, repoName)
+	}
+	tagName := strings.TrimSpace(release.TagName)
+	if tagName == "" {
+		return config.FallbackSpec{}, false, fmt.Errorf("github release %s/%s is missing tag_name", owner, repoName)
 	}
 	asset, ok := bestGitHubReleaseAsset(release.Assets, name)
 	if !ok {
@@ -51,8 +66,14 @@ func (a *App) resolveGitHubFallback(ctx context.Context, name, owner, repoName s
 		Binary:         binary,
 		ReleaseChannel: "stable",
 		Recipe: config.FallbackRecipe{
-			Type:         config.FallbackRecipeGitHubReleaseAsset,
-			AssetPattern: asset.Name,
+			Type:             config.FallbackRecipeGitHubReleaseAsset,
+			AssetPattern:     asset.Name,
+			ReleaseID:        releaseID,
+			TagName:          tagName,
+			PublishedAt:      publishedAt,
+			AssetID:          strings.TrimSpace(asset.ID.String()),
+			AssetName:        asset.Name,
+			AssetDownloadURL: asset.BrowserDownloadURL,
 		},
 		Commands: config.FallbackCommands{
 			Install:   githubReleaseAssetInstallCommand(asset.BrowserDownloadURL),
@@ -98,7 +119,9 @@ func (a *App) fetchLatestGitHubRelease(ctx context.Context, owner, repoName stri
 		return githubRelease{}, fmt.Errorf("github release lookup failed: %s", resp.Status)
 	}
 	var release githubRelease
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+	decoder := json.NewDecoder(resp.Body)
+	decoder.UseNumber()
+	if err := decoder.Decode(&release); err != nil {
 		return githubRelease{}, err
 	}
 	return release, nil
@@ -107,36 +130,56 @@ func (a *App) fetchLatestGitHubRelease(ctx context.Context, owner, repoName stri
 func bestGitHubReleaseAsset(assets []githubAsset, binary string) (githubAsset, bool) {
 	osNames := githubOSNames()
 	archNames := githubArchNames()
-	var fallback githubAsset
-	var platformFallback githubAsset
 	for _, asset := range assets {
 		name := strings.ToLower(asset.Name)
-		if asset.BrowserDownloadURL == "" || strings.Contains(name, "checksum") || strings.Contains(name, "sha256") {
+		if strings.TrimSpace(asset.ID.String()) == "" || strings.TrimSpace(asset.Name) == "" || strings.TrimSpace(asset.BrowserDownloadURL) == "" {
 			continue
 		}
-		if fallback.Name == "" {
-			fallback = asset
+		if githubReleaseAssetIgnored(name) {
+			continue
 		}
 		if !containsAny(name, osNames) || !containsAny(name, archNames) {
+			continue
+		}
+		if !githubAssetExtractable(name) {
 			continue
 		}
 		if binary != "" && !strings.Contains(name, strings.ToLower(binary)) {
 			continue
 		}
-		if platformFallback.Name == "" {
-			platformFallback = asset
-		}
-		if githubAssetExtractable(name) {
-			return asset, true
-		}
-	}
-	if platformFallback.Name != "" {
-		return platformFallback, true
-	}
-	if fallback.Name != "" {
-		return fallback, true
+		return asset, true
 	}
 	return githubAsset{}, false
+}
+
+func normalizedGitHubPublishedAt(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("github latest release is missing published_at")
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return "", fmt.Errorf("github latest release published_at %q is not RFC3339: %w", value, err)
+	}
+	return parsed.UTC().Format(time.RFC3339), nil
+}
+
+func githubReleaseAssetIgnored(name string) bool {
+	if strings.Contains(name, "checksum") || strings.Contains(name, "sha256") || strings.Contains(name, "sha512") {
+		return true
+	}
+	if strings.Contains(name, "signature") || strings.HasSuffix(name, ".sig") || strings.HasSuffix(name, ".asc") {
+		return true
+	}
+	if strings.Contains(name, "readme") || strings.Contains(name, "license") || strings.Contains(name, "docs") {
+		return true
+	}
+	for _, suffix := range []string{".deb", ".rpm", ".pkg", ".msi", ".dmg"} {
+		if strings.HasSuffix(name, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 func githubAssetExtractable(name string) bool {

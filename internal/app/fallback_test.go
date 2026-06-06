@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -730,7 +731,7 @@ func TestUninstallToolFallback_ReportsUnavailableWithoutCommand(t *testing.T) {
 	}
 }
 
-func TestSaveToolFallbackFromGitHub_PersistsUnresolvedSource(t *testing.T) {
+func TestSaveToolFallbackFromGitHub_ResolverFailureDoesNotSaveFallback(t *testing.T) {
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
 	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubNotFoundClient())
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -739,47 +740,58 @@ func TestSaveToolFallbackFromGitHub_PersistsUnresolvedSource(t *testing.T) {
 		t.Fatalf("config.Save: %v", err)
 	}
 
-	if err := a.SaveToolFallbackFromGitHub(context.Background(), "rg", "BurntSushi/ripgrep"); err != nil {
-		t.Fatalf("SaveToolFallbackFromGitHub: %v", err)
+	if err := a.SaveToolFallbackFromGitHub(context.Background(), "rg", "BurntSushi/ripgrep"); err == nil {
+		t.Fatal("SaveToolFallbackFromGitHub err = nil, want resolver failure")
 	}
 	got, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	fallback := got.Tools["rg"].Fallback
-	if fallback == nil {
-		t.Fatal("fallback missing")
-	}
-	if fallback.Status != config.FallbackStatusUnresolved || fallback.Source.Owner != "BurntSushi" || fallback.Source.Repo != "ripgrep" {
-		t.Fatalf("fallback = %+v, want unresolved BurntSushi/ripgrep source", fallback)
-	}
-	if fallback.Binary != "rg" || fallback.Commands.Check != "command -v rg" {
-		t.Fatalf("fallback binary/check = %q/%q, want rg command check", fallback.Binary, fallback.Commands.Check)
+	if fallback := got.Tools["rg"].Fallback; fallback != nil {
+		t.Fatalf("fallback = %+v, want no fallback saved after resolver failure", fallback)
 	}
 }
 
 func TestSaveToolFallbackFromGitHub_NormalizesSSHRepoURL(t *testing.T) {
+	currentPlatformGitHubCLIAsset(t)
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/repos/cli/cli/releases/latest" {
+			t.Fatalf("unexpected GitHub API path %q", req.URL.Path)
+		}
+		body, err := os.Open("testdata/github_cli_latest_release.json")
+		if err != nil {
+			return nil, err
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Body:       body,
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})}
+
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
-	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubNotFoundClient())
+	a.SetGitHubFallbackAPIForTest("https://api.github.test", client)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: logicalToolSpecs(logicalTool("rg", "system")),
+		Tools: logicalToolSpecs(logicalTool("gh", "system")),
 	}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
 
-	if err := a.SaveToolFallbackFromGitHub(context.Background(), "rg", "git@github.com:BurntSushi/ripgrep.git"); err != nil {
+	if err := a.SaveToolFallbackFromGitHub(context.Background(), "gh", "git@github.com:cli/cli.git"); err != nil {
 		t.Fatalf("SaveToolFallbackFromGitHub: %v", err)
 	}
 	got, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	fallback := got.Tools["rg"].Fallback
+	fallback := got.Tools["gh"].Fallback
 	if fallback == nil {
 		t.Fatal("fallback missing")
 	}
-	if fallback.Source.Owner != "BurntSushi" || fallback.Source.Repo != "ripgrep" || fallback.Source.URL != "https://github.com/BurntSushi/ripgrep" {
-		t.Fatalf("fallback source = %+v, want normalized BurntSushi/ripgrep", fallback.Source)
+	if fallback.Source.Owner != "cli" || fallback.Source.Repo != "cli" || fallback.Source.URL != "https://github.com/cli/cli" {
+		t.Fatalf("fallback source = %+v, want normalized cli/cli", fallback.Source)
 	}
 }
 
