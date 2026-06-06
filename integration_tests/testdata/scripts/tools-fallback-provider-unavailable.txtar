@@ -1,0 +1,43 @@
+# tools sync does not use fallback when the configured native provider is unavailable
+env PATH=$WORK/bin:$PATH
+
+exec omni --config settings.json hosts ensure testhost
+exec omni-seed-package-availability rg apt rg false 'no candidate'
+
+exec omni --config settings.json tools sync
+stdout 'failed: rg \(apt\): native install candidates unavailable for rg: apt/rg provider unavailable'
+! exec test -f .omni-cache/fallback/rg
+exec grep '"status": "unverified"' settings.json
+stdout '"status": "unverified"'
+
+-- settings.json --
+{
+  "version": 7,
+  "settings": {
+    "disabled_providers": ["npm", "pip"]
+  },
+  "tools": {
+    "rg": {
+      "providers": [{ "provider": "apt" }],
+      "fallback": {
+        "source": {
+          "type": "github",
+          "owner": "BurntSushi",
+          "repo": "ripgrep",
+          "url": "https://github.com/BurntSushi/ripgrep"
+        },
+        "status": "unverified",
+        "binary": "rg",
+        "commands": {
+          "install": "mkdir -p .omni-cache/fallback && touch .omni-cache/fallback/rg",
+          "check": "test -f .omni-cache/fallback/rg",
+          "uninstall": "rm -f .omni-cache/fallback/rg"
+        }
+      }
+    }
+  },
+  "hosts": { "testhost": [] },
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": ["rg"] }
+  ]
+}
