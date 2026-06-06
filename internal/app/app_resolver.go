@@ -93,6 +93,21 @@ func (a *App) resolvedToolEntries(ctx context.Context, cfg *config.RootConfig, g
 	return tools, warnings
 }
 
+func (a *App) currentToolGroups(cfg *config.RootConfig) []*config.GroupConfig {
+	groups, _ := a.currentToolGroupsWithAuthority(cfg)
+	return groups
+}
+
+func (a *App) currentToolGroupsWithAuthority(cfg *config.RootConfig) ([]*config.GroupConfig, bool) {
+	if cfg == nil {
+		return nil, false
+	}
+	if effective, _, ok := effectiveHostGroups(cfg, cfg.Groups, currentMachineGroupName()); ok {
+		return effective, true
+	}
+	return cfg.Groups, false
+}
+
 func (a *App) resolveInstallSpec(ctx context.Context, logicalName string, spec config.ToolSpec) config.ToolInstallSpec {
 	return a.resolveInstallSpecWithAvailability(ctx, logicalName, spec, nil)
 }

@@ -2,10 +2,13 @@ package app_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 
+	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/provider"
 )
 
 // ─── ListDiscovered ───────────────────────────────────────────────────────────
@@ -132,6 +135,85 @@ func TestListTools_HidesTrackedRowsRemovedFromConfig(t *testing.T) {
 	}
 	if len(tools) != 1 || tools[0].Name != "ripgrep" {
 		t.Fatalf("ListTools = %+v, want only configured ripgrep", tools)
+	}
+}
+
+func TestListToolsAndRefreshUseActiveHostGroups(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "Topaz.local")
+	ctx := context.Background()
+	system := &lifecycleProvider{
+		stubProvider: stubProvider{
+			name:      "system",
+			available: true,
+			installed: []provider.InstalledTool{
+				installedTool("ripgrep", "14.1.0", "system"),
+			},
+		},
+		resolvedName: "brew",
+	}
+	a, cfgPath := newImportApp(t, system, &stubProvider{name: "brew", available: true})
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(
+			logicalTool("docker", "system"),
+			logicalTool("ripgrep", "system"),
+		),
+		Hosts: map[string][]string{
+			"Topaz": {"dev"},
+			"coder": {"coder-workspace"},
+		},
+		Groups: []*config.GroupConfig{
+			{Name: "Topaz", Special: "host"},
+			{Name: "coder", Special: "host"},
+			{Name: "dev", Tools: groupTools("ripgrep")},
+			{Name: "coder-workspace", Tools: groupTools("docker")},
+		},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name:          "docker",
+		Provider:      "system",
+		Package:       "docker",
+		Installed:     false,
+		InstalledWith: "brew",
+	}); err != nil {
+		t.Fatalf("Upsert stale docker: %v", err)
+	}
+	if current := app.CurrentMachineGroupName(); current != "Topaz" {
+		t.Fatalf("CurrentMachineGroupName = %q, want Topaz", current)
+	}
+	info, err := a.HostStatus()
+	if err != nil {
+		t.Fatalf("HostStatus: %v", err)
+	}
+	if info.Active != "Topaz" || !slices.Contains(info.Hosts["Topaz"].Groups, "dev") {
+		t.Fatalf("HostStatus = %#v, want active Topaz with dev", info)
+	}
+
+	tools, err := a.ListTools(ctx, "")
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(tools) != 0 {
+		t.Fatalf("ListTools before refresh = %+v, want no stale coder tools on Topaz", tools)
+	}
+
+	if err := a.RefreshInstalled(ctx, nil); err != nil {
+		t.Fatalf("RefreshInstalled: %v", err)
+	}
+	docker, err := a.DB().Get(ctx, "docker", "system", "docker")
+	if err != nil {
+		t.Fatalf("Get docker cache row: %v", err)
+	}
+	if docker.Tracked {
+		t.Fatal("docker should be untracked after Topaz refresh")
+	}
+	tools, err = a.ListTools(ctx, "")
+	if err != nil {
+		t.Fatalf("ListTools after refresh: %v", err)
+	}
+	if len(tools) != 1 || tools[0].Name != "ripgrep" {
+		t.Fatalf("ListTools after refresh = %+v, want only Topaz ripgrep", tools)
 	}
 }
 

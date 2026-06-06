@@ -656,7 +656,7 @@ func (a *App) configuredOperationTool(ctx context.Context, name, providerName st
 	if err != nil {
 		return config.ToolEntry{}, "", false, fmt.Errorf("loading config: %w", err)
 	}
-	tools, _ := a.resolvedToolEntries(ctx, cfg, cfg.Groups)
+	tools, _ := a.resolvedToolEntries(ctx, cfg, a.currentToolGroups(cfg))
 	var matches []config.ToolEntry
 	for _, t := range tools {
 		if t.Name != name {
@@ -823,7 +823,7 @@ func (a *App) configuredPackageForTool(ctx context.Context, name, providerName s
 	if err != nil {
 		return "", fmt.Errorf("loading config: %w", err)
 	}
-	tools, _ := a.resolvedToolEntries(ctx, cfg, cfg.Groups)
+	tools, _ := a.resolvedToolEntries(ctx, cfg, a.currentToolGroups(cfg))
 	if tool, ok := resolvedToolByName(tools, name, providerName); ok {
 		return tool.EffectivePackage(), nil
 	}
