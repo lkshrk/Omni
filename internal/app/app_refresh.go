@@ -135,6 +135,7 @@ func (a *App) RefreshOutdated(ctx context.Context, refreshMetadata bool, progres
 			LatestVersion: latestVer,
 		})
 	}
+	updates = append(updates, a.githubFallbackOutdatedUpdatesBestEffort(ctx, tools)...)
 	stop()
 	writeCtx := context.WithoutCancel(ctx)
 	stop = profile.Start("app.refresh.outdated.write")
@@ -242,7 +243,8 @@ func (a *App) RefreshProviderOutdated(ctx context.Context, provName string, refr
 			}
 		}
 	}
-	if len(neededLookups) == 0 {
+	fallbackUpdates := a.githubFallbackOutdatedUpdatesBestEffort(ctx, targetTools)
+	if len(neededLookups) == 0 && len(fallbackUpdates) == 0 {
 		return nil
 	}
 	if refreshMetadata {
@@ -298,6 +300,7 @@ func (a *App) RefreshProviderOutdated(ctx context.Context, provName string, refr
 			LatestVersion: latestVer,
 		})
 	}
+	updates = append(updates, fallbackUpdates...)
 	writeCtx := context.WithoutCancel(ctx)
 	if err := a.readDB().UpdateOutdatedBatch(writeCtx, updates); err != nil {
 		return fmt.Errorf("updating outdated status for %s: %w", provName, err)
@@ -376,6 +379,113 @@ func (a *App) outdatedLookupProvider(t *database.ToolCache) string {
 		return t.Provider
 	}
 	return t.InstalledWith
+}
+
+func (a *App) githubFallbackOutdatedUpdatesBestEffort(ctx context.Context, tools []*database.ToolCache) []database.OutdatedUpdate {
+	if len(tools) == 0 {
+		return nil
+	}
+	cfg, err := a.loadConfig()
+	if err != nil || cfg == nil {
+		return nil
+	}
+	updates := make([]database.OutdatedUpdate, 0)
+	for _, t := range tools {
+		if t == nil || !t.Installed || t.InstalledWith != fallbackInstalledWithGitHub {
+			continue
+		}
+		spec, ok := cfg.Tools[t.Name]
+		if !ok {
+			continue
+		}
+		fallback := spec.Fallback
+		if !githubFallbackHasSavedReleaseMetadata(fallback) {
+			updates = append(updates, clearOutdatedUpdate(t))
+			continue
+		}
+		release, err := a.fetchLatestGitHubRelease(ctx, strings.TrimSpace(fallback.Source.Owner), strings.TrimSpace(fallback.Source.Repo))
+		if err != nil {
+			continue
+		}
+		latestPublishedAt, err := normalizedGitHubPublishedAt(release.PublishedAt)
+		if err != nil {
+			updates = append(updates, clearOutdatedUpdate(t))
+			continue
+		}
+		binary := strings.TrimSpace(fallback.Binary)
+		if binary == "" {
+			binary = t.Name
+		}
+		if _, ok := bestGitHubReleaseAsset(release.Assets, binary); !ok {
+			updates = append(updates, clearOutdatedUpdate(t))
+			continue
+		}
+		if !githubPublishedAtAfter(latestPublishedAt, fallback.Recipe.PublishedAt) {
+			updates = append(updates, clearOutdatedUpdate(t))
+			continue
+		}
+		tagName := strings.TrimSpace(release.TagName)
+		if tagName == "" {
+			updates = append(updates, clearOutdatedUpdate(t))
+			continue
+		}
+		updates = append(updates, database.OutdatedUpdate{
+			Name:          t.Name,
+			Provider:      t.Provider,
+			Package:       t.Package,
+			Outdated:      true,
+			LatestVersion: tagName,
+		})
+	}
+	return updates
+}
+
+func githubFallbackHasSavedReleaseMetadata(fallback *config.FallbackSpec) bool {
+	if fallback == nil {
+		return false
+	}
+	if fallback.Source.Type != config.FallbackSourceGitHub {
+		return false
+	}
+	if strings.TrimSpace(fallback.Source.Owner) == "" || strings.TrimSpace(fallback.Source.Repo) == "" {
+		return false
+	}
+	recipe := fallback.Recipe
+	if recipe.Type != config.FallbackRecipeGitHubReleaseAsset {
+		return false
+	}
+	if strings.TrimSpace(recipe.ReleaseID) == "" ||
+		strings.TrimSpace(recipe.TagName) == "" ||
+		strings.TrimSpace(recipe.PublishedAt) == "" ||
+		strings.TrimSpace(recipe.AssetID) == "" ||
+		strings.TrimSpace(recipe.AssetName) == "" ||
+		strings.TrimSpace(recipe.AssetDownloadURL) == "" {
+		return false
+	}
+	if _, err := normalizedGitHubPublishedAt(recipe.PublishedAt); err != nil {
+		return false
+	}
+	return true
+}
+
+func githubPublishedAtAfter(latest, saved string) bool {
+	latestTime, err := time.Parse(time.RFC3339, strings.TrimSpace(latest))
+	if err != nil {
+		return false
+	}
+	savedTime, err := time.Parse(time.RFC3339, strings.TrimSpace(saved))
+	if err != nil {
+		return false
+	}
+	return latestTime.After(savedTime)
+}
+
+func clearOutdatedUpdate(t *database.ToolCache) database.OutdatedUpdate {
+	return database.OutdatedUpdate{
+		Name:     t.Name,
+		Provider: t.Provider,
+		Package:  t.Package,
+	}
 }
 
 func flattenOutdatedManagers(byManager map[string]map[string]string) map[string]string {
