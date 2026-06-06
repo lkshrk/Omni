@@ -54,4 +54,4 @@ exit 1
 exit 1
 
 -- settings.json --
-{"version": 6, "settings": {"disabled_providers": ["system", "node", "python", "brew", "apt", "apk", "dnf", "pacman", "zypper", "npm", "pip", "uv", "bun", "pnpm"]}}
+{"version": 7, "settings": {"disabled_providers": ["system", "node", "python", "brew", "apt", "apk", "dnf", "pacman", "zypper", "npm", "pip", "uv", "bun", "pnpm"]}}

@@ -114,7 +114,7 @@ exit 1
 
 -- settings.json --
 {
-  "version": 6,
+  "version": 7,
   "settings": {
     "disabled_providers": ["npm", "pip"]
   },

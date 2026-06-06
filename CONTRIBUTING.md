@@ -42,10 +42,10 @@ Common shape:
 
 ```json
 {
-  "version": 1,
+  "version": 7,
   "settings": {},
   "tools": {
-    "ripgrep": { "provider": "system" }
+    "ripgrep": { "providers": [{ "provider": "brew" }, { "provider": "apt" }] }
   },
   "groups": [
     { "name": "dev", "tools": ["ripgrep"] }
@@ -56,14 +56,14 @@ Common shape:
 }
 ```
 
-Prefer portable providers in config:
+Tool config stores concrete provider candidates in priority order:
 
-- `system`
-- `node`
-- `python`
+- System packages: `brew`, `apt`, `apk`, `dnf`, `pacman`, `zypper`
+- Node packages: `bun`, `pnpm`, `npm`
+- Python packages: `uv`, `pip`
 
-Use concrete managers such as `brew`, `apt`, `uv`, or `pip3` as
-`install_with` pins only when a specific manager is required.
+Use `providers[].package` when the package name differs from the logical tool
+name. Legacy `provider`/`install_with` fields are migrated on load.
 
 ## Adding Or Changing Providers
 

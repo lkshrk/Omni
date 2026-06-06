@@ -75,7 +75,7 @@ esac
 
 -- settings.json --
 {
-  "version": 6,
+  "version": 7,
   "settings": {
     "update_quarantine": "2d"
   },

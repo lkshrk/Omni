@@ -4555,7 +4555,7 @@ func TestRenderToolRow_OneGapBetweenIconAndName(t *testing.T) {
 	}
 }
 
-func TestRenderToolRow_InstalledMetaProviderWithoutInstalledWithDoesNotGuessManager(t *testing.T) {
+func TestRenderToolRow_InstalledEcosystemProviderWithoutInstalledWithDoesNotGuessManager(t *testing.T) {
 	p := defaultPalette()
 	tool := &database.ToolCache{Name: "typescript", Provider: "node", Installed: true, Tracked: true}
 	cols := colWidths{name: 20, prov: 10, group: 8, screenW: 120}

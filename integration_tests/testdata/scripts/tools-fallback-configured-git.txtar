@@ -17,7 +17,7 @@ stdout '"status": "unverified"'
 
 -- settings.json --
 {
-  "version": 6,
+  "version": 7,
   "tools": {
     "gh": {
       "providers": [{ "provider": "brew" }],

@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"context"
 	"database/sql"
+	_ "embed"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -24,6 +25,9 @@ import (
 	"github.com/lkshrk/omni/internal/database"
 )
 
+//go:embed testdata/github_cli_latest_release.json
+var githubCLILatestRelease []byte
+
 // TestMain registers "omni" as a testscript command so we test the real
 // binary behaviour in a subprocess without needing a separate build step.
 func TestMain(m *testing.M) {
@@ -38,18 +42,15 @@ func TestMain(m *testing.M) {
 }
 
 func toolsFallbackConfiguredGitMain() int {
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		fmt.Fprintln(os.Stderr, "locate test fixture: runtime caller unavailable")
-		return 1
-	}
-	releaseFixture := filepath.Join(filepath.Dir(file), "..", "internal", "app", "testdata", "github_cli_latest_release.json")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/repos/cli/cli/releases/latest" {
 			http.NotFound(w, r)
 			return
 		}
-		http.ServeFile(w, r, releaseFixture)
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write(githubCLILatestRelease); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
 	}))
 	defer server.Close()
 	if err := os.Setenv("OMNI_GITHUB_API_BASE", server.URL); err != nil {

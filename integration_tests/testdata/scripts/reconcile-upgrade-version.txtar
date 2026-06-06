@@ -78,7 +78,7 @@ esac
 
 -- settings.json --
 {
-  "version": 6,
+  "version": 7,
   "hosts": { "testhost": ["base"] },
   "tools": {
     "ripgrep": { "providers": [{ "provider": "brew" }] }
