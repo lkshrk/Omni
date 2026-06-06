@@ -10,7 +10,7 @@ import (
 
 // CurrentVersion is the latest settings.json format version understood by omni.
 // Version 0 is the legacy unversioned format.
-const CurrentVersion = 7
+const CurrentVersion = 8
 
 const (
 	// FallbackSourceGitHub identifies a fallback recipe sourced from a GitHub repository.
@@ -18,6 +18,8 @@ const (
 
 	// FallbackStatusUnresolved means a source is known but no usable recipe exists yet.
 	FallbackStatusUnresolved = "unresolved"
+	// FallbackStatusUnsupported means source metadata exists but no current-platform recipe is usable.
+	FallbackStatusUnsupported = "unsupported"
 	// FallbackStatusUnverified means a recipe exists but has not completed successfully.
 	FallbackStatusUnverified = "unverified"
 	// FallbackStatusVerified means a recipe completed and its check command passed.
@@ -756,12 +758,12 @@ func validateFallback(path string, fallback *FallbackSpec) []ValidationError {
 		status = FallbackStatusUnverified
 	}
 	switch status {
-	case FallbackStatusUnresolved, FallbackStatusUnverified, FallbackStatusVerified, FallbackStatusFailed:
+	case FallbackStatusUnresolved, FallbackStatusUnsupported, FallbackStatusUnverified, FallbackStatusVerified, FallbackStatusFailed:
 	default:
 		errs = append(errs, ValidationError{Path: path + ".status", Message: fmt.Sprintf("unknown fallback status %q", fallback.Status)})
 	}
-	if status != FallbackStatusUnresolved && strings.TrimSpace(fallback.Commands.Check) == "" {
-		errs = append(errs, ValidationError{Path: path + ".commands.check", Message: "fallback check command is required unless status is unresolved"})
+	if status != FallbackStatusUnresolved && status != FallbackStatusUnsupported && strings.TrimSpace(fallback.Commands.Check) == "" {
+		errs = append(errs, ValidationError{Path: path + ".commands.check", Message: "fallback check command is required unless status is unresolved or unsupported"})
 	}
 	return errs
 }

@@ -299,6 +299,24 @@ func TestValidateRoot_ToolFallbackUnresolvedCanOmitCheck(t *testing.T) {
 	}
 }
 
+func TestValidateRoot_ToolFallbackUnsupportedCanOmitCheck(t *testing.T) {
+	cfg := &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"rg": {
+				Providers: []config.ToolInstallSpec{{Provider: "brew"}},
+				Fallback: &config.FallbackSpec{
+					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+					Status: config.FallbackStatusUnsupported,
+				},
+			},
+		},
+	}
+	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"brew"}})
+	if len(errs) != 0 {
+		t.Errorf("unsupported fallback without check produced errors: %v", errs)
+	}
+}
+
 func TestValidateRoot_ToolFallbackRequiresCheckWhenUsable(t *testing.T) {
 	cfg := &config.RootConfig{
 		Tools: map[string]config.ToolSpec{

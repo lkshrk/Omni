@@ -141,6 +141,7 @@ Fallback states:
 | State | Meaning |
 | --- | --- |
 | `unresolved` | Source is known, but no usable install/check recipe is saved yet. Sync skips it. |
+| `unsupported` | Source metadata exists, but no current-platform recipe is usable. Sync skips it. |
 | `unverified` | A usable recipe exists, but it has not passed install/check on this host. |
 | `verified` | The fallback install/check succeeded. |
 | `failed` | The fallback install or check failed. Normal sync does not retry it. |

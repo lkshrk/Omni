@@ -4009,6 +4009,7 @@ func TestRenderList_ConfiguredGitHubFallbackShowsGHStatus(t *testing.T) {
 		{name: "verified system", provider: "system", status: config.FallbackStatusVerified, want: "system(gh)"},
 		{name: "unverified concrete", provider: "apt", status: config.FallbackStatusUnverified, want: "system(gh?)"},
 		{name: "unresolved system", provider: "system", status: config.FallbackStatusUnresolved, want: "system(gh!)"},
+		{name: "unsupported system", provider: "system", status: config.FallbackStatusUnsupported, want: "system(gh!)"},
 		{name: "failed system", provider: "system", status: config.FallbackStatusFailed, want: "system(gh!)"},
 	}
 

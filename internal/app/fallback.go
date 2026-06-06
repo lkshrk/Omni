@@ -446,7 +446,7 @@ func automaticFallbackUsable(fallback *config.FallbackSpec, allowFailed bool) bo
 		if !allowFailed {
 			return false
 		}
-	case config.FallbackStatusUnresolved:
+	case config.FallbackStatusUnresolved, config.FallbackStatusUnsupported:
 		return false
 	}
 	return strings.TrimSpace(fallback.Commands.Install) != "" && strings.TrimSpace(fallback.Commands.Check) != ""

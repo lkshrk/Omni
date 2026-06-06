@@ -180,8 +180,7 @@ func (a *App) syncNativeUnavailableFallbacks(ctx context.Context, tools []resolv
 			continue
 		}
 		if !fallbackUsable {
-			msg := installRouteUnavailableMessage(entry.Name, resolved.route)
-			ops = append(ops, isync.SyncOp{Tool: tool, Kind: isync.OpFailed, Err: fmt.Errorf("%s; edit fallback before retrying", msg)})
+			ops = append(ops, isync.SyncOp{Tool: tool, Kind: isync.OpFailed, Err: errors.New(a.fallbackUnavailableMessage(entry.Name, resolved.route))})
 			continue
 		}
 		if opts.DryRun {
@@ -265,6 +264,15 @@ func installRouteUnavailableMessage(name string, route installRoute) string {
 		return fmt.Sprintf("no native install route is available for %s", name)
 	}
 	return fmt.Sprintf("native install candidates unavailable for %s: %s", name, strings.Join(parts, "; "))
+}
+
+func (a *App) fallbackUnavailableMessage(name string, route installRoute) string {
+	msg := installRouteUnavailableMessage(name, route)
+	_, fallback, err := a.configuredFallback(name)
+	if err == nil && fallback != nil && fallback.Status == config.FallbackStatusUnsupported {
+		return msg + "; fallback is unsupported on this platform; edit fallback before retrying"
+	}
+	return msg + "; edit fallback before retrying"
 }
 
 func (a *App) SyncWithState(ctx context.Context, opts isync.SyncOptions) (*SyncStateResult, error) {
@@ -609,9 +617,9 @@ func (a *App) Install(ctx context.Context, name, providerName string) error {
 			if fallbackUsable {
 				return a.InstallToolFallback(ctx, t.Name)
 			}
-			return fmt.Errorf("%s; edit fallback before retrying", installRouteUnavailableMessage(t.Name, resolved.route))
+			return errors.New(a.fallbackUnavailableMessage(t.Name, resolved.route))
 		case installRouteUnavailable:
-			return fmt.Errorf("%s; edit fallback before retrying", installRouteUnavailableMessage(t.Name, resolved.route))
+			return errors.New(a.fallbackUnavailableMessage(t.Name, resolved.route))
 		}
 		if err := installWithProvider(ctx, prov, tool, t.InstallWith); err != nil {
 			a.recordPrivilegeError(ctx, t.Name, t.Provider, t.EffectivePackage(), err)

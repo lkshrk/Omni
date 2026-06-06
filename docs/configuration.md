@@ -16,7 +16,7 @@ See [State And Files](state-and-files.md) for config path priority, cache path
 priority, environment variables, backups, and disposable cache behavior.
 
 The schema lives in
-[spec/omni.settings.v7.schema.json](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v7.schema.json).
+[spec/omni.settings.v8.schema.json](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v8.schema.json).
 
 ## Smallest Valid File
 
@@ -24,7 +24,7 @@ The smallest legal file is:
 
 ```json
 {
-  "version": 7
+  "version": 8
 }
 ```
 
@@ -37,8 +37,8 @@ automatically by Omni config writes.
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v7.schema.json",
-  "version": 7,
+  "$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v8.schema.json",
+  "version": 8,
   "settings": {
     "fallback_bin_dir": "~/.local/share/omni/fallback/bin",
     "provider_priority": ["brew", "apt", "dnf", "zypper", "pacman", "apk", "npm", "pip"]
@@ -210,7 +210,7 @@ Fallback fields:
 | --- | --- |
 | `source.type` | Currently `github`. |
 | `source.owner`, `source.repo`, `source.url` | Source repository provenance. |
-| `status` | `unresolved`, `unverified`, `verified`, or `failed`. |
+| `status` | `unresolved`, `unsupported`, `unverified`, `verified`, or `failed`. |
 | `binary` | Expected command name after install. |
 | `bin_dir` | Optional per-tool override for `settings.fallback_bin_dir`. |
 | `release_channel` | Optional release channel metadata for future resolver/editor use. |
@@ -218,7 +218,7 @@ Fallback fields:
 | `recipe.release_id`, `recipe.tag_name`, `recipe.published_at` | Generated GitHub release provenance and update-detection metadata. Leave alone unless editing manually. |
 | `recipe.asset_id`, `recipe.asset_name`, `recipe.asset_download_url` | Generated current-platform asset provenance and download metadata. Leave alone unless editing manually. |
 | `commands.install` | Shell command used by fallback install. Required for usable fallbacks. |
-| `commands.check` | Shell command used to verify install. Required unless status is `unresolved`. |
+| `commands.check` | Shell command used to verify install. Required unless status is `unresolved` or `unsupported`. |
 | `commands.uninstall` | Optional shell command for fallback uninstall. If absent, uninstall is unavailable. |
 | `commands.upgrade` | Optional shell command for fallback upgrade. If absent, Omni reuses `install`. |
 
