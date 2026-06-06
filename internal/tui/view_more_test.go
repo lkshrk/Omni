@@ -3931,6 +3931,22 @@ func TestToolInlineHints_FallbackEligibleSystemToolOffersFallback(t *testing.T) 
 	}
 }
 
+func TestToolInlineHints_FallbackEligibleConcreteProviderToolOffersFallback(t *testing.T) {
+	tool := &database.ToolCache{Name: "rg", Provider: "apt", Installed: false, Tracked: true}
+	m := baseModel([]*database.ToolCache{tool})
+	m.toolFallbacks = map[string]config.FallbackSpec{
+		"rg": {
+			Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+			Status: config.FallbackStatusUnverified,
+		},
+	}
+
+	hints := toolInlineHints(m, tool)
+	if !hasHint(hints, m.keys.Fallback.Help().Key, actions.MustTUILabel(actions.ToolFallback)) {
+		t.Fatalf("hints = %+v, want fallback action", hints)
+	}
+}
+
 func TestToolInlineHints_NativeInstalledSystemToolHidesFallback(t *testing.T) {
 	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: true, InstalledWith: "apt", Tracked: true}
 	m := baseModel([]*database.ToolCache{tool})
@@ -3938,6 +3954,16 @@ func TestToolInlineHints_NativeInstalledSystemToolHidesFallback(t *testing.T) {
 	hints := toolInlineHints(m, tool)
 	if hasHintKey(hints, m.keys.Fallback.Help().Key) {
 		t.Fatalf("hints = %+v, did not expect fallback action for native installed tool", hints)
+	}
+}
+
+func TestToolInlineHints_NativeInstalledConcreteProviderToolHidesFallback(t *testing.T) {
+	tool := &database.ToolCache{Name: "rg", Provider: "apt", Installed: true, InstalledWith: "apt", Tracked: true}
+	m := baseModel([]*database.ToolCache{tool})
+
+	hints := toolInlineHints(m, tool)
+	if hasHintKey(hints, m.keys.Fallback.Help().Key) {
+		t.Fatalf("hints = %+v, did not expect fallback action", hints)
 	}
 }
 
@@ -3975,19 +4001,20 @@ func TestFallbackKey_GitHubInstalledSystemToolOpensEditor(t *testing.T) {
 
 func TestRenderList_ConfiguredGitHubFallbackShowsGHStatus(t *testing.T) {
 	tests := []struct {
-		name   string
-		status string
-		want   string
+		name     string
+		provider string
+		status   string
+		want     string
 	}{
-		{name: "verified", status: config.FallbackStatusVerified, want: "system(gh)"},
-		{name: "unverified", status: config.FallbackStatusUnverified, want: "system(gh?)"},
-		{name: "unresolved", status: config.FallbackStatusUnresolved, want: "system(gh!)"},
-		{name: "failed", status: config.FallbackStatusFailed, want: "system(gh!)"},
+		{name: "verified system", provider: "system", status: config.FallbackStatusVerified, want: "system(gh)"},
+		{name: "unverified concrete", provider: "apt", status: config.FallbackStatusUnverified, want: "system(gh?)"},
+		{name: "unresolved system", provider: "system", status: config.FallbackStatusUnresolved, want: "system(gh!)"},
+		{name: "failed system", provider: "system", status: config.FallbackStatusFailed, want: "system(gh!)"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: false, Tracked: true}
+			tool := &database.ToolCache{Name: "rg", Provider: tt.provider, Installed: false, Tracked: true}
 			m := baseModel([]*database.ToolCache{tool})
 			m.toolFallbacks = map[string]config.FallbackSpec{
 				"rg": {
