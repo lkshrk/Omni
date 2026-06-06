@@ -22,6 +22,7 @@ import (
 	"github.com/rogpeppe/go-internal/testscript"
 
 	"github.com/lkshrk/omni/internal/cli"
+	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
 )
 
@@ -37,8 +38,36 @@ func TestMain(m *testing.M) {
 		"omni-seed-cache":                    seedCacheMain,
 		"omni-seed-package-availability":     seedPackageAvailabilityMain,
 		"omni-seed-update-metadata":          seedUpdateMetadataMain,
+		"omni-assert-tool-provider-list":     assertToolProviderListMain,
 		"omni-tools-fallback-configured-git": toolsFallbackConfiguredGitMain,
 	}))
+}
+
+func assertToolProviderListMain() int {
+	args := os.Args[1:]
+	if len(args) != 3 {
+		fmt.Fprintln(os.Stderr, "usage: omni-assert-tool-provider-list <config> <tool> <provider>")
+		return 2
+	}
+	cfg, err := config.Load(args[0])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "load config: %v\n", err)
+		return 1
+	}
+	spec, ok := cfg.Tools[args[1]]
+	if !ok {
+		fmt.Fprintf(os.Stderr, "tool %q missing\n", args[1])
+		return 1
+	}
+	if spec.Provider != "" || spec.Package != "" || spec.InstallWith != "" {
+		fmt.Fprintf(os.Stderr, "legacy fields still populated: provider=%q package=%q install_with=%q\n", spec.Provider, spec.Package, spec.InstallWith)
+		return 1
+	}
+	if len(spec.Providers) != 1 || spec.Providers[0].Provider != args[2] {
+		fmt.Fprintf(os.Stderr, "providers = %+v, want one %q candidate\n", spec.Providers, args[2])
+		return 1
+	}
+	return 0
 }
 
 func toolsFallbackConfiguredGitMain() int {
