@@ -399,6 +399,7 @@ func TestDoDelete_DeletesConfigEntry(t *testing.T) {
 }
 
 func TestDoSaveFallback_PersistsGitHubFallback(t *testing.T) {
+	t.Setenv("OMNI_GITHUB_API_BASE", "http://127.0.0.1:1")
 	prov := &okProvider{name: "apt"}
 	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("rg", "apt")})
 	m := modelForCmds(a)

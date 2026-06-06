@@ -1,0 +1,53 @@
+{
+  "url": "https://api.github.com/repos/cli/cli/releases/330388700",
+  "html_url": "https://github.com/cli/cli/releases/tag/v2.93.0",
+  "id": 330388700,
+  "tag_name": "v2.93.0",
+  "name": "GitHub CLI 2.93.0",
+  "draft": false,
+  "prerelease": false,
+  "assets": [
+    {
+      "url": "https://api.github.com/repos/cli/cli/releases/assets/431301750",
+      "id": 431301750,
+      "name": "gh_2.93.0_checksums.txt",
+      "content_type": "text/plain; charset=utf-8",
+      "browser_download_url": "https://github.com/cli/cli/releases/download/v2.93.0/gh_2.93.0_checksums.txt"
+    },
+    {
+      "url": "https://api.github.com/repos/cli/cli/releases/assets/431301770",
+      "id": 431301770,
+      "name": "gh_2.93.0_linux_amd64.tar.gz",
+      "content_type": "application/x-gtar",
+      "browser_download_url": "https://github.com/cli/cli/releases/download/v2.93.0/gh_2.93.0_linux_amd64.tar.gz"
+    },
+    {
+      "url": "https://api.github.com/repos/cli/cli/releases/assets/431301780",
+      "id": 431301780,
+      "name": "gh_2.93.0_linux_arm64.tar.gz",
+      "content_type": "application/x-gtar",
+      "browser_download_url": "https://github.com/cli/cli/releases/download/v2.93.0/gh_2.93.0_linux_arm64.tar.gz"
+    },
+    {
+      "url": "https://api.github.com/repos/cli/cli/releases/assets/431301796",
+      "id": 431301796,
+      "name": "gh_2.93.0_macOS_amd64.zip",
+      "content_type": "application/zip",
+      "browser_download_url": "https://github.com/cli/cli/releases/download/v2.93.0/gh_2.93.0_macOS_amd64.zip"
+    },
+    {
+      "url": "https://api.github.com/repos/cli/cli/releases/assets/431301800",
+      "id": 431301800,
+      "name": "gh_2.93.0_macOS_arm64.zip",
+      "content_type": "application/zip",
+      "browser_download_url": "https://github.com/cli/cli/releases/download/v2.93.0/gh_2.93.0_macOS_arm64.zip"
+    },
+    {
+      "url": "https://api.github.com/repos/cli/cli/releases/assets/431301821",
+      "id": 431301821,
+      "name": "gh_2.93.0_windows_amd64.zip",
+      "content_type": "application/zip",
+      "browser_download_url": "https://github.com/cli/cli/releases/download/v2.93.0/gh_2.93.0_windows_amd64.zip"
+    }
+  ]
+}

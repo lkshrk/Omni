@@ -732,6 +732,7 @@ func TestUninstallToolFallback_ReportsUnavailableWithoutCommand(t *testing.T) {
 
 func TestSaveToolFallbackFromGitHub_PersistsUnresolvedSource(t *testing.T) {
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubNotFoundClient())
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("rg", "system")),
 	}); err != nil {
@@ -759,6 +760,7 @@ func TestSaveToolFallbackFromGitHub_PersistsUnresolvedSource(t *testing.T) {
 
 func TestSaveToolFallbackFromGitHub_NormalizesSSHRepoURL(t *testing.T) {
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubNotFoundClient())
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("rg", "system")),
 	}); err != nil {

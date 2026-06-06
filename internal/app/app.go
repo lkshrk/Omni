@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -44,6 +45,8 @@ type App struct {
 	db           *database.DB
 	registry     *provider.Registry
 	fallbackExec executor.Executor
+	githubAPI    string
+	githubClient *http.Client
 	testMode     bool
 
 	// configMu serialises all read-modify-write cycles on settings.json. Held

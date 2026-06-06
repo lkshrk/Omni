@@ -1,4 +1,5 @@
 # tools fallback stores an unresolved GitHub fallback recipe
+env OMNI_GITHUB_API_BASE=http://127.0.0.1:1
 exec omni --config settings.json hosts ensure testhost
 
 exec omni --config settings.json tools set rg --provider system --install-with apt
