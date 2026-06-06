@@ -164,6 +164,34 @@ func normalizedGitHubPublishedAt(value string) (string, error) {
 	return parsed.UTC().Format(time.RFC3339), nil
 }
 
+func githubFallbackHasSavedReleaseMetadata(fallback *config.FallbackSpec) bool {
+	if fallback == nil {
+		return false
+	}
+	if fallback.Source.Type != config.FallbackSourceGitHub {
+		return false
+	}
+	if strings.TrimSpace(fallback.Source.Owner) == "" || strings.TrimSpace(fallback.Source.Repo) == "" {
+		return false
+	}
+	recipe := fallback.Recipe
+	if recipe.Type != config.FallbackRecipeGitHubReleaseAsset {
+		return false
+	}
+	if strings.TrimSpace(recipe.ReleaseID) == "" ||
+		strings.TrimSpace(recipe.TagName) == "" ||
+		strings.TrimSpace(recipe.PublishedAt) == "" ||
+		strings.TrimSpace(recipe.AssetID) == "" ||
+		strings.TrimSpace(recipe.AssetName) == "" ||
+		strings.TrimSpace(recipe.AssetDownloadURL) == "" {
+		return false
+	}
+	if _, err := normalizedGitHubPublishedAt(recipe.PublishedAt); err != nil {
+		return false
+	}
+	return true
+}
+
 func githubReleaseAssetIgnored(name string) bool {
 	if strings.Contains(name, "checksum") || strings.Contains(name, "sha256") || strings.Contains(name, "sha512") {
 		return true

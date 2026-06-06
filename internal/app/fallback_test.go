@@ -4,10 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -708,6 +710,292 @@ func TestUpgrade_UsesFallbackForGitHubInstall(t *testing.T) {
 	}
 }
 
+func TestUpgradeToolFallback_GitHubOutdatedRefreshesRecipeBeforeUpgrade(t *testing.T) {
+	ctx := context.Background()
+	latestAsset := currentPlatformGitHubCLIAsset(t)
+	calls := int32(0)
+	fallbackExec := executor.NewMatchMock().WithFallback(executor.MockCall{})
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a.SetFallbackExecutor(fallbackExec)
+	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubFallbackLatestReleaseClient(t, &calls, func() io.ReadCloser {
+		body, err := os.Open("testdata/github_cli_latest_release.json")
+		if err != nil {
+			t.Fatalf("open GitHub fixture: %v", err)
+		}
+		return body
+	}))
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"gh": {
+				Provider: "system",
+				Fallback: oldGitHubCLIFallbackSpec(),
+			},
+		},
+		Groups: []*config.GroupConfig{{Tools: groupTools("gh")}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	seedGitHubFallbackUpgradeCacheRow(t, a.DB(), true, "v2.93.0")
+
+	if err := a.UpgradeToolFallback(ctx, "gh"); err != nil {
+		t.Fatalf("UpgradeToolFallback: %v", err)
+	}
+
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("GitHub latest release calls = %d, want 1", got)
+	}
+	assertFallbackCommandContains(t, fallbackExec, latestAsset.downloadURL)
+	assertFallbackCommandNotContains(t, fallbackExec, "https://github.com/cli/cli/releases/download/v2.92.0/gh_2.92.0_old.zip")
+	got, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	fallback := got.Tools["gh"].Fallback
+	if fallback == nil {
+		t.Fatal("fallback missing")
+	}
+	if fallback.Status != config.FallbackStatusVerified {
+		t.Fatalf("fallback status = %q, want verified", fallback.Status)
+	}
+	if fallback.Recipe.TagName != "v2.93.0" {
+		t.Fatalf("fallback tag = %q, want v2.93.0", fallback.Recipe.TagName)
+	}
+	if fallback.Recipe.PublishedAt != "2026-05-27T17:47:41Z" {
+		t.Fatalf("fallback published_at = %q, want latest fixture timestamp", fallback.Recipe.PublishedAt)
+	}
+	if fallback.Recipe.AssetDownloadURL != latestAsset.downloadURL {
+		t.Fatalf("fallback asset URL = %q, want %q", fallback.Recipe.AssetDownloadURL, latestAsset.downloadURL)
+	}
+	assertGitHubFallbackOutdated(t, a.DB(), false, "")
+}
+
+func TestUpgradeToolFallback_GitHubRefreshFailureKeepsOldRecipeAndOutdatedRow(t *testing.T) {
+	ctx := context.Background()
+	latestAsset := currentPlatformGitHubCLIAsset(t)
+	calls := int32(0)
+	fallbackExec := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "sh -c mkdir -p", Response: executor.MockCall{Err: errors.New("download failed"), Stderr: "curl failed"}},
+	).WithFallback(executor.MockCall{})
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a.SetFallbackExecutor(fallbackExec)
+	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubFallbackLatestReleaseClient(t, &calls, func() io.ReadCloser {
+		body, err := os.Open("testdata/github_cli_latest_release.json")
+		if err != nil {
+			t.Fatalf("open GitHub fixture: %v", err)
+		}
+		return body
+	}))
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"gh": {
+				Provider: "system",
+				Fallback: oldGitHubCLIFallbackSpec(),
+			},
+		},
+		Groups: []*config.GroupConfig{{Tools: groupTools("gh")}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	seedGitHubFallbackUpgradeCacheRow(t, a.DB(), true, "v2.93.0")
+
+	err := a.UpgradeToolFallback(ctx, "gh")
+	if err == nil || !strings.Contains(err.Error(), "download failed") {
+		t.Fatalf("UpgradeToolFallback err = %v, want upgrade command failure", err)
+	}
+
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("GitHub latest release calls = %d, want 1", got)
+	}
+	assertFallbackCommandContains(t, fallbackExec, latestAsset.downloadURL)
+	got, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	fallback := got.Tools["gh"].Fallback
+	if fallback == nil {
+		t.Fatal("fallback missing")
+	}
+	if fallback.Status != config.FallbackStatusFailed {
+		t.Fatalf("fallback status = %q, want failed", fallback.Status)
+	}
+	if fallback.Recipe.TagName != "v2.92.0" {
+		t.Fatalf("fallback tag = %q, want preserved old tag", fallback.Recipe.TagName)
+	}
+	if fallback.Recipe.PublishedAt != "2026-05-01T00:00:00Z" {
+		t.Fatalf("fallback published_at = %q, want preserved old timestamp", fallback.Recipe.PublishedAt)
+	}
+	if strings.Contains(fallback.Commands.Upgrade, latestAsset.downloadURL) {
+		t.Fatalf("fallback upgrade command = %q, want old command preserved after failure", fallback.Commands.Upgrade)
+	}
+	assertGitHubFallbackOutdated(t, a.DB(), true, "v2.93.0")
+}
+
+func TestUpgradeToolFallback_GitHubRefreshCheckFailureKeepsOldRecipeAndOutdatedRow(t *testing.T) {
+	ctx := context.Background()
+	latestAsset := currentPlatformGitHubCLIAsset(t)
+	calls := int32(0)
+	fallbackExec := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "sh -c mkdir -p", Response: executor.MockCall{}},
+		executor.MatchRule{Pattern: "sh -c test -x", Response: executor.MockCall{Err: errors.New("missing refreshed binary")}},
+	).WithFallback(executor.MockCall{})
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a.SetFallbackExecutor(fallbackExec)
+	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubFallbackLatestReleaseClient(t, &calls, func() io.ReadCloser {
+		body, err := os.Open("testdata/github_cli_latest_release.json")
+		if err != nil {
+			t.Fatalf("open GitHub fixture: %v", err)
+		}
+		return body
+	}))
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"gh": {
+				Provider: "system",
+				Fallback: oldGitHubCLIFallbackSpec(),
+			},
+		},
+		Groups: []*config.GroupConfig{{Tools: groupTools("gh")}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	seedGitHubFallbackUpgradeCacheRow(t, a.DB(), true, "v2.93.0")
+
+	err := a.UpgradeToolFallback(ctx, "gh")
+	if err == nil || !strings.Contains(err.Error(), "upgrade verification failed") {
+		t.Fatalf("UpgradeToolFallback err = %v, want check failure", err)
+	}
+
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("GitHub latest release calls = %d, want 1", got)
+	}
+	assertFallbackCommandContains(t, fallbackExec, latestAsset.downloadURL)
+	got, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	fallback := got.Tools["gh"].Fallback
+	if fallback == nil {
+		t.Fatal("fallback missing")
+	}
+	if fallback.Status != config.FallbackStatusFailed {
+		t.Fatalf("fallback status = %q, want failed", fallback.Status)
+	}
+	if fallback.Recipe.TagName != "v2.92.0" {
+		t.Fatalf("fallback tag = %q, want preserved old tag", fallback.Recipe.TagName)
+	}
+	if strings.Contains(fallback.Commands.Check, "test -x") {
+		t.Fatalf("fallback check command = %q, want old command preserved after check failure", fallback.Commands.Check)
+	}
+	assertGitHubFallbackOutdated(t, a.DB(), true, "v2.93.0")
+}
+
+func TestUpgradeToolFallback_GitHubResolverFailureKeepsOldRecipeAndOutdatedRow(t *testing.T) {
+	ctx := context.Background()
+	calls := int32(0)
+	fallbackExec := executor.NewMatchMock().WithFallback(executor.MockCall{Err: errors.New("unexpected fallback command")})
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a.SetFallbackExecutor(fallbackExec)
+	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubFallbackLatestReleaseClient(t, &calls, func() io.ReadCloser {
+		return githubFallbackReleaseBody(
+			"v2.93.0",
+			"2026-05-27T17:47:41Z",
+			"gh_2.93.0_plan9_mips.tar.gz",
+			"https://github.com/cli/cli/releases/download/v2.93.0/gh_2.93.0_plan9_mips.tar.gz",
+		)
+	}))
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"gh": {
+				Provider: "system",
+				Fallback: oldGitHubCLIFallbackSpec(),
+			},
+		},
+		Groups: []*config.GroupConfig{{Tools: groupTools("gh")}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	seedGitHubFallbackUpgradeCacheRow(t, a.DB(), true, "v2.93.0")
+
+	err := a.UpgradeToolFallback(ctx, "gh")
+	if err == nil {
+		t.Fatal("UpgradeToolFallback err = nil, want resolver failure")
+	}
+
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("GitHub latest release calls = %d, want 1", got)
+	}
+	if got := fallbackExec.CallCount(); got != 0 {
+		t.Fatalf("fallback command count = %d, want zero when resolver fails", got)
+	}
+	got, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	fallback := got.Tools["gh"].Fallback
+	if fallback == nil {
+		t.Fatal("fallback missing")
+	}
+	if fallback.Status != config.FallbackStatusFailed {
+		t.Fatalf("fallback status = %q, want failed", fallback.Status)
+	}
+	if fallback.Recipe.TagName != "v2.92.0" {
+		t.Fatalf("fallback tag = %q, want preserved old tag", fallback.Recipe.TagName)
+	}
+	if fallback.Recipe.PublishedAt != "2026-05-01T00:00:00Z" {
+		t.Fatalf("fallback published_at = %q, want preserved old timestamp", fallback.Recipe.PublishedAt)
+	}
+	if fallback.Recipe.AssetDownloadURL != "https://github.com/cli/cli/releases/download/v2.92.0/gh_2.92.0_old.zip" {
+		t.Fatalf("fallback asset URL = %q, want old recipe URL preserved", fallback.Recipe.AssetDownloadURL)
+	}
+	if fallback.Commands.Upgrade != "curl -fsSL https://github.com/cli/cli/releases/download/v2.92.0/gh_2.92.0_old.zip -o /tmp/gh-old.zip" {
+		t.Fatalf("fallback upgrade command = %q, want old command preserved", fallback.Commands.Upgrade)
+	}
+	if fallback.Commands.Check != "command -v gh" {
+		t.Fatalf("fallback check command = %q, want old command preserved", fallback.Commands.Check)
+	}
+	assertGitHubFallbackOutdated(t, a.DB(), true, "v2.93.0")
+}
+
+func TestUpgradeToolFallback_GitHubNotOutdatedUsesSavedRecipeWithoutReleaseLookup(t *testing.T) {
+	ctx := context.Background()
+	fallbackExec := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "sh -c curl -fsSL https://github.com/cli/cli/releases/download/v2.92.0/gh_2.92.0_old.zip", Response: executor.MockCall{}},
+		executor.MatchRule{Pattern: "sh -c command -v gh", Response: executor.MockCall{}},
+	).WithFallback(executor.MockCall{Err: errors.New("unexpected fallback command")})
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a.SetFallbackExecutor(fallbackExec)
+	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubFallbackLatestReleaseClient(t, nil, func() io.ReadCloser {
+		t.Fatal("GitHub latest release endpoint should not be called when the row is not marked outdated")
+		return http.NoBody
+	}))
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"gh": {
+				Provider: "system",
+				Fallback: oldGitHubCLIFallbackSpec(),
+			},
+		},
+		Groups: []*config.GroupConfig{{Tools: groupTools("gh")}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	seedGitHubFallbackUpgradeCacheRow(t, a.DB(), false, "")
+
+	if err := a.UpgradeToolFallback(ctx, "gh"); err != nil {
+		t.Fatalf("UpgradeToolFallback: %v", err)
+	}
+
+	fallbackExec.AssertCalled(t, "sh -c curl -fsSL https://github.com/cli/cli/releases/download/v2.92.0/gh_2.92.0_old.zip")
+	got, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got.Tools["gh"].Fallback.Recipe.TagName != "v2.92.0" {
+		t.Fatalf("fallback tag = %q, want saved old recipe", got.Tools["gh"].Fallback.Recipe.TagName)
+	}
+	assertGitHubFallbackOutdated(t, a.DB(), false, "")
+}
+
 func TestUninstallToolFallback_ReportsUnavailableWithoutCommand(t *testing.T) {
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -806,5 +1094,73 @@ func TestSaveToolFallbackFromGitHub_RejectsInvalidRepo(t *testing.T) {
 	err := a.SaveToolFallbackFromGitHub(context.Background(), "rg", "not-a-repo")
 	if err == nil || !strings.Contains(err.Error(), "github repo must be owner/repo") {
 		t.Fatalf("SaveToolFallbackFromGitHub err = %v, want repo validation", err)
+	}
+}
+
+func oldGitHubCLIFallbackSpec() *config.FallbackSpec {
+	oldURL := "https://github.com/cli/cli/releases/download/v2.92.0/gh_2.92.0_old.zip"
+	return &config.FallbackSpec{
+		Source: config.FallbackSource{
+			Type:  config.FallbackSourceGitHub,
+			Owner: "cli",
+			Repo:  "cli",
+			URL:   "https://github.com/cli/cli",
+		},
+		Status: config.FallbackStatusVerified,
+		Binary: "gh",
+		Recipe: config.FallbackRecipe{
+			Type:             config.FallbackRecipeGitHubReleaseAsset,
+			ReleaseID:        "320000000",
+			TagName:          "v2.92.0",
+			PublishedAt:      "2026-05-01T00:00:00Z",
+			AssetID:          "420000000",
+			AssetName:        "gh_2.92.0_old.zip",
+			AssetPattern:     "gh_2.92.0_old.zip",
+			AssetDownloadURL: oldURL,
+		},
+		Commands: config.FallbackCommands{
+			Upgrade: "curl -fsSL " + oldURL + " -o /tmp/gh-old.zip",
+			Check:   "command -v gh",
+		},
+	}
+}
+
+func seedGitHubFallbackUpgradeCacheRow(t *testing.T, db *database.DB, outdated bool, latestVersion string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := db.Upsert(ctx, &database.ToolCache{
+		Name:          "gh",
+		Provider:      "system",
+		Package:       "gh",
+		Installed:     true,
+		InstalledWith: "gh",
+		Outdated:      outdated,
+		LastChecked:   time.Now(),
+	}); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+	if outdated || latestVersion != "" {
+		if err := db.UpdateOutdated(ctx, "gh", "system", "gh", outdated, latestVersion); err != nil {
+			t.Fatalf("seed outdated state: %v", err)
+		}
+	}
+}
+
+func assertFallbackCommandContains(t *testing.T, exec *executor.MatchMockExecutor, value string) {
+	t.Helper()
+	for _, call := range exec.CallsMatching("sh -c ") {
+		if strings.Contains(call.Name+" "+strings.Join(call.Args, " "), value) {
+			return
+		}
+	}
+	t.Fatalf("fallback commands did not contain %q; calls = %+v", value, exec.Calls)
+}
+
+func assertFallbackCommandNotContains(t *testing.T, exec *executor.MatchMockExecutor, value string) {
+	t.Helper()
+	for _, call := range exec.CallsMatching("sh -c ") {
+		if strings.Contains(call.Name+" "+strings.Join(call.Args, " "), value) {
+			t.Fatalf("fallback command contained %q; calls = %+v", value, exec.Calls)
+		}
 	}
 }
