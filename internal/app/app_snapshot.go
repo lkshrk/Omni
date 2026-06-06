@@ -28,6 +28,7 @@ type StartupSnapshot struct {
 	GroupIgnores           map[string]map[string]bool
 	ToolProviderPins       map[string]string
 	ToolFallbacks          map[string]config.FallbackSpec
+	ToolGit                map[string]string
 	EffectivePythonManager string
 	EffectiveNodeManager   string
 	EffectiveSystemManager string
@@ -52,6 +53,7 @@ type ToolScopeState struct {
 	ToolIgnores        map[string]bool
 	ToolProviderPins   map[string]string
 	ToolFallbacks      map[string]config.FallbackSpec
+	ToolGit            map[string]string
 }
 
 type ToolScopeDisplayState struct {
@@ -60,6 +62,7 @@ type ToolScopeDisplayState struct {
 	GroupIgnores     map[string]map[string]bool
 	ToolProviderPins map[string]string
 	ToolFallbacks    map[string]config.FallbackSpec
+	ToolGit          map[string]string
 }
 
 type ToolGroupState struct {
@@ -160,6 +163,7 @@ func (a *App) StartupSnapshot(ctx context.Context) (*StartupSnapshot, error) {
 		GroupIgnores:           toolScopeDisplayState.GroupIgnores,
 		ToolProviderPins:       toolScopeDisplayState.ToolProviderPins,
 		ToolFallbacks:          toolScopeDisplayState.ToolFallbacks,
+		ToolGit:                toolScopeDisplayState.ToolGit,
 		EffectivePythonManager: pythonBin,
 		EffectiveNodeManager:   nodeBin,
 		EffectiveSystemManager: ecosystemProviders[provider.EcosystemSystem],
@@ -248,6 +252,7 @@ func buildToolScopeDisplayStateWithFallback(state *ToolScopeState, fallbackHostI
 		GroupIgnores:     groupIgnoresFromScopeState(state.GlobalIgnoredTools),
 		ToolProviderPins: toolProviderPinsFromScopeState(state.ToolProviderPins),
 		ToolFallbacks:    toolFallbacksFromScopeState(state.ToolFallbacks),
+		ToolGit:          toolGitFromScopeState(state.ToolGit),
 	}
 }
 
@@ -315,6 +320,16 @@ func toolFallbacksFromScopeState(fallbacks map[string]config.FallbackSpec) map[s
 	return out
 }
 
+func toolGitFromScopeState(toolGit map[string]string) map[string]string {
+	out := make(map[string]string, len(toolGit))
+	for name, git := range toolGit {
+		if name != "" && git != "" {
+			out[name] = git
+		}
+	}
+	return out
+}
+
 func (a *App) toolScopeStateFromConfig(cfg *config.RootConfig) *ToolScopeState {
 	hostInfo := a.hostStatusFromConfig(cfg)
 	var hostIgnored []string
@@ -323,24 +338,29 @@ func (a *App) toolScopeStateFromConfig(cfg *config.RootConfig) *ToolScopeState {
 			hostIgnored = append([]string(nil), host.Ignore...)
 		}
 	}
-	toolIgnores, toolProviderPins, toolFallbacks := a.toolScopeFromConfig(cfg)
+	toolIgnores, toolProviderPins, toolFallbacks, toolGit := a.toolScopeFromConfig(cfg)
 	return &ToolScopeState{
 		GlobalIgnoredTools: append([]string(nil), cfg.Ignore.Tools...),
 		HostIgnoredTools:   hostIgnored,
 		ToolIgnores:        toolIgnores,
 		ToolProviderPins:   toolProviderPins,
 		ToolFallbacks:      toolFallbacks,
+		ToolGit:            toolGit,
 	}
 }
 
-func (a *App) toolScopeFromConfig(cfg *config.RootConfig) (map[string]bool, map[string]string, map[string]config.FallbackSpec) {
+func (a *App) toolScopeFromConfig(cfg *config.RootConfig) (map[string]bool, map[string]string, map[string]config.FallbackSpec, map[string]string) {
 	toolIgnores := make(map[string]bool)
 	pins := make(map[string]string)
 	fallbacks := make(map[string]config.FallbackSpec)
+	toolGit := make(map[string]string)
 	shortHost := shortHostname(currentHostname())
 	for name, spec := range cfg.Tools {
 		if spec.Ignore {
 			toolIgnores[name] = true
+		}
+		if spec.Git != "" {
+			toolGit[name] = spec.Git
 		}
 		if spec.Fallback != nil {
 			fallbacks[name] = *spec.Fallback
@@ -353,5 +373,5 @@ func (a *App) toolScopeFromConfig(cfg *config.RootConfig) (map[string]bool, map[
 			pins[name] = spec.InstallWith
 		}
 	}
-	return toolIgnores, pins, fallbacks
+	return toolIgnores, pins, fallbacks, toolGit
 }

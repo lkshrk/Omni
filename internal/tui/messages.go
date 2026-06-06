@@ -22,6 +22,7 @@ type toolsLoadedMsg struct {
 	groupIgnoreSet         map[string]map[string]bool
 	toolProviderPins       map[string]string
 	toolFallbacks          map[string]config.FallbackSpec
+	toolGit                map[string]string
 	hostInfo               *app.HostInfo
 	ignoreList             []string // tool names ignored by the active host
 	dotsHistory            []app.DotsHistoryEntry

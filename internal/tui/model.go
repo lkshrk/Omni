@@ -269,6 +269,7 @@ type Model struct {
 	groupIgnoreSet   map[string]map[string]bool
 	toolProviderPins map[string]string
 	toolFallbacks    map[string]config.FallbackSpec
+	toolGit          map[string]string
 
 	// provider filter — [All] [system] [node] [python] …
 	providerNames  []string // ordered ecosystem provider names from the app/provider registry
@@ -633,6 +634,7 @@ func toolsLoadedMsgFromStartupState(snapshot *app.StartupSnapshot) toolsLoadedMs
 		groupIgnoreSet:         snapshot.GroupIgnores,
 		toolProviderPins:       snapshot.ToolProviderPins,
 		toolFallbacks:          snapshot.ToolFallbacks,
+		toolGit:                snapshot.ToolGit,
 		hostInfo:               hostInfo,
 		ignoreList:             ignoreList,
 		dotsHistory:            snapshot.DotsHistory,
