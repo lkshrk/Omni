@@ -94,6 +94,47 @@ func TestListDiscovered_HidesUnattributedLegacyRows(t *testing.T) {
 	}
 }
 
+func TestListTools_HidesTrackedRowsRemovedFromConfig(t *testing.T) {
+	ctx := context.Background()
+	brew := &stubProvider{name: "brew", available: true}
+	system := &lifecycleProvider{stubProvider: stubProvider{name: "system", available: true}, resolvedName: "brew"}
+	a, cfgPath := newImportApp(t, system, brew)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("ripgrep", "system")),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("ripgrep"),
+		}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name:          "docker",
+		Provider:      "system",
+		Package:       "docker-desktop",
+		Installed:     true,
+		InstalledWith: "brew",
+	}); err != nil {
+		t.Fatalf("Upsert stale docker: %v", err)
+	}
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name:          "ripgrep",
+		Provider:      "system",
+		Package:       "ripgrep",
+		Installed:     true,
+		InstalledWith: "brew",
+	}); err != nil {
+		t.Fatalf("Upsert configured ripgrep: %v", err)
+	}
+
+	tools, err := a.ListTools(ctx, "")
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(tools) != 1 || tools[0].Name != "ripgrep" {
+		t.Fatalf("ListTools = %+v, want only configured ripgrep", tools)
+	}
+}
+
 func TestToolDisplaySnapshotReturnsToolsDiscoveredAndManager(t *testing.T) {
 	ctx := context.Background()
 	brew := &stubProvider{name: "brew", available: true}
