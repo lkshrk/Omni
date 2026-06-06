@@ -85,6 +85,22 @@ func TestMustTUICopy_UsesTUIOverrides(t *testing.T) {
 	}
 }
 
+func TestToolSetSpecCopyUsesProviderListTerminology(t *testing.T) {
+	action, ok := Get(ToolSetSpec)
+	if !ok {
+		t.Fatal("ToolSetSpec should exist")
+	}
+	if !strings.Contains(action.LongDescription, "provider candidates") {
+		t.Fatalf("LongDescription = %q, want provider candidates terminology", action.LongDescription)
+	}
+	stale := []string{"ecosystem provider", "concrete install-with target"}
+	for _, term := range stale {
+		if strings.Contains(action.LongDescription, term) {
+			t.Fatalf("LongDescription = %q should not contain stale term %q", action.LongDescription, term)
+		}
+	}
+}
+
 func TestMustDescription_PanicsOnUnknown(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {

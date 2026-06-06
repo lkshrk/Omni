@@ -121,14 +121,10 @@ func (a *App) Import(ctx context.Context, opts ImportOptions) (*ImportResult, er
 					}
 					spec := cfg.Tools[t.Name]
 					providerName := configProvider
-					spec.Providers = upsertToolProvider(spec.Providers, config.ToolInstallSpec{
+					setToolProviderCandidate(&spec, config.ToolInstallSpec{
 						Provider: providerName,
 						Package:  t.Package,
 					})
-					spec.Provider = ""
-					spec.Package = ""
-					spec.InstallWith = ""
-					spec.Options = nil
 					metadataEntry := config.ToolEntry{Name: t.Name, Provider: providerName, Package: t.Package}
 					if entry, ok := provider.LookupInstalledMetadata(metadata, toolEntryLookupKeys(metadataEntry)); ok {
 						if git := gitURLFromSourceMetadata(entry.Source); git != "" {

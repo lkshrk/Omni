@@ -56,11 +56,7 @@ func (a *App) SetTool(name, providerName, packageName, installWith string) error
 			cfg.Tools = make(map[string]config.ToolSpec)
 		}
 		spec := cfg.Tools[name]
-		spec.Providers = upsertToolProviderFirst(spec.Providers, entry)
-		spec.Provider = ""
-		spec.Package = ""
-		spec.InstallWith = ""
-		spec.Options = nil
+		setDefaultToolProviderCandidate(&spec, entry)
 		cfg.Tools[name] = spec
 		return nil
 	})
@@ -92,7 +88,24 @@ func (a *App) providerEntryFromLegacyArgs(providerName, packageName, installWith
 	return config.ToolInstallSpec{Provider: concrete, Package: packageName, Options: cloneOptionMap(options)}, nil
 }
 
-func upsertToolProvider(providers []config.ToolInstallSpec, entry config.ToolInstallSpec) []config.ToolInstallSpec {
+func setToolProviderCandidate(spec *config.ToolSpec, entry config.ToolInstallSpec) {
+	spec.Providers = upsertToolProviderCandidate(spec.Providers, entry)
+	clearLegacyToolProviderFields(spec)
+}
+
+func setDefaultToolProviderCandidate(spec *config.ToolSpec, entry config.ToolInstallSpec) {
+	spec.Providers = promoteToolProviderCandidate(spec.Providers, entry)
+	clearLegacyToolProviderFields(spec)
+}
+
+func clearLegacyToolProviderFields(spec *config.ToolSpec) {
+	spec.Provider = ""
+	spec.Package = ""
+	spec.InstallWith = ""
+	spec.Options = nil
+}
+
+func upsertToolProviderCandidate(providers []config.ToolInstallSpec, entry config.ToolInstallSpec) []config.ToolInstallSpec {
 	for i, existing := range providers {
 		if existing.Provider == entry.Provider {
 			providers[i] = entry
@@ -102,8 +115,8 @@ func upsertToolProvider(providers []config.ToolInstallSpec, entry config.ToolIns
 	return append(providers, entry)
 }
 
-func upsertToolProviderFirst(providers []config.ToolInstallSpec, entry config.ToolInstallSpec) []config.ToolInstallSpec {
-	providers = upsertToolProvider(providers, entry)
+func promoteToolProviderCandidate(providers []config.ToolInstallSpec, entry config.ToolInstallSpec) []config.ToolInstallSpec {
+	providers = upsertToolProviderCandidate(providers, entry)
 	for i, existing := range providers {
 		if existing.Provider != entry.Provider {
 			continue
@@ -620,11 +633,7 @@ func (a *App) setToolInstallSpec(name, host, providerName, packageName, installW
 			}
 			spec.Hosts[host] = entry
 		} else {
-			spec.Providers = upsertToolProvider(spec.Providers, entry)
-			spec.Provider = ""
-			spec.Package = ""
-			spec.InstallWith = ""
-			spec.Options = nil
+			setToolProviderCandidate(&spec, entry)
 		}
 		cfg.Tools[name] = spec
 		return nil

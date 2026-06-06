@@ -605,14 +605,10 @@ func (a *App) syncOrphansToMachineGroup(ctx context.Context, activeGroups []*con
 					cfg.Tools = make(map[string]config.ToolSpec)
 				}
 				spec := cfg.Tools[t.Name]
-				spec.Providers = upsertToolProvider(spec.Providers, config.ToolInstallSpec{
+				setToolProviderCandidate(&spec, config.ToolInstallSpec{
 					Provider: configProvider,
 					Package:  t.Package,
 				})
-				spec.Provider = ""
-				spec.Package = ""
-				spec.InstallWith = ""
-				spec.Options = nil
 				cfg.Tools[t.Name] = spec
 				orphans = append(orphans, config.ToolEntry{Name: t.Name})
 				covered[key] = struct{}{}
