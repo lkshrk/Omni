@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -67,7 +68,7 @@ func (m *Model) openFallbackEditor(t *database.ToolCache) tea.Cmd {
 	m.fallbackTarget = *t
 	m.fallbackTargetSet = true
 	m.mode = viewFallbackEditor
-	m.fallbackEditor = fallbackEditorStateForTool(t, m.toolFallbacks)
+	m.fallbackEditor = fallbackEditorStateForTool(t, m.toolFallbacks, m.toolGit)
 	m.focusFallbackEditorField()
 	return textinput.Blink
 }
@@ -241,7 +242,7 @@ func fallbackConcreteForTool(t *database.ToolCache, fallbacks map[string]config.
 	return fallbackConcreteLabel(fallback)
 }
 
-func fallbackEditorStateForTool(t *database.ToolCache, fallbacks map[string]config.FallbackSpec) fallbackEditorState {
+func fallbackEditorStateForTool(t *database.ToolCache, fallbacks map[string]config.FallbackSpec, toolGit map[string]string) fallbackEditorState {
 	state := fallbackEditorState{fields: map[fallbackEditorFieldID]string{}}
 	for _, field := range fallbackEditorFields {
 		state.fields[field.id] = ""
@@ -253,6 +254,9 @@ func fallbackEditorStateForTool(t *database.ToolCache, fallbacks map[string]conf
 	state.fields[fallbackFieldBinary] = name
 	state.fields[fallbackFieldCheckCommand] = "command -v " + name
 	state.fields[fallbackFieldReleaseChannel] = "stable"
+	if git := fallbackRepoFromToolGit(toolGit[name]); git != "" {
+		state.fields[fallbackFieldRepo] = git
+	}
 	if fallbacks == nil || t == nil {
 		return state
 	}
@@ -277,13 +281,41 @@ func fallbackEditorStateForTool(t *database.ToolCache, fallbacks map[string]conf
 
 func (m *Model) focusFallbackEditorField() {
 	if m.fallbackEditor.fields == nil {
-		m.fallbackEditor = fallbackEditorStateForTool(&m.fallbackTarget, m.toolFallbacks)
+		m.fallbackEditor = fallbackEditorStateForTool(&m.fallbackTarget, m.toolFallbacks, m.toolGit)
 	}
 	field := fallbackEditorFields[m.fallbackEditor.cursor]
 	m.settingsInput.SetValue(m.fallbackEditor.fields[field.id])
 	m.settingsInput.Placeholder = field.placeholder
 	m.settingsInput.CursorEnd()
 	m.settingsInput.Focus()
+}
+
+func fallbackRepoFromToolGit(git string) string {
+	git = strings.TrimSpace(git)
+	if git == "" {
+		return ""
+	}
+	if strings.HasPrefix(git, "git@github.com:") {
+		repo := strings.TrimSuffix(strings.TrimPrefix(git, "git@github.com:"), ".git")
+		parts := strings.Split(strings.Trim(repo, "/"), "/")
+		if len(parts) >= 2 && parts[0] != "" && parts[1] != "" {
+			return parts[0] + "/" + parts[1]
+		}
+		return ""
+	}
+	parsed, err := url.Parse(git)
+	if err != nil || parsed.Host == "" {
+		return ""
+	}
+	if !strings.EqualFold(parsed.Host, "github.com") {
+		return ""
+	}
+	path := strings.Trim(strings.TrimSuffix(parsed.Path, ".git"), "/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return ""
+	}
+	return parts[0] + "/" + parts[1]
 }
 
 func (m *Model) moveFallbackEditorCursor(delta int) {

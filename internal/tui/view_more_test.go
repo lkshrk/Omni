@@ -4053,6 +4053,25 @@ func TestOpenFallbackEditor_PrefillsExistingRecipe(t *testing.T) {
 	}
 }
 
+func TestOpenFallbackEditor_PrefillsConfiguredGit(t *testing.T) {
+	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: false, Tracked: true}
+	m := baseModel([]*database.ToolCache{tool})
+	m.toolGit = map[string]string{"rg": "https://github.com/BurntSushi/ripgrep"}
+
+	if cmd := m.openFallbackEditor(tool); cmd == nil {
+		t.Fatal("openFallbackEditor returned nil command")
+	}
+	if m.mode != viewFallbackEditor {
+		t.Fatalf("mode = %v, want fallback editor", m.mode)
+	}
+	if got := m.fallbackEditor.fields[fallbackFieldRepo]; got != "BurntSushi/ripgrep" {
+		t.Fatalf("repo field = %q, want configured git repo", got)
+	}
+	if got := fallbackConcreteForTool(tool, m.toolFallbacks); got != "" {
+		t.Fatalf("fallback label = %q, want no gh status until fallback is configured", got)
+	}
+}
+
 func TestFallbackEditorKeyboardNavigationPersistsActiveField(t *testing.T) {
 	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: false, Tracked: true}
 	m := baseModel([]*database.ToolCache{tool})

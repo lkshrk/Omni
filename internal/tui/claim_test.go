@@ -359,12 +359,16 @@ func TestDoInstallAndAdd_RefreshesToolMembershipState(t *testing.T) {
 func TestDoInstallAndAdd_PreservesCachedSearchMetadata(t *testing.T) {
 	ctx := context.Background()
 	prov := &okProvider{name: "system"}
-	a, _ := newCmdApp(t, prov, nil)
+	a, cfgPath := newCmdApp(t, prov, nil)
 	if err := a.DB().UpsertMetadataBatch(ctx, []database.MetadataUpdate{{
 		Name:        "ripgrep",
 		Provider:    "system",
 		Package:     "ripgrep",
 		Description: "fast grep",
+		SourceType:  provider.SourceTypeGitHub,
+		SourceOwner: "BurntSushi",
+		SourceRepo:  "ripgrep",
+		SourceURL:   "https://github.com/BurntSushi/ripgrep",
 	}}); err != nil {
 		t.Fatalf("UpsertMetadataBatch: %v", err)
 	}
@@ -383,6 +387,13 @@ func TestDoInstallAndAdd_PreservesCachedSearchMetadata(t *testing.T) {
 	}
 	if !got.tools[0].Description.Valid || got.tools[0].Description.String != "fast grep" {
 		t.Fatalf("installed row description = %+v, want cached search metadata", got.tools[0].Description)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if got := cfg.Tools["ripgrep"].Git; got != "https://github.com/BurntSushi/ripgrep" {
+		t.Fatalf("tool git = %q, want cached search GitHub source", got)
 	}
 }
 
