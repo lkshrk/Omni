@@ -1,0 +1,22 @@
+# tools fallback rejects configured GitHub URLs that are not repository roots
+! exec omni --config settings.json tools fallback gh
+stderr 'tool "gh" git URL is not a GitHub repo; pass --from-github owner/repo'
+
+exec grep '"git": "https://github.com/cli/cli/releases?expanded=true"' settings.json
+stdout '"git": "https://github.com/cli/cli/releases\?expanded=true"'
+! exec grep '"fallback"' settings.json
+
+-- settings.json --
+{
+  "version": 5,
+  "tools": {
+    "gh": {
+      "provider": "system",
+      "git": "https://github.com/cli/cli/releases?expanded=true"
+    }
+  },
+  "hosts": { "testhost": [] },
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": ["gh"] }
+  ]
+}
