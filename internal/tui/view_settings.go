@@ -311,7 +311,7 @@ func renderSettings(m Model) string {
 		settingsRowSystemPriority: {
 			settingsRowMeta: settingsRows[settingsRowSystemPriority],
 			value:           priorityVal(m.systemPriorityDisplay(providerState.SystemPriority)),
-			help:            p.styleHelp.Render("Concrete system managers tried for system tools without an install_with override."),
+			help:            p.styleHelp.Render("Concrete system providers tried for system tools without a tool-specific provider candidate."),
 		},
 		settingsRowSystemProvider: {
 			settingsRowMeta: settingsRows[settingsRowSystemProvider],

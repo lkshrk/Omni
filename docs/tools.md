@@ -1,7 +1,7 @@
 # Tools
 
 Tools are logical names in `settings.json`. Omni resolves each logical tool to
-a concrete package manager when it syncs the active host.
+one configured provider candidate when it syncs the active host.
 
 For the full provider model, see [Providers](providers.md).
 
@@ -54,7 +54,7 @@ omni tools search typescript --provider npm
 ```
 
 Search uses provider registries where available. Results are best-effort because
-each package manager exposes different metadata.
+each provider exposes different metadata.
 
 ## Import Installed Tools
 
@@ -124,7 +124,7 @@ Later `tools install <tool>` and `tools sync` still try the native system
 manager first. They use the saved fallback only when Omni has explicit cached
 evidence that the concrete manager, such as `apt` or `dnf`, cannot provide the
 configured package. GitHub fallback is not a normal background search path and
-does not make `gh` the preferred package manager for native-owned rows.
+does not make `gh` the preferred provider for native-owned rows.
 
 Omni may populate `tools.<name>.git` from Brew metadata refresh/import/install
 or from cached install-from-search metadata. That field is only upstream
