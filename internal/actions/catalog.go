@@ -339,7 +339,7 @@ var Tools = []Action{
 		Scope:           ScopeRow,
 		Label:           "set tool spec",
 		Description:     "Create or update a logical tool spec.",
-		LongDescription: "Create or update a logical tool spec, including package name, ecosystem provider, concrete install-with target, or host override.",
+		LongDescription: "Create or update a logical tool spec, including concrete provider candidates, package name, quarantine, or legacy host override.",
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresToolName, RequiresEcosystemProvider},
 		TUI:             &TUIBinding{KeyMapField: "PinProvider", DefaultKey: "p", Label: "set tool spec", Description: "Edit provider and package settings for the selected tool."},

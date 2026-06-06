@@ -86,15 +86,11 @@ func (a *App) Switch(ctx context.Context, name, fromProvider, toProvider string)
 			}
 		}
 
-		spec.Providers = upsertToolProviderFirst(spec.Providers, config.ToolInstallSpec{
+		setDefaultToolProviderCandidate(&spec, config.ToolInstallSpec{
 			Provider: targetProvider,
 			Package:  pkg,
 			Options:  cloneOptionMap(install.Options),
 		})
-		spec.Provider = ""
-		spec.Package = ""
-		spec.InstallWith = ""
-		spec.Options = nil
 		cfg.Tools[name] = spec
 		return nil
 	})

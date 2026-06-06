@@ -68,6 +68,51 @@ func TestSetTool_PromotesProviderToDefault(t *testing.T) {
 	}
 }
 
+func TestSetTool_PreservesToolMetadataWhenPromotingProvider(t *testing.T) {
+	a, cfgPath := newImportApp(t)
+	fallback := config.FallbackSpec{
+		Source:   config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "cli", Repo: "cli"},
+		Status:   config.FallbackStatusUnverified,
+		Binary:   "gh",
+		Commands: config.FallbackCommands{Check: "{{bin}} --version"},
+	}
+
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"gh": {
+				Providers:  []config.ToolInstallSpec{{Provider: "apt", Package: "gh"}, {Provider: "brew", Package: "gh"}},
+				Git:        "https://github.com/cli/cli",
+				Fallback:   &fallback,
+				Quarantine: "7d",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	if err := a.SetTool("gh", "brew", "gh", ""); err != nil {
+		t.Fatalf("SetTool: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	spec := cfg.Tools["gh"]
+	wantProviders := []config.ToolInstallSpec{{Provider: "brew", Package: "gh"}, {Provider: "apt", Package: "gh"}}
+	if !reflect.DeepEqual(spec.Providers, wantProviders) {
+		t.Fatalf("providers = %+v, want %+v", spec.Providers, wantProviders)
+	}
+	if spec.Git != "https://github.com/cli/cli" {
+		t.Fatalf("git = %q, want configured git metadata preserved", spec.Git)
+	}
+	if spec.Fallback == nil || !reflect.DeepEqual(*spec.Fallback, fallback) {
+		t.Fatalf("fallback = %+v, want %+v", spec.Fallback, fallback)
+	}
+	if spec.Quarantine != "7d" {
+		t.Fatalf("quarantine = %q, want preserved", spec.Quarantine)
+	}
+}
+
 func TestSetTool_RejectsMissingProvider(t *testing.T) {
 	a, _ := newImportApp(t)
 

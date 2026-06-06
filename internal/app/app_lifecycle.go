@@ -477,14 +477,10 @@ func (a *App) addDiscoveredClaimsToConfig(groupName string, claims []discoveredC
 			if providerName == "pip3" {
 				providerName = "pip"
 			}
-			spec.Providers = upsertToolProvider(spec.Providers, config.ToolInstallSpec{
+			setToolProviderCandidate(&spec, config.ToolInstallSpec{
 				Provider: providerName,
 				Package:  claim.pkg,
 			})
-			spec.Provider = ""
-			spec.Package = ""
-			spec.InstallWith = ""
-			spec.Options = nil
 			cfg.Tools[claim.name] = spec
 			if !containsToolMembership(gc.Tools, claim.name) {
 				gc.Tools = append(gc.Tools, config.ToolEntry{Name: claim.name})
@@ -1269,11 +1265,7 @@ func (a *App) Add(ctx context.Context, providerName, pkg, name, groupName, insta
 			cfg.Tools = make(map[string]config.ToolSpec)
 		}
 		spec := cfg.Tools[name]
-		spec.Providers = upsertToolProvider(spec.Providers, entry)
-		spec.Provider = ""
-		spec.Package = ""
-		spec.InstallWith = ""
-		spec.Options = nil
+		setToolProviderCandidate(&spec, entry)
 		cfg.Tools[name] = spec
 		if !containsToolMembership(gc.Tools, name) {
 			gc.Tools = append(gc.Tools, config.ToolEntry{Name: name})
