@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -59,6 +61,99 @@ func TestInstallToolFallback_RunsInstallCheckAndUpdatesState(t *testing.T) {
 	}
 	if got.Tools["rg"].Fallback.Status != config.FallbackStatusVerified {
 		t.Fatalf("fallback status = %q, want verified", got.Tools["rg"].Fallback.Status)
+	}
+}
+
+func TestInstallToolFallback_MaterializesTemplateRecipe(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a.CacheDir = filepath.Join(t.TempDir(), "cache")
+	binDir := filepath.Join(home, ".local", "share", "omni", "fallback", "bin")
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{FallbackBinDir: "~/.local/share/omni/fallback/bin"},
+		Tools: map[string]config.ToolSpec{
+			"rg": {
+				Provider: "system",
+				Fallback: &config.FallbackSpec{
+					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+					Status: config.FallbackStatusUnverified,
+					Binary: "rg",
+					Commands: config.FallbackCommands{
+						Install: `mkdir -p "{{bin_dir}}" "{{cache_dir}}" && printf '#!/bin/sh\nexit 0\n' > "{{bin_dir}}/{{binary}}" && chmod +x "{{bin_dir}}/{{binary}}"`,
+						Check:   `test -x "{{bin_dir}}/{{binary}}" && test -d "{{cache_dir}}" && test "{{repo}}" = "BurntSushi/ripgrep"`,
+					},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if err := a.InstallToolFallback(ctx, "rg"); err != nil {
+		t.Fatalf("InstallToolFallback: %v", err)
+	}
+
+	info, err := os.Stat(filepath.Join(binDir, "rg"))
+	if err != nil {
+		t.Fatalf("fallback binary stat: %v", err)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		t.Fatalf("fallback binary mode = %v, want executable", info.Mode().Perm())
+	}
+	cached, err := a.DB().Get(ctx, "rg", "system", "rg")
+	if err != nil {
+		t.Fatalf("Get rg: %v", err)
+	}
+	if !cached.Installed || cached.InstalledWith != "gh" {
+		t.Fatalf("cached = installed %v with %q, want installed with gh", cached.Installed, cached.InstalledWith)
+	}
+	got, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got.Tools["rg"].Fallback.Status != config.FallbackStatusVerified {
+		t.Fatalf("fallback status = %q, want verified", got.Tools["rg"].Fallback.Status)
+	}
+}
+
+func TestInstallToolFallback_RejectsUnknownTemplateVariable(t *testing.T) {
+	ctx := context.Background()
+	mock := executor.NewMatchMock().WithFallback(executor.MockCall{})
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a.SetFallbackExecutor(mock)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"rg": {
+				Provider: "system",
+				Fallback: &config.FallbackSpec{
+					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+					Status: config.FallbackStatusUnverified,
+					Commands: config.FallbackCommands{
+						Install: "echo {{missing}}",
+						Check:   "command -v rg",
+					},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	err := a.InstallToolFallback(ctx, "rg")
+	if err == nil || !strings.Contains(err.Error(), `unknown fallback template variable "missing"`) {
+		t.Fatalf("InstallToolFallback err = %v, want unknown template variable", err)
+	}
+	if mock.CallCount() != 0 {
+		t.Fatalf("fallback command count = %d, want no shell execution", mock.CallCount())
+	}
+	got, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got.Tools["rg"].Fallback.Status != config.FallbackStatusFailed {
+		t.Fatalf("fallback status = %q, want failed", got.Tools["rg"].Fallback.Status)
 	}
 }
 
