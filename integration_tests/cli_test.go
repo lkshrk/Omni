@@ -7,6 +7,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,12 +28,41 @@ import (
 // binary behaviour in a subprocess without needing a separate build step.
 func TestMain(m *testing.M) {
 	os.Exit(testscript.RunMain(m, map[string]func() int{
-		"omni":                             func() int { cli.Execute(); return 0 },
-		"omni-mark-outdated-refresh-fresh": markOutdatedRefreshFreshMain,
-		"omni-seed-cache":                  seedCacheMain,
-		"omni-seed-package-availability":   seedPackageAvailabilityMain,
-		"omni-seed-update-metadata":        seedUpdateMetadataMain,
+		"omni":                               func() int { cli.Execute(); return 0 },
+		"omni-mark-outdated-refresh-fresh":   markOutdatedRefreshFreshMain,
+		"omni-seed-cache":                    seedCacheMain,
+		"omni-seed-package-availability":     seedPackageAvailabilityMain,
+		"omni-seed-update-metadata":          seedUpdateMetadataMain,
+		"omni-tools-fallback-configured-git": toolsFallbackConfiguredGitMain,
 	}))
+}
+
+func toolsFallbackConfiguredGitMain() int {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		fmt.Fprintln(os.Stderr, "locate test fixture: runtime caller unavailable")
+		return 1
+	}
+	releaseFixture := filepath.Join(filepath.Dir(file), "..", "internal", "app", "testdata", "github_cli_latest_release.json")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/cli/cli/releases/latest" {
+			http.NotFound(w, r)
+			return
+		}
+		http.ServeFile(w, r, releaseFixture)
+	}))
+	defer server.Close()
+	if err := os.Setenv("OMNI_GITHUB_API_BASE", server.URL); err != nil {
+		fmt.Fprintf(os.Stderr, "set OMNI_GITHUB_API_BASE: %v\n", err)
+		return 1
+	}
+	cmd := cli.NewRootCmd()
+	cmd.SetArgs(os.Args[1:])
+	if err := cmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return 0
 }
 
 func seedCacheMain() int {
