@@ -179,3 +179,112 @@ func TestPlanInstallRoute_MarksFallbackEligibleWhenAllNativeCandidatesUnavailabl
 		t.Fatalf("skipped = %+v, want both native candidates skipped", route.Skipped)
 	}
 }
+
+func TestPlanInstallRoute_DoesNotUseFallbackWhenProviderUnavailable(t *testing.T) {
+	ctx := context.Background()
+	apt := &availabilityCountingProvider{name: "apt", available: false}
+	a := New(filepath.Join(t.TempDir(), "settings.json"))
+	if err := a.InitTestMode(ctx, apt); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	defer a.Close() //nolint:errcheck
+
+	route := a.planInstallRoute(ctx, "rg", config.ToolSpec{
+		Providers: []config.ToolInstallSpec{
+			{Provider: "apt", Package: "ripgrep"},
+		},
+		Fallback: githubFallbackSpec(),
+	}, make(map[string]bool))
+
+	if route.Kind != installRouteUnavailable {
+		t.Fatalf("route kind = %q, want unavailable", route.Kind)
+	}
+	if len(route.Skipped) != 1 || route.Skipped[0].Reason != installRouteSkipProviderUnavailable || route.Skipped[0].Install.Provider != "apt" {
+		t.Fatalf("skipped = %+v, want apt provider-unavailable skip", route.Skipped)
+	}
+}
+
+func TestPlanInstallRoute_DoesNotUseFallbackForMixedSkipReasons(t *testing.T) {
+	ctx := context.Background()
+	apt := &availabilityCountingProvider{name: "apt", available: true}
+	brew := &availabilityCountingProvider{name: "brew", available: false}
+	a := New(filepath.Join(t.TempDir(), "settings.json"))
+	if err := a.InitTestMode(ctx, apt, brew); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	defer a.Close() //nolint:errcheck
+	if err := a.DB().UpsertPackageAvailability(ctx, database.PackageAvailability{
+		Name:      "rg",
+		Provider:  "apt",
+		Package:   "ripgrep",
+		Available: false,
+		Reason:    "no apt candidate",
+		CheckedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("seed apt availability: %v", err)
+	}
+
+	route := a.planInstallRoute(ctx, "rg", config.ToolSpec{
+		Providers: []config.ToolInstallSpec{
+			{Provider: "apt", Package: "ripgrep"},
+			{Provider: "brew", Package: "ripgrep"},
+		},
+		Fallback: githubFallbackSpec(),
+	}, make(map[string]bool))
+
+	if route.Kind != installRouteUnavailable {
+		t.Fatalf("route kind = %q, want unavailable", route.Kind)
+	}
+	if len(route.Skipped) != 2 {
+		t.Fatalf("skipped = %+v, want both native candidates skipped", route.Skipped)
+	}
+	if route.Skipped[0].Reason != installRouteSkipPackageUnavailable || route.Skipped[1].Reason != installRouteSkipProviderUnavailable {
+		t.Fatalf("skip reasons = %+v, want package-unavailable then provider-unavailable", route.Skipped)
+	}
+}
+
+func TestPlanInstallRoute_HostOverrideShortCircuitsCandidates(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "topaz.example")
+	ctx := context.Background()
+	apt := &availabilityCountingProvider{name: "apt", available: false}
+	brew := &availabilityCountingProvider{name: "brew", available: false}
+	a := New(filepath.Join(t.TempDir(), "settings.json"))
+	if err := a.InitTestMode(ctx, apt, brew); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	defer a.Close() //nolint:errcheck
+
+	route := a.planInstallRoute(ctx, "rg", config.ToolSpec{
+		Hosts: map[string]config.ToolInstallSpec{
+			"topaz": {Provider: "brew", Package: "ripgrep"},
+		},
+		Providers: []config.ToolInstallSpec{
+			{Provider: "apt", Package: "ripgrep"},
+		},
+		Fallback: githubFallbackSpec(),
+	}, make(map[string]bool))
+
+	if route.Kind != installRouteNative {
+		t.Fatalf("route kind = %q, want native", route.Kind)
+	}
+	if route.Install.Provider != "brew" || route.Install.Package != "ripgrep" {
+		t.Fatalf("route install = %+v, want host override", route.Install)
+	}
+	if len(route.Skipped) != 0 {
+		t.Fatalf("skipped = %+v, want no skipped candidates for host override", route.Skipped)
+	}
+	if apt.calls != 0 || brew.calls != 0 {
+		t.Fatalf("provider availability calls = apt:%d brew:%d, want none", apt.calls, brew.calls)
+	}
+}
+
+func githubFallbackSpec() *config.FallbackSpec {
+	return &config.FallbackSpec{
+		Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+		Status: config.FallbackStatusUnverified,
+		Commands: config.FallbackCommands{
+			Install: "install rg",
+			Check:   "command -v rg",
+		},
+	}
+}
