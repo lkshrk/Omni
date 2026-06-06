@@ -98,8 +98,51 @@ func TestGroupSchemaDoesNotAdvertiseNonPersistedIgnore(t *testing.T) {
 	}
 }
 
+func TestToolSchemaUsesConcreteProviderCandidates(t *testing.T) {
+	defs := build().Defs
+	tool := defs["ToolSpec"]
+	if tool == nil {
+		t.Fatal("ToolSpec schema missing")
+	}
+	if hasRequired(tool.Required, "provider") {
+		t.Fatalf("ToolSpec required fields = %v, want provider optional for legacy migration only", tool.Required)
+	}
+	providers := tool.Properties["providers"]
+	if providers == nil || providers.Type != "array" || providers.Items == nil || providers.Items.Ref != "#/$defs/ToolInstallSpec" {
+		t.Fatalf("providers schema = %+v, want array of ToolInstallSpec refs", providers)
+	}
+
+	install := defs["ToolInstallSpec"]
+	if install == nil {
+		t.Fatal("ToolInstallSpec schema missing")
+	}
+	providerProp := install.Properties["provider"]
+	if providerProp == nil {
+		t.Fatal("ToolInstallSpec provider property missing")
+	}
+	for _, concrete := range []string{"brew", "apt", "npm", "pip", "script"} {
+		if !hasEnum(providerProp.Enum, concrete) {
+			t.Fatalf("ToolInstallSpec provider enum missing concrete provider %q: %v", concrete, providerProp.Enum)
+		}
+	}
+	for _, ecosystem := range []string{"system", "node", "python"} {
+		if hasEnum(providerProp.Enum, ecosystem) {
+			t.Fatalf("ToolInstallSpec provider enum includes ecosystem provider %q: %v", ecosystem, providerProp.Enum)
+		}
+	}
+}
+
 func hasRequired(required []string, want string) bool {
 	for _, got := range required {
+		if got == want {
+			return true
+		}
+	}
+	return false
+}
+
+func hasEnum(values []any, want string) bool {
+	for _, got := range values {
 		if got == want {
 			return true
 		}

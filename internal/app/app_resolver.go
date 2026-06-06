@@ -142,7 +142,7 @@ func (a *App) resolveInstallSpecWithAvailability(ctx context.Context, logicalNam
 		candidates = append([]config.ToolInstallSpec{defaultSpec}, spec.Variants...)
 	}
 	for _, candidate := range candidates {
-		if a.providerUsableCached(ctx, candidate.Provider, availability) {
+		if a.installCandidateUsableCached(ctx, logicalName, candidate, availability) {
 			return candidate
 		}
 	}
@@ -150,6 +150,20 @@ func (a *App) resolveInstallSpecWithAvailability(ctx context.Context, logicalNam
 		return candidates[0]
 	}
 	return defaultSpec
+}
+
+func (a *App) installCandidateUsableCached(ctx context.Context, logicalName string, candidate config.ToolInstallSpec, availability map[string]bool) bool {
+	if !a.providerUsableCached(ctx, candidate.Provider, availability) {
+		return false
+	}
+	pkg := candidate.EffectivePackage(logicalName)
+	cached, err := a.readDB().GetPackageAvailability(ctx, logicalName, candidate.Provider, pkg)
+	if err == nil {
+		return cached.Available
+	}
+	// Only an explicit unavailable package probe blocks a candidate. Missing or
+	// unreadable availability should still try native before considering fallback.
+	return true
 }
 
 func (a *App) providerUsableCached(ctx context.Context, providerName string, availability map[string]bool) bool {

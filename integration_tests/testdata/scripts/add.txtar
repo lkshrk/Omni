@@ -2,7 +2,9 @@
 exec omni --config settings.json hosts ensure testhost
 exec omni --config settings.json tools add ripgrep --provider brew --group testhost
 stdout 'added ripgrep'
+exec omni-assert-tool-provider-list settings.json ripgrep brew
 
 # Running add again with a different tool should also succeed
 exec omni --config settings.json tools add typescript --provider npm --group testhost
 stdout 'added typescript'
+exec omni-assert-tool-provider-list settings.json typescript npm
