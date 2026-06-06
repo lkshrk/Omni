@@ -2,14 +2,14 @@
 
 This page explains the shape of `settings.json`. For narrative examples, use
 [Configuration](configuration.md). For the machine-readable schema, use
-[`spec/omni.settings.v7.schema.json`](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v7.schema.json).
+[`spec/omni.settings.v8.schema.json`](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v8.schema.json).
 
 ## Root Object
 
 | Key | Type | Required | Description |
 | --- | --- | --- | --- |
 | `$schema` | string | no | Editor schema URI written by Omni. |
-| `version` | integer | yes | Settings format version. Current version is `7`. |
+| `version` | integer | yes | Settings format version. Current version is `8`. |
 | `settings` | object | no | Global defaults. |
 | `host_settings` | object | no | Per-host setting overrides. |
 | `tools` | object | no | Logical tool specs keyed by logical name. |
@@ -35,7 +35,7 @@ This page explains the shape of `settings.json`. For narrative examples, use
 ### `settings.ecosystems` (legacy)
 
 `settings.ecosystems` remains in the schema so older configs can load and
-migrate. New v7 config should use `provider_priority`, bootstrap
+migrate. New v8 config should use `provider_priority`, bootstrap
 `settings.providers`, and tool-level `providers[]`.
 
 | Ecosystem | Fields | Accepted values |
@@ -108,7 +108,7 @@ unavailable for the configured package.
 | Field | Type | Description |
 | --- | --- | --- |
 | `source` | object | Source repository provenance. `source.type` is currently `github`. |
-| `status` | string | `unresolved`, `unverified`, `verified`, or `failed`. |
+| `status` | string | `unresolved`, `unsupported`, `unverified`, `verified`, or `failed`. |
 | `binary` | string | Expected command name after install. |
 | `bin_dir` | string | Optional per-tool fallback binary directory override. |
 | `release_channel` | string | Optional release channel metadata. |
@@ -121,7 +121,7 @@ unavailable for the configured package.
 | `recipe.asset_download_url` | string | Generated GitHub release asset download URL used by generated install and upgrade commands. |
 | `platforms` | object | Optional OS/architecture-specific recipe overrides. |
 | `commands.install` | string | Install command for usable fallbacks. |
-| `commands.check` | string | Required verification command unless the fallback is `unresolved`. |
+| `commands.check` | string | Required verification command unless the fallback is `unresolved` or `unsupported`. |
 | `commands.uninstall` | string | Optional uninstall command. If absent, uninstall is unavailable. |
 | `commands.upgrade` | string | Optional upgrade command. If absent, install is reused for upgrade. |
 

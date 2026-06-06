@@ -465,6 +465,50 @@ func TestSync_UsesFallbackOnlyWhenAllNativeCandidatesUnavailable(t *testing.T) {
 	}
 }
 
+func TestSync_SkipsUnsupportedFallbackWhenNativePackageUnavailable(t *testing.T) {
+	ctx := context.Background()
+	apt := &stubProvider{name: "apt", available: true}
+	fallbackExec := executor.NewMatchMock().WithFallback(executor.MockCall{Err: errors.New("unexpected fallback command")})
+	a, cfgPath := newImportApp(t, apt)
+	a.SetFallbackExecutor(fallbackExec)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"rg": {
+				Providers: []config.ToolInstallSpec{{Provider: "apt", Package: "ripgrep"}},
+				Fallback: &config.FallbackSpec{
+					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+					Status: config.FallbackStatusUnsupported,
+				},
+			},
+		},
+		Groups: []*config.GroupConfig{{Tools: []config.ToolEntry{{Name: "rg"}}}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	if err := a.DB().UpsertPackageAvailability(ctx, database.PackageAvailability{
+		Name:      "rg",
+		Provider:  "apt",
+		Package:   "ripgrep",
+		Available: false,
+		Reason:    "no apt candidate",
+	}); err != nil {
+		t.Fatalf("seed apt package availability: %v", err)
+	}
+
+	result, err := a.Sync(ctx, isync.SyncOptions{})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	if fallbackExec.CallCount() != 0 {
+		t.Fatalf("fallback command count = %d, want no unsupported-platform execution", fallbackExec.CallCount())
+	}
+	failed := result.Failed()
+	if len(failed) != 1 || !strings.Contains(failed[0].Err.Error(), "unsupported") {
+		t.Fatalf("failed ops = %+v, want unsupported fallback failure", failed)
+	}
+}
+
 func TestSync_DoesNotUseFallbackWhenProviderUnavailable(t *testing.T) {
 	ctx := context.Background()
 	apt := &stubProvider{name: "apt", available: false}

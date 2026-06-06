@@ -46,7 +46,7 @@ Fallback-capable rows can show GitHub source labels:
 | --- | --- |
 | `gh` | Installed through a verified GitHub fallback. |
 | `gh?` | A GitHub fallback exists but is unverified. |
-| `gh!` | The fallback is unresolved or failed and needs editing. |
+| `gh!` | The fallback is unresolved, unsupported on this platform, or failed and needs editing. |
 
 The `f fallback` row action opens the fallback editor for eligible configured
 tools. The editor is a structured form for the GitHub repo, binary,

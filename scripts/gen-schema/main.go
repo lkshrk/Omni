@@ -421,6 +421,7 @@ func buildWithID(id string) *schema {
 						Type:        "string",
 						Enum: []any{
 							config.FallbackStatusUnresolved,
+							config.FallbackStatusUnsupported,
 							config.FallbackStatusUnverified,
 							config.FallbackStatusVerified,
 							config.FallbackStatusFailed,
