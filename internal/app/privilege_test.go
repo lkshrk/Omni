@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"os"
+	"path/filepath"
 	"runtime"
 	"testing"
 
@@ -254,6 +255,57 @@ func TestPrivilegeQueuePlan_UsesProviderPlanWhenRowReasonIsGeneric(t *testing.T)
 	}
 	if item.Command.Display != "brew install --cask karabiner-elements" {
 		t.Fatalf("display command = %q", item.Command.Display)
+	}
+}
+
+func TestPrivilegeQueuePlanUsesMarkedPrivilegeMetadata(t *testing.T) {
+	ctx := context.Background()
+	a := New(filepath.Join(t.TempDir(), "settings.json"))
+	if err := a.InitTestMode(ctx, aptpkg.New(nil)); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	defer a.Close() //nolint:errcheck
+
+	reason := "apt install vim needs sudo"
+	if err := a.MarkToolPrivilegeRequired(ctx, "vim", "apt", "vim", string(provider.PrivilegeRequired), reason); err != nil {
+		t.Fatalf("MarkToolPrivilegeRequired: %v", err)
+	}
+	tool, err := a.DB().Get(ctx, "vim", "apt", "vim")
+	if err != nil {
+		t.Fatalf("Get marked tool: %v", err)
+	}
+	if tool.Privilege != string(provider.PrivilegeRequired) {
+		t.Fatalf("Privilege = %q, want required", tool.Privilege)
+	}
+	if !tool.PrivilegeReason.Valid || tool.PrivilegeReason.String != reason {
+		t.Fatalf("PrivilegeReason = %+v, want cached sudo reason", tool.PrivilegeReason)
+	}
+
+	key := privilegeQueueToolKey(tool.Name, tool.Provider)
+	plan, err := a.PrivilegeQueuePlan(ctx, PrivilegeQueueRequest{
+		RowErrors: map[string]string{
+			key: "install failed",
+		},
+		Actions: map[string]provider.PrivilegeAction{
+			key: provider.PrivilegeActionInstall,
+		},
+		Tools: []*database.ToolCache{tool},
+	})
+	if err != nil {
+		t.Fatalf("PrivilegeQueuePlan: %v", err)
+	}
+	if len(plan.Items) != 1 {
+		t.Fatalf("queue items = %#v, want one cached-privilege item", plan.Items)
+	}
+	item := plan.Items[0]
+	if item.Plan.Requirement != provider.PrivilegeRequired || item.Plan.Reason != reason {
+		t.Fatalf("plan = %+v, want cached required sudo reason", item.Plan)
+	}
+	if item.Command.Display != expectedInteractiveAdminDisplay("apt-get install -y vim") {
+		t.Fatalf("display command = %q, want apt-get install admin command", item.Command.Display)
+	}
+	if len(plan.RowErrors) != 0 {
+		t.Fatalf("row errors = %#v, want none", plan.RowErrors)
 	}
 }
 
