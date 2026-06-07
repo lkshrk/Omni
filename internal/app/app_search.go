@@ -54,6 +54,7 @@ type ProviderMatchInstallResult struct {
 var (
 	ErrProviderDiscoveryNotConfigured     = errors.New("provider discovery requires configured tool")
 	ErrProviderDiscoveryAlreadyConfigured = errors.New("provider discovery already configured")
+	ErrProviderDiscoveryNoHighConfidence  = errors.New("no high-confidence provider match")
 )
 
 type RefreshInstalledProgressEvent struct {
@@ -1665,7 +1666,7 @@ func (a *App) providerMatchInstallCandidate(providerName string) bool {
 	return meta.Kind != provider.ProviderKindEcosystem
 }
 
-func (a *App) InstallHighConfidenceProviderMatches(ctx context.Context, name, providerFilter string) (*ProviderMatchInstallResult, error) {
+func (a *App) AddHighConfidenceProviderMatches(ctx context.Context, name, providerFilter string) (*ProviderMatchInstallResult, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
 		return nil, err
@@ -1690,7 +1691,7 @@ func (a *App) InstallHighConfidenceProviderMatches(ctx context.Context, name, pr
 		})
 	}
 	if len(result.Added) == 0 {
-		return result, fmt.Errorf("no high-confidence provider match for %q", name)
+		return result, fmt.Errorf("%w for %q", ErrProviderDiscoveryNoHighConfidence, name)
 	}
 	result.Installed = result.Added[0]
 	if err := a.withConfig(func(cfg *config.RootConfig) error {
@@ -1708,6 +1709,14 @@ func (a *App) InstallHighConfidenceProviderMatches(ctx context.Context, name, pr
 		cfg.Tools[name] = spec
 		return nil
 	}); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+func (a *App) InstallHighConfidenceProviderMatches(ctx context.Context, name, providerFilter string) (*ProviderMatchInstallResult, error) {
+	result, err := a.AddHighConfidenceProviderMatches(ctx, name, providerFilter)
+	if err != nil {
 		return result, err
 	}
 	if err := a.Install(ctx, name, result.Installed.Provider); err != nil {

@@ -1459,6 +1459,59 @@ func TestInstallHighConfidenceProviderMatches_AddsAllHighAndInstallsPriority(t *
 	}
 }
 
+func TestSync_ConfiguredToolAutoAddsHighConfidenceProviderMatches(t *testing.T) {
+	brew := &searchStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		results: []provider.SearchResult{{
+			Name:     "prettier",
+			Provider: "brew",
+		}},
+	}
+	npm := &searchStub{
+		stubProvider: stubProvider{name: "npm", available: true},
+		results: []provider.SearchResult{{
+			Name:     "prettier",
+			Provider: "npm",
+		}},
+	}
+	a, cfgPath := newImportApp(t, brew, npm)
+	if err := a.SaveSettings(context.Background(), config.Settings{ProviderPriority: []string{"npm", "brew"}}); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Version:  config.CurrentVersion,
+		Settings: config.Settings{ProviderPriority: []string{"npm", "brew"}},
+		Tools: map[string]config.ToolSpec{
+			"prettier": {},
+		},
+		Hosts: map[string][]string{"testhost": {}},
+		Groups: []*config.GroupConfig{{
+			Name:    "testhost",
+			Special: "host",
+			Tools:   []config.ToolEntry{{Name: "prettier"}},
+		}},
+	}); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+
+	result, err := a.Sync(context.Background(), syncprogress.SyncOptions{})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if installed := result.Installed(); len(installed) != 1 || installed[0].Tool.Provider != "npm" {
+		t.Fatalf("installed = %+v, want npm priority install", installed)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	providers := cfg.Tools["prettier"].Providers
+	if len(providers) != 2 || providers[0].Provider != "npm" || providers[1].Provider != "brew" {
+		t.Fatalf("providers = %+v, want priority order npm, brew", providers)
+	}
+}
+
 func TestInstallHighConfidenceProviderMatches_SkipsEcosystemSearchCandidates(t *testing.T) {
 	node := &searchStub{
 		stubProvider: stubProvider{name: "node", available: true},

@@ -56,6 +56,16 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 		activeGroups = active
 	}
 
+	if !opts.DryRun {
+		if err := a.addMissingProviderMatchesForGroups(ctx, cfg, groups, opts.Provider, opts.Progress); err != nil {
+			return nil, err
+		}
+		cfg, err = a.loadConfig()
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	// Resolve once and derive both the entry list (for the syncer) and the
 	// detailed view (for tap collection) from the same pass.
 	resolvedDetailed, warnings := a.resolveTools(ctx, cfg, groups)
@@ -150,6 +160,59 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 		}
 	}
 	return result, nil
+}
+
+func (a *App) addMissingProviderMatchesForGroups(ctx context.Context, cfg *config.RootConfig, groups []*config.GroupConfig, providerFilter string, progress func(string)) error {
+	if cfg == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	for _, group := range groups {
+		if group == nil {
+			continue
+		}
+		for _, tool := range group.Tools {
+			name := strings.TrimSpace(tool.Name)
+			if name == "" {
+				continue
+			}
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			spec, ok := cfg.Tools[name]
+			if !ok || len(spec.Providers) > 0 || spec.Fallback != nil {
+				continue
+			}
+			result, err := a.AddHighConfidenceProviderMatches(ctx, name, providerFilter)
+			if err != nil {
+				if errors.Is(err, ErrProviderDiscoveryNotConfigured) ||
+					errors.Is(err, ErrProviderDiscoveryAlreadyConfigured) ||
+					errors.Is(err, ErrProviderDiscoveryNoHighConfidence) {
+					continue
+				}
+				return err
+			}
+			if progress != nil && len(result.Added) > 0 {
+				progress(providerMatchProgressText(name, result.Added))
+			}
+		}
+	}
+	return nil
+}
+
+func providerMatchProgressText(name string, added []config.ToolInstallSpec) string {
+	if len(added) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(added))
+	for _, spec := range added {
+		parts = append(parts, spec.Provider+"/"+spec.EffectivePackage(name))
+	}
+	if len(parts) == 1 {
+		return fmt.Sprintf("matched provider: %s -> %s", name, parts[0])
+	}
+	return fmt.Sprintf("matched providers: %s -> %s", name, strings.Join(parts, ", "))
 }
 
 func (a *App) syncNativeUnavailableFallbacks(ctx context.Context, tools []resolvedTool, opts isync.SyncOptions) ([]resolvedTool, []isync.SyncOp) {
