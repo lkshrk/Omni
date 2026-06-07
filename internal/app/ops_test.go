@@ -2049,7 +2049,7 @@ func TestInstallHighConfidenceProviderMatches_IgnoresWeakMatches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	if len(tools) != 0 {
+	if anyToolInstalled(tools) {
 		t.Fatalf("tools = %+v, want no install", tools)
 	}
 }

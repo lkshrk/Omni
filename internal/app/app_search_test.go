@@ -11,6 +11,18 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
+func containsToolNamed(tools []*database.ToolCache, name string) bool {
+	return slices.ContainsFunc(tools, func(t *database.ToolCache) bool {
+		return t != nil && t.Name == name
+	})
+}
+
+func anyToolInstalled(tools []*database.ToolCache) bool {
+	return slices.ContainsFunc(tools, func(t *database.ToolCache) bool {
+		return t != nil && t.Installed
+	})
+}
+
 // ─── ListDiscovered ───────────────────────────────────────────────────────────
 
 func TestListDiscovered_EmptyInitially(t *testing.T) {
@@ -56,8 +68,8 @@ func TestListDiscovered_HidesRowsOutsideTrackedProviders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	if len(tools) != 1 || tools[0].Name != "jq" {
-		t.Fatalf("ListTools = %+v, want only scoped untracked jq", tools)
+	if !containsToolNamed(tools, "jq") || containsToolNamed(tools, "black") {
+		t.Fatalf("ListTools = %+v, want scoped untracked jq present and out-of-scope black hidden", tools)
 	}
 }
 
@@ -92,8 +104,57 @@ func TestListDiscovered_HidesUnattributedLegacyRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	if len(tools) != 1 || tools[0].Name != "jq" {
-		t.Fatalf("ListTools = %+v, want only attributed brew-backed jq", tools)
+	if !containsToolNamed(tools, "jq") || containsToolNamed(tools, "utm") {
+		t.Fatalf("ListTools = %+v, want attributed brew-backed jq present and unattributed utm hidden", tools)
+	}
+}
+
+func TestListTools_ShowsConfiguredToolWithoutCacheRow(t *testing.T) {
+	brew := &stubProvider{name: "brew", available: true}
+	a, cfgPath := newImportApp(t, brew)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("fd", "brew")),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("fd"),
+		}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	// No refresh has run, so there is no cache row. The tool is config-led and
+	// must still appear as a not-installed row rather than vanishing.
+	tools, err := a.ListTools(context.Background(), "")
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(tools) != 1 || tools[0].Name != "fd" {
+		t.Fatalf("ListTools = %+v, want one synthesized fd row", tools)
+	}
+	if tools[0].Installed {
+		t.Fatalf("fd Installed = true, want false (no cache row)")
+	}
+	if tools[0].Provider != "brew" {
+		t.Fatalf("fd Provider = %q, want brew", tools[0].Provider)
+	}
+}
+
+func TestListTools_ShowsEmptyProviderToolAsUnresolved(t *testing.T) {
+	a, cfgPath := newImportApp(t)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{"fd": {}},
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("fd"),
+		}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	tools, err := a.ListTools(context.Background(), "")
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(tools) != 1 || tools[0].Name != "fd" || tools[0].Installed {
+		t.Fatalf("ListTools = %+v, want one not-installed unresolved fd row", tools)
 	}
 }
 
@@ -220,8 +281,8 @@ func TestListToolsAndRefreshUseActiveHostGroups(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	if len(tools) != 0 {
-		t.Fatalf("ListTools before refresh = %+v, want no stale coder tools on Topaz", tools)
+	if !containsToolNamed(tools, "ripgrep") || containsToolNamed(tools, "docker") {
+		t.Fatalf("ListTools before refresh = %+v, want config-led Topaz ripgrep present and no stale coder docker", tools)
 	}
 
 	if err := a.RefreshInstalled(ctx, nil); err != nil {
@@ -266,8 +327,8 @@ func TestToolDisplaySnapshotReturnsToolsDiscoveredAndManager(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToolDisplaySnapshot: %v", err)
 	}
-	if len(snapshot.Tools) != 1 || snapshot.Tools[0].Name != "jq" {
-		t.Fatalf("Tools = %+v, want jq", snapshot.Tools)
+	if !slices.ContainsFunc(snapshot.Tools, func(t *database.ToolCache) bool { return t != nil && t.Name == "jq" }) {
+		t.Fatalf("Tools = %+v, want jq present", snapshot.Tools)
 	}
 	if len(snapshot.Discovered) != 1 || snapshot.Discovered[0].Name != "jq" {
 		t.Fatalf("Discovered = %+v, want jq", snapshot.Discovered)

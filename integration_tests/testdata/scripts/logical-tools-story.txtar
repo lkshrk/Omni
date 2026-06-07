@@ -51,7 +51,10 @@ stdout '1 tool'
 exec omni --config settings.json tools sync --dry-run --group testhost
 stdout 'Dry-run'
 exec omni --config settings.json tools list --format json
-stdout '\[\]'
+stdout '"ripgrep"'
+stdout '"fd"'
+! stdout '"shellcheck"'
+! stdout '"typescript"'
 
 exec grep '"ripgrep"' settings.json
 stdout '"ripgrep"'
