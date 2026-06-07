@@ -1,12 +1,65 @@
 package app
 
 import (
+	"context"
 	"database/sql"
+	"path/filepath"
 	"testing"
 
+	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/provider"
 )
+
+type gitMetadataProviderStub struct {
+	name     string
+	metadata map[string]provider.InstalledMetadata
+}
+
+func (s *gitMetadataProviderStub) Name() string { return s.name }
+
+func (s *gitMetadataProviderStub) Description() string { return s.name }
+
+func (s *gitMetadataProviderStub) Available(context.Context) (bool, error) { return true, nil }
+
+func (s *gitMetadataProviderStub) Install(context.Context, provider.Tool) error { return nil }
+
+func (s *gitMetadataProviderStub) Uninstall(context.Context, provider.Tool) error { return nil }
+
+func (s *gitMetadataProviderStub) Upgrade(context.Context, provider.Tool) error { return nil }
+
+func (s *gitMetadataProviderStub) IsInstalled(context.Context, provider.Tool) (bool, string, error) {
+	return false, "", nil
+}
+
+func (s *gitMetadataProviderStub) ListInstalled(context.Context) ([]provider.InstalledTool, error) {
+	return nil, nil
+}
+
+func (s *gitMetadataProviderStub) InstalledMetadataMap(context.Context) (map[string]provider.InstalledMetadata, error) {
+	return s.metadata, nil
+}
+
+func newGitMetadataTestApp(t *testing.T, cfgPath string, providers ...provider.Provider) *App {
+	t.Helper()
+	a := New(cfgPath)
+	if err := a.InitTestMode(context.Background(), providers...); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	return a
+}
+
+func saveGitMetadataToolConfig(t *testing.T, cfgPath string) {
+	t.Helper()
+	if err := config.Save(cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"ripgrep": {Providers: []config.ToolInstallSpec{{Provider: "brew"}}},
+		},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+}
 
 func TestGitURLFromMetadataPrefersOwnerRepo(t *testing.T) {
 	t.Run("provider source", func(t *testing.T) {
@@ -110,5 +163,71 @@ func TestMergeToolGitPreservesUserEditedDifferentRepo(t *testing.T) {
 				t.Fatalf("mergeToolGit = %q/%v, want %q/%v", got, changed, tt.want, tt.wantChanged)
 			}
 		})
+	}
+}
+
+func TestEnrichToolGitFromInstalledProviderMetadataUsesConcreteOwner(t *testing.T) {
+	ctx := context.Background()
+	cfgPath := filepath.Join(t.TempDir(), "settings.json")
+	brew := &gitMetadataProviderStub{name: "brew"}
+	apt := &gitMetadataProviderStub{
+		name: "apt",
+		metadata: map[string]provider.InstalledMetadata{
+			"ripgrep": {
+				Source: provider.SourceMetadata{
+					Type:  provider.SourceTypeGitHub,
+					Owner: "BurntSushi",
+					Repo:  "ripgrep",
+				},
+			},
+		},
+	}
+	a := newGitMetadataTestApp(t, cfgPath, brew, apt)
+	saveGitMetadataToolConfig(t, cfgPath)
+
+	err := a.enrichToolGitFromInstalledProviderMetadata(ctx, config.ToolEntry{Name: "ripgrep", Provider: "brew"}, brew, "apt")
+	if err != nil {
+		t.Fatalf("enrichToolGitFromInstalledProviderMetadata: %v", err)
+	}
+
+	got, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if git := got.Tools["ripgrep"].Git; git != "https://github.com/BurntSushi/ripgrep" {
+		t.Fatalf("git = %q, want concrete owner source", git)
+	}
+}
+
+func TestEnrichToolGitFromInstalledProviderMetadataUsesOperationProviderWhenOwnerSame(t *testing.T) {
+	ctx := context.Background()
+	cfgPath := filepath.Join(t.TempDir(), "settings.json")
+	brew := &gitMetadataProviderStub{
+		name: "brew",
+		metadata: map[string]provider.InstalledMetadata{
+			"ripgrep": {
+				Source: provider.SourceMetadata{
+					Type:  provider.SourceTypeGitHub,
+					Owner: "BurntSushi",
+					Repo:  "ripgrep",
+				},
+			},
+		},
+	}
+	apt := &gitMetadataProviderStub{name: "apt"}
+	a := newGitMetadataTestApp(t, cfgPath, brew, apt)
+	saveGitMetadataToolConfig(t, cfgPath)
+
+	err := a.enrichToolGitFromInstalledProviderMetadata(ctx, config.ToolEntry{Name: "ripgrep", Provider: "brew"}, brew, "brew")
+	if err != nil {
+		t.Fatalf("enrichToolGitFromInstalledProviderMetadata: %v", err)
+	}
+
+	got, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if git := got.Tools["ripgrep"].Git; git != "https://github.com/BurntSushi/ripgrep" {
+		t.Fatalf("git = %q, want operation provider source", git)
 	}
 }
