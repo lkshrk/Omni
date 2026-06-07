@@ -134,6 +134,22 @@ func TestProbeFirstPrefersAvailableHintThenPriority(t *testing.T) {
 	}
 }
 
+func TestCloneSettingsStringMapCopiesInput(t *testing.T) {
+	if got := cloneSettingsStringMap(nil); got != nil {
+		t.Fatalf("cloneSettingsStringMap(nil) = %#v, want nil", got)
+	}
+	input := map[string]string{"node": "pnpm"}
+	got := cloneSettingsStringMap(input)
+	got["node"] = "bun"
+	got["python"] = "uv"
+	if input["node"] != "pnpm" {
+		t.Fatalf("input node mutated to %q, want pnpm", input["node"])
+	}
+	if _, ok := input["python"]; ok {
+		t.Fatalf("input gained python key after clone mutation: %#v", input)
+	}
+}
+
 func TestRefreshInstalledScanLabelUsesExplicitInstallWithForEcosystem(t *testing.T) {
 	a := New(filepath.Join(t.TempDir(), "settings.json"))
 	a.registry = provider.NewRegistry()
