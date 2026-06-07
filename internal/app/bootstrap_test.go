@@ -40,6 +40,34 @@ func TestBootstrapPlanDetectsManagersAndHost(t *testing.T) {
 	}
 }
 
+func TestBootstrapPlanDetectsAnyAvailableProvider(t *testing.T) {
+	a, _ := newImportApp(t,
+		&stubProvider{name: "apt", available: false},
+		&stubProvider{name: "brew", available: true},
+	)
+
+	plan, err := a.BootstrapPlan(context.Background())
+	if err != nil {
+		t.Fatalf("BootstrapPlan: %v", err)
+	}
+	if !plan.AnyProviderAvailable {
+		t.Fatal("BootstrapPlan.AnyProviderAvailable = false, want true")
+	}
+	if len(plan.Providers) != 2 {
+		t.Fatalf("BootstrapPlan.Providers len = %d, want 2", len(plan.Providers))
+	}
+	availability := make(map[string]bool, len(plan.Providers))
+	for _, p := range plan.Providers {
+		availability[p.Name] = p.Available
+	}
+	if availability["apt"] {
+		t.Fatalf("apt availability = true, want false: %+v", plan.Providers)
+	}
+	if !availability["brew"] {
+		t.Fatalf("brew availability = false, want true: %+v", plan.Providers)
+	}
+}
+
 func TestSetupHostSummariesUseActiveOrCurrentHost(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "desk.example.com")
 	if got := app.DefaultSetupHostName(); got != "desk" {
