@@ -2,6 +2,7 @@ package app_test
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -260,6 +261,24 @@ func TestHasHostAssignmentsReportsConfiguredHosts(t *testing.T) {
 	}
 	if !hasHosts {
 		t.Fatal("HasHostAssignments configured host = false, want true")
+	}
+}
+
+func TestHostStateWrappersPropagateConfigLoadErrors(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "settings.json")
+	if err := os.WriteFile(cfgPath, []byte("{"), 0o600); err != nil {
+		t.Fatalf("write invalid config: %v", err)
+	}
+	a := app.New(cfgPath)
+
+	if _, err := a.HostStatus(); err == nil {
+		t.Fatal("HostStatus error = nil, want config load error")
+	}
+	if _, err := a.HasHostAssignments(); err == nil {
+		t.Fatal("HasHostAssignments error = nil, want config load error")
+	}
+	if _, err := a.HostSummaries(); err == nil {
+		t.Fatal("HostSummaries error = nil, want config load error")
 	}
 }
 
