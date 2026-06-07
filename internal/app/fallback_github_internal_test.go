@@ -22,6 +22,39 @@ func TestBestGitHubReleaseAsset_PrefersExtractableArchive(t *testing.T) {
 	}
 }
 
+func TestBestGitHubReleaseAsset_SkipsMetadataAndWrongBinary(t *testing.T) {
+	osName := githubOSNames()[0]
+	archName := githubArchNames()[0]
+	wantName := fmt.Sprintf("fd_10.3.0_%s_%s.zip", osName, archName)
+	asset, ok := bestGitHubReleaseAsset([]githubAsset{
+		{ID: "1", Name: fmt.Sprintf("fd_10.3.0_%s_%s_checksums.txt", osName, archName), BrowserDownloadURL: "https://example.test/checksums.txt"},
+		{ID: "2", Name: fmt.Sprintf("rg_14.1.1_%s_%s.tar.gz", osName, archName), BrowserDownloadURL: "https://example.test/rg.tar.gz"},
+		{ID: "3", Name: wantName, BrowserDownloadURL: "https://example.test/fd.zip"},
+	}, "fd")
+	if !ok {
+		t.Fatal("bestGitHubReleaseAsset returned no match")
+	}
+	if asset.Name != wantName {
+		t.Fatalf("asset = %q, want %q", asset.Name, wantName)
+	}
+}
+
+func TestNormalizedGitHubPublishedAt(t *testing.T) {
+	got, err := normalizedGitHubPublishedAt("2026-06-07T12:34:56+02:00")
+	if err != nil {
+		t.Fatalf("normalizedGitHubPublishedAt: %v", err)
+	}
+	if got != "2026-06-07T10:34:56Z" {
+		t.Fatalf("published_at = %q, want UTC RFC3339", got)
+	}
+	if _, err := normalizedGitHubPublishedAt(""); err == nil {
+		t.Fatal("normalizedGitHubPublishedAt accepted empty published_at")
+	}
+	if _, err := normalizedGitHubPublishedAt("2026-06-07"); err == nil {
+		t.Fatal("normalizedGitHubPublishedAt accepted non-RFC3339 published_at")
+	}
+}
+
 func TestParseGitHubRepo(t *testing.T) {
 	tests := []struct {
 		in        string
