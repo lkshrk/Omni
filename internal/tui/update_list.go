@@ -22,31 +22,43 @@ const (
 func (m *Model) handleListNavigationKeyMsg(msg tea.KeyPressMsg) bool {
 	switch {
 	case key.Matches(msg, m.keys.Up):
-		if n := len(m.visibleTools); n > 0 {
+		if candidates := providerCandidateOptions(*m, m.selectedTool()); len(candidates) > 0 && m.providerCandidateCursor > 0 {
+			m.providerCandidateCursor--
+		} else if n := len(m.visibleTools); n > 0 {
 			m.cursor = (m.cursor - 1 + n) % n
+			m.providerCandidateCursor = max(len(providerCandidateOptions(*m, m.selectedTool()))-1, 0)
 		}
 	case key.Matches(msg, m.keys.Down):
-		if n := len(m.visibleTools); n > 0 {
+		if candidates := providerCandidateOptions(*m, m.selectedTool()); len(candidates) > 0 && m.providerCandidateCursor < len(candidates)-1 {
+			m.providerCandidateCursor++
+		} else if n := len(m.visibleTools); n > 0 {
 			m.cursor = (m.cursor + 1) % n
+			m.providerCandidateCursor = 0
 		}
 	case key.Matches(msg, m.keys.Top):
 		m.cursor = 0
+		m.providerCandidateCursor = 0
 	case key.Matches(msg, m.keys.Bottom):
 		if n := len(m.visibleTools); n > 0 {
 			m.cursor = n - 1
+			m.providerCandidateCursor = 0
 		}
 	case key.Matches(msg, m.keys.HalfPageDown):
 		half := max(listAvailableHeight(*m)/2, 1)
 		m.cursor = min(m.cursor+half, max(len(m.visibleTools)-1, 0))
+		m.providerCandidateCursor = 0
 	case key.Matches(msg, m.keys.HalfPageUp):
 		half := max(listAvailableHeight(*m)/2, 1)
 		m.cursor = max(m.cursor-half, 0)
+		m.providerCandidateCursor = 0
 	case key.Matches(msg, m.keys.PageDown):
 		page := max(listAvailableHeight(*m), 1)
 		m.cursor = min(m.cursor+page, max(len(m.visibleTools)-1, 0))
+		m.providerCandidateCursor = 0
 	case key.Matches(msg, m.keys.PageUp):
 		page := max(listAvailableHeight(*m), 1)
 		m.cursor = max(m.cursor-page, 0)
+		m.providerCandidateCursor = 0
 	case key.Matches(msg, m.keys.PrevTab):
 		if len(m.providerNames) > 0 {
 			if m.providerTabIdx > 0 {
@@ -145,17 +157,18 @@ func (m *Model) handleListActionKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		}
 	case key.Matches(msg, m.keys.Confirm):
 		if t := m.selectedTool(); t != nil && !t.Installed {
+			installTool := m.selectedProviderCandidateTool(t)
 			if m.isInstallAndAddCandidate(t) {
 				m.openInstallGroupPicker()
 				break
 			}
-			if m.blockPrivilegedToolAction(t, provider.PrivilegeActionInstall) {
+			if m.blockPrivilegedToolAction(installTool, provider.PrivilegeActionInstall) {
 				break
 			}
 			m.loading = true
 			startOp(m, "Installing "+t.Name+"…")
-			m.startRowOperation(t.Name, t.Provider, m.statusMsg)
-			cmds = append(cmds, m.spinner.Tick, m.doInstall(t.Name, t.Provider))
+			m.startRowOperation(t.Name, installTool.Provider, m.statusMsg)
+			cmds = append(cmds, m.spinner.Tick, m.doInstall(t.Name, installTool.Provider))
 		}
 	case key.Matches(msg, m.keys.Search):
 		m.mode = viewSearch
@@ -172,16 +185,17 @@ func (m *Model) handleListActionKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 			break
 		}
 		if t := m.selectedTool(); t != nil && !t.Installed {
+			installTool := m.selectedProviderCandidateTool(t)
 			if m.isInstallAndAddCandidate(t) {
 				m.openInstallGroupPicker()
 			} else {
-				if m.blockPrivilegedToolAction(t, provider.PrivilegeActionInstall) {
+				if m.blockPrivilegedToolAction(installTool, provider.PrivilegeActionInstall) {
 					break
 				}
 				m.loading = true
 				startOp(m, "Installing "+t.Name+"…")
-				m.startRowOperation(t.Name, t.Provider, m.statusMsg)
-				cmds = append(cmds, m.spinner.Tick, m.doInstall(t.Name, t.Provider))
+				m.startRowOperation(t.Name, installTool.Provider, m.statusMsg)
+				cmds = append(cmds, m.spinner.Tick, m.doInstall(t.Name, installTool.Provider))
 			}
 		}
 	case key.Matches(msg, m.keys.Delete):

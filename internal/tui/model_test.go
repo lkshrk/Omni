@@ -218,6 +218,49 @@ func TestModel_CursorNavigation(t *testing.T) {
 	}
 }
 
+func TestModel_ProviderCandidateNavigation(t *testing.T) {
+	tools := []*database.ToolCache{
+		{Name: "prettier", Provider: "", Installed: false, Tracked: true},
+		{Name: "eslint", Provider: "", Installed: false, Tracked: true},
+	}
+	m := baseModel(tools)
+	m.toolProviderCandidates = map[string][]config.ToolInstallSpec{
+		"prettier": {
+			{Provider: "npm", Package: "prettier"},
+			{Provider: "brew", Package: "prettier"},
+		},
+		"eslint": {
+			{Provider: "npm", Package: "eslint"},
+			{Provider: "brew", Package: "eslint"},
+		},
+	}
+	m.applyFilter()
+
+	got := drive(m, pressRune('j'))
+	if got.cursor != 0 {
+		t.Fatalf("cursor after first down = %d, want tool row 0", got.cursor)
+	}
+	if got.providerCandidateCursor != 1 {
+		t.Fatalf("providerCandidateCursor after first down = %d, want second provider", got.providerCandidateCursor)
+	}
+
+	got = drive(got, pressRune('j'))
+	if got.cursor != 1 {
+		t.Fatalf("cursor after second down = %d, want next tool row", got.cursor)
+	}
+	if got.providerCandidateCursor != 0 {
+		t.Fatalf("providerCandidateCursor after moving tools = %d, want first provider", got.providerCandidateCursor)
+	}
+
+	got = drive(got, pressRune('k'))
+	if got.cursor != 0 {
+		t.Fatalf("cursor after up from first provider = %d, want previous tool row", got.cursor)
+	}
+	if got.providerCandidateCursor != 1 {
+		t.Fatalf("providerCandidateCursor after up = %d, want previous tool last provider", got.providerCandidateCursor)
+	}
+}
+
 func TestModel_TopBottomOnEmptyList(t *testing.T) {
 	t.Run("home on empty list stays at 0", func(t *testing.T) {
 		m := drive(baseModel(nil), pressHome())
