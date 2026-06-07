@@ -1236,6 +1236,16 @@ func (a *App) UpgradeAllDetailedWithOptions(ctx context.Context, progress func(s
 			}
 		}
 		if err := a.UpgradeWithOptions(ctx, t.Name, t.Provider, UpgradeOptions{Force: opts.Force}); err != nil {
+			if isUnupgradeableManagerSelf(t, err) {
+				if progress != nil {
+					progress("skipping " + displayName + " (externally managed; cannot self-upgrade)…")
+				}
+				if toolProgress != nil {
+					toolProgress(isync.ProgressEvent{Tool: tool, Message: "Skipped " + t.Name + " (externally managed; cannot self-upgrade)", TargetVersion: targetVersion, Done: true})
+				}
+				result.Skipped = append(result.Skipped, bulkToolErrorFromError(t.Name, t.Provider, err))
+				continue
+			}
 			if toolProgress != nil {
 				toolProgress(isync.ProgressEvent{Tool: tool, Message: "Failed upgrading " + t.Name, TargetVersion: targetVersion, Err: err, Done: true})
 			}
@@ -1249,6 +1259,21 @@ func (a *App) UpgradeAllDetailedWithOptions(ctx context.Context, progress func(s
 		result.Upgraded = append(result.Upgraded, t.Name)
 	}
 	return result, errors.Join(errs...)
+}
+
+// isUnupgradeableManagerSelf reports whether an upgrade failure is a package
+// manager that cannot upgrade itself in an externally managed Python (PEP 668).
+// Switching pip to uv does not apply to the pip package itself, so this is a
+// graceful skip rather than a failure.
+func isUnupgradeableManagerSelf(t *database.ToolCache, err error) bool {
+	if t == nil || !provider.HasErrorCode(err, provider.ErrorExternallyManagedPython) {
+		return false
+	}
+	pkg := t.Package
+	if pkg == "" {
+		pkg = t.Name
+	}
+	return pkg == "pip" && config.NormalizeConcreteProvider(t.Provider) == "pip"
 }
 
 func toolTargetVersion(tool *database.ToolCache) string {

@@ -167,6 +167,7 @@ type UpgradeAllSummary struct {
 	Upgraded    int
 	Quarantined int
 	Failed      int
+	Skipped     int
 }
 
 type SyncResultSummary struct {
@@ -426,6 +427,7 @@ func SummarizeUpgradeAll(result *UpgradeAllResult) UpgradeAllSummary {
 		Upgraded:    len(result.Upgraded),
 		Quarantined: len(result.Quarantined),
 		Failed:      len(result.Failures),
+		Skipped:     len(result.Skipped),
 	}
 }
 
@@ -440,6 +442,9 @@ func UpgradeAllSummaryLines(result *UpgradeAllResult) []string {
 	}
 	if summary.Failed > 0 {
 		lines = append(lines, textutil.PluralCount(summary.Failed, "tool", "tools")+" failed.")
+	}
+	if summary.Skipped > 0 {
+		lines = append(lines, textutil.PluralCount(summary.Skipped, "tool", "tools")+" skipped.")
 	}
 	return lines
 }

@@ -149,6 +149,10 @@ type UpgradeAllResult struct {
 	Upgraded    []string
 	Quarantined []QuarantinedUpdate
 	Failures    []BulkToolError
+	// Skipped lists tools that could not be upgraded but are not treated as
+	// failures (e.g. a package manager that cannot self-upgrade in an externally
+	// managed Python). The run still exits successfully.
+	Skipped []BulkToolError
 }
 
 type UpgradeAllStateResult struct {
