@@ -584,6 +584,37 @@ func TestUpgradeAllFailureRowsAndSummaryText(t *testing.T) {
 	}
 }
 
+func TestSyncAllFailureRowsMergesDirectAndSyncFailures(t *testing.T) {
+	rows := SyncAllFailureRows(&SyncAllResult{
+		Failures: []BulkToolError{
+			{Name: "fd", Provider: "system", Message: "network failed"},
+		},
+		SyncResult: &isync.SyncResult{Ops: []isync.SyncOp{
+			{
+				Tool: provider.Tool{Name: "vim", Provider: "system"},
+				Kind: isync.OpFailed,
+				Err:  errors.New("requires sudo: apt install vim"),
+			},
+		}},
+	})
+
+	if rows.RowErrors[toolResultKey("fd", "system")] != "network failed" {
+		t.Fatalf("RowErrors = %#v, want direct sync-all failure", rows.RowErrors)
+	}
+	if rows.RowErrors[toolResultKey("vim", "system")] != "requires sudo: apt install vim" {
+		t.Fatalf("RowErrors = %#v, want nested sync failure", rows.RowErrors)
+	}
+	if rows.PrivilegedActions[toolResultKey("vim", "system")] != provider.PrivilegeActionInstall {
+		t.Fatalf("PrivilegedActions = %#v, want vim install action", rows.PrivilegedActions)
+	}
+
+	got := BulkToolFailureSummaryText("sync complete", rows)
+	want := "sync complete, 1 need admin approval, 1 failed"
+	if got != want {
+		t.Fatalf("BulkToolFailureSummaryText = %q, want %q", got, want)
+	}
+}
+
 func TestSyncAllPhaseProgressText(t *testing.T) {
 	got := SyncAllPhaseProgressText("reading installed packages…", 2)
 	want := "Syncing tools 0/2: checking installed state…"
