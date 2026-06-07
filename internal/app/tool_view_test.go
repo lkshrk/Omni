@@ -280,6 +280,30 @@ func TestBuildToolViewList_FiltersProviderAndGroupWithoutDroppingMatchingSearch(
 	})
 }
 
+func TestBuildToolViewList_FiltersQueryByToolNameAndProvider(t *testing.T) {
+	tools := []*database.ToolCache{
+		{Name: "git", Provider: "system", Tracked: true, Installed: true},
+		{Name: "eslint", Provider: "node", Tracked: true, Installed: true},
+		{Name: "ruff", Provider: "python", Tracked: true, Installed: true},
+	}
+	discovered := []*database.ToolCache{
+		{Name: "node-exporter", Provider: "system", Installed: true},
+		{Name: "utm", Provider: "system", Installed: true},
+	}
+
+	got := app.BuildToolViewList(app.ToolViewListOptions{
+		Tools:           tools,
+		DiscoveredTools: discovered,
+		Query:           "NODE",
+	})
+
+	assertToolViewNames(t, got.Tools, []string{"node-exporter", "eslint"})
+	assertToolViewCounts(t, got.Counts, map[app.ToolViewSection]int{
+		app.ToolViewSectionOutOfSync: 1,
+		app.ToolViewSectionInstalled: 1,
+	})
+}
+
 func assertToolViewNames(t *testing.T, tools []*database.ToolCache, want []string) {
 	t.Helper()
 	if len(tools) != len(want) {
