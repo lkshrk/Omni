@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/dots"
 	"github.com/lkshrk/omni/internal/provider"
@@ -79,6 +80,50 @@ func TestRefreshProviderScanProgressText(t *testing.T) {
 	want := "Scanning system/brew… (1/3)"
 	if got != want {
 		t.Fatalf("RefreshProviderScanProgressText = %q, want %q", got, want)
+	}
+}
+
+func TestProviderMatchProgressText(t *testing.T) {
+	if got := providerMatchProgressText("ripgrep", nil); got != "" {
+		t.Fatalf("providerMatchProgressText empty = %q, want empty", got)
+	}
+	got := providerMatchProgressText("ripgrep", []config.ToolInstallSpec{{Provider: "brew", Package: "rg"}})
+	want := "matched provider: ripgrep -> brew/rg"
+	if got != want {
+		t.Fatalf("providerMatchProgressText single = %q, want %q", got, want)
+	}
+	got = providerMatchProgressText("ripgrep", []config.ToolInstallSpec{{Provider: "brew", Package: "rg"}, {Provider: "apt"}})
+	want = "matched providers: ripgrep -> brew/rg, apt/ripgrep"
+	if got != want {
+		t.Fatalf("providerMatchProgressText multi = %q, want %q", got, want)
+	}
+}
+
+func TestRefreshDescriptionAndDiscoveryProgressText(t *testing.T) {
+	desc := RefreshDescriptionsProgressText(RefreshDescriptionsProgressEvent{Name: "ripgrep", Index: -1})
+	if want := "Refreshing descriptions 0/-1: tool/ripgrep…"; desc != want {
+		t.Fatalf("RefreshDescriptionsProgressText fallback = %q, want %q", desc, want)
+	}
+	desc = RefreshDescriptionsProgressText(RefreshDescriptionsProgressEvent{Provider: "brew", Name: "ripgrep", Index: 2, Total: 4})
+	if want := "Refreshing descriptions 2/4: brew/ripgrep…"; desc != want {
+		t.Fatalf("RefreshDescriptionsProgressText provider = %q, want %q", desc, want)
+	}
+
+	installed := RefreshInstalledProgressText(RefreshInstalledProgressEvent{Provider: "brew", ProviderLabel: "system/brew", Name: "ripgrep", Index: 1, Total: 3})
+	if want := "Refreshing tools… 1/3: system/brew/ripgrep"; installed != want {
+		t.Fatalf("RefreshInstalledProgressText = %q, want %q", installed, want)
+	}
+	installed = RefreshInstalledProgressText(RefreshInstalledProgressEvent{Provider: "brew", Name: "ripgrep", Index: 1, Total: 3})
+	if want := "Refreshing tools… 1/3: brew/ripgrep"; installed != want {
+		t.Fatalf("RefreshInstalledProgressText provider fallback = %q, want %q", installed, want)
+	}
+	discovered := RefreshDiscoveredProgressText(RefreshDiscoveredProgressEvent{Index: 0, Total: 0})
+	if want := "Finding local tools 0/0…"; discovered != want {
+		t.Fatalf("RefreshDiscoveredProgressText fallback = %q, want %q", discovered, want)
+	}
+	discovered = RefreshDiscoveredProgressText(RefreshDiscoveredProgressEvent{Provider: " brew ", Index: 2, Total: 5})
+	if want := "Finding local tools 2/5: brew…"; discovered != want {
+		t.Fatalf("RefreshDiscoveredProgressText provider = %q, want %q", discovered, want)
 	}
 }
 
