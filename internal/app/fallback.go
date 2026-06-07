@@ -20,6 +20,8 @@ import (
 
 const fallbackInstalledWithGitHub = "gh"
 
+var errFallbackNotConfigured = errors.New("fallback not configured")
+
 var fallbackTemplatePattern = regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}`)
 
 var fallbackTemplateVariables = map[string]struct{}{
@@ -59,6 +61,17 @@ func (a *App) SaveToolFallback(_ context.Context, name string, fallback config.F
 		cfg.Tools[name] = spec
 		return nil
 	})
+}
+
+func (a *App) ToolFallback(name string) (*config.FallbackSpec, bool, error) {
+	_, fallback, err := a.configuredFallback(name)
+	if err != nil {
+		if errors.Is(err, errFallbackNotConfigured) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	return fallback, true, nil
 }
 
 func (a *App) SaveToolFallbackFromGitHub(ctx context.Context, name, repo string) error {
@@ -286,7 +299,7 @@ func (a *App) configuredFallback(name string) (config.ToolSpec, *config.Fallback
 		return config.ToolSpec{}, nil, fmt.Errorf("tool %q not found", name)
 	}
 	if spec.Fallback == nil {
-		return config.ToolSpec{}, nil, fmt.Errorf("tool %q has no fallback", name)
+		return config.ToolSpec{}, nil, fmt.Errorf("%w: tool %q has no fallback", errFallbackNotConfigured, name)
 	}
 	return spec, spec.Fallback, nil
 }
@@ -431,7 +444,7 @@ func (a *App) automaticFallbackUsableForTool(name string, allowFailed bool) (boo
 	if err == nil {
 		return automaticFallbackUsable(fallback, allowFailed), nil
 	}
-	if strings.Contains(err.Error(), "has no fallback") {
+	if errors.Is(err, errFallbackNotConfigured) {
 		return false, nil
 	}
 	return false, err

@@ -8,6 +8,7 @@ import (
 
 	"github.com/lkshrk/omni/internal/actions"
 	appcore "github.com/lkshrk/omni/internal/app"
+	"github.com/lkshrk/omni/internal/config"
 	textutil "github.com/lkshrk/omni/internal/text"
 )
 
@@ -54,6 +55,14 @@ func newToolsFallbackCmd(state *rootState) *cobra.Command {
 			source := fromGitHub
 			if source == "" {
 				source = "configured git"
+			}
+			fallback, ok, err := state.app.ToolFallback(args[0])
+			if err != nil {
+				return err
+			}
+			if ok && fallback.Status == config.FallbackStatusUnsupported {
+				fmt.Fprintf(cmdOut(cmd), "Configured unsupported fallback draft for logical tool %q from gh %s.\n", args[0], source)
+				return nil
 			}
 			fmt.Fprintf(cmdOut(cmd), "Configured fallback for logical tool %q from gh %s.\n", args[0], source)
 			return nil
