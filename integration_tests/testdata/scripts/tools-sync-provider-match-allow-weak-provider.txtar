@@ -1,0 +1,78 @@
+# tools sync --provider with --allow-weak restricts provider discovery to that provider
+exec chmod 755 bin/brew
+env PATH=$WORK/bin:$PATH
+
+exec omni --config settings.json hosts ensure testhost
+exec omni --config settings.json tools sync --provider brew --allow-weak
+stdout 'matched provider: prettier -> brew/prettier-plugin-tailwindcss'
+stdout 'done: prettier \(brew\)'
+stdout 'installed: prettier \(brew\)'
+exec test -f .omni-cache/fake-brew/prettier-plugin-tailwindcss
+! exec test -f .omni-cache/fake-brew/prettier
+exec omni-assert-tool-provider-list settings.json prettier brew=prettier-plugin-tailwindcss
+
+-- bin/brew --
+#!/usr/bin/env sh
+set -eu
+state="${OMNI_CACHE_DIR}/fake-brew"
+mkdir -p "$state"
+case "${1:-}" in
+  --version)
+    echo "Homebrew 4.0.0"
+    ;;
+  search)
+    if [ "${2:-}" = "prettier" ]; then
+      printf '==> Formulae\nprettier-plugin-tailwindcss\n'
+      exit 0
+    fi
+    echo "No formulae or casks found for $2" >&2
+    exit 1
+    ;;
+  install)
+    shift
+    if [ "${1:-}" = "--formula" ] || [ "${1:-}" = "--cask" ]; then
+      shift
+    fi
+    : > "$state/$1"
+    ;;
+  list)
+    shift
+    if [ "${1:-}" = "--cask" ]; then
+      exit 0
+    fi
+    if [ "${1:-}" = "--versions" ]; then
+      shift
+      if [ "${1:-}" = "--cask" ]; then
+        shift
+      fi
+      for pkg in "$@"; do
+        if [ -f "$state/$pkg" ]; then
+          echo "$pkg 1.0.0"
+          exit 0
+        fi
+      done
+    fi
+    exit 1
+    ;;
+  info)
+    echo '{"formulae":[],"casks":[]}'
+    ;;
+  update|outdated)
+    ;;
+esac
+
+-- settings.json --
+{
+  "version": 8,
+  "settings": {
+    "provider_priority": ["npm", "brew"],
+    "disabled_providers": ["bun", "pnpm", "uv", "pip", "apt", "apk", "dnf", "pacman", "zypper"]
+  },
+  "tools": {
+    "prettier": {}
+  },
+  "hosts": { "testhost": [] },
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": ["prettier"] }
+  ]
+}
