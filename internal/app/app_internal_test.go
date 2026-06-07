@@ -91,6 +91,25 @@ func TestShortHostname(t *testing.T) {
 	}
 }
 
+func TestSettingsManagerHelpSubject(t *testing.T) {
+	tests := []struct {
+		ecosystem string
+		want      string
+	}{
+		{ecosystem: provider.EcosystemNode, want: "JS package manager"},
+		{ecosystem: provider.EcosystemPython, want: "Python tool manager"},
+		{ecosystem: "", want: "Manager"},
+		{ecosystem: "ruby", want: "Ruby manager"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.ecosystem, func(t *testing.T) {
+			if got := settingsManagerHelpSubject(tt.ecosystem); got != tt.want {
+				t.Fatalf("settingsManagerHelpSubject(%q) = %q, want %q", tt.ecosystem, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRefreshInstalledScanLabelUsesExplicitInstallWithForEcosystem(t *testing.T) {
 	a := New(filepath.Join(t.TempDir(), "settings.json"))
 	a.registry = provider.NewRegistry()
