@@ -1323,7 +1323,7 @@ func (a *App) listToolsFromConfig(ctx context.Context, cfg *config.RootConfig, p
 }
 
 func (a *App) configuredToolCacheKeys(ctx context.Context, cfg *config.RootConfig) (map[string]struct{}, bool) {
-	groups, hostAuthoritative := a.currentToolGroupsWithAuthority(cfg)
+	groups, _ := a.currentToolGroupsWithAuthority(cfg)
 	entries, _ := a.resolvedToolEntries(ctx, cfg, groups)
 	keys := make(map[string]struct{}, len(entries))
 	for _, entry := range entries {
@@ -1332,7 +1332,7 @@ func (a *App) configuredToolCacheKeys(ctx context.Context, cfg *config.RootConfi
 			keys[NewToolKey(entry.Name, entry.InstallWith, entry.EffectivePackage()).String()] = struct{}{}
 		}
 	}
-	return keys, (hostAuthoritative && len(cfg.Tools) > 0) || len(keys) > 0
+	return keys, len(cfg.Tools) > 0 || len(keys) > 0
 }
 
 type discoveryScope struct {

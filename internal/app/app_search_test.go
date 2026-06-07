@@ -138,6 +138,36 @@ func TestListTools_HidesTrackedRowsRemovedFromConfig(t *testing.T) {
 	}
 }
 
+func TestListTools_HidesTrackedRowsWhenConfigHasNoEffectiveTools(t *testing.T) {
+	ctx := context.Background()
+	brew := &stubProvider{name: "brew", available: true}
+	a, cfgPath := newImportApp(t, brew)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools:  logicalToolSpecs(logicalTool("ripgrep", "brew")),
+		Groups: []*config.GroupConfig{{Name: "system", Tools: nil}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name:          "docker",
+		Provider:      "brew",
+		Package:       "docker-desktop",
+		Installed:     true,
+		InstalledWith: "brew",
+		Tracked:       true,
+	}); err != nil {
+		t.Fatalf("Upsert stale docker: %v", err)
+	}
+
+	tools, err := a.ListTools(ctx, "")
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(tools) != 0 {
+		t.Fatalf("ListTools = %+v, want no stale tracked rows", tools)
+	}
+}
+
 func TestListToolsAndRefreshUseActiveHostGroups(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "Topaz.local")
 	ctx := context.Background()

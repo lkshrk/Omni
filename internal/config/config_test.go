@@ -339,6 +339,56 @@ func TestNormalizeFile_PersistsLegacyVersionWithoutOrderChange(t *testing.T) {
 	}
 }
 
+func TestNormalizeFile_PersistsLegacyToolProviderMigration(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+	raw := `{
+  "version": 5,
+  "tools": {
+    "docker": {
+      "provider": "brew",
+      "package": "docker-desktop",
+      "options": {"brew_kind": "cask"}
+    }
+  },
+  "groups": [
+    {"name": "system", "tools": ["docker"]}
+  ]
+}`
+	if err := os.WriteFile(path, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	changed, err := config.NormalizeFile(path)
+	if err != nil {
+		t.Fatalf("NormalizeFile: %v", err)
+	}
+	if !changed {
+		t.Fatal("NormalizeFile changed = false, want true for legacy provider migration")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+	for _, want := range []string{`"providers": [`, `"provider": "brew"`, `"package": "docker-desktop"`, `"brew_kind": "cask"`} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("NormalizeFile missing %s in migrated config:\n%s", want, content)
+		}
+	}
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load migrated config: %v", err)
+	}
+	docker := loaded.Tools["docker"]
+	if docker.Provider != "" || docker.Package != "" || docker.Options != nil {
+		t.Fatalf("docker legacy fields = provider %q package %q options %v, want empty", docker.Provider, docker.Package, docker.Options)
+	}
+	if len(docker.Providers) != 1 || docker.Providers[0].Provider != "brew" || docker.Providers[0].Package != "docker-desktop" || docker.Providers[0].Options["brew_kind"] != "cask" {
+		t.Fatalf("docker providers = %+v, want brew/docker-desktop cask", docker.Providers)
+	}
+}
+
 func TestSave_CreatesParentDirs(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nested", "dir", "settings.json")
