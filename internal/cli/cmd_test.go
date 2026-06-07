@@ -4326,6 +4326,58 @@ func TestInstall_ConfiguredToolAllowWeakNodeFamilyFilterInstallsConcreteMatch(t 
 	}
 }
 
+func TestInstall_ConfiguredToolAllowWeakPythonFamilyFilterInstallsConcreteMatch(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "settings.json")
+	cacheDir := t.TempDir()
+	withConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{ProviderPriority: []string{"pip"}},
+		Tools: map[string]config.ToolSpec{
+			"ruff": {},
+		},
+		Groups: []*config.GroupConfig{cliTestHostGroup("ruff")},
+	})
+	pip := &cliStubProvider{
+		name: "pip",
+		searchResults: []provider.SearchResult{{
+			Name:     "ruff-lsp",
+			Provider: "pip",
+		}},
+	}
+	a := app.New(cfgPath)
+	a.CacheDir = cacheDir
+	if err := a.InitTestMode(context.Background(), pip); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	var out bytes.Buffer
+	cmd := newInstallCmd(&rootState{app: a, yes: true})
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"ruff", "--provider", "python", "--allow-weak"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("tools install ruff --provider python --allow-weak: %v", err)
+	}
+	if len(pip.installedCalls) != 1 || pip.installedCalls[0] != "ruff" {
+		t.Fatalf("pip installedCalls = %v, want [ruff]", pip.installedCalls)
+	}
+	if !strings.Contains(out.String(), "matched provider: ruff -> pip/ruff-lsp") {
+		t.Fatalf("output = %q, want matched family-filtered weak provider line", out.String())
+	}
+	if !strings.Contains(out.String(), "✓ installed ruff (pip)") {
+		t.Fatalf("output = %q, want installed pip line", out.String())
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	providers := cfg.Tools["ruff"].Providers
+	if len(providers) != 1 || providers[0].Provider != "pip" || providers[0].Package != "ruff-lsp" {
+		t.Fatalf("providers = %+v, want weak pip match saved under concrete provider", providers)
+	}
+}
+
 // ─── install --group ────────────────────────────────────────────────────────
 
 func TestInstall_Group_NoHostRequired_SyncsGroup(t *testing.T) {
