@@ -29,9 +29,11 @@ func TestBestGitHubReleaseAsset_SkipsMetadataAndWrongBinary(t *testing.T) {
 	archName := githubArchNames()[0]
 	wantName := fmt.Sprintf("fd_10.3.0_%s_%s.zip", osName, archName)
 	asset, ok := bestGitHubReleaseAsset([]githubAsset{
-		{ID: "1", Name: fmt.Sprintf("fd_10.3.0_%s_%s_checksums.txt", osName, archName), BrowserDownloadURL: "https://example.test/checksums.txt"},
-		{ID: "2", Name: fmt.Sprintf("rg_14.1.1_%s_%s.tar.gz", osName, archName), BrowserDownloadURL: "https://example.test/rg.tar.gz"},
-		{ID: "3", Name: wantName, BrowserDownloadURL: "https://example.test/fd.zip"},
+		{Name: fmt.Sprintf("fd_10.3.0_%s_%s.tar.gz", osName, archName), BrowserDownloadURL: "https://example.test/fd-missing-id.tar.gz"},
+		{ID: "1", Name: fmt.Sprintf("fd_10.3.0_%s_%s.tar.gz", osName, archName)},
+		{ID: "2", Name: fmt.Sprintf("fd_10.3.0_%s_%s_checksums.txt", osName, archName), BrowserDownloadURL: "https://example.test/checksums.txt"},
+		{ID: "3", Name: fmt.Sprintf("rg_14.1.1_%s_%s.tar.gz", osName, archName), BrowserDownloadURL: "https://example.test/rg.tar.gz"},
+		{ID: "4", Name: wantName, BrowserDownloadURL: "https://example.test/fd.zip"},
 	}, "fd")
 	if !ok {
 		t.Fatal("bestGitHubReleaseAsset returned no match")
