@@ -39,6 +39,7 @@ func TestMain(m *testing.M) {
 		"omni-seed-package-availability":      seedPackageAvailabilityMain,
 		"omni-seed-update-metadata":           seedUpdateMetadataMain,
 		"omni-assert-tool-provider-list":      assertToolProviderListMain,
+		"omni-with-npm-registry":              withNPMRegistryMain,
 		"omni-tools-fallback-configured-git":  toolsFallbackConfiguredGitMain,
 		"omni-tools-fallback-unsupported-git": toolsFallbackUnsupportedGitMain,
 	}))
@@ -46,8 +47,8 @@ func TestMain(m *testing.M) {
 
 func assertToolProviderListMain() int {
 	args := os.Args[1:]
-	if len(args) != 3 {
-		fmt.Fprintln(os.Stderr, "usage: omni-assert-tool-provider-list <config> <tool> <provider>")
+	if len(args) < 3 {
+		fmt.Fprintln(os.Stderr, "usage: omni-assert-tool-provider-list <config> <tool> <provider> [provider...]")
 		return 2
 	}
 	cfg, err := config.Load(args[0])
@@ -64,8 +65,42 @@ func assertToolProviderListMain() int {
 		fmt.Fprintf(os.Stderr, "legacy fields still populated: provider=%q package=%q install_with=%q\n", spec.Provider, spec.Package, spec.InstallWith)
 		return 1
 	}
-	if len(spec.Providers) != 1 || spec.Providers[0].Provider != args[2] {
-		fmt.Fprintf(os.Stderr, "providers = %+v, want one %q candidate\n", spec.Providers, args[2])
+	want := args[2:]
+	if len(spec.Providers) != len(want) {
+		fmt.Fprintf(os.Stderr, "providers = %+v, want %v\n", spec.Providers, want)
+		return 1
+	}
+	for i, providerName := range want {
+		if spec.Providers[i].Provider != providerName {
+			fmt.Fprintf(os.Stderr, "providers = %+v, want %v\n", spec.Providers, want)
+			return 1
+		}
+	}
+	return 0
+}
+
+func withNPMRegistryMain() int {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/-/v1/search" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Query().Get("text") != "prettier" {
+			fmt.Fprint(w, `{"objects":[]}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"objects":[{"package":{"name":"prettier","version":"3.5.0","description":"Prettier formatter"}}]}`)
+	}))
+	defer server.Close()
+	if err := os.Setenv("OMNI_TEST_NPM_REGISTRY_URL", server.URL); err != nil {
+		fmt.Fprintf(os.Stderr, "set OMNI_TEST_NPM_REGISTRY_URL: %v\n", err)
+		return 1
+	}
+	cmd := cli.NewRootCmd()
+	cmd.SetArgs(os.Args[1:])
+	if err := cmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	return 0

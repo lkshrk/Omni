@@ -82,6 +82,16 @@ func TestSearch_QueryEscaped(t *testing.T) {
 	}
 }
 
+func TestNew_UsesIsolatedTestRegistryOverride(t *testing.T) {
+	t.Setenv("OMNI_TEST_ISOLATED", "1")
+	t.Setenv("OMNI_TEST_NPM_REGISTRY_URL", "https://registry.test/")
+
+	p := New(executor.NewMatchMock(), "npm")
+	if p.registryURL != "https://registry.test" {
+		t.Fatalf("registryURL = %q, want isolated test override without trailing slash", p.registryURL)
+	}
+}
+
 func TestOutdatedInfoByManager_UsesNPMRegistryTime(t *testing.T) {
 	outdated := `{"typescript":{"latest":"5.4.0"}}`
 	client := staticJSONClient(`{"time":{"5.4.0":"2026-05-28T12:00:00.000Z"}}`)

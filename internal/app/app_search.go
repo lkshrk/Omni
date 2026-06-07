@@ -1621,7 +1621,8 @@ func (a *App) ProviderMatches(ctx context.Context, logicalName string, spec conf
 	disabled := disabledProviderSet(settings.DisabledProviders)
 	matches := make([]ProviderMatch, 0, len(results))
 	for _, result := range results {
-		if disabled[strings.TrimSpace(result.Provider)] {
+		resultProvider := strings.TrimSpace(result.Provider)
+		if disabled[resultProvider] || !a.providerMatchInstallCandidate(resultProvider) {
 			continue
 		}
 		confidence := ClassifyProviderMatch(logicalName, spec, result)
@@ -1651,6 +1652,17 @@ func (a *App) ProviderMatches(ctx context.Context, logicalName string, spec conf
 		return matches[i].Name < matches[j].Name
 	})
 	return matches, errors.Join(err, settingsErr)
+}
+
+func (a *App) providerMatchInstallCandidate(providerName string) bool {
+	if providerName == "" || a == nil || a.registry == nil {
+		return providerName != ""
+	}
+	meta, ok := a.registry.Metadata(providerName)
+	if !ok {
+		return true
+	}
+	return meta.Kind != provider.ProviderKindEcosystem
 }
 
 func (a *App) InstallHighConfidenceProviderMatches(ctx context.Context, name, providerFilter string) (*ProviderMatchInstallResult, error) {
