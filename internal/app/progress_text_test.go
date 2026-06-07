@@ -579,6 +579,7 @@ func TestReconcileIssueLinesPluralizesCounts(t *testing.T) {
 		UpgradeAll: &UpgradeAllResult{Failures: []BulkToolError{{Name: "git", Provider: "brew"}, {Name: "go", Provider: "brew"}}},
 		DotsEntries: []DotStatus{
 			{Health: HealthConflict},
+			{Health: HealthConflict},
 			{Health: HealthMissing},
 			{Health: HealthNoSource},
 		},
@@ -588,7 +589,7 @@ func TestReconcileIssueLinesPluralizesCounts(t *testing.T) {
 	want := []string{
 		"1 tool failed to install",
 		"2 tools failed to upgrade",
-		"1 dot entry has conflicts",
+		"2 dot entries have conflicts",
 		"2 dot entries missing or no source",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -596,6 +597,11 @@ func TestReconcileIssueLinesPluralizesCounts(t *testing.T) {
 	}
 	if got := ReconcileIssueLines(nil); got != nil {
 		t.Fatalf("nil ReconcileIssueLines = %v, want nil", got)
+	}
+
+	singular := ReconcileIssueLines(&ReconcileResult{DotsEntries: []DotStatus{{Health: HealthConflict}}})
+	if want := []string{"1 dot entry has conflicts"}; !reflect.DeepEqual(singular, want) {
+		t.Fatalf("singular ReconcileIssueLines = %v, want %v", singular, want)
 	}
 }
 
