@@ -568,11 +568,18 @@ func TestRenameHostMovesSpecialHostGroup(t *testing.T) {
 
 func TestCopyHostConfigCopiesHostScopedSettingsAndOverrides(t *testing.T) {
 	a, cfgPath := newImportApp(t)
+	tools := logicalToolSpecs(
+		logicalFixtureTool{Name: "fd", Provider: "brew", Package: "fd-find", Options: map[string]string{"scope": "source"}},
+		logicalTool("ripgrep", "brew"),
+	)
+	fdSpec := tools["fd"]
+	fdSpec.Hosts = map[string]config.ToolInstallSpec{
+		"laptop":  {Provider: "apt", Package: "fd-find", Options: map[string]string{"scope": "laptop"}},
+		"desktop": {Provider: "brew", Package: "old-fd"},
+	}
+	tools["fd"] = fdSpec
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: logicalToolSpecs(
-			logicalFixtureTool{Name: "fd", Provider: "brew", Package: "fd-find", Options: map[string]string{"scope": "source"}},
-			logicalTool("ripgrep", "brew"),
-		),
+		Tools: tools,
 		Groups: []*config.GroupConfig{
 			{Name: "laptop", Special: "host", Tools: groupTools("fd"), Dots: []config.DotEntry{{
 				Name: "private",
@@ -645,6 +652,13 @@ func TestCopyHostConfigCopiesHostScopedSettingsAndOverrides(t *testing.T) {
 	}
 	if got := settings.ProviderPriority; !slices.Equal(got, []string{"brew", "apt"}) {
 		t.Fatalf("desktop provider priority = %v, want [brew apt]", got)
+	}
+	copiedFD := cfg.Tools["fd"].Hosts["desktop"]
+	if copiedFD.Provider != "apt" || copiedFD.Package != "fd-find" || copiedFD.Options["scope"] != "laptop" {
+		t.Fatalf("desktop fd override = %+v, want copied laptop override", copiedFD)
+	}
+	if got := cfg.Tools["fd"].Hosts["laptop"].Options["scope"]; got != "laptop" {
+		t.Fatalf("laptop fd override option = %q, want preserved source override", got)
 	}
 	settings.DisabledProviders[0] = "python"
 	if cfg.HostSettings["laptop"].DisabledProviders[0] != "node" {
