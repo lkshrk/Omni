@@ -12,6 +12,7 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/provider"
+	systemprovider "github.com/lkshrk/omni/internal/provider/system"
 )
 
 // ─── HostGroups ───────────────────────────────────────────────────────────────
@@ -164,6 +165,32 @@ func TestSetupProviderOptionsFromManagers(t *testing.T) {
 		if options[i] != want[i] {
 			t.Fatalf("option %d = %+v, want %+v", i, options[i], want[i])
 		}
+	}
+}
+
+func TestSetupProviderOptionsUsesResolvedProvidersAndAvailableManagers(t *testing.T) {
+	binDir := t.TempDir()
+	for _, name := range []string{"bun", "npm", "uv"} {
+		path := filepath.Join(binDir, name)
+		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write fake %s: %v", name, err)
+		}
+	}
+	t.Setenv("PATH", binDir)
+
+	brew := &stubProvider{name: "brew", available: true}
+	a, _ := newImportApp(t, systemprovider.New(brew), brew)
+	settings := config.Settings{DisabledProviders: []string{provider.EcosystemPython}}
+	settings.SetEcosystemManager(provider.EcosystemNode, "npm")
+
+	got := a.SetupProviderOptions(context.Background(), settings)
+	want := []app.SetupProviderOption{
+		{Name: "system", Label: "system(brew)", Enabled: true},
+		{Name: "node", Label: "node(npm • bun)", Enabled: true},
+		{Name: "python", Label: "python(uv)", Enabled: false},
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("SetupProviderOptions = %+v, want %+v", got, want)
 	}
 }
 
