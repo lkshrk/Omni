@@ -1847,6 +1847,50 @@ func TestInstallProviderMatches_AllowWeakNodeFamilyFilterInstallsConcreteMatch(t
 	}
 }
 
+func TestInstallProviderMatches_AllowWeakPythonFamilyFilterInstallsConcreteMatch(t *testing.T) {
+	pip := &searchStub{
+		stubProvider: stubProvider{name: "pip", available: true},
+		results: []provider.SearchResult{{
+			Name:     "ruff-lsp",
+			Provider: "pip",
+		}},
+	}
+	a, cfgPath := newImportApp(t, pip)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Version:  config.CurrentVersion,
+		Settings: config.Settings{ProviderPriority: []string{"pip"}},
+		Tools: map[string]config.ToolSpec{
+			"ruff": {},
+		},
+		Groups: []*config.GroupConfig{{Name: "python", Tools: []config.ToolEntry{{Name: "ruff"}}}},
+	}); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	result, err := a.InstallProviderMatches(context.Background(), "ruff", "python", app.ProviderMatchOptions{AllowWeak: true})
+	if err != nil {
+		t.Fatalf("InstallProviderMatches: %v", err)
+	}
+	if result.Installed.Provider != "pip" || result.Installed.Package != "ruff-lsp" {
+		t.Fatalf("installed = %+v, want pip/ruff-lsp", result.Installed)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	providers := cfg.Tools["ruff"].Providers
+	if len(providers) != 1 || providers[0].Provider != "pip" || providers[0].Package != "ruff-lsp" {
+		t.Fatalf("providers = %+v, want weak pip match saved under concrete provider", providers)
+	}
+	tools, err := a.ListTools(context.Background(), "")
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(tools) != 1 || tools[0].Provider != "pip" || tools[0].Package != "ruff-lsp" || !tools[0].Installed {
+		t.Fatalf("tools = %+v, want installed weak pip row", tools)
+	}
+}
+
 func TestSync_AllowWeakProviderMatches(t *testing.T) {
 	npm := &searchStub{
 		stubProvider: stubProvider{name: "npm", available: true},

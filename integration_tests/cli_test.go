@@ -95,6 +95,10 @@ func withNPMRegistryMain() int {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if os.Getenv("OMNI_TEST_NPM_WEAK_SEARCH") == "1" {
+			fmt.Fprint(w, `{"objects":[{"package":{"name":"prettier-plugin-tailwindcss","version":"0.6.14","description":"Tailwind CSS class sorter for Prettier"}}]}`)
+			return
+		}
 		fmt.Fprint(w, `{"objects":[{"package":{"name":"prettier","version":"3.5.0","description":"Prettier formatter"}}]}`)
 	}))
 	defer server.Close()
