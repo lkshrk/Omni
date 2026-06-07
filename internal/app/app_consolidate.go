@@ -133,10 +133,16 @@ func (a *App) ConsolidateToProvider(ctx context.Context, targetProvider string, 
 					return fmt.Errorf("deleting old consolidate cache for %s/%s: %w", install.InstallWith, name, err)
 				}
 			}
-			spec.Provider = configProvider
-			spec.Package = install.EffectivePackage(name)
-			spec.InstallWith = targetInstallWith
-			spec.Options = install.Options
+			setDefaultToolProviderCandidate(&spec, config.ToolInstallSpec{
+				Provider:    configProvider,
+				Package:     install.EffectivePackage(name),
+				InstallWith: targetInstallWith,
+				Options:     install.Options,
+			})
+			spec.Provider = ""
+			spec.Package = ""
+			spec.InstallWith = ""
+			spec.Options = nil
 			cfg.Tools[name] = spec
 			result.Migrated = append(result.Migrated, ct)
 		}
