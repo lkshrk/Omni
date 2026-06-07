@@ -170,6 +170,54 @@ func TestSaveToolFallback_PersistsRecipeWithoutInstalling(t *testing.T) {
 	}
 }
 
+func TestToolFallback_ReturnsSavedSpec(t *testing.T) {
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(
+			logicalTool("rg", "system"),
+			logicalTool("fd", "system"),
+		),
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	saved := config.FallbackSpec{
+		Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+		Status: config.FallbackStatusUnverified,
+		Binary: "rg",
+		Commands: config.FallbackCommands{
+			Install: "install rg",
+			Check:   "command -v rg",
+		},
+	}
+	if err := a.SaveToolFallback(context.Background(), "rg", saved); err != nil {
+		t.Fatalf("SaveToolFallback: %v", err)
+	}
+
+	got, ok, err := a.ToolFallback("rg")
+	if err != nil {
+		t.Fatalf("ToolFallback: %v", err)
+	}
+	if !ok || got == nil {
+		t.Fatal("ToolFallback ok = false, want saved fallback")
+	}
+	if got.Source.Owner != saved.Source.Owner || got.Source.Repo != saved.Source.Repo || got.Commands.Check != saved.Commands.Check {
+		t.Fatalf("ToolFallback = %+v, want saved fallback spec", got)
+	}
+
+	empty, ok, err := a.ToolFallback("fd")
+	if err != nil {
+		t.Fatalf("ToolFallback without fallback: %v", err)
+	}
+	if ok || empty != nil {
+		t.Fatalf("fallback-less ToolFallback = %+v/%v, want nil/false", empty, ok)
+	}
+
+	if _, _, err := a.ToolFallback("missing"); err == nil || !strings.Contains(err.Error(), `tool "missing" not found`) {
+		t.Fatalf("missing ToolFallback err = %v, want missing tool error", err)
+	}
+}
+
 func TestSaveToolFallback_RejectsUnknownTemplateVariable(t *testing.T) {
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
