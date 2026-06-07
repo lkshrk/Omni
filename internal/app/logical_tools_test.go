@@ -451,6 +451,30 @@ func TestToolGroupLabelsForHostFiltersInactiveGroupsAndCompacts(t *testing.T) {
 	}
 }
 
+func TestToolGroupLabelsUsesCurrentMachineHostFilter(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost.local")
+
+	labels := app.ToolGroupLabels(
+		map[string][]string{
+			"git\x00system": {"testhost", "ops", "dev", "unused"},
+			"fd\x00system":  {"unused"},
+		},
+		&app.HostInfo{
+			Active: "testhost",
+			Hosts: map[string]config.HostAssignment{
+				"testhost": {Groups: []string{"dev", "ops"}},
+			},
+		},
+	)
+
+	if got := labels["git\x00system"]; got != "dev,ops+1" {
+		t.Fatalf("git label = %q, want dev,ops+1", got)
+	}
+	if got := labels["fd\x00system"]; got != "" {
+		t.Fatalf("fd label = %q, want empty inactive label", got)
+	}
+}
+
 func TestVisibleGroupNamesForHostUsesActiveHostGroups(t *testing.T) {
 	got := app.VisibleGroupNamesForHost(
 		[]string{"archive", "personal", "work"},

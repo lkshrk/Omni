@@ -1873,6 +1873,46 @@ func TestSetGroupDotsAppliesEditorDiff(t *testing.T) {
 	}
 }
 
+func TestSetGroupDotsAppliesEditorDiffWithDefaultContext(t *testing.T) {
+	a, cfgDir, _ := newDotsApp(t)
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	host := dotsTestHostGroupName()
+
+	rootCfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	rootCfg.Groups = []*config.GroupConfig{
+		{Name: host, Special: "host", Dots: []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}}},
+		{Name: "work", Dots: []config.DotEntry{{Name: "zsh", Path: "~/.zshrc"}}},
+	}
+	rootCfg.Hosts = map[string][]string{host: {"work"}}
+	if err := saveAppConfig(t, cfgPath, rootCfg); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	change, err := a.SetGroupDots(
+		"work",
+		map[string]bool{"nvim": true, "zsh": false},
+		map[string]bool{"nvim": false, "zsh": true},
+	)
+	if err != nil {
+		t.Fatalf("SetGroupDots: %v", err)
+	}
+	if change.Changed != 2 {
+		t.Fatalf("changed = %d, want 2", change.Changed)
+	}
+	if !reflect.DeepEqual(change.DotMemberships["nvim"], []string{"work"}) {
+		t.Fatalf("dot memberships = %v, want nvim in work", change.DotMemberships)
+	}
+	if change.DotsState == nil {
+		t.Fatal("DotsState is nil, want refreshed state")
+	}
+	if !reflect.DeepEqual(change.DotsState.DotMemberships["nvim"], []string{"work"}) {
+		t.Fatalf("state dot memberships = %v, want nvim in work", change.DotsState.DotMemberships)
+	}
+}
+
 func testContainsString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
