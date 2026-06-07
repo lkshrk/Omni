@@ -1,0 +1,134 @@
+# tools sync recovers a failed fallback through native install once the package becomes available
+exec chmod 755 bin/apt-get bin/dpkg-query bin/apt-mark bin/sudo
+env PATH=$WORK/bin:$PATH
+
+exec omni --config settings.json hosts ensure testhost
+exec omni-seed-package-availability rg apt ripgrep false 'no candidate'
+
+exec omni --config settings.json tools sync
+stdout 'failed: rg \(apt\): fallback rg install: exit status 1'
+exec grep '"status": "failed"' settings.json
+stdout '"status": "failed"'
+! exec test -f .omni-cache/fake-apt/ripgrep
+! exec test -f .omni-cache/fallback/rg
+
+exec omni-seed-package-availability rg apt ripgrep true
+exec omni --config settings.json tools sync
+stdout 'installed: rg \(apt\)'
+exec test -f .omni-cache/fake-apt/ripgrep
+! exec test -f .omni-cache/fallback/rg
+exec grep '"status": "failed"' settings.json
+stdout '"status": "failed"'
+
+exec omni --config settings.json tools list rg --format json
+stdout '"installed_with":"apt"'
+! stdout '"failed_at"'
+
+-- bin/apt-get --
+#!/bin/sh
+set -eu
+state="${OMNI_CACHE_DIR}/fake-apt"
+mkdir -p "$state"
+case "${1:-}" in
+  --version)
+    echo "apt 2.0.0"
+    ;;
+  install)
+    shift
+    if [ "${1:-}" = "-y" ]; then
+      shift
+    fi
+    : > "$state/$1"
+    echo "1.0.0" > "$state/$1.version"
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+
+-- bin/dpkg-query --
+#!/bin/sh
+set -eu
+state="${OMNI_CACHE_DIR}/fake-apt"
+case "${1:-}" in
+  --showformat=*)
+    shift
+    if [ "${1:-}" = "--show" ]; then
+      shift
+    fi
+    pkg="${1:-}"
+    if [ -f "$state/$pkg" ]; then
+      cat "$state/$pkg.version"
+      exit 0
+    fi
+    exit 1
+    ;;
+  -W)
+    shift
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        -f=*) shift ;;
+        *) break ;;
+      esac
+    done
+    for pkg in ripgrep; do
+      if [ -f "$state/$pkg" ]; then
+        version="$(cat "$state/$pkg.version")"
+        printf '%s\t%s\tii \n' "$pkg" "$version"
+      fi
+    done
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+
+-- bin/apt-mark --
+#!/bin/sh
+set -eu
+if [ "${1:-}" = "showmanual" ]; then
+  state="${OMNI_CACHE_DIR}/fake-apt"
+  [ -f "$state/ripgrep" ] && echo "ripgrep"
+  exit 0
+fi
+exit 1
+
+-- bin/sudo --
+#!/bin/sh
+set -eu
+if [ "${1:-}" = "-n" ]; then
+  shift
+fi
+exec "$@"
+
+-- settings.json --
+{
+  "version": 7,
+  "settings": {
+    "disabled_providers": ["npm", "pip"]
+  },
+  "tools": {
+    "rg": {
+      "providers": [{ "provider": "apt", "package": "ripgrep" }],
+      "fallback": {
+        "source": {
+          "type": "github",
+          "owner": "BurntSushi",
+          "repo": "ripgrep",
+          "url": "https://github.com/BurntSushi/ripgrep"
+        },
+        "status": "unverified",
+        "binary": "rg",
+        "commands": {
+          "install": "test -f .omni-cache/allow-fallback-install && mkdir -p .omni-cache/fallback && touch .omni-cache/fallback/rg",
+          "check": "test -f .omni-cache/fallback/rg",
+          "uninstall": "rm -f .omni-cache/fallback/rg"
+        }
+      }
+    }
+  },
+  "hosts": { "testhost": [] },
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": ["rg"] }
+  ]
+}
