@@ -1,0 +1,44 @@
+# startup migration persists legacy tool provider config and filters stale tracked cache rows
+exec omni-seed-cache docker brew docker-desktop 1.0.0 2.0.0 brew
+exec omni-seed-cache ripgrep brew ripgrep 14.0.0 15.0.0 brew
+
+exec omni --config settings.json tools list --format json
+stdout '"name":"ripgrep"'
+stdout '"provider":"brew"'
+! stdout '"name":"docker"'
+! stdout 'docker-desktop'
+
+exec omni-assert-tool-provider-list settings.json docker brew=docker-desktop
+exec omni-assert-tool-provider-list settings.json ripgrep brew=ripgrep
+exec grep '"providers"' settings.json
+stdout '"providers"'
+
+-- settings.json --
+{
+  "version": 5,
+  "tools": {
+    "docker": {
+      "provider": "brew",
+      "package": "docker-desktop",
+      "options": {
+        "brew_kind": "cask"
+      }
+    },
+    "ripgrep": {
+      "provider": "brew",
+      "package": "ripgrep"
+    }
+  },
+  "groups": [
+    {
+      "name": "testhost",
+      "special": "host",
+      "tools": [
+        "ripgrep"
+      ]
+    }
+  ],
+  "hosts": {
+    "testhost": []
+  }
+}
