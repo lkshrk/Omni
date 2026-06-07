@@ -366,7 +366,7 @@ func (a *App) refreshWithCachedOwner(ctx context.Context, t config.ToolEntry, ke
 	}
 	available, err := ownerProv.Available(ctx)
 	if err != nil || !available {
-		return nil, nil, true
+		return nil, nil, false
 	}
 	var (
 		installed bool
