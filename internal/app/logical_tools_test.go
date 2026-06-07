@@ -180,6 +180,135 @@ func TestToolProviderScopeChoices_PlansEcosystemChoice(t *testing.T) {
 	}
 }
 
+func TestSetToolProviderScopeWithStatePersistsHostProviderPin(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "desk.local")
+	a, cfgPath := newImportApp(t)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"prettier": {Providers: []config.ToolInstallSpec{{Provider: "npm"}}},
+		},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	change, err := a.SetToolProviderScopeWithState(context.Background(), "prettier", app.ToolProviderScopeOptions{
+		Kind:         app.ToolProviderScopeHost,
+		ProviderName: "node",
+		Package:      "prettier",
+		InstallWith:  "bun",
+	})
+	if err != nil {
+		t.Fatalf("SetToolProviderScopeWithState: %v", err)
+	}
+	if change == nil || change.ScopeDisplay == nil {
+		t.Fatalf("change = %#v, want refreshed scope display", change)
+	}
+	if got := change.ScopeDisplay.ToolProviderPins["prettier"]; got != "bun" {
+		t.Fatalf("provider pins = %v, want prettier pinned to bun", change.ScopeDisplay.ToolProviderPins)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	hostSpec, ok := cfg.Tools["prettier"].Hosts["desk"]
+	if !ok {
+		t.Fatalf("host overrides = %v, want desk override", cfg.Tools["prettier"].Hosts)
+	}
+	if hostSpec.Provider != "bun" || hostSpec.Package != "prettier" {
+		t.Fatalf("host override = %+v, want bun/prettier", hostSpec)
+	}
+}
+
+func TestSetToolProviderScopeWithStatePersistsToolProviderPin(t *testing.T) {
+	a, cfgPath := newImportApp(t)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"prettier": {Providers: []config.ToolInstallSpec{{Provider: "npm"}}},
+		},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	change, err := a.SetToolProviderScopeWithState(context.Background(), "prettier", app.ToolProviderScopeOptions{
+		Kind:         app.ToolProviderScopeTool,
+		ProviderName: "node",
+		Package:      "prettier",
+		InstallWith:  "bun",
+	})
+	if err != nil {
+		t.Fatalf("SetToolProviderScopeWithState: %v", err)
+	}
+	if got := change.ScopeDisplay.ToolProviderPins["prettier"]; got != "bun" {
+		t.Fatalf("provider pins = %v, want prettier pinned to bun", change.ScopeDisplay.ToolProviderPins)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	want := []config.ToolInstallSpec{{Provider: "bun", Package: "prettier"}, {Provider: "npm"}}
+	if got := cfg.Tools["prettier"].Providers; !reflect.DeepEqual(got, want) {
+		t.Fatalf("providers = %+v, want %+v", got, want)
+	}
+}
+
+func TestSetToolProviderScopeWithStateRejectsInvalidScopeOptions(t *testing.T) {
+	a, _ := newImportApp(t)
+
+	if _, err := a.SetToolProviderScopeWithState(context.Background(), "prettier", app.ToolProviderScopeOptions{
+		Kind: app.ToolProviderScopeHost,
+	}); err == nil || err.Error() != "installed provider is unknown" {
+		t.Fatalf("missing install_with error = %v, want installed provider is unknown", err)
+	}
+
+	if _, err := a.SetToolProviderScopeWithState(context.Background(), "prettier", app.ToolProviderScopeOptions{
+		Kind:         app.ToolProviderScopeKind("provider-nowhere"),
+		ProviderName: "node",
+		InstallWith:  "bun",
+	}); err == nil || err.Error() != `unknown provider scope "provider-nowhere"` {
+		t.Fatalf("unknown scope error = %v", err)
+	}
+}
+
+func TestClearToolInstallOverrideReportsMissingOverride(t *testing.T) {
+	a, cfgPath := newImportApp(t)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"black": {Providers: []config.ToolInstallSpec{{Provider: "uv", Package: "black"}}},
+		},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	result, err := a.ClearToolInstallOverride(context.Background(), "black", "")
+	if err == nil {
+		t.Fatalf("ClearToolInstallOverride result = %+v, want missing override error", result)
+	}
+	if got := err.Error(); got != `provider override for "black" not found` {
+		t.Fatalf("error = %q", got)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got := cfg.Tools["black"].Providers; !reflect.DeepEqual(got, []config.ToolInstallSpec{{Provider: "uv", Package: "black"}}) {
+		t.Fatalf("providers = %+v, want unchanged uv candidate", got)
+	}
+}
+
+func TestClearToolInstallOverrideRejectsMissingInputs(t *testing.T) {
+	a, _ := newImportApp(t)
+
+	if _, err := a.ClearToolInstallOverride(context.Background(), "", ""); err == nil || err.Error() != "tool name is required" {
+		t.Fatalf("missing name error = %v, want tool name is required", err)
+	}
+	if _, err := a.ClearToolInstallOverride(context.Background(), "missing", ""); err == nil || err.Error() != `logical tool "missing" not found` {
+		t.Fatalf("missing tool error = %v, want logical tool not found", err)
+	}
+}
+
 func TestSetTool_RejectsEcosystemProviderWithoutConcrete(t *testing.T) {
 	a, _ := newImportApp(t)
 
