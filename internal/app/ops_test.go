@@ -2987,3 +2987,25 @@ func TestDefaultInstallProviderSkipsDisabledProviders(t *testing.T) {
 		t.Fatalf("DefaultInstallProvider = %q, want npm", got)
 	}
 }
+
+func TestDefaultInstallProviderSkipsDisabledProviderFamily(t *testing.T) {
+	brew := &stubProvider{name: "brew", available: true}
+	npm := &stubProvider{name: "npm", available: true}
+	a, _ := newImportApp(t, brew, npm)
+
+	settings := config.Settings{
+		ProviderPriority:  []string{"brew", "npm"},
+		DisabledProviders: []string{"system"},
+	}
+	if err := a.SaveSettings(context.Background(), settings); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+
+	got, err := a.DefaultInstallProvider(context.Background())
+	if err != nil {
+		t.Fatalf("DefaultInstallProvider: %v", err)
+	}
+	if got != "npm" {
+		t.Fatalf("DefaultInstallProvider = %q, want npm after system disabled", got)
+	}
+}
