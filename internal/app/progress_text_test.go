@@ -634,6 +634,27 @@ func TestSyncAllFailureRowsMergesDirectAndSyncFailures(t *testing.T) {
 	}
 }
 
+func TestPrivilegedActionMapForRows(t *testing.T) {
+	rowErrors := map[string]string{
+		toolResultKey("vim", "system"): "requires sudo: apt install vim",
+		toolResultKey("bat", "system"): "requires sudo: apt install bat",
+	}
+
+	got := PrivilegedActionMapForRows(rowErrors, provider.PrivilegeActionInstall)
+	if len(got) != 2 ||
+		got[toolResultKey("vim", "system")] != provider.PrivilegeActionInstall ||
+		got[toolResultKey("bat", "system")] != provider.PrivilegeActionInstall {
+		t.Fatalf("PrivilegedActionMapForRows = %#v, want install action for each row", got)
+	}
+
+	if got := PrivilegedActionMapForRows(nil, provider.PrivilegeActionInstall); got != nil {
+		t.Fatalf("nil row errors map = %#v, want nil", got)
+	}
+	if got := PrivilegedActionMapForRows(rowErrors, ""); got != nil {
+		t.Fatalf("empty action map = %#v, want nil", got)
+	}
+}
+
 func TestSyncAllPhaseProgressText(t *testing.T) {
 	got := SyncAllPhaseProgressText("reading installed packages…", 2)
 	want := "Syncing tools 0/2: checking installed state…"
