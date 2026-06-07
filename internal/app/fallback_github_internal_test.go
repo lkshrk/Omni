@@ -62,6 +62,36 @@ func TestBestGitHubReleaseAsset_AcceptsPlatformAliases(t *testing.T) {
 	}
 }
 
+func TestGitHubReleaseAssetIgnored(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{name: "fd_checksums.txt", want: true},
+		{name: "fd.sha256", want: true},
+		{name: "fd.signature", want: true},
+		{name: "fd.tar.gz.sig", want: true},
+		{name: "fd.tar.gz.asc", want: true},
+		{name: "fd_README.md", want: true},
+		{name: "fd_LICENSE", want: true},
+		{name: "fd_docs.zip", want: true},
+		{name: "fd_linux_amd64.deb", want: true},
+		{name: "fd_linux_amd64.rpm", want: true},
+		{name: "fd_macos_arm64.pkg", want: true},
+		{name: "fd_windows_amd64.msi", want: true},
+		{name: "fd_macos_arm64.dmg", want: true},
+		{name: "fd_linux_amd64.tar.gz", want: false},
+		{name: "fd_linux_amd64.zip", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := githubReleaseAssetIgnored(strings.ToLower(tt.name)); got != tt.want {
+				t.Fatalf("githubReleaseAssetIgnored(%q) = %v, want %v", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestNormalizedGitHubPublishedAt(t *testing.T) {
 	got, err := normalizedGitHubPublishedAt("2026-06-07T12:34:56+02:00")
 	if err != nil {
