@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"maps"
 	"time"
 
@@ -16,7 +17,7 @@ import (
 func (m *Model) doInstall(name, prov string) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
 	return func() tea.Msg {
-		result, err := a.InstallWithState(ctx, name, prov)
+		result, err := installToolWithState(ctx, a, name, prov)
 		if err != nil {
 			return opCompleteMsg{err: err}
 		}
@@ -30,6 +31,17 @@ func (m *Model) doInstall(name, prov string) tea.Cmd {
 			hostInfo:             result.State.HostInfo,
 		}
 	}
+}
+
+func installToolWithState(ctx context.Context, a *app.App, name, prov string) (*app.ToolGroupMutationState, error) {
+	if prov != "" {
+		return a.InstallWithState(ctx, name, prov)
+	}
+	result, err := a.InstallHighConfidenceProviderMatchesWithState(ctx, name, "")
+	if errors.Is(err, app.ErrProviderDiscoveryNotConfigured) || errors.Is(err, app.ErrProviderDiscoveryAlreadyConfigured) {
+		return a.InstallWithState(ctx, name, prov)
+	}
+	return result, err
 }
 
 // doDelete deletes a single tool.

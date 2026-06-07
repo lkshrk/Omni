@@ -69,6 +69,15 @@ func (p *okProvider) PrivilegeCommand(action provider.PrivilegeAction, tool prov
 	}
 }
 
+type searchOKProvider struct {
+	okProvider
+	results []provider.SearchResult
+}
+
+func (p *searchOKProvider) Search(_ context.Context, _ string) ([]provider.SearchResult, error) {
+	return p.results, nil
+}
+
 type privilegedOKProvider struct {
 	okProvider
 	plan provider.PrivilegePlan
@@ -349,6 +358,49 @@ func TestDoInstall_Success(t *testing.T) {
 	}
 	if got.message == "" {
 		t.Error("expected non-empty success message")
+	}
+}
+
+func TestDoInstall_ConfiguredEmptyToolAddsHighConfidenceProviderMatch(t *testing.T) {
+	prov := &searchOKProvider{
+		okProvider: okProvider{name: "brew"},
+		results: []provider.SearchResult{{
+			Name:     "prettier",
+			Provider: "brew",
+		}},
+	}
+	a, cfgPath := newCmdApp(t, prov, nil)
+	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
+		Version:  config.CurrentVersion,
+		Settings: config.Settings{ProviderPriority: []string{"brew"}},
+		Tools: map[string]config.ToolSpec{
+			"prettier": {},
+		},
+		Groups: []*config.GroupConfig{tuiTestHostGroup("prettier")},
+	}); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	m := modelForCmds(a)
+	msg := m.doInstall("prettier", "")()
+	got, ok := msg.(opCompleteMsg)
+	if !ok {
+		t.Fatalf("expected opCompleteMsg, got %T", msg)
+	}
+	if got.err != nil {
+		t.Fatalf("unexpected error: %v", got.err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	providers := cfg.Tools["prettier"].Providers
+	if len(providers) != 1 || providers[0].Provider != "brew" {
+		t.Fatalf("providers = %+v, want high-confidence brew match saved", providers)
+	}
+	if len(got.tools) != 1 || got.tools[0].Provider != "brew" || !got.tools[0].Installed {
+		t.Fatalf("tools = %+v, want installed brew row", got.tools)
 	}
 }
 
