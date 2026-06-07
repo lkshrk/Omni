@@ -3927,6 +3927,42 @@ func TestInlineDetailLines_ConfiguredProviderCandidates(t *testing.T) {
 	}
 }
 
+func TestInlineDetailLines_ConfiguredProviderCandidatesHiddenWhenNotActionable(t *testing.T) {
+	tests := []struct {
+		name       string
+		tool       *database.ToolCache
+		candidates []config.ToolInstallSpec
+	}{
+		{
+			name:       "single candidate",
+			tool:       &database.ToolCache{Name: "prettier", Provider: "npm", Installed: false, Tracked: true},
+			candidates: []config.ToolInstallSpec{{Provider: "npm", Package: "prettier"}},
+		},
+		{
+			name: "installed row",
+			tool: &database.ToolCache{Name: "prettier", Provider: "npm", Installed: true, Tracked: true},
+			candidates: []config.ToolInstallSpec{
+				{Provider: "npm", Package: "prettier"},
+				{Provider: "brew", Package: "prettier"},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := baseModel([]*database.ToolCache{tc.tool})
+			m.toolProviderCandidates = map[string][]config.ToolInstallSpec{"prettier": tc.candidates}
+			m.applyFilter()
+
+			cols := newColWidthsWithProviderPins(m.visibleTools, nil, nil, m.toolProviderPins, nil, "", "", "", 120)
+			lines := inlineDetailLines(m, 120, cols)
+			got := stripANSIEscapeSequences(strings.Join(lines, "\n"))
+			if strings.Contains(got, "available providers") {
+				t.Fatalf("inline detail = %q, want provider candidates hidden", got)
+			}
+		})
+	}
+}
+
 func TestToolInlineHints_PinnedProviderOffersRemoveOverride(t *testing.T) {
 	tool := &database.ToolCache{Name: "typescript", Provider: "node", Installed: true, InstalledWith: "npm", Tracked: true}
 	m := baseModel([]*database.ToolCache{tool})

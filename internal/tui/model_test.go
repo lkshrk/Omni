@@ -527,6 +527,31 @@ func TestModel_ToolsLoadedMsg(t *testing.T) {
 		}
 	})
 
+	t.Run("startup snapshot provider candidates reach selected row details", func(t *testing.T) {
+		snapshot := &app.StartupSnapshot{
+			Tools: []*database.ToolCache{{Name: "prettier", Provider: "", Installed: false, Tracked: true}},
+			ToolProviderCandidates: map[string][]config.ToolInstallSpec{
+				"prettier": {
+					{Provider: "npm", Package: "prettier"},
+					{Provider: "brew", Package: "prettier"},
+				},
+			},
+		}
+		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true, width: 120}
+		got := drive(m, toolsLoadedMsgFromStartupState(snapshot))
+
+		if len(got.toolProviderCandidates["prettier"]) != 2 {
+			t.Fatalf("toolProviderCandidates = %+v, want prettier candidates", got.toolProviderCandidates)
+		}
+		cols := newColWidthsWithProviderPins(got.visibleTools, nil, nil, got.toolProviderPins, nil, "", "", "", 120)
+		detail := stripANSIEscapeSequences(strings.Join(inlineDetailLines(got, 120, cols), "\n"))
+		for _, want := range []string{"available providers", "npm/prettier", "brew/prettier"} {
+			if !strings.Contains(detail, want) {
+				t.Fatalf("inline detail = %q, want %q", detail, want)
+			}
+		}
+	})
+
 	t.Run("success from viewStatus sets mode to viewStatus", func(t *testing.T) {
 		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true}
 		got := drive(m, toolsLoadedMsg{tools: threeTools()})
