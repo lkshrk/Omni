@@ -35,6 +35,29 @@ func TestRecordPrivilegeError_NonPrivilegeError(t *testing.T) {
 	a.recordPrivilegeError(context.Background(), "vim", "apt", "vim", err)
 }
 
+func TestExternalPrivilegeActionText(t *testing.T) {
+	for _, tt := range []struct {
+		action provider.PrivilegeAction
+		want   string
+	}{
+		{action: provider.PrivilegeActionInstall, want: "install"},
+		{action: provider.PrivilegeActionUninstall, want: "uninstall"},
+		{action: provider.PrivilegeActionUpgrade, want: "upgrade"},
+		{action: provider.PrivilegeAction("repair"), want: "repair"},
+	} {
+		if got := externalToolActionVerb(tt.action); got != tt.want {
+			t.Fatalf("externalToolActionVerb(%q) = %q, want %q", tt.action, got, tt.want)
+		}
+	}
+
+	if got := privilegeReason(provider.PrivilegePlan{Reason: "apt requires sudo"}); got != "apt requires sudo" {
+		t.Fatalf("privilegeReason explicit = %q, want provider reason", got)
+	}
+	if got := privilegeReason(provider.PrivilegePlan{}); got != "package manager needs privileged access" {
+		t.Fatalf("privilegeReason default = %q, want fallback reason", got)
+	}
+}
+
 func TestPrivilegedToolCommand_BrewCaskActions(t *testing.T) {
 	a := newPrivilegeCommandTestApp(brew.New(nil))
 	plan := provider.PrivilegePlan{
