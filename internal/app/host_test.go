@@ -264,6 +264,39 @@ func TestHasHostAssignmentsReportsConfiguredHosts(t *testing.T) {
 	}
 }
 
+func TestGroupContentCountsReturnsCountsAndErrors(t *testing.T) {
+	a, cfgPath := newImportApp(t)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew"), logicalTool("fd", "brew")),
+		Groups: []*config.GroupConfig{
+			{
+				Name:  "work",
+				Tools: groupTools("ripgrep", "fd"),
+				Dots: []config.DotEntry{
+					{Name: "nvim", Path: "~/.config/nvim"},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	tools, dots, err := a.GroupContentCounts(" work ")
+	if err != nil {
+		t.Fatalf("GroupContentCounts: %v", err)
+	}
+	if tools != 2 || dots != 1 {
+		t.Fatalf("counts = %d tools, %d dots; want 2 tools, 1 dot", tools, dots)
+	}
+
+	if _, _, err := a.GroupContentCounts(" "); err == nil || err.Error() != "group name cannot be empty" {
+		t.Fatalf("empty group error = %v, want group name cannot be empty", err)
+	}
+	if _, _, err := a.GroupContentCounts("missing"); err == nil || err.Error() != `group "missing" not found` {
+		t.Fatalf("missing group error = %v, want missing group error", err)
+	}
+}
+
 func TestHostStateWrappersPropagateConfigLoadErrors(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
 	if err := os.WriteFile(cfgPath, []byte("{"), 0o600); err != nil {
