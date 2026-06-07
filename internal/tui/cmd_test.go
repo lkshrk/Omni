@@ -414,6 +414,48 @@ func TestDoInstall_ConfiguredEmptyToolAddsHighConfidenceProviderMatch(t *testing
 	}
 }
 
+func TestDoInstall_ConfiguredEmptyToolDoesNotInstallWeakProviderMatch(t *testing.T) {
+	prov := &searchOKProvider{
+		okProvider: okProvider{name: "brew"},
+		results: []provider.SearchResult{{
+			Name:     "prettier-plugin-tailwindcss",
+			Provider: "brew",
+		}},
+	}
+	a, cfgPath := newCmdApp(t, prov, nil)
+	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
+		Version:  config.CurrentVersion,
+		Settings: config.Settings{ProviderPriority: []string{"brew"}},
+		Tools: map[string]config.ToolSpec{
+			"prettier": {},
+		},
+		Groups: []*config.GroupConfig{tuiTestHostGroup("prettier")},
+	}); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	m := modelForCmds(a)
+	msg := m.doInstall("prettier", "")()
+	got, ok := msg.(opCompleteMsg)
+	if !ok {
+		t.Fatalf("expected opCompleteMsg, got %T", msg)
+	}
+	if got.err == nil || !strings.Contains(got.err.Error(), "no high-confidence provider match") {
+		t.Fatalf("err = %v, want no high-confidence provider match", got.err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if providers := cfg.Tools["prettier"].Providers; len(providers) != 0 {
+		t.Fatalf("providers = %+v, want no weak match saved by TUI install", providers)
+	}
+	if len(got.tools) != 0 {
+		t.Fatalf("tools = %+v, want no installed rows", got.tools)
+	}
+}
+
 func TestHandleListActionInstallUsesSelectedProviderCandidate(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
