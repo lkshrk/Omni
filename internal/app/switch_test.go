@@ -133,6 +133,24 @@ func TestFirstApplicableProviderSolutionSelectsSwitchProviderTarget(t *testing.T
 	}
 }
 
+func TestFirstApplicableProviderSolutionRejectsMissingSwitchTarget(t *testing.T) {
+	for _, actionErr := range []*provider.ActionError{
+		nil,
+		{},
+		{Solutions: []provider.ErrorSolution{
+			{Action: provider.ErrorSolutionActionSwitchProvider},
+			{Action: "run-command", TargetProvider: "brew"},
+		}},
+	} {
+		if solution, ok := app.FirstApplicableProviderSolution(actionErr); ok {
+			t.Fatalf("FirstApplicableProviderSolution(%+v) = %+v, true; want no solution", actionErr, solution)
+		}
+		if idx := app.FirstApplicableProviderSolutionIndex(actionErr); idx != -1 {
+			t.Fatalf("FirstApplicableProviderSolutionIndex(%+v) = %d, want -1", actionErr, idx)
+		}
+	}
+}
+
 func TestApplyProviderSolutionWithStateSwitchesTargetProvider(t *testing.T) {
 	ctx := context.Background()
 	brew := &stubProvider{name: "brew", available: true}
