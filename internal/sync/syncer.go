@@ -619,19 +619,15 @@ func (s *Syncer) operationProviderName(t config.ToolEntry) string {
 }
 
 func (s *Syncer) providerMatchesFilter(ctx context.Context, t config.ToolEntry, providerName string) bool {
-	if providerName == "" || t.Provider == providerName || t.InstallWith == providerName {
+	if providerName == "" {
 		return true
 	}
-	if s.providerBelongsToFilter(t.Provider, providerName) || s.providerBelongsToFilter(t.InstallWith, providerName) {
-		return true
+	for _, name := range []string{t.Provider, t.InstallWith, s.operationProviderName(t)} {
+		if s.providerNameMatchesFilter(name, providerName) {
+			return true
+		}
 	}
 	opProvider := s.operationProviderName(t)
-	if opProvider == providerName {
-		return true
-	}
-	if s.providerBelongsToFilter(opProvider, providerName) {
-		return true
-	}
 	prov, ok := s.registry.Get(opProvider)
 	if !ok {
 		return false
@@ -641,12 +637,15 @@ func (s *Syncer) providerMatchesFilter(ctx context.Context, t config.ToolEntry, 
 		return false
 	}
 	concrete, err := cr.ResolvedName(ctx)
-	return err == nil && concrete == providerName
+	return err == nil && s.providerNameMatchesFilter(concrete, providerName)
 }
 
-func (s *Syncer) providerBelongsToFilter(providerName, filter string) bool {
+func (s *Syncer) providerNameMatchesFilter(providerName, filter string) bool {
 	if providerName == "" || filter == "" {
 		return false
+	}
+	if providerName == filter {
+		return true
 	}
 	if meta, ok := s.registry.Metadata(providerName); ok && meta.Ecosystem == filter {
 		return true
