@@ -332,6 +332,33 @@ func TestPrivilegeQueuePlanUsesMarkedPrivilegeMetadata(t *testing.T) {
 	}
 }
 
+func TestPrivilegeQueuePlanBuildsItemFromRowErrorOnly(t *testing.T) {
+	a := newPrivilegeCommandTestApp(aptpkg.New(nil))
+	key := privilegeQueueToolKey("vim", "apt")
+
+	plan, err := a.PrivilegeQueuePlan(context.Background(), PrivilegeQueueRequest{
+		RowErrors: map[string]string{
+			key: "requires sudo/root privileges",
+		},
+		Actions: map[string]provider.PrivilegeAction{
+			key: provider.PrivilegeActionInstall,
+		},
+	})
+	if err != nil {
+		t.Fatalf("PrivilegeQueuePlan: %v", err)
+	}
+	if len(plan.Items) != 1 {
+		t.Fatalf("queue items = %#v, want synthesized row-error item", plan.Items)
+	}
+	item := plan.Items[0]
+	if item.Tool.Name != "vim" || item.Tool.Provider != "apt" || item.Tool.Package != "vim" {
+		t.Fatalf("tool = %+v, want synthesized vim/apt row", item.Tool)
+	}
+	if item.Command.Display != expectedInteractiveAdminDisplay("apt-get install -y vim") {
+		t.Fatalf("display command = %q, want synthesized apt install command", item.Command.Display)
+	}
+}
+
 func TestPrivilegeQueuePlanRejectsProviderToolUninstall(t *testing.T) {
 	a := New(filepath.Join(t.TempDir(), "settings.json"))
 	ctx := context.Background()
