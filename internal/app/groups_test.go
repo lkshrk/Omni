@@ -355,6 +355,48 @@ func TestInstallAndAddWithStatePersistsAndPassesOptions(t *testing.T) {
 	}
 }
 
+func TestInstallAndAddWithStateRejectsInvalidInstallWith(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		installWith string
+		want        string
+	}{
+		{name: "unknown manager", installWith: "missing", want: `unknown concrete provider/manager "missing"`},
+		{name: "ecosystem as manager", installWith: "node", want: `install_with "node" must be a concrete provider or manager`},
+		{name: "wrong ecosystem", installWith: "uv", want: `install_with "uv" belongs to ecosystem "python", not "node"`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			npm := &installTracker{stubProvider: stubProvider{name: "npm", available: true}}
+			a, cfgPath := newImportApp(t, npm)
+			if err := saveAppConfig(t, cfgPath, &config.RootConfig{}); err != nil {
+				t.Fatalf("save config: %v", err)
+			}
+
+			_, err := a.InstallAndAddWithState(ctx, app.AddToolOptions{
+				ProviderName: "node",
+				Package:      "prettier",
+				Name:         "prettier",
+				GroupName:    "work",
+				InstallWith:  tt.installWith,
+			})
+			if err == nil || err.Error() != tt.want {
+				t.Fatalf("InstallAndAddWithState err = %v, want %q", err, tt.want)
+			}
+			if len(npm.installCalled) != 0 {
+				t.Fatalf("installCalled = %v, want no install after rejected install_with", npm.installCalled)
+			}
+			cfg, err := config.Load(cfgPath)
+			if err != nil {
+				t.Fatalf("config.Load: %v", err)
+			}
+			if len(cfg.Tools) != 0 {
+				t.Fatalf("tools = %+v, want no config writes after rejected install_with", cfg.Tools)
+			}
+		})
+	}
+}
+
 func assertHostAssignedToGroup(t *testing.T, info *app.HostInfo, host, group string) {
 	t.Helper()
 	if info == nil {
