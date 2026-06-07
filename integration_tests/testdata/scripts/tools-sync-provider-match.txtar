@@ -1,0 +1,133 @@
+# tools sync adds high-confidence provider search matches for configured empty-provider tools
+exec chmod 755 bin/brew bin/npm
+env PATH=$WORK/bin:$PATH
+
+exec omni --config settings.json hosts ensure testhost
+exec omni-with-npm-registry --config settings.json tools sync
+stdout 'matched providers: prettier -> npm/prettier, brew/prettier'
+stdout 'done: prettier \(npm\)'
+stdout 'installed: prettier \(npm\)'
+exec test -f .omni-cache/fake-npm/prettier
+! exec test -f .omni-cache/fake-brew/prettier
+exec omni-assert-tool-provider-list settings.json prettier npm brew
+
+-- bin/brew --
+#!/usr/bin/env sh
+set -eu
+state="${OMNI_CACHE_DIR}/fake-brew"
+mkdir -p "$state"
+case "${1:-}" in
+  --version)
+    echo "Homebrew 4.0.0"
+    ;;
+  search)
+    if [ "${2:-}" = "prettier" ]; then
+      printf '==> Formulae\nprettier\n'
+      exit 0
+    fi
+    echo "No formulae or casks found for $2" >&2
+    exit 1
+    ;;
+  install)
+    shift
+    if [ "${1:-}" = "--formula" ] || [ "${1:-}" = "--cask" ]; then
+      shift
+    fi
+    : > "$state/$1"
+    ;;
+  list)
+    shift
+    if [ "${1:-}" = "--cask" ]; then
+      exit 0
+    fi
+    if [ "${1:-}" = "--versions" ]; then
+      shift
+      if [ "${1:-}" = "--cask" ]; then
+        shift
+      fi
+      for pkg in "$@"; do
+        if [ -f "$state/$pkg" ]; then
+          echo "$pkg 1.0.0"
+          exit 0
+        fi
+      done
+    fi
+    exit 1
+    ;;
+  info)
+    echo '{"formulae":[],"casks":[]}'
+    ;;
+  update|outdated)
+    ;;
+esac
+
+-- bin/npm --
+#!/usr/bin/env sh
+set -eu
+state="${OMNI_CACHE_DIR}/fake-npm"
+mkdir -p "$state"
+case "${1:-}" in
+  --version)
+    echo "10.2.4"
+    ;;
+  install)
+    pkg=""
+    for arg in "$@"; do
+      case "$arg" in
+        install|-g)
+          ;;
+        *)
+          pkg="$arg"
+          ;;
+      esac
+    done
+    if [ -n "$pkg" ]; then
+      : > "$state/$pkg"
+      exit 0
+    fi
+    exit 1
+    ;;
+  list|ls)
+    pkg=""
+    for arg in "$@"; do
+      case "$arg" in
+        list|ls|-g|--depth=0)
+          ;;
+        *)
+          pkg="$arg"
+          ;;
+      esac
+    done
+    if [ -n "$pkg" ]; then
+      if [ -f "$state/$pkg" ]; then
+        printf '/fake\n+-- %s@1.0.0\n' "$pkg"
+        exit 0
+      fi
+      exit 1
+    fi
+    for entry in "$state"/*; do
+      [ -f "$entry" ] || continue
+      printf '+-- %s@1.0.0\n' "$(basename "$entry")"
+    done
+    exit 0
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+
+-- settings.json --
+{
+  "version": 7,
+  "settings": {
+    "provider_priority": ["npm", "brew"],
+    "disabled_providers": ["bun", "pnpm", "python", "apt", "apk", "dnf", "pacman", "zypper", "pip"]
+  },
+  "tools": {
+    "prettier": {}
+  },
+  "hosts": { "testhost": [] },
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": ["prettier"] }
+  ]
+}
