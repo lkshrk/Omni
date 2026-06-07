@@ -34,7 +34,7 @@ key routing, modal state, rendering, and async result handling.
 | `tools.refresh` | yes | yes | yes | yes | - |
 | `tools.consolidate` | yes | yes | yes | yes | - |
 | `tools.set_spec` | yes | yes | yes | yes | - |
-| `tools.fallback` | yes | yes | yes | yes | Covers config save, TUI edit/render, native-unavailable sync/install, retry-failed, upgrade, and uninstall-unavailable routing. |
+| `tools.fallback` | yes | yes | yes | yes | Covers config save, TUI edit/render, native-unavailable sync/install, native recovery after failed fallback, retry-failed, upgrade, and uninstall-unavailable routing. |
 | `tools.delete_spec` | yes | yes | yes | yes | - |
 | `tools.normalize_provider_overrides` | yes | yes | yes | n/a | - |
 | `tools.import` | yes | yes | yes | yes | - |
