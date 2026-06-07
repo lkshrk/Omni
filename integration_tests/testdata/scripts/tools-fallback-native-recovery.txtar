@@ -1,6 +1,7 @@
 # tools sync recovers a failed fallback through native install once the package becomes available
-exec chmod 755 bin/apt-get bin/dpkg-query bin/apt-mark bin/sudo
-env PATH=$WORK/bin:$PATH
+exec chmod 755 bin/apt-get bin/dpkg-query bin/apt-mark bin/sudo bin/bun bin/pnpm bin/npm bin/uv bin/pip3 bin/pip bin/extract-testscript-bin
+exec bin/extract-testscript-bin
+env PATH=$WORK/bin:/usr/bin:/bin:/usr/sbin:/sbin
 
 exec omni --config settings.json hosts ensure testhost
 exec omni-seed-package-availability rg apt ripgrep false 'no candidate'
@@ -101,11 +102,43 @@ if [ "${1:-}" = "-n" ]; then
 fi
 exec "$@"
 
+-- bin/extract-testscript-bin --
+#!/bin/sh
+# Copy the testscript command binaries into $WORK/bin so they survive the PATH reset.
+tsbin="${PATH%%:*}"
+for f in "$tsbin"/*; do
+  [ -x "$f" ] && cp "$f" "$WORK/bin/" 2>/dev/null
+done
+
+-- bin/bun --
+#!/bin/sh
+exit 1
+
+-- bin/pnpm --
+#!/bin/sh
+exit 1
+
+-- bin/npm --
+#!/bin/sh
+exit 1
+
+-- bin/uv --
+#!/bin/sh
+exit 1
+
+-- bin/pip3 --
+#!/bin/sh
+exit 1
+
+-- bin/pip --
+#!/bin/sh
+exit 1
+
 -- settings.json --
 {
   "version": 7,
   "settings": {
-    "disabled_providers": ["npm", "pip"]
+    "disabled_providers": ["node", "python"]
   },
   "tools": {
     "rg": {
