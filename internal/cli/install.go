@@ -65,6 +65,16 @@ bootstrap or host assignment:
 				}
 				providerName = resolved
 				fmt.Fprintf(cmdOut(cmd), "auto-selected provider: %s\n", providerName)
+			} else {
+				matchResult, err := state.app.InstallProviderMatches(cmd.Context(), name, providerName, app.ProviderMatchOptions{AllowWeak: allowWeak})
+				if err == nil {
+					printProviderMatchInstallResult(cmdOut(cmd), name, matchResult)
+					promptSatisfiedGroupsAfterInstall(cmd, state)
+					return nil
+				}
+				if !errors.Is(err, app.ErrProviderDiscoveryAlreadyConfigured) && !errors.Is(err, app.ErrProviderDiscoveryNotConfigured) {
+					return err
+				}
 			}
 			if err := state.app.Install(cmd.Context(), name, providerName); err != nil {
 				return err

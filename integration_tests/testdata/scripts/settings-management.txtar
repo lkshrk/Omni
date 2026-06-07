@@ -29,7 +29,7 @@ stdout 'disabled_providers = node'
 exec omni --config settings.json settings disable-provider system
 stdout 'disabled_providers = node, system'
 ! exec omni --config settings.json settings disable-provider brew
-stderr 'not an ecosystem provider'
+stderr 'not a provider family'
 exec omni --config settings.json settings enable-provider node
 stdout 'disabled_providers = system'
 

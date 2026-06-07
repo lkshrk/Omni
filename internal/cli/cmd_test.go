@@ -4160,6 +4160,68 @@ func TestInstall_ConfiguredToolAllowWeakInstallsWeakProviderMatch(t *testing.T) 
 	}
 }
 
+func TestInstall_ConfiguredToolAllowWeakHonorsProviderFilter(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "settings.json")
+	cacheDir := t.TempDir()
+	withConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{ProviderPriority: []string{"npm", "brew"}},
+		Tools: map[string]config.ToolSpec{
+			"prettier": {},
+		},
+		Groups: []*config.GroupConfig{cliTestHostGroup("prettier")},
+	})
+	npm := &cliStubProvider{
+		name: "npm",
+		searchResults: []provider.SearchResult{{
+			Name:     "prettier-plugin-tailwindcss",
+			Provider: "npm",
+		}},
+	}
+	brew := &cliStubProvider{
+		name: "brew",
+		searchResults: []provider.SearchResult{{
+			Name:     "prettier-plugin-tailwindcss",
+			Provider: "brew",
+		}},
+	}
+	a := app.New(cfgPath)
+	a.CacheDir = cacheDir
+	if err := a.InitTestMode(context.Background(), npm, brew); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	var out bytes.Buffer
+	cmd := newInstallCmd(&rootState{app: a, yes: true})
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"prettier", "--provider", "brew", "--allow-weak"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("tools install prettier --provider brew --allow-weak: %v", err)
+	}
+	if len(npm.installedCalls) != 0 {
+		t.Fatalf("npm installedCalls = %v, want no install", npm.installedCalls)
+	}
+	if len(brew.installedCalls) != 1 || brew.installedCalls[0] != "prettier" {
+		t.Fatalf("brew installedCalls = %v, want [prettier]", brew.installedCalls)
+	}
+	if !strings.Contains(out.String(), "matched provider: prettier -> brew/prettier-plugin-tailwindcss") {
+		t.Fatalf("output = %q, want matched filtered weak provider line", out.String())
+	}
+	if !strings.Contains(out.String(), "✓ installed prettier (brew)") {
+		t.Fatalf("output = %q, want installed brew line", out.String())
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	providers := cfg.Tools["prettier"].Providers
+	if len(providers) != 1 || providers[0].Provider != "brew" || providers[0].Package != "prettier-plugin-tailwindcss" {
+		t.Fatalf("providers = %+v, want only filtered weak brew provider saved", providers)
+	}
+}
+
 // ─── install --group ────────────────────────────────────────────────────────
 
 func TestInstall_Group_NoHostRequired_SyncsGroup(t *testing.T) {
