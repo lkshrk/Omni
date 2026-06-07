@@ -514,6 +514,92 @@ func TestRefreshProviderInstalledWithProgress_ReportsEachTool(t *testing.T) {
 	}
 }
 
+func TestRefreshProviderInstalled_UsesCachedConcreteOwnerMetadata(t *testing.T) {
+	brew, apt := cachedOwnerMetadataProviders()
+	a, cfgPath := newImportApp(t, brew, apt)
+	ctx := context.Background()
+
+	seedRipgrepBrewWithCachedAptOwner(t, a, cfgPath, ctx)
+
+	if err := a.RefreshProviderInstalled(ctx, "brew"); err != nil {
+		t.Fatalf("RefreshProviderInstalled: %v", err)
+	}
+
+	assertRipgrepBrewOwnedByAptMetadata(t, a, cfgPath, ctx)
+}
+
+func cachedOwnerMetadataProviders() (*stubProvider, *metadataCheckingStub) {
+	brew := &stubProvider{name: "brew", available: true}
+	apt := &metadataCheckingStub{
+		stubProvider: stubProvider{name: "apt", available: true},
+		metadata: map[string]provider.InstalledMetadata{
+			"ripgrep": {
+				Version: "14.1.1",
+				Privilege: provider.PrivilegePlan{
+					Requirement: provider.PrivilegeRequired,
+					Reason:      "apt requires administrator privileges",
+				},
+				Source: provider.SourceMetadata{
+					Type:  provider.SourceTypeGitHub,
+					Owner: "BurntSushi",
+					Repo:  "ripgrep",
+					URL:   "https://github.com/BurntSushi/ripgrep",
+				},
+			},
+		},
+	}
+	return brew, apt
+}
+
+func seedRipgrepBrewWithCachedAptOwner(t *testing.T, a *app.App, cfgPath string, ctx context.Context) {
+	t.Helper()
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("ripgrep"),
+		}},
+	}); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name:          "ripgrep",
+		Provider:      "brew",
+		Package:       "ripgrep",
+		Installed:     true,
+		InstalledWith: "apt",
+	}); err != nil {
+		t.Fatalf("seed cached owner: %v", err)
+	}
+}
+
+func assertRipgrepBrewOwnedByAptMetadata(t *testing.T, a *app.App, cfgPath string, ctx context.Context) {
+	t.Helper()
+	got, err := a.DB().Get(ctx, "ripgrep", "brew", "ripgrep")
+	if err != nil {
+		t.Fatalf("Get ripgrep: %v", err)
+	}
+	if !got.Installed || got.InstalledWith != "apt" || got.Version.String != "14.1.1" {
+		t.Fatalf("cache = installed:%v owner:%q version:%q, want true/apt/14.1.1", got.Installed, got.InstalledWith, got.Version.String)
+	}
+	if got.Privilege != string(provider.PrivilegeRequired) || !got.PrivilegeReason.Valid {
+		t.Fatalf("privilege = %q reason:%+v, want required with reason", got.Privilege, got.PrivilegeReason)
+	}
+	meta, err := a.DB().GetMetadata(ctx, "ripgrep", "brew", "ripgrep")
+	if err != nil {
+		t.Fatalf("GetMetadata ripgrep: %v", err)
+	}
+	if meta.SourceType != provider.SourceTypeGitHub || meta.SourceOwner != "BurntSushi" || meta.SourceRepo != "ripgrep" {
+		t.Fatalf("metadata source = %s/%s/%s, want github/BurntSushi/ripgrep", meta.SourceType, meta.SourceOwner, meta.SourceRepo)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got := cfg.Tools["ripgrep"].Git; got != "https://github.com/BurntSushi/ripgrep" {
+		t.Fatalf("tool git = %q, want cached source URL persisted", got)
+	}
+}
+
 type cancelingBulkStub struct {
 	bulkCheckingStub
 	cancel context.CancelFunc
