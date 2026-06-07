@@ -741,6 +741,82 @@ func TestSync_RetryFailedRerunsFailedFallback(t *testing.T) {
 	}
 }
 
+func TestSync_RecoversFailedFallbackThroughNativeWhenPackageAvailable(t *testing.T) {
+	ctx := context.Background()
+	apt := &stubProvider{name: "apt", available: true}
+	fallbackExec := executor.NewMatchMock().WithFallback(executor.MockCall{Err: errors.New("unexpected fallback command")})
+	a, cfgPath := newImportApp(t, apt)
+	a.SetFallbackExecutor(fallbackExec)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"rg": {
+				Providers: []config.ToolInstallSpec{{Provider: "apt", Package: "ripgrep"}},
+				Fallback: &config.FallbackSpec{
+					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+					Status: config.FallbackStatusFailed,
+					Commands: config.FallbackCommands{
+						Install: "install rg",
+						Check:   "command -v rg",
+					},
+				},
+			},
+		},
+		Groups: []*config.GroupConfig{{Tools: []config.ToolEntry{{Name: "rg"}}}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	if err := a.DB().UpsertPackageAvailability(ctx, database.PackageAvailability{
+		Name:      "rg",
+		Provider:  "apt",
+		Package:   "ripgrep",
+		Available: true,
+	}); err != nil {
+		t.Fatalf("seed package availability: %v", err)
+	}
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name:          "rg",
+		Provider:      "apt",
+		Package:       "ripgrep",
+		Installed:     true,
+		InstalledWith: "gh",
+		LastChecked:   time.Now(),
+	}); err != nil {
+		t.Fatalf("seed fallback row: %v", err)
+	}
+	if err := a.DB().MarkFailed(ctx, "rg", "apt", "ripgrep", "previous fallback failure"); err != nil {
+		t.Fatalf("seed failed row: %v", err)
+	}
+
+	result, err := a.Sync(ctx, isync.SyncOptions{})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	if fallbackExec.CallCount() != 0 {
+		t.Fatalf("fallback command count = %d, want native recovery without fallback", fallbackExec.CallCount())
+	}
+	if len(apt.installed) != 1 || apt.installed[0].EffectivePackage() != "ripgrep" {
+		t.Fatalf("apt installed = %+v, want native ripgrep install", apt.installed)
+	}
+	if installed := result.Installed(); len(installed) != 1 || installed[0].Tool.Name != "rg" {
+		t.Fatalf("installed ops = %+v, want native install for rg", installed)
+	}
+	cached, err := a.DB().Get(ctx, "rg", "apt", "ripgrep")
+	if err != nil {
+		t.Fatalf("Get rg: %v", err)
+	}
+	if cached.FailedAt != nil || cached.FailureCount != 0 || !cached.Installed || cached.InstalledWith != "apt" {
+		t.Fatalf("cache failure/install state = failed_at:%v count:%d installed:%v with:%q, want cleared installed apt", cached.FailedAt, cached.FailureCount, cached.Installed, cached.InstalledWith)
+	}
+	got, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got.Tools["rg"].Fallback == nil || got.Tools["rg"].Fallback.Status != config.FallbackStatusFailed {
+		t.Fatalf("fallback config = %+v, want failed fallback kept for editing/history", got.Tools["rg"].Fallback)
+	}
+}
+
 func TestInstall_DoesNotRetryFailedFallbackWhenNativePackageUnavailable(t *testing.T) {
 	ctx := context.Background()
 	system := &lifecycleProvider{
