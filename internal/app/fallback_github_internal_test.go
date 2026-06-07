@@ -62,6 +62,19 @@ func TestBestGitHubReleaseAsset_AcceptsPlatformAliases(t *testing.T) {
 	}
 }
 
+func TestBestGitHubReleaseAsset_ReturnsNoMatchWhenNoUsableAssetExists(t *testing.T) {
+	osName := githubOSNames()[0]
+	archName := githubArchNames()[0]
+	asset, ok := bestGitHubReleaseAsset([]githubAsset{
+		{ID: "1", Name: fmt.Sprintf("fd_10.3.0_%s_%s.sha256", osName, archName), BrowserDownloadURL: "https://example.test/fd.sha256"},
+		{ID: "2", Name: fmt.Sprintf("fd_10.3.0_%s_%s.tar.xz", osName, archName), BrowserDownloadURL: "https://example.test/fd.tar.xz"},
+		{ID: "3", Name: fmt.Sprintf("fd_10.3.0_windows_%s.zip", archName), BrowserDownloadURL: "https://example.test/fd-windows.zip"},
+	}, "fd")
+	if ok {
+		t.Fatalf("bestGitHubReleaseAsset returned %+v, want no match", asset)
+	}
+}
+
 func TestGitHubReleaseAssetIgnored(t *testing.T) {
 	tests := []struct {
 		name string
