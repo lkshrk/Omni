@@ -694,6 +694,36 @@ func TestRenderHeader_SettingsModeShowsDotsOff(t *testing.T) {
 	}
 }
 
+func TestRenderSettings_ShowsProviderFamilyRows(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewSettings
+	m.width = 120
+	m.height = 50
+	settings := tuiSettingsWithPriority("brew", "apt")
+	settings.SetEcosystemManager("node", "bun")
+	settings.SetEcosystemManager("python", "uv")
+	settings.DisabledProviders = []string{"python"}
+	m.setSettings(settings)
+
+	out := stripANSIEscapeSequences(renderSettings(m))
+	for _, want := range []string{
+		"System Provider Order",
+		"brew › apt",
+		"Track System",
+		"Track Node",
+		"Track Python",
+		"[OFF]",
+		"Node Manager",
+		"bun",
+		"Python Manager",
+		"uv",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("settings view missing %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestRenderHeaderUsesCachedDotsAvailability(t *testing.T) {
 	t.Run("settings shows dots on when app is enabled despite stale disabled setting", func(t *testing.T) {
 		m := baseModel(nil)
