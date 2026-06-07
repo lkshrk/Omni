@@ -528,6 +528,24 @@ func TestRefreshProviderInstalled_UsesCachedConcreteOwnerMetadata(t *testing.T) 
 	assertRipgrepBrewOwnedByAptMetadata(t, a, cfgPath, ctx)
 }
 
+func TestRefreshProviderInstalled_FallsBackWhenCachedOwnerUnavailable(t *testing.T) {
+	brew := &bulkCheckingStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		bulk:         map[string]string{"ripgrep": "14.2.0"},
+	}
+	apt := &stubProvider{name: "apt", available: false}
+	a, cfgPath := newImportApp(t, brew, apt)
+	ctx := context.Background()
+
+	seedRipgrepBrewWithCachedAptOwner(t, a, cfgPath, ctx)
+
+	if err := a.RefreshProviderInstalled(ctx, "brew"); err != nil {
+		t.Fatalf("RefreshProviderInstalled: %v", err)
+	}
+
+	assertRipgrepBrewCache(t, a, ctx, "brew", "14.2.0")
+}
+
 func cachedOwnerMetadataProviders() (*stubProvider, *metadataCheckingStub) {
 	brew := &stubProvider{name: "brew", available: true}
 	apt := &metadataCheckingStub{
@@ -572,15 +590,21 @@ func seedRipgrepBrewWithCachedAptOwner(t *testing.T, a *app.App, cfgPath string,
 	}
 }
 
-func assertRipgrepBrewOwnedByAptMetadata(t *testing.T, a *app.App, cfgPath string, ctx context.Context) {
+func assertRipgrepBrewCache(t *testing.T, a *app.App, ctx context.Context, owner, version string) *database.ToolCache {
 	t.Helper()
 	got, err := a.DB().Get(ctx, "ripgrep", "brew", "ripgrep")
 	if err != nil {
 		t.Fatalf("Get ripgrep: %v", err)
 	}
-	if !got.Installed || got.InstalledWith != "apt" || got.Version.String != "14.1.1" {
-		t.Fatalf("cache = installed:%v owner:%q version:%q, want true/apt/14.1.1", got.Installed, got.InstalledWith, got.Version.String)
+	if !got.Installed || got.InstalledWith != owner || got.Version.String != version {
+		t.Fatalf("cache = installed:%v owner:%q version:%q, want true/%s/%s", got.Installed, got.InstalledWith, got.Version.String, owner, version)
 	}
+	return got
+}
+
+func assertRipgrepBrewOwnedByAptMetadata(t *testing.T, a *app.App, cfgPath string, ctx context.Context) {
+	t.Helper()
+	got := assertRipgrepBrewCache(t, a, ctx, "apt", "14.1.1")
 	if got.Privilege != string(provider.PrivilegeRequired) || !got.PrivilegeReason.Valid {
 		t.Fatalf("privilege = %q reason:%+v, want required with reason", got.Privilege, got.PrivilegeReason)
 	}

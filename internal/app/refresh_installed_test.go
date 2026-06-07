@@ -590,6 +590,30 @@ func TestRefreshInstalled_UsesCachedConcreteOwnerWhenDifferentFromConfiguredProv
 	a, cfgPath := newImportApp(t, brew, apt)
 	ctx := context.Background()
 
+	seedRipgrepBrewWithCachedAptOwner(t, a, cfgPath, ctx)
+
+	if err := a.RefreshInstalled(ctx, nil); err != nil {
+		t.Fatalf("RefreshInstalled: %v", err)
+	}
+
+	got, err := a.DB().Get(ctx, "ripgrep", "brew", "ripgrep")
+	if err != nil {
+		t.Fatalf("Get ripgrep: %v", err)
+	}
+	if !got.Installed || got.InstalledWith != "apt" || got.Version.String != "14.1.1" {
+		t.Fatalf("cache = installed:%v owner:%q version:%q, want true/apt/14.1.1", got.Installed, got.InstalledWith, got.Version.String)
+	}
+}
+
+func TestRefreshInstalled_FallsBackWhenCachedOwnerUnavailable(t *testing.T) {
+	brew := &bulkCheckingStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		bulk:         map[string]string{"ripgrep": "14.2.0"},
+	}
+	apt := &stubProvider{name: "apt", available: false}
+	a, cfgPath := newImportApp(t, brew, apt)
+	ctx := context.Background()
+
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
 		Groups: []*config.GroupConfig{{
@@ -612,13 +636,7 @@ func TestRefreshInstalled_UsesCachedConcreteOwnerWhenDifferentFromConfiguredProv
 		t.Fatalf("RefreshInstalled: %v", err)
 	}
 
-	got, err := a.DB().Get(ctx, "ripgrep", "brew", "ripgrep")
-	if err != nil {
-		t.Fatalf("Get ripgrep: %v", err)
-	}
-	if !got.Installed || got.InstalledWith != "apt" || got.Version.String != "14.1.1" {
-		t.Fatalf("cache = installed:%v owner:%q version:%q, want true/apt/14.1.1", got.Installed, got.InstalledWith, got.Version.String)
-	}
+	assertRipgrepBrewCache(t, a, ctx, "brew", "14.2.0")
 }
 
 func TestRefreshInstalled_UsesCachedConcreteOwnerMetadata(t *testing.T) {
