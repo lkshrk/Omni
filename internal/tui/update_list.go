@@ -157,18 +157,7 @@ func (m *Model) handleListActionKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		}
 	case key.Matches(msg, m.keys.Confirm):
 		if t := m.selectedTool(); t != nil && !t.Installed {
-			installTool := m.selectedProviderCandidateTool(t)
-			if m.isInstallAndAddCandidate(t) {
-				m.openInstallGroupPicker()
-				break
-			}
-			if m.blockPrivilegedToolAction(installTool, provider.PrivilegeActionInstall) {
-				break
-			}
-			m.loading = true
-			startOp(m, "Installing "+t.Name+"…")
-			m.startRowOperation(t.Name, installTool.Provider, m.statusMsg)
-			cmds = append(cmds, m.spinner.Tick, m.doInstall(t.Name, installTool.Provider))
+			cmds = append(cmds, m.startSelectedToolInstall(t)...)
 		}
 	case key.Matches(msg, m.keys.Search):
 		m.mode = viewSearch
@@ -185,18 +174,7 @@ func (m *Model) handleListActionKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 			break
 		}
 		if t := m.selectedTool(); t != nil && !t.Installed {
-			installTool := m.selectedProviderCandidateTool(t)
-			if m.isInstallAndAddCandidate(t) {
-				m.openInstallGroupPicker()
-			} else {
-				if m.blockPrivilegedToolAction(installTool, provider.PrivilegeActionInstall) {
-					break
-				}
-				m.loading = true
-				startOp(m, "Installing "+t.Name+"…")
-				m.startRowOperation(t.Name, installTool.Provider, m.statusMsg)
-				cmds = append(cmds, m.spinner.Tick, m.doInstall(t.Name, installTool.Provider))
-			}
+			cmds = append(cmds, m.startSelectedToolInstall(t)...)
 		}
 	case key.Matches(msg, m.keys.Delete):
 		if msg.IsRepeat {
@@ -269,6 +247,24 @@ func (m *Model) handleListActionKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	}
 
 	return cmds
+}
+
+func (m *Model) startSelectedToolInstall(t *database.ToolCache) []tea.Cmd {
+	if t == nil || t.Installed {
+		return nil
+	}
+	if m.isInstallAndAddCandidate(t) {
+		m.openInstallGroupPicker()
+		return nil
+	}
+	installTool := m.selectedProviderCandidateTool(t)
+	if m.blockPrivilegedToolAction(installTool, provider.PrivilegeActionInstall) {
+		return nil
+	}
+	m.loading = true
+	startOp(m, "Installing "+t.Name+"…")
+	m.startRowOperation(t.Name, installTool.Provider, m.statusMsg)
+	return []tea.Cmd{m.spinner.Tick, m.doInstall(t.Name, installTool.Provider)}
 }
 
 func (m *Model) handleListConfirmationKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
