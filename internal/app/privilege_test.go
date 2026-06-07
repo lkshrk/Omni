@@ -58,6 +58,14 @@ func TestExternalPrivilegeActionText(t *testing.T) {
 	}
 }
 
+func TestShellJoinQuotesUnsafeCommandParts(t *testing.T) {
+	got := shellJoin([]string{"apt-get", "install", "-y", "safe_pkg", "name with spaces", "owner's-tool", ""})
+	want := "apt-get install -y safe_pkg 'name with spaces' 'owner'\\''s-tool' ''"
+	if got != want {
+		t.Fatalf("shellJoin = %q, want %q", got, want)
+	}
+}
+
 func TestPrivilegedToolCommand_BrewCaskActions(t *testing.T) {
 	a := newPrivilegeCommandTestApp(brew.New(nil))
 	plan := provider.PrivilegePlan{
