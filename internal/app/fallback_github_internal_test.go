@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/config"
@@ -114,6 +115,21 @@ func TestGitHubFallbackHasSavedReleaseMetadata(t *testing.T) {
 	wrongSource.Source.Type = ""
 	if githubFallbackHasSavedReleaseMetadata(&wrongSource) {
 		t.Fatal("githubFallbackHasSavedReleaseMetadata accepted non-GitHub source")
+	}
+}
+
+func TestGitHubReleaseAssetInstallCommandUsesAssetBasename(t *testing.T) {
+	got := githubReleaseAssetInstallCommand("https://github.com/cli/cli/releases/download/v2.93.0/gh_2.93.0_macOS_arm64.zip")
+	if !strings.Contains(got, `asset="{{cache_dir}}/gh_2.93.0_macOS_arm64.zip"`) {
+		t.Fatalf("install command = %q, want cache asset basename from download URL", got)
+	}
+	if !strings.Contains(got, `curl -fsSL "https://github.com/cli/cli/releases/download/v2.93.0/gh_2.93.0_macOS_arm64.zip"`) {
+		t.Fatalf("install command = %q, want curl against download URL", got)
+	}
+
+	fallback := githubReleaseAssetInstallCommand("")
+	if !strings.Contains(fallback, `asset="{{cache_dir}}/{{asset_path}}"`) {
+		t.Fatalf("fallback install command = %q, want asset_path placeholder", fallback)
 	}
 }
 
