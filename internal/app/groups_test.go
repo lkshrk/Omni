@@ -161,6 +161,24 @@ func TestAdd_ToBaseGroup(t *testing.T) {
 	}
 }
 
+func TestAdd_RecordsTapQualifiedPackageForBrewInstallWith(t *testing.T) {
+	stub := &stubProvider{name: "brew", available: true}
+	a, cfgPath := newImportApp(t, stub)
+
+	if err := a.Add(context.Background(), "system", "hashicorp/tap/terraform", "terraform", "work", "brew"); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	updated, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	spec := updated.Tools["terraform"]
+	if len(spec.Taps) != 1 || spec.Taps[0] != "hashicorp/tap" {
+		t.Fatalf("terraform taps = %v, want [hashicorp/tap]", spec.Taps)
+	}
+}
+
 func TestAdd_ToNamedGroup(t *testing.T) {
 	stub := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, stub)
