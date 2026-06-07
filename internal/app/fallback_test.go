@@ -675,6 +675,9 @@ func TestSync_UsesFallbackRecipeSavedFromGitHubSpec(t *testing.T) {
 	if fallback == nil || fallback.Status != config.FallbackStatusVerified {
 		t.Fatalf("fallback = %+v, want verified saved editor recipe", fallback)
 	}
+	if fallback.Source.Owner != "BurntSushi" || fallback.Source.Repo != "ripgrep" || fallback.Source.URL != "https://github.com/BurntSushi/ripgrep" {
+		t.Fatalf("fallback source = %+v, want materialized GitHub source", fallback.Source)
+	}
 }
 
 func TestSync_DryRunPlansFallbackWhenNativePackageUnavailable(t *testing.T) {
