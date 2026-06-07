@@ -1459,6 +1459,52 @@ func TestInstallHighConfidenceProviderMatches_AddsAllHighAndInstallsPriority(t *
 	}
 }
 
+func TestInstallHighConfidenceProviderMatchesWithState_ReturnsUpdatedToolsAndGroups(t *testing.T) {
+	brew := &searchStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		results: []provider.SearchResult{{
+			Name:     "prettier",
+			Provider: "brew",
+		}},
+	}
+	npm := &searchStub{
+		stubProvider: stubProvider{name: "npm", available: true},
+		results: []provider.SearchResult{{
+			Name:     "prettier",
+			Provider: "npm",
+		}},
+	}
+	a, cfgPath := newImportApp(t, brew, npm)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Version:  config.CurrentVersion,
+		Settings: config.Settings{ProviderPriority: []string{"npm", "brew"}},
+		Tools: map[string]config.ToolSpec{
+			"prettier": {},
+		},
+		Groups: []*config.GroupConfig{{Name: "web", Tools: []config.ToolEntry{{Name: "prettier"}}}},
+	}); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	result, err := a.InstallHighConfidenceProviderMatchesWithState(context.Background(), "prettier", "")
+	if err != nil {
+		t.Fatalf("InstallHighConfidenceProviderMatchesWithState: %v", err)
+	}
+	if result.State == nil {
+		t.Fatal("State = nil, want updated tool group state")
+	}
+	if len(result.Tools) != 1 || result.Tools[0].Name != "prettier" || result.Tools[0].Provider != "npm" || !result.Tools[0].Installed {
+		t.Fatalf("Tools = %+v, want installed prettier/npm", result.Tools)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if providers := cfg.Tools["prettier"].Providers; len(providers) != 2 || providers[0].Provider != "npm" || providers[1].Provider != "brew" {
+		t.Fatalf("providers = %+v, want priority order npm, brew", providers)
+	}
+}
+
 func TestInstallHighConfidenceProviderMatches_AddsConcreteProviderBreadth(t *testing.T) {
 	providerNames := []string{"apk", "apt", "dnf", "pacman", "zypper", "pip"}
 	providers := make([]provider.Provider, 0, len(providerNames))
