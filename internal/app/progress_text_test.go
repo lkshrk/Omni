@@ -42,6 +42,26 @@ func TestRefreshToolsStatus(t *testing.T) {
 	}
 }
 
+func TestProgressNormalization(t *testing.T) {
+	progressIndex, progressTotal := normalizedProgress(-1, 0)
+	if progressIndex != 0 || progressTotal != 0 {
+		t.Fatalf("normalizedProgress(-1, 0) = %d/%d, want 0/0", progressIndex, progressTotal)
+	}
+	progressIndex, progressTotal = normalizedProgress(3, 0)
+	if progressIndex != 3 || progressTotal != 3 {
+		t.Fatalf("normalizedProgress(3, 0) = %d/%d, want 3/3", progressIndex, progressTotal)
+	}
+
+	done, total := normalizedDoneTotal(-1, -2)
+	if done != 0 || total != 0 {
+		t.Fatalf("normalizedDoneTotal(-1, -2) = %d/%d, want 0/0", done, total)
+	}
+	done, total = normalizedDoneTotal(5, 3)
+	if done != 3 || total != 3 {
+		t.Fatalf("normalizedDoneTotal(5, 3) = %d/%d, want 3/3", done, total)
+	}
+}
+
 func TestRefreshProviderScanLabels(t *testing.T) {
 	labels := RefreshProviderScanLabels(
 		map[string]bool{"node": true, "system": true, "": true},
