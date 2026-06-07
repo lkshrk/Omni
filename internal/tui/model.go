@@ -261,16 +261,17 @@ type Model struct {
 	consolidateOptions   []app.EcosystemMigration // cached at load time; registry lookup, no IO
 
 	// group subtabs — used by group picker (move tool to group), not for list filtering
-	groupNames             []string          // ordered reusable group names
-	toolGroups             map[string]string // "name\x00provider" → group name
-	toolMemberships        map[string][]string
-	ignoreLabels           map[string]string // logical tool name → compact ignore source label
-	toolIgnoreSet          map[string]bool
-	groupIgnoreSet         map[string]map[string]bool
-	toolProviderPins       map[string]string
-	toolProviderCandidates map[string][]config.ToolInstallSpec
-	toolFallbacks          map[string]config.FallbackSpec
-	toolGit                map[string]string
+	groupNames              []string          // ordered reusable group names
+	toolGroups              map[string]string // "name\x00provider" → group name
+	toolMemberships         map[string][]string
+	ignoreLabels            map[string]string // logical tool name → compact ignore source label
+	toolIgnoreSet           map[string]bool
+	groupIgnoreSet          map[string]map[string]bool
+	toolProviderPins        map[string]string
+	toolProviderCandidates  map[string][]config.ToolInstallSpec
+	providerCandidateCursor int
+	toolFallbacks           map[string]config.FallbackSpec
+	toolGit                 map[string]string
 
 	// provider filter — [All] [system] [node] [python] …
 	providerNames  []string // ordered ecosystem provider names from the app/provider registry
@@ -786,15 +787,15 @@ func (m Model) ecosystemProviderNames() []string {
 func (m *Model) clampToolCursor() {
 	if len(m.visibleTools) == 0 {
 		m.cursor = 0
+		m.providerCandidateCursor = 0
 		return
 	}
 	if m.cursor < 0 {
 		m.cursor = 0
-		return
-	}
-	if m.cursor >= len(m.visibleTools) {
+	} else if m.cursor >= len(m.visibleTools) {
 		m.cursor = len(m.visibleTools) - 1
 	}
+	m.clampProviderCandidateCursor()
 }
 
 // sectionOf is context-free; prefer displaySection when model state is available.
@@ -861,6 +862,49 @@ func (m *Model) selectedTool() *database.ToolCache {
 		return nil
 	}
 	return m.visibleTools[m.cursor]
+}
+
+func (m *Model) selectedProviderCandidateTool(t *database.ToolCache) *database.ToolCache {
+	candidates := providerCandidateOptions(*m, t)
+	if len(candidates) == 0 {
+		return t
+	}
+	idx := clampIndex(m.providerCandidateCursor, len(candidates))
+	candidate := candidates[idx]
+	out := *t
+	out.Provider = candidate.Provider
+	out.Package = candidate.EffectivePackage(t.Name)
+	return &out
+}
+
+func (m *Model) clampProviderCandidateCursor() {
+	count := len(providerCandidateOptions(*m, m.selectedTool()))
+	if count == 0 {
+		m.providerCandidateCursor = 0
+		return
+	}
+	m.providerCandidateCursor = clampIndex(m.providerCandidateCursor, count)
+}
+
+func providerCandidateOptions(m Model, t *database.ToolCache) []config.ToolInstallSpec {
+	if t == nil || t.Installed || !t.Tracked {
+		return nil
+	}
+	candidates := m.toolProviderCandidates[t.Name]
+	if len(candidates) < 2 {
+		return nil
+	}
+	out := make([]config.ToolInstallSpec, 0, len(candidates))
+	for _, candidate := range candidates {
+		if strings.TrimSpace(candidate.Provider) == "" {
+			continue
+		}
+		out = append(out, candidate)
+	}
+	if len(out) < 2 {
+		return nil
+	}
+	return out
 }
 
 // countSection returns the number of visible tools in a given section.

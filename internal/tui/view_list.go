@@ -984,33 +984,28 @@ func providerMismatchDetailLine(m Model, t *database.ToolCache, prefix string) s
 }
 
 func providerCandidateDetailLines(m Model, t *database.ToolCache, prefix string, wrapWidth int) []string {
-	if t == nil || t.Installed || !t.Tracked {
+	candidates := providerCandidateOptions(m, t)
+	if len(candidates) == 0 {
 		return nil
 	}
-	candidates := m.toolProviderCandidates[t.Name]
-	if len(candidates) < 2 {
-		return nil
-	}
-	labels := make([]string, 0, len(candidates))
-	for _, candidate := range candidates {
+	p := m.palette
+	lines := []string{prefix + p.styleHelp.Render("available providers:")}
+	selected := clampIndex(m.providerCandidateCursor, len(candidates))
+	for i, candidate := range candidates {
 		provider := strings.TrimSpace(candidate.Provider)
-		if provider == "" {
-			continue
-		}
 		pkg := strings.TrimSpace(candidate.EffectivePackage(t.Name))
 		if pkg == "" {
 			pkg = t.Name
 		}
-		labels = append(labels, provider+"/"+pkg)
-	}
-	if len(labels) < 2 {
-		return nil
-	}
-	textLine := "available providers: " + strings.Join(labels, ", ")
-	wrapped := text.WrapText(textLine, wrapWidth)
-	lines := make([]string, 0, len(wrapped))
-	for _, line := range wrapped {
-		lines = append(lines, prefix+m.palette.styleHelp.Render(line))
+		marker := "  "
+		style := p.styleHelp
+		if i == selected {
+			marker = "› "
+			style = p.styleStatus
+		}
+		for _, line := range text.WrapText(marker+provider+"/"+pkg, wrapWidth) {
+			lines = append(lines, prefix+style.Render(line))
+		}
 	}
 	return lines
 }

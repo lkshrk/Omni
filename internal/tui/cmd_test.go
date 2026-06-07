@@ -78,6 +78,16 @@ func (p *searchOKProvider) Search(_ context.Context, _ string) ([]provider.Searc
 	return p.results, nil
 }
 
+type installRecordingProvider struct {
+	okProvider
+	installed []provider.Tool
+}
+
+func (p *installRecordingProvider) Install(_ context.Context, tool provider.Tool) error {
+	p.installed = append(p.installed, tool)
+	return nil
+}
+
 type privilegedOKProvider struct {
 	okProvider
 	plan provider.PrivilegePlan
@@ -401,6 +411,62 @@ func TestDoInstall_ConfiguredEmptyToolAddsHighConfidenceProviderMatch(t *testing
 	}
 	if len(got.tools) != 1 || got.tools[0].Provider != "brew" || !got.tools[0].Installed {
 		t.Fatalf("tools = %+v, want installed brew row", got.tools)
+	}
+}
+
+func TestHandleListActionInstallUsesSelectedProviderCandidate(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "settings.json")
+	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
+		Version: config.CurrentVersion,
+		Tools: map[string]config.ToolSpec{
+			"prettier": {
+				Providers: []config.ToolInstallSpec{
+					{Provider: "npm", Package: "prettier"},
+					{Provider: "brew", Package: "prettier"},
+				},
+			},
+		},
+		Groups: []*config.GroupConfig{tuiTestHostGroup("prettier")},
+	}); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	npm := &installRecordingProvider{okProvider: okProvider{name: "npm"}}
+	brew := &installRecordingProvider{okProvider: okProvider{name: "brew"}}
+	a := app.New(cfgPath)
+	a.CacheDir = dir
+	if err := a.InitTestMode(context.Background(), npm, brew); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	m := modelForCmds(a)
+	m.allTools = []*database.ToolCache{{Name: "prettier", Provider: "", Installed: false, Tracked: true}}
+	m.toolProviderCandidates = map[string][]config.ToolInstallSpec{
+		"prettier": {
+			{Provider: "npm", Package: "prettier"},
+			{Provider: "brew", Package: "prettier"},
+		},
+	}
+	m.providerCandidateCursor = 1
+	m.applyFilter()
+
+	cmds := m.handleListActionKeyMsg(pressRune('i').(tea.KeyPressMsg))
+	if len(cmds) == 0 {
+		t.Fatal("install action returned no commands")
+	}
+	done, ok := opCompleteFromCmd(cmds[len(cmds)-1])
+	if !ok {
+		t.Fatalf("expected opCompleteMsg from install command")
+	}
+	if done.err != nil {
+		t.Fatalf("unexpected install error: %v", done.err)
+	}
+	if len(npm.installed) != 0 {
+		t.Fatalf("npm installs = %+v, want none", npm.installed)
+	}
+	if len(brew.installed) != 1 || brew.installed[0].Name != "prettier" {
+		t.Fatalf("brew installs = %+v, want prettier", brew.installed)
 	}
 }
 
