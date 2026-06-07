@@ -1459,6 +1459,63 @@ func TestInstallHighConfidenceProviderMatches_AddsAllHighAndInstallsPriority(t *
 	}
 }
 
+func TestInstallHighConfidenceProviderMatches_AddsConcreteProviderBreadth(t *testing.T) {
+	providerNames := []string{"apk", "apt", "dnf", "pacman", "zypper", "pip"}
+	providers := make([]provider.Provider, 0, len(providerNames))
+	for _, providerName := range providerNames {
+		providers = append(providers, &searchStub{
+			stubProvider: stubProvider{name: providerName, available: true},
+			results: []provider.SearchResult{{
+				Name:     "ripgrep",
+				Provider: providerName,
+			}},
+		})
+	}
+	a, cfgPath := newImportApp(t, providers...)
+	priority := []string{"apt", "dnf", "pacman", "zypper", "apk", "pip"}
+	if err := a.SaveSettings(context.Background(), config.Settings{ProviderPriority: priority}); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Version:  config.CurrentVersion,
+		Settings: config.Settings{ProviderPriority: priority},
+		Tools: map[string]config.ToolSpec{
+			"ripgrep": {},
+		},
+		Groups: []*config.GroupConfig{{Name: "base", Tools: []config.ToolEntry{{Name: "ripgrep"}}}},
+	}); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	result, err := a.InstallHighConfidenceProviderMatches(context.Background(), "ripgrep", "")
+	if err != nil {
+		t.Fatalf("InstallHighConfidenceProviderMatches: %v", err)
+	}
+	if result.Installed.Provider != "apt" {
+		t.Fatalf("installed = %+v, want apt priority winner", result.Installed)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	gotProviders := cfg.Tools["ripgrep"].Providers
+	if len(gotProviders) != len(priority) {
+		t.Fatalf("providers = %+v, want %d concrete providers", gotProviders, len(priority))
+	}
+	for i, want := range priority {
+		if gotProviders[i].Provider != want || gotProviders[i].Package != "ripgrep" {
+			t.Fatalf("providers = %+v, want priority[%d]=%s/ripgrep", gotProviders, i, want)
+		}
+	}
+	tools, err := a.ListTools(context.Background(), "")
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(tools) != 1 || tools[0].Provider != "apt" || !tools[0].Installed {
+		t.Fatalf("tools = %+v, want installed apt row", tools)
+	}
+}
+
 func TestSync_ConfiguredToolAutoAddsHighConfidenceProviderMatches(t *testing.T) {
 	brew := &searchStub{
 		stubProvider: stubProvider{name: "brew", available: true},
