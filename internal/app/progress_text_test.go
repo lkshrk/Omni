@@ -584,6 +584,25 @@ func TestUpgradeAllFailureRowsAndSummaryText(t *testing.T) {
 	}
 }
 
+func TestUpgradeAllSummaryLines(t *testing.T) {
+	got := UpgradeAllSummaryLines(&UpgradeAllResult{
+		Upgraded:    []string{"ripgrep"},
+		Quarantined: []QuarantinedUpdate{{Name: "bat"}, {Name: "fd"}},
+		Failures:    []BulkToolError{{Name: "vim", Provider: "system", Message: "network failed"}},
+	})
+	want := []string{
+		"1 tool upgraded.",
+		"2 updates quarantined.",
+		"1 tool failed.",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("UpgradeAllSummaryLines = %v, want %v", got, want)
+	}
+	if got := UpgradeAllSummaryLines(nil); len(got) != 0 {
+		t.Fatalf("nil UpgradeAllSummaryLines = %v, want empty", got)
+	}
+}
+
 func TestSyncAllFailureRowsMergesDirectAndSyncFailures(t *testing.T) {
 	rows := SyncAllFailureRows(&SyncAllResult{
 		Failures: []BulkToolError{
