@@ -833,13 +833,14 @@ func TestRefreshProviderInstalled_UnavailableProvider(t *testing.T) {
 		t.Fatalf("RefreshProviderInstalled unavailable: %v", err)
 	}
 
-	// Provider unavailable — tool should not be in the DB (never upserted).
+	// Provider unavailable — config-led row may show but must be not-installed
+	// since nothing was upserted.
 	tools, err := a.ListTools(context.Background(), "")
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	if len(tools) != 0 {
-		t.Errorf("got %d tools in DB, want 0 (provider unavailable)", len(tools))
+	if anyToolInstalled(tools) {
+		t.Errorf("tools = %+v, want none installed (provider unavailable)", tools)
 	}
 }
 

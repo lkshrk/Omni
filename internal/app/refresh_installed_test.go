@@ -450,13 +450,14 @@ func TestRefreshInstalled_UnavailableProvider_SkipsTool(t *testing.T) {
 		t.Fatalf("RefreshInstalled: %v", err)
 	}
 
-	// Tool should not appear in DB (never upserted).
+	// Provider unavailable: the config-led row still shows (not vanished), but
+	// it must be not-installed since nothing was upserted.
 	tools, err := a.ListTools(context.Background(), "")
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	if len(tools) != 0 {
-		t.Errorf("got %d tools in DB, want 0 (provider unavailable → skipped)", len(tools))
+	if anyToolInstalled(tools) {
+		t.Errorf("tools = %+v, want none installed (provider unavailable → skipped)", tools)
 	}
 }
 

@@ -1328,10 +1328,59 @@ func (a *App) listToolsFromConfig(ctx context.Context, cfg *config.RootConfig, p
 	if cfg == nil {
 		return tools, nil
 	}
+	// Names with any raw cache row (even those filtered out below by scope) must
+	// not be re-synthesized as config-led rows; only tools with no cache state at
+	// all get a synthesized not-installed row.
+	cachedNames := make(map[string]struct{}, len(tools))
+	for _, tc := range tools {
+		if tc != nil {
+			cachedNames[tc.Name] = struct{}{}
+		}
+	}
 	configured, authoritative := a.configuredToolCacheKeys(ctx, cfg)
 	scope := a.discoveryProviderScope(ctx, cfg, ecosystemProviders)
 	tools = filterToolCachesByConfigAndScope(tools, configured, authoritative, scope)
-	return filterIgnoredToolCaches(tools, ignoredToolSet(cfg)), nil
+	tools = filterIgnoredToolCaches(tools, ignoredToolSet(cfg))
+	return a.appendConfigLedRows(ctx, cfg, tools, cachedNames), nil
+}
+
+// appendConfigLedRows makes the tool list config-led: every resolved configured
+// tool appears even when it has no cache row yet (not refreshed, or unresolved
+// empty-provider tool). Such tools are synthesized as not-installed rows so they
+// surface as "needs sync" instead of silently vanishing from list and TUI.
+func (a *App) appendConfigLedRows(ctx context.Context, cfg *config.RootConfig, tools []*database.ToolCache, cachedNames map[string]struct{}) []*database.ToolCache {
+	// Dedup by logical tool name: a tool may be installed under a non-winner
+	// provider while config resolves it to a different priority winner, so a
+	// name already represented by any cache row must not be re-synthesized.
+	present := make(map[string]struct{}, len(tools)+len(cachedNames))
+	for name := range cachedNames {
+		present[name] = struct{}{}
+	}
+	for _, tc := range tools {
+		if tc == nil {
+			continue
+		}
+		present[tc.Name] = struct{}{}
+	}
+	groups, _ := a.currentToolGroupsWithAuthority(cfg)
+	entries, _ := a.resolvedToolEntries(ctx, cfg, groups)
+	ignored := ignoredToolSet(cfg)
+	for _, e := range entries {
+		if toolNameIgnored(ignored, e.Name) {
+			continue
+		}
+		if _, ok := present[e.Name]; ok {
+			continue
+		}
+		present[e.Name] = struct{}{}
+		tools = append(tools, &database.ToolCache{
+			Name:     e.Name,
+			Provider: e.Provider,
+			Package:  e.EffectivePackage(),
+			Tracked:  true,
+		})
+	}
+	return tools
 }
 
 func (a *App) configuredToolCacheKeys(ctx context.Context, cfg *config.RootConfig) (map[string]struct{}, bool) {
