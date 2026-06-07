@@ -1267,7 +1267,7 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 			})
 		}
 	}
-	return discovered
+	return collapseSharedStoreDuplicates(discovered, ecosystemProviders)
 }
 
 // ListDiscovered returns all tool entries that are installed locally but not
@@ -1563,6 +1563,43 @@ func filterToolCachesByConfigAndScope(tools []*database.ToolCache, configured ma
 
 func discoveredToolAllowed(tool *database.ToolCache, scope discoveryScope) bool {
 	return tool != nil && tool.Installed && scope.allowsDiscovered(tool.Provider, tool.InstalledWith)
+}
+
+// ecosystemSharesGlobalStore reports whether an ecosystem's managers install
+// into a shared global store, so the same package is reported by every manager.
+// Node (bun/pnpm/npm) and Python (uv/pip) share a store; system PMs do not.
+func ecosystemSharesGlobalStore(ecosystem string) bool {
+	return ecosystem == provider.EcosystemNode || ecosystem == provider.EcosystemPython
+}
+
+// collapseSharedStoreDuplicates reduces discovered upserts that resolve to the
+// same shared-store ecosystem and tool name down to a single entry. Because
+// node/python managers share a global store, discovery probes each manager and
+// reports the same globally-installed package once per manager — without this,
+// one package yields one row per manager (e.g. node(bun!)/node(npm!)/node(pnpm!)).
+// The surviving row prefers the ecosystem's effective manager so the tool is
+// shown under the single PM it is actually managed by; otherwise the first
+// reported entry wins.
+func collapseSharedStoreDuplicates(discovered []database.DiscoveredUpsert, effective map[string]string) []database.DiscoveredUpsert {
+	out := discovered[:0]
+	idx := make(map[string]int)
+	for _, d := range discovered {
+		ecosystem, ok := provider.BuiltinEcosystemFor(d.InstalledWith)
+		if !ok || !ecosystemSharesGlobalStore(ecosystem) {
+			out = append(out, d)
+			continue
+		}
+		key := ecosystem + "\x00" + strings.ToLower(d.Name)
+		if i, seen := idx[key]; seen {
+			if d.InstalledWith == effective[ecosystem] && out[i].InstalledWith != effective[ecosystem] {
+				out[i] = d
+			}
+			continue
+		}
+		idx[key] = len(out)
+		out = append(out, d)
+	}
+	return out
 }
 
 func reverseEcosystemProviders(ecosystemProviders map[string]string) map[string]string {
