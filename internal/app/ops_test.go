@@ -1665,6 +1665,91 @@ func TestInstallHighConfidenceProviderMatches_IgnoresWeakMatches(t *testing.T) {
 	}
 }
 
+func TestInstallProviderMatches_AllowWeakInstallsPriorityWeakMatch(t *testing.T) {
+	npm := &searchStub{
+		stubProvider: stubProvider{name: "npm", available: true},
+		results: []provider.SearchResult{{
+			Name:     "prettier-plugin-tailwindcss",
+			Provider: "npm",
+		}},
+	}
+	a, cfgPath := newImportApp(t, npm)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Version: config.CurrentVersion,
+		Tools: map[string]config.ToolSpec{
+			"prettier": {},
+		},
+		Groups: []*config.GroupConfig{{Name: "web", Tools: []config.ToolEntry{{Name: "prettier"}}}},
+	}); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	result, err := a.InstallProviderMatches(context.Background(), "prettier", "", app.ProviderMatchOptions{AllowWeak: true})
+	if err != nil {
+		t.Fatalf("InstallProviderMatches: %v", err)
+	}
+	if result.Installed.Provider != "npm" || result.Installed.Package != "prettier-plugin-tailwindcss" {
+		t.Fatalf("installed = %+v, want npm/prettier-plugin-tailwindcss", result.Installed)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	providers := cfg.Tools["prettier"].Providers
+	if len(providers) != 1 || providers[0].Provider != "npm" || providers[0].Package != "prettier-plugin-tailwindcss" {
+		t.Fatalf("providers = %+v, want weak npm match saved", providers)
+	}
+	tools, err := a.ListTools(context.Background(), "")
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(tools) != 1 || tools[0].Provider != "npm" || tools[0].Package != "prettier-plugin-tailwindcss" || !tools[0].Installed {
+		t.Fatalf("tools = %+v, want installed weak npm row", tools)
+	}
+}
+
+func TestSync_AllowWeakProviderMatches(t *testing.T) {
+	npm := &searchStub{
+		stubProvider: stubProvider{name: "npm", available: true},
+		results: []provider.SearchResult{{
+			Name:     "prettier-plugin-tailwindcss",
+			Provider: "npm",
+		}},
+	}
+	a, cfgPath := newImportApp(t, npm)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Version: config.CurrentVersion,
+		Tools: map[string]config.ToolSpec{
+			"prettier": {},
+		},
+		Hosts: map[string][]string{"testhost": {}},
+		Groups: []*config.GroupConfig{{
+			Name:    "testhost",
+			Special: "host",
+			Tools:   []config.ToolEntry{{Name: "prettier"}},
+		}},
+	}); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+
+	result, err := a.Sync(context.Background(), syncprogress.SyncOptions{AllowWeak: true})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if installed := result.Installed(); len(installed) != 1 || installed[0].Tool.Provider != "npm" || installed[0].Tool.Package != "prettier-plugin-tailwindcss" {
+		t.Fatalf("installed = %+v, want weak npm package install", installed)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	providers := cfg.Tools["prettier"].Providers
+	if len(providers) != 1 || providers[0].Provider != "npm" || providers[0].Package != "prettier-plugin-tailwindcss" {
+		t.Fatalf("providers = %+v, want weak npm match saved", providers)
+	}
+}
+
 func TestInstallHighConfidenceProviderMatches_SkipsFallbackOnlyTool(t *testing.T) {
 	npm := &searchStub{
 		stubProvider: stubProvider{name: "npm", available: true},

@@ -91,6 +91,11 @@ whether an import into the machine group runs after the group sync.
 Use `tools install <tool>` for a single explicit install. Use `tools sync` when
 you want the active host's configured desired state applied.
 
+If a configured tool has no provider entries, explicit install/sync can search
+enabled providers and save high-confidence matches automatically. Weak matches
+are skipped unless you pass `--allow-weak`, which saves and installs the best
+weak provider match by provider priority.
+
 ## Fallbacks
 
 Fallbacks let a configured tool install from GitHub when its native provider

@@ -62,6 +62,9 @@ type SyncOptions struct { //nolint:revive // name is intentional for clarity in 
 	// SkipPrivileged records privileged package-manager actions as failures
 	// without executing them.
 	SkipPrivileged bool
+	// AllowWeak permits explicit sync flows to apply the best weak provider
+	// discovery match when no high-confidence match exists.
+	AllowWeak bool
 }
 
 type ProgressEvent struct {
