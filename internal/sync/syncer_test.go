@@ -487,6 +487,32 @@ func TestSync_ProviderFilterIncludesInstallWithConcreteProvider(t *testing.T) {
 	}
 }
 
+func TestSync_ProviderFilterIncludesConcreteProviderInFamily(t *testing.T) {
+	ctx := context.Background()
+	brew := &mockProvider{name: "brew", available: true, isInstalled: map[string]bool{"ripgrep": false}, versions: map[string]string{}}
+	pip := &mockProvider{name: "pip", available: true, isInstalled: map[string]bool{"black": false}, versions: map[string]string{}}
+
+	reg := provider.NewRegistry()
+	reg.RegisterWithMetadata(brew, provider.BuiltinMetadata("brew"))
+	reg.RegisterWithMetadata(pip, provider.BuiltinMetadata("pip"))
+
+	db := newDB(t)
+	s := syncer.New(reg, db)
+
+	_, err := s.Sync(ctx,
+		cfg(entry("ripgrep", "brew"), entry("black", "pip")),
+		syncer.SyncOptions{Provider: "system"})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if len(brew.installed) != 1 || brew.installed[0] != "ripgrep" {
+		t.Fatalf("brew installed = %v, want [ripgrep]", brew.installed)
+	}
+	if len(pip.installed) != 0 {
+		t.Fatalf("pip installed = %v, want no installs", pip.installed)
+	}
+}
+
 func TestSync_ProviderFilterIncludesResolvedConcreteProvider(t *testing.T) {
 	ctx := context.Background()
 	system := &concreteResolverProvider{
