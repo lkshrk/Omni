@@ -47,7 +47,15 @@ bootstrap or host assignment:
 					promptSatisfiedGroupsAfterInstall(cmd, state)
 					return nil
 				}
-				if !errors.Is(err, app.ErrProviderDiscoveryNotConfigured) && !errors.Is(err, app.ErrProviderDiscoveryAlreadyConfigured) {
+				if errors.Is(err, app.ErrProviderDiscoveryAlreadyConfigured) {
+					if err := state.app.Install(cmd.Context(), name, ""); err != nil {
+						return err
+					}
+					printInstallResult(cmd, state, name, "")
+					promptSatisfiedGroupsAfterInstall(cmd, state)
+					return nil
+				}
+				if !errors.Is(err, app.ErrProviderDiscoveryNotConfigured) {
 					return err
 				}
 				resolved, err := state.app.DefaultInstallProvider(cmd.Context())
@@ -60,7 +68,7 @@ bootstrap or host assignment:
 			if err := state.app.Install(cmd.Context(), name, providerName); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmdOut(cmd), "✓ installed %s (%s)\n", name, providerName)
+			printInstallResult(cmd, state, name, providerName)
 
 			// After each install, check if any unselected reusable group is now
 			// fully satisfied and offer to add it to the active host.
@@ -75,6 +83,30 @@ bootstrap or host assignment:
 	cmd.ValidArgsFunction = completeToolNames(state)
 	_ = cmd.RegisterFlagCompletionFunc("group", completeGroupNames(state))
 	return cmd
+}
+
+func printInstallResult(cmd *cobra.Command, state *rootState, name, providerName string) {
+	if providerName == "" {
+		providerName = installedProviderLabel(cmd, state, name)
+	}
+	if providerName == "" {
+		fmt.Fprintf(cmdOut(cmd), "✓ installed %s\n", name)
+		return
+	}
+	fmt.Fprintf(cmdOut(cmd), "✓ installed %s (%s)\n", name, providerName)
+}
+
+func installedProviderLabel(cmd *cobra.Command, state *rootState, name string) string {
+	tools, err := state.app.ListTools(cmd.Context(), "")
+	if err != nil {
+		return ""
+	}
+	for _, tool := range tools {
+		if tool.Name == name && tool.Installed {
+			return tool.Provider
+		}
+	}
+	return ""
 }
 
 func printProviderMatchInstallResult(out io.Writer, name string, result *app.ProviderMatchInstallResult) {
