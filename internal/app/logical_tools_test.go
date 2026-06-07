@@ -113,6 +113,44 @@ func TestSetTool_PreservesToolMetadataWhenPromotingProvider(t *testing.T) {
 	}
 }
 
+func TestSetToolDefaultInstallSpec_PromotesProviderWithoutChangingHostOverride(t *testing.T) {
+	a, cfgPath := newImportApp(t)
+
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"black": {
+				Providers: []config.ToolInstallSpec{
+					{Provider: "pip", Package: "black"},
+					{Provider: "uv", Package: "black"},
+				},
+				Hosts: map[string]config.ToolInstallSpec{
+					"workstation": {Provider: "pip", Package: "black"},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	if err := a.SetToolDefaultInstallSpec("black", "uv", "black", ""); err != nil {
+		t.Fatalf("SetToolDefaultInstallSpec: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	spec := cfg.Tools["black"]
+	wantProviders := []config.ToolInstallSpec{{Provider: "uv", Package: "black"}, {Provider: "pip", Package: "black"}}
+	if !reflect.DeepEqual(spec.Providers, wantProviders) {
+		t.Fatalf("providers = %+v, want %+v", spec.Providers, wantProviders)
+	}
+	wantHost := config.ToolInstallSpec{Provider: "pip", Package: "black"}
+	if !reflect.DeepEqual(spec.Hosts["workstation"], wantHost) {
+		t.Fatalf("host override = %+v, want %+v", spec.Hosts["workstation"], wantHost)
+	}
+}
+
 func TestSetTool_RejectsMissingProvider(t *testing.T) {
 	a, _ := newImportApp(t)
 

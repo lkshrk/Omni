@@ -633,7 +633,7 @@ func (a *App) setToolInstallSpec(name, host, providerName, packageName, installW
 			}
 			spec.Hosts[host] = entry
 		} else {
-			setToolProviderCandidate(&spec, entry)
+			setDefaultToolProviderCandidate(&spec, entry)
 		}
 		cfg.Tools[name] = spec
 		return nil
