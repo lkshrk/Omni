@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -378,6 +379,32 @@ func TestToolMembershipMap_ReturnsSingleOwnerMembership(t *testing.T) {
 	want := "work"
 	if strings.Join(memberships, ",") != want {
 		t.Fatalf("memberships = %v, want [%s]", memberships, want)
+	}
+}
+
+func TestToolGroupMapReturnsFirstMembership(t *testing.T) {
+	a, cfgPath := newImportApp(t)
+	rootCfg := &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew"), logicalTool("fd", "brew")),
+		Groups: []*config.GroupConfig{
+			{Name: "alpha", Tools: groupTools("ripgrep")},
+			{Name: "work", Tools: groupTools("fd")},
+		},
+	}
+	if err := saveAppConfig(t, cfgPath, rootCfg); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	got, err := a.ToolGroupMap(context.Background())
+	if err != nil {
+		t.Fatalf("ToolGroupMap: %v", err)
+	}
+	want := map[string]string{
+		"fd\x00brew":      "work",
+		"ripgrep\x00brew": "alpha",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ToolGroupMap = %v, want %v", got, want)
 	}
 }
 
