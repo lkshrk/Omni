@@ -64,6 +64,38 @@ func TestRefreshProviderScanProviderNamesFromCountsDropsEmptyProviders(t *testin
 	}
 }
 
+func TestRefreshProviderScanPlanAccessorsSkipEmptyProviders(t *testing.T) {
+	plan := app.RefreshProviderScanPlan{Steps: []app.RefreshProviderScanStep{
+		{Provider: "system", Label: "system (apt)", Count: 2},
+		{Provider: "", Label: "ignored", Count: 9},
+		{Provider: "node", Count: -3},
+		{Provider: "brew", Label: "brew", Count: 1},
+	}}
+
+	names := plan.ProviderNames()
+	if len(names) != 3 || names[0] != "system" || names[1] != "node" || names[2] != "brew" {
+		t.Fatalf("provider names = %v, want system/node/brew", names)
+	}
+
+	set := plan.ProviderSet()
+	if len(set) != 3 || !set["system"] || !set["node"] || !set["brew"] || set[""] {
+		t.Fatalf("provider set = %#v, want non-empty providers only", set)
+	}
+
+	counts := plan.CountsByProvider()
+	if len(counts) != 3 || counts["system"] != 2 || counts["node"] != -3 || counts["brew"] != 1 {
+		t.Fatalf("counts = %#v, want counts for non-empty providers", counts)
+	}
+	if total := plan.Total(); total != 3 {
+		t.Fatalf("total = %d, want positive provider counts only", total)
+	}
+
+	labels := plan.LabelsByProvider()
+	if len(labels) != 2 || labels["system"] != "system (apt)" || labels["brew"] != "brew" || labels["node"] != "" {
+		t.Fatalf("labels = %#v, want non-empty labels for non-empty providers", labels)
+	}
+}
+
 func TestCurrentRefreshProviderScanPlan_KeepsConfiguredConcreteProvider(t *testing.T) {
 	brew := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, brew)
