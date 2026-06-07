@@ -866,6 +866,25 @@ func TestUpgradeAllProgressText(t *testing.T) {
 	}
 }
 
+func TestIsPrivilegeErrorText(t *testing.T) {
+	tests := []struct {
+		name    string
+		message string
+		want    bool
+	}{
+		{name: "classified sudo prompt", message: "sudo: a password is required", want: true},
+		{name: "fallback admin wording", message: "installer requires admin approval", want: true},
+		{name: "ordinary failure", message: "network timed out", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isPrivilegeErrorText(tt.message); got != tt.want {
+				t.Fatalf("isPrivilegeErrorText(%q) = %v, want %v", tt.message, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestUpgradeAllProgressTotalCountsInstalledOutdatedTools(t *testing.T) {
 	tools := []*database.ToolCache{
 		{Name: "bat", Installed: true, Outdated: true},
