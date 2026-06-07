@@ -48,7 +48,7 @@ func TestMain(m *testing.M) {
 func assertToolProviderListMain() int {
 	args := os.Args[1:]
 	if len(args) < 3 {
-		fmt.Fprintln(os.Stderr, "usage: omni-assert-tool-provider-list <config> <tool> <provider> [provider...]")
+		fmt.Fprintln(os.Stderr, "usage: omni-assert-tool-provider-list <config> <tool> <provider>[=<package>] [provider[=<package>]...]")
 		return 2
 	}
 	cfg, err := config.Load(args[0])
@@ -71,8 +71,13 @@ func assertToolProviderListMain() int {
 		return 1
 	}
 	for i, providerName := range want {
-		if spec.Providers[i].Provider != providerName {
+		wantProvider, wantPackage, hasPackage := strings.Cut(providerName, "=")
+		if spec.Providers[i].Provider != wantProvider {
 			fmt.Fprintf(os.Stderr, "providers = %+v, want %v\n", spec.Providers, want)
+			return 1
+		}
+		if hasPackage && spec.Providers[i].Package != wantPackage {
+			fmt.Fprintf(os.Stderr, "provider %q package = %q, want %q in %+v\n", wantProvider, spec.Providers[i].Package, wantPackage, spec.Providers)
 			return 1
 		}
 	}
