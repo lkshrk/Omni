@@ -261,15 +261,16 @@ type Model struct {
 	consolidateOptions   []app.EcosystemMigration // cached at load time; registry lookup, no IO
 
 	// group subtabs — used by group picker (move tool to group), not for list filtering
-	groupNames       []string          // ordered reusable group names
-	toolGroups       map[string]string // "name\x00provider" → group name
-	toolMemberships  map[string][]string
-	ignoreLabels     map[string]string // logical tool name → compact ignore source label
-	toolIgnoreSet    map[string]bool
-	groupIgnoreSet   map[string]map[string]bool
-	toolProviderPins map[string]string
-	toolFallbacks    map[string]config.FallbackSpec
-	toolGit          map[string]string
+	groupNames             []string          // ordered reusable group names
+	toolGroups             map[string]string // "name\x00provider" → group name
+	toolMemberships        map[string][]string
+	ignoreLabels           map[string]string // logical tool name → compact ignore source label
+	toolIgnoreSet          map[string]bool
+	groupIgnoreSet         map[string]map[string]bool
+	toolProviderPins       map[string]string
+	toolProviderCandidates map[string][]config.ToolInstallSpec
+	toolFallbacks          map[string]config.FallbackSpec
+	toolGit                map[string]string
 
 	// provider filter — [All] [system] [node] [python] …
 	providerNames  []string // ordered ecosystem provider names from the app/provider registry
@@ -633,6 +634,7 @@ func toolsLoadedMsgFromStartupState(snapshot *app.StartupSnapshot) toolsLoadedMs
 		toolIgnoreSet:          snapshot.ToolIgnores,
 		groupIgnoreSet:         snapshot.GroupIgnores,
 		toolProviderPins:       snapshot.ToolProviderPins,
+		toolProviderCandidates: snapshot.ToolProviderCandidates,
 		toolFallbacks:          snapshot.ToolFallbacks,
 		toolGit:                snapshot.ToolGit,
 		hostInfo:               hostInfo,

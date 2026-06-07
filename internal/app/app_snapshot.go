@@ -27,6 +27,7 @@ type StartupSnapshot struct {
 	ToolIgnores            map[string]bool
 	GroupIgnores           map[string]map[string]bool
 	ToolProviderPins       map[string]string
+	ToolProviderCandidates map[string][]config.ToolInstallSpec
 	ToolFallbacks          map[string]config.FallbackSpec
 	ToolGit                map[string]string
 	EffectivePythonManager string
@@ -48,21 +49,23 @@ type StartupSnapshot struct {
 }
 
 type ToolScopeState struct {
-	GlobalIgnoredTools []string
-	HostIgnoredTools   []string
-	ToolIgnores        map[string]bool
-	ToolProviderPins   map[string]string
-	ToolFallbacks      map[string]config.FallbackSpec
-	ToolGit            map[string]string
+	GlobalIgnoredTools     []string
+	HostIgnoredTools       []string
+	ToolIgnores            map[string]bool
+	ToolProviderPins       map[string]string
+	ToolProviderCandidates map[string][]config.ToolInstallSpec
+	ToolFallbacks          map[string]config.FallbackSpec
+	ToolGit                map[string]string
 }
 
 type ToolScopeDisplayState struct {
-	IgnoreLabels     map[string]string
-	ToolIgnores      map[string]bool
-	GroupIgnores     map[string]map[string]bool
-	ToolProviderPins map[string]string
-	ToolFallbacks    map[string]config.FallbackSpec
-	ToolGit          map[string]string
+	IgnoreLabels           map[string]string
+	ToolIgnores            map[string]bool
+	GroupIgnores           map[string]map[string]bool
+	ToolProviderPins       map[string]string
+	ToolProviderCandidates map[string][]config.ToolInstallSpec
+	ToolFallbacks          map[string]config.FallbackSpec
+	ToolGit                map[string]string
 }
 
 type ToolGroupState struct {
@@ -162,6 +165,7 @@ func (a *App) StartupSnapshot(ctx context.Context) (*StartupSnapshot, error) {
 		ToolIgnores:            toolScopeDisplayState.ToolIgnores,
 		GroupIgnores:           toolScopeDisplayState.GroupIgnores,
 		ToolProviderPins:       toolScopeDisplayState.ToolProviderPins,
+		ToolProviderCandidates: toolScopeDisplayState.ToolProviderCandidates,
 		ToolFallbacks:          toolScopeDisplayState.ToolFallbacks,
 		ToolGit:                toolScopeDisplayState.ToolGit,
 		EffectivePythonManager: pythonBin,
@@ -247,12 +251,13 @@ func buildToolScopeDisplayStateWithFallback(state *ToolScopeState, fallbackHostI
 		state = &stateCopy
 	}
 	return &ToolScopeDisplayState{
-		IgnoreLabels:     ignoreLabelsFromScopeState(state),
-		ToolIgnores:      toolIgnoresFromScopeState(state.ToolIgnores),
-		GroupIgnores:     groupIgnoresFromScopeState(state.GlobalIgnoredTools),
-		ToolProviderPins: toolProviderPinsFromScopeState(state.ToolProviderPins),
-		ToolFallbacks:    toolFallbacksFromScopeState(state.ToolFallbacks),
-		ToolGit:          toolGitFromScopeState(state.ToolGit),
+		IgnoreLabels:           ignoreLabelsFromScopeState(state),
+		ToolIgnores:            toolIgnoresFromScopeState(state.ToolIgnores),
+		GroupIgnores:           groupIgnoresFromScopeState(state.GlobalIgnoredTools),
+		ToolProviderPins:       toolProviderPinsFromScopeState(state.ToolProviderPins),
+		ToolProviderCandidates: toolProviderCandidatesFromScopeState(state.ToolProviderCandidates),
+		ToolFallbacks:          toolFallbacksFromScopeState(state.ToolFallbacks),
+		ToolGit:                toolGitFromScopeState(state.ToolGit),
 	}
 }
 
@@ -310,6 +315,17 @@ func toolProviderPinsFromScopeState(pins map[string]string) map[string]string {
 	return pinCopy
 }
 
+func toolProviderCandidatesFromScopeState(candidates map[string][]config.ToolInstallSpec) map[string][]config.ToolInstallSpec {
+	out := make(map[string][]config.ToolInstallSpec, len(candidates))
+	for name, specs := range candidates {
+		if name == "" || len(specs) == 0 {
+			continue
+		}
+		out[name] = cloneToolInstallSpecs(specs)
+	}
+	return out
+}
+
 func toolFallbacksFromScopeState(fallbacks map[string]config.FallbackSpec) map[string]config.FallbackSpec {
 	out := make(map[string]config.FallbackSpec, len(fallbacks))
 	for name, fallback := range fallbacks {
@@ -339,14 +355,50 @@ func (a *App) toolScopeStateFromConfig(cfg *config.RootConfig) *ToolScopeState {
 		}
 	}
 	toolIgnores, toolProviderPins, toolFallbacks, toolGit := a.toolScopeFromConfig(cfg)
+	toolProviderCandidates := toolProviderCandidatesFromConfig(cfg)
 	return &ToolScopeState{
-		GlobalIgnoredTools: append([]string(nil), cfg.Ignore.Tools...),
-		HostIgnoredTools:   hostIgnored,
-		ToolIgnores:        toolIgnores,
-		ToolProviderPins:   toolProviderPins,
-		ToolFallbacks:      toolFallbacks,
-		ToolGit:            toolGit,
+		GlobalIgnoredTools:     append([]string(nil), cfg.Ignore.Tools...),
+		HostIgnoredTools:       hostIgnored,
+		ToolIgnores:            toolIgnores,
+		ToolProviderPins:       toolProviderPins,
+		ToolProviderCandidates: toolProviderCandidates,
+		ToolFallbacks:          toolFallbacks,
+		ToolGit:                toolGit,
 	}
+}
+
+func toolProviderCandidatesFromConfig(cfg *config.RootConfig) map[string][]config.ToolInstallSpec {
+	if cfg == nil {
+		return nil
+	}
+	out := make(map[string][]config.ToolInstallSpec)
+	for name, spec := range cfg.Tools {
+		if name == "" {
+			continue
+		}
+		candidates := spec.Providers
+		if len(candidates) == 0 {
+			defaultSpec := spec.DefaultInstallSpec()
+			if defaultSpec.Provider != "" || defaultSpec.Package != "" || defaultSpec.InstallWith != "" {
+				candidates = []config.ToolInstallSpec{defaultSpec}
+			}
+		}
+		for _, candidate := range candidates {
+			if candidate.Provider == "" {
+				continue
+			}
+			out[name] = append(out[name], cloneToolInstallSpec(candidate))
+		}
+	}
+	return out
+}
+
+func cloneToolInstallSpecs(in []config.ToolInstallSpec) []config.ToolInstallSpec {
+	out := make([]config.ToolInstallSpec, len(in))
+	for i, spec := range in {
+		out[i] = cloneToolInstallSpec(spec)
+	}
+	return out
 }
 
 func (a *App) toolScopeFromConfig(cfg *config.RootConfig) (map[string]bool, map[string]string, map[string]config.FallbackSpec, map[string]string) {
