@@ -1062,6 +1062,58 @@ func TestUpgradeAll_SkipsUninstalledOutdatedRows(t *testing.T) {
 	}
 }
 
+func TestUpgradeAllDetailedReportsTargetVersionProgress(t *testing.T) {
+	stub := &stubProvider{
+		name:      "brew",
+		available: true,
+		installed: []provider.InstalledTool{
+			installedTool("ripgrep", "14.1.0", "brew"),
+		},
+	}
+	a, _ := newImportApp(t, stub)
+	ctx := context.Background()
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name:          "ripgrep",
+		Provider:      "brew",
+		Package:       "ripgrep",
+		Installed:     true,
+		InstalledWith: "brew",
+		Outdated:      true,
+		LatestVersion: sql.NullString{String: "15.0.0", Valid: true},
+		Tracked:       true,
+	}); err != nil {
+		t.Fatalf("seed tool: %v", err)
+	}
+
+	var textProgress []string
+	var events []syncprogress.ProgressEvent
+	result, err := a.UpgradeAllDetailed(ctx, func(msg string) {
+		textProgress = append(textProgress, msg)
+	}, func(event syncprogress.ProgressEvent) {
+		events = append(events, event)
+	})
+	if err != nil {
+		t.Fatalf("UpgradeAllDetailed: %v", err)
+	}
+	if len(result.Upgraded) != 1 || result.Upgraded[0] != "ripgrep" {
+		t.Fatalf("Upgraded = %v, want [ripgrep]", result.Upgraded)
+	}
+	if len(textProgress) != 1 || !strings.Contains(textProgress[0], "15.0.0") {
+		t.Fatalf("text progress = %v, want target version 15.0.0", textProgress)
+	}
+	if len(events) != 2 {
+		t.Fatalf("events = %+v, want start and done events", events)
+	}
+	for _, event := range events {
+		if event.TargetVersion != "15.0.0" {
+			t.Fatalf("event TargetVersion = %q, want 15.0.0; event=%+v", event.TargetVersion, event)
+		}
+	}
+	if !events[len(events)-1].Done {
+		t.Fatalf("last event = %+v, want done", events[len(events)-1])
+	}
+}
+
 func TestReconcile_SyncsAndUpgradesTools(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	stub := &reconcileUpgradeStub{
