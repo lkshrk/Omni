@@ -199,6 +199,26 @@ func TestNormalizeToolState(t *testing.T) {
 	}
 }
 
+func TestProviderMatchInstallCandidateSkipsEcosystemProviders(t *testing.T) {
+	a := New(filepath.Join(t.TempDir(), "settings.json"))
+	a.registry = provider.NewRegistry()
+	a.registry.RegisterWithMetadata(&internalProviderStub{name: "system"}, provider.Metadata{Kind: provider.ProviderKindEcosystem})
+	a.registry.RegisterWithMetadata(&internalProviderStub{name: "brew"}, provider.Metadata{Kind: provider.ProviderKindConcrete})
+
+	if a.providerMatchInstallCandidate("system") {
+		t.Fatal("system provider family was accepted as an install candidate")
+	}
+	if !a.providerMatchInstallCandidate("brew") {
+		t.Fatal("brew concrete provider was rejected as an install candidate")
+	}
+	if !a.providerMatchInstallCandidate("unknown-provider") {
+		t.Fatal("unknown provider should be left to provider search result handling")
+	}
+	if a.providerMatchInstallCandidate("") {
+		t.Fatal("empty provider was accepted as an install candidate")
+	}
+}
+
 func TestRefreshInstalledScanLabelUsesExplicitInstallWithForEcosystem(t *testing.T) {
 	a := New(filepath.Join(t.TempDir(), "settings.json"))
 	a.registry = provider.NewRegistry()
