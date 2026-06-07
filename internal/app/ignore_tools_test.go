@@ -329,6 +329,41 @@ func TestRefreshDiscoveredSkipsGloballyIgnoredName(t *testing.T) {
 	}
 }
 
+func TestSyncAllSkipsIgnoredDiscoveredClaims(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	brew := &installTracker{stubProvider: stubProvider{name: "brew", available: true}}
+	a, cfgPath := newImportApp(t, brew)
+	tools := logicalToolSpecs(logicalTool("fzf", "brew"))
+	ignored := tools["fzf"]
+	ignored.Ignore = true
+	tools["fzf"] = ignored
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools:  tools,
+		Groups: []*config.GroupConfig{testHostToolGroup()},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	discovered := []*database.ToolCache{
+		{Name: "fzf", Provider: "brew", Installed: true, Tracked: false},
+	}
+
+	result, err := a.SyncAll(context.Background(), app.SyncAllOptions{Discovered: discovered})
+	if err != nil {
+		t.Fatalf("SyncAll: %v", err)
+	}
+	if len(result.ClaimedNames) != 0 {
+		t.Fatalf("ClaimedNames = %v, want ignored discovered tool skipped", result.ClaimedNames)
+	}
+	updated, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	hostGroup := findTestGroup(updated, "testhost")
+	if hostGroup != nil && testGroupHasTool(hostGroup, "fzf") {
+		t.Fatalf("ignored discovered fzf was claimed into host group: %+v", hostGroup.Tools)
+	}
+}
+
 func TestImportSkipsGloballyIgnoredName(t *testing.T) {
 	stub := &ignoredProcessingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
