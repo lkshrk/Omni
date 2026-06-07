@@ -3,6 +3,8 @@ package app
 import (
 	"fmt"
 	"testing"
+
+	"github.com/lkshrk/omni/internal/config"
 )
 
 func TestBestGitHubReleaseAsset_PrefersExtractableArchive(t *testing.T) {
@@ -52,6 +54,46 @@ func TestNormalizedGitHubPublishedAt(t *testing.T) {
 	}
 	if _, err := normalizedGitHubPublishedAt("2026-06-07"); err == nil {
 		t.Fatal("normalizedGitHubPublishedAt accepted non-RFC3339 published_at")
+	}
+}
+
+func TestGitHubFallbackHasSavedReleaseMetadata(t *testing.T) {
+	valid := &config.FallbackSpec{
+		Source: config.FallbackSource{
+			Type:  config.FallbackSourceGitHub,
+			Owner: "sharkdp",
+			Repo:  "fd",
+		},
+		Recipe: config.FallbackRecipe{
+			Type:             config.FallbackRecipeGitHubReleaseAsset,
+			ReleaseID:        "release-1",
+			TagName:          "v10.3.0",
+			PublishedAt:      "2026-06-07T10:34:56Z",
+			AssetID:          "asset-1",
+			AssetName:        "fd.tar.gz",
+			AssetDownloadURL: "https://example.test/fd.tar.gz",
+		},
+	}
+	if !githubFallbackHasSavedReleaseMetadata(valid) {
+		t.Fatal("githubFallbackHasSavedReleaseMetadata(valid) = false, want true")
+	}
+
+	missingAsset := *valid
+	missingAsset.Recipe.AssetDownloadURL = ""
+	if githubFallbackHasSavedReleaseMetadata(&missingAsset) {
+		t.Fatal("githubFallbackHasSavedReleaseMetadata accepted missing asset download URL")
+	}
+
+	badDate := *valid
+	badDate.Recipe.PublishedAt = "2026-06-07"
+	if githubFallbackHasSavedReleaseMetadata(&badDate) {
+		t.Fatal("githubFallbackHasSavedReleaseMetadata accepted non-RFC3339 published_at")
+	}
+
+	wrongSource := *valid
+	wrongSource.Source.Type = ""
+	if githubFallbackHasSavedReleaseMetadata(&wrongSource) {
+		t.Fatal("githubFallbackHasSavedReleaseMetadata accepted non-GitHub source")
 	}
 }
 
