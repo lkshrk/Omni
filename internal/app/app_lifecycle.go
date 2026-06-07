@@ -719,6 +719,13 @@ func (a *App) InstallWithState(ctx context.Context, name, providerName string) (
 	})
 }
 
+func (a *App) InstallHighConfidenceProviderMatchesWithState(ctx context.Context, name, providerFilter string) (*ToolGroupMutationState, error) {
+	return a.toolGroupMutationStateAfter(ctx, func() error {
+		_, err := a.InstallHighConfidenceProviderMatches(ctx, name, providerFilter)
+		return err
+	})
+}
+
 func (a *App) configuredOperationTool(ctx context.Context, name, providerName string) (config.ToolEntry, string, bool, error) {
 	resolved, opProvider, ok, err := a.configuredOperationResolvedTool(ctx, name, providerName)
 	if err != nil || !ok {
