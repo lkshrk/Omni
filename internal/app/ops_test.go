@@ -1402,6 +1402,140 @@ func TestProviderMatches_ReturnsMatchesWithPartialSearchError(t *testing.T) {
 	}
 }
 
+func TestInstallHighConfidenceProviderMatches_AddsAllHighAndInstallsPriority(t *testing.T) {
+	brew := &searchStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		results: []provider.SearchResult{{
+			Name:     "prettier",
+			Provider: "brew",
+		}},
+	}
+	npm := &searchStub{
+		stubProvider: stubProvider{name: "npm", available: true},
+		results: []provider.SearchResult{{
+			Name:     "prettier",
+			Provider: "npm",
+		}},
+	}
+	a, cfgPath := newImportApp(t, brew, npm)
+	if err := a.SaveSettings(context.Background(), config.Settings{ProviderPriority: []string{"npm", "brew"}}); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Version:  config.CurrentVersion,
+		Settings: config.Settings{ProviderPriority: []string{"npm", "brew"}},
+		Tools: map[string]config.ToolSpec{
+			"prettier": {},
+		},
+		Groups: []*config.GroupConfig{{Name: "web", Tools: []config.ToolEntry{{Name: "prettier"}}}},
+	}); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	result, err := a.InstallHighConfidenceProviderMatches(context.Background(), "prettier", "")
+	if err != nil {
+		t.Fatalf("InstallHighConfidenceProviderMatches: %v", err)
+	}
+	if result.Installed.Provider != "npm" {
+		t.Fatalf("installed = %+v, want npm", result.Installed)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	providers := cfg.Tools["prettier"].Providers
+	if len(providers) != 2 {
+		t.Fatalf("providers = %+v, want npm and brew", providers)
+	}
+	if providers[0].Provider != "npm" || providers[1].Provider != "brew" {
+		t.Fatalf("providers = %+v, want priority order npm, brew", providers)
+	}
+	tools, err := a.ListTools(context.Background(), "")
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(tools) != 1 || tools[0].Provider != "npm" || !tools[0].Installed {
+		t.Fatalf("tools = %+v, want installed npm row", tools)
+	}
+}
+
+func TestInstallHighConfidenceProviderMatches_IgnoresWeakMatches(t *testing.T) {
+	npm := &searchStub{
+		stubProvider: stubProvider{name: "npm", available: true},
+		results: []provider.SearchResult{{
+			Name:     "prettier-plugin-tailwindcss",
+			Provider: "npm",
+		}},
+	}
+	a, cfgPath := newImportApp(t, npm)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Version: config.CurrentVersion,
+		Tools: map[string]config.ToolSpec{
+			"prettier": {},
+		},
+		Groups: []*config.GroupConfig{{Name: "web", Tools: []config.ToolEntry{{Name: "prettier"}}}},
+	}); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	result, err := a.InstallHighConfidenceProviderMatches(context.Background(), "prettier", "")
+	if err == nil || !strings.Contains(err.Error(), "no high-confidence provider match") {
+		t.Fatalf("InstallHighConfidenceProviderMatches err = %v, want no high-confidence match", err)
+	}
+	if result == nil || len(result.Matches) != 1 || result.Matches[0].Confidence != app.ProviderMatchWeak {
+		t.Fatalf("result = %+v, want weak match reported", result)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if providers := cfg.Tools["prettier"].Providers; len(providers) != 0 {
+		t.Fatalf("providers = %+v, want no weak match saved", providers)
+	}
+	tools, err := a.ListTools(context.Background(), "")
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(tools) != 0 {
+		t.Fatalf("tools = %+v, want no install", tools)
+	}
+}
+
+func TestInstallHighConfidenceProviderMatches_InstallsWithPartialSearchError(t *testing.T) {
+	brew := &searchStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		results: []provider.SearchResult{{
+			Name:     "prettier",
+			Provider: "brew",
+		}},
+	}
+	npm := &searchStub{
+		stubProvider: stubProvider{name: "npm", available: true},
+		err:          errors.New("registry unavailable"),
+	}
+	a, cfgPath := newImportApp(t, brew, npm)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Version: config.CurrentVersion,
+		Tools: map[string]config.ToolSpec{
+			"prettier": {},
+		},
+		Groups: []*config.GroupConfig{{Name: "web", Tools: []config.ToolEntry{{Name: "prettier"}}}},
+	}); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	result, err := a.InstallHighConfidenceProviderMatches(context.Background(), "prettier", "")
+	if err != nil {
+		t.Fatalf("InstallHighConfidenceProviderMatches: %v", err)
+	}
+	if result.SearchErr == nil || !strings.Contains(result.SearchErr.Error(), "searching npm") {
+		t.Fatalf("SearchErr = %v, want partial npm search error", result.SearchErr)
+	}
+	if result.Installed.Provider != "brew" {
+		t.Fatalf("installed = %+v, want brew", result.Installed)
+	}
+}
+
 func TestSearch_CachesResultMetadata(t *testing.T) {
 	ctx := context.Background()
 	s := &searchStub{
