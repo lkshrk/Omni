@@ -167,6 +167,38 @@ func TestExpandHomePath(t *testing.T) {
 	}
 }
 
+func TestNormalizeToolState(t *testing.T) {
+	tests := []struct {
+		raw  string
+		want ToolListState
+	}{
+		{raw: "", want: ""},
+		{raw: " Installed ", want: ToolStateInstalled},
+		{raw: "missing", want: ToolStateMissing},
+		{raw: "updates", want: ToolStateOutdated},
+		{raw: "quarantine", want: ToolStateQuarantined},
+		{raw: "metadata", want: ToolStateBlockedMetadata},
+		{raw: "ignore", want: ToolStateIgnored},
+		{raw: "orphans", want: ToolStateUnclaimed},
+		{raw: "sync", want: ToolStateOutOfSync},
+		{raw: "failures", want: ToolStateFailed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.raw, func(t *testing.T) {
+			got, err := normalizeToolState(tt.raw)
+			if err != nil {
+				t.Fatalf("normalizeToolState(%q): %v", tt.raw, err)
+			}
+			if got != tt.want {
+				t.Fatalf("normalizeToolState(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+	if _, err := normalizeToolState("not-a-state"); err == nil {
+		t.Fatal("normalizeToolState accepted unknown state")
+	}
+}
+
 func TestRefreshInstalledScanLabelUsesExplicitInstallWithForEcosystem(t *testing.T) {
 	a := New(filepath.Join(t.TempDir(), "settings.json"))
 	a.registry = provider.NewRegistry()
