@@ -309,6 +309,45 @@ func TestPrivilegeQueuePlanUsesMarkedPrivilegeMetadata(t *testing.T) {
 	}
 }
 
+func TestPrivilegeQueuePlanRejectsProviderToolUninstall(t *testing.T) {
+	a := New(filepath.Join(t.TempDir(), "settings.json"))
+	ctx := context.Background()
+	if err := a.InitTestMode(ctx, aptpkg.New(nil)); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	defer a.Close() //nolint:errcheck
+
+	tool := &database.ToolCache{
+		Name:      "apt",
+		Provider:  "apt",
+		Package:   "apt",
+		Installed: true,
+		Privilege: string(provider.PrivilegeRequired),
+	}
+	key := privilegeQueueToolKey(tool.Name, tool.Provider)
+
+	plan, err := a.PrivilegeQueuePlan(ctx, PrivilegeQueueRequest{
+		RowErrors: map[string]string{
+			key: "requires sudo/root privileges",
+		},
+		Actions: map[string]provider.PrivilegeAction{
+			key: provider.PrivilegeActionUninstall,
+		},
+		Tools: []*database.ToolCache{tool},
+	})
+	if err != nil {
+		t.Fatalf("PrivilegeQueuePlan: %v", err)
+	}
+	if len(plan.Items) != 0 {
+		t.Fatalf("queue items = %#v, want none for protected provider tool", plan.Items)
+	}
+	got := plan.RowErrors[key]
+	want := `tool "apt" is a package manager/provider and cannot be deleted or uninstalled by omni`
+	if got != want {
+		t.Fatalf("row error = %q, want %q", got, want)
+	}
+}
+
 type privilegePlanningProvider struct {
 	name string
 	plan provider.PrivilegePlan
