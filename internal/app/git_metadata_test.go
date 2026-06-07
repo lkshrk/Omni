@@ -11,35 +11,6 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-type gitMetadataProviderStub struct {
-	name     string
-	metadata map[string]provider.InstalledMetadata
-}
-
-func (s *gitMetadataProviderStub) Name() string { return s.name }
-
-func (s *gitMetadataProviderStub) Description() string { return s.name }
-
-func (s *gitMetadataProviderStub) Available(context.Context) (bool, error) { return true, nil }
-
-func (s *gitMetadataProviderStub) Install(context.Context, provider.Tool) error { return nil }
-
-func (s *gitMetadataProviderStub) Uninstall(context.Context, provider.Tool) error { return nil }
-
-func (s *gitMetadataProviderStub) Upgrade(context.Context, provider.Tool) error { return nil }
-
-func (s *gitMetadataProviderStub) IsInstalled(context.Context, provider.Tool) (bool, string, error) {
-	return false, "", nil
-}
-
-func (s *gitMetadataProviderStub) ListInstalled(context.Context) ([]provider.InstalledTool, error) {
-	return nil, nil
-}
-
-func (s *gitMetadataProviderStub) InstalledMetadataMap(context.Context) (map[string]provider.InstalledMetadata, error) {
-	return s.metadata, nil
-}
-
 func newGitMetadataTestApp(t *testing.T, cfgPath string, providers ...provider.Provider) *App {
 	t.Helper()
 	a := New(cfgPath)
@@ -169,8 +140,8 @@ func TestMergeToolGitPreservesUserEditedDifferentRepo(t *testing.T) {
 func TestEnrichToolGitFromInstalledProviderMetadataUsesConcreteOwner(t *testing.T) {
 	ctx := context.Background()
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
-	brew := &gitMetadataProviderStub{name: "brew"}
-	apt := &gitMetadataProviderStub{
+	brew := &internalProviderStub{name: "brew"}
+	apt := &internalProviderStub{
 		name: "apt",
 		metadata: map[string]provider.InstalledMetadata{
 			"ripgrep": {
@@ -202,7 +173,7 @@ func TestEnrichToolGitFromInstalledProviderMetadataUsesConcreteOwner(t *testing.
 func TestEnrichToolGitFromInstalledProviderMetadataUsesOperationProviderWhenOwnerSame(t *testing.T) {
 	ctx := context.Background()
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
-	brew := &gitMetadataProviderStub{
+	brew := &internalProviderStub{
 		name: "brew",
 		metadata: map[string]provider.InstalledMetadata{
 			"ripgrep": {
@@ -214,7 +185,7 @@ func TestEnrichToolGitFromInstalledProviderMetadataUsesOperationProviderWhenOwne
 			},
 		},
 	}
-	apt := &gitMetadataProviderStub{name: "apt"}
+	apt := &internalProviderStub{name: "apt"}
 	a := newGitMetadataTestApp(t, cfgPath, brew, apt)
 	saveGitMetadataToolConfig(t, cfgPath)
 
