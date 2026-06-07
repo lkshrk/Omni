@@ -68,6 +68,50 @@ func TestAutomaticFallbackUsableForToolHandlesConfiguredMissingFallback(t *testi
 	}
 }
 
+func TestFallbackOwnershipHelpers(t *testing.T) {
+	githubFallback := &config.FallbackSpec{
+		Source: config.FallbackSource{Type: config.FallbackSourceGitHub},
+	}
+	if got := fallbackInstalledWith(githubFallback); got != fallbackInstalledWithGitHub {
+		t.Fatalf("fallbackInstalledWith(github) = %q, want %q", got, fallbackInstalledWithGitHub)
+	}
+	if got := fallbackInstalledWith(&config.FallbackSpec{}); got != "fallback" {
+		t.Fatalf("fallbackInstalledWith(generic) = %q, want fallback", got)
+	}
+	if got := fallbackInstalledWith(nil); got != "fallback" {
+		t.Fatalf("fallbackInstalledWith(nil) = %q, want fallback", got)
+	}
+	for _, owner := range []string{fallbackInstalledWithGitHub, "fallback"} {
+		if !fallbackLifecycleOwner(owner) {
+			t.Fatalf("fallbackLifecycleOwner(%q) = false, want true", owner)
+		}
+	}
+	if fallbackLifecycleOwner("brew") {
+		t.Fatal("fallbackLifecycleOwner(brew) = true, want false")
+	}
+
+	spec := config.ToolSpec{
+		Provider: "system",
+		Package:  "ripgrep",
+		Providers: []config.ToolInstallSpec{{
+			Provider: "brew",
+			Package:  "rg",
+		}},
+	}
+	if got := fallbackProvider(spec); got != "brew" {
+		t.Fatalf("fallbackProvider = %q, want brew", got)
+	}
+	if got := fallbackProvider(config.ToolSpec{Provider: "system"}); got != "system" {
+		t.Fatalf("fallbackProvider legacy spec = %q, want system", got)
+	}
+	if got := fallbackPackage("ripgrep", spec); got != "rg" {
+		t.Fatalf("fallbackPackage = %q, want rg", got)
+	}
+	if got := fallbackPackage("fd", config.ToolSpec{}); got != "fd" {
+		t.Fatalf("fallbackPackage empty spec = %q, want fd", got)
+	}
+}
+
 func TestSyncNativeUnavailableFallbacksUsesCachedFallbackInstall(t *testing.T) {
 	ctx := context.Background()
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
