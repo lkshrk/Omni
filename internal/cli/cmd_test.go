@@ -3945,6 +3945,120 @@ func TestInstall_WithHost_ExplicitProvider_ReachesInstall(t *testing.T) {
 	_ = cmd.Execute()
 }
 
+func TestInstall_ConfiguredToolAutoAddsHighConfidenceProviderMatches(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "settings.json")
+	cacheDir := t.TempDir()
+	withConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{ProviderPriority: []string{"npm", "brew"}},
+		Tools: map[string]config.ToolSpec{
+			"prettier": {},
+		},
+		Groups: []*config.GroupConfig{cliTestHostGroup("prettier")},
+	})
+	brew := &cliStubProvider{
+		name: "brew",
+		searchResults: []provider.SearchResult{{
+			Name:     "prettier",
+			Provider: "brew",
+		}},
+	}
+	npm := &cliStubProvider{
+		name: "npm",
+		searchResults: []provider.SearchResult{{
+			Name:     "prettier",
+			Provider: "npm",
+		}},
+	}
+	a := app.New(cfgPath)
+	a.CacheDir = cacheDir
+	if err := a.InitTestMode(context.Background(), brew, npm); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	var out bytes.Buffer
+	cmd := newInstallCmd(&rootState{app: a, yes: true})
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"prettier"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("tools install prettier: %v", err)
+	}
+	if len(npm.installedCalls) != 1 || npm.installedCalls[0] != "prettier" {
+		t.Fatalf("npm installedCalls = %v, want [prettier]", npm.installedCalls)
+	}
+	if len(brew.installedCalls) != 0 {
+		t.Fatalf("brew installedCalls = %v, want no install", brew.installedCalls)
+	}
+	if !strings.Contains(out.String(), "matched providers: prettier -> npm/prettier, brew/prettier") {
+		t.Fatalf("output = %q, want matched providers line", out.String())
+	}
+	if !strings.Contains(out.String(), "✓ installed prettier (npm)") {
+		t.Fatalf("output = %q, want installed npm line", out.String())
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	providers := cfg.Tools["prettier"].Providers
+	if len(providers) != 2 || providers[0].Provider != "npm" || providers[1].Provider != "brew" {
+		t.Fatalf("providers = %+v, want npm then brew", providers)
+	}
+}
+
+func TestInstall_ConfiguredToolDoesNotAutoInstallWeakProviderMatch(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "settings.json")
+	cacheDir := t.TempDir()
+	withConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{ProviderPriority: []string{"npm"}},
+		Tools: map[string]config.ToolSpec{
+			"prettier": {},
+		},
+		Groups: []*config.GroupConfig{cliTestHostGroup("prettier")},
+	})
+	npm := &cliStubProvider{
+		name: "npm",
+		searchResults: []provider.SearchResult{{
+			Name:     "prettier-plugin-tailwindcss",
+			Provider: "npm",
+		}},
+	}
+	a := app.New(cfgPath)
+	a.CacheDir = cacheDir
+	if err := a.InitTestMode(context.Background(), npm); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	var out bytes.Buffer
+	cmd := newInstallCmd(&rootState{app: a, yes: true})
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"prettier"})
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatalf("tools install prettier succeeded, want weak-match error")
+	}
+	if !strings.Contains(err.Error(), `no high-confidence provider match for "prettier"`) {
+		t.Fatalf("error = %v, want high-confidence provider match error", err)
+	}
+	if len(npm.installedCalls) != 0 {
+		t.Fatalf("npm installedCalls = %v, want no install", npm.installedCalls)
+	}
+	if strings.Contains(out.String(), "auto-selected provider") {
+		t.Fatalf("output = %q, want no default provider fallback", out.String())
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if providers := cfg.Tools["prettier"].Providers; len(providers) != 0 {
+		t.Fatalf("providers = %+v, want none", providers)
+	}
+}
+
 // ─── install --group ────────────────────────────────────────────────────────
 
 func TestInstall_Group_NoHostRequired_SyncsGroup(t *testing.T) {

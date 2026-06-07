@@ -1501,6 +1501,46 @@ func TestInstallHighConfidenceProviderMatches_IgnoresWeakMatches(t *testing.T) {
 	}
 }
 
+func TestInstallHighConfidenceProviderMatches_SkipsFallbackOnlyTool(t *testing.T) {
+	npm := &searchStub{
+		stubProvider: stubProvider{name: "npm", available: true},
+		results: []provider.SearchResult{{
+			Name:     "ripgrep",
+			Provider: "npm",
+		}},
+	}
+	a, cfgPath := newImportApp(t, npm)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Version: config.CurrentVersion,
+		Tools: map[string]config.ToolSpec{
+			"ripgrep": {
+				Fallback: &config.FallbackSpec{
+					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+					Status: config.FallbackStatusUnresolved,
+				},
+			},
+		},
+		Groups: []*config.GroupConfig{{Name: "base", Tools: []config.ToolEntry{{Name: "ripgrep"}}}},
+	}); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	result, err := a.InstallHighConfidenceProviderMatches(context.Background(), "ripgrep", "")
+	if !errors.Is(err, app.ErrProviderDiscoveryAlreadyConfigured) {
+		t.Fatalf("InstallHighConfidenceProviderMatches err = %v, want already configured", err)
+	}
+	if result != nil {
+		t.Fatalf("result = %+v, want nil", result)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if providers := cfg.Tools["ripgrep"].Providers; len(providers) != 0 {
+		t.Fatalf("providers = %+v, want fallback-only config unchanged", providers)
+	}
+}
+
 func TestInstallHighConfidenceProviderMatches_InstallsWithPartialSearchError(t *testing.T) {
 	brew := &searchStub{
 		stubProvider: stubProvider{name: "brew", available: true},

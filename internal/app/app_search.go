@@ -51,6 +51,11 @@ type ProviderMatchInstallResult struct {
 	SearchErr error
 }
 
+var (
+	ErrProviderDiscoveryNotConfigured     = errors.New("provider discovery requires configured tool")
+	ErrProviderDiscoveryAlreadyConfigured = errors.New("provider discovery already configured")
+)
+
 type RefreshInstalledProgressEvent struct {
 	Provider      string
 	ProviderLabel string
@@ -1655,7 +1660,10 @@ func (a *App) InstallHighConfidenceProviderMatches(ctx context.Context, name, pr
 	}
 	spec, ok := cfg.Tools[name]
 	if !ok {
-		return nil, fmt.Errorf("tool %q not found", name)
+		return nil, fmt.Errorf("%w: tool %q not found", ErrProviderDiscoveryNotConfigured, name)
+	}
+	if len(spec.Providers) > 0 || spec.Fallback != nil {
+		return nil, fmt.Errorf("%w: tool %q already has provider candidates", ErrProviderDiscoveryAlreadyConfigured, name)
 	}
 	matches, matchErr := a.ProviderMatches(ctx, name, spec, providerFilter)
 	result := &ProviderMatchInstallResult{Matches: matches, SearchErr: matchErr}
