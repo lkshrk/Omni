@@ -162,6 +162,9 @@ func TestGitHubFallbackHasSavedReleaseMetadata(t *testing.T) {
 	if !githubFallbackHasSavedReleaseMetadata(valid) {
 		t.Fatal("githubFallbackHasSavedReleaseMetadata(valid) = false, want true")
 	}
+	if githubFallbackHasSavedReleaseMetadata(nil) {
+		t.Fatal("githubFallbackHasSavedReleaseMetadata accepted nil fallback")
+	}
 
 	missingAsset := *valid
 	missingAsset.Recipe.AssetDownloadURL = ""
@@ -179,6 +182,18 @@ func TestGitHubFallbackHasSavedReleaseMetadata(t *testing.T) {
 	wrongSource.Source.Type = ""
 	if githubFallbackHasSavedReleaseMetadata(&wrongSource) {
 		t.Fatal("githubFallbackHasSavedReleaseMetadata accepted non-GitHub source")
+	}
+
+	missingRepo := *valid
+	missingRepo.Source.Repo = ""
+	if githubFallbackHasSavedReleaseMetadata(&missingRepo) {
+		t.Fatal("githubFallbackHasSavedReleaseMetadata accepted missing source repo")
+	}
+
+	wrongRecipe := *valid
+	wrongRecipe.Recipe.Type = config.FallbackRecipeRawCommands
+	if githubFallbackHasSavedReleaseMetadata(&wrongRecipe) {
+		t.Fatal("githubFallbackHasSavedReleaseMetadata accepted non-release-asset recipe")
 	}
 }
 
