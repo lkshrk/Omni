@@ -1094,6 +1094,45 @@ func TestReconcile_SyncsAndUpgradesTools(t *testing.T) {
 	}
 }
 
+func TestReconcile_SkipsDotfilesWhenDisabled(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	a, cfgPath := newImportApp(t)
+	if err := config.Save(cfgPath, &config.RootConfig{
+		Settings: config.Settings{
+			DotsRepo:     t.TempDir(),
+			DotsDisabled: config.BoolPtr(true),
+		},
+		Hosts: map[string][]string{"testhost": {"base"}},
+		Groups: []*config.GroupConfig{
+			{Name: "testhost", Special: "host"},
+			{Name: "base"},
+		},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	var progress []string
+	result, err := a.Reconcile(context.Background(), app.ReconcileOptions{
+		Progress: func(message string) {
+			progress = append(progress, message)
+		},
+	})
+	if err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+	if result == nil {
+		t.Fatal("result = nil")
+	}
+	if result.DotsSkipped != "dotfiles disabled for this host" {
+		t.Fatalf("DotsSkipped = %q, want disabled reason", result.DotsSkipped)
+	}
+	for _, message := range progress {
+		if message == "syncing dotfiles..." || message == "committing dotfiles..." {
+			t.Fatalf("progress = %v, want no dotfile sync/commit when dots are disabled", progress)
+		}
+	}
+}
+
 type reconcileUpgradeStub struct {
 	stubProvider
 	upgraded map[string]bool
