@@ -110,6 +110,30 @@ func TestSettingsManagerHelpSubject(t *testing.T) {
 	}
 }
 
+func TestProbeFirstPrefersAvailableHintThenPriority(t *testing.T) {
+	binDir := t.TempDir()
+	writeProbeExecutable := func(name string) {
+		t.Helper()
+		path := filepath.Join(binDir, name)
+		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write executable %s: %v", name, err)
+		}
+	}
+	writeProbeExecutable("pnpm")
+	writeProbeExecutable("npm")
+	t.Setenv("PATH", binDir)
+
+	if got := probeFirst("pnpm", []string{"npm"}); got != "pnpm" {
+		t.Fatalf("probeFirst available hint = %q, want pnpm", got)
+	}
+	if got := probeFirst("bun", []string{"pnpm", "npm"}); got != "pnpm" {
+		t.Fatalf("probeFirst missing hint fallback = %q, want pnpm", got)
+	}
+	if got := probeFirst("", []string{"bun"}); got != "" {
+		t.Fatalf("probeFirst missing candidates = %q, want empty", got)
+	}
+}
+
 func TestRefreshInstalledScanLabelUsesExplicitInstallWithForEcosystem(t *testing.T) {
 	a := New(filepath.Join(t.TempDir(), "settings.json"))
 	a.registry = provider.NewRegistry()
