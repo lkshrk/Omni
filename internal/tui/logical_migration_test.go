@@ -146,6 +146,76 @@ func TestLogicalMigration_SearchInstallAndAddPersistsLogicalProvider(t *testing.
 	}
 }
 
+func TestLogicalMigration_ConfiguredEmptyToolInstallKeyAddsHighConfidenceProviderMatch(t *testing.T) {
+	prov := &searchOKProvider{
+		okProvider: okProvider{name: "brew"},
+		results: []provider.SearchResult{{
+			Name:     "prettier",
+			Provider: "brew",
+		}},
+	}
+	a, cfgPath := newCmdApp(t, prov, nil)
+	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
+		Version:  config.CurrentVersion,
+		Settings: config.Settings{ProviderPriority: []string{"brew"}},
+		Tools: map[string]config.ToolSpec{
+			"prettier": {},
+		},
+		Groups: []*config.GroupConfig{tuiTestHostGroup("prettier")},
+	}); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	m := modelForCmds(a)
+	m.allTools = []*database.ToolCache{{
+		Name:      "prettier",
+		Provider:  "",
+		Installed: false,
+		Tracked:   true,
+	}}
+	m.applyFilter()
+	if len(m.visibleTools) != 1 || m.visibleTools[0].Name != "prettier" || m.visibleTools[0].Provider != "" {
+		t.Fatalf("visibleTools = %+v, want missing configured prettier row with empty provider", m.visibleTools)
+	}
+	if m.displaySection(m.visibleTools[0]) != sectionOutOfSync || m.syncStatusOf(m.visibleTools[0]) != syncMissing {
+		t.Fatalf("row classification = section:%v sync:%v, want missing out-of-sync", m.displaySection(m.visibleTools[0]), m.syncStatusOf(m.visibleTools[0]))
+	}
+
+	tm, cmd := m.Update(pressRune('i'))
+	got := tm.(Model)
+	if !got.loading {
+		t.Fatal("loading should be true after pressing install on missing configured tool")
+	}
+	if got.rowOpKey != toolKey("prettier", "") {
+		t.Fatalf("rowOpKey = %q, want empty-provider prettier operation", got.rowOpKey)
+	}
+	if got.rowOpStatus != "Installing prettier…" {
+		t.Fatalf("rowOpStatus = %q, want install status", got.rowOpStatus)
+	}
+	if cmd == nil {
+		t.Fatal("install key should dispatch an install command")
+	}
+	msg := runLastBatchCommand(t, cmd)
+	done, ok := msg.(opCompleteMsg)
+	if !ok {
+		t.Fatalf("command msg = %T, want opCompleteMsg", msg)
+	}
+	if done.err != nil {
+		t.Fatalf("install command error = %v", done.err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	providers := cfg.Tools["prettier"].Providers
+	if len(providers) != 1 || providers[0].Provider != "brew" {
+		t.Fatalf("providers = %+v, want high-confidence brew match saved", providers)
+	}
+	if len(done.tools) != 1 || done.tools[0].Provider != "brew" || !done.tools[0].Installed {
+		t.Fatalf("done.tools = %+v, want installed brew row", done.tools)
+	}
+}
+
 func TestLogicalMigration_SearchInstallAndAddAsksGroup(t *testing.T) {
 	prov := &okProvider{name: "brew"}
 	a, cfgPath := newCmdApp(t, prov, nil)
