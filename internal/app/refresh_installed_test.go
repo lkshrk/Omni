@@ -580,3 +580,43 @@ func TestRefreshInstalled_MultiManagerPath_UsesFullSlashPackage(t *testing.T) {
 		t.Fatalf("cache = installed:%v owner:%q version:%q, want true/npm/1.52.0", got.Installed, got.InstalledWith, got.Version.String)
 	}
 }
+
+func TestRefreshInstalled_UsesCachedConcreteOwnerWhenDifferentFromConfiguredProvider(t *testing.T) {
+	brew := &stubProvider{name: "brew", available: true}
+	apt := &bulkCheckingStub{
+		stubProvider: stubProvider{name: "apt", available: true},
+		bulk:         map[string]string{"ripgrep": "14.1.1"},
+	}
+	a, cfgPath := newImportApp(t, brew, apt)
+	ctx := context.Background()
+
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("ripgrep"),
+		}},
+	}); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name:          "ripgrep",
+		Provider:      "brew",
+		Package:       "ripgrep",
+		Installed:     true,
+		InstalledWith: "apt",
+	}); err != nil {
+		t.Fatalf("seed cached owner: %v", err)
+	}
+
+	if err := a.RefreshInstalled(ctx, nil); err != nil {
+		t.Fatalf("RefreshInstalled: %v", err)
+	}
+
+	got, err := a.DB().Get(ctx, "ripgrep", "brew", "ripgrep")
+	if err != nil {
+		t.Fatalf("Get ripgrep: %v", err)
+	}
+	if !got.Installed || got.InstalledWith != "apt" || got.Version.String != "14.1.1" {
+		t.Fatalf("cache = installed:%v owner:%q version:%q, want true/apt/14.1.1", got.Installed, got.InstalledWith, got.Version.String)
+	}
+}
