@@ -41,6 +41,24 @@ func TestBestGitHubReleaseAsset_SkipsMetadataAndWrongBinary(t *testing.T) {
 	}
 }
 
+func TestBestGitHubReleaseAsset_AcceptsPlatformAliases(t *testing.T) {
+	osNames := githubOSNames()
+	archNames := githubArchNames()
+	osName := osNames[len(osNames)-1]
+	archName := archNames[len(archNames)-1]
+	wantName := fmt.Sprintf("gh_2.93.0_%s_%s.tar.gz", osName, archName)
+
+	asset, ok := bestGitHubReleaseAsset([]githubAsset{
+		{ID: "1", Name: wantName, BrowserDownloadURL: "https://example.test/gh.tar.gz"},
+	}, "gh")
+	if !ok {
+		t.Fatal("bestGitHubReleaseAsset returned no match for platform aliases")
+	}
+	if asset.Name != wantName {
+		t.Fatalf("asset = %q, want %q", asset.Name, wantName)
+	}
+}
+
 func TestNormalizedGitHubPublishedAt(t *testing.T) {
 	got, err := normalizedGitHubPublishedAt("2026-06-07T12:34:56+02:00")
 	if err != nil {
