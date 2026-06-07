@@ -120,10 +120,11 @@ Accepted GitHub repo forms are `owner/repo`, `github.com/owner/repo`, `https://g
 Browser URLs with extra paths, queries, or fragments are rejected.
 
 This resolves the latest stable GitHub release, selects an asset for the
-current OS/architecture, and writes `settings.json` only. It does not install
-the tool immediately. Resolution is strict: if Omni cannot read the release
-metadata or cannot find a supported current-platform asset, the command fails
-and leaves the existing config unchanged.
+current OS/architecture when possible, and writes `settings.json` only. It does
+not install the tool immediately. Resolver/API failures leave the existing
+config unchanged. If the release exists but has no supported current-platform
+asset, Omni saves an `unsupported` draft with source and release metadata so the
+recipe can be edited later.
 
 Later `tools install <tool>` and `tools sync` still try the native system
 manager first. They use the saved fallback only when Omni has explicit cached

@@ -222,12 +222,14 @@ Fallback fields:
 | `commands.uninstall` | Optional shell command for fallback uninstall. If absent, uninstall is unavailable. |
 | `commands.upgrade` | Optional shell command for fallback upgrade. If absent, Omni reuses `install`. |
 
-`omni tools fallback <tool> --from-github owner/repo` writes the fallback only
+`omni tools fallback <tool> --from-github owner/repo` writes a usable fallback
 after resolving latest stable release metadata and a supported asset for the
 current platform. If `--from-github` is omitted, Omni uses the tool's `git`
-value when it is a GitHub URL. If resolution fails, the existing config is
-unchanged. The command is config-only; install, sync, and upgrade decide later
-whether to use the saved GitHub fallback recipe.
+value when it is a GitHub URL. If the release exists but has no current-platform
+asset, Omni saves an `unsupported` draft with source and release provenance for
+later editing. Resolver/API failures leave the existing config unchanged. The
+command is config-only; install, sync, and upgrade decide later whether to use
+the saved GitHub fallback recipe.
 Accepted GitHub repo forms are `owner/repo`, `github.com/owner/repo`, `https://github.com/owner/repo`,
 `https://github.com/owner/repo.git`, and `git@github.com:owner/repo.git`.
 Browser URLs with extra paths, queries, or fragments are rejected.
