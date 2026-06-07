@@ -228,7 +228,7 @@ func TestImport_UnavailableProviderSkipped(t *testing.T) {
 }
 
 func TestImport_EcosystemProvidersWithRegisteredDelegatesSkipped(t *testing.T) {
-	// system is the ecosystem provider whose ListInstalled output is a subset of
+	// system is the provider family whose ListInstalled output is a subset of
 	// its concrete delegates. It must be skipped during a full import to
 	// prevent duplicate config entries.
 	brewStub := &stubProvider{
@@ -250,7 +250,7 @@ func TestImport_EcosystemProvidersWithRegisteredDelegatesSkipped(t *testing.T) {
 
 	// Only the concrete provider (brew) should contribute; system is skipped.
 	if len(result.Added) != 1 {
-		t.Errorf("Added = %d, want 1 (brew only, system ecosystem provider skipped)", len(result.Added))
+		t.Errorf("Added = %d, want 1 (brew only, system provider family skipped)", len(result.Added))
 	}
 	if len(result.Added) > 0 && result.Added[0].Provider != "brew" {
 		t.Errorf("Added[0].Provider = %q, want brew", result.Added[0].Provider)
@@ -296,8 +296,8 @@ func TestImport_ResolvedDefaultConcreteDoesNotWriteInstallWith(t *testing.T) {
 }
 
 func TestImport_EcosystemProviderExplicitFilter(t *testing.T) {
-	// When the user explicitly requests an ecosystem provider via --provider,
-	// the skip set is bypassed and the ecosystem provider IS iterated.
+	// When the user explicitly requests a provider family via --provider,
+	// the skip set is bypassed and the provider family IS iterated.
 	system := &stubProvider{
 		name:      "system",
 		available: true,
@@ -310,7 +310,7 @@ func TestImport_EcosystemProviderExplicitFilter(t *testing.T) {
 		t.Fatalf("Import: %v", err)
 	}
 	if len(result.Added) != 0 {
-		t.Errorf("Added = %d, want 0 (ecosystem providers are skipped)", len(result.Added))
+		t.Errorf("Added = %d, want 0 (provider families are skipped)", len(result.Added))
 	}
 }
 

@@ -16,7 +16,7 @@ syncs dotfiles through a Git-backed GNU Stow repo.
 ## What Omni Manages
 
 - **Tools**: system packages, Node packages, and Python packages through
-  portable ecosystem providers.
+  provider families.
 - **Dotfiles**: Stow package directories, symlink repair, ignored paths,
   host-specific variants, Git commit/push flows, and optional native services.
 - **Hosts and groups**: per-machine activation of reusable tool and dotfile

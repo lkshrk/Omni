@@ -1056,8 +1056,8 @@ func TestEnableDisableProvider_ValidatesAndPersists(t *testing.T) {
 	if len(enabled) != 0 {
 		t.Fatalf("enabled list = %v, want none disabled", enabled)
 	}
-	if _, err := a.DisableProvider(context.Background(), "brew"); err == nil || !strings.Contains(err.Error(), `"brew" is not an ecosystem provider`) {
-		t.Fatalf("DisableProvider(brew) err = %v, want ecosystem-provider validation", err)
+	if _, err := a.DisableProvider(context.Background(), "brew"); err == nil || !strings.Contains(err.Error(), `"brew" is not a provider family`) {
+		t.Fatalf("DisableProvider(brew) err = %v, want provider-family validation", err)
 	}
 
 	cfg, err := config.Load(cfgPath)

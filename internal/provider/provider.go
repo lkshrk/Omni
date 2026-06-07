@@ -105,7 +105,7 @@ type Searcher interface {
 	Search(ctx context.Context, query string) ([]SearchResult, error)
 }
 
-// ConcreteResolver is optionally implemented by ecosystem providers that delegate
+// ConcreteResolver is optionally implemented by provider families that delegate
 // to one of several concrete providers. ResolvedName returns the Name() of the
 // active concrete delegate, or an error when no delegate is available.
 type ConcreteResolver interface {
@@ -149,7 +149,7 @@ type OutdatedInfo struct {
 	DateSource    string
 }
 
-// MultiManagerBulkChecker is optionally implemented by ecosystem providers that
+// MultiManagerBulkChecker is optionally implemented by provider families that
 // delegate to multiple concrete backends (e.g. python → uv/pip3/pip).
 // Unlike BulkChecker (which only probes the currently-active backend),
 // InstalledByManager probes ALL available backends and records which concrete
@@ -181,38 +181,38 @@ type OutdatedInfoChecker interface {
 	OutdatedInfoMap(ctx context.Context) (map[string]OutdatedInfo, error)
 }
 
-// ManagerOutdatedChecker is optionally implemented by ecosystem providers that
+// ManagerOutdatedChecker is optionally implemented by provider families that
 // can attribute outdated packages to their concrete managers.
 type ManagerOutdatedChecker interface {
 	// OutdatedByManager returns manager→lowercase-name→latestVersion.
 	OutdatedByManager(ctx context.Context) (map[string]map[string]string, error)
 }
 
-// ManagerOutdatedInfoChecker is optionally implemented by ecosystem providers
+// ManagerOutdatedInfoChecker is optionally implemented by provider families
 // that can preserve manager attribution and PM update metadata.
 type ManagerOutdatedInfoChecker interface {
 	OutdatedInfoByManager(ctx context.Context) (map[string]map[string]OutdatedInfo, error)
 }
 
-// ManagerUpgrader is optionally implemented by ecosystem providers that can upgrade
+// ManagerUpgrader is optionally implemented by provider families that can upgrade
 // a tool using the concrete manager that owns the current installation.
 type ManagerUpgrader interface {
 	UpgradeWithManager(ctx context.Context, tool Tool, manager string) error
 }
 
-// ManagerUninstaller is optionally implemented by ecosystem providers that can
+// ManagerUninstaller is optionally implemented by provider families that can
 // uninstall a tool from a caller-selected concrete manager.
 type ManagerUninstaller interface {
 	UninstallFrom(ctx context.Context, tool Tool, manager string) error
 }
 
-// ManagerInstaller is optionally implemented by ecosystem providers that can
+// ManagerInstaller is optionally implemented by provider families that can
 // install a tool using a caller-selected concrete manager.
 type ManagerInstaller interface {
 	InstallWithManager(ctx context.Context, tool Tool, manager string) error
 }
 
-// ManagerInstalledChecker is optionally implemented by ecosystem providers that can
+// ManagerInstalledChecker is optionally implemented by provider families that can
 // check a tool using a concrete manager rather than the currently resolved one.
 type ManagerInstalledChecker interface {
 	IsInstalledWithManager(ctx context.Context, tool Tool, manager string) (bool, string, error)

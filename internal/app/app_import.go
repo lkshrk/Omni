@@ -15,7 +15,7 @@ type ImportOptions struct {
 	DryRun                 bool     // collect what would be added without writing the config
 	Provider               string   // restrict to one provider; empty = all
 	Group                  string   // destination group name; empty = current machine group
-	SkipEcosystemProviders []string // ecosystem provider names whose tools are excluded (e.g. ["python"])
+	SkipEcosystemProviders []string // provider-family names whose tools are excluded (e.g. ["python"])
 }
 
 // ImportResult summarises what happened during an import.

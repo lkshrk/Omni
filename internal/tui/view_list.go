@@ -15,7 +15,7 @@ import (
 // renderFilterBar renders the provider and group filter pill bars.
 // Group pills are shown when the config has reusable groups. The current host
 // group is added separately so users can filter local-only entries.
-// Provider pills are ecosystem providers from the provider registry, not a
+// Provider pills are provider families from the provider registry, not a
 // projection of the currently visible tools.
 // Returns empty string when neither condition is met.
 func renderFilterBar(m Model) string {

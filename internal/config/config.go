@@ -241,8 +241,8 @@ type Settings struct {
 	// ProviderUpdateQuarantine overrides UpdateQuarantine by logical provider,
 	// concrete provider, or concrete manager. Concrete values win in app logic.
 	ProviderUpdateQuarantine map[string]string `json:"provider_update_quarantine,omitempty"`
-	// Ecosystems holds settings for portable ecosystem providers such as system,
-	// node, and python.
+	// Ecosystems holds legacy provider-family settings for system, node, and
+	// python.
 	Ecosystems map[string]EcosystemSettings `json:"ecosystems,omitempty"`
 	// FallbackBinDir is the default directory for fallback-installed binaries.
 	FallbackBinDir string `json:"fallback_bin_dir,omitempty"`
@@ -255,7 +255,7 @@ type Settings struct {
 	DotsDisabled *bool `json:"dots_disabled,omitempty"`
 	// DotsGit controls git behaviour for the dots repo.
 	DotsGit DotsGitConfig `json:"dots_git"`
-	// DisabledProviders lists ecosystem provider names ("system", "node", "python")
+	// DisabledProviders lists provider-family names ("system", "node", "python")
 	// that are disabled on this machine. Stored in host_settings, not global settings.
 	DisabledProviders []string `json:"disabled_providers,omitempty"`
 	// ProviderPriority ranks concrete providers for this host.
@@ -455,7 +455,7 @@ func (c *RootConfig) EffectiveSettings(shortHostname string) Settings {
 		s.DotsDisabled = hs.DotsDisabled
 	}
 	// DisabledProviders: nil means "inherit global"; an explicit empty list
-	// means "enable all ecosystem providers on this host".
+	// means "enable all provider families on this host".
 	if hs.DisabledProviders != nil {
 		s.DisabledProviders = cloneStringSlice(hs.DisabledProviders)
 	}
@@ -544,7 +544,7 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 			if _, ok := providerSet[spec.Provider]; !ok {
 				errs = append(errs, ValidationError{Path: path + ".provider", Message: fmt.Sprintf("unknown provider %q", spec.Provider)})
 			} else if _, ok := ecosystemSet[spec.Provider]; ok {
-				errs = append(errs, ValidationError{Path: path + ".provider", Message: fmt.Sprintf("ecosystem provider %q is not supported in tools providers", spec.Provider)})
+				errs = append(errs, ValidationError{Path: path + ".provider", Message: fmt.Sprintf("provider family %q is not supported in tools providers", spec.Provider)})
 			}
 		}
 		if spec.InstallWith != "" && !allowInstallWith {

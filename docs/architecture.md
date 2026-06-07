@@ -84,7 +84,7 @@ At app startup, Omni registers concrete providers first:
 - `zypper`
 - `pip`
 
-Then it registers enabled ecosystem providers:
+Then it registers enabled provider families:
 
 - `system`, backed by available concrete system managers
 - `node`, backed by the configured Node manager
