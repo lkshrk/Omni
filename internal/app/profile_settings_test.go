@@ -489,6 +489,19 @@ func TestSettingsManagerOptions(t *testing.T) {
 	}
 }
 
+func TestSystemProviderPriorityDisplayFiltersInvalidAndDuplicateProviders(t *testing.T) {
+	a, _ := newImportApp(t)
+	priority := []string{"apt", "missing", "brew", "apt", "dnf"}
+	want := []string{"apt", "brew", "dnf"}
+
+	if got := app.DefaultSystemProviderPriorityDisplay(priority); !slices.Equal(got, want) {
+		t.Fatalf("DefaultSystemProviderPriorityDisplay = %v, want %v", got, want)
+	}
+	if got := a.SystemProviderPriorityDisplay(priority); !slices.Equal(got, want) {
+		t.Fatalf("SystemProviderPriorityDisplay = %v, want %v", got, want)
+	}
+}
+
 func TestSettingsManagerHelp(t *testing.T) {
 	a, _ := newImportApp(t)
 
@@ -522,6 +535,9 @@ func TestSettingsManagerHelp(t *testing.T) {
 
 	if got := app.DefaultSettingsManagerHelp("missing"); got != "" {
 		t.Fatalf("DefaultSettingsManagerHelp(missing) = %q, want empty", got)
+	}
+	if got := (*app.App)(nil).SettingsManagerHelp(provider.EcosystemNode); got != "JS package manager (auto = bun preferred, then pnpm, then npm)." {
+		t.Fatalf("nil SettingsManagerHelp(node) = %q, want default node help", got)
 	}
 }
 
@@ -563,6 +579,29 @@ func TestSettingsProviderHelp(t *testing.T) {
 
 	if got := app.DefaultSettingsProviderHelp("missing"); got != "" {
 		t.Fatalf("DefaultSettingsProviderHelp(missing) = %q, want empty", got)
+	}
+	if got := (*app.App)(nil).SettingsProviderHelp(provider.EcosystemSystem); got != "Track system tools on this machine (apt/apk/dnf/zypper/pacman/brew)." {
+		t.Fatalf("nil SettingsProviderHelp(system) = %q, want default system help", got)
+	}
+}
+
+func TestSettingsProviderAndManagerMembershipHelpers(t *testing.T) {
+	a, _ := newImportApp(t)
+
+	if !a.IsManagerForEcosystem(provider.EcosystemNode, "bun") {
+		t.Fatal("IsManagerForEcosystem(node, bun) = false, want true")
+	}
+	if a.IsManagerForEcosystem(provider.EcosystemNode, "uv") {
+		t.Fatal("IsManagerForEcosystem(node, uv) = true, want false")
+	}
+	if !a.IsConcreteProviderForEcosystem(provider.EcosystemSystem, "brew") {
+		t.Fatal("IsConcreteProviderForEcosystem(system, brew) = false, want true")
+	}
+	if a.IsConcreteProviderForEcosystem(provider.EcosystemSystem, provider.EcosystemSystem) {
+		t.Fatal("IsConcreteProviderForEcosystem(system, system) = true, want false for provider family")
+	}
+	if a.IsConcreteProviderForEcosystem(provider.EcosystemNode, "brew") {
+		t.Fatal("IsConcreteProviderForEcosystem(node, brew) = true, want false")
 	}
 }
 
