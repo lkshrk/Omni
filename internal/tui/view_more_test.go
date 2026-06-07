@@ -3906,6 +3906,27 @@ func TestInlineDetailLines_WrongProviderShowsActualAndExpected(t *testing.T) {
 	}
 }
 
+func TestInlineDetailLines_ConfiguredProviderCandidates(t *testing.T) {
+	tool := &database.ToolCache{Name: "prettier", Provider: "", Installed: false, Tracked: true}
+	m := baseModel([]*database.ToolCache{tool})
+	m.toolProviderCandidates = map[string][]config.ToolInstallSpec{
+		"prettier": {
+			{Provider: "npm", Package: "prettier"},
+			{Provider: "brew", Package: "prettier"},
+		},
+	}
+	m.applyFilter()
+
+	cols := newColWidthsWithProviderPins(m.visibleTools, nil, nil, m.toolProviderPins, nil, "", "", "", 120)
+	lines := inlineDetailLines(m, 120, cols)
+	got := stripANSIEscapeSequences(strings.Join(lines, "\n"))
+	for _, want := range []string{"available providers", "npm/prettier", "brew/prettier"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("inline detail = %q, want %q", got, want)
+		}
+	}
+}
+
 func TestToolInlineHints_PinnedProviderOffersRemoveOverride(t *testing.T) {
 	tool := &database.ToolCache{Name: "typescript", Provider: "node", Installed: true, InstalledWith: "npm", Tracked: true}
 	m := baseModel([]*database.ToolCache{tool})

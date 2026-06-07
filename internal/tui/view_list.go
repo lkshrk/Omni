@@ -919,6 +919,8 @@ func inlineDetailLines(m Model, width int, cols colWidths) []string {
 		lines = append(lines, line)
 	}
 
+	lines = append(lines, providerCandidateDetailLines(m, t, prefix, wrapWidth)...)
+
 	lines = append(lines, rowActionErrorAdviceLines(m, t, prefix, wrapWidth)...)
 
 	if line := listConfirmationHintsLine(m, t, hintPrefix); line != "" {
@@ -979,6 +981,38 @@ func providerMismatchDetailLine(m Model, t *database.ToolCache, prefix string) s
 		p.styleStatus.Render(t.InstalledWith) +
 		p.styleHelp.Render(", expected "+source+" ") +
 		p.styleStatus.Render(desired)
+}
+
+func providerCandidateDetailLines(m Model, t *database.ToolCache, prefix string, wrapWidth int) []string {
+	if t == nil || t.Installed || !t.Tracked {
+		return nil
+	}
+	candidates := m.toolProviderCandidates[t.Name]
+	if len(candidates) < 2 {
+		return nil
+	}
+	labels := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		provider := strings.TrimSpace(candidate.Provider)
+		if provider == "" {
+			continue
+		}
+		pkg := strings.TrimSpace(candidate.EffectivePackage(t.Name))
+		if pkg == "" {
+			pkg = t.Name
+		}
+		labels = append(labels, provider+"/"+pkg)
+	}
+	if len(labels) < 2 {
+		return nil
+	}
+	textLine := "available providers: " + strings.Join(labels, ", ")
+	wrapped := text.WrapText(textLine, wrapWidth)
+	lines := make([]string, 0, len(wrapped))
+	for _, line := range wrapped {
+		lines = append(lines, prefix+m.palette.styleHelp.Render(line))
+	}
+	return lines
 }
 
 func desiredConcreteProviderForTool(m Model, t *database.ToolCache) (string, string) {

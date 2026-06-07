@@ -113,6 +113,7 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 	m.toolIgnoreSet = msg.toolIgnoreSet
 	m.groupIgnoreSet = msg.groupIgnoreSet
 	m.toolProviderPins = msg.toolProviderPins
+	m.toolProviderCandidates = msg.toolProviderCandidates
 	m.toolFallbacks = msg.toolFallbacks
 	m.toolGit = msg.toolGit
 	m.effectivePythonManager = msg.effectivePythonManager

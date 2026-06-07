@@ -11,12 +11,13 @@ import (
 func TestStartupSnapshotBuildsConfigDerivedState(t *testing.T) {
 	brew := &stubProvider{name: "brew", available: true}
 	system := &stubProvider{name: "system", available: true}
-	a, cfgPath := newImportApp(t, system, brew)
+	apt := &stubProvider{name: "apt", available: true}
+	a, cfgPath := newImportApp(t, system, brew, apt)
 	host := testShortHostname()
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Settings: config.Settings{AutoImport: true},
 		Tools: map[string]config.ToolSpec{
-			"ripgrep": {Providers: []config.ToolInstallSpec{{Provider: "brew"}}},
+			"ripgrep": {Providers: []config.ToolInstallSpec{{Provider: "brew"}, {Provider: "apt", Package: "ripgrep"}}},
 			"fd":      {Providers: []config.ToolInstallSpec{{Provider: "brew"}}, Ignore: true},
 		},
 		Hosts: map[string][]string{host: {"dev"}},
@@ -70,6 +71,9 @@ func TestStartupSnapshotBuildsConfigDerivedState(t *testing.T) {
 	}
 	if got := snapshot.ToolProviderPins["ripgrep"]; got != "" {
 		t.Fatalf("tool provider pins = %v, want no ripgrep pin", snapshot.ToolProviderPins)
+	}
+	if got := snapshot.ToolProviderCandidates["ripgrep"]; len(got) != 2 || got[0].Provider != "brew" || got[1].Provider != "apt" {
+		t.Fatalf("tool provider candidates = %+v, want brew then apt", got)
 	}
 }
 

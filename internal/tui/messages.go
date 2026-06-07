@@ -21,6 +21,7 @@ type toolsLoadedMsg struct {
 	toolIgnoreSet          map[string]bool
 	groupIgnoreSet         map[string]map[string]bool
 	toolProviderPins       map[string]string
+	toolProviderCandidates map[string][]config.ToolInstallSpec
 	toolFallbacks          map[string]config.FallbackSpec
 	toolGit                map[string]string
 	hostInfo               *app.HostInfo
