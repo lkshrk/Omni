@@ -605,6 +605,20 @@ func TestRefreshInstalled_UsesCachedConcreteOwnerWhenDifferentFromConfiguredProv
 	}
 }
 
+func TestRefreshInstalled_UsesCachedConcreteOwnerSlowPath(t *testing.T) {
+	brew, apt := cachedOwnerSlowPathProviders()
+	a, cfgPath := newImportApp(t, brew, apt)
+	ctx := context.Background()
+
+	seedRipgrepBrewWithCachedAptOwner(t, a, cfgPath, ctx)
+
+	if err := a.RefreshInstalled(ctx, nil); err != nil {
+		t.Fatalf("RefreshInstalled: %v", err)
+	}
+
+	assertRipgrepBrewCache(t, a, ctx, "apt", "14.1.2")
+}
+
 func TestRefreshInstalled_FallsBackWhenCachedOwnerUnavailable(t *testing.T) {
 	brew := &bulkCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},

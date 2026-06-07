@@ -528,6 +528,33 @@ func TestRefreshProviderInstalled_UsesCachedConcreteOwnerMetadata(t *testing.T) 
 	assertRipgrepBrewOwnedByAptMetadata(t, a, cfgPath, ctx)
 }
 
+func TestRefreshProviderInstalled_UsesCachedConcreteOwnerSlowPath(t *testing.T) {
+	brew, apt := cachedOwnerSlowPathProviders()
+	a, cfgPath := newImportApp(t, brew, apt)
+	ctx := context.Background()
+
+	seedRipgrepBrewWithCachedAptOwner(t, a, cfgPath, ctx)
+
+	if err := a.RefreshProviderInstalled(ctx, "brew"); err != nil {
+		t.Fatalf("RefreshProviderInstalled: %v", err)
+	}
+
+	assertRipgrepBrewCache(t, a, ctx, "apt", "14.1.2")
+}
+
+func cachedOwnerSlowPathProviders() (*stubProvider, *stubProvider) {
+	brew := &stubProvider{name: "brew", available: true}
+	apt := &stubProvider{
+		name:      "apt",
+		available: true,
+		installed: []provider.InstalledTool{{
+			Tool:    provider.Tool{Name: "ripgrep", Provider: "apt"},
+			Version: "14.1.2",
+		}},
+	}
+	return brew, apt
+}
+
 func TestRefreshProviderInstalled_FallsBackWhenCachedOwnerUnavailable(t *testing.T) {
 	brew := &bulkCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
