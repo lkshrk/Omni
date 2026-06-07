@@ -217,6 +217,9 @@ func TestDashboardReconcilePlan_PlansActionableToolDotAndIgnoreSteps(t *testing.
 	if got := reconcileStepIDs(steps); !reflect.DeepEqual(got, wantIDs) {
 		t.Fatalf("step IDs = %#v, want %#v; steps=%#v", got, wantIDs, steps)
 	}
+	if !app.DashboardReconcilePlanHasStep(steps, app.ReconcileStepSyncTools) {
+		t.Fatalf("steps = %#v, want sync tools step", steps)
+	}
 
 	assertReconcileDetail(t, steps, app.ReconcileStepSyncTools, "install 1 missing tool, add 1 local tool")
 	assertReconcileDetail(t, steps, app.ReconcileStepUpgradeTools, "1 outdated tool")
