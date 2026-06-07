@@ -523,7 +523,7 @@ func (a *App) validateEcosystemProvider(name string) error {
 	if a.IsEcosystemProvider(name) {
 		return nil
 	}
-	return fmt.Errorf("%q is not an ecosystem provider (supported: %s)", name, strings.Join(a.EcosystemProviderNames(), ", "))
+	return fmt.Errorf("%q is not a provider family (supported: %s)", name, strings.Join(a.EcosystemProviderNames(), ", "))
 }
 
 func (a *App) EcosystemProviderNames() []string {
@@ -906,7 +906,7 @@ func (a *App) SaveSettings(_ context.Context, s config.Settings) error {
 	})
 }
 
-// SaveDisabledProviders sets which ecosystem providers are disabled on this machine.
+// SaveDisabledProviders sets which provider families are disabled on this machine.
 // Persisted to host_settings[shortHostname].disabled_providers.
 // All other host settings and global settings are preserved.
 func (a *App) SaveDisabledProviders(_ context.Context, disabled []string) error {
@@ -971,7 +971,7 @@ func (a *App) PinEcosystemForHost(_ context.Context, ecosystem, concrete string)
 			}
 			hs.SetEcosystemPriority(provider.EcosystemSystem, next)
 		default:
-			return fmt.Errorf("unknown ecosystem provider %q", ecosystem)
+			return fmt.Errorf("unknown provider family %q", ecosystem)
 		}
 		return nil
 	})
@@ -1032,7 +1032,7 @@ func (a *App) ResetCache(ctx context.Context) error {
 }
 
 // EffectiveManagers returns the binary names that the python and node
-// ecosystem providers would actually use right now, honouring settings hints and
+// provider families would actually use right now, honouring settings hints and
 // falling back to PATH probing in preference order.
 //
 // Returns "" for either ecosystem when no suitable binary is found on PATH.
@@ -1047,8 +1047,8 @@ func (a *App) effectiveManagersFromSettings(s config.Settings) (pythonBin, nodeB
 	return pythonBin, nodeBin
 }
 
-// ResolvedEcosystemProviders returns a map of ecosystem provider name → concrete
-// provider name for every ecosystem provider in the registry that implements
+// ResolvedEcosystemProviders returns a map of provider-family name → concrete
+// provider name for every provider family in the registry that implements
 // provider.ConcreteResolver and is currently available.
 func (a *App) ResolvedEcosystemProviders(ctx context.Context) map[string]string {
 	ecos := a.registry.EcosystemProviders()

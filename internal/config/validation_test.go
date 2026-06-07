@@ -203,8 +203,8 @@ func TestValidateRoot_EcosystemProviderEntryRejected(t *testing.T) {
 		Known:      []string{"system", "brew"},
 		Ecosystems: []string{"system"},
 	})
-	if !containsErrorMessage(errs, "ecosystem provider") {
-		t.Errorf("expected ecosystem-provider error, got %v", errs)
+	if !containsErrorMessage(errs, "provider family") {
+		t.Errorf("expected provider-family error, got %v", errs)
 	}
 }
 

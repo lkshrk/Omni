@@ -274,13 +274,13 @@ type Model struct {
 	toolGit                 map[string]string
 
 	// provider filter — [All] [system] [node] [python] …
-	providerNames  []string // ordered ecosystem provider names from the app/provider registry
+	providerNames  []string // ordered provider-family names from the app/provider registry
 	providerTabIdx int      // 0=All, 1+=providerNames[idx-1]
 
 	// effective package-manager binaries resolved at load time via PATH probing.
 	effectivePythonManager string // e.g. "uv", "pip3"
 	effectiveNodeManager   string // e.g. "bun", "pnpm", "npm"
-	effectiveSystemManager string // e.g. "brew", "apt" — concrete PM backing the system ecosystem provider
+	effectiveSystemManager string // e.g. "brew", "apt" — concrete PM backing the system provider family
 
 	// group-assignment tab
 	hostInfo    *app.HostInfo

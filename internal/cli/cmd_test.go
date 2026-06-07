@@ -5425,10 +5425,10 @@ func TestSettingsDisableProvider_RejectsConcreteProvider(t *testing.T) {
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "settings", "disable-provider", "brew"})
 	err := cmd.Execute()
 	if err == nil {
-		t.Fatal("settings disable-provider brew succeeded, want ecosystem-provider validation error")
+		t.Fatal("settings disable-provider brew succeeded, want provider-family validation error")
 	}
-	if !strings.Contains(err.Error(), `"brew" is not an ecosystem provider`) {
-		t.Fatalf("error = %v, want ecosystem-provider validation", err)
+	if !strings.Contains(err.Error(), `"brew" is not a provider family`) {
+		t.Fatalf("error = %v, want provider-family validation", err)
 	}
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,6 +44,53 @@ func TestWriteVersionedSchemaRefusesToRewriteExistingVersion(t *testing.T) {
 	err := writeVersionedSchema(out, build())
 	if err == nil {
 		t.Fatal("expected existing versioned schema with different content to be rejected")
+	}
+	if !strings.Contains(err.Error(), "bump config.CurrentVersion") {
+		t.Fatalf("error = %v, want CurrentVersion guidance", err)
+	}
+}
+
+func TestWriteVersionedSchemaAllowsDescriptionOnlyChanges(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "omni.settings.v1.schema.json")
+	doc := build()
+	oldDoc := build()
+	oldDoc.Description = "old generated wording"
+	data, err := encodeSchema(oldDoc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(out, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeVersionedSchema(out, doc); err != nil {
+		t.Fatalf("writeVersionedSchema description-only change: %v", err)
+	}
+	written, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(written, data) {
+		t.Fatal("description-only versioned schema comparison rewrote existing schema")
+	}
+}
+
+func TestWriteVersionedSchemaRejectsStructuralChanges(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "omni.settings.v1.schema.json")
+	doc := build()
+	oldDoc := build()
+	oldDoc.Type = "array"
+	data, err := encodeSchema(oldDoc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(out, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err = writeVersionedSchema(out, doc)
+	if err == nil {
+		t.Fatal("expected structural schema change to be rejected")
 	}
 	if !strings.Contains(err.Error(), "bump config.CurrentVersion") {
 		t.Fatalf("error = %v, want CurrentVersion guidance", err)
@@ -127,8 +175,34 @@ func TestToolSchemaUsesConcreteProviderCandidates(t *testing.T) {
 	}
 	for _, ecosystem := range []string{"system", "node", "python"} {
 		if hasEnum(providerProp.Enum, ecosystem) {
-			t.Fatalf("ToolInstallSpec provider enum includes ecosystem provider %q: %v", ecosystem, providerProp.Enum)
+			t.Fatalf("ToolInstallSpec provider enum includes provider family %q: %v", ecosystem, providerProp.Enum)
 		}
+	}
+}
+
+func TestLegacyEcosystemSchemaDescriptionsUseProviderFamilyWording(t *testing.T) {
+	root := build()
+	settings := root.Defs["Settings"]
+	if settings == nil {
+		t.Fatal("Settings schema missing")
+	}
+	ecosystems := settings.Properties["ecosystems"]
+	if ecosystems == nil {
+		t.Fatal("settings.ecosystems schema missing")
+	}
+	if !strings.Contains(ecosystems.Description, "Legacy provider-family settings") {
+		t.Fatalf("settings.ecosystems description = %q, want legacy provider-family wording", ecosystems.Description)
+	}
+	if strings.Contains(ecosystems.Description, "ecosystem provider") {
+		t.Fatalf("settings.ecosystems description contains stale wording: %q", ecosystems.Description)
+	}
+
+	legacy := root.Defs["EcosystemSettings"]
+	if legacy == nil {
+		t.Fatal("EcosystemSettings schema missing")
+	}
+	if !strings.Contains(legacy.Description, "provider family") {
+		t.Fatalf("EcosystemSettings description = %q, want provider-family wording", legacy.Description)
 	}
 }
 

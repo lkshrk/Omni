@@ -166,7 +166,7 @@ func buildWithID(id string) *schema {
 						Default:     false,
 					},
 					"ecosystems": {
-						Description: "Settings for portable ecosystem providers such as system, node, and python.",
+						Description: "Legacy provider-family settings for system, node, and python. New config should prefer provider_priority and tool providers[].",
 						Type:        "object",
 						Properties: map[string]*schema{
 							provider.EcosystemSystem: ref("#/$defs/EcosystemSettings"),
@@ -199,7 +199,7 @@ func buildWithID(id string) *schema {
 				Type:        "object",
 				Properties: map[string]*schema{
 					"ecosystems": {
-						Description: "Host-specific ecosystem manager and priority overrides.",
+						Description: "Legacy host-specific provider-family manager and priority overrides.",
 						Type:        "object",
 						Properties: map[string]*schema{
 							provider.EcosystemSystem: ref("#/$defs/EcosystemSettings"),
@@ -227,16 +227,16 @@ func buildWithID(id string) *schema {
 				AdditionalProperties: false,
 			},
 			"EcosystemSettings": {
-				Description: "Settings for one ecosystem provider.",
+				Description: "Legacy settings for one provider family.",
 				Type:        "object",
 				Properties: map[string]*schema{
 					"manager": {
-						Description: "Concrete manager used by manager-backed ecosystems. Omit to auto-detect.",
+						Description: "Concrete manager used by manager-backed provider families. Omit to auto-detect.",
 						Type:        "string",
 						Examples:    managerNames,
 					},
 					"priority": {
-						Description: "Ordered concrete provider/manager priority for this ecosystem.",
+						Description: "Ordered concrete provider/manager priority for this provider family.",
 						Type:        "array",
 						Items:       &schema{Type: "string", MinLength: 1},
 						Examples:    []any{systemPriority},
@@ -706,6 +706,13 @@ func writeVersionedSchema(out string, doc *schema) error {
 	switch {
 	case err == nil:
 		if !bytes.Equal(existing, data) {
+			equal, cmpErr := equalIgnoringSchemaDescriptions(existing, data)
+			if cmpErr != nil {
+				return fmt.Errorf("compare %s: %w", out, cmpErr)
+			}
+			if equal {
+				return nil
+			}
 			return fmt.Errorf("%s already exists with different content; bump config.CurrentVersion to create a new schema version instead of rewriting an old one", out)
 		}
 		return nil
@@ -714,6 +721,46 @@ func writeVersionedSchema(out string, doc *schema) error {
 	default:
 		return writeBytes(out, data)
 	}
+}
+
+func equalIgnoringSchemaDescriptions(left, right []byte) (bool, error) {
+	var leftJSON any
+	if err := json.Unmarshal(left, &leftJSON); err != nil {
+		return false, err
+	}
+	var rightJSON any
+	if err := json.Unmarshal(right, &rightJSON); err != nil {
+		return false, err
+	}
+	stripSchemaDescriptions(leftJSON)
+	stripSchemaDescriptions(rightJSON)
+	return jsonDeepEqual(leftJSON, rightJSON), nil
+}
+
+func stripSchemaDescriptions(v any) {
+	switch value := v.(type) {
+	case map[string]any:
+		delete(value, "description")
+		for _, child := range value {
+			stripSchemaDescriptions(child)
+		}
+	case []any:
+		for _, child := range value {
+			stripSchemaDescriptions(child)
+		}
+	}
+}
+
+func jsonDeepEqual(left, right any) bool {
+	leftData, err := json.Marshal(left)
+	if err != nil {
+		return false
+	}
+	rightData, err := json.Marshal(right)
+	if err != nil {
+		return false
+	}
+	return bytes.Equal(leftData, rightData)
 }
 
 func writeSchema(out string, doc *schema) error {

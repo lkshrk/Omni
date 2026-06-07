@@ -277,7 +277,7 @@ func (a *App) initProviderRegistry(settings config.Settings) {
 	a.registry.RegisterWithMetadata(pip.New(exec), provider.BuiltinMetadata("pip"))
 	a.registry.RegisterWithMetadata(script.New(exec), provider.BuiltinMetadata("script"))
 
-	// ecosystem providers — skipped when the user has disabled them on this machine.
+	// provider families — skipped when the user has disabled them on this machine.
 	disabledSet := make(map[string]bool, len(settings.DisabledProviders))
 	for _, p := range settings.DisabledProviders {
 		disabledSet[p] = true

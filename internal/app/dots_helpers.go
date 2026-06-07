@@ -36,7 +36,7 @@ func (a *App) DotsStowInstalled(ctx context.Context) bool {
 	return dots.CheckInstalled(ctx, executor.New())
 }
 
-// InstallDotsStow installs GNU Stow through the system ecosystem provider.
+// InstallDotsStow installs GNU Stow through the system provider family.
 // Callers own user consent before invoking this; this method may run the host
 // package manager and can require privileges depending on the concrete manager.
 func (a *App) InstallDotsStow(ctx context.Context) error {

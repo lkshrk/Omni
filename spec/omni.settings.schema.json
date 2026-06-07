@@ -217,11 +217,11 @@
       "additionalProperties": false
     },
     "EcosystemSettings": {
-      "description": "Settings for one ecosystem provider.",
+      "description": "Legacy settings for one provider family.",
       "type": "object",
       "properties": {
         "manager": {
-          "description": "Concrete manager used by manager-backed ecosystems. Omit to auto-detect.",
+          "description": "Concrete manager used by manager-backed provider families. Omit to auto-detect.",
           "examples": [
             "bun",
             "pnpm",
@@ -232,7 +232,7 @@
           "type": "string"
         },
         "priority": {
-          "description": "Ordered concrete provider/manager priority for this ecosystem.",
+          "description": "Ordered concrete provider/manager priority for this provider family.",
           "examples": [
             [
               "apt",
@@ -551,7 +551,7 @@
           "type": "string"
         },
         "ecosystems": {
-          "description": "Host-specific ecosystem manager and priority overrides.",
+          "description": "Legacy host-specific provider-family manager and priority overrides.",
           "type": "object",
           "properties": {
             "node": {
@@ -592,7 +592,7 @@
           "type": "string"
         },
         "ecosystems": {
-          "description": "Settings for portable ecosystem providers such as system, node, and python.",
+          "description": "Legacy provider-family settings for system, node, and python. New config should prefer provider_priority and tool providers[].",
           "examples": [
             {
               "node": {

@@ -971,7 +971,7 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 
 	// BulkChecker path: single backend, bulk map lookup.
 	// On error fall through to per-tool slow path so a partial failure (e.g. a
-	// ecosystem provider whose delegate doesn't support bulk) doesn't skip all tools.
+	// provider family whose delegate doesn't support bulk) doesn't skip all tools.
 	if mbc, ok := p.(provider.MetadataBulkChecker); ok {
 		if metadata, err := mbc.InstalledMetadataMap(ctx); err == nil {
 			m := installedMapFromMetadata(metadata)
@@ -1179,7 +1179,7 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 		configuredNames[name] = struct{}{}
 	}
 
-	// Build ecosystem maps so discovered tools get the ecosystem provider name
+	// Build provider-family maps so discovered tools get the provider-family name
 	// as their config provider label while scope checks can use the resolved
 	// concrete manager for default ecosystem tools.
 	stop := profile.Start("app.refresh.discovered.resolve_ecosystems")

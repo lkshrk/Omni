@@ -19,7 +19,7 @@ func scriptValidation(opts map[string]string) []config.ValidationError {
 	return config.ValidateRoot(root, scriptProvVal())
 }
 
-// scriptProvVal includes ecosystem providers so a passing script tool proves
+// scriptProvVal includes provider families so a passing script tool proves
 // the ecosystem-only rule is skipped for the script provider.
 func scriptProvVal() config.ProviderValidation {
 	return config.ProviderValidation{
