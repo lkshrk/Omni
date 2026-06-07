@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -402,6 +403,40 @@ func TestSyncAll_DryRunDoesNotWriteClaims(t *testing.T) {
 	}
 	if hostGroup := findTestGroup(updated, "testhost"); hostGroup != nil && len(hostGroup.Tools) > 0 {
 		t.Fatalf("dry-run wrote hostname group claims: %+v", hostGroup.Tools)
+	}
+}
+
+func TestSyncAll_ReportsInvalidDiscoveredClaimWithoutWritingConfig(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	brew := &installTracker{stubProvider: stubProvider{name: "brew", available: true}}
+	a, cfgPath := newImportApp(t, brew)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{testHostGroup()}}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	discovered := []*database.ToolCache{
+		{Name: "prettier", Provider: "node", Package: "prettier", Installed: true, Tracked: false},
+	}
+
+	result, err := a.SyncAll(context.Background(), app.SyncAllOptions{Discovered: discovered})
+	if err == nil {
+		t.Fatal("SyncAll err = nil, want invalid discovered provider error")
+	}
+	if !strings.Contains(err.Error(), `provider "node" must be concrete`) {
+		t.Fatalf("SyncAll err = %v, want concrete-provider validation", err)
+	}
+	if len(result.ClaimedNames) != 0 {
+		t.Fatalf("ClaimedNames = %v, want none", result.ClaimedNames)
+	}
+	if len(result.Failures) != 1 || result.Failures[0].Name != "prettier" || result.Failures[0].Provider != "node" {
+		t.Fatalf("Failures = %+v, want prettier/node claim failure", result.Failures)
+	}
+
+	updated, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if _, ok := updated.Tools["prettier"]; ok {
+		t.Fatalf("prettier was written despite failed discovered claim: %+v", updated.Tools["prettier"])
 	}
 }
 
