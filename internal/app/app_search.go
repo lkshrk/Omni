@@ -44,6 +44,13 @@ type ProviderMatch struct {
 	Confidence ProviderMatchConfidence
 }
 
+type ProviderMatchInstallResult struct {
+	Matches   []ProviderMatch
+	Added     []config.ToolInstallSpec
+	Installed config.ToolInstallSpec
+	SearchErr error
+}
+
 type RefreshInstalledProgressEvent struct {
 	Provider      string
 	ProviderLabel string
@@ -1639,6 +1646,54 @@ func (a *App) ProviderMatches(ctx context.Context, logicalName string, spec conf
 		return matches[i].Name < matches[j].Name
 	})
 	return matches, errors.Join(err, settingsErr)
+}
+
+func (a *App) InstallHighConfidenceProviderMatches(ctx context.Context, name, providerFilter string) (*ProviderMatchInstallResult, error) {
+	cfg, err := a.loadConfig()
+	if err != nil {
+		return nil, err
+	}
+	spec, ok := cfg.Tools[name]
+	if !ok {
+		return nil, fmt.Errorf("tool %q not found", name)
+	}
+	matches, matchErr := a.ProviderMatches(ctx, name, spec, providerFilter)
+	result := &ProviderMatchInstallResult{Matches: matches, SearchErr: matchErr}
+	for _, match := range matches {
+		if match.Confidence != ProviderMatchHigh {
+			continue
+		}
+		result.Added = append(result.Added, config.ToolInstallSpec{
+			Provider: match.Provider,
+			Package:  match.Name,
+			Options:  cloneOptionMap(match.Options),
+		})
+	}
+	if len(result.Added) == 0 {
+		return result, fmt.Errorf("no high-confidence provider match for %q", name)
+	}
+	result.Installed = result.Added[0]
+	if err := a.withConfig(func(cfg *config.RootConfig) error {
+		spec, ok := cfg.Tools[name]
+		if !ok {
+			return fmt.Errorf("tool %q not found", name)
+		}
+		for i, entry := range result.Added {
+			if i == 0 {
+				setDefaultToolProviderCandidate(&spec, entry)
+				continue
+			}
+			setToolProviderCandidate(&spec, entry)
+		}
+		cfg.Tools[name] = spec
+		return nil
+	}); err != nil {
+		return result, err
+	}
+	if err := a.Install(ctx, name, result.Installed.Provider); err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func (a *App) providerPriorityRank(priority []string) map[string]int {
