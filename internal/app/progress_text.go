@@ -549,7 +549,7 @@ func SyncAllFailureRows(result *SyncAllResult) BulkToolFailureRows {
 	}
 	rows.merge(bulkToolFailureRows(result.Failures))
 	syncRows := SyncFailureRows(result.SyncResult)
-	rows.PrivilegedActions = syncRows.PrivilegedActions
+	rows.merge(syncRows)
 	return rows
 }
 
