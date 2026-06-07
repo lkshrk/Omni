@@ -97,6 +97,10 @@ func withNPMRegistryMain() int {
 		fmt.Fprintf(os.Stderr, "set OMNI_TEST_NPM_REGISTRY_URL: %v\n", err)
 		return 1
 	}
+	if err := os.Setenv("OMNI_TEST_ISOLATED", "1"); err != nil {
+		fmt.Fprintf(os.Stderr, "set OMNI_TEST_ISOLATED: %v\n", err)
+		return 1
+	}
 	cmd := cli.NewRootCmd()
 	cmd.SetArgs(os.Args[1:])
 	if err := cmd.Execute(); err != nil {
