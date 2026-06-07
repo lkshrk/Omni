@@ -53,12 +53,16 @@ Examples:
 						fmt.Fprintf(out, "  - skipped: %s (%s): update quarantined\n", name, event.Tool.Provider)
 						return
 					}
+					if strings.HasPrefix(strings.TrimSpace(event.Message), "Skipped ") {
+						fmt.Fprintf(out, "  - skipped: %s (%s): externally managed; cannot self-upgrade\n", name, event.Tool.Provider)
+						return
+					}
 					fmt.Fprintf(out, "  ✓ upgraded: %s (%s)\n", name, event.Tool.Provider)
 				}, app.UpgradeAllOptions{Force: force})
 				if err != nil {
 					return err
 				}
-				if result == nil || len(result.Upgraded)+len(result.Failures)+len(result.Quarantined) == 0 {
+				if result == nil || len(result.Upgraded)+len(result.Failures)+len(result.Quarantined)+len(result.Skipped) == 0 {
 					fmt.Fprintln(out, "Nothing to upgrade.")
 				}
 				for _, line := range app.UpgradeAllSummaryLines(result) {
