@@ -769,8 +769,12 @@ func TestUpgradeAllProgressText(t *testing.T) {
 		{name: "started with target version", message: "Upgrading bat…", targetVersion: "1.2.3", want: "Upgrading tools 1/2: bat (1.2.3)…"},
 		{name: "done with target version", message: "Upgraded bat", targetVersion: "1.2.3", want: "Upgrading tools 1/2: bat (1.2.3) upgraded"},
 		{name: "done", message: "Upgraded bat", want: "Upgrading tools 1/2: bat upgraded"},
+		{name: "admin approval message", message: "Admin approval needed for bat", want: "Upgrading tools 1/2: bat needs admin approval"},
 		{name: "admin skipped", message: "Skipped upgrading bat", err: errors.New("requires sudo: apt upgrade bat"), want: "Upgrading tools 1/2: bat needs admin approval"},
+		{name: "skipped", message: "Skipped upgrading bat", want: "Upgrading tools 1/2: bat skipped"},
 		{name: "failed", message: "Failed upgrading bat", want: "Upgrading tools 1/2: bat failed"},
+		{name: "custom", message: "Checking cache", want: "Upgrading tools 1/2: checking cache"},
+		{name: "empty", want: "Upgrading tools 1/2: bat"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -784,6 +788,15 @@ func TestUpgradeAllProgressText(t *testing.T) {
 				t.Fatalf("UpgradeAllProgressText = %q, want %q", got, tt.want)
 			}
 		})
+	}
+
+	got := UpgradeAllProgressText(isync.ProgressEvent{
+		Tool:    provider.Tool{Name: "bat", Provider: "brew"},
+		Message: "Upgraded bat",
+	}, 0, 0)
+	want := "Upgrading tools: bat upgraded"
+	if got != want {
+		t.Fatalf("UpgradeAllProgressText without total = %q, want %q", got, want)
 	}
 }
 
