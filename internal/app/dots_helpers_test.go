@@ -3,10 +3,43 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/dots"
 )
+
+func TestAppendUniqueStringValue(t *testing.T) {
+	values := []string{"base", "work"}
+	if got := appendUniqueStringValue(values, "work"); !reflect.DeepEqual(got, values) {
+		t.Fatalf("append existing = %v, want %v", got, values)
+	}
+	got := appendUniqueStringValue(values, "personal")
+	want := []string{"base", "work", "personal"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("append new = %v, want %v", got, want)
+	}
+}
+
+func TestCompactDotGroupLabel(t *testing.T) {
+	tests := []struct {
+		name   string
+		groups []string
+		want   string
+	}{
+		{name: "none", want: ""},
+		{name: "one", groups: []string{"base"}, want: "base"},
+		{name: "two", groups: []string{"base", "work"}, want: "base,work"},
+		{name: "many", groups: []string{"base", "work", "personal", "laptop"}, want: "base,work,+2"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := compactDotGroupLabel(tt.groups); got != tt.want {
+				t.Fatalf("compactDotGroupLabel(%v) = %q, want %q", tt.groups, got, tt.want)
+			}
+		})
+	}
+}
 
 func TestDotConflictIsManagedStowLink(t *testing.T) {
 	tests := []struct {
