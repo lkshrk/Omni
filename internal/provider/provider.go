@@ -99,6 +99,46 @@ type SourceMetadata struct {
 	URL   string
 }
 
+// GitHubSourceHint derives a GitHub SourceMetadata from the first of the given
+// values that parses as a GitHub repository URL/spec. It accepts https/http/ssh
+// and git+ prefixed forms. Returns the zero value when none parse.
+func GitHubSourceHint(values ...string) SourceMetadata {
+	for _, raw := range values {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			continue
+		}
+		value = strings.TrimPrefix(value, "git+")
+		value = strings.TrimPrefix(value, "https://")
+		value = strings.TrimPrefix(value, "http://")
+		value = strings.TrimPrefix(value, "git@")
+		value = strings.TrimPrefix(value, "www.")
+		switch {
+		case strings.HasPrefix(value, "github.com:"):
+			value = strings.TrimPrefix(value, "github.com:")
+		case strings.HasPrefix(value, "github.com/"):
+			value = strings.TrimPrefix(value, "github.com/")
+		default:
+			continue
+		}
+		parts := strings.Split(value, "/")
+		if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+			continue
+		}
+		repo := strings.TrimSuffix(parts[1], ".git")
+		if repo == "" {
+			continue
+		}
+		return SourceMetadata{
+			Type:  SourceTypeGitHub,
+			Owner: parts[0],
+			Repo:  repo,
+			URL:   "https://github.com/" + parts[0] + "/" + repo,
+		}
+	}
+	return SourceMetadata{}
+}
+
 // Searcher is implemented by providers that support registry search.
 // It is optional — providers that do not implement it are silently skipped.
 type Searcher interface {

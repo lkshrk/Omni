@@ -1393,13 +1393,23 @@ func TestSearchResultDisplayProviderKeepsConcreteWithinSameEcosystem(t *testing.
 	}
 }
 
-func TestClassifyProviderMatch_HighConfidenceExactPackage(t *testing.T) {
+func TestClassifyProviderMatch_HighConfidenceExactPackageNative(t *testing.T) {
+	got := app.ClassifyProviderMatch("ripgrep", config.ToolSpec{}, provider.SearchResult{
+		Name:     "ripgrep",
+		Provider: "brew",
+	})
+	if got != app.ProviderMatchHigh {
+		t.Fatalf("ClassifyProviderMatch = %q, want high", got)
+	}
+}
+
+func TestClassifyProviderMatch_EcosystemExactPackageWeakWithoutSource(t *testing.T) {
 	got := app.ClassifyProviderMatch("prettier", config.ToolSpec{}, provider.SearchResult{
 		Name:     "prettier",
 		Provider: "npm",
 	})
-	if got != app.ProviderMatchHigh {
-		t.Fatalf("ClassifyProviderMatch = %q, want high", got)
+	if got != app.ProviderMatchWeak {
+		t.Fatalf("ClassifyProviderMatch = %q, want weak (npm name match, no source)", got)
 	}
 }
 
@@ -1448,12 +1458,54 @@ func TestClassifyProviderMatch_WeakForLooseSearchHit(t *testing.T) {
 	}
 }
 
+func TestClassifyProviderMatch_NativeNameMatchHigh(t *testing.T) {
+	for _, prov := range []string{"brew", "apt", "dnf", "apk", "pacman", "zypper"} {
+		got := app.ClassifyProviderMatch("ripgrep", config.ToolSpec{}, provider.SearchResult{
+			Name:     "ripgrep",
+			Provider: prov,
+		})
+		if got != app.ProviderMatchHigh {
+			t.Fatalf("native %s name match = %q, want high", prov, got)
+		}
+	}
+}
+
+func TestClassifyProviderMatch_EcosystemNameMatchWeakWithoutSource(t *testing.T) {
+	for _, prov := range []string{"npm", "pnpm", "bun", "pip", "uv"} {
+		got := app.ClassifyProviderMatch("ripgrep", config.ToolSpec{}, provider.SearchResult{
+			Name:     "ripgrep",
+			Provider: prov,
+		})
+		if got != app.ProviderMatchWeak {
+			t.Fatalf("ecosystem %s name match = %q, want weak (no source/git)", prov, got)
+		}
+	}
+}
+
+func TestClassifyProviderMatch_EcosystemNameMatchHighWithMatchingGitSource(t *testing.T) {
+	got := app.ClassifyProviderMatch("prettier", config.ToolSpec{
+		Git: "https://github.com/prettier/prettier",
+	}, provider.SearchResult{
+		Name:     "prettier",
+		Provider: "npm",
+		Source: provider.SourceMetadata{
+			Type: provider.SourceTypeGitHub,
+			URL:  "https://github.com/prettier/prettier",
+		},
+	})
+	if got != app.ProviderMatchHigh {
+		t.Fatalf("ecosystem npm match with matching git source = %q, want high", got)
+	}
+}
+
 func TestProviderMatches_SortsHighConfidenceByProviderPriority(t *testing.T) {
+	prettierSource := provider.SourceMetadata{Type: provider.SourceTypeGitHub, URL: "https://github.com/prettier/prettier"}
 	brew := &searchStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		results: []provider.SearchResult{{
 			Name:     "prettier",
 			Provider: "brew",
+			Source:   prettierSource,
 		}},
 	}
 	npm := &searchStub{
@@ -1461,6 +1513,7 @@ func TestProviderMatches_SortsHighConfidenceByProviderPriority(t *testing.T) {
 		results: []provider.SearchResult{{
 			Name:     "prettier",
 			Provider: "npm",
+			Source:   prettierSource,
 		}},
 	}
 	a, _ := newImportApp(t, brew, npm)
@@ -1468,7 +1521,7 @@ func TestProviderMatches_SortsHighConfidenceByProviderPriority(t *testing.T) {
 		t.Fatalf("SaveSettings: %v", err)
 	}
 
-	matches, err := a.ProviderMatches(context.Background(), "prettier", config.ToolSpec{}, "")
+	matches, err := a.ProviderMatches(context.Background(), "prettier", config.ToolSpec{Git: "https://github.com/prettier/prettier"}, "")
 	if err != nil {
 		t.Fatalf("ProviderMatches: %v", err)
 	}
@@ -1515,6 +1568,51 @@ func TestProviderMatches_PutsHighConfidenceBeforeWeakEvenWhenPriorityIsLower(t *
 	}
 	if matches[1].Provider != "npm" || matches[1].Confidence != app.ProviderMatchWeak {
 		t.Fatalf("second match = %+v, want weak npm", matches[1])
+	}
+}
+
+func TestProviderMatches_ConsensusSourcePromotesEcosystemToHigh(t *testing.T) {
+	src := provider.SourceMetadata{Type: provider.SourceTypeGitHub, URL: "https://github.com/prettier/prettier"}
+	brew := &searchStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		results:      []provider.SearchResult{{Name: "prettier", Provider: "brew", Source: src}},
+	}
+	npm := &searchStub{
+		stubProvider: stubProvider{name: "npm", available: true},
+		results:      []provider.SearchResult{{Name: "prettier", Provider: "npm", Source: src}},
+	}
+	a, _ := newImportApp(t, brew, npm)
+	if err := a.SaveSettings(context.Background(), config.Settings{ProviderPriority: []string{"npm", "brew"}}); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+	// Tool has no git; two providers agreeing on the same source repo is the only signal.
+	matches, err := a.ProviderMatches(context.Background(), "prettier", config.ToolSpec{}, "")
+	if err != nil {
+		t.Fatalf("ProviderMatches: %v", err)
+	}
+	if len(matches) != 2 {
+		t.Fatalf("matches = %d, want 2", len(matches))
+	}
+	for _, m := range matches {
+		if m.Confidence != app.ProviderMatchHigh {
+			t.Fatalf("provider %s confidence = %q, want high via source consensus", m.Provider, m.Confidence)
+		}
+	}
+}
+
+func TestProviderMatches_SingleEcosystemSourceStaysWeakWithoutConsensus(t *testing.T) {
+	src := provider.SourceMetadata{Type: provider.SourceTypeGitHub, URL: "https://github.com/prettier/prettier"}
+	npm := &searchStub{
+		stubProvider: stubProvider{name: "npm", available: true},
+		results:      []provider.SearchResult{{Name: "prettier", Provider: "npm", Source: src}},
+	}
+	a, _ := newImportApp(t, npm)
+	matches, err := a.ProviderMatches(context.Background(), "prettier", config.ToolSpec{}, "")
+	if err != nil {
+		t.Fatalf("ProviderMatches: %v", err)
+	}
+	if len(matches) != 1 || matches[0].Confidence != app.ProviderMatchWeak {
+		t.Fatalf("matches = %+v, want single weak npm (no git, no consensus)", matches)
 	}
 }
 
@@ -1580,11 +1678,13 @@ func TestProviderMatches_ReturnsMatchesWithPartialSearchError(t *testing.T) {
 }
 
 func TestInstallHighConfidenceProviderMatches_AddsAllHighAndInstallsPriority(t *testing.T) {
+	prettierSource := provider.SourceMetadata{Type: provider.SourceTypeGitHub, URL: "https://github.com/prettier/prettier"}
 	brew := &searchStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		results: []provider.SearchResult{{
 			Name:     "prettier",
 			Provider: "brew",
+			Source:   prettierSource,
 		}},
 	}
 	npm := &searchStub{
@@ -1592,6 +1692,7 @@ func TestInstallHighConfidenceProviderMatches_AddsAllHighAndInstallsPriority(t *
 		results: []provider.SearchResult{{
 			Name:     "prettier",
 			Provider: "npm",
+			Source:   prettierSource,
 		}},
 	}
 	a, cfgPath := newImportApp(t, brew, npm)
@@ -1602,7 +1703,7 @@ func TestInstallHighConfidenceProviderMatches_AddsAllHighAndInstallsPriority(t *
 		Version:  config.CurrentVersion,
 		Settings: config.Settings{ProviderPriority: []string{"npm", "brew"}},
 		Tools: map[string]config.ToolSpec{
-			"prettier": {},
+			"prettier": {Git: "https://github.com/prettier/prettier"},
 		},
 		Groups: []*config.GroupConfig{{Name: "web", Tools: []config.ToolEntry{{Name: "prettier"}}}},
 	}); err != nil {
@@ -1637,11 +1738,13 @@ func TestInstallHighConfidenceProviderMatches_AddsAllHighAndInstallsPriority(t *
 }
 
 func TestAddHighConfidenceProviderMatches_AddsAllHighWithoutInstalling(t *testing.T) {
+	prettierSource := provider.SourceMetadata{Type: provider.SourceTypeGitHub, URL: "https://github.com/prettier/prettier"}
 	brew := &searchStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		results: []provider.SearchResult{{
 			Name:     "prettier",
 			Provider: "brew",
+			Source:   prettierSource,
 		}},
 	}
 	npm := &searchStub{
@@ -1649,6 +1752,7 @@ func TestAddHighConfidenceProviderMatches_AddsAllHighWithoutInstalling(t *testin
 		results: []provider.SearchResult{{
 			Name:     "prettier",
 			Provider: "npm",
+			Source:   prettierSource,
 		}},
 	}
 	a, cfgPath := newImportApp(t, brew, npm)
@@ -1656,7 +1760,7 @@ func TestAddHighConfidenceProviderMatches_AddsAllHighWithoutInstalling(t *testin
 		Version:  config.CurrentVersion,
 		Settings: config.Settings{ProviderPriority: []string{"npm", "brew"}},
 		Tools: map[string]config.ToolSpec{
-			"prettier": {},
+			"prettier": {Git: "https://github.com/prettier/prettier"},
 		},
 		Groups: []*config.GroupConfig{{Name: "web", Tools: []config.ToolEntry{{Name: "prettier"}}}},
 	}); err != nil {
@@ -1687,11 +1791,13 @@ func TestAddHighConfidenceProviderMatches_AddsAllHighWithoutInstalling(t *testin
 }
 
 func TestInstallHighConfidenceProviderMatchesWithState_ReturnsUpdatedToolsAndGroups(t *testing.T) {
+	prettierSource := provider.SourceMetadata{Type: provider.SourceTypeGitHub, URL: "https://github.com/prettier/prettier"}
 	brew := &searchStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		results: []provider.SearchResult{{
 			Name:     "prettier",
 			Provider: "brew",
+			Source:   prettierSource,
 		}},
 	}
 	npm := &searchStub{
@@ -1699,6 +1805,7 @@ func TestInstallHighConfidenceProviderMatchesWithState_ReturnsUpdatedToolsAndGro
 		results: []provider.SearchResult{{
 			Name:     "prettier",
 			Provider: "npm",
+			Source:   prettierSource,
 		}},
 	}
 	a, cfgPath := newImportApp(t, brew, npm)
@@ -1706,7 +1813,7 @@ func TestInstallHighConfidenceProviderMatchesWithState_ReturnsUpdatedToolsAndGro
 		Version:  config.CurrentVersion,
 		Settings: config.Settings{ProviderPriority: []string{"npm", "brew"}},
 		Tools: map[string]config.ToolSpec{
-			"prettier": {},
+			"prettier": {Git: "https://github.com/prettier/prettier"},
 		},
 		Groups: []*config.GroupConfig{{Name: "web", Tools: []config.ToolEntry{{Name: "prettier"}}}},
 	}); err != nil {
@@ -1733,6 +1840,7 @@ func TestInstallHighConfidenceProviderMatchesWithState_ReturnsUpdatedToolsAndGro
 }
 
 func TestInstallHighConfidenceProviderMatches_AddsConcreteProviderBreadth(t *testing.T) {
+	ripgrepSource := provider.SourceMetadata{Type: provider.SourceTypeGitHub, URL: "https://github.com/BurntSushi/ripgrep"}
 	providerNames := []string{"apk", "apt", "dnf", "pacman", "zypper", "pip"}
 	providers := make([]provider.Provider, 0, len(providerNames))
 	for _, providerName := range providerNames {
@@ -1741,6 +1849,7 @@ func TestInstallHighConfidenceProviderMatches_AddsConcreteProviderBreadth(t *tes
 			results: []provider.SearchResult{{
 				Name:     "ripgrep",
 				Provider: providerName,
+				Source:   ripgrepSource,
 			}},
 		})
 	}
@@ -1753,7 +1862,7 @@ func TestInstallHighConfidenceProviderMatches_AddsConcreteProviderBreadth(t *tes
 		Version:  config.CurrentVersion,
 		Settings: config.Settings{ProviderPriority: priority},
 		Tools: map[string]config.ToolSpec{
-			"ripgrep": {},
+			"ripgrep": {Git: "https://github.com/BurntSushi/ripgrep"},
 		},
 		Groups: []*config.GroupConfig{{Name: "base", Tools: []config.ToolEntry{{Name: "ripgrep"}}}},
 	}); err != nil {
@@ -1790,11 +1899,13 @@ func TestInstallHighConfidenceProviderMatches_AddsConcreteProviderBreadth(t *tes
 }
 
 func TestSync_ConfiguredToolAutoAddsHighConfidenceProviderMatches(t *testing.T) {
+	prettierSource := provider.SourceMetadata{Type: provider.SourceTypeGitHub, URL: "https://github.com/prettier/prettier"}
 	brew := &searchStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		results: []provider.SearchResult{{
 			Name:     "prettier",
 			Provider: "brew",
+			Source:   prettierSource,
 		}},
 	}
 	npm := &searchStub{
@@ -1802,6 +1913,7 @@ func TestSync_ConfiguredToolAutoAddsHighConfidenceProviderMatches(t *testing.T) 
 		results: []provider.SearchResult{{
 			Name:     "prettier",
 			Provider: "npm",
+			Source:   prettierSource,
 		}},
 	}
 	a, cfgPath := newImportApp(t, brew, npm)
@@ -1812,7 +1924,7 @@ func TestSync_ConfiguredToolAutoAddsHighConfidenceProviderMatches(t *testing.T) 
 		Version:  config.CurrentVersion,
 		Settings: config.Settings{ProviderPriority: []string{"npm", "brew"}},
 		Tools: map[string]config.ToolSpec{
-			"prettier": {},
+			"prettier": {Git: "https://github.com/prettier/prettier"},
 		},
 		Hosts: map[string][]string{"testhost": {}},
 		Groups: []*config.GroupConfig{{
@@ -1843,11 +1955,13 @@ func TestSync_ConfiguredToolAutoAddsHighConfidenceProviderMatches(t *testing.T) 
 }
 
 func TestInstallHighConfidenceProviderMatches_SkipsEcosystemSearchCandidates(t *testing.T) {
+	prettierSource := provider.SourceMetadata{Type: provider.SourceTypeGitHub, URL: "https://github.com/prettier/prettier"}
 	node := &searchStub{
 		stubProvider: stubProvider{name: "node", available: true},
 		results: []provider.SearchResult{{
 			Name:     "prettier",
 			Provider: "node",
+			Source:   prettierSource,
 		}},
 	}
 	brew := &searchStub{
@@ -1855,6 +1969,7 @@ func TestInstallHighConfidenceProviderMatches_SkipsEcosystemSearchCandidates(t *
 		results: []provider.SearchResult{{
 			Name:     "prettier",
 			Provider: "brew",
+			Source:   prettierSource,
 		}},
 	}
 	npm := &searchStub{
@@ -1862,6 +1977,7 @@ func TestInstallHighConfidenceProviderMatches_SkipsEcosystemSearchCandidates(t *
 		results: []provider.SearchResult{{
 			Name:     "prettier",
 			Provider: "npm",
+			Source:   prettierSource,
 		}},
 	}
 	a, cfgPath := newImportApp(t, node, brew, npm)
@@ -1872,7 +1988,7 @@ func TestInstallHighConfidenceProviderMatches_SkipsEcosystemSearchCandidates(t *
 		Version:  config.CurrentVersion,
 		Settings: config.Settings{ProviderPriority: []string{"npm", "brew"}},
 		Tools: map[string]config.ToolSpec{
-			"prettier": {},
+			"prettier": {Git: "https://github.com/prettier/prettier"},
 		},
 		Groups: []*config.GroupConfig{{Name: "web", Tools: []config.ToolEntry{{Name: "prettier"}}}},
 	}); err != nil {

@@ -1603,21 +1603,88 @@ func ClassifyProviderMatch(logicalName string, spec config.ToolSpec, result prov
 	if resultName == "" || strings.TrimSpace(result.Provider) == "" {
 		return ProviderMatchNone
 	}
-	if samePackageName(resultName, logicalName) {
-		return ProviderMatchHigh
-	}
-	for _, install := range spec.Providers {
-		if samePackageName(resultName, install.EffectivePackage(logicalName)) {
-			return ProviderMatchHigh
-		}
-	}
-	if len(spec.Providers) == 0 && samePackageName(resultName, spec.DefaultInstallSpec().EffectivePackage(logicalName)) {
-		return ProviderMatchHigh
-	}
+	// A source/git match is decisive on any provider, including language ecosystems.
 	if sameGitHubSource(spec.Git, result.Source) {
 		return ProviderMatchHigh
 	}
+	// A bare package-name match is only high-confidence on native system package
+	// managers (brew/apt/dnf/…), whose registries are curated. Language ecosystems
+	// (npm/pip/…) routinely carry same-named squatter/wrapper packages, so a name
+	// match there is weak unless corroborated by a source/git match.
+	if providerNameMatch(logicalName, spec, resultName) && isNativeProvider(result.Provider) {
+		return ProviderMatchHigh
+	}
 	return ProviderMatchWeak
+}
+
+func providerNameMatch(logicalName string, spec config.ToolSpec, resultName string) bool {
+	if samePackageName(resultName, logicalName) {
+		return true
+	}
+	for _, install := range spec.Providers {
+		if samePackageName(resultName, install.EffectivePackage(logicalName)) {
+			return true
+		}
+	}
+	if len(spec.Providers) == 0 && samePackageName(resultName, spec.DefaultInstallSpec().EffectivePackage(logicalName)) {
+		return true
+	}
+	return false
+}
+
+// isNativeProvider reports whether name is a concrete system package manager
+// (brew/apt/dnf/apk/pacman/zypper) — the system ecosystem — as opposed to a
+// language ecosystem manager (npm/pip/…).
+func isNativeProvider(name string) bool {
+	return ToolProviderEcosystem(name) == provider.EcosystemSystem
+}
+
+// normalizedSourceRepoKey returns a lowercase "owner/repo" key for a GitHub
+// source hint, or "" when no usable repo can be derived.
+func normalizedSourceRepoKey(s provider.SourceMetadata) string {
+	if s.Type != provider.SourceTypeGitHub {
+		return ""
+	}
+	owner := strings.ToLower(strings.TrimSpace(s.Owner))
+	repo := strings.ToLower(strings.TrimSpace(s.Repo))
+	if (owner == "" || repo == "") && strings.TrimSpace(s.URL) != "" {
+		if o, r, err := parseGitHubRepo(s.URL); err == nil {
+			owner, repo = strings.ToLower(o), strings.ToLower(r)
+		}
+	}
+	if owner == "" || repo == "" {
+		return ""
+	}
+	return owner + "/" + repo
+}
+
+// promoteSourceConsensus raises weak name-matching matches to high when at least
+// two providers report the same upstream source repo for the tool. Agreement
+// across providers on a concrete repo is strong evidence the result is the real
+// tool, even on language ecosystems that lack a native curated registry. Only
+// name-matching results are eligible, so unrelated monorepo siblings sharing a
+// repo are not promoted.
+func promoteSourceConsensus(logicalName string, spec config.ToolSpec, matches []ProviderMatch) {
+	counts := make(map[string]int, len(matches))
+	for _, m := range matches {
+		if !providerNameMatch(logicalName, spec, strings.TrimSpace(m.Name)) {
+			continue
+		}
+		if key := normalizedSourceRepoKey(m.Source); key != "" {
+			counts[key]++
+		}
+	}
+	for i := range matches {
+		if matches[i].Confidence == ProviderMatchHigh {
+			continue
+		}
+		if !providerNameMatch(logicalName, spec, strings.TrimSpace(matches[i].Name)) {
+			continue
+		}
+		if key := normalizedSourceRepoKey(matches[i].Source); key != "" && counts[key] >= 2 {
+			matches[i].Confidence = ProviderMatchHigh
+		}
+	}
 }
 
 func (a *App) ProviderMatches(ctx context.Context, logicalName string, spec config.ToolSpec, providerFilter string) ([]ProviderMatch, error) {
@@ -1636,6 +1703,7 @@ func (a *App) ProviderMatches(ctx context.Context, logicalName string, spec conf
 		}
 		matches = append(matches, ProviderMatch{SearchResult: result, Confidence: confidence})
 	}
+	promoteSourceConsensus(logicalName, spec, matches)
 	rank := a.providerPriorityRank(defaultProviderPriority(settings))
 	sort.SliceStable(matches, func(i, j int) bool {
 		leftHigh := matches[i].Confidence == ProviderMatchHigh

@@ -75,7 +75,7 @@ esac
     }
   },
   "tools": {
-    "prettier": {}
+    "prettier": { "git": "https://github.com/prettier/prettier" }
   },
   "hosts": { "testhost": [] },
   "groups": [
