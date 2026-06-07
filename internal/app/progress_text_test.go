@@ -83,6 +83,52 @@ func TestRefreshProviderScanProgressText(t *testing.T) {
 	}
 }
 
+func TestRefreshProgressStatusBranches(t *testing.T) {
+	tests := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{
+			name: "scan without label",
+			got:  RefreshProviderScanProgressText(" ", 0, 0),
+			want: "Scanning… (0/0)",
+		},
+		{
+			name: "tool status without total",
+			got:  RefreshToolProgressStatus("node/bun", "typescript", 0, 0),
+			want: "Refreshing tools…",
+		},
+		{
+			name: "tool status with tool only",
+			got:  RefreshToolProgressStatus(" ", "typescript", 1, 2),
+			want: "Refreshing tools… 1/2: typescript",
+		},
+		{
+			name: "tool status with no active label",
+			got:  RefreshToolProgressStatus(" ", " ", 1, 2),
+			want: "Refreshing tools… 1/2",
+		},
+		{
+			name: "sync phase without total",
+			got:  SyncAllPhaseProgressText("checking providers…", 0),
+			want: "Syncing tools: checking providers…",
+		},
+		{
+			name: "sync phase empty defaults installed",
+			got:  SyncAllPhaseProgressText(" ", 3),
+			want: "Syncing tools 0/3: checking installed state…",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.got != tt.want {
+				t.Fatalf("progress text = %q, want %q", tt.got, tt.want)
+			}
+		})
+	}
+}
+
 func TestProviderMatchProgressText(t *testing.T) {
 	if got := providerMatchProgressText("ripgrep", nil); got != "" {
 		t.Fatalf("providerMatchProgressText empty = %q, want empty", got)
