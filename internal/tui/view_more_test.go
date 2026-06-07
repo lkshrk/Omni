@@ -4132,6 +4132,43 @@ func TestOpenFallbackEditor_PrefillsExistingRecipe(t *testing.T) {
 	}
 }
 
+func TestOpenFallbackEditor_PrefillsUnsupportedFallback(t *testing.T) {
+	tool := &database.ToolCache{Name: "gh", Provider: "system", Installed: false, Tracked: true}
+	m := baseModel([]*database.ToolCache{tool})
+	m.toolFallbacks = map[string]config.FallbackSpec{
+		"gh": {
+			Source:         config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "cli", Repo: "cli"},
+			Status:         config.FallbackStatusUnsupported,
+			Binary:         "gh",
+			ReleaseChannel: "stable",
+			Recipe: config.FallbackRecipe{
+				ReleaseID:   "330388700",
+				TagName:     "v2.93.0",
+				PublishedAt: "2026-05-27T17:47:41Z",
+			},
+		},
+	}
+
+	if cmd := m.openFallbackEditor(tool); cmd == nil {
+		t.Fatal("openFallbackEditor returned nil command")
+	}
+	if m.mode != viewFallbackEditor {
+		t.Fatalf("mode = %v, want fallback editor", m.mode)
+	}
+	fields := m.fallbackEditor.fields
+	if fields[fallbackFieldRepo] != "cli/cli" ||
+		fields[fallbackFieldBinary] != "gh" ||
+		fields[fallbackFieldInstallCommand] != "" ||
+		fields[fallbackFieldCheckCommand] != "" ||
+		fields[fallbackFieldReleaseChannel] != "stable" {
+		t.Fatalf("fallback editor fields = %#v, want unsupported draft values without commands", fields)
+	}
+	out := stripANSIEscapeSequences(renderFallbackEditorPopup(m))
+	if !strings.Contains(out, "gh!") {
+		t.Fatalf("popup = %q, want unsupported gh! status", out)
+	}
+}
+
 func TestOpenFallbackEditor_PrefillsConfiguredGit(t *testing.T) {
 	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: false, Tracked: true}
 	m := baseModel([]*database.ToolCache{tool})
