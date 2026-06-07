@@ -620,3 +620,74 @@ func TestRefreshInstalled_UsesCachedConcreteOwnerWhenDifferentFromConfiguredProv
 		t.Fatalf("cache = installed:%v owner:%q version:%q, want true/apt/14.1.1", got.Installed, got.InstalledWith, got.Version.String)
 	}
 }
+
+func TestRefreshInstalled_UsesCachedConcreteOwnerMetadata(t *testing.T) {
+	brew := &stubProvider{name: "brew", available: true}
+	apt := &metadataCheckingStub{
+		stubProvider: stubProvider{name: "apt", available: true},
+		metadata: map[string]provider.InstalledMetadata{
+			"ripgrep": {
+				Version: "14.1.1",
+				Privilege: provider.PrivilegePlan{
+					Requirement: provider.PrivilegeRequired,
+					Reason:      "apt requires administrator privileges",
+				},
+				Source: provider.SourceMetadata{
+					Type:  provider.SourceTypeGitHub,
+					Owner: "BurntSushi",
+					Repo:  "ripgrep",
+					URL:   "https://github.com/BurntSushi/ripgrep",
+				},
+			},
+		},
+	}
+	a, cfgPath := newImportApp(t, brew, apt)
+	ctx := context.Background()
+
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("ripgrep"),
+		}},
+	}); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name:          "ripgrep",
+		Provider:      "brew",
+		Package:       "ripgrep",
+		Installed:     true,
+		InstalledWith: "apt",
+	}); err != nil {
+		t.Fatalf("seed cached owner: %v", err)
+	}
+
+	if err := a.RefreshInstalled(ctx, nil); err != nil {
+		t.Fatalf("RefreshInstalled: %v", err)
+	}
+
+	got, err := a.DB().Get(ctx, "ripgrep", "brew", "ripgrep")
+	if err != nil {
+		t.Fatalf("Get ripgrep: %v", err)
+	}
+	if !got.Installed || got.InstalledWith != "apt" || got.Version.String != "14.1.1" {
+		t.Fatalf("cache = installed:%v owner:%q version:%q, want true/apt/14.1.1", got.Installed, got.InstalledWith, got.Version.String)
+	}
+	if got.Privilege != string(provider.PrivilegeRequired) || !got.PrivilegeReason.Valid {
+		t.Fatalf("privilege = %q reason:%+v, want required with reason", got.Privilege, got.PrivilegeReason)
+	}
+	meta, err := a.DB().GetMetadata(ctx, "ripgrep", "brew", "ripgrep")
+	if err != nil {
+		t.Fatalf("GetMetadata ripgrep: %v", err)
+	}
+	if meta.SourceType != provider.SourceTypeGitHub || meta.SourceOwner != "BurntSushi" || meta.SourceRepo != "ripgrep" {
+		t.Fatalf("metadata source = %s/%s/%s, want github/BurntSushi/ripgrep", meta.SourceType, meta.SourceOwner, meta.SourceRepo)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got := cfg.Tools["ripgrep"].Git; got != "https://github.com/BurntSushi/ripgrep" {
+		t.Fatalf("tool git = %q, want cached source URL persisted", got)
+	}
+}
