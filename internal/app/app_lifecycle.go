@@ -952,10 +952,15 @@ func (a *App) RemoveToolFromConfigWithState(ctx context.Context, name, providerN
 
 func (a *App) configuredCacheIdentityForTool(ctx context.Context, name, providerName string) (string, string, error) {
 	if providerName != "" {
-		if configured, _, found, err := a.configuredOperationTool(ctx, name, providerName); err != nil {
+		if configured, opProvider, found, err := a.configuredOperationTool(ctx, name, providerName); err != nil {
 			return "", "", err
 		} else if found {
-			return configured.Provider, configured.EffectivePackage(), nil
+			return opProvider, configured.EffectivePackage(), nil
+		}
+		if configured, opProvider, found, err := a.configuredOperationTool(ctx, name, ""); err != nil {
+			return "", "", err
+		} else if found {
+			return opProvider, configured.EffectivePackage(), nil
 		}
 	}
 	pkg, err := a.configuredPackageForTool(ctx, name, providerName)
