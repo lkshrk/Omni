@@ -199,6 +199,58 @@ func TestInstallToolFallback_CheckFailureMarksFailed(t *testing.T) {
 	}
 }
 
+func TestUninstallToolFallback_RunsUninstallAndDeletesCache(t *testing.T) {
+	ctx := context.Background()
+	mock := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "sh -c uninstall rg", Response: executor.MockCall{}},
+	).WithFallback(executor.MockCall{Err: errors.New("unexpected fallback command")})
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
+	a.SetFallbackExecutor(mock)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"rg": {
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
+				Fallback: &config.FallbackSpec{
+					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+					Status: config.FallbackStatusVerified,
+					Commands: config.FallbackCommands{
+						Check:     "command -v rg",
+						Uninstall: "uninstall rg",
+					},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name:          "rg",
+		Provider:      "apt",
+		Package:       "rg",
+		Installed:     true,
+		InstalledWith: "gh",
+		LastChecked:   time.Now(),
+	}); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+
+	if err := a.UninstallToolFallback(ctx, "rg"); err != nil {
+		t.Fatalf("UninstallToolFallback: %v", err)
+	}
+
+	mock.AssertCalled(t, "sh -c uninstall rg")
+	if _, err := a.DB().Get(ctx, "rg", "apt", "rg"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("cache row err = %v, want sql.ErrNoRows", err)
+	}
+	got, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got.Tools["rg"].Fallback == nil {
+		t.Fatal("fallback config was removed by direct fallback uninstall")
+	}
+}
+
 func TestInstall_UsesFallbackWhenNativePackageUnavailable(t *testing.T) {
 	ctx := context.Background()
 	system := &lifecycleProvider{
