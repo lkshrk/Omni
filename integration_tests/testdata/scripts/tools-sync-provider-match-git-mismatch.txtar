@@ -1,0 +1,80 @@
+# tools sync does not auto-add a package-name mismatch when GitHub source metadata differs
+exec chmod 755 bin/brew
+env PATH=$WORK/bin:$PATH
+
+exec omni --config settings.json hosts ensure testhost
+exec omni --config settings.json tools sync
+! stdout 'matched provider'
+! exec test -f .omni-cache/fake-brew/fd-find
+exec omni-assert-tool-provider-list settings.json fd
+
+-- bin/brew --
+#!/usr/bin/env sh
+set -eu
+state="${OMNI_CACHE_DIR}/fake-brew"
+mkdir -p "$state"
+case "${1:-}" in
+  --version)
+    echo "Homebrew 4.0.0"
+    ;;
+  search)
+    if [ "${2:-}" = "fd" ]; then
+      printf '==> Formulae\nfd-find\n'
+      exit 0
+    fi
+    echo "No formulae or casks found for $2" >&2
+    exit 1
+    ;;
+  install)
+    shift
+    if [ "${1:-}" = "--formula" ] || [ "${1:-}" = "--cask" ]; then
+      shift
+    fi
+    : > "$state/$1"
+    ;;
+  list)
+    shift
+    if [ "${1:-}" = "--cask" ]; then
+      exit 0
+    fi
+    if [ "${1:-}" = "--versions" ]; then
+      shift
+      if [ "${1:-}" = "--cask" ]; then
+        shift
+      fi
+      for pkg in "$@"; do
+        if [ -f "$state/$pkg" ]; then
+          echo "$pkg 1.0.0"
+          exit 0
+        fi
+      done
+    fi
+    exit 1
+    ;;
+  info)
+    shift
+    if [ "${1:-}" = "--json=v2" ]; then
+      printf '{"formulae":[{"name":"fd-find","full_name":"fd-find","desc":"different fd package","homepage":"https://github.com/example/fd-find","urls":{"stable":{"url":"https://github.com/example/fd-find/archive/refs/tags/v1.0.0.tar.gz"}}}],"casks":[]}\n'
+      exit 0
+    fi
+    exit 1
+    ;;
+  update|outdated)
+    ;;
+esac
+
+-- settings.json --
+{
+  "version": 7,
+  "settings": {
+    "provider_priority": ["brew"],
+    "disabled_providers": ["node", "python", "apt", "apk", "dnf", "pacman", "zypper", "pip"]
+  },
+  "tools": {
+    "fd": { "git": "https://github.com/sharkdp/fd" }
+  },
+  "hosts": { "testhost": [] },
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": ["fd"] }
+  ]
+}

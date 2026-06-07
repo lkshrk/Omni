@@ -47,8 +47,8 @@ func TestMain(m *testing.M) {
 
 func assertToolProviderListMain() int {
 	args := os.Args[1:]
-	if len(args) < 3 {
-		fmt.Fprintln(os.Stderr, "usage: omni-assert-tool-provider-list <config> <tool> <provider>[=<package>] [provider[=<package>]...]")
+	if len(args) < 2 {
+		fmt.Fprintln(os.Stderr, "usage: omni-assert-tool-provider-list <config> <tool> [<provider>[=<package>] ...]")
 		return 2
 	}
 	cfg, err := config.Load(args[0])
