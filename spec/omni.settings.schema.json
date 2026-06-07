@@ -524,7 +524,7 @@
       "type": "object",
       "properties": {
         "disabled_providers": {
-          "description": "Ecosystem provider names disabled on this host.",
+          "description": "Provider family names disabled on this host.",
           "examples": [
             [
               "system",

@@ -218,7 +218,7 @@ func buildWithID(id string) *schema {
 						Type:        "boolean",
 					},
 					"disabled_providers": {
-						Description: "Ecosystem provider names disabled on this host.",
+						Description: "Provider family names disabled on this host.",
 						Type:        "array",
 						Items:       &schema{Type: "string", MinLength: 1},
 						Examples:    []any{ecosystemNames},
