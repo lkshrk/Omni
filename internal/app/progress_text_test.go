@@ -634,6 +634,46 @@ func TestSyncFailureRows(t *testing.T) {
 	}
 }
 
+func TestSyncFailurePrivilegeAction(t *testing.T) {
+	tests := []struct {
+		name       string
+		op         isync.SyncOp
+		wantAction provider.PrivilegeAction
+		wantOK     bool
+	}{
+		{
+			name:       "install failure",
+			op:         isync.SyncOp{Kind: isync.OpInstall, Err: errors.New("requires sudo: apt install vim")},
+			wantAction: provider.PrivilegeActionInstall,
+			wantOK:     true,
+		},
+		{
+			name:       "failed op",
+			op:         isync.SyncOp{Kind: isync.OpFailed, Err: errors.New("requires root: apk add vim")},
+			wantAction: provider.PrivilegeActionInstall,
+			wantOK:     true,
+		},
+		{
+			name:       "uninstall failure",
+			op:         isync.SyncOp{Kind: isync.OpUninstall, Err: errors.New("requires admin: uninstall vim")},
+			wantAction: provider.PrivilegeActionUninstall,
+			wantOK:     true,
+		},
+		{name: "cancelled", op: isync.SyncOp{Kind: isync.OpInstall, Err: context.Canceled}},
+		{name: "ordinary failure", op: isync.SyncOp{Kind: isync.OpInstall, Err: errors.New("network failed")}},
+		{name: "unsupported op", op: isync.SyncOp{Kind: isync.OpProviderUnavailable, Err: errors.New("requires sudo: apt upgrade vim")}},
+		{name: "no error", op: isync.SyncOp{Kind: isync.OpInstall}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotAction, gotOK := syncFailurePrivilegeAction(tt.op)
+			if gotAction != tt.wantAction || gotOK != tt.wantOK {
+				t.Fatalf("syncFailurePrivilegeAction = (%q, %v), want (%q, %v)", gotAction, gotOK, tt.wantAction, tt.wantOK)
+			}
+		})
+	}
+}
+
 func TestUpgradeAllFailureRowsAndSummaryText(t *testing.T) {
 	rows := UpgradeAllFailureRows(&UpgradeAllResult{Failures: []BulkToolError{
 		{Name: "bat", Provider: "system", Message: "requires sudo: apt upgrade bat"},
