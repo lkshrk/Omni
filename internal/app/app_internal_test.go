@@ -150,6 +150,23 @@ func TestCloneSettingsStringMapCopiesInput(t *testing.T) {
 	}
 }
 
+func TestExpandHomePath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if got := expandHomePath("~"); got != home {
+		t.Fatalf("expandHomePath(~) = %q, want %q", got, home)
+	}
+	if got := expandHomePath("~/settings.json"); got != filepath.Join(home, "settings.json") {
+		t.Fatalf("expandHomePath(~/settings.json) = %q, want under HOME", got)
+	}
+	if got := expandHomePath("/tmp/settings.json"); got != "/tmp/settings.json" {
+		t.Fatalf("expandHomePath absolute = %q, want unchanged", got)
+	}
+	if got := expandHomePath("~other/settings.json"); got != "~other/settings.json" {
+		t.Fatalf("expandHomePath user home = %q, want unchanged", got)
+	}
+}
+
 func TestRefreshInstalledScanLabelUsesExplicitInstallWithForEcosystem(t *testing.T) {
 	a := New(filepath.Join(t.TempDir(), "settings.json"))
 	a.registry = provider.NewRegistry()
