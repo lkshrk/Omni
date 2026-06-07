@@ -1,6 +1,6 @@
 # tools fallback saves an unsupported GitHub draft when release metadata exists but no asset matches this platform
 exec omni-tools-fallback-unsupported-git --config settings.json tools fallback gh --from-github cli/cli
-stdout 'Configured fallback for logical tool "gh" from gh cli/cli.'
+stdout 'Configured unsupported fallback draft for logical tool "gh" from gh cli/cli.'
 
 exec grep '"owner": "cli"' settings.json
 stdout '"owner": "cli"'
