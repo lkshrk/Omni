@@ -228,6 +228,20 @@ func TestDashboardReconcilePlan_PlansActionableToolDotAndIgnoreSteps(t *testing.
 	assertReconcileDetail(t, steps, app.ReconcileStepFixIgnore, "2 ignore patterns need cleanup")
 }
 
+func TestDashboardReconcilePlan_UsesExplicitDotsConfiguredFlag(t *testing.T) {
+	steps := app.DashboardReconcilePlan(app.DashboardReconcilePlanInput{
+		DotsConfigured: true,
+		DotsEntries: []app.DotStatus{
+			{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}},
+		},
+	})
+
+	if !app.DashboardReconcilePlanHasStep(steps, app.ReconcileStepSyncDots) {
+		t.Fatalf("steps = %#v, want sync dots step from explicit configured flag", steps)
+	}
+	assertReconcileDetail(t, steps, app.ReconcileStepSyncDots, "1 out-of-sync entry")
+}
+
 func TestDashboardReconcilePlan_SuppressesDotsStepsWhenDotsUnavailable(t *testing.T) {
 	base := app.DashboardReconcilePlanInput{
 		DotsRepo: "/repo",
