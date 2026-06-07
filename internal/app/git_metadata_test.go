@@ -202,3 +202,33 @@ func TestEnrichToolGitFromInstalledProviderMetadataUsesOperationProviderWhenOwne
 		t.Fatalf("git = %q, want operation provider source", git)
 	}
 }
+
+func TestEnrichToolGitFromCachedMetadata(t *testing.T) {
+	ctx := context.Background()
+	cfgPath := filepath.Join(t.TempDir(), "settings.json")
+	a := newGitMetadataTestApp(t, cfgPath)
+	saveGitMetadataToolConfig(t, cfgPath)
+	if err := a.DB().UpsertMetadataBatch(ctx, []database.MetadataUpdate{{
+		Name:        "ripgrep",
+		Provider:    "brew",
+		Package:     "ripgrep",
+		SourceType:  provider.SourceTypeGitHub,
+		SourceOwner: "BurntSushi",
+		SourceRepo:  "ripgrep",
+		SourceURL:   "https://github.com/ignored/ignored",
+	}}); err != nil {
+		t.Fatalf("UpsertMetadataBatch: %v", err)
+	}
+
+	if err := a.enrichToolGitFromCachedMetadata(ctx, "ripgrep", "brew", "ripgrep"); err != nil {
+		t.Fatalf("enrichToolGitFromCachedMetadata: %v", err)
+	}
+
+	got, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if git := got.Tools["ripgrep"].Git; git != "https://github.com/BurntSushi/ripgrep" {
+		t.Fatalf("git = %q, want cached metadata source", git)
+	}
+}
