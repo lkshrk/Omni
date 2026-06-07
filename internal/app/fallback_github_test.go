@@ -139,6 +139,71 @@ func TestSaveToolFallbackFromGitHub_UsesConfiguredGitWhenRepoOmitted(t *testing.
 	}
 }
 
+func TestSaveToolFallbackFromGitHub_SavesUnsupportedWhenReleaseHasNoCurrentPlatformAsset(t *testing.T) {
+	ctx := context.Background()
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/repos/cli/cli/releases/latest" {
+			t.Fatalf("unexpected GitHub API path %q", req.URL.Path)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Body: io.NopCloser(strings.NewReader(`{
+  "id": 330388700,
+  "tag_name": "v2.93.0",
+  "published_at": "2026-05-27T17:47:41Z",
+  "draft": false,
+  "prerelease": false,
+  "assets": [
+    {
+      "id": 431301999,
+      "name": "gh_2.93.0_unsupportedos_unsupportedarch.tar.gz",
+      "browser_download_url": "https://github.com/cli/cli/releases/download/v2.93.0/gh_2.93.0_unsupportedos_unsupportedarch.tar.gz"
+    }
+  ]
+}`)),
+			Header:  make(http.Header),
+			Request: req,
+		}, nil
+	})}
+
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a.SetGitHubFallbackAPIForTest("https://api.github.test", client)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("gh", "system")),
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if err := a.SaveToolFallbackFromGitHub(ctx, "gh", "cli/cli"); err != nil {
+		t.Fatalf("SaveToolFallbackFromGitHub: %v", err)
+	}
+
+	got, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	fallback := got.Tools["gh"].Fallback
+	if fallback == nil {
+		t.Fatal("fallback missing")
+	}
+	if fallback.Status != config.FallbackStatusUnsupported {
+		t.Fatalf("fallback status = %q, want unsupported", fallback.Status)
+	}
+	if fallback.Source.Owner != "cli" || fallback.Source.Repo != "cli" {
+		t.Fatalf("source = %+v, want cli/cli", fallback.Source)
+	}
+	if fallback.Recipe.ReleaseID != "330388700" || fallback.Recipe.TagName != "v2.93.0" || fallback.Recipe.PublishedAt != "2026-05-27T17:47:41Z" {
+		t.Fatalf("recipe release metadata = %+v, want latest release metadata without asset recipe", fallback.Recipe)
+	}
+	if fallback.Recipe.AssetName != "" || fallback.Recipe.AssetDownloadURL != "" {
+		t.Fatalf("recipe asset = %+v, want no current-platform asset", fallback.Recipe)
+	}
+	if fallback.Commands.Install != "" || fallback.Commands.Check != "" {
+		t.Fatalf("commands = %+v, want unsupported fallback without executable recipe", fallback.Commands)
+	}
+}
+
 func TestSaveToolFallbackFromGitHub_RejectsReleaseWithoutPublishedAtAndPreservesConfig(t *testing.T) {
 	ctx := context.Background()
 	expectedAsset := currentPlatformGitHubCLIAsset(t)

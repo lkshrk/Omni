@@ -33,13 +33,14 @@ var githubCLILatestRelease []byte
 // binary behaviour in a subprocess without needing a separate build step.
 func TestMain(m *testing.M) {
 	os.Exit(testscript.RunMain(m, map[string]func() int{
-		"omni":                               func() int { cli.Execute(); return 0 },
-		"omni-mark-outdated-refresh-fresh":   markOutdatedRefreshFreshMain,
-		"omni-seed-cache":                    seedCacheMain,
-		"omni-seed-package-availability":     seedPackageAvailabilityMain,
-		"omni-seed-update-metadata":          seedUpdateMetadataMain,
-		"omni-assert-tool-provider-list":     assertToolProviderListMain,
-		"omni-tools-fallback-configured-git": toolsFallbackConfiguredGitMain,
+		"omni":                                func() int { cli.Execute(); return 0 },
+		"omni-mark-outdated-refresh-fresh":    markOutdatedRefreshFreshMain,
+		"omni-seed-cache":                     seedCacheMain,
+		"omni-seed-package-availability":      seedPackageAvailabilityMain,
+		"omni-seed-update-metadata":           seedUpdateMetadataMain,
+		"omni-assert-tool-provider-list":      assertToolProviderListMain,
+		"omni-tools-fallback-configured-git":  toolsFallbackConfiguredGitMain,
+		"omni-tools-fallback-unsupported-git": toolsFallbackUnsupportedGitMain,
 	}))
 }
 
@@ -80,6 +81,42 @@ func toolsFallbackConfiguredGitMain() int {
 		if _, err := w.Write(githubCLILatestRelease); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
+	}))
+	defer server.Close()
+	if err := os.Setenv("OMNI_GITHUB_API_BASE", server.URL); err != nil {
+		fmt.Fprintf(os.Stderr, "set OMNI_GITHUB_API_BASE: %v\n", err)
+		return 1
+	}
+	cmd := cli.NewRootCmd()
+	cmd.SetArgs(os.Args[1:])
+	if err := cmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return 0
+}
+
+func toolsFallbackUnsupportedGitMain() int {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/cli/cli/releases/latest" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{
+  "id": 330388700,
+  "tag_name": "v2.93.0",
+  "published_at": "2026-05-27T17:47:41Z",
+  "draft": false,
+  "prerelease": false,
+  "assets": [
+    {
+      "id": 431301999,
+      "name": "gh_2.93.0_unsupportedos_unsupportedarch.tar.gz",
+      "browser_download_url": "https://github.com/cli/cli/releases/download/v2.93.0/gh_2.93.0_unsupportedos_unsupportedarch.tar.gz"
+    }
+  ]
+}`)
 	}))
 	defer server.Close()
 	if err := os.Setenv("OMNI_GITHUB_API_BASE", server.URL); err != nil {

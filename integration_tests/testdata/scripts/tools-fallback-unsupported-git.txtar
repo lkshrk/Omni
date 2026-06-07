@@ -1,0 +1,30 @@
+# tools fallback saves an unsupported GitHub draft when release metadata exists but no asset matches this platform
+exec omni-tools-fallback-unsupported-git --config settings.json tools fallback gh --from-github cli/cli
+stdout 'Configured fallback for logical tool "gh" from gh cli/cli.'
+
+exec grep '"owner": "cli"' settings.json
+stdout '"owner": "cli"'
+exec grep '"repo": "cli"' settings.json
+stdout '"repo": "cli"'
+exec grep '"status": "unsupported"' settings.json
+stdout '"status": "unsupported"'
+exec grep '"tag_name": "v2.93.0"' settings.json
+stdout '"tag_name": "v2.93.0"'
+exec grep '"published_at": "2026-05-27T17:47:41Z"' settings.json
+stdout '"published_at": "2026-05-27T17:47:41Z"'
+! grep '"install"' settings.json
+! grep '"check"' settings.json
+
+-- settings.json --
+{
+  "version": 8,
+  "tools": {
+    "gh": {
+      "providers": [{ "provider": "brew" }]
+    }
+  },
+  "hosts": { "testhost": [] },
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": ["gh"] }
+  ]
+}

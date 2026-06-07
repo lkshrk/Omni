@@ -55,7 +55,20 @@ func (a *App) resolveGitHubFallback(ctx context.Context, name, owner, repoName s
 	}
 	asset, ok := bestGitHubReleaseAsset(release.Assets, name)
 	if !ok {
-		return config.FallbackSpec{}, false, nil
+		binary := strings.TrimSpace(name)
+		if binary == "" {
+			binary = repoName
+		}
+		return config.FallbackSpec{
+			Status:         config.FallbackStatusUnsupported,
+			Binary:         binary,
+			ReleaseChannel: "stable",
+			Recipe: config.FallbackRecipe{
+				ReleaseID:   releaseID,
+				TagName:     tagName,
+				PublishedAt: publishedAt,
+			},
+		}, true, nil
 	}
 	binary := strings.TrimSpace(name)
 	if binary == "" {
