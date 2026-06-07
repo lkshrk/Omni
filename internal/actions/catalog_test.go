@@ -101,6 +101,24 @@ func TestToolSetSpecCopyUsesProviderListTerminology(t *testing.T) {
 	}
 }
 
+func TestToolProviderActionCopyUsesProviderFamilyTerminology(t *testing.T) {
+	for _, id := range []ID{ToolPinProvider, ToolReinstallDefault} {
+		action, ok := Get(id)
+		if !ok {
+			t.Fatalf("%s should exist", id)
+		}
+		if !strings.Contains(action.LongDescription, "provider family") {
+			t.Fatalf("%s LongDescription = %q, want provider family terminology", id, action.LongDescription)
+		}
+		stale := []string{"ecosystem provider", "ecosystem-provider", "ecosystem host manager", "concrete-provider"}
+		for _, term := range stale {
+			if strings.Contains(action.LongDescription, term) {
+				t.Fatalf("%s LongDescription = %q should not contain stale term %q", id, action.LongDescription, term)
+			}
+		}
+	}
+}
+
 func TestMustDescription_PanicsOnUnknown(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {

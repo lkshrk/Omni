@@ -196,6 +196,20 @@ func TestLegacyEcosystemSchemaDescriptionsUseProviderFamilyWording(t *testing.T)
 	if strings.Contains(ecosystems.Description, "ecosystem provider") {
 		t.Fatalf("settings.ecosystems description contains stale wording: %q", ecosystems.Description)
 	}
+	hostSettings := root.Defs["HostSettings"]
+	if hostSettings == nil {
+		t.Fatal("HostSettings schema missing")
+	}
+	disabledProviders := hostSettings.Properties["disabled_providers"]
+	if disabledProviders == nil {
+		t.Fatal("hosts.<name>.disabled_providers schema missing")
+	}
+	if !strings.Contains(disabledProviders.Description, "Provider family") {
+		t.Fatalf("hosts.<name>.disabled_providers description = %q, want provider family wording", disabledProviders.Description)
+	}
+	if strings.Contains(disabledProviders.Description, "Ecosystem provider") {
+		t.Fatalf("hosts.<name>.disabled_providers description contains stale wording: %q", disabledProviders.Description)
+	}
 
 	legacy := root.Defs["EcosystemSettings"]
 	if legacy == nil {
