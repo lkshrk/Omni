@@ -1412,6 +1412,45 @@ func TestUpgradeToolFallback_GitHubNotOutdatedUsesSavedRecipeWithoutReleaseLooku
 	assertGitHubFallbackOutdated(t, a.DB(), false, "")
 }
 
+func TestUpgradeToolFallback_GitHubWithoutCacheRowUsesSavedRecipeWithoutReleaseLookup(t *testing.T) {
+	ctx := context.Background()
+	fallbackExec := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "sh -c curl -fsSL https://github.com/cli/cli/releases/download/v2.92.0/gh_2.92.0_old.zip", Response: executor.MockCall{}},
+		executor.MatchRule{Pattern: "sh -c command -v gh", Response: executor.MockCall{}},
+	).WithFallback(executor.MockCall{Err: errors.New("unexpected fallback command")})
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
+	a.SetFallbackExecutor(fallbackExec)
+	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubFallbackLatestReleaseClient(t, nil, func() io.ReadCloser {
+		t.Fatal("GitHub latest release endpoint should not be called without a cache row")
+		return http.NoBody
+	}))
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"gh": {
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
+				Fallback:  oldGitHubCLIFallbackSpec(),
+			},
+		},
+		Groups: []*config.GroupConfig{{Tools: groupTools("gh")}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if err := a.UpgradeToolFallback(ctx, "gh"); err != nil {
+		t.Fatalf("UpgradeToolFallback: %v", err)
+	}
+
+	fallbackExec.AssertCalled(t, "sh -c curl -fsSL https://github.com/cli/cli/releases/download/v2.92.0/gh_2.92.0_old.zip")
+	got, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got.Tools["gh"].Fallback.Recipe.TagName != "v2.92.0" {
+		t.Fatalf("fallback tag = %q, want saved old recipe", got.Tools["gh"].Fallback.Recipe.TagName)
+	}
+	assertGitHubFallbackOutdated(t, a.DB(), false, "")
+}
+
 func TestUninstallToolFallback_ReportsUnavailableWithoutCommand(t *testing.T) {
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
