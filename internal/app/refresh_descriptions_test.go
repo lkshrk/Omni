@@ -365,6 +365,37 @@ func TestRefreshDescriptions_FetchesConfiguredNodeRowsInstalledWithManager(t *te
 	}
 }
 
+func TestRefreshDescriptions_UsesInstalledWithEcosystemWhenCacheProviderMissing(t *testing.T) {
+	prov := &describingProvider{stubProvider: stubProvider{name: "node", available: true}}
+	a, _ := newImportApp(t, prov)
+	ctx := context.Background()
+
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name:          "pm2",
+		Provider:      "npm",
+		Package:       "pm2",
+		Installed:     true,
+		InstalledWith: "bun",
+	}); err != nil {
+		t.Fatalf("seed node cache row: %v", err)
+	}
+
+	if err := a.RefreshDescriptions(ctx, 0); err != nil {
+		t.Fatalf("RefreshDescriptions: %v", err)
+	}
+
+	got, err := a.DB().Get(ctx, "pm2", "npm", "pm2")
+	if err != nil {
+		t.Fatalf("db get: %v", err)
+	}
+	if !got.Description.Valid || got.Description.String != "description of pm2" {
+		t.Fatalf("description = %#v, want node ecosystem description", got.Description)
+	}
+	if got.Provider != "npm" || got.InstalledWith != "bun" {
+		t.Fatalf("cache identity = provider %q installed_with %q, want npm/bun", got.Provider, got.InstalledWith)
+	}
+}
+
 func TestRefreshDescriptions_FetchesConcreteManagerCacheRows(t *testing.T) {
 	prov := &describingProvider{stubProvider: stubProvider{name: "npm", available: true}}
 	a, _ := newImportApp(t, prov)
