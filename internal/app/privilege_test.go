@@ -58,6 +58,22 @@ func TestExternalPrivilegeActionText(t *testing.T) {
 	}
 }
 
+func TestPrivilegedApprovalRowMessage(t *testing.T) {
+	for _, tt := range []struct {
+		action provider.PrivilegeAction
+		want   string
+	}{
+		{action: provider.PrivilegeActionInstall, want: "admin approval required to install"},
+		{action: provider.PrivilegeActionUpgrade, want: "admin approval required to upgrade"},
+		{action: provider.PrivilegeActionUninstall, want: "admin approval required to uninstall"},
+		{action: provider.PrivilegeAction("repair"), want: "admin approval required to install"},
+	} {
+		if got := privilegedApprovalRowMessage(tt.action); got != tt.want {
+			t.Fatalf("privilegedApprovalRowMessage(%q) = %q, want %q", tt.action, got, tt.want)
+		}
+	}
+}
+
 func TestShellJoinQuotesUnsafeCommandParts(t *testing.T) {
 	got := shellJoin([]string{"apt-get", "install", "-y", "safe_pkg", "name with spaces", "owner's-tool", ""})
 	want := "apt-get install -y safe_pkg 'name with spaces' 'owner'\\''s-tool' ''"
