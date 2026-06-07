@@ -124,7 +124,7 @@ esac
     "disabled_providers": ["bun", "pnpm", "python", "apt", "apk", "dnf", "pacman", "zypper", "pip"]
   },
   "tools": {
-    "prettier": {}
+    "prettier": { "git": "https://github.com/prettier/prettier" }
   },
   "hosts": { "testhost": [] },
   "groups": [

@@ -305,9 +305,11 @@ func parsePipShowVersion(output string) string {
 // pypiInfoResponse is the relevant subset of GET /pypi/<name>/json.
 type pypiInfoResponse struct {
 	Info struct {
-		Name    string `json:"name"`
-		Version string `json:"version"`
-		Summary string `json:"summary"`
+		Name        string            `json:"name"`
+		Version     string            `json:"version"`
+		Summary     string            `json:"summary"`
+		HomePage    string            `json:"home_page"`
+		ProjectURLs map[string]string `json:"project_urls"`
 	} `json:"info"`
 	Releases map[string][]struct {
 		UploadTime        string `json:"upload_time"`
@@ -391,5 +393,27 @@ func (p *Provider) Search(ctx context.Context, query string) ([]provider.SearchR
 		Version:     payload.Info.Version,
 		Description: payload.Info.Summary,
 		Provider:    "pip",
+		Source:      provider.GitHubSourceHint(pypiSourceCandidates(payload.Info.ProjectURLs, payload.Info.HomePage)...),
 	}}, nil
+}
+
+// pypiSourceCandidates returns project URLs likely to point at the upstream
+// source repo, repository/source-labelled keys first, then any remaining URLs,
+// then the home page.
+func pypiSourceCandidates(projectURLs map[string]string, homePage string) []string {
+	candidates := make([]string, 0, len(projectURLs)+1)
+	preferred := make([]string, 0, len(projectURLs))
+	rest := make([]string, 0, len(projectURLs))
+	for label, u := range projectURLs {
+		switch strings.ToLower(strings.TrimSpace(label)) {
+		case "source", "source code", "repository", "code", "github":
+			preferred = append(preferred, u)
+		default:
+			rest = append(rest, u)
+		}
+	}
+	candidates = append(candidates, preferred...)
+	candidates = append(candidates, rest...)
+	candidates = append(candidates, homePage)
+	return candidates
 }

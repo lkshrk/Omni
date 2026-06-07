@@ -99,7 +99,7 @@ func withNPMRegistryMain() int {
 			fmt.Fprint(w, `{"objects":[{"package":{"name":"prettier-plugin-tailwindcss","version":"0.6.14","description":"Tailwind CSS class sorter for Prettier"}}]}`)
 			return
 		}
-		fmt.Fprint(w, `{"objects":[{"package":{"name":"prettier","version":"3.5.0","description":"Prettier formatter"}}]}`)
+		fmt.Fprint(w, `{"objects":[{"package":{"name":"prettier","version":"3.5.0","description":"Prettier formatter","links":{"repository":"https://github.com/prettier/prettier"}}}]}`)
 	}))
 	defer server.Close()
 	if err := os.Setenv("OMNI_TEST_NPM_REGISTRY_URL", server.URL); err != nil {

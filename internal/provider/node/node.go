@@ -679,6 +679,10 @@ type npmSearchResponse struct {
 			Name        string `json:"name"`
 			Version     string `json:"version"`
 			Description string `json:"description"`
+			Links       struct {
+				Repository string `json:"repository"`
+				Homepage   string `json:"homepage"`
+			} `json:"links"`
 		} `json:"package"`
 	} `json:"objects"`
 }
@@ -703,6 +707,7 @@ func (p *Provider) Search(ctx context.Context, query string) ([]provider.SearchR
 			Version:     obj.Package.Version,
 			Description: obj.Package.Description,
 			Provider:    "node",
+			Source:      provider.GitHubSourceHint(obj.Package.Links.Repository, obj.Package.Links.Homepage),
 		})
 	}
 	return results, nil

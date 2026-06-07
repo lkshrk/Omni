@@ -3953,15 +3953,17 @@ func TestInstall_ConfiguredToolAutoAddsHighConfidenceProviderMatches(t *testing.
 	withConfig(t, cfgPath, &config.RootConfig{
 		Settings: config.Settings{ProviderPriority: []string{"npm", "brew"}},
 		Tools: map[string]config.ToolSpec{
-			"prettier": {},
+			"prettier": {Git: "https://github.com/prettier/prettier"},
 		},
 		Groups: []*config.GroupConfig{cliTestHostGroup("prettier")},
 	})
+	prettierSource := provider.SourceMetadata{Type: provider.SourceTypeGitHub, URL: "https://github.com/prettier/prettier"}
 	brew := &cliStubProvider{
 		name: "brew",
 		searchResults: []provider.SearchResult{{
 			Name:     "prettier",
 			Provider: "brew",
+			Source:   prettierSource,
 		}},
 	}
 	npm := &cliStubProvider{
@@ -3969,6 +3971,7 @@ func TestInstall_ConfiguredToolAutoAddsHighConfidenceProviderMatches(t *testing.
 		searchResults: []provider.SearchResult{{
 			Name:     "prettier",
 			Provider: "npm",
+			Source:   prettierSource,
 		}},
 	}
 	a := app.New(cfgPath)
