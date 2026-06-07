@@ -89,6 +89,31 @@ func (p *Provider) Uninstall(ctx context.Context, tool provider.Tool) error {
 	return nil
 }
 
+// SelfPackageName implements provider.SelfPackageUpgradeChecker. The pip
+// package represents the manager itself.
+func (p *Provider) SelfPackageName() string { return "pip" }
+
+// externallyManagedProbe asks the Python interpreter whether the environment is
+// PEP 668 externally managed (the same `<stdlib>/EXTERNALLY-MANAGED` marker pip
+// itself checks before refusing to mutate the environment).
+const externallyManagedProbe = `import sysconfig,os;print('1' if os.path.exists(os.path.join(sysconfig.get_path('stdlib'),'EXTERNALLY-MANAGED')) else '0')`
+
+// SelfPackageUpgradeable implements provider.SelfPackageUpgradeChecker. It
+// reports whether pip can upgrade its own package: false under PEP 668
+// externally-managed Python (where `pip install --upgrade pip` is refused),
+// true otherwise. When no interpreter can be probed it assumes upgradeable so
+// the tool is not silently hidden on systems we cannot classify.
+func (p *Provider) SelfPackageUpgradeable(ctx context.Context) bool {
+	for _, py := range []string{"python3", "python"} {
+		stdout, _, err := p.exec.Run(ctx, py, "-c", externallyManagedProbe)
+		if err != nil {
+			continue
+		}
+		return strings.TrimSpace(stdout) != "1"
+	}
+	return true
+}
+
 func (p *Provider) Upgrade(ctx context.Context, tool provider.Tool) error {
 	_, stderr, err := p.exec.Run(ctx, p.bin, "install", "--upgrade", tool.EffectivePackage())
 	if err != nil {

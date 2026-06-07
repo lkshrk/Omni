@@ -300,3 +300,42 @@ func TestOutdatedMap_Error(t *testing.T) {
 		t.Fatal("expected error, got nil")
 	}
 }
+
+// --- SelfPackageUpgradeable (PEP 668 externally-managed detection) ---
+
+func TestSelfPackageName_IsPip(t *testing.T) {
+	p, _ := newPip()
+	if p.SelfPackageName() != "pip" {
+		t.Errorf("SelfPackageName = %q, want pip", p.SelfPackageName())
+	}
+}
+
+func TestSelfPackageUpgradeable_FalseWhenExternallyManaged(t *testing.T) {
+	m := executor.NewMatchMock(executor.MatchRule{
+		Pattern:  "python3 -c",
+		Response: executor.MockCall{Stdout: "1\n"},
+	})
+	p := pip.New(m)
+	if p.SelfPackageUpgradeable(context.Background()) {
+		t.Error("SelfPackageUpgradeable = true, want false (EXTERNALLY-MANAGED marker present)")
+	}
+}
+
+func TestSelfPackageUpgradeable_TrueWhenNotManaged(t *testing.T) {
+	m := executor.NewMatchMock(executor.MatchRule{
+		Pattern:  "python3 -c",
+		Response: executor.MockCall{Stdout: "0\n"},
+	})
+	p := pip.New(m)
+	if !p.SelfPackageUpgradeable(context.Background()) {
+		t.Error("SelfPackageUpgradeable = false, want true (no marker)")
+	}
+}
+
+func TestSelfPackageUpgradeable_TrueWhenInterpreterMissing(t *testing.T) {
+	m := executor.NewMatchMock().WithFallback(executor.MockCall{Err: errors.New("not found")})
+	p := pip.New(m)
+	if !p.SelfPackageUpgradeable(context.Background()) {
+		t.Error("SelfPackageUpgradeable = false, want true (no interpreter ⇒ assume upgradeable)")
+	}
+}
