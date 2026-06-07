@@ -710,9 +710,17 @@ func TestSyncAllToolProgressText(t *testing.T) {
 		want    string
 	}{
 		{name: "adding", message: "Adding fzf to config…", want: "Syncing tools 1/2: adding discovered fzf to config…"},
+		{name: "added", message: "Added fzf to config", want: "Syncing tools 1/2: added discovered fzf to config"},
+		{name: "would add", message: "Would add fzf to config", want: "Syncing tools 1/2: would add discovered fzf to config"},
+		{name: "failed adding", message: "Failed adding fzf", want: "Syncing tools 1/2: failed adding discovered fzf to config"},
 		{name: "installing", message: "Installing fzf…", want: "Syncing tools 1/2: installing missing fzf…"},
+		{name: "installed", message: "Installed fzf", want: "Syncing tools 1/2: installed missing fzf"},
 		{name: "admin skipped", message: "Skipped installing fzf", err: errors.New("requires sudo: apt install fzf"), want: "Syncing tools 1/2: admin approval needed for fzf"},
+		{name: "skipped", message: "Skipped installing fzf", want: "Syncing tools 1/2: skipped missing fzf"},
 		{name: "failed", message: "Failed installing fzf", want: "Syncing tools 1/2: failed installing missing fzf"},
+		{name: "cancelled", message: "Cancelled installing fzf", want: "Syncing tools 1/2: cancelled installing missing fzf"},
+		{name: "custom", message: "Checking cache", want: "Syncing tools 1/2: checking cache"},
+		{name: "empty", want: "Syncing tools 1/2: fzf"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -725,6 +733,15 @@ func TestSyncAllToolProgressText(t *testing.T) {
 				t.Fatalf("SyncAllToolProgressText = %q, want %q", got, tt.want)
 			}
 		})
+	}
+
+	got := SyncAllToolProgressText(isync.ProgressEvent{
+		Tool:    provider.Tool{Name: "fzf", Provider: "brew"},
+		Message: "Installed fzf",
+	}, 0, 0)
+	want := "Syncing tools: installed missing fzf"
+	if got != want {
+		t.Fatalf("SyncAllToolProgressText without total = %q, want %q", got, want)
 	}
 }
 
