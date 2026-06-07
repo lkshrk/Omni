@@ -1851,6 +1851,48 @@ func TestSync_AllowWeakHonorsProviderFilter(t *testing.T) {
 	}
 }
 
+func TestSync_AllowWeakProviderFamilyFilterInstallsConcreteMatch(t *testing.T) {
+	brew := &searchStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		results: []provider.SearchResult{{
+			Name:     "prettier-plugin-tailwindcss",
+			Provider: "brew",
+		}},
+	}
+	a, cfgPath := newImportApp(t, brew)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Version: config.CurrentVersion,
+		Tools: map[string]config.ToolSpec{
+			"prettier": {},
+		},
+		Hosts: map[string][]string{"testhost": {}},
+		Groups: []*config.GroupConfig{{
+			Name:    "testhost",
+			Special: "host",
+			Tools:   []config.ToolEntry{{Name: "prettier"}},
+		}},
+	}); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+
+	result, err := a.Sync(context.Background(), syncprogress.SyncOptions{Provider: "system", AllowWeak: true})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if installed := result.Installed(); len(installed) != 1 || installed[0].Tool.Provider != "brew" || installed[0].Tool.Package != "prettier-plugin-tailwindcss" {
+		t.Fatalf("installed = %+v, want system-family weak brew package install", installed)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	providers := cfg.Tools["prettier"].Providers
+	if len(providers) != 1 || providers[0].Provider != "brew" || providers[0].Package != "prettier-plugin-tailwindcss" {
+		t.Fatalf("providers = %+v, want weak brew match saved under concrete provider", providers)
+	}
+}
+
 func TestInstallHighConfidenceProviderMatches_SkipsFallbackOnlyTool(t *testing.T) {
 	npm := &searchStub{
 		stubProvider: stubProvider{name: "npm", available: true},
