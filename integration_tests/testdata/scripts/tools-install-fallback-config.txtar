@@ -1,0 +1,57 @@
+# tools install keeps existing fallback routing instead of provider discovery
+exec chmod 755 bin/apt-get
+env PATH=$WORK/bin:$PATH
+
+exec omni --config settings.json hosts ensure testhost
+exec omni-seed-package-availability rg apt rg false 'no candidate'
+
+exec omni --config settings.json tools install rg
+stdout 'installed rg \(apt\)'
+exec test -f .omni-cache/fallback/rg
+exec grep '"status": "verified"' settings.json
+stdout '"status": "verified"'
+! exec grep '"providers": \[\]' settings.json
+
+-- bin/apt-get --
+#!/bin/sh
+set -eu
+case "${1:-}" in
+  --version)
+    echo "apt 2.0.0"
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+
+-- settings.json --
+{
+  "version": 7,
+  "settings": {
+    "disabled_providers": ["npm", "pip"]
+  },
+  "tools": {
+    "rg": {
+      "providers": [{ "provider": "apt" }],
+      "fallback": {
+        "source": {
+          "type": "github",
+          "owner": "BurntSushi",
+          "repo": "ripgrep",
+          "url": "https://github.com/BurntSushi/ripgrep"
+        },
+        "status": "unverified",
+        "binary": "rg",
+        "commands": {
+          "install": "mkdir -p .omni-cache/fallback && touch .omni-cache/fallback/rg",
+          "check": "test -f .omni-cache/fallback/rg",
+          "uninstall": "rm -f .omni-cache/fallback/rg"
+        }
+      }
+    }
+  },
+  "hosts": { "testhost": [] },
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": ["rg"] }
+  ]
+}
