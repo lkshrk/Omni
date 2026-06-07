@@ -367,6 +367,35 @@ func TestPrivilegeQueuePlanBuildsItemFromRowErrorOnly(t *testing.T) {
 	}
 }
 
+func TestPrivilegeQueuePlanSkipsInvalidActionsAndInstalledInstalls(t *testing.T) {
+	a := newPrivilegeCommandTestApp(aptpkg.New(nil))
+	installed := &database.ToolCache{Name: "vim", Provider: "apt", Package: "vim", Installed: true}
+	invalid := &database.ToolCache{Name: "fd", Provider: "apt", Package: "fd"}
+	installedKey := privilegeQueueToolKey(installed.Name, installed.Provider)
+	invalidKey := privilegeQueueToolKey(invalid.Name, invalid.Provider)
+
+	plan, err := a.PrivilegeQueuePlan(context.Background(), PrivilegeQueueRequest{
+		RowErrors: map[string]string{
+			installedKey: "requires sudo/root privileges",
+			invalidKey:   "requires sudo/root privileges",
+		},
+		Actions: map[string]provider.PrivilegeAction{
+			installedKey: provider.PrivilegeActionInstall,
+			invalidKey:   provider.PrivilegeAction("repair"),
+		},
+		Tools: []*database.ToolCache{installed, invalid},
+	})
+	if err != nil {
+		t.Fatalf("PrivilegeQueuePlan: %v", err)
+	}
+	if len(plan.Items) != 0 {
+		t.Fatalf("queue items = %#v, want no privileged actions for stale install or invalid action", plan.Items)
+	}
+	if len(plan.RowErrors) != 0 {
+		t.Fatalf("row errors = %#v, want none", plan.RowErrors)
+	}
+}
+
 func TestPrivilegeQueuePlanRejectsProviderToolUninstall(t *testing.T) {
 	a := New(filepath.Join(t.TempDir(), "settings.json"))
 	ctx := context.Background()
