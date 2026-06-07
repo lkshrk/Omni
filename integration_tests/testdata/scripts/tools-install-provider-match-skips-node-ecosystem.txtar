@@ -1,0 +1,84 @@
+# tools install ignores ecosystem node search matches when concrete npm also matches
+exec chmod 755 bin/npm
+env PATH=$WORK/bin:$PATH
+
+exec omni --config settings.json hosts ensure testhost
+exec omni-with-npm-registry --config settings.json tools install prettier
+stdout 'matched provider: prettier -> npm/prettier'
+! stdout 'node/prettier'
+stdout 'installed prettier \(npm\)'
+exec test -f .omni-cache/fake-npm/prettier
+exec omni-assert-tool-provider-list settings.json prettier npm
+
+-- bin/npm --
+#!/usr/bin/env sh
+set -eu
+state="${OMNI_CACHE_DIR}/fake-npm"
+mkdir -p "$state"
+case "${1:-}" in
+  --version)
+    echo "10.2.4"
+    ;;
+  install)
+    pkg=""
+    for arg in "$@"; do
+      case "$arg" in
+        install|-g)
+          ;;
+        *)
+          pkg="$arg"
+          ;;
+      esac
+    done
+    if [ -n "$pkg" ]; then
+      : > "$state/$pkg"
+      exit 0
+    fi
+    exit 1
+    ;;
+  list|ls)
+    pkg=""
+    for arg in "$@"; do
+      case "$arg" in
+        list|ls|-g|--depth=0)
+          ;;
+        *)
+          pkg="$arg"
+          ;;
+      esac
+    done
+    if [ -n "$pkg" ]; then
+      if [ -f "$state/$pkg" ]; then
+        printf '/fake\n+-- %s@1.0.0\n' "$pkg"
+        exit 0
+      fi
+      exit 1
+    fi
+    for entry in "$state"/*; do
+      [ -f "$entry" ] || continue
+      printf '+-- %s@1.0.0\n' "$(basename "$entry")"
+    done
+    exit 0
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+
+-- settings.json --
+{
+  "version": 7,
+  "host_settings": {
+    "testhost": {
+      "provider_priority": ["npm"],
+      "disabled_providers": ["bun", "pnpm", "brew", "python", "system", "pip"]
+    }
+  },
+  "tools": {
+    "prettier": {}
+  },
+  "hosts": { "testhost": [] },
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": ["prettier"] }
+  ]
+}
