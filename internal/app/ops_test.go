@@ -595,6 +595,51 @@ func TestRemoveToolFromConfig_RemovesConcreteConfiguredCacheForLogicalProvider(t
 	}
 }
 
+func TestRemoveToolFromConfig_RemovesConfiguredAndRequestedCacheRows(t *testing.T) {
+	apt := &stubProvider{name: "apt", available: true}
+	brew := &stubProvider{name: "brew", available: true}
+	a, cfgPath := newImportApp(t, apt, brew)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"rg": {
+				Providers: []config.ToolInstallSpec{{Provider: "brew", Package: "ripgrep"}},
+			},
+		},
+		Groups: []*config.GroupConfig{testHostToolGroup("rg")},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	ctx := context.Background()
+	for _, providerName := range []string{"brew", "apt"} {
+		if err := a.DB().Upsert(ctx, &database.ToolCache{
+			Name:      "rg",
+			Provider:  providerName,
+			Package:   "ripgrep",
+			Installed: false,
+			Tracked:   true,
+		}); err != nil {
+			t.Fatalf("seed %s cache: %v", providerName, err)
+		}
+	}
+
+	if err := a.RemoveToolFromConfig(ctx, "rg", "apt"); err != nil {
+		t.Fatalf("RemoveToolFromConfig: %v", err)
+	}
+
+	for _, providerName := range []string{"brew", "apt"} {
+		if _, err := a.DB().Get(ctx, "rg", providerName, "ripgrep"); err == nil || !errors.Is(err, sql.ErrNoRows) {
+			t.Fatalf("%s cache row err = %v, want sql.ErrNoRows", providerName, err)
+		}
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if hasTool(cfg, "rg", "") {
+		t.Fatalf("rg still present in config: %+v", cfg.Groups)
+	}
+}
+
 func TestRemoveToolFromConfigWithStateReturnsUpdatedToolsAndGroups(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost.local")
 	stub := &stubProvider{
