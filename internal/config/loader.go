@@ -437,6 +437,13 @@ func normalizeConcreteProvider(provider string) string {
 	}
 }
 
+// NormalizeConcreteProvider canonicalizes a concrete provider/manager name for
+// persisted config: meta-provider families ("system"/"node"/"python") and empty
+// strings return "", and "pip3" collapses to "pip". Other names pass through.
+func NormalizeConcreteProvider(provider string) string {
+	return normalizeConcreteProvider(provider)
+}
+
 // Normalize sorts order-insensitive config collections in place.
 // Returns true when it changed cfg.
 func Normalize(cfg *RootConfig) bool {

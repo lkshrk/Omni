@@ -54,6 +54,94 @@ func (s *isInstalledStub) IsInstalled(_ context.Context, t provider.Tool) (bool,
 	return false, "", nil
 }
 
+func TestRefreshInstalled_CapturesConcreteProviderForEmptyProviderTool(t *testing.T) {
+	prov := &metadataCheckingStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		metadata: map[string]provider.InstalledMetadata{
+			"ripgrep": {
+				Version: "14.1.0",
+				Source: provider.SourceMetadata{
+					Type:  provider.SourceTypeGitHub,
+					Owner: "BurntSushi",
+					Repo:  "ripgrep",
+					URL:   "https://github.com/BurntSushi/ripgrep",
+				},
+			},
+		},
+	}
+	a, cfgPath := newImportApp(t, prov)
+
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{"ripgrep": {}},
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("ripgrep"),
+		}},
+	}); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+
+	if err := a.RefreshInstalled(context.Background(), nil); err != nil {
+		t.Fatalf("RefreshInstalled: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	providers := cfg.Tools["ripgrep"].Providers
+	if len(providers) != 1 || providers[0].Provider != "brew" || providers[0].EffectivePackage("ripgrep") != "ripgrep" {
+		t.Fatalf("providers = %+v, want [brew/ripgrep] captured from installed state", providers)
+	}
+	if got := cfg.Tools["ripgrep"].Git; got != "https://github.com/BurntSushi/ripgrep" {
+		t.Fatalf("git = %q, want backfilled from installed source", got)
+	}
+
+	tools, err := a.ListTools(context.Background(), "")
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(tools) != 1 || !tools[0].Installed || tools[0].Provider != "brew" {
+		t.Fatalf("tools = %+v, want installed brew row", tools)
+	}
+}
+
+func TestRefreshInstalled_CapturesConcreteManagerNotFamilyForEcosystemTool(t *testing.T) {
+	// A python-ecosystem tool installed via uv must be captured as the concrete
+	// "uv" provider, never the "python" family (which fails config validation).
+	prov := &multiManagerStub{
+		stubProvider: stubProvider{name: "python", available: true},
+		entries: map[string]provider.InstalledEntry{
+			"flux-local": {Version: "1.2.3", ConcreteManager: "uv"},
+		},
+	}
+	a, cfgPath := newImportApp(t, prov)
+
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{"flux-local": {}},
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("flux-local"),
+		}},
+	}); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+
+	if err := a.RefreshInstalled(context.Background(), nil); err != nil {
+		t.Fatalf("RefreshInstalled: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	providers := cfg.Tools["flux-local"].Providers
+	if len(providers) != 1 || providers[0].Provider != "uv" {
+		t.Fatalf("providers = %+v, want concrete [uv], never python family", providers)
+	}
+	if errs := config.ValidateRoot(cfg, config.ProviderValidation{}); len(errs) != 0 {
+		t.Fatalf("config validation errors after capture: %v", errs)
+	}
+}
+
 func TestRefreshInstalled_BulkPath_MarksInstalled(t *testing.T) {
 	prov := &bulkCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},

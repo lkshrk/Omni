@@ -652,6 +652,18 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 	}
 	stop()
 
+	stop = profile.Start("app.refresh.installed.capture_empty")
+	if captured, gitByTool := captureEmptyProviderInstalls(a, tools, multiMaps, installedMaps, metadataMaps, concreteForBulk); len(captured) > 0 {
+		if updated, err := a.persistCapturedProviders(cfg, captured, gitByTool); err != nil {
+			stop()
+			return err
+		} else if updated != nil {
+			cfg = updated
+			tools, _ = a.currentResolvedToolEntries(ctx, cfg)
+		}
+	}
+	stop()
+
 	stop = profile.Start("app.refresh.installed.resolve_installed")
 	upserts := make([]*database.ToolCache, 0, len(tools))
 	metadataUpdates := make([]database.MetadataUpdate, 0)
@@ -1685,6 +1697,115 @@ func promoteSourceConsensus(logicalName string, spec config.ToolSpec, matches []
 			matches[i].Confidence = ProviderMatchHigh
 		}
 	}
+}
+
+// captureEmptyProviderInstalls inspects the installed-state maps gathered during
+// a refresh scan and, for each configured tool that has no concrete provider yet,
+// records every concrete provider that currently has the tool installed. It
+// returns captured provider entries per tool plus a backfilled GitHub source per
+// tool (from provider metadata) when one is available. No search or install is
+// performed — this only reflects what is already installed locally.
+func captureEmptyProviderInstalls(
+	a *App,
+	tools []config.ToolEntry,
+	multiMaps map[string]map[string]provider.InstalledEntry,
+	installedMaps map[string]map[string]string,
+	metadataMaps map[string]map[string]provider.InstalledMetadata,
+	concreteForBulk map[string]string,
+) (map[string][]config.ToolInstallSpec, map[string]string) {
+	captured := make(map[string][]config.ToolInstallSpec)
+	gitByTool := make(map[string]string)
+	for _, t := range tools {
+		if a.operationProviderName(t) != "" {
+			continue
+		}
+		keys := toolEntryLookupKeys(t)
+		seen := make(map[string]bool)
+		add := func(concrete string, src provider.SourceMetadata) {
+			concrete = config.NormalizeConcreteProvider(concrete)
+			if concrete == "" || seen[concrete] {
+				return
+			}
+			seen[concrete] = true
+			captured[t.Name] = append(captured[t.Name], config.ToolInstallSpec{Provider: concrete, Package: t.Name})
+			if gitByTool[t.Name] == "" {
+				if g := gitURLFromSourceMetadata(src); g != "" {
+					gitByTool[t.Name] = g
+				}
+			}
+		}
+		// Per-tool concrete attribution for language ecosystems (npm/pip/…).
+		for _, mm := range multiMaps {
+			if entry := provider.LookupInstalledEntry(mm, keys); entry.ConcreteManager != "" {
+				add(entry.ConcreteManager, provider.SourceMetadata{})
+			}
+		}
+		// Bulk providers that report source metadata (e.g. brew).
+		for provName, mmeta := range metadataMaps {
+			if md, ok := provider.LookupInstalledMetadata(mmeta, keys); ok {
+				add(concreteForBulk[provName], md.Source)
+			}
+		}
+		// Plain bulk providers without metadata; skip those already handled above.
+		for provName, m := range installedMaps {
+			if _, isMeta := metadataMaps[provName]; isMeta {
+				continue
+			}
+			if _, isMulti := multiMaps[provName]; isMulti {
+				continue
+			}
+			if _, ok := provider.LookupString(m, keys); ok {
+				add(concreteForBulk[provName], provider.SourceMetadata{})
+			}
+		}
+	}
+	return captured, gitByTool
+}
+
+// persistCapturedProviders writes captured provider entries (ordered by host
+// provider priority) and backfilled git into config and saves it. Returns the
+// updated config, or nil when nothing changed.
+func (a *App) persistCapturedProviders(cfg *config.RootConfig, captured map[string][]config.ToolInstallSpec, gitByTool map[string]string) (*config.RootConfig, error) {
+	if len(captured) == 0 {
+		return nil, nil
+	}
+	settings, _ := a.LoadSettings()
+	rank := a.providerPriorityRank(defaultProviderPriority(settings))
+	changed := false
+	for name, provs := range captured {
+		spec, ok := cfg.Tools[name]
+		if !ok || len(spec.Providers) > 0 {
+			continue
+		}
+		sortByProviderRank(provs, rank)
+		spec.Providers = provs
+		if spec.Git == "" && gitByTool[name] != "" {
+			spec.Git = gitByTool[name]
+		}
+		cfg.Tools[name] = spec
+		changed = true
+	}
+	if !changed {
+		return nil, nil
+	}
+	if err := config.Save(a.ConfigPath, cfg); err != nil {
+		return nil, fmt.Errorf("persisting captured providers: %w", err)
+	}
+	return cfg, nil
+}
+
+func sortByProviderRank(provs []config.ToolInstallSpec, rank map[string]int) {
+	sort.SliceStable(provs, func(i, j int) bool {
+		ri, iOK := rank[provs[i].Provider]
+		rj, jOK := rank[provs[j].Provider]
+		if iOK != jOK {
+			return iOK
+		}
+		if ri != rj {
+			return ri < rj
+		}
+		return provs[i].Provider < provs[j].Provider
+	})
 }
 
 func (a *App) ProviderMatches(ctx context.Context, logicalName string, spec config.ToolSpec, providerFilter string) ([]ProviderMatch, error) {
