@@ -80,6 +80,37 @@ func TestRefreshOutdated_GitHubFallbackClearsOutdatedWhenLatestNotNewer(t *testi
 	assertGitHubFallbackOutdated(t, a.DB(), false, "")
 }
 
+func TestRefreshOutdated_GitHubFallbackClearsOutdatedWhenLatestOlder(t *testing.T) {
+	ctx := context.Background()
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	asset := currentPlatformGitHubCLIAsset(t)
+	calls := int32(0)
+	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubFallbackLatestReleaseClient(t, &calls, func() io.ReadCloser {
+		return githubFallbackReleaseBody("v2.92.0", "2026-05-01T00:00:00Z", asset.name, asset.downloadURL)
+	}))
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"gh": {
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
+				Fallback:  githubFallbackSpec("v2.93.0", "2026-05-27T17:47:41Z", asset),
+			},
+		},
+		Groups: []*config.GroupConfig{{Tools: groupTools("gh")}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	seedGitHubFallbackCacheRow(t, a.DB(), true)
+
+	if err := a.RefreshOutdated(ctx, false, nil); err != nil {
+		t.Fatalf("RefreshOutdated: %v", err)
+	}
+
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("GitHub latest release calls = %d, want 1", got)
+	}
+	assertGitHubFallbackOutdated(t, a.DB(), false, "")
+}
+
 func TestRefreshOutdated_GitHubFallbackSkipsLatestReleaseWithoutCurrentPlatformAsset(t *testing.T) {
 	ctx := context.Background()
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
