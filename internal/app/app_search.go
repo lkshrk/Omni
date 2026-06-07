@@ -51,6 +51,10 @@ type ProviderMatchInstallResult struct {
 	SearchErr error
 }
 
+type ProviderMatchOptions struct {
+	AllowWeak bool
+}
+
 var (
 	ErrProviderDiscoveryNotConfigured     = errors.New("provider discovery requires configured tool")
 	ErrProviderDiscoveryAlreadyConfigured = errors.New("provider discovery already configured")
@@ -1667,6 +1671,10 @@ func (a *App) providerMatchInstallCandidate(providerName string) bool {
 }
 
 func (a *App) AddHighConfidenceProviderMatches(ctx context.Context, name, providerFilter string) (*ProviderMatchInstallResult, error) {
+	return a.AddProviderMatches(ctx, name, providerFilter, ProviderMatchOptions{})
+}
+
+func (a *App) AddProviderMatches(ctx context.Context, name, providerFilter string, opts ProviderMatchOptions) (*ProviderMatchInstallResult, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
 		return nil, err
@@ -1689,6 +1697,19 @@ func (a *App) AddHighConfidenceProviderMatches(ctx context.Context, name, provid
 			Package:  match.Name,
 			Options:  cloneOptionMap(match.Options),
 		})
+	}
+	if len(result.Added) == 0 && opts.AllowWeak {
+		for _, match := range matches {
+			if match.Confidence != ProviderMatchWeak {
+				continue
+			}
+			result.Added = append(result.Added, config.ToolInstallSpec{
+				Provider: match.Provider,
+				Package:  match.Name,
+				Options:  cloneOptionMap(match.Options),
+			})
+			break
+		}
 	}
 	if len(result.Added) == 0 {
 		return result, fmt.Errorf("%w for %q", ErrProviderDiscoveryNoHighConfidence, name)
@@ -1715,7 +1736,11 @@ func (a *App) AddHighConfidenceProviderMatches(ctx context.Context, name, provid
 }
 
 func (a *App) InstallHighConfidenceProviderMatches(ctx context.Context, name, providerFilter string) (*ProviderMatchInstallResult, error) {
-	result, err := a.AddHighConfidenceProviderMatches(ctx, name, providerFilter)
+	return a.InstallProviderMatches(ctx, name, providerFilter, ProviderMatchOptions{})
+}
+
+func (a *App) InstallProviderMatches(ctx context.Context, name, providerFilter string, opts ProviderMatchOptions) (*ProviderMatchInstallResult, error) {
+	result, err := a.AddProviderMatches(ctx, name, providerFilter, opts)
 	if err != nil {
 		return result, err
 	}

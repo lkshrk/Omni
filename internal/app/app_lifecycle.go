@@ -57,7 +57,7 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 	}
 
 	if !opts.DryRun {
-		if err := a.addMissingProviderMatchesForGroups(ctx, cfg, groups, opts.Provider, opts.Progress); err != nil {
+		if err := a.addMissingProviderMatchesForGroups(ctx, cfg, groups, opts.Provider, opts.AllowWeak, opts.Progress); err != nil {
 			return nil, err
 		}
 		cfg, err = a.loadConfig()
@@ -162,7 +162,7 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 	return result, nil
 }
 
-func (a *App) addMissingProviderMatchesForGroups(ctx context.Context, cfg *config.RootConfig, groups []*config.GroupConfig, providerFilter string, progress func(string)) error {
+func (a *App) addMissingProviderMatchesForGroups(ctx context.Context, cfg *config.RootConfig, groups []*config.GroupConfig, providerFilter string, allowWeak bool, progress func(string)) error {
 	if cfg == nil {
 		return nil
 	}
@@ -184,7 +184,7 @@ func (a *App) addMissingProviderMatchesForGroups(ctx context.Context, cfg *confi
 			if !ok || len(spec.Providers) > 0 || spec.Fallback != nil {
 				continue
 			}
-			result, err := a.AddHighConfidenceProviderMatches(ctx, name, providerFilter)
+			result, err := a.AddProviderMatches(ctx, name, providerFilter, ProviderMatchOptions{AllowWeak: allowWeak})
 			if err != nil {
 				if errors.Is(err, ErrProviderDiscoveryNotConfigured) ||
 					errors.Is(err, ErrProviderDiscoveryAlreadyConfigured) ||
@@ -394,6 +394,7 @@ func (a *App) SyncAll(ctx context.Context, opts SyncAllOptions) (*SyncAllResult,
 		Progress:       opts.Progress,
 		ToolProgress:   opts.ToolProgress,
 		SkipPrivileged: opts.SkipPrivileged,
+		AllowWeak:      opts.AllowWeak,
 	})
 	failures := append([]BulkToolError(nil), claimFailures...)
 	if syncResult != nil {

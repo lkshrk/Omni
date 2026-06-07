@@ -25,6 +25,17 @@ Tool config stores concrete provider candidates:
 The first provider is the normal install target. Additional entries are
 high-confidence alternatives discovered from search/import metadata.
 
+When a configured tool has no provider entries yet, explicit install and sync
+commands may search enabled providers for package matches. High-confidence
+matches are saved automatically and the highest-priority provider is installed.
+Weak matches are ignored by default. Use `--allow-weak` only when you want Omni
+to save and install the best weak match returned by provider priority:
+
+```sh
+omni tools install prettier --allow-weak
+omni tools sync --allow-weak
+```
+
 ## Built-In Providers
 
 | Provider family | Providers |

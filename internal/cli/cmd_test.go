@@ -4108,6 +4108,58 @@ func TestInstall_ConfiguredToolDoesNotAutoInstallWeakProviderMatch(t *testing.T)
 	}
 }
 
+func TestInstall_ConfiguredToolAllowWeakInstallsWeakProviderMatch(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "settings.json")
+	cacheDir := t.TempDir()
+	withConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{ProviderPriority: []string{"npm"}},
+		Tools: map[string]config.ToolSpec{
+			"prettier": {},
+		},
+		Groups: []*config.GroupConfig{cliTestHostGroup("prettier")},
+	})
+	npm := &cliStubProvider{
+		name: "npm",
+		searchResults: []provider.SearchResult{{
+			Name:     "prettier-plugin-tailwindcss",
+			Provider: "npm",
+		}},
+	}
+	a := app.New(cfgPath)
+	a.CacheDir = cacheDir
+	if err := a.InitTestMode(context.Background(), npm); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	var out bytes.Buffer
+	cmd := newInstallCmd(&rootState{app: a, yes: true})
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"prettier", "--allow-weak"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("tools install prettier --allow-weak: %v", err)
+	}
+	if len(npm.installedCalls) != 1 || npm.installedCalls[0] != "prettier" {
+		t.Fatalf("npm installedCalls = %v, want [prettier]", npm.installedCalls)
+	}
+	if !strings.Contains(out.String(), "matched provider: prettier -> npm/prettier-plugin-tailwindcss") {
+		t.Fatalf("output = %q, want matched weak provider line", out.String())
+	}
+	if !strings.Contains(out.String(), "✓ installed prettier (npm)") {
+		t.Fatalf("output = %q, want installed npm line", out.String())
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	providers := cfg.Tools["prettier"].Providers
+	if len(providers) != 1 || providers[0].Provider != "npm" || providers[0].Package != "prettier-plugin-tailwindcss" {
+		t.Fatalf("providers = %+v, want weak npm provider saved", providers)
+	}
+}
+
 // ─── install --group ────────────────────────────────────────────────────────
 
 func TestInstall_Group_NoHostRequired_SyncsGroup(t *testing.T) {

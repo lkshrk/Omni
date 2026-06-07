@@ -172,7 +172,7 @@ var Tools = []Action{
 		Description:     "Install missing tools from config.",
 		LongDescription: "Install configured tools that are missing locally.",
 		Mutates:         true,
-		CLI:             []CLIBinding{{Command: []string{"tools", "sync"}, Flags: []string{"--dry-run", "--prune", "--provider", "--group", "--retry-failed"}}},
+		CLI:             []CLIBinding{{Command: []string{"tools", "sync"}, Flags: []string{"--dry-run", "--prune", "--provider", "--group", "--retry-failed", "--allow-weak"}}},
 		Palette:         &PaletteBinding{Command: []string{"tools", "sync"}, Description: "sync tools from config"},
 		PaletteEligible: true,
 	},
@@ -186,7 +186,7 @@ var Tools = []Action{
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresToolName},
 		TUI:             &TUIBinding{KeyMapField: "Install", DefaultKey: "i", Label: "install", Description: "Install the selected missing tool."},
-		CLI:             []CLIBinding{{Command: []string{"tools", "install"}, Flags: []string{"--provider", "--group", "--force"}}},
+		CLI:             []CLIBinding{{Command: []string{"tools", "install"}, Flags: []string{"--provider", "--group", "--force", "--allow-weak"}}},
 	},
 	{
 		ID:                 ToolDelete,
@@ -236,7 +236,7 @@ var Tools = []Action{
 		RequiresConfirm:    true,
 		ConfirmDescription: ConfirmSyncAll,
 		TUI:                &TUIBinding{KeyMapField: "SyncAll", DefaultKey: "S", Label: "sync all", Description: "Add discovered tools and install missing tools.", ConfirmDescription: ConfirmSyncAll},
-		CLI:                []CLIBinding{{Command: []string{"tools", "sync"}, Flags: []string{"--all"}}},
+		CLI:                []CLIBinding{{Command: []string{"tools", "sync"}, Flags: []string{"--all", "--allow-weak"}}},
 	},
 	{
 		ID:              ToolClaim,

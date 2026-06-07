@@ -18,6 +18,7 @@ func newInstallCmd(state *rootState) *cobra.Command {
 	var providerName string
 	var group string
 	var force bool
+	var allowWeak bool
 
 	cmd := &cobra.Command{
 		Use:   "install [tool]",
@@ -41,7 +42,7 @@ bootstrap or host assignment:
 			}
 			name := args[0]
 			if providerName == "" {
-				matchResult, err := state.app.InstallHighConfidenceProviderMatches(cmd.Context(), name, "")
+				matchResult, err := state.app.InstallProviderMatches(cmd.Context(), name, "", app.ProviderMatchOptions{AllowWeak: allowWeak})
 				if err == nil {
 					printProviderMatchInstallResult(cmdOut(cmd), name, matchResult)
 					promptSatisfiedGroupsAfterInstall(cmd, state)
@@ -80,6 +81,7 @@ bootstrap or host assignment:
 	addProviderFlag(cmd, &providerName, "provider to use; omit to auto-select from priority list")
 	cmd.Flags().StringVar(&group, "group", "", "install all tools in the named group")
 	cmd.Flags().BoolVar(&force, "force", false, "skip bootstrap and host assignment checks")
+	cmd.Flags().BoolVar(&allowWeak, "allow-weak", false, "allow best weak provider discovery match when no high-confidence match exists")
 	cmd.ValidArgsFunction = completeToolNames(state)
 	_ = cmd.RegisterFlagCompletionFunc("group", completeGroupNames(state))
 	return cmd

@@ -17,6 +17,7 @@ func newSyncCmd(state *rootState) *cobra.Command {
 	var group string
 	var retryFailed bool
 	var all bool
+	var allowWeak bool
 
 	cmd := &cobra.Command{
 		Use:   "sync [group]",
@@ -48,8 +49,9 @@ Use --all to ` + actions.MustLongDescription(actions.ToolSyncAll) + `.`,
 					}
 				}
 				syncOpts := app.SyncAllOptions{
-					DryRun: dryRun,
-					Group:  group,
+					DryRun:    dryRun,
+					Group:     group,
+					AllowWeak: allowWeak,
 					Progress: func(msg string) {
 						fmt.Fprintf(out, "  %s\n", msg)
 					},
@@ -83,6 +85,7 @@ Use --all to ` + actions.MustLongDescription(actions.ToolSyncAll) + `.`,
 				Provider:    providerFilter,
 				Group:       group,
 				RetryFailed: retryFailed,
+				AllowWeak:   allowWeak,
 				Progress: func(msg string) {
 					fmt.Fprintf(out, "  %s\n", msg)
 				},
@@ -148,6 +151,7 @@ Use --all to ` + actions.MustLongDescription(actions.ToolSyncAll) + `.`,
 	cmd.Flags().StringVar(&group, "group", "", "limit sync to one group, or assign discovered tools (with --all)")
 	cmd.Flags().BoolVar(&retryFailed, "retry-failed", false, "only retry tools that failed in a previous sync")
 	cmd.Flags().BoolVar(&all, "all", false, actions.MustDescription(actions.ToolSyncAll))
+	cmd.Flags().BoolVar(&allowWeak, "allow-weak", false, "allow best weak provider discovery match when no high-confidence match exists")
 	cmd.ValidArgsFunction = completeToolNames(state)
 	_ = cmd.RegisterFlagCompletionFunc("group", completeGroupNames(state))
 	return cmd

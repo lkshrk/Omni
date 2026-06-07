@@ -116,6 +116,7 @@ type SyncAllOptions struct {
 	Progress       func(string)
 	ToolProgress   func(isync.ProgressEvent)
 	SkipPrivileged bool
+	AllowWeak      bool
 }
 
 type SyncAllResult struct {
