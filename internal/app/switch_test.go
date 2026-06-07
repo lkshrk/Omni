@@ -560,6 +560,45 @@ func TestMigrateInstallation_RegisteredWrongProviderPersistsResolvedConcreteOwne
 	}
 }
 
+func TestMigrateInstallation_UnregisteredBackendCleansOldEnvironment(t *testing.T) {
+	pip := &envCleanerProvider{stubProvider: stubProvider{name: "pip", available: true}}
+	a, cfgPath := newImportApp(t, pip)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools:  logicalToolSpecs(logicalTool("black", "pip")),
+		Groups: []*config.GroupConfig{testHostToolGroup("black")},
+	}); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+
+	result, err := a.MigrateInstallation(context.Background(), "black", "uv", "pip")
+	if err != nil {
+		t.Fatalf("MigrateInstallation: %v", err)
+	}
+	if result.FromProvider != "pip" || result.ToProvider != "pip" || result.Package != "black" {
+		t.Fatalf("result = %+v, want pip -> pip for black", result)
+	}
+	if len(pip.installWithManagers) != 0 {
+		t.Fatalf("install managers = %v, want direct pip install", pip.installWithManagers)
+	}
+	if len(pip.uninstallFromBinaries) != 1 || pip.uninstallFromBinaries[0] != "uv" {
+		t.Fatalf("cleanup binaries = %v, want [uv]", pip.uninstallFromBinaries)
+	}
+	if len(pip.uninstallFromTools) != 1 || pip.uninstallFromTools[0].Package != "black" {
+		t.Fatalf("cleanup tools = %+v, want black package cleanup", pip.uninstallFromTools)
+	}
+
+	tools, err := a.ListTools(context.Background(), "")
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(tools) != 1 {
+		t.Fatalf("got %d tools, want 1: %+v", len(tools), tools)
+	}
+	if tools[0].Provider != "pip" || tools[0].InstalledWith != "pip" {
+		t.Fatalf("DB tool = provider %q installed_with %q, want pip/pip", tools[0].Provider, tools[0].InstalledWith)
+	}
+}
+
 func TestReinstallWithDefault_UsesConfiguredProviderAfterDefaultChange(t *testing.T) {
 	pip := &lifecycleProvider{
 		stubProvider: stubProvider{name: "pip", available: true},
