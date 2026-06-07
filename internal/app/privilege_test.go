@@ -145,6 +145,12 @@ func TestPrivilegedToolCommand_SudoBackedProviders(t *testing.T) {
 			want:   "apt-get install -y vim",
 		},
 		{
+			name:   "apt install uses name when package missing",
+			action: provider.PrivilegeActionInstall,
+			tool:   database.ToolCache{Name: "vim", Provider: "apt"},
+			want:   "apt-get install -y vim",
+		},
+		{
 			name:   "apk uninstall",
 			action: provider.PrivilegeActionUninstall,
 			tool:   database.ToolCache{Name: "vim", Provider: "apk", Package: "vim"},
