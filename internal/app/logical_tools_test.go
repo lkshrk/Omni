@@ -253,6 +253,46 @@ func TestSetToolProviderScopeWithStatePersistsToolProviderPin(t *testing.T) {
 	}
 }
 
+func TestSetToolProviderScopeWithStatePersistsEcosystemProviderPin(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "desk.local")
+	a, cfgPath := newImportApp(t)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"prettier": {Providers: []config.ToolInstallSpec{{Provider: "npm"}}},
+		},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	change, err := a.SetToolProviderScopeWithState(context.Background(), "prettier", app.ToolProviderScopeOptions{
+		Kind:         app.ToolProviderScopeEcosystem,
+		ProviderName: "node",
+		Package:      "prettier",
+		InstallWith:  "bun",
+	})
+	if err != nil {
+		t.Fatalf("SetToolProviderScopeWithState: %v", err)
+	}
+	if got := change.ScopeDisplay.ToolProviderPins["prettier"]; got != "bun" {
+		t.Fatalf("tool provider pins = %v, want prettier shown as pinned to bun", change.ScopeDisplay.ToolProviderPins)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	settings, ok := cfg.HostSettings["desk"]
+	if !ok {
+		t.Fatalf("host settings = %v, want desk settings", cfg.HostSettings)
+	}
+	if got := settings.EcosystemManager(provider.EcosystemNode); got != "bun" {
+		t.Fatalf("node manager = %q, want bun", got)
+	}
+	if _, ok := cfg.Tools["prettier"].Hosts["desk"]; ok {
+		t.Fatalf("host override should not be written for ecosystem scope: %+v", cfg.Tools["prettier"].Hosts)
+	}
+}
+
 func TestSetToolProviderScopeWithStateRejectsInvalidScopeOptions(t *testing.T) {
 	a, _ := newImportApp(t)
 

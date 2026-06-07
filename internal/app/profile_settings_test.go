@@ -293,6 +293,79 @@ func TestSystemProviderPriorityPlanning(t *testing.T) {
 	}
 }
 
+func TestPinEcosystemForHostPersistsManagerAndSystemPriority(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "desk.local")
+	a, cfgPath := newImportApp(t)
+	initialSettings := config.Settings{}
+	initialSettings.SetEcosystemPriority(provider.EcosystemSystem, []string{"apt", "dnf", "brew"})
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		HostSettings: map[string]config.Settings{
+			"desk": initialSettings,
+		},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	if err := a.PinEcosystemForHost(context.Background(), provider.EcosystemNode, "bun"); err != nil {
+		t.Fatalf("PinEcosystemForHost node: %v", err)
+	}
+	if err := a.PinEcosystemForHost(context.Background(), provider.EcosystemSystem, "brew"); err != nil {
+		t.Fatalf("PinEcosystemForHost system: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	settings := cfg.HostSettings["desk"]
+	if got := settings.EcosystemManager(provider.EcosystemNode); got != "bun" {
+		t.Fatalf("node manager = %q, want bun", got)
+	}
+	wantPriority := []string{"brew", "apt", "apk", "dnf", "zypper", "pacman"}
+	if got := settings.EcosystemPriority(provider.EcosystemSystem); !slices.Equal(got, wantPriority) {
+		t.Fatalf("system priority = %v, want %v", got, wantPriority)
+	}
+}
+
+func TestPinEcosystemForHostRejectsInvalidProviderPins(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "desk.local")
+	a, _ := newImportApp(t)
+
+	tests := []struct {
+		name      string
+		ecosystem string
+		concrete  string
+		want      string
+	}{
+		{
+			name:      "wrong node manager",
+			ecosystem: provider.EcosystemNode,
+			concrete:  "uv",
+			want:      `"uv" is not a manager for ecosystem "node"`,
+		},
+		{
+			name:      "ecosystem is not system concrete",
+			ecosystem: provider.EcosystemSystem,
+			concrete:  provider.EcosystemNode,
+			want:      `"node" is not a system provider`,
+		},
+		{
+			name:      "unknown family",
+			ecosystem: "ruby",
+			concrete:  "gem",
+			want:      `unknown provider family "ruby"`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := a.PinEcosystemForHost(context.Background(), tt.ecosystem, tt.concrete)
+			if err == nil || err.Error() != tt.want {
+				t.Fatalf("PinEcosystemForHost error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestSettingsProviderSummary(t *testing.T) {
 	a, _ := newImportApp(t)
 	settings := config.Settings{DisabledProviders: []string{"node", "brew", "node"}}
