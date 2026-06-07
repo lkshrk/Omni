@@ -280,6 +280,68 @@ func TestSaveToolFallbackFromGitHub_RejectsReleaseWithoutPublishedAtAndPreserves
 	}
 }
 
+func TestSaveToolFallbackFromGitHub_PreservesConfigWhenGitHubLookupFails(t *testing.T) {
+	ctx := context.Background()
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/repos/cli/cli/releases/latest" {
+			t.Fatalf("unexpected GitHub API path %q", req.URL.Path)
+		}
+		return &http.Response{
+			StatusCode: http.StatusInternalServerError,
+			Status:     "500 Internal Server Error",
+			Body:       http.NoBody,
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})}
+
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a.SetGitHubFallbackAPIForTest("https://api.github.test", client)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"gh": {
+				Providers: []config.ToolInstallSpec{{Provider: "brew"}},
+				Fallback: &config.FallbackSpec{
+					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "old", Repo: "repo"},
+					Status: config.FallbackStatusVerified,
+					Binary: "gh",
+					Recipe: config.FallbackRecipe{
+						Type:             config.FallbackRecipeGitHubReleaseAsset,
+						AssetDownloadURL: "https://example.test/old-gh.zip",
+					},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	err := a.SaveToolFallbackFromGitHub(ctx, "gh", "cli/cli")
+	if err == nil {
+		t.Fatal("SaveToolFallbackFromGitHub err = nil, want GitHub lookup failure")
+	}
+	if !strings.Contains(err.Error(), "github release lookup failed: 500 Internal Server Error") {
+		t.Fatalf("SaveToolFallbackFromGitHub err = %v, want HTTP 500 lookup failure", err)
+	}
+	got, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	fallback := got.Tools["gh"].Fallback
+	if fallback == nil {
+		t.Fatal("fallback missing after failed lookup")
+	}
+	if fallback.Status != config.FallbackStatusVerified {
+		t.Fatalf("fallback status after failed lookup = %q, want verified preserved", fallback.Status)
+	}
+	if fallback.Source.Owner != "old" || fallback.Source.Repo != "repo" {
+		t.Fatalf("source after failed lookup = %+v, want preserved old/repo fallback", fallback.Source)
+	}
+	if fallback.Recipe.AssetDownloadURL != "https://example.test/old-gh.zip" {
+		t.Fatalf("asset URL after failed lookup = %q, want preserved old URL", fallback.Recipe.AssetDownloadURL)
+	}
+}
+
 type githubReleaseAssetFixture struct {
 	id          string
 	name        string
