@@ -1500,6 +1500,56 @@ func TestInstallHighConfidenceProviderMatches_AddsAllHighAndInstallsPriority(t *
 	}
 }
 
+func TestAddHighConfidenceProviderMatches_AddsAllHighWithoutInstalling(t *testing.T) {
+	brew := &searchStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		results: []provider.SearchResult{{
+			Name:     "prettier",
+			Provider: "brew",
+		}},
+	}
+	npm := &searchStub{
+		stubProvider: stubProvider{name: "npm", available: true},
+		results: []provider.SearchResult{{
+			Name:     "prettier",
+			Provider: "npm",
+		}},
+	}
+	a, cfgPath := newImportApp(t, brew, npm)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Version:  config.CurrentVersion,
+		Settings: config.Settings{ProviderPriority: []string{"npm", "brew"}},
+		Tools: map[string]config.ToolSpec{
+			"prettier": {},
+		},
+		Groups: []*config.GroupConfig{{Name: "web", Tools: []config.ToolEntry{{Name: "prettier"}}}},
+	}); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	result, err := a.AddHighConfidenceProviderMatches(context.Background(), "prettier", "")
+	if err != nil {
+		t.Fatalf("AddHighConfidenceProviderMatches: %v", err)
+	}
+	if result.Installed.Provider != "npm" {
+		t.Fatalf("selected install candidate = %+v, want npm priority winner", result.Installed)
+	}
+	if len(brew.installed) != 0 || len(npm.installed) != 0 {
+		t.Fatalf("provider installs = brew:%+v npm:%+v, want add-only no install", brew.installed, npm.installed)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	providers := cfg.Tools["prettier"].Providers
+	if len(providers) != 2 || providers[0].Provider != "npm" || providers[1].Provider != "brew" {
+		t.Fatalf("providers = %+v, want priority order npm, brew", providers)
+	}
+	if _, err := a.DB().Get(context.Background(), "prettier", "npm", "prettier"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("npm cache get error = %v, want sql.ErrNoRows", err)
+	}
+}
+
 func TestInstallHighConfidenceProviderMatchesWithState_ReturnsUpdatedToolsAndGroups(t *testing.T) {
 	brew := &searchStub{
 		stubProvider: stubProvider{name: "brew", available: true},
