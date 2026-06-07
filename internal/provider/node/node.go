@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -73,8 +74,17 @@ func New(exec executor.Executor, hint string) *Provider {
 		exec:        exec,
 		hint:        hint,
 		httpClient:  &http.Client{Timeout: 15 * time.Second},
-		registryURL: "https://registry.npmjs.org",
+		registryURL: defaultRegistryURL(),
 	}
+}
+
+func defaultRegistryURL() string {
+	if os.Getenv("OMNI_TEST_ISOLATED") == "1" {
+		if raw := strings.TrimSpace(os.Getenv("OMNI_TEST_NPM_REGISTRY_URL")); raw != "" {
+			return strings.TrimRight(raw, "/")
+		}
+	}
+	return "https://registry.npmjs.org"
 }
 
 // newWithRegistry creates a Provider with a custom registry URL and HTTP client.

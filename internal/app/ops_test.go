@@ -1459,6 +1459,60 @@ func TestInstallHighConfidenceProviderMatches_AddsAllHighAndInstallsPriority(t *
 	}
 }
 
+func TestInstallHighConfidenceProviderMatches_SkipsEcosystemSearchCandidates(t *testing.T) {
+	node := &searchStub{
+		stubProvider: stubProvider{name: "node", available: true},
+		results: []provider.SearchResult{{
+			Name:     "prettier",
+			Provider: "node",
+		}},
+	}
+	brew := &searchStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		results: []provider.SearchResult{{
+			Name:     "prettier",
+			Provider: "brew",
+		}},
+	}
+	npm := &searchStub{
+		stubProvider: stubProvider{name: "npm", available: true},
+		results: []provider.SearchResult{{
+			Name:     "prettier",
+			Provider: "npm",
+		}},
+	}
+	a, cfgPath := newImportApp(t, node, brew, npm)
+	if err := a.SaveSettings(context.Background(), config.Settings{ProviderPriority: []string{"npm", "brew"}}); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Version:  config.CurrentVersion,
+		Settings: config.Settings{ProviderPriority: []string{"npm", "brew"}},
+		Tools: map[string]config.ToolSpec{
+			"prettier": {},
+		},
+		Groups: []*config.GroupConfig{{Name: "web", Tools: []config.ToolEntry{{Name: "prettier"}}}},
+	}); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	result, err := a.InstallHighConfidenceProviderMatches(context.Background(), "prettier", "")
+	if err != nil {
+		t.Fatalf("InstallHighConfidenceProviderMatches: %v", err)
+	}
+	if result.Installed.Provider != "npm" {
+		t.Fatalf("installed = %+v, want npm", result.Installed)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	providers := cfg.Tools["prettier"].Providers
+	if len(providers) != 2 || providers[0].Provider != "npm" || providers[1].Provider != "brew" {
+		t.Fatalf("providers = %+v, want concrete npm then brew only", providers)
+	}
+}
+
 func TestInstallHighConfidenceProviderMatches_IgnoresWeakMatches(t *testing.T) {
 	npm := &searchStub{
 		stubProvider: stubProvider{name: "npm", available: true},
