@@ -20,9 +20,13 @@ import (
 type searchStub struct {
 	stubProvider
 	results []provider.SearchResult
+	err     error
 }
 
 func (s *searchStub) Search(_ context.Context, _ string) ([]provider.SearchResult, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
 	return s.results, nil
 }
 
@@ -1334,6 +1338,67 @@ func TestProviderMatches_PutsHighConfidenceBeforeWeakEvenWhenPriorityIsLower(t *
 	}
 	if matches[1].Provider != "npm" || matches[1].Confidence != app.ProviderMatchWeak {
 		t.Fatalf("second match = %+v, want weak npm", matches[1])
+	}
+}
+
+func TestProviderMatches_SkipsDisabledProviders(t *testing.T) {
+	brew := &searchStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		results: []provider.SearchResult{{
+			Name:     "prettier",
+			Provider: "brew",
+		}},
+	}
+	npm := &searchStub{
+		stubProvider: stubProvider{name: "npm", available: true},
+		results: []provider.SearchResult{{
+			Name:     "prettier",
+			Provider: "npm",
+		}},
+	}
+	a, _ := newImportApp(t, brew, npm)
+	if err := a.SaveSettings(context.Background(), config.Settings{
+		ProviderPriority:  []string{"npm", "brew"},
+		DisabledProviders: []string{"npm"},
+	}); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+
+	matches, err := a.ProviderMatches(context.Background(), "prettier", config.ToolSpec{}, "")
+	if err != nil {
+		t.Fatalf("ProviderMatches: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("ProviderMatches returned %d matches, want only enabled brew match", len(matches))
+	}
+	if matches[0].Provider != "brew" {
+		t.Fatalf("match provider = %q, want brew", matches[0].Provider)
+	}
+}
+
+func TestProviderMatches_ReturnsMatchesWithPartialSearchError(t *testing.T) {
+	brew := &searchStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		results: []provider.SearchResult{{
+			Name:     "prettier",
+			Provider: "brew",
+		}},
+	}
+	npm := &searchStub{
+		stubProvider: stubProvider{name: "npm", available: true},
+		err:          errors.New("registry unavailable"),
+	}
+	a, _ := newImportApp(t, brew, npm)
+
+	matches, err := a.ProviderMatches(context.Background(), "prettier", config.ToolSpec{}, "")
+	if err == nil || !strings.Contains(err.Error(), "searching npm") {
+		t.Fatalf("ProviderMatches err = %v, want partial npm search error", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("ProviderMatches returned %d matches, want successful brew match despite partial error", len(matches))
+	}
+	if matches[0].Provider != "brew" || matches[0].Confidence != app.ProviderMatchHigh {
+		t.Fatalf("match = %+v, want high-confidence brew", matches[0])
 	}
 }
 

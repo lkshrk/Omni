@@ -1605,15 +1605,19 @@ func ClassifyProviderMatch(logicalName string, spec config.ToolSpec, result prov
 
 func (a *App) ProviderMatches(ctx context.Context, logicalName string, spec config.ToolSpec, providerFilter string) ([]ProviderMatch, error) {
 	results, err := a.Search(ctx, logicalName, providerFilter)
+	settings, settingsErr := a.LoadSettings()
+	disabled := disabledProviderSet(settings.DisabledProviders)
 	matches := make([]ProviderMatch, 0, len(results))
 	for _, result := range results {
+		if disabled[strings.TrimSpace(result.Provider)] {
+			continue
+		}
 		confidence := ClassifyProviderMatch(logicalName, spec, result)
 		if confidence == ProviderMatchNone {
 			continue
 		}
 		matches = append(matches, ProviderMatch{SearchResult: result, Confidence: confidence})
 	}
-	settings, settingsErr := a.LoadSettings()
 	rank := a.providerPriorityRank(defaultProviderPriority(settings))
 	sort.SliceStable(matches, func(i, j int) bool {
 		leftHigh := matches[i].Confidence == ProviderMatchHigh
