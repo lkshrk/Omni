@@ -1,7 +1,10 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"io"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -38,6 +41,15 @@ bootstrap or host assignment:
 			}
 			name := args[0]
 			if providerName == "" {
+				matchResult, err := state.app.InstallHighConfidenceProviderMatches(cmd.Context(), name, "")
+				if err == nil {
+					printProviderMatchInstallResult(cmdOut(cmd), name, matchResult)
+					promptSatisfiedGroupsAfterInstall(cmd, state)
+					return nil
+				}
+				if !errors.Is(err, app.ErrProviderDiscoveryNotConfigured) && !errors.Is(err, app.ErrProviderDiscoveryAlreadyConfigured) {
+					return err
+				}
 				resolved, err := state.app.DefaultInstallProvider(cmd.Context())
 				if err != nil {
 					return err
@@ -52,15 +64,7 @@ bootstrap or host assignment:
 
 			// After each install, check if any unselected reusable group is now
 			// fully satisfied and offer to add it to the active host.
-			hostname, activeGroupNames, hasHost := state.app.ActiveHostInfo()
-			if hasHost {
-				satisfied, err := state.app.CheckSatisfiedGroups(cmd.Context(), activeGroupNames)
-				if err == nil {
-					promptSatisfiedGroups(state, hostname, satisfied, func(g string) error {
-						return state.app.ClaimFromMachineGroup(g)
-					})
-				}
-			}
+			promptSatisfiedGroupsAfterInstall(cmd, state)
 			return nil
 		},
 	}
@@ -71,6 +75,41 @@ bootstrap or host assignment:
 	cmd.ValidArgsFunction = completeToolNames(state)
 	_ = cmd.RegisterFlagCompletionFunc("group", completeGroupNames(state))
 	return cmd
+}
+
+func printProviderMatchInstallResult(out io.Writer, name string, result *app.ProviderMatchInstallResult) {
+	if result == nil {
+		return
+	}
+	if len(result.Added) == 1 {
+		fmt.Fprintf(out, "matched provider: %s -> %s/%s\n", name, result.Added[0].Provider, result.Added[0].EffectivePackage(name))
+	} else if len(result.Added) > 1 {
+		parts := make([]string, 0, len(result.Added))
+		for _, added := range result.Added {
+			parts = append(parts, fmt.Sprintf("%s/%s", added.Provider, added.EffectivePackage(name)))
+		}
+		fmt.Fprintf(out, "matched providers: %s -> %s\n", name, strings.Join(parts, ", "))
+	}
+	if result.SearchErr != nil {
+		fmt.Fprintf(out, "warning: %v\n", result.SearchErr)
+	}
+	if result.Installed.Provider != "" {
+		fmt.Fprintf(out, "✓ installed %s (%s)\n", name, result.Installed.Provider)
+	}
+}
+
+func promptSatisfiedGroupsAfterInstall(cmd *cobra.Command, state *rootState) {
+	hostname, activeGroupNames, hasHost := state.app.ActiveHostInfo()
+	if !hasHost {
+		return
+	}
+	satisfied, err := state.app.CheckSatisfiedGroups(cmd.Context(), activeGroupNames)
+	if err != nil {
+		return
+	}
+	promptSatisfiedGroups(state, hostname, satisfied, func(g string) error {
+		return state.app.ClaimFromMachineGroup(g)
+	})
 }
 
 func runInstallGroup(cmd *cobra.Command, state *rootState, group string) error {
