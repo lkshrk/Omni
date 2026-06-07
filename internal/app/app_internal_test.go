@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/dots"
 	"github.com/lkshrk/omni/internal/provider"
 )
@@ -138,6 +139,49 @@ func TestRefreshInstalledScanLabelFallsBackOnResolverError(t *testing.T) {
 	}
 	if cached, ok := resolved["system"]; !ok || cached != "" {
 		t.Fatalf("resolved cache = %q/%v, want empty cached fallback", cached, ok)
+	}
+}
+
+func TestNewRefreshProviderScanPlanSkipsConcreteCoveredByEcosystem(t *testing.T) {
+	plan := newRefreshProviderScanPlan(
+		[]*database.ToolCache{{Name: "typescript", Provider: "npm", Tracked: true}},
+		[]string{"node", "npm"},
+		map[string]int{"node": 2, "npm": 1},
+		map[string]string{"node": "npm"},
+	)
+
+	if len(plan.Steps) != 1 {
+		t.Fatalf("steps = %#v, want only ecosystem scan", plan.Steps)
+	}
+	step := plan.Steps[0]
+	if step.Provider != "node" || step.Label != "node/npm" || step.Count != 2 {
+		t.Fatalf("step = %#v, want node/npm count 2", step)
+	}
+}
+
+func TestNewRefreshProviderScanPlanCountsTrackedRowsWhenConfigCountsMissing(t *testing.T) {
+	plan := newRefreshProviderScanPlan(
+		[]*database.ToolCache{
+			{Name: "fd", Provider: "brew", Tracked: true},
+			{Name: "ripgrep", Provider: "brew", Tracked: true},
+			{Name: "ignored", Provider: "brew", Tracked: false},
+			{Name: "htop", Provider: "apt", Tracked: true},
+			nil,
+		},
+		[]string{"brew", "zypper"},
+		nil,
+		nil,
+	)
+
+	counts := plan.CountsByProvider()
+	if counts["brew"] != 2 {
+		t.Fatalf("brew count = %d, want tracked row count 2", counts["brew"])
+	}
+	if counts["zypper"] != 1 {
+		t.Fatalf("zypper count = %d, want default count 1", counts["zypper"])
+	}
+	if counts["apt"] != 1 {
+		t.Fatalf("apt count = %d, want discovered tracked row count 1", counts["apt"])
 	}
 }
 
