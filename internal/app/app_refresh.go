@@ -127,6 +127,7 @@ func (a *App) RefreshOutdated(ctx context.Context, refreshMetadata bool, progres
 			continue
 		}
 		latestVer, isOutdated := outdatedForTool(t, m, outdatedByManager[outdatedProvider])
+		latestVer, isOutdated = a.suppressSelfUnupgradeable(ctx, t, latestVer, isOutdated)
 		updates = append(updates, database.OutdatedUpdate{
 			Name:          t.Name,
 			Provider:      t.Provider,
@@ -292,6 +293,7 @@ func (a *App) RefreshProviderOutdated(ctx context.Context, provName string, refr
 			continue
 		}
 		latestVer, isOutdated := outdatedForTool(t, outdatedByProv[lookupProvider], outdatedByManager[lookupProvider])
+		latestVer, isOutdated = a.suppressSelfUnupgradeable(ctx, t, latestVer, isOutdated)
 		updates = append(updates, database.OutdatedUpdate{
 			Name:          t.Name,
 			Provider:      t.Provider,
@@ -549,6 +551,36 @@ func updateMetadataForInfo(providerName string, infoByPackage map[string]provide
 		})
 	}
 	return updates
+}
+
+// suppressSelfUnupgradeable clears the outdated/latest signal for a package that
+// represents its own manager when that manager cannot upgrade itself in the
+// current environment (e.g. pip under PEP 668 externally managed Python). Such a
+// package must not be presented as upgradeable since the upgrade is always
+// refused. Returns the (possibly cleared) latest version and outdated flag.
+func (a *App) suppressSelfUnupgradeable(ctx context.Context, t *database.ToolCache, latestVer string, isOutdated bool) (string, bool) {
+	if !isOutdated {
+		return latestVer, isOutdated
+	}
+	p, ok := a.registry.Get(config.NormalizeConcreteProvider(t.Provider))
+	if !ok {
+		return latestVer, isOutdated
+	}
+	checker, ok := p.(provider.SelfPackageUpgradeChecker)
+	if !ok {
+		return latestVer, isOutdated
+	}
+	pkg := t.Package
+	if pkg == "" {
+		pkg = t.Name
+	}
+	if !strings.EqualFold(pkg, checker.SelfPackageName()) {
+		return latestVer, isOutdated
+	}
+	if checker.SelfPackageUpgradeable(ctx) {
+		return latestVer, isOutdated
+	}
+	return "", false
 }
 
 func outdatedForTool(t *database.ToolCache, flat map[string]string, byManager map[string]map[string]string) (string, bool) {

@@ -100,6 +100,74 @@ func (s *managerOutdatedInfoStub) OutdatedInfoByManager(_ context.Context) (map[
 	return s.byManager, nil
 }
 
+// selfUnupgradeableStub is an outdated-reporting provider whose own package
+// cannot be upgraded (PEP 668 externally managed), exercising suppression.
+type selfUnupgradeableStub struct {
+	provOutdatedStub
+	upgradeable bool
+}
+
+func (s *selfUnupgradeableStub) SelfPackageName() string                       { return "pip" }
+func (s *selfUnupgradeableStub) SelfPackageUpgradeable(_ context.Context) bool { return s.upgradeable }
+
+func TestRefreshOutdated_SuppressesSelfUnupgradeableManager(t *testing.T) {
+	prov := &selfUnupgradeableStub{
+		provOutdatedStub: provOutdatedStub{
+			stubProvider: stubProvider{name: "pip", available: true},
+			outdatedMap:  map[string]string{"pip": "25.0"},
+		},
+		upgradeable: false,
+	}
+	a, _ := newImportApp(t, prov)
+	if err := a.DB().Upsert(context.Background(), &database.ToolCache{
+		Name: "pip", Provider: "pip", Package: "pip",
+		Installed: true, InstalledWith: "pip", LastChecked: time.Now(),
+	}); err != nil {
+		t.Fatalf("db.Upsert: %v", err)
+	}
+
+	if err := a.RefreshOutdated(context.Background(), false, nil); err != nil {
+		t.Fatalf("RefreshOutdated: %v", err)
+	}
+
+	got, err := a.DB().Get(context.Background(), "pip", "pip", "pip")
+	if err != nil {
+		t.Fatalf("get pip: %v", err)
+	}
+	if got.Outdated {
+		t.Errorf("pip.Outdated = true, want false (manager cannot self-upgrade under PEP 668)")
+	}
+}
+
+func TestRefreshOutdated_KeepsSelfUpgradeableManagerOutdated(t *testing.T) {
+	prov := &selfUnupgradeableStub{
+		provOutdatedStub: provOutdatedStub{
+			stubProvider: stubProvider{name: "pip", available: true},
+			outdatedMap:  map[string]string{"pip": "25.0"},
+		},
+		upgradeable: true,
+	}
+	a, _ := newImportApp(t, prov)
+	if err := a.DB().Upsert(context.Background(), &database.ToolCache{
+		Name: "pip", Provider: "pip", Package: "pip",
+		Installed: true, InstalledWith: "pip", LastChecked: time.Now(),
+	}); err != nil {
+		t.Fatalf("db.Upsert: %v", err)
+	}
+
+	if err := a.RefreshOutdated(context.Background(), false, nil); err != nil {
+		t.Fatalf("RefreshOutdated: %v", err)
+	}
+
+	got, err := a.DB().Get(context.Background(), "pip", "pip", "pip")
+	if err != nil {
+		t.Fatalf("get pip: %v", err)
+	}
+	if !got.Outdated {
+		t.Errorf("pip.Outdated = false, want true (manager can self-upgrade on this host)")
+	}
+}
+
 // TestRefreshProviderOutdated_UnknownProvider verifies that an unregistered
 // provider name is silently skipped (returns nil, no panic).
 func TestRefreshProviderOutdated_UnknownProvider(t *testing.T) {

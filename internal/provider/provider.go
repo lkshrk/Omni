@@ -199,6 +199,18 @@ type MultiManagerBulkChecker interface {
 	InstalledByManager(ctx context.Context) (map[string]InstalledEntry, error)
 }
 
+// SelfPackageUpgradeChecker is optionally implemented by providers that manage a
+// package representing the manager itself (e.g. pip's own "pip" package). Some
+// environments forbid the manager from upgrading itself (PEP 668 externally
+// managed Python), so the package must not be presented as upgradeable.
+type SelfPackageUpgradeChecker interface {
+	// SelfPackageName is the package name representing the manager itself.
+	SelfPackageName() string
+	// SelfPackageUpgradeable reports whether the manager can upgrade its own
+	// package in the current environment.
+	SelfPackageUpgradeable(ctx context.Context) bool
+}
+
 // MetadataRefresher is optionally implemented by providers whose outdated
 // detection relies on a locally-cached package index that can go stale (e.g.
 // Homebrew taps). Refreshing pulls the latest index so OutdatedMap sees newly
