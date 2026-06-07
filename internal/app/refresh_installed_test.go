@@ -105,6 +105,39 @@ func TestRefreshInstalled_CapturesConcreteProviderForEmptyProviderTool(t *testin
 	}
 }
 
+func TestRefreshInstalled_CapturesViaIsInstalledFallbackWhenBulkMisses(t *testing.T) {
+	// A configured empty-provider tool installed as a brew dependency/cask is not
+	// in the bulk "leaves" map, but a per-tool IsInstalled probe finds it.
+	prov := &isInstalledStub{
+		stubProvider:  stubProvider{name: "brew", available: true},
+		installedName: "cmake",
+		installedVer:  "3.30.0",
+	}
+	a, cfgPath := newImportApp(t, prov)
+
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{"cmake": {}},
+		Groups: []*config.GroupConfig{{
+			Tools: groupTools("cmake"),
+		}},
+	}); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+
+	if err := a.RefreshInstalled(context.Background(), nil); err != nil {
+		t.Fatalf("RefreshInstalled: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	providers := cfg.Tools["cmake"].Providers
+	if len(providers) != 1 || providers[0].Provider != "brew" {
+		t.Fatalf("providers = %+v, want [brew] captured via IsInstalled fallback", providers)
+	}
+}
+
 func TestRefreshInstalled_CapturesConcreteManagerNotFamilyForEcosystemTool(t *testing.T) {
 	// A python-ecosystem tool installed via uv must be captured as the concrete
 	// "uv" provider, never the "python" family (which fails config validation).

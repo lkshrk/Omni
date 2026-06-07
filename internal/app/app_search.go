@@ -653,7 +653,7 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 	stop()
 
 	stop = profile.Start("app.refresh.installed.capture_empty")
-	if captured, gitByTool := captureEmptyProviderInstalls(a, tools, multiMaps, installedMaps, metadataMaps, concreteForBulk); len(captured) > 0 {
+	if captured, gitByTool := captureEmptyProviderInstalls(ctx, a, tools, available, multiMaps, installedMaps, metadataMaps, concreteForBulk); len(captured) > 0 {
 		if updated, err := a.persistCapturedProviders(cfg, captured, gitByTool); err != nil {
 			stop()
 			return err
@@ -1755,8 +1755,10 @@ func promoteSourceConsensus(logicalName string, spec config.ToolSpec, matches []
 // tool (from provider metadata) when one is available. No search or install is
 // performed — this only reflects what is already installed locally.
 func captureEmptyProviderInstalls(
+	ctx context.Context,
 	a *App,
 	tools []config.ToolEntry,
+	available []provider.Provider,
 	multiMaps map[string]map[string]provider.InstalledEntry,
 	installedMaps map[string]map[string]string,
 	metadataMaps map[string]map[string]provider.InstalledMetadata,
@@ -1805,6 +1807,19 @@ func captureEmptyProviderInstalls(
 			}
 			if _, ok := provider.LookupString(m, keys); ok {
 				add(concreteForBulk[provName], provider.SourceMetadata{})
+			}
+		}
+		// Fallback: a tool installed as a dependency/cask/tap is absent from the
+		// bulk maps (e.g. brew's leaves --installed-on-request). Probe each
+		// available provider per-tool so configured-but-not-leaf tools still
+		// capture their concrete provider.
+		if len(seen) == 0 {
+			for _, p := range available {
+				installed, _, err := a.isInstalledWithEntry(ctx, p, p.Name(), t)
+				if err != nil || !installed {
+					continue
+				}
+				add(installedWithForOperation(ctx, p, p.Name(), ""), provider.SourceMetadata{})
 			}
 		}
 	}
