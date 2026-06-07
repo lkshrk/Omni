@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -29,6 +30,19 @@ const (
 	ToolStateOutOfSync       ToolListState = "out-of-sync"
 	ToolStateFailed          ToolListState = "failed"
 )
+
+type ProviderMatchConfidence string
+
+const (
+	ProviderMatchNone ProviderMatchConfidence = "none"
+	ProviderMatchWeak ProviderMatchConfidence = "weak"
+	ProviderMatchHigh ProviderMatchConfidence = "high"
+)
+
+type ProviderMatch struct {
+	provider.SearchResult
+	Confidence ProviderMatchConfidence
+}
 
 type RefreshInstalledProgressEvent struct {
 	Provider      string
@@ -1565,6 +1579,109 @@ func SearchResultDisplayProvider(r provider.SearchResult) string {
 		return ""
 	}
 	return r.SourceProvider
+}
+
+func ClassifyProviderMatch(logicalName string, spec config.ToolSpec, result provider.SearchResult) ProviderMatchConfidence {
+	resultName := strings.TrimSpace(result.Name)
+	if resultName == "" || strings.TrimSpace(result.Provider) == "" {
+		return ProviderMatchNone
+	}
+	if samePackageName(resultName, logicalName) {
+		return ProviderMatchHigh
+	}
+	for _, install := range spec.Providers {
+		if samePackageName(resultName, install.EffectivePackage(logicalName)) {
+			return ProviderMatchHigh
+		}
+	}
+	if len(spec.Providers) == 0 && samePackageName(resultName, spec.DefaultInstallSpec().EffectivePackage(logicalName)) {
+		return ProviderMatchHigh
+	}
+	if sameGitHubSource(spec.Git, result.Source) {
+		return ProviderMatchHigh
+	}
+	return ProviderMatchWeak
+}
+
+func (a *App) ProviderMatches(ctx context.Context, logicalName string, spec config.ToolSpec, providerFilter string) ([]ProviderMatch, error) {
+	results, err := a.Search(ctx, logicalName, providerFilter)
+	matches := make([]ProviderMatch, 0, len(results))
+	for _, result := range results {
+		confidence := ClassifyProviderMatch(logicalName, spec, result)
+		if confidence == ProviderMatchNone {
+			continue
+		}
+		matches = append(matches, ProviderMatch{SearchResult: result, Confidence: confidence})
+	}
+	settings, settingsErr := a.LoadSettings()
+	rank := a.providerPriorityRank(defaultProviderPriority(settings))
+	sort.SliceStable(matches, func(i, j int) bool {
+		leftHigh := matches[i].Confidence == ProviderMatchHigh
+		rightHigh := matches[j].Confidence == ProviderMatchHigh
+		if leftHigh != rightHigh {
+			return leftHigh
+		}
+		leftRank, leftOK := rank[matches[i].Provider]
+		rightRank, rightOK := rank[matches[j].Provider]
+		if leftOK != rightOK {
+			return leftOK
+		}
+		if leftRank != rightRank {
+			return leftRank < rightRank
+		}
+		if matches[i].Provider != matches[j].Provider {
+			return matches[i].Provider < matches[j].Provider
+		}
+		return matches[i].Name < matches[j].Name
+	})
+	return matches, errors.Join(err, settingsErr)
+}
+
+func (a *App) providerPriorityRank(priority []string) map[string]int {
+	if len(priority) == 0 {
+		if a != nil && a.registry != nil {
+			priority = a.registry.DefaultInstallProviderNames()
+		}
+		if len(priority) == 0 {
+			priority = provider.BuiltinDefaultInstallProviderNames()
+		}
+	}
+	rank := make(map[string]int, len(priority))
+	for i, name := range priority {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, ok := rank[name]; !ok {
+			rank[name] = i
+		}
+	}
+	return rank
+}
+
+func samePackageName(a, b string) bool {
+	return strings.EqualFold(strings.TrimSpace(a), strings.TrimSpace(b))
+}
+
+func sameGitHubSource(toolGit string, source provider.SourceMetadata) bool {
+	if strings.TrimSpace(toolGit) == "" || source.Type != provider.SourceTypeGitHub {
+		return false
+	}
+	toolOwner, toolRepo, err := parseGitHubRepo(toolGit)
+	if err != nil {
+		return false
+	}
+	sourceOwner := strings.TrimSpace(source.Owner)
+	sourceRepo := strings.TrimSpace(source.Repo)
+	if sourceOwner == "" || sourceRepo == "" {
+		var err error
+		sourceOwner, sourceRepo, err = parseGitHubRepo(source.URL)
+		if err != nil {
+			return false
+		}
+	}
+	return strings.EqualFold(toolOwner, sourceOwner) &&
+		strings.EqualFold(toolRepo, sourceRepo)
 }
 
 func (a *App) cacheSearchMetadata(ctx context.Context, results []provider.SearchResult) error {

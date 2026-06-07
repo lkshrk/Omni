@@ -1212,6 +1212,131 @@ func TestSearchResultDisplayProviderKeepsConcreteWithinSameEcosystem(t *testing.
 	}
 }
 
+func TestClassifyProviderMatch_HighConfidenceExactPackage(t *testing.T) {
+	got := app.ClassifyProviderMatch("prettier", config.ToolSpec{}, provider.SearchResult{
+		Name:     "prettier",
+		Provider: "npm",
+	})
+	if got != app.ProviderMatchHigh {
+		t.Fatalf("ClassifyProviderMatch = %q, want high", got)
+	}
+}
+
+func TestClassifyProviderMatch_HighConfidenceMatchingGitSource(t *testing.T) {
+	got := app.ClassifyProviderMatch("rg", config.ToolSpec{
+		Git: "https://github.com/BurntSushi/ripgrep",
+	}, provider.SearchResult{
+		Name:     "ripgrep",
+		Provider: "brew",
+		Source: provider.SourceMetadata{
+			Type:  provider.SourceTypeGitHub,
+			Owner: "burntsushi",
+			Repo:  "ripgrep",
+			URL:   "https://github.com/BurntSushi/ripgrep",
+		},
+	})
+	if got != app.ProviderMatchHigh {
+		t.Fatalf("ClassifyProviderMatch = %q, want high", got)
+	}
+}
+
+func TestClassifyProviderMatch_HighConfidenceMatchingGitSourceURL(t *testing.T) {
+	got := app.ClassifyProviderMatch("rg", config.ToolSpec{
+		Git: "git@github.com:BurntSushi/ripgrep.git",
+	}, provider.SearchResult{
+		Name:     "ripgrep",
+		Provider: "brew",
+		Source: provider.SourceMetadata{
+			Type: provider.SourceTypeGitHub,
+			URL:  "https://github.com/BurntSushi/ripgrep",
+		},
+	})
+	if got != app.ProviderMatchHigh {
+		t.Fatalf("ClassifyProviderMatch = %q, want high", got)
+	}
+}
+
+func TestClassifyProviderMatch_WeakForLooseSearchHit(t *testing.T) {
+	got := app.ClassifyProviderMatch("prettier", config.ToolSpec{}, provider.SearchResult{
+		Name:        "prettier-plugin-tailwindcss",
+		Provider:    "npm",
+		Description: "Tailwind CSS class sorter for Prettier",
+	})
+	if got != app.ProviderMatchWeak {
+		t.Fatalf("ClassifyProviderMatch = %q, want weak", got)
+	}
+}
+
+func TestProviderMatches_SortsHighConfidenceByProviderPriority(t *testing.T) {
+	brew := &searchStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		results: []provider.SearchResult{{
+			Name:     "prettier",
+			Provider: "brew",
+		}},
+	}
+	npm := &searchStub{
+		stubProvider: stubProvider{name: "npm", available: true},
+		results: []provider.SearchResult{{
+			Name:     "prettier",
+			Provider: "npm",
+		}},
+	}
+	a, _ := newImportApp(t, brew, npm)
+	if err := a.SaveSettings(context.Background(), config.Settings{ProviderPriority: []string{"npm", "brew"}}); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+
+	matches, err := a.ProviderMatches(context.Background(), "prettier", config.ToolSpec{}, "")
+	if err != nil {
+		t.Fatalf("ProviderMatches: %v", err)
+	}
+	if len(matches) != 2 {
+		t.Fatalf("ProviderMatches returned %d matches, want 2", len(matches))
+	}
+	if matches[0].Provider != "npm" || matches[0].Confidence != app.ProviderMatchHigh {
+		t.Fatalf("first match = %+v, want high-confidence npm", matches[0])
+	}
+	if matches[1].Provider != "brew" || matches[1].Confidence != app.ProviderMatchHigh {
+		t.Fatalf("second match = %+v, want high-confidence brew", matches[1])
+	}
+}
+
+func TestProviderMatches_PutsHighConfidenceBeforeWeakEvenWhenPriorityIsLower(t *testing.T) {
+	brew := &searchStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		results: []provider.SearchResult{{
+			Name:     "prettier",
+			Provider: "brew",
+		}},
+	}
+	npm := &searchStub{
+		stubProvider: stubProvider{name: "npm", available: true},
+		results: []provider.SearchResult{{
+			Name:     "prettier-plugin-tailwindcss",
+			Provider: "npm",
+		}},
+	}
+	a, _ := newImportApp(t, brew, npm)
+	if err := a.SaveSettings(context.Background(), config.Settings{ProviderPriority: []string{"npm", "brew"}}); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+
+	matches, err := a.ProviderMatches(context.Background(), "prettier", config.ToolSpec{}, "")
+	if err != nil {
+		t.Fatalf("ProviderMatches: %v", err)
+	}
+	if len(matches) != 2 {
+		t.Fatalf("ProviderMatches returned %d matches, want 2", len(matches))
+	}
+	if matches[0].Provider != "brew" || matches[0].Confidence != app.ProviderMatchHigh {
+		t.Fatalf("first match = %+v, want high-confidence brew before weak npm", matches[0])
+	}
+	if matches[1].Provider != "npm" || matches[1].Confidence != app.ProviderMatchWeak {
+		t.Fatalf("second match = %+v, want weak npm", matches[1])
+	}
+}
+
 func TestSearch_CachesResultMetadata(t *testing.T) {
 	ctx := context.Background()
 	s := &searchStub{
