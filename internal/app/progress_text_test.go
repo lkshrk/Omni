@@ -655,6 +655,45 @@ func TestPrivilegedActionMapForRows(t *testing.T) {
 	}
 }
 
+func TestBulkToolFailureSummaryTextBranches(t *testing.T) {
+	adminKey := toolResultKey("vim", "system")
+	tests := []struct {
+		name string
+		rows BulkToolFailureRows
+		want string
+	}{
+		{
+			name: "no failures",
+			want: "sync complete",
+		},
+		{
+			name: "admin only",
+			rows: BulkToolFailureRows{
+				RowErrors:         map[string]string{adminKey: "requires sudo: apt install vim"},
+				PrivilegedActions: map[string]provider.PrivilegeAction{adminKey: provider.PrivilegeActionInstall},
+			},
+			want: "sync complete, 1 need admin approval",
+		},
+		{
+			name: "failures only",
+			rows: BulkToolFailureRows{
+				RowErrors: map[string]string{
+					toolResultKey("fd", "system"):  "network failed",
+					toolResultKey("bat", "system"): "checksum failed",
+				},
+			},
+			want: "sync complete, 2 failed",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := BulkToolFailureSummaryText("sync complete", tt.rows); got != tt.want {
+				t.Fatalf("BulkToolFailureSummaryText = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSyncAllPhaseProgressText(t *testing.T) {
 	got := SyncAllPhaseProgressText("reading installed packages…", 2)
 	want := "Syncing tools 0/2: checking installed state…"
