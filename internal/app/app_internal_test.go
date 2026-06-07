@@ -1,6 +1,8 @@
 package app
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,7 +12,46 @@ import (
 
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/dots"
+	"github.com/lkshrk/omni/internal/provider"
 )
+
+type internalProviderStub struct {
+	name     string
+	concrete string
+	err      error
+	metadata map[string]provider.InstalledMetadata
+}
+
+func (s *internalProviderStub) Name() string { return s.name }
+
+func (s *internalProviderStub) Description() string { return s.name }
+
+func (s *internalProviderStub) Available(context.Context) (bool, error) { return true, nil }
+
+func (s *internalProviderStub) Install(context.Context, provider.Tool) error { return nil }
+
+func (s *internalProviderStub) Uninstall(context.Context, provider.Tool) error { return nil }
+
+func (s *internalProviderStub) Upgrade(context.Context, provider.Tool) error { return nil }
+
+func (s *internalProviderStub) IsInstalled(context.Context, provider.Tool) (bool, string, error) {
+	return false, "", nil
+}
+
+func (s *internalProviderStub) ListInstalled(context.Context) ([]provider.InstalledTool, error) {
+	return nil, nil
+}
+
+func (s *internalProviderStub) ResolvedName(context.Context) (string, error) {
+	if s.err != nil {
+		return "", s.err
+	}
+	return s.concrete, nil
+}
+
+func (s *internalProviderStub) InstalledMetadataMap(context.Context) (map[string]provider.InstalledMetadata, error) {
+	return s.metadata, nil
+}
 
 func TestTapFromPackage(t *testing.T) {
 	tests := []struct {
@@ -46,6 +87,57 @@ func TestShortHostname(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("shortHostname(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+}
+
+func TestRefreshInstalledScanLabelUsesExplicitInstallWithForEcosystem(t *testing.T) {
+	a := New(filepath.Join(t.TempDir(), "settings.json"))
+	a.registry = provider.NewRegistry()
+	system := &internalProviderStub{name: "system", concrete: "apt"}
+	a.registry.RegisterWithMetadata(system, provider.Metadata{Kind: provider.ProviderKindEcosystem})
+
+	got := a.refreshInstalledScanLabel(context.Background(), config.ToolEntry{
+		Name:        "ripgrep",
+		Provider:    "system",
+		InstallWith: "brew",
+	}, "system", system, map[string]string{})
+
+	if got != "system/brew" {
+		t.Fatalf("refreshInstalledScanLabel = %q, want system/brew", got)
+	}
+}
+
+func TestRefreshInstalledScanLabelCachesConcreteResolver(t *testing.T) {
+	a := New(filepath.Join(t.TempDir(), "settings.json"))
+	a.registry = provider.NewRegistry()
+	system := &internalProviderStub{name: "system", concrete: "apt"}
+	resolved := make(map[string]string)
+
+	first := a.refreshInstalledScanLabel(context.Background(), config.ToolEntry{Name: "ripgrep", Provider: "system"}, "system", system, resolved)
+	system.concrete = "brew"
+	second := a.refreshInstalledScanLabel(context.Background(), config.ToolEntry{Name: "fd", Provider: "system"}, "system", system, resolved)
+
+	if first != "system/apt" || second != "system/apt" {
+		t.Fatalf("labels = %q/%q, want cached system/apt", first, second)
+	}
+	if got, ok := (&refreshInstalledScanProgress{resolvedConcrete: resolved}).resolvedProviderName("system"); !ok || got != "apt" {
+		t.Fatalf("resolvedProviderName = %q/%v, want apt/true", got, ok)
+	}
+}
+
+func TestRefreshInstalledScanLabelFallsBackOnResolverError(t *testing.T) {
+	a := New(filepath.Join(t.TempDir(), "settings.json"))
+	a.registry = provider.NewRegistry()
+	system := &internalProviderStub{name: "system", err: errors.New("resolver failed")}
+	resolved := make(map[string]string)
+
+	got := a.refreshInstalledScanLabel(context.Background(), config.ToolEntry{Name: "ripgrep", Provider: "system"}, "system", system, resolved)
+
+	if got != "system" {
+		t.Fatalf("refreshInstalledScanLabel = %q, want system fallback", got)
+	}
+	if cached, ok := resolved["system"]; !ok || cached != "" {
+		t.Fatalf("resolved cache = %q/%v, want empty cached fallback", cached, ok)
 	}
 }
 
