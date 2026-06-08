@@ -1,0 +1,43 @@
+# v8→v9 migration expands family-level disabled_providers into concrete providers
+# in both global settings and per-host settings, preserving sibling keys.
+exec omni --config settings.json hosts ensure testhost
+
+# After startup normalization the file version must be 9.
+exec grep '"version"' settings.json
+stdout '"version": 9'
+
+# Global disabled_providers: ["node"] → ["bun","pnpm","npm"]
+# The values are on separate lines in pretty-printed JSON; grep for each name.
+exec grep '"bun"' settings.json
+stdout '"bun"'
+exec grep '"pnpm"' settings.json
+stdout '"pnpm"'
+exec grep '"npm"' settings.json
+stdout '"npm"'
+
+# The family name "node" must no longer appear as a quoted value in the file.
+! exec grep '"node"' settings.json
+
+# Sibling key auto_import must have survived unchanged.
+exec grep '"auto_import"' settings.json
+stdout '"auto_import": true'
+
+# host_settings.testhost.disabled_providers: ["python"] → ["uv","pip"]
+exec grep '"uv"' settings.json
+stdout '"uv"'
+exec grep '"pip"' settings.json
+stdout '"pip"'
+
+-- settings.json --
+{
+  "version": 8,
+  "settings": {
+    "auto_import": true,
+    "disabled_providers": ["node"]
+  },
+  "host_settings": {
+    "testhost": {
+      "disabled_providers": ["python"]
+    }
+  }
+}
