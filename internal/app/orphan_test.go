@@ -378,6 +378,35 @@ func TestSyncAll_ClaimResolvedDefaultConcreteDoesNotWriteInstallWith(t *testing.
 	}
 }
 
+func TestSyncAll_ClaimNodeToolWritesConcreteNotFamily(t *testing.T) {
+	// Regression: claiming a discovered node tool must write the concrete manager
+	// (bun), never the "node" family — which would fail provider validation.
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	bun := &lifecycleProvider{stubProvider: stubProvider{name: "bun", available: true}, installed: true}
+	a, cfgPath := newImportApp(t, bun)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{testHostGroup()}}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	discovered := []*database.ToolCache{
+		{Name: "tsx", Provider: "bun", InstalledWith: "bun", Installed: true, Tracked: false},
+	}
+
+	if _, err := a.SyncAll(context.Background(), app.SyncAllOptions{Discovered: discovered}); err != nil {
+		t.Fatalf("SyncAll: %v", err)
+	}
+	updated, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	spec := updated.Tools["tsx"]
+	if len(spec.Providers) != 1 || spec.Providers[0].Provider != "bun" {
+		t.Fatalf("tsx spec = %+v, want concrete bun provider (not node family)", spec)
+	}
+	if errs := config.ValidateRoot(updated, config.ProviderValidation{}); len(errs) > 0 {
+		t.Fatalf("config did not validate clean after claim: %v", errs)
+	}
+}
+
 func TestSyncAll_DryRunDoesNotWriteClaims(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	brew := &installTracker{stubProvider: stubProvider{name: "brew", available: true}}
