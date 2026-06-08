@@ -604,7 +604,7 @@ func TestSwitchReinstallDefaultFlag_InstallsConfiguredProvider(t *testing.T) {
 		t.Fatalf("seed cache: %v", err)
 	}
 
-	cmd := newSwitchCmd(&rootState{app: a, yes: true})
+	cmd := newReinstallCmd(&rootState{app: a, yes: true})
 	cmd.SetArgs([]string{"black", "--reinstall-default"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("switch --reinstall-default: %v", err)
@@ -1980,7 +1980,7 @@ func TestSwitch_MissingFrom_ReturnsError(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "switch", "sometool", "--to", "brew"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "reinstall", "sometool", "--to", "brew"})
 	err := cmd.Execute()
 	if err == nil {
 		t.Error("expected error when --from is missing")
@@ -1999,7 +1999,7 @@ func TestSwitch_MissingTo_ReturnsError(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "switch", "sometool", "--from", "brew"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "reinstall", "sometool", "--from", "brew"})
 	err := cmd.Execute()
 	if err == nil {
 		t.Error("expected error when --to is missing")
@@ -2354,7 +2354,7 @@ func TestSwitch_BothFlags_AttemptsFailed(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "switch", "sometool", "--from", "brew", "--to", "pip"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "reinstall", "sometool", "--from", "brew", "--to", "pip"})
 	// Will likely fail (tool not in config) but exercises the code path.
 	_ = cmd.Execute()
 }
@@ -3918,7 +3918,7 @@ func TestSwitch_ToolNotFound_ReturnsError(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "switch", "nonexistent_tool_xyz", "--from", "brew", "--to", "pip"})
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "reinstall", "nonexistent_tool_xyz", "--from", "brew", "--to", "pip"})
 	err := cmd.Execute()
 	// Should error: tool not found in config.
 	if err == nil {

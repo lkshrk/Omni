@@ -1,0 +1,11 @@
+# omni tools reinstall without --from exits with an error
+exec omni --config settings.json hosts ensure testhost
+! exec omni --config settings.json tools reinstall black
+stderr '--from is required'
+
+# omni tools reinstall with --from but no --to also exits with an error
+! exec omni --config settings.json tools reinstall black --from brew
+stderr '--to is required'
+
+-- settings.json --
+{}

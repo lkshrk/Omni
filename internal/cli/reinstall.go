@@ -8,23 +8,24 @@ import (
 	"github.com/lkshrk/omni/internal/actions"
 )
 
-func newSwitchCmd(state *rootState) *cobra.Command {
+func newReinstallCmd(state *rootState) *cobra.Command {
 	var fromProvider, toProvider string
 	var providerName string
 	var reinstallDefault bool
 
 	cmd := &cobra.Command{
-		Use:   "switch <tool>",
-		Short: "Move a tool to a different provider",
-		Long: `Switch moves a single tool from one provider to another:
-installs via the new provider, removes the old installation (best-effort),
-and rewrites the config entry.
+		Use:   "reinstall <tool>",
+		Short: "Reinstall a tool, optionally moving it to a different provider",
+		Long: `Reinstall reinstalls a single tool. With --from/--to it moves the tool
+between providers: installs via the new provider, removes the old installation
+(best-effort), and rewrites the config entry. With --reinstall-default it
+reinstalls using the tool's configured default provider.
 
 Examples:
-  omni switch black --from brew --to pip
-  omni switch prettier --from brew --to npm
-  omni switch ripgrep --from brew --to npm
-  omni switch black --reinstall-default    # ` + actions.MustLongDescription(actions.ToolReinstallDefault) + ``,
+  omni reinstall black --from brew --to pip
+  omni reinstall prettier --from brew --to npm
+  omni reinstall ripgrep --from brew --to npm
+  omni reinstall black --reinstall-default    # ` + actions.MustLongDescription(actions.ToolReinstallDefault) + ``,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
@@ -56,7 +57,7 @@ Examples:
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmdOut(cmd), "✓ switched %s: %s → %s\n", name, fromProvider, toProvider)
+			fmt.Fprintf(cmdOut(cmd), "✓ reinstalled %s: %s → %s\n", name, fromProvider, toProvider)
 			if result.UninstallWarning != nil {
 				fmt.Fprintf(cmdOut(cmd), "  warning: could not remove old %s installation: %v\n", fromProvider, result.UninstallWarning)
 			}

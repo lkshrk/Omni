@@ -51,7 +51,7 @@ func TestMutatingCLICommandsAreCataloged(t *testing.T) {
 		{"tools", "install"},
 		{"tools", "delete"},
 		{"tools", "upgrade"},
-		{"tools", "switch"},
+		{"tools", "reinstall"},
 		{"tools", "import"},
 		{"tools", "refresh"},
 		{"tools", "consolidate"},
@@ -468,7 +468,7 @@ func isMutatingCLICommand(path []string) bool {
 	}
 	switch path[0] {
 	case "tools":
-		return len(path) == 2 && oneOf(path[1], "sync", "add", "install", "delete", "delete-spec", "upgrade", "switch", "import", "refresh", "consolidate", "set", "ignore", "unignore", "normalize")
+		return len(path) == 2 && oneOf(path[1], "sync", "add", "install", "delete", "delete-spec", "upgrade", "reinstall", "import", "refresh", "consolidate", "set", "ignore", "unignore", "normalize")
 	case "groups":
 		return len(path) == 2 && oneOf(path[1], "create", "rename", "delete", "move-tool", "remove-tool", "ignore-tool", "unignore-tool")
 	case "hosts":
