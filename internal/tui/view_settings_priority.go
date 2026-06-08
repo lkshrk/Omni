@@ -5,7 +5,9 @@ import "strings"
 // providerPriorityContentWidth is the inner text width of the provider-priority
 // popup.
 func providerPriorityContentWidth(m Model) int {
-	return popupContentWidth(m, 40, 28, 48)
+	// Wide enough that the footer hints (cancel … grab · on/off … save) sit on a
+	// single line instead of wrapping the primary action below.
+	return popupContentWidth(m, 54, 48, 64)
 }
 
 func providerPriorityPopupFrame(m Model) popupFrame {
