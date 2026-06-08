@@ -12,6 +12,7 @@ import (
 // tapBrewStub is a full brew stub that also implements the brewTapManager interface.
 type tapBrewStub struct {
 	existingTaps  []string
+	existingTrust []string
 	tapsCalled    []string
 	trustedCalled []string
 }
@@ -33,6 +34,7 @@ func (s *tapBrewStub) Tap(_ context.Context, name string) error {
 	s.tapsCalled = append(s.tapsCalled, name)
 	return nil
 }
+func (s *tapBrewStub) ListTrusted(_ context.Context) ([]string, error) { return s.existingTrust, nil }
 func (s *tapBrewStub) Trust(_ context.Context, name string) error {
 	s.trustedCalled = append(s.trustedCalled, name)
 	return nil
@@ -88,6 +90,27 @@ func TestSync_TrustsAlreadyTappedRepo(t *testing.T) {
 	}
 	if len(stub.trustedCalled) != 1 || stub.trustedCalled[0] != "hashicorp/tap" {
 		t.Errorf("Trust called with %v, want [hashicorp/tap]", stub.trustedCalled)
+	}
+}
+
+func TestSync_SkipsAlreadyTrustedTap(t *testing.T) {
+	// A tap already trusted must not be re-trusted (avoids a brew call per sync).
+	stub := &tapBrewStub{existingTaps: []string{"hashicorp/tap"}, existingTrust: []string{"hashicorp/tap"}}
+	a, cfgPath := newImportApp(t, stub)
+	cfg := &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"terraform": {Provider: "brew", Package: "hashicorp/tap/terraform", InstallWith: "brew", Taps: []string{"hashicorp/tap"}},
+		},
+		Groups: []*config.GroupConfig{{Tools: []config.ToolEntry{{Name: "terraform"}}}},
+	}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+	if _, err := a.Sync(context.Background(), sync.SyncOptions{}); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if len(stub.trustedCalled) != 0 {
+		t.Errorf("Trust called %v, want none (already trusted)", stub.trustedCalled)
 	}
 }
 

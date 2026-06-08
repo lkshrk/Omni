@@ -731,6 +731,7 @@ func (a *App) HostGroups(ctx context.Context, hostname string) ([]*config.GroupC
 type brewTapManager interface {
 	ListTaps(ctx context.Context) ([]string, error)
 	Tap(ctx context.Context, name string) error
+	ListTrusted(ctx context.Context) ([]string, error)
 	Trust(ctx context.Context, name string) error
 }
 
@@ -756,18 +757,29 @@ func (a *App) syncTaps(ctx context.Context, taps []string, dryRun bool) error {
 	for _, t := range current {
 		tapped[t] = struct{}{}
 	}
-	for _, tap := range taps {
-		if dryRun {
-			continue
+	if dryRun {
+		return nil
+	}
+	// Trust is idempotent but each call spawns brew; only trust taps not already
+	// trusted so steady-state syncs make no trust mutations. nil (older Homebrew
+	// without tap-trust) leaves the set empty and Trust is a no-op anyway.
+	trusted := make(map[string]struct{})
+	if list, err := bm.ListTrusted(ctx); err == nil {
+		for _, t := range list {
+			trusted[t] = struct{}{}
 		}
+	}
+	for _, tap := range taps {
 		if _, exists := tapped[tap]; !exists {
 			if err := bm.Tap(ctx, tap); err != nil {
 				return fmt.Errorf("tapping %s: %w", tap, err)
 			}
 		}
-		// Trust every config-declared tap (no-op on older Homebrew). A tap in
-		// config is one the user opted into; trusting it keeps short-name
-		// installs/outdated working once Homebrew enforces tap-trust.
+		if _, ok := trusted[tap]; ok {
+			continue
+		}
+		// A tap in config is one the user opted into; trust it so short-name
+		// installs/outdated keep working once Homebrew enforces tap-trust.
 		if err := bm.Trust(ctx, tap); err != nil {
 			return fmt.Errorf("trusting tap %s: %w", tap, err)
 		}
