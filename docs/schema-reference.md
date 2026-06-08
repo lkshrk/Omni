@@ -35,8 +35,9 @@ This page explains the shape of `settings.json`. For narrative examples, use
 ### `settings.ecosystems` (legacy)
 
 `settings.ecosystems` remains in the schema so older configs can load and
-migrate. New v8 config should use `provider_priority`, bootstrap
-`settings.providers`, and tool-level `providers[]`.
+migrate. Current (v9) config should use `provider_priority`, bootstrap
+`settings.providers`, and tool-level `providers[]`. The v8→v9 migration expands
+family `disabled_providers` (`system`/`node`/`python`) into concrete providers.
 
 | Ecosystem | Fields | Accepted values |
 | --- | --- | --- |
