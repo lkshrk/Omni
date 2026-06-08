@@ -15,7 +15,7 @@ exec test -f .omni-cache/fake-pip/black
 exec omni --config settings.json tools set black --provider uv
 stdout 'Set logical tool "black" with provider "uv"'
 
-exec omni -y --config settings.json tools switch black --reinstall-default
+exec omni -y --config settings.json tools reinstall black --reinstall-default
 stdout 'reinstalled black with default provider uv'
 exec test -f .omni-cache/fake-uv/black
 exec test ! -f .omni-cache/fake-pip/black

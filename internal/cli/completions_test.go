@@ -431,7 +431,7 @@ func TestCompletionWiring(t *testing.T) {
 		{[]string{"tools", "install"}},
 		{[]string{"tools", "upgrade"}},
 		{[]string{"tools", "delete"}},
-		{[]string{"tools", "switch"}},
+		{[]string{"tools", "reinstall"}},
 		{[]string{"tools", "sync"}},
 		{[]string{"tools", "set"}},
 		{[]string{"tools", "delete-spec"}},

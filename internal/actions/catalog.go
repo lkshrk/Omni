@@ -308,7 +308,7 @@ var Tools = []Action{
 		ConfirmDescription: ConfirmReinstall,
 		Requirements:       []Requirement{RequiresToolName},
 		TUI:                &TUIBinding{KeyMapField: "MigrateProvider", DefaultKey: "r", Label: "reinstall with default", Description: "Reinstall the selected tool with its default provider.", ConfirmDescription: ConfirmReinstall},
-		CLI:                []CLIBinding{{Command: []string{"tools", "switch"}, Flags: []string{"--reinstall-default", "--provider"}}},
+		CLI:                []CLIBinding{{Command: []string{"tools", "reinstall"}, Flags: []string{"--reinstall-default", "--provider"}}},
 	},
 	{
 		ID:              ToolRefresh,
@@ -399,12 +399,12 @@ var Tools = []Action{
 		ID:              ToolSwitchProvider,
 		Domain:          "tools",
 		Scope:           ScopeRow,
-		Label:           "switch provider",
+		Label:           "move provider",
 		Description:     "Move one tool between explicit providers.",
 		LongDescription: "Install one tool with an explicit target provider, remove the old provider installation best-effort, and rewrite config/cache ownership.",
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresToolName},
-		CLI:             []CLIBinding{{Command: []string{"tools", "switch"}, Flags: []string{"--from", "--to"}}},
+		CLI:             []CLIBinding{{Command: []string{"tools", "reinstall"}, Flags: []string{"--from", "--to"}}},
 		CLIOnlyReason:   "explicit --from/--to provider migration is a legacy CLI repair path; TUI exposes scoped provider pinning and reinstall-with-default instead",
 	},
 }

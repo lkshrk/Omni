@@ -34,7 +34,7 @@ func newToolsCmd(state *rootState) *cobra.Command {
 		newSearchCmd(state),
 		newRefreshCmd(state),
 		newConsolidateCmd(state),
-		newSwitchCmd(state),
+		newReinstallCmd(state),
 		newProvidersCmd(state),
 		newListCmd(state),
 	)
