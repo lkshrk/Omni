@@ -1831,7 +1831,7 @@ func TestRender_DotsDisabledHidesMutatingHints(t *testing.T) {
 			t.Fatalf("disabled dots row hints include %q: %q", blocked, rowHints)
 		}
 	}
-	help := renderHelpPopup(m)
+	help := renderHelpPopupWithWidth(m, helpPopupContentWidth(m))
 	for _, blocked := range []string{"discover", "sync all", "variant", "delete", "ignore", "use repo", "use local"} {
 		if strings.Contains(help, blocked) {
 			t.Fatalf("disabled dots help includes %q: %q", blocked, help)
