@@ -2172,14 +2172,14 @@ func TestRenderHostGroupToolsEditor(t *testing.T) {
 	m.groupToolsEditor.cursor = 0
 
 	out := renderHostGroupToolsEditor(m)
-	for _, want := range []string{"[all]", "system", "node", "python", "enabled", "disabled", "ignored", "[x]", "ripgrep", "system(", "brew", "[ ]", "eslint", "node(", "pnpm", "ruff", "ignored", "space toggle", "x ignore", "/ search", "[] filter", "enter save", "esc cancel"} {
+	for _, want := range []string{"[all]", "system", "node", "python", "enabled", "disabled", "ignored", "[x]", "ripgrep", "brew", "[ ]", "eslint", "pnpm", "ruff", "ignored", "space toggle", "x ignore", "/ search", "[] filter", "enter save", "esc cancel"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("group tools editor missing %q:\n%s", want, out)
 		}
 	}
 	ripgrepLine := renderedLineContaining(out, "ripgrep")
-	providerCol := visualColumnOf(ripgrepLine, "system(")
-	wantProviderCol := groupToolsContentWidth(m) - lipgloss.Width("system(brew)")
+	providerCol := visualColumnOf(ripgrepLine, "brew")
+	wantProviderCol := groupToolsContentWidth(m) - lipgloss.Width("brew")
 	if providerCol != wantProviderCol {
 		t.Fatalf("tool provider column = %d, want right-aligned %d:\n%s", providerCol, wantProviderCol, ripgrepLine)
 	}
@@ -3856,21 +3856,21 @@ func TestProviderLabel_TableDriven(t *testing.T) {
 	cases := []struct {
 		raw, installedWith, systemBin, pythonBin, nodeBin, want string
 	}{
-		{"brew", "", "", "", "", "system(brew!)"},
-		{"apt", "", "", "", "", "system(apt!)"},
-		{"system", "brew", "", "", "", "system(brew)"},
-		{"system", "", "brew", "", "", "system(brew)"},
+		{"brew", "", "", "", "", "brew"},
+		{"apt", "", "", "", "", "apt"},
+		{"system", "brew", "", "", "", "brew"},
+		{"system", "", "brew", "", "", "brew"},
 		{"system", "", "", "", "", "system"},
-		{"python", "", "", "uv", "", "python(uv)"},
+		{"python", "", "", "uv", "", "uv"},
 		{"python", "", "", "", "", "python"},
-		{"pip", "", "", "", "", "python(pip3!)"},
-		{"pip3", "", "", "", "", "python(pip3!)"},
-		{"uv", "", "", "", "", "python(uv!)"},
-		{"node", "", "", "", "bun", "node(bun)"},
+		{"pip", "", "", "", "", "pip3"},
+		{"pip3", "", "", "", "", "pip3"},
+		{"uv", "", "", "", "", "uv"},
+		{"node", "", "", "", "bun", "bun"},
 		{"node", "", "", "", "", "node"},
-		{"npm", "", "", "", "", "node(npm!)"},
-		{"bun", "", "", "", "", "node(bun!)"},
-		{"pnpm", "", "", "", "", "node(pnpm!)"},
+		{"npm", "", "", "", "", "npm"},
+		{"bun", "", "", "", "", "bun"},
+		{"pnpm", "", "", "", "", "pnpm"},
 		{"cargo", "", "", "", "", "cargo"},
 	}
 	for _, tc := range cases {
@@ -3892,14 +3892,14 @@ func TestProviderLabelForToolWithPinMarksExplicitOverride(t *testing.T) {
 			pin:     "npm",
 			nodeBin: "bun",
 			tool:    &database.ToolCache{Name: "typescript", Provider: "node", Installed: true, InstalledWith: "npm", Tracked: true},
-			want:    "node(npm!)",
+			want:    "npm",
 		},
 		{
 			name:      "missing pinned python manager",
 			pin:       "pip3",
 			pythonBin: "uv",
 			tool:      &database.ToolCache{Name: "ruff", Provider: "python", Installed: false, Tracked: true},
-			want:      "python(pip3!)",
+			want:      "pip3",
 		},
 	}
 	for _, tc := range cases {
@@ -4091,11 +4091,11 @@ func TestRenderList_ConfiguredGitHubFallbackShowsGHStatus(t *testing.T) {
 		status   string
 		want     string
 	}{
-		{name: "verified system", provider: "system", status: config.FallbackStatusVerified, want: "system(gh)"},
-		{name: "unverified concrete", provider: "apt", status: config.FallbackStatusUnverified, want: "system(gh?)"},
-		{name: "unresolved system", provider: "system", status: config.FallbackStatusUnresolved, want: "system(gh!)"},
-		{name: "unsupported system", provider: "system", status: config.FallbackStatusUnsupported, want: "system(gh!)"},
-		{name: "failed system", provider: "system", status: config.FallbackStatusFailed, want: "system(gh!)"},
+		{name: "verified system", provider: "system", status: config.FallbackStatusVerified, want: "gh"},
+		{name: "unverified concrete", provider: "apt", status: config.FallbackStatusUnverified, want: "gh?"},
+		{name: "unresolved system", provider: "system", status: config.FallbackStatusUnresolved, want: "gh!"},
+		{name: "unsupported system", provider: "system", status: config.FallbackStatusUnsupported, want: "gh!"},
+		{name: "failed system", provider: "system", status: config.FallbackStatusFailed, want: "gh!"},
 	}
 
 	for _, tt := range tests {
@@ -4131,8 +4131,8 @@ func TestRenderList_ConfiguredGitHubFallbackHidesGHStatusForNativeInstalledTool(
 	if strings.Contains(out, "gh") {
 		t.Fatalf("rendered list = %q, want native installed provider without gh fallback status", out)
 	}
-	if !strings.Contains(out, "system(apt)") {
-		t.Fatalf("rendered list = %q, want native installed provider label", out)
+	if !strings.Contains(out, "apt") {
+		t.Fatalf("rendered list = %q, want native installed concrete provider label", out)
 	}
 }
 
@@ -4606,12 +4606,12 @@ func TestRenderToolRow_PrivilegeMarkerUsesOwnColumn(t *testing.T) {
 		t.Fatalf("row = %q, privilege marker should not be in name column", out)
 	}
 	markerIdx := strings.Index(out, iconPrivileged)
-	providerIdx := strings.Index(out, "system(")
+	providerIdx := strings.Index(out, "apt")
 	if markerIdx < 0 || providerIdx < 0 || markerIdx > providerIdx {
 		t.Fatalf("row = %q, want privilege marker before provider label", out)
 	}
 	markerCol := visualColumnOf(out, iconPrivileged)
-	providerCol := visualColumnOf(out, "system(")
+	providerCol := visualColumnOf(out, "apt")
 	if gap := providerCol - markerCol - lipgloss.Width(iconPrivileged); gap != toolPrivilegeProviderGap {
 		t.Fatalf("row = %q, privilege-provider gap = %d, want %d", out, gap, toolPrivilegeProviderGap)
 	}
@@ -4652,8 +4652,8 @@ func TestRenderList_SearchResultPrivilegeMarker(t *testing.T) {
 	if !strings.Contains(out, iconPrivileged) {
 		t.Fatalf("row = %q, want privilege marker for privileged search result", out)
 	}
-	if !strings.Contains(plain, "system(brew)") {
-		t.Fatalf("row = %q, want brew-backed system provider label", out)
+	if !strings.Contains(plain, "brew") {
+		t.Fatalf("row = %q, want brew-backed provider label", out)
 	}
 }
 
@@ -4679,8 +4679,8 @@ func TestRenderToolRow_OrphanDoesNotShowBaseGroup(t *testing.T) {
 	if strings.Contains(out, "[base]") {
 		t.Fatalf("orphan row = %q, should not show base group", out)
 	}
-	if !strings.Contains(out, "system(") || !strings.Contains(out, "brew") {
-		t.Fatalf("orphan row = %q, want concrete provider label", out)
+	if !strings.Contains(out, "brew") {
+		t.Fatalf("orphan row = %q, want concrete provider label 'brew'", out)
 	}
 }
 
@@ -5541,18 +5541,18 @@ func TestRenderProviderCol_NoConcreteProvider(t *testing.T) {
 
 func TestRenderProviderCol_WithConcrete(t *testing.T) {
 	p := defaultPalette()
-	// system meta with brew concrete — no override
-	out := renderProviderCol(p, "system", "brew", "", "", "", "system(brew)", 14, false, false)
-	if !strings.Contains(out, "system") {
-		t.Errorf("expected 'system' in provider col, got: %q", out)
+	// system meta with brew concrete — label is just the concrete name
+	out := renderProviderCol(p, "system", "brew", "", "", "", "brew", 14, false, false)
+	if !strings.Contains(out, "brew") {
+		t.Errorf("expected 'brew' in provider col, got: %q", out)
 	}
 }
 
 func TestRenderProviderCol_Selected(t *testing.T) {
 	p := defaultPalette()
-	out := renderProviderCol(p, "system", "brew", "", "", "", "system(brew)", 14, true, false)
-	if !strings.Contains(out, "system") {
-		t.Errorf("expected 'system' in selected provider col, got: %q", out)
+	out := renderProviderCol(p, "system", "brew", "", "", "", "brew", 14, true, false)
+	if !strings.Contains(out, "brew") {
+		t.Errorf("expected 'brew' in selected provider col, got: %q", out)
 	}
 }
 

@@ -1687,10 +1687,87 @@ func (a *App) Search(ctx context.Context, query, providerFilter string) ([]provi
 			results = append(results, r)
 		}
 	}
+	settings := config.Settings{}
+	if cfg, err := a.loadConfig(); err == nil {
+		settings = a.effectiveSettings(cfg)
+	}
+	results = dedupSearchResults(results, a.providerPriorityRank(defaultProviderPriority(settings)), query)
 	if err := a.cacheSearchMetadata(ctx, results); err != nil {
 		errs = append(errs, err)
 	}
 	return results, errors.Join(errs...)
+}
+
+// dedupSearchResults collapses search hits that refer to the same logical package
+// within the same ecosystem — bun/pnpm/npm and the node family all return the
+// same npm package — down to one row (the highest-priority concrete provider),
+// and sorts by provider priority then name. rank maps a provider name to its
+// priority index (lower = higher priority); providers absent from rank sort last.
+func dedupSearchResults(results []provider.SearchResult, rank map[string]int, query string) []provider.SearchResult {
+	rankOf := func(name string) int {
+		if r, ok := rank[name]; ok {
+			return r
+		}
+		return len(rank) + 1000
+	}
+	type key struct{ name, scope string }
+	index := make(map[key]int, len(results))
+	out := make([]provider.SearchResult, 0, len(results))
+	for _, r := range results {
+		// Only collapse providers that share a global store (node: bun/pnpm/npm;
+		// python: uv/pip) — those return the same registry package N times. System
+		// PMs (brew/apt/…) are genuinely distinct install targets and must each
+		// survive, so they are keyed per-provider.
+		eco := ToolProviderEcosystem(r.Provider)
+		scope := r.Provider
+		if ecosystemSharesGlobalStore(eco) {
+			scope = eco
+		}
+		k := key{strings.ToLower(r.Name), scope}
+		if idx, ok := index[k]; ok {
+			if rankOf(r.Provider) < rankOf(out[idx].Provider) {
+				out[idx] = r
+			}
+			continue
+		}
+		index[k] = len(out)
+		out = append(out, r)
+	}
+	// Relevance first (exact > prefix > substring), then host provider priority,
+	// then name — so typing a tool name surfaces that tool regardless of which
+	// package manager would install it.
+	sort.SliceStable(out, func(i, j int) bool {
+		si, sj := queryMatchScore(out[i].Name, query), queryMatchScore(out[j].Name, query)
+		if si != sj {
+			return si > sj
+		}
+		ri, rj := rankOf(out[i].Provider), rankOf(out[j].Provider)
+		if ri != rj {
+			return ri < rj
+		}
+		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
+	})
+	return out
+}
+
+// queryMatchScore ranks how closely a result name matches the search query:
+// 3 exact, 2 prefix, 1 substring, 0 none.
+func queryMatchScore(name, query string) int {
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" {
+		return 0
+	}
+	n := strings.ToLower(name)
+	switch {
+	case n == q:
+		return 3
+	case strings.HasPrefix(n, q):
+		return 2
+	case strings.Contains(n, q):
+		return 1
+	default:
+		return 0
+	}
 }
 
 func SearchResultDisplayProvider(r provider.SearchResult) string {

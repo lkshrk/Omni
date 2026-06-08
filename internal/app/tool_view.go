@@ -55,15 +55,16 @@ type ToolProviderDisplay struct {
 	Override bool
 }
 
+// Label renders the provider for display: the concrete package manager when one
+// is resolved (e.g. "bun"), falling back to the ecosystem name only when the
+// tool is unresolved (e.g. "node"). The meta(concrete) wrapper and the override
+// "!" marker are intentionally omitted — wrong-provider state is conveyed by the
+// Out-of-sync section and the expanded candidate detail, not the column.
 func (d ToolProviderDisplay) Label() string {
-	if d.Concrete == "" {
-		return d.Meta
+	if d.Concrete != "" {
+		return d.Concrete
 	}
-	concrete := d.Concrete
-	if d.Override {
-		concrete += "!"
-	}
-	return d.Meta + "(" + concrete + ")"
+	return d.Meta
 }
 
 type ToolViewClassification struct {

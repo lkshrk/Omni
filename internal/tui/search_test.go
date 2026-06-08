@@ -116,20 +116,22 @@ func TestDoSearch_ReturnsResults(t *testing.T) {
 	if len(got.tools) != 2 {
 		t.Fatalf("tools = %d, want 2", len(got.tools))
 	}
-	if got.tools[0].Name != "ripgrep" {
-		t.Errorf("tools[0].Name = %q, want ripgrep", got.tools[0].Name)
+	// After dedup+sort (alphabetical tiebreak when both score 0 for query "rg"),
+	// fd sorts before ripgrep.
+	if got.tools[0].Name != "fd" {
+		t.Errorf("tools[0].Name = %q, want fd", got.tools[0].Name)
 	}
-	if got.tools[0].Provider != "brew" {
-		t.Errorf("tools[0].Provider = %q, want brew", got.tools[0].Provider)
+	if got.tools[1].Name != "ripgrep" {
+		t.Errorf("tools[1].Name = %q, want ripgrep", got.tools[1].Name)
 	}
-	if got.tools[0].InstalledWith != "" {
-		t.Errorf("tools[0].InstalledWith = %q, want empty concrete provider row", got.tools[0].InstalledWith)
+	if got.tools[1].Provider != "brew" {
+		t.Errorf("tools[1].Provider = %q, want brew", got.tools[1].Provider)
 	}
-	if got.tools[0].Options["brew_kind"] != "formula" {
-		t.Errorf("tools[0].Options[brew_kind] = %q, want formula", got.tools[0].Options["brew_kind"])
+	if got.tools[1].InstalledWith != "" {
+		t.Errorf("tools[1].InstalledWith = %q, want empty concrete provider row", got.tools[1].InstalledWith)
 	}
-	if got.tools[1].Name != "fd" {
-		t.Errorf("tools[1].Name = %q, want fd", got.tools[1].Name)
+	if got.tools[1].Options["brew_kind"] != "formula" {
+		t.Errorf("tools[1].Options[brew_kind] = %q, want formula", got.tools[1].Options["brew_kind"])
 	}
 }
 
