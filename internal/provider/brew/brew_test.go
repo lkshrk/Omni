@@ -366,6 +366,30 @@ func TestTap_Error(t *testing.T) {
 	}
 }
 
+func TestTrust_Success(t *testing.T) {
+	p, m := newBrew(executor.MockCall{})
+	if err := p.Trust(context.Background(), "hashicorp/tap"); err != nil {
+		t.Fatalf("Trust: %v", err)
+	}
+	if len(m.Calls) != 1 || m.Calls[0].Args[0] != "trust" || m.Calls[0].Args[1] != "hashicorp/tap" {
+		t.Errorf("unexpected calls: %+v", m.Calls)
+	}
+}
+
+func TestTrust_UnsupportedSubcommandIsNoOp(t *testing.T) {
+	p, _ := newBrew(executor.MockCall{Err: errors.New("exit 1"), Stderr: "Error: Unknown command: trust"})
+	if err := p.Trust(context.Background(), "hashicorp/tap"); err != nil {
+		t.Fatalf("Trust on old brew should be a no-op, got: %v", err)
+	}
+}
+
+func TestTrust_RealErrorPropagates(t *testing.T) {
+	p, _ := newBrew(executor.MockCall{Err: errors.New("exit 1"), Stderr: "Error: Tap not installed"})
+	if err := p.Trust(context.Background(), "bad/tap"); err == nil {
+		t.Fatal("expected error for a real trust failure")
+	}
+}
+
 func TestUntap_Success(t *testing.T) {
 	p, m := newBrew(executor.MockCall{})
 	if err := p.Untap(context.Background(), "hashicorp/tap"); err != nil {
