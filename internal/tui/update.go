@@ -90,9 +90,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case setupProvidersDoneMsg:
 		cmds = append(cmds, m.handleSetupProvidersDoneMsg(msg)...)
 
-	case setupNodeMgrDoneMsg:
-		cmds = append(cmds, m.handleSetupNodeMgrDoneMsg(msg)...)
-
 	case setupHostDoneMsg:
 		cmds = append(cmds, m.handleSetupHostDoneMsg(msg)...)
 
@@ -450,8 +447,6 @@ func (m *Model) scrollSetupBy(delta int) {
 	switch m.setupStep {
 	case 1, 2:
 		m.setupProviderIdx = clampIndex(m.setupProviderIdx+delta, len(m.setupProviders))
-	case 3:
-		m.setupNodeMgrIdx = clampIndex(m.setupNodeMgrIdx+delta, len(m.setupNodeManagerChoices()))
 	case 8:
 		m.setupCopyHostIdx = clampIndex(m.setupCopyHostIdx+delta, len(m.setupCopyHostNames()))
 	case 9:

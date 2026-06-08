@@ -299,15 +299,11 @@ func TestRenderSetup_Step3(t *testing.T) {
 	if out == "" {
 		t.Error("expected non-empty output for setupStep=3")
 	}
-	if !strings.Contains(out, "Node") {
-		t.Errorf("expected 'Node' in step 3 output, got:\n%s", out)
+	// Step 3 is now the provider-priority editor. The background panel shows
+	// the "Set provider priority." lead text; the actual editor is an overlay.
+	if !strings.Contains(out, "priority") {
+		t.Errorf("expected 'priority' in step 3 output, got:\n%s", out)
 	}
-	line := renderedLineContaining(out, "confirm")
-	if line == "" || !strings.Contains(line, "skip") {
-		t.Fatalf("expected skip/confirm action row in step 3, got:\n%s", out)
-	}
-	assertActionLeftAligned(t, out, "skip")
-	assertActionRightAligned(t, out, "confirm", m.width)
 }
 
 func TestRenderSetup_Step5(t *testing.T) {
@@ -393,7 +389,9 @@ func TestRenderSetup_AllActionFootersUsePopupAlignment(t *testing.T) {
 	}{
 		{name: "import settings", model: setupRenderModel(0), left: "quit", right: "import existing"},
 		{name: "provider picker", model: setupRenderModel(1), rightOnly: "save & continue"},
-		{name: "node manager", model: setupRenderModel(3), left: "skip", right: "confirm"},
+		// Step 3 (provider priority) has no inline footer — its actions live inside
+		// the editingPriority popup overlay. It is excluded from this footer-alignment
+		// suite; the priority editor's own hints are covered by Settings tests.
 		{name: "dotfiles decision", model: setupRenderModel(5), left: "skip for now", right: "set up dotfile sync"},
 		{name: "dotfiles picker fallback", model: setupRenderModel(6), left: "skip"},
 		{name: "copy host", model: setupRenderModel(7), left: "start fresh", right: "copy host"},

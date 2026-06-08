@@ -401,36 +401,6 @@ func TestCancelSearch_NonNilCancel(t *testing.T) {
 	}
 }
 
-// ── doSaveNodeManager ─────────────────────────────────────────────────────────
-
-// TestDoSaveNodeManager_HappyPath verifies that doSaveNodeManager returns a
-// setupNodeMgrDoneMsg with no error when the app has a valid config.
-func TestDoSaveNodeManager_HappyPath(t *testing.T) {
-	m := newCmdTestModel(t)
-	msg := m.doSaveNodeManager("bun")()
-	got, ok := msg.(setupNodeMgrDoneMsg)
-	if !ok {
-		t.Fatalf("expected setupNodeMgrDoneMsg, got %T", msg)
-	}
-	if got.err != nil {
-		t.Errorf("unexpected error: %v", got.err)
-	}
-}
-
-// TestDoSaveNodeManager_EmptyManager verifies that saving an empty manager
-// string (auto-detect mode) does not return an error.
-func TestDoSaveNodeManager_EmptyManager(t *testing.T) {
-	m := newCmdTestModel(t)
-	msg := m.doSaveNodeManager("")()
-	got, ok := msg.(setupNodeMgrDoneMsg)
-	if !ok {
-		t.Fatalf("expected setupNodeMgrDoneMsg, got %T", msg)
-	}
-	if got.err != nil {
-		t.Errorf("unexpected error saving empty manager: %v", got.err)
-	}
-}
-
 // ── doSaveDisabledProviders ───────────────────────────────────────────────────
 
 // TestDoSaveDisabledProviders_HappyPath verifies that doSaveDisabledProviders

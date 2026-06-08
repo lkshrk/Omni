@@ -360,9 +360,6 @@ type Model struct {
 	setupBackgroundMode viewMode
 	setupProviders      []app.SetupProviderOption
 	setupProviderIdx    int
-	// setupNodeMgrIdx is the cursor for node manager selection in step 3.
-	// 0=auto, 1=bun, 2=pnpm, 3=npm
-	setupNodeMgrIdx int
 	// setupCopyHostIdx is the cursor for the host-copy picker in step 8.
 	setupCopyHostIdx int
 	// setupGroupIdx/draft are the final reusable-group selection in step 9.
@@ -496,14 +493,6 @@ type listConfirmation struct {
 	provider      string
 	installed     bool
 	installedWith string
-}
-
-func (m Model) setupNodeManagerChoices() []app.SettingsManagerOption {
-	choices := app.DefaultSetupNodeManagerOptions()
-	if m.app != nil {
-		choices = m.app.SetupNodeManagerOptions()
-	}
-	return choices
 }
 
 // New creates the initial Model.

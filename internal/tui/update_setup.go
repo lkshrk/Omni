@@ -246,18 +246,6 @@ func (m *Model) handleSetupProvidersDoneMsg(msg setupProvidersDoneMsg) []tea.Cmd
 	return cmds
 }
 
-func (m *Model) handleSetupNodeMgrDoneMsg(msg setupNodeMgrDoneMsg) []tea.Cmd {
-	var cmds []tea.Cmd
-
-	m.loading = false
-	if msg.err != nil {
-		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
-		return cmds
-	}
-	m.startSetupHostCreation(&cmds)
-	return cmds
-}
-
 func (m *Model) handleSetupHostDoneMsg(msg setupHostDoneMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 
@@ -339,6 +327,17 @@ func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return tea.Batch(cmds...), false
 	}
 
+	// Provider-priority editor (step 3) reuses the settings editor's key handling.
+	// When it closes (saved via enter or cancelled via esc) the wizard continues
+	// to host creation.
+	if m.editingPriority {
+		pcmds := m.handleSettingsPriorityKeyMsg(msg)
+		if !m.editingPriority {
+			m.startSetupHostCreation(&pcmds)
+		}
+		return tea.Batch(pcmds...), true
+	}
+
 	switch m.setupStep {
 	case 0: // Import existing config or create a fresh one.
 		switch {
@@ -371,29 +370,7 @@ func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		case key.Matches(msg, m.keys.Confirm):
 			m.confirmSetupProviders(&cmds)
 		}
-	case 3: // Node manager selection
-		choices := m.setupNodeManagerChoices()
-		switch {
-		case key.Matches(msg, m.keys.Up):
-			if m.setupNodeMgrIdx > 0 {
-				m.setupNodeMgrIdx--
-			}
-		case key.Matches(msg, m.keys.Down):
-			if m.setupNodeMgrIdx < len(choices)-1 {
-				m.setupNodeMgrIdx++
-			}
-		case key.Matches(msg, m.keys.Confirm):
-			chosen := choices[m.setupNodeMgrIdx].Value
-			if chosen == "" {
-				m.startSetupHostCreation(&cmds)
-			} else {
-				m.loading = true
-				startOp(m, "Saving…")
-				cmds = append(cmds, m.spinner.Tick, m.doSaveNodeManager(chosen))
-			}
-		case key.Matches(msg, m.keys.Back):
-			m.startSetupHostCreation(&cmds)
-		}
+	// Step 3 (provider priority) is handled by the editingPriority guard above.
 	case 5: // Enable dotfile sync.
 		switch {
 		case key.Matches(msg, m.keys.Confirm) || strings.EqualFold(msg.String(), "y"):
@@ -595,11 +572,11 @@ func (m *Model) finishSetupReload() {
 }
 
 func (m *Model) advanceSetupPastProviders(cmds *[]tea.Cmd) {
-	if app.SetupNodeProviderEnabled(m.setupProviders) {
-		m.setupStep = 3
-		return
-	}
-	m.startSetupHostCreation(cmds)
+	// Provider-priority step: order + enable/disable concrete providers. Saving
+	// derives the node/python effective managers, so this replaces the old
+	// node-manager-only step.
+	m.setupStep = 3
+	m.startSettingsPriorityEdit()
 }
 
 func (m *Model) startSetupHostCreation(cmds *[]tea.Cmd) {
