@@ -20,10 +20,11 @@ stdout 'node.manager   = pnpm'
 stdout 'python.manager = pip3'
 stdout 'Created host "testhost"'
 stdout 'Skipping dots setup'
-exec grep '"manager": "pnpm"' settings.json
-stdout '"manager": "pnpm"'
-exec grep '"manager": "pip3"' settings.json
-stdout '"manager": "pip3"'
+exec grep '"pnpm"' settings.json
+stdout '"pnpm"'
+# pip3 normalizes to the canonical concrete provider "pip" in provider_priority.
+exec grep '"pip"' settings.json
+stdout '"pip"'
 exec grep '"testhost"' settings.json
 stdout '"testhost"'
 

@@ -181,12 +181,13 @@ func TestConsolidateWithState_UpdatesManagerSettingAndReturnsState(t *testing.T)
 		t.Fatalf("save config: %v", err)
 	}
 
-	state, err := a.ConsolidateWithState(ctx, "node", "bun", nil)
+	// Consolidate to npm (non-default) so the setting is explicitly written.
+	state, err := a.ConsolidateWithState(ctx, "node", "npm", nil)
 	if err != nil {
 		t.Fatalf("ConsolidateWithState: %v", err)
 	}
-	if state.Result == nil || state.Result.Ecosystem != "node" || state.Result.Manager != "bun" || !state.Result.SettingsUpdated {
-		t.Fatalf("result = %+v, want node/bun with settings update", state.Result)
+	if state.Result == nil || state.Result.Ecosystem != "node" || state.Result.Manager != "npm" || !state.Result.SettingsUpdated {
+		t.Fatalf("result = %+v, want node/npm with settings update", state.Result)
 	}
 	if len(state.Result.Migrated) != 0 {
 		t.Fatalf("migrated = %+v, want none", state.Result.Migrated)
@@ -201,8 +202,8 @@ func TestConsolidateWithState_UpdatesManagerSettingAndReturnsState(t *testing.T)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	if got := cfg.HostSettings[testShortHostname()].EcosystemManager("node"); got != "bun" {
-		t.Fatalf("node manager = %q, want bun", got)
+	if got := app.EffectiveEcosystemManager(cfg.HostSettings[testShortHostname()], "node"); got != "npm" {
+		t.Fatalf("node manager = %q, want npm", got)
 	}
 }
 

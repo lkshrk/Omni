@@ -316,8 +316,12 @@ func (a *App) runConsolidate(ctx context.Context, ecosystem, manager string, dry
 				cfg.HostSettings = make(map[string]config.Settings)
 			}
 			hs := cfg.HostSettings[hostname]
-			if hs.EcosystemManager(ecosystem) != spec.SettingsValue {
-				hs.SetEcosystemManager(ecosystem, spec.SettingsValue)
+			if EffectiveEcosystemManager(hs, ecosystem) != spec.SettingsValue {
+				canonical := config.NormalizeConcreteProvider(spec.SettingsValue)
+				if canonical == "" {
+					canonical = spec.SettingsValue
+				}
+				hs.ProviderPriority = promoteEcosystemConcrete(hs.ProviderPriority, canonical)
 				cfg.HostSettings[hostname] = hs
 				result.SettingsUpdated = true
 			}

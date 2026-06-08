@@ -6,13 +6,10 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
-func testSettingsWithManagers(node, python string) config.Settings {
+func testSettingsWithProviderPriority(providers ...string) config.Settings {
 	var s config.Settings
-	if node != "" {
-		s.SetEcosystemManager("node", node)
-	}
-	if python != "" {
-		s.SetEcosystemManager("python", python)
+	if len(providers) > 0 {
+		s.ProviderPriority = append([]string(nil), providers...)
 	}
 	return s
 }
@@ -21,19 +18,16 @@ func testSettingsWithManagers(node, python string) config.Settings {
 
 func TestEffectiveSettings_NoHostEntry_ReturnsGlobal(t *testing.T) {
 	cfg := &config.RootConfig{
-		Settings: testSettingsWithManagers("bun", "uv"),
+		Settings: testSettingsWithProviderPriority("bun", "uv"),
 	}
 	got := cfg.EffectiveSettings("myhost")
-	if got.EcosystemManager("node") != "bun" {
-		t.Errorf("node manager = %q, want bun", got.EcosystemManager("node"))
-	}
-	if got.EcosystemManager("python") != "uv" {
-		t.Errorf("python manager = %q, want uv", got.EcosystemManager("python"))
+	if len(got.ProviderPriority) < 2 || got.ProviderPriority[0] != "bun" || got.ProviderPriority[1] != "uv" {
+		t.Errorf("ProviderPriority = %v, want [bun uv] (global)", got.ProviderPriority)
 	}
 }
 
 func TestEffectiveSettings_HostEntryAllZero_GlobalFillsGaps(t *testing.T) {
-	settings := testSettingsWithManagers("pnpm", "uv")
+	settings := testSettingsWithProviderPriority("pnpm", "uv")
 	settings.DotsRepo = "~/dotfiles"
 	cfg := &config.RootConfig{
 		Settings: settings,
@@ -42,11 +36,8 @@ func TestEffectiveSettings_HostEntryAllZero_GlobalFillsGaps(t *testing.T) {
 		},
 	}
 	got := cfg.EffectiveSettings("myhost")
-	if got.EcosystemManager("node") != "pnpm" {
-		t.Errorf("node manager = %q, want pnpm (global)", got.EcosystemManager("node"))
-	}
-	if got.EcosystemManager("python") != "uv" {
-		t.Errorf("python manager = %q, want uv (global)", got.EcosystemManager("python"))
+	if len(got.ProviderPriority) < 2 || got.ProviderPriority[0] != "pnpm" || got.ProviderPriority[1] != "uv" {
+		t.Errorf("ProviderPriority = %v, want [pnpm uv] (global fills gaps)", got.ProviderPriority)
 	}
 	if got.DotsRepo != "~/dotfiles" {
 		t.Errorf("DotsRepo = %q, want ~/dotfiles (global)", got.DotsRepo)
@@ -142,7 +133,7 @@ func TestEffectiveSettings_HostEntryAbsentDotsDisabled_GlobalPreserved(t *testin
 			DotsDisabled: config.BoolPtr(true),
 		},
 		HostSettings: map[string]config.Settings{
-			"myhost": testSettingsWithManagers("bun", ""), // DotsDisabled not set → nil
+			"myhost": testSettingsWithProviderPriority("bun"), // DotsDisabled not set → nil
 		},
 	}
 	got := cfg.EffectiveSettings("myhost")
@@ -151,42 +142,40 @@ func TestEffectiveSettings_HostEntryAbsentDotsDisabled_GlobalPreserved(t *testin
 	}
 }
 
-func TestEffectiveSettings_Mixed_HostNodeManager_GlobalPythonManager(t *testing.T) {
+func TestEffectiveSettings_Mixed_HostProviderPriority_OverridesGlobal(t *testing.T) {
 	cfg := &config.RootConfig{
-		Settings: testSettingsWithManagers("npm", "uv"),
+		Settings: testSettingsWithProviderPriority("npm", "uv"),
 		HostSettings: map[string]config.Settings{
-			"myhost": testSettingsWithManagers("bun", ""),
+			"myhost": testSettingsWithProviderPriority("bun"),
 		},
 	}
 	got := cfg.EffectiveSettings("myhost")
-	if got.EcosystemManager("node") != "bun" {
-		t.Errorf("node manager = %q, want bun (host wins)", got.EcosystemManager("node"))
-	}
-	if got.EcosystemManager("python") != "uv" {
-		t.Errorf("python manager = %q, want uv (global fills gap)", got.EcosystemManager("python"))
+	// Host provider_priority replaces global when non-nil.
+	if len(got.ProviderPriority) == 0 || got.ProviderPriority[0] != "bun" {
+		t.Errorf("ProviderPriority = %v, want bun first (host wins)", got.ProviderPriority)
 	}
 }
 
 func TestEffectiveSettings_MultipleHosts_OnlyCurrentApplies(t *testing.T) {
 	cfg := &config.RootConfig{
-		Settings: testSettingsWithManagers("npm", ""),
+		Settings: testSettingsWithProviderPriority("npm"),
 		HostSettings: map[string]config.Settings{
-			"workhost": testSettingsWithManagers("bun", ""),
-			"homehost": testSettingsWithManagers("pnpm", ""),
+			"workhost": testSettingsWithProviderPriority("bun"),
+			"homehost": testSettingsWithProviderPriority("pnpm"),
 		},
 	}
 	got := cfg.EffectiveSettings("homehost")
-	if got.EcosystemManager("node") != "pnpm" {
-		t.Errorf("node manager = %q, want pnpm (homehost only)", got.EcosystemManager("node"))
+	if len(got.ProviderPriority) == 0 || got.ProviderPriority[0] != "pnpm" {
+		t.Errorf("ProviderPriority = %v, want pnpm first (homehost only)", got.ProviderPriority)
 	}
 
 	got2 := cfg.EffectiveSettings("workhost")
-	if got2.EcosystemManager("node") != "bun" {
-		t.Errorf("node manager = %q, want bun (workhost only)", got2.EcosystemManager("node"))
+	if len(got2.ProviderPriority) == 0 || got2.ProviderPriority[0] != "bun" {
+		t.Errorf("ProviderPriority = %v, want bun first (workhost only)", got2.ProviderPriority)
 	}
 
 	got3 := cfg.EffectiveSettings("otherhost")
-	if got3.EcosystemManager("node") != "npm" {
-		t.Errorf("node manager = %q, want npm (global, no host entry)", got3.EcosystemManager("node"))
+	if len(got3.ProviderPriority) == 0 || got3.ProviderPriority[0] != "npm" {
+		t.Errorf("ProviderPriority = %v, want npm first (global, no host entry)", got3.ProviderPriority)
 	}
 }

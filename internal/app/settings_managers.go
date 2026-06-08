@@ -1,0 +1,178 @@
+package app
+
+import (
+	"context"
+	"slices"
+	"strings"
+
+	"golang.org/x/sync/errgroup"
+
+	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/executor"
+	"github.com/lkshrk/omni/internal/provider"
+)
+
+// ─── Manager probing & setup wizard ─────────────────────────────────────────
+
+// EffectiveManagers returns the binary names that the python and node
+// provider families would actually use right now, honouring settings hints and
+// falling back to PATH probing in preference order.
+//
+// Returns "" for either ecosystem when no suitable binary is found on PATH.
+func (a *App) EffectiveManagers() (pythonBin, nodeBin string) {
+	s, _ := a.LoadSettings()
+	return a.effectiveManagersFromSettings(s)
+}
+
+func (a *App) effectiveManagersFromSettings(s config.Settings) (pythonBin, nodeBin string) {
+	pythonBin = probeFirst(EffectiveEcosystemManager(s, provider.EcosystemPython), a.managerNames(provider.EcosystemPython))
+	nodeBin = probeFirst(EffectiveEcosystemManager(s, provider.EcosystemNode), a.managerNames(provider.EcosystemNode))
+	return pythonBin, nodeBin
+}
+
+// ResolvedEcosystemProviders returns a map of provider-family name → concrete
+// provider name for every provider family in the registry that implements
+// provider.ConcreteResolver and is currently available.
+func (a *App) ResolvedEcosystemProviders(ctx context.Context) map[string]string {
+	ecos := a.registry.EcosystemProviders()
+	type resolved struct {
+		name     string
+		concrete string
+	}
+	out := make([]resolved, len(ecos))
+	g, gctx := errgroup.WithContext(ctx)
+	for i, p := range ecos {
+		g.Go(func() error {
+			cr, ok := p.(provider.ConcreteResolver)
+			if !ok {
+				return nil
+			}
+			concrete, err := cr.ResolvedName(gctx)
+			if err == nil && concrete != "" {
+				out[i] = resolved{name: p.Name(), concrete: concrete}
+			}
+			return nil
+		})
+	}
+	// Goroutines return nil unconditionally; Wait only fails on panic recovery.
+	if err := g.Wait(); err != nil {
+		return nil
+	}
+	result := make(map[string]string, len(out))
+	for _, r := range out {
+		if r.name != "" {
+			result[r.name] = r.concrete
+		}
+	}
+	return result
+}
+
+func (a *App) EffectiveSystemManager(ctx context.Context) string {
+	return a.ResolvedEcosystemProviders(ctx)[provider.EcosystemSystem]
+}
+
+// AllAvailableManagers returns ALL binary names found on PATH for each ecosystem,
+// in priority order. Unlike EffectiveManagers (which returns the single preferred
+// binary), this is used by the setup wizard to display every available manager.
+func (a *App) AllAvailableManagers() (pythonBins, nodeBins []string) {
+	s, _ := a.LoadSettings()
+	return a.allAvailableManagersFromSettings(s)
+}
+
+func (a *App) allAvailableManagersFromSettings(s config.Settings) (pythonBins, nodeBins []string) {
+	pythonBins = probeAll(EffectiveEcosystemManager(s, provider.EcosystemPython), a.managerNames(provider.EcosystemPython))
+	nodeBins = probeAll(EffectiveEcosystemManager(s, provider.EcosystemNode), a.managerNames(provider.EcosystemNode))
+	return pythonBins, nodeBins
+}
+
+type SetupProviderOption struct {
+	Name    string
+	Label   string
+	Enabled bool
+}
+
+func (a *App) SetupProviderOptions(ctx context.Context, settings config.Settings) []SetupProviderOption {
+	pythonBins, nodeBins := a.allAvailableManagersFromSettings(settings)
+	return SetupProviderOptionsFromManagers(a.ResolvedEcosystemProviders(ctx), pythonBins, nodeBins, settings)
+}
+
+func SetupProviderOptionsFromManagers(metaMap map[string]string, allPyBins, allNodeBins []string, settings config.Settings) []SetupProviderOption {
+	managerLabel := func(meta string, bins []string) string {
+		if len(bins) == 0 {
+			return meta
+		}
+		return meta + "(" + strings.Join(bins, " • ") + ")"
+	}
+
+	type entry struct {
+		name  string
+		label string
+	}
+	entries := []entry{
+		{provider.EcosystemSystem, provider.EcosystemSystem},
+		{provider.EcosystemNode, managerLabel(provider.EcosystemNode, allNodeBins)},
+		{provider.EcosystemPython, managerLabel(provider.EcosystemPython, allPyBins)},
+	}
+	if concrete := metaMap[provider.EcosystemSystem]; concrete != "" {
+		entries[0].label = provider.EcosystemSystem + "(" + concrete + ")"
+	}
+
+	rows := make([]SetupProviderOption, 0, len(entries))
+	for _, e := range entries {
+		isEnabled := !slices.Contains(settings.DisabledProviders, e.name)
+		rows = append(rows, SetupProviderOption{Name: e.name, Label: e.label, Enabled: isEnabled})
+	}
+	return rows
+}
+
+func SetupDisabledProviders(options []SetupProviderOption) []string {
+	var disabled []string
+	for _, option := range options {
+		if !option.Enabled {
+			disabled = append(disabled, option.Name)
+		}
+	}
+	return disabled
+}
+
+// probeFirst returns hint if it is a non-empty string and exists on PATH.
+// Otherwise it returns the first candidate from the priority list that is
+// found on PATH, or "" if none are available.
+func probeFirst(hint string, priority []string) string {
+	if hint != "" {
+		if managerAvailable(hint) {
+			return hint
+		}
+	}
+	for _, bin := range priority {
+		if managerAvailable(bin) {
+			return bin
+		}
+	}
+	return ""
+}
+
+// probeAll returns all candidate binaries from priority found on PATH, in order.
+// If hint is non-empty and on PATH it is included first (deduplicated).
+func probeAll(hint string, priority []string) []string {
+	seen := make(map[string]bool)
+	var found []string
+	add := func(bin string) {
+		if bin != "" && !seen[bin] {
+			if managerAvailable(bin) {
+				seen[bin] = true
+				found = append(found, bin)
+			}
+		}
+	}
+	add(hint)
+	for _, bin := range priority {
+		add(bin)
+	}
+	return found
+}
+
+func managerAvailable(bin string) bool {
+	resolved, _ := executor.ResolveCommand(bin)
+	return resolved != bin
+}

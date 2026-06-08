@@ -285,7 +285,7 @@ func TestSetToolProviderScopeWithStatePersistsEcosystemProviderPin(t *testing.T)
 	if !ok {
 		t.Fatalf("host settings = %v, want desk settings", cfg.HostSettings)
 	}
-	if got := settings.EcosystemManager(provider.EcosystemNode); got != "bun" {
+	if got := app.EffectiveEcosystemManager(settings, provider.EcosystemNode); got != "bun" {
 		t.Fatalf("node manager = %q, want bun", got)
 	}
 	if _, ok := cfg.Tools["prettier"].Hosts["desk"]; ok {

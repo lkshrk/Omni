@@ -128,10 +128,10 @@ func TestApplyBootstrapCreatesConfigManagersAndHost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSettings: %v", err)
 	}
-	if got := settings.EcosystemManager("node"); got != "pnpm" {
+	if got := app.EffectiveEcosystemManager(settings, "node"); got != "pnpm" {
 		t.Fatalf("node manager = %q, want pnpm", got)
 	}
-	if got := settings.EcosystemManager("python"); got != "pip3" {
+	if got := app.EffectiveEcosystemManager(settings, "python"); got != "pip3" {
 		t.Fatalf("python manager = %q, want pip3", got)
 	}
 

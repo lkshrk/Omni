@@ -75,7 +75,7 @@ func TestImportConfigFile_CopiesExistingSettings(t *testing.T) {
 		},
 		Hosts: map[string][]string{"laptop": {"work"}},
 	}
-	source.Settings.SetEcosystemManager("node", "pnpm")
+	source.Settings.ProviderPriority = append([]string{"pnpm"}, source.Settings.ProviderPriority...)
 	if err := config.Save(sourcePath, source); err != nil {
 		t.Fatalf("save source config: %v", err)
 	}
@@ -94,8 +94,8 @@ func TestImportConfigFile_CopiesExistingSettings(t *testing.T) {
 	if group := findTestGroup(got, "work"); group == nil || !testGroupHasTool(group, "ripgrep") {
 		t.Fatalf("imported work group = %#v, want ripgrep membership", group)
 	}
-	if got.Settings.EcosystemManager("node") != "pnpm" {
-		t.Fatalf("node manager = %q, want pnpm", got.Settings.EcosystemManager("node"))
+	if got := app.EffectiveEcosystemManager(got.Settings, "node"); got != "pnpm" {
+		t.Fatalf("node manager = %q, want pnpm", got)
 	}
 }
 

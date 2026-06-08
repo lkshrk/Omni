@@ -79,32 +79,6 @@ func TestToolSpec_ToToolEntry_PackageDefaultsFromLogicalName(t *testing.T) {
 	}
 }
 
-func TestSettings_EcosystemPriority(t *testing.T) {
-	s := config.Settings{
-		Ecosystems: map[string]config.EcosystemSettings{
-			"node": {Priority: []string{"pnpm", "npm"}},
-		},
-	}
-	if got := s.EcosystemPriority("node"); len(got) != 2 || got[0] != "pnpm" {
-		t.Errorf("EcosystemPriority(node) = %v, want [pnpm npm]", got)
-	}
-	if got := s.EcosystemPriority("missing"); got != nil {
-		t.Errorf("EcosystemPriority(missing) = %v, want nil", got)
-	}
-	// Empty priority slice returns nil rather than empty slice.
-	s.Ecosystems["python"] = config.EcosystemSettings{}
-	if got := s.EcosystemPriority("python"); got != nil {
-		t.Errorf("EcosystemPriority(empty) = %v, want nil", got)
-	}
-}
-
-func TestSettings_EcosystemManager_FallbackEmpty(t *testing.T) {
-	var s config.Settings
-	if got := s.EcosystemManager("node"); got != "" {
-		t.Errorf("nil-Ecosystems EcosystemManager = %q, want empty", got)
-	}
-}
-
 func TestValidationError_FormatsWithAndWithoutPath(t *testing.T) {
 	tests := []struct {
 		name string

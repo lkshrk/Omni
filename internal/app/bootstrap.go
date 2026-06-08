@@ -114,8 +114,13 @@ func (a *App) ApplyBootstrap(ctx context.Context, opts BootstrapApplyOptions) (B
 
 	if opts.NodeManager != "" || opts.PythonManager != "" || opts.UpdateQuarantine != "" {
 		var settings config.Settings
-		settings.SetEcosystemManager(provider.EcosystemNode, opts.NodeManager)
-		settings.SetEcosystemManager(provider.EcosystemPython, opts.PythonManager)
+		for _, mgr := range []string{opts.PythonManager, opts.NodeManager} {
+			canonical := config.NormalizeConcreteProvider(mgr)
+			if canonical == "" {
+				canonical = mgr
+			}
+			settings.ProviderPriority = promoteEcosystemConcrete(settings.ProviderPriority, canonical)
+		}
 		settings.UpdateQuarantine = opts.UpdateQuarantine
 		if err := a.SaveSettings(ctx, settings); err != nil {
 			return BootstrapApplyResult{}, fmt.Errorf("saving settings: %w", err)
