@@ -41,6 +41,7 @@ const (
 	hintCtxSettingsDurationEdit
 	hintCtxSettingsDanger
 	hintCtxSettingsPriorityEdit
+	hintCtxSettingsPriorityHold
 	hintCtxSettingsStatus
 	hintCtxHostGroupPicker
 	hintCtxHostDefault
@@ -305,10 +306,16 @@ func contextHintItems(m Model, ctx hintContext) []hintItem {
 		}
 	case hintCtxSettingsPriorityEdit:
 		return []hintItem{
-			rawHint("j/k", "move"),
-			rawHint("J/K", "reorder"),
-			hintFromBindingDesc(m.keys.Toggle, "on/off"),
+			rawHint("↑/↓", "move"),
+			hintFromBindingDesc(m.keys.Toggle, "grab"),
+			rawHint("x", "on/off"),
 			hintFromBindingDesc(m.keys.Confirm, "save"),
+			hintFromBindingDesc(m.keys.Back, "cancel"),
+		}
+	case hintCtxSettingsPriorityHold:
+		return []hintItem{
+			rawHint("↑/↓", "carry"),
+			hintFromBindingDesc(m.keys.Toggle, "drop"),
 			hintFromBindingDesc(m.keys.Back, "cancel"),
 		}
 	case hintCtxSettingsStatus:

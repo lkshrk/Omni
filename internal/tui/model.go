@@ -391,6 +391,7 @@ type Model struct {
 
 	// provider priority editor (active when editing the Priority row in settings)
 	editingPriority                bool
+	priorityHolding                bool
 	priorityCursor                 int
 	priorityDraft                  []string
 	priorityDisabled               map[string]bool

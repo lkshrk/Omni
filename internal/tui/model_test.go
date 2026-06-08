@@ -2390,36 +2390,42 @@ func TestModel_PriorityEditor_CursorClamps(t *testing.T) {
 	}
 }
 
-func TestModel_PriorityEditor_ShiftJMoveDown(t *testing.T) {
+func TestModel_PriorityEditor_GrabCarryDown(t *testing.T) {
 	// Open editor; default draft starts [brew, apt, apk, ...].
-	// cursor starts at 0 (brew); shift+j should swap brew down with apt.
-	msgs := append(goToPriorityRow(), pressEnter(), pressRune('J'))
+	// cursor starts at 0 (brew); space grabs, j carries brew down, space drops.
+	msgs := append(goToPriorityRow(), pressEnter(), pressRune(' '), pressRune('j'), pressRune(' '))
 	m := drive(baseModel(nil), msgs...)
 	if m.priorityDraft[0] != "apt" || m.priorityDraft[1] != "brew" {
-		t.Errorf("priorityDraft = %v after J, want [apt brew ...]", m.priorityDraft)
+		t.Errorf("priorityDraft = %v after grab+j+drop, want [apt brew ...]", m.priorityDraft)
 	}
 	if m.priorityCursor != 1 {
-		t.Errorf("priorityCursor = %d, want 1 (follows item)", m.priorityCursor)
+		t.Errorf("priorityCursor = %d, want 1 (follows carried item)", m.priorityCursor)
+	}
+	if m.priorityHolding {
+		t.Error("priorityHolding should be false after dropping")
 	}
 }
 
-func TestModel_PriorityEditor_ShiftKMoveUp(t *testing.T) {
+func TestModel_PriorityEditor_GrabCarryUp(t *testing.T) {
 	// Default draft: [brew, apt, apk, ...]. Move cursor to index 1 (apt),
-	// then shift+k should swap apt up with brew.
-	msgs := append(goToPriorityRow(), pressEnter(), pressRune('j'), pressRune('K'))
+	// grab, k carries apt up past brew, drop.
+	msgs := append(goToPriorityRow(), pressEnter(), pressRune('j'), pressRune(' '), pressRune('k'), pressRune(' '))
 	m := drive(baseModel(nil), msgs...)
 	if m.priorityDraft[0] != "apt" || m.priorityDraft[1] != "brew" {
-		t.Errorf("priorityDraft = %v after j+K, want [apt brew ...]", m.priorityDraft)
+		t.Errorf("priorityDraft = %v after j+grab+k+drop, want [apt brew ...]", m.priorityDraft)
 	}
 	if m.priorityCursor != 0 {
-		t.Errorf("priorityCursor = %d, want 0 (follows item)", m.priorityCursor)
+		t.Errorf("priorityCursor = %d, want 0 (follows carried item)", m.priorityCursor)
+	}
+	if m.priorityHolding {
+		t.Error("priorityHolding should be false after dropping")
 	}
 }
 
 func TestModel_PriorityEditor_SaveOnEnter(t *testing.T) {
-	// Reorder and confirm; settings.ProviderPriority should update.
-	// Default draft is [brew, apt, apk, ...]; J at cursor=0 swaps brew↓apt → [apt, brew, apk, ...].
-	msgs := append(goToPriorityRow(), pressEnter(), pressRune('J'), pressEnter())
+	// Reorder via grab-carry and confirm; settings.ProviderPriority should update.
+	// Default draft is [brew, apt, apk, ...]; space+j+space carries brew down → [apt, brew, apk, ...].
+	msgs := append(goToPriorityRow(), pressEnter(), pressRune(' '), pressRune('j'), pressRune(' '), pressEnter())
 	m := drive(baseModel(nil), msgs...)
 	if m.editingPriority {
 		t.Error("editingPriority should be false after enter")
@@ -2432,8 +2438,8 @@ func TestModel_PriorityEditor_SaveOnEnter(t *testing.T) {
 func TestModel_PriorityEditor_DiscardOnEsc(t *testing.T) {
 	base := baseModel(nil)
 	base.settings.ProviderPriority = []string{"brew", "apt", "apk"}
-	// Reorder and then esc — original settings.ProviderPriority should be unchanged.
-	msgs := append(goToPriorityRow(), pressEnter(), pressRune('J'), pressEsc())
+	// Reorder via grab-carry and then esc — original settings.ProviderPriority should be unchanged.
+	msgs := append(goToPriorityRow(), pressEnter(), pressRune(' '), pressRune('j'), pressRune(' '), pressEsc())
 	m := drive(base, msgs...)
 	if m.editingPriority {
 		t.Error("editingPriority should be false after esc")
@@ -2462,34 +2468,34 @@ func TestModel_PriorityEditor_SavedOrderRoundTrips(t *testing.T) {
 
 // ─── Priority editor — space-toggle and rendering ────────────────────────────
 
-func TestModel_PriorityEditor_SpaceToggleDisables(t *testing.T) {
-	// Open editor (default draft starts with "brew" at index 0), press space
-	// to disable brew, then Enter to confirm.
-	msgs := append(goToPriorityRow(), pressEnter(), pressRune(' '), pressEnter())
+func TestModel_PriorityEditor_XTogglesDisables(t *testing.T) {
+	// Open editor (default draft starts with "brew" at index 0), press x
+	// to disable brew (browse mode), then Enter to confirm.
+	msgs := append(goToPriorityRow(), pressEnter(), pressRune('x'), pressEnter())
 	m := drive(baseModel(nil), msgs...)
 	if m.editingPriority {
 		t.Fatal("editingPriority should be false after enter")
 	}
 	if !slices.Contains(m.settings.DisabledProviders, "brew") {
-		t.Errorf("DisabledProviders = %v, want 'brew' after space-toggle + confirm", m.settings.DisabledProviders)
+		t.Errorf("DisabledProviders = %v, want 'brew' after x-toggle + confirm", m.settings.DisabledProviders)
 	}
 }
 
-func TestModel_PriorityEditor_SpaceToggleTwiceReenables(t *testing.T) {
-	// Toggle off then on — provider must NOT be in DisabledProviders after confirm.
-	msgs := append(goToPriorityRow(), pressEnter(), pressRune(' '), pressRune(' '), pressEnter())
+func TestModel_PriorityEditor_XToggleTwiceReenables(t *testing.T) {
+	// Toggle off then on with x — provider must NOT be in DisabledProviders after confirm.
+	msgs := append(goToPriorityRow(), pressEnter(), pressRune('x'), pressRune('x'), pressEnter())
 	m := drive(baseModel(nil), msgs...)
 	if m.editingPriority {
 		t.Fatal("editingPriority should be false after enter")
 	}
 	if slices.Contains(m.settings.DisabledProviders, "brew") {
-		t.Errorf("DisabledProviders = %v, brew should not be disabled after double-toggle", m.settings.DisabledProviders)
+		t.Errorf("DisabledProviders = %v, brew should not be disabled after double x-toggle", m.settings.DisabledProviders)
 	}
 }
 
 func TestModel_PriorityEditor_RenderUnavailable(t *testing.T) {
 	// Open the editor, then inject a small priorityAvailable map so that only
-	// "brew" is available; all other draft items should render with "(n/a)".
+	// "brew" is available; unavailable rows are greyed (dim) — no "(n/a)" text.
 	msgs := append(goToPriorityRow(), pressEnter())
 	m := drive(baseModel(nil), msgs...)
 	if !m.editingPriority {
@@ -2500,26 +2506,24 @@ func TestModel_PriorityEditor_RenderUnavailable(t *testing.T) {
 	m.width = 120
 	m.height = 50
 	out := stripANSIEscapeSequences(renderSettings(m))
-	if !strings.Contains(out, "(n/a)") {
-		t.Fatalf("expected '(n/a)' for unavailable providers, got:\n%s", out)
+	// The new design uses greying (dim style) rather than "(n/a)" text.
+	if strings.Contains(out, "(n/a)") {
+		t.Errorf("'(n/a)' text should not appear; unavailable rows are greyed: got:\n%s", out)
 	}
-	// Count occurrences: brew is available so must not get (n/a);
-	// every other draft item (10 of them) should.
-	lines := strings.Split(out, "\n")
-	brewHasNA := false
-	for _, l := range lines {
-		if strings.Contains(l, "brew") && strings.Contains(l, "(n/a)") {
-			brewHasNA = true
-		}
+	// Every draft row should still show a dot (● enabled, ○ disabled).
+	// With no priorityDisabled set, all rows should show ●.
+	if !strings.Contains(out, "●") {
+		t.Fatalf("expected ● dot for enabled providers in editor, got:\n%s", out)
 	}
-	if brewHasNA {
-		t.Errorf("'brew' (available) should not have '(n/a)' suffix:\n%s", out)
+	// brew (the only available one) must appear in the output.
+	if !strings.Contains(out, "brew") {
+		t.Errorf("'brew' row should be present in rendered output:\n%s", out)
 	}
 }
 
 func TestModel_PriorityEditor_RenderDisabled(t *testing.T) {
 	// Open the editor, inject priorityDisabled so "brew" is marked off,
-	// then render and verify "(off)" appears on the brew line.
+	// then render and verify the ○ dot appears on the brew line (no "(off)" text).
 	msgs := append(goToPriorityRow(), pressEnter())
 	m := drive(baseModel(nil), msgs...)
 	if !m.editingPriority {
@@ -2530,18 +2534,17 @@ func TestModel_PriorityEditor_RenderDisabled(t *testing.T) {
 	m.width = 120
 	m.height = 50
 	out := stripANSIEscapeSequences(renderSettings(m))
-	if !strings.Contains(out, "(off)") {
-		t.Fatalf("expected '(off)' for disabled provider, got:\n%s", out)
+	// New design uses ○ dot for disabled, not "(off)" text.
+	if strings.Contains(out, "(off)") {
+		t.Errorf("'(off)' text should not appear; disabled rows show ○ dot: got:\n%s", out)
 	}
-	lines := strings.Split(out, "\n")
-	brewHasOff := false
-	for _, l := range lines {
-		if strings.Contains(l, "brew") && strings.Contains(l, "(off)") {
-			brewHasOff = true
-		}
+	// The ○ dot must appear somewhere (brew is disabled).
+	if !strings.Contains(out, "○") {
+		t.Fatalf("expected ○ dot for disabled provider 'brew', got:\n%s", out)
 	}
-	if !brewHasOff {
-		t.Errorf("'brew' (disabled) should have '(off)' suffix:\n%s", out)
+	// Non-disabled rows (apt, apk, …) should show ● dot.
+	if !strings.Contains(out, "●") {
+		t.Errorf("expected ● dot for enabled providers, got:\n%s", out)
 	}
 }
 

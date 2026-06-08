@@ -1016,29 +1016,34 @@ func TestFlow2_UC93_DangerDisableDots(t *testing.T) {
 }
 
 // UC-94: Provider-order editor — K swaps item up.
-func TestFlow2_UC94_PriorityEditorKSwap(t *testing.T) {
+func TestFlow2_UC94_PriorityEditorGrabCarryUp(t *testing.T) {
 	// Navigate to the provider-order row, open it, move cursor down once,
-	// then K to swap up (moving item 1 to position 0).
+	// then grab+↑+drop to carry the item up (moving item 1 to position 0).
 	msgs := append(toSettings(), nj(settingsRowProviderPriority)...)
-	msgs = append(msgs, pressEnter())                          // opens priority editor
-	msgs = append(msgs, pressRune('j'))                        // move cursor to index 1
-	msgs = append(msgs, tea.KeyPressMsg{Code: 'K', Text: "K"}) // swap up
+	msgs = append(msgs, pressEnter())   // opens priority editor
+	msgs = append(msgs, pressRune('j')) // move cursor to index 1
+	msgs = append(msgs, pressRune(' ')) // grab
+	msgs = append(msgs, pressRune('k')) // carry up
+	msgs = append(msgs, pressRune(' ')) // drop
 	got := drive(baseModel(nil), msgs...)
 	if !got.editingPriority {
 		t.Error("editingPriority should still be true")
 	}
 	if got.priorityCursor != 0 {
-		t.Errorf("priorityCursor = %d, want 0 after K swap", got.priorityCursor)
+		t.Errorf("priorityCursor = %d, want 0 after carry up", got.priorityCursor)
+	}
+	if got.priorityHolding {
+		t.Error("priorityHolding should be false after dropping")
 	}
 	// The item that was at index 1 should now be at index 0.
 	if len(got.priorityDraft) < 2 {
 		t.Fatal("priorityDraft should have at least 2 items")
 	}
-	// Default draft is [brew, apt, apk, ...]. After j (cursor=1) and K (swap
-	// up, cursor=0), draft[0] is the item originally at index 1 (apt).
+	// Default draft is [brew, apt, apk, ...]. After j (cursor=1) and grab+k+drop,
+	// draft[0] is the item originally at index 1 (apt).
 	original := []string{"brew", "apt", "apk", "dnf", "pacman", "zypper", "bun", "pnpm", "npm", "uv", "pip"}
 	if got.priorityDraft[0] != original[1] {
-		t.Errorf("priorityDraft[0] = %q, want %q (swapped up)", got.priorityDraft[0], original[1])
+		t.Errorf("priorityDraft[0] = %q, want %q (carried up)", got.priorityDraft[0], original[1])
 	}
 }
 
