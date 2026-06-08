@@ -54,9 +54,25 @@ func (g *Git) Pull(ctx context.Context) error {
 	return nil
 }
 
-// CommitAll stages all changes and commits with the given message.
-// Returns nil without error if there is nothing to commit.
+// CommitAll stages all changes and commits with the given message, honouring
+// the user's commit-signing config. Returns nil without error if there is
+// nothing to commit.
 func (g *Git) CommitAll(ctx context.Context, message string) error {
+	return g.commitAll(ctx, message, true)
+}
+
+// SnapshotAll behaves like CommitAll but disables commit signing. It is for
+// omni-internal safety checkpoints (e.g. the pre-resolve/pre-sync snapshots that
+// preserve prior repo state before a mutation) which must succeed regardless of
+// the user's commit.gpgsign setting or signing-key availability — otherwise a
+// missing/locked signing key would abort conflict resolution and dot syncing.
+// User-facing commits (dots add/commit/push) still go through CommitAll/Push and
+// stay signed.
+func (g *Git) SnapshotAll(ctx context.Context, message string) error {
+	return g.commitAll(ctx, message, false)
+}
+
+func (g *Git) commitAll(ctx context.Context, message string, sign bool) error {
 	if _, stderr, err := g.run(ctx, "add", "-A"); err != nil {
 		return gitErr("git add", err, stderr)
 	}
@@ -67,7 +83,12 @@ func (g *Git) CommitAll(ctx context.Context, message string) error {
 	if strings.TrimSpace(stdout) == "" {
 		return nil // nothing to commit
 	}
-	if _, stderr, err := g.run(ctx, "commit", "-m", message); err != nil {
+	args := make([]string, 0, 5)
+	if !sign {
+		args = append(args, "-c", "commit.gpgsign=false")
+	}
+	args = append(args, "commit", "-m", message)
+	if _, stderr, err := g.run(ctx, args...); err != nil {
 		return gitErr("git commit", err, stderr)
 	}
 	return nil

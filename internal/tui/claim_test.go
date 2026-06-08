@@ -46,7 +46,7 @@ func TestDoClaim_Success(t *testing.T) {
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
 
-	msg := m.doClaim("ripgrep", "brew", "work")()
+	msg := m.doClaim("ripgrep", "brew", "", "work")()
 	got, ok := msg.(claimDoneMsg)
 	if !ok {
 		t.Fatalf("expected claimDoneMsg, got %T", msg)
@@ -71,7 +71,7 @@ func TestDoClaim_RefreshesToolMembershipState(t *testing.T) {
 	m.toolGroups = map[string]string{key: ""}
 	m.toolMemberships = map[string][]string{}
 
-	msg := m.doClaim("ripgrep", "brew", "work")()
+	msg := m.doClaim("ripgrep", "brew", "", "work")()
 	got, ok := msg.(claimDoneMsg)
 	if !ok {
 		t.Fatalf("expected claimDoneMsg, got %T", msg)
@@ -159,7 +159,7 @@ func TestDoClaim_AddError(t *testing.T) {
 	redirectToReadOnlyConfig(t, a)
 
 	m := modelForCmds(a)
-	msg := m.doClaim("bat", "brew", "")()
+	msg := m.doClaim("bat", "brew", "", "")()
 	got, ok := msg.(claimDoneMsg)
 	if !ok {
 		t.Fatalf("expected claimDoneMsg, got %T", msg)
@@ -172,6 +172,162 @@ func TestDoClaim_AddError(t *testing.T) {
 	}
 	if got.groupName != "" {
 		t.Errorf("groupName = %q on error, want base/empty", got.groupName)
+	}
+}
+
+// ── doClaim — ecosystem tool coverage ────────────────────────────────────────
+
+// TestDoClaim_NodeToolWritesConcreteProvider verifies that claiming an orphan
+// node tool (Provider=bun, InstalledWith=bun) writes the concrete "bun" provider
+// to config — never the "node" family — and that the resulting config validates
+// clean. This mirrors the assertion in the bulk TestSyncAll_ClaimNodeToolWritesConcreteNotFamily.
+func TestDoClaim_NodeToolWritesConcreteProvider(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	bun := &okProvider{name: "bun"}
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "settings.json")
+	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
+		Groups: []*config.GroupConfig{tuiTestHostGroup()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	a := app.New(cfgPath)
+	a.CacheDir = dir
+	if err := a.InitTestMode(context.Background(), bun); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	m := modelForCmds(a)
+	msg := m.doClaim("tsx", "bun", "bun", "testhost")()
+	got, ok := msg.(claimDoneMsg)
+	if !ok {
+		t.Fatalf("expected claimDoneMsg, got %T", msg)
+	}
+	if got.err != nil {
+		t.Fatalf("doClaim error: %v", got.err)
+	}
+	if got.name != "tsx" {
+		t.Errorf("name = %q, want tsx", got.name)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	spec := cfg.Tools["tsx"]
+	if len(spec.Providers) != 1 || spec.Providers[0].Provider != "bun" {
+		t.Fatalf("tsx spec = %+v, want concrete bun provider (not node family)", spec)
+	}
+	if errs := config.ValidateRoot(cfg, config.ProviderValidation{}); len(errs) > 0 {
+		t.Fatalf("config did not validate clean after single claim: %v", errs)
+	}
+}
+
+// TestDoClaim_NodeToolMatchesBulkPath confirms that a single TUI claim for a
+// node ecosystem orphan produces identical config shape as the bulk SyncAll path
+// tested in TestSyncAll_ClaimNodeToolWritesConcreteNotFamily: provider="bun",
+// no install_with pin (bun==bun so ClaimInstallWith returns ""), valid config.
+func TestDoClaim_NodeToolMatchesBulkPath(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	bun := &okProvider{name: "bun"}
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "settings.json")
+	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
+		Groups: []*config.GroupConfig{tuiTestHostGroup()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	a := app.New(cfgPath)
+	a.CacheDir = dir
+	if err := a.InitTestMode(context.Background(), bun); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	m := modelForCmds(a)
+	msg := m.doClaim("tsx", "bun", "bun", "testhost")()
+	got, ok := msg.(claimDoneMsg)
+	if !ok {
+		t.Fatalf("expected claimDoneMsg, got %T", msg)
+	}
+	if got.err != nil {
+		t.Fatalf("doClaim error: %v", got.err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	spec := cfg.Tools["tsx"]
+
+	// Concrete provider written — not the "node" family.
+	if len(spec.Providers) != 1 || spec.Providers[0].Provider != "bun" {
+		t.Fatalf("tsx spec providers = %+v, want [{Provider:bun}]", spec.Providers)
+	}
+	// When configProvider==installedWith (both "bun"), ClaimInstallWith returns ""
+	// — no explicit install_with pin is needed.
+	if spec.Providers[0].InstallWith != "" {
+		t.Fatalf("tsx spec install_with = %q, want empty (bun==bun, no pin needed)", spec.Providers[0].InstallWith)
+	}
+	// Config must validate clean — no "node" family provider lurking.
+	if errs := config.ValidateRoot(cfg, config.ProviderValidation{}); len(errs) > 0 {
+		t.Fatalf("config did not validate clean after single claim: %v", errs)
+	}
+	// Tool appears in the requested group.
+	var found bool
+	for _, g := range cfg.Groups {
+		for _, tool := range g.Tools {
+			if tool.Name == "tsx" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("tsx not found in any group after claim; groups = %+v", cfg.Groups)
+	}
+}
+
+// TestDoClaim_PythonToolWritesConcreteProvider exercises the pip ecosystem:
+// an orphan installed via pip is claimed as provider="pip" and must not be
+// written as the "python" family.
+func TestDoClaim_PythonToolWritesConcreteProvider(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	pip := &okProvider{name: "pip"}
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "settings.json")
+	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
+		Groups: []*config.GroupConfig{tuiTestHostGroup()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	a := app.New(cfgPath)
+	a.CacheDir = dir
+	if err := a.InitTestMode(context.Background(), pip); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	m := modelForCmds(a)
+	msg := m.doClaim("black", "pip", "pip", "testhost")()
+	got, ok := msg.(claimDoneMsg)
+	if !ok {
+		t.Fatalf("expected claimDoneMsg, got %T", msg)
+	}
+	if got.err != nil {
+		t.Fatalf("doClaim error: %v", got.err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	spec := cfg.Tools["black"]
+	if len(spec.Providers) != 1 || spec.Providers[0].Provider != "pip" {
+		t.Fatalf("black spec = %+v, want concrete pip provider (not python family)", spec)
+	}
+	if errs := config.ValidateRoot(cfg, config.ProviderValidation{}); len(errs) > 0 {
+		t.Fatalf("config did not validate clean after pip claim: %v", errs)
 	}
 }
 

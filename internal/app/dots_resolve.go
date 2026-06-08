@@ -112,7 +112,7 @@ func resolveDotUseLocal(ctx context.Context, repoPath, stowPath string, entry do
 	if pathExists(entry.SourcePath) {
 		gt := newGitForRepo(repoPath, executor.New())
 		if gt.IsRepo() {
-			if err := gt.CommitAll(ctx, "dots: pre-resolve "+entry.Name); err != nil {
+			if err := gt.SnapshotAll(ctx, "dots: pre-resolve "+entry.Name); err != nil {
 				return nil, fmt.Errorf("dots resolve %q: pre-commit repo state: %w", entry.Name, err)
 			}
 		}

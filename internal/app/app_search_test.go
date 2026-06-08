@@ -266,15 +266,15 @@ func TestListToolsAndRefreshUseActiveHostGroups(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Upsert stale docker: %v", err)
 	}
-	if current := app.CurrentMachineGroupName(); current != "Topaz" {
-		t.Fatalf("CurrentMachineGroupName = %q, want Topaz", current)
+	if current := app.CurrentMachineGroupName(); current != "topaz" {
+		t.Fatalf("CurrentMachineGroupName = %q, want topaz", current)
 	}
 	info, err := a.HostStatus()
 	if err != nil {
 		t.Fatalf("HostStatus: %v", err)
 	}
-	if info.Active != "Topaz" || !slices.Contains(info.Hosts["Topaz"].Groups, "dev") {
-		t.Fatalf("HostStatus = %#v, want active Topaz with dev", info)
+	if info.Active != "topaz" || !slices.Contains(info.Hosts["topaz"].Groups, "dev") {
+		t.Fatalf("HostStatus = %#v, want active topaz with dev", info)
 	}
 
 	tools, err := a.ListTools(ctx, "")
