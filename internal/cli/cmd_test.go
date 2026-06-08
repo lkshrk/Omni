@@ -3882,11 +3882,11 @@ func TestConsolidate_EcosystemDryRun_NodeTools_PrintsWouldMigrate(t *testing.T) 
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	// Config with npm tools — when consolidating to bun, they would migrate.
 	settings := config.Settings{}
-	settings.SetEcosystemManager("node", "npm")
+	settings.ProviderPriority = append([]string{"npm"}, settings.ProviderPriority...)
 	withConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
-			"prettier":   {Provider: "node"},
-			"typescript": {Provider: "node"},
+			"prettier":   {Provider: "npm"},
+			"typescript": {Provider: "npm"},
 		},
 		Groups: []*config.GroupConfig{
 			{Name: "testhost", Special: "host", Tools: []config.ToolEntry{

@@ -288,10 +288,10 @@ func (a *App) initProviderRegistry(settings config.Settings) {
 		disabledSet[p] = true
 	}
 	if !disabledSet[provider.EcosystemNode] {
-		a.registry.RegisterWithMetadata(node.New(exec, settings.EcosystemManager(provider.EcosystemNode)), provider.BuiltinMetadata(provider.EcosystemNode))
+		a.registry.RegisterWithMetadata(node.New(exec, EffectiveEcosystemManager(settings, provider.EcosystemNode)), provider.BuiltinMetadata(provider.EcosystemNode))
 	}
 	if !disabledSet[provider.EcosystemPython] {
-		a.registry.RegisterWithMetadata(python.New(exec, settings.EcosystemManager(provider.EcosystemPython)), provider.BuiltinMetadata(provider.EcosystemPython))
+		a.registry.RegisterWithMetadata(python.New(exec, EffectiveEcosystemManager(settings, provider.EcosystemPython)), provider.BuiltinMetadata(provider.EcosystemPython))
 	}
 	// system resolves to the first available concrete package manager on the host.
 	// Native Linux PMs ordered before brew so distro-native packages win on Linux.
@@ -325,6 +325,15 @@ func (a *App) loadConfig() (*config.RootConfig, error) {
 	cfg, err := config.Load(a.ConfigPath)
 	if err != nil {
 		return nil, err
+	}
+	// Present legacy mixed-case entries for this machine as the canonical
+	// lower-cased hostname so every reader sees a consistent key; a later write
+	// persists the normalised form to disk.
+	migrateCurrentHostCase(cfg, currentMachineGroupName())
+	migrateLegacyEcosystemManager(&cfg.Settings)
+	for host, hs := range cfg.HostSettings {
+		migrateLegacyEcosystemManager(&hs)
+		cfg.HostSettings[host] = hs
 	}
 	if a.registry != nil {
 		if errs := config.ValidateRoot(cfg, a.providerValidation()); len(errs) > 0 {
@@ -699,6 +708,9 @@ func groupsByNames(groups []*config.GroupConfig, names []string) []*config.Group
 }
 
 func effectiveHostGroups(cfg *config.RootConfig, groups []*config.GroupConfig, hostname string) ([]*config.GroupConfig, []*config.GroupConfig, bool) {
+	if hostname != "" {
+		hostname = shortHostname(hostname)
+	}
 	names, ok := activeHostGroupNames(cfg, hostname)
 	effective := groupsByNames(groups, names)
 	return effective, effective, ok

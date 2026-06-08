@@ -182,7 +182,7 @@ func TestSetupProviderOptionsUsesResolvedProvidersAndAvailableManagers(t *testin
 	brew := &stubProvider{name: "brew", available: true}
 	a, _ := newImportApp(t, systemprovider.New(brew), brew)
 	settings := config.Settings{DisabledProviders: []string{provider.EcosystemPython}}
-	settings.SetEcosystemManager(provider.EcosystemNode, "npm")
+	settings.ProviderPriority = append([]string{"npm"}, settings.ProviderPriority...)
 
 	got := a.SetupProviderOptions(context.Background(), settings)
 	want := []app.SetupProviderOption{
@@ -207,19 +207,6 @@ func TestSetupProviderEnabled(t *testing.T) {
 	}
 }
 
-func TestSetupNodeHelpers(t *testing.T) {
-	a, _ := newImportApp(t)
-	wantOptions := []app.SettingsManagerOption{
-		{Value: "", Label: "auto", Description: "use the provider's preferred available manager"},
-		{Value: "bun", Label: "bun", Description: "fast runtime + package manager"},
-		{Value: "pnpm", Label: "pnpm", Description: "disk-efficient, workspace-native"},
-		{Value: "npm", Label: "npm", Description: "bundled with every Node.js install"},
-	}
-	if got := a.SetupNodeManagerOptions(); !slices.Equal(got, wantOptions) {
-		t.Fatalf("SetupNodeManagerOptions = %+v, want %+v", got, wantOptions)
-	}
-}
-
 func TestApplySettingsChange_DraftSemantics(t *testing.T) {
 	a, _ := newImportApp(t)
 	base := config.Settings{DisabledProviders: []string{"node"}}
@@ -240,10 +227,10 @@ func TestApplySettingsChange_DraftSemantics(t *testing.T) {
 	if want := "brew,pnpm,npm,uv,pip"; strings.Join(got.ProviderPriority, ",") != want {
 		t.Fatalf("provider_priority = %v, want %s (bogus filtered)", got.ProviderPriority, want)
 	}
-	if manager := got.EcosystemManager(provider.EcosystemNode); manager != "pnpm" {
+	if manager := app.EffectiveEcosystemManager(got, provider.EcosystemNode); manager != "pnpm" {
 		t.Fatalf("derived node manager = %q, want pnpm", manager)
 	}
-	if manager := got.EcosystemManager(provider.EcosystemPython); manager != "uv" {
+	if manager := app.EffectiveEcosystemManager(got, provider.EcosystemPython); manager != "uv" {
 		t.Fatalf("derived python manager = %q, want uv", manager)
 	}
 
@@ -279,10 +266,10 @@ func TestApplySettingsChange_SetProviderLayout_SetsOrderAndDisabled(t *testing.T
 		t.Errorf("disabled = %v, want %s", got.DisabledProviders, want)
 	}
 	// pnpm leads node order and is enabled → node manager pnpm; uv disabled → python pip3.
-	if m := got.EcosystemManager(provider.EcosystemNode); m != "pnpm" {
+	if m := app.EffectiveEcosystemManager(got, provider.EcosystemNode); m != "pnpm" {
 		t.Errorf("node manager = %q, want pnpm", m)
 	}
-	if m := got.EcosystemManager(provider.EcosystemPython); m != "pip3" {
+	if m := app.EffectiveEcosystemManager(got, provider.EcosystemPython); m != "pip3" {
 		t.Errorf("python manager = %q, want pip3", m)
 	}
 }
@@ -335,22 +322,11 @@ func TestApplySettingsChange_ToggleConcreteProvider(t *testing.T) {
 	}
 }
 
-func TestSystemProviderPriorityPlanning(t *testing.T) {
-	a, _ := newImportApp(t, &stubProvider{name: "brew"}, &stubProvider{name: "apt"})
-
-	if got := a.SystemProviderPriorityDisplay([]string{"brew", "missing", "apt", "brew"}); !slices.Equal(got, []string{"brew", "apt"}) {
-		t.Fatalf("display priority = %v, want [brew apt]", got)
-	}
-	if got := a.SystemProviderPriorityDraft([]string{"brew", "missing", "brew"}); !slices.Equal(got, []string{"brew", "apt", "apk", "dnf", "zypper", "pacman"}) {
-		t.Fatalf("draft priority = %v, want brew followed by remaining valid providers", got)
-	}
-}
-
 func TestPinEcosystemForHostPersistsManagerAndSystemPriority(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "desk.local")
 	a, cfgPath := newImportApp(t)
 	initialSettings := config.Settings{}
-	initialSettings.SetEcosystemPriority(provider.EcosystemSystem, []string{"apt", "dnf", "brew"})
+	initialSettings.ProviderPriority = []string{"apt", "dnf", "brew"}
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		HostSettings: map[string]config.Settings{
 			"desk": initialSettings,
@@ -371,11 +347,11 @@ func TestPinEcosystemForHostPersistsManagerAndSystemPriority(t *testing.T) {
 		t.Fatalf("config.Load: %v", err)
 	}
 	settings := cfg.HostSettings["desk"]
-	if got := settings.EcosystemManager(provider.EcosystemNode); got != "bun" {
+	if got := app.EffectiveEcosystemManager(settings, provider.EcosystemNode); got != "bun" {
 		t.Fatalf("node manager = %q, want bun", got)
 	}
-	wantPriority := []string{"brew", "apt", "apk", "dnf", "zypper", "pacman"}
-	if got := settings.EcosystemPriority(provider.EcosystemSystem); !slices.Equal(got, wantPriority) {
+	wantPriority := []string{"brew", "apt", "dnf", "apk", "zypper", "pacman"}
+	if got := app.SystemInstallPriority(settings); !slices.Equal(got, wantPriority) {
 		t.Fatalf("system priority = %v, want %v", got, wantPriority)
 	}
 }
@@ -510,151 +486,6 @@ func TestDefaultEcosystemProviderNames(t *testing.T) {
 	}
 }
 
-func TestSettingsManagerOptions(t *testing.T) {
-	a, _ := newImportApp(t)
-
-	node := a.SettingsManagerOptions(provider.EcosystemNode)
-	wantNode := []app.SettingsManagerOption{
-		{Value: "", Label: "auto", Description: "use the provider's preferred available manager"},
-		{Value: "bun", Label: "bun", Description: "fast runtime + package manager"},
-		{Value: "pnpm", Label: "pnpm", Description: "disk-efficient, workspace-native"},
-		{Value: "npm", Label: "npm", Description: "bundled with every Node.js install"},
-	}
-	if !slices.Equal(node, wantNode) {
-		t.Fatalf("node manager options = %#v, want %#v", node, wantNode)
-	}
-	if defaultNode := app.DefaultSettingsManagerOptions(provider.EcosystemNode); !slices.Equal(defaultNode, wantNode) {
-		t.Fatalf("default node manager options = %#v, want %#v", defaultNode, wantNode)
-	}
-
-	python := a.SettingsManagerOptions(provider.EcosystemPython)
-	wantPython := []app.SettingsManagerOption{
-		{Value: "", Label: "auto", Description: "use the provider's preferred available manager"},
-		{Value: "uv", Label: "uv", Description: "fast Python tool manager"},
-		{Value: "pip3", Label: "pip3", Description: "Python package installer"},
-	}
-	if !slices.Equal(python, wantPython) {
-		t.Fatalf("python manager options = %#v, want %#v", python, wantPython)
-	}
-
-	if got := a.SettingsManagerOptions("missing"); got != nil {
-		t.Fatalf("unknown ecosystem manager options = %#v, want nil", got)
-	}
-}
-
-func TestSystemProviderPriorityDisplayFiltersInvalidAndDuplicateProviders(t *testing.T) {
-	a, _ := newImportApp(t)
-	priority := []string{"apt", "missing", "brew", "apt", "dnf"}
-	want := []string{"apt", "brew", "dnf"}
-
-	if got := a.SystemProviderPriorityDisplay(priority); !slices.Equal(got, want) {
-		t.Fatalf("SystemProviderPriorityDisplay = %v, want %v", got, want)
-	}
-}
-
-func TestSettingsManagerHelp(t *testing.T) {
-	a, _ := newImportApp(t)
-
-	tests := []struct {
-		name      string
-		ecosystem string
-		want      string
-	}{
-		{
-			name:      "node",
-			ecosystem: provider.EcosystemNode,
-			want:      "JS package manager (auto = bun preferred, then pnpm, then npm).",
-		},
-		{
-			name:      "python",
-			ecosystem: provider.EcosystemPython,
-			want:      "Python tool manager (auto = uv preferred, then pip3).",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := app.DefaultSettingsManagerHelp(tt.ecosystem); got != tt.want {
-				t.Fatalf("DefaultSettingsManagerHelp(%q) = %q, want %q", tt.ecosystem, got, tt.want)
-			}
-			if got := a.SettingsManagerHelp(tt.ecosystem); got != tt.want {
-				t.Fatalf("SettingsManagerHelp(%q) = %q, want %q", tt.ecosystem, got, tt.want)
-			}
-		})
-	}
-
-	if got := app.DefaultSettingsManagerHelp("missing"); got != "" {
-		t.Fatalf("DefaultSettingsManagerHelp(missing) = %q, want empty", got)
-	}
-	if got := (*app.App)(nil).SettingsManagerHelp(provider.EcosystemNode); got != "JS package manager (auto = bun preferred, then pnpm, then npm)." {
-		t.Fatalf("nil SettingsManagerHelp(node) = %q, want default node help", got)
-	}
-}
-
-func TestSettingsProviderHelp(t *testing.T) {
-	a, _ := newImportApp(t)
-
-	tests := []struct {
-		name      string
-		ecosystem string
-		want      string
-	}{
-		{
-			name:      "system",
-			ecosystem: provider.EcosystemSystem,
-			want:      "Track system tools on this machine (apt/apk/dnf/zypper/pacman/brew).",
-		},
-		{
-			name:      "node",
-			ecosystem: provider.EcosystemNode,
-			want:      "Track node tools on this machine (bun/pnpm/npm).",
-		},
-		{
-			name:      "python",
-			ecosystem: provider.EcosystemPython,
-			want:      "Track python tools on this machine (uv/pip3).",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := app.DefaultSettingsProviderHelp(tt.ecosystem); got != tt.want {
-				t.Fatalf("DefaultSettingsProviderHelp(%q) = %q, want %q", tt.ecosystem, got, tt.want)
-			}
-			if got := a.SettingsProviderHelp(tt.ecosystem); got != tt.want {
-				t.Fatalf("SettingsProviderHelp(%q) = %q, want %q", tt.ecosystem, got, tt.want)
-			}
-		})
-	}
-
-	if got := app.DefaultSettingsProviderHelp("missing"); got != "" {
-		t.Fatalf("DefaultSettingsProviderHelp(missing) = %q, want empty", got)
-	}
-	if got := (*app.App)(nil).SettingsProviderHelp(provider.EcosystemSystem); got != "Track system tools on this machine (apt/apk/dnf/zypper/pacman/brew)." {
-		t.Fatalf("nil SettingsProviderHelp(system) = %q, want default system help", got)
-	}
-}
-
-func TestSettingsProviderAndManagerMembershipHelpers(t *testing.T) {
-	a, _ := newImportApp(t)
-
-	if !a.IsManagerForEcosystem(provider.EcosystemNode, "bun") {
-		t.Fatal("IsManagerForEcosystem(node, bun) = false, want true")
-	}
-	if a.IsManagerForEcosystem(provider.EcosystemNode, "uv") {
-		t.Fatal("IsManagerForEcosystem(node, uv) = true, want false")
-	}
-	if !a.IsConcreteProviderForEcosystem(provider.EcosystemSystem, "brew") {
-		t.Fatal("IsConcreteProviderForEcosystem(system, brew) = false, want true")
-	}
-	if a.IsConcreteProviderForEcosystem(provider.EcosystemSystem, provider.EcosystemSystem) {
-		t.Fatal("IsConcreteProviderForEcosystem(system, system) = true, want false for provider family")
-	}
-	if a.IsConcreteProviderForEcosystem(provider.EcosystemNode, "brew") {
-		t.Fatal("IsConcreteProviderForEcosystem(node, brew) = true, want false")
-	}
-}
-
 func TestSaveSettingsChange_PersistsHostAndGlobalSettings(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "settings-change-host")
 	a, cfgPath := newImportApp(t)
@@ -685,7 +516,7 @@ func TestSaveSettingsChange_PersistsHostAndGlobalSettings(t *testing.T) {
 		t.Fatalf("host provider_priority = %v, want [bun npm uv pip brew]", host.ProviderPriority)
 	}
 	// node manager derived from priority order (bun leads node).
-	if manager := host.EcosystemManager(provider.EcosystemNode); manager != "bun" {
+	if manager := app.EffectiveEcosystemManager(host, provider.EcosystemNode); manager != "bun" {
 		t.Fatalf("host node manager = %q, want bun (derived)", manager)
 	}
 	if !slices.Contains(host.DisabledProviders, "npm") {
@@ -713,7 +544,7 @@ func TestSaveSettingsChanges_AppliesBatchToCurrentConfig(t *testing.T) {
 	if !settings.AutoImport {
 		t.Fatal("returned settings should preserve current config auto_import")
 	}
-	if manager := settings.EcosystemManager(provider.EcosystemNode); manager != "pnpm" {
+	if manager := app.EffectiveEcosystemManager(settings, provider.EcosystemNode); manager != "pnpm" {
 		t.Fatalf("returned node manager = %q, want pnpm (derived)", manager)
 	}
 
@@ -872,8 +703,10 @@ func TestSaveSettings_PersistsGlobalAndHostSpecificShape(t *testing.T) {
 			AutoPush:   true,
 		},
 	}
-	settings.SetEcosystemManager("node", "pnpm")
-	settings.SetEcosystemPriority("system", []string{"brew", "apt"})
+	settings.ProviderPriority = append([]string{"pnpm"}, settings.ProviderPriority...)
+	settings.Ecosystems = map[string]config.EcosystemSettings{
+		"system": {Priority: []string{"brew", "apt"}},
+	}
 
 	if err := a.SaveSettings(context.Background(), settings); err != nil {
 		t.Fatalf("SaveSettings: %v", err)
@@ -1054,10 +887,10 @@ func TestSetSetting_PersistsParsedValues(t *testing.T) {
 		t.Fatalf("provider_priority = %q, want pnpm,npm,uv,pip,brew", got)
 	}
 	// managers derived from priority order.
-	if got := hostSettings.EcosystemManager(provider.EcosystemNode); got != "pnpm" {
+	if got := app.EffectiveEcosystemManager(hostSettings, provider.EcosystemNode); got != "pnpm" {
 		t.Fatalf("node manager = %q, want pnpm (derived)", got)
 	}
-	if got := hostSettings.EcosystemManager(provider.EcosystemPython); got != "uv" {
+	if got := app.EffectiveEcosystemManager(hostSettings, provider.EcosystemPython); got != "uv" {
 		t.Fatalf("python manager = %q, want uv (derived)", got)
 	}
 	if got := hostSettings.DotsRepo; got != "~/dotfiles" {
@@ -1155,6 +988,7 @@ func TestEffectiveManagers_UsesActiveNVMBin(t *testing.T) {
 // shortHostnameForTest mirrors the app-internal shortHostname logic so tests
 // can derive the expected key without importing unexported symbols.
 func shortHostnameForTest(hostname string) string {
+	hostname = strings.ToLower(hostname)
 	if idx := strings.IndexByte(hostname, '.'); idx != -1 {
 		return hostname[:idx]
 	}

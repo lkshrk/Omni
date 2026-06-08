@@ -265,45 +265,6 @@ type Settings struct {
 	Providers []ProviderEntry `json:"providers,omitempty"`
 }
 
-func (s Settings) Ecosystem(name string) EcosystemSettings {
-	if s.Ecosystems == nil {
-		return EcosystemSettings{}
-	}
-	return s.Ecosystems[name]
-}
-
-func (s Settings) EcosystemManager(name string) string {
-	if eco := s.Ecosystem(name); eco.Manager != "" {
-		return eco.Manager
-	}
-	return ""
-}
-
-func (s *Settings) SetEcosystemManager(name, manager string) {
-	if s.Ecosystems == nil {
-		s.Ecosystems = make(map[string]EcosystemSettings)
-	}
-	eco := s.Ecosystems[name]
-	eco.Manager = manager
-	s.Ecosystems[name] = eco
-}
-
-func (s Settings) EcosystemPriority(name string) []string {
-	if eco := s.Ecosystem(name); len(eco.Priority) > 0 {
-		return eco.Priority
-	}
-	return nil
-}
-
-func (s *Settings) SetEcosystemPriority(name string, priority []string) {
-	if s.Ecosystems == nil {
-		s.Ecosystems = make(map[string]EcosystemSettings)
-	}
-	eco := s.Ecosystems[name]
-	eco.Priority = append([]string(nil), priority...)
-	s.Ecosystems[name] = eco
-}
-
 // DotsGitConfig controls how the dots git wrapper behaves.
 type DotsGitConfig struct {
 	// AutoCommit runs "git commit" automatically after add/remove operations.
@@ -437,9 +398,6 @@ func (c *RootConfig) EffectiveSettings(shortHostname string) Settings {
 		}
 		for name, hostEco := range hs.Ecosystems {
 			eco := s.Ecosystems[name]
-			if hostEco.Manager != "" {
-				eco.Manager = hostEco.Manager
-			}
 			if len(hostEco.Priority) > 0 {
 				eco.Priority = append([]string(nil), hostEco.Priority...)
 			}

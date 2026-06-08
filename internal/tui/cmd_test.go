@@ -1677,7 +1677,7 @@ func TestDoSaveSettingsChange_QueuesPendingChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSettings: %v", err)
 	}
-	if got := settings.EcosystemManager(provider.EcosystemNode); got != "pnpm" {
+	if got := app.EffectiveEcosystemManager(settings, provider.EcosystemNode); got != "pnpm" {
 		t.Fatalf("node manager = %q, want queued change pnpm", got)
 	}
 }

@@ -876,8 +876,10 @@ func TestSettings_JSONTagsRemainStableAcrossUILabelRenames(t *testing.T) {
 			AutoPush:   true,
 		},
 	}
-	settings.SetEcosystemManager("node", "pnpm")
-	settings.SetEcosystemPriority("system", []string{"brew", "apt"})
+	settings.ProviderPriority = append([]string{"pnpm"}, settings.ProviderPriority...)
+	settings.Ecosystems = map[string]config.EcosystemSettings{
+		"system": {Priority: []string{"brew", "apt"}},
+	}
 
 	raw, err := json.Marshal(config.RootConfig{Settings: settings})
 	if err != nil {
@@ -939,7 +941,7 @@ func TestPatch_UpdatesTargetKey(t *testing.T) {
 
 	// Write an initial file with both settings and groups.
 	initialSettings := config.Settings{DotsRepo: "~/dotfiles"}
-	initialSettings.SetEcosystemManager("node", "bun")
+	initialSettings.ProviderPriority = append([]string{"bun"}, initialSettings.ProviderPriority...)
 	initial := &config.RootConfig{
 		Settings: initialSettings,
 		Groups:   []*config.GroupConfig{{Tools: []config.ToolEntry{{Name: "ripgrep", Provider: "brew"}}}},
@@ -953,7 +955,7 @@ func TestPatch_UpdatesTargetKey(t *testing.T) {
 		Settings config.Settings `json:"settings"`
 	}
 	newSettings := config.Settings{DotsRepo: "~/newdots"}
-	newSettings.SetEcosystemManager("node", "pnpm")
+	newSettings.ProviderPriority = append([]string{"pnpm"}, newSettings.ProviderPriority...)
 	if err := config.Patch(path, settingsPatch{Settings: newSettings}); err != nil {
 		t.Fatalf("Patch: %v", err)
 	}
@@ -967,8 +969,8 @@ func TestPatch_UpdatesTargetKey(t *testing.T) {
 	if loaded.Settings.DotsRepo != "~/newdots" {
 		t.Errorf("DotsRepo = %q, want ~/newdots", loaded.Settings.DotsRepo)
 	}
-	if loaded.Settings.EcosystemManager("node") != "pnpm" {
-		t.Errorf("node manager = %q, want pnpm", loaded.Settings.EcosystemManager("node"))
+	if got := loaded.Settings.ProviderPriority; len(got) == 0 || got[0] != "pnpm" {
+		t.Errorf("provider_priority = %v, want pnpm first (node manager)", got)
 	}
 
 	// Groups must be preserved unchanged.
@@ -1090,7 +1092,7 @@ func TestPatch_PreservesUnknownKeys(t *testing.T) {
 		Settings config.Settings `json:"settings"`
 	}
 	patchSettings := config.Settings{}
-	patchSettings.SetEcosystemManager("node", "bun")
+	patchSettings.ProviderPriority = append([]string{"bun"}, patchSettings.ProviderPriority...)
 	if err := config.Patch(path, settingsPatch{Settings: patchSettings}); err != nil {
 		t.Fatalf("Patch: %v", err)
 	}
@@ -1129,7 +1131,7 @@ func TestPatch_MultiKeyFilePreservesAllKeys(t *testing.T) {
 		Settings config.Settings `json:"settings"`
 	}
 	patchSettings := config.Settings{}
-	patchSettings.SetEcosystemManager("node", "bun")
+	patchSettings.ProviderPriority = append([]string{"bun"}, patchSettings.ProviderPriority...)
 	if err := config.Patch(path, settingsPatch{Settings: patchSettings}); err != nil {
 		t.Fatalf("Patch: %v", err)
 	}
@@ -1159,7 +1161,7 @@ func TestPatch_SchemaFirstAfterManyKeys(t *testing.T) {
 
 	// Write a full config with many keys.
 	initialSettings := config.Settings{DotsRepo: "~/dots"}
-	initialSettings.SetEcosystemManager("node", "bun")
+	initialSettings.ProviderPriority = append([]string{"bun"}, initialSettings.ProviderPriority...)
 	initial := &config.RootConfig{
 		Settings: initialSettings,
 		Groups: []*config.GroupConfig{{
@@ -1178,7 +1180,7 @@ func TestPatch_SchemaFirstAfterManyKeys(t *testing.T) {
 		Settings config.Settings `json:"settings"`
 	}
 	patchSettings := config.Settings{}
-	patchSettings.SetEcosystemManager("node", "pnpm")
+	patchSettings.ProviderPriority = append([]string{"pnpm"}, patchSettings.ProviderPriority...)
 	if err := config.Patch(path, settingsPatch{Settings: patchSettings}); err != nil {
 		t.Fatalf("Patch: %v", err)
 	}

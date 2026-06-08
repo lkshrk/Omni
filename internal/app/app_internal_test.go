@@ -91,25 +91,6 @@ func TestShortHostname(t *testing.T) {
 	}
 }
 
-func TestSettingsManagerHelpSubject(t *testing.T) {
-	tests := []struct {
-		ecosystem string
-		want      string
-	}{
-		{ecosystem: provider.EcosystemNode, want: "JS package manager"},
-		{ecosystem: provider.EcosystemPython, want: "Python tool manager"},
-		{ecosystem: "", want: "Manager"},
-		{ecosystem: "ruby", want: "Ruby manager"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.ecosystem, func(t *testing.T) {
-			if got := settingsManagerHelpSubject(tt.ecosystem); got != tt.want {
-				t.Fatalf("settingsManagerHelpSubject(%q) = %q, want %q", tt.ecosystem, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestProbeFirstPrefersAvailableHintThenPriority(t *testing.T) {
 	binDir := t.TempDir()
 	writeProbeExecutable := func(name string) {

@@ -542,6 +542,19 @@ type discoveredClaim struct {
 	tool           provider.Tool
 }
 
+// ClaimInstallWith returns the install_with value to record when claiming a
+// single discovered/orphan tool, mirroring the bulk-claim resolution so a
+// TUI/CLI single claim pins the same concrete manager (e.g. bun) as
+// `tools sync --all`. Returns "" when no explicit pin is needed.
+func (a *App) ClaimInstallWith(ctx context.Context, configProvider, installedWith string) string {
+	resolved := a.ResolvedEcosystemProviders(ctx)
+	installWith := configInstallWithForConcreteProvider(configProvider, installedWith, resolved)
+	if installWith == "" && installedWith == "" {
+		installWith = configInstallWithForConcreteProvider(configProvider, configProvider, resolved)
+	}
+	return installWith
+}
+
 func (a *App) validateDiscoveredClaim(claim discoveredClaim) error {
 	if claim.configProvider == "" {
 		return fmt.Errorf("provider is required")
@@ -763,7 +776,7 @@ func defaultProviderPriority(settings config.Settings) []string {
 	if len(settings.ProviderPriority) > 0 {
 		return append([]string(nil), settings.ProviderPriority...)
 	}
-	return settings.EcosystemPriority("system")
+	return nil
 }
 
 func disabledProviderSet(groups ...[]string) map[string]bool {
@@ -1473,7 +1486,7 @@ func (a *App) installForAdd(ctx context.Context, opts AddToolOptions) error {
 	}
 	if providerName == "" {
 		settings, _ := a.LoadSettings()
-		resolved, err := a.resolveProvider(ctx, settings.EcosystemPriority("system"))
+		resolved, err := a.resolveProvider(ctx, SystemInstallPriority(settings))
 		if err != nil {
 			return err
 		}
@@ -1611,17 +1624,20 @@ func (a *App) providerSupportsTaps(providerName, installWith string) bool {
 
 // currentHostname returns the machine's hostname for host matching.
 // OMNI_HOSTNAME overrides os.Hostname() — useful for tests and containers.
+// Hostnames are always lower-cased so they compare and key consistently
+// regardless of how the OS or env reports their case.
 func currentHostname() string {
 	if h := strings.TrimSpace(os.Getenv("OMNI_HOSTNAME")); h != "" {
-		return h
+		return strings.ToLower(h)
 	}
 	h, _ := os.Hostname()
-	return strings.TrimSpace(h)
+	return strings.ToLower(strings.TrimSpace(h))
 }
 
-// shortHostname returns the first label of hostname (strips domain suffix).
-// "macbook.corp.local" → "macbook", "macbook" → "macbook".
+// shortHostname returns the first label of hostname (strips domain suffix),
+// lower-cased. "MacBook.corp.local" → "macbook", "macbook" → "macbook".
 func shortHostname(hostname string) string {
+	hostname = strings.ToLower(strings.TrimSpace(hostname))
 	if hostname == "" {
 		return "localhost"
 	}
@@ -1766,4 +1782,34 @@ func lastNonEmptyLine(s string) string {
 		}
 	}
 	return ""
+}
+
+// ResetCache closes the current DB connection, deletes the DB file, and
+// reopens + re-migrates it so the user starts with a clean cache.
+//
+// The entire Close → nil → Open → assign cycle is performed under dbMu write
+// lock so no concurrent goroutine can observe a nil a.db or operate on a
+// partially-reset connection. Callers that read a.db should use a.readDB().
+func (a *App) ResetCache(ctx context.Context) error {
+	a.dbMu.Lock()
+	defer a.dbMu.Unlock()
+
+	if a.db != nil {
+		if err := a.db.Close(); err != nil {
+			return fmt.Errorf("reset cache: close db: %w", err)
+		}
+		a.db = nil
+	}
+	if err := os.Remove(a.DBPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("reset cache: remove db: %w", err)
+	}
+	db, err := database.Open(a.DBPath)
+	if err != nil {
+		return fmt.Errorf("reset cache: open db: %w", err)
+	}
+	if err := db.Migrate(ctx); err != nil {
+		return fmt.Errorf("reset cache: migrate db: %w", err)
+	}
+	a.db = db
+	return nil
 }

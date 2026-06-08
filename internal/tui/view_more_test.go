@@ -1268,7 +1268,7 @@ func TestRenderSettings_DisabledProvider(t *testing.T) {
 func TestRenderSettings_NodeManagerSet(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSettings
-	m.settings.SetEcosystemManager("node", "bun")
+	m.settings.ProviderPriority = append([]string{"bun"}, m.settings.ProviderPriority...)
 	out := renderSettings(m)
 	if !strings.Contains(out, "bun") {
 		t.Errorf("expected 'bun' in settings when node manager=bun, got:\n%s", out)

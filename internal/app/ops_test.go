@@ -2794,7 +2794,7 @@ func TestLoadSettings_MissingConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSettings: %v", err)
 	}
-	if s.EcosystemManager("node") != "" || s.EcosystemManager("python") != "" {
+	if len(s.ProviderPriority) != 0 {
 		t.Errorf("expected zero-value Settings for missing config, got %+v", s)
 	}
 }
@@ -2844,8 +2844,8 @@ func TestSaveSettings_PreservesTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSettings: %v", err)
 	}
-	if s.EcosystemManager("node") != "bun" {
-		t.Errorf("node manager = %q, want bun", s.EcosystemManager("node"))
+	if app.EffectiveEcosystemManager(s, "node") != "bun" {
+		t.Errorf("node manager = %q, want bun", app.EffectiveEcosystemManager(s, "node"))
 	}
 }
 
@@ -2861,8 +2861,8 @@ func TestSaveSettings_CreatesConfigWhenMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSettings: %v", err)
 	}
-	if s.EcosystemManager("python") != "uv" {
-		t.Errorf("python manager = %q, want uv", s.EcosystemManager("python"))
+	if app.EffectiveEcosystemManager(s, "python") != "uv" {
+		t.Errorf("python manager = %q, want uv", app.EffectiveEcosystemManager(s, "python"))
 	}
 }
 
@@ -2912,7 +2912,7 @@ func TestResetSettings_ClearsSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSettings after reset: %v", err)
 	}
-	if s.EcosystemManager("node") != "" || s.EcosystemManager("python") != "" {
+	if len(s.ProviderPriority) != 0 {
 		t.Errorf("settings not cleared: got %+v", s)
 	}
 }
