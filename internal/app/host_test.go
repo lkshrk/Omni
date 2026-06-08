@@ -97,19 +97,19 @@ func TestInitRepairsLegacyCurrentHostGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	group := findHostTestGroup(cfg.Groups, "Topaz")
+	group := findHostTestGroup(cfg.Groups, "topaz")
 	if group == nil || !group.IsHost() {
-		t.Fatalf("Topaz group = %#v, want repaired special host group", group)
+		t.Fatalf("topaz group = %#v, want repaired special host group", group)
 	}
-	if groups, ok := cfg.Hosts["Topaz"]; !ok || len(groups) != 0 {
-		t.Fatalf("hosts[Topaz] = %v, ok=%v, want empty assignment", groups, ok)
+	if groups, ok := cfg.Hosts["topaz"]; !ok || len(groups) != 0 {
+		t.Fatalf("hosts[topaz] = %v, ok=%v, want empty assignment", groups, ok)
 	}
 	info, err := a.HostStatus()
 	if err != nil {
 		t.Fatalf("HostStatus: %v", err)
 	}
-	if info.Active != "Topaz" {
-		t.Fatalf("active host = %q, want Topaz", info.Active)
+	if info.Active != "topaz" {
+		t.Fatalf("active host = %q, want topaz", info.Active)
 	}
 }
 

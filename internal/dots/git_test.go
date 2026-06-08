@@ -92,6 +92,27 @@ func TestGit_CommitAll_WithChanges(t *testing.T) {
 	assertGitArgs(t, mock.Calls[2], "commit", "-m", "dots: add nvim")
 }
 
+// TestGit_SnapshotAll_DisablesSigning guards the fix for internal safety
+// checkpoints aborting when the user has commit.gpgsign enabled without an
+// available signing key: SnapshotAll must pass -c commit.gpgsign=false so the
+// pre-resolve/pre-sync snapshot commits cannot be blocked by signing.
+func TestGit_SnapshotAll_DisablesSigning(t *testing.T) {
+	g, mock := newMockGit(t,
+		executor.MockCall{},               // add -A
+		executor.MockCall{Stdout: " M x"}, // status --porcelain → has changes
+		executor.MockCall{},               // commit
+	)
+	if err := g.SnapshotAll(context.Background(), "dots: pre-resolve nvim"); err != nil {
+		t.Fatalf("SnapshotAll: %v", err)
+	}
+	if len(mock.Calls) != 3 {
+		t.Fatalf("want 3 calls, got %d", len(mock.Calls))
+	}
+	assertGitArgs(t, mock.Calls[0], "add", "-A")
+	assertGitArgs(t, mock.Calls[1], "status", "--porcelain")
+	assertGitArgs(t, mock.Calls[2], "-c", "commit.gpgsign=false", "commit", "-m", "dots: pre-resolve nvim")
+}
+
 func TestGit_CommitAll_NothingToCommit(t *testing.T) {
 	g, mock := newMockGit(t,
 		executor.MockCall{},           // add -A

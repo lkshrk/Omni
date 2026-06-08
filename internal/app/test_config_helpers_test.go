@@ -75,6 +75,8 @@ func testShortHostname() string {
 	if hostname == "" {
 		hostname, _ = os.Hostname()
 	}
+	// Mirror production shortHostname: hostnames are always lower-cased.
+	hostname = strings.ToLower(hostname)
 	if idx := strings.IndexByte(hostname, '.'); idx != -1 {
 		return hostname[:idx]
 	}

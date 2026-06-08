@@ -261,13 +261,13 @@ func truncatedGitStatus(status string, maxLines int) (lines []string, overflow s
 	return
 }
 
-func statusDotSummary(counts app.DotFileCounts, gitStatus string) string {
+// statusDotSummary returns the managed/ignored overview. It deliberately omits
+// repo-dirty state: the row's "dirty" value and the specific "repo dirty: <file>"
+// detail already convey it, so repeating it here just duplicates the word across
+// the row, its Cause line, and the detail.
+func statusDotSummary(counts app.DotFileCounts) string {
 	if counts.Synced > 0 || counts.OutOfSync > 0 || counts.Ignored > 0 {
-		summary := dotRatioText(counts) + " managed" + statusDotIgnoredSuffix(counts)
-		if strings.TrimSpace(gitStatus) != "" {
-			summary += ", repo dirty"
-		}
-		return summary
+		return dotRatioText(counts) + " managed" + statusDotIgnoredSuffix(counts)
 	}
 	return "No dotfile entries loaded."
 }
@@ -410,7 +410,7 @@ func statusDotOverviewSummary(m Model, counts app.DotFileCounts) string {
 	case dotsViewUnconfigured(m):
 		return "Set dots_repo to use dotfiles."
 	default:
-		return statusDotSummary(counts, m.dotsGitStatus)
+		return statusDotSummary(counts)
 	}
 }
 
@@ -437,13 +437,10 @@ func statusDotDetails(m Model, counts app.DotFileCounts) []string {
 			details = append(details, statusDetailLine(m, "queued: "+statusInlineNames(queued, 5)))
 		}
 	}
-	if counts.Synced > 0 || counts.OutOfSync > 0 || counts.Ignored > 0 {
-		details = append(details, statusDetailLine(m, dotRatioText(counts)+" managed"+statusDotIgnoredSuffix(counts)))
-	}
 	if strings.TrimSpace(m.dotsGitStatus) != "" {
 		lines, overflow := truncatedGitStatus(m.dotsGitStatus, 3)
 		if len(lines) > 0 {
-			details = append(details, statusDetailLine(m, "repo dirty: "+lines[0]))
+			details = append(details, statusDetailLine(m, "changed: "+lines[0]))
 			for _, line := range lines[1:] {
 				details = append(details, statusDetailLine(m, line))
 			}
@@ -525,7 +522,7 @@ func statusDotAttentionDetails(m Model, counts app.DotFileCounts) []string {
 	if strings.TrimSpace(m.dotsGitStatus) != "" {
 		lines, overflow := truncatedGitStatus(m.dotsGitStatus, 3)
 		if len(lines) > 0 {
-			details = append(details, statusDetailLine(m, "repo dirty: "+lines[0]))
+			details = append(details, statusDetailLine(m, "changed: "+lines[0]))
 			for _, line := range lines[1:] {
 				details = append(details, statusDetailLine(m, line))
 			}

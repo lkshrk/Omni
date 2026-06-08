@@ -79,6 +79,19 @@ func (m *Model) startDoctorRun(message string) {
 	startOp(m, message)
 }
 
+// refreshDoctorAfterFix re-runs doctor so its cached findings (and the action
+// hints derived from them, e.g. "commit dotfiles") drop once a dashboard fix
+// resolved the underlying issue. The Doctor row reads a doctorResult snapshot,
+// unlike the live Dotfiles row, so without this it keeps showing a stale warn.
+// No-op when doctor has not been run or is already running.
+func (m *Model) refreshDoctorAfterFix(cmds *[]tea.Cmd) {
+	if m.doctorResult == nil || m.doctorRunning {
+		return
+	}
+	m.startDoctorRun("Refreshing doctor…")
+	*cmds = append(*cmds, m.spinner.Tick, m.doRunDoctor())
+}
+
 func (m *Model) startDashboardRefresh(cmds *[]tea.Cmd) {
 	*cmds = append(*cmds, m.refreshInstalledProviders()...)
 	if !m.doctorRunning {
@@ -250,10 +263,12 @@ func (m *Model) finishDashboardReconcile(cmds *[]tea.Cmd) {
 		}
 		m.dashboardReconcileErrors = nil
 		*cmds = append(*cmds, setStatus(m, msg, true))
+		m.refreshDoctorAfterFix(cmds)
 		return
 	}
 	m.dashboardReconcileErrors = nil
 	*cmds = append(*cmds, setStatus(m, "✓ reconciled", false))
+	m.refreshDoctorAfterFix(cmds)
 }
 
 func (m *Model) continueDashboardReconcile(kind dashboardReconcilePlanKind, err error, cmds *[]tea.Cmd) {

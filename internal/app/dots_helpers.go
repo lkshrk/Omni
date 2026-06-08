@@ -14,7 +14,6 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/dots"
 	"github.com/lkshrk/omni/internal/executor"
-	"github.com/lkshrk/omni/internal/provider"
 )
 
 func (a *App) requireStow(ctx context.Context) error {
@@ -44,11 +43,7 @@ func (a *App) InstallDotsStow(ctx context.Context) error {
 		return nil
 	}
 	settings, _ := a.LoadSettings()
-	priority := settings.EcosystemPriority(provider.EcosystemSystem)
-	if len(priority) == 0 {
-		priority = provider.BuiltinSystemProviderPriorityNames()
-	}
-	providerName, err := a.resolveProvider(ctx, priority)
+	providerName, err := a.resolveProvider(ctx, SystemInstallPriority(settings))
 	if err != nil {
 		return fmt.Errorf("install stow: %w", err)
 	}
@@ -370,7 +365,13 @@ func syncResolvedDotEntry(ctx context.Context, repoPath, stowPath string, entry 
 			return []dots.Op{{Kind: dots.OpRepair, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}}, nil
 		}
 		if state == DotStateConflict {
-			switch entry.OnConflict {
+			// Per-entry on_conflict wins; otherwise fall back to a sync-wide
+			// ConflictStrategy (e.g. `dots sync --use-repo`).
+			strategy := entry.OnConflict
+			if strategy == "" {
+				strategy = opts.ConflictStrategy
+			}
+			switch strategy {
 			case "use_repo":
 				if opts.DryRun {
 					return []dots.Op{{Kind: dots.OpDryRepair, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}}, nil
@@ -430,7 +431,7 @@ func syncModifiedDotEntry(ctx context.Context, repoPath, stowPath string, entry 
 	if pathExists(entry.SourcePath) {
 		gt := newGitForRepo(repoPath, executor.New())
 		if gt.IsRepo() {
-			if err := gt.CommitAll(ctx, "dots: pre-sync "+entry.Name); err != nil {
+			if err := gt.SnapshotAll(ctx, "dots: pre-sync "+entry.Name); err != nil {
 				return nil, fmt.Errorf("pre-commit repo state: %w", err)
 			}
 		}

@@ -147,6 +147,10 @@ func (a *App) repairCurrentHostEntry() error {
 		return nil
 	}
 	return a.withConfig(func(cfg *config.RootConfig) error {
+		// Migrate any legacy mixed-case host group/assignment for this machine to
+		// the lower-cased canonical hostname so old configs keep resolving now
+		// that the live hostname is always lower-cased.
+		migrateCurrentHostCase(cfg, hostname)
 		if _, ok := cfg.Hosts[hostname]; ok {
 			return nil
 		}
@@ -166,6 +170,42 @@ func (a *App) repairCurrentHostEntry() error {
 		cfg.Hosts[hostname] = []string{}
 		return nil
 	})
+}
+
+// migrateCurrentHostCase renames a host-special group and host_settings/Hosts
+// assignment whose name matches hostname only by case to the canonical
+// lower-cased hostname. Reusable (non-host) groups keep their original case.
+func migrateCurrentHostCase(cfg *config.RootConfig, hostname string) {
+	if hostname == "" {
+		return
+	}
+	for _, g := range cfg.Groups {
+		if g != nil && g.Name != hostname && strings.EqualFold(g.Name, hostname) {
+			g.Name = hostname
+		}
+	}
+	migrateStringMapKeyCase(&cfg.Hosts, hostname)
+	for existing, value := range cfg.HostSettings {
+		if existing != hostname && strings.EqualFold(existing, hostname) {
+			if cfg.HostSettings == nil {
+				continue
+			}
+			cfg.HostSettings[hostname] = value
+			delete(cfg.HostSettings, existing)
+		}
+	}
+}
+
+func migrateStringMapKeyCase(m *map[string][]string, key string) {
+	if m == nil || *m == nil {
+		return
+	}
+	for existing, value := range *m {
+		if existing != key && strings.EqualFold(existing, key) {
+			(*m)[key] = value
+			delete(*m, existing)
+		}
+	}
 }
 
 // EnsureHost creates the physical special hostname group and a host assignment
