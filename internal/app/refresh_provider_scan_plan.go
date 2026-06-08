@@ -35,7 +35,11 @@ func (a *App) CurrentRefreshProviderScanPlan(ctx context.Context) (RefreshProvid
 	}
 	resolved, _ := a.currentResolvedTools(ctx, cfg)
 	providerToolCounts := a.configuredProviderToolCountsFromResolved(resolved)
-	return newRefreshProviderScanPlan(tools, configuredProvidersFromCounts(providerToolCounts), providerToolCounts, resolvedEcosystems), nil
+	disabled := make(map[string]bool)
+	for _, name := range a.effectiveSettings(cfg).DisabledProviders {
+		disabled[name] = true
+	}
+	return newRefreshProviderScanPlan(tools, configuredProvidersFromCounts(providerToolCounts), providerToolCounts, resolvedEcosystems, disabled), nil
 }
 
 func (p RefreshProviderScanPlan) ProviderNames() []string {
@@ -102,7 +106,7 @@ func RefreshProviderScanProviderNames(counts map[string]int) []string {
 	return names
 }
 
-func newRefreshProviderScanPlan(tools []*database.ToolCache, configuredProviders []string, providerToolCounts map[string]int, resolvedEcosystems map[string]string) RefreshProviderScanPlan {
+func newRefreshProviderScanPlan(tools []*database.ToolCache, configuredProviders []string, providerToolCounts map[string]int, resolvedEcosystems map[string]string, disabled map[string]bool) RefreshProviderScanPlan {
 	configured := make(map[string]bool, len(configuredProviders))
 	for _, name := range configuredProviders {
 		if name = strings.TrimSpace(name); name != "" {
@@ -123,7 +127,7 @@ func newRefreshProviderScanPlan(tools []*database.ToolCache, configuredProviders
 	planned := make(map[string]bool, len(configuredProviders)+len(tools))
 	addProvider := func(providerName string) {
 		providerName = strings.TrimSpace(providerName)
-		if providerName == "" || planned[providerName] || coveredConcrete[providerName] {
+		if providerName == "" || planned[providerName] || coveredConcrete[providerName] || disabled[providerName] {
 			return
 		}
 		planned[providerName] = true

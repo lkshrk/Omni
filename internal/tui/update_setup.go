@@ -543,6 +543,7 @@ func (m *Model) startCurrentProviderScans() []tea.Cmd {
 		return []tea.Cmd{setStatus(m, "✗ "+err.Error(), true)}
 	}
 	m.scanningProviders = plan.ProviderSet()
+	m.refreshScanErrors = nil
 	m.providerScanToolCounts = plan.CountsByProvider()
 	m.providerScanLabels = plan.LabelsByProvider()
 	m.providerScanToolDone = make(map[string]int, len(m.providerScanToolCounts))

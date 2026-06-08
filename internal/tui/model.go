@@ -390,6 +390,7 @@ type Model struct {
 	hostRequired bool
 
 	// provider priority editor (active when editing the Priority row in settings)
+	refreshScanErrors              []string
 	editingPriority                bool
 	priorityHolding                bool
 	priorityCursor                 int

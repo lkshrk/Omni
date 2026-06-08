@@ -125,6 +125,35 @@ func TestCurrentRefreshProviderScanPlan_KeepsConfiguredConcreteProvider(t *testi
 	}
 }
 
+func TestCurrentRefreshProviderScanPlan_SkipsDisabledProvider(t *testing.T) {
+	brew := &stubProvider{name: "brew", available: true}
+	pnpm := &stubProvider{name: "pnpm", available: true}
+	a, cfgPath := newImportApp(t, brew, pnpm)
+	host := testShortHostname()
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("git", "brew"), logicalTool("prettier", "pnpm")),
+		Hosts: map[string][]string{host: {"dev"}},
+		Groups: []*config.GroupConfig{
+			{Name: host, Special: "host"},
+			{Name: "dev", Tools: []config.ToolEntry{{Name: "git"}, {Name: "prettier"}}},
+		},
+		HostSettings: map[string]config.Settings{host: {DisabledProviders: []string{"pnpm"}}},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	plan, err := a.CurrentRefreshProviderScanPlan(context.Background())
+	if err != nil {
+		t.Fatalf("CurrentRefreshProviderScanPlan: %v", err)
+	}
+	if plan.ProviderSet()["pnpm"] {
+		t.Fatalf("plan = %#v, want pnpm excluded (disabled)", plan.Steps)
+	}
+	if !plan.ProviderSet()["brew"] {
+		t.Fatalf("plan = %#v, want brew present", plan.Steps)
+	}
+}
+
 func TestCurrentRefreshProviderScanPlanReadsCurrentAppState(t *testing.T) {
 	brew := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, brew)
