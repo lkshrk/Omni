@@ -2460,6 +2460,91 @@ func TestModel_PriorityEditor_SavedOrderRoundTrips(t *testing.T) {
 	}
 }
 
+// ─── Priority editor — space-toggle and rendering ────────────────────────────
+
+func TestModel_PriorityEditor_SpaceToggleDisables(t *testing.T) {
+	// Open editor (default draft starts with "brew" at index 0), press space
+	// to disable brew, then Enter to confirm.
+	msgs := append(goToPriorityRow(), pressEnter(), pressRune(' '), pressEnter())
+	m := drive(baseModel(nil), msgs...)
+	if m.editingPriority {
+		t.Fatal("editingPriority should be false after enter")
+	}
+	if !slices.Contains(m.settings.DisabledProviders, "brew") {
+		t.Errorf("DisabledProviders = %v, want 'brew' after space-toggle + confirm", m.settings.DisabledProviders)
+	}
+}
+
+func TestModel_PriorityEditor_SpaceToggleTwiceReenables(t *testing.T) {
+	// Toggle off then on — provider must NOT be in DisabledProviders after confirm.
+	msgs := append(goToPriorityRow(), pressEnter(), pressRune(' '), pressRune(' '), pressEnter())
+	m := drive(baseModel(nil), msgs...)
+	if m.editingPriority {
+		t.Fatal("editingPriority should be false after enter")
+	}
+	if slices.Contains(m.settings.DisabledProviders, "brew") {
+		t.Errorf("DisabledProviders = %v, brew should not be disabled after double-toggle", m.settings.DisabledProviders)
+	}
+}
+
+func TestModel_PriorityEditor_RenderUnavailable(t *testing.T) {
+	// Open the editor, then inject a small priorityAvailable map so that only
+	// "brew" is available; all other draft items should render with "(n/a)".
+	msgs := append(goToPriorityRow(), pressEnter())
+	m := drive(baseModel(nil), msgs...)
+	if !m.editingPriority {
+		t.Fatal("editingPriority should be true")
+	}
+	m.priorityAvailable = map[string]bool{"brew": true}
+	m.mode = viewSettings
+	m.width = 120
+	m.height = 50
+	out := stripANSIEscapeSequences(renderSettings(m))
+	if !strings.Contains(out, "(n/a)") {
+		t.Fatalf("expected '(n/a)' for unavailable providers, got:\n%s", out)
+	}
+	// Count occurrences: brew is available so must not get (n/a);
+	// every other draft item (10 of them) should.
+	lines := strings.Split(out, "\n")
+	brewHasNA := false
+	for _, l := range lines {
+		if strings.Contains(l, "brew") && strings.Contains(l, "(n/a)") {
+			brewHasNA = true
+		}
+	}
+	if brewHasNA {
+		t.Errorf("'brew' (available) should not have '(n/a)' suffix:\n%s", out)
+	}
+}
+
+func TestModel_PriorityEditor_RenderDisabled(t *testing.T) {
+	// Open the editor, inject priorityDisabled so "brew" is marked off,
+	// then render and verify "(off)" appears on the brew line.
+	msgs := append(goToPriorityRow(), pressEnter())
+	m := drive(baseModel(nil), msgs...)
+	if !m.editingPriority {
+		t.Fatal("editingPriority should be true")
+	}
+	m.priorityDisabled = map[string]bool{"brew": true}
+	m.mode = viewSettings
+	m.width = 120
+	m.height = 50
+	out := stripANSIEscapeSequences(renderSettings(m))
+	if !strings.Contains(out, "(off)") {
+		t.Fatalf("expected '(off)' for disabled provider, got:\n%s", out)
+	}
+	lines := strings.Split(out, "\n")
+	brewHasOff := false
+	for _, l := range lines {
+		if strings.Contains(l, "brew") && strings.Contains(l, "(off)") {
+			brewHasOff = true
+		}
+	}
+	if !brewHasOff {
+		t.Errorf("'brew' (disabled) should have '(off)' suffix:\n%s", out)
+	}
+}
+
 // ─── Delete / Upgrade / UpgradeAll key handlers ──────────────────────────────
 
 func TestModel_KeyD_DeleteRequiresConfirmation(t *testing.T) {

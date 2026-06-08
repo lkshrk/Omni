@@ -349,6 +349,60 @@ func TestApplySettingsChange_SetProviderPriority_DerivesManagerSkippingDisabled(
 	}
 }
 
+func TestApplySettingsChange_SetProviderLayout_SetsOrderAndDisabled(t *testing.T) {
+	a, _ := newImportApp(t)
+
+	got, _, err := a.ApplySettingsChange(context.Background(), config.Settings{}, app.SetProviderLayout(
+		[]string{"pnpm", "bun", "npm", "uv", "pip", "brew"},
+		[]string{"bun", "bogus", "uv"},
+	))
+	if err != nil {
+		t.Fatalf("SetProviderLayout: %v", err)
+	}
+	if want := "pnpm,bun,npm,uv,pip,brew"; strings.Join(got.ProviderPriority, ",") != want {
+		t.Errorf("provider_priority = %v, want %s", got.ProviderPriority, want)
+	}
+	// "bogus" filtered out; valid concretes kept in order.
+	if want := "bun,uv"; strings.Join(got.DisabledProviders, ",") != want {
+		t.Errorf("disabled = %v, want %s", got.DisabledProviders, want)
+	}
+	// pnpm leads node order and is enabled → node manager pnpm; uv disabled → python pip3.
+	if m := got.EcosystemManager(provider.EcosystemNode); m != "pnpm" {
+		t.Errorf("node manager = %q, want pnpm", m)
+	}
+	if m := got.EcosystemManager(provider.EcosystemPython); m != "pip3" {
+		t.Errorf("python manager = %q, want pip3", m)
+	}
+}
+
+func TestConcreteProviderPriorityDraft_SeedsThenAppendsAll(t *testing.T) {
+	a, _ := newImportApp(t)
+	draft := a.ConcreteProviderPriorityDraft([]string{"uv", "brew"})
+	if len(draft) < 2 || draft[0] != "uv" || draft[1] != "brew" {
+		t.Fatalf("draft = %v, want leading [uv brew]", draft)
+	}
+	if !slices.Contains(draft, "bun") || !slices.Contains(draft, "pip") {
+		t.Errorf("draft = %v, want all concretes appended", draft)
+	}
+}
+
+func TestDefaultConcreteProviderPriorityDraft_NoApp(t *testing.T) {
+	draft := app.DefaultConcreteProviderPriorityDraft(nil)
+	want := []string{"brew", "apt", "apk", "dnf", "pacman", "zypper", "bun", "pnpm", "npm", "uv", "pip"}
+	if strings.Join(draft, ",") != strings.Join(want, ",") {
+		t.Fatalf("draft = %v, want %v", draft, want)
+	}
+}
+
+func TestAvailableConcreteProviderSet(t *testing.T) {
+	brew := &stubProvider{name: "brew", available: true}
+	a, _ := newImportApp(t, brew)
+	set := a.AvailableConcreteProviderSet(context.Background())
+	if !set["brew"] {
+		t.Errorf("available set = %v, want brew present", set)
+	}
+}
+
 func TestApplySettingsChange_ToggleConcreteProvider(t *testing.T) {
 	a, _ := newImportApp(t)
 
