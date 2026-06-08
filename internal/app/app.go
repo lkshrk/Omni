@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -731,7 +732,6 @@ func (a *App) HostGroups(ctx context.Context, hostname string) ([]*config.GroupC
 type brewTapManager interface {
 	ListTaps(ctx context.Context) ([]string, error)
 	Tap(ctx context.Context, name string) error
-	ListTrusted(ctx context.Context) ([]string, error)
 	Trust(ctx context.Context, name string) error
 }
 
@@ -760,13 +760,12 @@ func (a *App) syncTaps(ctx context.Context, taps []string, dryRun bool) error {
 	if dryRun {
 		return nil
 	}
-	// Trust is idempotent but each call spawns brew; only trust taps not already
-	// trusted so steady-state syncs make no trust mutations. nil (older Homebrew
-	// without tap-trust) leaves the set empty and Trust is a no-op anyway.
-	trusted := make(map[string]struct{})
-	if list, err := bm.ListTrusted(ctx); err == nil {
-		for _, t := range list {
-			trusted[t] = struct{}{}
+	// Each `brew trust` spawns a subprocess; once a tap is trusted we record it in
+	// the DB so subsequent syncs skip the call entirely (no brew invocation).
+	trusted := map[string]bool{}
+	if db := a.readDB(); db != nil {
+		if t, err := db.TrustedTaps(ctx); err == nil {
+			trusted = t
 		}
 	}
 	for _, tap := range taps {
@@ -775,13 +774,18 @@ func (a *App) syncTaps(ctx context.Context, taps []string, dryRun bool) error {
 				return fmt.Errorf("tapping %s: %w", tap, err)
 			}
 		}
-		if _, ok := trusted[tap]; ok {
+		if trusted[tap] {
 			continue
 		}
 		// A tap in config is one the user opted into; trust it so short-name
 		// installs/outdated keep working once Homebrew enforces tap-trust.
 		if err := bm.Trust(ctx, tap); err != nil {
 			return fmt.Errorf("trusting tap %s: %w", tap, err)
+		}
+		if db := a.readDB(); db != nil {
+			if err := db.MarkTapTrusted(ctx, tap, time.Now()); err != nil {
+				return fmt.Errorf("recording trusted tap %s: %w", tap, err)
+			}
 		}
 	}
 	return nil

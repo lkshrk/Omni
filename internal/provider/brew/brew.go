@@ -623,28 +623,6 @@ func (p *Provider) ListTaps(ctx context.Context) ([]string, error) {
 	return taps, nil
 }
 
-// ListTrusted returns the taps/items Homebrew currently trusts (`brew trust`
-// with no args). On older Homebrew without the subcommand it returns nil so the
-// caller can skip trust management entirely.
-func (p *Provider) ListTrusted(ctx context.Context) ([]string, error) {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	stdout, stderr, err := p.exec.Run(ctx, "brew", "trust")
-	if err != nil {
-		if brewSubcommandUnsupported(stderr) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("brew trust: %w\n%s", err, strings.TrimSpace(stderr))
-	}
-	var trusted []string
-	for _, line := range strings.Split(stdout, "\n") {
-		if t := strings.TrimSpace(line); t != "" {
-			trusted = append(trusted, t)
-		}
-	}
-	return trusted, nil
-}
-
 func (p *Provider) IsTapped(ctx context.Context, name string) (bool, error) {
 	taps, err := p.ListTaps(ctx)
 	if err != nil {

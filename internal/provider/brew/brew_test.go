@@ -376,25 +376,6 @@ func TestTrust_Success(t *testing.T) {
 	}
 }
 
-func TestListTrusted_ParsesTaps(t *testing.T) {
-	p, _ := newBrew(executor.MockCall{Stdout: "hashicorp/tap\nkoekeishiya/formulae\n"})
-	got, err := p.ListTrusted(context.Background())
-	if err != nil {
-		t.Fatalf("ListTrusted: %v", err)
-	}
-	if len(got) != 2 || got[0] != "hashicorp/tap" || got[1] != "koekeishiya/formulae" {
-		t.Errorf("ListTrusted = %v, want [hashicorp/tap koekeishiya/formulae]", got)
-	}
-}
-
-func TestListTrusted_UnsupportedSubcommandReturnsNil(t *testing.T) {
-	p, _ := newBrew(executor.MockCall{Err: errors.New("exit 1"), Stderr: "Error: Unknown command: trust"})
-	got, err := p.ListTrusted(context.Background())
-	if err != nil || got != nil {
-		t.Fatalf("ListTrusted on old brew = (%v, %v), want (nil, nil)", got, err)
-	}
-}
-
 func TestTrust_UnsupportedSubcommandIsNoOp(t *testing.T) {
 	p, _ := newBrew(executor.MockCall{Err: errors.New("exit 1"), Stderr: "Error: Unknown command: trust"})
 	if err := p.Trust(context.Background(), "hashicorp/tap"); err != nil {
