@@ -21,9 +21,11 @@ type searchStub struct {
 	stubProvider
 	results []provider.SearchResult
 	err     error
+	calls   int
 }
 
 func (s *searchStub) Search(_ context.Context, _ string) ([]provider.SearchResult, error) {
+	s.calls++
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -1533,6 +1535,39 @@ func TestProviderMatches_SortsHighConfidenceByProviderPriority(t *testing.T) {
 	}
 	if matches[1].Provider != "brew" || matches[1].Confidence != app.ProviderMatchHigh {
 		t.Fatalf("second match = %+v, want high-confidence brew", matches[1])
+	}
+}
+
+func TestSync_CachesProviderSearchMiss(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	// brew search never matches "ghost" → discovery finds no high-confidence
+	// provider, which should be cached so a second sync skips the registry search.
+	brew := &searchStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		results:      []provider.SearchResult{{Name: "prettier", Provider: "brew"}},
+	}
+	a, cfgPath := newImportApp(t, brew)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{"ghost": {}},
+		Groups: []*config.GroupConfig{
+			{Name: "testhost", Special: "host", Tools: []config.ToolEntry{{Name: "ghost"}}},
+		},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if _, err := a.Sync(context.Background(), syncprogress.SyncOptions{}); err != nil {
+		t.Fatalf("first Sync: %v", err)
+	}
+	afterFirst := brew.calls
+	if afterFirst == 0 {
+		t.Fatalf("expected the first sync to search for ghost")
+	}
+	if _, err := a.Sync(context.Background(), syncprogress.SyncOptions{}); err != nil {
+		t.Fatalf("second Sync: %v", err)
+	}
+	if brew.calls != afterFirst {
+		t.Fatalf("second sync searched again (%d → %d); want cached miss to skip re-search", afterFirst, brew.calls)
 	}
 }
 

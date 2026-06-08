@@ -184,17 +184,28 @@ func (a *App) addMissingProviderMatchesForGroups(ctx context.Context, cfg *confi
 			if !ok || len(spec.Providers) > 0 || spec.Fallback != nil {
 				continue
 			}
+			// Skip re-searching registries for a tool whose discovery recently
+			// found no usable match (within the TTL).
+			if a.recentProviderSearchMiss(ctx, name) {
+				continue
+			}
 			result, err := a.AddProviderMatches(ctx, name, providerFilter, ProviderMatchOptions{AllowWeak: allowWeak})
 			if err != nil {
+				if errors.Is(err, ErrProviderDiscoveryNoHighConfidence) {
+					a.recordProviderSearchMiss(ctx, name)
+					continue
+				}
 				if errors.Is(err, ErrProviderDiscoveryNotConfigured) ||
-					errors.Is(err, ErrProviderDiscoveryAlreadyConfigured) ||
-					errors.Is(err, ErrProviderDiscoveryNoHighConfidence) {
+					errors.Is(err, ErrProviderDiscoveryAlreadyConfigured) {
 					continue
 				}
 				return err
 			}
-			if progress != nil && len(result.Added) > 0 {
-				progress(providerMatchProgressText(name, result.Added))
+			if len(result.Added) > 0 {
+				a.clearProviderSearchMiss(ctx, name)
+				if progress != nil {
+					progress(providerMatchProgressText(name, result.Added))
+				}
 			}
 		}
 	}

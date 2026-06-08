@@ -2002,6 +2002,59 @@ func sortByProviderRank(provs []config.ToolInstallSpec, rank map[string]int) {
 	})
 }
 
+// providerSearchMissTTL bounds how long a "no high-confidence provider match"
+// result is cached, so sync skips re-searching registries for the same
+// unresolved tool until the window expires.
+const providerSearchMissTTL = 6 * time.Hour
+
+// recentProviderSearchMiss reports whether a recent discovery search for
+// logicalName found no usable match. Cached as a package_availability row with an
+// empty provider (the "search" sentinel).
+func (a *App) recentProviderSearchMiss(ctx context.Context, name string) bool {
+	db := a.readDB()
+	if db == nil {
+		return false
+	}
+	cached, err := db.GetPackageAvailability(ctx, name, "", name)
+	if err != nil || cached == nil || cached.Available {
+		return false
+	}
+	return time.Since(cached.CheckedAt) < providerSearchMissTTL
+}
+
+func (a *App) recordProviderSearchMiss(ctx context.Context, name string) {
+	db := a.readDB()
+	if db == nil {
+		return
+	}
+	if err := db.UpsertPackageAvailability(ctx, database.PackageAvailability{
+		Name:      name,
+		Provider:  "",
+		Package:   name,
+		Available: false,
+		Reason:    "no high-confidence provider match",
+		CheckedAt: time.Now().UTC(),
+	}); err != nil {
+		return // best-effort cache; a failed write just re-searches next sync
+	}
+}
+
+func (a *App) clearProviderSearchMiss(ctx context.Context, name string) {
+	db := a.readDB()
+	if db == nil {
+		return
+	}
+	if err := db.UpsertPackageAvailability(ctx, database.PackageAvailability{
+		Name:      name,
+		Provider:  "",
+		Package:   name,
+		Available: true,
+		CheckedAt: time.Now().UTC(),
+	}); err != nil {
+		return // best-effort
+	}
+}
+
 func (a *App) ProviderMatches(ctx context.Context, logicalName string, spec config.ToolSpec, providerFilter string) ([]ProviderMatch, error) {
 	results, err := a.Search(ctx, logicalName, providerFilter)
 	settings, settingsErr := a.LoadSettings()
