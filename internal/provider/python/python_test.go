@@ -906,6 +906,27 @@ func TestInstalledByManager_EffectivePriority(t *testing.T) {
 	}
 }
 
+func TestInstalledByManager_FillInBackendFailureTolerated(t *testing.T) {
+	// uv is effective and works; pip3 is available but its list fails. A broken
+	// fill-in backend must not abort detection for the effective backend.
+	uvList := "flux-local v1.0.0\n  - flux-local\n"
+	m := executor.NewMatchMock(
+		uvOK(),
+		executor.MatchRule{Pattern: "uv tool list", Response: executor.MockCall{Stdout: uvList}},
+		pip3OK(),
+		executor.MatchRule{Pattern: "pip3 list --not-required --format=json", Response: executor.MockCall{Err: errors.New("pip failed")}},
+		executor.MatchRule{Pattern: "pip --version", Response: executor.MockCall{Err: errors.New("not found")}},
+	)
+	p := New(m, "uv")
+	got, err := p.InstalledByManager(context.Background())
+	if err != nil {
+		t.Fatalf("InstalledByManager: %v", err)
+	}
+	if e := got["flux-local"]; e.ConcreteManager != "uv" {
+		t.Errorf("flux-local.ConcreteManager = %q, want uv (effective survives broken fill-in)", e.ConcreteManager)
+	}
+}
+
 func TestInstalledByManager_ReturnsUVListError(t *testing.T) {
 	m := executor.NewMatchMock(
 		uvOK(),
