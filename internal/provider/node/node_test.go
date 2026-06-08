@@ -640,6 +640,8 @@ func TestOutdatedMap_BunNonJSONFailureReturnsCommandError(t *testing.T) {
 	m := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "bun --version", Response: executor.MockCall{Stdout: "1.3.8"}},
 		executor.MatchRule{Pattern: "bun outdated -g --json", Response: executor.MockCall{Stdout: out, Err: errors.New("exit 1")}},
+		executor.MatchRule{Pattern: "pnpm --version", Response: executor.MockCall{Err: errors.New("not found")}},
+		executor.MatchRule{Pattern: "npm --version", Response: executor.MockCall{Err: errors.New("not found")}},
 	)
 	p := node.New(m, "bun")
 	_, err := p.OutdatedMap(context.Background())
@@ -711,6 +713,27 @@ func TestOutdatedMap_EmptyFailureReturnsError(t *testing.T) {
 	p := node.New(m, "")
 	if _, err := p.OutdatedMap(context.Background()); err == nil {
 		t.Fatal("OutdatedMap error = nil, want error for failed empty outdated output")
+	}
+}
+
+func TestOutdatedMap_BrokenFillInManagerTolerated(t *testing.T) {
+	// bun is effective and reports nothing outdated (success); pnpm is available
+	// but `pnpm outdated` exits 1 (global bin dir not in PATH). A broken fill-in
+	// manager must not fail the whole outdated check.
+	m := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "bun --version", Response: executor.MockCall{Stdout: "1.1.0"}},
+		executor.MatchRule{Pattern: "bun outdated -g --json", Response: executor.MockCall{Stdout: "{}"}},
+		executor.MatchRule{Pattern: "pnpm --version", Response: executor.MockCall{Stdout: "10.0.0"}},
+		executor.MatchRule{Pattern: "pnpm outdated -g --json", Response: executor.MockCall{Err: errors.New("exit status 1"), Stderr: "global bin dir not in PATH"}},
+		executor.MatchRule{Pattern: "npm --version", Response: executor.MockCall{Err: errors.New("not found")}},
+	)
+	p := node.New(m, "bun")
+	got, err := p.OutdatedMap(context.Background())
+	if err != nil {
+		t.Fatalf("OutdatedMap error = %v, want nil (broken pnpm tolerated)", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("OutdatedMap = %v, want empty", got)
 	}
 }
 
