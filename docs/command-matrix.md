@@ -84,7 +84,7 @@ Bootstrap flags:
 | `omni tools upgrade --all` | yes | Packages, cache | `omni tools list`; `--force` bypasses update quarantine |
 | `omni tools delete <tool>` | yes | Config, packages, cache | `omni tools list <tool>` |
 | `omni tools import` | yes | Config | `--dry-run` |
-| `omni tools switch <tool>` | yes | Config, packages, cache | `omni tools list <tool>` |
+| `omni tools reinstall <tool>` | yes | Config, packages, cache | `omni tools list <tool>` |
 | `omni tools consolidate <ecosystem> <manager>` | yes | Config, packages, cache | `--dry-run` |
 | `omni tools ignore <name>` | yes | Config | `omni tools list <name>` |
 | `omni tools unignore <name>` | yes | Config | `omni tools list <name>` |
@@ -99,12 +99,12 @@ Important flags:
 | `--group` | `install`, `sync`, `import`, `list`, `add` | Target, filter, or assign a reusable group explicitly. |
 | `--force` | `install` | Skip bootstrap and host assignment checks for an explicit install path. |
 | `--allow-weak` | `install`, `sync` | Permit the best weak provider discovery match when no high-confidence match exists. |
-| `--provider` | `add`, `set`, `install`, `list`, `search`, `sync`, `switch --reinstall-default` | Scope command behavior to one provider where supported. |
+| `--provider` | `add`, `set`, `install`, `list`, `search`, `sync`, `reinstall --reinstall-default` | Scope command behavior to one provider where supported. |
 | `--from-github` | `fallback` | Resolve and save a GitHub fallback recipe from `owner/repo`. Optional when the tool config has a GitHub `git` URL. |
 | `--install-with` | `add`, `set` | Pin one logical tool to a concrete manager. |
 | `--host` | `set` | Boolean flag; write a host-specific tool override for the current host. |
-| `--from`, `--to` | `switch` | Move one tool between concrete managers or providers. |
-| `--reinstall-default` | `switch` | Reinstall a tool with its configured default provider. Cannot be combined with `--from`/`--to`. |
+| `--from`, `--to` | `reinstall` | Move one tool between concrete managers or providers. |
+| `--reinstall-default` | `reinstall` | Reinstall a tool with its configured default provider. Cannot be combined with `--from`/`--to`. |
 
 ## Dotfile Commands
 

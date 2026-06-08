@@ -22,10 +22,10 @@ between providers: installs via the new provider, removes the old installation
 reinstalls using the tool's configured default provider.
 
 Examples:
-  omni reinstall black --from brew --to pip
-  omni reinstall prettier --from brew --to npm
-  omni reinstall ripgrep --from brew --to npm
-  omni reinstall black --reinstall-default    # ` + actions.MustLongDescription(actions.ToolReinstallDefault) + ``,
+  omni tools reinstall black --from brew --to pip
+  omni tools reinstall prettier --from brew --to npm
+  omni tools reinstall ripgrep --from brew --to npm
+  omni tools reinstall black --reinstall-default    # ` + actions.MustLongDescription(actions.ToolReinstallDefault) + ``,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]

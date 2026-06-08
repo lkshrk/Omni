@@ -202,11 +202,11 @@ Use `reinstall with default` behavior when a logical tool is installed through a
 different provider than the configured default:
 
 ```sh
-omni tools switch ripgrep --reinstall-default
-omni tools switch black --from brew --to pip
+omni tools reinstall ripgrep --reinstall-default
+omni tools reinstall black --from brew --to pip
 ```
 
-Use `switch` with `--from` and `--to` for a targeted provider change, or
+Use `reinstall` with `--from` and `--to` for a targeted provider change, or
 `--reinstall-default` when the configured default is already correct.
 
 ## Ignore Tools
