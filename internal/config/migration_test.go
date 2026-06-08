@@ -63,6 +63,86 @@ func TestMigrateRawVersion_UsesRegisteredMigrationChain(t *testing.T) {
 	}
 }
 
+func TestMigrateV8ToV9_ExpandsFamilyDisabledProviders(t *testing.T) {
+	cfg := &RootConfig{
+		Version:  8,
+		Settings: Settings{DisabledProviders: []string{"node", "brew"}},
+		HostSettings: map[string]Settings{
+			"laptop": {DisabledProviders: []string{"python"}},
+		},
+	}
+	if _, err := Migrate(cfg); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	if cfg.Version != CurrentVersion {
+		t.Fatalf("version = %d, want %d", cfg.Version, CurrentVersion)
+	}
+	wantGlobal := []string{"bun", "pnpm", "npm", "brew"}
+	if got := cfg.Settings.DisabledProviders; !equalStrings(got, wantGlobal) {
+		t.Errorf("global disabled = %v, want %v", got, wantGlobal)
+	}
+	wantHost := []string{"uv", "pip"}
+	if got := cfg.HostSettings["laptop"].DisabledProviders; !equalStrings(got, wantHost) {
+		t.Errorf("host disabled = %v, want %v", got, wantHost)
+	}
+}
+
+func TestMigrateV8ToV9_Idempotent(t *testing.T) {
+	in := []string{"bun", "pnpm", "npm", "brew"}
+	if got := expandFamilyDisabledProviders(in); !equalStrings(got, in) {
+		t.Errorf("expand(concrete) = %v, want unchanged %v", got, in)
+	}
+}
+
+func TestMigrateRawV8ToV9_ExpandsFamilyDisabledProviders(t *testing.T) {
+	raw := map[string]json.RawMessage{
+		"version":       json.RawMessage(`8`),
+		"settings":      json.RawMessage(`{"disabled_providers":["node"],"auto_import":true}`),
+		"host_settings": json.RawMessage(`{"laptop":{"disabled_providers":["system"]}}`),
+	}
+	if err := migrateRawConfigV8ToV9(raw); err != nil {
+		t.Fatalf("migrateRawConfigV8ToV9: %v", err)
+	}
+	var settings map[string]json.RawMessage
+	if err := json.Unmarshal(raw["settings"], &settings); err != nil {
+		t.Fatalf("parse settings: %v", err)
+	}
+	// Unknown/sibling keys preserved.
+	if string(settings["auto_import"]) != "true" {
+		t.Errorf("auto_import = %s, want true (sibling key preserved)", settings["auto_import"])
+	}
+	var dp []string
+	if err := json.Unmarshal(settings["disabled_providers"], &dp); err != nil {
+		t.Fatalf("parse disabled_providers: %v", err)
+	}
+	if want := []string{"bun", "pnpm", "npm"}; !equalStrings(dp, want) {
+		t.Errorf("settings disabled = %v, want %v", dp, want)
+	}
+	var hosts map[string]map[string]json.RawMessage
+	if err := json.Unmarshal(raw["host_settings"], &hosts); err != nil {
+		t.Fatalf("parse host_settings: %v", err)
+	}
+	var hostDP []string
+	if err := json.Unmarshal(hosts["laptop"]["disabled_providers"], &hostDP); err != nil {
+		t.Fatalf("parse host disabled: %v", err)
+	}
+	if want := []string{"brew", "apt", "apk", "dnf", "pacman", "zypper"}; !equalStrings(hostDP, want) {
+		t.Errorf("host disabled = %v, want %v", hostDP, want)
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestMigrateV5ToV6_ConvertsToolsToProviderLists(t *testing.T) {
 	cfg := &RootConfig{
 		Version: 5,
