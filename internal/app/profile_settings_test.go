@@ -122,7 +122,8 @@ func groupNamesForTest(groups []*config.GroupConfig) []string {
 func TestSaveDisabledProviders_PersistsList(t *testing.T) {
 	a, cfgPath := newImportApp(t)
 
-	want := []string{"system", "node"}
+	// Concrete names persist as-is.
+	want := []string{"brew", "npm"}
 	if err := a.SaveDisabledProviders(context.Background(), want); err != nil {
 		t.Fatalf("SaveDisabledProviders: %v", err)
 	}
@@ -962,8 +963,9 @@ func TestSaveDisabledProviders_SecondCallOverwrites(t *testing.T) {
 	hostname, _ := os.Hostname()
 	short := shortHostnameForTest(hostname)
 	got := cfg.HostSettings[short].DisabledProviders
-	if len(got) != 1 || got[0] != "python" {
-		t.Errorf("DisabledProviders = %v after second call, want [python]", got)
+	// python family is expanded to its concrete members on write.
+	if want := "uv,pip"; strings.Join(got, ",") != want {
+		t.Errorf("DisabledProviders = %v after second call, want [uv pip]", got)
 	}
 }
 
@@ -1001,25 +1003,29 @@ func TestSaveDisabledProviders_EmptyList(t *testing.T) {
 	}
 }
 
-func TestSaveDisabledProviders_RejectsNonEcosystemProvider(t *testing.T) {
+func TestSaveDisabledProviders_ExpandsFamilyAndAcceptsConcrete(t *testing.T) {
 	a, cfgPath := newImportApp(t)
+	// A family name is expanded to its concrete members.
 	if err := a.SaveDisabledProviders(context.Background(), []string{provider.EcosystemNode}); err != nil {
 		t.Fatalf("SaveDisabledProviders(node): %v", err)
 	}
-
-	err := a.SaveDisabledProviders(context.Background(), []string{"brew"})
-	if err == nil {
-		t.Fatal("SaveDisabledProviders(brew) succeeded, want validation error")
-	}
-
-	cfg, loadErr := config.Load(cfgPath)
-	if loadErr != nil {
-		t.Fatalf("config.Load: %v", loadErr)
-	}
 	hostname, _ := os.Hostname()
 	short := shortHostnameForTest(hostname)
-	if got := cfg.HostSettings[short].DisabledProviders; len(got) != 1 || got[0] != provider.EcosystemNode {
-		t.Fatalf("disabled providers = %v after invalid save, want [node]", got)
+	cfg, _ := config.Load(cfgPath)
+	if got := cfg.HostSettings[short].DisabledProviders; strings.Join(got, ",") != "bun,pnpm,npm" {
+		t.Fatalf("disabled = %v, want [bun pnpm npm]", got)
+	}
+	// A concrete provider is accepted directly.
+	if err := a.SaveDisabledProviders(context.Background(), []string{"brew"}); err != nil {
+		t.Fatalf("SaveDisabledProviders(brew): %v", err)
+	}
+	cfg, _ = config.Load(cfgPath)
+	if got := cfg.HostSettings[short].DisabledProviders; len(got) != 1 || got[0] != "brew" {
+		t.Fatalf("disabled = %v, want [brew]", got)
+	}
+	// An unknown name is rejected.
+	if err := a.SaveDisabledProviders(context.Background(), []string{"bogus-pm"}); err == nil {
+		t.Fatal("SaveDisabledProviders(bogus-pm) succeeded, want validation error")
 	}
 }
 

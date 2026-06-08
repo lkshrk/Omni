@@ -172,8 +172,9 @@ func TestSetupImportSavesDisabledProvidersAndReturnsHostInfo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	if got := cfg.HostSettings["setupbox"].DisabledProviders; !slices.Equal(got, []string{"node"}) {
-		t.Fatalf("disabled providers = %v, want [node]", got)
+	// The node family disable is stored as its concrete members.
+	if got := cfg.HostSettings["setupbox"].DisabledProviders; !slices.Equal(got, []string{"bun", "pnpm", "npm"}) {
+		t.Fatalf("disabled providers = %v, want [bun pnpm npm]", got)
 	}
 	hostGroup := findAppTestGroup(cfg, "setupbox")
 	if hostGroup == nil || !hostGroup.IsHost() || !testGroupHasTool(hostGroup, "ripgrep") {

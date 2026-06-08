@@ -645,13 +645,6 @@ func (a *App) parseSystemPriority(value string) ([]string, error) {
 	return priority, nil
 }
 
-func (a *App) validateEcosystemProvider(name string) error {
-	if a.IsEcosystemProvider(name) {
-		return nil
-	}
-	return fmt.Errorf("%q is not a provider family (supported: %s)", name, strings.Join(a.EcosystemProviderNames(), ", "))
-}
-
 // filterDisablableProviders keeps only valid (concrete or family) provider
 // names, de-duplicated, preserving order.
 func (a *App) filterDisablableProviders(names []string) []string {
@@ -1068,19 +1061,50 @@ func (a *App) SaveSettings(_ context.Context, s config.Settings) error {
 	})
 }
 
-// SaveDisabledProviders sets which provider families are disabled on this machine.
-// Persisted to host_settings[shortHostname].disabled_providers.
-// All other host settings and global settings are preserved.
+// SaveDisabledProviders sets which providers are disabled on this machine,
+// persisted to host_settings[shortHostname].disabled_providers as CONCRETE
+// provider names. Family names (system/node/python) passed by legacy callers
+// (e.g. the bootstrap provider step) are expanded to their concrete members so
+// the stored list always matches the concrete provider-priority model.
 func (a *App) SaveDisabledProviders(_ context.Context, disabled []string) error {
-	for _, name := range disabled {
-		if err := a.validateEcosystemProvider(name); err != nil {
+	concrete := expandToConcreteProviders(disabled)
+	for _, name := range concrete {
+		if err := a.validateDisablableProvider(name); err != nil {
 			return err
 		}
 	}
 	return a.patchCurrentHostSettings(func(hs *config.Settings) error {
-		hs.DisabledProviders = append([]string{}, disabled...)
+		hs.DisabledProviders = concrete
 		return nil
 	})
+}
+
+// expandToConcreteProviders converts any ecosystem family name to its concrete
+// members, passing concrete names through unchanged (de-duplicated, order
+// preserved).
+func expandToConcreteProviders(names []string) []string {
+	out := make([]string, 0, len(names))
+	seen := make(map[string]struct{}, len(names))
+	add := func(n string) {
+		if n == "" {
+			return
+		}
+		if _, ok := seen[n]; ok {
+			return
+		}
+		seen[n] = struct{}{}
+		out = append(out, n)
+	}
+	for _, name := range names {
+		if provider.BuiltinIsEcosystem(name) {
+			for _, c := range provider.BuiltinConcreteProvidersForEcosystem(name) {
+				add(c)
+			}
+			continue
+		}
+		add(name)
+	}
+	return out
 }
 
 // SaveDotsDisabled sets the per-machine dots_disabled flag in host_settings.

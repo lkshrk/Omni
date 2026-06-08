@@ -69,7 +69,7 @@ func (p *Provider) ErrorSolutions(code provider.ErrorCode, tool provider.Tool) [
 	}
 	command := ""
 	if tool.Name != "" {
-		command = fmt.Sprintf("omni switch %s --from %s --to uv", tool.Name, fromProvider)
+		command = fmt.Sprintf("omni reinstall %s --from %s --to uv", tool.Name, fromProvider)
 	}
 	return []provider.ErrorSolution{
 		{
