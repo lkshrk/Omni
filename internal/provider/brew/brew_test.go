@@ -249,7 +249,70 @@ func TestIsInstalled_TapPackage(t *testing.T) {
 	}
 }
 
+func TestInstall_AmbiguousRetriesFormula(t *testing.T) {
+	p, m := newBrew(
+		executor.MockCall{Err: errors.New("exit 1"), Stderr: "Error: foo is both a formula and a cask."},
+		executor.MockCall{Stdout: "==> Installed"}, // --formula retry succeeds
+	)
+	if err := p.Install(context.Background(), tool("foo")); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if len(m.Calls) != 2 {
+		t.Fatalf("want 2 calls (bare + formula retry), got %d: %+v", len(m.Calls), m.Calls)
+	}
+	if got := strings.Join(m.Calls[1].Args, " "); got != "install --formula foo" {
+		t.Fatalf("retry args = %q, want install --formula foo", got)
+	}
+}
+
+func TestInstall_AmbiguousFallsBackToCask(t *testing.T) {
+	p, m := newBrew(
+		executor.MockCall{Err: errors.New("exit 1"), Stderr: "is both a formula and a cask"},
+		executor.MockCall{Err: errors.New("exit 1"), Stderr: "no available formula"},
+		executor.MockCall{Stdout: "==> Installed"}, // --cask retry succeeds
+	)
+	if err := p.Install(context.Background(), tool("foo")); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if len(m.Calls) != 3 {
+		t.Fatalf("want 3 calls, got %d: %+v", len(m.Calls), m.Calls)
+	}
+	if got := strings.Join(m.Calls[2].Args, " "); got != "install --cask foo" {
+		t.Fatalf("final args = %q, want install --cask foo", got)
+	}
+}
+
+func TestInstall_NoAmbiguousRetryWhenKindSet(t *testing.T) {
+	p, m := newBrew(executor.MockCall{Err: errors.New("exit 1"), Stderr: "is both a formula and a cask"})
+	tl := tool("foo")
+	tl.Options = map[string]string{"brew_kind": "formula"}
+	if err := p.Install(context.Background(), tl); err == nil {
+		t.Fatal("Install should return the error, not retry")
+	}
+	if len(m.Calls) != 1 {
+		t.Fatalf("want 1 call (no retry when kind set), got %d", len(m.Calls))
+	}
+}
+
 // --- ListInstalled ---
+
+func TestListInstalled_CasksCarryBrewKind(t *testing.T) {
+	p, _ := newBrew(
+		executor.MockCall{Stdout: ""},                 // brew list (formulae) → none
+		executor.MockCall{Stdout: "rectangle\n"},      // brew list --cask
+		executor.MockCall{Stdout: "rectangle 0.84\n"}, // brew list --versions --cask
+	)
+	tools, err := p.ListInstalled(context.Background())
+	if err != nil {
+		t.Fatalf("ListInstalled: %v", err)
+	}
+	if len(tools) != 1 {
+		t.Fatalf("got %d tools, want 1 cask: %+v", len(tools), tools)
+	}
+	if tools[0].Options["brew_kind"] != "cask" {
+		t.Fatalf("cask Options = %v, want brew_kind=cask", tools[0].Options)
+	}
+}
 
 func TestListInstalled(t *testing.T) {
 	p, _ := newBrew(
@@ -738,8 +801,8 @@ func TestOutdatedMap_ReturnsFormulae(t *testing.T) {
 	if got["git"] != "2.44.0" {
 		t.Errorf("map[git] = %q, want 2.44.0", got["git"])
 	}
-	if len(m.Calls) != 1 || strings.Join(m.Calls[0].Args, " ") != "outdated --json=v2" {
-		t.Fatalf("calls = %+v, want brew outdated without explicit update", m.Calls)
+	if len(m.Calls) != 1 || strings.Join(m.Calls[0].Args, " ") != "outdated --json=v2 --greedy" {
+		t.Fatalf("calls = %+v, want brew outdated --greedy without explicit update", m.Calls)
 	}
 }
 
