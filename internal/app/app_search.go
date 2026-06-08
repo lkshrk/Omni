@@ -1687,15 +1687,24 @@ func (a *App) Search(ctx context.Context, query, providerFilter string) ([]provi
 			results = append(results, r)
 		}
 	}
-	settings := config.Settings{}
-	if cfg, err := a.loadConfig(); err == nil {
-		settings = a.effectiveSettings(cfg)
-	}
-	results = dedupSearchResults(results, a.providerPriorityRank(defaultProviderPriority(settings)), query)
 	if err := a.cacheSearchMetadata(ctx, results); err != nil {
 		errs = append(errs, err)
 	}
 	return results, errors.Join(errs...)
+}
+
+// SearchForDisplay returns search results for the CLI/TUI: collapsed across
+// shared-store managers (so a node package appears once, not per bun/pnpm/npm)
+// and sorted relevance-first. The raw Search results (used by provider-match
+// install discovery) keep every concrete provider as a candidate.
+func (a *App) SearchForDisplay(ctx context.Context, query, providerFilter string) ([]provider.SearchResult, error) {
+	results, err := a.Search(ctx, query, providerFilter)
+	settings := config.Settings{}
+	if cfg, cfgErr := a.loadConfig(); cfgErr == nil {
+		settings = a.effectiveSettings(cfg)
+	}
+	results = dedupSearchResults(results, a.providerPriorityRank(defaultProviderPriority(settings)), query)
+	return results, err
 }
 
 // dedupSearchResults collapses search hits that refer to the same logical package

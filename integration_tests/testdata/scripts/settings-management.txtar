@@ -28,10 +28,12 @@ exec omni --config settings.json settings disable-provider node
 stdout 'disabled_providers = node'
 exec omni --config settings.json settings disable-provider system
 stdout 'disabled_providers = node, system'
-! exec omni --config settings.json settings disable-provider brew
-stderr 'not a provider family'
+exec omni --config settings.json settings disable-provider brew
+stdout 'disabled_providers = node, system, brew'
 exec omni --config settings.json settings enable-provider node
-stdout 'disabled_providers = system'
+stdout 'disabled_providers = system, brew'
+! exec omni --config settings.json settings disable-provider bogus-pm
+stderr 'is not a known provider'
 
 exec omni --config settings.json settings show
 stdout 'auto_import = true'
@@ -41,7 +43,7 @@ stdout 'system.priority = brew, apt'
 stdout 'dots_repo = '
 stdout 'dots_git.auto_commit = true'
 stdout 'dots_git.auto_push = true'
-stdout 'disabled_providers = system'
+stdout 'disabled_providers = system, brew'
 exec omni --config settings.json settings get node.manager
 stdout 'pnpm'
 exec omni --config settings.json settings show python.manager --format json

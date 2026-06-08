@@ -150,7 +150,7 @@ func (m *Model) doSearch(ctx context.Context, query string, gen int) tea.Cmd {
 	// to the selected provider rather than fanning out to all providers.
 	providerFilter := m.currentSearchProviderFilter()
 	return func() tea.Msg {
-		results, err := a.Search(ctx, query, providerFilter)
+		results, err := a.SearchForDisplay(ctx, query, providerFilter)
 		if ctx.Err() != nil {
 			return nil // cancelled — next search (or Esc) owns the searching flag
 		}
