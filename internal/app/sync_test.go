@@ -11,8 +11,9 @@ import (
 
 // tapBrewStub is a full brew stub that also implements the brewTapManager interface.
 type tapBrewStub struct {
-	existingTaps []string
-	tapsCalled   []string
+	existingTaps  []string
+	tapsCalled    []string
+	trustedCalled []string
 }
 
 func (s *tapBrewStub) Name() string                                       { return "brew" }
@@ -30,6 +31,10 @@ func (s *tapBrewStub) ListInstalled(_ context.Context) ([]provider.InstalledTool
 func (s *tapBrewStub) ListTaps(_ context.Context) ([]string, error) { return s.existingTaps, nil }
 func (s *tapBrewStub) Tap(_ context.Context, name string) error {
 	s.tapsCalled = append(s.tapsCalled, name)
+	return nil
+}
+func (s *tapBrewStub) Trust(_ context.Context, name string) error {
+	s.trustedCalled = append(s.trustedCalled, name)
 	return nil
 }
 
@@ -55,6 +60,34 @@ func TestSync_AddsMissingTaps(t *testing.T) {
 
 	if len(stub.tapsCalled) != 1 || stub.tapsCalled[0] != "hashicorp/tap" {
 		t.Errorf("Tap called with %v, want [hashicorp/tap]", stub.tapsCalled)
+	}
+	if len(stub.trustedCalled) != 1 || stub.trustedCalled[0] != "hashicorp/tap" {
+		t.Errorf("Trust called with %v, want [hashicorp/tap]", stub.trustedCalled)
+	}
+}
+
+func TestSync_TrustsAlreadyTappedRepo(t *testing.T) {
+	// A tap that is already present must still be trusted (it may predate
+	// tap-trust enforcement).
+	stub := &tapBrewStub{existingTaps: []string{"hashicorp/tap"}}
+	a, cfgPath := newImportApp(t, stub)
+	cfg := &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"terraform": {Provider: "brew", Package: "hashicorp/tap/terraform", InstallWith: "brew", Taps: []string{"hashicorp/tap"}},
+		},
+		Groups: []*config.GroupConfig{{Tools: []config.ToolEntry{{Name: "terraform"}}}},
+	}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+	if _, err := a.Sync(context.Background(), sync.SyncOptions{}); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if len(stub.tapsCalled) != 0 {
+		t.Errorf("Tap called %v, want none (already tapped)", stub.tapsCalled)
+	}
+	if len(stub.trustedCalled) != 1 || stub.trustedCalled[0] != "hashicorp/tap" {
+		t.Errorf("Trust called with %v, want [hashicorp/tap]", stub.trustedCalled)
 	}
 }
 

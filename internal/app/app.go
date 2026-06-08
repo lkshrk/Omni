@@ -731,6 +731,7 @@ func (a *App) HostGroups(ctx context.Context, hostname string) ([]*config.GroupC
 type brewTapManager interface {
 	ListTaps(ctx context.Context) ([]string, error)
 	Tap(ctx context.Context, name string) error
+	Trust(ctx context.Context, name string) error
 }
 
 // syncTaps ensures every tap declared across cfg taps is present.
@@ -756,14 +757,19 @@ func (a *App) syncTaps(ctx context.Context, taps []string, dryRun bool) error {
 		tapped[t] = struct{}{}
 	}
 	for _, tap := range taps {
-		if _, exists := tapped[tap]; exists {
-			continue
-		}
 		if dryRun {
 			continue
 		}
-		if err := bm.Tap(ctx, tap); err != nil {
-			return fmt.Errorf("tapping %s: %w", tap, err)
+		if _, exists := tapped[tap]; !exists {
+			if err := bm.Tap(ctx, tap); err != nil {
+				return fmt.Errorf("tapping %s: %w", tap, err)
+			}
+		}
+		// Trust every config-declared tap (no-op on older Homebrew). A tap in
+		// config is one the user opted into; trusting it keeps short-name
+		// installs/outdated working once Homebrew enforces tap-trust.
+		if err := bm.Trust(ctx, tap); err != nil {
+			return fmt.Errorf("trusting tap %s: %w", tap, err)
 		}
 	}
 	return nil

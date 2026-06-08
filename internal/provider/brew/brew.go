@@ -572,6 +572,31 @@ func (p *Provider) Tap(ctx context.Context, name string) error {
 	return nil
 }
 
+// Trust marks a tap as trusted (Homebrew 5.2+/6.0 tap-trust). A tap declared in
+// config is one the user opted into, so omni trusts it on their behalf — without
+// this, short-name installs/outdated checks from the tap are refused once
+// tap-trust is enforced. On older Homebrew without the `brew trust` subcommand
+// this is a no-op (the trust model does not exist yet).
+func (p *Provider) Trust(ctx context.Context, name string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, stderr, err := p.exec.Run(ctx, "brew", "trust", name)
+	if err != nil {
+		if brewSubcommandUnsupported(stderr) {
+			return nil // older Homebrew: no tap-trust to apply
+		}
+		return fmt.Errorf("brew trust %s: %w\n%s", name, err, strings.TrimSpace(stderr))
+	}
+	return nil
+}
+
+// brewSubcommandUnsupported reports whether stderr indicates the brew subcommand
+// does not exist on this Homebrew version.
+func brewSubcommandUnsupported(stderr string) bool {
+	s := strings.ToLower(stderr)
+	return strings.Contains(s, "unknown command") || strings.Contains(s, "unknown subcommand")
+}
+
 func (p *Provider) Untap(ctx context.Context, name string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
