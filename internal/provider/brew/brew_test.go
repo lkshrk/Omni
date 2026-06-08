@@ -294,6 +294,57 @@ func TestInstall_NoAmbiguousRetryWhenKindSet(t *testing.T) {
 	}
 }
 
+func TestInstall_SelfHealsUntrustedTap(t *testing.T) {
+	p, m := newBrew(
+		executor.MockCall{Err: errors.New("exit 1"), Stderr: "Error: Refusing to load formula getsentry/xcodebuildmcp/xcodebuildmcp from untrusted tap getsentry/xcodebuildmcp."},
+		executor.MockCall{Stdout: ""},              // brew trust succeeds
+		executor.MockCall{Stdout: "==> Installed"}, // retry install succeeds
+	)
+	if err := p.Install(context.Background(), tool("xcodebuildmcp")); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if len(m.Calls) != 3 {
+		t.Fatalf("want 3 calls (install + trust + retry), got %d: %+v", len(m.Calls), m.Calls)
+	}
+	if got := strings.Join(m.Calls[1].Args, " "); got != "trust getsentry/xcodebuildmcp" {
+		t.Fatalf("call[1] = %q, want trust getsentry/xcodebuildmcp", got)
+	}
+	if got := strings.Join(m.Calls[2].Args, " "); got != "install xcodebuildmcp" {
+		t.Fatalf("call[2] = %q, want install xcodebuildmcp", got)
+	}
+}
+
+func TestInstall_AlreadyInstalledFromOtherTapIsNoOp(t *testing.T) {
+	p, m := newBrew(
+		executor.MockCall{Err: errors.New("exit 1"), Stderr: "Error: flux was installed from the fluxcd/tap tap\nbut you are trying to install it from the homebrew/core tap.\nFormulae with the same name from different taps cannot be installed at the same time."},
+	)
+	if err := p.Install(context.Background(), tool("flux")); err != nil {
+		t.Fatalf("Install should treat already-installed-from-tap as success, got %v", err)
+	}
+	if len(m.Calls) != 1 {
+		t.Fatalf("want 1 call (no trust/retry), got %d: %+v", len(m.Calls), m.Calls)
+	}
+}
+
+func TestUpgrade_SelfHealsUntrustedTap(t *testing.T) {
+	p, m := newBrew(
+		executor.MockCall{Stdout: ""}, // list --versions (not a formula)
+		executor.MockCall{Stdout: ""}, // list --versions --cask (not a cask)
+		executor.MockCall{Err: errors.New("exit 1"), Stderr: "Error: Refusing to load formula quarkdown-labs/quarkdown/quarkdown from untrusted tap quarkdown-labs/quarkdown."},
+		executor.MockCall{Stdout: ""},             // brew trust succeeds
+		executor.MockCall{Stdout: "==> Upgraded"}, // retry upgrade succeeds
+	)
+	if err := p.Upgrade(context.Background(), tool("quarkdown")); err != nil {
+		t.Fatalf("Upgrade: %v", err)
+	}
+	if len(m.Calls) != 5 {
+		t.Fatalf("want 5 calls, got %d: %+v", len(m.Calls), m.Calls)
+	}
+	if got := strings.Join(m.Calls[3].Args, " "); got != "trust quarkdown-labs/quarkdown" {
+		t.Fatalf("call[3] = %q, want trust quarkdown-labs/quarkdown", got)
+	}
+}
+
 // --- ListInstalled ---
 
 func TestListInstalled_CasksCarryBrewKind(t *testing.T) {

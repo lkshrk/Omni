@@ -24,6 +24,7 @@ const (
 	ToolFallback                   ID = "tools.fallback"
 	ToolDeleteSpec                 ID = "tools.delete_spec"
 	ToolNormalizeProviderOverrides ID = "tools.normalize_provider_overrides"
+	ToolHealBrewTaps               ID = "tools.heal_brew_taps"
 	ToolImport                     ID = "tools.import"
 	ToolSwitchProvider             ID = "tools.switch_provider"
 	DotsSync                       ID = "dots.sync"
@@ -385,6 +386,19 @@ var Tools = []Action{
 		ConfirmDescription: "confirm normalize provider overrides",
 		CLI:                []CLIBinding{{Command: []string{"tools", "normalize"}, Flags: []string{"--default-overrides", "--dry-run"}}},
 		CLIOnlyReason:      "TUI Settings danger-zone cleanup is being added separately; sync all already auto-cleans current-host no-op overrides.",
+	},
+	{
+		ID:                 ToolHealBrewTaps,
+		Domain:             "tools",
+		Scope:              ScopeGlobal,
+		Label:              "heal brew taps",
+		Description:        "Backfill tap-qualified brew package names.",
+		LongDescription:    "Rewrite brew tool entries stored with a bare package name to their tap-qualified form and record the tap, so Homebrew tap-trust no longer hides them from the scan.",
+		Mutates:            true,
+		RequiresConfirm:    true,
+		ConfirmDescription: "confirm heal brew taps",
+		CLI:                []CLIBinding{{Command: []string{"tools", "heal-taps"}, Flags: []string{"--dry-run"}}},
+		CLIOnlyReason:      "Config-hygiene cleanup is CLI-only; runs ad hoc, not part of the TUI danger zone yet.",
 	},
 	{
 		ID:              ToolImport,

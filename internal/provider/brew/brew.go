@@ -51,6 +51,23 @@ func (p *Provider) Install(ctx context.Context, tool provider.Tool) error {
 	if err == nil {
 		return nil
 	}
+	// The package is already installed from a tap; brew refuses to install the
+	// same name from a different tap. Treat as installed rather than a failure —
+	// the scan missed it only because its tap was untrusted (now self-healing).
+	if isBrewAlreadyInstalledFromTap(stderr) {
+		return nil
+	}
+	// brew refused because the formula's tap is untrusted. Trust it and retry
+	// once; a tool omni is asked to install is one the user opted into.
+	if tap, ok := parseBrewUntrustedTap(stderr); ok {
+		if _, _, terr := p.exec.Run(ctx, "brew", "trust", tap); terr == nil {
+			if _, rstderr, rerr := p.exec.Run(ctx, "brew", args...); rerr == nil {
+				return nil
+			} else {
+				err, stderr = rerr, rstderr
+			}
+		}
+	}
 	// When the kind is unspecified and brew refuses because the name is both a
 	// formula and a cask, retry explicitly — formula first (the common CLI case),
 	// then cask. Tools added via search/import already carry brew_kind and skip
@@ -66,6 +83,34 @@ func (p *Provider) Install(ctx context.Context, tool provider.Tool) error {
 		}
 	}
 	return fmt.Errorf("brew %s: %w (stderr: %s)", strings.Join(args, " "), err, strings.TrimSpace(stderr))
+}
+
+// parseBrewUntrustedTap extracts the tap name from a brew tap-trust refusal,
+// e.g. "Refusing to load formula getsentry/xcodebuildmcp/xcodebuildmcp from
+// untrusted tap getsentry/xcodebuildmcp." → "getsentry/xcodebuildmcp".
+func parseBrewUntrustedTap(stderr string) (string, bool) {
+	_, rest, found := strings.Cut(stderr, "from untrusted tap ")
+	if !found {
+		return "", false
+	}
+	rest = strings.TrimSpace(rest)
+	field := strings.FieldsFunc(rest, func(r rune) bool {
+		return r == ' ' || r == '\n' || r == '\t' || r == '.' || r == ',' || r == '"' || r == '\''
+	})
+	if len(field) == 0 || field[0] == "" {
+		return "", false
+	}
+	return field[0], true
+}
+
+// isBrewAlreadyInstalledFromTap reports whether brew refused an install because
+// the same-named formula is already installed from a different tap, e.g.
+// "flux was installed from the fluxcd/tap tap but you are trying to install it
+// from the homebrew/core tap."
+func isBrewAlreadyInstalledFromTap(stderr string) bool {
+	s := strings.ToLower(stderr)
+	return strings.Contains(s, "was installed from the") &&
+		strings.Contains(s, "tap")
 }
 
 // isBrewAmbiguousFormulaCask reports whether brew refused an unqualified install
@@ -104,10 +149,20 @@ func (p *Provider) Upgrade(ctx context.Context, tool provider.Tool) error {
 	defer p.mu.Unlock()
 	args := p.upgradeArgs(ctx, tool.EffectivePackage())
 	_, stderr, err := p.exec.Run(ctx, "brew", args...)
-	if err != nil {
-		return fmt.Errorf("brew %s: %w (stderr: %s)", strings.Join(args, " "), err, strings.TrimSpace(stderr))
+	if err == nil {
+		return nil
 	}
-	return nil
+	// Same tap-trust self-heal as Install: trust the refused tap and retry once.
+	if tap, ok := parseBrewUntrustedTap(stderr); ok {
+		if _, _, terr := p.exec.Run(ctx, "brew", "trust", tap); terr == nil {
+			if _, rstderr, rerr := p.exec.Run(ctx, "brew", args...); rerr == nil {
+				return nil
+			} else {
+				err, stderr = rerr, rstderr
+			}
+		}
+	}
+	return fmt.Errorf("brew %s: %w (stderr: %s)", strings.Join(args, " "), err, strings.TrimSpace(stderr))
 }
 
 func (p *Provider) upgradeArgs(ctx context.Context, pkg string) []string {
@@ -529,6 +584,31 @@ func (p *Provider) OutdatedMap(ctx context.Context) (map[string]string, error) {
 		m[strings.ToLower(formulaName(c.Name))] = c.CurrentVersion
 	}
 	return m, nil
+}
+
+// ResolveTap reports the tap-qualified full name and tap for a formula when it
+// originates from a non-core tap. Used to backfill config entries that were
+// stored with a bare package name (which loses the tap origin and breaks
+// tap-trust). Returns ok=false for core formulae, casks, or unknown names.
+func (p *Provider) ResolveTap(ctx context.Context, name string) (fullName string, tap string, ok bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	out, err := p.info(ctx, "info", "--json=v2", name)
+	if err != nil {
+		return "", "", false
+	}
+	for _, f := range out.Formulae {
+		full := strings.TrimSpace(f.FullName)
+		if full == "" || !strings.Contains(full, "/") {
+			continue
+		}
+		parts := strings.Split(full, "/")
+		if len(parts) != 3 || parts[0] == "" || parts[1] == "" {
+			continue
+		}
+		return full, parts[0] + "/" + parts[1], true
+	}
+	return "", "", false
 }
 
 // Describe fetches a one-line description via `brew info --json=v2`.

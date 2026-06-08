@@ -92,6 +92,30 @@ func TestSync_TrustsAlreadyTappedRepo(t *testing.T) {
 	}
 }
 
+func TestSync_TrustsUntrackedInstalledTap(t *testing.T) {
+	// A tap present on the machine but absent from config must still be trusted,
+	// otherwise Homebrew 5.2+ hides its installed formulae from the scan and omni
+	// wrongly treats those tools as missing.
+	stub := &tapBrewStub{existingTaps: []string{"quarkdown-labs/quarkdown"}}
+	a, cfgPath := newImportApp(t, stub)
+	cfg := &config.RootConfig{
+		Tools:  logicalToolSpecs(logicalTool("git", "brew")),
+		Groups: []*config.GroupConfig{{Tools: groupTools("git")}},
+	}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+	if _, err := a.Sync(context.Background(), sync.SyncOptions{}); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if len(stub.tapsCalled) != 0 {
+		t.Errorf("Tap called %v, want none (already tapped)", stub.tapsCalled)
+	}
+	if len(stub.trustedCalled) != 1 || stub.trustedCalled[0] != "quarkdown-labs/quarkdown" {
+		t.Errorf("Trust called with %v, want [quarkdown-labs/quarkdown]", stub.trustedCalled)
+	}
+}
+
 func TestSync_SkipsAlreadyTrustedTap(t *testing.T) {
 	// A tap recorded as trusted in the DB must not be re-trusted (no brew call).
 	stub := &tapBrewStub{existingTaps: []string{"hashicorp/tap"}}

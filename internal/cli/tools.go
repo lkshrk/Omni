@@ -22,6 +22,7 @@ func newToolsCmd(state *rootState) *cobra.Command {
 		newToolsFallbackCmd(state),
 		newToolsDeleteSpecCmd(state),
 		newToolsNormalizeCmd(state),
+		newToolsHealTapsCmd(state),
 		newToolsIgnoreCmd(state),
 		newToolsUnignoreCmd(state),
 		// moved from root:
@@ -237,6 +238,51 @@ func printNormalizedOverrides(out io.Writer, overrides []appcore.NormalizedInsta
 			scope = fmt.Sprintf(" (host %s)", override.Host)
 		}
 		fmt.Fprintf(out, "  %s: %s via %s%s\n", override.Name, override.Provider, override.InstallWith, scope)
+	}
+}
+
+func newToolsHealTapsCmd(state *rootState) *cobra.Command {
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "heal-taps",
+		Short: actions.MustDescription(actions.ToolHealBrewTaps),
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			out := cmdOut(cmd)
+			backfilled, err := state.app.BackfillBrewTaps(cmd.Context(), true)
+			if err != nil {
+				return err
+			}
+			if len(backfilled) == 0 {
+				fmt.Fprintln(out, "No bare brew packages to heal.")
+				return nil
+			}
+			if dryRun {
+				fmt.Fprintf(out, "Would heal %s:\n", textutil.PluralCount(len(backfilled), "brew tap", "brew taps"))
+				printBrewTapBackfills(out, backfilled)
+				return nil
+			}
+			fmt.Fprintf(out, "Will heal %s:\n", textutil.PluralCount(len(backfilled), "brew tap", "brew taps"))
+			printBrewTapBackfills(out, backfilled)
+			ok, err := confirmAction(cmd, state, fmt.Sprintf("Rewrite %d bare brew packages to tap-qualified form?", len(backfilled)))
+			if err != nil || !ok {
+				return err
+			}
+			backfilled, err = state.app.BackfillBrewTaps(cmd.Context(), false)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(out, "Healed %s.\n", textutil.PluralCount(len(backfilled), "brew tap", "brew taps"))
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "show packages that would be healed without writing config")
+	return cmd
+}
+
+func printBrewTapBackfills(out io.Writer, backfilled []appcore.BrewTapBackfill) {
+	for _, b := range backfilled {
+		fmt.Fprintf(out, "  %s: %s -> %s (tap %s)\n", b.Name, b.OldPackage, b.NewPackage, b.Tap)
 	}
 }
 

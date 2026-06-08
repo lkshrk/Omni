@@ -261,6 +261,7 @@ func TestActionCatalogIncludesDurableDomains(t *testing.T) {
 		ToolSetSpec,
 		ToolDeleteSpec,
 		ToolNormalizeProviderOverrides,
+		ToolHealBrewTaps,
 		ToolImport,
 		ToolSwitchProvider,
 		DotsRefresh,

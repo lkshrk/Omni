@@ -747,18 +747,26 @@ type brewTapManager interface {
 	Trust(ctx context.Context, name string) error
 }
 
-// syncTaps ensures every tap declared across cfg taps is present.
+// syncTaps ensures every tap declared across cfg taps is present and trusts
+// every tap the machine is subscribed to. Homebrew 5.2+ hides untrusted-tap
+// formulae from list/leaves/info, so an untrusted tap makes its installed tools
+// look missing — omni would then try a bare `brew install` that is refused or
+// silently resolves to homebrew/core. Trusting all currently-tapped repos
+// before the scan breaks that chicken-and-egg: a tap the user already ran
+// `brew tap` on is one they opted into, the same rationale used for config taps.
 // Already-tapped repos are skipped; dry-run skips mutations.
 func (a *App) syncTaps(ctx context.Context, taps []string, dryRun bool) error {
-	if len(taps) == 0 {
-		return nil
-	}
 	brewProv, ok := a.registry.Get("brew")
 	if !ok {
 		return nil
 	}
 	bm, ok := brewProv.(brewTapManager)
 	if !ok {
+		return nil
+	}
+	// brew is always registered; skip on machines where it is not installed so
+	// `brew tap` is never invoked there.
+	if available, err := brewProv.Available(ctx); err != nil || !available {
 		return nil
 	}
 	current, err := bm.ListTaps(ctx)
@@ -772,6 +780,24 @@ func (a *App) syncTaps(ctx context.Context, taps []string, dryRun bool) error {
 	if dryRun {
 		return nil
 	}
+	// Trust the union of config-declared taps and every tap already present on
+	// the machine. Order config taps first so a tap missing from the machine is
+	// tapped before it is trusted.
+	trustOrder := make([]string, 0, len(taps)+len(current))
+	seen := make(map[string]struct{}, len(taps)+len(current))
+	for _, tap := range append(append([]string(nil), taps...), current...) {
+		if tap == "" {
+			continue
+		}
+		if _, dup := seen[tap]; dup {
+			continue
+		}
+		seen[tap] = struct{}{}
+		trustOrder = append(trustOrder, tap)
+	}
+	if len(trustOrder) == 0 {
+		return nil
+	}
 	// Each `brew trust` spawns a subprocess; once a tap is trusted we record it in
 	// the DB so subsequent syncs skip the call entirely (no brew invocation).
 	trusted := map[string]bool{}
@@ -780,7 +806,7 @@ func (a *App) syncTaps(ctx context.Context, taps []string, dryRun bool) error {
 			trusted = t
 		}
 	}
-	for _, tap := range taps {
+	for _, tap := range trustOrder {
 		if _, exists := tapped[tap]; !exists {
 			if err := bm.Tap(ctx, tap); err != nil {
 				return fmt.Errorf("tapping %s: %w", tap, err)
@@ -789,8 +815,6 @@ func (a *App) syncTaps(ctx context.Context, taps []string, dryRun bool) error {
 		if trusted[tap] {
 			continue
 		}
-		// A tap in config is one the user opted into; trust it so short-name
-		// installs/outdated keep working once Homebrew enforces tap-trust.
 		if err := bm.Trust(ctx, tap); err != nil {
 			return fmt.Errorf("trusting tap %s: %w", tap, err)
 		}
