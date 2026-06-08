@@ -4,8 +4,27 @@ import "context"
 
 // Named returns p with Name overridden. It is intended for concrete aliases
 // backed by an existing manager provider, such as npm over the node provider.
+//
+// MultiManagerBulkChecker is forwarded only when the base provider implements it
+// (e.g. the node/python families): the optional interface must not be claimed by
+// aliases of non-multi providers, or callers that prefer the multi path would
+// receive an empty result instead of falling back to the bulk path.
 func Named(name string, p Provider) Provider {
-	return namedProvider{name: name, Provider: p}
+	np := namedProvider{name: name, Provider: p}
+	if _, ok := p.(MultiManagerBulkChecker); ok {
+		return namedMultiProvider{namedProvider: np}
+	}
+	return np
+}
+
+// namedMultiProvider is a namedProvider that also forwards
+// MultiManagerBulkChecker to the base provider.
+type namedMultiProvider struct {
+	namedProvider
+}
+
+func (p namedMultiProvider) InstalledByManager(ctx context.Context) (map[string]InstalledEntry, error) {
+	return p.Provider.(MultiManagerBulkChecker).InstalledByManager(ctx)
 }
 
 type namedProvider struct {
