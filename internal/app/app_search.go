@@ -1208,9 +1208,16 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 	var discovered []database.DiscoveredUpsert
 	// Best-effort: per-provider errors are skipped so one bad provider
 	// doesn't prevent discovering the rest.
+	disabled := make(map[string]struct{})
+	for _, name := range a.effectiveSettings(cfg).DisabledProviders {
+		disabled[name] = struct{}{}
+	}
 	providers := make([]provider.Provider, 0)
 	stop = profile.Start("app.refresh.discovered.available_providers")
 	for _, p := range a.availableProviders(ctx) {
+		if _, off := disabled[p.Name()]; off {
+			continue // provider disabled on this host: do not discover under it
+		}
 		if !a.registry.ImportSkipsProvider(p.Name()) && a.discoveryProviderAllowed(p, revEcosystem, scope) {
 			providers = append(providers, p)
 		}

@@ -329,6 +329,36 @@ func TestRefreshDiscoveredSkipsGloballyIgnoredName(t *testing.T) {
 	}
 }
 
+func TestRefreshDiscoveredSkipsDisabledProvider(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	stub := &ignoredProcessingStub{
+		stubProvider: stubProvider{name: "brew", available: true},
+		listInstalled: []provider.InstalledTool{
+			{Tool: provider.Tool{Name: "ripgrep", Provider: "brew"}, Version: "14.1.0"},
+			{Tool: provider.Tool{Name: "fd", Provider: "brew"}, Version: "9.0.0"},
+		},
+	}
+	a, cfgPath := newImportApp(t, stub)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools:        logicalToolSpecs(logicalTool("ripgrep", "brew")),
+		Groups:       []*config.GroupConfig{testHostToolGroup("ripgrep")},
+		HostSettings: map[string]config.Settings{"testhost": {DisabledProviders: []string{"brew"}}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if err := a.RefreshDiscovered(context.Background()); err != nil {
+		t.Fatalf("RefreshDiscovered: %v", err)
+	}
+	discovered, err := a.ListDiscovered(context.Background())
+	if err != nil {
+		t.Fatalf("ListDiscovered: %v", err)
+	}
+	if len(discovered) != 0 {
+		t.Fatalf("discovered = %v, want none (brew disabled)", toolNames(discovered))
+	}
+}
+
 func TestSyncAllSkipsIgnoredDiscoveredClaims(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	brew := &installTracker{stubProvider: stubProvider{name: "brew", available: true}}
