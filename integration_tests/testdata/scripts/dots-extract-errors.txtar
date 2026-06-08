@@ -1,0 +1,21 @@
+# dots extract error paths: escaping subpath and missing parent entry
+# @requires: stow
+env HOME=$WORK/home
+exec git init $WORK/home/dotfiles
+exec git -C $WORK/home/dotfiles config user.email t@t.com
+exec git -C $WORK/home/dotfiles config user.name T
+exec git -C $WORK/home/dotfiles config commit.gpgsign false
+
+# Subpath that escapes the entry is rejected
+! exec omni -y --config settings.json dots extract nvim ../escape --group x
+stderr 'escapes the entry'
+
+# Non-existent parent entry is rejected
+! exec omni -y --config settings.json dots extract nope lua --group y
+stderr 'not configured'
+
+-- settings.json --
+{"host_settings":{"testhost":{"dots_repo":"~/dotfiles"}},"hosts":{"testhost":[]},"groups":[{"name":"testhost","special":"host","dots":[{"name":"nvim","path":"~/.config/nvim"}]},{"name":"work"}]}
+
+-- home/dotfiles/dotfiles/nvim/.config/nvim/init.lua --
+-- init

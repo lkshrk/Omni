@@ -381,6 +381,16 @@ func (m *Model) handleDotsActionKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibl
 		cmds = append(cmds, m.handleDotsResolveKeyMsg(visible, app.DotResolveUseRepo)...)
 	case key.Matches(msg, m.keys.DotUseLocal):
 		cmds = append(cmds, m.handleDotsResolveKeyMsg(visible, app.DotResolveUseLocal)...)
+	case key.Matches(msg, m.keys.DotUseRepoAll):
+		if msg.IsRepeat {
+			break
+		}
+		cmds = append(cmds, m.handleDotsForceResolveAllKeyMsg(app.DotResolveUseRepo)...)
+	case key.Matches(msg, m.keys.DotUseLocalAll):
+		if msg.IsRepeat {
+			break
+		}
+		cmds = append(cmds, m.handleDotsForceResolveAllKeyMsg(app.DotResolveUseLocal)...)
 	case key.Matches(msg, m.keys.DotDelete):
 		cmds = append(cmds, m.handleDotsDeleteKeyMsg(visible)...)
 	case key.Matches(msg, m.keys.DotVariant):
@@ -531,6 +541,7 @@ func (m *Model) openDotGroupMembershipPicker(visible []dotsVisibleRow) {
 	}
 	row := visible[m.dotsCursor]
 	if row.isChild {
+		m.openDotChildExtractPicker(row)
 		return
 	}
 	name := row.entry.Name
@@ -545,6 +556,39 @@ func (m *Model) openDotGroupMembershipPicker(visible []dotsVisibleRow) {
 	m.pickerMembershipKind = pickerMembershipDot
 	m.pickerMembershipName = name
 	m.pickerOriginalGroups = append([]string(nil), m.dotMemberships[name]...)
+}
+
+// openDotChildExtractPicker opens the same group popup for a child sub-path row.
+// Confirming extracts the subtree into a new entry assigned to the picked
+// groups, letting a subdir live in a different group than its parent.
+func (m *Model) openDotChildExtractPicker(row dotsVisibleRow) {
+	if !dotsChildExtractable(row) {
+		return
+	}
+	childName := app.DotExtractName(row.entry.Name, row.child.RelPath)
+	m.mode = viewGroupMembership
+	m.pickerGroups = append(prioritizedPickerGroups(*m), groupPickerNewSentinel)
+	m.pickerCursor = 0
+	m.pickerCreatingGroup = false
+	m.pickerCreatedGroups = nil
+	m.pickerMembershipKind = pickerMembershipDot
+	m.pickerMembershipName = childName
+	m.pickerOriginalGroups = nil
+	m.pickerDotExtractParent = row.entry.Name
+	m.pickerDotExtractSub = row.child.RelPath
+	if m.dotMemberships == nil {
+		m.dotMemberships = make(map[string][]string)
+	}
+	m.dotMemberships[childName] = nil
+}
+
+// dotsChildExtractable reports whether a child row names a real managed subpath
+// that can be split into its own entry.
+func dotsChildExtractable(row dotsVisibleRow) bool {
+	if !row.isChild || row.child.Ignored {
+		return false
+	}
+	return strings.TrimSpace(row.child.RelPath) != ""
 }
 
 func (m *Model) handleDotsConfirmKeyMsg(visible []dotsVisibleRow) []tea.Cmd {
@@ -672,6 +716,42 @@ func (m *Model) handleDotsResolveKeyMsg(visible []dotsVisibleRow, strategy app.D
 	m.dotsConfirmIdx = -1
 	cmds = append(cmds, m.armConfirmationTimeout())
 	return cmds
+}
+
+// handleDotsForceResolveAllKeyMsg arms (first press) then runs (second press) a
+// force-resolve of every conflicting entry with the given strategy.
+func (m *Model) handleDotsForceResolveAllKeyMsg(strategy app.DotsResolveStrategy) []tea.Cmd {
+	if m.app == nil || dotsConflictCount(*m) == 0 {
+		return nil
+	}
+	want := "use_repo"
+	if strategy == app.DotResolveUseLocal {
+		want = "use_local"
+	}
+	if m.dotsForceResolve == want {
+		m.cancelConfirmationTimeout()
+		m.dotsForceResolve = ""
+		label := "repo"
+		if strategy == app.DotResolveUseLocal {
+			label = "local"
+		}
+		m.beginDotsOperation("Resolving all conflicts with " + label + "…")
+		return []tea.Cmd{m.spinner.Tick, m.doDotsForceResolveAll(strategy)}
+	}
+	m.clearDotsConfirmState()
+	m.dotsForceResolve = want
+	return []tea.Cmd{m.armConfirmationTimeout()}
+}
+
+// dotsConflictCount reports how many tracked entries are in a conflict state.
+func dotsConflictCount(m Model) int {
+	n := 0
+	for _, e := range m.dotsEntries {
+		if app.DotStatusState(e) == app.DotStateConflict {
+			n++
+		}
+	}
+	return n
 }
 
 func (m *Model) handleDotsDeleteKeyMsg(visible []dotsVisibleRow) []tea.Cmd {

@@ -92,6 +92,11 @@ type SyncOptions struct {
 	EntryOrder               []string
 	SuppressUnchangedHistory bool
 	Progress                 func(SyncProgressEvent)
+	// ConflictStrategy forces resolution of conflicting entries that have no
+	// per-entry on_conflict policy: "use_repo" relinks the repo version over the
+	// local target, "use_local" adopts the local content into the repo. Empty
+	// keeps the default behaviour (sync errors on unresolved conflicts).
+	ConflictStrategy string
 }
 
 // UnlinkOptions configures the behaviour of Manager.UnlinkAll.

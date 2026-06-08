@@ -176,6 +176,22 @@ func (a *App) DotsResolveConflictWithState(ctx context.Context, name string, str
 	})
 }
 
+// DotsForceResolveAllWithState runs a full sync that force-resolves every
+// conflicting entry with the given strategy (the bulk equivalent of
+// `dots sync --use-repo|--use-local`), returning the refreshed dots state.
+func (a *App) DotsForceResolveAllWithState(ctx context.Context, strategy DotsResolveStrategy) (*DotsOperationStateResult, error) {
+	conflictStrategy := ""
+	switch strategy {
+	case DotResolveUseRepo:
+		conflictStrategy = "use_repo"
+	case DotResolveUseLocal:
+		conflictStrategy = "use_local"
+	}
+	return a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
+		return a.DotsSync(dots.SyncOptions{ConflictStrategy: conflictStrategy})
+	})
+}
+
 func (a *App) DotsAddIgnorePatternWithState(ctx context.Context, name, pattern string) (*DotsOperationStateResult, error) {
 	return a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
 		return nil, a.DotsAddIgnorePatternContext(ctx, name, pattern)

@@ -74,6 +74,45 @@ func (m *Model) doSetDotGroupMemberships(name string, before, after, createdGrou
 	}
 }
 
+// doExtractDotIntoGroups splits sub out of the parent dots entry into a new
+// entry named name, then assigns that entry to the picked groups. Extract drops
+// the new entry in the first group; SetDotGroups then reconciles the full set.
+func (m *Model) doExtractDotIntoGroups(parent, sub, name string, after, createdGroups []string, activeHost string) tea.Cmd {
+	a, ctx := m.app, m.ctx
+	_, gen := m.currentDotsOperation()
+	group := ""
+	if len(after) > 0 {
+		group = after[0]
+	}
+	return func() tea.Msg {
+		if _, err := a.DotsExtract(ctx, parent, sub, app.DotsExtractOptions{Name: name, Group: group}); err != nil {
+			return dotsLoadedMsg{gen: gen, err: err}
+		}
+		change, err := a.SetDotGroupsWithState(ctx, name, after, createdGroups, activeHost)
+		if err != nil {
+			return dotsLoadedMsg{gen: gen, err: err}
+		}
+		msg := dotsLoadedMsg{
+			gen:            gen,
+			dotMemberships: change.DotMemberships,
+			detail:         "✓ extracted " + name + groupSuffix(after),
+		}
+		if change.DotsState != nil {
+			msg.entries = change.DotsState.Entries
+			msg.gitStatus = change.DotsState.GitStatus
+			msg.dotMemberships = change.DotsState.DotMemberships
+		}
+		return msg
+	}
+}
+
+func groupSuffix(groups []string) string {
+	if len(groups) == 1 && groups[0] != "" {
+		return " to " + groups[0]
+	}
+	return ""
+}
+
 func groupMoveDetail(name string, groups []string) string {
 	if len(groups) == 1 && groups[0] != "" {
 		return "✓ moved " + name + " to " + groups[0]
@@ -467,8 +506,10 @@ func (m *Model) doConsolidate(ecosystem, manager string) tea.Cmd {
 }
 
 // doClaim adds an orphan tool (installed but not in config) to the given group.
-// Pass groupName="" to add to the current host group.
-func (m *Model) doClaim(name, prov, groupName string, activeHost ...string) tea.Cmd {
+// Pass groupName="" to add to the current host group. installedWith is the
+// concrete manager the tool was installed with (e.g. bun), used to pin
+// install_with so a single claim matches the bulk `sync --all` claim.
+func (m *Model) doClaim(name, prov, installedWith, groupName string, activeHost ...string) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
 		var assignHosts []string
@@ -480,6 +521,7 @@ func (m *Model) doClaim(name, prov, groupName string, activeHost ...string) tea.
 			Package:      name,
 			Name:         name,
 			GroupName:    groupName,
+			InstallWith:  a.ClaimInstallWith(ctx, prov, installedWith),
 			AssignHosts:  assignHosts,
 		})
 		msg := claimDoneMsg{err: err, name: name, groupName: groupName}

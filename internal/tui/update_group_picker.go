@@ -210,7 +210,7 @@ func (m *Model) runGroupPickerAction(group string, cmds *[]tea.Cmd) bool {
 			return false
 		}
 		startOp(m, "Adding "+t.Name+" to config…")
-		*cmds = append(*cmds, m.spinner.Tick, m.doClaim(t.Name, t.Provider, claimGroup, m.activeHostForCreatedGroup(group)))
+		*cmds = append(*cmds, m.spinner.Tick, m.doClaim(t.Name, t.Provider, t.InstalledWith, claimGroup, m.activeHostForCreatedGroup(group)))
 		return true
 	}
 	m.loading = false
@@ -286,12 +286,19 @@ func (m *Model) finishGroupMembershipPicker() {
 	if m.pickerMembershipKind == pickerMembershipDot {
 		nextMode = viewDots
 	}
+	if m.pickerDotExtractParent != "" && m.pickerMembershipName != "" {
+		// Drop the phantom draft seeded for the pending child extract so a
+		// not-yet-created entry never lingers in the membership map.
+		delete(m.dotMemberships, m.pickerMembershipName)
+	}
 	m.mode = nextMode
 	m.pickerGroups = nil
 	m.pickerCursor = 0
 	m.pickerMembershipKind = ""
 	m.pickerMembershipName = ""
 	m.pickerMembershipKey = ""
+	m.pickerDotExtractParent = ""
+	m.pickerDotExtractSub = ""
 	m.pickerOriginalGroups = nil
 	m.pickerCreatedGroups = nil
 	m.pickerCreatingGroup = false
@@ -459,6 +466,13 @@ func (m *Model) saveGroupMembershipPicker(cmds *[]tea.Cmd) {
 		host = m.hostInfo.Active
 	}
 	if m.pickerMembershipKind == pickerMembershipDot {
+		if m.pickerDotExtractParent != "" {
+			parent, sub := m.pickerDotExtractParent, m.pickerDotExtractSub
+			m.beginDotsOperation("Extracting " + name + "…")
+			*cmds = append(*cmds, m.spinner.Tick, m.doExtractDotIntoGroups(parent, sub, name, next, created, host))
+			m.finishGroupMembershipPicker()
+			return
+		}
 		m.beginDotsOperation("Updating groups for " + name + "…")
 		*cmds = append(*cmds, m.spinner.Tick, m.doSetDotGroupMemberships(name, m.pickerOriginalGroups, next, created, host))
 	} else {

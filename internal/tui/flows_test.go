@@ -1488,7 +1488,7 @@ func TestFlow_UC36_PriorityEditor(t *testing.T) {
 		if got.editingPriority {
 			t.Error("editingPriority should be false after esc")
 		}
-		if priority := got.settings.EcosystemPriority("system"); len(priority) == 0 || priority[0] != "brew" {
+		if priority := got.settings.ProviderPriority; len(priority) == 0 || priority[0] != "brew" {
 			t.Errorf("system priority = %v after esc, want original order", priority)
 		}
 	})
@@ -3300,4 +3300,640 @@ func TestFlow_UC65_WindowSize(t *testing.T) {
 	if got.height != 60 {
 		t.Errorf("height = %d, want 60", got.height)
 	}
+}
+
+// ── UC-66 Dots tab: g on child row opens extract picker ───────────────────────
+
+// dotsModelWithChild builds a dots model whose first entry has an expanded
+// directory child so tests can position dotsCursor on a child row.
+// It does NOT wire up a real app.App — use dotsModelWithChildAndApp for
+// tests that drive through the full key handler (which requires m.app != nil).
+func dotsModelWithChild(childRelPath string, childIgnored bool) Model {
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.dotsLoaded = true
+	setDotsRepoForTest(&m, "/repo/dotfiles")
+	cacheDotsAvailability(&m, app.DotsSyncAvailability{
+		Configured: true,
+		Reason:     app.DotsSyncAvailabilityReady,
+		RepoPath:   "/repo/dotfiles",
+	})
+	m.dotsEntries = []app.DotStatus{
+		{
+			Name:       "config",
+			SourcePath: "/repo/config",
+			TargetPath: "~/.config",
+			Health:     app.HealthOK,
+			State:      app.DotStateSynced,
+			Actions:    []app.DotAction{app.DotActionRemove, app.DotActionIgnore},
+			Children: []app.DotChild{
+				{RelPath: childRelPath, Ignored: childIgnored, IsDir: false},
+			},
+		},
+	}
+	// Expand the parent so child rows are visible.
+	m.dotsExpandedName = "config"
+	m.dotsExpandedState = app.DotStatusState(m.dotsEntries[0])
+	return m
+}
+
+// dotsModelWithChildAndApp is like dotsModelWithChild but also wires a real
+// (in-memory) app.App so the full MoveGroup key handler path can run.
+func dotsModelWithChildAndApp(t *testing.T, childRelPath string, childIgnored bool) Model {
+	t.Helper()
+	appModel, repoDir := newDotsModelForCmds(t)
+	m := dotsModelWithChild(childRelPath, childIgnored)
+	m.app = appModel.app
+	m.ctx = appModel.ctx
+	cacheDotsAvailability(&m, app.DotsSyncAvailability{
+		Configured: true,
+		Reason:     app.DotsSyncAvailabilityReady,
+		RepoPath:   repoDir,
+	})
+	return m
+}
+
+func TestFlow_UC66_DotChildExtractPickerOpens(t *testing.T) {
+	// openDotGroupMembershipPicker requires m.app != nil; use the app-backed helper
+	// so the full g → openDotGroupMembershipPicker → openDotChildExtractPicker path runs.
+	t.Run("g on extractable child opens group membership picker in extract mode", func(t *testing.T) {
+		m := dotsModelWithChildAndApp(t, "nvim", false)
+		visible := dotsVisibleRows(m)
+		// Find the child row index (parent at 0, child at 1).
+		childIdx := -1
+		for i, row := range visible {
+			if row.isChild {
+				childIdx = i
+				break
+			}
+		}
+		if childIdx < 0 {
+			t.Fatal("expected a child row in visible rows, found none")
+		}
+		m.dotsCursor = childIdx
+
+		got := drive(m, pressRune('g'))
+
+		if got.mode != viewGroupMembership {
+			t.Fatalf("mode = %v, want viewGroupMembership after g on extractable child", got.mode)
+		}
+		if got.pickerDotExtractParent != "config" {
+			t.Errorf("pickerDotExtractParent = %q, want %q", got.pickerDotExtractParent, "config")
+		}
+		if got.pickerDotExtractSub != "nvim" {
+			t.Errorf("pickerDotExtractSub = %q, want %q", got.pickerDotExtractSub, "nvim")
+		}
+		wantName := app.DotExtractName("config", "nvim")
+		if got.pickerMembershipName != wantName {
+			t.Errorf("pickerMembershipName = %q, want %q", got.pickerMembershipName, wantName)
+		}
+		if got.pickerMembershipKind != pickerMembershipDot {
+			t.Errorf("pickerMembershipKind = %q, want %q", got.pickerMembershipKind, pickerMembershipDot)
+		}
+	})
+
+	// Call openDotChildExtractPicker directly (white-box) to verify the seeded
+	// state without needing a real app for the child-path branch.
+	t.Run("openDotChildExtractPicker seeds extract context directly", func(t *testing.T) {
+		m := dotsModelWithChild("nvim", false)
+		visible := dotsVisibleRows(m)
+		childIdx := -1
+		for i, row := range visible {
+			if row.isChild {
+				childIdx = i
+				break
+			}
+		}
+		if childIdx < 0 {
+			t.Fatal("expected a child row in visible rows, found none")
+		}
+		row := visible[childIdx]
+
+		m.openDotChildExtractPicker(row)
+
+		if m.mode != viewGroupMembership {
+			t.Fatalf("mode = %v, want viewGroupMembership", m.mode)
+		}
+		if m.pickerDotExtractParent != "config" {
+			t.Errorf("pickerDotExtractParent = %q, want config", m.pickerDotExtractParent)
+		}
+		if m.pickerDotExtractSub != "nvim" {
+			t.Errorf("pickerDotExtractSub = %q, want nvim", m.pickerDotExtractSub)
+		}
+		wantName := app.DotExtractName("config", "nvim")
+		if m.pickerMembershipName != wantName {
+			t.Errorf("pickerMembershipName = %q, want %q", m.pickerMembershipName, wantName)
+		}
+		if m.pickerMembershipKind != pickerMembershipDot {
+			t.Errorf("pickerMembershipKind = %q, want pickerMembershipDot", m.pickerMembershipKind)
+		}
+		if m.pickerOriginalGroups != nil {
+			t.Errorf("pickerOriginalGroups = %v, want nil for extract (no prior groups)", m.pickerOriginalGroups)
+		}
+		if _, hasMembership := m.dotMemberships[wantName]; !hasMembership {
+			t.Errorf("phantom dotMemberships[%q] was not seeded", wantName)
+		}
+	})
+
+	t.Run("g on non-child (top-level) entry with no memberships is a no-op", func(t *testing.T) {
+		m := dotsModelWithChildAndApp(t, "nvim", false)
+		m.dotsCursor = 0 // top-level "config" row
+		// Ensure cursor is indeed on the top-level row.
+		visible := dotsVisibleRows(m)
+		if visible[0].isChild {
+			t.Fatal("expected cursor on top-level row at index 0")
+		}
+		// Top-level entry has no dotMemberships set, so g should be a no-op.
+		got := drive(m, pressRune('g'))
+		if got.mode == viewGroupMembership {
+			t.Error("group picker should not open for top-level entry with no memberships")
+		}
+	})
+}
+
+func TestFlow_UC66_DotsChildExtractable(t *testing.T) {
+	t.Run("extractable: isChild=true, not ignored, non-empty RelPath", func(t *testing.T) {
+		row := dotsVisibleRow{
+			entry:   app.DotStatus{Name: "config"},
+			isChild: true,
+			child:   app.DotChild{RelPath: "nvim", Ignored: false},
+		}
+		if !dotsChildExtractable(row) {
+			t.Error("expected dotsChildExtractable=true for normal child with non-empty RelPath")
+		}
+	})
+
+	t.Run("not extractable: isChild=false (top-level row)", func(t *testing.T) {
+		row := dotsVisibleRow{
+			entry:   app.DotStatus{Name: "config"},
+			isChild: false,
+		}
+		if dotsChildExtractable(row) {
+			t.Error("expected dotsChildExtractable=false for top-level row")
+		}
+	})
+
+	t.Run("not extractable: child is ignored", func(t *testing.T) {
+		row := dotsVisibleRow{
+			entry:   app.DotStatus{Name: "config"},
+			isChild: true,
+			child:   app.DotChild{RelPath: "nvim", Ignored: true},
+		}
+		if dotsChildExtractable(row) {
+			t.Error("expected dotsChildExtractable=false for ignored child")
+		}
+	})
+
+	t.Run("not extractable: empty RelPath", func(t *testing.T) {
+		row := dotsVisibleRow{
+			entry:   app.DotStatus{Name: "config"},
+			isChild: true,
+			child:   app.DotChild{RelPath: "", Ignored: false},
+		}
+		if dotsChildExtractable(row) {
+			t.Error("expected dotsChildExtractable=false for child with empty RelPath")
+		}
+	})
+
+	t.Run("openDotChildExtractPicker is a no-op for an ignored child", func(t *testing.T) {
+		m := dotsModelWithChild("nvim", true /* ignored */)
+		visible := dotsVisibleRows(m)
+		childIdx := -1
+		for i, row := range visible {
+			if row.isChild {
+				childIdx = i
+				break
+			}
+		}
+		if childIdx < 0 {
+			t.Fatal("expected a child row in visible rows, found none")
+		}
+		row := visible[childIdx]
+
+		m.openDotChildExtractPicker(row)
+
+		if m.mode == viewGroupMembership {
+			t.Error("openDotChildExtractPicker must not open picker for an ignored child row")
+		}
+		if m.mode != viewDots {
+			t.Errorf("mode = %v, want viewDots after no-op on ignored child", m.mode)
+		}
+	})
+}
+
+func TestFlow_UC66_DotChildExtractPickerCancelClears(t *testing.T) {
+	// Drive through openDotChildExtractPicker directly (no real app needed for the
+	// cancel/finish path — finishGroupMembershipPicker has no app dependency).
+	t.Run("esc from extract picker clears extract context and phantom membership", func(t *testing.T) {
+		m := dotsModelWithChild("nvim", false)
+		visible := dotsVisibleRows(m)
+		childIdx := -1
+		for i, row := range visible {
+			if row.isChild {
+				childIdx = i
+				break
+			}
+		}
+		if childIdx < 0 {
+			t.Fatal("expected a child row in visible rows, found none")
+		}
+		row := visible[childIdx]
+
+		// Open picker directly (bypasses app == nil guard in openDotGroupMembershipPicker).
+		m.openDotChildExtractPicker(row)
+		if m.mode != viewGroupMembership {
+			t.Fatalf("picker did not open: mode = %v", m.mode)
+		}
+		childName := app.DotExtractName("config", "nvim")
+		if _, hasMembership := m.dotMemberships[childName]; !hasMembership {
+			t.Fatalf("phantom membership %q not seeded before cancel", childName)
+		}
+
+		// Cancel via the key handler (Esc → closeGroupMembershipPicker → finishGroupMembershipPicker).
+		cancelled := drive(m, pressEsc())
+
+		if cancelled.mode != viewDots {
+			t.Errorf("mode = %v, want viewDots after esc", cancelled.mode)
+		}
+		if cancelled.pickerDotExtractParent != "" {
+			t.Errorf("pickerDotExtractParent = %q, want empty after cancel", cancelled.pickerDotExtractParent)
+		}
+		if cancelled.pickerDotExtractSub != "" {
+			t.Errorf("pickerDotExtractSub = %q, want empty after cancel", cancelled.pickerDotExtractSub)
+		}
+		if _, stillHas := cancelled.dotMemberships[childName]; stillHas {
+			t.Errorf("phantom dotMemberships[%q] should be removed after cancel", childName)
+		}
+	})
+}
+
+// ── UC-67 Dots tab: bulk force-resolve all conflicts ─────────────────────────
+
+// conflictDotsModel returns a baseModel on viewDots with the given DotStatus
+// entries already loaded and dots availability set to enabled.
+// baseModel initialises the -1 sentinel fields correctly via New().
+func conflictDotsModel(entries []app.DotStatus) Model {
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.dotsLoaded = true
+	setDotsRepoForTest(&m, "/repo")
+	m.dotsEntries = entries
+	return m
+}
+
+func twoConflictEntries() []app.DotStatus {
+	return []app.DotStatus{
+		{Name: "gitconfig", Health: app.HealthConflict, State: app.DotStateConflict, Actions: []app.DotAction{app.DotActionUseRepo, app.DotActionUseLocal, app.DotActionRemove}},
+		{Name: "zshrc", Health: app.HealthConflict, State: app.DotStateConflict, Actions: []app.DotAction{app.DotActionUseRepo, app.DotActionUseLocal, app.DotActionRemove}},
+	}
+}
+
+// newDotsModelForCmdsReady wraps newDotsModelForCmds and initialises the
+// -1 sentinel fields that modelForCmds omits (dotsOverwriteIdx etc.), so
+// the model behaves like one built via New() rather than a raw struct literal.
+func newDotsModelForCmdsReady(t *testing.T) (Model, string) {
+	t.Helper()
+	m, repoDir := newDotsModelForCmds(t)
+	m.mode = viewDots
+	m.dotsLoaded = true
+	m.dotsConfirmIdx = -1
+	m.dotsOverwriteIdx = -1
+	m.dotsLocalIdx = -1
+	m.dotsIgnoreIdx = -1
+	m.dotsVariantIdx = -1
+	m.dangerConfirmRow = -1
+	return m, repoDir
+}
+
+func TestFlow_UC67_DotForceResolveAll_FirstPressArmsUseRepo(t *testing.T) {
+	m, _ := newDotsModelForCmdsReady(t)
+	m.dotsEntries = twoConflictEntries()
+
+	m.handleDotsForceResolveAllKeyMsg(app.DotResolveUseRepo)
+	if m.dotsForceResolve != "use_repo" {
+		t.Errorf("dotsForceResolve = %q, want %q", m.dotsForceResolve, "use_repo")
+	}
+	if !m.hasActiveConfirmation() {
+		t.Error("hasActiveConfirmation() = false, want true after arming")
+	}
+}
+
+func TestFlow_UC67_DotForceResolveAll_SecondPressFiresUseRepo(t *testing.T) {
+	m, _ := newDotsModelForCmdsReady(t)
+	m.dotsEntries = twoConflictEntries()
+
+	// First press: arm
+	m.handleDotsForceResolveAllKeyMsg(app.DotResolveUseRepo)
+	// Second press: should clear arm and return run cmds
+	cmds := m.handleDotsForceResolveAllKeyMsg(app.DotResolveUseRepo)
+	if m.dotsForceResolve != "" {
+		t.Errorf("dotsForceResolve = %q, want %q after second press", m.dotsForceResolve, "")
+	}
+	if len(cmds) == 0 {
+		t.Error("expected non-empty cmds after second press (run command), got nil")
+	}
+}
+
+func TestFlow_UC67_DotForceResolveAll_FirstPressArmsUseLocal(t *testing.T) {
+	m, _ := newDotsModelForCmdsReady(t)
+	m.dotsEntries = twoConflictEntries()
+
+	m.handleDotsForceResolveAllKeyMsg(app.DotResolveUseLocal)
+	if m.dotsForceResolve != "use_local" {
+		t.Errorf("dotsForceResolve = %q, want %q", m.dotsForceResolve, "use_local")
+	}
+	if !m.hasActiveConfirmation() {
+		t.Error("hasActiveConfirmation() = false, want true after arming with use-local")
+	}
+}
+
+func TestFlow_UC67_DotForceResolveAll_SwitchStrategyCancelsAndRearms(t *testing.T) {
+	m, _ := newDotsModelForCmdsReady(t)
+	m.dotsEntries = twoConflictEntries()
+
+	// Arm use_local first
+	m.handleDotsForceResolveAllKeyMsg(app.DotResolveUseLocal)
+	if m.dotsForceResolve != "use_local" {
+		t.Fatalf("setup: dotsForceResolve = %q, want use_local", m.dotsForceResolve)
+	}
+	// Now press U (use_repo) — should re-arm to use_repo, not fire
+	cmds := m.handleDotsForceResolveAllKeyMsg(app.DotResolveUseRepo)
+	if m.dotsForceResolve != "use_repo" {
+		t.Errorf("dotsForceResolve = %q, want use_repo after switching strategy", m.dotsForceResolve)
+	}
+	// Should have returned exactly one arm cmd, not a run cmd (i.e. dotsLoading should stay false)
+	if len(cmds) != 1 {
+		t.Errorf("expected 1 arm cmd after switching strategy, got %d cmds", len(cmds))
+	}
+	if m.dotsLoading {
+		t.Error("dotsLoading should be false — strategy switch should not fire the operation")
+	}
+}
+
+func TestFlow_UC67_DotForceResolveAll_NoConflictsIsNoop(t *testing.T) {
+	m, _ := newDotsModelForCmdsReady(t)
+	m.dotsEntries = []app.DotStatus{
+		{Name: "nvim", Health: app.HealthOK, State: app.DotStateSynced},
+	}
+
+	cmds := m.handleDotsForceResolveAllKeyMsg(app.DotResolveUseRepo)
+	if cmds != nil {
+		t.Errorf("expected nil cmds for no-conflict model, got %v", cmds)
+	}
+	if m.dotsForceResolve != "" {
+		t.Errorf("dotsForceResolve = %q, want empty for no-conflict model", m.dotsForceResolve)
+	}
+}
+
+func TestFlow_UC67_DotForceResolveAll_ClearActiveConfirmationClearsArm(t *testing.T) {
+	m, _ := newDotsModelForCmdsReady(t)
+	m.dotsEntries = twoConflictEntries()
+
+	m.handleDotsForceResolveAllKeyMsg(app.DotResolveUseRepo)
+	if m.dotsForceResolve == "" {
+		t.Fatal("setup: dotsForceResolve should be set before clear")
+	}
+	m.clearActiveConfirmation()
+	if m.dotsForceResolve != "" {
+		t.Errorf("dotsForceResolve = %q, want empty after clearActiveConfirmation", m.dotsForceResolve)
+	}
+	if m.hasActiveConfirmation() {
+		t.Error("hasActiveConfirmation() = true, want false after clearActiveConfirmation")
+	}
+}
+
+func TestFlow_UC67_DotsConflictHints_BulkKeysVisibleWhenMultipleConflicts(t *testing.T) {
+	m := conflictDotsModel(twoConflictEntries())
+	hints := dotsConflictHintItems(m)
+
+	repoAllKey := m.keys.DotUseRepoAll.Help().Key
+	localAllKey := m.keys.DotUseLocalAll.Help().Key
+
+	var foundRepoAll, foundLocalAll bool
+	for _, h := range hints {
+		if h.key == repoAllKey {
+			foundRepoAll = true
+		}
+		if h.key == localAllKey {
+			foundLocalAll = true
+		}
+	}
+	if !foundRepoAll {
+		t.Errorf("DotUseRepoAll hint (%q) missing from dotsConflictHintItems with 2 conflicts; hints = %#v", repoAllKey, hints)
+	}
+	if !foundLocalAll {
+		t.Errorf("DotUseLocalAll hint (%q) missing from dotsConflictHintItems with 2 conflicts; hints = %#v", localAllKey, hints)
+	}
+}
+
+func TestFlow_UC67_DotsConflictHints_BulkKeysHiddenWithSingleConflict(t *testing.T) {
+	m := conflictDotsModel([]app.DotStatus{
+		{Name: "gitconfig", Health: app.HealthConflict, State: app.DotStateConflict, Actions: []app.DotAction{app.DotActionUseRepo, app.DotActionUseLocal}},
+	})
+	hints := dotsConflictHintItems(m)
+
+	repoAllKey := m.keys.DotUseRepoAll.Help().Key
+	localAllKey := m.keys.DotUseLocalAll.Help().Key
+
+	for _, h := range hints {
+		if h.key == repoAllKey {
+			t.Errorf("DotUseRepoAll hint (%q) should NOT appear with only 1 conflict; hints = %#v", repoAllKey, hints)
+		}
+		if h.key == localAllKey {
+			t.Errorf("DotUseLocalAll hint (%q) should NOT appear with only 1 conflict; hints = %#v", localAllKey, hints)
+		}
+	}
+}
+
+func TestFlow_UC67_DotsConflictHints_BulkKeysHiddenWithNoConflicts(t *testing.T) {
+	m := conflictDotsModel([]app.DotStatus{
+		{Name: "nvim", Health: app.HealthOK, State: app.DotStateSynced},
+	})
+	// dotsConflictHintItems is only shown for conflict rows, but dotsConflictCount
+	// guards the bulk hints; verify they don't appear even if called directly.
+	hints := dotsConflictHintItems(m)
+
+	repoAllKey := m.keys.DotUseRepoAll.Help().Key
+	localAllKey := m.keys.DotUseLocalAll.Help().Key
+
+	for _, h := range hints {
+		if h.key == repoAllKey {
+			t.Errorf("DotUseRepoAll hint (%q) should NOT appear with 0 conflicts; hints = %#v", repoAllKey, hints)
+		}
+		if h.key == localAllKey {
+			t.Errorf("DotUseLocalAll hint (%q) should NOT appear with 0 conflicts; hints = %#v", localAllKey, hints)
+		}
+	}
+}
+
+func TestFlow_UC67_DotForceResolveAll_AppNilIsNoop(t *testing.T) {
+	// baseModel has no app wired; handleDotsForceResolveAllKeyMsg should return nil
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.dotsLoaded = true
+	setDotsRepoForTest(&m, "/repo")
+	m.dotsEntries = twoConflictEntries()
+	// app is nil on baseModel
+	cmds := m.handleDotsForceResolveAllKeyMsg(app.DotResolveUseRepo)
+	if cmds != nil {
+		t.Errorf("expected nil cmds when m.app == nil, got %v", cmds)
+	}
+}
+
+func TestFlow_UC67_DotForceResolveAll_KeyDispatch_UArmsViaUpdate(t *testing.T) {
+	// Drive through the real Update() dispatch with an app-backed model.
+	m, _ := newDotsModelForCmdsReady(t)
+	m.dotsEntries = twoConflictEntries()
+
+	got := drive(m, pressRune('U'))
+	if got.dotsForceResolve != "use_repo" {
+		t.Errorf("dotsForceResolve = %q, want use_repo after pressing U", got.dotsForceResolve)
+	}
+	if !got.hasActiveConfirmation() {
+		t.Error("hasActiveConfirmation() = false after first U press")
+	}
+}
+
+func TestFlow_UC67_DotForceResolveAll_KeyDispatch_LArmsViaUpdate(t *testing.T) {
+	m, _ := newDotsModelForCmdsReady(t)
+	m.dotsEntries = twoConflictEntries()
+
+	got := drive(m, pressRune('L'))
+	if got.dotsForceResolve != "use_local" {
+		t.Errorf("dotsForceResolve = %q, want use_local after pressing L", got.dotsForceResolve)
+	}
+}
+
+func TestFlow_UC67_DotForceResolveAll_KeyDispatch_SecondUFires(t *testing.T) {
+	m, _ := newDotsModelForCmdsReady(t)
+	m.dotsEntries = twoConflictEntries()
+
+	got := drive(m, pressRune('U'), pressRune('U'))
+	if got.dotsForceResolve != "" {
+		t.Errorf("dotsForceResolve = %q, want empty after second U (operation fired)", got.dotsForceResolve)
+	}
+	if !got.dotsLoading {
+		t.Error("dotsLoading should be true after second U press fires the operation")
+	}
+}
+
+func TestFlow_UC67_DotForceResolveAll_DotsConflictCount(t *testing.T) {
+	t.Run("counts only conflict entries", func(t *testing.T) {
+		m := conflictDotsModel([]app.DotStatus{
+			{Name: "a", State: app.DotStateConflict},
+			{Name: "b", State: app.DotStateSynced},
+			{Name: "c", State: app.DotStateConflict},
+		})
+		if got := dotsConflictCount(m); got != 2 {
+			t.Errorf("dotsConflictCount = %d, want 2", got)
+		}
+	})
+
+	t.Run("zero conflicts", func(t *testing.T) {
+		m := conflictDotsModel([]app.DotStatus{
+			{Name: "a", State: app.DotStateSynced},
+		})
+		if got := dotsConflictCount(m); got != 0 {
+			t.Errorf("dotsConflictCount = %d, want 0", got)
+		}
+	})
+
+	t.Run("empty entries", func(t *testing.T) {
+		m := conflictDotsModel(nil)
+		if got := dotsConflictCount(m); got != 0 {
+			t.Errorf("dotsConflictCount = %d, want 0 for empty entries", got)
+		}
+	})
+}
+
+func TestFlow_UC67_DotForceResolveAll_KeyDispatch_SwitchRearms(t *testing.T) {
+	// Press L (arm use_local), then U (should re-arm use_repo, not fire).
+	m, _ := newDotsModelForCmdsReady(t)
+	m.dotsEntries = twoConflictEntries()
+
+	got := drive(m, pressRune('L'))
+	if got.dotsForceResolve != "use_local" {
+		t.Fatalf("setup: dotsForceResolve = %q, want use_local", got.dotsForceResolve)
+	}
+	got = drive(got, pressRune('U'))
+	if got.dotsForceResolve != "use_repo" {
+		t.Errorf("dotsForceResolve = %q, want use_repo after switching from L to U", got.dotsForceResolve)
+	}
+	if got.dotsLoading {
+		t.Error("dotsLoading should be false — strategy switch should not fire the operation")
+	}
+}
+
+func TestFlow_UC67_DotForceResolveAll_KeyDispatch_U_NoConflicts(t *testing.T) {
+	// Pressing U when there are no conflicts is a no-op even through real Update().
+	m, _ := newDotsModelForCmdsReady(t)
+	m.dotsEntries = []app.DotStatus{
+		{Name: "nvim", Health: app.HealthOK, State: app.DotStateSynced},
+	}
+
+	got := drive(m, pressRune('U'))
+	if got.dotsForceResolve != "" {
+		t.Errorf("dotsForceResolve = %q, want empty when no conflicts", got.dotsForceResolve)
+	}
+	if got.dotsLoading {
+		t.Error("dotsLoading should be false when no conflicts")
+	}
+}
+
+// ── UC-66 (existing) ──────────────────────────────────────────────────────────
+
+func TestFlow_UC66_DotChildExtractHintVisible(t *testing.T) {
+	t.Run("g/edit-groups hint appears for extractable child row", func(t *testing.T) {
+		m := dotsModelWithChild("nvim", false)
+		visible := dotsVisibleRows(m)
+		childIdx := -1
+		for i, row := range visible {
+			if row.isChild {
+				childIdx = i
+				break
+			}
+		}
+		if childIdx < 0 {
+			t.Fatal("expected a child row in visible rows, found none")
+		}
+		m.dotsCursor = childIdx
+
+		hints := dotsRowHintItems(m)
+		moveGroupKey := m.keys.MoveGroup.Help().Key
+		found := false
+		for _, h := range hints {
+			if h.key == moveGroupKey {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("dotsRowHintItems did not include MoveGroup key %q for extractable child; hints = %#v", moveGroupKey, hints)
+		}
+	})
+
+	t.Run("g/edit-groups hint does NOT appear for ignored child row", func(t *testing.T) {
+		m := dotsModelWithChild("nvim", true /* ignored */)
+		visible := dotsVisibleRows(m)
+		childIdx := -1
+		for i, row := range visible {
+			if row.isChild {
+				childIdx = i
+				break
+			}
+		}
+		if childIdx < 0 {
+			t.Fatal("expected a child row in visible rows, found none")
+		}
+		m.dotsCursor = childIdx
+
+		hints := dotsRowHintItems(m)
+		moveGroupKey := m.keys.MoveGroup.Help().Key
+		for _, h := range hints {
+			if h.key == moveGroupKey {
+				t.Errorf("dotsRowHintItems should NOT include MoveGroup hint for ignored child; hints = %#v", hints)
+				break
+			}
+		}
+	})
 }

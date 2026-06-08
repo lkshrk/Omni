@@ -56,15 +56,17 @@ type KeyMap struct {
 	GroupNext key.Binding // } — cycle group filter forward
 
 	// Dots tab actions
-	DotRefresh  key.Binding // R — refresh status and discover candidates
-	DotPull     key.Binding // p — git pull + resync (command palette only)
-	DotDelete   key.Binding // d — delete dots entry (confirm required)
-	DotAdd      key.Binding // a — adopt a new path into the dots repo
-	DotVariant  key.Binding // v — create/remove host-specific package variant
-	DotIgnore   key.Binding // x — add an ignore pattern for the selected entry
-	DotUseRepo  key.Binding // u — resolve conflict with repo version
-	DotUseLocal key.Binding // l — resolve conflict with local version
-	DotCommit   key.Binding // C — commit dotfiles (global)
+	DotRefresh     key.Binding // R — refresh status and discover candidates
+	DotPull        key.Binding // p — git pull + resync (command palette only)
+	DotDelete      key.Binding // d — delete dots entry (confirm required)
+	DotAdd         key.Binding // a — adopt a new path into the dots repo
+	DotVariant     key.Binding // v — create/remove host-specific package variant
+	DotIgnore      key.Binding // x — add an ignore pattern for the selected entry
+	DotUseRepo     key.Binding // u — resolve conflict with repo version
+	DotUseLocal    key.Binding // l — resolve conflict with local version
+	DotUseRepoAll  key.Binding // U — force-resolve all conflicts with repo version
+	DotUseLocalAll key.Binding // L — force-resolve all conflicts with local version
+	DotCommit      key.Binding // C — commit dotfiles (global)
 
 	// Out-of-sync actions
 	PinProvider key.Binding // p — pin provider scope
@@ -82,7 +84,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Top, k.Bottom, k.HalfPageUp, k.HalfPageDown, k.PageUp, k.PageDown, k.Tab},
 		{k.Install, k.Upgrade, k.UpgradeAll, k.SyncAll, k.DotCommit, k.Claim, k.MoveGroup, k.PinProvider, k.MigrateProvider, k.Fallback, k.Ignore, k.Delete, k.Refresh},
-		{k.DotRefresh, k.DotAdd, k.DotDelete, k.DotVariant, k.DotIgnore, k.DotUseRepo, k.DotUseLocal, k.Reconcile, k.ApplySolution},
+		{k.DotRefresh, k.DotAdd, k.DotDelete, k.DotVariant, k.DotIgnore, k.DotUseRepo, k.DotUseLocal, k.DotUseRepoAll, k.DotUseLocalAll, k.Reconcile, k.ApplySolution},
 		{k.Search, k.PrevTab, k.NextTab, k.GroupPrev, k.GroupNext, k.Palette, k.NewGroup, k.HostGroups, k.GroupTools, k.GroupDots, k.Rename, k.Help, k.Quit},
 	}
 }
@@ -263,6 +265,14 @@ func DefaultKeyMap() KeyMap {
 		DotUseLocal: key.NewBinding(
 			key.WithKeys("l"),
 			key.WithHelp("l", actions.MustTUILabel(actions.DotsResolveUseLocal)),
+		),
+		DotUseRepoAll: key.NewBinding(
+			key.WithKeys("U"),
+			key.WithHelp("U", actions.MustTUILabel(actions.DotsResolveAllUseRepo)),
+		),
+		DotUseLocalAll: key.NewBinding(
+			key.WithKeys("L"),
+			key.WithHelp("L", actions.MustTUILabel(actions.DotsResolveAllUseLocal)),
 		),
 		DotCommit: key.NewBinding(
 			key.WithKeys("C"),
