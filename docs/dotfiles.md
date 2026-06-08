@@ -138,6 +138,31 @@ omni dots resolve nvim --use-local
 Use repo when the dotfiles repo should replace local content. Use local when
 the current machine has the desired content and the repo should be updated.
 
+Force-resolve every conflict in one pass instead of per entry:
+
+```sh
+omni dots sync --use-repo    # keep the repo version for all conflicts
+omni dots sync --use-local   # adopt the local version for all conflicts
+```
+
+A per-entry `on_conflict` policy still wins over the sync-wide flag. In the TUI,
+press `U` (use repo) or `L` (use local) on the dots tab to force-resolve all
+conflicts at once; both prompt for confirmation.
+
+## Extract A Subdirectory
+
+Split a subdirectory out of a tracked directory entry into its own entry so it
+can belong to a different group than its parent:
+
+```sh
+omni dots extract nvim lua/plugins --group work
+omni dots extract nvim lua/plugins --group work --name nvim-plugins
+```
+
+The parent stops managing the subtree (an `ignore` is added) and the subtree is
+adopted as a new entry assigned to `--group` (default: this host's group). In
+the TUI, expand an entry and press `g` on a child sub-path row to do the same.
+
 ## Git Workflow
 
 ```sh

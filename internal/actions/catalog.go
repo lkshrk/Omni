@@ -34,6 +34,8 @@ const (
 	DotsDelete                     ID = "dots.delete"
 	DotsResolveUseRepo             ID = "dots.resolve_use_repo"
 	DotsResolveUseLocal            ID = "dots.resolve_use_local"
+	DotsResolveAllUseRepo          ID = "dots.resolve_all_use_repo"
+	DotsResolveAllUseLocal         ID = "dots.resolve_all_use_local"
 	DotsIgnore                     ID = "dots.ignore"
 	DotsEnable                     ID = "dots.enable"
 	DotsDisable                    ID = "dots.disable"
@@ -420,7 +422,7 @@ var Dots = []Action{
 		LongDescription: "Repair managed dotfile symlinks without pulling or pushing git changes.",
 		Mutates:         true,
 		TUI:             &TUIBinding{KeyMapField: "Sync", DefaultKey: "s", Label: "sync dotfiles", Description: "Repair managed dotfile symlinks."},
-		CLI:             []CLIBinding{{Command: []string{"dots", "sync"}, Flags: []string{"--dry-run"}}},
+		CLI:             []CLIBinding{{Command: []string{"dots", "sync"}, Flags: []string{"--dry-run", "--use-repo", "--use-local"}}},
 		Palette:         &PaletteBinding{Command: []string{"dots", "sync"}, Description: "repair dotfile symlinks (no git)"},
 		PaletteEligible: true,
 	},
@@ -457,7 +459,10 @@ var Dots = []Action{
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresToolName, RequiresGroupAssignment},
 		TUI:             &TUIBinding{KeyMapField: "MoveGroup", DefaultKey: "g", Label: LabelMoveGroup, Description: "Move the selected dotfile entry to another group."},
-		CLI:             []CLIBinding{{Command: []string{"dots", "groups"}, Flags: []string{"--move", "--remove"}}},
+		CLI: []CLIBinding{
+			{Command: []string{"dots", "groups"}, Flags: []string{"--move", "--remove"}},
+			{Command: []string{"dots", "extract"}, Flags: []string{"--group", "--name"}},
+		},
 	},
 	{
 		ID:              DotsVariant,
@@ -515,6 +520,32 @@ var Dots = []Action{
 		Requirements:       []Requirement{RequiresToolName},
 		TUI:                &TUIBinding{KeyMapField: "DotUseLocal", DefaultKey: "l", Label: "use local", Description: "Resolve the selected conflict with the local version.", ConfirmDescription: "confirm use local"},
 		CLI:                []CLIBinding{{Command: []string{"dots", "resolve"}, Flags: []string{"--use-local"}}},
+	},
+	{
+		ID:                 DotsResolveAllUseRepo,
+		Domain:             "dots",
+		Scope:              ScopeGlobal,
+		Label:              "use repo (all)",
+		Description:        "Force-resolve every dots conflict with the repo version.",
+		LongDescription:    "Run a sync that relinks the repo version over the local target for every conflicting dots entry, backing up local content first.",
+		Mutates:            true,
+		RequiresConfirm:    true,
+		ConfirmDescription: "confirm use repo for all",
+		TUI:                &TUIBinding{KeyMapField: "DotUseRepoAll", DefaultKey: "U", Label: "use repo (all)", Description: "Force-resolve every conflict with the repo version.", ConfirmDescription: "confirm use repo for all"},
+		CLI:                []CLIBinding{{Command: []string{"dots", "sync"}, Flags: []string{"--use-repo"}}},
+	},
+	{
+		ID:                 DotsResolveAllUseLocal,
+		Domain:             "dots",
+		Scope:              ScopeGlobal,
+		Label:              "use local (all)",
+		Description:        "Force-resolve every dots conflict with the local version.",
+		LongDescription:    "Run a sync that adopts the local content into the repository for every conflicting dots entry, then relinks the managed targets.",
+		Mutates:            true,
+		RequiresConfirm:    true,
+		ConfirmDescription: "confirm use local for all",
+		TUI:                &TUIBinding{KeyMapField: "DotUseLocalAll", DefaultKey: "L", Label: "use local (all)", Description: "Force-resolve every conflict with the local version.", ConfirmDescription: "confirm use local for all"},
+		CLI:                []CLIBinding{{Command: []string{"dots", "sync"}, Flags: []string{"--use-local"}}},
 	},
 	{
 		ID:              DotsIgnore,

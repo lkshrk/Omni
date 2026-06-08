@@ -1,0 +1,49 @@
+# dots sync --use-repo force-resolves ALL conflicting entries in one pass
+# @requires: stow
+env HOME=$WORK/home
+exec git init $WORK/home/dotfiles
+exec git -C $WORK/home/dotfiles config user.email t@t.com
+exec git -C $WORK/home/dotfiles config user.name T
+exec git -C $WORK/home/dotfiles config commit.gpgsign false
+
+# Make both entries conflict: repo file NEWER than local file → content conflict
+exec touch -t 202001010000 home/.config/alpha/alpha.conf
+exec touch -t 202001010100 home/dotfiles/dotfiles/alpha/.config/alpha/alpha.conf
+exec touch -t 202001010000 home/.config/beta/beta.conf
+exec touch -t 202001010100 home/dotfiles/dotfiles/beta/.config/beta/beta.conf
+
+# dots sync without a flag must fail when conflicts exist
+! exec omni -y --config settings.json dots sync
+stderr 'requires choosing'
+
+# dots sync --use-repo repairs all conflicts in one pass
+exec omni -y --config settings.json dots sync --use-repo
+stdout 'repaired'
+stdout 'symlink\(s\) updated'
+
+# Both entries should now be Synced (no conflict)
+exec omni --config settings.json dots status
+stdout 'Synced'
+! stdout 'conflict'
+
+# Local symlinks resolve to repo content
+exec cat home/.config/alpha/alpha.conf
+stdout 'repo-alpha'
+exec cat home/.config/beta/beta.conf
+stdout 'repo-beta'
+
+# Error: both flags together is not allowed
+! exec omni -y --config settings.json dots sync --use-repo --use-local
+stderr 'choose at most one'
+
+-- settings.json --
+{"host_settings":{"testhost":{"dots_repo":"~/dotfiles"}},"hosts":{"testhost":[]},"groups":[{"name":"testhost","special":"host","dots":[{"name":"alpha","path":"~/.config/alpha"},{"name":"beta","path":"~/.config/beta"}]}]}
+
+-- home/dotfiles/dotfiles/alpha/.config/alpha/alpha.conf --
+repo-alpha
+-- home/.config/alpha/alpha.conf --
+local-alpha
+-- home/dotfiles/dotfiles/beta/.config/beta/beta.conf --
+repo-beta
+-- home/.config/beta/beta.conf --
+local-beta

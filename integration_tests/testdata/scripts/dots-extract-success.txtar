@@ -1,0 +1,47 @@
+# dots extract splits a subdirectory out of a parent entry into its own new entry in a different group
+# @requires: stow
+env HOME=$WORK/home
+exec git init $WORK/home/dotfiles
+exec git -C $WORK/home/dotfiles config user.email t@t.com
+exec git -C $WORK/home/dotfiles config user.name T
+exec git -C $WORK/home/dotfiles config commit.gpgsign false
+
+# Seed the parent package files
+exec omni -y --config settings.json dots sync
+stdout 'symlink\(s\) updated'
+
+# Extract lua/plugins into its own entry in the "work" group
+exec omni -y --config settings.json dots extract nvim lua/plugins --group work
+stdout 'linked'
+stdout 'symlink\(s\) updated'
+
+# The new package file exists and resolves correctly
+exec cat home/.config/nvim/lua/plugins/work.lua
+stdout '-- work'
+exists home/dotfiles/dotfiles/nvim-plugins/.config/nvim/lua/plugins/work.lua
+exec cat home/dotfiles/dotfiles/nvim-plugins/.config/nvim/lua/plugins/work.lua
+stdout '-- work'
+
+# The subtree is removed from the parent package
+! exists home/dotfiles/dotfiles/nvim/.config/nvim/lua/plugins/work.lua
+
+# The remaining parent files still resolve
+exec cat home/.config/nvim/init.lua
+stdout '-- init'
+exec cat home/.config/nvim/lua/core.lua
+stdout '-- core'
+
+# The new entry appears in settings.json under the work group
+exec cat settings.json
+stdout 'nvim-plugins'
+stdout 'work'
+
+-- settings.json --
+{"host_settings":{"testhost":{"dots_repo":"~/dotfiles"}},"hosts":{"testhost":[]},"groups":[{"name":"testhost","special":"host","dots":[{"name":"nvim","path":"~/.config/nvim"}]},{"name":"work"}]}
+
+-- home/dotfiles/dotfiles/nvim/.config/nvim/init.lua --
+-- init
+-- home/dotfiles/dotfiles/nvim/.config/nvim/lua/core.lua --
+-- core
+-- home/dotfiles/dotfiles/nvim/.config/nvim/lua/plugins/work.lua --
+-- work

@@ -431,6 +431,9 @@ func dotsRowHintItems(m Model) []hintItem {
 	if !row.isChild && len(m.dotMemberships[entry.Name]) > 0 {
 		hints = append(hints, hintFromBindingDesc(m.keys.MoveGroup, actions.MustTUILabel(actions.DotsEditGroups)))
 	}
+	if dotsChildExtractable(row) {
+		hints = append(hints, hintFromBindingDesc(m.keys.MoveGroup, actions.MustTUILabel(actions.DotsEditGroups)))
+	}
 	if dotsVariantEligible(row) {
 		hints = append(hints, hintFromBinding(m.keys.DotVariant))
 	}
@@ -483,6 +486,12 @@ func dotsConflictHintItems(m Model) []hintItem {
 	}
 	if app.DotStatusHasAction(entry, app.DotActionRemove) {
 		hints = append(hints, hintFromBinding(m.keys.DotDelete))
+	}
+	if dotsConflictCount(m) > 1 {
+		hints = append(hints,
+			hintFromBindingDesc(m.keys.DotUseRepoAll, actions.MustTUILabel(actions.DotsResolveAllUseRepo)),
+			hintFromBindingDesc(m.keys.DotUseLocalAll, actions.MustTUILabel(actions.DotsResolveAllUseLocal)),
+		)
 	}
 	return hints
 }

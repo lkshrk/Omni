@@ -90,6 +90,9 @@ func (m *Model) handleDotsSyncedMsg(msg dotsSyncedMsg) []tea.Cmd {
 		cmds = append(cmds, cmd)
 	}
 	m.continueDashboardReconcile(dashboardReconcilePlanSyncDots, msg.err, &cmds)
+	if !m.dashboardReconcileRunning && !m.launchBatchActive && m.mode == viewStatus {
+		m.refreshDoctorAfterFix(&cmds)
+	}
 	m.refreshDotsHistory(&cmds)
 	return cmds
 }
@@ -230,6 +233,9 @@ func (m *Model) handleDotsCommittedMsg(msg dotsCommittedMsg) []tea.Cmd {
 		cmds = append(cmds, setStatus(m, "✓ committed", false))
 	}
 	m.continueDashboardReconcile(dashboardReconcilePlanCommitDots, msg.err, &cmds)
+	if !m.dashboardReconcileRunning && m.mode == viewStatus {
+		m.refreshDoctorAfterFix(&cmds)
+	}
 	m.refreshDotsHistory(&cmds)
 	return cmds
 }
@@ -580,6 +586,16 @@ func (m *Model) doDotsResolve(name string, strategy app.DotsResolveStrategy) tea
 		result, err := a.DotsResolveConflictWithState(ctx, name, strategy)
 		entries, gitStatus, memberships := dotsSnapshotFromState(result)
 		return dotsFixedMsg{gen: gen, name: name, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: err}
+	}
+}
+
+func (m *Model) doDotsForceResolveAll(strategy app.DotsResolveStrategy) tea.Cmd {
+	a := m.app
+	ctx, gen := m.currentDotsOperation()
+	return func() tea.Msg {
+		result, err := a.DotsForceResolveAllWithState(ctx, strategy)
+		entries, gitStatus, memberships := dotsSnapshotFromState(result)
+		return dotsFixedMsg{gen: gen, name: "all conflicts", entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: err}
 	}
 }
 

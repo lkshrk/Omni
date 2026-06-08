@@ -104,6 +104,7 @@ Common tool flags:
 | `omni dots sync [name]` | Create or repair symlinks. |
 | `omni dots delete <name>` | Delete a dots entry from management. |
 | `omni dots resolve <name>` | Resolve a conflict with `--use-repo` or `--use-local`. |
+| `omni dots extract <parent> <subpath>` | Split a subdirectory into its own entry/group. |
 | `omni dots ignore <name> [pattern]` | Ignore an entry or path pattern. |
 | `omni dots unignore <name> [pattern]` | Include an entry or remove an ignore pattern. |
 | `omni dots groups <name>` | Show or move a dots entry group assignment. |
@@ -136,7 +137,8 @@ Common dot flags:
 | `--ignore <pattern>` | `dots add` | Add child ignore patterns while creating the entry. |
 | `--move <group>` | `dots groups` | Replace the entry's assignment with one group. |
 | `--remove <group>[,<group>]` | `dots groups` | Remove assignments from the entry. |
-| `--use-repo`, `--use-local` | `dots resolve` | Choose the source of truth for a conflict. |
+| `--use-repo`, `--use-local` | `dots resolve`, `dots sync` | Choose the source of truth for a conflict. On `dots sync` they force-resolve every conflict at once. |
+| `--group <group>`, `--name <name>` | `dots extract` | Target group for the new entry, and an optional name override. |
 
 ## Groups Commands
 

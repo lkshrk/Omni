@@ -31,6 +31,7 @@ Set the repo path via 'omni ui' (Dots tab) or settings.dots_repo in settings.jso
 		newDotsVariantCmd(state),
 		newDotsDeleteCmd(state),
 		newDotsResolveCmd(state),
+		newDotsExtractCmd(state),
 		newDotsIgnoreCmd(state),
 		newDotsUnignoreCmd(state),
 		newDotsListCmd(state),
@@ -127,6 +128,8 @@ func ensureDotsStowForCLI(cmd *cobra.Command, state *rootState) error {
 
 func newDotsSyncCmd(state *rootState) *cobra.Command {
 	var dryRun bool
+	var useRepo bool
+	var useLocal bool
 
 	cmd := &cobra.Command{
 		Use:   "sync [name]",
@@ -136,10 +139,30 @@ func newDotsSyncCmd(state *rootState) *cobra.Command {
 			if err := requireDotsConfigured(state); err != nil {
 				return err
 			}
+			if useRepo && useLocal {
+				return fmt.Errorf("choose at most one of --use-repo or --use-local")
+			}
+			conflictStrategy := ""
+			switch {
+			case useRepo:
+				conflictStrategy = "use_repo"
+			case useLocal:
+				conflictStrategy = "use_local"
+			}
+			if conflictStrategy != "" && !dryRun {
+				side := "the repo version over local targets"
+				if useLocal {
+					side = "local content into the repo"
+				}
+				ok, err := confirmAction(cmd, state, fmt.Sprintf("Force-resolve all dots conflicts by relinking %s?", side))
+				if err != nil || !ok {
+					return err
+				}
+			}
 			if err := ensureDotsStowForCLI(cmd, state); err != nil {
 				return err
 			}
-			opts := dots.SyncOptions{DryRun: dryRun}
+			opts := dots.SyncOptions{DryRun: dryRun, ConflictStrategy: conflictStrategy}
 			var (
 				ops []dots.Op
 				err error
@@ -161,6 +184,8 @@ func newDotsSyncCmd(state *rootState) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be done without making changes")
+	cmd.Flags().BoolVar(&useRepo, "use-repo", false, "Force-resolve every conflict by keeping the repo version")
+	cmd.Flags().BoolVar(&useLocal, "use-local", false, "Force-resolve every conflict by adopting the local version")
 	return cmd
 }
 
@@ -518,6 +543,39 @@ func newDotsResolveCmd(state *rootState) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&useRepo, "use-repo", false, "Keep the repo version and replace the local target")
 	cmd.Flags().BoolVar(&useLocal, "use-local", false, "Copy the local target into the repo and relink it")
+	cmd.ValidArgsFunction = completeDotNames(state)
+	return cmd
+}
+
+// ─── dots extract ─────────────────────────────────────────────────────────────
+
+func newDotsExtractCmd(state *rootState) *cobra.Command {
+	var group string
+	var name string
+	cmd := &cobra.Command{
+		Use:   "extract <parent> <subpath>",
+		Short: "Split a subdirectory of a dots entry into its own entry/group",
+		Long: "Extract a subdirectory out of a tracked directory entry into a new dot entry " +
+			"so it can belong to a different group than its parent. The parent stops " +
+			"managing the subtree (an ignore is added) and the subtree is adopted as a new entry.",
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireDotsConfigured(state); err != nil {
+				return err
+			}
+			if err := ensureDotsStowForCLI(cmd, state); err != nil {
+				return err
+			}
+			ops, err := state.app.DotsExtract(cmd.Context(), args[0], args[1], app.DotsExtractOptions{
+				Name:  name,
+				Group: group,
+			})
+			printDotOps(cmd, ops, false)
+			return err
+		},
+	}
+	cmd.Flags().StringVarP(&group, "group", "g", "", "Group for the new entry (default: this host's group; created if missing)")
+	cmd.Flags().StringVar(&name, "name", "", "Name for the new entry (default: derived from parent and subpath)")
 	cmd.ValidArgsFunction = completeDotNames(state)
 	return cmd
 }

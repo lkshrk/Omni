@@ -38,7 +38,8 @@ func (m *Model) hasActiveConfirmation() bool {
 		m.dotsOverwriteIdx >= 0 ||
 		m.dotsLocalIdx >= 0 ||
 		m.dotsIgnoreIdx >= 0 ||
-		m.dotsVariantIdx >= 0
+		m.dotsVariantIdx >= 0 ||
+		m.dotsForceResolve != ""
 }
 
 func (m *Model) clearActiveConfirmation() {
@@ -61,6 +62,7 @@ func (m *Model) clearActiveConfirmation() {
 	m.dotsLocalIdx = -1
 	m.dotsIgnoreIdx = -1
 	m.dotsVariantIdx = -1
+	m.dotsForceResolve = ""
 	m.dotsVariantMode = dotsVariantNone
 	m.stowInstallVariant = dotsVariantRequest{}
 	if wipeStatus {

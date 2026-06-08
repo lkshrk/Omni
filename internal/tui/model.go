@@ -338,17 +338,22 @@ type Model struct {
 	pickerMembershipKind  string
 	pickerMembershipName  string
 	pickerMembershipKey   string
-	pickerActionTool      database.ToolCache
-	pickerActionToolSet   bool
-	pickerOriginalGroups  []string
-	pickerCreatedGroups   []string
-	scopeOptions          []scopeOption
-	scopeCursor           int
-	scopeTarget           database.ToolCache
-	scopeTargetSet        bool
-	fallbackTarget        database.ToolCache
-	fallbackTargetSet     bool
-	fallbackEditor        fallbackEditorState
+	// pickerDotExtract* are set when the group popup was opened on a child
+	// sub-path row: confirming extracts the subtree into a new entry assigned to
+	// the picked groups instead of editing an existing entry's membership.
+	pickerDotExtractParent string
+	pickerDotExtractSub    string
+	pickerActionTool       database.ToolCache
+	pickerActionToolSet    bool
+	pickerOriginalGroups   []string
+	pickerCreatedGroups    []string
+	scopeOptions           []scopeOption
+	scopeCursor            int
+	scopeTarget            database.ToolCache
+	scopeTargetSet         bool
+	fallbackTarget         database.ToolCache
+	fallbackTargetSet      bool
+	fallbackEditor         fallbackEditorState
 
 	// setup wizard step (0 = create config?, 1 = import tools?, 2 = provider
 	// selection, 3 = node manager, 4 = unused, 5 = enable dotfiles?, 6 = dots
@@ -438,11 +443,12 @@ type Model struct {
 	dotsProgressCh         chan dotsProgressUpdate
 	dotsPendingNames       map[string]bool
 	dotsActiveName         string
-	dotsConfirmIdx         int // index of entry pending delete confirm; -1 = none
-	dotsOverwriteIdx       int // index of conflict entry pending use-repo confirm; -1 = none
-	dotsLocalIdx           int // index of conflict entry pending use-local confirm; -1 = none
-	dotsIgnoreIdx          int // index of child path pending ignore/include confirm; -1 = none
-	dotsVariantIdx         int // index of entry pending host variant choice/removal; -1 = none
+	dotsConfirmIdx         int    // index of entry pending delete confirm; -1 = none
+	dotsOverwriteIdx       int    // index of conflict entry pending use-repo confirm; -1 = none
+	dotsLocalIdx           int    // index of conflict entry pending use-local confirm; -1 = none
+	dotsForceResolve       string // "use_repo"/"use_local" when a force-resolve-all is armed; "" = none
+	dotsIgnoreIdx          int    // index of child path pending ignore/include confirm; -1 = none
+	dotsVariantIdx         int    // index of entry pending host variant choice/removal; -1 = none
 	dotsVariantMode        dotsVariantMode
 	dotsPeek               *dotsPeekState
 	dotsPeekLoading        bool

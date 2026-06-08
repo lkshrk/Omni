@@ -118,6 +118,7 @@ Important flags:
 | `omni dots add <path>` | no | Config, files, dot repo, cache | `omni dots discover` |
 | `omni dots delete <name>` | no | Config, files, dot repo, cache | `omni dots status <name>` |
 | `omni dots resolve <name>` | no | Files, dot repo, cache | `omni dots status <name>` |
+| `omni dots extract <parent> <subpath>` | no | Config, files, dot repo, cache | `omni dots status <parent>` |
 | `omni dots ignore <name> [pattern]` | no | Config | `omni dots status <name>` |
 | `omni dots unignore <name> [pattern]` | no | Config | `omni dots list <name>` |
 | `omni dots groups <name>` | no | Config | `omni dots list <name>` |
@@ -148,7 +149,18 @@ omni dots resolve <name> --use-local
 ```
 
 Use `--use-repo` when the dotfiles repo is correct. Use `--use-local` when the
-current local files are correct.
+current local files are correct. Force-resolve every conflict in one pass with
+`omni dots sync --use-repo` or `--use-local` (per-entry `on_conflict` still
+wins); in the TUI, `U`/`L` on the dots tab do the same.
+
+Split a subdirectory into its own entry/group:
+
+```sh
+omni dots extract nvim lua/plugins --group work
+```
+
+The parent stops managing the subtree and it is adopted as a new entry in
+`--group`.
 
 Group assignment edits are also explicit:
 
