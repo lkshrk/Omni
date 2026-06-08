@@ -505,8 +505,10 @@ func (p *Provider) OutdatedByManager(ctx context.Context) (map[string]map[string
 	}
 	for i := range supported {
 		if supported[i].binary != effectiveBinary {
+			// A broken fill-in backend (e.g. an externally-managed pip) must not
+			// fail the whole outdated check when the effective backend succeeded.
 			if err := probeBackend(&supported[i]); err != nil {
-				return nil, err
+				continue
 			}
 		}
 	}

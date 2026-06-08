@@ -407,6 +407,7 @@ func (p *Provider) OutdatedByManager(ctx context.Context) (map[string]map[string
 
 	result := make(map[string]map[string]string)
 	var errs []error
+	anyOK := false
 	probe := func(m *mgr) {
 		if _, _, err := p.exec.Run(ctx, m.binary, "--version"); err != nil {
 			return
@@ -416,6 +417,7 @@ func (p *Provider) OutdatedByManager(ctx context.Context) (map[string]map[string
 			errs = append(errs, err)
 			return
 		}
+		anyOK = true // succeeded, even if it found nothing outdated
 		if len(outdated) > 0 {
 			result[m.binary] = outdated
 		}
@@ -427,7 +429,10 @@ func (p *Provider) OutdatedByManager(ctx context.Context) (map[string]map[string
 			probe(&supported[i])
 		}
 	}
-	if len(result) > 0 {
+	// A broken manager (e.g. pnpm whose global bin dir is not in PATH) must not
+	// fail the whole check: succeed as long as any manager reported, and only
+	// error when every available manager failed.
+	if anyOK {
 		return result, nil
 	}
 	if len(errs) > 0 {
