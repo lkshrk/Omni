@@ -376,20 +376,35 @@ func renderSettings(m Model) string {
 				[]rowCell{rightCell(p.styleProvider.Render("[editing]"), 0)},
 				contentW, settingsMinGap, listColumnGap,
 			) + "\n")
-			prItems := make([]any, len(m.priorityDraft))
 			for j, name := range m.priorityDraft {
-				label := name
-				if m.priorityAvailable != nil && !m.priorityAvailable[name] {
-					label += p.styleHelp.Render("  (n/a)")
+				cursorOn := j == m.priorityCursor
+				enum := " "
+				if cursorOn {
+					if m.priorityHolding {
+						enum = "⇅"
+					} else {
+						enum = "‣"
+					}
 				}
+				dot := "●"
 				if m.priorityDisabled[name] {
-					label += p.styleMissing.Render("  (off)")
+					dot = "○"
 				}
-				prItems[j] = label
+				unavailable := m.priorityAvailable != nil && !m.priorityAvailable[name]
+				style := p.styleNormal
+				switch {
+				case cursorOn:
+					style = p.styleActiveText
+				case unavailable || m.priorityDisabled[name]:
+					style = p.styleHelp // dim: unavailable on this host or toggled off
+				}
+				write("    " + style.Render(enum+" "+dot+" "+name) + "\n")
 			}
-			prl := newCursorList(p, prItems, m.priorityCursor, 4)
-			write(prl.String() + "\n")
-			write(renderContextHints(m, hintCtxSettingsPriorityEdit, hintPrefix) + "\n")
+			hintCtx := hintCtxSettingsPriorityEdit
+			if m.priorityHolding {
+				hintCtx = hintCtxSettingsPriorityHold
+			}
+			write(renderContextHints(m, hintCtx, hintPrefix) + "\n")
 			continue
 		}
 

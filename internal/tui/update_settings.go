@@ -83,46 +83,54 @@ func (m *Model) handleSettingsSubmodeKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cm
 
 func (m *Model) handleSettingsPriorityKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	var cmds []tea.Cmd
-	switch msg.String() {
-	case "j":
-		if m.priorityCursor < len(m.priorityDraft)-1 {
-			m.priorityCursor++
-		}
-	case "k":
-		if m.priorityCursor > 0 {
+	s := msg.String()
+	up := s == "k" || key.Matches(msg, m.keys.Up)
+	down := s == "j" || key.Matches(msg, m.keys.Down)
+	switch {
+	case up:
+		// While holding, movement carries the grabbed provider; otherwise it moves
+		// the cursor.
+		if m.priorityHolding {
+			if m.priorityCursor > 0 {
+				i := m.priorityCursor
+				m.priorityDraft[i], m.priorityDraft[i-1] = m.priorityDraft[i-1], m.priorityDraft[i]
+				m.priorityCursor--
+			}
+		} else if m.priorityCursor > 0 {
 			m.priorityCursor--
 		}
-	case "J":
-		if m.priorityCursor < len(m.priorityDraft)-1 {
-			i := m.priorityCursor
-			m.priorityDraft[i], m.priorityDraft[i+1] = m.priorityDraft[i+1], m.priorityDraft[i]
+	case down:
+		if m.priorityHolding {
+			if m.priorityCursor < len(m.priorityDraft)-1 {
+				i := m.priorityCursor
+				m.priorityDraft[i], m.priorityDraft[i+1] = m.priorityDraft[i+1], m.priorityDraft[i]
+				m.priorityCursor++
+			}
+		} else if m.priorityCursor < len(m.priorityDraft)-1 {
 			m.priorityCursor++
 		}
-	case "K":
-		if m.priorityCursor > 0 {
-			i := m.priorityCursor
-			m.priorityDraft[i], m.priorityDraft[i-1] = m.priorityDraft[i-1], m.priorityDraft[i]
-			m.priorityCursor--
+	case key.Matches(msg, m.keys.Toggle): // space: grab / drop the provider under the cursor
+		if len(m.priorityDraft) > 0 {
+			m.priorityHolding = !m.priorityHolding
 		}
-	default:
-		switch {
-		case key.Matches(msg, m.keys.Toggle):
-			if m.priorityCursor >= 0 && m.priorityCursor < len(m.priorityDraft) {
-				name := m.priorityDraft[m.priorityCursor]
-				if m.priorityDisabled == nil {
-					m.priorityDisabled = make(map[string]bool)
-				}
-				m.priorityDisabled[name] = !m.priorityDisabled[name]
+	case s == "x": // toggle the provider on/off (browse mode only)
+		if !m.priorityHolding && m.priorityCursor >= 0 && m.priorityCursor < len(m.priorityDraft) {
+			name := m.priorityDraft[m.priorityCursor]
+			if m.priorityDisabled == nil {
+				m.priorityDisabled = make(map[string]bool)
 			}
-		case key.Matches(msg, m.keys.Confirm):
-			change := app.SetProviderLayout(m.priorityDraft, m.priorityDisabledList())
-			if m.applySettingsChange(change) {
-				m.editingPriority = false
-				m.appendSaveSettingsChangeCmd(&cmds, change)
-			}
-		case key.Matches(msg, m.keys.Back):
+			m.priorityDisabled[name] = !m.priorityDisabled[name]
+		}
+	case key.Matches(msg, m.keys.Confirm):
+		change := app.SetProviderLayout(m.priorityDraft, m.priorityDisabledList())
+		if m.applySettingsChange(change) {
 			m.editingPriority = false
+			m.priorityHolding = false
+			m.appendSaveSettingsChangeCmd(&cmds, change)
 		}
+	case key.Matches(msg, m.keys.Back):
+		m.editingPriority = false
+		m.priorityHolding = false
 	}
 	return cmds
 }
@@ -318,6 +326,7 @@ func (m *Model) startSettingsPriorityEdit() {
 		m.priorityAvailable = m.app.AvailableConcreteProviderSet(context.Background())
 	}
 	m.priorityCursor = 0
+	m.priorityHolding = false
 	m.editingPriority = true
 }
 

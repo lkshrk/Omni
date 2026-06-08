@@ -1471,12 +1471,12 @@ func TestFlow_UC36_PriorityEditor(t *testing.T) {
 		}
 	})
 
-	t.Run("J swaps item down", func(t *testing.T) {
-		msgs := append(toPriority(), pressEnter(), pressRune('J'))
+	t.Run("grab+j+drop carries item down", func(t *testing.T) {
+		msgs := append(toPriority(), pressEnter(), pressRune(' '), pressRune('j'), pressRune(' '))
 		got := drive(baseModel(nil), msgs...)
-		// Default draft is [brew, apt, apk, ...]; J at cursor=0 swaps brew↓apt.
+		// Default draft is [brew, apt, apk, ...]; grab+j+drop carries brew↓ → [apt, brew, apk, ...].
 		if len(got.priorityDraft) < 2 || got.priorityDraft[0] != "apt" || got.priorityDraft[1] != "brew" {
-			t.Errorf("priorityDraft = %v after J, want [apt brew ...]", got.priorityDraft)
+			t.Errorf("priorityDraft = %v after grab+j+drop, want [apt brew ...]", got.priorityDraft)
 		}
 	})
 
@@ -1494,14 +1494,15 @@ func TestFlow_UC36_PriorityEditor(t *testing.T) {
 	})
 
 	t.Run("Enter saves reordered priority", func(t *testing.T) {
-		msgs := append(toPriority(), pressEnter(), pressRune('J'), pressEnter())
+		// Reorder via grab+j+drop: [brew, apt, apk, ...] → [apt, brew, apk, ...], then confirm.
+		msgs := append(toPriority(), pressEnter(), pressRune(' '), pressRune('j'), pressRune(' '), pressEnter())
 		got := drive(baseModel(nil), msgs...)
 		if got.editingPriority {
 			t.Error("editingPriority should be false after enter")
 		}
-		// After J at cursor=0, draft is [apt, brew, apk, ...]; Confirm persists that order.
+		// After grab+j+drop at cursor=0, draft is [apt, brew, apk, ...]; Confirm persists that order.
 		if got := got.settings.ProviderPriority; len(got) == 0 || got[0] != "apt" {
-			t.Errorf("provider_priority = %v after enter+J, want apt first", got)
+			t.Errorf("provider_priority = %v after grab+j+drop+enter, want apt first", got)
 		}
 	})
 }
