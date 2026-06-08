@@ -1536,6 +1536,36 @@ func TestProviderMatches_SortsHighConfidenceByProviderPriority(t *testing.T) {
 	}
 }
 
+func TestSearchForDisplay_DedupsSharedStoreAndSorts(t *testing.T) {
+	mk := func(name string) *searchStub {
+		return &searchStub{
+			stubProvider: stubProvider{name: name, available: true},
+			results:      []provider.SearchResult{{Name: "prettier", Provider: name}},
+		}
+	}
+	// bun/pnpm/npm share the node store; brew is a separate ecosystem.
+	a, _ := newImportApp(t, mk("bun"), mk("pnpm"), mk("npm"), mk("brew"))
+	if err := a.SaveSettings(context.Background(), config.Settings{ProviderPriority: []string{"brew", "bun", "pnpm", "npm"}}); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+
+	results, err := a.SearchForDisplay(context.Background(), "prettier", "")
+	if err != nil {
+		t.Fatalf("SearchForDisplay: %v", err)
+	}
+	// node managers collapse to one row; brew stays distinct → 2 rows.
+	if len(results) != 2 {
+		t.Fatalf("SearchForDisplay returned %d rows, want 2: %+v", len(results), results)
+	}
+	// brew has the highest priority rank → first; node row keeps its winner (bun).
+	if results[0].Provider != "brew" {
+		t.Errorf("first = %q, want brew (priority winner)", results[0].Provider)
+	}
+	if results[1].Provider != "bun" {
+		t.Errorf("second = %q, want bun (node store collapsed to highest priority)", results[1].Provider)
+	}
+}
+
 func TestProviderMatches_PutsHighConfidenceBeforeWeakEvenWhenPriorityIsLower(t *testing.T) {
 	brew := &searchStub{
 		stubProvider: stubProvider{name: "brew", available: true},
