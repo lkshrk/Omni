@@ -513,6 +513,11 @@ func (a *App) ConcreteProviderPriorityOptions() []string {
 	opts := provider.BuiltinConcreteProviderPriorityNames()
 	for _, eco := range []string{provider.EcosystemSystem, provider.EcosystemNode, provider.EcosystemPython} {
 		for _, name := range a.ConcreteProviderNamesForEcosystem(eco) {
+			// Skip aliases (e.g. pip3 → pip): they would duplicate their canonical
+			// provider, which is already in the builtin list.
+			if config.NormalizeConcreteProvider(name) != name {
+				continue
+			}
 			if !slices.Contains(opts, name) {
 				opts = append(opts, name)
 			}
