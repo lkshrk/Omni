@@ -2505,7 +2505,7 @@ func TestModel_PriorityEditor_RenderUnavailable(t *testing.T) {
 	m.mode = viewSettings
 	m.width = 120
 	m.height = 50
-	out := stripANSIEscapeSequences(renderSettings(m))
+	out := stripANSIEscapeSequences(m.viewString())
 	// The new design uses greying (dim style) rather than "(n/a)" text.
 	if strings.Contains(out, "(n/a)") {
 		t.Errorf("'(n/a)' text should not appear; unavailable rows are greyed: got:\n%s", out)
@@ -2533,7 +2533,7 @@ func TestModel_PriorityEditor_RenderDisabled(t *testing.T) {
 	m.mode = viewSettings
 	m.width = 120
 	m.height = 50
-	out := stripANSIEscapeSequences(renderSettings(m))
+	out := stripANSIEscapeSequences(m.viewString())
 	// New design uses ○ dot for disabled, not "(off)" text.
 	if strings.Contains(out, "(off)") {
 		t.Errorf("'(off)' text should not appear; disabled rows show ○ dot: got:\n%s", out)
