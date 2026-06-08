@@ -5685,14 +5685,14 @@ func TestSettingsSet_RejectsInvalidManagerAndPriority(t *testing.T) {
 		want string
 	}{
 		{
-			name: "invalid node manager",
+			name: "node.manager no longer settable",
 			args: []string{"settings", "set", "node.manager", "uv"},
-			want: `"uv" is not a manager for ecosystem "node"`,
+			want: "no longer settable",
 		},
 		{
-			name: "ecosystem in system priority",
-			args: []string{"settings", "set", "system.priority", "system"},
-			want: `"system" is not a concrete provider for ecosystem "system"`,
+			name: "system.priority no longer settable",
+			args: []string{"settings", "set", "system.priority", "brew"},
+			want: "no longer settable",
 		},
 	} {
 		cmd := NewRootCmd()

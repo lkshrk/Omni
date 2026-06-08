@@ -40,9 +40,6 @@ func (a *App) QuerySettings(key string) (map[string]any, error) {
 		"auto_import":                settings.AutoImport,
 		"update_quarantine":          settings.UpdateQuarantine,
 		"provider_update_quarantine": settings.ProviderUpdateQuarantine,
-		"node.manager":               settings.EcosystemManager(provider.EcosystemNode),
-		"python.manager":             settings.EcosystemManager(provider.EcosystemPython),
-		"system.priority":            settings.EcosystemPriority(provider.EcosystemSystem),
 		"dots_repo":                  settings.DotsRepo,
 		"dots_disabled":              settings.DotsDisabled,
 		"dots_git.auto_commit":       settings.DotsGit.AutoCommit,
@@ -342,24 +339,11 @@ func (a *App) applySettingValue(settings *config.Settings, key, value string) (s
 			return "", err
 		}
 		settings.UpdateQuarantine = value
-	case provider.EcosystemNode + ".manager":
-		manager, err := a.parseSettingManager(provider.EcosystemNode, value)
-		if err != nil {
-			return "", err
-		}
-		settings.SetEcosystemManager(provider.EcosystemNode, manager)
-	case provider.EcosystemPython + ".manager":
-		manager, err := a.parseSettingManager(provider.EcosystemPython, value)
-		if err != nil {
-			return "", err
-		}
-		settings.SetEcosystemManager(provider.EcosystemPython, manager)
-	case provider.EcosystemSystem + ".priority":
-		priority, err := a.parseSystemPriority(value)
-		if err != nil {
-			return "", err
-		}
-		settings.SetEcosystemPriority(provider.EcosystemSystem, priority)
+	case "provider_priority":
+		settings.ProviderPriority = a.filterConcreteProviderPriority(splitCommaList(value))
+		a.deriveEcosystemManagers(settings)
+	case provider.EcosystemNode + ".manager", provider.EcosystemPython + ".manager", provider.EcosystemSystem + ".priority":
+		return "", fmt.Errorf("%q is derived from provider_priority and is no longer settable; set provider_priority instead (e.g. omni settings set provider_priority brew,bun,uv)", canonical)
 	case "dots_repo":
 		settings.DotsRepo = value
 	case "dots_git.auto_commit":
@@ -624,25 +608,15 @@ func (a *App) parseSettingManager(ecosystem, value string) (string, error) {
 	return "", fmt.Errorf("%q is not a manager for ecosystem %q (supported: %s)", value, ecosystem, strings.Join(a.ManagerNames(ecosystem), ", "))
 }
 
-func (a *App) parseSystemPriority(value string) ([]string, error) {
-	raw := strings.Split(value, ",")
-	priority := make([]string, 0, len(raw))
-	seen := make(map[string]struct{}, len(raw))
-	for _, part := range raw {
-		name := strings.TrimSpace(part)
-		if name == "" {
-			return nil, fmt.Errorf("system.priority contains an empty provider")
+func splitCommaList(value string) []string {
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if t := strings.TrimSpace(part); t != "" {
+			out = append(out, t)
 		}
-		if _, ok := seen[name]; ok {
-			return nil, fmt.Errorf("system.priority contains duplicate provider %q", name)
-		}
-		if !a.IsConcreteProviderForEcosystem(provider.EcosystemSystem, name) {
-			return nil, fmt.Errorf("%q is not a concrete provider for ecosystem %q (supported: %s)", name, provider.EcosystemSystem, strings.Join(a.ConcreteProviderNamesForEcosystem(provider.EcosystemSystem), ", "))
-		}
-		seen[name] = struct{}{}
-		priority = append(priority, name)
 	}
-	return priority, nil
+	return out
 }
 
 // filterDisablableProviders keeps only valid (concrete or family) provider

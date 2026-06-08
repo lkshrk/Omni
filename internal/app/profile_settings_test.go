@@ -250,36 +250,24 @@ func TestApplySettingsChange_DraftSemantics(t *testing.T) {
 		t.Fatal("auto_import should toggle on")
 	}
 
-	got, _, err = a.ApplySettingsChange(context.Background(), got, app.SetSettingValue("node.manager", "pnpm"))
+	// provider_priority is the single source of truth; node/python managers derive from it.
+	got, _, err = a.ApplySettingsChange(context.Background(), got, app.SetSettingValue("provider_priority", "brew,pnpm,npm,uv,pip,bogus"))
 	if err != nil {
-		t.Fatalf("ApplySettingsChange node.manager: %v", err)
+		t.Fatalf("ApplySettingsChange provider_priority: %v", err)
+	}
+	if want := "brew,pnpm,npm,uv,pip"; strings.Join(got.ProviderPriority, ",") != want {
+		t.Fatalf("provider_priority = %v, want %s (bogus filtered)", got.ProviderPriority, want)
 	}
 	if manager := got.EcosystemManager(provider.EcosystemNode); manager != "pnpm" {
-		t.Fatalf("node manager = %q, want pnpm", manager)
-	}
-
-	got, _, err = a.ApplySettingsChange(context.Background(), got, app.SetSettingValue("python.manager", "uv"))
-	if err != nil {
-		t.Fatalf("ApplySettingsChange python.manager: %v", err)
+		t.Fatalf("derived node manager = %q, want pnpm", manager)
 	}
 	if manager := got.EcosystemManager(provider.EcosystemPython); manager != "uv" {
-		t.Fatalf("python manager = %q, want uv", manager)
+		t.Fatalf("derived python manager = %q, want uv", manager)
 	}
 
-	got, _, err = a.ApplySettingsChange(context.Background(), got, app.SetSettingValue("python.manager", "pip"))
-	if err != nil {
-		t.Fatalf("ApplySettingsChange python.manager alias: %v", err)
-	}
-	if manager := got.EcosystemManager(provider.EcosystemPython); manager != "pip3" {
-		t.Fatalf("python manager alias = %q, want pip3", manager)
-	}
-
-	got, _, err = a.ApplySettingsChange(context.Background(), got, app.SetSystemPriority([]string{"brew", "missing", "apt", "brew"}))
-	if err != nil {
-		t.Fatalf("ApplySettingsChange system priority: %v", err)
-	}
-	if priority := got.EcosystemPriority(provider.EcosystemSystem); strings.Join(priority, ",") != "brew,apt" {
-		t.Fatalf("system priority = %v, want [brew apt]", priority)
+	// The legacy per-ecosystem setters are no longer settable.
+	if _, _, err := a.ApplySettingsChange(context.Background(), got, app.SetSettingValue("node.manager", "bun")); err == nil {
+		t.Fatal("node.manager should no longer be settable")
 	}
 
 	got, _, err = a.ApplySettingsChange(context.Background(), got, app.ToggleSettingsProvider(provider.EcosystemNode))
@@ -871,10 +859,8 @@ func TestSaveSettingsChange_PersistsHostAndGlobalSettings(t *testing.T) {
 
 	for _, change := range []app.SettingsChange{
 		app.SetSettingValue("auto_import", "true"),
-		app.SetSettingValue("node.manager", "bun"),
-		app.SetSettingValue("python.manager", "uv"),
-		app.SetSystemPriority([]string{"brew"}),
-		app.ToggleSettingsProvider(provider.EcosystemNode),
+		app.SetSettingValue("provider_priority", "bun,npm,uv,pip,brew"),
+		app.ToggleSettingsProvider("npm"),
 		app.ToggleSettingBool("dots_git.auto_push"),
 	} {
 		if _, err := a.SaveSettingsChange(context.Background(), change); err != nil {
@@ -893,17 +879,15 @@ func TestSaveSettingsChange_PersistsHostAndGlobalSettings(t *testing.T) {
 		t.Fatal("global settings.dots_git.auto_push should persist")
 	}
 	host := cfg.HostSettings["settings-change-host"]
+	if strings.Join(host.ProviderPriority, ",") != "bun,npm,uv,pip,brew" {
+		t.Fatalf("host provider_priority = %v, want [bun npm uv pip brew]", host.ProviderPriority)
+	}
+	// node manager derived from priority order (bun leads node).
 	if manager := host.EcosystemManager(provider.EcosystemNode); manager != "bun" {
-		t.Fatalf("host node manager = %q, want bun", manager)
+		t.Fatalf("host node manager = %q, want bun (derived)", manager)
 	}
-	if manager := host.EcosystemManager(provider.EcosystemPython); manager != "uv" {
-		t.Fatalf("host python manager = %q, want uv", manager)
-	}
-	if priority := host.EcosystemPriority(provider.EcosystemSystem); strings.Join(priority, ",") != "brew" {
-		t.Fatalf("host system priority = %v, want [brew]", priority)
-	}
-	if !slices.Contains(host.DisabledProviders, provider.EcosystemNode) {
-		t.Fatalf("host disabled providers = %v, want node disabled", host.DisabledProviders)
+	if !slices.Contains(host.DisabledProviders, "npm") {
+		t.Fatalf("host disabled providers = %v, want npm disabled", host.DisabledProviders)
 	}
 }
 
@@ -918,7 +902,7 @@ func TestSaveSettingsChanges_AppliesBatchToCurrentConfig(t *testing.T) {
 
 	settings, _, err := a.SaveSettingsChanges(
 		context.Background(),
-		app.SetSettingValue("node.manager", "pnpm"),
+		app.SetSettingValue("provider_priority", "pnpm,npm,uv,pip,brew"),
 		app.ToggleSettingBool("dots_git.auto_push"),
 	)
 	if err != nil {
@@ -928,7 +912,7 @@ func TestSaveSettingsChanges_AppliesBatchToCurrentConfig(t *testing.T) {
 		t.Fatal("returned settings should preserve current config auto_import")
 	}
 	if manager := settings.EcosystemManager(provider.EcosystemNode); manager != "pnpm" {
-		t.Fatalf("returned node manager = %q, want pnpm", manager)
+		t.Fatalf("returned node manager = %q, want pnpm (derived)", manager)
 	}
 
 	cfg, err := config.Load(cfgPath)
@@ -941,8 +925,8 @@ func TestSaveSettingsChanges_AppliesBatchToCurrentConfig(t *testing.T) {
 	if !cfg.Settings.DotsGit.AutoPush {
 		t.Fatal("settings.dots_git.auto_push should persist")
 	}
-	if manager := cfg.HostSettings["settings-batch-host"].EcosystemManager(provider.EcosystemNode); manager != "pnpm" {
-		t.Fatalf("host node manager = %q, want pnpm", manager)
+	if got := strings.Join(cfg.HostSettings["settings-batch-host"].ProviderPriority, ","); got != "pnpm,npm,uv,pip,brew" {
+		t.Fatalf("host provider_priority = %q, want pnpm,npm,uv,pip,brew", got)
 	}
 }
 
@@ -1244,9 +1228,7 @@ func TestSetSetting_PersistsParsedValues(t *testing.T) {
 		value string
 	}{
 		{key: "auto-import", value: "true"},
-		{key: "node.manager", value: "pnpm"},
-		{key: "python.manager", value: "uv"},
-		{key: "system.priority", value: "brew,apt"},
+		{key: "provider_priority", value: "pnpm,npm,uv,pip,brew"},
 		{key: "dots_repo", value: "$HOME/dotfiles"},
 		{key: "dots_git.auto_commit", value: "true"},
 		{key: "dots_git.auto_push", value: "true"},
@@ -1266,14 +1248,15 @@ func TestSetSetting_PersistsParsedValues(t *testing.T) {
 		t.Fatalf("global settings = %+v, want enabled auto import and dots git flags", settings)
 	}
 	hostSettings := cfg.HostSettings["testhost"]
+	if got := strings.Join(hostSettings.ProviderPriority, ","); got != "pnpm,npm,uv,pip,brew" {
+		t.Fatalf("provider_priority = %q, want pnpm,npm,uv,pip,brew", got)
+	}
+	// managers derived from priority order.
 	if got := hostSettings.EcosystemManager(provider.EcosystemNode); got != "pnpm" {
-		t.Fatalf("node manager = %q, want pnpm", got)
+		t.Fatalf("node manager = %q, want pnpm (derived)", got)
 	}
 	if got := hostSettings.EcosystemManager(provider.EcosystemPython); got != "uv" {
-		t.Fatalf("python manager = %q, want uv", got)
-	}
-	if got := hostSettings.EcosystemPriority(provider.EcosystemSystem); len(got) != 2 || got[0] != "brew" || got[1] != "apt" {
-		t.Fatalf("system priority = %v, want [brew apt]", got)
+		t.Fatalf("python manager = %q, want uv (derived)", got)
 	}
 	if got := hostSettings.DotsRepo; got != "~/dotfiles" {
 		t.Fatalf("dots repo = %q, want ~/dotfiles", got)
@@ -1288,8 +1271,7 @@ func TestSetSetting_RejectsInvalidValues(t *testing.T) {
 		want  string
 	}{
 		{key: "auto_import", value: "yes please", want: "auto_import must be true or false"},
-		{key: "node.manager", value: "uv", want: `"uv" is not a manager for ecosystem "node"`},
-		{key: "system.priority", value: "system", want: `"system" is not a concrete provider for ecosystem "system"`},
+		{key: "node.manager", value: "uv", want: "no longer settable"},
 		{key: "missing", value: "true", want: `unknown setting "missing"`},
 	}
 	for _, tt := range tests {
