@@ -306,7 +306,6 @@ func contextHintItems(m Model, ctx hintContext) []hintItem {
 		}
 	case hintCtxSettingsPriorityEdit:
 		return []hintItem{
-			rawHint("↑/↓", "move"),
 			hintFromBindingDesc(m.keys.Toggle, "grab"),
 			rawHint("x", "on/off"),
 			hintFromBindingDesc(m.keys.Confirm, "save"),
