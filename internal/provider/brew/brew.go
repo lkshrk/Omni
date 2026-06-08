@@ -48,10 +48,33 @@ func (p *Provider) Install(ctx context.Context, tool provider.Tool) error {
 	defer p.mu.Unlock()
 	args := installArgs(tool)
 	_, stderr, err := p.exec.Run(ctx, "brew", args...)
-	if err != nil {
-		return fmt.Errorf("brew %s: %w (stderr: %s)", strings.Join(args, " "), err, strings.TrimSpace(stderr))
+	if err == nil {
+		return nil
 	}
-	return nil
+	// When the kind is unspecified and brew refuses because the name is both a
+	// formula and a cask, retry explicitly — formula first (the common CLI case),
+	// then cask. Tools added via search/import already carry brew_kind and skip
+	// this path.
+	if tool.Options[brewKindOption] == "" && isBrewAmbiguousFormulaCask(stderr) {
+		for _, kind := range []string{"--formula", "--cask"} {
+			retry := []string{"install", kind, tool.EffectivePackage()}
+			if _, rstderr, rerr := p.exec.Run(ctx, "brew", retry...); rerr == nil {
+				return nil
+			} else {
+				args, err, stderr = retry, rerr, rstderr
+			}
+		}
+	}
+	return fmt.Errorf("brew %s: %w (stderr: %s)", strings.Join(args, " "), err, strings.TrimSpace(stderr))
+}
+
+// isBrewAmbiguousFormulaCask reports whether brew refused an unqualified install
+// because the name resolves to both a formula and a cask.
+func isBrewAmbiguousFormulaCask(stderr string) bool {
+	s := strings.ToLower(stderr)
+	return strings.Contains(s, "both a formula and a cask") ||
+		strings.Contains(s, "please specify") && strings.Contains(s, "cask") ||
+		strings.Contains(s, "provided by multiple")
 }
 
 func installArgs(tool provider.Tool) []string {
@@ -239,7 +262,12 @@ func (p *Provider) installedCasks(ctx context.Context) ([]provider.InstalledTool
 	tools := make([]provider.InstalledTool, 0, len(tokens))
 	for _, token := range tokens {
 		tools = append(tools, provider.InstalledTool{
-			Tool:    provider.Tool{Name: token, Provider: "brew", Package: token},
+			Tool: provider.Tool{
+				Name:     token,
+				Provider: "brew",
+				Package:  token,
+				Options:  map[string]string{brewKindOption: brewKindCask},
+			},
 			Version: lookupBrewListVersion(versions, token),
 		})
 	}
@@ -483,7 +511,9 @@ type brewOutdatedOutput struct {
 func (p *Provider) OutdatedMap(ctx context.Context) (map[string]string, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	stdout, _, err := p.exec.Run(ctx, "brew", "outdated", "--json=v2")
+	// --greedy includes casks that auto-update or pin to :latest; without it
+	// `brew outdated` silently skips them, so those casks would never be flagged.
+	stdout, _, err := p.exec.Run(ctx, "brew", "outdated", "--json=v2", "--greedy")
 	if err != nil {
 		return nil, fmt.Errorf("brew outdated: %w", err)
 	}
