@@ -250,6 +250,7 @@ var configMigrations = []configMigration{
 	{from: 5, to: 6, apply: migrateConfigV5ToV6, applyRaw: migrateRawConfigV5ToV6},
 	{from: 6, to: 7, apply: migrateConfigV6ToV7, applyRaw: migrateRawConfigV6ToV7},
 	{from: 7, to: 8, apply: migrateConfigV7ToV8, applyRaw: migrateRawConfigV7ToV8},
+	{from: 8, to: 9, apply: migrateConfigV8ToV9, applyRaw: migrateRawConfigV8ToV9},
 }
 
 func configMigrationFrom(version int) (configMigration, bool) {

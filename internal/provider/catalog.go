@@ -204,6 +204,41 @@ func BuiltinSystemProviderPriorityNames() []string {
 	return append([]string(nil), systemProviderPriority...)
 }
 
+// BuiltinConcreteProviderPriorityNames returns every concrete package-manager
+// provider, ordered by DisplayOrder, suitable as the default host
+// provider-priority list. The special "script" provider and the "pip3" alias of
+// "pip" are excluded — they are not user-prioritizable package managers.
+func BuiltinConcreteProviderPriorityNames() []string {
+	return sortedMetadataNames(builtinMetadata, func(name string, meta Metadata) bool {
+		if meta.Kind != ProviderKindConcrete {
+			return false
+		}
+		if name == "script" || name == "pip3" {
+			return false
+		}
+		return true
+	})
+}
+
+// BuiltinConcreteProvidersForEcosystem returns the concrete providers belonging
+// to the given ecosystem family ("system"/"node"/"python"), ordered by
+// DisplayOrder. Used to expand a family-level disable into concrete providers.
+// The "pip3" alias is excluded in favour of "pip".
+func BuiltinConcreteProvidersForEcosystem(ecosystem string) []string {
+	if ecosystem == "" {
+		return nil
+	}
+	return sortedMetadataNames(builtinMetadata, func(name string, meta Metadata) bool {
+		if meta.Kind != ProviderKindConcrete || meta.Ecosystem != ecosystem {
+			return false
+		}
+		if name == "script" || name == "pip3" {
+			return false
+		}
+		return true
+	})
+}
+
 func MergeKnownNames(registered []string) []string {
 	seen := make(map[string]struct{})
 	merged := append([]string(nil), BuiltinKnownNames()...)
