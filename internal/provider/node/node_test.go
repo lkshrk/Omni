@@ -514,6 +514,33 @@ func TestInstalledByManager_AvailableManagerListFailureReturnsError(t *testing.T
 	}
 }
 
+func TestInstalledByManager_FillInManagerFailureTolerated(t *testing.T) {
+	// bun is effective and works; pnpm is available but its global list fails
+	// (e.g. pnpm global bin dir not in PATH → exit 1). A broken fill-in manager
+	// must not abort detection for the effective manager and other backends.
+	bunOut := listOutput("context-mode@1.0.0")
+	npmOut := listOutput("yaml-lint@1.7.0")
+	m := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "bun --version", Response: executor.MockCall{Stdout: "1.3.8"}},
+		executor.MatchRule{Pattern: "bun pm ls -g", Response: executor.MockCall{Stdout: bunOut}},
+		executor.MatchRule{Pattern: "pnpm --version", Response: executor.MockCall{Stdout: "10.0.0"}},
+		executor.MatchRule{Pattern: "pnpm ls -g --depth=0", Response: executor.MockCall{Err: errors.New("global bin dir not in PATH")}},
+		executor.MatchRule{Pattern: "npm --version", Response: executor.MockCall{Stdout: "11.0.0"}},
+		executor.MatchRule{Pattern: "npm list -g --depth=0", Response: executor.MockCall{Stdout: npmOut}},
+	)
+	p := node.New(m, "bun")
+	got, err := p.InstalledByManager(context.Background())
+	if err != nil {
+		t.Fatalf("InstalledByManager: %v", err)
+	}
+	if got["context-mode"].ConcreteManager != "bun" {
+		t.Errorf("context-mode manager = %q, want bun (effective survives broken fill-in)", got["context-mode"].ConcreteManager)
+	}
+	if got["yaml-lint"].ConcreteManager != "npm" {
+		t.Errorf("yaml-lint manager = %q, want npm (other fill-in still probed)", got["yaml-lint"].ConcreteManager)
+	}
+}
+
 func TestInstalledByManager_BunEmptyGlobalTolerated(t *testing.T) {
 	// bun exits non-zero when the global install dir is empty (fresh workspace).
 	// That must not abort the sync — treat it as "no globals", not a fatal error.

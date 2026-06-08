@@ -355,10 +355,13 @@ func (p *Provider) InstalledByManager(ctx context.Context) (map[string]provider.
 		}
 	}
 	// Remaining managers fill in tools not owned by the effective manager.
+	// A fill-in manager that fails to list (e.g. pnpm's global bin dir not in
+	// PATH → exit 1) must not abort detection: skip it and keep the effective
+	// manager's attribution plus whatever other backends report.
 	for i := range supported {
 		if supported[i].binary != effectiveBinary {
 			if err := probeManager(&supported[i]); err != nil {
-				return nil, err
+				continue
 			}
 		}
 	}

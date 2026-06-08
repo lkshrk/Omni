@@ -362,10 +362,12 @@ func (p *Provider) InstalledByManager(ctx context.Context) (map[string]provider.
 		}
 	}
 	// Remaining backends fill in tools not owned by the effective manager.
+	// A fill-in backend that fails to list must not abort detection: skip it and
+	// keep the effective backend's attribution plus whatever else reports.
 	for i := range supported {
 		if supported[i].binary != effectiveBinary {
 			if err := probeBackend(&supported[i]); err != nil {
-				return nil, err
+				continue
 			}
 		}
 	}
