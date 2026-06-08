@@ -946,36 +946,6 @@ func TestFlow2_UC85b_DotsOldDiscoverKeyNoop(t *testing.T) {
 
 // ── Group E — Settings Tab ────────────────────────────────────────────────────
 
-// UC-86: Row 5 → NodeManager cycles.
-func TestFlow2_UC86_SettingsNodeManager(t *testing.T) {
-	msgs := append(toSettings(), nj(5)...)
-	msgs = append(msgs, pressRune(' '))
-	got := drive(baseModel(nil), msgs...)
-	if got.settings.EcosystemManager("node") == "" {
-		t.Error("node manager should be non-empty after cycling from row 5")
-	}
-}
-
-// UC-87: Row 6 → PythonManager cycles.
-func TestFlow2_UC87_SettingsPythonManager(t *testing.T) {
-	msgs := append(toSettings(), nj(6)...)
-	msgs = append(msgs, pressRune(' '))
-	got := drive(baseModel(nil), msgs...)
-	if got.settings.EcosystemManager("python") == "" {
-		t.Error("python manager should be non-empty after cycling from row 6")
-	}
-}
-
-// UC-88: Track System row toggles the system ecosystem for this host.
-func TestFlow2_UC88_SettingsSystemProviderToggle(t *testing.T) {
-	msgs := append(toSettings(), nj(settingsRowSystemProvider)...)
-	msgs = append(msgs, pressRune(' '))
-	got := drive(baseModel(nil), msgs...)
-	if !slices.Contains(got.settings.DisabledProviders, "system") {
-		t.Errorf("expected 'system' in DisabledProviders %v", got.settings.DisabledProviders)
-	}
-}
-
 // UC-89: Commit Changes row toggles AutoCommit (only when AutoPush=false).
 func TestFlow2_UC89_SettingsAutoCommit(t *testing.T) {
 	t.Run("AutoPush=false: toggles AutoCommit", func(t *testing.T) {
@@ -1049,7 +1019,7 @@ func TestFlow2_UC93_DangerDisableDots(t *testing.T) {
 func TestFlow2_UC94_PriorityEditorKSwap(t *testing.T) {
 	// Navigate to the provider-order row, open it, move cursor down once,
 	// then K to swap up (moving item 1 to position 0).
-	msgs := append(toSettings(), nj(settingsRowSystemPriority)...)
+	msgs := append(toSettings(), nj(settingsRowProviderPriority)...)
 	msgs = append(msgs, pressEnter())                          // opens priority editor
 	msgs = append(msgs, pressRune('j'))                        // move cursor to index 1
 	msgs = append(msgs, tea.KeyPressMsg{Code: 'K', Text: "K"}) // swap up
@@ -1064,9 +1034,9 @@ func TestFlow2_UC94_PriorityEditorKSwap(t *testing.T) {
 	if len(got.priorityDraft) < 2 {
 		t.Fatal("priorityDraft should have at least 2 items")
 	}
-	// After one j (cursor=1) and K (swap up, cursor=0), priorityDraft[0] should
-	// be the item that was originally at index 1.
-	original := []string{"apt", "apk", "dnf", "zypper", "pacman", "brew"}
+	// Default draft is [brew, apt, apk, ...]. After j (cursor=1) and K (swap
+	// up, cursor=0), draft[0] is the item originally at index 1 (apt).
+	original := []string{"brew", "apt", "apk", "dnf", "pacman", "zypper", "bun", "pnpm", "npm", "uv", "pip"}
 	if got.priorityDraft[0] != original[1] {
 		t.Errorf("priorityDraft[0] = %q, want %q (swapped up)", got.priorityDraft[0], original[1])
 	}

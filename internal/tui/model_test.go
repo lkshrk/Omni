@@ -1317,68 +1317,13 @@ func TestModel_SettingsVisibleRowsMutateExpectedFields(t *testing.T) {
 			},
 		},
 		{
-			name:   "system provider order",
-			row:    settingsRowSystemPriority,
+			name:   "provider priority",
+			row:    settingsRowProviderPriority,
 			action: pressEnter(),
 			assert: func(t *testing.T, m Model) {
 				t.Helper()
 				if !m.editingPriority {
-					t.Fatalf("row %d should open provider order editor", settingsRowSystemPriority)
-				}
-			},
-		},
-		{
-			name:   "system provider",
-			row:    settingsRowSystemProvider,
-			action: pressRune(' '),
-			assert: func(t *testing.T, m Model) {
-				t.Helper()
-				if !slices.Contains(m.settings.DisabledProviders, "system") {
-					t.Fatalf("row %d should toggle system provider, disabled providers = %v", settingsRowSystemProvider, m.settings.DisabledProviders)
-				}
-			},
-		},
-		{
-			name:   "node provider",
-			row:    settingsRowNodeProvider,
-			action: pressRune(' '),
-			assert: func(t *testing.T, m Model) {
-				t.Helper()
-				if !slices.Contains(m.settings.DisabledProviders, "node") {
-					t.Fatalf("row %d should toggle node provider, disabled providers = %v", settingsRowNodeProvider, m.settings.DisabledProviders)
-				}
-			},
-		},
-		{
-			name:   "python provider",
-			row:    settingsRowPythonProvider,
-			action: pressRune(' '),
-			assert: func(t *testing.T, m Model) {
-				t.Helper()
-				if !slices.Contains(m.settings.DisabledProviders, "python") {
-					t.Fatalf("row %d should toggle python provider, disabled providers = %v", settingsRowPythonProvider, m.settings.DisabledProviders)
-				}
-			},
-		},
-		{
-			name:   "node manager",
-			row:    settingsRowNodeManager,
-			action: pressRune(' '),
-			assert: func(t *testing.T, m Model) {
-				t.Helper()
-				if got := m.settings.EcosystemManager("node"); got != "bun" {
-					t.Fatalf("row %d should cycle node manager to bun, got %q", settingsRowNodeManager, got)
-				}
-			},
-		},
-		{
-			name:   "python manager",
-			row:    settingsRowPythonManager,
-			action: pressRune(' '),
-			assert: func(t *testing.T, m Model) {
-				t.Helper()
-				if got := m.settings.EcosystemManager("python"); got != "uv" {
-					t.Fatalf("row %d should cycle python manager to uv, got %q", settingsRowPythonManager, got)
+					t.Fatalf("row %d should open provider order editor", settingsRowProviderPriority)
 				}
 			},
 		},
@@ -2373,7 +2318,7 @@ func TestModel_SettingsSavedMsg(t *testing.T) {
 
 // goToPriorityRow navigates to Settings and moves the cursor to Provider Order.
 func goToPriorityRow() []tea.Msg {
-	return append(toSettings(), nj(settingsRowSystemPriority)...)
+	return append(toSettings(), nj(settingsRowProviderPriority)...)
 }
 
 func TestModel_PriorityEditor_Open(t *testing.T) {
@@ -2382,8 +2327,8 @@ func TestModel_PriorityEditor_Open(t *testing.T) {
 	if !m.editingPriority {
 		t.Fatal("editingPriority should be true after enter on priority row")
 	}
-	if len(m.priorityDraft) != 6 {
-		t.Fatalf("priorityDraft len = %d, want 6 (default system providers)", len(m.priorityDraft))
+	if len(m.priorityDraft) != 11 {
+		t.Fatalf("priorityDraft len = %d, want 11 (all concrete providers)", len(m.priorityDraft))
 	}
 	if m.priorityCursor != 0 {
 		t.Errorf("priorityCursor = %d, want 0", m.priorityCursor)
@@ -2406,8 +2351,8 @@ func TestModel_PriorityEditor_OpenFromSettings(t *testing.T) {
 	if !m.editingPriority {
 		t.Fatal("editingPriority should be true")
 	}
-	if len(m.priorityDraft) != 6 || m.priorityDraft[0] != "brew" || m.priorityDraft[1] != "apt" {
-		t.Errorf("priorityDraft = %v, want [brew apt ...system defaults]", m.priorityDraft)
+	if len(m.priorityDraft) != 11 || m.priorityDraft[0] != "brew" || m.priorityDraft[1] != "apt" {
+		t.Errorf("priorityDraft = %v, want [brew apt ...all concrete defaults]", m.priorityDraft)
 	}
 }
 
@@ -2433,22 +2378,25 @@ func TestModel_PriorityEditor_CursorClamps(t *testing.T) {
 		t.Errorf("priorityCursor = %d, want 0 (clamped at top)", m.priorityCursor)
 	}
 
-	// j past last item — should stay at the last default system provider
-	manyJ := []tea.Msg{pressRune('j'), pressRune('j'), pressRune('j'), pressRune('j'), pressRune('j')}
+	// j past last item — should stay at the last concrete provider (index 10, 11 items)
+	manyJ := make([]tea.Msg, 15)
+	for i := range manyJ {
+		manyJ[i] = pressRune('j')
+	}
 	msgs = append(goToPriorityRow(), append([]tea.Msg{pressEnter()}, manyJ...)...)
 	m = drive(baseModel(nil), msgs...)
-	if m.priorityCursor != 5 {
-		t.Errorf("priorityCursor = %d, want 5 (clamped at bottom)", m.priorityCursor)
+	if m.priorityCursor != 10 {
+		t.Errorf("priorityCursor = %d, want 10 (clamped at bottom of 11 items)", m.priorityCursor)
 	}
 }
 
 func TestModel_PriorityEditor_ShiftJMoveDown(t *testing.T) {
-	// Open editor; default draft is the concrete system provider priority.
-	// cursor starts at 0 (apt); shift+j should swap apt down.
+	// Open editor; default draft starts [brew, apt, apk, ...].
+	// cursor starts at 0 (brew); shift+j should swap brew down with apt.
 	msgs := append(goToPriorityRow(), pressEnter(), pressRune('J'))
 	m := drive(baseModel(nil), msgs...)
-	if m.priorityDraft[0] != "apk" || m.priorityDraft[1] != "apt" {
-		t.Errorf("priorityDraft = %v after J, want [apk apt ...]", m.priorityDraft)
+	if m.priorityDraft[0] != "apt" || m.priorityDraft[1] != "brew" {
+		t.Errorf("priorityDraft = %v after J, want [apt brew ...]", m.priorityDraft)
 	}
 	if m.priorityCursor != 1 {
 		t.Errorf("priorityCursor = %d, want 1 (follows item)", m.priorityCursor)
@@ -2456,11 +2404,12 @@ func TestModel_PriorityEditor_ShiftJMoveDown(t *testing.T) {
 }
 
 func TestModel_PriorityEditor_ShiftKMoveUp(t *testing.T) {
-	// Move cursor to index 1, then shift+k should swap apk up.
+	// Default draft: [brew, apt, apk, ...]. Move cursor to index 1 (apt),
+	// then shift+k should swap apt up with brew.
 	msgs := append(goToPriorityRow(), pressEnter(), pressRune('j'), pressRune('K'))
 	m := drive(baseModel(nil), msgs...)
-	if m.priorityDraft[0] != "apk" || m.priorityDraft[1] != "apt" {
-		t.Errorf("priorityDraft = %v after j+K, want [apk apt ...]", m.priorityDraft)
+	if m.priorityDraft[0] != "apt" || m.priorityDraft[1] != "brew" {
+		t.Errorf("priorityDraft = %v after j+K, want [apt brew ...]", m.priorityDraft)
 	}
 	if m.priorityCursor != 0 {
 		t.Errorf("priorityCursor = %d, want 0 (follows item)", m.priorityCursor)
@@ -2468,41 +2417,46 @@ func TestModel_PriorityEditor_ShiftKMoveUp(t *testing.T) {
 }
 
 func TestModel_PriorityEditor_SaveOnEnter(t *testing.T) {
-	// Reorder and confirm; settings should update.
+	// Reorder and confirm; settings.ProviderPriority should update.
+	// Default draft is [brew, apt, apk, ...]; J at cursor=0 swaps brew↓apt → [apt, brew, apk, ...].
 	msgs := append(goToPriorityRow(), pressEnter(), pressRune('J'), pressEnter())
 	m := drive(baseModel(nil), msgs...)
 	if m.editingPriority {
 		t.Error("editingPriority should be false after enter")
 	}
-	if priority := m.settings.EcosystemPriority("system"); len(priority) == 0 || priority[0] != "apk" {
-		t.Errorf("system priority = %v, want [apk apt ...]", priority)
+	if priority := m.settings.ProviderPriority; len(priority) == 0 || priority[0] != "apt" {
+		t.Errorf("provider_priority = %v, want [apt brew ...]", priority)
 	}
 }
 
 func TestModel_PriorityEditor_DiscardOnEsc(t *testing.T) {
 	base := baseModel(nil)
-	base.settings = tuiSettingsWithPriority("brew", "apt", "apk")
-	// Reorder and then esc — original settings should be unchanged.
+	base.settings.ProviderPriority = []string{"brew", "apt", "apk"}
+	// Reorder and then esc — original settings.ProviderPriority should be unchanged.
 	msgs := append(goToPriorityRow(), pressEnter(), pressRune('J'), pressEsc())
 	m := drive(base, msgs...)
 	if m.editingPriority {
 		t.Error("editingPriority should be false after esc")
 	}
-	if priority := m.settings.EcosystemPriority("system"); len(priority) == 0 || priority[0] != "brew" {
-		t.Errorf("system priority = %v, want original [brew ...]", priority)
+	if got := m.settings.ProviderPriority; len(got) == 0 || got[0] != "brew" {
+		t.Errorf("provider_priority = %v, want original [brew apt apk]", got)
 	}
 }
 
-func TestModel_PriorityEditor_FiltersNonSystemProviders(t *testing.T) {
+func TestModel_PriorityEditor_SavedOrderRoundTrips(t *testing.T) {
+	// Seed ProviderPriority directly (the field the editor reads/writes).
+	// ConcreteProviderPriorityDraft with no app appends remaining catalog
+	// providers after the seeded ones, so draft = [uv, brew, apt, apk, ...].
+	// Confirm persists the full draft; first three must match the seed.
 	base := baseModel(nil)
-	base.settings = tuiSettingsWithPriority("brew", "pip", "node", "apt", "pip3", "brew")
+	base.settings.ProviderPriority = []string{"uv", "brew", "apt"}
 	msgs := append(goToPriorityRow(), pressEnter(), pressEnter())
 	m := drive(base, msgs...)
-	if got := m.settings.EcosystemPriority("system"); slices.Contains(got, "pip") || slices.Contains(got, "pip3") || slices.Contains(got, "node") {
-		t.Fatalf("system priority = %v, should not include non-system providers/managers", got)
+	if m.editingPriority {
+		t.Fatal("editingPriority should be false after enter")
 	}
-	if got := m.settings.EcosystemPriority("system"); len(got) < 2 || got[0] != "brew" || got[1] != "apt" {
-		t.Fatalf("system priority = %v, want stale list sanitized while preserving system order", got)
+	if got := m.settings.ProviderPriority; len(got) == 0 || got[0] != "uv" || got[1] != "brew" || got[2] != "apt" {
+		t.Fatalf("provider_priority = %v, want [uv brew apt ...]", got)
 	}
 }
 

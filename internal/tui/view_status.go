@@ -308,7 +308,7 @@ func statusDoctorCheckAction(check app.DoctorCheck) statusAction {
 	case "config", "host":
 		return statusAction{kind: statusActionOpenSettings, settingsRow: settingsRowBootstrap, desc: "open bootstrap"}
 	case "providers":
-		return statusAction{kind: statusActionOpenSettings, settingsRow: settingsRowSystemProvider, desc: "open provider settings"}
+		return statusAction{kind: statusActionOpenSettings, settingsRow: settingsRowProviderPriority, desc: "open provider settings"}
 	case "dots":
 		if strings.Contains(check.Message, "disabled") {
 			return statusAction{kind: statusActionOpenSettings, settingsRow: settingsRowDotsSync, desc: "open dotfile sync setting"}

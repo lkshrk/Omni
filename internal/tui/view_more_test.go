@@ -694,32 +694,27 @@ func TestRenderHeader_SettingsModeShowsDotsOff(t *testing.T) {
 	}
 }
 
-func TestRenderSettings_ShowsProviderFamilyRows(t *testing.T) {
+func TestRenderSettings_ShowsProviderPriorityRow(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSettings
 	m.width = 120
 	m.height = 50
 	settings := tuiSettingsWithPriority("brew", "apt")
-	settings.SetEcosystemManager("node", "bun")
-	settings.SetEcosystemManager("python", "uv")
-	settings.DisabledProviders = []string{"python"}
 	m.setSettings(settings)
 
 	out := stripANSIEscapeSequences(renderSettings(m))
 	for _, want := range []string{
-		"System Provider Order",
+		"Provider Priority",
 		"brew › apt",
-		"Track System",
-		"Track Node",
-		"Track Python",
-		"[OFF]",
-		"Node Manager",
-		"bun",
-		"Python Manager",
-		"uv",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("settings view missing %q:\n%s", want, out)
+		}
+	}
+	// Removed rows must not appear.
+	for _, gone := range []string{"System Provider Order", "Track System", "Track Node", "Track Python", "Node Manager", "Python Manager"} {
+		if strings.Contains(out, gone) {
+			t.Fatalf("settings view should not contain removed row %q:\n%s", gone, out)
 		}
 	}
 }
@@ -1149,8 +1144,8 @@ func TestRenderSettings_Basic(t *testing.T) {
 	if out == "" {
 		t.Error("expected non-empty settings output")
 	}
-	if !strings.Contains(out, "Node Manager") {
-		t.Errorf("expected 'Node Manager' in settings, got:\n%s", out)
+	if !strings.Contains(out, "Provider Priority") {
+		t.Errorf("expected 'Provider Priority' in settings, got:\n%s", out)
 	}
 }
 
@@ -1158,11 +1153,14 @@ func TestRenderSettings_SectionHeaders(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSettings
 	out := renderSettings(m)
-	sections := []string{"Tools", "Managers", "Dotfiles", "Maintenance"}
+	sections := []string{"Tools", "Dotfiles", "Maintenance"}
 	for _, s := range sections {
 		if !strings.Contains(out, s) {
 			t.Errorf("expected section %q in settings, got:\n%s", s, out)
 		}
+	}
+	if strings.Contains(out, "Managers") {
+		t.Errorf("'Managers' section should not exist in settings, got:\n%s", out)
 	}
 }
 
@@ -1177,13 +1175,7 @@ func TestRenderSettings_LabelOrderAndLegacyNames(t *testing.T) {
 	}{
 		{"Tools", true},
 		{"Import Installed Tools", false},
-		{"Track System", false},
-		{"System Provider Order", false},
-		{"Track Node", false},
-		{"Track Python", false},
-		{"Managers", true},
-		{"Node Manager", false},
-		{"Python Manager", false},
+		{"Provider Priority", false},
 		{"Dotfiles", true},
 		{"Repository", false},
 		{"Dotfile Sync", false},
@@ -1215,6 +1207,13 @@ func TestRenderSettings_LabelOrderAndLegacyNames(t *testing.T) {
 	legacy := []string{
 		"Auto Import",
 		"System Priority",
+		"System Provider Order",
+		"Track System",
+		"Track Node",
+		"Track Python",
+		"Node Manager",
+		"Python Manager",
+		"Managers",
 		"System Ecosystem",
 		"Node Ecosystem",
 		"Python Ecosystem",
@@ -1245,14 +1244,15 @@ func TestRenderSettings_AutoImportON(t *testing.T) {
 func TestRenderSettings_OnlySelectedRowShowsDetail(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSettings
-	m.settingsCursor = 5
+	m.settingsCursor = settingsRowProviderPriority
 	out := renderSettings(m)
 
 	if strings.Contains(out, "Add newly installed tools") {
-		t.Fatalf("unselected import help should not render in compact settings view:\n%s", out)
+		t.Fatalf("unselected import help should not render when priority row is selected:\n%s", out)
 	}
-	if !strings.Contains(out, "JS package manager") {
-		t.Fatalf("selected Node Manager help should render:\n%s", out)
+	// The priority row is selected; its value bracket should appear.
+	if !strings.Contains(out, "Provider Priority") {
+		t.Fatalf("selected Provider Priority row should render:\n%s", out)
 	}
 }
 
@@ -1442,13 +1442,11 @@ func TestRenderSettings_DotsDisableKeepLocalPrompt(t *testing.T) {
 func TestRenderSettings_ProviderPriority(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSettings
-	m.settings.SetEcosystemPriority("system", []string{"brew", "pip", "npm", "apt"})
+	// Set a custom provider priority order; the collapsed row should reflect it.
+	m.settings.ProviderPriority = []string{"uv", "brew", "apt"}
 	out := renderSettings(m)
-	if !strings.Contains(out, "brew") {
-		t.Errorf("expected 'brew' in provider priority row, got:\n%s", out)
-	}
-	if strings.Contains(out, "pip") || strings.Contains(out, "npm") {
-		t.Errorf("system priority row should not render non-system managers, got:\n%s", out)
+	if !strings.Contains(out, "uv") || !strings.Contains(out, "brew") {
+		t.Errorf("expected saved priority providers in priority row, got:\n%s", out)
 	}
 }
 
@@ -2857,7 +2855,7 @@ func TestRenderSettings_ExpandableRowsUseEnterHint(t *testing.T) {
 		row  int
 		word string
 	}{
-		{"priority", settingsRowSystemPriority, "edit"},
+		{"priority", settingsRowProviderPriority, "edit"},
 		{"dots repo", settingsRowDotsRepo, "edit"},
 		{"disable dots", settingsRowDotsSync, "disable"},
 		{"reminder interval", settingsRowDotsReminderInterval, "set"},
@@ -6049,7 +6047,7 @@ func TestViewString_SettingsMode(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSettings
 	out := m.viewString()
-	if !strings.Contains(out, "Node Manager") {
+	if !strings.Contains(out, "Provider Priority") {
 		t.Errorf("expected settings content in viewString, got:\n%s", out)
 	}
 }

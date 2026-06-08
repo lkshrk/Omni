@@ -1894,11 +1894,6 @@ func TestSettingsRowActionsPersistExpectedConfigFields(t *testing.T) {
 
 	for _, row := range []int{
 		settingsRowAutoImport,
-		settingsRowSystemProvider,
-		settingsRowNodeProvider,
-		settingsRowPythonProvider,
-		settingsRowNodeManager,
-		settingsRowPythonManager,
 		settingsRowDotsCommit,
 		settingsRowDotsPush,
 	} {
@@ -1918,19 +1913,19 @@ func TestSettingsRowActionsPersistExpectedConfigFields(t *testing.T) {
 		m.handleSettingsSavedMsg(msg)
 	}
 
-	m.settingsCursor = settingsRowSystemPriority
+	m.settingsCursor = settingsRowProviderPriority
 	m.startSettingsPriorityEdit()
 	m.priorityDraft = []string{"brew"}
 	cmds := m.handleSettingsPriorityKeyMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if len(cmds) != 1 {
-		t.Fatalf("row %d priority save produced %d save commands, want 1", settingsRowSystemPriority, len(cmds))
+		t.Fatalf("row %d priority save produced %d save commands, want 1", settingsRowProviderPriority, len(cmds))
 	}
 	msg, ok := cmds[0]().(settingsSavedMsg)
 	if !ok {
-		t.Fatalf("row %d priority save command returned %T, want settingsSavedMsg", settingsRowSystemPriority, msg)
+		t.Fatalf("row %d priority save command returned %T, want settingsSavedMsg", settingsRowProviderPriority, msg)
 	}
 	if msg.err != nil {
-		t.Fatalf("row %d priority save command failed: %v", settingsRowSystemPriority, msg.err)
+		t.Fatalf("row %d priority save command failed: %v", settingsRowProviderPriority, msg.err)
 	}
 	m.handleSettingsSavedMsg(msg)
 
@@ -1948,24 +1943,11 @@ func TestSettingsRowActionsPersistExpectedConfigFields(t *testing.T) {
 		t.Fatalf("row %d should persist settings.dots_git.auto_push=true", settingsRowDotsPush)
 	}
 
+	// Priority editor save: SetProviderLayout(["brew"], []) should persist
+	// provider_priority = ["brew"] in the host settings.
 	host := cfg.HostSettings["settingsrowtest"]
-	if !slices.Contains(host.DisabledProviders, "system") {
-		t.Fatalf("row 2 should persist host_settings.settingsrowtest.disabled_providers system, got %v", host.DisabledProviders)
-	}
-	if !slices.Contains(host.DisabledProviders, "node") {
-		t.Fatalf("row 3 should persist host_settings.settingsrowtest.disabled_providers node, got %v", host.DisabledProviders)
-	}
-	if !slices.Contains(host.DisabledProviders, "python") {
-		t.Fatalf("row 4 should persist host_settings.settingsrowtest.disabled_providers python, got %v", host.DisabledProviders)
-	}
-	if got := host.EcosystemPriority("system"); len(got) != 1 || got[0] != "brew" {
-		t.Fatalf("row 1 should persist host_settings.settingsrowtest.ecosystems.system.priority = [brew], got %v", got)
-	}
-	if got := host.EcosystemManager("node"); got != "bun" {
-		t.Fatalf("row 5 should persist host_settings.settingsrowtest.ecosystems.node.manager = bun, got %q", got)
-	}
-	if got := host.EcosystemManager("python"); got != "uv" {
-		t.Fatalf("row 6 should persist host_settings.settingsrowtest.ecosystems.python.manager = uv, got %q", got)
+	if got := host.ProviderPriority; len(got) != 1 || got[0] != "brew" {
+		t.Fatalf("priority save should persist host_settings.settingsrowtest.provider_priority = [brew], got %v", got)
 	}
 }
 
@@ -1980,13 +1962,13 @@ func TestSettingsRowActionDoesNotOverwriteConfigWithStaleModel(t *testing.T) {
 		t.Fatalf("saveTUIConfig: %v", err)
 	}
 	m := modelForCmds(a)
-	m.settings = config.Settings{}
-	m.settingsCursor = settingsRowNodeManager
+	m.settings = config.Settings{} // stale — AutoImport is false in model but true on disk
+	m.settingsCursor = settingsRowAutoImport
 
 	var cmds []tea.Cmd
 	m.handleSettingsRowAction(&cmds)
 	if len(cmds) != 1 {
-		t.Fatalf("node manager row produced %d save commands, want 1", len(cmds))
+		t.Fatalf("auto-import row produced %d save commands, want 1", len(cmds))
 	}
 	msg, ok := cmds[0]().(settingsSavedMsg)
 	if !ok {
@@ -2000,11 +1982,10 @@ func TestSettingsRowActionDoesNotOverwriteConfigWithStaleModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	if !cfg.Settings.AutoImport {
-		t.Fatal("settings.auto_import was overwritten from stale TUI model")
-	}
-	if got := cfg.HostSettings["stalesettingstest"].EcosystemManager("node"); got != "bun" {
-		t.Fatalf("node manager = %q, want bun", got)
+	// The toggle read from disk (AutoImport=true) and flipped to false — the
+	// live config value must have been used, not the stale in-model zero value.
+	if cfg.Settings.AutoImport {
+		t.Fatal("settings.auto_import should have been toggled off from live config value")
 	}
 }
 
