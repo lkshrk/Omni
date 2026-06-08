@@ -3266,7 +3266,7 @@ func TestActiveConfirmationsUseSingleHelpHint(t *testing.T) {
 				}
 			}
 
-			help := renderHelpPopup(tc.m)
+			help := renderHelpPopupWithWidth(tc.m, helpPopupContentWidth(tc.m))
 			if !strings.Contains(help, tc.want) {
 				t.Fatalf("help popup missing single confirmation %q:\n%s", tc.want, help)
 			}
@@ -3601,7 +3601,7 @@ func TestRenderHelpPopup_ToolsSectionsUseCompactDescriptions(t *testing.T) {
 	m := baseModel(nil)
 	m.groupNames = []string{"base", "work"}
 
-	out := renderHelpPopup(m)
+	out := renderHelpPopupWithWidth(m, helpPopupContentWidth(m))
 	for _, want := range []string{
 		"Current Tab Actions",
 		"Row",
@@ -3649,7 +3649,7 @@ func TestRenderHelpPopup_TabSpecificActionsAndLegend(t *testing.T) {
 				setDotsRepoForTest(&m, "/repo/dotfiles")
 				m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 			}
-			out := renderHelpPopup(m)
+			out := renderHelpPopupWithWidth(m, helpPopupContentWidth(m))
 			for _, want := range tc.want {
 				if !strings.Contains(out, want) {
 					t.Errorf("help popup missing %q:\n%s", want, out)
@@ -3727,7 +3727,7 @@ func TestRenderHelpPopup_DashboardSelectedRowActions(t *testing.T) {
 			m := baseModel(nil)
 			m.mode = viewStatus
 			m = tc.setup(m)
-			out := renderHelpPopup(m)
+			out := renderHelpPopupWithWidth(m, helpPopupContentWidth(m))
 			for _, want := range tc.want {
 				if !strings.Contains(out, want) {
 					t.Fatalf("dashboard help missing %q:\n%s", want, out)
@@ -3746,7 +3746,7 @@ func TestRenderHelpPopup_DotsLegendOmitsTreeKindIcons(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewDots
 	setDotsRepoForTest(&m, "/repo/dotfiles")
-	out := renderHelpPopup(m)
+	out := renderHelpPopupWithWidth(m, helpPopupContentWidth(m))
 	for _, unwanted := range []string{dotKindFolderCollapsedIcon, dotKindFolderExpandedIcon, dotKindFolderEmptyIcon} {
 		if strings.Contains(out, unwanted) {
 			t.Fatalf("dots help legend should not include tree kind icon %q:\n%s", unwanted, out)
@@ -3763,7 +3763,7 @@ func TestHelpPopup_DividerRendersAsSingleLineInPopupFrame(t *testing.T) {
 
 	popup := renderPopupFrame(
 		m.palette,
-		renderHelpPopup(m),
+		renderHelpPopupWithWidth(m, helpPopupContentWidth(m)),
 		popupFrame{
 			Title:    helpPopupTitle(m),
 			PaddingY: 1,
@@ -3829,7 +3829,7 @@ func TestRenderHelpPopup_ActionOrderKeepsDeleteLast(t *testing.T) {
 			if tc.mode == viewDots {
 				m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
 			}
-			out := renderHelpPopup(m)
+			out := renderHelpPopupWithWidth(m, helpPopupContentWidth(m))
 			deleteIdx := strings.Index(out, "delete")
 			if deleteIdx < 0 {
 				t.Fatalf("help popup missing canonical delete action:\n%s", out)

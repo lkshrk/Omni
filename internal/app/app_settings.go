@@ -66,11 +66,8 @@ type SettingsChangeKind string
 const (
 	SettingsChangeSetValue            SettingsChangeKind = "set_value"
 	SettingsChangeToggleBool          SettingsChangeKind = "toggle_bool"
-	SettingsChangeSetSystemPriority   SettingsChangeKind = "set_system_priority"
 	SettingsChangeSetProviderPriority SettingsChangeKind = "set_provider_priority"
-	SettingsChangeToggleProvider      SettingsChangeKind = "toggle_provider"
 	SettingsChangeSetProvider         SettingsChangeKind = "set_provider"
-	SettingsChangeCycleManager        SettingsChangeKind = "cycle_manager"
 )
 
 type SettingsChange struct {
@@ -87,14 +84,9 @@ type SettingsChange struct {
 type SettingsActionID string
 
 const (
-	SettingsActionToggleAutoImport     SettingsActionID = "toggle-auto-import"
-	SettingsActionToggleSystemProvider SettingsActionID = "toggle-system-provider"
-	SettingsActionToggleNodeProvider   SettingsActionID = "toggle-node-provider"
-	SettingsActionTogglePythonProvider SettingsActionID = "toggle-python-provider"
-	SettingsActionCycleNodeManager     SettingsActionID = "cycle-node-manager"
-	SettingsActionCyclePythonManager   SettingsActionID = "cycle-python-manager"
-	SettingsActionToggleDotsCommit     SettingsActionID = "toggle-dots-commit"
-	SettingsActionToggleDotsPush       SettingsActionID = "toggle-dots-push"
+	SettingsActionToggleAutoImport SettingsActionID = "toggle-auto-import"
+	SettingsActionToggleDotsCommit SettingsActionID = "toggle-dots-commit"
+	SettingsActionToggleDotsPush   SettingsActionID = "toggle-dots-push"
 )
 
 type SettingsManagerOption struct {
@@ -108,15 +100,6 @@ type SettingsProviderSummary struct {
 	Total   int
 }
 
-type SettingsProviderState struct {
-	SystemPriority []string
-	SystemEnabled  bool
-	NodeEnabled    bool
-	PythonEnabled  bool
-	NodeManager    string
-	PythonManager  string
-}
-
 type SettingsChangeResult struct {
 	Key               string
 	DisabledProviders []string
@@ -128,15 +111,6 @@ func SetSettingValue(key, value string) SettingsChange {
 
 func ToggleSettingBool(key string) SettingsChange {
 	return SettingsChange{Kind: SettingsChangeToggleBool, Key: CanonicalSettingKey(key)}
-}
-
-func SetSystemPriority(priority []string) SettingsChange {
-	return SettingsChange{Kind: SettingsChangeSetSystemPriority, Priority: append([]string(nil), priority...)}
-}
-
-// SetProviderPriority sets the flat per-host concrete provider-priority list.
-func SetProviderPriority(priority []string) SettingsChange {
-	return SettingsChange{Kind: SettingsChangeSetProviderPriority, Priority: append([]string(nil), priority...)}
 }
 
 // SetProviderLayout sets both the provider-priority order and the full set of
@@ -164,32 +138,14 @@ func (a *App) AvailableConcreteProviderSet(ctx context.Context) map[string]bool 
 	return out
 }
 
-func ToggleSettingsProvider(providerName string) SettingsChange {
-	return SettingsChange{Kind: SettingsChangeToggleProvider, Provider: providerName}
-}
-
 func SetSettingsProviderEnabled(providerName string, enabled bool) SettingsChange {
 	return SettingsChange{Kind: SettingsChangeSetProvider, Provider: providerName, Enabled: enabled}
-}
-
-func CycleSettingsManager(ecosystem string) SettingsChange {
-	return SettingsChange{Kind: SettingsChangeCycleManager, Ecosystem: ecosystem}
 }
 
 func SettingsChangeForAction(action SettingsActionID) (SettingsChange, error) {
 	switch action {
 	case SettingsActionToggleAutoImport:
 		return ToggleSettingBool("auto_import"), nil
-	case SettingsActionToggleSystemProvider:
-		return ToggleSettingsProvider(provider.EcosystemSystem), nil
-	case SettingsActionToggleNodeProvider:
-		return ToggleSettingsProvider(provider.EcosystemNode), nil
-	case SettingsActionTogglePythonProvider:
-		return ToggleSettingsProvider(provider.EcosystemPython), nil
-	case SettingsActionCycleNodeManager:
-		return CycleSettingsManager(provider.EcosystemNode), nil
-	case SettingsActionCyclePythonManager:
-		return CycleSettingsManager(provider.EcosystemPython), nil
 	case SettingsActionToggleDotsCommit:
 		return ToggleSettingBool("dots_git.auto_commit"), nil
 	case SettingsActionToggleDotsPush:
@@ -273,9 +229,6 @@ func (a *App) ApplySettingsChange(_ context.Context, settings config.Settings, c
 			return config.Settings{}, SettingsChangeResult{}, err
 		}
 		result.Key = key
-	case SettingsChangeSetSystemPriority:
-		settings.SetEcosystemPriority(provider.EcosystemSystem, a.filterSystemPriority(change.Priority))
-		result.Key = provider.EcosystemSystem + ".priority"
 	case SettingsChangeSetProviderPriority:
 		settings.ProviderPriority = a.filterConcreteProviderPriority(change.Priority)
 		if change.Disabled != nil {
@@ -284,13 +237,6 @@ func (a *App) ApplySettingsChange(_ context.Context, settings config.Settings, c
 		}
 		a.deriveEcosystemManagers(&settings)
 		result.Key = "provider_priority"
-	case SettingsChangeToggleProvider:
-		disabled, err := a.toggleDisabledProvider(settings.DisabledProviders, change.Provider)
-		if err != nil {
-			return config.Settings{}, SettingsChangeResult{}, err
-		}
-		settings.DisabledProviders = disabled
-		result.DisabledProviders = append([]string(nil), disabled...)
 	case SettingsChangeSetProvider:
 		disabled, err := a.setProviderEnabled(settings.DisabledProviders, change.Provider, change.Enabled)
 		if err != nil {
@@ -298,13 +244,6 @@ func (a *App) ApplySettingsChange(_ context.Context, settings config.Settings, c
 		}
 		settings.DisabledProviders = disabled
 		result.DisabledProviders = append([]string(nil), disabled...)
-	case SettingsChangeCycleManager:
-		manager, err := a.nextSettingManager(change.Ecosystem, settings.EcosystemManager(change.Ecosystem))
-		if err != nil {
-			return config.Settings{}, SettingsChangeResult{}, err
-		}
-		settings.SetEcosystemManager(change.Ecosystem, manager)
-		result.Key = change.Ecosystem + ".manager"
 	default:
 		return config.Settings{}, SettingsChangeResult{}, fmt.Errorf("unknown settings change %q", change.Kind)
 	}
@@ -379,16 +318,6 @@ func applyToggleSettingBool(settings *config.Settings, key string) (string, erro
 	return canonical, nil
 }
 
-func (a *App) toggleDisabledProvider(disabled []string, providerName string) ([]string, error) {
-	if err := a.validateDisablableProvider(providerName); err != nil {
-		return nil, err
-	}
-	if slices.Contains(disabled, providerName) {
-		return removeString(disabled, providerName), nil
-	}
-	return append(append([]string(nil), disabled...), providerName), nil
-}
-
 func (a *App) setProviderEnabled(disabled []string, providerName string, enabled bool) ([]string, error) {
 	if err := a.validateDisablableProvider(providerName); err != nil {
 		return nil, err
@@ -412,38 +341,8 @@ func removeString(values []string, value string) []string {
 	return out
 }
 
-func (a *App) nextSettingManager(ecosystem, current string) (string, error) {
-	options := settingsManagerValues(a.managerOptions(ecosystem))
-	if len(options) == 0 {
-		return "", fmt.Errorf("unknown ecosystem %q", ecosystem)
-	}
-	if current == "" {
-		return options[0], nil
-	}
-	if opt, ok := a.managerOption(ecosystem, current); ok {
-		current = settingManagerValue(opt)
-	}
-	for i, option := range options {
-		if current == option {
-			if i+1 < len(options) {
-				return options[i+1], nil
-			}
-			return "", nil
-		}
-	}
-	return "", nil
-}
-
 func DefaultSystemProviderPriorityOptions() []string {
 	return provider.BuiltinSystemProviderPriorityNames()
-}
-
-func DefaultSystemProviderPriorityDraft(priority []string) []string {
-	return systemProviderPriorityDraft(priority, DefaultSystemProviderPriorityOptions())
-}
-
-func DefaultSystemProviderPriorityDisplay(priority []string) []string {
-	return filterSystemProviderPriority(priority, DefaultSystemProviderPriorityOptions())
 }
 
 // DefaultConcreteProviderPriorityDraft returns the provider-priority editor draft
@@ -468,10 +367,6 @@ func (a *App) SystemProviderPriorityDraft(priority []string) []string {
 
 func (a *App) SystemProviderPriorityDisplay(priority []string) []string {
 	return filterSystemProviderPriority(priority, a.SystemProviderPriorityOptions())
-}
-
-func (a *App) filterSystemPriority(priority []string) []string {
-	return a.SystemProviderPriorityDisplay(priority)
 }
 
 func systemProviderPriorityDraft(priority, options []string) []string {
@@ -698,17 +593,6 @@ func (a *App) SettingsProviderHelp(ecosystem string) string {
 	}
 }
 
-func SettingsProviderStateFrom(settings config.Settings) SettingsProviderState {
-	return SettingsProviderState{
-		SystemPriority: append([]string(nil), settings.EcosystemPriority(provider.EcosystemSystem)...),
-		SystemEnabled:  !slices.Contains(settings.DisabledProviders, provider.EcosystemSystem),
-		NodeEnabled:    !slices.Contains(settings.DisabledProviders, provider.EcosystemNode),
-		PythonEnabled:  !slices.Contains(settings.DisabledProviders, provider.EcosystemPython),
-		NodeManager:    settings.EcosystemManager(provider.EcosystemNode),
-		PythonManager:  settings.EcosystemManager(provider.EcosystemPython),
-	}
-}
-
 func (a *App) ManagerNames(ecosystem string) []string {
 	return a.managerNames(ecosystem)
 }
@@ -730,10 +614,6 @@ func (a *App) SettingsManagerHelp(ecosystem string) string {
 		return DefaultSettingsManagerHelp(ecosystem)
 	}
 	return settingsManagerHelp(ecosystem, a.SettingsManagerOptions(ecosystem))
-}
-
-func DefaultSetupNodeManagerOptions() []SettingsManagerOption {
-	return DefaultSettingsManagerOptions(provider.EcosystemNode)
 }
 
 func (a *App) SetupNodeManagerOptions() []SettingsManagerOption {
@@ -1303,15 +1183,6 @@ func SetupProviderOptionsFromManagers(metaMap map[string]string, allPyBins, allN
 	return rows
 }
 
-func SetupProviderEnabled(options []SetupProviderOption, name string) bool {
-	for _, option := range options {
-		if option.Name == name && option.Enabled {
-			return true
-		}
-	}
-	return false
-}
-
 func SetupDisabledProviders(options []SetupProviderOption) []string {
 	var disabled []string
 	for _, option := range options {
@@ -1320,10 +1191,6 @@ func SetupDisabledProviders(options []SetupProviderOption) []string {
 		}
 	}
 	return disabled
-}
-
-func SetupNodeProviderEnabled(options []SetupProviderOption) bool {
-	return SetupProviderEnabled(options, provider.EcosystemNode)
 }
 
 // probeFirst returns hint if it is a non-empty string and exists on PATH.

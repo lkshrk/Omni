@@ -365,7 +365,7 @@ func TestRenderDots_RemoveConfirmHasNoCancelHint(t *testing.T) {
 		}
 	}
 	m.help.ShowAll = true
-	help := renderHelpPopup(m)
+	help := renderHelpPopupWithWidth(m, helpPopupContentWidth(m))
 	if strings.Contains(help, "cancel") {
 		t.Fatalf("help popup should not describe escape as cancel during delete confirmation, got:\n%s", help)
 	}

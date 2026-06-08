@@ -33,8 +33,7 @@ type actionHints struct {
 type hintContext int
 
 const (
-	hintCtxSetupNodeManager hintContext = iota
-	hintCtxSettingsToggle
+	hintCtxSettingsToggle hintContext = iota
 	hintCtxSettingsEdit
 	hintCtxSettingsDotsSync
 	hintCtxSettingsDuration
@@ -269,11 +268,6 @@ func renderPressAgainActionHint(pal palette, prefix, keyLabel, action string) st
 
 func contextHintItems(m Model, ctx hintContext) []hintItem {
 	switch ctx {
-	case hintCtxSetupNodeManager:
-		return []hintItem{
-			dangerHintFromBindingDesc(m.keys.Confirm, "confirm"),
-			hintFromBindingDesc(m.keys.Back, "skip"),
-		}
 	case hintCtxSettingsToggle:
 		return []hintItem{
 			hintFromBindingDesc(m.keys.Toggle, "change"),
@@ -717,10 +711,6 @@ func tabFullHelpBindings(m *Model) [][]key.Binding {
 			{k.PrevTab, k.NextTab, k.GroupPrev, k.GroupNext},
 		}
 	}
-}
-
-func renderHelpPopup(m Model) string {
-	return renderHelpPopupWithWidth(m, helpPopupContentWidth(m))
 }
 
 func renderHelpPopupWithWidth(m Model, width int) string {

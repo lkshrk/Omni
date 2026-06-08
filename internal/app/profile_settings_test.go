@@ -202,15 +202,6 @@ func TestSetupProviderEnabled(t *testing.T) {
 		{Name: "python", Enabled: true},
 	}
 
-	if app.SetupProviderEnabled(options, "node") {
-		t.Fatal("node should be disabled")
-	}
-	if !app.SetupProviderEnabled(options, "python") {
-		t.Fatal("python should be enabled")
-	}
-	if app.SetupProviderEnabled(options, "missing") {
-		t.Fatal("missing provider should be disabled")
-	}
 	if got := app.SetupDisabledProviders(options); !slices.Equal(got, []string{"node"}) {
 		t.Fatalf("SetupDisabledProviders = %v, want [node]", got)
 	}
@@ -224,17 +215,8 @@ func TestSetupNodeHelpers(t *testing.T) {
 		{Value: "pnpm", Label: "pnpm", Description: "disk-efficient, workspace-native"},
 		{Value: "npm", Label: "npm", Description: "bundled with every Node.js install"},
 	}
-	if got := app.DefaultSetupNodeManagerOptions(); !slices.Equal(got, wantOptions) {
-		t.Fatalf("DefaultSetupNodeManagerOptions = %+v, want %+v", got, wantOptions)
-	}
 	if got := a.SetupNodeManagerOptions(); !slices.Equal(got, wantOptions) {
 		t.Fatalf("SetupNodeManagerOptions = %+v, want %+v", got, wantOptions)
-	}
-	if app.SetupNodeProviderEnabled([]app.SetupProviderOption{{Name: "node", Enabled: false}}) {
-		t.Fatal("disabled node setup provider should not be enabled")
-	}
-	if !app.SetupNodeProviderEnabled([]app.SetupProviderOption{{Name: "node", Enabled: true}}) {
-		t.Fatal("enabled node setup provider should be enabled")
 	}
 }
 
@@ -270,71 +252,12 @@ func TestApplySettingsChange_DraftSemantics(t *testing.T) {
 		t.Fatal("node.manager should no longer be settable")
 	}
 
-	got, _, err = a.ApplySettingsChange(context.Background(), got, app.ToggleSettingsProvider(provider.EcosystemNode))
-	if err != nil {
-		t.Fatalf("ApplySettingsChange toggle node: %v", err)
-	}
-	if slices.Contains(got.DisabledProviders, provider.EcosystemNode) {
-		t.Fatalf("node should be enabled, disabled providers = %v", got.DisabledProviders)
-	}
-
-	got, _, err = a.ApplySettingsChange(context.Background(), got, app.ToggleSettingsProvider(provider.EcosystemSystem))
-	if err != nil {
-		t.Fatalf("ApplySettingsChange toggle system: %v", err)
-	}
-	if !slices.Contains(got.DisabledProviders, provider.EcosystemSystem) {
-		t.Fatalf("system should be disabled, disabled providers = %v", got.DisabledProviders)
-	}
-
 	got, _, err = a.ApplySettingsChange(context.Background(), got, app.ToggleSettingBool("dots_git.auto_commit"))
 	if err != nil {
 		t.Fatalf("ApplySettingsChange dots_git.auto_commit: %v", err)
 	}
 	if !got.DotsGit.AutoCommit {
 		t.Fatal("dots_git.auto_commit should toggle on")
-	}
-}
-
-func TestApplySettingsChange_SetProviderPriority(t *testing.T) {
-	a, _ := newImportApp(t)
-
-	got, _, err := a.ApplySettingsChange(context.Background(), config.Settings{}, app.SetProviderPriority(
-		[]string{"pnpm", "bun", "npm", "uv", "pip", "brew", "bogus", "brew"},
-	))
-	if err != nil {
-		t.Fatalf("ApplySettingsChange set provider priority: %v", err)
-	}
-	// Unknown names dropped, duplicates removed, order preserved.
-	if want := "pnpm,bun,npm,uv,pip,brew"; strings.Join(got.ProviderPriority, ",") != want {
-		t.Fatalf("provider_priority = %v, want %s", got.ProviderPriority, want)
-	}
-	// Node manager derived from the top-ranked node concrete in priority (pnpm).
-	if m := got.EcosystemManager(provider.EcosystemNode); m != "pnpm" {
-		t.Errorf("derived node manager = %q, want pnpm", m)
-	}
-	// Python manager derived from top-ranked python concrete (uv before pip).
-	if m := got.EcosystemManager(provider.EcosystemPython); m != "uv" {
-		t.Errorf("derived python manager = %q, want uv", m)
-	}
-}
-
-func TestApplySettingsChange_SetProviderPriority_DerivesManagerSkippingDisabled(t *testing.T) {
-	a, _ := newImportApp(t)
-	base := config.Settings{DisabledProviders: []string{"bun", "pnpm", "uv"}}
-
-	got, _, err := a.ApplySettingsChange(context.Background(), base, app.SetProviderPriority(
-		[]string{"bun", "pnpm", "npm", "uv", "pip"},
-	))
-	if err != nil {
-		t.Fatalf("ApplySettingsChange: %v", err)
-	}
-	// bun+pnpm disabled → first available node concrete is npm.
-	if m := got.EcosystemManager(provider.EcosystemNode); m != "npm" {
-		t.Errorf("derived node manager = %q, want npm (bun/pnpm disabled)", m)
-	}
-	// uv disabled → pip wins; pip stores as its settings value pip3.
-	if m := got.EcosystemManager(provider.EcosystemPython); m != "pip3" {
-		t.Errorf("derived python manager = %q, want pip3 (uv disabled)", m)
 	}
 }
 
@@ -395,17 +318,17 @@ func TestAvailableConcreteProviderSet(t *testing.T) {
 func TestApplySettingsChange_ToggleConcreteProvider(t *testing.T) {
 	a, _ := newImportApp(t)
 
-	got, _, err := a.ApplySettingsChange(context.Background(), config.Settings{}, app.ToggleSettingsProvider("bun"))
+	got, _, err := a.ApplySettingsChange(context.Background(), config.Settings{}, app.SetSettingsProviderEnabled("bun", false))
 	if err != nil {
-		t.Fatalf("toggle concrete bun: %v", err)
+		t.Fatalf("disable concrete bun: %v", err)
 	}
 	if !slices.Contains(got.DisabledProviders, "bun") {
 		t.Fatalf("bun should be disabled, got %v", got.DisabledProviders)
 	}
 
-	got, _, err = a.ApplySettingsChange(context.Background(), got, app.ToggleSettingsProvider("bun"))
+	got, _, err = a.ApplySettingsChange(context.Background(), got, app.SetSettingsProviderEnabled("bun", true))
 	if err != nil {
-		t.Fatalf("re-toggle concrete bun: %v", err)
+		t.Fatalf("re-enable concrete bun: %v", err)
 	}
 	if slices.Contains(got.DisabledProviders, "bun") {
 		t.Fatalf("bun should be re-enabled, got %v", got.DisabledProviders)
@@ -420,9 +343,6 @@ func TestSystemProviderPriorityPlanning(t *testing.T) {
 	}
 	if got := a.SystemProviderPriorityDraft([]string{"brew", "missing", "brew"}); !slices.Equal(got, []string{"brew", "apt", "apk", "dnf", "zypper", "pacman"}) {
 		t.Fatalf("draft priority = %v, want brew followed by remaining valid providers", got)
-	}
-	if got := app.DefaultSystemProviderPriorityDraft([]string{"missing"}); !slices.Equal(got, app.DefaultSystemProviderPriorityOptions()) {
-		t.Fatalf("default draft = %v, want defaults %v", got, app.DefaultSystemProviderPriorityOptions())
 	}
 }
 
@@ -514,29 +434,6 @@ func TestSettingsProviderSummary(t *testing.T) {
 	}
 }
 
-func TestSettingsProviderStateFrom(t *testing.T) {
-	var settings config.Settings
-	settings.DisabledProviders = []string{"node"}
-	settings.SetEcosystemManager("node", "bun")
-	settings.SetEcosystemManager("python", "uv")
-	settings.SetEcosystemPriority("system", []string{"brew", "apt"})
-
-	got := app.SettingsProviderStateFrom(settings)
-	if !got.SystemEnabled || got.NodeEnabled || !got.PythonEnabled {
-		t.Fatalf("provider enabled flags = system:%v node:%v python:%v, want true false true", got.SystemEnabled, got.NodeEnabled, got.PythonEnabled)
-	}
-	if got.NodeManager != "bun" || got.PythonManager != "uv" {
-		t.Fatalf("managers = node:%q python:%q, want bun uv", got.NodeManager, got.PythonManager)
-	}
-	if !slices.Equal(got.SystemPriority, []string{"brew", "apt"}) {
-		t.Fatalf("SystemPriority = %v, want [brew apt]", got.SystemPriority)
-	}
-	got.SystemPriority[0] = "mutated"
-	if app.SettingsProviderStateFrom(settings).SystemPriority[0] == "mutated" {
-		t.Fatal("SettingsProviderStateFrom returned mutable settings priority")
-	}
-}
-
 func TestSettingsChangeForAction(t *testing.T) {
 	a, _ := newImportApp(t)
 	tests := []struct {
@@ -551,56 +448,6 @@ func TestSettingsChangeForAction(t *testing.T) {
 				t.Helper()
 				if !settings.AutoImport {
 					t.Fatal("AutoImport should be enabled")
-				}
-			},
-		},
-		{
-			name:   "system provider",
-			action: app.SettingsActionToggleSystemProvider,
-			assert: func(t *testing.T, settings config.Settings) {
-				t.Helper()
-				if !slices.Contains(settings.DisabledProviders, "system") {
-					t.Fatalf("DisabledProviders = %v, want system", settings.DisabledProviders)
-				}
-			},
-		},
-		{
-			name:   "node provider",
-			action: app.SettingsActionToggleNodeProvider,
-			assert: func(t *testing.T, settings config.Settings) {
-				t.Helper()
-				if !slices.Contains(settings.DisabledProviders, "node") {
-					t.Fatalf("DisabledProviders = %v, want node", settings.DisabledProviders)
-				}
-			},
-		},
-		{
-			name:   "python provider",
-			action: app.SettingsActionTogglePythonProvider,
-			assert: func(t *testing.T, settings config.Settings) {
-				t.Helper()
-				if !slices.Contains(settings.DisabledProviders, "python") {
-					t.Fatalf("DisabledProviders = %v, want python", settings.DisabledProviders)
-				}
-			},
-		},
-		{
-			name:   "node manager",
-			action: app.SettingsActionCycleNodeManager,
-			assert: func(t *testing.T, settings config.Settings) {
-				t.Helper()
-				if got := settings.EcosystemManager("node"); got != "bun" {
-					t.Fatalf("node manager = %q, want bun", got)
-				}
-			},
-		},
-		{
-			name:   "python manager",
-			action: app.SettingsActionCyclePythonManager,
-			assert: func(t *testing.T, settings config.Settings) {
-				t.Helper()
-				if got := settings.EcosystemManager("python"); got != "uv" {
-					t.Fatalf("python manager = %q, want uv", got)
 				}
 			},
 		},
@@ -700,9 +547,6 @@ func TestSystemProviderPriorityDisplayFiltersInvalidAndDuplicateProviders(t *tes
 	priority := []string{"apt", "missing", "brew", "apt", "dnf"}
 	want := []string{"apt", "brew", "dnf"}
 
-	if got := app.DefaultSystemProviderPriorityDisplay(priority); !slices.Equal(got, want) {
-		t.Fatalf("DefaultSystemProviderPriorityDisplay = %v, want %v", got, want)
-	}
 	if got := a.SystemProviderPriorityDisplay(priority); !slices.Equal(got, want) {
 		t.Fatalf("SystemProviderPriorityDisplay = %v, want %v", got, want)
 	}
@@ -811,48 +655,6 @@ func TestSettingsProviderAndManagerMembershipHelpers(t *testing.T) {
 	}
 }
 
-func TestSettingsManagerCycle(t *testing.T) {
-	a, _ := newImportApp(t)
-
-	settings := config.Settings{}
-	for _, tt := range []struct {
-		ecosystem string
-		want      string
-	}{
-		{provider.EcosystemNode, "bun"},
-		{provider.EcosystemNode, "pnpm"},
-		{provider.EcosystemNode, "npm"},
-		{provider.EcosystemNode, ""},
-	} {
-		var err error
-		settings, _, err = a.ApplySettingsChange(context.Background(), settings, app.CycleSettingsManager(tt.ecosystem))
-		if err != nil {
-			t.Fatalf("CycleSettingsManager(%s): %v", tt.ecosystem, err)
-		}
-		if got := settings.EcosystemManager(tt.ecosystem); got != tt.want {
-			t.Fatalf("%s manager = %q, want %q", tt.ecosystem, got, tt.want)
-		}
-	}
-
-	for _, tt := range []struct {
-		ecosystem string
-		want      string
-	}{
-		{provider.EcosystemPython, "uv"},
-		{provider.EcosystemPython, "pip3"},
-		{provider.EcosystemPython, ""},
-	} {
-		var err error
-		settings, _, err = a.ApplySettingsChange(context.Background(), settings, app.CycleSettingsManager(tt.ecosystem))
-		if err != nil {
-			t.Fatalf("CycleSettingsManager(%s): %v", tt.ecosystem, err)
-		}
-		if got := settings.EcosystemManager(tt.ecosystem); got != tt.want {
-			t.Fatalf("%s manager = %q, want %q", tt.ecosystem, got, tt.want)
-		}
-	}
-}
-
 func TestSaveSettingsChange_PersistsHostAndGlobalSettings(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "settings-change-host")
 	a, cfgPath := newImportApp(t)
@@ -860,7 +662,7 @@ func TestSaveSettingsChange_PersistsHostAndGlobalSettings(t *testing.T) {
 	for _, change := range []app.SettingsChange{
 		app.SetSettingValue("auto_import", "true"),
 		app.SetSettingValue("provider_priority", "bun,npm,uv,pip,brew"),
-		app.ToggleSettingsProvider("npm"),
+		app.SetSettingsProviderEnabled("npm", false),
 		app.ToggleSettingBool("dots_git.auto_push"),
 	} {
 		if _, err := a.SaveSettingsChange(context.Background(), change); err != nil {
