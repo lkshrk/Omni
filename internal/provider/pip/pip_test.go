@@ -100,7 +100,7 @@ func TestMutation_ExternallyManagedPython(t *testing.T) {
 			if actionErr.Code != provider.ErrorExternallyManagedPython {
 				t.Fatalf("Code = %q, want %q", actionErr.Code, provider.ErrorExternallyManagedPython)
 			}
-			if len(actionErr.Solutions) == 0 || actionErr.Solutions[0].Command != "omni switch black --from pip --to uv" {
+			if len(actionErr.Solutions) == 0 || actionErr.Solutions[0].Command != "omni reinstall black --from pip --to uv" {
 				t.Fatalf("solutions = %#v, want uv switch command", actionErr.Solutions)
 			}
 			if actionErr.Solutions[0].Action != provider.ErrorSolutionActionSwitchProvider || actionErr.Solutions[0].TargetProvider != "uv" {
