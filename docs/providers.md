@@ -126,10 +126,10 @@ ignored so it stays visible without participating in normal sync.
 
 ## Disabled Providers
 
-Disable providers per host when a machine should never use them:
+Disable concrete providers per host when a machine should never use them:
 
 ```sh
-omni settings disable-provider python
+omni settings disable-provider pip
 ```
 
 Equivalent host setting:
@@ -138,13 +138,19 @@ Equivalent host setting:
 {
   "host_settings": {
     "server": {
-      "disabled_providers": ["python"]
+      "disabled_providers": ["uv", "pip"]
     }
   }
 }
 ```
 
-Disabled providers are skipped as install targets on that host.
+`disabled_providers` holds concrete provider names (e.g. `brew`, `apt`, `bun`,
+`pnpm`, `npm`, `uv`, `pip`). Legacy family names (`system`/`node`/`python`) are
+migrated to their concrete members automatically. Disabled providers are skipped
+both as install targets and during discovery on that host. In the TUI, the
+**Provider Priority** settings row edits the per-host order and toggles
+providers on/off (space); the top-ranked available provider in each ecosystem
+becomes that ecosystem's effective manager.
 
 ## Privilege Metadata
 

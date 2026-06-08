@@ -104,7 +104,7 @@ func newSettingsSetCmd(state *rootState) *cobra.Command {
 func newSettingsDisableProviderCmd(state *rootState) *cobra.Command {
 	return &cobra.Command{
 		Use:   "disable-provider <provider>",
-		Short: "Disable a provider family on this host",
+		Short: "Disable a provider on this host (concrete name, e.g. brew, bun, pip)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			disabled, err := state.app.DisableProvider(cmd.Context(), args[0])
@@ -120,7 +120,7 @@ func newSettingsDisableProviderCmd(state *rootState) *cobra.Command {
 func newSettingsEnableProviderCmd(state *rootState) *cobra.Command {
 	return &cobra.Command{
 		Use:   "enable-provider <provider>",
-		Short: "Enable a provider family on this host",
+		Short: "Enable a provider on this host (concrete name, e.g. brew, bun, pip)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			enabled, err := state.app.EnableProvider(cmd.Context(), args[0])
