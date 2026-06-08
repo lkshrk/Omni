@@ -15,7 +15,7 @@ func newSearchCmd(state *rootState) *cobra.Command {
 		Short: "Search provider registries for packages",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			results, err := state.app.Search(cmd.Context(), args[0], providerFilter)
+			results, err := state.app.SearchForDisplay(cmd.Context(), args[0], providerFilter)
 			if err != nil {
 				return err
 			}

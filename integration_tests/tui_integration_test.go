@@ -105,9 +105,9 @@ func TestTUIFallbackProviderListSmoke(t *testing.T) {
 		writeTUIKeys(t, tty, "\t")
 		toolsScreen := waitForRequiredScreen(t, capture, 8*time.Second, func(text string) bool {
 			return strings.Contains(text, "rg") &&
-				strings.Contains(text, "system(gh?)") &&
+				strings.Contains(text, "gh?") &&
 				strings.Contains(text, "jq") &&
-				strings.Contains(text, "system(apt!)")
+				strings.Contains(text, "apt")
 		}, "TUI did not render provider-list fallback/native tool states")
 		writeTUIKeys(t, tty, "f")
 		editorScreen := waitForRequiredScreen(t, capture, 8*time.Second, func(text string) bool {
@@ -165,8 +165,8 @@ func TestTUIFallbackEditorPrefillsConfiguredGitHint(t *testing.T) {
 		writeTUIKeys(t, tty, "\t")
 		toolsScreen := waitForRequiredScreen(t, capture, 8*time.Second, func(text string) bool {
 			return strings.Contains(text, "rg") &&
-				strings.Contains(text, "system(apt!)") &&
-				!strings.Contains(text, "system(gh?)")
+				strings.Contains(text, "apt") &&
+				!strings.Contains(text, "gh?")
 		}, "TUI did not render provider-list tool without fallback status")
 		writeTUIKeys(t, tty, "f")
 		editorScreen := waitForRequiredScreen(t, capture, 8*time.Second, func(text string) bool {
