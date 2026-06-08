@@ -13,7 +13,7 @@ func TestPrintProviderErrorAdvice(t *testing.T) {
 	err := provider.NewExternallyManagedPythonError("pip3", "upgrade", provider.Tool{Name: "pip", Provider: "python"}, errors.New("exit 1"), "raw stderr", []provider.ErrorSolution{
 		{
 			Label:          "Reinstall this tool with uv",
-			Command:        "omni switch pip --from python --to uv",
+			Command:        "omni tools reinstall pip --from python --to uv",
 			Detail:         "uv installs Python CLI tools into isolated tool environments.",
 			Action:         provider.ErrorSolutionActionSwitchProvider,
 			TargetProvider: "uv",
@@ -23,7 +23,7 @@ func TestPrintProviderErrorAdvice(t *testing.T) {
 	printProviderErrorAdvice(&b, err)
 
 	out := b.String()
-	for _, want := range []string{"suggestion: Reinstall this tool with uv", "omni switch pip --from python --to uv", "isolated tool environments"} {
+	for _, want := range []string{"suggestion: Reinstall this tool with uv", "omni tools reinstall pip --from python --to uv", "isolated tool environments"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output %q missing %q", out, want)
 		}

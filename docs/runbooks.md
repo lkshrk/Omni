@@ -177,7 +177,7 @@ omni tools list
 If Omni now shows provider drift, repair one tool:
 
 ```sh
-omni tools switch <tool> --reinstall-default
+omni tools reinstall <tool> --reinstall-default
 ```
 
 Or repair a whole ecosystem:

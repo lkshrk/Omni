@@ -134,8 +134,8 @@ omni tools consolidate python uv
 For one tool:
 
 ```sh
-omni tools switch <tool> --reinstall-default
-omni tools switch <tool> --from <old-provider> --to <new-provider>
+omni tools reinstall <tool> --reinstall-default
+omni tools reinstall <tool> --from <old-provider> --to <new-provider>
 ```
 
 See [Providers](providers.md) for provider drift and concrete ownership rules.

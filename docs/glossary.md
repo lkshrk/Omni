@@ -97,7 +97,7 @@ example, logical tool `node` can install package `nodejs`.
 ## Provider Drift
 
 A tool is installed through a different concrete manager than the current
-default for its ecosystem. `switch` and `consolidate` are the normal repair
+default for its ecosystem. `reinstall` and `consolidate` are the normal repair
 commands.
 
 ## Reconcile

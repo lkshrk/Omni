@@ -68,7 +68,7 @@ mutability, dry-run support, and safer first steps.
 | `omni tools import` | Import installed tools into config. |
 | `omni tools search <query>` | Search provider registries. |
 | `omni tools refresh` | Refresh installed and outdated cache state. |
-| `omni tools switch <tool>` | Move a tool to a different provider. |
+| `omni tools reinstall <tool>` | Reinstall a tool, optionally moving it to a different provider. |
 | `omni tools consolidate <ecosystem> <manager>` | Move tools to one manager. |
 | `omni tools providers` | List available providers. |
 | `omni tools ignore <name>` | Ignore a logical tool everywhere. |
@@ -79,7 +79,7 @@ Common tool flags:
 
 | Flag | Commands | Description |
 | --- | --- | --- |
-| `--provider <provider>` | `add`, `set`, `install`, `list`, `search`, `sync`, `switch --reinstall-default` | Select or filter a provider. |
+| `--provider <provider>` | `add`, `set`, `install`, `list`, `search`, `sync`, `reinstall --reinstall-default` | Select or filter a provider. |
 | `--from-github <owner/repo>` | `fallback` | Resolve and save a GitHub fallback recipe from an explicit repo. Omit it only when the tool config has a GitHub `git` URL. |
 | `--install-with <manager>` | `add`, `set` | Pin a logical tool to a concrete manager. |
 | `--quarantine <duration>` | `set` | Set a tool-level update quarantine duration, `0`, or `exempt`. |
@@ -90,8 +90,8 @@ Common tool flags:
 | `--prune` | `sync` | Remove local installations no longer in config. Cannot be combined with `sync --all`. |
 | `--all` | `sync`, `upgrade` | Bulk mode for the command. For sync, also claims discovered tools. |
 | `--force` | `upgrade`, `reconcile` | Bypass update quarantine for upgrades. |
-| `--from <provider>`, `--to <provider>` | `switch` | Move one tool between providers. |
-| `--reinstall-default` | `switch` | Reinstall one tool with its configured default provider. |
+| `--from <provider>`, `--to <provider>` | `reinstall` | Move one tool between providers. |
+| `--reinstall-default` | `reinstall` | Reinstall one tool with its configured default provider. |
 
 ## Dots Commands
 
