@@ -1256,11 +1256,11 @@ func TestFlow_UC31_SettingsToggleAutoImport(t *testing.T) {
 // ── UC-32 Settings tab: row 7 opens file picker ──────────────────────────────
 
 func TestFlow_UC32_SettingsOpenFilePicker(t *testing.T) {
-	msgs := append(toSettings(), nj(7)...)
+	msgs := append(toSettings(), nj(settingsRowDotsRepo)...)
 	msgs = append(msgs, pressEnter())
 	got := drive(baseModel(nil), msgs...)
 	if !got.showFilePicker {
-		t.Error("showFilePicker should be true after enter on dots repo row (row 7)")
+		t.Errorf("showFilePicker should be true after enter on dots repo row (row %d)", settingsRowDotsRepo)
 	}
 }
 
@@ -1269,7 +1269,7 @@ func TestFlow_UC32_SettingsOpenFilePicker(t *testing.T) {
 func TestFlow_UC33_FilePickerEscCloses(t *testing.T) {
 	m := baseModel(nil)
 	setDotsRepoForTest(&m, "~/dotfiles")
-	msgs := append(toSettings(), nj(7)...)
+	msgs := append(toSettings(), nj(settingsRowDotsRepo)...)
 	msgs = append(msgs, pressEnter(), pressEsc())
 	got := drive(m, msgs...)
 	if got.showFilePicker {
@@ -1446,7 +1446,7 @@ func TestFlow_UC35_DangerDotsDisableKeepLocalChoice(t *testing.T) {
 func TestFlow_UC36_PriorityEditor(t *testing.T) {
 	// Navigate to settings and to the provider-order row.
 	toPriority := func() []tea.Msg {
-		return append(toSettings(), nj(settingsRowSystemPriority)...)
+		return append(toSettings(), nj(settingsRowProviderPriority)...)
 	}
 
 	t.Run("Enter on priority row opens editor", func(t *testing.T) {
@@ -1474,9 +1474,9 @@ func TestFlow_UC36_PriorityEditor(t *testing.T) {
 	t.Run("J swaps item down", func(t *testing.T) {
 		msgs := append(toPriority(), pressEnter(), pressRune('J'))
 		got := drive(baseModel(nil), msgs...)
-		// Default draft is the concrete system provider priority; J swaps apt↓apk.
-		if len(got.priorityDraft) < 2 || got.priorityDraft[0] != "apk" || got.priorityDraft[1] != "apt" {
-			t.Errorf("priorityDraft = %v after J, want apk first", got.priorityDraft)
+		// Default draft is [brew, apt, apk, ...]; J at cursor=0 swaps brew↓apt.
+		if len(got.priorityDraft) < 2 || got.priorityDraft[0] != "apt" || got.priorityDraft[1] != "brew" {
+			t.Errorf("priorityDraft = %v after J, want [apt brew ...]", got.priorityDraft)
 		}
 	})
 
@@ -1499,8 +1499,9 @@ func TestFlow_UC36_PriorityEditor(t *testing.T) {
 		if got.editingPriority {
 			t.Error("editingPriority should be false after enter")
 		}
-		if priority := got.settings.EcosystemPriority("system"); len(priority) == 0 || priority[0] != "apk" {
-			t.Errorf("system priority = %v after enter, want reordered", priority)
+		// After J at cursor=0, draft is [apt, brew, apk, ...]; Confirm persists that order.
+		if got := got.settings.ProviderPriority; len(got) == 0 || got[0] != "apt" {
+			t.Errorf("provider_priority = %v after enter+J, want apt first", got)
 		}
 	})
 }

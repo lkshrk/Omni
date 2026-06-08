@@ -83,6 +83,7 @@ type SettingsChange struct {
 	Provider  string
 	Ecosystem string
 	Priority  []string
+	Disabled  []string
 	Enabled   bool
 }
 
@@ -139,6 +140,31 @@ func SetSystemPriority(priority []string) SettingsChange {
 // SetProviderPriority sets the flat per-host concrete provider-priority list.
 func SetProviderPriority(priority []string) SettingsChange {
 	return SettingsChange{Kind: SettingsChangeSetProviderPriority, Priority: append([]string(nil), priority...)}
+}
+
+// SetProviderLayout sets both the provider-priority order and the full set of
+// disabled concrete providers in one change (the TUI priority editor commits
+// reorder + enable/disable together).
+func SetProviderLayout(priority, disabled []string) SettingsChange {
+	return SettingsChange{
+		Kind:     SettingsChangeSetProviderPriority,
+		Priority: append([]string(nil), priority...),
+		Disabled: append([]string(nil), disabled...),
+	}
+}
+
+// AvailableConcreteProviderSet reports which concrete providers are available on
+// this host, for rendering the provider-priority editor (unavailable entries are
+// shown greyed but remain orderable).
+func (a *App) AvailableConcreteProviderSet(ctx context.Context) map[string]bool {
+	out := make(map[string]bool)
+	if a.registry == nil {
+		return out
+	}
+	for _, p := range a.availableProviders(ctx) {
+		out[p.Name()] = true
+	}
+	return out
 }
 
 func ToggleSettingsProvider(providerName string) SettingsChange {
@@ -255,6 +281,10 @@ func (a *App) ApplySettingsChange(_ context.Context, settings config.Settings, c
 		result.Key = provider.EcosystemSystem + ".priority"
 	case SettingsChangeSetProviderPriority:
 		settings.ProviderPriority = a.filterConcreteProviderPriority(change.Priority)
+		if change.Disabled != nil {
+			settings.DisabledProviders = a.filterDisablableProviders(change.Disabled)
+			result.DisabledProviders = append([]string(nil), settings.DisabledProviders...)
+		}
 		a.deriveEcosystemManagers(&settings)
 		result.Key = "provider_priority"
 	case SettingsChangeToggleProvider:
@@ -430,6 +460,12 @@ func DefaultSystemProviderPriorityDraft(priority []string) []string {
 
 func DefaultSystemProviderPriorityDisplay(priority []string) []string {
 	return filterSystemProviderPriority(priority, DefaultSystemProviderPriorityOptions())
+}
+
+// DefaultConcreteProviderPriorityDraft returns the provider-priority editor draft
+// using the builtin concrete provider set, for callers without a registry.
+func DefaultConcreteProviderPriorityDraft(priority []string) []string {
+	return systemProviderPriorityDraft(priority, provider.BuiltinConcreteProviderPriorityNames())
 }
 
 func (a *App) SystemProviderPriorityOptions() []string {
@@ -609,6 +645,24 @@ func (a *App) validateEcosystemProvider(name string) error {
 		return nil
 	}
 	return fmt.Errorf("%q is not a provider family (supported: %s)", name, strings.Join(a.EcosystemProviderNames(), ", "))
+}
+
+// filterDisablableProviders keeps only valid (concrete or family) provider
+// names, de-duplicated, preserving order.
+func (a *App) filterDisablableProviders(names []string) []string {
+	out := make([]string, 0, len(names))
+	seen := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		if a.validateDisablableProvider(name) != nil {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
 }
 
 // validateDisablableProvider accepts the names that may appear in

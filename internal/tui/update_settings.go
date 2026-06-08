@@ -63,7 +63,7 @@ func (m *Model) setSettingsCursor(row int) {
 
 func (m *Model) handleSettingsConfirmAction(cmds *[]tea.Cmd) {
 	switch m.settingsCursor {
-	case settingsRowSystemPriority, settingsRowDotsRepo, settingsRowDotsSync, settingsRowDotsReminderInterval, settingsRowDotsWatchDebounce, settingsRowDoctor, settingsRowBootstrap, settingsRowResetSettings, settingsRowResetCache:
+	case settingsRowProviderPriority, settingsRowDotsRepo, settingsRowDotsSync, settingsRowDotsReminderInterval, settingsRowDotsWatchDebounce, settingsRowDoctor, settingsRowBootstrap, settingsRowResetSettings, settingsRowResetCache:
 		m.handleSettingsEditAction(cmds)
 	}
 }
@@ -105,17 +105,38 @@ func (m *Model) handleSettingsPriorityKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 			m.priorityCursor--
 		}
 	default:
-		if key.Matches(msg, m.keys.Confirm) {
-			change := app.SetSystemPriority(m.priorityDraft)
+		switch {
+		case key.Matches(msg, m.keys.Toggle):
+			if m.priorityCursor >= 0 && m.priorityCursor < len(m.priorityDraft) {
+				name := m.priorityDraft[m.priorityCursor]
+				if m.priorityDisabled == nil {
+					m.priorityDisabled = make(map[string]bool)
+				}
+				m.priorityDisabled[name] = !m.priorityDisabled[name]
+			}
+		case key.Matches(msg, m.keys.Confirm):
+			change := app.SetProviderLayout(m.priorityDraft, m.priorityDisabledList())
 			if m.applySettingsChange(change) {
 				m.editingPriority = false
 				m.appendSaveSettingsChangeCmd(&cmds, change)
 			}
-		} else if key.Matches(msg, m.keys.Back) {
+		case key.Matches(msg, m.keys.Back):
 			m.editingPriority = false
 		}
 	}
 	return cmds
+}
+
+// priorityDisabledList returns the disabled providers from the editor draft in
+// the draft's order (deterministic for persistence and tests).
+func (m Model) priorityDisabledList() []string {
+	out := make([]string, 0, len(m.priorityDisabled))
+	for _, name := range m.priorityDraft {
+		if m.priorityDisabled[name] {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 func (m *Model) handleSettingsServiceDurationKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
@@ -241,7 +262,7 @@ func (m *Model) applySettingsChange(change app.SettingsChange) bool {
 
 func (m *Model) handleSettingsEditAction(cmds *[]tea.Cmd) {
 	switch m.settingsCursor {
-	case settingsRowSystemPriority:
+	case settingsRowProviderPriority:
 		m.startSettingsPriorityEdit()
 	case settingsRowDotsRepo:
 		*cmds = append(*cmds, m.openFilePicker("Dots repo path", dotsRepoPathForView(*m), false))
@@ -287,10 +308,41 @@ func (m *Model) startBootstrapSetup() {
 }
 
 func (m *Model) startSettingsPriorityEdit() {
-	providerState := app.SettingsProviderStateFrom(m.settings)
-	m.priorityDraft = m.systemPriorityDraft(providerState.SystemPriority)
+	m.priorityDraft = m.providerPriorityDraft(m.settings.ProviderPriority)
+	m.priorityDisabled = make(map[string]bool, len(m.settings.DisabledProviders))
+	for _, name := range m.settings.DisabledProviders {
+		m.priorityDisabled[name] = true
+	}
+	m.priorityAvailable = nil
+	if m.app != nil {
+		m.priorityAvailable = m.app.AvailableConcreteProviderSet(context.Background())
+	}
 	m.priorityCursor = 0
 	m.editingPriority = true
+}
+
+func (m Model) providerPriorityDraft(priority []string) []string {
+	if m.app == nil {
+		return app.DefaultConcreteProviderPriorityDraft(priority)
+	}
+	return m.app.ConcreteProviderPriorityDraft(priority)
+}
+
+// providerPriorityDisplay returns the enabled providers in priority order for the
+// collapsed settings row.
+func (m Model) providerPriorityDisplay() []string {
+	draft := m.providerPriorityDraft(m.settings.ProviderPriority)
+	disabled := make(map[string]bool, len(m.settings.DisabledProviders))
+	for _, name := range m.settings.DisabledProviders {
+		disabled[name] = true
+	}
+	out := make([]string, 0, len(draft))
+	for _, name := range draft {
+		if !disabled[name] {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 func (m *Model) startSettingsServiceDurationEdit() {
@@ -339,20 +391,6 @@ func (m *Model) applySettingsServiceDurationChoice(choices []settingsDurationCho
 	default:
 		return nil
 	}
-}
-
-func (m Model) systemPriorityDraft(priority []string) []string {
-	if m.app == nil {
-		return app.DefaultSystemProviderPriorityDraft(priority)
-	}
-	return m.app.SystemProviderPriorityDraft(priority)
-}
-
-func (m Model) systemPriorityDisplay(priority []string) []string {
-	if m.app == nil {
-		return app.DefaultSystemProviderPriorityDisplay(priority)
-	}
-	return m.app.SystemProviderPriorityDisplay(priority)
 }
 
 func (m *Model) handleSettingsDotsSyncAction(cmds *[]tea.Cmd) {

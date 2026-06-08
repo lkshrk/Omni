@@ -393,6 +393,8 @@ type Model struct {
 	editingPriority                bool
 	priorityCursor                 int
 	priorityDraft                  []string
+	priorityDisabled               map[string]bool
+	priorityAvailable              map[string]bool
 	editingServiceDuration         bool
 	serviceDurationRow             int
 	serviceDurationIdx             int

@@ -9,7 +9,6 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/provider"
 )
 
 const (
@@ -21,12 +20,7 @@ const (
 
 const (
 	settingsRowAutoImport = iota
-	settingsRowSystemProvider
-	settingsRowSystemPriority
-	settingsRowNodeProvider
-	settingsRowPythonProvider
-	settingsRowNodeManager
-	settingsRowPythonManager
+	settingsRowProviderPriority
 	settingsRowDotsRepo
 	settingsRowDotsSync
 	settingsRowDotsReminder
@@ -60,40 +54,10 @@ var settingsRows = []settingsRowMeta{
 		hint:    hintCtxSettingsToggle,
 		action:  app.SettingsActionToggleAutoImport,
 	},
-	settingsRowSystemPriority: {
-		label:   "System Provider Order",
+	settingsRowProviderPriority: {
+		label:   "Provider Priority",
 		section: "Tools",
 		hint:    hintCtxSettingsEdit,
-	},
-	settingsRowSystemProvider: {
-		label:   "Track System",
-		section: "Tools",
-		hint:    hintCtxSettingsToggle,
-		action:  app.SettingsActionToggleSystemProvider,
-	},
-	settingsRowNodeProvider: {
-		label:   "Track Node",
-		section: "Tools",
-		hint:    hintCtxSettingsToggle,
-		action:  app.SettingsActionToggleNodeProvider,
-	},
-	settingsRowPythonProvider: {
-		label:   "Track Python",
-		section: "Tools",
-		hint:    hintCtxSettingsToggle,
-		action:  app.SettingsActionTogglePythonProvider,
-	},
-	settingsRowNodeManager: {
-		label:   "Node Manager",
-		section: "Managers",
-		hint:    hintCtxSettingsToggle,
-		action:  app.SettingsActionCycleNodeManager,
-	},
-	settingsRowPythonManager: {
-		label:   "Python Manager",
-		section: "Managers",
-		hint:    hintCtxSettingsToggle,
-		action:  app.SettingsActionCyclePythonManager,
 	},
 	settingsRowDotsRepo: {
 		label:   "Repository",
@@ -182,20 +146,6 @@ func formatSettingLabel(label string) string {
 	return fmt.Sprintf("%-*s", settingLabelWidth, label)
 }
 
-func settingsManagerHelp(a *app.App, ecosystem string) string {
-	if a == nil {
-		return app.DefaultSettingsManagerHelp(ecosystem)
-	}
-	return a.SettingsManagerHelp(ecosystem)
-}
-
-func settingsProviderHelp(a *app.App, ecosystem string) string {
-	if a == nil {
-		return app.DefaultSettingsProviderHelp(ecosystem)
-	}
-	return a.SettingsProviderHelp(ecosystem)
-}
-
 func renderSettings(m Model) string {
 	p := m.palette
 	var buf scrollBuf
@@ -212,13 +162,6 @@ func renderSettings(m Model) string {
 			return p.styleInstalled.Render("[ON]")
 		}
 		return p.styleMissing.Render("[OFF]")
-	}
-
-	nodeVal := func(v string) string {
-		if v == "" {
-			return p.styleProvider.Render("[auto]")
-		}
-		return p.styleProvider.Render("[" + v + "]")
 	}
 
 	priorityVal := func(pv []string) string {
@@ -300,43 +243,16 @@ func renderSettings(m Model) string {
 		return p.styleHelp.Render("Choose the " + name + " service value used on the next enable.")
 	}
 
-	providerState := app.SettingsProviderStateFrom(m.settings)
-
 	rows := []settingRow{
 		settingsRowAutoImport: {
 			settingsRowMeta: settingsRows[settingsRowAutoImport],
 			value:           onOff(m.settings.AutoImport),
 			help:            p.styleHelp.Render("Add newly installed tools to the config on every sync."),
 		},
-		settingsRowSystemPriority: {
-			settingsRowMeta: settingsRows[settingsRowSystemPriority],
-			value:           priorityVal(m.systemPriorityDisplay(providerState.SystemPriority)),
-			help:            p.styleHelp.Render("Concrete system providers tried for system tools without a tool-specific provider candidate."),
-		},
-		settingsRowSystemProvider: {
-			settingsRowMeta: settingsRows[settingsRowSystemProvider],
-			value:           onOff(providerState.SystemEnabled),
-			help:            p.styleHelp.Render(settingsProviderHelp(m.app, provider.EcosystemSystem)),
-		},
-		settingsRowNodeProvider: {
-			settingsRowMeta: settingsRows[settingsRowNodeProvider],
-			value:           onOff(providerState.NodeEnabled),
-			help:            p.styleHelp.Render(settingsProviderHelp(m.app, provider.EcosystemNode)),
-		},
-		settingsRowPythonProvider: {
-			settingsRowMeta: settingsRows[settingsRowPythonProvider],
-			value:           onOff(providerState.PythonEnabled),
-			help:            p.styleHelp.Render(settingsProviderHelp(m.app, provider.EcosystemPython)),
-		},
-		settingsRowNodeManager: {
-			settingsRowMeta: settingsRows[settingsRowNodeManager],
-			value:           nodeVal(providerState.NodeManager),
-			help:            p.styleHelp.Render(settingsManagerHelp(m.app, provider.EcosystemNode)),
-		},
-		settingsRowPythonManager: {
-			settingsRowMeta: settingsRows[settingsRowPythonManager],
-			value:           nodeVal(providerState.PythonManager),
-			help:            p.styleHelp.Render(settingsManagerHelp(m.app, provider.EcosystemPython)),
+		settingsRowProviderPriority: {
+			settingsRowMeta: settingsRows[settingsRowProviderPriority],
+			value:           priorityVal(m.providerPriorityDisplay()),
+			help:            p.styleHelp.Render("Per-machine order of concrete package managers. Reorder to set priority; space toggles a provider off."),
 		},
 		settingsRowDotsRepo: {
 			settingsRowMeta: settingsRows[settingsRowDotsRepo],
@@ -453,19 +369,25 @@ func renderSettings(m Model) string {
 			lbl = p.styleDangerLabel
 		}
 
-		// System Provider Order row: expand into an inline reorder list when editing.
-		if i == settingsRowSystemPriority && m.editingPriority {
+		// Provider Priority row: expand into an inline reorder list when editing.
+		if i == settingsRowProviderPriority && m.editingPriority {
 			write(renderResponsiveGroupListRow(p, true,
 				[]rowCell{leftCell(p.styleActiveText.Render(rowInset+formatSettingLabel(row.label)), settingLabelWidth+lipgloss.Width(rowInset))},
 				[]rowCell{rightCell(p.styleProvider.Render("[editing]"), 0)},
 				contentW, settingsMinGap, listColumnGap,
 			) + "\n")
-			prCursor := m.priorityCursor
 			prItems := make([]any, len(m.priorityDraft))
-			for j, pd := range m.priorityDraft {
-				prItems[j] = pd
+			for j, name := range m.priorityDraft {
+				label := name
+				if m.priorityAvailable != nil && !m.priorityAvailable[name] {
+					label += p.styleHelp.Render("  (n/a)")
+				}
+				if m.priorityDisabled[name] {
+					label += p.styleMissing.Render("  (off)")
+				}
+				prItems[j] = label
 			}
-			prl := newCursorList(p, prItems, prCursor, 4)
+			prl := newCursorList(p, prItems, m.priorityCursor, 4)
 			write(prl.String() + "\n")
 			write(renderContextHints(m, hintCtxSettingsPriorityEdit, hintPrefix) + "\n")
 			continue
