@@ -29,6 +29,41 @@ func (namedBaseProvider) Search(context.Context, string) ([]provider.SearchResul
 	return []provider.SearchResult{{Name: "typescript", Provider: "node"}}, nil
 }
 
+// multiBaseProvider is a base provider that implements MultiManagerBulkChecker,
+// like node/python (bun/pnpm/npm and uv/pip backends).
+type multiBaseProvider struct {
+	namedBaseProvider
+}
+
+func (multiBaseProvider) InstalledByManager(context.Context) (map[string]provider.InstalledEntry, error) {
+	return map[string]provider.InstalledEntry{
+		"context-mode": {Version: "1.0.0", ConcreteManager: "bun"},
+	}, nil
+}
+
+func TestNamed_ForwardsMultiManagerBulkChecker(t *testing.T) {
+	p := provider.Named("bun", multiBaseProvider{})
+
+	mbc, ok := p.(provider.MultiManagerBulkChecker)
+	if !ok {
+		t.Fatal("named provider should expose MultiManagerBulkChecker when base implements it")
+	}
+	entries, err := mbc.InstalledByManager(context.Background())
+	if err != nil {
+		t.Fatalf("InstalledByManager: %v", err)
+	}
+	if e := entries["context-mode"]; e.ConcreteManager != "bun" {
+		t.Fatalf("context-mode manager = %q, want bun", e.ConcreteManager)
+	}
+}
+
+func TestNamed_DoesNotClaimMultiWhenBaseLacksIt(t *testing.T) {
+	p := provider.Named("npm", namedBaseProvider{})
+	if _, ok := p.(provider.MultiManagerBulkChecker); ok {
+		t.Fatal("named provider must not claim MultiManagerBulkChecker when base lacks it")
+	}
+}
+
 func TestNamed_OverridesProviderIdentity(t *testing.T) {
 	p := provider.Named("npm", namedBaseProvider{})
 
