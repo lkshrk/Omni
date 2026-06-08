@@ -730,39 +730,29 @@ func renderProviderCol(p palette, raw, installedWith, systemBin, pythonBin, node
 }
 
 func renderProviderColWithExplicit(p palette, raw, installedWith, explicitWith, systemBin, pythonBin, nodeBin, plainLabel string, colW int, selected, wrongProvider bool) string {
-	meta, concrete, isOverride := providerPartsWithExplicit(raw, installedWith, explicitWith, systemBin, pythonBin, nodeBin)
+	meta, concrete, _ := providerPartsWithExplicit(raw, installedWith, explicitWith, systemBin, pythonBin, nodeBin)
 
 	// Trailing space padding based on the unstyled label width so all columns align.
 	labelW := colW
 	plainW := lipgloss.Width(plainLabel)
 	padding := strings.Repeat(" ", max(0, colW-plainW))
 
-	metaStyle := providerMetaStyle(p, meta)
-	if selected {
-		metaStyle = metaStyle.Bold(true)
-	}
-
+	// Show the concrete package manager when resolved; fall back to the ecosystem
+	// name (muted) only for unresolved tools. No meta(concrete) wrapper, no "!".
+	label := concrete
+	style := providerMetaStyle(p, meta)
 	if concrete == "" {
-		return metaStyle.Render(fitCellText(meta, labelW)) + padding
-	}
-
-	concreteStyle := lipgloss.NewStyle().Foreground(p.colHelp).Italic(true)
-	if wrongProvider {
-		concreteStyle = p.styleWrongProv.Italic(true)
+		label = meta
+	} else if wrongProvider {
+		style = p.styleWrongProv
 	}
 	if selected {
-		concreteStyle = concreteStyle.Bold(true)
+		style = style.Bold(true)
 	}
-	concreteLabel := concrete
-	if isOverride {
-		concreteLabel += "!"
-	}
-
-	styled := metaStyle.Render(meta+"(") + concreteStyle.Render(concreteLabel) + metaStyle.Render(")")
 	if plainW > colW {
-		return metaStyle.Render(fitProviderLabel(meta, concreteLabel, labelW))
+		return style.Render(fitCellText(label, labelW))
 	}
-	return styled + padding
+	return style.Render(label) + padding
 }
 
 func providerMetaStyle(p palette, meta string) lipgloss.Style {
@@ -776,26 +766,6 @@ func providerMetaStyle(p palette, meta string) lipgloss.Style {
 	default:
 		return p.styleNormal
 	}
-}
-
-func fitProviderLabel(meta, concrete string, width int) string {
-	if width <= 0 {
-		return ""
-	}
-	full := meta + "(" + concrete + ")"
-	if lipgloss.Width(full) <= width {
-		return full
-	}
-	if meta != "" {
-		short := string([]rune(meta)[0]) + "(" + concrete + ")"
-		if lipgloss.Width(short) <= width {
-			return short
-		}
-	}
-	if lipgloss.Width(concrete) <= width {
-		return concrete
-	}
-	return fitCellText(full, width)
 }
 
 // providerParts splits a raw provider string into a meta label, the concrete

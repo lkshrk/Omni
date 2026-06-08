@@ -100,16 +100,16 @@ func TestToolProviderDisplayLabel(t *testing.T) {
 		input app.ToolProviderDisplayInput
 		want  string
 	}{
-		{name: "concrete system manager", input: app.ToolProviderDisplayInput{Provider: "brew"}, want: "system(brew!)"},
-		{name: "system installed with concrete manager", input: app.ToolProviderDisplayInput{Provider: "system", InstalledWith: "brew"}, want: "system(brew)"},
-		{name: "system default manager", input: app.ToolProviderDisplayInput{Provider: "system", EffectiveSystemManager: "brew"}, want: "system(brew)"},
+		{name: "concrete system manager", input: app.ToolProviderDisplayInput{Provider: "brew"}, want: "brew"},
+		{name: "system installed with concrete manager", input: app.ToolProviderDisplayInput{Provider: "system", InstalledWith: "brew"}, want: "brew"},
+		{name: "system default manager", input: app.ToolProviderDisplayInput{Provider: "system", EffectiveSystemManager: "brew"}, want: "brew"},
 		{name: "system without manager", input: app.ToolProviderDisplayInput{Provider: "system"}, want: "system"},
-		{name: "python concrete manager normalizes pip", input: app.ToolProviderDisplayInput{Provider: "pip"}, want: "python(pip3!)"},
-		{name: "node default manager", input: app.ToolProviderDisplayInput{Provider: "node", EffectiveNodeManager: "bun"}, want: "node(bun)"},
+		{name: "python concrete manager normalizes pip", input: app.ToolProviderDisplayInput{Provider: "pip"}, want: "pip3"},
+		{name: "node default manager", input: app.ToolProviderDisplayInput{Provider: "node", EffectiveNodeManager: "bun"}, want: "bun"},
 		{name: "node default manager same as ecosystem", input: app.ToolProviderDisplayInput{Provider: "node", EffectiveNodeManager: "node"}, want: "node"},
 		{name: "unknown provider", input: app.ToolProviderDisplayInput{Provider: "cargo"}, want: "cargo"},
-		{name: "explicit provider override", input: app.ToolProviderDisplayInput{Provider: "node", ExplicitProvider: "npm", EffectiveNodeManager: "bun"}, want: "node(npm!)"},
-		{name: "explicit provider wins when installed with ecosystem", input: app.ToolProviderDisplayInput{Provider: "node", InstalledWith: "node", ExplicitProvider: "pnpm"}, want: "node(pnpm!)"},
+		{name: "explicit provider override", input: app.ToolProviderDisplayInput{Provider: "node", ExplicitProvider: "npm", EffectiveNodeManager: "bun"}, want: "npm"},
+		{name: "explicit provider wins when installed with ecosystem", input: app.ToolProviderDisplayInput{Provider: "node", InstalledWith: "node", ExplicitProvider: "pnpm"}, want: "pnpm"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -136,8 +136,8 @@ func TestToolProviderDisplayForToolMarksPinnedManagerOverride(t *testing.T) {
 	if got.Meta != "python" || got.Concrete != "pip3" || !got.Override {
 		t.Fatalf("ToolProviderDisplayForTool = %+v, want python/pip3 override", got)
 	}
-	if label := got.Label(); label != "python(pip3!)" {
-		t.Fatalf("Label = %q, want python(pip3!)", label)
+	if label := got.Label(); label != "pip3" {
+		t.Fatalf("Label = %q, want pip3", label)
 	}
 }
 
