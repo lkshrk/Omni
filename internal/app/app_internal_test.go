@@ -276,6 +276,7 @@ func TestNewRefreshProviderScanPlanSkipsConcreteCoveredByEcosystem(t *testing.T)
 		[]string{"node", "npm"},
 		map[string]int{"node": 2, "npm": 1},
 		map[string]string{"node": "npm"},
+		nil,
 	)
 
 	if len(plan.Steps) != 1 {
@@ -297,6 +298,7 @@ func TestNewRefreshProviderScanPlanCountsTrackedRowsWhenConfigCountsMissing(t *t
 			nil,
 		},
 		[]string{"brew", "zypper"},
+		nil,
 		nil,
 		nil,
 	)

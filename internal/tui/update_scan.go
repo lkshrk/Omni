@@ -1,6 +1,9 @@
 package tui
 
 import (
+	"fmt"
+	"strings"
+
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
@@ -20,7 +23,9 @@ func (m *Model) handleProviderScannedMsg(msg providerScannedMsg) []tea.Cmd {
 	if msg.err != nil {
 		status := app.ProviderScanFailureStatus(msg.provider, msg.err)
 		if !m.collectLaunchBatchError(status) {
-			cmds = append(cmds, setStatus(m, status, true))
+			// Accumulate rather than flashing each failure (which overwrite each
+			// other); a single aggregated message is shown when the scan settles.
+			m.refreshScanErrors = append(m.refreshScanErrors, status)
 		}
 	}
 	if len(m.scanningProviders) > 0 && (msg.err == nil || m.launchBatchActive) {
@@ -50,12 +55,26 @@ func (m *Model) handleProviderScannedMsg(msg providerScannedMsg) []tea.Cmd {
 		ch, progressGen := m.beginProgressStream()
 		cmds = append(cmds, m.doFetchFinalTools(msg.gen), m.doRefreshDiscovered(m.discoveryGen, ch, progressGen), waitForProgress(ch, progressGen))
 		cmds = append(cmds, m.startProviderOutdatedChecks(outdatedProviders, msg.gen)...)
+		if len(m.refreshScanErrors) > 0 {
+			cmds = append(cmds, setStatus(m, aggregateRefreshErrors(m.refreshScanErrors), true))
+			m.refreshScanErrors = nil
+		}
 	}
 	if cmd := m.finishLaunchBatchIfIdle(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
 
 	return cmds
+}
+
+// aggregateRefreshErrors combines per-provider scan failures into a single
+// readable status so multiple failures don't overwrite each other as transient
+// flashes.
+func aggregateRefreshErrors(errs []string) string {
+	if len(errs) == 1 {
+		return errs[0]
+	}
+	return fmt.Sprintf("%d provider scans failed — %s", len(errs), strings.Join(errs, " · "))
 }
 
 func (m *Model) startProviderOutdatedChecks(providers []string, gen int) []tea.Cmd {
