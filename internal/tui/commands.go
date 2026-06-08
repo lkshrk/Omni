@@ -356,15 +356,6 @@ func syncAllClaimedNames(result *app.SyncAllResult) []string {
 	return result.ClaimedNames
 }
 
-// doSaveNodeManager persists the chosen node manager to host_settings.
-// Used by setup wizard step 3.
-func (m *Model) doSaveNodeManager(manager string) tea.Cmd {
-	a, ctx := m.app, m.ctx
-	return func() tea.Msg {
-		return setupNodeMgrDoneMsg{err: a.SaveNodeManager(ctx, manager)}
-	}
-}
-
 // anyMissingDescription reports whether any tool in the list lacks a cached
 // description. Used to skip the background description warm-up on launches
 // where every tool is already populated.

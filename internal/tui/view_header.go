@@ -30,22 +30,14 @@ func renderSetup(m Model) string {
 	case 1, 2:
 		body = renderProviderPickerStep(m, m.setupStep)
 	case 3:
-		var options []setupOption
-		for i, c := range m.setupNodeManagerChoices() {
-			options = append(options, setupOption{Label: c.Label, Detail: c.Description, Selected: i == m.setupNodeMgrIdx})
-		}
+		// The provider-priority editor popup (editingPriority) overlays this step;
+		// the panel below is the muted background behind that popup.
 		body = renderSetupPanel(m, setupPanel{
-			Lead: "Choose a Node.js package manager.",
+			Lead: "Set provider priority.",
 			Help: []string{
-				"If you have multiple installed, omni will use this one.",
+				"Order the package managers omni prefers on this machine.",
 				"You can always change this later in Settings.",
 			},
-			Body: renderSetupOptions(m, options),
-			Footer: renderSetupFooter(m,
-				[]hintItem{hintFromBindingDesc(m.keys.Back, "skip")},
-				nil,
-				[]hintItem{hintFromBindingDesc(m.keys.Confirm, "confirm")},
-			),
 		})
 	case 5:
 		body = renderSetupPanel(m, setupPanel{

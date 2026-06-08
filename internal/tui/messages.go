@@ -264,9 +264,6 @@ type setupImportDoneMsg struct {
 // setupProvidersDoneMsg is sent after the setup-wizard provider selection step saves.
 type setupProvidersDoneMsg struct{ err error }
 
-// setupNodeMgrDoneMsg is sent after the setup-wizard node manager step saves.
-type setupNodeMgrDoneMsg struct{ err error }
-
 // setupBootstrapDoneMsg is sent after the existing-host bootstrap activation
 // applies one optional action.
 type setupBootstrapDoneMsg struct {

@@ -52,7 +52,7 @@ func setupStep2Model() Model {
 	return m
 }
 
-// setupStep3Model builds a model at setup step 3 (node manager selection).
+// setupStep3Model builds a model at setup step 3 (provider priority editor).
 func setupStep3Model() Model {
 	m := Model{
 		keys:             DefaultKeyMap(),
@@ -62,7 +62,12 @@ func setupStep3Model() Model {
 		settingsInput:    textinput.New(),
 		mode:             viewSetup,
 		setupStep:        3,
-		setupNodeMgrIdx:  0,
+		editingPriority:  true,
+		priorityDraft:    []string{"brew", "bun", "npm", "uv", "pip"},
+		priorityDisabled: map[string]bool{},
+		priorityAvailable: map[string]bool{
+			"brew": true, "bun": true, "npm": true, "uv": true, "pip": true,
+		},
 		upgradingKeys:    make(map[string]bool),
 		dangerConfirmRow: -1,
 		dotsConfirmIdx:   -1,
@@ -752,44 +757,32 @@ func TestFlow2_UC77_SetupStep6Esc(t *testing.T) {
 	}
 }
 
-// UC-78: setupImportDoneMsg (no node providers) → auto-create host.
+// UC-78: setupImportDoneMsg → priority editor (step 3).
 func TestFlow2_UC78_SetupImportDoneMsg(t *testing.T) {
-	// loadingSetup(1) has no setupProviders, so node is not enabled → creates host.
+	// After import the wizard opens the provider-priority editor (step 3).
 	m := loadingSetup(1)
 	m.allTools = []*database.ToolCache{{Name: "snapshot", Provider: "brew"}}
 	got := drive(m, setupImportDoneMsg{added: 2})
-	if got.setupStep == 4 {
-		t.Fatalf("setupStep = %d, host confirmation screen should not be shown", got.setupStep)
+	if got.setupStep != 3 {
+		t.Fatalf("setupStep = %d, want 3 (priority editor) after import", got.setupStep)
 	}
-	if got.setupStep != 5 {
-		t.Fatalf("setupStep = %d, want dotfile decision while host is created", got.setupStep)
-	}
-	if !got.loading {
-		t.Error("loading should be true while creating the host automatically")
-	}
-	if got.settingsInput.Focused() {
-		t.Error("settingsInput should not be focused during automatic host creation")
+	if !got.editingPriority {
+		t.Error("editingPriority should be true after advancing past providers")
 	}
 	if len(got.allTools) != 1 || got.allTools[0].Name != "snapshot" {
 		t.Fatalf("allTools changed before onboarding finished: %+v", got.allTools)
 	}
 }
 
-// UC-79: setupProvidersDoneMsg (no node providers) → auto-create host.
+// UC-79: setupProvidersDoneMsg → priority editor (step 3).
 func TestFlow2_UC79_SetupProvidersDoneMsg(t *testing.T) {
-	// loadingSetup(2) has no setupProviders, so node is not enabled → creates host.
+	// After providers are saved the wizard opens the provider-priority editor.
 	got := drive(loadingSetup(2), setupProvidersDoneMsg{})
-	if got.setupStep == 4 {
-		t.Fatalf("setupStep = %d, host confirmation screen should not be shown", got.setupStep)
+	if got.setupStep != 3 {
+		t.Fatalf("setupStep = %d, want 3 (priority editor) after providers saved", got.setupStep)
 	}
-	if got.setupStep != 5 {
-		t.Fatalf("setupStep = %d, want dotfile decision while host is created", got.setupStep)
-	}
-	if !got.loading {
-		t.Error("loading should be true while creating the host automatically")
-	}
-	if got.settingsInput.Focused() {
-		t.Error("settingsInput should not be focused during automatic host creation")
+	if !got.editingPriority {
+		t.Error("editingPriority should be true after advancing past providers")
 	}
 }
 
@@ -841,17 +834,6 @@ func TestFlow2_SetupErrorsStayOnCurrentStep(t *testing.T) {
 		}
 		if got.loading {
 			t.Fatal("loading should clear after provider failure")
-		}
-	})
-
-	t.Run("node manager failure stays on manager step", func(t *testing.T) {
-		got := drive(loadingSetup(3), setupNodeMgrDoneMsg{err: setupErr})
-
-		if got.setupStep != 3 {
-			t.Fatalf("setupStep = %d, want 3", got.setupStep)
-		}
-		if got.loading {
-			t.Fatal("loading should clear after node manager failure")
 		}
 	})
 
@@ -2481,69 +2463,50 @@ func assertNotLoading(t *testing.T, m Model) {
 	}
 }
 
-// ── UC-142: Setup step 3 — node manager selection ─────────────────────────────
+// ── UC-142: Setup step 3 — provider priority editor ───────────────────────────
 
-func TestFlow2_UC142_SetupStep3NodeMgr(t *testing.T) {
-	t.Run("down moves cursor", func(t *testing.T) {
-		got := drive(setupStep3Model(), tea.KeyPressMsg{Code: 'j', Text: "j"})
-		if got.setupNodeMgrIdx != 1 {
-			t.Errorf("setupNodeMgrIdx = %d, want 1 after j", got.setupNodeMgrIdx)
-		}
-	})
-	t.Run("up does not go below 0", func(t *testing.T) {
-		got := drive(setupStep3Model(), tea.KeyPressMsg{Code: 'k', Text: "k"})
-		if got.setupNodeMgrIdx != 0 {
-			t.Errorf("setupNodeMgrIdx = %d, want 0 after k at top", got.setupNodeMgrIdx)
-		}
-	})
-	t.Run("enter on auto creates host without showing step 4", func(t *testing.T) {
-		got := drive(setupStep3Model(), pressEnter())
-		if got.setupStep == 4 {
-			t.Fatalf("setupStep = %d, host confirmation screen should not be shown", got.setupStep)
-		}
-		if got.setupStep != 5 {
-			t.Fatalf("setupStep = %d, want dotfile decision while host is created", got.setupStep)
-		}
-		if !got.loading {
-			t.Error("loading should be true while creating the host automatically")
-		}
-		if got.settingsInput.Focused() {
-			t.Error("settingsInput should not be focused during automatic host creation")
-		}
-	})
-	t.Run("enter on bun sets loading=true", func(t *testing.T) {
+func TestFlow2_UC142_SetupStep3PriorityEditor(t *testing.T) {
+	t.Run("keys route through priority editor while editingPriority", func(t *testing.T) {
+		// 'x' should toggle the provider at the cursor position disabled.
 		m := setupStep3Model()
-		m.setupNodeMgrIdx = 1 // bun
-		got := drive(m, pressEnter())
-		if !got.loading {
-			t.Error("loading should be true when saving non-auto manager")
+		// cursor starts at 0 (brew); x toggles it disabled.
+		got := drive(m, tea.KeyPressMsg{Code: 'x', Text: "x"})
+		if !got.priorityDisabled["brew"] {
+			t.Error("x should toggle brew into priorityDisabled")
+		}
+		// A second x should re-enable it.
+		got2 := drive(got, tea.KeyPressMsg{Code: 'x', Text: "x"})
+		if got2.priorityDisabled["brew"] {
+			t.Error("second x should remove brew from priorityDisabled")
 		}
 	})
-	t.Run("esc creates host without showing step 4", func(t *testing.T) {
+
+	t.Run("space sets priorityHolding while editingPriority", func(t *testing.T) {
+		got := drive(setupStep3Model(), tea.KeyPressMsg{Code: ' ', Text: " "})
+		if !got.priorityHolding {
+			t.Error("space should set priorityHolding = true")
+		}
+	})
+
+	t.Run("esc closes editor and advances wizard to step 5", func(t *testing.T) {
 		got := drive(setupStep3Model(), pressEsc())
-		if got.setupStep == 4 {
-			t.Fatalf("setupStep = %d, host confirmation screen should not be shown", got.setupStep)
+		if got.editingPriority {
+			t.Error("editingPriority should be false after esc")
 		}
 		if got.setupStep != 5 {
-			t.Fatalf("setupStep = %d, want dotfile decision while host is created", got.setupStep)
-		}
-		if !got.loading {
-			t.Error("loading should be true while creating the host automatically")
+			t.Errorf("setupStep = %d after esc, want 5 (host creation)", got.setupStep)
 		}
 	})
-	t.Run("setupNodeMgrDoneMsg creates host without showing step 4", func(t *testing.T) {
-		got := drive(loadingSetup(3), setupNodeMgrDoneMsg{})
-		if got.setupStep == 4 {
-			t.Fatalf("setupStep = %d, host confirmation screen should not be shown", got.setupStep)
+
+	t.Run("enter closes editor and advances wizard to step 5", func(t *testing.T) {
+		// With a nil app the save cmd is a no-op, but editingPriority must
+		// close and the wizard must advance past step 3.
+		got := drive(setupStep3Model(), pressEnter())
+		if got.editingPriority {
+			t.Error("editingPriority should be false after enter")
 		}
 		if got.setupStep != 5 {
-			t.Fatalf("setupStep = %d, want dotfile decision while host is created", got.setupStep)
-		}
-		if !got.loading {
-			t.Error("loading should be true while creating the host automatically")
-		}
-		if got.settingsInput.Focused() {
-			t.Error("settingsInput should not be focused during automatic host creation")
+			t.Errorf("setupStep = %d after enter, want 5 (host creation)", got.setupStep)
 		}
 	})
 }
@@ -2654,7 +2617,7 @@ func TestFlow2_UC146_GroupColAlwaysVisible(t *testing.T) {
 	})
 }
 
-// UC-143: Setup step 2 with node disabled → auto-create host.
+// UC-143: Setup step 2 with node disabled → priority editor (step 3).
 func TestFlow2_UC143_SetupStep2NodeDisabled(t *testing.T) {
 	m := Model{
 		keys:          DefaultKeyMap(),
@@ -2676,16 +2639,10 @@ func TestFlow2_UC143_SetupStep2NodeDisabled(t *testing.T) {
 		height:           80,
 	}
 	got := drive(m, pressEnter())
-	if got.setupStep == 4 {
-		t.Fatalf("setupStep = %d, host confirmation screen should not be shown", got.setupStep)
+	if got.setupStep != 3 {
+		t.Fatalf("setupStep = %d, want 3 (priority editor) after providers confirmed", got.setupStep)
 	}
-	if got.setupStep != 5 {
-		t.Fatalf("setupStep = %d, want dotfile decision while host is created", got.setupStep)
-	}
-	if !got.loading {
-		t.Error("loading should be true while creating the host automatically")
-	}
-	if got.settingsInput.Focused() {
-		t.Error("settingsInput should not be focused during automatic host creation")
+	if !got.editingPriority {
+		t.Error("editingPriority should be true after advancing past providers")
 	}
 }
