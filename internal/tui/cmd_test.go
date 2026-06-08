@@ -1634,7 +1634,7 @@ func TestDoSaveSettingsChange_QueuesPendingChanges(t *testing.T) {
 	if first == nil {
 		t.Fatal("first save should start immediately")
 	}
-	second := m.doSaveSettingsChange(app.SetSettingValue("node.manager", "pnpm"))
+	second := m.doSaveSettingsChange(app.SetSettingValue("provider_priority", "pnpm,npm,uv,pip,brew"))
 	if second != nil {
 		t.Fatal("second save should queue while first save is running")
 	}
