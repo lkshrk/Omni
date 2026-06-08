@@ -84,6 +84,14 @@ func (m Model) viewString() string {
 		return p.styleErr.Render("Error: "+m.err.Error()) + "\n" + p.styleHelp.Render("Press q to quit.")
 	}
 
+	// Provider-priority editor popup — overlays the settings tab.
+	if m.editingPriority {
+		bgModel := m
+		bgModel.editingPriority = false
+		bg := bgModel.viewString()
+		return placePopup(bg, m, renderProviderPriorityPopup(m), providerPriorityPopupFrame(m))
+	}
+
 	if m.stowInstallPrompt {
 		bgModel := m
 		bgModel.stowInstallPrompt = false

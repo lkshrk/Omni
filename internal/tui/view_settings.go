@@ -369,45 +369,6 @@ func renderSettings(m Model) string {
 			lbl = p.styleDangerLabel
 		}
 
-		// Provider Priority row: expand into an inline reorder list when editing.
-		if i == settingsRowProviderPriority && m.editingPriority {
-			write(renderResponsiveGroupListRow(p, true,
-				[]rowCell{leftCell(p.styleActiveText.Render(rowInset+formatSettingLabel(row.label)), settingLabelWidth+lipgloss.Width(rowInset))},
-				[]rowCell{rightCell(p.styleProvider.Render("[editing]"), 0)},
-				contentW, settingsMinGap, listColumnGap,
-			) + "\n")
-			for j, name := range m.priorityDraft {
-				cursorOn := j == m.priorityCursor
-				enum := " "
-				if cursorOn {
-					if m.priorityHolding {
-						enum = "⇅"
-					} else {
-						enum = "‣"
-					}
-				}
-				dot := "●"
-				if m.priorityDisabled[name] {
-					dot = "○"
-				}
-				unavailable := m.priorityAvailable != nil && !m.priorityAvailable[name]
-				style := p.styleNormal
-				switch {
-				case cursorOn:
-					style = p.styleActiveText
-				case unavailable || m.priorityDisabled[name]:
-					style = p.styleHelp // dim: unavailable on this host or toggled off
-				}
-				write("    " + style.Render(enum+" "+dot+" "+name) + "\n")
-			}
-			hintCtx := hintCtxSettingsPriorityEdit
-			if m.priorityHolding {
-				hintCtx = hintCtxSettingsPriorityHold
-			}
-			write(renderContextHints(m, hintCtx, hintPrefix) + "\n")
-			continue
-		}
-
 		if i == m.serviceDurationRow && m.editingServiceDuration {
 			write(renderResponsiveGroupListRow(p, true,
 				[]rowCell{leftCell(p.styleActiveText.Render(rowInset+formatSettingLabel(row.label)), settingLabelWidth+lipgloss.Width(rowInset))},

@@ -1420,9 +1420,17 @@ func TestRenderSettings_EditingPriority(t *testing.T) {
 	m.settingsCursor = 1
 	m.editingPriority = true
 	m.priorityDraft = []string{"brew", "apt"}
-	out := renderSettings(m)
-	if !strings.Contains(out, "editing") {
-		t.Errorf("expected 'editing' in priority editing state, got:\n%s", out)
+	m.width = 120
+	m.height = 50
+	// The editor is now a popup; use the full composited view.
+	out := m.viewString()
+	// Popup title must be present.
+	if !strings.Contains(out, "Provider Priority") {
+		t.Errorf("expected 'Provider Priority' popup title in priority editing state, got:\n%s", out)
+	}
+	// Draft providers must appear in the popup body.
+	if !strings.Contains(out, "brew") || !strings.Contains(out, "apt") {
+		t.Errorf("expected draft providers 'brew' and 'apt' in popup, got:\n%s", out)
 	}
 }
 
@@ -2882,13 +2890,20 @@ func TestRenderSettings_EditModeShowsCancelHint(t *testing.T) {
 	m.settingsCursor = 1
 	m.editingPriority = true
 	m.priorityDraft = []string{"brew", "apt"}
-	out := renderSettings(m)
-	line := renderedLineContaining(out, "cancel")
-	if line == "" {
+	m.width = 120
+	m.height = 50
+	// The editor is now a popup; hints appear in the composited full view.
+	// The footer renders across two lines: one for cancel, one for enter save.
+	out := stripANSIEscapeSequences(m.viewString())
+	if renderedLineContaining(out, "cancel") == "" {
 		t.Fatalf("priority edit cancel hint missing from output:\n%s", out)
 	}
-	if !strings.Contains(line, "enter") || !strings.Contains(line, "save") {
-		t.Fatalf("priority edit should hint enter save and cancel, got %q", line)
+	if renderedLineContaining(out, "save") == "" {
+		t.Fatalf("priority edit save hint missing from output:\n%s", out)
+	}
+	// "enter" key label must appear somewhere in the popup footer.
+	if !strings.Contains(out, "enter") {
+		t.Fatalf("priority edit should show enter key hint, got:\n%s", out)
 	}
 }
 
