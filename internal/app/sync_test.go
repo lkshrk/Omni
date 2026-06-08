@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/provider"
@@ -12,7 +13,6 @@ import (
 // tapBrewStub is a full brew stub that also implements the brewTapManager interface.
 type tapBrewStub struct {
 	existingTaps  []string
-	existingTrust []string
 	tapsCalled    []string
 	trustedCalled []string
 }
@@ -34,7 +34,6 @@ func (s *tapBrewStub) Tap(_ context.Context, name string) error {
 	s.tapsCalled = append(s.tapsCalled, name)
 	return nil
 }
-func (s *tapBrewStub) ListTrusted(_ context.Context) ([]string, error) { return s.existingTrust, nil }
 func (s *tapBrewStub) Trust(_ context.Context, name string) error {
 	s.trustedCalled = append(s.trustedCalled, name)
 	return nil
@@ -94,9 +93,12 @@ func TestSync_TrustsAlreadyTappedRepo(t *testing.T) {
 }
 
 func TestSync_SkipsAlreadyTrustedTap(t *testing.T) {
-	// A tap already trusted must not be re-trusted (avoids a brew call per sync).
-	stub := &tapBrewStub{existingTaps: []string{"hashicorp/tap"}, existingTrust: []string{"hashicorp/tap"}}
+	// A tap recorded as trusted in the DB must not be re-trusted (no brew call).
+	stub := &tapBrewStub{existingTaps: []string{"hashicorp/tap"}}
 	a, cfgPath := newImportApp(t, stub)
+	if err := a.DB().MarkTapTrusted(context.Background(), "hashicorp/tap", time.Now()); err != nil {
+		t.Fatalf("seed trusted tap: %v", err)
+	}
 	cfg := &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"terraform": {Provider: "brew", Package: "hashicorp/tap/terraform", InstallWith: "brew", Taps: []string{"hashicorp/tap"}},
@@ -110,7 +112,31 @@ func TestSync_SkipsAlreadyTrustedTap(t *testing.T) {
 		t.Fatalf("Sync: %v", err)
 	}
 	if len(stub.trustedCalled) != 0 {
-		t.Errorf("Trust called %v, want none (already trusted)", stub.trustedCalled)
+		t.Errorf("Trust called %v, want none (already trusted in DB)", stub.trustedCalled)
+	}
+}
+
+func TestSync_RecordsTrustedTapInDB(t *testing.T) {
+	stub := &tapBrewStub{existingTaps: []string{"hashicorp/tap"}}
+	a, cfgPath := newImportApp(t, stub)
+	cfg := &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"terraform": {Provider: "brew", Package: "hashicorp/tap/terraform", InstallWith: "brew", Taps: []string{"hashicorp/tap"}},
+		},
+		Groups: []*config.GroupConfig{{Tools: []config.ToolEntry{{Name: "terraform"}}}},
+	}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+	if _, err := a.Sync(context.Background(), sync.SyncOptions{}); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	trusted, err := a.DB().TrustedTaps(context.Background())
+	if err != nil {
+		t.Fatalf("TrustedTaps: %v", err)
+	}
+	if !trusted["hashicorp/tap"] {
+		t.Errorf("trusted taps = %v, want hashicorp/tap recorded", trusted)
 	}
 }
 

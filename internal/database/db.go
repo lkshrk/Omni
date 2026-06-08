@@ -105,6 +105,15 @@ type PackageAvailability struct {
 	CheckedAt time.Time `bun:"checked_at,notnull"`
 }
 
+// TrustedTap records a Homebrew tap omni has already run `brew trust` on, so
+// tap sync can skip the trust call on subsequent runs.
+type TrustedTap struct {
+	bun.BaseModel `bun:"table:trusted_taps,alias:tt"`
+
+	Name      string    `bun:"name,pk"`
+	TrustedAt time.Time `bun:"trusted_at,notnull"`
+}
+
 type DotStatusCache struct {
 	bun.BaseModel `bun:"table:dot_status_cache,alias:dsc"`
 
@@ -216,6 +225,33 @@ func (db *DB) Bun() *bun.DB {
 	return db.bun
 }
 
+// TrustedTaps returns the set of Homebrew taps omni has already trusted.
+func (db *DB) TrustedTaps(ctx context.Context) (map[string]bool, error) {
+	var rows []TrustedTap
+	if err := db.bun.NewSelect().Model(&rows).Scan(ctx); err != nil {
+		return nil, fmt.Errorf("loading trusted taps: %w", err)
+	}
+	out := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		out[r.Name] = true
+	}
+	return out, nil
+}
+
+// MarkTapTrusted records that a tap has been trusted so future syncs skip the
+// `brew trust` call.
+func (db *DB) MarkTapTrusted(ctx context.Context, name string, at time.Time) error {
+	_, err := db.bun.NewInsert().
+		Model(&TrustedTap{Name: name, TrustedAt: at}).
+		On("CONFLICT (name) DO UPDATE").
+		Set("trusted_at = EXCLUDED.trusted_at").
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("recording trusted tap %s: %w", name, err)
+	}
+	return nil
+}
+
 // Migrate creates schema tables if they do not already exist (idempotent).
 // For existing databases it also adds new columns via ALTER TABLE, suppressing
 // "duplicate column" errors so the migration is safe to run repeatedly.
@@ -264,6 +300,13 @@ func (db *DB) Migrate(ctx context.Context) error {
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("creating dot_status_cache table: %w", err)
+	}
+	_, err = db.bun.NewCreateTable().
+		Model((*TrustedTap)(nil)).
+		IfNotExists().
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("creating trusted_taps table: %w", err)
 	}
 	_, err = db.bun.NewCreateTable().
 		Model((*DotSnapshotMeta)(nil)).
