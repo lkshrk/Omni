@@ -306,6 +306,69 @@ func TestApplySettingsChange_DraftSemantics(t *testing.T) {
 	}
 }
 
+func TestApplySettingsChange_SetProviderPriority(t *testing.T) {
+	a, _ := newImportApp(t)
+
+	got, _, err := a.ApplySettingsChange(context.Background(), config.Settings{}, app.SetProviderPriority(
+		[]string{"pnpm", "bun", "npm", "uv", "pip", "brew", "bogus", "brew"},
+	))
+	if err != nil {
+		t.Fatalf("ApplySettingsChange set provider priority: %v", err)
+	}
+	// Unknown names dropped, duplicates removed, order preserved.
+	if want := "pnpm,bun,npm,uv,pip,brew"; strings.Join(got.ProviderPriority, ",") != want {
+		t.Fatalf("provider_priority = %v, want %s", got.ProviderPriority, want)
+	}
+	// Node manager derived from the top-ranked node concrete in priority (pnpm).
+	if m := got.EcosystemManager(provider.EcosystemNode); m != "pnpm" {
+		t.Errorf("derived node manager = %q, want pnpm", m)
+	}
+	// Python manager derived from top-ranked python concrete (uv before pip).
+	if m := got.EcosystemManager(provider.EcosystemPython); m != "uv" {
+		t.Errorf("derived python manager = %q, want uv", m)
+	}
+}
+
+func TestApplySettingsChange_SetProviderPriority_DerivesManagerSkippingDisabled(t *testing.T) {
+	a, _ := newImportApp(t)
+	base := config.Settings{DisabledProviders: []string{"bun", "pnpm", "uv"}}
+
+	got, _, err := a.ApplySettingsChange(context.Background(), base, app.SetProviderPriority(
+		[]string{"bun", "pnpm", "npm", "uv", "pip"},
+	))
+	if err != nil {
+		t.Fatalf("ApplySettingsChange: %v", err)
+	}
+	// bun+pnpm disabled → first available node concrete is npm.
+	if m := got.EcosystemManager(provider.EcosystemNode); m != "npm" {
+		t.Errorf("derived node manager = %q, want npm (bun/pnpm disabled)", m)
+	}
+	// uv disabled → pip wins; pip stores as its settings value pip3.
+	if m := got.EcosystemManager(provider.EcosystemPython); m != "pip3" {
+		t.Errorf("derived python manager = %q, want pip3 (uv disabled)", m)
+	}
+}
+
+func TestApplySettingsChange_ToggleConcreteProvider(t *testing.T) {
+	a, _ := newImportApp(t)
+
+	got, _, err := a.ApplySettingsChange(context.Background(), config.Settings{}, app.ToggleSettingsProvider("bun"))
+	if err != nil {
+		t.Fatalf("toggle concrete bun: %v", err)
+	}
+	if !slices.Contains(got.DisabledProviders, "bun") {
+		t.Fatalf("bun should be disabled, got %v", got.DisabledProviders)
+	}
+
+	got, _, err = a.ApplySettingsChange(context.Background(), got, app.ToggleSettingsProvider("bun"))
+	if err != nil {
+		t.Fatalf("re-toggle concrete bun: %v", err)
+	}
+	if slices.Contains(got.DisabledProviders, "bun") {
+		t.Fatalf("bun should be re-enabled, got %v", got.DisabledProviders)
+	}
+}
+
 func TestSystemProviderPriorityPlanning(t *testing.T) {
 	a, _ := newImportApp(t, &stubProvider{name: "brew"}, &stubProvider{name: "apt"})
 
@@ -1195,8 +1258,19 @@ func TestEnableDisableProvider_ValidatesAndPersists(t *testing.T) {
 	if len(enabled) != 0 {
 		t.Fatalf("enabled list = %v, want none disabled", enabled)
 	}
-	if _, err := a.DisableProvider(context.Background(), "brew"); err == nil || !strings.Contains(err.Error(), `"brew" is not a provider family`) {
-		t.Fatalf("DisableProvider(brew) err = %v, want provider-family validation", err)
+	// Concrete providers are disablable under the provider-priority model.
+	concreteDisabled, err := a.DisableProvider(context.Background(), "brew")
+	if err != nil {
+		t.Fatalf("DisableProvider(brew): %v", err)
+	}
+	if !slices.Contains(concreteDisabled, "brew") {
+		t.Fatalf("disabled = %v, want brew present", concreteDisabled)
+	}
+	if _, err := a.DisableProvider(context.Background(), "bogus-pm"); err == nil || !strings.Contains(err.Error(), "is not a known provider") {
+		t.Fatalf("DisableProvider(bogus-pm) err = %v, want unknown-provider validation", err)
+	}
+	if _, err := a.EnableProvider(context.Background(), "brew"); err != nil {
+		t.Fatalf("EnableProvider(brew): %v", err)
 	}
 
 	cfg, err := config.Load(cfgPath)

@@ -67,12 +67,13 @@ func CanonicalSettingKey(key string) string {
 type SettingsChangeKind string
 
 const (
-	SettingsChangeSetValue          SettingsChangeKind = "set_value"
-	SettingsChangeToggleBool        SettingsChangeKind = "toggle_bool"
-	SettingsChangeSetSystemPriority SettingsChangeKind = "set_system_priority"
-	SettingsChangeToggleProvider    SettingsChangeKind = "toggle_provider"
-	SettingsChangeSetProvider       SettingsChangeKind = "set_provider"
-	SettingsChangeCycleManager      SettingsChangeKind = "cycle_manager"
+	SettingsChangeSetValue            SettingsChangeKind = "set_value"
+	SettingsChangeToggleBool          SettingsChangeKind = "toggle_bool"
+	SettingsChangeSetSystemPriority   SettingsChangeKind = "set_system_priority"
+	SettingsChangeSetProviderPriority SettingsChangeKind = "set_provider_priority"
+	SettingsChangeToggleProvider      SettingsChangeKind = "toggle_provider"
+	SettingsChangeSetProvider         SettingsChangeKind = "set_provider"
+	SettingsChangeCycleManager        SettingsChangeKind = "cycle_manager"
 )
 
 type SettingsChange struct {
@@ -133,6 +134,11 @@ func ToggleSettingBool(key string) SettingsChange {
 
 func SetSystemPriority(priority []string) SettingsChange {
 	return SettingsChange{Kind: SettingsChangeSetSystemPriority, Priority: append([]string(nil), priority...)}
+}
+
+// SetProviderPriority sets the flat per-host concrete provider-priority list.
+func SetProviderPriority(priority []string) SettingsChange {
+	return SettingsChange{Kind: SettingsChangeSetProviderPriority, Priority: append([]string(nil), priority...)}
 }
 
 func ToggleSettingsProvider(providerName string) SettingsChange {
@@ -247,6 +253,10 @@ func (a *App) ApplySettingsChange(_ context.Context, settings config.Settings, c
 	case SettingsChangeSetSystemPriority:
 		settings.SetEcosystemPriority(provider.EcosystemSystem, a.filterSystemPriority(change.Priority))
 		result.Key = provider.EcosystemSystem + ".priority"
+	case SettingsChangeSetProviderPriority:
+		settings.ProviderPriority = a.filterConcreteProviderPriority(change.Priority)
+		a.deriveEcosystemManagers(&settings)
+		result.Key = "provider_priority"
 	case SettingsChangeToggleProvider:
 		disabled, err := a.toggleDisabledProvider(settings.DisabledProviders, change.Provider)
 		if err != nil {
@@ -356,7 +366,7 @@ func applyToggleSettingBool(settings *config.Settings, key string) (string, erro
 }
 
 func (a *App) toggleDisabledProvider(disabled []string, providerName string) ([]string, error) {
-	if err := a.validateEcosystemProvider(providerName); err != nil {
+	if err := a.validateDisablableProvider(providerName); err != nil {
 		return nil, err
 	}
 	if slices.Contains(disabled, providerName) {
@@ -366,7 +376,7 @@ func (a *App) toggleDisabledProvider(disabled []string, providerName string) ([]
 }
 
 func (a *App) setProviderEnabled(disabled []string, providerName string, enabled bool) ([]string, error) {
-	if err := a.validateEcosystemProvider(providerName); err != nil {
+	if err := a.validateDisablableProvider(providerName); err != nil {
 		return nil, err
 	}
 	if enabled {
@@ -460,6 +470,81 @@ func systemProviderPriorityDraft(priority, options []string) []string {
 	return draft
 }
 
+// ConcreteProviderPriorityOptions returns the concrete providers eligible for
+// the host priority list, ordered by catalog DisplayOrder, plus any registered
+// concretes not already covered.
+func (a *App) ConcreteProviderPriorityOptions() []string {
+	opts := provider.BuiltinConcreteProviderPriorityNames()
+	for _, eco := range []string{provider.EcosystemSystem, provider.EcosystemNode, provider.EcosystemPython} {
+		for _, name := range a.ConcreteProviderNamesForEcosystem(eco) {
+			if !slices.Contains(opts, name) {
+				opts = append(opts, name)
+			}
+		}
+	}
+	return opts
+}
+
+// ConcreteProviderPriorityDraft returns the editable draft: the saved priority
+// order with any missing known concrete providers appended so all are
+// reorderable in the UI.
+func (a *App) ConcreteProviderPriorityDraft(priority []string) []string {
+	return systemProviderPriorityDraft(priority, a.ConcreteProviderPriorityOptions())
+}
+
+func (a *App) filterConcreteProviderPriority(priority []string) []string {
+	return filterSystemProviderPriority(priority, a.ConcreteProviderPriorityOptions())
+}
+
+// deriveEcosystemManagers sets each node/python ecosystem manager to the
+// top-ranked, non-disabled concrete provider of that ecosystem in the host
+// provider-priority order, keeping the existing EcosystemManager consumers
+// correct now that the priority list is the single source of truth. The concrete
+// name is mapped to its settings manager value (e.g. pip -> pip3).
+func (a *App) deriveEcosystemManagers(settings *config.Settings) {
+	disabled := make(map[string]struct{}, len(settings.DisabledProviders))
+	for _, n := range settings.DisabledProviders {
+		disabled[n] = struct{}{}
+	}
+	for _, eco := range []string{provider.EcosystemNode, provider.EcosystemPython} {
+		members := provider.BuiltinConcreteProvidersForEcosystem(eco)
+		memberSet := make(map[string]struct{}, len(members))
+		for _, m := range members {
+			memberSet[m] = struct{}{}
+		}
+		chosen := ""
+		for _, name := range settings.ProviderPriority {
+			if _, ok := memberSet[name]; !ok {
+				continue
+			}
+			if _, off := disabled[name]; off {
+				continue
+			}
+			chosen = name
+			break
+		}
+		if chosen == "" {
+			for _, name := range members {
+				if _, off := disabled[name]; !off {
+					chosen = name
+					break
+				}
+			}
+		}
+		if chosen == "" {
+			continue
+		}
+		settings.SetEcosystemManager(eco, managerSettingValue(eco, chosen))
+	}
+}
+
+func managerSettingValue(ecosystem, concrete string) string {
+	if opt, ok := provider.BuiltinManagerOption(ecosystem, concrete); ok && opt.SettingsValue != "" {
+		return opt.SettingsValue
+	}
+	return concrete
+}
+
 func filterSystemProviderPriority(priority, options []string) []string {
 	out := make([]string, 0, len(priority))
 	seen := make(map[string]struct{}, len(priority))
@@ -524,6 +609,24 @@ func (a *App) validateEcosystemProvider(name string) error {
 		return nil
 	}
 	return fmt.Errorf("%q is not a provider family (supported: %s)", name, strings.Join(a.EcosystemProviderNames(), ", "))
+}
+
+// validateDisablableProvider accepts the names that may appear in
+// disabled_providers: any concrete provider (the priority-model toggle target)
+// or, for backward compatibility, an ecosystem family name.
+func (a *App) validateDisablableProvider(name string) error {
+	if a.IsEcosystemProvider(name) {
+		return nil
+	}
+	if a.registry != nil {
+		if _, ok := a.registry.Get(name); ok {
+			return nil
+		}
+	}
+	if slices.Contains(provider.BuiltinConcreteProviderPriorityNames(), name) {
+		return nil
+	}
+	return fmt.Errorf("%q is not a known provider", name)
 }
 
 func (a *App) EcosystemProviderNames() []string {

@@ -5635,7 +5635,7 @@ func TestSettingsSet_BooleanAndDotsGitSettings(t *testing.T) {
 	}
 }
 
-func TestSettingsDisableProvider_RejectsConcreteProvider(t *testing.T) {
+func TestSettingsDisableProvider_AcceptsConcreteProvider(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
@@ -5644,12 +5644,31 @@ func TestSettingsDisableProvider_RejectsConcreteProvider(t *testing.T) {
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "settings", "disable-provider", "brew"})
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("settings disable-provider brew succeeded, want provider-family validation error")
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("settings disable-provider brew: %v", err)
 	}
-	if !strings.Contains(err.Error(), `"brew" is not a provider family`) {
-		t.Fatalf("error = %v, want provider-family validation", err)
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got := cfg.HostSettings["testhost"].DisabledProviders; !slices.Contains(got, "brew") {
+		t.Fatalf("disabled providers = %v, want brew present", got)
+	}
+}
+
+func TestSettingsDisableProvider_RejectsUnknownProvider(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	withConfig(t, cfgPath, &config.RootConfig{})
+
+	cmd := NewRootCmd()
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "settings", "disable-provider", "bogus-pm"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "is not a known provider") {
+		t.Fatalf("error = %v, want unknown-provider validation", err)
 	}
 }
 
