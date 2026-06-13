@@ -1,4 +1,34 @@
 {
 	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
-	"extends": ["github>lkshrk/woodpecker-ops//renovate/presets/app-library.json5"]
+	"extends": ["config:recommended", ":dependencyDashboard"],
+	"rangeStrategy": "replace",
+	"automerge": false,
+	"automergeType": "pr",
+	"automergeStrategy": "squash",
+	"platformAutomerge": false,
+	"packageRules": [
+		{
+			"description": "Automerge non-major updates after CI passes",
+			"matchUpdateTypes": ["patch", "minor"],
+			"automerge": true
+		},
+		{
+			"description": "Require manual review for major updates",
+			"matchUpdateTypes": ["major"],
+			"automerge": false
+		},
+		{
+			"matchDepTypes": ["engines"],
+			"enabled": false
+		}
+	],
+	"lockFileMaintenance": {
+		"enabled": true,
+		"automerge": true,
+		"automergeType": "branch",
+		"schedule": ["before 4am on sunday"]
+	},
+	"prConcurrentLimit": 5,
+	"prHourlyLimit": 2,
+	"timezone": "Europe/Berlin"
 }
