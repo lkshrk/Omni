@@ -1,4 +1,7 @@
 # omni reconcile --yes cleans audited dotfile ignore patterns.
+exec chmod 755 bin/brew
+env PATH=$WORK/bin:$PATH
+
 exec omni --yes --config settings.json reconcile --skip-privileged
 stdout 'syncing tools'
 stdout 'upgrading tools'
@@ -11,10 +14,17 @@ exec grep '"!/settings.json"' settings.json
 ! exec grep '"!/hooks/"' settings.json
 ! exec grep '"hooks"' settings.json
 
+-- bin/brew --
+#!/bin/sh
+if [ "${1:-}" = "tap" ]; then
+  exit 0
+fi
+exit 1
+
 -- settings.json --
 {
   "settings": {
-    "disabled_providers": ["system", "node", "python"]
+    "disabled_providers": ["system", "brew", "node", "python"]
   },
   "hosts": { "testhost": [] },
   "groups": [

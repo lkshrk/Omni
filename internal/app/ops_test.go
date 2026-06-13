@@ -742,6 +742,58 @@ func TestUpgrade_Success(t *testing.T) {
 	}
 }
 
+func TestUpgradeInstalled_UsesCachedInstalledOwner(t *testing.T) {
+	node := &managerUpgradeStub{stubProvider: stubProvider{name: "node", available: true}, verifyInstalled: true}
+	a, _ := newImportApp(t, node)
+	ctx := context.Background()
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name:          "typescript",
+		Provider:      "node",
+		Package:       "typescript",
+		Installed:     true,
+		InstalledWith: "npm",
+		Outdated:      true,
+		Tracked:       true,
+	}); err != nil {
+		t.Fatalf("seed tool: %v", err)
+	}
+
+	if err := a.UpgradeInstalled(ctx, "typescript"); err != nil {
+		t.Fatalf("UpgradeInstalled: %v", err)
+	}
+
+	if len(node.managerUpgrades) != 1 || node.managerUpgrades[0] != "npm" {
+		t.Fatalf("manager upgrades = %v, want [npm]", node.managerUpgrades)
+	}
+}
+
+func TestUpgradeInstalled_NoInstalledOwner(t *testing.T) {
+	a, _ := newImportApp(t, &stubProvider{name: "brew", available: true})
+	if err := a.UpgradeInstalled(context.Background(), "ripgrep"); err == nil || !strings.Contains(err.Error(), "not installed") {
+		t.Fatalf("UpgradeInstalled error = %v, want not installed", err)
+	}
+}
+
+func TestUpgradeInstalled_MultipleInstalledOwners(t *testing.T) {
+	a, _ := newImportApp(t,
+		&stubProvider{name: "brew", available: true},
+		&stubProvider{name: "pip", available: true},
+	)
+	ctx := context.Background()
+	for _, tcache := range []*database.ToolCache{
+		{Name: "black", Provider: "brew", Package: "black", Installed: true, Tracked: true},
+		{Name: "black", Provider: "pip", Package: "black", Installed: true, Tracked: true},
+	} {
+		if err := a.DB().Upsert(ctx, tcache); err != nil {
+			t.Fatalf("seed tool: %v", err)
+		}
+	}
+
+	if err := a.UpgradeInstalled(ctx, "black"); err == nil || !strings.Contains(err.Error(), "multiple installed providers") {
+		t.Fatalf("UpgradeInstalled error = %v, want multiple installed providers", err)
+	}
+}
+
 func TestUpgradeWithStateReturnsUpdatedTools(t *testing.T) {
 	node := &managerUpgradeStub{stubProvider: stubProvider{name: "node", available: true}, verifyInstalled: true}
 	a, _ := newImportApp(t, node)

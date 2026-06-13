@@ -1,4 +1,5 @@
 # tools sync does not use fallback when the configured native provider is unavailable
+exec chmod 755 bin/brew
 env PATH=$WORK/bin:$PATH
 
 exec omni --config settings.json hosts ensure testhost
@@ -10,11 +11,18 @@ stdout 'failed: rg \(apt\): native install candidates unavailable for rg: apt/rg
 exec grep '"status": "unverified"' settings.json
 stdout '"status": "unverified"'
 
+-- bin/brew --
+#!/bin/sh
+if [ "${1:-}" = "tap" ]; then
+  exit 0
+fi
+exit 1
+
 -- settings.json --
 {
   "version": 7,
   "settings": {
-    "disabled_providers": ["npm", "pip"]
+    "disabled_providers": ["brew", "npm", "pip"]
   },
   "tools": {
     "rg": {

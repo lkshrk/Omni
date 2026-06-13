@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -44,8 +43,8 @@ func newReconcileCmd(state *rootState) *cobra.Command {
 						fmt.Fprintf(out, "  ! failed: %s (%s): %v\n", name, event.Tool.Provider, event.Err)
 						return
 					}
-					if strings.HasPrefix(strings.TrimSpace(event.Message), "Skipped upgrading ") {
-						fmt.Fprintf(out, "  - skipped: %s (%s): update quarantined\n", name, event.Tool.Provider)
+					if reason, ok := skippedUpgradeProgressReason(event.Message); ok {
+						fmt.Fprintf(out, "  - skipped: %s (%s): %s\n", name, event.Tool.Provider, reason)
 						return
 					}
 					fmt.Fprintf(out, "  ✓ done: %s (%s)\n", name, event.Tool.Provider)

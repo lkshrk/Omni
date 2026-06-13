@@ -100,9 +100,9 @@ func TestPrivilegedToolCommand_BrewCaskActions(t *testing.T) {
 		action provider.PrivilegeAction
 		want   string
 	}{
-		{name: "install", action: provider.PrivilegeActionInstall, want: "brew install --cask parsec"},
+		{name: "install", action: provider.PrivilegeActionInstall, want: "brew install --cask --no-ask parsec"},
 		{name: "uninstall", action: provider.PrivilegeActionUninstall, want: "brew uninstall --cask parsec"},
-		{name: "upgrade", action: provider.PrivilegeActionUpgrade, want: "brew upgrade --cask parsec"},
+		{name: "upgrade", action: provider.PrivilegeActionUpgrade, want: "brew upgrade --cask --no-ask parsec"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -264,7 +264,7 @@ func TestPrivilegeQueuePlan_PrefersSpecificRowReason(t *testing.T) {
 	if item.Plan.Reason != "brew cask karabiner-elements uses a pkg installer" {
 		t.Fatalf("reason = %q, want row-specific cask reason", item.Plan.Reason)
 	}
-	if item.Command.Display != "brew install --cask karabiner-elements" {
+	if item.Command.Display != "brew install --cask --no-ask karabiner-elements" {
 		t.Fatalf("display command = %q", item.Command.Display)
 	}
 	if item.ApprovalMessage != "admin approval required to install" {
@@ -306,7 +306,7 @@ func TestPrivilegeQueuePlan_UsesProviderPlanWhenRowReasonIsGeneric(t *testing.T)
 	if item.Plan.Reason != "brew cask karabiner-elements uses a pkg installer" {
 		t.Fatalf("reason = %q, want provider cask reason", item.Plan.Reason)
 	}
-	if item.Command.Display != "brew install --cask karabiner-elements" {
+	if item.Command.Display != "brew install --cask --no-ask karabiner-elements" {
 		t.Fatalf("display command = %q", item.Command.Display)
 	}
 }
@@ -489,11 +489,11 @@ func (p *privilegePlanningProvider) PrivilegePlan(context.Context, provider.Priv
 func (p *privilegePlanningProvider) PrivilegeCommand(action provider.PrivilegeAction, tool provider.Tool) (string, []string, bool) {
 	switch action {
 	case provider.PrivilegeActionInstall:
-		return "brew", []string{"install", "--cask", tool.EffectivePackage()}, true
+		return "brew", []string{"install", "--cask", "--no-ask", tool.EffectivePackage()}, true
 	case provider.PrivilegeActionUninstall:
 		return "brew", []string{"uninstall", "--cask", tool.EffectivePackage()}, true
 	case provider.PrivilegeActionUpgrade:
-		return "brew", []string{"upgrade", "--cask", tool.EffectivePackage()}, true
+		return "brew", []string{"upgrade", "--cask", "--no-ask", tool.EffectivePackage()}, true
 	default:
 		return "", nil, false
 	}

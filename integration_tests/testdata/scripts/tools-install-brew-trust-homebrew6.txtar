@@ -1,0 +1,73 @@
+# omni tools install self-heals Homebrew 6 tap-trust refusals with the real stderr shape
+exec chmod 755 bin/brew
+env PATH=$WORK/bin:$PATH
+
+exec omni --config settings.json tools install quarkdown --provider brew
+stdout 'installed quarkdown \(brew\)'
+exec test -f .omni-cache/fake-brew/quarkdown
+exec test -f .omni-cache/fake-brew/trusted-quarkdown
+
+-- bin/brew --
+#!/usr/bin/env sh
+set -eu
+state="${OMNI_CACHE_DIR}/fake-brew"
+mkdir -p "$state"
+case "${1:-}" in
+  --version)
+    echo "Homebrew 6.0.0"
+    ;;
+  install)
+    shift
+    if [ "${1:-}" = "--formula" ] || [ "${1:-}" = "--cask" ]; then
+      shift
+    fi
+    if [ "${1:-}" = "quarkdown" ] && [ ! -f "$state/trusted-quarkdown" ]; then
+      printf '✔︎ JSON API packages.arm64_tahoe.jws.json\n' >&2
+      printf 'Error: Refusing to load formula quarkdown-labs/quarkdown/quarkdown from untrusted tap quarkdown-labs/quarkdown.\n' >&2
+      printf 'Run `brew trust --formula quarkdown-labs/quarkdown/quarkdown` or `brew trust quarkdown-labs/quarkdown` to trust it.\n' >&2
+      exit 1
+    fi
+    : > "$state/$1"
+    ;;
+  trust)
+    if [ "${2:-}" = "quarkdown-labs/quarkdown" ]; then
+      : > "$state/trusted-quarkdown"
+      exit 0
+    fi
+    exit 1
+    ;;
+  list)
+    shift
+    if [ "${1:-}" = "--cask" ]; then
+      exit 0
+    fi
+    if [ "${1:-}" = "--versions" ]; then
+      shift
+      if [ "${1:-}" = "--cask" ]; then
+        shift
+      fi
+      for pkg in "$@"; do
+        if [ -f "$state/$pkg" ]; then
+          echo "$pkg 1.0.0"
+          exit 0
+        fi
+      done
+    fi
+    exit 1
+    ;;
+  info)
+    printf '{"formulae":[],"casks":[]}\n'
+    ;;
+esac
+
+-- settings.json --
+{
+  "version": 7,
+  "tools": {
+    "quarkdown": { "providers": [{ "provider": "brew" }] }
+  },
+  "hosts": { "testhost": [] },
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": ["quarkdown"] }
+  ]
+}

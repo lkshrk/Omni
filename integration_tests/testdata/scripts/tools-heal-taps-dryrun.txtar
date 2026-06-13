@@ -1,0 +1,37 @@
+# omni tools heal-taps --dry-run reports tap-qualified rewrites without changing config
+exec chmod 755 bin/brew
+env PATH=$WORK/bin:$PATH
+
+exec omni --config settings.json tools heal-taps --dry-run
+stdout 'Would heal 1 brew tap:'
+stdout 'quarkdown: quarkdown -> quarkdown-labs/quarkdown/quarkdown \(tap quarkdown-labs/quarkdown\)'
+exec grep '"package": "quarkdown"' settings.json
+! exec grep 'quarkdown-labs/quarkdown/quarkdown' settings.json
+
+-- bin/brew --
+#!/usr/bin/env sh
+set -eu
+case "${1:-}" in
+  --version)
+    echo "Homebrew 6.0.0"
+    ;;
+  info)
+    if [ "${2:-}" = "--json=v2" ] && [ "${3:-}" = "quarkdown" ]; then
+      printf '{"formulae":[{"name":"quarkdown","full_name":"quarkdown-labs/quarkdown/quarkdown","desc":"documents as code","installed":[]}],"casks":[]}\n'
+      exit 0
+    fi
+    printf '{"formulae":[],"casks":[]}\n'
+    ;;
+esac
+
+-- settings.json --
+{
+  "version": 7,
+  "tools": {
+    "quarkdown": { "providers": [{ "provider": "brew", "package": "quarkdown" }] }
+  },
+  "hosts": { "testhost": [] },
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": ["quarkdown"] }
+  ]
+}

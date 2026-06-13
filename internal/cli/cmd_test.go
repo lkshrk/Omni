@@ -1950,7 +1950,7 @@ func TestUpgrade_All_EmptyDB(t *testing.T) {
 	}
 }
 
-func TestUpgrade_NameWithoutProvider_ReturnsError(t *testing.T) {
+func TestUpgrade_NameUsesInstalledProvider(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
@@ -1958,14 +1958,30 @@ func TestUpgrade_NameWithoutProvider_ReturnsError(t *testing.T) {
 	withConfig(t, cfgPath, &config.RootConfig{})
 	withHost(t, cfgPath)
 
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "upgrade", "sometool"})
-	err := cmd.Execute()
-	if err == nil {
-		t.Error("expected error when --provider is missing for named upgrade")
+	prov := &cliStubProvider{
+		name:      "brew",
+		installed: []provider.InstalledTool{{Tool: provider.Tool{Name: "ripgrep", Provider: "brew"}, Version: "1.0.0"}},
 	}
-	if !strings.Contains(err.Error(), "--provider") {
-		t.Errorf("expected '--provider' in error, got: %v", err)
+	a := app.New(cfgPath)
+	a.CacheDir = cacheDir
+	if err := a.InitTestMode(context.Background(), prov); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	if err := a.DB().Upsert(context.Background(), &database.ToolCache{
+		Name:      "ripgrep",
+		Provider:  "brew",
+		Package:   "ripgrep",
+		Installed: true,
+		Tracked:   true,
+	}); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+
+	cmd := newUpgradeCmd(&rootState{app: a})
+	cmd.SetArgs([]string{"ripgrep"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("upgrade ripgrep: %v", err)
 	}
 }
 
@@ -3839,9 +3855,9 @@ func TestSync_DryRun_WithProviderFlag_NoToolsForProvider(t *testing.T) {
 	}
 }
 
-// ─── upgrade: individual tool name without provider → error ──────────────────
+// ─── upgrade: individual tool name uses installed cache owner ────────────────
 
-func TestUpgrade_NameAndProvider_NoSuchTool(t *testing.T) {
+func TestUpgrade_NameNoSuchInstalledTool(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
@@ -3850,9 +3866,11 @@ func TestUpgrade_NameAndProvider_NoSuchTool(t *testing.T) {
 	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "upgrade", "nonexistent_tool_xyz", "--provider", "brew"})
-	// Will fail because tool isn't installed — exercises the upgrade path that calls Upgrade().
-	_ = cmd.Execute()
+	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "upgrade", "nonexistent_tool_xyz"})
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "not installed") {
+		t.Fatalf("upgrade nonexistent error = %v, want not installed", err)
+	}
 }
 
 // ─── import: dry-run flag set (would-import action string) ───────────────────

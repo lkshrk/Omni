@@ -1,5 +1,5 @@
 # tools sync uses a configured fallback when native package availability is cached unavailable
-exec chmod 755 bin/apt-get
+exec chmod 755 bin/apt-get bin/brew
 env PATH=$WORK/bin:$PATH
 
 exec omni --config settings.json hosts ensure testhost
@@ -27,11 +27,18 @@ case "${1:-}" in
     ;;
 esac
 
+-- bin/brew --
+#!/bin/sh
+if [ "${1:-}" = "tap" ]; then
+  exit 0
+fi
+exit 1
+
 -- settings.json --
 {
   "version": 7,
   "settings": {
-    "disabled_providers": ["npm", "pip"]
+    "disabled_providers": ["brew", "npm", "pip"]
   },
   "tools": {
     "rg": {

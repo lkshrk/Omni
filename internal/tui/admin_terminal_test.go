@@ -179,8 +179,8 @@ func TestRenderAdminTerminalPopup_PreRunStyling(t *testing.T) {
 	m.adminTerminal = &adminTerminalState{
 		name:    "karabiner-elements",
 		command: "brew",
-		args:    []string{"install", "--cask", "karabiner-elements"},
-		display: "brew install --cask karabiner-elements",
+		args:    []string{"install", "--cask", "--no-ask", "karabiner-elements"},
+		display: "brew install --cask --no-ask karabiner-elements",
 		reason:  "brew cask karabiner-elements uses a pkg installer",
 	}
 
@@ -191,7 +191,7 @@ func TestRenderAdminTerminalPopup_PreRunStyling(t *testing.T) {
 		"brew cask",
 		"The karabiner-elements cask uses a macOS package installer.",
 		"command",
-		"brew install --cask karabiner-elements",
+		"brew install --cask --no-ask karabiner-elements",
 		"A terminal will open here after you continue.",
 		"continue",
 	} {

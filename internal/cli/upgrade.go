@@ -13,9 +13,8 @@ import (
 
 func newUpgradeCmd(state *rootState) *cobra.Command {
 	var (
-		providerName string
-		all          bool
-		force        bool
+		all   bool
+		force bool
 	)
 
 	cmd := &cobra.Command{
@@ -26,8 +25,8 @@ func newUpgradeCmd(state *rootState) *cobra.Command {
 ` + actions.MustLongDescription(actions.ToolUpdateAll) + `
 
 Examples:
-  omni upgrade ripgrep --provider brew     # upgrade one tool
-  omni upgrade --all                       # upgrade all outdated tools`,
+  omni upgrade ripgrep     # upgrade one installed tool
+  omni upgrade --all       # upgrade all outdated tools`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -49,12 +48,8 @@ Examples:
 						fmt.Fprintf(out, "  ! failed: %s (%s): %v\n", name, event.Tool.Provider, event.Err)
 						return
 					}
-					if strings.HasPrefix(strings.TrimSpace(event.Message), "Skipped upgrading ") {
-						fmt.Fprintf(out, "  - skipped: %s (%s): update quarantined\n", name, event.Tool.Provider)
-						return
-					}
-					if strings.HasPrefix(strings.TrimSpace(event.Message), "Skipped ") {
-						fmt.Fprintf(out, "  - skipped: %s (%s): externally managed; cannot self-upgrade\n", name, event.Tool.Provider)
+					if reason, ok := skippedUpgradeProgressReason(event.Message); ok {
+						fmt.Fprintf(out, "  - skipped: %s (%s): %s\n", name, event.Tool.Provider, reason)
 						return
 					}
 					fmt.Fprintf(out, "  ✓ upgraded: %s (%s)\n", name, event.Tool.Provider)
@@ -75,20 +70,33 @@ Examples:
 				return fmt.Errorf("specify a tool name or use --all")
 			}
 			name := args[0]
-			if err := requireProvider(providerName); err != nil {
+			if err := a.UpgradeInstalledWithOptions(ctx, name, app.UpgradeOptions{Force: force}); err != nil {
 				return err
 			}
-			if err := a.UpgradeWithOptions(ctx, name, providerName, app.UpgradeOptions{Force: force}); err != nil {
-				return err
-			}
-			fmt.Fprintf(cmdOut(cmd), "✓ upgraded %s (%s)\n", name, providerName)
+			fmt.Fprintf(cmdOut(cmd), "✓ upgraded %s\n", name)
 			return nil
 		},
 	}
 
-	addProviderFlag(cmd, &providerName, "provider to use")
 	cmd.Flags().BoolVar(&all, "all", false, actions.MustDescription(actions.ToolUpdateAll))
 	cmd.Flags().BoolVar(&force, "force", false, "bypass update quarantine")
 	cmd.ValidArgsFunction = completeToolNames(state)
 	return cmd
+}
+
+func skippedUpgradeProgressReason(message string) (string, bool) {
+	msg := strings.ToLower(strings.TrimSpace(message))
+	if !strings.HasPrefix(msg, "skipped ") {
+		return "", false
+	}
+	switch {
+	case strings.Contains(msg, "update quarantined"):
+		return "update quarantined", true
+	case strings.Contains(msg, "manual cask upgrade"):
+		return "manual cask upgrade", true
+	case strings.Contains(msg, "externally managed") && strings.Contains(msg, "self-upgrade"):
+		return "externally managed; cannot self-upgrade", true
+	default:
+		return "skipped", true
+	}
 }

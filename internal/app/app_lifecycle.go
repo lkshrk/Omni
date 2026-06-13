@@ -1043,6 +1043,49 @@ func (a *App) Upgrade(ctx context.Context, name, providerName string) error {
 	return a.UpgradeWithOptions(ctx, name, providerName, UpgradeOptions{})
 }
 
+// UpgradeInstalled upgrades a single installed tool using the local cache owner.
+func (a *App) UpgradeInstalled(ctx context.Context, name string) error {
+	return a.UpgradeInstalledWithOptions(ctx, name, UpgradeOptions{})
+}
+
+func (a *App) UpgradeInstalledWithOptions(ctx context.Context, name string, opts UpgradeOptions) error {
+	target, err := a.installedUpgradeTarget(ctx, name)
+	if err != nil {
+		return err
+	}
+	return a.UpgradeWithOptions(ctx, target.Name, target.Provider, opts)
+}
+
+func (a *App) installedUpgradeTarget(ctx context.Context, name string) (*database.ToolCache, error) {
+	tools, err := a.readDB().List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var matches []*database.ToolCache
+	for _, t := range tools {
+		if t == nil || t.Name != name || !t.Installed {
+			continue
+		}
+		matches = append(matches, t)
+	}
+	switch len(matches) {
+	case 0:
+		return nil, fmt.Errorf("tool %q is not installed; run 'omni tools refresh' if the cache is stale", name)
+	case 1:
+		return matches[0], nil
+	default:
+		owners := make([]string, 0, len(matches))
+		for _, t := range matches {
+			owner := t.Provider
+			if t.InstalledWith != "" {
+				owner += "/" + t.InstalledWith
+			}
+			owners = append(owners, owner)
+		}
+		return nil, fmt.Errorf("tool %q has multiple installed providers: %s", name, strings.Join(owners, ", "))
+	}
+}
+
 func (a *App) UpgradeWithOptions(ctx context.Context, name, providerName string, opts UpgradeOptions) error {
 	_, ok := a.registry.Get(providerName)
 	if !ok {
@@ -1270,6 +1313,16 @@ func (a *App) UpgradeAllDetailedWithOptions(ctx context.Context, progress func(s
 				result.Skipped = append(result.Skipped, bulkToolErrorFromError(t.Name, t.Provider, err))
 				continue
 			}
+			if isBrewManualInstallerCaskUpgrade(t, err) {
+				if progress != nil {
+					progress("skipping " + displayName + " (manual cask upgrade)…")
+				}
+				if toolProgress != nil {
+					toolProgress(isync.ProgressEvent{Tool: tool, Message: "Skipped " + t.Name + " (manual cask upgrade)", TargetVersion: targetVersion, Done: true})
+				}
+				result.Skipped = append(result.Skipped, bulkToolErrorFromError(t.Name, t.Provider, err))
+				continue
+			}
 			if toolProgress != nil {
 				toolProgress(isync.ProgressEvent{Tool: tool, Message: "Failed upgrading " + t.Name, TargetVersion: targetVersion, Err: err, Done: true})
 			}
@@ -1298,6 +1351,19 @@ func isUnupgradeableManagerSelf(t *database.ToolCache, err error) bool {
 		pkg = t.Name
 	}
 	return pkg == "pip" && config.NormalizeConcreteProvider(t.Provider) == "pip"
+}
+
+func isBrewManualInstallerCaskUpgrade(t *database.ToolCache, err error) bool {
+	if t == nil || err == nil {
+		return false
+	}
+	if config.NormalizeConcreteProvider(t.Provider) != "brew" && config.NormalizeConcreteProvider(t.InstalledWith) != "brew" {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "not upgrading") &&
+		strings.Contains(msg, "installer manual") &&
+		strings.Contains(msg, "cask")
 }
 
 func toolTargetVersion(tool *database.ToolCache) string {
