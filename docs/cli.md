@@ -84,6 +84,7 @@ Common tool flags:
 | `--from-github <owner/repo>` | `fallback` | Resolve and save a GitHub fallback recipe from an explicit repo. Omit it only when the tool config has a GitHub `git` URL. |
 | `--install-with <manager>` | `add`, `set` | Pin a logical tool to a concrete manager. |
 | `--quarantine <duration>` | `set` | Set a tool-level update quarantine duration, `0`, or `exempt`. |
+| `--force` | `install`, `upgrade`, `reconcile` | For install, skip bootstrap and host assignment checks. For upgrade and reconcile, bypass update quarantine. |
 | `--group <group>` | `add`, `install`, `sync`, `import`, `list` | Assign, target, or filter by group. |
 | `--host` | `set` | Boolean flag; write the override for the current active host. It does not take a hostname value. |
 | `--global` | `set` | Write the default logical install spec. |

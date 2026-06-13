@@ -23,7 +23,7 @@ See [State And Files](state-and-files.md#cache-contents).
 ## Concrete Manager
 
 The real package manager that performs the operation: `brew`, `apt`, `bun`,
-`uv`, `pip3`, and similar names.
+`uv`, `pip`, and similar names.
 
 ## Concrete Provider
 

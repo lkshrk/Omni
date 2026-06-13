@@ -33,13 +33,13 @@ dependencies, such as `apt install ./omni.deb`, `dnf install ./omni.rpm`,
 | Linux | supported | Native managers include `apt`, `apk`, `dnf`, `zypper`, and `pacman`. User services use systemd where available. |
 | Windows | not documented | Windows support is not part of the current tested contract. |
 
-Supported built-in providers:
+Supported built-in concrete providers:
 
-| Ecosystem | Portable provider | Concrete managers |
-| --- | --- | --- |
-| System packages | `system` | `apt`, `apk`, `dnf`, `zypper`, `pacman`, `brew` |
-| Node packages | `node` | `bun`, `pnpm`, `npm` |
-| Python packages | `python` | `uv`, `pip3` |
+| Package area | Concrete providers |
+| --- | --- |
+| System packages | `apt`, `apk`, `dnf`, `zypper`, `pacman`, `brew` |
+| Node packages | `bun`, `pnpm`, `npm` |
+| Python packages | `uv`, `pip` |
 
 ## Install With Go
 

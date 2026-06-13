@@ -98,7 +98,7 @@ Important flags:
 | `--prune` | `sync` | Remove local installations no longer in config. Cannot be combined with `sync --all`. |
 | `--all` | `sync` | Claim discovered installed tools into config, then install missing configured tools. |
 | `--group` | `install`, `sync`, `import`, `list`, `add` | Target, filter, or assign a reusable group explicitly. |
-| `--force` | `install` | Skip bootstrap and host assignment checks for an explicit install path. |
+| `--force` | `install`, `upgrade`, `reconcile` | For install, skip bootstrap and host assignment checks for an explicit install path. For upgrade and reconcile, bypass update quarantine. |
 | `--allow-weak` | `install`, `sync` | Permit the best weak provider discovery match when no high-confidence match exists. |
 | `--provider` | `add`, `set`, `install`, `list`, `search`, `sync`, `reinstall --reinstall-default` | Scope command behavior to one provider where supported. |
 | `--from-github` | `fallback` | Resolve and save a GitHub fallback recipe from `owner/repo`. Optional when the tool config has a GitHub `git` URL. |
