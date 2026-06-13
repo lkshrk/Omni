@@ -1,0 +1,79 @@
+# omni reconcile reports Homebrew manual-installer cask upgrades as skips, not successful upgrades
+exec chmod 755 bin/brew
+env PATH=$WORK/bin:$PATH
+
+exec omni-seed-cache battle-net brew battle-net 1.19.3.3219 1.20.0 brew
+exec omni --yes --config settings.json reconcile --skip-privileged --force
+stdout 'upgrading battle-net \(1.20.0\)'
+stdout 'skipping battle-net \(1.20.0\) \(manual cask upgrade\)'
+stdout 'skipped: battle-net \(1.20.0\) \(brew\): manual cask upgrade'
+stdout 'Reconcile complete .* 0 installed, 0 added to config, 0 upgraded, dotfiles not configured\.'
+! stdout 'done: battle-net'
+! stdout 'failed to upgrade'
+
+-- bin/brew --
+#!/usr/bin/env sh
+set -eu
+case "${1:-}" in
+  --version)
+    echo "Homebrew 6.0.0"
+    ;;
+  info)
+    if [ "${2:-}" = "--json=v2" ] && [ "${3:-}" = "--installed" ]; then
+      printf '{"formulae":[],"casks":[{"token":"battle-net","installed":"1.19.3.3219","artifacts":[]}]}\n'
+      exit 0
+    fi
+    printf '{"formulae":[],"casks":[]}\n'
+    ;;
+  leaves)
+    ;;
+  list)
+    shift
+    if [ "${1:-}" = "--cask" ]; then
+      echo "battle-net"
+      exit 0
+    fi
+    if [ "${1:-}" = "--versions" ]; then
+      shift
+      if [ "${1:-}" = "--cask" ]; then
+        shift
+        for pkg in "$@"; do
+          if [ "$pkg" = "battle-net" ]; then
+            echo "battle-net 1.19.3.3219"
+            exit 0
+          fi
+        done
+      fi
+    fi
+    exit 1
+    ;;
+  outdated)
+    printf '{"formulae":[],"casks":[{"name":"battle-net","current_version":"1.20.0"}]}\n'
+    ;;
+  upgrade)
+    shift
+    if [ "${1:-}" = "--formula" ] || [ "${1:-}" = "--cask" ]; then
+      shift
+    fi
+    if [ "${1:-}" = "battle-net" ]; then
+      printf 'Error: Not upgrading 1 `installer manual` cask.\n' >&2
+      exit 1
+    fi
+    exit 1
+    ;;
+esac
+
+-- settings.json --
+{
+  "version": 7,
+  "settings": {
+    "disabled_providers": ["node", "python", "apt", "apk", "dnf", "pacman", "zypper", "pip"]
+  },
+  "tools": {
+    "battle-net": { "providers": [{ "provider": "brew" }] }
+  },
+  "hosts": { "testhost": [] },
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": ["battle-net"] }
+  ]
+}

@@ -462,13 +462,21 @@ func (p *Provider) PrivilegePlan(ctx context.Context, action provider.PrivilegeA
 
 func (p *Provider) PrivilegeCommand(action provider.PrivilegeAction, tool provider.Tool) (string, []string, bool) {
 	verb := "uninstall"
+	noAsk := false
 	switch action {
 	case provider.PrivilegeActionInstall:
 		verb = "install"
+		noAsk = true
 	case provider.PrivilegeActionUpgrade:
 		verb = "upgrade"
+		noAsk = true
 	}
-	return "brew", []string{verb, "--cask", tool.EffectivePackage()}, true
+	args := []string{verb, "--cask"}
+	if noAsk {
+		args = append(args, "--no-ask")
+	}
+	args = append(args, tool.EffectivePackage())
+	return "brew", args, true
 }
 
 func (c brewCaskInfo) privilegePlan(action provider.PrivilegeAction) provider.PrivilegePlan {

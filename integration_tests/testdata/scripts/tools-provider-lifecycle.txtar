@@ -13,7 +13,7 @@ exec omni --config settings.json tools install black --provider pip
 stdout 'installed black'
 exec test -f .omni-cache/fake-pip/black
 
-exec omni --config settings.json tools upgrade black --provider pip
+exec omni --config settings.json tools upgrade black
 stdout 'upgraded black'
 exec test -f .omni-cache/fake-pip/black-upgraded
 

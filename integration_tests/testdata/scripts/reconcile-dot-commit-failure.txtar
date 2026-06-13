@@ -1,0 +1,98 @@
+# omni reconcile surfaces dotfile commit failures after syncing dotfiles
+# @requires: stow
+env HOME=$WORK/home
+mkdir $WORK/home
+mkdir $WORK/home/.config
+exec chmod 755 bin/brew bin/apt bin/apk bin/dnf bin/pacman bin/zypper bin/pip bin/pip3
+env PATH=$WORK/bin:$PATH
+
+exec git init $WORK/home/dotfiles
+exec git -C $WORK/home/dotfiles config user.email t@t.com
+exec git -C $WORK/home/dotfiles config user.name T
+exec git -C $WORK/home/dotfiles config commit.gpgsign false
+exec git -C $WORK/home/dotfiles config tag.gpgsign false
+exec git -C $WORK/home/dotfiles add dotfiles
+exec git -C $WORK/home/dotfiles commit -m seed
+exec cp changed/init.lua $WORK/home/dotfiles/dotfiles/nvim/.config/nvim/init.lua
+exec git -C $WORK/home/dotfiles config gpg.format ssh
+exec git -C $WORK/home/dotfiles config user.signingkey $WORK/missing-signing-key.pub
+exec git -C $WORK/home/dotfiles config commit.gpgsign true
+
+! exec omni --yes --config settings.json reconcile --skip-privileged -m 'dots: reconcile commit'
+stdout 'syncing tools'
+stdout 'syncing dotfiles'
+stdout 'committing dotfiles'
+stdout 'Reconcile complete .* 0 installed, 0 added to config, 0 upgraded, .* dotfile op\.'
+stderr 'commit dotfiles:'
+! stdout 'dotfiles committed'
+
+-- bin/brew --
+#!/bin/sh
+case "${1:-}" in
+  --version)
+    echo "Homebrew 6.0.0"
+    ;;
+  info)
+    printf '{"formulae":[],"casks":[]}\n'
+    ;;
+  leaves|list|outdated|update)
+    if [ "${1:-}" = "outdated" ]; then
+      printf '{"formulae":[],"casks":[]}\n'
+    fi
+    ;;
+esac
+
+-- bin/apt --
+#!/bin/sh
+exit 1
+
+-- bin/apk --
+#!/bin/sh
+exit 1
+
+-- bin/dnf --
+#!/bin/sh
+exit 1
+
+-- bin/pacman --
+#!/bin/sh
+exit 1
+
+-- bin/zypper --
+#!/bin/sh
+exit 1
+
+-- bin/pip --
+#!/bin/sh
+exit 1
+
+-- bin/pip3 --
+#!/bin/sh
+exit 1
+
+-- settings.json --
+{
+  "version": 7,
+  "settings": {
+    "disabled_providers": ["npm", "pip"]
+  },
+  "host_settings": {
+    "testhost": {
+      "dots_repo": "~/dotfiles"
+    }
+  },
+  "hosts": { "testhost": [] },
+  "groups": [
+    {
+      "name": "testhost",
+      "special": "host",
+      "dots": [{ "name": "nvim", "path": "~/.config/nvim" }]
+    }
+  ]
+}
+
+-- home/dotfiles/dotfiles/nvim/.config/nvim/init.lua --
+-- seed config
+
+-- changed/init.lua --
+-- signing failure change

@@ -1,4 +1,7 @@
 # script provider: install via custom shell command, idempotency via check probe
+exec chmod 755 bin/brew
+env PATH=$WORK/bin:$PATH
+
 exec omni --config settings.json hosts ensure testhost
 
 # First sync: check fails (marker absent) → install runs → marker created.
@@ -11,8 +14,18 @@ exec omni --config settings.json tools sync
 stdout 'already installed: mytool \(script\)'
 ! stdout 'done: mytool \(script\)'
 
+-- bin/brew --
+#!/bin/sh
+if [ "${1:-}" = "tap" ]; then
+  exit 0
+fi
+exit 1
+
 -- settings.json --
 {
+  "settings": {
+    "disabled_providers": ["brew", "node", "python"]
+  },
   "tools": {
     "mytool": {
       "provider": "script",

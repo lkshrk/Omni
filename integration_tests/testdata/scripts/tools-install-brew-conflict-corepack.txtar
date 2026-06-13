@@ -1,0 +1,65 @@
+# omni tools install keeps Homebrew formula conflicts actionable instead of treating them as recoverable
+exec chmod 755 bin/brew
+env PATH=$WORK/bin:$PATH
+
+! exec omni --config settings.json tools install pnpm --provider brew
+stderr 'brew install pnpm'
+stderr 'Cannot install pnpm because conflicting formulae are installed'
+stderr 'corepack: because both install `pnpm` and `pnpx` binaries'
+! exec test -f .omni-cache/fake-brew/pnpm
+
+-- bin/brew --
+#!/usr/bin/env sh
+set -eu
+state="${OMNI_CACHE_DIR}/fake-brew"
+mkdir -p "$state"
+case "${1:-}" in
+  --version)
+    echo "Homebrew 6.0.0"
+    ;;
+  install)
+    shift
+    if [ "${1:-}" = "--formula" ] || [ "${1:-}" = "--cask" ]; then
+      shift
+    fi
+    if [ "${1:-}" = "pnpm" ]; then
+      cat >&2 <<'EOF'
+Warning: The following taps are not trusted:
+  quarkdown-labs/quarkdown
+
+Homebrew is currently ignoring formulae, casks and commands from these taps because tap trust is required.
+Error: Cannot install pnpm because conflicting formulae are installed.
+  corepack: because both install `pnpm` and `pnpx` binaries
+
+Please `brew unlink corepack` before continuing.
+EOF
+      exit 1
+    fi
+    exit 1
+    ;;
+  list)
+    shift
+    if [ "${1:-}" = "--cask" ]; then
+      exit 0
+    fi
+    if [ "${1:-}" = "--versions" ]; then
+      exit 1
+    fi
+    exit 1
+    ;;
+  info)
+    printf '{"formulae":[],"casks":[]}\n'
+    ;;
+esac
+
+-- settings.json --
+{
+  "version": 7,
+  "tools": {
+    "pnpm": { "providers": [{ "provider": "brew" }] }
+  },
+  "hosts": { "testhost": [] },
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": ["pnpm"] }
+  ]
+}

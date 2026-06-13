@@ -54,7 +54,12 @@ func (p *okProvider) PrivilegeCommand(action provider.PrivilegeAction, tool prov
 		case provider.PrivilegeActionUpgrade:
 			verb = "upgrade"
 		}
-		return "brew", []string{verb, "--cask", pkg}, true
+		args := []string{verb, "--cask"}
+		if action == provider.PrivilegeActionInstall || action == provider.PrivilegeActionUpgrade {
+			args = append(args, "--no-ask")
+		}
+		args = append(args, pkg)
+		return "brew", args, true
 	case "apt":
 		switch action {
 		case provider.PrivilegeActionInstall:
@@ -1846,8 +1851,8 @@ func TestQueuePrivilegedInstallPrompts_HandlesAdminInstallError(t *testing.T) {
 	if m.adminTerminal == nil {
 		t.Fatal("admin terminal prompt was not opened")
 	}
-	if got := m.adminTerminal.display; got != "brew install --cask karabiner-elements" {
-		t.Fatalf("display command = %q, want brew install --cask karabiner-elements", got)
+	if got := m.adminTerminal.display; got != "brew install --cask --no-ask karabiner-elements" {
+		t.Fatalf("display command = %q, want brew install --cask --no-ask karabiner-elements", got)
 	}
 	if !strings.Contains(m.adminTerminal.reason, "pkg installer") {
 		t.Fatalf("admin reason = %q, want cask pkg installer reason", m.adminTerminal.reason)
@@ -1878,8 +1883,8 @@ func TestQueuePrivilegedInstallPrompts_UsesSyncRowReasonWhenPlanLookupIsGeneric(
 	if m.adminTerminal == nil {
 		t.Fatal("admin terminal prompt was not opened")
 	}
-	if got := m.adminTerminal.display; got != "brew install --cask karabiner-elements" {
-		t.Fatalf("display command = %q, want brew install --cask karabiner-elements", got)
+	if got := m.adminTerminal.display; got != "brew install --cask --no-ask karabiner-elements" {
+		t.Fatalf("display command = %q, want brew install --cask --no-ask karabiner-elements", got)
 	}
 	if got := m.adminTerminal.reason; got != "brew cask karabiner-elements uses a pkg installer" {
 		t.Fatalf("admin reason = %q, want sync row cask reason", got)

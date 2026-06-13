@@ -215,7 +215,7 @@ var Tools = []Action{
 		Mutates:         true,
 		Requirements:    []Requirement{RequiresToolName},
 		TUI:             &TUIBinding{KeyMapField: "Upgrade", DefaultKey: "u", Label: "upgrade", Description: "Upgrade the selected outdated tool."},
-		CLI:             []CLIBinding{{Command: []string{"tools", "upgrade"}, Flags: []string{"--provider", "--force"}}},
+		CLI:             []CLIBinding{{Command: []string{"tools", "upgrade"}, Flags: []string{"--force"}}},
 	},
 	{
 		ID:              ToolUpdateAll,
