@@ -1,0 +1,65 @@
+# trace list shows persisted command reason and actual issued command
+exec chmod 755 bin/brew
+env PATH=$WORK/bin:$PATH
+
+exec omni-seed-cache bam brew bam 1.0.0 2.0.0 brew
+exec omni --config settings.json tools upgrade bam
+stdout 'upgraded bam'
+
+exec omni --config settings.json trace list --limit 20
+stdout 'upgrading bam \(brew\)'
+stdout 'brew upgrade --cask bam'
+
+-- bin/brew --
+#!/usr/bin/env sh
+set -eu
+state="${OMNI_CACHE_DIR}/fake-brew"
+mkdir -p "$state"
+case "${1:-}" in
+  --version)
+    echo "Homebrew 6.0.0"
+    ;;
+  list)
+    shift
+    cask=0
+    if [ "${1:-}" = "--versions" ]; then
+      shift
+    fi
+    if [ "${1:-}" = "--cask" ]; then
+      cask=1
+      shift
+    fi
+    if [ "$cask" -eq 1 ] && [ "${1:-}" = "bam" ]; then
+      echo "bam 2.0.0"
+      exit 0
+    fi
+    exit 1
+    ;;
+  upgrade)
+    shift
+    if [ "${1:-}" = "--cask" ]; then
+      shift
+    fi
+    : > "$state/$1-upgraded"
+    ;;
+  update)
+    ;;
+  outdated)
+    echo '{"formulae":[],"casks":[]}'
+    ;;
+  info)
+    echo '{"formulae":[],"casks":[]}'
+    ;;
+esac
+
+-- settings.json --
+{
+  "version": 7,
+  "hosts": { "testhost": [] },
+  "tools": {
+    "bam": { "providers": [{ "provider": "brew" }] }
+  },
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": ["bam"] }
+  ]
+}

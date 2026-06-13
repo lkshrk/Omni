@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/lkshrk/omni/internal/dots"
-	"github.com/lkshrk/omni/internal/executor"
 )
 
 func (a *App) DotsPull(ctx context.Context) (ops []dots.Op, err error) {
@@ -26,7 +25,7 @@ func (a *App) DotsPull(ctx context.Context) (ops []dots.Op, err error) {
 	defer func() {
 		a.recordDotsHistoryResult(ctx, "pull", "", repoPath, ops, err, false)
 	}()
-	g := newGitForRepo(repoPath, executor.New())
+	g := newGitForRepo(repoPath, a.newExecutor())
 	if err := g.Pull(ctx); err != nil {
 		return nil, fmt.Errorf("dots pull: %w", err)
 	}
@@ -55,7 +54,7 @@ func (a *App) DotsPush(ctx context.Context, message string) (err error) {
 		a.recordDotsHistoryResult(ctx, "push", "", repoPath, nil, err, false)
 		a.refreshDotsStateAfterSuccess(ctx, &err, false)
 	}()
-	g := newGitForRepo(repoPath, executor.New())
+	g := newGitForRepo(repoPath, a.newExecutor())
 	if message == "" {
 		gitStatus, err := g.Status(ctx)
 		if err != nil {
@@ -88,7 +87,7 @@ func (a *App) DotsCommit(ctx context.Context, message string) (err error) {
 		a.recordDotsHistoryResult(ctx, "commit", "", repoPath, nil, err, false)
 		a.refreshDotsStateAfterSuccess(ctx, &err, false)
 	}()
-	g := newGitForRepo(repoPath, executor.New())
+	g := newGitForRepo(repoPath, a.newExecutor())
 	if message == "" {
 		gitStatus, err := g.Status(ctx)
 		if err != nil {

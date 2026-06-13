@@ -30,6 +30,7 @@ mutability, dry-run support, and safer first steps.
 | `omni doctor` | Run read-only health checks. |
 | `omni tools` | Manage logical tool specs and package operations. |
 | `omni dots` | Manage dotfile symlinks from a Git repo. |
+| `omni trace` | Inspect the rotating command trace log. |
 | `omni groups` | Manage reusable groups. |
 | `omni hosts` | Manage host group assignments. |
 | `omni settings` | Manage effective settings. |
@@ -92,6 +93,18 @@ Common tool flags:
 | `--force` | `upgrade`, `reconcile` | Bypass update quarantine for upgrades. |
 | `--from <provider>`, `--to <provider>` | `reinstall` | Move one tool between providers. |
 | `--reinstall-default` | `reinstall` | Reinstall one tool with its configured default provider. |
+
+## Trace Commands
+
+| Command | Description |
+| --- | --- |
+| `omni trace list` | Show recent external commands Omni issued and the reason for each command. |
+
+Common trace flags:
+
+| Flag | Commands | Description |
+| --- | --- | --- |
+| `--limit <n>` | `list` | Limit the number of trace rows shown. |
 
 ## Dots Commands
 

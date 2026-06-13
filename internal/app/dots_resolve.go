@@ -10,7 +10,6 @@ import (
 
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/dots"
-	"github.com/lkshrk/omni/internal/executor"
 )
 
 func (a *App) DotsResolveConflict(ctx context.Context, name string, strategy DotsResolveStrategy) (ops []dots.Op, err error) {
@@ -55,9 +54,9 @@ func (a *App) DotsResolveConflict(ctx context.Context, name string, strategy Dot
 	}
 	switch strategy {
 	case DotResolveUseRepo:
-		return resolveDotUseRepo(ctx, stowPath, entry)
+		return resolveDotUseRepo(ctx, a.newExecutor(), stowPath, entry)
 	case DotResolveUseLocal:
-		return resolveDotUseLocal(ctx, repoPath, stowPath, entry)
+		return resolveDotUseLocal(ctx, a.newExecutor(), repoPath, stowPath, entry)
 	default:
 		return nil, fmt.Errorf("dots resolve %q: unknown strategy %q", name, strategy)
 	}
@@ -86,15 +85,15 @@ func (a *App) resolvedDotEntry(name, stowPath string) (dots.ResolvedEntry, error
 	return dots.ResolvedEntry{}, fmt.Errorf("dots entry %q not found", name)
 }
 
-func resolveDotUseRepo(ctx context.Context, stowPath string, entry dots.ResolvedEntry) ([]dots.Op, error) {
-	prep, err := prepareDotTargetForRestow(entry)
+func resolveDotUseRepo(ctx context.Context, exec dots.BackupExecutor, stowPath string, entry dots.ResolvedEntry) ([]dots.Op, error) {
+	prep, err := prepareDotTargetForRestow(ctx, exec, entry)
 	if err != nil {
 		return nil, err
 	}
-	if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Package}, false); err != nil {
+	if err := dots.Restow(ctx, exec, stowPath, []string{entry.Package}, false); err != nil {
 		wrapped := fmt.Errorf("dots resolve %q: use repo version relink: %w", entry.Name, err)
 		if prep.backupPath != "" {
-			if restoreErr := restoreDotTargetAfterFailedRestow(entry, prep); restoreErr != nil {
+			if restoreErr := restoreDotTargetAfterFailedRestow(ctx, exec, entry, prep); restoreErr != nil {
 				return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: wrapped}},
 					fmt.Errorf("%w (restore failed: %v)", wrapped, restoreErr)
 			}
@@ -104,13 +103,13 @@ func resolveDotUseRepo(ctx context.Context, stowPath string, entry dots.Resolved
 	return []dots.Op{{Kind: dots.OpRepair, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}}, nil
 }
 
-func resolveDotUseLocal(ctx context.Context, repoPath, stowPath string, entry dots.ResolvedEntry) (ops []dots.Op, retErr error) {
+func resolveDotUseLocal(ctx context.Context, exec dots.BackupExecutor, repoPath, stowPath string, entry dots.ResolvedEntry) (ops []dots.Op, retErr error) {
 	copySource, err := localDotCopySource(entry.TargetPath)
 	if err != nil {
 		return nil, err
 	}
 	if pathExists(entry.SourcePath) {
-		gt := newGitForRepo(repoPath, executor.New())
+		gt := newGitForRepo(repoPath, exec)
 		if gt.IsRepo() {
 			if err := gt.SnapshotAll(ctx, "dots: pre-resolve "+entry.Name); err != nil {
 				return nil, fmt.Errorf("dots resolve %q: pre-commit repo state: %w", entry.Name, err)
@@ -122,7 +121,7 @@ func resolveDotUseLocal(ctx context.Context, repoPath, stowPath string, entry do
 		return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}},
 			fmt.Errorf("dots resolve %q: replace repo source: %w", entry.Name, err)
 	}
-	prep, err := prepareDotTargetForRestow(entry)
+	prep, err := prepareDotTargetForRestow(ctx, exec, entry)
 	if err != nil {
 		if rollbackErr := replacement.rollback(); rollbackErr != nil {
 			return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}},
@@ -143,10 +142,10 @@ func resolveDotUseLocal(ctx context.Context, repoPath, stowPath string, entry do
 			}
 		}
 	}()
-	if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Package}, false); err != nil {
+	if err := dots.Restow(ctx, exec, stowPath, []string{entry.Package}, false); err != nil {
 		wrapped := fmt.Errorf("dots resolve %q: use local version relink after copying local content: %w", entry.Name, err)
 		if prep.backupPath != "" {
-			if restoreErr := restoreDotTargetAfterFailedRestow(entry, prep); restoreErr != nil {
+			if restoreErr := restoreDotTargetAfterFailedRestow(ctx, exec, entry, prep); restoreErr != nil {
 				return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: wrapped}},
 					fmt.Errorf("%w (restore failed: %v)", wrapped, restoreErr)
 			}
@@ -559,8 +558,8 @@ func oldSourceStagingParent(sourcePath, packageRoot string) string {
 	return filepath.Dir(packageRoot)
 }
 
-func restoreDotBackupAfterFailedStow(backupPath, originalPath string) error {
-	if err := dots.RemoveLocalPathAfterBackup(originalPath, backupPath); err != nil {
+func restoreDotBackupAfterFailedStow(ctx context.Context, exec dots.BackupExecutor, backupPath, originalPath string) error {
+	if err := dots.RemoveLocalPathAfterBackupWithExecutor(ctx, exec, originalPath, backupPath); err != nil {
 		return fmt.Errorf("remove partial target: %w", err)
 	}
 	return restoreBackupPath(backupPath, originalPath)

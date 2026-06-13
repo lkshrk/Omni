@@ -6,24 +6,44 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/lkshrk/omni/internal/executor"
 )
 
 const BackupDirName = "dotfiles.bkp"
 
+type BackupExecutor interface {
+	Run(ctx context.Context, name string, args ...string) (stdout, stderr string, err error)
+}
+
+func backupExec(exec BackupExecutor) BackupExecutor {
+	if exec != nil {
+		return exec
+	}
+	return executor.New()
+}
+
 // BackupLocalPath copies path into ~/dotfiles.bkp before callers mutate the
 // live target. The backup path mirrors the target's home-relative path.
 func BackupLocalPath(path string) (string, error) {
-	return BackupLocalPathFrom(path, path)
+	return BackupLocalPathWithExecutor(context.Background(), nil, path)
+}
+
+func BackupLocalPathWithExecutor(ctx context.Context, exec BackupExecutor, path string) (string, error) {
+	return BackupLocalPathFromWithExecutor(ctx, exec, path, path)
 }
 
 // BackupLocalPathFrom copies source into the backup destination derived from
 // path. Use this when path is a managed symlink but the durable safety copy
 // should contain the linked repo content before that repo content is removed.
 func BackupLocalPathFrom(path, source string) (string, error) {
+	return BackupLocalPathFromWithExecutor(context.Background(), nil, path, source)
+}
+
+func BackupLocalPathFromWithExecutor(ctx context.Context, exec BackupExecutor, path, source string) (string, error) {
 	info, err := os.Lstat(source)
 	if err != nil {
 		return "", err
@@ -32,7 +52,7 @@ func BackupLocalPathFrom(path, source string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := backupCopyPath(source, dst, info); err != nil {
+	if err := backupCopyPath(ctx, backupExec(exec), source, dst, info); err != nil {
 		return "", err
 	}
 	return dst, nil
@@ -43,6 +63,10 @@ func BackupLocalPathFrom(path, source string) (string, error) {
 // owned by the link path. If path is already absent it is a no-op, but if a
 // real target exists without a readable backup, removal is refused.
 func BackupAndRemoveLocalPath(path string) (string, error) {
+	return BackupAndRemoveLocalPathWithExecutor(context.Background(), nil, path)
+}
+
+func BackupAndRemoveLocalPathWithExecutor(ctx context.Context, exec BackupExecutor, path string) (string, error) {
 	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
 		return "", nil
@@ -51,14 +75,14 @@ func BackupAndRemoveLocalPath(path string) (string, error) {
 		return "", fmt.Errorf("stat local target %q: %w", path, err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return "", RemoveLocalPathAfterBackup(path, "")
+		return "", RemoveLocalPathAfterBackupWithExecutor(ctx, exec, path, "")
 	}
 
-	backupPath, err := BackupLocalPath(path)
+	backupPath, err := BackupLocalPathWithExecutor(ctx, exec, path)
 	if err != nil && !os.IsNotExist(err) {
 		return "", fmt.Errorf("backup %q: %w", path, err)
 	}
-	if err := RemoveLocalPathAfterBackup(path, backupPath); err != nil {
+	if err := RemoveLocalPathAfterBackupWithExecutor(ctx, exec, path, backupPath); err != nil {
 		return backupPath, err
 	}
 	return backupPath, nil
@@ -69,6 +93,10 @@ func BackupAndRemoveLocalPath(path string) (string, error) {
 // not delete the target data. This is the guard for flows that must copy local
 // content elsewhere before replacement, such as "use local" conflict resolution.
 func RemoveLocalPathAfterBackup(path, backupPath string) error {
+	return RemoveLocalPathAfterBackupWithExecutor(context.Background(), nil, path, backupPath)
+}
+
+func RemoveLocalPathAfterBackupWithExecutor(ctx context.Context, exec BackupExecutor, path, backupPath string) error {
 	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
 		return nil
@@ -92,13 +120,13 @@ func RemoveLocalPathAfterBackup(path, backupPath string) error {
 	if _, err := os.Lstat(backupPath); err != nil {
 		return fmt.Errorf("refusing to remove %q without readable backup %q: %w", path, backupPath, err)
 	}
-	if _, err := moveLocalPathToTrash(path, info); err != nil {
+	if _, err := moveLocalPathToTrash(ctx, exec, path, info); err != nil {
 		return fmt.Errorf("trash %q: %w", path, err)
 	}
 	return nil
 }
 
-func moveLocalPathToTrash(path string, info os.FileInfo) (string, error) {
+func moveLocalPathToTrash(ctx context.Context, exec BackupExecutor, path string, info os.FileInfo) (string, error) {
 	dst, err := trashDestination(path)
 	if err != nil {
 		return "", err
@@ -106,7 +134,7 @@ func moveLocalPathToTrash(path string, info os.FileInfo) (string, error) {
 	if err := os.Rename(path, dst); err == nil {
 		return dst, nil
 	}
-	if err := backupCopyPath(path, dst, info); err != nil {
+	if err := backupCopyPath(ctx, backupExec(exec), path, dst, info); err != nil {
 		return "", err
 	}
 	if err := os.RemoveAll(path); err != nil && !os.IsNotExist(err) {
@@ -195,7 +223,7 @@ func uniqueBackupDestination(path string) string {
 	}
 }
 
-func backupCopyPath(src, dst string, info os.FileInfo) error {
+func backupCopyPath(ctx context.Context, exec BackupExecutor, src, dst string, info os.FileInfo) error {
 	if info.Mode()&os.ModeSymlink != 0 {
 		target, err := os.Readlink(src)
 		if err != nil {
@@ -210,12 +238,12 @@ func backupCopyPath(src, dst string, info os.FileInfo) error {
 		// Prefer git ls-files when src is inside a git repo — only tracked
 		// files are backed up, which naturally excludes caches, build
 		// artifacts, and anything in .gitignore.
-		if err := backupCopyGitTracked(src, dst); err == nil {
+		if err := backupCopyGitTracked(ctx, exec, src, dst); err == nil {
 			return nil
 		}
 		// Fallback: walk the directory but skip default-ignored paths
 		// (.cache, node_modules, __pycache__, etc.).
-		return backupCopyDirFiltered(src, dst)
+		return backupCopyDirFiltered(ctx, exec, src, dst)
 	}
 	if !info.Mode().IsRegular() {
 		return nil
@@ -226,13 +254,12 @@ func backupCopyPath(src, dst string, info os.FileInfo) error {
 // backupCopyGitTracked copies only git-tracked files from src into dst.
 // Returns a non-nil error when src is not inside a git repo or git is
 // unavailable, signalling the caller to fall back.
-func backupCopyGitTracked(src, dst string) error {
-	cmd := exec.CommandContext(context.Background(), "git", "-C", src, "ls-files", "-z")
-	out, err := cmd.Output()
+func backupCopyGitTracked(ctx context.Context, exec BackupExecutor, src, dst string) error {
+	out, _, err := backupExec(exec).Run(ctx, "git", "-C", src, "ls-files", "-z")
 	if err != nil {
 		return err
 	}
-	files := strings.Split(string(out), "\x00")
+	files := strings.Split(out, "\x00")
 	var hasFiles bool
 	for _, rel := range files {
 		if rel == "" {
@@ -278,7 +305,7 @@ func backupCopyGitTracked(src, dst string) error {
 }
 
 // backupCopyDirFiltered walks src recursively, skipping default-ignored paths.
-func backupCopyDirFiltered(src, dst string) error {
+func backupCopyDirFiltered(ctx context.Context, exec BackupExecutor, src, dst string) error {
 	ignores := defaultIgnores
 	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -302,7 +329,7 @@ func backupCopyDirFiltered(src, dst string) error {
 		if entryInfo.IsDir() && entryInfo.Mode()&os.ModeSymlink == 0 {
 			return os.MkdirAll(target, entryInfo.Mode().Perm())
 		}
-		return backupCopyPath(path, target, entryInfo)
+		return backupCopyPath(ctx, exec, path, target, entryInfo)
 	})
 }
 

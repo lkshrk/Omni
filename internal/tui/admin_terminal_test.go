@@ -56,7 +56,7 @@ echo "PTY_OK"
 		args:    []string{"uninstall", "--cask", "parsec"},
 		display: "brew uninstall --cask parsec",
 	}
-	session, err := startAdminTerminalProcess(context.Background(), state, 80, 24, events)
+	session, err := startAdminTerminalProcess(context.Background(), state, 80, 24, events, nil)
 	if err != nil {
 		t.Fatalf("start admin terminal process: %v", err)
 	}

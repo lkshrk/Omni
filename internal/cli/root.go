@@ -125,6 +125,7 @@ Already set up?
 		newReconcileCmd(state),
 		newDoctorCmd(state),
 		newSettingsCmd(state),
+		newTraceCmd(state),
 		newToolsCmd(state),
 		newGroupsCmd(state),
 		newHostsCmd(state),
@@ -148,6 +149,7 @@ var hostExempt = map[string]bool{
 	"ui":         true, // TUI handles its own onboarding including host setup
 	"version":    true,
 	"settings":   true,
+	"trace":      true,
 	"help":       true,
 	"completion": true,
 }

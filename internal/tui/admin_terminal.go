@@ -2,6 +2,8 @@ package tui
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -158,7 +160,7 @@ func (m *Model) startAdminTerminalSession() tea.Cmd {
 		}
 		m.upgradingKeys[state.rowKey] = true
 	}
-	session, err := startAdminTerminalProcess(m.ctx, *state, adminTerminalContentWidth(*m), adminTerminalPTYRows(*m), state.events)
+	session, err := startAdminTerminalProcess(m.ctx, *state, adminTerminalContentWidth(*m), adminTerminalPTYRows(*m), state.events, m.app)
 	if err != nil {
 		doneState := state.completionState()
 		return func() tea.Msg {
@@ -611,10 +613,11 @@ func visibleAdminTerminalOutputLines(output string, width, height int) []string 
 	return lines
 }
 
-func startAdminTerminalProcess(ctx context.Context, state adminTerminalState, cols, rows int, events chan tea.Msg) (*adminTerminalSession, error) {
+func startAdminTerminalProcess(ctx context.Context, state adminTerminalState, cols, rows int, events chan tea.Msg, traceSink executor.TraceSink) (*adminTerminalSession, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	started := time.Now().UTC()
 	commandPath, env := executor.ResolveCommand(state.command)
 	cmd := exec.CommandContext(ctx, commandPath, state.args...)
 	cmd.Env = env
@@ -641,6 +644,7 @@ func startAdminTerminalProcess(ctx context.Context, state adminTerminalState, co
 	doneState := state.completionState()
 	go func() {
 		err := cmd.Wait()
+		recordAdminTerminalTrace(ctx, traceSink, state, started, time.Now().UTC(), err)
 		select {
 		case <-readDone:
 		case <-time.After(200 * time.Millisecond):
@@ -657,6 +661,45 @@ func startAdminTerminalProcess(ctx context.Context, state adminTerminalState, co
 		}
 	}()
 	return &adminTerminalSession{ptmx: ptmx}, nil
+}
+
+func recordAdminTerminalTrace(ctx context.Context, sink executor.TraceSink, state adminTerminalState, started, finished time.Time, err error) {
+	if sink == nil {
+		return
+	}
+	reason := strings.TrimSpace(state.reason)
+	if reason == "" {
+		reason = "admin terminal command"
+	}
+	status := "success"
+	if err != nil {
+		status = "failed"
+	}
+	if ctx != nil && ctx.Err() != nil {
+		status = "canceled"
+	}
+	exitCode := sql.NullInt64{}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		exitCode = sql.NullInt64{Int64: int64(exitErr.ExitCode()), Valid: true}
+	}
+	_ = sink.RecordCommandTrace(context.WithoutCancel(ctx), executor.TraceRecord{
+		StartedAt:  started,
+		FinishedAt: finished,
+		DurationMS: finished.Sub(started).Milliseconds(),
+		Reason:     reason,
+		Command:    executor.RenderCommand(state.command, state.args...),
+		Status:     status,
+		ExitCode:   exitCode,
+		Error:      adminTerminalTraceError(err),
+	})
+}
+
+func adminTerminalTraceError(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // sendAdminTerminalOutput sends an output message to the event channel.

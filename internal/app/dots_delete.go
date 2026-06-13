@@ -10,7 +10,6 @@ import (
 
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/dots"
-	"github.com/lkshrk/omni/internal/executor"
 )
 
 func (a *App) DotsDelete(ctx context.Context, name string) error {
@@ -95,7 +94,7 @@ func (a *App) DotsDeleteWithOptions(ctx context.Context, name string, opts DotsD
 		return err
 	}
 
-	if gt := newGitForRepo(repoPath, executor.New()); gt.IsRepo() {
+	if gt := newGitForRepo(repoPath, a.newExecutor()); gt.IsRepo() {
 		msg := "dots: delete " + name
 		if gitCfg.AutoPush {
 			if err := gt.Push(ctx, msg); err != nil {

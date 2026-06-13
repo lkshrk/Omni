@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/executor"
 	"github.com/lkshrk/omni/internal/provider"
 )
 
@@ -419,7 +421,7 @@ func (s *Syncer) Sync(ctx context.Context, cfg *config.Config, opts SyncOptions)
 				}
 				opts.toolProgress(ProgressEvent{Tool: tool, Message: "Installing " + d.entry.Name + "…"})
 
-				installCtx, cancel := context.WithTimeout(ctx, opts.installTimeout())
+				installCtx, cancel := context.WithTimeout(traceReason(ctx, "installing", d.entry.Name, d.opProvider, d.entry.InstallWith), opts.installTimeout())
 				op.Err = s.install(installCtx, prov, d.opProvider, d.entry)
 				cancel()
 
@@ -539,7 +541,7 @@ func (s *Syncer) Sync(ctx context.Context, cfg *config.Config, opts SyncOptions)
 						continue
 					}
 				}
-				uninstallErr := uninstall(ctx, prov, t, manager)
+				uninstallErr := uninstall(traceReason(ctx, "removing", c.Name, opProvider, manager), prov, t, manager)
 				if plan, ok := provider.ClassifyPrivilegeError(uninstallErr); ok && plan.RequiresPrivilege() {
 					if err := s.db.MarkPrivilegeRequired(ctx, c.Name, c.Provider, c.Package, string(plan.Requirement), plan.Reason); err != nil {
 						result.Warnings = append(result.Warnings,
@@ -695,6 +697,15 @@ func (s *Syncer) install(ctx context.Context, prov provider.Provider, opProvider
 		}
 	}
 	return prov.Install(ctx, tool)
+}
+
+func traceReason(ctx context.Context, action, name, providerName, detail string) context.Context {
+	providerName = fmt.Sprintf("%s/%s", providerName, detail)
+	providerName = strings.Trim(providerName, "/")
+	if providerName == "" {
+		return executor.WithTraceReason(ctx, fmt.Sprintf("%s %s", action, name))
+	}
+	return executor.WithTraceReason(ctx, fmt.Sprintf("%s %s (%s)", action, name, providerName))
 }
 
 // uniqueProviderNames returns deduplicated operation provider names from the tool list.

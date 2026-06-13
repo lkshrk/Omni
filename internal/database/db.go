@@ -105,6 +105,24 @@ type PackageAvailability struct {
 	CheckedAt time.Time `bun:"checked_at,notnull"`
 }
 
+// CommandTrace records subprocesses Omni issues through the shared executor.
+// It is intentionally compact: stdout is not stored, and stderr/error fields
+// are caller-truncated/redacted before insertion.
+type CommandTrace struct {
+	bun.BaseModel `bun:"table:command_traces,alias:ct"`
+
+	ID         int64         `bun:"id,pk,autoincrement"`
+	StartedAt  time.Time     `bun:"started_at,notnull"`
+	FinishedAt time.Time     `bun:"finished_at,notnull"`
+	DurationMS int64         `bun:"duration_ms,notnull,default:0"`
+	Reason     string        `bun:"reason,notnull,default:''"`
+	Command    string        `bun:"command,type:TEXT,notnull"`
+	Status     string        `bun:"status,notnull,default:''"`
+	ExitCode   sql.NullInt64 `bun:"exit_code"`
+	Error      string        `bun:"error,type:TEXT,notnull,default:''"`
+	Stderr     string        `bun:"stderr,type:TEXT,notnull,default:''"`
+}
+
 // TrustedTap records a Homebrew tap omni has already run `brew trust` on, so
 // tap sync can skip the trust call on subsequent runs.
 type TrustedTap struct {
@@ -154,6 +172,7 @@ type DotsSnapshot struct {
 
 const dotsSnapshotMetaKey = "current"
 const providerListCacheClearStateKey = "migration.provider_list_cache_cleared"
+const commandTraceRetentionLimit = 5000
 
 // MetadataUpdate is registry metadata learned without changing install state.
 type MetadataUpdate struct {
@@ -252,6 +271,62 @@ func (db *DB) MarkTapTrusted(ctx context.Context, name string, at time.Time) err
 	return nil
 }
 
+// RecordCommandTrace appends one command trace and prunes older rows beyond the
+// rotating retention limit. Callers should treat errors as non-fatal.
+func (db *DB) RecordCommandTrace(ctx context.Context, trace *CommandTrace) error {
+	if trace == nil {
+		return nil
+	}
+	if trace.StartedAt.IsZero() {
+		trace.StartedAt = time.Now().UTC()
+	}
+	if trace.FinishedAt.IsZero() {
+		trace.FinishedAt = trace.StartedAt
+	}
+	if trace.DurationMS < 0 {
+		trace.DurationMS = 0
+	}
+	trace.ID = 0
+	if _, err := db.bun.NewInsert().Model(trace).Exec(ctx); err != nil {
+		return fmt.Errorf("recording command trace: %w", err)
+	}
+	return db.pruneCommandTraces(ctx, commandTraceRetentionLimit)
+}
+
+func (db *DB) pruneCommandTraces(ctx context.Context, limit int) error {
+	if limit <= 0 {
+		return nil
+	}
+	_, err := db.bun.ExecContext(ctx, `
+		DELETE FROM command_traces
+		WHERE id NOT IN (
+			SELECT id
+			FROM command_traces
+			ORDER BY started_at DESC, id DESC
+			LIMIT ?
+		)`, limit)
+	if err != nil {
+		return fmt.Errorf("pruning command traces: %w", err)
+	}
+	return nil
+}
+
+// ListCommandTraces returns newest command traces first.
+func (db *DB) ListCommandTraces(ctx context.Context, limit int) ([]CommandTrace, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var traces []CommandTrace
+	if err := db.bun.NewSelect().
+		Model(&traces).
+		Order("started_at DESC", "id DESC").
+		Limit(limit).
+		Scan(ctx); err != nil {
+		return nil, fmt.Errorf("listing command traces: %w", err)
+	}
+	return traces, nil
+}
+
 // Migrate creates schema tables if they do not already exist (idempotent).
 // For existing databases it also adds new columns via ALTER TABLE, suppressing
 // "duplicate column" errors so the migration is safe to run repeatedly.
@@ -293,6 +368,13 @@ func (db *DB) Migrate(ctx context.Context) error {
 		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("creating package_availability table: %w", err)
+	}
+	_, err = db.bun.NewCreateTable().
+		Model((*CommandTrace)(nil)).
+		IfNotExists().
+		Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("creating command_traces table: %w", err)
 	}
 	_, err = db.bun.NewCreateTable().
 		Model((*DotStatusCache)(nil)).
@@ -342,6 +424,9 @@ func (db *DB) Migrate(ctx context.Context) error {
 		 ON package_availability (name, provider, package)`)
 	if err != nil {
 		return fmt.Errorf("creating package availability unique index: %w", err)
+	}
+	if _, err := db.bun.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_command_traces_started_at ON command_traces (started_at DESC)`); err != nil {
+		return fmt.Errorf("creating command trace started_at index: %w", err)
 	}
 	// Add columns introduced after initial schema; duplicate-column errors are
 	// expected (column already created by the CREATE TABLE above) and suppressed.

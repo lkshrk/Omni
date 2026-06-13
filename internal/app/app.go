@@ -252,7 +252,7 @@ func (a *App) InitReadOnly(_ context.Context) error {
 }
 
 func (a *App) initProviderRegistry(settings config.Settings) {
-	exec := executor.New()
+	exec := a.newExecutor()
 	a.fallbackExec = exec
 	a.registry = provider.NewRegistry()
 

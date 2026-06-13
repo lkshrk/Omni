@@ -349,6 +349,7 @@ func discoverRunnableCLICommands(root *cobra.Command) [][]string {
 func uncatalogedRunnableCLICommandAllowed(path []string) bool {
 	switch commandKey(path) {
 	case "ui",
+		"trace list",
 		"tools list",
 		"tools search",
 		"tools providers",
