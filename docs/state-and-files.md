@@ -94,8 +94,8 @@ the rest of `settings.json`.
 | Preserved | Reset to default |
 | --- | --- |
 | logical tools | `settings.auto_import` |
-| groups and host groups | ecosystem manager and priority settings |
-| host assignments | current host ecosystem manager and priority settings |
+| groups and host groups | provider priority settings |
+| host assignments | current host provider priority, dotfile, and disabled-provider settings |
 | global ignore lists | `settings.dots_git` |
 | top-level schema/version metadata | current host `dots_repo`, `dots_disabled`, and disabled providers |
 
@@ -110,7 +110,7 @@ derive on every render:
 - installed tool rows
 - installed versions
 - outdated markers
-- concrete manager attribution such as `brew`, `uv`, or `pip3`
+- concrete provider attribution such as `brew`, `uv`, or `pip`
 - privilege requirements reported by package managers
 - dotfile operation history
 - bootstrap completion markers

@@ -84,19 +84,15 @@ At app startup, Omni registers concrete providers first:
 - `zypper`
 - `pip`
 
-Then it registers enabled provider families:
+Provider metadata records each provider's package family, display order, manager
+options, and default install order. The legacy provider-family names
+`system`, `node`, and `python` remain internal compatibility metadata for old
+configs and consolidation flows, but current tool config stores concrete
+providers in `tools[].providers[]`.
 
-- `system`, backed by available concrete system managers
-- `node`, backed by the configured Node manager
-- `python`, backed by the configured Python manager
-
-Provider metadata records whether a provider is an ecosystem or concrete
-provider, which ecosystem a concrete provider belongs to, display order, manager
-options, and default install order.
-
-The concrete Python provider is registered as `pip`, while the executable,
-settings value, and observed manager normally use `pip3`. `pip` remains accepted
-as an alias and is normalized to `pip3` where manager settings are persisted.
+The Python provider is `pip`. Legacy `pip3` manager settings remain accepted
+and migrate through the provider catalog, but current config should use `pip`
+as the concrete provider name.
 
 ## Tool Lifecycle
 

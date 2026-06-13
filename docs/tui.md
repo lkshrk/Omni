@@ -86,8 +86,7 @@ duplicating every entry.
 
 Settings covers machine-local preferences:
 
-- ecosystem managers
-- system manager priority
+- concrete provider priority
 - disabled providers
 - dotfiles repo path
 - dotfile sync enablement
