@@ -12,7 +12,6 @@ import (
 
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/dots"
-	"github.com/lkshrk/omni/internal/executor"
 )
 
 func (a *App) DotsList() ([]DotStatus, error) {
@@ -44,7 +43,7 @@ func (a *App) DotsStatus(ctx context.Context) (*DotsStatusResult, error) {
 	if repoErr != nil {
 		return nil, repoErr
 	}
-	g := newGitForRepo(repoPath, executor.New())
+	g := newGitForRepo(repoPath, a.newExecutor())
 	if g.IsRepo() {
 		gitStatus, err = g.Status(ctx)
 		if err != nil {

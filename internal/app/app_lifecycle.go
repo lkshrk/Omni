@@ -110,7 +110,7 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 
 		// A manager installed by a script in pass 1 may land in a dir not yet on
 		// PATH; refresh from the login shell so pass-2 dependents can find it.
-		refreshPathAfterScriptInstalls(ctx, executor.New(), pass1, func(p string) {
+		refreshPathAfterScriptInstalls(ctx, a.newExecutor(), pass1, func(p string) {
 			if err := os.Setenv("PATH", p); err != nil {
 				// best effort: pass-2 dependents fall back to the existing PATH
 				return
@@ -684,6 +684,7 @@ func (a *App) Install(ctx context.Context, name, providerName string) error {
 		return err
 	} else if ok {
 		t := resolved.entry
+		ctx = traceReasonDetail(ctx, "installing", t.Name, opProvider, t.InstallWith)
 		prov, ok := a.registry.Get(opProvider)
 		if !ok {
 			return fmt.Errorf("unknown provider %q", opProvider)
@@ -703,7 +704,7 @@ func (a *App) Install(ctx context.Context, name, providerName string) error {
 				return err
 			}
 			if fallbackUsable {
-				return a.InstallToolFallback(ctx, t.Name)
+				return a.InstallToolFallback(traceReason(ctx, "installing fallback", t.Name, "gh"), t.Name)
 			}
 			return errors.New(a.fallbackUnavailableMessage(t.Name, resolved.route))
 		case installRouteUnavailable:
@@ -751,6 +752,7 @@ func (a *App) Install(ctx context.Context, name, providerName string) error {
 	if !avail {
 		return fmt.Errorf("provider %q is not available on this system", providerName)
 	}
+	ctx = traceReason(ctx, "installing", name, providerName)
 	t := provider.Tool{Name: name, Provider: providerName, Package: name}
 	if err := prov.Install(ctx, t); err != nil {
 		a.recordPrivilegeError(ctx, name, providerName, name, err)
@@ -920,7 +922,7 @@ func (a *App) Uninstall(ctx context.Context, name, providerName string) error {
 		return fmt.Errorf("load cached install owner for %s/%s: %w", providerName, name, err)
 	}
 	if fallbackLifecycleOwner(installedWith) {
-		if err := a.UninstallToolFallback(ctx, name); err != nil {
+		if err := a.UninstallToolFallback(traceReason(ctx, "removing fallback", name, "gh"), name); err != nil {
 			return err
 		}
 		return a.removeToolFromConfig(name, providerName)
@@ -929,6 +931,7 @@ func (a *App) Uninstall(ctx context.Context, name, providerName string) error {
 	if !ok {
 		return fmt.Errorf("unknown provider %q", providerName)
 	}
+	ctx = traceReasonDetail(ctx, "removing", name, opProvider, manager)
 	t := provider.Tool{Name: name, Provider: opProvider, Package: pkg}
 	if err := uninstallWithProvider(ctx, prov, t, manager); err != nil {
 		a.recordPrivilegeError(ctx, name, providerName, pkg, err)
@@ -1127,7 +1130,7 @@ func (a *App) UpgradeWithOptions(ctx context.Context, name, providerName string,
 		return fmt.Errorf("load cached install owner for %s/%s: %w", providerName, name, err)
 	}
 	if fallbackLifecycleOwner(installedWith) {
-		return a.UpgradeToolFallback(ctx, name)
+		return a.UpgradeToolFallback(traceReason(ctx, "upgrading fallback", name, "gh"), name)
 	}
 	if !opts.Force && cached != nil {
 		cfg, cfgErr := a.loadConfig()
@@ -1147,6 +1150,7 @@ func (a *App) UpgradeWithOptions(ctx context.Context, name, providerName string,
 	if !ok {
 		return fmt.Errorf("unknown provider %q", providerName)
 	}
+	ctx = traceReasonDetail(ctx, "upgrading", name, opProvider, manager)
 	t := provider.Tool{Name: name, Provider: opProvider, Package: pkg}
 	if err := upgradeTool(ctx, prov, t, manager); err != nil {
 		a.recordPrivilegeError(ctx, name, providerName, pkg, err)

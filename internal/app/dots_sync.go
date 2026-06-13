@@ -79,7 +79,7 @@ func (a *App) DotsSyncContext(ctx context.Context, opts dots.SyncOptions) (ops [
 		if opts.Progress != nil {
 			opts.Progress(dots.SyncProgressEvent{Entry: entry.Name, Index: i + 1, Total: total})
 		}
-		entryOps, syncErr := syncResolvedDotEntry(ctx, repoPath, stowPath, entry, opts, false)
+		entryOps, syncErr := syncResolvedDotEntry(ctx, a.newExecutor(), repoPath, stowPath, entry, opts, false)
 		if opts.Progress != nil {
 			opts.Progress(dots.SyncProgressEvent{Entry: entry.Name, Index: i + 1, Total: total, Done: true, Err: syncErr, Ops: entryOps})
 		}
@@ -203,7 +203,7 @@ func (a *App) DotsSyncEntry(ctx context.Context, name string, opts dots.SyncOpti
 		if opts.Progress != nil {
 			opts.Progress(dots.SyncProgressEvent{Entry: entry.Name, Index: 1, Total: 1})
 		}
-		ops, syncErr := syncResolvedDotEntry(ctx, repoPath, stowPath, entry, opts, true)
+		ops, syncErr := syncResolvedDotEntry(ctx, a.newExecutor(), repoPath, stowPath, entry, opts, true)
 		if opts.Progress != nil {
 			opts.Progress(dots.SyncProgressEvent{Entry: entry.Name, Index: 1, Total: 1, Done: true, Err: syncErr, Ops: ops})
 		}

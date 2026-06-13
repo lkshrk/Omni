@@ -177,6 +177,61 @@ func TestPackageAvailability_UpsertAndGet(t *testing.T) {
 	}
 }
 
+func TestCommandTrace_RecordListAndPrune(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	base := time.Date(2026, 6, 13, 12, 0, 0, 0, time.UTC)
+
+	seed := make([]database.CommandTrace, 5000)
+	for i := range seed {
+		seed[i] = database.CommandTrace{
+			StartedAt:  base.Add(time.Duration(i) * time.Second),
+			FinishedAt: base.Add(time.Duration(i)*time.Second + time.Millisecond),
+			DurationMS: 1,
+			Reason:     "installing rg (brew)",
+			Command:    "brew install rg",
+			Status:     "success",
+		}
+	}
+	if _, err := db.Bun().NewInsert().Model(&seed).Exec(ctx); err != nil {
+		t.Fatalf("seed command traces: %v", err)
+	}
+	for i := 5000; i < 5002; i++ {
+		if err := db.RecordCommandTrace(ctx, &database.CommandTrace{
+			StartedAt:  base.Add(time.Duration(i) * time.Second),
+			FinishedAt: base.Add(time.Duration(i)*time.Second + time.Millisecond),
+			DurationMS: 1,
+			Reason:     "installing rg (brew)",
+			Command:    "brew install rg",
+			Status:     "success",
+		}); err != nil {
+			t.Fatalf("RecordCommandTrace %d: %v", i, err)
+		}
+	}
+
+	var count int
+	if err := db.Bun().NewRaw("SELECT count(*) FROM command_traces").Scan(ctx, &count); err != nil {
+		t.Fatalf("count command traces: %v", err)
+	}
+	if count != 5000 {
+		t.Fatalf("command trace count = %d, want retained 5000", count)
+	}
+
+	traces, err := db.ListCommandTraces(ctx, 2)
+	if err != nil {
+		t.Fatalf("ListCommandTraces: %v", err)
+	}
+	if len(traces) != 2 {
+		t.Fatalf("traces = %d, want 2", len(traces))
+	}
+	if traces[0].Command != "brew install rg" || !traces[0].StartedAt.Equal(base.Add(5001*time.Second)) {
+		t.Fatalf("newest trace = %+v, want newest command", traces[0])
+	}
+	if !traces[1].StartedAt.Equal(base.Add(5000 * time.Second)) {
+		t.Fatalf("second trace started_at = %s, want second newest", traces[1].StartedAt)
+	}
+}
+
 func TestDotsSnapshot_ReplaceAndGet(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)

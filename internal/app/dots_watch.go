@@ -249,7 +249,7 @@ func (a *App) InstallDotsWatchService(ctx context.Context, opts DotsWatchInstall
 	}
 	info := service.info()
 	if opts.Activate {
-		if err := service.activate(ctx, executor.New()); err != nil {
+		if err := service.activate(ctx, a.newExecutor()); err != nil {
 			return info, err
 		}
 	}
@@ -263,7 +263,7 @@ func (a *App) UninstallDotsWatchService(ctx context.Context) (*DotsWatchService,
 	if err != nil {
 		return nil, err
 	}
-	if err := service.deactivate(ctx, executor.New()); err != nil {
+	if err := service.deactivate(ctx, a.newExecutor()); err != nil {
 		return service.info(), err
 	}
 	for _, file := range service.files {

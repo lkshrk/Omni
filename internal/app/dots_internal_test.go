@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -160,7 +161,7 @@ func TestRollbackDotsAdd_RemovesPartialTargetBeforeRestore(t *testing.T) {
 	}
 	packagePath := filepath.Join(tmp, "repo", "dotfiles", "nvim", ".config", "nvim")
 
-	if err := rollbackDotsAdd(targetPath, packagePath, backupPath); err != nil {
+	if err := rollbackDotsAdd(context.Background(), nil, targetPath, packagePath, backupPath); err != nil {
 		t.Fatalf("rollbackDotsAdd: %v", err)
 	}
 

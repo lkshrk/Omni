@@ -189,6 +189,7 @@ func (a *App) checkToolFallbackWithSpec(ctx context.Context, name string, spec c
 	if err != nil {
 		return false, err
 	}
+	ctx = traceReason(ctx, "checking fallback", name, "gh")
 	_, _, err = a.fallbackExecutor().Run(ctx, "sh", "-c", command)
 	return err == nil, nil
 }
@@ -313,6 +314,7 @@ func (a *App) runFallbackCommand(ctx context.Context, name, action string, spec 
 	if err != nil {
 		return err
 	}
+	ctx = traceReason(ctx, action+" fallback", name, "gh")
 	_, stderr, err := a.fallbackExecutor().Run(ctx, "sh", "-c", rendered)
 	if err != nil {
 		return fmt.Errorf("fallback %s %s: %w (stderr: %s)", name, action, err, strings.TrimSpace(stderr))
@@ -424,7 +426,7 @@ func (a *App) fallbackExecutor() executor.Executor {
 	if a.fallbackExec != nil {
 		return a.fallbackExec
 	}
-	return executor.New()
+	return a.newExecutor()
 }
 
 func (a *App) setToolFallbackStatus(name, status string) error {

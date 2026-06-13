@@ -99,4 +99,12 @@ Hide
 Type "q"
 Sleep 400ms
 Type "q"
-Sleep 1s
+Sleep 400ms
+Type "omni tools upgrade ripgrep --force" Enter
+Sleep 800ms
+
+# ── Command trace log (4s) ──
+Show
+Sleep 400ms
+Type "omni trace list --limit 9" Enter
+Sleep 4s

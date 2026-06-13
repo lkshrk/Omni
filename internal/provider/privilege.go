@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -106,11 +105,11 @@ func PrivilegedCommand(cmd string, args ...string) (string, []string) {
 	return "sudo", append([]string{"-n", cmd}, args...)
 }
 
-func SudoValidationCommand(ctx context.Context) *exec.Cmd {
+func SudoValidationCommand() (string, []string, bool) {
 	if runtime.GOOS == "windows" || os.Geteuid() == 0 || runningUnderGoTest() {
-		return nil
+		return "", nil, false
 	}
-	return exec.CommandContext(ctx, "sudo", "-v")
+	return "sudo", []string{"-v"}, true
 }
 
 func runningUnderGoTest() bool {

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -249,7 +250,7 @@ func TestRestoreDotTargetAfterFailedRestow(t *testing.T) {
 		entry := dots.ResolvedEntry{Name: "test", TargetPath: targetPath}
 		prep := preparedDotTarget{backupPath: backupPath, preservedDirectory: false}
 
-		if err := restoreDotTargetAfterFailedRestow(entry, prep); err != nil {
+		if err := restoreDotTargetAfterFailedRestow(context.Background(), nil, entry, prep); err != nil {
 			t.Fatalf("restoreDotTargetAfterFailedRestow: %v", err)
 		}
 		got, err := os.ReadFile(targetPath)
@@ -290,7 +291,7 @@ func TestRestoreDotTargetAfterFailedRestow(t *testing.T) {
 			removedManagedPaths: true,
 		}
 
-		if err := restoreDotTargetAfterFailedRestow(entry, prep); err != nil {
+		if err := restoreDotTargetAfterFailedRestow(context.Background(), nil, entry, prep); err != nil {
 			t.Fatalf("restoreDotTargetAfterFailedRestow: %v", err)
 		}
 		got, err := os.ReadFile(filepath.Join(targetDir, "sub", "file.txt"))
@@ -314,7 +315,7 @@ func TestRestoreDotTargetAfterFailedRestow(t *testing.T) {
 			removedManagedPaths: false,
 		}
 
-		if err := restoreDotTargetAfterFailedRestow(entry, prep); err != nil {
+		if err := restoreDotTargetAfterFailedRestow(context.Background(), nil, entry, prep); err != nil {
 			t.Fatalf("restoreDotTargetAfterFailedRestow: %v", err)
 		}
 	})

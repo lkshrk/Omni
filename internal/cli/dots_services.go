@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/executor"
 )
 
 // ─── dots reminder ───────────────────────────────────────────────────────────
@@ -65,7 +64,7 @@ func newDotsReminderRunCmd(state *rootState) *cobra.Command {
 				return err
 			}
 			if notify && result.NeedsReminder {
-				if err := notifyDotsReminder(cmd.Context(), result); err != nil {
+				if err := notifyDotsReminder(cmd.Context(), state.app, result); err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "warning: notification: %v\n", err)
 				}
 			}
@@ -176,7 +175,7 @@ func printDotsReminderService(cmd *cobra.Command, header string, info *app.DotsR
 	}
 }
 
-func notifyDotsReminder(ctx context.Context, result *app.DotsReminderResult) error {
+func notifyDotsReminder(ctx context.Context, a *app.App, result *app.DotsReminderResult) error {
 	if result == nil || !result.NeedsReminder {
 		return nil
 	}
@@ -187,7 +186,7 @@ func notifyDotsReminder(ctx context.Context, result *app.DotsReminderResult) err
 			message += fmt.Sprintf(" (+%d more)", len(result.Reasons)-1)
 		}
 	}
-	exec := executor.New()
+	exec := a.CommandExecutor()
 	switch runtime.GOOS {
 	case "darwin":
 		script := fmt.Sprintf(`display notification "%s" with title "Omni dotfiles"`, appleScriptString(message))

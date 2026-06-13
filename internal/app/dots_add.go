@@ -11,7 +11,6 @@ import (
 
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/dots"
-	"github.com/lkshrk/omni/internal/executor"
 )
 
 // DotsAdd moves the file/dir at path into the dots repo and links it back via
@@ -98,7 +97,7 @@ func (a *App) DotsAdd(ctx context.Context, path string, opts DotsAddOptions) (op
 		return nil, fmt.Errorf("dots add: %q exists locally; pass --adopt to move it into dots management", path)
 	}
 
-	backupPath, err := dots.BackupLocalPath(abs)
+	backupPath, err := dots.BackupLocalPathWithExecutor(ctx, a.newExecutor(), abs)
 	if err != nil {
 		return nil, fmt.Errorf("dots add: backup: %w", err)
 	}
@@ -114,14 +113,14 @@ func (a *App) DotsAdd(ctx context.Context, path string, opts DotsAddOptions) (op
 		}
 		return nil, fmt.Errorf("dots add: copy to repo: %w", err)
 	}
-	if err := dots.RemoveLocalPathAfterBackup(abs, backupPath); err != nil {
+	if err := dots.RemoveLocalPathAfterBackupWithExecutor(ctx, a.newExecutor(), abs, backupPath); err != nil {
 		if cleanupErr := cleanupPackage(); cleanupErr != nil {
 			return nil, fmt.Errorf("dots add: remove local target: %w (cleanup failed: %v)", err, cleanupErr)
 		}
 		return nil, fmt.Errorf("dots add: remove local target: %w", err)
 	}
-	if err := dots.Restow(ctx, executor.New(), stowPath, []string{pkgName}, false); err != nil {
-		if rollbackErr := rollbackDotsAdd(abs, pkgDst, backupPath); rollbackErr != nil {
+	if err := dots.Restow(ctx, a.newExecutor(), stowPath, []string{pkgName}, false); err != nil {
+		if rollbackErr := rollbackDotsAdd(ctx, a.newExecutor(), abs, pkgDst, backupPath); rollbackErr != nil {
 			return nil, fmt.Errorf("dots add: stow: %w (rollback failed: %v)", err, rollbackErr)
 		}
 		return nil, fmt.Errorf("dots add: stow: %w", err)
@@ -136,13 +135,13 @@ func (a *App) DotsAdd(ctx context.Context, path string, opts DotsAddOptions) (op
 		gc.Dots = append(gc.Dots, entry)
 		return nil
 	}); err != nil {
-		if rollbackErr := rollbackDotsAdd(abs, pkgDst, backupPath); rollbackErr != nil {
+		if rollbackErr := rollbackDotsAdd(ctx, a.newExecutor(), abs, pkgDst, backupPath); rollbackErr != nil {
 			return nil, fmt.Errorf("dots add: save config: %w (rollback failed: %v)", err, rollbackErr)
 		}
 		return nil, fmt.Errorf("dots add: save config: %w", err)
 	}
 
-	if g := newGitForRepo(repoPath, executor.New()); g.IsRepo() {
+	if g := newGitForRepo(repoPath, a.newExecutor()); g.IsRepo() {
 		msg := "dots: add " + name
 		if gitCfg.AutoPush {
 			if err := g.Push(ctx, msg); err != nil {
@@ -308,7 +307,7 @@ func (a *App) DotsAddHostVariant(ctx context.Context, name string, opts DotsAddV
 		}
 	}
 	if source.Created {
-		if gt := newGitForRepo(repoPath, executor.New()); gt.IsRepo() {
+		if gt := newGitForRepo(repoPath, a.newExecutor()); gt.IsRepo() {
 			msg := fmt.Sprintf("dots: add %s variant for %s", name, host)
 			if gitCfg.AutoPush {
 				if err := gt.Push(ctx, msg); err != nil {
@@ -390,7 +389,7 @@ func (a *App) DotsRemoveHostVariant(ctx context.Context, name string, opts DotsR
 		if rmErr := os.RemoveAll(pkgRoot); rmErr != nil {
 			return removed, fmt.Errorf("dots variant remove: remove repo package %q: %w", removed.Package, rmErr)
 		}
-		if gt := newGitForRepo(repoPath, executor.New()); gt.IsRepo() {
+		if gt := newGitForRepo(repoPath, a.newExecutor()); gt.IsRepo() {
 			msg := fmt.Sprintf("dots: remove %s variant for %s", name, host)
 			if gitCfg.AutoPush {
 				if err := gt.Push(ctx, msg); err != nil {
@@ -407,9 +406,9 @@ func (a *App) DotsRemoveHostVariant(ctx context.Context, name string, opts DotsR
 }
 
 // DotsDelete deletes the dots entry named name from all group files. Managed
-func rollbackDotsAdd(targetPath, packagePath, backupPath string) error {
+func rollbackDotsAdd(ctx context.Context, exec dots.BackupExecutor, targetPath, packagePath, backupPath string) error {
 	var errs []string
-	if err := dots.RemoveLocalPathAfterBackup(targetPath, backupPath); err != nil {
+	if err := dots.RemoveLocalPathAfterBackupWithExecutor(ctx, exec, targetPath, backupPath); err != nil {
 		errs = append(errs, fmt.Sprintf("remove target link: %v", err))
 	}
 	if backupPath != "" {

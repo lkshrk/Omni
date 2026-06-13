@@ -32,7 +32,7 @@ func (a *App) requireStow(ctx context.Context) error {
 
 // DotsStowInstalled reports whether GNU Stow is currently reachable on PATH.
 func (a *App) DotsStowInstalled(ctx context.Context) bool {
-	return dots.CheckInstalled(ctx, executor.New())
+	return dots.CheckInstalled(ctx, a.newExecutor())
 }
 
 // InstallDotsStow installs GNU Stow through the system provider family.
@@ -280,7 +280,7 @@ func normalisePath(path string) string {
 	}
 	return "~/" + filepath.ToSlash(rel)
 }
-func syncResolvedDotEntry(ctx context.Context, repoPath, stowPath string, entry dots.ResolvedEntry, opts dots.SyncOptions, failUnsyncable bool) ([]dots.Op, error) {
+func syncResolvedDotEntry(ctx context.Context, exec dots.BackupExecutor, repoPath, stowPath string, entry dots.ResolvedEntry, opts dots.SyncOptions, failUnsyncable bool) ([]dots.Op, error) {
 	// Pre-stow: remove repo source files matching ignore patterns so stow never
 	// attempts to link them. Handles legacy entries where files were committed
 	// before their ignore pattern (or DotsEjectIgnoredPaths) existed.
@@ -294,7 +294,7 @@ func syncResolvedDotEntry(ctx context.Context, repoPath, stowPath string, entry 
 			if opts.DryRun {
 				return []dots.Op{{Kind: dots.OpDryRepair, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}}, nil
 			}
-			if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Package}, false); err != nil {
+			if err := dots.Restow(ctx, exec, stowPath, []string{entry.Package}, false); err != nil {
 				return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}}, err
 			}
 			return []dots.Op{lstatEntryOp(entry, false)}, nil
@@ -304,7 +304,7 @@ func syncResolvedDotEntry(ctx context.Context, repoPath, stowPath string, entry 
 		if opts.DryRun {
 			return []dots.Op{{Kind: dots.OpDryLink, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}}, nil
 		}
-		if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Package}, false); err != nil {
+		if err := dots.Restow(ctx, exec, stowPath, []string{entry.Package}, false); err != nil {
 			return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}}, err
 		}
 		return []dots.Op{lstatEntryOp(entry, false)}, nil
@@ -312,13 +312,13 @@ func syncResolvedDotEntry(ctx context.Context, repoPath, stowPath string, entry 
 		if opts.DryRun {
 			return []dots.Op{{Kind: dots.OpDryRepair, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}}, nil
 		}
-		prep, err := prepareDotTargetForRestow(entry)
+		prep, err := prepareDotTargetForRestow(ctx, exec, entry)
 		if err != nil {
 			return nil, err
 		}
-		if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Package}, false); err != nil {
+		if err := dots.Restow(ctx, exec, stowPath, []string{entry.Package}, false); err != nil {
 			if prep.backupPath != "" {
-				if restoreErr := restoreDotTargetAfterFailedRestow(entry, prep); restoreErr != nil {
+				if restoreErr := restoreDotTargetAfterFailedRestow(ctx, exec, entry, prep); restoreErr != nil {
 					return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}},
 						fmt.Errorf("%w (restore failed: %v)", err, restoreErr)
 				}
@@ -330,7 +330,7 @@ func syncResolvedDotEntry(ctx context.Context, repoPath, stowPath string, entry 
 		if opts.DryRun {
 			return []dots.Op{{Kind: dots.OpDryAdopt, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}}, nil
 		}
-		op, err := syncLocalOnlyDotEntry(ctx, stowPath, entry)
+		op, err := syncLocalOnlyDotEntry(ctx, exec, stowPath, entry)
 		if err != nil {
 			return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}}, err
 		}
@@ -339,7 +339,7 @@ func syncResolvedDotEntry(ctx context.Context, repoPath, stowPath string, entry 
 		if opts.DryRun {
 			return []dots.Op{{Kind: dots.OpDryAdopt, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}}, nil
 		}
-		ops, err := syncModifiedDotEntry(ctx, repoPath, stowPath, entry)
+		ops, err := syncModifiedDotEntry(ctx, exec, repoPath, stowPath, entry)
 		if err != nil {
 			return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}}, err
 		}
@@ -349,13 +349,13 @@ func syncResolvedDotEntry(ctx context.Context, repoPath, stowPath string, entry 
 			if opts.DryRun {
 				return []dots.Op{{Kind: dots.OpDryRepair, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}}, nil
 			}
-			prep, err := prepareDotTargetForRestow(entry)
+			prep, err := prepareDotTargetForRestow(ctx, exec, entry)
 			if err != nil {
 				return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}}, err
 			}
-			if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Package}, false); err != nil {
+			if err := dots.Restow(ctx, exec, stowPath, []string{entry.Package}, false); err != nil {
 				if prep.backupPath != "" {
-					if restoreErr := restoreDotTargetAfterFailedRestow(entry, prep); restoreErr != nil {
+					if restoreErr := restoreDotTargetAfterFailedRestow(ctx, exec, entry, prep); restoreErr != nil {
 						return []dots.Op{{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath, Err: err}},
 							fmt.Errorf("%w (restore failed: %v)", err, restoreErr)
 					}
@@ -376,12 +376,12 @@ func syncResolvedDotEntry(ctx context.Context, repoPath, stowPath string, entry 
 				if opts.DryRun {
 					return []dots.Op{{Kind: dots.OpDryRepair, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}}, nil
 				}
-				return resolveDotUseRepo(ctx, stowPath, entry)
+				return resolveDotUseRepo(ctx, exec, stowPath, entry)
 			case "use_local":
 				if opts.DryRun {
 					return []dots.Op{{Kind: dots.OpDryAdopt, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}}, nil
 				}
-				return resolveDotUseLocal(ctx, repoPath, stowPath, entry)
+				return resolveDotUseLocal(ctx, exec, repoPath, stowPath, entry)
 			}
 		}
 		err := fmt.Errorf("requires choosing use repo version or use local version")
@@ -395,7 +395,7 @@ func syncResolvedDotEntry(ctx context.Context, repoPath, stowPath string, entry 
 	}
 }
 
-func syncLocalOnlyDotEntry(ctx context.Context, stowPath string, entry dots.ResolvedEntry) (dots.Op, error) {
+func syncLocalOnlyDotEntry(ctx context.Context, exec dots.BackupExecutor, stowPath string, entry dots.ResolvedEntry) (dots.Op, error) {
 	copySource, err := localDotCopySource(entry.TargetPath)
 	if err != nil {
 		return dots.Op{}, err
@@ -406,19 +406,19 @@ func syncLocalOnlyDotEntry(ctx context.Context, stowPath string, entry dots.Reso
 		}
 		return dots.Op{}, fmt.Errorf("copy local into repo: %w", err)
 	}
-	prep, err := prepareDotTargetForRestow(entry)
+	prep, err := prepareDotTargetForRestow(ctx, exec, entry)
 	if err != nil {
 		if cleanupErr := os.RemoveAll(entry.SourcePath); cleanupErr != nil {
 			return dots.Op{}, fmt.Errorf("prepare local target: %w (remove created source failed: %v)", err, cleanupErr)
 		}
 		return dots.Op{}, fmt.Errorf("prepare local target: %w", err)
 	}
-	if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Package}, false); err != nil {
+	if err := dots.Restow(ctx, exec, stowPath, []string{entry.Package}, false); err != nil {
 		if removeErr := os.RemoveAll(entry.SourcePath); removeErr != nil {
 			return dots.Op{}, fmt.Errorf("%w (remove created source failed: %v)", err, removeErr)
 		}
 		if prep.backupPath != "" {
-			if restoreErr := restoreDotTargetAfterFailedRestow(entry, prep); restoreErr != nil {
+			if restoreErr := restoreDotTargetAfterFailedRestow(ctx, exec, entry, prep); restoreErr != nil {
 				return dots.Op{}, fmt.Errorf("%w (restore failed: %v)", err, restoreErr)
 			}
 		}
@@ -427,9 +427,9 @@ func syncLocalOnlyDotEntry(ctx context.Context, stowPath string, entry dots.Reso
 	return dots.Op{Kind: dots.OpAdopt, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}, nil
 }
 
-func syncModifiedDotEntry(ctx context.Context, repoPath, stowPath string, entry dots.ResolvedEntry) (ops []dots.Op, retErr error) {
+func syncModifiedDotEntry(ctx context.Context, exec dots.BackupExecutor, repoPath, stowPath string, entry dots.ResolvedEntry) (ops []dots.Op, retErr error) {
 	if pathExists(entry.SourcePath) {
-		gt := newGitForRepo(repoPath, executor.New())
+		gt := newGitForRepo(repoPath, exec)
 		if gt.IsRepo() {
 			if err := gt.SnapshotAll(ctx, "dots: pre-sync "+entry.Name); err != nil {
 				return nil, fmt.Errorf("pre-commit repo state: %w", err)
@@ -449,13 +449,13 @@ func syncModifiedDotEntry(ctx context.Context, repoPath, stowPath string, entry 
 			retErr = fmt.Errorf("%w (rollback failed: %v)", retErr, rollbackErr)
 		}
 	}()
-	prep, err := prepareDotTargetForRestow(entry)
+	prep, err := prepareDotTargetForRestow(ctx, exec, entry)
 	if err != nil {
 		return nil, fmt.Errorf("prepare local target: %w", err)
 	}
-	if err := dots.Restow(ctx, executor.New(), stowPath, []string{entry.Package}, false); err != nil {
+	if err := dots.Restow(ctx, exec, stowPath, []string{entry.Package}, false); err != nil {
 		if prep.backupPath != "" {
-			if restoreErr := restoreDotTargetAfterFailedRestow(entry, prep); restoreErr != nil {
+			if restoreErr := restoreDotTargetAfterFailedRestow(ctx, exec, entry, prep); restoreErr != nil {
 				return nil, fmt.Errorf("%w (restore failed: %v)", err, restoreErr)
 			}
 		}
@@ -557,12 +557,12 @@ func localDotCopySource(targetPath string) (string, error) {
 	return targetPath, nil
 }
 
-func backupAndRemoveLocalTarget(targetPath string) (string, error) {
-	return dots.BackupAndRemoveLocalPath(targetPath)
+func backupAndRemoveLocalTarget(ctx context.Context, exec dots.BackupExecutor, targetPath string) (string, error) {
+	return dots.BackupAndRemoveLocalPathWithExecutor(ctx, exec, targetPath)
 }
 
-func backupLocalTarget(targetPath string) (string, error) {
-	backupPath, backupErr := dots.BackupLocalPath(targetPath)
+func backupLocalTarget(ctx context.Context, exec dots.BackupExecutor, targetPath string) (string, error) {
+	backupPath, backupErr := dots.BackupLocalPathWithExecutor(ctx, exec, targetPath)
 	if backupErr != nil && !os.IsNotExist(backupErr) {
 		return "", fmt.Errorf("backup %q: %w", targetPath, backupErr)
 	}
@@ -575,18 +575,18 @@ type preparedDotTarget struct {
 	removedManagedPaths bool
 }
 
-func prepareDotTargetForRestow(entry dots.ResolvedEntry) (preparedDotTarget, error) {
+func prepareDotTargetForRestow(ctx context.Context, exec dots.BackupExecutor, entry dots.ResolvedEntry) (preparedDotTarget, error) {
 	if shouldPreserveDirectoryDotTarget(entry) {
 		prep := preparedDotTarget{preservedDirectory: true}
-		backupPath, err := backupLocalTarget(entry.TargetPath)
+		backupPath, err := backupLocalTarget(ctx, exec, entry.TargetPath)
 		if err != nil {
 			return prep, err
 		}
 		prep.backupPath = backupPath
 		prep.removedManagedPaths = true
-		if err := removeManagedDotTargetPaths(entry, backupPath); err != nil {
+		if err := removeManagedDotTargetPaths(ctx, exec, entry, backupPath); err != nil {
 			if backupPath != "" {
-				if restoreErr := restorePreparedDirectoryTargetAfterFailedRestow(entry, prep); restoreErr != nil {
+				if restoreErr := restorePreparedDirectoryTargetAfterFailedRestow(ctx, exec, entry, prep); restoreErr != nil {
 					return prep, fmt.Errorf("%w (restore failed: %v)", err, restoreErr)
 				}
 			}
@@ -594,7 +594,7 @@ func prepareDotTargetForRestow(entry dots.ResolvedEntry) (preparedDotTarget, err
 		}
 		return prep, nil
 	}
-	backupPath, err := backupAndRemoveLocalTarget(entry.TargetPath)
+	backupPath, err := backupAndRemoveLocalTarget(ctx, exec, entry.TargetPath)
 	if err != nil {
 		return preparedDotTarget{}, err
 	}
@@ -622,18 +622,18 @@ func isFoldedDotDirectory(entry dots.ResolvedEntry) bool {
 	return sameResolvedPath(entry.TargetPath, entry.SourcePath)
 }
 
-func removeManagedDotTargetPaths(entry dots.ResolvedEntry, backupPath string) error {
+func removeManagedDotTargetPaths(ctx context.Context, exec dots.BackupExecutor, entry dots.ResolvedEntry, backupPath string) error {
 	ignores := combinedDotIgnores(entry.Ignore)
-	if err := removeManagedDotTargetFiles(entry, ignores, backupPath); err != nil {
+	if err := removeManagedDotTargetFiles(ctx, exec, entry, ignores, backupPath); err != nil {
 		return err
 	}
-	if err := removeDotTargetDirectoryConflicts(entry, ignores, backupPath); err != nil {
+	if err := removeDotTargetDirectoryConflicts(ctx, exec, entry, ignores, backupPath); err != nil {
 		return err
 	}
 	return removeEmptyUnmanagedDotTargetDirs(entry, ignores)
 }
 
-func removeManagedDotTargetFiles(entry dots.ResolvedEntry, ignores []string, backupPath string) error {
+func removeManagedDotTargetFiles(ctx context.Context, exec dots.BackupExecutor, entry dots.ResolvedEntry, ignores []string, backupPath string) error {
 	return filepath.WalkDir(entry.TargetPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -665,11 +665,11 @@ func removeManagedDotTargetFiles(entry dots.ResolvedEntry, ignores []string, bac
 		if sameResolvedPath(path, sourcePath) {
 			return nil
 		}
-		return dots.RemoveLocalPathAfterBackup(path, backupPath)
+		return dots.RemoveLocalPathAfterBackupWithExecutor(ctx, exec, path, backupPath)
 	})
 }
 
-func removeDotTargetDirectoryConflicts(entry dots.ResolvedEntry, ignores []string, backupPath string) error {
+func removeDotTargetDirectoryConflicts(ctx context.Context, exec dots.BackupExecutor, entry dots.ResolvedEntry, ignores []string, backupPath string) error {
 	return filepath.WalkDir(entry.SourcePath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -706,10 +706,10 @@ func removeDotTargetDirectoryConflicts(entry dots.ResolvedEntry, ignores []strin
 			if targetInfo.IsDir() && targetInfo.Mode()&os.ModeSymlink == 0 {
 				return nil
 			}
-			return dots.RemoveLocalPathAfterBackup(targetPath, backupPath)
+			return dots.RemoveLocalPathAfterBackupWithExecutor(ctx, exec, targetPath, backupPath)
 		}
 		if targetInfo.IsDir() && targetInfo.Mode()&os.ModeSymlink == 0 {
-			if err := dots.RemoveLocalPathAfterBackup(targetPath, backupPath); err != nil {
+			if err := dots.RemoveLocalPathAfterBackupWithExecutor(ctx, exec, targetPath, backupPath); err != nil {
 				return fmt.Errorf("replace directory %q with managed file: %w", targetPath, err)
 			}
 		}
@@ -757,14 +757,14 @@ func removeEmptyUnmanagedDotTargetDirs(entry dots.ResolvedEntry, ignores []strin
 	return nil
 }
 
-func restoreDotTargetAfterFailedRestow(entry dots.ResolvedEntry, prep preparedDotTarget) error {
+func restoreDotTargetAfterFailedRestow(ctx context.Context, exec dots.BackupExecutor, entry dots.ResolvedEntry, prep preparedDotTarget) error {
 	if prep.preservedDirectory {
-		return restorePreparedDirectoryTargetAfterFailedRestow(entry, prep)
+		return restorePreparedDirectoryTargetAfterFailedRestow(ctx, exec, entry, prep)
 	}
-	return restoreDotBackupAfterFailedStow(prep.backupPath, entry.TargetPath)
+	return restoreDotBackupAfterFailedStow(ctx, exec, prep.backupPath, entry.TargetPath)
 }
 
-func restorePreparedDirectoryTargetAfterFailedRestow(entry dots.ResolvedEntry, prep preparedDotTarget) error {
+func restorePreparedDirectoryTargetAfterFailedRestow(ctx context.Context, exec dots.BackupExecutor, entry dots.ResolvedEntry, prep preparedDotTarget) error {
 	if prep.backupPath == "" || !prep.removedManagedPaths {
 		return nil
 	}
@@ -787,7 +787,7 @@ func restorePreparedDirectoryTargetAfterFailedRestow(entry dots.ResolvedEntry, p
 		if info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
 			return os.MkdirAll(targetItem, info.Mode().Perm())
 		}
-		if err := dots.RemoveLocalPathAfterBackup(targetItem, prep.backupPath); err != nil {
+		if err := dots.RemoveLocalPathAfterBackupWithExecutor(ctx, exec, targetItem, prep.backupPath); err != nil {
 			return err
 		}
 		return restoreBackupFile(path, targetItem)

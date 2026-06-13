@@ -410,15 +410,11 @@ EOF
 
 cat > "$root/settings.json" <<EOF
 {
-  "\$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v1.schema.json",
-  "version": 1,
+  "\$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v9.schema.json",
+  "version": 9,
   "settings": {
     "auto_import": true,
-    "ecosystems": {
-      "system": { "manager": "brew", "priority": ["brew"] },
-      "node": { "manager": "pnpm", "priority": ["pnpm", "bun", "npm"] },
-      "python": { "manager": "uv", "priority": ["uv", "pip3", "pip"] }
-    },
+    "provider_priority": ["brew", "pnpm", "bun", "npm", "uv", "pip"],
     "dots_repo": "$root/dotfiles",
     "dots_git": { "auto_commit": false, "auto_push": false }
   },
@@ -430,34 +426,34 @@ cat > "$root/settings.json" <<EOF
     "home-desktop": ["core", "media"]
   },
   "tools": {
-    "ripgrep": { "provider": "system", "package": "ripgrep" },
-    "git": { "provider": "system", "package": "git" },
-    "fd": { "provider": "system", "package": "fd" },
-    "typescript": { "provider": "node", "package": "typescript", "install_with": "pnpm" },
-    "eslint": { "provider": "node", "package": "eslint", "install_with": "pnpm" },
-    "vitest": { "provider": "node", "package": "vitest", "install_with": "pnpm" },
-    "prettier": { "provider": "node", "package": "prettier", "install_with": "npm" },
-    "wrangler": { "provider": "node", "package": "wrangler", "install_with": "npm" },
-    "@aisuite/chub": { "provider": "node", "package": "@aisuite/chub", "install_with": "bun" },
-    "black": { "provider": "python", "package": "black", "install_with": "uv" },
-    "ruff": { "provider": "python", "package": "ruff", "install_with": "uv" },
-    "poetry": { "provider": "python", "package": "poetry", "install_with": "uv" },
-    "ansible": { "provider": "python", "package": "ansible", "install_with": "uv" },
-    "httpie": { "provider": "python", "package": "httpie", "install_with": "pip3" },
-    "awscli": { "provider": "python", "package": "awscli", "install_with": "pip3" },
-    "pytest": { "provider": "python", "package": "pytest", "install_with": "uv" },
-    "pre-commit": { "provider": "python", "package": "pre-commit", "install_with": "pip3" },
-    "kubectl": { "provider": "system", "package": "kubectl" },
-    "slack": { "provider": "system", "package": "slack", "install_with": "brew" },
-    "parsec": { "provider": "system", "package": "parsec" },
-    "zoom": { "provider": "system", "package": "zoom" },
-    "jq": { "provider": "system", "package": "jq" },
-    "bat": { "provider": "system", "package": "bat" },
-    "fzf": { "provider": "system", "package": "fzf" },
-    "docker": { "provider": "system", "package": "docker-desktop" },
-    "gh": { "provider": "system", "package": "gh" },
-    "go": { "provider": "system", "package": "go" },
-    "starship": { "provider": "system", "package": "starship" }
+    "ripgrep": { "providers": [{ "provider": "brew", "package": "ripgrep" }] },
+    "git": { "providers": [{ "provider": "brew", "package": "git" }] },
+    "fd": { "providers": [{ "provider": "brew", "package": "fd" }] },
+    "typescript": { "providers": [{ "provider": "pnpm", "package": "typescript" }] },
+    "eslint": { "providers": [{ "provider": "pnpm", "package": "eslint" }] },
+    "vitest": { "providers": [{ "provider": "pnpm", "package": "vitest" }] },
+    "prettier": { "providers": [{ "provider": "npm", "package": "prettier" }] },
+    "wrangler": { "providers": [{ "provider": "npm", "package": "wrangler" }] },
+    "@aisuite/chub": { "providers": [{ "provider": "bun", "package": "@aisuite/chub" }] },
+    "black": { "providers": [{ "provider": "uv", "package": "black" }] },
+    "ruff": { "providers": [{ "provider": "uv", "package": "ruff" }] },
+    "poetry": { "providers": [{ "provider": "uv", "package": "poetry" }] },
+    "ansible": { "providers": [{ "provider": "uv", "package": "ansible" }] },
+    "httpie": { "providers": [{ "provider": "pip", "package": "httpie" }] },
+    "awscli": { "providers": [{ "provider": "pip", "package": "awscli" }] },
+    "pytest": { "providers": [{ "provider": "uv", "package": "pytest" }] },
+    "pre-commit": { "providers": [{ "provider": "pip", "package": "pre-commit" }] },
+    "kubectl": { "providers": [{ "provider": "brew", "package": "kubectl" }] },
+    "slack": { "providers": [{ "provider": "brew", "package": "slack" }] },
+    "parsec": { "providers": [{ "provider": "brew", "package": "parsec" }] },
+    "zoom": { "providers": [{ "provider": "brew", "package": "zoom" }] },
+    "jq": { "providers": [{ "provider": "brew", "package": "jq" }] },
+    "bat": { "providers": [{ "provider": "brew", "package": "bat" }] },
+    "fzf": { "providers": [{ "provider": "brew", "package": "fzf" }] },
+    "docker": { "providers": [{ "provider": "brew", "package": "docker-desktop" }] },
+    "gh": { "providers": [{ "provider": "brew", "package": "gh" }] },
+    "go": { "providers": [{ "provider": "brew", "package": "go" }] },
+    "starship": { "providers": [{ "provider": "brew", "package": "starship" }] }
   },
   "groups": [
     {
@@ -511,14 +507,10 @@ EOF
 
 cat > "$root/onboarding-settings.json" <<EOF
 {
-  "\$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v1.schema.json",
-  "version": 1,
+  "\$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v9.schema.json",
+  "version": 9,
   "settings": {
-    "ecosystems": {
-      "system": { "manager": "brew", "priority": ["brew"] },
-      "node": { "manager": "pnpm", "priority": ["pnpm", "bun", "npm"] },
-      "python": { "manager": "uv", "priority": ["uv", "pip3", "pip"] }
-    }
+    "provider_priority": ["brew", "pnpm", "bun", "npm", "uv", "pip"]
   },
   "tools": {},
   "hosts": {},
@@ -573,6 +565,21 @@ CREATE TABLE IF NOT EXISTS local_state (
   value TEXT NOT NULL,
   updated_at DATETIME NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS command_traces (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  started_at DATETIME NOT NULL,
+  finished_at DATETIME NOT NULL,
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  reason TEXT NOT NULL DEFAULT '',
+  command TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT '',
+  exit_code INTEGER,
+  error TEXT NOT NULL DEFAULT '',
+  stderr TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_command_traces_started_at
+  ON command_traces (started_at);
 SCHEMA
 config_path="$root/settings.json"
 if command -v shasum >/dev/null 2>&1; then
@@ -595,45 +602,63 @@ ON CONFLICT (key) DO UPDATE SET
   value = EXCLUDED.value,
   updated_at = EXCLUDED.updated_at;
 
+INSERT INTO local_state (key, value, updated_at)
+VALUES ('migration.provider_list_cache_cleared', '1', CURRENT_TIMESTAMP)
+ON CONFLICT (key) DO UPDATE SET
+  value = EXCLUDED.value,
+  updated_at = EXCLUDED.updated_at;
+
 DELETE FROM tool_cache;
 INSERT INTO tool_cache
   (name, provider, package, installed, installed_with, version, outdated, latest_version, description, last_checked, tracked)
 VALUES
-  ('ripgrep', 'system', 'ripgrep', 1, 'brew', '14.1.1', 1, '14.2.0', 'fast recursive search', CURRENT_TIMESTAMP, 1),
-  ('git', 'system', 'git', 1, 'brew', '2.49.0', 0, NULL, 'distributed version control', CURRENT_TIMESTAMP, 1),
-  ('fd', 'system', 'fd', 0, '', NULL, 0, NULL, 'friendly find replacement', CURRENT_TIMESTAMP, 1),
-  ('typescript', 'node', 'typescript', 1, 'pnpm', '5.8.3', 1, '5.9.3', 'TypeScript compiler', CURRENT_TIMESTAMP, 1),
-  ('eslint', 'node', 'eslint', 1, 'pnpm', '9.25.1', 0, NULL, 'JavaScript linting', CURRENT_TIMESTAMP, 1),
-  ('vitest', 'node', 'vitest', 1, 'pnpm', '3.1.4', 0, NULL, 'Vite-native test runner', CURRENT_TIMESTAMP, 1),
-  ('prettier', 'node', 'prettier', 1, 'npm', '3.5.3', 1, '3.6.2', 'opinionated code formatter', CURRENT_TIMESTAMP, 1),
-  ('wrangler', 'node', 'wrangler', 1, 'npm', '4.14.1', 0, NULL, 'Cloudflare developer platform CLI', CURRENT_TIMESTAMP, 1),
-  ('@aisuite/chub', 'node', '@aisuite/chub', 1, 'bun', '0.1.4', 0, NULL, 'AI tooling workspace helpers', CURRENT_TIMESTAMP, 1),
-  ('black', 'python', 'black', 1, 'uv', '25.1.0', 0, NULL, 'Python formatter', CURRENT_TIMESTAMP, 1),
-  ('ruff', 'python', 'ruff', 1, 'uv', '0.11.8', 0, NULL, 'Python linter and formatter', CURRENT_TIMESTAMP, 1),
-  ('poetry', 'python', 'poetry', 1, 'uv', '2.1.3', 0, NULL, 'Python packaging and dependency manager', CURRENT_TIMESTAMP, 1),
-  ('ansible', 'python', 'ansible', 1, 'uv', '11.5.0', 0, NULL, 'automation for infrastructure and apps', CURRENT_TIMESTAMP, 1),
-  ('httpie', 'python', 'httpie', 1, 'pip3', '3.2.3', 0, NULL, 'friendly HTTP client', CURRENT_TIMESTAMP, 1),
-  ('awscli', 'python', 'awscli', 1, 'pip3', '1.38.0', 0, NULL, 'AWS CLI tooling', CURRENT_TIMESTAMP, 1),
-  ('pytest', 'python', 'pytest', 0, '', NULL, 0, NULL, 'Python test runner', CURRENT_TIMESTAMP, 1),
-  ('pre-commit', 'python', 'pre-commit', 1, 'pip3', '4.1.0', 1, '4.2.0', 'Git hook manager', CURRENT_TIMESTAMP, 1),
-  ('kubectl', 'system', 'kubectl', 1, 'brew', '1.32.0', 1, '1.33.1', 'Kubernetes CLI', CURRENT_TIMESTAMP, 1),
-  ('slack', 'system', 'slack', 1, 'brew', '4.37.101', 0, NULL, 'team chat', CURRENT_TIMESTAMP, 1),
-  ('parsec', 'system', 'parsec', 1, 'brew', '150-95', 0, NULL, 'low-latency remote desktop', CURRENT_TIMESTAMP, 1),
-  ('zoom', 'system', 'zoom', 1, 'brew', '6.1.0', 0, NULL, 'video meetings', CURRENT_TIMESTAMP, 1),
-  ('jq', 'system', 'jq', 1, 'brew', '1.8.0', 0, NULL, 'JSON processor', CURRENT_TIMESTAMP, 1),
-  ('bat', 'system', 'bat', 1, 'brew', '0.24.0', 0, NULL, 'better cat', CURRENT_TIMESTAMP, 1),
-  ('fzf', 'system', 'fzf', 1, 'brew', '0.56.0', 0, NULL, 'fuzzy finder', CURRENT_TIMESTAMP, 1),
-  ('docker', 'system', 'docker-desktop', 1, 'brew', '4.76.0', 0, NULL, 'Docker Desktop', CURRENT_TIMESTAMP, 1),
-  ('gh', 'system', 'gh', 1, 'brew', '2.66.0', 0, NULL, 'GitHub CLI', CURRENT_TIMESTAMP, 1),
-  ('go', 'system', 'go', 1, 'brew', '1.23.6', 0, NULL, 'Go toolchain', CURRENT_TIMESTAMP, 1),
-  ('starship', 'system', 'starship', 1, 'brew', '1.22.0', 0, NULL, 'shell prompt', CURRENT_TIMESTAMP, 1),
-  ('htop', 'system', 'htop', 1, 'brew', '3.3.0', 0, NULL, 'interactive process viewer', CURRENT_TIMESTAMP, 0);
+  ('ripgrep', 'brew', 'ripgrep', 1, 'brew', '14.1.1', 1, '14.2.0', 'fast recursive search', CURRENT_TIMESTAMP, 1),
+  ('git', 'brew', 'git', 1, 'brew', '2.49.0', 0, NULL, 'distributed version control', CURRENT_TIMESTAMP, 1),
+  ('fd', 'brew', 'fd', 0, '', NULL, 0, NULL, 'friendly find replacement', CURRENT_TIMESTAMP, 1),
+  ('typescript', 'pnpm', 'typescript', 1, 'pnpm', '5.8.3', 1, '5.9.3', 'TypeScript compiler', CURRENT_TIMESTAMP, 1),
+  ('eslint', 'pnpm', 'eslint', 1, 'pnpm', '9.25.1', 0, NULL, 'JavaScript linting', CURRENT_TIMESTAMP, 1),
+  ('vitest', 'pnpm', 'vitest', 1, 'pnpm', '3.1.4', 0, NULL, 'Vite-native test runner', CURRENT_TIMESTAMP, 1),
+  ('prettier', 'npm', 'prettier', 1, 'npm', '3.5.3', 1, '3.6.2', 'opinionated code formatter', CURRENT_TIMESTAMP, 1),
+  ('wrangler', 'npm', 'wrangler', 1, 'npm', '4.14.1', 0, NULL, 'Cloudflare developer platform CLI', CURRENT_TIMESTAMP, 1),
+  ('@aisuite/chub', 'bun', '@aisuite/chub', 1, 'bun', '0.1.4', 0, NULL, 'AI tooling workspace helpers', CURRENT_TIMESTAMP, 1),
+  ('black', 'uv', 'black', 1, 'uv', '25.1.0', 0, NULL, 'Python formatter', CURRENT_TIMESTAMP, 1),
+  ('ruff', 'uv', 'ruff', 1, 'uv', '0.11.8', 0, NULL, 'Python linter and formatter', CURRENT_TIMESTAMP, 1),
+  ('poetry', 'uv', 'poetry', 1, 'uv', '2.1.3', 0, NULL, 'Python packaging and dependency manager', CURRENT_TIMESTAMP, 1),
+  ('ansible', 'uv', 'ansible', 1, 'uv', '11.5.0', 0, NULL, 'automation for infrastructure and apps', CURRENT_TIMESTAMP, 1),
+  ('httpie', 'pip', 'httpie', 1, 'pip', '3.2.3', 0, NULL, 'friendly HTTP client', CURRENT_TIMESTAMP, 1),
+  ('awscli', 'pip', 'awscli', 1, 'pip', '1.38.0', 0, NULL, 'AWS CLI tooling', CURRENT_TIMESTAMP, 1),
+  ('pytest', 'uv', 'pytest', 0, '', NULL, 0, NULL, 'Python test runner', CURRENT_TIMESTAMP, 1),
+  ('pre-commit', 'pip', 'pre-commit', 1, 'pip', '4.1.0', 1, '4.2.0', 'Git hook manager', CURRENT_TIMESTAMP, 1),
+  ('kubectl', 'brew', 'kubectl', 1, 'brew', '1.32.0', 1, '1.33.1', 'Kubernetes CLI', CURRENT_TIMESTAMP, 1),
+  ('slack', 'brew', 'slack', 1, 'brew', '4.37.101', 0, NULL, 'team chat', CURRENT_TIMESTAMP, 1),
+  ('parsec', 'brew', 'parsec', 1, 'brew', '150-95', 0, NULL, 'low-latency remote desktop', CURRENT_TIMESTAMP, 1),
+  ('zoom', 'brew', 'zoom', 1, 'brew', '6.1.0', 0, NULL, 'video meetings', CURRENT_TIMESTAMP, 1),
+  ('jq', 'brew', 'jq', 1, 'brew', '1.8.0', 0, NULL, 'JSON processor', CURRENT_TIMESTAMP, 1),
+  ('bat', 'brew', 'bat', 1, 'brew', '0.24.0', 0, NULL, 'better cat', CURRENT_TIMESTAMP, 1),
+  ('fzf', 'brew', 'fzf', 1, 'brew', '0.56.0', 0, NULL, 'fuzzy finder', CURRENT_TIMESTAMP, 1),
+  ('docker', 'brew', 'docker-desktop', 1, 'brew', '4.76.0', 0, NULL, 'Docker Desktop', CURRENT_TIMESTAMP, 1),
+  ('gh', 'brew', 'gh', 1, 'brew', '2.66.0', 0, NULL, 'GitHub CLI', CURRENT_TIMESTAMP, 1),
+  ('go', 'brew', 'go', 1, 'brew', '1.23.6', 0, NULL, 'Go toolchain', CURRENT_TIMESTAMP, 1),
+  ('starship', 'brew', 'starship', 1, 'brew', '1.22.0', 0, NULL, 'shell prompt', CURRENT_TIMESTAMP, 1),
+  ('htop', 'brew', 'htop', 1, 'brew', '3.3.0', 0, NULL, 'interactive process viewer', CURRENT_TIMESTAMP, 0);
 
 UPDATE tool_cache
 SET privilege = 'maybe',
     privilege_reason = 'brew cask parsec uses pkgutil uninstall',
     privilege_at = CURRENT_TIMESTAMP
-WHERE name = 'parsec' AND provider = 'system' AND package = 'parsec';
+WHERE name = 'parsec' AND provider = 'brew' AND package = 'parsec';
+
+DELETE FROM command_traces;
+INSERT INTO command_traces
+  (started_at, finished_at, duration_ms, reason, command, status, exit_code, error, stderr)
+VALUES
+  (datetime('now', '-2 minutes'), datetime('now', '-119 seconds'), 320,
+   'upgrading ripgrep (brew)', 'brew upgrade ripgrep', 'success', 0, '', ''),
+  (datetime('now', '-90 seconds'), datetime('now', '-89 seconds'), 180,
+   'syncing dotfiles', 'stow -R -d $root/dotfiles/dotfiles -t $root/home nvim zsh git',
+   'success', 0, '', ''),
+  (datetime('now', '-45 seconds'), datetime('now', '-44 seconds'), 95,
+   'checking fallback pre-commit (uv)', 'uv tool list', 'success', 0, '', '');
 SQL
 
 echo "$root"

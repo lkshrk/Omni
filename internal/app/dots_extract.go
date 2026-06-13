@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/lkshrk/omni/internal/dots"
-	"github.com/lkshrk/omni/internal/executor"
 )
 
 // DotsExtractOptions configures DotsExtract.
@@ -108,7 +107,7 @@ func (a *App) DotsExtract(ctx context.Context, parentName, subpath string, opts 
 	}
 
 	// Safety snapshot before moving files around the repo.
-	if g := newGitForRepo(repoPath, executor.New()); g.IsRepo() {
+	if g := newGitForRepo(repoPath, a.newExecutor()); g.IsRepo() {
 		if err := g.SnapshotAll(ctx, "dots: pre-extract "+childName); err != nil {
 			return nil, fmt.Errorf("dots extract: snapshot repo: %w", err)
 		}
@@ -119,7 +118,7 @@ func (a *App) DotsExtract(ctx context.Context, parentName, subpath string, opts 
 	// can't be ejected by pattern. Instead materialise it from the parent package
 	// as real files in place, then drop it from the parent package; DotsAdd then
 	// re-adopts those real files into a new package + entry.
-	if _, err := dots.BackupLocalPath(childTarget); err != nil {
+	if _, err := dots.BackupLocalPathWithExecutor(ctx, a.newExecutor(), childTarget); err != nil {
 		return nil, fmt.Errorf("dots extract: backup %q: %w", childTarget, err)
 	}
 	if err := os.RemoveAll(childTarget); err != nil {

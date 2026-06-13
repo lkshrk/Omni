@@ -246,7 +246,7 @@ func (a *App) InstallDotsReminderService(ctx context.Context, opts DotsReminderI
 	}
 	info := service.info()
 	if opts.Activate {
-		if err := service.activate(ctx, executor.New()); err != nil {
+		if err := service.activate(ctx, a.newExecutor()); err != nil {
 			return info, err
 		}
 	}
@@ -261,7 +261,7 @@ func (a *App) UninstallDotsReminderService(ctx context.Context) (*DotsReminderSe
 	if err != nil {
 		return nil, err
 	}
-	if err := service.deactivate(ctx, executor.New()); err != nil {
+	if err := service.deactivate(ctx, a.newExecutor()); err != nil {
 		return service.info(), err
 	}
 	for _, file := range service.files {

@@ -40,6 +40,7 @@ the normal active-host gate.
 | `omni init` | no | Alias for `bootstrap` | `omni bootstrap --no-import` |
 | `omni doctor` | no | Read-only | already read-only |
 | `omni reconcile` | yes | Config, cache, packages, files, dot repo | `omni doctor` |
+| `omni trace list` | no | Read-only | already read-only |
 | `omni completion` | no | Read-only | already read-only |
 | `omni help [command]` | no | Read-only | already read-only |
 | `omni --version` | no | Read-only | already read-only |
