@@ -5,7 +5,6 @@ DEMO_TAPE := demo/omni-demo.tape
 DEMO_GIF  := docs/assets/omni-demo.gif
 TMP_DIR     ?= $(CURDIR)/.tmp
 TMP_MAX_MB  ?= 2048
-LIVE_GOCACHE ?= $(TMP_DIR)/go-build
 DEV_DIR     ?= /private/tmp/omni-dev
 DEV_HOST    ?= devhost
 DEV_CONFIG  ?= $(DEV_DIR)/settings.json
@@ -29,10 +28,9 @@ build:
 ## run: alias for tui-live
 run: tui-live
 
-## tui-live: run the TUI with live/default config and cache
-tui-live: prune-tmp
-	@mkdir -p "$(LIVE_GOCACHE)"
-	GOCACHE="$(LIVE_GOCACHE)" go run -ldflags "$(LDFLAGS)" $(CMD_PATH)
+## tui-live: build if needed, then run the TUI with live/default config and cache
+tui-live: prune-tmp build
+	./bin/$(BINARY)
 
 ## tui-dev: run the TUI with isolated dev config and cache
 tui-dev: dev-bootstrap
@@ -41,10 +39,9 @@ tui-dev: dev-bootstrap
 ## cli: alias for cli-dev
 cli: cli-dev
 
-## cli-live: run the CLI with live/default config and cache; pass ARGS="..."
-cli-live: prune-tmp
-	@mkdir -p "$(LIVE_GOCACHE)"
-	GOCACHE="$(LIVE_GOCACHE)" go run -ldflags "$(LDFLAGS)" $(CMD_PATH) $(ARGS)
+## cli-live: build if needed, then run the CLI with live/default config and cache; pass ARGS="..."
+cli-live: prune-tmp build
+	./bin/$(BINARY) $(ARGS)
 
 ## cli-dev: run the CLI with isolated dev config and cache; pass ARGS="..."
 cli-dev: dev-bootstrap
