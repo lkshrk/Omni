@@ -214,6 +214,21 @@ func allInstallRouteSkipsArePackageUnavailable(skipped []installRouteSkip, candi
 	return true
 }
 
+// allInstallRouteSkipsAreProviderUnavailable reports whether every skip in the
+// list is due to the provider itself being absent on the current system. A
+// non-empty list is required (zero skips are not "all provider-unavailable").
+func allInstallRouteSkipsAreProviderUnavailable(skipped []installRouteSkip, candidates int) bool {
+	if len(skipped) != candidates || candidates == 0 {
+		return false
+	}
+	for _, skip := range skipped {
+		if skip.Reason != installRouteSkipProviderUnavailable {
+			return false
+		}
+	}
+	return true
+}
+
 func (a *App) installCandidateUsableCached(ctx context.Context, logicalName string, candidate config.ToolInstallSpec, availability map[string]bool) (bool, installRouteSkip) {
 	if !a.providerUsableCached(ctx, candidate.Provider, availability) {
 		return false, installRouteSkip{Install: candidate, Reason: installRouteSkipProviderUnavailable}

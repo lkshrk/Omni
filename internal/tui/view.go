@@ -177,6 +177,14 @@ func (m Model) viewString() string {
 		return placePopup(bg, m, renderDotsPeekPopup(m), dotsPeekPopupFrame(m))
 	}
 
+	if m.mode == viewSettings && (m.traceLog != nil || m.traceLogLoading) {
+		bgModel := m
+		bgModel.traceLog = nil
+		bgModel.traceLogLoading = false
+		bg := bgModel.viewString()
+		return placePopup(bg, m, renderTraceLogPopup(m), traceLogPopupFrame(m))
+	}
+
 	if m.mode == viewIgnoreScope {
 		bgModel := m
 		bgModel.mode = viewList
