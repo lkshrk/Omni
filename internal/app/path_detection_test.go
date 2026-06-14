@@ -1,14 +1,5 @@
 package app_test
 
-// Tests for HCL-26: detect installed tools via PATH when the configured
-// provider is unavailable or unregistered on the current host.
-//
-// Acceptance criteria:
-//   A1: provider unavailable/unregistered + binary on PATH → tool marked installed (InstalledWith="")
-//   A2: provider available → PATH detection does not fire (provider's authoritative answer wins)
-//   A3: binary absent → tool remains not-installed
-//   A5: no oscillation — RefreshInstalled then Sync(DryRun) emits no OpInstall
-
 import (
 	"context"
 	"os"
@@ -19,10 +10,7 @@ import (
 	isync "github.com/lkshrk/omni/internal/sync"
 )
 
-// TestRefreshInstalled_PathDetection_FailureRecordPreserved verifies the core
-// safety invariant: a tool with an active failure record is NOT marked installed
-// via PATH detection, even when its binary is on PATH and the provider is
-// unavailable. Retry-failed flows must not be disrupted by PATH detection.
+// TestRefreshInstalled_PathDetection_FailureRecordPreserved: active failure records must survive RefreshInstalled — PATH detection must not clear them.
 func TestRefreshInstalled_PathDetection_FailureRecordPreserved(t *testing.T) {
 	makeBin(t, "mytool")
 
@@ -62,8 +50,6 @@ func TestRefreshInstalled_PathDetection_FailureRecordPreserved(t *testing.T) {
 	t.Error("mytool not found in ListTools output")
 }
 
-// makeBin creates a zero-byte executable named binName in a temp dir and
-// prepends that dir to PATH for the duration of the test.
 func makeBin(t *testing.T, binName string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -75,9 +61,6 @@ func makeBin(t *testing.T, binName string) {
 	t.Setenv("PATH", dir+":"+old)
 }
 
-// TestRefreshInstalled_PathDetection_ProviderUnavailable checks A1:
-// configured provider is registered but Available=false; binary is on PATH.
-// Expected: tool marked Installed=true, InstalledWith="".
 func TestRefreshInstalled_PathDetection_ProviderUnavailable(t *testing.T) {
 	makeBin(t, "mytool")
 
@@ -113,8 +96,6 @@ func TestRefreshInstalled_PathDetection_ProviderUnavailable(t *testing.T) {
 	t.Error("mytool not found in ListTools output")
 }
 
-// TestRefreshInstalled_PathDetection_ProviderUnregistered checks A1 for the
-// unregistered case: no provider is registered at all (registry.Get returns !ok).
 func TestRefreshInstalled_PathDetection_ProviderUnregistered(t *testing.T) {
 	makeBin(t, "mytool")
 
@@ -147,13 +128,10 @@ func TestRefreshInstalled_PathDetection_ProviderUnregistered(t *testing.T) {
 	t.Error("mytool not found in ListTools output")
 }
 
-// TestRefreshInstalled_PathDetection_ProviderAvailable_NotBypassed checks A2:
-// when provider IS available, its authoritative "not installed" answer must win.
-// Having the binary on PATH must NOT cause a false positive.
 func TestRefreshInstalled_PathDetection_ProviderAvailable_NotBypassed(t *testing.T) {
-	makeBin(t, "mytool") // on PATH — must NOT trigger installed
+	makeBin(t, "mytool")
 
-	brew := &stubProvider{name: "brew", available: true} // available, but mytool not in its installed list
+	brew := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, brew)
 
 	cfg := &config.RootConfig{
@@ -182,10 +160,7 @@ func TestRefreshInstalled_PathDetection_ProviderAvailable_NotBypassed(t *testing
 	t.Error("mytool not found in ListTools output")
 }
 
-// TestRefreshInstalled_PathDetection_BinaryAbsent checks A3:
-// provider unavailable AND binary not on PATH → tool must not be marked installed.
 func TestRefreshInstalled_PathDetection_BinaryAbsent(t *testing.T) {
-	// Override PATH to an empty dir so no binary can be found.
 	emptyDir := t.TempDir()
 	t.Setenv("PATH", emptyDir)
 
@@ -218,9 +193,6 @@ func TestRefreshInstalled_PathDetection_BinaryAbsent(t *testing.T) {
 	t.Error("definitelymissingtool not found in ListTools output")
 }
 
-// TestRefreshInstalled_PathDetection_NoOscillation checks A5:
-// after RefreshInstalled marks a PATH-detected tool installed, a subsequent
-// Sync(DryRun) must not emit OpInstall for it.
 func TestRefreshInstalled_PathDetection_NoOscillation(t *testing.T) {
 	makeBin(t, "mytool")
 
@@ -249,8 +221,6 @@ func TestRefreshInstalled_PathDetection_NoOscillation(t *testing.T) {
 	}
 }
 
-// TestRefreshProviderInstalled_PathDetection_ProviderUnavailable checks A1 via
-// RefreshProviderInstalled (the scoped parallel-refresh path).
 func TestRefreshProviderInstalled_PathDetection_ProviderUnavailable(t *testing.T) {
 	makeBin(t, "mytool")
 
