@@ -391,13 +391,20 @@ func (p *Provider) InstalledMetadataMap(ctx context.Context) (map[string]provide
 	}
 
 	metadata := make(map[string]provider.InstalledMetadata, len(out.Formulae)+len(caskTokens))
+	// Every formula brew info reports, whether or not installed-on-request, so the
+	// tap-trust union below can tell a deliberately-excluded transitive dependency
+	// (known to brew info) apart from a formula brew info hides entirely.
+	infoFormulae := make(map[string]struct{}, len(out.Formulae))
 	for _, f := range out.Formulae {
-		if len(f.Installed) == 0 || !f.Installed[0].InstalledOnRequest {
-			continue
-		}
 		name := f.Name
 		if name == "" {
 			name = formulaName(f.FullName)
+		}
+		if name != "" {
+			infoFormulae[strings.ToLower(name)] = struct{}{}
+		}
+		if len(f.Installed) == 0 || !f.Installed[0].InstalledOnRequest {
+			continue
 		}
 		if name == "" {
 			continue
@@ -429,6 +436,45 @@ func (p *Provider) InstalledMetadataMap(ctx context.Context) (map[string]provide
 			metadata[token] = provider.InstalledMetadata{}
 		}
 	}
+
+	// Homebrew tap-trust hides formulae from untrusted taps in `brew info` (and
+	// `brew leaves`), so installed-from-untrusted-tap formulae are absent above
+	// even though they are installed. `brew list --formula` still reports them.
+	// Union those in so configured tools backed by untrusted taps are detected
+	// as installed instead of wrongly reported missing.
+	//
+	// Best-effort: brew info above is the authoritative installed set; this union
+	// only recovers formulae brew info hides. A failure here degrades to the
+	// brew-info result rather than failing the whole scan, mirroring how
+	// Available treats a missing/erroring brew as non-fatal.
+	listOut, _, listErr := p.exec.Run(ctx, "brew", "list", "--versions", "--formula")
+	if listErr != nil {
+		return metadata, nil
+	}
+	for _, line := range strings.Split(listOut, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		name := strings.ToLower(formulaName(fields[0]))
+		if name == "" {
+			continue
+		}
+		if _, ok := metadata[name]; ok {
+			continue
+		}
+		// brew info already accounted for this formula (e.g. an intentionally
+		// excluded transitive dependency); only add formulae brew info hid.
+		if _, ok := infoFormulae[name]; ok {
+			continue
+		}
+		version := ""
+		if len(fields) > 1 {
+			version = strings.Join(fields[1:], " ")
+		}
+		metadata[name] = provider.InstalledMetadata{Version: version}
+	}
+
 	return metadata, nil
 }
 
