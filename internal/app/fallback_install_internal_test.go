@@ -743,3 +743,45 @@ func TestNativeGitHubInstallPipeline_RejectsTraversalBinary(t *testing.T) {
 		})
 	}
 }
+
+// --- redirect token stripping ---
+
+// TestGitHubHTTPClient_RedirectStripsAuthorizationHeader verifies that the
+// Authorization header is not forwarded when a download URL redirects to a
+// non-GitHub host. A leak here would hand GITHUB_TOKEN to an arbitrary server.
+func TestGitHubHTTPClient_RedirectStripsAuthorizationHeader(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "secret-token")
+
+	// Second-hop server: records whether it received an Authorization header.
+	var receivedAuth string
+	hop2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(hop2.Close)
+
+	// First-hop server: redirects to the non-GitHub hop2 server.
+	hop1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, hop2.URL+"/resource", http.StatusFound)
+	}))
+	t.Cleanup(hop1.Close)
+
+	a := &App{}
+	client := a.githubHTTPClient()
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, hop1.URL+"/start", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer secret-token")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	if receivedAuth != "" {
+		t.Errorf("Authorization header was forwarded to non-GitHub redirect target: %q", receivedAuth)
+	}
+}

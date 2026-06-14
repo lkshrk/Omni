@@ -102,7 +102,7 @@ func (a *App) resolveGitHubFallback(ctx context.Context, name, owner, repoName s
 func (a *App) fetchLatestGitHubRelease(ctx context.Context, owner, repoName string) (githubRelease, error) {
 	client := a.githubClient
 	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second}
+		client = &http.Client{Timeout: 15 * time.Second, CheckRedirect: stripAuthOnRedirect}
 	}
 	baseURL := strings.TrimRight(a.githubAPI, "/")
 	if baseURL == "" {

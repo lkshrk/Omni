@@ -577,11 +577,27 @@ func writeExecutable(r io.Reader, destPath string) error {
 }
 
 // githubHTTPClient returns the test-injected client or a fresh default one.
+// The default client strips the Authorization header on every redirect and caps
+// redirect depth at 10 to prevent token leakage to non-GitHub hosts.
 func (a *App) githubHTTPClient() *http.Client {
 	if a.githubClient != nil {
 		return a.githubClient
 	}
-	return &http.Client{Timeout: 30 * time.Second}
+	return &http.Client{
+		Timeout:       30 * time.Second,
+		CheckRedirect: stripAuthOnRedirect,
+	}
+}
+
+// stripAuthOnRedirect removes the Authorization header before following any
+// redirect so that GITHUB_TOKEN is never forwarded to a non-GitHub host.
+// It also enforces a hard cap of 10 redirects to match Go's default behaviour.
+func stripAuthOnRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return fmt.Errorf("too many redirects")
+	}
+	req.Header.Del("Authorization")
+	return nil
 }
 
 // githubAPIBase returns the configured or default GitHub API base URL.
