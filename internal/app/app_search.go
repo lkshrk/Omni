@@ -448,17 +448,20 @@ func applyPrivilegeMetadata(upsert *database.ToolCache, plan provider.PrivilegeP
 }
 
 func installedSourceMetadataUpdate(t config.ToolEntry, entry provider.InstalledMetadata) (database.MetadataUpdate, bool) {
-	if strings.TrimSpace(entry.Source.Type) == "" {
+	hasSource := strings.TrimSpace(entry.Source.Type) != ""
+	hasKind := strings.TrimSpace(entry.ArtifactKind) != ""
+	if !hasSource && !hasKind {
 		return database.MetadataUpdate{}, false
 	}
 	return database.MetadataUpdate{
-		Name:        t.Name,
-		Provider:    t.Provider,
-		Package:     t.EffectivePackage(),
-		SourceType:  strings.TrimSpace(entry.Source.Type),
-		SourceOwner: strings.TrimSpace(entry.Source.Owner),
-		SourceRepo:  strings.TrimSpace(entry.Source.Repo),
-		SourceURL:   strings.TrimSpace(entry.Source.URL),
+		Name:         t.Name,
+		Provider:     t.Provider,
+		Package:      t.EffectivePackage(),
+		SourceType:   strings.TrimSpace(entry.Source.Type),
+		SourceOwner:  strings.TrimSpace(entry.Source.Owner),
+		SourceRepo:   strings.TrimSpace(entry.Source.Repo),
+		SourceURL:    strings.TrimSpace(entry.Source.URL),
+		ArtifactKind: strings.TrimSpace(entry.ArtifactKind),
 	}, true
 }
 

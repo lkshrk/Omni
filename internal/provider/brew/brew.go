@@ -147,7 +147,7 @@ func (p *Provider) Uninstall(ctx context.Context, tool provider.Tool) error {
 func (p *Provider) Upgrade(ctx context.Context, tool provider.Tool) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	args := p.upgradeArgs(ctx, tool.EffectivePackage())
+	args := p.upgradeArgsWithKind(ctx, tool.EffectivePackage(), tool.Options[brewKindOption])
 	_, stderr, err := p.exec.Run(ctx, "brew", args...)
 	if err == nil {
 		return nil
@@ -165,8 +165,19 @@ func (p *Provider) Upgrade(ctx context.Context, tool provider.Tool) error {
 	return fmt.Errorf("brew %s: %w (stderr: %s)", strings.Join(args, " "), err, strings.TrimSpace(stderr))
 }
 
-func (p *Provider) upgradeArgs(ctx context.Context, pkg string) []string {
+func (p *Provider) upgradeArgsWithKind(ctx context.Context, pkg, kind string) []string {
+	return upgradeArgsForKind(ctx, p, pkg, kind)
+}
+
+func upgradeArgsForKind(ctx context.Context, p *Provider, pkg, kind string) []string {
 	name := formulaName(pkg)
+	switch kind {
+	case brewKindFormula:
+		return []string{"upgrade", "--formula", pkg}
+	case brewKindCask:
+		return []string{"upgrade", "--cask", name}
+	}
+	// Fall back to live probing when no persisted kind is available.
 	if p.installedFormula(ctx, name) {
 		return []string{"upgrade", "--formula", pkg}
 	}
@@ -293,7 +304,12 @@ func (p *Provider) installedFormulae(ctx context.Context) ([]provider.InstalledT
 	for _, pkg := range packages {
 		name := formulaName(pkg)
 		tools = append(tools, provider.InstalledTool{
-			Tool:    provider.Tool{Name: name, Provider: "brew", Package: pkg},
+			Tool: provider.Tool{
+				Name:     name,
+				Provider: "brew",
+				Package:  pkg,
+				Options:  map[string]string{brewKindOption: brewKindFormula},
+			},
 			Version: lookupBrewListVersion(versions, pkg),
 		})
 	}
@@ -410,8 +426,9 @@ func (p *Provider) InstalledMetadataMap(ctx context.Context) (map[string]provide
 			continue
 		}
 		metadata[strings.ToLower(name)] = provider.InstalledMetadata{
-			Version: f.Installed[0].Version,
-			Source:  brewSourceHint(f.Homepage, f.URLs.Stable.URL),
+			Version:      f.Installed[0].Version,
+			Source:       brewSourceHint(f.Homepage, f.URLs.Stable.URL),
+			ArtifactKind: brewKindFormula,
 		}
 	}
 
@@ -424,7 +441,11 @@ func (p *Provider) InstalledMetadataMap(ctx context.Context) (map[string]provide
 		if _, ok := caskTokens[key]; !ok {
 			continue
 		}
-		entry := provider.InstalledMetadata{Version: c.Installed, Source: brewSourceHint(c.Homepage, c.URL)}
+		entry := provider.InstalledMetadata{
+			Version:      c.Installed,
+			Source:       brewSourceHint(c.Homepage, c.URL),
+			ArtifactKind: brewKindCask,
+		}
 		if plan := c.privilegePlan(provider.PrivilegeActionUninstall); plan.RequiresPrivilege() {
 			entry.Privilege = plan
 		}
@@ -433,7 +454,7 @@ func (p *Provider) InstalledMetadataMap(ctx context.Context) (map[string]provide
 	}
 	for token := range caskTokens {
 		if _, ok := seenCasks[token]; !ok {
-			metadata[token] = provider.InstalledMetadata{}
+			metadata[token] = provider.InstalledMetadata{ArtifactKind: brewKindCask}
 		}
 	}
 
