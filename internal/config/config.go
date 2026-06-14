@@ -128,6 +128,10 @@ type FallbackRecipe struct {
 	AssetID          string `json:"asset_id,omitempty"`
 	AssetName        string `json:"asset_name,omitempty"`
 	AssetDownloadURL string `json:"asset_download_url,omitempty"`
+	// InstalledVersion is the normalized version string recorded at install/upgrade
+	// time (e.g. "2.93.0"). Used to detect when a newer release is available
+	// without relying solely on published_at timestamps.
+	InstalledVersion string `json:"installed_version,omitempty"`
 }
 
 // FallbackPlatform overrides release-asset matching for one OS/architecture key.

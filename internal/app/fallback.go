@@ -177,6 +177,14 @@ func (a *App) InstallToolFallback(ctx context.Context, name string) error {
 	if err := a.setToolFallbackStatus(name, config.FallbackStatusVerified); err != nil {
 		return err
 	}
+	// Persist the installed version from the recipe tag so future refresh
+	// cycles can use version comparison rather than published_at alone.
+	if tagName := strings.TrimSpace(fallback.Recipe.TagName); tagName != "" {
+		if persistErr := a.persistFallbackInstalledVersion(name, tagName); persistErr != nil {
+			// Best-effort: a missing version does not block the install.
+			_ = persistErr
+		}
+	}
 	if err := a.readDB().Upsert(ctx, &database.ToolCache{
 		Name:          name,
 		Provider:      fallbackProvider(spec),
@@ -277,12 +285,21 @@ func (a *App) UpgradeToolFallback(ctx context.Context, name string) error {
 	if refreshed {
 		verified := *upgradeFallback
 		verified.Status = config.FallbackStatusVerified
+		// Record the newly installed version so future refresh cycles can
+		// compare versions rather than relying on published_at alone.
+		if tagName := strings.TrimSpace(upgradeFallback.Recipe.TagName); tagName != "" {
+			verified.Recipe.InstalledVersion = normalizeFallbackVersion(tagName)
+		}
 		if err := a.SaveToolFallback(ctx, name, verified); err != nil {
 			return err
 		}
 	} else {
 		if err := a.setToolFallbackStatus(name, config.FallbackStatusVerified); err != nil {
 			return err
+		}
+		// Best-effort: persist installed version even on non-refreshed upgrades.
+		if tagName := strings.TrimSpace(upgradeFallback.Recipe.TagName); tagName != "" {
+			_ = a.persistFallbackInstalledVersion(name, tagName)
 		}
 	}
 	if err := a.readDB().Upsert(ctx, &database.ToolCache{
@@ -542,6 +559,25 @@ func (a *App) persistFallbackChecksum(name, digest string) error {
 			return nil
 		}
 		spec.Fallback.Recipe.Checksum = digest
+		cfg.Tools[name] = spec
+		return nil
+	})
+}
+
+// persistFallbackInstalledVersion records the normalized version string from
+// tagName into the stored recipe. This lets future outdated-refresh cycles
+// compare version strings rather than relying solely on published_at.
+func (a *App) persistFallbackInstalledVersion(name, tagName string) error {
+	normalized := normalizeFallbackVersion(tagName)
+	if normalized == "" {
+		return nil
+	}
+	return a.withConfig(func(cfg *config.RootConfig) error {
+		spec, ok := cfg.Tools[name]
+		if !ok || spec.Fallback == nil {
+			return nil
+		}
+		spec.Fallback.Recipe.InstalledVersion = normalized
 		cfg.Tools[name] = spec
 		return nil
 	})
