@@ -442,9 +442,14 @@ func (p *Provider) InstalledMetadataMap(ctx context.Context) (map[string]provide
 	// even though they are installed. `brew list --formula` still reports them.
 	// Union those in so configured tools backed by untrusted taps are detected
 	// as installed instead of wrongly reported missing.
-	listOut, _, err := p.exec.Run(ctx, "brew", "list", "--versions", "--formula")
-	if err != nil {
-		return nil, fmt.Errorf("brew list --versions --formula: %w", err)
+	//
+	// Best-effort: brew info above is the authoritative installed set; this union
+	// only recovers formulae brew info hides. A failure here degrades to the
+	// brew-info result rather than failing the whole scan, mirroring how
+	// Available treats a missing/erroring brew as non-fatal.
+	listOut, _, listErr := p.exec.Run(ctx, "brew", "list", "--versions", "--formula")
+	if listErr != nil {
+		return metadata, nil
 	}
 	for _, line := range strings.Split(listOut, "\n") {
 		fields := strings.Fields(line)
