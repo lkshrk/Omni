@@ -69,6 +69,25 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 	// Resolve once and derive both the entry list (for the syncer) and the
 	// detailed view (for tap collection) from the same pass.
 	resolvedDetailed, warnings := a.resolveTools(ctx, cfg, groups)
+
+	// For tools whose every configured provider is unavailable on this host,
+	// attempt a high-confidence provider search across currently available
+	// providers before giving up. This handles the case where a tool spec only
+	// lists a provider that is absent on the current platform (e.g. brew on
+	// Linux) but another provider can supply the same tool.
+	if !opts.DryRun {
+		if searched, searchWarnings := a.addProviderSearchForUnavailableTools(ctx, cfg, groups, resolvedDetailed, opts.Provider, opts.Progress); searched {
+			cfg, err = a.loadConfig()
+			if err != nil {
+				return nil, err
+			}
+			resolvedDetailed, warnings = a.resolveTools(ctx, cfg, groups)
+			warnings = append(warnings, searchWarnings...)
+		} else {
+			warnings = append(warnings, searchWarnings...)
+		}
+	}
+
 	var fallbackOps []isync.SyncOp
 	resolvedDetailed, fallbackOps = a.syncNativeUnavailableFallbacks(ctx, resolvedDetailed, opts)
 	resolvedTools := make([]config.ToolEntry, 0, len(resolvedDetailed))
@@ -236,15 +255,45 @@ func (a *App) syncNativeUnavailableFallbacks(ctx context.Context, tools []resolv
 			continue
 		}
 		tool := provider.Tool{Name: entry.Name, Provider: entry.Provider, Package: entry.EffectivePackage(), Options: entry.Options}
-		if resolved.route.Kind == installRouteUnavailable && resolved.route.FallbackConfigured {
-			ops = append(ops, isync.SyncOp{Tool: tool, Kind: isync.OpFailed, Err: errors.New(installRouteUnavailableMessage(entry.Name, resolved.route))})
-			continue
-		}
+		// Capture the original route kind before any promotion so the RetryFailed
+		// guard below can distinguish a tool that genuinely came in as
+		// installRouteFallbackEligible (and should respect RetryFailed) from one
+		// that was just promoted from installRouteUnavailable (and must not be sent
+		// back to the native syncer, which cannot install it).
+		originalRouteKind := resolved.route.Kind
 		if resolved.route.Kind == installRouteUnavailable {
-			filtered = append(filtered, resolved)
-			continue
+			// When every skip is provider-unavailable and a fallback is
+			// configured, treat the tool as fallback-eligible rather than
+			// immediately failing. This covers the case where a tool spec lists
+			// only a provider that is absent on the current platform (e.g. brew
+			// on Linux) and no available native provider was found by search.
+			if resolved.route.FallbackConfigured && allInstallRouteSkipsAreProviderUnavailable(resolved.route.Skipped, len(resolved.route.Skipped)) {
+				// Fall through to the fallback handling below by rewriting the
+				// route kind in our local copy so the subsequent code can handle it.
+				resolved = resolvedTool{
+					entry:       resolved.entry,
+					memberships: resolved.memberships,
+					taps:        resolved.taps,
+					route: installRoute{
+						Kind:               installRouteFallbackEligible,
+						Install:            resolved.route.Install,
+						Skipped:            resolved.route.Skipped,
+						FallbackConfigured: true,
+					},
+				}
+			} else if resolved.route.FallbackConfigured {
+				ops = append(ops, isync.SyncOp{Tool: tool, Kind: isync.OpFailed, Err: errors.New(installRouteUnavailableMessage(entry.Name, resolved.route))})
+				continue
+			} else {
+				filtered = append(filtered, resolved)
+				continue
+			}
 		}
-		if opts.RetryFailed && !a.cachedFailureExists(ctx, entry) {
+		// RetryFailed sends fallback-eligible tools back to the native syncer so
+		// they get a fresh attempt. Skip this for tools promoted from
+		// installRouteUnavailable: their configured providers are absent on this
+		// system, so the native syncer cannot help them regardless of retry state.
+		if opts.RetryFailed && originalRouteKind != installRouteUnavailable && !a.cachedFailureExists(ctx, entry) {
 			filtered = append(filtered, resolved)
 			continue
 		}
@@ -1882,4 +1931,156 @@ func (a *App) ResetCache(ctx context.Context) error {
 	}
 	a.db = db
 	return nil
+}
+
+// addProviderSearchForUnavailableTools searches available providers for
+// high-confidence matches for tools whose every configured provider is
+// unavailable on the current host. It is called during Sync after the initial
+// addMissingProviderMatchesForGroups pass (which only searches tools with no
+// providers configured at all). This handles the codex-on-Linux shape where
+// the tool spec has exactly one provider (brew) that is absent, but another
+// provider (node/npm) can supply the same package.
+//
+// Returns (searched bool, warnings []string). searched is true when at least
+// one tool had a high-confidence alternative found and persisted, signalling
+// that the caller should reload config and re-resolve before continuing.
+func (a *App) addProviderSearchForUnavailableTools(
+	ctx context.Context,
+	cfg *config.RootConfig,
+	groups []*config.GroupConfig,
+	resolved []resolvedTool,
+	providerFilter string,
+	progress func(string),
+) (bool, []string) {
+	if cfg == nil {
+		return false, nil
+	}
+
+	// Build a name set of tools that are resolved as provider-unavailable with
+	// all configured providers unavailable (not package-unavailable).
+	unavailableNames := make(map[string]struct{})
+	for _, rt := range resolved {
+		if rt.route.Kind != installRouteUnavailable {
+			continue
+		}
+		skips := rt.route.Skipped
+		if len(skips) == 0 {
+			continue
+		}
+		if !allInstallRouteSkipsAreProviderUnavailable(skips, len(skips)) {
+			continue
+		}
+		// Only act when the tool actually has configured providers (this function
+		// is the complement to addMissingProviderMatchesForGroups, not a
+		// replacement for it).
+		spec, ok := cfg.Tools[rt.entry.Name]
+		if !ok || len(spec.Providers) == 0 {
+			continue
+		}
+		unavailableNames[rt.entry.Name] = struct{}{}
+	}
+	if len(unavailableNames) == 0 {
+		return false, nil
+	}
+
+	// Deduplicate across group memberships so each tool is searched once.
+	var warnings []string
+	searched := false
+	seen := make(map[string]struct{})
+	for _, group := range groups {
+		if group == nil {
+			continue
+		}
+		for _, tool := range group.Tools {
+			name := strings.TrimSpace(tool.Name)
+			if name == "" {
+				continue
+			}
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			if _, ok := unavailableNames[name]; !ok {
+				continue
+			}
+			// Skip if a recent search already found nothing (TTL-guarded).
+			if a.recentProviderSearchMiss(ctx, name) {
+				continue
+			}
+			spec, ok := cfg.Tools[name]
+			if !ok {
+				continue
+			}
+			// Report which providers were skipped so the user understands why
+			// we are attempting a broader search (I5).
+			if progress != nil {
+				skippedProviders := make([]string, 0, len(spec.Providers))
+				for _, p := range spec.Providers {
+					skippedProviders = append(skippedProviders, p.Provider)
+				}
+				progress(fmt.Sprintf("provider unavailable for %s (%s); searching available providers…",
+					name, strings.Join(skippedProviders, ", ")))
+			}
+			matches, matchErr := a.ProviderMatches(ctx, name, spec, providerFilter)
+			if matchErr != nil {
+				warnings = append(warnings, fmt.Sprintf("provider search for %s: %v", name, matchErr))
+				a.recordProviderSearchMiss(ctx, name)
+				continue
+			}
+			// Only persist high-confidence matches (A4: no weak matches silently).
+			var highConf []config.ToolInstallSpec
+			for _, m := range matches {
+				if m.Confidence == ProviderMatchHigh {
+					highConf = append(highConf, config.ToolInstallSpec{
+						Provider: m.Provider,
+						Package:  m.Name,
+						Options:  cloneOptionMap(m.Options),
+					})
+				}
+			}
+			if len(highConf) == 0 {
+				a.recordProviderSearchMiss(ctx, name)
+				continue
+			}
+			// Persist the alternative providers in priority order (I2). Prepend
+			// them as additional candidates so that: (a) the existing configured
+			// providers are preserved in the spec (they may become available on a
+			// future run), (b) the available alternatives are tried first on this
+			// host.
+			if err := a.withConfig(func(c *config.RootConfig) error {
+				s, ok := c.Tools[name]
+				if !ok {
+					return fmt.Errorf("tool %q not found", name)
+				}
+				// Avoid duplicates: only add candidates not already present.
+				existing := make(map[string]struct{}, len(s.Providers))
+				for _, p := range s.Providers {
+					existing[p.Provider] = struct{}{}
+				}
+				newProviders := make([]config.ToolInstallSpec, 0, len(highConf)+len(s.Providers))
+				for _, hc := range highConf {
+					if _, dup := existing[hc.Provider]; !dup {
+						newProviders = append(newProviders, hc)
+					}
+				}
+				s.Providers = append(newProviders, s.Providers...)
+				c.Tools[name] = s
+				return nil
+			}); err != nil {
+				warnings = append(warnings, fmt.Sprintf("persisting provider search result for %s: %v", name, err))
+				continue
+			}
+			a.clearProviderSearchMiss(ctx, name)
+			searched = true
+			if progress != nil {
+				parts := make([]string, 0, len(highConf))
+				for _, hc := range highConf {
+					parts = append(parts, hc.Provider+"/"+hc.EffectivePackage(name))
+				}
+				progress(fmt.Sprintf("found alternative provider for %s: %s",
+					name, strings.Join(parts, ", ")))
+			}
+		}
+	}
+	return searched, warnings
 }

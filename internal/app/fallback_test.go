@@ -561,10 +561,18 @@ func TestSync_SkipsUnsupportedFallbackWhenNativePackageUnavailable(t *testing.T)
 	}
 }
 
-func TestSync_DoesNotUseFallbackWhenProviderUnavailable(t *testing.T) {
+// TestSync_UsesFallbackWhenProviderUnavailableAndNoNativeAlternative verifies
+// HCL-22 acceptance criterion A3: when all configured providers are unavailable
+// AND no native provider search finds a high-confidence alternative, a usable
+// configured Git/GitHub fallback is attempted as the last resort.
+func TestSync_UsesFallbackWhenProviderUnavailableAndNoNativeAlternative(t *testing.T) {
 	ctx := context.Background()
+	// apt is unavailable; no other provider is registered to find alternatives.
 	apt := &stubProvider{name: "apt", available: false}
-	fallbackExec := executor.NewMatchMock().WithFallback(executor.MockCall{})
+	fallbackExec := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "sh -c install rg", Response: executor.MockCall{}},
+		executor.MatchRule{Pattern: "sh -c command -v rg", Response: executor.MockCall{}},
+	).WithFallback(executor.MockCall{Err: errors.New("unexpected fallback command")})
 	a, cfgPath := newImportApp(t, apt)
 	a.SetFallbackExecutor(fallbackExec)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -587,29 +595,16 @@ func TestSync_DoesNotUseFallbackWhenProviderUnavailable(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
-	if err := a.DB().UpsertPackageAvailability(ctx, database.PackageAvailability{
-		Name:      "rg",
-		Provider:  "apt",
-		Package:   "ripgrep",
-		Available: false,
-		Reason:    "no apt candidate",
-	}); err != nil {
-		t.Fatalf("seed apt package availability: %v", err)
-	}
 
 	result, err := a.Sync(ctx, isync.SyncOptions{})
 	if err != nil {
 		t.Fatalf("Sync: %v", err)
 	}
 
-	if fallbackExec.CallCount() != 0 {
-		t.Fatalf("fallback command count = %d, want no fallback when provider is unavailable", fallbackExec.CallCount())
-	}
-	if installed := result.Installed(); len(installed) != 0 {
-		t.Fatalf("installed ops = %+v, want no fallback install", installed)
-	}
-	if failed := result.Failed(); len(failed) != 1 || failed[0].Tool.Name != "rg" {
-		t.Fatalf("failed ops = %+v, want provider unavailable failure for rg", failed)
+	// With HCL-22: fallback IS attempted as last resort after provider-unavailable
+	// + no native search alternatives. The fallback install+check commands run.
+	if fallbackExec.CallCount() == 0 {
+		t.Errorf("fallback was not attempted; ops = %+v", result.Ops)
 	}
 }
 
