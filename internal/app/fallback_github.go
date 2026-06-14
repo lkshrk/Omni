@@ -230,7 +230,7 @@ func githubReleaseAssetIgnored(name string) bool {
 }
 
 func githubAssetExtractable(name string) bool {
-	for _, suffix := range []string{".tar.gz", ".tgz", ".zip"} {
+	for _, suffix := range []string{".tar.gz", ".tgz", ".tar.xz", ".zip"} {
 		if strings.HasSuffix(name, suffix) {
 			return true
 		}
