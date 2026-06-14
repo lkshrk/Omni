@@ -631,6 +631,11 @@ func automaticFallbackUsable(fallback *config.FallbackSpec, allowFailed bool) bo
 	case config.FallbackStatusUnresolved, config.FallbackStatusUnsupported:
 		return false
 	}
+	// Native GitHub release asset recipes use the Go pipeline; they do not
+	// require a shell install command to be usable.
+	if isNativeGitHubRecipe(fallback) {
+		return true
+	}
 	return strings.TrimSpace(fallback.Commands.Install) != "" && strings.TrimSpace(fallback.Commands.Check) != ""
 }
 

@@ -264,11 +264,14 @@ func (a *App) fetchGitHubReleaseByTag(ctx context.Context, owner, repo, tagName 
 }
 
 // isChecksumAsset reports whether a (lowercased) filename is a recognised
-// SHA-256 checksums asset.
+// SHA-256 checksums asset. Matches the common patterns used by Go, Rust, and
+// other release tooling: SHA256SUMS, *_checksums.txt, *.sha256sum(s).
 func isChecksumAsset(name string) bool {
 	return name == "sha256sums" ||
 		name == "sha256sums.txt" ||
+		name == "checksums.txt" ||
 		strings.HasSuffix(name, "_checksums.txt") ||
+		strings.HasSuffix(name, "-checksums.txt") ||
 		strings.HasSuffix(name, ".sha256sum") ||
 		strings.HasSuffix(name, ".sha256sums")
 }

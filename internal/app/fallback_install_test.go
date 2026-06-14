@@ -73,10 +73,10 @@ func (s *stubGitHubServer) serve(t *testing.T) *httptest.Server {
 				{"id": 1, "name": s.assetName, "browser_download_url": "http://" + r.Host + "/asset/" + s.assetName},
 			}
 			writeJSON(w, map[string]any{
-				"id":          1,
-				"tag_name":    "v1.0.0",
+				"id":           1,
+				"tag_name":     "v1.0.0",
 				"published_at": "2026-06-01T00:00:00Z",
-				"assets":      assets,
+				"assets":       assets,
 			})
 
 		case strings.HasPrefix(r.URL.Path, "/asset/"):
@@ -116,9 +116,9 @@ func buildTarGz(t *testing.T, entryName string, content []byte) []byte {
 	gw := gzip.NewWriter(&stringWriter{&buf})
 	tw := tar.NewWriter(gw)
 	tw.WriteHeader(&tar.Header{Name: entryName, Mode: 0o755, Size: int64(len(content))}) //nolint:errcheck
-	tw.Write(content)                                                                      //nolint:errcheck
-	tw.Close()                                                                             //nolint:errcheck
-	gw.Close()                                                                             //nolint:errcheck
+	tw.Write(content)                                                                    //nolint:errcheck
+	tw.Close()                                                                           //nolint:errcheck
+	gw.Close()                                                                           //nolint:errcheck
 	return []byte(buf.String())
 }
 
@@ -136,9 +136,9 @@ func buildTarXz(t *testing.T, entryName string, content []byte) []byte {
 		}
 		tw := tar.NewWriter(xw)
 		tw.WriteHeader(&tar.Header{Name: entryName, Mode: 0o755, Size: int64(len(content))}) //nolint:errcheck
-		tw.Write(content)                                                                      //nolint:errcheck
-		tw.Close()                                                                             //nolint:errcheck
-		xw.Close()                                                                             //nolint:errcheck
+		tw.Write(content)                                                                    //nolint:errcheck
+		tw.Close()                                                                           //nolint:errcheck
+		xw.Close()                                                                           //nolint:errcheck
 		pw.Close()
 		errCh <- nil
 	}()
