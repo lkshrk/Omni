@@ -4,21 +4,11 @@ import (
 	"fmt"
 	"strings"
 
-	"charm.land/lipgloss/v2"
-
 	"github.com/lkshrk/omni/internal/app"
 )
 
 func dotsPeekPopupFrame(m Model) popupFrame {
-	paddingX := 2
-	contentW := dotsPeekContentWidth(m)
-	return popupFrame{
-		Title:         dotsPeekPopupTitle(m),
-		PaddingY:      1,
-		PaddingX:      paddingX,
-		Width:         popupFrameWidthForContent(contentW, paddingX),
-		ContentHeight: dotsPeekContentHeight(m),
-	}
+	return scrollPopupFrame(m, dotsPeekPopupTitle(m))
 }
 
 func dotsPeekPopupTitle(m Model) string {
@@ -42,33 +32,21 @@ func dotsPeekPopupTitleTarget(result app.DotsPeekResult) string {
 }
 
 func dotsPeekContentWidth(m Model) int {
-	return popupContentWidth(m, 96, 48, 120)
-}
-
-func dotsPeekContentHeight(m Model) int {
-	if m.height <= 0 {
-		return 24
-	}
-	return clampPopupDimension(min(m.height-8, 26), 8, max(m.height-8, 1))
+	return scrollPopupContentWidth(m)
 }
 
 func dotsPeekBodyHeight(m Model) int {
-	frame := fitPopupFrameToWindow(m, dotsPeekPopupFrame(m))
-	target := popupContentTargetHeight(m, frame)
-	footerH := lipgloss.Height(renderPickerHintItems(m, dotsPeekContentWidth(m), dotsPeekHintItems(m)))
-	return max(target-footerH, 1)
+	return scrollPopupBodyHeight(m, dotsPeekPopupTitle(m), dotsPeekHintItems(m))
 }
 
 func renderDotsPeekPopup(m Model) string {
-	width := dotsPeekContentWidth(m)
-	bodyHeight := dotsPeekBodyHeight(m)
-	lines := dotsPeekLines(m, width)
-	start := 0
+	title := dotsPeekPopupTitle(m)
+	lines := dotsPeekLines(m, dotsPeekContentWidth(m))
+	scroll := 0
 	if m.dotsPeek != nil {
-		start = clampRange(m.dotsPeek.scroll, 0, dotsPeekMaxScroll(m))
+		scroll = m.dotsPeek.scroll
 	}
-	body := strings.Join(dotsPeekVisibleLines(m.palette, lines, start, bodyHeight), "\n")
-	return renderPopupBodyWithFooterItems(m, width, bodyHeight, body, dotsPeekHintItems(m))
+	return renderScrollPopup(m, title, lines, scroll, dotsPeekHintItems(m))
 }
 
 func dotsPeekHintItems(m Model) []hintItem {
@@ -79,29 +57,7 @@ func dotsPeekHintItems(m Model) []hintItem {
 
 func dotsPeekMaxScroll(m Model) int {
 	lines := dotsPeekLines(m, dotsPeekContentWidth(m))
-	return max(len(lines)-dotsPeekBodyHeight(m), 0)
-}
-
-func dotsPeekVisibleLines(p palette, lines []string, start, height int) []string {
-	if height <= 0 {
-		return nil
-	}
-	if len(lines) == 0 {
-		return []string{""}
-	}
-	start = clampRange(start, 0, max(len(lines)-height, 0))
-	end := min(start+height, len(lines))
-	out := append([]string(nil), lines[start:end]...)
-	if len(out) == 0 {
-		out = []string{""}
-	}
-	if start > 0 {
-		out[0] = p.styleHelp.Render("...")
-	}
-	if end < len(lines) {
-		out[len(out)-1] = p.styleHelp.Render("...")
-	}
-	return out
+	return scrollPopupMaxScroll(lines, dotsPeekBodyHeight(m))
 }
 
 func dotsPeekLines(m Model, width int) []string {

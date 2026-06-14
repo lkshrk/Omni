@@ -9,34 +9,18 @@ import (
 	"github.com/lkshrk/omni/internal/database"
 )
 
+const traceLogTitle = "Command Log"
+
 func traceLogPopupFrame(m Model) popupFrame {
-	paddingX := 2
-	contentW := traceLogContentWidth(m)
-	return popupFrame{
-		Title:         "Command Log",
-		PaddingY:      1,
-		PaddingX:      paddingX,
-		Width:         popupFrameWidthForContent(contentW, paddingX),
-		ContentHeight: traceLogContentHeight(m),
-	}
+	return scrollPopupFrame(m, traceLogTitle)
 }
 
 func traceLogContentWidth(m Model) int {
-	return popupContentWidth(m, 96, 48, 120)
-}
-
-func traceLogContentHeight(m Model) int {
-	if m.height <= 0 {
-		return 24
-	}
-	return clampPopupDimension(min(m.height-8, 26), 8, max(m.height-8, 1))
+	return scrollPopupContentWidth(m)
 }
 
 func traceLogBodyHeight(m Model) int {
-	frame := fitPopupFrameToWindow(m, traceLogPopupFrame(m))
-	target := popupContentTargetHeight(m, frame)
-	footerH := lipgloss.Height(renderPickerHintItems(m, traceLogContentWidth(m), traceLogHintItems(m)))
-	return max(target-footerH, 1)
+	return scrollPopupBodyHeight(m, traceLogTitle, traceLogHintItems(m))
 }
 
 func traceLogHintItems(m Model) []hintItem {
@@ -47,19 +31,16 @@ func traceLogHintItems(m Model) []hintItem {
 
 func traceLogMaxScroll(m Model) int {
 	lines := traceLogLines(m, traceLogContentWidth(m))
-	return max(len(lines)-traceLogBodyHeight(m), 0)
+	return scrollPopupMaxScroll(lines, traceLogBodyHeight(m))
 }
 
 func renderTraceLogPopup(m Model) string {
-	width := traceLogContentWidth(m)
-	bodyHeight := traceLogBodyHeight(m)
-	lines := traceLogLines(m, width)
-	start := 0
+	lines := traceLogLines(m, traceLogContentWidth(m))
+	scroll := 0
 	if m.traceLog != nil {
-		start = clampRange(m.traceLog.scroll, 0, traceLogMaxScroll(m))
+		scroll = m.traceLog.scroll
 	}
-	body := strings.Join(dotsPeekVisibleLines(m.palette, lines, start, bodyHeight), "\n")
-	return renderPopupBodyWithFooterItems(m, width, bodyHeight, body, traceLogHintItems(m))
+	return renderScrollPopup(m, traceLogTitle, lines, scroll, traceLogHintItems(m))
 }
 
 func traceLogLines(m Model, width int) []string {
