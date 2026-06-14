@@ -231,6 +231,11 @@ func Open(path string) (*DB, error) {
 	if _, err := sqlDB.ExecContext(context.Background(), "PRAGMA journal_mode=WAL"); err != nil {
 		return nil, fmt.Errorf("enabling WAL mode: %w", err)
 	}
+	// Retry for up to 5 s before returning SQLITE_BUSY; avoids transient
+	// contention errors during WAL checkpoints with concurrent readers.
+	if _, err := sqlDB.ExecContext(context.Background(), "PRAGMA busy_timeout=5000"); err != nil {
+		return nil, fmt.Errorf("setting busy_timeout: %w", err)
+	}
 
 	bunDB := bun.NewDB(sqlDB, sqlitedialect.New())
 	return &DB{bun: bunDB}, nil
