@@ -1,0 +1,114 @@
+# A1: configured provider (apt) is unavailable on this host; sync searches available
+# providers and installs via an alternative high-confidence match (npm).
+# brew is stubbed out so the host brew does not interfere; apt has no stub so it
+# is absent from PATH, making omni treat it as provider-unavailable.
+exec chmod 755 bin/brew bin/npm
+env PATH=$WORK/bin:$PATH
+
+exec omni --config settings.json hosts ensure testhost
+exec omni-with-npm-registry --config settings.json tools sync
+stdout 'provider unavailable for prettier \(apt\); searching available providers'
+stdout 'found alternative provider for prettier: npm/prettier'
+stdout 'done: prettier \(npm\)'
+stdout 'installed: prettier \(npm\)'
+exec test -f .omni-cache/fake-npm/prettier
+
+-- bin/brew --
+#!/usr/bin/env sh
+# Stub brew: responds to --version so brew is available, but does nothing else.
+# This prevents the real Homebrew on the test host from being invoked.
+set -eu
+case "${1:-}" in
+  --version)
+    echo "Homebrew 4.0.0"
+    ;;
+  search)
+    # No results for any package so brew is never chosen as the alternative.
+    echo "No formulae or casks found for ${2:-}" >&2
+    exit 1
+    ;;
+  update|outdated)
+    ;;
+  info)
+    echo '{"formulae":[],"casks":[]}'
+    ;;
+  tap|tap-info)
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+
+-- bin/npm --
+#!/usr/bin/env sh
+set -eu
+state="${OMNI_CACHE_DIR}/fake-npm"
+mkdir -p "$state"
+case "${1:-}" in
+  --version)
+    echo "10.2.4"
+    ;;
+  install)
+    pkg=""
+    for arg in "$@"; do
+      case "$arg" in
+        install|-g)
+          ;;
+        *)
+          pkg="$arg"
+          ;;
+      esac
+    done
+    if [ -n "$pkg" ]; then
+      : > "$state/$pkg"
+      exit 0
+    fi
+    exit 1
+    ;;
+  list|ls)
+    pkg=""
+    for arg in "$@"; do
+      case "$arg" in
+        list|ls|-g|--depth=0)
+          ;;
+        *)
+          pkg="$arg"
+          ;;
+      esac
+    done
+    if [ -n "$pkg" ]; then
+      if [ -f "$state/$pkg" ]; then
+        printf '/fake\n+-- %s@1.0.0\n' "$pkg"
+        exit 0
+      fi
+      exit 1
+    fi
+    for entry in "$state"/*; do
+      [ -f "$entry" ] || continue
+      printf '+-- %s@1.0.0\n' "$(basename "$entry")"
+    done
+    exit 0
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+
+-- settings.json --
+{
+  "version": 7,
+  "settings": {
+    "provider_priority": ["npm", "brew"],
+    "disabled_providers": ["bun", "pnpm", "python", "apt", "apk", "dnf", "pacman", "zypper", "pip"]
+  },
+  "tools": {
+    "prettier": {
+      "providers": [{ "provider": "apt" }],
+      "git": "https://github.com/prettier/prettier"
+    }
+  },
+  "hosts": { "testhost": [] },
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": ["prettier"] }
+  ]
+}
