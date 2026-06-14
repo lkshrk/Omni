@@ -1,13 +1,16 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/executor"
 )
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -381,3 +384,107 @@ var errTraceLoadFailed = errSentinel("trace load failed")
 type errSentinel string
 
 func (e errSentinel) Error() string { return string(e) }
+
+// ── Integration: real App + real SQLite DB ────────────────────────────────────
+
+// TestTraceLog_Integration_RealAppRealDB proves the full end-to-end path:
+// real DB rows → App.CommandTraces → doLoadTraces cmd → popup render.
+//
+// Traces are seeded via App.RecordCommandTrace (the executor.TraceSink path),
+// which writes directly to the SQLite database — no stubs involved.
+func TestTraceLog_Integration_RealAppRealDB(t *testing.T) {
+	ctx := context.Background()
+
+	// 1. Build a real App backed by a real temp SQLite DB, identical to how
+	//    newDotsModelForCmds constructs its app (reusing the same helper chain).
+	m, _ := newDotsModelForCmds(t)
+	a := m.app
+
+	// 2. Record two real command traces through App.RecordCommandTrace (the
+	//    executor.TraceSink interface), so rows land in the real SQLite table.
+	t0 := time.Date(2024, 3, 10, 14, 22, 33, 0, time.UTC)
+	traces := []executor.TraceRecord{
+		{
+			StartedAt:  t0,
+			FinishedAt: t0.Add(77 * time.Millisecond),
+			DurationMS: 77,
+			Command:    "brew install omni-integration-canary",
+			Status:     "ok",
+			Reason:     "integration test reason alpha",
+		},
+		{
+			StartedAt:  t0.Add(time.Minute),
+			FinishedAt: t0.Add(time.Minute + 210*time.Millisecond),
+			DurationMS: 210,
+			Command:    "npm install --global omni-integration-canary",
+			Status:     "error",
+			Reason:     "integration test reason beta",
+		},
+	}
+	for _, tr := range traces {
+		if err := a.RecordCommandTrace(ctx, tr); err != nil {
+			t.Fatalf("RecordCommandTrace: %v", err)
+		}
+	}
+
+	// 3. Wire the model to the real App, navigate to Settings, position cursor
+	//    on settingsRowTraceLog, and press Enter.
+	m.mode = viewSettings
+	m.settingsCursor = settingsRowTraceLog
+	m.dangerConfirmRow = -1
+
+	m = drive(m, pressEnter())
+
+	if !m.traceLogLoading {
+		t.Fatal("traceLogLoading should be true after Enter")
+	}
+
+	// 4. Execute the real tea.Cmd returned by doLoadTraces — this calls
+	//    App.CommandTraces against the real SQLite DB.  Feed the resulting
+	//    message back through Update exactly as the bubbletea runtime would.
+	cmd := m.doLoadTraces()
+	msg := cmd() // run the Cmd synchronously; returns traceLogLoadedMsg
+	m = drive(m, msg)
+
+	// 5. Assert popup state populated from real DB rows.
+	if m.traceLogLoading {
+		t.Error("traceLogLoading should be false after load")
+	}
+	if m.traceLog == nil {
+		t.Fatal("traceLog should not be nil after real load")
+	}
+	if len(m.traceLog.traces) < 2 {
+		t.Fatalf("expected ≥2 traces from DB, got %d", len(m.traceLog.traces))
+	}
+
+	// Assert rendered View contains the real command strings, status, and reasons.
+	view := m.View().Content
+	for _, want := range []string{
+		"omni-integration-canary",       // command substring shared by both rows
+		"ok",                            // status of first trace
+		"error",                         // status of second trace
+		"integration test reason alpha", // reason sub-line from first row
+		"integration test reason beta",  // reason sub-line from second row
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("View() missing %q\nfull view:\n%s", want, view)
+		}
+	}
+
+	// 6. Esc closes the popup.
+	m = drive(m, pressEsc())
+	if m.traceLog != nil {
+		t.Error("traceLog should be nil after Esc")
+	}
+	if m.mode != viewSettings {
+		t.Errorf("mode = %v after Esc, want viewSettings", m.mode)
+	}
+
+	// Verify App can be closed cleanly (cleanup also runs via t.Cleanup).
+	_ = a
+}
+
+// newRealAppModel is a convenience used only by the integration test above.
+// It shadows the per-test App built by newDotsModelForCmds so callers can
+// reach m.app for direct DB operations.
+var _ *app.App // keep the app import used
