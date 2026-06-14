@@ -58,7 +58,7 @@ func makeBin(t *testing.T, binName string) {
 		t.Fatalf("makeBin %s: %v", binName, err)
 	}
 	old := os.Getenv("PATH")
-	t.Setenv("PATH", dir+":"+old)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+old)
 }
 
 func TestRefreshInstalled_PathDetection_ProviderUnavailable(t *testing.T) {
@@ -262,7 +262,7 @@ func TestRefreshInstalled_PathDetection_StaleRowCleared(t *testing.T) {
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatalf("write bin: %v", err)
 	}
-	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	brew := &stubProvider{name: "brew", available: false}
 	a, cfgPath := newImportApp(t, brew)
@@ -309,7 +309,7 @@ func TestRefreshProviderInstalled_PathDetection_StaleRowCleared(t *testing.T) {
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatalf("write bin: %v", err)
 	}
-	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	brew := &stubProvider{name: "brew", available: false}
 	a, cfgPath := newImportApp(t, brew)
