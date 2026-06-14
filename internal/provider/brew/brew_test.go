@@ -800,6 +800,49 @@ func TestInstalledMetadataMap_UntrustedTapFormulaHiddenFromInfo(t *testing.T) {
 	if got["ripgrep"].Version != "14.1.1" {
 		t.Errorf("ripgrep version = %q, want 14.1.1 (info metadata preserved)", got["ripgrep"].Version)
 	}
+	if got["flux"].ArtifactKind != "formula" {
+		t.Errorf("flux ArtifactKind = %q, want formula (union entries are formulae)", got["flux"].ArtifactKind)
+	}
+}
+
+func TestInstalledMetadataMap_ListFormulaErrorIsBestEffort(t *testing.T) {
+	// `brew list --versions --formula` failing must not fail the whole scan:
+	// the brew info result is still returned, with no error.
+	installedInfo := `{"formulae":[` +
+		`{"name":"ripgrep","full_name":"ripgrep","installed":[{"version":"14.1.1","installed_on_request":true}]}` +
+		`],"casks":[]}`
+	p, _ := newBrew(
+		executor.MockCall{Stdout: installedInfo},
+		executor.MockCall{},
+		executor.MockCall{Err: errors.New("exit 1")},
+	)
+	got, err := p.InstalledMetadataMap(context.Background())
+	if err != nil {
+		t.Fatalf("InstalledMetadataMap should degrade gracefully, got error: %v", err)
+	}
+	if got["ripgrep"].Version != "14.1.1" {
+		t.Errorf("ripgrep missing after best-effort list failure: %+v", got)
+	}
+}
+
+func TestInstalledMetadataMap_RejectsMalformedFormulaName(t *testing.T) {
+	// A garbage/control-char name from brew list output must not become a key.
+	installedInfo := `{"formulae":[],"casks":[]}`
+	p, _ := newBrew(
+		executor.MockCall{Stdout: installedInfo},
+		executor.MockCall{},
+		executor.MockCall{Stdout: "good-tool 1.0.0\nbad!!name 2.0.0\n"},
+	)
+	got, err := p.InstalledMetadataMap(context.Background())
+	if err != nil {
+		t.Fatalf("InstalledMetadataMap: %v", err)
+	}
+	if _, ok := got["good-tool"]; !ok {
+		t.Errorf("valid formula name dropped: %+v", got)
+	}
+	if _, ok := got["bad!!name"]; ok {
+		t.Errorf("malformed formula name must be rejected: %+v", got)
+	}
 }
 
 func TestInstalledMetadataMap_ExcludesTransitiveDepKnownToInfo(t *testing.T) {

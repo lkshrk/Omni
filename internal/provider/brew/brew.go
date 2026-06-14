@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/lkshrk/omni/internal/executor"
 	"github.com/lkshrk/omni/internal/provider"
@@ -478,7 +479,7 @@ func (p *Provider) InstalledMetadataMap(ctx context.Context) (map[string]provide
 			continue
 		}
 		name := strings.ToLower(formulaName(fields[0]))
-		if name == "" {
+		if !validBrewFormulaName(name) {
 			continue
 		}
 		if _, ok := metadata[name]; ok {
@@ -493,7 +494,7 @@ func (p *Provider) InstalledMetadataMap(ctx context.Context) (map[string]provide
 		if len(fields) > 1 {
 			version = strings.Join(fields[1:], " ")
 		}
-		metadata[name] = provider.InstalledMetadata{Version: version}
+		metadata[name] = provider.InstalledMetadata{Version: version, ArtifactKind: brewKindFormula}
 	}
 
 	return metadata, nil
@@ -981,6 +982,27 @@ func formulaName(pkg string) string {
 		return pkg[i+1:]
 	}
 	return pkg
+}
+
+// validBrewFormulaName guards names parsed from `brew list` output before they
+// become metadata map keys, rejecting empty, over-long, or control/garbage
+// names so malformed output can't shadow a real formula or poison the cache.
+func validBrewFormulaName(name string) bool {
+	if name == "" || len(name) > 256 {
+		return false
+	}
+	for _, r := range name {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			continue
+		}
+		switch r {
+		case '-', '_', '.', '+', '@':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // parseBrewVersion extracts the installed version from `brew list --versions` output.
