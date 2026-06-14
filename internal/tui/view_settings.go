@@ -31,10 +31,10 @@ const (
 	settingsRowDotsCommit
 	settingsRowDotsPush
 	settingsRowDoctor
+	settingsRowTraceLog
 	settingsRowBootstrap
 	settingsRowResetSettings
 	settingsRowResetCache
-	settingsRowTraceLog
 	settingsRowCount
 )
 
