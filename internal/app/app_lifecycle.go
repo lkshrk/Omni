@@ -255,6 +255,12 @@ func (a *App) syncNativeUnavailableFallbacks(ctx context.Context, tools []resolv
 			continue
 		}
 		tool := provider.Tool{Name: entry.Name, Provider: entry.Provider, Package: entry.EffectivePackage(), Options: entry.Options}
+		// Capture the original route kind before any promotion so the RetryFailed
+		// guard below can distinguish a tool that genuinely came in as
+		// installRouteFallbackEligible (and should respect RetryFailed) from one
+		// that was just promoted from installRouteUnavailable (and must not be sent
+		// back to the native syncer, which cannot install it).
+		originalRouteKind := resolved.route.Kind
 		if resolved.route.Kind == installRouteUnavailable {
 			// When every skip is provider-unavailable and a fallback is
 			// configured, treat the tool as fallback-eligible rather than
@@ -283,7 +289,11 @@ func (a *App) syncNativeUnavailableFallbacks(ctx context.Context, tools []resolv
 				continue
 			}
 		}
-		if opts.RetryFailed && !a.cachedFailureExists(ctx, entry) {
+		// RetryFailed sends fallback-eligible tools back to the native syncer so
+		// they get a fresh attempt. Skip this for tools promoted from
+		// installRouteUnavailable: their configured providers are absent on this
+		// system, so the native syncer cannot help them regardless of retry state.
+		if opts.RetryFailed && originalRouteKind != installRouteUnavailable && !a.cachedFailureExists(ctx, entry) {
 			filtered = append(filtered, resolved)
 			continue
 		}

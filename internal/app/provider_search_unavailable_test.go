@@ -223,7 +223,6 @@ func TestSync_UnavailableProvider_FallbackLastResort(t *testing.T) {
 		available:     true,
 		searchResults: nil, // no matches
 	}
-	_ = apt
 
 	var fallbackInstalled bool
 	exec := &recordingFallbackExecutor{onInstall: func() { fallbackInstalled = true }}
@@ -260,25 +259,20 @@ func TestSync_UnavailableProvider_FallbackLastResort(t *testing.T) {
 		t.Fatalf("Sync: %v", err)
 	}
 
-	// Expect fallback to have been attempted (OpInstall via fallback path).
-	var fallbackOp bool
-	for _, op := range result.Ops {
-		if op.Tool.Name == "mytool" && op.Kind == isync.OpInstall {
-			fallbackOp = true
-		}
+	// Positive assertion: the recordingFallbackExecutor must have been called,
+	// proving the fallback install command actually ran (not just reached the
+	// fallback-eligible branch). This catches regressions where the tool is
+	// routed back to the native syncer or given up on silently.
+	if !fallbackInstalled {
+		t.Errorf("fallback executor was never called for mytool; ops = %+v", result.Ops)
 	}
-	// The fallback executor returns an error if it is called, so we see OpFailed
-	// OR OpInstall depending on implementation; but either way fallback was tried
-	// (not silently skipped as OpFailed with "provider unavailable").
-	_ = fallbackOp
-	_ = fallbackInstalled
 
-	// Core assertion: the result must not contain a raw "no install route" failure
-	// that indicates the tool was skipped without trying fallback.
+	// Secondary: no op for mytool should carry a native-route error, which would
+	// indicate the tool was skipped without even attempting the fallback.
 	for _, op := range result.Ops {
 		if op.Tool.Name == "mytool" && op.Kind == isync.OpFailed {
-			if op.Err != nil && isNoNativeRouteError(op.Err) && !fallbackInstalled {
-				t.Errorf("mytool was skipped with native-unavailable error without attempting fallback: %v", op.Err)
+			if op.Err != nil && isNoNativeRouteError(op.Err) {
+				t.Errorf("mytool op carries native-unavailable error (fallback was not attempted): %v", op.Err)
 			}
 		}
 	}
