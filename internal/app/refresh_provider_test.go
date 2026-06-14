@@ -1106,22 +1106,48 @@ func (d *delayBulkStub) InstalledMap(_ context.Context) (map[string]string, erro
 	return d.bulk, nil
 }
 
+// delayConcreteStub is a BulkChecker + ConcreteResolver that sleeps before
+// returning. It exercises the resolvedConcrete read path inside the parallel
+// goroutines, which is guarded by rcMu and must be race-free.
+type delayConcreteStub struct {
+	stubProvider
+	bulk         map[string]string
+	delay        time.Duration
+	concreteName string
+}
+
+func (d *delayConcreteStub) InstalledMap(_ context.Context) (map[string]string, error) {
+	time.Sleep(d.delay)
+	return d.bulk, nil
+}
+
+func (d *delayConcreteStub) ResolvedName(_ context.Context) (string, error) {
+	return d.concreteName, nil
+}
+
 // TestRefreshInstalled_BulkScansRunConcurrently verifies that RefreshInstalled
 // fans out independent provider bulk scans in parallel. Two providers each
 // sleep for `delay`; serial execution takes ≥ 2×delay, parallel takes ~1×delay.
 // The threshold is 1.8×delay to give headroom on slow CI.
+//
+// One provider implements ConcreteResolver so the resolvedConcrete read path
+// inside the parallel goroutines (guarded by rcMu) is exercised under -race.
 func TestRefreshInstalled_BulkScansRunConcurrently(t *testing.T) {
 	const delay = 50 * time.Millisecond
 
+	// provA implements BulkChecker only.
 	provA := &delayBulkStub{
 		stubProvider: stubProvider{name: "prov-a", available: true},
 		bulk:         map[string]string{"tool-a": "1.0"},
 		delay:        delay,
 	}
-	provB := &delayBulkStub{
+	// provB implements BulkChecker + ConcreteResolver — exercises the
+	// scanProgress.resolvedProviderName read under rcMu in the goroutine.
+	provB := &delayConcreteStub{
 		stubProvider: stubProvider{name: "prov-b", available: true},
 		bulk:         map[string]string{"tool-b": "2.0"},
 		delay:        delay,
+		concreteName: "prov-b-concrete",
 	}
 
 	a, cfgPath := newImportApp(t, provA, provB)
