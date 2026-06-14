@@ -1,4 +1,4 @@
-shared_config:
-  enabled: true
-  repository: "lkshrk/woodpecker-ops"
-  file: ".coderabbit.yaml"
+remote_config:
+  repository: "my-org/shared-configs"
+  ref: "main"
+  path: ".shared-coderabbit.yaml"
