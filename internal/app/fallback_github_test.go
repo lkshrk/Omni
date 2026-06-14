@@ -425,6 +425,29 @@ func TestGitHubFallbackLiveAPI_ResolvesLatestRelease(t *testing.T) {
 	}
 }
 
+func TestFetchLatestGitHubRelease_RejectsInvalidAPIBaseEnv(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name string
+		base string
+	}{
+		{name: "http scheme", base: "http://api.github.com"},
+		{name: "non-github host", base: "https://evil.example.com"},
+		{name: "not a URL", base: "not-a-url"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("OMNI_GITHUB_API_BASE", tc.base)
+			a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+			// No SetGitHubFallbackAPIForTest so the env var path is exercised.
+			_ = cfgPath
+			if err := a.SaveToolFallbackFromGitHub(ctx, "gh", "cli/cli"); err == nil {
+				t.Fatalf("SaveToolFallbackFromGitHub with OMNI_GITHUB_API_BASE=%q: err = nil, want validation error", tc.base)
+			}
+		})
+	}
+}
+
 func liveGitHubLatestReleaseStatus(ctx context.Context, owner, repo string) (int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/"+owner+"/"+repo+"/releases/latest", nil)
 	if err != nil {

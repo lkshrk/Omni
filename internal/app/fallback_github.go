@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"runtime"
@@ -90,10 +91,10 @@ func (a *App) resolveGitHubFallback(ctx context.Context, name, owner, repoName s
 		},
 		Commands: config.FallbackCommands{
 			Install:   githubReleaseAssetInstallCommand(asset.BrowserDownloadURL),
-			Check:     `test -x "{{bin_dir}}/{{binary}}"`,
-			Uninstall: `rm -f "{{bin_dir}}/{{binary}}"`,
+			Check:     `test -x {{bin_dir}}/{{binary}}`,
+			Uninstall: `rm -f {{bin_dir}}/{{binary}}`,
 			Upgrade:   githubReleaseAssetInstallCommand(asset.BrowserDownloadURL),
-			Version:   `"{{bin_dir}}/{{binary}}" --version`,
+			Version:   `{{bin_dir}}/{{binary}} --version`,
 		},
 	}, true, nil
 }
@@ -105,18 +106,35 @@ func (a *App) fetchLatestGitHubRelease(ctx context.Context, owner, repoName stri
 	}
 	baseURL := strings.TrimRight(a.githubAPI, "/")
 	if baseURL == "" {
-		baseURL = strings.TrimRight(os.Getenv("OMNI_GITHUB_API_BASE"), "/")
+		envBase := strings.TrimRight(os.Getenv("OMNI_GITHUB_API_BASE"), "/")
+		if envBase != "" {
+			// Validate the env override: must be HTTPS and must point at a
+			// github.com host so we never send the Authorization token to an
+			// arbitrary server.
+			parsed, parseErr := url.Parse(envBase)
+			if parseErr != nil || parsed.Scheme != "https" ||
+				!isGitHubHost(parsed.Host) {
+				return githubRelease{}, fmt.Errorf(
+					"OMNI_GITHUB_API_BASE %q is invalid: must be an https://api.github.com URL",
+					envBase,
+				)
+			}
+			baseURL = envBase
+		}
 	}
 	if baseURL == "" {
 		baseURL = defaultGitHubAPIBase
 	}
-	url := baseURL + "/repos/" + owner + "/" + repoName + "/releases/latest"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	apiURL := baseURL + "/repos/" + owner + "/" + repoName + "/releases/latest"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
 		return githubRelease{}, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "omni")
+	// The token is sent whenever the base URL is a known GitHub host (guaranteed
+	// by the validation above for env overrides) or via the programmatic test
+	// override (SetGitHubFallbackAPIForTest, in-process only).
 	if token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN")); token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -263,16 +281,40 @@ func containsAny(s string, needles []string) bool {
 	return false
 }
 
+// isGitHubHost reports whether host is a recognized GitHub API hostname,
+// ensuring we only send auth tokens to GitHub's own servers.
+func isGitHubHost(host string) bool {
+	host = strings.ToLower(host)
+	return host == "api.github.com" || host == "github.com"
+}
+
+// shellSingleQuote wraps s in single quotes so it is treated as a literal
+// value by sh -c, regardless of special characters it may contain.
+func shellSingleQuote(s string) string {
+	// Replace every ' with '\'' (close quote, literal single-quote, reopen quote).
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 func githubReleaseAssetInstallCommand(downloadURL string) string {
 	assetName := path.Base(downloadURL)
 	if strings.TrimSpace(assetName) == "" || assetName == "." || assetName == "/" {
-		assetName = "{{asset_path}}"
+		// Fall back to the template variable; quoting is applied at render time.
+		return `mkdir -p '{{cache_dir}}' '{{bin_dir}}' && ` +
+			`asset='{{cache_dir}}/{{asset_path}}' && ` +
+			`curl -fsSL '{{asset_path}}' -o "$asset" && ` +
+			`tmp="$(mktemp -d)" && ` +
+			`case "$asset" in *.zip) unzip -q "$asset" -d "$tmp" ;; *.tar.gz|*.tgz) tar -xzf "$asset" -C "$tmp" ;; *) cp "$asset" "$tmp/"'{{binary}}' ;; esac && ` +
+			`found="$(find "$tmp" -type f -perm -111 -name '{{binary}}' | head -n 1)" && ` +
+			`test -n "$found" && cp "$found" '{{bin_dir}}'/'{{binary}}' && chmod +x '{{bin_dir}}'/'{{binary}}'`
 	}
-	return `mkdir -p "{{cache_dir}}" "{{bin_dir}}" && ` +
-		`asset="{{cache_dir}}/` + assetName + `" && ` +
-		`curl -fsSL "` + downloadURL + `" -o "$asset" && ` +
+	// Both downloadURL (from GitHub API browser_download_url) and assetName
+	// (derived from it via path.Base) are shell-quoted so a malicious or
+	// compromised release URL cannot inject shell commands.
+	return `mkdir -p '{{cache_dir}}' '{{bin_dir}}' && ` +
+		`asset='{{cache_dir}}'/` + shellSingleQuote(assetName) + ` && ` +
+		`curl -fsSL ` + shellSingleQuote(downloadURL) + ` -o "$asset" && ` +
 		`tmp="$(mktemp -d)" && ` +
-		`case "$asset" in *.zip) unzip -q "$asset" -d "$tmp" ;; *.tar.gz|*.tgz) tar -xzf "$asset" -C "$tmp" ;; *) cp "$asset" "$tmp/{{binary}}" ;; esac && ` +
-		`found="$(find "$tmp" -type f -perm -111 -name "{{binary}}" | head -n 1)" && ` +
-		`test -n "$found" && cp "$found" "{{bin_dir}}/{{binary}}" && chmod +x "{{bin_dir}}/{{binary}}"`
+		`case "$asset" in *.zip) unzip -q "$asset" -d "$tmp" ;; *.tar.gz|*.tgz) tar -xzf "$asset" -C "$tmp" ;; *) cp "$asset" "$tmp/"'{{binary}}' ;; esac && ` +
+		`found="$(find "$tmp" -type f -perm -111 -name '{{binary}}' | head -n 1)" && ` +
+		`test -n "$found" && cp "$found" '{{bin_dir}}'/'{{binary}}' && chmod +x '{{bin_dir}}'/'{{binary}}'`
 }
