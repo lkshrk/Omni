@@ -13,17 +13,14 @@ import (
 type DriftClass string
 
 const (
-	// DriftProviderUnusable means the configured provider is unavailable/unregistered
-	// on this host, the tool has no usable native or fallback route, and the tool
-	// is not present via any other means.
+	// DriftProviderUnusable means the configured provider is unavailable/unregistered,
+	// the tool has no usable native or fallback route, and the tool is not present.
 	DriftProviderUnusable DriftClass = "provider-unusable"
 
-	// DriftWrongProvider means the tool is installed by a provider that differs
-	// from the configured/pinned provider.
+	// DriftWrongProvider means the tool is installed by a different provider than configured.
 	DriftWrongProvider DriftClass = "wrong-provider"
 
-	// DriftUnavailableButPresent means the configured provider is unavailable yet
-	// the tool is present on PATH (detected by the HCL-26 PATH helpers).
+	// DriftUnavailableButPresent means the configured provider is unavailable yet the tool is present on PATH.
 	DriftUnavailableButPresent DriftClass = "unavailable-but-present"
 )
 
@@ -33,20 +30,16 @@ type DriftFinding struct {
 	Provider   string // configured provider
 	Class      DriftClass
 	Suggestion string
-	// Extra is optional context (e.g. actual installed-with value).
-	Extra string
+	Extra      string // optional context (e.g. actual installed-with value)
 }
 
-// driftReport is the raw output from doctorDrift, before being folded into
-// DoctorResult. Kept separate so unit tests can inspect findings directly.
+// driftReport is the raw output of buildDriftReport; kept separate so tests can inspect findings directly.
 type driftReport struct {
 	findings []DriftFinding
 	warnings []string // resolver warnings surfaced as detail lines
 }
 
-// doctorDrift detects config-vs-reality mismatches for all configured tools
-// and adds a "drift" check to result. It reuses the existing provider
-// availability helpers and DB cache (InstalledWith) from app_search.go.
+// doctorDrift runs drift analysis and appends the result to the doctor report.
 func (a *App) doctorDrift(ctx context.Context, result *DoctorResult, cfg *config.RootConfig) {
 	report, err := a.buildDriftReport(ctx, cfg)
 	if err != nil {
@@ -57,25 +50,19 @@ func (a *App) doctorDrift(ctx context.Context, result *DoctorResult, cfg *config
 	a.addDriftCheck(result, report)
 }
 
-// buildDriftReport performs the actual drift analysis and returns the raw
-// findings. Callers in production code should use doctorDrift; this function
-// is package-private so that tests can inspect the findings directly.
+// buildDriftReport returns the raw drift findings; package-private so tests can inspect directly.
 func (a *App) buildDriftReport(ctx context.Context, cfg *config.RootConfig) (*driftReport, error) {
-	// 1. Resolve which tools are active on this host.
-	//    Use currentResolvedTools (not currentResolvedToolEntries) so we get the
-	//    resolved install route for each tool without a second planning pass.
+	// Use currentResolvedTools (not currentResolvedToolEntries) to get the resolved install route per tool.
 	resolved, warnings := a.currentResolvedTools(ctx, cfg)
 	if len(resolved) == 0 {
 		return &driftReport{warnings: warnings}, nil
 	}
 
-	// 2. Collect provider availability in one pass.
 	availMap, err := a.providerAvailabilityMap(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("checking provider availability: %w", err)
 	}
 
-	// 3. Load the DB cache so we can inspect InstalledWith.
 	cached, err := a.cachedToolMap(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("reading tool cache: %w", err)
@@ -85,7 +72,7 @@ func (a *App) buildDriftReport(ctx context.Context, cfg *config.RootConfig) (*dr
 	for _, rt := range resolved {
 		t := rt.entry
 		if t.Provider == "" {
-			continue // unresolved / empty-provider tool — skip
+			continue
 		}
 
 		provAvail, provRegistered := availMap[t.Provider]
@@ -93,19 +80,14 @@ func (a *App) buildDriftReport(ctx context.Context, cfg *config.RootConfig) (*dr
 
 		switch {
 		case !provRegistered || !provAvail:
-			// The configured provider is unavailable/unregistered.
-			//
-			// Before flagging as drift, check whether the resolver already found a
-			// usable route (native via a secondary Providers[] entry, or a GitHub
-			// fallback). If a working route exists, this is not drift — the config
-			// correctly handles the unavailability.
+			// Skip if the resolver already found a usable native or fallback route;
+			// the config correctly handles the unavailability in that case.
 			if rt.route.Kind == installRouteNative || rt.route.Kind == installRouteFallbackEligible {
-				continue // a usable route exists; not drift
+				continue
 			}
 
 			if tc != nil && tc.Installed && tc.InstalledWith != "" {
-				// Class 3: provider unavailable but tool is present another way
-				// (e.g. pnpm pinned to brew but delivered by corepack).
+				// Provider unavailable but tool is present via another manager (e.g. corepack).
 				findings = append(findings, DriftFinding{
 					Tool:     t.Name,
 					Provider: t.Provider,
@@ -116,7 +98,6 @@ func (a *App) buildDriftReport(ctx context.Context, cfg *config.RootConfig) (*dr
 						t.Name, tc.InstalledWith, t.Provider, tc.InstalledWith),
 				})
 			} else if tc == nil || !tc.Installed {
-				// Class 1: provider can't provide on this host, no fallback, tool absent.
 				findings = append(findings, DriftFinding{
 					Tool:     t.Name,
 					Provider: t.Provider,
@@ -128,10 +109,7 @@ func (a *App) buildDriftReport(ctx context.Context, cfg *config.RootConfig) (*dr
 			}
 
 		case tc != nil && tc.Installed && tc.InstalledWith != "" && tc.InstalledWith != t.Provider:
-			// Class 2: tool is installed by a different provider than configured.
-			// Tools with InstalledWith="" (PATH-detected by HCL-26) are intentionally
-			// skipped here — an empty InstalledWith means no concrete manager claim
-			// and is not a wrong-provider mismatch.
+			// InstalledWith="" (PATH-detected tools) is intentionally excluded — no concrete manager claim means no mismatch.
 			findings = append(findings, DriftFinding{
 				Tool:     t.Name,
 				Provider: t.Provider,
@@ -154,11 +132,9 @@ func (a *App) buildDriftReport(ctx context.Context, cfg *config.RootConfig) (*dr
 	return &driftReport{findings: findings, warnings: warnings}, nil
 }
 
-// addDriftCheck converts a driftReport into a single DoctorCheck and appends
-// it to result using the grouped-detail format already used by dots_audit.go.
+// addDriftCheck converts a driftReport into a DoctorCheck and appends it to result.
 func (a *App) addDriftCheck(result *DoctorResult, report *driftReport) {
-	// Surface resolver warnings as detail lines regardless of whether there are
-	// drift findings — resolution problems are meaningful in the doctor context.
+	// Always surface resolver warnings — resolution problems are meaningful even without drift findings.
 	extraDetails := make([]string, 0, len(report.warnings))
 	for _, w := range report.warnings {
 		extraDetails = append(extraDetails, "resolver warning: "+w)
@@ -169,7 +145,6 @@ func (a *App) addDriftCheck(result *DoctorResult, report *driftReport) {
 		return
 	}
 
-	// Group findings by class for readable output.
 	groups := make(map[DriftClass][]DriftFinding)
 	for _, f := range report.findings {
 		groups[f.Class] = append(groups[f.Class], f)
@@ -218,9 +193,7 @@ func driftClassLabel(class DriftClass) string {
 	}
 }
 
-// providerAvailabilityMap returns a map of provider name → available (bool)
-// for every provider registered in the registry. A missing key means the
-// provider is not registered on this host.
+// providerAvailabilityMap returns name → available for every registered provider.
 func (a *App) providerAvailabilityMap(ctx context.Context) (map[string]bool, error) {
 	if a.registry == nil {
 		return map[string]bool{}, nil
@@ -239,7 +212,6 @@ func (a *App) providerAvailabilityMap(ctx context.Context) (map[string]bool, err
 }
 
 // cachedToolMap returns a name-keyed map of ToolCache rows from the DB.
-// Only the first row per name is kept (lowest-priority duplicate wins).
 func (a *App) cachedToolMap(ctx context.Context) (map[string]*database.ToolCache, error) {
 	db := a.readDB()
 	if db == nil {
