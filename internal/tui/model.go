@@ -105,6 +105,11 @@ type dotsPeekState struct {
 	scroll int
 }
 
+type traceLogState struct {
+	traces []database.CommandTrace
+	scroll int
+}
+
 type groupToolSection int
 
 const (
@@ -453,6 +458,9 @@ type Model struct {
 	dotsPeek               *dotsPeekState
 	dotsPeekLoading        bool
 	dotsPeekGen            int
+	traceLog               *traceLogState
+	traceLogLoading        bool
+	traceLogGen            int
 	dotsSearchActive       bool // true when dots search bar is open
 	filePickerForDotAdd    bool // true when file picker opened for "add path" on dots tab
 	stowInstalled          bool

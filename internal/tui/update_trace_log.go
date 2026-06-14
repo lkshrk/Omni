@@ -1,0 +1,58 @@
+package tui
+
+import (
+	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
+)
+
+func (m *Model) handleTraceLogLoadedMsg(msg traceLogLoadedMsg) []tea.Cmd {
+	if msg.gen != m.traceLogGen {
+		return nil
+	}
+	m.traceLogLoading = false
+	if msg.err != nil {
+		// Surface the error via status; don't crash the popup.
+		m.traceLog = &traceLogState{}
+		return nil
+	}
+	m.traceLog = &traceLogState{traces: msg.traces}
+	return nil
+}
+
+func (m *Model) handleTraceLogKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
+	if key.Matches(msg, m.keys.Back) {
+		m.traceLogGen++
+		m.traceLog = nil
+		m.traceLogLoading = false
+		return nil
+	}
+	if m.traceLog == nil {
+		return nil
+	}
+	switch {
+	case key.Matches(msg, m.keys.Up):
+		m.scrollTraceLogBy(-1)
+	case key.Matches(msg, m.keys.Down):
+		m.scrollTraceLogBy(1)
+	case key.Matches(msg, m.keys.HalfPageUp):
+		m.scrollTraceLogBy(-max(traceLogBodyHeight(*m), 1) / 2)
+	case key.Matches(msg, m.keys.HalfPageDown):
+		m.scrollTraceLogBy(max(traceLogBodyHeight(*m), 1) / 2)
+	case key.Matches(msg, m.keys.PageUp):
+		m.scrollTraceLogBy(-max(traceLogBodyHeight(*m), 1))
+	case key.Matches(msg, m.keys.PageDown):
+		m.scrollTraceLogBy(max(traceLogBodyHeight(*m), 1))
+	case key.Matches(msg, m.keys.Top):
+		m.traceLog.scroll = 0
+	case key.Matches(msg, m.keys.Bottom):
+		m.traceLog.scroll = traceLogMaxScroll(*m)
+	}
+	return nil
+}
+
+func (m *Model) scrollTraceLogBy(delta int) {
+	if m.traceLog == nil || delta == 0 {
+		return
+	}
+	m.traceLog.scroll = clampRange(m.traceLog.scroll+delta, 0, traceLogMaxScroll(*m))
+}
