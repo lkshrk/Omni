@@ -1,15 +1,19 @@
-# tools sync does not use fallback when the configured native provider is unavailable
+# tools sync uses fallback as last resort when configured native provider is unavailable
 exec chmod 755 bin/brew
 env PATH=$WORK/bin:$PATH
 
 exec omni --config settings.json hosts ensure testhost
-exec omni-seed-package-availability rg apt rg false 'no candidate'
 
 exec omni --config settings.json tools sync
-stdout 'failed: rg \(apt\): native install candidates unavailable for rg: apt/rg provider unavailable'
-! exec test -f .omni-cache/fallback/rg
-exec grep '"status": "unverified"' settings.json
-stdout '"status": "unverified"'
+stdout 'installed: rg \(apt\)'
+exec test -f .omni-cache/fallback/rg
+exec grep '"status": "verified"' settings.json
+stdout '"status": "verified"'
+
+# A second sync should verify the fallback-owned binary and skip reinstall.
+exec omni --config settings.json tools sync
+stdout 'already installed: rg \(apt\)'
+exec test -f .omni-cache/fallback/rg
 
 -- bin/brew --
 #!/bin/sh
