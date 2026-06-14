@@ -65,9 +65,10 @@ func TestBestGitHubReleaseAsset_AcceptsPlatformAliases(t *testing.T) {
 func TestBestGitHubReleaseAsset_ReturnsNoMatchWhenNoUsableAssetExists(t *testing.T) {
 	osName := githubOSNames()[0]
 	archName := githubArchNames()[0]
+	// Only a checksum asset and a wrong-OS archive — no extractable current-platform asset.
 	asset, ok := bestGitHubReleaseAsset([]githubAsset{
 		{ID: "1", Name: fmt.Sprintf("fd_10.3.0_%s_%s.sha256", osName, archName), BrowserDownloadURL: "https://example.test/fd.sha256"},
-		{ID: "2", Name: fmt.Sprintf("fd_10.3.0_%s_%s.tar.xz", osName, archName), BrowserDownloadURL: "https://example.test/fd.tar.xz"},
+		{ID: "2", Name: fmt.Sprintf("fd_10.3.0_%s_%s.deb", osName, archName), BrowserDownloadURL: "https://example.test/fd.deb"},
 		{ID: "3", Name: fmt.Sprintf("fd_10.3.0_windows_%s.zip", archName), BrowserDownloadURL: "https://example.test/fd-windows.zip"},
 	}, "fd")
 	if ok {
@@ -113,8 +114,8 @@ func TestGitHubAssetExtractable(t *testing.T) {
 		{name: "fd_linux_amd64.tar.gz", want: true},
 		{name: "fd_linux_amd64.tgz", want: true},
 		{name: "fd_linux_amd64.zip", want: true},
+		{name: "fd_linux_amd64.tar.xz", want: true},
 		{name: "fd_linux_amd64.gz", want: false},
-		{name: "fd_linux_amd64.tar.xz", want: false},
 		{name: "fd_linux_amd64", want: false},
 	}
 	for _, tt := range tests {

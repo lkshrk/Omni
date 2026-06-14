@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -139,7 +140,7 @@ func (a *App) InstallToolFallback(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	if err := a.runFallbackCommand(ctx, name, "install", spec, fallback, fallback.Commands.Install); err != nil {
+	if err := a.runFallbackInstall(ctx, name, "install", spec, fallback, fallback.Commands.Install); err != nil {
 		// Capture the clean message before any wrapping so the DB stores the
 		// original failure reason, not the composite status-recording annotation.
 		origMsg := err.Error()
@@ -199,6 +200,11 @@ func (a *App) CheckToolFallback(ctx context.Context, name string) (bool, error) 
 }
 
 func (a *App) checkToolFallbackWithSpec(ctx context.Context, name string, spec config.ToolSpec, fallback *config.FallbackSpec) (bool, error) {
+	// Native check for GitHub release asset recipes: exec binary --version.
+	if isNativeGitHubRecipe(fallback) && strings.TrimSpace(fallback.Commands.Check) == "" {
+		return a.nativeCheckFallback(ctx, name, fallback)
+	}
+	// Shell check: custom command or any non-native recipe.
 	command := strings.TrimSpace(fallback.Commands.Check)
 	if command == "" {
 		return false, fmt.Errorf("fallback %s: missing check command", name)
@@ -228,11 +234,15 @@ func (a *App) UpgradeToolFallback(ctx context.Context, name string) error {
 		}
 		return err
 	}
-	command := upgradeFallback.Commands.Upgrade
-	if strings.TrimSpace(command) == "" {
-		command = upgradeFallback.Commands.Install
+	upgradeCmd := strings.TrimSpace(upgradeFallback.Commands.Upgrade)
+	if upgradeCmd == "" {
+		upgradeCmd = upgradeFallback.Commands.Install
 	}
-	if err := a.runFallbackCommand(ctx, name, "upgrade", spec, upgradeFallback, command); err != nil {
+	upgradeAction := "upgrade"
+	if upgradeCmd == upgradeFallback.Commands.Install {
+		upgradeAction = "install"
+	}
+	if err := a.runFallbackInstall(ctx, name, upgradeAction, spec, upgradeFallback, upgradeCmd); err != nil {
 		origMsg := err.Error()
 		if statusErr := a.setToolFallbackStatus(name, config.FallbackStatusFailed); statusErr != nil {
 			err = fmt.Errorf("%w (also: failed to record fallback status: %v)", err, statusErr)
@@ -319,6 +329,13 @@ func (a *App) UninstallToolFallback(ctx context.Context, name string) error {
 	spec, fallback, err := a.configuredFallback(name)
 	if err != nil {
 		return err
+	}
+	// Native uninstall for GitHub release asset recipes.
+	if isNativeGitHubRecipe(fallback) && strings.TrimSpace(fallback.Commands.Uninstall) == "" {
+		if err := a.nativeUninstallFallback(ctx, name, fallback); err != nil {
+			return err
+		}
+		return a.readDB().Delete(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec))
 	}
 	if strings.TrimSpace(fallback.Commands.Uninstall) == "" {
 		return fmt.Errorf("fallback uninstall is not available for %s", name)
@@ -439,6 +456,10 @@ func (a *App) fallbackCommandVars(name string, spec config.ToolSpec, fallback *c
 	}, nil
 }
 
+// FallbackCacheDir returns the resolved fallback cache directory path.
+// Exported for test helpers.
+func (a *App) FallbackCacheDir() (string, error) { return a.fallbackCacheDir() }
+
 func (a *App) fallbackCacheDir() (string, error) {
 	root := strings.TrimSpace(a.CacheDir)
 	if root == "" {
@@ -470,6 +491,102 @@ func (a *App) fallbackBinDir(fallback *config.FallbackSpec, cacheDir string) (st
 		return "", fmt.Errorf("fallback bin dir %q must be an absolute path", expanded)
 	}
 	return expanded, nil
+}
+
+// isNativeGitHubRecipe reports whether the fallback should use the native Go
+// download/extract/install pipeline rather than shell commands.
+//
+// The native pipeline is used when the recipe is a GitHub release asset with a
+// resolved download URL AND the caller has not supplied explicit install/upgrade
+// shell commands (the custom-shell escape hatch).
+func isNativeGitHubRecipe(fallback *config.FallbackSpec) bool {
+	if fallback == nil {
+		return false
+	}
+	if fallback.Recipe.Type != config.FallbackRecipeGitHubReleaseAsset {
+		return false
+	}
+	if strings.TrimSpace(fallback.Recipe.AssetDownloadURL) == "" {
+		return false
+	}
+	// Explicit install or upgrade shell commands opt out of the native pipeline.
+	return strings.TrimSpace(fallback.Commands.Install) == "" &&
+		strings.TrimSpace(fallback.Commands.Upgrade) == ""
+}
+
+// runFallbackInstall dispatches to the native pipeline for GitHub release asset
+// recipes and falls through to the shell-command path for everything else
+// (raw_commands recipes and custom-shell escape-hatch overrides).
+// action and shellCommand are used only for the shell-command path.
+func (a *App) runFallbackInstall(ctx context.Context, name, action string, spec config.ToolSpec, fallback *config.FallbackSpec, shellCommand string) error {
+	if isNativeGitHubRecipe(fallback) {
+		if err := a.nativeGitHubInstallPipeline(ctx, name, fallback); err != nil {
+			return err
+		}
+		// Persist any checksum that was verified during the pipeline run.
+		if cs := strings.TrimSpace(fallback.Recipe.Checksum); cs != "" {
+			_ = a.persistFallbackChecksum(name, cs) // best-effort; non-fatal
+		}
+		return nil
+	}
+	// Shell-command path for raw_commands recipes or explicit overrides.
+	return a.runFallbackCommand(ctx, name, action, spec, fallback, shellCommand)
+}
+
+// persistFallbackChecksum writes the verified checksum digest back to the
+// stored recipe so future installs can skip the network fetch.
+func (a *App) persistFallbackChecksum(name, digest string) error {
+	return a.withConfig(func(cfg *config.RootConfig) error {
+		spec, ok := cfg.Tools[name]
+		if !ok || spec.Fallback == nil {
+			return nil
+		}
+		spec.Fallback.Recipe.Checksum = digest
+		cfg.Tools[name] = spec
+		return nil
+	})
+}
+
+// nativeCheckFallback verifies the installed binary by executing it with
+// --version. Returns (true, nil) when the binary runs successfully.
+func (a *App) nativeCheckFallback(ctx context.Context, name string, fallback *config.FallbackSpec) (bool, error) {
+	cacheDir, err := a.fallbackCacheDir()
+	if err != nil {
+		return false, err
+	}
+	binDir, err := a.fallbackBinDir(fallback, cacheDir)
+	if err != nil {
+		return false, err
+	}
+	binary := strings.TrimSpace(fallback.Binary)
+	if binary == "" {
+		binary = name
+	}
+	binPath := filepath.Join(binDir, binary)
+	ctx = traceReason(ctx, "checking fallback", name, "gh")
+	_, _, err = a.fallbackExecutor().Run(ctx, binPath, "--version")
+	return err == nil, nil
+}
+
+// nativeUninstallFallback removes the installed binary from the bin dir.
+func (a *App) nativeUninstallFallback(_ context.Context, name string, fallback *config.FallbackSpec) error {
+	cacheDir, err := a.fallbackCacheDir()
+	if err != nil {
+		return err
+	}
+	binDir, err := a.fallbackBinDir(fallback, cacheDir)
+	if err != nil {
+		return err
+	}
+	binary := strings.TrimSpace(fallback.Binary)
+	if binary == "" {
+		binary = name
+	}
+	binPath := filepath.Join(binDir, binary)
+	if err := os.Remove(binPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("fallback %s: uninstall: %w", name, err)
+	}
+	return nil
 }
 
 func (a *App) fallbackExecutor() executor.Executor {
@@ -513,6 +630,11 @@ func automaticFallbackUsable(fallback *config.FallbackSpec, allowFailed bool) bo
 		}
 	case config.FallbackStatusUnresolved, config.FallbackStatusUnsupported:
 		return false
+	}
+	// Native GitHub release asset recipes use the Go pipeline; they do not
+	// require a shell install command to be usable.
+	if isNativeGitHubRecipe(fallback) {
+		return true
 	}
 	return strings.TrimSpace(fallback.Commands.Install) != "" && strings.TrimSpace(fallback.Commands.Check) != ""
 }
