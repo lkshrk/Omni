@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -517,10 +518,12 @@ func nativeFallbackInstallMain() int {
 	}))
 	defer server.Close()
 
-	// Rewrite placeholders in the config file so txtar fixtures can embed them
-	// and have them resolved to live values at runtime.
-	//   STUB_SERVER_URL       → the httptest server URL
-	//   ASSET_NAME_PLACEHOLDER → the real asset name (GOOS/GOARCH substituted)
+	// Rewrite the config file so the asset_download_url always points at the
+	// current invocation's stub server. This handles both the initial placeholder
+	// and subsequent invocations where a prior run already wrote a dead port.
+	//   STUB_SERVER_URL        → current server URL (initial fixture)
+	//   ASSET_NAME_PLACEHOLDER → real GOOS/GOARCH asset name (initial fixture)
+	//   http://127.0.0.1:*/asset/ → current server /asset/ (re-invocations)
 	args := os.Args[1:]
 	for i, arg := range args {
 		if arg == "--config" && i+1 < len(args) {
@@ -529,6 +532,9 @@ func nativeFallbackInstallMain() int {
 				s := string(b)
 				s = strings.ReplaceAll(s, "STUB_SERVER_URL", server.URL)
 				s = strings.ReplaceAll(s, "ASSET_NAME_PLACEHOLDER", assetName)
+				// Replace any previously written 127.0.0.1 asset URL with the
+				// current server so re-invocations don't hit a dead port.
+				s = rewriteLocalhostAssetURL(s, server.URL+"/asset/")
 				if s != string(b) {
 					_ = os.WriteFile(cfgPath, []byte(s), 0o644)
 				}
@@ -548,4 +554,13 @@ func nativeFallbackInstallMain() int {
 		return 1
 	}
 	return 0
+}
+
+// rewriteLocalhostAssetURL replaces any "http://127.0.0.1:<port>/asset/"
+// occurrences in s with newAssetBase so subsequent invocations of the stub
+// helper always download from the live server rather than a dead port.
+var localhostAssetRe = regexp.MustCompile(`http://127\.0\.0\.1:\d+/asset/`)
+
+func rewriteLocalhostAssetURL(s, newAssetBase string) string {
+	return localhostAssetRe.ReplaceAllString(s, newAssetBase)
 }
