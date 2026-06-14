@@ -1082,7 +1082,7 @@ func applyToolMetadata(t *ToolCache, m *ToolMetadata) {
 		t.Privilege = m.Privilege
 		t.PrivilegeReason = m.PrivilegeReason
 	}
-	if m.ArtifactKind != "" {
+	if m.ArtifactKind != "" && t.Provider == "brew" {
 		if t.Options == nil {
 			t.Options = make(map[string]string)
 		}
