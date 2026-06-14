@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lkshrk/omni/internal/config"
@@ -717,56 +719,98 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 	installedMaps := make(map[string]map[string]string)
 	metadataMaps := make(map[string]map[string]provider.InstalledMetadata)
 	concreteForBulk := make(map[string]string)
-	// Iterate the precomputed available set so we don't call Available a
-	// second time. Per-provider scan failures are skipped silently so a
-	// single failing backend doesn't block discovery for others.
+
+	type providerBulkResult struct {
+		name          string
+		multiMap      map[string]provider.InstalledEntry // non-nil → MultiManagerBulkChecker
+		metadataMap   map[string]provider.InstalledMetadata
+		installedMap  map[string]string
+		installedWith string
+	}
+
 	stop = profile.Start("app.refresh.installed.bulk_maps")
-	for _, p := range available {
-		scanProgress.emitProvider(p.Name())
-		// MultiManagerBulkChecker takes priority: probes all backends for per-tool attribution.
-		if mbc, ok := p.(provider.MultiManagerBulkChecker); ok {
-			entries, err := mbc.InstalledByManager(ctx)
-			if err != nil {
-				continue
+	results := make([]providerBulkResult, len(available))
+	var wg sync.WaitGroup
+	for i, p := range available {
+		i, p := i, p
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			res := providerBulkResult{name: p.Name()}
+			// MultiManagerBulkChecker takes priority: probes all backends for per-tool attribution.
+			if mbc, ok := p.(provider.MultiManagerBulkChecker); ok {
+				entries, err := mbc.InstalledByManager(ctx)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "warning: omni: bulk scan %s: %v\n", p.Name(), err)
+				} else {
+					res.multiMap = entries
+				}
+				results[i] = res
+				return
 			}
-			multiMaps[p.Name()] = entries
+			var m map[string]string
+			if mbc, ok := p.(provider.MetadataBulkChecker); ok {
+				metadata, err := mbc.InstalledMetadataMap(ctx)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "warning: omni: bulk scan %s: %v\n", p.Name(), err)
+					results[i] = res
+					return
+				}
+				res.metadataMap = metadata
+				// Pre-computed here so the merge pass doesn't recompute from res.metadataMap.
+				m = installedMapFromMetadata(metadata)
+			} else {
+				bc, ok := p.(provider.BulkChecker)
+				if !ok {
+					results[i] = res
+					return
+				}
+				var err error
+				m, err = bc.InstalledMap(ctx)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "warning: omni: bulk scan %s: %v\n", p.Name(), err)
+					results[i] = res
+					return
+				}
+			}
+			// resolvedConcrete is fully populated before any goroutine starts (happens-before via wg.Add), so reads under rcMu are safe.
+			installedWith := p.Name()
+			if cr, ok := p.(provider.ConcreteResolver); ok {
+				if name, cached := scanProgress.resolvedProviderName(p.Name()); cached {
+					installedWith = name
+				} else if name, resolveErr := cr.ResolvedName(ctx); resolveErr == nil && name != "" {
+					installedWith = name
+				} else {
+					installedWith = "" // prefer unknown over stale ecosystem name
+				}
+			}
+			res.installedMap = m
+			res.installedWith = installedWith
+			results[i] = res
+		}()
+	}
+	wg.Wait()
+
+	// Merge results in registry order so output remains deterministic.
+	for _, res := range results {
+		if res.name == "" {
 			continue
 		}
-		var (
-			m   map[string]string
-			err error
-		)
-		if mbc, ok := p.(provider.MetadataBulkChecker); ok {
-			metadata, err := mbc.InstalledMetadataMap(ctx)
-			if err != nil {
-				continue
-			}
-			metadataMaps[p.Name()] = metadata
-			m = installedMapFromMetadata(metadata)
-		} else {
-			bc, ok := p.(provider.BulkChecker)
-			if !ok {
-				continue
-			}
-			m, err = bc.InstalledMap(ctx)
-			if err != nil {
-				continue
-			}
+		scanProgress.emitProvider(res.name)
+		if res.multiMap != nil {
+			multiMaps[res.name] = res.multiMap
+			continue
 		}
-		// Resolve concrete backend for InstalledWith. Ecosystem providers (e.g. node)
-		// implement ConcreteResolver; concrete providers are their own backend.
-		installedWith := p.Name()
-		if cr, ok := p.(provider.ConcreteResolver); ok {
-			if name, cached := scanProgress.resolvedProviderName(p.Name()); cached {
-				installedWith = name
-			} else if name, resolveErr := cr.ResolvedName(ctx); resolveErr == nil && name != "" {
-				installedWith = name
-			} else {
-				installedWith = "" // prefer unknown over stale ecosystem name
-			}
+		if res.metadataMap != nil {
+			metadataMaps[res.name] = res.metadataMap
+			installedMaps[res.name] = res.installedMap
+			concreteForBulk[res.name] = res.installedWith
+			continue
 		}
-		installedMaps[p.Name()] = m
-		concreteForBulk[p.Name()] = installedWith
+		if res.installedMap != nil {
+			installedMaps[res.name] = res.installedMap
+			concreteForBulk[res.name] = res.installedWith
+		}
 	}
 	stop()
 
@@ -919,6 +963,8 @@ type refreshInstalledScanProgress struct {
 	total            int
 	labelsByProvider map[string][]string
 	emitted          map[string]bool
+	// rcMu guards resolvedConcrete: written single-goroutine during setup, read concurrently by bulk-scan goroutines.
+	rcMu             sync.RWMutex
 	resolvedConcrete map[string]string
 }
 
@@ -973,6 +1019,8 @@ func (p *refreshInstalledScanProgress) resolvedProviderName(providerName string)
 	if p == nil || p.resolvedConcrete == nil {
 		return "", false
 	}
+	p.rcMu.RLock()
+	defer p.rcMu.RUnlock()
 	name, ok := p.resolvedConcrete[providerName]
 	return name, ok
 }
