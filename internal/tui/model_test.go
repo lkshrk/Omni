@@ -3693,6 +3693,25 @@ func TestDotsPeekEscWhileLoadingIgnoresLateResult(t *testing.T) {
 	}
 }
 
+func TestTraceLogBackWhileLoadingIgnoresLateResult(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewSettings
+	m.settingsCursor = settingsRowTraceLog
+	m.traceLogLoading = true
+	m.traceLogGen = 1
+
+	got := drive(m,
+		pressEsc(),
+		traceLogLoadedMsg{gen: 1},
+	)
+	if got.traceLogLoading {
+		t.Fatal("traceLogLoading = true, want false after Back clears it")
+	}
+	if got.traceLog != nil {
+		t.Fatalf("traceLog = %+v, want nil after stale result", got.traceLog)
+	}
+}
+
 func mustWriteTUIDotFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

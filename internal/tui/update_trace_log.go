@@ -6,7 +6,10 @@ import (
 )
 
 func (m *Model) handleTraceLogLoadedMsg(msg traceLogLoadedMsg) []tea.Cmd {
-	if msg.gen != m.traceLogGen {
+	// Discard responses that don't belong to the current open: either a stale
+	// generation (the popup was closed or re-opened) or loading was already
+	// cleared (e.g. by a concurrent Back keypress that raced the goroutine).
+	if msg.gen != m.traceLogGen || !m.traceLogLoading {
 		return nil
 	}
 	m.traceLogLoading = false
