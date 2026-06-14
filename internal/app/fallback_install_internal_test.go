@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,8 @@ import (
 	"testing"
 
 	"github.com/ulikunitz/xz"
+
+	"github.com/lkshrk/omni/internal/config"
 )
 
 // --- isChecksumAsset ---
@@ -635,5 +638,108 @@ func writeTarXz(t *testing.T, path, entryName string, content []byte) {
 	}
 	if _, err := tw.Write(content); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// --- path traversal guard ---
+
+func TestNativeGitHubInstallPipeline_RejectsTraversalAssetName(t *testing.T) {
+	traversalCases := []string{
+		"../../etc/passwd",
+		"../outside",
+		"subdir/../../escape",
+	}
+	for _, assetName := range traversalCases {
+		t.Run(assetName, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Should never be reached; the guard must reject before download.
+				http.NotFound(w, r)
+			}))
+			t.Cleanup(srv.Close)
+
+			cfgDir := t.TempDir()
+			a := &App{ConfigPath: filepath.Join(cfgDir, "settings.json"), CacheDir: cfgDir}
+			a.SetGitHubFallbackAPIForTest(srv.URL, srv.Client())
+
+			fallback := &config.FallbackSpec{
+				Binary: "mytool",
+				Recipe: config.FallbackRecipe{
+					Type:             config.FallbackRecipeGitHubReleaseAsset,
+					AssetName:        assetName,
+					AssetDownloadURL: srv.URL + "/asset/file.tar.gz",
+					TagName:          "v1.0.0",
+				},
+			}
+			err := a.nativeGitHubInstallPipeline(t.Context(), "mytool", fallback)
+			if err == nil {
+				t.Fatalf("expected error for asset_name %q, got nil", assetName)
+			}
+			// The resolved path must not exist outside the cache dir.
+			cacheDir := filepath.Join(cfgDir, "fallback")
+			entries, _ := filepath.Glob(cacheDir + "/../*")
+			for _, e := range entries {
+				if filepath.Base(e) == "passwd" || filepath.Base(e) == "outside" || filepath.Base(e) == "escape" {
+					t.Errorf("traversal path %q was created on disk", e)
+				}
+			}
+		})
+	}
+}
+
+func TestNativeGitHubInstallPipeline_RejectsTraversalBinary(t *testing.T) {
+	// Build a minimal tar.gz so the download phase would succeed if the binary
+	// guard were absent. The guard must reject before extraction.
+	content := []byte("#!/bin/sh\necho hi")
+	tmpDir := t.TempDir()
+	archivePath := filepath.Join(tmpDir, "tool.tar.gz")
+	f, err := os.Create(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw := gzip.NewWriter(f)
+	tw := tar.NewWriter(gw)
+	_ = tw.WriteHeader(&tar.Header{Name: "mytool", Mode: 0o755, Size: int64(len(content))})
+	_, _ = tw.Write(content)
+	_ = tw.Close()
+	_ = gw.Close()
+	_ = f.Close()
+	archiveBytes, err := os.ReadFile(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/releases/tags/v1.0.0"):
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"id": 1, "tag_name": "v1.0.0", "assets": []any{}}) //nolint:errcheck
+		default:
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Write(archiveBytes) //nolint:errcheck
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	cfgDir := t.TempDir()
+	a := &App{ConfigPath: filepath.Join(cfgDir, "settings.json"), CacheDir: cfgDir}
+	a.SetGitHubFallbackAPIForTest(srv.URL, srv.Client())
+
+	traversalBinaries := []string{"../../injected", "../bad"}
+	for _, binary := range traversalBinaries {
+		t.Run(binary, func(t *testing.T) {
+			fallback := &config.FallbackSpec{
+				Binary: binary,
+				Recipe: config.FallbackRecipe{
+					Type:             config.FallbackRecipeGitHubReleaseAsset,
+					AssetName:        "tool.tar.gz",
+					AssetDownloadURL: srv.URL + "/asset/tool.tar.gz",
+					TagName:          "v1.0.0",
+				},
+			}
+			err := a.nativeGitHubInstallPipeline(t.Context(), "mytool", fallback)
+			if err == nil {
+				t.Fatalf("expected error for binary %q, got nil", binary)
+			}
+		})
 	}
 }

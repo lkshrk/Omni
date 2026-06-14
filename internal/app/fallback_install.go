@@ -46,9 +46,16 @@ func (a *App) nativeGitHubInstallPipeline(ctx context.Context, name string, fall
 	if downloadURL == "" {
 		return fmt.Errorf("fallback %s: native install requires a resolved asset_download_url", name)
 	}
-	assetName := strings.TrimSpace(recipe.AssetName)
-	if assetName == "" {
-		assetName = filepath.Base(downloadURL)
+	rawAssetName := strings.TrimSpace(recipe.AssetName)
+	if rawAssetName == "" {
+		rawAssetName = filepath.Base(downloadURL)
+	}
+	// Sanitise both untrusted path components before joining into fs paths.
+	// filepath.Base strips any directory traversal (../../) sequences; we then
+	// reject the degenerate values ".", "..", and "" that Base can still return.
+	assetName := filepath.Base(rawAssetName)
+	if assetName == "" || assetName == "." || assetName == ".." {
+		return fmt.Errorf("fallback %s: asset_name %q is not a valid filename", name, rawAssetName)
 	}
 
 	cacheDir, err := a.fallbackCacheDir()
@@ -68,6 +75,10 @@ func (a *App) nativeGitHubInstallPipeline(ctx context.Context, name string, fall
 	}
 
 	assetPath := filepath.Join(cacheDir, assetName)
+	// Containment assertion: the resolved path must remain inside cacheDir.
+	if !strings.HasPrefix(assetPath, cacheDir+string(filepath.Separator)) {
+		return fmt.Errorf("fallback %s: asset path %q escapes cache dir", name, assetPath)
+	}
 	if err := a.downloadFallbackAsset(ctx, name, downloadURL, assetPath); err != nil {
 		return err
 	}
@@ -77,11 +88,19 @@ func (a *App) nativeGitHubInstallPipeline(ctx context.Context, name string, fall
 		return err
 	}
 
-	binary := strings.TrimSpace(fallback.Binary)
-	if binary == "" {
-		binary = name
+	rawBinary := strings.TrimSpace(fallback.Binary)
+	if rawBinary == "" {
+		rawBinary = name
+	}
+	binary := filepath.Base(rawBinary)
+	if binary == "" || binary == "." || binary == ".." {
+		return fmt.Errorf("fallback %s: binary %q is not a valid filename", name, rawBinary)
 	}
 	destPath := filepath.Join(binDir, binary)
+	// Containment assertion: the binary destination must remain inside binDir.
+	if !strings.HasPrefix(destPath, binDir+string(filepath.Separator)) {
+		return fmt.Errorf("fallback %s: binary path %q escapes bin dir", name, destPath)
+	}
 	if err := extractAndInstall(assetPath, assetName, binary, fallback.Recipe.BinaryPath, destPath); err != nil {
 		return fmt.Errorf("fallback %s: %w", name, err)
 	}
