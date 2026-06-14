@@ -565,6 +565,18 @@ func executableInstalledOnPath(binaryName string) bool {
 	return err == nil
 }
 
+// failedToolKey returns the map key used to identify a failed tool record.
+// Package is included so a failure on one variant (e.g. package "mytool@1")
+// does not suppress PATH detection for other variants of the same tool/provider.
+// pkg defaults to name when empty, matching tool_cache row semantics.
+func failedToolKey(name, provider, pkg string) string {
+	pkg = strings.TrimSpace(pkg)
+	if pkg == "" {
+		pkg = name
+	}
+	return name + "\x00" + provider + "\x00" + pkg
+}
+
 // toolHasActiveFailure reports whether the tool has a failure record.
 // nil means the set could not be loaded — treated as "all failed" so PATH
 // detection is suppressed rather than risking clearing retry-failed state.
@@ -572,13 +584,14 @@ func toolHasActiveFailure(t config.ToolEntry, failedTools map[string]struct{}) b
 	if failedTools == nil {
 		return true // fail-safe: suppress PATH detection when set could not be loaded
 	}
-	_, ok := failedTools[t.Name+"\x00"+t.Provider]
+	_, ok := failedTools[failedToolKey(t.Name, t.Provider, t.EffectivePackage())]
 	return ok
 }
 
-// loadFailedToolSet returns the name+"\x00"+provider set of tools with active
-// failures. On error it returns nil; callers must treat nil as "all failed" —
-// an empty map would incorrectly enable PATH detection for retry-failed tools.
+// loadFailedToolSet returns the (name, provider, package)-keyed set of tools
+// with active failures. On error it returns nil; callers must treat nil as
+// "all failed" — an empty map would incorrectly enable PATH detection for
+// retry-failed tools.
 func (a *App) loadFailedToolSet(ctx context.Context) (map[string]struct{}, error) {
 	failed, err := a.readDB().ListFailed(ctx)
 	if err != nil {
@@ -586,33 +599,52 @@ func (a *App) loadFailedToolSet(ctx context.Context) (map[string]struct{}, error
 	}
 	set := make(map[string]struct{}, len(failed))
 	for _, f := range failed {
-		set[f.Name+"\x00"+f.Provider] = struct{}{}
+		set[failedToolKey(f.Name, f.Provider, f.Package)] = struct{}{}
 	}
 	return set, nil
 }
 
-func executableDetectSingleTool(t config.ToolEntry, cfg *config.RootConfig, failedTools map[string]struct{}) (*database.ToolCache, bool) {
+// executableDetectSingleTool probes PATH for t's binary and returns the upsert
+// row to write. installed is the current cached Installed value for this row
+// (false when no row exists yet). The second return is true when a row should
+// be written: positive (binary found, not failed) or negative (binary gone,
+// was previously marked installed so the stale row needs correcting).
+func executableDetectSingleTool(t config.ToolEntry, cfg *config.RootConfig, failedTools map[string]struct{}, cachedInstalled bool) (*database.ToolCache, bool) {
 	if toolHasActiveFailure(t, failedTools) {
 		return nil, false
 	}
 	spec := cfg.Tools[t.Name]
-	if !executableInstalledOnPath(toolBinaryName(t.Name, spec)) {
+	onPath := executableInstalledOnPath(toolBinaryName(t.Name, spec))
+	if !onPath && !cachedInstalled {
+		// Binary absent and no stale positive row — nothing to write.
 		return nil, false
 	}
 	return &database.ToolCache{
 		Name:          t.Name,
 		Provider:      t.Provider,
 		Package:       t.EffectivePackage(),
-		Installed:     true,
+		Installed:     onPath,
 		InstalledWith: "", // no concrete manager claim — avoids wrong-provider classification
 		LastChecked:   time.Now(),
 	}, true
 }
 
 func (a *App) executableDetectProviderTools(ctx context.Context, cfg *config.RootConfig, tools []config.ToolEntry, failedTools map[string]struct{}) error {
+	// Build a map of currently-cached Installed values so we can clear stale
+	// positive rows when a previously-detected binary disappears from PATH.
+	cachedRows, err := a.readDB().ListByProvider(ctx, tools[0].Provider)
+	if err != nil {
+		cachedRows = nil // best-effort; treat all as not-cached
+	}
+	cachedInstalled := make(map[string]bool, len(cachedRows))
+	for _, r := range cachedRows {
+		cachedInstalled[failedToolKey(r.Name, r.Provider, r.Package)] = r.Installed
+	}
+
 	var upserts []*database.ToolCache
 	for _, t := range tools {
-		if row, ok := executableDetectSingleTool(t, cfg, failedTools); ok {
+		was := cachedInstalled[failedToolKey(t.Name, t.Provider, t.EffectivePackage())]
+		if row, ok := executableDetectSingleTool(t, cfg, failedTools, was); ok {
 			upserts = append(upserts, row)
 		}
 	}
@@ -750,6 +782,15 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 	if err != nil {
 		failedTools = nil
 	}
+	// Used by PATH-detection branches to clear stale Installed=true rows when a
+	// binary disappears; built once here to avoid per-tool DB round-trips.
+	allCached, cacheErr := a.readDB().List(ctx)
+	cachedInstalledByKey := make(map[string]bool, len(allCached))
+	if cacheErr == nil {
+		for _, r := range allCached {
+			cachedInstalledByKey[failedToolKey(r.Name, r.Provider, r.Package)] = r.Installed
+		}
+	}
 	upserts := make([]*database.ToolCache, 0, len(tools))
 	metadataUpdates := make([]database.MetadataUpdate, 0)
 	for _, t := range tools {
@@ -809,7 +850,8 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 		p, ok := a.registry.Get(opProvider)
 		if !ok {
 			// Provider not registered — probe PATH as a last resort.
-			if row, detected := executableDetectSingleTool(t, cfg, failedTools); detected {
+			was := cachedInstalledByKey[failedToolKey(t.Name, t.Provider, t.EffectivePackage())]
+			if row, detected := executableDetectSingleTool(t, cfg, failedTools, was); detected {
 				upserts = append(upserts, row)
 			}
 			continue
@@ -820,7 +862,8 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 		}
 		if !avail {
 			// Provider unavailable on this host (e.g. brew on Linux) — probe PATH as a last resort.
-			if row, detected := executableDetectSingleTool(t, cfg, failedTools); detected {
+			was := cachedInstalledByKey[failedToolKey(t.Name, t.Provider, t.EffectivePackage())]
+			if row, detected := executableDetectSingleTool(t, cfg, failedTools, was); detected {
 				upserts = append(upserts, row)
 			}
 			continue

@@ -252,3 +252,97 @@ func TestRefreshProviderInstalled_PathDetection_ProviderUnavailable(t *testing.T
 	}
 	t.Error("mytool not found in ListTools output")
 }
+
+// TestRefreshInstalled_PathDetection_StaleRowCleared verifies that a stale
+// Installed=true cache row is corrected when the binary is no longer on PATH
+// and the provider is unavailable.
+func TestRefreshInstalled_PathDetection_StaleRowCleared(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "mytool")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write bin: %v", err)
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	brew := &stubProvider{name: "brew", available: false}
+	a, cfgPath := newImportApp(t, brew)
+
+	cfg := &config.RootConfig{
+		Tools:  map[string]config.ToolSpec{"mytool": {Providers: []config.ToolInstallSpec{{Provider: "brew", Package: "mytool"}}}},
+		Groups: []*config.GroupConfig{testHostToolGroup("mytool")},
+	}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+	if err := a.RefreshInstalled(context.Background(), nil); err != nil {
+		t.Fatalf("RefreshInstalled pass 1: %v", err)
+	}
+
+	// Remove binary; next refresh must clear the stale installed row.
+	if err := os.Remove(bin); err != nil {
+		t.Fatalf("remove bin: %v", err)
+	}
+	if err := a.RefreshInstalled(context.Background(), nil); err != nil {
+		t.Fatalf("RefreshInstalled pass 2: %v", err)
+	}
+
+	tools, err := a.ListTools(context.Background(), "")
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	for _, tc := range tools {
+		if tc.Name == "mytool" {
+			if tc.Installed {
+				t.Errorf("mytool.Installed = true after binary removed — stale row not cleared")
+			}
+			return
+		}
+	}
+	t.Error("mytool not found in ListTools output")
+}
+
+// TestRefreshProviderInstalled_PathDetection_StaleRowCleared mirrors the stale-
+// clear check via the scoped RefreshProviderInstalled path.
+func TestRefreshProviderInstalled_PathDetection_StaleRowCleared(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "mytool")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write bin: %v", err)
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	brew := &stubProvider{name: "brew", available: false}
+	a, cfgPath := newImportApp(t, brew)
+
+	cfg := &config.RootConfig{
+		Tools:  map[string]config.ToolSpec{"mytool": {Providers: []config.ToolInstallSpec{{Provider: "brew", Package: "mytool"}}}},
+		Groups: []*config.GroupConfig{testHostToolGroup("mytool")},
+	}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+	if err := a.RefreshProviderInstalled(context.Background(), "brew"); err != nil {
+		t.Fatalf("RefreshProviderInstalled pass 1: %v", err)
+	}
+
+	if err := os.Remove(bin); err != nil {
+		t.Fatalf("remove bin: %v", err)
+	}
+	if err := a.RefreshProviderInstalled(context.Background(), "brew"); err != nil {
+		t.Fatalf("RefreshProviderInstalled pass 2: %v", err)
+	}
+
+	tools, err := a.ListTools(context.Background(), "")
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	for _, tc := range tools {
+		if tc.Name == "mytool" {
+			if tc.Installed {
+				t.Errorf("mytool.Installed = true after binary removed via RefreshProviderInstalled — stale row not cleared")
+			}
+			return
+		}
+	}
+	t.Error("mytool not found in ListTools output")
+}
