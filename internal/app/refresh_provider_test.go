@@ -1135,7 +1135,6 @@ func (d *delayConcreteStub) ResolvedName(_ context.Context) (string, error) {
 func TestRefreshInstalled_BulkScansRunConcurrently(t *testing.T) {
 	const delay = 50 * time.Millisecond
 
-	// provA implements BulkChecker only.
 	provA := &delayBulkStub{
 		stubProvider: stubProvider{name: "prov-a", available: true},
 		bulk:         map[string]string{"tool-a": "1.0"},
