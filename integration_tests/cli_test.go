@@ -3,10 +3,16 @@
 package integration_test
 
 import (
+	"archive/tar"
 	"bufio"
+	"bytes"
+	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	_ "embed"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -40,8 +46,9 @@ func TestMain(m *testing.M) {
 		"omni-seed-update-metadata":           seedUpdateMetadataMain,
 		"omni-assert-tool-provider-list":      assertToolProviderListMain,
 		"omni-with-npm-registry":              withNPMRegistryMain,
-		"omni-tools-fallback-configured-git":  toolsFallbackConfiguredGitMain,
-		"omni-tools-fallback-unsupported-git": toolsFallbackUnsupportedGitMain,
+		"omni-tools-fallback-configured-git":    toolsFallbackConfiguredGitMain,
+		"omni-tools-fallback-unsupported-git":   toolsFallbackUnsupportedGitMain,
+		"omni-native-fallback-install":           nativeFallbackInstallMain,
 	}))
 }
 
@@ -455,4 +462,90 @@ func scriptRequires(path, requirement string) (bool, error) {
 		return false, err
 	}
 	return false, nil
+}
+
+// nativeFallbackInstallMain starts a stub server that serves a GitHub releases
+// API, the asset download, and a checksums file. Before running the omni
+// command it rewrites every occurrence of the placeholder "STUB_SERVER_URL"
+// in the config file (first positional argument after --config) with the
+// actual server URL, so txtar fixtures can embed the placeholder and have it
+// resolved at runtime.
+//
+// Usage in txtar: exec omni-native-fallback-install --config settings.json <cmd> [args...]
+func nativeFallbackInstallMain() int {
+	// Build a minimal tar.gz containing a stub binary.
+	binaryContent := []byte("#!/bin/sh\nexit 0\n")
+	assetName := fmt.Sprintf("mytool_v1.0.0_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+
+	var assetBuf bytes.Buffer
+	gw := gzip.NewWriter(&assetBuf)
+	tw := tar.NewWriter(gw)
+	tw.WriteHeader(&tar.Header{Name: "mytool_v1.0.0/mytool", Mode: 0o755, Size: int64(len(binaryContent))}) //nolint:errcheck
+	tw.Write(binaryContent)                                                                                  //nolint:errcheck
+	tw.Close()                                                                                               //nolint:errcheck
+	gw.Close()                                                                                               //nolint:errcheck
+	assetBytes := assetBuf.Bytes()
+
+	sum := sha256.Sum256(assetBytes)
+	digest := hex.EncodeToString(sum[:])
+	checksumContent := digest + "  " + assetName + "\n"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		releaseAssets := func(host string) []map[string]any {
+			return []map[string]any{
+				{"id": 1, "name": assetName, "browser_download_url": "http://" + host + "/asset/" + assetName},
+				{"id": 2, "name": "checksums.txt", "browser_download_url": "http://" + host + "/checksums"},
+			}
+		}
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/releases/latest"),
+			strings.HasSuffix(r.URL.Path, "/releases/tags/v1.0.0"):
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+				"id": 1, "tag_name": "v1.0.0", "published_at": "2026-06-01T00:00:00Z",
+				"assets": releaseAssets(r.Host),
+			})
+		case strings.HasPrefix(r.URL.Path, "/asset/"):
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Write(assetBytes) //nolint:errcheck
+		case r.URL.Path == "/checksums":
+			w.Header().Set("Content-Type", "text/plain")
+			w.Write([]byte(checksumContent)) //nolint:errcheck
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	// Rewrite placeholders in the config file so txtar fixtures can embed them
+	// and have them resolved to live values at runtime.
+	//   STUB_SERVER_URL       → the httptest server URL
+	//   ASSET_NAME_PLACEHOLDER → the real asset name (GOOS/GOARCH substituted)
+	args := os.Args[1:]
+	for i, arg := range args {
+		if arg == "--config" && i+1 < len(args) {
+			cfgPath := args[i+1]
+			if b, err := os.ReadFile(cfgPath); err == nil {
+				s := string(b)
+				s = strings.ReplaceAll(s, "STUB_SERVER_URL", server.URL)
+				s = strings.ReplaceAll(s, "ASSET_NAME_PLACEHOLDER", assetName)
+				if s != string(b) {
+					_ = os.WriteFile(cfgPath, []byte(s), 0o644)
+				}
+			}
+			break
+		}
+	}
+
+	if err := os.Setenv("OMNI_GITHUB_API_BASE", server.URL); err != nil {
+		fmt.Fprintf(os.Stderr, "set OMNI_GITHUB_API_BASE: %v\n", err)
+		return 1
+	}
+	cmd := cli.NewRootCmd()
+	cmd.SetArgs(args)
+	if err := cmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return 0
 }
