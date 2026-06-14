@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,6 +27,11 @@ import (
 const (
 	downloadTimeout = 5 * time.Minute
 	downloadRetries = 3
+	// maxDownloadBytes caps the asset download to prevent disk-fill from a
+	// malicious or corrupted release (512 MiB).
+	maxDownloadBytes = 512 << 20
+	// maxEntryBytes caps each extracted tar/zip entry individually.
+	maxEntryBytes = 512 << 20
 )
 
 // nativeGitHubInstallPipeline downloads, checksums, extracts, and installs a
@@ -82,8 +88,15 @@ func (a *App) nativeGitHubInstallPipeline(ctx context.Context, name string, fall
 	return nil
 }
 
+// errNoRetry wraps a download error that must not be retried (e.g. 4xx).
+type errNoRetry struct{ cause error }
+
+func (e errNoRetry) Error() string { return e.cause.Error() }
+func (e errNoRetry) Unwrap() error { return e.cause }
+
 // downloadFallbackAsset fetches downloadURL to destPath, retrying up to
-// downloadRetries times on transient HTTP/network errors.
+// downloadRetries times on transient errors (5xx, network). 4xx errors are
+// not retried because the resource is definitively absent or forbidden.
 func (a *App) downloadFallbackAsset(ctx context.Context, name, downloadURL, destPath string) error {
 	client := a.githubHTTPClient()
 	var lastErr error
@@ -98,6 +111,11 @@ func (a *App) downloadFallbackAsset(ctx context.Context, name, downloadURL, dest
 		lastErr = downloadToFile(ctx, client, downloadURL, destPath)
 		if lastErr == nil {
 			return nil
+		}
+		// 4xx responses are definitive — no point retrying.
+		var noRetry errNoRetry
+		if errors.As(lastErr, &noRetry) {
+			break
 		}
 	}
 	return fmt.Errorf("fallback %s: download %s: %w", name, downloadURL, lastErr)
@@ -123,7 +141,13 @@ func downloadToFile(ctx context.Context, client *http.Client, rawURL, destPath s
 	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("HTTP %s", resp.Status)
+		err := fmt.Errorf("HTTP %s", resp.Status)
+		// 4xx errors are definitive; wrapping in errNoRetry prevents the caller
+		// from retrying a request that will never succeed.
+		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+			return errNoRetry{err}
+		}
+		return err
 	}
 
 	tmp, err := os.CreateTemp(filepath.Dir(destPath), ".omni-dl-*")
@@ -139,9 +163,16 @@ func downloadToFile(ctx context.Context, client *http.Client, rawURL, destPath s
 		}
 	}()
 
-	if _, err := io.Copy(tmp, resp.Body); err != nil {
+	// Guard against a runaway response body filling the disk.
+	limited := io.LimitReader(resp.Body, maxDownloadBytes+1)
+	n, err := io.Copy(tmp, limited)
+	if err != nil {
 		_ = tmp.Close()
 		return fmt.Errorf("write download: %w", err)
+	}
+	if n > maxDownloadBytes {
+		_ = tmp.Close()
+		return fmt.Errorf("download exceeds %d MiB limit", maxDownloadBytes>>20)
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close temp file: %w", err)
@@ -376,7 +407,7 @@ func installFromZipFile(f *zip.File, destPath string) error {
 		return fmt.Errorf("open zip entry: %w", err)
 	}
 	defer rc.Close() //nolint:errcheck
-	return writeExecutable(rc, destPath)
+	return writeExecutable(io.LimitReader(rc, maxEntryBytes+1), destPath)
 }
 
 func extractTarGz(archivePath, binaryName, binaryPath, destPath string) error {
@@ -432,13 +463,15 @@ func extractTarStream(tr *tar.Reader, binaryName, binaryPath, destPath string) e
 		if err != nil {
 			return fmt.Errorf("read tar: %w", err)
 		}
-		if hdr.Typeflag == tar.TypeDir {
+		// Only regular files are eligible; symlinks, devices, and directories
+		// must not be selected as the install target.
+		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
 
 		base := filepath.Base(hdr.Name)
 		if binaryPath != "" && hdr.Name == binaryPath {
-			return writeExecutable(tr, destPath)
+			return writeExecutable(io.LimitReader(tr, maxEntryBytes+1), destPath)
 		}
 		if base == binaryName && bufPath == "" {
 			tmp, err := os.CreateTemp(tmpDir, ".omni-tar-*")
@@ -446,9 +479,14 @@ func extractTarStream(tr *tar.Reader, binaryName, binaryPath, destPath string) e
 				return fmt.Errorf("buffer tar entry: %w", err)
 			}
 			bufPath = tmp.Name()
-			if _, err := io.Copy(tmp, tr); err != nil {
+			n, err := io.Copy(tmp, io.LimitReader(tr, maxEntryBytes+1))
+			if err != nil {
 				_ = tmp.Close()
 				return fmt.Errorf("copy tar entry: %w", err)
+			}
+			if n > maxEntryBytes {
+				_ = tmp.Close()
+				return fmt.Errorf("tar entry exceeds %d MiB limit", maxEntryBytes>>20)
 			}
 			if err := tmp.Close(); err != nil {
 				return fmt.Errorf("close tar buffer: %w", err)
@@ -495,9 +533,16 @@ func writeExecutable(r io.Reader, destPath string) error {
 		}
 	}()
 
-	if _, err := io.Copy(tmp, r); err != nil {
+	n, err := io.Copy(tmp, r)
+	if err != nil {
 		_ = tmp.Close()
 		return fmt.Errorf("write binary: %w", err)
+	}
+	// Callers pass a LimitReader(r, maxEntryBytes+1); if we read more than
+	// the cap the stream was larger than allowed.
+	if n > maxEntryBytes {
+		_ = tmp.Close()
+		return fmt.Errorf("entry exceeds %d MiB limit", maxEntryBytes>>20)
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close install temp: %w", err)
