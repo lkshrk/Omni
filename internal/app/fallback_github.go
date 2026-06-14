@@ -106,21 +106,7 @@ func (a *App) fetchLatestGitHubRelease(ctx context.Context, owner, repoName stri
 	}
 	baseURL := strings.TrimRight(a.githubAPI, "/")
 	if baseURL == "" {
-		envBase := strings.TrimRight(os.Getenv("OMNI_GITHUB_API_BASE"), "/")
-		if envBase != "" {
-			// Validate the env override: must be HTTPS and must point at a
-			// github.com host so we never send the Authorization token to an
-			// arbitrary server.
-			parsed, parseErr := url.Parse(envBase)
-			if parseErr != nil || parsed.Scheme != "https" ||
-				!isGitHubHost(parsed.Host) {
-				return githubRelease{}, fmt.Errorf(
-					"OMNI_GITHUB_API_BASE %q is invalid: must be an https://api.github.com URL",
-					envBase,
-				)
-			}
-			baseURL = envBase
-		}
+		baseURL = strings.TrimRight(os.Getenv("OMNI_GITHUB_API_BASE"), "/")
 	}
 	if baseURL == "" {
 		baseURL = defaultGitHubAPIBase
@@ -132,11 +118,13 @@ func (a *App) fetchLatestGitHubRelease(ctx context.Context, owner, repoName stri
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "omni")
-	// The token is sent whenever the base URL is a known GitHub host (guaranteed
-	// by the validation above for env overrides) or via the programmatic test
-	// override (SetGitHubFallbackAPIForTest, in-process only).
+	// Only attach the token to GitHub's own API to prevent credential leakage
+	// when OMNI_GITHUB_API_BASE points at a non-GitHub host (e.g. a local test stub).
 	if token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN")); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+		parsed, parseErr := url.Parse(baseURL)
+		if parseErr == nil && isGitHubHost(parsed.Host) {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
