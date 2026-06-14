@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -743,7 +744,9 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 			// MultiManagerBulkChecker takes priority: probes all backends for per-tool attribution.
 			if mbc, ok := p.(provider.MultiManagerBulkChecker); ok {
 				entries, err := mbc.InstalledByManager(ctx)
-				if err == nil {
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "warning: omni: bulk scan %s: %v\n", p.Name(), err)
+				} else {
 					res.multiMap = entries
 				}
 				results[i] = res
@@ -753,10 +756,13 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 			if mbc, ok := p.(provider.MetadataBulkChecker); ok {
 				metadata, err := mbc.InstalledMetadataMap(ctx)
 				if err != nil {
+					fmt.Fprintf(os.Stderr, "warning: omni: bulk scan %s: %v\n", p.Name(), err)
 					results[i] = res
 					return
 				}
 				res.metadataMap = metadata
+				// Pre-compute the version-only map here; the merge pass reuses it
+				// directly rather than recomputing from res.metadataMap.
 				m = installedMapFromMetadata(metadata)
 			} else {
 				bc, ok := p.(provider.BulkChecker)
@@ -767,12 +773,16 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 				var err error
 				m, err = bc.InstalledMap(ctx)
 				if err != nil {
+					fmt.Fprintf(os.Stderr, "warning: omni: bulk scan %s: %v\n", p.Name(), err)
 					results[i] = res
 					return
 				}
 			}
 			// Resolve concrete backend for InstalledWith. Ecosystem providers (e.g. node)
 			// implement ConcreteResolver; concrete providers are their own backend.
+			// resolvedProviderName reads scanProgress.resolvedConcrete under rcMu;
+			// that map is fully populated before any goroutine starts (happens-before
+			// via the sync.WaitGroup.Add calls that follow newRefreshInstalledScanProgress).
 			installedWith := p.Name()
 			if cr, ok := p.(provider.ConcreteResolver); ok {
 				if name, cached := scanProgress.resolvedProviderName(p.Name()); cached {
@@ -802,7 +812,7 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 		}
 		if res.metadataMap != nil {
 			metadataMaps[res.name] = res.metadataMap
-			installedMaps[res.name] = installedMapFromMetadata(res.metadataMap)
+			installedMaps[res.name] = res.installedMap // pre-computed in goroutine
 			concreteForBulk[res.name] = res.installedWith
 			continue
 		}
@@ -962,6 +972,10 @@ type refreshInstalledScanProgress struct {
 	total            int
 	labelsByProvider map[string][]string
 	emitted          map[string]bool
+	// resolvedConcrete caches ConcreteResolver results. It is written during
+	// scan-progress setup (single-goroutine) and read concurrently by the
+	// parallel bulk-scan goroutines, so reads are guarded by rcMu.
+	rcMu             sync.RWMutex
 	resolvedConcrete map[string]string
 }
 
@@ -1016,6 +1030,8 @@ func (p *refreshInstalledScanProgress) resolvedProviderName(providerName string)
 	if p == nil || p.resolvedConcrete == nil {
 		return "", false
 	}
+	p.rcMu.RLock()
+	defer p.rcMu.RUnlock()
 	name, ok := p.resolvedConcrete[providerName]
 	return name, ok
 }
