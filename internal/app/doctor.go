@@ -63,6 +63,7 @@ func (a *App) Doctor(ctx context.Context) (*DoctorResult, error) {
 	if configOK {
 		a.doctorHost(result, cfg)
 		a.doctorProviders(ctx, result)
+		a.doctorDrift(ctx, result, cfg)
 		a.doctorDots(ctx, result, cfg)
 		a.doctorDotsIgnorePatterns(result, cfg)
 	}
