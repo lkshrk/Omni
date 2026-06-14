@@ -806,17 +806,27 @@ func (a *App) syncTaps(ctx context.Context, taps []string, dryRun bool) error {
 			trusted = t
 		}
 	}
+	// tapOpTimeout caps each individual brew tap/trust subprocess call so a
+	// single slow network response cannot stall the full sync indefinitely.
+	const tapOpTimeout = 60 * time.Second
+
 	for _, tap := range trustOrder {
 		if _, exists := tapped[tap]; !exists {
-			if err := bm.Tap(ctx, tap); err != nil {
-				return fmt.Errorf("tapping %s: %w", tap, err)
+			tapCtx, tapCancel := context.WithTimeout(ctx, tapOpTimeout)
+			tapErr := bm.Tap(tapCtx, tap)
+			tapCancel()
+			if tapErr != nil {
+				return fmt.Errorf("tapping %s: %w", tap, tapErr)
 			}
 		}
 		if trusted[tap] {
 			continue
 		}
-		if err := bm.Trust(ctx, tap); err != nil {
-			return fmt.Errorf("trusting tap %s: %w", tap, err)
+		trustCtx, trustCancel := context.WithTimeout(ctx, tapOpTimeout)
+		trustErr := bm.Trust(trustCtx, tap)
+		trustCancel()
+		if trustErr != nil {
+			return fmt.Errorf("trusting tap %s: %w", tap, trustErr)
 		}
 		if db := a.readDB(); db != nil {
 			if err := db.MarkTapTrusted(ctx, tap, time.Now()); err != nil {
