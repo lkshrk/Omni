@@ -7756,6 +7756,12 @@ func TestRenderDots_SectionHeadersPresent(t *testing.T) {
 			t.Errorf("dots view missing entry %q\nview:\n%s", name, out)
 		}
 	}
+	// DotStateSynced → "Synced", DotStateIgnored → "Ignored" per DotStatusSections.
+	for _, header := range []string{"Synced", "Ignored"} {
+		if !strings.Contains(out, header) {
+			t.Errorf("dots view missing section header %q — renderDots() section.Header() not called\nview:\n%s", header, out)
+		}
+	}
 }
 
 // TestRenderStatus_SectionHeadersPresent catches renames or sectionOrder changes
