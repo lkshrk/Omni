@@ -286,23 +286,23 @@ func shellSingleQuote(s string) string {
 func githubReleaseAssetInstallCommand(downloadURL string) string {
 	assetName := path.Base(downloadURL)
 	if strings.TrimSpace(assetName) == "" || assetName == "." || assetName == "/" {
-		// Fall back to the template variable; quoting is applied at render time.
-		return `mkdir -p '{{cache_dir}}' '{{bin_dir}}' && ` +
-			`asset='{{cache_dir}}/{{asset_path}}' && ` +
-			`curl -fsSL '{{asset_path}}' -o "$asset" && ` +
+		// No URL available: asset_path (already absolute, quoted at render time)
+		// is used directly as the local archive to extract.
+		return `mkdir -p {{cache_dir}} {{bin_dir}} && ` +
+			`asset={{asset_path}} && ` +
 			`tmp="$(mktemp -d)" && ` +
-			`case "$asset" in *.zip) unzip -q "$asset" -d "$tmp" ;; *.tar.gz|*.tgz) tar -xzf "$asset" -C "$tmp" ;; *) cp "$asset" "$tmp/"'{{binary}}' ;; esac && ` +
-			`found="$(find "$tmp" -type f -perm -111 -name '{{binary}}' | head -n 1)" && ` +
-			`test -n "$found" && cp "$found" '{{bin_dir}}'/'{{binary}}' && chmod +x '{{bin_dir}}'/'{{binary}}'`
+			`case "$asset" in *.zip) unzip -q "$asset" -d "$tmp" ;; *.tar.gz|*.tgz) tar -xzf "$asset" -C "$tmp" ;; *) cp "$asset" "$tmp/"{{binary}} ;; esac && ` +
+			`found="$(find "$tmp" -type f -perm -111 -name {{binary}} | head -n 1)" && ` +
+			`test -n "$found" && cp "$found" {{bin_dir}}/{{binary}} && chmod +x {{bin_dir}}/{{binary}}`
 	}
-	// Both downloadURL (from GitHub API browser_download_url) and assetName
-	// (derived from it via path.Base) are shell-quoted so a malicious or
-	// compromised release URL cannot inject shell commands.
-	return `mkdir -p '{{cache_dir}}' '{{bin_dir}}' && ` +
-		`asset='{{cache_dir}}'/` + shellSingleQuote(assetName) + ` && ` +
+	// downloadURL and assetName (from GitHub API browser_download_url) are
+	// shell-quoted at construction time; {{var}} placeholders are quoted at
+	// render time — so no placeholder appears inside a surrounding quote pair.
+	return `mkdir -p {{cache_dir}} {{bin_dir}} && ` +
+		`asset={{cache_dir}}/` + shellSingleQuote(assetName) + ` && ` +
 		`curl -fsSL ` + shellSingleQuote(downloadURL) + ` -o "$asset" && ` +
 		`tmp="$(mktemp -d)" && ` +
-		`case "$asset" in *.zip) unzip -q "$asset" -d "$tmp" ;; *.tar.gz|*.tgz) tar -xzf "$asset" -C "$tmp" ;; *) cp "$asset" "$tmp/"'{{binary}}' ;; esac && ` +
-		`found="$(find "$tmp" -type f -perm -111 -name '{{binary}}' | head -n 1)" && ` +
-		`test -n "$found" && cp "$found" '{{bin_dir}}'/'{{binary}}' && chmod +x '{{bin_dir}}'/'{{binary}}'`
+		`case "$asset" in *.zip) unzip -q "$asset" -d "$tmp" ;; *.tar.gz|*.tgz) tar -xzf "$asset" -C "$tmp" ;; *) cp "$asset" "$tmp/"{{binary}} ;; esac && ` +
+		`found="$(find "$tmp" -type f -perm -111 -name {{binary}} | head -n 1)" && ` +
+		`test -n "$found" && cp "$found" {{bin_dir}}/{{binary}} && chmod +x {{bin_dir}}/{{binary}}`
 }

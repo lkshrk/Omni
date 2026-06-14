@@ -199,18 +199,22 @@ func TestGitHubFallbackHasSavedReleaseMetadata(t *testing.T) {
 
 func TestGitHubReleaseAssetInstallCommandUsesAssetBasename(t *testing.T) {
 	got := githubReleaseAssetInstallCommand("https://github.com/cli/cli/releases/download/v2.93.0/gh_2.93.0_macOS_arm64.zip")
-	// Asset name and download URL must be single-quoted so shell metacharacters
-	// in a malicious URL cannot escape the string boundary.
-	if !strings.Contains(got, `asset='{{cache_dir}}'/'gh_2.93.0_macOS_arm64.zip'`) {
-		t.Fatalf("install command = %q, want single-quoted cache asset basename", got)
+	// Placeholders are bare so the rendered single-quoted value is the only quoting.
+	// The asset name and URL are shell-quoted at construction; no surrounding quotes in the template.
+	if !strings.Contains(got, `asset={{cache_dir}}/'gh_2.93.0_macOS_arm64.zip'`) {
+		t.Fatalf("install command = %q, want bare cache_dir placeholder followed by quoted asset name", got)
 	}
 	if !strings.Contains(got, `curl -fsSL 'https://github.com/cli/cli/releases/download/v2.93.0/gh_2.93.0_macOS_arm64.zip'`) {
 		t.Fatalf("install command = %q, want single-quoted curl download URL", got)
 	}
 
+	// No-URL branch: asset_path (full absolute path, quoted at render time) used directly.
 	fallback := githubReleaseAssetInstallCommand("")
-	if !strings.Contains(fallback, `asset='{{cache_dir}}/{{asset_path}}'`) {
-		t.Fatalf("fallback install command = %q, want asset_path placeholder", fallback)
+	if !strings.Contains(fallback, `asset={{asset_path}}`) {
+		t.Fatalf("fallback install command = %q, want bare asset_path placeholder", fallback)
+	}
+	if strings.Contains(fallback, "curl") {
+		t.Fatalf("fallback install command = %q, want no curl when no download URL", fallback)
 	}
 }
 
