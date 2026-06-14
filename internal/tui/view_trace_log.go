@@ -9,8 +9,10 @@ import (
 	"github.com/lkshrk/omni/internal/database"
 )
 
+const traceLogTitle = "Command Log"
+
 func traceLogPopupFrame(m Model) popupFrame {
-	return scrollPopupFrame(m, "Command Log")
+	return scrollPopupFrame(m, traceLogTitle)
 }
 
 func traceLogContentWidth(m Model) int {
@@ -18,7 +20,7 @@ func traceLogContentWidth(m Model) int {
 }
 
 func traceLogBodyHeight(m Model) int {
-	return scrollPopupBodyHeight(m, "Command Log", traceLogHintItems(m))
+	return scrollPopupBodyHeight(m, traceLogTitle, traceLogHintItems(m))
 }
 
 func traceLogHintItems(m Model) []hintItem {
@@ -38,7 +40,7 @@ func renderTraceLogPopup(m Model) string {
 	if m.traceLog != nil {
 		scroll = m.traceLog.scroll
 	}
-	return renderScrollPopup(m, "Command Log", lines, scroll, traceLogHintItems(m))
+	return renderScrollPopup(m, traceLogTitle, lines, scroll, traceLogHintItems(m))
 }
 
 func traceLogLines(m Model, width int) []string {

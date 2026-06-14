@@ -76,9 +76,10 @@ func scrollPopupVisibleLines(p palette, lines []string, start, height int) []str
 	return out
 }
 
-// renderScrollPopup renders a complete scrollable overlay: it applies the
-// visible-line window, joins the body, appends the hint footer, and returns
-// the rendered string ready for placeOverlay.
+// renderScrollPopup renders a complete scrollable overlay: it clamps the scroll
+// offset to [0, maxScroll], applies the visible-line window, joins the body,
+// appends the hint footer, and returns the rendered string ready for
+// placeOverlay. Callers may pass an unclamped scroll offset — it is clamped here.
 func renderScrollPopup(m Model, title string, lines []string, scroll int, hints []hintItem) string {
 	width := scrollPopupContentWidth(m)
 	bodyH := scrollPopupBodyHeight(m, title, hints)
