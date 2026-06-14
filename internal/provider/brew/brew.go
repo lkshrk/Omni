@@ -304,7 +304,12 @@ func (p *Provider) installedFormulae(ctx context.Context) ([]provider.InstalledT
 	for _, pkg := range packages {
 		name := formulaName(pkg)
 		tools = append(tools, provider.InstalledTool{
-			Tool:    provider.Tool{Name: name, Provider: "brew", Package: pkg},
+			Tool: provider.Tool{
+				Name:     name,
+				Provider: "brew",
+				Package:  pkg,
+				Options:  map[string]string{brewKindOption: brewKindFormula},
+			},
 			Version: lookupBrewListVersion(versions, pkg),
 		})
 	}

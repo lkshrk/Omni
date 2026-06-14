@@ -210,6 +210,32 @@ func TestUpgrade_FallsBackToProbeWhenKindUnknown(t *testing.T) {
 	}
 }
 
+// TestInstalledFormulae_CarryBrewKindOption verifies that ListInstalled returns
+// formula tools with Options["brew_kind"]="formula", symmetric with casks.
+func TestInstalledFormulae_CarryBrewKindOption(t *testing.T) {
+	ctx := context.Background()
+	// brew leaves --installed-on-request → ripgrep
+	// brew list --versions ripgrep → ripgrep 14.1.0
+	// brew list --cask → (empty, no casks)
+	p, _ := newBrew(
+		executor.MockCall{Stdout: "ripgrep"},        // leaves --installed-on-request
+		executor.MockCall{Stdout: "ripgrep 14.1.0"}, // list --versions ripgrep
+		executor.MockCall{Stdout: ""},               // list --cask
+	)
+
+	tools, err := p.ListInstalled(ctx)
+	if err != nil {
+		t.Fatalf("ListInstalled: %v", err)
+	}
+	if len(tools) == 0 {
+		t.Fatal("expected at least one installed tool")
+	}
+	got := tools[0].Options["brew_kind"]
+	if got != "formula" {
+		t.Errorf("ListInstalled formula Options[brew_kind] = %q, want %q", got, "formula")
+	}
+}
+
 // TestInstalledCasks_CarryBrewKindOption verifies that ListInstalled returns
 // cask tools with Options["brew_kind"]="cask" (used by lifecycle commands).
 func TestInstalledCasks_CarryBrewKindOption(t *testing.T) {
