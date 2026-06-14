@@ -14,7 +14,8 @@ type DriftClass string
 
 const (
 	// DriftProviderUnusable means the configured provider is unavailable/unregistered
-	// on this host and has no usable fallback.
+	// on this host, the tool has no usable native or fallback route, and the tool
+	// is not present via any other means.
 	DriftProviderUnusable DriftClass = "provider-unusable"
 
 	// DriftWrongProvider means the tool is installed by a provider that differs
@@ -40,6 +41,7 @@ type DriftFinding struct {
 // DoctorResult. Kept separate so unit tests can inspect findings directly.
 type driftReport struct {
 	findings []DriftFinding
+	warnings []string // resolver warnings surfaced as detail lines
 }
 
 // doctorDrift detects config-vs-reality mismatches for all configured tools
@@ -56,12 +58,15 @@ func (a *App) doctorDrift(ctx context.Context, result *DoctorResult, cfg *config
 }
 
 // buildDriftReport performs the actual drift analysis and returns the raw
-// findings. Exported only for testing; callers should use doctorDrift.
+// findings. Callers in production code should use doctorDrift; this function
+// is package-private so that tests can inspect the findings directly.
 func (a *App) buildDriftReport(ctx context.Context, cfg *config.RootConfig) (*driftReport, error) {
 	// 1. Resolve which tools are active on this host.
-	tools, _ := a.currentResolvedToolEntries(ctx, cfg)
-	if len(tools) == 0 {
-		return &driftReport{}, nil
+	//    Use currentResolvedTools (not currentResolvedToolEntries) so we get the
+	//    resolved install route for each tool without a second planning pass.
+	resolved, warnings := a.currentResolvedTools(ctx, cfg)
+	if len(resolved) == 0 {
+		return &driftReport{warnings: warnings}, nil
 	}
 
 	// 2. Collect provider availability in one pass.
@@ -77,7 +82,8 @@ func (a *App) buildDriftReport(ctx context.Context, cfg *config.RootConfig) (*dr
 	}
 
 	var findings []DriftFinding
-	for _, t := range tools {
+	for _, rt := range resolved {
+		t := rt.entry
 		if t.Provider == "" {
 			continue // unresolved / empty-provider tool — skip
 		}
@@ -87,34 +93,53 @@ func (a *App) buildDriftReport(ctx context.Context, cfg *config.RootConfig) (*dr
 
 		switch {
 		case !provRegistered || !provAvail:
-			// Provider unavailable on this host.
+			// The configured provider is unavailable/unregistered.
+			//
+			// Before flagging as drift, check whether the resolver already found a
+			// usable route (native via a secondary Providers[] entry, or a GitHub
+			// fallback). If a working route exists, this is not drift — the config
+			// correctly handles the unavailability.
+			if rt.route.Kind == installRouteNative || rt.route.Kind == installRouteFallbackEligible {
+				continue // a usable route exists; not drift
+			}
+
 			if tc != nil && tc.Installed && tc.InstalledWith != "" {
-				// Class 3: unavailable provider but tool is present another way.
+				// Class 3: provider unavailable but tool is present another way
+				// (e.g. pnpm pinned to brew but delivered by corepack).
 				findings = append(findings, DriftFinding{
-					Tool:       t.Name,
-					Provider:   t.Provider,
-					Class:      DriftUnavailableButPresent,
-					Extra:      tc.InstalledWith,
-					Suggestion: fmt.Sprintf("reconfigure provider: tool %q is present via %q but pinned to unavailable %q — update provider in config or add %q as a fallback", t.Name, tc.InstalledWith, t.Provider, tc.InstalledWith),
+					Tool:     t.Name,
+					Provider: t.Provider,
+					Class:    DriftUnavailableButPresent,
+					Extra:    tc.InstalledWith,
+					Suggestion: fmt.Sprintf(
+						"reconfigure provider: tool %q is present via %q but pinned to unavailable %q — update provider in config or add %q as a fallback",
+						t.Name, tc.InstalledWith, t.Provider, tc.InstalledWith),
 				})
 			} else if tc == nil || !tc.Installed {
-				// Class 1: provider can't provide on this host and tool is missing.
+				// Class 1: provider can't provide on this host, no fallback, tool absent.
 				findings = append(findings, DriftFinding{
-					Tool:       t.Name,
-					Provider:   t.Provider,
-					Class:      DriftProviderUnusable,
-					Suggestion: fmt.Sprintf("provider %q is not available on this host for tool %q — add a fallback provider or change the configured provider", t.Provider, t.Name),
+					Tool:     t.Name,
+					Provider: t.Provider,
+					Class:    DriftProviderUnusable,
+					Suggestion: fmt.Sprintf(
+						"provider %q is not available on this host for tool %q — add a fallback provider or change the configured provider",
+						t.Provider, t.Name),
 				})
 			}
 
 		case tc != nil && tc.Installed && tc.InstalledWith != "" && tc.InstalledWith != t.Provider:
 			// Class 2: tool is installed by a different provider than configured.
+			// Tools with InstalledWith="" (PATH-detected by HCL-26) are intentionally
+			// skipped here — an empty InstalledWith means no concrete manager claim
+			// and is not a wrong-provider mismatch.
 			findings = append(findings, DriftFinding{
-				Tool:       t.Name,
-				Provider:   t.Provider,
-				Class:      DriftWrongProvider,
-				Extra:      tc.InstalledWith,
-				Suggestion: fmt.Sprintf("tool %q is configured for %q but installed via %q — run 'omni tools sync' to reconcile or update the provider in config", t.Name, t.Provider, tc.InstalledWith),
+				Tool:     t.Name,
+				Provider: t.Provider,
+				Class:    DriftWrongProvider,
+				Extra:    tc.InstalledWith,
+				Suggestion: fmt.Sprintf(
+					"tool %q is configured for %q but installed via %q — run 'omni tools sync' to reconcile or update the provider in config",
+					t.Name, t.Provider, tc.InstalledWith),
 			})
 		}
 	}
@@ -126,14 +151,21 @@ func (a *App) buildDriftReport(ctx context.Context, cfg *config.RootConfig) (*dr
 		return findings[i].Tool < findings[j].Tool
 	})
 
-	return &driftReport{findings: findings}, nil
+	return &driftReport{findings: findings, warnings: warnings}, nil
 }
 
 // addDriftCheck converts a driftReport into a single DoctorCheck and appends
 // it to result using the grouped-detail format already used by dots_audit.go.
 func (a *App) addDriftCheck(result *DoctorResult, report *driftReport) {
+	// Surface resolver warnings as detail lines regardless of whether there are
+	// drift findings — resolution problems are meaningful in the doctor context.
+	extraDetails := make([]string, 0, len(report.warnings))
+	for _, w := range report.warnings {
+		extraDetails = append(extraDetails, "resolver warning: "+w)
+	}
+
 	if len(report.findings) == 0 {
-		result.addCheck("drift", "Drift", DoctorStatusOK, "no config-vs-reality drift detected")
+		result.addCheck("drift", "Drift", DoctorStatusOK, "no config-vs-reality drift detected", extraDetails...)
 		return
 	}
 
@@ -167,6 +199,7 @@ func (a *App) addDriftCheck(result *DoctorResult, report *driftReport) {
 		Label:   "Drift",
 		Status:  DoctorStatusWarn,
 		Message: fmt.Sprintf("%d drift finding(s) — config does not match reality", len(report.findings)),
+		Details: extraDetails,
 		Groups:  detailGroups,
 	}
 	result.Checks = append(result.Checks, check)
