@@ -7631,40 +7631,107 @@ func TestRenderDotsPeek_PopupAbsentOutsideDots(t *testing.T) {
 	}
 }
 
-// TestRenderList_SectionHeadersPresent asserts that the list view renders
-// recognisable section headers when tools are present. The exact section a tool
-// lands in depends on sync classification; without a live app context tools are
-// classified as "Out of Sync". We assert (a) the tool name appears, (b) at
-// least one section header string from sectionLabel() appears, and (c) the
-// section header comes from the known set — not a raw int or blank string.
-// This guards against sectionLabel() being bypassed or returning garbage.
+// TestRenderList_SectionHeadersPresent asserts that the list view renders the
+// correct section header for each tool based on its actual state.
+//
+// Classification rules for brew tools (no provider-pin, no ecosystem manager):
+//   - Installed: true, Tracked: true, Outdated: false  → sectionInstalled  → "Installed"
+//   - Installed: true, Tracked: true, Outdated: true   → sectionUpdates    → "Updates Available"
+//
+// Both assertions use baseModel — no live app.App is required because brew
+// tools are classified solely by their ToolCache fields; the
+// ToolClassificationContext is empty (no provider pins, no ecosystem
+// overrides) which is the correct default for brew.
 func TestRenderList_SectionHeadersPresent(t *testing.T) {
-	tool := &database.ToolCache{
-		Name: "git", Provider: "brew", Package: "git",
-		Installed: true, Tracked: true,
-	}
-	m := baseModel([]*database.ToolCache{tool})
-	m.mode = viewList
-	m.width = 120
-	m.height = 60
-
-	out := stripANSIEscapeSequences(renderList(m))
-
-	if !strings.Contains(out, "git") {
-		t.Errorf("list view missing tool name 'git'\nview:\n%s", out)
-	}
-
-	knownHeaders := []string{"Installed", "Available", "Out of Sync", "Updates Available", "Ignored", "Quarantined Updates"}
-	found := false
-	for _, h := range knownHeaders {
-		if strings.Contains(out, h) {
-			found = true
-			break
+	t.Run("installed brew tool renders Installed section header", func(t *testing.T) {
+		tool := &database.ToolCache{
+			Name: "git", Provider: "brew", Package: "git",
+			Installed: true, Tracked: true,
 		}
-	}
-	if !found {
-		t.Errorf("list view contains no recognised section header from %v\nview:\n%s", knownHeaders, out)
-	}
+		m := baseModel([]*database.ToolCache{tool})
+		m.mode = viewList
+		m.width = 120
+		m.height = 60
+
+		out := stripANSIEscapeSequences(renderList(m))
+
+		if !strings.Contains(out, "git") {
+			t.Errorf("list view missing tool name 'git'\nview:\n%s", out)
+		}
+		if !strings.Contains(out, "Installed") {
+			t.Errorf("list view missing 'Installed' section header for an installed, up-to-date brew tool\nview:\n%s", out)
+		}
+		// Negative guard: this tool must NOT appear under "Updates Available" or "Out of Sync".
+		if strings.Contains(out, "Updates Available") {
+			t.Errorf("list view wrongly shows 'Updates Available' for a non-outdated tool\nview:\n%s", out)
+		}
+		if strings.Contains(out, "Out of Sync") {
+			t.Errorf("list view wrongly shows 'Out of Sync' for a tracked+installed brew tool\nview:\n%s", out)
+		}
+	})
+
+	t.Run("outdated brew tool renders Updates Available section header", func(t *testing.T) {
+		outdated := &database.ToolCache{
+			Name: "ripgrep", Provider: "brew", Package: "ripgrep",
+			Installed: true, Tracked: true, Outdated: true,
+		}
+		outdated.Version.Valid = true
+		outdated.Version.String = "13.0"
+		outdated.LatestVersion.Valid = true
+		outdated.LatestVersion.String = "14.1"
+
+		m := baseModel([]*database.ToolCache{outdated})
+		m.mode = viewList
+		m.width = 120
+		m.height = 60
+
+		out := stripANSIEscapeSequences(renderList(m))
+
+		if !strings.Contains(out, "ripgrep") {
+			t.Errorf("list view missing tool name 'ripgrep'\nview:\n%s", out)
+		}
+		if !strings.Contains(out, "Updates Available") {
+			t.Errorf("list view missing 'Updates Available' section header for an outdated brew tool\nview:\n%s", out)
+		}
+		if strings.Contains(out, "Installed") {
+			t.Errorf("list view wrongly shows 'Installed' for an outdated tool\nview:\n%s", out)
+		}
+	})
+
+	t.Run("both sections render when installed and outdated tools coexist", func(t *testing.T) {
+		installed := &database.ToolCache{
+			Name: "bat", Provider: "brew", Package: "bat",
+			Installed: true, Tracked: true,
+		}
+		outdated := &database.ToolCache{
+			Name: "fd", Provider: "brew", Package: "fd",
+			Installed: true, Tracked: true, Outdated: true,
+		}
+		outdated.Version.Valid = true
+		outdated.Version.String = "8.7"
+		outdated.LatestVersion.Valid = true
+		outdated.LatestVersion.String = "9.0"
+
+		m := baseModel([]*database.ToolCache{installed, outdated})
+		m.mode = viewList
+		m.width = 120
+		m.height = 60
+
+		out := stripANSIEscapeSequences(renderList(m))
+
+		if !strings.Contains(out, "bat") {
+			t.Errorf("list view missing tool name 'bat'\nview:\n%s", out)
+		}
+		if !strings.Contains(out, "fd") {
+			t.Errorf("list view missing tool name 'fd'\nview:\n%s", out)
+		}
+		if !strings.Contains(out, "Installed") {
+			t.Errorf("list view missing 'Installed' section header\nview:\n%s", out)
+		}
+		if !strings.Contains(out, "Updates Available") {
+			t.Errorf("list view missing 'Updates Available' section header\nview:\n%s", out)
+		}
+	})
 }
 
 // TestRenderList_UpdatesSectionHeader asserts that the "Updates Available"
