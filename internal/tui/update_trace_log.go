@@ -11,9 +11,10 @@ func (m *Model) handleTraceLogLoadedMsg(msg traceLogLoadedMsg) []tea.Cmd {
 	}
 	m.traceLogLoading = false
 	if msg.err != nil {
-		// Surface the error via status; don't crash the popup.
-		m.traceLog = &traceLogState{}
-		return nil
+		// Surface the failure both in the popup body and the status bar so it
+		// isn't mistaken for an empty log.
+		m.traceLog = &traceLogState{err: msg.err}
+		return []tea.Cmd{setStatus(m, "command log: "+msg.err.Error(), true)}
 	}
 	m.traceLog = &traceLogState{traces: msg.traces}
 	return nil

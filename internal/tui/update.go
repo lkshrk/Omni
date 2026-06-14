@@ -365,7 +365,7 @@ func (m *Model) handleMouseWheelMsg(msg tea.MouseWheelMsg) bool {
 		m.scrollDotsPeekBy(delta)
 		return true
 	}
-	if m.traceLog != nil {
+	if m.mode == viewSettings && m.traceLog != nil {
 		m.scrollTraceLogBy(delta)
 		return true
 	}

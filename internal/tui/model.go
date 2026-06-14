@@ -108,6 +108,7 @@ type dotsPeekState struct {
 type traceLogState struct {
 	traces []database.CommandTrace
 	scroll int
+	err    error
 }
 
 type groupToolSection int

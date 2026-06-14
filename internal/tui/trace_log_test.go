@@ -378,6 +378,132 @@ func TestTraceLog_ErrorInLoadedMsg(t *testing.T) {
 	}
 }
 
+// ── UC-TL-08: render gate — popup only visible in viewSettings ────────────────
+
+// TestTraceLog_RenderGate_VisibleInSettings verifies the popup is drawn when
+// m.mode == viewSettings and traceLog is populated.
+func TestTraceLog_RenderGate_VisibleInSettings(t *testing.T) {
+	m := settingsTraceLogModel()
+	m = injectTraces(m, fixtureTraces())
+
+	// Precondition: we are in viewSettings with traces loaded.
+	if m.mode != viewSettings {
+		t.Fatalf("precondition: mode = %v, want viewSettings", m.mode)
+	}
+	if m.traceLog == nil {
+		t.Fatal("precondition: traceLog should be non-nil")
+	}
+
+	view := m.View().Content
+	if !strings.Contains(view, "brew install ripgrep") {
+		t.Errorf("popup should be visible in viewSettings; View() missing trace command\nview:\n%s", view)
+	}
+	if !strings.Contains(view, "Command Log") {
+		t.Errorf("popup title 'Command Log' should appear in viewSettings\nview:\n%s", view)
+	}
+}
+
+// TestTraceLog_RenderGate_HiddenOutsideSettings verifies the popup is NOT drawn
+// when m.mode is not viewSettings, even if traceLog is populated. This is the
+// regression guard for the bug class where the popup silently disappears when
+// the view mode changes.
+func TestTraceLog_RenderGate_HiddenOutsideSettings(t *testing.T) {
+	// Build the model in settings mode so we can populate traceLog.
+	m := settingsTraceLogModel()
+	m = injectTraces(m, fixtureTraces())
+
+	if m.traceLog == nil {
+		t.Fatal("precondition: traceLog should be non-nil")
+	}
+
+	// Now force the mode to viewList — traceLog stays populated to verify the gate.
+	m.mode = viewList
+
+	view := m.View().Content
+	if strings.Contains(view, "brew install ripgrep") {
+		t.Error("popup trace command should NOT appear when mode != viewSettings")
+	}
+	if strings.Contains(view, "Command Log") {
+		t.Error("popup title 'Command Log' should NOT appear when mode != viewSettings")
+	}
+}
+
+// ── UC-TL-09: error path rendering ───────────────────────────────────────────
+
+// TestTraceLog_ErrorPath_RendersFailureMessage verifies that when
+// handleTraceLogLoadedMsg receives msg.err != nil it:
+//
+//	(a) renders "Failed to load command log" + the error text in the popup,
+//	(b) does NOT render "No commands recorded.", and
+//	(c) sets m.statusMsg with m.statusIsErr == true.
+func TestTraceLog_ErrorPath_RendersFailureMessage(t *testing.T) {
+	m := settingsTraceLogModel()
+	gen := m.traceLogGen + 1
+	m = drive(m, pressEnter())
+
+	sentinelErr := errSentinel("db unavailable")
+	m = drive(m, traceLogLoadedMsg{gen: gen, err: sentinelErr})
+
+	// (a) popup body must contain the failure text.
+	view := m.View().Content
+	if !strings.Contains(view, "Failed to load command log") {
+		t.Errorf("View() missing 'Failed to load command log'\nview:\n%s", view)
+	}
+	if !strings.Contains(view, "db unavailable") {
+		t.Errorf("View() missing error text 'db unavailable'\nview:\n%s", view)
+	}
+
+	// (b) must NOT fall through to the empty-state text.
+	if strings.Contains(view, "No commands recorded.") {
+		t.Error("View() must not show 'No commands recorded.' when err is set")
+	}
+
+	// (c) status bar must reflect the error.
+	if m.statusMsg == "" {
+		t.Error("statusMsg should be set after error traceLogLoadedMsg")
+	}
+	if !m.statusIsErr {
+		t.Errorf("statusIsErr should be true after error traceLogLoadedMsg, statusMsg=%q", m.statusMsg)
+	}
+}
+
+// ── UC-TL-10: half-page scroll ───────────────────────────────────────────────
+
+// TestTraceLog_HalfPageDown_AdvancesScroll verifies that ctrl+d moves the
+// scroll position forward by at least 1 row.
+func TestTraceLog_HalfPageDown_AdvancesScroll(t *testing.T) {
+	m := settingsTraceLogModel()
+	m = injectTraces(m, manyTraces(50)) // enough rows to scroll
+
+	if m.traceLog.scroll != 0 {
+		t.Fatalf("precondition: initial scroll = %d, want 0", m.traceLog.scroll)
+	}
+
+	m = drive(m, pressCtrlD())
+	if m.traceLog.scroll == 0 {
+		t.Error("HalfPageDown (ctrl+d) should advance scroll beyond 0")
+	}
+	scrollAfterDown := m.traceLog.scroll
+
+	// Half-page up should move back toward 0.
+	m = drive(m, pressCtrlU())
+	if m.traceLog.scroll >= scrollAfterDown {
+		t.Errorf("HalfPageUp (ctrl+u) should reduce scroll; got %d, was %d", m.traceLog.scroll, scrollAfterDown)
+	}
+}
+
+// TestTraceLog_HalfPageUp_ClampsAtZero verifies ctrl+u cannot go below scroll=0.
+func TestTraceLog_HalfPageUp_ClampsAtZero(t *testing.T) {
+	m := settingsTraceLogModel()
+	m = injectTraces(m, manyTraces(50))
+
+	// Starting at 0, pressing ctrl+u should not underflow.
+	m = drive(m, pressCtrlU())
+	if m.traceLog.scroll != 0 {
+		t.Errorf("HalfPageUp at top should clamp to 0, got %d", m.traceLog.scroll)
+	}
+}
+
 // errTraceLoadFailed is a sentinel error for testing the error-path.
 var errTraceLoadFailed = errSentinel("trace load failed")
 

@@ -66,6 +66,9 @@ func traceLogLines(m Model, width int) []string {
 	if m.traceLogLoading && m.traceLog == nil {
 		return []string{m.palette.styleHelp.Render("Loading command log...")}
 	}
+	if m.traceLog != nil && m.traceLog.err != nil {
+		return []string{m.palette.styleMissing.Render("Failed to load command log: " + m.traceLog.err.Error())}
+	}
 	if m.traceLog == nil || len(m.traceLog.traces) == 0 {
 		return []string{m.palette.styleHelp.Render("No commands recorded.")}
 	}
@@ -118,9 +121,9 @@ func traceLogStatusText(m Model, trace database.CommandTrace) string {
 		return p.styleMissing.Render(trace.Status)
 	default:
 		if trace.Status != "" {
-			return trace.Status
+			return p.styleHelp.Render(trace.Status)
 		}
-		return m.palette.styleHelp.Render("unknown")
+		return p.styleHelp.Render("unknown")
 	}
 }
 
