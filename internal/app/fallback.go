@@ -140,20 +140,38 @@ func (a *App) InstallToolFallback(ctx context.Context, name string) error {
 		return err
 	}
 	if err := a.runFallbackCommand(ctx, name, "install", spec, fallback, fallback.Commands.Install); err != nil {
-		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
-		_ = a.readDB().MarkFailed(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec), err.Error())
+		// Capture the clean message before any wrapping so the DB stores the
+		// original failure reason, not the composite status-recording annotation.
+		origMsg := err.Error()
+		if statusErr := a.setToolFallbackStatus(name, config.FallbackStatusFailed); statusErr != nil {
+			err = fmt.Errorf("%w (also: failed to record fallback status: %v)", err, statusErr)
+		}
+		if markErr := a.readDB().MarkFailed(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec), origMsg); markErr != nil {
+			err = fmt.Errorf("%w (also: failed to record DB failure: %v)", err, markErr)
+		}
 		return err
 	}
 	installed, err := a.CheckToolFallback(ctx, name)
 	if err != nil {
-		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
-		_ = a.readDB().MarkFailed(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec), err.Error())
+		origMsg := err.Error()
+		if statusErr := a.setToolFallbackStatus(name, config.FallbackStatusFailed); statusErr != nil {
+			err = fmt.Errorf("%w (also: failed to record fallback status: %v)", err, statusErr)
+		}
+		if markErr := a.readDB().MarkFailed(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec), origMsg); markErr != nil {
+			err = fmt.Errorf("%w (also: failed to record DB failure: %v)", err, markErr)
+		}
 		return err
 	}
 	if !installed {
-		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
-		_ = a.readDB().MarkFailed(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec), "fallback install verification failed")
-		return fmt.Errorf("fallback install verification failed for %s: check command did not pass", name)
+		const verifyMsg = "fallback install verification failed"
+		primaryErr := fmt.Errorf("%s for %s: check command did not pass", verifyMsg, name)
+		if statusErr := a.setToolFallbackStatus(name, config.FallbackStatusFailed); statusErr != nil {
+			primaryErr = fmt.Errorf("%w (also: failed to record fallback status: %v)", primaryErr, statusErr)
+		}
+		if markErr := a.readDB().MarkFailed(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec), verifyMsg); markErr != nil {
+			primaryErr = fmt.Errorf("%w (also: failed to record DB failure: %v)", primaryErr, markErr)
+		}
+		return primaryErr
 	}
 	if err := a.setToolFallbackStatus(name, config.FallbackStatusVerified); err != nil {
 		return err
@@ -201,7 +219,13 @@ func (a *App) UpgradeToolFallback(ctx context.Context, name string) error {
 	}
 	upgradeFallback, refreshed, err := a.githubFallbackUpgradeCandidate(ctx, name, spec, fallback)
 	if err != nil {
-		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
+		origMsg := err.Error()
+		if statusErr := a.setToolFallbackStatus(name, config.FallbackStatusFailed); statusErr != nil {
+			err = fmt.Errorf("%w (also: failed to record fallback status: %v)", err, statusErr)
+		}
+		if markErr := a.readDB().MarkFailed(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec), origMsg); markErr != nil {
+			err = fmt.Errorf("%w (also: failed to record DB failure: %v)", err, markErr)
+		}
 		return err
 	}
 	command := upgradeFallback.Commands.Upgrade
@@ -209,17 +233,36 @@ func (a *App) UpgradeToolFallback(ctx context.Context, name string) error {
 		command = upgradeFallback.Commands.Install
 	}
 	if err := a.runFallbackCommand(ctx, name, "upgrade", spec, upgradeFallback, command); err != nil {
-		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
+		origMsg := err.Error()
+		if statusErr := a.setToolFallbackStatus(name, config.FallbackStatusFailed); statusErr != nil {
+			err = fmt.Errorf("%w (also: failed to record fallback status: %v)", err, statusErr)
+		}
+		if markErr := a.readDB().MarkFailed(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec), origMsg); markErr != nil {
+			err = fmt.Errorf("%w (also: failed to record DB failure: %v)", err, markErr)
+		}
 		return err
 	}
 	installed, err := a.checkToolFallbackWithSpec(ctx, name, spec, upgradeFallback)
 	if err != nil {
-		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
+		origMsg := err.Error()
+		if statusErr := a.setToolFallbackStatus(name, config.FallbackStatusFailed); statusErr != nil {
+			err = fmt.Errorf("%w (also: failed to record fallback status: %v)", err, statusErr)
+		}
+		if markErr := a.readDB().MarkFailed(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec), origMsg); markErr != nil {
+			err = fmt.Errorf("%w (also: failed to record DB failure: %v)", err, markErr)
+		}
 		return err
 	}
 	if !installed {
-		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
-		return fmt.Errorf("fallback upgrade verification failed for %s: check command did not pass", name)
+		const verifyMsg = "fallback upgrade verification failed"
+		primaryErr := fmt.Errorf("%s for %s: check command did not pass", verifyMsg, name)
+		if statusErr := a.setToolFallbackStatus(name, config.FallbackStatusFailed); statusErr != nil {
+			primaryErr = fmt.Errorf("%w (also: failed to record fallback status: %v)", primaryErr, statusErr)
+		}
+		if markErr := a.readDB().MarkFailed(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec), verifyMsg); markErr != nil {
+			primaryErr = fmt.Errorf("%w (also: failed to record DB failure: %v)", primaryErr, markErr)
+		}
+		return primaryErr
 	}
 	if refreshed {
 		verified := *upgradeFallback

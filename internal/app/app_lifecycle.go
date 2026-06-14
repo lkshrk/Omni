@@ -1355,7 +1355,13 @@ func (a *App) UpgradeAllDetailedWithOptions(ctx context.Context, progress func(s
 				continue
 			}
 		}
-		if err := a.UpgradeWithOptions(ctx, t.Name, t.Provider, UpgradeOptions{Force: opts.Force}); err != nil {
+		// upgradeToolTimeout caps a single tool upgrade. One hung package-manager
+		// must not stall every remaining tool in the loop.
+		const upgradeToolTimeout = 10 * time.Minute
+		upgradeCtx, upgradeCancel := context.WithTimeout(ctx, upgradeToolTimeout)
+		upgradeErr := a.UpgradeWithOptions(upgradeCtx, t.Name, t.Provider, UpgradeOptions{Force: opts.Force})
+		upgradeCancel()
+		if err := upgradeErr; err != nil {
 			if isUnupgradeableManagerSelf(t, err) {
 				if progress != nil {
 					progress("skipping " + displayName + " (externally managed; cannot self-upgrade)…")
