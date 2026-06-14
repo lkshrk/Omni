@@ -229,11 +229,13 @@ func Open(path string) (*DB, error) {
 	// Enable WAL mode so concurrent readers (TUI, background sync) don't block
 	// each other. Must be set before any schema work.
 	if _, err := sqlDB.ExecContext(context.Background(), "PRAGMA journal_mode=WAL"); err != nil {
+		_ = sqlDB.Close()
 		return nil, fmt.Errorf("enabling WAL mode: %w", err)
 	}
 	// Retry for up to 5 s before returning SQLITE_BUSY; avoids transient
 	// contention errors during WAL checkpoints with concurrent readers.
 	if _, err := sqlDB.ExecContext(context.Background(), "PRAGMA busy_timeout=5000"); err != nil {
+		_ = sqlDB.Close()
 		return nil, fmt.Errorf("setting busy_timeout: %w", err)
 	}
 
