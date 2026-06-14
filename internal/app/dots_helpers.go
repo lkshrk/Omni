@@ -918,7 +918,7 @@ func purgeIgnoredRepoSources(entry dots.ResolvedEntry) int {
 		return 0
 	}
 	var purged int
-	_ = filepath.WalkDir(entry.SourcePath, func(path string, d os.DirEntry, walkErr error) error {
+	if walkErr := filepath.WalkDir(entry.SourcePath, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -938,7 +938,9 @@ func purgeIgnoredRepoSources(entry dots.ResolvedEntry) int {
 			return filepath.SkipDir
 		}
 		return nil
-	})
+	}); walkErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: omni: purging dot files in %s: %v\n", entry.SourcePath, walkErr)
+	}
 	return purged
 }
 
