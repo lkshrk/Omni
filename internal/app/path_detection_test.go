@@ -19,6 +19,49 @@ import (
 	isync "github.com/lkshrk/omni/internal/sync"
 )
 
+// TestRefreshInstalled_PathDetection_FailureRecordPreserved verifies the core
+// safety invariant: a tool with an active failure record is NOT marked installed
+// via PATH detection, even when its binary is on PATH and the provider is
+// unavailable. Retry-failed flows must not be disrupted by PATH detection.
+func TestRefreshInstalled_PathDetection_FailureRecordPreserved(t *testing.T) {
+	makeBin(t, "mytool")
+
+	brew := &stubProvider{name: "brew", available: false}
+	a, cfgPath := newImportApp(t, brew)
+
+	cfg := &config.RootConfig{
+		Tools:  map[string]config.ToolSpec{"mytool": {Providers: []config.ToolInstallSpec{{Provider: "brew", Package: "mytool"}}}},
+		Groups: []*config.GroupConfig{testHostToolGroup("mytool")},
+	}
+	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+
+	// Seed an active failure record for mytool/brew before running RefreshInstalled.
+	ctx := context.Background()
+	if err := a.DB().MarkFailed(ctx, "mytool", "brew", "mytool", "prior install failure"); err != nil {
+		t.Fatalf("MarkFailed: %v", err)
+	}
+
+	if err := a.RefreshInstalled(ctx, nil); err != nil {
+		t.Fatalf("RefreshInstalled: %v", err)
+	}
+
+	tools, err := a.ListTools(ctx, "")
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	for _, tc := range tools {
+		if tc.Name == "mytool" {
+			if tc.Installed {
+				t.Errorf("mytool.Installed = true despite active failure record — retry-failed state was cleared by PATH detection (safety violation)")
+			}
+			return
+		}
+	}
+	t.Error("mytool not found in ListTools output")
+}
+
 // makeBin creates a zero-byte executable named binName in a temp dir and
 // prepends that dir to PATH for the duration of the test.
 func makeBin(t *testing.T, binName string) {
