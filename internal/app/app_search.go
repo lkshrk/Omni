@@ -614,6 +614,12 @@ func executableDetectSingleTool(t config.ToolEntry, cfg *config.RootConfig, fail
 		return nil, false
 	}
 	spec := cfg.Tools[t.Name]
+	// A configured fallback is a user-managed install mechanism with its own
+	// status lifecycle (unverified/verified/failed). PATH detection must not
+	// override it: the fallback state (gh?/gh/gh!) must remain visible.
+	if spec.Fallback != nil && spec.Fallback.Status != "" {
+		return nil, false
+	}
 	onPath := executableInstalledOnPath(toolBinaryName(t.Name, spec))
 	if !onPath && !cachedInstalled {
 		// Binary absent and no stale positive row — nothing to write.

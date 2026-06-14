@@ -346,3 +346,59 @@ func TestRefreshProviderInstalled_PathDetection_StaleRowCleared(t *testing.T) {
 	}
 	t.Error("mytool not found in ListTools output")
 }
+
+// TestRefreshInstalled_PathDetection_ConfiguredFallback_NotMasked verifies that
+// a tool with a configured fallback (any status) is NOT marked installed by PATH
+// detection — the fallback status lifecycle (gh?/gh/gh!) must remain visible
+// and not be silently overridden because the binary happens to be on PATH.
+func TestRefreshInstalled_PathDetection_ConfiguredFallback_NotMasked(t *testing.T) {
+	makeBin(t, "mytool")
+
+	brew := &stubProvider{name: "brew", available: false}
+	a, cfgPath := newImportApp(t, brew)
+
+	for _, status := range []string{
+		config.FallbackStatusUnverified,
+		config.FallbackStatusVerified,
+		config.FallbackStatusFailed,
+		config.FallbackStatusUnresolved,
+	} {
+		status := status
+		t.Run(status, func(t *testing.T) {
+			cfg := &config.RootConfig{
+				Tools: map[string]config.ToolSpec{
+					"mytool": {
+						Providers: []config.ToolInstallSpec{{Provider: "brew", Package: "mytool"}},
+						Fallback: &config.FallbackSpec{
+							Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "example", Repo: "mytool"},
+							Status: status,
+							Commands: config.FallbackCommands{
+								Check: "command -v mytool",
+							},
+						},
+					},
+				},
+				Groups: []*config.GroupConfig{testHostToolGroup("mytool")},
+			}
+			if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+				t.Fatalf("saving config: %v", err)
+			}
+			if err := a.RefreshInstalled(context.Background(), nil); err != nil {
+				t.Fatalf("RefreshInstalled: %v", err)
+			}
+			tools, err := a.ListTools(context.Background(), "")
+			if err != nil {
+				t.Fatalf("ListTools: %v", err)
+			}
+			for _, tc := range tools {
+				if tc.Name == "mytool" {
+					if tc.Installed {
+						t.Errorf("fallback status %q: mytool.Installed = true -- PATH detection masked configured fallback", status)
+					}
+					return
+				}
+			}
+			t.Error("mytool not found in ListTools output")
+		})
+	}
+}
