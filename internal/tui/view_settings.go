@@ -350,6 +350,11 @@ func renderSettings(m Model) string {
 			value:           p.styleHelp.Render("[reset]"),
 			help:            p.styleHelp.Render("Delete and reinitialise the tool cache database."),
 		},
+		settingsRowTraceLog: {
+			settingsRowMeta: settingsRows[settingsRowTraceLog],
+			value:           p.styleHelp.Render("[view]"),
+			help:            p.styleHelp.Render("View recent commands Omni ran and why."),
+		},
 	}
 
 	for i, row := range rows {

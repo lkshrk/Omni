@@ -717,6 +717,33 @@ func TestRenderSettings_ShowsProviderPriorityRow(t *testing.T) {
 	}
 }
 
+// TestRenderSettings_AllRowsRendered is a regression for settingsRowTraceLog
+// ("Command Log") being present in the const iota and settingsRows meta slice
+// but accidentally omitted from the keyed render slice in renderSettings, which
+// made the row selectable but invisible. The test iterates settingsRows so any
+// future row added to the const/meta but dropped from the render slice will
+// also fail.
+func TestRenderSettings_AllRowsRendered(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewSettings
+	m.width = 120
+	m.height = 60 // tall enough that no rows are clipped by the scroll window
+
+	out := stripANSIEscapeSequences(renderSettings(m))
+
+	for i, row := range settingsRows {
+		if !strings.Contains(out, row.label) {
+			t.Errorf("settings view missing row %d label %q — row is in settingsRows but not rendered", i, row.label)
+		}
+	}
+
+	// Explicit regression: Command Log (settingsRowTraceLog) was the specific
+	// row that was dropped from the render slice before this fix.
+	if !strings.Contains(out, "Command Log") {
+		t.Errorf("settings view missing %q (regression: settingsRowTraceLog omitted from render slice)", "Command Log")
+	}
+}
+
 func TestRenderHeaderUsesCachedDotsAvailability(t *testing.T) {
 	t.Run("settings shows dots on when app is enabled despite stale disabled setting", func(t *testing.T) {
 		m := baseModel(nil)
