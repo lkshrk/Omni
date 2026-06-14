@@ -692,3 +692,86 @@ func assertFallbackStatusFailed(t *testing.T, cfgPath, toolName string) {
 		t.Errorf("fallback status = %q, want failed", s)
 	}
 }
+
+func TestInstallToolFallback_PersistsInstalledVersion(t *testing.T) {
+	binaryContent := []byte("#!/bin/sh\nexit 0\n")
+	assetContent := buildTarGz(t, "tool_v1.0/mytool", binaryContent)
+
+	srv := (&stubGitHubServer{
+		assetName:    "tool_v1.0_darwin_arm64.tar.gz",
+		assetContent: assetContent,
+	}).serve(t)
+
+	a, cfgPath := newImportApp(t, &stubProvider{name: "apt", available: true})
+	a.CacheDir = t.TempDir()
+	a.SetGitHubFallbackAPIForTest(srv.URL, srv.Client())
+
+	fallbackSpec := githubReleaseAssetFallback(srv.URL, "tool_v1.0_darwin_arm64.tar.gz", "mytool")
+	// TagName is set to v1.0.0 so it gets persisted as InstalledVersion.
+	fallbackSpec.Recipe.TagName = "v1.0.0"
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"mytool": {
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
+				Fallback:  &fallbackSpec,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("saveAppConfig: %v", err)
+	}
+
+	if err := a.InstallToolFallback(context.Background(), "mytool"); err != nil {
+		t.Fatalf("InstallToolFallback: %v", err)
+	}
+
+	assertFallbackStatusVerified(t, cfgPath, "mytool")
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	got := cfg.Tools["mytool"].Fallback.Recipe.InstalledVersion
+	if got != "1.0.0" {
+		t.Errorf("InstalledVersion = %q, want %q", got, "1.0.0")
+	}
+}
+
+func TestInstallToolFallback_NoTagName_InstalledVersionEmpty(t *testing.T) {
+	binaryContent := []byte("#!/bin/sh\nexit 0\n")
+	assetContent := buildTarGz(t, "tool_v1.0/mytool", binaryContent)
+
+	srv := (&stubGitHubServer{
+		assetName:    "tool_v1.0_darwin_arm64.tar.gz",
+		assetContent: assetContent,
+	}).serve(t)
+
+	a, cfgPath := newImportApp(t, &stubProvider{name: "apt", available: true})
+	a.CacheDir = t.TempDir()
+	a.SetGitHubFallbackAPIForTest(srv.URL, srv.Client())
+
+	fallbackSpec := githubReleaseAssetFallback(srv.URL, "tool_v1.0_darwin_arm64.tar.gz", "mytool")
+	fallbackSpec.Recipe.TagName = "" // no tag → InstalledVersion stays empty
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"mytool": {
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
+				Fallback:  &fallbackSpec,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("saveAppConfig: %v", err)
+	}
+
+	if err := a.InstallToolFallback(context.Background(), "mytool"); err != nil {
+		t.Fatalf("InstallToolFallback: %v", err)
+	}
+
+	assertFallbackStatusVerified(t, cfgPath, "mytool")
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	got := cfg.Tools["mytool"].Fallback.Recipe.InstalledVersion
+	if got != "" {
+		t.Errorf("InstalledVersion = %q, want empty when no TagName", got)
+	}
+}
