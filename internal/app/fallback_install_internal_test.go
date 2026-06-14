@@ -6,6 +6,9 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -299,6 +302,287 @@ func TestExtractAndInstall_RawBinary(t *testing.T) {
 	if info.Mode()&0o111 == 0 {
 		t.Error("raw: installed binary is not executable")
 	}
+}
+
+// --- tar exact-path match (parity with zip) ---
+
+func TestExtractAndInstall_TarGzExactPath(t *testing.T) {
+	for _, compression := range []string{"gz", "xz"} {
+		compression := compression
+		t.Run(compression, func(t *testing.T) {
+			dir := t.TempDir()
+			correct := []byte("correct binary")
+			wrong := []byte("wrong binary")
+			ext := ".tar." + compression
+			archivePath := filepath.Join(dir, "archive"+ext)
+
+			// Write two entries with the same base name; exact path wins.
+			writeTarMulti(t, archivePath, compression, []tarEntry{
+				{name: "other/mytool", typeflag: tar.TypeReg, content: wrong},
+				{name: "exact/path/mytool", typeflag: tar.TypeReg, content: correct},
+			})
+
+			destPath := filepath.Join(dir, "mytool")
+			if err := extractAndInstall(archivePath, "archive"+ext, "mytool", "exact/path/mytool", destPath); err != nil {
+				t.Fatalf("extractAndInstall exact path %s: %v", compression, err)
+			}
+			got, err := os.ReadFile(destPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != string(correct) {
+				t.Errorf("%s exact path: got %q, want %q", compression, got, correct)
+			}
+		})
+	}
+}
+
+func TestExtractAndInstall_TarBinaryNotFound(t *testing.T) {
+	for _, compression := range []string{"gz", "xz"} {
+		compression := compression
+		t.Run(compression, func(t *testing.T) {
+			dir := t.TempDir()
+			ext := ".tar." + compression
+			archivePath := filepath.Join(dir, "archive"+ext)
+
+			writeTarMulti(t, archivePath, compression, []tarEntry{
+				{name: "other_binary", typeflag: tar.TypeReg, content: []byte("data")},
+			})
+
+			err := extractAndInstall(archivePath, "archive"+ext, "mytool", "", filepath.Join(dir, "mytool"))
+			if err == nil || !strings.Contains(err.Error(), "not found") {
+				t.Fatalf("%s: expected not-found error, got %v", compression, err)
+			}
+		})
+	}
+}
+
+// --- symlink edge: symlink with matching name must not be selected ---
+
+func TestExtractAndInstall_TarSymlinkSkipped(t *testing.T) {
+	for _, compression := range []string{"gz", "xz"} {
+		compression := compression
+		t.Run(compression, func(t *testing.T) {
+			dir := t.TempDir()
+			real := []byte("real binary content")
+			ext := ".tar." + compression
+			archivePath := filepath.Join(dir, "archive"+ext)
+
+			// Symlink entry appears first with the target name; real regular
+			// file appears second — the symlink must be skipped.
+			writeTarMulti(t, archivePath, compression, []tarEntry{
+				{name: "mytool", typeflag: tar.TypeSymlink, content: nil},
+				{name: "dir/mytool", typeflag: tar.TypeReg, content: real},
+			})
+
+			destPath := filepath.Join(dir, "mytool")
+			if err := extractAndInstall(archivePath, "archive"+ext, "mytool", "", destPath); err != nil {
+				t.Fatalf("%s symlink skip: %v", compression, err)
+			}
+			got, err := os.ReadFile(destPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != string(real) {
+				t.Errorf("%s symlink skip: got %q, want %q", compression, got, real)
+			}
+		})
+	}
+}
+
+// --- size cap: oversized download and tar entry are rejected ---
+
+func TestDownloadToFile_OversizedBodyRejected(t *testing.T) {
+	// Override the cap via a tiny limit so the test stays fast.
+	const testLimit = 16
+	origMax := maxDownloadBytes
+	// Can't change the constant at runtime; test via a crafted response body
+	// that is exactly testLimit+1 bytes and verify the production limit works
+	// by feeding maxDownloadBytes+1 bytes into a real downloadToFile call.
+	_ = origMax // constant, can't reassign — test the real cap via a pipe
+
+	// Pipe maxDownloadBytes+1 bytes through downloadToFile by serving them
+	// from a local handler and verifying the error.
+	// To keep the test fast we serve only 1 byte over the cap, which triggers
+	// the limit check (n > maxDownloadBytes).
+	importHTTP := &countingHandler{limit: maxDownloadBytes + 1}
+	srv := newSingleUseServer(t, importHTTP)
+
+	dir := t.TempDir()
+	destPath := filepath.Join(dir, "out")
+	err := downloadToFile(t.Context(), srv.Client(), srv.URL+"/big", destPath)
+	if err == nil || !strings.Contains(err.Error(), "limit") {
+		t.Fatalf("oversized download: want limit error, got %v", err)
+	}
+	// destPath must not exist (temp file cleaned up on error).
+	if _, statErr := os.Stat(destPath); !os.IsNotExist(statErr) {
+		t.Error("partial download file left behind after size-cap error")
+	}
+}
+
+func TestExtractAndInstall_TarOversizedEntryRejected(t *testing.T) {
+	dir := t.TempDir()
+	archivePath := filepath.Join(dir, "big.tar.gz")
+
+	// Write a tar entry that is maxEntryBytes+1 bytes — the header claims the
+	// right size so the writer succeeds; the reader hits the limit check.
+	const bigSize = maxEntryBytes + 1
+	f, err := os.Create(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw := gzip.NewWriter(f)
+	tw := tar.NewWriter(gw)
+	hdr := &tar.Header{Name: "mytool", Typeflag: tar.TypeReg, Mode: 0o755, Size: bigSize}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatal(err)
+	}
+	// Write bigSize zero bytes without buffering them all in memory.
+	chunk := make([]byte, 1<<20) // 1 MiB chunks
+	remaining := int64(bigSize)
+	for remaining > 0 {
+		n := int64(len(chunk))
+		if n > remaining {
+			n = remaining
+		}
+		if _, err := tw.Write(chunk[:n]); err != nil {
+			t.Fatal(err)
+		}
+		remaining -= n
+	}
+	tw.Close() //nolint:errcheck
+	gw.Close() //nolint:errcheck
+	f.Close()  //nolint:errcheck
+
+	destPath := filepath.Join(dir, "mytool")
+	err = extractAndInstall(archivePath, "big.tar.gz", "mytool", "", destPath)
+	if err == nil || !strings.Contains(err.Error(), "limit") {
+		t.Fatalf("oversized tar entry: want limit error, got %v", err)
+	}
+	if _, statErr := os.Stat(destPath); !os.IsNotExist(statErr) {
+		t.Error("partial binary left behind after entry size-cap error")
+	}
+}
+
+// --- atomic install: no partial file on write failure ---
+
+func TestWriteExecutable_AtomicNoBinaryOnFailure(t *testing.T) {
+	dir := t.TempDir()
+	destPath := filepath.Join(dir, "mytool")
+
+	// errReader always returns an error on Read, simulating a mid-stream failure.
+	err := writeExecutable(errReader{}, destPath)
+	if err == nil {
+		t.Fatal("expected write error, got nil")
+	}
+	// The destination must not exist — the temp file was cleaned up.
+	if _, statErr := os.Stat(destPath); !os.IsNotExist(statErr) {
+		t.Error("partial binary exists at destPath after failed writeExecutable")
+	}
+}
+
+func TestWriteExecutable_Mode0755(t *testing.T) {
+	dir := t.TempDir()
+	destPath := filepath.Join(dir, "mytool")
+	content := []byte("binary content")
+
+	if err := writeExecutable(strings.NewReader(string(content)), destPath); err != nil {
+		t.Fatalf("writeExecutable: %v", err)
+	}
+	info, err := os.Stat(destPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o755 {
+		t.Errorf("mode = %o, want 0755", info.Mode().Perm())
+	}
+}
+
+// --- helpers ---
+
+type tarEntry struct {
+	name     string
+	typeflag byte
+	content  []byte
+}
+
+// writeTarMulti writes a tar archive (gz or xz compressed) with the given entries.
+func writeTarMulti(t *testing.T, path, compression string, entries []tarEntry) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close() //nolint:errcheck
+
+	var tw *tar.Writer
+	switch compression {
+	case "xz":
+		xw, err := xz.NewWriter(f)
+		if err != nil {
+			t.Fatalf("xz.NewWriter: %v", err)
+		}
+		defer xw.Close() //nolint:errcheck
+		tw = tar.NewWriter(xw)
+	default:
+		gw := gzip.NewWriter(f)
+		defer gw.Close() //nolint:errcheck
+		tw = tar.NewWriter(gw)
+	}
+	defer tw.Close() //nolint:errcheck
+
+	for _, e := range entries {
+		hdr := &tar.Header{
+			Name:     e.name,
+			Typeflag: e.typeflag,
+			Mode:     0o755,
+			Size:     int64(len(e.content)),
+		}
+		if e.typeflag == tar.TypeSymlink {
+			hdr.Linkname = "target"
+			hdr.Size = 0
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatal(err)
+		}
+		if len(e.content) > 0 {
+			if _, err := tw.Write(e.content); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+}
+
+// errReader returns an error on every Read call.
+type errReader struct{}
+
+func (errReader) Read(_ []byte) (int, error) {
+	return 0, fmt.Errorf("injected read error")
+}
+
+// countingHandler serves exactly n bytes of zero data (one byte over the cap
+// triggers the limit check in downloadToFile).
+type countingHandler struct{ limit int64 }
+
+func (h *countingHandler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/octet-stream")
+	chunk := make([]byte, 32*1024)
+	remaining := h.limit
+	for remaining > 0 {
+		n := int64(len(chunk))
+		if n > remaining {
+			n = remaining
+		}
+		w.Write(chunk[:n]) //nolint:errcheck
+		remaining -= n
+	}
+}
+
+func newSingleUseServer(t *testing.T, h http.Handler) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(h)
+	t.Cleanup(srv.Close)
+	return srv
 }
 
 // --- helpers ---

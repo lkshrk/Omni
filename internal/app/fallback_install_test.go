@@ -503,6 +503,114 @@ func TestNativeInstallPipeline_NativeUninstall(t *testing.T) {
 	}
 }
 
+// TestNativeInstallPipeline_TransientFailureRetried verifies the download retry
+// path: the stub returns 503 on the first asset request and 200 on the second.
+// The install must succeed — the retry absorbed the transient failure.
+func TestNativeInstallPipeline_TransientFailureRetried(t *testing.T) {
+	binaryContent := []byte("#!/bin/sh\nexit 0\n")
+	assetContent := buildTarGz(t, "mytool", binaryContent)
+
+	var attempts int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/releases/tags/v1.0.0"),
+			strings.HasSuffix(r.URL.Path, "/releases/latest"):
+			writeJSON(w, map[string]any{
+				"id": 1, "tag_name": "v1.0.0", "published_at": "2026-06-01T00:00:00Z",
+				"assets": []map[string]any{
+					{"id": 1, "name": "tool.tar.gz", "browser_download_url": "http://" + r.Host + "/asset/tool.tar.gz"},
+				},
+			})
+		case strings.HasPrefix(r.URL.Path, "/asset/"):
+			// First call returns 503 (transient); subsequent calls succeed.
+			attempts++
+			if attempts == 1 {
+				http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Write(assetContent) //nolint:errcheck
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	a, cfgPath := newImportApp(t, &stubProvider{name: "apt", available: true})
+	a.CacheDir = t.TempDir()
+	a.SetGitHubFallbackAPIForTest(srv.URL, srv.Client())
+
+	fallbackSpec := githubReleaseAssetFallback(srv.URL, "tool.tar.gz", "mytool")
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"mytool": {
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
+				Fallback:  &fallbackSpec,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("saveAppConfig: %v", err)
+	}
+
+	if err := a.InstallToolFallback(context.Background(), "mytool"); err != nil {
+		t.Fatalf("InstallToolFallback after retry: %v", err)
+	}
+	if attempts < 2 {
+		t.Errorf("asset endpoint called %d times, want ≥2 (retry)", attempts)
+	}
+	assertBinaryInstalled(t, a, fallbackSpec, "mytool", binaryContent)
+	assertFallbackStatusVerified(t, cfgPath, "mytool")
+}
+
+// TestNativeInstallPipeline_NonRetriable404NeverRetried verifies that a 404
+// response is not retried — the endpoint must be called exactly once.
+func TestNativeInstallPipeline_NonRetriable404NeverRetried(t *testing.T) {
+	var attempts int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/releases/tags/v1.0.0"),
+			strings.HasSuffix(r.URL.Path, "/releases/latest"):
+			writeJSON(w, map[string]any{
+				"id": 1, "tag_name": "v1.0.0", "published_at": "2026-06-01T00:00:00Z",
+				"assets": []map[string]any{
+					{"id": 1, "name": "tool.tar.gz", "browser_download_url": "http://" + r.Host + "/asset/tool.tar.gz"},
+				},
+			})
+		case strings.HasPrefix(r.URL.Path, "/asset/"):
+			attempts++
+			http.NotFound(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	a, cfgPath := newImportApp(t, &stubProvider{name: "apt", available: true})
+	a.CacheDir = t.TempDir()
+	a.SetGitHubFallbackAPIForTest(srv.URL, srv.Client())
+
+	fallbackSpec := githubReleaseAssetFallback(srv.URL, "tool.tar.gz", "mytool")
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"mytool": {
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
+				Fallback:  &fallbackSpec,
+			},
+		},
+	}); err != nil {
+		t.Fatalf("saveAppConfig: %v", err)
+	}
+
+	err := a.InstallToolFallback(context.Background(), "mytool")
+	if err == nil {
+		t.Fatal("expected error for 404, got nil")
+	}
+	if attempts != 1 {
+		t.Errorf("asset endpoint called %d times, want exactly 1 (no retry on 404)", attempts)
+	}
+	assertFallbackStatusFailed(t, cfgPath, "mytool")
+}
+
 // --- helpers ---
 
 // githubReleaseAssetFallback builds a minimal FallbackSpec for a GitHub
