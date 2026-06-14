@@ -436,10 +436,11 @@ func TestInstalledMetadataMap_CaskPkgutilRequiresPrivilege(t *testing.T) {
 	if _, ok := got["normal-app"]; ok {
 		t.Fatalf("metadata included non-Homebrew cask artifact: %+v", got["normal-app"])
 	}
-	if len(m.Calls) != 2 ||
+	if len(m.Calls) != 3 ||
 		strings.Join(m.Calls[0].Args, " ") != "info --json=v2 --installed" ||
-		strings.Join(m.Calls[1].Args, " ") != "list --cask" {
-		t.Fatalf("calls = %+v, want installed info plus cask ownership filter", m.Calls)
+		strings.Join(m.Calls[1].Args, " ") != "list --cask" ||
+		strings.Join(m.Calls[2].Args, " ") != "list --versions --formula" {
+		t.Fatalf("calls = %+v, want installed info, cask ownership filter, and formula list union", m.Calls)
 	}
 }
 
@@ -747,10 +748,11 @@ func TestInstalledMap_ReturnsFormulae(t *testing.T) {
 	if _, ok := got["dep"]; ok {
 		t.Errorf("transitive formula dep should not be in map: %v", got)
 	}
-	if len(m.Calls) != 2 ||
+	if len(m.Calls) != 3 ||
 		strings.Join(m.Calls[0].Args, " ") != "info --json=v2 --installed" ||
-		strings.Join(m.Calls[1].Args, " ") != "list --cask" {
-		t.Fatalf("calls = %+v, want fast installed info scan plus cask filter", m.Calls)
+		strings.Join(m.Calls[1].Args, " ") != "list --cask" ||
+		strings.Join(m.Calls[2].Args, " ") != "list --versions --formula" {
+		t.Fatalf("calls = %+v, want fast installed info scan, cask filter, and formula list union", m.Calls)
 	}
 }
 
@@ -769,6 +771,59 @@ func TestInstalledMetadataMap_IncludesFormulaSource(t *testing.T) {
 	source := got["ripgrep"].Source
 	if source.Type != provider.SourceTypeGitHub || source.Owner != "BurntSushi" || source.Repo != "ripgrep" {
 		t.Fatalf("source = %+v, want github BurntSushi/ripgrep", source)
+	}
+}
+
+func TestInstalledMetadataMap_UntrustedTapFormulaHiddenFromInfo(t *testing.T) {
+	// Homebrew tap-trust hides untrusted-tap formulae from `brew info`, so flux
+	// (installed from fluxcd/tap) is absent from the JSON even though it is
+	// installed. `brew list --versions --formula` still reports it. ripgrep is a
+	// trusted-tap/core formula present in both.
+	installedInfo := `{"formulae":[` +
+		`{"name":"ripgrep","full_name":"ripgrep","installed":[{"version":"14.1.1","installed_on_request":true}]}` +
+		`],"casks":[]}`
+	p, _ := newBrew(
+		executor.MockCall{Stdout: installedInfo},
+		executor.MockCall{},
+		executor.MockCall{Stdout: "ripgrep 14.1.1\nflux 2.4.0\n"},
+	)
+	got, err := p.InstalledMetadataMap(context.Background())
+	if err != nil {
+		t.Fatalf("InstalledMetadataMap: %v", err)
+	}
+	if _, ok := got["flux"]; !ok {
+		t.Fatalf("flux not detected; tap-trust-hidden formula must be unioned from brew list: %+v", got)
+	}
+	if got["flux"].Version != "2.4.0" {
+		t.Errorf("flux version = %q, want 2.4.0", got["flux"].Version)
+	}
+	if got["ripgrep"].Version != "14.1.1" {
+		t.Errorf("ripgrep version = %q, want 14.1.1 (info metadata preserved)", got["ripgrep"].Version)
+	}
+}
+
+func TestInstalledMetadataMap_ExcludesTransitiveDepKnownToInfo(t *testing.T) {
+	// dep is a transitive dependency: present in brew info as not-on-request AND
+	// present in brew list. It must stay excluded — the union only adds formulae
+	// brew info hides entirely, not ones it deliberately reports as dependencies.
+	installedInfo := `{"formulae":[` +
+		`{"name":"git","full_name":"git","installed":[{"version":"2.43.0","installed_on_request":true}]},` +
+		`{"name":"dep","full_name":"dep","installed":[{"version":"1.0.0","installed_on_request":false}]}` +
+		`],"casks":[]}`
+	p, _ := newBrew(
+		executor.MockCall{Stdout: installedInfo},
+		executor.MockCall{},
+		executor.MockCall{Stdout: "git 2.43.0\ndep 1.0.0\n"},
+	)
+	got, err := p.InstalledMetadataMap(context.Background())
+	if err != nil {
+		t.Fatalf("InstalledMetadataMap: %v", err)
+	}
+	if _, ok := got["dep"]; ok {
+		t.Fatalf("transitive dep known to brew info must stay excluded: %+v", got)
+	}
+	if got["git"].Version != "2.43.0" {
+		t.Errorf("git version = %q, want 2.43.0", got["git"].Version)
 	}
 }
 
