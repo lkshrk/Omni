@@ -1092,3 +1092,67 @@ func TestRefreshDiscovered_SkipsUnavailableProvider(t *testing.T) {
 		t.Errorf("got %d discovered tools, want 0 (provider unavailable)", len(discovered))
 	}
 }
+
+// delayBulkStub is a BulkChecker that sleeps for delay before returning,
+// used to detect whether multiple provider scans run concurrently.
+type delayBulkStub struct {
+	stubProvider
+	bulk  map[string]string
+	delay time.Duration
+}
+
+func (d *delayBulkStub) InstalledMap(_ context.Context) (map[string]string, error) {
+	time.Sleep(d.delay)
+	return d.bulk, nil
+}
+
+// TestRefreshInstalled_BulkScansRunConcurrently verifies that RefreshInstalled
+// fans out independent provider bulk scans in parallel. Two providers each
+// sleep for `delay`; serial execution takes ≥ 2×delay, parallel takes ~1×delay.
+// The threshold is 1.8×delay to give headroom on slow CI.
+func TestRefreshInstalled_BulkScansRunConcurrently(t *testing.T) {
+	const delay = 50 * time.Millisecond
+
+	provA := &delayBulkStub{
+		stubProvider: stubProvider{name: "prov-a", available: true},
+		bulk:         map[string]string{"tool-a": "1.0"},
+		delay:        delay,
+	}
+	provB := &delayBulkStub{
+		stubProvider: stubProvider{name: "prov-b", available: true},
+		bulk:         map[string]string{"tool-b": "2.0"},
+		delay:        delay,
+	}
+
+	a, cfgPath := newImportApp(t, provA, provB)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"tool-a": {Providers: []config.ToolInstallSpec{{Provider: "prov-a"}}},
+			"tool-b": {Providers: []config.ToolInstallSpec{{Provider: "prov-b"}}},
+		},
+		Groups: []*config.GroupConfig{{Tools: groupTools("tool-a", "tool-b")}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	start := time.Now()
+	if err := a.RefreshInstalled(context.Background(), nil); err != nil {
+		t.Fatalf("RefreshInstalled: %v", err)
+	}
+	elapsed := time.Since(start)
+
+	threshold := time.Duration(float64(delay) * 1.8)
+	if elapsed >= threshold {
+		t.Errorf("RefreshInstalled took %v (≥ 1.8×delay=%v): provider bulk scans appear serial, want parallel", elapsed, threshold)
+	}
+
+	// Verify detection results are correct regardless of scheduling.
+	gotA, err := a.DB().Get(context.Background(), "tool-a", "prov-a", "tool-a")
+	if err != nil || !gotA.Installed {
+		t.Errorf("tool-a: installed=%v err=%v, want installed=true", gotA.Installed, err)
+	}
+	gotB, err := a.DB().Get(context.Background(), "tool-b", "prov-b", "tool-b")
+	if err != nil || !gotB.Installed {
+		t.Errorf("tool-b: installed=%v err=%v, want installed=true", gotB.Installed, err)
+	}
+}

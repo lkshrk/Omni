@@ -895,6 +895,30 @@ func TestInstalledMap_Error(t *testing.T) {
 	}
 }
 
+// TestInstalledMetadataMap_ExactCallCount asserts that a single
+// InstalledMetadataMap call issues exactly 3 brew subprocesses:
+// (1) info --json=v2 --installed, (2) list --cask, (3) list --versions --formula.
+// This guards against regressions that re-introduce duplicate brew list --cask
+// invocations within one metadata scan.
+func TestInstalledMetadataMap_ExactCallCount(t *testing.T) {
+	installedInfo := `{"formulae":[{"name":"git","full_name":"git","installed":[{"version":"2.43.0","installed_on_request":true}]}],"casks":[]}`
+	m := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "brew info", Response: executor.MockCall{Stdout: installedInfo}},
+		executor.MatchRule{Pattern: "brew list --cask", Response: executor.MockCall{Stdout: ""}},
+		executor.MatchRule{Pattern: "brew list --versions --formula", Response: executor.MockCall{Stdout: "git 2.43.0\n"}},
+	)
+	p := brew.New(m)
+	if _, err := p.InstalledMetadataMap(context.Background()); err != nil {
+		t.Fatalf("InstalledMetadataMap: %v", err)
+	}
+	if got := m.CallCount(); got != 3 {
+		t.Errorf("brew subprocess calls = %d, want exactly 3 (info, list --cask, list --versions --formula)", got)
+	}
+	m.MustHaveCalledN(t, "brew info --json=v2 --installed", 1)
+	m.MustHaveCalledN(t, "brew list --cask", 1)
+	m.MustHaveCalledN(t, "brew list --versions --formula", 1)
+}
+
 func TestListInstalled_ReturnsFormulaeAndBrewCasks(t *testing.T) {
 	p, _ := newBrew(
 		executor.MockCall{Stdout: "homebrew/core/git\nasmvik/formulae/yabai\n"},
