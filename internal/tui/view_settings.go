@@ -34,6 +34,7 @@ const (
 	settingsRowBootstrap
 	settingsRowResetSettings
 	settingsRowResetCache
+	settingsRowTraceLog
 	settingsRowCount
 )
 
@@ -128,6 +129,11 @@ var settingsRows = []settingsRowMeta{
 		section: "Maintenance",
 		hint:    hintCtxSettingsDanger,
 		danger:  true,
+	},
+	settingsRowTraceLog: {
+		label:   "Command Log",
+		section: "Maintenance",
+		hint:    hintCtxSettingsEdit,
 	},
 }
 
