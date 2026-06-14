@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -548,6 +549,100 @@ func normalizeToolState(raw string) (ToolListState, error) {
 	}
 }
 
+// toolBinaryName returns the binary name to probe on PATH for last-resort
+// installed detection. It uses the configured fallback binary when set,
+// otherwise falls back to the tool name.
+func toolBinaryName(name string, spec *config.ToolSpec) string {
+	if spec != nil && spec.Fallback != nil && strings.TrimSpace(spec.Fallback.Binary) != "" {
+		return strings.TrimSpace(spec.Fallback.Binary)
+	}
+	return name
+}
+
+// executableInstalledOnPath returns true when the named binary can be located
+// on the current PATH. It is used as a last-resort installed signal when the
+// configured provider is unavailable or unregistered on the host.
+func executableInstalledOnPath(binaryName string) bool {
+	if binaryName == "" {
+		return false
+	}
+	_, err := exec.LookPath(binaryName)
+	return err == nil
+}
+
+// toolHasActiveFailure reports whether the given tool has an active failure
+// record in the failed set (name + "\x00" + provider key).
+// A nil failedTools map means the set could not be loaded from the DB and is
+// treated as "all tools have active failures" — the fail-safe: PATH detection
+// is suppressed entirely rather than risking clearing retry-failed state.
+func toolHasActiveFailure(t config.ToolEntry, failedTools map[string]struct{}) bool {
+	if failedTools == nil {
+		return true // fail-safe: suppress PATH detection when set could not be loaded
+	}
+	_, ok := failedTools[t.Name+"\x00"+t.Provider]
+	return ok
+}
+
+// loadFailedToolSet loads the current failure set from the DB.
+// On error it returns (nil, err); callers must treat nil as "all tools have
+// active failures" and skip PATH detection entirely — an empty map would
+// incorrectly enable PATH detection for tools with active failure records.
+func (a *App) loadFailedToolSet(ctx context.Context) (map[string]struct{}, error) {
+	failed, err := a.readDB().ListFailed(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("loading failed tool set for PATH detection: %w", err)
+	}
+	set := make(map[string]struct{}, len(failed))
+	for _, f := range failed {
+		set[f.Name+"\x00"+f.Provider] = struct{}{}
+	}
+	return set, nil
+}
+
+// executableDetectSingleTool probes one tool's binary on PATH.
+// It returns a ready-to-upsert ToolCache row and true when the binary is found
+// and the tool has no active failure record. When failedTools is nil (i.e. the
+// failure set could not be loaded) it always returns (nil, false).
+func executableDetectSingleTool(t config.ToolEntry, cfg *config.RootConfig, failedTools map[string]struct{}) (*database.ToolCache, bool) {
+	if toolHasActiveFailure(t, failedTools) {
+		return nil, false
+	}
+	spec := cfg.Tools[t.Name]
+	if !executableInstalledOnPath(toolBinaryName(t.Name, &spec)) {
+		return nil, false
+	}
+	return &database.ToolCache{
+		Name:          t.Name,
+		Provider:      t.Provider,
+		Package:       t.EffectivePackage(),
+		Installed:     true,
+		InstalledWith: "", // no concrete manager claim — avoids wrong-provider classification
+		LastChecked:   time.Now(),
+	}, true
+}
+
+// executableDetectProviderTools is called when a provider is unavailable or
+// unregistered on the current host. It probes the binary on PATH for each
+// tool that does not have an active failure record and writes installed rows
+// for those that are found, so they are not shown as out-of-sync in the TUI.
+// When failedTools is nil (failure set could not be loaded) no upserts are
+// written — the fail-safe prevents clearing active failure records.
+func (a *App) executableDetectProviderTools(ctx context.Context, cfg *config.RootConfig, tools []config.ToolEntry, failedTools map[string]struct{}) error {
+	var upserts []*database.ToolCache
+	for _, t := range tools {
+		if row, ok := executableDetectSingleTool(t, cfg, failedTools); ok {
+			upserts = append(upserts, row)
+		}
+	}
+	if len(upserts) == 0 {
+		return nil
+	}
+	if err := a.readDB().UpsertBatch(ctx, upserts); err != nil {
+		return fmt.Errorf("upserting executable-detected tools: %w", err)
+	}
+	return nil
+}
+
 func toolStateMatches(state, filter ToolListState) bool {
 	if state == filter {
 		return true
@@ -668,6 +763,11 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 	stop()
 
 	stop = profile.Start("app.refresh.installed.resolve_installed")
+	// Load current failure set so PATH detection does not clear active failure
+	// records — retry-failed flows depend on failure state surviving RefreshInstalled.
+	// On error failedTools is nil: PATH detection is skipped entirely for this run
+	// rather than risking clearing retry-failed state with an empty set.
+	failedTools, _ := a.loadFailedToolSet(ctx)
 	upserts := make([]*database.ToolCache, 0, len(tools))
 	metadataUpdates := make([]database.MetadataUpdate, 0)
 	for _, t := range tools {
@@ -726,6 +826,11 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 		// Used for providers that do not implement BulkChecker.
 		p, ok := a.registry.Get(opProvider)
 		if !ok {
+			// Provider not registered on this host. As a last resort, probe the
+			// binary on PATH so tools already present are not shown as out-of-sync.
+			if row, detected := executableDetectSingleTool(t, cfg, failedTools); detected {
+				upserts = append(upserts, row)
+			}
 			continue
 		}
 		avail, err := p.Available(ctx)
@@ -733,6 +838,12 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 			continue
 		}
 		if !avail {
+			// Provider registered but not available on this host (e.g. brew on Linux).
+			// As a last resort, probe the binary on PATH so configured tools that are
+			// already present are not shown as out-of-sync.
+			if row, detected := executableDetectSingleTool(t, cfg, failedTools); detected {
+				upserts = append(upserts, row)
+			}
 			continue
 		}
 		scanProgress.emitProvider(opProvider)
@@ -891,16 +1002,26 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 		return nil
 	}
 
+	// Load failure set early so PATH detection (for unavailable providers) does
+	// not clear active failure records — retry-failed flows depend on this.
+	// On error provFailedTools is nil: executableDetectProviderTools treats nil
+	// as "all tools have active failures" and suppresses PATH detection entirely.
+	provFailedTools, _ := a.loadFailedToolSet(ctx)
+
 	p, ok := a.registry.Get(provName)
 	if !ok {
-		return nil
+		// Provider not registered on this host — probe PATH for each tool as a
+		// last resort so tools present on PATH are not shown as out-of-sync.
+		return a.executableDetectProviderTools(context.WithoutCancel(ctx), cfg, provTools, provFailedTools)
 	}
 	avail, err := p.Available(ctx)
 	if err != nil {
 		return refreshContextErr(ctx, err)
 	}
 	if !avail {
-		return nil
+		// Provider registered but not available on this host (e.g. brew on Linux).
+		// Probe PATH as a last resort.
+		return a.executableDetectProviderTools(context.WithoutCancel(ctx), cfg, provTools, provFailedTools)
 	}
 	providerLabel := ProviderScanDisplayLabel(provName, resolvedProviderConcreteName(ctx, p))
 	emitTool := func(index int, t config.ToolEntry) {
