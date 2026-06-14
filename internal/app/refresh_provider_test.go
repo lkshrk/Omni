@@ -1093,59 +1093,76 @@ func TestRefreshDiscovered_SkipsUnavailableProvider(t *testing.T) {
 	}
 }
 
-// delayBulkStub is a BulkChecker that sleeps for delay before returning,
-// used to detect whether multiple provider scans run concurrently.
-type delayBulkStub struct {
-	stubProvider
-	bulk  map[string]string
-	delay time.Duration
+// bulkScanTracker holds shared atomic counters used by the concurrent bulk
+// stubs below. Sharing a single tracker lets both stubs increment the same
+// active counter, so the peak reflects true cross-stub overlap.
+type bulkScanTracker struct {
+	active  atomic.Int32
+	maxSeen atomic.Int32
 }
 
-func (d *delayBulkStub) InstalledMap(_ context.Context) (map[string]string, error) {
-	time.Sleep(d.delay)
-	return d.bulk, nil
+func (tr *bulkScanTracker) enter() {
+	cur := tr.active.Add(1)
+	for {
+		prev := tr.maxSeen.Load()
+		if cur <= prev || tr.maxSeen.CompareAndSwap(prev, cur) {
+			break
+		}
+	}
 }
 
-// delayConcreteStub is a BulkChecker + ConcreteResolver that sleeps before
-// returning. It exercises the resolvedConcrete read path inside the parallel
-// goroutines, which is guarded by rcMu and must be race-free.
-type delayConcreteStub struct {
+func (tr *bulkScanTracker) exit() { tr.active.Add(-1) }
+
+// concurrentBulkStub is a BulkChecker that records entry/exit in a shared
+// tracker so TestRefreshInstalled_BulkScansRunConcurrently can assert overlap.
+type concurrentBulkStub struct {
 	stubProvider
-	bulk         map[string]string
-	delay        time.Duration
+	bulk    map[string]string
+	delay   time.Duration
+	tracker *bulkScanTracker
+}
+
+func (s *concurrentBulkStub) InstalledMap(_ context.Context) (map[string]string, error) {
+	s.tracker.enter()
+	time.Sleep(s.delay) // widen overlap window so both goroutines are active together
+	s.tracker.exit()
+	return s.bulk, nil
+}
+
+// concurrentConcreteStub adds ConcreteResolver to concurrentBulkStub.
+// This exercises the rcMu-guarded resolvedConcrete read path under -race.
+type concurrentConcreteStub struct {
+	concurrentBulkStub
 	concreteName string
 }
 
-func (d *delayConcreteStub) InstalledMap(_ context.Context) (map[string]string, error) {
-	time.Sleep(d.delay)
-	return d.bulk, nil
-}
-
-func (d *delayConcreteStub) ResolvedName(_ context.Context) (string, error) {
-	return d.concreteName, nil
+func (s *concurrentConcreteStub) ResolvedName(_ context.Context) (string, error) {
+	return s.concreteName, nil
 }
 
 // TestRefreshInstalled_BulkScansRunConcurrently verifies that RefreshInstalled
-// fans out independent provider bulk scans in parallel. Two providers each
-// sleep for `delay`; serial execution takes ≥ 2×delay, parallel takes ~1×delay.
-// The threshold is 1.8×delay to give headroom on slow CI.
+// fans out independent provider bulk scans in parallel. A shared atomic
+// active-counter proves overlap: peak ≥ 2 means both InstalledMap calls were
+// executing simultaneously. No wall-clock threshold is used.
 //
-// One provider implements ConcreteResolver so the resolvedConcrete read path
-// inside the parallel goroutines (guarded by rcMu) is exercised under -race.
+// provB implements ConcreteResolver so the rcMu-guarded resolvedConcrete read
+// inside the goroutine is exercised under -race.
 func TestRefreshInstalled_BulkScansRunConcurrently(t *testing.T) {
-	const delay = 50 * time.Millisecond
+	tracker := &bulkScanTracker{}
 
-	provA := &delayBulkStub{
+	provA := &concurrentBulkStub{
 		stubProvider: stubProvider{name: "prov-a", available: true},
 		bulk:         map[string]string{"tool-a": "1.0"},
-		delay:        delay,
+		delay:        20 * time.Millisecond,
+		tracker:      tracker,
 	}
-	// provB implements BulkChecker + ConcreteResolver — exercises the
-	// scanProgress.resolvedProviderName read under rcMu in the goroutine.
-	provB := &delayConcreteStub{
-		stubProvider: stubProvider{name: "prov-b", available: true},
-		bulk:         map[string]string{"tool-b": "2.0"},
-		delay:        delay,
+	provB := &concurrentConcreteStub{
+		concurrentBulkStub: concurrentBulkStub{
+			stubProvider: stubProvider{name: "prov-b", available: true},
+			bulk:         map[string]string{"tool-b": "2.0"},
+			delay:        20 * time.Millisecond,
+			tracker:      tracker,
+		},
 		concreteName: "prov-b-concrete",
 	}
 
@@ -1160,24 +1177,27 @@ func TestRefreshInstalled_BulkScansRunConcurrently(t *testing.T) {
 		t.Fatalf("config.Save: %v", err)
 	}
 
-	start := time.Now()
 	if err := a.RefreshInstalled(context.Background(), nil); err != nil {
 		t.Fatalf("RefreshInstalled: %v", err)
 	}
-	elapsed := time.Since(start)
 
-	threshold := time.Duration(float64(delay) * 1.8)
-	if elapsed >= threshold {
-		t.Errorf("RefreshInstalled took %v (≥ 1.8×delay=%v): provider bulk scans appear serial, want parallel", elapsed, threshold)
+	if got := tracker.maxSeen.Load(); got < 2 {
+		t.Errorf("peak concurrent InstalledMap calls = %d, want ≥ 2: provider scans appear serial", got)
 	}
 
-	// Verify detection results are correct regardless of scheduling.
+	// Verify detection results are correct.
 	gotA, err := a.DB().Get(context.Background(), "tool-a", "prov-a", "tool-a")
-	if err != nil || !gotA.Installed {
-		t.Errorf("tool-a: installed=%v err=%v, want installed=true", gotA.Installed, err)
+	if err != nil {
+		t.Fatalf("DB.Get tool-a: %v", err)
+	}
+	if !gotA.Installed {
+		t.Errorf("tool-a installed = false, want true")
 	}
 	gotB, err := a.DB().Get(context.Background(), "tool-b", "prov-b", "tool-b")
-	if err != nil || !gotB.Installed {
-		t.Errorf("tool-b: installed=%v err=%v, want installed=true", gotB.Installed, err)
+	if err != nil {
+		t.Fatalf("DB.Get tool-b: %v", err)
+	}
+	if !gotB.Installed {
+		t.Errorf("tool-b installed = false, want true")
 	}
 }
