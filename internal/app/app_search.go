@@ -728,6 +728,11 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 		installedWith string
 	}
 
+	// refreshProviderTimeout caps each package-manager subprocess during a bulk
+	// scan. 2 minutes is generous for a single provider but prevents a hung
+	// subprocess from blocking wg.Wait() indefinitely.
+	const refreshProviderTimeout = 2 * time.Minute
+
 	stop = profile.Start("app.refresh.installed.bulk_maps")
 	results := make([]providerBulkResult, len(available))
 	var wg sync.WaitGroup
@@ -736,6 +741,9 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			provCtx, provCancel := context.WithTimeout(ctx, refreshProviderTimeout)
+			defer provCancel()
+			ctx := provCtx
 			res := providerBulkResult{name: p.Name()}
 			// MultiManagerBulkChecker takes priority: probes all backends for per-tool attribution.
 			if mbc, ok := p.(provider.MultiManagerBulkChecker); ok {
