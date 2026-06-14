@@ -199,16 +199,93 @@ func TestGitHubFallbackHasSavedReleaseMetadata(t *testing.T) {
 
 func TestGitHubReleaseAssetInstallCommandUsesAssetBasename(t *testing.T) {
 	got := githubReleaseAssetInstallCommand("https://github.com/cli/cli/releases/download/v2.93.0/gh_2.93.0_macOS_arm64.zip")
-	if !strings.Contains(got, `asset="{{cache_dir}}/gh_2.93.0_macOS_arm64.zip"`) {
-		t.Fatalf("install command = %q, want cache asset basename from download URL", got)
+	// Placeholders are bare so the rendered single-quoted value is the only quoting.
+	// The asset name and URL are shell-quoted at construction; no surrounding quotes in the template.
+	if !strings.Contains(got, `asset={{cache_dir}}/'gh_2.93.0_macOS_arm64.zip'`) {
+		t.Fatalf("install command = %q, want bare cache_dir placeholder followed by quoted asset name", got)
 	}
-	if !strings.Contains(got, `curl -fsSL "https://github.com/cli/cli/releases/download/v2.93.0/gh_2.93.0_macOS_arm64.zip"`) {
-		t.Fatalf("install command = %q, want curl against download URL", got)
+	if !strings.Contains(got, `curl -fsSL 'https://github.com/cli/cli/releases/download/v2.93.0/gh_2.93.0_macOS_arm64.zip'`) {
+		t.Fatalf("install command = %q, want single-quoted curl download URL", got)
 	}
 
+	// No-URL branch: asset_path (full absolute path, quoted at render time) used directly.
 	fallback := githubReleaseAssetInstallCommand("")
-	if !strings.Contains(fallback, `asset="{{cache_dir}}/{{asset_path}}"`) {
-		t.Fatalf("fallback install command = %q, want asset_path placeholder", fallback)
+	if !strings.Contains(fallback, `asset={{asset_path}}`) {
+		t.Fatalf("fallback install command = %q, want bare asset_path placeholder", fallback)
+	}
+	if strings.Contains(fallback, "curl") {
+		t.Fatalf("fallback install command = %q, want no curl when no download URL", fallback)
+	}
+}
+
+func TestShellSingleQuote(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{in: "normal", want: "'normal'"},
+		{in: "/usr/local/bin", want: "'/usr/local/bin'"},
+		// A value containing a single-quote must be escaped so it cannot
+		// break out of the surrounding single-quoted shell word.
+		{in: "it's", want: `'it'\''s'`},
+		// Values that look like injection attempts must be neutralised.
+		{in: `'; touch pwned`, want: `''\''; touch pwned'`},
+		{in: `$(rm -rf /)`, want: `'$(rm -rf /)'`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			if got := shellSingleQuote(tt.in); got != tt.want {
+				t.Fatalf("shellSingleQuote(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRenderFallbackCommandNeutralisesInjection(t *testing.T) {
+	// A binary name containing shell metacharacters (as could arrive from a
+	// compromised settings.json) must be single-quoted so it cannot break out
+	// of the generated sh -c string.
+	a := New(t.TempDir() + "/settings.json")
+	spec := config.ToolSpec{}
+	poison := `'; touch /tmp/pwned; echo '`
+	fallback := &config.FallbackSpec{
+		Binary: poison,
+		BinDir: "/safe/bin",
+		Commands: config.FallbackCommands{
+			Check: `test -x {{bin_dir}}/{{binary}}`,
+		},
+	}
+	rendered, err := a.renderFallbackCommand("tool", spec, fallback, `test -x {{bin_dir}}/{{binary}}`)
+	if err != nil {
+		t.Fatalf("renderFallbackCommand: %v", err)
+	}
+	// The poison value must appear in the rendered command only inside its
+	// single-quoted form — the literal characters '; touch are present in the
+	// output but enclosed within the shell quoting, so they cannot execute.
+	quotedPoison := shellSingleQuote(poison)
+	if !strings.Contains(rendered, quotedPoison) {
+		t.Fatalf("rendered command does not contain properly quoted binary name:\n  rendered = %q\n  want to contain %q", rendered, quotedPoison)
+	}
+	// Verify the command can be evaluated safely by sh without side effects.
+	// We do this by checking the rendered string does not contain the word
+	// "touch" OUTSIDE of single quotes (a crude but sufficient check: the
+	// quoted form wraps all occurrences of touch inside '...').
+	withoutQuoted := strings.ReplaceAll(rendered, quotedPoison, "QUOTED")
+	if strings.Contains(withoutQuoted, "touch") {
+		t.Fatalf("rendered command contains 'touch' outside of single-quoted value: %q", rendered)
+	}
+}
+
+func TestIsGitHubHost(t *testing.T) {
+	for _, host := range []string{"api.github.com", "github.com", "API.GITHUB.COM"} {
+		if !isGitHubHost(host) {
+			t.Fatalf("isGitHubHost(%q) = false, want true", host)
+		}
+	}
+	for _, host := range []string{"evil.example.com", "api.github.com.evil.com", "notgithub.com"} {
+		if isGitHubHost(host) {
+			t.Fatalf("isGitHubHost(%q) = true, want false", host)
+		}
 	}
 }
 

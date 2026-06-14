@@ -84,8 +84,8 @@ func TestInstallToolFallback_MaterializesTemplateRecipe(t *testing.T) {
 					Status: config.FallbackStatusUnverified,
 					Binary: "rg",
 					Commands: config.FallbackCommands{
-						Install: `mkdir -p "{{bin_dir}}" "{{cache_dir}}" && printf '#!/bin/sh\nexit 0\n' > "{{bin_dir}}/{{binary}}" && chmod +x "{{bin_dir}}/{{binary}}"`,
-						Check:   `test -x "{{bin_dir}}/{{binary}}" && test -d "{{cache_dir}}" && test "{{repo}}" = "BurntSushi/ripgrep"`,
+						Install: `mkdir -p {{bin_dir}} {{cache_dir}} && printf '#!/bin/sh\nexit 0\n' > {{bin_dir}}/{{binary}} && chmod +x {{bin_dir}}/{{binary}}`,
+						Check:   `test -x {{bin_dir}}/{{binary}} && test -d {{cache_dir}} && test {{repo}} = 'BurntSushi/ripgrep'`,
 					},
 				},
 			},

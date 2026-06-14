@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"runtime"
@@ -90,10 +91,10 @@ func (a *App) resolveGitHubFallback(ctx context.Context, name, owner, repoName s
 		},
 		Commands: config.FallbackCommands{
 			Install:   githubReleaseAssetInstallCommand(asset.BrowserDownloadURL),
-			Check:     `test -x "{{bin_dir}}/{{binary}}"`,
-			Uninstall: `rm -f "{{bin_dir}}/{{binary}}"`,
+			Check:     `test -x {{bin_dir}}/{{binary}}`,
+			Uninstall: `rm -f {{bin_dir}}/{{binary}}`,
 			Upgrade:   githubReleaseAssetInstallCommand(asset.BrowserDownloadURL),
-			Version:   `"{{bin_dir}}/{{binary}}" --version`,
+			Version:   `{{bin_dir}}/{{binary}} --version`,
 		},
 	}, true, nil
 }
@@ -110,15 +111,20 @@ func (a *App) fetchLatestGitHubRelease(ctx context.Context, owner, repoName stri
 	if baseURL == "" {
 		baseURL = defaultGitHubAPIBase
 	}
-	url := baseURL + "/repos/" + owner + "/" + repoName + "/releases/latest"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	apiURL := baseURL + "/repos/" + owner + "/" + repoName + "/releases/latest"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
 		return githubRelease{}, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "omni")
+	// Only attach the token to GitHub's own API to prevent credential leakage
+	// when OMNI_GITHUB_API_BASE points at a non-GitHub host (e.g. a local test stub).
 	if token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN")); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+		parsed, parseErr := url.Parse(baseURL)
+		if parseErr == nil && isGitHubHost(parsed.Host) {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -263,16 +269,40 @@ func containsAny(s string, needles []string) bool {
 	return false
 }
 
+// isGitHubHost reports whether host is a recognized GitHub API hostname,
+// ensuring we only send auth tokens to GitHub's own servers.
+func isGitHubHost(host string) bool {
+	host = strings.ToLower(host)
+	return host == "api.github.com" || host == "github.com"
+}
+
+// shellSingleQuote wraps s in single quotes so it is treated as a literal
+// value by sh -c, regardless of special characters it may contain.
+func shellSingleQuote(s string) string {
+	// Replace every ' with '\'' (close quote, literal single-quote, reopen quote).
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 func githubReleaseAssetInstallCommand(downloadURL string) string {
 	assetName := path.Base(downloadURL)
 	if strings.TrimSpace(assetName) == "" || assetName == "." || assetName == "/" {
-		assetName = "{{asset_path}}"
+		// No URL available: asset_path (already absolute, quoted at render time)
+		// is used directly as the local archive to extract.
+		return `mkdir -p {{cache_dir}} {{bin_dir}} && ` +
+			`asset={{asset_path}} && ` +
+			`tmp="$(mktemp -d)" && ` +
+			`case "$asset" in *.zip) unzip -q "$asset" -d "$tmp" ;; *.tar.gz|*.tgz) tar -xzf "$asset" -C "$tmp" ;; *) cp "$asset" "$tmp/"{{binary}} ;; esac && ` +
+			`found="$(find "$tmp" -type f -perm -111 -name {{binary}} | head -n 1)" && ` +
+			`test -n "$found" && cp "$found" {{bin_dir}}/{{binary}} && chmod +x {{bin_dir}}/{{binary}}`
 	}
-	return `mkdir -p "{{cache_dir}}" "{{bin_dir}}" && ` +
-		`asset="{{cache_dir}}/` + assetName + `" && ` +
-		`curl -fsSL "` + downloadURL + `" -o "$asset" && ` +
+	// downloadURL and assetName (from GitHub API browser_download_url) are
+	// shell-quoted at construction time; {{var}} placeholders are quoted at
+	// render time — so no placeholder appears inside a surrounding quote pair.
+	return `mkdir -p {{cache_dir}} {{bin_dir}} && ` +
+		`asset={{cache_dir}}/` + shellSingleQuote(assetName) + ` && ` +
+		`curl -fsSL ` + shellSingleQuote(downloadURL) + ` -o "$asset" && ` +
 		`tmp="$(mktemp -d)" && ` +
-		`case "$asset" in *.zip) unzip -q "$asset" -d "$tmp" ;; *.tar.gz|*.tgz) tar -xzf "$asset" -C "$tmp" ;; *) cp "$asset" "$tmp/{{binary}}" ;; esac && ` +
-		`found="$(find "$tmp" -type f -perm -111 -name "{{binary}}" | head -n 1)" && ` +
-		`test -n "$found" && cp "$found" "{{bin_dir}}/{{binary}}" && chmod +x "{{bin_dir}}/{{binary}}"`
+		`case "$asset" in *.zip) unzip -q "$asset" -d "$tmp" ;; *.tar.gz|*.tgz) tar -xzf "$asset" -C "$tmp" ;; *) cp "$asset" "$tmp/"{{binary}} ;; esac && ` +
+		`found="$(find "$tmp" -type f -perm -111 -name {{binary}} | head -n 1)" && ` +
+		`test -n "$found" && cp "$found" {{bin_dir}}/{{binary}} && chmod +x {{bin_dir}}/{{binary}}`
 }

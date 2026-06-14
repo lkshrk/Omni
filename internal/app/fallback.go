@@ -424,15 +424,18 @@ func (a *App) fallbackCommandVars(name string, spec config.ToolSpec, fallback *c
 	if assetName := strings.TrimSpace(fallback.Recipe.AssetPattern); assetName != "" {
 		assetPath = filepath.Join(cacheDir, filepath.Base(assetName))
 	}
+	// All values are shell-single-quoted so that user-controlled inputs
+	// (binary name, bin_dir, cache_dir, asset_path, repo, version) cannot
+	// inject shell commands when substituted into an sh -c string.
 	return map[string]string{
-		"arch":       runtime.GOARCH,
-		"asset_path": assetPath,
-		"binary":     binary,
-		"bin_dir":    binDir,
-		"cache_dir":  cacheDir,
-		"os":         runtime.GOOS,
-		"repo":       repo,
-		"version":    "",
+		"arch":       shellSingleQuote(runtime.GOARCH),
+		"asset_path": shellSingleQuote(assetPath),
+		"binary":     shellSingleQuote(binary),
+		"bin_dir":    shellSingleQuote(binDir),
+		"cache_dir":  shellSingleQuote(cacheDir),
+		"os":         shellSingleQuote(runtime.GOOS),
+		"repo":       shellSingleQuote(repo),
+		"version":    shellSingleQuote(""),
 	}, nil
 }
 
@@ -461,6 +464,10 @@ func (a *App) fallbackBinDir(fallback *config.FallbackSpec, cacheDir string) (st
 	expanded, err := dots.ExpandTilde(binDir)
 	if err != nil {
 		return "", fmt.Errorf("resolving fallback bin dir: %w", err)
+	}
+	expanded = filepath.Clean(expanded)
+	if !filepath.IsAbs(expanded) {
+		return "", fmt.Errorf("fallback bin dir %q must be an absolute path", expanded)
 	}
 	return expanded, nil
 }

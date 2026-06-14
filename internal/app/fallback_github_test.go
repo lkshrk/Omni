@@ -425,6 +425,39 @@ func TestGitHubFallbackLiveAPI_ResolvesLatestRelease(t *testing.T) {
 	}
 }
 
+func TestFetchLatestGitHubRelease_DoesNotSendTokenToNonGitHubBase(t *testing.T) {
+	// The GITHUB_TOKEN must never be forwarded to a non-GitHub host.
+	// Non-GitHub bases are accepted (local stubs, self-hosted setups) but
+	// receive the request without the Authorization header.
+	t.Setenv("GITHUB_TOKEN", "secret-token")
+
+	var capturedAuth string
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		capturedAuth = req.Header.Get("Authorization")
+		return &http.Response{
+			StatusCode: http.StatusNotFound,
+			Status:     "404 Not Found",
+			Body:       http.NoBody,
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})}
+
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
+	a.SetGitHubFallbackAPIForTest("http://127.0.0.1:1", client)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("gh", "system")),
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	_ = a.SaveToolFallbackFromGitHub(context.Background(), "gh", "cli/cli")
+
+	if capturedAuth != "" {
+		t.Fatalf("Authorization header sent to non-GitHub host: %q, want empty", capturedAuth)
+	}
+}
+
 func liveGitHubLatestReleaseStatus(ctx context.Context, owner, repo string) (int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/"+owner+"/"+repo+"/releases/latest", nil)
 	if err != nil {
