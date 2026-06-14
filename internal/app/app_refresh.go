@@ -171,7 +171,11 @@ func (a *App) outdatedMapsForProvidersBestEffort(ctx context.Context, providerNa
 		go func() {
 			defer wg.Done()
 			m, byManager, metadata, ok, err := a.outdatedMapsForProvider(ctx, provName)
-			if err != nil || !ok {
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "warning: omni: refresh outdated for %s: %v\n", provName, err)
+				return
+			}
+			if !ok {
 				return
 			}
 			mu.Lock()
