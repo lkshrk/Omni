@@ -456,6 +456,10 @@ func (a *App) fallbackCommandVars(name string, spec config.ToolSpec, fallback *c
 	}, nil
 }
 
+// FallbackCacheDir returns the resolved fallback cache directory path.
+// Exported for test helpers.
+func (a *App) FallbackCacheDir() (string, error) { return a.fallbackCacheDir() }
+
 func (a *App) fallbackCacheDir() (string, error) {
 	root := strings.TrimSpace(a.CacheDir)
 	if root == "" {
@@ -491,12 +495,23 @@ func (a *App) fallbackBinDir(fallback *config.FallbackSpec, cacheDir string) (st
 
 // isNativeGitHubRecipe reports whether the fallback should use the native Go
 // download/extract/install pipeline rather than shell commands.
+//
+// The native pipeline is used when the recipe is a GitHub release asset with a
+// resolved download URL AND the caller has not supplied explicit install/upgrade
+// shell commands (the custom-shell escape hatch).
 func isNativeGitHubRecipe(fallback *config.FallbackSpec) bool {
 	if fallback == nil {
 		return false
 	}
-	return fallback.Recipe.Type == config.FallbackRecipeGitHubReleaseAsset &&
-		strings.TrimSpace(fallback.Recipe.AssetDownloadURL) != ""
+	if fallback.Recipe.Type != config.FallbackRecipeGitHubReleaseAsset {
+		return false
+	}
+	if strings.TrimSpace(fallback.Recipe.AssetDownloadURL) == "" {
+		return false
+	}
+	// Explicit install or upgrade shell commands opt out of the native pipeline.
+	return strings.TrimSpace(fallback.Commands.Install) == "" &&
+		strings.TrimSpace(fallback.Commands.Upgrade) == ""
 }
 
 // runFallbackInstall dispatches to the native pipeline for GitHub release asset
