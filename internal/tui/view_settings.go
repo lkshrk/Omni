@@ -46,6 +46,8 @@ type settingsRowMeta struct {
 	hint    hintContext
 	danger  bool
 	action  app.SettingsActionID
+	valueFn func(m Model) string
+	helpFn  func(m Model) string
 }
 
 var settingsRows = []settingsRowMeta{
@@ -54,93 +56,166 @@ var settingsRows = []settingsRowMeta{
 		section: "Tools",
 		hint:    hintCtxSettingsToggle,
 		action:  app.SettingsActionToggleAutoImport,
+		valueFn: func(m Model) string { return settingsOnOff(m.palette, m.settings.AutoImport) },
+		helpFn: func(m Model) string {
+			return m.palette.styleHelp.Render("Add newly installed tools to the config on every sync.")
+		},
 	},
 	settingsRowProviderPriority: {
 		label:   "Provider Priority",
 		section: "Tools",
 		hint:    hintCtxSettingsEdit,
+		valueFn: func(m Model) string { return settingsPriorityVal(m.palette, m.providerPriorityDisplay()) },
+		helpFn: func(m Model) string {
+			return m.palette.styleHelp.Render("Per-machine order of concrete package managers. Reorder to set priority; space toggles a provider off.")
+		},
 	},
 	settingsRowDotsRepo: {
 		label:   "Repository",
 		section: "Dotfiles",
 		hint:    hintCtxSettingsEdit,
+		valueFn: func(m Model) string { return settingsDotsRepoVal(m) },
+		helpFn:  func(m Model) string { return m.palette.styleHelp.Render("Path to your dotfiles git repository.") },
 	},
 	settingsRowDotsSync: {
 		label:   "Dotfile Sync",
 		section: "Dotfiles",
 		hint:    hintCtxSettingsDotsSync,
+		valueFn: func(m Model) string { return settingsOnOff(m.palette, !dotsViewDisabled(m)) },
+		helpFn: func(m Model) string {
+			if dotsViewDisabled(m) {
+				return m.palette.styleHelp.Render("Re-enable dotfile sync and restore managed symlinks.")
+			}
+			return m.palette.styleHelp.Render("Disable sync: remove managed symlinks and copy files back locally.")
+		},
 	},
 	settingsRowDotsReminder: {
 		label:   "Reminder Notifications",
 		section: "Dotfiles",
 		hint:    hintCtxSettingsToggle,
+		valueFn: func(m Model) string {
+			return settingsServiceVal(m.palette, m.dotsReminderService != nil && m.dotsReminderService.Installed, m.dotsReminderServiceErr)
+		},
+		helpFn: func(m Model) string {
+			return settingsServiceHelp(m.palette, "reminder", m.dotsReminderService != nil && m.dotsReminderService.Installed, m.dotsReminderServiceErr, "Install a native reminder timer with desktop notifications.", dotsViewUnconfigured(m))
+		},
 	},
 	settingsRowDotsReminderInterval: {
 		label:   "Reminder Interval",
 		section: "Dotfiles",
 		hint:    hintCtxSettingsDuration,
+		valueFn: func(m Model) string {
+			return settingsDurationVal(m.palette, m.currentDotsReminderInterval(), m.dotsReminderServiceErr)
+		},
+		helpFn: func(m Model) string {
+			return settingsDurationHelp(m.palette, "reminder", m.dotsReminderService != nil && m.dotsReminderService.Installed, m.dotsReminderServiceErr)
+		},
 	},
 	settingsRowDotsWatch: {
 		label:   "Watch Sync",
 		section: "Dotfiles",
 		hint:    hintCtxSettingsToggle,
+		valueFn: func(m Model) string {
+			return settingsServiceVal(m.palette, m.dotsWatchService != nil && m.dotsWatchService.Installed, m.dotsWatchServiceErr)
+		},
+		helpFn: func(m Model) string {
+			return settingsServiceHelp(m.palette, "watch", m.dotsWatchService != nil && m.dotsWatchService.Installed, m.dotsWatchServiceErr, "Install a native watcher that syncs links after changes; it does not commit or push.", dotsViewUnconfigured(m))
+		},
 	},
 	settingsRowDotsWatchDebounce: {
 		label:   "Watch Debounce",
 		section: "Dotfiles",
 		hint:    hintCtxSettingsDuration,
+		valueFn: func(m Model) string {
+			return settingsDurationVal(m.palette, m.currentDotsWatchDebounce(), m.dotsWatchServiceErr)
+		},
+		helpFn: func(m Model) string {
+			return settingsDurationHelp(m.palette, "watch", m.dotsWatchService != nil && m.dotsWatchService.Installed, m.dotsWatchServiceErr)
+		},
 	},
 	settingsRowDotsServices: {
 		label:   "Service Status",
 		section: "Dotfiles",
 		hint:    hintCtxSettingsStatus,
+		valueFn: func(m Model) string { return settingsServicesVal(m) },
+		helpFn: func(m Model) string {
+			return m.palette.styleHelp.Render("Native service file status for reminders and watch sync.")
+		},
 	},
 	settingsRowDotsCommit: {
 		label:   "Commit Changes",
 		section: "Dotfiles",
 		hint:    hintCtxSettingsToggle,
 		action:  app.SettingsActionToggleDotsCommit,
+		valueFn: func(m Model) string {
+			if m.settings.DotsGit.AutoPush {
+				return m.palette.styleHelp.Render("[──]")
+			}
+			return settingsOnOff(m.palette, m.settings.DotsGit.AutoCommit)
+		},
+		helpFn: func(m Model) string {
+			if m.settings.DotsGit.AutoPush {
+				return m.palette.styleHelp.Render("Implied by Push Changes.")
+			}
+			return m.palette.styleHelp.Render("Commit automatically after dots add/remove/variant operations; does not affect Watch Sync.")
+		},
 	},
 	settingsRowDotsPush: {
 		label:   "Push Changes",
 		section: "Dotfiles",
 		hint:    hintCtxSettingsToggle,
 		action:  app.SettingsActionToggleDotsPush,
+		valueFn: func(m Model) string { return settingsOnOff(m.palette, m.settings.DotsGit.AutoPush) },
+		helpFn: func(m Model) string {
+			return m.palette.styleHelp.Render("Push (and commit) automatically after dots add/remove/variant operations; does not affect Watch Sync.")
+		},
 	},
 	settingsRowDoctor: {
 		label:   "Run Doctor",
 		section: "Maintenance",
 		hint:    hintCtxSettingsEdit,
+		valueFn: func(m Model) string { return settingsDoctorVal(m) },
+		helpFn: func(m Model) string {
+			return m.palette.styleHelp.Render("Run read-only checks for config, host setup, providers, dotfiles, services, and cache.")
+		},
+	},
+	settingsRowTraceLog: {
+		label:   "Command Log",
+		section: "Maintenance",
+		hint:    hintCtxSettingsEdit,
+		valueFn: func(m Model) string { return m.palette.styleHelp.Render("[view]") },
+		helpFn:  func(m Model) string { return m.palette.styleHelp.Render("View recent commands Omni ran and why.") },
 	},
 	settingsRowBootstrap: {
 		label:   "Run Bootstrap Again",
 		section: "Maintenance",
 		hint:    hintCtxSettingsDanger,
 		danger:  true,
+		valueFn: func(m Model) string { return m.palette.styleHelp.Render("[run]") },
+		helpFn: func(m Model) string {
+			return m.palette.styleHelp.Render("Run the guided bootstrap flow for this host again.")
+		},
 	},
 	settingsRowResetSettings: {
 		label:   "Reset Settings",
 		section: "Maintenance",
 		hint:    hintCtxSettingsDanger,
 		danger:  true,
+		valueFn: func(m Model) string { return m.palette.styleHelp.Render("[reset]") },
+		helpFn: func(m Model) string {
+			return m.palette.styleHelp.Render("Restore all settings to defaults (tools, hosts, and groups preserved).")
+		},
 	},
 	settingsRowResetCache: {
 		label:   "Reset Cache",
 		section: "Maintenance",
 		hint:    hintCtxSettingsDanger,
 		danger:  true,
+		valueFn: func(m Model) string { return m.palette.styleHelp.Render("[reset]") },
+		helpFn: func(m Model) string {
+			return m.palette.styleHelp.Render("Delete and reinitialise the tool cache database.")
+		},
 	},
-	settingsRowTraceLog: {
-		label:   "Command Log",
-		section: "Maintenance",
-		hint:    hintCtxSettingsEdit,
-	},
-}
-
-type settingRow struct {
-	settingsRowMeta
-	value string
-	help  string // pre-rendered with styling
 }
 
 type settingsDurationChoice struct {
@@ -150,6 +225,96 @@ type settingsDurationChoice struct {
 
 func formatSettingLabel(label string) string {
 	return fmt.Sprintf("%-*s", settingLabelWidth, label)
+}
+
+func settingsOnOff(p palette, on bool) string {
+	if on {
+		return p.styleInstalled.Render("[ON]")
+	}
+	return p.styleMissing.Render("[OFF]")
+}
+
+func settingsPriorityVal(p palette, pv []string) string {
+	if len(pv) == 0 {
+		return p.styleProvider.Render("[default]")
+	}
+	return p.styleProvider.Render("[" + strings.Join(pv, " › ") + "]")
+}
+
+func settingsDotsRepoVal(m Model) string {
+	v := dotsRepoPathForView(m)
+	if v == "" {
+		return m.palette.styleHelp.Render("[not set]")
+	}
+	contentW := rowAvailableWidth(m.width)
+	avail := max(contentW-settingLabelWidth-settingsMinGap, 12)
+	return m.palette.styleProvider.Render(truncatePath(v, avail))
+}
+
+func settingsServiceVal(p palette, installed bool, statusErr string) string {
+	if statusErr != "" {
+		return p.styleHelp.Render("[n/a]")
+	}
+	return settingsOnOff(p, installed)
+}
+
+func settingsDurationVal(p palette, duration time.Duration, statusErr string) string {
+	if statusErr != "" {
+		return p.styleHelp.Render("[n/a]")
+	}
+	return p.styleProvider.Render("[" + formatSettingsDuration(duration) + "]")
+}
+
+func settingsServicesVal(m Model) string {
+	p := m.palette
+	if m.dotsReminderServiceErr != "" || m.dotsWatchServiceErr != "" {
+		return p.styleHelp.Render("[n/a]")
+	}
+	installed := 0
+	if m.dotsReminderService != nil && m.dotsReminderService.Installed {
+		installed++
+	}
+	if m.dotsWatchService != nil && m.dotsWatchService.Installed {
+		installed++
+	}
+	return p.styleProvider.Render(fmt.Sprintf("[%d/2 on]", installed))
+}
+
+func settingsDoctorVal(m Model) string {
+	p := m.palette
+	switch {
+	case m.doctorRunning:
+		return p.styleProvider.Render("[running]")
+	case m.doctorErr != "":
+		return p.styleMissing.Render("[failed]")
+	case m.doctorResult != nil:
+		return p.styleProvider.Render(fmt.Sprintf("[%d ok/%d warn/%d fail]", m.doctorResult.Summary.OK, m.doctorResult.Summary.Warn, m.doctorResult.Summary.Fail))
+	default:
+		return p.styleHelp.Render("[run]")
+	}
+}
+
+func settingsServiceHelp(p palette, name string, installed bool, statusErr string, enableCopy string, unconfigured bool) string {
+	if unconfigured {
+		return p.styleHelp.Render("Set a dotfiles repository before enabling " + name + ".")
+	}
+	if statusErr != "" {
+		return p.styleHelp.Render(statusErr)
+	}
+	if installed {
+		return p.styleHelp.Render("Native " + name + " service is installed; space disables it.")
+	}
+	return p.styleHelp.Render(enableCopy)
+}
+
+func settingsDurationHelp(p palette, name string, installed bool, statusErr string) string {
+	if statusErr != "" {
+		return p.styleHelp.Render(statusErr)
+	}
+	if installed {
+		return p.styleHelp.Render("Update the installed " + name + " service interval.")
+	}
+	return p.styleHelp.Render("Choose the " + name + " service value used on the next enable.")
 }
 
 func renderSettings(m Model) string {
@@ -163,202 +328,10 @@ func renderSettings(m Model) string {
 
 	write("\n")
 
-	onOff := func(on bool) string {
-		if on {
-			return p.styleInstalled.Render("[ON]")
-		}
-		return p.styleMissing.Render("[OFF]")
-	}
-
-	priorityVal := func(pv []string) string {
-		if len(pv) == 0 {
-			return p.styleProvider.Render("[default]")
-		}
-		return p.styleProvider.Render("[" + strings.Join(pv, " › ") + "]")
-	}
-
-	dotsRepoVal := func(v string) string {
-		if v == "" {
-			return p.styleHelp.Render("[not set]")
-		}
-		avail := max(contentW-lipgloss.Width(rowInset)-settingLabelWidth-settingsMinGap, 12)
-		return p.styleProvider.Render(truncatePath(v, avail))
-	}
-
-	serviceVal := func(installed bool, statusErr string) string {
-		if statusErr != "" {
-			return p.styleHelp.Render("[n/a]")
-		}
-		return onOff(installed)
-	}
-
-	durationVal := func(duration time.Duration, statusErr string) string {
-		if statusErr != "" {
-			return p.styleHelp.Render("[n/a]")
-		}
-		return p.styleProvider.Render("[" + formatSettingsDuration(duration) + "]")
-	}
-
-	servicesVal := func() string {
-		if m.dotsReminderServiceErr != "" || m.dotsWatchServiceErr != "" {
-			return p.styleHelp.Render("[n/a]")
-		}
-		installed := 0
-		if m.dotsReminderService != nil && m.dotsReminderService.Installed {
-			installed++
-		}
-		if m.dotsWatchService != nil && m.dotsWatchService.Installed {
-			installed++
-		}
-		return p.styleProvider.Render(fmt.Sprintf("[%d/2 on]", installed))
-	}
-
-	doctorVal := func() string {
-		switch {
-		case m.doctorRunning:
-			return p.styleProvider.Render("[running]")
-		case m.doctorErr != "":
-			return p.styleMissing.Render("[failed]")
-		case m.doctorResult != nil:
-			return p.styleProvider.Render(fmt.Sprintf("[%d ok/%d warn/%d fail]", m.doctorResult.Summary.OK, m.doctorResult.Summary.Warn, m.doctorResult.Summary.Fail))
-		default:
-			return p.styleHelp.Render("[run]")
-		}
-	}
-
-	serviceHelp := func(name string, installed bool, statusErr string, enableCopy string) string {
-		if dotsViewUnconfigured(m) {
-			return p.styleHelp.Render("Set a dotfiles repository before enabling " + name + ".")
-		}
-		if statusErr != "" {
-			return p.styleHelp.Render(statusErr)
-		}
-		if installed {
-			return p.styleHelp.Render("Native " + name + " service is installed; space disables it.")
-		}
-		return p.styleHelp.Render(enableCopy)
-	}
-
-	durationHelp := func(name string, installed bool, statusErr string) string {
-		if statusErr != "" {
-			return p.styleHelp.Render(statusErr)
-		}
-		if installed {
-			return p.styleHelp.Render("Update the installed " + name + " service interval.")
-		}
-		return p.styleHelp.Render("Choose the " + name + " service value used on the next enable.")
-	}
-
-	rows := []settingRow{
-		settingsRowAutoImport: {
-			settingsRowMeta: settingsRows[settingsRowAutoImport],
-			value:           onOff(m.settings.AutoImport),
-			help:            p.styleHelp.Render("Add newly installed tools to the config on every sync."),
-		},
-		settingsRowProviderPriority: {
-			settingsRowMeta: settingsRows[settingsRowProviderPriority],
-			value:           priorityVal(m.providerPriorityDisplay()),
-			help:            p.styleHelp.Render("Per-machine order of concrete package managers. Reorder to set priority; space toggles a provider off."),
-		},
-		settingsRowDotsRepo: {
-			settingsRowMeta: settingsRows[settingsRowDotsRepo],
-			value:           dotsRepoVal(dotsRepoPathForView(m)),
-			help:            p.styleHelp.Render("Path to your dotfiles git repository."),
-		},
-		settingsRowDotsSync: {
-			settingsRowMeta: settingsRows[settingsRowDotsSync],
-			value:           onOff(!dotsViewDisabled(m)),
-			help: func() string {
-				if dotsViewDisabled(m) {
-					return p.styleHelp.Render("Re-enable dotfile sync and restore managed symlinks.")
-				}
-				return p.styleHelp.Render("Disable sync: remove managed symlinks and copy files back locally.")
-			}(),
-		},
-		settingsRowDotsReminder: {
-			settingsRowMeta: settingsRows[settingsRowDotsReminder],
-			value:           serviceVal(m.dotsReminderService != nil && m.dotsReminderService.Installed, m.dotsReminderServiceErr),
-			help: serviceHelp(
-				"reminder",
-				m.dotsReminderService != nil && m.dotsReminderService.Installed,
-				m.dotsReminderServiceErr,
-				"Install a native reminder timer with desktop notifications.",
-			),
-		},
-		settingsRowDotsReminderInterval: {
-			settingsRowMeta: settingsRows[settingsRowDotsReminderInterval],
-			value:           durationVal(m.currentDotsReminderInterval(), m.dotsReminderServiceErr),
-			help:            durationHelp("reminder", m.dotsReminderService != nil && m.dotsReminderService.Installed, m.dotsReminderServiceErr),
-		},
-		settingsRowDotsWatch: {
-			settingsRowMeta: settingsRows[settingsRowDotsWatch],
-			value:           serviceVal(m.dotsWatchService != nil && m.dotsWatchService.Installed, m.dotsWatchServiceErr),
-			help: serviceHelp(
-				"watch",
-				m.dotsWatchService != nil && m.dotsWatchService.Installed,
-				m.dotsWatchServiceErr,
-				"Install a native watcher that syncs links after changes; it does not commit or push.",
-			),
-		},
-		settingsRowDotsWatchDebounce: {
-			settingsRowMeta: settingsRows[settingsRowDotsWatchDebounce],
-			value:           durationVal(m.currentDotsWatchDebounce(), m.dotsWatchServiceErr),
-			help:            durationHelp("watch", m.dotsWatchService != nil && m.dotsWatchService.Installed, m.dotsWatchServiceErr),
-		},
-		settingsRowDotsServices: {
-			settingsRowMeta: settingsRows[settingsRowDotsServices],
-			value:           servicesVal(),
-			help:            p.styleHelp.Render("Native service file status for reminders and watch sync."),
-		},
-		settingsRowDotsCommit: {
-			settingsRowMeta: settingsRows[settingsRowDotsCommit],
-			value: func() string {
-				if m.settings.DotsGit.AutoPush {
-					return p.styleHelp.Render("[──]")
-				}
-				return onOff(m.settings.DotsGit.AutoCommit)
-			}(),
-			help: func() string {
-				if m.settings.DotsGit.AutoPush {
-					return p.styleHelp.Render("Implied by Push Changes.")
-				}
-				return p.styleHelp.Render("Commit automatically after dots add/remove/variant operations; does not affect Watch Sync.")
-			}(),
-		},
-		settingsRowDotsPush: {
-			settingsRowMeta: settingsRows[settingsRowDotsPush],
-			value:           onOff(m.settings.DotsGit.AutoPush),
-			help:            p.styleHelp.Render("Push (and commit) automatically after dots add/remove/variant operations; does not affect Watch Sync."),
-		},
-		settingsRowDoctor: {
-			settingsRowMeta: settingsRows[settingsRowDoctor],
-			value:           doctorVal(),
-			help:            p.styleHelp.Render("Run read-only checks for config, host setup, providers, dotfiles, services, and cache."),
-		},
-		settingsRowBootstrap: {
-			settingsRowMeta: settingsRows[settingsRowBootstrap],
-			value:           p.styleHelp.Render("[run]"),
-			help:            p.styleHelp.Render("Run the guided bootstrap flow for this host again."),
-		},
-		settingsRowResetSettings: {
-			settingsRowMeta: settingsRows[settingsRowResetSettings],
-			value:           p.styleHelp.Render("[reset]"),
-			help:            p.styleHelp.Render("Restore all settings to defaults (tools, hosts, and groups preserved)."),
-		},
-		settingsRowResetCache: {
-			settingsRowMeta: settingsRows[settingsRowResetCache],
-			value:           p.styleHelp.Render("[reset]"),
-			help:            p.styleHelp.Render("Delete and reinitialise the tool cache database."),
-		},
-		settingsRowTraceLog: {
-			settingsRowMeta: settingsRows[settingsRowTraceLog],
-			value:           p.styleHelp.Render("[view]"),
-			help:            p.styleHelp.Render("View recent commands Omni ran and why."),
-		},
-	}
-
-	for i, row := range rows {
-		if i == 0 || row.section != rows[i-1].section {
+	for i, row := range settingsRows {
+		value := row.valueFn(m)
+		help := row.helpFn(m)
+		if i == 0 || row.section != settingsRows[i-1].section {
 			if i > 0 {
 				write("\n")
 			}
@@ -419,13 +392,13 @@ func renderSettings(m Model) string {
 			}
 			write(renderResponsiveGroupListRow(p, true,
 				[]rowCell{leftCell(labelStyle.Render(rowInset+formatSettingLabel(row.label)), settingLabelWidth+lipgloss.Width(rowInset))},
-				[]rowCell{rightCell(row.value, 0)},
+				[]rowCell{rightCell(value, 0)},
 				contentW, settingsMinGap, listColumnGap,
 			) + "\n")
 		} else {
 			write(renderResponsiveGroupListRow(p, false,
 				[]rowCell{leftCell(lbl.Render(rowInset+formatSettingLabel(row.label)), settingLabelWidth+lipgloss.Width(rowInset))},
-				[]rowCell{rightCell(row.value, 0)},
+				[]rowCell{rightCell(value, 0)},
 				contentW, settingsMinGap, listColumnGap,
 			) + "\n")
 		}
@@ -435,7 +408,7 @@ func renderSettings(m Model) string {
 			} else if i == settingsRowDoctor && (m.doctorResult != nil || m.doctorErr != "") {
 				write(renderScrollableSettingsDoctorDashboard(m, detailPrefix) + "\n")
 			} else {
-				write(detailPrefix + row.help + "\n")
+				write(detailPrefix + help + "\n")
 			}
 			if hints := renderContextHints(m, settingsRowHintContext(i), hintPrefix); hints != "" {
 				write(hints + "\n")
