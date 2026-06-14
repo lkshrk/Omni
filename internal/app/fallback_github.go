@@ -146,29 +146,144 @@ func (a *App) fetchLatestGitHubRelease(ctx context.Context, owner, repoName stri
 	return release, nil
 }
 
+// scoreGitHubAsset returns a relevance score for a release asset name against
+// the current runtime platform. A score ≤ 0 means the asset is not usable.
+// Higher scores are preferred. The function is deterministic and pure.
+//
+// Scoring breakdown:
+//   - OS match: exact GOOS=20, alias=15; no match → 0 (reject)
+//   - Arch match: exact GOARCH=10, alias=7; no match → 0 (reject)
+//   - Archive type: .tar.gz/.tgz=4, .zip=3, .tar.xz=2, .tar.bz2=1, bare binary=1
+//   - libc (linux only): musl=2, gnu/glibc=1
+//   - ignored suffix (.sig/.asc/.sbom/…) → 0
+func scoreGitHubAsset(assetName string) int {
+	name := strings.ToLower(assetName)
+
+	// Rejected up-front: ignored suffixes score zero.
+	if githubReleaseAssetIgnored(name) {
+		return 0
+	}
+
+	// OS score — exact GOOS beats alias.
+	osScore := 0
+	switch runtime.GOOS {
+	case "darwin":
+		if strings.Contains(name, "darwin") {
+			osScore = 20
+		} else if strings.Contains(name, "macos") || strings.Contains(name, "mac") || strings.Contains(name, "apple") {
+			osScore = 15
+		}
+	case "windows":
+		if strings.Contains(name, "windows") {
+			osScore = 20
+		} else if strings.Contains(name, "win") {
+			osScore = 15
+		}
+	default:
+		// linux and other GOOS: only exact match.
+		if strings.Contains(name, runtime.GOOS) {
+			osScore = 20
+		}
+	}
+	if osScore == 0 {
+		return 0
+	}
+
+	// Arch score — exact GOARCH beats alias.
+	archScore := 0
+	switch runtime.GOARCH {
+	case "amd64":
+		if strings.Contains(name, "amd64") {
+			archScore = 10
+		} else if strings.Contains(name, "x86_64") || strings.Contains(name, "x64") {
+			archScore = 7
+		}
+	case "arm64":
+		if strings.Contains(name, "arm64") {
+			archScore = 10
+		} else if strings.Contains(name, "aarch64") {
+			archScore = 7
+		}
+	case "386":
+		if strings.Contains(name, "386") {
+			archScore = 10
+		} else if strings.Contains(name, "i386") || strings.Contains(name, "x86") {
+			archScore = 7
+		}
+	default:
+		if strings.Contains(name, runtime.GOARCH) {
+			archScore = 10
+		}
+	}
+	if archScore == 0 {
+		return 0
+	}
+
+	// Archive-type score.
+	archiveScore := 0
+	switch {
+	case strings.HasSuffix(name, ".tar.gz"), strings.HasSuffix(name, ".tgz"):
+		archiveScore = 4
+	case strings.HasSuffix(name, ".zip"):
+		archiveScore = 3
+	case strings.HasSuffix(name, ".tar.xz"):
+		archiveScore = 2
+	case strings.HasSuffix(name, ".tar.bz2"):
+		archiveScore = 1
+	default:
+		// Bare binary or unknown archive — include with minimal weight only when
+		// no extension flags it as a package format (deb/rpm/msi/…).
+		if !strings.ContainsAny(name, ".") || strings.HasSuffix(name, ".gz") {
+			archiveScore = 1
+		}
+	}
+	if archiveScore == 0 {
+		return 0
+	}
+
+	// libc preference on linux: musl is statically linked and more portable.
+	libcScore := 0
+	if runtime.GOOS == "linux" {
+		if strings.Contains(name, "musl") {
+			libcScore = 2
+		} else if strings.Contains(name, "gnu") || strings.Contains(name, "glibc") {
+			libcScore = 1
+		}
+	}
+
+	return osScore + archScore + archiveScore + libcScore
+}
+
 func bestGitHubReleaseAsset(assets []githubAsset, binary string) (githubAsset, bool) {
-	osNames := githubOSNames()
-	archNames := githubArchNames()
+	best := githubAsset{}
+	bestScore := 0
+	found := false
+
 	for _, asset := range assets {
-		name := strings.ToLower(asset.Name)
 		if strings.TrimSpace(asset.ID.String()) == "" || strings.TrimSpace(asset.Name) == "" || strings.TrimSpace(asset.BrowserDownloadURL) == "" {
 			continue
 		}
+		name := strings.ToLower(asset.Name)
 		if githubReleaseAssetIgnored(name) {
-			continue
-		}
-		if !containsAny(name, osNames) || !containsAny(name, archNames) {
-			continue
-		}
-		if !githubAssetExtractable(name) {
 			continue
 		}
 		if binary != "" && !strings.Contains(name, strings.ToLower(binary)) {
 			continue
 		}
-		return asset, true
+		score := scoreGitHubAsset(asset.Name)
+		if score <= 0 {
+			continue
+		}
+		// Pick the highest-scoring asset; on an equal-score tie, prefer the
+		// lexicographically smaller name so the choice is deterministic regardless
+		// of the order GitHub returns assets.
+		if !found || score > bestScore || (score == bestScore && asset.Name < best.Name) {
+			best = asset
+			bestScore = score
+			found = true
+		}
 	}
-	return githubAsset{}, false
+	return best, found
 }
 
 func normalizedGitHubPublishedAt(value string) (string, error) {
@@ -215,7 +330,9 @@ func githubReleaseAssetIgnored(name string) bool {
 	if strings.Contains(name, "checksum") || strings.Contains(name, "sha256") || strings.Contains(name, "sha512") {
 		return true
 	}
-	if strings.Contains(name, "signature") || strings.HasSuffix(name, ".sig") || strings.HasSuffix(name, ".asc") {
+	// Detached signatures and SBOM attestations are metadata, not installable assets.
+	if strings.Contains(name, "signature") || strings.HasSuffix(name, ".sig") ||
+		strings.HasSuffix(name, ".asc") || strings.HasSuffix(name, ".sbom") {
 		return true
 	}
 	if strings.Contains(name, "readme") || strings.Contains(name, "license") || strings.Contains(name, "docs") {
@@ -258,15 +375,6 @@ func githubArchNames() []string {
 	default:
 		return []string{runtime.GOARCH}
 	}
-}
-
-func containsAny(s string, needles []string) bool {
-	for _, needle := range needles {
-		if strings.Contains(s, needle) {
-			return true
-		}
-	}
-	return false
 }
 
 // isGitHubHost reports whether host is a recognized GitHub API hostname,
