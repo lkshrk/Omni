@@ -223,6 +223,86 @@ func TestDoctorDrift_UnavailableButPresent_DetectedViaInstalledWith(t *testing.T
 	}
 }
 
+// ─── Class 1 false-positive guard: working fallback ──────────────────────────
+
+func TestDoctorDrift_NoDrift_WhenPrimaryProviderUnavailableButFallbackWorks(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+
+	// Primary provider "pip" is unavailable, but "brew" is available and listed
+	// as a secondary Providers[] entry. The resolver picks "brew" as the usable
+	// route — this must NOT produce a Class-1 finding.
+	unavailPip := newDriftProvider("pip", false, nil)
+	availBrew := newDriftProvider("brew", true, map[string]string{"git": "2.43.0"})
+	a, cfgPath := newImportApp(t, unavailPip, availBrew)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"git": {
+				Providers: []config.ToolInstallSpec{
+					{Provider: "pip"},
+					{Provider: "brew"},
+				},
+			},
+		},
+		Hosts: map[string][]string{"testhost": {}},
+		Groups: []*config.GroupConfig{
+			{Name: "testhost", Special: "host", Tools: []config.ToolEntry{{Name: "git"}}},
+		},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	result, err := a.Doctor(context.Background())
+	if err != nil {
+		t.Fatalf("Doctor: %v", err)
+	}
+
+	check := doctorCheck(result, "drift")
+	if check == nil {
+		t.Fatalf("missing drift check in %+v", result.Checks)
+	}
+	if check.Status != app.DoctorStatusOK {
+		t.Fatalf("drift status = %q, want ok (fallback provider available, no drift): %+v", check.Status, check)
+	}
+}
+
+// ─── Class 2: PATH-detected tools (InstalledWith="") do not trigger wrong-provider ──
+
+func TestDoctorDrift_NoDrift_WhenInstalledWithEmptyPathDetected(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+
+	// HCL-26 PATH-detection writes Installed:true with InstalledWith:"" to avoid
+	// wrong-provider classification. This must not produce a Class-2 finding.
+	brew := newDriftProvider("brew", true, nil)
+	a, cfgPath := newImportApp(t, brew)
+	if err := saveAppConfig(t, cfgPath, buildDriftConfig(map[string]string{
+		"git": "brew",
+	})); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	// Seed with InstalledWith="" — the HCL-26 PATH-detected shape.
+	seedDB(t, a, []*database.ToolCache{{
+		Name:          "git",
+		Provider:      "brew",
+		Package:       "git",
+		Installed:     true,
+		InstalledWith: "",
+	}})
+
+	result, err := a.Doctor(context.Background())
+	if err != nil {
+		t.Fatalf("Doctor: %v", err)
+	}
+
+	check := doctorCheck(result, "drift")
+	if check == nil {
+		t.Fatalf("missing drift check in %+v", result.Checks)
+	}
+	if check.Status != app.DoctorStatusOK {
+		t.Fatalf("drift status = %q, want ok (InstalledWith empty → no wrong-provider finding): %+v", check.Status, check)
+	}
+}
+
 // ─── Clean (no-drift) case ────────────────────────────────────────────────────
 
 func TestDoctorDrift_NoDrift_WhenAllProvidersAvailableAndInstalledWithMatches(t *testing.T) {
