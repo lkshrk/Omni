@@ -7562,17 +7562,8 @@ func TestRenderSetupOptions_WrapIndentMatchesDescCol(t *testing.T) {
 	}
 }
 
-// ── Render-surface guardrails (HCL-30) ────────────────────────────────────────
-//
-// These tests assert user-visible rendered output so that adding a row, popup,
-// or tab section to the model WITHOUT wiring it into the render path causes a
-// test failure. They complement the state-only tests that existed before.
-
-// TestRenderSettings_SectionHeadersPresent asserts that every distinct section
-// name referenced by settingsRows is actually visible in the rendered settings
-// surface. A row whose section header is never emitted by renderSettings()
-// (e.g. because it was added to the iota but not to the render slice) will
-// cause this test to fail.
+// TestRenderSettings_SectionHeadersPresent catches rows added to the settingsRows
+// iota that are never emitted by renderSettings() (section present in data but absent in render).
 func TestRenderSettings_SectionHeadersPresent(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSettings
@@ -7593,17 +7584,14 @@ func TestRenderSettings_SectionHeadersPresent(t *testing.T) {
 	}
 }
 
-// TestRenderDotsPeek_PopupVisibleInDots asserts that the dotsPeek popup title
-// ("Peek") appears in View().Content when mode == viewDots and dotsPeekLoading
-// is set. This is the render-gate guard for the dotsPeek popup class: if the
-// popup is added to the model but gated away from View() it will fail here.
+// TestRenderDotsPeek_PopupVisibleInDots is the render-gate guard: popup added to
+// the model but missing from the View() switch will fail here.
 func TestRenderDotsPeek_PopupVisibleInDots(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.width = 120
 	m.height = 60
-	// dotsPeekLoading causes the popup to render (loading state) without
-	// requiring a real DotsPeekResult to be constructed.
+	// dotsPeekLoading triggers the loading state without needing a real DotsPeekResult.
 	m.dotsPeekLoading = true
 
 	view := m.View().Content
@@ -7612,13 +7600,11 @@ func TestRenderDotsPeek_PopupVisibleInDots(t *testing.T) {
 	}
 }
 
-// TestRenderDotsPeek_PopupAbsentOutsideDots asserts that the dotsPeek popup is
-// NOT drawn when mode != viewDots, even when dotsPeekLoading is set. This
-// catches the bug class where a popup's render gate is missing and it bleeds
-// into unrelated views.
+// TestRenderDotsPeek_PopupAbsentOutsideDots catches a missing render gate that
+// would let the popup bleed into unrelated views.
 func TestRenderDotsPeek_PopupAbsentOutsideDots(t *testing.T) {
 	m := baseModel(nil)
-	m.mode = viewSettings // a mode that is NOT viewDots
+	m.mode = viewSettings
 	m.width = 120
 	m.height = 60
 	m.dotsPeekLoading = true
@@ -7631,17 +7617,9 @@ func TestRenderDotsPeek_PopupAbsentOutsideDots(t *testing.T) {
 	}
 }
 
-// TestRenderList_SectionHeadersPresent asserts that the list view renders the
-// correct section header for each tool based on its actual state.
-//
-// Classification rules for brew tools (no provider-pin, no ecosystem manager):
-//   - Installed: true, Tracked: true, Outdated: false  → sectionInstalled  → "Installed"
-//   - Installed: true, Tracked: true, Outdated: true   → sectionUpdates    → "Updates Available"
-//
-// Both assertions use baseModel — no live app.App is required because brew
-// tools are classified solely by their ToolCache fields; the
-// ToolClassificationContext is empty (no provider pins, no ecosystem
-// overrides) which is the correct default for brew.
+// TestRenderList_SectionHeadersPresent verifies brew tool classification into render sections.
+// Brew tools use only ToolCache fields (no provider pins); baseModel sets an empty
+// ToolClassificationContext which is correct for brew.
 func TestRenderList_SectionHeadersPresent(t *testing.T) {
 	t.Run("installed brew tool renders Installed section header", func(t *testing.T) {
 		tool := &database.ToolCache{
@@ -7661,7 +7639,6 @@ func TestRenderList_SectionHeadersPresent(t *testing.T) {
 		if !strings.Contains(out, "Installed") {
 			t.Errorf("list view missing 'Installed' section header for an installed, up-to-date brew tool\nview:\n%s", out)
 		}
-		// Negative guard: this tool must NOT appear under "Updates Available" or "Out of Sync".
 		if strings.Contains(out, "Updates Available") {
 			t.Errorf("list view wrongly shows 'Updates Available' for a non-outdated tool\nview:\n%s", out)
 		}
@@ -7734,10 +7711,8 @@ func TestRenderList_SectionHeadersPresent(t *testing.T) {
 	})
 }
 
-// TestRenderList_UpdatesSectionHeader asserts that the "Updates Available"
-// section header renders when an installed tool has an update pending. If the
-// sectionUpdates case is removed from sectionLabel() the header silently
-// reverts to "Available" and this test fails.
+// TestRenderList_UpdatesSectionHeader guards sectionLabel(): removing the sectionUpdates
+// case silently reverts the header to "Available" — this test catches that.
 func TestRenderList_UpdatesSectionHeader(t *testing.T) {
 	outdated := &database.ToolCache{
 		Name: "fzf", Provider: "brew", Package: "fzf",
@@ -7759,11 +7734,8 @@ func TestRenderList_UpdatesSectionHeader(t *testing.T) {
 	}
 }
 
-// TestRenderDots_SectionHeadersPresent asserts that when dotsEntries contains
-// entries in multiple sections, the section headers from DotStatusSections are
-// rendered in the dots tab. Dots section titles come from the data layer
-// (app.DotStatusSections); this test ensures renderDots() actually calls
-// sections.Header() so any bypass in the render loop fails here.
+// TestRenderDots_SectionHeadersPresent ensures renderDots() calls sections.Header();
+// a bypass in the render loop would drop entries without failing otherwise.
 func TestRenderDots_SectionHeadersPresent(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewDots
@@ -7771,8 +7743,7 @@ func TestRenderDots_SectionHeadersPresent(t *testing.T) {
 	m.height = 60
 	// DotsRepo must be set so renderDots() doesn't bail to the "not configured" early-return.
 	m.setSettings(config.Settings{DotsRepo: "/home/user/dotfiles"})
-	// Populate entries spanning two natural dots sections so DotStatusSections
-	// returns multiple groups.
+	// Two entries with different states so DotStatusSections returns multiple groups.
 	m.dotsEntries = []app.DotStatus{
 		{Name: "nvim", State: app.DotStateSynced, Health: app.HealthOK},
 		{Name: "zsh", State: app.DotStateIgnored},
@@ -7780,8 +7751,6 @@ func TestRenderDots_SectionHeadersPresent(t *testing.T) {
 
 	out := stripANSIEscapeSequences(renderDots(m))
 
-	// Both entries must appear by name — if the section render loop is broken
-	// the entries would not be drawn at all.
 	for _, name := range []string{"nvim", "zsh"} {
 		if !strings.Contains(out, name) {
 			t.Errorf("dots view missing entry %q\nview:\n%s", name, out)
@@ -7789,11 +7758,8 @@ func TestRenderDots_SectionHeadersPresent(t *testing.T) {
 	}
 }
 
-// TestRenderStatus_SectionHeadersPresent asserts that the status tab renders
-// its canonical section headers when there is data for each section. If a
-// section constant is renamed or the sectionOrder slice is modified without
-// updating statusSectionAttention/statusSectionOverview the label disappears
-// from the render surface and this test catches it.
+// TestRenderStatus_SectionHeadersPresent catches renames or sectionOrder changes
+// that drop statusSectionOverview/"Data" from the rendered surface.
 func TestRenderStatus_SectionHeadersPresent(t *testing.T) {
 	installed := &database.ToolCache{
 		Name: "git", Provider: "brew", Package: "git",
@@ -7806,7 +7772,7 @@ func TestRenderStatus_SectionHeadersPresent(t *testing.T) {
 
 	out := stripANSIEscapeSequences(renderStatus(m))
 
-	// "Data" (statusSectionOverview) always has content (tool counts etc.).
+	// "Data" is the statusSectionOverview label; always has content (tool counts).
 	if !strings.Contains(out, "Data") {
 		t.Errorf("status view missing 'Data' section header\nview:\n%s", out)
 	}
