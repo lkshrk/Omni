@@ -762,6 +762,7 @@ func normalizedCopy(cfg *RootConfig) RootConfig {
 func cloneSettings(settings Settings) Settings {
 	settings.DisabledProviders = cloneStringSlice(settings.DisabledProviders)
 	settings.ProviderPriority = cloneStringSlice(settings.ProviderPriority)
+	settings.AgentsUse = cloneStringSlice(settings.AgentsUse)
 	settings.ProviderUpdateQuarantine = cloneStringMap(settings.ProviderUpdateQuarantine)
 	if settings.Ecosystems != nil {
 		ecosystems := make(map[string]EcosystemSettings, len(settings.Ecosystems))

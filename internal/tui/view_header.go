@@ -523,6 +523,7 @@ func mainTabs() []mainTab {
 		{mode: viewStatus, label: "Dashboard"},
 		{mode: viewList, label: "Tools"},
 		{mode: viewDots, label: "Dots"},
+		{mode: viewSkills, label: "Agents"},
 		{mode: viewGroups, label: "Groups"},
 		{mode: viewSettings, label: "Settings"},
 	}

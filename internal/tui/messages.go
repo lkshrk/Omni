@@ -42,10 +42,40 @@ type toolsLoadedMsg struct {
 	dotsWatchServiceErr    string
 	dotsConfigured         bool
 	dotsConfiguredKnown    bool
+	agentsEnabled          bool
 	dotsSyncAvail          app.DotsSyncAvailability
 	dotsSyncAvailKnown     bool
 	setupProviders         []app.SetupProviderOption
 	ecosystemProviders     []string
+}
+
+type skillsManifestLoadedMsg struct {
+	rows []app.SkillRow
+	err  error
+}
+
+type skillsUpdatedMsg struct {
+	err error
+}
+
+type agentsToggledMsg struct {
+	enabled bool
+	err     error
+}
+
+type agentsUseSavedMsg struct {
+	ids []string
+	err error
+}
+
+type skillsRestoredMsg struct {
+	res app.RestoreSkillsResult
+	err error
+}
+
+type skillsImportedMsg struct {
+	diff app.ImportDiff
+	err  error
 }
 
 type setupConfigImportDoneMsg struct {

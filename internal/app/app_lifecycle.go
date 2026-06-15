@@ -1301,6 +1301,7 @@ func (a *App) UpgradeAllDetailedWithOptions(ctx context.Context, progress func(s
 	tools = filterIgnoredToolCaches(tools, a.ignoredToolSetBestEffort())
 	if !opts.Force {
 		a.annotateUpdateQuarantine(ctx, cfg, tools)
+		a.annotateSelfUpdatingCasks(tools)
 	}
 	result := &UpgradeAllResult{}
 	var errs []error

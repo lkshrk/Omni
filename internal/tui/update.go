@@ -278,6 +278,67 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fallbackSavedMsg:
 		cmds = append(cmds, m.handleFallbackSavedMsg(msg)...)
 
+	case skillsManifestLoadedMsg:
+		m.skillsRows = msg.rows
+		m.skillsErr = msg.err
+		m.skillsLoaded = true
+
+	case skillsRestoredMsg:
+		m.skillsRunning = false
+		if msg.err != nil {
+			m.skillsErr = msg.err
+		} else {
+			r := msg.res
+			m.skillsResult = &r
+			m.skillsLoaded = false
+			cmds = append(cmds, m.loadSkillsManifestCmd())
+		}
+		return m, tea.Batch(cmds...)
+
+	case skillsImportedMsg:
+		m.skillsRunning = false
+		if msg.err != nil {
+			m.skillsErr = msg.err
+		} else {
+			d := msg.diff
+			m.skillsImport = &d
+			m.skillsLoaded = false
+			cmds = append(cmds, m.loadSkillsManifestCmd())
+		}
+		return m, tea.Batch(cmds...)
+
+	case skillsUpdatedMsg:
+		m.skillsRunning = false
+		if msg.err != nil {
+			m.skillsErr = msg.err
+		} else {
+			m.skillsLoaded = false
+			cmds = append(cmds, m.loadSkillsManifestCmd())
+		}
+		return m, tea.Batch(cmds...)
+
+	case agentsToggledMsg:
+		if msg.err != nil {
+			m.skillsErr = msg.err
+		} else {
+			m.agentsEnabled = msg.enabled
+			m.skillsErr = nil
+			if m.agentsEnabled {
+				m.skillsLoaded = false
+				cmds = append(cmds, m.loadSkillsManifestCmd())
+			}
+		}
+		return m, tea.Batch(cmds...)
+
+	case agentsUseSavedMsg:
+		if msg.err != nil {
+			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
+		} else {
+			m.settings.AgentsUse = msg.ids
+			cmds = append(cmds, setStatus(&m, "✓ agents saved", false))
+		}
+		return m, tea.Batch(cmds...)
+
 	case tea.KeyPressMsg:
 		return m.handleKeyPressMsg(msg, cmds)
 	}
@@ -336,7 +397,7 @@ func (m Model) mainTabsClickable() bool {
 	if m.hostRequired || m.showFilePicker || m.stowInstallPrompt || m.dashboardReconcilePlanOpen || m.help.ShowAll {
 		return false
 	}
-	if m.mode != viewList && m.mode != viewDots && m.mode != viewStatus && m.mode != viewGroups && m.mode != viewSettings {
+	if !isMainTabMode(m.mode) {
 		return false
 	}
 	if m.hostRenameMode || m.groupCreating || m.groupRenameMode || m.groupDeleteConfirm {

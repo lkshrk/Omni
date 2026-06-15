@@ -7783,3 +7783,66 @@ func TestRenderStatus_SectionHeadersPresent(t *testing.T) {
 		t.Errorf("status view missing 'Data' section header\nview:\n%s", out)
 	}
 }
+
+func TestDisplayVersionText_SelfUpdates(t *testing.T) {
+	tool := &database.ToolCache{
+		Name:      "battle-net",
+		Provider:  "brew",
+		Installed: true,
+		Outdated:  true,
+	}
+	tool.Version.Valid = true
+	tool.Version.String = "1.0.0"
+	tool.LatestVersion.Valid = true
+	tool.LatestVersion.String = "2.0.0"
+	tool.UpdateBlocked = app.UpdateBlockSelfUpdates
+
+	got := displayVersionText(tool)
+	if got != "1.0.0 → 2.0.0" {
+		t.Errorf("displayVersionText(self-updates) = %q, want normal update text (marker lives in the name)", got)
+	}
+}
+
+func TestDisplayVersionText_NormalOutdated(t *testing.T) {
+	tool := &database.ToolCache{
+		Name:      "ripgrep",
+		Provider:  "brew",
+		Installed: true,
+		Outdated:  true,
+	}
+	tool.Version.Valid = true
+	tool.Version.String = "13.0.0"
+	tool.LatestVersion.Valid = true
+	tool.LatestVersion.String = "14.0.0"
+
+	got := displayVersionText(tool)
+	if got != "13.0.0 → 14.0.0" {
+		t.Errorf("displayVersionText(normal outdated) = %q, want %q", got, "13.0.0 → 14.0.0")
+	}
+}
+
+func TestRenderToolRow_SelfUpdatingCask(t *testing.T) {
+	p := defaultPalette()
+	tool := &database.ToolCache{
+		Name:      "battle-net",
+		Provider:  "brew",
+		Installed: true,
+		Outdated:  true,
+	}
+	tool.Version.Valid = true
+	tool.Version.String = "1.0.0"
+	tool.LatestVersion.Valid = true
+	tool.LatestVersion.String = "2.0.0"
+	tool.UpdateBlocked = app.UpdateBlockSelfUpdates
+
+	cols := colWidths{name: 20, prov: 10, ver: 20, screenW: 120}
+	out := renderToolRow(p, tool, cols, "", "", "brew", "", "", false, false, syncOK)
+
+	plain := stripANSIEscapeSequences(out)
+	if !strings.Contains(plain, "(self)") {
+		t.Errorf("self-updating row should contain '(self)', got: %q", plain)
+	}
+	if !strings.Contains(plain, "→") {
+		t.Errorf("self-updating row should read like a normal update (contain '→'), got: %q", plain)
+	}
+}

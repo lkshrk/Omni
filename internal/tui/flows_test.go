@@ -145,8 +145,8 @@ func manyTools(n int) []*database.ToolCache {
 
 // toSettings returns the key sequence that navigates from list to settings tab.
 func toSettings() []tea.Msg {
-	// Third tab lands on settings with cursor hidden; the extra j reveals cursor at row 0.
-	return []tea.Msg{pressTab(), pressTab(), pressTab(), pressRune('j')}
+	// Tab order: Tools→Dots→Agents→Groups→Settings; fourth tab lands on settings.
+	return []tea.Msg{pressTab(), pressTab(), pressTab(), pressTab(), pressRune('j')}
 }
 
 // nj returns n 'j' presses.
@@ -820,10 +820,10 @@ func TestFlow_UC24_TabCycle(t *testing.T) {
 		}
 	})
 
-	t.Run("list → dots", func(t *testing.T) {
-		got := drive(baseModel(nil), pressTab())
-		if got.mode != viewDots {
-			t.Errorf("mode = %v, want viewDots", got.mode)
+	t.Run("list → agents", func(t *testing.T) {
+		got := drive(baseModel(nil), pressTab(), pressTab())
+		if got.mode != viewSkills {
+			t.Errorf("mode = %v, want viewSkills", got.mode)
 		}
 	})
 
@@ -854,28 +854,28 @@ func TestFlow_UC24_TabCycle(t *testing.T) {
 	})
 
 	t.Run("dots → groups", func(t *testing.T) {
-		got := drive(baseModel(nil), pressTab(), pressTab())
+		got := drive(baseModel(nil), pressTab(), pressTab(), pressTab())
 		if got.mode != viewGroups {
 			t.Errorf("mode = %v, want viewGroups", got.mode)
 		}
 	})
 
 	t.Run("groups → settings", func(t *testing.T) {
-		got := drive(baseModel(nil), pressTab(), pressTab(), pressTab())
+		got := drive(baseModel(nil), pressTab(), pressTab(), pressTab(), pressTab())
 		if got.mode != viewSettings {
 			t.Errorf("mode = %v, want viewSettings", got.mode)
 		}
 	})
 
 	t.Run("settings → dashboard", func(t *testing.T) {
-		got := drive(baseModel(nil), pressTab(), pressTab(), pressTab(), pressTab())
+		got := drive(baseModel(nil), pressTab(), pressTab(), pressTab(), pressTab(), pressTab())
 		if got.mode != viewStatus {
 			t.Errorf("mode = %v, want viewStatus", got.mode)
 		}
 	})
 
-	t.Run("settings → list", func(t *testing.T) {
-		got := drive(baseModel(nil), pressTab(), pressTab(), pressTab(), pressTab(), pressTab())
+	t.Run("dashboard → list", func(t *testing.T) {
+		got := drive(baseModel(nil), pressTab(), pressTab(), pressTab(), pressTab(), pressTab(), pressTab())
 		if got.mode != viewList {
 			t.Errorf("mode = %v, want viewList (full cycle)", got.mode)
 		}
@@ -1510,7 +1510,7 @@ func TestFlow_UC36_PriorityEditor(t *testing.T) {
 // ── UC-37 Hosts tab navigation ────────────────────────────────────────────
 
 func TestFlow_UC37_GroupsNavigation(t *testing.T) {
-	toHosts := func() []tea.Msg { return []tea.Msg{pressTab(), pressTab()} }
+	toHosts := func() []tea.Msg { return []tea.Msg{pressTab(), pressTab(), pressTab()} }
 
 	t.Run("Esc from hosts returns to list", func(t *testing.T) {
 		got := drive(baseModel(nil), append(toHosts(), pressEsc())...)
@@ -1540,7 +1540,7 @@ func TestFlow_UC37_GroupsNavigation(t *testing.T) {
 // ── UC-38 Host creation is onboarding/CLI only ────────────────────────────────
 
 func TestFlow_UC38_NewHostRemovedFromHostsTab(t *testing.T) {
-	toHosts := func() []tea.Msg { return []tea.Msg{pressTab(), pressTab()} }
+	toHosts := func() []tea.Msg { return []tea.Msg{pressTab(), pressTab(), pressTab()} }
 
 	t.Run("p does not open host creation", func(t *testing.T) {
 		got := drive(baseModel(nil), append(toHosts(), pressRune('p'))...)
@@ -1560,7 +1560,7 @@ func TestFlow_UC38_NewHostRemovedFromHostsTab(t *testing.T) {
 // ── UC-39 Host delete confirm ─────────────────────────────────────────────
 
 func TestFlow_UC39_HostDeleteConfirm(t *testing.T) {
-	toHosts := func() []tea.Msg { return []tea.Msg{pressTab(), pressTab()} }
+	toHosts := func() []tea.Msg { return []tea.Msg{pressTab(), pressTab(), pressTab()} }
 
 	m := baseModel(nil)
 	m.hostInfo = &app.HostInfo{

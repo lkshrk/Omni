@@ -555,9 +555,17 @@ Expected: FAIL — undefined `dryRunLines`.
 
 Append to `internal/app/agents_skills.go`:
 
-```go
-import "strings"  // add to existing import block
+Add `strings` and the provider package to the import block:
 
+```go
+import (
+	"strings"
+
+	"github.com/lkshrk/omni/internal/provider"
+)
+```
+
+```go
 // RestoreSkillsOptions controls a restore run.
 type RestoreSkillsOptions struct {
 	DryRun bool
@@ -573,27 +581,33 @@ func dryRunLines(runner string, skills []config.ManifestSkill) []string {
 	return lines
 }
 
+// nodeManager reads the declared node ecosystem manager ("bun"/"npm"/...).
+// Empty when unset → skillRunner falls back to npx.
+func nodeManager(cfg *config.RootConfig) string {
+	return cfg.Settings.Ecosystems[provider.EcosystemNode].Manager
+}
+
 // RestoreSkills restores the manifest skill set onto this host.
 func (a *App) RestoreSkills(ctx context.Context, opts RestoreSkillsOptions) (RestoreSkillsResult, []string, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
 		return RestoreSkillsResult{}, nil, err
 	}
-	runner := skillRunner(a.effectiveNodeManager(cfg))
+	runner := skillRunner(nodeManager(cfg))
 	skills := cfg.Agents.Skills
 	if opts.DryRun {
 		return RestoreSkillsResult{}, dryRunLines(runner, skills), nil
 	}
-	inst := npxInstaller{runner: runner, exec: a.fallbackExec.Run}
+	inst := npxInstaller{runner: runner, exec: a.fallbackExecutor().Run}
 	return restoreSkills(ctx, skills, inst), nil, nil
 }
 ```
 
-> Note for implementer: `a.effectiveNodeManager(cfg)` must return the resolved
-> node manager string ("bun"/"npm"/...). If no such helper exists, read
-> `cfg.Settings.Ecosystems["node"].Manager` directly (see `Settings.Ecosystems`
-> in `config.go`) and inline a small helper. Confirm the exact field name
-> against `EcosystemSettings` before writing — do not invent it.
+> Verified against source: `EcosystemSettings.Manager` exists
+> (`internal/config/config.go:234`); `provider.EcosystemNode == "node"`
+> (`internal/provider/catalog.go:7`); `a.fallbackExecutor()` is the nil-safe
+> executor accessor returning `a.fallbackExec` or `a.newExecutor()`
+> (`internal/app/fallback.go:630`) — use it, NOT `a.fallbackExec` directly.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -980,12 +994,34 @@ In `internal/cli/root.go`, add to the `root.AddCommand(...)` block (~line 123):
 		newAgentsCmd(state),
 ```
 
-- [ ] **Step 3: Verify build**
+- [ ] **Step 3: Exempt `agents` from host gating**
 
-Run: `go build ./... && go vet ./internal/cli/`
-Expected: no errors.
+Agent skills are independent of tool-host assignment (like `dots`). In
+`internal/cli/root.go`, add to the `hostExempt` map (~line 143):
 
-- [ ] **Step 4: Manual smoke (dry-run, no network)**
+```go
+	"agents":     true, // skills restore/import are independent of tool hosts
+```
+
+The ancestor walk in `requireActiveHost` (root.go:174-183) then exempts the whole
+`agents` subtree. Verified: without this, `omni agents skills restore` errors
+when no active host is configured.
+
+- [ ] **Step 4: Extend the hostExempt membership test**
+
+In `internal/cli/cmd_test.go`, `TestHostExempt_ContainsExpectedCommands`
+(~line 1751), add `"agents"` to the `expected` slice:
+
+```go
+	expected := []string{"bootstrap", "doctor", "init", "hosts", "dots", "ui", "version", "settings", "help", "completion", "agents"}
+```
+
+- [ ] **Step 5: Verify build + host-exempt test**
+
+Run: `go build ./... && go test ./internal/cli/ -run TestHostExempt -v`
+Expected: build OK, test PASS.
+
+- [ ] **Step 6: Manual smoke (dry-run, no network)**
 
 Run:
 ```bash
@@ -994,10 +1030,10 @@ go run ./cmd/omni --config /tmp/omni-skills.json agents skills restore --dry-run
 ```
 Expected stdout: `npx skills add o/r#main -s x -g -a claude-code -y`
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add internal/cli/agents.go internal/cli/root.go
+git add internal/cli/agents.go internal/cli/root.go internal/cli/cmd_test.go
 git commit -m "feat(cli): omni agents skills restore/import commands"
 ```
 
@@ -1019,9 +1055,8 @@ Brief: "Write two txtar fixtures for `integration_tests/testdata/scripts/`.
 Fixture 1 `agents-skills-restore-dryrun.txtar`: a `settings.json` declaring one
 `agents.skills` entry `{name:'x', source:'o/r', ref:'main', agents:['claude-code']}`;
 run `omni --config settings.json agents skills restore --dry-run`; assert stdout
-matches `npx skills add o/r#main -s x -g -a claude-code -y`. Remember the harness
-injects `OMNI_HOSTNAME=testhost`; if the command is host-gated, first run
-`omni --config settings.json hosts ensure testhost`.
+matches `npx skills add o/r#main -s x -g -a claude-code -y`. The `agents` command
+is host-exempt (Task 10 Step 3), so no `hosts ensure` is needed.
 
 Fixture 2 `agents-skills-import-dryrun.txtar`: provide a `.agents/.skill-lock.json`
 file in the work dir with one skill entry, set `HOME` (or `XDG_STATE_HOME`) so
@@ -1043,7 +1078,419 @@ git commit -m "test(agents): txtar dry-run coverage for skills restore and impor
 
 ---
 
-## Task 12: Full suite + docs touch-up
+## Task 12: Post-restore drift check
+
+Compare each skill's `skillFolderHash` before vs after restore and surface
+changes as non-fatal warnings (the spec's health check). `skills add` rewrites
+the lockfile, so post-restore hashes reflect what was actually fetched; a change
+vs the pre-restore value means the locked ref moved.
+
+**Files:**
+- Modify: `internal/app/agents_skills.go`
+- Test: `internal/app/agents_skills_test.go`
+
+- [ ] **Step 1: Write the failing test**
+
+```go
+func TestSkillDriftDiff(t *testing.T) {
+	before := map[string]string{"a": "h1", "b": "h2", "gone": "h9"}
+	after := map[string]string{"a": "h1", "b": "h2new", "c": "h3"}
+	drift := skillDrift(before, after)
+	// changed: b (h2 -> h2new); new: c (had no prior hash). "a" unchanged, "gone" ignored.
+	if len(drift) != 2 {
+		t.Fatalf("want 2 drift entries, got %d: %v", len(drift), drift)
+	}
+	got := map[string]bool{}
+	for _, d := range drift {
+		got[d] = true
+	}
+	if !got["b"] || !got["c"] {
+		t.Fatalf("drift = %v, want b and c", drift)
+	}
+}
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `go test ./internal/app/ -run TestSkillDriftDiff -v`
+Expected: FAIL — undefined `skillDrift`.
+
+- [ ] **Step 3: Write the implementation**
+
+Append to `internal/app/agents_skills.go`:
+
+```go
+// skillDrift returns the names whose folder hash changed (or newly appeared)
+// between two lockfile snapshots. Names absent from `after` are ignored.
+func skillDrift(before, after map[string]string) []string {
+	var changed []string
+	for name, h := range after {
+		if before[name] != h {
+			changed = append(changed, name)
+		}
+	}
+	sort.Strings(changed)
+	return changed
+}
+
+// lockHashes reads the live lockfile and returns name -> skillFolderHash.
+// A missing lockfile yields an empty map (no error).
+func lockHashes(home string) (map[string]string, error) {
+	lock, err := config.LoadSkillLock(config.SkillLockPath(home))
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(lock.Skills))
+	for name, e := range lock.Skills {
+		out[name] = e.SkillFolderHash
+	}
+	return out, nil
+}
+```
+
+Then add a `Drift []string` field to `RestoreSkillsResult` and populate it in
+`RestoreSkills` (non-dry-run path) by snapshotting hashes before and after the
+install loop:
+
+```go
+// in RestoreSkillsResult:
+//     Drift []string
+
+// in RestoreSkills, replace the non-dry-run return with:
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return RestoreSkillsResult{}, nil, fmt.Errorf("resolving home dir: %w", err)
+	}
+	before, err := lockHashes(home)
+	if err != nil {
+		return RestoreSkillsResult{}, nil, err
+	}
+	inst := npxInstaller{runner: runner, exec: a.fallbackExecutor().Run}
+	res := restoreSkills(ctx, skills, inst)
+	after, err := lockHashes(home)
+	if err != nil {
+		return RestoreSkillsResult{}, nil, err
+	}
+	res.Drift = skillDrift(before, after)
+	return res, nil, nil
+```
+
+Ensure `os` and `sort` are in the import block (added in Tasks 7–8).
+
+- [ ] **Step 4: Run tests**
+
+Run: `go test ./internal/app/ -run 'TestSkillDrift|TestRestoreSkills' -v`
+Expected: PASS.
+
+- [ ] **Step 5: Surface drift in the CLI**
+
+In `internal/cli/agents.go`, in `newAgentsRestoreSkillsCmd`'s RunE, after the
+failures loop, add:
+
+```go
+			for _, d := range res.Drift {
+				fmt.Fprintf(cmdOut(cmd), "  ~ drift: %s changed since lock\n", d)
+			}
+```
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add internal/app/agents_skills.go internal/app/agents_skills_test.go internal/cli/agents.go
+git commit -m "feat(app): post-restore skill drift warnings"
+```
+
+---
+
+## Task 13: TUI Skills tab
+
+Add a `Skills` main tab that lists the manifest and runs restore/import with two
+keys. Mirrors the existing tab wiring (Dots/Groups). TUI tests are authored by
+the **tui-tester** agent (project rule) in the final step.
+
+**Files:**
+- Modify: `internal/app/agents_skills.go` (add `ListSkills` accessor)
+- Modify: `internal/tui/model.go` (enum + state fields)
+- Modify: `internal/tui/view_header.go` (`mainTabs`)
+- Modify: `internal/tui/view.go` (render dispatch + window title)
+- Modify: `internal/tui/update_keys.go` (key handling + tab-cycle allowlists)
+- Modify: `internal/tui/update.go` (message routing + allowlist)
+- Create: `internal/tui/view_skills.go`
+- Create: `internal/tui/commands_agents.go`
+- Modify: `internal/tui/messages.go` (two result messages)
+
+- [ ] **Step 1: App accessor for the manifest**
+
+Append to `internal/app/agents_skills.go`:
+
+```go
+// ListSkills returns the declared manifest skills.
+func (a *App) ListSkills() ([]config.ManifestSkill, error) {
+	cfg, err := a.loadConfig()
+	if err != nil {
+		return nil, err
+	}
+	return cfg.Agents.Skills, nil
+}
+```
+
+- [ ] **Step 2: Add the view mode**
+
+In `internal/tui/model.go`, add to the `viewMode` const block (after `viewDots`):
+
+```go
+	viewSkills                          // agent skills management tab
+```
+
+- [ ] **Step 3: Add model state**
+
+In `internal/tui/model.go`, in the `Model` struct (near the other per-tab state),
+add:
+
+```go
+	// skills tab
+	skillsManifest []config.ManifestSkill
+	skillsLoaded   bool
+	skillsRunning  bool
+	skillsResult   *app.RestoreSkillsResult
+	skillsImport   *app.ImportDiff
+	skillsErr      error
+```
+
+Confirm `config` is already imported in `model.go` (it is — `ManifestSkill` is a
+`config` type).
+
+- [ ] **Step 4: Register the tab**
+
+In `internal/tui/view_header.go`, add to `mainTabs()` (after the Dots entry):
+
+```go
+		{mode: viewSkills, label: "Skills"},
+```
+
+- [ ] **Step 5: Messages**
+
+In `internal/tui/messages.go`, add:
+
+```go
+type skillsRestoredMsg struct {
+	res app.RestoreSkillsResult
+	err error
+}
+
+type skillsImportedMsg struct {
+	diff app.ImportDiff
+	err  error
+}
+```
+
+- [ ] **Step 6: Commands**
+
+Create `internal/tui/commands_agents.go`. Copy the import block style from
+`internal/tui/commands_admin.go` (same `tea` and `app` import paths):
+
+```go
+package tui
+
+import (
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/lkshrk/omni/internal/app"
+)
+
+func (m *Model) doRestoreSkills() tea.Cmd {
+	a, ctx := m.app, m.ctx
+	return func() tea.Msg {
+		res, _, err := a.RestoreSkills(ctx, app.RestoreSkillsOptions{})
+		return skillsRestoredMsg{res: res, err: err}
+	}
+}
+
+func (m *Model) doImportSkills() tea.Cmd {
+	a, ctx := m.app, m.ctx
+	return func() tea.Msg {
+		diff, err := a.ImportSkills(ctx, app.ImportSkillsOptions{})
+		return skillsImportedMsg{diff: diff, err: err}
+	}
+}
+
+func (m *Model) loadSkillsManifest() {
+	skills, err := m.app.ListSkills()
+	m.skillsManifest = skills
+	m.skillsErr = err
+	m.skillsLoaded = true
+}
+```
+
+> Verify the `tea` import path against `commands_admin.go` before writing — if it
+> differs, match that file exactly.
+
+- [ ] **Step 7: Render dispatch + view**
+
+Create `internal/tui/view_skills.go`:
+
+```go
+package tui
+
+import (
+	"fmt"
+	"strings"
+)
+
+func (m Model) viewSkillsBody() string {
+	var b strings.Builder
+	b.WriteString("Agent Skills\n\n")
+	if m.skillsErr != nil {
+		fmt.Fprintf(&b, "error: %v\n", m.skillsErr)
+		return b.String()
+	}
+	if len(m.skillsManifest) == 0 {
+		b.WriteString("No skills declared. Run import to capture installed skills.\n")
+	}
+	for _, s := range m.skillsManifest {
+		ref := ""
+		if s.Ref != "" {
+			ref = "#" + s.Ref
+		}
+		fmt.Fprintf(&b, "  • %-28s %s%s\n", s.Name, s.Source, ref)
+	}
+	if m.skillsRunning {
+		b.WriteString("\nworking…\n")
+	}
+	if m.skillsResult != nil {
+		fmt.Fprintf(&b, "\n%s\n", RestoreSkillsSummaryLine(*m.skillsResult))
+	}
+	if m.skillsImport != nil {
+		fmt.Fprintf(&b, "\n%s\n", ImportDiffSummaryLine(*m.skillsImport))
+	}
+	b.WriteString("\n[r] restore   [i] import\n")
+	return b.String()
+}
+```
+
+Add thin re-exports in `internal/tui/view_skills.go` that call the app text
+helpers (keeps the view import-light):
+
+```go
+func RestoreSkillsSummaryLine(res app.RestoreSkillsResult) string {
+	return app.RestoreSkillsSummaryText(res)
+}
+
+func ImportDiffSummaryLine(diff app.ImportDiff) string {
+	return app.ImportDiffSummaryText(diff)
+}
+```
+
+Add `"github.com/lkshrk/omni/internal/app"` to the `view_skills.go` imports for
+those two helpers.
+
+In `internal/tui/view.go`, add to the render dispatch switch (alongside
+`case viewDots:`):
+
+```go
+	case viewSkills:
+		body = m.viewSkillsBody()
+```
+
+> Match the exact assignment pattern of the neighbouring `case viewDots:` arm
+> (variable name / wrapper call may differ — copy its shape).
+
+Also add to `windowTitle()`:
+
+```go
+	case viewSkills:
+		return "omni — skills"
+```
+
+- [ ] **Step 8: Key handling**
+
+In `internal/tui/update_keys.go`, add a `case viewSkills:` arm to the per-mode
+key switch (near `case viewDots:`):
+
+```go
+	case viewSkills:
+		switch msg.String() {
+		case "r":
+			m.skillsRunning = true
+			m.skillsResult = nil
+			return m, m.doRestoreSkills()
+		case "i":
+			m.skillsRunning = true
+			m.skillsImport = nil
+			return m, m.doImportSkills()
+		}
+```
+
+Add `viewSkills` to the tab-cycle allowlists in `update_keys.go` (the
+`case viewStatus, viewList, viewDots, viewGroups, viewSettings:` at ~line 216 and
+the negative guard at ~line 230) and in `update.go` (~line 339). Also load the
+manifest on switch: in the tab-switch handler (mirror the `target == viewDots`
+lazy-load at update_keys.go:203), add:
+
+```go
+	if target == viewSkills && !m.skillsLoaded {
+		m.loadSkillsManifest()
+	}
+```
+
+- [ ] **Step 9: Message handling**
+
+In `internal/tui/update.go`, add cases to the top-level message switch (near
+`case toolsLoadedMsg:`):
+
+```go
+	case skillsRestoredMsg:
+		m.skillsRunning = false
+		if msg.err != nil {
+			m.skillsErr = msg.err
+		} else {
+			r := msg.res
+			m.skillsResult = &r
+			m.loadSkillsManifest()
+		}
+		return m, nil
+
+	case skillsImportedMsg:
+		m.skillsRunning = false
+		if msg.err != nil {
+			m.skillsErr = msg.err
+		} else {
+			d := msg.diff
+			m.skillsImport = &d
+			m.loadSkillsManifest()
+		}
+		return m, nil
+```
+
+> Match the exact `return` shape of neighbouring arms — some return
+> `m, cmd`, some `m, nil`. Copy the local convention.
+
+- [ ] **Step 10: Build + manual smoke**
+
+Run: `go build ./... && go run ./cmd/omni --config /tmp/omni-skills.json ui`
+(reuse the `/tmp/omni-skills.json` from Task 10). Tab to **Skills**, confirm the
+declared skill lists and the `[r] restore   [i] import` footer renders.
+
+- [ ] **Step 11: Tests via tui-tester, then commit**
+
+Dispatch the **tui-tester** agent: "Cover the new `viewSkills` tab in
+`internal/tui`: tab appears in `mainTabs()`; switching to it lazy-loads the
+manifest via `loadSkillsManifest`; `r` dispatches `doRestoreSkills` and a
+`skillsRestoredMsg` populates `skillsResult` + clears `skillsRunning`; `i`
+dispatches import and `skillsImportedMsg` populates `skillsImport`; the body
+renders skill rows and the `[r] restore   [i] import` footer. Use the project's
+established TUI test helpers (`drive(...)`, `baseModel(...)`)."
+
+Then:
+```bash
+go test ./internal/tui/ -run Skills -v
+git add internal/app/agents_skills.go internal/tui/
+git commit -m "feat(tui): agent skills tab with restore and import"
+```
+
+---
+
+## Task 14: Full suite + docs touch-up
 
 **Files:**
 - Modify: `README.md` (add a short agents/skills usage note near existing command docs)
@@ -1073,6 +1520,25 @@ git commit -m "docs: document omni agents skills restore/import"
 
 ## Self-Review Notes
 
-- **Spec coverage:** manifest types (T1–2), lockfile parse + path (T3), installer boundary/npx+bunx (T4), restore aggregation (T5–6), dry-run (T6), import upsert (T7–8), CLI surface (T10), tests (T11–12). Drift check (post-restore `skillFolderHash` diff) from the spec is **deferred** — restore returns install results only; add a follow-up task if drift warnings are wanted in v1.
-- **Deliberate open items for the implementer:** exact `EcosystemSettings` field for node manager (Task 6 note); whether `agents` needs adding to any host-gating/exempt map in `root.go` (Task 10); `--copy` vs symlink not yet wired (spec open question) — default to CLI default (symlink) for v1.
-- **Out of scope (per spec):** removing skills on restore, omni writing the lockfile, exact-hash pinning, per-host skill sets.
+- **Spec coverage:** manifest types (T1–2), lockfile parse + path (T3), installer
+  boundary/npx+bunx (T4), restore aggregation (T5–6), dry-run (T6), import upsert
+  (T7–8), summary text (T9), CLI surface + host-exempt (T10), integration tests
+  (T11), drift check (T12), TUI Skills tab (T13), suite + docs (T14).
+- **Seams verified against source (no longer assumptions):**
+  - Node manager: `cfg.Settings.Ecosystems[provider.EcosystemNode].Manager`
+    (`config.go:234`, `catalog.go:7`). — Task 6.
+  - Executor: `a.fallbackExecutor()` nil-safe accessor (`fallback.go:630`),
+    not raw `a.fallbackExec`. — Task 6.
+  - Host gating: `hostExempt` map (`root.go:143`) + ancestor walk
+    (`root.go:174`); `agents` added + membership test updated. — Task 10.
+- **TUI:** a dedicated **Skills** main tab (T13) — `viewSkills` mode, `mainTabs`
+  entry, `view_skills.go`, `commands_agents.go`, message routing, `r`/`i` keys.
+  Wiring mirrors the verified Dots/Groups tab pattern; tests via **tui-tester**.
+  Implementer must copy the exact `tea` import path and neighbouring `case`-arm
+  shapes from `commands_admin.go` / `view.go` / `update.go` (flagged inline).
+- **Still open (low-risk, decide in execution):** `--copy` vs symlink — default
+  to CLI default (symlink) for v1; `SkillPath` is stored for import fidelity and
+  the future Go installer but unused by the npx `add` path (`-s <name>` selects);
+  empty manifest/lockfile → treat as no-op success.
+- **Out of scope (per spec):** removing skills on restore, omni writing the
+  lockfile, exact-hash pinning, per-host skill sets.

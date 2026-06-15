@@ -379,7 +379,7 @@ func TestGlobalNavigationClearsActiveConfirmations(t *testing.T) {
 				return m
 			}(),
 			key:      pressTab(),
-			wantMode: viewGroups,
+			wantMode: viewSkills,
 		},
 		{
 			name: "settings danger confirm palette",

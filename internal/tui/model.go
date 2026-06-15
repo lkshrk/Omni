@@ -39,6 +39,7 @@ const (
 	viewFallbackEditor                  // GitHub fallback source editor
 	viewAdminTerminal                   // privileged package action terminal handoff
 	viewDots                            // dotfiles management tab
+	viewSkills                          // agent skills management tab
 )
 
 // section groups tools into visual categories in the list view.
@@ -397,6 +398,11 @@ type Model struct {
 	// this machine. All navigation is locked until a host is active.
 	hostRequired bool
 
+	// agents-use editor (active when editing the Agents row in settings)
+	editingAgents    bool
+	agentsEditRows   []app.AgentPickerRow
+	agentsEditCursor int
+
 	// provider priority editor (active when editing the Priority row in settings)
 	refreshScanErrors              []string
 	editingPriority                bool
@@ -479,6 +485,15 @@ type Model struct {
 	stowInstallPath        string
 	stowInstallVariant     dotsVariantRequest
 
+	// agents (skills) tab
+	agentsEnabled bool
+	skillsRows    []app.SkillRow
+	skillsLoaded  bool
+	skillsRunning bool
+	skillsResult  *app.RestoreSkillsResult
+	skillsImport  *app.ImportDiff
+	skillsErr     error
+
 	// danger zone (settings tab)
 	dangerConfirmRow int // settings row awaiting inline confirmation; -1 = none
 
@@ -536,6 +551,7 @@ func New(a *app.App, ctx context.Context) Model {
 		app:              a,
 		ctx:              ctx,
 		cancel:           cancel,
+		agentsEnabled:    true, // enabled by default; the startup snapshot corrects it
 		keys:             DefaultKeyMap(),
 		spinner:          sp,
 		help:             newHelp(),
@@ -662,6 +678,7 @@ func toolsLoadedMsgFromStartupState(snapshot *app.StartupSnapshot) toolsLoadedMs
 		dotsWatchServiceErr:    errorString(snapshot.DotsWatchServiceErr),
 		dotsConfigured:         snapshot.DotsConfigured,
 		dotsConfiguredKnown:    true,
+		agentsEnabled:          snapshot.AgentsEnabled,
 		dotsSyncAvail:          snapshot.DotsSyncAvailability,
 		dotsSyncAvailKnown:     true,
 		setupProviders:         snapshot.SetupProviders,

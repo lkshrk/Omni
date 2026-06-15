@@ -1749,7 +1749,7 @@ func TestRequireActiveHost_NonExemptCommand_WithHost_Passes(t *testing.T) {
 // ─── hostExempt map ───────────────────────────────────────────────────────────
 
 func TestHostExempt_ContainsExpectedCommands(t *testing.T) {
-	expected := []string{"bootstrap", "doctor", "init", "hosts", "dots", "ui", "version", "settings", "help", "completion"}
+	expected := []string{"bootstrap", "doctor", "init", "hosts", "dots", "ui", "version", "settings", "help", "completion", "agents"}
 	for _, name := range expected {
 		if !hostExempt[name] {
 			t.Errorf("expected %q in hostExempt", name)

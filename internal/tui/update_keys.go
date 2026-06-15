@@ -142,6 +142,26 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 		cmds = append(cmds, m.handleCommandKeyMsg(msg)...)
 	case viewAdminTerminal:
 		cmds = append(cmds, m.handleAdminTerminalKeyMsg(msg)...)
+	case viewSkills:
+		if !m.agentsEnabled {
+			break
+		}
+		switch msg.String() {
+		case "r":
+			m.skillsRunning = true
+			m.skillsErr = nil
+			m.skillsResult = nil
+			cmds = append(cmds, m.doRestoreSkills())
+		case "i":
+			m.skillsRunning = true
+			m.skillsErr = nil
+			m.skillsImport = nil
+			cmds = append(cmds, m.doImportSkills())
+		case "u":
+			m.skillsRunning = true
+			m.skillsErr = nil
+			cmds = append(cmds, m.doUpdateSkills())
+		}
 	default:
 		switch {
 		case m.handleListNavigationKeyMsg(msg):
@@ -204,6 +224,10 @@ func (m *Model) switchMainTab(target viewMode, cmds *[]tea.Cmd) bool {
 		m.beginDotsOperation("Loading dots…")
 		*cmds = append(*cmds, m.spinner.Tick, m.doLoadDots())
 	}
+	if target == viewSkills && m.agentsEnabled && !m.skillsLoaded {
+		m.skillsLoaded = true
+		*cmds = append(*cmds, m.loadSkillsManifestCmd())
+	}
 	if target == viewStatus && m.shouldAutoRunStatusDoctor() {
 		m.startDoctorRun("Running doctor…")
 		*cmds = append(*cmds, m.spinner.Tick, m.doRunDoctor())
@@ -213,7 +237,7 @@ func (m *Model) switchMainTab(target viewMode, cmds *[]tea.Cmd) bool {
 
 func isMainTabMode(mode viewMode) bool {
 	switch mode {
-	case viewStatus, viewList, viewDots, viewGroups, viewSettings:
+	case viewStatus, viewList, viewDots, viewGroups, viewSettings, viewSkills:
 		return true
 	default:
 		return false
@@ -227,7 +251,7 @@ func (m *Model) handlePaletteOpenKeyMsg(msg tea.KeyPressMsg, cmds *[]tea.Cmd) bo
 	if m.loading {
 		return false
 	}
-	if m.mode != viewList && m.mode != viewSettings && m.mode != viewStatus && m.mode != viewGroups && m.mode != viewDots {
+	if m.mode != viewList && m.mode != viewSettings && m.mode != viewStatus && m.mode != viewGroups && m.mode != viewDots && m.mode != viewSkills {
 		return false
 	}
 	m.cancelConfirmationForGlobalNavigation()

@@ -366,7 +366,10 @@ func uncatalogedRunnableCLICommandAllowed(path []string) bool {
 		"settings get",
 		"dots list",
 		"dots status",
-		"dots variant list":
+		"dots variant list",
+		"agents skills restore",
+		"agents skills import",
+		"agents skills update":
 		return true
 	default:
 		return false
