@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/lkshrk/omni/internal/executor"
 	"github.com/lkshrk/omni/internal/provider"
@@ -147,7 +148,7 @@ func (p *Provider) Uninstall(ctx context.Context, tool provider.Tool) error {
 func (p *Provider) Upgrade(ctx context.Context, tool provider.Tool) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	args := p.upgradeArgs(ctx, tool.EffectivePackage())
+	args := p.upgradeArgsWithKind(ctx, tool.EffectivePackage(), tool.Options[brewKindOption])
 	_, stderr, err := p.exec.Run(ctx, "brew", args...)
 	if err == nil {
 		return nil
@@ -165,8 +166,19 @@ func (p *Provider) Upgrade(ctx context.Context, tool provider.Tool) error {
 	return fmt.Errorf("brew %s: %w (stderr: %s)", strings.Join(args, " "), err, strings.TrimSpace(stderr))
 }
 
-func (p *Provider) upgradeArgs(ctx context.Context, pkg string) []string {
+func (p *Provider) upgradeArgsWithKind(ctx context.Context, pkg, kind string) []string {
+	return upgradeArgsForKind(ctx, p, pkg, kind)
+}
+
+func upgradeArgsForKind(ctx context.Context, p *Provider, pkg, kind string) []string {
 	name := formulaName(pkg)
+	switch kind {
+	case brewKindFormula:
+		return []string{"upgrade", "--formula", pkg}
+	case brewKindCask:
+		return []string{"upgrade", "--cask", name}
+	}
+	// Fall back to live probing when no persisted kind is available.
 	if p.installedFormula(ctx, name) {
 		return []string{"upgrade", "--formula", pkg}
 	}
@@ -293,7 +305,12 @@ func (p *Provider) installedFormulae(ctx context.Context) ([]provider.InstalledT
 	for _, pkg := range packages {
 		name := formulaName(pkg)
 		tools = append(tools, provider.InstalledTool{
-			Tool:    provider.Tool{Name: name, Provider: "brew", Package: pkg},
+			Tool: provider.Tool{
+				Name:     name,
+				Provider: "brew",
+				Package:  pkg,
+				Options:  map[string]string{brewKindOption: brewKindFormula},
+			},
 			Version: lookupBrewListVersion(versions, pkg),
 		})
 	}
@@ -391,20 +408,28 @@ func (p *Provider) InstalledMetadataMap(ctx context.Context) (map[string]provide
 	}
 
 	metadata := make(map[string]provider.InstalledMetadata, len(out.Formulae)+len(caskTokens))
+	// Every formula brew info reports, whether or not installed-on-request, so the
+	// tap-trust union below can tell a deliberately-excluded transitive dependency
+	// (known to brew info) apart from a formula brew info hides entirely.
+	infoFormulae := make(map[string]struct{}, len(out.Formulae))
 	for _, f := range out.Formulae {
-		if len(f.Installed) == 0 || !f.Installed[0].InstalledOnRequest {
-			continue
-		}
 		name := f.Name
 		if name == "" {
 			name = formulaName(f.FullName)
+		}
+		if name != "" {
+			infoFormulae[strings.ToLower(name)] = struct{}{}
+		}
+		if len(f.Installed) == 0 || !f.Installed[0].InstalledOnRequest {
+			continue
 		}
 		if name == "" {
 			continue
 		}
 		metadata[strings.ToLower(name)] = provider.InstalledMetadata{
-			Version: f.Installed[0].Version,
-			Source:  brewSourceHint(f.Homepage, f.URLs.Stable.URL),
+			Version:      f.Installed[0].Version,
+			Source:       brewSourceHint(f.Homepage, f.URLs.Stable.URL),
+			ArtifactKind: brewKindFormula,
 		}
 	}
 
@@ -417,7 +442,11 @@ func (p *Provider) InstalledMetadataMap(ctx context.Context) (map[string]provide
 		if _, ok := caskTokens[key]; !ok {
 			continue
 		}
-		entry := provider.InstalledMetadata{Version: c.Installed, Source: brewSourceHint(c.Homepage, c.URL)}
+		entry := provider.InstalledMetadata{
+			Version:      c.Installed,
+			Source:       brewSourceHint(c.Homepage, c.URL),
+			ArtifactKind: brewKindCask,
+		}
 		if plan := c.privilegePlan(provider.PrivilegeActionUninstall); plan.RequiresPrivilege() {
 			entry.Privilege = plan
 		}
@@ -426,9 +455,48 @@ func (p *Provider) InstalledMetadataMap(ctx context.Context) (map[string]provide
 	}
 	for token := range caskTokens {
 		if _, ok := seenCasks[token]; !ok {
-			metadata[token] = provider.InstalledMetadata{}
+			metadata[token] = provider.InstalledMetadata{ArtifactKind: brewKindCask}
 		}
 	}
+
+	// Homebrew tap-trust hides formulae from untrusted taps in `brew info` (and
+	// `brew leaves`), so installed-from-untrusted-tap formulae are absent above
+	// even though they are installed. `brew list --formula` still reports them.
+	// Union those in so configured tools backed by untrusted taps are detected
+	// as installed instead of wrongly reported missing.
+	//
+	// Best-effort: brew info above is the authoritative installed set; this union
+	// only recovers formulae brew info hides. A failure here degrades to the
+	// brew-info result rather than failing the whole scan, mirroring how
+	// Available treats a missing/erroring brew as non-fatal.
+	listOut, _, listErr := p.exec.Run(ctx, "brew", "list", "--versions", "--formula")
+	if listErr != nil {
+		return metadata, nil
+	}
+	for _, line := range strings.Split(listOut, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		name := strings.ToLower(formulaName(fields[0]))
+		if !validBrewFormulaName(name) {
+			continue
+		}
+		if _, ok := metadata[name]; ok {
+			continue
+		}
+		// brew info already accounted for this formula (e.g. an intentionally
+		// excluded transitive dependency); only add formulae brew info hid.
+		if _, ok := infoFormulae[name]; ok {
+			continue
+		}
+		version := ""
+		if len(fields) > 1 {
+			version = strings.Join(fields[1:], " ")
+		}
+		metadata[name] = provider.InstalledMetadata{Version: version, ArtifactKind: brewKindFormula}
+	}
+
 	return metadata, nil
 }
 
@@ -914,6 +982,27 @@ func formulaName(pkg string) string {
 		return pkg[i+1:]
 	}
 	return pkg
+}
+
+// validBrewFormulaName guards names parsed from `brew list` output before they
+// become metadata map keys, rejecting empty, over-long, or control/garbage
+// names so malformed output can't shadow a real formula or poison the cache.
+func validBrewFormulaName(name string) bool {
+	if name == "" || len(name) > 256 {
+		return false
+	}
+	for _, r := range name {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			continue
+		}
+		switch r {
+		case '-', '_', '.', '+', '@':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // parseBrewVersion extracts the installed version from `brew list --versions` output.
