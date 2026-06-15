@@ -40,6 +40,7 @@ type StartupSnapshot struct {
 	DotsWatchService       *DotsWatchService
 	DotsWatchServiceErr    error
 	DotsConfigured         bool
+	AgentsEnabled          bool
 	DotsSyncAvailability   DotsSyncAvailability
 	DotsHistory            []DotsHistoryEntry
 	DotsHistoryErr         error
@@ -95,6 +96,8 @@ func (a *App) StartupSnapshot(ctx context.Context) (*StartupSnapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	a.annotateUpdateQuarantine(ctx, cfg, tools)
+	a.annotateSelfUpdatingCasks(tools)
 
 	stop = profile.Start("app.startup.config_state")
 	settings := a.effectiveSettings(cfg)
@@ -178,6 +181,7 @@ func (a *App) StartupSnapshot(ctx context.Context) (*StartupSnapshot, error) {
 		DotsWatchService:       dotsWatchService,
 		DotsWatchServiceErr:    dotsWatchServiceErr,
 		DotsConfigured:         DotsConfiguredInSettings(settings),
+		AgentsEnabled:          a.AgentsEnabled(cfg),
 		DotsSyncAvailability:   DotsSyncAvailabilityInSettings(settings),
 		DotsHistory:            dotsHistory,
 		DotsHistoryErr:         dotsHistoryErr,

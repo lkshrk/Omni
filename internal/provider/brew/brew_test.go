@@ -462,6 +462,64 @@ func TestPrivilegePlan_CaskPkgInstallerRequiresPrivilege(t *testing.T) {
 	}
 }
 
+func TestPrivilegePlan_CaskInstallerRequiresPrivilegeOnInstall(t *testing.T) {
+	output := `{"formulae":[],"casks":[` +
+		`{"token":"littlesnitch","installed":"5.0","artifacts":[{"installer":[{"script":{"executable":"install.sh","sudo":true}}]}]}` +
+		`]}`
+	p, _ := newBrew(executor.MockCall{Stdout: output})
+
+	plan, err := p.PrivilegePlan(context.Background(), provider.PrivilegeActionInstall, tool("littlesnitch"))
+	if err != nil {
+		t.Fatalf("PrivilegePlan: %v", err)
+	}
+	if plan.Requirement != provider.PrivilegeMaybe {
+		t.Fatalf("PrivilegePlan = %+v, want maybe", plan)
+	}
+	if !strings.Contains(plan.Reason, "installer") {
+		t.Fatalf("reason = %q, want installer mention", plan.Reason)
+	}
+}
+
+func TestPrivilegePlan_CaskLaunchctlRequiresPrivilegeOnUninstall(t *testing.T) {
+	output := `{"formulae":[],"casks":[` +
+		`{"token":"stats","installed":"2.0","artifacts":[{"app":["Stats.app"]},{"uninstall":[{"launchctl":"eu.exelban.Stats.SMC.Helper","quit":"eu.exelban.Stats"}]}]}` +
+		`]}`
+	p, _ := newBrew(executor.MockCall{Stdout: output})
+
+	plan, err := p.PrivilegePlan(context.Background(), provider.PrivilegeActionUninstall, tool("stats"))
+	if err != nil {
+		t.Fatalf("PrivilegePlan: %v", err)
+	}
+	if plan.Requirement != provider.PrivilegeMaybe {
+		t.Fatalf("PrivilegePlan = %+v, want maybe", plan)
+	}
+	if !strings.Contains(plan.Reason, "launchctl") {
+		t.Fatalf("reason = %q, want launchctl mention", plan.Reason)
+	}
+}
+
+func TestInstalledMetadataMap_SelfUpdatingCask(t *testing.T) {
+	installedInfo := `{"formulae":[],"casks":[` +
+		`{"token":"battle-net","installed":"1.0","artifacts":[{"installer":[{"manual":"Battle.net-Setup.app"}]}]},` +
+		`{"token":"stats","installed":"2.0","artifacts":[{"app":["Stats.app"]}]}` +
+		`]}`
+	p, _ := newBrew(
+		executor.MockCall{Stdout: installedInfo},
+		executor.MockCall{Stdout: "battle-net\nstats\n"},
+	)
+
+	got, err := p.InstalledMetadataMap(context.Background())
+	if err != nil {
+		t.Fatalf("InstalledMetadataMap: %v", err)
+	}
+	if !got["battle-net"].SelfUpdates {
+		t.Error("battle-net (manual installer) should be SelfUpdates=true")
+	}
+	if got["stats"].SelfUpdates {
+		t.Error("stats (app cask) should be SelfUpdates=false")
+	}
+}
+
 // --- Tap / Untap / ListTaps / IsTapped ---
 
 func TestTap_Success(t *testing.T) {
@@ -711,8 +769,8 @@ func TestUpgrade_DisambiguatesInstalledCask(t *testing.T) {
 	if got := strings.Join(m.Calls[1].Args, " "); got != "list --versions --cask iterm2" {
 		t.Fatalf("cask probe args = %q, want list --versions --cask iterm2", got)
 	}
-	if got := strings.Join(m.Calls[2].Args, " "); got != "upgrade --cask iterm2" {
-		t.Fatalf("upgrade args = %q, want upgrade --cask iterm2", got)
+	if got := strings.Join(m.Calls[2].Args, " "); got != "upgrade --cask --greedy iterm2" {
+		t.Fatalf("upgrade args = %q, want upgrade --cask --greedy iterm2", got)
 	}
 }
 

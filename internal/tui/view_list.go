@@ -602,14 +602,25 @@ func renderNameWithPackage(p palette, nameStyle lipgloss.Style, t *database.Tool
 		}
 		rendered += aliasStyle.Render(" {" + alias + "}")
 	}
+	if t.UpdateBlocked == app.UpdateBlockSelfUpdates {
+		selfStyle := p.styleVersionMuted
+		if selected {
+			selfStyle = selfStyle.Bold(true)
+		}
+		rendered += selfStyle.Render(" (self)")
+	}
 	return rendered + strings.Repeat(" ", max(width-lipgloss.Width(plain), 0))
 }
 
 func nameDisplayText(t *database.ToolCache) string {
-	if alias := packageAlias(t); alias != "" {
-		return t.Name + " {" + alias + "}"
+	suffix := ""
+	if t.UpdateBlocked == app.UpdateBlockSelfUpdates {
+		suffix = " (self)"
 	}
-	return t.Name
+	if alias := packageAlias(t); alias != "" {
+		return t.Name + " {" + alias + "}" + suffix
+	}
+	return t.Name + suffix
 }
 
 func packageAlias(t *database.ToolCache) string {

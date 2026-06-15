@@ -170,20 +170,28 @@ func (p *Provider) upgradeArgsWithKind(ctx context.Context, pkg, kind string) []
 	return upgradeArgsForKind(ctx, p, pkg, kind)
 }
 
+// caskUpgradeArgs upgrades a cask with --greedy so casks that auto-update or
+// pin to :latest are actually upgraded; plain `brew upgrade --cask` refuses
+// them. (installer-manual casks remain un-upgradable — brew refuses those
+// regardless.)
+func caskUpgradeArgs(name string) []string {
+	return []string{"upgrade", "--cask", "--greedy", name}
+}
+
 func upgradeArgsForKind(ctx context.Context, p *Provider, pkg, kind string) []string {
 	name := formulaName(pkg)
 	switch kind {
 	case brewKindFormula:
 		return []string{"upgrade", "--formula", pkg}
 	case brewKindCask:
-		return []string{"upgrade", "--cask", name}
+		return caskUpgradeArgs(name)
 	}
 	// Fall back to live probing when no persisted kind is available.
 	if p.installedFormula(ctx, name) {
 		return []string{"upgrade", "--formula", pkg}
 	}
 	if p.installedCask(ctx, name) {
-		return []string{"upgrade", "--cask", name}
+		return caskUpgradeArgs(name)
 	}
 	return []string{"upgrade", pkg}
 }
@@ -446,6 +454,7 @@ func (p *Provider) InstalledMetadataMap(ctx context.Context) (map[string]provide
 			Version:      c.Installed,
 			Source:       brewSourceHint(c.Homepage, c.URL),
 			ArtifactKind: brewKindCask,
+			SelfUpdates:  c.hasManualInstaller(),
 		}
 		if plan := c.privilegePlan(provider.PrivilegeActionUninstall); plan.RequiresPrivilege() {
 			entry.Privilege = plan
@@ -531,6 +540,7 @@ func (p *Provider) PrivilegePlan(ctx context.Context, action provider.PrivilegeA
 func (p *Provider) PrivilegeCommand(action provider.PrivilegeAction, tool provider.Tool) (string, []string, bool) {
 	verb := "uninstall"
 	noAsk := false
+	greedy := false
 	switch action {
 	case provider.PrivilegeActionInstall:
 		verb = "install"
@@ -538,8 +548,12 @@ func (p *Provider) PrivilegeCommand(action provider.PrivilegeAction, tool provid
 	case provider.PrivilegeActionUpgrade:
 		verb = "upgrade"
 		noAsk = true
+		greedy = true
 	}
 	args := []string{verb, "--cask"}
+	if greedy {
+		args = append(args, "--greedy")
+	}
 	if noAsk {
 		args = append(args, "--no-ask")
 	}
@@ -554,13 +568,18 @@ func (c brewCaskInfo) privilegePlan(action provider.PrivilegeAction) provider.Pr
 	var reason string
 	switch action {
 	case provider.PrivilegeActionInstall:
-		if c.hasArtifact("pkg") {
+		switch {
+		case c.hasArtifact("pkg"):
 			reason = "brew cask " + c.Token + " uses a pkg installer"
+		case c.hasArtifact("installer"):
+			reason = "brew cask " + c.Token + " runs an installer that may need sudo"
 		}
 	case provider.PrivilegeActionUninstall:
 		switch {
 		case c.hasUninstallKey("pkgutil"):
 			reason = "brew cask " + c.Token + " uses pkgutil uninstall"
+		case c.hasUninstallKey("launchctl"):
+			reason = "brew cask " + c.Token + " unloads a launchctl service"
 		case c.hasArtifact("pkg"):
 			reason = "brew cask " + c.Token + " uses a pkg installer"
 		}
@@ -568,14 +587,31 @@ func (c brewCaskInfo) privilegePlan(action provider.PrivilegeAction) provider.Pr
 		switch {
 		case c.hasArtifact("pkg"):
 			reason = "brew cask " + c.Token + " uses a pkg installer"
+		case c.hasArtifact("installer"):
+			reason = "brew cask " + c.Token + " runs an installer that may need sudo"
 		case c.hasUninstallKey("pkgutil"):
 			reason = "brew cask " + c.Token + " uses pkgutil uninstall"
+		case c.hasUninstallKey("launchctl"):
+			reason = "brew cask " + c.Token + " unloads a launchctl service"
 		}
 	}
 	if reason == "" {
 		return provider.PrivilegePlan{}
 	}
 	return provider.PrivilegePlan{Requirement: provider.PrivilegeMaybe, Reason: reason}
+}
+
+func (c brewCaskInfo) hasManualInstaller() bool {
+	for _, artifact := range c.Artifacts {
+		raw, ok := artifact["installer"]
+		if !ok {
+			continue
+		}
+		if rawObjectHasKey(raw, "manual") {
+			return true
+		}
+	}
+	return false
 }
 
 func (c brewCaskInfo) hasArtifact(name string) bool {
@@ -643,7 +679,8 @@ func (p *Provider) OutdatedMap(ctx context.Context) (map[string]string, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	// --greedy includes casks that auto-update or pin to :latest; without it
-	// `brew outdated` silently skips them, so those casks would never be flagged.
+	// `brew outdated` silently skips them. The cask upgrade command pairs this
+	// with --greedy so those updates actually apply.
 	stdout, _, err := p.exec.Run(ctx, "brew", "outdated", "--json=v2", "--greedy")
 	if err != nil {
 		return nil, fmt.Errorf("brew outdated: %w", err)

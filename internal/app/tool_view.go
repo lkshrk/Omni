@@ -319,6 +319,11 @@ func toolViewSection(tool *database.ToolCache, context ToolClassificationContext
 	if context.Ignored {
 		return ToolViewSectionIgnored
 	}
+	if tool.Installed && tool.Outdated && tool.UpdateBlocked == UpdateBlockSelfUpdates {
+		// self-updating casks read as a normal update (the version is behind),
+		// just marked and non-actionable — not a deferred quarantine.
+		return ToolViewSectionUpdates
+	}
 	if tool.Installed && tool.Outdated && tool.UpdateBlocked != "" {
 		return ToolViewSectionQuarantined
 	}

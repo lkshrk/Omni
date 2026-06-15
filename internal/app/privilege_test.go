@@ -102,7 +102,7 @@ func TestPrivilegedToolCommand_BrewCaskActions(t *testing.T) {
 	}{
 		{name: "install", action: provider.PrivilegeActionInstall, want: "brew install --cask --no-ask parsec"},
 		{name: "uninstall", action: provider.PrivilegeActionUninstall, want: "brew uninstall --cask parsec"},
-		{name: "upgrade", action: provider.PrivilegeActionUpgrade, want: "brew upgrade --cask --no-ask parsec"},
+		{name: "upgrade", action: provider.PrivilegeActionUpgrade, want: "brew upgrade --cask --greedy --no-ask parsec"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

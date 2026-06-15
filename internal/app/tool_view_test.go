@@ -78,6 +78,12 @@ func TestClassifyToolView(t *testing.T) {
 			wantSec:  app.ToolViewSectionAvailable,
 			wantSync: app.ToolSyncUnclaimed,
 		},
+		{
+			name:     "self-updating cask reads as an update, not quarantined",
+			tool:     &database.ToolCache{Name: "battle-net", Provider: "brew", Tracked: true, Installed: true, Outdated: true, UpdateBlocked: app.UpdateBlockSelfUpdates},
+			wantSec:  app.ToolViewSectionUpdates,
+			wantSync: app.ToolSyncOK,
+		},
 	}
 
 	for _, tt := range tests {
