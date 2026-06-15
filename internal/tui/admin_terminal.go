@@ -50,6 +50,8 @@ type adminTerminalState struct {
 	queueTotal             int
 	id                     int
 	running                bool
+	finished               bool
+	finishErr              error
 	output                 string
 	events                 chan tea.Msg
 	session                *adminTerminalSession
@@ -122,6 +124,13 @@ func (m *Model) handleAdminTerminalKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		m.mode = viewList
 		return nil
 	}
+	if m.adminTerminal.finished {
+		state := m.adminTerminal.completionState()
+		err := m.adminTerminal.finishErr
+		m.mode = m.adminTerminal.returnMode
+		m.adminTerminal = nil
+		return m.finalizeAdminTerminal(state, err)
+	}
 	if m.adminTerminal.running {
 		if data := adminTerminalKeyBytes(msg); len(data) > 0 {
 			m.writeAdminTerminalInput(data)
@@ -193,18 +202,31 @@ func (m *Model) handleAdminTerminalDoneMsg(msg adminTerminalDoneMsg) []tea.Cmd {
 	if m.adminTerminal != nil && msg.id != 0 && m.adminTerminal.id != msg.id {
 		return nil
 	}
+	// Keep the terminal open after the process exits so its output and any
+	// error stay visible; the user dismisses it with a keypress, which then
+	// runs the post-action refresh/error handling.
 	if m.adminTerminal != nil {
 		m.closeAdminTerminalSession()
-		m.mode = m.adminTerminal.returnMode
-		m.adminTerminal = nil
-	} else if msg.state.returnMode != viewAdminTerminal {
+		m.adminTerminal.running = false
+		m.adminTerminal.finished = true
+		m.adminTerminal.finishErr = msg.err
+		m.loading = false
+		return nil
+	}
+	if msg.state.returnMode != viewAdminTerminal {
 		m.mode = msg.state.returnMode
 	}
-	if msg.err != nil {
-		return m.handleOpCompleteMsg(opCompleteMsg{key: msg.state.rowKey, err: fmt.Errorf("admin terminal: %w", msg.err)})
+	return m.finalizeAdminTerminal(msg.state, msg.err)
+}
+
+// finalizeAdminTerminal runs the post-completion handling once the user has
+// dismissed the finished terminal (or when no view was open to keep).
+func (m *Model) finalizeAdminTerminal(state adminTerminalState, err error) []tea.Cmd {
+	if err != nil {
+		return m.handleOpCompleteMsg(opCompleteMsg{key: state.rowKey, err: fmt.Errorf("admin terminal: %w", err)})
 	}
-	m.startRowOperation(msg.state.name, msg.state.providerName, "Refreshing…")
-	return []tea.Cmd{m.doCompleteAdminTerminalAction(msg.state)}
+	m.startRowOperation(state.name, state.providerName, "Refreshing…")
+	return []tea.Cmd{m.doCompleteAdminTerminalAction(state)}
 }
 
 func (m *Model) doCompleteAdminTerminalAction(state adminTerminalState) tea.Cmd {
@@ -304,9 +326,12 @@ func renderAdminTerminalPopup(m Model) string {
 	}
 	width := adminTerminalContentWidth(m)
 	var content string
-	if state.running {
+	switch {
+	case state.finished:
+		content = renderAdminTerminalFinishedPopup(m, state, width)
+	case state.running:
 		content = renderAdminTerminalRunningPopup(m, state, width)
-	} else {
+	default:
 		content = renderAdminTerminalApprovalPopup(m, state, width)
 	}
 	return lipgloss.NewStyle().Width(width).Render(content)
@@ -339,6 +364,22 @@ func renderAdminTerminalRunningPopup(m Model, state *adminTerminalState, width i
 	sb.WriteString(renderAdminTerminalCommandHeader(m, state, width))
 	sb.WriteByte('\n')
 	sb.WriteString(renderAdminTerminalOutput(m, state, width))
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func renderAdminTerminalFinishedPopup(m Model, state *adminTerminalState, width int) string {
+	var sb strings.Builder
+	sb.WriteString(renderAdminTerminalCommandHeader(m, state, width))
+	sb.WriteByte('\n')
+	sb.WriteString(renderAdminTerminalOutput(m, state, width))
+	sb.WriteString("\n\n")
+	if state.finishErr != nil {
+		sb.WriteString(m.palette.styleErr.Render("failed: " + state.finishErr.Error()))
+	} else {
+		sb.WriteString(m.palette.styleInstalled.Render("done"))
+	}
+	sb.WriteString("\n\n")
+	sb.WriteString(m.palette.styleHelp.Render("press any key to close"))
 	return strings.TrimRight(sb.String(), "\n")
 }
 

@@ -65,6 +65,7 @@ type ToolMetadata struct {
 	Privilege       string         `bun:"privilege,notnull,default:''"`
 	PrivilegeReason sql.NullString `bun:"privilege_reason"`
 	ArtifactKind    string         `bun:"artifact_kind,notnull,default:''"`
+	SelfUpdates     bool           `bun:"self_updates,notnull,default:false"`
 	UpdatedAt       time.Time      `bun:"updated_at,notnull"`
 }
 
@@ -190,6 +191,7 @@ type MetadataUpdate struct {
 	Privilege       string
 	PrivilegeReason string
 	ArtifactKind    string // provider-specific artifact kind, e.g. "formula" or "cask" for brew
+	SelfUpdates     bool   // cask the manager cannot upgrade (manual installer; app self-updates)
 }
 
 // DB wraps a bun.DB and provides typed tool-cache operations.
@@ -486,6 +488,7 @@ func (db *DB) Migrate(ctx context.Context) error {
 		{"source_repo", "TEXT NOT NULL DEFAULT ''"},
 		{"source_url", "TEXT"},
 		{"artifact_kind", "TEXT NOT NULL DEFAULT ''"},
+		{"self_updates", "BOOLEAN NOT NULL DEFAULT FALSE"},
 	} {
 		if err := addCol("tool_metadata", c.col, c.def); err != nil {
 			return err
@@ -694,9 +697,9 @@ func (db *DB) UpsertMetadataBatch(ctx context.Context, updates []MetadataUpdate)
 				`INSERT INTO tool_metadata (
 				     name, provider, package, version, description,
 				     source_type, source_owner, source_repo, source_url,
-				     privilege, privilege_reason, artifact_kind, updated_at
+				     privilege, privilege_reason, artifact_kind, self_updates, updated_at
 				 )
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				 ON CONFLICT (name, provider, package) DO UPDATE SET
 				     description = CASE
 				         WHEN EXCLUDED.description IS NOT NULL AND EXCLUDED.description != '' THEN EXCLUDED.description
@@ -731,10 +734,14 @@ func (db *DB) UpsertMetadataBatch(ctx context.Context, updates []MetadataUpdate)
 				         WHEN EXCLUDED.artifact_kind != '' THEN EXCLUDED.artifact_kind
 				         ELSE tool_metadata.artifact_kind
 				     END,
+				     self_updates = CASE
+				         WHEN EXCLUDED.artifact_kind != '' THEN EXCLUDED.self_updates
+				         ELSE tool_metadata.self_updates
+				     END,
 				     updated_at = EXCLUDED.updated_at`,
 				u.Name, u.Provider, u.Package, version, description,
 				u.SourceType, u.SourceOwner, u.SourceRepo, sourceURL,
-				u.Privilege, privilegeReason, u.ArtifactKind, now); err != nil {
+				u.Privilege, privilegeReason, u.ArtifactKind, u.SelfUpdates, now); err != nil {
 				return fmt.Errorf("upserting metadata for %s/%s: %w", u.Provider, u.Name, err)
 			}
 		}
@@ -1125,6 +1132,12 @@ func applyToolMetadata(t *ToolCache, m *ToolMetadata) {
 			t.Options = make(map[string]string)
 		}
 		t.Options["brew_kind"] = m.ArtifactKind
+	}
+	if m.SelfUpdates {
+		if t.Options == nil {
+			t.Options = make(map[string]string)
+		}
+		t.Options["self_updates"] = "true"
 	}
 }
 

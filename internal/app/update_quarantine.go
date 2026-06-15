@@ -39,6 +39,8 @@ type updateQuarantineDecision struct {
 
 func quarantineBlockedError(name string, decision updateQuarantineDecision) error {
 	switch decision.Reason {
+	case UpdateBlockSelfUpdates:
+		return fmt.Errorf("%s updates itself; brew cannot upgrade it, open the app to update", name)
 	case UpdateBlockMetadataMissing:
 		return fmt.Errorf("%s update blocked: package-manager update metadata unavailable; use --force to bypass quarantine", name)
 	case UpdateBlockQuarantined:

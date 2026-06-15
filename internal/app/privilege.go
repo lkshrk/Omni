@@ -415,7 +415,9 @@ func (a *App) privilegedToolCommandProvider(ctx context.Context, t *database.Too
 func brewCaskMayPromptForPassword(plan provider.PrivilegePlan) bool {
 	reason := strings.ToLower(plan.Reason)
 	return strings.Contains(reason, "brew cask") &&
-		(strings.Contains(reason, "pkgutil") || strings.Contains(reason, "pkg installer"))
+		(strings.Contains(reason, "pkgutil") ||
+			strings.Contains(reason, "installer") ||
+			strings.Contains(reason, "launchctl"))
 }
 
 func interactivePrivilegedCommand(cmd string, args ...string) (string, []string, bool) {

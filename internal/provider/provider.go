@@ -167,6 +167,7 @@ type InstalledMetadata struct {
 	Privilege    PrivilegePlan
 	Source       SourceMetadata
 	ArtifactKind string // provider-specific artifact kind, e.g. "formula" or "cask" for brew
+	SelfUpdates  bool   // cask the manager cannot upgrade (manual installer; the app self-updates)
 }
 
 // MetadataBulkChecker is optionally implemented by providers whose installed

@@ -483,6 +483,51 @@ func TestList(t *testing.T) {
 	}
 }
 
+func TestMetadataSelfUpdatesPersistsAndSurvivesSourceUpdate(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+
+	if err := db.Upsert(ctx, &database.ToolCache{Name: "battle-net", Provider: "brew", Package: "battle-net", Installed: true, Outdated: true}); err != nil {
+		t.Fatalf("upsert tool: %v", err)
+	}
+
+	// Cask metadata marks it self-updating.
+	if err := db.UpsertMetadataBatch(ctx, []database.MetadataUpdate{
+		{Name: "battle-net", Provider: "brew", Package: "battle-net", ArtifactKind: "cask", SelfUpdates: true},
+	}); err != nil {
+		t.Fatalf("upsert cask metadata: %v", err)
+	}
+
+	selfUpdates := func() string {
+		list, err := db.List(ctx)
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		for _, tc := range list {
+			if tc.Name == "battle-net" {
+				return tc.Options["self_updates"]
+			}
+		}
+		t.Fatal("battle-net not found")
+		return ""
+	}
+
+	if got := selfUpdates(); got != "true" {
+		t.Fatalf("self_updates after cask metadata = %q, want true", got)
+	}
+
+	// A later source-only update (no artifact_kind) must NOT clear the flag —
+	// otherwise the cask flickers back to an actionable update on refresh.
+	if err := db.UpsertMetadataBatch(ctx, []database.MetadataUpdate{
+		{Name: "battle-net", Provider: "brew", Package: "battle-net", SourceType: "github", SourceOwner: "blizzard", SourceRepo: "battle-net"},
+	}); err != nil {
+		t.Fatalf("upsert source metadata: %v", err)
+	}
+	if got := selfUpdates(); got != "true" {
+		t.Fatalf("self_updates after source-only update = %q, want it preserved as true", got)
+	}
+}
+
 func TestListByProvider(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
