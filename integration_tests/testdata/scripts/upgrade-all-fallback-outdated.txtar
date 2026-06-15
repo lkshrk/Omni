@@ -1,0 +1,54 @@
+# omni tools upgrade --all upgrades a fallback-installed tool that the DB marks
+# outdated, executing the fallback upgrade shell command and verifying success.
+exec chmod 755 bin/apt-get bin/brew
+env PATH=$WORK/bin:$PATH
+
+# Seed rg as installed via shell-command fallback (installed_with=fallback) and marked outdated.
+# Using "fallback" (not "gh") avoids the GitHub API refresh that would clear the seeded state.
+exec omni-seed-cache rg apt rg 14.0.0 v14.1.0 fallback
+
+exec omni --config settings.json tools upgrade --all
+stdout 'upgrading rg'
+stdout 'upgraded: rg'
+exec test -f $OMNI_CACHE_DIR/rg-upgraded
+
+-- bin/apt-get --
+#!/bin/sh
+set -eu
+case "${1:-}" in
+  --version) echo "apt 2.0.0" ;;
+  *) exit 1 ;;
+esac
+
+-- bin/brew --
+#!/bin/sh
+set -eu
+case "${1:-}" in
+  --version) echo "Homebrew 4.0.0" ;;
+  outdated)  echo '{"formulae":[],"casks":[]}' ;;
+  *) exit 0 ;;
+esac
+
+-- settings.json --
+{
+  "version": 9,
+  "hosts": { "testhost": [] },
+  "tools": {
+    "rg": {
+      "providers": [{ "provider": "apt" }],
+      "fallback": {
+        "source": { "type": "github", "owner": "BurntSushi", "repo": "ripgrep" },
+        "status": "verified",
+        "binary": "rg",
+        "commands": {
+          "install": "touch \"$OMNI_CACHE_DIR/rg-upgraded\"",
+          "check": "test -f \"$OMNI_CACHE_DIR/rg-upgraded\"",
+          "upgrade": "touch \"$OMNI_CACHE_DIR/rg-upgraded\""
+        }
+      }
+    }
+  },
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": ["rg"] }
+  ]
+}
