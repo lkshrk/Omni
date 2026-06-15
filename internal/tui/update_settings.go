@@ -65,6 +65,10 @@ func (m *Model) handleSettingsConfirmAction(cmds *[]tea.Cmd) {
 	switch m.settingsCursor {
 	case settingsRowProviderPriority, settingsRowDotsRepo, settingsRowDotsSync, settingsRowDotsReminderInterval, settingsRowDotsWatchDebounce, settingsRowDoctor, settingsRowBootstrap, settingsRowResetSettings, settingsRowResetCache:
 		m.handleSettingsEditAction(cmds)
+	case settingsRowTraceLog:
+		m.traceLogGen++
+		m.traceLogLoading = true
+		*cmds = append(*cmds, m.doLoadTraces())
 	}
 }
 

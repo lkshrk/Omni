@@ -32,7 +32,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.FocusMsg:
 		m.focused = true
 		// Re-kick the spinner tick chain if any activity is still ongoing.
-		if m.loading || len(m.scanningProviders) > 0 || len(m.outdatedProviders) > 0 || m.providerSnapshotRefreshing || m.outdatedSnapshotRefreshing || m.discoveryRefreshing || m.descRefreshing || m.dotsLoading || m.dotsPeekLoading || m.searching || len(m.upgradingKeys) > 0 {
+		if m.loading || len(m.scanningProviders) > 0 || len(m.outdatedProviders) > 0 || m.providerSnapshotRefreshing || m.outdatedSnapshotRefreshing || m.discoveryRefreshing || m.descRefreshing || m.dotsLoading || m.dotsPeekLoading || m.traceLogLoading || m.searching || len(m.upgradingKeys) > 0 {
 			cmds = append(cmds, m.spinner.Tick)
 		}
 
@@ -72,7 +72,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case spinner.TickMsg:
 		// Only reschedule while focused — avoids burning CPU in the background.
-		if m.focused && (m.loading || len(m.scanningProviders) > 0 || len(m.outdatedProviders) > 0 || m.providerSnapshotRefreshing || m.outdatedSnapshotRefreshing || m.discoveryRefreshing || m.descRefreshing || m.dotsLoading || m.dotsPeekLoading || m.searching || len(m.upgradingKeys) > 0) {
+		if m.focused && (m.loading || len(m.scanningProviders) > 0 || len(m.outdatedProviders) > 0 || m.providerSnapshotRefreshing || m.outdatedSnapshotRefreshing || m.discoveryRefreshing || m.descRefreshing || m.dotsLoading || m.dotsPeekLoading || m.traceLogLoading || m.searching || len(m.upgradingKeys) > 0) {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			cmds = append(cmds, cmd)
@@ -233,6 +233,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dotsPeekLoadedMsg:
 		cmds = append(cmds, m.handleDotsPeekLoadedMsg(msg)...)
 
+	case traceLogLoadedMsg:
+		cmds = append(cmds, m.handleTraceLogLoadedMsg(msg)...)
+
 	case dotsPreparedMsg:
 		cmds = append(cmds, m.handleDotsPreparedMsg(msg)...)
 
@@ -360,6 +363,10 @@ func (m *Model) handleMouseWheelMsg(msg tea.MouseWheelMsg) bool {
 	}
 	if m.dotsPeek != nil {
 		m.scrollDotsPeekBy(delta)
+		return true
+	}
+	if m.mode == viewSettings && m.traceLog != nil {
+		m.scrollTraceLogBy(delta)
 		return true
 	}
 	m.scrollBy(delta)
