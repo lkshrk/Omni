@@ -28,8 +28,13 @@ Or:
 
 ```sh
 brew tap lkshrk/tap
+brew trust --tap lkshrk/tap
 brew install omni
 ```
+
+Homebrew 6 requires trust for non-official taps before it will load their
+formulae. Trust can also be narrowed to the Omni formula with
+`brew trust --formula lkshrk/tap/omni`.
 
 Linux packages and release archives are published on
 [GitHub Releases](https://github.com/lkshrk/omni/releases).

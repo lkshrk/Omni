@@ -53,7 +53,15 @@ Make sure `$GOPATH/bin` or `$GOBIN` is on `PATH`.
 
 ```sh
 brew tap lkshrk/tap
+brew trust --tap lkshrk/tap
 brew install omni
+```
+
+Homebrew 6 requires trust for non-official taps before it will load their
+formulae. If you prefer a narrower entry, trust only Omni:
+
+```sh
+brew trust --formula lkshrk/tap/omni
 ```
 
 ## Install From Releases
