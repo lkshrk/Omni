@@ -3693,13 +3693,16 @@ func TestDotsPeekEscWhileLoadingIgnoresLateResult(t *testing.T) {
 	}
 }
 
-func TestTraceLogBackWhileLoadingIgnoresLateResult(t *testing.T) {
+// TestTraceLogStaleGenIgnoresLateResult covers the generation-mismatch path:
+// Back bumps traceLogGen so the in-flight response no longer matches.
+func TestTraceLogStaleGenIgnoresLateResult(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSettings
 	m.settingsCursor = settingsRowTraceLog
 	m.traceLogLoading = true
 	m.traceLogGen = 1
 
+	// Back increments gen to 2 and clears loading; arriving gen=1 is now stale.
 	got := drive(m,
 		pressEsc(),
 		traceLogLoadedMsg{gen: 1},
@@ -3708,7 +3711,25 @@ func TestTraceLogBackWhileLoadingIgnoresLateResult(t *testing.T) {
 		t.Fatal("traceLogLoading = true, want false after Back clears it")
 	}
 	if got.traceLog != nil {
-		t.Fatalf("traceLog = %+v, want nil after stale result", got.traceLog)
+		t.Fatalf("traceLog = %+v, want nil after stale-gen result", got.traceLog)
+	}
+}
+
+// TestTraceLogLoadingClearedIgnoresCurrentGenResult covers the !traceLogLoading
+// short-circuit: gen matches but loading was already cleared (e.g. a second Back
+// keypress raced the goroutine). The response must not re-populate traceLog.
+func TestTraceLogLoadingClearedIgnoresCurrentGenResult(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewSettings
+	m.traceLogGen = 3
+	m.traceLogLoading = false // loading already cleared; no request in flight
+
+	got := drive(m, traceLogLoadedMsg{gen: 3})
+	if got.traceLog != nil {
+		t.Fatalf("traceLog = %+v, want nil when loading was already cleared", got.traceLog)
+	}
+	if got.traceLogLoading {
+		t.Fatal("traceLogLoading = true, want false")
 	}
 }
 
