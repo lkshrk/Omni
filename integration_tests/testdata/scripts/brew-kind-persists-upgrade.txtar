@@ -1,0 +1,154 @@
+# brew_kind persists across process restarts: after a refresh records artifact kinds in
+# tool_metadata, a subsequent upgrade invocation uses --cask for the cask tool and
+# --formula for the formula tool based on how Homebrew classifies each package.
+exec chmod 755 bin/brew
+env PATH=$WORK/bin:$PATH
+
+# Seed both tools as installed and outdated (simulates a prior install run).
+exec omni-seed-cache iterm2 brew iterm2 3.4.0 3.5.0 brew
+exec omni-seed-cache ripgrep brew ripgrep 14.0.0 14.1.0 brew
+
+# Process 1 — omni tools refresh:
+# Calls InstalledMetadataMap (brew info --json=v2 --installed + brew list --cask),
+# which records ArtifactKind="cask" for iterm2 and ArtifactKind="formula" for ripgrep
+# in the tool_metadata table. This is the persistence step under HCL-24.
+exec omni --config settings.json tools refresh
+
+# Process 2 — omni tools upgrade --all (fresh omni process, reads from DB):
+# The DB hydrates brew_kind into ToolCache.Options for each tool. The upgrade path
+# uses the correct --cask / --formula flag; the stub logs every brew invocation.
+exec omni --config settings.json tools upgrade --all
+stdout 'upgrading iterm2'
+stdout 'upgraded: iterm2'
+stdout 'upgrading ripgrep'
+stdout 'upgraded: ripgrep'
+
+# Assert the brew stub was invoked with the correct upgrade command shapes.
+# Cask must be upgraded with --cask (not bare or --formula).
+exec grep -q 'upgrade --cask iterm2' .omni-cache/brew-calls.log
+# Formula must be upgraded with --formula (not bare or --cask).
+exec grep -q 'upgrade --formula ripgrep' .omni-cache/brew-calls.log
+
+# The upgrade call for iterm2 must not use --formula.
+! exec grep -q 'upgrade --formula iterm2' .omni-cache/brew-calls.log
+# The upgrade call for ripgrep must not use --cask.
+! exec grep -q 'upgrade --cask ripgrep' .omni-cache/brew-calls.log
+
+-- bin/brew --
+#!/usr/bin/env sh
+set -eu
+log="${OMNI_CACHE_DIR}/brew-calls.log"
+mkdir -p "${OMNI_CACHE_DIR}"
+
+# Log every invocation for post-run assertions.
+echo "$*" >> "$log"
+
+state="${OMNI_CACHE_DIR}/fake-brew"
+mkdir -p "$state"
+
+case "${1:-}" in
+  --version)
+    echo "Homebrew 6.0.0"
+    ;;
+
+  info)
+    # brew info --json=v2 --installed  (called by InstalledMetadataMap during refresh)
+    if [ "${2:-}" = "--json=v2" ] && [ "${3:-}" = "--installed" ]; then
+      printf '{"formulae":[{"name":"ripgrep","full_name":"ripgrep","desc":"fast grep","homepage":"https://github.com/BurntSushi/ripgrep","urls":{"stable":{"url":"https://github.com/BurntSushi/ripgrep"}},"installed":[{"version":"14.0.0","installed_on_request":true}]}],"casks":[{"token":"iterm2","desc":"terminal","homepage":"https://iterm2.com","url":"https://iterm2.com/dl","installed":"3.4.0","artifacts":[]}]}\n'
+      exit 0
+    fi
+    printf '{"formulae":[],"casks":[]}\n'
+    ;;
+
+  list)
+    shift
+    cask_flag=0
+    versions_flag=0
+    pkgs=""
+    for arg in "$@"; do
+      case "$arg" in
+        --cask)     cask_flag=1 ;;
+        --versions) versions_flag=1 ;;
+        *)          pkgs="${pkgs} ${arg}" ;;
+      esac
+    done
+
+    # brew list --cask (no pkg args) — list all installed casks
+    if [ "$cask_flag" -eq 1 ] && [ "$versions_flag" -eq 0 ] && [ -z "$(echo "$pkgs" | tr -d ' ')" ]; then
+      echo "iterm2"
+      exit 0
+    fi
+
+    # brew list --versions [--cask] <pkg> — return version if known
+    if [ "$versions_flag" -eq 1 ]; then
+      for pkg in $pkgs; do
+        case "$pkg" in
+          iterm2)
+            if [ "$cask_flag" -eq 1 ]; then
+              echo "iterm2 3.5.0"
+              exit 0
+            fi
+            # iterm2 is not a formula; return empty / failure
+            exit 1
+            ;;
+          ripgrep)
+            if [ "$cask_flag" -eq 0 ]; then
+              echo "ripgrep 14.1.0"
+              exit 0
+            fi
+            exit 1
+            ;;
+        esac
+      done
+    fi
+    exit 1
+    ;;
+
+  leaves)
+    # brew leaves --installed-on-request  (called by installedFormulae in refresh)
+    if [ "${2:-}" = "--installed-on-request" ]; then
+      echo "ripgrep"
+      exit 0
+    fi
+    ;;
+
+  outdated)
+    # brew outdated --json=v2 --greedy  (called by RefreshProviderOutdated)
+    if [ ! -f "$state/iterm2-upgraded" ] && [ ! -f "$state/ripgrep-upgraded" ]; then
+      printf '{"formulae":[{"name":"ripgrep","current_version":"14.1.0"}],"casks":[{"name":"iterm2","current_version":"3.5.0"}]}\n'
+    elif [ ! -f "$state/iterm2-upgraded" ]; then
+      printf '{"formulae":[],"casks":[{"name":"iterm2","current_version":"3.5.0"}]}\n'
+    elif [ ! -f "$state/ripgrep-upgraded" ]; then
+      printf '{"formulae":[{"name":"ripgrep","current_version":"14.1.0"}],"casks":[]}\n'
+    else
+      printf '{"formulae":[],"casks":[]}\n'
+    fi
+    ;;
+
+  upgrade)
+    shift
+    kind_flag=""
+    if [ "${1:-}" = "--formula" ] || [ "${1:-}" = "--cask" ]; then
+      kind_flag="$1"
+      shift
+    fi
+    pkg="${1:-}"
+    : > "$state/$pkg-upgraded"
+    ;;
+esac
+
+-- settings.json --
+{
+  "version": 7,
+  "settings": {
+    "disabled_providers": ["node", "python", "apt", "apk", "dnf", "pacman", "zypper", "pip"]
+  },
+  "tools": {
+    "iterm2":  { "providers": [{ "provider": "brew" }] },
+    "ripgrep": { "providers": [{ "provider": "brew" }] }
+  },
+  "hosts": { "testhost": [] },
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": ["iterm2", "ripgrep"] }
+  ]
+}

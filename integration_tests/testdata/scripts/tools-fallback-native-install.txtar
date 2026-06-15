@@ -1,0 +1,72 @@
+# Native install pipeline: downloads a real tar.gz asset, verifies checksum,
+# extracts binary, and installs it without curl/tar/unzip shell dependencies.
+# STUB_SERVER_URL is replaced at runtime by the omni-native-fallback-install helper.
+
+exec chmod 755 bin/apt-get
+
+env PATH=$WORK/bin:$PATH
+env HOME=$WORK
+
+exec omni-native-fallback-install --config settings.json hosts ensure testhost
+exec omni-seed-package-availability mytool apt mytool false 'no candidate'
+
+# Sync triggers native install because apt is unavailable and the fallback has
+# a github_release_asset recipe with no explicit install shell command.
+exec omni-native-fallback-install --config settings.json tools sync
+stdout 'installed: mytool \(apt\)'
+
+# Config must reflect verified status.
+exec grep '"status": "verified"' settings.json
+stdout '"status": "verified"'
+
+# A second sync re-checks and confirms already installed.
+exec omni-native-fallback-install --config settings.json tools sync
+stdout 'already installed: mytool \(apt\)'
+
+-- bin/apt-get --
+#!/bin/sh
+set -eu
+case "${1:-}" in
+  --version) echo "apt 2.0.0" ;;
+  *) exit 1 ;;
+esac
+
+-- settings.json --
+{
+  "version": 7,
+  "settings": {
+    "disabled_providers": ["brew", "npm", "pip", "node", "python", "pip3"]
+  },
+  "tools": {
+    "mytool": {
+      "providers": [{ "provider": "apt" }],
+      "fallback": {
+        "source": {
+          "type": "github",
+          "owner": "testowner",
+          "repo": "testrepo",
+          "url": "https://github.com/testowner/testrepo"
+        },
+        "status": "unverified",
+        "binary": "mytool",
+        "recipe": {
+          "type": "github_release_asset",
+          "asset_pattern": "mytool_v1.0.0_GOOS_GOARCH.tar.gz",
+          "release_id": "1",
+          "tag_name": "v1.0.0",
+          "published_at": "2026-06-01T00:00:00Z",
+          "asset_id": "1",
+          "asset_name": "ASSET_NAME_PLACEHOLDER",
+          "asset_download_url": "STUB_SERVER_URL/asset/ASSET_NAME_PLACEHOLDER"
+        },
+        "commands": {
+          "check": "test -x {{bin_dir}}/{{binary}}"
+        }
+      }
+    }
+  },
+  "hosts": { "testhost": [] },
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": ["mytool"] }
+  ]
+}
