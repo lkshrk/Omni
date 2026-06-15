@@ -16,13 +16,17 @@ Git-backed GNU Stow repo, and exposes the same behavior through a CLI and TUI.
 ## Install
 
 Package-manager installs declare GNU Stow as a runtime dependency, so Homebrew
-and Linux packages install `stow` with Omni. `go install` and release archives
-install only the `omni` binary; install `stow` separately if you want dotfile
-sync from those channels.
+and Linux packages install `stow` with Omni. The install script and release
+archives install only the `omni` binary; install `stow` separately if you want
+dotfile sync from those channels.
+
+Linux (and other Unix) — download the latest release binary into `~/.local/bin`:
 
 ```sh
-go install github.com/lkshrk/omni/cmd/omni@latest
+curl -fsSL https://raw.githubusercontent.com/lkshrk/omni/main/scripts/linux-install.sh | bash
 ```
+
+Set `DIR` to choose a different destination (e.g. `DIR=/usr/local/bin`).
 
 Or:
 

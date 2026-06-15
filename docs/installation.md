@@ -41,13 +41,16 @@ Supported built-in concrete providers:
 | Node packages | `bun`, `pnpm`, `npm` |
 | Python packages | `uv`, `pip` |
 
-## Install With Go
+## Install on Linux
+
+Download the latest release binary into `~/.local/bin`:
 
 ```sh
-go install github.com/lkshrk/omni/cmd/omni@latest
+curl -fsSL https://raw.githubusercontent.com/lkshrk/omni/main/scripts/linux-install.sh | bash
 ```
 
-Make sure `$GOPATH/bin` or `$GOBIN` is on `PATH`.
+Set `DIR` to choose a different destination (for example `DIR=/usr/local/bin`).
+Make sure the destination is on your `PATH`.
 
 ## Install With Homebrew
 
@@ -80,7 +83,7 @@ https://github.com/lkshrk/omni/releases
 Use the same channel you installed from:
 
 ```sh
-go install github.com/lkshrk/omni/cmd/omni@latest
+curl -fsSL https://raw.githubusercontent.com/lkshrk/omni/main/scripts/linux-install.sh | bash
 brew upgrade omni
 ```
 
