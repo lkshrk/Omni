@@ -219,6 +219,83 @@ func TestValidateRoot_ToolFallbackAcceptsGitHubSystemTool(t *testing.T) {
 	}
 }
 
+func TestValidateRoot_ToolFallbackNativeRecipeNoCheckRequired(t *testing.T) {
+	cfg := &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"glow": {
+				Providers: []config.ToolInstallSpec{{Provider: "brew"}},
+				Fallback: &config.FallbackSpec{
+					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "charmbracelet", Repo: "glow"},
+					Binary: "glow",
+					Recipe: config.FallbackRecipe{Type: config.FallbackRecipeGitHubReleaseAsset, AssetPattern: "glow_{version}_Linux_x86_64.tar.gz"},
+				},
+			},
+		},
+	}
+	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"brew"}})
+	if len(errs) != 0 {
+		t.Errorf("native github_release_asset fallback without a check command should be valid, got: %v", errs)
+	}
+}
+
+func TestValidateRoot_ToolFallbackRawCommandsStillRequiresCheck(t *testing.T) {
+	cfg := &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"tool": {
+				Providers: []config.ToolInstallSpec{{Provider: "brew"}},
+				Fallback: &config.FallbackSpec{
+					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "o", Repo: "r"},
+					Binary: "tool",
+					Recipe: config.FallbackRecipe{Type: config.FallbackRecipeRawCommands},
+				},
+			},
+		},
+	}
+	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"brew"}})
+	if !containsErrorMessage(errs, "fallback check command is required") {
+		t.Errorf("raw_commands fallback without a check should still be rejected, got: %v", errs)
+	}
+}
+
+func TestValidateRoot_ToolFallbackRawCommandsGitHubSourceNoOwnerRepo(t *testing.T) {
+	cfg := &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"pi": {
+				Providers: []config.ToolInstallSpec{{Provider: "brew"}},
+				Fallback: &config.FallbackSpec{
+					Source:   config.FallbackSource{Type: config.FallbackSourceGitHub, URL: "https://pi.dev"},
+					Binary:   "pi",
+					Recipe:   config.FallbackRecipe{Type: config.FallbackRecipeRawCommands},
+					Commands: config.FallbackCommands{Check: "command -v pi", Install: "curl -fsSL https://pi.dev/install.sh | sh"},
+				},
+			},
+		},
+	}
+	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"brew"}})
+	if len(errs) != 0 {
+		t.Errorf("raw_commands fallback with a github source but no owner/repo should be valid, got: %v", errs)
+	}
+}
+
+func TestValidateRoot_ToolFallbackReleaseAssetStillRequiresOwnerRepo(t *testing.T) {
+	cfg := &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"x": {
+				Providers: []config.ToolInstallSpec{{Provider: "brew"}},
+				Fallback: &config.FallbackSpec{
+					Source: config.FallbackSource{Type: config.FallbackSourceGitHub},
+					Binary: "x",
+					Recipe: config.FallbackRecipe{Type: config.FallbackRecipeGitHubReleaseAsset, AssetPattern: "x-{version}.tar.gz"},
+				},
+			},
+		},
+	}
+	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"brew"}})
+	if !containsErrorMessage(errs, "github fallback source requires owner and repo") {
+		t.Errorf("release-asset fallback without owner/repo should be rejected, got: %v", errs)
+	}
+}
+
 func TestValidateRoot_ToolFallbackAcceptsAnyToolProvider(t *testing.T) {
 	cfg := &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
