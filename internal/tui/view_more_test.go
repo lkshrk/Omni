@@ -717,6 +717,33 @@ func TestRenderSettings_ShowsProviderPriorityRow(t *testing.T) {
 	}
 }
 
+// TestRenderSettings_AllRowsRendered is a regression for settingsRowTraceLog
+// ("Command Log") being present in the const iota and settingsRows meta slice
+// but accidentally omitted from the keyed render slice in renderSettings, which
+// made the row selectable but invisible. The test iterates settingsRows so any
+// future row added to the const/meta but dropped from the render slice will
+// also fail.
+func TestRenderSettings_AllRowsRendered(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewSettings
+	m.width = 120
+	m.height = 60 // tall enough that no rows are clipped by the scroll window
+
+	out := stripANSIEscapeSequences(renderSettings(m))
+
+	for i, row := range settingsRows {
+		if !strings.Contains(out, row.label) {
+			t.Errorf("settings view missing row %d label %q — row is in settingsRows but not rendered", i, row.label)
+		}
+	}
+
+	// Explicit regression: Command Log (settingsRowTraceLog) was the specific
+	// row that was dropped from the render slice before this fix.
+	if !strings.Contains(out, "Command Log") {
+		t.Errorf("settings view missing %q (regression: settingsRowTraceLog omitted from render slice)", "Command Log")
+	}
+}
+
 func TestRenderHeaderUsesCachedDotsAvailability(t *testing.T) {
 	t.Run("settings shows dots on when app is enabled despite stale disabled setting", func(t *testing.T) {
 		m := baseModel(nil)
@@ -7532,5 +7559,227 @@ func TestRenderSetupOptions_WrapIndentMatchesDescCol(t *testing.T) {
 		if actualIndent != 8 {
 			t.Fatalf("continuation line indent = %d, want exactly 8:\n%q\nfull output:\n%s", actualIndent, line, out)
 		}
+	}
+}
+
+// TestRenderSettings_SectionHeadersPresent catches rows added to the settingsRows
+// iota that are never emitted by renderSettings() (section present in data but absent in render).
+func TestRenderSettings_SectionHeadersPresent(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewSettings
+	m.width = 120
+	m.height = 60
+
+	out := stripANSIEscapeSequences(renderSettings(m))
+
+	seen := make(map[string]bool)
+	for _, row := range settingsRows {
+		if seen[row.section] {
+			continue
+		}
+		seen[row.section] = true
+		if !strings.Contains(out, row.section) {
+			t.Errorf("settings view missing section header %q — section is referenced in settingsRows but not rendered", row.section)
+		}
+	}
+}
+
+// TestRenderDotsPeek_PopupVisibleInDots is the render-gate guard: popup added to
+// the model but missing from the View() switch will fail here.
+func TestRenderDotsPeek_PopupVisibleInDots(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.width = 120
+	m.height = 60
+	// dotsPeekLoading triggers the loading state without needing a real DotsPeekResult.
+	m.dotsPeekLoading = true
+
+	view := m.View().Content
+	if !strings.Contains(view, "Peek") {
+		t.Errorf("dotsPeek popup should be visible in viewDots; View() missing 'Peek' title\nview:\n%s", view)
+	}
+}
+
+// TestRenderDotsPeek_PopupAbsentOutsideDots catches a missing render gate that
+// would let the popup bleed into unrelated views.
+func TestRenderDotsPeek_PopupAbsentOutsideDots(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewSettings
+	m.width = 120
+	m.height = 60
+	m.dotsPeekLoading = true
+
+	view := m.View().Content
+	// "Peek" as a popup title must not appear outside its owning mode.
+	// We look for the popup frame decoration to distinguish a header from a tool name.
+	if strings.Contains(view, "── Peek") || strings.Contains(view, "Peek ──") {
+		t.Errorf("dotsPeek popup should NOT appear when mode != viewDots\nview:\n%s", view)
+	}
+}
+
+// TestRenderList_SectionHeadersPresent verifies brew tool classification into render sections.
+// Brew tools use only ToolCache fields (no provider pins); baseModel sets an empty
+// ToolClassificationContext which is correct for brew.
+func TestRenderList_SectionHeadersPresent(t *testing.T) {
+	t.Run("installed brew tool renders Installed section header", func(t *testing.T) {
+		tool := &database.ToolCache{
+			Name: "git", Provider: "brew", Package: "git",
+			Installed: true, Tracked: true,
+		}
+		m := baseModel([]*database.ToolCache{tool})
+		m.mode = viewList
+		m.width = 120
+		m.height = 60
+
+		out := stripANSIEscapeSequences(renderList(m))
+
+		if !strings.Contains(out, "git") {
+			t.Errorf("list view missing tool name 'git'\nview:\n%s", out)
+		}
+		if !strings.Contains(out, "Installed") {
+			t.Errorf("list view missing 'Installed' section header for an installed, up-to-date brew tool\nview:\n%s", out)
+		}
+		if strings.Contains(out, "Updates Available") {
+			t.Errorf("list view wrongly shows 'Updates Available' for a non-outdated tool\nview:\n%s", out)
+		}
+		if strings.Contains(out, "Out of Sync") {
+			t.Errorf("list view wrongly shows 'Out of Sync' for a tracked+installed brew tool\nview:\n%s", out)
+		}
+	})
+
+	t.Run("outdated brew tool renders Updates Available section header", func(t *testing.T) {
+		outdated := &database.ToolCache{
+			Name: "ripgrep", Provider: "brew", Package: "ripgrep",
+			Installed: true, Tracked: true, Outdated: true,
+		}
+		outdated.Version.Valid = true
+		outdated.Version.String = "13.0"
+		outdated.LatestVersion.Valid = true
+		outdated.LatestVersion.String = "14.1"
+
+		m := baseModel([]*database.ToolCache{outdated})
+		m.mode = viewList
+		m.width = 120
+		m.height = 60
+
+		out := stripANSIEscapeSequences(renderList(m))
+
+		if !strings.Contains(out, "ripgrep") {
+			t.Errorf("list view missing tool name 'ripgrep'\nview:\n%s", out)
+		}
+		if !strings.Contains(out, "Updates Available") {
+			t.Errorf("list view missing 'Updates Available' section header for an outdated brew tool\nview:\n%s", out)
+		}
+		if strings.Contains(out, "Installed") {
+			t.Errorf("list view wrongly shows 'Installed' for an outdated tool\nview:\n%s", out)
+		}
+	})
+
+	t.Run("both sections render when installed and outdated tools coexist", func(t *testing.T) {
+		installed := &database.ToolCache{
+			Name: "bat", Provider: "brew", Package: "bat",
+			Installed: true, Tracked: true,
+		}
+		outdated := &database.ToolCache{
+			Name: "fd", Provider: "brew", Package: "fd",
+			Installed: true, Tracked: true, Outdated: true,
+		}
+		outdated.Version.Valid = true
+		outdated.Version.String = "8.7"
+		outdated.LatestVersion.Valid = true
+		outdated.LatestVersion.String = "9.0"
+
+		m := baseModel([]*database.ToolCache{installed, outdated})
+		m.mode = viewList
+		m.width = 120
+		m.height = 60
+
+		out := stripANSIEscapeSequences(renderList(m))
+
+		if !strings.Contains(out, "bat") {
+			t.Errorf("list view missing tool name 'bat'\nview:\n%s", out)
+		}
+		if !strings.Contains(out, "fd") {
+			t.Errorf("list view missing tool name 'fd'\nview:\n%s", out)
+		}
+		if !strings.Contains(out, "Installed") {
+			t.Errorf("list view missing 'Installed' section header\nview:\n%s", out)
+		}
+		if !strings.Contains(out, "Updates Available") {
+			t.Errorf("list view missing 'Updates Available' section header\nview:\n%s", out)
+		}
+	})
+}
+
+// TestRenderList_UpdatesSectionHeader guards sectionLabel(): removing the sectionUpdates
+// case silently reverts the header to "Available" — this test catches that.
+func TestRenderList_UpdatesSectionHeader(t *testing.T) {
+	outdated := &database.ToolCache{
+		Name: "fzf", Provider: "brew", Package: "fzf",
+		Installed: true, Tracked: true, Outdated: true,
+	}
+	outdated.Version.Valid = true
+	outdated.Version.String = "1.0"
+	outdated.LatestVersion.Valid = true
+	outdated.LatestVersion.String = "2.0"
+	m := baseModel([]*database.ToolCache{outdated})
+	m.mode = viewList
+	m.width = 120
+	m.height = 60
+
+	out := stripANSIEscapeSequences(renderList(m))
+
+	if !strings.Contains(out, "Updates Available") {
+		t.Errorf("list view missing 'Updates Available' section header\nview:\n%s", out)
+	}
+}
+
+// TestRenderDots_SectionHeadersPresent ensures renderDots() calls sections.Header();
+// a bypass in the render loop would drop entries without failing otherwise.
+func TestRenderDots_SectionHeadersPresent(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.width = 120
+	m.height = 60
+	// DotsRepo must be set so renderDots() doesn't bail to the "not configured" early-return.
+	m.setSettings(config.Settings{DotsRepo: "/home/user/dotfiles"})
+	// Two entries with different states so DotStatusSections returns multiple groups.
+	m.dotsEntries = []app.DotStatus{
+		{Name: "nvim", State: app.DotStateSynced, Health: app.HealthOK},
+		{Name: "zsh", State: app.DotStateIgnored},
+	}
+
+	out := stripANSIEscapeSequences(renderDots(m))
+
+	for _, name := range []string{"nvim", "zsh"} {
+		if !strings.Contains(out, name) {
+			t.Errorf("dots view missing entry %q\nview:\n%s", name, out)
+		}
+	}
+	// DotStateSynced → "Synced", DotStateIgnored → "Ignored" per DotStatusSections.
+	for _, header := range []string{"Synced", "Ignored"} {
+		if !strings.Contains(out, header) {
+			t.Errorf("dots view missing section header %q — renderDots() section.Header() not called\nview:\n%s", header, out)
+		}
+	}
+}
+
+// TestRenderStatus_SectionHeadersPresent catches renames or sectionOrder changes
+// that drop statusSectionOverview/"Data" from the rendered surface.
+func TestRenderStatus_SectionHeadersPresent(t *testing.T) {
+	installed := &database.ToolCache{
+		Name: "git", Provider: "brew", Package: "git",
+		Installed: true, Tracked: true,
+	}
+	m := baseModel([]*database.ToolCache{installed})
+	m.mode = viewStatus
+	m.width = 120
+	m.height = 60
+
+	out := stripANSIEscapeSequences(renderStatus(m))
+
+	// "Data" is the statusSectionOverview label; always has content (tool counts).
+	if !strings.Contains(out, "Data") {
+		t.Errorf("status view missing 'Data' section header\nview:\n%s", out)
 	}
 }

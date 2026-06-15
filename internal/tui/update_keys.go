@@ -76,6 +76,11 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 		return *m, tea.Batch(cmds...)
 	}
 
+	if m.mode == viewSettings && (m.traceLog != nil || m.traceLogLoading) {
+		cmds = append(cmds, m.handleTraceLogKeyMsg(msg)...)
+		return *m, tea.Batch(cmds...)
+	}
+
 	if m.handleTabKeyMsg(msg, &cmds) {
 		return *m, tea.Batch(cmds...)
 	}

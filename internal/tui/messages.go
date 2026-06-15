@@ -304,6 +304,12 @@ type dotsPeekLoadedMsg struct {
 	err    error
 }
 
+type traceLogLoadedMsg struct {
+	gen    int
+	traces []database.CommandTrace
+	err    error
+}
+
 // dotsPreparedMsg is sent when the launch-time, non-mutating dots snapshot is fetched.
 type dotsPreparedMsg struct {
 	gen            int
