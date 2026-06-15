@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -139,24 +140,49 @@ func (a *App) InstallToolFallback(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	if err := a.runFallbackCommand(ctx, name, "install", spec, fallback, fallback.Commands.Install); err != nil {
-		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
-		_ = a.readDB().MarkFailed(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec), err.Error())
+	if err := a.runFallbackInstall(ctx, name, "install", spec, fallback, fallback.Commands.Install); err != nil {
+		// Capture the clean message before any wrapping so the DB stores the
+		// original failure reason, not the composite status-recording annotation.
+		origMsg := err.Error()
+		if statusErr := a.setToolFallbackStatus(name, config.FallbackStatusFailed); statusErr != nil {
+			err = errors.Join(err, fmt.Errorf("failed to record fallback status: %w", statusErr))
+		}
+		if markErr := a.readDB().MarkFailed(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec), origMsg); markErr != nil {
+			err = errors.Join(err, fmt.Errorf("failed to record DB failure: %w", markErr))
+		}
 		return err
 	}
 	installed, err := a.CheckToolFallback(ctx, name)
 	if err != nil {
-		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
-		_ = a.readDB().MarkFailed(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec), err.Error())
+		origMsg := err.Error()
+		if statusErr := a.setToolFallbackStatus(name, config.FallbackStatusFailed); statusErr != nil {
+			err = errors.Join(err, fmt.Errorf("failed to record fallback status: %w", statusErr))
+		}
+		if markErr := a.readDB().MarkFailed(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec), origMsg); markErr != nil {
+			err = errors.Join(err, fmt.Errorf("failed to record DB failure: %w", markErr))
+		}
 		return err
 	}
 	if !installed {
-		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
-		_ = a.readDB().MarkFailed(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec), "fallback install verification failed")
-		return fmt.Errorf("fallback install verification failed for %s: check command did not pass", name)
+		const verifyMsg = "fallback install verification failed"
+		primaryErr := fmt.Errorf("%s for %s: check command did not pass", verifyMsg, name)
+		if statusErr := a.setToolFallbackStatus(name, config.FallbackStatusFailed); statusErr != nil {
+			primaryErr = errors.Join(primaryErr, fmt.Errorf("failed to record fallback status: %w", statusErr))
+		}
+		if markErr := a.readDB().MarkFailed(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec), verifyMsg); markErr != nil {
+			primaryErr = errors.Join(primaryErr, fmt.Errorf("failed to record DB failure: %w", markErr))
+		}
+		return primaryErr
 	}
 	if err := a.setToolFallbackStatus(name, config.FallbackStatusVerified); err != nil {
 		return err
+	}
+	// Persist the installed version from the recipe tag so future refresh
+	// cycles can use version comparison rather than published_at alone.
+	if tagName := strings.TrimSpace(fallback.Recipe.TagName); tagName != "" {
+		if persistErr := a.persistFallbackInstalledVersion(name, tagName); persistErr != nil {
+			return fmt.Errorf("fallback %s: persist installed version: %w", name, persistErr)
+		}
 	}
 	if err := a.readDB().Upsert(ctx, &database.ToolCache{
 		Name:          name,
@@ -181,6 +207,11 @@ func (a *App) CheckToolFallback(ctx context.Context, name string) (bool, error) 
 }
 
 func (a *App) checkToolFallbackWithSpec(ctx context.Context, name string, spec config.ToolSpec, fallback *config.FallbackSpec) (bool, error) {
+	// Native check for GitHub release asset recipes: exec binary --version.
+	if isNativeGitHubRecipe(fallback) && strings.TrimSpace(fallback.Commands.Check) == "" {
+		return a.nativeCheckFallback(ctx, name, fallback)
+	}
+	// Shell check: custom command or any non-native recipe.
 	command := strings.TrimSpace(fallback.Commands.Check)
 	if command == "" {
 		return false, fmt.Errorf("fallback %s: missing check command", name)
@@ -201,35 +232,74 @@ func (a *App) UpgradeToolFallback(ctx context.Context, name string) error {
 	}
 	upgradeFallback, refreshed, err := a.githubFallbackUpgradeCandidate(ctx, name, spec, fallback)
 	if err != nil {
-		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
+		origMsg := err.Error()
+		if statusErr := a.setToolFallbackStatus(name, config.FallbackStatusFailed); statusErr != nil {
+			err = errors.Join(err, fmt.Errorf("failed to record fallback status: %w", statusErr))
+		}
+		if markErr := a.readDB().MarkFailed(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec), origMsg); markErr != nil {
+			err = errors.Join(err, fmt.Errorf("failed to record DB failure: %w", markErr))
+		}
 		return err
 	}
-	command := upgradeFallback.Commands.Upgrade
-	if strings.TrimSpace(command) == "" {
-		command = upgradeFallback.Commands.Install
+	upgradeCmd := strings.TrimSpace(upgradeFallback.Commands.Upgrade)
+	if upgradeCmd == "" {
+		upgradeCmd = upgradeFallback.Commands.Install
 	}
-	if err := a.runFallbackCommand(ctx, name, "upgrade", spec, upgradeFallback, command); err != nil {
-		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
+	upgradeAction := "upgrade"
+	if upgradeCmd == upgradeFallback.Commands.Install {
+		upgradeAction = "install"
+	}
+	if err := a.runFallbackInstall(ctx, name, upgradeAction, spec, upgradeFallback, upgradeCmd); err != nil {
+		origMsg := err.Error()
+		if statusErr := a.setToolFallbackStatus(name, config.FallbackStatusFailed); statusErr != nil {
+			err = errors.Join(err, fmt.Errorf("failed to record fallback status: %w", statusErr))
+		}
+		if markErr := a.readDB().MarkFailed(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec), origMsg); markErr != nil {
+			err = errors.Join(err, fmt.Errorf("failed to record DB failure: %w", markErr))
+		}
 		return err
 	}
 	installed, err := a.checkToolFallbackWithSpec(ctx, name, spec, upgradeFallback)
 	if err != nil {
-		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
+		origMsg := err.Error()
+		if statusErr := a.setToolFallbackStatus(name, config.FallbackStatusFailed); statusErr != nil {
+			err = errors.Join(err, fmt.Errorf("failed to record fallback status: %w", statusErr))
+		}
+		if markErr := a.readDB().MarkFailed(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec), origMsg); markErr != nil {
+			err = errors.Join(err, fmt.Errorf("failed to record DB failure: %w", markErr))
+		}
 		return err
 	}
 	if !installed {
-		_ = a.setToolFallbackStatus(name, config.FallbackStatusFailed)
-		return fmt.Errorf("fallback upgrade verification failed for %s: check command did not pass", name)
+		const verifyMsg = "fallback upgrade verification failed"
+		primaryErr := fmt.Errorf("%s for %s: check command did not pass", verifyMsg, name)
+		if statusErr := a.setToolFallbackStatus(name, config.FallbackStatusFailed); statusErr != nil {
+			primaryErr = errors.Join(primaryErr, fmt.Errorf("failed to record fallback status: %w", statusErr))
+		}
+		if markErr := a.readDB().MarkFailed(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec), verifyMsg); markErr != nil {
+			primaryErr = errors.Join(primaryErr, fmt.Errorf("failed to record DB failure: %w", markErr))
+		}
+		return primaryErr
 	}
 	if refreshed {
 		verified := *upgradeFallback
 		verified.Status = config.FallbackStatusVerified
+		// Record the newly installed version so future refresh cycles can
+		// compare versions rather than relying on published_at alone.
+		if tagName := strings.TrimSpace(upgradeFallback.Recipe.TagName); tagName != "" {
+			verified.Recipe.InstalledVersion = normalizeFallbackVersion(tagName)
+		}
 		if err := a.SaveToolFallback(ctx, name, verified); err != nil {
 			return err
 		}
 	} else {
 		if err := a.setToolFallbackStatus(name, config.FallbackStatusVerified); err != nil {
 			return err
+		}
+		if tagName := strings.TrimSpace(upgradeFallback.Recipe.TagName); tagName != "" {
+			if persistErr := a.persistFallbackInstalledVersion(name, tagName); persistErr != nil {
+				return fmt.Errorf("fallback %s: persist installed version: %w", name, persistErr)
+			}
 		}
 	}
 	if err := a.readDB().Upsert(ctx, &database.ToolCache{
@@ -276,6 +346,13 @@ func (a *App) UninstallToolFallback(ctx context.Context, name string) error {
 	spec, fallback, err := a.configuredFallback(name)
 	if err != nil {
 		return err
+	}
+	// Native uninstall for GitHub release asset recipes.
+	if isNativeGitHubRecipe(fallback) && strings.TrimSpace(fallback.Commands.Uninstall) == "" {
+		if err := a.nativeUninstallFallback(ctx, name, fallback); err != nil {
+			return err
+		}
+		return a.readDB().Delete(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec))
 	}
 	if strings.TrimSpace(fallback.Commands.Uninstall) == "" {
 		return fmt.Errorf("fallback uninstall is not available for %s", name)
@@ -381,17 +458,24 @@ func (a *App) fallbackCommandVars(name string, spec config.ToolSpec, fallback *c
 	if assetName := strings.TrimSpace(fallback.Recipe.AssetPattern); assetName != "" {
 		assetPath = filepath.Join(cacheDir, filepath.Base(assetName))
 	}
+	// All values are shell-single-quoted so that user-controlled inputs
+	// (binary name, bin_dir, cache_dir, asset_path, repo, version) cannot
+	// inject shell commands when substituted into an sh -c string.
 	return map[string]string{
-		"arch":       runtime.GOARCH,
-		"asset_path": assetPath,
-		"binary":     binary,
-		"bin_dir":    binDir,
-		"cache_dir":  cacheDir,
-		"os":         runtime.GOOS,
-		"repo":       repo,
-		"version":    "",
+		"arch":       shellSingleQuote(runtime.GOARCH),
+		"asset_path": shellSingleQuote(assetPath),
+		"binary":     shellSingleQuote(binary),
+		"bin_dir":    shellSingleQuote(binDir),
+		"cache_dir":  shellSingleQuote(cacheDir),
+		"os":         shellSingleQuote(runtime.GOOS),
+		"repo":       shellSingleQuote(repo),
+		"version":    shellSingleQuote(""),
 	}, nil
 }
+
+// FallbackCacheDir returns the resolved fallback cache directory path.
+// Exported for test helpers.
+func (a *App) FallbackCacheDir() (string, error) { return a.fallbackCacheDir() }
 
 func (a *App) fallbackCacheDir() (string, error) {
 	root := strings.TrimSpace(a.CacheDir)
@@ -419,7 +503,128 @@ func (a *App) fallbackBinDir(fallback *config.FallbackSpec, cacheDir string) (st
 	if err != nil {
 		return "", fmt.Errorf("resolving fallback bin dir: %w", err)
 	}
+	expanded = filepath.Clean(expanded)
+	if !filepath.IsAbs(expanded) {
+		return "", fmt.Errorf("fallback bin dir %q must be an absolute path", expanded)
+	}
 	return expanded, nil
+}
+
+// isNativeGitHubRecipe reports whether the fallback should use the native Go
+// download/extract/install pipeline rather than shell commands.
+//
+// The native pipeline is used when the recipe is a GitHub release asset with a
+// resolved download URL AND the caller has not supplied explicit install/upgrade
+// shell commands (the custom-shell escape hatch).
+func isNativeGitHubRecipe(fallback *config.FallbackSpec) bool {
+	if fallback == nil {
+		return false
+	}
+	if fallback.Recipe.Type != config.FallbackRecipeGitHubReleaseAsset {
+		return false
+	}
+	if strings.TrimSpace(fallback.Recipe.AssetDownloadURL) == "" {
+		return false
+	}
+	// Explicit install or upgrade shell commands opt out of the native pipeline.
+	return strings.TrimSpace(fallback.Commands.Install) == "" &&
+		strings.TrimSpace(fallback.Commands.Upgrade) == ""
+}
+
+// runFallbackInstall dispatches to the native pipeline for GitHub release asset
+// recipes and falls through to the shell-command path for everything else
+// (raw_commands recipes and custom-shell escape-hatch overrides).
+// action and shellCommand are used only for the shell-command path.
+func (a *App) runFallbackInstall(ctx context.Context, name, action string, spec config.ToolSpec, fallback *config.FallbackSpec, shellCommand string) error {
+	if isNativeGitHubRecipe(fallback) {
+		if err := a.nativeGitHubInstallPipeline(ctx, name, fallback); err != nil {
+			return err
+		}
+		// Persist any checksum that was verified during the pipeline run.
+		if cs := strings.TrimSpace(fallback.Recipe.Checksum); cs != "" {
+			if persistErr := a.persistFallbackChecksum(name, cs); persistErr != nil {
+				return fmt.Errorf("fallback %s: persist checksum: %w", name, persistErr)
+			}
+		}
+		return nil
+	}
+	// Shell-command path for raw_commands recipes or explicit overrides.
+	return a.runFallbackCommand(ctx, name, action, spec, fallback, shellCommand)
+}
+
+// persistFallbackChecksum writes the verified checksum digest back to the
+// stored recipe so future installs can skip the network fetch.
+func (a *App) persistFallbackChecksum(name, digest string) error {
+	return a.withConfig(func(cfg *config.RootConfig) error {
+		spec, ok := cfg.Tools[name]
+		if !ok || spec.Fallback == nil {
+			return nil
+		}
+		spec.Fallback.Recipe.Checksum = digest
+		cfg.Tools[name] = spec
+		return nil
+	})
+}
+
+// persistFallbackInstalledVersion records the normalized version string from
+// tagName into the stored recipe. This lets future outdated-refresh cycles
+// compare version strings rather than relying solely on published_at.
+func (a *App) persistFallbackInstalledVersion(name, tagName string) error {
+	normalized := normalizeFallbackVersion(tagName)
+	if normalized == "" {
+		return nil
+	}
+	return a.withConfig(func(cfg *config.RootConfig) error {
+		spec, ok := cfg.Tools[name]
+		if !ok || spec.Fallback == nil {
+			return nil
+		}
+		spec.Fallback.Recipe.InstalledVersion = normalized
+		cfg.Tools[name] = spec
+		return nil
+	})
+}
+
+// nativeCheckFallback verifies the installed binary by executing it with
+// --version. Returns (true, nil) when the binary runs successfully.
+func (a *App) nativeCheckFallback(ctx context.Context, name string, fallback *config.FallbackSpec) (bool, error) {
+	cacheDir, err := a.fallbackCacheDir()
+	if err != nil {
+		return false, err
+	}
+	binDir, err := a.fallbackBinDir(fallback, cacheDir)
+	if err != nil {
+		return false, err
+	}
+	binary := strings.TrimSpace(fallback.Binary)
+	if binary == "" {
+		binary = name
+	}
+	binPath := filepath.Join(binDir, binary)
+	ctx = traceReason(ctx, "checking fallback", name, "gh")
+	_, _, err = a.fallbackExecutor().Run(ctx, binPath, "--version")
+	return err == nil, nil
+}
+
+// nativeUninstallFallback removes the installed binary from the bin dir.
+func (a *App) nativeUninstallFallback(_ context.Context, name string, fallback *config.FallbackSpec) error {
+	cacheDir, err := a.fallbackCacheDir()
+	if err != nil {
+		return err
+	}
+	binDir, err := a.fallbackBinDir(fallback, cacheDir)
+	if err != nil {
+		return err
+	}
+	binary := strings.TrimSpace(fallback.Binary)
+	if binary == "" {
+		binary = name
+	}
+	binPath := filepath.Join(binDir, binary)
+	if err := os.Remove(binPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("fallback %s: uninstall: %w", name, err)
+	}
+	return nil
 }
 
 func (a *App) fallbackExecutor() executor.Executor {
@@ -463,6 +668,11 @@ func automaticFallbackUsable(fallback *config.FallbackSpec, allowFailed bool) bo
 		}
 	case config.FallbackStatusUnresolved, config.FallbackStatusUnsupported:
 		return false
+	}
+	// Native GitHub release asset recipes use the Go pipeline; they do not
+	// require a shell install command to be usable.
+	if isNativeGitHubRecipe(fallback) {
+		return true
 	}
 	return strings.TrimSpace(fallback.Commands.Install) != "" && strings.TrimSpace(fallback.Commands.Check) != ""
 }
