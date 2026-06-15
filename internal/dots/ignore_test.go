@@ -73,6 +73,9 @@ func TestShouldIgnore_DefaultPatterns(t *testing.T) {
 		{"credentials.json", true},
 		{"auth.json", true},
 
+		// Lock files (machine-state, reproducible)
+		{".skill-lock.json", true},
+
 		// Safe files — should NOT be ignored
 		{"init.lua", false},
 		{"config.toml", false},
