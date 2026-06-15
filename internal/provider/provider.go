@@ -163,9 +163,10 @@ type BulkChecker interface {
 // InstalledMetadata pairs the installed version with provider-specific metadata
 // learned during a bulk installed scan.
 type InstalledMetadata struct {
-	Version   string
-	Privilege PrivilegePlan
-	Source    SourceMetadata
+	Version      string
+	Privilege    PrivilegePlan
+	Source       SourceMetadata
+	ArtifactKind string // provider-specific artifact kind, e.g. "formula" or "cask" for brew
 }
 
 // MetadataBulkChecker is optionally implemented by providers whose installed

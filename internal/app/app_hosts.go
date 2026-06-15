@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -612,7 +613,12 @@ func (a *App) syncOrphansToMachineGroup(ctx context.Context, activeGroups []*con
 
 	machineGroup := currentMachineGroupName()
 
-	return a.withConfig(func(cfg *config.RootConfig) error {
+	// scanErrs captures per-provider ListInstalled failures. Declared outside
+	// the withConfig closure so they can be joined with the save result and
+	// returned to the caller, which surfaces them as warnings.
+	var scanErrs []error
+
+	saveErr := a.withConfig(func(cfg *config.RootConfig) error {
 		hg, err := ensureHostGroupInConfig(cfg, machineGroup)
 		if err != nil {
 			return err
@@ -622,14 +628,15 @@ func (a *App) syncOrphansToMachineGroup(ctx context.Context, activeGroups []*con
 		}
 
 		var orphans []config.ToolEntry
-		// Best-effort: per-provider errors are skipped so one bad provider
-		// doesn't prevent discovering orphans from the rest.
-		_ = a.forEachAvailable(ctx, func(p provider.Provider) error { //nolint:errcheck // best-effort orphan scan
+		// Scan each available provider independently so one bad provider does
+		// not block orphan discovery from the rest.
+		_ = a.forEachAvailable(ctx, func(p provider.Provider) error {
 			if a.registry.ImportSkipsProvider(p.Name()) {
 				return nil
 			}
 			installed, err := p.ListInstalled(ctx)
 			if err != nil {
+				scanErrs = append(scanErrs, fmt.Errorf("listing installed for %s: %w", p.Name(), err))
 				return nil
 			}
 			for _, t := range installed {
@@ -663,6 +670,7 @@ func (a *App) syncOrphansToMachineGroup(ctx context.Context, activeGroups []*con
 		hg.Tools = append(hg.Tools, orphans...)
 		return nil
 	})
+	return errors.Join(saveErr, errors.Join(scanErrs...))
 }
 
 // CheckSatisfiedGroups returns reusable group names that are not active for the
