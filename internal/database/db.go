@@ -64,6 +64,7 @@ type ToolMetadata struct {
 	SourceURL       sql.NullString `bun:"source_url"`
 	Privilege       string         `bun:"privilege,notnull,default:''"`
 	PrivilegeReason sql.NullString `bun:"privilege_reason"`
+	ArtifactKind    string         `bun:"artifact_kind,notnull,default:''"`
 	UpdatedAt       time.Time      `bun:"updated_at,notnull"`
 }
 
@@ -172,6 +173,7 @@ type DotsSnapshot struct {
 
 const dotsSnapshotMetaKey = "current"
 const providerListCacheClearStateKey = "migration.provider_list_cache_cleared"
+const toolMetadataMigratedStateKey = "migration.tool_metadata_migrated"
 const commandTraceRetentionLimit = 5000
 
 // MetadataUpdate is registry metadata learned without changing install state.
@@ -187,6 +189,7 @@ type MetadataUpdate struct {
 	SourceURL       string
 	Privilege       string
 	PrivilegeReason string
+	ArtifactKind    string // provider-specific artifact kind, e.g. "formula" or "cask" for brew
 }
 
 // DB wraps a bun.DB and provides typed tool-cache operations.
@@ -227,7 +230,14 @@ func Open(path string) (*DB, error) {
 	// Enable WAL mode so concurrent readers (TUI, background sync) don't block
 	// each other. Must be set before any schema work.
 	if _, err := sqlDB.ExecContext(context.Background(), "PRAGMA journal_mode=WAL"); err != nil {
+		_ = sqlDB.Close()
 		return nil, fmt.Errorf("enabling WAL mode: %w", err)
+	}
+	// Retry for up to 5 s before returning SQLITE_BUSY; avoids transient
+	// contention errors during WAL checkpoints with concurrent readers.
+	if _, err := sqlDB.ExecContext(context.Background(), "PRAGMA busy_timeout=5000"); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("setting busy_timeout: %w", err)
 	}
 
 	bunDB := bun.NewDB(sqlDB, sqlitedialect.New())
@@ -428,13 +438,28 @@ func (db *DB) Migrate(ctx context.Context) error {
 	if _, err := db.bun.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_command_traces_started_at ON command_traces (started_at DESC)`); err != nil {
 		return fmt.Errorf("creating command trace started_at index: %w", err)
 	}
-	// Add columns introduced after initial schema; duplicate-column errors are
-	// expected (column already created by the CREATE TABLE above) and suppressed.
-	// Any other error is returned.
-	addCol := func(col, def string) error {
-		_, e := db.bun.ExecContext(ctx, "ALTER TABLE tool_cache ADD COLUMN "+col+" "+def)
-		if e != nil && !strings.Contains(e.Error(), "duplicate column") && !strings.Contains(e.Error(), "already has column") {
-			return fmt.Errorf("adding column %s: %w", col, e)
+	// addCol adds a column to table only when it does not already exist.
+	// PRAGMA table_info is used rather than catching driver error strings, which
+	// are not part of any stable API.
+	addCol := func(table, col, def string) error {
+		var cols []struct {
+			CID       int            `bun:"cid"`
+			Name      string         `bun:"name"`
+			Type      string         `bun:"type"`
+			NotNull   int            `bun:"notnull"`
+			DfltValue sql.NullString `bun:"dflt_value"`
+			PK        int            `bun:"pk"`
+		}
+		if err := db.bun.NewRaw("PRAGMA table_info("+table+")").Scan(ctx, &cols); err != nil {
+			return fmt.Errorf("table_info %s: %w", table, err)
+		}
+		for _, c := range cols {
+			if c.Name == col {
+				return nil // already present
+			}
+		}
+		if _, err := db.bun.ExecContext(ctx, "ALTER TABLE "+table+" ADD COLUMN "+col+" "+def); err != nil {
+			return fmt.Errorf("adding column %s.%s: %w", table, col, err)
 		}
 		return nil
 	}
@@ -451,24 +476,18 @@ func (db *DB) Migrate(ctx context.Context) error {
 		{"privilege_reason", "TEXT"},
 		{"privilege_at", "DATETIME"},
 	} {
-		if err := addCol(c.col, c.def); err != nil {
+		if err := addCol("tool_cache", c.col, c.def); err != nil {
 			return err
 		}
-	}
-	addMetaCol := func(col, def string) error {
-		_, e := db.bun.ExecContext(ctx, "ALTER TABLE tool_metadata ADD COLUMN "+col+" "+def)
-		if e != nil && !strings.Contains(e.Error(), "duplicate column") && !strings.Contains(e.Error(), "already has column") {
-			return fmt.Errorf("adding metadata column %s: %w", col, e)
-		}
-		return nil
 	}
 	for _, c := range []struct{ col, def string }{
 		{"source_type", "TEXT NOT NULL DEFAULT ''"},
 		{"source_owner", "TEXT NOT NULL DEFAULT ''"},
 		{"source_repo", "TEXT NOT NULL DEFAULT ''"},
 		{"source_url", "TEXT"},
+		{"artifact_kind", "TEXT NOT NULL DEFAULT ''"},
 	} {
-		if err := addMetaCol(c.col, c.def); err != nil {
+		if err := addCol("tool_metadata", c.col, c.def); err != nil {
 			return err
 		}
 	}
@@ -496,15 +515,37 @@ func (db *DB) clearProviderDerivedCacheForProviderList(ctx context.Context) erro
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	for _, table := range []string{"tool_cache", "tool_metadata", "package_availability", "update_metadata"} {
-		if _, err := db.bun.ExecContext(ctx, "DELETE FROM "+table); err != nil {
-			return fmt.Errorf("clearing %s for provider-list migration: %w", table, err)
+	// Wrap all deletes + sentinel write in one transaction so a mid-wipe crash
+	// leaves the database consistent: either fully wiped (sentinel set) or
+	// untouched (sentinel absent, safe to retry on next startup).
+	return db.bun.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		for _, table := range []string{"tool_cache", "tool_metadata", "package_availability", "update_metadata"} {
+			if _, err := tx.ExecContext(ctx, "DELETE FROM "+table); err != nil {
+				return fmt.Errorf("clearing %s for provider-list migration: %w", table, err)
+			}
 		}
-	}
-	return db.SetState(ctx, providerListCacheClearStateKey, "1")
+		_, err := tx.ExecContext(ctx,
+			`INSERT INTO local_state (key, value, updated_at)
+			 VALUES (?, ?, ?)
+			 ON CONFLICT (key) DO UPDATE SET
+			     value = EXCLUDED.value,
+			     updated_at = EXCLUDED.updated_at`,
+			providerListCacheClearStateKey, "1", time.Now().UTC())
+		if err != nil {
+			return fmt.Errorf("setting migration sentinel: %w", err)
+		}
+		return nil
+	})
 }
 
 func (db *DB) migrateExistingToolMetadata(ctx context.Context) error {
+	// Guard with a sentinel so the full tool_cache scan runs only once, not on
+	// every startup after the cache has already been promoted to tool_metadata.
+	if _, err := db.GetState(ctx, toolMetadataMigratedStateKey); err == nil {
+		return nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
 	_, err := db.bun.ExecContext(ctx,
 		`INSERT INTO tool_metadata (
 		     name, provider, package, description,
@@ -541,7 +582,7 @@ func (db *DB) migrateExistingToolMetadata(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("migrating existing tool metadata: %w", err)
 	}
-	return nil
+	return db.SetState(ctx, toolMetadataMigratedStateKey, "1")
 }
 
 func (db *DB) dropLegacyToolCache(ctx context.Context) error {
@@ -653,9 +694,9 @@ func (db *DB) UpsertMetadataBatch(ctx context.Context, updates []MetadataUpdate)
 				`INSERT INTO tool_metadata (
 				     name, provider, package, version, description,
 				     source_type, source_owner, source_repo, source_url,
-				     privilege, privilege_reason, updated_at
+				     privilege, privilege_reason, artifact_kind, updated_at
 				 )
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				 ON CONFLICT (name, provider, package) DO UPDATE SET
 				     description = CASE
 				         WHEN EXCLUDED.description IS NOT NULL AND EXCLUDED.description != '' THEN EXCLUDED.description
@@ -686,10 +727,14 @@ func (db *DB) UpsertMetadataBatch(ctx context.Context, updates []MetadataUpdate)
 				         WHEN EXCLUDED.privilege != '' THEN EXCLUDED.privilege_reason
 				         ELSE tool_metadata.privilege_reason
 				     END,
+				     artifact_kind = CASE
+				         WHEN EXCLUDED.artifact_kind != '' THEN EXCLUDED.artifact_kind
+				         ELSE tool_metadata.artifact_kind
+				     END,
 				     updated_at = EXCLUDED.updated_at`,
 				u.Name, u.Provider, u.Package, version, description,
 				u.SourceType, u.SourceOwner, u.SourceRepo, sourceURL,
-				u.Privilege, privilegeReason, now); err != nil {
+				u.Privilege, privilegeReason, u.ArtifactKind, now); err != nil {
 				return fmt.Errorf("upserting metadata for %s/%s: %w", u.Provider, u.Name, err)
 			}
 		}
@@ -1074,6 +1119,12 @@ func applyToolMetadata(t *ToolCache, m *ToolMetadata) {
 	if t.Privilege == "" && m.Privilege != "" {
 		t.Privilege = m.Privilege
 		t.PrivilegeReason = m.PrivilegeReason
+	}
+	if m.ArtifactKind != "" && t.Provider == "brew" {
+		if t.Options == nil {
+			t.Options = make(map[string]string)
+		}
+		t.Options["brew_kind"] = m.ArtifactKind
 	}
 }
 
