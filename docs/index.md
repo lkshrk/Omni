@@ -29,12 +29,12 @@ syncs dotfiles through a Git-backed GNU Stow repo.
 ## Fast Path
 
 ```sh
-go install github.com/lkshrk/omni/cmd/omni@latest
+curl -fsSL https://raw.githubusercontent.com/lkshrk/omni/main/scripts/linux-install.sh | bash
 omni
 ```
 
 If you install through Homebrew or a Linux package, Omni pulls in GNU Stow for
-dotfile sync. If you use `go install` or a release archive, install `stow`
+dotfile sync. If you use the install script or a release archive, install `stow`
 separately before syncing dotfiles.
 
 The first launch opens the TUI and guides the current host through setup. For a
