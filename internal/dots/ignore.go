@@ -75,6 +75,7 @@ var defaultIgnores = []string{
 	// ── Lock files (reproducible, machine-state) ──────────────────────────────
 	"Brewfile.lock.json", // Homebrew Bundle lock (machine-specific formulae state)
 	"lazy-lock.json",     // Neovim lazy.nvim plugin lock
+	".skill-lock.json",   // vercel-labs/skills lockfile (omni tracks skills via its manifest)
 
 	// ── Databases (always machine-state) ─────────────────────────────────────
 	"*.sqlite",
