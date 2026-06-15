@@ -73,7 +73,9 @@ func (p *Provider) IsInstalled(ctx context.Context, t provider.Tool) (bool, stri
 		return err == nil, "", nil
 	}
 	if detect := strings.TrimSpace(t.Options[optDetect]); detect != "" {
-		_, _, err := p.exec.Run(ctx, "sh", "-c", "command -v "+detect)
+		// Pass detect as $1 so shell metacharacters in the value cannot escape
+		// the command -v invocation. "detect" is a binary name, not a shell snippet.
+		_, _, err := p.exec.Run(ctx, "sh", "-c", `command -v "$1"`, "--", detect)
 		return err == nil, "", nil
 	}
 	return false, "", nil

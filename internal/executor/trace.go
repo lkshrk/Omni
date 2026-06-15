@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 const tracePreviewLimit = 4096
@@ -201,6 +203,9 @@ func redactTraceText(s string) string {
 	if s == "" {
 		return ""
 	}
+	// Strip terminal escape/control sequences so command output captured from
+	// untrusted formulae/taps can't corrupt the TUI when the trace is rendered.
+	s = ansi.Strip(s)
 	return envAssignmentPattern.ReplaceAllString(s, "$1=[redacted]")
 }
 
