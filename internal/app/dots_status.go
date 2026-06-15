@@ -504,7 +504,7 @@ func collectDotFileCountRelsFromRoot(root, relRoot, ignoreRoot string, ignores [
 		tracked[filepath.ToSlash(rel)] = true
 		return
 	}
-	_ = filepath.WalkDir(path, func(path string, d os.DirEntry, err error) error {
+	if walkErr := filepath.WalkDir(path, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -537,11 +537,13 @@ func collectDotFileCountRelsFromRoot(root, relRoot, ignoreRoot string, ignores [
 			tracked[filepath.ToSlash(walkRel)] = true
 		}
 		return nil
-	})
+	}); walkErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: omni: scanning dot files in %s: %v\n", path, walkErr)
+	}
 }
 
 func collectIgnoredDotFileCountRels(root, path string, ignored map[string]bool) {
-	_ = filepath.WalkDir(path, func(path string, d os.DirEntry, err error) error {
+	if walkErr := filepath.WalkDir(path, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
 		}
@@ -554,7 +556,9 @@ func collectIgnoredDotFileCountRels(root, path string, ignored map[string]bool) 
 			ignored[filepath.ToSlash(rel)] = true
 		}
 		return nil
-	})
+	}); walkErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: omni: scanning ignored dot files in %s: %v\n", path, walkErr)
+	}
 }
 
 func dotFileCountSynced(state DotState) bool {
