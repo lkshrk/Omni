@@ -63,7 +63,7 @@ func (m *Model) setSettingsCursor(row int) {
 
 func (m *Model) handleSettingsConfirmAction(cmds *[]tea.Cmd) {
 	switch m.settingsCursor {
-	case settingsRowProviderPriority, settingsRowDotsRepo, settingsRowDotsSync, settingsRowDotsReminderInterval, settingsRowDotsWatchDebounce, settingsRowDoctor, settingsRowBootstrap, settingsRowResetSettings, settingsRowResetCache:
+	case settingsRowProviderPriority, settingsRowDotsRepo, settingsRowDotsSync, settingsRowAgentsEnabled, settingsRowAgentsUse, settingsRowDotsReminderInterval, settingsRowDotsWatchDebounce, settingsRowDoctor, settingsRowBootstrap, settingsRowResetSettings, settingsRowResetCache:
 		m.handleSettingsEditAction(cmds)
 	case settingsRowTraceLog:
 		m.traceLogGen++
@@ -75,6 +75,9 @@ func (m *Model) handleSettingsConfirmAction(cmds *[]tea.Cmd) {
 func (m *Model) handleSettingsSubmodeKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
 	if m.editingPriority {
 		return true, m.handleSettingsPriorityKeyMsg(msg)
+	}
+	if m.editingAgents {
+		return true, m.handleSettingsAgentsKeyMsg(msg)
 	}
 	if m.editingServiceDuration {
 		return true, m.handleSettingsServiceDurationKeyMsg(msg)
@@ -280,6 +283,10 @@ func (m *Model) handleSettingsEditAction(cmds *[]tea.Cmd) {
 		*cmds = append(*cmds, m.openFilePicker("Dots repo path", dotsRepoPathForView(*m), false))
 	case settingsRowDotsSync:
 		m.handleSettingsDotsSyncAction(cmds)
+	case settingsRowAgentsEnabled:
+		*cmds = append(*cmds, m.doToggleAgents())
+	case settingsRowAgentsUse:
+		m.startSettingsAgentsEdit()
 	case settingsRowDotsReminderInterval, settingsRowDotsWatchDebounce:
 		m.startSettingsServiceDurationEdit()
 	case settingsRowDoctor:
@@ -404,6 +411,53 @@ func (m *Model) applySettingsServiceDurationChoice(choices []settingsDurationCho
 	default:
 		return nil
 	}
+}
+
+func (m *Model) startSettingsAgentsEdit() {
+	var rows []app.AgentPickerRow
+	if m.app != nil {
+		var err error
+		rows, err = m.app.AgentPickerRows()
+		if err != nil {
+			rows = nil
+		}
+	}
+	m.agentsEditRows = rows
+	m.agentsEditCursor = 0
+	m.editingAgents = true
+}
+
+func (m *Model) handleSettingsAgentsKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
+	var cmds []tea.Cmd
+	s := msg.String()
+	up := s == "k" || key.Matches(msg, m.keys.Up)
+	down := s == "j" || key.Matches(msg, m.keys.Down)
+	switch {
+	case up:
+		if m.agentsEditCursor > 0 {
+			m.agentsEditCursor--
+		}
+	case down:
+		if m.agentsEditCursor < len(m.agentsEditRows)-1 {
+			m.agentsEditCursor++
+		}
+	case key.Matches(msg, m.keys.Toggle):
+		if m.agentsEditCursor >= 0 && m.agentsEditCursor < len(m.agentsEditRows) {
+			m.agentsEditRows[m.agentsEditCursor].Enabled = !m.agentsEditRows[m.agentsEditCursor].Enabled
+		}
+	case key.Matches(msg, m.keys.Confirm):
+		ids := make([]string, 0, len(m.agentsEditRows))
+		for _, r := range m.agentsEditRows {
+			if r.Enabled {
+				ids = append(ids, r.ID)
+			}
+		}
+		m.editingAgents = false
+		cmds = append(cmds, m.doSaveAgentsUse(ids))
+	case key.Matches(msg, m.keys.Back):
+		m.editingAgents = false
+	}
+	return cmds
 }
 
 func (m *Model) handleSettingsDotsSyncAction(cmds *[]tea.Cmd) {

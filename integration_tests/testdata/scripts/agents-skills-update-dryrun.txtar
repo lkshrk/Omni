@@ -1,0 +1,6 @@
+# agents skills update --dry-run prints npx skills update line for all manifest entries
+exec omni --config settings.json agents skills update --dry-run
+stdout '^npx skills update -g -y frontend-design tdd$'
+
+-- settings.json --
+{"version":1,"agents":{"skills":[{"name":"frontend-design","source":"vercel-labs/agent-skills"},{"name":"tdd","source":"o/r"}]}}

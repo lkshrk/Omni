@@ -131,6 +131,7 @@ Already set up?
 		newHostsCmd(state),
 		newDotsCmd(state),
 		newUICmd(state),
+		newAgentsCmd(state),
 	)
 
 	return root
@@ -152,6 +153,7 @@ var hostExempt = map[string]bool{
 	"trace":      true,
 	"help":       true,
 	"completion": true,
+	"agents":     true,
 }
 
 func commandInChain(cmd *cobra.Command, name string) bool {

@@ -30,6 +30,8 @@ const (
 	settingsRowDotsServices
 	settingsRowDotsCommit
 	settingsRowDotsPush
+	settingsRowAgentsEnabled
+	settingsRowAgentsUse
 	settingsRowDoctor
 	settingsRowTraceLog
 	settingsRowBootstrap
@@ -168,6 +170,27 @@ var settingsRows = []settingsRowMeta{
 		valueFn: func(m Model) string { return settingsOnOff(m.palette, m.settings.DotsGit.AutoPush) },
 		helpFn: func(m Model) string {
 			return m.palette.styleHelp.Render("Push (and commit) automatically after dots add/remove/variant operations; does not affect Watch Sync.")
+		},
+	},
+	settingsRowAgentsEnabled: {
+		label:   "Agent Skills",
+		section: "Agents",
+		hint:    hintCtxSettingsAgents,
+		valueFn: func(m Model) string { return settingsOnOff(m.palette, m.agentsEnabled) },
+		helpFn: func(m Model) string {
+			if m.agentsEnabled {
+				return m.palette.styleHelp.Render("Disable agent skill restore/import/update for this machine.")
+			}
+			return m.palette.styleHelp.Render("Re-enable agent skill restore/import/update.")
+		},
+	},
+	settingsRowAgentsUse: {
+		label:   "Agents",
+		section: "Agents",
+		hint:    hintCtxSettingsEdit,
+		valueFn: func(m Model) string { return settingsAgentsUseVal(m) },
+		helpFn: func(m Model) string {
+			return m.palette.styleHelp.Render("Which installed agents skills are installed to on this machine.")
 		},
 	},
 	settingsRowDoctor: {
@@ -667,6 +690,72 @@ func renderSettingsDurationPicker(m Model, prefix string) string {
 		parts = append(parts, p.styleHelp.Render(choice.label))
 	}
 	return prefix + strings.Join(parts, "  ")
+}
+
+func agentsEditorPopupFrame(m Model) popupFrame {
+	contentH := len(m.agentsEditRows) + popupFooterHeight
+	if len(m.agentsEditRows) == 0 {
+		contentH = 1 + popupFooterHeight
+	}
+	return popupFrame{
+		Title:          "Agents",
+		PaddingY:       1,
+		PaddingX:       2,
+		Width:          popupFrameWidthForContent(popupContentWidth(m, 40, 32, 56), 2),
+		ContentHeight:  contentH,
+		NoTitleDivider: true,
+	}
+}
+
+func settingsAgentsUseVal(m Model) string {
+	p := m.palette
+	ids := m.settings.AgentsUse
+	if ids == nil {
+		return p.styleHelp.Render("[all detected]")
+	}
+	if len(ids) == 0 {
+		return p.styleHelp.Render("[none]")
+	}
+	return p.styleProvider.Render("[" + strings.Join(ids, ", ") + "]")
+}
+
+func renderSettingsAgentsEditor(m Model) string {
+	p := m.palette
+	rows := m.agentsEditRows
+	if len(rows) == 0 {
+		prefix := textRowContentPrefix()
+		var sb strings.Builder
+		sb.WriteString(prefix + p.styleHelp.Render("No supported agents detected on this machine.") + "\n")
+		sb.WriteString(renderPickerHintItems(m, rowAvailableWidth(m.width), []hintItem{
+			hintFromBindingDesc(m.keys.Back, "cancel"),
+		}))
+		return sb.String()
+	}
+	contentW := rowAvailableWidth(m.width)
+	labelW := 0
+	for _, row := range rows {
+		if w := lipgloss.Width(row.Display); w > labelW {
+			labelW = w
+		}
+	}
+	pickerRows := make([]pickerChoiceRow, 0, len(rows))
+	for i, r := range rows {
+		selected := i == m.agentsEditCursor
+		style := p.styleNormal
+		if selected {
+			style = p.styleActiveText
+		}
+		mark := "[ ]"
+		if r.Enabled {
+			mark = "[x]"
+		}
+		pickerRows = append(pickerRows, pickerChoiceRow{selected: selected, label: r.Display, mark: mark, style: style})
+	}
+	var sb strings.Builder
+	sb.WriteString(renderPickerChoiceRows(p, pickerRows, labelW, 0))
+	sb.WriteString("\n")
+	sb.WriteString(renderPickerHintItems(m, contentW, toggleSaveCancelActionItems(m)))
+	return sb.String()
 }
 
 func (m Model) currentSettingsDurationValue(row int) time.Duration {

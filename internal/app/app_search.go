@@ -28,6 +28,7 @@ const (
 	ToolStateOutdated        ToolListState = "outdated"
 	ToolStateQuarantined     ToolListState = "quarantined"
 	ToolStateBlockedMetadata ToolListState = "blocked-metadata"
+	ToolStateSelfUpdates     ToolListState = "self-updates"
 	ToolStateIgnored         ToolListState = "ignored"
 	ToolStateUnclaimed       ToolListState = "unclaimed"
 	ToolStateOutOfSync       ToolListState = "out-of-sync"
@@ -106,6 +107,7 @@ func (a *App) ListTools(ctx context.Context, providerFilter string) ([]*database
 		return filterIgnoredToolCaches(tools, nil), nil
 	}
 	a.annotateUpdateQuarantine(ctx, cfg, tools)
+	a.annotateSelfUpdatingCasks(tools)
 	return tools, nil
 }
 
@@ -177,6 +179,7 @@ func (a *App) QueryTools(ctx context.Context, opts ToolListOptions) ([]ToolListI
 		return nil, err
 	}
 	a.annotateUpdateQuarantine(ctx, cfg, tools)
+	a.annotateSelfUpdatingCasks(tools)
 	if opts.Provider != "" {
 		filtered := tools[:0]
 		for _, tool := range tools {
@@ -465,6 +468,7 @@ func installedSourceMetadataUpdate(t config.ToolEntry, entry provider.InstalledM
 		SourceRepo:   strings.TrimSpace(entry.Source.Repo),
 		SourceURL:    strings.TrimSpace(entry.Source.URL),
 		ArtifactKind: strings.TrimSpace(entry.ArtifactKind),
+		SelfUpdates:  entry.SelfUpdates,
 	}, true
 }
 
@@ -503,6 +507,9 @@ func classifyToolState(t *database.ToolCache, ignoreSet map[string]struct{}, res
 	}
 	if classification.Section == ToolViewSectionUpdates {
 		return ToolStateOutdated
+	}
+	if t.UpdateBlocked == UpdateBlockSelfUpdates {
+		return ToolStateSelfUpdates
 	}
 	if t.UpdateBlocked == UpdateBlockMetadataMissing {
 		return ToolStateBlockedMetadata

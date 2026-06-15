@@ -62,6 +62,8 @@ func (m Model) windowTitle() string {
 		return "omni — setup"
 	case viewAdminTerminal:
 		return "omni — admin"
+	case viewSkills:
+		return "omni — agents"
 	default:
 		return "omni"
 	}
@@ -90,6 +92,13 @@ func (m Model) viewString() string {
 		bgModel.editingPriority = false
 		bg := bgModel.viewString()
 		return placePopup(bg, m, renderProviderPriorityPopup(m), providerPriorityPopupFrame(m))
+	}
+
+	if m.editingAgents {
+		bgModel := m
+		bgModel.editingAgents = false
+		bg := bgModel.viewString()
+		return placePopup(bg, m, renderSettingsAgentsEditor(m), agentsEditorPopupFrame(m))
 	}
 
 	if m.stowInstallPrompt {
@@ -312,6 +321,8 @@ func (m Model) viewString() string {
 		body = renderGroups(m)
 	case m.mode == viewDots:
 		body = renderDots(m)
+	case m.mode == viewSkills:
+		body = m.viewSkillsBody()
 	case m.mode == viewStatus:
 		if len(m.allTools) == 0 || m.launchBatchActive {
 			body = ""

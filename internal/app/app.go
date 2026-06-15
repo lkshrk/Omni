@@ -336,11 +336,26 @@ func (a *App) loadConfig() (*config.RootConfig, error) {
 		cfg.HostSettings[host] = hs
 	}
 	if a.registry != nil {
-		if errs := config.ValidateRoot(cfg, a.providerValidation()); len(errs) > 0 {
+		if errs := fatalValidationErrors(config.ValidateRoot(cfg, a.providerValidation())); len(errs) > 0 {
 			return nil, config.ValidationErrors(errs)
 		}
 	}
 	return cfg, nil
+}
+
+// fatalValidationErrors drops fallback-pathed validation errors. A fallback is
+// a last resort that only matters when actually used; malformed fallback
+// metadata for a tool satisfied by its primary provider must never block
+// loading or saving config. `omni doctor` still reports the full set.
+func fatalValidationErrors(errs []config.ValidationError) []config.ValidationError {
+	fatal := make([]config.ValidationError, 0, len(errs))
+	for _, e := range errs {
+		if strings.Contains(e.Path, ".fallback") {
+			continue
+		}
+		fatal = append(fatal, e)
+	}
+	return fatal
 }
 
 func (a *App) effectiveSettings(cfg *config.RootConfig) config.Settings {
@@ -487,7 +502,7 @@ func (a *App) withConfig(fn func(*config.RootConfig) error) error {
 		return err
 	}
 	if a.registry != nil {
-		if errs := config.ValidateRoot(cfg, a.providerValidation()); len(errs) > 0 {
+		if errs := fatalValidationErrors(config.ValidateRoot(cfg, a.providerValidation())); len(errs) > 0 {
 			return config.ValidationErrors(errs)
 		}
 	}
@@ -533,6 +548,7 @@ func topLevelKeys(cfg *config.RootConfig) (map[string]json.RawMessage, error) {
 		Ignore       config.GlobalIgnore          `json:"ignore,omitempty"`
 		Groups       []*config.GroupConfig        `json:"groups,omitempty"`
 		HostSettings map[string]hostSettingsPatch `json:"host_settings,omitempty"`
+		Agents       config.AgentsConfig          `json:"agents,omitempty"`
 	}
 	data, err := json.Marshal(rootConfigPatchDoc{
 		Schema:       cfg.Schema,
@@ -543,6 +559,7 @@ func topLevelKeys(cfg *config.RootConfig) (map[string]json.RawMessage, error) {
 		Ignore:       cfg.Ignore,
 		Groups:       cfg.Groups,
 		HostSettings: hostSettingsPatchDoc(cfg.HostSettings),
+		Agents:       cfg.Agents,
 	})
 	if err != nil {
 		return nil, err

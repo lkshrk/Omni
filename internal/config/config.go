@@ -257,6 +257,14 @@ type Settings struct {
 	// Using *bool so that an absent host entry (nil) is distinguished from an
 	// explicit false — a nil host value must not silently override a global true.
 	DotsDisabled *bool `json:"dots_disabled,omitempty"`
+	// AgentsDisabled turns the agent-skills feature off on this machine. *bool so
+	// an absent value (nil) means enabled-by-default, distinct from explicit false.
+	AgentsDisabled *bool `json:"agents_disabled,omitempty"`
+	// AgentsUse lists the agent identifiers (skills-CLI names like "claude-code",
+	// "codex") that skills are installed to on this machine. Stored in
+	// host_settings since installed agents differ per machine. A nil host value
+	// means "inherit global"; an explicit empty list means "no agents".
+	AgentsUse []string `json:"agents_use,omitempty"`
 	// DotsGit controls git behaviour for the dots repo.
 	DotsGit DotsGitConfig `json:"dots_git"`
 	// DisabledProviders lists provider-family names ("system", "node", "python")
@@ -383,6 +391,25 @@ type RootConfig struct {
 	// DisabledProviders.
 	// Global fields (not overridable here): AutoImport, DotsGit.
 	HostSettings map[string]Settings `json:"host_settings,omitempty"`
+	Agents       AgentsConfig        `json:"agents,omitempty"`
+}
+
+// AgentsConfig holds omni-managed AI-agent resources. Skills are restored by
+// driving the upstream `skills` CLI; this is omni's own declarative manifest,
+// not the CLI's runtime lockfile.
+type AgentsConfig struct {
+	Skills []ManifestSkill `json:"skills,omitempty"`
+}
+
+// ManifestSkill is one declared agent skill. Only fields omni can author and
+// replay are stored; runtime fields (folder hash, timestamps) live in the
+// upstream lockfile and are never written here.
+type ManifestSkill struct {
+	Name      string   `json:"name"`
+	Source    string   `json:"source"`
+	Ref       string   `json:"ref,omitempty"`
+	SkillPath string   `json:"skill_path,omitempty"`
+	Agents    []string `json:"agents,omitempty"`
 }
 
 // EffectiveSettings returns the merged settings for a specific machine.
@@ -423,6 +450,11 @@ func (c *RootConfig) EffectiveSettings(shortHostname string) Settings {
 	}
 	if hs.ProviderPriority != nil {
 		s.ProviderPriority = cloneStringSlice(hs.ProviderPriority)
+	}
+	// AgentsUse: nil host list means "inherit global"; a non-nil host list
+	// (including empty) replaces the global list entirely.
+	if hs.AgentsUse != nil {
+		s.AgentsUse = cloneStringSlice(hs.AgentsUse)
 	}
 	// Providers: nil host list means "inherit global"; a non-nil host list
 	// (including empty) replaces the global list entirely.
@@ -548,6 +580,16 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 				errs = append(errs, ValidationError{Path: path + ".hosts", Message: "host name is required"})
 			}
 			errs = append(errs, validateInstall(fmt.Sprintf("%s.hosts.%q", path, host), override, true)...)
+		}
+	}
+
+	for i, skill := range cfg.Agents.Skills {
+		path := fmt.Sprintf("$.agents.skills[%d]", i)
+		if strings.TrimSpace(skill.Name) == "" {
+			errs = append(errs, ValidationError{Path: path + ".name", Message: "skill name is required"})
+		}
+		if strings.TrimSpace(skill.Source) == "" {
+			errs = append(errs, ValidationError{Path: path + ".source", Message: "skill source is required"})
 		}
 	}
 
@@ -708,7 +750,11 @@ func validateFallback(path string, fallback *FallbackSpec) []ValidationError {
 	case "":
 		errs = append(errs, ValidationError{Path: path + ".source.type", Message: "fallback source type is required"})
 	case FallbackSourceGitHub:
-		if strings.TrimSpace(fallback.Source.Owner) == "" || strings.TrimSpace(fallback.Source.Repo) == "" {
+		// owner/repo locate the release to download. raw_commands installs via
+		// its own commands, so the github source is just metadata and needs
+		// neither; every other recipe (release-asset, or unset) requires them.
+		if fallback.Recipe.Type != FallbackRecipeRawCommands &&
+			(strings.TrimSpace(fallback.Source.Owner) == "" || strings.TrimSpace(fallback.Source.Repo) == "") {
 			errs = append(errs, ValidationError{Path: path + ".source", Message: "github fallback source requires owner and repo"})
 		}
 	default:
@@ -724,7 +770,11 @@ func validateFallback(path string, fallback *FallbackSpec) []ValidationError {
 	default:
 		errs = append(errs, ValidationError{Path: path + ".status", Message: fmt.Sprintf("unknown fallback status %q", fallback.Status)})
 	}
-	if status != FallbackStatusUnresolved && status != FallbackStatusUnsupported && strings.TrimSpace(fallback.Commands.Check) == "" {
+	// Native release-asset recipes verify via the downloaded binary; only
+	// shell-driven recipes need an explicit check command.
+	if fallback.Recipe.Type != FallbackRecipeGitHubReleaseAsset &&
+		status != FallbackStatusUnresolved && status != FallbackStatusUnsupported &&
+		strings.TrimSpace(fallback.Commands.Check) == "" {
 		errs = append(errs, ValidationError{Path: path + ".commands.check", Message: "fallback check command is required unless status is unresolved or unsupported"})
 	}
 	return errs

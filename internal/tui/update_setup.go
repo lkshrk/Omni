@@ -56,6 +56,7 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 		// background list as the pre-onboarding snapshot; fresh scans/reloads run
 		// only after onboarding exits.
 		m.setSettings(msg.settings)
+		m.agentsEnabled = msg.agentsEnabled
 		if msg.dotsConfiguredKnown {
 			m.dotsConfiguredCached = msg.dotsConfigured
 		}
@@ -98,6 +99,7 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 	m.discoveredTools = msg.discovered
 	m.rebuildDiscoveredKeys()
 	m.setSettings(msg.settings)
+	m.agentsEnabled = msg.agentsEnabled
 	if msg.dotsConfiguredKnown {
 		m.dotsConfiguredCached = msg.dotsConfigured
 	}

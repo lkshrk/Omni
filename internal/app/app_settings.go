@@ -34,6 +34,7 @@ func (a *App) QuerySettings(key string) (map[string]any, error) {
 		"provider_update_quarantine": settings.ProviderUpdateQuarantine,
 		"dots_repo":                  settings.DotsRepo,
 		"dots_disabled":              settings.DotsDisabled,
+		"agents_disabled":            settings.AgentsDisabled,
 		"dots_git.auto_commit":       settings.DotsGit.AutoCommit,
 		"dots_git.auto_push":         settings.DotsGit.AutoPush,
 		"disabled_providers":         settings.DisabledProviders,

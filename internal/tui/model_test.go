@@ -39,6 +39,7 @@ func baseModel(tools []*database.ToolCache) Model {
 		filter:           fi,
 		commandInput:     ci,
 		settingsInput:    si,
+		agentsEnabled:    true,
 		mode:             viewList,
 		allTools:         tools,
 		visibleTools:     tools,
@@ -1071,7 +1072,7 @@ func TestModel_KeysIgnoredWhileLoading(t *testing.T) {
 }
 
 func TestModel_SettingsTab(t *testing.T) {
-	// Tab order: Dashboard → Tools → Dots → Groups → Settings → Dashboard.
+	// Tab order: Dashboard → Tools → Agents → Dots → Groups → Settings → Dashboard.
 	// Within Groups, j/k cascades through sections; Tab switches main tabs.
 	t.Run("tab from dashboard opens list", func(t *testing.T) {
 		m := baseModel(threeTools())
@@ -1112,42 +1113,42 @@ func TestModel_SettingsTab(t *testing.T) {
 	})
 
 	t.Run("tab from dots opens groups", func(t *testing.T) {
-		m := drive(baseModel(threeTools()), pressTab(), pressTab())
+		m := drive(baseModel(threeTools()), pressTab(), pressTab(), pressTab())
 		if m.mode != viewGroups {
 			t.Errorf("mode = %v, want viewGroups", m.mode)
 		}
 	})
 
 	t.Run("tab from groups opens settings", func(t *testing.T) {
-		m := drive(baseModel(threeTools()), pressTab(), pressTab(), pressTab())
+		m := drive(baseModel(threeTools()), pressTab(), pressTab(), pressTab(), pressTab())
 		if m.mode != viewSettings {
 			t.Errorf("mode = %v, want viewSettings", m.mode)
 		}
 	})
 
 	t.Run("tab from settings opens status", func(t *testing.T) {
-		m := drive(baseModel(threeTools()), pressTab(), pressTab(), pressTab(), pressTab())
+		m := drive(baseModel(threeTools()), pressTab(), pressTab(), pressTab(), pressTab(), pressTab())
 		if m.mode != viewStatus {
 			t.Errorf("mode = %v, want viewStatus", m.mode)
 		}
 	})
 
 	t.Run("tab from settings returns to list", func(t *testing.T) {
-		m := drive(baseModel(threeTools()), pressTab(), pressTab(), pressTab(), pressTab(), pressTab())
+		m := drive(baseModel(threeTools()), pressTab(), pressTab(), pressTab(), pressTab(), pressTab(), pressTab())
 		if m.mode != viewList {
 			t.Errorf("mode = %v, want viewList", m.mode)
 		}
 	})
 
 	t.Run("esc from hosts returns to list", func(t *testing.T) {
-		m := drive(baseModel(threeTools()), pressTab(), pressTab(), pressEsc())
+		m := drive(baseModel(threeTools()), pressTab(), pressTab(), pressTab(), pressEsc())
 		if m.mode != viewList {
 			t.Errorf("mode = %v, want viewList after esc from hosts", m.mode)
 		}
 	})
 
 	t.Run("esc from settings returns to list", func(t *testing.T) {
-		m := drive(baseModel(threeTools()), pressTab(), pressTab(), pressTab(), pressEsc())
+		m := drive(baseModel(threeTools()), pressTab(), pressTab(), pressTab(), pressTab(), pressEsc())
 		if m.mode != viewList {
 			t.Errorf("mode = %v, want viewList after esc from settings", m.mode)
 		}
@@ -1932,21 +1933,21 @@ func TestModel_DotsRepoEdit(t *testing.T) {
 
 func TestModel_HostsTab(t *testing.T) {
 	t.Run("tab from dots opens hosts", func(t *testing.T) {
-		m := drive(baseModel(threeTools()), pressTab(), pressTab())
+		m := drive(baseModel(threeTools()), pressTab(), pressTab(), pressTab())
 		if m.mode != viewGroups {
 			t.Errorf("mode = %v, want viewGroups", m.mode)
 		}
 	})
 
 	t.Run("esc from hosts returns to list", func(t *testing.T) {
-		m := drive(baseModel(threeTools()), pressTab(), pressTab(), pressEsc())
+		m := drive(baseModel(threeTools()), pressTab(), pressTab(), pressTab(), pressEsc())
 		if m.mode != viewList {
 			t.Errorf("mode = %v, want viewList", m.mode)
 		}
 	})
 
 	t.Run("j/k navigate host cursor", func(t *testing.T) {
-		m := drive(baseModel(threeTools()), pressTab(), pressTab())
+		m := drive(baseModel(threeTools()), pressTab(), pressTab(), pressTab())
 		// hostCursor starts at 0; hostInfo is nil so Down is clamped
 		if m.hostCursor != 0 {
 			t.Errorf("hostCursor = %d, want 0", m.hostCursor)
@@ -4919,16 +4920,16 @@ func stringContains(s, sub string) bool {
 // ─── Cursor reveal on tab switch ─────────────────────────────────────────────
 
 // toSettingsRaw switches to the settings tab without the reveal press.
-// 3 tabs from list: list→dots→groups→settings.
+// 4 tabs from list: list→agents→dots→groups→settings.
 func toSettingsRaw() []tea.Msg {
-	return []tea.Msg{pressTab(), pressTab(), pressTab()}
+	return []tea.Msg{pressTab(), pressTab(), pressTab(), pressTab()}
 }
 
 // TestCursorReveal_FirstDownAfterTabSwitch verifies that the first navigation
 // keypress after a tab switch reveals the cursor at its current position (row 0)
 // without moving it, and that the second keypress navigates normally.
 func TestCursorReveal_FirstDownAfterTabSwitch(t *testing.T) {
-	// After 3 tabs cursorHidden is true and settingsCursor is 0.
+	// After 4 tabs cursorHidden is true and settingsCursor is 0.
 	// First j should reveal (cursorHidden→false) but NOT advance the cursor.
 	m := drive(baseModel(nil), append(toSettingsRaw(), pressRune('j'))...)
 	if m.mode != viewSettings {
@@ -5053,10 +5054,10 @@ func TestCursorReveal_GroupsTab(t *testing.T) {
 	}
 	m.groupNames = []string{"work", "personal"}
 
-	// Two Tab presses: list → dots → groups. cursorHidden should be true.
-	mGroups := drive(m, pressTab(), pressTab())
+	// Three Tab presses: list → agents → dots → groups. cursorHidden should be true.
+	mGroups := drive(m, pressTab(), pressTab(), pressTab())
 	if mGroups.mode != viewGroups {
-		t.Fatalf("mode = %v, want viewGroups after 2 tabs", mGroups.mode)
+		t.Fatalf("mode = %v, want viewGroups after 3 tabs", mGroups.mode)
 	}
 	if !mGroups.cursorHidden {
 		t.Fatal("cursorHidden should be true immediately after tab switch to groups")

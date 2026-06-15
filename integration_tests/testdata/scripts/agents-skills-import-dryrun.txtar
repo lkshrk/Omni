@@ -1,0 +1,13 @@
+# agents skills import --dry-run reads the lockfile and reports added/updated/unchanged counts
+env XDG_STATE_HOME=$WORK/state
+mkdir $WORK/state
+mkdir $WORK/state/skills
+exec omni --config settings.json agents skills import --dry-run
+stdout '1 added'
+stdout '\+ x'
+
+-- settings.json --
+{}
+
+-- state/skills/.skill-lock.json --
+{"version":3,"skills":{"x":{"source":"o/r","sourceType":"github","sourceUrl":"https://github.com/o/r","ref":"main","skillFolderHash":"abc","installedAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}}}

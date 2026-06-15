@@ -36,6 +36,7 @@ const (
 	hintCtxSettingsToggle hintContext = iota
 	hintCtxSettingsEdit
 	hintCtxSettingsDotsSync
+	hintCtxSettingsAgents
 	hintCtxSettingsDuration
 	hintCtxSettingsDurationEdit
 	hintCtxSettingsDanger
@@ -284,6 +285,14 @@ func contextHintItems(m Model, ctx hintContext) []hintItem {
 		return []hintItem{
 			dangerHintFromBindingDesc(m.keys.Confirm, desc),
 		}
+	case hintCtxSettingsAgents:
+		desc := "disable"
+		if !m.agentsEnabled {
+			desc = "enable"
+		}
+		return []hintItem{
+			hintFromBindingDesc(m.keys.Confirm, desc),
+		}
 	case hintCtxSettingsDuration:
 		return []hintItem{
 			hintFromBindingDesc(m.keys.Confirm, "set"),
@@ -527,7 +536,7 @@ func toolInlineHints(m Model, t *database.ToolCache) []hintItem {
 	isIgnored := m.displaySection(t) == sectionIgnored
 	var hints []hintItem
 
-	if !isIgnored && t.Installed && t.Outdated {
+	if !isIgnored && t.Installed && t.Outdated && t.UpdateBlocked != app.UpdateBlockSelfUpdates {
 		hints = append(hints, hintFromBinding(m.keys.Upgrade))
 	}
 

@@ -55,6 +55,19 @@ omni reconcile
 
 Before broad repairs, read the [Safety Model](docs/safety.md).
 
+## Agent skills
+
+Omni restores AI-agent skills from a tracked manifest by driving the
+[`skills`](https://github.com/vercel-labs/skills) CLI (`npx`/`bunx`). Declare
+skills under `agents.skills` in your config, or capture already-installed ones,
+then restore the set on any machine. Also available as the **Skills** TUI tab.
+
+```sh
+omni agents skills import            # capture installed skills into the manifest
+omni agents skills restore           # install the manifest skill set on this host
+omni agents skills restore --dry-run # preview the skills add commands
+```
+
 ## Docs
 
 Full documentation can be found at <https://lkshrk.github.io/omni/>. Local docs commands use `uv`:
