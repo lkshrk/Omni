@@ -2,6 +2,7 @@ package script
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/executor"
@@ -107,7 +108,7 @@ func TestIsInstalled_CheckNonZero(t *testing.T) {
 
 func TestIsInstalled_DetectFound(t *testing.T) {
 	mock := executor.NewMatchMock(executor.MatchRule{
-		Pattern:  "sh -c command -v bun",
+		Pattern:  `sh -c command -v "$1" -- bun`,
 		Response: executor.MockCall{Stdout: "/root/.bun/bin/bun"},
 	}).WithFallback(executor.MockCall{})
 	p := New(mock)
@@ -119,13 +120,43 @@ func TestIsInstalled_DetectFound(t *testing.T) {
 
 func TestIsInstalled_DetectMissing(t *testing.T) {
 	mock := executor.NewMatchMock(executor.MatchRule{
-		Pattern:  "sh -c command -v bun",
+		Pattern:  `sh -c command -v "$1" -- bun`,
 		Response: executor.MockCall{Err: context.DeadlineExceeded},
 	}).WithFallback(executor.MockCall{})
 	p := New(mock)
 	ok, _, _ := p.IsInstalled(context.Background(), tool("bun", map[string]string{"detect": "bun"}))
 	if ok {
 		t.Error("IsInstalled() = true; want false when command -v fails")
+	}
+}
+
+func TestIsInstalled_DetectInjectionPayloadDoesNotExecute(t *testing.T) {
+	// A malicious "detect" value with shell metacharacters must not be
+	// interpolated into the shell string. The argv approach passes detect as
+	// $1, so the shell never evaluates it as code. The mock verifies that
+	// the exact args we expect were passed (payload as a literal argv token,
+	// not as part of the -c script).
+	payload := "x; touch PWNED"
+	mock := executor.NewMatchMock().WithFallback(executor.MockCall{Err: context.DeadlineExceeded})
+	p := New(mock)
+	ok, _, _ := p.IsInstalled(context.Background(), tool("evil", map[string]string{"detect": payload}))
+	if ok {
+		t.Error("IsInstalled() = true; want false for unknown binary")
+	}
+	// The call must carry the payload as a separate argv element, not embedded
+	// in the shell script string.
+	calls := mock.CallsMatching(`sh -c command -v "$1" --`)
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 call with argv pattern, got %d", len(calls))
+	}
+	args := calls[0].Args
+	// args: ["-c", `command -v "$1"`, "--", payload]
+	if len(args) < 4 || args[3] != payload {
+		t.Errorf("detect payload not passed as separate argv arg; args = %q", args)
+	}
+	// Confirm the -c script string itself does NOT contain the payload.
+	if strings.Contains(args[1], payload) {
+		t.Errorf("detect payload was interpolated into the shell script string: %q", args[1])
 	}
 }
 
