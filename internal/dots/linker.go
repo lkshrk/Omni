@@ -128,28 +128,39 @@ func backupAndRemoveUnlinkedTarget(e ResolvedEntry) (string, error) {
 		return "", RemoveLocalPathAfterBackup(e.TargetPath, "")
 	}
 	sourceInfo, sourceErr := os.Lstat(e.SourcePath)
-	if sourceErr == nil && sourceInfo.IsDir() && sourceInfo.Mode()&os.ModeSymlink == 0 && info.IsDir() && targetDirectoryHasManagedLinks(e) {
-		backupPath, backupErr := BackupLocalPathFrom(e.TargetPath, e.SourcePath)
-		if backupErr != nil && !os.IsNotExist(backupErr) {
-			return "", fmt.Errorf("backup %q: %w", e.TargetPath, backupErr)
+	if sourceErr == nil && sourceInfo.IsDir() && sourceInfo.Mode()&os.ModeSymlink == 0 && info.IsDir() {
+		hasLinks, walkErr := targetDirectoryHasManagedLinks(e)
+		if walkErr != nil {
+			// A walk error means we cannot confirm the directory is safe to
+			// clobber. Fail closed to avoid destroying managed symlinks.
+			return "", fmt.Errorf("scan managed links in %q: %w", e.TargetPath, walkErr)
 		}
-		if removeErr := RemoveLocalPathAfterBackup(e.TargetPath, backupPath); removeErr != nil {
-			return backupPath, removeErr
+		if hasLinks {
+			backupPath, backupErr := BackupLocalPathFrom(e.TargetPath, e.SourcePath)
+			if backupErr != nil && !os.IsNotExist(backupErr) {
+				return "", fmt.Errorf("backup %q: %w", e.TargetPath, backupErr)
+			}
+			if removeErr := RemoveLocalPathAfterBackup(e.TargetPath, backupPath); removeErr != nil {
+				return backupPath, removeErr
+			}
+			return backupPath, nil
 		}
-		return backupPath, nil
 	}
 	return BackupAndRemoveLocalPath(e.TargetPath)
 }
 
-func targetDirectoryHasManagedLinks(e ResolvedEntry) bool {
+func targetDirectoryHasManagedLinks(e ResolvedEntry) (bool, error) {
 	found := false
-	_ = filepath.WalkDir(e.SourcePath, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || found {
+	walkErr := filepath.WalkDir(e.SourcePath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if found {
 			return filepath.SkipAll
 		}
 		rel, relErr := filepath.Rel(e.SourcePath, path)
 		if relErr != nil {
-			return filepath.SkipAll
+			return relErr
 		}
 		if rel == "." {
 			return nil
@@ -178,7 +189,10 @@ func targetDirectoryHasManagedLinks(e ResolvedEntry) bool {
 		}
 		return nil
 	})
-	return found
+	if walkErr != nil {
+		return false, walkErr
+	}
+	return found, nil
 }
 
 func backupAndRemoveManagedLink(path string) (string, error) {

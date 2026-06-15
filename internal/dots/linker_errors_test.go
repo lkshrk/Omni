@@ -470,6 +470,59 @@ func TestValidateEntryName_RejectsPathComponents(t *testing.T) {
 	}
 }
 
+// TestUnlinkAll_WalkErrorDoesNotClobberTarget verifies that when the source
+// directory becomes unreadable mid-operation, UnlinkAll returns an error
+// instead of treating the target as clobberable (which would destroy managed
+// symlinks).
+func TestUnlinkAll_WalkErrorDoesNotClobberTarget(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod-based permission tests not supported on Windows")
+	}
+
+	repo := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// Set up: source dir with one file, target dir with a managed symlink.
+	src := filepath.Join(repo, "zsh", "subdir", ".zshrc")
+	writeFile(t, src, "# zsh")
+
+	targetDir := filepath.Join(home, "subdir")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Create a managed symlink inside the target directory.
+	if err := os.Symlink(src, filepath.Join(targetDir, ".zshrc")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make the source subdirectory unreadable so that WalkDir errors.
+	srcSubdir := filepath.Join(repo, "zsh", "subdir")
+	if err := os.Chmod(srcSubdir, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(srcSubdir, 0o755) })
+
+	m, err := dots.New(repo, []config.DotEntry{
+		{Name: "zsh", Path: "~/subdir"},
+	})
+	if err != nil {
+		t.Fatalf("dots.New: %v", err)
+	}
+
+	// UnlinkAll must return an error — it must NOT return nil and clobber the
+	// target directory that contains managed symlinks.
+	_, unlinkErr := m.UnlinkAll(dots.UnlinkOptions{RemoveLocal: true})
+	if unlinkErr == nil {
+		t.Fatal("UnlinkAll returned nil; want an error when source walk fails")
+	}
+
+	// The managed symlink inside the target must still exist (not destroyed).
+	if _, statErr := os.Lstat(filepath.Join(targetDir, ".zshrc")); statErr != nil {
+		t.Fatalf("managed symlink was removed despite walk error: %v", statErr)
+	}
+}
+
 func TestNew_AllowsHomeLocalPathStartingWithDots(t *testing.T) {
 	home := t.TempDir()
 	repo := t.TempDir()
