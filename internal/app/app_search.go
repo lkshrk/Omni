@@ -5,8 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lkshrk/omni/internal/config"
@@ -448,17 +451,20 @@ func applyPrivilegeMetadata(upsert *database.ToolCache, plan provider.PrivilegeP
 }
 
 func installedSourceMetadataUpdate(t config.ToolEntry, entry provider.InstalledMetadata) (database.MetadataUpdate, bool) {
-	if strings.TrimSpace(entry.Source.Type) == "" {
+	hasSource := strings.TrimSpace(entry.Source.Type) != ""
+	hasKind := strings.TrimSpace(entry.ArtifactKind) != ""
+	if !hasSource && !hasKind {
 		return database.MetadataUpdate{}, false
 	}
 	return database.MetadataUpdate{
-		Name:        t.Name,
-		Provider:    t.Provider,
-		Package:     t.EffectivePackage(),
-		SourceType:  strings.TrimSpace(entry.Source.Type),
-		SourceOwner: strings.TrimSpace(entry.Source.Owner),
-		SourceRepo:  strings.TrimSpace(entry.Source.Repo),
-		SourceURL:   strings.TrimSpace(entry.Source.URL),
+		Name:         t.Name,
+		Provider:     t.Provider,
+		Package:      t.EffectivePackage(),
+		SourceType:   strings.TrimSpace(entry.Source.Type),
+		SourceOwner:  strings.TrimSpace(entry.Source.Owner),
+		SourceRepo:   strings.TrimSpace(entry.Source.Repo),
+		SourceURL:    strings.TrimSpace(entry.Source.URL),
+		ArtifactKind: strings.TrimSpace(entry.ArtifactKind),
 	}, true
 }
 
@@ -545,6 +551,120 @@ func normalizeToolState(raw string) (ToolListState, error) {
 	}
 }
 
+func toolBinaryName(name string, spec config.ToolSpec) string {
+	if spec.Fallback != nil && strings.TrimSpace(spec.Fallback.Binary) != "" {
+		return strings.TrimSpace(spec.Fallback.Binary)
+	}
+	return name
+}
+
+// executableInstalledOnPath reports whether binaryName is found on PATH.
+func executableInstalledOnPath(binaryName string) bool {
+	if binaryName == "" {
+		return false
+	}
+	_, err := exec.LookPath(binaryName)
+	return err == nil
+}
+
+// failedToolKey returns the map key used to identify a failed tool record.
+// Package is included so a failure on one variant (e.g. package "mytool@1")
+// does not suppress PATH detection for other variants of the same tool/provider.
+// pkg defaults to name when empty, matching tool_cache row semantics.
+func failedToolKey(name, provider, pkg string) string {
+	pkg = strings.TrimSpace(pkg)
+	if pkg == "" {
+		pkg = name
+	}
+	return name + "\x00" + provider + "\x00" + pkg
+}
+
+// toolHasActiveFailure reports whether the tool has a failure record.
+// nil means the set could not be loaded — treated as "all failed" so PATH
+// detection is suppressed rather than risking clearing retry-failed state.
+func toolHasActiveFailure(t config.ToolEntry, failedTools map[string]struct{}) bool {
+	if failedTools == nil {
+		return true // fail-safe: suppress PATH detection when set could not be loaded
+	}
+	_, ok := failedTools[failedToolKey(t.Name, t.Provider, t.EffectivePackage())]
+	return ok
+}
+
+// loadFailedToolSet returns the (name, provider, package)-keyed set of tools
+// with active failures. On error it returns nil; callers must treat nil as
+// "all failed" — an empty map would incorrectly enable PATH detection for
+// retry-failed tools.
+func (a *App) loadFailedToolSet(ctx context.Context) (map[string]struct{}, error) {
+	failed, err := a.readDB().ListFailed(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("loading failed tool set for PATH detection: %w", err)
+	}
+	set := make(map[string]struct{}, len(failed))
+	for _, f := range failed {
+		set[failedToolKey(f.Name, f.Provider, f.Package)] = struct{}{}
+	}
+	return set, nil
+}
+
+// executableDetectSingleTool probes PATH for t's binary and returns the upsert
+// row to write. installed is the current cached Installed value for this row
+// (false when no row exists yet). The second return is true when a row should
+// be written: positive (binary found, not failed) or negative (binary gone,
+// was previously marked installed so the stale row needs correcting).
+func executableDetectSingleTool(t config.ToolEntry, cfg *config.RootConfig, failedTools map[string]struct{}, cachedInstalled bool) (*database.ToolCache, bool) {
+	if toolHasActiveFailure(t, failedTools) {
+		return nil, false
+	}
+	spec := cfg.Tools[t.Name]
+	// A configured fallback is a user-managed install mechanism with its own
+	// status lifecycle (unverified/verified/failed). PATH detection must not
+	// override it: the fallback state (gh?/gh/gh!) must remain visible.
+	if spec.Fallback != nil && spec.Fallback.Status != "" {
+		return nil, false
+	}
+	onPath := executableInstalledOnPath(toolBinaryName(t.Name, spec))
+	if !onPath && !cachedInstalled {
+		// Binary absent and no stale positive row — nothing to write.
+		return nil, false
+	}
+	return &database.ToolCache{
+		Name:          t.Name,
+		Provider:      t.Provider,
+		Package:       t.EffectivePackage(),
+		Installed:     onPath,
+		InstalledWith: "", // no concrete manager claim — avoids wrong-provider classification
+		LastChecked:   time.Now(),
+	}, true
+}
+
+func (a *App) executableDetectProviderTools(ctx context.Context, cfg *config.RootConfig, tools []config.ToolEntry, failedTools map[string]struct{}) error {
+	// Build a map of currently-cached Installed values so we can clear stale
+	// positive rows when a previously-detected binary disappears from PATH.
+	cachedRows, err := a.readDB().ListByProvider(ctx, tools[0].Provider)
+	if err != nil {
+		cachedRows = nil // best-effort; treat all as not-cached
+	}
+	cachedInstalled := make(map[string]bool, len(cachedRows))
+	for _, r := range cachedRows {
+		cachedInstalled[failedToolKey(r.Name, r.Provider, r.Package)] = r.Installed
+	}
+
+	var upserts []*database.ToolCache
+	for _, t := range tools {
+		was := cachedInstalled[failedToolKey(t.Name, t.Provider, t.EffectivePackage())]
+		if row, ok := executableDetectSingleTool(t, cfg, failedTools, was); ok {
+			upserts = append(upserts, row)
+		}
+	}
+	if len(upserts) == 0 {
+		return nil
+	}
+	if err := a.readDB().UpsertBatch(ctx, upserts); err != nil {
+		return fmt.Errorf("upserting executable-detected tools: %w", err)
+	}
+	return nil
+}
+
 func toolStateMatches(state, filter ToolListState) bool {
 	if state == filter {
 		return true
@@ -599,56 +719,106 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 	installedMaps := make(map[string]map[string]string)
 	metadataMaps := make(map[string]map[string]provider.InstalledMetadata)
 	concreteForBulk := make(map[string]string)
-	// Iterate the precomputed available set so we don't call Available a
-	// second time. Per-provider scan failures are skipped silently so a
-	// single failing backend doesn't block discovery for others.
+
+	type providerBulkResult struct {
+		name          string
+		multiMap      map[string]provider.InstalledEntry // non-nil → MultiManagerBulkChecker
+		metadataMap   map[string]provider.InstalledMetadata
+		installedMap  map[string]string
+		installedWith string
+	}
+
+	// refreshProviderTimeout caps each package-manager subprocess during a bulk
+	// scan. 2 minutes is generous for a single provider but prevents a hung
+	// subprocess from blocking wg.Wait() indefinitely.
+	const refreshProviderTimeout = 2 * time.Minute
+
 	stop = profile.Start("app.refresh.installed.bulk_maps")
-	for _, p := range available {
-		scanProgress.emitProvider(p.Name())
-		// MultiManagerBulkChecker takes priority: probes all backends for per-tool attribution.
-		if mbc, ok := p.(provider.MultiManagerBulkChecker); ok {
-			entries, err := mbc.InstalledByManager(ctx)
-			if err != nil {
-				continue
+	results := make([]providerBulkResult, len(available))
+	var wg sync.WaitGroup
+	for i, p := range available {
+		i, p := i, p
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			provCtx, provCancel := context.WithTimeout(ctx, refreshProviderTimeout)
+			defer provCancel()
+			ctx := provCtx
+			res := providerBulkResult{name: p.Name()}
+			// MultiManagerBulkChecker takes priority: probes all backends for per-tool attribution.
+			if mbc, ok := p.(provider.MultiManagerBulkChecker); ok {
+				entries, err := mbc.InstalledByManager(ctx)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "warning: omni: bulk scan %s: %v\n", p.Name(), err)
+				} else {
+					res.multiMap = entries
+				}
+				results[i] = res
+				return
 			}
-			multiMaps[p.Name()] = entries
+			var m map[string]string
+			if mbc, ok := p.(provider.MetadataBulkChecker); ok {
+				metadata, err := mbc.InstalledMetadataMap(ctx)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "warning: omni: bulk scan %s: %v\n", p.Name(), err)
+					results[i] = res
+					return
+				}
+				res.metadataMap = metadata
+				// Pre-computed here so the merge pass doesn't recompute from res.metadataMap.
+				m = installedMapFromMetadata(metadata)
+			} else {
+				bc, ok := p.(provider.BulkChecker)
+				if !ok {
+					results[i] = res
+					return
+				}
+				var err error
+				m, err = bc.InstalledMap(ctx)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "warning: omni: bulk scan %s: %v\n", p.Name(), err)
+					results[i] = res
+					return
+				}
+			}
+			// resolvedConcrete is fully populated before any goroutine starts (happens-before via wg.Add), so reads under rcMu are safe.
+			installedWith := p.Name()
+			if cr, ok := p.(provider.ConcreteResolver); ok {
+				if name, cached := scanProgress.resolvedProviderName(p.Name()); cached {
+					installedWith = name
+				} else if name, resolveErr := cr.ResolvedName(ctx); resolveErr == nil && name != "" {
+					installedWith = name
+				} else {
+					installedWith = "" // prefer unknown over stale ecosystem name
+				}
+			}
+			res.installedMap = m
+			res.installedWith = installedWith
+			results[i] = res
+		}()
+	}
+	wg.Wait()
+
+	// Merge results in registry order so output remains deterministic.
+	for _, res := range results {
+		if res.name == "" {
 			continue
 		}
-		var (
-			m   map[string]string
-			err error
-		)
-		if mbc, ok := p.(provider.MetadataBulkChecker); ok {
-			metadata, err := mbc.InstalledMetadataMap(ctx)
-			if err != nil {
-				continue
-			}
-			metadataMaps[p.Name()] = metadata
-			m = installedMapFromMetadata(metadata)
-		} else {
-			bc, ok := p.(provider.BulkChecker)
-			if !ok {
-				continue
-			}
-			m, err = bc.InstalledMap(ctx)
-			if err != nil {
-				continue
-			}
+		scanProgress.emitProvider(res.name)
+		if res.multiMap != nil {
+			multiMaps[res.name] = res.multiMap
+			continue
 		}
-		// Resolve concrete backend for InstalledWith. Ecosystem providers (e.g. node)
-		// implement ConcreteResolver; concrete providers are their own backend.
-		installedWith := p.Name()
-		if cr, ok := p.(provider.ConcreteResolver); ok {
-			if name, cached := scanProgress.resolvedProviderName(p.Name()); cached {
-				installedWith = name
-			} else if name, resolveErr := cr.ResolvedName(ctx); resolveErr == nil && name != "" {
-				installedWith = name
-			} else {
-				installedWith = "" // prefer unknown over stale ecosystem name
-			}
+		if res.metadataMap != nil {
+			metadataMaps[res.name] = res.metadataMap
+			installedMaps[res.name] = res.installedMap
+			concreteForBulk[res.name] = res.installedWith
+			continue
 		}
-		installedMaps[p.Name()] = m
-		concreteForBulk[p.Name()] = installedWith
+		if res.installedMap != nil {
+			installedMaps[res.name] = res.installedMap
+			concreteForBulk[res.name] = res.installedWith
+		}
 	}
 	stop()
 
@@ -665,6 +835,20 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 	stop()
 
 	stop = profile.Start("app.refresh.installed.resolve_installed")
+	// nil on error — treated as "all failed" to protect retry-failed state.
+	failedTools, err := a.loadFailedToolSet(ctx)
+	if err != nil {
+		failedTools = nil
+	}
+	// Used by PATH-detection branches to clear stale Installed=true rows when a
+	// binary disappears; built once here to avoid per-tool DB round-trips.
+	allCached, cacheErr := a.readDB().List(ctx)
+	cachedInstalledByKey := make(map[string]bool, len(allCached))
+	if cacheErr == nil {
+		for _, r := range allCached {
+			cachedInstalledByKey[failedToolKey(r.Name, r.Provider, r.Package)] = r.Installed
+		}
+	}
 	upserts := make([]*database.ToolCache, 0, len(tools))
 	metadataUpdates := make([]database.MetadataUpdate, 0)
 	for _, t := range tools {
@@ -723,6 +907,11 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 		// Used for providers that do not implement BulkChecker.
 		p, ok := a.registry.Get(opProvider)
 		if !ok {
+			// Provider not registered — probe PATH as a last resort.
+			was := cachedInstalledByKey[failedToolKey(t.Name, t.Provider, t.EffectivePackage())]
+			if row, detected := executableDetectSingleTool(t, cfg, failedTools, was); detected {
+				upserts = append(upserts, row)
+			}
 			continue
 		}
 		avail, err := p.Available(ctx)
@@ -730,6 +919,11 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 			continue
 		}
 		if !avail {
+			// Provider unavailable on this host (e.g. brew on Linux) — probe PATH as a last resort.
+			was := cachedInstalledByKey[failedToolKey(t.Name, t.Provider, t.EffectivePackage())]
+			if row, detected := executableDetectSingleTool(t, cfg, failedTools, was); detected {
+				upserts = append(upserts, row)
+			}
 			continue
 		}
 		scanProgress.emitProvider(opProvider)
@@ -777,6 +971,8 @@ type refreshInstalledScanProgress struct {
 	total            int
 	labelsByProvider map[string][]string
 	emitted          map[string]bool
+	// rcMu guards resolvedConcrete: written single-goroutine during setup, read concurrently by bulk-scan goroutines.
+	rcMu             sync.RWMutex
 	resolvedConcrete map[string]string
 }
 
@@ -831,6 +1027,8 @@ func (p *refreshInstalledScanProgress) resolvedProviderName(providerName string)
 	if p == nil || p.resolvedConcrete == nil {
 		return "", false
 	}
+	p.rcMu.RLock()
+	defer p.rcMu.RUnlock()
 	name, ok := p.resolvedConcrete[providerName]
 	return name, ok
 }
@@ -888,16 +1086,26 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 		return nil
 	}
 
+	// nil on error — treated as "all failed" to protect retry-failed state.
+	provFailedTools, err := a.loadFailedToolSet(ctx)
+	if err != nil {
+		provFailedTools = nil
+	}
+
 	p, ok := a.registry.Get(provName)
 	if !ok {
-		return nil
+		// Provider not registered on this host — probe PATH for each tool as a
+		// last resort so tools present on PATH are not shown as out-of-sync.
+		return a.executableDetectProviderTools(context.WithoutCancel(ctx), cfg, provTools, provFailedTools)
 	}
 	avail, err := p.Available(ctx)
 	if err != nil {
 		return refreshContextErr(ctx, err)
 	}
 	if !avail {
-		return nil
+		// Provider registered but not available on this host (e.g. brew on Linux).
+		// Probe PATH as a last resort.
+		return a.executableDetectProviderTools(context.WithoutCancel(ctx), cfg, provTools, provFailedTools)
 	}
 	providerLabel := ProviderScanDisplayLabel(provName, resolvedProviderConcreteName(ctx, p))
 	emitTool := func(index int, t config.ToolEntry) {

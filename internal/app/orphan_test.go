@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -14,6 +15,16 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 	gosync "github.com/lkshrk/omni/internal/sync"
 )
+
+// listErrProvider is a stubProvider whose ListInstalled always returns an error.
+type listErrProvider struct {
+	stubProvider
+	err error
+}
+
+func (p *listErrProvider) ListInstalled(_ context.Context) ([]provider.InstalledTool, error) {
+	return nil, p.err
+}
 
 // ─── CheckSatisfiedGroups ─────────────────────────────────────────────────────
 
@@ -709,5 +720,45 @@ func TestClaimFromMachineGroup_PrunesMachineGroup(t *testing.T) {
 	}
 	if !foundRipgrep {
 		t.Error("ripgrep should remain in hostname group")
+	}
+}
+
+// TestSync_OrphanScanProviderError_SurfacedAsWarning verifies that a provider
+// whose ListInstalled returns an error causes a warning in the Sync result
+// instead of silently swallowing the failure.
+func TestSync_OrphanScanProviderError_SurfacedAsWarning(t *testing.T) {
+	scanErr := errors.New("boom: list installed failed")
+	bad := &listErrProvider{
+		stubProvider: stubProvider{name: "brew", available: true},
+		err:          scanErr,
+	}
+	a, cfgPath := newImportApp(t, bad)
+	short := testShortHostname()
+
+	rootCfg := &config.RootConfig{
+		Groups: []*config.GroupConfig{
+			{Name: short, Special: "host"},
+		},
+		Hosts: map[string][]string{short: {}},
+	}
+	if err := saveAppConfig(t, cfgPath, rootCfg); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := a.Sync(context.Background(), gosync.SyncOptions{})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	// The scan failure must be surfaced as a warning, not silently dropped.
+	found := false
+	for _, w := range result.Warnings {
+		if strings.Contains(w, "brew") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected a warning mentioning provider %q, got warnings: %v", "brew", result.Warnings)
 	}
 }

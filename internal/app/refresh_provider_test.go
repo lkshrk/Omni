@@ -1092,3 +1092,112 @@ func TestRefreshDiscovered_SkipsUnavailableProvider(t *testing.T) {
 		t.Errorf("got %d discovered tools, want 0 (provider unavailable)", len(discovered))
 	}
 }
+
+// bulkScanTracker holds shared atomic counters used by the concurrent bulk
+// stubs below. Sharing a single tracker lets both stubs increment the same
+// active counter, so the peak reflects true cross-stub overlap.
+type bulkScanTracker struct {
+	active  atomic.Int32
+	maxSeen atomic.Int32
+}
+
+func (tr *bulkScanTracker) enter() {
+	cur := tr.active.Add(1)
+	for {
+		prev := tr.maxSeen.Load()
+		if cur <= prev || tr.maxSeen.CompareAndSwap(prev, cur) {
+			break
+		}
+	}
+}
+
+func (tr *bulkScanTracker) exit() { tr.active.Add(-1) }
+
+// concurrentBulkStub is a BulkChecker that records entry/exit in a shared
+// tracker so TestRefreshInstalled_BulkScansRunConcurrently can assert overlap.
+type concurrentBulkStub struct {
+	stubProvider
+	bulk    map[string]string
+	delay   time.Duration
+	tracker *bulkScanTracker
+}
+
+func (s *concurrentBulkStub) InstalledMap(_ context.Context) (map[string]string, error) {
+	s.tracker.enter()
+	time.Sleep(s.delay) // widen overlap window so both goroutines are active together
+	s.tracker.exit()
+	return s.bulk, nil
+}
+
+// concurrentConcreteStub adds ConcreteResolver to concurrentBulkStub.
+// This exercises the rcMu-guarded resolvedConcrete read path under -race.
+type concurrentConcreteStub struct {
+	concurrentBulkStub
+	concreteName string
+}
+
+func (s *concurrentConcreteStub) ResolvedName(_ context.Context) (string, error) {
+	return s.concreteName, nil
+}
+
+// TestRefreshInstalled_BulkScansRunConcurrently verifies that RefreshInstalled
+// fans out independent provider bulk scans in parallel. A shared atomic
+// active-counter proves overlap: peak ≥ 2 means both InstalledMap calls were
+// executing simultaneously. No wall-clock threshold is used.
+//
+// provB implements ConcreteResolver so the rcMu-guarded resolvedConcrete read
+// inside the goroutine is exercised under -race.
+func TestRefreshInstalled_BulkScansRunConcurrently(t *testing.T) {
+	tracker := &bulkScanTracker{}
+
+	provA := &concurrentBulkStub{
+		stubProvider: stubProvider{name: "prov-a", available: true},
+		bulk:         map[string]string{"tool-a": "1.0"},
+		delay:        20 * time.Millisecond,
+		tracker:      tracker,
+	}
+	provB := &concurrentConcreteStub{
+		concurrentBulkStub: concurrentBulkStub{
+			stubProvider: stubProvider{name: "prov-b", available: true},
+			bulk:         map[string]string{"tool-b": "2.0"},
+			delay:        20 * time.Millisecond,
+			tracker:      tracker,
+		},
+		concreteName: "prov-b-concrete",
+	}
+
+	a, cfgPath := newImportApp(t, provA, provB)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"tool-a": {Providers: []config.ToolInstallSpec{{Provider: "prov-a"}}},
+			"tool-b": {Providers: []config.ToolInstallSpec{{Provider: "prov-b"}}},
+		},
+		Groups: []*config.GroupConfig{{Tools: groupTools("tool-a", "tool-b")}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if err := a.RefreshInstalled(context.Background(), nil); err != nil {
+		t.Fatalf("RefreshInstalled: %v", err)
+	}
+
+	if got := tracker.maxSeen.Load(); got < 2 {
+		t.Errorf("peak concurrent InstalledMap calls = %d, want ≥ 2: provider scans appear serial", got)
+	}
+
+	// Verify detection results are correct.
+	gotA, err := a.DB().Get(context.Background(), "tool-a", "prov-a", "tool-a")
+	if err != nil {
+		t.Fatalf("DB.Get tool-a: %v", err)
+	}
+	if !gotA.Installed {
+		t.Errorf("tool-a installed = false, want true")
+	}
+	gotB, err := a.DB().Get(context.Background(), "tool-b", "prov-b", "tool-b")
+	if err != nil {
+		t.Fatalf("DB.Get tool-b: %v", err)
+	}
+	if !gotB.Installed {
+		t.Errorf("tool-b installed = false, want true")
+	}
+}

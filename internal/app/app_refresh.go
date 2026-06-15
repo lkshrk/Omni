@@ -171,7 +171,11 @@ func (a *App) outdatedMapsForProvidersBestEffort(ctx context.Context, providerNa
 		go func() {
 			defer wg.Done()
 			m, byManager, metadata, ok, err := a.outdatedMapsForProvider(ctx, provName)
-			if err != nil || !ok {
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "warning: omni: refresh outdated for %s: %v\n", provName, err)
+				return
+			}
+			if !ok {
 				return
 			}
 			mu.Lock()
@@ -422,12 +426,16 @@ func (a *App) githubFallbackOutdatedUpdatesBestEffort(ctx context.Context, tools
 			updates = append(updates, clearOutdatedUpdate(t))
 			continue
 		}
-		if !githubPublishedAtAfter(latestPublishedAt, fallback.Recipe.PublishedAt) {
+		tagName := strings.TrimSpace(release.TagName)
+		if tagName == "" {
 			updates = append(updates, clearOutdatedUpdate(t))
 			continue
 		}
-		tagName := strings.TrimSpace(release.TagName)
-		if tagName == "" {
+		// Prefer version-string comparison when an installed version is recorded;
+		// fall back to published_at when no stored version is available (e.g.
+		// tools installed before HCL-36, or recipes without a TagName).
+		isOutdated := fallbackTagOutdated(tagName, fallback.Recipe.InstalledVersion, latestPublishedAt, fallback.Recipe.PublishedAt)
+		if !isOutdated {
 			updates = append(updates, clearOutdatedUpdate(t))
 			continue
 		}
@@ -452,6 +460,22 @@ func githubPublishedAtAfter(latest, saved string) bool {
 		return false
 	}
 	return latestTime.After(savedTime)
+}
+
+// fallbackTagOutdated reports whether a GitHub fallback tool is outdated.
+// When installedVersion is non-empty, version comparison is the primary
+// signal: the tool is outdated when latestTag normalizes to a strictly newer
+// version. When installedVersion is empty (tools installed before version
+// tracking was added), published_at timestamps serve as the fallback signal.
+func fallbackTagOutdated(latestTag, installedVersion, latestPublishedAt, savedPublishedAt string) bool {
+	if installedVersion != "" {
+		newer, ok := fallbackVersionNewer(latestTag, installedVersion)
+		if ok {
+			return newer
+		}
+		// Version strings not comparable — fall through to published_at.
+	}
+	return githubPublishedAtAfter(latestPublishedAt, savedPublishedAt)
 }
 
 func clearOutdatedUpdate(t *database.ToolCache) database.OutdatedUpdate {
