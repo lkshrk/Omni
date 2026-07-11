@@ -133,23 +133,6 @@ func (m *Model) handleFallbackEditorKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	return []tea.Cmd{cmd}
 }
 
-func (m *Model) doSaveFallback(name, repo string) tea.Cmd {
-	a, ctx := m.app, m.beginCancellableAction()
-	return func() tea.Msg {
-		err := a.SaveToolFallbackFromGitHub(ctx, name, repo)
-		var fallbacks map[string]config.FallbackSpec
-		if err == nil {
-			scope, scopeErr := a.ToolScopeDisplayState(ctx)
-			if scopeErr != nil {
-				err = scopeErr
-			} else {
-				fallbacks = scope.ToolFallbacks
-			}
-		}
-		return fallbackSavedMsg{err: err, name: name, repo: repo, toolFallbacks: fallbacks}
-	}
-}
-
 func (m *Model) doSaveFallbackEditor(name string) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
 	fallback := m.fallbackSpecFromEditor()

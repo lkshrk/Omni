@@ -8,6 +8,66 @@ import (
 	gosync "github.com/lkshrk/omni/internal/sync"
 )
 
+// doSetupAgentsDiff computes diff-only unmanaged skill/mcp/plugin counts for
+// the agents onboarding step. No writes: skills uses ImportSkills' DryRun
+// path, mcp/plugins are already diff-only.
+func (m *Model) doSetupAgentsDiff() tea.Cmd {
+	a, ctx := m.app, m.ctx
+	return func() tea.Msg {
+		skillRows, err := a.UnmanagedSkillPackages(ctx)
+		if err != nil {
+			return setupAgentsDiffMsg{err: err}
+		}
+		mcpDiff, err := a.ImportMcpServers(ctx)
+		if err != nil {
+			return setupAgentsDiffMsg{err: err}
+		}
+		pluginDiff, err := a.ImportPlugins(ctx)
+		if err != nil {
+			return setupAgentsDiffMsg{err: err}
+		}
+		mcpCount := 0
+		for _, servers := range mcpDiff.Unmanaged {
+			mcpCount += len(servers)
+		}
+		pluginCount := 0
+		for _, plugins := range pluginDiff.Unmanaged {
+			pluginCount += len(plugins)
+		}
+		return setupAgentsDiffMsg{
+			unmanagedSkills:  len(skillRows),
+			unmanagedMcp:     mcpCount,
+			unmanagedPlugins: pluginCount,
+		}
+	}
+}
+
+// doSetupAgentsImportAll adopts all unmanaged skills/mcp servers/plugins into
+// the manifest. This is manifest adoption only — it never installs anything
+// into an agent CLI.
+func (m *Model) doSetupAgentsImportAll() tea.Cmd {
+	a, ctx := m.app, m.ctx
+	return func() tea.Msg {
+		skillsDiff, err := a.ImportSkills(ctx, app.ImportSkillsOptions{})
+		if err != nil {
+			return setupAgentsImportDoneMsg{err: err}
+		}
+		mcpAdopted, err := a.AdoptUnmanagedMcpServers(ctx)
+		if err != nil {
+			return setupAgentsImportDoneMsg{err: err}
+		}
+		pluginsAdopted, _, err := a.AdoptUnmanagedPlugins(ctx)
+		if err != nil {
+			return setupAgentsImportDoneMsg{err: err}
+		}
+		return setupAgentsImportDoneMsg{
+			skills:  len(skillsDiff.Added),
+			mcp:     mcpAdopted,
+			plugins: pluginsAdopted,
+		}
+	}
+}
+
 // doCreateConfig creates an empty settings.json and reloads.
 func (m *Model) doCreateConfig() tea.Cmd {
 	a, ctx := m.app, m.ctx

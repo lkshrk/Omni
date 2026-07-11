@@ -1,12 +1,13 @@
 package tui
 
 import (
-	"context"
 	sql "database/sql"
+	"errors"
 	"fmt"
 	"image/color"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -842,7 +843,7 @@ func TestRenderHeader_RightEdgeMatchesListRows(t *testing.T) {
 	header := renderHeader(m)
 
 	cols := colWidths{name: 20, prov: 10, group: 8, screenW: m.width}
-	row := listRowPrefix(m.palette, true) + renderToolRow(m.palette, m.allTools[0], cols, "", "dev", "", "", "", false, true, syncOK)
+	row := listRowPrefix(m.palette, true) + renderToolRowWithProviderPin(m.palette, m.allTools[0], cols, "", "dev", "", "", "", "", "", false, true, syncOK)
 	if got, want := lipgloss.Width(header), lipgloss.Width(row); got != want {
 		t.Fatalf("header right edge should align with list row right edge: header=%d row=%d\nheader=%q\nrow=%q", got, want, header, row)
 	}
@@ -1726,7 +1727,8 @@ func TestHostGroupToolsPopup_FilterKeepsDimensions(t *testing.T) {
 			lipgloss.Width(full), lipgloss.Height(full), lipgloss.Width(narrow), lipgloss.Height(narrow), full, narrow)
 	}
 
-	baseContent := renderHostGroupToolsEditor(unfilteredHostGroupToolsModel(filtered))
+	unfiltered := unfilteredHostGroupToolsModel(filtered)
+	baseContent := renderHostGroupToolsEditorWithLayout(unfiltered, groupToolsPopupLayoutFor(unfiltered))
 	wantHeight := max(lipgloss.Height(baseContent), lipgloss.Height(filteredContent))
 	if filteredFrame.ContentHeight != wantHeight {
 		t.Fatalf("filtered tool popup content height = %d, want %d", filteredFrame.ContentHeight, wantHeight)
@@ -1762,7 +1764,8 @@ func TestHostGroupDotsPopup_SearchKeepsDimensions(t *testing.T) {
 	searching := filtered
 	searching.groupDotsEditor.searchActive = true
 	searchingContent, searchingFrame := renderHostGroupDotsPopup(searching)
-	baseContent := renderHostGroupDotsEditor(unfilteredHostGroupDotsModel(searching))
+	unfiltered := unfilteredHostGroupDotsModel(searching)
+	baseContent := renderHostGroupDotsEditorWithLayout(unfiltered, groupDotsPopupLayoutFor(unfiltered))
 	wantHeight := max(lipgloss.Height(baseContent), lipgloss.Height(searchingContent))
 	if searchingFrame.ContentHeight != wantHeight {
 		t.Fatalf("searching dot popup content height = %d, want %d", searchingFrame.ContentHeight, wantHeight)
@@ -1787,8 +1790,9 @@ func TestHostGroupEditorPopups_DoNotWrapDividersOrFooter(t *testing.T) {
 			}
 			m.groupToolsEditor.membership = map[string]bool{"@scope/toolkit": true}
 
-			frame := groupToolsPopupFrame(m)
-			out := renderPopupFrame(m.palette, renderHostGroupToolsEditor(m), frame)
+			layout := groupToolsPopupLayoutFor(m)
+			frame := groupToolsPopupFrameWithLayout(m, layout)
+			out := renderPopupFrame(m.palette, renderHostGroupToolsEditorWithLayout(m, layout), frame)
 			assertPopupFrameDoesNotWrap(t, out, frame.Width, []string{"esc", "space", "x", "enter"})
 		})
 
@@ -1804,8 +1808,9 @@ func TestHostGroupEditorPopups_DoNotWrapDividersOrFooter(t *testing.T) {
 			}
 			m.groupDotsEditor.membership = map[string]bool{"nvim": true}
 
-			frame := groupDotsPopupFrame(m)
-			out := renderPopupFrame(m.palette, renderHostGroupDotsEditor(m), frame)
+			layout := groupDotsPopupLayoutFor(m)
+			frame := groupDotsPopupFrameWithLayout(m, layout)
+			out := renderPopupFrame(m.palette, renderHostGroupDotsEditorWithLayout(m, layout), frame)
 			assertPopupFrameDoesNotWrap(t, out, frame.Width, []string{"esc", "space", "enter"})
 		})
 	}
@@ -2184,223 +2189,6 @@ func assertOrderedSubstrings(t *testing.T, out string, wants ...string) {
 	}
 }
 
-func TestRenderHostGroupToolsEditor(t *testing.T) {
-	m := hostsModel()
-	m.mode = viewGroupTools
-	m.groupToolsEditor.group = "work"
-	m.effectiveSystemManager = "brew"
-	m.effectiveNodeManager = "pnpm"
-	m.allTools = []*database.ToolCache{
-		{Name: "ripgrep", Provider: "system", Installed: true, InstalledWith: "brew", Tracked: true},
-		{Name: "eslint", Provider: "node", Package: "eslint", Installed: true, InstalledWith: "pnpm", Tracked: true},
-		{Name: "ruff", Provider: "python", Installed: false, Tracked: true},
-	}
-	m.toolMemberships = map[string][]string{
-		toolKey("ripgrep", "system"): {"work"},
-	}
-	m.groupToolsEditor.membership = map[string]bool{"ripgrep": true, "eslint": false, "ruff": false}
-	m.groupToolsEditor.originalMembership = copyBoolMap(m.groupToolsEditor.membership)
-	m.groupToolsIgnore = map[string]bool{"ruff": true}
-	m.groupToolsOriginalIgnore = copyBoolMap(m.groupToolsIgnore)
-	m.groupToolsEditor.cursor = 0
-
-	out := renderHostGroupToolsEditor(m)
-	for _, want := range []string{"[all]", "system", "node", "python", "enabled", "disabled", "ignored", "[x]", "ripgrep", "brew", "[ ]", "eslint", "pnpm", "ruff", "ignored", "space toggle", "x ignore", "/ search", "[] filter", "enter save", "esc cancel"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("group tools editor missing %q:\n%s", want, out)
-		}
-	}
-	ripgrepLine := renderedLineContaining(out, "ripgrep")
-	providerCol := visualColumnOf(ripgrepLine, "brew")
-	wantProviderCol := groupToolsContentWidth(m) - lipgloss.Width("brew")
-	if providerCol != wantProviderCol {
-		t.Fatalf("tool provider column = %d, want right-aligned %d:\n%s", providerCol, wantProviderCol, ripgrepLine)
-	}
-
-	m.groupToolsProviderIdx = 2
-	out = renderHostGroupToolsEditor(m)
-	if !strings.Contains(out, "[node]") || strings.Contains(out, "provider:") || strings.Contains(out, "ripgrep") {
-		t.Fatalf("provider filter should narrow rows to node tools:\n%s", out)
-	}
-
-	m.groupToolsProviderIdx = 0
-	for i, row := range groupToolRows(m) {
-		if row.tool.Name == "ruff" {
-			m.groupToolsEditor.cursor = i
-			break
-		}
-	}
-	out = renderHostGroupToolsEditor(m)
-	if !strings.Contains(out, "x unignore") {
-		t.Fatalf("group-ignored selected tool should hint unignore:\n%s", out)
-	}
-	if strings.Contains(out, "x ignore") {
-		t.Fatalf("group-ignored selected tool should not hint ignore:\n%s", out)
-	}
-}
-
-func TestRenderHostGroupDotsEditor(t *testing.T) {
-	m := hostsModel()
-	m.mode = viewGroupDots
-	m.groupDotsEditor.group = "work"
-	m.dotMemberships = map[string][]string{
-		"nvim": {"work"},
-		"zsh":  {"base"},
-	}
-	m.dotsEntries = []app.DotStatus{
-		{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK},
-		{Name: "zsh", TargetPath: "~/.zshrc", Health: app.HealthMissing},
-	}
-	m.groupDotsEditor.membership = map[string]bool{"nvim": true, "zsh": false}
-	m.groupDotsEditor.originalMembership = copyBoolMap(m.groupDotsEditor.membership)
-
-	out := renderHostGroupDotsEditor(m)
-	for _, want := range []string{"enabled", "disabled", "[x]", "nvim", "~/.config/nvim", "[ ]", "zsh", "space toggle", "/ search", "enter save", "esc cancel"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("group dots editor missing %q:\n%s", want, out)
-		}
-	}
-	nvimLine := renderedLineContaining(out, "nvim")
-	targetCol := visualColumnOf(nvimLine, "~/.config/nvim")
-	wantTargetCol := groupDotsContentWidth(m) - lipgloss.Width("~/.config/nvim")
-	if targetCol != wantTargetCol {
-		t.Fatalf("dot target column = %d, want right-aligned %d:\n%s", targetCol, wantTargetCol, nvimLine)
-	}
-	for _, unwanted := range []string{"ok", "missing"} {
-		if strings.Contains(out, unwanted) {
-			t.Fatalf("group dots editor should no longer render health column %q:\n%s", unwanted, out)
-		}
-	}
-
-	m.groupDotsEditor.search = "zsh"
-	out = renderHostGroupDotsEditor(m)
-	if strings.Contains(out, "nvim") || !strings.Contains(out, "zsh") {
-		t.Fatalf("search should narrow rows to zsh:\n%s", out)
-	}
-}
-
-func TestRenderHostGroupDotsEditor_GroupsIgnoredSeparately(t *testing.T) {
-	m := hostsModel()
-	m.mode = viewGroupDots
-	m.groupDotsEditor.group = "work"
-	m.dotMemberships = map[string][]string{
-		"nvim":    {"work"},
-		"copilot": {"work"},
-	}
-	m.dotsEntries = []app.DotStatus{
-		{Name: "nvim", TargetPath: "~/.config/nvim", State: app.DotStateSynced},
-		{Name: "nvim", TargetPath: "~/.config/nvim", State: app.DotStateIgnored, Counts: app.DotFileCounts{Ignored: 2}},
-		{Name: "copilot", TargetPath: "~/.config/copilot", State: app.DotStateIgnored},
-	}
-	m.groupDotsEditor.membership = map[string]bool{"nvim": true, "copilot": true}
-	m.groupDotsEditor.originalMembership = copyBoolMap(m.groupDotsEditor.membership)
-
-	out := renderHostGroupDotsEditor(m)
-	enabledIdx := strings.Index(out, "enabled")
-	ignoredIdx := strings.Index(out, "ignored")
-	if enabledIdx < 0 || ignoredIdx < 0 {
-		t.Fatalf("missing enabled/ignored section labels:\n%s", out)
-	}
-	if ignoredIdx < enabledIdx {
-		t.Fatalf("ignored section should come after enabled:\n%s", out)
-	}
-	copilotIdx := strings.Index(out, "copilot")
-	if copilotIdx < ignoredIdx {
-		t.Fatalf("copilot row should appear under the ignored section:\n%s", out)
-	}
-	nvimIdx := strings.Index(out, "nvim")
-	if nvimIdx < enabledIdx || nvimIdx > ignoredIdx {
-		t.Fatalf("synced nvim row should stay in enabled section despite ignored-child status:\n%s", out)
-	}
-}
-
-func TestRenderHostGroupDotsEditor_AppGeneratedIgnoredChildSummary(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	dir := t.TempDir()
-	repoDir := filepath.Join(dir, "dotfiles-repo")
-	cfgPath := filepath.Join(dir, "settings.json")
-	target := filepath.Join(home, ".config", "nvim")
-	source := filepath.Join(repoDir, "dotfiles", "nvim", ".config", "nvim")
-	if err := os.MkdirAll(filepath.Join(source, "node_modules", "pkg"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(source, "init.lua"), []byte("-- cfg"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(source, "node_modules", "pkg", "mod.js"), []byte("module"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(source, target); err != nil {
-		t.Fatal(err)
-	}
-	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
-		Settings: config.Settings{DotsRepo: repoDir},
-		Groups: []*config.GroupConfig{
-			{Name: "testhost", Special: "host"},
-			{Name: "work", Dots: []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}}},
-		},
-		Hosts: map[string][]string{"testhost": {"work"}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	a := app.New(cfgPath)
-	a.CacheDir = dir
-	if err := a.InitTestMode(context.Background()); err != nil {
-		t.Fatalf("InitTestMode: %v", err)
-	}
-	t.Cleanup(func() { _ = a.Close() })
-	result, err := a.DiscoverDotsStatus(context.Background())
-	if err != nil {
-		t.Fatalf("DiscoverDotsStatus: %v", err)
-	}
-	var syncedNvim, ignoredNvim bool
-	for _, entry := range result.Entries {
-		if entry.Name == "nvim" && entry.State == app.DotStateSynced {
-			syncedNvim = true
-		}
-		if entry.Name == "nvim" && entry.State == app.DotStateIgnored {
-			ignoredNvim = true
-		}
-	}
-	if !syncedNvim || !ignoredNvim {
-		t.Fatalf("DiscoverDotsStatus entries = %#v, want synced and ignored nvim rows", result.Entries)
-	}
-	memberships, err := a.DotMembershipMap(context.Background())
-	if err != nil {
-		t.Fatalf("DotMembershipMap: %v", err)
-	}
-
-	m := hostsModel()
-	m.mode = viewGroupDots
-	m.groupDotsEditor.group = "work"
-	m.dotMemberships = memberships
-	m.dotsEntries = result.Entries
-	m.groupDotsEditor.start("work", groupDotNames(m), func(name string) bool {
-		return slices.Contains(m.dotMemberships[name], "work")
-	})
-
-	for _, tc := range []struct {
-		name         string
-		search       string
-		searchActive bool
-	}{
-		{name: "normal"},
-		{name: "search", search: "nvim", searchActive: true},
-	} {
-		m.groupDotsEditor.search = tc.search
-		m.groupDotsEditor.searchActive = tc.searchActive
-		out := renderHostGroupDotsEditor(m)
-		if !strings.Contains(out, "enabled") || strings.Contains(out, "ignored") {
-			t.Fatalf("synced nvim with ignored children should render only as enabled (%s):\n%s", tc.name, out)
-		}
-	}
-}
-
 func TestRenderHostGroupEditor(t *testing.T) {
 	m := hostsModel()
 	m.hostEditMode = 1
@@ -2535,34 +2323,6 @@ func TestRenderFocusedEmptyInputsDoNotDuplicatePlaceholderFirstRune(t *testing.T
 				m.commandInput.SetValue("")
 				m.commandInput.Focus()
 				return m.viewString()
-			},
-		},
-		{
-			name:        "group tools search",
-			placeholder: "search tools…",
-			render: func(placeholder string) string {
-				m := hostsModel()
-				m.mode = viewGroupTools
-				m.groupToolsEditor.group = "work"
-				m.groupToolsEditor.searchActive = true
-				m.settingsInput.Placeholder = placeholder
-				m.settingsInput.SetValue("")
-				m.settingsInput.Focus()
-				return renderHostGroupToolsEditor(m)
-			},
-		},
-		{
-			name:        "group dots search",
-			placeholder: "search dotfiles…",
-			render: func(placeholder string) string {
-				m := hostsModel()
-				m.mode = viewGroupDots
-				m.groupDotsEditor.group = "work"
-				m.groupDotsEditor.searchActive = true
-				m.settingsInput.Placeholder = placeholder
-				m.settingsInput.SetValue("")
-				m.settingsInput.Focus()
-				return renderHostGroupDotsEditor(m)
 			},
 		},
 	}
@@ -3738,15 +3498,15 @@ func TestRenderHelpPopup_DashboardSelectedRowActions(t *testing.T) {
 			unwanted: []string{"open/fix selected"},
 		},
 		{
-			name: "all clear",
+			name: "healthy tool updates",
 			setup: func(m Model) Model {
 				m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
 				m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}}}
-				m.statusCursor = statusRowIndex(statusRows(m), "All Clear")
+				m.statusCursor = statusRowIndex(statusRows(m), "Tool Updates")
 				return m
 			},
 			want:     []string{"Bulk", "R", "refresh dashboard"},
-			unwanted: []string{"Row", "reconcile all", "open/fix selected"},
+			unwanted: []string{"Row", "reconcile all", "open/fix selected", "upgrade all"},
 		},
 	}
 	for _, tc := range cases {
@@ -3891,36 +3651,6 @@ func bindingHelpDescs(bindings []key.Binding) []string {
 }
 
 // ── view_list.go ──────────────────────────────────────────────────────────────
-
-func TestProviderLabel_TableDriven(t *testing.T) {
-	cases := []struct {
-		raw, installedWith, systemBin, pythonBin, nodeBin, want string
-	}{
-		{"brew", "", "", "", "", "brew"},
-		{"apt", "", "", "", "", "apt"},
-		{"system", "brew", "", "", "", "brew"},
-		{"system", "", "brew", "", "", "brew"},
-		{"system", "", "", "", "", "system"},
-		{"python", "", "", "uv", "", "uv"},
-		{"python", "", "", "", "", "python"},
-		{"pip", "", "", "", "", "pip3"},
-		{"pip3", "", "", "", "", "pip3"},
-		{"uv", "", "", "", "", "uv"},
-		{"node", "", "", "", "bun", "bun"},
-		{"node", "", "", "", "", "node"},
-		{"npm", "", "", "", "", "npm"},
-		{"bun", "", "", "", "", "bun"},
-		{"pnpm", "", "", "", "", "pnpm"},
-		{"cargo", "", "", "", "", "cargo"},
-	}
-	for _, tc := range cases {
-		got := providerLabel(tc.raw, tc.installedWith, tc.systemBin, tc.pythonBin, tc.nodeBin)
-		if got != tc.want {
-			t.Errorf("providerLabel(%q, %q, %q, %q, %q) = %q, want %q",
-				tc.raw, tc.installedWith, tc.systemBin, tc.pythonBin, tc.nodeBin, got, tc.want)
-		}
-	}
-}
 
 func TestProviderLabelForToolWithPinMarksExplicitOverride(t *testing.T) {
 	cases := []struct {
@@ -4464,7 +4194,7 @@ func hasHintKey(hints []hintItem, key string) bool {
 }
 
 func TestProviderParts_System(t *testing.T) {
-	meta, concrete, isOverride := providerParts("system", "brew", "", "", "")
+	meta, concrete, isOverride := providerPartsWithExplicit("system", "brew", "", "", "", "")
 	if meta != "system" {
 		t.Errorf("expected meta=system, got %q", meta)
 	}
@@ -4477,7 +4207,7 @@ func TestProviderParts_System(t *testing.T) {
 }
 
 func TestProviderParts_Brew(t *testing.T) {
-	meta, concrete, isOverride := providerParts("brew", "", "", "", "")
+	meta, concrete, isOverride := providerPartsWithExplicit("brew", "", "", "", "", "")
 	if meta != "system" {
 		t.Errorf("expected meta=system, got %q", meta)
 	}
@@ -4490,14 +4220,14 @@ func TestProviderParts_Brew(t *testing.T) {
 }
 
 func TestProviderParts_Python(t *testing.T) {
-	meta, _, _ := providerParts("python", "uv", "", "uv", "")
+	meta, _, _ := providerPartsWithExplicit("python", "uv", "", "", "uv", "")
 	if meta != "python" {
 		t.Errorf("expected meta=python, got %q", meta)
 	}
 }
 
 func TestProviderParts_Node(t *testing.T) {
-	meta, concrete, _ := providerParts("node", "", "", "", "bun")
+	meta, concrete, _ := providerPartsWithExplicit("node", "", "", "", "", "bun")
 	if meta != "node" {
 		t.Errorf("expected meta=node, got %q", meta)
 	}
@@ -4507,7 +4237,7 @@ func TestProviderParts_Node(t *testing.T) {
 }
 
 func TestProviderParts_Unknown(t *testing.T) {
-	meta, concrete, isOverride := providerParts("cargo", "", "", "", "")
+	meta, concrete, isOverride := providerPartsWithExplicit("cargo", "", "", "", "", "")
 	if meta != "cargo" {
 		t.Errorf("expected meta=cargo for unknown, got %q", meta)
 	}
@@ -4524,7 +4254,7 @@ func TestNewColWidths_BasicTools(t *testing.T) {
 		{Name: "git", Provider: "brew"},
 		{Name: "a-very-long-tool-name", Provider: "npm"},
 	}
-	cols := newColWidths(tools, nil, nil, "", "", "", 120)
+	cols := newColWidthsWithProviderPins(tools, nil, nil, nil, nil, "", "", "", 120)
 	if cols.name < len("a-very-long-tool-name") {
 		t.Errorf("name column %d should be >= longest tool name (%d)", cols.name, len("a-very-long-tool-name"))
 	}
@@ -4538,9 +4268,9 @@ func TestNewColWidths_WithGroups(t *testing.T) {
 		{Name: "git", Provider: "brew"},
 	}
 	groups := []string{"dev"}
-	cols := newColWidths(tools, map[string]string{
+	cols := newColWidthsWithProviderPins(tools, map[string]string{
 		toolKey("git", "brew"): "dev",
-	}, groups, "", "", "", 120)
+	}, groups, nil, nil, "", "", "", 120)
 	if cols.group == 0 {
 		t.Error("expected non-zero group column width when groups exist")
 	}
@@ -4550,16 +4280,16 @@ func TestNewColWidths_IgnoreLabelsDoNotInflateGroupColumn(t *testing.T) {
 	tools := []*database.ToolCache{
 		{Name: "git", Provider: "brew"},
 	}
-	cols := newColWidths(tools, map[string]string{
+	cols := newColWidthsWithProviderPins(tools, map[string]string{
 		toolKey("git", "brew"): "dev",
-	}, []string{"dev"}, "", "", "", 120)
+	}, []string{"dev"}, nil, nil, "", "", "", 120)
 	if cols.group != len("[dev]") {
 		t.Fatalf("group column = %d, want %d; ignore details belong in selected-row detail, not the group column", cols.group, len("[dev]"))
 	}
 }
 
 func TestNewColWidths_NoTools(t *testing.T) {
-	cols := newColWidths(nil, nil, nil, "", "", "", 120)
+	cols := newColWidthsWithProviderPins(nil, nil, nil, nil, nil, "", "", "", 120)
 	if cols.name < 20 {
 		t.Errorf("name column %d should be >= floor of 20", cols.name)
 	}
@@ -4570,7 +4300,7 @@ func TestNewColWidths_UsesCompactVersionWidth(t *testing.T) {
 	tool.Version.Valid = true
 	tool.Version.String = "2.40.0, abc1234567890"
 
-	cols := newColWidths([]*database.ToolCache{tool}, nil, nil, "", "", "", 80)
+	cols := newColWidthsWithProviderPins([]*database.ToolCache{tool}, nil, nil, nil, nil, "", "", "", 80)
 	wantName := 20
 	if cols.name != wantName {
 		t.Errorf("name column = %d, want %d with split row width", cols.name, wantName)
@@ -4581,7 +4311,7 @@ func TestRenderToolRow_InstalledNormal(t *testing.T) {
 	p := defaultPalette()
 	tool := &database.ToolCache{Name: "git", Provider: "brew", Installed: true}
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
-	out := renderToolRow(p, tool, cols, "", "", "", "", "", false, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", "", "", "", "", "", "", false, false, syncOK)
 	if !strings.Contains(out, "git") {
 		t.Errorf("expected 'git' in tool row, got: %q", out)
 	}
@@ -4592,7 +4322,7 @@ func TestRenderToolRow_StatusColorStaysOnIcon(t *testing.T) {
 	tool := &database.ToolCache{Name: "git", Provider: "brew", Installed: true}
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
 
-	out := renderToolRow(p, tool, cols, "", "", "", "", "", false, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", "", "", "", "", "", "", false, false, syncOK)
 
 	if !strings.Contains(out, p.styleInstalled.Render(iconInstalled)) {
 		t.Fatalf("row should color installed icon, got: %q", out)
@@ -4610,7 +4340,7 @@ func TestRenderToolRow_OrphanUsesOrphanIconColor(t *testing.T) {
 	tool := &database.ToolCache{Name: "utm", Provider: "system", Installed: true, InstalledWith: "brew", Tracked: false}
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
 
-	out := renderToolRow(p, tool, cols, "", "", "brew", "", "", false, false, syncOrphan)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", "", "", "", "brew", "", "", false, false, syncOrphan)
 
 	if !strings.Contains(out, p.styleOrphan.Render(iconOrphan)) {
 		t.Fatalf("orphan row should color orphan icon, got: %q", out)
@@ -4625,7 +4355,7 @@ func TestRenderToolRow_ShowsPackageAliasAfterLogicalName(t *testing.T) {
 	tool := &database.ToolCache{Name: "editor", Provider: "system", Package: "neovim", Installed: true, Tracked: true}
 	cols := colWidths{name: 24, prov: 14, ver: 8, screenW: 120}
 
-	out := renderToolRow(p, tool, cols, "", "", "brew", "", "", false, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", "", "", "", "brew", "", "", false, false, syncOK)
 
 	if !strings.Contains(out, "editor") || !strings.Contains(out, "{neovim}") {
 		t.Fatalf("row = %q, want logical name and package alias", out)
@@ -4640,7 +4370,7 @@ func TestRenderToolRow_PrivilegeMarkerUsesOwnColumn(t *testing.T) {
 	tool := &database.ToolCache{Name: "editor", Provider: "apt", Package: "neovim", Installed: true, Tracked: true}
 	cols := colWidths{name: 24, priv: lipgloss.Width(iconPrivileged), prov: 14, ver: 8, screenW: 120}
 
-	out := renderToolRow(p, tool, cols, "", "", "", "", "", false, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", "", "", "", "", "", "", false, false, syncOK)
 
 	if strings.Contains(out, "editor "+iconPrivileged) || strings.Contains(out, "{neovim} "+iconPrivileged) {
 		t.Fatalf("row = %q, privilege marker should not be in name column", out)
@@ -4655,7 +4385,7 @@ func TestRenderToolRow_PrivilegeMarkerUsesOwnColumn(t *testing.T) {
 	if gap := providerCol - markerCol - lipgloss.Width(iconPrivileged); gap != toolPrivilegeProviderGap {
 		t.Fatalf("row = %q, privilege-provider gap = %d, want %d", out, gap, toolPrivilegeProviderGap)
 	}
-	providerCell := renderProviderCol(p, "apt", "", "", "", "", "apt", 14, false, false)
+	providerCell := renderProviderColWithExplicit(p, "apt", "", "", "", "", "", "apt", 14, false, false)
 	if strings.Contains(providerCell, iconPrivileged) {
 		t.Fatalf("provider cell = %q, privilege marker should be rendered separately", providerCell)
 	}
@@ -4666,7 +4396,7 @@ func TestRenderToolRow_SystemBrewDoesNotShowPrivilegeMarker(t *testing.T) {
 	tool := &database.ToolCache{Name: "ripgrep", Provider: "system", Package: "ripgrep", Installed: false, Tracked: true}
 	cols := colWidths{name: 24, prov: 14, ver: 8, screenW: 120}
 
-	out := renderToolRow(p, tool, cols, "", "", "brew", "", "", false, false, syncMissing)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", "", "", "", "brew", "", "", false, false, syncMissing)
 
 	if strings.Contains(out, iconPrivileged) {
 		t.Fatalf("row = %q, system rows resolved to brew should not show privilege marker", out)
@@ -4701,7 +4431,7 @@ func TestRenderToolRow_MissingTool(t *testing.T) {
 	p := defaultPalette()
 	tool := &database.ToolCache{Name: "missing-tool", Provider: "brew", Installed: false}
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
-	out := renderToolRow(p, tool, cols, "", "", "", "", "", false, false, syncMissing)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", "", "", "", "", "", "", false, false, syncMissing)
 	if !strings.Contains(out, "missing-tool") {
 		t.Errorf("expected tool name in missing tool row, got: %q", out)
 	}
@@ -4715,7 +4445,7 @@ func TestRenderToolRow_OrphanDoesNotShowBaseGroup(t *testing.T) {
 	tool := &database.ToolCache{Name: "fzf", Provider: "system", InstalledWith: "brew", Installed: true, Tracked: false}
 	cols := colWidths{name: 20, prov: 12, ver: 8, group: len("[base]"), screenW: 120}
 
-	out := renderToolRow(p, tool, cols, "", "", "", "", "", false, false, syncOrphan)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", "", "", "", "", "", "", false, false, syncOrphan)
 	if strings.Contains(out, "[base]") {
 		t.Fatalf("orphan row = %q, should not show base group", out)
 	}
@@ -4737,7 +4467,7 @@ func TestRenderToolRow_OutdatedTool(t *testing.T) {
 	tool.LatestVersion.Valid = true
 	tool.LatestVersion.String = "2.41.0"
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
-	out := renderToolRow(p, tool, cols, "", "", "", "", "", false, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", "", "", "", "", "", "", false, false, syncOK)
 	if !strings.Contains(out, "2.40.0") {
 		t.Errorf("expected version in outdated tool row, got: %q", out)
 	}
@@ -4753,7 +4483,7 @@ func TestRenderToolRow_CompactsCommaVersionSuffix(t *testing.T) {
 	tool.Version.Valid = true
 	tool.Version.String = "2.40.0, abc123"
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
-	out := renderToolRow(p, tool, cols, "", "", "", "", "", false, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", "", "", "", "", "", "", false, false, syncOK)
 	if !strings.Contains(out, "2.40.0") {
 		t.Errorf("expected compact version in tool row, got: %q", out)
 	}
@@ -4766,7 +4496,7 @@ func TestRenderToolRow_IgnoredTool(t *testing.T) {
 	p := defaultPalette()
 	tool := &database.ToolCache{Name: "ignored-pkg", Provider: "pip", Installed: false, Tracked: true}
 	cols := colWidths{name: 20, prov: 14, group: len("[work]"), screenW: 120}
-	out := renderToolRow(p, tool, cols, "", "work", "", "", "", true, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", "work", "", "", "", "", "", true, false, syncOK)
 	if !strings.Contains(out, "ignored-pkg") {
 		t.Errorf("expected tool name in ignored row, got: %q", out)
 	}
@@ -4785,7 +4515,7 @@ func TestRenderToolRow_OneGapBetweenIconAndName(t *testing.T) {
 	tool.Version.String = "1.0.0"
 	cols := colWidths{name: 20, prov: 10, group: 0, screenW: 120}
 
-	out := renderToolRow(p, tool, cols, "", "base", "", "", "", false, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", "base", "", "", "", "", "", false, false, syncOK)
 	icon := p.styleInstalled.Render(iconInstalled)
 	name := renderNameCell(p, p.styleNormal, tool, "", cols.name, false)
 	if !strings.Contains(out, icon+" "+name) {
@@ -4800,7 +4530,7 @@ func TestRenderToolRow_InstalledEcosystemProviderWithoutInstalledWithDoesNotGues
 	p := defaultPalette()
 	tool := &database.ToolCache{Name: "typescript", Provider: "node", Installed: true, Tracked: true}
 	cols := colWidths{name: 20, prov: 10, group: 8, screenW: 120}
-	out := renderToolRow(p, tool, cols, "", "dev", "", "", "pnpm", false, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", "dev", "", "", "", "", "pnpm", false, false, syncOK)
 	if strings.Contains(out, "node(pnpm)") {
 		t.Fatalf("installed row without installed_with should not guess effective node manager, got: %q", out)
 	}
@@ -4815,7 +4545,7 @@ func TestRenderToolRow_SelectedTool(t *testing.T) {
 	tool.Version.Valid = true
 	tool.Version.String = "1.2.3"
 	cols := colWidths{name: 20, prov: 10, group: 8, screenW: 120}
-	out := renderToolRow(p, tool, cols, "", "dev", "", "", "", false, true, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", "dev", "", "", "", "", "", false, true, syncOK)
 	if !strings.Contains(out, "selected") {
 		t.Errorf("expected 'selected' in selected tool row, got: %q", out)
 	}
@@ -4834,7 +4564,7 @@ func TestRenderToolRow_WithSpinner(t *testing.T) {
 	p := defaultPalette()
 	tool := &database.ToolCache{Name: "upgrading", Provider: "brew", Installed: true}
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
-	out := renderToolRow(p, tool, cols, "⠋", "", "", "", "", false, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "⠋", "", "", "", "", "", "", false, false, syncOK)
 	if !strings.Contains(out, "upgrading") {
 		t.Errorf("expected tool name with spinner view, got: %q", out)
 	}
@@ -4844,7 +4574,7 @@ func TestRenderToolRow_WithGroup(t *testing.T) {
 	p := defaultPalette()
 	tool := &database.ToolCache{Name: "git", Provider: "brew", Installed: true, Tracked: true}
 	cols := colWidths{name: 20, prov: 10, group: 8, screenW: 120}
-	out := renderToolRow(p, tool, cols, "", "dev", "", "", "", false, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", "dev", "", "", "", "", "", false, false, syncOK)
 	if !strings.Contains(out, "dev") {
 		t.Errorf("expected group badge 'dev' in tool row, got: %q", out)
 	}
@@ -4854,7 +4584,7 @@ func TestRenderToolRow_RightAlignsGroupBadge(t *testing.T) {
 	p := defaultPalette()
 	tool := &database.ToolCache{Name: "git", Provider: "brew", Installed: true, Tracked: true}
 	cols := colWidths{name: 20, prov: 10, group: 8, screenW: 120}
-	out := renderToolRow(p, tool, cols, "", "dev", "", "", "", false, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", "dev", "", "", "", "", "", false, false, syncOK)
 	if !strings.Contains(out, p.styleHelp.Render("[dev]")) {
 		t.Errorf("expected group badge in right group, got: %q", out)
 	}
@@ -4867,7 +4597,7 @@ func TestRenderToolRow_ProviderVersionAndGroupShareRightGroup(t *testing.T) {
 	tool.Version.String = "2.40.0"
 	cols := colWidths{name: 20, prov: 10, ver: 8, group: 8, screenW: 80}
 
-	out := renderToolRow(p, tool, cols, "", "dev", "", "", "", false, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", "dev", "", "", "", "", "", false, false, syncOK)
 	providerCol := visualColumnOf(out, "brew")
 	versionCol := visualColumnOf(out, "2.40.0")
 	groupCol := visualColumnOf(out, "[dev]")
@@ -4889,8 +4619,8 @@ func TestRenderToolRow_EmptyGroupCellKeepsColumnsAligned(t *testing.T) {
 	ungrouped.Version.String = "9.10.0"
 	cols := colWidths{name: 20, prov: 10, ver: 8, group: 8, screenW: 80}
 
-	withGroup := renderToolRow(p, grouped, cols, "", "dev", "", "", "", false, false, syncOK)
-	withoutGroup := renderToolRow(p, ungrouped, cols, "", "", "", "", "", false, false, syncOrphan)
+	withGroup := renderToolRowWithProviderPin(p, grouped, cols, "", "dev", "", "", "", "", "", false, false, syncOK)
+	withoutGroup := renderToolRowWithProviderPin(p, ungrouped, cols, "", "", "", "", "", "", "", false, false, syncOrphan)
 	if strings.Contains(withoutGroup, "[base]") || strings.Contains(withoutGroup, "[dev]") {
 		t.Fatalf("ungrouped row should reserve an empty group cell, not render a badge: %q", withoutGroup)
 	}
@@ -4977,17 +4707,9 @@ func TestRenderToolRow_LongUpgradeVersionDoesNotPushGroupBadge(t *testing.T) {
 	tool.LatestVersion.Valid = true
 	tool.LatestVersion.String = "5.9.0-next.20260501+very-long-build-metadata"
 	screenW := 80
-	cols := newColWidths(
-		[]*database.ToolCache{tool},
-		map[string]string{toolKey("typescript", "node"): "dev"},
-		[]string{"dev"},
-		"",
-		"",
-		"pnpm",
-		screenW,
-	)
+	cols := newColWidthsWithProviderPins([]*database.ToolCache{tool}, map[string]string{toolKey("typescript", "node"): "dev"}, []string{"dev"}, nil, nil, "", "", "pnpm", screenW)
 
-	out := screenEdgeInset() + renderToolRow(p, tool, cols, "", "dev", "", "", "pnpm", false, false, syncOK)
+	out := screenEdgeInset() + renderToolRowWithProviderPin(p, tool, cols, "", "dev", "", "", "", "", "pnpm", false, false, syncOK)
 	if got := lipgloss.Width(out); got > screenContentWidth(screenW) {
 		t.Fatalf("row width = %d, want <= %d; row: %q", got, screenContentWidth(screenW), out)
 	}
@@ -5573,7 +5295,7 @@ func TestWrapText_Basic(t *testing.T) {
 
 func TestRenderProviderCol_NoConcreteProvider(t *testing.T) {
 	p := defaultPalette()
-	out := renderProviderCol(p, "cargo", "", "", "", "", "cargo", 10, false, false)
+	out := renderProviderColWithExplicit(p, "cargo", "", "", "", "", "", "cargo", 10, false, false)
 	if !strings.Contains(out, "cargo") {
 		t.Errorf("expected 'cargo' in provider col, got: %q", out)
 	}
@@ -5582,7 +5304,7 @@ func TestRenderProviderCol_NoConcreteProvider(t *testing.T) {
 func TestRenderProviderCol_WithConcrete(t *testing.T) {
 	p := defaultPalette()
 	// system meta with brew concrete — label is just the concrete name
-	out := renderProviderCol(p, "system", "brew", "", "", "", "brew", 14, false, false)
+	out := renderProviderColWithExplicit(p, "system", "brew", "", "", "", "", "brew", 14, false, false)
 	if !strings.Contains(out, "brew") {
 		t.Errorf("expected 'brew' in provider col, got: %q", out)
 	}
@@ -5590,7 +5312,7 @@ func TestRenderProviderCol_WithConcrete(t *testing.T) {
 
 func TestRenderProviderCol_Selected(t *testing.T) {
 	p := defaultPalette()
-	out := renderProviderCol(p, "system", "brew", "", "", "", "brew", 14, true, false)
+	out := renderProviderColWithExplicit(p, "system", "brew", "", "", "", "", "brew", 14, true, false)
 	if !strings.Contains(out, "brew") {
 		t.Errorf("expected 'brew' in selected provider col, got: %q", out)
 	}
@@ -5835,6 +5557,21 @@ func TestToolInlineHints_DefaultActionOrder(t *testing.T) {
 	want := []string{
 		m.keys.Upgrade.Help().Key,
 		m.keys.MoveGroup.Help().Key,
+		m.keys.Ignore.Help().Key,
+		m.keys.Delete.Help().Key,
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("hint key order = %v, want %v", got, want)
+	}
+}
+
+func TestToolInlineHints_OrphanToolOffersIgnore(t *testing.T) {
+	tool := &database.ToolCache{Name: "grok", Provider: "brew", Installed: true, Tracked: false}
+	m := baseModel([]*database.ToolCache{tool})
+
+	got := hintKeys(toolInlineHints(m, tool))
+	want := []string{
+		m.keys.Claim.Help().Key,
 		m.keys.Ignore.Help().Key,
 		m.keys.Delete.Help().Key,
 	}
@@ -6110,7 +5847,7 @@ func TestViewString_StatusMode(t *testing.T) {
 	}
 	m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateConflict, Health: app.HealthConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 	out := m.viewString()
-	for _, want := range []string{"Health Check", "Data", "Quiet", "Tool Updates", "Tool Sync", "Dotfiles", "Services", "Ignored Tools"} {
+	for _, want := range []string{"Health Check", "Data", "Tool Updates", "Tool Sync", "Dotfiles", "Services"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status view missing %q:\n%s", want, out)
 		}
@@ -6146,6 +5883,68 @@ func TestDashboardAttentionRowsCollapseOKDoctorChecks(t *testing.T) {
 	}
 	if idx := statusRowIndex(rows, "Doctor"); idx < 0 || rows[idx].action.kind != statusActionOpenDotsIssue {
 		t.Fatalf("single dotfiles health warning should open dotfile issues, idx=%d row=%#v", idx, rows)
+	}
+}
+
+func TestDashboardDoctorDriftOffersNvmFix(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewStatus
+	m.doctorResult = &app.DoctorResult{
+		Checks: []app.DoctorCheck{
+			{
+				ID:      "drift",
+				Label:   "Drift",
+				Status:  app.DoctorStatusWarn,
+				Message: "1 drift finding(s) — config does not match reality",
+				Groups: []app.DoctorDetailGroup{{
+					Header: "nvm-managed binary (configured for system provider)",
+					Items: []string{
+						"pnpm [brew]",
+						"  suggestion: migrate to pnpm",
+					},
+				}},
+			},
+		},
+		Summary: app.DoctorSummary{Warn: 1},
+	}
+
+	rows := statusRows(m)
+	idx := statusRowIndex(rows, "Doctor")
+	if idx < 0 {
+		t.Fatalf("missing Doctor row: %#v", rows)
+	}
+	if rows[idx].action.kind != statusActionFixNvmManaged || rows[idx].action.desc != "fix nvm-managed tools" {
+		t.Fatalf("drift row action = %#v, want fix nvm-managed tools", rows[idx].action)
+	}
+}
+
+func TestDashboardDoctorDriftOffersNvmFixWithOtherChecks(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewStatus
+	m.doctorResult = &app.DoctorResult{
+		Checks: []app.DoctorCheck{
+			{
+				ID:      "drift",
+				Label:   "Drift",
+				Status:  app.DoctorStatusWarn,
+				Message: "1 drift finding(s) — config does not match reality",
+				Groups: []app.DoctorDetailGroup{{
+					Header: "nvm-managed binary (configured for system provider)",
+					Items:  []string{"pnpm [brew]", "  suggestion: migrate"},
+				}},
+			},
+			{ID: "cache", Label: "Cache", Status: app.DoctorStatusWarn, Message: "cache stale"},
+		},
+		Summary: app.DoctorSummary{Warn: 2},
+	}
+
+	rows := statusRows(m)
+	idx := statusRowIndex(rows, "Doctor")
+	if idx < 0 {
+		t.Fatalf("missing Doctor row: %#v", rows)
+	}
+	if rows[idx].action.kind != statusActionFixNvmManaged {
+		t.Fatalf("doctor row with nvm drift + other checks should offer fix, got %#v", rows[idx].action)
 	}
 }
 
@@ -6349,6 +6148,7 @@ func TestStatusNavigationAndEnterActions(t *testing.T) {
 
 	m = baseModel(nil)
 	m.mode = viewStatus
+	m.dotsReminderServiceErr = "read service file: denied"
 	m.statusCursor = statusRowIndex(statusRows(m), "Services")
 	out = renderStatus(m)
 	if !strings.Contains(out, "enter") || !strings.Contains(out, "open service settings") {
@@ -6456,9 +6256,9 @@ func TestDashboardDotfileRowsUseCachedDotsAvailability(t *testing.T) {
 		m.settings = config.Settings{}
 		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 
-		row, ok := statusDotfilesAttentionRow(m)
-		if !ok {
-			t.Fatal("expected dotfiles attention row")
+		row := statusDotfilesAttentionRow(m)
+		if !row.needsAttention {
+			t.Fatal("expected dotfiles attention row with issues")
 		}
 		if row.action.kind != statusActionSyncDots {
 			t.Fatalf("attention action = %v, want sync dots from app-backed availability", row.action)
@@ -6481,9 +6281,9 @@ func TestDashboardDotfileRowsUseCachedDotsAvailability(t *testing.T) {
 		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 		m.dotsGitStatus = " M dotfiles/nvim/init.lua"
 
-		row, ok := statusDotfilesAttentionRow(m)
-		if !ok {
-			t.Fatal("expected dotfiles attention row")
+		row := statusDotfilesAttentionRow(m)
+		if !row.needsAttention {
+			t.Fatal("expected dotfiles attention row with issues")
 		}
 		if row.action.kind != statusActionOpenSettings || row.action.settingsRow != settingsRowDotsRepo {
 			t.Fatalf("attention action = %v, want dots repo settings", row.action)
@@ -6499,9 +6299,9 @@ func TestDashboardDotfileRowsUseCachedDotsAvailability(t *testing.T) {
 		m.settings = config.Settings{DotsRepo: repoDir, DotsDisabled: config.BoolPtr(true)}
 		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 
-		row, ok := statusDotfilesAttentionRow(m)
-		if !ok {
-			t.Fatal("expected dotfiles attention row")
+		row := statusDotfilesAttentionRow(m)
+		if !row.needsAttention {
+			t.Fatal("expected dotfiles attention row with issues")
 		}
 		if row.action.kind != statusActionSyncDots {
 			t.Fatalf("attention action = %v, want sync dots from app-backed enabled state", row.action)
@@ -6518,7 +6318,7 @@ func TestDashboardDotfileRowsUseCachedDotsAvailability(t *testing.T) {
 		m.settings = config.Settings{DotsRepo: "/tmp/stale-dotfiles"}
 		m.dotsSyncAvailCached = app.DotsSyncAvailability{Configured: true, Reason: app.DotsSyncAvailabilityReady, RepoPath: "/repo/current-dotfiles"}
 		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}}}
-		m.statusCursor = statusRowIndex(statusRows(m), "Dotfiles")
+		m.statusCursor = statusRowIndexInSection(statusRows(m), statusSectionOverview, "Dotfiles")
 
 		out := stripANSIEscapeSequences(renderStatus(m))
 
@@ -6535,9 +6335,9 @@ func TestDashboardDotfileRowsUseCachedDotsAvailability(t *testing.T) {
 		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 		m.dotsGitStatus = " M dotfiles/nvim/init.lua"
 
-		row, ok := statusDotfilesAttentionRow(m)
-		if !ok {
-			t.Fatal("expected dotfiles attention row")
+		row := statusDotfilesAttentionRow(m)
+		if !row.needsAttention {
+			t.Fatal("expected dotfiles attention row with issues")
 		}
 		if row.action.kind != statusActionOpenSettings || row.action.settingsRow != settingsRowDotsRepo {
 			t.Fatalf("attention action = %v, want dots repo settings", row.action)
@@ -6554,9 +6354,9 @@ func TestDashboardDotfileRowsUseCachedDotsAvailability(t *testing.T) {
 		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 		m.dotsGitStatus = " M dotfiles/nvim/init.lua"
 
-		row, ok := statusDotfilesAttentionRow(m)
-		if !ok {
-			t.Fatal("expected dotfiles attention row")
+		row := statusDotfilesAttentionRow(m)
+		if !row.needsAttention {
+			t.Fatal("expected dotfiles attention row with issues")
 		}
 		if row.action.kind != statusActionOpenSettings || row.action.settingsRow != settingsRowDotsRepo {
 			t.Fatalf("attention action = %v, want dots repo settings", row.action)
@@ -6603,7 +6403,7 @@ func TestDashboardRowsUseMiddleSummaryColumn(t *testing.T) {
 	m.width = 140
 
 	out := renderStatus(m)
-	for _, want := range []string{"git", "fd missing", "1 installed locally"} {
+	for _, want := range []string{"git", "fd missing", "1 installed"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("dashboard should render row summaries in the main row, missing %q:\n%s", want, out)
 		}
@@ -6678,7 +6478,7 @@ func TestDashboardDataRowsShowLoadingWithCurrentSnapshot(t *testing.T) {
 		m.progressText = "Refreshing tools… 0/1: brew"
 
 		out := renderStatus(m)
-		for _, want := range []string{iconPending, "Refreshing tools… 0/1: brew", "1 installed locally"} {
+		for _, want := range []string{iconPending, "Refreshing tools… 0/1: brew", "1 installed"} {
 			if !strings.Contains(out, want) {
 				t.Fatalf("dashboard should keep tool data visible while refreshing, missing %q:\n%s", want, out)
 			}
@@ -6694,7 +6494,7 @@ func TestDashboardDataRowsShowLoadingWithCurrentSnapshot(t *testing.T) {
 		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 3}}}
 
 		out := renderStatus(m)
-		for _, want := range []string{iconPending, "Syncing dots 1/2", "3/3 managed"} {
+		for _, want := range []string{iconPending, "Syncing dots 1/2", "3 synced"} {
 			if !strings.Contains(out, want) {
 				t.Fatalf("dashboard should keep dotfile data visible while syncing, missing %q:\n%s", want, out)
 			}
@@ -6716,28 +6516,6 @@ func TestDashboardDataRowsShowLoadingWithCurrentSnapshot(t *testing.T) {
 	})
 }
 
-func TestDashboardIgnoredToolsAreMuted(t *testing.T) {
-	m := baseModel([]*database.ToolCache{
-		{Name: "certifi", Provider: "python", Installed: true, Tracked: true},
-	})
-	m.ignoreSet = map[string]bool{"certifi": true}
-
-	rows := statusRows(m)
-	idx := statusRowIndex(rows, "Ignored Tools")
-	if idx < 0 {
-		t.Fatalf("missing ignored row: %#v", rows)
-	}
-	if rows[idx].section != statusSectionQuiet {
-		t.Fatalf("ignored tools should be quiet, row=%#v", rows[idx])
-	}
-	if got, want := rows[idx].value, m.palette.styleHelp.Render("1 ignored"); got != want {
-		t.Fatalf("ignored value = %q, want muted %q", got, want)
-	}
-	if statusRowIndex(rows, "Inventory") >= 0 {
-		t.Fatalf("dashboard should not render the old inventory row: %#v", rows)
-	}
-}
-
 func TestDashboardRowsUseSharedStatusIcons(t *testing.T) {
 	t.Run("attention rows", func(t *testing.T) {
 		m := baseModel([]*database.ToolCache{
@@ -6753,11 +6531,10 @@ func TestDashboardRowsUseSharedStatusIcons(t *testing.T) {
 
 		rows := statusRows(m)
 		want := map[string]string{
-			"Tool Updates":  iconFailed,
-			"Tool Sync":     iconFailed,
-			"Dotfiles":      iconFailed,
-			"Services":      iconFailed,
-			"Ignored Tools": iconIgnored,
+			"Tool Updates": iconFailed,
+			"Tool Sync":    iconFailed,
+			"Dotfiles":     iconFailed,
+			"Services":     iconFailed,
 		}
 		for label, icon := range want {
 			idx := statusRowIndex(rows, label)
@@ -6770,16 +6547,28 @@ func TestDashboardRowsUseSharedStatusIcons(t *testing.T) {
 		}
 	})
 
-	t.Run("all clear", func(t *testing.T) {
+	t.Run("healthy health check rows", func(t *testing.T) {
 		m := baseModel(nil)
 		m.mode = viewStatus
 		m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
 		m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}}}
+		m.doctorResult = &app.DoctorResult{
+			Checks:  []app.DoctorCheck{{ID: "config", Label: "Config", Status: app.DoctorStatusOK, Message: "ok"}},
+			Summary: app.DoctorSummary{OK: 1},
+		}
 
 		rows := statusRows(m)
-		idx := statusRowIndex(rows, "All Clear")
-		if idx < 0 || rows[idx].icon != iconInstalled {
-			t.Fatalf("all-clear row should use healthy icon, idx=%d rows=%#v", idx, rows)
+		for _, label := range []string{"Tool Updates", "Tool Sync", "Dotfiles", "Services", "Doctor"} {
+			idx := statusRowIndex(rows, label)
+			if idx < 0 {
+				t.Fatalf("missing health check row %q: %#v", label, rows)
+			}
+			if rows[idx].icon != iconInstalled {
+				t.Fatalf("%s should use healthy icon when clear, row=%#v", label, rows[idx])
+			}
+			if rows[idx].needsAttention {
+				t.Fatalf("%s should not need attention when clear, row=%#v", label, rows[idx])
+			}
 		}
 	})
 }
@@ -6939,6 +6728,15 @@ func statusRowIndex(rows []statusListRow, label string) int {
 	return -1
 }
 
+func statusRowIndexInSection(rows []statusListRow, section, label string) int {
+	for i, row := range rows {
+		if row.section == section && row.label == label {
+			return i
+		}
+	}
+	return -1
+}
+
 func TestStatusToolCountsIncludesDiscoveredTools(t *testing.T) {
 	m := baseModel([]*database.ToolCache{{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true}})
 	m.discoveredTools = []*database.ToolCache{{Name: "fd", Provider: "brew", Installed: true}}
@@ -6981,12 +6779,6 @@ func TestStatusToolsOverviewValue_UpdateCountUsesOutdatedStyle(t *testing.T) {
 	}
 	if strings.Contains(value2, "update") {
 		t.Errorf("no updates: value = %q, must not contain \"update\"", value2)
-	}
-
-	// Case 3: outdated tool → summary does NOT contain "update"
-	summary := statusToolsOverviewSummary(counts)
-	if strings.Contains(summary, "update") {
-		t.Errorf("summary = %q, must not contain \"update\"", summary)
 	}
 }
 
@@ -7836,7 +7628,7 @@ func TestRenderToolRow_SelfUpdatingCask(t *testing.T) {
 	tool.UpdateBlocked = app.UpdateBlockSelfUpdates
 
 	cols := colWidths{name: 20, prov: 10, ver: 20, screenW: 120}
-	out := renderToolRow(p, tool, cols, "", "", "brew", "", "", false, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", "", "", "", "brew", "", "", false, false, syncOK)
 
 	plain := stripANSIEscapeSequences(out)
 	if !strings.Contains(plain, "(self)") {
@@ -7844,5 +7636,686 @@ func TestRenderToolRow_SelfUpdatingCask(t *testing.T) {
 	}
 	if !strings.Contains(plain, "→") {
 		t.Errorf("self-updating row should read like a normal update (contain '→'), got: %q", plain)
+	}
+}
+
+func TestDashboardAgentsDataRowOrderAndLabels(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewStatus
+
+	var overviewLabels []string
+	for _, row := range statusRows(m) {
+		if row.section == statusSectionOverview {
+			overviewLabels = append(overviewLabels, row.label)
+		}
+	}
+	want := []string{"Tools", "Dotfiles", "Agents", "Services"}
+	if !slices.Equal(overviewLabels, want) {
+		t.Fatalf("overview labels = %v, want %v", overviewLabels, want)
+	}
+	if slices.Contains(overviewLabels, "Tool Sync") {
+		t.Fatalf("overview rows should not include Tool Sync: %v", overviewLabels)
+	}
+}
+
+func TestDashboardOverviewBreakdownFormats(t *testing.T) {
+	t.Run("tools", func(t *testing.T) {
+		m := baseModel([]*database.ToolCache{
+			{Name: "ripgrep", Provider: "brew", Installed: true, Tracked: true},
+			{Name: "fzf", Provider: "brew", Installed: true, Tracked: true},
+			{Name: "bat", Provider: "brew", Installed: false, Tracked: false},
+			{Name: "eza", Provider: "brew", Installed: false, Tracked: true},
+		})
+		m.ignoreSet = map[string]bool{"eza": true}
+		counts := statusToolCounts(m)
+		got := statusToolsOverviewBreakdown(counts)
+		if !strings.Contains(got, "2 installed · 1 available · 1 ignored") {
+			t.Fatalf("tools breakdown = %q, want it to contain %q", got, "2 installed · 1 available · 1 ignored")
+		}
+	})
+
+	t.Run("dotfiles no out of sync", func(t *testing.T) {
+		counts := app.DotFileCounts{Synced: 4, OutOfSync: 0, Ignored: 2}
+		got := statusDotOverviewBreakdown(counts)
+		if strings.Contains(got, "out-of-sync") {
+			t.Fatalf("dotfiles breakdown = %q, must not contain out-of-sync", got)
+		}
+		if !strings.Contains(got, "4 synced") || !strings.Contains(got, "2 ignored") {
+			t.Fatalf("dotfiles breakdown = %q, want synced and ignored segments", got)
+		}
+	})
+
+	t.Run("agents", func(t *testing.T) {
+		view := agentsDashboardView{
+			enabled:       true,
+			skillPackages: 7,
+			mcpServers:    3,
+			plugins:       5,
+		}
+		got := statusAgentsOverviewSummary(view)
+		if got != "7 skills · 3 mcp · 5 plugins" {
+			t.Fatalf("agents overview summary = %q, want %q", got, "7 skills · 3 mcp · 5 plugins")
+		}
+	})
+
+	t.Run("automation", func(t *testing.T) {
+		m := baseModel(nil)
+		got := statusAutomationBreakdown(m)
+		if !strings.Contains(got, "reminder") || !strings.Contains(got, "watch") {
+			t.Fatalf("automation breakdown = %q, want reminder and watch tokens", got)
+		}
+	})
+}
+
+func TestAgentsDashboardEnabled_ShowsLoadingNotDisabledBeforeSnapshot(t *testing.T) {
+	m := baseModel(nil)
+	m.agentsEnabled = true
+	if !agentsDashboardEnabled(m) {
+		t.Fatal("agents should appear enabled while startup agent sections load")
+	}
+	view := agentsDashboardViewFor(m)
+	if !view.enabled {
+		t.Fatal("dashboard view should be enabled before agentsSummary snapshot arrives")
+	}
+	row := statusAgentsOverviewRow(m)
+	if row.muted {
+		t.Fatalf("agents overview row should not be muted during startup load, got %#v", row)
+	}
+	if !strings.Contains(row.summary, "Loading agents") && !strings.Contains(row.value, "managed") {
+		t.Fatalf("agents row should show loading or managed state, got value=%q summary=%q", row.value, row.summary)
+	}
+}
+
+func TestAgentsDashboardViewFor_UsesLiveSkillRows(t *testing.T) {
+	m := baseModel(nil)
+	m.agentsEnabled = true
+	m.agentsSummary = app.DashboardAgentsSummary{
+		AgentsEnabled: true,
+		SkillPackages: 99,
+		SkillsMissing: 99,
+		McpServers:    99,
+		Plugins:       99,
+	}
+	m.skillsLoaded = true
+	m.mcpLoaded = true
+	m.pluginLoaded = true
+	m.skillsRows = []app.SkillPackageRow{
+		{Name: "o/installed", Installed: true},
+		{Name: "o/missing", Installed: false},
+	}
+	m.skillsUnmanagedRows = []app.SkillPackageRow{{Name: "o/orphan"}}
+	m.mcpRows = []app.McpServerRow{{Name: "srv-a"}}
+	m.pluginRows = []app.PluginRow{{Name: "plug-a"}}
+
+	view := agentsDashboardViewFor(m)
+	if view.skillPackages != 2 || view.skillsInstalled != 1 || view.skillsMissing != 1 || view.skillsUnmanaged != 1 {
+		t.Fatalf("live view = %#v, want host-resolved skill counts from rows", view)
+	}
+	if view.mcpServers != 1 || view.plugins != 1 {
+		t.Fatalf("live mcp/plugin counts = %d/%d, want 1/1", view.mcpServers, view.plugins)
+	}
+}
+
+func TestDashboardAgentsOverviewRow(t *testing.T) {
+	t.Run("enabled", func(t *testing.T) {
+		m := baseModel(nil)
+		m.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: true, SkillPackages: 7, McpServers: 3, Plugins: 5}
+		if !statusAgentsLoading(m) {
+			t.Fatalf("bare baseModel should be in a loading state (skillsLoaded=false)")
+		}
+		row := statusAgentsOverviewRow(m)
+		want := fmt.Sprintf("%d managed", m.agentsSummary.Managed())
+		if !strings.Contains(row.value, want) {
+			t.Fatalf("agents overview value = %q, want it to contain %q even while loading", row.value, want)
+		}
+		if row.muted {
+			t.Fatalf("enabled agents row should not be muted")
+		}
+		wantIcon, wantStyle := statusRowWorkingIcon(m, true)
+		if row.icon != wantIcon || row.iconStyle.Render("x") != wantStyle.Render("x") {
+			t.Fatalf("loading icon = (%q, %q), want (%q, %q)", row.icon, row.iconStyle.Render("x"), wantIcon, wantStyle.Render("x"))
+		}
+	})
+
+	t.Run("enabled and loaded", func(t *testing.T) {
+		m := baseModel(nil)
+		m.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: true, SkillPackages: 7, McpServers: 3, Plugins: 5}
+		m.skillsLoaded = true
+		m.mcpLoaded = true
+		m.pluginLoaded = true
+		m.mcpRunning = false
+		m.pluginRunning = false
+		if statusAgentsLoading(m) {
+			t.Fatalf("model with all sections loaded should not be in a loading state")
+		}
+		row := statusAgentsOverviewRow(m)
+		want := fmt.Sprintf("%d managed", agentsDashboardViewFor(m).managed())
+		if !strings.Contains(row.value, want) {
+			t.Fatalf("agents overview value = %q, want it to contain %q", row.value, want)
+		}
+		wantIcon, wantStyle := statusRowOKIcon(m)
+		if row.icon != wantIcon || row.iconStyle.Render("x") != wantStyle.Render("x") {
+			t.Fatalf("loaded icon = (%q, %q), want (%q, %q)", row.icon, row.iconStyle.Render("x"), wantIcon, wantStyle.Render("x"))
+		}
+	})
+
+	t.Run("disabled", func(t *testing.T) {
+		m := baseModel(nil)
+		m.agentsEnabled = false
+		m.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: false}
+		row := statusAgentsOverviewRow(m)
+		if !row.muted {
+			t.Fatalf("disabled agents row should be muted")
+		}
+		if !strings.Contains(row.value, "—") {
+			t.Fatalf("disabled agents value = %q, want data placeholder", row.value)
+		}
+	})
+
+	t.Run("details", func(t *testing.T) {
+		m := baseModel(nil)
+		summary := app.DashboardAgentsSummary{
+			AgentsEnabled:   true,
+			SkillsInstalled: 11,
+			SkillsMissing:   13,
+			SkillsUnmanaged: 17,
+			McpServers:      19,
+			Plugins:         23,
+			Marketplaces:    29,
+		}
+		m.agentsSummary = summary
+		row := statusAgentsOverviewRow(m)
+		if len(row.details) != 4 {
+			t.Fatalf("agents overview details = %#v, want 4 lines", row.details)
+		}
+		if !strings.Contains(row.details[0], "11") || !strings.Contains(row.details[0], "13") || !strings.Contains(row.details[0], "17") {
+			t.Fatalf("skills detail line = %q, want installed=11, missing=13, unmanaged=17", row.details[0])
+		}
+		if !strings.Contains(row.details[1], "19") {
+			t.Fatalf("mcp detail line = %q, want mcp servers=19", row.details[1])
+		}
+		if !strings.Contains(row.details[2], "23") {
+			t.Fatalf("plugins detail line = %q, want plugins=23", row.details[2])
+		}
+		if !strings.Contains(row.details[3], "29") {
+			t.Fatalf("marketplaces detail line = %q, want marketplaces=29", row.details[3])
+		}
+	})
+}
+
+func TestDashboardAgentsAttentionRow(t *testing.T) {
+	t.Run("ok when all managed", func(t *testing.T) {
+		m := baseModel(nil)
+		m.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: true}
+		row := statusAgentsAttentionRow(m)
+		if row.needsAttention {
+			t.Fatalf("attention row should be healthy when out of sync is zero: %#v", row)
+		}
+		if row.icon != iconInstalled {
+			t.Fatalf("healthy agents row icon = %q, want %q", row.icon, iconInstalled)
+		}
+	})
+
+	t.Run("present but muted when disabled", func(t *testing.T) {
+		m := baseModel(nil)
+		m.agentsEnabled = false
+		m.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: false, SkillsMissing: 2}
+		row := statusAgentsAttentionRow(m)
+		if row.label != "Agents" || !row.muted {
+			t.Fatalf("disabled agents row = %#v, want muted Agents row", row)
+		}
+		if row.needsAttention {
+			t.Fatalf("disabled agents should not count as attention: %#v", row)
+		}
+	})
+
+	t.Run("present with issues and sample", func(t *testing.T) {
+		m := baseModel(nil)
+		m.agentsSummary = app.DashboardAgentsSummary{
+			AgentsEnabled:      true,
+			SkillsMissing:      2,
+			SkillsMissingNames: []string{"skillpkg-alpha", "skillpkg-beta"},
+		}
+		row := statusAgentsAttentionRow(m)
+		if !row.needsAttention {
+			t.Fatalf("attention row should need attention: %#v", row)
+		}
+		if !strings.Contains(row.value, "2") || !strings.Contains(row.value, "issues") {
+			t.Fatalf("attention row value = %q, want it to contain 2 and issues", row.value)
+		}
+		if !strings.Contains(row.summary, "skillpkg-alpha") {
+			t.Fatalf("attention row summary = %q, want it to contain skillpkg-alpha", row.summary)
+		}
+	})
+
+	t.Run("mcp plugin issues without misleading skills summary", func(t *testing.T) {
+		m := baseModel(nil)
+		m.agentsSummary = app.DashboardAgentsSummary{
+			AgentsEnabled:   true,
+			SkillPackages:   8,
+			SkillsInstalled: 8,
+		}
+		m.skillsLoaded = true
+		m.mcpLoaded = true
+		m.pluginLoaded = true
+		m.enabledAgents = []string{"claude"}
+		m.skillsRows = make([]app.SkillPackageRow, 8)
+		for i := range m.skillsRows {
+			m.skillsRows[i] = app.SkillPackageRow{Name: fmt.Sprintf("skill-%d", i), Installed: true}
+		}
+		m.mcpRows = []app.McpServerRow{
+			{Name: "mu-mcp", PerAgentStatus: map[string]app.McpStatus{"claude": app.McpStatusMissing}},
+			{Name: "nu-mcp", PerAgentStatus: map[string]app.McpStatus{"claude": app.McpStatusMissing}},
+		}
+		m.pluginRows = []app.PluginRow{
+			{Name: "xi-plugin", PerAgentStatus: map[string]app.PluginStatus{"claude": app.PluginStatusMissing}},
+		}
+		row := statusAgentsAttentionRow(m)
+		if !row.needsAttention {
+			t.Fatal("attention row should need attention for mcp/plugin drift")
+		}
+		if strings.Contains(row.summary, "All managed skills installed") {
+			t.Fatalf("summary = %q, should not claim skills are fine when mcp/plugin drift exists", row.summary)
+		}
+		if !strings.Contains(row.summary, "mu-mcp") {
+			t.Fatalf("summary = %q, want out-of-sync mcp/plugin names", row.summary)
+		}
+		if len(row.details) == 0 || !strings.Contains(strings.Join(row.details, "\n"), "mcp: 2 missing") {
+			t.Fatalf("details = %v, want mcp missing breakdown", row.details)
+		}
+		if row.action.kind != statusActionOpenAgents {
+			t.Fatalf("action = %v, want open agents when only mcp/plugin drift", row.action.kind)
+		}
+	})
+
+	t.Run("action selection", func(t *testing.T) {
+		m := baseModel(nil)
+		m.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: true, SkillsUnmanaged: 3, SkillsUnmanagedNames: []string{"skillpkg-a", "skillpkg-b", "skillpkg-c"}}
+		row := statusAgentsAttentionRow(m)
+		if !row.needsAttention || row.action.kind != statusActionOpenAgents {
+			t.Fatalf("unmanaged-only issues should open agents, row=%#v", row)
+		}
+
+		m2 := baseModel(nil)
+		m2.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: true, SkillsMissing: 2, SkillsMissingNames: []string{"skillpkg-a", "skillpkg-b"}}
+		m2.loading = true
+		row2 := statusAgentsAttentionRow(m2)
+		if !row2.needsAttention || row2.action.kind != statusActionOpenAgents {
+			t.Fatalf("loading gate should block restore action, row=%#v", row2)
+		}
+
+		m3 := baseModel(nil)
+		m3.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: true, SkillsMissing: 2, SkillsMissingNames: []string{"skillpkg-a", "skillpkg-b"}}
+		m3.skillsRunning = true
+		row3 := statusAgentsAttentionRow(m3)
+		if !row3.needsAttention || row3.action.kind != statusActionOpenAgents {
+			t.Fatalf("skillsRunning gate should block restore action, row=%#v", row3)
+		}
+
+		m4 := baseModel(nil)
+		m4.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: true, SkillsMissing: 2, SkillsMissingNames: []string{"skillpkg-a", "skillpkg-b"}}
+		row4 := statusAgentsAttentionRow(m4)
+		if !row4.needsAttention || row4.action.kind != statusActionRestoreSkills {
+			t.Fatalf("missing skills with no gates should offer restore skills, row=%#v", row4)
+		}
+	})
+
+	t.Run("working icon", func(t *testing.T) {
+		running := baseModel(nil)
+		running.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: true, SkillsMissing: 2, SkillsMissingNames: []string{"skillpkg-a", "skillpkg-b"}}
+		running.skillsRunning = true
+		row := statusAgentsAttentionRow(running)
+		if !row.needsAttention {
+			t.Fatalf("attention row should need attention: %#v", row)
+		}
+		wantIcon, wantStyle := statusRowWorkingIcon(running, true)
+		if row.icon != wantIcon || row.iconStyle.Render("x") != wantStyle.Render("x") {
+			t.Fatalf("running icon = (%q, %q), want (%q, %q)", row.icon, row.iconStyle.Render("x"), wantIcon, wantStyle.Render("x"))
+		}
+
+		idle := baseModel(nil)
+		idle.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: true, SkillsMissing: 2, SkillsMissingNames: []string{"skillpkg-a", "skillpkg-b"}}
+		idleRow := statusAgentsAttentionRow(idle)
+		if !idleRow.needsAttention {
+			t.Fatalf("attention row should need attention: %#v", idleRow)
+		}
+		if idleRow.icon == row.icon && idleRow.iconStyle.Render("x") == row.iconStyle.Render("x") {
+			t.Fatalf("idle icon should differ from running icon, got %q for both", idleRow.icon)
+		}
+	})
+}
+
+// TestDashboardAgentsOverviewIconAndAttentionAgree pins that both the
+// overview icon and the attention row's presence derive out-of-sync state
+// from statusAgentsCounts (live mcp/plugin rows), not from agentsSummary
+// ints — so a live mcp-missing row that agentsSummary knows nothing about
+// still trips the warning icon and produces an attention row.
+func TestDashboardAgentsOverviewIconAndAttentionAgree(t *testing.T) {
+	m := baseModel(nil)
+	m.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: true}
+	m.skillsLoaded = true
+	m.mcpLoaded = true
+	m.pluginLoaded = true
+	m.enabledAgents = []string{"claude"}
+	m.mcpRows = []app.McpServerRow{{
+		Name:           "iota-mcp",
+		PerAgentStatus: map[string]app.McpStatus{"claude": app.McpStatusMissing},
+	}}
+
+	icon, iconStyle := statusAgentsOverviewIcon(m)
+	wantIcon, wantStyle := statusRowWarningIcon(m)
+	if icon != wantIcon || iconStyle.Render("x") != wantStyle.Render("x") {
+		t.Fatalf("overview icon = (%q,%q), want warning icon (%q,%q)", icon, iconStyle.Render("x"), wantIcon, wantStyle.Render("x"))
+	}
+
+	row := statusAgentsAttentionRow(m)
+	if !row.needsAttention {
+		t.Fatal("expected attention row to need attention when statusAgentsCounts reports a live mcp-missing row")
+	}
+}
+
+// TestStatusAgentsCounts_CountsPerAgentRows pins dashboard counts match the
+// Agents tab Out of Sync section: one issue per flattened row, not per manifest
+// item with any adapter missing.
+func TestStatusAgentsCounts_CountsPerAgentRows(t *testing.T) {
+	m := baseModel(nil)
+	m.mcpLoaded = true
+	m.pluginLoaded = true
+	m.enabledAgents = []string{"claude", "cursor"}
+	m.mcpUnmanaged = map[string][]app.InstalledMcpServer{
+		"claude": {{Name: "kappa-mcp"}},
+		"cursor": {{Name: "kappa-mcp"}},
+	}
+	m.pluginUnmanaged = map[string][]app.InstalledPlugin{
+		"claude": {{Name: "kappa-plugin"}},
+		"cursor": {{Name: "kappa-plugin"}},
+	}
+
+	counts := statusAgentsCounts(m)
+	if counts.McpUnmanaged != 2 {
+		t.Fatalf("McpUnmanaged = %d, want 2 (one row per agent)", counts.McpUnmanaged)
+	}
+	if counts.PluginsUnmanaged != 2 {
+		t.Fatalf("PluginsUnmanaged = %d, want 2 (one row per agent)", counts.PluginsUnmanaged)
+	}
+}
+
+func TestStatusAgentsCounts_IgnoresNonTargetedAgentMissing(t *testing.T) {
+	m := baseModel(nil)
+	m.mcpLoaded = true
+	m.enabledAgents = []string{"claude-code"}
+	m.mcpRows = []app.McpServerRow{{
+		Name:   "theta-mcp",
+		Agents: []string{"claude-code"},
+		PerAgentStatus: map[string]app.McpStatus{
+			"claude-code": app.McpStatusInstalled,
+			"codex":       app.McpStatusMissing,
+		},
+	}}
+
+	counts := statusAgentsCounts(m)
+	if counts.OutOfSync() != 0 {
+		t.Fatalf("OutOfSync = %d, want 0 when only a non-targeted agent is missing", counts.OutOfSync())
+	}
+}
+
+// TestStatusAgentsCounts_IgnoredItemsExcludedAcrossAllThreeFeatures pins that
+// statusAgentsCounts filters ignored names out of skills-missing/unmanaged
+// (via agentsSummary name lists) and out of mcp/plugin missing-or-unmanaged
+// (via live rows), for all three features simultaneously.
+func TestStatusAgentsCounts_IgnoredItemsExcludedAcrossAllThreeFeatures(t *testing.T) {
+	m := baseModel(nil)
+	m.agentsIgnore = config.AgentsIgnore{
+		Skills:     []string{"lambda-skill-ignored"},
+		McpServers: []string{"lambda-mcp-ignored"},
+		Plugins:    []string{"lambda-plugin-ignored"},
+	}
+	m.agentsSummary = app.DashboardAgentsSummary{
+		AgentsEnabled:        true,
+		SkillsMissingNames:   []string{"lambda-skill-ignored", "lambda-skill-kept"},
+		SkillsUnmanagedNames: []string{"lambda-skill-ignored", "lambda-skill-kept"},
+	}
+	m.skillsLoaded = true
+	m.mcpLoaded = true
+	m.pluginLoaded = true
+	m.enabledAgents = []string{"claude"}
+	m.skillsRows = []app.SkillPackageRow{
+		{Name: "lambda-skill-kept", Installed: false},
+	}
+	m.skillsUnmanagedRows = []app.SkillPackageRow{
+		{Name: "lambda-skill-kept"},
+	}
+	m.mcpRows = []app.McpServerRow{
+		{Name: "lambda-mcp-ignored", PerAgentStatus: map[string]app.McpStatus{"claude": app.McpStatusMissing}},
+		{Name: "lambda-mcp-kept", PerAgentStatus: map[string]app.McpStatus{"claude": app.McpStatusMissing}},
+	}
+	m.mcpUnmanaged = map[string][]app.InstalledMcpServer{
+		"claude": {{Name: "lambda-mcp-ignored"}, {Name: "lambda-mcp-kept"}},
+	}
+	m.pluginRows = []app.PluginRow{
+		{Name: "lambda-plugin-ignored", PerAgentStatus: map[string]app.PluginStatus{"claude": app.PluginStatusMissing}},
+		{Name: "lambda-plugin-kept", PerAgentStatus: map[string]app.PluginStatus{"claude": app.PluginStatusMissing}},
+	}
+	m.pluginUnmanaged = map[string][]app.InstalledPlugin{
+		"claude": {{Name: "lambda-plugin-ignored"}, {Name: "lambda-plugin-kept"}},
+	}
+
+	counts := statusAgentsCounts(m)
+	if counts.SkillsMissing != 1 {
+		t.Fatalf("SkillsMissing = %d, want 1 (ignored name excluded)", counts.SkillsMissing)
+	}
+	if counts.SkillsUnmanaged != 1 {
+		t.Fatalf("SkillsUnmanaged = %d, want 1 (ignored name excluded)", counts.SkillsUnmanaged)
+	}
+	if counts.McpMissing != 1 {
+		t.Fatalf("McpMissing = %d, want 1 (ignored name excluded)", counts.McpMissing)
+	}
+	if counts.McpUnmanaged != 1 {
+		t.Fatalf("McpUnmanaged = %d, want 1 (ignored name excluded)", counts.McpUnmanaged)
+	}
+	if counts.PluginsMissing != 1 {
+		t.Fatalf("PluginsMissing = %d, want 1 (ignored name excluded)", counts.PluginsMissing)
+	}
+	if counts.PluginsUnmanaged != 1 {
+		t.Fatalf("PluginsUnmanaged = %d, want 1 (ignored name excluded)", counts.PluginsUnmanaged)
+	}
+}
+
+func TestDashboardAgentsSummaryLoadedMsgHandler(t *testing.T) {
+	t.Run("error path keeps previous summary", func(t *testing.T) {
+		m := baseModel(nil)
+		seeded := app.DashboardAgentsSummary{SkillPackages: 41, AgentsEnabled: true}
+		m.agentsSummary = seeded
+		got := drive(m, agentsSummaryLoadedMsg{err: errors.New("boom")})
+		// Pins the err-guard in update.go: msg.summary is a zero value on error
+		// and must not overwrite the previously loaded summary.
+		if !reflect.DeepEqual(got.agentsSummary, seeded) {
+			t.Fatalf("agentsSummary = %#v, want unchanged %#v", got.agentsSummary, seeded)
+		}
+	})
+
+	t.Run("success path replaces summary", func(t *testing.T) {
+		m := baseModel(nil)
+		want := app.DashboardAgentsSummary{SkillPackages: 41, AgentsEnabled: true}
+		got := drive(m, agentsSummaryLoadedMsg{summary: want})
+		if !reflect.DeepEqual(got.agentsSummary, want) {
+			t.Fatalf("agentsSummary = %#v, want %#v", got.agentsSummary, want)
+		}
+	})
+}
+
+func TestDashboardAgentsSummaryRefreshWiring(t *testing.T) {
+	m, _ := dashboardDotsAppModel(t, nil)
+	m.mode = viewStatus
+	m.agentsEnabled = true
+
+	updatedModel, cmd := m.Update(skillsFeatureToggledMsg{enabled: true, err: nil})
+	if cmd == nil {
+		t.Fatalf("Update should return a non-nil cmd for skillsFeatureToggledMsg")
+	}
+	updated, ok := updatedModel.(Model)
+	if !ok {
+		t.Fatalf("Update should return a Model, got %T", updatedModel)
+	}
+	if !updated.skillsEnabled {
+		t.Fatalf("skillsEnabled should flip to true")
+	}
+}
+
+func TestDashboardAgentsRestoreSkillsDispatch(t *testing.T) {
+	t.Run("restore skills", func(t *testing.T) {
+		m := baseModel(nil)
+		m.agentsSummary = app.DashboardAgentsSummary{
+			AgentsEnabled:      true,
+			SkillsMissing:      2,
+			SkillsMissingNames: []string{"skillpkg-alpha"},
+		}
+		var cmds []tea.Cmd
+		m.handleStatusAction(statusAction{kind: statusActionRestoreSkills}, &cmds)
+		if !m.skillsRunning {
+			t.Fatalf("skillsRunning should be true after dispatch")
+		}
+		if len(cmds) == 0 {
+			t.Fatalf("expected commands to be queued")
+		}
+	})
+
+	t.Run("open agents", func(t *testing.T) {
+		m := baseModel(nil)
+		var cmds []tea.Cmd
+		m.handleStatusAction(statusAction{kind: statusActionOpenAgents}, &cmds)
+		if m.mode != viewSkills {
+			t.Fatalf("mode = %v, want viewSkills", m.mode)
+		}
+	})
+}
+
+func TestStatusDashboardDataRows_ActivityConsistency(t *testing.T) {
+	freshLoadingNoData := func() Model {
+		m := baseModel(nil)
+		m.loading = true
+		m.progressText = "working…"
+		m.dotsPreparing = true
+		m.dotsServicesRefreshing = true
+		m.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: true}
+		m.skillsLoaded = false
+		return m
+	}
+	loadedNoActivity := func() Model {
+		m := baseModel([]*database.ToolCache{{Name: "ripgrep", Provider: "brew", Package: "ripgrep", Installed: true}})
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: app.DotStateSynced}}
+		m.dotsReminderService = &app.DotsReminderService{Installed: true, Interval: time.Hour}
+		m.dotsWatchService = &app.DotsWatchService{Installed: true}
+		m.agentsSummary = app.DashboardAgentsSummary{
+			AgentsEnabled: true,
+			SkillPackages: 2,
+			McpServers:    1,
+			Plugins:       1,
+		}
+		m.skillsLoaded = true
+		m.mcpLoaded = true
+		m.pluginLoaded = true
+		m.mcpRunning = false
+		m.pluginRunning = false
+		return m
+	}
+	refreshingWithData := func() Model {
+		m := loadedNoActivity()
+		m.loading = true
+		m.progressText = "working…"
+		m.dotsLoading = true
+		m.dotsActiveName = "nvim"
+		m.dotsServicesRefreshing = true
+		m.skillsLoaded = false
+		return m
+	}
+
+	rowFns := []struct {
+		name     string
+		row      func(m Model) statusListRow
+		activity func(m Model) string
+	}{
+		{"Tools", func(m Model) statusListRow { return statusToolsOverviewRow(m, statusToolCounts(m)) }, statusToolsActivityText},
+		{"Dotfiles", statusDotfilesOverviewRow, statusDotsActivityText},
+		{"Automation", statusAutomationOverviewRow, func(m Model) string {
+			if m.dotsServicesRefreshing {
+				return "Refreshing service status…"
+			}
+			return ""
+		}},
+		{"Agents", statusAgentsOverviewRow, func(m Model) string {
+			if m.agentsSummary.AgentsEnabled && statusAgentsLoading(m) {
+				return "Loading agents…"
+			}
+			return ""
+		}},
+	}
+
+	for _, rf := range rowFns {
+		t.Run(rf.name, func(t *testing.T) {
+			t.Run("fresh-loading no data shows loading value and working icon", func(t *testing.T) {
+				m := freshLoadingNoData()
+				row := rf.row(m)
+				activity := rf.activity(m)
+				if activity == "" {
+					t.Fatalf("test setup bug: %s activity text is empty in fresh-loading state", rf.name)
+				}
+				if !strings.Contains(row.summary, activity) {
+					t.Errorf("%s summary = %q, want it to contain activity text %q", rf.name, row.summary, activity)
+				}
+				wantIcon, wantStyle := statusRowWorkingIcon(m, true)
+				if row.icon != wantIcon || row.iconStyle.Render("x") != wantStyle.Render("x") {
+					t.Errorf("icon = %q, want working icon %q", row.icon, wantIcon)
+				}
+				if rf.name == "Agents" {
+					if strings.Contains(row.value, iconPending) {
+						t.Errorf("Agents value = %q, agents always keeps its real value even while working", row.value)
+					}
+				} else if !strings.Contains(row.value, iconPending) {
+					t.Errorf("%s value = %q, want loading placeholder containing %q", rf.name, row.value, iconPending)
+				}
+			})
+
+			t.Run("loaded no activity shows quiet row", func(t *testing.T) {
+				m := loadedNoActivity()
+				if activity := rf.activity(m); activity != "" {
+					t.Fatalf("test setup bug: %s activity text = %q, want empty in loaded-no-activity state", rf.name, activity)
+				}
+				row := rf.row(m)
+				if strings.Contains(row.value, iconPending) {
+					t.Errorf("%s value = %q, should not show loading placeholder once loaded", rf.name, row.value)
+				}
+				wantIcon, wantStyle := statusRowWorkingIcon(m, true)
+				if row.icon == wantIcon && row.iconStyle.Render("x") == wantStyle.Render("x") {
+					t.Errorf("%s icon = %q, should not show the working icon while quiet", rf.name, row.icon)
+				}
+			})
+
+			t.Run("refreshing with data shows activity in summary and working icon", func(t *testing.T) {
+				m := refreshingWithData()
+				row := rf.row(m)
+				activity := rf.activity(m)
+				if activity == "" {
+					t.Fatalf("test setup bug: %s activity text is empty in refreshing-with-data state", rf.name)
+				}
+				if !strings.Contains(row.summary, activity) {
+					t.Errorf("%s summary = %q, want it to contain activity text %q", rf.name, row.summary, activity)
+				}
+				wantIcon, wantStyle := statusRowWorkingIcon(m, true)
+				if row.icon != wantIcon || row.iconStyle.Render("x") != wantStyle.Render("x") {
+					t.Errorf("icon = %q, want working icon %q", row.icon, wantIcon)
+				}
+				if rf.name == "Agents" {
+					if strings.Contains(row.value, iconPending) {
+						t.Errorf("Agents value = %q, should keep real value (hasData) while working", row.value)
+					}
+					if !strings.Contains(row.value, "managed") {
+						t.Errorf("Agents value = %q, want it to still show managed count", row.value)
+					}
+				} else if !strings.Contains(row.value, iconPending) {
+					t.Errorf("%s value = %q, want loading placeholder even though data is present", rf.name, row.value)
+				}
+			})
+		})
 	}
 }

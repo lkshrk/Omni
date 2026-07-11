@@ -10,17 +10,6 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 )
 
-// dotsEntryNameColW returns the name-column width for the dots table.
-func dotsEntryNameColW(entries []app.DotStatus) int {
-	w := dotsNameMinW
-	for _, e := range entries {
-		if n := len([]rune(e.Name)); n > w {
-			w = n
-		}
-	}
-	return w
-}
-
 // truncatePath clips s to maxW runes, appending "…" if truncated.
 func truncatePath(s string, maxW int) string {
 	if len(s) <= maxW {
@@ -510,23 +499,6 @@ func renderDotsVariantRemovePrompt(m Model, name, prefix string, width int) stri
 func renderDotsSearchControl(m Model) string {
 	p := m.palette
 	return "  " + p.styleNormal.Render("/") + " " + renderEmptyAwareTextInputView(p, m.filter, m.filter.Placeholder, 0)
-}
-
-// dotHealthDisplay returns the icon style, icon character, and status label
-// for a given health value.
-func dotHealthDisplay(p palette, h app.DotHealth) (lipgloss.Style, string, string) {
-	switch h {
-	case app.HealthOK:
-		return dotSyncedStyle(p, false), "✓", "ok"
-	case app.HealthMissing:
-		return p.styleMissing, "✗", "missing"
-	case app.HealthConflict:
-		return p.styleOutdated, "!", "conflict"
-	case app.HealthNoSource:
-		return p.styleHelp, "·", "no-source"
-	default:
-		return p.styleHelp, "·", string(h)
-	}
 }
 
 func dotStateDisplay(p palette, state app.DotState) (lipgloss.Style, string, string) {

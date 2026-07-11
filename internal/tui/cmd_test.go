@@ -573,37 +573,6 @@ func TestDoDelete_DeletesConfigEntry(t *testing.T) {
 	}
 }
 
-func TestDoSaveFallback_ResolverFailurePreservesConfig(t *testing.T) {
-	t.Setenv("OMNI_GITHUB_API_BASE", "http://127.0.0.1:1")
-	prov := &okProvider{name: "apt"}
-	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("rg", "apt")})
-	m := modelForCmds(a)
-
-	msg := m.doSaveFallback("rg", "BurntSushi/ripgrep")()
-	got, ok := msg.(fallbackSavedMsg)
-	if !ok {
-		t.Fatalf("expected fallbackSavedMsg, got %T", msg)
-	}
-	if got.err == nil || !strings.Contains(got.err.Error(), "/repos/BurntSushi/ripgrep/releases/latest") {
-		t.Fatalf("doSaveFallback err = %v, want GitHub resolver failure", got.err)
-	}
-	if len(got.toolFallbacks) != 0 {
-		t.Fatalf("toolFallbacks = %+v, want no unresolved draft on resolver failure", got.toolFallbacks)
-	}
-
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	spec := cfg.Tools["rg"]
-	if len(spec.Providers) != 1 || spec.Providers[0].Provider != "apt" {
-		t.Fatalf("spec = %+v, want existing tool config preserved", spec)
-	}
-	if spec.Fallback != nil {
-		t.Fatalf("fallback = %+v, want no unresolved draft saved", spec.Fallback)
-	}
-}
-
 func TestDoSaveFallbackEditor_PersistsStructuredRecipe(t *testing.T) {
 	prov := &okProvider{name: "apt"}
 	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("rg", "apt")})
@@ -1822,75 +1791,6 @@ func TestBlockPrivilegedToolAction_RefreshesGenericCachedBrewPrivilegeIntoAdminP
 	}
 }
 
-func TestQueuePrivilegedInstallPrompts_HandlesAdminInstallError(t *testing.T) {
-	prov := &privilegedOKProvider{
-		okProvider: okProvider{name: "brew"},
-		plan: provider.PrivilegePlan{
-			Requirement: provider.PrivilegeMaybe,
-			Reason:      "brew cask karabiner-elements uses a pkg installer",
-		},
-	}
-	a, _ := newCmdApp(t, prov, nil)
-	m := modelForCmds(a)
-	m.mode = viewList
-	m.allTools = []*database.ToolCache{{
-		Name:          "karabiner-elements",
-		Provider:      provider.EcosystemSystem,
-		Package:       "karabiner-elements",
-		InstalledWith: "brew",
-		Tracked:       true,
-	}}
-	m.applyFilter()
-
-	opened := m.queuePrivilegedInstallPrompts(map[string]string{
-		toolKey("karabiner-elements", provider.EcosystemSystem): "installer requires administrator privileges",
-	})
-	if !opened {
-		t.Fatal("admin install failure should open the admin terminal prompt")
-	}
-	if m.adminTerminal == nil {
-		t.Fatal("admin terminal prompt was not opened")
-	}
-	if got := m.adminTerminal.display; got != "brew install --cask --no-ask karabiner-elements" {
-		t.Fatalf("display command = %q, want brew install --cask --no-ask karabiner-elements", got)
-	}
-	if !strings.Contains(m.adminTerminal.reason, "pkg installer") {
-		t.Fatalf("admin reason = %q, want cask pkg installer reason", m.adminTerminal.reason)
-	}
-}
-
-func TestQueuePrivilegedInstallPrompts_UsesSyncRowReasonWhenPlanLookupIsGeneric(t *testing.T) {
-	prov := &okProvider{name: "brew"}
-	a, _ := newCmdApp(t, prov, nil)
-	m := modelForCmds(a)
-	m.mode = viewList
-	m.allTools = []*database.ToolCache{{
-		Name:            "karabiner-elements",
-		Provider:        provider.EcosystemSystem,
-		Package:         "karabiner-elements",
-		Tracked:         true,
-		Privilege:       string(provider.PrivilegeRequired),
-		PrivilegeReason: sql.NullString{String: "package manager needs sudo/root access", Valid: true},
-	}}
-	m.applyFilter()
-
-	opened := m.queuePrivilegedInstallPrompts(map[string]string{
-		toolKey("karabiner-elements", provider.EcosystemSystem): "requires sudo: brew cask karabiner-elements uses a pkg installer",
-	})
-	if !opened {
-		t.Fatal("sync row privilege reason should open the admin terminal prompt")
-	}
-	if m.adminTerminal == nil {
-		t.Fatal("admin terminal prompt was not opened")
-	}
-	if got := m.adminTerminal.display; got != "brew install --cask --no-ask karabiner-elements" {
-		t.Fatalf("display command = %q, want brew install --cask --no-ask karabiner-elements", got)
-	}
-	if got := m.adminTerminal.reason; got != "brew cask karabiner-elements uses a pkg installer" {
-		t.Fatalf("admin reason = %q, want sync row cask reason", got)
-	}
-}
-
 func TestSettingsRowActionsPersistExpectedConfigFields(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "settingsrowtest")
 	prov := &okProvider{name: "brew"}
@@ -3051,20 +2951,6 @@ func TestDoDotsPush_NonGitDir(t *testing.T) {
 	}
 }
 
-// ── doDotsOverwrite ───────────────────────────────────────────────────────────
-
-func TestDoDotsOverwrite_NotFound(t *testing.T) {
-	m, _ := newDotsModelForCmds(t)
-	msg := m.doDotsOverwrite("nonexistent")()
-	got, ok := msg.(dotsFixedMsg)
-	if !ok {
-		t.Fatalf("expected dotsFixedMsg, got %T", msg)
-	}
-	if got.err == nil {
-		t.Error("expected error for unknown entry name")
-	}
-}
-
 // ── doDotsDelete ──────────────────────────────────────────────────────────────
 
 func TestDoDotsDelete_NotFound(t *testing.T) {
@@ -3121,43 +3007,6 @@ func TestDoDotsDelete_Success(t *testing.T) {
 	}
 	if got.name != "nvim" {
 		t.Errorf("name = %q, want nvim", got.name)
-	}
-}
-
-// ── doRemoveHost ───────────────────────────────────────────────────────────
-
-func TestDoRemoveHost_Success(t *testing.T) {
-	prov := &okProvider{name: "brew"}
-	a, _ := newCmdApp(t, prov, nil)
-	if err := a.EnsureHost("work"); err != nil {
-		t.Fatalf("EnsureHost: %v", err)
-	}
-	m := modelForCmds(a)
-	msg := m.doRemoveHost("work")()
-	got, ok := msg.(dangerOpDoneMsg)
-	if !ok {
-		t.Fatalf("expected dangerOpDoneMsg, got %T", msg)
-	}
-	if got.err != nil {
-		t.Errorf("unexpected error: %v", got.err)
-	}
-	if !got.reload {
-		t.Error("reload should be true after delete-host")
-	}
-}
-
-func TestDoRemoveHost_NonExistent(t *testing.T) {
-	prov := &okProvider{name: "brew"}
-	a, _ := newCmdApp(t, prov, nil)
-	m := modelForCmds(a)
-	// Deleting a host that doesn't exist should succeed (idempotent).
-	msg := m.doRemoveHost("nonexistent")()
-	got, ok := msg.(dangerOpDoneMsg)
-	if !ok {
-		t.Fatalf("expected dangerOpDoneMsg, got %T", msg)
-	}
-	if got.err != nil {
-		t.Errorf("unexpected error for non-existent host: %v", got.err)
 	}
 }
 

@@ -443,12 +443,17 @@ const groupPickerNewSentinel = "+ new group…"
 
 func renderGroupPicker(m Model) string {
 	p := m.palette
-	t := m.selectedTool()
-	if t == nil {
-		return p.styleHelp.Render("no tool selected")
+	// Agents-tab claims target an orphan with no manifest entry, so no group
+	// is "current" and no tools-list selection is required.
+	group := ""
+	if !m.pickerClaimAgentsSet {
+		t, ok := m.groupPickerActionTool()
+		if !ok {
+			return p.styleHelp.Render("no tool selected")
+		}
+		group = m.toolGroups[toolKey(t.Name, t.Provider)]
 	}
 	var sb strings.Builder
-	group := m.toolGroups[toolKey(t.Name, t.Provider)]
 	contentW := groupPickerContentWidth(m)
 
 	// Render group list. The "+ new group…" sentinel is styled differently;
@@ -607,10 +612,6 @@ func hostAssignmentPickerLabel(m Model, group string) string {
 	return group
 }
 
-func renderHostGroupToolsEditor(m Model) string {
-	return renderHostGroupToolsEditorWithLayout(m, groupToolsPopupLayoutFor(m))
-}
-
 func renderHostGroupToolsPopup(m Model) (string, popupFrame) {
 	layout := groupToolsPopupLayoutFor(m)
 	return renderHostGroupToolsEditorWithLayout(m, layout), groupToolsPopupFrameWithLayout(m, layout)
@@ -683,10 +684,6 @@ func renderHostGroupToolsEditorWithLayout(m Model, layout groupToolsPopupLayout)
 	}
 	sb.WriteString(renderPickerHintItems(m, contentW, contextHintItems(m, ctx)))
 	return lipgloss.NewStyle().Width(contentW).Render(sb.String())
-}
-
-func renderHostGroupDotsEditor(m Model) string {
-	return renderHostGroupDotsEditorWithLayout(m, groupDotsPopupLayoutFor(m))
 }
 
 func renderHostGroupDotsPopup(m Model) (string, popupFrame) {

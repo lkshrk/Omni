@@ -39,9 +39,9 @@ func renderFilterBar(m Model) string {
 	}
 	if hasGroupPills {
 		remaining := available - used
-		if hasProvPills && remaining > lipgloss.Width("   ·   ") {
-			sb.WriteString(p.styleHelp.Render("   ·   "))
-			remaining -= lipgloss.Width("   ·   ")
+		if hasProvPills && remaining > lipgloss.Width(pillBarSeparator) {
+			sb.WriteString(p.styleHelp.Render(pillBarSeparator))
+			remaining -= lipgloss.Width(pillBarSeparator)
 		} else if hasProvPills {
 			return sb.String()
 		}
@@ -56,6 +56,8 @@ type toolFilterKind int
 const (
 	toolFilterProvider toolFilterKind = iota
 	toolFilterGroup
+	agentsFilterType
+	agentsFilterAgent
 )
 
 type toolFilterHitZone struct {
@@ -88,7 +90,7 @@ func toolFilterHitZones(m Model) []toolFilterHitZone {
 		available -= used
 	}
 	if hasGroupPills {
-		sepW := lipgloss.Width("   ·   ")
+		sepW := lipgloss.Width(pillBarSeparator)
 		if hasProvPills && available > sepW {
 			x += sepW
 			available -= sepW
@@ -106,6 +108,67 @@ func toolFilterBarY(m Model) int {
 		return 4
 	}
 	return 2
+}
+
+// agentsFilterHitZones computes click targets for the agents tab's two pill
+// bars (type chips, agent-ID filter), mirroring exactly what viewSkillsBody
+// renders: same "  " x-offset, same shared line, same width budget.
+func agentsFilterHitZones(m Model) []toolFilterHitZone {
+	if m.mode != viewSkills {
+		return nil
+	}
+	if !m.skillsSectionEnabled() && !m.mcpSectionEnabled() && !m.pluginsSectionEnabled() {
+		return nil
+	}
+
+	pad := screenEdgeInset()
+	available := max(m.width-lipgloss.Width(pad), 1)
+	disabledChips := map[int]bool{
+		agentsChipSkills: !m.skillsSectionEnabled(),
+		agentsChipMcp:    !m.mcpSectionEnabled(),
+		agentsChipPlugin: !m.pluginsSectionEnabled(),
+	}
+
+	y := 2
+	if m.skillsSearchActive {
+		y = 3
+	}
+
+	x := lipgloss.Width("  ")
+	typeLabels := []string{"all", "skills", "mcp", "plugin"}
+	typeZones, used := pillHitZonesDim(agentsFilterType, typeLabels, m.skillTypeIdx, disabledChips, x, y, available)
+	zones := append([]toolFilterHitZone{}, typeZones...)
+
+	agentIDs := skillAgentIDs(m.skillsRows, m.enabledAgents)
+	if len(agentIDs) > 0 {
+		sepW := lipgloss.Width(pillBarSeparator)
+		remaining := available - used
+		if remaining > sepW {
+			agentZones, _ := pillHitZones(agentsFilterAgent, agentIDs, m.skillAgentIdx, x+used+sepW, y, remaining-sepW)
+			zones = append(zones, agentZones...)
+		}
+	}
+	return zones
+}
+
+// pillHitZonesDim mirrors pillHitZones but for renderPillBarDim's label
+// convention: labels are used verbatim (no "all" prepend) and a disabled
+// index never yields a clickable zone.
+func pillHitZonesDim(kind toolFilterKind, labels []string, activeIdx int, disabled map[int]bool, start, y, maxW int) ([]toolFilterHitZone, int) {
+	zones := make([]toolFilterHitZone, 0, len(labels))
+	x := start
+	for i, label := range labels {
+		active := activeIdx == i && !disabled[i]
+		w := pillCellWidth(label, active, maxW-(x-start))
+		if w <= 0 {
+			break
+		}
+		if !disabled[i] {
+			zones = append(zones, toolFilterHitZone{kind: kind, index: i, start: x, end: x + w, y: y})
+		}
+		x += w
+	}
+	return zones, x - start
 }
 
 func pillHitZones(kind toolFilterKind, names []string, activeIdx, start, y, maxW int) ([]toolFilterHitZone, int) {
@@ -175,6 +238,38 @@ func pillText(label string, active bool) string {
 		return "[" + label + "]"
 	}
 	return " " + label + " "
+}
+
+// renderPillBarDim renders pills for a fixed set of names without prepending
+// an "all" option (activeIdx maps directly to names[activeIdx]). Pills
+// flagged in disabled render with the dim help style and never as active, so
+// a disabled section's chip reads as unselectable even if activeIdx briefly
+// points at it.
+func renderPillBarDim(pal palette, names []string, activeIdx, maxW int, disabled map[int]bool) string {
+	var sb strings.Builder
+	used := 0
+	for i, label := range names {
+		active := activeIdx == i && !disabled[i]
+		w := pillCellWidth(label, active, maxW-used)
+		if w <= 0 {
+			break
+		}
+		text := pillText(label, active)
+		if lipgloss.Width(text) > w {
+			if active {
+				text = "[" + fitCellText(label, max(w-2, 1)) + "]"
+			} else {
+				text = " " + fitCellText(label, max(w-2, 1)) + " "
+			}
+		}
+		if active {
+			sb.WriteString(pal.styleTitle.Render(text))
+		} else {
+			sb.WriteString(pal.styleHelp.Render(text))
+		}
+		used += w
+	}
+	return sb.String()
 }
 
 func renderList(m Model) string {
@@ -321,6 +416,7 @@ const verReserveW = 24
 type colWidths struct {
 	name    int // name column — widest tool name, floor 20
 	priv    int // privilege marker column — 0 when no visible tools need it
+	typ     int // feature-type column (skills/mcp/plugin) — agents tab only, 0 on tools
 	prov    int // provider column — widest label, floor 8
 	ver     int // version column — widest displayed version, capped by verReserveW
 	group   int // group badge column — widest [badge], 0 when no tools have a group
@@ -333,51 +429,39 @@ type colWidths struct {
 // full pane width.  Short tool names remain short — rows don't pad to the edge.
 // groupNames is the list of reusable group names; when non-empty the group
 // column is always reserved so it does not flicker in/out as filters change.
-func newColWidths(tools []*database.ToolCache, toolGroups map[string]string, groupNames []string, systemBin, pythonBin, nodeBin string, screenW int) colWidths {
-	return newColWidthsWithProviderPins(tools, toolGroups, groupNames, nil, nil, systemBin, pythonBin, nodeBin, screenW)
-}
-
 func newColWidthsWithProviderPins(tools []*database.ToolCache, toolGroups map[string]string, groupNames []string, providerPins map[string]string, fallbacks map[string]config.FallbackSpec, systemBin, pythonBin, nodeBin string, screenW int) colWidths {
-	cols := colWidths{name: 20, prov: 8, ver: len("missing"), screenW: screenW}
+	seed := colWidths{name: 20, prov: 8, ver: len("missing"), screenW: screenW}
 
 	// Seed group column width from all known reusable group names so
 	// the column is stable regardless of which tools are currently visible.
-	if len(groupNames) > 0 {
-		for _, g := range groupNames {
-			if n := len([]rune(g)) + 2; n > cols.group {
-				cols.group = n
-			}
+	for _, g := range groupNames {
+		if n := len([]rune(g)) + 2; n > seed.group {
+			seed.group = n
 		}
 	}
 
-	for _, t := range tools {
-		if n := lipgloss.Width(nameDisplayText(t)); n > cols.name {
-			cols.name = n
-		}
-		if n := lipgloss.Width(providerDisplayTextForToolWithPin(t, providerPinForTool(t, providerPins), fallbackConcreteForTool(t, fallbacks), systemBin, pythonBin, nodeBin)); n > cols.prov {
-			cols.prov = n
-		}
-		if toolHasPrivilegeMarker(t, systemBin) {
-			cols.priv = lipgloss.Width(iconPrivileged)
-		}
-		if n := len([]rune(displayVersionText(t))); n > cols.ver {
-			cols.ver = n
-		}
-		if g := toolGroups[toolKey(t.Name, t.Provider)]; g != "" {
-			if n := len([]rune(g)) + 2; n > cols.group { // +2 for [ and ]
-				cols.group = n
+	measure := rowColWidthMeasure{
+		name: func(i int) string { return nameDisplayText(tools[i]) },
+		prov: func(i int) string {
+			t := tools[i]
+			return providerDisplayTextForToolWithPin(t, providerPinForTool(t, providerPins), fallbackConcreteForTool(t, fallbacks), systemBin, pythonBin, nodeBin)
+		},
+		ver: func(i int) string { return displayVersionText(tools[i]) },
+		group: func(i int) string {
+			t := tools[i]
+			if g := toolGroups[toolKey(t.Name, t.Provider)]; g != "" {
+				return "[" + g + "]"
 			}
-		}
+			return ""
+		},
+		priv: func(i int) bool { return toolHasPrivilegeMarker(tools[i], systemBin) },
 	}
 
 	// Layout: left group [icon name], right group [provider version group].
 	// The flexible space sits between the groups; individual columns stay at
 	// their largest observed width so rows across tabs obey the same placement
 	// rule.
-	cols.ver = min(cols.ver, verReserveW)
-	cols = fitToolColumnsToScreen(cols)
-
-	return cols
+	return seedWidenCapShrinkColWidths(seed, len(tools), measure)
 }
 
 func fitToolColumnsForRowErrors(cols colWidths, tools []*database.ToolCache, rowErrors map[string]string) colWidths {
@@ -444,10 +528,6 @@ func displayVersionText(t *database.ToolCache) string {
 	}
 }
 
-func renderToolRow(p palette, t *database.ToolCache, cols colWidths, spinnerView, group, systemBin, pythonBin, nodeBin string, ignored, selected bool, ss syncStatus, rowErrValues ...string) string {
-	return renderToolRowWithProviderPin(p, t, cols, spinnerView, group, "", "", systemBin, pythonBin, nodeBin, ignored, selected, ss, rowErrValues...)
-}
-
 func renderToolRowWithProviderPin(p palette, t *database.ToolCache, cols colWidths, spinnerView, group, providerPin, fallbackConcrete, systemBin, pythonBin, nodeBin string, ignored, selected bool, ss syncStatus, rowErrValues ...string) string {
 	label := providerLabelForToolWithPin(t, providerPin, fallbackConcrete, systemBin, pythonBin, nodeBin)
 	privileged := toolHasPrivilegeMarker(t, systemBin)
@@ -460,26 +540,19 @@ func renderToolRowWithProviderPin(p palette, t *database.ToolCache, cols colWidt
 		rowErr = rowErrorSummary(rowErrValues[0])
 	}
 	emphasis := func(s lipgloss.Style) lipgloss.Style {
-		if selected {
-			return s.Bold(true)
-		}
-		return s
+		return rowEmphasis(selected, s)
 	}
 
 	iconGap := strings.Repeat(" ", toolIconNameGapWidth)
 	groupCell := func(s lipgloss.Style) []rowCell {
-		if cols.group == 0 {
-			return nil
-		}
 		if !t.Tracked {
-			return []rowCell{rightCell("", cols.group)}
+			return rowGroupBadgeCell(s, "", cols.group)
 		}
-		if group == "" {
-			return []rowCell{rightCell("", cols.group)}
+		badge := ""
+		if group != "" {
+			badge = "[" + group + "]"
 		}
-		badge := "[" + group + "]"
-		badgeStyle := s
-		return []rowCell{rightCell(badgeStyle.Render(fitCellText(badge, cols.group)), cols.group)}
+		return rowGroupBadgeCell(s, badge, cols.group)
 	}
 	split := func(left, right []rowCell) string {
 		return renderSplitRow(left, right, rowAvailableWidth(cols.screenW), listColumnGap, listColumnGap)
@@ -490,7 +563,9 @@ func renderToolRowWithProviderPin(p palette, t *database.ToolCache, cols colWidt
 		icon := ignoredStyle.Render(iconIgnored)
 		name := renderNameCell(p, ignoredStyle, t, "", cols.name, selected)
 		priv := renderPrivilegeCol(privileged, cols.priv, ignoredStyle)
-		prov := ignoredStyle.Render(fitCellText(label, cols.prov))
+		provText := fitCellText(label, cols.prov)
+		provPadding := strings.Repeat(" ", max(0, cols.prov-lipgloss.Width(provText)))
+		prov := ignoredStyle.Render(provText) + provPadding
 		var ver string
 		switch {
 		case t.Installed && t.Outdated && t.LatestVersion.Valid:
@@ -517,7 +592,7 @@ func renderToolRowWithProviderPin(p palette, t *database.ToolCache, cols colWidt
 		switch {
 		case ss == syncOrphan:
 			icon = emphasis(p.styleOrphan).Render(iconOrphan)
-		case ss == syncWrongProv:
+		case ss == syncWrongProv, ss == syncNvmManaged:
 			icon = emphasis(p.styleWrongProv).Render(iconWrongProv)
 		case t.Installed && t.Outdated:
 			icon = emphasis(p.styleOutdated).Render(iconOutdated)
@@ -539,7 +614,7 @@ func renderToolRowWithProviderPin(p palette, t *database.ToolCache, cols colWidt
 	if fallbackConcrete != "" {
 		displayInstalledWith = fallbackConcrete
 	}
-	prov := renderProviderColWithExplicit(p, displayProvider, displayInstalledWith, providerPin, provSystemBin, provPythonBin, provNodeBin, label, cols.prov, selected, ss == syncWrongProv)
+	prov := renderProviderColWithExplicit(p, displayProvider, displayInstalledWith, providerPin, provSystemBin, provPythonBin, provNodeBin, label, cols.prov, selected, isProviderRepairSync(ss))
 
 	var ver string
 	switch {
@@ -649,9 +724,22 @@ func fitUpgradeVersionText(current, latest string, width int) (string, string) {
 	if lipgloss.Width(combined) <= width {
 		return current, " → " + latest
 	}
-	latestWidth := width - lipgloss.Width(current) - lipgloss.Width(" → ")
+	arrowW := lipgloss.Width(" → ")
+	latestWidth := width - lipgloss.Width(current) - arrowW
 	if latestWidth <= 0 {
-		return fitCellText(combined, width), ""
+		if width <= arrowW {
+			return fitCellText(combined, width), ""
+		}
+		currentWidth := width - arrowW - 1
+		if currentWidth < 1 {
+			currentWidth = 1
+		}
+		fittedCurrent := fitCellText(current, currentWidth)
+		remaining := width - lipgloss.Width(fittedCurrent) - arrowW
+		if remaining <= 0 {
+			remaining = 1
+		}
+		return fittedCurrent, " → " + fitCellText(latest, remaining)
 	}
 	return current, " → " + fitCellText(latest, latestWidth)
 }
@@ -735,11 +823,7 @@ func privilegeProviderCells(priv string, privW int, provider string, providerW i
 // Concrete part: italic+muted when it follows the default manager setting;
 // explicit per-tool overrides get a ! suffix, and wrong-provider rows are
 // highlighted with the warning style.
-// plainLabel must be the output of providerLabel() so the padding is correct.
-func renderProviderCol(p palette, raw, installedWith, systemBin, pythonBin, nodeBin, plainLabel string, colW int, selected, wrongProvider bool) string {
-	return renderProviderColWithExplicit(p, raw, installedWith, "", systemBin, pythonBin, nodeBin, plainLabel, colW, selected, wrongProvider)
-}
-
+// plainLabel must be the output of providerLabelForToolWithPin() so the padding is correct.
 func renderProviderColWithExplicit(p palette, raw, installedWith, explicitWith, systemBin, pythonBin, nodeBin, plainLabel string, colW int, selected, wrongProvider bool) string {
 	meta, concrete, _ := providerPartsWithExplicit(raw, installedWith, explicitWith, systemBin, pythonBin, nodeBin)
 
@@ -779,16 +863,13 @@ func providerMetaStyle(p palette, meta string) lipgloss.Style {
 	}
 }
 
-// providerParts splits a raw provider string into a meta label, the concrete
-// backend, and whether the backend is an explicit per-tool override.
+// providerPartsWithExplicit splits a raw provider string into a meta label,
+// the concrete backend, and whether the backend is an explicit per-tool
+// override.
 //
 // Ecosystem providers resolve concrete from installedWith, explicit pins, or
 // effective managers. Explicit pins plus concrete providers/managers render as
 // overrides.
-func providerParts(raw, installedWith, systemBin, pythonBin, nodeBin string) (meta, concrete string, isOverride bool) {
-	return providerPartsWithExplicit(raw, installedWith, "", systemBin, pythonBin, nodeBin)
-}
-
 func providerPartsWithExplicit(raw, installedWith, explicitWith, systemBin, pythonBin, nodeBin string) (meta, concrete string, isOverride bool) {
 	parts := app.ToolProviderDisplayParts(app.ToolProviderDisplayInput{
 		Provider:               raw,
@@ -836,22 +917,6 @@ func providerDisplayTextForToolWithPin(t *database.ToolCache, providerPin, fallb
 	return providerLabelForToolWithPin(t, providerPin, fallbackConcrete, systemBin, pythonBin, nodeBin)
 }
 
-// providerLabel converts a raw provider DB value to a human-readable label.
-func providerLabel(raw, installedWith, systemBin, pythonBin, nodeBin string) string {
-	return providerLabelWithExplicit(raw, installedWith, "", systemBin, pythonBin, nodeBin)
-}
-
-func providerLabelWithExplicit(raw, installedWith, explicitWith, systemBin, pythonBin, nodeBin string) string {
-	return app.ToolProviderDisplayLabel(app.ToolProviderDisplayInput{
-		Provider:               raw,
-		InstalledWith:          installedWith,
-		ExplicitProvider:       explicitWith,
-		EffectiveSystemManager: systemBin,
-		EffectivePythonManager: pythonBin,
-		EffectiveNodeManager:   nodeBin,
-	})
-}
-
 func providerPinForTool(t *database.ToolCache, providerPins map[string]string) string {
 	if t == nil || providerPins == nil {
 		return ""
@@ -896,6 +961,9 @@ func inlineDetailLines(m Model, width int, cols colWidths) []string {
 		lines = append(lines, line)
 	}
 
+	if line := nvmManagedDetailLine(m, t, prefix); line != "" {
+		lines = append(lines, line)
+	}
 	if line := providerMismatchDetailLine(m, t, prefix); line != "" {
 		lines = append(lines, line)
 	}
@@ -927,6 +995,9 @@ func toolRightGroupWidth(cols colWidths) int {
 	if cols.priv > 0 {
 		width += cols.priv + toolPrivilegeProviderGap
 	}
+	if cols.typ > 0 {
+		width += cols.typ + listColumnGap
+	}
 	if cols.group > 0 {
 		width += listColumnGap + cols.group
 	}
@@ -945,6 +1016,32 @@ func ignoreDetailLine(m Model, t *database.ToolCache, prefix string) string {
 		return ""
 	}
 	return prefix + m.palette.styleHelp.Render("ignored by ") + m.palette.styleIgnored.Render(label)
+}
+
+func nvmManagedDetailLine(m Model, t *database.ToolCache, prefix string) string {
+	if t == nil || m.syncStatusOf(t) != syncNvmManaged {
+		return ""
+	}
+	p := m.palette
+	prov := t.Provider
+	if t.Name == "node" {
+		return prefix +
+			p.styleWrongProv.Render("nvm-managed runtime") +
+			p.styleHelp.Render(": configured for ") +
+			p.styleStatus.Render(prov) +
+			p.styleHelp.Render(" but active binary is under nvm — press ") +
+			p.styleStatus.Render("r") +
+			p.styleHelp.Render(" to stop managing node through omni")
+	}
+	mgr := m.effectiveNodeManagerLabel()
+	return prefix +
+		p.styleWrongProv.Render("nvm-managed") +
+		p.styleHelp.Render(": configured for ") +
+		p.styleStatus.Render(prov) +
+		p.styleHelp.Render(" but resolves via nvm — press ") +
+		p.styleStatus.Render("r") +
+		p.styleHelp.Render(" to move to ") +
+		p.styleStatus.Render(mgr)
 }
 
 func providerMismatchDetailLine(m Model, t *database.ToolCache, prefix string) string {
@@ -1070,6 +1167,11 @@ func listConfirmationHintsLine(m Model, t *database.ToolCache, prefix string) st
 	case listConfirmReinstallDefault:
 		confirm := actions.MustTUIConfirmDescription(actions.ToolReinstallDefault)
 		return renderConfirmActionHints(m, prefix, m.keys.MigrateProvider, confirm)
+	case listConfirmMigrateNvm:
+		confirm := "move off " + c.provider + " to " + m.effectiveNodeManagerLabel()
+		return renderConfirmActionHints(m, prefix, m.keys.MigrateProvider, confirm)
+	case listConfirmRemoveNvmRuntime:
+		return renderConfirmActionHints(m, prefix, m.keys.MigrateProvider, "remove node from omni config (nvm owns runtime)")
 	case listConfirmClearProviderOverride:
 		return renderConfirmActionHints(m, prefix, m.keys.PinProvider, "remove provider override and reinstall with default")
 	default:

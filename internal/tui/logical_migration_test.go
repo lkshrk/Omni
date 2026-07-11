@@ -115,37 +115,6 @@ func TestLogicalMigration_SearchResultGroupSelectionAddsExplicitGroup(t *testing
 	}
 }
 
-func TestLogicalMigration_SearchInstallAndAddPersistsLogicalProvider(t *testing.T) {
-	prov := &okProvider{name: "brew"}
-	a, cfgPath := newCmdApp(t, prov, nil)
-	m := modelForCmds(a)
-
-	msg := m.doInstallAndAdd("ripgrep", "brew")()
-	got, ok := msg.(opCompleteMsg)
-	if !ok {
-		t.Fatalf("expected opCompleteMsg, got %T", msg)
-	}
-	if got.err != nil {
-		t.Fatalf("unexpected error: %v", got.err)
-	}
-
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	spec, ok := cfg.Tools["ripgrep"]
-	if !ok {
-		t.Fatalf("ripgrep logical spec missing from config: %+v", cfg.Tools)
-	}
-	if len(spec.Providers) != 1 || spec.Providers[0].Provider != "brew" {
-		t.Fatalf("ripgrep spec = %+v, want provider-list brew entry", spec)
-	}
-	host := groupByName(cfg, shortHostname())
-	if host == nil || !groupHasTool(host, "ripgrep") {
-		t.Fatalf("host group does not contain ripgrep: %+v", cfg.Groups)
-	}
-}
-
 func TestLogicalMigration_ConfiguredEmptyToolInstallKeyAddsHighConfidenceProviderMatch(t *testing.T) {
 	prov := &searchOKProvider{
 		okProvider: okProvider{name: "brew"},

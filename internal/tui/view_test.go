@@ -65,94 +65,6 @@ func TestViewAppliesASCIISymbolMode(t *testing.T) {
 	}
 }
 
-// ── dotsEntryNameColW ─────────────────────────────────────────────────────────
-
-func TestDotsEntryNameColW(t *testing.T) {
-	tests := []struct {
-		name    string
-		entries []app.DotStatus
-		wantMin int // result must be >= this value
-	}{
-		{
-			name:    "empty slice returns floor of 12",
-			entries: nil,
-			wantMin: 12,
-		},
-		{
-			name:    "all names shorter than 12",
-			entries: []app.DotStatus{{Name: "vim"}, {Name: "zsh"}},
-			wantMin: 12,
-		},
-		{
-			name: "name longer than 12 wins",
-			entries: []app.DotStatus{
-				{Name: "nvim"},
-				{Name: "this-is-a-very-long-name"},
-			},
-			wantMin: 24, // len("this-is-a-very-long-name")
-		},
-		{
-			name:    "single name exactly 12",
-			entries: []app.DotStatus{{Name: "123456789012"}},
-			wantMin: 12,
-		},
-		{
-			name:    "single name of length 13",
-			entries: []app.DotStatus{{Name: "1234567890123"}},
-			wantMin: 13,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := dotsEntryNameColW(tt.entries)
-			if got < tt.wantMin {
-				t.Errorf("dotsEntryNameColW() = %d, want >= %d", got, tt.wantMin)
-			}
-		})
-	}
-}
-
-func TestDotsEntryNameColW_LongestName(t *testing.T) {
-	entries := []app.DotStatus{
-		{Name: "short"},
-		{Name: "medium-name"},
-		{Name: "this-is-the-longest-one"},
-	}
-	got := dotsEntryNameColW(entries)
-	// must equal the longest name length (23)
-	if got != 23 {
-		t.Errorf("dotsEntryNameColW() = %d, want 23", got)
-	}
-}
-
-// ── dotHealthDisplay ──────────────────────────────────────────────────────────
-
-func TestDotHealthDisplay(t *testing.T) {
-	p := defaultPalette()
-	tests := []struct {
-		health    app.DotHealth
-		wantIcon  string
-		wantLabel string
-	}{
-		{app.HealthOK, "✓", "ok"},
-		{app.HealthMissing, "✗", "missing"},
-		{app.HealthConflict, "!", "conflict"},
-		{app.HealthNoSource, "·", "no-source"},
-		{app.DotHealth("unknown-status"), "·", "unknown-status"},
-	}
-	for _, tt := range tests {
-		t.Run(string(tt.health), func(t *testing.T) {
-			_, icon, label := dotHealthDisplay(p, tt.health)
-			if icon != tt.wantIcon {
-				t.Errorf("dotHealthDisplay(%q) icon = %q, want %q", tt.health, icon, tt.wantIcon)
-			}
-			if label != tt.wantLabel {
-				t.Errorf("dotHealthDisplay(%q) label = %q, want %q", tt.health, label, tt.wantLabel)
-			}
-		})
-	}
-}
-
 func TestDotStateDisplay_TrimsConflictSuffix(t *testing.T) {
 	p := defaultPalette()
 	_, _, label := dotStateDisplay(p, app.DotStateUntrackedConflict)
@@ -1254,67 +1166,6 @@ func TestRenderDots_UsesHomeAliasForUserPaths(t *testing.T) {
 	}
 }
 
-// ── confirmCancelHint ─────────────────────────────────────────────────────────
-
-func TestConfirmCancelHint(t *testing.T) {
-	m := baseModel(nil)
-	got := confirmCancelHint(m, "save changes")
-	if len(got) == 0 {
-		t.Error("expected non-empty hint string")
-	}
-	if !strings.Contains(got, "save changes") {
-		t.Errorf("expected 'save changes' in hint, got: %q", got)
-	}
-	if !strings.Contains(got, "cancel") {
-		t.Errorf("expected 'cancel' in hint, got: %q", got)
-	}
-}
-
-func TestConfirmCancelHint_UsesKeyBindings(t *testing.T) {
-	m := baseModel(nil)
-	// The hint should contain the Confirm key binding help text.
-	confirmKey := m.keys.Confirm.Help().Key
-	got := confirmCancelHint(m, "do it")
-	if !strings.Contains(got, confirmKey) {
-		t.Errorf("expected confirm key %q in hint %q", confirmKey, got)
-	}
-}
-
-// ── newCursorList ─────────────────────────────────────────────────────────────
-
-func TestNewCursorList_Basic(t *testing.T) {
-	p := defaultPalette()
-	items := []any{"alpha", "beta", "gamma"}
-	l := newCursorList(p, items, 0, 2)
-	if l == nil {
-		t.Fatal("expected non-nil list")
-	}
-	out := l.String()
-	if !strings.Contains(out, "alpha") {
-		t.Errorf("expected 'alpha' in list output, got:\n%s", out)
-	}
-}
-
-func TestNewCursorList_CursorMarker(t *testing.T) {
-	p := defaultPalette()
-	items := []any{"apple", "banana", "cherry"}
-	// cursor at second item
-	l := newCursorList(p, items, 1, 0)
-	out := l.String()
-	// The enumerator returns "‣" for the cursor row and " " for others.
-	if !strings.Contains(out, "‣") {
-		t.Errorf("expected cursor marker '‣' in list output, got:\n%s", out)
-	}
-}
-
-func TestNewCursorList_EmptyItems(t *testing.T) {
-	p := defaultPalette()
-	l := newCursorList(p, []any{}, 0, 0)
-	if l == nil {
-		t.Fatal("expected non-nil list even for empty items")
-	}
-}
-
 // ── hintKey ───────────────────────────────────────────────────────────────────
 
 func TestHintKey_NonEmpty(t *testing.T) {
@@ -1820,5 +1671,35 @@ func TestDotsRowHintItems_SynthesizedContainer_HasIgnoreHint(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("synthesized container with DotActionIgnore+State=Ignored should have 'include' hint, got hints: %v", descs)
+	}
+}
+
+func TestViewStatus_RendersWhileStartupSnapshotPending(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewStatus
+	m.loading = true
+	m.doctorRunning = true
+	m.width = 100
+	m.height = 24
+
+	out := m.viewString()
+	if !strings.Contains(out, "Doctor") {
+		t.Fatalf("expected dashboard doctor row while tools load, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Health Check") {
+		t.Fatalf("expected dashboard sections while tools load, got:\n%s", out)
+	}
+}
+
+func TestViewStatus_SuppressedDuringLaunchBatch(t *testing.T) {
+	m := baseModel(threeTools())
+	m.mode = viewStatus
+	m.launchBatchActive = true
+	m.width = 100
+	m.height = 24
+
+	out := m.viewString()
+	if strings.Contains(out, "Health Check") {
+		t.Fatalf("launch batch should suppress dashboard body, got:\n%s", out)
 	}
 }

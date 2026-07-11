@@ -17,6 +17,8 @@ const (
 	listConfirmDelete                = "delete"
 	listConfirmReinstallDefault      = "reinstall-default"
 	listConfirmClearProviderOverride = "clear-provider-override"
+	listConfirmMigrateNvm            = "migrate-nvm"
+	listConfirmRemoveNvmRuntime      = "remove-nvm-runtime"
 )
 
 func (m *Model) handleListNavigationKeyMsg(msg tea.KeyPressMsg) bool {
@@ -25,14 +27,14 @@ func (m *Model) handleListNavigationKeyMsg(msg tea.KeyPressMsg) bool {
 		if candidates := providerCandidateOptions(*m, m.selectedTool()); len(candidates) > 0 && m.providerCandidateCursor > 0 {
 			m.providerCandidateCursor--
 		} else if n := len(m.visibleTools); n > 0 {
-			m.cursor = (m.cursor - 1 + n) % n
+			m.cursor = cursorMove(m.cursor, -1, n, true)
 			m.providerCandidateCursor = max(len(providerCandidateOptions(*m, m.selectedTool()))-1, 0)
 		}
 	case key.Matches(msg, m.keys.Down):
 		if candidates := providerCandidateOptions(*m, m.selectedTool()); len(candidates) > 0 && m.providerCandidateCursor < len(candidates)-1 {
 			m.providerCandidateCursor++
 		} else if n := len(m.visibleTools); n > 0 {
-			m.cursor = (m.cursor + 1) % n
+			m.cursor = cursorMove(m.cursor, 1, n, true)
 			m.providerCandidateCursor = 0
 		}
 	case key.Matches(msg, m.keys.Top):
@@ -224,7 +226,7 @@ func (m *Model) handleListActionKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		if t := m.selectedTool(); t != nil {
 			if providerPinForTool(t, m.toolProviderPins) != "" {
 				cmds = append(cmds, m.armListConfirmation(listConfirmClearProviderOverride, t))
-			} else if m.syncStatusOf(t) == syncWrongProv {
+			} else if isProviderRepairSync(m.syncStatusOf(t)) {
 				m.openProviderScopePicker(t)
 			}
 		}
@@ -241,8 +243,17 @@ func (m *Model) handleListActionKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		if msg.IsRepeat {
 			break
 		}
-		if t := m.selectedTool(); t != nil && m.syncStatusOf(t) == syncWrongProv {
-			cmds = append(cmds, m.armListConfirmation(listConfirmReinstallDefault, t))
+		if t := m.selectedTool(); t != nil {
+			switch m.syncStatusOf(t) {
+			case syncWrongProv:
+				cmds = append(cmds, m.armListConfirmation(listConfirmReinstallDefault, t))
+			case syncNvmManaged:
+				if t.Name == "node" {
+					cmds = append(cmds, m.armListConfirmation(listConfirmRemoveNvmRuntime, t))
+				} else {
+					cmds = append(cmds, m.armListConfirmation(listConfirmMigrateNvm, t))
+				}
+			}
 		}
 	}
 
@@ -310,6 +321,17 @@ func (m *Model) handleListConfirmationKeyMsg(msg tea.KeyPressMsg) (bool, []tea.C
 		startOp(m, "Reinstalling "+c.name+" with default ("+c.provider+")…")
 		m.startRowOperation(c.name, c.provider, m.statusMsg)
 		cmds = append(cmds, m.spinner.Tick, m.doMigrateProvider(c.name, c.provider, c.installedWith))
+	case listConfirmMigrateNvm:
+		m.loading = true
+		m.migrating = true
+		startOp(m, "Migrating "+c.name+" off Homebrew to "+m.effectiveNodeManagerLabel()+"…")
+		m.startRowOperation(c.name, c.provider, m.statusMsg)
+		cmds = append(cmds, m.spinner.Tick, m.doMigrateNvmTool(c.name))
+	case listConfirmRemoveNvmRuntime:
+		m.loading = true
+		startOp(m, "Removing "+c.name+" from omni config…")
+		m.startRowOperation(c.name, c.provider, m.statusMsg)
+		cmds = append(cmds, m.spinner.Tick, m.doMigrateNvmTool(c.name))
 	case listConfirmClearProviderOverride:
 		m.loading = true
 		m.migrating = c.installed && c.installedWith != ""
@@ -479,7 +501,7 @@ func (m *Model) matchesListConfirmationAction(msg tea.KeyPressMsg) bool {
 		return key.Matches(msg, m.keys.SyncAll)
 	case listConfirmDelete:
 		return key.Matches(msg, m.keys.Delete)
-	case listConfirmReinstallDefault:
+	case listConfirmReinstallDefault, listConfirmMigrateNvm, listConfirmRemoveNvmRuntime:
 		return key.Matches(msg, m.keys.MigrateProvider)
 	case listConfirmClearProviderOverride:
 		return key.Matches(msg, m.keys.PinProvider)

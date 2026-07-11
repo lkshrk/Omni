@@ -2600,14 +2600,14 @@ func TestFlow2_UC146_GroupColAlwaysVisible(t *testing.T) {
 	}
 
 	t.Run("host group only → cols.group shows host badge", func(t *testing.T) {
-		cols := newColWidths(tools, tg, nil, "", "", "", 120)
+		cols := newColWidthsWithProviderPins(tools, tg, nil, nil, nil, "", "", "", 120)
 		if cols.group < len("[host]") {
 			t.Errorf("cols.group = %d, too narrow for [host]", cols.group)
 		}
 	})
 
 	t.Run("with reusable groups → cols.group>0 even if all tools are in host group", func(t *testing.T) {
-		cols := newColWidths(tools, tg, []string{"work"}, "", "", "", 120)
+		cols := newColWidthsWithProviderPins(tools, tg, []string{"work"}, nil, nil, "", "", "", 120)
 		if cols.group == 0 {
 			t.Error("cols.group should be > 0 when reusable groups exist")
 		}

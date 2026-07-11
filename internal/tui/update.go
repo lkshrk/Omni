@@ -1,8 +1,12 @@
 package tui
 
 import (
+	"fmt"
+
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/lkshrk/omni/internal/app"
 )
 
 // Update handles messages and key events.
@@ -32,7 +36,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.FocusMsg:
 		m.focused = true
 		// Re-kick the spinner tick chain if any activity is still ongoing.
-		if m.loading || len(m.scanningProviders) > 0 || len(m.outdatedProviders) > 0 || m.providerSnapshotRefreshing || m.outdatedSnapshotRefreshing || m.discoveryRefreshing || m.descRefreshing || m.dotsLoading || m.dotsPeekLoading || m.traceLogLoading || m.searching || len(m.upgradingKeys) > 0 {
+		if m.spinnerActivityActive() {
 			cmds = append(cmds, m.spinner.Tick)
 		}
 
@@ -72,7 +76,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case spinner.TickMsg:
 		// Only reschedule while focused — avoids burning CPU in the background.
-		if m.focused && (m.loading || len(m.scanningProviders) > 0 || len(m.outdatedProviders) > 0 || m.providerSnapshotRefreshing || m.outdatedSnapshotRefreshing || m.discoveryRefreshing || m.descRefreshing || m.dotsLoading || m.dotsPeekLoading || m.traceLogLoading || m.searching || len(m.upgradingKeys) > 0) {
+		if m.focused && m.spinnerActivityActive() {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			cmds = append(cmds, cmd)
@@ -101,6 +105,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case setupBootstrapDoneMsg:
 		cmds = append(cmds, m.handleSetupBootstrapDoneMsg(msg)...)
+
+	case setupAgentsDiffMsg:
+		cmds = append(cmds, m.handleSetupAgentsDiffMsg(msg)...)
+
+	case setupAgentsImportDoneMsg:
+		cmds = append(cmds, m.handleSetupAgentsImportDoneMsg(msg)...)
 
 	case stowInstallDoneMsg:
 		cmds = append(cmds, m.handleStowInstallDoneMsg(msg)...)
@@ -206,6 +216,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fixIgnoreDoneMsg:
 		cmds = append(cmds, m.handleFixIgnoreDoneMsg(msg)...)
 
+	case fixNvmDoneMsg:
+		cmds = append(cmds, m.handleFixNvmDoneMsg(msg)...)
+
 	case dotsServiceChangedMsg:
 		cmds = append(cmds, m.handleDotsServiceChangedMsg(msg)...)
 
@@ -278,10 +291,59 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fallbackSavedMsg:
 		cmds = append(cmds, m.handleFallbackSavedMsg(msg)...)
 
+	case agentsSummaryLoadedMsg:
+		if msg.err == nil {
+			m.agentsSummary = msg.summary
+		}
+
+	case nvmManagedLoadedMsg:
+		if msg.err == nil {
+			m.nvmManaged = msg.nvmManaged
+			m.applyFilter()
+		}
+
+	case agentsIgnoreReloadedMsg:
+		if msg.err == nil {
+			m.agentsIgnore = msg.ignore
+			clampAgentsAllCursor(&m)
+		}
+
+	case agentsIgnoreToggledMsg:
+		m.clearAgentsOp()
+		if msg.err != nil {
+			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
+		} else {
+			desc := "ignored"
+			if !msg.nowIgnored {
+				desc = "unignored"
+			}
+			cmds = append(cmds, setStatus(&m, "✓ "+msg.name+" "+desc, false), m.doReloadAgentsIgnore(), m.doLoadAgentsSummary())
+		}
+		return m, tea.Batch(cmds...)
+
 	case skillsManifestLoadedMsg:
 		m.skillsRows = msg.rows
+		m.skillsUnmanagedRows = msg.unmanaged
 		m.skillsErr = msg.err
 		m.skillsLoaded = true
+		if m.skillAgentIdx > len(skillAgentIDs(m.skillsRows, m.enabledAgents)) {
+			m.skillAgentIdx = 0
+		}
+		clampSkillsCursor(&m)
+		clampAgentsAllCursor(&m)
+		cmds = append(cmds, m.doLoadAgentsSummary())
+
+	case skillsGroupsUpdatedMsg:
+		if msg.err != nil {
+			m.skillsErr = msg.err
+		} else {
+			m.skillsRows = msg.rows
+			if m.skillAgentIdx > len(skillAgentIDs(m.skillsRows, m.enabledAgents)) {
+				m.skillAgentIdx = 0
+			}
+			clampSkillsCursor(&m)
+			clampAgentsAllCursor(&m)
+		}
 
 	case skillsRestoredMsg:
 		m.skillsRunning = false
@@ -291,7 +353,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			r := msg.res
 			m.skillsResult = &r
 			m.skillsLoaded = false
-			cmds = append(cmds, m.loadSkillsManifestCmd())
+			cmds = append(cmds, setStatus(&m, app.RestoreSkillsSummaryText(r), false), m.loadSkillsManifestCmd(), m.doLoadAgentsSummary())
 		}
 		return m, tea.Batch(cmds...)
 
@@ -303,17 +365,65 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			d := msg.diff
 			m.skillsImport = &d
 			m.skillsLoaded = false
-			cmds = append(cmds, m.loadSkillsManifestCmd())
+			cmds = append(cmds, setStatus(&m, app.ImportDiffSummaryText(d), false), m.loadSkillsManifestCmd())
 		}
 		return m, tea.Batch(cmds...)
 
 	case skillsUpdatedMsg:
 		m.skillsRunning = false
+		m.clearAgentsOp()
 		if msg.err != nil {
 			m.skillsErr = msg.err
 		} else {
 			m.skillsLoaded = false
-			cmds = append(cmds, m.loadSkillsManifestCmd())
+			cmds = append(cmds, setStatus(&m, "✓ skills updated", false), m.loadSkillsManifestCmd())
+		}
+		return m, tea.Batch(cmds...)
+
+	case skillsFoundMsg:
+		m.skillAddRunning = false
+		m.searching = false
+		if msg.err != nil {
+			m.skillsErr = msg.err
+			m.skillsSearchActive = false
+			m.filter.SetValue("")
+			m.filter.Blur()
+			clampSkillsCursor(&m)
+			clampAgentsAllCursor(&m)
+		} else {
+			m.skillFindResults = msg.results
+			m.skillFindCursor = 0
+			clampSkillsCursor(&m)
+			clampAgentsAllCursor(&m)
+			cmds = append(cmds, setStatus(&m, fmt.Sprintf("found %d", len(msg.results)), false))
+		}
+
+	case skillAddedMsg:
+		m.skillAddRunning = false
+		m.clearAgentsOp()
+		m.searching = false
+		m.skillsSearchActive = false
+		m.skillFindResults = nil
+		m.filter.SetValue("")
+		m.filter.Blur()
+		clampSkillsCursor(&m)
+		clampAgentsAllCursor(&m)
+		if msg.err != nil {
+			m.skillsErr = msg.err
+		} else {
+			m.skillsLoaded = false
+			cmds = append(cmds, m.loadSkillsManifestCmd(), m.doLoadAgentsSummary())
+		}
+		return m, tea.Batch(cmds...)
+
+	case skillRemovedMsg:
+		m.skillsRunning = false
+		m.clearAgentsOp()
+		if msg.err != nil {
+			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
+		} else {
+			m.skillsLoaded = false
+			cmds = append(cmds, m.loadSkillsManifestCmd(), m.doLoadAgentsSummary())
 		}
 		return m, tea.Batch(cmds...)
 
@@ -327,6 +437,54 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.skillsLoaded = false
 				cmds = append(cmds, m.loadSkillsManifestCmd())
 			}
+			cmds = append(cmds, m.doLoadAgentsSummary())
+		}
+		return m, tea.Batch(cmds...)
+
+	case skillsFeatureToggledMsg:
+		if msg.err != nil {
+			m.skillsErr = msg.err
+		} else {
+			m.skillsEnabled = msg.enabled
+			m.skillsErr = nil
+			if msg.enabled && m.agentsEnabled {
+				m.skillsLoaded = false
+				cmds = append(cmds, m.loadSkillsManifestCmd())
+			}
+			cmds = append(cmds, m.doLoadAgentsSummary())
+		}
+		return m, tea.Batch(cmds...)
+
+	case mcpFeatureToggledMsg:
+		if msg.err != nil {
+			m.mcpErr = msg.err
+		} else {
+			m.mcpEnabled = msg.enabled
+			m.mcpErr = nil
+			if msg.enabled && m.agentsEnabled {
+				m.mcpLoaded = false
+				m.mcpRunning = true
+				cmds = append(cmds, m.spinner.Tick, m.doLoadMcpRows())
+			}
+			cmds = append(cmds, m.doLoadAgentsSummary())
+		}
+		return m, tea.Batch(cmds...)
+
+	case pluginsFeatureToggledMsg:
+		if msg.err != nil {
+			m.pluginErr = msg.err
+		} else {
+			m.pluginsEnabled = msg.enabled
+			m.pluginErr = nil
+			if msg.enabled && m.agentsEnabled {
+				m.pluginLoaded = false
+				m.pluginRunning = true
+				cmds = append(cmds, m.spinner.Tick, m.doLoadPluginRows())
+				m.marketplaceLoaded = false
+				m.marketplaceRunning = true
+				cmds = append(cmds, m.spinner.Tick, m.doLoadMarketplaceRows())
+			}
+			cmds = append(cmds, m.doLoadAgentsSummary())
 		}
 		return m, tea.Batch(cmds...)
 
@@ -336,6 +494,277 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.settings.AgentsUse = msg.ids
 			cmds = append(cmds, setStatus(&m, "✓ agents saved", false))
+		}
+		return m, tea.Batch(cmds...)
+
+	case skillAgentsSavedMsg:
+		if msg.err != nil {
+			m.skillsErr = msg.err
+		} else {
+			m.skillsRows = msg.rows
+			if m.skillAgentIdx > len(skillAgentIDs(m.skillsRows, m.enabledAgents)) {
+				m.skillAgentIdx = 0
+			}
+			clampSkillsCursor(&m)
+			clampAgentsAllCursor(&m)
+			cmds = append(cmds, setStatus(&m, "✓ agents updated", false))
+		}
+		return m, tea.Batch(cmds...)
+
+	case mcpRowsMsg:
+		m.mcpRunning = false
+		m.mcpRows = msg.rows
+		m.mcpUnmanaged = msg.unmanaged
+		m.mcpErr = msg.err
+		clampMcpCursor(&m)
+		clampAgentsAllCursor(&m)
+
+	case mcpRestoreDoneMsg:
+		m.mcpRunning = false
+		if msg.err != nil {
+			m.mcpErr = msg.err
+		} else {
+			m.mcpErr = nil
+			cmds = append(cmds, m.doLoadMcpRows())
+		}
+		return m, tea.Batch(cmds...)
+
+	case mcpRemoveDoneMsg:
+		m.mcpRunning = false
+		m.clearAgentsOp()
+		if msg.err != nil {
+			m.mcpErr = msg.err
+		} else {
+			m.mcpErr = nil
+			cmds = append(cmds, m.doLoadMcpRows())
+		}
+		return m, tea.Batch(cmds...)
+
+	case mcpImportAdoptDoneMsg:
+		m.mcpRunning = false
+		m.clearAgentsOp()
+		if msg.err != nil {
+			m.mcpErr = msg.err
+			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
+		} else {
+			m.mcpErr = nil
+			cmds = append(cmds, m.doLoadMcpRows())
+		}
+		return m, tea.Batch(cmds...)
+
+	case mcpAgentsSavedMsg:
+		m.mcpRunning = false
+		m.clearAgentsOp()
+		if msg.err != nil {
+			m.mcpErr = msg.err
+		} else {
+			m.mcpErr = nil
+			cmds = append(cmds, m.doLoadMcpRows())
+		}
+		return m, tea.Batch(cmds...)
+
+	case mcpGroupsSavedMsg:
+		if msg.err != nil {
+			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
+		} else {
+			cmds = append(cmds, m.doLoadMcpRows())
+		}
+		return m, tea.Batch(cmds...)
+
+	case pluginRowsMsg:
+		m.pluginRunning = false
+		m.pluginRows = msg.rows
+		m.pluginUnmanaged = msg.unmanaged
+		m.pluginErr = msg.err
+		clampPluginCursor(&m)
+		clampAgentsAllCursor(&m)
+
+	case pluginRestoreDoneMsg:
+		m.pluginRunning = false
+		if msg.err != nil {
+			m.pluginErr = msg.err
+		} else {
+			m.pluginErr = nil
+			cmds = append(cmds, m.doLoadPluginRows())
+		}
+		return m, tea.Batch(cmds...)
+
+	case pluginRemoveDoneMsg:
+		m.pluginRunning = false
+		m.clearAgentsOp()
+		if msg.err != nil {
+			m.pluginErr = msg.err
+		} else {
+			m.pluginErr = nil
+			cmds = append(cmds, m.doLoadPluginRows())
+		}
+		return m, tea.Batch(cmds...)
+
+	case pluginImportAdoptDoneMsg:
+		m.pluginRunning = false
+		m.clearAgentsOp()
+		if msg.err != nil {
+			m.pluginErr = msg.err
+			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
+		} else {
+			m.pluginErr = nil
+			cmds = append(cmds, m.doLoadPluginRows())
+			if msg.reloadMarketplaces {
+				cmds = append(cmds, m.doLoadMarketplaceRows())
+			}
+		}
+		return m, tea.Batch(cmds...)
+
+	case pluginNeedsMarketplaceMsg:
+		// Loading stays true (set by runAgentsClaimGroupPickerAction) until the
+		// user answers the offer, so the spinner keeps showing on the row.
+		cmds = append(cmds, m.armPluginMarketplaceOffer(msg))
+		return m, tea.Batch(cmds...)
+
+	case pluginAgentsSavedMsg:
+		m.pluginRunning = false
+		m.clearAgentsOp()
+		if msg.err != nil {
+			m.pluginErr = msg.err
+		} else {
+			m.pluginErr = nil
+			cmds = append(cmds, m.doLoadPluginRows())
+		}
+		return m, tea.Batch(cmds...)
+
+	case pluginGroupsSavedMsg:
+		if msg.err != nil {
+			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
+		} else {
+			cmds = append(cmds, m.doLoadPluginRows())
+		}
+		return m, tea.Batch(cmds...)
+
+	case pluginUpdateDoneMsg:
+		m.pluginRunning = false
+		m.clearAgentsOp()
+		if msg.err != nil {
+			m.pluginErr = msg.err
+		} else {
+			m.pluginErr = nil
+			cmds = append(cmds, m.doLoadPluginRows())
+		}
+		return m, tea.Batch(cmds...)
+
+	case marketplaceRowsMsg:
+		m.marketplaceRunning = false
+		m.marketplaceRows = msg.rows
+		m.marketplaceUnmanaged = msg.unmanaged
+		m.marketplaceErr = msg.err
+		clampMarketplaceCursor(&m)
+		clampAgentsAllCursor(&m)
+
+	case marketplaceRemoveDoneMsg:
+		m.marketplaceRunning = false
+		m.clearAgentsOp()
+		if msg.err != nil {
+			m.marketplaceErr = msg.err
+		} else {
+			m.marketplaceErr = nil
+			cmds = append(cmds, m.doLoadMarketplaceRows())
+		}
+		return m, tea.Batch(cmds...)
+
+	case marketplaceImportAdoptDoneMsg:
+		m.marketplaceRunning = false
+		m.clearAgentsOp()
+		if msg.err != nil {
+			m.marketplaceErr = msg.err
+			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
+		} else {
+			m.marketplaceErr = nil
+			cmds = append(cmds, m.doLoadMarketplaceRows())
+		}
+		return m, tea.Batch(cmds...)
+
+	case marketplaceGroupsSavedMsg:
+		if msg.err != nil {
+			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
+		} else {
+			cmds = append(cmds, m.doLoadMarketplaceRows())
+		}
+		return m, tea.Batch(cmds...)
+
+	case agentsProgressDoneMsg:
+		if msg.gen != m.progressGen {
+			return m, tea.Batch(cmds...)
+		}
+		m.progressGen++
+		m.progressText = ""
+		m.progressCh = nil
+		if msg.skills {
+			m.skillsRunning = false
+			m.skillsErr = msg.skillsErr
+			if msg.skillsErr == nil {
+				m.skillsLoaded = false
+				cmds = append(cmds, m.loadSkillsManifestCmd())
+			}
+		}
+		if msg.mcp {
+			m.mcpRunning = false
+			m.mcpErr = msg.mcpErr
+			if msg.mcpErr == nil {
+				cmds = append(cmds, m.doLoadMcpRows())
+			}
+		}
+		if msg.plugin {
+			m.pluginRunning = false
+			m.pluginErr = msg.pluginErr
+			if msg.pluginErr == nil {
+				cmds = append(cmds, m.doLoadPluginRows())
+			}
+		}
+		if msg.marketplace {
+			m.marketplaceRunning = false
+			m.marketplaceErr = msg.marketplaceErr
+			if msg.marketplaceErr == nil {
+				cmds = append(cmds, m.doLoadMarketplaceRows())
+			}
+		}
+		// A plugin update also refreshes marketplaces internally (see
+		// App.UpdatePlugins), so reload marketplace rows on that path too
+		// even though msg.marketplace is false — otherwise UpdatedAt stays
+		// stale in the TUI's cached rows until the next manual refresh.
+		if msg.plugin && !msg.marketplace && msg.pluginErr == nil && m.marketplacesSectionEnabled() {
+			cmds = append(cmds, m.doLoadMarketplaceRows())
+		}
+		cmds = append(cmds, m.doLoadAgentsSummary())
+		return m, tea.Batch(cmds...)
+
+	case mcpAddDoneMsg:
+		m.mcpRunning = false
+		if msg.err != nil {
+			if m.mcpFormOpen {
+				m.mcpFormErr = msg.err
+			} else {
+				cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
+			}
+		} else {
+			m.mcpFormOpen = false
+			m.mcpFormErr = nil
+			m.resetMcpForm()
+			cmds = append(cmds, m.doLoadMcpRows())
+		}
+		return m, tea.Batch(cmds...)
+
+	case pluginAddDoneMsg:
+		m.pluginRunning = false
+		if msg.err != nil {
+			if m.pluginFormOpen {
+				m.pluginFormErr = msg.err
+			} else {
+				cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
+			}
+		} else {
+			m.pluginFormOpen = false
+			m.pluginFormErr = nil
+			m.resetPluginForm()
+			cmds = append(cmds, m.doLoadPluginRows())
 		}
 		return m, tea.Batch(cmds...)
 
@@ -354,6 +783,9 @@ func (m *Model) handleMouseClickMsg(msg tea.MouseClickMsg, cmds *[]tea.Cmd) bool
 	if m.handleToolFilterClick(mouse.X, mouse.Y) {
 		return true
 	}
+	if m.handleAgentsFilterClick(mouse.X, mouse.Y) {
+		return true
+	}
 	if !m.mainTabsClickable() {
 		return false
 	}
@@ -367,23 +799,39 @@ func (m *Model) handleToolFilterClick(x, y int) bool {
 	if !m.toolFiltersClickable() {
 		return false
 	}
-	for _, zone := range toolFilterHitZones(*m) {
-		if y != zone.y || x < zone.start || x >= zone.end {
-			continue
-		}
-		switch zone.kind {
-		case toolFilterProvider:
-			m.providerTabIdx = zone.index
-		case toolFilterGroup:
-			m.groupTabIdx = zone.index
-			m.setGroupFilterFromIdx(buildAllGroupNames(visibleGroupNames(*m)))
-		}
-		m.applyFilter()
-		m.cursor = 0
-		m.clearListConfirmation()
-		return true
+	zone, ok := matchHitZone(toolFilterHitZones, *m, x, y)
+	if !ok {
+		return false
 	}
-	return false
+	switch zone.kind {
+	case toolFilterProvider:
+		m.providerTabIdx = zone.index
+	case toolFilterGroup:
+		m.groupTabIdx = zone.index
+		m.setGroupFilterFromIdx(buildAllGroupNames(visibleGroupNames(*m)))
+	}
+	m.applyFilter()
+	m.cursor = 0
+	m.clearListConfirmation()
+	return true
+}
+
+func (m *Model) handleAgentsFilterClick(x, y int) bool {
+	if m.mode != viewSkills {
+		return false
+	}
+	zone, ok := matchHitZone(agentsFilterHitZones, *m, x, y)
+	if !ok {
+		return false
+	}
+	switch zone.kind {
+	case agentsFilterType:
+		m.setAgentsChip(zone.index)
+	case agentsFilterAgent:
+		m.skillAgentIdx = zone.index
+		clampSkillsCursor(m)
+	}
+	return true
 }
 
 func (m Model) toolFiltersClickable() bool {
@@ -440,7 +888,7 @@ func (m *Model) scrollBy(delta int) {
 	}
 	switch m.mode {
 	case viewList, viewSearch:
-		m.cursor = clampIndex(m.cursor+delta, len(m.visibleTools))
+		m.cursor = cursorMove(m.cursor, delta, len(m.visibleTools), true)
 		m.clearListConfirmation()
 	case viewCommand:
 		m.commandCursor = clampRange(m.commandCursor+delta, -1, max(len(m.commandSuggestions)-1, -1))
@@ -462,12 +910,30 @@ func (m *Model) scrollBy(delta int) {
 		m.scopeCursor = clampIndex(m.scopeCursor+delta, len(m.scopeOptions))
 	case viewSetup:
 		m.scrollSetupBy(delta)
+	case viewSkills:
+		m.scrollSkillsTabBy(delta)
+	}
+}
+
+// scrollSkillsTabBy routes a mouse wheel scroll on the agents tab to the
+// same cursor-move logic the active chip's key handler uses, so wheel and
+// keyboard navigation stay in lockstep.
+func (m *Model) scrollSkillsTabBy(delta int) {
+	switch m.skillTypeIdx {
+	case agentsChipAll:
+		agentsAllCursorMove(m, delta)
+	case agentsChipSkills:
+		m.agentsChipMoveRow(agentsSectionSkills, delta)
+	case agentsChipMcp:
+		m.agentsChipMoveRow(agentsSectionMcp, delta)
+	case agentsChipPlugin:
+		m.agentsChipMoveRow(agentsSectionPlugins, delta)
 	}
 }
 
 func (m *Model) scrollDotsBy(delta int) {
 	visible := dotsVisibleRows(*m)
-	m.dotsCursor = clampIndex(m.dotsCursor+delta, len(visible))
+	m.dotsCursor = cursorMove(m.dotsCursor, delta, len(visible), true)
 	m.syncDotsExpandedName(visible)
 	m.clearDotsConfirmState()
 }

@@ -283,10 +283,6 @@ func groupToolsNeedsFilteredRows(m Model) bool {
 	return m.groupToolsProviderIdx != 0 || strings.TrimSpace(m.groupToolsEditor.search) != ""
 }
 
-func groupToolsContentWidth(m Model) int {
-	return groupToolsPopupLayoutFor(m).contentWidth
-}
-
 func groupDotsPopupLayoutFor(m Model) groupDotsPopupLayout {
 	base := unfilteredHostGroupDotsModel(m)
 	baseRows := groupDotRows(base)
@@ -320,10 +316,6 @@ func groupDotsPopupLayoutFor(m Model) groupDotsPopupLayout {
 
 func groupDotsNeedsFilteredRows(m Model) bool {
 	return strings.TrimSpace(m.groupDotsEditor.search) != ""
-}
-
-func groupDotsContentWidth(m Model) int {
-	return groupDotsPopupLayoutFor(m).contentWidth
 }
 
 func groupToolsEditorContentHeight(m Model, rows []groupToolRow, contentW int) int {
@@ -643,22 +635,27 @@ func ignoreScopeOptions(m Model, t *database.ToolCache) []scopeOption {
 	if t == nil {
 		return nil
 	}
-	toolChecked := m.toolIgnoreSet[t.Name]
-	options := []scopeOption{{
-		kind:    "tool",
-		label:   "tool everywhere",
-		detail:  "config tools." + t.Name + ".ignore",
-		checked: toolChecked, initialChecked: toolChecked,
-	}}
-	for _, group := range m.toolMemberships[toolMembershipKey(t)] {
-		checked := m.groupIgnoreSet[t.Name] != nil && m.groupIgnoreSet[t.Name][group]
+	var options []scopeOption
+	if t.Tracked {
+		toolChecked := m.toolIgnoreSet[t.Name]
 		options = append(options, scopeOption{
-			kind:    "group",
-			label:   "group: " + group,
-			detail:  "skip in this group",
-			group:   group,
-			checked: checked, initialChecked: checked,
+			kind:    "tool",
+			label:   "tool everywhere",
+			detail:  "config tools." + t.Name + ".ignore",
+			checked: toolChecked, initialChecked: toolChecked,
 		})
+	}
+	if t.Tracked {
+		for _, group := range m.toolMemberships[toolMembershipKey(t)] {
+			checked := m.groupIgnoreSet[t.Name] != nil && m.groupIgnoreSet[t.Name][group]
+			options = append(options, scopeOption{
+				kind:    "group",
+				label:   "group: " + group,
+				detail:  "skip in this group",
+				group:   group,
+				checked: checked, initialChecked: checked,
+			})
+		}
 	}
 	if m.hostInfo != nil && m.hostInfo.Active != "" {
 		checked := m.ignoreSet[t.Name]
@@ -762,15 +759,19 @@ func groupMembershipContentWidth(m Model) int {
 }
 
 func groupPickerContentWidth(m Model) int {
-	t := m.selectedTool()
-	if t == nil {
-		return popupContentWidth(m, lipgloss.Width("no tool selected"), 24, 40)
+	group := ""
+	if !m.pickerClaimAgentsSet {
+		t, ok := m.groupPickerActionTool()
+		if !ok {
+			return popupContentWidth(m, lipgloss.Width("no tool selected"), 24, 40)
+		}
+		group = m.toolGroups[toolKey(t.Name, t.Provider)]
 	}
 	width := 0
-	labelW, detailW := groupPickerColumnWidths(m, m.toolGroups[toolKey(t.Name, t.Provider)])
+	labelW, detailW := groupPickerColumnWidths(m, group)
 	for _, g := range m.pickerGroups {
 		rowW := 2 + labelW
-		if detail := groupPickerDetail(m, g, m.toolGroups[toolKey(t.Name, t.Provider)]); detail != "" {
+		if detail := groupPickerDetail(m, g, group); detail != "" {
 			rowW += 2 + detailW
 		}
 		width = max(width, rowW)

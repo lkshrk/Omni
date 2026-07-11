@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/lkshrk/omni/internal/app"
 )
 
@@ -21,6 +23,7 @@ func TestSkills_MainTabsContainsSkills(t *testing.T) {
 func TestSkills_ViewBodyEmptyManifest(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSkills
+	m.skillTypeIdx = agentsChipSkills
 	out := m.viewSkillsBody()
 	if !strings.Contains(out, "No agent skills tracked yet.") {
 		t.Errorf("viewSkillsBody() with empty manifest missing 'No agent skills tracked yet.', got:\n%s", out)
@@ -33,53 +36,64 @@ func TestSkills_ViewBodyEmptyManifest(t *testing.T) {
 func TestSkills_ViewBodyWithSkills(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSkills
-	m.skillsRows = []app.SkillRow{
-		{Name: "caveman", Source: "github.com/foo/caveman", Installed: true},
-		{Name: "review", Source: "github.com/bar/review", Ref: "v2"},
+	m.skillTypeIdx = agentsChipSkills
+	m.agentsEnabled = true
+	m.width = 120
+	// Name IS the owner/repo — that is the display text in the name column.
+	m.enabledAgents = []string{"claude"}
+	m.skillsRows = []app.SkillPackageRow{
+		{Name: "github.com/foo/caveman", Source: "github.com/foo/caveman", Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
+		{Name: "github.com/bar/review", Source: "github.com/bar/review", Ref: "v2", PerAgentStatus: map[string]bool{"claude": false}},
 	}
-	out := m.viewSkillsBody()
-	if !strings.Contains(out, "caveman") {
-		t.Errorf("viewSkillsBody() missing skill name 'caveman', got:\n%s", out)
-	}
+	m.skillsCursor = 0
+	out := stripANSIEscapeSequences(m.viewSkillsBody())
 	if !strings.Contains(out, "github.com/foo/caveman") {
-		t.Errorf("viewSkillsBody() missing source 'github.com/foo/caveman', got:\n%s", out)
+		t.Errorf("viewSkillsBody() missing row 'github.com/foo/caveman', got:\n%s", out)
 	}
 	if !strings.Contains(out, "github.com/bar/review") {
-		t.Errorf("viewSkillsBody() missing source 'github.com/bar/review', got:\n%s", out)
+		t.Errorf("viewSkillsBody() missing row 'github.com/bar/review', got:\n%s", out)
 	}
-	if !strings.Contains(out, "[r] restore") {
-		t.Errorf("viewSkillsBody() missing footer, got:\n%s", out)
+	// Per-row hints appear inline under the selected row, eligibility-driven
+	// via agentsRowHints — an installed row is update-eligible.
+	// Hint format: key then desc, no brackets (e.g. "u update").
+	if !strings.Contains(out, "u update") {
+		t.Errorf("viewSkillsBody() missing per-row hint 'u update' for selected row, got:\n%s", out)
 	}
 }
 
 func TestSkills_ViewBodySectionHeaders(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSkills
-	m.skillsRows = []app.SkillRow{
-		{Name: "caveman", Source: "github.com/foo/caveman", Agents: []string{"claude"}, Updated: "2026-06-01", Installed: true},
-		{Name: "review", Source: "github.com/bar/review", Installed: false},
+	m.skillTypeIdx = agentsChipSkills
+	// Name IS the owner/repo source — that is what renders in the name column.
+	m.enabledAgents = []string{"claude"}
+	m.skillsRows = []app.SkillPackageRow{
+		{Name: "github.com/foo/caveman", Source: "github.com/foo/caveman", Updated: "2026-06-01", Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
+		{Name: "github.com/bar/review", Source: "github.com/bar/review", Installed: false, PerAgentStatus: map[string]bool{"claude": false}},
 	}
 	out := m.viewSkillsBody()
 	if !strings.Contains(out, "Installed") {
 		t.Errorf("viewSkillsBody() missing 'Installed' section header, got:\n%s", out)
 	}
-	if !strings.Contains(out, "Not Installed") {
-		t.Errorf("viewSkillsBody() missing 'Not Installed' section header, got:\n%s", out)
-	}
-	if !strings.Contains(out, "caveman") {
-		t.Errorf("viewSkillsBody() missing skill name 'caveman', got:\n%s", out)
+	if !strings.Contains(out, "Out of Sync") {
+		t.Errorf("viewSkillsBody() missing 'Out of Sync' section header, got:\n%s", out)
 	}
 	if !strings.Contains(out, "github.com/foo/caveman") {
-		t.Errorf("viewSkillsBody() missing source 'github.com/foo/caveman', got:\n%s", out)
+		t.Errorf("viewSkillsBody() missing row 'github.com/foo/caveman', got:\n%s", out)
+	}
+	if !strings.Contains(out, "github.com/bar/review") {
+		t.Errorf("viewSkillsBody() missing row 'github.com/bar/review', got:\n%s", out)
 	}
 }
 
 func TestSkills_ViewBodyInstalledIcon(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSkills
-	m.skillsRows = []app.SkillRow{
-		{Name: "installed-skill", Source: "gh/x", Installed: true},
-		{Name: "missing-skill", Source: "gh/y", Installed: false},
+	m.skillTypeIdx = agentsChipSkills
+	m.enabledAgents = []string{"claude"}
+	m.skillsRows = []app.SkillPackageRow{
+		{Name: "installed-skill", Source: "gh/x", Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
+		{Name: "missing-skill", Source: "gh/y", Installed: false, PerAgentStatus: map[string]bool{"claude": false}},
 	}
 	out := m.viewSkillsBody()
 	if !strings.Contains(out, "✓") {
@@ -93,18 +107,25 @@ func TestSkills_ViewBodyInstalledIcon(t *testing.T) {
 func TestSkills_ViewBodyFooterUpdate(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSkills
-	m.skillsRows = []app.SkillRow{
+	m.skillTypeIdx = agentsChipSkills
+	m.agentsEnabled = true
+	m.width = 120
+	m.skillsRows = []app.SkillPackageRow{
 		{Name: "caveman", Source: "github.com/foo/caveman", Installed: true},
 	}
-	out := m.viewSkillsBody()
-	if !strings.Contains(out, "[u] update") {
-		t.Errorf("viewSkillsBody() missing [u] update footer, got:\n%s", out)
+	m.skillsCursor = 0
+	out := stripANSIEscapeSequences(m.viewSkillsBody())
+	// Per-row hint appears under the selected row (not a static footer).
+	// Hint format: key then desc, no brackets (e.g. "u update").
+	if !strings.Contains(out, "u update") {
+		t.Errorf("viewSkillsBody() missing per-row hint 'u update' for selected row, got:\n%s", out)
 	}
 }
 
 func TestSkills_ViewBodyError(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSkills
+	m.skillTypeIdx = agentsChipSkills
 	m.skillsErr = errors.New("manifest not found")
 	out := m.viewSkillsBody()
 	if !strings.Contains(out, "error: manifest not found") {
@@ -189,6 +210,7 @@ func TestSkills_ImportedMsgWithErrorSetsErr(t *testing.T) {
 func TestSkills_RKeyStartsRestore(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSkills
+	m.skillTypeIdx = agentsChipSkills
 
 	m = drive(m, pressRune('r'))
 
@@ -200,6 +222,7 @@ func TestSkills_RKeyStartsRestore(t *testing.T) {
 func TestSkills_IKeyStartsImport(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSkills
+	m.skillTypeIdx = agentsChipSkills
 
 	m = drive(m, pressRune('i'))
 
@@ -211,6 +234,7 @@ func TestSkills_IKeyStartsImport(t *testing.T) {
 func TestSkills_RKeyClearsResult(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSkills
+	m.skillTypeIdx = agentsChipSkills
 	prev := app.RestoreSkillsResult{Installed: []string{"old"}}
 	m.skillsResult = &prev
 
@@ -224,6 +248,7 @@ func TestSkills_RKeyClearsResult(t *testing.T) {
 func TestSkills_IKeyClearsImportDiff(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSkills
+	m.skillTypeIdx = agentsChipSkills
 	prev := app.ImportDiff{Added: []string{"x"}}
 	m.skillsImport = &prev
 
@@ -237,6 +262,7 @@ func TestSkills_IKeyClearsImportDiff(t *testing.T) {
 func TestSkills_UKeyStartsUpdate(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSkills
+	m.skillTypeIdx = agentsChipSkills
 
 	m = drive(m, pressRune('u'))
 
@@ -343,9 +369,10 @@ func TestSkills_SettingsRowAgentsEnabledMeta(t *testing.T) {
 func TestSkills_BodyNoRedundantTitle(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSkills
+	m.skillTypeIdx = agentsChipSkills
 	m.agentsEnabled = true
 	m.width = 120
-	m.skillsRows = []app.SkillRow{
+	m.skillsRows = []app.SkillPackageRow{
 		{Name: "caveman", Source: "github.com/foo/caveman", Installed: true},
 	}
 
@@ -359,11 +386,13 @@ func TestSkills_BodyNoRedundantTitle(t *testing.T) {
 func TestSkills_StatusColumn(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSkills
+	m.skillTypeIdx = agentsChipSkills
 	m.agentsEnabled = true
 	m.width = 120
-	m.skillsRows = []app.SkillRow{
-		{Name: "skill-present", Source: "github.com/foo/present", Installed: true},
-		{Name: "skill-absent", Source: "github.com/foo/absent", Installed: false},
+	m.enabledAgents = []string{"claude"}
+	m.skillsRows = []app.SkillPackageRow{
+		{Name: "skill-present", Source: "github.com/foo/present", Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
+		{Name: "skill-absent", Source: "github.com/foo/absent", Installed: false, PerAgentStatus: map[string]bool{"claude": false}},
 	}
 
 	out := stripANSIEscapeSequences(m.viewSkillsBody())
@@ -388,30 +417,49 @@ func TestSkills_StatusColumn(t *testing.T) {
 		t.Fatal("could not find row containing 'skill-absent'")
 	}
 
-	if !strings.Contains(installedRow, "installed") {
-		t.Errorf("installed skill row missing status label 'installed': %q", installedRow)
+	if !strings.Contains(installedRow, iconInstalled) {
+		t.Errorf("installed skill row missing mark %q: %q", iconInstalled, installedRow)
 	}
-	if !strings.Contains(missingRow, "missing") {
-		t.Errorf("not-installed skill row missing status label 'missing': %q", missingRow)
+	if !strings.Contains(missingRow, iconMissing) {
+		t.Errorf("not-installed skill row missing mark %q: %q", iconMissing, missingRow)
+	}
+
+	installedIdx := strings.Index(out, "Installed")
+	outOfSyncIdx := strings.Index(out, "Out of Sync")
+	installedRowIdx := strings.Index(out, "skill-present")
+	missingRowIdx := strings.Index(out, "skill-absent")
+	if outOfSyncIdx < 0 || installedIdx < 0 {
+		t.Fatalf("expected both Out of Sync and Installed section headers in:\n%s", out)
+	}
+	if missingRowIdx <= outOfSyncIdx || missingRowIdx >= installedIdx {
+		t.Errorf("skill-absent should render under Out of Sync (between idx %d and %d), got row idx %d", outOfSyncIdx, installedIdx, missingRowIdx)
+	}
+	if installedRowIdx <= installedIdx {
+		t.Errorf("skill-present should render under Installed (idx %d), got row idx %d", installedIdx, installedRowIdx)
 	}
 }
 
 func TestSkills_LayoutColumnsAligned(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSkills
+	m.skillTypeIdx = agentsChipSkills
 	m.agentsEnabled = true
 	m.width = 120
-	m.skillsRows = []app.SkillRow{
-		{Name: "cv", Source: "github.com/short/src", Installed: true},
-		{Name: "a-much-longer-skill-name", Source: "github.com/longer/source-path", Installed: true},
+	m.enabledAgents = []string{"claude"}
+	// renderSplitRow right-aligns the whole right-side cell group (agent, version,
+	// badge) against the row's total width via alignLR, so the agent column sits
+	// at a fixed offset from the line end regardless of name length.
+	m.skillsRows = []app.SkillPackageRow{
+		{Name: "cv", Source: "github.com/short/src", Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
+		{Name: "a-much-longer-skill-name", Source: "github.com/longer/source-path", Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
 	}
 
 	out := stripANSIEscapeSequences(m.viewSkillsBody())
 	lines := strings.Split(out, "\n")
 
-	findRow := func(skillName string) string {
+	findRow := func(name string) string {
 		for _, l := range lines {
-			if strings.Contains(l, skillName) {
+			if strings.Contains(l, name) {
 				return l
 			}
 		}
@@ -428,18 +476,284 @@ func TestSkills_LayoutColumnsAligned(t *testing.T) {
 		t.Fatal("could not find row containing 'a-much-longer-skill-name'")
 	}
 
-	shortSrcIdx := strings.Index(shortRow, "github.com/short/src")
-	longSrcIdx := strings.Index(longRow, "github.com/longer/source-path")
+	shortTypeIdx := strings.Index(shortRow, "claude")
+	longTypeIdx := strings.Index(longRow, "claude")
 
-	if shortSrcIdx < 0 {
-		t.Fatalf("source not found in short row: %q", shortRow)
+	if shortTypeIdx < 0 {
+		t.Fatalf("agent column 'claude' not found in short row: %q", shortRow)
 	}
-	if longSrcIdx < 0 {
-		t.Fatalf("source not found in long row: %q", longRow)
+	if longTypeIdx < 0 {
+		t.Fatalf("agent column 'claude' not found in long row: %q", longRow)
 	}
 
-	if shortSrcIdx != longSrcIdx {
-		t.Errorf("source column not aligned: short row source at col %d, long row source at col %d\nshort: %q\nlong:  %q",
-			shortSrcIdx, longSrcIdx, shortRow, longRow)
+	shortOffsetFromEnd := len([]rune(shortRow)) - len([]rune(shortRow[:shortTypeIdx]))
+	longOffsetFromEnd := len([]rune(longRow)) - len([]rune(longRow[:longTypeIdx]))
+	if shortOffsetFromEnd != longOffsetFromEnd {
+		t.Errorf("type column not right-aligned: short row offset-from-end %d, long row offset-from-end %d\nshort: %q\nlong:  %q",
+			shortOffsetFromEnd, longOffsetFromEnd, shortRow, longRow)
+	}
+}
+
+func TestFeatureToggles_RowMetaLabels(t *testing.T) {
+	cases := []struct {
+		row   int
+		label string
+	}{
+		{settingsRowSkillsEnabled, "Skills"},
+		{settingsRowMcpEnabled, "MCP Servers"},
+		{settingsRowPluginsEnabled, "Plugins"},
+	}
+	for _, tc := range cases {
+		meta := settingsRows[tc.row]
+		if meta.label != tc.label {
+			t.Errorf("row %d label = %q, want %q", tc.row, meta.label, tc.label)
+		}
+		if meta.section != "Agents" {
+			t.Errorf("row %d section = %q, want %q", tc.row, meta.section, "Agents")
+		}
+	}
+}
+
+func TestFeatureToggles_RenderShowsOnOff(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewSettings
+	m.width = 120
+	m.skillsEnabled = true
+	m.mcpEnabled = false
+	m.pluginsEnabled = true
+
+	out := stripANSIEscapeSequences(renderSettings(m))
+	lines := strings.Split(out, "\n")
+
+	findRowLine := func(label string) string {
+		for _, l := range lines {
+			if strings.Contains(l, label) && !strings.Contains(l, "Agent "+label) {
+				return l
+			}
+		}
+		return ""
+	}
+
+	skillsLine := findRowLine("Skills")
+	if skillsLine == "" || !strings.Contains(skillsLine, "[ON]") {
+		t.Errorf("Skills row = %q, want to contain 'on'", skillsLine)
+	}
+	mcpLine := findRowLine("MCP Servers")
+	if mcpLine == "" || !strings.Contains(mcpLine, "[OFF]") {
+		t.Errorf("MCP Servers row = %q, want to contain 'off'", mcpLine)
+	}
+	pluginsLine := findRowLine("Plugins")
+	if pluginsLine == "" || !strings.Contains(pluginsLine, "[ON]") {
+		t.Errorf("Plugins row = %q, want to contain 'on'", pluginsLine)
+	}
+}
+
+func TestFeatureToggles_RenderShowsOffWhenDisabled(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewSettings
+	m.width = 120
+	m.skillsEnabled = false
+	m.mcpEnabled = false
+	m.pluginsEnabled = false
+
+	out := stripANSIEscapeSequences(renderSettings(m))
+	lines := strings.Split(out, "\n")
+
+	findRowLine := func(label string) string {
+		for _, l := range lines {
+			if strings.Contains(l, label) && !strings.Contains(l, "Agent "+label) {
+				return l
+			}
+		}
+		return ""
+	}
+
+	for _, label := range []string{"Skills", "MCP Servers", "Plugins"} {
+		line := findRowLine(label)
+		if line == "" || !strings.Contains(line, "[OFF]") {
+			t.Errorf("%s row = %q, want to contain 'off'", label, line)
+		}
+	}
+}
+
+func TestFeatureToggles_NilAppTogglesReturnNilCmd(t *testing.T) {
+	m := baseModel(nil)
+
+	if cmd := m.doToggleSkillsFeature(); cmd != nil {
+		t.Error("doToggleSkillsFeature() with nil app should return nil Cmd")
+	}
+	if cmd := m.doToggleMcpFeature(); cmd != nil {
+		t.Error("doToggleMcpFeature() with nil app should return nil Cmd")
+	}
+	if cmd := m.doTogglePluginsFeature(); cmd != nil {
+		t.Error("doTogglePluginsFeature() with nil app should return nil Cmd")
+	}
+}
+
+func TestFeatureToggles_ConfirmDispatchesNilCmdWithNilApp(t *testing.T) {
+	cases := []int{settingsRowSkillsEnabled, settingsRowMcpEnabled, settingsRowPluginsEnabled}
+	for _, row := range cases {
+		m := baseModel(nil)
+		m.mode = viewSettings
+		m.settingsCursor = row
+
+		var tm tea.Model = m
+		tm, cmd := tm.Update(pressEnter())
+		_ = tm
+
+		if cmd != nil {
+			t.Errorf("row %d: expected nil Cmd (batch of nil cmds) when confirming toggle with nil app", row)
+		}
+	}
+}
+
+func TestFeatureToggles_SkillsReloadsWhenAgentsEnabled(t *testing.T) {
+	m := baseModel(nil)
+	m.agentsEnabled = true
+	m.skillsLoaded = true
+
+	got := drive(m, skillsFeatureToggledMsg{enabled: true})
+
+	if got.skillsLoaded {
+		t.Error("skillsLoaded should be reset to false to trigger reload when agentsEnabled=true")
+	}
+	if !got.skillsEnabled {
+		t.Error("skillsEnabled should be true after skillsFeatureToggledMsg{enabled: true}")
+	}
+}
+
+func TestFeatureToggles_SkillsNoReloadWhenAgentsDisabled(t *testing.T) {
+	m := baseModel(nil)
+	m.agentsEnabled = false
+	m.skillsLoaded = true
+
+	got := drive(m, skillsFeatureToggledMsg{enabled: true})
+
+	if !got.skillsLoaded {
+		t.Error("skillsLoaded should remain true (no reload) when agentsEnabled=false")
+	}
+	if !got.skillsEnabled {
+		t.Error("skillsEnabled should still be true after skillsFeatureToggledMsg{enabled: true}")
+	}
+}
+
+func TestFeatureToggles_McpReloadsWhenAgentsEnabled(t *testing.T) {
+	m := baseModel(nil)
+	m.agentsEnabled = true
+	m.mcpLoaded = true
+	m.mcpRunning = false
+
+	got := drive(m, mcpFeatureToggledMsg{enabled: true})
+
+	if got.mcpLoaded {
+		t.Error("mcpLoaded should be reset to false when agentsEnabled=true")
+	}
+	if !got.mcpRunning {
+		t.Error("mcpRunning should be true to signal reload in progress")
+	}
+	if !got.mcpEnabled {
+		t.Error("mcpEnabled should be true after mcpFeatureToggledMsg{enabled: true}")
+	}
+}
+
+func TestFeatureToggles_McpNoReloadWhenAgentsDisabled(t *testing.T) {
+	m := baseModel(nil)
+	m.agentsEnabled = false
+	m.mcpLoaded = true
+	m.mcpRunning = false
+
+	got := drive(m, mcpFeatureToggledMsg{enabled: true})
+
+	if !got.mcpLoaded {
+		t.Error("mcpLoaded should remain true (no reload) when agentsEnabled=false")
+	}
+	if got.mcpRunning {
+		t.Error("mcpRunning should remain false when agentsEnabled=false")
+	}
+	if !got.mcpEnabled {
+		t.Error("mcpEnabled should still be true after mcpFeatureToggledMsg{enabled: true}")
+	}
+}
+
+func TestFeatureToggles_PluginsReloadsWhenAgentsEnabled(t *testing.T) {
+	m := baseModel(nil)
+	m.agentsEnabled = true
+	m.pluginLoaded = true
+	m.pluginRunning = false
+
+	got := drive(m, pluginsFeatureToggledMsg{enabled: true})
+
+	if got.pluginLoaded {
+		t.Error("pluginLoaded should be reset to false when agentsEnabled=true")
+	}
+	if !got.pluginRunning {
+		t.Error("pluginRunning should be true to signal reload in progress")
+	}
+	if !got.pluginsEnabled {
+		t.Error("pluginsEnabled should be true after pluginsFeatureToggledMsg{enabled: true}")
+	}
+}
+
+func TestFeatureToggles_PluginsNoReloadWhenAgentsDisabled(t *testing.T) {
+	m := baseModel(nil)
+	m.agentsEnabled = false
+	m.pluginLoaded = true
+	m.pluginRunning = false
+
+	got := drive(m, pluginsFeatureToggledMsg{enabled: true})
+
+	if !got.pluginLoaded {
+		t.Error("pluginLoaded should remain true (no reload) when agentsEnabled=false")
+	}
+	if got.pluginRunning {
+		t.Error("pluginRunning should remain false when agentsEnabled=false")
+	}
+	if !got.pluginsEnabled {
+		t.Error("pluginsEnabled should still be true after pluginsFeatureToggledMsg{enabled: true}")
+	}
+}
+
+func TestFeatureToggles_SkillsErrorPreservesState(t *testing.T) {
+	m := baseModel(nil)
+	m.skillsEnabled = false
+	want := errors.New("save failed")
+
+	got := drive(m, skillsFeatureToggledMsg{enabled: true, err: want})
+
+	if got.skillsEnabled {
+		t.Error("skillsEnabled must remain false when skillsFeatureToggledMsg carries an error")
+	}
+	if got.skillsErr == nil || got.skillsErr.Error() != want.Error() {
+		t.Errorf("skillsErr = %v, want %v", got.skillsErr, want)
+	}
+}
+
+func TestFeatureToggles_McpErrorPreservesState(t *testing.T) {
+	m := baseModel(nil)
+	m.mcpEnabled = false
+	want := errors.New("save failed")
+
+	got := drive(m, mcpFeatureToggledMsg{enabled: true, err: want})
+
+	if got.mcpEnabled {
+		t.Error("mcpEnabled must remain false when mcpFeatureToggledMsg carries an error")
+	}
+	if got.mcpErr == nil || got.mcpErr.Error() != want.Error() {
+		t.Errorf("mcpErr = %v, want %v", got.mcpErr, want)
+	}
+}
+
+func TestFeatureToggles_PluginsErrorPreservesState(t *testing.T) {
+	m := baseModel(nil)
+	m.pluginsEnabled = false
+	want := errors.New("save failed")
+
+	got := drive(m, pluginsFeatureToggledMsg{enabled: true, err: want})
+
+	if got.pluginsEnabled {
+		t.Error("pluginsEnabled must remain false when pluginsFeatureToggledMsg carries an error")
+	}
+	if got.pluginErr == nil || got.pluginErr.Error() != want.Error() {
+		t.Errorf("pluginErr = %v, want %v", got.pluginErr, want)
 	}
 }

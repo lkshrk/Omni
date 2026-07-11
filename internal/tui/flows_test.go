@@ -1113,6 +1113,199 @@ func TestFlow_UC27_SetupStep1(t *testing.T) {
 	})
 }
 
+// ── Setup step 4 (agents onboarding) ────────────────────────────────────────
+//
+// setupAgentsStepModel builds a model past step-3 provider priority, ready to
+// enter (or skip) step 4. groupNames is non-empty so startSetupGroupSelection
+// lands on step 9 instead of falling through to finishSetupWithReload.
+func setupAgentsStepModel() Model {
+	return Model{
+		keys:                DefaultKeyMap(),
+		spinner:             spinner.New(),
+		filter:              textinput.New(),
+		commandInput:        textinput.New(),
+		settingsInput:       textinput.New(),
+		mode:                viewSetup,
+		agentsEnabled:       true,
+		groupNames:          []string{"work"},
+		setupBackgroundMode: viewSettings,
+	}
+}
+
+func TestSetupAgentsStep_SkipsWhenAgentsDisabled(t *testing.T) {
+	m := setupAgentsStepModel()
+	m.agentsEnabled = false
+	var cmds []tea.Cmd
+	m.startSetupAgentsStep(&cmds)
+
+	if m.setupStep == 4 {
+		t.Fatal("setupStep should not be 4 when agentsEnabled is false")
+	}
+	if m.setupStep != 9 {
+		t.Errorf("setupStep = %d, want 9 (group selection)", m.setupStep)
+	}
+}
+
+func TestSetupAgentsStep_SkipsWhenNoAgentsDetected(t *testing.T) {
+	// testguard isolates HOME package-wide, but pin an empty temp dir here too
+	// so this test's "no agents installed" branch is deterministic regardless
+	// of what other tests in this file do with HOME.
+	t.Setenv("HOME", t.TempDir())
+	m := setupAgentsStepModel()
+	var cmds []tea.Cmd
+	m.startSetupAgentsStep(&cmds)
+
+	if m.setupStep == 4 {
+		t.Fatal("setupStep should not be 4 when no agents are detected on the machine")
+	}
+}
+
+func TestSetupAgentsStep_PopulatesStateWhenNotSkipped(t *testing.T) {
+	m := setupAgentsStepModel()
+	m.setupStep = 4
+	m.setupAgentsList = []app.AgentInfo{
+		{ID: "claude-code", Display: "Claude Code"},
+		{ID: "codex", Display: "Codex"},
+	}
+	m.setupAgentsDiffLoaded = true
+	m.setupAgentsUnmanagedSkills = 3
+	m.setupAgentsUnmanagedMcp = 2
+	m.setupAgentsUnmanagedPlugins = 1
+
+	if m.setupStep != 4 {
+		t.Fatalf("setupStep = %d, want 4", m.setupStep)
+	}
+	if len(m.setupAgentsList) != 2 {
+		t.Fatalf("setupAgentsList = %d entries, want 2", len(m.setupAgentsList))
+	}
+	if !m.setupAgentsDiffLoaded {
+		t.Error("setupAgentsDiffLoaded should be true")
+	}
+	if m.setupAgentsUnmanagedSkills != 3 || m.setupAgentsUnmanagedMcp != 2 || m.setupAgentsUnmanagedPlugins != 1 {
+		t.Errorf("unmanaged counts = %d/%d/%d, want 3/2/1",
+			m.setupAgentsUnmanagedSkills, m.setupAgentsUnmanagedMcp, m.setupAgentsUnmanagedPlugins)
+	}
+}
+
+func TestSetupAgentsStep_PressIWhileLoadedArmsImport(t *testing.T) {
+	m := setupAgentsStepModel()
+	m.setupStep = 4
+	m.setupAgentsDiffLoaded = true
+	m.setupAgentsDiffLoading = false
+
+	got := drive(m, pressRune('i'))
+	if !got.loading {
+		t.Error("loading should be true after pressing i on a loaded step 4")
+	}
+	if got.setupStep != 4 {
+		t.Errorf("setupStep = %d, want 4 (still on agents step until import completes)", got.setupStep)
+	}
+}
+
+func TestSetupAgentsStep_PressIWhileDiffLoadingIsNoOp(t *testing.T) {
+	m := setupAgentsStepModel()
+	m.setupStep = 4
+	m.setupAgentsDiffLoading = true
+
+	got := drive(m, pressRune('i'))
+	if got.loading {
+		t.Error("loading should stay false while setupAgentsDiffLoading is true")
+	}
+	if got.setupStep != 4 {
+		t.Errorf("setupStep = %d, want 4", got.setupStep)
+	}
+}
+
+func TestSetupAgentsStep_PressSAdvancesWithoutImport(t *testing.T) {
+	m := setupAgentsStepModel()
+	m.setupStep = 4
+	m.setupAgentsDiffLoaded = true
+
+	got := drive(m, pressRune('s'))
+	if got.setupStep != 9 {
+		t.Errorf("setupStep = %d, want 9", got.setupStep)
+	}
+	if got.loading {
+		t.Error("loading should stay false; skip does not dispatch a mutation")
+	}
+}
+
+func TestHandleSetupAgentsDiffMsg_Success(t *testing.T) {
+	m := setupAgentsStepModel()
+	m.setupStep = 4
+	m.setupAgentsDiffLoading = true
+
+	m.handleSetupAgentsDiffMsg(setupAgentsDiffMsg{
+		unmanagedSkills:  5,
+		unmanagedMcp:     4,
+		unmanagedPlugins: 2,
+	})
+
+	if m.setupAgentsDiffLoading {
+		t.Error("setupAgentsDiffLoading should be false after success")
+	}
+	if !m.setupAgentsDiffLoaded {
+		t.Error("setupAgentsDiffLoaded should be true after success")
+	}
+	if m.setupAgentsUnmanagedSkills != 5 || m.setupAgentsUnmanagedMcp != 4 || m.setupAgentsUnmanagedPlugins != 2 {
+		t.Errorf("unmanaged counts = %d/%d/%d, want 5/4/2",
+			m.setupAgentsUnmanagedSkills, m.setupAgentsUnmanagedMcp, m.setupAgentsUnmanagedPlugins)
+	}
+}
+
+func TestHandleSetupAgentsImportDoneMsg_SuccessAdvances(t *testing.T) {
+	m := setupAgentsStepModel()
+	m.setupStep = 4
+	m.loading = true
+
+	m.handleSetupAgentsImportDoneMsg(setupAgentsImportDoneMsg{skills: 2, mcp: 1, plugins: 0})
+
+	if m.setupStep != 9 {
+		t.Errorf("setupStep = %d, want 9 after successful import", m.setupStep)
+	}
+	if m.loading {
+		t.Error("loading should be false after import completes")
+	}
+}
+
+func TestHandleSetupAgentsImportDoneMsg_ErrorDoesNotAdvance(t *testing.T) {
+	m := setupAgentsStepModel()
+	m.setupStep = 4
+	m.loading = true
+
+	m.handleSetupAgentsImportDoneMsg(setupAgentsImportDoneMsg{err: errors.New("adopt failed")})
+
+	if m.setupStep != 4 {
+		t.Errorf("setupStep = %d, want 4 (unchanged on error)", m.setupStep)
+	}
+	if m.loading {
+		t.Error("loading should be false after error")
+	}
+}
+
+func TestSetupAgentsStep_BackgroundModePreservedAcrossSkip(t *testing.T) {
+	m := setupAgentsStepModel()
+	m.setupStep = 4
+	m.setupAgentsDiffLoaded = true
+
+	got := drive(m, pressRune('s'))
+	if got.setupBackgroundMode != viewSettings {
+		t.Errorf("setupBackgroundMode = %v, want viewSettings (unchanged)", got.setupBackgroundMode)
+	}
+}
+
+func TestSetupAgentsStep_BackgroundModePreservedAcrossImportDone(t *testing.T) {
+	m := setupAgentsStepModel()
+	m.setupStep = 4
+	m.loading = true
+
+	m.handleSetupAgentsImportDoneMsg(setupAgentsImportDoneMsg{skills: 1, mcp: 0, plugins: 0})
+
+	if m.setupBackgroundMode != viewSettings {
+		t.Errorf("setupBackgroundMode = %v, want viewSettings (unchanged)", m.setupBackgroundMode)
+	}
+}
+
 // ── UC-29 toolsLoadedMsg state transitions ────────────────────────────────────
 
 func TestFlow_UC29_ToolsLoadedMsg(t *testing.T) {
@@ -2707,6 +2900,30 @@ func TestFlow_UC52_IgnoreDoneMsg(t *testing.T) {
 			t.Errorf("statusMsg = %q, want ✓ curl un-ignored", got.statusMsg)
 		}
 	})
+
+	t.Run("tool-level ignore keeps row in ignored section", func(t *testing.T) {
+		tool := oneInstalled()[0]
+		m := baseModel(oneInstalled())
+		got := drive(m, ignoreDoneMsg{
+			name:          tool.Name,
+			ignored:       true,
+			tools:         []*database.ToolCache{tool},
+			ignoreLabels:  map[string]string{tool.Name: "tool"},
+			toolIgnoreSet: map[string]bool{tool.Name: true},
+		})
+		if len(got.visibleTools) != 1 || got.visibleTools[0].Name != tool.Name {
+			t.Fatalf("visibleTools = %#v, want ignored %q retained", got.visibleTools, tool.Name)
+		}
+		if got.displaySection(got.visibleTools[0]) != sectionIgnored {
+			t.Fatalf("displaySection = %v, want sectionIgnored", got.displaySection(got.visibleTools[0]))
+		}
+		if got.sectionCounts[sectionIgnored] != 1 {
+			t.Fatalf("sectionCounts[ignored] = %d, want 1", got.sectionCounts[sectionIgnored])
+		}
+		if got.cursor != 0 {
+			t.Fatalf("cursor = %d, want 0 on ignored tool", got.cursor)
+		}
+	})
 }
 
 func TestFlow_SyncAllDoneRemovesClaimedDiscovered(t *testing.T) {
@@ -3206,10 +3423,22 @@ func TestFlow_UC64_MouseWheelScroll(t *testing.T) {
 		}
 	})
 
-	t.Run("wheel up at top stays at 0", func(t *testing.T) {
+	t.Run("wheel up at top wraps to last row", func(t *testing.T) {
 		got := drive(m, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
-		if got.cursor != 0 {
-			t.Errorf("cursor = %d, want 0 (clamped)", got.cursor)
+		if got.cursor != len(m.visibleTools)-1 {
+			t.Errorf("cursor = %d, want %d (wrapped)", got.cursor, len(m.visibleTools)-1)
+		}
+	})
+
+	t.Run("group picker popup wheel up at top clamps, does not wrap", func(t *testing.T) {
+		p := baseModel(nil)
+		p.mode = viewGroupPicker
+		p.pickerGroups = []string{"base", "work", "+ new group…"}
+		p.pickerCursor = 0
+
+		got := drive(p, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+		if got.pickerCursor != 0 {
+			t.Errorf("pickerCursor = %d, want 0 (clamped, not wrapped like a main tab)", got.pickerCursor)
 		}
 	})
 

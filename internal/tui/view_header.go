@@ -39,6 +39,8 @@ func renderSetup(m Model) string {
 				"You can always change this later in Settings.",
 			},
 		})
+	case 4:
+		body = renderSetupAgentsStep(m)
 	case 5:
 		body = renderSetupPanel(m, setupPanel{
 			Lead: "Enable dotfile sync?",
@@ -170,6 +172,36 @@ func renderSetup(m Model) string {
 	}
 
 	return body
+}
+
+// renderSetupAgentsStep renders setup step 4: detected agents plus the
+// diff-only unmanaged skills/mcp/plugins counts, gating the [i]/[s] footer
+// until the async diff finishes.
+func renderSetupAgentsStep(m Model) string {
+	names := make([]string, 0, len(m.setupAgentsList))
+	for _, a := range m.setupAgentsList {
+		names = append(names, a.Display)
+	}
+	help := []string{"Found agents: " + strings.Join(names, ", ")}
+
+	var footer string
+	if m.setupAgentsDiffLoading {
+		help = append(help, m.spinner.View()+" checking manifest…")
+	} else if m.setupAgentsDiffLoaded {
+		help = append(help, fmt.Sprintf("Not in manifest: %d skill packages · %d mcp servers · %d plugins",
+			m.setupAgentsUnmanagedSkills, m.setupAgentsUnmanagedMcp, m.setupAgentsUnmanagedPlugins))
+		footer = renderSetupFooter(m,
+			[]hintItem{dangerRawHint("s", "skip")},
+			nil,
+			[]hintItem{dangerRawHint("i", "import all")},
+		)
+	}
+
+	return renderSetupPanel(m, setupPanel{
+		Lead:   "Bring existing agents state into the manifest?",
+		Help:   help,
+		Footer: footer,
+	})
 }
 
 type setupPanel struct {
@@ -350,6 +382,8 @@ func setupPopupTitle(m Model) string {
 		return logoMark + " Omni - Enable ecosystems"
 	case 3:
 		return logoMark + " Omni - Choose Node manager"
+	case 4:
+		return logoMark + " Omni - Agents onboarding"
 	case 5:
 		return logoMark + " Omni - Dotfile sync"
 	case 6:
@@ -445,7 +479,7 @@ func renderSettingsHeaderInfo(m Model) string {
 }
 
 func renderStatusHeaderInfo(m Model) string {
-	if len(m.allTools) == 0 || m.launchBatchActive {
+	if m.launchBatchActive {
 		return ""
 	}
 	attention := statusAttentionCount(m)

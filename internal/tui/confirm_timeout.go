@@ -4,6 +4,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/lkshrk/omni/internal/app"
 )
 
 const confirmTimeout = 5 * time.Second
@@ -39,7 +41,13 @@ func (m *Model) hasActiveConfirmation() bool {
 		m.dotsLocalIdx >= 0 ||
 		m.dotsIgnoreIdx >= 0 ||
 		m.dotsVariantIdx >= 0 ||
-		m.dotsForceResolve != ""
+		m.dotsForceResolve != "" ||
+		m.mcpDeleteConfirm ||
+		m.pluginDeleteConfirm ||
+		m.marketplaceDeleteConfirm ||
+		m.agentsDeleteConfirm ||
+		m.agentsIgnoreConfirm ||
+		m.pluginMarketplaceOfferConfirm
 }
 
 func (m *Model) clearActiveConfirmation() {
@@ -65,6 +73,24 @@ func (m *Model) clearActiveConfirmation() {
 	m.dotsForceResolve = ""
 	m.dotsVariantMode = dotsVariantNone
 	m.stowInstallVariant = dotsVariantRequest{}
+	m.mcpDeleteConfirm = false
+	m.mcpDeleteName = ""
+	m.pluginDeleteConfirm = false
+	m.pluginDeleteName = ""
+	m.marketplaceDeleteConfirm = false
+	m.marketplaceDeleteName = ""
+	m.agentsDeleteConfirm = false
+	m.agentsDeleteUninstall = false
+	m.agentsDeleteName = ""
+	m.agentsIgnoreConfirm = false
+	m.agentsIgnoreName = ""
+	m.pluginMarketplaceOfferConfirm = false
+	m.pluginMarketplaceOfferAgentID = ""
+	m.pluginMarketplaceOfferPlugin = app.InstalledPlugin{}
+	m.pluginMarketplaceOfferGroup = ""
+	m.pluginMarketplaceOfferMarket = ""
+	m.pluginMarketplaceOfferSource = ""
+	m.pluginMarketplaceOfferOpKey = ""
 	if wipeStatus {
 		clearStatus(m)
 	}

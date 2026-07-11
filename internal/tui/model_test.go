@@ -33,13 +33,36 @@ func baseModel(tools []*database.ToolCache) Model {
 	si := textinput.New()
 	si.Placeholder = "~/dotfiles"
 	si.CharLimit = 256
+	mfn := textinput.New()
+	mfn.Placeholder = "server-name"
+	mfn.CharLimit = 64
+	mfc := textinput.New()
+	mfc.Placeholder = "npx -y @server/mcp"
+	mfc.CharLimit = 256
+	mfu := textinput.New()
+	mfu.Placeholder = "https://mcp.example.com"
+	mfu.CharLimit = 256
+	mfe := textinput.New()
+	mfe.Placeholder = "API_KEY,TOKEN"
+	mfe.CharLimit = 256
+	mfl := textinput.New()
+	mfl.Placeholder = "LOG_LEVEL=info"
+	mfl.CharLimit = 256
 	m := Model{
 		keys:             DefaultKeyMap(),
 		spinner:          spinner.New(),
 		filter:           fi,
 		commandInput:     ci,
 		settingsInput:    si,
+		mcpFormName:      mfn,
+		mcpFormCommand:   mfc,
+		mcpFormURL:       mfu,
+		mcpFormEnv:       mfe,
+		mcpFormEnvLit:    mfl,
 		agentsEnabled:    true,
+		skillsEnabled:    true,
+		mcpEnabled:       true,
+		pluginsEnabled:   true,
 		mode:             viewList,
 		allTools:         tools,
 		visibleTools:     tools,
@@ -1787,42 +1810,56 @@ func TestRefreshDoctorAfterFix_DotsCommitted(t *testing.T) {
 		}
 	})
 
-	t.Run("does not re-run doctor when doctorResult is nil", func(t *testing.T) {
+	t.Run("defers doctor refresh when doctorResult is nil", func(t *testing.T) {
 		m := setupDotsCommitModel(viewStatus, false, false)
 		msg := committedMsgForModel(m)
 
 		got := drive(m, msg)
 
 		if got.doctorRunning {
-			t.Fatal("doctorRunning should stay false when doctorResult was nil (doctor never ran)")
+			t.Fatal("doctorRunning should stay false while the initial doctor snapshot is still pending")
+		}
+		if !got.doctorRefreshPending {
+			t.Fatal("doctorRefreshPending should be set when commit finishes before the first doctor snapshot")
 		}
 	})
 
-	t.Run("does not re-run doctor when mode is viewDots (not viewStatus)", func(t *testing.T) {
+	t.Run("re-runs doctor after commit from non-dashboard tabs", func(t *testing.T) {
 		m := setupDotsCommitModel(viewDots, true, false)
 		msg := committedMsgForModel(m)
 
 		got := drive(m, msg)
 
-		if got.doctorRunning {
-			t.Fatal("doctorRunning should stay false when mode is viewDots, not viewStatus")
+		if !got.doctorRunning {
+			t.Fatal("doctorRunning should be true after commit even when mode is viewDots")
 		}
 	})
 
-	t.Run("does not re-run doctor when doctor is already running", func(t *testing.T) {
-		// doctorRunning=true means a refresh is already in flight — no double-start.
+	t.Run("defers doctor refresh when doctor is already running", func(t *testing.T) {
 		m := setupDotsCommitModel(viewStatus, true, true)
 		msg := committedMsgForModel(m)
 
 		got := drive(m, msg)
 
-		// doctorRunning was already true before the message; it must stay true
-		// (still running) but must not have been restarted a second time.
-		// The real assertion is that refreshDoctorAfterFix is a no-op here,
-		// which we verify by checking startOp was not called a second time
-		// (progressText keeps the commit operation label, not "Refreshing doctor…").
+		if !got.doctorRefreshPending {
+			t.Fatal("doctorRefreshPending should be set when commit finishes during an in-flight doctor run")
+		}
+	})
+
+	t.Run("drains pending refresh after doctor completes", func(t *testing.T) {
+		m := setupDotsCommitModel(viewStatus, true, true)
+		got := drive(m, committedMsgForModel(m))
+		if !got.doctorRefreshPending {
+			t.Fatal("expected pending refresh after commit during doctor run")
+		}
+
+		got = drive(got, doctorDoneMsg{result: stubDoctorResult()})
+
 		if !got.doctorRunning {
-			t.Fatal("doctorRunning should stay true (already in flight)")
+			t.Fatal("doctorRunning should be true after draining pending refresh")
+		}
+		if got.doctorRefreshPending {
+			t.Fatal("doctorRefreshPending should be cleared once the follow-up refresh starts")
 		}
 	})
 }
@@ -1842,21 +1879,23 @@ func TestRefreshDoctorAfterFix_DotsSynced(t *testing.T) {
 		}
 	})
 
-	t.Run("does not re-run doctor when doctorResult is nil", func(t *testing.T) {
+	t.Run("defers doctor refresh when doctorResult is nil", func(t *testing.T) {
 		m := baseModel(nil)
 		m.mode = viewStatus
 		m.beginDotsOperation("Syncing dots…")
-		// doctorResult is nil — doctor has never been run
 		msg := syncedMsgForModel(m)
 
 		got := drive(m, msg)
 
 		if got.doctorRunning {
-			t.Fatal("doctorRunning should stay false when doctorResult was nil")
+			t.Fatal("doctorRunning should stay false while the first doctor snapshot is pending")
+		}
+		if !got.doctorRefreshPending {
+			t.Fatal("doctorRefreshPending should be set when sync finishes before the first doctor snapshot")
 		}
 	})
 
-	t.Run("does not re-run doctor when mode is viewDots", func(t *testing.T) {
+	t.Run("re-runs doctor after sync from non-dashboard tabs", func(t *testing.T) {
 		m := baseModel(nil)
 		m.mode = viewDots
 		m.beginDotsOperation("Syncing dots…")
@@ -1865,8 +1904,8 @@ func TestRefreshDoctorAfterFix_DotsSynced(t *testing.T) {
 
 		got := drive(m, msg)
 
-		if got.doctorRunning {
-			t.Fatal("doctorRunning should stay false when mode is viewDots")
+		if !got.doctorRunning {
+			t.Fatal("doctorRunning should be true after sync even when mode is viewDots")
 		}
 	})
 }
@@ -3192,7 +3231,7 @@ func TestModel_ProviderScannedMsg_RefreshStatusShowsRemainingProviders(t *testin
 	m.scanningProviders = map[string]bool{"brew": true, "node": true}
 	m.providerScanToolCounts = map[string]int{"brew": 2, "node": 3}
 	m.refreshToolTotal = 5
-	m.progressText = toolRefreshStatus(m.scanningProviders, m.refreshToolDone, m.refreshToolTotal)
+	m.progressText = m.toolRefreshStatus(m.refreshToolDone, m.refreshToolTotal)
 
 	got := drive(m, providerScannedMsg{provider: "brew"})
 
@@ -4584,6 +4623,8 @@ func TestActivityLabel_Branches(t *testing.T) {
 		{"descriptions", Model{descRefreshing: true}, "Refreshing tool descriptions…"},
 		{"dotsLoading", Model{dotsLoading: true}, "Loading dots…"},
 		{"doctorRunning", Model{doctorRunning: true}, "Running doctor…"},
+		{"mcpRunning", Model{mcpRunning: true}, "Working…"},
+		{"pluginRunning", Model{pluginRunning: true}, "Working…"},
 		{"default", Model{}, "Loading…"},
 	}
 	for _, tc := range cases {
@@ -4593,6 +4634,38 @@ func TestActivityLabel_Branches(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestStatusbar_SpinnerVisibleWhenMCPOrPluginRunning(t *testing.T) {
+	t.Run("mcpRunning", func(t *testing.T) {
+		m := baseModel(nil)
+		m.mcpRunning = true
+		m.width = 80
+
+		out := renderFooterStatusLayer(m, 78)
+		spinnerView := m.spinner.View()
+		if !strings.Contains(out, spinnerView) {
+			t.Errorf("statusbar missing spinner when mcpRunning=true; got %q", out)
+		}
+		if !strings.Contains(out, "Working…") {
+			t.Errorf("statusbar missing 'Working…' text when mcpRunning=true; got %q", out)
+		}
+	})
+
+	t.Run("pluginRunning", func(t *testing.T) {
+		m := baseModel(nil)
+		m.pluginRunning = true
+		m.width = 80
+
+		out := renderFooterStatusLayer(m, 78)
+		spinnerView := m.spinner.View()
+		if !strings.Contains(out, spinnerView) {
+			t.Errorf("statusbar missing spinner when pluginRunning=true; got %q", out)
+		}
+		if !strings.Contains(out, "Working…") {
+			t.Errorf("statusbar missing 'Working…' text when pluginRunning=true; got %q", out)
+		}
+	})
 }
 
 func TestActivityLabel_ScanningUsesConcreteEcosystemLabel(t *testing.T) {
@@ -4791,6 +4864,59 @@ func TestPinnedProvider_KeyPressArmsClearOverride(t *testing.T) {
 	}
 	if got.rowOpKey != toolKey("typescript", "node") {
 		t.Fatalf("rowOpKey = %q, want selected tool key", got.rowOpKey)
+	}
+}
+
+func TestSyncStatusOf_NvmManagedBrewTool(t *testing.T) {
+	tool := &database.ToolCache{
+		Name:          "pnpm",
+		Provider:      "brew",
+		Installed:     true,
+		InstalledWith: "",
+		Tracked:       true,
+	}
+	m := baseModel([]*database.ToolCache{tool})
+	m.nvmManaged = map[string]bool{"pnpm": true}
+
+	if got := m.syncStatusOf(tool); got != syncNvmManaged {
+		t.Fatalf("syncStatusOf = %v, want syncNvmManaged", got)
+	}
+}
+
+func TestNvmManaged_KeyPressArmsMigrateConfirm(t *testing.T) {
+	tool := &database.ToolCache{
+		Name:          "pnpm",
+		Provider:      "brew",
+		Installed:     true,
+		InstalledWith: "",
+		Tracked:       true,
+	}
+	m := baseModel([]*database.ToolCache{tool})
+	m.nvmManaged = map[string]bool{"pnpm": true}
+	m.effectiveNodeManager = "pnpm"
+	m.applyFilter()
+
+	got := drive(m, pressRune('r'))
+	if got.listConfirm.action != listConfirmMigrateNvm {
+		t.Fatalf("listConfirm.action = %q, want migrate-nvm", got.listConfirm.action)
+	}
+}
+
+func TestNvmRuntime_KeyPressArmsRemoveConfirm(t *testing.T) {
+	tool := &database.ToolCache{
+		Name:          "node",
+		Provider:      "brew",
+		Installed:     true,
+		InstalledWith: "",
+		Tracked:       true,
+	}
+	m := baseModel([]*database.ToolCache{tool})
+	m.nvmManaged = map[string]bool{"node": true}
+	m.applyFilter()
+
+	got := drive(m, pressRune('r'))
+	if got.listConfirm.action != listConfirmRemoveNvmRuntime {
+		t.Fatalf("listConfirm.action = %q, want remove-nvm-runtime", got.listConfirm.action)
 	}
 }
 
