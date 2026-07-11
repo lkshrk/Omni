@@ -55,7 +55,7 @@ nfpms:
     dependencies:
       - stow
 
-brews:
+homebrew_casks:
   - name: omni
     repository:
       owner: lkshrk
