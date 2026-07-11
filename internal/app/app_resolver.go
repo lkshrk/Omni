@@ -65,7 +65,7 @@ type installRoute struct {
 	FallbackConfigured bool
 }
 
-func (a *App) resolveTools(ctx context.Context, cfg *config.RootConfig, groups []*config.GroupConfig) ([]resolvedTool, []string) {
+func (a *App) resolveTools(ctx context.Context, cfg *config.RootConfig, groups []*config.GroupConfig, includeIgnored bool) ([]resolvedTool, []string) {
 	if cfg == nil {
 		return nil, nil
 	}
@@ -102,7 +102,7 @@ func (a *App) resolveTools(ctx context.Context, cfg *config.RootConfig, groups [
 		route := a.planInstallRoute(ctx, name, spec, availability)
 		install := route.Install
 		entry := spec.ToToolEntry(name, install)
-		if toolNameIgnored(ignored, name) || entry.Ignore {
+		if !includeIgnored && (toolNameIgnored(ignored, name) || entry.Ignore) {
 			continue
 		}
 		resolved = append(resolved, resolvedTool{
@@ -115,8 +115,8 @@ func (a *App) resolveTools(ctx context.Context, cfg *config.RootConfig, groups [
 	return resolved, warnings
 }
 
-func (a *App) resolvedToolEntries(ctx context.Context, cfg *config.RootConfig, groups []*config.GroupConfig) ([]config.ToolEntry, []string) {
-	resolved, warnings := a.resolveTools(ctx, cfg, groups)
+func (a *App) resolvedToolEntries(ctx context.Context, cfg *config.RootConfig, groups []*config.GroupConfig, includeIgnored bool) ([]config.ToolEntry, []string) {
+	resolved, warnings := a.resolveTools(ctx, cfg, groups, includeIgnored)
 	tools := make([]config.ToolEntry, 0, len(resolved))
 	for _, t := range resolved {
 		tools = append(tools, t.entry)
@@ -125,7 +125,7 @@ func (a *App) resolvedToolEntries(ctx context.Context, cfg *config.RootConfig, g
 }
 
 func (a *App) currentResolvedTools(ctx context.Context, cfg *config.RootConfig) ([]resolvedTool, []string) {
-	return a.resolveTools(ctx, cfg, a.currentToolGroups(cfg))
+	return a.resolveTools(ctx, cfg, a.currentToolGroups(cfg), false)
 }
 
 func (a *App) currentResolvedToolEntries(ctx context.Context, cfg *config.RootConfig) ([]config.ToolEntry, []string) {
@@ -200,6 +200,41 @@ func normalizeInstallRouteCandidate(logicalName string, spec config.ToolSpec, in
 		install.Package = spec.Package
 	}
 	return install
+}
+
+// findConfiguredInstallCandidate searches every install candidate configured
+// for a logical tool (Hosts, Providers, and default+Variants) for one whose
+// Provider or InstallWith matches providerName. Unlike planInstallRoute, this
+// does not stop at the first available candidate — an explicit --provider
+// request must be able to reach any configured entry, including secondary
+// ones planInstallRoute would otherwise skip in favor of an earlier, more
+// available candidate.
+func (a *App) findConfiguredInstallCandidate(ctx context.Context, logicalName string, spec config.ToolSpec, providerName string) (config.ToolInstallSpec, bool) {
+	if providerName == "" {
+		return config.ToolInstallSpec{}, false
+	}
+	hostname := currentHostname()
+	candidates := make([]config.ToolInstallSpec, 0, len(spec.Providers)+len(spec.Variants)+2)
+	if install, ok := spec.Hosts[hostname]; ok {
+		candidates = append(candidates, install)
+	} else if short := shortHostname(hostname); short != hostname {
+		if install, ok := spec.Hosts[short]; ok {
+			candidates = append(candidates, install)
+		}
+	}
+	if len(spec.Providers) > 0 {
+		candidates = append(candidates, spec.Providers...)
+	} else {
+		candidates = append(candidates, spec.DefaultInstallSpec())
+		candidates = append(candidates, spec.Variants...)
+	}
+	for _, candidate := range candidates {
+		candidate = normalizeInstallRouteCandidate(logicalName, spec, candidate)
+		if a.installSpecMatchesProvider(ctx, candidate, providerName) {
+			return candidate, true
+		}
+	}
+	return config.ToolInstallSpec{}, false
 }
 
 func allInstallRouteSkipsArePackageUnavailable(skipped []installRouteSkip, candidates int) bool {

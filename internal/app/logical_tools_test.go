@@ -994,11 +994,10 @@ func TestSetGroupToolsWithStateReturnsDisplayState(t *testing.T) {
 	for _, tool := range result.Tools {
 		names = append(names, tool.Name)
 	}
-	if slices.Contains(names, "eslint") || slices.Contains(names, "ruff") {
-		t.Fatalf("Tools = %v, want ignored tools absent", names)
-	}
-	if !slices.Contains(names, "fd") {
-		t.Fatalf("Tools = %v, want fd present", names)
+	for _, want := range []string{"eslint", "ruff", "fd"} {
+		if !slices.Contains(names, want) {
+			t.Fatalf("Tools = %v, want %q retained for TUI ignored section", names, want)
+		}
 	}
 }
 

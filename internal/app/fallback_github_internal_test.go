@@ -107,27 +107,6 @@ func TestGitHubReleaseAssetIgnored(t *testing.T) {
 	}
 }
 
-func TestGitHubAssetExtractable(t *testing.T) {
-	tests := []struct {
-		name string
-		want bool
-	}{
-		{name: "fd_linux_amd64.tar.gz", want: true},
-		{name: "fd_linux_amd64.tgz", want: true},
-		{name: "fd_linux_amd64.zip", want: true},
-		{name: "fd_linux_amd64.tar.xz", want: true},
-		{name: "fd_linux_amd64.gz", want: false},
-		{name: "fd_linux_amd64", want: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := githubAssetExtractable(tt.name); got != tt.want {
-				t.Fatalf("githubAssetExtractable(%q) = %v, want %v", tt.name, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestNormalizedGitHubPublishedAt(t *testing.T) {
 	got, err := normalizedGitHubPublishedAt("2026-06-07T12:34:56+02:00")
 	if err != nil {

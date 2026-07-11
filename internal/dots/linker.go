@@ -18,6 +18,39 @@ func resolveSymlinkTarget(linkPath, target string) string {
 	return filepath.Clean(filepath.Join(filepath.Dir(linkPath), target))
 }
 
+// StowRelativeSymlinkTarget returns the relative symlink text GNU Stow itself
+// would write for a link at linkPath pointing at targetPath, i.e. targetPath
+// expressed relative to linkPath's own directory.
+func StowRelativeSymlinkTarget(linkPath, targetPath string) (string, error) {
+	return filepath.Rel(filepath.Dir(linkPath), targetPath)
+}
+
+// WriteStowShapedSymlink replaces (or creates) the symlink at linkPath with
+// one shaped exactly as GNU Stow would write it, so a subsequent stow -R does
+// not reject it as "not owned by stow". linkPath's existing entry, if any,
+// must already be a symlink; the caller is responsible for confirming it
+// resolves to targetPath before calling this.
+func WriteStowShapedSymlink(linkPath, targetPath string) error {
+	rel, err := StowRelativeSymlinkTarget(linkPath, targetPath)
+	if err != nil {
+		return fmt.Errorf("compute stow-relative target for %q: %w", linkPath, err)
+	}
+	tmp := linkPath + ".omc-relink-tmp"
+	if err := os.Remove(tmp); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("clear stale relink temp %q: %w", tmp, err)
+	}
+	if err := os.Symlink(rel, tmp); err != nil {
+		return fmt.Errorf("create stow-shaped symlink %q: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, linkPath); err != nil {
+		if removeErr := os.Remove(tmp); removeErr != nil && !os.IsNotExist(removeErr) {
+			return fmt.Errorf("relink %q: %w (cleanup failed: %v)", linkPath, err, removeErr)
+		}
+		return fmt.Errorf("relink %q: %w", linkPath, err)
+	}
+	return nil
+}
+
 // ─── unlink helpers ───────────────────────────────────────────────────────────
 
 // unlinkEntry removes managed symlinks for entry e and copies the repo files

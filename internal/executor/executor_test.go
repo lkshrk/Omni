@@ -155,22 +155,6 @@ func TestMatchMock_MustHaveCalledN_FailsOnWrongCount(t *testing.T) {
 	}
 }
 
-// ─── BrewVersionOutput ────────────────────────────────────────────────────────
-
-func TestBrewVersionOutput(t *testing.T) {
-	got := executor.BrewVersionOutput("ripgrep", "14.1.0")
-	if got != "ripgrep 14.1.0\n" {
-		t.Errorf("got %q, want %q", got, "ripgrep 14.1.0\n")
-	}
-}
-
-func TestBrewVersionOutput_EmptyVersion(t *testing.T) {
-	got := executor.BrewVersionOutput("git", "")
-	if got != "git \n" {
-		t.Errorf("got %q, want %q", got, "git \n")
-	}
-}
-
 // ─── fakeT ────────────────────────────────────────────────────────────────────
 
 // fakeT records Errorf calls without failing the actual test.

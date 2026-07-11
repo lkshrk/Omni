@@ -66,6 +66,7 @@ func (a *App) Doctor(ctx context.Context) (*DoctorResult, error) {
 		a.doctorDrift(ctx, result, cfg)
 		a.doctorDots(ctx, result, cfg)
 		a.doctorDotsIgnorePatterns(result, cfg)
+		a.doctorAgents(result, cfg)
 	}
 	result.Summary = doctorSummary(result.Checks)
 	return result, nil

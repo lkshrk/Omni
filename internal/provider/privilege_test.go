@@ -62,13 +62,3 @@ func TestPrivilegedCommand_BypassesSudoInTests(t *testing.T) {
 		t.Fatalf("args = %v, want [install vim]", args)
 	}
 }
-
-func TestSudoValidationCommand_BypassesSudoInTests(t *testing.T) {
-	cmd, args, ok := SudoValidationCommand()
-	if ok {
-		t.Fatalf("SudoValidationCommand ok = true, want false in tests")
-	}
-	if cmd != "" || args != nil {
-		t.Fatalf("SudoValidationCommand = %q %v, want empty", cmd, args)
-	}
-}

@@ -73,9 +73,11 @@ var defaultIgnores = []string{
 	"._*", // resource fork sidecar files created by macOS on foreign fs
 
 	// ── Lock files (reproducible, machine-state) ──────────────────────────────
+	// .skill-lock.json is deliberately NOT ignored: it's a trackable user
+	// dotfile (see the v13→v14 migration exemption), and a stow --ignore on it
+	// silently empties any entry that targets it.
 	"Brewfile.lock.json", // Homebrew Bundle lock (machine-specific formulae state)
 	"lazy-lock.json",     // Neovim lazy.nvim plugin lock
-	".skill-lock.json",   // vercel-labs/skills lockfile (omni tracks skills via its manifest)
 
 	// ── Databases (always machine-state) ─────────────────────────────────────
 	"*.sqlite",

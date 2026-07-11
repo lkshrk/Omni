@@ -709,7 +709,7 @@ func (a *App) CheckSatisfiedGroups(ctx context.Context, activeGroupNames []strin
 		if len(g.Tools) == 0 {
 			continue
 		}
-		tools, _ := a.resolvedToolEntries(ctx, cfg, []*config.GroupConfig{g})
+		tools, _ := a.resolvedToolEntries(ctx, cfg, []*config.GroupConfig{g}, false)
 		allInstalled := true
 		for _, t := range tools {
 			if _, ok := installedSet[resolvedToolKey(t)]; !ok {
@@ -950,7 +950,7 @@ func (a *App) toolGroupMutationState(ctx context.Context) (*ToolGroupMutationSta
 	if err != nil {
 		return nil, err
 	}
-	tools, err := a.ListTools(ctx, "")
+	tools, err := a.ListToolsForView(ctx, "")
 	if err != nil {
 		return nil, err
 	}
@@ -1002,9 +1002,6 @@ func (a *App) SetGlobalToolIgnore(name string, ignored bool) error {
 	}
 	return a.withConfig(func(cfg *config.RootConfig) error {
 		if ignored {
-			if _, ok := cfg.Tools[name]; !ok {
-				return fmt.Errorf("logical tool %q not found", name)
-			}
 			if slices.Contains(cfg.Ignore.Tools, name) {
 				return errSkipSave
 			}

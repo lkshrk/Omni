@@ -8,7 +8,7 @@ exec git -C $WORK/home/dotfiles config user.email t@t.com
 exec git -C $WORK/home/dotfiles config user.name T
 exec git -C $WORK/home/dotfiles commit --allow-empty -m init
 exec omni --config settings.json dots sync --dry-run
-stdout 'syncing dots 1/1: nvim'
+stdout 'checking dots 1/1: nvim'
 stdout 'would link'
 stdout 'Dry-run'
 

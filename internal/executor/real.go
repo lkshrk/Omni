@@ -68,16 +68,6 @@ func (r *RealExecutor) CommandAvailable(name string) bool {
 	return CommandAvailable(name)
 }
 
-// resolveInEnv looks up binary in the PATH extracted from env.
-// Returns the full path if found, otherwise returns name unchanged
-// (letting the OS produce a meaningful "not found" error).
-func resolveInEnv(name string, env []string) string {
-	if resolved, ok := lookupInEnv(name, env); ok {
-		return resolved
-	}
-	return name
-}
-
 func lookupInEnv(name string, env []string) (string, bool) {
 	if strings.ContainsRune(name, '/') {
 		if isExecutableFile(name) {
@@ -164,8 +154,9 @@ func discoverNodeManagerPaths() []string {
 	return paths
 }
 
-// nvmDefaultBinDir resolves ~/.nvm/alias/default through the alias chain to
-// a concrete installed-version bin directory.
+// nvmDefaultBinDir resolves $NVM_DIR/alias/default (or ~/.nvm/alias/default
+// when NVM_DIR is unset, matching nvm.sh's own default) through the alias
+// chain to a concrete installed-version bin directory.
 // Handles three alias formats:
 //   - Concrete version: "v22.16.0" → direct lookup.
 //   - LTS alias chain: "lts/*" → "lts/iron" → "v20.x.y".
@@ -174,7 +165,10 @@ func discoverNodeManagerPaths() []string {
 // Falls back to the newest installed version overall when the chain cannot be
 // resolved (e.g. a stale alias pointing to an uninstalled version).
 func nvmDefaultBinDir(home string) string {
-	nvmDir := filepath.Join(home, ".nvm")
+	nvmDir := os.Getenv("NVM_DIR")
+	if nvmDir == "" {
+		nvmDir = filepath.Join(home, ".nvm")
+	}
 	if !isDir(nvmDir) {
 		return ""
 	}

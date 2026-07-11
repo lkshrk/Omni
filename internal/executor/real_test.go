@@ -132,60 +132,10 @@ func TestRealExecutor_Run(t *testing.T) {
 // neither volta nor nvm directories can be found).
 func TestDiscoverNodeManagerPaths_NoHome(t *testing.T) {
 	t.Setenv("HOME", "/nonexistent-path-xyz-abc")
+	t.Setenv("NVM_DIR", "") // isolate from the invoking shell's real NVM_DIR
 	got := discoverNodeManagerPaths()
 	if len(got) != 0 {
 		t.Errorf("expected empty paths with nonexistent HOME, got %v", got)
-	}
-}
-
-// ─── resolveInEnv ─────────────────────────────────────────────────────────────
-
-// TestResolveInEnv_FindsBinaryInAugmentedPath verifies that resolveInEnv picks
-// up a binary that exists only in the augmented PATH entry, not in the current
-// process PATH. This is the regression case: exec.CommandContext resolves
-// binaries using the process PATH, ignoring cmd.Env. resolveInEnv must be used
-// to pre-resolve the binary path so the correct binary is executed.
-func TestResolveInEnv_FindsBinaryInAugmentedPath(t *testing.T) {
-	dir := t.TempDir()
-	binary := filepath.Join(dir, "mytool")
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\necho ok\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	env := []string{"PATH=" + dir + ":/usr/bin:/bin"}
-	got := resolveInEnv("mytool", env)
-	if got != binary {
-		t.Errorf("resolveInEnv = %q, want %q", got, binary)
-	}
-}
-
-func TestResolveInEnv_ReturnsNameWhenNotFound(t *testing.T) {
-	env := []string{"PATH=/nonexistent-dir-xyz"}
-	got := resolveInEnv("nosuchbinary", env)
-	if got != "nosuchbinary" {
-		t.Errorf("resolveInEnv = %q, want original name", got)
-	}
-}
-
-func TestResolveInEnv_PassesThroughAbsolutePath(t *testing.T) {
-	got := resolveInEnv("/usr/bin/env", []string{"PATH=/nonexistent"})
-	if got != "/usr/bin/env" {
-		t.Errorf("resolveInEnv = %q, want /usr/bin/env", got)
-	}
-}
-
-func TestResolveInEnv_PrefersFirstMatchInPath(t *testing.T) {
-	dir1 := t.TempDir()
-	dir2 := t.TempDir()
-	for _, d := range []string{dir1, dir2} {
-		if err := os.WriteFile(filepath.Join(d, "tool"), []byte("x"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	env := []string{"PATH=" + dir1 + ":" + dir2}
-	got := resolveInEnv("tool", env)
-	want := filepath.Join(dir1, "tool")
-	if got != want {
-		t.Errorf("resolveInEnv = %q, want first match %q", got, want)
 	}
 }
 
@@ -252,6 +202,7 @@ func TestResolveCommand_UsesActiveNVMBinBeforeDefaultAlias(t *testing.T) {
 	}
 	writeAlias(t, filepath.Join(home, ".nvm"), "default", "v20.10.0\n")
 	t.Setenv("HOME", home)
+	t.Setenv("NVM_DIR", "") // isolate from the invoking shell's real NVM_DIR
 	t.Setenv("NVM_BIN", activeBin)
 	t.Setenv("PATH", "/usr/bin:/bin")
 
@@ -283,6 +234,7 @@ func TestNew_ReturnsNonNil(t *testing.T) {
 // Returns the home path and the versionsDir path.
 func makeNvmHome(t *testing.T) (home, versionsDir string) {
 	t.Helper()
+	t.Setenv("NVM_DIR", "") // isolate from the invoking shell's real NVM_DIR
 	home = t.TempDir()
 	versionsDir = filepath.Join(home, ".nvm", "versions", "node")
 	aliasDir := filepath.Join(home, ".nvm", "alias")
@@ -310,9 +262,34 @@ func writeAlias(t *testing.T, nvmDir, name, content string) {
 }
 
 func TestNvmDefaultBinDir_NvmDirAbsent(t *testing.T) {
-	home := t.TempDir() // no .nvm subdir
+	home := t.TempDir()     // no .nvm subdir
+	t.Setenv("NVM_DIR", "") // isolate from the invoking shell's real NVM_DIR
 	if got := nvmDefaultBinDir(home); got != "" {
 		t.Errorf("expected empty without .nvm, got %q", got)
+	}
+}
+
+// TestNvmDefaultBinDir_HonoursNVMDirEnv verifies that a custom $NVM_DIR
+// (e.g. homebrew nvm installs, or dotfiles that relocate it) is used instead
+// of the hardcoded ~/.nvm, since nvm.sh itself honours NVM_DIR as the source
+// of truth and only falls back to ~/.nvm when it is unset.
+func TestNvmDefaultBinDir_HonoursNVMDirEnv(t *testing.T) {
+	home := t.TempDir() // no .nvm under home at all
+	customDir := t.TempDir()
+	versionsDir := filepath.Join(customDir, "versions", "node")
+	binDir := filepath.Join(versionsDir, "v22.16.0", "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(customDir, "alias"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeAlias(t, customDir, "default", "v22.16.0\n")
+	t.Setenv("NVM_DIR", customDir)
+
+	got := nvmDefaultBinDir(home)
+	if got != binDir {
+		t.Errorf("got %q, want %q", got, binDir)
 	}
 }
 

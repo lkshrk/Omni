@@ -5,16 +5,27 @@ import "context"
 // Named returns p with Name overridden. It is intended for concrete aliases
 // backed by an existing manager provider, such as npm over the node provider.
 //
-// MultiManagerBulkChecker is forwarded only when the base provider implements it
-// (e.g. the node/python families): the optional interface must not be claimed by
-// aliases of non-multi providers, or callers that prefer the multi path would
-// receive an empty result instead of falling back to the bulk path.
+// MultiManagerBulkChecker and ManagerOutdatedInfoChecker are forwarded only
+// when the base provider implements them (e.g. the node/python families): each
+// optional interface must not be claimed by aliases of providers that lack it,
+// or callers that prefer the manager-attributed path would receive an empty
+// result instead of falling back to the unattributed path, or would silently
+// lose manager attribution when a same-named package exists under multiple
+// concrete managers.
 func Named(name string, p Provider) Provider {
 	np := namedProvider{name: name, Provider: p}
-	if _, ok := p.(MultiManagerBulkChecker); ok {
+	_, multi := p.(MultiManagerBulkChecker)
+	_, outdatedInfo := p.(ManagerOutdatedInfoChecker)
+	switch {
+	case multi && outdatedInfo:
+		return namedMultiOutdatedInfoProvider{namedMultiProvider: namedMultiProvider{namedProvider: np}}
+	case multi:
 		return namedMultiProvider{namedProvider: np}
+	case outdatedInfo:
+		return namedOutdatedInfoProvider{namedProvider: np}
+	default:
+		return np
 	}
-	return np
 }
 
 // namedMultiProvider is a namedProvider that also forwards
@@ -25,6 +36,27 @@ type namedMultiProvider struct {
 
 func (p namedMultiProvider) InstalledByManager(ctx context.Context) (map[string]InstalledEntry, error) {
 	return p.Provider.(MultiManagerBulkChecker).InstalledByManager(ctx)
+}
+
+// namedOutdatedInfoProvider is a namedProvider that also forwards
+// ManagerOutdatedInfoChecker to the base provider.
+type namedOutdatedInfoProvider struct {
+	namedProvider
+}
+
+func (p namedOutdatedInfoProvider) OutdatedInfoByManager(ctx context.Context) (map[string]map[string]OutdatedInfo, error) {
+	return p.Provider.(ManagerOutdatedInfoChecker).OutdatedInfoByManager(ctx)
+}
+
+// namedMultiOutdatedInfoProvider is a namedProvider that forwards both
+// MultiManagerBulkChecker and ManagerOutdatedInfoChecker, for bases (e.g.
+// node/python) that implement both optional interfaces together.
+type namedMultiOutdatedInfoProvider struct {
+	namedMultiProvider
+}
+
+func (p namedMultiOutdatedInfoProvider) OutdatedInfoByManager(ctx context.Context) (map[string]map[string]OutdatedInfo, error) {
+	return p.Provider.(ManagerOutdatedInfoChecker).OutdatedInfoByManager(ctx)
 }
 
 type namedProvider struct {

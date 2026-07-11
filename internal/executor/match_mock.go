@@ -2,7 +2,6 @@ package executor
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"sync"
 )
@@ -102,8 +101,3 @@ func (m *MatchMockExecutor) MustHaveCalledN(t interface{ Errorf(string, ...any) 
 
 // Verify that MatchMockExecutor satisfies the Executor interface.
 var _ Executor = (*MatchMockExecutor)(nil)
-
-// BrewVersionOutput formats a `brew list --versions <pkg>` output line.
-func BrewVersionOutput(pkg, version string) string {
-	return fmt.Sprintf("%s %s\n", pkg, version)
-}

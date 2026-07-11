@@ -94,12 +94,22 @@ type ToolListItem struct {
 }
 
 func (a *App) ListTools(ctx context.Context, providerFilter string) ([]*database.ToolCache, error) {
+	return a.listToolsForDisplay(ctx, providerFilter, false)
+}
+
+// ListToolsForView returns configured tools for TUI/CLI table rendering,
+// including ignored tools so they can appear in the Ignored section.
+func (a *App) ListToolsForView(ctx context.Context, providerFilter string) ([]*database.ToolCache, error) {
+	return a.listToolsForDisplay(ctx, providerFilter, true)
+}
+
+func (a *App) listToolsForDisplay(ctx context.Context, providerFilter string, includeIgnored bool) ([]*database.ToolCache, error) {
 	cfg, cfgErr := a.loadConfig()
 	ecosystemProviders := map[string]string(nil)
 	if cfgErr == nil {
 		ecosystemProviders = a.ResolvedEcosystemProviders(ctx)
 	}
-	tools, err := a.listToolsFromConfig(ctx, cfg, providerFilter, ecosystemProviders)
+	tools, err := a.listToolsFromConfig(ctx, cfg, providerFilter, ecosystemProviders, includeIgnored)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +163,7 @@ func (a *App) ToolMembershipMap(ctx context.Context) (map[string][]string, error
 }
 
 func (a *App) toolMembershipMapFromConfig(ctx context.Context, cfg *config.RootConfig) map[string][]string {
-	resolved, _ := a.resolveTools(ctx, cfg, cfg.Groups)
+	resolved, _ := a.resolveTools(ctx, cfg, cfg.Groups, false)
 	return toolMembershipMapFromResolved(resolved)
 }
 
@@ -174,7 +184,7 @@ func (a *App) QueryTools(ctx context.Context, opts ToolListOptions) ([]ToolListI
 		return nil, err
 	}
 	resolvedProviders := a.ResolvedEcosystemProviders(ctx)
-	tools, err := a.listToolsFromConfig(ctx, cfg, "", resolvedProviders)
+	tools, err := a.listToolsFromConfig(ctx, cfg, "", resolvedProviders, false)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +211,7 @@ func (a *App) QueryTools(ctx context.Context, opts ToolListOptions) ([]ToolListI
 	groupByTool := make(map[string]string)
 	allowed := make(map[string]struct{})
 	groupExists := opts.Group == ""
-	resolved, _ := a.resolveTools(ctx, cfg, groups)
+	resolved, _ := a.resolveTools(ctx, cfg, groups, false)
 	for _, g := range groups {
 		groupName := g.BaseName()
 		if groupName == opts.Group {
@@ -522,7 +532,7 @@ func classifyToolState(t *database.ToolCache, ignoreSet map[string]struct{}, res
 		return ToolStateUnclaimed
 	case ToolSyncMissing:
 		return ToolStateMissing
-	case ToolSyncWrongProvider:
+	case ToolSyncWrongProvider, ToolSyncNvmManaged:
 		return ToolStateOutOfSync
 	}
 	if classification.Section == ToolViewSectionInstalled {
@@ -1396,6 +1406,30 @@ func (a *App) previewDiscovered(ctx context.Context) ([]*database.ToolCache, err
 	return out, nil
 }
 
+func (a *App) discoverCLIToolSets(ctx context.Context) map[string]map[string]bool {
+	cliSets := make(map[string]map[string]bool)
+	for _, prov := range a.availableProviders(ctx) {
+		cp, ok := prov.(provider.CLIToolProvider)
+		if !ok {
+			continue
+		}
+		set, err := cp.CLIToolSet(ctx)
+		if err != nil {
+			continue
+		}
+		cliSets[prov.Name()] = set
+	}
+	return cliSets
+}
+
+func discoverCLIToolAllowed(cliSets map[string]map[string]bool, providerName, toolName string) bool {
+	cliSet, ok := cliSets[providerName]
+	if !ok {
+		return true
+	}
+	return cliSet[strings.ToLower(toolName)]
+}
+
 func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootConfig, progress func(RefreshDiscoveredProgressEvent)) []database.DiscoveredUpsert {
 	// Build name-only set of tools already declared in config.
 	configuredNames := make(map[string]struct{})
@@ -1438,6 +1472,7 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 		}
 	}
 	stop()
+	cliSets := a.discoverCLIToolSets(ctx)
 	for i, p := range providers {
 		if progress != nil {
 			progress(RefreshDiscoveredProgressEvent{Provider: p.Name(), Index: i + 1, Total: len(providers)})
@@ -1454,6 +1489,9 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 			}
 			for name, entry := range entries {
 				if _, ok := configuredNames[name]; ok {
+					continue
+				}
+				if !discoverCLIToolAllowed(cliSets, p.Name(), name) {
 					continue
 				}
 				if !scope.allowsDiscovered(configProvider, entry.ConcreteManager) {
@@ -1477,6 +1515,9 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 		for _, t := range installed {
 			if _, ok := configuredNames[t.Name]; ok {
 				continue // already in config; skip
+			}
+			if !discoverCLIToolAllowed(cliSets, p.Name(), t.Name) {
+				continue
 			}
 			if !scope.allowsDiscovered(configProvider, p.Name()) {
 				continue
@@ -1509,7 +1550,7 @@ type ToolDisplaySnapshot struct {
 }
 
 func (a *App) ToolDisplaySnapshot(ctx context.Context) (*ToolDisplaySnapshot, error) {
-	tools, err := a.ListTools(ctx, "")
+	tools, err := a.ListToolsForView(ctx, "")
 	if err != nil {
 		return nil, err
 	}
@@ -1534,7 +1575,7 @@ func (a *App) listDiscoveredFromConfig(ctx context.Context, cfg *config.RootConf
 	return filterIgnoredToolCaches(discovered, ignoredToolSet(cfg)), nil
 }
 
-func (a *App) listToolsFromConfig(ctx context.Context, cfg *config.RootConfig, providerFilter string, ecosystemProviders map[string]string) ([]*database.ToolCache, error) {
+func (a *App) listToolsFromConfig(ctx context.Context, cfg *config.RootConfig, providerFilter string, ecosystemProviders map[string]string, includeIgnored bool) ([]*database.ToolCache, error) {
 	var (
 		tools []*database.ToolCache
 		err   error
@@ -1559,18 +1600,20 @@ func (a *App) listToolsFromConfig(ctx context.Context, cfg *config.RootConfig, p
 			cachedNames[tc.Name] = struct{}{}
 		}
 	}
-	configured, authoritative := a.configuredToolCacheKeys(ctx, cfg)
+	configured, authoritative := a.configuredToolCacheKeys(ctx, cfg, includeIgnored)
 	scope := a.discoveryProviderScope(ctx, cfg, ecosystemProviders)
 	tools = filterToolCachesByConfigAndScope(tools, configured, authoritative, scope)
-	tools = filterIgnoredToolCaches(tools, ignoredToolSet(cfg))
-	return a.appendConfigLedRows(ctx, cfg, tools, cachedNames), nil
+	if !includeIgnored {
+		tools = filterIgnoredToolCaches(tools, ignoredToolSet(cfg))
+	}
+	return a.appendConfigLedRows(ctx, cfg, tools, cachedNames, includeIgnored), nil
 }
 
 // appendConfigLedRows makes the tool list config-led: every resolved configured
 // tool appears even when it has no cache row yet (not refreshed, or unresolved
 // empty-provider tool). Such tools are synthesized as not-installed rows so they
 // surface as "needs sync" instead of silently vanishing from list and TUI.
-func (a *App) appendConfigLedRows(ctx context.Context, cfg *config.RootConfig, tools []*database.ToolCache, cachedNames map[string]struct{}) []*database.ToolCache {
+func (a *App) appendConfigLedRows(ctx context.Context, cfg *config.RootConfig, tools []*database.ToolCache, cachedNames map[string]struct{}, includeIgnored bool) []*database.ToolCache {
 	// Dedup by logical tool name: a tool may be installed under a non-winner
 	// provider while config resolves it to a different priority winner, so a
 	// name already represented by any cache row must not be re-synthesized.
@@ -1585,12 +1628,8 @@ func (a *App) appendConfigLedRows(ctx context.Context, cfg *config.RootConfig, t
 		present[tc.Name] = struct{}{}
 	}
 	groups, _ := a.currentToolGroupsWithAuthority(cfg)
-	entries, _ := a.resolvedToolEntries(ctx, cfg, groups)
-	ignored := ignoredToolSet(cfg)
+	entries, _ := a.resolvedToolEntries(ctx, cfg, groups, includeIgnored)
 	for _, e := range entries {
-		if toolNameIgnored(ignored, e.Name) {
-			continue
-		}
 		if _, ok := present[e.Name]; ok {
 			continue
 		}
@@ -1602,12 +1641,33 @@ func (a *App) appendConfigLedRows(ctx context.Context, cfg *config.RootConfig, t
 			Tracked:  true,
 		})
 	}
+	if includeIgnored {
+		ignored := ignoredToolSet(cfg)
+		for name := range ignored {
+			if _, ok := present[name]; ok {
+				continue
+			}
+			spec, ok := cfg.Tools[name]
+			if !ok {
+				continue
+			}
+			install := a.resolveInstallSpec(ctx, name, spec)
+			entry := spec.ToToolEntry(name, install)
+			present[name] = struct{}{}
+			tools = append(tools, &database.ToolCache{
+				Name:     entry.Name,
+				Provider: entry.Provider,
+				Package:  entry.EffectivePackage(),
+				Tracked:  true,
+			})
+		}
+	}
 	return tools
 }
 
-func (a *App) configuredToolCacheKeys(ctx context.Context, cfg *config.RootConfig) (map[string]struct{}, bool) {
+func (a *App) configuredToolCacheKeys(ctx context.Context, cfg *config.RootConfig, includeIgnored bool) (map[string]struct{}, bool) {
 	groups, _ := a.currentToolGroupsWithAuthority(cfg)
-	entries, _ := a.resolvedToolEntries(ctx, cfg, groups)
+	entries, _ := a.resolvedToolEntries(ctx, cfg, groups, includeIgnored)
 	keys := make(map[string]struct{}, len(entries))
 	for _, entry := range entries {
 		keys[resolvedToolKey(entry)] = struct{}{}

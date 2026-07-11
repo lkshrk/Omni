@@ -63,7 +63,7 @@ func (a *App) Import(ctx context.Context, opts ImportOptions) (*ImportResult, er
 		// ListInstalled returns just the plain tool name.
 		configured := make(map[string]struct{})
 		configuredNames := make(map[string]struct{})
-		configuredTools, _ := a.resolvedToolEntries(ctx, cfg, cfg.Groups)
+		configuredTools, _ := a.resolvedToolEntries(ctx, cfg, cfg.Groups, false)
 		for _, t := range configuredTools {
 			configured[t.Provider+"\x00"+t.Name] = struct{}{}
 			if ep := t.EffectivePackage(); ep != t.Name {

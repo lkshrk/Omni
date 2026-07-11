@@ -10,21 +10,41 @@ import (
 	"github.com/lkshrk/omni/internal/dots"
 )
 
-func TestLstatOp_RejectsSymlinkToRepoPrefixSibling(t *testing.T) {
-	repoDir := filepath.Join(t.TempDir(), "repo")
-	siblingDir := repoDir + "-other"
-	srcDir := filepath.Join(siblingDir, "nvim", ".config", "nvim")
-	if err := os.MkdirAll(srcDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	dst := filepath.Join(t.TempDir(), "nvim")
-	if err := os.Symlink(srcDir, dst); err != nil {
-		t.Fatal(err)
+func TestAgentConfigDotCandidateNames_DerivesFromCatalog(t *testing.T) {
+	names := agentConfigDotCandidateNames()
+	nameSet := make(map[string]struct{}, len(names))
+	for _, n := range names {
+		nameSet[n] = struct{}{}
 	}
 
-	op := lstatOp("nvim", dst, repoDir, false)
-	if op.Kind != dots.OpConflict {
-		t.Fatalf("lstatOp kind = %v, want OpConflict for repo prefix sibling", op.Kind)
+	// A known catalog entry's ".config/<leaf>" configDir must appear.
+	if _, ok := nameSet["agents"]; !ok {
+		t.Fatalf("agentConfigDotCandidateNames() = %v, want it to include %q (from supportedAgents .config/agents entries)", names, "agents")
+	}
+	for _, want := range []string{"crush", "devin", "goose", "opencode"} {
+		if _, ok := nameSet[want]; !ok {
+			t.Fatalf("agentConfigDotCandidateNames() = %v, want it to include %q", names, want)
+		}
+	}
+
+	// Home-level (non-.config) catalog dirs must never be derived here: they
+	// are not swept by the generic ~/.config scan, and deriving them would be
+	// meaningless for this ignore list.
+	for _, notWant := range []string{"claude", "codex", "grok", "agents-skill-lock", "gemini"} {
+		if _, ok := nameSet[notWant]; ok {
+			t.Fatalf("agentConfigDotCandidateNames() = %v, must not include home-level dir %q", names, notWant)
+		}
+	}
+
+	// Multi-segment configDirs (e.g. ".gemini/antigravity") must never
+	// contribute a derived name here at all: they don't start with
+	// ".config/", so the parent-blanket-ignore risk doesn't apply, but assert
+	// the guard rejects any accidental ".config/foo/bar" catalog entry too.
+	if leaf, ok := configDotSubdirLeaf(".config/foo/bar"); ok {
+		t.Fatalf("configDotSubdirLeaf(%q) = %q, ok=true, want ok=false for multi-segment path", ".config/foo/bar", leaf)
+	}
+	if leaf, ok := configDotSubdirLeaf(".gemini/antigravity"); ok {
+		t.Fatalf("configDotSubdirLeaf(%q) = %q, ok=true, want ok=false for non-.config path", ".gemini/antigravity", leaf)
 	}
 }
 

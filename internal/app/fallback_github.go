@@ -346,15 +346,6 @@ func githubReleaseAssetIgnored(name string) bool {
 	return false
 }
 
-func githubAssetExtractable(name string) bool {
-	for _, suffix := range []string{".tar.gz", ".tgz", ".tar.xz", ".zip"} {
-		if strings.HasSuffix(name, suffix) {
-			return true
-		}
-	}
-	return false
-}
-
 func githubOSNames() []string {
 	switch runtime.GOOS {
 	case "darwin":

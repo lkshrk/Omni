@@ -232,7 +232,7 @@ func TestResolveToolsCachesProviderAvailabilityPerPass(t *testing.T) {
 		group.Tools = append(group.Tools, config.ToolEntry{Name: name})
 	}
 
-	resolved, warnings := a.resolveTools(ctx, cfg, cfg.Groups)
+	resolved, warnings := a.resolveTools(ctx, cfg, cfg.Groups, false)
 	if len(warnings) != 0 {
 		t.Fatalf("warnings = %v, want none", warnings)
 	}
@@ -251,7 +251,7 @@ func TestResolveToolsCachesProviderAvailabilityPerPass(t *testing.T) {
 		t.Fatalf("available Available calls = %d, want 1", available.calls)
 	}
 
-	_, _ = a.resolveTools(ctx, cfg, cfg.Groups)
+	_, _ = a.resolveTools(ctx, cfg, cfg.Groups, false)
 	if unavailable.calls != 2 || available.calls != 2 {
 		t.Fatalf("availability cache escaped pass: missing=%d available=%d, want 2/2", unavailable.calls, available.calls)
 	}
@@ -349,6 +349,40 @@ func TestPlanInstallRoute_MarksFallbackEligibleWhenAllNativeCandidatesUnavailabl
 	}
 	if len(route.Skipped) != 2 {
 		t.Fatalf("skipped = %+v, want both native candidates skipped", route.Skipped)
+	}
+}
+
+func TestPlanInstallRoute_BrewUnavailableUsesScriptAlternative(t *testing.T) {
+	ctx := context.Background()
+	brew := &availabilityCountingProvider{name: "brew", available: false}
+	script := &availabilityCountingProvider{name: "script", available: true}
+	a := New(filepath.Join(t.TempDir(), "settings.json"))
+	if err := a.InitTestMode(ctx, brew, script); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	defer a.Close() //nolint:errcheck
+
+	route := a.planInstallRoute(ctx, "grok", config.ToolSpec{
+		Providers: []config.ToolInstallSpec{
+			{Provider: "brew", Package: "grok"},
+			{
+				Provider: "script",
+				Options: map[string]string{
+					"install": "curl -fsSL https://x.ai/cli/install.sh | bash",
+					"check":   "command -v grok || test -x $HOME/.grok/bin/grok",
+				},
+			},
+		},
+	}, make(map[string]bool))
+
+	if route.Kind != installRouteNative {
+		t.Fatalf("route kind = %q, want native", route.Kind)
+	}
+	if route.Install.Provider != "script" {
+		t.Fatalf("install provider = %q, want script", route.Install.Provider)
+	}
+	if len(route.Skipped) != 1 || route.Skipped[0].Reason != installRouteSkipProviderUnavailable || route.Skipped[0].Install.Provider != "brew" {
+		t.Fatalf("skipped = %+v, want brew provider-unavailable skip", route.Skipped)
 	}
 }
 
@@ -458,5 +492,116 @@ func githubFallbackSpec() *config.FallbackSpec {
 			Install: "install rg",
 			Check:   "command -v rg",
 		},
+	}
+}
+
+// codexToolSpec mirrors the real-world config that triggered the wrong-package
+// bug: a system provider default (brew) plus a secondary node-ecosystem
+// candidate (bun) written by `omni consolidate`, whose Package differs from
+// the logical tool name.
+func codexToolSpec() config.ToolSpec {
+	return config.ToolSpec{
+		Providers: []config.ToolInstallSpec{
+			{Provider: "brew", Package: "codex"},
+			{Provider: "bun", Package: "@openai/codex"},
+		},
+	}
+}
+
+func saveCodexConfig(t *testing.T, configPath string, spec config.ToolSpec) {
+	t.Helper()
+	cfg := &config.RootConfig{
+		Tools:  map[string]config.ToolSpec{"codex": spec},
+		Groups: []*config.GroupConfig{{Name: "base", Tools: []config.ToolEntry{{Name: "codex"}}}},
+	}
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+}
+
+func TestInstall_ExplicitProviderMatchesSecondaryConfiguredCandidate(t *testing.T) {
+	ctx := context.Background()
+	configPath := filepath.Join(t.TempDir(), "settings.json")
+	brew := newManagerRoutingProvider("brew")
+	bun := newManagerRoutingProvider("bun")
+	a := New(configPath)
+	if err := a.InitTestMode(ctx, brew, bun); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	defer a.Close() //nolint:errcheck
+
+	saveCodexConfig(t, configPath, codexToolSpec())
+
+	// brew is the primary (first) configured candidate and would be
+	// auto-picked by planInstallRoute; requesting --provider bun explicitly
+	// must still reach the secondary bun candidate and its configured
+	// package, not fall back to installing a package literally named "codex"
+	// via bun.
+	if err := a.Install(ctx, "codex", "bun"); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	if len(bun.installCalls) != 1 {
+		t.Fatalf("bun installCalls = %+v, want exactly 1", bun.installCalls)
+	}
+	got := bun.installCalls[0]
+	if got.Provider != "bun" || got.Package != "@openai/codex" {
+		t.Fatalf("installed tool = %+v, want codex via bun package @openai/codex", got)
+	}
+	if len(brew.installCalls) != 0 {
+		t.Fatalf("brew installCalls = %+v, want none", brew.installCalls)
+	}
+}
+
+func TestInstall_UnmatchedRequestedProviderReturnsErrorNotLiteralNameFallback(t *testing.T) {
+	ctx := context.Background()
+	configPath := filepath.Join(t.TempDir(), "settings.json")
+	brew := newManagerRoutingProvider("brew")
+	npm := newManagerRoutingProvider("npm")
+	a := New(configPath)
+	if err := a.InitTestMode(ctx, brew, npm); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	defer a.Close() //nolint:errcheck
+
+	saveCodexConfig(t, configPath, codexToolSpec())
+
+	// codex has no configured "npm" candidate (only brew and bun); this must
+	// error rather than silently install a package literally named "codex"
+	// via npm.
+	err := a.Install(ctx, "codex", "npm")
+	if err == nil {
+		t.Fatalf("Install with unmatched provider = nil error, want error")
+	}
+	if len(npm.installCalls) != 0 {
+		t.Fatalf("npm installCalls = %+v, want none", npm.installCalls)
+	}
+	if len(brew.installCalls) != 0 {
+		t.Fatalf("brew installCalls = %+v, want none", brew.installCalls)
+	}
+}
+
+func TestInstall_UnconfiguredToolStillUsesLiteralNameFallback(t *testing.T) {
+	ctx := context.Background()
+	configPath := filepath.Join(t.TempDir(), "settings.json")
+	brew := newManagerRoutingProvider("brew")
+	a := New(configPath)
+	if err := a.InitTestMode(ctx, brew); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	defer a.Close() //nolint:errcheck
+
+	// No config.Tools entry at all for "adhoc-tool" — the legacy ad-hoc
+	// install path must still work.
+	if err := a.Install(ctx, "adhoc-tool", "brew"); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	if len(brew.installCalls) != 1 {
+		t.Fatalf("brew installCalls = %+v, want exactly 1", brew.installCalls)
+	}
+	got := brew.installCalls[0]
+	if got.Provider != "brew" || got.Package != "adhoc-tool" {
+		t.Fatalf("installed tool = %+v, want adhoc-tool via brew literal name", got)
 	}
 }

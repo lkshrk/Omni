@@ -2,6 +2,7 @@ package app_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"sync/atomic"
@@ -406,6 +407,90 @@ func TestRefreshProviderOutdated_PersistsManagerUpdateMetadata(t *testing.T) {
 	}
 	if !metadata.AvailableAt.Equal(availableAt) || metadata.DateSource != "npm_registry_time" {
 		t.Fatalf("metadata = %+v, want npm_registry_time at %s", metadata, availableAt)
+	}
+}
+
+// onlyManagerOutdatedInfoStub mirrors the real node/python provider shape:
+// OutdatedInfoMap (satisfying plain OutdatedInfoChecker) is a convenience
+// wrapper that merges OutdatedInfoByManager's per-manager results into one
+// flat, first-writer-wins map by package name, exactly like
+// node.Provider.OutdatedInfoMap does. This is what lets the bug hide: even
+// without ManagerOutdatedInfoChecker forwarding, namedProvider's own
+// OutdatedInfoMap method still finds a real (but manager-unattributed and
+// therefore cross-contaminated) result from the base.
+type onlyManagerOutdatedInfoStub struct {
+	stubProvider
+	byManager map[string]map[string]provider.OutdatedInfo
+}
+
+func (s *onlyManagerOutdatedInfoStub) OutdatedInfoByManager(_ context.Context) (map[string]map[string]provider.OutdatedInfo, error) {
+	return s.byManager, nil
+}
+
+func (s *onlyManagerOutdatedInfoStub) OutdatedInfoMap(_ context.Context) (map[string]provider.OutdatedInfo, error) {
+	result := make(map[string]provider.OutdatedInfo)
+	for _, m := range s.byManager {
+		for name, info := range m {
+			if _, exists := result[name]; !exists {
+				result[name] = info
+			}
+		}
+	}
+	if len(result) == 0 {
+		return nil, nil
+	}
+	return result, nil
+}
+
+// TestRefreshProviderOutdated_NamedAliasPreservesManagerAttribution guards
+// against a regression where provider.Named-wrapped aliases (bun, pnpm, uv,
+// ...) lost ManagerOutdatedInfoChecker because Named embedded the base as the
+// Provider interface, so the optional method wasn't promoted.
+// outdatedMapsForProvider then fell through to the wrapper's own concrete
+// OutdatedMap/OutdatedInfoMap methods (which always structurally satisfy
+// OutdatedChecker/OutdatedInfoChecker but return nil when the base lacks
+// those), losing per-manager attribution entirely. outdatedForTool then
+// matched by package name only across every concrete manager flattened
+// together: a same-named package already current under pnpm got contaminated
+// by npm's outdated entry for typescript, wrongly flipping the pnpm-owned row
+// to Outdated=true even though its own manager (pnpm) has no update.
+func TestRefreshProviderOutdated_NamedAliasPreservesManagerAttribution(t *testing.T) {
+	base := &onlyManagerOutdatedInfoStub{
+		stubProvider: stubProvider{name: "node", available: true},
+		byManager: map[string]map[string]provider.OutdatedInfo{
+			"npm":  {"typescript": {LatestVersion: "5.5.0"}},
+			"pnpm": {},
+		},
+	}
+	// Mirror app.go's real registration: bun/pnpm/npm are separate Named
+	// aliases wrapping the same underlying node provider.
+	bun := provider.Named("bun", base)
+	pnpm := provider.Named("pnpm", base)
+	a, _ := newImportApp(t, bun, pnpm)
+	ctx := context.Background()
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name:          "typescript",
+		Provider:      "pnpm",
+		Package:       "typescript",
+		Installed:     true,
+		InstalledWith: "pnpm",
+		Outdated:      false,
+		LatestVersion: sql.NullString{},
+		LastChecked:   time.Now(),
+	}); err != nil {
+		t.Fatalf("db.Upsert: %v", err)
+	}
+
+	if err := a.RefreshOutdated(ctx, false, nil); err != nil {
+		t.Fatalf("RefreshOutdated: %v", err)
+	}
+
+	typescript, err := a.DB().Get(ctx, "typescript", "pnpm", "typescript")
+	if err != nil {
+		t.Fatalf("get typescript: %v", err)
+	}
+	if typescript.Outdated {
+		t.Fatalf("typescript.Outdated = true, want false: pnpm has no update for it, only npm does, and manager attribution must keep them separate")
 	}
 }
 
@@ -958,6 +1043,15 @@ func (s *listInstalledStub) ListInstalled(_ context.Context) ([]provider.Install
 	return s.installed, nil
 }
 
+type cliFilteredListInstalledStub struct {
+	listInstalledStub
+	cliSet map[string]bool
+}
+
+func (s *cliFilteredListInstalledStub) CLIToolSet(context.Context) (map[string]bool, error) {
+	return s.cliSet, nil
+}
+
 // TestRefreshDiscovered_PopulatesDB verifies that tools reported by
 // ListInstalled are stored as discovered (tracked=false) entries.
 func TestRefreshDiscovered_PopulatesDB(t *testing.T) {
@@ -1028,6 +1122,38 @@ func TestRefreshDiscovered_ScansOnlyTrackedProviders(t *testing.T) {
 	}
 	if len(discovered) != 1 || discovered[0].Name != "jq" {
 		t.Fatalf("discovered = %+v, want only brew jq", discovered)
+	}
+}
+
+func TestRefreshDiscovered_SkipsNonCLIToolPackages(t *testing.T) {
+	pip := &cliFilteredListInstalledStub{
+		listInstalledStub: listInstalledStub{
+			stubProvider: stubProvider{name: "pip", available: true},
+			installed: []provider.InstalledTool{
+				{Tool: provider.Tool{Name: "asyncpg", Provider: "pip"}, Version: "0.31.0"},
+				{Tool: provider.Tool{Name: "black", Provider: "pip"}, Version: "24.4.0"},
+			},
+		},
+		cliSet: map[string]bool{"black": true},
+	}
+	a, cfgPath := newImportApp(t, pip)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools:  logicalToolSpecs(logicalTool("ruff", "pip")),
+		Groups: []*config.GroupConfig{testHostToolGroup("ruff")},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if err := a.RefreshDiscovered(context.Background()); err != nil {
+		t.Fatalf("RefreshDiscovered: %v", err)
+	}
+
+	discovered, err := a.ListDiscovered(context.Background())
+	if err != nil {
+		t.Fatalf("ListDiscovered: %v", err)
+	}
+	if len(discovered) != 1 || discovered[0].Name != "black" {
+		t.Fatalf("discovered = %+v, want only CLI package black", discovered)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -43,12 +44,13 @@ var supported = []mgr{
 		emptyExitNonZero: true,  // bun pm ls -g exits 1 when the global dir is empty
 	},
 	{
-		binary:      "pnpm",
-		install:     []string{"add", "-g"},
-		uninstall:   []string{"remove", "-g"},
-		upgrade:     []string{"update", "-g", "--latest"},
-		listGlobal:  []string{"ls", "-g", "--depth=0"}, // "ls" outputs tree format in all pnpm versions; "list" outputs JSON by default in pnpm v10+
-		filterByPkg: true,
+		binary:           "pnpm",
+		install:          []string{"add", "-g"},
+		uninstall:        []string{"remove", "-g"},
+		upgrade:          []string{"update", "-g", "--latest"},
+		listGlobal:       []string{"ls", "-g", "--depth=0"}, // "ls" outputs tree format in all pnpm versions; "list" outputs JSON by default in pnpm v10+
+		filterByPkg:      true,
+		emptyExitNonZero: true, // pnpm ls -g exits 1 when no globals are installed or global bin dir is empty
 	},
 	{
 		binary:               "npm",
@@ -292,7 +294,7 @@ func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) 
 	}
 	stdout, _, err := p.exec.Run(ctx, m.binary, m.listGlobal...)
 	if err != nil {
-		if m.emptyExitNonZero {
+		if m.emptyExitNonZero && isEmptyGlobalListError(err) {
 			return map[string]string{}, nil // empty global dir; nothing installed
 		}
 		return nil, fmt.Errorf("%s: %w", cmdStr(m.binary, m.listGlobal), err)
@@ -327,7 +329,7 @@ func (p *Provider) InstalledByManager(ctx context.Context) (map[string]provider.
 		}
 		stdout, _, err := p.exec.Run(ctx, m.binary, m.listGlobal...)
 		if err != nil {
-			if m.emptyExitNonZero {
+			if m.emptyExitNonZero && isEmptyGlobalListError(err) {
 				return nil // empty global dir; nothing to attribute
 			}
 			return fmt.Errorf("%s: %w", cmdStr(m.binary, m.listGlobal), err)
@@ -367,6 +369,20 @@ func (p *Provider) InstalledByManager(ctx context.Context) (map[string]provider.
 	}
 
 	return result, nil
+}
+
+// isEmptyGlobalListError reports whether err is the benign exit status 1 some
+// package managers use when the global install dir is empty (bun, pnpm).
+func isEmptyGlobalListError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode() == 1
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "exit status 1")
 }
 
 // npmOutdatedEntry is one entry from `npm/pnpm outdated -g --json`.

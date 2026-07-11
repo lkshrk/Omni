@@ -286,6 +286,9 @@ func syncResolvedDotEntry(ctx context.Context, exec dots.BackupExecutor, repoPat
 	// before their ignore pattern (or DotsEjectIgnoredPaths) existed.
 	if !opts.DryRun {
 		purgeIgnoredRepoSources(entry)
+		if err := selfHealDotEntryLinkShape(entry); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: omni: self-heal symlink shape for %s: %v\n", entry.Name, err)
+		}
 	}
 	state, _ := classifyDotEntry(entry)
 	switch state {
@@ -944,37 +947,72 @@ func purgeIgnoredRepoSources(entry dots.ResolvedEntry) int {
 	return purged
 }
 
-// lstatOp returns an Op that describes the current link state at dst.
-func lstatOp(entryName, dst, repoPath string, dryRun bool) dots.Op {
-	info, err := os.Lstat(dst)
-	if os.IsNotExist(err) {
-		if dryRun {
-			return dots.Op{Kind: dots.OpDryLink, Entry: entryName, Dst: dst}
-		}
-		return dots.Op{Kind: dots.OpConflict, Entry: entryName, Dst: dst,
-			Err: fmt.Errorf("path not linked after stow")}
-	}
+// selfHealDotEntryLinkShape rewrites existing target symlinks that already
+// resolve to the correct repo file but aren't shaped the way GNU Stow itself
+// would write them (e.g. absolute instead of relative, or a differently
+// computed relative path). Stow refuses to touch such links ("not owned by
+// stow"), aborting the whole package's restow even though the link's target
+// is already correct. Only links resolving to the entry's own source are
+// touched; anything else is left for the normal conflict/broken-link flow.
+func selfHealDotEntryLinkShape(entry dots.ResolvedEntry) error {
+	srcInfo, err := os.Lstat(entry.SourcePath)
 	if err != nil {
-		return dots.Op{Kind: dots.OpConflict, Entry: entryName, Dst: dst, Err: err}
+		return nil
 	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		target, _ := os.Readlink(dst)
-		// Stow may create relative symlinks; resolve to absolute for comparison.
-		absTarget := target
-		if !filepath.IsAbs(absTarget) {
-			absTarget = filepath.Clean(filepath.Join(filepath.Dir(dst), absTarget))
-		}
-		if pathWithinDir(absTarget, repoPath) {
-			if dryRun {
-				return dots.Op{Kind: dots.OpSkip, Entry: entryName, Dst: dst}
+	if srcInfo.IsDir() && srcInfo.Mode()&os.ModeSymlink == 0 {
+		return filepath.WalkDir(entry.SourcePath, func(path string, d os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
 			}
-			return dots.Op{Kind: dots.OpLink, Entry: entryName, Src: absTarget, Dst: dst}
-		}
-		return dots.Op{Kind: dots.OpConflict, Entry: entryName, Dst: dst,
-			Err: fmt.Errorf("symlink points elsewhere: %s", target)}
+			rel, relErr := filepath.Rel(entry.SourcePath, path)
+			if relErr != nil || rel == "." {
+				return relErr
+			}
+			if shouldIgnoreDotPath(entry.SourcePath, rel, d.Name(), combinedDotIgnores(entry.Ignore)) {
+				if d.IsDir() {
+					if ignoredDotDirHasIncludedDescendant(entry.SourcePath, rel, combinedDotIgnores(entry.Ignore)) {
+						return nil
+					}
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if d.IsDir() {
+				return nil
+			}
+			return healDotLinkShapeAt(filepath.Join(entry.TargetPath, rel), path)
+		})
 	}
-	return dots.Op{Kind: dots.OpConflict, Entry: entryName, Dst: dst,
-		Err: fmt.Errorf("real file at %q; use omni dots add --adopt to migrate", dst)}
+	return healDotLinkShapeAt(entry.TargetPath, entry.SourcePath)
+}
+
+// healDotLinkShapeAt rewrites the symlink at linkPath to stow-relative shape
+// when it already resolves to sourcePath. Non-symlinks and links resolving
+// to a different file are left untouched.
+func healDotLinkShapeAt(linkPath, sourcePath string) error {
+	info, err := os.Lstat(linkPath)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		return nil
+	}
+	target, err := os.Readlink(linkPath)
+	if err != nil {
+		return nil
+	}
+	absTarget := target
+	if !filepath.IsAbs(absTarget) {
+		absTarget = filepath.Clean(filepath.Join(filepath.Dir(linkPath), absTarget))
+	}
+	if !sameCleanPath(absTarget, sourcePath) {
+		return nil
+	}
+	wantRel, err := dots.StowRelativeSymlinkTarget(linkPath, sourcePath)
+	if err != nil {
+		return fmt.Errorf("compute stow-relative target for %q: %w", linkPath, err)
+	}
+	if target == wantRel {
+		return nil
+	}
+	return dots.WriteStowShapedSymlink(linkPath, sourcePath)
 }
 
 func lstatEntryOp(entry dots.ResolvedEntry, dryRun bool) dots.Op {
