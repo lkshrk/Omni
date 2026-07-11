@@ -286,8 +286,17 @@ func contextHintItems(m Model, ctx hintContext) []hintItem {
 			dangerHintFromBindingDesc(m.keys.Confirm, desc),
 		}
 	case hintCtxSettingsAgents:
+		enabled := m.agentsEnabled
+		switch m.settingsCursor {
+		case settingsRowSkillsEnabled:
+			enabled = m.skillsEnabled
+		case settingsRowMcpEnabled:
+			enabled = m.mcpEnabled
+		case settingsRowPluginsEnabled:
+			enabled = m.pluginsEnabled
+		}
 		desc := "disable"
-		if !m.agentsEnabled {
+		if !enabled {
 			desc = "enable"
 		}
 		return []hintItem{
@@ -544,17 +553,20 @@ func toolInlineHints(m Model, t *database.ToolCache) []hintItem {
 	switch {
 	case ss == syncOrphan && t.Installed:
 		hints = append(hints, hintFromBinding(m.keys.Claim))
+		showIgnore = true
 		showDelete = true
 	case providerPinForTool(t, m.toolProviderPins) != "":
 		hints = append(hints, hintFromBindingDesc(m.keys.PinProvider, "remove override"))
-		if ss == syncWrongProv {
+		if isProviderRepairSync(ss) {
 			hints = append(hints, hintFromBinding(m.keys.MigrateProvider))
 		}
 		showGroup = true
 		showIgnore = true
 		showDelete = true
-	case ss == syncWrongProv:
-		hints = append(hints, hintFromBinding(m.keys.PinProvider))
+	case ss == syncWrongProv, ss == syncNvmManaged:
+		if ss == syncWrongProv {
+			hints = append(hints, hintFromBinding(m.keys.PinProvider))
+		}
 		hints = append(hints, hintFromBinding(m.keys.MigrateProvider))
 		showGroup = true
 		showIgnore = true
@@ -607,6 +619,9 @@ func tabShortHelpBindings(m *Model) []key.Binding {
 	case viewGroups:
 		actions := []key.Binding{k.NewGroup}
 		return footerBindings(k, actions, nil)
+	case viewSkills:
+		listActions := []key.Binding{agentsUpdateAllBinding(), agentsSyncAllBinding(), agentsRefreshBinding()}
+		return footerBindings(k, listActions, []key.Binding{agentsFilterBinding(k), agentsAgentFilterBinding(k)})
 	default:
 		if m.listConfirm.action == listConfirmSyncAll {
 			return nil
@@ -627,6 +642,9 @@ func rowConfirmationActive(m Model) bool {
 		m.hostDeleteConfirm ||
 		m.groupDeleteConfirm ||
 		m.dangerConfirmRow >= 0 ||
+		m.agentsDeleteConfirm ||
+		m.agentsIgnoreConfirm ||
+		m.pluginMarketplaceOfferConfirm ||
 		dotsConfirmationActive(m)
 }
 
@@ -655,6 +673,63 @@ func footerFilterBinding(k KeyMap, includeGroup bool) key.Binding {
 		keys = append(keys, k.GroupPrev.Keys()...)
 	}
 	return key.NewBinding(key.WithKeys(keys...), key.WithHelp(strings.Join(labels, ","), providerHelp.Desc))
+}
+
+// agentsInstallBinding, agentsUpdateBinding, agentsGroupBinding,
+// agentsIgnoreBinding, and agentsDeleteBinding describe the agents-all row
+// actions (i/u/g/x/d) for the full-help popup. They're constructed ad hoc
+// rather than added to KeyMap since they're footer/popup-display-only —
+// handleAgentsAllRowActionKeyMsg matches on the raw key string directly.
+func agentsInstallBinding() key.Binding {
+	return key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "install"))
+}
+
+func agentsUpdateBinding() key.Binding {
+	return key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "update"))
+}
+
+func agentsGroupBinding() key.Binding {
+	return key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "group"))
+}
+
+func agentsIgnoreBinding() key.Binding {
+	return key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "ignore"))
+}
+
+func agentsDeleteBinding() key.Binding {
+	return key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "delete"))
+}
+
+// agentsFilterBinding and agentsAgentFilterBinding describe the agents tab's
+// two independent filter chip bars ([,] type chip, {,} agent chip) for the
+// footer defaults row, kept as separate hint entries (unlike tools' single
+// combined footerFilterBinding) since the agent chip's label ("agent") means
+// something different from tools' group filter.
+func agentsFilterBinding(k KeyMap) key.Binding {
+	help := k.PrevTab.Help()
+	return key.NewBinding(key.WithKeys(k.PrevTab.Keys()...), key.WithHelp(compactFilterLabel(help.Key), "filter"))
+}
+
+func agentsAgentFilterBinding(k KeyMap) key.Binding {
+	help := k.GroupPrev.Help()
+	return key.NewBinding(key.WithKeys(k.GroupPrev.Keys()...), key.WithHelp(compactFilterLabel(help.Key), "agent"))
+}
+
+// agentsUpdateAllBinding, agentsSyncAllBinding, and agentsRefreshBinding
+// describe the agents tab's three global bulk actions (U/S/R), mirroring
+// tools' UpgradeAll/SyncAll/Refresh footer row exactly. Handled directly by
+// key string in handleAgentsGlobalActionKeyMsg (see the "U"/"S"/"R" cases),
+// so these exist for display only.
+func agentsUpdateAllBinding() key.Binding {
+	return key.NewBinding(key.WithKeys("U"), key.WithHelp("U", "update all"))
+}
+
+func agentsSyncAllBinding() key.Binding {
+	return key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "sync all"))
+}
+
+func agentsRefreshBinding() key.Binding {
+	return key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "refresh"))
 }
 
 func footerClearFiltersBinding(k KeyMap) key.Binding {
@@ -721,6 +796,12 @@ func tabFullHelpBindings(m *Model) [][]key.Binding {
 		return [][]key.Binding{
 			common,
 			{k.NewGroup, k.HostGroups, k.GroupTools, k.GroupDots, k.Toggle, k.Back},
+		}
+	case viewSkills:
+		return [][]key.Binding{
+			common,
+			{agentsInstallBinding(), agentsUpdateBinding(), agentsGroupBinding(), agentsIgnoreBinding(), agentsDeleteBinding()},
+			{footerFilterBinding(k, true)},
 		}
 	default:
 		return [][]key.Binding{
@@ -791,6 +872,22 @@ func activeConfirmationHelpItems(m Model) []hintItem {
 		return []hintItem{pressAgainHint(m.keys.Toggle.Help().Key, "copy groups")}
 	case m.groupDeleteConfirm:
 		return confirmActionItems(m.keys.Confirm, actions.MustTUIConfirmDescription(actions.GroupDelete), m.keys.Back)
+	case m.agentsDeleteConfirm:
+		label := "delete"
+		if m.agentsDeleteUninstall {
+			label = "uninstall"
+		}
+		return []hintItem{pressAgainHint(m.keys.Delete.Help().Key, label)}
+	case m.agentsIgnoreConfirm:
+		label := "confirm ignore"
+		if m.agentsIgnoreName != "" {
+			if entry, ok := agentsAllEntryAt(m, m.agentsAllCursor); ok && entry.feature == m.agentsIgnoreFeature && entry.status == agentsStatusIgnored {
+				label = "confirm include"
+			}
+		}
+		return []hintItem{pressAgainHint(m.keys.Ignore.Help().Key, label)}
+	case m.pluginMarketplaceOfferConfirm:
+		return confirmActionItems(m.keys.Confirm, "claim marketplace "+m.pluginMarketplaceOfferMarket+" too", m.keys.Back)
 	default:
 		return nil
 	}

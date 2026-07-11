@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -57,6 +58,12 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 		// only after onboarding exits.
 		m.setSettings(msg.settings)
 		m.agentsEnabled = msg.agentsEnabled
+		m.skillsEnabled = msg.skillsEnabled
+		m.mcpEnabled = msg.mcpEnabled
+		m.pluginsEnabled = msg.pluginsEnabled
+		m.agentsSummary = msg.agentsSummary
+		m.enabledAgents = msg.enabledAgents
+		m.agentsIgnore = msg.agentsIgnore
 		if msg.dotsConfiguredKnown {
 			m.dotsConfiguredCached = msg.dotsConfigured
 		}
@@ -70,6 +77,7 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 		m.effectivePythonManager = msg.effectivePythonManager
 		m.effectiveNodeManager = msg.effectiveNodeManager
 		m.effectiveSystemManager = msg.effectiveSystemManager
+		m.nvmManaged = msg.nvmManaged
 		m.dotsReminderService = msg.dotsReminderService
 		m.dotsReminderServiceErr = msg.dotsReminderServiceErr
 		m.dotsReminderInterval = app.DotsReminderInterval(msg.dotsReminderService)
@@ -100,6 +108,31 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 	m.rebuildDiscoveredKeys()
 	m.setSettings(msg.settings)
 	m.agentsEnabled = msg.agentsEnabled
+	m.skillsEnabled = msg.skillsEnabled
+	m.mcpEnabled = msg.mcpEnabled
+	m.pluginsEnabled = msg.pluginsEnabled
+	m.agentsSummary = msg.agentsSummary
+	m.enabledAgents = msg.enabledAgents
+	m.agentsIgnore = msg.agentsIgnore
+	if m.skillsSectionEnabled() && !m.skillsLoaded {
+		m.skillsLoaded = true
+		cmds = append(cmds, m.loadSkillsManifestCmd())
+	}
+	if m.mcpSectionEnabled() && !m.mcpLoaded {
+		m.mcpLoaded = true
+		m.mcpRunning = true
+		cmds = append(cmds, m.spinner.Tick, m.doLoadMcpRows())
+	}
+	if m.pluginsSectionEnabled() && !m.pluginLoaded {
+		m.pluginLoaded = true
+		m.pluginRunning = true
+		cmds = append(cmds, m.spinner.Tick, m.doLoadPluginRows())
+	}
+	if m.marketplacesSectionEnabled() && !m.marketplaceLoaded {
+		m.marketplaceLoaded = true
+		m.marketplaceRunning = true
+		cmds = append(cmds, m.spinner.Tick, m.doLoadMarketplaceRows())
+	}
 	if msg.dotsConfiguredKnown {
 		m.dotsConfiguredCached = msg.dotsConfigured
 	}
@@ -121,6 +154,7 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 	m.effectivePythonManager = msg.effectivePythonManager
 	m.effectiveNodeManager = msg.effectiveNodeManager
 	m.effectiveSystemManager = msg.effectiveSystemManager
+	m.nvmManaged = msg.nvmManaged
 	m.stowInstalled = msg.stowInstalled
 	m.dotsReminderService = msg.dotsReminderService
 	m.dotsReminderServiceErr = msg.dotsReminderServiceErr
@@ -168,6 +202,10 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 		cmds = append(cmds, m.spinner.Tick, m.doLaunchDotsSyncOnly())
 	}
 
+	if m.agentsEnabled {
+		cmds = append(cmds, m.doLoadAgentsSummary())
+	}
+	cmds = append(cmds, m.doLoadNvmManaged())
 	cmds = append(cmds, m.startPostLoadBackgroundTasks()...)
 	// Only suppress the dashboard body during the post-bootstrap reload so
 	// the user sees a complete first render after onboarding. On a normal
@@ -322,6 +360,36 @@ func (m *Model) handleSetupBootstrapDoneMsg(msg setupBootstrapDoneMsg) []tea.Cmd
 	return cmds
 }
 
+func (m *Model) handleSetupAgentsDiffMsg(msg setupAgentsDiffMsg) []tea.Cmd {
+	m.setupAgentsDiffLoading = false
+	if msg.err != nil {
+		return []tea.Cmd{setStatus(m, "✗ "+msg.err.Error(), true)}
+	}
+	m.setupAgentsDiffLoaded = true
+	m.setupAgentsUnmanagedSkills = msg.unmanagedSkills
+	m.setupAgentsUnmanagedMcp = msg.unmanagedMcp
+	m.setupAgentsUnmanagedPlugins = msg.unmanagedPlugins
+	return nil
+}
+
+func (m *Model) handleSetupAgentsImportDoneMsg(msg setupAgentsImportDoneMsg) []tea.Cmd {
+	var cmds []tea.Cmd
+
+	m.loading = false
+	if msg.err != nil {
+		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
+		return cmds
+	}
+	total := msg.skills + msg.mcp + msg.plugins
+	if total > 0 {
+		cmds = append(cmds, setStatus(m, fmt.Sprintf("✓ imported %d skills · %d mcp servers · %d plugins", msg.skills, msg.mcp, msg.plugins), false))
+	} else {
+		cmds = append(cmds, setStatus(m, "✓ nothing to import", false))
+	}
+	m.startSetupGroupSelection(&cmds)
+	return cmds
+}
+
 func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	var cmds []tea.Cmd
 
@@ -373,6 +441,19 @@ func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			m.confirmSetupProviders(&cmds)
 		}
 	// Step 3 (provider priority) is handled by the editingPriority guard above.
+	case 4: // Agents onboarding.
+		if m.setupAgentsDiffLoading {
+			break
+		}
+		switch {
+		case strings.EqualFold(msg.String(), "i"):
+			m.loading = true
+			startOp(m, "Importing agents state…")
+			cmds = append(cmds, m.spinner.Tick, m.doSetupAgentsImportAll())
+		case strings.EqualFold(msg.String(), "s") || key.Matches(msg, m.keys.Back):
+			cmds = append(cmds, setStatus(m, "✓ agents onboarding skipped", false))
+			m.startSetupGroupSelection(&cmds)
+		}
 	case 5: // Enable dotfile sync.
 		switch {
 		case key.Matches(msg, m.keys.Confirm) || strings.EqualFold(msg.String(), "y"):
@@ -385,7 +466,7 @@ func (m *Model) handleSetupKeyMsg(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		}
 	case 6: // Dots repo path — handled by showFilePicker routing above.
 		if key.Matches(msg, m.keys.Back) {
-			m.startSetupGroupSelection(&cmds)
+			m.startSetupAgentsStep(&cmds)
 		}
 	case 7: // Copy another host?
 		switch {
@@ -615,6 +696,32 @@ func (m *Model) startSetupGroupSelection(cmds *[]tea.Cmd) {
 	m.setupStep = 9
 	m.setupGroupIdx = clampRange(m.setupGroupIdx, 0, len(m.groupNames)-1)
 	m.initSetupGroupDraft()
+}
+
+// startSetupAgentsStep enters the post-dots agents onboarding step, or skips
+// straight to group selection when agents are disabled for this host or no
+// supported agent CLI is detected.
+func (m *Model) startSetupAgentsStep(cmds *[]tea.Cmd) {
+	if !m.agentsEnabled {
+		m.startSetupGroupSelection(cmds)
+		return
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		m.startSetupGroupSelection(cmds)
+		return
+	}
+	agents := app.InstalledAgents(home)
+	if len(agents) == 0 {
+		m.startSetupGroupSelection(cmds)
+		return
+	}
+	m.loading = false
+	m.setupStep = 4
+	m.setupAgentsList = agents
+	m.setupAgentsDiffLoading = true
+	m.setupAgentsDiffLoaded = false
+	*cmds = append(*cmds, m.spinner.Tick, m.doSetupAgentsDiff())
 }
 
 func (m *Model) initSetupGroupDraft() {

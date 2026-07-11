@@ -212,7 +212,7 @@ func (m *Model) moveDotsCursor(delta int, visible []dotsVisibleRow) {
 		return
 	}
 	n := len(visible)
-	next := (m.dotsCursor + delta + n) % n
+	next := cursorMove(m.dotsCursor, delta, n, true)
 	target := visible[next]
 	if m.dotsExpandedName != "" && (target.entry.Name != m.dotsExpandedName || app.DotStatusState(target.entry) != m.dotsExpandedState) {
 		m.clearDotsExpandedChildren(m.dotsExpandedName)

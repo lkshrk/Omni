@@ -92,68 +92,6 @@ func TestDoCreateGroup_DuplicateIsOK(t *testing.T) {
 	// Whether err is nil or not depends on app semantics; we just assert no panic.
 }
 
-// ── doAddGroupToHost ───────────────────────────────────────────────────────
-
-func TestDoAddGroupToHost_Success(t *testing.T) {
-	m := modelWithGroupApp(t)
-	msg := m.doAddGroupToHost("default", "mygroup")()
-	got, ok := msg.(hostGroupChangedMsg)
-	if !ok {
-		t.Fatalf("expected hostGroupChangedMsg, got %T", msg)
-	}
-	if got.err != nil {
-		t.Errorf("unexpected error: %v", got.err)
-	}
-	if !got.added {
-		t.Error("expected added=true")
-	}
-	if got.host != "default" {
-		t.Errorf("host = %q, want %q", got.host, "default")
-	}
-}
-
-func TestDoAddGroupToHost_NewHost(t *testing.T) {
-	// Adding a group to a non-existent host should create it (app is idempotent).
-	m := modelWithGroupApp(t)
-	msg := m.doAddGroupToHost("brandnew", "mygroup")()
-	_, ok := msg.(hostGroupChangedMsg)
-	if !ok {
-		t.Fatalf("expected hostGroupChangedMsg, got %T", msg)
-	}
-}
-
-// ── doRemoveGroupFromHost ──────────────────────────────────────────────────
-
-func TestDoRemoveGroupFromHost_Success(t *testing.T) {
-	m := modelWithGroupApp(t)
-	msg := m.doRemoveGroupFromHost("default", "mygroup")()
-	got, ok := msg.(hostGroupChangedMsg)
-	if !ok {
-		t.Fatalf("expected hostGroupChangedMsg, got %T", msg)
-	}
-	if got.err != nil {
-		t.Errorf("unexpected error: %v", got.err)
-	}
-	if got.added {
-		t.Error("expected added=false for remove")
-	}
-	if got.host != "default" {
-		t.Errorf("host = %q, want %q", got.host, "default")
-	}
-	if got.group != "mygroup" {
-		t.Errorf("group = %q, want %q", got.group, "mygroup")
-	}
-}
-
-func TestDoRemoveGroupFromHost_MissingHostIsOK(t *testing.T) {
-	m := modelWithGroupApp(t)
-	msg := m.doRemoveGroupFromHost("nonexistent", "mygroup")()
-	_, ok := msg.(hostGroupChangedMsg)
-	if !ok {
-		t.Fatalf("expected hostGroupChangedMsg, got %T", msg)
-	}
-}
-
 func TestDoSetHostGroups_UpdatesMemberships(t *testing.T) {
 	m := modelWithGroupApp(t)
 	msg := m.doSetHostGroups("default", []string{"mygroup"}, []string{"newgroup"}, []string{"newgroup"})()
@@ -234,11 +172,24 @@ func TestDoSetHostGroupTools_UpdatesMembershipsAndIgnores(t *testing.T) {
 	}
 
 	m.handleGroupToolsChangedMsg(got)
-	if names := toolNames(m.allTools); slices.Contains(names, "eslint") || slices.Contains(names, "ruff") {
-		t.Fatalf("allTools = %v, want group-ignored tools absent after save", names)
+	for _, name := range []string{"eslint", "ruff"} {
+		if !slices.Contains(toolNames(m.allTools), name) {
+			t.Fatalf("allTools = %v, want ignored %q retained for ignored section", toolNames(m.allTools), name)
+		}
 	}
-	if names := toolNames(m.visibleTools); slices.Contains(names, "eslint") || slices.Contains(names, "ruff") {
-		t.Fatalf("visibleTools = %v, want group-ignored tools absent after save", names)
+	for _, tool := range m.visibleTools {
+		if tool == nil {
+			continue
+		}
+		if tool.Name != "eslint" && tool.Name != "ruff" {
+			continue
+		}
+		if m.displaySection(tool) != sectionIgnored {
+			t.Fatalf("displaySection(%q) = %v, want sectionIgnored", tool.Name, m.displaySection(tool))
+		}
+	}
+	if m.sectionCounts[sectionIgnored] < 2 {
+		t.Fatalf("sectionCounts[ignored] = %d, want at least 2", m.sectionCounts[sectionIgnored])
 	}
 }
 
@@ -718,17 +669,5 @@ func TestDoDotsSyncDiscovered_AddsCandidateAndRefreshes(t *testing.T) {
 	}
 	if !foundConflict {
 		t.Fatalf("entries = %#v, want refreshed tracked claude conflict", got.entries)
-	}
-}
-
-func TestDoDotsOverwrite_ErrorPath(t *testing.T) {
-	m := newNoDotsModel(t)
-	msg := m.doDotsOverwrite("anything")()
-	got, ok := msg.(dotsFixedMsg)
-	if !ok {
-		t.Fatalf("expected dotsFixedMsg, got %T", msg)
-	}
-	if got.err == nil {
-		t.Error("expected non-nil error when dots_repo not configured")
 	}
 }

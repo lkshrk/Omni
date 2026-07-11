@@ -600,17 +600,25 @@ func (m *Model) handleDotsServiceChangedMsg(msg dotsServiceChangedMsg) []tea.Cmd
 }
 
 func (m *Model) handleDoctorDoneMsg(msg doctorDoneMsg) []tea.Cmd {
+	var cmds []tea.Cmd
 	m.doctorRunning = false
 	if msg.err != nil {
 		m.doctorErr = msg.err.Error()
-		return []tea.Cmd{setStatus(m, "✗ doctor: "+msg.err.Error(), true)}
+		cmds = append(cmds, setStatus(m, "✗ doctor: "+msg.err.Error(), true))
+	} else {
+		m.doctorResult = msg.result
+		m.doctorErr = ""
+		if msg.result != nil && msg.result.HasFailures() {
+			cmds = append(cmds, setStatus(m, "✗ doctor found failing checks", true))
+		} else {
+			cmds = append(cmds, setStatus(m, "✓ doctor complete", false))
+		}
 	}
-	m.doctorResult = msg.result
-	m.doctorErr = ""
-	if msg.result != nil && msg.result.HasFailures() {
-		return []tea.Cmd{setStatus(m, "✗ doctor found failing checks", true)}
+	if m.doctorRefreshPending {
+		m.doctorRefreshPending = false
+		m.refreshDoctorAfterFix(&cmds)
 	}
-	return []tea.Cmd{setStatus(m, "✓ doctor complete", false)}
+	return cmds
 }
 
 func (m *Model) handleDangerOpDoneMsg(msg dangerOpDoneMsg) []tea.Cmd {
@@ -637,7 +645,7 @@ func (m *Model) handleDangerOpDoneMsg(msg dangerOpDoneMsg) []tea.Cmd {
 			m.dotsGitStatus = ""
 			m.dotsLoaded = false
 		}
-		m.startSetupGroupSelection(&cmds)
+		m.startSetupAgentsStep(&cmds)
 		return cmds
 	}
 	if msg.setupComplete && msg.err == nil {
@@ -819,8 +827,9 @@ func (m *Model) handleIgnoreDoneMsg(msg ignoreDoneMsg) []tea.Cmd {
 	}
 	if msg.tools != nil {
 		m.allTools = msg.tools
-		m.applyFilter()
 	}
+	m.applyFilter()
+	m.repositionCursorToTool(msg.name)
 	return cmds
 }
 
@@ -845,6 +854,10 @@ func (m *Model) handleMigrateProviderDoneMsg(msg migrateProviderDoneMsg) []tea.C
 		m.allTools = msg.tools
 		m.applyFilter()
 	}
+	if msg.nvmManaged != nil {
+		m.nvmManaged = msg.nvmManaged
+		m.applyFilter()
+	}
 	if msg.toolProviderPins != nil {
 		m.toolProviderPins = msg.toolProviderPins
 		m.applyFilter()
@@ -857,6 +870,9 @@ func claimSuccessStatus(msg claimDoneMsg) string {
 }
 
 func migrateProviderSuccessStatus(msg migrateProviderDoneMsg) string {
+	if msg.removedFromConfig {
+		return "✓ removed " + msg.name + " from omni config (nvm owns the Node runtime)"
+	}
 	if msg.clearedProviderOverride {
 		switch {
 		case msg.fromProvider != "" && msg.toProvider != "":

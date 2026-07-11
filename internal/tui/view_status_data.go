@@ -5,7 +5,10 @@ import (
 	"sort"
 	"strings"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/lkshrk/omni/internal/app"
+	"github.com/lkshrk/omni/internal/config"
 	textutil "github.com/lkshrk/omni/internal/text"
 )
 
@@ -18,6 +21,7 @@ func statusToolCounts(m Model) app.DashboardToolSummary {
 		EffectiveSystemManager: m.effectiveSystemManager,
 		EffectivePythonManager: m.effectivePythonManager,
 		EffectiveNodeManager:   m.effectiveNodeManager,
+		NvmManaged:             m.nvmManaged,
 	})
 }
 
@@ -48,6 +52,37 @@ func statusStaleSummary(activity, fallback string, hasData bool) string {
 	return activity
 }
 
+// statusRowActivity carries a dashboard Data row's in-flight state so
+// applyStatusRowActivity can apply the same loading-value/stale-summary/
+// working-icon treatment uniformly across tools, dotfiles, automation, and
+// agents rows.
+//
+// keepValue preserves the row's real value instead of swapping to a loading
+// placeholder while active — only agents wants this; tools/dotfiles/
+// automation always swap to the loading value while their activity text is
+// set, even once they have data (e.g. upgrading one of several tracked
+// tools), so they leave keepValue false.
+type statusRowActivity struct {
+	text      string
+	hasData   bool
+	working   bool
+	keepValue bool
+}
+
+func applyStatusRowActivity(m Model, value, summary, icon string, iconStyle lipgloss.Style, a statusRowActivity) (string, string, string, lipgloss.Style) {
+	if a.text == "" {
+		return value, summary, icon, iconStyle
+	}
+	summary = statusStaleSummary(a.text, summary, a.hasData)
+	if !a.keepValue {
+		value = statusLoadingValue(m, "loading")
+	}
+	if a.working {
+		icon, iconStyle = statusRowWorkingIcon(m, true)
+	}
+	return value, summary, icon, iconStyle
+}
+
 func statusToolsLoading(m Model) bool {
 	return m.loading ||
 		len(m.upgradingKeys) > 0 ||
@@ -55,6 +90,309 @@ func statusToolsLoading(m Model) bool {
 		m.providerSnapshotRefreshing ||
 		m.discoveryRefreshing ||
 		m.descRefreshing
+}
+
+// agentsIgnoreSets turns the manifest's ignore lists into name-lookup sets.
+// Duplicates app.AgentsIgnoreSet's body because that function takes a loaded
+// *config.RootConfig, which the TUI model doesn't hold (config is loaded on
+// demand inside specific cmds, not cached on Model).
+func agentsIgnoreSets(ignore config.AgentsIgnore) (skills, mcp, plugins, marketplaces map[string]bool) {
+	toSet := func(names []string) map[string]bool {
+		set := make(map[string]bool, len(names))
+		for _, n := range names {
+			set[n] = true
+		}
+		return set
+	}
+	return toSet(ignore.Skills), toSet(ignore.McpServers), toSet(ignore.Plugins), toSet(ignore.Marketplaces)
+}
+
+// agentsDashCounts merges skills/mcp/plugin out-of-sync counts for the
+// dashboard attention row. Skills come pre-aggregated from m.agentsSummary
+// (unfiltered by ignore set); mcp/plugin are derived from the live rows
+// loaded at boot, filtered against the ignore sets since those are rows
+// already being iterated.
+type agentsDashCounts struct {
+	SkillsMissing, SkillsUnmanaged             int
+	McpMissing, McpUnmanaged                   int
+	PluginsMissing, PluginsUnmanaged           int
+	MarketplacesMissing, MarketplacesUnmanaged int
+}
+
+func (c agentsDashCounts) OutOfSync() int {
+	return c.SkillsMissing + c.SkillsUnmanaged +
+		c.McpMissing + c.McpUnmanaged +
+		c.PluginsMissing + c.PluginsUnmanaged +
+		c.MarketplacesMissing + c.MarketplacesUnmanaged
+}
+
+func agentsDashboardDataLoaded(m Model) bool {
+	return m.skillsLoaded || m.mcpLoaded || m.pluginLoaded || m.marketplaceLoaded
+}
+
+// agentsDashCountsFromRows mirrors the Agents tab Out of Sync section: one
+// dashboard issue per flattened row that agentsAllRowsList would render there.
+func agentsDashCountsFromRows(rows []agentsAllRow) agentsDashCounts {
+	var counts agentsDashCounts
+	for _, e := range rows {
+		if e.status != agentsStatusOutOfSync {
+			continue
+		}
+		switch e.feature {
+		case agentsSectionSkills:
+			switch e.mark {
+			case agentsMarkMissing:
+				counts.SkillsMissing++
+			case agentsMarkOrphan:
+				counts.SkillsUnmanaged++
+			}
+		case agentsSectionMcp:
+			switch e.mark {
+			case agentsMarkMissing:
+				counts.McpMissing++
+			case agentsMarkOrphan:
+				counts.McpUnmanaged++
+			}
+		case agentsSectionPlugins:
+			switch e.mark {
+			case agentsMarkMissing:
+				counts.PluginsMissing++
+			case agentsMarkOrphan:
+				counts.PluginsUnmanaged++
+			}
+		case agentsSectionMarketplaces:
+			switch e.mark {
+			case agentsMarkMissing:
+				counts.MarketplacesMissing++
+			case agentsMarkOrphan:
+				counts.MarketplacesUnmanaged++
+			}
+		}
+	}
+	return counts
+}
+
+func agentsDashCountsFromSummary(summary app.DashboardAgentsSummary, ignore config.AgentsIgnore) agentsDashCounts {
+	skillsIgnore, mcpIgnore, pluginIgnore, marketplaceIgnore := agentsIgnoreSets(ignore)
+	counts := agentsDashCounts{}
+	for _, name := range summary.SkillsMissingNames {
+		if !skillsIgnore[name] {
+			counts.SkillsMissing++
+		}
+	}
+	for _, name := range summary.SkillsUnmanagedNames {
+		if !skillsIgnore[name] {
+			counts.SkillsUnmanaged++
+		}
+	}
+	_ = mcpIgnore
+	_ = pluginIgnore
+	_ = marketplaceIgnore
+	return counts
+}
+
+// agentsDashboardEnabled mirrors the host-level agents toggle from the startup
+// snapshot. Model.New seeds agentsEnabled true until toolsLoadedMsg corrects it.
+func agentsDashboardEnabled(m Model) bool {
+	return m.agentsEnabled
+}
+
+type agentsDashboardView struct {
+	enabled            bool
+	skillPackages      int
+	mcpServers         int
+	plugins            int
+	marketplaces       int
+	skillsInstalled    int
+	skillsMissing      int
+	skillsUnmanaged    int
+	skillsMissingNames []string
+}
+
+func (v agentsDashboardView) managed() int {
+	return v.skillPackages + v.mcpServers + v.plugins
+}
+
+func agentsDashboardViewFor(m Model) agentsDashboardView {
+	if !agentsDashboardEnabled(m) {
+		return agentsDashboardView{}
+	}
+	skillsIgnore, _, _, _ := agentsIgnoreSets(m.agentsIgnore)
+	view := agentsDashboardView{enabled: true}
+
+	if m.skillsLoaded && (len(m.skillsRows) > 0 || len(m.skillsUnmanagedRows) > 0) {
+		view.skillsMissingNames = make([]string, 0, len(m.skillsRows))
+		for _, row := range m.skillsRows {
+			if skillsIgnore[row.Name] {
+				continue
+			}
+			view.skillPackages++
+			status, mark := skillPackageRowStatus(row.Installed, row.ShadowedByPlugin)
+			if status == agentsStatusOutOfSync && mark == agentsMarkMissing {
+				view.skillsMissing++
+				view.skillsMissingNames = append(view.skillsMissingNames, row.Name)
+				continue
+			}
+			view.skillsInstalled++
+		}
+		for _, row := range m.skillsUnmanagedRows {
+			if !skillsIgnore[row.Name] {
+				view.skillsUnmanaged++
+			}
+		}
+		sort.Strings(view.skillsMissingNames)
+	} else {
+		summary := m.agentsSummary
+		view.skillPackages = summary.SkillPackages
+		view.skillsInstalled = summary.SkillsInstalled
+		view.skillsMissing = summary.SkillsMissing
+		view.skillsUnmanaged = summary.SkillsUnmanaged
+		for _, name := range summary.SkillsMissingNames {
+			if !skillsIgnore[name] {
+				view.skillsMissingNames = append(view.skillsMissingNames, name)
+			}
+		}
+	}
+
+	if m.mcpLoaded && len(m.mcpRows) > 0 {
+		view.mcpServers = len(m.mcpRows)
+	} else {
+		view.mcpServers = m.agentsSummary.McpServers
+	}
+	if m.pluginLoaded && len(m.pluginRows) > 0 {
+		view.plugins = len(m.pluginRows)
+	} else {
+		view.plugins = m.agentsSummary.Plugins
+	}
+	if m.marketplaceLoaded && len(m.marketplaceRows) > 0 {
+		view.marketplaces = len(m.marketplaceRows)
+	} else {
+		view.marketplaces = m.agentsSummary.Marketplaces
+	}
+	return view
+}
+
+func statusAgentsCounts(m Model) agentsDashCounts {
+	if !agentsDashboardEnabled(m) {
+		return agentsDashCounts{}
+	}
+	if agentsDashboardDataLoaded(m) {
+		return agentsDashCountsFromRows(agentsAllRowsList(m))
+	}
+	return agentsDashCountsFromSummary(m.agentsSummary, m.agentsIgnore)
+}
+
+// statusAgentsOutOfSyncNames collects deduplicated out-of-sync item names for
+// dashboard attention summaries, using the same row set as statusAgentsCounts.
+func statusAgentsOutOfSyncNames(m Model) []string {
+	rows := agentsAllRowsList(m)
+	if !agentsDashboardDataLoaded(m) {
+		skillsIgnore, _, _, _ := agentsIgnoreSets(m.agentsIgnore)
+		seen := make(map[string]bool)
+		var names []string
+		add := func(name string) {
+			if name == "" || seen[name] {
+				return
+			}
+			seen[name] = true
+			names = append(names, name)
+		}
+		for _, name := range m.agentsSummary.SkillsMissingNames {
+			if !skillsIgnore[name] {
+				add(name)
+			}
+		}
+		for _, name := range m.agentsSummary.SkillsUnmanagedNames {
+			if !skillsIgnore[name] {
+				add(name)
+			}
+		}
+		sort.Strings(names)
+		return names
+	}
+	seen := make(map[string]bool)
+	var names []string
+	for _, e := range rows {
+		if e.status != agentsStatusOutOfSync || seen[e.sortName] {
+			continue
+		}
+		seen[e.sortName] = true
+		names = append(names, e.sortName)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func statusAgentsAttentionSummary(m Model, counts agentsDashCounts) string {
+	names := statusAgentsOutOfSyncNames(m)
+	if len(names) > 0 {
+		return statusSampleSummary(names, "")
+	}
+	return statusAgentsOutOfSyncBreakdown(counts)
+}
+
+func statusAgentsOutOfSyncBreakdown(counts agentsDashCounts) string {
+	var parts []string
+	if counts.SkillsMissing > 0 {
+		parts = append(parts, textutil.PluralCount(counts.SkillsMissing, "skill missing", "skills missing"))
+	}
+	if counts.SkillsUnmanaged > 0 {
+		parts = append(parts, textutil.PluralCount(counts.SkillsUnmanaged, "skill unmanaged", "skills unmanaged"))
+	}
+	if counts.McpMissing > 0 {
+		parts = append(parts, textutil.PluralCount(counts.McpMissing, "mcp missing", "mcp missing"))
+	}
+	if counts.McpUnmanaged > 0 {
+		parts = append(parts, textutil.PluralCount(counts.McpUnmanaged, "mcp unmanaged", "mcp unmanaged"))
+	}
+	if counts.PluginsMissing > 0 {
+		parts = append(parts, textutil.PluralCount(counts.PluginsMissing, "plugin missing", "plugins missing"))
+	}
+	if counts.PluginsUnmanaged > 0 {
+		parts = append(parts, textutil.PluralCount(counts.PluginsUnmanaged, "plugin unmanaged", "plugins unmanaged"))
+	}
+	if counts.MarketplacesMissing > 0 {
+		parts = append(parts, textutil.PluralCount(counts.MarketplacesMissing, "marketplace missing", "marketplaces missing"))
+	}
+	if counts.MarketplacesUnmanaged > 0 {
+		parts = append(parts, textutil.PluralCount(counts.MarketplacesUnmanaged, "marketplace unmanaged", "marketplaces unmanaged"))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func statusAgentsAttentionDetails(m Model, counts agentsDashCounts, view agentsDashboardView) []string {
+	var details []string
+	if statusAgentsLoading(m) {
+		details = append(details, statusActivityDetailLine(m, activityLabel(m), true))
+	}
+	if counts.OutOfSync() == 0 {
+		if len(details) == 0 {
+			return statusDetailLines(m, "All managed agents items in sync.")
+		}
+		return details
+	}
+	details = append(details, statusDetailLine(m, fmt.Sprintf("skills: %d installed, %d missing, %d unmanaged", view.skillsInstalled, view.skillsMissing, view.skillsUnmanaged)))
+	if counts.McpMissing > 0 || counts.McpUnmanaged > 0 {
+		details = append(details, statusDetailLine(m, fmt.Sprintf("mcp: %d missing, %d unmanaged", counts.McpMissing, counts.McpUnmanaged)))
+	}
+	if counts.PluginsMissing > 0 || counts.PluginsUnmanaged > 0 {
+		details = append(details, statusDetailLine(m, fmt.Sprintf("plugins: %d missing, %d unmanaged", counts.PluginsMissing, counts.PluginsUnmanaged)))
+	}
+	if counts.MarketplacesMissing > 0 || counts.MarketplacesUnmanaged > 0 {
+		details = append(details, statusDetailLine(m, fmt.Sprintf("marketplaces: %d missing, %d unmanaged", counts.MarketplacesMissing, counts.MarketplacesUnmanaged)))
+	}
+	names := statusAgentsOutOfSyncNames(m)
+	if len(names) > 0 {
+		details = append(details, statusDetailLine(m, "Issues: "+statusInlineNames(names, 5)))
+		if len(names) > 5 {
+			details = append(details, statusDetailLine(m, fmt.Sprintf("+%d more", len(names)-5)))
+		}
+	}
+	return details
+}
+
+func statusAgentsLoading(m Model) bool {
+	return m.mcpRunning || m.pluginRunning || m.marketplaceRunning || !m.skillsLoaded
 }
 
 func statusToolsActivityText(m Model) string {
@@ -73,6 +411,17 @@ func statusToolsActivityText(m Model) string {
 	return activityLabel(m)
 }
 
+func statusHealthOKValue(m Model) string {
+	return m.palette.styleInstalled.Render("[ok]")
+}
+
+func statusToolsOverviewDataValue(m Model, counts app.DashboardToolSummary) string {
+	if counts.Tracked == 0 {
+		return m.palette.styleHelp.Render("0 tracked")
+	}
+	return m.palette.styleProvider.Render(textutil.PluralCount(counts.Tracked, "tracked", "tracked"))
+}
+
 func statusToolsOverviewValue(m Model, counts app.DashboardToolSummary) string {
 	if counts.Tracked == 0 {
 		return m.palette.styleHelp.Render("no tools")
@@ -83,18 +432,8 @@ func statusToolsOverviewValue(m Model, counts app.DashboardToolSummary) string {
 	return m.palette.styleProvider.Render(textutil.PluralCount(counts.Tracked, "tracked", "tracked"))
 }
 
-func statusToolsOverviewSummary(counts app.DashboardToolSummary) string {
-	if counts.Tracked == 0 {
-		return "No tools configured for this host."
-	}
-	parts := []string{textutil.PluralCount(counts.Installed, "installed locally", "installed locally")}
-	if counts.Available > 0 {
-		parts = append(parts, textutil.PluralCount(counts.Available, "available", "available"))
-	}
-	if counts.OutOfSync > 0 {
-		parts = append(parts, textutil.PluralCount(counts.OutOfSync, "sync issue", "sync issues"))
-	}
-	return strings.Join(parts, ", ")
+func statusToolsOverviewBreakdown(counts app.DashboardToolSummary) string {
+	return fmt.Sprintf("%d installed · %d available · %d ignored", counts.Installed, counts.Available, counts.Ignored)
 }
 
 func statusToolsOverviewDetails(m Model, counts app.DashboardToolSummary) []string {
@@ -158,7 +497,12 @@ func dashboardToolActivityInput(m Model) app.DashboardToolActivityInput {
 		EffectiveSystemManager: m.effectiveSystemManager,
 		EffectivePythonManager: m.effectivePythonManager,
 		EffectiveNodeManager:   m.effectiveNodeManager,
+		NvmManaged:             m.nvmManaged,
 	}
+}
+
+func statusDashboardNvmManagedActionable(m Model) bool {
+	return app.DashboardReconcilePlanHasStep(dashboardReconcilePlanItems(m), app.ReconcileStepFixNvmManaged)
 }
 
 func statusUpgradeSummary(active, waiting, updates []string) string {
@@ -261,17 +605,6 @@ func truncatedGitStatus(status string, maxLines int) (lines []string, overflow s
 	return
 }
 
-// statusDotSummary returns the managed/ignored overview. It deliberately omits
-// repo-dirty state: the row's "dirty" value and the specific "repo dirty: <file>"
-// detail already convey it, so repeating it here just duplicates the word across
-// the row, its Cause line, and the detail.
-func statusDotSummary(counts app.DotFileCounts) string {
-	if counts.Synced > 0 || counts.OutOfSync > 0 || counts.Ignored > 0 {
-		return dotRatioText(counts) + " managed" + statusDotIgnoredSuffix(counts)
-	}
-	return "No dotfile entries loaded."
-}
-
 func statusDotfilesNotLoaded(m Model, counts app.DotFileCounts) bool {
 	if m.dotsLoading || m.dotsPreparing {
 		return false
@@ -342,6 +675,7 @@ func dashboardReconcilePlanInput(m Model) app.DashboardReconcilePlanInput {
 		DotsEntries:     m.dotsEntries,
 		DotsGitStatus:   m.dotsGitStatus,
 		Doctor:          m.doctorResult,
+		NvmManaged:      m.nvmManaged,
 	}
 }
 
@@ -386,21 +720,29 @@ func dotsViewBlocked(m Model) bool {
 	return reason == app.DotsSyncAvailabilityNoRepo || reason == app.DotsSyncAvailabilityDisabled
 }
 
-func statusDotfilesOverviewValue(m Model, counts app.DotFileCounts) string {
+func statusDotfilesOverviewDataValue(m Model, counts app.DotFileCounts) string {
 	switch {
-	case dotsViewDisabled(m):
-		return m.palette.styleHelp.Render("disabled")
-	case dotsViewUnconfigured(m):
-		return m.palette.styleHelp.Render("not set")
-	case counts.OutOfSync > 0:
-		return m.palette.styleOutdated.Render(dotRatioText(counts))
-	case statusDotfilesNotLoaded(m, counts):
-		return m.palette.styleHelp.Render("not loaded")
-	case strings.TrimSpace(m.dotsGitStatus) != "":
-		return m.palette.styleOutdated.Render("dirty")
+	case dotsViewDisabled(m), dotsViewUnconfigured(m), statusDotfilesNotLoaded(m, counts):
+		return m.palette.styleHelp.Render("—")
 	default:
-		return m.palette.styleInstalled.Render(dotRatioText(counts))
+		total := counts.Synced + counts.OutOfSync + counts.Ignored
+		if total == 0 {
+			return m.palette.styleHelp.Render("0 entries")
+		}
+		return m.palette.styleProvider.Render(textutil.PluralCount(total, "entry", "entries"))
 	}
+}
+
+func statusAutomationOverviewDataValue(m Model) string {
+	status := dashboardDotsAutomationStatus(m)
+	return m.palette.styleProvider.Render(fmt.Sprintf("%d/2", status.Installed))
+}
+
+func statusAgentsOverviewDataValue(m Model, view agentsDashboardView) string {
+	if !view.enabled {
+		return m.palette.styleHelp.Render("—")
+	}
+	return m.palette.styleProvider.Render(fmt.Sprintf("%d managed", view.managed()))
 }
 
 func statusDotOverviewSummary(m Model, counts app.DotFileCounts) string {
@@ -410,8 +752,17 @@ func statusDotOverviewSummary(m Model, counts app.DotFileCounts) string {
 	case dotsViewUnconfigured(m):
 		return "Set dots_repo to use dotfiles."
 	default:
-		return statusDotSummary(counts)
+		return statusDotOverviewBreakdown(counts)
 	}
+}
+
+func statusDotOverviewBreakdown(counts app.DotFileCounts) string {
+	parts := []string{textutil.PluralCount(counts.Synced, "synced", "synced")}
+	if counts.OutOfSync > 0 {
+		parts = append(parts, textutil.PluralCount(counts.OutOfSync, "out-of-sync", "out-of-sync"))
+	}
+	parts = append(parts, textutil.PluralCount(counts.Ignored, "ignored", "ignored"))
+	return strings.Join(parts, " · ")
 }
 
 func statusDotOverviewDetails(m Model, counts app.DotFileCounts) []string {
@@ -538,13 +889,6 @@ func statusDotAttentionDetails(m Model, counts app.DotFileCounts) []string {
 	return details
 }
 
-func statusDotIgnoredSuffix(counts app.DotFileCounts) string {
-	if counts.Ignored == 0 {
-		return ""
-	}
-	return fmt.Sprintf(", %d ignored", counts.Ignored)
-}
-
 func statusAutomationNeedsAttention(m Model) bool {
 	return dashboardDotsAutomationStatus(m).NeedsAttention
 }
@@ -554,9 +898,6 @@ func statusAnyAutomationInstalled(m Model) bool {
 }
 
 func statusAutomationValue(m Model) string {
-	if m.dotsServicesRefreshing {
-		return statusLoadingValue(m, "loading")
-	}
 	status := dashboardDotsAutomationStatus(m)
 	if status.HasError {
 		return m.palette.styleOutdated.Render("[warn]")
@@ -577,11 +918,7 @@ func statusAutomationValue(m Model) string {
 
 func statusAutomationSummary(m Model) string {
 	parts := []string{statusReminderAutomationSummary(m), statusWatchAutomationSummary(m)}
-	summary := strings.Join(parts, " · ")
-	if m.dotsServicesRefreshing {
-		return statusStaleSummary("Refreshing service status…", summary, dashboardDotsAutomationStatus(m).Known)
-	}
-	return summary
+	return strings.Join(parts, " · ")
 }
 
 func statusReminderAutomationSummary(m Model) string {
@@ -604,6 +941,25 @@ func statusWatchAutomationSummary(m Model) string {
 		return "Watch [OFF]"
 	}
 	return "Watch [ON] debounce " + formatSettingsDuration(app.DotsWatchDebounce(service))
+}
+
+// statusAutomationBreakdown gives the compact reminder/watch stat string shown
+// in the Data section's middle column, reading the same service fields the
+// prose summary functions above already read.
+func statusAutomationBreakdown(m Model) string {
+	reminder := "reminder off"
+	if errText := strings.TrimSpace(m.dotsReminderServiceErr); errText != "" {
+		reminder = "reminder warn"
+	} else if service := m.dotsReminderService; service != nil && service.Installed {
+		reminder = "reminder " + formatSettingsDuration(app.DotsReminderInterval(service))
+	}
+	watch := "watch off"
+	if errText := strings.TrimSpace(m.dotsWatchServiceErr); errText != "" {
+		watch = "watch warn"
+	} else if service := m.dotsWatchService; service != nil && service.Installed {
+		watch = "watch " + formatSettingsDuration(app.DotsWatchDebounce(service))
+	}
+	return reminder + "/" + watch
 }
 
 func statusAutomationDetails(m Model) []string {
@@ -691,6 +1047,25 @@ func dashboardDotsAutomationStatus(m Model) app.DashboardDotsAutomationStatus {
 		DotsConfigured: m.dotsConfiguredCached,
 		DotsDisabled:   m.dotsSyncAvailCached.Reason == app.DotsSyncAvailabilityDisabled,
 	})
+}
+
+func statusAgentsOverviewSummary(view agentsDashboardView) string {
+	if !view.enabled {
+		return "Agents disabled for this host."
+	}
+	return fmt.Sprintf("%d skills · %d mcp · %d plugins", view.skillPackages, view.mcpServers, view.plugins)
+}
+
+func statusAgentsOverviewDetails(m Model, view agentsDashboardView) []string {
+	if !view.enabled {
+		return statusDetailLines(m, "Agents disabled for this host.")
+	}
+	return statusDetailLines(m,
+		fmt.Sprintf("skills: %d installed, %d missing, %d unmanaged", view.skillsInstalled, view.skillsMissing, view.skillsUnmanaged),
+		fmt.Sprintf("mcp servers: %d", view.mcpServers),
+		fmt.Sprintf("plugins: %d", view.plugins),
+		fmt.Sprintf("marketplaces: %d", view.marketplaces),
+	)
 }
 
 func onOffText(enabled bool) string {

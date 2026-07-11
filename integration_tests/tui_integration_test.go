@@ -137,24 +137,25 @@ func TestTUIFallbackEditorPrefillsConfiguredGitHint(t *testing.T) {
 		Version:  config.CurrentVersion,
 		Settings: config.Settings{DisabledProviders: []string{"node", "python", "pip"}},
 		Tools: map[string]config.ToolSpec{
-			"rg": {
-				Providers: []config.ToolInstallSpec{{Provider: "apt", Package: "rg"}},
+			// synthetic name — must never resolve on PATH, or executableDetectSingleTool marks it installed and f is ineligible
+			"omni-test-fbtool": {
+				Providers: []config.ToolInstallSpec{{Provider: "apt", Package: "omni-test-fbtool"}},
 				Git:       "https://github.com/BurntSushi/ripgrep",
 			},
 		},
 		Hosts: map[string][]string{"testhost": {"dev"}},
 		Groups: []*config.GroupConfig{
 			{Name: "testhost", Special: "host"},
-			{Name: "dev", Tools: []config.ToolEntry{{Name: "rg"}}},
+			{Name: "dev", Tools: []config.ToolEntry{{Name: "omni-test-fbtool"}}},
 		},
 	}); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
 	seedTUIToolCache(t, cache,
-		&database.ToolCache{Name: "rg", Provider: "apt", Package: "rg", Installed: false, Tracked: true},
+		&database.ToolCache{Name: "omni-test-fbtool", Provider: "apt", Package: "omni-test-fbtool", Installed: false, Tracked: true},
 	)
 	listOut := runOmniOutput(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "tools", "list")
-	if !strings.Contains(listOut, "rg") {
+	if !strings.Contains(listOut, "omni-test-fbtool") {
 		t.Fatalf("seeded tool is not visible through app list:\n%s", listOut)
 	}
 
@@ -164,18 +165,18 @@ func TestTUIFallbackEditorPrefillsConfiguredGitHint(t *testing.T) {
 		}, "TUI did not render main tabs")
 		writeTUIKeys(t, tty, "\t")
 		toolsScreen := waitForRequiredScreen(t, capture, 8*time.Second, func(text string) bool {
-			return strings.Contains(text, "rg") &&
+			return strings.Contains(text, "omni-test-fbtool") &&
 				strings.Contains(text, "apt") &&
 				!strings.Contains(text, "gh?")
 		}, "TUI did not render provider-list tool without fallback status")
 		writeTUIKeys(t, tty, "f")
 		editorScreen := waitForRequiredScreen(t, capture, 8*time.Second, func(text string) bool {
-			return strings.Contains(text, "Set Fallback: rg") &&
+			return strings.Contains(text, "Set Fallback: omni-test-fbtool") &&
 				strings.Contains(text, "BurntSushi/ripgrep")
 		}, "TUI did not prefill fallback editor from configured git hint")
 		writeTUIKeys(t, tty, "\r")
 		savedScreen := waitForRequiredScreen(t, capture, 8*time.Second, func(text string) bool {
-			return strings.Contains(text, "fallback saved for rg from gh BurntSushi/ripgrep")
+			return strings.Contains(text, "fallback saved for omni-test-fbtool from gh BurntSushi/ripgrep")
 		}, "TUI did not save fallback from configured git hint")
 		return toolsScreen + "\n" + editorScreen + "\n" + savedScreen
 	})
@@ -186,7 +187,7 @@ func TestTUIFallbackEditorPrefillsConfiguredGitHint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config after fallback save: %v", err)
 	}
-	fallback := cfg.Tools["rg"].Fallback
+	fallback := cfg.Tools["omni-test-fbtool"].Fallback
 	if fallback == nil ||
 		fallback.Source.Type != config.FallbackSourceGitHub ||
 		fallback.Source.Owner != "BurntSushi" ||
@@ -287,7 +288,9 @@ func TestTUIDashboardReconcileFixesDotIgnorePatterns(t *testing.T) {
 			{
 				Name: "dev",
 				Dots: []config.DotEntry{
-					{Name: "claude", Path: "~/.claude", Ignore: []string{"*", "!/settings.json", "!/skills/", "skills", "!/hooks/", "hooks"}},
+					// Not an agent config dir: those are dropped from dots by the
+					// v13→v14 migration on load, which would empty this scenario.
+					{Name: "editor", Path: "~/.editor", Ignore: []string{"*", "!/settings.json", "!/skills/", "skills", "!/hooks/", "hooks"}},
 				},
 			},
 		},
@@ -317,8 +320,8 @@ func TestTUIDashboardReconcileFixesDotIgnorePatterns(t *testing.T) {
 		}
 
 		writeTUIKeys(t, tty, "\r")
-		if !waitForConfigDotIgnore(configPath, "dev", "claude", []string{"*", "!/settings.json"}, 8*time.Second) {
-			t.Fatalf("claude ignore patterns were not fixed from dashboard reconcile; screen:\n%s", planScreen)
+		if !waitForConfigDotIgnore(configPath, "dev", "editor", []string{"*", "!/settings.json"}, 8*time.Second) {
+			t.Fatalf("editor ignore patterns were not fixed from dashboard reconcile; screen:\n%s", planScreen)
 		}
 		return capture.Text()
 	})

@@ -75,7 +75,7 @@ func renderFooterStatusOnly(status string, contentW int) string {
 func renderFooterStatusLayer(m Model, maxWidth int) string {
 	p := m.palette
 	switch {
-	case m.loading || m.dotsLoading || m.dotsPeekLoading || m.doctorRunning || m.searching || len(m.scanningProviders) > 0 || len(m.outdatedProviders) > 0 || m.providerSnapshotRefreshing || m.outdatedSnapshotRefreshing || m.discoveryRefreshing || m.descRefreshing || len(m.upgradingKeys) > 0:
+	case m.spinnerActivityActive():
 		text := m.progressText
 		progress := text != ""
 		if text == "" {
@@ -128,6 +128,10 @@ func activityLabel(m Model) string {
 	switch {
 	case m.searching:
 		return "Searching…"
+	case m.skillAddRunning:
+		return "Adding skill…"
+	case m.skillsRunning, m.mcpRunning, m.pluginRunning, m.marketplaceRunning:
+		return "Working…"
 	case len(m.scanningProviders) > 0:
 		return m.toolRefreshStatus(m.refreshToolDone, m.refreshToolTotal)
 	case m.providerSnapshotRefreshing || m.discoveryRefreshing:
@@ -145,10 +149,6 @@ func activityLabel(m Model) string {
 	default:
 		return "Loading…"
 	}
-}
-
-func toolRefreshStatus(providers map[string]bool, done, total int) string {
-	return app.RefreshToolsStatus(app.RefreshProviderScanLabels(providers, nil), done, total)
 }
 
 func (m Model) toolRefreshStatus(done, total int) string {

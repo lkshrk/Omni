@@ -6,7 +6,6 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/lipgloss/v2"
-	"charm.land/lipgloss/v2/list"
 )
 
 // logoMark is the compact app title.
@@ -228,42 +227,12 @@ func textRowHintPrefix() string {
 	return strings.Repeat(" ", rowMarkerWidth+2+listDetailExtraIndent+listHintExtraIndent)
 }
 
-// confirmCancelHint builds a "  <confirm> <action>  ·  <back> cancel" hint line.
-func confirmCancelHint(m Model, confirmLabel string) string {
-	return "  " + confirmCancelHintText(m, confirmLabel)
-}
-
 func confirmCancelHintWithPrefix(m Model, confirmLabel, prefix string) string {
 	return renderConfirmActionHints(m, prefix, m.keys.Confirm, confirmLabel)
 }
 
 func confirmCancelHintText(m Model, confirmLabel string) string {
 	return confirmActionHintText(m, m.keys.Confirm, confirmLabel)
-}
-
-// newCursorList builds a lipgloss/list with a › cursor on the active row.
-// paddingLeft is applied to the enumerator column.
-func newCursorList(pal palette, items []any, cursor, paddingLeft int) *list.List {
-	return list.New(items...).
-		Enumerator(func(_ list.Items, i int) string {
-			if i == cursor {
-				return "‣"
-			}
-			return " "
-		}).
-		EnumeratorStyleFunc(func(_ list.Items, i int) lipgloss.Style {
-			s := lipgloss.NewStyle().PaddingLeft(paddingLeft).PaddingRight(1)
-			if i == cursor {
-				return pal.styleActiveText.PaddingLeft(paddingLeft).PaddingRight(1)
-			}
-			return s
-		}).
-		ItemStyleFunc(func(_ list.Items, i int) lipgloss.Style {
-			if i == cursor {
-				return pal.styleActiveText
-			}
-			return pal.styleNormal
-		})
 }
 
 // scrollBuf accumulates rendered lines, tracks the cursor row, and applies a

@@ -280,44 +280,6 @@ func (m *Model) selectedHostName() string {
 	return ""
 }
 
-func (m *Model) doAddGroupToHost(host, group string) tea.Cmd {
-	a, ctx := m.app, m.ctx
-	return func() tea.Msg {
-		state, err := a.AddGroupToHostWithState(ctx, host, group)
-		if err != nil {
-			return hostGroupChangedMsg{err: err, host: host, group: group, added: true}
-		}
-		return hostGroupChangedMsg{
-			host:            host,
-			group:           group,
-			added:           true,
-			info:            state.HostInfo,
-			groupNames:      state.GroupNames,
-			toolGroups:      state.ToolGroups,
-			toolMemberships: state.ToolMemberships,
-		}
-	}
-}
-
-func (m *Model) doRemoveGroupFromHost(host, group string) tea.Cmd {
-	a, ctx := m.app, m.ctx
-	return func() tea.Msg {
-		state, err := a.RemoveGroupFromHostWithState(ctx, host, group)
-		if err != nil {
-			return hostGroupChangedMsg{err: err, host: host, group: group, added: false}
-		}
-		return hostGroupChangedMsg{
-			host:            host,
-			group:           group,
-			added:           false,
-			info:            state.HostInfo,
-			groupNames:      state.GroupNames,
-			toolGroups:      state.ToolGroups,
-			toolMemberships: state.ToolMemberships,
-		}
-	}
-}
-
 func (m *Model) doSetHostGroups(host string, _ []string, after, createdGroups []string) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
@@ -409,17 +371,6 @@ func (m *Model) doDeleteGroup(name string, deleteTools bool) tea.Cmd {
 			toolMemberships: result.State.ToolMemberships,
 			info:            result.State.HostInfo,
 		}
-	}
-}
-
-// doRemoveHost removes the named host from settings.json then reloads tools.
-func (m *Model) doRemoveHost(name string) tea.Cmd {
-	a := m.app
-	return func() tea.Msg {
-		if err := a.RemoveHost(name); err != nil {
-			return dangerOpDoneMsg{action: "delete-host", err: err}
-		}
-		return dangerOpDoneMsg{action: "delete-host", detail: name + " deleted", reload: true}
 	}
 }
 
@@ -537,12 +488,6 @@ func (m *Model) doClaim(name, prov, installedWith, groupName string, activeHost 
 	}
 }
 
-func (m *Model) doSetIgnoreScope(name string, opt scopeOption) tea.Cmd {
-	opt.initialChecked = opt.checked
-	opt.checked = !opt.checked
-	return m.doSaveIgnoreScopes(name, []scopeOption{opt})
-}
-
 func (m *Model) doSaveIgnoreScopes(name string, options []scopeOption) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
@@ -583,12 +528,6 @@ func (m *Model) doSaveIgnoreScopes(name string, options []scopeOption) tea.Cmd {
 		}
 		return msg
 	}
-}
-
-// doInstallAndAdd installs a tool and adds it to the selected config group.
-// Used for search results and orphan tools that are not yet in config.
-func (m *Model) doInstallAndAdd(name, prov string, groupAndHost ...string) tea.Cmd {
-	return m.doInstallAndAddTool(&database.ToolCache{Name: name, Provider: prov, Package: name}, groupAndHost...)
 }
 
 func (m *Model) doInstallAndAddTool(t *database.ToolCache, groupAndHost ...string) tea.Cmd {
@@ -678,6 +617,53 @@ func (m *Model) doClearProviderOverride(name, configProv, installedWith string) 
 			return migrateProviderDoneMsg{err: fmt.Errorf("remove provider override: %w", err), name: name, fromProvider: fromProvider, toProvider: toProvider, clearedProviderOverride: true}
 		}
 		return migrateProviderDoneMsg{name: name, fromProvider: fromProvider, toProvider: toProvider, tools: tools, toolProviderPins: pins, clearedProviderOverride: true}
+	}
+}
+
+func (m *Model) doMigrateNvmTool(name string) tea.Cmd {
+	a, ctx := m.app, m.beginCancellableAction()
+	return func() tea.Msg {
+		fromProvider := ""
+		cfg, cfgErr := a.LoadConfig()
+		if cfgErr == nil {
+			if spec, ok := cfg.Tools[name]; ok {
+				fromProvider = spec.DefaultInstallSpec().Provider
+			}
+		}
+
+		result, err := a.MigrateNvmManagedToolWithState(ctx, name)
+		var tools []*database.ToolCache
+		var switchResult *app.SwitchResult
+		if result != nil {
+			tools = result.Tools
+			switchResult = result.Result
+		}
+		nvmManaged, mapErr := a.NvmManagedSystemToolNames(ctx)
+		if mapErr != nil {
+			nvmManaged = nil
+		}
+		if switchResult != nil && switchResult.FromProvider != "" {
+			fromProvider = switchResult.FromProvider
+		}
+		if err != nil {
+			return migrateProviderDoneMsg{
+				err:          fmt.Errorf("migrate nvm-managed tool: %w", err),
+				name:         name,
+				fromProvider: fromProvider,
+				nvmManaged:   nvmManaged,
+			}
+		}
+		msg := migrateProviderDoneMsg{
+			name:              name,
+			fromProvider:      fromProvider,
+			tools:             tools,
+			nvmManaged:        nvmManaged,
+			removedFromConfig: name == "node",
+		}
+		if switchResult != nil {
+			msg.toProvider = switchResult.ToProvider
+		}
+		return msg
 	}
 }
 

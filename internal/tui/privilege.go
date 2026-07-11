@@ -48,10 +48,6 @@ func (m *Model) blockProtectedProviderToolDelete(t *database.ToolCache, action p
 	return false
 }
 
-func (m *Model) queuePrivilegedInstallPrompts(rowErrors map[string]string) bool {
-	return m.queuePrivilegedToolPrompts(rowErrors, app.PrivilegedActionMapForRows(rowErrors, provider.PrivilegeActionInstall))
-}
-
 func (m *Model) queuePrivilegedToolPrompts(rowErrors map[string]string, actions map[string]provider.PrivilegeAction) bool {
 	if len(rowErrors) == 0 || m.app == nil {
 		return false

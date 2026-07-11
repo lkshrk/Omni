@@ -35,7 +35,8 @@ type toolsLoadedMsg struct {
 	effectivePythonManager string // binary actually used (uv, pip3, pip) — empty if not found
 	effectiveNodeManager   string // binary actually used (bun, pnpm, npm) — empty if not found
 	effectiveSystemManager string // concrete PM backing the system ecosystem provider (e.g. "brew", "apt") — empty if not resolved
-	stowInstalled          bool   // true when GNU Stow is reachable on PATH
+	nvmManaged             map[string]bool
+	stowInstalled          bool // true when GNU Stow is reachable on PATH
 	dotsReminderService    *app.DotsReminderService
 	dotsReminderServiceErr string
 	dotsWatchService       *app.DotsWatchService
@@ -43,14 +44,36 @@ type toolsLoadedMsg struct {
 	dotsConfigured         bool
 	dotsConfiguredKnown    bool
 	agentsEnabled          bool
+	skillsEnabled          bool
+	mcpEnabled             bool
+	pluginsEnabled         bool
+	agentsSummary          app.DashboardAgentsSummary
 	dotsSyncAvail          app.DotsSyncAvailability
 	dotsSyncAvailKnown     bool
 	setupProviders         []app.SetupProviderOption
 	ecosystemProviders     []string
+	enabledAgents          []string
+	agentsIgnore           config.AgentsIgnore
+}
+
+type agentsSummaryLoadedMsg struct {
+	summary app.DashboardAgentsSummary
+	err     error
+}
+
+type nvmManagedLoadedMsg struct {
+	nvmManaged map[string]bool
+	err        error
 }
 
 type skillsManifestLoadedMsg struct {
-	rows []app.SkillRow
+	rows      []app.SkillPackageRow
+	unmanaged []app.SkillPackageRow
+	err       error
+}
+
+type skillsGroupsUpdatedMsg struct {
+	rows []app.SkillPackageRow
 	err  error
 }
 
@@ -58,7 +81,39 @@ type skillsUpdatedMsg struct {
 	err error
 }
 
+// agentsProgressDoneMsg signals completion of the agents tab's U/S combined
+// progress-streaming sequence (doAgentsUpdateAll/doAgentsSyncAll). Unlike
+// progressDoneMsg (tools tab), it carries one error per feature since the
+// sequence runs multiple independently-tracked sub-steps (skills, mcp,
+// plugins) that each have their own running/err fields on Model.
+type agentsProgressDoneMsg struct {
+	gen            int
+	skills         bool
+	mcp            bool
+	plugin         bool
+	marketplace    bool
+	skillsErr      error
+	mcpErr         error
+	pluginErr      error
+	marketplaceErr error
+}
+
 type agentsToggledMsg struct {
+	enabled bool
+	err     error
+}
+
+type skillsFeatureToggledMsg struct {
+	enabled bool
+	err     error
+}
+
+type mcpFeatureToggledMsg struct {
+	enabled bool
+	err     error
+}
+
+type pluginsFeatureToggledMsg struct {
 	enabled bool
 	err     error
 }
@@ -75,6 +130,20 @@ type skillsRestoredMsg struct {
 
 type skillsImportedMsg struct {
 	diff app.ImportDiff
+	err  error
+}
+
+type skillsFoundMsg struct {
+	results []app.FindResult
+	err     error
+}
+
+type skillAddedMsg struct {
+	err error
+}
+
+type skillAgentsSavedMsg struct {
+	rows []app.SkillPackageRow
 	err  error
 }
 
@@ -184,6 +253,13 @@ type doctorDoneMsg struct {
 type fixIgnoreDoneMsg struct {
 	modified []string
 	err      error
+}
+
+type fixNvmDoneMsg struct {
+	result     *app.NvmManagedMigrationBatchResult
+	tools      []*database.ToolCache
+	nvmManaged map[string]bool
+	err        error
 }
 
 type dotsServiceKind string
@@ -307,6 +383,24 @@ type setupHostDoneMsg struct {
 	hostName string
 	info     *app.HostInfo
 	err      error
+}
+
+// setupAgentsDiffMsg carries the diff-only unmanaged mcp/plugin counts for
+// the setup wizard's agents onboarding step.
+type setupAgentsDiffMsg struct {
+	unmanagedSkills  int
+	unmanagedMcp     int
+	unmanagedPlugins int
+	err              error
+}
+
+// setupAgentsImportDoneMsg is sent after the agents onboarding step's
+// import-all action finishes adopting unmanaged skills/mcp/plugins.
+type setupAgentsImportDoneMsg struct {
+	skills  int
+	mcp     int
+	plugins int
+	err     error
 }
 
 type stowInstallDoneMsg struct {
@@ -549,6 +643,8 @@ type migrateProviderDoneMsg struct {
 	tools                   []*database.ToolCache
 	toolProviderPins        map[string]string
 	clearedProviderOverride bool
+	removedFromConfig       bool
+	nvmManaged              map[string]bool
 }
 
 type fallbackSavedMsg struct {

@@ -31,6 +31,9 @@ const (
 	settingsRowDotsCommit
 	settingsRowDotsPush
 	settingsRowAgentsEnabled
+	settingsRowSkillsEnabled
+	settingsRowMcpEnabled
+	settingsRowPluginsEnabled
 	settingsRowAgentsUse
 	settingsRowDoctor
 	settingsRowTraceLog
@@ -182,6 +185,42 @@ var settingsRows = []settingsRowMeta{
 				return m.palette.styleHelp.Render("Disable agent skill restore/import/update for this machine.")
 			}
 			return m.palette.styleHelp.Render("Re-enable agent skill restore/import/update.")
+		},
+	},
+	settingsRowSkillsEnabled: {
+		label:   "Skills",
+		section: "Agents",
+		hint:    hintCtxSettingsAgents,
+		valueFn: func(m Model) string { return settingsOnOff(m.palette, m.skillsEnabled) },
+		helpFn: func(m Model) string {
+			if m.skillsEnabled {
+				return m.palette.styleHelp.Render("Disable skill-package management for this machine.")
+			}
+			return m.palette.styleHelp.Render("Re-enable skill-package management.")
+		},
+	},
+	settingsRowMcpEnabled: {
+		label:   "MCP Servers",
+		section: "Agents",
+		hint:    hintCtxSettingsAgents,
+		valueFn: func(m Model) string { return settingsOnOff(m.palette, m.mcpEnabled) },
+		helpFn: func(m Model) string {
+			if m.mcpEnabled {
+				return m.palette.styleHelp.Render("Disable MCP server management for this machine.")
+			}
+			return m.palette.styleHelp.Render("Re-enable MCP server management.")
+		},
+	},
+	settingsRowPluginsEnabled: {
+		label:   "Plugins",
+		section: "Agents",
+		hint:    hintCtxSettingsAgents,
+		valueFn: func(m Model) string { return settingsOnOff(m.palette, m.pluginsEnabled) },
+		helpFn: func(m Model) string {
+			if m.pluginsEnabled {
+				return m.palette.styleHelp.Render("Disable plugin management for this machine.")
+			}
+			return m.palette.styleHelp.Render("Re-enable plugin management.")
 		},
 	},
 	settingsRowAgentsUse: {

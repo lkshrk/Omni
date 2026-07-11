@@ -63,7 +63,7 @@ func (m *Model) setSettingsCursor(row int) {
 
 func (m *Model) handleSettingsConfirmAction(cmds *[]tea.Cmd) {
 	switch m.settingsCursor {
-	case settingsRowProviderPriority, settingsRowDotsRepo, settingsRowDotsSync, settingsRowAgentsEnabled, settingsRowAgentsUse, settingsRowDotsReminderInterval, settingsRowDotsWatchDebounce, settingsRowDoctor, settingsRowBootstrap, settingsRowResetSettings, settingsRowResetCache:
+	case settingsRowProviderPriority, settingsRowDotsRepo, settingsRowDotsSync, settingsRowAgentsEnabled, settingsRowSkillsEnabled, settingsRowMcpEnabled, settingsRowPluginsEnabled, settingsRowAgentsUse, settingsRowDotsReminderInterval, settingsRowDotsWatchDebounce, settingsRowDoctor, settingsRowBootstrap, settingsRowResetSettings, settingsRowResetCache:
 		m.handleSettingsEditAction(cmds)
 	case settingsRowTraceLog:
 		m.traceLogGen++
@@ -285,6 +285,12 @@ func (m *Model) handleSettingsEditAction(cmds *[]tea.Cmd) {
 		m.handleSettingsDotsSyncAction(cmds)
 	case settingsRowAgentsEnabled:
 		*cmds = append(*cmds, m.doToggleAgents())
+	case settingsRowSkillsEnabled:
+		*cmds = append(*cmds, m.doToggleSkillsFeature())
+	case settingsRowMcpEnabled:
+		*cmds = append(*cmds, m.doToggleMcpFeature())
+	case settingsRowPluginsEnabled:
+		*cmds = append(*cmds, m.doTogglePluginsFeature())
 	case settingsRowAgentsUse:
 		m.startSettingsAgentsEdit()
 	case settingsRowDotsReminderInterval, settingsRowDotsWatchDebounce:

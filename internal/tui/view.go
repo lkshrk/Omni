@@ -101,6 +101,41 @@ func (m Model) viewString() string {
 		return placePopup(bg, m, renderSettingsAgentsEditor(m), agentsEditorPopupFrame(m))
 	}
 
+	if m.skillAgentsPicker {
+		bgModel := m
+		bgModel.skillAgentsPicker = false
+		bg := bgModel.viewString()
+		return placePopup(bg, m, renderSkillAgentsPicker(m), skillAgentsPickerFrame(m))
+	}
+
+	if m.mcpAgentsPicker {
+		bgModel := m
+		bgModel.mcpAgentsPicker = false
+		bg := bgModel.viewString()
+		return placePopup(bg, m, renderSkillAgentsPicker(m), skillAgentsPickerFrame(m))
+	}
+
+	if m.pluginAgentsPicker {
+		bgModel := m
+		bgModel.pluginAgentsPicker = false
+		bg := bgModel.viewString()
+		return placePopup(bg, m, renderSkillAgentsPicker(m), skillAgentsPickerFrame(m))
+	}
+
+	if m.mcpFormOpen {
+		bgModel := m
+		bgModel.mcpFormOpen = false
+		bg := bgModel.viewString()
+		return placePopup(bg, m, renderMcpFormPopup(m), mcpFormPopupFrame(m))
+	}
+
+	if m.pluginFormOpen {
+		bgModel := m
+		bgModel.pluginFormOpen = false
+		bg := bgModel.viewString()
+		return placePopup(bg, m, renderPluginFormPopup(m), pluginFormPopupFrame(m))
+	}
+
 	if m.stowInstallPrompt {
 		bgModel := m
 		bgModel.stowInstallPrompt = false
@@ -136,10 +171,13 @@ func (m Model) viewString() string {
 		return placePopup(bg, m, renderSetupPopup(m, contentWidth), frame)
 	}
 
-	// Group picker — overlays the tool list so context stays visible.
+	// Group picker — overlays the originating tab so context stays visible.
 	if m.mode == viewGroupPicker {
 		bgModel := m
 		bgModel.mode = viewList
+		if m.pickerClaimAgentsSet {
+			bgModel.mode = viewSkills
+		}
 		bg := bgModel.viewString()
 		title := "Choose Group"
 		if m.pickerPurposeClaim {
@@ -154,8 +192,11 @@ func (m Model) viewString() string {
 	if m.mode == viewGroupMembership {
 		bgModel := m
 		bgModel.mode = viewList
-		if m.pickerMembershipKind == pickerMembershipDot {
+		switch m.pickerMembershipKind {
+		case pickerMembershipDot:
 			bgModel.mode = viewDots
+		case pickerMembershipSkill:
+			bgModel.mode = viewSkills
 		}
 		bg := bgModel.viewString()
 		paddingX := 2
@@ -324,7 +365,7 @@ func (m Model) viewString() string {
 	case m.mode == viewSkills:
 		body = m.viewSkillsBody()
 	case m.mode == viewStatus:
-		if len(m.allTools) == 0 || m.launchBatchActive {
+		if m.launchBatchActive {
 			body = ""
 		} else {
 			body = renderStatus(m)
@@ -617,6 +658,9 @@ func popupTitleForSelectedTool(m Model, action string) string {
 }
 
 func popupTitleForGroupPickerTool(m Model, action string) string {
+	if m.pickerClaimAgentsSet {
+		return popupTitleForName(action, agentsRowName(m, m.pickerClaimAgentsRow))
+	}
 	if m.pickerActionToolSet {
 		return popupTitleForName(action, m.pickerActionTool.Name)
 	}
@@ -655,6 +699,9 @@ func groupMembershipPopupTitle(m Model) string {
 	if m.pickerMembershipKind == pickerMembershipDot {
 		return popupTitleForSelectedDot(m, "Move Group")
 	}
+	if m.pickerMembershipKind == pickerMembershipSkill {
+		return popupTitleForName("Move Group", m.pickerMembershipName)
+	}
 	return popupTitleForMembershipTool(m, "Move Group")
 }
 
@@ -669,10 +716,6 @@ func groupEditorPopupFrame(m Model) popupFrame {
 	}
 }
 
-func groupToolsPopupFrame(m Model) popupFrame {
-	return groupToolsPopupFrameWithLayout(m, groupToolsPopupLayoutFor(m))
-}
-
 func groupToolsPopupFrameWithLayout(m Model, layout groupToolsPopupLayout) popupFrame {
 	paddingX := 2
 	return popupFrame{
@@ -683,10 +726,6 @@ func groupToolsPopupFrameWithLayout(m Model, layout groupToolsPopupLayout) popup
 		ContentHeight:  layout.contentHeight,
 		NoTitleDivider: true,
 	}
-}
-
-func groupDotsPopupFrame(m Model) popupFrame {
-	return groupDotsPopupFrameWithLayout(m, groupDotsPopupLayoutFor(m))
 }
 
 func groupDotsPopupFrameWithLayout(m Model, layout groupDotsPopupLayout) popupFrame {

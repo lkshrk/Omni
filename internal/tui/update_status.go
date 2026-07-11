@@ -75,6 +75,9 @@ func (m *Model) shouldAutoRunStatusDoctor() bool {
 }
 
 func (m *Model) startDoctorRun(message string) {
+	if m.doctorRunning {
+		return
+	}
 	m.doctorRunning = true
 	startOp(m, message)
 }
@@ -83,9 +86,11 @@ func (m *Model) startDoctorRun(message string) {
 // hints derived from them, e.g. "commit dotfiles") drop once a dashboard fix
 // resolved the underlying issue. The Doctor row reads a doctorResult snapshot,
 // unlike the live Dotfiles row, so without this it keeps showing a stale warn.
-// No-op when doctor has not been run or is already running.
+// When doctor is still running or has not produced its first snapshot yet, the
+// refresh is deferred until handleDoctorDoneMsg drains doctorRefreshPending.
 func (m *Model) refreshDoctorAfterFix(cmds *[]tea.Cmd) {
-	if m.doctorResult == nil || m.doctorRunning {
+	if m.doctorRunning || m.doctorResult == nil {
+		m.doctorRefreshPending = true
 		return
 	}
 	m.startDoctorRun("Refreshing doctor…")
@@ -227,6 +232,8 @@ func (m *Model) startNextDashboardReconcileStep(cmds *[]tea.Cmd) {
 			m.startDashboardDotsCommit(cmds)
 		case dashboardReconcilePlanFixIgnore:
 			m.startDashboardFixIgnore(cmds)
+		case dashboardReconcilePlanFixNvmManaged:
+			m.startDashboardFixNvmManaged(cmds)
 		}
 		if len(*cmds) > before {
 			return
@@ -247,6 +254,8 @@ func (m *Model) dashboardReconcileStepActionable(kind dashboardReconcilePlanKind
 		return statusDashboardDotsCommitActionable(*m)
 	case dashboardReconcilePlanFixIgnore:
 		return statusDashboardFixIgnoreActionable(*m)
+	case dashboardReconcilePlanFixNvmManaged:
+		return statusDashboardNvmManagedActionable(*m)
 	default:
 		return false
 	}
@@ -346,6 +355,24 @@ func (m *Model) startDashboardFixIgnore(cmds *[]tea.Cmd) {
 	})
 }
 
+func (m *Model) startDashboardFixNvmManaged(cmds *[]tea.Cmd) {
+	if !statusDashboardNvmManagedActionable(*m) {
+		return
+	}
+	a, ctx := m.app, m.beginCancellableAction()
+	m.loading = true
+	*cmds = append(*cmds, m.spinner.Tick, func() tea.Msg {
+		state, err := a.MigrateAllNvmManagedToolsWithState(ctx)
+		msg := fixNvmDoneMsg{err: err}
+		if state != nil {
+			msg.result = state.Batch
+			msg.tools = state.Tools
+			msg.nvmManaged = state.NvmManaged
+		}
+		return msg
+	})
+}
+
 func (m *Model) startDashboardUpgradeAll(cmds *[]tea.Cmd) {
 	if len(m.upgradingKeys) > 0 || statusToolCounts(*m).Updates == 0 {
 		return
@@ -428,7 +455,54 @@ func (m *Model) handleStatusAction(action statusAction, cmds *[]tea.Cmd) {
 		m.startDashboardUpgradeAll(cmds)
 	case statusActionFixIgnore:
 		m.startDashboardFixIgnore(cmds)
+	case statusActionFixNvmManaged:
+		m.startDashboardFixNvmManaged(cmds)
+	case statusActionOpenAgents:
+		m.switchMainTab(viewSkills, cmds)
+	case statusActionRestoreSkills:
+		if !m.loading && !m.skillsRunning {
+			m.skillsRunning = true
+			m.skillsErr = nil
+			m.skillsResult = nil
+			*cmds = append(*cmds, m.spinner.Tick, m.doRestoreSkills())
+		}
 	}
+}
+
+func (m *Model) handleFixNvmDoneMsg(msg fixNvmDoneMsg) []tea.Cmd {
+	var cmds []tea.Cmd
+	m.finishCancellableAction()
+	m.loading = false
+	if isContextCanceled(msg.err) {
+		cmds = append(cmds, setStatus(m, "cancelled", false))
+		m.continueDashboardReconcile(dashboardReconcilePlanFixNvmManaged, msg.err, &cmds)
+		return cmds
+	}
+	if msg.err != nil {
+		cmds = append(cmds, setStatus(m, "fix nvm-managed tools: "+msg.err.Error(), true))
+		m.continueDashboardReconcile(dashboardReconcilePlanFixNvmManaged, msg.err, &cmds)
+		return cmds
+	}
+	if msg.tools != nil {
+		m.allTools = msg.tools
+		m.applyFilter()
+	}
+	if msg.nvmManaged != nil {
+		m.nvmManaged = msg.nvmManaged
+		m.applyFilter()
+	}
+	if msg.result != nil && len(msg.result.Items) > 0 {
+		names := make([]string, 0, len(msg.result.Items))
+		for _, item := range msg.result.Items {
+			names = append(names, item.Name)
+		}
+		cmds = append(cmds, setStatus(m, "✓ fixed nvm-managed tools: "+strings.Join(names, ", "), false))
+	} else {
+		cmds = append(cmds, setStatus(m, "no nvm-managed tools to fix", false))
+	}
+	m.refreshDoctorAfterFix(&cmds)
+	m.continueDashboardReconcile(dashboardReconcilePlanFixNvmManaged, nil, &cmds)
+	return cmds
 }
 
 func (m *Model) handleFixIgnoreDoneMsg(msg fixIgnoreDoneMsg) []tea.Cmd {
@@ -440,9 +514,7 @@ func (m *Model) handleFixIgnoreDoneMsg(msg fixIgnoreDoneMsg) []tea.Cmd {
 	}
 	if len(msg.modified) > 0 {
 		cmds = append(cmds, setStatus(m, "✓ fixed ignore patterns for "+strings.Join(msg.modified, ", "), false))
-		// Re-run doctor to refresh findings.
-		m.startDoctorRun("Refreshing doctor…")
-		cmds = append(cmds, m.spinner.Tick, m.doRunDoctor())
+		m.refreshDoctorAfterFix(&cmds)
 	}
 	m.continueDashboardReconcile(dashboardReconcilePlanFixIgnore, nil, &cmds)
 	return cmds

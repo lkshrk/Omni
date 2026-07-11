@@ -90,7 +90,7 @@ func (m *Model) handleDotsSyncedMsg(msg dotsSyncedMsg) []tea.Cmd {
 		cmds = append(cmds, cmd)
 	}
 	m.continueDashboardReconcile(dashboardReconcilePlanSyncDots, msg.err, &cmds)
-	if !m.dashboardReconcileRunning && !m.launchBatchActive && m.mode == viewStatus {
+	if !m.dashboardReconcileRunning && !m.launchBatchActive {
 		m.refreshDoctorAfterFix(&cmds)
 	}
 	m.refreshDotsHistory(&cmds)
@@ -233,7 +233,7 @@ func (m *Model) handleDotsCommittedMsg(msg dotsCommittedMsg) []tea.Cmd {
 		cmds = append(cmds, setStatus(m, "✓ committed", false))
 	}
 	m.continueDashboardReconcile(dashboardReconcilePlanCommitDots, msg.err, &cmds)
-	if !m.dashboardReconcileRunning && m.mode == viewStatus {
+	if !m.dashboardReconcileRunning {
 		m.refreshDoctorAfterFix(&cmds)
 	}
 	m.refreshDotsHistory(&cmds)
@@ -280,6 +280,9 @@ func (m *Model) handleDotsFixedMsg(msg dotsFixedMsg) []tea.Cmd {
 		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
 	} else {
 		cmds = append(cmds, setStatus(m, "✓ resolved "+msg.name, false))
+	}
+	if !m.dashboardReconcileRunning {
+		m.refreshDoctorAfterFix(&cmds)
 	}
 	m.refreshDotsHistory(&cmds)
 	return cmds
@@ -571,12 +574,6 @@ func (m *Model) doDotsCommit() tea.Cmd {
 		entries, gitStatus, memberships := dotsSnapshotFromState(result)
 		return dotsCommittedMsg{gen: gen, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: err}
 	}
-}
-
-// doDotsOverwrite resolves a conflict for the named entry by backing up the
-// original file and creating the managed symlink, then refreshes status.
-func (m *Model) doDotsOverwrite(name string) tea.Cmd {
-	return m.doDotsResolve(name, app.DotResolveUseRepo)
 }
 
 func (m *Model) doDotsResolve(name string, strategy app.DotsResolveStrategy) tea.Cmd {
