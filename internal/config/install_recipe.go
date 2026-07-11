@@ -226,7 +226,7 @@ func materializeAptRepo(logicalName string, spec ToolInstallSpec) (ToolInstallSp
 			)
 		} else {
 			setup = fmt.Sprintf(
-				`install -m 0755 -d /etc/apt/keyrings && curl -fsSL %s -o %s && chmod a+r %s && suite=$({ . /etc/os-release; echo "${VERSION_CODENAME:-${UBUNTU_CODENAME:-stable}}"; }) && line=%s && line=${line//{suite}/$suite} && printf '%%s\n' "$line" > /etc/apt/sources.list.d/omni-%s.list && apt-get update`,
+				`install -m 0755 -d /etc/apt/keyrings && curl -fsSL %s -o %s && chmod a+r %s && suite=$({ . /etc/os-release; echo "${VERSION_CODENAME:-${UBUNTU_CODENAME:-stable}}"; }) && printf '%%s\n' %s | sed "s/{suite}/$suite/g" > /etc/apt/sources.list.d/omni-%s.list && apt-get update`,
 				shellSingleQuote(keyURL), shellSingleQuote(signedBy), shellSingleQuote(signedBy),
 				shellSingleQuote(format), shellSingleQuote(logicalName),
 			)

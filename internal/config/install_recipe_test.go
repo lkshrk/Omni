@@ -81,6 +81,12 @@ func TestMaterializeInstallSpec_AptRepo(t *testing.T) {
 	if got.Options["setup"] == "" || got.Options["packages"] != "example-cli" {
 		t.Fatalf("options = %+v, want generated setup and packages", got.Options)
 	}
+	if strings.Contains(got.Options["setup"], "${line//") {
+		t.Fatalf("setup = %q, want POSIX shell syntax", got.Options["setup"])
+	}
+	if !strings.Contains(got.Options["setup"], `sed "s/{suite}/$suite/g"`) {
+		t.Fatalf("setup = %q, want suite substitution through sed", got.Options["setup"])
+	}
 }
 
 func TestMaterializeInstallSpec_GitHubReleaseAssetPinnedTag(t *testing.T) {
