@@ -1,0 +1,63 @@
+# agents plugins restore: drives the fake claude CLI to install a manifest
+# plugin, adding its marketplace first. --agents claude-code keeps the target
+# deterministic regardless of what real agent CLIs (if any) are on the host
+# PATH. Covers: --dry-run prints "would install: claude-code/<name>" without
+# invoking installs, then a real restore prints "installed:
+# claude-code/<name>" and drives marketplace add then plugin install, and a
+# second real restore against an adapter that now reports the plugin already
+# present prints "already installed: claude-code/<name>" without issuing any
+# further install or marketplace add calls.
+chmod 0755 $WORK/bin/claude
+env PATH=$WORK/bin:$PATH
+
+exec omni --config settings.json agents plugins restore --dry-run
+stdout -count=1 'would install: claude-code/caveman'
+! exec grep -q 'plugins install' .omni-cache/claude-calls.log
+! exec grep -q 'plugins marketplace add' .omni-cache/claude-calls.log
+
+exec omni --config settings.json agents plugins restore
+stdout -count=1 'installed: claude-code/caveman'
+exec grep -q 'plugins marketplace add lkshrk/marketplace' .omni-cache/claude-calls.log
+exec grep -q 'plugins install caveman@lkshrk' .omni-cache/claude-calls.log
+
+# Flip the fake CLI's `plugins list --json` response to report caveman
+# already installed, then restore again: the plugin must be skipped rather
+# than re-installed, and no further install/marketplace-add calls issued.
+cp list-response-installed.json $WORK/.omni-cache/plugins-list-response.json
+
+exec omni --config settings.json agents plugins restore
+stdout -count=1 'already installed: claude-code/caveman'
+! stdout '^installed: claude-code/caveman$'
+exec sh -c 'test $(grep -c "plugins install caveman@lkshrk" '"$WORK"'/.omni-cache/claude-calls.log) -eq 1'
+exec sh -c 'test $(grep -c "plugins marketplace add lkshrk/marketplace" '"$WORK"'/.omni-cache/claude-calls.log) -eq 1'
+
+-- settings.json --
+{"agents":{"marketplaces":[{"name":"lkshrk","source":"lkshrk/marketplace"}],"plugins":[{"name":"caveman","marketplace":"lkshrk","agents":["claude-code"]}]}}
+
+-- list-response-installed.json --
+{"installed":[{"id":"caveman@lkshrk","version":"1.0.0","scope":"user","enabled":true}],"available":[]}
+
+-- bin/claude --
+#!/bin/sh
+set -eu
+mkdir -p "${OMNI_CACHE_DIR}"
+echo "$*" >> "${OMNI_CACHE_DIR}/claude-calls.log"
+if [ "$1" = "plugins" ] && [ "$2" = "list" ] && [ "$3" = "--json" ] && [ "$4" = "--available" ]; then
+  if [ -f "${OMNI_CACHE_DIR}/plugins-list-response.json" ]; then
+    cat "${OMNI_CACHE_DIR}/plugins-list-response.json"
+  else
+    printf '{"installed":[],"available":[]}\n'
+  fi
+  exit 0
+fi
+if [ "$1" = "plugins" ] && [ "$2" = "marketplace" ] && [ "$3" = "list" ] && [ "$4" = "--json" ]; then
+  printf '[]\n'
+  exit 0
+fi
+if [ "$1" = "plugins" ] && [ "$2" = "marketplace" ] && [ "$3" = "add" ]; then
+  exit 0
+fi
+if [ "$1" = "plugins" ] && [ "$2" = "install" ]; then
+  exit 0
+fi
+exit 1

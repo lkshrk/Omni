@@ -43,12 +43,14 @@ type App struct {
 	CacheDir   string // where omni.db lives; derived from XDG_CACHE_HOME when empty
 	DBPath     string
 
-	db           *database.DB
-	registry     *provider.Registry
-	fallbackExec executor.Executor
-	githubAPI    string
-	githubClient *http.Client
-	testMode     bool
+	db                 *database.DB
+	registry           *provider.Registry
+	fallbackExec       executor.Executor
+	githubAPI          string
+	githubClient       *http.Client
+	testMode           bool
+	testMcpAdapters    []McpAdapter
+	testPluginAdapters []PluginAdapter
 
 	// configMu serialises all read-modify-write cycles on settings.json. Held
 	// for the duration of withConfig; read-only loadConfig calls do not need it.
@@ -169,8 +171,12 @@ type UpgradeAllOptions struct {
 
 // New creates an App targeting configPath (the full path to settings.json).
 // Call Init or InitTestMode before any other method.
-func New(configPath string) *App {
-	return &App{ConfigPath: configPath}
+func New(configPath string, opts ...func(*App)) *App {
+	a := &App{ConfigPath: configPath}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
 }
 
 // readDB acquires a shared lock on dbMu, copies the db pointer, and releases
@@ -318,6 +324,13 @@ func (a *App) Close() error {
 
 // ─── Internal config helpers ──────────────────────────────────────────────────
 
+// LoadConfig exposes loadConfig to callers outside internal/app (TUI, CLI)
+// that need the same host-key/ecosystem normalization and validation as the
+// rest of App instead of reading settings.json directly.
+func (a *App) LoadConfig() (*config.RootConfig, error) {
+	return a.loadConfig()
+}
+
 // loadConfig reads settings.json. Returns an empty RootConfig when the file
 // does not exist — callers treat this as "nothing configured yet". Read-only
 // callers do not need configMu; mutating callers must use withConfig.
@@ -343,14 +356,13 @@ func (a *App) loadConfig() (*config.RootConfig, error) {
 	return cfg, nil
 }
 
-// fatalValidationErrors drops fallback-pathed validation errors. A fallback is
-// a last resort that only matters when actually used; malformed fallback
-// metadata for a tool satisfied by its primary provider must never block
-// loading or saving config. `omni doctor` still reports the full set.
+// fatalValidationErrors drops fallback-pathed and warn-level validation errors.
+// A fallback only matters when actually used; warn-level errors are advisory.
+// Neither should block loading or saving config. `omni doctor` reports the full set.
 func fatalValidationErrors(errs []config.ValidationError) []config.ValidationError {
 	fatal := make([]config.ValidationError, 0, len(errs))
 	for _, e := range errs {
-		if strings.Contains(e.Path, ".fallback") {
+		if strings.Contains(e.Path, ".fallback") || e.Warn {
 			continue
 		}
 		fatal = append(fatal, e)

@@ -68,7 +68,7 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 
 	// Resolve once and derive both the entry list (for the syncer) and the
 	// detailed view (for tap collection) from the same pass.
-	resolvedDetailed, warnings := a.resolveTools(ctx, cfg, groups)
+	resolvedDetailed, warnings := a.resolveTools(ctx, cfg, groups, false)
 
 	// For tools whose every configured provider is unavailable on this host,
 	// attempt a high-confidence provider search across currently available
@@ -81,7 +81,7 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 			if err != nil {
 				return nil, err
 			}
-			resolvedDetailed, warnings = a.resolveTools(ctx, cfg, groups)
+			resolvedDetailed, warnings = a.resolveTools(ctx, cfg, groups, false)
 			warnings = append(warnings, searchWarnings...)
 		} else {
 			warnings = append(warnings, searchWarnings...)
@@ -782,6 +782,12 @@ func (a *App) Install(ctx context.Context, name, providerName string) error {
 		return a.enrichToolGitFromInstalledProviderMetadata(ctx, t, prov, installedWith)
 	}
 
+	if hasSpec, err := a.configuredToolHasSpec(name); err != nil {
+		return err
+	} else if hasSpec {
+		return a.unmatchedConfiguredProviderError(ctx, name, providerName)
+	}
+
 	if providerName == "" {
 		settings, _ := a.LoadSettings()
 		resolved, err := a.resolveProvider(ctx, defaultProviderPriority(settings), settings.DisabledProviders)
@@ -890,6 +896,22 @@ func (a *App) configuredOperationResolvedTool(ctx context.Context, name, provide
 		matches = append(matches, t)
 	}
 	if len(matches) == 0 {
+		// currentResolvedTools only carries the single auto-picked candidate per
+		// tool (planInstallRoute stops at the first available one), so an
+		// explicit --provider request for a different configured candidate
+		// (e.g. a secondary "bun" entry when brew is the auto-picked default)
+		// would otherwise find nothing here. Search every configured candidate
+		// before concluding the tool has no match for providerName.
+		if providerName != "" {
+			if spec, ok := cfg.Tools[name]; ok {
+				if candidate, found := a.findConfiguredInstallCandidate(ctx, name, spec, providerName); found {
+					entry := spec.ToToolEntry(name, candidate)
+					resolved := resolvedTool{entry: entry}
+					opProvider := a.operationProviderName(entry)
+					return resolved, opProvider, true, nil
+				}
+			}
+		}
 		return resolvedTool{}, "", false, nil
 	}
 	if len(matches) > 1 && providerName == "" {
@@ -898,6 +920,44 @@ func (a *App) configuredOperationResolvedTool(ctx context.Context, name, provide
 	resolved := matches[0]
 	opProvider := a.operationProviderName(resolved.entry)
 	return resolved, opProvider, true, nil
+}
+
+// configuredToolHasSpec reports whether name has any logical spec in config,
+// regardless of whether it's ignored, host-restricted, or group-membership
+// filtered out of currentResolvedTools. Used to gate the literal-name install
+// fallback: that fallback must only fire for tools with zero configured
+// entries, never for a configured tool whose requested provider just failed
+// to match.
+func (a *App) configuredToolHasSpec(name string) (bool, error) {
+	cfg, err := a.loadConfig()
+	if err != nil {
+		return false, fmt.Errorf("loading config: %w", err)
+	}
+	_, ok := cfg.Tools[name]
+	return ok, nil
+}
+
+func (a *App) unmatchedConfiguredProviderError(ctx context.Context, name, providerName string) error {
+	cfg, err := a.loadConfig()
+	if err != nil {
+		return fmt.Errorf("loading config: %w", err)
+	}
+	spec, ok := cfg.Tools[name]
+	if !ok {
+		return fmt.Errorf("tool %q is not configured", name)
+	}
+	candidates := spec.Providers
+	if len(candidates) == 0 {
+		candidates = []config.ToolInstallSpec{spec.DefaultInstallSpec()}
+	}
+	available := make([]string, 0, len(candidates))
+	for _, c := range candidates {
+		available = append(available, fmt.Sprintf("%s (package %q)", c.Provider, c.EffectivePackage(name)))
+	}
+	if providerName == "" {
+		return fmt.Errorf("tool %q has no install candidate for the current host; available providers: %s", name, strings.Join(available, ", "))
+	}
+	return fmt.Errorf("tool %q is not configured with a candidate for provider %q; available providers: %s", name, providerName, strings.Join(available, ", "))
 }
 
 func installedWithForOperation(ctx context.Context, prov provider.Provider, opProvider, installWith string) string {

@@ -267,7 +267,7 @@ func (a *App) providerRepairState(ctx context.Context, result *SwitchResult) (*P
 		return state, fmt.Errorf("refresh descriptions: %w", err)
 	}
 	var err error
-	state.Tools, err = a.ListTools(ctx, "")
+	state.Tools, err = a.ListToolsForView(ctx, "")
 	if err != nil {
 		return state, fmt.Errorf("list tools: %w", err)
 	}
@@ -421,7 +421,7 @@ func (a *App) ClearProviderOverrideWithState(ctx context.Context, name, configPr
 	if err != nil {
 		return state, err
 	}
-	state.Tools, err = a.ListTools(ctx, "")
+	state.Tools, err = a.ListToolsForView(ctx, "")
 	if err != nil {
 		return state, fmt.Errorf("list tools: %w", err)
 	}

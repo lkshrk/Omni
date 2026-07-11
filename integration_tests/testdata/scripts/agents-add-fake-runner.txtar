@@ -1,0 +1,49 @@
+# agents add: exercises install + manifest persistence with a fake npx binary.
+# Covers: success (manifest entry created), dedup (re-add same source → single
+# entry), ref storage (owner/repo#ref stores Ref separately), runner failure.
+chmod 0755 $WORK/bin/npx
+env PATH=$WORK/bin:$PATH
+
+# success: CLI reports added; restore --dry-run confirms manifest entry
+exec omni --config settings.json agents add owner/repo
+stdout 'added owner/repo'
+exec omni --config settings.json agents skills restore --dry-run
+stdout 'npx skills add owner/repo -g -y'
+
+# dedup: re-adding the same source leaves exactly one manifest entry
+exec omni --config settings.json agents add owner/repo
+stdout 'added owner/repo'
+exec omni --config settings.json agents skills restore --dry-run
+stdout -count=1 'npx skills add owner/repo -g -y'
+
+# ref: #ref component is stored in the manifest and forwarded to the runner
+exec omni --config settings.json agents add 'other/repo#main'
+stdout 'added other/repo'
+exec omni --config settings.json agents skills restore --dry-run
+stdout 'npx skills add other/repo#main -g -y'
+
+# failure: runner exit 1 propagates as a non-zero omni exit
+! exec omni --config settings.json agents add fail/repo
+stderr 'skills add fail/repo'
+
+-- settings.json --
+{}
+
+-- bin/npx --
+#!/bin/sh
+if [ "$1" = "skills" ] && [ "$2" = "find" ]; then
+  shift 2
+  for arg; do
+    [ "$arg" = "nomatch" ] && exit 0
+  done
+  printf '\033[32mowner/repo@skill-name  12.3K installs\033[0m\n'
+  printf 'other-owner/other-repo@other-skill  456 installs\n'
+  exit 0
+fi
+if [ "$1" = "skills" ] && [ "$2" = "add" ]; then
+  case "$3" in
+    fail/*) printf 'error: package not found\n' >&2; exit 1 ;;
+  esac
+  exit 0
+fi
+exit 1

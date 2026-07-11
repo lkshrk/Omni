@@ -228,6 +228,40 @@ func TestDashboardReconcilePlan_PlansActionableToolDotAndIgnoreSteps(t *testing.
 	assertReconcileDetail(t, steps, app.ReconcileStepFixIgnore, "2 ignore patterns need cleanup")
 }
 
+func TestDashboardReconcilePlan_IncludesFixNvmManagedStepFromDoctorDrift(t *testing.T) {
+	steps := app.DashboardReconcilePlan(app.DashboardReconcilePlanInput{
+		Doctor: &app.DoctorResult{
+			Checks: []app.DoctorCheck{{
+				ID:     "drift",
+				Status: app.DoctorStatusWarn,
+				Groups: []app.DoctorDetailGroup{{
+					Header: "nvm-managed binary (configured for system provider)",
+					Items:  []string{"pnpm [brew]", "  suggestion: migrate"},
+				}},
+			}},
+		},
+	})
+	if !app.DashboardReconcilePlanHasStep(steps, app.ReconcileStepFixNvmManaged) {
+		t.Fatalf("steps = %#v, want fix-nvm-managed from doctor drift", steps)
+	}
+}
+
+func TestDashboardReconcilePlan_IncludesFixNvmManagedStep(t *testing.T) {
+	steps := app.DashboardReconcilePlan(app.DashboardReconcilePlanInput{
+		Tools: []*database.ToolCache{
+			{Name: "pnpm", Provider: "brew", Tracked: true, Installed: true},
+		},
+		NvmManaged: map[string]bool{"pnpm": true},
+	})
+	if !app.DashboardReconcilePlanHasStep(steps, app.ReconcileStepFixNvmManaged) {
+		t.Fatalf("steps = %#v, want fix-nvm-managed step", steps)
+	}
+	assertReconcileDetail(t, steps, app.ReconcileStepFixNvmManaged, "1 nvm-managed tool")
+	if got := reconcileStepIDs(steps)[0]; got != app.ReconcileStepFixNvmManaged {
+		t.Fatalf("first step = %q, want fix-nvm-managed first", got)
+	}
+}
+
 func TestDashboardReconcilePlan_UsesExplicitDotsConfiguredFlag(t *testing.T) {
 	steps := app.DashboardReconcilePlan(app.DashboardReconcilePlanInput{
 		DotsConfigured: true,

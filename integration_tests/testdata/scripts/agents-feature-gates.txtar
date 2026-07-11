@@ -1,0 +1,55 @@
+# per-feature and master agents_disabled gates block mutating commands and
+# turn restore commands into soft warnings (or, under the master flag, hard
+# failures), all before any adapter/runner is ever invoked.
+
+# 1. skills_disabled blocks agents add
+! exec omni --config skills-disabled.json agents add owner/repo
+stderr 'skills are disabled for this host'
+
+# 2. mcp_disabled blocks agents mcp add
+! exec omni --config mcp-disabled.json agents mcp add --name myserver --transport stdio --command 'npx my-server'
+stderr 'mcp servers are disabled for this host'
+
+# 3. plugins_disabled blocks agents plugins add
+! exec omni --config plugins-disabled.json agents plugins add --name caveman --marketplace lkshrk
+stderr 'plugins are disabled for this host'
+
+# 4. skills_disabled turns skills restore into a soft warning (exit 0)
+exec omni --config skills-disabled.json agents skills restore
+stdout 'warn: skills are disabled for this host, skipping restore'
+
+# 5. mcp_disabled turns mcp restore into a soft warning (exit 0)
+exec omni --config mcp-disabled.json agents mcp restore
+stdout 'warn: mcp servers are disabled for this host, skipping restore'
+
+# 6. plugins_disabled turns plugins restore into a soft warning (exit 0)
+exec omni --config plugins-disabled.json agents plugins restore
+stdout 'warn: plugins are disabled for this host, skipping restore'
+
+# 7. agents_disabled (master) blocks all three add commands
+! exec omni --config agents-disabled.json agents add owner/repo
+stderr 'agent skills are disabled for this host'
+! exec omni --config agents-disabled.json agents mcp add --name myserver --transport stdio --command 'npx my-server'
+stderr 'agent skills are disabled for this host'
+! exec omni --config agents-disabled.json agents plugins add --name caveman --marketplace lkshrk
+stderr 'agent skills are disabled for this host'
+
+# 8. agents_disabled (master) hard-fails all three restore commands
+! exec omni --config agents-disabled.json agents skills restore
+stderr 'agent skills are disabled for this host'
+! exec omni --config agents-disabled.json agents mcp restore
+stderr 'agent skills are disabled for this host'
+! exec omni --config agents-disabled.json agents plugins restore
+stderr 'agent skills are disabled for this host'
+
+-- skills-disabled.json --
+{"host_settings":{"testhost":{"skills_disabled":true}}}
+
+-- mcp-disabled.json --
+{"host_settings":{"testhost":{"mcp_disabled":true}}}
+
+-- plugins-disabled.json --
+{"host_settings":{"testhost":{"plugins_disabled":true}}}
+
+-- agents-disabled.json --
+{"host_settings":{"testhost":{"agents_disabled":true}}}

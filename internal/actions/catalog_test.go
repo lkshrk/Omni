@@ -53,32 +53,9 @@ func TestAction_Requires(t *testing.T) {
 	}
 }
 
-func TestMustLabel_Found(t *testing.T) {
-	if got := MustLabel(ToolSync); got == "" {
-		t.Error("MustLabel(ToolSync) returned empty")
-	}
-}
-
-func TestMustLabel_PanicsOnUnknown(t *testing.T) {
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("expected panic")
-		}
-		msg, _ := r.(string)
-		if !strings.Contains(msg, "unknown action") {
-			t.Errorf("panic = %v, want containing 'unknown action'", r)
-		}
-	}()
-	_ = MustLabel(ID("does.not.exist"))
-}
-
 func TestMustTUICopy_UsesTUIOverrides(t *testing.T) {
 	if got := MustTUILabel(DotsSync); got != "sync dotfiles" {
 		t.Fatalf("MustTUILabel(DotsSync) = %q, want TUI override", got)
-	}
-	if got := MustTUIDescription(ToolSyncAll); got != "Add discovered tools and install missing tools." {
-		t.Fatalf("MustTUIDescription(ToolSyncAll) = %q, want TUI override", got)
 	}
 	if got := MustTUIConfirmDescription(ToolReinstallDefault); got != ConfirmReinstall {
 		t.Fatalf("MustTUIConfirmDescription(ToolReinstallDefault) = %q, want %q", got, ConfirmReinstall)

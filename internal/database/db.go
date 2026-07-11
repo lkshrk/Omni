@@ -448,7 +448,7 @@ func (db *DB) Migrate(ctx context.Context) error {
 			CID       int            `bun:"cid"`
 			Name      string         `bun:"name"`
 			Type      string         `bun:"type"`
-			NotNull   int            `bun:"notnull"`
+			NotNull   int            `bun:"column:notnull"`
 			DfltValue sql.NullString `bun:"dflt_value"`
 			PK        int            `bun:"pk"`
 		}

@@ -175,14 +175,6 @@ func TestRefreshDescriptionAndDiscoveryProgressText(t *testing.T) {
 		t.Fatalf("RefreshDescriptionsProgressText provider = %q, want %q", desc, want)
 	}
 
-	installed := RefreshInstalledProgressText(RefreshInstalledProgressEvent{Provider: "brew", ProviderLabel: "system/brew", Name: "ripgrep", Index: 1, Total: 3})
-	if want := "Refreshing tools… 1/3: system/brew/ripgrep"; installed != want {
-		t.Fatalf("RefreshInstalledProgressText = %q, want %q", installed, want)
-	}
-	installed = RefreshInstalledProgressText(RefreshInstalledProgressEvent{Provider: "brew", Name: "ripgrep", Index: 1, Total: 3})
-	if want := "Refreshing tools… 1/3: brew/ripgrep"; installed != want {
-		t.Fatalf("RefreshInstalledProgressText provider fallback = %q, want %q", installed, want)
-	}
 	discovered := RefreshDiscoveredProgressText(RefreshDiscoveredProgressEvent{Index: 0, Total: 0})
 	if want := "Finding local tools 0/0…"; discovered != want {
 		t.Fatalf("RefreshDiscoveredProgressText fallback = %q, want %q", discovered, want)
@@ -459,15 +451,15 @@ func TestClaimSuccessStatusTextUsesCurrentHostFallback(t *testing.T) {
 
 func TestDotsSyncProgressText(t *testing.T) {
 	active := dots.SyncProgressEvent{Entry: "nvim", Index: 1, Total: 2}
-	if got, want := DotsSyncProgressLineText(active), "syncing dots 1/2: nvim"; got != want {
+	if got, want := DotsSyncProgressLineText(active), "checking dots 1/2: nvim"; got != want {
 		t.Fatalf("DotsSyncProgressLineText = %q, want %q", got, want)
 	}
-	if got, want := DotsSyncActivityProgressText(active), "Syncing dots 1/2: nvim…"; got != want {
+	if got, want := DotsSyncActivityProgressText(active), "Checking dots 1/2: nvim…"; got != want {
 		t.Fatalf("DotsSyncActivityProgressText = %q, want %q", got, want)
 	}
 
 	initial := dots.SyncProgressEvent{Index: -1, Total: 3}
-	if got, want := DotsSyncProgressLineText(initial), "syncing dots 0/3"; got != want {
+	if got, want := DotsSyncProgressLineText(initial), "checking dots 0/3"; got != want {
 		t.Fatalf("DotsSyncProgressLineText initial = %q, want %q", got, want)
 	}
 	if got, want := DotsSyncActivityProgressText(initial), "Syncing dots 0/3…"; got != want {
@@ -743,27 +735,6 @@ func TestSyncAllFailureRowsMergesDirectAndSyncFailures(t *testing.T) {
 	want := "sync complete, 1 need admin approval, 1 failed"
 	if got != want {
 		t.Fatalf("BulkToolFailureSummaryText = %q, want %q", got, want)
-	}
-}
-
-func TestPrivilegedActionMapForRows(t *testing.T) {
-	rowErrors := map[string]string{
-		toolResultKey("vim", "system"): "requires sudo: apt install vim",
-		toolResultKey("bat", "system"): "requires sudo: apt install bat",
-	}
-
-	got := PrivilegedActionMapForRows(rowErrors, provider.PrivilegeActionInstall)
-	if len(got) != 2 ||
-		got[toolResultKey("vim", "system")] != provider.PrivilegeActionInstall ||
-		got[toolResultKey("bat", "system")] != provider.PrivilegeActionInstall {
-		t.Fatalf("PrivilegedActionMapForRows = %#v, want install action for each row", got)
-	}
-
-	if got := PrivilegedActionMapForRows(nil, provider.PrivilegeActionInstall); got != nil {
-		t.Fatalf("nil row errors map = %#v, want nil", got)
-	}
-	if got := PrivilegedActionMapForRows(rowErrors, ""); got != nil {
-		t.Fatalf("empty action map = %#v, want nil", got)
 	}
 }
 

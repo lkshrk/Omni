@@ -4,7 +4,7 @@ mkdir $WORK/state
 mkdir $WORK/state/skills
 exec omni --config settings.json agents skills import --dry-run
 stdout '1 added'
-stdout '\+ x'
+stdout '\+ o/r'
 
 -- settings.json --
 {}

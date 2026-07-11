@@ -52,6 +52,7 @@ func TestMutatingCLICommandsAreCataloged(t *testing.T) {
 		{"tools", "delete"},
 		{"tools", "upgrade"},
 		{"tools", "reinstall"},
+		{"tools", "migrate-nvm"},
 		{"tools", "import"},
 		{"tools", "refresh"},
 		{"tools", "consolidate"},
@@ -369,7 +370,24 @@ func uncatalogedRunnableCLICommandAllowed(path []string) bool {
 		"dots variant list",
 		"agents skills restore",
 		"agents skills import",
-		"agents skills update":
+		"agents skills update",
+		"agents skills remove",
+		"agents skills uninstall",
+		"agents add",
+		"agents find",
+		"agents mcp list",
+		"agents mcp add",
+		"agents mcp remove",
+		"agents mcp restore",
+		"agents mcp import",
+		"agents plugins list",
+		"agents plugins add",
+		"agents plugins remove",
+		"agents plugins restore",
+		"agents plugins import",
+		"agents plugins marketplace list",
+		"agents plugins marketplace add",
+		"agents plugins marketplace remove":
 		return true
 	default:
 		return false

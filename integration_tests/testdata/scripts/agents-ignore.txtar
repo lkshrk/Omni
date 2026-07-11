@@ -1,0 +1,36 @@
+# agents.ignore lists must survive a config-mutating agents command untouched.
+# agents mcp add rewrites agents.mcp_servers via read-modify-write; the
+# unrelated agents.ignore block (skills/mcp_servers/plugins) must round-trip.
+chmod 0755 $WORK/bin/claude
+env PATH=$WORK/bin:$PATH
+
+exec omni --config settings.json agents mcp add --name myserver --transport stdio --command 'npx my-server' --agents claude-code
+stdout 'added myserver'
+
+exec grep '"myserver"' settings.json
+stdout '"myserver"'
+
+# Array values are pretty-printed one per line; grep each ignore entry in
+# isolation so the assertion doesn't accidentally match the new mcp_servers
+# manifest entry (which also has a "name": "myserver" field but no bare "y").
+exec grep -A9 '"ignore": {' settings.json
+stdout '"skills": \['
+stdout '"x"'
+stdout '"mcp_servers": \['
+stdout '"y"'
+stdout '"plugins": \['
+stdout '"z"'
+
+-- settings.json --
+{"agents":{"ignore":{"skills":["x"],"mcp_servers":["y"],"plugins":["z"]}}}
+
+-- bin/claude --
+#!/bin/sh
+set -eu
+mkdir -p "${OMNI_CACHE_DIR}"
+echo "$*" >> "${OMNI_CACHE_DIR}/claude-calls.log"
+if [ "$1" = "mcp" ] && [ "$2" = "add" ]; then
+  echo "added myserver"
+  exit 0
+fi
+exit 1

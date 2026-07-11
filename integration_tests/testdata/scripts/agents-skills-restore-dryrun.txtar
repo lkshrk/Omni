@@ -1,6 +1,6 @@
-# agents skills restore --dry-run prints npx skills add line for each manifest entry
+# agents skills restore --dry-run prints npx skills add line for each package
 exec omni --config settings.json agents skills restore --dry-run
-stdout '^npx skills add o/r#main -s x -g -a claude-code -y$'
+stdout '^npx skills add o/r#main -g -a claude-code -y$'
 
 -- settings.json --
 {"version":1,"agents":{"skills":[{"name":"x","source":"o/r","ref":"main","agents":["claude-code"]}]}}

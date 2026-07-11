@@ -1,0 +1,29 @@
+# agents plugins list: shows manifest ("managed") plugins with per-agent
+# install status parsed from the fake claude CLI's `plugins list --json
+# --available` output ({installed: [{id: "name@marketplace", version, scope,
+# enabled}], available: [{name, marketplaceName, version, latestVersion}]}),
+# plus an "unmanaged" section for a plugin the fake CLI reports that the
+# manifest doesn't know about. --agents claude-code on the manifest entry
+# keeps status deterministic regardless of what real agent CLIs (if any) are
+# on the host PATH. caveman has a newer version available, so its managed row
+# shows "<version> -> <latest>"; hand-added has a version but no update
+# available, so its unmanaged row shows the plain version with no arrow.
+chmod 0755 $WORK/bin/claude
+env PATH=$WORK/bin:$PATH
+
+exec omni --config settings.json agents plugins list
+stdout 'caveman\s+lkshrk\s+1\.0\.0 → 1\.2\.0\s+claude-code\(✓\)'
+stdout '-- unmanaged \(claude-code\) --'
+stdout 'hand-added\s+lkshrk\s+9\.9\.9'
+
+-- settings.json --
+{"agents":{"marketplaces":[{"name":"lkshrk","source":"lkshrk/marketplace"}],"plugins":[{"name":"caveman","marketplace":"lkshrk","agents":["claude-code"]}]}}
+
+-- bin/claude --
+#!/bin/sh
+set -eu
+if [ "$1" = "plugins" ] && [ "$2" = "list" ] && [ "$3" = "--json" ] && [ "$4" = "--available" ]; then
+  printf '{"installed":[{"id":"caveman@lkshrk","version":"1.0.0","scope":"user","enabled":true},{"id":"hand-added@lkshrk","version":"9.9.9","scope":"user","enabled":true}],"available":[{"name":"caveman","marketplaceName":"lkshrk","latestVersion":"1.2.0"}]}\n'
+  exit 0
+fi
+exit 1

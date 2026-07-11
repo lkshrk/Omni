@@ -11,11 +11,11 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-// SkillInstaller materializes one manifest skill onto the host for the given
+// SkillInstaller materializes one skill package onto the host for the given
 // agents. The npx/bunx wrapper is the only implementation today; a Go-native
 // installer can replace it behind this interface later.
 type SkillInstaller interface {
-	Install(ctx context.Context, skill config.ManifestSkill, agents []string) error
+	Install(ctx context.Context, pkg config.SkillPackage, agents []string) error
 }
 
 func skillRunner(nodeManager string) string {
@@ -25,16 +25,16 @@ func skillRunner(nodeManager string) string {
 	return "npx"
 }
 
-func skillSource(skill config.ManifestSkill) string {
-	if skill.Ref != "" {
-		return skill.Source + "#" + skill.Ref
+func skillPackageSource(pkg config.SkillPackage) string {
+	if pkg.Ref != "" {
+		return pkg.Source + "#" + pkg.Ref
 	}
-	return skill.Source
+	return pkg.Source
 }
 
-// skillAddArgs builds the argument vector for `<runner> skills add ...`.
-func skillAddArgs(skill config.ManifestSkill, agents []string) []string {
-	args := []string{"skills", "add", skillSource(skill), "-s", skill.Name, "-g"}
+// skillPackageAddArgs builds `skills add <source>[#ref] -g [-a agents...] -y`.
+func skillPackageAddArgs(pkg config.SkillPackage, agents []string) []string {
+	args := []string{"skills", "add", skillPackageSource(pkg), "-g"}
 	if len(agents) > 0 {
 		args = append(args, "-a")
 		args = append(args, agents...)
@@ -48,11 +48,11 @@ type npxInstaller struct {
 	exec   func(ctx context.Context, name string, args ...string) (string, string, error)
 }
 
-func (n npxInstaller) Install(ctx context.Context, skill config.ManifestSkill, agents []string) error {
-	args := skillAddArgs(skill, agents)
+func (n npxInstaller) Install(ctx context.Context, pkg config.SkillPackage, agents []string) error {
+	args := skillPackageAddArgs(pkg, agents)
 	_, stderr, err := n.exec(ctx, n.runner, args...)
 	if err != nil {
-		return fmt.Errorf("skills add %s: %w: %s", skill.Name, err, stderr)
+		return fmt.Errorf("skills add %s: %w: %s", pkg.Source, err, stderr)
 	}
 	return nil
 }
@@ -68,37 +68,71 @@ type RestoreSkillsResult struct {
 	Installed []string
 	Failed    []SkillFailure
 	Drift     []string
+	Warnings  []string
+	// ShadowedByPlugin lists package sources skipped because an installed
+	// plugin's name matches the package's repo-segment name on one of its
+	// target agents — a user-scope duplicate of a plugin-provided skill is
+	// harm, not repair (see SkillPackageRow.ShadowedByPlugin).
+	ShadowedByPlugin []string
 }
 
-func restoreSkills(ctx context.Context, skills []config.ManifestSkill, use []string, inst SkillInstaller) RestoreSkillsResult {
-	var res RestoreSkillsResult
-	for _, skill := range skills {
-		if err := inst.Install(ctx, skill, effectiveSkillAgents(use, skill)); err != nil {
-			res.Failed = append(res.Failed, SkillFailure{Name: skill.Name, Message: err.Error()})
+// filterShadowedSkillPackages splits pkgs into those to install and those
+// skipped because an installed plugin already provides them on a target
+// agent (see skillPackageRepoName/installedPluginNames). use is the host's
+// enabled-agents fallback, mirroring effectiveSkillAgents' resolution so the
+// shadow check considers the same agent set restore would actually install
+// to.
+func filterShadowedSkillPackages(pkgs []resolvedPackage, use []string, pluginNames map[string]map[string]bool) (keep []resolvedPackage, shadowed []string) {
+	for _, p := range pkgs {
+		repoName := skillPackageRepoName(p.Source)
+		agents := effectiveSkillAgents(use, p.SkillPackage)
+		isShadowed := false
+		for _, id := range agents {
+			if pluginShadowsName(pluginNames, id, repoName) {
+				isShadowed = true
+				break
+			}
+		}
+		if isShadowed {
+			shadowed = append(shadowed, p.Source)
 			continue
 		}
-		res.Installed = append(res.Installed, skill.Name)
+		keep = append(keep, p)
+	}
+	return keep, shadowed
+}
+
+func restoreSkills(ctx context.Context, pkgs []resolvedPackage, use []string, inst SkillInstaller) RestoreSkillsResult {
+	var res RestoreSkillsResult
+	for _, p := range pkgs {
+		agents := effectiveSkillAgents(use, p.SkillPackage)
+		if err := inst.Install(ctx, p.SkillPackage, agents); err != nil {
+			res.Failed = append(res.Failed, SkillFailure{Name: p.Source, Message: err.Error()})
+			continue
+		}
+		res.Installed = append(res.Installed, p.Source)
 	}
 	return res
 }
 
-// effectiveSkillAgents resolves which agents a skill installs to: the host's
-// enabled agents (use), narrowed to the skill's own agents when it declares
+// effectiveSkillAgents resolves which agents a package installs to: the host's
+// enabled agents (use), narrowed to the package's own agents when it declares
 // any. A nil use list means "not configured" — restore omits -a and lets the
 // CLI auto-detect installed agents.
-func effectiveSkillAgents(use []string, skill config.ManifestSkill) []string {
-	if len(skill.Agents) == 0 {
+// A non-nil empty use list means "no agents enabled" — the intersection is empty and the package installs to nothing.
+func effectiveSkillAgents(use []string, pkg config.SkillPackage) []string {
+	if len(pkg.Agents) == 0 {
 		return use
 	}
 	if use == nil {
-		return skill.Agents
+		return pkg.Agents
 	}
 	enabled := make(map[string]bool, len(use))
 	for _, a := range use {
 		enabled[a] = true
 	}
-	out := make([]string, 0, len(skill.Agents))
-	for _, a := range skill.Agents {
+	out := make([]string, 0, len(pkg.Agents))
+	for _, a := range pkg.Agents {
 		if enabled[a] {
 			out = append(out, a)
 		}
@@ -111,10 +145,10 @@ type RestoreSkillsOptions struct {
 	DryRun bool
 }
 
-func dryRunLines(runner string, skills []config.ManifestSkill, use []string) []string {
-	lines := make([]string, 0, len(skills))
-	for _, skill := range skills {
-		args := skillAddArgs(skill, effectiveSkillAgents(use, skill))
+func dryRunLines(runner string, pkgs []resolvedPackage, use []string) []string {
+	lines := make([]string, 0, len(pkgs))
+	for _, p := range pkgs {
+		args := skillPackageAddArgs(p.SkillPackage, effectiveSkillAgents(use, p.SkillPackage))
 		lines = append(lines, runner+" "+strings.Join(args, " "))
 	}
 	return lines
@@ -124,7 +158,7 @@ func nodeManager(cfg *config.RootConfig) string {
 	return cfg.Settings.Ecosystems[provider.EcosystemNode].Manager
 }
 
-// RestoreSkills restores the manifest skill set onto this host.
+// RestoreSkills restores the resolved package set onto this host.
 func (a *App) RestoreSkills(ctx context.Context, opts RestoreSkillsOptions) (RestoreSkillsResult, []string, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -133,11 +167,16 @@ func (a *App) RestoreSkills(ctx context.Context, opts RestoreSkillsOptions) (Res
 	if err := a.requireAgentsEnabled(cfg); err != nil {
 		return RestoreSkillsResult{}, nil, err
 	}
+	if config.BoolVal(a.effectiveSettings(cfg).SkillsDisabled) {
+		return RestoreSkillsResult{Warnings: []string{"skills are disabled for this host, skipping restore"}}, nil, nil
+	}
 	runner := skillRunner(nodeManager(cfg))
-	skills := cfg.Agents.Skills
+	pkgs := resolveSkillPackages(cfg, currentMachineGroupName())
 	use := a.effectiveSettings(cfg).AgentsUse
+	pluginNames := installedPluginNames(ctx, a)
+	pkgs, shadowedSources := filterShadowedSkillPackages(pkgs, use, pluginNames)
 	if opts.DryRun {
-		return RestoreSkillsResult{}, dryRunLines(runner, skills, use), nil
+		return RestoreSkillsResult{ShadowedByPlugin: shadowedSources}, dryRunLines(runner, pkgs, use), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -148,7 +187,8 @@ func (a *App) RestoreSkills(ctx context.Context, opts RestoreSkillsOptions) (Res
 		return RestoreSkillsResult{}, nil, err
 	}
 	inst := npxInstaller{runner: runner, exec: a.fallbackExecutor().Run}
-	res := restoreSkills(ctx, skills, use, inst)
+	res := restoreSkills(ctx, pkgs, use, inst)
+	res.ShadowedByPlugin = shadowedSources
 	after, err := lockHashes(home)
 	if err != nil {
 		return RestoreSkillsResult{}, nil, err
@@ -164,45 +204,51 @@ type ImportDiff struct {
 	Unchanged []string
 }
 
-// importSkills upserts lockfile entries into the manifest, dropping runtime
-// fields. Existing entries change only when source/ref/skillPath differ.
-func importSkills(existing []config.ManifestSkill, lock *config.SkillLockFile) ([]config.ManifestSkill, ImportDiff) {
-	byName := make(map[string]config.ManifestSkill, len(existing))
+// importPackages folds lockfile entries into the flat package manifest, deduped
+// by source. New sources are appended ungrouped; existing sources update Ref
+// when the lockfile differs.
+func importPackages(existing []config.SkillPackage, lock *config.SkillLockFile) ([]config.SkillPackage, ImportDiff) {
+	bySource := make(map[string]config.SkillPackage, len(existing))
 	order := make([]string, 0, len(existing))
-	for _, s := range existing {
-		byName[s.Name] = s
-		order = append(order, s.Name)
+	for _, p := range existing {
+		bySource[p.Source] = p
+		order = append(order, p.Source)
 	}
+
+	lockBySource := make(map[string]string)
+	sources := make([]string, 0)
+	for _, e := range lock.Skills {
+		if e.Source == "" {
+			continue
+		}
+		if _, ok := lockBySource[e.Source]; !ok {
+			lockBySource[e.Source] = e.Ref
+			sources = append(sources, e.Source)
+		}
+	}
+	sort.Strings(sources)
 
 	var diff ImportDiff
-	names := make([]string, 0, len(lock.Skills))
-	for name := range lock.Skills {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	for _, name := range names {
-		e := lock.Skills[name]
-		next := config.ManifestSkill{Name: name, Source: e.Source, Ref: e.Ref, SkillPath: e.SkillPath}
-		prev, ok := byName[name]
+	for _, src := range sources {
+		ref := lockBySource[src]
+		prev, ok := bySource[src]
 		switch {
 		case !ok:
-			next.Agents = nil
-			byName[name] = next
-			order = append(order, name)
-			diff.Added = append(diff.Added, name)
-		case prev.Source != next.Source || prev.Ref != next.Ref || prev.SkillPath != next.SkillPath:
-			next.Agents = prev.Agents
-			byName[name] = next
-			diff.Updated = append(diff.Updated, name)
+			bySource[src] = config.SkillPackage{Source: src, Ref: ref}
+			order = append(order, src)
+			diff.Added = append(diff.Added, src)
+		case prev.Ref != ref:
+			prev.Ref = ref
+			bySource[src] = prev
+			diff.Updated = append(diff.Updated, src)
 		default:
-			diff.Unchanged = append(diff.Unchanged, name)
+			diff.Unchanged = append(diff.Unchanged, src)
 		}
 	}
 
-	merged := make([]config.ManifestSkill, 0, len(order))
-	for _, name := range order {
-		merged = append(merged, byName[name])
+	merged := make([]config.SkillPackage, 0, len(order))
+	for _, src := range order {
+		merged = append(merged, bySource[src])
 	}
 	return merged, diff
 }
@@ -219,7 +265,7 @@ func (a *App) ImportSkills(ctx context.Context, opts ImportSkillsOptions) (Impor
 	if err != nil {
 		return ImportDiff{}, err
 	}
-	if err := a.requireAgentsEnabled(cfg); err != nil {
+	if err := a.requireSkillsEnabled(cfg); err != nil {
 		return ImportDiff{}, err
 	}
 	home, err := os.UserHomeDir()
@@ -233,13 +279,13 @@ func (a *App) ImportSkills(ctx context.Context, opts ImportSkillsOptions) (Impor
 
 	var diff ImportDiff
 	if opts.DryRun {
-		_, diff = importSkills(cfg.Agents.Skills, lock)
+		_, diff = importPackages(cfg.Agents.Packages, lock)
 		return diff, nil
 	}
 
 	err = a.withConfig(func(cfg *config.RootConfig) error {
-		merged, d := importSkills(cfg.Agents.Skills, lock)
-		cfg.Agents.Skills = merged
+		merged, d := importPackages(cfg.Agents.Packages, lock)
+		cfg.Agents.Packages = merged
 		diff = d
 		return nil
 	})
@@ -272,25 +318,57 @@ func lockHashes(home string) (map[string]string, error) {
 	return out, nil
 }
 
-// ListSkills returns the declared manifest skills.
-func (a *App) ListSkills() ([]config.ManifestSkill, error) {
-	cfg, err := a.loadConfig()
-	if err != nil {
-		return nil, err
-	}
-	return cfg.Agents.Skills, nil
+// skillUpdateArgs builds `skills update -g -y [names...]`. With names it targets
+// exactly those skills; with none it updates all global skills.
+func skillUpdateArgs(names []string) []string {
+	args := []string{"skills", "update", "-g", "-y"}
+	return append(args, names...)
 }
 
-// skillUpdateArgs builds `<runner> skills update -g -y [names...]`. With manifest
-// names it targets exactly those; with none it updates all global skills. The
-// upstream CLI checks each skill's folder hash against the latest upstream tree
-// SHA and only refreshes the ones that changed.
-func skillUpdateArgs(skills []config.ManifestSkill) []string {
-	args := []string{"skills", "update", "-g", "-y"}
-	for _, s := range skills {
-		args = append(args, s.Name)
+// skillPackageRemoveArgs builds `skills remove -g [-a agents...] -y <names...>`.
+// Mirrors skillPackageAddArgs' global scope and agent targeting.
+func skillPackageRemoveArgs(skillNames, agents []string) []string {
+	args := []string{"skills", "remove", "-g"}
+	if len(agents) > 0 {
+		args = append(args, "-a")
+		args = append(args, agents...)
 	}
-	return args
+	args = append(args, "-y")
+	return append(args, skillNames...)
+}
+
+// agentsWithPackageSkills returns sorted agent IDs where any of the package's
+// lockfile skill names are present in that agent's skills dirs.
+func agentsWithPackageSkills(home string, lock *config.SkillLockFile, source string) []string {
+	names := packageSkills(lock, source)
+	if len(names) == 0 {
+		return nil
+	}
+	var agents []string
+	for _, ag := range InstalledAgents(home) {
+		if agentHasAnySkill(home, ag, names) {
+			agents = append(agents, ag.ID)
+		}
+	}
+	sort.Strings(agents)
+	return agents
+}
+
+// packageSkillNames returns the lockfile skill names whose source matches one of
+// the resolved packages, sorted and unique.
+func packageSkillNames(lock *config.SkillLockFile, pkgs []resolvedPackage) []string {
+	want := make(map[string]struct{}, len(pkgs))
+	for _, p := range pkgs {
+		want[p.Source] = struct{}{}
+	}
+	var names []string
+	for name, e := range lock.Skills {
+		if _, ok := want[e.Source]; ok {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 // UpdateSkillsOptions controls an update run.
@@ -298,19 +376,27 @@ type UpdateSkillsOptions struct {
 	DryRun bool
 }
 
-// UpdateSkills refreshes the manifest skills to their latest upstream versions
-// via the skills CLI (which performs the outdated check internally). DryRun
-// returns the command that would run instead of executing it.
+// UpdateSkills refreshes the resolved package skills to their latest upstream
+// versions via the skills CLI. DryRun returns the command that would run.
 func (a *App) UpdateSkills(ctx context.Context, opts UpdateSkillsOptions) (output string, dryRun string, err error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
 		return "", "", err
 	}
-	if err := a.requireAgentsEnabled(cfg); err != nil {
+	if err := a.requireSkillsEnabled(cfg); err != nil {
 		return "", "", err
 	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", "", fmt.Errorf("resolving home dir: %w", err)
+	}
+	lock, err := config.LoadSkillLock(config.SkillLockPath(home))
+	if err != nil {
+		return "", "", err
+	}
+	pkgs := resolveSkillPackages(cfg, currentMachineGroupName())
 	runner := skillRunner(nodeManager(cfg))
-	args := skillUpdateArgs(cfg.Agents.Skills)
+	args := skillUpdateArgs(packageSkillNames(lock, pkgs))
 	if opts.DryRun {
 		return "", runner + " " + strings.Join(args, " "), nil
 	}

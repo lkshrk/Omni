@@ -126,27 +126,6 @@ func TestToolProviderDisplayLabel(t *testing.T) {
 	}
 }
 
-func TestToolProviderDisplayForToolDoesNotGuessConcreteForInstalledUnknownManager(t *testing.T) {
-	tool := &database.ToolCache{Name: "typescript", Provider: "node", Installed: true, Tracked: true}
-	got := app.ToolProviderDisplayForTool(tool, "", app.ToolClassificationContext{EffectiveNodeManager: "bun"})
-
-	if got.Meta != "node" || got.Concrete != "" || got.Override {
-		t.Fatalf("ToolProviderDisplayForTool = %+v, want node without guessed concrete manager", got)
-	}
-}
-
-func TestToolProviderDisplayForToolMarksPinnedManagerOverride(t *testing.T) {
-	tool := &database.ToolCache{Name: "ruff", Provider: "python", Tracked: true}
-	got := app.ToolProviderDisplayForTool(tool, "pip3", app.ToolClassificationContext{EffectivePythonManager: "uv"})
-
-	if got.Meta != "python" || got.Concrete != "pip3" || !got.Override {
-		t.Fatalf("ToolProviderDisplayForTool = %+v, want python/pip3 override", got)
-	}
-	if label := got.Label(); label != "pip3" {
-		t.Fatalf("Label = %q, want pip3", label)
-	}
-}
-
 func TestToolHasPrivilegeMarker(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -217,6 +196,25 @@ func TestToolProviderDisplayRole(t *testing.T) {
 			t.Errorf("ToolProviderDisplayRoleFor(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
+}
+
+func TestBuildToolViewList_PlacesIgnoreLabelToolsInIgnoredBucket(t *testing.T) {
+	tools := []*database.ToolCache{
+		{Name: "git", Provider: "system", Tracked: true, Installed: true},
+		{Name: "bat", Provider: "system", Tracked: true, Installed: true},
+	}
+	got := app.BuildToolViewList(app.ToolViewListOptions{
+		Tools:        tools,
+		IgnoreLabels: map[string]string{"bat": "tool"},
+	})
+	assertToolViewNames(t, got.Tools, []string{"git", "bat"})
+	if got.Tools[len(got.Tools)-1].Name != "bat" {
+		t.Fatalf("ignored tool = %q, want bat last in ignored bucket", got.Tools[len(got.Tools)-1].Name)
+	}
+	assertToolViewCounts(t, got.Counts, map[app.ToolViewSection]int{
+		app.ToolViewSectionInstalled: 1,
+		app.ToolViewSectionIgnored:   1,
+	})
 }
 
 func TestBuildToolViewList_OrdersCountsAndDedupesSources(t *testing.T) {

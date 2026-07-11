@@ -1,0 +1,34 @@
+# agents mcp remove: unregisters a manifest server and calls the fake claude
+# CLI to remove it from the agent. The manifest entry targets claude-code
+# only, so a real codex binary on the host PATH (if any) is never invoked and
+# can't make this test flaky. Covers: successful removal drops the manifest
+# entry, and removing a name not in the manifest is a hard error.
+chmod 0755 $WORK/bin/claude
+env PATH=$WORK/bin:$PATH
+env HOME=$WORK/home
+mkdir $WORK/home
+
+exec omni --config settings.json agents mcp remove myserver
+stdout 'removed myserver'
+exec grep -q 'mcp remove -s user myserver' .omni-cache/claude-calls.log
+
+exec omni --config settings.json agents mcp restore --dry-run
+! stdout 'myserver'
+
+! exec omni --config settings.json agents mcp remove not-in-manifest
+stderr 'not-in-manifest.*not found in manifest'
+
+-- settings.json --
+{"agents":{"mcp_servers":[
+  {"name":"myserver","transport":"stdio","command":"npx my-server","agents":["claude-code"]}
+]}}
+
+-- bin/claude --
+#!/bin/sh
+set -eu
+mkdir -p "${OMNI_CACHE_DIR}"
+echo "$*" >> "${OMNI_CACHE_DIR}/claude-calls.log"
+if [ "$1" = "mcp" ] && [ "$2" = "remove" ]; then
+  exit 0
+fi
+exit 1

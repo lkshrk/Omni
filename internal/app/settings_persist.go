@@ -45,6 +45,20 @@ type hostSettingsPatch struct {
 	DotsDisabled      *bool                               `json:"dots_disabled,omitempty"`
 	DisabledProviders *[]string                           `json:"disabled_providers,omitempty"`
 	ProviderPriority  []string                            `json:"provider_priority,omitempty"`
+	AgentsDisabled    *bool                               `json:"agents_disabled,omitempty"`
+	SkillsDisabled    *bool                               `json:"skills_disabled,omitempty"`
+	McpDisabled       *bool                               `json:"mcp_disabled,omitempty"`
+	PluginsDisabled   *bool                               `json:"plugins_disabled,omitempty"`
+	AgentsUse         *[]string                           `json:"agents_use,omitempty"`
+	Providers         *[]config.ProviderEntry             `json:"providers,omitempty"`
+}
+
+func cloneBoolPtr(v *bool) *bool {
+	if v == nil {
+		return nil
+	}
+	c := *v
+	return &c
 }
 
 func hostSettingsPatchDoc(in map[string]config.Settings) map[string]hostSettingsPatch {
@@ -57,14 +71,23 @@ func hostSettingsPatchDoc(in map[string]config.Settings) map[string]hostSettings
 			Ecosystems:       cloneEcosystemSettings(settings.Ecosystems),
 			DotsRepo:         settings.DotsRepo,
 			ProviderPriority: append([]string(nil), settings.ProviderPriority...),
-		}
-		if settings.DotsDisabled != nil {
-			dotsDisabled := *settings.DotsDisabled
-			patch.DotsDisabled = &dotsDisabled
+			DotsDisabled:     cloneBoolPtr(settings.DotsDisabled),
+			AgentsDisabled:   cloneBoolPtr(settings.AgentsDisabled),
+			SkillsDisabled:   cloneBoolPtr(settings.SkillsDisabled),
+			McpDisabled:      cloneBoolPtr(settings.McpDisabled),
+			PluginsDisabled:  cloneBoolPtr(settings.PluginsDisabled),
 		}
 		if settings.DisabledProviders != nil {
 			disabledProviders := append([]string{}, settings.DisabledProviders...)
 			patch.DisabledProviders = &disabledProviders
+		}
+		if settings.AgentsUse != nil {
+			agentsUse := append([]string{}, settings.AgentsUse...)
+			patch.AgentsUse = &agentsUse
+		}
+		if settings.Providers != nil {
+			providers := append([]config.ProviderEntry{}, settings.Providers...)
+			patch.Providers = &providers
 		}
 		out[host] = patch
 	}

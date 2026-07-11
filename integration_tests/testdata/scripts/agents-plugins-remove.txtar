@@ -1,0 +1,35 @@
+# agents plugins remove: unregisters a manifest plugin and calls the fake
+# claude CLI to uninstall it. The manifest entry targets claude-code only, so
+# a real codex binary on the host PATH (if any) is never invoked and can't
+# make this test flaky. Covers: successful removal drops the manifest entry
+# and invokes uninstall with the full name@marketplace plus --yes, the
+# marketplace it depended on stays declared, and removing a name not in the
+# manifest is a hard error.
+chmod 0755 $WORK/bin/claude
+env PATH=$WORK/bin:$PATH
+
+exec omni --config settings.json agents plugins remove caveman
+stdout 'removed caveman'
+exec grep -q 'plugins uninstall caveman@lkshrk --yes' .omni-cache/claude-calls.log
+
+exec omni --config settings.json agents plugins restore --dry-run
+! stdout 'caveman'
+
+exec omni --config settings.json agents plugins marketplace list
+stdout 'lkshrk\s+lkshrk/marketplace'
+
+! exec omni --config settings.json agents plugins remove not-in-manifest
+stderr 'not-in-manifest.*not found in manifest'
+
+-- settings.json --
+{"agents":{"marketplaces":[{"name":"lkshrk","source":"lkshrk/marketplace"}],"plugins":[{"name":"caveman","marketplace":"lkshrk","agents":["claude-code"]}]}}
+
+-- bin/claude --
+#!/bin/sh
+set -eu
+mkdir -p "${OMNI_CACHE_DIR}"
+echo "$*" >> "${OMNI_CACHE_DIR}/claude-calls.log"
+if [ "$1" = "plugins" ] && [ "$2" = "uninstall" ]; then
+  exit 0
+fi
+exit 1

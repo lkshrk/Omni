@@ -41,12 +41,22 @@ type StartupSnapshot struct {
 	DotsWatchServiceErr    error
 	DotsConfigured         bool
 	AgentsEnabled          bool
+	AgentsSummary          DashboardAgentsSummary
+	SkillsEnabled          bool
+	McpEnabled             bool
+	PluginsEnabled         bool
 	DotsSyncAvailability   DotsSyncAvailability
 	DotsHistory            []DotsHistoryEntry
 	DotsHistoryErr         error
 	DotsState              *DotsState
 	SetupProviders         []SetupProviderOption
 	EcosystemProviderNames []string
+	NvmManaged             map[string]bool
+	EnabledAgents          []string
+	// AgentsIgnore is the raw manifest struct rather than three separate sorted
+	// []string fields: the TUI derives lookup sets itself via AgentsIgnoreSet,
+	// so duplicating the shape here would just be another place to keep in sync.
+	AgentsIgnore config.AgentsIgnore
 }
 
 type ToolScopeState struct {
@@ -91,7 +101,7 @@ func (a *App) StartupSnapshot(ctx context.Context) (*StartupSnapshot, error) {
 	stop()
 
 	stop = profile.Start("app.startup.list_tools")
-	tools, err := a.listToolsFromConfig(ctx, cfg, "", ecosystemProviders)
+	tools, err := a.listToolsFromConfig(ctx, cfg, "", ecosystemProviders, true)
 	stop()
 	if err != nil {
 		return nil, err
@@ -144,6 +154,13 @@ func (a *App) StartupSnapshot(ctx context.Context) (*StartupSnapshot, error) {
 	discovered, _ := a.listDiscoveredFromConfig(ctx, cfg, ecosystemProviders)
 	stop()
 
+	stop = profile.Start("app.startup.agents_summary")
+	agentsSummary, err := a.DashboardAgentsSummary(ctx, cfg)
+	stop()
+	if err != nil {
+		return nil, err
+	}
+
 	stop = profile.Start("app.startup.stow_installed")
 	stowInstalled := a.DotsStowInstalled(ctx)
 	stop()
@@ -182,12 +199,18 @@ func (a *App) StartupSnapshot(ctx context.Context) (*StartupSnapshot, error) {
 		DotsWatchServiceErr:    dotsWatchServiceErr,
 		DotsConfigured:         DotsConfiguredInSettings(settings),
 		AgentsEnabled:          a.AgentsEnabled(cfg),
+		AgentsSummary:          agentsSummary,
+		SkillsEnabled:          !config.BoolVal(settings.SkillsDisabled),
+		McpEnabled:             !config.BoolVal(settings.McpDisabled),
+		PluginsEnabled:         !config.BoolVal(settings.PluginsDisabled),
 		DotsSyncAvailability:   DotsSyncAvailabilityInSettings(settings),
 		DotsHistory:            dotsHistory,
 		DotsHistoryErr:         dotsHistoryErr,
 		DotsState:              dotsState,
 		SetupProviders:         setupProviders,
 		EcosystemProviderNames: ecosystemProviderNames,
+		EnabledAgents:          a.EnabledAgentIDs(cfg),
+		AgentsIgnore:           cfg.Agents.Ignore,
 	}, nil
 }
 
