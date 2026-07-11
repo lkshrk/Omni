@@ -8,6 +8,7 @@ the current machine.
 | Type | Examples | Role |
 | --- | --- | --- |
 | Concrete provider | `brew`, `apt`, `apk`, `dnf`, `pacman`, `zypper`, `bun`, `pnpm`, `npm`, `uv`, `pip` | Actual package manager or registry client. |
+| Script provider | `script` | User-authored shell install/check/uninstall commands. |
 | Bootstrap provider tool | `uv` installed by `brew` | A provider executable managed before dependent tools. |
 
 Tool config stores concrete provider candidates:
@@ -43,6 +44,53 @@ omni tools sync --allow-weak
 | System packages | `apt`, `apk`, `dnf`, `zypper`, `pacman`, `brew` |
 | Node packages | `bun`, `pnpm`, `npm` |
 | Python packages | `uv`, `pip` |
+| Script installs | `script` |
+
+## Script Provider
+
+Use `script` when no OS or ecosystem package manager carries a tool but an
+upstream installer exists (curl/bash, vendor script, or fixed command sequence).
+List it as a fallback candidate after native providers:
+
+```json
+{
+  "tools": {
+    "grok": {
+      "providers": [
+        { "provider": "brew", "package": "grok" },
+        {
+          "provider": "script",
+          "options": {
+            "install": "curl -fsSL https://x.ai/cli/install.sh | bash",
+            "check": "command -v grok || test -x $HOME/.grok/bin/grok",
+            "uninstall": "rm -f $HOME/.grok/bin/grok",
+            "upgrade": "grok update 2>/dev/null || curl -fsSL https://x.ai/cli/install.sh | bash"
+          }
+        }
+      ]
+    }
+  }
+}
+```
+
+| Option | Required | Role |
+| --- | --- | --- |
+| `install` | yes | Shell command Omni runs to install the tool. |
+| `check` or `detect` | one required | `check` is a full shell probe (exit 0 = installed). `detect` is a binary name passed to `command -v`. |
+| `uninstall` | no | Removal command. Omit when uninstall should be unavailable. |
+| `upgrade` | no | Upgrade command. Falls back to `install` when omitted. |
+| `version` | no | Display-only version command for tool rows. |
+
+Routing behavior:
+
+- Omni tries provider candidates in order and skips providers that are not
+  available on the current machine (for example `brew` on Linux).
+- Use `--provider script` with `tools install` or `tools delete` when you need
+  to target the script owner explicitly on hosts where an earlier candidate is
+  also available.
+
+See [Recipes — Grok](recipes.md#grok-homebrew-on-macos-xai-script-on-linux) for
+a full macOS/Linux example.
 
 ## Update Date Metadata
 

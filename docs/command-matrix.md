@@ -89,6 +89,8 @@ Bootstrap flags:
 | `omni tools consolidate <ecosystem> <manager>` | yes | Config, packages, cache | `--dry-run` |
 | `omni tools ignore <name>` | yes | Config | `omni tools list <name>` |
 | `omni tools unignore <name>` | yes | Config | `omni tools list <name>` |
+| `omni tools migrate-nvm [tool...]` | yes | Config | `omni doctor` |
+| `omni tools migrate-nvm --all` | yes | Config | `omni doctor` |
 
 Important flags:
 
@@ -96,7 +98,7 @@ Important flags:
 | --- | --- | --- |
 | `--dry-run` | `sync`, `import`, `consolidate`, `normalize` | Show planned changes without writing config or mutating packages where supported. |
 | `--prune` | `sync` | Remove local installations no longer in config. Cannot be combined with `sync --all`. |
-| `--all` | `sync` | Claim discovered installed tools into config, then install missing configured tools. |
+| `--all` | `sync`, `migrate-nvm` | For sync, claim discovered installed tools into config, then install missing configured tools. For migrate-nvm, migrate every nvm-managed system-provider tool. |
 | `--group` | `install`, `sync`, `import`, `list`, `add` | Target, filter, or assign a reusable group explicitly. |
 | `--force` | `install`, `upgrade`, `reconcile` | For install, skip bootstrap and host assignment checks for an explicit install path. For upgrade and reconcile, bypass update quarantine. |
 | `--allow-weak` | `install`, `sync` | Permit the best weak provider discovery match when no high-confidence match exists. |

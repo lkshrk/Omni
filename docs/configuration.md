@@ -16,7 +16,8 @@ See [State And Files](state-and-files.md) for config path priority, cache path
 priority, environment variables, backups, and disposable cache behavior.
 
 The schema lives in
-[spec/omni.settings.v9.schema.json](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v9.schema.json).
+[spec/omni.settings.v16.schema.json](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v16.schema.json).
+Omni migrates older files to the current version on load.
 
 ## Smallest Valid File
 
@@ -24,7 +25,7 @@ The smallest legal file is:
 
 ```json
 {
-  "version": 9
+  "version": 16
 }
 ```
 
@@ -37,8 +38,8 @@ automatically by Omni config writes.
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v9.schema.json",
-  "version": 9,
+  "$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v16.schema.json",
+  "version": 16,
   "settings": {
     "fallback_bin_dir": "~/.local/share/omni/fallback/bin",
     "provider_priority": ["brew", "apt", "dnf", "zypper", "pacman", "apk", "npm", "pip"]
@@ -140,16 +141,27 @@ Host settings override selected global settings for one machine:
     "workstation": {
       "dots_repo": "~/src/dotfiles",
       "provider_priority": ["apt", "brew", "npm", "pip"],
-      "disabled_providers": ["pip"]
+      "disabled_providers": ["pip"],
+      "agents_disabled": false,
+      "skills_disabled": false,
+      "mcp_disabled": false,
+      "plugins_disabled": false
     }
   }
 }
 ```
 
 Host-specific fields include `provider_priority`, `dots_repo`, `dots_disabled`,
-and `disabled_providers`. Global fields such as `auto_import`,
-`update_quarantine`, `provider_update_quarantine`, and `dots_git` are not host
-overrides.
+`disabled_providers`, `agents_disabled`, `skills_disabled`, `mcp_disabled`, and
+`plugins_disabled`. Global fields such as `auto_import`, `update_quarantine`,
+`provider_update_quarantine`, and `dots_git` are not host overrides.
+
+`agents_disabled`, `skills_disabled`, `mcp_disabled`, and `plugins_disabled`
+are per-host pointer-to-bool fields: absent (`nil`) means enabled by default,
+and only an explicit `true` turns the feature off. `agents_disabled` is the
+master switch for the agent skills/mcp/plugins features — when it disables
+agents for a host, skills, mcp, and plugins are all disabled too regardless of
+their own individual flags.
 
 ## Tool Specs
 
@@ -193,9 +205,10 @@ Fields:
 | Field | Description |
 | --- | --- |
 | `providers` | Ordered concrete provider candidates for this logical tool. |
-| `providers[].provider` | Concrete provider such as `brew`, `apt`, `npm`, or `pip`. |
+| `providers[].provider` | Concrete provider such as `brew`, `apt`, `npm`, `pip`, or `script`. |
 | `providers[].package` | Package name when it differs from the logical name. |
 | `providers[].bin` | Optional binary name when the command differs from the package. |
+| `providers[].options` | Provider-specific options. For `script`, requires `install` plus `check` or `detect`. |
 | `git` | Upstream git repository URL. Brew metadata refresh/import/install and install-from-search may populate GitHub URLs here for later fallback setup. |
 | `quarantine` | Tool-specific update quarantine override. Use `2d`/`48h`, `0`, or `exempt`. |
 | `taps` | Homebrew taps required before install. |
@@ -282,3 +295,24 @@ Dot entries use two similarly named fields:
 
 Ignore state keeps noisy or intentionally unmanaged items out of normal sync
 and refresh flows.
+
+## Agents Ignore
+
+```json
+{
+  "agents": {
+    "ignore": {
+      "skills": ["vercel-labs/agent-skills"],
+      "mcp_servers": ["context7"],
+      "plugins": ["my-plugin"],
+      "marketplaces": ["noisy-marketplace"]
+    }
+  }
+}
+```
+
+`agents.ignore` lists managed skill packages, MCP servers, plugins, and
+marketplaces by name, skipped during restore/sync — the agents equivalent of
+the top-level `ignore` list for tools and dots. Ignored items still render,
+dimmed, under the Ignored section of the Agents tab, and are excluded from the
+dashboard's Agents attention count.

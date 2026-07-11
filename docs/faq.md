@@ -141,7 +141,9 @@ copies the local target into the repo.
 
 Some provider scans can distinguish CLI packages from pure libraries. Omni is a
 tool manager, so non-CLI packages may be kept visible but ignored instead of
-being treated as managed command-line tools.
+being treated as managed command-line tools. Discovery scans also skip non-CLI
+pip packages, so libraries such as `asyncpg` usually appear only as suppressible
+orphans until you ignore them from the Tools tab or add them to `ignore.tools`.
 
 ## How do I make CI or tests deterministic?
 

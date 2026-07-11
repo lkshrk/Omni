@@ -41,6 +41,11 @@ mutability, dry-run support, and safer first steps.
 `bootstrap`, `doctor`, `hosts`, `dots`, `ui`, `settings`, `--version`, `help`, and
 `completion` can run before an active host is configured.
 
+`omni doctor` includes an "Agent features" check covering skills, mcp, and
+plugins. For each feature it reports enabled/disabled state, checks
+runner/agent binary reachability, and reports manifest counts. A feature
+disabled for this host is reported as disabled rather than actively probed.
+
 ## Bootstrap
 
 `omni bootstrap` also has the compatibility alias `omni init`.
@@ -74,6 +79,7 @@ mutability, dry-run support, and safer first steps.
 | `omni tools providers` | List available providers. |
 | `omni tools ignore <name>` | Ignore a logical tool everywhere. |
 | `omni tools unignore <name>` | Stop ignoring a logical tool. |
+| `omni tools migrate-nvm [tool...]` | Move nvm-managed system-provider tools to the node manager. |
 | `omni tools normalize --default-overrides` | Remove redundant default overrides. |
 
 Common tool flags:
@@ -90,10 +96,61 @@ Common tool flags:
 | `--global` | `set` | Write the default logical install spec. |
 | `--dry-run` | `sync`, `import`, `consolidate`, `normalize` | Preview supported changes. |
 | `--prune` | `sync` | Remove local installations no longer in config. Cannot be combined with `sync --all`. |
-| `--all` | `sync`, `upgrade` | Bulk mode for the command. For sync, also claims discovered tools. |
+| `--all` | `sync`, `upgrade`, `migrate-nvm` | Bulk mode. For sync, also claims discovered tools. For migrate-nvm, migrates every nvm-managed system-provider tool. |
 | `--force` | `upgrade`, `reconcile` | Bypass update quarantine for upgrades. |
 | `--from <provider>`, `--to <provider>` | `reinstall` | Move one tool between providers. |
 | `--reinstall-default` | `reinstall` | Reinstall one tool with its configured default provider. |
+
+## Agents Commands
+
+| Command | Description |
+| --- | --- |
+| `omni agents add <source>` | Add and install a skill package (owner/repo or GitHub URL). |
+| `omni agents find <query>` | Search skills.sh for skill packages. |
+| `omni agents skills restore` | Install the manifest skill set onto this host. |
+| `omni agents skills import` | Import CLI/UI-added skills from the lockfile into the manifest. |
+| `omni agents skills update` | Update manifest skills to their latest upstream versions. |
+| `omni agents mcp list` | List managed and unmanaged MCP servers. |
+| `omni agents mcp add` | Add an MCP server to the manifest and install it. |
+| `omni agents mcp remove <name>` | Remove an MCP server from the manifest. |
+| `omni agents mcp restore` | Install the manifest MCP servers onto this host. |
+| `omni agents mcp import [<name>]` | List unmanaged MCP servers, or adopt one into the manifest by name. |
+| `omni agents plugins list` | List managed and unmanaged plugins, with installed version and, for outdated plugins, an arrow to the latest available version (e.g. `1.0.0 → 1.2.0`). |
+| `omni agents plugins add` | Add a plugin to the manifest and install it. |
+| `omni agents plugins remove <name>` | Remove a plugin from the manifest. |
+| `omni agents plugins restore` | Install the manifest plugin set onto this host. |
+| `omni agents plugins import [<name>]` | List unmanaged plugins, or adopt one into the manifest by name. |
+| `omni agents plugins marketplace list` | List declared marketplaces. |
+| `omni agents plugins marketplace add <name>` | Declare a marketplace and add it to targeted agent CLIs. |
+| `omni agents plugins marketplace remove <name>` | Remove a marketplace from the manifest only. |
+
+Agent skills, MCP servers, and plugins are gated by per-host settings:
+`agents_disabled` is the master switch, and `skills_disabled`, `mcp_disabled`,
+and `plugins_disabled` gate each feature individually (see
+[Configuration](configuration.md#host-settings)).
+
+Omni detects installed agent CLIs from binary and config-dir signals. Supported
+agents include Claude Code, Codex, Cursor, and Grok (`grok` on `PATH` with
+`~/.grok`). Grok plugin and MCP restore flows use the Grok CLI adapters when Grok
+is among the enabled agents for the host.
+
+`agents skills restore`, `agents mcp restore`, and `agents plugins restore`
+special-case their own feature flag: if the feature is disabled for this host,
+each command exits `0` and prints a warning instead of erroring:
+
+```text
+warn: skills are disabled for this host, skipping restore
+warn: mcp servers are disabled for this host, skipping restore
+warn: plugins are disabled for this host, skipping restore
+```
+
+All other `agents` subcommands (`add`, `find`, `skills import`, `skills
+update`, `mcp add`/`remove`/`import`, `plugins add`/`remove`/`import`/
+`marketplace *`) error out when their feature is disabled for this host,
+whether disabled individually or via the `agents_disabled` master switch. The
+three `restore` commands also still error when `agents_disabled` (the master
+switch) is what's disabling them — the warn-and-exit-0 behavior applies only
+to their own individual `*_disabled` flag.
 
 ## Trace Commands
 

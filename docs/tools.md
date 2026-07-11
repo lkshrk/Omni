@@ -220,6 +220,42 @@ Ignored tools stay in config but do not participate in normal management. This
 is useful for imported libraries or packages that should not be installed,
 upgraded, or deleted by Omni.
 
+Ignore scopes:
+
+| Scope | Config effect | Typical use |
+| --- | --- | --- |
+| Tool everywhere | `tools.<name>.ignore = true` | Stop managing a configured logical tool on every host. |
+| Per group | group ignore membership | Skip one tool inside a reusable group. |
+| This host | `ignore.tools` entry | Suppress a discovered orphan or noisy package on one machine without creating a logical spec. |
+
+`omni tools ignore` applies the tool-wide flag and requires the logical tool to
+already exist in config. For discovered-only packages, use the Tools tab ignore
+picker (`x`) and choose **this host**, or add the name to `ignore.tools`
+directly.
+
+## NVM-Managed Provider Drift
+
+When nvm owns the Node runtime, JS globals should use the configured node manager
+(`pnpm`, `npm`, or `bun`), not a system provider (`brew`, `apt`, …). Omni's
+doctor reports **nvm-managed binary (configured for system provider)** when the
+active binary resolves through nvm but config still points at a system provider.
+
+Fix from the CLI:
+
+```sh
+omni tools migrate-nvm --all
+omni tools migrate-nvm node pnpm
+omni doctor
+```
+
+`migrate-nvm` rewrites affected tool specs to the configured node manager or
+removes the Node runtime from config when nvm owns it. The Tools tab offers the
+same repair on drift rows (`r` / migrate confirmation). The dashboard Tool Sync
+row can route bulk nvm fixes when doctor reports drift.
+
+See [Recipes — Use Node Via nvm](recipes.md#use-node-via-nvm) and
+[Troubleshooting](troubleshooting.md#node-or-pnpm-still-listed-under-a-system-provider-after-switching-to-nvm).
+
 ## Host Overrides
 
 Use a host override when one machine needs a different install spec:

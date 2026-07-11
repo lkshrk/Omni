@@ -48,10 +48,18 @@ See [Dotfiles](dotfiles.md).
 
 ## Provider
 
-A concrete package manager or registry client in config, such as `brew`,
-`apt`, `npm`, or `pip`.
+A concrete package manager, registry client, or script installer in config,
+such as `brew`, `apt`, `npm`, `pip`, or `script`.
 
 See [Providers](providers.md).
+
+## Script Provider
+
+A provider candidate that runs user-authored shell commands from
+`providers[].options` (`install`, `check`/`detect`, optional `uninstall` and
+`upgrade`). Used when no native package manager carries the tool.
+
+See [Providers — Script Provider](providers.md#script-provider).
 
 ## Effective Package
 

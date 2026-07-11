@@ -74,6 +74,7 @@ nav:
       - Architecture: architecture.md
       - Glossary: glossary.md
   - Operations:
+      - Release Notes: release-notes.md
       - Runbooks: runbooks.md
       - FAQ: faq.md
       - Troubleshooting: troubleshooting.md
