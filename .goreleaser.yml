@@ -61,16 +61,12 @@ homebrew_casks:
       owner: lkshrk
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    directory: Formula
+    directory: Casks
     homepage: https://github.com/lkshrk/omni
     description: Manage all your dev tools from a single JSON config file.
     license: MIT
     dependencies:
-      - name: stow
-    install: |
-      bin.install "omni"
-    test: |
-      system "#{bin}/omni", "--version"
+      - formula: stow
 
 changelog:
   use: git

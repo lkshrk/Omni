@@ -10,6 +10,19 @@ on:
   workflow_dispatch:
 
 jobs:
+  release-config:
+    name: Release Configuration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6.0.3
+
+      - name: Validate GoReleaser configuration
+        uses: goreleaser/goreleaser-action@v7.2.2
+        with:
+          version: '~> v2'
+          args: check
+
   vet:
     name: Go Vet
     runs-on: ubuntu-latest

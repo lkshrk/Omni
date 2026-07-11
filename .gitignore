@@ -1,6 +1,7 @@
 # Build output
 .worktrees/
 bin/
+dist/
 .tmp/
 site/
 
