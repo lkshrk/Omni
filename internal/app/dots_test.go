@@ -372,6 +372,47 @@ func TestDiscoverDotsEntries_AddsGrokAllowlistIgnores(t *testing.T) {
 	}
 }
 
+func TestDiscoverDotsEntries_AddsOmniAllowlistIgnores(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repoDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".config", "omni"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := app.DiscoverDotsEntries(repoDir)
+	if err != nil {
+		t.Fatalf("DiscoverDotsEntries: %v", err)
+	}
+	var omni config.DotEntry
+	for _, entry := range got {
+		if entry.Name == "omni" {
+			omni = entry
+			break
+		}
+	}
+	if omni.Name == "" {
+		t.Fatalf("omni entry not discovered: %#v", got)
+	}
+	if omni.Path != "~/.config/omni" {
+		t.Fatalf("omni path = %q, want ~/.config/omni", omni.Path)
+	}
+	for _, want := range []string{
+		"*",
+		"!/settings.json",
+		"!/settings.d/",
+	} {
+		if !testContainsString(omni.Ignore, want) {
+			t.Fatalf("omni ignore = %v, missing %q", omni.Ignore, want)
+		}
+	}
+	for _, duplicateGlobal := range []string{"*.log", ".DS_Store", "cache"} {
+		if testContainsString(omni.Ignore, duplicateGlobal) {
+			t.Fatalf("omni ignore = %v, should not duplicate global ignore %q", omni.Ignore, duplicateGlobal)
+		}
+	}
+}
+
 func TestDiscoverDotsEntries_ExcludesAgentConfigDirs(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

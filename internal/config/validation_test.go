@@ -196,6 +196,18 @@ func TestValidateRoot_InstallWithRejectedOnProviderEntry(t *testing.T) {
 	}
 }
 
+func TestValidateRoot_AcceptsHostProviderOverride(t *testing.T) {
+	cfg := &config.RootConfig{Tools: map[string]config.ToolSpec{
+		"pnpm": {
+			Providers: []config.ToolInstallSpec{{Provider: "brew"}, {Provider: "bun"}},
+			Hosts:     map[string]config.ToolInstallSpec{"topaz": {Provider: "bun"}},
+		},
+	}}
+	if errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"brew", "bun"}}); len(errs) != 0 {
+		t.Fatalf("host provider override produced errors: %v", errs)
+	}
+}
+
 func TestValidateRoot_ToolFallbackAcceptsGitHubSystemTool(t *testing.T) {
 	cfg := &config.RootConfig{
 		Tools: map[string]config.ToolSpec{

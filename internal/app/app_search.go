@@ -877,11 +877,15 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 				if upsert == nil {
 					continue
 				}
-				upserts = append(upserts, upsert)
-				if metadataUpdate != nil {
-					metadataUpdates = append(metadataUpdates, *metadataUpdate)
+				// A stale cached owner must not block rediscovery on the resolved
+				// route provider or other configured alternates.
+				if upsert.Installed {
+					upserts = append(upserts, upsert)
+					if metadataUpdate != nil {
+						metadataUpdates = append(metadataUpdates, *metadataUpdate)
+					}
+					continue
 				}
-				continue
 			}
 		}
 		if mm, hasMulti := multiMaps[opProvider]; hasMulti && t.InstallWith == "" {
@@ -902,12 +906,18 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 		if m, hasBulk := installedMaps[opProvider]; hasBulk && !(t.InstallWith != "" && opProvider == t.Provider) {
 			// Fast path: bulk map lookup (concrete providers with BulkChecker).
 			ver, installed := provider.LookupString(m, keys)
+			installedWith := concreteForBulk[opProvider]
+			if !installed {
+				if altVer, altInstalled, altWith := a.lookupAlternateConfiguredInstall(cfg, t, keys, multiMaps, installedMaps, concreteForBulk); altInstalled {
+					ver, installed, installedWith = altVer, true, altWith
+				}
+			}
 			upsert := &database.ToolCache{
 				Name:          t.Name,
 				Provider:      t.Provider,
 				Package:       t.EffectivePackage(),
 				Installed:     installed,
-				InstalledWith: concreteForBulk[opProvider],
+				InstalledWith: installedWith,
 				Version:       sql.NullString{String: ver, Valid: ver != ""},
 				LastChecked:   time.Now(),
 			}
@@ -1154,6 +1164,11 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 	}
 	ownerInstalledMaps := make(map[string]map[string]string)
 	ownerMetadataMaps := make(map[string]map[string]provider.InstalledMetadata)
+	lookupMaps := &refreshLookupMaps{
+		installedMaps:   ownerInstalledMaps,
+		metadataMaps:    ownerMetadataMaps,
+		concreteForBulk: make(map[string]string),
+	}
 
 	if mbc, ok := p.(provider.MultiManagerBulkChecker); ok {
 		entries, err := mbc.InstalledByManager(ctx)
@@ -1165,14 +1180,9 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 			keys := toolEntryLookupKeys(t)
 			if owner := cachedOwners[resolvedToolKey(t)]; owner != "" && owner != provName && t.InstallWith == "" {
 				if upsert, metadataUpdate, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, ownerInstalledMaps, ownerMetadataMaps); handled {
-					if upsert == nil {
+					if useCachedOwnerUpsert(upsert, metadataUpdate, &upserts, &metadataUpdates) {
 						continue
 					}
-					upserts = append(upserts, upsert)
-					if metadataUpdate != nil {
-						metadataUpdates = append(metadataUpdates, *metadataUpdate)
-					}
-					continue
 				}
 			}
 			if t.InstallWith != "" && a.operationProviderName(t) == t.Provider {
@@ -1223,29 +1233,25 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 			if installedWith != "" {
 				ownerMetadataMaps[installedWith] = metadata
 				ownerInstalledMaps[installedWith] = m
+				lookupMaps.concreteForBulk[installedWith] = installedWith
 			}
 			for i, t := range provTools {
 				emitTool(i, t)
 				keys := toolEntryLookupKeys(t)
 				if owner := cachedOwners[resolvedToolKey(t)]; owner != "" && owner != provName && t.InstallWith == "" {
 					if upsert, metadataUpdate, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, ownerInstalledMaps, ownerMetadataMaps); handled {
-						if upsert == nil {
+						if useCachedOwnerUpsert(upsert, metadataUpdate, &upserts, &metadataUpdates) {
 							continue
 						}
-						upserts = append(upserts, upsert)
-						if metadataUpdate != nil {
-							metadataUpdates = append(metadataUpdates, *metadataUpdate)
-						}
-						continue
 					}
 				}
-				ver, installed := provider.LookupString(m, keys)
+				ver, installed, resolvedWith := a.resolveInstalledBulkLookup(ctx, cfg, t, keys, m, installedWith, lookupMaps)
 				upsert := &database.ToolCache{
 					Name:          t.Name,
 					Provider:      t.Provider,
 					Package:       t.EffectivePackage(),
 					Installed:     installed,
-					InstalledWith: installedWith,
+					InstalledWith: resolvedWith,
 					Version:       sql.NullString{String: ver, Valid: ver != ""},
 					LastChecked:   time.Now(),
 				}
@@ -1274,29 +1280,25 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 			}
 			if installedWith != "" {
 				ownerInstalledMaps[installedWith] = m
+				lookupMaps.concreteForBulk[installedWith] = installedWith
 			}
 			for i, t := range provTools {
 				emitTool(i, t)
 				keys := toolEntryLookupKeys(t)
 				if owner := cachedOwners[resolvedToolKey(t)]; owner != "" && owner != provName && t.InstallWith == "" {
 					if upsert, metadataUpdate, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, ownerInstalledMaps, ownerMetadataMaps); handled {
-						if upsert == nil {
+						if useCachedOwnerUpsert(upsert, metadataUpdate, &upserts, &metadataUpdates) {
 							continue
 						}
-						upserts = append(upserts, upsert)
-						if metadataUpdate != nil {
-							metadataUpdates = append(metadataUpdates, *metadataUpdate)
-						}
-						continue
 					}
 				}
-				ver, installed := provider.LookupString(m, keys)
+				ver, installed, resolvedWith := a.resolveInstalledBulkLookup(ctx, cfg, t, keys, m, installedWith, lookupMaps)
 				upserts = append(upserts, &database.ToolCache{
 					Name:          t.Name,
 					Provider:      t.Provider,
 					Package:       t.EffectivePackage(),
 					Installed:     installed,
-					InstalledWith: installedWith,
+					InstalledWith: resolvedWith,
 					Version:       sql.NullString{String: ver, Valid: ver != ""},
 					LastChecked:   time.Now(),
 				})
@@ -1314,14 +1316,9 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 		emitTool(i, t)
 		if owner := cachedOwners[resolvedToolKey(t)]; owner != "" && owner != provName && t.InstallWith == "" {
 			if upsert, metadataUpdate, handled := a.refreshWithCachedOwner(ctx, t, toolEntryLookupKeys(t), owner, ownerInstalledMaps, ownerMetadataMaps); handled {
-				if upsert == nil {
+				if useCachedOwnerUpsert(upsert, metadataUpdate, &upserts, &metadataUpdates) {
 					continue
 				}
-				upserts = append(upserts, upsert)
-				if metadataUpdate != nil {
-					metadataUpdates = append(metadataUpdates, *metadataUpdate)
-				}
-				continue
 			}
 		}
 		installed, ver, err := a.isInstalledWithEntry(ctx, p, provName, t)
@@ -1464,6 +1461,11 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 	providers := make([]provider.Provider, 0)
 	stop = profile.Start("app.refresh.discovered.available_providers")
 	for _, p := range a.availableProviders(ctx) {
+		// A global pip environment mixes applications with libraries. It is only
+		// authoritative for explicitly configured tools, never for auto-discovery.
+		if p.Name() == "pip" {
+			continue
+		}
 		if _, off := disabled[p.Name()]; off {
 			continue // provider disabled on this host: do not discover under it
 		}
@@ -1759,10 +1761,160 @@ func (a *App) discoveryProviderScope(ctx context.Context, cfg *config.RootConfig
 	return scope
 }
 
-func discoveryScopeInstallSpecs(spec config.ToolSpec) []config.ToolInstallSpec {
-	if len(spec.Providers) > 0 {
-		return append([]config.ToolInstallSpec(nil), spec.Providers...)
+type refreshLookupMaps struct {
+	multiMaps       map[string]map[string]provider.InstalledEntry
+	installedMaps   map[string]map[string]string
+	metadataMaps    map[string]map[string]provider.InstalledMetadata
+	concreteForBulk map[string]string
+}
+
+func (a *App) ensureProviderBulkSnapshot(ctx context.Context, providerName string, maps *refreshLookupMaps) {
+	if maps == nil || providerName == "" {
+		return
 	}
+	if maps.installedMaps != nil {
+		if _, ok := maps.installedMaps[providerName]; ok {
+			return
+		}
+	}
+	if maps.multiMaps != nil {
+		if _, ok := maps.multiMaps[providerName]; ok {
+			return
+		}
+	}
+	p, ok := a.registry.Get(providerName)
+	if !ok {
+		return
+	}
+	if maps.multiMaps == nil {
+		maps.multiMaps = make(map[string]map[string]provider.InstalledEntry)
+	}
+	if maps.installedMaps == nil {
+		maps.installedMaps = make(map[string]map[string]string)
+	}
+	if maps.metadataMaps == nil {
+		maps.metadataMaps = make(map[string]map[string]provider.InstalledMetadata)
+	}
+	if maps.concreteForBulk == nil {
+		maps.concreteForBulk = make(map[string]string)
+	}
+	if mbc, ok := p.(provider.MultiManagerBulkChecker); ok {
+		if entries, err := mbc.InstalledByManager(ctx); err == nil {
+			maps.multiMaps[providerName] = entries
+		}
+		return
+	}
+	if mbc, ok := p.(provider.MetadataBulkChecker); ok {
+		if metadata, err := mbc.InstalledMetadataMap(ctx); err == nil {
+			maps.metadataMaps[providerName] = metadata
+			maps.installedMaps[providerName] = installedMapFromMetadata(metadata)
+			maps.concreteForBulk[providerName] = resolvedProviderConcreteName(ctx, p)
+		}
+		return
+	}
+	if bc, ok := p.(provider.BulkChecker); ok {
+		if m, err := bc.InstalledMap(ctx); err == nil {
+			maps.installedMaps[providerName] = m
+			maps.concreteForBulk[providerName] = resolvedProviderConcreteName(ctx, p)
+		}
+	}
+}
+
+func (a *App) ensureAlternateProviderBulkSnapshots(ctx context.Context, cfg *config.RootConfig, t config.ToolEntry, maps *refreshLookupMaps) {
+	if cfg == nil {
+		return
+	}
+	spec, ok := cfg.Tools[t.Name]
+	if !ok {
+		return
+	}
+	for _, candidate := range discoveryScopeInstallSpecs(spec) {
+		alt := strings.TrimSpace(candidate.Provider)
+		if alt == "" || alt == t.Provider {
+			continue
+		}
+		a.ensureProviderBulkSnapshot(ctx, alt, maps)
+	}
+}
+
+func (a *App) resolveInstalledBulkLookup(
+	ctx context.Context,
+	cfg *config.RootConfig,
+	t config.ToolEntry,
+	keys []string,
+	routeMap map[string]string,
+	routeInstalledWith string,
+	maps *refreshLookupMaps,
+) (version string, installed bool, installedWith string) {
+	version, installed = provider.LookupString(routeMap, keys)
+	installedWith = routeInstalledWith
+	if installed {
+		return version, true, installedWith
+	}
+	a.ensureAlternateProviderBulkSnapshots(ctx, cfg, t, maps)
+	if altVer, altInstalled, altWith := a.lookupAlternateConfiguredInstall(cfg, t, keys, maps.multiMaps, maps.installedMaps, maps.concreteForBulk); altInstalled {
+		return altVer, true, altWith
+	}
+	return version, false, installedWith
+}
+
+func useCachedOwnerUpsert(upsert *database.ToolCache, metadataUpdate *database.MetadataUpdate, upserts *[]*database.ToolCache, metadataUpdates *[]database.MetadataUpdate) bool {
+	if upsert == nil {
+		return true
+	}
+	if !upsert.Installed {
+		return false
+	}
+	*upserts = append(*upserts, upsert)
+	if metadataUpdate != nil {
+		*metadataUpdates = append(*metadataUpdates, *metadataUpdate)
+	}
+	return true
+}
+
+// lookupAlternateConfiguredInstall checks other configured provider candidates when
+// the resolved route provider does not have the tool installed locally.
+func (a *App) lookupAlternateConfiguredInstall(
+	cfg *config.RootConfig,
+	t config.ToolEntry,
+	keys []string,
+	multiMaps map[string]map[string]provider.InstalledEntry,
+	installedMaps map[string]map[string]string,
+	concreteForBulk map[string]string,
+) (version string, installed bool, installedWith string) {
+	if cfg == nil {
+		return "", false, ""
+	}
+	spec, ok := cfg.Tools[t.Name]
+	if !ok {
+		return "", false, ""
+	}
+	routeProvider := t.Provider
+	for _, candidate := range discoveryScopeInstallSpecs(spec) {
+		alt := strings.TrimSpace(candidate.Provider)
+		if alt == "" || alt == routeProvider {
+			continue
+		}
+		if mm, ok := multiMaps[alt]; ok {
+			entry := provider.LookupInstalledEntry(mm, keys)
+			if entry.ConcreteManager != "" {
+				return entry.Version, true, entry.ConcreteManager
+			}
+		}
+		if m, ok := installedMaps[alt]; ok {
+			if ver, found := provider.LookupString(m, keys); found {
+				with := alt
+				if concrete := concreteForBulk[alt]; concrete != "" {
+					with = concrete
+				}
+				return ver, true, with
+			}
+		}
+	}
+	return "", false, ""
+}
+
+func discoveryScopeInstallSpecs(spec config.ToolSpec) []config.ToolInstallSpec {
 	hostname := currentHostname()
 	if install, ok := spec.Hosts[hostname]; ok {
 		return []config.ToolInstallSpec{install}
@@ -1771,6 +1923,9 @@ func discoveryScopeInstallSpecs(spec config.ToolSpec) []config.ToolInstallSpec {
 		if install, ok := spec.Hosts[short]; ok {
 			return []config.ToolInstallSpec{install}
 		}
+	}
+	if len(spec.Providers) > 0 {
+		return append([]config.ToolInstallSpec(nil), spec.Providers...)
 	}
 	specs := make([]config.ToolInstallSpec, 0, 1+len(spec.Variants))
 	specs = append(specs, spec.DefaultInstallSpec())

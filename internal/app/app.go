@@ -25,6 +25,7 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 	apkpkg "github.com/lkshrk/omni/internal/provider/apk"
 	aptpkg "github.com/lkshrk/omni/internal/provider/apt"
+	"github.com/lkshrk/omni/internal/provider/aptrepo"
 	"github.com/lkshrk/omni/internal/provider/brew"
 	dnfpkg "github.com/lkshrk/omni/internal/provider/dnf"
 	"github.com/lkshrk/omni/internal/provider/node"
@@ -287,6 +288,7 @@ func (a *App) initProviderRegistry(settings config.Settings) {
 	a.registry.RegisterWithMetadata(provider.Named("uv", python.New(exec, "uv")), provider.BuiltinMetadata("uv"))
 	a.registry.RegisterWithMetadata(pip.New(exec), provider.BuiltinMetadata("pip"))
 	a.registry.RegisterWithMetadata(script.New(exec), provider.BuiltinMetadata("script"))
+	a.registry.RegisterWithMetadata(aptrepo.New(exec), provider.BuiltinMetadata("apt_repo"))
 
 	// provider families — skipped when the user has disabled them on this machine.
 	disabledSet := make(map[string]bool, len(settings.DisabledProviders))
@@ -548,6 +550,33 @@ func (a *App) withConfig(fn func(*config.RootConfig) error) error {
 		}
 	}
 	return config.PatchRaw(a.ConfigPath, diff)
+}
+
+// patchToolConfig edits a tool at the file that owns its effective definition.
+// Root settings may include a tools fragment; writing the merged config back to
+// the root would otherwise be overwritten on the next load.
+func (a *App) patchToolConfig(name string, mutate func(*config.ToolSpec) error) error {
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
+
+	cfg, err := a.loadConfig()
+	if err != nil {
+		return err
+	}
+	preview, ok := cfg.Tools[name]
+	if !ok {
+		return fmt.Errorf("logical tool %q not found", name)
+	}
+	if err := mutate(&preview); err != nil {
+		return err
+	}
+	cfg.Tools[name] = preview
+	if a.registry != nil {
+		if errs := fatalValidationErrors(config.ValidateRoot(cfg, a.providerValidation())); len(errs) > 0 {
+			return config.ValidationErrors(errs)
+		}
+	}
+	return config.PatchTool(a.ConfigPath, name, mutate)
 }
 
 func topLevelKeys(cfg *config.RootConfig) (map[string]json.RawMessage, error) {

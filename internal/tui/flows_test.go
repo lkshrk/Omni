@@ -683,8 +683,8 @@ func TestFlow_UC19_PinMigrateProvider(t *testing.T) {
 		}
 	})
 
-	t.Run("r arms reinstall confirmation", func(t *testing.T) {
-		got := drive(m, tea.KeyPressMsg{Code: 'r', Text: "r"})
+	t.Run("i arms reinstall confirmation", func(t *testing.T) {
+		got := drive(m, tea.KeyPressMsg{Code: 'i', Text: "i"})
 		if got.loading {
 			t.Error("loading should stay false before reinstall confirmation")
 		}
@@ -693,13 +693,20 @@ func TestFlow_UC19_PinMigrateProvider(t *testing.T) {
 		}
 	})
 
-	t.Run("second r confirms reinstall with default (sets loading + migrating)", func(t *testing.T) {
-		got := drive(m, tea.KeyPressMsg{Code: 'r', Text: "r"}, tea.KeyPressMsg{Code: 'r', Text: "r"})
+	t.Run("r still arms reinstall confirmation", func(t *testing.T) {
+		got := drive(m, tea.KeyPressMsg{Code: 'r', Text: "r"})
+		if got.listConfirm.action != listConfirmReinstallDefault {
+			t.Fatalf("listConfirm.action = %q, want reinstall-default", got.listConfirm.action)
+		}
+	})
+
+	t.Run("second i confirms reinstall with default (sets loading + migrating)", func(t *testing.T) {
+		got := drive(m, tea.KeyPressMsg{Code: 'i', Text: "i"}, tea.KeyPressMsg{Code: 'i', Text: "i"})
 		if !got.loading {
-			t.Error("loading should be true after confirmed r")
+			t.Error("loading should be true after confirmed i")
 		}
 		if !got.migrating {
-			t.Error("migrating should be true after confirmed r — regression: was never set")
+			t.Error("migrating should be true after confirmed i — regression: was never set")
 		}
 	})
 

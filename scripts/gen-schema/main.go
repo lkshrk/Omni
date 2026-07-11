@@ -93,6 +93,11 @@ func buildWithID(id string) *schema {
 				Description: "JSON Schema reference URI (injected automatically by omni on every write).",
 				Type:        "string",
 			},
+			"$include": {
+				Description: "Additional settings fragments to merge into this file on load. Paths are relative to the directory containing this settings file. Stripped before save.",
+				Type:        "array",
+				Items:       &schema{Type: "string", MinLength: 1},
+			},
 			"version": {
 				Description: "settings.json format version. Missing means legacy unversioned config; omni migrates it to the current version on write.",
 				Type:        "integer",
@@ -461,6 +466,18 @@ func buildWithID(id string) *schema {
 						Type:                 "object",
 						AdditionalProperties: &schema{Type: "string"},
 					},
+					"source": {
+						Description: "Optional structured source metadata for recipe-backed install candidates.",
+						Ref:         "#/$defs/FallbackSource",
+					},
+					"recipe": {
+						Description: "Optional structured install recipe materialized into provider options at resolve time.",
+						Ref:         "#/$defs/FallbackRecipe",
+					},
+					"bin_dir": {
+						Description: "Optional binary directory override for recipe-backed script installs.",
+						Type:        "string",
+					},
 				},
 				AdditionalProperties: false,
 			},
@@ -559,8 +576,13 @@ func buildWithID(id string) *schema {
 					"type": {
 						Description: "Fallback recipe kind.",
 						Type:        "string",
-						Enum:        []any{config.FallbackRecipeGitHubReleaseAsset, config.FallbackRecipeRawCommands},
-						Examples:    []any{config.FallbackRecipeGitHubReleaseAsset},
+						Enum: []any{
+							config.FallbackRecipeGitHubReleaseAsset,
+							config.FallbackRecipeRawCommands,
+							config.FallbackRecipeCurlInstallScript,
+							config.FallbackRecipeAptRepo,
+						},
+						Examples: []any{config.FallbackRecipeGitHubReleaseAsset},
 					},
 					"asset_pattern": {
 						Description: "Release asset match pattern using fallback template variables.",
@@ -575,6 +597,11 @@ func buildWithID(id string) *schema {
 					"checksum": {
 						Description: "Checksum to verify the matched release asset when confidently known.",
 						Type:        "string",
+					},
+					"tag_name": {
+						Description: "Pinned GitHub release tag (e.g. v0.62.2). Omit to use latest.",
+						Type:        "string",
+						Examples:    []any{"v0.62.2"},
 					},
 				},
 				AdditionalProperties: false,

@@ -9,6 +9,7 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/provider"
 	"github.com/lkshrk/omni/internal/text"
 )
 
@@ -319,7 +320,9 @@ func renderList(m Model) string {
 	}
 
 	// Pre-compute column widths then detail lines (detail needs cols for wrap width).
-	cols := newColWidthsWithProviderPins(m.visibleTools, m.toolGroups, visibleGroupNames(m), m.toolProviderPins, m.toolFallbacks, m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager, m.width)
+	cols := newColWidthsWithProviderPins(m.visibleTools, m.toolGroups, visibleGroupNames(m), m.toolProviderPins, m.toolFallbacks, m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager, m.width, func(t *database.ToolCache) bool {
+		return m.syncStatusOf(t) == syncWrongProv
+	})
 	cols = fitToolColumnsForRowErrors(cols, m.visibleTools, m.rowErrors)
 	detail := inlineDetailLines(m, m.width, cols)
 
@@ -429,7 +432,7 @@ type colWidths struct {
 // full pane width.  Short tool names remain short — rows don't pad to the edge.
 // groupNames is the list of reusable group names; when non-empty the group
 // column is always reserved so it does not flicker in/out as filters change.
-func newColWidthsWithProviderPins(tools []*database.ToolCache, toolGroups map[string]string, groupNames []string, providerPins map[string]string, fallbacks map[string]config.FallbackSpec, systemBin, pythonBin, nodeBin string, screenW int) colWidths {
+func newColWidthsWithProviderPins(tools []*database.ToolCache, toolGroups map[string]string, groupNames []string, providerPins map[string]string, fallbacks map[string]config.FallbackSpec, systemBin, pythonBin, nodeBin string, screenW int, wrongProvider func(*database.ToolCache) bool) colWidths {
 	seed := colWidths{name: 20, prov: 8, ver: len("missing"), screenW: screenW}
 
 	// Seed group column width from all known reusable group names so
@@ -444,7 +447,11 @@ func newColWidthsWithProviderPins(tools []*database.ToolCache, toolGroups map[st
 		name: func(i int) string { return nameDisplayText(tools[i]) },
 		prov: func(i int) string {
 			t := tools[i]
-			return providerDisplayTextForToolWithPin(t, providerPinForTool(t, providerPins), fallbackConcreteForTool(t, fallbacks), systemBin, pythonBin, nodeBin)
+			label := providerDisplayTextForToolWithPin(t, providerPinForTool(t, providerPins), fallbackConcreteForTool(t, fallbacks), systemBin, pythonBin, nodeBin)
+			if wrongProvider != nil && wrongProvider(t) && t.InstalledWith != "" && t.InstalledWith != label {
+				label = t.InstalledWith
+			}
+			return label
 		},
 		ver: func(i int) string { return displayVersionText(tools[i]) },
 		group: func(i int) string {
@@ -454,7 +461,15 @@ func newColWidthsWithProviderPins(tools []*database.ToolCache, toolGroups map[st
 			}
 			return ""
 		},
-		priv: func(i int) bool { return toolHasPrivilegeMarker(tools[i], systemBin) },
+		priv: func(i int) bool {
+			if toolHasPrivilegeMarker(tools[i], systemBin) {
+				return true
+			}
+			if wrongProvider != nil && wrongProvider(tools[i]) {
+				return true
+			}
+			return providerPinForTool(tools[i], providerPins) != ""
+		},
 	}
 
 	// Layout: left group [icon name], right group [provider version group].
@@ -542,6 +557,8 @@ func renderToolRowWithProviderPin(p palette, t *database.ToolCache, cols colWidt
 	emphasis := func(s lipgloss.Style) lipgloss.Style {
 		return rowEmphasis(selected, s)
 	}
+	wrongProv := ss == syncWrongProv
+	showMarker := wrongProv || providerPin != ""
 
 	iconGap := strings.Repeat(" ", toolIconNameGapWidth)
 	groupCell := func(s lipgloss.Style) []rowCell {
@@ -562,7 +579,13 @@ func renderToolRowWithProviderPin(p palette, t *database.ToolCache, cols colWidt
 		ignoredStyle := emphasis(p.styleIgnored)
 		icon := ignoredStyle.Render(iconIgnored)
 		name := renderNameCell(p, ignoredStyle, t, "", cols.name, selected)
-		priv := renderPrivilegeCol(privileged, cols.priv, ignoredStyle)
+		mark := ""
+		if privileged {
+			mark = iconPrivileged
+		} else if showMarker {
+			mark = providerWrongGlyph
+		}
+		priv := renderPrivilegeCol(mark, cols.priv, ignoredStyle)
 		provText := fitCellText(label, cols.prov)
 		provPadding := strings.Repeat(" ", max(0, cols.prov-lipgloss.Width(provText)))
 		prov := ignoredStyle.Render(provText) + provPadding
@@ -577,7 +600,7 @@ func renderToolRowWithProviderPin(p palette, t *database.ToolCache, cols colWidt
 			ver = ignoredStyle.Render("ignored")
 		}
 		left := []rowCell{leftCell(icon+iconGap+name, 0)}
-		right := privilegeProviderCells(priv, cols.priv, prov, cols.prov)
+		right := privilegeProviderCells(priv, cols.priv, prov, cols.prov, toolPrivilegeProviderGap)
 		right = append(right, rightCell(ver, cols.ver))
 		right = append(right, groupCell(ignoredStyle)...)
 		return split(left, right)
@@ -608,13 +631,24 @@ func renderToolRowWithProviderPin(p palette, t *database.ToolCache, cols colWidt
 		nameStyle = nameStyle.Bold(true)
 	}
 	name := renderNameCell(p, nameStyle, t, rowErr, cols.name, selected)
-	priv := renderPrivilegeCol(privileged, cols.priv, emphasis(p.styleHelp))
+	mark := ""
+	if privileged {
+		mark = iconPrivileged
+	} else if showMarker {
+		mark = providerWrongGlyph
+	}
+	markStyle := emphasis(p.styleHelp)
+	if showMarker {
+		markStyle = emphasis(p.styleWrongProv)
+	}
+	priv := renderPrivilegeCol(mark, cols.priv, markStyle)
 	displayInstalledWith := t.InstalledWith
 	displayProvider := providerForFallbackDisplay(t.Provider, fallbackConcrete)
 	if fallbackConcrete != "" {
 		displayInstalledWith = fallbackConcrete
 	}
-	prov := renderProviderColWithExplicit(p, displayProvider, displayInstalledWith, providerPin, provSystemBin, provPythonBin, provNodeBin, label, cols.prov, selected, isProviderRepairSync(ss))
+	plainLabel := label
+	prov := renderProviderColWithExplicit(p, displayProvider, displayInstalledWith, providerPin, provSystemBin, provPythonBin, provNodeBin, plainLabel, cols.prov, selected, showMarker)
 
 	var ver string
 	switch {
@@ -629,7 +663,7 @@ func renderToolRowWithProviderPin(p palette, t *database.ToolCache, cols colWidt
 	}
 
 	left := []rowCell{leftCell(icon+iconGap+name, 0)}
-	right := privilegeProviderCells(priv, cols.priv, prov, cols.prov)
+	right := privilegeProviderCells(priv, cols.priv, prov, cols.prov, toolPrivilegeProviderGap)
 	right = append(right, rightCell(ver, cols.ver))
 	right = append(right, groupCell(emphasis(p.styleHelp))...)
 	return split(left, right)
@@ -798,32 +832,35 @@ func stripANSIEscapeSequences(s string) string {
 	return b.String()
 }
 
-func renderPrivilegeCol(privileged bool, colW int, style lipgloss.Style) string {
+func renderPrivilegeCol(mark string, colW int, style lipgloss.Style) string {
 	if colW <= 0 {
 		return ""
 	}
-	if !privileged {
+	if mark == "" {
 		return strings.Repeat(" ", colW)
 	}
-	return style.Render(fitCellText(iconPrivileged, colW))
+	return style.Render(fitCellText(mark, colW))
 }
 
-func privilegeProviderCells(priv string, privW int, provider string, providerW int) []rowCell {
+func privilegeProviderCells(priv string, privW int, provider string, providerW int, gap int) []rowCell {
 	if privW <= 0 {
 		return []rowCell{rightCell(provider, providerW)}
 	}
+	if gap < 0 {
+		gap = 0
+	}
 	combined := renderCell(rightCell(priv, privW)) +
-		strings.Repeat(" ", toolPrivilegeProviderGap) +
+		strings.Repeat(" ", gap) +
 		renderCell(rightCell(provider, providerW))
-	return []rowCell{rightCell(combined, privW+toolPrivilegeProviderGap+providerW)}
+	return []rowCell{rightCell(combined, privW+gap+providerW)}
 }
 
 // renderProviderCol renders the provider column with per-part styling.
 // Meta part (system/python/node) uses normal text colour for all families.
-// Concrete part: italic+muted when it follows the default manager setting;
-// explicit per-tool overrides get a ! suffix, and wrong-provider rows are
-// highlighted with the warning style.
-// plainLabel must be the output of providerLabelForToolWithPin() so the padding is correct.
+// Concrete part uses the resolved manager label.
+// The wrong-provider glyph (if any) is placed in the priv/mark column before
+// the provider name (just like the lock icon) so names align vertically.
+// plainLabel is the clean label.
 func renderProviderColWithExplicit(p palette, raw, installedWith, explicitWith, systemBin, pythonBin, nodeBin, plainLabel string, colW int, selected, wrongProvider bool) string {
 	meta, concrete, _ := providerPartsWithExplicit(raw, installedWith, explicitWith, systemBin, pythonBin, nodeBin)
 
@@ -833,19 +870,22 @@ func renderProviderColWithExplicit(p palette, raw, installedWith, explicitWith, 
 	padding := strings.Repeat(" ", max(0, colW-plainW))
 
 	// Show the concrete package manager when resolved; fall back to the ecosystem
-	// name (muted) only for unresolved tools. No meta(concrete) wrapper, no "!".
+	// name (muted) only for unresolved tools. Wrong-provider concrete tools
+	// (brew route, bun install) surface the actual install source.
 	label := concrete
 	style := providerMetaStyle(p, meta)
 	if concrete == "" {
 		label = meta
-	} else if wrongProvider {
-		style = p.styleWrongProv
+	}
+	if wrongProvider && installedWith != "" && installedWith != label {
+		label = installedWith
 	}
 	if selected {
 		style = style.Bold(true)
 	}
 	if plainW > colW {
-		return style.Render(fitCellText(label, labelW))
+		fitted := fitCellText(label, labelW)
+		return style.Render(fitted) + padding
 	}
 	return style.Render(label) + padding
 }
@@ -891,7 +931,7 @@ func providerLabelForToolWithPin(t *database.ToolCache, providerPin, fallbackCon
 	if fallbackConcrete != "" {
 		installedWith = fallbackConcrete
 	}
-	return app.ToolProviderDisplayLabel(app.ToolProviderDisplayInput{
+	label := app.ToolProviderDisplayLabel(app.ToolProviderDisplayInput{
 		Provider:               providerName,
 		InstalledWith:          installedWith,
 		ExplicitProvider:       providerPin,
@@ -899,6 +939,11 @@ func providerLabelForToolWithPin(t *database.ToolCache, providerPin, fallbackCon
 		EffectivePythonManager: pythonBin,
 		EffectiveNodeManager:   nodeBin,
 	})
+	if providerPin == "" && installedWith != "" && installedWith != label && installedWith != providerName &&
+		!provider.BuiltinIsEcosystem(providerName) {
+		return installedWith
+	}
+	return label
 }
 
 func providerForFallbackDisplay(providerName, fallbackConcrete string) string {
@@ -1048,7 +1093,7 @@ func providerMismatchDetailLine(m Model, t *database.ToolCache, prefix string) s
 	if t == nil || m.syncStatusOf(t) != syncWrongProv || t.InstalledWith == "" {
 		return ""
 	}
-	desired, source := desiredConcreteProviderForTool(m, t)
+	desired, source := app.ExpectedConcreteProviderForTool(t, toolClassificationContext(m, t))
 	if desired == "" || desired == t.InstalledWith {
 		return ""
 	}
@@ -1086,10 +1131,6 @@ func providerCandidateDetailLines(m Model, t *database.ToolCache, prefix string,
 		}
 	}
 	return lines
-}
-
-func desiredConcreteProviderForTool(m Model, t *database.ToolCache) (string, string) {
-	return app.DesiredConcreteProviderForTool(t, toolClassificationContext(m, t))
 }
 
 func rowActionErrorAdviceLines(m Model, t *database.ToolCache, prefix string, wrapWidth int) []string {
@@ -1166,7 +1207,7 @@ func listConfirmationHintsLine(m Model, t *database.ToolCache, prefix string) st
 		return renderConfirmActionHints(m, prefix, m.keys.Delete, actions.MustTUIConfirmDescription(actions.ToolDelete))
 	case listConfirmReinstallDefault:
 		confirm := actions.MustTUIConfirmDescription(actions.ToolReinstallDefault)
-		return renderConfirmActionHints(m, prefix, m.keys.MigrateProvider, confirm)
+		return renderConfirmActionHints(m, prefix, m.keys.Install, confirm)
 	case listConfirmMigrateNvm:
 		confirm := "move off " + c.provider + " to " + m.effectiveNodeManagerLabel()
 		return renderConfirmActionHints(m, prefix, m.keys.MigrateProvider, confirm)

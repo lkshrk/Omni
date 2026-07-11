@@ -179,7 +179,7 @@ func renderToolsRowForTest(t *testing.T, f parityFixture) parityRow {
 	if f.group != "" {
 		groupNames = []string{f.group}
 	}
-	cols := newColWidthsWithProviderPins([]*database.ToolCache{tool}, groups, groupNames, nil, nil, "", "", "", parityWidth)
+	cols := newColWidthsWithProviderPins([]*database.ToolCache{tool}, groups, groupNames, nil, nil, "", "", "", parityWidth, nil)
 
 	m := baseModel([]*database.ToolCache{tool})
 	m.palette = pal

@@ -3395,7 +3395,7 @@ func TestRenderHelpPopup_ToolsSectionsUseCompactDescriptions(t *testing.T) {
 		"Bulk",
 		"Navigation",
 		"add to config",
-		"reinstall with default",
+		"reinstall",
 		"add discovered and install missing",
 		"[],{}",
 		"wrong provider",
@@ -3695,12 +3695,19 @@ func TestInlineDetailLines_WrongProviderShowsActualAndExpected(t *testing.T) {
 	m.toolProviderPins = map[string]string{"typescript": "npm"}
 	m.applyFilter()
 
-	cols := newColWidthsWithProviderPins(m.visibleTools, nil, nil, m.toolProviderPins, nil, "", "", m.effectiveNodeManager, 100)
+	cols := newColWidthsWithProviderPins(m.visibleTools, nil, nil, m.toolProviderPins, nil, "", "", m.effectiveNodeManager, 100, nil)
 	lines := inlineDetailLines(m, 100, cols)
 	got := stripANSIEscapeSequences(strings.Join(lines, "\n"))
 	want := "wrong provider: installed with bun, expected configured npm"
 	if !strings.Contains(got, want) {
 		t.Fatalf("inline detail = %q, want %q", got, want)
+	}
+	installKey := m.keys.Install.Help().Key
+	if strings.Contains(got, "press "+installKey+" to reinstall") {
+		t.Fatalf("inline detail = %q, duplicate reinstall hint should be gone", got)
+	}
+	if !strings.Contains(got, installKey+" reinstall") {
+		t.Fatalf("inline detail = %q, want single reinstall hint with key %q", got, installKey)
 	}
 }
 
@@ -3715,7 +3722,7 @@ func TestInlineDetailLines_ConfiguredProviderCandidates(t *testing.T) {
 	}
 	m.applyFilter()
 
-	cols := newColWidthsWithProviderPins(m.visibleTools, nil, nil, m.toolProviderPins, nil, "", "", "", 120)
+	cols := newColWidthsWithProviderPins(m.visibleTools, nil, nil, m.toolProviderPins, nil, "", "", "", 120, nil)
 	lines := inlineDetailLines(m, 120, cols)
 	got := stripANSIEscapeSequences(strings.Join(lines, "\n"))
 	for _, want := range []string{"available providers", "npm/prettier", "brew/prettier"} {
@@ -3751,7 +3758,7 @@ func TestInlineDetailLines_ConfiguredProviderCandidatesHiddenWhenNotActionable(t
 			m.toolProviderCandidates = map[string][]config.ToolInstallSpec{"prettier": tc.candidates}
 			m.applyFilter()
 
-			cols := newColWidthsWithProviderPins(m.visibleTools, nil, nil, m.toolProviderPins, nil, "", "", "", 120)
+			cols := newColWidthsWithProviderPins(m.visibleTools, nil, nil, m.toolProviderPins, nil, "", "", "", 120, nil)
 			lines := inlineDetailLines(m, 120, cols)
 			got := stripANSIEscapeSequences(strings.Join(lines, "\n"))
 			if strings.Contains(got, "available providers") {
@@ -4254,7 +4261,7 @@ func TestNewColWidths_BasicTools(t *testing.T) {
 		{Name: "git", Provider: "brew"},
 		{Name: "a-very-long-tool-name", Provider: "npm"},
 	}
-	cols := newColWidthsWithProviderPins(tools, nil, nil, nil, nil, "", "", "", 120)
+	cols := newColWidthsWithProviderPins(tools, nil, nil, nil, nil, "", "", "", 120, nil)
 	if cols.name < len("a-very-long-tool-name") {
 		t.Errorf("name column %d should be >= longest tool name (%d)", cols.name, len("a-very-long-tool-name"))
 	}
@@ -4270,7 +4277,7 @@ func TestNewColWidths_WithGroups(t *testing.T) {
 	groups := []string{"dev"}
 	cols := newColWidthsWithProviderPins(tools, map[string]string{
 		toolKey("git", "brew"): "dev",
-	}, groups, nil, nil, "", "", "", 120)
+	}, groups, nil, nil, "", "", "", 120, nil)
 	if cols.group == 0 {
 		t.Error("expected non-zero group column width when groups exist")
 	}
@@ -4282,14 +4289,14 @@ func TestNewColWidths_IgnoreLabelsDoNotInflateGroupColumn(t *testing.T) {
 	}
 	cols := newColWidthsWithProviderPins(tools, map[string]string{
 		toolKey("git", "brew"): "dev",
-	}, []string{"dev"}, nil, nil, "", "", "", 120)
+	}, []string{"dev"}, nil, nil, "", "", "", 120, nil)
 	if cols.group != len("[dev]") {
 		t.Fatalf("group column = %d, want %d; ignore details belong in selected-row detail, not the group column", cols.group, len("[dev]"))
 	}
 }
 
 func TestNewColWidths_NoTools(t *testing.T) {
-	cols := newColWidthsWithProviderPins(nil, nil, nil, nil, nil, "", "", "", 120)
+	cols := newColWidthsWithProviderPins(nil, nil, nil, nil, nil, "", "", "", 120, nil)
 	if cols.name < 20 {
 		t.Errorf("name column %d should be >= floor of 20", cols.name)
 	}
@@ -4300,7 +4307,7 @@ func TestNewColWidths_UsesCompactVersionWidth(t *testing.T) {
 	tool.Version.Valid = true
 	tool.Version.String = "2.40.0, abc1234567890"
 
-	cols := newColWidthsWithProviderPins([]*database.ToolCache{tool}, nil, nil, nil, nil, "", "", "", 80)
+	cols := newColWidthsWithProviderPins([]*database.ToolCache{tool}, nil, nil, nil, nil, "", "", "", 80, nil)
 	wantName := 20
 	if cols.name != wantName {
 		t.Errorf("name column = %d, want %d with split row width", cols.name, wantName)
@@ -4707,7 +4714,7 @@ func TestRenderToolRow_LongUpgradeVersionDoesNotPushGroupBadge(t *testing.T) {
 	tool.LatestVersion.Valid = true
 	tool.LatestVersion.String = "5.9.0-next.20260501+very-long-build-metadata"
 	screenW := 80
-	cols := newColWidthsWithProviderPins([]*database.ToolCache{tool}, map[string]string{toolKey("typescript", "node"): "dev"}, []string{"dev"}, nil, nil, "", "", "pnpm", screenW)
+	cols := newColWidthsWithProviderPins([]*database.ToolCache{tool}, map[string]string{toolKey("typescript", "node"): "dev"}, []string{"dev"}, nil, nil, "", "", "pnpm", screenW, nil)
 
 	out := screenEdgeInset() + renderToolRowWithProviderPin(p, tool, cols, "", "dev", "", "", "", "", "pnpm", false, false, syncOK)
 	if got := lipgloss.Width(out); got > screenContentWidth(screenW) {
@@ -5318,6 +5325,42 @@ func TestRenderProviderCol_Selected(t *testing.T) {
 	}
 }
 
+func TestRenderToolRow_ConcreteWrongProviderShowsInstalledWithMarker(t *testing.T) {
+	tool := &database.ToolCache{
+		Name: "pnpm", Provider: "brew", InstalledWith: "bun",
+		Installed: true, Tracked: true, Version: sql.NullString{String: "11.11.0", Valid: true},
+	}
+	p := defaultPalette()
+	cols := newColWidthsWithProviderPins([]*database.ToolCache{tool}, nil, nil, nil, nil, "", "", "bun", 120, func(t *database.ToolCache) bool {
+		return t != nil && t.Name == tool.Name
+	})
+	out := stripANSIEscapeSequences(renderToolRowWithProviderPin(p, tool, cols, "", "", "", "", "", "", "bun", false, false, syncWrongProv))
+	if !strings.Contains(out, "bun") {
+		t.Fatalf("row = %q, want installed provider bun", out)
+	}
+	if strings.Contains(out, "brew") {
+		t.Fatalf("row = %q, want route provider brew hidden in provider column", out)
+	}
+	if !strings.Contains(out, providerWrongGlyph) {
+		t.Fatalf("row = %q, want wrong-provider glyph %q before provider, got: %q", out, providerWrongGlyph, out)
+	}
+	if !strings.Contains(out, "11.11.0") {
+		t.Fatalf("row = %q, want installed version", out)
+	}
+}
+
+func TestNewColWidths_ProviderPinReservesAlignedMarkerWidth(t *testing.T) {
+	tool := &database.ToolCache{Name: "prettier", Provider: "node", Installed: true, Tracked: true}
+	cols := newColWidthsWithProviderPins([]*database.ToolCache{tool}, nil, nil, map[string]string{"prettier": "bun"}, nil, "", "", "bun", 120, nil)
+	if cols.priv != lipgloss.Width(providerWrongGlyph) {
+		t.Fatalf("priv/mark column = %d, want pin marker width", cols.priv)
+	}
+	out := stripANSIEscapeSequences(renderToolRowWithProviderPin(defaultPalette(), tool, cols, "", "", "bun", "", "", "", "bun", false, false, syncOK))
+	if !strings.Contains(out, providerWrongGlyph+"bun") {
+		t.Fatalf("row = %q, want provider pin prefix without gap", out)
+	}
+}
+
 // ── view_helpers.go ───────────────────────────────────────────────────────────
 
 func TestRenderHRule_NonEmpty(t *testing.T) {
@@ -5539,7 +5582,7 @@ func TestToolInlineHints_OutdatedWrongProviderStartsWithUpgrade(t *testing.T) {
 	want := []string{
 		m.keys.Upgrade.Help().Key,
 		m.keys.PinProvider.Help().Key,
-		m.keys.MigrateProvider.Help().Key,
+		m.keys.Install.Help().Key,
 		m.keys.MoveGroup.Help().Key,
 		m.keys.Ignore.Help().Key,
 		m.keys.Delete.Help().Key,
@@ -5605,6 +5648,49 @@ func TestListConfirmationDetailLine_MissingToolConfirmsDelete(t *testing.T) {
 	out := listConfirmationHintsLine(m, tool, "")
 	if !strings.Contains(out, "confirm delete") {
 		t.Fatalf("confirmation line = %q, want delete wording", out)
+	}
+}
+
+func TestListConfirmationHintsLine_ReinstallUsesInstallKey(t *testing.T) {
+	tool := wrongProvTool()
+	m := wrongProvModel()
+	m.armListConfirmation(listConfirmReinstallDefault, tool)
+
+	out := stripANSIEscapeSequences(listConfirmationHintsLine(m, tool, ""))
+	installKey := m.keys.Install.Help().Key
+	wantPrompt := installKey + " " + actions.ConfirmReinstall
+	if !strings.Contains(out, wantPrompt) {
+		t.Fatalf("confirmation line = %q, want %q", out, wantPrompt)
+	}
+	items := confirmActionItems(m.keys.Install, actions.ConfirmReinstall, m.keys.Back)
+	if items[0].key != installKey {
+		t.Fatalf("confirm action key = %q, want install key %q", items[0].key, installKey)
+	}
+}
+
+func TestToolInlineHints_PinnedMismatchOffersReinstall(t *testing.T) {
+	tool := &database.ToolCache{
+		Name:          "typescript",
+		Provider:      "node",
+		InstalledWith: "bun",
+		Installed:     true,
+		Tracked:       true,
+	}
+	m := baseModel([]*database.ToolCache{tool})
+	m.effectiveNodeManager = "bun"
+	m.toolProviderPins = map[string]string{"typescript": "npm"}
+	m.applyFilter()
+
+	if got := m.syncStatusOf(tool); got != syncWrongProv {
+		t.Fatalf("syncStatusOf = %v, want syncWrongProv", got)
+	}
+
+	hints := toolInlineHints(m, tool)
+	if !hasHint(hints, m.keys.Install.Help().Key, actions.MustTUILabel(actions.ToolReinstallDefault)) {
+		t.Fatalf("hints = %#v, want %q on %q", hints, actions.MustTUILabel(actions.ToolReinstallDefault), m.keys.Install.Help().Key)
+	}
+	if !hasHint(hints, m.keys.PinProvider.Help().Key, "remove override") {
+		t.Fatalf("hints = %#v, want remove override on %q", hints, m.keys.PinProvider.Help().Key)
 	}
 }
 

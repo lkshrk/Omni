@@ -379,6 +379,8 @@ func installRouteUnavailableMessage(name string, route installRoute) string {
 			parts = append(parts, part)
 		case installRouteSkipProviderUnavailable:
 			parts = append(parts, fmt.Sprintf("%s/%s provider unavailable", skip.Install.Provider, pkg))
+		case installRouteSkipProviderDisabled:
+			parts = append(parts, fmt.Sprintf("%s/%s provider disabled on this host", skip.Install.Provider, pkg))
 		default:
 			parts = append(parts, fmt.Sprintf("%s/%s unavailable", skip.Install.Provider, pkg))
 		}

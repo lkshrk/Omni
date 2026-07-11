@@ -584,11 +584,20 @@ func (m *Model) doSetProviderScope(name string, opt scopeOption, t *database.Too
 		if t == nil || t.InstalledWith == "" {
 			return opCompleteMsg{err: fmt.Errorf("provider pin: installed provider is unknown")}
 		}
+		providerName := t.Provider
+		installWith := t.InstalledWith
+		// When pinning a tool whose declared provider is a concrete (e.g. "brew")
+		// but it is currently installed via a different concrete provider (e.g. "bun"),
+		// record the InstalledWith as the provider name for the spec so that the
+		// override is properly written and extracted as a pin.
+		if installWith != "" && installWith != t.Provider && !a.KnownEcosystemProvider(t.Provider) {
+			providerName = installWith
+		}
 		result, err := a.SetToolProviderScopeWithState(ctx, name, app.ToolProviderScopeOptions{
 			Kind:         app.ToolProviderScopeKind(opt.kind),
-			ProviderName: t.Provider,
+			ProviderName: providerName,
 			Package:      t.Package,
-			InstallWith:  t.InstalledWith,
+			InstallWith:  installWith,
 		})
 		if err != nil {
 			return opCompleteMsg{err: fmt.Errorf("pin provider: %w", err)}

@@ -264,6 +264,7 @@ func TestActionCatalogIncludesDurableDomains(t *testing.T) {
 		SettingsProvider,
 		SettingsReset,
 		SettingsResetCache,
+		SettingsMigrateHostOverrides,
 		SetupInit,
 	} {
 		if _, ok := Get(id); !ok {

@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/provider"
@@ -49,6 +51,7 @@ type installRouteSkipReason string
 
 const (
 	installRouteSkipProviderUnavailable installRouteSkipReason = "provider-unavailable"
+	installRouteSkipProviderDisabled    installRouteSkipReason = "provider-disabled"
 	installRouteSkipPackageUnavailable  installRouteSkipReason = "package-unavailable"
 )
 
@@ -162,12 +165,14 @@ func (a *App) resolveInstallSpecWithAvailability(ctx context.Context, logicalNam
 
 func (a *App) planInstallRoute(ctx context.Context, logicalName string, spec config.ToolSpec, availability map[string]bool) installRoute {
 	hostname := currentHostname()
+	settings, _ := a.LoadSettings()
+	fallbackBinDir := strings.TrimSpace(settings.FallbackBinDir)
 	if install, ok := spec.Hosts[hostname]; ok {
-		return installRoute{Kind: installRouteNative, Install: normalizeInstallRouteCandidate(logicalName, spec, install), FallbackConfigured: spec.Fallback != nil}
+		return installRoute{Kind: installRouteNative, Install: a.normalizeInstallRouteCandidate(logicalName, spec, install, fallbackBinDir), FallbackConfigured: spec.Fallback != nil}
 	}
 	if short := shortHostname(hostname); short != hostname {
 		if install, ok := spec.Hosts[short]; ok {
-			return installRoute{Kind: installRouteNative, Install: normalizeInstallRouteCandidate(logicalName, spec, install), FallbackConfigured: spec.Fallback != nil}
+			return installRoute{Kind: installRouteNative, Install: a.normalizeInstallRouteCandidate(logicalName, spec, install, fallbackBinDir), FallbackConfigured: spec.Fallback != nil}
 		}
 	}
 
@@ -176,10 +181,12 @@ func (a *App) planInstallRoute(ctx context.Context, logicalName string, spec con
 	if len(candidates) == 0 {
 		candidates = append([]config.ToolInstallSpec{defaultSpec}, spec.Variants...)
 	}
+	sortInstallCandidatesByPriority(candidates, settings.ProviderPriority)
+	disabled := a.installDisabledProviders()
 	skipped := make([]installRouteSkip, 0, len(candidates))
 	for _, candidate := range candidates {
-		candidate = normalizeInstallRouteCandidate(logicalName, spec, candidate)
-		if usable, skip := a.installCandidateUsableCached(ctx, logicalName, candidate, availability); usable {
+		candidate = a.normalizeInstallRouteCandidate(logicalName, spec, candidate, fallbackBinDir)
+		if usable, skip := a.installCandidateUsableCached(ctx, logicalName, candidate, availability, disabled); usable {
 			return installRoute{Kind: installRouteNative, Install: candidate, Skipped: skipped, FallbackConfigured: spec.Fallback != nil}
 		} else {
 			skipped = append(skipped, skip)
@@ -190,16 +197,44 @@ func (a *App) planInstallRoute(ctx context.Context, logicalName string, spec con
 		if spec.Fallback != nil && allInstallRouteSkipsArePackageUnavailable(skipped, len(candidates)) {
 			kind = installRouteFallbackEligible
 		}
-		return installRoute{Kind: kind, Install: normalizeInstallRouteCandidate(logicalName, spec, candidates[0]), Skipped: skipped, FallbackConfigured: spec.Fallback != nil}
+		return installRoute{Kind: kind, Install: a.normalizeInstallRouteCandidate(logicalName, spec, candidates[0], fallbackBinDir), Skipped: skipped, FallbackConfigured: spec.Fallback != nil}
 	}
-	return installRoute{Kind: installRouteUnavailable, Install: normalizeInstallRouteCandidate(logicalName, spec, defaultSpec), FallbackConfigured: spec.Fallback != nil}
+	return installRoute{Kind: installRouteUnavailable, Install: a.normalizeInstallRouteCandidate(logicalName, spec, defaultSpec, fallbackBinDir), FallbackConfigured: spec.Fallback != nil}
 }
 
-func normalizeInstallRouteCandidate(logicalName string, spec config.ToolSpec, install config.ToolInstallSpec) config.ToolInstallSpec {
+func (a *App) normalizeInstallRouteCandidate(logicalName string, spec config.ToolSpec, install config.ToolInstallSpec, fallbackBinDir string) config.ToolInstallSpec {
 	if install.Package == "" && spec.Package != "" {
 		install.Package = spec.Package
 	}
+	materialized, err := config.MaterializeInstallSpec(logicalName, install, fallbackBinDir)
+	if err == nil {
+		install = materialized
+	}
 	return install
+}
+
+func sortInstallCandidatesByPriority(candidates []config.ToolInstallSpec, priority []string) {
+	if len(priority) == 0 || len(candidates) <= 1 {
+		return
+	}
+	rank := make(map[string]int, len(priority))
+	for i, name := range priority {
+		rank[name] = i
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		ri, oki := rank[candidates[i].Provider]
+		rj, okj := rank[candidates[j].Provider]
+		switch {
+		case oki && okj:
+			return ri < rj
+		case oki:
+			return true
+		case okj:
+			return false
+		default:
+			return false
+		}
+	})
 }
 
 // findConfiguredInstallCandidate searches every install candidate configured
@@ -228,8 +263,10 @@ func (a *App) findConfiguredInstallCandidate(ctx context.Context, logicalName st
 		candidates = append(candidates, spec.DefaultInstallSpec())
 		candidates = append(candidates, spec.Variants...)
 	}
+	settings, _ := a.LoadSettings()
+	fallbackBinDir := strings.TrimSpace(settings.FallbackBinDir)
 	for _, candidate := range candidates {
-		candidate = normalizeInstallRouteCandidate(logicalName, spec, candidate)
+		candidate = a.normalizeInstallRouteCandidate(logicalName, spec, candidate, fallbackBinDir)
 		if a.installSpecMatchesProvider(ctx, candidate, providerName) {
 			return candidate, true
 		}
@@ -264,7 +301,18 @@ func allInstallRouteSkipsAreProviderUnavailable(skipped []installRouteSkip, cand
 	return true
 }
 
-func (a *App) installCandidateUsableCached(ctx context.Context, logicalName string, candidate config.ToolInstallSpec, availability map[string]bool) (bool, installRouteSkip) {
+func (a *App) installDisabledProviders() map[string]bool {
+	settings, err := a.LoadSettings()
+	if err != nil {
+		return nil
+	}
+	return disabledProviderSet(settings.DisabledProviders)
+}
+
+func (a *App) installCandidateUsableCached(ctx context.Context, logicalName string, candidate config.ToolInstallSpec, availability map[string]bool, disabled map[string]bool) (bool, installRouteSkip) {
+	if disabled[candidate.Provider] {
+		return false, installRouteSkip{Install: candidate, Reason: installRouteSkipProviderDisabled}
+	}
 	if !a.providerUsableCached(ctx, candidate.Provider, availability) {
 		return false, installRouteSkip{Install: candidate, Reason: installRouteSkipProviderUnavailable}
 	}

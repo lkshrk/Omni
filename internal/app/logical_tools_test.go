@@ -3,6 +3,8 @@ package app_test
 import (
 	"context"
 	"database/sql"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -206,6 +208,13 @@ func TestSetToolProviderScopeWithStatePersistsHostProviderPin(t *testing.T) {
 	if got := change.ScopeDisplay.ToolProviderPins["prettier"]; got != "bun" {
 		t.Fatalf("provider pins = %v, want prettier pinned to bun", change.ScopeDisplay.ToolProviderPins)
 	}
+	reloaded, err := a.ToolScopeDisplayState(context.Background())
+	if err != nil {
+		t.Fatalf("ToolScopeDisplayState: %v", err)
+	}
+	if got := reloaded.ToolProviderPins["prettier"]; got != "bun" {
+		t.Fatalf("reloaded provider pins = %v, want prettier pinned to bun", reloaded.ToolProviderPins)
+	}
 
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
@@ -217,6 +226,37 @@ func TestSetToolProviderScopeWithStatePersistsHostProviderPin(t *testing.T) {
 	}
 	if hostSpec.Provider != "bun" || hostSpec.Package != "prettier" {
 		t.Fatalf("host override = %+v, want bun/prettier", hostSpec)
+	}
+}
+
+func TestSetToolProviderScopeWithStatePersistsHostPinInInclude(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "desk.local")
+	a, cfgPath := newImportApp(t)
+	fragmentPath := filepath.Join(filepath.Dir(cfgPath), "tools.json")
+	if err := os.WriteFile(fragmentPath, []byte(`{"tools":{"prettier":{"providers":[{"provider":"npm"}]}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgPath, []byte(`{"version":17,"$include":["tools.json"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.SetToolProviderScopeWithState(context.Background(), "prettier", app.ToolProviderScopeOptions{
+		Kind: app.ToolProviderScopeHost, ProviderName: "node", Package: "prettier", InstallWith: "bun",
+	}); err != nil {
+		t.Fatalf("SetToolProviderScopeWithState: %v", err)
+	}
+	reloaded, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reloaded.Tools["prettier"].Hosts["desk"].Provider; got != "bun" {
+		t.Fatalf("host pin = %q, want bun", got)
+	}
+	main, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(main), "prettier") {
+		t.Fatalf("root config gained overridden tool: %s", main)
 	}
 }
 
@@ -241,6 +281,13 @@ func TestSetToolProviderScopeWithStatePersistsToolProviderPin(t *testing.T) {
 	}
 	if got := change.ScopeDisplay.ToolProviderPins["prettier"]; got != "bun" {
 		t.Fatalf("provider pins = %v, want prettier pinned to bun", change.ScopeDisplay.ToolProviderPins)
+	}
+	reloaded, err := a.ToolScopeDisplayState(context.Background())
+	if err != nil {
+		t.Fatalf("ToolScopeDisplayState: %v", err)
+	}
+	if got := reloaded.ToolProviderPins["prettier"]; got != "bun" {
+		t.Fatalf("reloaded provider pins = %v, want prettier pinned to bun", reloaded.ToolProviderPins)
 	}
 
 	cfg, err := config.Load(cfgPath)
@@ -290,6 +337,43 @@ func TestSetToolProviderScopeWithStatePersistsEcosystemProviderPin(t *testing.T)
 	}
 	if _, ok := cfg.Tools["prettier"].Hosts["desk"]; ok {
 		t.Fatalf("host override should not be written for ecosystem scope: %+v", cfg.Tools["prettier"].Hosts)
+	}
+}
+
+func TestClearToolInstallOverrideRemovesHostProviderPin(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "desk.local")
+	a, cfgPath := newImportApp(t)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"prettier": {Providers: []config.ToolInstallSpec{{Provider: "npm"}}},
+		},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	if _, err := a.SetToolProviderScopeWithState(context.Background(), "prettier", app.ToolProviderScopeOptions{
+		Kind:         app.ToolProviderScopeHost,
+		ProviderName: "node",
+		Package:      "prettier",
+		InstallWith:  "bun",
+	}); err != nil {
+		t.Fatalf("SetToolProviderScopeWithState: %v", err)
+	}
+
+	cleared, err := a.ClearToolInstallOverride(context.Background(), "prettier", "bun")
+	if err != nil {
+		t.Fatalf("ClearToolInstallOverride: %v", err)
+	}
+	if cleared.Scope != "host" {
+		t.Fatalf("cleared = %+v, want host scope", cleared)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if hosts := cfg.Tools["prettier"].Hosts; len(hosts) != 0 {
+		t.Fatalf("host overrides = %v, want none after unpin", hosts)
 	}
 }
 

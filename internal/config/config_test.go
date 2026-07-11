@@ -1465,3 +1465,43 @@ func TestGroupMcpServerRef_UnknownRef_IsWarn(t *testing.T) {
 		t.Fatalf("expected Warn=true for unknown mcp_server ref, got Warn=false: %+v", *found)
 	}
 }
+
+func TestExpandGroupAgentRefs_ExpandsShorthandAndDedupes(t *testing.T) {
+	cfg := &config.RootConfig{
+		Agents: config.AgentsConfig{
+			Packages:     []config.SkillPackage{{Source: "vercel-labs/agent-skills"}},
+			McpServers:   []config.McpServer{{Name: "gh", Transport: "stdio", Command: "gh"}},
+			Plugins:      []config.Plugin{{Name: "useful", Marketplace: "lkshrk"}},
+			Marketplaces: []config.Marketplace{{Name: "lkshrk", Source: "https://example.com"}},
+		},
+		Groups: []*config.GroupConfig{{
+			Name:         "work",
+			Skills:       []string{config.AgentRefPackages, "vercel-labs/agent-skills"},
+			McpServers:   []string{config.AgentRefMcpServers},
+			Plugins:      []string{config.AgentRefPlugins},
+			Marketplaces: []string{config.AgentRefMarketplaces},
+		}},
+	}
+	if !config.ExpandGroupAgentRefs(cfg) {
+		t.Fatal("ExpandGroupAgentRefs = false, want true")
+	}
+	group := cfg.Groups[0]
+	if len(group.Skills) != 1 || group.Skills[0] != "vercel-labs/agent-skills" {
+		t.Fatalf("skills = %v, want deduped package source", group.Skills)
+	}
+	if len(group.McpServers) != 1 || group.McpServers[0] != "gh" {
+		t.Fatalf("mcp_servers = %v, want expanded gh", group.McpServers)
+	}
+	if len(group.Plugins) != 1 || group.Plugins[0] != "useful" {
+		t.Fatalf("plugins = %v, want expanded useful", group.Plugins)
+	}
+	if len(group.Marketplaces) != 1 || group.Marketplaces[0] != "lkshrk" {
+		t.Fatalf("marketplaces = %v, want expanded lkshrk", group.Marketplaces)
+	}
+	errs := config.ValidateRoot(cfg, config.ProviderValidation{})
+	for _, err := range errs {
+		if strings.Contains(err.Path, ".skills[") || strings.Contains(err.Path, ".mcp_servers[") {
+			t.Fatalf("unexpected validation error for expanded refs: %v", err)
+		}
+	}
+}

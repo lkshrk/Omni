@@ -610,7 +610,7 @@ func TestModel_ToolsLoadedMsg(t *testing.T) {
 		if len(got.toolProviderCandidates["prettier"]) != 2 {
 			t.Fatalf("toolProviderCandidates = %+v, want prettier candidates", got.toolProviderCandidates)
 		}
-		cols := newColWidthsWithProviderPins(got.visibleTools, nil, nil, got.toolProviderPins, nil, "", "", "", 120)
+		cols := newColWidthsWithProviderPins(got.visibleTools, nil, nil, got.toolProviderPins, nil, "", "", "", 120, nil)
 		detail := stripANSIEscapeSequences(strings.Join(inlineDetailLines(got, 120, cols), "\n"))
 		for _, want := range []string{"available providers", "npm/prettier", "brew/prettier"} {
 			if !strings.Contains(detail, want) {
