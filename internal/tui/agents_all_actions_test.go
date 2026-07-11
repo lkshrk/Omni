@@ -1312,6 +1312,13 @@ func TestDoAgentsUpdateAll_NoOutdatedPlugins_RunsMarketplacesSynchronously(t *te
 	}
 }
 
+func TestDashboardReconcilePlan_IncludesMissingAgents(t *testing.T) {
+	m := agentsAllModel([]app.SkillPackageRow{{Name: "missing", Installed: false}}, nil, nil)
+	if !app.DashboardReconcilePlanHasStep(dashboardReconcilePlanItems(m), app.ReconcileStepSyncAgents) {
+		t.Fatalf("steps = %#v, want sync-agents step", dashboardReconcilePlanItems(m))
+	}
+}
+
 func TestDoAgentsUpdateAll_OutdatedPluginsPresent_MarketplacesNotRunSynchronously(t *testing.T) {
 	m := agentsAllModel(
 		nil, nil,

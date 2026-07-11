@@ -377,7 +377,7 @@ func TestRemoveMarketplace_DeletesManifestEntryOnly(t *testing.T) {
 }
 
 func TestSetPluginAgents_WideningInstallsOnNewlySelectedAdapter(t *testing.T) {
-	claude := &stubPluginAdapter{id: "claude-code", available: true}
+	claude := &stubPluginAdapter{id: "claude-code", available: true, listedPlugins: []app.InstalledPlugin{{Name: "caveman", Marketplace: "caveman"}}}
 	codex := &stubPluginAdapter{id: "codex", available: true}
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
@@ -415,6 +415,21 @@ func TestSetPluginAgents_NarrowingRemovesFromDeselectedAdapterOnly(t *testing.T)
 	cfg := loadPluginTestConfig(t, a)
 	if len(cfg.Agents.Plugins) != 1 || len(cfg.Agents.Plugins[0].Agents) != 1 || cfg.Agents.Plugins[0].Agents[0] != "claude-code" {
 		t.Fatalf("expected manifest Agents narrowed to [claude-code], got %+v", cfg.Agents.Plugins)
+	}
+}
+
+func TestSetPluginAgents_ReconcilesMissingSelectedAdapter(t *testing.T) {
+	claude := &stubPluginAdapter{id: "claude-code", available: true}
+	agents := config.AgentsConfig{
+		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
+		Plugins:      []config.Plugin{{Name: "caveman", Marketplace: "caveman", Agents: []string{"claude-code"}}},
+	}
+	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{claude}))
+	if _, err := a.SetPluginAgents(context.Background(), "caveman", []string{"claude-code"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(claude.installedPlugin) != 1 {
+		t.Fatalf("expected missing selected plugin to be installed, got %d calls", len(claude.installedPlugin))
 	}
 }
 

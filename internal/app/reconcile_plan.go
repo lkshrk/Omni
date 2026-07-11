@@ -18,6 +18,7 @@ const (
 	ReconcileStepCommitDots    DashboardReconcileStepID = "commit-dots"
 	ReconcileStepFixIgnore     DashboardReconcileStepID = "fix-ignore"
 	ReconcileStepFixNvmManaged DashboardReconcileStepID = "fix-nvm-managed"
+	ReconcileStepSyncAgents    DashboardReconcileStepID = "sync-agents"
 )
 
 type DashboardReconcilePlanInput struct {
@@ -25,7 +26,9 @@ type DashboardReconcilePlanInput struct {
 	DiscoveredTools []*database.ToolCache
 	IgnoredTools    map[string]bool
 
-	UpgradeBusy bool
+	UpgradeBusy     bool
+	AgentsOutOfSync int
+	AgentsBusy      bool
 
 	DotsRepo       string
 	DotsConfigured bool
@@ -263,7 +266,7 @@ func dashboardToolSyncIssueName(tool *database.ToolCache, status ToolSyncStatus)
 }
 
 func DashboardReconcilePlan(input DashboardReconcilePlanInput) []DashboardReconcilePlanStep {
-	steps := make([]DashboardReconcilePlanStep, 0, 6)
+	steps := make([]DashboardReconcilePlanStep, 0, 7)
 	if nvm := dashboardNvmManagedCount(input); nvm > 0 {
 		steps = append(steps, DashboardReconcilePlanStep{
 			ID:     ReconcileStepFixNvmManaged,
@@ -283,6 +286,13 @@ func DashboardReconcilePlan(input DashboardReconcilePlanInput) []DashboardReconc
 			ID:     ReconcileStepUpgradeTools,
 			Label:  "Upgrade tools",
 			Detail: textutil.PluralCount(updates, "outdated tool", "outdated tools"),
+		})
+	}
+	if input.AgentsOutOfSync > 0 && !input.AgentsBusy {
+		steps = append(steps, DashboardReconcilePlanStep{
+			ID:     ReconcileStepSyncAgents,
+			Label:  "Sync agents",
+			Detail: textutil.PluralCount(input.AgentsOutOfSync, "missing agent item", "missing agent items"),
 		})
 	}
 	if dashboardDotsConfigured(input) && !input.DotsBusy {

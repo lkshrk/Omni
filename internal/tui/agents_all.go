@@ -610,13 +610,13 @@ func (m *Model) doAgentsSyncAll() []tea.Cmd {
 		}
 		if runMcp {
 			sendProgress(ch, gen, "restoring mcp servers…")
-			_, err := a.RestoreMcpServers(ctx, app.RestoreMcpOptions{})
-			done.mcpErr = err
+			res, err := a.RestoreMcpServers(ctx, app.RestoreMcpOptions{})
+			done.mcpErr = combineMcpErrors(err, res.Errors)
 		}
 		if runPlugins {
 			sendProgress(ch, gen, "restoring plugins…")
-			_, err := a.RestorePlugins(ctx, app.RestorePluginOptions{})
-			done.pluginErr = err
+			res, err := a.RestorePlugins(ctx, app.RestorePluginOptions{})
+			done.pluginErr = combinePluginErrors(err, res.Errors)
 		}
 		return done
 	}

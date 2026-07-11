@@ -226,6 +226,8 @@ func (m *Model) startNextDashboardReconcileStep(cmds *[]tea.Cmd) {
 			m.startToolSyncAllConfirmed(cmds)
 		case dashboardReconcilePlanUpgradeTools:
 			m.startDashboardUpgradeAll(cmds)
+		case dashboardReconcilePlanSyncAgents:
+			*cmds = append(*cmds, m.doAgentsSyncAll()...)
 		case dashboardReconcilePlanSyncDots:
 			m.startDashboardDotsSync(cmds)
 		case dashboardReconcilePlanCommitDots:
@@ -248,6 +250,8 @@ func (m *Model) dashboardReconcileStepActionable(kind dashboardReconcilePlanKind
 		return statusDashboardToolSyncActionable(*m)
 	case dashboardReconcilePlanUpgradeTools:
 		return statusDashboardUpgradeActionable(*m)
+	case dashboardReconcilePlanSyncAgents:
+		return statusDashboardPlanHasStep(*m, app.ReconcileStepSyncAgents)
 	case dashboardReconcilePlanSyncDots:
 		return statusDashboardDotsSyncActionable(*m)
 	case dashboardReconcilePlanCommitDots:

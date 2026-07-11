@@ -228,6 +228,14 @@ func TestDashboardReconcilePlan_PlansActionableToolDotAndIgnoreSteps(t *testing.
 	assertReconcileDetail(t, steps, app.ReconcileStepFixIgnore, "2 ignore patterns need cleanup")
 }
 
+func TestDashboardReconcilePlan_IncludesMissingAgents(t *testing.T) {
+	steps := app.DashboardReconcilePlan(app.DashboardReconcilePlanInput{AgentsOutOfSync: 2})
+	if !app.DashboardReconcilePlanHasStep(steps, app.ReconcileStepSyncAgents) {
+		t.Fatalf("steps = %#v, want sync-agents step", steps)
+	}
+	assertReconcileDetail(t, steps, app.ReconcileStepSyncAgents, "2 missing agent items")
+}
+
 func TestDashboardReconcilePlan_IncludesFixNvmManagedStepFromDoctorDrift(t *testing.T) {
 	steps := app.DashboardReconcilePlan(app.DashboardReconcilePlanInput{
 		Doctor: &app.DoctorResult{
