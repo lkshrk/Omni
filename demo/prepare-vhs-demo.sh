@@ -348,6 +348,127 @@ EOF
 ln -sf pip3 "$root/bin/pip"
 chmod +x "$root/bin/brew" "$root/bin/pnpm" "$root/bin/uv" "$root/bin/pip3"
 
+for agent_bin in claude grok; do
+  ln -sf agent-stub "$root/bin/$agent_bin"
+done
+
+cat > "$root/bin/agent-stub" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+agent="$(basename "$0")"
+args="$*"
+
+case "$agent" in
+claude)
+  case "$args" in
+  "plugins list --json --available")
+    printf '%s\n' '{"installed":[{"id":"caveman@lkshrk","version":"1.0.0","scope":"user","enabled":true}],"available":[{"name":"caveman","marketplaceName":"lkshrk","latestVersion":"2.0.0"}]}'
+    ;;
+  "plugins list --json")
+    printf '%s\n' '[{"id":"caveman@lkshrk","version":"1.0.0","scope":"user","enabled":true}]'
+    ;;
+  "plugins marketplace list --json")
+    printf '%s\n' '[{"name":"lkshrk","source":"github","repo":"lkshrk/agent-marketplace"}]'
+    ;;
+  "mcp list")
+    printf 'grafana: https://mcp.example.com (HTTP) - ✔ Connected\n'
+    ;;
+  *)
+    echo "agent-stub: unsupported claude args: $args" >&2
+    exit 1
+    ;;
+  esac
+  ;;
+grok)
+  case "$args" in
+  "mcp list --json")
+    printf '%s\n' '[{"name":"grafana","url":"https://mcp.example.com/mcp","enabled":true,"scope":"user"}]'
+    ;;
+  "plugin list --json --available")
+    printf '%s\n' '[]'
+    ;;
+  "plugin list --json")
+    printf '%s\n' '[]'
+    ;;
+  "plugin marketplace list --json")
+    printf '%s\n' '[]'
+    ;;
+  *)
+    echo "agent-stub: unsupported grok args: $args" >&2
+    exit 1
+    ;;
+  esac
+  ;;
+*)
+  echo "agent-stub: unknown agent binary: $agent" >&2
+  exit 1
+  ;;
+esac
+EOF
+chmod +x "$root/bin/agent-stub"
+
+mkdir -p \
+  "$root/home/.claude/skills/frontend-design" \
+  "$root/home/.grok/skills/frontend-design" \
+  "$root/home/.agents"
+
+cat > "$root/home/.claude/skills/frontend-design/SKILL.md" <<'EOF'
+---
+name: frontend-design
+description: Opinionated UI craft guidance for agent-generated interfaces and design systems.
+---
+EOF
+
+cat > "$root/home/.grok/skills/frontend-design/SKILL.md" <<'EOF'
+---
+name: frontend-design
+description: Opinionated UI craft guidance for agent-generated interfaces and design systems.
+---
+EOF
+
+cat > "$root/home/.agents/.skill-lock.json" <<'EOF'
+{
+  "version": 3,
+  "skills": {
+    "frontend-design": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/vercel-labs/agent-skills",
+      "ref": "main",
+      "skillPath": "skills/frontend-design",
+      "skillFolderHash": "demo-vhs-lock",
+      "installedAt": "2026-06-01T00:00:00Z",
+      "updatedAt": "2026-06-01T00:00:00Z"
+    }
+  }
+}
+EOF
+
+cat > "$root/home/.claude.json" <<'EOF'
+{
+  "mcpServers": {
+    "grafana": {
+      "type": "http",
+      "url": "https://mcp.example.com"
+    }
+  }
+}
+EOF
+
+mkdir -p "$root/home/.claude/plugins/marketplaces/lkshrk/.claude-plugin"
+cat > "$root/home/.claude/plugins/marketplaces/lkshrk/.claude-plugin/marketplace.json" <<'EOF'
+{
+  "plugins": [
+    {
+      "name": "caveman",
+      "description": "Caveman-style commit messages and token discipline for agent sessions.",
+      "version": "2.0.0"
+    }
+  ]
+}
+EOF
+
 mkdir -p \
   "$root/dotfiles/dotfiles/nvim/.config/nvim" \
   "$root/dotfiles/dotfiles/zsh" \
@@ -355,7 +476,9 @@ mkdir -p \
   "$root/dotfiles/dotfiles/starship/.config" \
   "$root/dotfiles/dotfiles/alacritty/.config/alacritty" \
   "$root/dotfiles/dotfiles/wezterm/.config/wezterm" \
-  "$root/dotfiles/dotfiles/tmux"
+  "$root/dotfiles/dotfiles/tmux" \
+  "$root/dotfiles/dotfiles/grok/.grok" \
+  "$root/dotfiles/dotfiles/agents-skill-lock/.agents"
 
 cat > "$root/dotfiles/dotfiles/nvim/.config/nvim/init.lua" <<'EOF'
 vim.opt.number = true
@@ -396,6 +519,28 @@ cat > "$root/dotfiles/dotfiles/tmux/.tmux.conf" <<'EOF'
 set -g mouse on
 EOF
 
+cat > "$root/dotfiles/dotfiles/grok/.grok/config.toml" <<'EOF'
+default_model = "grok-3"
+EOF
+
+cat > "$root/dotfiles/dotfiles/agents-skill-lock/.agents/.skill-lock.json" <<'EOF'
+{
+  "version": 3,
+  "skills": {
+    "frontend-design": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/vercel-labs/agent-skills",
+      "ref": "main",
+      "skillPath": "skills/frontend-design",
+      "skillFolderHash": "demo-vhs-lock",
+      "installedAt": "2026-06-01T00:00:00Z",
+      "updatedAt": "2026-06-01T00:00:00Z"
+    }
+  }
+}
+EOF
+
 git -C "$root/dotfiles" init -q
 git -C "$root/dotfiles" add .
 git -C "$root/dotfiles" \
@@ -410,13 +555,44 @@ EOF
 
 cat > "$root/settings.json" <<EOF
 {
-  "\$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v9.schema.json",
-  "version": 9,
+  "\$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v16.schema.json",
+  "version": 16,
   "settings": {
     "auto_import": true,
     "provider_priority": ["brew", "pnpm", "bun", "npm", "uv", "pip"],
     "dots_repo": "$root/dotfiles",
     "dots_git": { "auto_commit": false, "auto_push": false }
+  },
+  "agents": {
+    "packages": [
+      {
+        "source": "vercel-labs/agent-skills",
+        "ref": "main",
+        "agents": ["claude-code", "grok"]
+      }
+    ],
+    "mcp_servers": [
+      {
+        "name": "grafana",
+        "transport": "http",
+        "url": "https://mcp.example.com",
+        "agents": ["claude-code", "grok"]
+      }
+    ],
+    "marketplaces": [
+      {
+        "name": "lkshrk",
+        "source": "lkshrk/agent-marketplace",
+        "agents": ["claude-code"]
+      }
+    ],
+    "plugins": [
+      {
+        "name": "caveman",
+        "marketplace": "lkshrk",
+        "agents": ["claude-code"]
+      }
+    ]
   },
   "ignore": {
     "tools": ["zoom"]
@@ -482,9 +658,14 @@ cat > "$root/settings.json" <<EOF
       "name": "dev",
       "description": "Language servers, linters, and test runners",
       "tools": ["eslint", "vitest", "prettier", "ruff", "httpie", "pytest", "pre-commit", "jq", "bat", "fzf", "go", "@aisuite/chub"],
+      "skills": ["vercel-labs/agent-skills"],
+      "mcp_servers": ["grafana"],
+      "plugins": ["caveman"],
+      "marketplaces": ["lkshrk"],
       "dots": [
         { "name": "starship", "path": "~/.config/starship.toml" },
-        { "name": "tmux", "path": "~/.tmux.conf" }
+        { "name": "tmux", "path": "~/.tmux.conf" },
+        { "name": "agents-skill-lock", "path": "~/.agents/.skill-lock.json" }
       ]
     },
     {
@@ -493,7 +674,8 @@ cat > "$root/settings.json" <<EOF
       "tools": ["kubectl", "slack", "parsec", "zoom", "docker", "gh", "awscli", "ansible", "wrangler"],
       "dots": [
         { "name": "wezterm", "path": "~/.config/wezterm" },
-        { "name": "alacritty", "path": "~/.config/alacritty" }
+        { "name": "alacritty", "path": "~/.config/alacritty" },
+        { "name": "grok", "path": "~/.grok" }
       ]
     },
     {
@@ -507,8 +689,8 @@ EOF
 
 cat > "$root/onboarding-settings.json" <<EOF
 {
-  "\$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v9.schema.json",
-  "version": 9,
+  "\$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v16.schema.json",
+  "version": 16,
   "settings": {
     "provider_priority": ["brew", "pnpm", "bun", "npm", "uv", "pip"]
   },
@@ -608,6 +790,45 @@ ON CONFLICT (key) DO UPDATE SET
   value = EXCLUDED.value,
   updated_at = EXCLUDED.updated_at;
 
+INSERT INTO local_state (key, value, updated_at)
+VALUES ('migration.tool_metadata_migrated', '1', CURRENT_TIMESTAMP)
+ON CONFLICT (key) DO UPDATE SET
+  value = EXCLUDED.value,
+  updated_at = EXCLUDED.updated_at;
+
+DELETE FROM tool_metadata;
+INSERT INTO tool_metadata (name, provider, package, description, updated_at)
+VALUES
+  ('ripgrep', 'brew', 'ripgrep', 'fast recursive search', CURRENT_TIMESTAMP),
+  ('git', 'brew', 'git', 'distributed version control', CURRENT_TIMESTAMP),
+  ('fd', 'brew', 'fd', 'friendly find replacement', CURRENT_TIMESTAMP),
+  ('typescript', 'pnpm', 'typescript', 'TypeScript compiler', CURRENT_TIMESTAMP),
+  ('eslint', 'pnpm', 'eslint', 'JavaScript linting', CURRENT_TIMESTAMP),
+  ('vitest', 'pnpm', 'vitest', 'Vite-native test runner', CURRENT_TIMESTAMP),
+  ('prettier', 'npm', 'prettier', 'opinionated code formatter', CURRENT_TIMESTAMP),
+  ('wrangler', 'npm', 'wrangler', 'Cloudflare developer platform CLI', CURRENT_TIMESTAMP),
+  ('@aisuite/chub', 'bun', '@aisuite/chub', 'AI tooling workspace helpers', CURRENT_TIMESTAMP),
+  ('black', 'uv', 'black', 'Python formatter', CURRENT_TIMESTAMP),
+  ('ruff', 'uv', 'ruff', 'Python linter and formatter', CURRENT_TIMESTAMP),
+  ('poetry', 'uv', 'poetry', 'Python packaging and dependency manager', CURRENT_TIMESTAMP),
+  ('ansible', 'uv', 'ansible', 'automation for infrastructure and apps', CURRENT_TIMESTAMP),
+  ('httpie', 'pip', 'httpie', 'friendly HTTP client', CURRENT_TIMESTAMP),
+  ('awscli', 'pip', 'awscli', 'AWS CLI tooling', CURRENT_TIMESTAMP),
+  ('pytest', 'uv', 'pytest', 'Python test runner', CURRENT_TIMESTAMP),
+  ('pre-commit', 'pip', 'pre-commit', 'Git hook manager', CURRENT_TIMESTAMP),
+  ('kubectl', 'brew', 'kubectl', 'Kubernetes CLI', CURRENT_TIMESTAMP),
+  ('slack', 'brew', 'slack', 'team chat', CURRENT_TIMESTAMP),
+  ('parsec', 'brew', 'parsec', 'low-latency remote desktop', CURRENT_TIMESTAMP),
+  ('zoom', 'brew', 'zoom', 'video meetings', CURRENT_TIMESTAMP),
+  ('jq', 'brew', 'jq', 'JSON processor', CURRENT_TIMESTAMP),
+  ('bat', 'brew', 'bat', 'better cat', CURRENT_TIMESTAMP),
+  ('fzf', 'brew', 'fzf', 'fuzzy finder', CURRENT_TIMESTAMP),
+  ('docker', 'brew', 'docker-desktop', 'Docker Desktop', CURRENT_TIMESTAMP),
+  ('gh', 'brew', 'gh', 'GitHub CLI', CURRENT_TIMESTAMP),
+  ('go', 'brew', 'go', 'Go toolchain', CURRENT_TIMESTAMP),
+  ('starship', 'brew', 'starship', 'shell prompt', CURRENT_TIMESTAMP),
+  ('htop', 'brew', 'htop', 'interactive process viewer', CURRENT_TIMESTAMP);
+
 DELETE FROM tool_cache;
 INSERT INTO tool_cache
   (name, provider, package, installed, installed_with, version, outdated, latest_version, description, last_checked, tracked)
@@ -658,7 +879,9 @@ VALUES
    'syncing dotfiles', 'stow -R -d $root/dotfiles/dotfiles -t $root/home nvim zsh git',
    'success', 0, '', ''),
   (datetime('now', '-45 seconds'), datetime('now', '-44 seconds'), 95,
-   'checking fallback pre-commit (uv)', 'uv tool list', 'success', 0, '', '');
+   'checking fallback pre-commit (uv)', 'uv tool list', 'success', 0, '', ''),
+  (datetime('now', '-20 seconds'), datetime('now', '-19 seconds'), 140,
+   'restoring agent skills', 'npx skills add vercel-labs/agent-skills#main -g -y', 'success', 0, '', '');
 SQL
 
 echo "$root"

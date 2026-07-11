@@ -34,77 +34,56 @@ Sleep 1.5s
 
 # ── Cut bootstrap wait + loading ──
 Hide
-Sleep 20s
+Sleep 22s
 
-# ── Dashboard (4s) ── browse health rows
+# ── Dashboard: Tool Updates (default cursor) ──
 Show
-Sleep 500ms
-Type "j"
-Sleep 500ms
-Type "j"
-Sleep 500ms
+Sleep 3s
+
+# ── Dashboard: Tool Sync ──
 Type "j"
 Sleep 2.5s
 
-# ── Tools tab (4s) ── browse down
+# ── Dashboard: Agents attention ──
+Type "j"
+Type "j"
+Sleep 3s
+
+# ── Tools: ripgrep update row with description ──
 Tab
-Sleep 500ms
-Type "j"
-Sleep 500ms
-Type "j"
-Sleep 3s
-
-# ── Command palette popup (4s) ──
-Type ":"
-Sleep 4s
-
-# ── Tools with provider filter (4s) ──
-Escape
-Sleep 200ms
-Type "]"
-Sleep 3.8s
-
-# ── Tools search (4s) ── type "pre" → filters to prettier + pre-commit
-Type "/pre"
-Sleep 3s
-Escape
-Sleep 1s
-
-# ── Dots tab (4s) ── browse entries
-Tab
-Sleep 500ms
-Type "j"
-Sleep 500ms
-Type "j"
-Sleep 3s
-
-# ── Groups tab (4s) ── browse groups
-Tab
-Sleep 500ms
-Type "j"
-Sleep 500ms
-Type "j"
-Sleep 3s
-
-# ── Settings tab (4s) ── browse settings
-Tab
-Sleep 500ms
-Type "j"
-Sleep 500ms
-Type "j"
-Sleep 3s
-
-# ── Done ──
-Hide
-Type "q"
-Sleep 400ms
-Type "q"
-Sleep 400ms
-Type "omni tools upgrade ripgrep --force" Enter
 Sleep 800ms
+Sleep 3s
 
-# ── Command trace log (4s) ──
-Show
-Sleep 400ms
-Type "omni trace list --limit 9" Enter
-Sleep 4s
+# ── Command palette: migrate-nvm ──
+Type ":"
+Sleep 300ms
+Type "mig"
+Sleep 3.5s
+Escape
+Sleep 300ms
+
+# ── Tools search: ripgrep ──
+Type "/rip"
+Sleep 3.5s
+Escape
+Sleep 500ms
+
+# ── Dots: synced entry with hints ──
+Tab
+Sleep 800ms
+Sleep 3s
+
+# ── Agents: plugin update with marketplace description ──
+Tab
+Sleep 1s
+Sleep 3.5s
+
+# ── Agents: MCP chip + grafana transport details ──
+Right
+Sleep 500ms
+Sleep 3.5s
+
+# ── Groups: host assignment details ──
+Tab
+Sleep 800ms
+Sleep 3.5s
