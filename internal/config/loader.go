@@ -183,6 +183,7 @@ func load(path string, normalize bool) (*RootConfig, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
+	MigrateSkillPackages(&cfg)
 	if normalize {
 		Normalize(&cfg)
 	}
@@ -251,6 +252,13 @@ var configMigrations = []configMigration{
 	{from: 6, to: 7, apply: migrateConfigV6ToV7, applyRaw: migrateRawConfigV6ToV7},
 	{from: 7, to: 8, apply: migrateConfigV7ToV8, applyRaw: migrateRawConfigV7ToV8},
 	{from: 8, to: 9, apply: migrateConfigV8ToV9, applyRaw: migrateRawConfigV8ToV9},
+	{from: 9, to: 10, apply: migrateConfigV9ToV10, applyRaw: migrateRawConfigV9ToV10},
+	{from: 10, to: 11, apply: migrateConfigV10ToV11, applyRaw: migrateRawConfigV10ToV11},
+	{from: 11, to: 12, apply: migrateConfigV11ToV12, applyRaw: migrateRawConfigV11ToV12},
+	{from: 12, to: 13, apply: migrateConfigV12ToV13, applyRaw: migrateRawConfigV12ToV13},
+	{from: 13, to: 14, apply: migrateConfigV13ToV14, applyRaw: migrateRawConfigV13ToV14},
+	{from: 14, to: 15, apply: migrateConfigV14ToV15, applyRaw: migrateRawConfigV14ToV15},
+	{from: 15, to: 16, apply: migrateConfigV15ToV16, applyRaw: migrateRawConfigV15ToV16},
 }
 
 func configMigrationFrom(version int) (configMigration, bool) {
@@ -701,6 +709,10 @@ func normalizedCopy(cfg *RootConfig) RootConfig {
 	}
 	out := *cfg
 	out.Settings = cloneSettings(cfg.Settings)
+	out.Agents.Packages = append([]SkillPackage(nil), cfg.Agents.Packages...)
+	for i := range out.Agents.Packages {
+		out.Agents.Packages[i].Agents = append([]string(nil), out.Agents.Packages[i].Agents...)
+	}
 	out.Groups = make([]*GroupConfig, 0, len(cfg.Groups))
 	for _, g := range cfg.Groups {
 		if g == nil {
@@ -711,6 +723,7 @@ func normalizedCopy(cfg *RootConfig) RootConfig {
 		gc.Taps = append([]string(nil), g.Taps...)
 		gc.Tools = append([]ToolEntry(nil), g.Tools...)
 		gc.Dots = append([]DotEntry(nil), g.Dots...)
+		gc.Skills = append([]string(nil), g.Skills...)
 		for i := range gc.Dots {
 			if gc.Dots[i].Hosts != nil {
 				hosts := make(map[string]DotVariant, len(gc.Dots[i].Hosts))
@@ -830,4 +843,72 @@ func cloneInstallSpecMap(in map[string]ToolInstallSpec) map[string]ToolInstallSp
 		out[k] = s
 	}
 	return out
+}
+
+func migrateConfigV9ToV10(cfg *RootConfig) error {
+	cfg.Version = 10
+	return nil
+}
+
+func migrateRawConfigV9ToV10(raw map[string]json.RawMessage) error {
+	raw["version"] = json.RawMessage(`10`)
+	return nil
+}
+
+func migrateConfigV10ToV11(cfg *RootConfig) error {
+	cfg.Version = 11
+	return nil
+}
+
+func migrateRawConfigV10ToV11(raw map[string]json.RawMessage) error {
+	raw["version"] = json.RawMessage(`11`)
+	return nil
+}
+
+func migrateConfigV11ToV12(cfg *RootConfig) error {
+	cfg.Version = 12
+	return nil
+}
+
+func migrateRawConfigV11ToV12(raw map[string]json.RawMessage) error {
+	raw["version"] = json.RawMessage(`12`)
+	return nil
+}
+
+func migrateConfigV12ToV13(cfg *RootConfig) error {
+	cfg.Version = 13
+	return nil
+}
+
+func migrateRawConfigV12ToV13(raw map[string]json.RawMessage) error {
+	raw["version"] = json.RawMessage(`13`)
+	return nil
+}
+
+// migrateConfigV14ToV15 is a no-op data migration: v15 only adds
+// GroupConfig.Marketplaces (a new omitempty field with no prior form to
+// convert), matching how v11->v12 handled the field addition in the same
+// commit that also raised CurrentVersion.
+func migrateConfigV14ToV15(cfg *RootConfig) error {
+	cfg.Version = 15
+	return nil
+}
+
+func migrateRawConfigV14ToV15(raw map[string]json.RawMessage) error {
+	raw["version"] = json.RawMessage(`15`)
+	return nil
+}
+
+// migrateConfigV15ToV16 is a no-op data migration: v16 only adds
+// AgentsIgnore.Marketplaces (a new omitempty field with no prior form to
+// convert), matching how v14->v15 handled the field addition in the same
+// commit that also raised CurrentVersion.
+func migrateConfigV15ToV16(cfg *RootConfig) error {
+	cfg.Version = 16
+	return nil
+}
+
+func migrateRawConfigV15ToV16(raw map[string]json.RawMessage) error {
+	raw["version"] = json.RawMessage(`16`)
+	return nil
 }

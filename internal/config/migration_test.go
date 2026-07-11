@@ -47,6 +47,20 @@ func TestMigrate_UsesRegisteredMigrationChain(t *testing.T) {
 	}
 }
 
+func TestMigrate_V11ConfigReachesCurrentVersion(t *testing.T) {
+	cfg := &RootConfig{Version: 11}
+	migrated, err := Migrate(cfg)
+	if err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	if !migrated {
+		t.Fatal("Migrate migrated = false, want true for v11 config")
+	}
+	if cfg.Version != CurrentVersion {
+		t.Fatalf("version = %d, want %d", cfg.Version, CurrentVersion)
+	}
+}
+
 func TestMigrateRawVersion_UsesRegisteredMigrationChain(t *testing.T) {
 	raw := map[string]json.RawMessage{
 		"settings": json.RawMessage(`{}`),
@@ -128,6 +142,114 @@ func TestMigrateRawV8ToV9_ExpandsFamilyDisabledProviders(t *testing.T) {
 	}
 	if want := []string{"brew", "apt", "apk", "dnf", "pacman", "zypper"}; !equalStrings(hostDP, want) {
 		t.Errorf("host disabled = %v, want %v", hostDP, want)
+	}
+}
+
+func TestMigrateV13ToV14_DropsAgentConfigDots(t *testing.T) {
+	cfg := &RootConfig{
+		Version: 13,
+		Groups: []*GroupConfig{{
+			Name: "base",
+			Dots: []DotEntry{
+				{Name: "claude", Path: "~/.claude"},
+				{Name: "agents-root", Path: "~/.agents"},
+				{Name: "agents-skills", Path: "~/.agents/skills"},
+				{Name: "agents-skills-child", Path: "~/.agents/skills/demo"},
+				{Name: "agents-lock", Path: "~/.agents/.skill-lock.json"},
+				{Name: "ampcfg", Path: "~/.config/agents"},
+				{Name: "claude-settings", Path: "~/.claude/settings.json"},
+				{Name: "claude-agents-skill", Path: "~/.claude/agents/foo.md"},
+				{Name: "zshrc", Path: "~/.zshrc"},
+				{Name: "nvim", Path: "~/.config/nvim"},
+			},
+		}},
+	}
+	if _, err := Migrate(cfg); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	if cfg.Version != CurrentVersion {
+		t.Fatalf("version = %d, want %d", cfg.Version, CurrentVersion)
+	}
+	got := make(map[string]struct{}, len(cfg.Groups[0].Dots))
+	for _, d := range cfg.Groups[0].Dots {
+		got[d.Name] = struct{}{}
+	}
+	for _, dropped := range []string{"claude", "agents-skills", "agents-skills-child", "ampcfg", "claude-settings", "claude-agents-skill"} {
+		if _, ok := got[dropped]; ok {
+			t.Errorf("dot %q still present after migration, want dropped", dropped)
+		}
+	}
+	for _, kept := range []string{"agents-root", "agents-lock", "zshrc", "nvim"} {
+		if _, ok := got[kept]; !ok {
+			t.Errorf("dot %q missing after migration, want kept", kept)
+		}
+	}
+}
+
+func TestMigrateRawV13ToV14_DropsAgentConfigDots(t *testing.T) {
+	raw := map[string]json.RawMessage{
+		"version": json.RawMessage(`13`),
+		"groups": json.RawMessage(`[
+			{
+				"name": "base",
+				"dots": [
+					{"name": "claude", "path": "~/.claude"},
+					{"name": "claude-settings", "path": "~/.claude/settings.json"},
+					{"name": "zshrc", "path": "~/.zshrc"},
+					{"name": "nvim", "path": "~/.config/nvim"}
+				]
+			}
+		]`),
+	}
+	if err := migrateRawConfigV13ToV14(raw); err != nil {
+		t.Fatalf("migrateRawConfigV13ToV14: %v", err)
+	}
+	var groups []struct {
+		Name string     `json:"name"`
+		Dots []DotEntry `json:"dots"`
+	}
+	if err := json.Unmarshal(raw["groups"], &groups); err != nil {
+		t.Fatalf("parse groups: %v", err)
+	}
+	if len(groups) != 1 {
+		t.Fatalf("groups = %d, want 1", len(groups))
+	}
+	got := make(map[string]struct{}, len(groups[0].Dots))
+	for _, d := range groups[0].Dots {
+		got[d.Name] = struct{}{}
+	}
+	if _, ok := got["claude"]; ok {
+		t.Error("dot \"claude\" still present after raw migration, want dropped")
+	}
+	if _, ok := got["claude-settings"]; ok {
+		t.Error("dot \"claude-settings\" still present after raw migration, want dropped")
+	}
+	if _, ok := got["zshrc"]; !ok {
+		t.Error("dot \"zshrc\" missing after raw migration, want kept")
+	}
+	if _, ok := got["nvim"]; !ok {
+		t.Error("dot \"nvim\" missing after raw migration, want kept")
+	}
+}
+
+func TestIsAgentConfigDotPath_AgentsDirTruthTable(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{name: "agents root dir itself is trackable", path: "~/.agents", want: false},
+		{name: "agents skills subtree is machine-managed", path: "~/.agents/skills", want: true},
+		{name: "agents skills subtree child is machine-managed", path: "~/.agents/skills/demo/SKILL.md", want: true},
+		{name: "agents skill-lock file is trackable", path: "~/.agents/.skill-lock.json", want: false},
+		{name: "other file directly under agents is trackable", path: "~/.agents/README.md", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isAgentConfigDotPath(tc.path); got != tc.want {
+				t.Errorf("isAgentConfigDotPath(%q) = %v, want %v", tc.path, got, tc.want)
+			}
+		})
 	}
 }
 

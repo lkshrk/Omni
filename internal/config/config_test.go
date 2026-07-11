@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -563,58 +564,6 @@ func TestRoundTrip(t *testing.T) {
 	}
 }
 
-// ─── Validate ─────────────────────────────────────────────────────────────────
-
-func TestValidate_Valid(t *testing.T) {
-	cfg := &config.Config{
-		Tools: []config.ToolEntry{
-			{Name: "ripgrep", Provider: "brew"},
-			{Name: "black", Provider: "pip"},
-		},
-	}
-	errs := config.Validate(cfg, []string{"brew", "pip", "node"})
-	if len(errs) != 0 {
-		t.Errorf("expected no errors, got %v", errs)
-	}
-}
-
-func TestValidate_DuplicateToolName(t *testing.T) {
-	cfg := &config.Config{
-		Tools: []config.ToolEntry{
-			{Name: "ripgrep", Provider: "brew"},
-			{Name: "ripgrep", Provider: "brew"},
-		},
-	}
-	errs := config.Validate(cfg, nil)
-	if len(errs) == 0 {
-		t.Fatal("expected duplicate error")
-	}
-}
-
-func TestValidate_UnknownProvider(t *testing.T) {
-	cfg := &config.Config{
-		Tools: []config.ToolEntry{
-			{Name: "something", Provider: "cargo"},
-		},
-	}
-	errs := config.Validate(cfg, []string{"brew", "node", "pip"})
-	if len(errs) == 0 {
-		t.Fatal("expected unknown provider error")
-	}
-}
-
-func TestValidate_MissingName(t *testing.T) {
-	cfg := &config.Config{
-		Tools: []config.ToolEntry{
-			{Name: "", Provider: "brew"},
-		},
-	}
-	errs := config.Validate(cfg, nil)
-	if len(errs) == 0 {
-		t.Fatal("expected missing name error")
-	}
-}
-
 // ─── EffectivePackage ─────────────────────────────────────────────────────────
 
 func TestEffectivePackage_DefaultsToName(t *testing.T) {
@@ -628,48 +577,6 @@ func TestEffectivePackage_UsesPackageWhenSet(t *testing.T) {
 	e := config.ToolEntry{Name: "black", Provider: "pip", Package: "black"}
 	if got := e.EffectivePackage(); got != "black" {
 		t.Errorf("got %q, want %q", got, "black")
-	}
-}
-
-// ─── ValidateGroups ───────────────────────────────────────────────────────────
-
-func TestValidateGroups_NoDuplicates(t *testing.T) {
-	groups := []*config.GroupConfig{
-		{Tools: []config.ToolEntry{{Name: "ripgrep", Provider: "brew"}}},
-		{
-			Name:  "work",
-			Tools: []config.ToolEntry{{Name: "slack", Provider: "brew"}},
-		},
-	}
-	if errs := config.ValidateGroups(groups); len(errs) != 0 {
-		t.Errorf("unexpected errors: %v", errs)
-	}
-}
-
-func TestValidateGroups_DuplicateAllowedAcrossGroups(t *testing.T) {
-	groups := []*config.GroupConfig{
-		{Tools: []config.ToolEntry{{Name: "git", Provider: "brew"}}},
-		{
-			Name:  "work",
-			Tools: []config.ToolEntry{{Name: "git", Provider: "brew"}},
-		},
-	}
-	if errs := config.ValidateGroups(groups); len(errs) != 0 {
-		t.Errorf("logical tools can belong to multiple groups, got %v", errs)
-	}
-}
-
-func TestValidateGroups_SameNameDifferentProvider(t *testing.T) {
-	// Logical tool memberships are provider-independent.
-	groups := []*config.GroupConfig{
-		{Tools: []config.ToolEntry{{Name: "ripgrep", Provider: "brew"}}},
-		{
-			Name:  "linux",
-			Tools: []config.ToolEntry{{Name: "ripgrep", Provider: "apt"}},
-		},
-	}
-	if errs := config.ValidateGroups(groups); len(errs) != 0 {
-		t.Errorf("unexpected errors for cross-provider tools: %v", errs)
 	}
 }
 
@@ -754,6 +661,61 @@ func TestGlobalIgnore_EmptyOmittedFromJSON(t *testing.T) {
 }
 
 // ─── DotEntry ─────────────────────────────────────────────────────────────────
+
+func TestAgentsIgnore_Roundtrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+
+	original := &config.RootConfig{
+		Agents: config.AgentsConfig{
+			Ignore: config.AgentsIgnore{
+				Skills:     []string{"vercel-labs/agent-skills"},
+				McpServers: []string{"context7"},
+				Plugins:    []string{"my-plugin"},
+			},
+		},
+	}
+	if err := config.Save(path, original); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if len(loaded.Agents.Ignore.Skills) != 1 || loaded.Agents.Ignore.Skills[0] != "vercel-labs/agent-skills" {
+		t.Errorf("Ignore.Skills = %v, want [vercel-labs/agent-skills]", loaded.Agents.Ignore.Skills)
+	}
+	if len(loaded.Agents.Ignore.McpServers) != 1 || loaded.Agents.Ignore.McpServers[0] != "context7" {
+		t.Errorf("Ignore.McpServers = %v, want [context7]", loaded.Agents.Ignore.McpServers)
+	}
+	if len(loaded.Agents.Ignore.Plugins) != 1 || loaded.Agents.Ignore.Plugins[0] != "my-plugin" {
+		t.Errorf("Ignore.Plugins = %v, want [my-plugin]", loaded.Agents.Ignore.Plugins)
+	}
+}
+
+func TestAgentsIgnore_EmptyRoundTripsAsEmptyObject(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "settings.json")
+
+	original := &config.RootConfig{}
+	if err := config.Save(path, original); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	agentsIdx := strings.Index(string(data), `"agents"`)
+	if agentsIdx == -1 {
+		t.Fatalf("expected agents key in written JSON: %s", data)
+	}
+	if !strings.Contains(string(data)[agentsIdx:], `"ignore": {}`) {
+		t.Errorf("empty agents.ignore should round-trip as an empty object, matching top-level ignore: %s", data)
+	}
+}
 
 func TestGroupConfig_WithDotEntries_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
@@ -870,6 +832,10 @@ func TestSettings_JSONTagsRemainStableAcrossUILabelRenames(t *testing.T) {
 		AutoImport:        true,
 		DotsRepo:          "~/dotfiles",
 		DotsDisabled:      &disabled,
+		AgentsDisabled:    &disabled,
+		SkillsDisabled:    &disabled,
+		McpDisabled:       &disabled,
+		PluginsDisabled:   &disabled,
 		DisabledProviders: []string{"node"},
 		DotsGit: config.DotsGitConfig{
 			AutoCommit: true,
@@ -899,6 +865,10 @@ func TestSettings_JSONTagsRemainStableAcrossUILabelRenames(t *testing.T) {
 		"ecosystems",
 		"dots_repo",
 		"dots_disabled",
+		"agents_disabled",
+		"skills_disabled",
+		"mcp_disabled",
+		"plugins_disabled",
 		"dots_git",
 		"disabled_providers",
 	} {
@@ -1339,5 +1309,159 @@ func TestDotEntry_Path_RoundTrips(t *testing.T) {
 	}
 	if dots[1].Name != "zsh" || dots[1].Path != "~/.zshrc" || dots[1].Package != "zsh-default" || dots[1].Hosts["work"].Package != "zsh-work" || len(dots[1].Ignore) != 1 {
 		t.Errorf("dots[1] = %+v", dots[1])
+	}
+}
+
+func TestMcpServerValidation(t *testing.T) {
+	cases := []struct {
+		name    string
+		servers []config.McpServer
+		wantErr bool
+		errFrag string
+	}{
+		{
+			name:    "valid stdio",
+			servers: []config.McpServer{{Name: "x", Transport: "stdio", Command: "npx foo"}},
+		},
+		{
+			name:    "valid http",
+			servers: []config.McpServer{{Name: "x", Transport: "http", URL: "https://example.com"}},
+		},
+		{
+			name:    "valid sse",
+			servers: []config.McpServer{{Name: "x", Transport: "sse", URL: "https://example.com/sse"}},
+		},
+		{
+			name:    "stdio missing command",
+			servers: []config.McpServer{{Name: "x", Transport: "stdio"}},
+			wantErr: true, errFrag: "command",
+		},
+		{
+			name:    "stdio with url",
+			servers: []config.McpServer{{Name: "x", Transport: "stdio", Command: "npx x", URL: "https://x.com"}},
+			wantErr: true, errFrag: "url",
+		},
+		{
+			name:    "http missing url",
+			servers: []config.McpServer{{Name: "x", Transport: "http"}},
+			wantErr: true, errFrag: "url",
+		},
+		{
+			name:    "http with command",
+			servers: []config.McpServer{{Name: "x", Transport: "http", URL: "https://x.com", Command: "npx"}},
+			wantErr: true, errFrag: "command",
+		},
+		{
+			name:    "unknown transport",
+			servers: []config.McpServer{{Name: "x", Transport: "grpc", Command: "npx"}},
+			wantErr: true, errFrag: "transport",
+		},
+		{
+			name:    "empty name",
+			servers: []config.McpServer{{Name: "", Transport: "stdio", Command: "npx"}},
+			wantErr: true, errFrag: "name",
+		},
+		{
+			name: "duplicate name",
+			servers: []config.McpServer{
+				{Name: "dup", Transport: "stdio", Command: "npx x"},
+				{Name: "dup", Transport: "stdio", Command: "npx y"},
+			},
+			wantErr: true, errFrag: "duplicate",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := &config.RootConfig{
+				Version: config.CurrentVersion,
+				Agents:  config.AgentsConfig{McpServers: c.servers},
+			}
+			errs := config.ValidateRoot(root, config.ProviderValidation{})
+			if c.wantErr {
+				if len(errs) == 0 {
+					t.Fatal("expected validation error, got none")
+				}
+				combined := fmt.Sprintf("%v", errs)
+				if !strings.Contains(combined, c.errFrag) {
+					t.Fatalf("expected %q in errors, got: %v", c.errFrag, errs)
+				}
+				return
+			}
+			if len(errs) != 0 {
+				t.Fatalf("unexpected errors: %v", errs)
+			}
+		})
+	}
+}
+
+func TestMcpServerValidation_EmptyEnvName(t *testing.T) {
+	root := &config.RootConfig{
+		Version: config.CurrentVersion,
+		Agents: config.AgentsConfig{McpServers: []config.McpServer{
+			{Name: "x", Transport: "stdio", Command: "npx x", Env: []string{""}},
+		}},
+	}
+	errs := config.ValidateRoot(root, config.ProviderValidation{})
+	if len(errs) == 0 {
+		t.Fatal("expected validation error for empty env name, got none")
+	}
+	combined := fmt.Sprintf("%v", errs)
+	if !strings.Contains(combined, "env") {
+		t.Fatalf("expected error mentioning env, got: %v", errs)
+	}
+}
+
+func TestMcpServerValidation_WhitespaceEnvName(t *testing.T) {
+	root := &config.RootConfig{
+		Version: config.CurrentVersion,
+		Agents: config.AgentsConfig{McpServers: []config.McpServer{
+			{Name: "x", Transport: "stdio", Command: "npx x", Env: []string{"   "}},
+		}},
+	}
+	errs := config.ValidateRoot(root, config.ProviderValidation{})
+	if len(errs) == 0 {
+		t.Fatal("expected validation error for whitespace-only env name, got none")
+	}
+}
+
+func TestGroupMcpServerRef_ValidRef_NoWarning(t *testing.T) {
+	root := &config.RootConfig{
+		Version: config.CurrentVersion,
+		Agents: config.AgentsConfig{McpServers: []config.McpServer{
+			{Name: "linear", Transport: "http", URL: "https://example.com"},
+		}},
+		Groups: []*config.GroupConfig{
+			{Name: "work", McpServers: []string{"linear"}},
+		},
+	}
+	errs := config.ValidateRoot(root, config.ProviderValidation{})
+	for _, e := range errs {
+		if strings.Contains(e.Message, "mcp_server ref") {
+			t.Fatalf("unexpected mcp_server ref warning for valid ref: %v", e)
+		}
+	}
+}
+
+func TestGroupMcpServerRef_UnknownRef_IsWarn(t *testing.T) {
+	root := &config.RootConfig{
+		Version: config.CurrentVersion,
+		Agents:  config.AgentsConfig{},
+		Groups: []*config.GroupConfig{
+			{Name: "work", McpServers: []string{"does-not-exist"}},
+		},
+	}
+	errs := config.ValidateRoot(root, config.ProviderValidation{})
+	var found *config.ValidationError
+	for i := range errs {
+		if strings.Contains(errs[i].Message, "mcp_server ref") {
+			found = &errs[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("expected mcp_server ref warning, got none")
+	}
+	if !found.Warn {
+		t.Fatalf("expected Warn=true for unknown mcp_server ref, got Warn=false: %+v", *found)
 	}
 }
