@@ -118,6 +118,7 @@ func newAgentPickerApp(t *testing.T, agentsUse []string) *App {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	stubBinariesOnPath(t, "claude", "cursor")
 	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
