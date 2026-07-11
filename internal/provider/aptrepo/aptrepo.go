@@ -123,7 +123,9 @@ func packageList(tool provider.Tool) []string {
 }
 
 func (p *Provider) run(ctx context.Context, toolName, action, cmd string) error {
-	_, stderr, err := p.exec.Run(ctx, "sh", "-c", cmd)
+	// setup writes under /etc/apt and runs apt-get update; both need root.
+	rawCmd, rawArgs := provider.PrivilegedCommand("sh", "-c", cmd)
+	_, stderr, err := p.exec.Run(ctx, rawCmd, rawArgs...)
 	if err != nil {
 		return fmt.Errorf("apt_repo %s %s: %w (stderr: %s)", toolName, action, err, strings.TrimSpace(stderr))
 	}
