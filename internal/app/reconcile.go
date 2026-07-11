@@ -22,6 +22,7 @@ type ReconcileOptions struct {
 
 // ReconcileResult records the operations attempted by Reconcile.
 type ReconcileResult struct {
+	NvmManaged         *NvmManagedMigrationBatchResult
 	SyncAll            *SyncAllResult
 	UpgradeAll         *UpgradeAllResult
 	FixedIgnoreEntries []string
@@ -32,6 +33,8 @@ type ReconcileResult struct {
 }
 
 type ReconcileSummary struct {
+	NvmManaged    int
+	NvmRemoved    int
 	Installed     int
 	Claimed       int
 	Upgraded      int
@@ -42,6 +45,7 @@ type ReconcileSummary struct {
 }
 
 type ReconcileIssueSummary struct {
+	NvmFailures     int
 	SyncFailures    int
 	UpgradeFailures int
 	DotsConflicts   int
@@ -60,6 +64,15 @@ func SummarizeReconcile(result *ReconcileResult) ReconcileSummary {
 		DotsCommitted: result.DotsCommitted,
 		DotsSkipped:   result.DotsSkipped,
 	}
+	if result.NvmManaged != nil {
+		for _, item := range result.NvmManaged.Items {
+			if item.Removed {
+				summary.NvmRemoved++
+			} else {
+				summary.NvmManaged++
+			}
+		}
+	}
 	if result.UpgradeAll != nil {
 		upgradeSummary := SummarizeUpgradeAll(result.UpgradeAll)
 		summary.Upgraded = upgradeSummary.Upgraded
@@ -73,6 +86,9 @@ func SummarizeReconcileIssues(result *ReconcileResult) ReconcileIssueSummary {
 		return ReconcileIssueSummary{}
 	}
 	var summary ReconcileIssueSummary
+	if result.NvmManaged != nil {
+		summary.NvmFailures = len(result.NvmManaged.Failures)
+	}
 	if result.SyncAll != nil {
 		summary.SyncFailures = len(result.SyncAll.Failures)
 	}
@@ -91,7 +107,7 @@ func SummarizeReconcileIssues(result *ReconcileResult) ReconcileIssueSummary {
 }
 
 func (s ReconcileIssueSummary) Total() int {
-	return s.SyncFailures + s.UpgradeFailures + s.DotsConflicts + s.DotsMissing
+	return s.NvmFailures + s.SyncFailures + s.UpgradeFailures + s.DotsConflicts + s.DotsMissing
 }
 
 func (s ReconcileIssueSummary) HasIssues() bool {
@@ -104,6 +120,13 @@ func (s ReconcileIssueSummary) HasIssues() bool {
 func (a *App) Reconcile(ctx context.Context, opts ReconcileOptions) (*ReconcileResult, error) {
 	result := &ReconcileResult{}
 	var errs []error
+
+	a.reconcileProgress(opts, "fixing nvm-managed tools...")
+	nvmResult, err := a.MigrateAllNvmManagedTools(ctx)
+	result.NvmManaged = nvmResult
+	if err != nil {
+		errs = append(errs, fmt.Errorf("fix nvm-managed tools: %w", err))
+	}
 
 	a.reconcileProgress(opts, "syncing tools...")
 	syncResult, err := a.SyncAll(ctx, SyncAllOptions{

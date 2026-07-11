@@ -1,0 +1,41 @@
+# agents plugins marketplace: add declares a marketplace and drives the fake
+# claude CLI's marketplace add, list shows the declared entry, and remove
+# deletes only the manifest entry. omni must never remove a marketplace from
+# an agent CLI (it may still serve hand-installed plugins omni doesn't know
+# about), so the calls log must never contain a marketplace-remove call.
+chmod 0755 $WORK/bin/claude
+env PATH=$WORK/bin:$PATH
+
+exec omni --config settings.json agents plugins marketplace add lkshrk --source lkshrk/marketplace --agents claude-code
+stdout 'added lkshrk'
+exec grep -q 'plugins marketplace add lkshrk/marketplace' .omni-cache/claude-calls.log
+
+exec omni --config settings.json agents plugins marketplace list
+stdout 'lkshrk\s+lkshrk/marketplace'
+
+exec omni --config settings.json agents plugins marketplace remove lkshrk
+stdout 'removed lkshrk'
+exec omni --config settings.json agents plugins marketplace list
+! stdout 'lkshrk'
+! exec grep -q 'marketplace remove' .omni-cache/claude-calls.log
+
+-- settings.json --
+{}
+
+-- bin/claude --
+#!/bin/sh
+set -eu
+mkdir -p "${OMNI_CACHE_DIR}"
+echo "$*" >> "${OMNI_CACHE_DIR}/claude-calls.log"
+if [ "$1" = "plugins" ] && [ "$2" = "marketplace" ] && [ "$3" = "list" ] && [ "$4" = "--json" ]; then
+  printf '[]\n'
+  exit 0
+fi
+if [ "$1" = "plugins" ] && [ "$2" = "marketplace" ] && [ "$3" = "add" ]; then
+  exit 0
+fi
+if [ "$1" = "plugins" ] && [ "$2" = "marketplace" ] && [ "$3" = "remove" ]; then
+  echo "marketplace remove should never be called" >&2
+  exit 1
+fi
+exit 1

@@ -271,7 +271,7 @@ func (a *App) SetToolIgnoreScopesWithState(ctx context.Context, name string, cha
 		}
 	}
 
-	tools, err := a.ListTools(ctx, "")
+	tools, err := a.ListToolsForView(ctx, "")
 	if err != nil {
 		return nil, err
 	}
@@ -393,7 +393,7 @@ func (a *App) SetToolProviderScopeWithState(ctx context.Context, name string, op
 	if err != nil {
 		return nil, err
 	}
-	tools, err := a.ListTools(ctx, "")
+	tools, err := a.ListToolsForView(ctx, "")
 	if err != nil {
 		return nil, err
 	}

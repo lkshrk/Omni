@@ -786,9 +786,6 @@ func setGlobalToolIgnoreInConfig(cfg *config.RootConfig, name string, ignored bo
 		return fmt.Errorf("tool name is required")
 	}
 	if ignored {
-		if _, ok := cfg.Tools[name]; !ok {
-			return fmt.Errorf("logical tool %q not found", name)
-		}
 		if !slices.Contains(cfg.Ignore.Tools, name) {
 			cfg.Ignore.Tools = append(cfg.Ignore.Tools, name)
 		}

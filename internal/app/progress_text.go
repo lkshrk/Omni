@@ -39,9 +39,9 @@ func RefreshProviderScanProgressText(label string, index, total int) string {
 func DotsSyncProgressLineText(event dots.SyncProgressEvent) string {
 	index, total := normalizedProgress(event.Index, event.Total)
 	if event.Entry == "" {
-		return fmt.Sprintf("syncing dots %d/%d", index, total)
+		return fmt.Sprintf("checking dots %d/%d", index, total)
 	}
-	return fmt.Sprintf("syncing dots %d/%d: %s", index, total, event.Entry)
+	return fmt.Sprintf("checking dots %d/%d: %s", index, total, event.Entry)
 }
 
 func DotsSyncActivityProgressText(event dots.SyncProgressEvent) string {
@@ -55,7 +55,7 @@ func DotsSyncActivityProgressText(event dots.SyncProgressEvent) string {
 	case event.Done:
 		return fmt.Sprintf("Synced dots %s: %s", progress, event.Entry)
 	default:
-		return fmt.Sprintf("Syncing dots %s: %s…", progress, event.Entry)
+		return fmt.Sprintf("Checking dots %s: %s…", progress, event.Entry)
 	}
 }
 
@@ -489,6 +489,12 @@ func ReconcileSummaryText(result *ReconcileResult, prefix string) string {
 	if summary.DotOps > 0 {
 		status += ", " + textutil.PluralCount(summary.DotOps, "dotfile op", "dotfile ops")
 	}
+	if summary.NvmManaged > 0 {
+		status += ", " + textutil.PluralCount(summary.NvmManaged, "nvm-managed tool migrated", "nvm-managed tools migrated")
+	}
+	if summary.NvmRemoved > 0 {
+		status += ", " + textutil.PluralCount(summary.NvmRemoved, "runtime removed from config", "runtimes removed from config")
+	}
 	if summary.DotsCommitted {
 		status += ", dotfiles committed"
 	} else if summary.DotsSkipped != "" {
@@ -502,7 +508,10 @@ func ReconcileIssueLines(result *ReconcileResult) []string {
 	if !issues.HasIssues() {
 		return nil
 	}
-	lines := make([]string, 0, 4)
+	lines := make([]string, 0, 5)
+	if issues.NvmFailures > 0 {
+		lines = append(lines, textutil.PluralCount(issues.NvmFailures, "nvm-managed tool", "nvm-managed tools")+" failed to migrate")
+	}
 	if issues.SyncFailures > 0 {
 		lines = append(lines, textutil.PluralCount(issues.SyncFailures, "tool", "tools")+" failed to install")
 	}
@@ -574,17 +583,6 @@ func UpgradeAllFailureRows(result *UpgradeAllResult) BulkToolFailureRows {
 		rows.PrivilegedActions[toolResultKey(failure.Name, failure.Provider)] = provider.PrivilegeActionUpgrade
 	}
 	return rows
-}
-
-func PrivilegedActionMapForRows(rowErrors map[string]string, action provider.PrivilegeAction) map[string]provider.PrivilegeAction {
-	if len(rowErrors) == 0 || action == "" {
-		return nil
-	}
-	actions := make(map[string]provider.PrivilegeAction, len(rowErrors))
-	for key := range rowErrors {
-		actions[key] = action
-	}
-	return actions
 }
 
 func BulkToolFailureSummaryText(base string, rows BulkToolFailureRows) string {
@@ -842,14 +840,6 @@ func RefreshToolProgressStatus(providerLabel, toolName string, done, total int) 
 		return status
 	}
 	return status + ": " + active
-}
-
-func RefreshInstalledProgressText(event RefreshInstalledProgressEvent) string {
-	providerLabel := event.ProviderLabel
-	if strings.TrimSpace(providerLabel) == "" {
-		providerLabel = event.Provider
-	}
-	return RefreshToolProgressStatus(providerLabel, event.Name, event.Index, event.Total)
 }
 
 func RefreshDiscoveredProgressText(event RefreshDiscoveredProgressEvent) string {

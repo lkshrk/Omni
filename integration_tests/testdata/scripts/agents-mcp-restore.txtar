@@ -1,0 +1,86 @@
+# agents mcp restore: drives fake claude/codex CLIs to install manifest MCP
+# servers. Covers: env var resolution for stdio servers, http server via
+# codex, a missing env var producing a non-fatal per-server error, and the
+# already-installed skip path. claude-code's List() reads $HOME/.claude.json
+# directly (no exec); codex's List() still execs `codex mcp list --json` and
+# reads whatever the manifest state file below says is already present.
+chmod 0755 $WORK/bin/claude
+chmod 0755 $WORK/bin/codex
+env PATH=$WORK/bin:$PATH
+env HOME=$WORK/home
+mkdir $WORK/home
+
+# LINEAR_API_KEY is intentionally unset for this first run, so no `mcp add`
+# for linear is ever attempted; claude is never exec'd at all (List() reads
+# $HOME/.claude.json directly), so claude-calls.log isn't created yet.
+exec omni --config settings.json agents mcp restore
+stdout 'installed: codex/grafana'
+stdout '! claude-code/linear: .*LINEAR_API_KEY.* not set'
+! exists .omni-cache/claude-calls.log
+exists .omni-cache/codex-calls.log
+grep 'mcp add' .omni-cache/codex-calls.log
+
+# Now provide the env var and restore again: claude is invoked and both
+# servers report installed ($HOME/.claude.json still doesn't have linear yet,
+# and the fake codex CLI's `mcp list` still reports nothing already installed).
+env LINEAR_API_KEY=test-token
+exec omni --config settings.json agents mcp restore
+stdout 'installed: claude-code/linear'
+stdout 'installed: codex/grafana'
+grep 'LINEAR_API_KEY=test-token' .omni-cache/claude-calls.log
+grep -count=1 'mcp add' .omni-cache/claude-calls.log
+grep -count=2 'mcp add' .omni-cache/codex-calls.log
+
+# The second run's `mcp add` already wrote linear into $HOME/.claude.json (see
+# bin/claude below), so claude-code's List() now reports it as installed.
+# Seed the fake codex CLI's `mcp list` output the same way, then restore a
+# third time: both should be skipped via the already-installed path, and
+# neither call log should gain a new `mcp add`.
+cp codex-mcp-preinstalled .omni-cache/codex-mcp-preinstalled
+exec omni --config settings.json agents mcp restore
+stdout 'already installed: claude-code/linear'
+stdout 'already installed: codex/grafana'
+grep -count=1 'mcp add' .omni-cache/claude-calls.log
+grep -count=2 'mcp add' .omni-cache/codex-calls.log
+
+-- settings.json --
+{"agents":{"mcp_servers":[
+  {"name":"linear","transport":"stdio","command":"npx -y @linear/mcp","env":["LINEAR_API_KEY"],"agents":["claude-code"]},
+  {"name":"grafana","transport":"http","url":"https://mcp.example.com","agents":["codex"]}
+]}}
+
+-- codex-mcp-preinstalled --
+[{"name":"grafana","transport":{"type":"streamable_http","url":"https://mcp.example.com"}}]
+
+-- bin/claude --
+#!/bin/sh
+set -eu
+mkdir -p "${OMNI_CACHE_DIR}"
+echo "$*" >> "${OMNI_CACHE_DIR}/claude-calls.log"
+if [ "$1" = "mcp" ] && [ "$2" = "add" ] && [ "$3" = "-s" ] && [ "$4" = "user" ]; then
+  if [ "$5" = "linear" ]; then
+    printf '{"mcpServers":{"linear":{"command":"npx","args":["-y","@linear/mcp"]}}}' > "$HOME/.claude.json"
+  fi
+  echo "added $5"
+  exit 0
+fi
+exit 1
+
+-- bin/codex --
+#!/bin/sh
+set -eu
+mkdir -p "${OMNI_CACHE_DIR}"
+echo "$*" >> "${OMNI_CACHE_DIR}/codex-calls.log"
+if [ "$1" = "mcp" ] && [ "$2" = "list" ] && [ "$3" = "--json" ]; then
+  if [ -f "${OMNI_CACHE_DIR}/codex-mcp-preinstalled" ]; then
+    cat "${OMNI_CACHE_DIR}/codex-mcp-preinstalled"
+  else
+    printf '[]\n'
+  fi
+  exit 0
+fi
+if [ "$1" = "mcp" ] && [ "$2" = "add" ]; then
+  echo "added $3"
+  exit 0
+fi
+exit 1

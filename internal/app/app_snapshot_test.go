@@ -63,6 +63,16 @@ func TestStartupSnapshotBuildsConfigDerivedState(t *testing.T) {
 	if !snapshot.ToolIgnores["fd"] {
 		t.Fatalf("tool ignores = %v, want fd", snapshot.ToolIgnores)
 	}
+	foundFD := false
+	for _, tool := range snapshot.Tools {
+		if tool != nil && tool.Name == "fd" {
+			foundFD = true
+			break
+		}
+	}
+	if !foundFD {
+		t.Fatalf("snapshot tools = %v, want ignored fd retained for TUI ignored section", snapshot.Tools)
+	}
 	if got := snapshot.IgnoreLabels["fd"]; got != "tool" {
 		t.Fatalf("ignore labels = %v, want fd=tool", snapshot.IgnoreLabels)
 	}

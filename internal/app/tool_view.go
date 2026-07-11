@@ -26,6 +26,7 @@ const (
 	ToolSyncMissing       ToolSyncStatus = "missing"
 	ToolSyncUnclaimed     ToolSyncStatus = "unclaimed"
 	ToolSyncWrongProvider ToolSyncStatus = "wrong-provider"
+	ToolSyncNvmManaged    ToolSyncStatus = "nvm-managed"
 )
 
 type ToolClassificationContext struct {
@@ -37,6 +38,9 @@ type ToolClassificationContext struct {
 	EffectiveSystemManager string
 	EffectivePythonManager string
 	EffectiveNodeManager   string
+
+	// NvmManaged marks system-provider tools whose active binary resolves via nvm.
+	NvmManaged map[string]bool
 }
 
 type ToolProviderDisplayInput struct {
@@ -121,7 +125,7 @@ func BuildToolViewList(options ToolViewListOptions) ToolViewList {
 		if !toolMatchesQuery(tool, q) {
 			continue
 		}
-		if options.IgnoredTools[tool.Name] {
+		if toolListedAsIgnored(tool.Name, options) {
 			ignored = append(ignored, tool)
 		} else {
 			normal = append(normal, tool)
@@ -202,6 +206,9 @@ func ToolSyncStatusForTool(tool *database.ToolCache, context ToolClassificationC
 	if desired != "" && tool.InstalledWith != "" && tool.InstalledWith != desired {
 		return ToolSyncWrongProvider
 	}
+	if IsSystemProvider(tool.Provider) && tool.Installed && context.NvmManaged != nil && context.NvmManaged[tool.Name] {
+		return ToolSyncNvmManaged
+	}
 	return ToolSyncOK
 }
 
@@ -222,23 +229,6 @@ func DesiredConcreteProviderForTool(tool *database.ToolCache, context ToolClassi
 	default:
 		return "", ""
 	}
-}
-
-func ToolProviderDisplayForTool(tool *database.ToolCache, providerPin string, context ToolClassificationContext) ToolProviderDisplay {
-	if tool == nil {
-		return ToolProviderDisplay{}
-	}
-	input := ToolProviderDisplayInput{
-		Provider:         tool.Provider,
-		InstalledWith:    tool.InstalledWith,
-		ExplicitProvider: providerPin,
-	}
-	if !(tool.Installed && tool.InstalledWith == "" && providerPin == "") {
-		input.EffectiveSystemManager = context.EffectiveSystemManager
-		input.EffectivePythonManager = context.EffectivePythonManager
-		input.EffectiveNodeManager = context.EffectiveNodeManager
-	}
-	return ToolProviderDisplayParts(input)
 }
 
 func ToolProviderDisplayLabel(input ToolProviderDisplayInput) string {
@@ -330,7 +320,7 @@ func toolViewSection(tool *database.ToolCache, context ToolClassificationContext
 	if tool.Installed && tool.Outdated {
 		return ToolViewSectionUpdates
 	}
-	if context.Discovered || (tool.Tracked && !tool.Installed) || syncStatus == ToolSyncWrongProvider {
+	if context.Discovered || (tool.Tracked && !tool.Installed) || syncStatus == ToolSyncWrongProvider || syncStatus == ToolSyncNvmManaged {
 		return ToolViewSectionOutOfSync
 	}
 	if tool.Installed {
@@ -378,6 +368,12 @@ func ToolProviderEcosystem(raw string) string {
 	return raw
 }
 
+// IsSystemProvider reports whether raw names a concrete system package manager
+// (brew, apt, dnf, pacman, zypper, apk) or the system ecosystem alias.
+func IsSystemProvider(raw string) bool {
+	return ToolProviderEcosystem(raw) == provider.EcosystemSystem
+}
+
 type ToolProviderDisplayRole string
 
 const (
@@ -416,6 +412,10 @@ func toolViewKeySet(tools []*database.ToolCache) map[string]bool {
 		keys[toolViewKey(tool)] = true
 	}
 	return keys
+}
+
+func toolListedAsIgnored(name string, options ToolViewListOptions) bool {
+	return options.IgnoredTools[name] || options.IgnoreLabels[name] != ""
 }
 
 func toolViewSectionOrder(section ToolViewSection) int {

@@ -12,11 +12,12 @@ import (
 type DashboardReconcileStepID string
 
 const (
-	ReconcileStepSyncTools    DashboardReconcileStepID = "sync-tools"
-	ReconcileStepUpgradeTools DashboardReconcileStepID = "upgrade-tools"
-	ReconcileStepSyncDots     DashboardReconcileStepID = "sync-dots"
-	ReconcileStepCommitDots   DashboardReconcileStepID = "commit-dots"
-	ReconcileStepFixIgnore    DashboardReconcileStepID = "fix-ignore"
+	ReconcileStepSyncTools     DashboardReconcileStepID = "sync-tools"
+	ReconcileStepUpgradeTools  DashboardReconcileStepID = "upgrade-tools"
+	ReconcileStepSyncDots      DashboardReconcileStepID = "sync-dots"
+	ReconcileStepCommitDots    DashboardReconcileStepID = "commit-dots"
+	ReconcileStepFixIgnore     DashboardReconcileStepID = "fix-ignore"
+	ReconcileStepFixNvmManaged DashboardReconcileStepID = "fix-nvm-managed"
 )
 
 type DashboardReconcilePlanInput struct {
@@ -34,6 +35,8 @@ type DashboardReconcilePlanInput struct {
 	DotsGitStatus  string
 
 	Doctor *DoctorResult
+
+	NvmManaged map[string]bool
 }
 
 type DashboardReconcilePlanStep struct {
@@ -51,6 +54,7 @@ type DashboardToolSummaryInput struct {
 	EffectiveSystemManager string
 	EffectivePythonManager string
 	EffectiveNodeManager   string
+	NvmManaged             map[string]bool
 }
 
 type DashboardToolActivityInput struct {
@@ -70,6 +74,8 @@ type DashboardToolActivityInput struct {
 	EffectiveSystemManager string
 	EffectivePythonManager string
 	EffectiveNodeManager   string
+
+	NvmManaged map[string]bool
 }
 
 type DashboardToolSummary struct {
@@ -181,6 +187,7 @@ func dashboardToolActivityClassification(input DashboardToolActivityInput, tool 
 		EffectiveSystemManager: input.EffectiveSystemManager,
 		EffectivePythonManager: input.EffectivePythonManager,
 		EffectiveNodeManager:   input.EffectiveNodeManager,
+		NvmManaged:             input.NvmManaged,
 	})
 }
 
@@ -199,6 +206,7 @@ func dashboardAccumulateToolSummary(summary *DashboardToolSummary, input Dashboa
 		EffectiveSystemManager: input.EffectiveSystemManager,
 		EffectivePythonManager: input.EffectivePythonManager,
 		EffectiveNodeManager:   input.EffectiveNodeManager,
+		NvmManaged:             input.NvmManaged,
 	}
 	classification := ClassifyToolView(tool, ctx)
 	switch classification.Section {
@@ -247,13 +255,22 @@ func dashboardToolSyncIssueName(tool *database.ToolCache, status ToolSyncStatus)
 		return name + " local only"
 	case ToolSyncWrongProvider:
 		return name + " provider mismatch"
+	case ToolSyncNvmManaged:
+		return name + " nvm-managed"
 	default:
 		return name
 	}
 }
 
 func DashboardReconcilePlan(input DashboardReconcilePlanInput) []DashboardReconcilePlanStep {
-	steps := make([]DashboardReconcilePlanStep, 0, 5)
+	steps := make([]DashboardReconcilePlanStep, 0, 6)
+	if nvm := dashboardNvmManagedCount(input); nvm > 0 {
+		steps = append(steps, DashboardReconcilePlanStep{
+			ID:     ReconcileStepFixNvmManaged,
+			Label:  "Fix nvm-managed tools",
+			Detail: textutil.PluralCount(nvm, "nvm-managed tool", "nvm-managed tools"),
+		})
+	}
 	if missing, discovered := dashboardToolSyncCounts(input); missing > 0 || discovered > 0 {
 		steps = append(steps, DashboardReconcilePlanStep{
 			ID:     ReconcileStepSyncTools,
@@ -313,6 +330,13 @@ func DotsIgnoreFinding(result *DoctorResult) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func dashboardNvmManagedCount(input DashboardReconcilePlanInput) int {
+	if n := len(sortedNvmManagedNames(input.NvmManaged, input.IgnoredTools)); n > 0 {
+		return n
+	}
+	return DoctorNvmManagedDriftCount(input.Doctor)
 }
 
 func dashboardToolSyncCounts(input DashboardReconcilePlanInput) (missing, discovered int) {

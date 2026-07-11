@@ -515,7 +515,7 @@ func (a *App) CompleteExternalToolActionWithState(ctx context.Context, opts Comp
 		}
 		return result, err
 	}
-	tools, err := a.ListTools(ctx, "")
+	tools, err := a.ListToolsForView(ctx, "")
 	if err != nil {
 		return result, fmt.Errorf("list tools: %w", err)
 	}

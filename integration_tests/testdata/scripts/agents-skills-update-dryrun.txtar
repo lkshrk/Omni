@@ -1,6 +1,12 @@
 # agents skills update --dry-run prints npx skills update line for all manifest entries
+env XDG_STATE_HOME=$WORK/state
+mkdir $WORK/state
+mkdir $WORK/state/skills
 exec omni --config settings.json agents skills update --dry-run
 stdout '^npx skills update -g -y frontend-design tdd$'
 
 -- settings.json --
 {"version":1,"agents":{"skills":[{"name":"frontend-design","source":"vercel-labs/agent-skills"},{"name":"tdd","source":"o/r"}]}}
+
+-- state/skills/.skill-lock.json --
+{"version":3,"skills":{"frontend-design":{"source":"vercel-labs/agent-skills","sourceType":"github","sourceUrl":"https://github.com/vercel-labs/agent-skills","ref":"main","skillFolderHash":"abc","installedAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"},"tdd":{"source":"o/r","sourceType":"github","sourceUrl":"https://github.com/o/r","ref":"main","skillFolderHash":"def","installedAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}}}

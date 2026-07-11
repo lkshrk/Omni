@@ -133,9 +133,7 @@ func TestSaveDisabledProviders_PersistsList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	hostname, _ := os.Hostname()
-	short := shortHostnameForTest(hostname)
-	got := cfg.HostSettings[short].DisabledProviders
+	got := cfg.HostSettings[testShortHostname()].DisabledProviders
 	if len(got) != len(want) {
 		t.Fatalf("DisabledProviders = %v, want %v", got, want)
 	}
@@ -170,6 +168,7 @@ func TestSetupProviderOptionsFromManagers(t *testing.T) {
 }
 
 func TestSetupProviderOptionsUsesResolvedProvidersAndAvailableManagers(t *testing.T) {
+	t.Setenv("NVM_DIR", "")
 	binDir := t.TempDir()
 	for _, name := range []string{"bun", "npm", "uv"} {
 		path := filepath.Join(binDir, name)
@@ -577,9 +576,7 @@ func TestSaveDisabledProviders_SecondCallOverwrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	hostname, _ := os.Hostname()
-	short := shortHostnameForTest(hostname)
-	got := cfg.HostSettings[short].DisabledProviders
+	got := cfg.HostSettings[testShortHostname()].DisabledProviders
 	// python family is expanded to its concrete members on write.
 	if want := "uv,pip"; strings.Join(got, ",") != want {
 		t.Errorf("DisabledProviders = %v after second call, want [uv pip]", got)
@@ -601,9 +598,7 @@ func TestSaveDisabledProviders_EmptyList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	hostname, _ := os.Hostname()
-	short := shortHostnameForTest(hostname)
-	got := cfg.HostSettings[short].DisabledProviders
+	got := cfg.HostSettings[testShortHostname()].DisabledProviders
 	if got == nil {
 		t.Fatal("DisabledProviders is nil after empty call, want explicit empty list")
 	}
@@ -626,10 +621,8 @@ func TestSaveDisabledProviders_ExpandsFamilyAndAcceptsConcrete(t *testing.T) {
 	if err := a.SaveDisabledProviders(context.Background(), []string{provider.EcosystemNode}); err != nil {
 		t.Fatalf("SaveDisabledProviders(node): %v", err)
 	}
-	hostname, _ := os.Hostname()
-	short := shortHostnameForTest(hostname)
 	cfg, _ := config.Load(cfgPath)
-	if got := cfg.HostSettings[short].DisabledProviders; strings.Join(got, ",") != "bun,pnpm,npm" {
+	if got := cfg.HostSettings[testShortHostname()].DisabledProviders; strings.Join(got, ",") != "bun,pnpm,npm" {
 		t.Fatalf("disabled = %v, want [bun pnpm npm]", got)
 	}
 	// A concrete provider is accepted directly.
@@ -637,7 +630,7 @@ func TestSaveDisabledProviders_ExpandsFamilyAndAcceptsConcrete(t *testing.T) {
 		t.Fatalf("SaveDisabledProviders(brew): %v", err)
 	}
 	cfg, _ = config.Load(cfgPath)
-	if got := cfg.HostSettings[short].DisabledProviders; len(got) != 1 || got[0] != "brew" {
+	if got := cfg.HostSettings[testShortHostname()].DisabledProviders; len(got) != 1 || got[0] != "brew" {
 		t.Fatalf("disabled = %v, want [brew]", got)
 	}
 	// An unknown name is rejected.
@@ -659,9 +652,7 @@ func TestSaveDotsDisabled_True(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	hostname, _ := os.Hostname()
-	short := shortHostnameForTest(hostname)
-	if !config.BoolVal(cfg.HostSettings[short].DotsDisabled) {
+	if !config.BoolVal(cfg.HostSettings[testShortHostname()].DotsDisabled) {
 		t.Error("DotsDisabled should be true after SaveDotsDisabled(true)")
 	}
 }
@@ -681,9 +672,7 @@ func TestSaveDotsDisabled_False(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	hostname, _ := os.Hostname()
-	short := shortHostnameForTest(hostname)
-	if config.BoolVal(cfg.HostSettings[short].DotsDisabled) {
+	if config.BoolVal(cfg.HostSettings[testShortHostname()].DotsDisabled) {
 		t.Error("DotsDisabled should be false after SaveDotsDisabled(false)")
 	}
 }
@@ -771,9 +760,7 @@ func TestDisableDotsForHost_NoRepoPersistsDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	hostname, _ := os.Hostname()
-	short := shortHostnameForTest(hostname)
-	if !config.BoolVal(cfg.HostSettings[short].DotsDisabled) {
+	if !config.BoolVal(cfg.HostSettings[testShortHostname()].DotsDisabled) {
 		t.Error("DotsDisabled should be true after DisableDotsForHost")
 	}
 }
@@ -796,9 +783,7 @@ func TestEnableDotsForHost_NoRepoClearsDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	hostname, _ := os.Hostname()
-	short := shortHostnameForTest(hostname)
-	if config.BoolVal(cfg.HostSettings[short].DotsDisabled) {
+	if config.BoolVal(cfg.HostSettings[testShortHostname()].DotsDisabled) {
 		t.Error("DotsDisabled should be false after EnableDotsForHost")
 	}
 }
@@ -960,6 +945,7 @@ func TestEnableDisableProvider_ValidatesAndPersists(t *testing.T) {
 }
 
 func TestEffectiveManagers_UsesActiveNVMBin(t *testing.T) {
+	t.Setenv("NVM_DIR", "")
 	home := t.TempDir()
 	activeBin := filepath.Join(home, ".nvm", "versions", "node", "v24.15.0", "bin")
 	if err := os.MkdirAll(activeBin, 0o755); err != nil {

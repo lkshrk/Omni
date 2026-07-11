@@ -387,25 +387,6 @@ func TestEnsureDotsStowForCLI_InteractiveInstalls(t *testing.T) {
 
 // ─── helpers: pure functions ───────────────────────────────────────────────────
 
-func TestHealthIcon_AllValues(t *testing.T) {
-	cases := []struct {
-		health app.DotHealth
-		want   string
-	}{
-		{app.HealthOK, "✓"},
-		{app.HealthMissing, "·"},
-		{app.HealthConflict, "✗"},
-		{app.HealthNoSource, "?"},
-		{app.DotHealth("unknown"), " "},
-	}
-	for _, tc := range cases {
-		got := healthIcon(tc.health)
-		if got != tc.want {
-			t.Errorf("healthIcon(%q) = %q, want %q", tc.health, got, tc.want)
-		}
-	}
-}
-
 func TestGroupList_Empty(t *testing.T) {
 	got := groupList(nil)
 	if got != "(none)" {
@@ -1559,7 +1540,7 @@ func TestDotsSync_NameDryRunUsesSingleEntry(t *testing.T) {
 		t.Fatalf("dots sync nvim --dry-run: %v", err)
 	}
 	got := outBuf.String()
-	if !strings.Contains(got, "syncing dots 1/1: nvim") || !strings.Contains(got, "would link") || strings.Contains(got, ".zshrc") {
+	if !strings.Contains(got, "checking dots 1/1: nvim") || !strings.Contains(got, "would link") || strings.Contains(got, ".zshrc") {
 		t.Fatalf("output = %q, want only nvim dry-run link", got)
 	}
 }

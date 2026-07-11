@@ -87,18 +87,3 @@ func truncateDotsActions(actions []app.DotAction, width int) string {
 	}
 	return string(runes[:width-1]) + "…"
 }
-
-func healthIcon(h app.DotHealth) string {
-	switch h {
-	case app.HealthOK:
-		return "✓"
-	case app.HealthMissing:
-		return "·"
-	case app.HealthConflict:
-		return "✗"
-	case app.HealthNoSource:
-		return "?"
-	default:
-		return " "
-	}
-}

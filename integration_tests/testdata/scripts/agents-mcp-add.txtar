@@ -1,0 +1,35 @@
+# agents mcp add: registers a new stdio server in the manifest and installs
+# it via the fake claude CLI. --agents claude-code restricts the target to
+# claude-code only, so a real codex binary on the host PATH (if any) is never
+# invoked and can't make this test flaky. Covers: manifest entry visible via
+# restore --dry-run, and re-adding the same name upserts rather than
+# duplicating.
+chmod 0755 $WORK/bin/claude
+env PATH=$WORK/bin:$PATH
+env HOME=$WORK/home
+mkdir $WORK/home
+
+exec omni --config settings.json agents mcp add --name myserver --transport stdio --command 'npx my-server' --agents claude-code
+stdout 'added myserver'
+exec omni --config settings.json agents mcp restore --dry-run
+stdout -count=1 'would install: claude-code/myserver'
+
+# Re-adding the same name is an upsert: no duplicate manifest entry.
+exec omni --config settings.json agents mcp add --name myserver --transport stdio --command 'npx my-server' --agents claude-code
+stdout 'added myserver'
+exec omni --config settings.json agents mcp restore --dry-run
+stdout -count=1 'would install: claude-code/myserver'
+
+-- settings.json --
+{}
+
+-- bin/claude --
+#!/bin/sh
+set -eu
+mkdir -p "${OMNI_CACHE_DIR}"
+echo "$*" >> "${OMNI_CACHE_DIR}/claude-calls.log"
+if [ "$1" = "mcp" ] && [ "$2" = "add" ]; then
+  echo "added myserver"
+  exit 0
+fi
+exit 1

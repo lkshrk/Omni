@@ -18,6 +18,7 @@ const (
 	ToolChangeGroup                ID = "tools.change_group"
 	ToolPinProvider                ID = "tools.pin_provider"
 	ToolReinstallDefault           ID = "tools.reinstall_default"
+	ToolMigrateNvm                 ID = "tools.migrate_nvm"
 	ToolRefresh                    ID = "tools.refresh"
 	ToolConsolidate                ID = "tools.consolidate"
 	ToolSetSpec                    ID = "tools.set_spec"
@@ -312,6 +313,24 @@ var Tools = []Action{
 		Requirements:       []Requirement{RequiresToolName},
 		TUI:                &TUIBinding{KeyMapField: "MigrateProvider", DefaultKey: "r", Label: "reinstall with default", Description: "Reinstall the selected tool with its default provider.", ConfirmDescription: ConfirmReinstall},
 		CLI:                []CLIBinding{{Command: []string{"tools", "reinstall"}, Flags: []string{"--reinstall-default", "--provider"}}},
+	},
+	{
+		ID:                 ToolMigrateNvm,
+		Domain:             "tools",
+		Scope:              ScopeRow,
+		Label:              "migrate nvm-managed",
+		Description:        "Move nvm-managed system-provider tools to the node package manager.",
+		LongDescription:    "Migrate configured system-provider tools whose active binaries resolve via nvm onto the effective node package manager, or remove the Node runtime from omni config when nvm owns it.",
+		Mutates:            true,
+		RequiresConfirm:    true,
+		ConfirmDescription: "Migrate nvm-managed system-provider tool(s)?",
+		Requirements:       []Requirement{RequiresToolName},
+		TUI:                &TUIBinding{KeyMapField: "MigrateProvider", DefaultKey: "r", Label: "migrate nvm-managed", Description: "Move the selected nvm-managed tool off the system provider.", ConfirmDescription: "Migrate nvm-managed tool off system provider?"},
+		CLI: []CLIBinding{
+			{Command: []string{"tools", "migrate-nvm"}, Flags: []string{"--all"}},
+		},
+		Palette:         &PaletteBinding{Command: []string{"tools", "migrate-nvm"}, Description: "migrate nvm-managed tools to node manager", DescriptionFormat: "migrate nvm-managed %s"},
+		PaletteEligible: true,
 	},
 	{
 		ID:              ToolRefresh,
@@ -981,16 +1000,6 @@ func Get(id ID) (Action, bool) {
 	return action, ok
 }
 
-// MustLabel returns the catalog label for id. It panics for programmer errors
-// during startup/tests, making stale key/help references obvious.
-func MustLabel(id ID) string {
-	action, ok := Get(id)
-	if !ok {
-		panic("unknown action: " + string(id))
-	}
-	return action.Label
-}
-
 // MustTUILabel returns the TUI-specific compact label for id. It falls back to
 // the canonical label so palette-only actions can share short nouns safely.
 func MustTUILabel(id ID) string {
@@ -1009,21 +1018,6 @@ func MustDescription(id ID) string {
 	action, ok := Get(id)
 	if !ok {
 		panic("unknown action: " + string(id))
-	}
-	return action.Description
-}
-
-// MustTUIDescription returns the TUI-specific action description for id.
-func MustTUIDescription(id ID) string {
-	action, ok := Get(id)
-	if !ok {
-		panic("unknown action: " + string(id))
-	}
-	if action.TUI != nil && action.TUI.Description != "" {
-		return action.TUI.Description
-	}
-	if action.Palette != nil && action.Palette.Description != "" {
-		return action.Palette.Description
 	}
 	return action.Description
 }
