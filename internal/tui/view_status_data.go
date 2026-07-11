@@ -664,11 +664,14 @@ func doctorHasIgnoreFindings(m Model) bool {
 }
 
 func dashboardReconcilePlanInput(m Model) app.DashboardReconcilePlanInput {
+	agents := statusAgentsCounts(m)
 	return app.DashboardReconcilePlanInput{
 		Tools:           m.allTools,
 		DiscoveredTools: m.discoveredTools,
 		IgnoredTools:    dashboardIgnoredTools(m),
 		UpgradeBusy:     len(m.upgradingKeys) > 0,
+		AgentsOutOfSync: agents.SkillsMissing + agents.McpMissing + agents.PluginsMissing,
+		AgentsBusy:      m.skillsRunning || m.mcpRunning || m.pluginRunning,
 		DotsConfigured:  m.dotsSyncAvailCached.Configured,
 		DotsDisabled:    m.dotsSyncAvailCached.Reason == app.DotsSyncAvailabilityDisabled,
 		DotsBusy:        m.dotsLoading || m.dotsPreparing,

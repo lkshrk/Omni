@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -92,6 +93,7 @@ func materializeGitHubReleaseAsset(logicalName string, spec ToolInstallSpec, fal
 	if binDir == "" {
 		binDir = "~/.local/bin"
 	}
+	binDir = expandTilde(binDir)
 	cacheDir := filepath.Join(filepath.Dir(binDir), "cache")
 	tag := githubReleaseTag(&recipe, spec.Options)
 	binaryPath := strings.TrimSpace(recipe.BinaryPath)
@@ -129,6 +131,20 @@ func materializeGitHubReleaseAsset(logicalName string, spec ToolInstallSpec, fal
 	out.Options["uninstall"] = uninstall
 	out.Options["upgrade"] = install
 	return out, nil
+}
+
+func expandTilde(path string) string {
+	if path != "~" && !strings.HasPrefix(path, "~/") {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return path
+	}
+	if path == "~" {
+		return home
+	}
+	return filepath.Join(home, path[2:])
 }
 
 func githubReleaseTag(recipe *FallbackRecipe, opts map[string]string) string {

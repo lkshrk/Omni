@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -36,6 +37,8 @@ func TestMaterializeInstallSpec_CurlInstallScript(t *testing.T) {
 }
 
 func TestMaterializeInstallSpec_GitHubReleaseAssetArchAware(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 	spec := config.ToolInstallSpec{
 		Provider: "script",
 		Source: &config.FallbackSource{
@@ -57,6 +60,9 @@ func TestMaterializeInstallSpec_GitHubReleaseAssetArchAware(t *testing.T) {
 	}
 	if !strings.Contains(got.Options["install"], "eza-community/eza/releases/latest/download") {
 		t.Fatalf("install = %q, want latest release URL", got.Options["install"])
+	}
+	if !strings.Contains(got.Options["install"], filepath.Join(home, ".local", "bin")) {
+		t.Fatalf("install = %q, want expanded home directory", got.Options["install"])
 	}
 }
 

@@ -457,8 +457,9 @@ func (a *App) RemoveMarketplace(name string) error {
 	})
 }
 
-// SetPluginAgents re-targets an existing manifest plugin's Agents list,
-// installing on newly-selected adapters and removing from deselected ones.
+// SetPluginAgents re-targets an existing manifest plugin's Agents list and
+// reconciles every selected adapter, installing it when missing and removing it when
+// deselected.
 func (a *App) SetPluginAgents(ctx context.Context, name string, agents []string) (AddPluginResult, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -483,7 +484,11 @@ func (a *App) SetPluginAgents(ctx context.Context, name string, agents []string)
 		wasTargeted := pluginTargetsAdapter(*target, adapter.ID())
 		nowTargeted := pluginTargetsAdapter(updated, adapter.ID())
 		switch {
-		case nowTargeted && !wasTargeted:
+		case nowTargeted:
+			if installed, listErr := adapter.ListPlugins(ctx); listErr == nil && pluginListed(installed, updated.Name, updated.Marketplace) {
+				res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+name)
+				continue
+			}
 			if m != nil {
 				if mErr := ensureMarketplace(ctx, adapter, *m); mErr != nil {
 					res.Errors = append(res.Errors, PluginError{AgentID: adapter.ID(), Name: name, Err: mErr})

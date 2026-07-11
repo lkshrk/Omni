@@ -734,6 +734,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.doLoadMarketplaceRows())
 		}
 		cmds = append(cmds, m.doLoadAgentsSummary())
+		if m.dashboardReconcileCurrent == dashboardReconcilePlanSyncAgents {
+			m.continueDashboardReconcile(dashboardReconcilePlanSyncAgents, firstAgentsProgressError(msg), &cmds)
+		}
 		return m, tea.Batch(cmds...)
 
 	case mcpAddDoneMsg:
@@ -773,6 +776,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+func firstAgentsProgressError(msg agentsProgressDoneMsg) error {
+	for _, err := range []error{msg.skillsErr, msg.mcpErr, msg.pluginErr, msg.marketplaceErr} {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (m *Model) handleMouseClickMsg(msg tea.MouseClickMsg, cmds *[]tea.Cmd) bool {

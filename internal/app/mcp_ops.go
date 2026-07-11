@@ -258,9 +258,9 @@ func (a *App) RemoveMcpServer(ctx context.Context, name string) (RemoveMcpResult
 	return res, nil
 }
 
-// SetMcpServerAgents re-targets an existing manifest server's Agents list, installing
-// it on newly-selected adapters and removing it from deselected ones. Adapters whose
-// targeting is unchanged are left untouched. Per-adapter tolerant like AddMcpServer.
+// SetMcpServerAgents re-targets an existing manifest server's Agents list and
+// reconciles every selected adapter, installing it when missing and removing it when
+// deselected. Per-adapter tolerant like AddMcpServer.
 func (a *App) SetMcpServerAgents(ctx context.Context, name string, agents []string) (AddMcpResult, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -284,7 +284,11 @@ func (a *App) SetMcpServerAgents(ctx context.Context, name string, agents []stri
 		wasTargeted := serverTargetsAdapter(*target, adapter.ID())
 		nowTargeted := serverTargetsAdapter(updated, adapter.ID())
 		switch {
-		case nowTargeted && !wasTargeted:
+		case nowTargeted:
+			if installed, listErr := adapter.List(ctx); listErr == nil && mcpServerListed(installed, name) {
+				res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+name)
+				continue
+			}
 			if addErr := adapter.Add(ctx, updated); addErr != nil {
 				res.Errors = append(res.Errors, McpServerError{AgentID: adapter.ID(), ServerName: name, Err: addErr})
 			}

@@ -98,7 +98,7 @@ func TestRestoreMcpServers_SkipsNonTargetedAgent(t *testing.T) {
 }
 
 func TestRestoreMcpServers_EmptyAgentsMeansAll(t *testing.T) {
-	claude := &stubMcpAdapter{id: "claude-code", available: true}
+	claude := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{{Name: "x"}}}
 	codex := &stubMcpAdapter{id: "codex", available: true}
 	srv := config.McpServer{Name: "grafana", Transport: "http", URL: "https://mcp.example.com", Agents: nil}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}}, app.WithMcpAdapters([]app.McpAdapter{claude, codex}))
@@ -415,7 +415,7 @@ func TestRemoveMcpServer_PartialAdapterFailureStillPersistsManifest(t *testing.T
 }
 
 func TestSetMcpServerAgents_NarrowingRemovesFromDeselectedAdapter(t *testing.T) {
-	claude := &stubMcpAdapter{id: "claude-code", available: true}
+	claude := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{{Name: "x"}}}
 	codex := &stubMcpAdapter{id: "codex", available: true}
 	existing := config.McpServer{Name: "x", Transport: "stdio", Command: "npx x", Agents: []string{"claude-code", "codex"}}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{existing}}, app.WithMcpAdapters([]app.McpAdapter{claude, codex}))
@@ -444,7 +444,7 @@ func TestSetMcpServerAgents_NarrowingRemovesFromDeselectedAdapter(t *testing.T) 
 }
 
 func TestSetMcpServerAgents_WideningAddsToNewlySelectedAdapter(t *testing.T) {
-	claude := &stubMcpAdapter{id: "claude-code", available: true}
+	claude := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{{Name: "x"}}}
 	codex := &stubMcpAdapter{id: "codex", available: true}
 	existing := config.McpServer{Name: "x", Transport: "stdio", Command: "npx x", Agents: []string{"claude-code"}}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{existing}}, app.WithMcpAdapters([]app.McpAdapter{claude, codex}))
@@ -470,7 +470,7 @@ func TestSetMcpServerAgents_WideningAddsToNewlySelectedAdapter(t *testing.T) {
 }
 
 func TestSetMcpServerAgents_NoChangeTouchesNoAdapter(t *testing.T) {
-	claude := &stubMcpAdapter{id: "claude-code", available: true}
+	claude := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{{Name: "x"}}}
 	existing := config.McpServer{Name: "x", Transport: "stdio", Command: "npx x", Agents: []string{"claude-code"}}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{existing}}, app.WithMcpAdapters([]app.McpAdapter{claude}))
 	res, err := a.SetMcpServerAgents(context.Background(), "x", []string{"claude-code"})
@@ -482,6 +482,18 @@ func TestSetMcpServerAgents_NoChangeTouchesNoAdapter(t *testing.T) {
 	}
 	if len(res.Errors) != 0 {
 		t.Fatalf("unexpected errors: %v", res.Errors)
+	}
+}
+
+func TestSetMcpServerAgents_ReconcilesMissingSelectedAdapter(t *testing.T) {
+	claude := &stubMcpAdapter{id: "claude-code", available: true}
+	existing := config.McpServer{Name: "x", Transport: "stdio", Command: "npx x", Agents: []string{"claude-code"}}
+	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{existing}}, app.WithMcpAdapters([]app.McpAdapter{claude}))
+	if _, err := a.SetMcpServerAgents(context.Background(), "x", []string{"claude-code"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(claude.addedServers) != 1 {
+		t.Fatalf("expected missing selected server to be installed, got %d Add calls", len(claude.addedServers))
 	}
 }
 

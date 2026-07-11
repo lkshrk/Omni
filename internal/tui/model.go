@@ -172,6 +172,7 @@ const (
 	dashboardReconcilePlanCommitDots    dashboardReconcilePlanKind = app.ReconcileStepCommitDots
 	dashboardReconcilePlanFixIgnore     dashboardReconcilePlanKind = app.ReconcileStepFixIgnore
 	dashboardReconcilePlanFixNvmManaged dashboardReconcilePlanKind = app.ReconcileStepFixNvmManaged
+	dashboardReconcilePlanSyncAgents    dashboardReconcilePlanKind = app.ReconcileStepSyncAgents
 )
 
 // Model is the root Bubbletea model.
