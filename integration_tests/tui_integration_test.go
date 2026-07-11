@@ -175,9 +175,19 @@ func TestTUIFallbackEditorPrefillsConfiguredGitHint(t *testing.T) {
 				strings.Contains(text, "BurntSushi/ripgrep")
 		}, "TUI did not prefill fallback editor from configured git hint")
 		writeTUIKeys(t, tty, "\r")
-		savedScreen := waitForRequiredScreen(t, capture, 8*time.Second, func(text string) bool {
-			return strings.Contains(text, "fallback saved for omni-test-fbtool from gh BurntSushi/ripgrep")
-		}, "TUI did not save fallback from configured git hint")
+		// Status text is transient and width-truncated; assert the persisted
+		// fallback instead, which is the behavior this flow owns.
+		savedScreen := waitForRequiredScreen(t, capture, 8*time.Second, func(_ string) bool {
+			cfg, err := config.Load(configPath)
+			if err != nil {
+				return false
+			}
+			fallback := cfg.Tools["omni-test-fbtool"].Fallback
+			return fallback != nil &&
+				fallback.Source.Type == config.FallbackSourceGitHub &&
+				fallback.Source.Owner == "BurntSushi" &&
+				fallback.Source.Repo == "ripgrep"
+		}, "TUI did not persist fallback from configured git hint")
 		return toolsScreen + "\n" + editorScreen + "\n" + savedScreen
 	})
 	if strings.Contains(strings.ToLower(screen), "error") {
