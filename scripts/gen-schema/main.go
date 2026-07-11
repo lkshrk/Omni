@@ -152,6 +152,7 @@ func buildWithID(id string) *schema {
 				Type:        "array",
 				Items:       ref("#/$defs/GroupConfig"),
 			},
+			"agents": ref("#/$defs/AgentsConfig"),
 		},
 		Required:             []string{"version"},
 		AdditionalProperties: false,
@@ -190,6 +191,26 @@ func buildWithID(id string) *schema {
 						Type:        "string",
 						Examples:    []any{"~/Dev/dotfiles", "~/.dotfiles"},
 					},
+					"dots_disabled": {
+						Description: "Disable dotfile sync for this settings scope.",
+						Type:        "boolean",
+					},
+					"agents_disabled": {
+						Description: "Master switch: disable the agent skills/mcp/plugins features for this settings scope.",
+						Type:        "boolean",
+					},
+					"skills_disabled": {
+						Description: "Disable the agent skills feature for this settings scope.",
+						Type:        "boolean",
+					},
+					"mcp_disabled": {
+						Description: "Disable the agent mcp feature for this settings scope.",
+						Type:        "boolean",
+					},
+					"plugins_disabled": {
+						Description: "Disable the agent plugins feature for this settings scope.",
+						Type:        "boolean",
+					},
 					"dots_git": ref("#/$defs/DotsGitConfig"),
 				},
 				AdditionalProperties: false,
@@ -215,6 +236,22 @@ func buildWithID(id string) *schema {
 					},
 					"dots_disabled": {
 						Description: "Whether dotfile sync is disabled on this host.",
+						Type:        "boolean",
+					},
+					"agents_disabled": {
+						Description: "Master switch: whether the agent skills/mcp/plugins features are disabled on this host.",
+						Type:        "boolean",
+					},
+					"skills_disabled": {
+						Description: "Whether the agent skills feature is disabled on this host.",
+						Type:        "boolean",
+					},
+					"mcp_disabled": {
+						Description: "Whether the agent mcp feature is disabled on this host.",
+						Type:        "boolean",
+					},
+					"plugins_disabled": {
+						Description: "Whether the agent plugins feature is disabled on this host.",
 						Type:        "boolean",
 					},
 					"disabled_providers": {
@@ -297,6 +334,26 @@ func buildWithID(id string) *schema {
 						Description: "Dotfile entries managed by this group.",
 						Type:        "array",
 						Items:       ref("#/$defs/DotEntry"),
+					},
+					"skills": {
+						Description: "Skill package sources active on this group's hosts.",
+						Type:        "array",
+						Items:       &schema{Type: "string", MinLength: 1},
+					},
+					"mcp_servers": {
+						Description: "MCP server names active on this group's hosts.",
+						Type:        "array",
+						Items:       &schema{Type: "string", MinLength: 1},
+					},
+					"plugins": {
+						Description: "Plugin names active on this group's hosts.",
+						Type:        "array",
+						Items:       &schema{Type: "string", MinLength: 1},
+					},
+					"marketplaces": {
+						Description: "Marketplace names assigned to this group.",
+						Type:        "array",
+						Items:       &schema{Type: "string", MinLength: 1},
 					},
 				},
 				AdditionalProperties: false,
@@ -616,6 +673,184 @@ func buildWithID(id string) *schema {
 						Type:        "array",
 						Items:       &schema{Type: "string", MinLength: 1},
 						Examples:    []any{[]any{"*.local", "secrets/"}},
+					},
+				},
+				AdditionalProperties: false,
+			},
+			"AgentsConfig": {
+				Description: "Omni-managed AI-agent resources: skill packages, MCP servers, plugin marketplaces, and plugins.",
+				Type:        "object",
+				Properties: map[string]*schema{
+					"packages": {
+						Description: "Skill package sources restored via the upstream skills CLI.",
+						Type:        "array",
+						Items:       ref("#/$defs/SkillPackage"),
+					},
+					"mcp_servers": {
+						Description: "MCP server entries restored for the configured agents.",
+						Type:        "array",
+						Items:       ref("#/$defs/McpServer"),
+					},
+					"marketplaces": {
+						Description: "Plugin marketplace sources for the configured agents.",
+						Type:        "array",
+						Items:       ref("#/$defs/Marketplace"),
+					},
+					"plugins": {
+						Description: "Plugins installed from a declared marketplace.",
+						Type:        "array",
+						Items:       ref("#/$defs/Plugin"),
+					},
+					"ignore": ref("#/$defs/AgentsIgnore"),
+				},
+				AdditionalProperties: false,
+			},
+			"SkillPackage": {
+				Description: "A source repo of agent skills, tracked as one unit.",
+				Type:        "object",
+				Required:    []string{"source"},
+				Properties: map[string]*schema{
+					"source": {
+						Description: "Skill package repository source (owner/repo or URL).",
+						Type:        "string",
+						MinLength:   1,
+						Examples:    []any{"vercel-labs/agent-skills"},
+					},
+					"ref": {
+						Description: "Git ref (branch, tag, or commit) to install from. Defaults to the package's default branch.",
+						Type:        "string",
+					},
+					"agents": {
+						Description: "Target agent IDs for this package. Empty means all configured agents.",
+						Type:        "array",
+						Items:       &schema{Type: "string", MinLength: 1},
+						Examples:    []any{[]any{"claude-code", "codex"}},
+					},
+				},
+				AdditionalProperties: false,
+			},
+			"McpServer": {
+				Description: "One MCP server entry in the omni agent manifest.",
+				Type:        "object",
+				Required:    []string{"name", "transport"},
+				Properties: map[string]*schema{
+					"name": {
+						Description: "MCP server identifier.",
+						Type:        "string",
+						MinLength:   1,
+						Examples:    []any{"context7"},
+					},
+					"transport": {
+						Description: "MCP transport kind. stdio requires command; http/sse require url.",
+						Type:        "string",
+						Enum:        []any{"stdio", "http", "sse"},
+						Examples:    []any{"stdio"},
+					},
+					"command": {
+						Description: "Command to launch the server. Required for stdio transport.",
+						Type:        "string",
+						Examples:    []any{"npx -y @upstash/context7-mcp"},
+					},
+					"url": {
+						Description: "Server URL. Required for http/sse transport.",
+						Type:        "string",
+						Examples:    []any{"https://mcp.example.com"},
+					},
+					"env": {
+						Description: "Environment variable names resolved from the calling environment at restore time.",
+						Type:        "array",
+						Items:       &schema{Type: "string", MinLength: 1},
+						Examples:    []any{[]any{"CONTEXT7_API_KEY"}},
+					},
+					"env_literal": {
+						Description:          "Non-secret inline environment values forwarded verbatim.",
+						Type:                 "object",
+						AdditionalProperties: &schema{Type: "string"},
+					},
+					"agents": {
+						Description: "Target agent IDs for this server. Empty means all configured agents.",
+						Type:        "array",
+						Items:       &schema{Type: "string", MinLength: 1},
+						Examples:    []any{[]any{"claude-code", "codex"}},
+					},
+				},
+				AdditionalProperties: false,
+			},
+			"Marketplace": {
+				Description: "A plugin marketplace source in the omni agent manifest.",
+				Type:        "object",
+				Required:    []string{"name", "source"},
+				Properties: map[string]*schema{
+					"name": {
+						Description: "Marketplace identifier.",
+						Type:        "string",
+						MinLength:   1,
+					},
+					"source": {
+						Description: "Marketplace source (owner/repo or URL) as accepted by the agent CLI's marketplace add command.",
+						Type:        "string",
+						MinLength:   1,
+					},
+					"agents": {
+						Description: "Target agent IDs for this marketplace. Empty means all configured agents.",
+						Type:        "array",
+						Items:       &schema{Type: "string", MinLength: 1},
+						Examples:    []any{[]any{"claude-code", "codex"}},
+					},
+				},
+				AdditionalProperties: false,
+			},
+			"Plugin": {
+				Description: "A plugin installed from a declared marketplace.",
+				Type:        "object",
+				Required:    []string{"name", "marketplace"},
+				Properties: map[string]*schema{
+					"name": {
+						Description: "Plugin identifier.",
+						Type:        "string",
+						MinLength:   1,
+					},
+					"marketplace": {
+						Description: "Name of the declared agents.marketplaces entry this plugin comes from.",
+						Type:        "string",
+						MinLength:   1,
+					},
+					"agents": {
+						Description: "Target agent IDs for this plugin. Empty means all configured agents.",
+						Type:        "array",
+						Items:       &schema{Type: "string", MinLength: 1},
+						Examples:    []any{[]any{"claude-code", "codex"}},
+					},
+				},
+				AdditionalProperties: false,
+			},
+			"AgentsIgnore": {
+				Description: "Agent resources skipped during restore/sync.",
+				Type:        "object",
+				Properties: map[string]*schema{
+					"skills": {
+						Description: "Skill package sources skipped during restore/sync.",
+						Type:        "array",
+						Items:       &schema{Type: "string", MinLength: 1},
+						Examples:    []any{[]any{"vercel-labs/agent-skills"}},
+					},
+					"mcp_servers": {
+						Description: "MCP server names skipped during restore/sync.",
+						Type:        "array",
+						Items:       &schema{Type: "string", MinLength: 1},
+						Examples:    []any{[]any{"context7"}},
+					},
+					"plugins": {
+						Description: "Plugin names skipped during restore/sync.",
+						Type:        "array",
+						Items:       &schema{Type: "string", MinLength: 1},
+						Examples:    []any{[]any{"my-plugin"}},
+					},
+					"marketplaces": {
+						Description: "Marketplace names skipped during restore/sync.",
+						Type:        "array",
+						Items:       &schema{Type: "string", MinLength: 1},
+						Examples:    []any{[]any{"my-marketplace"}},
 					},
 				},
 				AdditionalProperties: false,
