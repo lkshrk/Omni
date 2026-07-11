@@ -202,11 +202,15 @@ func ToolSyncStatusForTool(tool *database.ToolCache, context ToolClassificationC
 	if !tool.Installed {
 		return ToolSyncMissing
 	}
-	desired, _ := DesiredConcreteProviderForTool(tool, context)
+	desired, _ := ExpectedConcreteProviderForTool(tool, context)
 	if desired != "" && tool.InstalledWith != "" && tool.InstalledWith != desired {
 		return ToolSyncWrongProvider
 	}
-	if IsSystemProvider(tool.Provider) && tool.Installed && context.NvmManaged != nil && context.NvmManaged[tool.Name] {
+	// Only apply nvm-managed detection for tools without an explicit pin.
+	// If pinned (to bun etc), respect the pin even if the provider looks system.
+	if context.ToolProviderPins[tool.Name] == "" &&
+		IsSystemProvider(tool.Provider) && tool.Installed &&
+		context.NvmManaged != nil && context.NvmManaged[tool.Name] {
 		return ToolSyncNvmManaged
 	}
 	return ToolSyncOK
@@ -229,6 +233,20 @@ func DesiredConcreteProviderForTool(tool *database.ToolCache, context ToolClassi
 	default:
 		return "", ""
 	}
+}
+
+// ExpectedConcreteProviderForTool returns the concrete manager omni expects for a
+// tracked tool: ecosystem defaults/pins for node/system/python, otherwise the
+// configured route provider for multi-concrete tools (e.g. brew vs bun).
+func ExpectedConcreteProviderForTool(tool *database.ToolCache, context ToolClassificationContext) (string, string) {
+	desired, source := DesiredConcreteProviderForTool(tool, context)
+	if desired != "" || tool == nil {
+		return desired, source
+	}
+	if tool.Provider != "" && !provider.BuiltinIsEcosystem(tool.Provider) {
+		return tool.Provider, "configured"
+	}
+	return "", ""
 }
 
 func ToolProviderDisplayLabel(input ToolProviderDisplayInput) string {

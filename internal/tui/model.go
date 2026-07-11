@@ -663,11 +663,14 @@ type Model struct {
 }
 
 type listConfirmation struct {
-	action        string
-	name          string
-	provider      string
-	installed     bool
-	installedWith string
+	action   string
+	name     string
+	provider string
+	// pinnedProvider carries an explicit provider pin for clear-override; provider
+	// stays the declared tool provider so row keys and prompt matching keep working.
+	pinnedProvider string
+	installed      bool
+	installedWith  string
 }
 
 // New creates the initial Model.

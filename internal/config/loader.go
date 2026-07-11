@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/lkshrk/omni/internal/testguard"
 )
@@ -179,6 +180,9 @@ func load(path string, normalize bool) (*RootConfig, bool, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, false, fmt.Errorf("parsing config file: %w", err)
 	}
+	if err := loadIncludes(path, &cfg); err != nil {
+		return nil, false, err
+	}
 	migrated, err := Migrate(&cfg)
 	if err != nil {
 		return nil, false, err
@@ -259,6 +263,7 @@ var configMigrations = []configMigration{
 	{from: 13, to: 14, apply: migrateConfigV13ToV14, applyRaw: migrateRawConfigV13ToV14},
 	{from: 14, to: 15, apply: migrateConfigV14ToV15, applyRaw: migrateRawConfigV14ToV15},
 	{from: 15, to: 16, apply: migrateConfigV15ToV16, applyRaw: migrateRawConfigV15ToV16},
+	{from: 16, to: 17, apply: migrateConfigV16ToV17, applyRaw: migrateRawConfigV16ToV17},
 }
 
 func configMigrationFrom(version int) (configMigration, bool) {
@@ -473,6 +478,9 @@ func Normalize(cfg *RootConfig) bool {
 			changed = true
 		}
 	}
+	if ExpandGroupAgentRefs(cfg) {
+		changed = true
+	}
 	return changed
 }
 
@@ -610,6 +618,98 @@ func PatchRaw(path string, patch map[string]json.RawMessage) error {
 	return atomicWrite(path, buf.Bytes())
 }
 
+// ToolSource returns the file whose tool definition wins after resolving
+// $include entries. Included files are merged after their parent, so the last
+// matching definition is the effective one.
+func ToolSource(path, name string) (string, error) {
+	if strings.TrimSpace(name) == "" {
+		return "", fmt.Errorf("tool name is required")
+	}
+	source, found, err := toolSource(path, name)
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return path, nil
+	}
+	return source, nil
+}
+
+func toolSource(path, name string) (string, bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false, fmt.Errorf("reading config file: %w", err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return "", false, fmt.Errorf("parsing config file: %w", err)
+	}
+
+	var source string
+	found := false
+	var tools map[string]json.RawMessage
+	if err := json.Unmarshal(raw["tools"], &tools); err == nil && tools[name] != nil {
+		source = path
+		found = true
+	}
+	var includes []string
+	if includeRaw := raw["$include"]; len(includeRaw) > 0 {
+		if err := json.Unmarshal(includeRaw, &includes); err != nil {
+			return "", false, fmt.Errorf("parsing config includes: %w", err)
+		}
+	}
+	for _, include := range includes {
+		include = strings.TrimSpace(include)
+		if include == "" {
+			continue
+		}
+		includePath := include
+		if !filepath.IsAbs(includePath) {
+			includePath = filepath.Join(includeBaseDir(path), includePath)
+		}
+		includedSource, included, err := toolSource(includePath, name)
+		if err != nil {
+			return "", false, err
+		}
+		if included {
+			source = includedSource
+			found = true
+		}
+	}
+	return source, found, nil
+}
+
+// PatchTool updates exactly one tool definition in the file that owns it,
+// preserving sibling tool definitions and include layout.
+func PatchTool(path, name string, mutate func(*ToolSpec) error) error {
+	source, err := ToolSource(path, name)
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(source)
+	if err != nil {
+		return fmt.Errorf("reading config file: %w", err)
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("parsing config file: %w", err)
+	}
+	tools := make(map[string]ToolSpec)
+	if toolsRaw := raw["tools"]; len(toolsRaw) > 0 {
+		if err := json.Unmarshal(toolsRaw, &tools); err != nil {
+			return fmt.Errorf("parsing tools: %w", err)
+		}
+	}
+	spec := tools[name]
+	if err := mutate(&spec); err != nil {
+		return err
+	}
+	tools[name] = spec
+	return Patch(source, struct {
+		Tools map[string]ToolSpec `json:"tools"`
+	}{Tools: tools})
+}
+
 func migrateRawVersion(raw map[string]json.RawMessage) error {
 	if raw == nil {
 		return nil
@@ -708,6 +808,7 @@ func normalizedCopy(cfg *RootConfig) RootConfig {
 		return RootConfig{Version: CurrentVersion}
 	}
 	out := *cfg
+	out.Include = nil
 	out.Settings = cloneSettings(cfg.Settings)
 	out.Agents.Packages = append([]SkillPackage(nil), cfg.Agents.Packages...)
 	for i := range out.Agents.Packages {
@@ -743,6 +844,8 @@ func normalizedCopy(cfg *RootConfig) RootConfig {
 		spec.Providers = append([]ToolInstallSpec(nil), spec.Providers...)
 		for i := range spec.Providers {
 			spec.Providers[i].Options = cloneStringMap(spec.Providers[i].Options)
+			spec.Providers[i].Source = cloneFallbackSource(spec.Providers[i].Source)
+			spec.Providers[i].Recipe = cloneFallbackRecipe(spec.Providers[i].Recipe)
 		}
 		spec.Variants = append([]ToolInstallSpec(nil), spec.Variants...)
 		for i := range spec.Variants {
@@ -911,4 +1014,71 @@ func migrateConfigV15ToV16(cfg *RootConfig) error {
 func migrateRawConfigV15ToV16(raw map[string]json.RawMessage) error {
 	raw["version"] = json.RawMessage(`16`)
 	return nil
+}
+
+// migrateConfigV16ToV17 is a no-op data migration: v17 only adds optional
+// ToolInstallSpec source/recipe/bin_dir fields and $include support.
+func migrateConfigV16ToV17(cfg *RootConfig) error {
+	cfg.Version = 17
+	return nil
+}
+
+func migrateRawConfigV16ToV17(raw map[string]json.RawMessage) error {
+	raw["version"] = json.RawMessage(`17`)
+	return nil
+}
+
+func includeBaseDir(configPath string) string {
+	if resolved, err := resolveConfigWritePath(configPath); err == nil {
+		return filepath.Dir(resolved)
+	}
+	return filepath.Dir(configPath)
+}
+
+func loadIncludes(path string, cfg *RootConfig) error {
+	if cfg == nil || len(cfg.Include) == 0 {
+		return nil
+	}
+	baseDir := includeBaseDir(path)
+	includes := append([]string(nil), cfg.Include...)
+	cfg.Include = nil
+	for _, include := range includes {
+		include = strings.TrimSpace(include)
+		if include == "" {
+			continue
+		}
+		includePath := include
+		if !filepath.IsAbs(includePath) {
+			includePath = filepath.Join(baseDir, include)
+		}
+		data, err := os.ReadFile(includePath)
+		if err != nil {
+			return fmt.Errorf("reading included config %q: %w", include, err)
+		}
+		var fragment RootConfig
+		if err := json.Unmarshal(data, &fragment); err != nil {
+			return fmt.Errorf("parsing included config %q: %w", include, err)
+		}
+		if err := loadIncludes(includePath, &fragment); err != nil {
+			return err
+		}
+		MergeRootConfig(cfg, &fragment)
+	}
+	return nil
+}
+
+func cloneFallbackSource(src *FallbackSource) *FallbackSource {
+	if src == nil {
+		return nil
+	}
+	out := *src
+	return &out
+}
+
+func cloneFallbackRecipe(recipe *FallbackRecipe) *FallbackRecipe {
+	if recipe == nil {
+		return nil
+	}
+	out := *recipe
+	return &out
 }

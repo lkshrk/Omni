@@ -1125,7 +1125,7 @@ func TestRefreshDiscovered_ScansOnlyTrackedProviders(t *testing.T) {
 	}
 }
 
-func TestRefreshDiscovered_SkipsNonCLIToolPackages(t *testing.T) {
+func TestRefreshDiscovered_SkipsUnconfiguredPipPackages(t *testing.T) {
 	pip := &cliFilteredListInstalledStub{
 		listInstalledStub: listInstalledStub{
 			stubProvider: stubProvider{name: "pip", available: true},
@@ -1152,8 +1152,8 @@ func TestRefreshDiscovered_SkipsNonCLIToolPackages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListDiscovered: %v", err)
 	}
-	if len(discovered) != 1 || discovered[0].Name != "black" {
-		t.Fatalf("discovered = %+v, want only CLI package black", discovered)
+	if len(discovered) != 0 {
+		t.Fatalf("discovered = %+v, want no unconfigured pip packages", discovered)
 	}
 }
 

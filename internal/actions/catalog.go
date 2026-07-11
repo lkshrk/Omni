@@ -66,6 +66,7 @@ const (
 	SettingsProvider               ID = "settings.provider"
 	SettingsReset                  ID = "settings.reset"
 	SettingsResetCache             ID = "settings.reset_cache"
+	SettingsMigrateHostOverrides   ID = "settings.migrate_host_overrides"
 	SetupInit                      ID = "setup.init"
 	Doctor                         ID = "doctor"
 )
@@ -304,14 +305,14 @@ var Tools = []Action{
 		ID:                 ToolReinstallDefault,
 		Domain:             "tools",
 		Scope:              ScopeRow,
-		Label:              "reinstall with default",
-		Description:        "Reinstall a wrong-provider tool with its configured provider.",
-		LongDescription:    "Reinstall a wrong-provider tool with the configured provider family default, then remove the old concrete provider installation.",
+		Label:              "reinstall",
+		Description:        "Reinstall a wrong-provider tool with its preferred provider.",
+		LongDescription:    "Uninstall the current provider installation, then reinstall the tool with the preferred provider family default.",
 		Mutates:            true,
 		RequiresConfirm:    true,
 		ConfirmDescription: ConfirmReinstall,
 		Requirements:       []Requirement{RequiresToolName},
-		TUI:                &TUIBinding{KeyMapField: "MigrateProvider", DefaultKey: "r", Label: "reinstall with default", Description: "Reinstall the selected tool with its default provider.", ConfirmDescription: ConfirmReinstall},
+		TUI:                &TUIBinding{KeyMapField: "Install", DefaultKey: "i", Label: "reinstall", Description: "Uninstall the current provider and reinstall with the preferred provider.", ConfirmDescription: ConfirmReinstall},
 		CLI:                []CLIBinding{{Command: []string{"tools", "reinstall"}, Flags: []string{"--reinstall-default", "--provider"}}},
 	},
 	{
@@ -939,6 +940,17 @@ var Settings = []Action{
 		ConfirmDescription: "confirm reset cache",
 		TUI:                &TUIBinding{KeyMapField: "Confirm", DefaultKey: "enter", Label: "reset cache", Description: "Clear the local tool cache.", ConfirmDescription: "confirm reset cache"},
 		CLI:                []CLIBinding{{Command: []string{"settings", "reset-cache"}}},
+	},
+	{
+		ID:              SettingsMigrateHostOverrides,
+		Domain:          "settings",
+		Scope:           ScopeGlobal,
+		Label:           "migrate host overrides",
+		Description:     "Fold tools.*.hosts install overrides into providers[].",
+		LongDescription: "Move deprecated per-host install overrides into the providers[] list and remove empty hosts maps.",
+		Mutates:         true,
+		CLIOnlyReason:   "One-time config migration for deprecated tools.*.hosts install overrides; exposed as a CLI repair command.",
+		CLI:             []CLIBinding{{Command: []string{"settings", "migrate-host-overrides"}}},
 	},
 }
 

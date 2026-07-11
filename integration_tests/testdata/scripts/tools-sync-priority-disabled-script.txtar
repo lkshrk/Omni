@@ -1,0 +1,91 @@
+# provider_priority prefers script over brew, and disabled_providers skips brew anyway
+exec chmod 755 bin/brew
+env PATH=$WORK/bin:$PATH
+
+exec omni --config settings.json hosts ensure testhost
+exec omni --config settings.json tools sync
+stdout 'done: bun \(script\)'
+stdout 'installed: bun \(script\)'
+exec test -f script-installed-marker
+! exec test -f .omni-cache/fake-brew/bun
+
+-- bin/brew --
+#!/usr/bin/env sh
+set -eu
+state="${OMNI_CACHE_DIR}/fake-brew"
+mkdir -p "$state"
+case "${1:-}" in
+  --version)
+    echo "Homebrew 4.0.0"
+    ;;
+  search)
+    if [ "${2:-}" = "bun" ]; then
+      printf '==> Formulae\nbun\n'
+      exit 0
+    fi
+    echo "No formulae or casks found for $2" >&2
+    exit 1
+    ;;
+  install)
+    shift
+    if [ "${1:-}" = "--formula" ] || [ "${1:-}" = "--cask" ]; then
+      shift
+    fi
+    : > "$state/$1"
+    ;;
+  list)
+    shift
+    if [ "${1:-}" = "--cask" ]; then
+      exit 0
+    fi
+    if [ "${1:-}" = "--versions" ]; then
+      shift
+      if [ "${1:-}" = "--cask" ]; then
+        shift
+      fi
+      for pkg in "$@"; do
+        if [ -f "$state/$pkg" ]; then
+          echo "$pkg 1.0.0"
+          exit 0
+        fi
+      done
+    fi
+    exit 1
+    ;;
+  info)
+    echo '{"formulae":[],"casks":[]}'
+    ;;
+  update|outdated)
+    ;;
+esac
+
+-- settings.json --
+{
+  "version": 17,
+  "settings": {
+    "provider_priority": ["script", "brew"]
+  },
+  "host_settings": {
+    "testhost": {
+      "disabled_providers": ["brew"]
+    }
+  },
+  "tools": {
+    "bun": {
+      "providers": [
+        { "provider": "brew", "package": "bun" },
+        {
+          "provider": "script",
+          "options": {
+            "install": "touch script-installed-marker",
+            "check": "test -f script-installed-marker"
+          }
+        }
+      ]
+    }
+  },
+  "hosts": { "testhost": [] },
+  "groups": [
+    { "name": "testhost", "special": "host", "tools": ["bun"] }
+  ]
+}

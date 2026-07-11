@@ -12,15 +12,16 @@ import (
 )
 
 const (
-	iconInstalled  = "✓"
-	iconMissing    = "✗"
-	iconOutdated   = "↑"
-	iconIgnored    = "–"
-	iconOrphan     = "+"
-	iconWrongProv  = "⚠"
-	iconFailed     = "!"
-	iconPending    = "◷"
-	iconPrivileged = "⚿"
+	iconInstalled      = "✓"
+	iconMissing        = "✗"
+	iconOutdated       = "↑"
+	iconIgnored        = "–"
+	iconOrphan         = "+"
+	iconWrongProv      = "⚠"
+	providerWrongGlyph = "!"
+	iconFailed         = "!"
+	iconPending        = "◷"
+	iconPrivileged     = "⚿"
 )
 
 // newHelp creates a help.Model styled to match the omni palette.

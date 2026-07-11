@@ -416,14 +416,15 @@ func (a *App) ClearToolInstallOverride(ctx context.Context, name, providerName s
 		return ClearInstallOverrideResult{}, fmt.Errorf("tool name is required")
 	}
 	var result ClearInstallOverrideResult
-	err := a.withConfig(func(cfg *config.RootConfig) error {
-		spec, ok := cfg.Tools[name]
-		if !ok {
-			return fmt.Errorf("logical tool %q not found", name)
-		}
-		install := a.resolveInstallSpec(ctx, name, spec)
+	err := a.patchToolConfig(name, func(spec *config.ToolSpec) error {
+		install := a.resolveInstallSpec(ctx, name, *spec)
 		if providerName != "" && !installSpecMatchesProvider(install, providerName) {
-			return fmt.Errorf("tool %q with provider %q not found in config", name, providerName)
+			// Ecosystem family names (e.g. "node") may be passed from TUI while the
+			// resolved install uses the pinned concrete (e.g. "pnpm"). Allow the clear
+			// to proceed for known ecosystem names so unpin/remove works.
+			if !provider.BuiltinIsEcosystem(providerName) {
+				return fmt.Errorf("tool %q with provider %q not found in config", name, providerName)
+			}
 		}
 
 		hostnames := currentHostnames()
@@ -461,6 +462,19 @@ func (a *App) ClearToolInstallOverride(ctx context.Context, name, providerName s
 			}
 			spec.InstallWith = ""
 		}
+
+		// Clear host-level modern override entries (providers style host specs).
+		for _, h := range hostnames {
+			if _, ok := spec.Hosts[h]; ok {
+				delete(spec.Hosts, h)
+				if result.Name == "" {
+					result = ClearInstallOverrideResult{Name: name, Scope: "host"}
+				}
+			}
+		}
+		if len(spec.Hosts) == 0 {
+			spec.Hosts = nil
+		}
 		if result.Name == "" {
 			return fmt.Errorf("provider override for %q not found", name)
 		}
@@ -473,7 +487,6 @@ func (a *App) ClearToolInstallOverride(ctx context.Context, name, providerName s
 				spec.Hosts = nil
 			}
 		}
-		cfg.Tools[name] = spec
 		return nil
 	})
 	if err != nil {
@@ -615,11 +628,7 @@ func (a *App) setToolInstallSpec(name, host, providerName, packageName, installW
 		return err
 	}
 
-	return a.withConfig(func(cfg *config.RootConfig) error {
-		spec, ok := cfg.Tools[name]
-		if !ok {
-			return fmt.Errorf("logical tool %q not found", name)
-		}
+	return a.patchToolConfig(name, func(spec *config.ToolSpec) error {
 		if entry.Package == "" {
 			entry.Package = spec.DefaultInstallSpec().EffectivePackage(name)
 			if entry.Package == name {
@@ -631,11 +640,16 @@ func (a *App) setToolInstallSpec(name, host, providerName, packageName, installW
 			if spec.Hosts == nil {
 				spec.Hosts = make(map[string]config.ToolInstallSpec)
 			}
+			// hostSpec.Provider alone carries the pin; install_with on a concrete
+			// host spec is rejected by config validation (ecosystem-scoped only).
 			spec.Hosts[host] = entry
 		} else {
-			setDefaultToolProviderCandidate(&spec, entry)
+			setDefaultToolProviderCandidate(spec, entry)
+			if installWith != "" {
+				// Mark with InstallWith so pin extraction + remove recognize the override.
+				spec.InstallWith = installWith
+			}
 		}
-		cfg.Tools[name] = spec
 		return nil
 	})
 }
@@ -678,6 +692,11 @@ func (a *App) knownEcosystemProvider(providerName string) bool {
 		return true
 	}
 	return provider.BuiltinIsEcosystem(providerName)
+}
+
+// KnownEcosystemProvider is the exported version for use from other packages (e.g. TUI).
+func (a *App) KnownEcosystemProvider(providerName string) bool {
+	return a.knownEcosystemProvider(providerName)
 }
 
 func (a *App) validateInstallWith(providerName, installWith string) error {

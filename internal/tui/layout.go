@@ -5,8 +5,8 @@ package tui
 const (
 	// listColumnGap is the standard space between table columns across main lists.
 	listColumnGap = 3
-	// toolPrivilegeProviderGap keeps the sudo marker visually attached to provider.
-	toolPrivilegeProviderGap = 1
+	// Marker and provider render as one aligned cell: !bun / lockbrew.
+	toolPrivilegeProviderGap = 0
 
 	// dotsIconW is the health icon width (one rune: ✓ ! ✗ ·).
 	dotsIconW = 1

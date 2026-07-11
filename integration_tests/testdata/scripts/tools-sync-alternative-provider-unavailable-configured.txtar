@@ -99,7 +99,7 @@ esac
   "version": 7,
   "settings": {
     "provider_priority": ["npm", "brew"],
-    "disabled_providers": ["bun", "pnpm", "python", "apt", "apk", "dnf", "pacman", "zypper", "pip"]
+    "disabled_providers": ["bun", "pnpm", "python", "apk", "dnf", "pacman", "zypper", "pip"]
   },
   "tools": {
     "prettier": {

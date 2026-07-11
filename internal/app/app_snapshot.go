@@ -447,6 +447,8 @@ func (a *App) toolScopeFromConfig(cfg *config.RootConfig) (map[string]bool, map[
 		if hostSpec, ok := spec.Hosts[shortHost]; ok {
 			if hostSpec.InstallWith != "" {
 				pins[name] = hostSpec.InstallWith
+			} else if hostSpec.Provider != "" {
+				pins[name] = hostSpec.Provider
 			}
 		} else if spec.InstallWith != "" {
 			pins[name] = spec.InstallWith

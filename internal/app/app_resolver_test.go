@@ -85,6 +85,32 @@ func TestToolKeyDefaultsPackageAndString(t *testing.T) {
 	}
 }
 
+func TestPlanInstallRoute_HostOverrideBeatsGlobalProviders(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "Topaz.local")
+	cfgPath := filepath.Join(t.TempDir(), "settings.json")
+	a := New(cfgPath)
+	if err := config.Save(cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"pnpm": {
+				Providers: []config.ToolInstallSpec{{Provider: "bun"}, {Provider: "brew"}},
+				Hosts:     map[string]config.ToolInstallSpec{"topaz": {Provider: "bun"}},
+			},
+		},
+		Hosts:  map[string][]string{"topaz": {"ts"}},
+		Groups: []*config.GroupConfig{{Name: "topaz", Special: "host"}, {Name: "ts", Tools: []config.ToolEntry{{Name: "pnpm"}}}},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	cfg, err := a.loadConfig()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	got := a.planInstallRoute(context.Background(), "pnpm", cfg.Tools["pnpm"], nil).Install
+	if got.Provider != "bun" {
+		t.Fatalf("resolved provider = %q, want host-pinned bun", got.Provider)
+	}
+}
+
 func TestResolverProviderIdentityHelpers(t *testing.T) {
 	ctx := context.Background()
 	node := &availabilityCountingProvider{name: "node", available: true}
@@ -481,6 +507,179 @@ func TestPlanInstallRoute_HostOverrideShortCircuitsCandidates(t *testing.T) {
 	}
 	if apt.calls != 0 || brew.calls != 0 {
 		t.Fatalf("provider availability calls = apt:%d brew:%d, want none", apt.calls, brew.calls)
+	}
+}
+
+func TestPlanInstallRoute_SkipsDisabledProviderEvenWhenAvailable(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "coder")
+	ctx := context.Background()
+	brew := &availabilityCountingProvider{name: "brew", available: true}
+	script := &availabilityCountingProvider{name: "script", available: true}
+	configPath := filepath.Join(t.TempDir(), "settings.json")
+	a := New(configPath)
+	if err := a.InitTestMode(ctx, brew, script); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	defer a.Close() //nolint:errcheck
+	if err := config.Save(configPath, &config.RootConfig{
+		Version: config.CurrentVersion,
+		HostSettings: map[string]config.Settings{
+			"coder": {DisabledProviders: []string{"brew"}},
+		},
+		Tools: map[string]config.ToolSpec{
+			"bun": {
+				Providers: []config.ToolInstallSpec{
+					{Provider: "brew", Package: "bun"},
+					{
+						Provider: "script",
+						Options: map[string]string{
+							"install": "curl -fsSL https://bun.sh/install | bash",
+							"check":   "test -x $HOME/.bun/bin/bun",
+						},
+					},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	route := a.planInstallRoute(ctx, "bun", config.ToolSpec{
+		Providers: []config.ToolInstallSpec{
+			{Provider: "brew", Package: "bun"},
+			{
+				Provider: "script",
+				Options: map[string]string{
+					"install": "curl -fsSL https://bun.sh/install | bash",
+					"check":   "test -x $HOME/.bun/bin/bun",
+				},
+			},
+		},
+	}, make(map[string]bool))
+
+	if route.Kind != installRouteNative {
+		t.Fatalf("route kind = %q, want native", route.Kind)
+	}
+	if route.Install.Provider != "script" {
+		t.Fatalf("install provider = %q, want script", route.Install.Provider)
+	}
+	if len(route.Skipped) != 1 || route.Skipped[0].Reason != installRouteSkipProviderDisabled || route.Skipped[0].Install.Provider != "brew" {
+		t.Fatalf("skipped = %+v, want brew provider-disabled skip", route.Skipped)
+	}
+	if brew.calls != 0 {
+		t.Fatalf("brew availability calls = %d, want 0 (disabled before probe)", brew.calls)
+	}
+}
+
+func TestPlanInstallRoute_InheritsGlobalDisabledProviders(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "coder")
+	ctx := context.Background()
+	brew := &availabilityCountingProvider{name: "brew", available: true}
+	script := &availabilityCountingProvider{name: "script", available: true}
+	configPath := filepath.Join(t.TempDir(), "settings.json")
+	a := New(configPath)
+	if err := a.InitTestMode(ctx, brew, script); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	defer a.Close() //nolint:errcheck
+	if err := config.Save(configPath, &config.RootConfig{
+		Version:  config.CurrentVersion,
+		Settings: config.Settings{DisabledProviders: []string{"brew"}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	route := a.planInstallRoute(ctx, "bun", config.ToolSpec{
+		Providers: []config.ToolInstallSpec{
+			{Provider: "brew", Package: "bun"},
+			{Provider: "script", Options: map[string]string{"install": "true", "check": "true"}},
+		},
+	}, make(map[string]bool))
+
+	if route.Install.Provider != "script" {
+		t.Fatalf("install provider = %q, want script", route.Install.Provider)
+	}
+	if len(route.Skipped) != 1 || route.Skipped[0].Reason != installRouteSkipProviderDisabled {
+		t.Fatalf("skipped = %+v, want brew provider-disabled skip", route.Skipped)
+	}
+}
+
+func TestPlanInstallRoute_HostOverrideBypassesDisabledProviders(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "coder")
+	ctx := context.Background()
+	brew := &availabilityCountingProvider{name: "brew", available: true}
+	script := &availabilityCountingProvider{name: "script", available: true}
+	configPath := filepath.Join(t.TempDir(), "settings.json")
+	a := New(configPath)
+	if err := a.InitTestMode(ctx, brew, script); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	defer a.Close() //nolint:errcheck
+	if err := config.Save(configPath, &config.RootConfig{
+		Version: config.CurrentVersion,
+		HostSettings: map[string]config.Settings{
+			"coder": {DisabledProviders: []string{"brew"}},
+		},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	route := a.planInstallRoute(ctx, "bun", config.ToolSpec{
+		Hosts: map[string]config.ToolInstallSpec{
+			"coder": {Provider: "brew", Package: "bun"},
+		},
+		Providers: []config.ToolInstallSpec{
+			{Provider: "brew", Package: "bun"},
+			{Provider: "script", Options: map[string]string{"install": "true", "check": "true"}},
+		},
+	}, make(map[string]bool))
+
+	if route.Install.Provider != "brew" {
+		t.Fatalf("install provider = %q, want host override brew", route.Install.Provider)
+	}
+	if len(route.Skipped) != 0 {
+		t.Fatalf("skipped = %+v, want no skips for host override", route.Skipped)
+	}
+	if brew.calls != 0 {
+		t.Fatalf("brew availability calls = %d, want none for host override", brew.calls)
+	}
+}
+
+func TestPlanInstallRoute_SortsCandidatesByProviderPriority(t *testing.T) {
+	ctx := context.Background()
+	brew := &availabilityCountingProvider{name: "brew", available: true}
+	script := &availabilityCountingProvider{name: "script", available: true}
+	configPath := filepath.Join(t.TempDir(), "settings.json")
+	a := New(configPath)
+	if err := a.InitTestMode(ctx, brew, script); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	defer a.Close() //nolint:errcheck
+	if err := config.Save(configPath, &config.RootConfig{
+		Version:  config.CurrentVersion,
+		Settings: config.Settings{ProviderPriority: []string{"script", "brew"}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	route := a.planInstallRoute(ctx, "bun", config.ToolSpec{
+		Providers: []config.ToolInstallSpec{
+			{Provider: "brew", Package: "bun"},
+			{
+				Provider: "script",
+				Options: map[string]string{
+					"install": "true",
+					"check":   "true",
+				},
+			},
+		},
+	}, make(map[string]bool))
+
+	if route.Install.Provider != "script" {
+		t.Fatalf("install provider = %q, want script from provider_priority", route.Install.Provider)
+	}
+	if len(route.Skipped) != 0 {
+		t.Fatalf("skipped = %+v, want no skips", route.Skipped)
 	}
 }
 

@@ -153,6 +153,11 @@ var grokDotIgnorePatterns = dotAllowlistIgnorePatterns(
 	"hooks/",
 )
 
+var omniDotIgnorePatterns = dotAllowlistIgnorePatterns(
+	"settings.json",
+	"settings.d/",
+)
+
 // DiscoverDotsEntries returns initial dots candidates from the managed repo
 // subtree, ~/.config, and well-known home-level dotfile paths.
 func DiscoverDotsEntries(repoPath string) ([]config.DotEntry, error) {
@@ -235,6 +240,8 @@ func dotEntryWithDefaults(entry config.DotEntry) config.DotEntry {
 		entry.Ignore = appendMissingStrings(entry.Ignore, codexDotIgnorePatterns...)
 	case isNamedHomeDotEntry(entry, "grok", "~/.grok"):
 		entry.Ignore = appendMissingStrings(entry.Ignore, grokDotIgnorePatterns...)
+	case entry.Name == "omni" || entry.Path == "~/.config/omni":
+		entry.Ignore = appendMissingStrings(entry.Ignore, omniDotIgnorePatterns...)
 	}
 	return entry
 }

@@ -10,7 +10,7 @@ import (
 
 // CurrentVersion is the latest settings.json format version understood by omni.
 // Version 0 is the legacy unversioned format.
-const CurrentVersion = 16
+const CurrentVersion = 17
 
 const (
 	// FallbackSourceGitHub identifies a fallback recipe sourced from a GitHub repository.
@@ -31,6 +31,19 @@ const (
 	FallbackRecipeGitHubReleaseAsset = "github_release_asset"
 	// FallbackRecipeRawCommands runs user-editable shell commands.
 	FallbackRecipeRawCommands = "raw_commands"
+	// FallbackRecipeCurlInstallScript downloads and runs a remote install script.
+	FallbackRecipeCurlInstallScript = "curl_install_script"
+	// FallbackRecipeAptRepo configures an apt repository then installs packages.
+	FallbackRecipeAptRepo = "apt_repo"
+
+	// AgentRefPackages expands to every agents.packages[].source value.
+	AgentRefPackages = "@agents.packages"
+	// AgentRefMcpServers expands to every agents.mcp_servers[].name value.
+	AgentRefMcpServers = "@agents.mcp_servers"
+	// AgentRefPlugins expands to every agents.plugins[].name value.
+	AgentRefPlugins = "@agents.plugins"
+	// AgentRefMarketplaces expands to every agents.marketplaces[].name value.
+	AgentRefMarketplaces = "@agents.marketplaces"
 )
 
 // ToolEntry is the resolved execution form for a logical tool.
@@ -98,6 +111,9 @@ type ToolInstallSpec struct {
 	Bin         string            `json:"bin,omitempty"`
 	InstallWith string            `json:"install_with,omitempty"`
 	Options     map[string]string `json:"options,omitempty"`
+	Source      *FallbackSource   `json:"source,omitempty"`
+	Recipe      *FallbackRecipe   `json:"recipe,omitempty"`
+	BinDir      string            `json:"bin_dir,omitempty"`
 }
 
 // EffectivePackage returns the package identifier for logicalName.
@@ -386,6 +402,10 @@ type RootConfig struct {
 	// Schema holds the "$schema" URI injected on every write for editor support.
 	// It is read back on load but never acted on by the application.
 	Schema string `json:"$schema,omitempty"`
+	// Include lists additional settings fragments merged into this file on load.
+	// Paths are relative to the directory containing the main settings file.
+	// The field is stripped before save.
+	Include []string `json:"$include,omitempty"`
 	// Version identifies the settings.json format. Missing/zero is treated as the
 	// legacy unversioned format and migrated to CurrentVersion on load.
 	Version  int                 `json:"version"`
@@ -626,7 +646,13 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 	validateInstall := func(path string, spec ToolInstallSpec, allowInstallWith bool) []ValidationError {
 		var errs []ValidationError
 		if spec.Provider == "script" {
+			if spec.Recipe != nil && strings.TrimSpace(spec.Recipe.Type) != "" {
+				return validateRecipeInstallSpec(path, spec)
+			}
 			return validateScriptSpec(path, spec)
+		}
+		if spec.Provider == "apt_repo" {
+			return validateAptRepoSpec(path, spec)
 		}
 		if spec.Provider == "" {
 			errs = append(errs, ValidationError{Path: path + ".provider", Message: "provider is required"})
@@ -799,6 +825,9 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 			}
 		}
 		for si, src := range g.Skills {
+			if IsAgentRef(src) {
+				continue
+			}
 			if _, ok := pkgSources[src]; !ok {
 				errs = append(errs, ValidationError{
 					Path:    fmt.Sprintf("$.groups[%d].skills[%d]", gi, si),
@@ -807,6 +836,9 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 			}
 		}
 		for mi, name := range g.McpServers {
+			if IsAgentRef(name) {
+				continue
+			}
 			if _, ok := mcpServerNames[name]; !ok {
 				errs = append(errs, ValidationError{
 					Path:    fmt.Sprintf("$.groups[%d].mcp_servers[%d]", gi, mi),
@@ -816,6 +848,9 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 			}
 		}
 		for pi, name := range g.Plugins {
+			if IsAgentRef(name) {
+				continue
+			}
 			if _, ok := pluginNames[name]; !ok {
 				errs = append(errs, ValidationError{
 					Path:    fmt.Sprintf("$.groups[%d].plugins[%d]", gi, pi),
@@ -825,6 +860,9 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 			}
 		}
 		for mi, name := range g.Marketplaces {
+			if IsAgentRef(name) {
+				continue
+			}
 			if _, ok := marketplaceNames[name]; !ok {
 				errs = append(errs, ValidationError{
 					Path:    fmt.Sprintf("$.groups[%d].marketplaces[%d]", gi, mi),
@@ -1041,6 +1079,53 @@ func validateProviderSpec(path string, spec ToolInstallSpec, providerSet map[str
 		if _, ok := providerSet[spec.InstallWith]; !ok {
 			errs = append(errs, ValidationError{Path: path + ".install_with", Message: fmt.Sprintf("unknown concrete provider/manager %q", spec.InstallWith)})
 		}
+	}
+	return errs
+}
+
+func validateRecipeInstallSpec(path string, spec ToolInstallSpec) []ValidationError {
+	var errs []ValidationError
+	if spec.Recipe == nil || strings.TrimSpace(spec.Recipe.Type) == "" {
+		errs = append(errs, ValidationError{Path: path + ".recipe.type", Message: "recipe type is required"})
+		return errs
+	}
+	switch spec.Recipe.Type {
+	case FallbackRecipeCurlInstallScript:
+		if optionValue(spec.Options, "url") == "" && (spec.Source == nil || strings.TrimSpace(spec.Source.URL) == "") {
+			errs = append(errs, ValidationError{Path: path + ".options.url", Message: "curl_install_script requires options.url or source.url"})
+		}
+	case FallbackRecipeGitHubReleaseAsset:
+		if spec.Source == nil || spec.Source.Type != FallbackSourceGitHub {
+			errs = append(errs, ValidationError{Path: path + ".source", Message: "github_release_asset requires source.type github"})
+		} else if strings.TrimSpace(spec.Source.Owner) == "" || strings.TrimSpace(spec.Source.Repo) == "" {
+			errs = append(errs, ValidationError{Path: path + ".source", Message: "github_release_asset requires source.owner and source.repo"})
+		}
+		if strings.TrimSpace(spec.Recipe.AssetPattern) == "" {
+			errs = append(errs, ValidationError{Path: path + ".recipe.asset_pattern", Message: "github_release_asset requires recipe.asset_pattern"})
+		}
+	case FallbackRecipeAptRepo:
+		if optionValue(spec.Options, "key_url") == "" {
+			errs = append(errs, ValidationError{Path: path + ".options.key_url", Message: "apt_repo requires options.key_url"})
+		}
+		if optionValue(spec.Options, "signed_by") == "" {
+			errs = append(errs, ValidationError{Path: path + ".options.signed_by", Message: "apt_repo requires options.signed_by"})
+		}
+		if optionValue(spec.Options, "sources_format") == "" {
+			errs = append(errs, ValidationError{Path: path + ".options.sources_format", Message: "apt_repo requires options.sources_format"})
+		}
+	default:
+		errs = append(errs, ValidationError{Path: path + ".recipe.type", Message: fmt.Sprintf("unknown install recipe type %q", spec.Recipe.Type)})
+	}
+	return errs
+}
+
+func validateAptRepoSpec(path string, spec ToolInstallSpec) []ValidationError {
+	var errs []ValidationError
+	if strings.TrimSpace(spec.Options["setup"]) == "" {
+		errs = append(errs, ValidationError{Path: path + ".options.setup", Message: "apt_repo requires options.setup or a materialized setup command"})
+	}
+	if strings.TrimSpace(spec.Options["packages"]) == "" && strings.TrimSpace(spec.Package) == "" {
+		errs = append(errs, ValidationError{Path: path + ".options.packages", Message: "apt_repo requires options.packages"})
 	}
 	return errs
 }

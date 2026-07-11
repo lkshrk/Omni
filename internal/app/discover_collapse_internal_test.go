@@ -3,8 +3,22 @@ package app
 import (
 	"testing"
 
+	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
 )
+
+func TestDiscoveryScopeInstallSpecs_HostOverrideBeatsProviders(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "topaz.local")
+	spec := config.ToolSpec{
+		Providers: []config.ToolInstallSpec{{Provider: "pnpm"}, {Provider: "npm"}},
+		Hosts:     map[string]config.ToolInstallSpec{"topaz": {Provider: "bun"}},
+	}
+
+	got := discoveryScopeInstallSpecs(spec)
+	if len(got) != 1 || got[0].Provider != "bun" {
+		t.Fatalf("discovery specs = %+v, want host-pinned bun", got)
+	}
+}
 
 // Node managers (bun/pnpm/npm) share a global store, so each reports the same
 // globally-installed package. Discovery iterates each manager-provider, yielding

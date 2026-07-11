@@ -175,8 +175,15 @@ func (m *Model) handleListActionKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		if msg.IsRepeat {
 			break
 		}
-		if t := m.selectedTool(); t != nil && !t.Installed {
-			cmds = append(cmds, m.startSelectedToolInstall(t)...)
+		if t := m.selectedTool(); t != nil {
+			switch m.syncStatusOf(t) {
+			case syncWrongProv:
+				cmds = append(cmds, m.armListConfirmation(listConfirmReinstallDefault, t))
+			default:
+				if !t.Installed {
+					cmds = append(cmds, m.startSelectedToolInstall(t)...)
+				}
+			}
 		}
 	case key.Matches(msg, m.keys.Delete):
 		if msg.IsRepeat {
@@ -337,7 +344,11 @@ func (m *Model) handleListConfirmationKeyMsg(msg tea.KeyPressMsg) (bool, []tea.C
 		m.migrating = c.installed && c.installedWith != ""
 		startOp(m, "Removing provider override for "+c.name+"…")
 		m.startRowOperation(c.name, c.provider, m.statusMsg)
-		cmds = append(cmds, m.spinner.Tick, m.doClearProviderOverride(c.name, c.provider, c.installedWith))
+		clearProv := c.pinnedProvider
+		if clearProv == "" {
+			clearProv = c.provider
+		}
+		cmds = append(cmds, m.spinner.Tick, m.doClearProviderOverride(c.name, clearProv, c.installedWith))
 	}
 	return true, cmds
 }
@@ -484,6 +495,9 @@ func (m *Model) armListConfirmation(action string, t *database.ToolCache) tea.Cm
 	if t != nil {
 		m.listConfirm.name = t.Name
 		m.listConfirm.provider = t.Provider
+		if action == listConfirmClearProviderOverride {
+			m.listConfirm.pinnedProvider = providerPinForTool(t, m.toolProviderPins)
+		}
 		m.listConfirm.installed = t.Installed
 		m.listConfirm.installedWith = t.InstalledWith
 	}
@@ -501,7 +515,9 @@ func (m *Model) matchesListConfirmationAction(msg tea.KeyPressMsg) bool {
 		return key.Matches(msg, m.keys.SyncAll)
 	case listConfirmDelete:
 		return key.Matches(msg, m.keys.Delete)
-	case listConfirmReinstallDefault, listConfirmMigrateNvm, listConfirmRemoveNvmRuntime:
+	case listConfirmReinstallDefault:
+		return key.Matches(msg, m.keys.Install) || key.Matches(msg, m.keys.MigrateProvider)
+	case listConfirmMigrateNvm, listConfirmRemoveNvmRuntime:
 		return key.Matches(msg, m.keys.MigrateProvider)
 	case listConfirmClearProviderOverride:
 		return key.Matches(msg, m.keys.PinProvider)

@@ -558,16 +558,22 @@ func toolInlineHints(m Model, t *database.ToolCache) []hintItem {
 	case providerPinForTool(t, m.toolProviderPins) != "":
 		hints = append(hints, hintFromBindingDesc(m.keys.PinProvider, "remove override"))
 		if isProviderRepairSync(ss) {
-			hints = append(hints, hintFromBinding(m.keys.MigrateProvider))
+			if ss == syncWrongProv {
+				hints = append(hints, hintFromBindingDesc(m.keys.Install, actions.MustTUILabel(actions.ToolReinstallDefault)))
+			} else {
+				hints = append(hints, hintFromBinding(m.keys.MigrateProvider))
+			}
 		}
 		showGroup = true
 		showIgnore = true
 		showDelete = true
 	case ss == syncWrongProv, ss == syncNvmManaged:
 		if ss == syncWrongProv {
-			hints = append(hints, hintFromBinding(m.keys.PinProvider))
+			hints = append(hints, hintFromBindingDesc(m.keys.PinProvider, actions.MustTUILabel(actions.ToolPinProvider)))
+			hints = append(hints, hintFromBindingDesc(m.keys.Install, actions.MustTUILabel(actions.ToolReinstallDefault)))
+		} else {
+			hints = append(hints, hintFromBinding(m.keys.MigrateProvider))
 		}
-		hints = append(hints, hintFromBinding(m.keys.MigrateProvider))
 		showGroup = true
 		showIgnore = true
 		showDelete = true
@@ -847,7 +853,7 @@ func activeConfirmationHelpItems(m Model) []hintItem {
 	case m.listConfirm.action == listConfirmDelete:
 		return confirmActionItems(m.keys.Delete, actions.MustTUIConfirmDescription(actions.ToolDelete), m.keys.Back)
 	case m.listConfirm.action == listConfirmReinstallDefault:
-		return confirmActionItems(m.keys.MigrateProvider, actions.MustTUIConfirmDescription(actions.ToolReinstallDefault), m.keys.Back)
+		return confirmActionItems(m.keys.Install, actions.MustTUIConfirmDescription(actions.ToolReinstallDefault), m.keys.Back)
 	case m.listConfirm.action == listConfirmClearProviderOverride:
 		return confirmActionItems(m.keys.PinProvider, "remove provider override and reinstall with default", m.keys.Back)
 	case m.dotsConfirmIdx >= 0:
@@ -1018,11 +1024,11 @@ func helpActionGroups(m Model) []helpGroup {
 	default:
 		return []helpGroup{
 			{title: "Row", items: []hintItem{
-				hintFromBindingDesc(k.Install, actions.MustTUILabel(actions.ToolInstall)),
+				hintFromBindingDesc(k.Install, actions.MustTUILabel(actions.ToolInstall)+"/"+actions.MustTUILabel(actions.ToolReinstallDefault)),
 				hintFromBindingDesc(k.Upgrade, actions.MustTUILabel(actions.ToolUpdate)),
 				hintFromBindingDesc(k.Claim, actions.MustTUILabel(actions.ToolClaim)),
 				hintFromBindingDesc(k.PinProvider, actions.MustTUILabel(actions.ToolPinProvider)),
-				hintFromBindingDesc(k.MigrateProvider, actions.MustTUILabel(actions.ToolReinstallDefault)),
+				hintFromBindingDesc(k.MigrateProvider, "reinstall (alias)"),
 				hintFromBindingDesc(k.MoveGroup, actions.MustTUILabel(actions.ToolChangeGroup)),
 				hintFromBindingDesc(k.Ignore, actions.MustTUILabel(actions.ToolIgnore)),
 				hintFromBindingDesc(k.Delete, actions.MustTUILabel(actions.ToolDelete)),
@@ -1118,6 +1124,7 @@ func helpLegendItems(m Model) []string {
 			p.styleOutdated.Render(iconOutdated) + p.styleHelp.Render(" update"),
 			p.styleOrphan.Render(iconOrphan) + p.styleHelp.Render(" orphan"),
 			p.styleWrongProv.Render(iconWrongProv) + p.styleHelp.Render(" wrong provider"),
+			p.styleWrongProv.Render(providerWrongGlyph+" ") + p.styleHelp.Render("non-preferred provider"),
 			p.styleIgnored.Render(iconIgnored) + p.styleHelp.Render(" ignored"),
 			p.styleHelp.Render(iconPrivileged) + p.styleHelp.Render(" may need sudo"),
 			p.styleErr.Render(iconFailed) + p.styleHelp.Render(" failed"),

@@ -73,6 +73,17 @@ func TestClassifyToolView(t *testing.T) {
 			wantSync: app.ToolSyncOK,
 		},
 		{
+			name: "concrete provider mismatch is out of sync",
+			tool: &database.ToolCache{
+				Name: "pnpm", Provider: "brew", InstalledWith: "bun",
+				Installed: true, Tracked: true,
+			},
+			wantSec:    app.ToolViewSectionOutOfSync,
+			wantSync:   app.ToolSyncWrongProvider,
+			wantProv:   "brew",
+			wantSource: "configured",
+		},
+		{
 			name:     "search result is available",
 			tool:     &database.ToolCache{Name: "jq", Provider: "brew", Tracked: false, Installed: false},
 			wantSec:  app.ToolViewSectionAvailable,
@@ -92,9 +103,11 @@ func TestClassifyToolView(t *testing.T) {
 			if got.Section != tt.wantSec || got.SyncStatus != tt.wantSync {
 				t.Fatalf("ClassifyToolView = %#v, want section=%s sync=%s", got, tt.wantSec, tt.wantSync)
 			}
-			gotProvider, gotSource := app.DesiredConcreteProviderForTool(tt.tool, tt.context)
-			if gotProvider != tt.wantProv || gotSource != tt.wantSource {
-				t.Fatalf("DesiredConcreteProviderForTool = (%q, %q), want (%q, %q)", gotProvider, gotSource, tt.wantProv, tt.wantSource)
+			if tt.wantProv != "" || tt.wantSource != "" {
+				gotProvider, gotSource := app.ExpectedConcreteProviderForTool(tt.tool, tt.context)
+				if gotProvider != tt.wantProv || gotSource != tt.wantSource {
+					t.Fatalf("ExpectedConcreteProviderForTool = (%q, %q), want (%q, %q)", gotProvider, gotSource, tt.wantProv, tt.wantSource)
+				}
 			}
 		})
 	}

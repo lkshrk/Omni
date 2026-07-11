@@ -27,7 +27,7 @@ type KeyMap struct {
 	SyncAll         key.Binding // S — install missing and add discovered tools to config
 	Claim           key.Binding // c — add orphan tool to config
 	Ignore          key.Binding // x — ignore / un-ignore
-	MigrateProvider key.Binding // r — reinstall with default provider
+	MigrateProvider key.Binding // r — reinstall alias (primary: Install/i)
 	Fallback        key.Binding // f — configure fallback source
 	ApplySolution   key.Binding // a — apply selected provider remedy
 	Reconcile       key.Binding // A — reconcile all safe host lifecycle fixes
@@ -152,7 +152,7 @@ func DefaultKeyMap() KeyMap {
 		),
 		MigrateProvider: key.NewBinding(
 			key.WithKeys("r"),
-			key.WithHelp("r", actions.MustTUILabel(actions.ToolReinstallDefault)),
+			key.WithHelp("r", actions.MustTUILabel(actions.ToolMigrateNvm)),
 		),
 		Fallback: key.NewBinding(
 			key.WithKeys("f"),

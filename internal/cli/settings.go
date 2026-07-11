@@ -2,13 +2,18 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/lkshrk/omni/internal/app"
+	"github.com/lkshrk/omni/internal/config"
 )
+
+// ErrLintWarnings is returned by `omni settings lint` when advisory issues are found.
+var ErrLintWarnings = errors.New("settings lint found warnings")
 
 func newSettingsCmd(state *rootState) *cobra.Command {
 	cmd := &cobra.Command{
@@ -21,6 +26,8 @@ func newSettingsCmd(state *rootState) *cobra.Command {
 		newSettingsSetCmd(state),
 		newSettingsDisableProviderCmd(state),
 		newSettingsEnableProviderCmd(state),
+		newSettingsLintCmd(state),
+		newSettingsMigrateHostOverridesCmd(state),
 		newSettingsResetCmd(state),
 		newSettingsResetCacheCmd(state),
 	)
@@ -128,6 +135,47 @@ func newSettingsEnableProviderCmd(state *rootState) *cobra.Command {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "disabled_providers = %s\n", displayList(enabled))
+			return nil
+		},
+	}
+}
+
+func newSettingsLintCmd(state *rootState) *cobra.Command {
+	return &cobra.Command{
+		Use:   "lint",
+		Short: "Check settings.json for common hygiene issues",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cfg, err := config.Load(state.app.ConfigPath)
+			if err != nil {
+				return err
+			}
+			issues := state.app.LintSettings(cfg)
+			if len(issues) == 0 {
+				fmt.Fprintln(cmd.OutOrStdout(), "no issues found")
+				return nil
+			}
+			for _, issue := range issues {
+				fmt.Fprintln(cmd.OutOrStdout(), "warning:", issue.String())
+			}
+			return ErrLintWarnings
+		},
+	}
+}
+
+func newSettingsMigrateHostOverridesCmd(state *rootState) *cobra.Command {
+	return &cobra.Command{
+		Use:   "migrate-host-overrides",
+		Short: "Fold tools.*.hosts install overrides into providers[]",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			count, err := state.app.MigrateHostOverrides(cmd.Context())
+			if err != nil {
+				return err
+			}
+			if count == 0 {
+				fmt.Fprintln(cmd.OutOrStdout(), "no host install overrides to migrate")
+				return nil
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "migrated host install overrides for %d tool(s)\n", count)
 			return nil
 		},
 	}

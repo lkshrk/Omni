@@ -61,7 +61,8 @@ var builtinMetadata = map[string]Metadata{
 		DisplayOrder:        320,
 		DefaultInstallOrder: 40,
 	},
-	"script": {Kind: ProviderKindConcrete, DisplayOrder: 400},
+	"script":   {Kind: ProviderKindConcrete, DisplayOrder: 400},
+	"apt_repo": {Kind: ProviderKindConcrete, Ecosystem: EcosystemSystem, DisplayOrder: 105},
 }
 
 var systemProviderPriority = []string{"apt", "apk", "dnf", "zypper", "pacman", "brew"}
@@ -213,7 +214,7 @@ func BuiltinConcreteProviderPriorityNames() []string {
 		if meta.Kind != ProviderKindConcrete {
 			return false
 		}
-		if name == "script" || name == "pip3" {
+		if name == "script" || name == "apt_repo" || name == "pip3" {
 			return false
 		}
 		return true
@@ -232,7 +233,7 @@ func BuiltinConcreteProvidersForEcosystem(ecosystem string) []string {
 		if meta.Kind != ProviderKindConcrete || meta.Ecosystem != ecosystem {
 			return false
 		}
-		if name == "script" || name == "pip3" {
+		if name == "script" || name == "apt_repo" || name == "pip3" {
 			return false
 		}
 		return true
