@@ -10,10 +10,7 @@ import (
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-const (
-	listQueryFormat    = "%{NAME}\\t%{VERSION}-%{RELEASE}\\n"
-	summaryQueryFormat = "%{NAME}\\t%{SUMMARY}\\n"
-)
+const summaryQueryFormat = "%{NAME}\\t%{SUMMARY}\\n"
 
 func IsInstalled(ctx context.Context, exec executor.Executor, pkg string) (bool, string, error) {
 	stdout, _, err := exec.Run(ctx, "rpm", "-q", "--queryformat", "%{VERSION}-%{RELEASE}", pkg)
@@ -25,41 +22,6 @@ func IsInstalled(ctx context.Context, exec executor.Executor, pkg string) (bool,
 		return false, "", nil
 	}
 	return true, version, nil
-}
-
-func ListInstalled(ctx context.Context, exec executor.Executor, providerName string) ([]provider.InstalledTool, error) {
-	stdout, err := listInstalledOutput(ctx, exec)
-	if err != nil {
-		return nil, err
-	}
-	var tools []provider.InstalledTool
-	for _, line := range strings.Split(stdout, "\n") {
-		name, version := ParseListLine(line)
-		if name == "" {
-			continue
-		}
-		tools = append(tools, provider.InstalledTool{
-			Tool:    provider.Tool{Name: name, Provider: providerName},
-			Version: version,
-		})
-	}
-	return tools, nil
-}
-
-func InstalledMap(ctx context.Context, exec executor.Executor) (map[string]string, error) {
-	stdout, err := listInstalledOutput(ctx, exec)
-	if err != nil {
-		return nil, err
-	}
-	m := make(map[string]string)
-	for _, line := range strings.Split(stdout, "\n") {
-		name, version := ParseListLine(line)
-		if name == "" {
-			continue
-		}
-		m[strings.ToLower(name)] = version
-	}
-	return m, nil
 }
 
 func Summaries(ctx context.Context, exec executor.Executor, tools []provider.Tool) (map[string]string, error) {
@@ -162,12 +124,4 @@ func isRPMMissOutput(output string) bool {
 		}
 	}
 	return strings.TrimSpace(output) != ""
-}
-
-func listInstalledOutput(ctx context.Context, exec executor.Executor) (string, error) {
-	stdout, _, err := exec.Run(ctx, "rpm", "-qa", "--queryformat", listQueryFormat)
-	if err != nil {
-		return "", fmt.Errorf("rpm list: %w", err)
-	}
-	return stdout, nil
 }

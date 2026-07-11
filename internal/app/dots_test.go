@@ -174,6 +174,73 @@ func TestDiscoverDotsEntries_SkipsAgentsSkillLockWhenMissing(t *testing.T) {
 	}
 }
 
+func TestDiscoverDotsEntries_InfersAgentsSkillLockFromMisnamedRepoPackage(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repoDir := t.TempDir()
+	pkgDir := filepath.Join(dotsContentDir(repoDir), "skill-lock.json", ".agents")
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, ".skill-lock.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := app.DiscoverDotsEntries(repoDir)
+	if err != nil {
+		t.Fatalf("DiscoverDotsEntries: %v", err)
+	}
+	byName := make(map[string]string, len(got))
+	for _, entry := range got {
+		byName[entry.Name] = entry.Path
+	}
+	wantPath := "~/.agents/.skill-lock.json"
+	if path, ok := byName["agents-skill-lock"]; !ok || path != wantPath {
+		t.Fatalf("agents-skill-lock entry = %q (ok=%v), want %q", path, ok, wantPath)
+	}
+	if path, ok := byName["skill-lock.json"]; ok && path == "~/.config/skill-lock.json" {
+		t.Fatalf("misnamed package should not map to ~/.config/skill-lock.json, got %#v", got)
+	}
+}
+
+func TestDiscoverDotsStatus_SkipsMisnamedAgentsSkillLockWhenTracked(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	for _, pkg := range []string{"agents-skill-lock", "skill-lock.json"} {
+		pkgDir := filepath.Join(dotsContentDir(repoDir), pkg, ".agents")
+		if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(pkgDir, ".skill-lock.json"), []byte("{}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	agentsDir := filepath.Join(home, ".agents")
+	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(agentsDir, ".skill-lock.json")
+	if err := os.Symlink(filepath.Join(dotsContentDir(repoDir), "agents-skill-lock", ".agents", ".skill-lock.json"), target); err != nil {
+		t.Fatal(err)
+	}
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{Name: "agents-skill-lock", Path: "~/.agents/.skill-lock.json"},
+	}, home)
+
+	result, err := a.DiscoverDotsStatus(context.Background())
+	if err != nil {
+		t.Fatalf("DiscoverDotsStatus: %v", err)
+	}
+	for _, entry := range result.Entries {
+		if entry.Name == "skill-lock.json" || (entry.Name == "agents-skill-lock" && entry.Group == "" && entry.State == app.DotStateNoSource) {
+			t.Fatalf("tracked agents-skill-lock should suppress misnamed repo package candidate, got %#v", entry)
+		}
+	}
+}
+
 func TestDiscoverDotsEntries_AddsClaudeAllowlistIgnores(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -258,6 +325,93 @@ func TestDiscoverDotsEntries_AddsCodexAllowlistIgnores(t *testing.T) {
 	for _, duplicateGlobal := range []string{"*.log", ".DS_Store", "cache"} {
 		if testContainsString(codex.Ignore, duplicateGlobal) {
 			t.Fatalf("codex ignore = %v, should not duplicate global ignore %q", codex.Ignore, duplicateGlobal)
+		}
+	}
+}
+
+func TestDiscoverDotsEntries_AddsGrokAllowlistIgnores(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repoDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".grok"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := app.DiscoverDotsEntries(repoDir)
+	if err != nil {
+		t.Fatalf("DiscoverDotsEntries: %v", err)
+	}
+	var grok config.DotEntry
+	for _, entry := range got {
+		if entry.Name == "grok" {
+			grok = entry
+			break
+		}
+	}
+	if grok.Name == "" {
+		t.Fatalf("grok entry not discovered: %#v", got)
+	}
+	if grok.Path != "~/.grok" {
+		t.Fatalf("grok path = %q, want ~/.grok", grok.Path)
+	}
+	for _, want := range []string{
+		"*",
+		"!/config.toml",
+		"!/skills/",
+		"!/commands/",
+		"!/hooks/",
+	} {
+		if !testContainsString(grok.Ignore, want) {
+			t.Fatalf("grok ignore = %v, missing %q", grok.Ignore, want)
+		}
+	}
+	for _, duplicateGlobal := range []string{"*.log", ".DS_Store", "cache"} {
+		if testContainsString(grok.Ignore, duplicateGlobal) {
+			t.Fatalf("grok ignore = %v, should not duplicate global ignore %q", grok.Ignore, duplicateGlobal)
+		}
+	}
+}
+
+func TestDiscoverDotsEntries_ExcludesAgentConfigDirs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	repoDir := t.TempDir()
+
+	// Agent-managed dirs: must never surface as discovery candidates.
+	for _, dir := range []string{".claude", ".codex", ".grok", ".agents", ".config/agents"} {
+		if err := os.MkdirAll(filepath.Join(home, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Real dotfiles: must still be discovered.
+	if err := os.WriteFile(filepath.Join(home, ".zshrc"), []byte("zsh"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".config", "nvim"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := app.DiscoverDotsEntries(repoDir)
+	if err != nil {
+		t.Fatalf("DiscoverDotsEntries: %v", err)
+	}
+	byName := make(map[string]string, len(got))
+	for _, entry := range got {
+		byName[entry.Name] = entry.Path
+	}
+
+	if _, ok := byName["agents"]; ok {
+		t.Fatalf(".config/agents should not be discovered: %#v", byName)
+	}
+	for name, wantPath := range map[string]string{
+		"claude": "~/.claude",
+		"codex":  "~/.codex",
+		"grok":   "~/.grok",
+		"nvim":   "~/.config/nvim",
+		"zshrc":  "~/.zshrc",
+	} {
+		if gotPath, ok := byName[name]; !ok || gotPath != wantPath {
+			t.Fatalf("expected %q => %q to be discovered, got %#v", name, wantPath, byName)
 		}
 	}
 }
@@ -2391,13 +2545,13 @@ func TestDotsIncludeIgnoredPath_AppendsIncludeOverrideForBroadIgnore(t *testing.
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Settings: config.Settings{DotsRepo: t.TempDir()},
 		Groups: []*config.GroupConfig{{
-			Dots: []config.DotEntry{{Name: "claude", Path: "~/.claude", Ignore: []string{"*", "!/settings.json"}}},
+			Dots: []config.DotEntry{{Name: "myapp", Path: "~/.myapp", Ignore: []string{"*", "!/settings.json"}}},
 		}},
 	}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
 
-	if err := a.DotsIncludeIgnoredPath("claude", "projects/session.json"); err != nil {
+	if err := a.DotsIncludeIgnoredPath("myapp", "projects/session.json"); err != nil {
 		t.Fatalf("DotsIncludeIgnoredPath: %v", err)
 	}
 
@@ -2448,13 +2602,13 @@ func TestDotsIncludeIgnoredPath_MovesShadowedIncludeAfterBroadIgnore(t *testing.
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Settings: config.Settings{DotsRepo: t.TempDir()},
 		Groups: []*config.GroupConfig{{
-			Dots: []config.DotEntry{{Name: "claude", Path: "~/.claude", Ignore: []string{"!/projects/session.json", "*"}}},
+			Dots: []config.DotEntry{{Name: "myapp", Path: "~/.myapp", Ignore: []string{"!/projects/session.json", "*"}}},
 		}},
 	}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
 
-	if err := a.DotsIncludeIgnoredPath("claude", "projects/session.json"); err != nil {
+	if err := a.DotsIncludeIgnoredPath("myapp", "projects/session.json"); err != nil {
 		t.Fatalf("DotsIncludeIgnoredPath: %v", err)
 	}
 
@@ -2609,6 +2763,69 @@ func TestDotsSync_UnfoldsExistingDirectorySymlink(t *testing.T) {
 	}
 	assertRealDirectory(t, nvimPath)
 	assertSymlinkResolvesTo(t, filepath.Join(nvimPath, "init.lua"), filepath.Join(srcDir, "init.lua"))
+}
+
+func TestDotsSync_HealsAbsoluteSymlinkBeforeRestow(t *testing.T) {
+	if _, err := exec.LookPath("stow"); err != nil {
+		t.Skip("stow not available")
+	}
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	srcDir := filepath.Join(dotsContentDir(repoDir), "zsh", ".config", "zsh")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	envSrc := filepath.Join(srcDir, "10-env.zsh")
+	completionSrc := filepath.Join(srcDir, "15-completion-paths.zsh")
+	if err := os.WriteFile(envSrc, []byte("env"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(completionSrc, []byte("completion"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	zshTargetDir := filepath.Join(home, ".config", "zsh")
+	if err := os.MkdirAll(zshTargetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	envTarget := filepath.Join(zshTargetDir, "10-env.zsh")
+	// Absolute symlink resolving to the correct repo file but not shaped the
+	// way stow itself would write it (stow always writes a relative link).
+	if err := os.Symlink(envSrc, envTarget); err != nil {
+		t.Fatal(err)
+	}
+	// 15-completion-paths.zsh is missing entirely, which puts the directory
+	// entry into DotStateMissing and triggers stow -R for the whole package.
+
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{Name: "zsh", Path: zshTargetDir},
+	}, home)
+
+	ops, err := a.DotsSync(dots.SyncOptions{})
+	if err != nil {
+		t.Fatalf("DotsSync: %v", err)
+	}
+	if len(ops) == 0 {
+		t.Fatal("DotsSync: want at least one op")
+	}
+	for _, op := range ops {
+		if op.Kind == dots.OpConflict {
+			t.Fatalf("DotsSync: unexpected conflict op %+v", op)
+		}
+	}
+
+	assertSymlinkResolvesTo(t, envTarget, envSrc)
+	assertSymlinkResolvesTo(t, filepath.Join(zshTargetDir, "15-completion-paths.zsh"), completionSrc)
+
+	envLinkText, err := os.Readlink(envTarget)
+	if err != nil {
+		t.Fatalf("Readlink(%q): %v", envTarget, err)
+	}
+	if filepath.IsAbs(envLinkText) {
+		t.Fatalf("healed link %q is still absolute: %q", envTarget, envLinkText)
+	}
 }
 
 func TestDotsSync_DryRun(t *testing.T) {
@@ -6014,9 +6231,7 @@ func TestDisableDotsForHost_PersistsDisabledAfterUnlinkError(t *testing.T) {
 	if loadErr != nil {
 		t.Fatalf("config.Load: %v", loadErr)
 	}
-	hostname, _ := os.Hostname()
-	short := shortHostnameForTest(hostname)
-	if !config.BoolVal(cfg.HostSettings[short].DotsDisabled) {
+	if !config.BoolVal(cfg.HostSettings[dotsTestHostGroupName()].DotsDisabled) {
 		t.Fatal("DotsDisabled should be true after DisableDotsForHost partial failure")
 	}
 }
@@ -6395,4 +6610,49 @@ func TestDotsSync_HostFiltering(t *testing.T) {
 	if len(ops) != 0 {
 		t.Errorf("got %d ops, want 0 (host filtering should exclude mac group); ops=%v", len(ops), ops)
 	}
+}
+
+func TestDotsResolveConflict_ModifiedEntryUseLocalAdopts(t *testing.T) {
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	srcDir := filepath.Join(dotsContentDir(repoDir), "zsh", ".config", "zsh")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "tracked.zsh"), []byte("tracked"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	zshPath := filepath.Join(home, ".config", "zsh")
+	if err := os.MkdirAll(zshPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rel, err := filepath.Rel(zshPath, filepath.Join(srcDir, "tracked.zsh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(rel, filepath.Join(zshPath, "tracked.zsh")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(zshPath, "local-extra.zsh"), []byte("local"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{Name: "zsh", Path: zshPath},
+	}, home)
+
+	ops, err := a.DotsResolveConflict(context.Background(), "zsh", app.DotResolveUseLocal)
+	if err != nil {
+		t.Fatalf("DotsResolveConflict use-local on modified entry: %v", err)
+	}
+	if len(ops) != 1 || ops[0].Kind != dots.OpAdopt {
+		t.Fatalf("ops = %v, want OpAdopt", ops)
+	}
+	if _, err := os.Stat(filepath.Join(srcDir, "local-extra.zsh")); err != nil {
+		t.Errorf("local-extra.zsh not adopted into repo: %v", err)
+	}
+	assertSymlinkResolvesTo(t, filepath.Join(zshPath, "local-extra.zsh"), filepath.Join(srcDir, "local-extra.zsh"))
 }

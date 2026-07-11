@@ -75,47 +75,6 @@ func TestRestow_PropagatesError(t *testing.T) {
 	}
 }
 
-// ─── Unstow ───────────────────────────────────────────────────────────────────
-
-func TestUnstow_CallsStow(t *testing.T) {
-	home, _ := os.UserHomeDir()
-	mock := &executor.MockExecutor{}
-	if err := dots.Unstow(context.Background(), mock, "/repo", []string{"nvim"}); err != nil {
-		t.Fatalf("Unstow: %v", err)
-	}
-	assertStowArgs(t, mock.Calls[0].Args, "-D", "/repo", home, false, []string{"nvim"})
-}
-
-func TestUnstow_EmptyPackages_IsNoop(t *testing.T) {
-	mock := &executor.MockExecutor{}
-	if err := dots.Unstow(context.Background(), mock, "/repo", nil); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(mock.Calls) != 0 {
-		t.Errorf("expected no calls, got %d", len(mock.Calls))
-	}
-}
-
-// ─── Adopt ────────────────────────────────────────────────────────────────────
-
-func TestAdopt_CallsStow(t *testing.T) {
-	home, _ := os.UserHomeDir()
-	mock := &executor.MockExecutor{}
-	if err := dots.Adopt(context.Background(), mock, "/repo", "nvim", false); err != nil {
-		t.Fatalf("Adopt: %v", err)
-	}
-	assertStowArgs(t, mock.Calls[0].Args, "--adopt", "/repo", home, false, []string{"nvim"})
-}
-
-func TestAdopt_DryRun_AddsSimulate(t *testing.T) {
-	home, _ := os.UserHomeDir()
-	mock := &executor.MockExecutor{}
-	if err := dots.Adopt(context.Background(), mock, "/repo", "nvim", true); err != nil {
-		t.Fatalf("Adopt dry-run: %v", err)
-	}
-	assertStowArgs(t, mock.Calls[0].Args, "--adopt", "/repo", home, true, []string{"nvim"})
-}
-
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 func assertStowArgs(t *testing.T, got []string, mode, repo, home string, dryRun bool, packages []string) {

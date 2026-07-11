@@ -93,18 +93,3 @@ func looksLikeVersion(s string) bool {
 	}
 	return false
 }
-
-// parseFallbackVersionOutput extracts the first version-looking token from
-// the output of a version command (e.g. "gh version 2.93.0 (2026-05-27)").
-// Returns the raw token (not normalized) so callers can pass it to normalizeFallbackVersion.
-// Returns "" when no version token is found.
-func parseFallbackVersionOutput(output string) string {
-	// Walk word by word; the first token that looks like a version wins.
-	for _, word := range strings.Fields(output) {
-		w := strings.TrimPrefix(word, "v")
-		if looksLikeVersion(w) && strings.Contains(w, ".") {
-			return strings.TrimPrefix(word, "v")
-		}
-	}
-	return ""
-}

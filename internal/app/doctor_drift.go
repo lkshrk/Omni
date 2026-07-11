@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
@@ -22,6 +23,10 @@ const (
 
 	// DriftUnavailableButPresent means the configured provider is unavailable yet the tool is present on PATH.
 	DriftUnavailableButPresent DriftClass = "unavailable-but-present"
+
+	// DriftNvmManaged means the tool is configured for a system provider (e.g. brew) but
+	// the active binary resolves under an nvm Node version directory.
+	DriftNvmManaged DriftClass = "nvm-managed"
 )
 
 // DriftFinding describes a single config-vs-reality mismatch for one tool.
@@ -120,6 +125,10 @@ func (a *App) buildDriftReport(ctx context.Context, cfg *config.RootConfig) (*dr
 					t.Name, t.Provider, tc.InstalledWith),
 			})
 		}
+
+		if f, ok := a.nvmManagedDriftFinding(cfg, t); ok && !driftFindingExists(findings, f) {
+			findings = append(findings, f)
+		}
 	}
 
 	sort.Slice(findings, func(i, j int) bool {
@@ -151,7 +160,7 @@ func (a *App) addDriftCheck(result *DoctorResult, report *driftReport) {
 	}
 
 	var detailGroups []DoctorDetailGroup
-	classOrder := []DriftClass{DriftProviderUnusable, DriftWrongProvider, DriftUnavailableButPresent}
+	classOrder := []DriftClass{DriftProviderUnusable, DriftWrongProvider, DriftNvmManaged, DriftUnavailableButPresent}
 	for _, class := range classOrder {
 		findings, ok := groups[class]
 		if !ok {
@@ -188,9 +197,128 @@ func driftClassLabel(class DriftClass) string {
 		return "Wrong-provider install"
 	case DriftUnavailableButPresent:
 		return "Provider unavailable but tool present another way"
+	case DriftNvmManaged:
+		return "nvm-managed binary (configured for system provider)"
 	default:
 		return string(class)
 	}
+}
+
+// DoctorCheckHasNvmManagedDrift reports whether a drift check includes
+// nvm-managed system-provider findings.
+func DoctorCheckHasNvmManagedDrift(check DoctorCheck) bool {
+	if check.ID != "drift" || check.Status == DoctorStatusOK {
+		return false
+	}
+	return doctorNvmManagedFindingCount(check) > 0
+}
+
+// DoctorHasNvmManagedDrift reports whether any doctor check includes
+// nvm-managed system-provider drift findings.
+func DoctorHasNvmManagedDrift(result *DoctorResult) bool {
+	if result == nil {
+		return false
+	}
+	for _, check := range result.Checks {
+		if DoctorCheckHasNvmManagedDrift(check) {
+			return true
+		}
+	}
+	return false
+}
+
+// DoctorNvmManagedDriftCount returns the number of nvm-managed drift findings
+// reported by doctor drift checks.
+func DoctorNvmManagedDriftCount(result *DoctorResult) int {
+	if result == nil {
+		return 0
+	}
+	total := 0
+	for _, check := range result.Checks {
+		total += doctorNvmManagedFindingCount(check)
+	}
+	return total
+}
+
+func doctorNvmManagedFindingCount(check DoctorCheck) int {
+	header := driftClassLabel(DriftNvmManaged)
+	count := 0
+	for _, group := range check.Groups {
+		if group.Header != header {
+			continue
+		}
+		for _, item := range group.Items {
+			if strings.HasPrefix(item, "  suggestion:") {
+				continue
+			}
+			count++
+		}
+	}
+	return count
+}
+
+func driftFindingExists(findings []DriftFinding, candidate DriftFinding) bool {
+	for _, f := range findings {
+		if f.Tool == candidate.Tool && f.Class == candidate.Class {
+			return true
+		}
+		if f.Tool == candidate.Tool && f.Class == DriftWrongProvider && isNodePackageManager(f.Extra) {
+			return true
+		}
+	}
+	return false
+}
+
+func isNodePackageManager(name string) bool {
+	switch name {
+	case "node", "npm", "pnpm", "bun":
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *App) nvmManagedDriftFinding(cfg *config.RootConfig, t config.ToolEntry) (DriftFinding, bool) {
+	if !IsSystemProvider(t.Provider) {
+		return DriftFinding{}, false
+	}
+	spec, ok := cfg.Tools[t.Name]
+	if !ok {
+		return DriftFinding{}, false
+	}
+	if !ToolResolvesViaNvm(t.Name, spec) {
+		return DriftFinding{}, false
+	}
+
+	settings, _ := a.LoadSettings()
+	_, nodeManager := a.effectiveManagersFromSettings(settings)
+
+	return DriftFinding{
+		Tool:       t.Name,
+		Provider:   t.Provider,
+		Class:      DriftNvmManaged,
+		Extra:      "nvm",
+		Suggestion: nvmManagedDriftSuggestion(t.Name, t.Provider, nodeManager),
+	}, true
+}
+
+func nvmManagedDriftSuggestion(toolName, configuredProvider, nodeManager string) string {
+	if toolName == "node" {
+		return fmt.Sprintf(
+			"tool %q is configured for %s but the active binary is nvm-managed — stop managing the Node runtime through omni (remove %q from system-managed tools); use nvm for node versions and configure JS globals with 'omni consolidate node %s'",
+			toolName, configuredProvider, toolName, defaultNodeManagerLabel(nodeManager))
+	}
+	mgr := defaultNodeManagerLabel(nodeManager)
+	return fmt.Sprintf(
+		"tool %q is configured for %s but resolves via nvm — run 'omni tools set %s --provider %s' or 'omni consolidate --to %s', then 'omni settings set ecosystems.node.manager %s'",
+		toolName, configuredProvider, toolName, mgr, mgr, mgr)
+}
+
+func defaultNodeManagerLabel(nodeManager string) string {
+	if nodeManager != "" {
+		return nodeManager
+	}
+	return "pnpm"
 }
 
 // providerAvailabilityMap returns name → available for every registered provider.

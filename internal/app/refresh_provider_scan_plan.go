@@ -29,7 +29,7 @@ func (a *App) CurrentRefreshProviderScanPlan(ctx context.Context) (RefreshProvid
 	if a != nil && a.registry != nil {
 		resolvedEcosystems = a.ResolvedEcosystemProviders(ctx)
 	}
-	tools, err := a.listToolsFromConfig(ctx, cfg, "", resolvedEcosystems)
+	tools, err := a.listToolsFromConfig(ctx, cfg, "", resolvedEcosystems, false)
 	if err != nil {
 		return RefreshProviderScanPlan{}, err
 	}

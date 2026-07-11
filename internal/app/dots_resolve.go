@@ -49,7 +49,10 @@ func (a *App) DotsResolveConflict(ctx context.Context, name string, strategy Dot
 		return nil, err
 	}
 	state, _ := classifyDotEntry(entry)
-	if state != DotStateConflict {
+	// Modified entries resolve the same two ways a conflict does: use-local
+	// adopts the diverged local content into the repo, use-repo discards it
+	// and restores the repo version.
+	if state != DotStateConflict && state != DotStateModified {
 		return nil, fmt.Errorf("dots resolve %q: state %q does not require conflict resolution", name, state)
 	}
 	switch strategy {

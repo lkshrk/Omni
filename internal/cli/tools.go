@@ -36,6 +36,7 @@ func newToolsCmd(state *rootState) *cobra.Command {
 		newRefreshCmd(state),
 		newConsolidateCmd(state),
 		newReinstallCmd(state),
+		newToolsMigrateNvmCmd(state),
 		newProvidersCmd(state),
 		newListCmd(state),
 	)

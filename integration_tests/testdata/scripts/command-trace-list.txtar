@@ -8,7 +8,7 @@ stdout 'upgraded bam'
 
 exec omni --config settings.json trace list --limit 20
 stdout 'upgrading bam \(brew\)'
-stdout 'brew upgrade --cask bam'
+stdout 'brew upgrade --cask --greedy bam'
 
 -- bin/brew --
 #!/usr/bin/env sh

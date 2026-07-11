@@ -119,13 +119,16 @@ func (a *App) DotsEjectIgnoredPathsContext(ctx context.Context, name, pattern st
 		}
 		if sInfo.IsDir() {
 			if cpErr := copyDotPath(sourcePath, path, copyIgnores); cpErr != nil {
-				// Restore symlink on copy failure to avoid torn state.
-				_ = os.Symlink(sourcePath, path) // best-effort restore
+				if restoreErr := dots.WriteStowShapedSymlink(path, sourcePath); restoreErr != nil {
+					return fmt.Errorf("copy dir %q → %q: %w (restore symlink failed: %v)", sourcePath, path, cpErr, restoreErr)
+				}
 				return fmt.Errorf("copy dir %q → %q: %w", sourcePath, path, cpErr)
 			}
 		} else {
 			if cpErr := copyDotFile(sourcePath, path, sInfo.Mode().Perm()); cpErr != nil {
-				_ = os.Symlink(sourcePath, path) // best-effort restore
+				if restoreErr := dots.WriteStowShapedSymlink(path, sourcePath); restoreErr != nil {
+					return fmt.Errorf("copy %q → %q: %w (restore symlink failed: %v)", sourcePath, path, cpErr, restoreErr)
+				}
 				return fmt.Errorf("copy %q → %q: %w", sourcePath, path, cpErr)
 			}
 		}

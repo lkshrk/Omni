@@ -24,15 +24,16 @@ stdout 'upgrading ripgrep'
 stdout 'upgraded: ripgrep'
 
 # Assert the brew stub was invoked with the correct upgrade command shapes.
-# Cask must be upgraded with --cask (not bare or --formula).
-exec grep -q 'upgrade --cask iterm2' .omni-cache/brew-calls.log
+# Cask must be upgraded with --cask --greedy (not bare, not --formula) so
+# auto-updating/:latest casks actually upgrade (c0170a5).
+exec grep -q 'upgrade --cask --greedy iterm2' .omni-cache/brew-calls.log
 # Formula must be upgraded with --formula (not bare or --cask).
 exec grep -q 'upgrade --formula ripgrep' .omni-cache/brew-calls.log
 
 # The upgrade call for iterm2 must not use --formula.
 ! exec grep -q 'upgrade --formula iterm2' .omni-cache/brew-calls.log
-# The upgrade call for ripgrep must not use --cask.
-! exec grep -q 'upgrade --cask ripgrep' .omni-cache/brew-calls.log
+# The upgrade call for ripgrep must not use --cask (with or without --greedy).
+! exec grep -q 'upgrade --cask.*ripgrep' .omni-cache/brew-calls.log
 
 -- bin/brew --
 #!/usr/bin/env sh

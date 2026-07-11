@@ -438,14 +438,29 @@ func TestInstalledMap_Pnpm(t *testing.T) {
 	}
 }
 
-func TestInstalledMap_Error(t *testing.T) {
+func TestInstalledMap_PnpmListFailureStillErrors(t *testing.T) {
 	m := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "pnpm --version", Response: executor.MockCall{Stdout: "8.0.0"}},
-		executor.MatchRule{Pattern: "pnpm ls -g --depth=0", Response: executor.MockCall{Err: errors.New("exit 1")}},
+		executor.MatchRule{Pattern: "pnpm ls -g --depth=0", Response: executor.MockCall{Err: errors.New("list failed")}},
 	)
 	p := node.New(m, "pnpm")
 	if _, err := p.InstalledMap(context.Background()); err == nil {
-		t.Fatal("expected error, got nil")
+		t.Fatal("expected list failure error, got nil")
+	}
+}
+
+func TestInstalledMap_PnpmEmptyGlobalTolerated(t *testing.T) {
+	m := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "pnpm --version", Response: executor.MockCall{Stdout: "8.0.0"}},
+		executor.MatchRule{Pattern: "pnpm ls -g --depth=0", Response: executor.MockCall{Err: errors.New("exit status 1")}},
+	)
+	p := node.New(m, "pnpm")
+	got, err := p.InstalledMap(context.Background())
+	if err != nil {
+		t.Fatalf("InstalledMap error = %v, want nil (pnpm empty global tolerated)", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("got %d entries, want 0", len(got))
 	}
 }
 

@@ -105,13 +105,6 @@ func PrivilegedCommand(cmd string, args ...string) (string, []string) {
 	return "sudo", append([]string{"-n", cmd}, args...)
 }
 
-func SudoValidationCommand() (string, []string, bool) {
-	if runtime.GOOS == "windows" || os.Geteuid() == 0 || runningUnderGoTest() {
-		return "", nil, false
-	}
-	return "sudo", []string{"-v"}, true
-}
-
 func runningUnderGoTest() bool {
 	base := filepath.Base(os.Args[0])
 	return strings.HasSuffix(base, ".test") || strings.Contains(base, ".test.")

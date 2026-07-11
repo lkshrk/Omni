@@ -41,46 +41,6 @@ func Restow(ctx context.Context, exec executor.Executor, repoPath string, packag
 	return nil
 }
 
-// Unstow removes managed links for packages without refolding directories and
-// with the built-in dotfile ignore patterns applied to stow itself:
-//
-//	stow -D --no-folding --ignore=<global-ignore>... <packages...> -d <repo> -t ~
-//
-// No-op when packages is empty.
-func Unstow(ctx context.Context, exec executor.Executor, repoPath string, packages []string) error {
-	if len(packages) == 0 {
-		return nil
-	}
-	args, err := stowArgs("-D", repoPath, packages, false)
-	if err != nil {
-		return fmt.Errorf("stow -D: %w", err)
-	}
-	_, stderr, err := exec.Run(ctx, "stow", args...)
-	if err != nil {
-		return fmt.Errorf("stow -D: %w (stderr: %s)", err, stderr)
-	}
-	return nil
-}
-
-// Adopt moves the existing files at their home locations into the repo package
-// directory and links them back: equivalent to
-//
-//	stow --adopt --no-folding --ignore=<global-ignore>... [--simulate] <pkg> -d <repo> -t ~
-//
-// Callers should create a backup before calling Adopt to guard against data loss
-// if stow exits mid-adoption.
-func Adopt(ctx context.Context, exec executor.Executor, repoPath, pkg string, dryRun bool) error {
-	args, err := stowArgs("--adopt", repoPath, []string{pkg}, dryRun)
-	if err != nil {
-		return fmt.Errorf("stow --adopt %q: %w", pkg, err)
-	}
-	_, stderr, err := exec.Run(ctx, "stow", args...)
-	if err != nil {
-		return fmt.Errorf("stow --adopt %q: %w (stderr: %s)", pkg, err, stderr)
-	}
-	return nil
-}
-
 // stowArgs builds the argument slice for a stow invocation. Target is always
 // the current user's home directory; if HOME cannot be resolved we refuse
 // rather than fall back to "" which stow would interpret as cwd, planting

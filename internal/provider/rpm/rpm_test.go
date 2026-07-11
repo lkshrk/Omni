@@ -10,46 +10,6 @@ import (
 	"github.com/lkshrk/omni/internal/provider/rpm"
 )
 
-func TestListInstalled_UsesRPMQueryAndTagsProvider(t *testing.T) {
-	exec := &executor.MockExecutor{
-		Responses: []executor.MockCall{{
-			Stdout: "Ripgrep\t14.1.1-4\nbash\t5.2.15-1\ninvalid\n",
-		}},
-	}
-
-	tools, err := rpm.ListInstalled(context.Background(), exec, "zypper")
-	if err != nil {
-		t.Fatalf("ListInstalled: %v", err)
-	}
-	if len(tools) != 2 {
-		t.Fatalf("expected 2 tools, got %d: %+v", len(tools), tools)
-	}
-	if tools[0].Name != "Ripgrep" || tools[0].Provider != "zypper" || tools[0].Version != "14.1.1-4" {
-		t.Fatalf("unexpected first tool: %+v", tools[0])
-	}
-
-	call := exec.Calls[0]
-	if call.Name != "rpm" || len(call.Args) != 3 || call.Args[0] != "-qa" || call.Args[1] != "--queryformat" {
-		t.Fatalf("unexpected rpm call: %+v", call)
-	}
-}
-
-func TestInstalledMap_LowercasesNames(t *testing.T) {
-	exec := &executor.MockExecutor{
-		Responses: []executor.MockCall{{
-			Stdout: "Ripgrep\t14.1.1-4\nBash\t5.2.15-1\n",
-		}},
-	}
-
-	got, err := rpm.InstalledMap(context.Background(), exec)
-	if err != nil {
-		t.Fatalf("InstalledMap: %v", err)
-	}
-	if got["ripgrep"] != "14.1.1-4" || got["bash"] != "5.2.15-1" {
-		t.Fatalf("unexpected installed map: %v", got)
-	}
-}
-
 func TestSummaries_UsesRPMQueryAndKeepsPartialOutput(t *testing.T) {
 	exec := &executor.MockExecutor{
 		Responses: []executor.MockCall{{

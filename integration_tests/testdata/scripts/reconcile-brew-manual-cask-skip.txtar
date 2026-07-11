@@ -52,9 +52,9 @@ case "${1:-}" in
     ;;
   upgrade)
     shift
-    if [ "${1:-}" = "--formula" ] || [ "${1:-}" = "--cask" ]; then
+    while [ "${1:-}" = "--formula" ] || [ "${1:-}" = "--cask" ] || [ "${1:-}" = "--greedy" ]; do
       shift
-    fi
+    done
     if [ "${1:-}" = "battle-net" ]; then
       printf 'Error: Not upgrading 1 `installer manual` cask.\n' >&2
       exit 1

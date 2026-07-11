@@ -839,6 +839,31 @@ func TestSetGlobalToolIgnore(t *testing.T) {
 	}
 }
 
+func TestSetGlobalToolIgnore_AllowsDiscoveredSuppressionWithoutLogicalTool(t *testing.T) {
+	a, cfgPath := newImportApp(t)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools:  logicalToolSpecs(logicalTool("ripgrep", "brew")),
+		Groups: []*config.GroupConfig{{Tools: groupTools("ripgrep")}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if err := a.SetGlobalToolIgnore("asyncpg", true); err != nil {
+		t.Fatalf("SetGlobalToolIgnore(asyncpg): %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if !slices.Contains(cfg.Ignore.Tools, "asyncpg") {
+		t.Fatalf("ignore.tools = %v, want asyncpg", cfg.Ignore.Tools)
+	}
+	if _, ok := cfg.Tools["asyncpg"]; ok {
+		t.Fatal("global discovered suppression should not create a logical tool spec")
+	}
+}
+
 func findHostTestGroup(groups []*config.GroupConfig, name string) *config.GroupConfig {
 	for _, group := range groups {
 		if group.BaseName() == name {

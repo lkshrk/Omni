@@ -117,6 +117,47 @@ func TestIgnoredToolsHiddenFromListAndQuery(t *testing.T) {
 	}
 }
 
+func TestListToolsForView_IncludesIgnoredTools(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	a, cfgPath := newImportApp(t)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools:  logicalToolSpecs(logicalTool("curl", "brew")),
+		Groups: []*config.GroupConfig{testHostToolGroup("curl")},
+		Hosts:  map[string][]string{"testhost": {}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	ctx := context.Background()
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name:          "curl",
+		Provider:      "brew",
+		Package:       "curl",
+		Installed:     true,
+		InstalledWith: "brew",
+		Tracked:       true,
+	}); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+	if err := a.SetToolIgnore("curl", true); err != nil {
+		t.Fatalf("SetToolIgnore: %v", err)
+	}
+
+	hidden, err := a.ListTools(ctx, "")
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(hidden) != 0 {
+		t.Fatalf("ListTools = %v, want ignored tools hidden", toolNames(hidden))
+	}
+	visible, err := a.ListToolsForView(ctx, "")
+	if err != nil {
+		t.Fatalf("ListToolsForView: %v", err)
+	}
+	if len(visible) != 1 || visible[0].Name != "curl" {
+		t.Fatalf("ListToolsForView = %v, want curl retained", toolNames(visible))
+	}
+}
+
 func TestSetToolIgnoreScopesWithStateReturnsToolsAndScopeDisplay(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	a, cfgPath := newImportApp(t)
@@ -159,8 +200,8 @@ func TestSetToolIgnoreScopesWithStateReturnsToolsAndScopeDisplay(t *testing.T) {
 	if !result.ScopeDisplay.ToolIgnores["curl"] {
 		t.Fatalf("ToolIgnores[curl] = false, want true")
 	}
-	if len(result.Tools) != 0 {
-		t.Fatalf("Tools = %v, want curl hidden after ignore", toolNames(result.Tools))
+	if len(result.Tools) != 1 || result.Tools[0].Name != "curl" {
+		t.Fatalf("Tools = %v, want curl retained for TUI ignored section", toolNames(result.Tools))
 	}
 	updated, err := config.Load(cfgPath)
 	if err != nil {
@@ -168,6 +209,41 @@ func TestSetToolIgnoreScopesWithStateReturnsToolsAndScopeDisplay(t *testing.T) {
 	}
 	if !updated.Tools["curl"].Ignore {
 		t.Fatalf("config tool ignore = false, want true")
+	}
+}
+
+func TestSetToolIgnoreScopesWithStateSuppressesDiscoveredOrphan(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	a, cfgPath := newImportApp(t)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Groups: []*config.GroupConfig{testHostToolGroup()},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	ctx := context.Background()
+	if err := a.DB().UpsertDiscoveredBatch(ctx, []database.DiscoveredUpsert{
+		{Name: "asyncpg", Provider: "python", InstalledWith: "pip3", Version: "0.31.0"},
+	}); err != nil {
+		t.Fatalf("UpsertDiscovered: %v", err)
+	}
+
+	result, err := a.SetToolIgnoreScopesWithState(ctx, "asyncpg", []app.ToolIgnoreScopeChange{{
+		Kind:    app.ToolIgnoreScopeHost,
+		Ignored: true,
+	}})
+	if err != nil {
+		t.Fatalf("SetToolIgnoreScopesWithState: %v", err)
+	}
+	if !result.HostScopeChanged {
+		t.Fatal("HostScopeChanged = false, want true")
+	}
+
+	discovered, err := a.ListDiscovered(ctx)
+	if err != nil {
+		t.Fatalf("ListDiscovered: %v", err)
+	}
+	if len(discovered) != 0 {
+		t.Fatalf("discovered = %v, want asyncpg suppressed after global ignore", toolNames(discovered))
 	}
 }
 

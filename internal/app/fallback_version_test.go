@@ -65,24 +65,3 @@ func TestFallbackVersionNewer(t *testing.T) {
 		})
 	}
 }
-
-func TestParseFallbackVersionOutput(t *testing.T) {
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{"gh version 2.93.0 (2026-05-27)", "2.93.0"},
-		{"rg 14.1.0", "14.1.0"},
-		{"version: 1.2.3", "1.2.3"},
-		{"1.0.0", "1.0.0"},
-		{"no version here", ""},
-		{"", ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			if got := parseFallbackVersionOutput(tt.input); got != tt.want {
-				t.Errorf("parseFallbackVersionOutput(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
-	}
-}

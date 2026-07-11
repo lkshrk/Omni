@@ -133,7 +133,7 @@ func TestDoctor_ReportsDotsIgnorePatternFindings(t *testing.T) {
 			{
 				Name: "dev",
 				Dots: []config.DotEntry{
-					{Name: "claude", Path: "~/.claude", Ignore: []string{"*", "!/skills/", "skills"}},
+					{Name: "myapp", Path: "~/.myapp", Ignore: []string{"*", "!/skills/", "skills"}},
 					{Name: "nvim", Path: "~/.config/nvim", Ignore: []string{"*", "!/init.lua"}},
 				},
 			},
@@ -160,8 +160,8 @@ func TestDoctor_ReportsDotsIgnorePatternFindings(t *testing.T) {
 	if len(check.Groups) != 1 {
 		t.Fatalf("dots.ignore groups = %+v, want one affected dot entry", check.Groups)
 	}
-	if !strings.Contains(check.Groups[0].Header, "claude") {
-		t.Fatalf("dots.ignore group header = %q, want claude", check.Groups[0].Header)
+	if !strings.Contains(check.Groups[0].Header, "myapp") {
+		t.Fatalf("dots.ignore group header = %q, want myapp", check.Groups[0].Header)
 	}
 	details := strings.Join(check.Groups[0].Items, "\n")
 	for _, want := range []string{"[contradiction]", "!/skills/", "skills"} {
@@ -181,7 +181,7 @@ func TestDotsFixIgnorePatterns_RemovesAuditedDeadPatterns(t *testing.T) {
 			{
 				Name: "dev",
 				Dots: []config.DotEntry{
-					{Name: "claude", Path: "~/.claude", Ignore: []string{"*", "!/settings.json", "!/skills/", "skills", "!/hooks/", "hooks"}},
+					{Name: "myapp", Path: "~/.myapp", Ignore: []string{"*", "!/settings.json", "!/skills/", "skills", "!/hooks/", "hooks"}},
 					{Name: "nvim", Path: "~/.config/nvim", Ignore: []string{"*", "!/init.lua"}},
 				},
 			},
@@ -194,7 +194,7 @@ func TestDotsFixIgnorePatterns_RemovesAuditedDeadPatterns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DotsFixIgnorePatterns: %v", err)
 	}
-	if want := []string{"claude"}; !reflect.DeepEqual(modified, want) {
+	if want := []string{"myapp"}; !reflect.DeepEqual(modified, want) {
 		t.Fatalf("modified = %#v, want %#v", modified, want)
 	}
 
@@ -202,13 +202,13 @@ func TestDotsFixIgnorePatterns_RemovesAuditedDeadPatterns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	claude, ok := dotEntryByName(updated, "claude")
+	myapp, ok := dotEntryByName(updated, "myapp")
 	if !ok {
-		t.Fatalf("updated config missing claude dot entry: %+v", updated.Groups)
+		t.Fatalf("updated config missing myapp dot entry: %+v", updated.Groups)
 	}
 	wantIgnore := []string{"*", "!/settings.json"}
-	if !reflect.DeepEqual(claude.Ignore, wantIgnore) {
-		t.Fatalf("claude ignore = %#v, want %#v", claude.Ignore, wantIgnore)
+	if !reflect.DeepEqual(myapp.Ignore, wantIgnore) {
+		t.Fatalf("myapp ignore = %#v, want %#v", myapp.Ignore, wantIgnore)
 	}
 
 	result, err := a.Doctor(context.Background())

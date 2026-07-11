@@ -48,19 +48,80 @@ var wellKnownDotPaths = map[string]string{
 	"editorconfig":      "~/.editorconfig",
 	"claude":            "~/.claude",
 	"codex":             "~/.codex",
+	"grok":              "~/.grok",
 	"ssh":               "~/.ssh",
 	"gnupg":             "~/.gnupg",
 }
 
-var ignoredDotCandidateNames = map[string]struct{}{
-	"cache":        {},
-	"caches":       {},
-	"local":        {},
-	"logs":         {},
-	"node_modules": {},
-	"temp":         {},
-	"tmp":          {},
-	"trash":        {},
+var ignoredDotCandidateNames = buildIgnoredDotCandidateNames()
+
+func buildIgnoredDotCandidateNames() map[string]struct{} {
+	names := map[string]struct{}{
+		"cache":        {},
+		"caches":       {},
+		"local":        {},
+		"logs":         {},
+		"node_modules": {},
+		"temp":         {},
+		"tmp":          {},
+		"trash":        {},
+	}
+	for _, name := range agentConfigDotCandidateNames() {
+		names[name] = struct{}{}
+	}
+	return names
+}
+
+// agentConfigDotCandidateNames derives the ~/.config/<name> leaf names that
+// dotfiles discovery must never surface as candidates, because they are
+// machine-managed by the agents feature/CLIs (internal/app/agents_catalog.go
+// supportedAgents), not user dotfiles.
+//
+// Only supportedAgents configDir values that live directly under ".config/"
+// are included, using the exact leaf directory name — this is the only
+// namespace discoverLocalConfigDotsEntries scans generically (via
+// os.ReadDir(~/.config)). Home-level agent dirs (".claude", ".codex", ".grok",
+// ".agents", ".gemini", etc.) are never swept up by that generic scan, so they
+// are intentionally excluded here.
+//
+// A configDir that is itself a parent of other catalog entries (e.g.
+// ".gemini" parenting ".gemini/antigravity") is excluded by construction:
+// only entries with a literal "config/" prefix and no further nesting below
+// the leaf are derived, and only the leaf segment is used — never a partial
+// or ancestor path — so a legitimate dotfile dir sharing a name prefix can
+// never be blanket-ignored.
+func agentConfigDotCandidateNames() []string {
+	seen := make(map[string]struct{})
+	var names []string
+	for _, agent := range supportedAgents {
+		leaf, ok := configDotSubdirLeaf(agent.configDir)
+		if !ok {
+			continue
+		}
+		if _, dup := seen[leaf]; dup {
+			continue
+		}
+		seen[leaf] = struct{}{}
+		names = append(names, leaf)
+	}
+	return names
+}
+
+// configDotSubdirLeaf reports whether configDir is a direct child of
+// ".config" (exactly one path segment below it, e.g. ".config/crush") and, if
+// so, returns that leaf segment. Multi-level entries like ".config/foo/bar"
+// are excluded: deriving only the top segment ("foo") would ignore siblings
+// under ".config/foo" that the catalog does not actually own.
+func configDotSubdirLeaf(configDir string) (string, bool) {
+	const prefix = ".config/"
+	if !strings.HasPrefix(configDir, prefix) {
+		return "", false
+	}
+	rest := strings.TrimPrefix(configDir, prefix)
+	if rest == "" || strings.Contains(rest, "/") {
+		return "", false
+	}
+	return rest, true
 }
 
 var claudeDotIgnorePatterns = dotAllowlistIgnorePatterns(
@@ -83,6 +144,13 @@ var codexDotIgnorePatterns = dotAllowlistIgnorePatterns(
 	"AGENTS.md",
 	"RTK.md",
 	"rules/",
+)
+
+var grokDotIgnorePatterns = dotAllowlistIgnorePatterns(
+	"config.toml",
+	"skills/",
+	"commands/",
+	"hooks/",
 )
 
 // DiscoverDotsEntries returns initial dots candidates from the managed repo
@@ -165,6 +233,8 @@ func dotEntryWithDefaults(entry config.DotEntry) config.DotEntry {
 		entry.Ignore = appendMissingStrings(entry.Ignore, claudeDotIgnorePatterns...)
 	case isNamedHomeDotEntry(entry, "codex", "~/.codex"):
 		entry.Ignore = appendMissingStrings(entry.Ignore, codexDotIgnorePatterns...)
+	case isNamedHomeDotEntry(entry, "grok", "~/.grok"):
+		entry.Ignore = appendMissingStrings(entry.Ignore, grokDotIgnorePatterns...)
 	}
 	return entry
 }
@@ -380,7 +450,7 @@ func discoverRepoDotsEntries(repoPath string, includeIgnored bool) ([]config.Dot
 	}
 	var out []config.DotEntry
 	for _, entry := range entries {
-		if candidate, ok := dotEntryForRepoPackage(entry.Name(), entry.IsDir(), includeIgnored); ok {
+		if candidate, ok := dotEntryForRepoPackage(dotfilesPath, entry.Name(), entry.IsDir(), includeIgnored); ok {
 			out = append(out, candidate)
 		}
 	}
@@ -438,7 +508,7 @@ func discoverLocalWellKnownDotsEntries() ([]config.DotEntry, error) {
 	return out, nil
 }
 
-func dotEntryForRepoPackage(name string, isDir, includeIgnored bool) (config.DotEntry, bool) {
+func dotEntryForRepoPackage(stowPath, name string, isDir, includeIgnored bool) (config.DotEntry, bool) {
 	canon := strings.TrimPrefix(name, ".")
 	if strings.Contains(canon, "@") {
 		return config.DotEntry{}, false
@@ -453,9 +523,41 @@ func dotEntryForRepoPackage(name string, isDir, includeIgnored bool) (config.Dot
 		return config.DotEntry{Name: canon, Path: path}, true
 	}
 	if isDir && !strings.HasPrefix(name, ".") {
+		if inferred, ok := inferDotPathFromRepoPackage(stowPath, name); ok {
+			entryName := canon
+			if knownName, ok := wellKnownDotNameForPath(inferred); ok {
+				entryName = knownName
+			}
+			return config.DotEntry{Name: entryName, Path: inferred}, true
+		}
 		return config.DotEntry{Name: name, Path: "~/.config/" + name}, true
 	}
 	return config.DotEntry{}, false
+}
+
+// inferDotPathFromRepoPackage derives a home target from a stow package tree when
+// the package directory name does not match the mirrored home path (for example a
+// legacy "skill-lock.json" package that actually contains ".agents/.skill-lock.json").
+func inferDotPathFromRepoPackage(stowPath, packageName string) (string, bool) {
+	pkgDir := filepath.Join(stowPath, packageName)
+	info, err := os.Lstat(pkgDir)
+	if err != nil || !info.IsDir() {
+		return "", false
+	}
+	if pathExists(filepath.Join(pkgDir, ".agents", ".skill-lock.json")) {
+		return "~/.agents/.skill-lock.json", true
+	}
+	return "", false
+}
+
+func wellKnownDotNameForPath(path string) (string, bool) {
+	norm := strings.ToLower(filepath.ToSlash(strings.TrimSpace(path)))
+	for name, candidate := range wellKnownDotPaths {
+		if strings.ToLower(filepath.ToSlash(candidate)) == norm {
+			return name, true
+		}
+	}
+	return "", false
 }
 
 func ignoredDotCandidate(name string) bool {

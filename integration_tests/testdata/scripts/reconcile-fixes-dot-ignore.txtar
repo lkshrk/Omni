@@ -5,7 +5,7 @@ env PATH=$WORK/bin:$PATH
 exec omni --yes --config settings.json reconcile --skip-privileged
 stdout 'syncing tools'
 stdout 'upgrading tools'
-stdout 'fixed dotfile ignore patterns: claude'
+stdout 'fixed dotfile ignore patterns: myapp'
 stdout 'Reconcile complete .* 0 installed, 0 added to config, 0 upgraded'
 
 exec grep '"!/settings.json"' settings.json
@@ -33,8 +33,8 @@ exit 1
       "special": "host",
       "dots": [
         {
-          "name": "claude",
-          "path": "~/.claude",
+          "name": "myapp",
+          "path": "~/.myapp",
           "ignore": ["*", "!/settings.json", "!/skills/", "skills", "!/hooks/", "hooks"]
         }
       ]

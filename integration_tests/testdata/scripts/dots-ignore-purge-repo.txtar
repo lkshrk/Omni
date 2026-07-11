@@ -1,5 +1,5 @@
 # dots ignore purges repo copies when target already has real files.
-# Scenario: a tool (e.g. Codex) independently installed files into the target dir.
+# Scenario: a tool independently installed files into the target dir.
 # The dotfiles repo also has copies of those same files. Running dots ignore
 # should remove the repo copies so stow won't conflict on next sync, while
 # leaving the real target files untouched.
@@ -12,67 +12,66 @@ exec git -C $WORK/home/dotfiles config user.name T
 exec git -C $WORK/home/dotfiles commit --allow-empty -m init
 
 # Create the stow package directory tree (txtar creates leaf files below)
-mkdir $WORK/home/dotfiles/dotfiles
-mkdir $WORK/home/dotfiles/dotfiles/codex
-mkdir $WORK/home/dotfiles/dotfiles/codex/.codex
-mkdir $WORK/home/dotfiles/dotfiles/codex/.codex/skills
-mkdir $WORK/home/dotfiles/dotfiles/codex/.codex/skills/.system
-mkdir $WORK/home/dotfiles/dotfiles/codex/.codex/skills/.system/openai-docs
+mkdir $WORK/home/dotfiles/dotfiles/myapp
+mkdir $WORK/home/dotfiles/dotfiles/myapp/.myapp
+mkdir $WORK/home/dotfiles/dotfiles/myapp/.myapp/skills
+mkdir $WORK/home/dotfiles/dotfiles/myapp/.myapp/skills/.system
+mkdir $WORK/home/dotfiles/dotfiles/myapp/.myapp/skills/.system/openai-docs
 
 # Create the real target directory tree.
 # config.json is a symlink (normally synced file, must remain unaffected).
-# skills/.system/** are real files (installed by Codex independently).
-mkdir $WORK/home/.codex
-mkdir $WORK/home/.codex/skills
-mkdir $WORK/home/.codex/skills/.system
-mkdir $WORK/home/.codex/skills/.system/openai-docs
-exec ln -s $WORK/home/dotfiles/dotfiles/codex/.codex/config.json $WORK/home/.codex/config.json
+# skills/.system/** are real files (installed independently).
+mkdir $WORK/home/.myapp
+mkdir $WORK/home/.myapp/skills
+mkdir $WORK/home/.myapp/skills/.system
+mkdir $WORK/home/.myapp/skills/.system/openai-docs
+exec ln -s $WORK/home/dotfiles/dotfiles/myapp/.myapp/config.json $WORK/home/.myapp/config.json
 
 # Sanity: config.json is a symlink; real files exist
-exec sh -c 'test -L '"$WORK"'/home/.codex/config.json && echo symlink-ok'
+exec sh -c 'test -L '"$WORK"'/home/.myapp/config.json && echo symlink-ok'
 stdout 'symlink-ok'
-exec sh -c 'test -f '"$WORK"'/home/.codex/skills/.system/marker.txt && echo real-file-ok'
+exec sh -c 'test -f '"$WORK"'/home/.myapp/skills/.system/marker.txt && echo real-file-ok'
 stdout 'real-file-ok'
-exec sh -c 'test -f '"$WORK"'/home/.codex/skills/.system/openai-docs/SKILL.md && echo real-file-ok'
+exec sh -c 'test -f '"$WORK"'/home/.myapp/skills/.system/openai-docs/SKILL.md && echo real-file-ok'
 stdout 'real-file-ok'
 
 # Run dots ignore — should purge repo copies of skills/.system/ files
-exec omni --config settings.json dots ignore codex 'skills/.system/'
+exec omni --config settings.json dots ignore myapp 'skills/.system/'
 stdout 'ejected'
 stdout 'added ignore pattern'
 
 # Real target files must still exist (untouched)
-exec sh -c 'test -f '"$WORK"'/home/.codex/skills/.system/marker.txt && echo still-present'
+exec sh -c 'test -f '"$WORK"'/home/.myapp/skills/.system/marker.txt && echo still-present'
 stdout 'still-present'
-exec sh -c 'test -f '"$WORK"'/home/.codex/skills/.system/openai-docs/SKILL.md && echo still-present'
+exec sh -c 'test -f '"$WORK"'/home/.myapp/skills/.system/openai-docs/SKILL.md && echo still-present'
 stdout 'still-present'
 
 # Repo copy of the skills/.system subtree must be gone
-exec sh -c 'test ! -e '"$WORK"'/home/dotfiles/dotfiles/codex/.codex/skills/.system && echo removed'
+exec sh -c 'test ! -e '"$WORK"'/home/dotfiles/dotfiles/myapp/.myapp/skills/.system && echo removed'
 stdout 'removed'
 
 # config.json symlink must be unaffected
-exec sh -c 'test -L '"$WORK"'/home/.codex/config.json && echo still-symlink'
+exec sh -c 'test -L '"$WORK"'/home/.myapp/config.json && echo still-symlink'
 stdout 'still-symlink'
 
 # Repo copy of config.json must still exist (unaffected)
-exec sh -c 'test -f '"$WORK"'/home/dotfiles/dotfiles/codex/.codex/config.json && echo repo-intact'
+exec sh -c 'test -f '"$WORK"'/home/dotfiles/dotfiles/myapp/.myapp/config.json && echo repo-intact'
 stdout 'repo-intact'
 
 -- settings.json --
-{"host_settings":{"testhost":{"dots_repo":"~/dotfiles"}},"hosts":{"testhost":[]},"groups":[{"name":"testhost","special":"host","dots":[{"name":"codex","path":"~/.codex"}]}]}
+{"host_settings":{"testhost":{"dots_repo":"~/dotfiles"}},"hosts":{"testhost":[]},"groups":[{"name":"testhost","special":"host","dots":[{"name":"myapp","path":"~/.myapp"}]}]}
 
--- home/dotfiles/dotfiles/codex/.codex/config.json --
+-- home/dotfiles/dotfiles/myapp/.myapp/config.json --
 {"theme":"dark"}
 
--- home/dotfiles/dotfiles/codex/.codex/skills/.system/marker.txt --
+-- home/dotfiles/dotfiles/myapp/.myapp/skills/.system/marker.txt --
 system-managed
 
--- home/dotfiles/dotfiles/codex/.codex/skills/.system/openai-docs/SKILL.md --
+-- home/dotfiles/dotfiles/myapp/.myapp/skills/.system/openai-docs/SKILL.md --
 # OpenAI Docs Skill
 
--- home/.codex/skills/.system/marker.txt --
+-- home/.myapp/skills/.system/marker.txt --
 system-managed
 
--- home/.codex/skills/.system/openai-docs/SKILL.md --
+-- home/.myapp/skills/.system/openai-docs/SKILL.md --
 # OpenAI Docs Skill

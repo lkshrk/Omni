@@ -64,6 +64,42 @@ func TestNamed_DoesNotClaimMultiWhenBaseLacksIt(t *testing.T) {
 	}
 }
 
+// managerOutdatedInfoBaseProvider is a base provider that implements
+// ManagerOutdatedInfoChecker, like node/python (bun/pnpm/npm and uv/pip3/pip
+// backends).
+type managerOutdatedInfoBaseProvider struct {
+	namedBaseProvider
+}
+
+func (managerOutdatedInfoBaseProvider) OutdatedInfoByManager(context.Context) (map[string]map[string]provider.OutdatedInfo, error) {
+	return map[string]map[string]provider.OutdatedInfo{
+		"bun": {"typescript": {LatestVersion: "1.0.169"}},
+	}, nil
+}
+
+func TestNamed_ForwardsManagerOutdatedInfoChecker(t *testing.T) {
+	p := provider.Named("bun", managerOutdatedInfoBaseProvider{})
+
+	moc, ok := p.(provider.ManagerOutdatedInfoChecker)
+	if !ok {
+		t.Fatal("named provider should expose ManagerOutdatedInfoChecker when base implements it")
+	}
+	byManager, err := moc.OutdatedInfoByManager(context.Background())
+	if err != nil {
+		t.Fatalf("OutdatedInfoByManager: %v", err)
+	}
+	if info := byManager["bun"]["typescript"]; info.LatestVersion != "1.0.169" {
+		t.Fatalf("typescript latest = %q, want 1.0.169", info.LatestVersion)
+	}
+}
+
+func TestNamed_DoesNotClaimManagerOutdatedInfoWhenBaseLacksIt(t *testing.T) {
+	p := provider.Named("npm", namedBaseProvider{})
+	if _, ok := p.(provider.ManagerOutdatedInfoChecker); ok {
+		t.Fatal("named provider must not claim ManagerOutdatedInfoChecker when base lacks it")
+	}
+}
+
 func TestNamed_OverridesProviderIdentity(t *testing.T) {
 	p := provider.Named("npm", namedBaseProvider{})
 

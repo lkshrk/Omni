@@ -2,6 +2,8 @@ package app_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -300,6 +302,135 @@ func TestDoctorDrift_NoDrift_WhenInstalledWithEmptyPathDetected(t *testing.T) {
 	}
 	if check.Status != app.DoctorStatusOK {
 		t.Fatalf("drift status = %q, want ok (InstalledWith empty → no wrong-provider finding): %+v", check.Status, check)
+	}
+}
+
+func TestDoctorNvmManagedDriftHelpers(t *testing.T) {
+	check := app.DoctorCheck{
+		ID:     "drift",
+		Status: app.DoctorStatusWarn,
+		Groups: []app.DoctorDetailGroup{{
+			Header: "nvm-managed binary (configured for system provider)",
+			Items:  []string{"pnpm [brew]", "  suggestion: migrate"},
+		}},
+	}
+	if !app.DoctorCheckHasNvmManagedDrift(check) {
+		t.Fatal("DoctorCheckHasNvmManagedDrift = false, want true")
+	}
+	result := &app.DoctorResult{Checks: []app.DoctorCheck{check}}
+	if !app.DoctorHasNvmManagedDrift(result) {
+		t.Fatal("DoctorHasNvmManagedDrift = false, want true")
+	}
+	if got := app.DoctorNvmManagedDriftCount(result); got != 1 {
+		t.Fatalf("DoctorNvmManagedDriftCount = %d, want 1", got)
+	}
+}
+
+// ─── Class 4: nvm-managed binary with system-provider config ──────────────────
+
+func TestDoctorDrift_NvmManaged_DetectedWhenSystemConfiguredButBinaryUnderNvm(t *testing.T) {
+	for _, prov := range []string{"brew", "apt"} {
+		t.Run(prov, func(t *testing.T) {
+			t.Setenv("OMNI_HOSTNAME", "testhost")
+
+			home := t.TempDir()
+			nvmBin := filepath.Join(home, ".nvm", "versions", "node", "v22.1.0", "bin")
+			if err := os.MkdirAll(nvmBin, 0o755); err != nil {
+				t.Fatalf("mkdir nvm bin: %v", err)
+			}
+			pnpmPath := filepath.Join(nvmBin, "pnpm")
+			if err := os.WriteFile(pnpmPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+				t.Fatalf("write pnpm: %v", err)
+			}
+			t.Setenv("HOME", home)
+			t.Setenv("NVM_DIR", "")
+			t.Setenv("NVM_BIN", nvmBin)
+			t.Setenv("PATH", nvmBin)
+
+			system := newDriftProvider(prov, true, nil)
+			a, cfgPath := newImportApp(t, system)
+			if err := saveAppConfig(t, cfgPath, buildDriftConfig(map[string]string{
+				"pnpm": prov,
+			})); err != nil {
+				t.Fatalf("save config: %v", err)
+			}
+
+			// PATH-detected shape: installed on PATH but no concrete manager claim.
+			seedDB(t, a, []*database.ToolCache{{
+				Name:          "pnpm",
+				Provider:      prov,
+				Package:       "pnpm",
+				Installed:     true,
+				InstalledWith: "",
+			}})
+
+			result, err := a.Doctor(context.Background())
+			if err != nil {
+				t.Fatalf("Doctor: %v", err)
+			}
+
+			check := doctorCheck(result, "drift")
+			if check == nil || check.Status != app.DoctorStatusWarn {
+				t.Fatalf("drift check = %+v, want warn", check)
+			}
+			if !driftGroupContains(check.Groups, "pnpm") {
+				t.Fatalf("drift groups do not mention 'pnpm': %+v", check.Groups)
+			}
+			if !driftGroupContains(check.Groups, "nvm") {
+				t.Fatalf("drift groups do not mention nvm context: %+v", check.Groups)
+			}
+			if !driftGroupContains(check.Groups, "consolidate") {
+				t.Fatalf("drift suggestion missing consolidate guidance: %+v", check.Groups)
+			}
+		})
+	}
+}
+
+func TestDoctorDrift_NvmManaged_SkippedWhenWrongProviderAlreadyReportsNodeManager(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+
+	home := t.TempDir()
+	nvmBin := filepath.Join(home, ".nvm", "versions", "node", "v22.1.0", "bin")
+	if err := os.MkdirAll(nvmBin, 0o755); err != nil {
+		t.Fatalf("mkdir nvm bin: %v", err)
+	}
+	pnpmPath := filepath.Join(nvmBin, "pnpm")
+	if err := os.WriteFile(pnpmPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write pnpm: %v", err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("NVM_DIR", "")
+	t.Setenv("NVM_BIN", nvmBin)
+	t.Setenv("PATH", nvmBin)
+
+	brew := newDriftProvider("brew", true, map[string]string{"pnpm": "0.0.0"})
+	a, cfgPath := newImportApp(t, brew)
+	if err := saveAppConfig(t, cfgPath, buildDriftConfig(map[string]string{
+		"pnpm": "brew",
+	})); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	seedDB(t, a, []*database.ToolCache{{
+		Name:          "pnpm",
+		Provider:      "brew",
+		Package:       "pnpm",
+		Installed:     true,
+		InstalledWith: "pnpm",
+	}})
+
+	result, err := a.Doctor(context.Background())
+	if err != nil {
+		t.Fatalf("Doctor: %v", err)
+	}
+
+	check := doctorCheck(result, "drift")
+	if check == nil || check.Status != app.DoctorStatusWarn {
+		t.Fatalf("drift check = %+v, want warn", check)
+	}
+	nvmMentioned := driftGroupContains(check.Groups, "nvm-managed")
+	if nvmMentioned {
+		t.Fatalf("drift groups should not duplicate nvm-managed when wrong-provider already covers pnpm: %+v", check.Groups)
 	}
 }
 
