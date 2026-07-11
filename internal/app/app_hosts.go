@@ -623,8 +623,15 @@ func (a *App) syncOrphansToMachineGroup(ctx context.Context, activeGroups []*con
 		if err != nil {
 			return err
 		}
-		for _, t := range hg.Tools {
-			coveredNames[t.Name] = struct{}{}
+		// Validation allows a tool in only one group globally, so membership in
+		// any group — active or not — disqualifies it as an orphan.
+		for _, g := range cfg.Groups {
+			if g == nil {
+				continue
+			}
+			for _, t := range g.Tools {
+				coveredNames[t.Name] = struct{}{}
+			}
 		}
 
 		var orphans []config.ToolEntry

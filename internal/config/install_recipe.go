@@ -46,7 +46,9 @@ func materializeCurlInstallScript(logicalName string, spec ToolInstallSpec) (Too
 		checkPath = bin
 	}
 	envPrefix := curlInstallEnvPrefix(spec.Options)
-	install := envPrefix + `curl -fsSL ` + shellSingleQuote(url) + ` | sh`
+	// bash, not sh: upstream installers (bun, nvm) use bashisms like pipefail
+	// that dash rejects when piped, since the shebang never applies.
+	install := envPrefix + `curl -fsSL ` + shellSingleQuote(url) + ` | bash`
 	check := envPrefix + `command -v ` + shellSingleQuote(checkPath) + ` >/dev/null 2>&1`
 	if path := optionValue(spec.Options, "check_path"); path != "" && strings.Contains(path, "/") {
 		check = envPrefix + `test -x ` + shellSingleQuote(path)
