@@ -11,12 +11,13 @@ env HOME=$WORK/home
 mkdir $WORK/home
 
 # LINEAR_API_KEY is intentionally unset for this first run, so no `mcp add`
-# for linear is ever attempted; claude is never exec'd at all (List() reads
-# $HOME/.claude.json directly), so claude-calls.log isn't created yet.
+# for linear is ever attempted. Restore still execs `claude plugins list` for
+# plugin-shadow detection; MCP List() reads $HOME/.claude.json directly.
 exec omni --config settings.json agents mcp restore
 stdout 'installed: codex/grafana'
 stdout '! claude-code/linear: .*LINEAR_API_KEY.* not set'
-! exists .omni-cache/claude-calls.log
+exists .omni-cache/claude-calls.log
+! grep 'mcp add' .omni-cache/claude-calls.log
 exists .omni-cache/codex-calls.log
 grep 'mcp add' .omni-cache/codex-calls.log
 
@@ -57,6 +58,10 @@ grep -count=2 'mcp add' .omni-cache/codex-calls.log
 set -eu
 mkdir -p "${OMNI_CACHE_DIR}"
 echo "$*" >> "${OMNI_CACHE_DIR}/claude-calls.log"
+if [ "$1" = "plugins" ] && [ "$2" = "list" ]; then
+  printf '{"installed":[],"available":[]}\n'
+  exit 0
+fi
 if [ "$1" = "mcp" ] && [ "$2" = "add" ] && [ "$3" = "-s" ] && [ "$4" = "user" ]; then
   if [ "$5" = "linear" ]; then
     printf '{"mcpServers":{"linear":{"command":"npx","args":["-y","@linear/mcp"]}}}' > "$HOME/.claude.json"

@@ -104,6 +104,7 @@ func TestUnmanagedSkillPackages_PopulatesPerAgentStatus(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_STATE_HOME", "")
+	stubBinariesOnPath(t, "claude", "cursor")
 	if err := os.MkdirAll(filepath.Join(home, ".claude", "skills", "unmanaged-skill"), 0o755); err != nil {
 		t.Fatal(err)
 	}
