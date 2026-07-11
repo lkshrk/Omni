@@ -31,6 +31,7 @@ key routing, modal state, rendering, and async result handling.
 | `tools.change_group` | yes | yes | yes | yes | - |
 | `tools.pin_provider` | yes | yes | yes | yes | - |
 | `tools.reinstall_default` | yes | yes | yes | yes | - |
+| `tools.migrate_nvm` | yes | yes | yes | yes | - |
 | `tools.refresh` | yes | yes | yes | yes | - |
 | `tools.consolidate` | yes | yes | yes | yes | - |
 | `tools.set_spec` | yes | yes | yes | yes | - |

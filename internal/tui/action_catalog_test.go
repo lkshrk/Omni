@@ -159,7 +159,7 @@ func TestPaletteActionCatalogCommandsExist(t *testing.T) {
 		got[cmd.name] = cmd.desc
 	}
 
-	for _, id := range []actions.ID{actions.ToolSync, actions.DotsPull, actions.DotsPush, actions.DotsSync} {
+	for _, id := range []actions.ID{actions.ToolSync, actions.ToolMigrateNvm, actions.DotsPull, actions.DotsPush, actions.DotsSync} {
 		pal := actions.MustPalette(id)
 		name := paletteCommandName(pal)
 		if got[name] != pal.Description {

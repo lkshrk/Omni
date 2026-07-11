@@ -55,6 +55,41 @@ omni tools sync
 
 Expected result: this one tool uses `pnpm`.
 
+## Grok: Homebrew On macOS, x.ai Script On Linux
+
+Use Homebrew when the formula is available, and fall back to the official x.ai
+installer everywhere else (Linux, or macOS when you installed outside Homebrew):
+
+Set `"version": 16` (or let Omni migrate on load). Multi-provider `providers[]`
+entries require config version 6 or newer — without a version, the v5→v6
+migration can drop hand-authored provider lists that only used the new shape.
+
+```json
+"grok": {
+  "providers": [
+    { "provider": "brew", "package": "grok" },
+    {
+      "provider": "script",
+      "options": {
+        "install": "curl -fsSL https://x.ai/cli/install.sh | bash",
+        "check": "command -v grok || test -x $HOME/.grok/bin/grok",
+        "uninstall": "rm -f \"$HOME/.grok/bin/grok\" \"$HOME/.grok/bin/agent\" \"$HOME/.local/bin/grok\" \"$HOME/.local/bin/agent\" && rm -f \"$HOME/.grok/downloads\"/grok-* && rm -rf \"$HOME/.grok/completions\"",
+        "upgrade": "grok update 2>/dev/null || curl -fsSL https://x.ai/cli/install.sh | bash",
+        "version": "grok --version"
+      }
+    }
+  ],
+  "git": "https://github.com/xai-org/grok-cli"
+}
+```
+
+On Linux, Omni skips unavailable `brew` and installs through the `script`
+candidate. Delete with the script owner when Omni sees grok as installed:
+
+```sh
+omni tools delete grok --provider script
+```
+
 ## Move Python Tools To uv
 
 Preview first:
@@ -71,6 +106,50 @@ omni tools consolidate python uv
 
 Expected result: Python tools move to the `uv` manager and stale installs are
 removed best-effort from the old manager.
+
+## Use Node Via nvm
+
+Use nvm for the Node runtime. Let omni manage JS global CLIs through `pnpm`,
+`npm`, or `bun` — not a system package manager (`brew`, `apt`, `dnf`, …).
+
+Pin your JS package manager:
+
+```sh
+omni settings set ecosystems.node.manager pnpm
+```
+
+Preview migration off the system provider:
+
+```sh
+omni consolidate --to pnpm --dry-run
+```
+
+Apply:
+
+```sh
+omni consolidate --to pnpm
+omni tools refresh
+```
+
+For the Node runtime itself, do not keep `node` as a system-managed tool if nvm
+owns it. Remove it from the manifest or stop syncing it after uninstalling the
+system package (for example `brew uninstall node` on macOS).
+
+Migrate tools still owned by a system provider:
+
+```sh
+omni tools migrate-nvm --all
+```
+
+Check for drift:
+
+```sh
+omni doctor
+```
+
+Expected result: JS globals are configured for `pnpm` (or your chosen manager),
+`doctor` reports no system-vs-nvm drift, and nvm remains responsible for Node
+versions.
 
 ## Adopt Neovim Config Into Dotfiles
 

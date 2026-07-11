@@ -102,6 +102,21 @@ func buildPalette(m Model) []palCmd {
 		)
 	}
 
+	migrateNvmAction := actions.MustPalette(actions.ToolMigrateNvm)
+	cmds = append(cmds, palCmd{
+		name: paletteCommandName(migrateNvmAction),
+		desc: migrateNvmAction.Description,
+		run: func(m *Model) tea.Cmd {
+			m.mode = viewList
+			if !statusDashboardNvmManagedActionable(*m) {
+				return setStatus(m, "no nvm-managed system-provider tools", false)
+			}
+			var batch []tea.Cmd
+			m.startDashboardFixNvmManaged(&batch)
+			return tea.Batch(batch...)
+		},
+	})
+
 	consolidateAction := actions.MustPalette(actions.ToolConsolidate)
 	for _, opt := range m.consolidateOptions {
 		opt := opt

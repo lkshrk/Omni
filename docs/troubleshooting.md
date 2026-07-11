@@ -131,6 +131,39 @@ omni tools consolidate node bun
 omni tools consolidate python uv
 ```
 
+## Node Or pnpm Still Listed Under A System Provider After Switching To nvm
+
+Symptoms:
+
+- `node` or `pnpm` still show `brew`, `apt`, or another system provider as configured
+- tools work in an interactive shell but omni shows missing or system-owned state
+- `omni doctor` reports **nvm-managed binary (configured for system provider)**
+
+Omni treats nvm as a runtime bootstrap (PATH augmentation), not a package
+provider. JS globals belong on the `node` ecosystem (`pnpm`, `npm`, or `bun`).
+
+Fix:
+
+```sh
+omni settings set ecosystems.node.manager pnpm
+omni tools migrate-nvm --all
+omni consolidate --to pnpm --dry-run
+omni consolidate --to pnpm
+omni tools refresh
+omni doctor
+```
+
+`migrate-nvm` rewrites system-provider specs for tools whose active binaries
+resolve through nvm. You can also confirm the same repair from the Tools tab
+on drift rows or from the dashboard Tool Sync action when doctor reports nvm
+drift.
+
+For the Node runtime, remove system-package ownership instead of re-installing
+through omni (on macOS with Homebrew: `brew uninstall node`).
+
+See [Recipes — Use Node Via nvm](recipes.md#use-node-via-nvm) for the full
+workflow.
+
 For one tool:
 
 ```sh

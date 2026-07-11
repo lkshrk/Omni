@@ -2,14 +2,14 @@
 
 This page explains the shape of `settings.json`. For narrative examples, use
 [Configuration](configuration.md). For the machine-readable schema, use
-[`spec/omni.settings.v9.schema.json`](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v9.schema.json).
+[`spec/omni.settings.v16.schema.json`](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v16.schema.json).
 
 ## Root Object
 
 | Key | Type | Required | Description |
 | --- | --- | --- | --- |
 | `$schema` | string | no | Editor schema URI written by Omni. |
-| `version` | integer | yes | Settings format version. Current version is `9`. |
+| `version` | integer | yes | Settings format version. Current version is `16`. |
 | `settings` | object | no | Global defaults. |
 | `host_settings` | object | no | Per-host setting overrides. |
 | `tools` | object | no | Logical tool specs keyed by logical name. |
@@ -28,6 +28,10 @@ This page explains the shape of `settings.json`. For narrative examples, use
 | `ecosystems` | object | Legacy manager choices migrated to provider lists on load. |
 | `dots_repo` | string | Local path to the dotfiles Git repo. |
 | `dots_disabled` | boolean | Disable dotfile sync for this settings scope. |
+| `agents_disabled` | boolean | Master switch: disable the agent skills/mcp/plugins features for this settings scope. |
+| `skills_disabled` | boolean | Disable the agent skills feature for this settings scope. |
+| `mcp_disabled` | boolean | Disable the agent mcp feature for this settings scope. |
+| `plugins_disabled` | boolean | Disable the agent plugins feature for this settings scope. |
 | `dots_git` | object | Dotfiles repo commit/push behavior. |
 | `disabled_providers` | array | Providers disabled for this settings scope. |
 | `fallback_bin_dir` | string | Default directory for fallback-installed binaries. |
@@ -35,7 +39,7 @@ This page explains the shape of `settings.json`. For narrative examples, use
 ### `settings.ecosystems` (legacy)
 
 `settings.ecosystems` remains in the schema so older configs can load and
-migrate. Current (v9) config should use `provider_priority`, bootstrap
+migrate. Current config should use `provider_priority`, bootstrap
 `settings.providers`, and tool-level `providers[]`. The v8→v9 migration expands
 family `disabled_providers` (`system`/`node`/`python`) into concrete providers.
 
@@ -61,8 +65,14 @@ family `disabled_providers` (`system`/`node`/`python`) into concrete providers.
 ```
 
 Host settings can override `provider_priority`, `dots_repo`, `dots_disabled`,
-and `disabled_providers`. They do not override `auto_import`,
+`agents_disabled`, `skills_disabled`, `mcp_disabled`, `plugins_disabled`, and
+`disabled_providers`. They do not override `auto_import`,
 `update_quarantine`, `provider_update_quarantine`, or `dots_git`.
+
+A nil (absent) value for `agents_disabled`, `skills_disabled`, `mcp_disabled`,
+or `plugins_disabled` on a host means "enabled by default" and inherits the
+global setting. `agents_disabled` is the master switch: when true, it
+disables skills, mcp, and plugins regardless of their individual flags.
 
 ## `tools`
 
@@ -80,12 +90,12 @@ and `disabled_providers`. They do not override `auto_import`,
 | Field | Type | Description |
 | --- | --- | --- |
 | `providers` | array | Ordered concrete provider candidates. |
-| `providers[].provider` | string | Concrete provider such as `brew`, `apt`, `npm`, or `pip`. |
+| `providers[].provider` | string | Concrete provider such as `brew`, `apt`, `npm`, `pip`, or `script`. |
 | `providers[].package` | string | Provider package name. Defaults to the logical tool name. |
 | `providers[].bin` | string | Optional binary name when it differs from package/logical name. |
 | `git` | string | Upstream git repository URL. Brew metadata and install-from-search can populate GitHub URLs here for later fallback setup. |
 | `quarantine` | string | Tool-specific update quarantine override. Use a duration, `0`, or `exempt`. |
-| `options` | object | Provider-specific key-value options. |
+| `options` | object | Provider-specific key-value options. For `script`: `install` (required), `check` or `detect` (one required), optional `uninstall`, `upgrade`, `version`. |
 | `taps` | array | Homebrew taps required before install. |
 | `ignore` | boolean | Keep the tool in config but skip management. |
 | `variants` | array | Alternate install candidates tried in order. |
@@ -216,3 +226,36 @@ the reusable group list.
 ```
 
 Global ignore lists keep known-noisy entries visible but unmanaged.
+
+### `agents.ignore`
+
+```json
+{
+  "agents": {
+    "ignore": {
+      "skills": ["vercel-labs/agent-skills"],
+      "mcp_servers": ["context7"],
+      "plugins": ["my-plugin"],
+      "marketplaces": ["noisy-marketplace"]
+    }
+  }
+}
+```
+
+Lists agent-managed skills, MCP servers, plugins, and marketplaces skipped
+during restore/sync, mirroring the top-level `ignore` list for tools and dots.
+
+## Config Version Migrations
+
+Omni applies sequential migrations on load until `version` reaches the current
+supported value. Notable steps since older tagged releases:
+
+| Version | Effect |
+| --- | --- |
+| 6 | Legacy per-tool `provider`/`package` fields become `providers[]`. Hand-edited multi-provider arrays need `version` ≥ 6 before load or the v5→v6 step may rebuild `providers[]` from legacy fields only. |
+| 12 | Agent feature flags and agents manifest shape updates. |
+| 14 | Drops dot entries tracking agent config directories (for example `.claude`, `.codex`, `.agents/skills`). Discovery no longer surfaces those paths. |
+| 15 | Adds optional `groups[].marketplaces` membership refs. |
+| 16 | Adds `agents.ignore.marketplaces`. |
+
+See [Release Notes](release-notes.md) for a narrative summary since v0.8.8.
