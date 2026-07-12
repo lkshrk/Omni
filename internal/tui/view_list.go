@@ -447,7 +447,13 @@ func newColWidthsWithProviderPins(tools []*database.ToolCache, toolGroups map[st
 		name: func(i int) string { return nameDisplayText(tools[i]) },
 		prov: func(i int) string {
 			t := tools[i]
-			label := providerDisplayTextForToolWithPin(t, providerPinForTool(t, providerPins), fallbackConcreteForTool(t, fallbacks), systemBin, pythonBin, nodeBin)
+			pin := providerPinForTool(t, providerPins)
+			fallbackConcrete := fallbackConcreteForTool(t, fallbacks)
+			measureSystemBin, measurePythonBin, measureNodeBin := systemBin, pythonBin, nodeBin
+			if t.Installed && t.InstalledWith == "" && pin == "" && fallbackConcrete == "" {
+				measureSystemBin, measurePythonBin, measureNodeBin = "", "", ""
+			}
+			label := providerDisplayTextForToolWithPin(t, pin, fallbackConcrete, measureSystemBin, measurePythonBin, measureNodeBin)
 			if wrongProvider != nil && wrongProvider(t) && t.InstalledWith != "" && t.InstalledWith != label {
 				label = t.InstalledWith
 			}
@@ -544,12 +550,12 @@ func displayVersionText(t *database.ToolCache) string {
 }
 
 func renderToolRowWithProviderPin(p palette, t *database.ToolCache, cols colWidths, spinnerView, group, providerPin, fallbackConcrete, systemBin, pythonBin, nodeBin string, ignored, selected bool, ss syncStatus, rowErrValues ...string) string {
-	label := providerLabelForToolWithPin(t, providerPin, fallbackConcrete, systemBin, pythonBin, nodeBin)
 	privileged := toolHasPrivilegeMarker(t, systemBin)
 	provSystemBin, provPythonBin, provNodeBin := systemBin, pythonBin, nodeBin
 	if t.Installed && t.InstalledWith == "" && providerPin == "" && fallbackConcrete == "" {
 		provSystemBin, provPythonBin, provNodeBin = "", "", ""
 	}
+	label := providerLabelForToolWithPin(t, providerPin, fallbackConcrete, provSystemBin, provPythonBin, provNodeBin)
 	rowErr := ""
 	if len(rowErrValues) > 0 {
 		rowErr = rowErrorSummary(rowErrValues[0])
