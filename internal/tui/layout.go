@@ -5,8 +5,8 @@ package tui
 const (
 	// listColumnGap is the standard space between table columns across main lists.
 	listColumnGap = 3
-	// Marker and provider render as one aligned cell: !bun / lockbrew.
-	toolPrivilegeProviderGap = 0
+	// Marker and provider render as one aligned cell: ! bun / lock brew.
+	toolPrivilegeProviderGap = 1
 
 	// dotsIconW is the health icon width (one rune: ✓ ! ✗ ·).
 	dotsIconW = 1
