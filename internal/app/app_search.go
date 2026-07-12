@@ -1412,6 +1412,16 @@ func (a *App) discoverCLIToolSets(ctx context.Context) map[string]map[string]boo
 		}
 		set, err := cp.CLIToolSet(ctx)
 		if err != nil {
+			// Provider implements CLIToolProvider but failed to report its set:
+			// fail closed with an empty (non-nil) set rather than omitting the
+			// entry, which would fall back to allow-all in discoverCLIToolAllowed.
+			cliSets[prov.Name()] = map[string]bool{}
+			continue
+		}
+		if set == nil {
+			// namedProvider.CLIToolSet returns (nil, nil) when the wrapped
+			// provider does not implement CLIToolProvider at all: treat as
+			// non-implementing (allow-all), not as an empty result.
 			continue
 		}
 		cliSets[prov.Name()] = set
