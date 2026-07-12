@@ -203,13 +203,13 @@ func (m *Model) handleDiscoveredRefreshedMsg(msg discoveredRefreshedMsg) tea.Cmd
 		}
 		return setStatus(m, status, true)
 	}
-	if msg.discovered != nil {
-		m.discoveredTools = msg.discovered
-		m.rebuildDiscoveredKeys()
-		m.applyFilter()
-		if anyMissingDescription(msg.discovered) || anyMissingDescription(m.allTools) {
-			return m.startDescriptionRefresh()
-		}
+	// A successful scan can legitimately prune the last discovered row, leaving
+	// msg.discovered nil; still overwrite so pruned rows don't linger in the UI.
+	m.discoveredTools = msg.discovered
+	m.rebuildDiscoveredKeys()
+	m.applyFilter()
+	if anyMissingDescription(msg.discovered) || anyMissingDescription(m.allTools) {
+		return m.startDescriptionRefresh()
 	}
 
 	m.finishSetupReloadIfIdle()
