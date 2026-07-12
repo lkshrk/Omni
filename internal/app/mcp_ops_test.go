@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/app"
@@ -517,19 +516,19 @@ func TestSetMcpServerAgents_AdapterErrorIsNonFatalAndManifestStillPersists(t *te
 	}
 }
 
-func TestSetMcpServerAgents_TargetedUnavailableAdapterReturnsError(t *testing.T) {
+func TestSetMcpServerAgents_TargetedUnavailableAdapterSkips(t *testing.T) {
 	claude := &stubMcpAdapter{id: "claude-code", available: false}
 	existing := config.McpServer{Name: "x", Transport: "stdio", Command: "npx x", Agents: []string{}}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{existing}}, app.WithMcpAdapters([]app.McpAdapter{claude}))
 	res, err := a.SetMcpServerAgents(context.Background(), "x", []string{"claude-code"})
 	if err != nil {
-		t.Fatalf("SetMcpServerAgents must not fail wholly on a per-adapter error: %v", err)
+		t.Fatalf("SetMcpServerAgents must not fail wholly on a per-adapter skip: %v", err)
 	}
-	if len(res.Errors) != 1 || res.Errors[0].AgentID != "claude-code" {
-		t.Fatalf("expected 1 per-adapter error for claude-code, got %v", res.Errors)
+	if len(res.Errors) != 0 {
+		t.Fatalf("unavailable adapter must not produce errors, got %v", res.Errors)
 	}
-	if !strings.Contains(res.Errors[0].Error(), "not found on PATH") {
-		t.Fatalf("expected 'not found on PATH' error, got %q", res.Errors[0].Error())
+	if len(res.SkippedUnavailable) != 1 || res.SkippedUnavailable[0] != "claude-code/x" {
+		t.Fatalf("expected SkippedUnavailable [claude-code/x], got %v", res.SkippedUnavailable)
 	}
 }
 

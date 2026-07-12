@@ -130,12 +130,19 @@ func ensureMarketplace(ctx context.Context, adapter PluginAdapter, m config.Mark
 	if err != nil {
 		return err
 	}
-	for _, im := range existing {
-		if im.Name == m.Name {
-			return nil
-		}
+	if marketplaceListed(existing, m.Name) {
+		return nil
 	}
 	return adapter.AddMarketplace(ctx, m)
+}
+
+func marketplaceListed(existing []InstalledMarketplace, name string) bool {
+	for _, im := range existing {
+		if im.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // RestorePlugins installs manifest plugins into each targeted agent CLI,
@@ -212,10 +219,14 @@ func (a *App) RestorePlugins(ctx context.Context, opts RestorePluginOptions) (Re
 type AddPluginResult struct {
 	Errors           []PluginError
 	AlreadyInstalled []string
+	// SkippedUnavailable lists adapter/name pairs whose agent CLI is not on
+	// PATH: normal on multi-host manifests, an actionable warning on explicit installs.
+	SkippedUnavailable []string
 }
 
 type UpdatePluginResult struct {
-	Errors []PluginError
+	Errors             []PluginError
+	SkippedUnavailable []string
 }
 
 // UpdateMarketplacesResult collects per-adapter refresh failures. Errors are
@@ -302,7 +313,7 @@ func (a *App) UpdatePlugins(ctx context.Context, names []string, progress func(n
 				continue
 			}
 			if !adapter.Available() {
-				res.Errors = append(res.Errors, PluginError{AgentID: adapter.ID(), Name: names[i], Err: fmt.Errorf("%s CLI not found on PATH", adapter.ID())})
+				res.SkippedUnavailable = append(res.SkippedUnavailable, adapter.ID()+"/"+names[i])
 				continue
 			}
 			if updateErr := adapter.UpdatePlugin(ctx, names[i], target.Marketplace); updateErr != nil {
@@ -314,7 +325,8 @@ func (a *App) UpdatePlugins(ctx context.Context, names []string, progress func(n
 }
 
 type RemovePluginResult struct {
-	Errors []PluginError
+	Errors             []PluginError
+	SkippedUnavailable []string
 }
 
 // AddPlugin validates the marketplace ref, upserts the manifest, then
@@ -343,19 +355,18 @@ func (a *App) AddPlugin(ctx context.Context, p config.Plugin) (AddPluginResult, 
 		if !pluginTargetsAdapter(p, adapter.ID()) {
 			continue
 		}
+		// listed check first: adopting an already-present plugin must not demand the CLI
+		if installed, listErr := adapter.ListPlugins(ctx); listErr == nil && pluginListed(installed, p.Name, p.Marketplace) {
+			res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+p.Name)
+			continue
+		}
 		if !adapter.Available() {
-			res.Errors = append(res.Errors, PluginError{AgentID: adapter.ID(), Name: p.Name, Err: fmt.Errorf("%s CLI not found on PATH", adapter.ID())})
+			res.SkippedUnavailable = append(res.SkippedUnavailable, adapter.ID()+"/"+p.Name)
 			continue
 		}
 		if mErr := ensureMarketplace(ctx, adapter, *m); mErr != nil {
 			res.Errors = append(res.Errors, PluginError{AgentID: adapter.ID(), Name: p.Name, Err: fmt.Errorf("marketplace %s: %w", m.Name, mErr)})
 			continue
-		}
-		if installed, listErr := adapter.ListPlugins(ctx); listErr == nil {
-			if pluginListed(installed, p.Name, p.Marketplace) {
-				res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+p.Name)
-				continue
-			}
 		}
 		if installErr := adapter.InstallPlugin(ctx, p); installErr != nil {
 			res.Errors = append(res.Errors, PluginError{AgentID: adapter.ID(), Name: p.Name, Err: installErr})
@@ -391,8 +402,11 @@ func (a *App) AddMarketplace(ctx context.Context, m config.Marketplace) (AddPlug
 		if !targeted {
 			continue
 		}
+		if existing, listErr := adapter.ListMarketplaces(ctx); listErr == nil && marketplaceListed(existing, m.Name) {
+			continue
+		}
 		if !adapter.Available() {
-			res.Errors = append(res.Errors, PluginError{AgentID: adapter.ID(), Name: m.Name, Err: fmt.Errorf("%s CLI not found on PATH", adapter.ID())})
+			res.SkippedUnavailable = append(res.SkippedUnavailable, adapter.ID()+"/"+m.Name)
 			continue
 		}
 		if mErr := ensureMarketplace(ctx, adapter, m); mErr != nil {
@@ -427,8 +441,11 @@ func (a *App) RemovePlugin(ctx context.Context, name string) (RemovePluginResult
 		if !pluginTargetsAdapter(*target, adapter.ID()) {
 			continue
 		}
+		if installed, listErr := adapter.ListPlugins(ctx); listErr == nil && !pluginListed(installed, target.Name, target.Marketplace) {
+			continue
+		}
 		if !adapter.Available() {
-			res.Errors = append(res.Errors, PluginError{AgentID: adapter.ID(), Name: name, Err: fmt.Errorf("%s CLI not found on PATH", adapter.ID())})
+			res.SkippedUnavailable = append(res.SkippedUnavailable, adapter.ID()+"/"+name)
 			continue
 		}
 		if removeErr := adapter.RemovePlugin(ctx, *target); removeErr != nil {
@@ -496,16 +513,14 @@ func (a *App) SetPluginAgents(ctx context.Context, name string, agents []string)
 	for _, adapter := range a.pluginAdapters() {
 		wasTargeted := pluginTargetsAdapter(*target, adapter.ID())
 		nowTargeted := pluginTargetsAdapter(updated, adapter.ID())
-		if !adapter.Available() {
-			if nowTargeted {
-				res.Errors = append(res.Errors, PluginError{AgentID: adapter.ID(), Name: name, Err: fmt.Errorf("%s CLI not found on PATH", adapter.ID())})
-			}
-			continue
-		}
 		switch {
 		case nowTargeted:
 			if installed, listErr := adapter.ListPlugins(ctx); listErr == nil && pluginListed(installed, updated.Name, updated.Marketplace) {
 				res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+name)
+				continue
+			}
+			if !adapter.Available() {
+				res.SkippedUnavailable = append(res.SkippedUnavailable, adapter.ID()+"/"+name)
 				continue
 			}
 			if m != nil {
@@ -518,6 +533,9 @@ func (a *App) SetPluginAgents(ctx context.Context, name string, agents []string)
 				res.Errors = append(res.Errors, PluginError{AgentID: adapter.ID(), Name: name, Err: installErr})
 			}
 		case wasTargeted && !nowTargeted:
+			if !adapter.Available() {
+				continue
+			}
 			if removeErr := adapter.RemovePlugin(ctx, *target); removeErr != nil {
 				res.Errors = append(res.Errors, PluginError{AgentID: adapter.ID(), Name: name, Err: removeErr})
 			}

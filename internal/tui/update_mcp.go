@@ -15,6 +15,15 @@ import (
 // combineMcpErrors folds a top-level error with per-adapter errors so callers that
 // only track a single err field (as the mcp done-msg types do today) still surface
 // adapter failures instead of silently dropping them.
+// skippedUnavailableErr turns targeted-but-unavailable adapter skips into a
+// visible error on explicit user actions; bulk/adopt flows keep them silent.
+func skippedUnavailableErr(err error, skipped []string) error {
+	if err != nil || len(skipped) == 0 {
+		return err
+	}
+	return fmt.Errorf("not installed on %s: agent CLI not found on PATH", strings.Join(skipped, ", "))
+}
+
 func combineMcpErrors(err error, adapterErrs []app.McpServerError) error {
 	if err == nil && len(adapterErrs) == 0 {
 		return nil
@@ -71,7 +80,7 @@ func (m *Model) doRemoveMcp(name string) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
 		res, err := a.RemoveMcpServer(ctx, name)
-		return mcpRemoveDoneMsg{name: name, err: combineMcpErrors(err, res.Errors)}
+		return mcpRemoveDoneMsg{name: name, err: skippedUnavailableErr(combineMcpErrors(err, res.Errors), res.SkippedUnavailable)}
 	}
 }
 
@@ -80,7 +89,7 @@ func (m *Model) doAddMcp(s config.McpServer) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
 		res, err := a.AddMcpServer(ctx, s)
-		return mcpAddDoneMsg{err: combineMcpErrors(err, res.Errors)}
+		return mcpAddDoneMsg{err: skippedUnavailableErr(combineMcpErrors(err, res.Errors), res.SkippedUnavailable)}
 	}
 }
 
@@ -172,7 +181,7 @@ func (m *Model) doSetMcpAgents(row app.McpServerRow, ids []string) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
 		res, err := a.SetMcpServerAgents(ctx, row.Name, ids)
-		return mcpAgentsSavedMsg{err: combineMcpErrors(err, res.Errors)}
+		return mcpAgentsSavedMsg{err: skippedUnavailableErr(combineMcpErrors(err, res.Errors), res.SkippedUnavailable)}
 	}
 }
 
@@ -194,7 +203,7 @@ func (m *Model) doInstallMcpServer(name, agentID string) tea.Cmd {
 			ids = append(append([]string(nil), ids...), agentID)
 		}
 		res, err := a.SetMcpServerAgents(ctx, name, ids)
-		return mcpAgentsSavedMsg{err: combineMcpErrors(err, res.Errors)}
+		return mcpAgentsSavedMsg{err: skippedUnavailableErr(combineMcpErrors(err, res.Errors), res.SkippedUnavailable)}
 	}
 }
 

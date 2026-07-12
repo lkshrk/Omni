@@ -298,7 +298,7 @@ func (m *Model) doSetPluginAgents(row app.PluginRow, ids []string) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
 		res, err := a.SetPluginAgents(ctx, row.Name, ids)
-		return pluginAgentsSavedMsg{err: combinePluginErrors(err, res.Errors)}
+		return pluginAgentsSavedMsg{err: skippedUnavailableErr(combinePluginErrors(err, res.Errors), res.SkippedUnavailable)}
 	}
 }
 
@@ -309,7 +309,7 @@ func (m *Model) doUpdatePlugin(name string) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
 		res, err := a.UpdatePlugin(ctx, name)
-		return pluginUpdateDoneMsg{err: combinePluginErrors(err, res.Errors)}
+		return pluginUpdateDoneMsg{err: skippedUnavailableErr(combinePluginErrors(err, res.Errors), res.SkippedUnavailable)}
 	}
 }
 
@@ -330,7 +330,7 @@ func (m *Model) doInstallPlugin(name, agentID string) tea.Cmd {
 			ids = append(append([]string(nil), ids...), agentID)
 		}
 		res, err := a.SetPluginAgents(ctx, name, ids)
-		return pluginAgentsSavedMsg{err: combinePluginErrors(err, res.Errors)}
+		return pluginAgentsSavedMsg{err: skippedUnavailableErr(combinePluginErrors(err, res.Errors), res.SkippedUnavailable)}
 	}
 }
 
@@ -459,7 +459,7 @@ func (m *Model) doAddPlugin(p config.Plugin) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
 		res, err := a.AddPlugin(ctx, p)
-		return pluginAddDoneMsg{err: combinePluginErrors(err, res.Errors)}
+		return pluginAddDoneMsg{err: skippedUnavailableErr(combinePluginErrors(err, res.Errors), res.SkippedUnavailable)}
 	}
 }
 
