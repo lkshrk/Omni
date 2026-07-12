@@ -142,12 +142,25 @@ type pipListEntry struct {
 // cliToolSetScript returns a JSON object mapping lowercase package name → true
 // for every pip package that installs a console_scripts or scripts entry point.
 // Used by CLIToolSet to decide which imported packages need auto-ignore.
-const cliToolSetScript = `import importlib.metadata,json,sys` +
-	`;seen={}` +
-	`;[seen.update({d.metadata["Name"].lower():1})` +
-	` for d in importlib.metadata.distributions()` +
-	` if any(e.group in ("console_scripts","scripts") for e in d.entry_points)]` +
-	`;print(json.dumps(seen))`
+// Distributions with broken/partial dist-info metadata (seen on some Ubuntu
+// apt-managed installs) are skipped individually instead of aborting the scan.
+const cliToolSetScript = `import importlib.metadata,json
+seen={}
+def has_cli(d):
+	try:
+		return any(e.group in ("console_scripts","scripts") for e in d.entry_points)
+	except Exception:
+		return False
+for d in importlib.metadata.distributions():
+	try:
+		name=d.metadata["Name"]
+	except Exception:
+		continue
+	if not name:
+		continue
+	if has_cli(d):
+		seen[name.lower()]=1
+print(json.dumps(seen))`
 
 // CLIToolSet returns the set of lowercase pip package names that install at
 // least one CLI entry point.  Used by Import to mark library packages as
