@@ -3365,6 +3365,26 @@ func TestFlow_UC62_DiscoveredRefreshedMsg(t *testing.T) {
 			t.Error("statusMsg should be set on discoveredRefreshedMsg error")
 		}
 	})
+
+	t.Run("success pruning last row clears discoveredTools", func(t *testing.T) {
+		m := baseModel(nil)
+		m.discoveredTools = []*database.ToolCache{{Name: "fzf", Provider: "brew", Installed: true, Tracked: false}}
+		m.discoveryGen = 5
+		got := drive(m, discoveredRefreshedMsg{gen: 5, discovered: nil, err: nil})
+		if len(got.discoveredTools) != 0 {
+			t.Errorf("discoveredTools = %d, want 0 after pruning refresh", len(got.discoveredTools))
+		}
+	})
+
+	t.Run("error leaves discoveredTools untouched", func(t *testing.T) {
+		m := baseModel(nil)
+		m.discoveredTools = []*database.ToolCache{{Name: "fzf", Provider: "brew", Installed: true, Tracked: false}}
+		m.discoveryGen = 5
+		got := drive(m, discoveredRefreshedMsg{gen: 5, discovered: nil, err: errors.New("scan failed")})
+		if len(got.discoveredTools) != 1 {
+			t.Errorf("discoveredTools = %d, want 1 (unchanged) on error", len(got.discoveredTools))
+		}
+	})
 }
 
 // ── UC-63 descRefreshDoneMsg ──────────────────────────────────────────────────
