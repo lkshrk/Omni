@@ -33,9 +33,13 @@ func (a *claudeCodePluginAdapter) Available() bool {
 }
 
 func (a *claudeCodePluginAdapter) InstallPlugin(ctx context.Context, p config.Plugin) error {
-	_, stderr, err := a.exec(ctx, "claude", "plugins", "install", p.Name+"@"+p.Marketplace)
+	id := p.Name + "@" + p.Marketplace
+	stdout, stderr, err := a.exec(ctx, "claude", "plugins", "install", id)
 	if err != nil {
-		return fmt.Errorf("claude plugins install %s@%s: %w: %s", p.Name, p.Marketplace, err, stderr)
+		return fmt.Errorf("claude plugins install %s: %w: %s", id, err, stderr)
+	}
+	if strings.Contains(stdout, claudeInstallFailureMarker) || strings.Contains(stderr, claudeInstallFailureMarker) {
+		return fmt.Errorf("claude plugins install %s: %s", id, strings.TrimSpace(stdout+stderr))
 	}
 	return nil
 }
@@ -46,9 +50,12 @@ func (a *claudeCodePluginAdapter) InstallPlugin(ctx context.Context, p config.Pl
 // mandatory when stdin/stdout is not a TTY, which is always true for omni.
 func (a *claudeCodePluginAdapter) RemovePlugin(ctx context.Context, p config.Plugin) error {
 	id := p.Name + "@" + p.Marketplace
-	_, stderr, err := a.exec(ctx, "claude", "plugins", "uninstall", id, "--yes")
+	stdout, stderr, err := a.exec(ctx, "claude", "plugins", "uninstall", id, "--yes")
 	if err != nil {
 		return fmt.Errorf("claude plugins uninstall %s: %w: %s", id, err, stderr)
+	}
+	if strings.Contains(stdout, claudeUninstallFailureMarker) || strings.Contains(stderr, claudeUninstallFailureMarker) {
+		return fmt.Errorf("claude plugins uninstall %s: %s", id, strings.TrimSpace(stdout+stderr))
 	}
 	return nil
 }
@@ -60,6 +67,15 @@ func (a *claudeCodePluginAdapter) RemovePlugin(ctx context.Context, p config.Plu
 // parsed instead. Matched without the ✘ glyph, which renders inconsistently
 // across terminals.
 const claudeUpdateFailureMarker = "Failed to update"
+
+// Install, uninstall, and marketplace add share the same exit-0-on-failure
+// contract (verified live 2026-07-12 on 2.1.197): only a "Failed to ..."
+// output line distinguishes failure from success.
+const (
+	claudeInstallFailureMarker        = "Failed to install"
+	claudeUninstallFailureMarker      = "Failed to uninstall"
+	claudeMarketplaceAddFailureMarker = "Failed to add marketplace"
+)
 
 // UpdatePlugin updates a plugin by its full name@marketplace identity: a bare
 // name is rejected by the live CLI as not found (verified 2026-07-10), even
@@ -82,9 +98,12 @@ func (a *claudeCodePluginAdapter) UpdatePlugin(ctx context.Context, name, market
 // `marketplace remove`; a marketplace it didn't explicitly add is never torn
 // down by omni.
 func (a *claudeCodePluginAdapter) AddMarketplace(ctx context.Context, m config.Marketplace) error {
-	_, stderr, err := a.exec(ctx, "claude", "plugins", "marketplace", "add", m.Source)
+	stdout, stderr, err := a.exec(ctx, "claude", "plugins", "marketplace", "add", m.Source)
 	if err != nil {
 		return fmt.Errorf("claude plugins marketplace add %s: %w: %s", m.Source, err, stderr)
+	}
+	if strings.Contains(stdout, claudeMarketplaceAddFailureMarker) || strings.Contains(stderr, claudeMarketplaceAddFailureMarker) {
+		return fmt.Errorf("claude plugins marketplace add %s: %s", m.Source, strings.TrimSpace(stdout+stderr))
 	}
 	return nil
 }
