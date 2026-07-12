@@ -59,6 +59,39 @@ func TestClaudeCodePluginAdapter_RemovePlugin(t *testing.T) {
 	}
 }
 
+func TestClaudeCodePluginAdapter_ExitZeroFailureMarkers(t *testing.T) {
+	cases := []struct {
+		name   string
+		stdout string
+		op     func(a PluginAdapter) error
+	}{
+		{"install", `Installing plugin "x@m"...✘ Failed to install plugin "x@m": Plugin "x" not found in marketplace "m"`, func(a PluginAdapter) error {
+			return a.InstallPlugin(context.Background(), config.Plugin{Name: "x", Marketplace: "m"})
+		}},
+		{"uninstall", `✘ Failed to uninstall plugin "x@m": Plugin "x@m" not found in installed plugins`, func(a PluginAdapter) error {
+			return a.RemovePlugin(context.Background(), config.Plugin{Name: "x", Marketplace: "m"})
+		}},
+		{"marketplace add", `Adding marketplace…✘ Failed to add marketplace: Failed to clone marketplace repository`, func(a PluginAdapter) error {
+			return a.AddMarketplace(context.Background(), config.Marketplace{Name: "m", Source: "o/r"})
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			exec := func(_ context.Context, _ string, _ ...string) (string, string, error) {
+				return tc.stdout, "", nil
+			}
+			a := NewClaudeCodePluginAdapter(exec, func(string) (string, bool) { return "", false })
+			err := tc.op(a)
+			if err == nil {
+				t.Fatal("expected error for exit-0 failure output, got nil")
+			}
+			if !strings.Contains(err.Error(), "Failed to") {
+				t.Fatalf("expected failure output in error, got %v", err)
+			}
+		})
+	}
+}
+
 func TestClaudeCodePluginAdapter_UpdatePlugin_Success(t *testing.T) {
 	var gotCmd string
 	var gotArgs []string
