@@ -3,10 +3,11 @@
 # only, so a real codex binary on the host PATH (if any) is never invoked and
 # can't make this test flaky. Covers: successful removal drops the manifest
 # entry, and removing a name not in the manifest is a hard error.
+# RemoveMcpServer only execs the CLI when List() reports the name already
+# installed, so $HOME/.claude.json must seed myserver up front.
 chmod 0755 $WORK/bin/claude
 env PATH=$WORK/bin:$PATH
 env HOME=$WORK/home
-mkdir $WORK/home
 
 exec omni --config settings.json agents mcp remove myserver
 stdout 'removed myserver'
@@ -22,6 +23,9 @@ stderr 'not-in-manifest.*not found in manifest'
 {"agents":{"mcp_servers":[
   {"name":"myserver","transport":"stdio","command":"npx my-server","agents":["claude-code"]}
 ]}}
+
+-- home/.claude.json --
+{"mcpServers":{"myserver":{"type":"stdio","command":"npx","args":["my-server"]}}}
 
 -- bin/claude --
 #!/bin/sh
