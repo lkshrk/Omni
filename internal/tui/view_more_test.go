@@ -4645,6 +4645,27 @@ func TestRenderToolRow_EmptyGroupCellKeepsColumnsAligned(t *testing.T) {
 	}
 }
 
+func TestRenderToolRow_ProviderColumnAlignsWithAndWithoutMarker(t *testing.T) {
+	p := defaultPalette()
+	withMarker := &database.ToolCache{Name: "editor", Provider: "system", InstalledWith: "apt", Package: "neovim", Installed: true, Tracked: true}
+	withoutMarker := &database.ToolCache{Name: "runner", Provider: "node", Package: "sometool", Installed: true, Tracked: true}
+	tools := []*database.ToolCache{withMarker, withoutMarker}
+
+	cols := newColWidthsWithProviderPins(tools, nil, nil, nil, nil, "apt", "", "bun", 120, func(t *database.ToolCache) bool {
+		return t == withMarker
+	})
+
+	rowWith := renderToolRowWithProviderPin(p, withMarker, cols, "", "", "", "", "apt", "", "bun", false, false, syncWrongProv)
+	rowWithout := renderToolRowWithProviderPin(p, withoutMarker, cols, "", "", "", "", "apt", "", "bun", false, false, syncOK)
+
+	plainWith := stripANSIEscapeSequences(rowWith)
+	plainWithout := stripANSIEscapeSequences(rowWithout)
+
+	if got, want := visualColumnOf(plainWithout, "node"), visualColumnOf(plainWith, "apt"); got != want {
+		t.Fatalf("provider column shifted without marker: got %d want %d\nwith marker: %q\nwithout marker: %q", got, want, plainWith, plainWithout)
+	}
+}
+
 func TestRenderDotsRow_UsesCompactSpacing(t *testing.T) {
 	const name = "abcdefghijkl"
 	const target = "~/dot-target"
