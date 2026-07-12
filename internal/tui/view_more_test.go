@@ -5356,8 +5356,8 @@ func TestNewColWidths_ProviderPinReservesAlignedMarkerWidth(t *testing.T) {
 		t.Fatalf("priv/mark column = %d, want pin marker width", cols.priv)
 	}
 	out := stripANSIEscapeSequences(renderToolRowWithProviderPin(defaultPalette(), tool, cols, "", "", "bun", "", "", "", "bun", false, false, syncOK))
-	if !strings.Contains(out, providerWrongGlyph+"bun") {
-		t.Fatalf("row = %q, want provider pin prefix without gap", out)
+	if !strings.Contains(out, providerWrongGlyph+strings.Repeat(" ", toolPrivilegeProviderGap)+"bun") {
+		t.Fatalf("row = %q, want provider pin prefix with single-space gap", out)
 	}
 }
 
