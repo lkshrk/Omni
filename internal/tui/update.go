@@ -733,6 +733,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.plugin && !msg.marketplace && msg.pluginErr == nil && m.marketplacesSectionEnabled() {
 			cmds = append(cmds, m.doLoadMarketplaceRows())
 		}
+		if err := firstAgentsProgressError(msg); err != nil {
+			cmds = append(cmds, setStatus(&m, "✗ "+err.Error(), true))
+		}
 		cmds = append(cmds, m.doLoadAgentsSummary())
 		if m.dashboardReconcileCurrent == dashboardReconcilePlanSyncAgents {
 			m.continueDashboardReconcile(dashboardReconcilePlanSyncAgents, firstAgentsProgressError(msg), &cmds)

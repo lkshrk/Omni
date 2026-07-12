@@ -202,7 +202,11 @@ func (a *App) AddMcpServer(ctx context.Context, s config.McpServer) (AddMcpResul
 	}
 	var res AddMcpResult
 	for _, adapter := range a.mcpAdapters() {
-		if !serverTargetsAdapter(s, adapter.ID()) || !adapter.Available() {
+		if !serverTargetsAdapter(s, adapter.ID()) {
+			continue
+		}
+		if !adapter.Available() {
+			res.Errors = append(res.Errors, McpServerError{AgentID: adapter.ID(), ServerName: s.Name, Err: fmt.Errorf("%s CLI not found on PATH", adapter.ID())})
 			continue
 		}
 		if installed, listErr := adapter.List(ctx); listErr == nil {
@@ -242,7 +246,11 @@ func (a *App) RemoveMcpServer(ctx context.Context, name string) (RemoveMcpResult
 	}
 	var res RemoveMcpResult
 	for _, adapter := range a.mcpAdapters() {
-		if !serverTargetsAdapter(*target, adapter.ID()) || !adapter.Available() {
+		if !serverTargetsAdapter(*target, adapter.ID()) {
+			continue
+		}
+		if !adapter.Available() {
+			res.Errors = append(res.Errors, McpServerError{AgentID: adapter.ID(), ServerName: name, Err: fmt.Errorf("%s CLI not found on PATH", adapter.ID())})
 			continue
 		}
 		if removeErr := adapter.Remove(ctx, name); removeErr != nil {
@@ -278,11 +286,14 @@ func (a *App) SetMcpServerAgents(ctx context.Context, name string, agents []stri
 
 	var res AddMcpResult
 	for _, adapter := range a.mcpAdapters() {
-		if !adapter.Available() {
-			continue
-		}
 		wasTargeted := serverTargetsAdapter(*target, adapter.ID())
 		nowTargeted := serverTargetsAdapter(updated, adapter.ID())
+		if !adapter.Available() {
+			if nowTargeted {
+				res.Errors = append(res.Errors, McpServerError{AgentID: adapter.ID(), ServerName: name, Err: fmt.Errorf("%s CLI not found on PATH", adapter.ID())})
+			}
+			continue
+		}
 		switch {
 		case nowTargeted:
 			if installed, listErr := adapter.List(ctx); listErr == nil && mcpServerListed(installed, name) {

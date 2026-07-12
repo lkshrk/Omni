@@ -193,8 +193,19 @@ func (m Model) viewSkillsBody() string {
 		switch m.skillTypeIdx {
 		case agentsChipMcp:
 			only = agentsSectionMcp
+			if m.mcpErr != nil {
+				topLines = append(topLines, p.styleErr.Render(pad+"error: "+m.mcpErr.Error()))
+			}
 		case agentsChipPlugin:
 			only = agentsSectionPlugins
+			if m.pluginErr != nil {
+				topLines = append(topLines, p.styleErr.Render(pad+"error: "+m.pluginErr.Error()))
+			}
+		case agentsChipMarketplace:
+			only = agentsSectionMarketplaces
+			if m.marketplaceErr != nil {
+				topLines = append(topLines, p.styleErr.Render(pad+"error: "+m.marketplaceErr.Error()))
+			}
 		}
 		return renderAgentsGroupedTab(m, p, topLines, only, m.skillTypeIdx != agentsChipAll)
 	}
