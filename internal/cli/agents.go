@@ -798,6 +798,7 @@ func newAgentsPluginsMarketplaceAddCmd(state *rootState) *cobra.Command {
 			for _, e := range res.Errors {
 				fmt.Fprintf(cmdOut(cmd), "  ! %s/%s: %v\n", e.AgentID, e.Name, e.Err)
 			}
+			printSkippedUnavailable(cmd, res.SkippedUnavailable)
 			return nil
 		},
 	}
