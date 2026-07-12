@@ -177,11 +177,15 @@ func (a *App) RestoreMcpServers(ctx context.Context, opts RestoreMcpOptions) (Re
 type AddMcpResult struct {
 	Errors           []McpServerError
 	AlreadyInstalled []string
+	// SkippedUnavailable lists adapter/server pairs whose agent CLI is not on
+	// PATH: normal on multi-host manifests, an actionable warning on explicit installs.
+	SkippedUnavailable []string
 }
 
 // RemoveMcpResult reports per-adapter outcomes of a RemoveMcpServer call.
 type RemoveMcpResult struct {
-	Errors []McpServerError
+	Errors             []McpServerError
+	SkippedUnavailable []string
 }
 
 // AddMcpServer registers a server in the manifest and installs it via targeted agent CLIs.
@@ -205,15 +209,14 @@ func (a *App) AddMcpServer(ctx context.Context, s config.McpServer) (AddMcpResul
 		if !serverTargetsAdapter(s, adapter.ID()) {
 			continue
 		}
-		if !adapter.Available() {
-			res.Errors = append(res.Errors, McpServerError{AgentID: adapter.ID(), ServerName: s.Name, Err: fmt.Errorf("%s CLI not found on PATH", adapter.ID())})
+		// listed check first: adopting an already-present server must not demand the CLI
+		if installed, listErr := adapter.List(ctx); listErr == nil && mcpServerListed(installed, s.Name) {
+			res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+s.Name)
 			continue
 		}
-		if installed, listErr := adapter.List(ctx); listErr == nil {
-			if mcpServerListed(installed, s.Name) {
-				res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+s.Name)
-				continue
-			}
+		if !adapter.Available() {
+			res.SkippedUnavailable = append(res.SkippedUnavailable, adapter.ID()+"/"+s.Name)
+			continue
 		}
 		if addErr := adapter.Add(ctx, s); addErr != nil {
 			res.Errors = append(res.Errors, McpServerError{AgentID: adapter.ID(), ServerName: s.Name, Err: addErr})
@@ -249,8 +252,11 @@ func (a *App) RemoveMcpServer(ctx context.Context, name string) (RemoveMcpResult
 		if !serverTargetsAdapter(*target, adapter.ID()) {
 			continue
 		}
+		if installed, listErr := adapter.List(ctx); listErr == nil && !mcpServerListed(installed, name) {
+			continue
+		}
 		if !adapter.Available() {
-			res.Errors = append(res.Errors, McpServerError{AgentID: adapter.ID(), ServerName: name, Err: fmt.Errorf("%s CLI not found on PATH", adapter.ID())})
+			res.SkippedUnavailable = append(res.SkippedUnavailable, adapter.ID()+"/"+name)
 			continue
 		}
 		if removeErr := adapter.Remove(ctx, name); removeErr != nil {
@@ -288,22 +294,23 @@ func (a *App) SetMcpServerAgents(ctx context.Context, name string, agents []stri
 	for _, adapter := range a.mcpAdapters() {
 		wasTargeted := serverTargetsAdapter(*target, adapter.ID())
 		nowTargeted := serverTargetsAdapter(updated, adapter.ID())
-		if !adapter.Available() {
-			if nowTargeted {
-				res.Errors = append(res.Errors, McpServerError{AgentID: adapter.ID(), ServerName: name, Err: fmt.Errorf("%s CLI not found on PATH", adapter.ID())})
-			}
-			continue
-		}
 		switch {
 		case nowTargeted:
 			if installed, listErr := adapter.List(ctx); listErr == nil && mcpServerListed(installed, name) {
 				res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+name)
 				continue
 			}
+			if !adapter.Available() {
+				res.SkippedUnavailable = append(res.SkippedUnavailable, adapter.ID()+"/"+name)
+				continue
+			}
 			if addErr := adapter.Add(ctx, updated); addErr != nil {
 				res.Errors = append(res.Errors, McpServerError{AgentID: adapter.ID(), ServerName: name, Err: addErr})
 			}
 		case wasTargeted && !nowTargeted:
+			if !adapter.Available() {
+				continue
+			}
 			if removeErr := adapter.Remove(ctx, name); removeErr != nil {
 				res.Errors = append(res.Errors, McpServerError{AgentID: adapter.ID(), ServerName: name, Err: removeErr})
 			}

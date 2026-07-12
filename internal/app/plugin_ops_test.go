@@ -433,7 +433,7 @@ func TestSetPluginAgents_ReconcilesMissingSelectedAdapter(t *testing.T) {
 	}
 }
 
-func TestSetPluginAgents_TargetedUnavailableAdapterReturnsError(t *testing.T) {
+func TestSetPluginAgents_TargetedUnavailableAdapterSkips(t *testing.T) {
 	claude := &stubPluginAdapter{id: "claude-code", available: false}
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
@@ -442,13 +442,13 @@ func TestSetPluginAgents_TargetedUnavailableAdapterReturnsError(t *testing.T) {
 	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{claude}))
 	res, err := a.SetPluginAgents(context.Background(), "caveman", []string{"claude-code"})
 	if err != nil {
-		t.Fatalf("SetPluginAgents must not fail wholly on a per-adapter error: %v", err)
+		t.Fatalf("SetPluginAgents must not fail wholly on a per-adapter skip: %v", err)
 	}
-	if len(res.Errors) != 1 || res.Errors[0].AgentID != "claude-code" {
-		t.Fatalf("expected 1 per-adapter error for claude-code, got %v", res.Errors)
+	if len(res.Errors) != 0 {
+		t.Fatalf("unavailable adapter must not produce errors, got %v", res.Errors)
 	}
-	if !strings.Contains(res.Errors[0].Error(), "not found on PATH") {
-		t.Fatalf("expected 'not found on PATH' error, got %q", res.Errors[0].Error())
+	if len(res.SkippedUnavailable) != 1 || res.SkippedUnavailable[0] != "claude-code/caveman" {
+		t.Fatalf("expected SkippedUnavailable [claude-code/caveman], got %v", res.SkippedUnavailable)
 	}
 }
 
