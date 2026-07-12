@@ -11,6 +11,12 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 )
 
+func printSkippedUnavailable(cmd *cobra.Command, skipped []string) {
+	for _, s := range skipped {
+		fmt.Fprintf(cmdOut(cmd), "  ! %s: skipped, agent CLI not found on PATH\n", s)
+	}
+}
+
 func newAgentsCmd(state *rootState) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agents",
@@ -317,6 +323,7 @@ func newAgentsMcpAddCmd(state *rootState) *cobra.Command {
 			for _, e := range res.Errors {
 				fmt.Fprintf(cmdOut(cmd), "  ! %s/%s: %v\n", e.AgentID, e.ServerName, e.Err)
 			}
+			printSkippedUnavailable(cmd, res.SkippedUnavailable)
 			return nil
 		},
 	}
@@ -344,6 +351,7 @@ func newAgentsMcpRemoveCmd(state *rootState) *cobra.Command {
 			for _, e := range res.Errors {
 				fmt.Fprintf(cmdOut(cmd), "  ! %s/%s: %v\n", e.AgentID, e.ServerName, e.Err)
 			}
+			printSkippedUnavailable(cmd, res.SkippedUnavailable)
 			return nil
 		},
 	}
@@ -463,6 +471,7 @@ func importMcpServerByName(cmd *cobra.Command, state *rootState, diff app.McpImp
 	for _, e := range res.Errors {
 		fmt.Fprintf(cmdOut(cmd), "  ! %s/%s: %v\n", e.AgentID, e.ServerName, e.Err)
 	}
+	printSkippedUnavailable(cmd, res.SkippedUnavailable)
 	fmt.Fprintf(cmdOut(cmd), "imported %s\n", s.Name)
 	return nil
 }
@@ -564,6 +573,7 @@ func newAgentsPluginsAddCmd(state *rootState) *cobra.Command {
 			for _, e := range res.Errors {
 				fmt.Fprintf(cmdOut(cmd), "  ! %s/%s: %v\n", e.AgentID, e.Name, e.Err)
 			}
+			printSkippedUnavailable(cmd, res.SkippedUnavailable)
 			return nil
 		},
 	}
@@ -587,6 +597,7 @@ func newAgentsPluginsRemoveCmd(state *rootState) *cobra.Command {
 			for _, e := range res.Errors {
 				fmt.Fprintf(cmdOut(cmd), "  ! %s/%s: %v\n", e.AgentID, e.Name, e.Err)
 			}
+			printSkippedUnavailable(cmd, res.SkippedUnavailable)
 			return nil
 		},
 	}
@@ -718,6 +729,7 @@ func importPluginByName(cmd *cobra.Command, state *rootState, diff app.PluginImp
 		for _, e := range mres.Errors {
 			fmt.Fprintf(cmdOut(cmd), "  ! %s/%s: %v\n", e.AgentID, e.Name, e.Err)
 		}
+		printSkippedUnavailable(cmd, mres.SkippedUnavailable)
 	}
 
 	p := config.Plugin{Name: match.Name, Marketplace: match.Marketplace, Agents: matchedAgents}
@@ -728,6 +740,7 @@ func importPluginByName(cmd *cobra.Command, state *rootState, diff app.PluginImp
 	for _, e := range res.Errors {
 		fmt.Fprintf(cmdOut(cmd), "  ! %s/%s: %v\n", e.AgentID, e.Name, e.Err)
 	}
+	printSkippedUnavailable(cmd, res.SkippedUnavailable)
 	fmt.Fprintf(cmdOut(cmd), "imported %s\n", p.Name)
 	return nil
 }

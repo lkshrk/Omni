@@ -133,7 +133,7 @@ func TestAgentsPluginsAdd_InstallsAndPersists(t *testing.T) {
 }
 
 func TestAgentsPluginsRemove_UninstallsAndDeletesManifest(t *testing.T) {
-	stub := &pluginStubAdapter{id: "claude-code"}
+	stub := &pluginStubAdapter{id: "claude-code", listedPlugins: []app.InstalledPlugin{{Name: "caveman", Marketplace: "caveman"}}}
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
 		Plugins:      []config.Plugin{{Name: "caveman", Marketplace: "caveman"}},

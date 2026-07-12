@@ -356,7 +356,7 @@ func TestMcpServerByName_NotFound(t *testing.T) {
 }
 
 func TestRemoveMcpServer_PersistsRemoval(t *testing.T) {
-	stub := &stubMcpAdapter{id: "claude-code", available: true}
+	stub := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{{Name: "del"}}}
 	existing := config.McpServer{Name: "del", Transport: "stdio", Command: "npx del", Agents: []string{"claude-code"}}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{existing}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
 	if _, err := a.RemoveMcpServer(context.Background(), "del"); err != nil {
@@ -389,8 +389,8 @@ func TestRemoveMcpServer_RejectsUnmanaged(t *testing.T) {
 // partial-application drift on remove: the manifest must drop the server even when
 // one of the targeted adapters fails to remove it live.
 func TestRemoveMcpServer_PartialAdapterFailureStillPersistsManifest(t *testing.T) {
-	ok := &stubMcpAdapter{id: "claude-code", available: true}
-	fails := &stubMcpAdapter{id: "codex", available: true, removeErr: errors.New("boom")}
+	ok := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{{Name: "del"}}}
+	fails := &stubMcpAdapter{id: "codex", available: true, removeErr: errors.New("boom"), listed: []app.InstalledMcpServer{{Name: "del"}}}
 	existing := config.McpServer{Name: "del", Transport: "stdio", Command: "npx del"}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{existing}}, app.WithMcpAdapters([]app.McpAdapter{ok, fails}))
 	res, err := a.RemoveMcpServer(context.Background(), "del")
