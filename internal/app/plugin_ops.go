@@ -298,7 +298,11 @@ func (a *App) UpdatePlugins(ctx context.Context, names []string, progress func(n
 			progress(names[i])
 		}
 		for _, adapter := range adapters {
-			if !pluginTargetsAdapter(*target, adapter.ID()) || !adapter.Available() {
+			if !pluginTargetsAdapter(*target, adapter.ID()) {
+				continue
+			}
+			if !adapter.Available() {
+				res.Errors = append(res.Errors, PluginError{AgentID: adapter.ID(), Name: names[i], Err: fmt.Errorf("%s CLI not found on PATH", adapter.ID())})
 				continue
 			}
 			if updateErr := adapter.UpdatePlugin(ctx, names[i], target.Marketplace); updateErr != nil {
@@ -336,7 +340,11 @@ func (a *App) AddPlugin(ctx context.Context, p config.Plugin) (AddPluginResult, 
 	}
 	var res AddPluginResult
 	for _, adapter := range a.pluginAdapters() {
-		if !pluginTargetsAdapter(p, adapter.ID()) || !adapter.Available() {
+		if !pluginTargetsAdapter(p, adapter.ID()) {
+			continue
+		}
+		if !adapter.Available() {
+			res.Errors = append(res.Errors, PluginError{AgentID: adapter.ID(), Name: p.Name, Err: fmt.Errorf("%s CLI not found on PATH", adapter.ID())})
 			continue
 		}
 		if mErr := ensureMarketplace(ctx, adapter, *m); mErr != nil {
@@ -380,7 +388,11 @@ func (a *App) AddMarketplace(ctx context.Context, m config.Marketplace) (AddPlug
 				targeted = true
 			}
 		}
-		if !targeted || !adapter.Available() {
+		if !targeted {
+			continue
+		}
+		if !adapter.Available() {
+			res.Errors = append(res.Errors, PluginError{AgentID: adapter.ID(), Name: m.Name, Err: fmt.Errorf("%s CLI not found on PATH", adapter.ID())})
 			continue
 		}
 		if mErr := ensureMarketplace(ctx, adapter, m); mErr != nil {
@@ -412,7 +424,11 @@ func (a *App) RemovePlugin(ctx context.Context, name string) (RemovePluginResult
 	}
 	var res RemovePluginResult
 	for _, adapter := range a.pluginAdapters() {
-		if !pluginTargetsAdapter(*target, adapter.ID()) || !adapter.Available() {
+		if !pluginTargetsAdapter(*target, adapter.ID()) {
+			continue
+		}
+		if !adapter.Available() {
+			res.Errors = append(res.Errors, PluginError{AgentID: adapter.ID(), Name: name, Err: fmt.Errorf("%s CLI not found on PATH", adapter.ID())})
 			continue
 		}
 		if removeErr := adapter.RemovePlugin(ctx, *target); removeErr != nil {
@@ -478,11 +494,14 @@ func (a *App) SetPluginAgents(ctx context.Context, name string, agents []string)
 
 	var res AddPluginResult
 	for _, adapter := range a.pluginAdapters() {
-		if !adapter.Available() {
-			continue
-		}
 		wasTargeted := pluginTargetsAdapter(*target, adapter.ID())
 		nowTargeted := pluginTargetsAdapter(updated, adapter.ID())
+		if !adapter.Available() {
+			if nowTargeted {
+				res.Errors = append(res.Errors, PluginError{AgentID: adapter.ID(), Name: name, Err: fmt.Errorf("%s CLI not found on PATH", adapter.ID())})
+			}
+			continue
+		}
 		switch {
 		case nowTargeted:
 			if installed, listErr := adapter.ListPlugins(ctx); listErr == nil && pluginListed(installed, updated.Name, updated.Marketplace) {
