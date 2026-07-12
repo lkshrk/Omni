@@ -2646,3 +2646,152 @@ func TestFlow2_UC143_SetupStep2NodeDisabled(t *testing.T) {
 		t.Error("editingPriority should be true after advancing past providers")
 	}
 }
+
+// agentsProgressDoneMsg — error surfacing on the combined agents U/S progress
+// handler, and firstAgentsProgressError precedence (skills > mcp > plugin >
+// marketplace, per source order in update.go).
+
+func TestAgentsProgressDoneMsg_MCPErrorSetsStatus(t *testing.T) {
+	m := baseModel(nil)
+	err := errors.New("boom")
+	got := drive(m, agentsProgressDoneMsg{mcp: true, mcpErr: err})
+
+	if got.mcpErr == nil || got.mcpErr.Error() != "boom" {
+		t.Fatalf("mcpErr = %v, want boom", got.mcpErr)
+	}
+	if !got.statusIsErr {
+		t.Error("statusIsErr should be true after mcpErr")
+	}
+	if want := "✗ boom"; got.statusMsg != want {
+		t.Errorf("statusMsg = %q, want %q", got.statusMsg, want)
+	}
+}
+
+func TestAgentsProgressDoneMsg_SkillsErrorSetsStatus(t *testing.T) {
+	m := baseModel(nil)
+	err := errors.New("skills failed")
+	got := drive(m, agentsProgressDoneMsg{skills: true, skillsErr: err})
+
+	if got.skillsErr == nil || got.skillsErr.Error() != "skills failed" {
+		t.Fatalf("skillsErr = %v, want skills failed", got.skillsErr)
+	}
+	if !got.statusIsErr {
+		t.Error("statusIsErr should be true after skillsErr")
+	}
+	if want := "✗ skills failed"; got.statusMsg != want {
+		t.Errorf("statusMsg = %q, want %q", got.statusMsg, want)
+	}
+}
+
+func TestAgentsProgressDoneMsg_PluginErrorSetsStatus(t *testing.T) {
+	m := baseModel(nil)
+	err := errors.New("plugin failed")
+	got := drive(m, agentsProgressDoneMsg{plugin: true, pluginErr: err})
+
+	if got.pluginErr == nil || got.pluginErr.Error() != "plugin failed" {
+		t.Fatalf("pluginErr = %v, want plugin failed", got.pluginErr)
+	}
+	if !got.statusIsErr {
+		t.Error("statusIsErr should be true after pluginErr")
+	}
+	if want := "✗ plugin failed"; got.statusMsg != want {
+		t.Errorf("statusMsg = %q, want %q", got.statusMsg, want)
+	}
+}
+
+func TestAgentsProgressDoneMsg_MarketplaceErrorSetsStatus(t *testing.T) {
+	m := baseModel(nil)
+	err := errors.New("marketplace failed")
+	got := drive(m, agentsProgressDoneMsg{marketplace: true, marketplaceErr: err})
+
+	if got.marketplaceErr == nil || got.marketplaceErr.Error() != "marketplace failed" {
+		t.Fatalf("marketplaceErr = %v, want marketplace failed", got.marketplaceErr)
+	}
+	if !got.statusIsErr {
+		t.Error("statusIsErr should be true after marketplaceErr")
+	}
+	if want := "✗ marketplace failed"; got.statusMsg != want {
+		t.Errorf("statusMsg = %q, want %q", got.statusMsg, want)
+	}
+}
+
+func TestAgentsProgressDoneMsg_ErrorPrecedence(t *testing.T) {
+	m := baseModel(nil)
+	got := drive(m, agentsProgressDoneMsg{
+		skills:         true,
+		mcp:            true,
+		plugin:         true,
+		marketplace:    true,
+		skillsErr:      errors.New("skills err"),
+		mcpErr:         errors.New("mcp err"),
+		pluginErr:      errors.New("plugin err"),
+		marketplaceErr: errors.New("marketplace err"),
+	})
+
+	if want := "✗ skills err"; got.statusMsg != want {
+		t.Errorf("statusMsg = %q, want %q (skillsErr takes precedence)", got.statusMsg, want)
+	}
+	if !got.statusIsErr {
+		t.Error("statusIsErr should be true")
+	}
+}
+
+func TestAgentsProgressDoneMsg_StaleGenIgnored(t *testing.T) {
+	m := baseModel(nil)
+	m.progressGen = 5
+	err := errors.New("stale")
+	got := drive(m, agentsProgressDoneMsg{gen: 1, mcp: true, mcpErr: err})
+
+	if got.mcpErr != nil {
+		t.Errorf("mcpErr = %v, want nil for stale gen", got.mcpErr)
+	}
+	if got.statusIsErr {
+		t.Error("statusIsErr should remain false for stale gen message")
+	}
+}
+
+// viewSkillsBody — chip-scoped error rendering for mcp/plugin/marketplace.
+
+func TestViewSkillsBody_MCPErrorShownOnMCPChip(t *testing.T) {
+	m := baseModel(nil)
+	m.skillTypeIdx = agentsChipMcp
+	m.mcpErr = errors.New("mcp broke")
+
+	out := m.viewSkillsBody()
+	if !strings.Contains(out, "error: mcp broke") {
+		t.Errorf("viewSkillsBody() missing mcp error text, got:\n%s", out)
+	}
+}
+
+func TestViewSkillsBody_PluginErrorShownOnPluginChip(t *testing.T) {
+	m := baseModel(nil)
+	m.skillTypeIdx = agentsChipPlugin
+	m.pluginErr = errors.New("plugin broke")
+
+	out := m.viewSkillsBody()
+	if !strings.Contains(out, "error: plugin broke") {
+		t.Errorf("viewSkillsBody() missing plugin error text, got:\n%s", out)
+	}
+}
+
+func TestViewSkillsBody_MarketplaceErrorShownOnMarketplaceChip(t *testing.T) {
+	m := baseModel(nil)
+	m.skillTypeIdx = agentsChipMarketplace
+	m.marketplaceErr = errors.New("marketplace broke")
+
+	out := m.viewSkillsBody()
+	if !strings.Contains(out, "error: marketplace broke") {
+		t.Errorf("viewSkillsBody() missing marketplace error text, got:\n%s", out)
+	}
+}
+
+func TestViewSkillsBody_MCPErrorHiddenOnOtherChip(t *testing.T) {
+	m := baseModel(nil)
+	m.skillTypeIdx = agentsChipPlugin
+	m.mcpErr = errors.New("mcp broke")
+
+	out := m.viewSkillsBody()
+	if strings.Contains(out, "mcp broke") {
+		t.Errorf("viewSkillsBody() should not show mcp error while plugin chip active, got:\n%s", out)
+	}
+}
