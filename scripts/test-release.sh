@@ -11,8 +11,8 @@ assert_goreleaser_declares_stow_dependencies() {
     echo "goreleaser Linux packages must declare stow as a dependency" >&2
     exit 1
   fi
-  if ! grep -q '^      - formula: stow$' "$config"; then
-    echo "goreleaser Homebrew cask must declare stow as a formula dependency" >&2
+  if ! grep -q 'depends_on "stow"' "$ROOT/scripts/update-homebrew-formula.sh"; then
+    echo "Homebrew formula template must declare stow via depends_on" >&2
     exit 1
   fi
 }

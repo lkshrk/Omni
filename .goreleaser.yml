@@ -36,6 +36,12 @@ archives:
 checksum:
   name_template: checksums.txt
 
+# Homebrew formula (Formula/omni.rb in lkshrk/homebrew-tap) is bumped by
+# scripts/update-homebrew-formula.sh in the release workflow, not goreleaser's
+# `brews` publisher — that's deprecated as of goreleaser v2.10 in favor of
+# homebrew_casks, but omni is a CLI binary and a formula is the correct
+# distribution mechanism for it, not a cask.
+
 nfpms:
   - id: linux-packages
     ids: [omni]
@@ -54,19 +60,6 @@ nfpms:
       - rpm
     dependencies:
       - stow
-
-homebrew_casks:
-  - name: omni
-    repository:
-      owner: lkshrk
-      name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    directory: Casks
-    homepage: https://github.com/lkshrk/omni
-    description: Manage all your dev tools from a single JSON config file.
-    license: MIT
-    dependencies:
-      - formula: stow
 
 changelog:
   use: git
