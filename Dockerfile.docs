@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.23
 
-FROM python:3.13-alpine AS docs-deps
+FROM python:3.14-alpine AS docs-deps
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_ROOT_USER_ACTION=ignore
