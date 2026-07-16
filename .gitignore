@@ -47,7 +47,7 @@ GEMINI.md
 .roomodes
 .leankg/
 .wolf/
-
+.agent-progress.md
 # Go
 vendor/
 coverage.out
