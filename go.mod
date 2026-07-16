@@ -18,7 +18,7 @@ require (
 	github.com/ulikunitz/xz v0.5.15
 	github.com/uptrace/bun v1.2.18
 	github.com/uptrace/bun/dialect/sqlitedialect v1.2.18
-	golang.org/x/sync v0.20.0
+	golang.org/x/sync v0.22.0
 	modernc.org/sqlite v1.50.0
 )
 
