@@ -787,8 +787,89 @@ func TestDiscoverDotsStatus_AddsTransientCandidates(t *testing.T) {
 	if len(result.Entries) != 1 || result.Entries[0].Name != "kitty" || result.Entries[0].State != app.DotStateLocalOnly {
 		t.Fatalf("entries = %#v, want local-only kitty", result.Entries)
 	}
-	if !reflect.DeepEqual(result.Entries[0].Actions, []app.DotAction{app.DotActionSync, app.DotActionIgnore}) {
-		t.Fatalf("actions = %#v, want sync+ignore", result.Entries[0].Actions)
+	if !reflect.DeepEqual(result.Entries[0].Actions, []app.DotAction{app.DotActionSync, app.DotActionRemove, app.DotActionIgnore}) {
+		t.Fatalf("actions = %#v, want sync+remove+ignore", result.Entries[0].Actions)
+	}
+}
+
+func TestDotsDeleteLocal_RemovesDiscoveredLocalOnlyPath(t *testing.T) {
+	a, _, _ := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	target := filepath.Join(home, ".config", "kitty")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	status := app.DotStatus{Name: "kitty", TargetPath: target, State: app.DotStateLocalOnly}
+	if err := a.DotsDeleteLocal(context.Background(), status); err != nil {
+		t.Fatalf("DotsDeleteLocal: %v", err)
+	}
+	if _, err := os.Lstat(target); !os.IsNotExist(err) {
+		t.Fatalf("target still exists after delete: %v", err)
+	}
+}
+
+func TestDotsDeleteLocal_RejectsTrackedAndUnsafeTargets(t *testing.T) {
+	a, _, _ := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	tracked := app.DotStatus{Name: "kitty", TargetPath: filepath.Join(home, ".config", "kitty"), State: app.DotStateLocalOnly, Group: "base"}
+	if err := a.DotsDeleteLocal(context.Background(), tracked); err == nil {
+		t.Fatal("expected error for tracked entry")
+	}
+	wrongState := app.DotStatus{Name: "kitty", TargetPath: filepath.Join(home, ".config", "kitty"), State: app.DotStateRepoOnly}
+	if err := a.DotsDeleteLocal(context.Background(), wrongState); err == nil {
+		t.Fatal("expected error for non-local-only state")
+	}
+	relative := app.DotStatus{Name: "kitty", TargetPath: ".config/kitty", State: app.DotStateLocalOnly}
+	if err := a.DotsDeleteLocal(context.Background(), relative); err == nil {
+		t.Fatal("expected error for relative path")
+	}
+	homeItself := app.DotStatus{Name: "home", TargetPath: home, State: app.DotStateLocalOnly}
+	if err := a.DotsDeleteLocal(context.Background(), homeItself); err == nil {
+		t.Fatal("expected error for home directory target")
+	}
+	outside := t.TempDir()
+	outsideHome := app.DotStatus{Name: "etc", TargetPath: outside, State: app.DotStateLocalOnly}
+	if err := a.DotsDeleteLocal(context.Background(), outsideHome); err == nil {
+		t.Fatal("expected error for target outside home")
+	}
+	if _, err := os.Lstat(outside); err != nil {
+		t.Fatalf("outside-home path was deleted: %v", err)
+	}
+}
+
+func TestDotsDeleteLocal_StaleMissingPathIsNoOp(t *testing.T) {
+	a, _, _ := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	stale := app.DotStatus{Name: "kitty", TargetPath: filepath.Join(home, ".config", "kitty"), State: app.DotStateLocalOnly}
+	if err := a.DotsDeleteLocal(context.Background(), stale); err != nil {
+		t.Fatalf("DotsDeleteLocal on missing path: %v", err)
+	}
+}
+
+func TestDotsDeleteLocal_RejectsSymlinkedParentOutsideHome(t *testing.T) {
+	a, _, _ := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	outside := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(outside, "kitty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(home, ".config")); err != nil {
+		t.Fatal(err)
+	}
+
+	status := app.DotStatus{Name: "kitty", TargetPath: filepath.Join(home, ".config", "kitty"), State: app.DotStateLocalOnly}
+	if err := a.DotsDeleteLocal(context.Background(), status); err == nil {
+		t.Fatal("expected error for symlinked parent escaping home")
+	}
+	if _, err := os.Lstat(filepath.Join(outside, "kitty")); err != nil {
+		t.Fatalf("external path was deleted: %v", err)
 	}
 }
 

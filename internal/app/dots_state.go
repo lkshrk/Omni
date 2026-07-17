@@ -170,6 +170,12 @@ func (a *App) DotsDeleteWithState(ctx context.Context, name string, opts DotsDel
 	})
 }
 
+func (a *App) DotsDeleteLocalWithState(ctx context.Context, status DotStatus) (*DotsOperationStateResult, error) {
+	return a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
+		return nil, a.DotsDeleteLocal(ctx, status)
+	})
+}
+
 func (a *App) DotsResolveConflictWithState(ctx context.Context, name string, strategy DotsResolveStrategy) (*DotsOperationStateResult, error) {
 	return a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
 		return a.DotsResolveConflict(ctx, name, strategy)

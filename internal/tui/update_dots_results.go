@@ -686,6 +686,18 @@ func (m *Model) doDotsVariantChange(req dotsVariantRequest) tea.Cmd {
 	}
 }
 
+// doDotsDeleteLocal removes the local path behind a discovered local-only
+// candidate and refreshes status.
+func (m *Model) doDotsDeleteLocal(status app.DotStatus) tea.Cmd {
+	a := m.app
+	ctx, gen := m.currentDotsOperation()
+	return func() tea.Msg {
+		result, err := a.DotsDeleteLocalWithState(ctx, status)
+		entries, gitStatus, memberships := dotsSnapshotFromState(result)
+		return dotsDeletedMsg{gen: gen, name: status.Name, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: err}
+	}
+}
+
 // doDotsDelete removes the named dots entry and refreshes status.
 func (m *Model) doDotsDelete(name string, keepLocal bool) tea.Cmd {
 	a := m.app

@@ -488,6 +488,15 @@ func newDotsDeleteCmd(state *rootState) *cobra.Command {
 			if err := requireDotsConfigured(state); err != nil {
 				return err
 			}
+			memberships, err := state.app.DotMembershipMap(cmd.Context())
+			if err != nil {
+				return err
+			}
+			if len(memberships[args[0]]) == 0 {
+				if handled, err := runDotsDeleteDiscoveredLocal(cmd, state, args[0]); handled {
+					return err
+				}
+			}
 			ok, err := confirmAction(cmd, state, fmt.Sprintf("Delete dots entry %q and repo files? keep local: %t", args[0], keepLocal))
 			if err != nil || !ok {
 				return err
@@ -505,6 +514,28 @@ func newDotsDeleteCmd(state *rootState) *cobra.Command {
 	cmd.Flags().BoolVar(&keepLocal, "keep-local", true, "Keep local files after deleting the repo files")
 	cmd.ValidArgsFunction = completeDotNames(state)
 	return cmd
+}
+
+// runDotsDeleteDiscoveredLocal deletes the local path behind a discovered
+// local-only candidate. Returns handled=false when nameOrPath matches no such
+// candidate so the tracked-entry flow can produce its usual error.
+func runDotsDeleteDiscoveredLocal(cmd *cobra.Command, state *rootState, nameOrPath string) (bool, error) {
+	status, found, err := state.app.FindDiscoveredDotStatus(cmd.Context(), nameOrPath)
+	if !found || app.DotStatusState(status) != app.DotStateLocalOnly {
+		return false, nil
+	}
+	if err != nil {
+		return true, err
+	}
+	ok, err := confirmAction(cmd, state, fmt.Sprintf("Delete local path %q from disk?", status.TargetPath))
+	if err != nil || !ok {
+		return true, err
+	}
+	if err := state.app.DotsDeleteLocal(cmd.Context(), status); err != nil {
+		return true, err
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "deleted local path %q\n", status.TargetPath)
+	return true, nil
 }
 
 // ─── dots resolve ─────────────────────────────────────────────────────────────

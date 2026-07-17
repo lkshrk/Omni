@@ -366,6 +366,27 @@ func (a *App) DotsAddDiscoveredEntryContext(ctx context.Context, nameOrPath, gro
 	return added, nil
 }
 
+// FindDiscoveredDotStatus returns the discovered (untracked) candidate status
+// matching nameOrPath by candidate name or target path.
+func (a *App) FindDiscoveredDotStatus(ctx context.Context, nameOrPath string) (DotStatus, bool, error) {
+	result, err := a.DiscoverDotsStatus(ctx)
+	if result == nil {
+		return DotStatus{}, false, err
+	}
+	selector := strings.ToLower(strings.TrimSpace(nameOrPath))
+	selectorPath := strings.ToLower(filepath.ToSlash(normalisePath(nameOrPath)))
+	for _, status := range result.Entries {
+		if !DotStatusTransientCandidate(status) {
+			continue
+		}
+		path := strings.ToLower(filepath.ToSlash(normalisePath(status.TargetPath)))
+		if strings.ToLower(status.Name) == selector || path == selector || path == selectorPath {
+			return status, true, err
+		}
+	}
+	return DotStatus{}, false, err
+}
+
 func findDiscoveredDotCandidate(candidates []config.DotEntry, nameOrPath string) (config.DotEntry, bool) {
 	selector := strings.ToLower(strings.TrimSpace(nameOrPath))
 	selectorPath := strings.ToLower(filepath.ToSlash(normalisePath(nameOrPath)))
