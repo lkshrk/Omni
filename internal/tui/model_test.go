@@ -2764,6 +2764,85 @@ func TestModel_KeyU_UpgradeSetsKey(t *testing.T) {
 	}
 }
 
+func TestModel_ActionRendersBeforeWorkIsScheduled(t *testing.T) {
+	tools := []*database.ToolCache{
+		{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: true},
+	}
+	m := baseModel(tools)
+	m.upgradingKeys = make(map[string]bool)
+
+	next, cmd := m.Update(pressRune('u'))
+	got := next.(Model)
+	if !got.loading || !got.upgradingKeys["ripgrep\x00brew"] {
+		t.Fatalf("upgrade action did not publish running state before returning: loading=%v keys=%v", got.loading, got.upgradingKeys)
+	}
+	view := renderList(got)
+	if !strings.Contains(view, got.spinner.View()) || !strings.Contains(view, "Upgrading ripgrep…") {
+		t.Fatalf("first action frame does not contain spinner and status:\n%s", view)
+	}
+	if cmd == nil {
+		t.Fatal("upgrade action returned no command")
+	}
+	firstMsg := cmd()
+	if _, scheduledWorkImmediately := firstMsg.(tea.BatchMsg); scheduledWorkImmediately {
+		t.Fatal("action work was scheduled in the first frame before the running state could render")
+	}
+	deferred, ok := firstMsg.(runAfterRenderMsg)
+	if !ok {
+		t.Fatalf("first action command returned %T, want runAfterRenderMsg", firstMsg)
+	}
+	_, workCmd := got.Update(deferred)
+	if workCmd == nil {
+		t.Fatal("deferred action did not release its work after the first frame")
+	}
+	if _, ok := workCmd().(tea.BatchMsg); !ok {
+		t.Fatalf("released action command returned %T, want tea.BatchMsg", workCmd())
+	}
+}
+
+func TestModel_ActionRendersBeforeWorkWhenBackgroundAnimationIsActive(t *testing.T) {
+	m := baseModel([]*database.ToolCache{
+		{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: true},
+	})
+	m.upgradingKeys = make(map[string]bool)
+	m.providerSnapshotRefreshing = true
+
+	next, cmd := m.Update(pressRune('u'))
+	got := next.(Model)
+	if !got.loading || !got.upgradingKeys["ripgrep\x00brew"] {
+		t.Fatalf("upgrade action did not publish running state before returning: loading=%v keys=%v", got.loading, got.upgradingKeys)
+	}
+	if cmd == nil {
+		t.Fatal("upgrade action returned no command")
+	}
+	if firstMsg := cmd(); firstMsg == nil {
+		t.Fatal("upgrade action returned nil message")
+	} else if _, ok := firstMsg.(runAfterRenderMsg); !ok {
+		t.Fatalf("first action command returned %T while background animation was active, want runAfterRenderMsg", firstMsg)
+	}
+}
+
+func TestSpinnerActivityActive_IncludesEveryAsyncActionFlag(t *testing.T) {
+	tests := []struct {
+		name string
+		set  func(*Model)
+	}{
+		{name: "settings save", set: func(m *Model) { m.settingsSaveRunning = true }},
+		{name: "dashboard reconcile", set: func(m *Model) { m.dashboardReconcileRunning = true }},
+		{name: "setup agents diff", set: func(m *Model) { m.setupAgentsDiffLoading = true }},
+		{name: "dots services refresh", set: func(m *Model) { m.dotsServicesRefreshing = true }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := baseModel(nil)
+			tt.set(&m)
+			if !m.spinnerActivityActive() {
+				t.Fatal("async action flag did not activate the shared spinner lifecycle")
+			}
+		})
+	}
+}
+
 func TestModel_KeyU_UpgradeNoopWhenNotOutdated(t *testing.T) {
 	tools := []*database.ToolCache{
 		{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: false},
@@ -3515,7 +3594,7 @@ func TestDotsEnterPeeksSelectedFile(t *testing.T) {
 	if !got.dotsPeekLoading {
 		t.Fatal("dotsPeekLoading = false, want true while command runs")
 	}
-	msg := cmd()
+	msg := runLastBatchCommand(t, cmd)
 	if _, ok := msg.(dotsPeekLoadedMsg); !ok {
 		t.Fatalf("command msg = %T, want dotsPeekLoadedMsg", msg)
 	}
@@ -3546,7 +3625,7 @@ func TestDotsSpacePeeksSelectedFile(t *testing.T) {
 	if !got.dotsPeekLoading {
 		t.Fatal("dotsPeekLoading = false, want true while command runs")
 	}
-	msg := cmd()
+	msg := runLastBatchCommand(t, cmd)
 	if _, ok := msg.(dotsPeekLoadedMsg); !ok {
 		t.Fatalf("command msg = %T, want dotsPeekLoadedMsg", msg)
 	}
