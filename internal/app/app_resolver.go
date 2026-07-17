@@ -317,7 +317,11 @@ func (a *App) installCandidateUsableCached(ctx context.Context, logicalName stri
 		return false, installRouteSkip{Install: candidate, Reason: installRouteSkipProviderUnavailable}
 	}
 	pkg := candidate.EffectivePackage(logicalName)
-	cached, err := a.readDB().GetPackageAvailability(ctx, logicalName, candidate.Provider, pkg)
+	db := a.readDB()
+	if db == nil {
+		return true, installRouteSkip{}
+	}
+	cached, err := db.GetPackageAvailability(ctx, logicalName, candidate.Provider, pkg)
 	if err == nil {
 		if cached.Available {
 			return true, installRouteSkip{}
