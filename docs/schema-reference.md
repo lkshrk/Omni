@@ -95,7 +95,7 @@ disables skills, mcp, and plugins regardless of their individual flags.
 | `providers[].bin` | string | Optional binary name when it differs from package/logical name. |
 | `git` | string | Upstream git repository URL. Brew metadata and install-from-search can populate GitHub URLs here for later fallback setup. |
 | `quarantine` | string | Tool-specific update quarantine override. Use a duration, `0`, or `exempt`. |
-| `options` | object | Provider-specific key-value options. For `script`: `install` (required), `check` or `detect` (one required), optional `uninstall`, `upgrade`, `version`. |
+| `options` | object | Provider-specific key-value options. For `script`: `install` (required), `check` or `detect` (one required), optional `uninstall`, `upgrade`, `version`, and `latest`. `version` and `latest` each print one non-empty line; `latest` requires `version`. |
 | `taps` | array | Homebrew taps required before install. |
 | `ignore` | boolean | Keep the tool in config but skip management. |
 | `variants` | array | Alternate install candidates tried in order. |

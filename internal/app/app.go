@@ -67,6 +67,11 @@ type App struct {
 	// historyMu serialises the read-modify-write cycle in prependDotsHistory
 	// so concurrent tea.Cmd goroutines cannot lose history entries.
 	historyMu sync.Mutex
+
+	// githubReleaseMu coalesces concurrent provider refreshes for the same
+	// repository without retaining results across refresh operations.
+	githubReleaseMu       sync.Mutex
+	githubReleaseInFlight map[githubReleaseRepo]*githubReleaseLookupFlight
 }
 
 func (a *App) requireSafeTestHomeForDots() error {

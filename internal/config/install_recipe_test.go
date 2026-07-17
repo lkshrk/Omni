@@ -1,7 +1,10 @@
 package config_test
 
 import (
+	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -122,6 +125,71 @@ func TestMaterializeInstallSpec_GitHubReleaseAssetPinnedTag(t *testing.T) {
 	}
 }
 
+func TestMaterializeInstallSpec_GitHubReleaseAssetExpandsPinnedVersion(t *testing.T) {
+	spec := config.ToolInstallSpec{
+		Provider: "script",
+		Source:   &config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "cli", Repo: "cli"},
+		Recipe: &config.FallbackRecipe{
+			Type:         config.FallbackRecipeGitHubReleaseAsset,
+			AssetPattern: "gh_{version}_linux_amd64.tar.gz",
+			TagName:      "v2.93.0",
+		},
+		Bin: "gh",
+	}
+	got, err := config.MaterializeInstallSpec("gh", spec, "~/.local/bin")
+	if err != nil {
+		t.Fatalf("MaterializeInstallSpec: %v", err)
+	}
+	if !strings.Contains(got.Options["install"], "gh_2.93.0_linux_amd64.tar.gz") {
+		t.Fatalf("install = %q, want asset version expanded from tag", got.Options["install"])
+	}
+}
+
+func TestMaterializeInstallSpec_GitHubReleaseAssetDoesNotExecuteTagSubstitution(t *testing.T) {
+	tmp := t.TempDir()
+	marker := filepath.Join(tmp, "injected")
+	fakeBin := filepath.Join(tmp, "bin")
+	if err := os.MkdirAll(fakeBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fakeCurl := `#!/bin/sh
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "-o" ]; then
+    : > "$2"
+    exit 0
+  fi
+  shift
+done
+exit 1
+`
+	if err := os.WriteFile(filepath.Join(fakeBin, "curl"), []byte(fakeCurl), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	spec := config.ToolInstallSpec{
+		Provider: "script",
+		Source:   &config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "owner", Repo: "repo"},
+		Recipe: &config.FallbackRecipe{
+			Type:         config.FallbackRecipeGitHubReleaseAsset,
+			AssetPattern: "tool_{version}_{arch}",
+			TagName:      "v1$(touch " + marker + ")",
+		},
+		Bin:    "tool",
+		BinDir: filepath.Join(tmp, "install"),
+	}
+	got, err := config.MaterializeInstallSpec("tool", spec, "")
+	if err != nil {
+		t.Fatalf("MaterializeInstallSpec: %v", err)
+	}
+	cmd := exec.Command("sh", "-c", got.Options["install"])
+	cmd.Env = append(os.Environ(), "PATH="+fakeBin+":/usr/bin:/bin")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("generated install command failed: %v\n%s\ncommand: %s", err, output, got.Options["install"])
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("remote release tag executed shell substitution; marker stat error = %v", err)
+	}
+}
+
 func TestMaterializeInstallSpec_GitHubReleaseAssetRawBinaryArchMap(t *testing.T) {
 	spec := config.ToolInstallSpec{
 		Provider: "script",
@@ -174,6 +242,27 @@ func TestMaterializeInstallSpec_GitHubReleaseAssetOSArch(t *testing.T) {
 	}
 	if !strings.Contains(got.Options["install"], "uname -s") {
 		t.Fatalf("install = %q, want runtime os detection", got.Options["install"])
+	}
+}
+
+func TestGitHubReleaseAssetNameUsesUnameArchAlias(t *testing.T) {
+	if runtime.GOARCH != "amd64" {
+		t.Skip("x86_64 uname alias regression applies to amd64 hosts")
+	}
+	spec := config.ToolInstallSpec{
+		Provider: "script",
+		Recipe: &config.FallbackRecipe{
+			Type:         config.FallbackRecipeGitHubReleaseAsset,
+			AssetPattern: "tool_{arch}.tar.gz",
+		},
+		Options: map[string]string{"arch_map": "x86_64:x64"},
+	}
+	got, err := config.GitHubReleaseAssetName("tool", spec, "v1.0.0")
+	if err != nil {
+		t.Fatalf("GitHubReleaseAssetName: %v", err)
+	}
+	if got != "tool_x64.tar.gz" {
+		t.Fatalf("asset name = %q, want uname-mapped x86_64 asset", got)
 	}
 }
 

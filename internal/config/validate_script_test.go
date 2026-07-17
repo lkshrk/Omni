@@ -71,6 +71,31 @@ func TestScriptCheckSatisfiesDetectRequirement(t *testing.T) {
 	}
 }
 
+func TestScriptLatestRequiresVersion(t *testing.T) {
+	errs := scriptValidation(map[string]string{
+		"install": "x",
+		"detect":  "bun",
+		"latest":  "bun-latest",
+	})
+	if !scriptHasErrorAt(errs, `$.tools."bun".options.latest`) {
+		t.Errorf(`latest without version: want error at $.tools."bun".options.latest, got %v`, errs)
+	}
+}
+
+func TestRecipeBackedScriptLatestRequiresVersion(t *testing.T) {
+	root := &config.RootConfig{Tools: map[string]config.ToolSpec{
+		"gh": {Providers: []config.ToolInstallSpec{{
+			Provider: "script", Options: map[string]string{"latest": "gh-latest"},
+			Source: &config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "cli", Repo: "cli"},
+			Recipe: &config.FallbackRecipe{Type: config.FallbackRecipeGitHubReleaseAsset, AssetPattern: "gh_{version}_linux_amd64.tar.gz"},
+		}}},
+	}}
+	errs := config.ValidateRoot(root, scriptProvVal())
+	if !scriptHasErrorAt(errs, `$.tools."gh".providers[0].options.latest`) {
+		t.Fatalf("recipe latest without version: want options.latest error, got %v", errs)
+	}
+}
+
 // scriptProviderValidation drives a Settings.Providers entry using the script
 // provider through ValidateRoot, exercising the validateProviderSpec branch.
 func scriptProviderValidation(opts map[string]string) []config.ValidationError {

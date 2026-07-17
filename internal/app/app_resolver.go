@@ -63,6 +63,7 @@ type installRouteSkip struct {
 
 type installRoute struct {
 	Kind               installRouteKind
+	ConfiguredInstall  config.ToolInstallSpec
 	Install            config.ToolInstallSpec
 	Skipped            []installRouteSkip
 	FallbackConfigured bool
@@ -168,11 +169,11 @@ func (a *App) planInstallRoute(ctx context.Context, logicalName string, spec con
 	settings, _ := a.LoadSettings()
 	fallbackBinDir := strings.TrimSpace(settings.FallbackBinDir)
 	if install, ok := spec.Hosts[hostname]; ok {
-		return installRoute{Kind: installRouteNative, Install: a.normalizeInstallRouteCandidate(logicalName, spec, install, fallbackBinDir), FallbackConfigured: spec.Fallback != nil}
+		return a.makeInstallRoute(logicalName, spec, installRouteNative, install, nil, fallbackBinDir)
 	}
 	if short := shortHostname(hostname); short != hostname {
 		if install, ok := spec.Hosts[short]; ok {
-			return installRoute{Kind: installRouteNative, Install: a.normalizeInstallRouteCandidate(logicalName, spec, install, fallbackBinDir), FallbackConfigured: spec.Fallback != nil}
+			return a.makeInstallRoute(logicalName, spec, installRouteNative, install, nil, fallbackBinDir)
 		}
 	}
 
@@ -185,9 +186,10 @@ func (a *App) planInstallRoute(ctx context.Context, logicalName string, spec con
 	disabled := a.installDisabledProviders()
 	skipped := make([]installRouteSkip, 0, len(candidates))
 	for _, candidate := range candidates {
-		candidate = a.normalizeInstallRouteCandidate(logicalName, spec, candidate, fallbackBinDir)
+		configured := cloneToolInstallSpec(candidate)
+		candidate = a.normalizeInstallRouteCandidate(logicalName, spec, cloneToolInstallSpec(configured), fallbackBinDir)
 		if usable, skip := a.installCandidateUsableCached(ctx, logicalName, candidate, availability, disabled); usable {
-			return installRoute{Kind: installRouteNative, Install: candidate, Skipped: skipped, FallbackConfigured: spec.Fallback != nil}
+			return a.makeInstallRoute(logicalName, spec, installRouteNative, configured, skipped, fallbackBinDir)
 		} else {
 			skipped = append(skipped, skip)
 		}
@@ -197,9 +199,23 @@ func (a *App) planInstallRoute(ctx context.Context, logicalName string, spec con
 		if spec.Fallback != nil && allInstallRouteSkipsArePackageUnavailable(skipped, len(candidates)) {
 			kind = installRouteFallbackEligible
 		}
-		return installRoute{Kind: kind, Install: a.normalizeInstallRouteCandidate(logicalName, spec, candidates[0], fallbackBinDir), Skipped: skipped, FallbackConfigured: spec.Fallback != nil}
+		return a.makeInstallRoute(logicalName, spec, kind, candidates[0], skipped, fallbackBinDir)
 	}
-	return installRoute{Kind: installRouteUnavailable, Install: a.normalizeInstallRouteCandidate(logicalName, spec, defaultSpec, fallbackBinDir), FallbackConfigured: spec.Fallback != nil}
+	return a.makeInstallRoute(logicalName, spec, installRouteUnavailable, defaultSpec, nil, fallbackBinDir)
+}
+
+func (a *App) makeInstallRoute(logicalName string, spec config.ToolSpec, kind installRouteKind, install config.ToolInstallSpec, skipped []installRouteSkip, fallbackBinDir string) installRoute {
+	configured := cloneToolInstallSpec(install)
+	if configured.Package == "" && spec.Package != "" {
+		configured.Package = spec.Package
+	}
+	return installRoute{
+		Kind:               kind,
+		ConfiguredInstall:  configured,
+		Install:            a.normalizeInstallRouteCandidate(logicalName, spec, cloneToolInstallSpec(configured), fallbackBinDir),
+		Skipped:            skipped,
+		FallbackConfigured: spec.Fallback != nil,
+	}
 }
 
 func (a *App) normalizeInstallRouteCandidate(logicalName string, spec config.ToolSpec, install config.ToolInstallSpec, fallbackBinDir string) config.ToolInstallSpec {
@@ -237,41 +253,48 @@ func sortInstallCandidatesByPriority(candidates []config.ToolInstallSpec, priori
 	})
 }
 
-// findConfiguredInstallCandidate searches every install candidate configured
-// for a logical tool (Hosts, Providers, and default+Variants) for one whose
-// Provider or InstallWith matches providerName. Unlike planInstallRoute, this
-// does not stop at the first available candidate — an explicit --provider
-// request must be able to reach any configured entry, including secondary
-// ones planInstallRoute would otherwise skip in favor of an earlier, more
-// available candidate.
-func (a *App) findConfiguredInstallCandidate(ctx context.Context, logicalName string, spec config.ToolSpec, providerName string) (config.ToolInstallSpec, bool) {
-	if providerName == "" {
-		return config.ToolInstallSpec{}, false
-	}
+// configuredInstallRoutes returns every candidate that can apply on this host,
+// preserving both its authored recipe and its materialized provider options.
+func (a *App) configuredInstallRoutes(logicalName string, spec config.ToolSpec) []installRoute {
 	hostname := currentHostname()
-	candidates := make([]config.ToolInstallSpec, 0, len(spec.Providers)+len(spec.Variants)+2)
+	var candidates []config.ToolInstallSpec
 	if install, ok := spec.Hosts[hostname]; ok {
-		candidates = append(candidates, install)
+		candidates = []config.ToolInstallSpec{install}
 	} else if short := shortHostname(hostname); short != hostname {
 		if install, ok := spec.Hosts[short]; ok {
-			candidates = append(candidates, install)
+			candidates = []config.ToolInstallSpec{install}
 		}
 	}
-	if len(spec.Providers) > 0 {
-		candidates = append(candidates, spec.Providers...)
-	} else {
-		candidates = append(candidates, spec.DefaultInstallSpec())
-		candidates = append(candidates, spec.Variants...)
+	if len(candidates) == 0 {
+		if len(spec.Providers) > 0 {
+			candidates = append(candidates, spec.Providers...)
+		} else {
+			candidates = append(candidates, spec.DefaultInstallSpec())
+			candidates = append(candidates, spec.Variants...)
+		}
 	}
 	settings, _ := a.LoadSettings()
 	fallbackBinDir := strings.TrimSpace(settings.FallbackBinDir)
+	routes := make([]installRoute, 0, len(candidates))
 	for _, candidate := range candidates {
-		candidate = a.normalizeInstallRouteCandidate(logicalName, spec, candidate, fallbackBinDir)
-		if a.installSpecMatchesProvider(ctx, candidate, providerName) {
-			return candidate, true
+		routes = append(routes, a.makeInstallRoute(logicalName, spec, installRouteNative, candidate, nil, fallbackBinDir))
+	}
+	return routes
+}
+
+// findConfiguredInstallRoute searches every candidate for one whose Provider
+// or InstallWith matches providerName. Unlike planInstallRoute, it does not
+// stop at the first available candidate.
+func (a *App) findConfiguredInstallRoute(ctx context.Context, logicalName string, spec config.ToolSpec, providerName string) (installRoute, bool) {
+	if providerName == "" {
+		return installRoute{}, false
+	}
+	for _, route := range a.configuredInstallRoutes(logicalName, spec) {
+		if a.installSpecMatchesProvider(ctx, route.Install, providerName) {
+			return route, true
 		}
 	}
-	return config.ToolInstallSpec{}, false
+	return installRoute{}, false
 }
 
 func allInstallRouteSkipsArePackageUnavailable(skipped []installRouteSkip, candidates int) bool {

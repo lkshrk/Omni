@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -76,6 +77,23 @@ type descriptionPendingTool struct {
 	tool          provider.Tool
 }
 
+type githubReleaseRepo struct {
+	owner string
+	repo  string
+}
+
+type githubReleaseLookupResult struct {
+	release githubRelease
+	err     error
+}
+
+type githubReleaseLookupCache map[githubReleaseRepo]githubReleaseLookupResult
+
+type githubReleaseLookupFlight struct {
+	done   chan struct{}
+	result githubReleaseLookupResult
+}
+
 // RefreshOutdated queries each provider's OutdatedMap and writes results to the DB.
 // When refreshMetadata is true (user-initiated refresh), providers with a stale
 // local index are refreshed first; passive background scans pass false to avoid
@@ -110,6 +128,7 @@ func (a *App) RefreshOutdated(ctx context.Context, refreshMetadata bool, progres
 	stop = profile.Start("app.refresh.outdated.provider_maps")
 	outdatedByProv, outdatedByManager, updateMetadata := a.outdatedMapsForProvidersBestEffort(ctx, neededProviders)
 	stop()
+	resolvedTools := a.resolvedToolsByKeyBestEffort(ctx)
 
 	stop = profile.Start("app.refresh.outdated.build_updates")
 	updates := make([]database.OutdatedUpdate, 0, len(tools))
@@ -121,6 +140,12 @@ func (a *App) RefreshOutdated(ctx context.Context, refreshMetadata bool, progres
 				labelProvider = t.Provider
 			}
 			progress(fmt.Sprintf("Checking updates %d/%d: %s/%s…", i+1, len(tools), labelProvider, t.Name))
+		}
+		if update, handled := a.toolOutdatedUpdate(ctx, t, resolvedTools); handled {
+			if update != nil {
+				updates = append(updates, *update)
+			}
+			continue
 		}
 		m, ok := outdatedByProv[outdatedProvider]
 		if !ok {
@@ -136,7 +161,9 @@ func (a *App) RefreshOutdated(ctx context.Context, refreshMetadata bool, progres
 			LatestVersion: latestVer,
 		})
 	}
-	updates = append(updates, a.githubFallbackOutdatedUpdatesBestEffort(ctx, tools)...)
+	githubCache := make(githubReleaseLookupCache)
+	updates = append(updates, a.configuredGitHubOutdatedUpdatesBestEffort(ctx, tools, resolvedTools, githubCache)...)
+	updates = append(updates, a.githubFallbackOutdatedUpdatesBestEffort(ctx, tools, githubCache)...)
 	stop()
 	writeCtx := context.WithoutCancel(ctx)
 	stop = profile.Start("app.refresh.outdated.write")
@@ -150,6 +177,82 @@ func (a *App) RefreshOutdated(ctx context.Context, refreshMetadata bool, progres
 	}
 	stop()
 	return nil
+}
+
+func (a *App) resolvedToolsByKeyBestEffort(ctx context.Context) map[string]resolvedTool {
+	cfg, err := a.loadConfig()
+	if err != nil || cfg == nil {
+		return nil
+	}
+	tools, _ := a.currentResolvedTools(ctx, cfg)
+	byKey := make(map[string]resolvedTool, len(tools))
+	for _, tool := range tools {
+		byKey[resolvedToolKey(tool.entry)] = tool
+		spec, ok := cfg.Tools[tool.entry.Name]
+		if !ok {
+			continue
+		}
+		for _, route := range a.configuredInstallRoutes(tool.entry.Name, spec) {
+			entry := spec.ToToolEntry(tool.entry.Name, route.Install)
+			key := resolvedToolKey(entry)
+			if _, exists := byKey[key]; exists {
+				continue
+			}
+			byKey[key] = resolvedTool{
+				entry:       entry,
+				memberships: append([]string(nil), tool.memberships...),
+				taps:        append([]string(nil), spec.Taps...),
+				route:       route,
+			}
+		}
+	}
+	return byKey
+}
+
+func (a *App) toolOutdatedUpdate(ctx context.Context, cached *database.ToolCache, tools map[string]resolvedTool) (*database.OutdatedUpdate, bool) {
+	if cached == nil {
+		return nil, false
+	}
+	providerName := a.outdatedLookupProvider(cached)
+	p, ok := a.registry.Get(providerName)
+	if !ok {
+		return nil, false
+	}
+	checker, ok := p.(provider.ToolOutdatedChecker)
+	if !ok {
+		return nil, false
+	}
+	resolved, ok := tools[NewToolKey(cached.Name, cached.Provider, cached.Package).String()]
+	if !ok {
+		return nil, true
+	}
+	available, err := p.Available(ctx)
+	if err != nil || !available {
+		return nil, true
+	}
+	currentVersion := ""
+	if cached.Version.Valid {
+		currentVersion = cached.Version.String
+	}
+	latestVersion, outdated, supported, err := checker.CheckOutdated(ctx, a.operationTool(resolved.entry, providerName), currentVersion)
+	if !supported {
+		return nil, false
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: omni: refresh outdated for %s/%s: %v\n", providerName, cached.Name, err)
+		return nil, true
+	}
+	latestVersion, outdated = a.suppressSelfUnupgradeable(ctx, cached, latestVersion, outdated)
+	if !outdated {
+		latestVersion = ""
+	}
+	return &database.OutdatedUpdate{
+		Name:          cached.Name,
+		Provider:      cached.Provider,
+		Package:       cached.Package,
+		Outdated:      outdated,
+		LatestVersion: latestVersion,
+	}, true
 }
 
 func (a *App) outdatedMapsForProvidersBestEffort(ctx context.Context, providerNames map[string]struct{}) (map[string]map[string]string, map[string]map[string]map[string]string, []database.UpdateMetadata) {
@@ -236,6 +339,7 @@ func (a *App) RefreshProviderOutdated(ctx context.Context, provName string, refr
 			neededLookups[lookupProvider] = struct{}{}
 		}
 	}
+	resolvedTools := a.resolvedToolsByKeyBestEffort(ctx)
 	if cfg, cfgErr := a.loadConfig(); cfgErr == nil {
 		resolved, _ := a.currentResolvedToolEntries(ctx, cfg)
 		for _, entry := range resolved {
@@ -248,8 +352,10 @@ func (a *App) RefreshProviderOutdated(ctx context.Context, provName string, refr
 			}
 		}
 	}
-	fallbackUpdates := a.githubFallbackOutdatedUpdatesBestEffort(ctx, targetTools)
-	if len(neededLookups) == 0 && len(fallbackUpdates) == 0 {
+	githubCache := make(githubReleaseLookupCache)
+	fallbackUpdates := a.githubFallbackOutdatedUpdatesBestEffort(ctx, targetTools, githubCache)
+	configuredGitHubUpdates := a.configuredGitHubOutdatedUpdatesBestEffort(ctx, targetTools, resolvedTools, githubCache)
+	if len(neededLookups) == 0 && len(fallbackUpdates) == 0 && len(configuredGitHubUpdates) == 0 {
 		return nil
 	}
 	if refreshMetadata {
@@ -292,6 +398,12 @@ func (a *App) RefreshProviderOutdated(ctx context.Context, provName string, refr
 	}
 	updates := make([]database.OutdatedUpdate, 0, len(targetTools))
 	for _, t := range targetTools {
+		if update, handled := a.toolOutdatedUpdate(ctx, t, resolvedTools); handled {
+			if update != nil {
+				updates = append(updates, *update)
+			}
+			continue
+		}
 		lookupProvider := a.outdatedLookupProvider(t)
 		if !ensureOutdated(lookupProvider) {
 			continue
@@ -306,6 +418,7 @@ func (a *App) RefreshProviderOutdated(ctx context.Context, provName string, refr
 			LatestVersion: latestVer,
 		})
 	}
+	updates = append(updates, configuredGitHubUpdates...)
 	updates = append(updates, fallbackUpdates...)
 	writeCtx := context.WithoutCancel(ctx)
 	if err := a.readDB().UpdateOutdatedBatch(writeCtx, updates); err != nil {
@@ -387,7 +500,7 @@ func (a *App) outdatedLookupProvider(t *database.ToolCache) string {
 	return t.InstalledWith
 }
 
-func (a *App) githubFallbackOutdatedUpdatesBestEffort(ctx context.Context, tools []*database.ToolCache) []database.OutdatedUpdate {
+func (a *App) githubFallbackOutdatedUpdatesBestEffort(ctx context.Context, tools []*database.ToolCache, releases githubReleaseLookupCache) []database.OutdatedUpdate {
 	if len(tools) == 0 {
 		return nil
 	}
@@ -409,7 +522,7 @@ func (a *App) githubFallbackOutdatedUpdatesBestEffort(ctx context.Context, tools
 			updates = append(updates, clearOutdatedUpdate(t))
 			continue
 		}
-		release, err := a.fetchLatestGitHubRelease(ctx, strings.TrimSpace(fallback.Source.Owner), strings.TrimSpace(fallback.Source.Repo))
+		release, err := a.fetchLatestGitHubReleaseCached(ctx, releases, fallback.Source.Owner, fallback.Source.Repo)
 		if err != nil {
 			continue
 		}
@@ -448,6 +561,116 @@ func (a *App) githubFallbackOutdatedUpdatesBestEffort(ctx context.Context, tools
 		})
 	}
 	return updates
+}
+
+func (a *App) configuredGitHubOutdatedUpdatesBestEffort(ctx context.Context, tools []*database.ToolCache, resolved map[string]resolvedTool, releases githubReleaseLookupCache) []database.OutdatedUpdate {
+	updates := make([]database.OutdatedUpdate, 0)
+	for _, cached := range tools {
+		if cached == nil || !cached.Installed {
+			continue
+		}
+		tool, ok := resolved[NewToolKey(cached.Name, cached.Provider, cached.Package).String()]
+		if !ok {
+			continue
+		}
+		configured := tool.route.ConfiguredInstall
+		if strings.TrimSpace(tool.entry.Options["latest"]) != "" {
+			continue
+		}
+		if configured.Source == nil || configured.Source.Type != config.FallbackSourceGitHub || configured.Recipe == nil || configured.Recipe.Type != config.FallbackRecipeGitHubReleaseAsset {
+			continue
+		}
+		if strings.TrimSpace(configured.Options["install"]) != "" || strings.TrimSpace(configured.Recipe.TagName) != "" || strings.TrimSpace(configured.Options["release_tag"]) != "" {
+			updates = append(updates, clearOutdatedUpdate(cached))
+			continue
+		}
+		release, err := a.fetchLatestGitHubReleaseCached(ctx, releases, configured.Source.Owner, configured.Source.Repo)
+		if err != nil {
+			continue
+		}
+		latest := strings.TrimSpace(release.TagName)
+		current := ""
+		if cached.Version.Valid {
+			current = strings.TrimSpace(cached.Version.String)
+		}
+		newer, comparable := fallbackVersionNewer(latest, current)
+		if latest == "" || current == "" || !comparable {
+			continue
+		}
+		if _, ok := configuredGitHubReleaseAsset(cached.Name, configured, release); !ok {
+			updates = append(updates, clearOutdatedUpdate(cached))
+			continue
+		}
+		if !newer {
+			updates = append(updates, clearOutdatedUpdate(cached))
+			continue
+		}
+		updates = append(updates, database.OutdatedUpdate{
+			Name:          cached.Name,
+			Provider:      cached.Provider,
+			Package:       cached.Package,
+			Outdated:      true,
+			LatestVersion: latest,
+		})
+	}
+	return updates
+}
+
+func (a *App) fetchLatestGitHubReleaseCached(ctx context.Context, cache githubReleaseLookupCache, owner, repo string) (githubRelease, error) {
+	key := githubReleaseRepo{owner: strings.ToLower(strings.TrimSpace(owner)), repo: strings.ToLower(strings.TrimSpace(repo))}
+	if result, ok := cache[key]; ok {
+		return result.release, result.err
+	}
+
+	a.githubReleaseMu.Lock()
+	if flight, ok := a.githubReleaseInFlight[key]; ok {
+		done := flight.done
+		a.githubReleaseMu.Unlock()
+		select {
+		case <-ctx.Done():
+			return githubRelease{}, ctx.Err()
+		case <-done:
+			result := flight.result
+			if errors.Is(result.err, context.Canceled) || errors.Is(result.err, context.DeadlineExceeded) {
+				return a.fetchLatestGitHubReleaseCached(ctx, cache, owner, repo)
+			}
+			if cache != nil {
+				cache[key] = result
+			}
+			return result.release, result.err
+		}
+	}
+	if a.githubReleaseInFlight == nil {
+		a.githubReleaseInFlight = make(map[githubReleaseRepo]*githubReleaseLookupFlight)
+	}
+	flight := &githubReleaseLookupFlight{done: make(chan struct{})}
+	a.githubReleaseInFlight[key] = flight
+	a.githubReleaseMu.Unlock()
+
+	release, err := a.fetchLatestGitHubRelease(ctx, strings.TrimSpace(owner), strings.TrimSpace(repo))
+	result := githubReleaseLookupResult{release: release, err: err}
+	a.githubReleaseMu.Lock()
+	flight.result = result
+	delete(a.githubReleaseInFlight, key)
+	close(flight.done)
+	a.githubReleaseMu.Unlock()
+	if cache != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		cache[key] = result
+	}
+	return release, err
+}
+
+func configuredGitHubReleaseAsset(logicalName string, spec config.ToolInstallSpec, release githubRelease) (githubAsset, bool) {
+	name, err := config.GitHubReleaseAssetName(logicalName, spec, release.TagName)
+	if err != nil {
+		return githubAsset{}, false
+	}
+	for _, asset := range release.Assets {
+		if asset.Name == name && strings.TrimSpace(asset.BrowserDownloadURL) != "" {
+			return asset, true
+		}
+	}
+	return githubAsset{}, false
 }
 
 func githubPublishedAtAfter(latest, saved string) bool {

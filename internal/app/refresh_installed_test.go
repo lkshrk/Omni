@@ -2,13 +2,53 @@ package app_test
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/executor"
 	"github.com/lkshrk/omni/internal/provider"
+	"github.com/lkshrk/omni/internal/provider/script"
 )
+
+func TestRefreshInstalled_ScriptVersionFailurePreservesCachedState(t *testing.T) {
+	ctx := context.Background()
+	mock := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "sh -c exit 0", Response: executor.MockCall{}},
+		executor.MatchRule{Pattern: "sh -c bun-check", Response: executor.MockCall{}},
+		executor.MatchRule{Pattern: "sh -c bun --version", Response: executor.MockCall{Err: context.DeadlineExceeded}},
+	).WithFallback(executor.MockCall{})
+	a, cfgPath := newImportApp(t, script.New(mock))
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{"bun": {Providers: []config.ToolInstallSpec{{
+			Provider: "script", Options: map[string]string{"install": "bun-install", "check": "bun-check", "version": "bun --version"},
+		}}}},
+		Groups: []*config.GroupConfig{{Tools: groupTools("bun")}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name: "bun", Provider: "script", Package: "bun", Installed: true, InstalledWith: "script",
+		Version: sql.NullString{String: "1.2.3", Valid: true}, LastChecked: time.Now(),
+	}); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+
+	if err := a.RefreshInstalled(ctx, nil); err != nil {
+		t.Fatalf("RefreshInstalled: %v", err)
+	}
+
+	got, err := a.DB().Get(ctx, "bun", "script", "bun")
+	if err != nil {
+		t.Fatalf("Get bun: %v", err)
+	}
+	if !got.Installed || !got.Version.Valid || got.Version.String != "1.2.3" {
+		t.Fatalf("cached state installed=%v version=%q; want true, %q", got.Installed, got.Version.String, "1.2.3")
+	}
+}
 
 // bulkCheckingStub extends stubProvider with the BulkChecker interface.
 type bulkCheckingStub struct {

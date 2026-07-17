@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
-	"os"
 	"path"
 	"runtime"
 	"strings"
@@ -100,17 +98,8 @@ func (a *App) resolveGitHubFallback(ctx context.Context, name, owner, repoName s
 }
 
 func (a *App) fetchLatestGitHubRelease(ctx context.Context, owner, repoName string) (githubRelease, error) {
-	client := a.githubClient
-	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second, CheckRedirect: stripAuthOnRedirect}
-	}
-	baseURL := strings.TrimRight(a.githubAPI, "/")
-	if baseURL == "" {
-		baseURL = strings.TrimRight(os.Getenv("OMNI_GITHUB_API_BASE"), "/")
-	}
-	if baseURL == "" {
-		baseURL = defaultGitHubAPIBase
-	}
+	client := a.githubHTTPClient()
+	baseURL := a.githubAPIBase()
 	apiURL := baseURL + "/repos/" + owner + "/" + repoName + "/releases/latest"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
 	if err != nil {
@@ -118,14 +107,7 @@ func (a *App) fetchLatestGitHubRelease(ctx context.Context, owner, repoName stri
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "omni")
-	// Only attach the token to GitHub's own API to prevent credential leakage
-	// when OMNI_GITHUB_API_BASE points at a non-GitHub host (e.g. a local test stub).
-	if token := strings.TrimSpace(os.Getenv("GITHUB_TOKEN")); token != "" {
-		parsed, parseErr := url.Parse(baseURL)
-		if parseErr == nil && isGitHubHost(parsed.Host) {
-			req.Header.Set("Authorization", "Bearer "+token)
-		}
-	}
+	attachGitHubToken(req, baseURL)
 	resp, err := client.Do(req)
 	if err != nil {
 		return githubRelease{}, err

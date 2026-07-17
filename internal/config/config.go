@@ -651,7 +651,9 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 		var errs []ValidationError
 		if spec.Provider == "script" {
 			if spec.Recipe != nil && strings.TrimSpace(spec.Recipe.Type) != "" {
-				return validateRecipeInstallSpec(path, spec)
+				errs = append(errs, validateRecipeInstallSpec(path, spec)...)
+				errs = append(errs, validateScriptUpdateOptions(path, spec)...)
+				return errs
 			}
 			return validateScriptSpec(path, spec)
 		}
@@ -1134,8 +1136,8 @@ func validateAptRepoSpec(path string, spec ToolInstallSpec) []ValidationError {
 	return errs
 }
 
-// validateScriptSpec enforces the script provider's option contract: a
-// non-empty install command, and at least one detection mechanism.
+// validateScriptSpec enforces the script provider's install, detection, and
+// optional version/latest command contract.
 func validateScriptSpec(path string, spec ToolInstallSpec) []ValidationError {
 	var errs []ValidationError
 	if strings.TrimSpace(spec.Options["install"]) == "" {
@@ -1148,6 +1150,18 @@ func validateScriptSpec(path string, spec ToolInstallSpec) []ValidationError {
 		errs = append(errs, ValidationError{
 			Path:    path + ".options",
 			Message: "script provider requires options.detect or options.check",
+		})
+	}
+	errs = append(errs, validateScriptUpdateOptions(path, spec)...)
+	return errs
+}
+
+func validateScriptUpdateOptions(path string, spec ToolInstallSpec) []ValidationError {
+	var errs []ValidationError
+	if strings.TrimSpace(spec.Options["latest"]) != "" && strings.TrimSpace(spec.Options["version"]) == "" {
+		errs = append(errs, ValidationError{
+			Path:    path + ".options.latest",
+			Message: "script provider options.latest requires options.version",
 		})
 	}
 	return errs

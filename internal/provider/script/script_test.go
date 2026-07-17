@@ -94,6 +94,30 @@ func TestIsInstalled_CheckExitZero(t *testing.T) {
 	}
 }
 
+func TestIsInstalled_CheckReturnsVersion(t *testing.T) {
+	mock := executor.NewMatchMock(
+		executor.MatchRule{
+			Pattern:  "sh -c test -x /root/.bun/bin/bun",
+			Response: executor.MockCall{},
+		},
+		executor.MatchRule{
+			Pattern:  "sh -c bun --version",
+			Response: executor.MockCall{Stdout: "  1.2.3\n"},
+		},
+	).WithFallback(executor.MockCall{})
+	p := New(mock)
+	ok, version, err := p.IsInstalled(context.Background(), tool("bun", map[string]string{
+		"check":   "test -x /root/.bun/bin/bun",
+		"version": "bun --version",
+	}))
+	if err != nil {
+		t.Fatalf("IsInstalled() error = %v", err)
+	}
+	if !ok || version != "1.2.3" {
+		t.Errorf("IsInstalled() = %v, %q; want true, %q", ok, version, "1.2.3")
+	}
+}
+
 func TestIsInstalled_CheckNonZero(t *testing.T) {
 	mock := executor.NewMatchMock(executor.MatchRule{
 		Pattern:  "sh -c test -x /nope",
@@ -223,5 +247,82 @@ func TestListInstalled_Nil(t *testing.T) {
 	got, err := p.ListInstalled(context.Background())
 	if err != nil || got != nil {
 		t.Errorf("ListInstalled() = %v, %v; want nil, nil", got, err)
+	}
+}
+
+func TestLatestCommandMarksDifferentVersionOutdated(t *testing.T) {
+	mock := executor.NewMatchMock(executor.MatchRule{
+		Pattern:  "sh -c curl -fsSL https://example.com/latest",
+		Response: executor.MockCall{Stdout: "1.3.0\n"},
+	}).WithFallback(executor.MockCall{})
+	p := New(mock)
+	checker, ok := any(p).(provider.ToolOutdatedChecker)
+	if !ok {
+		t.Fatal("script provider does not implement provider.ToolOutdatedChecker")
+	}
+	latest, outdated, supported, err := checker.CheckOutdated(context.Background(), tool("bun", map[string]string{
+		"latest": "curl -fsSL https://example.com/latest",
+	}), "1.2.3")
+	if err != nil {
+		t.Fatalf("CheckOutdated() error = %v", err)
+	}
+	if !supported || !outdated || latest != "1.3.0" {
+		t.Errorf("CheckOutdated() = %q, %v, %v; want %q, true, true", latest, outdated, supported, "1.3.0")
+	}
+}
+
+func TestLatestCommandRejectsEmptyOutput(t *testing.T) {
+	mock := executor.NewMatchMock(executor.MatchRule{
+		Pattern:  "sh -c bun-latest",
+		Response: executor.MockCall{Stdout: " \n"},
+	}).WithFallback(executor.MockCall{})
+	checker := any(New(mock)).(provider.ToolOutdatedChecker)
+	_, _, supported, err := checker.CheckOutdated(context.Background(), tool("bun", map[string]string{
+		"latest": "bun-latest",
+	}), "1.2.3")
+	if !supported || err == nil {
+		t.Fatalf("CheckOutdated() supported=%v error=%v; want true and non-nil error", supported, err)
+	}
+}
+
+func TestLatestCommandNormalizesVPrefix(t *testing.T) {
+	mock := executor.NewMatchMock(executor.MatchRule{
+		Pattern:  "sh -c bun-latest",
+		Response: executor.MockCall{Stdout: "v1.2.3\n"},
+	}).WithFallback(executor.MockCall{})
+	checker := any(New(mock)).(provider.ToolOutdatedChecker)
+	latest, outdated, supported, err := checker.CheckOutdated(context.Background(), tool("bun", map[string]string{
+		"latest": "bun-latest",
+	}), "1.2.3")
+	if err != nil || !supported || outdated || latest != "v1.2.3" {
+		t.Fatalf("CheckOutdated() = %q, %v, %v, %v; want v1.2.3, false, true, nil", latest, outdated, supported, err)
+	}
+}
+
+func TestLatestCommandDoesNotMarkCurrentAheadOutdated(t *testing.T) {
+	mock := executor.NewMatchMock(executor.MatchRule{
+		Pattern:  "sh -c bun-latest",
+		Response: executor.MockCall{Stdout: "1.2.3\n"},
+	}).WithFallback(executor.MockCall{})
+	checker := any(New(mock)).(provider.ToolOutdatedChecker)
+	_, outdated, supported, err := checker.CheckOutdated(context.Background(), tool("bun", map[string]string{
+		"latest": "bun-latest",
+	}), "1.3.0")
+	if err != nil || !supported || outdated {
+		t.Fatalf("CheckOutdated() outdated=%v supported=%v error=%v; want false, true, nil", outdated, supported, err)
+	}
+}
+
+func TestLatestCommandRejectsIncomparableVersions(t *testing.T) {
+	mock := executor.NewMatchMock(executor.MatchRule{
+		Pattern:  "sh -c bun-latest",
+		Response: executor.MockCall{Stdout: "nightly-b\n"},
+	}).WithFallback(executor.MockCall{})
+	checker := any(New(mock)).(provider.ToolOutdatedChecker)
+	_, _, supported, err := checker.CheckOutdated(context.Background(), tool("bun", map[string]string{
+		"latest": "bun-latest",
+	}), "nightly-a")
+	if !supported || err == nil {
+		t.Fatalf("CheckOutdated() supported=%v error=%v; want true and non-nil error", supported, err)
 	}
 }

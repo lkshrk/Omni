@@ -15,6 +15,12 @@ exec omni-seed-package-availability mytool apt mytool false 'no candidate'
 exec omni-native-fallback-install --config settings.json tools sync
 stdout 'installed: mytool \(apt\)'
 
+# The structured recipe is hydrated from the local GitHub release response.
+exec grep '"asset_name":' settings.json
+stdout 'mytool_v1.0.0_'
+exec grep '"asset_download_url":' settings.json
+stdout '/asset/'
+
 # Config must reflect verified status.
 exec grep '"status": "verified"' settings.json
 stdout '"status": "verified"'

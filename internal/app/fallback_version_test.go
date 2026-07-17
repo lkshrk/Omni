@@ -51,6 +51,11 @@ func TestFallbackVersionNewer(t *testing.T) {
 		{"", "", false, false},
 		// Single-component numeric
 		{"15", "14", true, true},
+		// Different component counts compare with zero-padding.
+		{"1.2.3", "1.2", true, true},
+		{"1.2", "1.2.0", false, true},
+		// Non-semver strings are not guessed lexicographically.
+		{"release-10", "release-9", false, false},
 		// Non-parseable — no digits or no dots
 		{"nightly", "stable", false, false},
 	}

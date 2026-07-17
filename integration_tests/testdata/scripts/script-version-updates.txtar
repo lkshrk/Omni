@@ -1,0 +1,53 @@
+# script provider tracks versions, preserves cached latest on malformed output, and upgrades.
+exec omni --config settings.json hosts ensure testhost
+exec sh -c 'printf "1.1.0\\n" > latest-version'
+
+exec omni --config settings.json tools sync
+stdout 'done: mytool \(script\)'
+exec omni --config settings.json tools list mytool --format json
+stdout '"state":"installed"'
+stdout '"version":"1.0.0"'
+
+exec omni --config settings.json tools refresh
+stdout 'Checking updates [0-9]+/[0-9]+: script/mytool'
+stdout 'Refresh complete'
+exec omni --config settings.json tools list mytool --format json
+stdout '"state":"outdated"'
+stdout '"version":"1.0.0"'
+stdout '"latest_version":"1.1.0"'
+
+exec sh -c 'printf "1.1.0\\n2.0.0\\n" > latest-version'
+exec omni --config settings.json tools refresh
+stderr 'warning: omni: refresh outdated for script/mytool'
+exec omni --config settings.json tools list mytool --format json
+stdout '"state":"outdated"'
+stdout '"latest_version":"1.1.0"'
+
+exec sh -c 'printf "1.1.0\\n" > latest-version'
+exec omni --config settings.json tools upgrade mytool --force
+stdout 'upgraded mytool'
+exec omni --config settings.json tools list mytool --format json
+stdout '"version":"1.1.0"'
+! stdout '"state":"outdated"'
+! stdout '"latest_version"'
+
+-- settings.json --
+{
+  "settings": {
+    "disabled_providers": ["apt", "apk", "dnf", "pacman", "zypper", "brew", "node", "bun", "pnpm", "npm", "python", "uv", "pip"]
+  },
+  "tools": {
+    "mytool": {
+      "provider": "script",
+      "options": {
+        "install": "touch installed-marker && printf '1.0.0\\n' > installed-version",
+        "check": "test -f installed-marker",
+        "version": "cat installed-version",
+        "latest": "cat latest-version",
+        "upgrade": "printf '1.1.0\\n' > installed-version"
+      }
+    }
+  },
+  "hosts": {"testhost": []},
+  "groups": [{"name": "testhost", "special": "host", "tools": ["mytool"]}]
+}
