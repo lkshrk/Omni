@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -105,6 +106,53 @@ func (a *App) DotsDeleteWithOptions(ctx context.Context, name string, opts DotsD
 				return fmt.Errorf("dots delete: auto-commit: %w", err)
 			}
 		}
+	}
+	return nil
+}
+
+// DotsDeleteLocal removes the local file or directory behind a discovered
+// local-only candidate. Nothing exists in config or the repo for these
+// entries, so deletion only touches the local path.
+func (a *App) DotsDeleteLocal(ctx context.Context, status DotStatus) (err error) {
+	defer func() {
+		a.recordDotsHistoryResult(ctx, "delete", status.Name, "", nil, err, false)
+		a.refreshDotsStateAfterSuccess(ctx, &err, false)
+	}()
+	if !DotStatusTransientCandidate(status) || DotStatusState(status) != DotStateLocalOnly {
+		return fmt.Errorf("dots delete %q: only discovered local-only entries can be deleted locally", status.Name)
+	}
+	target := strings.TrimSpace(status.TargetPath)
+	if target == "" || !filepath.IsAbs(target) {
+		return fmt.Errorf("dots delete %q: invalid local path %q", status.Name, status.TargetPath)
+	}
+	target = filepath.Clean(target)
+	home, homeErr := os.UserHomeDir()
+	if homeErr != nil {
+		return fmt.Errorf("dots delete %q: resolve home directory: %w", status.Name, homeErr)
+	}
+	resolvedHome, homeErr := filepath.EvalSymlinks(filepath.Clean(home))
+	if homeErr != nil {
+		return fmt.Errorf("dots delete %q: resolve home directory: %w", status.Name, homeErr)
+	}
+	// Resolve the parent, not the target: intermediate symlinks (~/.config →
+	// elsewhere) must not smuggle the deletion outside home, while the target
+	// itself being a symlink is fine — RemoveAll only unlinks it.
+	resolvedParent, parentErr := filepath.EvalSymlinks(filepath.Dir(target))
+	if parentErr != nil {
+		// Parent gone means the target is gone too: keep RemoveAll's
+		// idempotent no-op behavior for stale local-only entries.
+		if errors.Is(parentErr, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("dots delete %q: resolve local path: %w", status.Name, parentErr)
+	}
+	resolvedTarget := filepath.Join(resolvedParent, filepath.Base(target))
+	rel, relErr := filepath.Rel(resolvedHome, resolvedTarget)
+	if relErr != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("dots delete %q: refusing to delete %q outside the home directory", status.Name, target)
+	}
+	if err := os.RemoveAll(resolvedTarget); err != nil {
+		return fmt.Errorf("dots delete %q: remove local path: %w", status.Name, err)
 	}
 	return nil
 }

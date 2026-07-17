@@ -411,7 +411,9 @@ func discoveredDotActions(state DotState) []DotAction {
 	switch state {
 	case DotStateUntrackedConflict:
 		return []DotAction{DotActionUseRepo, DotActionUseLocal, DotActionIgnore}
-	case DotStateLocalOnly, DotStateRepoOnly, DotStateUntrackedLinked:
+	case DotStateLocalOnly:
+		return []DotAction{DotActionSync, DotActionRemove, DotActionIgnore}
+	case DotStateRepoOnly, DotStateUntrackedLinked:
 		return []DotAction{DotActionSync, DotActionIgnore}
 	case DotStateIgnored:
 		return []DotAction{DotActionUnignore}

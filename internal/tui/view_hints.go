@@ -443,8 +443,16 @@ func dotsRowHintItems(m Model) []hintItem {
 	if dotsViewDisabled(m) {
 		return hints
 	}
-	if !row.isChild && app.DotStatusHasAction(entry, app.DotActionSync) {
+	if (!row.isChild || dotsChildOutOfSync(row)) && app.DotStatusHasAction(entry, app.DotActionSync) {
 		hints = append(hints, hintFromBindingDesc(m.keys.Sync, app.DotStatusSyncActionLabel(entry)))
+	}
+	if row.isChild && dotsChildOutOfSync(row) {
+		if app.DotStatusHasAction(entry, app.DotActionUseRepo) {
+			hints = append(hints, hintFromBindingDesc(m.keys.DotUseRepo, actions.MustTUILabel(actions.DotsResolveUseRepo)))
+		}
+		if app.DotStatusHasAction(entry, app.DotActionUseLocal) {
+			hints = append(hints, hintFromBindingDesc(m.keys.DotUseLocal, actions.MustTUILabel(actions.DotsResolveUseLocal)))
+		}
 	}
 	if !row.isChild && len(m.dotMemberships[entry.Name]) > 0 {
 		hints = append(hints, hintFromBindingDesc(m.keys.MoveGroup, actions.MustTUILabel(actions.DotsEditGroups)))

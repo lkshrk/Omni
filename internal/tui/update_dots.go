@@ -343,7 +343,7 @@ func (m *Model) handleDotsActionKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibl
 			break
 		}
 		row := visible[m.dotsCursor]
-		if row.isChild {
+		if row.isChild && !dotsChildOutOfSync(row) {
 			break
 		}
 		entry := row.entry
@@ -680,7 +680,7 @@ func (m *Model) handleDotsResolveKeyMsg(visible []dotsVisibleRow, strategy app.D
 		return cmds
 	}
 	row := visible[m.dotsCursor]
-	if row.isChild {
+	if row.isChild && !dotsChildOutOfSync(row) {
 		return cmds
 	}
 	entry := row.entry
@@ -784,6 +784,16 @@ func (m *Model) handleDotsDeleteChoiceKeyMsg(msg tea.KeyPressMsg, visible []dots
 		return cmds
 	}
 
+	if app.DotStatusTransientCandidate(row.entry) {
+		switch strings.ToLower(msg.String()) {
+		case "y":
+			cmds = append(cmds, m.confirmDotsDeleteLocal(row.entry)...)
+		case "n":
+			m.clearDotsConfirmState()
+		}
+		return cmds
+	}
+
 	switch strings.ToLower(msg.String()) {
 	case "y":
 		cmds = append(cmds, m.confirmDotsDelete(row.entry.Name, true)...)
@@ -791,6 +801,28 @@ func (m *Model) handleDotsDeleteChoiceKeyMsg(msg tea.KeyPressMsg, visible []dots
 		cmds = append(cmds, m.confirmDotsDelete(row.entry.Name, false)...)
 	}
 	return cmds
+}
+
+func (m *Model) confirmDotsDeleteLocal(entry app.DotStatus) []tea.Cmd {
+	m.cancelConfirmationTimeout()
+	m.dotsConfirmIdx = -1
+	m.dotsIgnoreIdx = -1
+	m.beginDotsOperation("Deleting " + entry.Name + "…")
+	return []tea.Cmd{m.spinner.Tick, m.doDotsDeleteLocal(entry)}
+}
+
+// dotsChildOutOfSync reports whether a child row's effective state needs
+// attention, making parent-level repair actions meaningful from that row.
+func dotsChildOutOfSync(row dotsVisibleRow) bool {
+	if !row.isChild || row.child.Ignored {
+		return false
+	}
+	switch dotChildStateForDisplay(row.child, app.DotStatusState(row.entry)) {
+	case app.DotStateSynced, app.DotStateIgnored, app.DotStateInactive, app.DotStateDisabled, app.DotStateNoSource:
+		return false
+	default:
+		return true
+	}
 }
 
 func (m *Model) confirmDotsDelete(name string, keepLocal bool) []tea.Cmd {

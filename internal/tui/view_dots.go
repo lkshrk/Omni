@@ -234,7 +234,9 @@ func renderDots(m Model) string {
 			childTargetPadded := renderCell(leftCell(childTarget, targetWidth))
 			isChildCursor := rowIndex == m.dotsCursor && !m.cursorHidden
 			childIgnoreConfirm := m.dotsIgnoreIdx == rowIndex
-			childRight := dotRightColumns(p, isChildCursor || childIgnoreConfirm, childStatusCol, childStatusStyle, app.DotChildFileCounts(child, app.DotStatusState(e)), cols.ratio, cols.ignore, "", cols.group)
+			childRepoConfirm := m.dotsOverwriteIdx == rowIndex && app.DotStatusHasAction(e, app.DotActionUseRepo)
+			childLocalConfirm := m.dotsLocalIdx == rowIndex && app.DotStatusHasAction(e, app.DotActionUseLocal)
+			childRight := dotRightColumns(p, isChildCursor || childIgnoreConfirm || childRepoConfirm || childLocalConfirm, childStatusCol, childStatusStyle, app.DotChildFileCounts(child, app.DotStatusState(e)), cols.ratio, cols.ignore, "", cols.group)
 			childLeft := func(iconStyle, nameStyle, targetStyle lipgloss.Style, iconText, childName, childTarget string) string {
 				return iconStyle.Render(iconText) +
 					iconNameGap +
@@ -247,6 +249,18 @@ func renderDots(m Model) string {
 				left := childLeft(p.styleIgnored.Bold(true), p.styleActiveText, p.styleHelp.Bold(true), "↳", childName, childTargetPadded)
 				write(renderDotsRow(true, left, childRight) + "\n")
 				write(renderContextHints(m, hintCtxDotsIgnoreConfirm, hintPrefix) + "\n")
+				buf.markCursorEnd()
+			} else if childRepoConfirm {
+				buf.markCursor()
+				left := childLeft(p.styleOutdated.Bold(true), p.styleActiveText, p.styleHelp.Bold(true), "↳", childName, childTargetPadded)
+				write(renderDotsRow(true, left, childRight) + "\n")
+				write(renderContextHints(m, hintCtxDotsRepoConfirm, hintPrefix) + "\n")
+				buf.markCursorEnd()
+			} else if childLocalConfirm {
+				buf.markCursor()
+				left := childLeft(p.styleOutdated.Bold(true), p.styleActiveText, p.styleHelp.Bold(true), "↳", childName, childTargetPadded)
+				write(renderDotsRow(true, left, childRight) + "\n")
+				write(renderContextHints(m, hintCtxDotsLocalConfirm, hintPrefix) + "\n")
 				buf.markCursorEnd()
 			} else if isChildCursor {
 				buf.markCursor()
@@ -325,7 +339,7 @@ func renderDots(m Model) string {
 			case removingConfirm:
 				left := rowLeft(p.styleMissing, p.styleMissing, p.styleMissing)
 				write(renderDotsRow(true, left, activeRight) + "\n")
-				write(renderDotsDeleteKeepLocalPrompt(m, e.Name, hintPrefix) + "\n")
+				write(renderDotsDeleteKeepLocalPrompt(m, e, hintPrefix) + "\n")
 				buf.markCursorEnd()
 			case repoConfirm:
 				left := rowLeft(p.styleOutdated, p.styleOutdated, p.styleOutdated)
@@ -455,11 +469,15 @@ func dotsHistoryEntryText(entry app.DotsHistoryEntry) string {
 	return operation + ": " + status + ", " + summary
 }
 
-func renderDotsDeleteKeepLocalPrompt(m Model, name, prefix string) string {
+func renderDotsDeleteKeepLocalPrompt(m Model, e app.DotStatus, prefix string) string {
 	p := m.palette
+	question := ", keep local? "
+	if app.DotStatusTransientCandidate(e) {
+		question = " from disk? "
+	}
 	prompt := p.styleHelp.Render("delete ") +
-		p.styleProvider.Bold(true).Render(name) +
-		p.styleHelp.Render(", keep local? ")
+		p.styleProvider.Bold(true).Render(e.Name) +
+		p.styleHelp.Render(question)
 	return prefix + prompt + renderActionHintText(p, contextHintItems(m, hintCtxDotsDeleteConfirm))
 }
 
