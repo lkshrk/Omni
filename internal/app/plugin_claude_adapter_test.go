@@ -590,3 +590,120 @@ func TestClaudeCodePluginAdapter_ListPlugins_FallsBackWhenAvailableFlagFails(t *
 		t.Fatalf("mismatch\ngot:  %+v\nwant: %+v", plugins, want)
 	}
 }
+
+// claudeAvailableFixtureWithPath builds a claude "plugins list --json
+// --available" response for one installed plugin whose available entry
+// carries a source path (the object form), with no manifest version — the
+// common real-world case (see claudeAvailableEntry's doc comment) that the
+// old repo-HEAD-sha comparison could never safely flag as outdated.
+const claudeAvailableFixtureWithPath = `{
+  "installed": [{"id": "superpowers@caveman", "version": "unknown", "scope": "user", "enabled": true}],
+  "available": [{
+    "pluginId": "superpowers@caveman", "name": "superpowers", "marketplaceName": "caveman",
+    "source": {"source": "git-subdir", "url": "...", "path": "plugins/superpowers", "ref": "main"}
+  }]
+}`
+
+func writeClaudeInstalledPluginsFixture(t *testing.T, home, identity, sha string) {
+	t.Helper()
+	pluginsDir := filepath.Join(home, ".claude", "plugins")
+	if err := os.MkdirAll(pluginsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"version": 2, "plugins": {"` + identity + `": [{"scope": "user", "installPath": "/x", "version": "unknown", "gitCommitSha": "` + sha + `"}]}}`
+	if err := os.WriteFile(filepath.Join(pluginsDir, "installed_plugins.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClaudeCodePluginAdapter_ListPlugins_PathOutdated_PathChangedSinceInstall(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeClaudeInstalledPluginsFixture(t, home, "superpowers@caveman", "installedsha1")
+
+	exec := func(_ context.Context, cmd string, args ...string) (string, string, error) {
+		if cmd == "git" {
+			// args: -C <repoRoot> log -1 --format=%H <rev> -- <path>
+			rev := args[5]
+			if rev == "HEAD" {
+				return "latestsha2\n", "", nil
+			}
+			if rev == "installedsha1" {
+				return "priorsha0\n", "", nil
+			}
+			return "", "unexpected rev", errBoom
+		}
+		return claudeAvailableFixtureWithPath, "", nil
+	}
+	a := NewClaudeCodePluginAdapter(exec, nil)
+	plugins, err := a.ListPlugins(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plugins) != 1 || plugins[0].PathOutdated == nil || !*plugins[0].PathOutdated {
+		t.Fatalf("expected PathOutdated=true (path changed since install), got %+v", plugins)
+	}
+}
+
+func TestClaudeCodePluginAdapter_ListPlugins_PathOutdated_UnchangedSinceInstall(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeClaudeInstalledPluginsFixture(t, home, "superpowers@caveman", "installedsha1")
+
+	exec := func(_ context.Context, cmd string, args ...string) (string, string, error) {
+		if cmd == "git" {
+			return "samesha\n", "", nil
+		}
+		return claudeAvailableFixtureWithPath, "", nil
+	}
+	a := NewClaudeCodePluginAdapter(exec, nil)
+	plugins, err := a.ListPlugins(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plugins) != 1 || plugins[0].PathOutdated == nil || *plugins[0].PathOutdated {
+		t.Fatalf("expected PathOutdated=false (path unchanged since install, unrelated repo commits shouldn't matter), got %+v", plugins)
+	}
+}
+
+func TestClaudeCodePluginAdapter_ListPlugins_PathOutdated_NilWhenGitFails(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeClaudeInstalledPluginsFixture(t, home, "superpowers@caveman", "installedsha1")
+
+	exec := func(_ context.Context, cmd string, args ...string) (string, string, error) {
+		if cmd == "git" {
+			return "", "not a git repository", errBoom
+		}
+		return claudeAvailableFixtureWithPath, "", nil
+	}
+	a := NewClaudeCodePluginAdapter(exec, nil)
+	plugins, err := a.ListPlugins(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plugins) != 1 || plugins[0].PathOutdated != nil {
+		t.Fatalf("expected PathOutdated=nil when git fails (never guess), got %+v", plugins)
+	}
+}
+
+func TestClaudeCodePluginAdapter_ListPlugins_PathOutdated_NilWhenNoInstalledSha(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	// No installed_plugins.json written: no installed sha available.
+
+	exec := func(_ context.Context, cmd string, args ...string) (string, string, error) {
+		if cmd == "git" {
+			t.Fatal("git should not be invoked without an installed sha to compare against")
+		}
+		return claudeAvailableFixtureWithPath, "", nil
+	}
+	a := NewClaudeCodePluginAdapter(exec, nil)
+	plugins, err := a.ListPlugins(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plugins) != 1 || plugins[0].PathOutdated != nil {
+		t.Fatalf("expected PathOutdated=nil without an installed sha, got %+v", plugins)
+	}
+}

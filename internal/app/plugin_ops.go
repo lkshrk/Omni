@@ -152,6 +152,18 @@ func marketplaceListed(existing []InstalledMarketplace, name string) bool {
 // future update pass both read from the marketplace's local clone, so a
 // stale clone must never be left in place ahead of them.
 func (a *App) RestorePlugins(ctx context.Context, opts RestorePluginOptions) (RestorePluginResult, error) {
+	return a.restorePlugins(ctx, opts, true)
+}
+
+// RestorePluginsPreRefreshed installs missing manifest plugins without the
+// up-front per-adapter marketplace refresh, for callers that just refreshed
+// marketplaces themselves (e.g. the TUI's update-all, which refreshes once
+// before both computing outdated plugins and installing missing ones).
+func (a *App) RestorePluginsPreRefreshed(ctx context.Context, opts RestorePluginOptions) (RestorePluginResult, error) {
+	return a.restorePlugins(ctx, opts, false)
+}
+
+func (a *App) restorePlugins(ctx context.Context, opts RestorePluginOptions, refreshMarketplaces bool) (RestorePluginResult, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
 		return RestorePluginResult{}, err
@@ -169,7 +181,7 @@ func (a *App) RestorePlugins(ctx context.Context, opts RestorePluginOptions) (Re
 			res.Warnings = append(res.Warnings, fmt.Sprintf("agent %s not available, skipping", adapter.ID()))
 			continue
 		}
-		if !opts.DryRun {
+		if !opts.DryRun && refreshMarketplaces {
 			if refreshErr := adapter.UpdateMarketplaces(ctx); refreshErr != nil {
 				res.Warnings = append(res.Warnings, fmt.Sprintf("agent %s: refresh marketplaces failed, continuing: %v", adapter.ID(), refreshErr))
 			}

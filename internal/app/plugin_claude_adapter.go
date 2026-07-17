@@ -124,21 +124,28 @@ type claudePluginListEntry struct {
 // which is either an object ({source, url, path, ref, sha, ...}) or a bare
 // string (e.g. "./plugins/agent-sdk-dev") depending on the marketplace entry
 // shape — verified live 2026-07-10. Sha is empty for the bare-string form.
+// Path is the plugin's own subdirectory within the marketplace clone: for
+// the object form it's the "path" field; for the bare-string form the string
+// itself is that path.
 type claudeAvailableSource struct {
-	Sha string
+	Sha  string
+	Path string
 }
 
 func (s *claudeAvailableSource) UnmarshalJSON(data []byte) error {
 	var obj struct {
-		Sha string `json:"sha"`
+		Sha  string `json:"sha"`
+		Path string `json:"path"`
 	}
 	if err := json.Unmarshal(data, &obj); err == nil {
 		s.Sha = obj.Sha
+		s.Path = obj.Path
 		return nil
 	}
 	var str string
 	if err := json.Unmarshal(data, &str); err == nil {
 		s.Sha = ""
+		s.Path = str
 		return nil
 	}
 	return nil
@@ -172,6 +179,7 @@ type claudePluginListAvailableResponse struct {
 
 func (a *claudeCodePluginAdapter) ListPlugins(ctx context.Context) ([]InstalledPlugin, error) {
 	installedShas := readClaudeInstalledPluginShas()
+	home, homeErr := os.UserHomeDir()
 
 	stdout, _, err := a.exec(ctx, "claude", "plugins", "list", "--json", "--available")
 	if err == nil {
@@ -181,6 +189,7 @@ func (a *claudeCodePluginAdapter) ListPlugins(ctx context.Context) ([]InstalledP
 		}
 		latestByIdentity := make(map[string]string, len(resp.Available))
 		latestShaByIdentity := make(map[string]string, len(resp.Available))
+		pathByIdentity := make(map[string]string, len(resp.Available))
 		for _, e := range resp.Available {
 			identity := e.Name + "@" + e.MarketplaceName
 			if v := e.versionLike(); v != "" {
@@ -189,19 +198,28 @@ func (a *claudeCodePluginAdapter) ListPlugins(ctx context.Context) ([]InstalledP
 			if e.Source.Sha != "" {
 				latestShaByIdentity[identity] = e.Source.Sha
 			}
+			if e.Source.Path != "" {
+				pathByIdentity[identity] = e.Source.Path
+			}
 		}
 		plugins := make([]InstalledPlugin, 0, len(resp.Installed))
 		for _, e := range resp.Installed {
 			name, marketplace := splitPluginIdentity(e.ID)
 			identity := name + "@" + marketplace
-			plugins = append(plugins, InstalledPlugin{
+			plugin := InstalledPlugin{
 				Name:          name,
 				Marketplace:   marketplace,
 				Version:       e.Version,
 				LatestVersion: latestByIdentity[identity],
 				Sha:           installedShas[identity],
 				LatestSha:     latestShaByIdentity[identity],
-			})
+			}
+			if homeErr == nil {
+				if path, ok := pathByIdentity[identity]; ok {
+					plugin.PathOutdated = a.pathOutdated(ctx, home, marketplace, path, plugin.Sha)
+				}
+			}
+			plugins = append(plugins, plugin)
 		}
 		return plugins, nil
 	}
@@ -226,6 +244,44 @@ func (a *claudeCodePluginAdapter) ListPlugins(ctx context.Context) ([]InstalledP
 		})
 	}
 	return plugins, nil
+}
+
+// pathOutdated determines whether path (the plugin's own subdirectory within
+// the marketplace clone) has changed since sha (the commit the plugin was
+// installed at) by comparing the path's last-touched commit at HEAD against
+// the same query pinned to sha — equal means the plugin's own files haven't
+// moved since install, regardless of unrelated commits elsewhere in the
+// marketplace repo (the false-positive mode a raw repo-HEAD sha comparison
+// hits, see plugin_rows.go's Outdated doc comment). Returns nil (unknown)
+// whenever the clone is missing, git fails, or sha is unknown — never guesses.
+func (a *claudeCodePluginAdapter) pathOutdated(ctx context.Context, home, marketplace, path, sha string) *bool {
+	if sha == "" {
+		return nil
+	}
+	repoRoot := claudeMarketplaceRepoRoot(home, marketplace)
+	latest := a.gitPluginPathCommit(ctx, repoRoot, "HEAD", path)
+	if latest == "" {
+		return nil
+	}
+	asOfInstall := a.gitPluginPathCommit(ctx, repoRoot, sha, path)
+	if asOfInstall == "" {
+		return nil
+	}
+	outdated := latest != asOfInstall
+	return &outdated
+}
+
+// gitPluginPathCommit returns the sha of the most recent commit reachable
+// from rev that touched path within repoRoot, or "" if it cannot be
+// determined (missing clone, path never committed, git unavailable) —
+// best-effort, mirroring readClaudeInstalledPluginShas' never-an-error
+// contract.
+func (a *claudeCodePluginAdapter) gitPluginPathCommit(ctx context.Context, repoRoot, rev, path string) string {
+	stdout, _, err := a.exec(ctx, "git", "-C", repoRoot, "log", "-1", "--format=%H", rev, "--", path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(stdout)
 }
 
 // claudeInstalledPluginsFile mirrors ~/.claude/plugins/installed_plugins.json,
