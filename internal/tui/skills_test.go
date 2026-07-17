@@ -147,6 +147,28 @@ func TestSkills_ViewBodyError(t *testing.T) {
 	}
 }
 
+func TestSkills_ViewBodyAllChipShowsSectionError(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewSkills
+	m.skillTypeIdx = agentsChipAll
+	m.mcpErr = errors.New("mcp registry unreachable")
+	out := m.viewSkillsBody()
+	if !strings.Contains(out, "error: mcp registry unreachable") {
+		t.Errorf("viewSkillsBody() all chip missing mcp error line, got:\n%s", out)
+	}
+}
+
+func TestSkills_ViewBodyMcpChipError(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewSkills
+	m.skillTypeIdx = agentsChipMcp
+	m.mcpErr = errors.New("mcp registry unreachable")
+	out := m.viewSkillsBody()
+	if !strings.Contains(out, "error: mcp registry unreachable") {
+		t.Errorf("viewSkillsBody() mcp chip missing error line, got:\n%s", out)
+	}
+}
+
 func TestSkills_RestoredMsgPopulatesResult(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSkills
