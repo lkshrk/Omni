@@ -406,6 +406,10 @@ type RootConfig struct {
 	// Paths are relative to the directory containing the main settings file.
 	// The field is stripped before save.
 	Include []string `json:"$include,omitempty"`
+	// MergeNotices collects advisory messages produced while merging $include
+	// fragments (e.g. duplicate definitions where the fragment wins). Populated
+	// on load, surfaced by settings lint, never persisted.
+	MergeNotices []string `json:"-"`
 	// Version identifies the settings.json format. Missing/zero is treated as the
 	// legacy unversioned format and migrated to CurrentVersion on load.
 	Version  int                 `json:"version"`

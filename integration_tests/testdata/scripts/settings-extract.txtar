@@ -1,0 +1,42 @@
+# settings extract decomposes settings.json into settings.d fragments
+env HOME=$WORK
+
+# extract moves tools, groups, and dots into fragments
+exec omni -y --config settings.json settings extract
+stdout 'settings.d/tools.json\s+<- tools'
+stdout 'settings.d/groups.json\s+<- groups'
+stdout 'settings.d/dots.json\s+<- groups'
+stdout 'settings.json now references the fragments via \$include'
+
+# main file no longer owns the moved keys but keeps settings and gains $include
+! grep '"tools":' settings.json
+! grep '"groups":' settings.json
+! grep '"agents":' settings.json
+grep 'dots_repo' settings.json
+grep '"settings.d/tools.json"' settings.json
+grep '"settings.d/groups.json"' settings.json
+grep '"settings.d/dots.json"' settings.json
+
+# dots.json carries the dot entry and its ignore pattern, not the tool membership
+grep '"nvim"' settings.d/dots.json
+grep '\*\.log' settings.d/dots.json
+! grep 'ripgrep' settings.d/dots.json
+
+# groups.json carries the tool membership without dots
+grep 'ripgrep' settings.d/groups.json
+! grep '"dots"' settings.d/groups.json
+
+# the merged config still resolves the dot entry and settings
+exec omni --config settings.json dots list
+stdout 'nvim'
+exec omni --config settings.json settings show
+stdout 'dots_repo = .*dotfiles'
+
+# re-running is a no-op
+exec omni -y --config settings.json settings extract
+stdout 'settings.json already extracted; nothing to do'
+
+-- settings.json --
+{"settings":{"dots_repo":"~/dotfiles"},"tools":{"ripgrep":{"provider":"brew","package":"ripgrep"}},"hosts":{"testhost":[]},"groups":[{"name":"testhost","special":"host","tools":["ripgrep"],"dots":[{"name":"nvim","path":"~/.config/nvim","ignore":["*.log"]}]}]}
+
+-- dotfiles/dotfiles/.keep --

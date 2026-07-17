@@ -8490,3 +8490,69 @@ func TestHeaderInfo_EmptyOnDashboardAndSettings(t *testing.T) {
 		t.Errorf("tools header info should not embed version %q, got: %q", version, out)
 	}
 }
+
+func TestRenderDots_CursorRowShowsLastError(t *testing.T) {
+	m := baseModel(nil)
+	setDotsRepoForTest(&m, "/repo")
+	m.dotsCursor = 0
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		State:      app.DotStateModified,
+		Counts:     app.DotFileCounts{OutOfSync: 1},
+		LastError:  "permission denied",
+	}}
+
+	out := stripANSIEscapeSequences(renderDots(m))
+	if !strings.Contains(out, "✗ permission denied") {
+		t.Fatalf("cursor row should render last error line, got:\n%s", out)
+	}
+}
+
+func TestRenderDots_CursorRowWithoutLastErrorOmitsErrorLine(t *testing.T) {
+	m := baseModel(nil)
+	setDotsRepoForTest(&m, "/repo")
+	m.dotsCursor = 0
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		State:      app.DotStateModified,
+		Counts:     app.DotFileCounts{OutOfSync: 1},
+	}}
+
+	out := stripANSIEscapeSequences(renderDots(m))
+	if strings.Contains(out, "✗") {
+		t.Fatalf("cursor row without LastError should not render an error line, got:\n%s", out)
+	}
+}
+
+func TestRenderDotsLastError_CollapsesWhitespace(t *testing.T) {
+	m := baseModel(nil)
+	e := app.DotStatus{LastError: "stow: error\n  something   failed\n"}
+
+	out := stripANSIEscapeSequences(renderDotsLastError(m.palette, e, m.width))
+	if !strings.Contains(out, "✗ stow: error something failed") {
+		t.Fatalf("multi-line error should collapse to single-spaced text, got: %q", out)
+	}
+}
+
+func TestRenderDotsLastError_TruncatesLongText(t *testing.T) {
+	m := baseModel(nil)
+	e := app.DotStatus{LastError: strings.Repeat("a", 450)}
+
+	out := stripANSIEscapeSequences(renderDotsLastError(m.palette, e, m.width))
+	flat := strings.NewReplacer("\n", "", " ", "").Replace(out)
+	if !strings.HasSuffix(flat, "…") {
+		t.Fatalf("long error should end with ellipsis, got tail: %q", flat[len(flat)-8:])
+	}
+	if got, want := strings.Count(flat, "a"), 399; got != want {
+		t.Fatalf("truncated error rune count = %d, want %d", got, want)
+	}
+}
+
+func TestRenderDotsLastError_EmptyReturnsNothing(t *testing.T) {
+	m := baseModel(nil)
+	if out := renderDotsLastError(m.palette, app.DotStatus{}, m.width); out != "" {
+		t.Fatalf("empty LastError should render nothing, got: %q", out)
+	}
+}

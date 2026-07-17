@@ -36,6 +36,15 @@ func BackupLocalPathWithExecutor(ctx context.Context, exec BackupExecutor, path 
 	return BackupLocalPathFromWithExecutor(ctx, exec, path, path)
 }
 
+// BackupLocalPathFilteredWithExecutor copies path into the backup destination
+// while skipping paths matched by ignores (entry-root-anchored patterns plus
+// the built-in defaults). Use it only when the mutation being guarded leaves
+// ignored paths untouched in place; destructive flows that remove the whole
+// target must keep taking full backups.
+func BackupLocalPathFilteredWithExecutor(ctx context.Context, exec BackupExecutor, path string, ignores []string) (string, error) {
+	return backupLocalPathFrom(ctx, exec, path, path, ignores)
+}
+
 // BackupLocalPathFrom copies source into the backup destination derived from
 // path. Use this when path is a managed symlink but the durable safety copy
 // should contain the linked repo content before that repo content is removed.
@@ -44,6 +53,10 @@ func BackupLocalPathFrom(path, source string) (string, error) {
 }
 
 func BackupLocalPathFromWithExecutor(ctx context.Context, exec BackupExecutor, path, source string) (string, error) {
+	return backupLocalPathFrom(ctx, exec, path, source, nil)
+}
+
+func backupLocalPathFrom(ctx context.Context, exec BackupExecutor, path, source string, ignores []string) (string, error) {
 	info, err := os.Lstat(source)
 	if err != nil {
 		return "", err
@@ -52,7 +65,7 @@ func BackupLocalPathFromWithExecutor(ctx context.Context, exec BackupExecutor, p
 	if err != nil {
 		return "", err
 	}
-	if err := backupCopyPath(ctx, backupExec(exec), source, dst, info); err != nil {
+	if err := backupCopyPath(ctx, backupExec(exec), source, dst, info, ignores); err != nil {
 		return "", err
 	}
 	return dst, nil
@@ -126,6 +139,27 @@ func RemoveLocalPathAfterBackupWithExecutor(ctx context.Context, exec BackupExec
 	return nil
 }
 
+// TrashLocalPath moves path into the user's trash directory instead of
+// deleting it permanently. Symlinks are unlinked in place because the link
+// itself carries no data. Missing paths are a no-op.
+func TrashLocalPath(ctx context.Context, exec BackupExecutor, path string) error {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	_, err = moveLocalPathToTrash(ctx, backupExec(exec), path, info)
+	return err
+}
+
 func moveLocalPathToTrash(ctx context.Context, exec BackupExecutor, path string, info os.FileInfo) (string, error) {
 	dst, err := trashDestination(path)
 	if err != nil {
@@ -134,7 +168,7 @@ func moveLocalPathToTrash(ctx context.Context, exec BackupExecutor, path string,
 	if err := os.Rename(path, dst); err == nil {
 		return dst, nil
 	}
-	if err := backupCopyPath(ctx, backupExec(exec), path, dst, info); err != nil {
+	if err := backupCopyPath(ctx, backupExec(exec), path, dst, info, nil); err != nil {
 		return "", err
 	}
 	if err := os.RemoveAll(path); err != nil && !os.IsNotExist(err) {
@@ -223,7 +257,7 @@ func uniqueBackupDestination(path string) string {
 	}
 }
 
-func backupCopyPath(ctx context.Context, exec BackupExecutor, src, dst string, info os.FileInfo) error {
+func backupCopyPath(ctx context.Context, exec BackupExecutor, src, dst string, info os.FileInfo, ignores []string) error {
 	if info.Mode()&os.ModeSymlink != 0 {
 		target, err := os.Readlink(src)
 		if err != nil {
@@ -241,9 +275,9 @@ func backupCopyPath(ctx context.Context, exec BackupExecutor, src, dst string, i
 		if err := backupCopyGitTracked(ctx, exec, src, dst); err == nil {
 			return nil
 		}
-		// Fallback: walk the directory but skip default-ignored paths
-		// (.cache, node_modules, __pycache__, etc.).
-		return backupCopyDirFiltered(ctx, exec, src, dst)
+		// Fallback: walk the directory but skip ignored paths (the entry's
+		// patterns when provided, otherwise .cache, node_modules, etc.).
+		return backupCopyDirFiltered(ctx, exec, src, dst, ignores)
 	}
 	if !info.Mode().IsRegular() {
 		return nil
@@ -304,9 +338,14 @@ func backupCopyGitTracked(ctx context.Context, exec BackupExecutor, src, dst str
 	return nil
 }
 
-// backupCopyDirFiltered walks src recursively, skipping default-ignored paths.
-func backupCopyDirFiltered(ctx context.Context, exec BackupExecutor, src, dst string) error {
-	ignores := defaultIgnores
+// backupCopyDirFiltered walks src recursively, skipping ignored paths. With
+// nil ignores it applies the built-in defaults; entry ignore lists are matched
+// with the same entry-root anchoring the sync classifier uses.
+func backupCopyDirFiltered(ctx context.Context, exec BackupExecutor, src, dst string, ignores []string) error {
+	if len(ignores) == 0 {
+		ignores = defaultIgnores
+	}
+	base := filepath.Base(src)
 	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -315,11 +354,18 @@ func backupCopyDirFiltered(ctx context.Context, exec BackupExecutor, src, dst st
 		if relErr != nil {
 			return relErr
 		}
-		if rel != "." && ShouldIgnore(d.Name(), ignores) {
-			if d.IsDir() {
+		if rel != "." {
+			relSlash := filepath.ToSlash(rel)
+			candidates := []string{relSlash, base + "/" + relSlash}
+			if ShouldIgnoreAnyPath(candidates, d.Name(), ignores) {
+				if !d.IsDir() {
+					return nil
+				}
+				if HasIncludedDescendant(relSlash, ignores) || HasIncludedDescendant(base+"/"+relSlash, ignores) {
+					return nil
+				}
 				return filepath.SkipDir
 			}
-			return nil
 		}
 		target := filepath.Join(dst, rel)
 		entryInfo, infoErr := os.Lstat(path)
@@ -329,7 +375,7 @@ func backupCopyDirFiltered(ctx context.Context, exec BackupExecutor, src, dst st
 		if entryInfo.IsDir() && entryInfo.Mode()&os.ModeSymlink == 0 {
 			return os.MkdirAll(target, entryInfo.Mode().Perm())
 		}
-		return backupCopyPath(ctx, exec, path, target, entryInfo)
+		return backupCopyPath(ctx, exec, path, target, entryInfo, ignores)
 	})
 }
 

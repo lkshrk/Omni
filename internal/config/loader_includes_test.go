@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/config"
@@ -138,5 +139,79 @@ func TestPatchTool_UpdatesOwningInclude(t *testing.T) {
 	}
 	if string(data) != "{\n  \"version\": 17,\n  \"$include\": [\"tools.json\"]\n}" {
 		t.Fatalf("root config was changed: %s", data)
+	}
+}
+
+func TestLoad_IncludeDotEntryOverridesParent(t *testing.T) {
+	dir := t.TempDir()
+	includePath := filepath.Join(dir, "groups.json")
+	mainPath := filepath.Join(dir, "settings.json")
+	if err := os.WriteFile(includePath, []byte(`{
+  "groups": [{ "name": "base", "dots": [
+    { "name": "claude", "path": "~/.claude", "ignore": ["*", "!/settings.json", "!/commands/"] }
+  ] }]
+}`), 0o600); err != nil {
+		t.Fatalf("write include: %v", err)
+	}
+	if err := os.WriteFile(mainPath, []byte(`{
+  "version": 17,
+  "$include": ["groups.json"],
+  "groups": [{ "name": "base", "dots": [
+    { "name": "claude", "path": "~/.claude", "ignore": ["*", "!/settings.json"] }
+  ] }]
+}`), 0o600); err != nil {
+		t.Fatalf("write main: %v", err)
+	}
+
+	cfg, err := config.Load(mainPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Groups) != 1 || len(cfg.Groups[0].Dots) != 1 {
+		t.Fatalf("groups = %+v, want one group with one dot entry", cfg.Groups)
+	}
+	ignore := cfg.Groups[0].Dots[0].Ignore
+	if len(ignore) != 3 || ignore[2] != "!/commands/" {
+		t.Fatalf("ignore = %v, want include fragment's list to win", ignore)
+	}
+}
+
+func TestLoad_RecordsMergeNoticeForDuplicateDotEntry(t *testing.T) {
+	dir := t.TempDir()
+	includePath := filepath.Join(dir, "groups.json")
+	mainPath := filepath.Join(dir, "settings.json")
+	if err := os.WriteFile(includePath, []byte(`{
+  "groups": [{ "name": "base", "dots": [
+    { "name": "claude", "path": "~/.claude" }
+  ] }]
+}`), 0o600); err != nil {
+		t.Fatalf("write include: %v", err)
+	}
+	if err := os.WriteFile(mainPath, []byte(`{
+  "version": 17,
+  "$include": ["groups.json"],
+  "groups": [{ "name": "base", "dots": [
+    { "name": "claude", "path": "~/.claude" },
+    { "name": "vim", "path": "~/.vim" }
+  ] }]
+}`), 0o600); err != nil {
+		t.Fatalf("write main: %v", err)
+	}
+
+	cfg, err := config.Load(mainPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.MergeNotices) != 1 {
+		t.Fatalf("MergeNotices = %v, want exactly one duplicate notice", cfg.MergeNotices)
+	}
+	notice := cfg.MergeNotices[0]
+	for _, want := range []string{`"claude"`, `"base"`, `"groups.json"`} {
+		if !strings.Contains(notice, want) {
+			t.Fatalf("notice = %q, want it to mention %s", notice, want)
+		}
+	}
+	if strings.Contains(strings.Join(cfg.MergeNotices, "\n"), `"vim"`) {
+		t.Fatalf("MergeNotices = %v, must not flag non-duplicated entries", cfg.MergeNotices)
 	}
 }

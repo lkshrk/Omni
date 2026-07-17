@@ -353,6 +353,9 @@ func renderDots(m Model) string {
 			case isCursor:
 				left := rowLeft(iconStyle.Bold(true), p.styleActiveText, p.styleHelp.Bold(true))
 				write(renderDotsRow(true, left, activeRight) + "\n")
+				if errLine := renderDotsLastError(p, e, m.width); errLine != "" {
+					write(errLine + "\n")
+				}
 				if app.DotStatusHasAction(e, app.DotActionUseRepo) || app.DotStatusHasAction(e, app.DotActionUseLocal) {
 					write(renderDotsContextHints(m, hintCtxDotsConflict, hintPrefix, m.width) + "\n")
 					buf.markCursorEnd()
@@ -790,4 +793,20 @@ func dotSyncedStyle(p palette, selected bool) lipgloss.Style {
 		style = style.Bold(true)
 	}
 	return style
+}
+
+// renderDotsLastError shows the recorded failure reason for the selected
+// out-of-sync entry, wrapped so multi-line tool output (e.g. stow stderr)
+// stays readable instead of being truncated into a transient status line.
+func renderDotsLastError(p palette, e app.DotStatus, width int) string {
+	text := strings.Join(strings.Fields(e.LastError), " ")
+	if text == "" {
+		return ""
+	}
+	const maxErrorRunes = 400
+	if runes := []rune(text); len(runes) > maxErrorRunes {
+		text = string(runes[:maxErrorRunes-1]) + "…"
+	}
+	avail := max(rowAvailableWidth(width)-4, 20)
+	return p.styleMissing.PaddingLeft(4).Width(avail).Render("✗ " + text)
 }

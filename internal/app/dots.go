@@ -75,6 +75,10 @@ type DotStatus struct {
 	Counts     DotFileCounts `json:"counts,omitempty"`
 	IsDir      bool          `json:"is_dir,omitempty"`
 	Children   []DotChild    `json:"children,omitempty"`
+	// LastError is the most recent recorded sync failure for this entry, set
+	// only while the entry still needs attention. It explains WHY an entry is
+	// out of sync (e.g. the stow conflict message), not just that it is.
+	LastError string `json:"last_error,omitempty"`
 
 	ignoredChildren []DotChild
 }

@@ -52,6 +52,7 @@ const (
 	dotLocalBrokenLink
 	dotLocalContent
 	dotLocalModified
+	dotLocalAllIgnored
 )
 
 type dotLocalState struct {
@@ -76,6 +77,8 @@ func classifyDotEntry(e dots.ResolvedEntry) (DotState, []DotAction) {
 			return DotStateBroken, syncableDotActions()
 		case dotLocalModified:
 			return DotStateModified, syncableDotActions()
+		case dotLocalAllIgnored:
+			return DotStateIgnored, []DotAction{DotActionUnignore, DotActionRemove}
 		default:
 			return DotStateConflict, conflictDotActions()
 		}
@@ -131,6 +134,7 @@ func inspectManagedDotDirectory(e dots.ResolvedEntry) dotLocalKind {
 	kind := dotLocalExpectedLink
 	rootMatches := sameResolvedPath(e.TargetPath, e.SourcePath)
 	sawNonIgnoredPath := false
+	sawIgnoredPath := false
 	sawLinkedManagedPath := false
 	walkErr := filepath.WalkDir(e.SourcePath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -146,6 +150,7 @@ func inspectManagedDotDirectory(e dots.ResolvedEntry) dotLocalKind {
 			return nil
 		}
 		if shouldIgnoreDotPath(e.SourcePath, rel, d.Name(), combinedDotIgnores(e.Ignore)) {
+			sawIgnoredPath = true
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -232,6 +237,9 @@ func inspectManagedDotDirectory(e dots.ResolvedEntry) dotLocalKind {
 		}
 	}
 	if !rootMatches && kind != dotLocalModified && (!sawNonIgnoredPath || !sawLinkedManagedPath) {
+		if !sawNonIgnoredPath && sawIgnoredPath {
+			return dotLocalAllIgnored
+		}
 		return dotLocalContent
 	}
 	return kind

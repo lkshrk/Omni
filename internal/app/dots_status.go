@@ -37,6 +37,7 @@ func (a *App) DotsStatus(ctx context.Context) (*DotsStatusResult, error) {
 		return nil, err
 	}
 	statuses := entryHealth(mgr, groupMap, variantMap)
+	a.attachLastSyncErrors(ctx, statuses)
 	memberships, membershipErr := a.DotMembershipMap(ctx)
 	var gitStatus string
 	repoPath, repoErr := resolveRepoPath(a.dotsRepoPath())
@@ -837,6 +838,8 @@ func dotLocalKindState(kind dotLocalKind, parentState DotState) DotState {
 		return DotStateBroken
 	case dotLocalModified:
 		return DotStateModified
+	case dotLocalAllIgnored:
+		return DotStateIgnored
 	default:
 		return DotStateConflict
 	}
@@ -844,4 +847,39 @@ func dotLocalKindState(kind dotLocalKind, parentState DotState) DotState {
 
 func isManagedDotFile(mode os.FileMode) bool {
 	return mode.IsRegular() || mode&os.ModeSymlink != 0
+}
+
+// attachLastSyncErrors annotates out-of-sync statuses with the most recent
+// recorded failure for their entry so UIs can explain why an entry is broken
+// instead of only showing its state. The newest history verdict per entry
+// wins: a successful newer operation clears an older failure.
+func (a *App) attachLastSyncErrors(ctx context.Context, statuses []DotStatus) {
+	if len(statuses) == 0 {
+		return
+	}
+	history, err := a.RecentDotsHistory(ctx, dotsHistoryLimit)
+	if err != nil || len(history) == 0 {
+		return
+	}
+	verdict := make(map[string]string)
+	note := func(entry, errText string) {
+		if entry == "" {
+			return
+		}
+		if _, seen := verdict[entry]; !seen {
+			verdict[entry] = errText
+		}
+	}
+	for _, record := range history {
+		for _, op := range record.Ops {
+			note(op.Entry, op.Error)
+		}
+		note(record.Entry, record.Error)
+	}
+	for i := range statuses {
+		if !DotStatusNeedsAttention(statuses[i]) {
+			continue
+		}
+		statuses[i].LastError = verdict[statuses[i].Name]
+	}
 }

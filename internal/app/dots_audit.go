@@ -48,30 +48,32 @@ func (a *App) doctorDotsIgnorePatterns(result *DoctorResult, cfg *config.RootCon
 // DotsFixIgnorePatterns removes dead patterns identified by audit checks from
 // the config. Returns the names of entries that were modified.
 func (a *App) DotsFixIgnorePatterns() ([]string, error) {
-	cfg, err := config.Load(a.ConfigPath)
-	if err != nil {
-		return nil, err
-	}
 	var modified []string
-	for gi := range cfg.Groups {
-		for di := range cfg.Groups[gi].Dots {
-			entry := &cfg.Groups[gi].Dots[di]
-			if len(entry.Ignore) == 0 {
-				continue
+	err := a.withConfig(func(cfg *config.RootConfig) error {
+		for gi := range cfg.Groups {
+			for di := range cfg.Groups[gi].Dots {
+				entry := &cfg.Groups[gi].Dots[di]
+				if len(entry.Ignore) == 0 {
+					continue
+				}
+				cleaned, changed := cleanIgnoreList(entry.Ignore)
+				if !changed {
+					continue
+				}
+				entry.Ignore = cleaned
+				modified = append(modified, entry.Name)
 			}
-			cleaned, changed := cleanIgnoreList(entry.Ignore)
-			if !changed {
-				continue
-			}
-			entry.Ignore = cleaned
-			modified = append(modified, entry.Name)
 		}
+		if len(modified) == 0 {
+			return errSkipSave
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("save config: %w", err)
 	}
 	if len(modified) == 0 {
 		return nil, nil
-	}
-	if err := config.Save(a.ConfigPath, cfg); err != nil {
-		return nil, fmt.Errorf("save config: %w", err)
 	}
 	return modified, nil
 }
