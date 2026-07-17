@@ -147,6 +147,14 @@ func agentsVersionCellText(m Model, e agentsAllRow) string {
 		if row.Sha != "" && row.LatestSha != "" && row.Sha != row.LatestSha {
 			return shaShort(row.Sha) + " → " + shaShort(row.LatestSha)
 		}
+		// PathOutdated (see PluginRow.Outdated's doc comment) has no comparable
+		// before/after value to show as an arrow — it's a git-history
+		// comparison, not a version or sha pair — so fall back to a plain
+		// label rather than silently showing nothing for the common
+		// versionless-plugin case.
+		if row.Outdated() {
+			return "update available"
+		}
 		return row.Version
 	case agentsSectionMarketplaces:
 		row, ok := agentsMarketplaceRowAt(m, e.localIdx)
@@ -212,7 +220,7 @@ func agentsPluginRowAt(m Model, localIdx int) (app.PluginRow, bool) {
 		return app.PluginRow{}, false
 	}
 	p := flat[idx].plugin
-	return app.PluginRow{Name: p.Name, Version: p.Version, LatestVersion: p.LatestVersion, Sha: p.Sha, LatestSha: p.LatestSha}, true
+	return app.PluginRow{Name: p.Name, Version: p.Version, LatestVersion: p.LatestVersion, Sha: p.Sha, LatestSha: p.LatestSha, PathOutdated: p.PathOutdated}, true
 }
 
 func agentsRowGroups(m Model, e agentsAllRow) []string {
@@ -405,6 +413,8 @@ func agentsRowCells(m Model, p palette, cols colWidths, e agentsAllRow, selected
 				ver = emphasis(p.styleMissing).Render(current) + emphasis(p.styleOutdated).Render(latest)
 			case r.Sha != "" && r.LatestSha != "" && r.Sha != r.LatestSha:
 				ver = emphasis(p.styleMissing).Render(fitCellText(shaShort(r.Sha), cols.ver/2)) + emphasis(p.styleOutdated).Render(" → "+fitCellText(shaShort(r.LatestSha), cols.ver/2))
+			case r.Outdated():
+				ver = emphasis(p.styleOutdated).Render(fitCellText("update available", cols.ver))
 			default:
 				ver = emphasis(p.styleVersionMuted).Render(fitCellText(r.Version, cols.ver))
 			}

@@ -516,21 +516,23 @@ func (m *Model) handleAgentsGlobalActionKeyMsg(msg tea.KeyPressMsg) (handled boo
 }
 
 // doAgentsUpdateAll runs the agents tab's "U" global bulk action: skills
-// update, a marketplace refresh, then an update for every outdated plugin.
-// mcp servers have no update concept (no version/sha drift tracked
-// per-adapter, only add/remove — see McpAdapter), so mcp participates in "U"
-// only as a no-op: it is simply not touched, same as tools' UpgradeAll only
-// touching rows with an actual update available. Marketplaces must refresh
-// BEFORE outdated plugins are computed: a plugin's LatestVersion/LatestSha
-// comes from the marketplace's local clone, so the cached rows can't know
-// about an update until the clone is pulled — computing outdated from the
-// cached rows first would never find anything to update. The plugin update
-// itself uses UpdatePluginsPreRefreshed so the refresh isn't repeated.
+// update, a marketplace refresh, an update for every outdated plugin, then an
+// install for every manifest plugin/mcp server still missing (so "U" also
+// picks up entries added to the manifest on another host, mirroring what "S"
+// does for those two sections — mcp has no update concept at all, only
+// add/remove, see McpAdapter, so install-missing is the only thing "U" can do
+// for it). Marketplaces must refresh BEFORE outdated plugins are computed: a
+// plugin's LatestVersion/LatestSha comes from the marketplace's local clone,
+// so the cached rows can't know about an update until the clone is pulled —
+// computing outdated from the cached rows first would never find anything to
+// update. The plugin update and the missing-plugin install both use their
+// PreRefreshed variant so that one refresh isn't repeated for each.
 func (m *Model) doAgentsUpdateAll() []tea.Cmd {
 	runSkills := m.skillsSectionEnabled() && len(m.skillsRows) > 0
 	runPlugins := m.pluginsSectionEnabled()
 	runMarketplaces := m.marketplacesSectionEnabled()
-	if !runSkills && !runPlugins && !runMarketplaces {
+	runMcp := m.mcpSectionEnabled()
+	if !runSkills && !runPlugins && !runMarketplaces && !runMcp {
 		return nil
 	}
 	if runSkills {
@@ -545,11 +547,15 @@ func (m *Model) doAgentsUpdateAll() []tea.Cmd {
 		m.marketplaceRunning = true
 		m.marketplaceErr = nil
 	}
+	if runMcp {
+		m.mcpRunning = true
+		m.mcpErr = nil
+	}
 	ch, gen := m.beginProgressStream()
 	a, ctx := m.app, m.ctx
 	work := func() tea.Msg {
 		defer close(ch)
-		done := agentsProgressDoneMsg{gen: gen, skills: runSkills, plugin: runPlugins, marketplace: runMarketplaces}
+		done := agentsProgressDoneMsg{gen: gen, skills: runSkills, mcp: runMcp, plugin: runPlugins, marketplace: runMarketplaces}
 		if runSkills {
 			sendProgress(ch, gen, "updating skills…")
 			_, _, err := a.UpdateSkills(ctx, app.UpdateSkillsOptions{})
@@ -583,6 +589,16 @@ func (m *Model) doAgentsUpdateAll() []tea.Cmd {
 					done.pluginErr = combinePluginErrors(err, res.Errors)
 				}
 			}
+		}
+		if runPlugins && done.pluginErr == nil {
+			sendProgress(ch, gen, "installing missing plugins…")
+			res, err := a.RestorePluginsPreRefreshed(ctx, app.RestorePluginOptions{})
+			done.pluginErr = combinePluginErrors(err, res.Errors)
+		}
+		if runMcp {
+			sendProgress(ch, gen, "installing missing mcp servers…")
+			res, err := a.RestoreMcpServers(ctx, app.RestoreMcpOptions{})
+			done.mcpErr = combineMcpErrors(err, res.Errors)
 		}
 		return done
 	}

@@ -28,7 +28,10 @@ type PluginRow struct {
 	LatestVersion  string
 	Sha            string
 	LatestSha      string
-	Description    string
+	// PathOutdated mirrors InstalledPlugin.PathOutdated — see its doc
+	// comment. Set from the first adapter that reports a non-nil value.
+	PathOutdated *bool
+	Description  string
 }
 
 // marketplaceManifestEntry mirrors one element of plugins[] in a
@@ -67,10 +70,16 @@ func pluginManifestEntry(manifestPath, name string) marketplaceManifestEntry {
 	return marketplaceManifestEntry{}
 }
 
+// claudeMarketplaceRepoRoot builds the on-disk clone root for one of claude's
+// marketplaces given its name.
+func claudeMarketplaceRepoRoot(home, marketplace string) string {
+	return filepath.Join(home, ".claude", "plugins", "marketplaces", marketplace)
+}
+
 // pluginMarketplaceManifestPath builds the on-disk path to a marketplace's
 // manifest.json given the marketplace name.
 func pluginMarketplaceManifestPath(home, marketplace string) string {
-	return filepath.Join(home, ".claude", "plugins", "marketplaces", marketplace, ".claude-plugin", "marketplace.json")
+	return filepath.Join(claudeMarketplaceRepoRoot(home, marketplace), ".claude-plugin", "marketplace.json")
 }
 
 // looksLikeGitSha reports whether s is plausibly a git commit sha rather than
@@ -95,23 +104,31 @@ func looksLikeGitSha(s string) bool {
 //
 // The marketplace catalog's source.sha (LatestSha) is the marketplace repo's
 // current commit, not the sha of the version a client would actually
-// install — comparing it against the installed commit sha produces false
-// positives for plugins that are genuinely up to date but happened to be
-// installed from an earlier commit of an unchanged release (verified live:
-// superpowers 6.1.1 flagged outdated forever despite being latest). So sha
-// comparison is never used as a general outdated signal.
+// install — comparing it against the installed commit sha directly produces
+// false positives for plugins that are genuinely up to date but happened to
+// be installed from an earlier commit of an unchanged release (verified
+// live: superpowers 6.1.1 flagged outdated forever despite being latest). So
+// raw repo-HEAD sha comparison is never used as a general outdated signal;
+// PathOutdated (below) is the precise replacement for the common versionless
+// case, computed per-plugin-subdirectory rather than per-repo.
 //
 // Rules, in order:
 //  1. Both Version and LatestVersion (marketplace manifest version) known:
 //     compare them directly.
-//  2. Version itself looks like a git sha (plugins that version themselves
+//  2. PathOutdated known (adapter compared the plugin's own source path's
+//     last-touched commit at HEAD against the same query at the installed
+//     commit): trust it directly.
+//  3. Version itself looks like a git sha (plugins that version themselves
 //     by commit, e.g. caveman-commit's "25d22f864ad6", with no manifest
 //     version to compare against): outdated when LatestSha does not have
 //     Version as a prefix.
-//  3. No usable signal: not outdated (never guess).
+//  4. No usable signal: not outdated (never guess).
 func (r PluginRow) Outdated() bool {
 	if r.Version != "" && r.LatestVersion != "" {
 		return r.Version != r.LatestVersion
+	}
+	if r.PathOutdated != nil {
+		return *r.PathOutdated
 	}
 	if looksLikeGitSha(r.Version) && r.LatestSha != "" {
 		return !strings.HasPrefix(r.LatestSha, r.Version)
@@ -183,6 +200,9 @@ func (a *App) PluginRows(ctx context.Context) (managed []PluginRow, unmanaged ma
 				}
 				if row.LatestSha == "" {
 					row.LatestSha = plg.LatestSha
+				}
+				if row.PathOutdated == nil {
+					row.PathOutdated = plg.PathOutdated
 				}
 			} else {
 				row.PerAgentStatus[adapter.ID()] = PluginStatusMissing
