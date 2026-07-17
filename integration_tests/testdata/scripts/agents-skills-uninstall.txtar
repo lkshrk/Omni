@@ -19,7 +19,7 @@ grep -count=1 'skills remove -g -a claude-code -y myskill' .omni-cache/npx-calls
 # marker ("Failed to"); the guard turns the lying zero exit into an error.
 env OMNI_FAKE_NPX_MARKER=1
 ! exec omni --config settings.json agents skills uninstall o/r
-stderr 'skills remove o/r exited 0 but reported failure \("Failed to"\); treating as failed'
+stderr 'skills remove o/r exited 0 but reported failure: Failed to remove skill myskill'
 env OMNI_FAKE_NPX_MARKER=
 
 # A source with no lockfile entries cannot be uninstalled.

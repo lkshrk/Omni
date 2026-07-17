@@ -19,7 +19,7 @@ stderr 'skills update: .*registry unreachable'
 env OMNI_FAKE_NPX_FAIL=
 env OMNI_FAKE_NPX_MARKER=1
 ! exec omni --config settings.json agents skills update
-stderr 'skills update exited 0 but reported failure \("✘"\); treating as failed'
+stderr 'skills update exited 0 but reported failure: ✘ could not update skills'
 
 -- settings.json --
 {"version":1,"agents":{"skills":[{"name":"frontend-design","source":"vercel-labs/agent-skills"},{"name":"tdd","source":"o/r"}]}}
