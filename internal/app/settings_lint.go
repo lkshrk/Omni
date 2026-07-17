@@ -30,6 +30,12 @@ func lintSettings(cfg *config.RootConfig) []SettingsLintIssue {
 		return nil
 	}
 	var issues []SettingsLintIssue
+	for _, notice := range cfg.MergeNotices {
+		issues = append(issues, SettingsLintIssue{
+			Path:    "$.$include",
+			Message: notice,
+		})
+	}
 	toolGroups := make(map[string][]string)
 	for _, group := range cfg.Groups {
 		if group == nil {

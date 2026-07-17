@@ -1,6 +1,9 @@
 package config
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // MergeRootConfig deep-merges src into dst. Later fragments win on scalar and
 // map fields; groups append and dedupe by name; agent arrays merge by identity.
@@ -342,19 +345,59 @@ func appendUniqueDotEntries(dst, values []DotEntry) []DotEntry {
 	if len(values) == 0 {
 		return dst
 	}
-	seen := make(map[string]struct{}, len(dst))
-	for _, value := range dst {
-		seen[value.Name] = struct{}{}
+	// Included fragments merge after their parent, so a same-name entry from a
+	// later fragment replaces the earlier one instead of being dropped.
+	seen := make(map[string]int, len(dst))
+	for i, value := range dst {
+		seen[value.Name] = i
 	}
 	for _, value := range values {
 		if value.Name == "" {
 			continue
 		}
-		if _, ok := seen[value.Name]; ok {
+		if i, ok := seen[value.Name]; ok {
+			dst[i] = value
 			continue
 		}
-		seen[value.Name] = struct{}{}
+		seen[value.Name] = len(dst)
 		dst = append(dst, value)
 	}
 	return dst
+}
+
+// includeMergeNotices reports duplicate definitions between dst and an
+// include fragment about to be merged, so lint can surface that the
+// fragment's definition silently wins over the parent's.
+func includeMergeNotices(dst, src *RootConfig, includeName string) []string {
+	if dst == nil || src == nil {
+		return nil
+	}
+	dstGroups := make(map[string]*GroupConfig, len(dst.Groups))
+	for _, group := range dst.Groups {
+		if group != nil {
+			dstGroups[group.BaseName()] = group
+		}
+	}
+	var notices []string
+	for _, group := range src.Groups {
+		if group == nil {
+			continue
+		}
+		existing, ok := dstGroups[group.BaseName()]
+		if !ok {
+			continue
+		}
+		dotNames := make(map[string]bool, len(existing.Dots))
+		for _, dot := range existing.Dots {
+			dotNames[dot.Name] = true
+		}
+		for _, dot := range group.Dots {
+			if dot.Name != "" && dotNames[dot.Name] {
+				notices = append(notices, fmt.Sprintf(
+					"group %q dot entry %q is defined in both the parent config and include %q; the include's definition wins — remove one copy",
+					group.BaseName(), dot.Name, includeName))
+			}
+		}
+	}
+	return notices
 }

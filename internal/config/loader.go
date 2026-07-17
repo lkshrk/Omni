@@ -1062,6 +1062,8 @@ func loadIncludes(path string, cfg *RootConfig) error {
 		if err := loadIncludes(includePath, &fragment); err != nil {
 			return err
 		}
+		cfg.MergeNotices = append(cfg.MergeNotices, fragment.MergeNotices...)
+		cfg.MergeNotices = append(cfg.MergeNotices, includeMergeNotices(cfg, &fragment, include)...)
 		MergeRootConfig(cfg, &fragment)
 	}
 	return nil

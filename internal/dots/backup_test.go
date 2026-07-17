@@ -346,3 +346,52 @@ func expectedTrashRoot(t *testing.T, home string) string {
 		return filepath.Join(home, ".local", "share", "Trash", "files")
 	}
 }
+
+func TestBackupLocalPathFiltered_HonorsEntryIgnores(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	target := filepath.Join(home, ".claude")
+	writeFile(t, filepath.Join(target, "settings.json"), "{}")
+	writeFile(t, filepath.Join(target, "plugins", "installed_plugins.json"), "{}")
+	writeFile(t, filepath.Join(target, "plugins", "plugin-catalog-cache.json"), "huge")
+	writeFile(t, filepath.Join(target, "projects", "session.jsonl"), "huge")
+
+	ignores := append(dots.DefaultIgnores(),
+		"*", "!/settings.json", "!/plugins", "!/plugins/installed_plugins.json")
+	backup, err := dots.BackupLocalPathFilteredWithExecutor(t.Context(), nil, target, ignores)
+	if err != nil {
+		t.Fatalf("BackupLocalPathFilteredWithExecutor: %v", err)
+	}
+
+	for _, want := range []string{"settings.json", "plugins/installed_plugins.json"} {
+		if _, err := os.Stat(filepath.Join(backup, want)); err != nil {
+			t.Errorf("expected %s in backup: %v", want, err)
+		}
+	}
+	for _, skip := range []string{"plugins/plugin-catalog-cache.json", "projects"} {
+		if _, err := os.Stat(filepath.Join(backup, skip)); !os.IsNotExist(err) {
+			t.Errorf("expected %s absent from backup, err = %v", skip, err)
+		}
+	}
+}
+
+func TestBackupLocalPathFiltered_NilIgnoresKeepsDefaultFiltering(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	target := filepath.Join(home, ".config", "tool")
+	writeFile(t, filepath.Join(target, "config.toml"), "x")
+	writeFile(t, filepath.Join(target, "cache", "blob"), "huge")
+
+	backup, err := dots.BackupLocalPathFilteredWithExecutor(t.Context(), nil, target, nil)
+	if err != nil {
+		t.Fatalf("BackupLocalPathFilteredWithExecutor: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(backup, "config.toml")); err != nil {
+		t.Errorf("expected config.toml in backup: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(backup, "cache")); !os.IsNotExist(err) {
+		t.Errorf("expected cache absent from backup, err = %v", err)
+	}
+}
