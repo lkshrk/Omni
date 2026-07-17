@@ -139,14 +139,17 @@ func TestUpgrade_CallsInstallUpgrade(t *testing.T) {
 
 func TestListInstalled(t *testing.T) {
 	// pip list --not-required --format=json output.
-	output := `[{"name":"black","version":"23.12.1"},{"name":"flake8","version":"6.1.0"}]`
-	p, m := newPip(executor.MockCall{Stdout: output})
+	output := `[{"name":"black","version":"23.12.1"},{"name":"cryptography","version":"41.0.7"}]`
+	p, m := newPip(
+		executor.MockCall{Stdout: output},
+		executor.MockCall{Stdout: `{"black":1}`},
+	)
 	tools, err := p.ListInstalled(context.Background())
 	if err != nil {
 		t.Fatalf("ListInstalled: %v", err)
 	}
-	if len(tools) != 2 {
-		t.Errorf("got %d tools, want 2", len(tools))
+	if len(tools) != 1 {
+		t.Fatalf("got %d tools, want 1 pip-owned tool", len(tools))
 	}
 	if tools[0].Name != "black" || tools[0].Version != "23.12.1" {
 		t.Errorf("unexpected tool: %+v", tools[0])
@@ -155,6 +158,9 @@ func TestListInstalled(t *testing.T) {
 	args := m.Calls[0].Args
 	if args[0] != "list" || args[1] != "--not-required" || args[2] != "--format=json" {
 		t.Errorf("unexpected args: %v", args)
+	}
+	if call := m.Calls[1]; call.Name != "python3" || call.Args[0] != "-c" {
+		t.Errorf("expected python3 ownership probe, got %s %v", call.Name, call.Args)
 	}
 }
 
@@ -236,8 +242,11 @@ func TestDescription_NonEmpty(t *testing.T) {
 // --- InstalledMap ---
 
 func TestInstalledMap_ReturnsTopLevel(t *testing.T) {
-	out := `[{"name":"black","version":"23.12.1"},{"name":"flake8","version":"6.1.0"}]`
-	p, _ := newPip(executor.MockCall{Stdout: out})
+	out := `[{"name":"black","version":"23.12.1"},{"name":"cryptography","version":"41.0.7"}]`
+	p, _ := newPip(
+		executor.MockCall{Stdout: out},
+		executor.MockCall{Stdout: `{"black":1}`},
+	)
 	got, err := p.InstalledMap(context.Background())
 	if err != nil {
 		t.Fatalf("InstalledMap: %v", err)
@@ -245,18 +254,18 @@ func TestInstalledMap_ReturnsTopLevel(t *testing.T) {
 	if got["black"] != "23.12.1" {
 		t.Errorf("map[black] = %q, want 23.12.1", got["black"])
 	}
-	if got["flake8"] != "6.1.0" {
-		t.Errorf("map[flake8] = %q, want 6.1.0", got["flake8"])
+	if _, exists := got["cryptography"]; exists {
+		t.Errorf("distro-owned cryptography should be filtered: %v", got)
 	}
 }
 
 func TestInstalledMap_UsesNotRequired(t *testing.T) {
-	p, m := newPip(executor.MockCall{Stdout: `[]`})
+	p, m := newPip(executor.MockCall{Stdout: `[]`}, executor.MockCall{Stdout: `{}`})
 	if _, err := p.InstalledMap(context.Background()); err != nil {
 		t.Fatalf("InstalledMap: %v", err)
 	}
-	if len(m.Calls) != 1 {
-		t.Fatalf("calls = %d, want 1", len(m.Calls))
+	if len(m.Calls) != 2 {
+		t.Fatalf("calls = %d, want pip list plus ownership probe", len(m.Calls))
 	}
 	call := m.Calls[0]
 	if call.Name != "pip3" {
@@ -283,8 +292,11 @@ func TestInstalledMap_Error(t *testing.T) {
 // --- OutdatedMap ---
 
 func TestOutdatedMap_Found(t *testing.T) {
-	out := `[{"name":"black","latest_version":"24.1.0"},{"name":"flake8","latest_version":"7.0.0"}]`
-	p, _ := newPip(executor.MockCall{Stdout: out})
+	out := `[{"name":"black","latest_version":"24.1.0"},{"name":"cryptography","latest_version":"49.0.0"}]`
+	p, _ := newPip(
+		executor.MockCall{Stdout: out},
+		executor.MockCall{Stdout: `{"black":1}`},
+	)
 	got, err := p.OutdatedMap(context.Background())
 	if err != nil {
 		t.Fatalf("OutdatedMap: %v", err)
@@ -292,12 +304,30 @@ func TestOutdatedMap_Found(t *testing.T) {
 	if got["black"] != "24.1.0" {
 		t.Errorf("map[black] = %q, want 24.1.0", got["black"])
 	}
+	if _, exists := got["cryptography"]; exists {
+		t.Errorf("distro-owned cryptography should be filtered: %v", got)
+	}
 }
 
 func TestOutdatedMap_Error(t *testing.T) {
 	p, _ := newPip(executor.MockCall{Err: errors.New("exit 1")})
 	if _, err := p.OutdatedMap(context.Background()); err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestOutdatedMap_OwnershipProbeError(t *testing.T) {
+	m := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "python3 -c", Response: executor.MockCall{Err: errors.New("probe failed")}},
+		executor.MatchRule{
+			Pattern:  "pip3 list --outdated --format=json",
+			Response: executor.MockCall{Stdout: `[{"name":"blinker","latest_version":"1.9.0"}]`},
+		},
+	)
+	p := pip.New(m)
+
+	if _, err := p.OutdatedMap(context.Background()); err == nil {
+		t.Fatal("expected ownership probe error, got nil")
 	}
 }
 

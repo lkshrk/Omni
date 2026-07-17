@@ -359,19 +359,20 @@ func TestListInstalled_UV(t *testing.T) {
 }
 
 func TestListInstalled_Pip3(t *testing.T) {
-	out := `[{"name":"black","version":"23.12.1"},{"name":"flake8","version":"6.1.0"}]`
+	out := `[{"name":"black","version":"23.12.1"},{"name":"cryptography","version":"41.0.7"}]`
 	m := executor.NewMatchMock(
 		uvMissing(),
 		pip3OK(),
 		executor.MatchRule{Pattern: "pip3 list --not-required --format=json", Response: executor.MockCall{Stdout: out}},
+		executor.MatchRule{Pattern: "python3 -c", Response: executor.MockCall{Stdout: `{"black":1}`}},
 	)
 	p := New(m, "")
 	tools, err := p.ListInstalled(context.Background())
 	if err != nil {
 		t.Fatalf("ListInstalled: %v", err)
 	}
-	if len(tools) != 2 {
-		t.Fatalf("got %d tools, want 2", len(tools))
+	if len(tools) != 1 {
+		t.Fatalf("got %d tools, want 1 pip-owned tool", len(tools))
 	}
 	if tools[0].Name != "black" || tools[0].Version != "23.12.1" {
 		t.Errorf("tools[0] = {%s %s}, want {black 23.12.1}", tools[0].Name, tools[0].Version)
@@ -411,11 +412,12 @@ func TestInstalledMap_UV(t *testing.T) {
 }
 
 func TestInstalledMap_Pip3(t *testing.T) {
-	out := `[{"name":"Black","version":"23.12.1"}]`
+	out := `[{"name":"Black","version":"23.12.1"},{"name":"cryptography","version":"41.0.7"}]`
 	m := executor.NewMatchMock(
 		uvMissing(),
 		pip3OK(),
 		executor.MatchRule{Pattern: "pip3 list --not-required --format=json", Response: executor.MockCall{Stdout: out}},
+		executor.MatchRule{Pattern: "python3 -c", Response: executor.MockCall{Stdout: `{"black":1}`}},
 	)
 	p := New(m, "")
 	got, err := p.InstalledMap(context.Background())
@@ -424,6 +426,9 @@ func TestInstalledMap_Pip3(t *testing.T) {
 	}
 	if got["black"] != "23.12.1" {
 		t.Errorf("map[black] = %q, want 23.12.1 (should be lowercased)", got["black"])
+	}
+	if _, exists := got["cryptography"]; exists {
+		t.Errorf("distro-owned cryptography should be filtered: %v", got)
 	}
 }
 
@@ -436,6 +441,30 @@ func TestInstalledMap_Pip3_InvalidJSONReturnsError(t *testing.T) {
 	p := New(m, "")
 	if _, err := p.InstalledMap(context.Background()); err == nil {
 		t.Fatal("expected invalid pip list JSON error, got nil")
+	}
+}
+
+func TestInstalledMap_PipUsesPythonOwnershipProbe(t *testing.T) {
+	m := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "pip --version", Response: executor.MockCall{Stdout: "pip 23.0"}},
+		executor.MatchRule{
+			Pattern:  "pip list --not-required --format=json",
+			Response: executor.MockCall{Stdout: `[{"name":"black","version":"23.12.1"}]`},
+		},
+		executor.MatchRule{Pattern: "python -c", Response: executor.MockCall{Stdout: `{"black":1}`}},
+	)
+	p := New(m, "pip")
+
+	got, err := p.InstalledMap(context.Background())
+	if err != nil {
+		t.Fatalf("InstalledMap: %v", err)
+	}
+	if got["black"] != "23.12.1" {
+		t.Fatalf("map[black] = %q, want 23.12.1", got["black"])
+	}
+	m.AssertCalled(t, "python -c")
+	if calls := m.CallsMatching("python3 -c"); len(calls) != 0 {
+		t.Fatalf("python3 ownership probe called %d times, want 0", len(calls))
 	}
 }
 
@@ -479,11 +508,12 @@ func TestOutdatedMap_UV_FlagNotSupported(t *testing.T) {
 }
 
 func TestOutdatedMap_Pip3(t *testing.T) {
-	out := `[{"name":"black","latest_version":"24.1.0"}]`
+	out := `[{"name":"black","latest_version":"24.1.0"},{"name":"cryptography","latest_version":"49.0.0"}]`
 	m := executor.NewMatchMock(
 		uvMissing(),
 		pip3OK(),
 		executor.MatchRule{Pattern: "pip3 list --outdated --format=json", Response: executor.MockCall{Stdout: out}},
+		executor.MatchRule{Pattern: "python3 -c", Response: executor.MockCall{Stdout: `{"black":1}`}},
 		executor.MatchRule{Pattern: "pip --version", Response: executor.MockCall{Err: errors.New("not found")}},
 	)
 	p := New(m, "")
@@ -493,6 +523,9 @@ func TestOutdatedMap_Pip3(t *testing.T) {
 	}
 	if got["black"] != "24.1.0" {
 		t.Errorf("map[black] = %q, want 24.1.0", got["black"])
+	}
+	if _, exists := got["cryptography"]; exists {
+		t.Errorf("distro-owned cryptography should be filtered: %v", got)
 	}
 }
 
@@ -508,6 +541,24 @@ func TestOutdatedMap_Pip3_InvalidJSONReturnsError(t *testing.T) {
 	}
 }
 
+func TestOutdatedMap_Pip3OwnershipProbeError(t *testing.T) {
+	m := executor.NewMatchMock(
+		uvMissing(),
+		pip3OK(),
+		executor.MatchRule{Pattern: "python3 -c", Response: executor.MockCall{Err: errors.New("probe failed")}},
+		executor.MatchRule{
+			Pattern:  "pip3 list --outdated --format=json",
+			Response: executor.MockCall{Stdout: `[{"name":"blinker","latest_version":"1.9.0"}]`},
+		},
+		executor.MatchRule{Pattern: "pip --version", Response: executor.MockCall{Err: errors.New("not found")}},
+	)
+	p := New(m, "pip3")
+
+	if _, err := p.OutdatedMap(context.Background()); err == nil {
+		t.Fatal("expected ownership probe error, got nil")
+	}
+}
+
 func TestOutdatedByManager_PreservesManagerAttribution(t *testing.T) {
 	uvOut := "black v24.1.0 (update available: v24.2.0)\n  - black\n"
 	pip3Out := `[{"name":"ruff","latest_version":"0.5.0"}]`
@@ -516,6 +567,7 @@ func TestOutdatedByManager_PreservesManagerAttribution(t *testing.T) {
 		executor.MatchRule{Pattern: "uv tool list --outdated", Response: executor.MockCall{Stdout: uvOut}},
 		pip3OK(),
 		executor.MatchRule{Pattern: "pip3 list --outdated --format=json", Response: executor.MockCall{Stdout: pip3Out}},
+		executor.MatchRule{Pattern: "python3 -c", Response: executor.MockCall{Stdout: `{"ruff":1}`}},
 		executor.MatchRule{Pattern: "pip --version", Response: executor.MockCall{Err: errors.New("not found")}},
 	)
 	p := New(m, "uv")
@@ -540,6 +592,7 @@ func TestOutdatedInfoByManager_UsesPyPIUploadTime(t *testing.T) {
 		Pattern:  "pip3 list --outdated --format=json",
 		Response: executor.MockCall{Stdout: `[{"name":"black","latest_version":"24.3.0"}]`},
 	})
+	m.AddRule(executor.MatchRule{Pattern: "python3 -c", Response: executor.MockCall{Stdout: `{"black":1}`}})
 	p := newWithPyPI(m, "pip3", "https://pypi.test", client)
 
 	got, err := p.OutdatedInfoByManager(context.Background())
@@ -859,6 +912,7 @@ func TestInstalledByManager_Pip3Only(t *testing.T) {
 		uvMissing(),
 		pip3OK(),
 		executor.MatchRule{Pattern: "pip3 list --not-required --format=json", Response: executor.MockCall{Stdout: pip3List}},
+		executor.MatchRule{Pattern: "python3 -c", Response: executor.MockCall{Stdout: `{"black":1,"ruff":1}`}},
 		executor.MatchRule{Pattern: "pip --version", Response: executor.MockCall{Err: errors.New("not found")}},
 	)
 	p := New(m, "")
@@ -886,6 +940,7 @@ func TestInstalledByManager_EffectivePriority(t *testing.T) {
 		executor.MatchRule{Pattern: "uv tool list", Response: executor.MockCall{Stdout: uvList}},
 		pip3OK(),
 		executor.MatchRule{Pattern: "pip3 list --not-required --format=json", Response: executor.MockCall{Stdout: pip3List}},
+		executor.MatchRule{Pattern: "python3 -c", Response: executor.MockCall{Stdout: `{"black":1,"ruff":1}`}},
 		executor.MatchRule{Pattern: "pip --version", Response: executor.MockCall{Err: errors.New("not found")}},
 	)
 	p := New(m, "uv") // effective = uv

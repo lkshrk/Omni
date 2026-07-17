@@ -105,7 +105,7 @@ func TestOutdatedInfoMap_UsesPyPIUploadTime(t *testing.T) {
 	m := executor.NewMatchMock(executor.MatchRule{
 		Pattern:  "pip3 list --outdated --format=json",
 		Response: executor.MockCall{Stdout: `[{"name":"black","latest_version":"24.3.0"}]`},
-	})
+	}, executor.MatchRule{Pattern: "python3 -c", Response: executor.MockCall{Stdout: `{"black":1}`}})
 	p := newWithPyPI(m, "https://pypi.test", client)
 
 	got, err := p.OutdatedInfoMap(context.Background())
