@@ -325,8 +325,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.skillsRunning = false
 		m.skillAddRunning = false
 		m.clearAgentsOpFor(agentsSectionSkills)
-		m.skillsRows = msg.rows
-		m.skillsUnmanagedRows = msg.unmanaged
+		// On error keep the seeded/previous rows visible instead of wiping
+		// the table with nil; the error surfaces via skillsErr.
+		if msg.err == nil {
+			m.skillsRows = msg.rows
+			m.skillsUnmanagedRows = msg.unmanaged
+			m.skillsRowsKnown = true
+		}
 		m.skillsErr = msg.err
 		m.skillsLoaded = true
 		if m.skillAgentIdx > len(skillAgentIDs(m.skillsRows, m.enabledAgents)) {
@@ -517,8 +522,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case mcpRowsMsg:
 		m.mcpRunning = false
 		m.clearAgentsOpFor(agentsSectionMcp)
-		m.mcpRows = msg.rows
-		m.mcpUnmanaged = msg.unmanaged
+		if msg.err == nil {
+			m.mcpRows = msg.rows
+			m.mcpUnmanaged = msg.unmanaged
+			m.mcpRowsKnown = true
+		}
 		m.mcpErr = msg.err
 		clampMcpCursor(&m)
 		clampAgentsAllCursor(&m)
@@ -578,8 +586,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pluginRowsMsg:
 		m.pluginRunning = false
 		m.clearAgentsOpFor(agentsSectionPlugins)
-		m.pluginRows = msg.rows
-		m.pluginUnmanaged = msg.unmanaged
+		if msg.err == nil {
+			m.pluginRows = msg.rows
+			m.pluginUnmanaged = msg.unmanaged
+			m.pluginRowsKnown = true
+		}
 		m.pluginErr = msg.err
 		clampPluginCursor(&m)
 		clampAgentsAllCursor(&m)
@@ -666,8 +677,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case marketplaceRowsMsg:
 		m.marketplaceRunning = false
 		m.clearAgentsOpFor(agentsSectionMarketplaces)
-		m.marketplaceRows = msg.rows
-		m.marketplaceUnmanaged = msg.unmanaged
+		if msg.err == nil {
+			m.marketplaceRows = msg.rows
+			m.marketplaceUnmanaged = msg.unmanaged
+			m.marketplaceRowsKnown = true
+		}
 		m.marketplaceErr = msg.err
 		clampMarketplaceCursor(&m)
 		clampAgentsAllCursor(&m)

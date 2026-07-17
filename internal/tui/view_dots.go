@@ -142,7 +142,9 @@ func renderDots(m Model) string {
 	// ── Empty state ───────────────────────────────────────────────────────────
 	if len(m.dotsEntries) == 0 {
 		sb.WriteString("\n")
-		if m.dotsPreparing {
+		// m.loading: the startup snapshot (which carries the cached dots
+		// state) hasn't landed yet — "No dotfiles tracked yet" would be a lie.
+		if m.dotsPreparing || m.loading {
 			sb.WriteString(p.styleHelp.Render("  Loading dotfiles…"))
 			sb.WriteString("\n")
 			return sb.String()

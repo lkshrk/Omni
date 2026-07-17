@@ -61,7 +61,6 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 		m.skillsEnabled = msg.skillsEnabled
 		m.mcpEnabled = msg.mcpEnabled
 		m.pluginsEnabled = msg.pluginsEnabled
-		m.agentsSummary = msg.agentsSummary
 		m.enabledAgents = msg.enabledAgents
 		m.agentsIgnore = msg.agentsIgnore
 		if msg.dotsConfiguredKnown {
@@ -111,9 +110,9 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 	m.skillsEnabled = msg.skillsEnabled
 	m.mcpEnabled = msg.mcpEnabled
 	m.pluginsEnabled = msg.pluginsEnabled
-	m.agentsSummary = msg.agentsSummary
 	m.enabledAgents = msg.enabledAgents
 	m.agentsIgnore = msg.agentsIgnore
+	m.seedAgentsRowsFromCache(msg.agentsRows)
 	if m.skillsSectionEnabled() && !m.skillsLoaded {
 		m.skillsLoaded = true
 		cmds = append(cmds, m.loadSkillsManifestCmd())

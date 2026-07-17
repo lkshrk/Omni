@@ -7865,6 +7865,10 @@ func TestDashboardAgentsOverviewRow(t *testing.T) {
 		m.skillsLoaded = true
 		m.mcpLoaded = true
 		m.pluginLoaded = true
+		m.skillsRowsKnown = true
+		m.mcpRowsKnown = true
+		m.pluginRowsKnown = true
+		m.marketplaceRowsKnown = true
 		m.mcpRunning = false
 		m.pluginRunning = false
 		if statusAgentsLoading(m) {
@@ -8078,6 +8082,10 @@ func TestDashboardAgentsOverviewIconAndAttentionAgree(t *testing.T) {
 	m.skillsLoaded = true
 	m.mcpLoaded = true
 	m.pluginLoaded = true
+	m.skillsRowsKnown = true
+	m.mcpRowsKnown = true
+	m.pluginRowsKnown = true
+	m.marketplaceRowsKnown = true
 	m.enabledAgents = []string{"claude"}
 	m.mcpRows = []app.McpServerRow{{
 		Name:           "iota-mcp",
@@ -8297,6 +8305,10 @@ func TestStatusDashboardDataRows_ActivityConsistency(t *testing.T) {
 		m.skillsLoaded = true
 		m.mcpLoaded = true
 		m.pluginLoaded = true
+		m.skillsRowsKnown = true
+		m.mcpRowsKnown = true
+		m.pluginRowsKnown = true
+		m.marketplaceRowsKnown = true
 		m.mcpRunning = false
 		m.pluginRunning = false
 		return m
@@ -8308,7 +8320,7 @@ func TestStatusDashboardDataRows_ActivityConsistency(t *testing.T) {
 		m.dotsLoading = true
 		m.dotsActiveName = "nvim"
 		m.dotsServicesRefreshing = true
-		m.skillsLoaded = false
+		m.skillsRowsKnown = false
 		return m
 	}
 

@@ -120,11 +120,7 @@ func (m *Model) loadSkillsManifestCmd() tea.Cmd {
 		return nil
 	}
 	return func() tea.Msg {
-		rows, err := a.SkillPackageRows(ctx)
-		if err != nil {
-			return skillsManifestLoadedMsg{err: err}
-		}
-		unmanaged, err := a.UnmanagedSkillPackages(ctx)
+		rows, unmanaged, err := a.SkillPackageRowState(ctx)
 		if err != nil {
 			return skillsManifestLoadedMsg{err: err}
 		}

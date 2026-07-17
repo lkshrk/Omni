@@ -15,6 +15,10 @@ func skillFilterBaseModel() Model {
 	m.skillsEnabled = true
 	m.mcpEnabled = true
 	m.pluginsEnabled = true
+	m.skillsRowsKnown = true
+	m.mcpRowsKnown = true
+	m.pluginRowsKnown = true
+	m.marketplaceRowsKnown = true
 	m.enabledAgents = []string{"claude"}
 	return m
 }

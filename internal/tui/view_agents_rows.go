@@ -645,12 +645,19 @@ func renderAgentsGroupedTab(m Model, p palette, topLines []string, only agentsSe
 				chip = agentsChipMarketplace
 			}
 		}
+		empty := agentsEmptyStateLines(p, pad, chip)
+		if !agentsRowsKnownForChip(m, chip) {
+			// Rows haven't arrived yet (neither cached nor live) — the
+			// onboarding hints would misread as "nothing tracked" while the
+			// initial adapter CLI loads are still running.
+			empty = []string{p.styleHelp.Render(pad + m.spinner.View() + " loading agents…")}
+		}
 		return renderSectionedTab(m, sectionedTab{
 			leadingBlank: false,
 			top:          topLines,
 			sections: []sectionedTabSection{{
 				rows:  nil,
-				empty: agentsEmptyStateLines(p, pad, chip),
+				empty: empty,
 			}},
 		})
 	}
@@ -716,6 +723,27 @@ func renderAgentsGroupedTab(m Model, p palette, topLines []string, only agentsSe
 		top:          topLines,
 		sections:     sections,
 	})
+}
+
+// agentsRowsKnownForChip reports whether the rows behind chip reflect reality
+// (cache-seeded or live-loaded). The all chip needs every enabled section
+// known — one still-loading section could otherwise masquerade as empty.
+func agentsRowsKnownForChip(m Model, chip int) bool {
+	switch chip {
+	case agentsChipSkills:
+		return m.skillsRowsKnown
+	case agentsChipMcp:
+		return m.mcpRowsKnown
+	case agentsChipPlugin:
+		return m.pluginRowsKnown
+	case agentsChipMarketplace:
+		return m.marketplaceRowsKnown
+	default:
+		return (!m.skillsSectionEnabled() || m.skillsRowsKnown) &&
+			(!m.mcpSectionEnabled() || m.mcpRowsKnown) &&
+			(!m.pluginsSectionEnabled() || m.pluginRowsKnown) &&
+			(!m.marketplacesSectionEnabled() || m.marketplaceRowsKnown)
+	}
 }
 
 // agentsEmptyStateLines returns the zero-row empty-state content for the

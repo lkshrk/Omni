@@ -709,3 +709,155 @@ func TestRemoveMarketplace_BlockedByReferencingPlugins(t *testing.T) {
 		t.Fatalf("marketplace must remain declared, got %v", remaining)
 	}
 }
+
+// TestUpdatePluginsPreRefreshed_SkipsMarketplaceRefresh pins the pre-refreshed
+// contract: callers that just ran UpdateMarketplaces themselves (the TUI's
+// update-all) must not pay a second refresh, while the updates still run.
+func TestUpdatePluginsPreRefreshed_SkipsMarketplaceRefresh(t *testing.T) {
+	stub := &stubPluginAdapter{id: "claude-code", available: true}
+	agents := config.AgentsConfig{
+		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
+		Plugins: []config.Plugin{
+			{Name: "one", Marketplace: "caveman"},
+			{Name: "two", Marketplace: "caveman"},
+		},
+	}
+	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{stub}))
+	var seen []string
+	res, err := a.UpdatePluginsPreRefreshed(context.Background(), []string{"one", "two"}, func(name string) {
+		seen = append(seen, name)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Errors) != 0 {
+		t.Fatalf("unexpected errors: %v", res.Errors)
+	}
+	if stub.updateMarketplacesCalls != 0 {
+		t.Fatalf("expected zero UpdateMarketplaces calls, got %d", stub.updateMarketplacesCalls)
+	}
+	if len(stub.updatedNames) != 2 {
+		t.Fatalf("expected both plugins updated, got %v", stub.updatedNames)
+	}
+	if len(seen) != 2 || seen[0] != "one" || seen[1] != "two" {
+		t.Fatalf("progress callback order wrong: %v", seen)
+	}
+}
+
+func TestUpdatePluginsPreRefreshed_UnknownPluginStillErrors(t *testing.T) {
+	stub := &stubPluginAdapter{id: "claude-code", available: true}
+	a := newPluginTestApp(t, config.AgentsConfig{}, app.WithPluginAdapters([]app.PluginAdapter{stub}))
+	if _, err := a.UpdatePluginsPreRefreshed(context.Background(), []string{"absent"}, nil); err == nil {
+		t.Fatal("expected not-found error")
+	}
+}
+
+func TestAddMarketplace_UpsertsManifestAndAddsToAdapters(t *testing.T) {
+	stub := &stubPluginAdapter{id: "claude-code", available: true}
+	a := newPluginTestApp(t, config.AgentsConfig{}, app.WithPluginAdapters([]app.PluginAdapter{stub}))
+	res, err := a.AddMarketplace(context.Background(), config.Marketplace{Name: "caveman", Source: "a/b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Errors) != 0 || len(res.SkippedUnavailable) != 0 {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+	if len(stub.addedMarkets) != 1 || stub.addedMarkets[0].Name != "caveman" {
+		t.Fatalf("adapter AddMarketplace calls = %v, want caveman added", stub.addedMarkets)
+	}
+	markets, err := a.Marketplaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(markets) != 1 || markets[0].Source != "a/b" {
+		t.Fatalf("manifest marketplaces = %v, want caveman a/b", markets)
+	}
+
+	// Upsert: same name with a new source replaces, never duplicates.
+	if _, err := a.AddMarketplace(context.Background(), config.Marketplace{Name: "caveman", Source: "a/c"}); err != nil {
+		t.Fatal(err)
+	}
+	markets, err = a.Marketplaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(markets) != 1 || markets[0].Source != "a/c" {
+		t.Fatalf("manifest after upsert = %v, want single caveman a/c", markets)
+	}
+}
+
+func TestAddMarketplace_SkipsAlreadyListedAndUnavailableAdapters(t *testing.T) {
+	listed := &stubPluginAdapter{
+		id: "claude-code", available: true,
+		listedMarkets: []app.InstalledMarketplace{{Name: "caveman", Source: "a/b"}},
+	}
+	offline := &stubPluginAdapter{id: "codex", available: false}
+	a := newPluginTestApp(t, config.AgentsConfig{}, app.WithPluginAdapters([]app.PluginAdapter{listed, offline}))
+	res, err := a.AddMarketplace(context.Background(), config.Marketplace{Name: "caveman", Source: "a/b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.addedMarkets) != 0 {
+		t.Fatalf("already-listed adapter must be skipped, got adds: %v", listed.addedMarkets)
+	}
+	if len(res.SkippedUnavailable) != 1 || res.SkippedUnavailable[0] != "codex/caveman" {
+		t.Fatalf("SkippedUnavailable = %v, want codex/caveman", res.SkippedUnavailable)
+	}
+}
+
+func TestFindUndeclaredMarketplace(t *testing.T) {
+	stub := &stubPluginAdapter{
+		id: "claude-code", available: true,
+		listedMarkets: []app.InstalledMarketplace{
+			{Name: "no-source", Source: ""},
+			{Name: "caveman", Source: "a/b"},
+		},
+	}
+	a := newPluginTestApp(t, config.AgentsConfig{}, app.WithPluginAdapters([]app.PluginAdapter{stub}))
+	ctx := context.Background()
+
+	source, ok, err := a.FindUndeclaredMarketplace(ctx, "caveman", nil)
+	if err != nil || !ok || source != "a/b" {
+		t.Fatalf("FindUndeclaredMarketplace(caveman) = %q,%v,%v; want a/b,true,nil", source, ok, err)
+	}
+	if _, ok, _ := a.FindUndeclaredMarketplace(ctx, "no-source", nil); ok {
+		t.Fatal("a listed marketplace without a re-addable source must not be returned")
+	}
+	if _, ok, _ := a.FindUndeclaredMarketplace(ctx, "absent", nil); ok {
+		t.Fatal("an unlisted marketplace must not be found")
+	}
+}
+
+// TestAdoptUnmanagedPlugins pins the bulk adopt: unmanaged plugins whose
+// marketplace is declared get manifest entries scoped to the reporting agent;
+// ones with undeclared marketplaces are counted as skipped, not adopted.
+func TestAdoptUnmanagedPlugins(t *testing.T) {
+	stub := &stubPluginAdapter{
+		id: "claude-code", available: true,
+		listedPlugins: []app.InstalledPlugin{
+			{Name: "declared-market", Marketplace: "caveman"},
+			{Name: "orphan-market", Marketplace: "undeclared"},
+		},
+	}
+	agents := config.AgentsConfig{
+		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
+	}
+	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{stub}))
+	adopted, skipped, err := a.AdoptUnmanagedPlugins(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if adopted != 1 || skipped != 1 {
+		t.Fatalf("adopted=%d skipped=%d, want 1/1", adopted, skipped)
+	}
+	cfg, err := a.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Agents.Plugins) != 1 || cfg.Agents.Plugins[0].Name != "declared-market" {
+		t.Fatalf("manifest plugins = %v, want only declared-market adopted", cfg.Agents.Plugins)
+	}
+	if got := cfg.Agents.Plugins[0].Agents; len(got) != 1 || got[0] != "claude-code" {
+		t.Fatalf("adopted plugin agents = %v, want [claude-code]", got)
+	}
+}

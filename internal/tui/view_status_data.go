@@ -392,7 +392,16 @@ func statusAgentsAttentionDetails(m Model, counts agentsDashCounts, view agentsD
 }
 
 func statusAgentsLoading(m Model) bool {
-	return m.mcpRunning || m.pluginRunning || m.marketplaceRunning || !m.skillsLoaded
+	if m.skillsRunning || m.mcpRunning || m.pluginRunning || m.marketplaceRunning {
+		return true
+	}
+	// A section whose rows aren't known yet (no cache seed, live load still in
+	// flight) is loading even though no running flag is set — the skills load
+	// in particular never sets one at launch dispatch.
+	return (m.skillsSectionEnabled() && !m.skillsRowsKnown) ||
+		(m.mcpSectionEnabled() && !m.mcpRowsKnown) ||
+		(m.pluginsSectionEnabled() && !m.pluginRowsKnown) ||
+		(m.marketplacesSectionEnabled() && !m.marketplaceRowsKnown)
 }
 
 func statusToolsActivityText(m Model) string {

@@ -5603,3 +5603,14 @@ func TestReassignQueue_E2E_FullCycle(t *testing.T) {
 		t.Error("step4: reassignCreatedGroups should be nil")
 	}
 }
+
+func TestEffectiveNodeManagerLabel(t *testing.T) {
+	m := baseModel(nil)
+	if got := m.effectiveNodeManagerLabel(); got != "pnpm" {
+		t.Errorf("default label = %q, want pnpm fallback", got)
+	}
+	m.effectiveNodeManager = "bun"
+	if got := m.effectiveNodeManagerLabel(); got != "bun" {
+		t.Errorf("label = %q, want the resolved manager", got)
+	}
+}

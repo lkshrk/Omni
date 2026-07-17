@@ -41,7 +41,7 @@ type StartupSnapshot struct {
 	DotsWatchServiceErr    error
 	DotsConfigured         bool
 	AgentsEnabled          bool
-	AgentsSummary          DashboardAgentsSummary
+	AgentsRows             *CachedAgentsRows
 	SkillsEnabled          bool
 	McpEnabled             bool
 	PluginsEnabled         bool
@@ -154,8 +154,11 @@ func (a *App) StartupSnapshot(ctx context.Context) (*StartupSnapshot, error) {
 	discovered, _ := a.listDiscoveredFromConfig(ctx, cfg, ecosystemProviders)
 	stop()
 
-	stop = profile.Start("app.startup.agents_summary")
-	agentsSummary, err := a.DashboardAgentsSummary(ctx, cfg)
+	// The agents dashboard summary is deliberately NOT part of the snapshot:
+	// it shells out to every agent CLI (installedPluginNames), which held the
+	// whole first render hostage. The TUI loads it async (doLoadAgentsSummary).
+	stop = profile.Start("app.startup.agents_rows_cache")
+	agentsRows, err := a.CachedAgentsRows(ctx)
 	stop()
 	if err != nil {
 		return nil, err
@@ -199,7 +202,7 @@ func (a *App) StartupSnapshot(ctx context.Context) (*StartupSnapshot, error) {
 		DotsWatchServiceErr:    dotsWatchServiceErr,
 		DotsConfigured:         DotsConfiguredInSettings(settings),
 		AgentsEnabled:          a.AgentsEnabled(cfg),
-		AgentsSummary:          agentsSummary,
+		AgentsRows:             agentsRows,
 		SkillsEnabled:          !config.BoolVal(settings.SkillsDisabled),
 		McpEnabled:             !config.BoolVal(settings.McpDisabled),
 		PluginsEnabled:         !config.BoolVal(settings.PluginsDisabled),

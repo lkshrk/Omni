@@ -113,5 +113,6 @@ func (a *App) McpServerRows(ctx context.Context) (managed []McpServerRow, unmana
 			unmanaged[adapter.ID()] = append(unmanaged[adapter.ID()], srv)
 		}
 	}
+	a.cacheAgentsRowsSectionBestEffort(ctx, agentsRowsCacheMcpKey, cachedMcpRows{Rows: managed, Unmanaged: unmanaged})
 	return managed, unmanaged, nil
 }

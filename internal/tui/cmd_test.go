@@ -3303,3 +3303,46 @@ func TestDoRefreshDiscovered_ReturnsMsg(t *testing.T) {
 		t.Errorf("gen = %d, want 9", got.gen)
 	}
 }
+
+// TestRenderDots_EmptyState_LoadingWhileStartupSnapshotPending pins the dots
+// tab's zero-entry state: while the startup snapshot hasn't landed yet
+// (m.loading) it must read as loading, not "No dotfiles tracked yet".
+func TestRenderDots_EmptyState_LoadingWhileStartupSnapshotPending(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.dotsSyncAvailCached = app.DotsSyncAvailability{Reason: app.DotsSyncAvailabilityReady}
+	m.loading = true
+
+	out := stripANSIEscapeSequences(renderDots(m))
+	if !strings.Contains(out, "Loading dotfiles…") {
+		t.Fatalf("expected loading line while startup snapshot is pending, got:\n%s", out)
+	}
+	if strings.Contains(out, "No dotfiles tracked yet.") {
+		t.Fatalf("empty state must not show before the startup snapshot lands, got:\n%s", out)
+	}
+
+	m.loading = false
+	out = stripANSIEscapeSequences(renderDots(m))
+	if !strings.Contains(out, "No dotfiles tracked yet.") {
+		t.Fatalf("expected empty state once the snapshot landed with no entries, got:\n%s", out)
+	}
+}
+
+func TestRenderDotsVariantPrompts(t *testing.T) {
+	m := baseModel(nil)
+	m.width = 120
+
+	create := stripANSIEscapeSequences(renderDotsVariantCreatePrompt(m, "nvim", "  ", 120))
+	if !strings.Contains(create, "create host variant for") || !strings.Contains(create, "nvim") {
+		t.Errorf("create prompt = %q, want it to name the entry", create)
+	}
+	remove := stripANSIEscapeSequences(renderDotsVariantRemovePrompt(m, "nvim", "  ", 120))
+	if !strings.Contains(remove, "remove host variant for") || !strings.Contains(remove, "nvim") {
+		t.Errorf("remove prompt = %q, want it to name the entry", remove)
+	}
+
+	narrow := stripANSIEscapeSequences(renderDotsVariantCreatePrompt(m, "very-long-dot-entry-name", "  ", 10))
+	if strings.Contains(narrow, "create host variant for") {
+		t.Errorf("narrow prompt = %q, want the prompt text dropped when it cannot fit", narrow)
+	}
+}

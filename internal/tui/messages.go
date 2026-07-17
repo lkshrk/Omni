@@ -47,7 +47,7 @@ type toolsLoadedMsg struct {
 	skillsEnabled          bool
 	mcpEnabled             bool
 	pluginsEnabled         bool
-	agentsSummary          app.DashboardAgentsSummary
+	agentsRows             *app.CachedAgentsRows
 	dotsSyncAvail          app.DotsSyncAvailability
 	dotsSyncAvailKnown     bool
 	setupProviders         []app.SetupProviderOption

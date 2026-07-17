@@ -509,18 +509,26 @@ type Model struct {
 	stowInstallVariant     dotsVariantRequest
 
 	// agents (skills) tab
-	agentsEnabled       bool
-	skillsEnabled       bool
-	mcpEnabled          bool
-	pluginsEnabled      bool
-	agentsSummary       app.DashboardAgentsSummary
-	enabledAgents       []string
-	agentsIgnore        config.AgentsIgnore
-	skillsRows          []app.SkillPackageRow
-	skillsUnmanagedRows []app.SkillPackageRow
-	skillsCursor        int
-	agentsAllCursor     int
-	skillsMemberships   map[string][]string // source → current group memberships (picker draft)
+	agentsEnabled  bool
+	skillsEnabled  bool
+	mcpEnabled     bool
+	pluginsEnabled bool
+	agentsSummary  app.DashboardAgentsSummary
+	// *RowsKnown flags mark sections whose rows reflect reality — either
+	// seeded from the persisted cache or landed from a live load. Empty rows
+	// with the flag unset mean "not loaded yet" and must render as loading,
+	// not as the onboarding empty state.
+	skillsRowsKnown      bool
+	mcpRowsKnown         bool
+	pluginRowsKnown      bool
+	marketplaceRowsKnown bool
+	enabledAgents        []string
+	agentsIgnore         config.AgentsIgnore
+	skillsRows           []app.SkillPackageRow
+	skillsUnmanagedRows  []app.SkillPackageRow
+	skillsCursor         int
+	agentsAllCursor      int
+	skillsMemberships    map[string][]string // source → current group memberships (picker draft)
 
 	// agentsOpKey identifies the agents-all row (see agentsRowRunKey) with an
 	// op in flight, mirroring rowOpKey's tools-tab row-spinner substitution.
@@ -883,7 +891,7 @@ func toolsLoadedMsgFromStartupState(snapshot *app.StartupSnapshot) toolsLoadedMs
 		skillsEnabled:          snapshot.SkillsEnabled,
 		mcpEnabled:             snapshot.McpEnabled,
 		pluginsEnabled:         snapshot.PluginsEnabled,
-		agentsSummary:          snapshot.AgentsSummary,
+		agentsRows:             snapshot.AgentsRows,
 		dotsSyncAvail:          snapshot.DotsSyncAvailability,
 		dotsSyncAvailKnown:     true,
 		setupProviders:         snapshot.SetupProviders,
