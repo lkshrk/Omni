@@ -19,6 +19,7 @@ import (
 
 	"github.com/lkshrk/omni/internal/actions"
 	"github.com/lkshrk/omni/internal/app"
+	"github.com/lkshrk/omni/internal/buildinfo"
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/provider"
@@ -584,15 +585,10 @@ func TestRenderHeaderInfo_UsesUniformRegularWeight(t *testing.T) {
 	groups := baseModel(nil)
 	groups.mode = viewGroups
 	groups.groupNames = []string{"dev"}
-	settings := baseModel(nil)
-	settings.mode = viewSettings
-	settings.setSettings(config.Settings{DotsRepo: "~/dotfiles"})
-
 	for name, m := range map[string]Model{
-		"tools":    tools,
-		"dots":     dots,
-		"groups":   groups,
-		"settings": settings,
+		"tools":  tools,
+		"dots":   dots,
+		"groups": groups,
 	} {
 		out := renderHeaderInfo(m)
 		if stripANSIEscapeSequences(out) == "" {
@@ -601,6 +597,16 @@ func TestRenderHeaderInfo_UsesUniformRegularWeight(t *testing.T) {
 		if headerInfoHasBoldANSI(out) {
 			t.Fatalf("%s header info should use regular weight: %q", name, out)
 		}
+	}
+
+	// Settings/dashboard top-right carry only the version segment now.
+	settings := baseModel(nil)
+	settings.mode = viewSettings
+	settings.setSettings(config.Settings{DotsRepo: "~/dotfiles"})
+	if out := renderHeaderVersion(settings); stripANSIEscapeSequences(out) == "" {
+		t.Fatal("settings header version is empty")
+	} else if headerInfoHasBoldANSI(out) {
+		t.Fatalf("settings header version should use regular weight: %q", out)
 	}
 }
 
@@ -668,28 +674,19 @@ func TestRenderHeader_GroupsModeUsesGroupInfo(t *testing.T) {
 	}
 }
 
-func TestRenderHeader_SettingsModeUsesSettingsInfo(t *testing.T) {
+// The settings header no longer carries the provider/dots summary — the
+// top-right shows only the version (renderHeaderVersion); the summaries live
+// in the settings tab body.
+func TestRenderHeader_SettingsModeShowsNoSummary(t *testing.T) {
 	m := baseModel(threeTools())
 	m.mode = viewSettings
 	m.settings.DisabledProviders = []string{"node", "node", "brew"}
 
 	out := stripANSIEscapeSequences(renderHeader(m))
-	if !strings.Contains(out, "2/3 providers") || !strings.Contains(out, "dots unset") {
-		t.Fatalf("settings header info = %q, want settings summary", out)
-	}
-	if strings.Contains(out, "tools") {
-		t.Fatalf("settings header should not show tools info: %q", out)
-	}
-}
-
-func TestRenderHeader_SettingsModeShowsDotsOff(t *testing.T) {
-	m := baseModel(nil)
-	m.mode = viewSettings
-	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles", DotsDisabled: config.BoolPtr(true)})
-
-	out := stripANSIEscapeSequences(renderHeader(m))
-	if !strings.Contains(out, "3/3 providers") || !strings.Contains(out, "dots off") {
-		t.Fatalf("settings header info = %q, want disabled dots summary", out)
+	for _, gone := range []string{"providers", "dots unset", "dots off", "dots on", "tools"} {
+		if strings.Contains(out, gone) {
+			t.Fatalf("settings header should not carry %q anymore: %q", gone, out)
+		}
 	}
 }
 
@@ -746,32 +743,10 @@ func TestRenderSettings_AllRowsRendered(t *testing.T) {
 }
 
 func TestRenderHeaderUsesCachedDotsAvailability(t *testing.T) {
-	t.Run("settings shows dots on when app is enabled despite stale disabled setting", func(t *testing.T) {
-		m := baseModel(nil)
-		m.mode = viewSettings
-		m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
-		m.settings = config.Settings{DotsRepo: "/repo/dotfiles", DotsDisabled: config.BoolPtr(true)}
-
-		out := stripANSIEscapeSequences(renderHeader(m))
-
-		if !strings.Contains(out, "dots on") || strings.Contains(out, "dots off") {
-			t.Fatalf("settings header should use app-backed enabled state: %q", out)
-		}
-	})
-
-	t.Run("settings shows dots unset when app is unconfigured despite stale repo", func(t *testing.T) {
-		m := baseModel(nil)
-		m.mode = viewSettings
-		m.settings = config.Settings{DotsRepo: "/tmp/stale-dotfiles"}
-		m.dotsSyncAvailCached = app.DotsSyncAvailability{Reason: app.DotsSyncAvailabilityNoRepo}
-
-		out := stripANSIEscapeSequences(renderHeader(m))
-
-		if !strings.Contains(out, "dots unset") || strings.Contains(out, "dots on") {
-			t.Fatalf("settings header should use app-backed unconfigured state: %q", out)
-		}
-	})
-
+	// The settings-header dots-label subtests were removed with the label
+	// itself: the settings top-right now carries only the version (see
+	// renderHeaderVersion); dots availability remains covered on the dots
+	// tab below.
 	t.Run("dots header keeps counts when app is enabled despite stale disabled setting", func(t *testing.T) {
 		m := baseModel(nil)
 		m.mode = viewDots
@@ -8424,5 +8399,94 @@ func TestStatusDashboardDataRows_ActivityConsistency(t *testing.T) {
 				}
 			})
 		})
+	}
+}
+
+func TestRenderHeaderVersion_DashboardAndSettingsOnly(t *testing.T) {
+	version := buildinfo.Short()
+	if version == "" {
+		t.Fatal("buildinfo.Short() must never be empty")
+	}
+
+	for name, mode := range map[string]viewMode{
+		"dashboard": viewStatus,
+		"settings":  viewSettings,
+	} {
+		m := baseModel(nil)
+		m.mode = mode
+		out := stripANSIEscapeSequences(renderHeaderVersion(m))
+		if !strings.Contains(out, version) {
+			t.Errorf("%s header version should include %q, got: %q", name, version, out)
+		}
+	}
+
+	for name, mode := range map[string]viewMode{
+		"tools":  viewList,
+		"dots":   viewDots,
+		"agents": viewSkills,
+		"groups": viewGroups,
+	} {
+		m := baseModel(nil)
+		m.mode = mode
+		if out := renderHeaderVersion(m); out != "" {
+			t.Errorf("%s header version should be empty, got: %q", name, out)
+		}
+	}
+}
+
+func TestRenderHeader_DashboardVersionOnlyAcrossStatusStates(t *testing.T) {
+	version := buildinfo.Short()
+
+	m := baseModel(nil)
+	m.mode = viewStatus
+	for _, doctorRunning := range []bool{false, true} {
+		m.doctorRunning = doctorRunning
+		out := stripANSIEscapeSequences(renderHeader(m))
+		if !strings.Contains(out, version) {
+			t.Errorf("dashboard header (doctorRunning=%v) should include version %q, got: %q", doctorRunning, version, out)
+		}
+		for _, status := range []string{"need attention", "all clear", "checking"} {
+			if strings.Contains(out, status) {
+				t.Errorf("dashboard header (doctorRunning=%v) must not carry status text %q anymore, got: %q", doctorRunning, status, out)
+			}
+		}
+	}
+}
+
+func TestRenderHeader_SettingsShowsVersionOnly(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewSettings
+	m.setSettings(config.Settings{DotsRepo: "~/dotfiles"})
+
+	out := stripANSIEscapeSequences(renderHeader(m))
+	if !strings.Contains(out, buildinfo.Short()) {
+		t.Errorf("settings header should include version %q, got: %q", buildinfo.Short(), out)
+	}
+	for _, info := range []string{"providers", "dots on", "dots off", "dots unset"} {
+		if strings.Contains(out, info) {
+			t.Errorf("settings header must not carry summary text %q anymore, got: %q", info, out)
+		}
+	}
+}
+
+func TestHeaderInfo_EmptyOnDashboardAndSettings(t *testing.T) {
+	version := buildinfo.Short()
+
+	status := baseModel(nil)
+	status.mode = viewStatus
+	if out := renderHeaderInfo(status); out != "" {
+		t.Errorf("dashboard header info should be empty (version renders separately), got: %q", out)
+	}
+
+	settings := baseModel(nil)
+	settings.mode = viewSettings
+	settings.setSettings(config.Settings{DotsRepo: "~/dotfiles"})
+	if out := renderHeaderInfo(settings); out != "" {
+		t.Errorf("settings header info should be empty (version renders separately), got: %q", out)
+	}
+
+	tools := baseModel([]*database.ToolCache{{Name: "git", Provider: "brew", Installed: true}})
+	if out := stripANSIEscapeSequences(renderHeaderInfo(tools)); strings.Contains(out, version) {
+		t.Errorf("tools header info should not embed version %q, got: %q", version, out)
 	}
 }

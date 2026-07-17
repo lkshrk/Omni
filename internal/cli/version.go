@@ -1,5 +1,10 @@
 package cli
 
-// Version is set at build time via -ldflags "-X github.com/lkshrk/omni/internal/cli.Version=<tag>".
-// Falls back to "dev" for local builds.
-var Version = "dev"
+import "github.com/lkshrk/omni/internal/buildinfo"
+
+// Version reports the binary's full version string (version, commit, date).
+// Injection happens in internal/buildinfo via -ldflags; see that package for
+// the go-install fallback.
+func Version() string {
+	return buildinfo.Full()
+}

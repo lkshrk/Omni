@@ -826,7 +826,7 @@ func TestVersion_Flag(t *testing.T) {
 	// The version string should be present in the buffer or stdout.
 	// cobra writes version to the output writer.
 	out := buf.String()
-	if !strings.Contains(out, Version) && !strings.Contains(out, "version") && !strings.Contains(out, "dev") {
+	if !strings.Contains(out, Version()) && !strings.Contains(out, "version") && !strings.Contains(out, "dev") {
 		// cobra uses os.Stdout for --version in some versions; just verify no crash
 		_ = out
 	}
@@ -1762,9 +1762,10 @@ func TestDotsCmd_NoSubcommand_ShowsHelp(t *testing.T) {
 // ─── version constant ─────────────────────────────────────────────────────────
 
 func TestVersion_IsDev(t *testing.T) {
-	// Default Version (no ldflags) should be "dev".
-	if Version == "" {
-		t.Error("Version should not be empty")
+	// Default Version (no ldflags) should be non-empty ("dev" or the module
+	// version resolved from debug.ReadBuildInfo).
+	if Version() == "" {
+		t.Error("Version() should not be empty")
 	}
 }
 

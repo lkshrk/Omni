@@ -201,16 +201,6 @@ func statusAttentionRows(m Model, counts app.DashboardToolSummary) []statusListR
 	}
 }
 
-func statusAttentionCount(m Model) int {
-	n := 0
-	for _, row := range statusAttentionRows(m, statusToolCounts(m)) {
-		if row.needsAttention {
-			n++
-		}
-	}
-	return n
-}
-
 func statusDoctorAttentionRow(m Model, hasDotfilesAttention bool) statusListRow {
 	switch {
 	case m.doctorRunning:

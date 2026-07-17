@@ -16,7 +16,11 @@ DOCKER      ?= docker
 
 # Embed version from git tags; fall back to "dev" on untagged repos.
 GIT_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS     := -X $(MODULE)/internal/cli.Version=$(GIT_VERSION)
+GIT_COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo "")
+BUILD_DATE  := $(shell date -u +%Y-%m-%d)
+LDFLAGS     := -X $(MODULE)/internal/buildinfo.Version=$(GIT_VERSION) \
+               -X $(MODULE)/internal/buildinfo.Commit=$(GIT_COMMIT) \
+               -X $(MODULE)/internal/buildinfo.Date=$(BUILD_DATE)
 
 .PHONY: build run tui-live tui-dev cli cli-live cli-dev dev-bootstrap test test-scripts test-package-managers test-all test-integration-build test-integration docs-build lint clean clean-cache clean-docker prune-tmp install gen-schema demo-gif
 
