@@ -121,11 +121,19 @@ func PatchRawRouted(path string, patch map[string]json.RawMessage) error {
 			continue
 		}
 		addFragmentPatch(owner, key, value)
-		if isJSONNull(value) {
-			// Deletions must also clear a stale copy in the main file so it
-			// cannot resurface as the merge parent.
-			if _, ok := chain[0].raw[key]; ok {
-				mainPatch[key] = value
+		// The patch value is the full merged section; stale copies of the key
+		// anywhere else in the chain would union-merge back on the next load
+		// and resurrect entries this patch removed. Consolidate the key into
+		// its owner file by clearing every other copy.
+		if _, ok := chain[0].raw[key]; ok {
+			mainPatch[key] = json.RawMessage("null")
+		}
+		for idx := 1; idx < len(chain); idx++ {
+			if idx == owner {
+				continue
+			}
+			if _, ok := chain[idx].raw[key]; ok {
+				addFragmentPatch(idx, key, json.RawMessage("null"))
 			}
 		}
 	}

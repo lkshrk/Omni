@@ -3,6 +3,7 @@ package app_test
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -369,6 +370,51 @@ func TestRemoveMcpServer_PersistsRemoval(t *testing.T) {
 	for _, s := range cfg.Agents.McpServers {
 		if s.Name == "del" {
 			t.Fatal("server still in manifest after remove")
+		}
+	}
+}
+
+// TestRemoveMcpServer_PersistsAcrossStaleDuplicateFragment pins the routed-write
+// consolidation: a stale full-document fragment (e.g. left by settings extract)
+// carrying a second "agents" key must not resurrect a deleted server through the
+// union merge on the next load.
+func TestRemoveMcpServer_PersistsAcrossStaleDuplicateFragment(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "settings.d"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("settings.json", `{
+  "version": 17,
+  "$include": ["settings.d/agents.json", "settings.d/tools.json"],
+  "settings": {}
+}`)
+	write("settings.d/agents.json", `{
+  "agents": { "mcp_servers": [{ "name": "node_repl", "transport": "stdio", "command": "node-repl", "agents": ["codex"] }] }
+}`)
+	write("settings.d/tools.json", `{
+  "agents": { "mcp_servers": [{ "name": "node_repl", "transport": "stdio", "command": "node-repl", "agents": ["codex"] }] },
+  "tools": {}
+}`)
+	stub := &stubMcpAdapter{id: "codex", available: true}
+	a := app.New(filepath.Join(dir, "settings.json"), app.WithMcpAdapters([]app.McpAdapter{stub}))
+	if err := a.InitTestMode(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	if _, err := a.RemoveMcpServer(context.Background(), "node_repl"); err != nil {
+		t.Fatal(err)
+	}
+	cfg := loadMcpTestConfig(t, a)
+	for _, s := range cfg.Agents.McpServers {
+		if s.Name == "node_repl" {
+			t.Fatal("server resurrected by stale duplicate fragment after remove")
 		}
 	}
 }
