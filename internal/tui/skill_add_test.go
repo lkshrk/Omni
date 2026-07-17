@@ -210,14 +210,19 @@ func TestSkillsSearch_AddedMsgClearsState(t *testing.T) {
 
 	m = drive(m, skillAddedMsg{})
 
-	if m.skillAddRunning {
-		t.Error("skillAddRunning should be false after skillAddedMsg")
+	if !m.skillAddRunning {
+		t.Error("skillAddRunning should stay true after successful skillAddedMsg until the manifest reload lands")
 	}
 	if m.skillsSearchActive {
 		t.Error("skillsSearchActive should be false after skillAddedMsg")
 	}
 	if len(m.skillFindResults) != 0 {
 		t.Errorf("skillFindResults should be cleared after skillAddedMsg, got %d entries", len(m.skillFindResults))
+	}
+
+	m = drive(m, skillsManifestLoadedMsg{})
+	if m.skillAddRunning {
+		t.Error("skillAddRunning should be false once skillsManifestLoadedMsg lands")
 	}
 }
 

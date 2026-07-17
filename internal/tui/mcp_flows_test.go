@@ -379,14 +379,19 @@ func TestMcpFlow_AddDoneMsgSuccessClosesFormAndReloads(t *testing.T) {
 	if m.mcpFormErr != nil {
 		t.Errorf("mcpFormErr should be nil after success, got %v", m.mcpFormErr)
 	}
-	if m.mcpRunning {
-		t.Error("mcpRunning should be false after mcpAddDoneMsg resolves")
+	if !m.mcpRunning {
+		t.Error("mcpRunning should stay true after successful mcpAddDoneMsg until the row reload lands")
 	}
 	if m.mcpFormName.Value() != "" {
 		t.Errorf("form should be reset after success, mcpFormName = %q", m.mcpFormName.Value())
 	}
 	if cmd == nil {
 		t.Fatal("expected a reload command after successful add")
+	}
+
+	m = drive(m, mcpRowsMsg{})
+	if m.mcpRunning {
+		t.Error("mcpRunning should be false once mcpRowsMsg lands")
 	}
 }
 

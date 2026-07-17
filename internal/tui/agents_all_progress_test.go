@@ -18,7 +18,7 @@ import (
 // doAgentsUpdateAll/doAgentsSyncAll sub-step Cmds actually execute), wired
 // like agentsAllModel but sourced from newCmdTestApp-style app construction
 // (see commands_test.go) instead of baseModel(nil)'s nil m.app.
-func agentsAllProgressModel(t *testing.T, cfg *config.RootConfig, skillsRows []app.SkillPackageRow, pluginRows []app.PluginRow) Model {
+func agentsAllProgressModel(t *testing.T, cfg *config.RootConfig, skillsRows []app.SkillPackageRow, pluginRows []app.PluginRow, opts ...func(*app.App)) Model {
 	t.Helper()
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
@@ -28,7 +28,7 @@ func agentsAllProgressModel(t *testing.T, cfg *config.RootConfig, skillsRows []a
 	if err := saveTUIConfig(t, cfgPath, cfg); err != nil {
 		t.Fatal(err)
 	}
-	a := app.New(cfgPath)
+	a := app.New(cfgPath, opts...)
 	a.CacheDir = dir
 	if err := a.InitTestMode(context.Background()); err != nil {
 		t.Fatalf("App.InitTestMode: %v", err)
@@ -119,14 +119,52 @@ func indexOfContainsFold(list []string, substr string) int {
 	return -1
 }
 
-// TestAgentsAll_UpdateAll_StreamsProgressText is a red test for the planned
-// doAgentsUpdateAll change: it should stream per-step progress text (via
-// beginProgressStream/sendProgress) while running skills update and each
-// outdated plugin update, mirroring tools' upgrade-all. Today
-// doAgentsUpdateAll never calls sendProgress, so no captured progressText
-// will mention "updating skills" or the outdated plugin's name — this test
-// is expected to FAIL until that production change lands.
+// progressStubPluginAdapter reports the plugin's update as discoverable only
+// after UpdateMarketplaces ran — the real-world shape doAgentsUpdateAll's
+// refresh-before-outdated ordering exists for: a plugin's LatestVersion comes
+// from the marketplace clone, so a stale clone shows nothing outdated.
+type progressStubPluginAdapter struct {
+	id        string
+	refreshed bool
+	events    []string
+}
+
+func (s *progressStubPluginAdapter) ID() string      { return s.id }
+func (s *progressStubPluginAdapter) Available() bool { return true }
+func (s *progressStubPluginAdapter) ListPlugins(context.Context) ([]app.InstalledPlugin, error) {
+	s.events = append(s.events, "list-plugins")
+	latest := "1.0.0"
+	if s.refreshed {
+		latest = "2.0.0"
+	}
+	return []app.InstalledPlugin{{Name: "outdated-plugin", Marketplace: "acme-market", Version: "1.0.0", LatestVersion: latest}}, nil
+}
+func (s *progressStubPluginAdapter) InstallPlugin(context.Context, config.Plugin) error { return nil }
+func (s *progressStubPluginAdapter) RemovePlugin(context.Context, config.Plugin) error  { return nil }
+func (s *progressStubPluginAdapter) UpdatePlugin(_ context.Context, name, _ string) error {
+	s.events = append(s.events, "update-plugin:"+name)
+	return nil
+}
+func (s *progressStubPluginAdapter) ListMarketplaces(context.Context) ([]app.InstalledMarketplace, error) {
+	return nil, nil
+}
+func (s *progressStubPluginAdapter) AddMarketplace(context.Context, config.Marketplace) error {
+	return nil
+}
+func (s *progressStubPluginAdapter) UpdateMarketplaces(context.Context) error {
+	s.refreshed = true
+	s.events = append(s.events, "update-marketplaces")
+	return nil
+}
+
+// TestAgentsAll_UpdateAll_StreamsProgressText drives the agents tab's "U"
+// bulk action end to end: skills update, marketplace refresh, then plugin
+// updates for the plugins found outdated AFTER that refresh. The cached rows
+// and the adapter both show nothing outdated until UpdateMarketplaces runs,
+// so the plugin only gets updated if doAgentsUpdateAll recomputes outdated
+// rows from a.PluginRows post-refresh.
 func TestAgentsAll_UpdateAll_StreamsProgressText(t *testing.T) {
+	fake := &progressStubPluginAdapter{id: "claude-code"}
 	cfg := &config.RootConfig{
 		Agents: config.AgentsConfig{
 			Marketplaces: []config.Marketplace{{Name: "acme-market", Source: "acme/market"}},
@@ -137,9 +175,10 @@ func TestAgentsAll_UpdateAll_StreamsProgressText(t *testing.T) {
 		[]app.SkillPackageRow{{Name: "caveman", Source: "github.com/foo/caveman", Installed: true}},
 		[]app.PluginRow{{
 			Name: "outdated-plugin", Marketplace: "acme-market",
-			Version: "1.0.0", LatestVersion: "2.0.0",
+			Version: "1.0.0", LatestVersion: "1.0.0",
 			PerAgentStatus: map[string]app.PluginStatus{"claude": app.PluginStatusInstalled},
 		}},
+		app.WithPluginAdapters([]app.PluginAdapter{fake}),
 	)
 
 	var captured []string
@@ -152,6 +191,27 @@ func TestAgentsAll_UpdateAll_StreamsProgressText(t *testing.T) {
 		t.Errorf("expected some captured progressText to mention plugin name 'outdated-plugin', got %v", captured)
 	}
 
+	refreshIdx := indexOfContainsFold(fake.events, "update-marketplaces")
+	updateIdx := indexOfContainsFold(fake.events, "update-plugin:outdated-plugin")
+	if refreshIdx < 0 {
+		t.Fatalf("expected UpdateMarketplaces to run on the adapter, events = %v", fake.events)
+	}
+	if updateIdx < 0 {
+		t.Fatalf("expected the post-refresh-outdated plugin to be updated in the same 'U' press, events = %v", fake.events)
+	}
+	if refreshIdx > updateIdx {
+		t.Errorf("marketplace refresh must precede the plugin update, events = %v", fake.events)
+	}
+	refreshes := 0
+	for _, e := range fake.events {
+		if e == "update-marketplaces" {
+			refreshes++
+		}
+	}
+	if refreshes != 1 {
+		t.Errorf("marketplace refresh should run exactly once (plugin update uses UpdatePluginsPreRefreshed), got %d in %v", refreshes, fake.events)
+	}
+
 	if got.progressText != "" {
 		t.Errorf("progressText after full drain = %q, want empty", got.progressText)
 	}
@@ -160,6 +220,9 @@ func TestAgentsAll_UpdateAll_StreamsProgressText(t *testing.T) {
 	}
 	if got.pluginRunning {
 		t.Error("pluginRunning should be false after full drain")
+	}
+	if got.marketplaceRunning {
+		t.Error("marketplaceRunning should be false after full drain")
 	}
 }
 

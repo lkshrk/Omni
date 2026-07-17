@@ -322,6 +322,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case skillsManifestLoadedMsg:
+		m.skillsRunning = false
+		m.skillAddRunning = false
+		m.clearAgentsOpFor(agentsSectionSkills)
 		m.skillsRows = msg.rows
 		m.skillsUnmanagedRows = msg.unmanaged
 		m.skillsErr = msg.err
@@ -346,8 +349,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case skillsRestoredMsg:
-		m.skillsRunning = false
 		if msg.err != nil {
+			m.skillsRunning = false
 			m.skillsErr = msg.err
 		} else {
 			r := msg.res
@@ -358,8 +361,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case skillsImportedMsg:
-		m.skillsRunning = false
 		if msg.err != nil {
+			m.skillsRunning = false
 			m.skillsErr = msg.err
 		} else {
 			d := msg.diff
@@ -370,9 +373,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case skillsUpdatedMsg:
-		m.skillsRunning = false
-		m.clearAgentsOp()
 		if msg.err != nil {
+			m.skillsRunning = false
+			m.clearAgentsOp()
 			m.skillsErr = msg.err
 		} else {
 			m.skillsLoaded = false
@@ -399,8 +402,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case skillAddedMsg:
-		m.skillAddRunning = false
-		m.clearAgentsOp()
 		m.searching = false
 		m.skillsSearchActive = false
 		m.skillFindResults = nil
@@ -409,6 +410,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		clampSkillsCursor(&m)
 		clampAgentsAllCursor(&m)
 		if msg.err != nil {
+			m.skillAddRunning = false
+			m.clearAgentsOp()
 			m.skillsErr = msg.err
 		} else {
 			m.skillsLoaded = false
@@ -417,9 +420,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case skillRemovedMsg:
-		m.skillsRunning = false
-		m.clearAgentsOp()
 		if msg.err != nil {
+			m.skillsRunning = false
+			m.clearAgentsOp()
 			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
 		} else {
 			m.skillsLoaded = false
@@ -513,6 +516,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case mcpRowsMsg:
 		m.mcpRunning = false
+		m.clearAgentsOpFor(agentsSectionMcp)
 		m.mcpRows = msg.rows
 		m.mcpUnmanaged = msg.unmanaged
 		m.mcpErr = msg.err
@@ -520,8 +524,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		clampAgentsAllCursor(&m)
 
 	case mcpRestoreDoneMsg:
-		m.mcpRunning = false
 		if msg.err != nil {
+			m.mcpRunning = false
 			m.mcpErr = msg.err
 		} else {
 			m.mcpErr = nil
@@ -530,9 +534,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case mcpRemoveDoneMsg:
-		m.mcpRunning = false
-		m.clearAgentsOp()
 		if msg.err != nil {
+			m.mcpRunning = false
+			m.clearAgentsOp()
 			m.mcpErr = msg.err
 		} else {
 			m.mcpErr = nil
@@ -541,9 +545,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case mcpImportAdoptDoneMsg:
-		m.mcpRunning = false
-		m.clearAgentsOp()
 		if msg.err != nil {
+			m.mcpRunning = false
+			m.clearAgentsOp()
 			m.mcpErr = msg.err
 			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
 		} else {
@@ -553,9 +557,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case mcpAgentsSavedMsg:
-		m.mcpRunning = false
-		m.clearAgentsOp()
 		if msg.err != nil {
+			m.mcpRunning = false
+			m.clearAgentsOp()
 			m.mcpErr = msg.err
 		} else {
 			m.mcpErr = nil
@@ -573,6 +577,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case pluginRowsMsg:
 		m.pluginRunning = false
+		m.clearAgentsOpFor(agentsSectionPlugins)
 		m.pluginRows = msg.rows
 		m.pluginUnmanaged = msg.unmanaged
 		m.pluginErr = msg.err
@@ -580,19 +585,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		clampAgentsAllCursor(&m)
 
 	case pluginRestoreDoneMsg:
-		m.pluginRunning = false
+		// On success the running flag (and any row-op spinner) stays set until
+		// the reloaded rows land (pluginRowsMsg) — clearing it here would show
+		// the stale pre-op row without its spinner for the whole reload,
+		// which reads as a failed operation.
 		if msg.err != nil {
+			m.pluginRunning = false
 			m.pluginErr = msg.err
 		} else {
 			m.pluginErr = nil
-			cmds = append(cmds, m.doLoadPluginRows())
+			cmds = append(cmds, m.doLoadPluginRows(), m.doLoadMarketplaceRows())
 		}
 		return m, tea.Batch(cmds...)
 
 	case pluginRemoveDoneMsg:
-		m.pluginRunning = false
-		m.clearAgentsOp()
 		if msg.err != nil {
+			m.pluginRunning = false
+			m.clearAgentsOp()
 			m.pluginErr = msg.err
 		} else {
 			m.pluginErr = nil
@@ -601,9 +610,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case pluginImportAdoptDoneMsg:
-		m.pluginRunning = false
-		m.clearAgentsOp()
 		if msg.err != nil {
+			m.pluginRunning = false
+			m.clearAgentsOp()
 			m.pluginErr = msg.err
 			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
 		} else {
@@ -622,13 +631,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case pluginAgentsSavedMsg:
-		m.pluginRunning = false
-		m.clearAgentsOp()
 		if msg.err != nil {
+			m.pluginRunning = false
+			m.clearAgentsOp()
 			m.pluginErr = msg.err
 		} else {
 			m.pluginErr = nil
-			cmds = append(cmds, m.doLoadPluginRows())
+			// Installing a plugin also installs its marketplace when the
+			// adapter didn't have it yet (App.SetPluginAgents →
+			// ensureMarketplace), so the marketplace section must reload too.
+			cmds = append(cmds, m.doLoadPluginRows(), m.doLoadMarketplaceRows())
 		}
 		return m, tea.Batch(cmds...)
 
@@ -641,9 +653,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case pluginUpdateDoneMsg:
-		m.pluginRunning = false
-		m.clearAgentsOp()
 		if msg.err != nil {
+			m.pluginRunning = false
+			m.clearAgentsOp()
 			m.pluginErr = msg.err
 		} else {
 			m.pluginErr = nil
@@ -653,6 +665,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case marketplaceRowsMsg:
 		m.marketplaceRunning = false
+		m.clearAgentsOpFor(agentsSectionMarketplaces)
 		m.marketplaceRows = msg.rows
 		m.marketplaceUnmanaged = msg.unmanaged
 		m.marketplaceErr = msg.err
@@ -660,9 +673,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		clampAgentsAllCursor(&m)
 
 	case marketplaceRemoveDoneMsg:
-		m.marketplaceRunning = false
-		m.clearAgentsOp()
 		if msg.err != nil {
+			m.marketplaceRunning = false
+			m.clearAgentsOp()
 			m.marketplaceErr = msg.err
 		} else {
 			m.marketplaceErr = nil
@@ -671,9 +684,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case marketplaceImportAdoptDoneMsg:
-		m.marketplaceRunning = false
-		m.clearAgentsOp()
 		if msg.err != nil {
+			m.marketplaceRunning = false
+			m.clearAgentsOp()
 			m.marketplaceErr = msg.err
 			cmds = append(cmds, setStatus(&m, "✗ "+msg.err.Error(), true))
 		} else {
@@ -697,33 +710,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.progressGen++
 		m.progressText = ""
 		m.progressCh = nil
+		// On success each section's running flag stays set until its reloaded
+		// rows land (rows msg handlers clear it) so completed rows keep their
+		// spinner instead of flashing the stale pre-op state.
 		if msg.skills {
-			m.skillsRunning = false
 			m.skillsErr = msg.skillsErr
 			if msg.skillsErr == nil {
 				m.skillsLoaded = false
 				cmds = append(cmds, m.loadSkillsManifestCmd())
+			} else {
+				m.skillsRunning = false
 			}
 		}
 		if msg.mcp {
-			m.mcpRunning = false
 			m.mcpErr = msg.mcpErr
 			if msg.mcpErr == nil {
 				cmds = append(cmds, m.doLoadMcpRows())
+			} else {
+				m.mcpRunning = false
 			}
 		}
 		if msg.plugin {
-			m.pluginRunning = false
 			m.pluginErr = msg.pluginErr
 			if msg.pluginErr == nil {
 				cmds = append(cmds, m.doLoadPluginRows())
+			} else {
+				m.pluginRunning = false
 			}
 		}
 		if msg.marketplace {
-			m.marketplaceRunning = false
 			m.marketplaceErr = msg.marketplaceErr
 			if msg.marketplaceErr == nil {
 				cmds = append(cmds, m.doLoadMarketplaceRows())
+			} else {
+				m.marketplaceRunning = false
 			}
 		}
 		// A plugin update also refreshes marketplaces internally (see
@@ -743,8 +763,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case mcpAddDoneMsg:
-		m.mcpRunning = false
 		if msg.err != nil {
+			m.mcpRunning = false
 			if m.mcpFormOpen {
 				m.mcpFormErr = msg.err
 			} else {
@@ -759,8 +779,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case pluginAddDoneMsg:
-		m.pluginRunning = false
 		if msg.err != nil {
+			m.pluginRunning = false
 			if m.pluginFormOpen {
 				m.pluginFormErr = msg.err
 			} else {

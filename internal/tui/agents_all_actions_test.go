@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -1319,21 +1320,27 @@ func TestDashboardReconcilePlan_IncludesMissingAgents(t *testing.T) {
 	}
 }
 
-func TestDoAgentsUpdateAll_OutdatedPluginsPresent_MarketplacesNotRunSynchronously(t *testing.T) {
+func TestDoAgentsUpdateAll_OutdatedPluginsPresent_MarketplacesStillRunSynchronously(t *testing.T) {
 	m := agentsAllModel(
 		nil, nil,
 		[]app.PluginRow{{Name: "old-plugin", Version: "1.0.0", LatestVersion: "2.0.0", PerAgentStatus: map[string]app.PluginStatus{"claude": app.PluginStatusInstalled}}},
 	)
 	m.skillsRows = nil
 
-	(&m).doAgentsUpdateAll()
+	cmds := (&m).doAgentsUpdateAll()
 
-	if m.marketplaceRunning {
-		t.Error("expected marketplaceRunning to stay false synchronously when an outdated plugin will refresh marketplaces itself")
+	if !m.marketplaceRunning {
+		t.Error("expected marketplaceRunning=true synchronously: update-all always refreshes marketplaces before computing outdated plugins")
+	}
+	if !m.pluginRunning {
+		t.Error("expected pluginRunning=true synchronously when the plugins section is enabled")
+	}
+	if len(cmds) == 0 {
+		t.Fatal("expected cmds to be returned")
 	}
 }
 
-func TestUpdate_AgentsProgressDoneMsg_MarketplaceTrue_ClearsRunningFlag(t *testing.T) {
+func TestUpdate_AgentsProgressDoneMsg_MarketplaceTrue_KeepsRunningUntilRowsMsg(t *testing.T) {
 	m := agentsAllModel(nil, nil, nil)
 	m.marketplaceRunning = true
 	m.marketplaceErr = nil
@@ -1341,8 +1348,28 @@ func TestUpdate_AgentsProgressDoneMsg_MarketplaceTrue_ClearsRunningFlag(t *testi
 	got, _ := m.Update(agentsProgressDoneMsg{gen: m.progressGen, marketplace: true})
 	got2 := got.(Model)
 
+	if !got2.marketplaceRunning {
+		t.Error("expected marketplaceRunning to stay true after a successful done msg until marketplaceRowsMsg lands")
+	}
+
+	got3 := drive(got2, marketplaceRowsMsg{})
+	if got3.marketplaceRunning {
+		t.Error("expected marketplaceRunning=false once marketplaceRowsMsg lands")
+	}
+}
+
+func TestUpdate_AgentsProgressDoneMsg_MarketplaceError_ClearsRunningImmediately(t *testing.T) {
+	m := agentsAllModel(nil, nil, nil)
+	m.marketplaceRunning = true
+
+	got, _ := m.Update(agentsProgressDoneMsg{gen: m.progressGen, marketplace: true, marketplaceErr: errors.New("refresh failed")})
+	got2 := got.(Model)
+
 	if got2.marketplaceRunning {
-		t.Error("expected marketplaceRunning=false after agentsProgressDoneMsg with marketplace=true")
+		t.Error("expected marketplaceRunning=false after an errored done msg (no reload is dispatched)")
+	}
+	if got2.marketplaceErr == nil {
+		t.Error("expected marketplaceErr to be set")
 	}
 }
 
@@ -1353,11 +1380,11 @@ func TestUpdate_AgentsProgressDoneMsg_PluginTrueWithoutMarketplace_TriggersMarke
 	got, cmd := m.Update(agentsProgressDoneMsg{gen: m.progressGen, plugin: true, marketplace: false, pluginErr: nil})
 	got2 := got.(Model)
 
-	if got2.pluginRunning {
-		t.Error("expected pluginRunning=false after agentsProgressDoneMsg")
+	if !got2.pluginRunning {
+		t.Error("expected pluginRunning to stay true after a successful done msg until pluginRowsMsg lands")
 	}
 	if cmd == nil {
-		t.Fatal("expected a non-nil batched cmd (marketplace reload + summary) for plugin-only done message")
+		t.Fatal("expected a non-nil batched cmd (plugin + marketplace reload + summary) for plugin-only done message")
 	}
 }
 
@@ -1789,5 +1816,122 @@ func TestDoAgentsRefreshAll_SectionGates(t *testing.T) {
 				t.Errorf("marketplaceRunning = %v, want %v", m.marketplaceRunning, tc.wantMarketplaceRunning)
 			}
 		})
+	}
+}
+
+// flattenCmdMsgs resolves cmd (recursing into tea.BatchMsg) into the flat
+// list of messages it would deliver, without feeding them back into Update.
+func flattenCmdMsgs(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	if msg == nil {
+		return nil
+	}
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		var out []tea.Msg
+		for _, c := range batch {
+			out = append(out, flattenCmdMsgs(c)...)
+		}
+		return out
+	}
+	return []tea.Msg{msg}
+}
+
+func TestPluginAgentsSavedMsg_SuccessKeepsSpinnerUntilPluginRowsAndReloadsMarketplaces(t *testing.T) {
+	a := newPluginClaimTestApp(t)
+	m := agentsAllModel(nil, nil, nil)
+	m.app = a
+	m.ctx = context.Background()
+	m.pluginRunning = true
+	opKey := agentsRowRunKey(agentsAllRow{feature: agentsSectionPlugins, localIdx: 0, agentID: "claude-code"})
+	m.startAgentsOp(opKey)
+
+	got, cmd := m.Update(pluginAgentsSavedMsg{})
+	gm := got.(Model)
+
+	if !gm.pluginRunning {
+		t.Error("pluginRunning should stay true after successful pluginAgentsSavedMsg until pluginRowsMsg lands")
+	}
+	if gm.agentsOpKey != opKey {
+		t.Errorf("agentsOpKey = %q, want %q kept until the plugin row reload lands", gm.agentsOpKey, opKey)
+	}
+	if cmd == nil {
+		t.Fatal("expected reload cmds after successful pluginAgentsSavedMsg")
+	}
+	var sawPluginRows, sawMarketplaceRows bool
+	for _, msg := range flattenCmdMsgs(cmd) {
+		switch msg.(type) {
+		case pluginRowsMsg:
+			sawPluginRows = true
+		case marketplaceRowsMsg:
+			sawMarketplaceRows = true
+		}
+	}
+	if !sawPluginRows {
+		t.Error("expected a plugin row reload (pluginRowsMsg) to be dispatched")
+	}
+	if !sawMarketplaceRows {
+		t.Error("expected a marketplace row reload (marketplaceRowsMsg) to be dispatched: installing a plugin may install its marketplace")
+	}
+
+	afterMarket := drive(gm, marketplaceRowsMsg{})
+	if !afterMarket.pluginRunning {
+		t.Error("pluginRunning should survive marketplaceRowsMsg landing first")
+	}
+	if afterMarket.agentsOpKey != opKey {
+		t.Errorf("agentsOpKey = %q after marketplaceRowsMsg, want %q: another section's reload must not kill the plugin row spinner", afterMarket.agentsOpKey, opKey)
+	}
+
+	afterPlugin := drive(afterMarket, pluginRowsMsg{})
+	if afterPlugin.pluginRunning {
+		t.Error("pluginRunning should be false once pluginRowsMsg lands")
+	}
+	if afterPlugin.agentsOpKey != "" {
+		t.Errorf("agentsOpKey = %q after pluginRowsMsg, want empty", afterPlugin.agentsOpKey)
+	}
+}
+
+func TestPluginAgentsSavedMsg_ErrorClearsRunningAndOpImmediately(t *testing.T) {
+	m := agentsAllModel(nil, nil, nil)
+	m.pluginRunning = true
+	m.startAgentsOp(agentsRowRunKey(agentsAllRow{feature: agentsSectionPlugins, localIdx: 0, agentID: "claude-code"}))
+
+	got, _ := m.Update(pluginAgentsSavedMsg{err: errors.New("save failed")})
+	gm := got.(Model)
+
+	if gm.pluginRunning {
+		t.Error("pluginRunning should be false immediately after an errored pluginAgentsSavedMsg")
+	}
+	if gm.agentsOpKey != "" {
+		t.Errorf("agentsOpKey = %q after error, want empty (no reload is dispatched to clear it later)", gm.agentsOpKey)
+	}
+	if gm.pluginErr == nil {
+		t.Error("pluginErr should be set")
+	}
+}
+
+func TestPluginRestoreDoneMsg_SuccessReloadsMarketplaceRowsToo(t *testing.T) {
+	a := newPluginClaimTestApp(t)
+	m := agentsAllModel(nil, nil, nil)
+	m.app = a
+	m.ctx = context.Background()
+	m.pluginRunning = true
+
+	got, cmd := m.Update(pluginRestoreDoneMsg{})
+	gm := got.(Model)
+
+	if !gm.pluginRunning {
+		t.Error("pluginRunning should stay true after successful pluginRestoreDoneMsg until pluginRowsMsg lands")
+	}
+	var sawMarketplaceRows bool
+	for _, msg := range flattenCmdMsgs(cmd) {
+		if _, ok := msg.(marketplaceRowsMsg); ok {
+			sawMarketplaceRows = true
+		}
+	}
+	if !sawMarketplaceRows {
+		t.Error("expected a marketplace row reload (marketplaceRowsMsg) after plugin restore: restoring plugins may install their marketplaces")
 	}
 }
