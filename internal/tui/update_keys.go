@@ -98,7 +98,12 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 	}
 
 	wasHidden := m.cursorHidden
-	m.cursorHidden = false
+	// Tab-global keys (bulk sync/update, refresh, commit, quit, help) act on
+	// the whole tab, not the selected row — they must not turn the post-tab-
+	// switch "no selection" state into a selected first row.
+	if !isTabGlobalKey(msg, m.keys, m.mode) {
+		m.cursorHidden = false
+	}
 
 	// First navigation keypress after a tab switch reveals the cursor without moving it.
 	if wasHidden && isMainTabMode(m.mode) && isNavigationKey(msg, m.keys) {
@@ -415,6 +420,19 @@ func (m *Model) cancelConfirmationForGlobalNavigation() {
 func isNavigationKey(msg tea.KeyPressMsg, k KeyMap) bool {
 	return key.Matches(msg, k.Up, k.Down, k.Top, k.Bottom,
 		k.HalfPageUp, k.HalfPageDown, k.PageUp, k.PageDown)
+}
+
+// isTabGlobalKey reports keys whose action is row-agnostic (bulk operations,
+// refresh, dots commit, quit, help). The agents tab's capital U/S/R bulk keys
+// share the same bindings as the tools tab's, so they are covered too.
+// DotAdd ("a") is global only on the dots tab — the same key opens a
+// row-scoped picker on the agents tab, which must keep revealing the cursor.
+func isTabGlobalKey(msg tea.KeyPressMsg, k KeyMap, mode viewMode) bool {
+	if key.Matches(msg, k.UpgradeAll, k.SyncAll, k.Refresh, k.DotRefresh, k.DotCommit,
+		k.Reconcile, k.DotUseRepoAll, k.DotUseLocalAll, k.Quit, k.Help) {
+		return true
+	}
+	return mode == viewDots && key.Matches(msg, k.DotAdd)
 }
 
 func (m *Model) handleSkillAgentsPickerKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
