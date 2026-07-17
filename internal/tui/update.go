@@ -10,12 +10,23 @@ import (
 )
 
 // Update handles messages and key events.
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
+	activityBefore := m.spinnerActivityState()
+	defer func() {
+		updated, ok := next.(Model)
+		if !ok || cmd == nil || !updated.spinnerActivityState().startedSince(activityBefore) {
+			return
+		}
+		cmd = runAfterRender(cmd)
+	}()
+
 	var cmds []tea.Cmd
 
 	cmds = append(cmds, m.updateActiveFilePicker(msg)...)
 
 	switch msg := msg.(type) {
+	case runAfterRenderMsg:
+		return m, msg.cmd
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -176,6 +187,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case opCompleteMsg:
 		cmds = append(cmds, m.handleOpCompleteMsg(msg)...)
+
+	case adminTerminalStartedMsg:
+		cmds = append(cmds, m.handleAdminTerminalStartedMsg(msg)...)
 
 	case adminTerminalDoneMsg:
 		cmds = append(cmds, m.handleAdminTerminalDoneMsg(msg)...)

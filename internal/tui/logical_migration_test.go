@@ -361,12 +361,15 @@ func opCompleteFromCmd(cmd tea.Cmd) (opCompleteMsg, bool) {
 	if done, ok := msg.(opCompleteMsg); ok {
 		return done, true
 	}
+	if deferred, ok := msg.(runAfterRenderMsg); ok {
+		return opCompleteFromCmd(deferred.cmd)
+	}
 	if batch, ok := msg.(tea.BatchMsg); ok {
 		for _, child := range batch {
 			if child == nil {
 				continue
 			}
-			if done, ok := child().(opCompleteMsg); ok {
+			if done, ok := opCompleteFromCmd(child); ok {
 				return done, true
 			}
 		}
@@ -396,15 +399,20 @@ func TestLogicalMigration_ReinstallDefaultConfirmationShowsWrongProviderPrompt(t
 
 func runLastBatchCommand(t *testing.T, cmd tea.Cmd) tea.Msg {
 	t.Helper()
-	msg := cmd()
-	batch, ok := msg.(tea.BatchMsg)
-	if !ok {
-		return msg
+	for {
+		msg := cmd()
+		switch msg := msg.(type) {
+		case runAfterRenderMsg:
+			cmd = msg.cmd
+		case tea.BatchMsg:
+			if len(msg) == 0 {
+				t.Fatal("empty command batch")
+			}
+			cmd = msg[len(msg)-1]
+		default:
+			return msg
+		}
 	}
-	if len(batch) == 0 {
-		t.Fatal("empty command batch")
-	}
-	return batch[len(batch)-1]()
 }
 
 func groupByName(cfg *config.RootConfig, name string) *config.GroupConfig {

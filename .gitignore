@@ -48,6 +48,8 @@ GEMINI.md
 .leankg/
 .wolf/
 .agent-progress.md
+docs/superpowers
+docs/research
 # Go
 vendor/
 coverage.out

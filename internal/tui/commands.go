@@ -15,6 +15,23 @@ import (
 	gosync "github.com/lkshrk/omni/internal/sync"
 )
 
+const actionFirstFrameDelay = 2 * time.Second / 60
+
+type runAfterRenderMsg struct {
+	cmd tea.Cmd
+}
+
+// runAfterRender gives the renderer a complete frame to publish newly-set
+// loading, row-operation, and status state before any action work can start.
+func runAfterRender(cmd tea.Cmd) tea.Cmd {
+	if cmd == nil {
+		return nil
+	}
+	return tea.Tick(actionFirstFrameDelay, func(time.Time) tea.Msg {
+		return runAfterRenderMsg{cmd: cmd}
+	})
+}
+
 // waitForProgress blocks on one receive from ch and emits a progressMsg.
 // Channel close is reported as a stream event, not operation completion; the
 // background operation returns progressDoneMsg with the final result.

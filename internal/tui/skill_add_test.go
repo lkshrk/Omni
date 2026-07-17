@@ -369,6 +369,9 @@ func batchHasSpinnerTick(spinnerTick tea.Cmd, cmd tea.Cmd) bool {
 		return c != nil && reflect.ValueOf(c).Pointer() == tickPtr
 	}
 	msg := cmd()
+	if deferred, ok := msg.(runAfterRenderMsg); ok {
+		return batchHasSpinnerTick(spinnerTick, deferred.cmd)
+	}
 	batch, ok := msg.(tea.BatchMsg)
 	if !ok {
 		return isTickPtr(cmd)
