@@ -11,6 +11,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/lkshrk/omni/internal/provider"
 )
@@ -249,6 +250,10 @@ func TestAdminTerminalPopupFrame_TitleReflectsState(t *testing.T) {
 	if got := adminTerminalPopupFrame(m).Title; got != "Installing vim" {
 		t.Fatalf("running title = %q, want Installing vim", got)
 	}
+	m.adminTerminal.output = "[sudo] password for alex: "
+	if got := adminTerminalPopupFrame(m).Title; got != "Password Required · vim" {
+		t.Fatalf("password title = %q, want Password Required · vim", got)
+	}
 }
 
 func TestAdminTerminalApprovalSummary_ShowsQueuePosition(t *testing.T) {
@@ -290,6 +295,135 @@ func TestRenderAdminTerminalPopup_RunningViewportStyling(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("renderAdminTerminalPopup missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestRenderAdminTerminalPopup_EmphasizesPasswordPrompt(t *testing.T) {
+	m := baseModel(nil)
+	m.width = 90
+	m.height = 24
+	m.adminTerminal = &adminTerminalState{
+		display: "sudo apt-get install -y vim",
+		running: true,
+		output:  "omni admin terminal: sudo apt-get install -y vim\n[sudo] password for alex: ",
+	}
+
+	out := renderAdminTerminalPopup(m)
+	assertLinesFitWidth(t, out, adminTerminalContentWidth(m))
+	for _, want := range []string{
+		"PASSWORD REQUIRED",
+		"Type your sudo password and press Enter.",
+		"Nothing will appear while you type.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("renderAdminTerminalPopup missing emphasized input guidance %q:\n%s", want, out)
+		}
+	}
+	prompt := "[sudo] password for alex:"
+	if !strings.Contains(out, m.palette.styleOutdated.Render(prompt)) {
+		t.Fatalf("renderAdminTerminalPopup did not emphasize password prompt %q:\n%s", prompt, out)
+	}
+}
+
+func TestRenderAdminTerminalOutput_LeftAlignsInputRequiredStatus(t *testing.T) {
+	m := baseModel(nil)
+	m.height = 24
+	state := &adminTerminalState{
+		running: true,
+		output:  "Omni needs your sudo password: ",
+	}
+
+	out := stripANSIEscapeSequences(renderAdminTerminalOutput(m, state, 64))
+	firstLine := strings.Split(out, "\n")[0]
+	if !strings.HasPrefix(firstLine, "terminal  input required") {
+		t.Fatalf("terminal status = %q, want left-aligned input-required label", firstLine)
+	}
+}
+
+func TestAdminTerminalPasswordPromptFitsConstrainedWindows(t *testing.T) {
+	tests := []struct {
+		name   string
+		width  int
+		height int
+	}{
+		{name: "narrow", width: 34, height: 24},
+		{name: "short", width: 70, height: 16},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := baseModel(nil)
+			m.width = tt.width
+			m.height = tt.height
+			m.adminTerminal = &adminTerminalState{
+				name:    "vim",
+				display: "sudo apt-get install -y vim",
+				running: true,
+				output:  "[sudo] password for alex: ",
+			}
+
+			bg := strings.Repeat("\n", m.height-1)
+			out := placePopup(bg, m, renderAdminTerminalPopup(m), adminTerminalPopupFrame(m))
+			if got := lipgloss.Width(out); got > m.width {
+				t.Fatalf("placed popup width = %d, window width = %d:\n%s", got, m.width, out)
+			}
+			if got := lipgloss.Height(out); got > m.height {
+				t.Fatalf("placed popup height = %d, window height = %d:\n%s", got, m.height, out)
+			}
+			plain := stripANSIEscapeSequences(out)
+			for _, want := range []string{"PASSWORD REQUIRED", "sudo", "password", "input", "Nothing will appear", "[sudo]"} {
+				if !strings.Contains(plain, want) {
+					t.Fatalf("placed popup missing %q in %s window:\n%s", want, tt.name, out)
+				}
+			}
+		})
+	}
+}
+
+func TestAdminTerminalAwaitingPassword(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		want   bool
+	}{
+		{name: "omni sudo prompt", output: "Omni needs your sudo password: ", want: true},
+		{name: "standard sudo prompt", output: "[sudo] password for alex: ", want: true},
+		{name: "generic password prompt", output: "Password: ", want: true},
+		{name: "passphrase prompt", output: "Enter passphrase for key '/tmp/id_ed25519': ", want: true},
+		{name: "prompt split across chunks", output: "installing\n[sudo] pass" + "word for alex: ", want: true},
+		{name: "completed prompt", output: "Password:\nInstalling vim\n", want: false},
+		{name: "password in log", output: "password authentication failed\n", want: false},
+		{name: "password policy log", output: "Password policy:\n", want: false},
+		{name: "password store log", output: "Password store:\n", want: false},
+		{name: "ordinary output", output: "Downloading packages...\n", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := adminTerminalAwaitingPassword(tt.output); got != tt.want {
+				t.Fatalf("adminTerminalAwaitingPassword(%q) = %t, want %t", tt.output, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAdminTerminalProcessEnvSetsDistinctSudoPrompt(t *testing.T) {
+	original := []string{"PATH=/usr/bin", "SUDO_PROMPT=old prompt", "TERM=xterm-256color"}
+	got := adminTerminalProcessEnv(original)
+
+	want := "SUDO_PROMPT=Omni needs your sudo password: "
+	count := 0
+	for _, entry := range got {
+		if strings.HasPrefix(entry, "SUDO_PROMPT=") {
+			count++
+			if entry != want {
+				t.Fatalf("SUDO_PROMPT = %q, want %q", entry, want)
+			}
+		}
+	}
+	if count != 1 {
+		t.Fatalf("SUDO_PROMPT entries = %d, want 1: %#v", count, got)
+	}
+	if original[1] != "SUDO_PROMPT=old prompt" {
+		t.Fatalf("adminTerminalProcessEnv mutated input: %#v", original)
 	}
 }
 

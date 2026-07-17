@@ -27,6 +27,7 @@ import (
 const (
 	adminTerminalEventBuffer   = 128
 	adminTerminalMaxOutputSize = 64 * 1024
+	adminTerminalSudoPrompt    = "Omni needs your sudo password: "
 )
 
 type adminTerminalState struct {
@@ -389,8 +390,28 @@ func renderAdminTerminalRunningPopup(m Model, state *adminTerminalState, width i
 	var sb strings.Builder
 	sb.WriteString(renderAdminTerminalCommandHeader(m, state, width))
 	sb.WriteByte('\n')
+	if adminTerminalAwaitingPassword(state.output) {
+		sb.WriteString(renderAdminTerminalPasswordNotice(m, width))
+		sb.WriteString("\n\n")
+	}
 	sb.WriteString(renderAdminTerminalOutput(m, state, width))
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+func renderAdminTerminalPasswordNotice(m Model, width int) string {
+	lines := []string{m.palette.styleOutdated.Render(fitCellText("⚠ PASSWORD REQUIRED", width))}
+	for _, item := range []struct {
+		text  string
+		style lipgloss.Style
+	}{
+		{text: "Type your sudo password and press Enter.", style: m.palette.styleActiveText},
+		{text: "Nothing will appear while you type.", style: m.palette.styleHelp},
+	} {
+		for _, line := range wrapText(item.text, max(width, 1)) {
+			lines = append(lines, item.style.Render(line))
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func renderAdminTerminalFinishedPopup(m Model, state *adminTerminalState, width int) string {
@@ -444,6 +465,12 @@ func adminTerminalPopupTitle(m Model) string {
 	}
 	if m.adminTerminal.running {
 		name := m.adminTerminal.name
+		if adminTerminalAwaitingPassword(m.adminTerminal.output) {
+			if name == "" {
+				return "Password Required"
+			}
+			return "Password Required · " + name
+		}
 		if name == "" {
 			return "Admin Terminal"
 		}
@@ -573,7 +600,13 @@ func adminTerminalContentWidth(m Model) int {
 }
 
 func adminTerminalRunningContentHeight(m Model) int {
-	return 5 + adminTerminalOutputHeight(m)
+	state := m.adminTerminal
+	width := adminTerminalContentWidth(m)
+	height := 5 + adminTerminalVisibleOutputHeight(m, state, width)
+	if state != nil && adminTerminalAwaitingPassword(state.output) {
+		height += adminTerminalPasswordNoticeRows(m, width)
+	}
+	return height
 }
 
 func adminTerminalOutputHeight(m Model) int {
@@ -584,17 +617,38 @@ func adminTerminalOutputHeight(m Model) int {
 }
 
 func renderAdminTerminalOutput(m Model, state *adminTerminalState, width int) string {
-	lines := visibleAdminTerminalOutputLines(state.output, width, adminTerminalOutputHeight(m))
-	var sb strings.Builder
-	sb.WriteString(alignLR(
+	awaitingPassword := adminTerminalAwaitingPassword(state.output)
+	height := adminTerminalVisibleOutputHeight(m, state, width)
+	lines := visibleAdminTerminalOutputLines(state.output, width, height)
+	header := alignLR(
 		m.palette.styleHelp.Render("terminal"),
 		m.palette.styleStatus.Render("live"),
 		width,
 		2,
-	))
+	)
+	if awaitingPassword {
+		statusWidth := max(width-lipgloss.Width("terminal")-2, 1)
+		header = m.palette.styleHelp.Render("terminal") + "  " +
+			m.palette.styleOutdated.Render(fitCellText("input required", statusWidth))
+		header = lipgloss.NewStyle().Width(width).Render(header)
+	}
+	var sb strings.Builder
+	sb.WriteString(header)
 	sb.WriteByte('\n')
 	sb.WriteString(renderAdminTerminalViewport(m.palette, lines, width))
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+func adminTerminalVisibleOutputHeight(m Model, state *adminTerminalState, width int) int {
+	height := adminTerminalOutputHeight(m)
+	if state != nil && adminTerminalAwaitingPassword(state.output) {
+		height = max(height-adminTerminalPasswordNoticeRows(m, width), 1)
+	}
+	return height
+}
+
+func adminTerminalPasswordNoticeRows(m Model, width int) int {
+	return lipgloss.Height(renderAdminTerminalPasswordNotice(m, width)) + 1
 }
 
 func renderAdminTerminalCommandHeader(m Model, state *adminTerminalState, width int) string {
@@ -633,8 +687,12 @@ func renderAdminTerminalViewport(p palette, lines []string, width int) string {
 	for _, line := range lines {
 		sb.WriteByte('\n')
 		text := fitCellText(line, innerWidth)
+		textStyle := p.styleNormal
+		if adminTerminalPasswordPrompt(text) {
+			textStyle = p.styleOutdated
+		}
 		sb.WriteString(border.Render("│ "))
-		sb.WriteString(p.styleNormal.Render(text))
+		sb.WriteString(textStyle.Render(text))
 		sb.WriteString(strings.Repeat(" ", max(innerWidth-lipgloss.Width(text), 0)))
 		sb.WriteString(border.Render(" │"))
 	}
@@ -680,6 +738,33 @@ func visibleAdminTerminalOutputLines(output string, width, height int) []string 
 	return lines
 }
 
+func adminTerminalAwaitingPassword(output string) bool {
+	output = strings.TrimRight(output, "\t\r\n ")
+	if output == "" {
+		return false
+	}
+	if idx := strings.LastIndexByte(output, '\n'); idx >= 0 {
+		output = output[idx+1:]
+	}
+	return adminTerminalPasswordPrompt(output)
+}
+
+func adminTerminalPasswordPrompt(line string) bool {
+	line = strings.ToLower(strings.TrimSpace(line))
+	if !strings.HasSuffix(line, ":") {
+		return false
+	}
+	return line == strings.ToLower(strings.TrimSpace(adminTerminalSudoPrompt)) ||
+		strings.HasPrefix(line, "[sudo] password") ||
+		line == "password:" ||
+		strings.HasPrefix(line, "password for ") ||
+		line == "enter password:" ||
+		strings.HasPrefix(line, "enter password for ") ||
+		line == "passphrase:" ||
+		strings.HasPrefix(line, "passphrase for ") ||
+		strings.HasPrefix(line, "enter passphrase for ")
+}
+
 func startAdminTerminalProcess(ctx context.Context, state adminTerminalState, cols, rows int, events chan tea.Msg, traceSink executor.TraceSink) (*adminTerminalSession, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -687,7 +772,7 @@ func startAdminTerminalProcess(ctx context.Context, state adminTerminalState, co
 	started := time.Now().UTC()
 	commandPath, env := executor.ResolveCommand(state.command)
 	cmd := exec.CommandContext(ctx, commandPath, state.args...)
-	cmd.Env = env
+	cmd.Env = adminTerminalProcessEnv(env)
 
 	ptmx, err := pty.StartWithSize(cmd, adminTerminalWinsize(cols, rows))
 	if err != nil {
@@ -728,6 +813,19 @@ func startAdminTerminalProcess(ctx context.Context, state adminTerminalState, co
 		}
 	}()
 	return &adminTerminalSession{ptmx: ptmx}, nil
+}
+
+func adminTerminalProcessEnv(env []string) []string {
+	const key = "SUDO_PROMPT="
+	prompt := key + adminTerminalSudoPrompt
+	result := append([]string(nil), env...)
+	for i, entry := range result {
+		if strings.HasPrefix(entry, key) {
+			result[i] = prompt
+			return result
+		}
+	}
+	return append(result, prompt)
 }
 
 func recordAdminTerminalTrace(ctx context.Context, sink executor.TraceSink, state adminTerminalState, started, finished time.Time, err error) {
