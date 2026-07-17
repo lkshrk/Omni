@@ -5614,3 +5614,140 @@ func TestEffectiveNodeManagerLabel(t *testing.T) {
 		t.Errorf("label = %q, want the resolved manager", got)
 	}
 }
+
+// ─── Tab-global keys keep the cursor hidden ──────────────────────────────────
+
+// hasSelectedRowLine reports whether any rendered line carries the selected-
+// row marker prefix, i.e. whether a row is visibly selected.
+func hasSelectedRowLine(out string) bool {
+	for _, line := range strings.Split(stripANSIEscapeSequences(out), "\n") {
+		if strings.HasPrefix(line, selectedRowMarker+" ") {
+			return true
+		}
+	}
+	return false
+}
+
+func TestCursorHidden_TabGlobalKeysKeepCursorHidden_ToolsTab(t *testing.T) {
+	for _, k := range []rune{'S', 'U', 'R', 'C', '?', 'q'} {
+		m := baseModel(threeTools())
+		m.width = 120
+		m.cursorHidden = true
+
+		got := drive(m, pressRune(k))
+
+		if !got.cursorHidden {
+			t.Errorf("cursorHidden after %q = false, want true (tab-global keys must not select a row)", string(k))
+		}
+		switch k {
+		case 'q':
+			if !got.confirmQuit {
+				t.Error("q should arm the quit confirmation")
+			}
+		case '?':
+			if !got.help.ShowAll {
+				t.Error("? should open full help")
+			}
+		}
+	}
+
+	m := baseModel(threeTools())
+	m.width = 120
+	m.cursorHidden = true
+	got := drive(m, pressRune('S'))
+	if hasSelectedRowLine(renderList(got)) {
+		t.Error("tools table should render no selected row after a tab-global key while hidden")
+	}
+	revealed := drive(got, pressRune('j'))
+	if !hasSelectedRowLine(renderList(revealed)) {
+		t.Error("sanity: a revealed cursor should render a selected row marker")
+	}
+}
+
+func TestCursorHidden_TabGlobalKeysKeepCursorHidden_AgentsTab(t *testing.T) {
+	fixture := func() Model {
+		m := agentsAllModel(
+			[]app.SkillPackageRow{{Name: "caveman", Source: "o/caveman", Installed: true}},
+			nil, nil,
+		)
+		m.cursorHidden = true
+		return m
+	}
+
+	for _, k := range []rune{'S', 'U', 'R', 'C', '?', 'q'} {
+		got := drive(fixture(), pressRune(k))
+		if !got.cursorHidden {
+			t.Errorf("cursorHidden after %q = false, want true on the agents tab", string(k))
+		}
+	}
+
+	got := drive(fixture(), pressRune('U'))
+	if hasSelectedRowLine(got.viewSkillsBody()) {
+		t.Error("agents table should render no selected row after a tab-global key while hidden")
+	}
+}
+
+func TestCursorHidden_NavigationRevealsWithoutMoving_ToolsTab(t *testing.T) {
+	m := baseModel(threeTools())
+	m.cursorHidden = true
+	m.cursor = 0
+
+	got := drive(m, pressRune('j'))
+	if got.cursorHidden {
+		t.Error("navigation key should reveal the hidden cursor")
+	}
+	if got.cursor != 0 {
+		t.Errorf("cursor = %d after reveal press, want 0 (revealed, not moved)", got.cursor)
+	}
+
+	got2 := drive(got, pressRune('j'))
+	if got2.cursor != 1 {
+		t.Errorf("cursor = %d after second j, want 1 (normal navigation)", got2.cursor)
+	}
+}
+
+func TestCursorHidden_RowActionKeyStillReveals_ToolsTab(t *testing.T) {
+	m := baseModel(threeTools())
+	m.cursorHidden = true
+
+	got := drive(m, pressRune('i'))
+	if got.cursorHidden {
+		t.Error("a row-action key should still reveal the cursor")
+	}
+}
+
+func TestCursorHidden_TabGlobalKeys_DashboardReconcileAndDotsBulk(t *testing.T) {
+	dash := baseModel(threeTools())
+	dash.mode = viewStatus
+	dash.cursorHidden = true
+	if got := drive(dash, pressRune('A')); !got.cursorHidden {
+		t.Error("cursorHidden after A on the dashboard = false, want true (reconcile-all is tab-global)")
+	}
+
+	for _, k := range []rune{'U', 'L'} {
+		dots := baseModel(nil)
+		dots.mode = viewDots
+		dots.cursorHidden = true
+		if got := drive(dots, pressRune(k)); !got.cursorHidden {
+			t.Errorf("cursorHidden after %q on the dots tab = false, want true (bulk conflict resolve is tab-global)", string(k))
+		}
+	}
+}
+
+func TestCursorHidden_DotAddTabGlobalOnlyOnDotsTab(t *testing.T) {
+	dots := baseModel(nil)
+	dots.mode = viewDots
+	dots.cursorHidden = true
+	if got := drive(dots, pressRune('a')); !got.cursorHidden {
+		t.Error("cursorHidden after a on the dots tab = false, want true (dots add opens a path picker with no row context)")
+	}
+
+	agents := agentsAllModel(
+		[]app.SkillPackageRow{{Name: "caveman", Source: "o/caveman", Installed: true}},
+		nil, nil,
+	)
+	agents.cursorHidden = true
+	if got := drive(agents, pressRune('a')); got.cursorHidden {
+		t.Error("cursorHidden after a on the agents tab = true, want false (row-scoped keys still reveal)")
+	}
+}
