@@ -85,7 +85,12 @@ func TestDotStateDisplay_ModifiedShowsLocalChanges(t *testing.T) {
 
 func TestRenderDots_NotConfigured(t *testing.T) {
 	m := baseModel(nil)
-	// DotsRepo is empty by default — expect the "no repo" message with setup hint.
+	// Zero-value cached availability: startup snapshot not landed — nothing renders.
+	if out := renderDots(m); out != "" {
+		t.Errorf("expected empty output while availability is unknown, got:\n%s", out)
+	}
+	// Known no-repo availability: onboarding with setup hint.
+	m.dotsSyncAvailCached = app.DotsSyncAvailability{Reason: app.DotsSyncAvailabilityNoRepo}
 	out := renderDots(m)
 	if !strings.Contains(out, "set up now") {
 		t.Errorf("expected 'set up now' in output, got:\n%s", out)
@@ -161,7 +166,7 @@ func TestRenderDotsUsesCachedDotsAvailability(t *testing.T) {
 		}
 	})
 
-	t.Run("renders setup when app availability is unknown despite stale local repo", func(t *testing.T) {
+	t.Run("renders nothing while availability unknown despite stale local repo", func(t *testing.T) {
 		m := baseModel(nil)
 		m.app = &app.App{}
 		m.settings = config.Settings{DotsRepo: "/tmp/stale-dotfiles"}
@@ -169,8 +174,8 @@ func TestRenderDotsUsesCachedDotsAvailability(t *testing.T) {
 
 		out := stripANSIEscapeSequences(renderDots(m))
 
-		if !strings.Contains(out, "No dotfiles repo configured yet.") || strings.Contains(out, "/tmp/stale-dotfiles") || strings.Contains(out, "nvim") {
-			t.Fatalf("renderDots should not derive availability from stale local settings, got:\n%s", out)
+		if out != "" {
+			t.Fatalf("renderDots should render nothing while availability is unknown, got:\n%s", out)
 		}
 	})
 }

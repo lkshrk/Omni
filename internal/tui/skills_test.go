@@ -24,12 +24,26 @@ func TestSkills_ViewBodyEmptyManifest(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
+	m.skillsRowsKnown = true
 	out := m.viewSkillsBody()
 	if !strings.Contains(out, "No agent skills tracked yet.") {
 		t.Errorf("viewSkillsBody() with empty manifest missing 'No agent skills tracked yet.', got:\n%s", out)
 	}
 	if !strings.Contains(out, "[i] import") {
 		t.Errorf("viewSkillsBody() missing [i] import line, got:\n%s", out)
+	}
+}
+
+func TestSkills_ViewBodyRowsNotYetKnown(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewSkills
+	m.skillTypeIdx = agentsChipSkills
+	out := m.viewSkillsBody()
+	if strings.Contains(out, "No agent skills tracked yet.") {
+		t.Errorf("viewSkillsBody() with rows not yet known must not contain 'No agent skills tracked yet.', got:\n%s", out)
+	}
+	if strings.Contains(out, "[i] import") {
+		t.Errorf("viewSkillsBody() with rows not yet known must not contain '[i] import', got:\n%s", out)
 	}
 }
 

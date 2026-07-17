@@ -3304,21 +3304,18 @@ func TestDoRefreshDiscovered_ReturnsMsg(t *testing.T) {
 	}
 }
 
-// TestRenderDots_EmptyState_LoadingWhileStartupSnapshotPending pins the dots
+// TestRenderDots_EmptyState_BlankWhileStartupSnapshotPending pins the dots
 // tab's zero-entry state: while the startup snapshot hasn't landed yet
-// (m.loading) it must read as loading, not "No dotfiles tracked yet".
-func TestRenderDots_EmptyState_LoadingWhileStartupSnapshotPending(t *testing.T) {
+// (m.loading) it must render nothing, not "No dotfiles tracked yet".
+func TestRenderDots_EmptyState_BlankWhileStartupSnapshotPending(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.dotsSyncAvailCached = app.DotsSyncAvailability{Reason: app.DotsSyncAvailabilityReady}
 	m.loading = true
 
 	out := stripANSIEscapeSequences(renderDots(m))
-	if !strings.Contains(out, "Loading dotfiles…") {
-		t.Fatalf("expected loading line while startup snapshot is pending, got:\n%s", out)
-	}
-	if strings.Contains(out, "No dotfiles tracked yet.") {
-		t.Fatalf("empty state must not show before the startup snapshot lands, got:\n%s", out)
+	if out != "" {
+		t.Fatalf("expected empty output while startup snapshot is pending, got:\n%s", out)
 	}
 
 	m.loading = false

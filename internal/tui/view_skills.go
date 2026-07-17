@@ -215,17 +215,21 @@ func (m Model) viewSkillsBody() string {
 	}
 
 	if len(m.skillsRows) == 0 && len(m.skillFindResults) == 0 {
+		var empty []string
+		if m.skillsRowsKnown {
+			empty = []string{
+				p.styleHelp.Render(pad + "No agent skills tracked yet."),
+				"",
+				pad + p.styleNormal.Render("[i] import ") + p.styleHelp.Render(" capture skills already installed via the skills CLI"),
+				pad + p.styleNormal.Render("[r] restore") + p.styleHelp.Render(" install your declared skills on this machine"),
+			}
+		}
 		return renderSectionedTab(m, sectionedTab{
 			leadingBlank: false,
 			top:          topLines,
 			sections: []sectionedTabSection{{
-				rows: nil,
-				empty: []string{
-					p.styleHelp.Render(pad + "No agent skills tracked yet."),
-					"",
-					pad + p.styleNormal.Render("[i] import ") + p.styleHelp.Render(" capture skills already installed via the skills CLI"),
-					pad + p.styleNormal.Render("[r] restore") + p.styleHelp.Render(" install your declared skills on this machine"),
-				},
+				rows:  nil,
+				empty: empty,
 			}},
 		})
 	}
