@@ -9,7 +9,7 @@ import (
 	"charm.land/lipgloss/v2/table"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/buildinfo"
 )
 
 func renderSetup(m Model) string {
@@ -408,10 +408,23 @@ func renderHeader(m Model) string {
 	title := p.styleTitle.PaddingLeft(0).Render(screenEdgeInset() + logoMark)
 	tabs := renderTabs(m)
 
-	right := renderHeaderInfo(m)
+	right := renderHeaderInfo(m) + renderHeaderVersion(m)
 
 	gap := max(screenContentWidth(m.width)-lipgloss.Width(title)-lipgloss.Width(tabs)-lipgloss.Width(right), 0)
 	return title + tabs + strings.Repeat(" ", gap) + right
+}
+
+// renderHeaderVersion is the binary version as a stable top-right header
+// segment on the dashboard and settings tabs — separate from
+// renderHeaderInfo so transient status text ("checking…", counts) keeps its
+// own contract and the version never moves with it.
+func renderHeaderVersion(m Model) string {
+	switch m.mode {
+	case viewStatus, viewSettings:
+		return renderHeaderInfoText(m.palette, "  "+buildinfo.Short())
+	default:
+		return ""
+	}
 }
 
 func renderHeaderInfo(m Model) string {
@@ -420,10 +433,11 @@ func renderHeaderInfo(m Model) string {
 		return renderDotsHeaderInfo(m)
 	case viewGroups:
 		return renderGroupsHeaderInfo(m)
-	case viewStatus:
-		return renderStatusHeaderInfo(m)
-	case viewSettings:
-		return renderSettingsHeaderInfo(m)
+	case viewStatus, viewSettings:
+		// Dashboard and settings keep the top-right for the version only
+		// (renderHeaderVersion); attention/provider summaries live in the
+		// tab bodies.
+		return ""
 	default:
 		return renderToolsHeaderInfo(m)
 	}
@@ -467,46 +481,11 @@ func renderGroupsHeaderInfo(m Model) string {
 	return renderHeaderInfoText(m.palette, "  "+compactCount(groups, "group")+"  "+compactCount(hosts, "host"))
 }
 
-func renderSettingsHeaderInfo(m Model) string {
-	summary := m.settingsProviderSummary(m.settings)
-	dotsLabel := "dots unset"
-	if dotsViewDisabled(m) {
-		dotsLabel = "dots off"
-	} else if dotsViewAvailability(m).Configured {
-		dotsLabel = "dots on"
-	}
-	return renderHeaderInfoText(m.palette, fmt.Sprintf("  %d/%d providers  %s", summary.Enabled, summary.Total, dotsLabel))
-}
-
-func renderStatusHeaderInfo(m Model) string {
-	if m.launchBatchActive {
-		return ""
-	}
-	attention := statusAttentionCount(m)
-	if m.doctorRunning {
-		if attention > 0 {
-			return renderHeaderInfoText(m.palette, fmt.Sprintf("  checking…  %d need attention", attention))
-		}
-		return renderHeaderInfoText(m.palette, "  checking…")
-	}
-	if attention == 0 {
-		return renderHeaderInfoText(m.palette, "  all clear")
-	}
-	return renderHeaderInfoText(m.palette, fmt.Sprintf("  %d need attention", attention))
-}
-
 func renderHeaderInfoText(p palette, text string) string {
 	if text == "" {
 		return ""
 	}
 	return lipgloss.NewStyle().Foreground(p.colMuted).Render(text)
-}
-
-func (m Model) settingsProviderSummary(settings config.Settings) app.SettingsProviderSummary {
-	if m.app == nil {
-		return app.DefaultSettingsProviderSummary(settings)
-	}
-	return m.app.SettingsProviderSummary(settings)
 }
 
 func renderTabs(m Model) string {

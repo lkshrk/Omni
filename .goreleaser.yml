@@ -19,7 +19,9 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X github.com/lkshrk/omni/internal/cli.Version={{.Version}}
+      - -X github.com/lkshrk/omni/internal/buildinfo.Version=v{{.Version}}
+      - -X github.com/lkshrk/omni/internal/buildinfo.Commit={{.ShortCommit}}
+      - -X github.com/lkshrk/omni/internal/buildinfo.Date={{.Now.Format "2006-01-02"}}
 
 archives:
   - id: omni

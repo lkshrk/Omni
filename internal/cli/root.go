@@ -36,7 +36,7 @@ func NewRootCmd() *cobra.Command {
 
 	root := &cobra.Command{
 		Use:     "omni",
-		Version: Version,
+		Version: Version(),
 		Short:   "keep dev tools in sync across machines from a single JSON config",
 		Long: `omni keeps your development tools (brew, npm, pip, …) and dotfiles
 in sync across machines from a single JSON config file (settings.json).
