@@ -98,6 +98,33 @@ func collectAdminTerminalTestOutput(events <-chan tea.Msg, timeout time.Duration
 	}
 }
 
+func TestStartAdminTerminalSessionDoesNotStartProcessBeforeCommandRuns(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PTY admin terminal is unsupported on Windows")
+	}
+	m := baseModel(nil)
+	m.ctx = context.Background()
+	m.width = 80
+	m.height = 24
+	m.adminTerminal = &adminTerminalState{
+		name:    "deferred-test",
+		command: filepath.Join(t.TempDir(), "missing-admin-command"),
+		display: "missing-admin-command",
+	}
+
+	cmd := m.startAdminTerminalSession()
+	if m.adminTerminal.session != nil {
+		_ = m.adminTerminal.session.ptmx.Close()
+		t.Fatal("admin terminal process started while constructing its command, before the running frame could render")
+	}
+	if cmd == nil {
+		t.Fatal("admin terminal start returned no command")
+	}
+	if _, startedTooEarly := cmd().(adminTerminalDoneMsg); startedTooEarly {
+		t.Fatal("admin terminal process was attempted while constructing its command, before the running frame could render")
+	}
+}
+
 func TestSendAdminTerminalOutputPreservesRecentOutputWhenBufferFull(t *testing.T) {
 	events := make(chan tea.Msg, adminTerminalEventBuffer)
 	for i := 0; i < adminTerminalEventBuffer+8; i++ {

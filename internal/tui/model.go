@@ -1203,16 +1203,89 @@ func (m *Model) countSection(s section) int {
 	return n
 }
 
+type spinnerActivityState struct {
+	loading                    bool
+	dotsLoading                bool
+	dotsPeekLoading            bool
+	doctorRunning              bool
+	settingsSaveRunning        bool
+	dashboardReconcileRunning  bool
+	setupAgentsDiffLoading     bool
+	dotsServicesRefreshing     bool
+	searching                  bool
+	traceLogLoading            bool
+	skillsRunning              bool
+	skillAddRunning            bool
+	mcpRunning                 bool
+	pluginRunning              bool
+	marketplaceRunning         bool
+	agentsOpKey                string
+	scanningProviders          int
+	outdatedProviders          int
+	providerSnapshotRefreshing bool
+	outdatedSnapshotRefreshing bool
+	discoveryRefreshing        bool
+	descRefreshing             bool
+	upgradingKeys              int
+}
+
+func (m Model) spinnerActivityState() spinnerActivityState {
+	return spinnerActivityState{
+		loading:                    m.loading,
+		dotsLoading:                m.dotsLoading,
+		dotsPeekLoading:            m.dotsPeekLoading,
+		doctorRunning:              m.doctorRunning,
+		settingsSaveRunning:        m.settingsSaveRunning,
+		dashboardReconcileRunning:  m.dashboardReconcileRunning,
+		setupAgentsDiffLoading:     m.setupAgentsDiffLoading,
+		dotsServicesRefreshing:     m.dotsServicesRefreshing,
+		searching:                  m.searching,
+		traceLogLoading:            m.traceLogLoading,
+		skillsRunning:              m.skillsRunning,
+		skillAddRunning:            m.skillAddRunning,
+		mcpRunning:                 m.mcpRunning,
+		pluginRunning:              m.pluginRunning,
+		marketplaceRunning:         m.marketplaceRunning,
+		agentsOpKey:                m.agentsOpKey,
+		scanningProviders:          len(m.scanningProviders),
+		outdatedProviders:          len(m.outdatedProviders),
+		providerSnapshotRefreshing: m.providerSnapshotRefreshing,
+		outdatedSnapshotRefreshing: m.outdatedSnapshotRefreshing,
+		discoveryRefreshing:        m.discoveryRefreshing,
+		descRefreshing:             m.descRefreshing,
+		upgradingKeys:              len(m.upgradingKeys),
+	}
+}
+
+func (s spinnerActivityState) startedSince(before spinnerActivityState) bool {
+	return s.loading && !before.loading ||
+		s.dotsLoading && !before.dotsLoading ||
+		s.dotsPeekLoading && !before.dotsPeekLoading ||
+		s.doctorRunning && !before.doctorRunning ||
+		s.settingsSaveRunning && !before.settingsSaveRunning ||
+		s.dashboardReconcileRunning && !before.dashboardReconcileRunning ||
+		s.setupAgentsDiffLoading && !before.setupAgentsDiffLoading ||
+		s.dotsServicesRefreshing && !before.dotsServicesRefreshing ||
+		s.searching && !before.searching ||
+		s.traceLogLoading && !before.traceLogLoading ||
+		s.skillsRunning && !before.skillsRunning ||
+		s.skillAddRunning && !before.skillAddRunning ||
+		s.mcpRunning && !before.mcpRunning ||
+		s.pluginRunning && !before.pluginRunning ||
+		s.marketplaceRunning && !before.marketplaceRunning ||
+		s.agentsOpKey != "" && before.agentsOpKey == "" ||
+		s.scanningProviders > before.scanningProviders ||
+		s.outdatedProviders > before.outdatedProviders ||
+		s.providerSnapshotRefreshing && !before.providerSnapshotRefreshing ||
+		s.outdatedSnapshotRefreshing && !before.outdatedSnapshotRefreshing ||
+		s.discoveryRefreshing && !before.discoveryRefreshing ||
+		s.descRefreshing && !before.descRefreshing ||
+		s.upgradingKeys > before.upgradingKeys
+}
+
 // spinnerActivityActive reports whether any async activity that drives the
 // shared spinner is in flight. Every tick-rescheduling and spinner-gating
-// site must use this — a flag missing here freezes that surface's animation.
+// site must use this state so new action flags cannot miss either lifecycle.
 func (m Model) spinnerActivityActive() bool {
-	return m.loading || m.dotsLoading || m.dotsPeekLoading || m.doctorRunning ||
-		m.searching || m.traceLogLoading ||
-		m.skillsRunning || m.skillAddRunning || m.mcpRunning || m.pluginRunning || m.marketplaceRunning ||
-		m.agentsOpKey != "" ||
-		len(m.scanningProviders) > 0 || len(m.outdatedProviders) > 0 ||
-		m.providerSnapshotRefreshing || m.outdatedSnapshotRefreshing ||
-		m.discoveryRefreshing || m.descRefreshing ||
-		len(m.upgradingKeys) > 0
+	return m.spinnerActivityState() != (spinnerActivityState{})
 }

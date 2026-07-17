@@ -66,6 +66,13 @@ type adminTerminalOutputMsg struct {
 	chunk string
 }
 
+type adminTerminalStartedMsg struct {
+	id      int
+	session *adminTerminalSession
+	state   adminTerminalState
+	err     error
+}
+
 type adminTerminalDoneMsg struct {
 	id    int
 	state adminTerminalState
@@ -169,15 +176,20 @@ func (m *Model) startAdminTerminalSession() tea.Cmd {
 		}
 		m.upgradingKeys[state.rowKey] = true
 	}
-	session, err := startAdminTerminalProcess(m.ctx, *state, adminTerminalContentWidth(*m), adminTerminalPTYRows(*m), state.events, m.app)
-	if err != nil {
-		doneState := state.completionState()
-		return func() tea.Msg {
-			return adminTerminalDoneMsg{id: doneState.id, state: doneState, err: err}
+	ctx := m.ctx
+	processState := *state
+	cols := adminTerminalContentWidth(*m)
+	rows := adminTerminalPTYRows(*m)
+	traceSink := m.app
+	return func() tea.Msg {
+		session, err := startAdminTerminalProcess(ctx, processState, cols, rows, processState.events, traceSink)
+		return adminTerminalStartedMsg{
+			id:      processState.id,
+			session: session,
+			state:   processState.completionState(),
+			err:     err,
 		}
 	}
-	state.session = session
-	return waitAdminTerminalEvent(state.id, state.events)
 }
 
 func waitAdminTerminalEvent(id int, events <-chan tea.Msg) tea.Cmd {
@@ -196,6 +208,20 @@ func (m *Model) handleAdminTerminalOutputMsg(msg adminTerminalOutputMsg) []tea.C
 	}
 	m.adminTerminal.appendOutput(msg.chunk)
 	return []tea.Cmd{waitAdminTerminalEvent(m.adminTerminal.id, m.adminTerminal.events)}
+}
+
+func (m *Model) handleAdminTerminalStartedMsg(msg adminTerminalStartedMsg) []tea.Cmd {
+	if m.adminTerminal == nil || m.adminTerminal.id != msg.id || !m.adminTerminal.running {
+		if msg.session != nil {
+			_ = msg.session.ptmx.Close()
+		}
+		return nil
+	}
+	if msg.err != nil {
+		return m.handleAdminTerminalDoneMsg(adminTerminalDoneMsg{id: msg.id, state: msg.state, err: msg.err})
+	}
+	m.adminTerminal.session = msg.session
+	return []tea.Cmd{waitAdminTerminalEvent(msg.id, m.adminTerminal.events)}
 }
 
 func (m *Model) handleAdminTerminalDoneMsg(msg adminTerminalDoneMsg) []tea.Cmd {
