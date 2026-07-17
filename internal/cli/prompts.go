@@ -34,8 +34,9 @@ func scanLine() (string, bool) {
 }
 
 func defaultStdinIsTerminal() bool {
-	info, err := os.Stdin.Stat()
-	return err == nil && (info.Mode()&os.ModeCharDevice) != 0
+	// term.IsTerminal, not a ModeCharDevice check: /dev/null is a char device
+	// but can never answer a prompt.
+	return term.IsTerminal(os.Stdin.Fd())
 }
 
 // readYesNo reads a single y/n keypress without requiring Enter.
@@ -134,6 +135,11 @@ func promptYesNo(state *rootState, question string, defaultVal bool) bool {
 // or skip (keep in machine group).
 func promptReassignClaimedTools(state *rootState, claimedNames []string) {
 	if len(claimedNames) == 0 {
+		return
+	}
+	if (state != nil && state.yes) || !stdinIsTerminal() {
+		// --yes runs are unattended even when a PTY is attached (e.g. coder
+		// startup scripts); a dangling prompt only reads as a hang in the log.
 		return
 	}
 	fmt.Fprintf(stdOut(), "\n%s added to machine group. Move to a different group?\n", textutil.PluralCount(len(claimedNames), "tool", "tools"))
