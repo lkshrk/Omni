@@ -353,6 +353,66 @@ func TestRemovePlugin_RemovesFromAdapterAndManifestButKeepsMarketplace(t *testin
 	}
 }
 
+func TestRemovePlugin_ListErrorStillUninstallsAndDeletesManifest(t *testing.T) {
+	stub := &stubPluginAdapter{id: "codex", available: true, listErr: errors.New("codex plugin list: boom")}
+	agents := config.AgentsConfig{
+		Marketplaces: []config.Marketplace{{Name: "ponytail", Source: "a/b"}},
+		Plugins:      []config.Plugin{{Name: "ponytail", Marketplace: "ponytail", Agents: []string{"codex"}}},
+	}
+	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{stub}))
+	res, err := a.RemovePlugin(context.Background(), "ponytail")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Errors) != 0 {
+		t.Fatalf("expected no adapter errors, got %v", res.Errors)
+	}
+	if len(stub.removedNames) != 1 {
+		t.Fatalf("expected attempted adapter uninstall, got %v", stub.removedNames)
+	}
+	if len(res.SkippedUnavailable) != 0 {
+		t.Fatalf("expected no skip when uninstall succeeds, got %v", res.SkippedUnavailable)
+	}
+	cfg := loadPluginTestConfig(t, a)
+	if len(cfg.Agents.Plugins) != 0 {
+		t.Fatal("expected plugin removed from manifest")
+	}
+}
+
+func TestRemovePlugin_ListErrorDowngradesUninstallFailureToWarning(t *testing.T) {
+	stub := &stubPluginAdapter{
+		id:        "codex",
+		available: true,
+		listErr:   errors.New("codex plugin list: boom"),
+		removeErr: errors.New("codex plugin remove: not installed"),
+	}
+	agents := config.AgentsConfig{
+		Marketplaces: []config.Marketplace{{Name: "ponytail", Source: "a/b"}},
+		Plugins:      []config.Plugin{{Name: "ponytail", Marketplace: "ponytail", Agents: []string{"codex"}}},
+	}
+	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{stub}))
+	res, err := a.RemovePlugin(context.Background(), "ponytail")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Errors) != 0 {
+		t.Fatalf("expected uninstall failure downgraded to warning, got errors %v", res.Errors)
+	}
+	if len(res.Warnings) != 1 || res.Warnings[0].AgentID != "codex" {
+		t.Fatalf("expected warning recorded, got %v", res.Warnings)
+	}
+	if !strings.Contains(res.Warnings[0].Err.Error(), "not installed") {
+		t.Fatalf("warning must carry the uninstall error, got %v", res.Warnings[0].Err)
+	}
+	if len(res.SkippedUnavailable) != 0 {
+		t.Fatalf("expected no unavailable skip, got %v", res.SkippedUnavailable)
+	}
+	cfg := loadPluginTestConfig(t, a)
+	if len(cfg.Agents.Plugins) != 0 {
+		t.Fatal("expected plugin removed from manifest")
+	}
+}
+
 func TestRemovePlugin_RejectsUnmanaged(t *testing.T) {
 	a := newPluginTestApp(t, config.AgentsConfig{}, app.WithPluginAdapters(nil))
 	if _, err := a.RemovePlugin(context.Background(), "ghost"); err == nil {

@@ -610,6 +610,9 @@ func newAgentsPluginsRemoveCmd(state *rootState) *cobra.Command {
 			for _, e := range res.Errors {
 				fmt.Fprintf(cmdOut(cmd), "  ! %s/%s: %v\n", e.AgentID, e.Name, e.Err)
 			}
+			for _, w := range res.Warnings {
+				fmt.Fprintf(cmdOut(cmd), "  ~ %s/%s: %v\n", w.AgentID, w.Name, w.Err)
+			}
 			printSkippedUnavailable(cmd, res.SkippedUnavailable)
 			return agentErrsFailure(len(res.Errors))
 		},
