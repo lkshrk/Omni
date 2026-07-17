@@ -285,7 +285,7 @@ func syncResolvedDotEntry(ctx context.Context, exec dots.BackupExecutor, repoPat
 	// attempts to link them. Handles legacy entries where files were committed
 	// before their ignore pattern (or DotsEjectIgnoredPaths) existed.
 	if !opts.DryRun {
-		purgeIgnoredRepoSources(entry)
+		purgeIgnoredRepoSources(ctx, exec, repoPath, entry)
 		if err := selfHealDotEntryLinkShape(entry); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: omni: self-heal symlink shape for %s: %v\n", entry.Name, err)
 		}
@@ -564,8 +564,8 @@ func backupAndRemoveLocalTarget(ctx context.Context, exec dots.BackupExecutor, t
 	return dots.BackupAndRemoveLocalPathWithExecutor(ctx, exec, targetPath)
 }
 
-func backupLocalTarget(ctx context.Context, exec dots.BackupExecutor, targetPath string) (string, error) {
-	backupPath, backupErr := dots.BackupLocalPathWithExecutor(ctx, exec, targetPath)
+func backupLocalTarget(ctx context.Context, exec dots.BackupExecutor, targetPath string, ignores []string) (string, error) {
+	backupPath, backupErr := dots.BackupLocalPathFilteredWithExecutor(ctx, exec, targetPath, ignores)
 	if backupErr != nil && !os.IsNotExist(backupErr) {
 		return "", fmt.Errorf("backup %q: %w", targetPath, backupErr)
 	}
@@ -581,7 +581,7 @@ type preparedDotTarget struct {
 func prepareDotTargetForRestow(ctx context.Context, exec dots.BackupExecutor, entry dots.ResolvedEntry) (preparedDotTarget, error) {
 	if shouldPreserveDirectoryDotTarget(entry) {
 		prep := preparedDotTarget{preservedDirectory: true}
-		backupPath, err := backupLocalTarget(ctx, exec, entry.TargetPath)
+		backupPath, err := backupLocalTarget(ctx, exec, entry.TargetPath, combinedDotIgnores(entry.Ignore))
 		if err != nil {
 			return prep, err
 		}
@@ -912,7 +912,7 @@ func ignoredDotDirHasIncludedDescendant(root, relPath string, ignores []string) 
 // ignored paths. It handles the case where files were committed before their
 // ignore pattern existed or before DotsEjectIgnoredPaths was available.
 // Returns the number of top-level paths removed.
-func purgeIgnoredRepoSources(entry dots.ResolvedEntry) int {
+func purgeIgnoredRepoSources(ctx context.Context, exec dots.BackupExecutor, repoPath string, entry dots.ResolvedEntry) int {
 	if len(entry.Ignore) == 0 {
 		return 0
 	}
@@ -920,7 +920,7 @@ func purgeIgnoredRepoSources(entry dots.ResolvedEntry) int {
 	if err != nil || !srcInfo.IsDir() {
 		return 0
 	}
-	var purged int
+	var candidates []string
 	if walkErr := filepath.WalkDir(entry.SourcePath, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -935,14 +935,33 @@ func purgeIgnoredRepoSources(entry dots.ResolvedEntry) int {
 			}
 			return nil
 		}
-		_ = os.RemoveAll(path)
-		purged++
+		candidates = append(candidates, path)
 		if d.IsDir() {
 			return filepath.SkipDir
 		}
 		return nil
 	}); walkErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: omni: purging dot files in %s: %v\n", entry.SourcePath, walkErr)
+	}
+	if len(candidates) == 0 {
+		return 0
+	}
+	// Snapshot before deleting so purged files stay recoverable from git
+	// history even when they were never committed before; the trash move
+	// below is the second safety layer.
+	gt := newGitForRepo(repoPath, exec)
+	if gt.IsRepo() {
+		if err := gt.SnapshotAll(ctx, "dots: pre-purge "+entry.Name); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: omni: pre-purge snapshot for %s: %v\n", entry.Name, err)
+		}
+	}
+	var purged int
+	for _, path := range candidates {
+		if err := dots.TrashLocalPath(ctx, exec, path); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: omni: purge ignored repo source %q: %v\n", path, err)
+			continue
+		}
+		purged++
 	}
 	return purged
 }
@@ -1032,6 +1051,8 @@ func lstatEntryOp(entry dots.ResolvedEntry, dryRun bool) dots.Op {
 	case dotLocalBrokenLink:
 		return dots.Op{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath,
 			Err: fmt.Errorf("managed link is broken")}
+	case dotLocalAllIgnored:
+		return dots.Op{Kind: dots.OpSkip, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath}
 	default:
 		return dots.Op{Kind: dots.OpConflict, Entry: entry.Name, Src: entry.SourcePath, Dst: entry.TargetPath,
 			Err: fmt.Errorf("real file at %q; use omni dots add --adopt to migrate", entry.TargetPath)}

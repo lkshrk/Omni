@@ -67,6 +67,7 @@ const (
 	SettingsReset                  ID = "settings.reset"
 	SettingsResetCache             ID = "settings.reset_cache"
 	SettingsMigrateHostOverrides   ID = "settings.migrate_host_overrides"
+	SettingsExtract                ID = "settings.extract"
 	SetupInit                      ID = "setup.init"
 	Doctor                         ID = "doctor"
 )
@@ -951,6 +952,17 @@ var Settings = []Action{
 		Mutates:         true,
 		CLIOnlyReason:   "One-time config migration for deprecated tools.*.hosts install overrides; exposed as a CLI repair command.",
 		CLI:             []CLIBinding{{Command: []string{"settings", "migrate-host-overrides"}}},
+	},
+	{
+		ID:              SettingsExtract,
+		Domain:          "settings",
+		Scope:           ScopeGlobal,
+		Label:           "extract settings fragments",
+		Description:     "Split settings.json into settings.d fragments.",
+		LongDescription: "Move agents, tools, groups, and dot entries into settings.d/agents.json, tools.json, groups.json, and dots.json, removing the duplicated keys from settings.json.",
+		Mutates:         true,
+		CLIOnlyReason:   "Config layout migration; exposed as a CLI repair command.",
+		CLI:             []CLIBinding{{Command: []string{"settings", "extract"}}},
 	},
 }
 

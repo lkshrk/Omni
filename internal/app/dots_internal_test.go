@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lkshrk/omni/internal/dots"
 )
@@ -377,5 +378,94 @@ func TestBuildIgnoredChildTree_DeepTree(t *testing.T) {
 	leaf := b.Children[0]
 	if !leaf.Ignored {
 		t.Errorf("leaf 'config.toml' should have Ignored=true")
+	}
+}
+
+func TestClassifyDotPathState_AllIgnoredDirIsIgnoredNotConflict(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "repo", ".claude", "plugins")
+	tgt := filepath.Join(tmp, "home", ".claude", "plugins")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "installed_plugins.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tgt, "data"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tgt, "installed_plugins.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ignores := append(dots.DefaultIgnores(), "*", "!/plugins", "!/agents/")
+
+	state := classifyDotPathState(src, tgt, ignores, DotStateConflict)
+	if state != DotStateIgnored {
+		t.Fatalf("all-ignored dir state = %s, want %s", state, DotStateIgnored)
+	}
+}
+
+func TestClassifyDotPathState_UnignoredContentStillConflicts(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "repo", ".claude", "plugins")
+	tgt := filepath.Join(tmp, "home", ".claude", "plugins")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "installed_plugins.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(tgt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tgt, "installed_plugins.json"), []byte("{\"local\":1}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	past := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(filepath.Join(tgt, "installed_plugins.json"), past, past); err != nil {
+		t.Fatal(err)
+	}
+
+	state := classifyDotPathState(src, tgt, dots.DefaultIgnores(), DotStateConflict)
+	if state != DotStateConflict {
+		t.Fatalf("unignored differing content state = %s, want %s", state, DotStateConflict)
+	}
+}
+
+func TestClassifyDotEntry_AllIgnoredRootDirIsIgnoredNotConflict(t *testing.T) {
+	tmp := t.TempDir()
+	src := filepath.Join(tmp, "repo", "claude", ".claude")
+	tgt := filepath.Join(tmp, "home", ".claude")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "state.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(tgt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tgt, "state.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	entry := dots.ResolvedEntry{
+		Name:       "claude",
+		SourcePath: src,
+		TargetPath: tgt,
+		Ignore:     append(dots.DefaultIgnores(), "*"),
+	}
+
+	state, actions := classifyDotEntry(entry)
+	if state != DotStateIgnored {
+		t.Fatalf("all-ignored root dir state = %s, want %s", state, DotStateIgnored)
+	}
+	want := []DotAction{DotActionUnignore, DotActionRemove}
+	if len(actions) != len(want) || actions[0] != want[0] || actions[1] != want[1] {
+		t.Fatalf("actions = %v, want %v", actions, want)
+	}
+
+	op := lstatEntryOp(entry, false)
+	if op.Kind != dots.OpSkip {
+		t.Fatalf("lstatEntryOp kind = %v, want %v", op.Kind, dots.OpSkip)
 	}
 }

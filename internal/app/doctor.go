@@ -100,6 +100,11 @@ func (a *App) doctorConfig(result *DoctorResult) (*config.RootConfig, bool) {
 		result.addCheck("config", "Config", DoctorStatusFail, "settings.json has validation errors", details...)
 		return cfg, false
 	}
+	if len(cfg.MergeNotices) > 0 {
+		details := append([]string{path}, cfg.MergeNotices...)
+		result.addCheck("config", "Config", DoctorStatusWarn, "settings.json has duplicate definitions across $include fragments", details...)
+		return cfg, true
+	}
 	result.addCheck("config", "Config", DoctorStatusOK, "settings.json is valid", path, fmt.Sprintf("version %d", cfg.Version))
 	return cfg, true
 }

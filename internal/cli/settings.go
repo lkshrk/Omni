@@ -27,6 +27,7 @@ func newSettingsCmd(state *rootState) *cobra.Command {
 		newSettingsDisableProviderCmd(state),
 		newSettingsEnableProviderCmd(state),
 		newSettingsLintCmd(state),
+		newSettingsExtractCmd(state),
 		newSettingsMigrateHostOverridesCmd(state),
 		newSettingsResetCmd(state),
 		newSettingsResetCacheCmd(state),
@@ -274,4 +275,43 @@ func displayBoolPtr(value *bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+func newSettingsExtractCmd(state *rootState) *cobra.Command {
+	return &cobra.Command{
+		Use:   "extract",
+		Short: "Extract agents, tools, groups, and dots into settings.d fragments",
+		Long: `Extract decomposes settings.json into the canonical settings.d layout:
+agents.json (agents), tools.json (tools), groups.json (groups without dots),
+and dots.json (dot entries per group). The moved keys are removed from
+settings.json and $include is updated. Duplicate definitions across the main
+file and fragments collapse to the effective merged value. Safe to re-run.`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ok, err := confirmAction(cmd, state, "Extract settings.json sections into settings.d fragments?")
+			if err != nil || !ok {
+				return err
+			}
+			report, err := config.ExtractIncludeFragments(state.app.ConfigPath)
+			if err != nil {
+				return err
+			}
+			out := cmd.OutOrStdout()
+			if report.Unchanged {
+				fmt.Fprintln(out, "settings.json already extracted; nothing to do")
+				return nil
+			}
+			for _, fragment := range []string{
+				"settings.d/agents.json",
+				"settings.d/tools.json",
+				"settings.d/groups.json",
+				"settings.d/dots.json",
+			} {
+				if key, ok := report.Moved[fragment]; ok {
+					fmt.Fprintf(out, "  %-24s <- %s\n", fragment, key)
+				}
+			}
+			fmt.Fprintln(out, "settings.json now references the fragments via $include.")
+			return nil
+		},
+	}
 }

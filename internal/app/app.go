@@ -549,7 +549,7 @@ func (a *App) withConfig(fn func(*config.RootConfig) error) error {
 			return fmt.Errorf("creating config directory: %w", err)
 		}
 	}
-	return config.PatchRaw(a.ConfigPath, diff)
+	return config.PatchRawRouted(a.ConfigPath, diff)
 }
 
 // patchToolConfig edits a tool at the file that owns its effective definition.

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -2422,7 +2423,11 @@ func (a *App) persistCapturedProviders(cfg *config.RootConfig, captured map[stri
 	if !changed {
 		return nil, nil
 	}
-	if err := config.Save(a.ConfigPath, cfg); err != nil {
+	toolsRaw, err := json.Marshal(cfg.Tools)
+	if err != nil {
+		return nil, fmt.Errorf("encoding captured providers: %w", err)
+	}
+	if err := config.PatchRawRouted(a.ConfigPath, map[string]json.RawMessage{"tools": toolsRaw}); err != nil {
 		return nil, fmt.Errorf("persisting captured providers: %w", err)
 	}
 	return cfg, nil

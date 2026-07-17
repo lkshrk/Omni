@@ -2,12 +2,14 @@ package app_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -6696,4 +6698,307 @@ func TestDotsResolveConflict_ModifiedEntryUseLocalAdopts(t *testing.T) {
 		t.Errorf("local-extra.zsh not adopted into repo: %v", err)
 	}
 	assertSymlinkResolvesTo(t, filepath.Join(zshPath, "local-extra.zsh"), filepath.Join(srcDir, "local-extra.zsh"))
+}
+
+func TestDotsSync_PurgeMovesIgnoredRepoSourceToTrashWithSnapshot(t *testing.T) {
+	if _, err := exec.LookPath("stow"); err != nil {
+		t.Skip("stow not available")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_DATA_HOME", "")
+
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repoDir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	runGit("init", "-q")
+	runGit("config", "user.email", "t@t")
+	runGit("config", "user.name", "t")
+	runGit("config", "commit.gpgsign", "false")
+
+	srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte("-- ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Never committed: the pre-purge snapshot is its only git safety net.
+	purgedPath := filepath.Join(srcDir, "secret.txt")
+	if err := os.WriteFile(purgedPath, []byte("precious"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	targetPath := filepath.Join(home, ".config", "nvim")
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{Name: "nvim", Path: targetPath, Ignore: []string{"secret.txt"}},
+	}, home)
+
+	if _, err := a.DotsSync(dots.SyncOptions{}); err != nil {
+		t.Fatalf("DotsSync: %v", err)
+	}
+	if _, err := os.Lstat(purgedPath); !os.IsNotExist(err) {
+		t.Fatalf("purged source still present: %v", err)
+	}
+	trashRoot := filepath.Join(home, ".Trash")
+	switch runtime.GOOS {
+	case "darwin":
+	case "windows":
+		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+			trashRoot = filepath.Join(localAppData, "Trash", "files")
+		}
+	default:
+		trashRoot = filepath.Join(home, ".local", "share", "Trash", "files")
+	}
+	trashed := filepath.Join(trashRoot, "secret.txt")
+	if got, err := os.ReadFile(trashed); err != nil || string(got) != "precious" {
+		t.Fatalf("trash copy = %q, %v; want purged content preserved in trash", got, err)
+	}
+	logCmd := exec.Command("git", "-C", repoDir, "log", "--format=%s", "--", "dotfiles/nvim/.config/nvim/secret.txt")
+	out, err := logCmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git log: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "dots: pre-purge nvim") {
+		t.Fatalf("git log = %q, want pre-purge snapshot containing purged file", out)
+	}
+}
+
+func TestDotsStatus_AttachesLastSyncErrorToOutOfSyncEntry(t *testing.T) {
+	if _, err := exec.LookPath("stow"); err != nil {
+		t.Skip("stow not available")
+	}
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	srcDir := filepath.Join(dotsContentDir(repoDir), "zshrc")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sourcePath := filepath.Join(srcDir, ".zshrc")
+	if err := os.WriteFile(sourcePath, []byte("repo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	targetPath := filepath.Join(home, ".zshrc")
+	// Conflicting local regular file that is OLDER than the repo source, so
+	// the classifier reports a choice-conflict and sync records a failure.
+	if err := os.WriteFile(targetPath, []byte("local"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	past := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(targetPath, past, past); err != nil {
+		t.Fatal(err)
+	}
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{Name: "zshrc", Path: targetPath},
+	}, home)
+
+	if _, err := a.DotsSync(dots.SyncOptions{}); err == nil {
+		t.Fatal("DotsSync should fail on unresolved conflict")
+	}
+
+	ctx := context.Background()
+	result, err := a.DotsStatus(ctx)
+	if err != nil {
+		t.Fatalf("DotsStatus: %v", err)
+	}
+	if len(result.Entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(result.Entries))
+	}
+	entry := result.Entries[0]
+	if !strings.Contains(entry.LastError, "use repo version or use local version") {
+		t.Fatalf("LastError = %q, want recorded conflict reason", entry.LastError)
+	}
+
+	// Resolving the conflict clears the annotation via the newer success record.
+	if _, err := a.DotsResolveConflict(ctx, "zshrc", app.DotResolveUseRepo); err != nil {
+		t.Fatalf("DotsResolveConflict: %v", err)
+	}
+	result, err = a.DotsStatus(ctx)
+	if err != nil {
+		t.Fatalf("DotsStatus after resolve: %v", err)
+	}
+	if got := result.Entries[0].LastError; got != "" {
+		t.Fatalf("LastError after resolve = %q, want empty", got)
+	}
+}
+
+func TestExtractedFragments_AppMutationsStayInFragments(t *testing.T) {
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	targetPath := filepath.Join(home, ".vim")
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{Name: "vim", Path: targetPath},
+	}, home)
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	if _, err := config.ExtractIncludeFragments(cfgPath); err != nil {
+		t.Fatalf("ExtractIncludeFragments: %v", err)
+	}
+
+	if err := a.DotsAddIgnorePattern("vim", ".netrwhist"); err != nil {
+		t.Fatalf("DotsAddIgnorePattern: %v", err)
+	}
+
+	mainData, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mainRaw map[string]json.RawMessage
+	if err := json.Unmarshal(mainData, &mainRaw); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := mainRaw["groups"]; ok {
+		t.Fatalf("groups re-inlined into main settings.json after mutation:\n%s", mainData)
+	}
+	dotsData, err := os.ReadFile(filepath.Join(cfgDir, "settings.d", "dots.json"))
+	if err != nil {
+		t.Fatalf("read dots.json: %v", err)
+	}
+	if !strings.Contains(string(dotsData), ".netrwhist") {
+		t.Fatalf("dots.json missing mutation:\n%s", dotsData)
+	}
+	if groupsData, err := os.ReadFile(filepath.Join(cfgDir, "settings.d", "groups.json")); err == nil {
+		if strings.Contains(string(groupsData), ".netrwhist") {
+			t.Fatalf("groups.json received dot mutation:\n%s", groupsData)
+		}
+	}
+
+	// Effective config still sees the change.
+	statuses, err := a.DotsList()
+	if err != nil {
+		t.Fatalf("DotsList: %v", err)
+	}
+	if len(statuses) != 1 {
+		t.Fatalf("statuses = %d, want 1", len(statuses))
+	}
+}
+
+// TestDotsSync_WhitelistDirectoryConvergesMixedStates reproduces the 2026-07-17
+// production incident shape in one entry: a whitelist-style ignore list
+// ("*" + negations) over a directory holding managed links, a newer local
+// regular file over a repo source, a local-only whitelisted file, a dangling
+// whitelisted link, and ignored machine-state dirs that must survive.
+func TestDotsSync_WhitelistDirectoryConvergesMixedStates(t *testing.T) {
+	if _, err := exec.LookPath("stow"); err != nil {
+		t.Skip("stow not available")
+	}
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	srcDir := filepath.Join(dotsContentDir(repoDir), "claude", ".claude")
+	for _, dir := range []string{filepath.Join(srcDir, "agents")} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeSrc := func(rel, content string) string {
+		t.Helper()
+		path := filepath.Join(srcDir, rel)
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	settingsSrc := writeSrc("settings.json", "repo-settings")
+	claudeMdSrc := writeSrc("CLAUDE.md", "claude-md")
+	agentSrc := writeSrc("agents/analyst.md", "agent")
+
+	target := filepath.Join(home, ".claude")
+	for _, dir := range []string{
+		filepath.Join(target, "agents"),
+		filepath.Join(target, "plugins", "cache"),
+		filepath.Join(target, "projects"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustLink := func(src, dst string) {
+		t.Helper()
+		rel, err := filepath.Rel(filepath.Dir(dst), src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(rel, dst); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustLink(claudeMdSrc, filepath.Join(target, "CLAUDE.md"))
+	mustLink(agentSrc, filepath.Join(target, "agents", "analyst.md"))
+	// Dangling whitelisted link: repo file was deleted out from under it.
+	mustLink(filepath.Join(srcDir, "RTK.md"), filepath.Join(target, "RTK.md"))
+
+	writeLocal := func(rel, content string) string {
+		t.Helper()
+		path := filepath.Join(target, rel)
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	writeLocal(filepath.Join("plugins", "cache", "blob"), "machine-state")
+	writeLocal(filepath.Join("projects", "p.json"), "machine-state")
+	keybindingsLocal := writeLocal("keybindings.json", "my-keys")
+	// Newer local regular file shadowing the repo source.
+	past := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(settingsSrc, past, past); err != nil {
+		t.Fatal(err)
+	}
+	settingsLocal := writeLocal("settings.json", "local-newer-settings")
+
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{Name: "claude", Path: target, Ignore: []string{
+			"*",
+			"!/settings.json",
+			"!/CLAUDE.md",
+			"!/RTK.md",
+			"!/keybindings.json",
+			"!/agents/",
+		}},
+	}, home)
+
+	if _, err := a.DotsSync(dots.SyncOptions{}); err != nil {
+		t.Fatalf("DotsSync: %v", err)
+	}
+
+	assertSymlinkResolvesTo(t, settingsLocal, settingsSrc)
+	if got, err := os.ReadFile(settingsSrc); err != nil || string(got) != "local-newer-settings" {
+		t.Fatalf("repo settings = %q, %v; want adopted local content", got, err)
+	}
+	assertSymlinkResolvesTo(t, keybindingsLocal, filepath.Join(srcDir, "keybindings.json"))
+	if got, err := os.ReadFile(filepath.Join(srcDir, "keybindings.json")); err != nil || string(got) != "my-keys" {
+		t.Fatalf("repo keybindings = %q, %v; want adopted local-only file", got, err)
+	}
+	assertSymlinkResolvesTo(t, filepath.Join(target, "CLAUDE.md"), claudeMdSrc)
+	assertSymlinkResolvesTo(t, filepath.Join(target, "agents", "analyst.md"), agentSrc)
+	for _, keep := range []string{
+		filepath.Join(target, "plugins", "cache", "blob"),
+		filepath.Join(target, "projects", "p.json"),
+	} {
+		if info, err := os.Lstat(keep); err != nil || info.Mode()&os.ModeSymlink != 0 {
+			t.Fatalf("ignored machine state %s must stay a local regular file (err=%v)", keep, err)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(target, "RTK.md")); !os.IsNotExist(err) {
+		t.Fatalf("dangling whitelisted link should be cleaned up, got err=%v", err)
+	}
+
+	statuses, err := a.DotsList()
+	if err != nil {
+		t.Fatalf("DotsList: %v", err)
+	}
+	if len(statuses) != 1 || statuses[0].State != app.DotStateSynced {
+		t.Fatalf("state = %+v, want synced entry", statuses)
+	}
 }

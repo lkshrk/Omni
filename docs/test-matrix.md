@@ -80,5 +80,6 @@ key routing, modal state, rendering, and async result handling.
 | `settings.reset` | yes | yes | yes | yes | - |
 | `settings.reset_cache` | yes | yes | yes | yes | - |
 | `settings.migrate_host_overrides` | yes | n/a | n/a | n/a | CLI-only config migration |
+| `settings.extract` | yes | n/a | n/a | n/a | CLI-only config layout migration |
 | `setup.init` | yes | yes | yes | yes | CLI command is `bootstrap`; `init` remains an alias |
 | `doctor` | yes | yes | yes | yes | - |
