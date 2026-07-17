@@ -162,6 +162,37 @@ for d in importlib.metadata.distributions():
 		seen[name.lower()]=1
 print(json.dumps(seen))`
 
+// pipOwnedPackageSetScript returns distributions whose INSTALLER metadata says
+// pip. Distro packages are visible to `pip list` too, but pip does not own them
+// and Omni must not import or offer to upgrade them.
+const pipOwnedPackageSetScript = `import importlib.metadata,json
+owned={}
+for d in importlib.metadata.distributions():
+	try:
+		installer=(d.read_text("INSTALLER") or "").strip().casefold()
+		name=d.metadata["Name"]
+	except Exception:
+		continue
+	if installer=="pip" and name:
+		owned[name.lower()]=1
+print(json.dumps(owned))`
+
+func (p *Provider) pipOwnedPackageSet(ctx context.Context) (map[string]bool, error) {
+	stdout, _, err := p.exec.Run(ctx, "python3", "-c", pipOwnedPackageSetScript)
+	if err != nil {
+		return nil, fmt.Errorf("pip ownership probe: %w", err)
+	}
+	var raw map[string]int
+	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &raw); err != nil {
+		return nil, fmt.Errorf("parsing pip ownership probe: %w", err)
+	}
+	owned := make(map[string]bool, len(raw))
+	for name := range raw {
+		owned[strings.ToLower(name)] = true
+	}
+	return owned, nil
+}
+
 // CLIToolSet returns the set of lowercase pip package names that install at
 // least one CLI entry point.  Used by Import to mark library packages as
 // auto-ignored.
@@ -181,9 +212,8 @@ func (p *Provider) CLIToolSet(ctx context.Context) (map[string]bool, error) {
 	return out, nil
 }
 
-// ListInstalled returns top-level (non-transitive) pip packages including pure
-// library packages.  Library packages are tracked for version/outdated info
-// even if they are auto-ignored in the config.
+// ListInstalled returns top-level (non-transitive), pip-owned packages,
+// including pure libraries. Distro-owned packages exposed by pip are excluded.
 func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool, error) {
 	stdout, _, err := p.exec.Run(ctx, p.bin, "list", "--not-required", "--format=json")
 	if err != nil {
@@ -193,9 +223,16 @@ func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool,
 	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &entries); err != nil {
 		return nil, fmt.Errorf("parsing pip list output: %w", err)
 	}
+	owned, err := p.pipOwnedPackageSet(ctx)
+	if err != nil {
+		return nil, err
+	}
 	tools := make([]provider.InstalledTool, 0, len(entries))
 	for _, e := range entries {
 		name := strings.ToLower(e.Name)
+		if !owned[name] {
+			continue
+		}
 		tools = append(tools, provider.InstalledTool{
 			Tool:    provider.Tool{Name: name, Provider: "pip", Package: name},
 			Version: e.Version,
@@ -204,7 +241,7 @@ func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool,
 	return tools, nil
 }
 
-// InstalledMap returns top-level (non-transitive) pip packages as lowercase-name→version.
+// InstalledMap returns top-level, pip-owned packages as lowercase-name→version.
 func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) {
 	stdout, _, err := p.exec.Run(ctx, p.bin, "list", "--not-required", "--format=json")
 	if err != nil {
@@ -214,9 +251,16 @@ func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) 
 	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &entries); err != nil {
 		return nil, fmt.Errorf("parsing pip list output: %w", err)
 	}
+	owned, err := p.pipOwnedPackageSet(ctx)
+	if err != nil {
+		return nil, err
+	}
 	m := make(map[string]string, len(entries))
 	for _, e := range entries {
-		m[strings.ToLower(e.Name)] = e.Version
+		name := strings.ToLower(e.Name)
+		if owned[name] {
+			m[name] = e.Version
+		}
 	}
 	return m, nil
 }
@@ -227,7 +271,7 @@ type pipOutdatedEntry struct {
 	LatestVersion string `json:"latest_version"`
 }
 
-// OutdatedMap returns lowercase package name → latest available version.
+// OutdatedMap returns pip-owned lowercase package name → latest available version.
 func (p *Provider) OutdatedMap(ctx context.Context) (map[string]string, error) {
 	stdout, _, err := p.exec.Run(ctx, p.bin, "list", "--outdated", "--format=json")
 	if err != nil {
@@ -237,9 +281,16 @@ func (p *Provider) OutdatedMap(ctx context.Context) (map[string]string, error) {
 	if err := json.Unmarshal([]byte(stdout), &entries); err != nil {
 		return nil, fmt.Errorf("parsing pip outdated: %w", err)
 	}
+	owned, err := p.pipOwnedPackageSet(ctx)
+	if err != nil {
+		return nil, err
+	}
 	m := make(map[string]string, len(entries))
 	for _, e := range entries {
-		m[strings.ToLower(e.Name)] = e.LatestVersion
+		name := strings.ToLower(e.Name)
+		if owned[name] {
+			m[name] = e.LatestVersion
+		}
 	}
 	return m, nil
 }

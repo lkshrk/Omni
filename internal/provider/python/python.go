@@ -304,7 +304,21 @@ func (p *Provider) ListInstalled(ctx context.Context) ([]provider.InstalledTool,
 	if err != nil {
 		return nil, fmt.Errorf("pip list --not-required: %w", err)
 	}
-	return parsePipList(stdout)
+	tools, err := parsePipList(stdout)
+	if err != nil {
+		return nil, err
+	}
+	owned, err := p.pipOwnedPackageSet(ctx, b)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]provider.InstalledTool, 0, len(tools))
+	for _, tool := range tools {
+		if owned[strings.ToLower(tool.Name)] {
+			filtered = append(filtered, tool)
+		}
+	}
+	return filtered, nil
 }
 
 // InstalledByManager implements provider.MultiManagerBulkChecker.
@@ -343,6 +357,11 @@ func (p *Provider) InstalledByManager(ctx context.Context) (map[string]provider.
 			if parseErr != nil {
 				return fmt.Errorf("parsing %s list output: %w", b.binary, parseErr)
 			}
+			owned, ownershipErr := p.pipOwnedPackageSet(ctx, b)
+			if ownershipErr != nil {
+				return ownershipErr
+			}
+			m = retainPipOwned(m, owned)
 		}
 		for name, ver := range m {
 			if _, exists := result[name]; !exists {
@@ -388,7 +407,56 @@ func (p *Provider) InstalledMap(ctx context.Context) (map[string]string, error) 
 	if err != nil {
 		return nil, fmt.Errorf("pip list --not-required: %w", err)
 	}
-	return parsePipInstalledMap(stdout)
+	m, err := parsePipInstalledMap(stdout)
+	if err != nil {
+		return nil, err
+	}
+	owned, err := p.pipOwnedPackageSet(ctx, b)
+	if err != nil {
+		return nil, err
+	}
+	return retainPipOwned(m, owned), nil
+}
+
+// pipOwnedPackageSetScript returns distributions whose INSTALLER metadata says
+// pip. Distro packages share the interpreter and appear in pip list output, but
+// are owned and upgraded by the system package manager instead.
+const pipOwnedPackageSetScript = `import importlib.metadata,json
+owned={}
+for d in importlib.metadata.distributions():
+	try:
+		installer=(d.read_text("INSTALLER") or "").strip().casefold()
+		name=d.metadata["Name"]
+	except Exception:
+		continue
+	if installer=="pip" and name:
+		owned[name.lower()]=1
+print(json.dumps(owned))`
+
+func (p *Provider) pipOwnedPackageSet(ctx context.Context, b *backend) (map[string]bool, error) {
+	stdout, _, err := p.exec.Run(ctx, b.pythonBinary, "-c", pipOwnedPackageSetScript)
+	if err != nil {
+		return nil, fmt.Errorf("%s ownership probe: %w", b.binary, err)
+	}
+	var raw map[string]int
+	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &raw); err != nil {
+		return nil, fmt.Errorf("parsing %s ownership probe: %w", b.binary, err)
+	}
+	owned := make(map[string]bool, len(raw))
+	for name := range raw {
+		owned[strings.ToLower(name)] = true
+	}
+	return owned, nil
+}
+
+func retainPipOwned(items map[string]string, owned map[string]bool) map[string]string {
+	filtered := make(map[string]string, len(items))
+	for name, value := range items {
+		if owned[strings.ToLower(name)] {
+			filtered[name] = value
+		}
+	}
+	return filtered
 }
 
 // cliToolSetScript returns a JSON object mapping lowercase package name → 1
@@ -501,6 +569,11 @@ func (p *Provider) OutdatedByManager(ctx context.Context) (map[string]map[string
 			if err != nil {
 				return fmt.Errorf("parsing %s outdated output: %w", b.binary, err)
 			}
+			owned, ownershipErr := p.pipOwnedPackageSet(ctx, b)
+			if ownershipErr != nil {
+				return ownershipErr
+			}
+			outdated = retainPipOwned(outdated, owned)
 		}
 		if len(outdated) > 0 {
 			result[b.binary] = outdated
