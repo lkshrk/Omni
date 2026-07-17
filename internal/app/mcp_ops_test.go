@@ -419,6 +419,26 @@ func TestRemoveMcpServer_PersistsAcrossStaleDuplicateFragment(t *testing.T) {
 	}
 }
 
+func TestRemoveMcpServer_ScrubsGroupRefs(t *testing.T) {
+	stub := &stubMcpAdapter{id: "codex", available: true}
+	existing := config.McpServer{Name: "del", Transport: "stdio", Command: "npx del", Agents: []string{"codex"}}
+	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{existing}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
+	if err := a.SetMcpGroups(context.Background(), "del", []string{"ai-plugins"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.RemoveMcpServer(context.Background(), "del"); err != nil {
+		t.Fatal(err)
+	}
+	cfg := loadMcpTestConfig(t, a)
+	for _, g := range cfg.Groups {
+		for _, ref := range g.McpServers {
+			if ref == "del" {
+				t.Fatalf("group %q still references removed server", g.Name)
+			}
+		}
+	}
+}
+
 func TestRemoveMcpServer_RejectsUnmanaged(t *testing.T) {
 	stub := &stubMcpAdapter{id: "claude-code", available: true}
 	a := newMcpTestApp(t, config.AgentsConfig{}, app.WithMcpAdapters([]app.McpAdapter{stub}))

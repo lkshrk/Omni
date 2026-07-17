@@ -413,6 +413,29 @@ func TestRemovePlugin_ListErrorDowngradesUninstallFailureToWarning(t *testing.T)
 	}
 }
 
+func TestRemovePlugin_ScrubsGroupRefs(t *testing.T) {
+	stub := &stubPluginAdapter{id: "codex", available: true}
+	agents := config.AgentsConfig{
+		Marketplaces: []config.Marketplace{{Name: "ponytail", Source: "a/b"}},
+		Plugins:      []config.Plugin{{Name: "ponytail", Marketplace: "ponytail", Agents: []string{"codex"}}},
+	}
+	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{stub}))
+	if err := a.SetPluginGroups(context.Background(), "ponytail", []string{"ai-plugins"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.RemovePlugin(context.Background(), "ponytail"); err != nil {
+		t.Fatal(err)
+	}
+	cfg := loadPluginTestConfig(t, a)
+	for _, g := range cfg.Groups {
+		for _, ref := range g.Plugins {
+			if ref == "ponytail" {
+				t.Fatalf("group %q still references removed plugin", g.Name)
+			}
+		}
+	}
+}
+
 func TestRemovePlugin_RejectsUnmanaged(t *testing.T) {
 	a := newPluginTestApp(t, config.AgentsConfig{}, app.WithPluginAdapters(nil))
 	if _, err := a.RemovePlugin(context.Background(), "ghost"); err == nil {
