@@ -54,6 +54,16 @@ type InstalledPlugin struct {
 	LatestVersion string
 	Sha           string
 	LatestSha     string
+	// PathOutdated is a precise outdated signal for plugins with no usable
+	// Version/LatestVersion pair (the common case — see plugin_rows.go's
+	// Outdated doc comment for why the marketplace-repo-HEAD sha can't be
+	// compared directly). nil means the adapter could not determine it
+	// (e.g. no source path, no installed commit sha, git unavailable);
+	// non-nil is authoritative. Populated by comparing the plugin's own
+	// source path's last-touched commit at HEAD against the same query run
+	// at the installed commit — equal means nothing has changed since
+	// install, regardless of unrelated commits elsewhere in the repo.
+	PathOutdated *bool
 }
 
 // InstalledMarketplace is one marketplace as reported by an agent's list

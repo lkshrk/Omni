@@ -97,6 +97,14 @@ func TestPluginRow_OutdatedShaMatrix(t *testing.T) {
 			app.PluginRow{Sha: "aaa1111", LatestSha: "bbb2222"}, false},
 		{"non-sha-looking version with no manifest version -> not outdated",
 			app.PluginRow{Version: "1.0.0", LatestSha: "d884ae04edebef577e82ff7c4e143debd0bbec9"}, false},
+		{"PathOutdated=true with no version signal -> outdated (the versionless-plugin case)",
+			app.PluginRow{PathOutdated: boolPtr(true)}, true},
+		{"PathOutdated=false with no version signal -> not outdated",
+			app.PluginRow{PathOutdated: boolPtr(false)}, false},
+		{"manifest version match wins over PathOutdated",
+			app.PluginRow{Version: "1.0.0", LatestVersion: "1.0.0", PathOutdated: boolPtr(true)}, false},
+		{"PathOutdated wins over sha-prefix fallback when both present",
+			app.PluginRow{Version: "25d22f864ad6", LatestSha: "25d22f864ad6ffab00112233445566778899aabb", PathOutdated: boolPtr(true)}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -104,5 +112,37 @@ func TestPluginRow_OutdatedShaMatrix(t *testing.T) {
 				t.Fatalf("Outdated() = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func boolPtr(b bool) *bool { return &b }
+
+// TestPluginRows_PathOutdatedMergedFromAdapter confirms PluginRows copies a
+// versionless plugin's PathOutdated signal from InstalledPlugin into the row
+// — this is the actual update-all bug: without it, plugins with no manifest
+// version (the common case) never show as outdated regardless of adapter
+// signal, so "U" silently has nothing to update.
+func TestPluginRows_PathOutdatedMergedFromAdapter(t *testing.T) {
+	claude := &stubPluginAdapter{
+		id:        "claude-code",
+		available: true,
+		listedPlugins: []app.InstalledPlugin{
+			{Name: "superpowers", Marketplace: "caveman", PathOutdated: boolPtr(true)},
+		},
+	}
+	agents := config.AgentsConfig{
+		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
+		Plugins:      []config.Plugin{{Name: "superpowers", Marketplace: "caveman"}},
+	}
+	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{claude}))
+	rows, _, err := a.PluginRows(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %+v", rows)
+	}
+	if !rows[0].Outdated() {
+		t.Fatalf("expected versionless plugin with PathOutdated=true to report Outdated()=true, got row %+v", rows[0])
 	}
 }

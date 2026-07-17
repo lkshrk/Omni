@@ -226,6 +226,278 @@ func TestAgentsAll_UpdateAll_StreamsProgressText(t *testing.T) {
 	}
 }
 
+// missingPluginStubAdapter reports nothing installed, so RestorePluginsPreRefreshed
+// (the "U" install-missing sub-step) has something to install.
+type missingPluginStubAdapter struct {
+	id        string
+	installed []string
+}
+
+func (s *missingPluginStubAdapter) ID() string      { return s.id }
+func (s *missingPluginStubAdapter) Available() bool { return true }
+func (s *missingPluginStubAdapter) ListPlugins(context.Context) ([]app.InstalledPlugin, error) {
+	return nil, nil
+}
+func (s *missingPluginStubAdapter) InstallPlugin(_ context.Context, p config.Plugin) error {
+	s.installed = append(s.installed, p.Name)
+	return nil
+}
+func (s *missingPluginStubAdapter) RemovePlugin(context.Context, config.Plugin) error { return nil }
+func (s *missingPluginStubAdapter) UpdatePlugin(context.Context, string, string) error {
+	return nil
+}
+func (s *missingPluginStubAdapter) ListMarketplaces(context.Context) ([]app.InstalledMarketplace, error) {
+	return nil, nil
+}
+func (s *missingPluginStubAdapter) AddMarketplace(context.Context, config.Marketplace) error {
+	return nil
+}
+func (s *missingPluginStubAdapter) UpdateMarketplaces(context.Context) error { return nil }
+
+// progressStubMcpAdapter reports nothing installed, so RestoreMcpServers (the
+// "U" install-missing sub-step) has something to add.
+type progressStubMcpAdapter struct {
+	id    string
+	added []string
+}
+
+func (s *progressStubMcpAdapter) ID() string      { return s.id }
+func (s *progressStubMcpAdapter) Available() bool { return true }
+func (s *progressStubMcpAdapter) List(context.Context) ([]app.InstalledMcpServer, error) {
+	return nil, nil
+}
+func (s *progressStubMcpAdapter) Add(_ context.Context, srv config.McpServer) error {
+	s.added = append(s.added, srv.Name)
+	return nil
+}
+func (s *progressStubMcpAdapter) Remove(context.Context, string) error { return nil }
+
+// TestAgentsAll_UpdateAll_InstallsMissingPluginsAndMcpServers is the
+// regression test for the "update-all should also install missing
+// plugins/mcps" request: previously "U" only updated already-installed
+// plugins found outdated and left mcp untouched entirely (mcp has no update
+// concept). Now it should also install manifest plugins/mcp servers that
+// aren't installed yet on this host — mirroring what "S" does for those two
+// sections, without requiring a full "S" sync.
+func TestAgentsAll_UpdateAll_InstallsMissingPluginsAndMcpServers(t *testing.T) {
+	pluginStub := &missingPluginStubAdapter{id: "claude-code"}
+	mcpStub := &progressStubMcpAdapter{id: "claude-code"}
+	cfg := &config.RootConfig{
+		Agents: config.AgentsConfig{
+			Marketplaces: []config.Marketplace{{Name: "acme-market", Source: "acme/market"}},
+			Plugins:      []config.Plugin{{Name: "missing-plugin", Marketplace: "acme-market"}},
+			McpServers:   []config.McpServer{{Name: "missing-mcp", Transport: "stdio", Command: "npx foo"}},
+		},
+	}
+	m := agentsAllProgressModel(t, cfg,
+		nil,
+		[]app.PluginRow{{
+			Name: "missing-plugin", Marketplace: "acme-market",
+			PerAgentStatus: map[string]app.PluginStatus{"claude-code": app.PluginStatusMissing},
+		}},
+		app.WithPluginAdapters([]app.PluginAdapter{pluginStub}),
+		app.WithMcpAdapters([]app.McpAdapter{mcpStub}),
+	)
+
+	var captured []string
+	got := drainProgressCmds(t, m, tea.KeyPressMsg{Code: 'U', Text: "U"}, &captured)
+
+	if !containsFold(captured, "installing missing plugins") {
+		t.Errorf("expected progress text to include 'installing missing plugins', got %v", captured)
+	}
+	if !containsFold(captured, "installing missing mcp servers") {
+		t.Errorf("expected progress text to include 'installing missing mcp servers', got %v", captured)
+	}
+	if len(pluginStub.installed) != 1 || pluginStub.installed[0] != "missing-plugin" {
+		t.Fatalf("expected missing-plugin to be installed via update-all, got %v", pluginStub.installed)
+	}
+	if len(mcpStub.added) != 1 || mcpStub.added[0] != "missing-mcp" {
+		t.Fatalf("expected missing-mcp to be added via update-all, got %v", mcpStub.added)
+	}
+	if got.pluginErr != nil {
+		t.Errorf("pluginErr = %v, want nil", got.pluginErr)
+	}
+	if got.mcpErr != nil {
+		t.Errorf("mcpErr = %v, want nil", got.mcpErr)
+	}
+}
+
+// combinedPluginStubAdapter reports one installed-but-outdated plugin and
+// leaves a second manifest plugin unreported (so PluginRows sees it as
+// missing) — lets a single "U" run exercise both the outdated-update and the
+// install-missing sub-step together, to check the marketplace refresh really
+// happens once for the whole run rather than once per sub-step.
+type combinedPluginStubAdapter struct {
+	id           string
+	refreshes    int
+	afterRefresh bool
+	installed    []string
+	updated      []string
+}
+
+func (s *combinedPluginStubAdapter) ID() string      { return s.id }
+func (s *combinedPluginStubAdapter) Available() bool { return true }
+func (s *combinedPluginStubAdapter) ListPlugins(context.Context) ([]app.InstalledPlugin, error) {
+	latest := "1.0.0"
+	if s.afterRefresh {
+		latest = "2.0.0"
+	}
+	return []app.InstalledPlugin{
+		{Name: "outdated-plugin", Marketplace: "acme-market", Version: "1.0.0", LatestVersion: latest},
+	}, nil
+}
+func (s *combinedPluginStubAdapter) InstallPlugin(_ context.Context, p config.Plugin) error {
+	s.installed = append(s.installed, p.Name)
+	return nil
+}
+func (s *combinedPluginStubAdapter) RemovePlugin(context.Context, config.Plugin) error { return nil }
+func (s *combinedPluginStubAdapter) UpdatePlugin(_ context.Context, name, _ string) error {
+	s.updated = append(s.updated, name)
+	return nil
+}
+func (s *combinedPluginStubAdapter) ListMarketplaces(context.Context) ([]app.InstalledMarketplace, error) {
+	return nil, nil
+}
+func (s *combinedPluginStubAdapter) AddMarketplace(context.Context, config.Marketplace) error {
+	return nil
+}
+func (s *combinedPluginStubAdapter) UpdateMarketplaces(context.Context) error {
+	s.refreshes++
+	s.afterRefresh = true
+	return nil
+}
+
+// TestAgentsAll_UpdateAll_RefreshesMarketplacesOnceAcrossUpdateAndInstall
+// covers the claim in doAgentsUpdateAll's doc comment: the outdated-plugin
+// update and the missing-plugin install both use their PreRefreshed variant
+// so the single up-front marketplace refresh isn't repeated for either. Only
+// the update-outdated path was covered before (TestAgentsAll_UpdateAll_
+// StreamsProgressText); this drives a plugin manifest with BOTH an outdated
+// and a missing entry in the same "U" press so both sub-steps actually run.
+func TestAgentsAll_UpdateAll_RefreshesMarketplacesOnceAcrossUpdateAndInstall(t *testing.T) {
+	fake := &combinedPluginStubAdapter{id: "claude-code"}
+	cfg := &config.RootConfig{
+		Agents: config.AgentsConfig{
+			Marketplaces: []config.Marketplace{{Name: "acme-market", Source: "acme/market"}},
+			Plugins: []config.Plugin{
+				{Name: "outdated-plugin", Marketplace: "acme-market"},
+				{Name: "missing-plugin", Marketplace: "acme-market"},
+			},
+		},
+	}
+	m := agentsAllProgressModel(t, cfg,
+		nil,
+		[]app.PluginRow{
+			{
+				Name: "outdated-plugin", Marketplace: "acme-market",
+				Version: "1.0.0", LatestVersion: "1.0.0",
+				PerAgentStatus: map[string]app.PluginStatus{"claude-code": app.PluginStatusInstalled},
+			},
+			{
+				Name: "missing-plugin", Marketplace: "acme-market",
+				PerAgentStatus: map[string]app.PluginStatus{"claude-code": app.PluginStatusMissing},
+			},
+		},
+		app.WithPluginAdapters([]app.PluginAdapter{fake}),
+	)
+
+	var captured []string
+	got := drainProgressCmds(t, m, tea.KeyPressMsg{Code: 'U', Text: "U"}, &captured)
+
+	if fake.refreshes != 1 {
+		t.Errorf("expected exactly 1 marketplace refresh across the whole 'U' run (update + install-missing), got %d", fake.refreshes)
+	}
+	if len(fake.updated) != 1 || fake.updated[0] != "outdated-plugin" {
+		t.Errorf("expected outdated-plugin to be updated, got %v", fake.updated)
+	}
+	if len(fake.installed) != 1 || fake.installed[0] != "missing-plugin" {
+		t.Errorf("expected missing-plugin to be installed, got %v", fake.installed)
+	}
+	if got.pluginErr != nil {
+		t.Errorf("pluginErr = %v, want nil", got.pluginErr)
+	}
+}
+
+// erroringPluginStubAdapter has nothing installed and fails every install, so
+// the "U" install-missing sub-step has a real failure to propagate.
+type erroringPluginStubAdapter struct{ id string }
+
+func (s *erroringPluginStubAdapter) ID() string      { return s.id }
+func (s *erroringPluginStubAdapter) Available() bool { return true }
+func (s *erroringPluginStubAdapter) ListPlugins(context.Context) ([]app.InstalledPlugin, error) {
+	return nil, nil
+}
+func (s *erroringPluginStubAdapter) InstallPlugin(context.Context, config.Plugin) error {
+	return errors.New("install exploded")
+}
+func (s *erroringPluginStubAdapter) RemovePlugin(context.Context, config.Plugin) error { return nil }
+func (s *erroringPluginStubAdapter) UpdatePlugin(context.Context, string, string) error {
+	return nil
+}
+func (s *erroringPluginStubAdapter) ListMarketplaces(context.Context) ([]app.InstalledMarketplace, error) {
+	return nil, nil
+}
+func (s *erroringPluginStubAdapter) AddMarketplace(context.Context, config.Marketplace) error {
+	return nil
+}
+func (s *erroringPluginStubAdapter) UpdateMarketplaces(context.Context) error { return nil }
+
+// erroringMcpStubAdapter has nothing installed and fails every add, so the
+// "U" install-missing sub-step has a real failure to propagate.
+type erroringMcpStubAdapter struct{ id string }
+
+func (s *erroringMcpStubAdapter) ID() string      { return s.id }
+func (s *erroringMcpStubAdapter) Available() bool { return true }
+func (s *erroringMcpStubAdapter) List(context.Context) ([]app.InstalledMcpServer, error) {
+	return nil, nil
+}
+func (s *erroringMcpStubAdapter) Add(context.Context, config.McpServer) error {
+	return errors.New("add exploded")
+}
+func (s *erroringMcpStubAdapter) Remove(context.Context, string) error { return nil }
+
+// TestAgentsAll_UpdateAll_InstallMissingFailures_PropagateAsPluginAndMcpErr
+// confirms a failure in either new "U" install-missing sub-step (plugin or
+// mcp) actually reaches the model as pluginErr/mcpErr — the sub-step's error
+// isn't swallowed by combinePluginErrors/combineMcpErrors, and its running
+// flag still clears (mirrors the existing skills-error-doesn't-stick-running
+// coverage in TestAgentsAll_UpdateAll_SkillsErrorDoesNotStickRunning).
+func TestAgentsAll_UpdateAll_InstallMissingFailures_PropagateAsPluginAndMcpErr(t *testing.T) {
+	pluginStub := &erroringPluginStubAdapter{id: "claude-code"}
+	mcpStub := &erroringMcpStubAdapter{id: "claude-code"}
+	cfg := &config.RootConfig{
+		Agents: config.AgentsConfig{
+			Marketplaces: []config.Marketplace{{Name: "acme-market", Source: "acme/market"}},
+			Plugins:      []config.Plugin{{Name: "missing-plugin", Marketplace: "acme-market"}},
+			McpServers:   []config.McpServer{{Name: "missing-mcp", Transport: "stdio", Command: "npx foo"}},
+		},
+	}
+	m := agentsAllProgressModel(t, cfg,
+		nil,
+		[]app.PluginRow{{
+			Name: "missing-plugin", Marketplace: "acme-market",
+			PerAgentStatus: map[string]app.PluginStatus{"claude-code": app.PluginStatusMissing},
+		}},
+		app.WithPluginAdapters([]app.PluginAdapter{pluginStub}),
+		app.WithMcpAdapters([]app.McpAdapter{mcpStub}),
+	)
+
+	got := drainProgressCmds(t, m, tea.KeyPressMsg{Code: 'U', Text: "U"}, &[]string{})
+
+	if got.pluginErr == nil || !strings.Contains(got.pluginErr.Error(), "install exploded") {
+		t.Errorf("pluginErr = %v, want it to contain 'install exploded'", got.pluginErr)
+	}
+	if got.mcpErr == nil || !strings.Contains(got.mcpErr.Error(), "add exploded") {
+		t.Errorf("mcpErr = %v, want it to contain 'add exploded'", got.mcpErr)
+	}
+	if got.pluginRunning {
+		t.Error("pluginRunning should be false after full drain even when install-missing errored")
+	}
+	if got.mcpRunning {
+		t.Error("mcpRunning should be false after full drain even when install-missing errored")
+	}
+}
+
 // TestAgentsAll_SyncAll_StreamsProgressTextInOrder is a red test for the
 // planned doAgentsSyncAll change: it should stream progress text for
 // "restoring skills" then "restoring mcp" then "restoring plugins" in that
