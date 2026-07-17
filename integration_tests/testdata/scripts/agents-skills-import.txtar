@@ -10,12 +10,12 @@ stdout '\+ o/r'
 # The manifest was written: a restore dry-run now plans the adopted package
 # (ref from the lock entry is preserved), and a second import is a no-op.
 exec omni --config settings.json agents skills restore --dry-run
-stdout 'npx skills add o/r#main -g -y'
+stdout 'npx skills add o/r#main -g -a codex -y'
 exec omni --config settings.json agents skills import
 stdout '0 added, 0 updated, 1 unchanged'
 
 -- settings.json --
-{}
+{"version":1,"settings":{"agents_use":["codex"]}}
 
 -- state/skills/.skill-lock.json --
 {"version":3,"skills":{"x":{"source":"o/r","sourceType":"github","sourceUrl":"https://github.com/o/r","ref":"main","skillFolderHash":"abc","installedAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}}}

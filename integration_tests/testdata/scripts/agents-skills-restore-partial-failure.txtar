@@ -13,11 +13,12 @@ env XDG_STATE_HOME=$WORK/state
 stdout '^1 installed, 1 failed$'
 stdout '! fail/two: skills add fail/two: .*package not found'
 stderr 'agent operation\(s\) failed'
-grep -count=1 'skills add ok/one -g -y' .omni-cache/npx-calls.log
-grep -count=1 'skills add fail/two -g -y' .omni-cache/npx-calls.log
+grep -count=1 'skills add ok/one -g -a codex -y' .omni-cache/npx-calls.log
+grep -count=1 'skills add fail/two -g -a codex -y' .omni-cache/npx-calls.log
+grep -count=1 'skills list -g --json' .omni-cache/npx-calls.log
 
 -- settings.json --
-{"version":1,"agents":{"skills":[{"name":"one","source":"ok/one"},{"name":"two","source":"fail/two"}]}}
+{"version":1,"settings":{"agents_use":["codex"]},"agents":{"skills":[{"name":"one","source":"ok/one"},{"name":"two","source":"fail/two"}]}}
 
 -- bin/npx --
 #!/bin/sh
@@ -30,6 +31,10 @@ if [ "$1" = "skills" ] && [ "$2" = "add" ]; then
   esac
   mkdir -p "${XDG_STATE_HOME}/skills"
   printf '{"version":3,"skills":{"one":{"source":"ok/one","sourceType":"github","sourceUrl":"https://github.com/ok/one","ref":"main","skillFolderHash":"h1","installedAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}}}\n' > "${XDG_STATE_HOME}/skills/.skill-lock.json"
+  exit 0
+fi
+if [ "$1" = "skills" ] && [ "$2" = "list" ]; then
+  printf '[{"name":"one","path":"%s/.agents/skills/one","scope":"global","agents":["Codex"]}]\n' "$HOME"
   exit 0
 fi
 exit 1
