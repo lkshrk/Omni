@@ -236,9 +236,8 @@ type UpdateMarketplacesResult struct {
 }
 
 // UpdateMarketplaces refreshes every configured marketplace on every
-// available plugin adapter. Callers that are about to run UpdatePlugins for
-// at least one outdated plugin should skip this and rely on UpdatePlugins'
-// own up-front refresh instead of doing it twice.
+// available plugin adapter. Callers that follow up with plugin updates
+// should use UpdatePluginsPreRefreshed to avoid repeating the refresh.
 func (a *App) UpdateMarketplaces(ctx context.Context) (UpdateMarketplacesResult, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -273,6 +272,18 @@ func (a *App) UpdatePlugin(ctx context.Context, name string) (UpdatePluginResult
 // collected as data on the result, mirroring AddPluginResult. progress, when
 // non-nil, is called with each plugin name before its update runs.
 func (a *App) UpdatePlugins(ctx context.Context, names []string, progress func(name string)) (UpdatePluginResult, error) {
+	return a.updatePlugins(ctx, names, progress, true)
+}
+
+// UpdatePluginsPreRefreshed updates plugins without the up-front marketplace
+// refresh, for callers that just ran UpdateMarketplaces themselves (e.g. the
+// TUI's update-all, which must refresh first to even discover which plugins
+// are outdated).
+func (a *App) UpdatePluginsPreRefreshed(ctx context.Context, names []string, progress func(name string)) (UpdatePluginResult, error) {
+	return a.updatePlugins(ctx, names, progress, false)
+}
+
+func (a *App) updatePlugins(ctx context.Context, names []string, progress func(name string), refreshMarketplaces bool) (UpdatePluginResult, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
 		return UpdatePluginResult{}, err
@@ -290,18 +301,20 @@ func (a *App) UpdatePlugins(ctx context.Context, names []string, progress func(n
 	}
 	var res UpdatePluginResult
 	adapters := a.pluginAdapters()
-	for _, adapter := range adapters {
-		if !adapter.Available() {
-			continue
-		}
-		targeted := slices.ContainsFunc(targets, func(t *config.Plugin) bool {
-			return pluginTargetsAdapter(*t, adapter.ID())
-		})
-		if !targeted {
-			continue
-		}
-		if refreshErr := adapter.UpdateMarketplaces(ctx); refreshErr != nil {
-			res.Errors = append(res.Errors, PluginError{AgentID: adapter.ID(), Name: "marketplaces", Err: fmt.Errorf("refresh marketplaces: %w", refreshErr)})
+	if refreshMarketplaces {
+		for _, adapter := range adapters {
+			if !adapter.Available() {
+				continue
+			}
+			targeted := slices.ContainsFunc(targets, func(t *config.Plugin) bool {
+				return pluginTargetsAdapter(*t, adapter.ID())
+			})
+			if !targeted {
+				continue
+			}
+			if refreshErr := adapter.UpdateMarketplaces(ctx); refreshErr != nil {
+				res.Errors = append(res.Errors, PluginError{AgentID: adapter.ID(), Name: "marketplaces", Err: fmt.Errorf("refresh marketplaces: %w", refreshErr)})
+			}
 		}
 	}
 	for i, target := range targets {

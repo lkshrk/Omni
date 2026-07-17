@@ -141,14 +141,19 @@ func TestSkills_RestoredMsgPopulatesResult(t *testing.T) {
 	res := app.RestoreSkillsResult{Installed: []string{"caveman", "review"}}
 	m = drive(m, skillsRestoredMsg{res: res})
 
-	if m.skillsRunning {
-		t.Error("skillsRunning should be false after skillsRestoredMsg")
+	if !m.skillsRunning {
+		t.Error("skillsRunning should stay true after successful skillsRestoredMsg until the manifest reload lands")
 	}
 	if m.skillsResult == nil {
 		t.Fatal("skillsResult should be set after skillsRestoredMsg")
 	}
 	if len(m.skillsResult.Installed) != 2 {
 		t.Errorf("skillsResult.Installed = %v, want 2 entries", m.skillsResult.Installed)
+	}
+
+	m = drive(m, skillsManifestLoadedMsg{})
+	if m.skillsRunning {
+		t.Error("skillsRunning should be false once skillsManifestLoadedMsg lands")
 	}
 }
 
@@ -178,14 +183,19 @@ func TestSkills_ImportedMsgPopulatesDiff(t *testing.T) {
 	diff := app.ImportDiff{Added: []string{"new-skill"}, Unchanged: []string{"old-skill"}}
 	m = drive(m, skillsImportedMsg{diff: diff})
 
-	if m.skillsRunning {
-		t.Error("skillsRunning should be false after skillsImportedMsg")
+	if !m.skillsRunning {
+		t.Error("skillsRunning should stay true after successful skillsImportedMsg until the manifest reload lands")
 	}
 	if m.skillsImport == nil {
 		t.Fatal("skillsImport should be set after skillsImportedMsg")
 	}
 	if len(m.skillsImport.Added) != 1 || m.skillsImport.Added[0] != "new-skill" {
 		t.Errorf("skillsImport.Added = %v, want [new-skill]", m.skillsImport.Added)
+	}
+
+	m = drive(m, skillsManifestLoadedMsg{})
+	if m.skillsRunning {
+		t.Error("skillsRunning should be false once skillsManifestLoadedMsg lands")
 	}
 }
 
@@ -278,8 +288,13 @@ func TestSkills_UpdatedMsgClearsRunning(t *testing.T) {
 
 	m = drive(m, skillsUpdatedMsg{})
 
+	if !m.skillsRunning {
+		t.Error("skillsRunning should stay true after successful skillsUpdatedMsg until the manifest reload lands")
+	}
+
+	m = drive(m, skillsManifestLoadedMsg{})
 	if m.skillsRunning {
-		t.Error("skillsRunning should be false after skillsUpdatedMsg")
+		t.Error("skillsRunning should be false once skillsManifestLoadedMsg lands")
 	}
 }
 

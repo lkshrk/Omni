@@ -339,14 +339,19 @@ func TestPluginFlow_AddDoneMsgSuccessClosesFormAndReloads(t *testing.T) {
 	if m.pluginFormErr != nil {
 		t.Errorf("pluginFormErr should be nil after success, got %v", m.pluginFormErr)
 	}
-	if m.pluginRunning {
-		t.Error("pluginRunning should be false after pluginAddDoneMsg resolves")
+	if !m.pluginRunning {
+		t.Error("pluginRunning should stay true after successful pluginAddDoneMsg until the row reload lands")
 	}
 	if m.pluginFormName.Value() != "" {
 		t.Errorf("form should be reset after success, pluginFormName = %q", m.pluginFormName.Value())
 	}
 	if cmd == nil {
 		t.Fatal("expected a reload command after successful add")
+	}
+
+	m = drive(m, pluginRowsMsg{})
+	if m.pluginRunning {
+		t.Error("pluginRunning should be false once pluginRowsMsg lands")
 	}
 }
 

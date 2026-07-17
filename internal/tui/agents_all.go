@@ -516,34 +516,28 @@ func (m *Model) handleAgentsGlobalActionKeyMsg(msg tea.KeyPressMsg) (handled boo
 }
 
 // doAgentsUpdateAll runs the agents tab's "U" global bulk action: skills
-// update, an update for every outdated plugin, and a marketplace refresh.
+// update, a marketplace refresh, then an update for every outdated plugin.
 // mcp servers have no update concept (no version/sha drift tracked
 // per-adapter, only add/remove — see McpAdapter), so mcp participates in "U"
 // only as a no-op: it is simply not touched, same as tools' UpgradeAll only
-// touching rows with an actual update available. Marketplaces always refresh
-// here except when UpdatePlugins is about to run anyway — UpdatePlugins
-// already refreshes every targeted adapter's marketplaces up front (see its
-// doc comment), so a standalone refresh in that case would just repeat the
-// same CLI call.
+// touching rows with an actual update available. Marketplaces must refresh
+// BEFORE outdated plugins are computed: a plugin's LatestVersion/LatestSha
+// comes from the marketplace's local clone, so the cached rows can't know
+// about an update until the clone is pulled — computing outdated from the
+// cached rows first would never find anything to update. The plugin update
+// itself uses UpdatePluginsPreRefreshed so the refresh isn't repeated.
 func (m *Model) doAgentsUpdateAll() []tea.Cmd {
 	runSkills := m.skillsSectionEnabled() && len(m.skillsRows) > 0
-	var outdatedPlugins []string
-	if m.pluginsSectionEnabled() {
-		for _, row := range m.pluginRows {
-			if row.Outdated() {
-				outdatedPlugins = append(outdatedPlugins, row.Name)
-			}
-		}
-	}
-	runMarketplaces := m.marketplacesSectionEnabled() && len(outdatedPlugins) == 0
-	if !runSkills && len(outdatedPlugins) == 0 && !runMarketplaces {
+	runPlugins := m.pluginsSectionEnabled()
+	runMarketplaces := m.marketplacesSectionEnabled()
+	if !runSkills && !runPlugins && !runMarketplaces {
 		return nil
 	}
 	if runSkills {
 		m.skillsRunning = true
 		m.skillsErr = nil
 	}
-	if len(outdatedPlugins) > 0 {
+	if runPlugins {
 		m.pluginRunning = true
 		m.pluginErr = nil
 	}
@@ -555,22 +549,40 @@ func (m *Model) doAgentsUpdateAll() []tea.Cmd {
 	a, ctx := m.app, m.ctx
 	work := func() tea.Msg {
 		defer close(ch)
-		done := agentsProgressDoneMsg{gen: gen, skills: runSkills, plugin: len(outdatedPlugins) > 0, marketplace: runMarketplaces}
+		done := agentsProgressDoneMsg{gen: gen, skills: runSkills, plugin: runPlugins, marketplace: runMarketplaces}
 		if runSkills {
 			sendProgress(ch, gen, "updating skills…")
 			_, _, err := a.UpdateSkills(ctx, app.UpdateSkillsOptions{})
 			done.skillsErr = err
 		}
-		if len(outdatedPlugins) > 0 {
-			res, err := a.UpdatePlugins(ctx, outdatedPlugins, func(name string) {
-				sendProgress(ch, gen, "updating plugin "+name+"…")
-			})
-			done.pluginErr = combinePluginErrors(err, res.Errors)
-		}
-		if runMarketplaces {
+		if runPlugins || runMarketplaces {
 			sendProgress(ch, gen, "updating marketplaces…")
 			res, err := a.UpdateMarketplaces(ctx)
-			done.marketplaceErr = combinePluginErrors(err, res.Errors)
+			mErr := combinePluginErrors(err, res.Errors)
+			if runMarketplaces {
+				done.marketplaceErr = mErr
+			} else {
+				done.pluginErr = mErr
+			}
+		}
+		if runPlugins && done.pluginErr == nil {
+			rows, _, err := a.PluginRows(ctx)
+			if err != nil {
+				done.pluginErr = err
+			} else {
+				var outdated []string
+				for _, row := range rows {
+					if row.Outdated() {
+						outdated = append(outdated, row.Name)
+					}
+				}
+				if len(outdated) > 0 {
+					res, err := a.UpdatePluginsPreRefreshed(ctx, outdated, func(name string) {
+						sendProgress(ch, gen, "updating plugin "+name+"…")
+					})
+					done.pluginErr = combinePluginErrors(err, res.Errors)
+				}
+			}
 		}
 		return done
 	}
