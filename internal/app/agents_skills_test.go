@@ -61,6 +61,15 @@ func TestRestoreSkillsOptionsDryRun(t *testing.T) {
 	}
 }
 
+func TestRestoreSkillsOptionsDryRunEmptyAgentSetIsNoOp(t *testing.T) {
+	pkgs := []resolvedPackage{
+		{SkillPackage: config.SkillPackage{Source: "o/r"}},
+	}
+	if lines := dryRunLines("npx", pkgs, []string{}); len(lines) != 0 {
+		t.Fatalf("lines = %v, want no install commands", lines)
+	}
+}
+
 // TestFilterShadowedSkillPackages_SkipsPluginProvided is a root-cause
 // regression test for the "restore reinstalls a plugin-provided skill as a
 // duplicate" scenario: RestoreSkills must not run the skills-CLI install for
@@ -112,13 +121,11 @@ func TestNpxInstallerVerifiesLockfile(t *testing.T) {
 	}
 }
 
-// TestShadowCheckAgents_NilUseFallsBackToDetectedAgents is the regression
+// TestResolveRestoreTargets_NilUseFallsBackToDetectedAgents is the regression
 // test for the default configuration (no agents_use, package without Agents):
-// filterShadowedSkillPackages fed a nil use list iterates zero agents and
-// shadows nothing, while the install auto-detects agents and would reinstall
-// a plugin-provided skill as a user-scope duplicate. RestoreSkills must feed
-// the filter the detected-agents fallback instead.
-func TestShadowCheckAgents_NilUseFallsBackToDetectedAgents(t *testing.T) {
+// RestoreSkills must pass the detected agents explicitly to both the shadow
+// filter and the upstream installer.
+func TestResolveRestoreTargets_NilUseFallsBackToDetectedAgents(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	stubBinariesOnPath(t, "claude")
@@ -137,7 +144,8 @@ func TestShadowCheckAgents_NilUseFallsBackToDetectedAgents(t *testing.T) {
 		"claude-code": {"academic-research-skills": true},
 	}
 
-	keep, shadowed := filterShadowedSkillPackages(pkgs, a.shadowCheckAgents(cfg, nil), pluginNames)
+	pkgs = resolveRestoreTargets(pkgs, nil, a.EnabledAgentIDs(cfg))
+	keep, shadowed := filterShadowedSkillPackages(pkgs, nil, pluginNames)
 	if len(shadowed) != 1 || shadowed[0] != "owner/academic-research-skills" {
 		t.Fatalf("shadowed = %v, want [owner/academic-research-skills]", shadowed)
 	}
@@ -145,12 +153,25 @@ func TestShadowCheckAgents_NilUseFallsBackToDetectedAgents(t *testing.T) {
 		t.Fatalf("keep = %+v, want only o/normal-package", keep)
 	}
 
-	explicit := []string{"cursor"}
-	if got := a.shadowCheckAgents(cfg, explicit); !reflect.DeepEqual(got, explicit) {
-		t.Fatalf("shadowCheckAgents(explicit) = %v, want %v", got, explicit)
+}
+
+func TestResolveRestoreTargets_PreservesPackageAgentsWithoutHostSelection(t *testing.T) {
+	pkgs := []resolvedPackage{{
+		SkillPackage: config.SkillPackage{Source: "o/r", Agents: []string{"claude-code"}},
+	}}
+	got := resolveRestoreTargets(pkgs, nil, []string{"codex"})
+	if !reflect.DeepEqual(got[0].Agents, []string{"claude-code"}) {
+		t.Fatalf("agents = %v, want package target [claude-code]", got[0].Agents)
 	}
-	if got := a.shadowCheckAgents(cfg, []string{}); got == nil || len(got) != 0 {
-		t.Fatalf("shadowCheckAgents(empty) = %#v, want non-nil empty", got)
+}
+
+func TestResolveRestoreTargets_ExplicitEmptyHostSelectionDisablesPackages(t *testing.T) {
+	pkgs := []resolvedPackage{{
+		SkillPackage: config.SkillPackage{Source: "o/r", Agents: []string{"claude-code"}},
+	}}
+	got := resolveRestoreTargets(pkgs, []string{}, []string{"codex"})
+	if got[0].Agents == nil || len(got[0].Agents) != 0 {
+		t.Fatalf("agents = %#v, want explicit empty target set", got[0].Agents)
 	}
 }
 
@@ -213,6 +234,121 @@ func TestSkillUpdateArgs(t *testing.T) {
 	}
 	if got := skillUpdateArgs(nil); !reflect.DeepEqual(got, []string{"skills", "update", "-g", "-y"}) {
 		t.Fatalf("empty names args = %v, want all-skills update", got)
+	}
+}
+
+func TestSkillListArgs(t *testing.T) {
+	want := []string{"skills", "list", "-g", "--json"}
+	if got := skillListArgs(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("args mismatch:\n got %v\nwant %v", got, want)
+	}
+}
+
+func TestSupportedAgentDisplaysAreUniqueForSkillsListMapping(t *testing.T) {
+	seen := make(map[string]string, len(supportedAgents))
+	for _, agent := range supportedAgents {
+		if previous, ok := seen[agent.Display]; ok {
+			t.Fatalf("agents %q and %q share upstream display name %q", previous, agent.ID, agent.Display)
+		}
+		seen[agent.Display] = agent.ID
+		if got := skillAgentDisplay(agent.ID); got != agent.Display {
+			t.Fatalf("skillAgentDisplay(%q) = %q, want %q", agent.ID, got, agent.Display)
+		}
+	}
+}
+
+func TestParseSkillsCLIList(t *testing.T) {
+	got, err := parseSkillsCLIList(`[
+  {"name":"one","path":"/tmp/one","scope":"global","agents":["Claude Code","Codex"]},
+  {"name":"two","path":"/tmp/two","scope":"global","agents":["Codex"]}
+]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Name != "one" || !reflect.DeepEqual(got[0].Agents, []string{"Claude Code", "Codex"}) {
+		t.Fatalf("parsed list = %+v", got)
+	}
+	if _, err := parseSkillsCLIList("not json"); err == nil {
+		t.Fatal("malformed list output must fail verification")
+	}
+	if _, err := parseSkillsCLIList("null"); err == nil {
+		t.Fatal("non-array list output must fail verification")
+	}
+	if got, err := parseSkillsCLIList("[]"); err != nil || len(got) != 0 {
+		t.Fatalf("empty array = %+v, %v", got, err)
+	}
+}
+
+func TestVerifyRestoredSkillTargetsAcceptsEveryExpectedAgentLink(t *testing.T) {
+	pkgs := []resolvedPackage{{SkillPackage: config.SkillPackage{
+		Source: "o/r", Agents: []string{"claude-code", "codex"},
+	}}}
+	lock := &config.SkillLockFile{Skills: map[string]config.SkillLockEntry{
+		"one": {Source: "o/r"},
+		"two": {Source: "o/r"},
+	}}
+	entries := []skillsCLIListEntry{
+		{Name: "one", Scope: "global", Agents: []string{"Claude Code", "Codex"}},
+		{Name: "two", Scope: "global", Agents: []string{"Claude Code", "Codex"}},
+	}
+	res := verifyRestoredSkillTargets(pkgs, lock, entries, RestoreSkillsResult{Installed: []string{"o/r"}})
+	if !reflect.DeepEqual(res.Installed, []string{"o/r"}) || len(res.Failed) != 0 {
+		t.Fatalf("result = %+v, want verified install", res)
+	}
+}
+
+func TestVerifyRestoredSkillTargetsRejectsMissingAgentLink(t *testing.T) {
+	pkgs := []resolvedPackage{
+		{SkillPackage: config.SkillPackage{Source: "ok/r", Agents: []string{"codex"}}},
+		{SkillPackage: config.SkillPackage{Source: "broken/r", Agents: []string{"claude-code", "codex"}}},
+	}
+	lock := &config.SkillLockFile{Skills: map[string]config.SkillLockEntry{
+		"ok":     {Source: "ok/r"},
+		"broken": {Source: "broken/r"},
+	}}
+	entries := []skillsCLIListEntry{
+		{Name: "ok", Scope: "global", Agents: []string{"Codex"}},
+		{Name: "broken", Scope: "global", Agents: []string{"Codex"}},
+	}
+	res := verifyRestoredSkillTargets(pkgs, lock, entries, RestoreSkillsResult{
+		Installed: []string{"ok/r", "broken/r"},
+		Failed:    []SkillFailure{{Name: "earlier/r", Message: "boom"}},
+	})
+	if !reflect.DeepEqual(res.Installed, []string{"ok/r"}) {
+		t.Fatalf("installed = %v, want only verified package", res.Installed)
+	}
+	if len(res.Failed) != 2 || res.Failed[1].Name != "broken/r" {
+		t.Fatalf("failed = %+v", res.Failed)
+	}
+	for _, want := range []string{"skills list verification", "broken", "claude-code"} {
+		if !strings.Contains(res.Failed[1].Message, want) {
+			t.Fatalf("failure %q must contain %q", res.Failed[1].Message, want)
+		}
+	}
+}
+
+func TestVerifyRestoredSkillTargetsRejectsProjectScopeRecord(t *testing.T) {
+	pkgs := []resolvedPackage{{SkillPackage: config.SkillPackage{Source: "o/r", Agents: []string{"codex"}}}}
+	lock := &config.SkillLockFile{Skills: map[string]config.SkillLockEntry{"one": {Source: "o/r"}}}
+	entries := []skillsCLIListEntry{{Name: "one", Scope: "project", Agents: []string{"Codex"}}}
+	res := verifyRestoredSkillTargets(pkgs, lock, entries, RestoreSkillsResult{Installed: []string{"o/r"}})
+	if len(res.Installed) != 0 || len(res.Failed) != 1 {
+		t.Fatalf("result = %+v, project record must not verify global restore", res)
+	}
+}
+
+func TestFailRestoredSkillVerificationDemotesEveryNominalSuccess(t *testing.T) {
+	res := failRestoredSkillVerification(RestoreSkillsResult{
+		Installed: []string{"a/one", "b/two"},
+		Failed:    []SkillFailure{{Name: "earlier/r", Message: "boom"}},
+	}, fmt.Errorf("invalid JSON"))
+	if len(res.Installed) != 0 || len(res.Failed) != 3 {
+		t.Fatalf("result = %+v", res)
+	}
+	for _, failure := range res.Failed[1:] {
+		if !strings.Contains(failure.Message, "skills list verification failed: invalid JSON") {
+			t.Fatalf("failure = %+v", failure)
+		}
 	}
 }
 

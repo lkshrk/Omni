@@ -85,7 +85,7 @@ func TestWithConfigPersistsPackagesAndGroupRefs(t *testing.T) {
 func TestSkillPackageAddArgs(t *testing.T) {
 	pkg := config.SkillPackage{Source: "o/r", Ref: "main"}
 	got := skillPackageAddArgs(pkg, []string{"claude-code", "codex"})
-	want := []string{"skills", "add", "o/r#main", "-g", "-a", "claude-code", "codex", "-y"}
+	want := []string{"skills", "add", "o/r#main", "-g", "-a", "claude-code", "-a", "codex", "-y"}
 	if len(got) != len(want) {
 		t.Fatalf("args = %v want %v", got, want)
 	}

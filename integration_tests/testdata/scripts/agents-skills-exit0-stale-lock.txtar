@@ -17,10 +17,11 @@ env XDG_STATE_HOME=$WORK/state
 stdout '^0 installed, 1 failed$'
 stdout '! o/r: skills add o/r exited 0 but reported failure: Failed to install skill o/r'
 stderr 'agent operation\(s\) failed'
-grep -count=1 'skills add o/r -g -y' .omni-cache/npx-calls.log
+grep -count=1 'skills add o/r -g -a codex -y' .omni-cache/npx-calls.log
+! grep 'skills list' .omni-cache/npx-calls.log
 
 -- settings.json --
-{"version":1,"agents":{"skills":[{"name":"x","source":"o/r"}]}}
+{"version":1,"settings":{"agents_use":["codex"]},"agents":{"skills":[{"name":"x","source":"o/r"}]}}
 
 -- state/skills/.skill-lock.json --
 {"version":3,"skills":{"x":{"source":"o/r","sourceType":"github","sourceUrl":"https://github.com/o/r","skillFolderHash":"stale","installedAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}}}

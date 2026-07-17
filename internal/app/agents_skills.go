@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -32,12 +33,13 @@ func skillPackageSource(pkg config.SkillPackage) string {
 	return pkg.Source
 }
 
-// skillPackageAddArgs builds `skills add <source>[#ref] -g [-a agents...] -y`.
+// skillPackageAddArgs builds `skills add <source>[#ref] -g [-a agent...] -y`.
+// Repeating the flag keeps each target explicit and mirrors the upstream
+// documented multi-agent invocation shape.
 func skillPackageAddArgs(pkg config.SkillPackage, agents []string) []string {
 	args := []string{"skills", "add", skillPackageSource(pkg), "-g"}
-	if len(agents) > 0 {
-		args = append(args, "-a")
-		args = append(args, agents...)
+	for _, agent := range agents {
+		args = append(args, "-a", agent)
 	}
 	return append(args, "-y")
 }
@@ -188,22 +190,33 @@ func filterShadowedSkillPackages(pkgs []resolvedPackage, use []string, pluginNam
 	return keep, shadowed
 }
 
-// shadowCheckAgents resolves the agent set the shadow filter must consider.
-// A nil use list makes the install omit -a and lets the CLI auto-detect
-// agents, but handed straight to filterShadowedSkillPackages it would iterate
-// nothing and shadow nothing — so fall back to the detected agents, the same
-// set the auto-detecting install would target (mirrors SkillPackageRows).
-func (a *App) shadowCheckAgents(cfg *config.RootConfig, use []string) []string {
-	if use != nil {
-		return use
+// resolveRestoreTargets writes an explicit agent set onto every package before
+// invoking the skills CLI. Package-level targets remain authoritative when the
+// host has no agents_use setting; only unrestricted packages fall back to the
+// detected installed agents.
+func resolveRestoreTargets(pkgs []resolvedPackage, use, detected []string) []resolvedPackage {
+	out := make([]resolvedPackage, len(pkgs))
+	copy(out, pkgs)
+	for i := range out {
+		pkg := &out[i].SkillPackage
+		if use == nil {
+			if len(pkg.Agents) == 0 {
+				pkg.Agents = append([]string(nil), detected...)
+			}
+			continue
+		}
+		pkg.Agents = effectiveSkillAgents(use, *pkg)
 	}
-	return a.EnabledAgentIDs(cfg)
+	return out
 }
 
 func restoreSkills(ctx context.Context, pkgs []resolvedPackage, use []string, inst SkillInstaller) RestoreSkillsResult {
 	var res RestoreSkillsResult
 	for _, p := range pkgs {
 		agents := effectiveSkillAgents(use, p.SkillPackage)
+		if len(agents) == 0 {
+			continue
+		}
 		if err := inst.Install(ctx, p.SkillPackage, agents); err != nil {
 			res.Failed = append(res.Failed, SkillFailure{Name: p.Source, Message: err.Error()})
 			continue
@@ -215,8 +228,8 @@ func restoreSkills(ctx context.Context, pkgs []resolvedPackage, use []string, in
 
 // effectiveSkillAgents resolves which agents a package installs to: the host's
 // enabled agents (use), narrowed to the package's own agents when it declares
-// any. A nil use list means "not configured" — restore omits -a and lets the
-// CLI auto-detect installed agents.
+// any. Restore resolves a nil host setting to detected installed agents before
+// calling this helper.
 // A non-nil empty use list means "no agents enabled" — the intersection is empty and the package installs to nothing.
 func effectiveSkillAgents(use []string, pkg config.SkillPackage) []string {
 	if len(pkg.Agents) == 0 {
@@ -246,7 +259,11 @@ type RestoreSkillsOptions struct {
 func dryRunLines(runner string, pkgs []resolvedPackage, use []string) []string {
 	lines := make([]string, 0, len(pkgs))
 	for _, p := range pkgs {
-		args := skillPackageAddArgs(p.SkillPackage, effectiveSkillAgents(use, p.SkillPackage))
+		agents := effectiveSkillAgents(use, p.SkillPackage)
+		if len(agents) == 0 {
+			continue
+		}
+		args := skillPackageAddArgs(p.SkillPackage, agents)
 		lines = append(lines, runner+" "+strings.Join(args, " "))
 	}
 	return lines
@@ -287,13 +304,18 @@ func (a *App) RestoreSkills(ctx context.Context, opts RestoreSkillsOptions) (Res
 	runner := skillRunner(nodeManager(cfg))
 	pkgs := resolveSkillPackages(cfg, currentMachineGroupName())
 	use := a.effectiveSettings(cfg).AgentsUse
+	var detected []string
+	if use == nil {
+		detected = a.EnabledAgentIDs(cfg)
+	}
+	pkgs = resolveRestoreTargets(pkgs, use, detected)
 	pluginNames, warnings := installedPluginNames(ctx, a)
 	if w := unconfiguredHostSkillsWarning(cfg); w != "" {
 		warnings = append(warnings, w)
 	}
-	pkgs, shadowedSources := filterShadowedSkillPackages(pkgs, a.shadowCheckAgents(cfg, use), pluginNames)
+	pkgs, shadowedSources := filterShadowedSkillPackages(pkgs, nil, pluginNames)
 	if opts.DryRun {
-		return RestoreSkillsResult{ShadowedByPlugin: shadowedSources, Warnings: warnings}, dryRunLines(runner, pkgs, use), nil
+		return RestoreSkillsResult{ShadowedByPlugin: shadowedSources, Warnings: warnings}, dryRunLines(runner, pkgs, nil), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -303,10 +325,23 @@ func (a *App) RestoreSkills(ctx context.Context, opts RestoreSkillsOptions) (Res
 	if err != nil {
 		return RestoreSkillsResult{}, nil, err
 	}
-	inst := npxInstaller{runner: runner, exec: a.fallbackExecutor().Run}
-	res := restoreSkills(ctx, pkgs, use, inst)
+	exec := a.fallbackExecutor().Run
+	inst := npxInstaller{runner: runner, exec: exec}
+	res := restoreSkills(ctx, pkgs, nil, inst)
 	res.ShadowedByPlugin = shadowedSources
 	res.Warnings = append(res.Warnings, warnings...)
+	if len(res.Installed) > 0 {
+		lock, err := config.LoadSkillLock(config.SkillLockPath(home))
+		if err != nil {
+			return res, nil, err
+		}
+		listed, err := listGlobalSkills(ctx, runner, exec)
+		if err != nil {
+			res = failRestoredSkillVerification(res, err)
+		} else {
+			res = verifyRestoredSkillTargets(pkgs, lock, listed, res)
+		}
+	}
 	after, err := lockHashes(home)
 	if err != nil {
 		return RestoreSkillsResult{}, nil, err
@@ -441,6 +476,118 @@ func lockHashes(home string) (map[string]string, error) {
 func skillUpdateArgs(names []string) []string {
 	args := []string{"skills", "update", "-g", "-y"}
 	return append(args, names...)
+}
+
+// skillsCLIListEntry is the stable machine-readable subset emitted by
+// `skills list -g --json`. Agent values are upstream display names, not the
+// IDs accepted by `skills add -a`.
+type skillsCLIListEntry struct {
+	Name   string   `json:"name"`
+	Scope  string   `json:"scope"`
+	Agents []string `json:"agents"`
+}
+
+func skillListArgs() []string {
+	return []string{"skills", "list", "-g", "--json"}
+}
+
+func parseSkillsCLIList(stdout string) ([]skillsCLIListEntry, error) {
+	var entries []skillsCLIListEntry
+	if err := json.Unmarshal([]byte(stdout), &entries); err != nil {
+		return nil, fmt.Errorf("parsing skills list JSON: %w", err)
+	}
+	if entries == nil {
+		return nil, fmt.Errorf("parsing skills list JSON: expected an array")
+	}
+	return entries, nil
+}
+
+func listGlobalSkills(ctx context.Context, runner string, exec func(context.Context, string, ...string) (string, string, error)) ([]skillsCLIListEntry, error) {
+	stdout, stderr, err := exec(ctx, runner, skillListArgs()...)
+	if err != nil {
+		return nil, fmt.Errorf("skills list: %w: %s", err, stderr)
+	}
+	if err := skillsCLIFailure("skills list", stdout, stderr); err != nil {
+		return nil, err
+	}
+	return parseSkillsCLIList(stdout)
+}
+
+func skillAgentDisplay(id string) string {
+	for _, agent := range supportedAgents {
+		if agent.ID == id {
+			return agent.Display
+		}
+	}
+	return id
+}
+
+// verifyRestoredSkillTargets turns a nominal package success into a failure
+// when the upstream filesystem-backed list cannot see every lockfile skill on
+// every resolved target agent. This catches missing canonical copies and
+// missing per-agent links that a populated lockfile alone cannot detect.
+func verifyRestoredSkillTargets(pkgs []resolvedPackage, lock *config.SkillLockFile, entries []skillsCLIListEntry, res RestoreSkillsResult) RestoreSkillsResult {
+	listed := make(map[string]map[string]bool, len(entries))
+	for _, entry := range entries {
+		if entry.Scope != "global" {
+			continue
+		}
+		agents := listed[entry.Name]
+		if agents == nil {
+			agents = make(map[string]bool, len(entry.Agents))
+			listed[entry.Name] = agents
+		}
+		for _, display := range entry.Agents {
+			agents[display] = true
+		}
+	}
+
+	packages := make(map[string]resolvedPackage, len(pkgs))
+	for _, pkg := range pkgs {
+		packages[pkg.Source] = pkg
+	}
+
+	verified := make([]string, 0, len(res.Installed))
+	for _, source := range res.Installed {
+		pkg, ok := packages[source]
+		if !ok {
+			verified = append(verified, source)
+			continue
+		}
+		names := packageSkills(lock, source)
+		var missing []string
+		if len(names) == 0 {
+			missing = append(missing, "lockfile skill entries")
+		}
+		for _, name := range names {
+			for _, agentID := range effectiveSkillAgents(nil, pkg.SkillPackage) {
+				if !listed[name][skillAgentDisplay(agentID)] {
+					missing = append(missing, name+" → "+agentID)
+				}
+			}
+		}
+		if len(missing) > 0 {
+			res.Failed = append(res.Failed, SkillFailure{
+				Name:    source,
+				Message: "skills list verification missing " + strings.Join(missing, ", "),
+			})
+			continue
+		}
+		verified = append(verified, source)
+	}
+	res.Installed = verified
+	return res
+}
+
+func failRestoredSkillVerification(res RestoreSkillsResult, err error) RestoreSkillsResult {
+	for _, source := range res.Installed {
+		res.Failed = append(res.Failed, SkillFailure{
+			Name:    source,
+			Message: "skills list verification failed: " + err.Error(),
+		})
+	}
+	res.Installed = nil
+	return res
 }
 
 // skillPackageRemoveArgs builds `skills remove -g [-a agents...] -y <names...>`.
