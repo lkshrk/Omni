@@ -30,7 +30,7 @@ func TestTUIConfiguredHostStartsDashboard(t *testing.T) {
 	home := filepath.Join(root, "home")
 	cache := filepath.Join(root, "cache")
 	configPath := filepath.Join(root, "settings.json")
-	env := isolatedTUIEnv(home, cache)
+	env := isolatedTUIEnv(t, home, cache)
 
 	runOmniCommand(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "hosts", "ensure", "testhost")
 
@@ -49,7 +49,7 @@ func TestTUIFallbackProviderListSmoke(t *testing.T) {
 	home := filepath.Join(root, "home")
 	cache := filepath.Join(root, "cache")
 	configPath := filepath.Join(root, "settings.json")
-	env := isolatedTUIEnv(home, cache)
+	env := isolatedTUIEnv(t, home, cache)
 
 	if err := os.MkdirAll(cache, 0o755); err != nil {
 		t.Fatalf("create cache: %v", err)
@@ -128,7 +128,7 @@ func TestTUIFallbackEditorPrefillsConfiguredGitHint(t *testing.T) {
 	home := filepath.Join(root, "home")
 	cache := filepath.Join(root, "cache")
 	configPath := filepath.Join(root, "settings.json")
-	env := isolatedTUIEnv(home, cache)
+	env := isolatedTUIEnv(t, home, cache)
 
 	if err := os.MkdirAll(cache, 0o755); err != nil {
 		t.Fatalf("create cache: %v", err)
@@ -213,7 +213,7 @@ func TestTUIIncludesStaticIgnoredDotCandidate(t *testing.T) {
 	home := filepath.Join(root, "home")
 	cache := filepath.Join(root, "cache")
 	configPath := filepath.Join(root, "settings.json")
-	env := isolatedTUIEnv(home, cache)
+	env := isolatedTUIEnv(t, home, cache)
 	repo := filepath.Join(home, "dotfiles")
 
 	if err := os.MkdirAll(filepath.Join(home, ".config", "node_modules"), 0o755); err != nil {
@@ -248,7 +248,7 @@ func TestTUISyncsDiscoveredDotCandidate(t *testing.T) {
 	home := filepath.Join(root, "home")
 	cache := filepath.Join(root, "cache")
 	configPath := filepath.Join(root, "settings.json")
-	env := isolatedTUIEnv(home, cache)
+	env := isolatedTUIEnv(t, home, cache)
 	repo := filepath.Join(home, "dotfiles")
 
 	candidateDir := filepath.Join(home, ".config", "ghost")
@@ -287,7 +287,7 @@ func TestTUIDashboardReconcileFixesDotIgnorePatterns(t *testing.T) {
 	home := filepath.Join(root, "home")
 	cache := filepath.Join(root, "cache")
 	configPath := filepath.Join(root, "settings.json")
-	env := isolatedTUIEnv(home, cache)
+	env := isolatedTUIEnv(t, home, cache)
 	cfg := &config.RootConfig{
 		Settings: config.Settings{
 			DisabledProviders: []string{"system", "node", "python", "pip"},
@@ -373,7 +373,49 @@ func integrationRepoRoot(t *testing.T) string {
 	}
 }
 
-func isolatedTUIEnv(home, cache string) []string {
+// minimalTestPATH deliberately excludes any developer-machine bin directory
+// that might hold real agent CLIs (claude, grok, codex, ...). The TUI's
+// agents feature shells out to those binaries by name (e.g. "claude plugins
+// list --json --available", "grok plugin list --json --available") to
+// enumerate plugins/mcp servers; if a real install is reachable on PATH it
+// runs for real and bootstraps its own state (e.g. ~/.claude, ~/.claude.json,
+// ~/.grok/...) inside the test's otherwise-isolated HOME. Those freshly
+// created directories then surface as unexpected dots candidates, shifting
+// row order/cursor position and breaking assertions that assume a specific
+// candidate is at the cursor.
+// Tool dirs stay (dots needs stow, typically brew-installed), but agent CLIs
+// must not run for real: agentCLIStubs shadows them via a dir prepended to
+// PATH, so a brew- or ~/.local/bin-installed claude/grok can never win.
+var minimalTestPATH = strings.Join([]string{
+	"/usr/bin", "/bin", "/usr/sbin", "/sbin",
+	"/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin",
+}, string(os.PathListSeparator))
+
+// agentCLIStubs are the binaries the agents feature execs by name (plugin/mcp
+// adapters and catalog detection). Each stub exits 0 with no output and no
+// side effects — the real CLIs bootstrap first-run state (~/.claude.json,
+// ~/.grok/...) into the test HOME, which then surfaces as unexpected dots
+// candidates and shifts cursor-position-sensitive assertions.
+var agentCLIStubs = []string{"claude", "codex", "grok", "cursor", "gemini", "opencode", "cline"}
+
+// stubAgentCLIDir creates a directory of no-op agent CLI stubs to prepend to
+// the isolated PATH.
+func stubAgentCLIDir(t *testing.T, home string) string {
+	t.Helper()
+	dir := filepath.Join(home, ".test-stub-bin")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range agentCLIStubs {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func isolatedTUIEnv(t *testing.T, home, cache string) []string {
+	stubDir := stubAgentCLIDir(t, home)
 	return append(os.Environ(),
 		"HOME="+home,
 		"XDG_CONFIG_HOME="+filepath.Join(home, ".config"),
@@ -383,6 +425,7 @@ func isolatedTUIEnv(home, cache string) []string {
 		"OMNI_HOSTNAME=testhost",
 		"OMNI_TEST_ISOLATED=1",
 		"TERM=xterm-256color",
+		"PATH="+stubDir+string(os.PathListSeparator)+minimalTestPATH,
 	)
 }
 

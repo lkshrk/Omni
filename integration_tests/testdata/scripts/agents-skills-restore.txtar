@@ -1,0 +1,36 @@
+# agents skills restore (real, non-dry-run): a fake npx runner installs both
+# manifest packages and writes their entries to the global lockfile at
+# $XDG_STATE_HOME/skills/.skill-lock.json — verifySkillInstalled requires the
+# entries to appear after a zero exit, so the fake must write them or the
+# install is treated as failed. Asserts the "N installed, N failed" summary
+# and that one `skills add` call per package reached the runner.
+chmod 0755 $WORK/bin/npx
+env PATH=$WORK/bin:$PATH
+env XDG_STATE_HOME=$WORK/state
+
+exec omni --config settings.json agents skills restore
+stdout '^2 installed, 0 failed$'
+! stdout 'drift'
+grep -count=1 'skills add a/one -g -y' .omni-cache/npx-calls.log
+grep -count=1 'skills add b/two -g -y' .omni-cache/npx-calls.log
+grep -count=2 'skills add' .omni-cache/npx-calls.log
+
+# The lockfile the runner wrote now backs the import path: everything the
+# restore installed is already in the manifest, so nothing to import.
+exec omni --config settings.json agents skills import --dry-run
+stdout '0 added, 0 updated, 2 unchanged'
+
+-- settings.json --
+{"version":1,"agents":{"skills":[{"name":"one","source":"a/one"},{"name":"two","source":"b/two"}]}}
+
+-- bin/npx --
+#!/bin/sh
+set -eu
+mkdir -p "${OMNI_CACHE_DIR}"
+echo "$*" >> "${OMNI_CACHE_DIR}/npx-calls.log"
+if [ "$1" = "skills" ] && [ "$2" = "add" ]; then
+  mkdir -p "${XDG_STATE_HOME}/skills"
+  printf '{"version":3,"skills":{"one":{"source":"a/one","sourceType":"github","sourceUrl":"https://github.com/a/one","skillFolderHash":"h1","installedAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"},"two":{"source":"b/two","sourceType":"github","sourceUrl":"https://github.com/b/two","skillFolderHash":"h2","installedAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}}}\n' > "${XDG_STATE_HOME}/skills/.skill-lock.json"
+  exit 0
+fi
+exit 1

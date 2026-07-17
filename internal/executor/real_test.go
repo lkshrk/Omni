@@ -132,7 +132,10 @@ func TestRealExecutor_Run(t *testing.T) {
 // neither volta nor nvm directories can be found).
 func TestDiscoverNodeManagerPaths_NoHome(t *testing.T) {
 	t.Setenv("HOME", "/nonexistent-path-xyz-abc")
-	t.Setenv("NVM_DIR", "") // isolate from the invoking shell's real NVM_DIR
+	// isolate from the invoking shell's real nvm env: NVM_BIN is consulted
+	// directly by discoverNodeManagerPaths, NVM_DIR by nvmDefaultBinDir.
+	t.Setenv("NVM_DIR", "")
+	t.Setenv("NVM_BIN", "")
 	got := discoverNodeManagerPaths()
 	if len(got) != 0 {
 		t.Errorf("expected empty paths with nonexistent HOME, got %v", got)
@@ -151,6 +154,8 @@ func TestResolveCommand_UsesAugmentedPath(t *testing.T) {
 	}
 	t.Setenv("HOME", home)
 	t.Setenv("PATH", "/usr/bin:/bin")
+	t.Setenv("NVM_DIR", "")
+	t.Setenv("NVM_BIN", "")
 
 	got, env := ResolveCommand("node-managed-tool")
 	if got != binary {

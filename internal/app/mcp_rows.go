@@ -64,7 +64,8 @@ func (a *App) McpServerRows(ctx context.Context) (managed []McpServerRow, unmana
 		}
 		installedByAgent[adapter.ID()] = byName
 	}
-	pluginNames := installedPluginNames(ctx, a)
+	// display-only builder: shadow warnings surface via RestoreSkills
+	pluginNames, _ := installedPluginNames(ctx, a)
 	manifestNames := make(map[string]struct{}, len(cfg.Agents.McpServers))
 	for _, s := range cfg.Agents.McpServers {
 		manifestNames[s.Name] = struct{}{}

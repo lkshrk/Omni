@@ -41,8 +41,15 @@ func (a *App) AddSkillPackage(ctx context.Context, input string) (config.SkillPa
 	runner := skillRunner(nodeManager(cfg))
 
 	args := skillPackageAddArgs(pkg, agents)
-	if _, stderr, err := a.fallbackExecutor().Run(ctx, runner, args...); err != nil {
+	stdout, stderr, err := a.fallbackExecutor().Run(ctx, runner, args...)
+	if err != nil {
 		return config.SkillPackage{}, fmt.Errorf("skills add %s: %w: %s", source, err, stderr)
+	}
+	if err := skillsCLIFailure("skills add "+source, stdout, stderr); err != nil {
+		return config.SkillPackage{}, err
+	}
+	if err := verifySkillInstalled(source); err != nil {
+		return config.SkillPackage{}, err
 	}
 
 	if err := a.withConfig(func(c *config.RootConfig) error {
@@ -83,8 +90,12 @@ func (a *App) UninstallSkillPackage(ctx context.Context, source string) error {
 	}
 	runner := skillRunner(nodeManager(cfg))
 	args := skillPackageRemoveArgs(names, agents)
-	if _, stderr, err := a.fallbackExecutor().Run(ctx, runner, args...); err != nil {
-		return fmt.Errorf("skills remove %s: %w: %s", source, err, stderr)
+	rmStdout, rmStderr, err := a.fallbackExecutor().Run(ctx, runner, args...)
+	if err != nil {
+		return fmt.Errorf("skills remove %s: %w: %s", source, err, rmStderr)
+	}
+	if err := skillsCLIFailure("skills remove "+source, rmStdout, rmStderr); err != nil {
+		return err
 	}
 	return a.withConfig(func(c *config.RootConfig) error {
 		c.Agents.Ignore.Skills = slices.DeleteFunc(c.Agents.Ignore.Skills, func(s string) bool {

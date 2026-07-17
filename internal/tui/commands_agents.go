@@ -179,6 +179,9 @@ func (m *Model) doAdoptSkillPackageWithGroup(source, group string, createdGroups
 
 func (m *Model) doSetSkillAgents(source string, ids []string) tea.Cmd {
 	a, ctx := m.app, m.ctx
+	if a == nil {
+		return nil
+	}
 	return func() tea.Msg {
 		rows, err := a.SetSkillAgentsWithState(ctx, source, ids)
 		return skillAgentsSavedMsg{rows: rows, err: err}
@@ -191,7 +194,7 @@ func (m *Model) openSkillAgentsPicker(row app.SkillPackageRow) tea.Cmd {
 		var err error
 		pickerRows, err = m.app.SkillAgentRows(row.Source)
 		if err != nil {
-			pickerRows = nil
+			return setStatus(m, "✗ "+err.Error(), true)
 		}
 	}
 	m.skillAgentsSource = row.Source
@@ -203,6 +206,9 @@ func (m *Model) openSkillAgentsPicker(row app.SkillPackageRow) tea.Cmd {
 
 func (m *Model) doSetSkillGroupMemberships(source string, after, createdGroups []string, activeHost string) tea.Cmd {
 	a, ctx := m.app, m.ctx
+	if a == nil {
+		return nil
+	}
 	return func() tea.Msg {
 		rows, err := a.SetSkillGroupsWithState(ctx, source, after, createdGroups, activeHost)
 		return skillsGroupsUpdatedMsg{rows: rows, err: err}

@@ -1021,6 +1021,21 @@ func helpActionGroups(m Model) []helpGroup {
 			items = append([]hintItem{items[0], hintFromBindingDesc(k.Toggle, "copy groups")}, items[1:]...)
 		}
 		return []helpGroup{{items: items}}
+	case viewSkills:
+		return []helpGroup{
+			{title: "Row", items: []hintItem{
+				hintFromBinding(agentsInstallBinding()),
+				hintFromBinding(agentsUpdateBinding()),
+				hintFromBinding(agentsGroupBinding()),
+				hintFromBinding(agentsIgnoreBinding()),
+				hintFromBinding(agentsDeleteBinding()),
+			}},
+			{title: "Bulk", items: []hintItem{
+				hintFromBinding(agentsUpdateAllBinding()),
+				hintFromBinding(agentsSyncAllBinding()),
+				hintFromBinding(agentsRefreshBinding()),
+			}},
+		}
 	default:
 		return []helpGroup{
 			{title: "Row", items: []hintItem{
@@ -1177,6 +1192,8 @@ func helpPopupTitle(m Model) string {
 		return "Dashboard Help"
 	case viewGroups:
 		return "Groups Help"
+	case viewSkills:
+		return "Agents Help"
 	default:
 		return "Tools Help"
 	}

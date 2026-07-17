@@ -757,3 +757,56 @@ func TestFeatureToggles_PluginsErrorPreservesState(t *testing.T) {
 		t.Errorf("pluginErr = %v, want %v", got.pluginErr, want)
 	}
 }
+
+// TestHelpPopup_AgentsTab_TitleAndActions is a regression test for the agents
+// tab's "?" popup showing the Tools help: helpPopupTitle must return "Agents
+// Help" for viewSkills, and the popup must render the agents Row/Bulk action
+// groups instead of Tools-only actions like "pin provider".
+func TestHelpPopup_AgentsTab_TitleAndActions(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewSkills
+	m.agentsEnabled = true
+
+	if got := helpPopupTitle(m); got != "Agents Help" {
+		t.Errorf("helpPopupTitle = %q, want %q", got, "Agents Help")
+	}
+
+	help := stripANSIEscapeSequences(renderHelpPopupWithWidth(m, helpPopupContentWidth(m)))
+	for _, want := range []string{"install", "update all", "sync all", "refresh"} {
+		if !strings.Contains(help, want) {
+			t.Errorf("agents help popup missing agents action %q, got:\n%s", want, help)
+		}
+	}
+	if strings.Contains(help, "pin provider") {
+		t.Errorf("agents help popup must not contain Tools-only action %q, got:\n%s", "pin provider", help)
+	}
+}
+
+// TestDoUninstallSkillPackage_NilAppReturnsNil verifies the nil-app guard.
+func TestDoUninstallSkillPackage_NilAppReturnsNil(t *testing.T) {
+	m := baseModel(nil)
+	m.app = nil
+	if cmd := m.doUninstallSkillPackage("github.com/foo/pkg"); cmd != nil {
+		t.Error("doUninstallSkillPackage with nil app should return nil cmd")
+	}
+}
+
+// TestDoUninstallSkillPackage_ErrorPropagates verifies an app failure lands
+// in skillRemovedMsg.err.
+func TestDoUninstallSkillPackage_ErrorPropagates(t *testing.T) {
+	m := baseModel(nil)
+	m.app = newBrokenConfigApp(t)
+
+	cmd := m.doUninstallSkillPackage("github.com/foo/pkg")
+	if cmd == nil {
+		t.Fatal("expected a non-nil cmd with a live app")
+	}
+	msg := cmd()
+	got, ok := msg.(skillRemovedMsg)
+	if !ok {
+		t.Fatalf("cmd() = %T, want skillRemovedMsg", msg)
+	}
+	if got.err == nil {
+		t.Error("expected an error when the config path is unreadable")
+	}
+}

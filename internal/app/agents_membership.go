@@ -34,6 +34,12 @@ func (a *App) SetSkillGroups(source string, groups, createdGroups []string, acti
 	}
 	targets := membershipGroupSet(groups)
 	return a.withConfig(func(cfg *config.RootConfig) error {
+		if err := a.requireSkillsEnabled(cfg); err != nil {
+			return err
+		}
+		if !slices.ContainsFunc(cfg.Agents.Packages, func(p config.SkillPackage) bool { return p.Source == source }) {
+			return fmt.Errorf("skill package %q not found", source)
+		}
 		if err := createSelectedGroupsInConfig(cfg, createdGroups, targets); err != nil {
 			return err
 		}

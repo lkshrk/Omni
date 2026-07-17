@@ -1,0 +1,35 @@
+# agents skills restore partial failure: one package installs, the other's
+# runner invocation exits 1. The failure is surfaced as a per-package
+# "  ! source: ..." detail line under the "1 installed, 1 failed" summary,
+# and agentErrsFailure makes the top-level omni command itself fail (exit 1,
+# "error: N agent operation(s) failed" on stderr) even though one package
+# installed fine — aligned with `agents mcp restore` / `agents plugins
+# restore`.
+chmod 0755 $WORK/bin/npx
+env PATH=$WORK/bin:$PATH
+env XDG_STATE_HOME=$WORK/state
+
+! exec omni --config settings.json agents skills restore
+stdout '^1 installed, 1 failed$'
+stdout '! fail/two: skills add fail/two: .*package not found'
+stderr 'agent operation\(s\) failed'
+grep -count=1 'skills add ok/one -g -y' .omni-cache/npx-calls.log
+grep -count=1 'skills add fail/two -g -y' .omni-cache/npx-calls.log
+
+-- settings.json --
+{"version":1,"agents":{"skills":[{"name":"one","source":"ok/one"},{"name":"two","source":"fail/two"}]}}
+
+-- bin/npx --
+#!/bin/sh
+set -eu
+mkdir -p "${OMNI_CACHE_DIR}"
+echo "$*" >> "${OMNI_CACHE_DIR}/npx-calls.log"
+if [ "$1" = "skills" ] && [ "$2" = "add" ]; then
+  case "$3" in
+    fail/*) printf 'error: package not found\n' >&2; exit 1 ;;
+  esac
+  mkdir -p "${XDG_STATE_HOME}/skills"
+  printf '{"version":3,"skills":{"one":{"source":"ok/one","sourceType":"github","sourceUrl":"https://github.com/ok/one","ref":"main","skillFolderHash":"h1","installedAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}}}\n' > "${XDG_STATE_HOME}/skills/.skill-lock.json"
+  exit 0
+fi
+exit 1

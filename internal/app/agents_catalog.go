@@ -124,9 +124,14 @@ func agentSkillsDirs(home string, a AgentInfo) []string {
 var lookPath = exec.LookPath
 
 // sharedConfigDirs returns the set of configDir values used by more than one
-// catalog entry. A shared dir (e.g. ".agents") is not agent-specific, so its
-// mere existence is not a reliable installed signal for any one agent mapped
-// to it.
+// catalog entry. A shared dir — whether a cross-vendor store (".agents" is
+// the skills CLI's canonical store, always present) or a vendor-shared dir
+// (".zencoder" is used by both Zencoder and Zenflow) — cannot identify WHICH
+// agent is installed, and InstalledAgents feeds restore/enable targets, so a
+// false positive would write skills and config for a product that is not
+// installed. Agents mapped to a shared dir therefore need an agent-specific
+// signal (their binary); without one they are never auto-detected, and users
+// can still target them explicitly via agents_use.
 func sharedConfigDirs() map[string]bool {
 	counts := make(map[string]int, len(supportedAgents))
 	for _, a := range supportedAgents {
@@ -165,12 +170,13 @@ func dirNonEmpty(dir string) bool {
 
 // InstalledAgents returns the supported agents detected as installed on this
 // machine, in catalog order. Detection is layered to avoid false positives
-// from configDirs shared across multiple catalog entries (e.g. ".agents" is
-// the skills canonical store, always present, and not agent-specific):
+// from configDirs shared across multiple catalog entries (see
+// sharedConfigDirs — a false positive here becomes a restore target and
+// writes state for an agent that is not installed):
 //
 //   - Shared configDir: installed only if the agent's binary is found on
 //     PATH. An agent with no known binary mapped to a shared dir is never
-//     auto-detected (no reliable signal exists).
+//     auto-detected; target it explicitly via agents_use instead.
 //   - Dedicated configDir: installed if the dir exists and, when a binary is
 //     set, the binary is also found on PATH; when no binary is set, installed
 //     if the dir exists and is non-empty.

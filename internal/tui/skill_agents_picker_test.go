@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -292,5 +293,123 @@ func TestSkillAgents_FooterShowsListLevelActions(t *testing.T) {
 	out := stripANSIEscapeSequences(m.viewSkillsBody())
 	if strings.Contains(out, "U update all") {
 		t.Errorf("viewSkillsBody must not contain a stray bulk-action line, got:\n%s", out)
+	}
+}
+
+// newBrokenConfigApp returns an *app.App whose config path is a directory, so
+// every LoadConfig/withConfig call fails deterministically without touching
+// the network or the user's real config.
+func newBrokenConfigApp(t *testing.T) *app.App {
+	t.Helper()
+	return app.New(t.TempDir())
+}
+
+// TestOpenSkillAgentsPicker_ErrorSetsStatusAndKeepsPickerClosed verifies that
+// when SkillAgentRows fails, openSkillAgentsPicker returns a "✗ …" status cmd
+// and does NOT open the picker or mutate picker state.
+func TestOpenSkillAgentsPicker_ErrorSetsStatusAndKeepsPickerClosed(t *testing.T) {
+	m := baseModel(nil)
+	m.app = newBrokenConfigApp(t)
+
+	cmd := m.openSkillAgentsPicker(app.SkillPackageRow{Source: "github.com/foo/pkg", Name: "pkg"})
+
+	if cmd == nil {
+		t.Fatal("expected a non-nil status cmd when SkillAgentRows fails")
+	}
+	if !strings.HasPrefix(m.statusMsg, "✗ ") {
+		t.Errorf("statusMsg = %q, want it to start with %q", m.statusMsg, "✗ ")
+	}
+	if m.skillAgentsPicker {
+		t.Error("skillAgentsPicker should stay false when SkillAgentRows fails")
+	}
+	if m.skillAgentsSource != "" {
+		t.Errorf("skillAgentsSource = %q, want empty (untouched on error)", m.skillAgentsSource)
+	}
+	if m.skillAgentsRows != nil {
+		t.Errorf("skillAgentsRows = %v, want nil (untouched on error)", m.skillAgentsRows)
+	}
+}
+
+// TestOpenSkillAgentsPicker_SuccessOpensPicker verifies the success path with
+// a live app: picker opens, source and rows are set, cursor resets to 0, and
+// no status cmd is returned.
+func TestOpenSkillAgentsPicker_SuccessOpensPicker(t *testing.T) {
+	a := newScanPlanTestApp(t)
+	m := baseModel(nil)
+	m.app = a
+	m.skillAgentsCursor = 3
+
+	cmd := m.openSkillAgentsPicker(app.SkillPackageRow{Source: "github.com/foo/pkg", Name: "pkg"})
+
+	if cmd != nil {
+		t.Errorf("expected nil cmd on success, got %v", cmd)
+	}
+	if !m.skillAgentsPicker {
+		t.Error("skillAgentsPicker should be true after a successful open")
+	}
+	if m.skillAgentsSource != "github.com/foo/pkg" {
+		t.Errorf("skillAgentsSource = %q, want %q", m.skillAgentsSource, "github.com/foo/pkg")
+	}
+	if m.skillAgentsCursor != 0 {
+		t.Errorf("skillAgentsCursor = %d, want 0", m.skillAgentsCursor)
+	}
+}
+
+// TestDoSetSkillGroupMemberships_ErrorCarriedInMsg verifies a failed group
+// update (unknown package source) propagates its error into
+// skillsGroupsUpdatedMsg with no rows.
+func TestDoSetSkillGroupMemberships_ErrorCarriedInMsg(t *testing.T) {
+	a := newScanPlanTestApp(t)
+	m := baseModel(nil)
+	m.app = a
+	m.ctx = context.Background()
+
+	msg := m.doSetSkillGroupMemberships("github.com/foo/absent", []string{"dev"}, nil, shortHostname())()
+	got, ok := msg.(skillsGroupsUpdatedMsg)
+	if !ok {
+		t.Fatalf("cmd() = %T, want skillsGroupsUpdatedMsg", msg)
+	}
+	if got.err == nil {
+		t.Fatal("expected an error for an unknown package source")
+	}
+	if !strings.Contains(got.err.Error(), "not found") {
+		t.Errorf("err = %q, want it to mention 'not found'", got.err.Error())
+	}
+	if got.rows != nil {
+		t.Errorf("rows = %v, want nil on error", got.rows)
+	}
+}
+
+// TestDoSetSkillGroupMemberships_SuccessReturnsRows verifies a successful
+// group update returns refreshed rows carrying the new membership.
+func TestDoSetSkillGroupMemberships_SuccessReturnsRows(t *testing.T) {
+	a := newScanPlanTestApp(t)
+	const source = "github.com/foo/pkg"
+	if _, err := a.AdoptSkillPackage(source); err != nil {
+		t.Fatalf("AdoptSkillPackage: %v", err)
+	}
+	m := baseModel(nil)
+	m.app = a
+	m.ctx = context.Background()
+
+	msg := m.doSetSkillGroupMemberships(source, []string{"dev"}, nil, shortHostname())()
+	got, ok := msg.(skillsGroupsUpdatedMsg)
+	if !ok {
+		t.Fatalf("cmd() = %T, want skillsGroupsUpdatedMsg", msg)
+	}
+	if got.err != nil {
+		t.Fatalf("err = %v, want nil", got.err)
+	}
+	var row app.SkillPackageRow
+	for _, r := range got.rows {
+		if r.Source == source {
+			row = r
+		}
+	}
+	if row.Source == "" {
+		t.Fatalf("rows = %v, want a row for %q", got.rows, source)
+	}
+	if len(row.Groups) != 1 || row.Groups[0] != "dev" {
+		t.Errorf("row.Groups = %v, want [dev]", row.Groups)
 	}
 }

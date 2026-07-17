@@ -103,7 +103,7 @@ func agentsAdoptEligible(e agentsAllRow) bool {
 }
 
 func (m *Model) agentsRowUpgrade(e agentsAllRow) (bool, []tea.Cmd) {
-	if e.feature == agentsSectionPlugins && e.localIdx < len(m.pluginRows) && e.status == agentsStatusUpdates {
+	if e.feature == agentsSectionPlugins && e.localIdx >= 0 && e.localIdx < len(m.pluginRows) && e.status == agentsStatusUpdates {
 		name := m.pluginRows[e.localIdx].Name
 		m.pluginRunning = true
 		m.pluginErr = nil

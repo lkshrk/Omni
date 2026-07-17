@@ -168,7 +168,12 @@ func TestSetupProviderOptionsFromManagers(t *testing.T) {
 }
 
 func TestSetupProviderOptionsUsesResolvedProvidersAndAvailableManagers(t *testing.T) {
+	// augmentedEnv prepends $NVM_BIN, ~/.volta/bin, ~/.bun/bin, and nvm dirs
+	// to PATH, so stubbing PATH alone still leaks the developer machine's
+	// managers (e.g. pnpm) into probeAll. Isolate every discovery source.
+	t.Setenv("HOME", t.TempDir())
 	t.Setenv("NVM_DIR", "")
+	t.Setenv("NVM_BIN", "")
 	binDir := t.TempDir()
 	for _, name := range []string{"bun", "npm", "uv"} {
 		path := filepath.Join(binDir, name)

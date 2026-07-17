@@ -116,6 +116,102 @@ func TestSetMcpGroups_NotFoundReturnsError(t *testing.T) {
 	}
 }
 
+func TestSetSkillGroups_RoundTrip(t *testing.T) {
+	a := newMembershipTestApp(t)
+	if err := a.withConfig(func(cfg *config.RootConfig) error {
+		cfg.Agents.Packages = []config.SkillPackage{{Source: "o/r"}}
+		cfg.Groups = []*config.GroupConfig{{Name: "work"}, {Name: "home"}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := a.SetSkillGroups("o/r", []string{"work", "home"}, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := a.loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	work := findGroupInConfig(cfg, "work")
+	home := findGroupInConfig(cfg, "home")
+	if len(work.Skills) != 1 || work.Skills[0] != "o/r" {
+		t.Errorf("work.Skills = %v, want [o/r]", work.Skills)
+	}
+	if len(home.Skills) != 1 || home.Skills[0] != "o/r" {
+		t.Errorf("home.Skills = %v, want [o/r]", home.Skills)
+	}
+
+	if err := a.SetSkillGroups("o/r", []string{"work"}, nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = a.loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	work = findGroupInConfig(cfg, "work")
+	home = findGroupInConfig(cfg, "home")
+	if len(work.Skills) != 1 || work.Skills[0] != "o/r" {
+		t.Errorf("work.Skills = %v, want [o/r] after reassign", work.Skills)
+	}
+	if len(home.Skills) != 0 {
+		t.Errorf("home.Skills = %v, want empty after reassign", home.Skills)
+	}
+}
+
+func TestSetSkillGroups_GuardedBySkillsEnabled(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "settings.json")
+	root := config.RootConfig{
+		Version:  config.CurrentVersion,
+		Settings: config.Settings{SkillsDisabled: config.BoolPtr(true)},
+		Agents: config.AgentsConfig{
+			Packages: []config.SkillPackage{{Source: "o/r"}},
+		},
+		Groups: []*config.GroupConfig{{Name: "work"}},
+	}
+	if err := config.Save(cfgPath, &root); err != nil {
+		t.Fatal(err)
+	}
+	brew := &availabilityCountingProvider{name: "brew", available: true}
+	a := New(cfgPath)
+	if err := a.InitTestMode(t.Context(), brew); err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close() //nolint:errcheck
+
+	if err := a.SetSkillGroups("o/r", []string{"work"}, nil, ""); err == nil {
+		t.Fatal("expected skills-disabled error")
+	}
+}
+
+// TestSetSkillGroups_NotFoundReturnsError pins the guard parity with
+// SetMcpGroups/SetPluginGroups: a source absent from the manifest must not
+// be written into group Skills lists as an orphan reference.
+func TestSetSkillGroups_NotFoundReturnsError(t *testing.T) {
+	a := newMembershipTestApp(t)
+	if err := a.withConfig(func(cfg *config.RootConfig) error {
+		cfg.Groups = []*config.GroupConfig{{Name: "work"}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	err := a.SetSkillGroups("does/not-exist", []string{"work"}, nil, "")
+	if err == nil {
+		t.Fatal("expected a not-found error for a nonexistent skill package source")
+	}
+
+	cfg, loadErr := a.loadConfig()
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	work := findGroupInConfig(cfg, "work")
+	if len(work.Skills) != 0 {
+		t.Errorf("work.Skills = %v, want empty: a not-found source should not be written", work.Skills)
+	}
+}
+
 func TestSetPluginGroups_RoundTrip(t *testing.T) {
 	a := newMembershipTestApp(t)
 	if err := a.withConfig(func(cfg *config.RootConfig) error {

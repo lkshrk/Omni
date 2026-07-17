@@ -1,0 +1,17 @@
+# agents skills remove: drops a package from the manifest (manifest-only —
+# no runner invocation, files stay on disk). Covers: successful removal
+# reflected in a restore dry-run, and the unknown-source error path.
+exec omni --config settings.json agents skills remove o/r
+stdout 'removed o/r from manifest'
+
+# Manifest no longer plans the removed package, the other entry survives.
+exec omni --config settings.json agents skills restore --dry-run
+! stdout 'skills add o/r '
+stdout 'npx skills add keep/me -g -y'
+
+# Removing a source that is not in the manifest fails.
+! exec omni --config settings.json agents skills remove nope/nope
+stderr 'skill package "nope/nope" not found in manifest'
+
+-- settings.json --
+{"version":1,"agents":{"skills":[{"name":"x","source":"o/r"},{"name":"keep","source":"keep/me"}]}}
