@@ -1,8 +1,9 @@
 # A1: configured provider (apt) is unavailable on this host; sync searches available
 # providers and installs via an alternative high-confidence match (npm).
-# brew is stubbed out so the host brew does not interfere; apt has no stub so it
-# is absent from PATH, making omni treat it as provider-unavailable.
-exec chmod 755 bin/brew bin/npm
+# brew is stubbed out so the host brew does not interfere; apt-get is stubbed to fail
+# its --version probe so omni treats apt as provider-unavailable on every host (CI
+# images lack apt-get; dev boxes have it).
+exec chmod 755 bin/brew bin/npm bin/apt-get
 env PATH=$WORK/bin:$PATH
 
 exec omni --config settings.json hosts ensure testhost
@@ -38,6 +39,11 @@ case "${1:-}" in
     exit 1
     ;;
 esac
+
+-- bin/apt-get --
+#!/usr/bin/env sh
+# Fail the availability probe so apt is treated as unavailable on every host.
+exit 1
 
 -- bin/npm --
 #!/usr/bin/env sh

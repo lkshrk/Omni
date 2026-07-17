@@ -276,6 +276,7 @@ func TestSync_PipTool(t *testing.T) {
 		executor.MatchRule{Pattern: "pip3 list", Response: executor.MockCall{Stdout: pipListOutput(nil)}},
 		executor.MatchRule{Pattern: "pip3 install black", Response: executor.MockCall{}},
 		executor.MatchRule{Pattern: "pip3 show black", Response: executor.MockCall{Stdout: "Name: black\nVersion: 24.3.0\n"}},
+		executor.MatchRule{Pattern: "python3 -c", Response: executor.MockCall{Stdout: `{"black":1}`}},
 	)
 	ta := newTestStackWithMock(t, mock)
 	cfg := simpleConfig("black", "pip")

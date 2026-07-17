@@ -5,26 +5,29 @@
 # lockfile ($XDG_STATE_HOME/skills/.skill-lock.json) or verifySkillInstalled
 # treats the zero-exit install as failed, so the fake runner writes them.
 chmod 0755 $WORK/bin/npx
+chmod 0755 $WORK/bin/codex
 env PATH=$WORK/bin:$PATH
+env HOME=$WORK/home
 env XDG_STATE_HOME=$WORK/state
+mkdir $WORK/home/.codex
 
 # success: CLI reports added; restore --dry-run confirms manifest entry
 exec omni --config settings.json agents add owner/repo
 stdout 'added owner/repo'
 exec omni --config settings.json agents skills restore --dry-run
-stdout 'npx skills add owner/repo -g -y'
+stdout 'npx skills add owner/repo -g'
 
 # dedup: re-adding the same source leaves exactly one manifest entry
 exec omni --config settings.json agents add owner/repo
 stdout 'added owner/repo'
 exec omni --config settings.json agents skills restore --dry-run
-stdout -count=1 'npx skills add owner/repo -g -y'
+stdout -count=1 'npx skills add owner/repo -g'
 
 # ref: #ref component is stored in the manifest and forwarded to the runner
 exec omni --config settings.json agents add 'other/repo#main'
 stdout 'added other/repo'
 exec omni --config settings.json agents skills restore --dry-run
-stdout 'npx skills add other/repo#main -g -y'
+stdout 'npx skills add other/repo#main -g'
 
 # failure: runner exit 1 propagates as a non-zero omni exit
 ! exec omni --config settings.json agents add fail/repo
@@ -53,3 +56,7 @@ if [ "$1" = "skills" ] && [ "$2" = "add" ]; then
   exit 0
 fi
 exit 1
+
+-- bin/codex --
+#!/bin/sh
+exit 0

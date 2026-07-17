@@ -1,5 +1,7 @@
-# tools sync uses fallback as last resort when configured native provider is unavailable
-exec chmod 755 bin/brew
+# tools sync uses fallback as last resort when configured native provider is unavailable.
+# apt-get is stubbed to fail its --version probe so apt reads as unavailable on any
+# host (CI images lack apt-get; dev boxes have it) — making the fallback path deterministic.
+exec chmod 755 bin/brew bin/apt-get
 env PATH=$WORK/bin:$PATH
 
 exec omni --config settings.json hosts ensure testhost
@@ -20,6 +22,11 @@ exec test -f .omni-cache/fallback/rg
 if [ "${1:-}" = "tap" ]; then
   exit 0
 fi
+exit 1
+
+-- bin/apt-get --
+#!/bin/sh
+# Fail the availability probe so apt is treated as unavailable on every host.
 exit 1
 
 -- settings.json --
