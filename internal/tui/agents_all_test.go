@@ -1371,14 +1371,14 @@ func TestAgentsAllRowsListAgentFilter_Marketplace(t *testing.T) {
 }
 
 func TestAgentsAll_ZeroRows_LoadingLineVsOnboardingEmptyState(t *testing.T) {
-	t.Run("chip with rows unknown shows loading line", func(t *testing.T) {
+	t.Run("chip with rows unknown renders no empty-state lines", func(t *testing.T) {
 		m := agentsAllModel(nil, nil, nil)
 		m.mcpRowsKnown = false
 		m.skillTypeIdx = agentsChipMcp
 
 		out := stripANSIEscapeSequences(m.viewSkillsBody())
-		if !strings.Contains(out, "loading agents…") {
-			t.Fatalf("expected loading line while mcp rows are unknown, got:\n%s", out)
+		if strings.Contains(out, "loading agents…") {
+			t.Fatalf("loading line must not show while mcp rows are unknown, got:\n%s", out)
 		}
 		if strings.Contains(out, "No MCP servers tracked yet.") {
 			t.Fatalf("onboarding empty state must not show before rows are known, got:\n%s", out)
@@ -1398,14 +1398,14 @@ func TestAgentsAll_ZeroRows_LoadingLineVsOnboardingEmptyState(t *testing.T) {
 		}
 	})
 
-	t.Run("all chip with one enabled section unknown shows loading line", func(t *testing.T) {
+	t.Run("all chip with one enabled section unknown renders no empty-state lines", func(t *testing.T) {
 		m := agentsAllModel(nil, nil, nil)
 		m.marketplaceRowsKnown = false
 		m.skillTypeIdx = agentsChipAll
 
 		out := stripANSIEscapeSequences(m.viewSkillsBody())
-		if !strings.Contains(out, "loading agents…") {
-			t.Fatalf("expected loading line while one enabled section is unknown, got:\n%s", out)
+		if strings.Contains(out, "loading agents…") {
+			t.Fatalf("loading line must not show while one enabled section is unknown, got:\n%s", out)
 		}
 		if strings.Contains(out, "No agent items tracked yet.") {
 			t.Fatalf("all-chip empty state must not show while a section is unknown, got:\n%s", out)

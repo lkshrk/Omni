@@ -649,8 +649,9 @@ func renderAgentsGroupedTab(m Model, p palette, topLines []string, only agentsSe
 		if !agentsRowsKnownForChip(m, chip) {
 			// Rows haven't arrived yet (neither cached nor live) — the
 			// onboarding hints would misread as "nothing tracked" while the
-			// initial adapter CLI loads are still running.
-			empty = []string{p.styleHelp.Render(pad + m.spinner.View() + " loading agents…")}
+			// initial adapter CLI loads are still running. Render nothing
+			// until the table data is ready.
+			empty = nil
 		}
 		return renderSectionedTab(m, sectionedTab{
 			leadingBlank: false,

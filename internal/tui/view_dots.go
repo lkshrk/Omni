@@ -118,6 +118,14 @@ func renderDots(m Model) string {
 	p := m.palette
 	var sb strings.Builder
 
+	// ── Startup snapshot not landed ───────────────────────────────────────────
+	// Zero-value cached availability means nothing is loaded yet; render
+	// nothing rather than flashing the onboarding screen before the cache
+	// arrives.
+	if m.dotsSyncAvailCached.Reason == "" && !m.dotsSyncAvailCached.Configured {
+		return ""
+	}
+
 	// ── Disabled ──────────────────────────────────────────────────────────────
 	if dotsViewDisabled(m) {
 		sb.WriteString("\n")
@@ -145,9 +153,7 @@ func renderDots(m Model) string {
 		// m.loading: the startup snapshot (which carries the cached dots
 		// state) hasn't landed yet — "No dotfiles tracked yet" would be a lie.
 		if m.dotsPreparing || m.loading {
-			sb.WriteString(p.styleHelp.Render("  Loading dotfiles…"))
-			sb.WriteString("\n")
-			return sb.String()
+			return ""
 		}
 		sb.WriteString(p.styleNormal.Render("  No dotfiles tracked yet.") + "\n\n")
 		sb.WriteString(p.styleHelp.Render("  Add dot entries from this tab or run sync all to discover candidates."))
