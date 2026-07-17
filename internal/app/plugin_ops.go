@@ -340,6 +340,10 @@ func (a *App) updatePlugins(ctx context.Context, names []string, progress func(n
 type RemovePluginResult struct {
 	Errors             []PluginError
 	SkippedUnavailable []string
+	// Warnings holds uninstall failures on adapters whose plugin listing also
+	// failed: presence was unverifiable, so the failure is reported without
+	// blocking the manifest delete (the plugin may simply not be installed).
+	Warnings []PluginError
 }
 
 // AddPlugin validates the marketplace ref, upserts the manifest, then
@@ -454,7 +458,8 @@ func (a *App) RemovePlugin(ctx context.Context, name string) (RemovePluginResult
 		if !pluginTargetsAdapter(*target, adapter.ID()) {
 			continue
 		}
-		if installed, listErr := adapter.ListPlugins(ctx); listErr == nil && !pluginListed(installed, target.Name, target.Marketplace) {
+		installed, listErr := adapter.ListPlugins(ctx)
+		if listErr == nil && !pluginListed(installed, target.Name, target.Marketplace) {
 			continue
 		}
 		if !adapter.Available() {
@@ -462,6 +467,14 @@ func (a *App) RemovePlugin(ctx context.Context, name string) (RemovePluginResult
 			continue
 		}
 		if removeErr := adapter.RemovePlugin(ctx, *target); removeErr != nil {
+			if listErr != nil {
+				// Presence was unverifiable; the uninstall was attempted anyway
+				// so an installed plugin isn't orphaned. Report the failure as
+				// a warning rather than a hard error — it may just mean the
+				// plugin was never installed — but never swallow it.
+				res.Warnings = append(res.Warnings, PluginError{AgentID: adapter.ID(), Name: name, Err: fmt.Errorf("uninstall unverified (listing failed: %v): %w", listErr, removeErr)})
+				continue
+			}
 			res.Errors = append(res.Errors, PluginError{AgentID: adapter.ID(), Name: name, Err: removeErr})
 		}
 	}

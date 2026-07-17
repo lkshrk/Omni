@@ -614,9 +614,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pluginRunning = false
 			m.clearAgentsOp()
 			m.pluginErr = msg.err
+			// The manifest delete may have succeeded even when an adapter
+			// errored — reload so the removed row doesn't linger as stale.
+			cmds = append(cmds, m.doLoadPluginRows())
 		} else {
 			m.pluginErr = nil
 			cmds = append(cmds, m.doLoadPluginRows())
+		}
+		if msg.warning != "" {
+			cmds = append(cmds, setStatus(&m, "⚠ "+msg.warning, true))
 		}
 		return m, tea.Batch(cmds...)
 

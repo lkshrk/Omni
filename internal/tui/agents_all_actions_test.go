@@ -1935,3 +1935,99 @@ func TestPluginRestoreDoneMsg_SuccessReloadsMarketplaceRowsToo(t *testing.T) {
 		t.Error("expected a marketplace row reload (marketplaceRowsMsg) after plugin restore: restoring plugins may install their marketplaces")
 	}
 }
+
+func TestPluginRemoveDoneMsg_ErrorStillReloadsRows(t *testing.T) {
+	a := newPluginClaimTestApp(t)
+	m := agentsAllModel(nil, nil, nil)
+	m.app = a
+	m.ctx = context.Background()
+	m.pluginRunning = true
+
+	got, cmd := m.Update(pluginRemoveDoneMsg{name: "demo", err: errors.New("adapter uninstall failed")})
+	gm := got.(Model)
+
+	if gm.pluginRunning {
+		t.Error("pluginRunning should be false after an errored pluginRemoveDoneMsg")
+	}
+	if gm.pluginErr == nil {
+		t.Error("pluginErr should be set")
+	}
+	if cmd == nil {
+		t.Fatal("expected a command batch (row reload) even on error: the manifest entry may already be deleted")
+	}
+	var sawPluginRows bool
+	for _, msg := range flattenCmdMsgs(cmd) {
+		if _, ok := msg.(pluginRowsMsg); ok {
+			sawPluginRows = true
+		}
+	}
+	if !sawPluginRows {
+		t.Error("expected a plugin row reload (pluginRowsMsg) after an errored remove")
+	}
+}
+
+func TestPluginRemoveDoneMsg_SuccessReloadsRows(t *testing.T) {
+	a := newPluginClaimTestApp(t)
+	m := agentsAllModel(nil, nil, nil)
+	m.app = a
+	m.ctx = context.Background()
+	m.pluginRunning = true
+	m.pluginErr = errors.New("stale")
+
+	got, cmd := m.Update(pluginRemoveDoneMsg{name: "demo"})
+	gm := got.(Model)
+
+	if gm.pluginErr != nil {
+		t.Errorf("pluginErr = %v after successful remove, want nil", gm.pluginErr)
+	}
+	var sawPluginRows bool
+	for _, msg := range flattenCmdMsgs(cmd) {
+		if _, ok := msg.(pluginRowsMsg); ok {
+			sawPluginRows = true
+		}
+	}
+	if !sawPluginRows {
+		t.Error("expected a plugin row reload (pluginRowsMsg) after a successful remove")
+	}
+}
+
+func TestPluginRemoveDoneMsg_WarningSetsStatusAndReloadsRows(t *testing.T) {
+	a := newPluginClaimTestApp(t)
+	m := agentsAllModel(nil, nil, nil)
+	m.app = a
+	m.ctx = context.Background()
+	m.pluginRunning = true
+
+	got, cmd := m.Update(pluginRemoveDoneMsg{name: "demo", warning: "codex: uninstall unverified"})
+	gm := got.(Model)
+
+	if gm.pluginErr != nil {
+		t.Errorf("pluginErr = %v for a warning-only remove, want nil", gm.pluginErr)
+	}
+	if !strings.Contains(gm.statusMsg, "uninstall unverified") {
+		t.Errorf("status text = %q, want it to contain the adapter warning", gm.statusMsg)
+	}
+	var sawPluginRows bool
+	for _, msg := range flattenCmdMsgs(cmd) {
+		if _, ok := msg.(pluginRowsMsg); ok {
+			sawPluginRows = true
+		}
+	}
+	if !sawPluginRows {
+		t.Error("expected a plugin row reload (pluginRowsMsg) alongside the warning status")
+	}
+}
+
+func TestPluginWarningsText_JoinsEntries(t *testing.T) {
+	if got := pluginWarningsText(nil); got != "" {
+		t.Errorf("pluginWarningsText(nil) = %q, want empty", got)
+	}
+	warnings := []app.PluginError{
+		{AgentID: "codex", Err: errors.New("uninstall unverified")},
+		{AgentID: "gemini", Err: errors.New("manifest stale")},
+	}
+	want := "codex: uninstall unverified; gemini: manifest stale"
+	if got := pluginWarningsText(warnings); got != want {
+		t.Errorf("pluginWarningsText = %q, want %q", got, want)
+	}
+}

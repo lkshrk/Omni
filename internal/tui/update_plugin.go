@@ -30,6 +30,18 @@ func combinePluginErrors(err error, adapterErrs []app.PluginError) error {
 	return errors.Join(all...)
 }
 
+// pluginWarningsText flattens non-fatal adapter warnings into one status line.
+func pluginWarningsText(warnings []app.PluginError) string {
+	if len(warnings) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(warnings))
+	for _, w := range warnings {
+		parts = append(parts, w.AgentID+": "+w.Err.Error())
+	}
+	return strings.Join(parts, "; ")
+}
+
 type pluginRowsMsg struct {
 	rows      []app.PluginRow
 	unmanaged map[string][]app.InstalledPlugin
@@ -39,8 +51,9 @@ type pluginRowsMsg struct {
 type pluginRestoreDoneMsg struct{ err error }
 
 type pluginRemoveDoneMsg struct {
-	name string
-	err  error
+	name    string
+	err     error
+	warning string
 }
 
 type pluginImportAdoptDoneMsg struct {
@@ -86,7 +99,7 @@ func (m *Model) doRemovePlugin(name string) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
 		res, err := a.RemovePlugin(ctx, name)
-		return pluginRemoveDoneMsg{name: name, err: combinePluginErrors(err, res.Errors)}
+		return pluginRemoveDoneMsg{name: name, err: combinePluginErrors(err, res.Errors), warning: pluginWarningsText(res.Warnings)}
 	}
 }
 
