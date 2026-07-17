@@ -67,6 +67,153 @@ func TestPatchRawRouted_FragmentOwnedKeyWritesToFragment(t *testing.T) {
 	}
 }
 
+func TestPatchRawRouted_DuplicateKeyConsolidatesIntoLastOwner(t *testing.T) {
+	dir := t.TempDir()
+	mainPath := writeRoutedFixture(t, dir, map[string]string{
+		"settings.json": `{
+  "version": 17,
+  "$include": ["settings.d/agents.json", "settings.d/tools.json"],
+  "settings": {}
+}`,
+		"settings.d/agents.json": `{
+  "agents": { "mcp_servers": [{ "name": "node_repl", "transport": "stdio", "command": "node-repl" }] }
+}`,
+		"settings.d/tools.json": `{
+  "agents": { "mcp_servers": [{ "name": "stale", "transport": "stdio", "command": "stale" }] },
+  "tools": {}
+}`,
+	})
+
+	patch := map[string]json.RawMessage{
+		"agents": json.RawMessage(`{"mcp_servers":[{"name":"keeper","transport":"stdio","command":"keeper"}]}`),
+	}
+	if err := config.PatchRawRouted(mainPath, patch); err != nil {
+		t.Fatalf("PatchRawRouted: %v", err)
+	}
+
+	agentsRaw := rawKeys(t, filepath.Join(dir, "settings.d", "agents.json"))
+	if _, ok := agentsRaw["agents"]; ok {
+		t.Fatalf("stale agents copy must be cleared from agents.json, got %s", agentsRaw["agents"])
+	}
+	toolsRaw := rawKeys(t, filepath.Join(dir, "settings.d", "tools.json"))
+	if !strings.Contains(string(toolsRaw["agents"]), "keeper") || strings.Contains(string(toolsRaw["agents"]), "stale") {
+		t.Fatalf("owner fragment agents = %s, want only patched value", toolsRaw["agents"])
+	}
+	if _, ok := rawKeys(t, mainPath)["agents"]; ok {
+		t.Fatal("agents must not appear in main settings.json")
+	}
+}
+
+func TestPatchRawRouted_DuplicateKeyAcrossThreeFragmentsClearsAllNonOwners(t *testing.T) {
+	dir := t.TempDir()
+	mainPath := writeRoutedFixture(t, dir, map[string]string{
+		"settings.json": `{
+  "version": 17,
+  "$include": ["settings.d/a.json", "settings.d/b.json", "settings.d/c.json"],
+  "settings": {}
+}`,
+		"settings.d/a.json": `{
+  "agents": { "mcp_servers": [{ "name": "from-a", "transport": "stdio", "command": "a" }] }
+}`,
+		"settings.d/b.json": `{
+  "agents": { "mcp_servers": [{ "name": "from-b", "transport": "stdio", "command": "b" }] },
+  "tools": {}
+}`,
+		"settings.d/c.json": `{
+  "agents": { "mcp_servers": [{ "name": "from-c", "transport": "stdio", "command": "c" }] }
+}`,
+	})
+
+	patch := map[string]json.RawMessage{
+		"agents": json.RawMessage(`{"mcp_servers":[{"name":"keeper","transport":"stdio","command":"keeper"}]}`),
+	}
+	if err := config.PatchRawRouted(mainPath, patch); err != nil {
+		t.Fatalf("PatchRawRouted: %v", err)
+	}
+
+	for _, name := range []string{"a.json", "b.json"} {
+		raw := rawKeys(t, filepath.Join(dir, "settings.d", name))
+		if _, ok := raw["agents"]; ok {
+			t.Fatalf("non-owner %s must have its agents copy cleared, got %s", name, raw["agents"])
+		}
+	}
+	ownerRaw := rawKeys(t, filepath.Join(dir, "settings.d", "c.json"))
+	agents := string(ownerRaw["agents"])
+	if !strings.Contains(agents, "keeper") || strings.Contains(agents, "from-") {
+		t.Fatalf("owner c.json agents = %s, want only patched value", agents)
+	}
+	if _, ok := rawKeys(t, filepath.Join(dir, "settings.d", "b.json"))["tools"]; !ok {
+		t.Fatal("unrelated tools key must survive in b.json")
+	}
+}
+
+func TestPatchRawRouted_NestedIncludeChainRoutesToDeepOwner(t *testing.T) {
+	dir := t.TempDir()
+	mainPath := writeRoutedFixture(t, dir, map[string]string{
+		"settings.json": `{
+  "version": 17,
+  "$include": ["settings.d/agents.json"],
+  "settings": {}
+}`,
+		"settings.d/agents.json": `{
+  "$include": ["agents/mcp.json"],
+  "agents": { "plugins": [{ "name": "plug", "marketplace": "m" }] }
+}`,
+		"settings.d/agents/mcp.json": `{
+  "agents": { "mcp_servers": [{ "name": "node_repl", "transport": "stdio", "command": "node-repl" }] }
+}`,
+	})
+
+	patch := map[string]json.RawMessage{
+		"agents": json.RawMessage(`{"mcp_servers":[{"name":"keeper","transport":"stdio","command":"keeper"}]}`),
+	}
+	if err := config.PatchRawRouted(mainPath, patch); err != nil {
+		t.Fatalf("PatchRawRouted: %v", err)
+	}
+
+	deepRaw := rawKeys(t, filepath.Join(dir, "settings.d", "agents", "mcp.json"))
+	deep := string(deepRaw["agents"])
+	if !strings.Contains(deep, "keeper") || strings.Contains(deep, "node_repl") {
+		t.Fatalf("deep owner agents = %s, want only patched value", deep)
+	}
+	midRaw := rawKeys(t, filepath.Join(dir, "settings.d", "agents.json"))
+	if _, ok := midRaw["agents"]; ok {
+		t.Fatalf("intermediate fragment agents copy must be cleared, got %s", midRaw["agents"])
+	}
+	if _, ok := midRaw["$include"]; !ok {
+		t.Fatal("intermediate fragment must keep its $include key")
+	}
+}
+
+func TestPatchRawRouted_DuplicateKeyInMainClearedOnRoutedWrite(t *testing.T) {
+	dir := t.TempDir()
+	mainPath := writeRoutedFixture(t, dir, map[string]string{
+		"settings.json": `{
+  "version": 17,
+  "$include": ["settings.d/agents.json"],
+  "agents": { "mcp_servers": [{ "name": "stale-main", "transport": "stdio", "command": "x" }] },
+  "settings": {}
+}`,
+		"settings.d/agents.json": `{
+  "agents": { "mcp_servers": [{ "name": "node_repl", "transport": "stdio", "command": "node-repl" }] }
+}`,
+	})
+
+	patch := map[string]json.RawMessage{
+		"agents": json.RawMessage(`{"mcp_servers":[{"name":"keeper","transport":"stdio","command":"keeper"}]}`),
+	}
+	if err := config.PatchRawRouted(mainPath, patch); err != nil {
+		t.Fatalf("PatchRawRouted: %v", err)
+	}
+	if _, ok := rawKeys(t, mainPath)["agents"]; ok {
+		t.Fatal("stale agents copy must be cleared from main settings.json")
+	}
+	fragRaw := rawKeys(t, filepath.Join(dir, "settings.d", "agents.json"))
+	if !strings.Contains(string(fragRaw["agents"]), "keeper") {
+		t.Fatalf("fragment agents = %s, want patched value", fragRaw["agents"])
+	}
+}
+
 func TestPatchRawRouted_MainOwnedKeyStaysInMain(t *testing.T) {
 	dir := t.TempDir()
 	mainPath := writeRoutedFixture(t, dir, map[string]string{
