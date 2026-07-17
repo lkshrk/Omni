@@ -15,7 +15,7 @@ env XDG_STATE_HOME=$WORK/state
 
 ! exec omni --config settings.json agents skills restore
 stdout '^0 installed, 1 failed$'
-stdout '! o/r: skills add o/r exited 0 but reported failure \("Failed to"\); treating as failed'
+stdout '! o/r: skills add o/r exited 0 but reported failure: Failed to install skill o/r'
 stderr 'agent operation\(s\) failed'
 grep -count=1 'skills add o/r -g -y' .omni-cache/npx-calls.log
 

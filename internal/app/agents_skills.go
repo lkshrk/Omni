@@ -78,10 +78,36 @@ var skillsCLIFailureMarkers = []string{"Failed to", "✗", "✘"}
 func skillsCLIFailure(op, stdout, stderr string) error {
 	for _, m := range skillsCLIFailureMarkers {
 		if strings.Contains(stdout, m) || strings.Contains(stderr, m) {
+			if detail := skillsFailureDetail(stdout, stderr); detail != "" {
+				return fmt.Errorf("%s exited 0 but reported failure: %s", op, detail)
+			}
 			return fmt.Errorf("%s exited 0 but reported failure (%q); treating as failed", op, m)
 		}
 	}
 	return nil
+}
+
+// skillsFailureDetail extracts the CLI's own failure lines so the surfaced
+// error explains why the operation failed, not just that a marker matched.
+func skillsFailureDetail(stdout, stderr string) string {
+	var lines []string
+	for _, line := range strings.Split(stdout+"\n"+stderr, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		for _, m := range skillsCLIFailureMarkers {
+			if strings.Contains(trimmed, m) {
+				lines = append(lines, trimmed)
+				break
+			}
+		}
+	}
+	const maxLines = 4
+	if len(lines) > maxLines {
+		lines = append(lines[:maxLines], "…")
+	}
+	return strings.Join(lines, "; ")
 }
 
 // SkillsCLIOutputIndicatesFailure reports whether output from the skills CLI

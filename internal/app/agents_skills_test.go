@@ -248,6 +248,30 @@ func TestSkillsCLIFailureMarkers(t *testing.T) {
 	}
 }
 
+func TestSkillsCLIFailureIncludesDetailLines(t *testing.T) {
+	stdout := "cloning repo\nFailed to install 2 skill(s)\n  ✗ my-skill → claude-code: EACCES permission denied\ndone"
+	err := skillsCLIFailure("skills add owner/repo", stdout, "")
+	if err == nil {
+		t.Fatal("expected failure error")
+	}
+	for _, want := range []string{"Failed to install 2 skill(s)", "EACCES permission denied"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q must carry detail %q", err, want)
+		}
+	}
+}
+
+func TestSkillsFailureDetailCapsLines(t *testing.T) {
+	stdout := strings.Repeat("✗ broken line\n", 6)
+	detail := skillsFailureDetail(stdout, "")
+	if got := strings.Count(detail, "✗"); got != 4 {
+		t.Fatalf("detail should cap at 4 failure lines, got %d in %q", got, detail)
+	}
+	if !strings.HasSuffix(detail, "…") {
+		t.Fatalf("capped detail must end with ellipsis, got %q", detail)
+	}
+}
+
 type fixedOutputExecutor struct {
 	stdout, stderr string
 	called         bool
