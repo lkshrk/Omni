@@ -96,18 +96,24 @@ func materializeGitHubReleaseAsset(logicalName string, spec ToolInstallSpec, fal
 	binDir = expandTilde(binDir)
 	cacheDir := filepath.Join(filepath.Dir(binDir), "cache")
 	tag := githubReleaseTag(&recipe, spec.Options)
+	version := strings.TrimPrefix(tag, "v")
+	if version == "" {
+		version = "latest"
+	}
 	binaryPath := strings.TrimSpace(recipe.BinaryPath)
 	extractDir := optionValue(spec.Options, "extract_dir")
 	stripComponents := optionValue(spec.Options, "strip_components")
 
 	var install string
-	if strings.Contains(pattern, "{arch}") || strings.Contains(pattern, "{os}") {
+	if downloadURL := strings.TrimSpace(recipe.AssetDownloadURL); downloadURL != "" {
+		install = githubReleaseAssetInstallCommand(downloadURL, binary, binDir, cacheDir, binaryPath, extractDir, stripComponents)
+	} else if strings.Contains(pattern, "{arch}") || strings.Contains(pattern, "{os}") {
 		install = githubReleaseAssetArchAwareInstall(
-			owner, repo, tag, pattern, binary, binDir, cacheDir, binaryPath,
+			owner, repo, tag, version, pattern, binary, binDir, cacheDir, binaryPath,
 			extractDir, stripComponents, optionValue(spec.Options, "arch_map"),
 		)
 	} else {
-		filename := expandRecipePlaceholders(pattern, binary)
+		filename := expandRecipePlaceholders(pattern, binary, version)
 		downloadURL := githubReleaseAssetURL(owner, repo, tag, filename)
 		install = githubReleaseAssetInstallCommand(downloadURL, binary, binDir, cacheDir, binaryPath, extractDir, stripComponents)
 	}
@@ -131,6 +137,55 @@ func materializeGitHubReleaseAsset(logicalName string, spec ToolInstallSpec, fal
 	out.Options["uninstall"] = uninstall
 	out.Options["upgrade"] = install
 	return out, nil
+}
+
+// GitHubReleaseAssetName resolves a recipe's asset template for the current
+// platform and release tag. It uses the same architecture mapping as command
+// materialization, allowing callers to match the configured asset exactly.
+func GitHubReleaseAssetName(logicalName string, spec ToolInstallSpec, tag string) (string, error) {
+	if spec.Recipe == nil || spec.Recipe.Type != FallbackRecipeGitHubReleaseAsset {
+		return "", fmt.Errorf("github release asset recipe is required for %q", logicalName)
+	}
+	pattern := strings.TrimSpace(spec.Recipe.AssetPattern)
+	if pattern == "" {
+		return "", fmt.Errorf("github_release_asset for %q requires recipe.asset_pattern", logicalName)
+	}
+	binary := strings.TrimSpace(spec.Bin)
+	if binary == "" {
+		binary = logicalName
+	}
+	version := strings.TrimPrefix(strings.TrimSpace(tag), "v")
+	if version == "" {
+		version = "latest"
+	}
+	arch := currentMappedArch(parseArchMap(optionValue(spec.Options, "arch_map")))
+	name := strings.ReplaceAll(pattern, "{arch}", arch)
+	name = strings.ReplaceAll(name, "{os}", runtime.GOOS)
+	name = strings.ReplaceAll(name, "{version}", version)
+	name = strings.ReplaceAll(name, "{binary}", binary)
+	return name, nil
+}
+
+func currentMappedArch(archMap map[string]string) string {
+	aliases := []string{runtime.GOARCH}
+	switch runtime.GOARCH {
+	case "amd64":
+		aliases = []string{"x86_64", "amd64"}
+	case "arm64":
+		if runtime.GOOS == "darwin" {
+			aliases = []string{"arm64", "aarch64"}
+		} else {
+			aliases = []string{"aarch64", "arm64"}
+		}
+	case "arm":
+		aliases = []string{"armv7l", "armv6l", "arm"}
+	}
+	for _, alias := range aliases {
+		if mapped := strings.TrimSpace(archMap[alias]); mapped != "" {
+			return mapped
+		}
+	}
+	return runtime.GOARCH
 }
 
 func expandTilde(path string) string {
@@ -171,8 +226,8 @@ func githubReleaseDownloadBase(owner, repo, tag string) string {
 	return fmt.Sprintf("https://github.com/%s/%s/releases/download/%s", owner, repo, tag)
 }
 
-func githubReleaseAssetArchAwareInstall(owner, repo, tag, pattern, binary, binDir, cacheDir, binaryPath, extractDir, stripComponents, archMapRaw string) string {
-	assetExpr := githubAssetPatternExprShell(pattern)
+func githubReleaseAssetArchAwareInstall(owner, repo, tag, version, pattern, binary, binDir, cacheDir, binaryPath, extractDir, stripComponents, archMapRaw string) string {
+	assetExpr := githubAssetPatternExprShell(pattern, version, binary)
 	archCase := buildArchCaseStatement(parseArchMap(archMapRaw))
 	releaseBase := githubReleaseDownloadBase(owner, repo, tag)
 	prefix := fmt.Sprintf(`mkdir -p %s %s`, shellSingleQuote(binDir), shellSingleQuote(cacheDir))
@@ -264,11 +319,36 @@ func materializeAptRepo(logicalName string, spec ToolInstallSpec) (ToolInstallSp
 	return out, nil
 }
 
-func githubAssetPatternExprShell(pattern string) string {
-	base := strings.ReplaceAll(pattern, "{arch}", "${a}")
-	base = strings.ReplaceAll(base, "{os}", "${os}")
-	base = strings.ReplaceAll(base, "{version}", "latest")
-	return `"` + base + `"`
+func githubAssetPatternExprShell(pattern, version, binary string) string {
+	values := map[string]string{
+		"{arch}":    `"$a"`,
+		"{os}":      `"$os"`,
+		"{version}": shellSingleQuote(version),
+		"{binary}":  shellSingleQuote(binary),
+	}
+	var expression strings.Builder
+	for pattern != "" {
+		nextIndex := len(pattern)
+		nextToken := ""
+		for token := range values {
+			if index := strings.Index(pattern, token); index >= 0 && index < nextIndex {
+				nextIndex = index
+				nextToken = token
+			}
+		}
+		if nextIndex > 0 {
+			expression.WriteString(shellSingleQuote(pattern[:nextIndex]))
+		}
+		if nextToken == "" {
+			break
+		}
+		expression.WriteString(values[nextToken])
+		pattern = pattern[nextIndex+len(nextToken):]
+	}
+	if expression.Len() == 0 {
+		return "''"
+	}
+	return expression.String()
 }
 
 func parseArchMap(raw string) map[string]string {
@@ -323,10 +403,10 @@ func isArchiveAssetPattern(pattern string) bool {
 	return strings.Contains(lower, ".tar.") || strings.HasSuffix(lower, ".zip") || strings.HasSuffix(lower, ".tgz")
 }
 
-func expandRecipePlaceholders(pattern, binary string) string {
+func expandRecipePlaceholders(pattern, binary, version string) string {
 	out := strings.ReplaceAll(pattern, "{arch}", runtime.GOARCH)
 	out = strings.ReplaceAll(out, "{os}", runtime.GOOS)
-	out = strings.ReplaceAll(out, "{version}", "latest")
+	out = strings.ReplaceAll(out, "{version}", version)
 	out = strings.ReplaceAll(out, "{binary}", binary)
 	return out
 }

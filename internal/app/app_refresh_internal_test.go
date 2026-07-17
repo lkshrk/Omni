@@ -1,78 +1,90 @@
 package app
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 )
 
-func TestFallbackTagOutdated(t *testing.T) {
-	const newerPublished = "2026-05-27T17:47:41Z"
-	const olderPublished = "2026-05-01T00:00:00Z"
+func TestFetchLatestGitHubReleaseCached_CanceledLeaderDoesNotPoisonWaiter(t *testing.T) {
+	var calls int32
+	firstStarted := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&calls, 1) == 1 {
+			close(firstStarted)
+			<-r.Context().Done()
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"id":1,"tag_name":"v2.0.0","published_at":"2026-07-17T00:00:00Z","assets":[]}`)
+	}))
+	t.Cleanup(server.Close)
 
-	tests := []struct {
-		name              string
-		latestTag         string
-		installedVersion  string
-		latestPublishedAt string
-		savedPublishedAt  string
-		want              bool
-	}{
-		// Version comparison path: newer tag → outdated.
-		{
-			name:      "version_newer",
-			latestTag: "v2.93.0", installedVersion: "2.92.0",
-			latestPublishedAt: olderPublished, savedPublishedAt: newerPublished,
-			want: true,
-		},
-		// Version comparison path: same version → not outdated.
-		{
-			name:      "version_same",
-			latestTag: "v2.93.0", installedVersion: "2.93.0",
-			latestPublishedAt: newerPublished, savedPublishedAt: olderPublished,
-			want: false,
-		},
-		// Version comparison path: latest older → not outdated.
-		{
-			name:      "version_older",
-			latestTag: "v2.92.0", installedVersion: "2.93.0",
-			latestPublishedAt: newerPublished, savedPublishedAt: olderPublished,
-			want: false,
-		},
-		// No installed version: falls back to published_at; latest is newer.
-		{
-			name:      "no_installed_version_publishedat_newer",
-			latestTag: "v2.93.0", installedVersion: "",
-			latestPublishedAt: newerPublished, savedPublishedAt: olderPublished,
-			want: true,
-		},
-		// No installed version: falls back to published_at; not newer.
-		{
-			name:      "no_installed_version_publishedat_same",
-			latestTag: "v2.93.0", installedVersion: "",
-			latestPublishedAt: olderPublished, savedPublishedAt: olderPublished,
-			want: false,
-		},
-		// Same non-semver tag: identical strings → not outdated (fast-path).
-		{
-			name:      "non_semver_same_tag_not_outdated",
-			latestTag: "nightly", installedVersion: "nightly",
-			latestPublishedAt: newerPublished, savedPublishedAt: olderPublished,
-			want: false,
-		},
-		// Non-semver tags differ and are not parseable → falls back to published_at.
-		{
-			name:      "non_semver_different_tags_falls_back_to_publishedat",
-			latestTag: "nightly-2", installedVersion: "nightly",
-			latestPublishedAt: newerPublished, savedPublishedAt: olderPublished,
-			want: true,
-		},
+	a := &App{}
+	a.SetGitHubFallbackAPIForTest(server.URL, server.Client())
+	leaderCtx, cancelLeader := context.WithCancel(context.Background())
+	leaderErr := make(chan error, 1)
+	go func() {
+		_, err := a.fetchLatestGitHubReleaseCached(leaderCtx, nil, "owner", "repo")
+		leaderErr <- err
+	}()
+	<-firstStarted
+
+	type lookupResult struct {
+		release githubRelease
+		err     error
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := fallbackTagOutdated(tt.latestTag, tt.installedVersion, tt.latestPublishedAt, tt.savedPublishedAt)
-			if got != tt.want {
-				t.Errorf("fallbackTagOutdated(%q, %q, %q, %q) = %v, want %v",
-					tt.latestTag, tt.installedVersion, tt.latestPublishedAt, tt.savedPublishedAt, got, tt.want)
-			}
-		})
+	waiterResult := make(chan lookupResult, 1)
+	go func() {
+		release, err := a.fetchLatestGitHubReleaseCached(context.Background(), nil, "owner", "repo")
+		waiterResult <- lookupResult{release: release, err: err}
+	}()
+	cancelLeader()
+
+	if err := <-leaderErr; !errors.Is(err, context.Canceled) {
+		t.Fatalf("leader error = %v, want context canceled", err)
+	}
+	result := <-waiterResult
+	if result.err != nil || result.release.TagName != "v2.0.0" {
+		t.Fatalf("waiter release=%q error=%v; want v2.0.0, nil", result.release.TagName, result.err)
+	}
+	if got := atomic.LoadInt32(&calls); got != 2 {
+		t.Fatalf("GitHub calls = %d, want canceled request plus waiter retry", got)
+	}
+}
+
+func TestFetchLatestGitHubReleaseCached_ScopesCompletedResultsToOperation(t *testing.T) {
+	var calls int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		call := atomic.AddInt32(&calls, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"id":%d,"tag_name":"v%d.0.0","published_at":"2026-07-17T00:00:00Z","assets":[]}`, call, call)
+	}))
+	t.Cleanup(server.Close)
+
+	a := &App{}
+	a.SetGitHubFallbackAPIForTest(server.URL, server.Client())
+	firstOperation := make(githubReleaseLookupCache)
+	first, err := a.fetchLatestGitHubReleaseCached(context.Background(), firstOperation, "owner", "repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := a.fetchLatestGitHubReleaseCached(context.Background(), firstOperation, "owner", "repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := a.fetchLatestGitHubReleaseCached(context.Background(), make(githubReleaseLookupCache), "owner", "repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.TagName != "v1.0.0" || again.TagName != "v1.0.0" || second.TagName != "v2.0.0" {
+		t.Fatalf("tags = %q, %q, %q; want operation cache then fresh lookup", first.TagName, again.TagName, second.TagName)
+	}
+	if got := atomic.LoadInt32(&calls); got != 2 {
+		t.Fatalf("GitHub calls = %d, want one per operation", got)
 	}
 }

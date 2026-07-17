@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"github.com/lkshrk/omni/internal/executor"
 	"github.com/lkshrk/omni/internal/provider"
 	brewprovider "github.com/lkshrk/omni/internal/provider/brew"
+	scriptprovider "github.com/lkshrk/omni/internal/provider/script"
 )
 
 type lifecycleProvider struct {
@@ -514,6 +516,93 @@ func TestUpgrade_UsesRegisteredInstalledWithProvider(t *testing.T) {
 	}
 	if len(system.upgraded) != 0 {
 		t.Fatalf("system upgraded = %+v, want no calls", system.upgraded)
+	}
+}
+
+func TestUpgrade_ConfiguredScriptPreservesLifecycleCommands(t *testing.T) {
+	ctx := context.Background()
+	exec := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "sh -c exit 0", Response: executor.MockCall{}},
+		executor.MatchRule{Pattern: "sh -c bun upgrade", Response: executor.MockCall{}},
+		executor.MatchRule{Pattern: "sh -c bun-check", Response: executor.MockCall{}},
+		executor.MatchRule{Pattern: "sh -c bun --version", Response: executor.MockCall{Stdout: "1.3.0\n"}},
+	).WithFallback(executor.MockCall{Err: errors.New("unexpected script command")})
+	a, cfgPath := newImportApp(t, scriptprovider.New(exec))
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"bun": {Providers: []config.ToolInstallSpec{{Provider: "script", Options: map[string]string{
+				"install": "bun install", "check": "bun-check", "version": "bun --version", "upgrade": "bun upgrade",
+			}}}},
+		},
+		Groups: []*config.GroupConfig{{Tools: groupTools("bun")}},
+	}); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name: "bun", Provider: "script", Package: "bun", Installed: true, InstalledWith: "script",
+		Version: sql.NullString{String: "1.2.3", Valid: true}, Outdated: true, LastChecked: time.Now(),
+	}); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+
+	if err := a.Upgrade(ctx, "bun", "script"); err != nil {
+		t.Fatalf("Upgrade: %v", err)
+	}
+
+	if calls := exec.CallsMatching("sh -c bun upgrade"); len(calls) != 1 {
+		t.Fatalf("upgrade calls = %d, want 1", len(calls))
+	}
+}
+
+func TestUpgrade_GitHubRecipeUsesCachedLatestRelease(t *testing.T) {
+	ctx := context.Background()
+	const assetURL = "https://downloads.example.test/gh_2.93.0_linux_amd64.tar.gz"
+	exec := executor.NewMatchMock(executor.MatchRule{
+		Pattern:  "sh -c gh --version",
+		Response: executor.MockCall{Stdout: "2.93.0\n"},
+	}).WithFallback(executor.MockCall{})
+	a, cfgPath := newImportApp(t, scriptprovider.New(exec))
+	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubFallbackLatestReleaseClient(t, nil, func() io.ReadCloser {
+		return githubFallbackReleaseBody("v2.93.0", "2026-05-27T17:47:41Z", "gh_2.93.0_linux_amd64.tar.gz", assetURL)
+	}))
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"gh": {Providers: []config.ToolInstallSpec{{
+				Provider: "script",
+				Bin:      "gh",
+				Options:  map[string]string{"version": "gh --version"},
+				Source:   &config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "cli", Repo: "cli"},
+				Recipe: &config.FallbackRecipe{
+					Type: config.FallbackRecipeGitHubReleaseAsset, AssetPattern: "gh_{version}_linux_amd64.tar.gz",
+				},
+			}}},
+		},
+		Groups: []*config.GroupConfig{{Tools: groupTools("gh")}},
+	}); err != nil {
+		t.Fatalf("saving config: %v", err)
+	}
+	if err := a.DB().Upsert(ctx, &database.ToolCache{
+		Name: "gh", Provider: "script", Package: "gh", Installed: true, InstalledWith: "script",
+		Version: sql.NullString{String: "2.92.0", Valid: true}, LastChecked: time.Now(),
+	}); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+	if err := a.DB().UpdateOutdated(ctx, "gh", "script", "gh", true, "v2.93.0"); err != nil {
+		t.Fatalf("seed outdated: %v", err)
+	}
+
+	if err := a.UpgradeWithOptions(ctx, "gh", "script", app.UpgradeOptions{Force: true}); err != nil {
+		t.Fatalf("UpgradeWithOptions: %v", err)
+	}
+
+	var hydratedCalls int
+	for _, call := range exec.CallsMatching("sh -c") {
+		if strings.Contains(strings.Join(call.Args, " "), assetURL) {
+			hydratedCalls++
+		}
+	}
+	if hydratedCalls != 1 {
+		t.Fatalf("hydrated GitHub upgrade calls = %d, want 1", hydratedCalls)
 	}
 }
 

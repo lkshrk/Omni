@@ -906,9 +906,9 @@ func (a *App) configuredOperationResolvedTool(ctx context.Context, name, provide
 		// before concluding the tool has no match for providerName.
 		if providerName != "" {
 			if spec, ok := cfg.Tools[name]; ok {
-				if candidate, found := a.findConfiguredInstallCandidate(ctx, name, spec, providerName); found {
-					entry := spec.ToToolEntry(name, candidate)
-					resolved := resolvedTool{entry: entry}
+				if route, found := a.findConfiguredInstallRoute(ctx, name, spec, providerName); found {
+					entry := spec.ToToolEntry(name, route.Install)
+					resolved := resolvedTool{entry: entry, taps: append([]string(nil), spec.Taps...), route: route}
 					opProvider := a.operationProviderName(entry)
 					return resolved, opProvider, true, nil
 				}
@@ -1213,9 +1213,14 @@ func (a *App) UpgradeWithOptions(ctx context.Context, name, providerName string,
 
 	var pkg string
 	installedWith := ""
-	if configured, _, found, err := a.configuredOperationTool(ctx, name, providerName); err != nil {
+	var configuredOptions map[string]string
+	var configuredResolved *resolvedTool
+	if resolved, _, found, err := a.configuredOperationResolvedTool(ctx, name, providerName); err != nil {
 		return err
 	} else if found {
+		configured := resolved.entry
+		configuredResolved = &resolved
+		configuredOptions = configured.Options
 		if providerName != "" && providerName != configured.Provider && configured.InstallWith == "" {
 			installedWith = providerName
 		}
@@ -1243,6 +1248,12 @@ func (a *App) UpgradeWithOptions(ctx context.Context, name, providerName string,
 	if fallbackLifecycleOwner(installedWith) {
 		return a.UpgradeToolFallback(traceReason(ctx, "upgrading fallback", name, "gh"), name)
 	}
+	if configuredResolved != nil && cached != nil && cached.Outdated && cached.LatestVersion.Valid {
+		configuredOptions, err = a.hydrateConfiguredGitHubUpgradeOptions(ctx, name, *configuredResolved, cached.LatestVersion.String)
+		if err != nil {
+			return err
+		}
+	}
 	if !opts.Force && cached != nil {
 		cfg, cfgErr := a.loadConfig()
 		if cfgErr != nil {
@@ -1262,7 +1273,7 @@ func (a *App) UpgradeWithOptions(ctx context.Context, name, providerName string,
 		return fmt.Errorf("unknown provider %q", providerName)
 	}
 	ctx = traceReasonDetail(ctx, "upgrading", name, opProvider, manager)
-	t := provider.Tool{Name: name, Provider: opProvider, Package: pkg}
+	t := provider.Tool{Name: name, Provider: opProvider, Package: pkg, Options: configuredOptions}
 	if err := upgradeTool(ctx, prov, t, manager); err != nil {
 		a.recordPrivilegeError(ctx, name, providerName, pkg, err)
 		return err
@@ -1290,6 +1301,42 @@ func (a *App) UpgradeWithOptions(ctx context.Context, name, providerName string,
 		return fmt.Errorf("refresh outdated after upgrade: %w", err)
 	}
 	return nil
+}
+
+func (a *App) hydrateConfiguredGitHubUpgradeOptions(ctx context.Context, name string, resolved resolvedTool, latestTag string) (map[string]string, error) {
+	configured := cloneToolInstallSpec(resolved.route.ConfiguredInstall)
+	if configured.Source == nil || configured.Source.Type != config.FallbackSourceGitHub || configured.Recipe == nil || configured.Recipe.Type != config.FallbackRecipeGitHubReleaseAsset {
+		return resolved.entry.Options, nil
+	}
+	if strings.TrimSpace(configured.Options["install"]) != "" || strings.TrimSpace(configured.Recipe.TagName) != "" || strings.TrimSpace(configured.Options["release_tag"]) != "" {
+		return resolved.entry.Options, nil
+	}
+	recipe := *configured.Recipe
+	recipe.TagName = strings.TrimSpace(latestTag)
+	if recipe.TagName == "" {
+		return resolved.entry.Options, nil
+	}
+	release, err := a.fetchLatestGitHubReleaseCached(ctx, nil, configured.Source.Owner, configured.Source.Repo)
+	if err != nil {
+		return nil, fmt.Errorf("resolving GitHub upgrade for %s at %s: %w", name, recipe.TagName, err)
+	}
+	if strings.TrimSpace(release.TagName) != recipe.TagName {
+		return nil, fmt.Errorf("GitHub latest release for %s changed from %s to %s; refresh updates before upgrading", name, recipe.TagName, strings.TrimSpace(release.TagName))
+	}
+	asset, ok := configuredGitHubReleaseAsset(name, configured, release)
+	if !ok {
+		return nil, fmt.Errorf("GitHub release %s for %s does not contain configured asset %q", recipe.TagName, name, recipe.AssetPattern)
+	}
+	recipe.AssetID = strings.TrimSpace(asset.ID.String())
+	recipe.AssetName = asset.Name
+	recipe.AssetDownloadURL = asset.BrowserDownloadURL
+	configured.Recipe = &recipe
+	settings, _ := a.LoadSettings()
+	materialized, err := config.MaterializeInstallSpec(name, configured, strings.TrimSpace(settings.FallbackBinDir))
+	if err != nil {
+		return nil, fmt.Errorf("materializing GitHub upgrade for %s at %s: %w", name, recipe.TagName, err)
+	}
+	return materialized.Options, nil
 }
 
 func (a *App) UpgradeWithState(ctx context.Context, name, providerName string) (*ToolGroupMutationState, error) {

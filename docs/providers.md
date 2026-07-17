@@ -64,7 +64,9 @@ List it as a fallback candidate after native providers:
             "install": "curl -fsSL https://x.ai/cli/install.sh | bash",
             "check": "command -v grok || test -x $HOME/.grok/bin/grok",
             "uninstall": "rm -f $HOME/.grok/bin/grok",
-            "upgrade": "grok update 2>/dev/null || curl -fsSL https://x.ai/cli/install.sh | bash"
+            "upgrade": "grok update 2>/dev/null || curl -fsSL https://x.ai/cli/install.sh | bash",
+            "version": "grok --version | awk '{print $NF}'",
+            "latest": "curl -fsSL https://x.ai/cli/latest-version"
           }
         }
       ]
@@ -79,7 +81,15 @@ List it as a fallback candidate after native providers:
 | `check` or `detect` | one required | `check` is a full shell probe (exit 0 = installed). `detect` is a binary name passed to `command -v`. |
 | `uninstall` | no | Removal command. Omit when uninstall should be unavailable. |
 | `upgrade` | no | Upgrade command. Falls back to `install` when omitted. |
-| `version` | no | Display-only version command for tool rows. |
+| `version` | no | Installed-version command. Must print exactly one non-empty line. |
+| `latest` | no | Latest-version command. Requires `version`, uses the same output format, and overrides source-based detection. |
+
+Omni marks a command-backed script outdated when `latest` is a strictly newer
+numeric release than `version`; a lowercase `v` prefix is ignored. Failed or
+incomparable commands preserve the previous cached state.
+For an unpinned `github_release_asset` recipe, Omni instead reuses its shared
+GitHub latest-release lookup. A recipe `tag_name` or `options.release_tag` pins
+the tool and disables automatic release tracking.
 
 Routing behavior:
 

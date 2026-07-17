@@ -229,6 +229,15 @@ type OutdatedChecker interface {
 	OutdatedMap(ctx context.Context) (map[string]string, error)
 }
 
+// ToolOutdatedChecker is optionally implemented by providers whose update
+// checks depend on per-tool configuration and therefore cannot be expressed as
+// one provider-wide OutdatedMap call.
+type ToolOutdatedChecker interface {
+	// supported is false when this tool has no provider-specific update check,
+	// allowing callers to fall through to source-based resolution.
+	CheckOutdated(ctx context.Context, tool Tool, currentVersion string) (latestVersion string, outdated bool, supported bool, err error)
+}
+
 // OutdatedInfoChecker is optionally implemented by providers that can attach
 // package-manager metadata to outdated results.
 type OutdatedInfoChecker interface {
