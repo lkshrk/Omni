@@ -190,6 +190,13 @@ func (m Model) viewSkillsBody() string {
 
 	if m.skillTypeIdx != agentsChipSkills {
 		only := agentsSectionSkills
+		if m.skillTypeIdx == agentsChipAll {
+			for _, err := range []error{m.skillsErr, m.mcpErr, m.pluginErr, m.marketplaceErr} {
+				if err != nil {
+					topLines = append(topLines, p.styleErr.Render(pad+"error: "+err.Error()))
+				}
+			}
+		}
 		switch m.skillTypeIdx {
 		case agentsChipMcp:
 			only = agentsSectionMcp
