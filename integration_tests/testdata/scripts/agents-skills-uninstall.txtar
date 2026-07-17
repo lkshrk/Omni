@@ -1,0 +1,48 @@
+# agents skills uninstall: removes a package's files from agent skill dirs
+# via the fake npx runner (`skills remove -g -a <agents> -y <names>`).
+# The target agents are computed from disk state: claude-code is detected
+# ($HOME/.claude exists + a claude binary on PATH) and its skills dir
+# contains the package's lockfile skill name, so it is the only -a target.
+# Manifest is untouched by uninstall (that is `skills remove`'s job).
+chmod 0755 $WORK/bin/npx
+chmod 0755 $WORK/bin/claude
+env PATH=$WORK/bin:$PATH
+env HOME=$WORK/home
+env XDG_STATE_HOME=$WORK/state
+mkdir $WORK/home/.claude/skills/myskill
+
+exec omni --config settings.json agents skills uninstall o/r
+stdout 'uninstalled o/r'
+grep -count=1 'skills remove -g -a claude-code -y myskill' .omni-cache/npx-calls.log
+
+# exit-0-with-marker: the runner exits 0 but prints a skillsCLIFailure
+# marker ("Failed to"); the guard turns the lying zero exit into an error.
+env OMNI_FAKE_NPX_MARKER=1
+! exec omni --config settings.json agents skills uninstall o/r
+stderr 'skills remove o/r exited 0 but reported failure \("Failed to"\); treating as failed'
+env OMNI_FAKE_NPX_MARKER=
+
+# A source with no lockfile entries cannot be uninstalled.
+! exec omni --config settings.json agents skills uninstall nope/nope
+stderr 'skill package "nope/nope" has no lockfile entries to uninstall'
+
+-- settings.json --
+{"version":1,"agents":{"skills":[{"name":"myskill","source":"o/r"}]}}
+
+-- state/skills/.skill-lock.json --
+{"version":3,"skills":{"myskill":{"source":"o/r","sourceType":"github","sourceUrl":"https://github.com/o/r","ref":"main","skillFolderHash":"abc","installedAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}}}
+
+-- bin/npx --
+#!/bin/sh
+set -eu
+mkdir -p "${OMNI_CACHE_DIR}"
+echo "$*" >> "${OMNI_CACHE_DIR}/npx-calls.log"
+if [ "${OMNI_FAKE_NPX_MARKER:-}" = "1" ]; then
+  printf 'Failed to remove skill myskill\n'
+  exit 0
+fi
+exit 0
+
+-- bin/claude --
+#!/bin/sh
+exit 0

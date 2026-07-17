@@ -243,3 +243,22 @@ func TestAgentsCatalog_ConfigDirsMatchConfigList(t *testing.T) {
 		}
 	}
 }
+
+// TestInstalledAgentsSharedDirRequiresAgentSpecificSignal pins the deliberate
+// trade-off for shared configDirs (.zencoder is shared by zencoder+zenflow,
+// .config/agents by amp/replit/universal): detection requires the agent's
+// binary, because InstalledAgents feeds restore targets and a false positive
+// would write skills/config for a product that is not installed. Binary-less
+// agents on shared dirs stay undetected; users target them via agents_use.
+func TestInstalledAgentsSharedDirRequiresAgentSpecificSignal(t *testing.T) {
+	home := t.TempDir()
+	stubBinariesOnPath(t) // empty PATH, no binaries resolvable
+	for _, dir := range [][]string{{".zencoder", "skills"}, {".config", "agents", "skills"}} {
+		if err := os.MkdirAll(filepath.Join(append([]string{home}, dir...)...), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := InstalledAgents(home); len(got) != 0 {
+		t.Fatalf("InstalledAgents = %+v, want none detected from shared dirs without binaries", got)
+	}
+}

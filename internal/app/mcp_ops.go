@@ -128,8 +128,9 @@ func (a *App) RestoreMcpServers(ctx context.Context, opts RestoreMcpOptions) (Re
 		return RestoreMcpResult{Warnings: []string{"mcp servers are disabled for this host, skipping restore"}}, nil
 	}
 	servers := resolveMcpServers(cfg, currentMachineGroupName())
-	pluginNames := installedPluginNames(ctx, a)
+	pluginNames, shadowWarnings := installedPluginNames(ctx, a)
 	var res RestoreMcpResult
+	res.Warnings = append(res.Warnings, shadowWarnings...)
 	for _, adapter := range a.mcpAdapters() {
 		if !adapter.Available() {
 			res.Warnings = append(res.Warnings, fmt.Sprintf("agent %s not available, skipping", adapter.ID()))

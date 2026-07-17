@@ -167,7 +167,8 @@ func (a *App) SkillPackageRows(ctx context.Context) ([]SkillPackageRow, error) {
 		return nil, err
 	}
 	resolved := resolveSkillPackages(cfg, currentMachineGroupName())
-	pluginNames := installedPluginNames(ctx, a)
+	// display-only builder: shadow warnings surface via RestoreSkills
+	pluginNames, _ := installedPluginNames(ctx, a)
 	rows := make([]SkillPackageRow, 0, len(resolved))
 	for _, p := range resolved {
 		installed, updated := packageLockStatus(lock, p.Source)
@@ -242,7 +243,8 @@ func (a *App) UnmanagedSkillPackages(ctx context.Context) ([]SkillPackageRow, er
 	}
 	sort.Strings(sources)
 	installedAgents := InstalledAgents(home)
-	pluginNames := installedPluginNames(ctx, a)
+	// display-only builder: shadow warnings surface via RestoreSkills
+	pluginNames, _ := installedPluginNames(ctx, a)
 	rows := make([]SkillPackageRow, 0, len(sources))
 	for _, src := range sources {
 		names := packageSkills(lock, src)

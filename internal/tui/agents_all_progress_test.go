@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -231,5 +232,96 @@ func TestAgentsAll_UpdateAll_SkillsErrorDoesNotStickRunning(t *testing.T) {
 	}
 	if got.mcpRunning {
 		t.Error("mcpRunning should be false after full drain even when the sequence errored")
+	}
+}
+
+// combineSkillErrors — folding RestoreSkillsResult.Failed into the returned
+// error, mirroring combineMcpErrors/combinePluginErrors (see
+// internal/tui/agents_all.go's doc comment on combineSkillErrors).
+
+func TestCombineSkillErrors_NilErrNoFailed_ReturnsNil(t *testing.T) {
+	got := combineSkillErrors(nil, app.RestoreSkillsResult{})
+	if got != nil {
+		t.Fatalf("combineSkillErrors(nil, no Failed) = %v, want nil", got)
+	}
+}
+
+func TestCombineSkillErrors_NilErrWithFailed_ReturnsErrorPerPackage(t *testing.T) {
+	res := app.RestoreSkillsResult{Failed: []app.SkillFailure{
+		{Name: "acme/foo", Message: "install failed"},
+		{Name: "acme/bar", Message: "timeout"},
+	}}
+	got := combineSkillErrors(nil, res)
+	if got == nil {
+		t.Fatal("combineSkillErrors(nil, Failed) = nil, want non-nil error")
+	}
+	msg := got.Error()
+	for _, want := range []string{"acme/foo", "install failed", "acme/bar", "timeout"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("combined error %q does not contain %q", msg, want)
+		}
+	}
+}
+
+func TestCombineSkillErrors_ErrAndFailed_JoinsBoth(t *testing.T) {
+	topErr := errors.New("restore skills: manifest load failed")
+	res := app.RestoreSkillsResult{Failed: []app.SkillFailure{
+		{Name: "acme/foo", Message: "install failed"},
+	}}
+	got := combineSkillErrors(topErr, res)
+	if got == nil {
+		t.Fatal("combineSkillErrors(err, Failed) = nil, want non-nil error")
+	}
+	msg := got.Error()
+	for _, want := range []string{"manifest load failed", "acme/foo", "install failed"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("combined error %q does not contain %q", msg, want)
+		}
+	}
+	if !errors.Is(got, topErr) {
+		t.Error("combined error should wrap/join the original top-level err (errors.Is)")
+	}
+}
+
+// agentsProgressDoneMsg — skills-specific handling: a non-nil skillsErr
+// (whether from a top-level RestoreSkills error or from combineSkillErrors
+// folding res.Failed) must clear skillsRunning, set skillsErr, surface the
+// error via setStatus (see firstAgentsProgressError), and must NOT dispatch a
+// manifest reload (loadSkillsManifestCmd is only called on the msg.skillsErr
+// == nil branch in update.go's agentsProgressDoneMsg case).
+
+func TestAgentsProgressDoneMsg_SkillsErrorFromFailedPackages_StopsRunningNoReload(t *testing.T) {
+	m := baseModel(nil)
+	m.skillsRunning = true
+	m.skillsLoaded = true // sentinel: only the err==nil branch resets this to false
+	err := combineSkillErrors(nil, app.RestoreSkillsResult{Failed: []app.SkillFailure{
+		{Name: "acme/foo", Message: "install failed"},
+	}})
+	if err == nil {
+		t.Fatal("precondition: combineSkillErrors should produce a non-nil error")
+	}
+
+	got := drive(m, agentsProgressDoneMsg{skills: true, skillsErr: err})
+
+	if got.skillsRunning {
+		t.Error("skillsRunning should be false after an errored skills done msg")
+	}
+	if got.skillsErr == nil {
+		t.Fatal("skillsErr should be set on the model")
+	}
+	if !strings.Contains(got.skillsErr.Error(), "acme/foo") {
+		t.Errorf("skillsErr = %q, want it to contain the failed package name", got.skillsErr.Error())
+	}
+	if !got.skillsLoaded {
+		t.Error("skillsLoaded should remain true (unchanged) — a manifest reload must not be dispatched on error")
+	}
+	if !got.statusIsErr {
+		t.Error("statusIsErr should be true")
+	}
+	if !strings.HasPrefix(got.statusMsg, "✗ ") {
+		t.Errorf("statusMsg = %q, want it to start with the error prefix %q", got.statusMsg, "✗ ")
+	}
+	if !strings.Contains(got.statusMsg, "acme/foo") {
+		t.Errorf("statusMsg = %q, want it to surface the failed package name via firstAgentsProgressError", got.statusMsg)
 	}
 }

@@ -19,7 +19,7 @@ func TestTUIAgentsTabRendersFakeClaudeStub(t *testing.T) {
 	cache := filepath.Join(root, "cache")
 	configPath := filepath.Join(root, "settings.json")
 	binDir := filepath.Join(root, "bin")
-	env := isolatedTUIEnv(home, cache)
+	env := isolatedTUIEnv(t, home, cache)
 
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		t.Fatalf("create fake bin dir: %v", err)

@@ -45,5 +45,12 @@ func normalizeSkillSource(in string) (source, ref string, err error) {
 	if !ownerRepoRe.MatchString(s) {
 		return "", "", fmt.Errorf("cannot parse skill source %q (want owner/repo or a github URL)", in)
 	}
+	// "." and ".." match the owner/repo charset but are traversal-shaped, not
+	// repo names; the string is handed as an argv element to the skills CLI
+	// and used as a manifest key, so reject rather than trust downstream.
+	owner, repo, _ := strings.Cut(s, "/")
+	if owner == "." || owner == ".." || repo == "." || repo == ".." {
+		return "", "", fmt.Errorf("invalid skill source %q: %q is not a valid owner/repo segment", in, s)
+	}
 	return s, ref, nil
 }

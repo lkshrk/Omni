@@ -29,3 +29,14 @@ func TestNormalizeSkillSource(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeSkillSourceRejectsTraversalSegments(t *testing.T) {
+	for _, in := range []string{"../..", "./.", "../repo", "owner/..", "owner/."} {
+		if _, _, err := normalizeSkillSource(in); err == nil {
+			t.Errorf("normalizeSkillSource(%q) = nil error, want traversal rejection", in)
+		}
+	}
+	if _, _, err := normalizeSkillSource("dot.owner/dot.repo"); err != nil {
+		t.Errorf("dotted-but-valid segments rejected: %v", err)
+	}
+}

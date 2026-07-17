@@ -32,6 +32,16 @@ func newAgentsCmd(state *rootState) *cobra.Command {
 	return cmd
 }
 
+// agentErrsFailure turns already-printed per-agent "  ! agent/name: err"
+// lines into a command failure: without it the process exits 0 on a partial
+// failure and scripted callers chain onto an operation that did not happen.
+func agentErrsFailure(n int) error {
+	if n == 0 {
+		return nil
+	}
+	return fmt.Errorf("%d agent operation(s) failed", n)
+}
+
 func newAgentsAddCmd(state *rootState) *cobra.Command {
 	return &cobra.Command{
 		Use:   "add <source>",
@@ -165,7 +175,7 @@ func newAgentsRestoreSkillsCmd(state *rootState) *cobra.Command {
 			for _, s := range res.ShadowedByPlugin {
 				fmt.Fprintf(cmdOut(cmd), "  skipped (provided by plugin): %s\n", s)
 			}
-			return nil
+			return agentErrsFailure(len(res.Failed))
 		},
 	}
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "print the skills add commands without running them")
@@ -299,11 +309,14 @@ func newAgentsMcpAddCmd(state *rootState) *cobra.Command {
 			if len(envLiteral) > 0 {
 				envLit = make(map[string]string, len(envLiteral))
 				for _, kv := range envLiteral {
-					i := strings.IndexByte(kv, '=')
-					if i < 0 {
+					k, v, ok := strings.Cut(kv, "=")
+					if !ok {
 						return fmt.Errorf("--env-literal %q: must be KEY=VALUE", kv)
 					}
-					envLit[kv[:i]] = kv[i+1:]
+					if _, dup := envLit[k]; dup {
+						return fmt.Errorf("--env-literal %q: duplicate key %q", kv, k)
+					}
+					envLit[k] = v
 				}
 			}
 			s := config.McpServer{
@@ -324,7 +337,7 @@ func newAgentsMcpAddCmd(state *rootState) *cobra.Command {
 				fmt.Fprintf(cmdOut(cmd), "  ! %s/%s: %v\n", e.AgentID, e.ServerName, e.Err)
 			}
 			printSkippedUnavailable(cmd, res.SkippedUnavailable)
-			return nil
+			return agentErrsFailure(len(res.Errors))
 		},
 	}
 	cmd.Flags().StringVar(&name, "name", "", "server name (required)")
@@ -352,7 +365,7 @@ func newAgentsMcpRemoveCmd(state *rootState) *cobra.Command {
 				fmt.Fprintf(cmdOut(cmd), "  ! %s/%s: %v\n", e.AgentID, e.ServerName, e.Err)
 			}
 			printSkippedUnavailable(cmd, res.SkippedUnavailable)
-			return nil
+			return agentErrsFailure(len(res.Errors))
 		},
 	}
 }
@@ -389,7 +402,7 @@ func newAgentsMcpRestoreCmd(state *rootState) *cobra.Command {
 			for _, e := range res.Errors {
 				fmt.Fprintf(w, "  ! %s/%s: %v\n", e.AgentID, e.ServerName, e.Err)
 			}
-			return nil
+			return agentErrsFailure(len(res.Errors))
 		},
 	}
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "print what would be installed without running")
@@ -473,7 +486,7 @@ func importMcpServerByName(cmd *cobra.Command, state *rootState, diff app.McpImp
 	}
 	printSkippedUnavailable(cmd, res.SkippedUnavailable)
 	fmt.Fprintf(cmdOut(cmd), "imported %s\n", s.Name)
-	return nil
+	return agentErrsFailure(len(res.Errors))
 }
 
 func newAgentsPluginsCmd(state *rootState) *cobra.Command {
@@ -574,7 +587,7 @@ func newAgentsPluginsAddCmd(state *rootState) *cobra.Command {
 				fmt.Fprintf(cmdOut(cmd), "  ! %s/%s: %v\n", e.AgentID, e.Name, e.Err)
 			}
 			printSkippedUnavailable(cmd, res.SkippedUnavailable)
-			return nil
+			return agentErrsFailure(len(res.Errors))
 		},
 	}
 	cmd.Flags().StringVar(&name, "name", "", "plugin name (required)")
@@ -598,7 +611,7 @@ func newAgentsPluginsRemoveCmd(state *rootState) *cobra.Command {
 				fmt.Fprintf(cmdOut(cmd), "  ! %s/%s: %v\n", e.AgentID, e.Name, e.Err)
 			}
 			printSkippedUnavailable(cmd, res.SkippedUnavailable)
-			return nil
+			return agentErrsFailure(len(res.Errors))
 		},
 	}
 }
@@ -632,7 +645,7 @@ func newAgentsPluginsRestoreCmd(state *rootState) *cobra.Command {
 			for _, e := range res.Errors {
 				fmt.Fprintf(w, "  ! %s/%s: %v\n", e.AgentID, e.Name, e.Err)
 			}
-			return nil
+			return agentErrsFailure(len(res.Errors))
 		},
 	}
 	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "print what would be installed without running")
@@ -703,6 +716,7 @@ func importPluginByName(cmd *cobra.Command, state *rootState, diff app.PluginImp
 		return fmt.Errorf("plugin %q is not unmanaged in any agent CLI", name)
 	}
 
+	failed := 0
 	marketplaces, err := state.app.Marketplaces()
 	if err != nil {
 		return err
@@ -730,6 +744,7 @@ func importPluginByName(cmd *cobra.Command, state *rootState, diff app.PluginImp
 			fmt.Fprintf(cmdOut(cmd), "  ! %s/%s: %v\n", e.AgentID, e.Name, e.Err)
 		}
 		printSkippedUnavailable(cmd, mres.SkippedUnavailable)
+		failed += len(mres.Errors)
 	}
 
 	p := config.Plugin{Name: match.Name, Marketplace: match.Marketplace, Agents: matchedAgents}
@@ -742,7 +757,7 @@ func importPluginByName(cmd *cobra.Command, state *rootState, diff app.PluginImp
 	}
 	printSkippedUnavailable(cmd, res.SkippedUnavailable)
 	fmt.Fprintf(cmdOut(cmd), "imported %s\n", p.Name)
-	return nil
+	return agentErrsFailure(failed + len(res.Errors))
 }
 
 func newAgentsPluginsMarketplaceCmd(state *rootState) *cobra.Command {
@@ -799,7 +814,7 @@ func newAgentsPluginsMarketplaceAddCmd(state *rootState) *cobra.Command {
 				fmt.Fprintf(cmdOut(cmd), "  ! %s/%s: %v\n", e.AgentID, e.Name, e.Err)
 			}
 			printSkippedUnavailable(cmd, res.SkippedUnavailable)
-			return nil
+			return agentErrsFailure(len(res.Errors))
 		},
 	}
 	cmd.Flags().StringVar(&source, "source", "", "marketplace source, owner/repo or URL (required)")

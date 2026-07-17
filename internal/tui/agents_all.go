@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"errors"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -575,6 +577,21 @@ func (m *Model) doAgentsUpdateAll() []tea.Cmd {
 	return []tea.Cmd{m.spinner.Tick, work, waitForProgress(ch, gen)}
 }
 
+// combineSkillErrors folds per-package install failures into the returned
+// error, mirroring combineMcpErrors/combinePluginErrors: RestoreSkills only
+// reports them via res.Failed, so a nil err alone does not mean every
+// package installed.
+func combineSkillErrors(err error, res app.RestoreSkillsResult) error {
+	all := make([]error, 0, len(res.Failed)+1)
+	if err != nil {
+		all = append(all, err)
+	}
+	for _, f := range res.Failed {
+		all = append(all, fmt.Errorf("%s: %s", f.Name, f.Message))
+	}
+	return errors.Join(all...)
+}
+
 // doAgentsSyncAll runs the agents tab's "S" global bulk action: restore
 // skills, mcp, and plugins from their manifests, mirroring tools' SyncAll
 // (install missing / add discovered).
@@ -605,8 +622,8 @@ func (m *Model) doAgentsSyncAll() []tea.Cmd {
 		done := agentsProgressDoneMsg{gen: gen, skills: runSkills, mcp: runMcp, plugin: runPlugins}
 		if runSkills {
 			sendProgress(ch, gen, "restoring skills…")
-			_, _, err := a.RestoreSkills(ctx, app.RestoreSkillsOptions{})
-			done.skillsErr = err
+			res, _, err := a.RestoreSkills(ctx, app.RestoreSkillsOptions{})
+			done.skillsErr = combineSkillErrors(err, res)
 		}
 		if runMcp {
 			sendProgress(ch, gen, "restoring mcp servers…")

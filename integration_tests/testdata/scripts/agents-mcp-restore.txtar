@@ -13,9 +13,14 @@ mkdir $WORK/home
 # LINEAR_API_KEY is intentionally unset for this first run, so no `mcp add`
 # for linear is ever attempted. Restore still execs `claude plugins list` for
 # plugin-shadow detection; MCP List() reads $HOME/.claude.json directly.
-exec omni --config settings.json agents mcp restore
+# The linear failure is collected as a per-agent error, so agentErrsFailure
+# now makes the top-level omni command fail (exit 1, "error: N agent
+# operation(s) failed" on stderr) even though codex/grafana installed fine;
+# the per-agent "  ! agent/name: ..." detail line is still printed to stdout.
+! exec omni --config settings.json agents mcp restore
 stdout 'installed: codex/grafana'
 stdout '! claude-code/linear: .*LINEAR_API_KEY.* not set'
+stderr 'agent operation\(s\) failed'
 exists .omni-cache/claude-calls.log
 ! grep 'mcp add' .omni-cache/claude-calls.log
 exists .omni-cache/codex-calls.log

@@ -1,0 +1,37 @@
+# agents skills restore: regression for the failure-marker guard
+# (skillsCLIFailure, internal/app/agents_skills.go). A failed exit-0
+# REinstall cannot be caught by verifySkillInstalled's lockfile-effect check:
+# the lockfile already holds the package's entries from an earlier install
+# (pre-seeded below), so a runner that exits 0 and writes nothing still
+# satisfies it. The marker check closes that hole — the fake's output
+# contains "Failed to", one of skillsCLIFailureMarkers, which turns the
+# zero-exit run into a per-package failure and, via agentErrsFailure, a
+# non-zero omni exit. (A marker-LESS silent exit-0 reinstall would still
+# false-succeed; detecting that needs version/hash comparison — see
+# verifySkillInstalled's doc comment.)
+chmod 0755 $WORK/bin/npx
+env PATH=$WORK/bin:$PATH
+env XDG_STATE_HOME=$WORK/state
+
+! exec omni --config settings.json agents skills restore
+stdout '^0 installed, 1 failed$'
+stdout '! o/r: skills add o/r exited 0 but reported failure \("Failed to"\); treating as failed'
+stderr 'agent operation\(s\) failed'
+grep -count=1 'skills add o/r -g -y' .omni-cache/npx-calls.log
+
+-- settings.json --
+{"version":1,"agents":{"skills":[{"name":"x","source":"o/r"}]}}
+
+-- state/skills/.skill-lock.json --
+{"version":3,"skills":{"x":{"source":"o/r","sourceType":"github","sourceUrl":"https://github.com/o/r","skillFolderHash":"stale","installedAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}}}
+
+-- bin/npx --
+#!/bin/sh
+set -eu
+mkdir -p "${OMNI_CACHE_DIR}"
+echo "$*" >> "${OMNI_CACHE_DIR}/npx-calls.log"
+if [ "$1" = "skills" ] && [ "$2" = "add" ]; then
+  printf 'Failed to install skill o/r\n'
+  exit 0
+fi
+exit 1

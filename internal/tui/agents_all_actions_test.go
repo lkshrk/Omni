@@ -1730,3 +1730,64 @@ func TestConfirmTimeoutMsg_StaleGen_LeavesOfferArmed(t *testing.T) {
 		t.Errorf("pluginMarketplaceOfferMarket = %q, want unchanged %q", got.pluginMarketplaceOfferMarket, "acme-market")
 	}
 }
+
+// TestDoAgentsRefreshAll_SectionGates verifies "R" dispatches a reload command
+// set per section-enabled gate: skills contributes 1 cmd (manifest load), mcp /
+// plugins / marketplaces each contribute 2 (spinner tick + row load), and the
+// dashboard agents summary is always appended regardless of gates. The
+// marketplaces gate shares pluginsEnabled (see marketplacesSectionEnabled).
+func TestDoAgentsRefreshAll_SectionGates(t *testing.T) {
+	cases := []struct {
+		name                   string
+		agents, skills         bool
+		mcp, plugins           bool
+		wantCmds               int
+		wantSkillsLoaded       bool
+		wantMcpRunning         bool
+		wantPluginRunning      bool
+		wantMarketplaceRunning bool
+	}{
+		{"all sections enabled", true, true, true, true, 8, true, true, true, true},
+		{"agents disabled gates every section", false, true, true, true, 1, false, false, false, false},
+		{"skills only", true, true, false, false, 2, true, false, false, false},
+		{"mcp only", true, false, true, false, 3, false, true, false, false},
+		{"plugins only also enables marketplaces", true, false, false, true, 5, false, false, true, true},
+		{"skills and mcp without plugins", true, true, true, false, 4, true, true, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newScanPlanTestApp(t)
+			m := agentsAllModel(nil, nil, nil)
+			m.app = a
+			m.ctx = context.Background()
+			m.agentsEnabled = tc.agents
+			m.skillsEnabled = tc.skills
+			m.mcpEnabled = tc.mcp
+			m.pluginsEnabled = tc.plugins
+			m.skillsLoaded = false
+
+			cmds := m.doAgentsRefreshAll()
+
+			if len(cmds) != tc.wantCmds {
+				t.Errorf("len(cmds) = %d, want %d", len(cmds), tc.wantCmds)
+			}
+			for i, c := range cmds {
+				if c == nil {
+					t.Errorf("cmds[%d] is nil, want every dispatched cmd non-nil with a live app", i)
+				}
+			}
+			if m.skillsLoaded != tc.wantSkillsLoaded {
+				t.Errorf("skillsLoaded = %v, want %v", m.skillsLoaded, tc.wantSkillsLoaded)
+			}
+			if m.mcpRunning != tc.wantMcpRunning {
+				t.Errorf("mcpRunning = %v, want %v", m.mcpRunning, tc.wantMcpRunning)
+			}
+			if m.pluginRunning != tc.wantPluginRunning {
+				t.Errorf("pluginRunning = %v, want %v", m.pluginRunning, tc.wantPluginRunning)
+			}
+			if m.marketplaceRunning != tc.wantMarketplaceRunning {
+				t.Errorf("marketplaceRunning = %v, want %v", m.marketplaceRunning, tc.wantMarketplaceRunning)
+			}
+		})
+	}
+}

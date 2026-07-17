@@ -54,7 +54,8 @@ func (a *App) DashboardAgentsSummary(ctx context.Context, cfg *config.RootConfig
 	}
 
 	resolved := resolveSkillPackages(cfg, currentMachineGroupName())
-	pluginNames := installedPluginNames(ctx, a)
+	// display-only builder: shadow warnings surface via RestoreSkills
+	pluginNames, _ := installedPluginNames(ctx, a)
 	installed := 0
 	var missingNames []string
 	for _, p := range resolved {

@@ -1,0 +1,41 @@
+# agents mcp import: lists MCP servers an agent CLI reports that the
+# manifest doesn't know about, then adopts one by name. claude-code's List()
+# reads $HOME/.claude.json's top-level "mcpServers" directly (no exec); the
+# claude binary only needs to exist on PATH for the adapter to be available.
+# Adoption stores name/transport/command only (never env values) and targets
+# the agents the server was found under.
+chmod 0755 $WORK/bin/claude
+env PATH=$WORK/bin:$PATH
+env HOME=$WORK/home
+
+exec omni --config settings.json agents mcp import
+stdout -count=1 '-- unmanaged \(claude-code\) --'
+stdout 'extra'
+
+exec omni --config settings.json agents mcp import extra
+stdout 'imported extra'
+
+# The server is now managed: a second import list no longer reports it.
+exec omni --config settings.json agents mcp import
+! stdout 'extra'
+
+# Adopting a name no agent CLI reports as unmanaged fails.
+! exec omni --config settings.json agents mcp import ghost
+stderr 'mcp server "ghost" is not unmanaged in any agent CLI'
+
+-- settings.json --
+{}
+
+-- home/.claude.json --
+{"mcpServers":{"extra":{"command":"npx","args":["-y","@extra/mcp"]}}}
+
+-- bin/claude --
+#!/bin/sh
+set -eu
+mkdir -p "${OMNI_CACHE_DIR}"
+echo "$*" >> "${OMNI_CACHE_DIR}/claude-calls.log"
+if [ "$1" = "mcp" ] && [ "$2" = "add" ]; then
+  echo "added $5"
+  exit 0
+fi
+exit 1

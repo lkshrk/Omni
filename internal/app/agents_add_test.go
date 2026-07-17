@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/config"
@@ -141,5 +142,38 @@ func TestUninstallSkillPackage_RejectsMissingLockfileEntries(t *testing.T) {
 	a := newSkillsTestApp(t, config.AgentsConfig{})
 	if err := a.UninstallSkillPackage(context.Background(), "ghost/pkg"); err == nil {
 		t.Fatal("expected error when package has no lockfile entries")
+	}
+}
+
+func TestUninstallSkillPackageExitZeroFailureMarker(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_HOME", "")
+	writeSkillLockFixture(t, home, config.SkillLockFile{
+		Version: 3,
+		Skills: map[string]config.SkillLockEntry{
+			"taste-skill": {Source: "Leonxlnx/taste-skill"},
+		},
+	})
+	if err := os.MkdirAll(filepath.Join(home, ".claude", "skills", "taste-skill"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stubBinariesOnPath(t, "claude")
+
+	a := newSkillsTestApp(t, config.AgentsConfig{
+		Ignore: config.AgentsIgnore{Skills: []string{"Leonxlnx/taste-skill"}},
+	})
+	a.SetFallbackExecutor(&fixedOutputExecutor{stdout: "✘ Failed to remove skill"})
+
+	err := a.UninstallSkillPackage(context.Background(), "Leonxlnx/taste-skill")
+	if err == nil || !strings.Contains(err.Error(), "exited 0 but reported failure") {
+		t.Fatalf("UninstallSkillPackage err = %v, want exit-0 failure-marker error", err)
+	}
+	cfg, err := a.loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Agents.Ignore.Skills) != 1 {
+		t.Fatalf("ignore list must be untouched on failed uninstall, got %v", cfg.Agents.Ignore.Skills)
 	}
 }

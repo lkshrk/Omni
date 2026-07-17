@@ -50,9 +50,69 @@ type npxInstaller struct {
 
 func (n npxInstaller) Install(ctx context.Context, pkg config.SkillPackage, agents []string) error {
 	args := skillPackageAddArgs(pkg, agents)
-	_, stderr, err := n.exec(ctx, n.runner, args...)
+	stdout, stderr, err := n.exec(ctx, n.runner, args...)
 	if err != nil {
 		return fmt.Errorf("skills add %s: %w: %s", pkg.Source, err, stderr)
+	}
+	if err := skillsCLIFailure("skills add "+pkg.Source, stdout, stderr); err != nil {
+		return err
+	}
+	return verifySkillInstalled(pkg.Source)
+}
+
+// skillsCLIFailureMarkers are substrings the skills CLI prints when an
+// operation fails despite a zero exit. Verified against vercel-labs/skills
+// (main, 2026-07): per-skill add failures print "Failed to install ${N}" plus
+// "✗ skill → agent: err" lines (src/add.ts), remove prints "Failed to remove
+// ${N} skill(s)" (src/remove.ts), update prints "✗ Failed to update ${name}"
+// (src/update.ts) — and none of these set process.exitCode, so the process
+// exits 0 (src/cli.ts: `process.exit(process.exitCode ?? 0)`). Only a
+// top-level clone/parse error exits 1. picocolors drops ANSI codes on
+// non-TTY output, so plain substring matching holds through the executor.
+// Marker checking catches the case verifySkillInstalled cannot: a failed
+// REinstall whose stale lock entries from an earlier install still satisfy
+// the effect check, plus update/remove operations that have no effect check
+// at all. "✘" is kept defensively for glyph drift.
+var skillsCLIFailureMarkers = []string{"Failed to", "✗", "✘"}
+
+func skillsCLIFailure(op, stdout, stderr string) error {
+	for _, m := range skillsCLIFailureMarkers {
+		if strings.Contains(stdout, m) || strings.Contains(stderr, m) {
+			return fmt.Errorf("%s exited 0 but reported failure (%q); treating as failed", op, m)
+		}
+	}
+	return nil
+}
+
+// SkillsCLIOutputIndicatesFailure reports whether output from the skills CLI
+// contains a known failure marker. Exported for the real-CLI canary
+// integration test, which guards the markers against upstream wording drift
+// (the CLI is invoked via npx unpinned, so releases change under us).
+func SkillsCLIOutputIndicatesFailure(stdout, stderr string) bool {
+	return skillsCLIFailure("skills", stdout, stderr) != nil
+}
+
+// verifySkillInstalled guards against the skills CLI exiting 0 on a failed
+// install — the same upstream-CLI contract already hit with `claude plugin`
+// (see plugin_claude_adapter.go's failure markers). Rather than guessing at
+// output markers for a CLI whose failure text is unverified, check the
+// effect: a successful `skills add` writes the package's entries to the
+// global lockfile, so their absence after a zero exit means the install did
+// not happen. Entries left by an earlier install satisfy this check, so a
+// failed exit-0 REinstall printing a failure marker is caught by
+// skillsAddFailure instead; a marker-less silent one would need version/hash
+// comparison against the resolved ref to detect.
+func verifySkillInstalled(source string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("resolving home dir: %w", err)
+	}
+	lock, err := config.LoadSkillLock(config.SkillLockPath(home))
+	if err != nil {
+		return err
+	}
+	if len(packageSkills(lock, source)) == 0 {
+		return fmt.Errorf("skills add %s exited 0 but wrote no lockfile entries; treating as failed install", source)
 	}
 	return nil
 }
@@ -100,6 +160,18 @@ func filterShadowedSkillPackages(pkgs []resolvedPackage, use []string, pluginNam
 		keep = append(keep, p)
 	}
 	return keep, shadowed
+}
+
+// shadowCheckAgents resolves the agent set the shadow filter must consider.
+// A nil use list makes the install omit -a and lets the CLI auto-detect
+// agents, but handed straight to filterShadowedSkillPackages it would iterate
+// nothing and shadow nothing — so fall back to the detected agents, the same
+// set the auto-detecting install would target (mirrors SkillPackageRows).
+func (a *App) shadowCheckAgents(cfg *config.RootConfig, use []string) []string {
+	if use != nil {
+		return use
+	}
+	return a.EnabledAgentIDs(cfg)
 }
 
 func restoreSkills(ctx context.Context, pkgs []resolvedPackage, use []string, inst SkillInstaller) RestoreSkillsResult {
@@ -158,6 +230,22 @@ func nodeManager(cfg *config.RootConfig) string {
 	return cfg.Settings.Ecosystems[provider.EcosystemNode].Manager
 }
 
+// unconfiguredHostSkillsWarning reports when group-assigned skill packages are
+// silently excluded from a restore because the current host is not registered
+// in cfg.Hosts (doctorHost surfaces the same state) — without it, "no active
+// groups" and "host never bootstrapped" are indistinguishable to the user.
+func unconfiguredHostSkillsWarning(cfg *config.RootConfig) string {
+	if _, ok := activeHostGroupNames(cfg, currentMachineGroupName()); ok {
+		return ""
+	}
+	for _, g := range cfg.Groups {
+		if g != nil && len(g.Skills) > 0 {
+			return "this host is not configured (run setup); skill packages assigned to groups are excluded from restore"
+		}
+	}
+	return ""
+}
+
 // RestoreSkills restores the resolved package set onto this host.
 func (a *App) RestoreSkills(ctx context.Context, opts RestoreSkillsOptions) (RestoreSkillsResult, []string, error) {
 	cfg, err := a.loadConfig()
@@ -173,10 +261,13 @@ func (a *App) RestoreSkills(ctx context.Context, opts RestoreSkillsOptions) (Res
 	runner := skillRunner(nodeManager(cfg))
 	pkgs := resolveSkillPackages(cfg, currentMachineGroupName())
 	use := a.effectiveSettings(cfg).AgentsUse
-	pluginNames := installedPluginNames(ctx, a)
-	pkgs, shadowedSources := filterShadowedSkillPackages(pkgs, use, pluginNames)
+	pluginNames, warnings := installedPluginNames(ctx, a)
+	if w := unconfiguredHostSkillsWarning(cfg); w != "" {
+		warnings = append(warnings, w)
+	}
+	pkgs, shadowedSources := filterShadowedSkillPackages(pkgs, a.shadowCheckAgents(cfg, use), pluginNames)
 	if opts.DryRun {
-		return RestoreSkillsResult{ShadowedByPlugin: shadowedSources}, dryRunLines(runner, pkgs, use), nil
+		return RestoreSkillsResult{ShadowedByPlugin: shadowedSources, Warnings: warnings}, dryRunLines(runner, pkgs, use), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -189,6 +280,7 @@ func (a *App) RestoreSkills(ctx context.Context, opts RestoreSkillsOptions) (Res
 	inst := npxInstaller{runner: runner, exec: a.fallbackExecutor().Run}
 	res := restoreSkills(ctx, pkgs, use, inst)
 	res.ShadowedByPlugin = shadowedSources
+	res.Warnings = append(res.Warnings, warnings...)
 	after, err := lockHashes(home)
 	if err != nil {
 		return RestoreSkillsResult{}, nil, err
@@ -403,6 +495,9 @@ func (a *App) UpdateSkills(ctx context.Context, opts UpdateSkillsOptions) (outpu
 	stdout, stderr, err := a.fallbackExecutor().Run(ctx, runner, args...)
 	if err != nil {
 		return stdout, "", fmt.Errorf("skills update: %w: %s", err, stderr)
+	}
+	if err := skillsCLIFailure("skills update", stdout, stderr); err != nil {
+		return stdout, "", err
 	}
 	return stdout, "", nil
 }
