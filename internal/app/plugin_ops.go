@@ -480,6 +480,7 @@ func (a *App) RemovePlugin(ctx context.Context, name string) (RemovePluginResult
 	}
 	if err := a.withConfig(func(c *config.RootConfig) error {
 		c.Agents.Plugins = deletePlugin(c.Agents.Plugins, name)
+		setPluginGroupsInConfig(c, name, map[string]struct{}{})
 		return nil
 	}); err != nil {
 		return res, fmt.Errorf("removed %s from agents but failed to update manifest (re-run to persist): %w", name, err)
@@ -512,6 +513,7 @@ func (a *App) RemoveMarketplace(name string) error {
 	}
 	return a.withConfig(func(c *config.RootConfig) error {
 		c.Agents.Marketplaces = deleteMarketplace(c.Agents.Marketplaces, name)
+		setMarketplaceGroupsInConfig(c, name, map[string]struct{}{})
 		return nil
 	})
 }

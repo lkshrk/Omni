@@ -266,6 +266,7 @@ func (a *App) RemoveMcpServer(ctx context.Context, name string) (RemoveMcpResult
 	}
 	if err := a.withConfig(func(c *config.RootConfig) error {
 		c.Agents.McpServers = deleteMcpServer(c.Agents.McpServers, name)
+		setMcpGroupsInConfig(c, name, map[string]struct{}{})
 		return nil
 	}); err != nil {
 		return res, fmt.Errorf("removed %s from agents but failed to update manifest (re-run to persist): %w", name, err)
