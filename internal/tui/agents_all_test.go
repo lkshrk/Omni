@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"sort"
 	"strings"
 	"testing"
@@ -25,6 +26,10 @@ func agentsAllModel(skills []app.SkillPackageRow, mcpRows []app.McpServerRow, pl
 	m.skillsLoaded = true
 	m.mcpLoaded = true
 	m.pluginLoaded = true
+	m.skillsRowsKnown = true
+	m.mcpRowsKnown = true
+	m.pluginRowsKnown = true
+	m.marketplaceRowsKnown = true
 	m.skillsRows = skills
 	m.mcpRows = mcpRows
 	m.pluginRows = pluginRows
@@ -1362,5 +1367,137 @@ func TestAgentsAllRowsListAgentFilter_Marketplace(t *testing.T) {
 		if e.feature == agentsSectionMarketplaces && e.agentID != selected {
 			t.Fatalf("skillAgentIdx=%d: unexpected marketplace row for agent %q, want only %q", m.skillAgentIdx, e.agentID, selected)
 		}
+	}
+}
+
+func TestAgentsAll_ZeroRows_LoadingLineVsOnboardingEmptyState(t *testing.T) {
+	t.Run("chip with rows unknown shows loading line", func(t *testing.T) {
+		m := agentsAllModel(nil, nil, nil)
+		m.mcpRowsKnown = false
+		m.skillTypeIdx = agentsChipMcp
+
+		out := stripANSIEscapeSequences(m.viewSkillsBody())
+		if !strings.Contains(out, "loading agents…") {
+			t.Fatalf("expected loading line while mcp rows are unknown, got:\n%s", out)
+		}
+		if strings.Contains(out, "No MCP servers tracked yet.") {
+			t.Fatalf("onboarding empty state must not show before rows are known, got:\n%s", out)
+		}
+	})
+
+	t.Run("chip with rows known shows onboarding empty state", func(t *testing.T) {
+		m := agentsAllModel(nil, nil, nil)
+		m.skillTypeIdx = agentsChipMcp
+
+		out := stripANSIEscapeSequences(m.viewSkillsBody())
+		if strings.Contains(out, "loading agents…") {
+			t.Fatalf("loading line must not show once rows are known, got:\n%s", out)
+		}
+		if !strings.Contains(out, "No MCP servers tracked yet.") {
+			t.Fatalf("expected onboarding empty state once rows are known, got:\n%s", out)
+		}
+	})
+
+	t.Run("all chip with one enabled section unknown shows loading line", func(t *testing.T) {
+		m := agentsAllModel(nil, nil, nil)
+		m.marketplaceRowsKnown = false
+		m.skillTypeIdx = agentsChipAll
+
+		out := stripANSIEscapeSequences(m.viewSkillsBody())
+		if !strings.Contains(out, "loading agents…") {
+			t.Fatalf("expected loading line while one enabled section is unknown, got:\n%s", out)
+		}
+		if strings.Contains(out, "No agent items tracked yet.") {
+			t.Fatalf("all-chip empty state must not show while a section is unknown, got:\n%s", out)
+		}
+	})
+
+	t.Run("all chip ignores unknown disabled sections", func(t *testing.T) {
+		m := agentsAllModel(nil, nil, nil)
+		m.mcpRowsKnown = false
+		m.mcpEnabled = false
+		m.skillTypeIdx = agentsChipAll
+
+		out := stripANSIEscapeSequences(m.viewSkillsBody())
+		if !strings.Contains(out, "No agent items tracked yet.") {
+			t.Fatalf("expected all-chip empty state when only a disabled section is unknown, got:\n%s", out)
+		}
+	})
+}
+
+// TestAgentsRowsMsgs_ErrorKeepsPreviouslySeededRows pins that an errored row
+// reload no longer wipes the rows on screen: the previous (cache-seeded or
+// live) rows stay put and only the section's err field is set.
+func TestAgentsRowsMsgs_ErrorKeepsPreviouslySeededRows(t *testing.T) {
+	m := agentsAllModel(
+		[]app.SkillPackageRow{{Name: "seed-skill", Source: "o/seed-skill", Installed: true}},
+		[]app.McpServerRow{{Name: "seed-mcp", PerAgentStatus: map[string]app.McpStatus{"claude": app.McpStatusInstalled}}},
+		[]app.PluginRow{{Name: "seed-plugin", Marketplace: "acme", PerAgentStatus: map[string]app.PluginStatus{"claude": app.PluginStatusInstalled}}},
+	)
+	m.marketplaceRows = []app.MarketplaceRow{{Name: "seed-market", Source: "acme/repo", PerAgentStatus: map[string]app.PluginStatus{"claude": app.PluginStatusInstalled}}}
+	boom := errors.New("adapter unavailable")
+
+	got := drive(m,
+		skillsManifestLoadedMsg{err: boom},
+		mcpRowsMsg{err: boom},
+		pluginRowsMsg{err: boom},
+		marketplaceRowsMsg{err: boom},
+	)
+
+	if len(got.skillsRows) != 1 || got.skillsRows[0].Name != "seed-skill" {
+		t.Errorf("skillsRows = %#v, want seeded rows kept on error", got.skillsRows)
+	}
+	if len(got.mcpRows) != 1 || got.mcpRows[0].Name != "seed-mcp" {
+		t.Errorf("mcpRows = %#v, want seeded rows kept on error", got.mcpRows)
+	}
+	if len(got.pluginRows) != 1 || got.pluginRows[0].Name != "seed-plugin" {
+		t.Errorf("pluginRows = %#v, want seeded rows kept on error", got.pluginRows)
+	}
+	if len(got.marketplaceRows) != 1 || got.marketplaceRows[0].Name != "seed-market" {
+		t.Errorf("marketplaceRows = %#v, want seeded rows kept on error", got.marketplaceRows)
+	}
+	if got.skillsErr == nil || got.mcpErr == nil || got.pluginErr == nil || got.marketplaceErr == nil {
+		t.Errorf("every section err should be set, got skills=%v mcp=%v plugin=%v marketplace=%v",
+			got.skillsErr, got.mcpErr, got.pluginErr, got.marketplaceErr)
+	}
+}
+
+func TestAgentsRowsMsgs_ErrorDoesNotMarkRowsKnown(t *testing.T) {
+	m := baseModel(nil)
+	boom := errors.New("adapter unavailable")
+
+	got := drive(m,
+		skillsManifestLoadedMsg{err: boom},
+		mcpRowsMsg{err: boom},
+		pluginRowsMsg{err: boom},
+		marketplaceRowsMsg{err: boom},
+	)
+
+	if got.skillsRowsKnown || got.mcpRowsKnown || got.pluginRowsKnown || got.marketplaceRowsKnown {
+		t.Errorf("no Known flag should be set by an errored rows msg, got skills=%v mcp=%v plugin=%v marketplace=%v",
+			got.skillsRowsKnown, got.mcpRowsKnown, got.pluginRowsKnown, got.marketplaceRowsKnown)
+	}
+}
+
+func TestAgentsMarketplaceRowAt(t *testing.T) {
+	m := agentsAllModel(nil, nil, nil)
+	m.marketplaceRows = []app.MarketplaceRow{{Name: "managed-market", Source: "acme/repo"}}
+	m.marketplaceUnmanaged = map[string][]app.InstalledMarketplace{
+		"claude-code": {{Name: "orphan-market", Source: "orphan/repo"}},
+	}
+
+	row, ok := agentsMarketplaceRowAt(m, 0)
+	if !ok || row.Name != "managed-market" {
+		t.Errorf("row at 0 = (%#v, %v), want the managed row", row, ok)
+	}
+	row, ok = agentsMarketplaceRowAt(m, 1)
+	if !ok || row.Name != "orphan-market" {
+		t.Errorf("row at 1 = (%#v, %v), want the flattened unmanaged row", row, ok)
+	}
+	if _, ok := agentsMarketplaceRowAt(m, 2); ok {
+		t.Error("row at 2 should not exist")
+	}
+	if _, ok := agentsMarketplaceRowAt(m, -1); ok {
+		t.Error("row at -1 should not exist")
 	}
 }

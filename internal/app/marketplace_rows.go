@@ -81,5 +81,6 @@ func (a *App) MarketplaceRows(ctx context.Context) (managed []MarketplaceRow, un
 			}
 		}
 	}
+	a.cacheAgentsRowsSectionBestEffort(ctx, agentsRowsCacheMarketplacesKey, cachedMarketplaceRows{Rows: managed, Unmanaged: unmanaged})
 	return managed, unmanaged, nil
 }

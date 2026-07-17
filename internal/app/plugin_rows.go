@@ -201,5 +201,6 @@ func (a *App) PluginRows(ctx context.Context) (managed []PluginRow, unmanaged ma
 			}
 		}
 	}
+	a.cacheAgentsRowsSectionBestEffort(ctx, agentsRowsCachePluginsKey, cachedPluginRows{Rows: managed, Unmanaged: unmanaged})
 	return managed, unmanaged, nil
 }
