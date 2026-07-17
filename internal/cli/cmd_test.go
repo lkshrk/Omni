@@ -4788,8 +4788,16 @@ func TestDotsStatus_EmptyEntries_OutputsCleanStatus(t *testing.T) {
 func withMockStdin(t *testing.T, input string, f func()) {
 	t.Helper()
 	orig := stdinScanner
-	t.Cleanup(func() { stdinScanner = orig })
+	origTerm := stdinIsTerminal
+	t.Cleanup(func() {
+		stdinScanner = orig
+		stdinIsTerminal = origTerm
+	})
 	stdinScanner = bufio.NewScanner(strings.NewReader(input))
+	// Mocked input implies an interactive session: prompts gated on a real
+	// terminal must still read it, independent of go test's /dev/null stdin
+	// happening to satisfy the char-device check.
+	stdinIsTerminal = func() bool { return true }
 	f()
 }
 
@@ -5031,6 +5039,38 @@ func TestPromptReassign_EOF(t *testing.T) {
 	}
 	if findGroup(cfg, "dev") != nil {
 		t.Error("expected no 'dev' group after EOF")
+	}
+}
+
+func TestPromptReassign_SkipsNonInteractiveStdin(t *testing.T) {
+	a := newReassignTestApp(t, "ripgrep")
+	state := &rootState{app: a}
+	withMockStdin(t, "a\ndev\n", func() {
+		withMockTerminal(t, false, func() {
+			promptReassignClaimedTools(state, []string{"ripgrep"})
+		})
+	})
+	cfg, err := config.Load(a.ConfigPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if findGroup(cfg, "dev") != nil {
+		t.Error("expected no prompt interaction on non-terminal stdin")
+	}
+}
+
+func TestPromptReassign_SkipsAssumeYes(t *testing.T) {
+	a := newReassignTestApp(t, "ripgrep")
+	state := &rootState{app: a, yes: true}
+	withMockStdin(t, "a\ndev\n", func() {
+		promptReassignClaimedTools(state, []string{"ripgrep"})
+	})
+	cfg, err := config.Load(a.ConfigPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if findGroup(cfg, "dev") != nil {
+		t.Error("expected no prompt interaction under --yes")
 	}
 }
 
