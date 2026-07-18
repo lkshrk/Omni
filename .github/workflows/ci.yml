@@ -76,8 +76,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y stow
 
-      - name: Unit tests with race detector
-        run: make test
+      - name: Shell and unit tests
+        run: make -j2 test
 
   integration:
     name: Docker Integration Tests

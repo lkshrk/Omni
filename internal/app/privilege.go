@@ -30,8 +30,8 @@ type PrivilegedToolCommand struct {
 type PrivilegeQueueRequest struct {
 	RowErrors    map[string]string
 	Actions      map[string]provider.PrivilegeAction
-	VisibleTools []*database.ToolCache
-	Tools        []*database.ToolCache
+	VisibleTools []*ToolView
+	Tools        []*ToolView
 }
 
 type PrivilegeQueuePlan struct {
@@ -48,7 +48,8 @@ type PrivilegeQueueItem struct {
 	ApprovalMessage string
 }
 
-func (a *App) ToolPrivilegePlan(ctx context.Context, t *database.ToolCache, action provider.PrivilegeAction) (provider.PrivilegePlan, error) {
+func (a *App) ToolPrivilegePlan(ctx context.Context, view *ToolView, action provider.PrivilegeAction) (provider.PrivilegePlan, error) {
+	t := toolCacheFromView(view)
 	if t == nil {
 		return provider.PrivilegePlan{}, nil
 	}
@@ -102,7 +103,7 @@ func (a *App) PrivilegeQueuePlan(ctx context.Context, req PrivilegeQueueRequest)
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	for _, t := range privilegeQueueCandidates(req.RowErrors, req.VisibleTools, req.Tools) {
+	for _, t := range privilegeQueueCandidates(req.RowErrors, toolCachesFromView(req.VisibleTools), toolCachesFromView(req.Tools)) {
 		key := privilegeQueueToolKey(t.Name, t.Provider)
 		action, ok := req.Actions[key]
 		if !ok || !privilegeQueueActionValid(action) || skipPrivilegeQueueCandidate(t, action) {
@@ -123,7 +124,7 @@ func (a *App) PrivilegeQueuePlan(ctx context.Context, req PrivilegeQueueRequest)
 		if shouldPreferRowPrivilegePlan(plan, rowPlan) && !isGenericPrivilegeReason(rowPlan.Reason) {
 			plan = rowPlan
 		} else {
-			providerPlan, err := a.ToolPrivilegePlan(ctx, t, action)
+			providerPlan, err := a.ToolPrivilegePlan(ctx, toolViewFromCache(t), action)
 			if err != nil || !providerPlan.RequiresPrivilege() {
 				plan = rowPlan
 			} else if shouldPreferRowPrivilegePlan(providerPlan, rowPlan) {
@@ -138,7 +139,7 @@ func (a *App) PrivilegeQueuePlan(ctx context.Context, req PrivilegeQueueRequest)
 		if plan.Reason == "" {
 			plan.Reason = "package manager needs sudo/root access"
 		}
-		command, ok := a.PrivilegedToolCommand(ctx, t, action, plan)
+		command, ok := a.PrivilegedToolCommand(ctx, toolViewFromCache(t), action, plan)
 		if !ok {
 			out.setRowError(key, "requires admin terminal; unsupported provider command")
 			continue
@@ -358,7 +359,8 @@ func (a *App) MarkToolPrivilegeRequired(ctx context.Context, name, prov, pkg, re
 	return a.readDB().MarkPrivilegeRequired(ctx, name, prov, pkg, requirement, reason)
 }
 
-func (a *App) PrivilegedToolCommand(ctx context.Context, t *database.ToolCache, action provider.PrivilegeAction, plan provider.PrivilegePlan) (PrivilegedToolCommand, bool) {
+func (a *App) PrivilegedToolCommand(ctx context.Context, view *ToolView, action provider.PrivilegeAction, plan provider.PrivilegePlan) (PrivilegedToolCommand, bool) {
+	t := toolCacheFromView(view)
 	if a == nil || a.registry == nil || t == nil || !plan.RequiresPrivilege() {
 		return PrivilegedToolCommand{}, false
 	}
@@ -389,7 +391,20 @@ func (a *App) PrivilegedToolCommand(ctx context.Context, t *database.ToolCache, 
 	}
 	command, args := rawCmd, append([]string(nil), rawArgs...)
 	if concrete != "brew" {
-		command, args, _ = interactivePrivilegedCommand(rawCmd, rawArgs...)
+		// The package name and option values originate from settings.json, which
+		// may be git-synced from a less-trusted source. Refuse to build a sudo
+		// escalation when either looks like an injected flag rather than a
+		// package identifier — a legitimate package/option value never leads
+		// with "-".
+		if configTokenLooksLikeFlag(pkg, t.Options) {
+			return PrivilegedToolCommand{}, false
+		}
+		privCmd, privArgs, ok := interactivePrivilegedCommand(rawCmd, rawArgs...)
+		if !ok {
+			// Not an allow-listed package manager — refuse to escalate.
+			return PrivilegedToolCommand{}, false
+		}
+		command, args = privCmd, privArgs
 	}
 	installedWith := t.InstalledWith
 	if installedWith == "" && provider.BuiltinIsEcosystem(t.Provider) && concrete != t.Provider {
@@ -433,7 +448,43 @@ func brewCaskMayPromptForPassword(plan provider.PrivilegePlan) bool {
 			strings.Contains(reason, "launchctl"))
 }
 
+// configTokenLooksLikeFlag reports whether an untrusted, config-sourced token
+// (a package name or option value from settings.json) could be misparsed as a
+// command-line flag when spliced into a privileged invocation. Legitimate
+// package names and option values never begin with "-".
+func configTokenLooksLikeFlag(pkg string, options map[string]string) bool {
+	if strings.HasPrefix(strings.TrimSpace(pkg), "-") {
+		return true
+	}
+	for _, v := range options {
+		if strings.HasPrefix(strings.TrimSpace(v), "-") {
+			return true
+		}
+	}
+	return false
+}
+
+// privilegedCommandAllowlist is the set of package-manager binaries omni will
+// escalate with sudo. Restricting the escalation to known managers is defense in
+// depth against the thin trust boundary around a git-synced settings.json: the
+// command reaching this path is built by a provider, but a future or compromised
+// provider returning an unexpected binary must never be silently run as root.
+// (brew never reaches here — it is handled without sudo by the caller.)
+var privilegedCommandAllowlist = map[string]bool{
+	"apk":     true,
+	"apt-get": true,
+	"dnf":     true,
+	"pacman":  true,
+	"zypper":  true,
+}
+
+// interactivePrivilegedCommand wraps cmd for privileged execution, returning
+// ok=false when cmd is not an allow-listed package manager. Callers must treat
+// ok=false as "refuse to run" rather than falling back to the raw command.
 func interactivePrivilegedCommand(cmd string, args ...string) (string, []string, bool) {
+	if !privilegedCommandAllowlist[cmd] {
+		return "", nil, false
+	}
 	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
 		return cmd, args, true
 	}
@@ -463,7 +514,7 @@ type CompleteExternalToolActionOptions struct {
 }
 
 type CompleteExternalToolActionStateResult struct {
-	Tools      []*database.ToolCache
+	Tools      []*ToolView
 	GroupState *ToolGroupState
 }
 

@@ -167,7 +167,7 @@ func TestSetTool_RejectsMissingProvider(t *testing.T) {
 
 func TestToolProviderScopeChoices_PlansEcosystemChoice(t *testing.T) {
 	a, _ := newImportApp(t)
-	tool := &database.ToolCache{Name: "typescript", Provider: "node", InstalledWith: "bun"}
+	tool := &app.ToolView{Name: "typescript", Provider: "node", InstalledWith: "bun"}
 
 	want := []app.ToolProviderScopeChoice{
 		{Kind: app.ToolProviderScopeHost, Label: "this tool on this host", Detail: "bun"},

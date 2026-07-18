@@ -134,10 +134,15 @@ type FallbackSource struct {
 
 // FallbackRecipe describes structured metadata used to build install commands.
 type FallbackRecipe struct {
-	Type             string `json:"type,omitempty"`
-	AssetPattern     string `json:"asset_pattern,omitempty"`
-	BinaryPath       string `json:"binary_path,omitempty"`
-	Checksum         string `json:"checksum,omitempty"`
+	Type         string `json:"type,omitempty"`
+	AssetPattern string `json:"asset_pattern,omitempty"`
+	BinaryPath   string `json:"binary_path,omitempty"`
+	Checksum     string `json:"checksum,omitempty"`
+	// ChecksumAssetID records the release asset that Checksum was verified
+	// against. A stored checksum is trusted only while it still matches the
+	// asset currently being installed; a rotated or newer asset re-verifies
+	// from the release's checksums file rather than trusting a stale digest.
+	ChecksumAssetID  string `json:"checksum_asset_id,omitempty"`
 	ReleaseID        string `json:"release_id,omitempty"`
 	TagName          string `json:"tag_name,omitempty"`
 	PublishedAt      string `json:"published_at,omitempty"`
@@ -485,7 +490,7 @@ type McpServer struct {
 // Marketplace is one plugin marketplace entry in the omni manifest. Source is
 // whatever form the agent CLIs accept for `plugins marketplace add` / `plugin
 // marketplace add` (owner/repo or URL) — verified against the probe transcript
-// in docs/superpowers/research/2026-07-02-plugin-cli-probe.md.
+// in specs/plugin-cli-probe.md.
 type Marketplace struct {
 	Name   string   `json:"name"`
 	Source string   `json:"source"`

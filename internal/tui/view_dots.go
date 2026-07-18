@@ -8,7 +8,6 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/dots"
 )
 
 // truncatePath clips s to maxW runes, appending "…" if truncated.
@@ -241,8 +240,8 @@ func renderDots(m Model) string {
 			childTargetPadded := renderCell(leftCell(childTarget, targetWidth))
 			isChildCursor := rowIndex == m.dotsCursor && !m.cursorHidden
 			childIgnoreConfirm := m.dotsIgnoreIdx == rowIndex
-			childRepoConfirm := m.dotsOverwriteIdx == rowIndex && app.DotStatusHasAction(e, dots.ActionUseRepo)
-			childLocalConfirm := m.dotsLocalIdx == rowIndex && app.DotStatusHasAction(e, dots.ActionUseLocal)
+			childRepoConfirm := m.dotsOverwriteIdx == rowIndex && app.DotStatusHasAction(e, app.DotActionUseRepo)
+			childLocalConfirm := m.dotsLocalIdx == rowIndex && app.DotStatusHasAction(e, app.DotActionUseLocal)
 			childVariantCreate := m.dotsVariantIdx == rowIndex && m.dotsVariantMode == dotsVariantCreate
 			childRight := dotRightColumns(p, isChildCursor || childIgnoreConfirm || childRepoConfirm || childLocalConfirm || childVariantCreate, childStatusCol, childStatusStyle, app.DotChildFileCounts(child, app.DotStatusState(e)), cols.ratio, cols.ignore, nil, m.hostInfo, cols.group)
 			childLeft := func(iconStyle, nameStyle, targetStyle lipgloss.Style, iconText, childName, childTarget string) string {
@@ -306,7 +305,7 @@ func renderDots(m Model) string {
 			iconStyle, icon, statusLabel := dotStateDisplay(p, app.DotStatusState(e))
 			// Synthesized container entries in the Ignored section (not
 			// explicitly ignored themselves) get muted "-" status.
-			ignoredContainer := inIgnoredSection && !app.DotStatusHasAction(e, dots.ActionUnignore)
+			ignoredContainer := inIgnoredSection && !app.DotStatusHasAction(e, app.DotActionUnignore)
 			if ignoredContainer {
 				statusLabel = "-"
 			}
@@ -330,8 +329,8 @@ func renderDots(m Model) string {
 			right := dotRightColumns(p, false, statusCol, statusStyle, app.DotStatusFileCounts(e), cols.ratio, cols.ignore, entryGroups, m.hostInfo, cols.group)
 
 			removingConfirm := m.dotsConfirmIdx == rowIndex
-			repoConfirm := m.dotsOverwriteIdx == rowIndex && app.DotStatusHasAction(e, dots.ActionUseRepo)
-			localConfirm := m.dotsLocalIdx == rowIndex && app.DotStatusHasAction(e, dots.ActionUseLocal)
+			repoConfirm := m.dotsOverwriteIdx == rowIndex && app.DotStatusHasAction(e, app.DotActionUseRepo)
+			localConfirm := m.dotsLocalIdx == rowIndex && app.DotStatusHasAction(e, app.DotActionUseLocal)
 			ignoreConfirm := m.dotsIgnoreIdx == rowIndex
 			variantCreate := m.dotsVariantIdx == rowIndex && m.dotsVariantMode == dotsVariantCreate
 			variantRemove := m.dotsVariantIdx == rowIndex && m.dotsVariantMode == dotsVariantRemove
@@ -392,7 +391,7 @@ func renderDots(m Model) string {
 				for _, detail := range fullMembershipDetailLines(m.dotMemberships[e.Name], width) {
 					write(prefix + p.styleHelp.Render(detail) + "\n")
 				}
-				if app.DotStatusHasAction(e, dots.ActionUseRepo) || app.DotStatusHasAction(e, dots.ActionUseLocal) {
+				if app.DotStatusHasAction(e, app.DotActionUseRepo) || app.DotStatusHasAction(e, app.DotActionUseLocal) {
 					write(renderDotsContextHints(m, hintCtxDotsConflict, hintPrefix, m.width) + "\n")
 					buf.markCursorEnd()
 				} else {
@@ -544,41 +543,41 @@ func renderDotsSearchControl(m Model) string {
 	return "  " + p.styleNormal.Render("/") + " " + renderEmptyAwareTextInputView(p, m.filter, m.filter.Placeholder, 0)
 }
 
-func dotStateDisplay(p palette, state dots.State) (lipgloss.Style, string, string) {
+func dotStateDisplay(p palette, state app.DotState) (lipgloss.Style, string, string) {
 	switch state {
-	case dots.StateSynced:
+	case app.DotStateSynced:
 		return dotSyncedStyle(p, false), "✓", "synced"
-	case dots.StateModified:
+	case app.DotStateModified:
 		return p.styleOutdated, "!", "local changes"
-	case dots.StateConflict, dots.StateUntrackedConflict, dots.StateAmbiguous:
+	case app.DotStateConflict, app.DotStateUntrackedConflict, app.DotStateAmbiguous:
 		return p.styleOutdated, "!", strings.TrimSuffix(string(state), "-conflict")
-	case dots.StateNoSource:
+	case app.DotStateNoSource:
 		return p.styleHelp, "·", "no-source"
-	case dots.StateIgnored, dots.StateInactive, dots.StateDisabled:
+	case app.DotStateIgnored, app.DotStateInactive, app.DotStateDisabled:
 		return p.styleHelp, "·", string(state)
 	default:
 		return p.styleMissing, "✗", string(state)
 	}
 }
 
-func dotStatusTextStyle(p palette, state dots.State) lipgloss.Style {
+func dotStatusTextStyle(p palette, state app.DotState) lipgloss.Style {
 	switch state {
-	case dots.StateSynced:
+	case app.DotStateSynced:
 		return dotSyncedStyle(p, false)
-	case dots.StateModified:
+	case app.DotStateModified:
 		return p.styleOutdated
-	case dots.StateConflict, dots.StateUntrackedConflict, dots.StateAmbiguous:
+	case app.DotStateConflict, app.DotStateUntrackedConflict, app.DotStateAmbiguous:
 		return p.styleOutdated
-	case dots.StateIgnored, dots.StateInactive, dots.StateDisabled:
+	case app.DotStateIgnored, app.DotStateInactive, app.DotStateDisabled:
 		return p.styleIgnored
-	case dots.StateNoSource:
+	case app.DotStateNoSource:
 		return p.styleHelp
 	default:
 		return p.styleMissing
 	}
 }
 
-func dotChildStatusDisplay(p palette, child app.DotChild, parentState dots.State) (string, lipgloss.Style) {
+func dotChildStatusDisplay(p palette, child app.DotChild, parentState app.DotState) (string, lipgloss.Style) {
 	if child.Ignored {
 		return "ignored", p.styleIgnored
 	}
@@ -587,11 +586,11 @@ func dotChildStatusDisplay(p palette, child app.DotChild, parentState dots.State
 	return label, dotStatusTextStyle(p, state)
 }
 
-func dotChildStateForDisplay(child app.DotChild, parentState dots.State) dots.State {
+func dotChildStateForDisplay(child app.DotChild, parentState app.DotState) app.DotState {
 	return app.DotChildDisplayState(child, parentState)
 }
 
-func dotChildRowStyles(p palette, child app.DotChild, parentState dots.State, inIgnoredSection bool) (lipgloss.Style, lipgloss.Style, lipgloss.Style) {
+func dotChildRowStyles(p palette, child app.DotChild, parentState app.DotState, inIgnoredSection bool) (lipgloss.Style, lipgloss.Style, lipgloss.Style) {
 	if inIgnoredSection && app.DotChildIsSynthesizedContainer(child, parentState) {
 		return p.styleHelp, p.styleHelp, p.styleHelp
 	}
@@ -599,9 +598,9 @@ func dotChildRowStyles(p palette, child app.DotChild, parentState dots.State, in
 	iconStyle := dotStatusTextStyle(p, state)
 	var nameStyle lipgloss.Style
 	switch state {
-	case dots.StateSynced:
+	case app.DotStateSynced:
 		nameStyle = p.styleNormal
-	case dots.StateNoSource:
+	case app.DotStateNoSource:
 		nameStyle = p.styleHelp
 	default:
 		nameStyle = dotStatusTextStyle(p, state)

@@ -3,22 +3,19 @@
 package integration_test
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
-	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/creack/pty"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/vttest"
 
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
@@ -34,12 +31,66 @@ func TestTUIConfiguredHostStartsDashboard(t *testing.T) {
 
 	runOmniCommand(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "hosts", "ensure", "testhost")
 
-	screen := runTUISmoke(t, bin, root, env, "--config", configPath, "--cache-dir", cache)
+	screen := runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(term *vttest.Terminal) string {
+		waitForRequiredScreen(t, term, 6*time.Second, func(text string) bool {
+			return strings.Contains(text, "Dashboard") && strings.Contains(text, "Tools")
+		}, "TUI did not render main tabs")
+		if err := term.Resize(120, 30); err != nil {
+			t.Fatalf("resize TUI: %v", err)
+		}
+		waitForRequiredScreen(t, term, 3*time.Second, func(text string) bool {
+			return strings.Contains(text, "Dashboard") && strings.Contains(text, "Settings")
+		}, "TUI did not redraw after resize")
+
+		writeTUIKeys(t, term, "?")
+		waitForRequiredScreen(t, term, 3*time.Second, func(text string) bool {
+			return strings.Contains(text, "Current Tab Actions") && strings.Contains(text, "Navigation")
+		}, "TUI did not open contextual help")
+		writeTUIKeys(t, term, "?")
+		waitForRequiredScreen(t, term, 3*time.Second, func(text string) bool {
+			return !strings.Contains(text, "Current Tab Actions")
+		}, "TUI did not close contextual help")
+		writeTUIKeys(t, term, "\t")
+		waitForRequiredScreen(t, term, 3*time.Second, func(text string) bool {
+			return strings.Contains(text, "[all]") && strings.Contains(text, "S sync all")
+		}, "TUI did not navigate to tools")
+		writeTUIKeys(t, term, "/", "zz")
+		searchScreen := waitForRequiredScreen(t, term, 3*time.Second, func(text string) bool {
+			return strings.Contains(text, "no search results for 'zz'")
+		}, "TUI did not accept a tools search query")
+		writeTUIKeys(t, term, "\x1b")
+		waitForRequiredScreen(t, term, 3*time.Second, func(text string) bool {
+			return !strings.Contains(text, "> zz")
+		}, "TUI did not close tools search")
+		return searchScreen
+	})
 	if !strings.Contains(screen, "Dashboard") || !strings.Contains(screen, "Tools") {
 		t.Fatalf("TUI did not render main tabs; screen:\n%s", screen)
 	}
 	if strings.Contains(strings.ToLower(screen), "setup") {
 		t.Fatalf("configured host opened setup instead of dashboard; screen:\n%s", screen)
+	}
+}
+
+func TestCurrentScreenOmitsOverwrittenOutput(t *testing.T) {
+	term, err := vttest.NewTerminal(t, 20, 2)
+	if err != nil {
+		t.Fatalf("create terminal: %v", err)
+	}
+	defer term.Close()
+	cmd := exec.CommandContext(t.Context(), "sh", "-c", "printf 'obsolete\\rreplacement'")
+	if err := term.Start(cmd); err != nil {
+		t.Fatalf("start overwrite fixture: %v", err)
+	}
+	screen := waitForRequiredScreen(t, term, time.Second, func(text string) bool {
+		return strings.Contains(text, "replacement")
+	}, "current screen omitted replacement output")
+	if err := term.Wait(cmd); err != nil {
+		t.Fatalf("wait for overwrite fixture: %v", err)
+	}
+
+	if strings.Contains(screen, "obsolete") {
+		t.Fatalf("current screen retained overwritten output: %q", screen)
 	}
 }
 
@@ -98,19 +149,19 @@ func TestTUIFallbackProviderListSmoke(t *testing.T) {
 		t.Fatalf("seeded tools are not visible through app list:\n%s", listOut)
 	}
 
-	screen := runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(tty *os.File, capture *lockedBuffer) string {
-		waitForRequiredScreen(t, capture, 6*time.Second, func(text string) bool {
+	screen := runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(term *vttest.Terminal) string {
+		waitForRequiredScreen(t, term, 6*time.Second, func(text string) bool {
 			return strings.Contains(text, "Dashboard") && strings.Contains(text, "Tools")
 		}, "TUI did not render main tabs")
-		writeTUIKeys(t, tty, "\t")
-		toolsScreen := waitForRequiredScreen(t, capture, 8*time.Second, func(text string) bool {
+		writeTUIKeys(t, term, "\t")
+		toolsScreen := waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
 			return strings.Contains(text, "rg") &&
 				strings.Contains(text, "gh?") &&
 				strings.Contains(text, "jq") &&
 				strings.Contains(text, "apt")
 		}, "TUI did not render provider-list fallback/native tool states")
-		writeTUIKeys(t, tty, "f")
-		editorScreen := waitForRequiredScreen(t, capture, 8*time.Second, func(text string) bool {
+		writeTUIKeys(t, term, "f")
+		editorScreen := waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
 			return strings.Contains(text, "Set Fallback: rg") &&
 				strings.Contains(text, "BurntSushi/ripgrep") &&
 				strings.Contains(text, "install rg")
@@ -159,25 +210,25 @@ func TestTUIFallbackEditorPrefillsConfiguredGitHint(t *testing.T) {
 		t.Fatalf("seeded tool is not visible through app list:\n%s", listOut)
 	}
 
-	screen := runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(tty *os.File, capture *lockedBuffer) string {
-		waitForRequiredScreen(t, capture, 6*time.Second, func(text string) bool {
+	screen := runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(term *vttest.Terminal) string {
+		waitForRequiredScreen(t, term, 6*time.Second, func(text string) bool {
 			return strings.Contains(text, "Dashboard") && strings.Contains(text, "Tools")
 		}, "TUI did not render main tabs")
-		writeTUIKeys(t, tty, "\t")
-		toolsScreen := waitForRequiredScreen(t, capture, 8*time.Second, func(text string) bool {
+		writeTUIKeys(t, term, "\t")
+		toolsScreen := waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
 			return strings.Contains(text, "omni-test-fbtool") &&
 				strings.Contains(text, "apt") &&
 				!strings.Contains(text, "gh?")
 		}, "TUI did not render provider-list tool without fallback status")
-		writeTUIKeys(t, tty, "f")
-		editorScreen := waitForRequiredScreen(t, capture, 8*time.Second, func(text string) bool {
+		writeTUIKeys(t, term, "f")
+		editorScreen := waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
 			return strings.Contains(text, "Set Fallback: omni-test-fbtool") &&
 				strings.Contains(text, "BurntSushi/ripgrep")
 		}, "TUI did not prefill fallback editor from configured git hint")
-		writeTUIKeys(t, tty, "\r")
+		writeTUIKeys(t, term, "\r")
 		// Status text is transient and width-truncated; assert the persisted
 		// fallback instead, which is the behavior this flow owns.
-		savedScreen := waitForRequiredScreen(t, capture, 8*time.Second, func(_ string) bool {
+		savedScreen := waitForRequiredScreen(t, term, 8*time.Second, func(_ string) bool {
 			cfg, err := config.Load(configPath)
 			if err != nil {
 				return false
@@ -207,6 +258,119 @@ func TestTUIFallbackEditorPrefillsConfiguredGitHint(t *testing.T) {
 	}
 }
 
+func TestTUIInstallsMissingToolWithFakeBrew(t *testing.T) {
+	bin := buildOmniBinary(t)
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	cache := filepath.Join(root, "cache")
+	configPath := filepath.Join(root, "settings.json")
+	installedMarker := filepath.Join(root, "brew-installed")
+	brewLog := filepath.Join(root, "brew.log")
+	env := append(isolatedTUIEnv(t, home, cache), "OMNI_TEST_BREW_STATE="+installedMarker, "OMNI_TEST_BREW_LOG="+brewLog)
+
+	brew := `#!/bin/sh
+set -eu
+state="${OMNI_TEST_BREW_STATE:?}"
+log="${OMNI_TEST_BREW_LOG:?}"
+printf '%s\n' "$*" >> "$log"
+case "$*" in
+	"--version") echo "Homebrew 4.0.0" ;;
+	"install omni-test-tool") echo "omni-test-tool" > "$state" ;;
+	"uninstall omni-test-tool"|"uninstall --formula omni-test-tool") rm -f "$state" ;;
+	"list --versions omni-test-tool")
+		[ -f "$state" ] || exit 1
+		echo "omni-test-tool 1.2.3"
+		;;
+	"list --versions --cask omni-test-tool") exit 1 ;;
+	"leaves --installed-on-request") [ ! -f "$state" ] || echo "omni-test-tool" ;;
+	"list --cask") ;;
+	"list --versions --formula") [ ! -f "$state" ] || echo "omni-test-tool 1.2.3" ;;
+	"info --json=v2 --installed")
+		if [ -f "$state" ]; then
+			echo '{"formulae":[{"name":"omni-test-tool","full_name":"omni-test-tool","desc":"integration fixture","installed":[{"version":"1.2.3","installed_on_request":true}]}],"casks":[]}'
+		else
+			echo '{"formulae":[],"casks":[]}'
+		fi
+		;;
+	info\ --json=v2*) echo '{"formulae":[{"name":"omni-test-tool","full_name":"omni-test-tool","desc":"integration fixture","installed":[]}],"casks":[]}' ;;
+	"outdated --json=v2 --greedy") echo '{"formulae":[],"casks":[]}' ;;
+	"update --quiet") ;;
+	"search omni-test-tool") echo "omni-test-tool" ;;
+	"tap") ;;
+	*) echo "unexpected fake brew command: $*" >&2; exit 64 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(home, ".test-stub-bin", "brew"), []byte(brew), 0o755); err != nil {
+		t.Fatalf("write fake brew: %v", err)
+	}
+	if err := config.Save(configPath, &config.RootConfig{
+		Version: config.CurrentVersion,
+		Settings: config.Settings{
+			DisabledProviders: []string{"apt", "apk", "dnf", "node", "pacman", "pip", "python", "zypper"},
+		},
+		Tools: map[string]config.ToolSpec{
+			"omni-test-tool": {Providers: []config.ToolInstallSpec{{Provider: "brew", Package: "omni-test-tool"}}},
+		},
+		Hosts: map[string][]string{"testhost": {"dev"}},
+		Groups: []*config.GroupConfig{
+			{Name: "testhost", Special: "host"},
+			{Name: "dev", Tools: []config.ToolEntry{{Name: "omni-test-tool"}}},
+		},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	screen := runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(term *vttest.Terminal) string {
+		waitForRequiredScreen(t, term, 6*time.Second, func(text string) bool {
+			return strings.Contains(text, "Dashboard") && strings.Contains(text, "Tools")
+		}, "TUI did not render main tabs")
+		writeTUIKeys(t, term, "\t")
+		missingScreen := waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
+			return strings.Contains(text, "omni-test-tool") && strings.Contains(text, "brew")
+		}, "TUI did not render the missing fake-brew tool")
+		writeTUIKeys(t, term, "i")
+		installedScreen := waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
+			_, err := os.Stat(installedMarker)
+			return err == nil && strings.Contains(strings.ToLower(text), "installed omni-test-tool")
+		}, "TUI did not durably install the fake-brew tool")
+
+		writeTUIKeys(t, term, "d")
+		confirmScreen := waitForRequiredScreen(t, term, 3*time.Second, func(text string) bool {
+			return strings.Contains(text, "confirm delete")
+		}, "TUI did not arm tool deletion")
+		writeTUIKeys(t, term, "j")
+		waitForRequiredScreen(t, term, 3*time.Second, func(text string) bool {
+			cfg, err := config.Load(configPath)
+			_, markerErr := os.Stat(installedMarker)
+			return err == nil && markerErr == nil && !strings.Contains(text, "confirm delete") && cfg.Tools["omni-test-tool"].Providers != nil
+		}, "non-confirming key did not cancel deletion")
+
+		writeTUIKeys(t, term, "d")
+		waitForRequiredScreen(t, term, 3*time.Second, func(text string) bool {
+			return strings.Contains(text, "confirm delete")
+		}, "TUI did not re-arm tool deletion")
+		writeTUIKeys(t, term, "d")
+		deletedScreen := waitForRequiredScreen(t, term, 8*time.Second, func(_ string) bool {
+			cfg, err := config.Load(configPath)
+			_, configured := cfg.Tools["omni-test-tool"]
+			_, markerErr := os.Stat(installedMarker)
+			return err == nil && !configured && os.IsNotExist(markerErr)
+		}, "TUI did not uninstall and remove the tool from config")
+		return missingScreen + "\n" + installedScreen + "\n" + confirmScreen + "\n" + deletedScreen
+	})
+	if strings.Contains(strings.ToLower(screen), "error") {
+		t.Fatalf("TUI showed an error during fake-brew lifecycle; screen:\n%s", screen)
+	}
+	logData, err := os.ReadFile(brewLog)
+	if err != nil {
+		t.Fatalf("read fake brew log: %v", err)
+	}
+	logText := string(logData)
+	if !strings.Contains(logText, "install omni-test-tool") || !strings.Contains(logText, "uninstall omni-test-tool") {
+		t.Fatalf("fake brew lifecycle log:\n%s", logText)
+	}
+}
+
 func TestTUIIncludesStaticIgnoredDotCandidate(t *testing.T) {
 	bin := buildOmniBinary(t)
 	root := t.TempDir()
@@ -223,12 +387,12 @@ func TestTUIIncludesStaticIgnoredDotCandidate(t *testing.T) {
 	runOmniCommand(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "hosts", "ensure", "testhost")
 	runOmniCommand(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "settings", "set", "dots_repo", "~/dotfiles")
 
-	screen := runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(tty *os.File, capture *lockedBuffer) string {
-		waitForRequiredScreen(t, capture, 6*time.Second, func(text string) bool {
+	screen := runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(term *vttest.Terminal) string {
+		waitForRequiredScreen(t, term, 6*time.Second, func(text string) bool {
 			return strings.Contains(text, "Dashboard") && strings.Contains(text, "Tools")
 		}, "TUI did not render main tabs")
-		writeTUIKeys(t, tty, "\t", "\t")
-		screen := waitForRequiredScreen(t, capture, 8*time.Second, func(text string) bool {
+		writeTUIKeys(t, term, "\t", "\t")
+		screen := waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
 			return strings.Contains(text, "node_modules") &&
 				strings.Contains(text, "Ignored") &&
 				strings.Contains(text, "dots synced")
@@ -236,8 +400,8 @@ func TestTUIIncludesStaticIgnoredDotCandidate(t *testing.T) {
 		var confirmScreen string
 		deadline := time.Now().Add(8 * time.Second)
 		for time.Now().Before(deadline) {
-			writeTUIKeys(t, tty, "x")
-			if current, ok := waitForScreen(capture, 500*time.Millisecond, func(text string) bool {
+			writeTUIKeys(t, term, "x")
+			if current, ok := waitForScreen(term, 500*time.Millisecond, func(text string) bool {
 				return strings.Contains(text, "confirm include")
 			}); ok {
 				confirmScreen = current
@@ -247,11 +411,11 @@ func TestTUIIncludesStaticIgnoredDotCandidate(t *testing.T) {
 		if confirmScreen == "" {
 			t.Fatalf("TUI did not arm ignored candidate include; screen:\n%s", screen)
 		}
-		writeTUIKeys(t, tty, "x")
+		writeTUIKeys(t, term, "x")
 		if !waitForConfigDot(configPath, "testhost", "node_modules", false, 8*time.Second) {
 			t.Fatalf("node_modules was not included after confirmation; screen:\n%s", confirmScreen)
 		}
-		return capture.Text()
+		return currentScreenText(term)
 	})
 	if strings.Contains(strings.ToLower(screen), "error") {
 		t.Fatalf("TUI showed an error while including ignored candidate; screen:\n%s", screen)
@@ -278,19 +442,19 @@ func TestTUISyncsDiscoveredDotCandidate(t *testing.T) {
 	runOmniCommand(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "hosts", "ensure", "testhost")
 	runOmniCommand(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "settings", "set", "dots_repo", "~/dotfiles")
 
-	screen := runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(tty *os.File, capture *lockedBuffer) string {
-		waitForRequiredScreen(t, capture, 6*time.Second, func(text string) bool {
+	screen := runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(term *vttest.Terminal) string {
+		waitForRequiredScreen(t, term, 6*time.Second, func(text string) bool {
 			return strings.Contains(text, "Dashboard") && strings.Contains(text, "Tools")
 		}, "TUI did not render main tabs")
-		writeTUIKeys(t, tty, "\t", "\t")
-		screen := waitForRequiredScreen(t, capture, 8*time.Second, func(text string) bool {
+		writeTUIKeys(t, term, "\t", "\t")
+		screen := waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
 			return strings.Contains(text, "ghost") && strings.Contains(text, "~/.config/ghost")
 		}, "TUI did not render discovered ghost candidate")
-		writeTUIKeys(t, tty, "s")
+		writeTUIKeys(t, term, "s")
 		if !waitForConfigDot(configPath, "testhost", "ghost", false, 8*time.Second) {
 			t.Fatalf("ghost was not persisted after sync; screen:\n%s", screen)
 		}
-		return capture.Text()
+		return currentScreenText(term)
 	})
 	if strings.Contains(strings.ToLower(screen), "error") {
 		t.Fatalf("TUI showed an error while syncing discovered candidate; screen:\n%s", screen)
@@ -325,16 +489,16 @@ func TestTUIDashboardReconcileFixesDotIgnorePatterns(t *testing.T) {
 		t.Fatalf("save config: %v", err)
 	}
 
-	screen := runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(tty *os.File, capture *lockedBuffer) string {
-		waitForRequiredScreen(t, capture, 6*time.Second, func(text string) bool {
+	screen := runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(term *vttest.Terminal) string {
+		waitForRequiredScreen(t, term, 6*time.Second, func(text string) bool {
 			return strings.Contains(text, "Dashboard") && strings.Contains(text, "Tools")
 		}, "TUI did not render main tabs")
 
 		var planScreen string
 		deadline := time.Now().Add(10 * time.Second)
 		for time.Now().Before(deadline) {
-			writeTUIKeys(t, tty, "A")
-			if screen, ok := waitForScreen(capture, 500*time.Millisecond, func(text string) bool {
+			writeTUIKeys(t, term, "A")
+			if screen, ok := waitForScreen(term, 500*time.Millisecond, func(text string) bool {
 				return strings.Contains(text, "Reconcile Plan") && strings.Contains(text, "Fix ignore patterns")
 			}); ok {
 				planScreen = screen
@@ -342,33 +506,46 @@ func TestTUIDashboardReconcileFixesDotIgnorePatterns(t *testing.T) {
 			}
 		}
 		if planScreen == "" {
-			t.Fatalf("TUI did not open reconcile plan with fix-ignore step; screen:\n%s", capture.Text())
+			t.Fatalf("TUI did not open reconcile plan with fix-ignore step; screen:\n%s", currentScreenText(term))
 		}
 
-		writeTUIKeys(t, tty, "\r")
+		writeTUIKeys(t, term, "\r")
 		if !waitForConfigDotIgnore(configPath, "dev", "editor", []string{"*", "!/settings.json"}, 8*time.Second) {
 			t.Fatalf("editor ignore patterns were not fixed from dashboard reconcile; screen:\n%s", planScreen)
 		}
-		return capture.Text()
+		return currentScreenText(term)
 	})
 	if strings.Contains(strings.ToLower(screen), "error") {
 		t.Fatalf("TUI showed an error while fixing dot ignore patterns; screen:\n%s", screen)
 	}
 }
 
+var (
+	omniBinaryOnce   sync.Once
+	omniBinaryPath   string
+	omniBinaryOutput []byte
+	omniBinaryErr    error
+)
+
 func buildOmniBinary(t *testing.T) string {
 	t.Helper()
-	repo := integrationRepoRoot(t)
-	bin := filepath.Join(t.TempDir(), "omni")
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "go", "build", "-o", bin, "./cmd/omni")
-	cmd.Dir = repo
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("build omni: %v\n%s", err, out)
+	omniBinaryOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "omni-integration-")
+		if err != nil {
+			omniBinaryErr = err
+			return
+		}
+		omniBinaryPath = filepath.Join(dir, "omni")
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "go", "build", "-o", omniBinaryPath, "./cmd/omni")
+		cmd.Dir = integrationRepoRoot(t)
+		omniBinaryOutput, omniBinaryErr = cmd.CombinedOutput()
+	})
+	if omniBinaryErr != nil {
+		t.Fatalf("build omni: %v\n%s", omniBinaryErr, omniBinaryOutput)
 	}
-	return bin
+	return omniBinaryPath
 }
 
 func integrationRepoRoot(t *testing.T) string {
@@ -514,16 +691,15 @@ func seedTUIToolCache(t *testing.T, cache string, tools ...*database.ToolCache) 
 }
 
 func runTUISmoke(t *testing.T, bin, dir string, env []string, args ...string) string {
-	return runTUI(t, bin, dir, env, args, func(_ *os.File, capture *lockedBuffer) string {
-		waitForRequiredScreen(t, capture, 6*time.Second, func(text string) bool {
+	return runTUI(t, bin, dir, env, args, func(term *vttest.Terminal) string {
+		waitForRequiredScreen(t, term, 6*time.Second, func(text string) bool {
 			return strings.Contains(text, "Dashboard") && strings.Contains(text, "Tools")
 		}, "TUI did not render expected startup screen")
-		time.Sleep(200 * time.Millisecond)
-		return capture.Text()
+		return currentScreenText(term)
 	})
 }
 
-func runTUI(t *testing.T, bin, dir string, env []string, args []string, interact func(*os.File, *lockedBuffer) string) string {
+func runTUI(t *testing.T, bin, dir string, env []string, args []string, interact func(*vttest.Terminal) string) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -531,68 +707,72 @@ func runTUI(t *testing.T, bin, dir string, env []string, args []string, interact
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = dir
 	cmd.Env = env
-	tty, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 24, Cols: 100})
+	term, err := vttest.NewTerminal(t, 100, 24)
 	if err != nil {
+		t.Fatalf("create TUI terminal: %v", err)
+	}
+	started := false
+	waited := false
+	defer func() {
+		if started && !waited {
+			_ = cmd.Process.Kill()
+			_ = term.Wait(cmd)
+		}
+		// x/vttest.Close races its emulator reader (upstream x/vt Close is not
+		// synchronized). The package process owns this bounded set of PTYs, so
+		// let process exit reclaim them instead of making the race lane unsound.
+	}()
+	if err := term.Start(cmd); err != nil {
 		t.Fatalf("start TUI: %v", err)
 	}
-	defer tty.Close()
+	started = true
 
-	var capture lockedBuffer
-	copyDone := make(chan struct{})
-	go func() {
-		_, _ = io.Copy(&capture, tty)
-		close(copyDone)
-	}()
-
-	screen := interact(tty, &capture)
-	writeTUIKeys(t, tty, "q", "q")
+	screen := interact(term)
+	writeTUIKeys(t, term, "q", "q")
 
 	waitDone := make(chan error, 1)
-	go func() { waitDone <- cmd.Wait() }()
+	go func() { waitDone <- term.Wait(cmd) }()
 	select {
 	case err := <-waitDone:
+		waited = true
 		if err != nil {
 			t.Fatalf("TUI exit: %v\n%s", err, screen)
 		}
 	case <-time.After(3 * time.Second):
 		_ = cmd.Process.Kill()
-		t.Fatalf("TUI did not quit after confirmation keys; screen:\n%s", capture.Text())
+		t.Fatalf("TUI did not quit after confirmation keys; screen:\n%s", currentScreenText(term))
 	}
-	_ = tty.Close()
-	<-copyDone
 
 	return screen
 }
 
-func writeTUIKeys(t *testing.T, tty *os.File, keys ...string) {
+func writeTUIKeys(t *testing.T, term *vttest.Terminal, keys ...string) {
 	t.Helper()
-	for _, key := range keys {
-		if _, err := tty.Write([]byte(key)); err != nil {
-			t.Fatalf("write TUI key %q: %v", key, err)
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
+	// vttest.Terminal.SendText takes the terminal mutex before the emulator
+	// mutex, while output callbacks take them in the opposite order. Sending
+	// through the concurrency-safe emulator avoids that upstream lock inversion.
+	term.Emulator.SendText(strings.Join(keys, ""))
 }
 
-func waitForRequiredScreen(t *testing.T, capture *lockedBuffer, timeout time.Duration, ready func(string) bool, message string) string {
+func waitForRequiredScreen(t *testing.T, term *vttest.Terminal, timeout time.Duration, ready func(string) bool, message string) string {
 	t.Helper()
-	screen, ok := waitForScreen(capture, timeout, ready)
+	screen, ok := waitForScreen(term, timeout, ready)
 	if !ok {
 		t.Fatalf("%s; screen:\n%s", message, screen)
 	}
 	return screen
 }
 
-func waitForScreen(capture *lockedBuffer, timeout time.Duration, ready func(string) bool) (string, bool) {
+func waitForScreen(term *vttest.Terminal, timeout time.Duration, ready func(string) bool) (string, bool) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		text := capture.Text()
+		text := currentScreenText(term)
 		if ready(text) {
 			return text, true
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	return capture.Text(), false
+	return currentScreenText(term), false
 }
 
 func waitForConfigDot(path, groupName, dotName string, ignored bool, timeout time.Duration) bool {
@@ -637,34 +817,6 @@ func waitForConfigDotIgnore(path, groupName, dotName string, ignore []string, ti
 	return false
 }
 
-type lockedBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (b *lockedBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
-}
-
-func (b *lockedBuffer) Text() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return truncateForFailure(stripANSI(b.buf.String()), 4000)
-}
-
-var ansiPattern = regexp.MustCompile(`\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\)|[=><])`)
-
-func stripANSI(s string) string {
-	s = ansiPattern.ReplaceAllString(s, "")
-	s = strings.ReplaceAll(s, "\r", "")
-	return s
-}
-
-func truncateForFailure(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return fmt.Sprintf("%s\n... truncated %d bytes ...", s[:max], len(s)-max)
+func currentScreenText(term *vttest.Terminal) string {
+	return strings.TrimSpace(ansi.Strip(term.Emulator.Render()))
 }

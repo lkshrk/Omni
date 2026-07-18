@@ -14,11 +14,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/database"
-	"github.com/lkshrk/omni/internal/dots"
 	"github.com/lkshrk/omni/internal/profile"
-	"github.com/lkshrk/omni/internal/provider"
 )
 
 // viewMode is the active top-level view.
@@ -71,7 +67,7 @@ const searchCacheTTL = 5 * time.Minute
 
 // searchCacheEntry holds cached provider search results.
 type searchCacheEntry struct {
-	tools []*database.ToolCache
+	tools []*app.ToolView
 	at    time.Time
 }
 
@@ -116,7 +112,7 @@ type dotsPeekState struct {
 }
 
 type traceLogState struct {
-	traces []database.CommandTrace
+	traces []app.CommandTraceView
 	scroll int
 	err    error
 }
@@ -130,7 +126,7 @@ const (
 )
 
 type groupToolRow struct {
-	tool        *database.ToolCache
+	tool        *app.ToolView
 	section     groupToolSection
 	enabled     bool
 	groupIgnore bool
@@ -195,16 +191,16 @@ type Model struct {
 	mode   viewMode
 	filter textinput.Model
 
-	settings             config.Settings
+	settings             app.Settings
 	settingsCursor       int // which settings row is selected
 	settingsDetailScroll int
 	taps                 []string
 
-	allTools        []*database.ToolCache // unfiltered
-	discoveredTools []*database.ToolCache // locally installed but not in config
-	discoveredKeys  map[string]bool       // "name\x00provider" set for fast orphan lookup
-	visibleTools    []*database.ToolCache // after filter + sort
-	searchTools     []*database.ToolCache // results from last provider search (not in allTools)
+	allTools        []*app.ToolView // unfiltered
+	discoveredTools []*app.ToolView // locally installed but not in config
+	discoveredKeys  map[string]bool // "name\x00provider" set for fast orphan lookup
+	visibleTools    []*app.ToolView // after filter + sort
+	searchTools     []*app.ToolView // results from last provider search (not in allTools)
 	// sectionCounts caches the per-section tool count computed once in applyFilter.
 	// Keyed by section constant (sectionUpdates, sectionInstalled, etc.).
 	// Avoids iterating visibleTools on every View() call (e.g. during active typing).
@@ -225,7 +221,7 @@ type Model struct {
 	rowOpStatus         string          // inline status shown where row action hints normally render
 	activeActionCancel  context.CancelFunc
 	rowErrors           map[string]string // tool key -> last failed row action message; survives filtering/search
-	rowActionErrors     map[string]*provider.ActionError
+	rowActionErrors     map[string]*app.ActionError
 	listConfirm         listConfirmation
 	suppressFooterHints bool
 	statusMsg           string
@@ -293,9 +289,9 @@ type Model struct {
 	toolIgnoreSet           map[string]bool
 	groupIgnoreSet          map[string]map[string]bool
 	toolProviderPins        map[string]string
-	toolProviderCandidates  map[string][]config.ToolInstallSpec
+	toolProviderCandidates  map[string][]app.ToolInstallSpec
 	providerCandidateCursor int
-	toolFallbacks           map[string]config.FallbackSpec
+	toolFallbacks           map[string]app.FallbackSpec
 	toolGit                 map[string]string
 	nvmManaged              map[string]bool
 
@@ -372,7 +368,7 @@ type Model struct {
 	// the picked groups instead of editing an existing entry's membership.
 	pickerDotExtractParent string
 	pickerDotExtractSub    string
-	pickerActionTool       database.ToolCache
+	pickerActionTool       app.ToolView
 	pickerActionToolSet    bool
 	// pickerClaimAgents payload for claiming an agents-tab orphan row: which
 	// feature (pickerMembershipSkill/Mcp/Plugin, carried in
@@ -384,9 +380,9 @@ type Model struct {
 	pickerCreatedGroups  []string
 	scopeOptions         []scopeOption
 	scopeCursor          int
-	scopeTarget          database.ToolCache
+	scopeTarget          app.ToolView
 	scopeTargetSet       bool
-	fallbackTarget       database.ToolCache
+	fallbackTarget       app.ToolView
 	fallbackTargetSet    bool
 	fallbackEditor       fallbackEditorState
 
@@ -455,6 +451,7 @@ type Model struct {
 	doctorErr                      string
 	doctorRunning                  bool
 	doctorRefreshPending           bool // set when a fix needs a doctor rerun but doctor is in flight or not ready
+	doctorPreserveStatus           bool // keep the triggering operation's result visible through its doctor refresh
 	cursorHidden                   bool // true until user navigates after tab switch
 	statusCursor                   int
 	dashboardReconcilePlanOpen     bool
@@ -481,7 +478,7 @@ type Model struct {
 	dotMemberships         map[string][]string
 	dotsCursor             int
 	dotsExpandedName       string
-	dotsExpandedState      dots.State
+	dotsExpandedState      app.DotState
 	dotsExpandedChildren   map[string]bool
 	dotsLoading            bool
 	dotsLoaded             bool // true after first lazy load
@@ -538,7 +535,7 @@ type Model struct {
 	pluginRowsKnown      bool
 	marketplaceRowsKnown bool
 	enabledAgents        []string
-	agentsIgnore         config.AgentsIgnore
+	agentsIgnore         app.AgentsIgnore
 	skillsRows           []app.SkillPackageRow
 	skillsUnmanagedRows  []app.SkillPackageRow
 	skillsCursor         int
@@ -698,7 +695,7 @@ type listConfirmation struct {
 }
 
 // New creates the initial Model.
-func New(a *app.App, ctx context.Context) Model {
+func New(ctx context.Context, a *app.App) Model {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -917,7 +914,7 @@ func toolsLoadedMsgFromStartupState(snapshot *app.StartupSnapshot) toolsLoadedMs
 	}
 }
 
-func (m *Model) setSettings(settings config.Settings) {
+func (m *Model) setSettings(settings app.Settings) {
 	m.settings = settings
 	m.dotsConfiguredCached = app.DotsConfiguredInSettings(settings)
 	m.dotsSyncAvailCached = app.DotsSyncAvailabilityInSettings(settings)
@@ -960,7 +957,7 @@ func groupHasActiveHostContext(m Model) bool {
 	return app.HasActiveHostGroupContextForCurrentMachine(m.hostInfo)
 }
 
-func toolMembershipKey(t *database.ToolCache) string {
+func toolMembershipKey(t *app.ToolView) string {
 	if t == nil {
 		return ""
 	}
@@ -972,7 +969,7 @@ func buildAllGroupNames(groupNames []string) []string {
 	return app.AllGroupNamesForCurrentMachine(groupNames)
 }
 
-func (m *Model) displaySection(t *database.ToolCache) section {
+func (m *Model) displaySection(t *app.ToolView) section {
 	classification := app.ClassifyToolView(t, toolClassificationContext(*m, t))
 	return sectionFromToolView(classification.Section)
 }
@@ -1037,8 +1034,8 @@ func (m *Model) applyFilter() {
 // group (auto-discovered system packages), identified by the hostInventory map.
 // Membership in a regular host group is a first-class, user-visible assignment
 // and is NOT filtered here.
-func filterHostInventoryTools(tools []*database.ToolCache, hostInventory map[string]bool) []*database.ToolCache {
-	filtered := make([]*database.ToolCache, 0, len(tools))
+func filterHostInventoryTools(tools []*app.ToolView, hostInventory map[string]bool) []*app.ToolView {
+	filtered := make([]*app.ToolView, 0, len(tools))
 	for _, tool := range tools {
 		if tool == nil {
 			continue
@@ -1104,17 +1101,17 @@ func (m *Model) clampToolCursor() {
 }
 
 // sectionOf is context-free; prefer displaySection when model state is available.
-func sectionOf(t *database.ToolCache) section {
+func sectionOf(t *app.ToolView) section {
 	classification := app.ClassifyToolView(t, app.ToolClassificationContext{})
 	return sectionFromToolView(classification.Section)
 }
 
 // syncStatusOf returns the out-of-sync sub-category for a tool in sectionOutOfSync.
-func (m *Model) syncStatusOf(t *database.ToolCache) syncStatus {
+func (m *Model) syncStatusOf(t *app.ToolView) syncStatus {
 	return syncStatusFromToolView(app.ToolSyncStatusForTool(t, toolClassificationContext(*m, t)))
 }
 
-func toolClassificationContext(m Model, t *database.ToolCache) app.ToolClassificationContext {
+func toolClassificationContext(m Model, t *app.ToolView) app.ToolClassificationContext {
 	ignored := false
 	discovered := false
 	if t != nil {
@@ -1176,14 +1173,14 @@ func (m Model) effectiveNodeManagerLabel() string {
 }
 
 // selectedTool returns the currently highlighted tool or nil.
-func (m *Model) selectedTool() *database.ToolCache {
+func (m *Model) selectedTool() *app.ToolView {
 	if len(m.visibleTools) == 0 || m.cursor < 0 || m.cursor >= len(m.visibleTools) {
 		return nil
 	}
 	return m.visibleTools[m.cursor]
 }
 
-func (m *Model) selectedProviderCandidateTool(t *database.ToolCache) *database.ToolCache {
+func (m *Model) selectedProviderCandidateTool(t *app.ToolView) *app.ToolView {
 	candidates := providerCandidateOptions(*m, t)
 	if len(candidates) == 0 {
 		return t
@@ -1205,7 +1202,7 @@ func (m *Model) clampProviderCandidateCursor() {
 	m.providerCandidateCursor = clampIndex(m.providerCandidateCursor, count)
 }
 
-func providerCandidateOptions(m Model, t *database.ToolCache) []config.ToolInstallSpec {
+func providerCandidateOptions(m Model, t *app.ToolView) []app.ToolInstallSpec {
 	if t == nil || t.Installed || !t.Tracked {
 		return nil
 	}
@@ -1213,7 +1210,7 @@ func providerCandidateOptions(m Model, t *database.ToolCache) []config.ToolInsta
 	if len(candidates) < 2 {
 		return nil
 	}
-	out := make([]config.ToolInstallSpec, 0, len(candidates))
+	out := make([]app.ToolInstallSpec, 0, len(candidates))
 	for _, candidate := range candidates {
 		if strings.TrimSpace(candidate.Provider) == "" {
 			continue

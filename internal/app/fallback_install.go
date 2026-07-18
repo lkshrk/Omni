@@ -210,9 +210,17 @@ func downloadToFile(ctx context.Context, client *http.Client, rawURL, destPath s
 // A checksum mismatch is always a hard failure.
 // On success the verified hex digest is persisted into fallback.Recipe.Checksum.
 func (a *App) verifyFallbackChecksum(ctx context.Context, name string, fallback *config.FallbackSpec, assetPath, assetName string) error {
-	// When a previously verified checksum is stored, use it to skip the fetch.
+	// Reuse a stored checksum to skip the fetch only when it was verified
+	// against the very asset now being installed. On a version bump or a rotated
+	// asset the recorded scope no longer matches, so fall through and re-fetch
+	// the authoritative digest for the current release instead of trusting a
+	// stale one.
+	assetID := strings.TrimSpace(fallback.Recipe.AssetID)
 	if stored := strings.TrimSpace(fallback.Recipe.Checksum); stored != "" {
-		return verifyFileChecksum(assetPath, stored, name)
+		scope := strings.TrimSpace(fallback.Recipe.ChecksumAssetID)
+		if scope != "" && assetID != "" && scope == assetID {
+			return verifyFileChecksum(assetPath, stored, name)
+		}
 	}
 
 	owner := strings.TrimSpace(fallback.Source.Owner)
@@ -232,8 +240,9 @@ func (a *App) verifyFallbackChecksum(ctx context.Context, name string, fallback 
 		return err
 	}
 
-	// Persist so future installs skip the network fetch.
+	// Persist so future installs skip the network fetch, scoped to this asset.
 	fallback.Recipe.Checksum = digest
+	fallback.Recipe.ChecksumAssetID = assetID
 	return nil
 }
 

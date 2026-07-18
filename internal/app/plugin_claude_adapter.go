@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	osExec "os/exec"
 	"path/filepath"
 	"strings"
 
@@ -28,7 +27,7 @@ func NewClaudeCodePluginAdapter(
 func (a *claudeCodePluginAdapter) ID() string { return "claude-code" }
 
 func (a *claudeCodePluginAdapter) Available() bool {
-	_, err := osExec.LookPath("claude")
+	_, err := lookPath("claude")
 	return err == nil
 }
 
@@ -110,7 +109,7 @@ func (a *claudeCodePluginAdapter) AddMarketplace(ctx context.Context, m config.M
 
 // claudePluginListEntry mirrors one element of the bare array returned by
 // `claude plugins list --json` (without --available), per the probe transcript
-// in docs/superpowers/research/2026-07-02-plugin-cli-probe.md. It also matches
+// in specs/plugin-cli-probe.md. It also matches
 // the "installed" array element when --available succeeds (verified live
 // 2026-07-10: that call wraps the same installed shape in {installed, available}).
 type claudePluginListEntry struct {

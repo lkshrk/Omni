@@ -835,7 +835,7 @@ func TestSyncAllProgressTotalCountsAddAndInstallOnly(t *testing.T) {
 		{Name: "ripgrep", Provider: "brew", Tracked: true, Installed: true, Outdated: true},
 	}
 
-	if got := SyncAllProgressTotal(tools, discovered); got != 2 {
+	if got := SyncAllProgressTotal(toolViewsFromCache(tools), toolViewsFromCache(discovered)); got != 2 {
 		t.Fatalf("SyncAllProgressTotal = %d, want 2", got)
 	}
 }
@@ -910,7 +910,7 @@ func TestUpgradeAllProgressTotalCountsInstalledOutdatedTools(t *testing.T) {
 		nil,
 	}
 
-	if got := UpgradeAllProgressTotal(tools); got != 1 {
+	if got := UpgradeAllProgressTotal(toolViewsFromCache(tools)); got != 1 {
 		t.Fatalf("UpgradeAllProgressTotal = %d, want 1", got)
 	}
 }

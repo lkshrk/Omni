@@ -2,7 +2,6 @@ package tui
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"maps"
 	"time"
@@ -10,7 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/database"
 )
 
 // doInstall installs a single tool.
@@ -154,23 +152,19 @@ func (m *Model) doSearch(ctx context.Context, query string, gen int) tea.Cmd {
 		if ctx.Err() != nil {
 			return nil // cancelled — next search (or Esc) owns the searching flag
 		}
-		tools := make([]*database.ToolCache, 0, len(results))
+		tools := make([]*app.ToolView, 0, len(results))
 		for _, r := range results {
-			t := &database.ToolCache{
+			t := &app.ToolView{
 				Name:          r.Name,
 				Provider:      r.Provider,
 				InstalledWith: app.SearchResultDisplayProvider(r),
 				Options:       maps.Clone(r.Options),
 			}
-			if r.Version != "" {
-				t.Version = sql.NullString{String: r.Version, Valid: true}
-			}
-			if r.Description != "" {
-				t.Description = sql.NullString{String: r.Description, Valid: true}
-			}
+			t.Version = r.Version
+			t.Description = r.Description
 			if r.Privilege.RequiresPrivilege() {
 				t.Privilege = string(r.Privilege.Requirement)
-				t.PrivilegeReason = sql.NullString{String: r.Privilege.Reason, Valid: r.Privilege.Reason != ""}
+				t.PrivilegeReason = r.Privilege.Reason
 			}
 			tools = append(tools, t)
 		}

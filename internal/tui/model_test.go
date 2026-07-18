@@ -17,14 +17,13 @@ import (
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/dots"
 	"github.com/lkshrk/omni/internal/provider"
 )
 
 // baseModel returns an already-loaded model with the given tools.
 // Bypasses the async DB load so tests are synchronous and deterministic.
-func baseModel(tools []*database.ToolCache) Model {
+func baseModel(tools []*app.ToolView) Model {
 	fi := textinput.New()
 	fi.Placeholder = "filter…"
 	fi.CharLimit = 64
@@ -139,8 +138,8 @@ func pressCtrlF() tea.Msg      { return tea.KeyPressMsg{Code: 'f', Mod: tea.ModC
 func pressCtrlB() tea.Msg      { return tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl} }
 func pressHome() tea.Msg       { return tea.KeyPressMsg{Code: tea.KeyHome} }
 
-func threeTools() []*database.ToolCache {
-	return []*database.ToolCache{
+func threeTools() []*app.ToolView {
+	return []*app.ToolView{
 		{Name: "git", Provider: "brew"},
 		{Name: "node", Provider: "npm"},
 		{Name: "python", Provider: "pip"},
@@ -244,7 +243,7 @@ func TestModel_CursorNavigation(t *testing.T) {
 }
 
 func TestModel_ProviderCandidateNavigation(t *testing.T) {
-	tools := []*database.ToolCache{
+	tools := []*app.ToolView{
 		{Name: "prettier", Provider: "", Installed: false, Tracked: true},
 		{Name: "eslint", Provider: "", Installed: false, Tracked: true},
 	}
@@ -293,8 +292,8 @@ func TestModel_ProviderCandidateNavigation(t *testing.T) {
 }
 
 func TestProviderCandidateOptions_PreferredThenAlphabetical(t *testing.T) {
-	tool := &database.ToolCache{Name: "prettier", Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "prettier", Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 	m.toolProviderCandidates = map[string][]config.ToolInstallSpec{
 		"prettier": {
 			{Provider: "npm", Package: "prettier"},
@@ -311,7 +310,7 @@ func TestProviderCandidateOptions_PreferredThenAlphabetical(t *testing.T) {
 }
 
 func TestModelApplyFilter_HidesSystemAndOSProviderTools(t *testing.T) {
-	m := baseModel([]*database.ToolCache{
+	m := baseModel([]*app.ToolView{
 		{Name: "git", Provider: "brew", Installed: true, Tracked: true},
 		{Name: "ls", Provider: "system", Installed: true, Tracked: true},
 		{Name: "dir", Provider: "os", Installed: true, Tracked: true},
@@ -332,7 +331,7 @@ func TestModelApplyFilter_HidesSystemAndOSProviderTools(t *testing.T) {
 // user-visible assignment and must NOT be hidden — only provider-inventory
 // tools (the hostInventoryTools map) are filtered out.
 func TestModelApplyFilter_KeepsHostGroupTools(t *testing.T) {
-	m := baseModel([]*database.ToolCache{
+	m := baseModel([]*app.ToolView{
 		{Name: "git", Provider: "brew", Installed: true, Tracked: true},
 		{Name: "ls", Provider: "system", Installed: true, Tracked: true},
 	})
@@ -367,7 +366,7 @@ func TestApplyFilter_PreservesWorkflowCursor(t *testing.T) {
 	t.Run("same index selects next visible row after current row disappears", func(t *testing.T) {
 		m := baseModel(threeTools())
 		m.cursor = 1
-		m.allTools = []*database.ToolCache{
+		m.allTools = []*app.ToolView{
 			{Name: "git", Provider: "brew"},
 			{Name: "python", Provider: "pip"},
 		}
@@ -385,7 +384,7 @@ func TestApplyFilter_PreservesWorkflowCursor(t *testing.T) {
 	t.Run("last removed clamps to previous visible row", func(t *testing.T) {
 		m := baseModel(threeTools())
 		m.cursor = 2
-		m.allTools = []*database.ToolCache{
+		m.allTools = []*app.ToolView{
 			{Name: "git", Provider: "brew"},
 			{Name: "node", Provider: "npm"},
 		}
@@ -417,7 +416,7 @@ func TestApplyFilter_PreservesWorkflowCursor(t *testing.T) {
 }
 
 func TestApplyFilter_SortsToolsBySectionThenName(t *testing.T) {
-	m := baseModel([]*database.ToolCache{
+	m := baseModel([]*app.ToolView{
 		{Name: "zoxide", Provider: "brew", Installed: true, Tracked: true},
 		{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
 		{Name: "bat", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
@@ -441,10 +440,10 @@ func TestApplyFilter_SortsToolsBySectionThenName(t *testing.T) {
 }
 
 func TestApplyFilter_KeepsDiscoveredOrphansVisibleOutOfSync(t *testing.T) {
-	tracked := &database.ToolCache{Name: "git", Provider: "brew", Installed: true, Tracked: true}
-	orphan := &database.ToolCache{Name: "utm", Provider: "brew", Installed: true, Tracked: false}
-	m := baseModel([]*database.ToolCache{tracked})
-	m.discoveredTools = []*database.ToolCache{orphan}
+	tracked := &app.ToolView{Name: "git", Provider: "brew", Installed: true, Tracked: true}
+	orphan := &app.ToolView{Name: "utm", Provider: "brew", Installed: true, Tracked: false}
+	m := baseModel([]*app.ToolView{tracked})
+	m.discoveredTools = []*app.ToolView{orphan}
 	m.rebuildDiscoveredKeys()
 
 	m.applyFilter()
@@ -460,7 +459,7 @@ func TestApplyFilter_KeepsDiscoveredOrphansVisibleOutOfSync(t *testing.T) {
 	}
 }
 
-func toolNames(tools []*database.ToolCache) []string {
+func toolNames(tools []*app.ToolView) []string {
 	names := make([]string, 0, len(tools))
 	for _, t := range tools {
 		names = append(names, t.Name)
@@ -470,10 +469,10 @@ func toolNames(tools []*database.ToolCache) []string {
 
 func TestModel_PageNavigation(t *testing.T) {
 	// Build a longer list to make page/half-page meaningful.
-	manyTools := func(n int) []*database.ToolCache {
-		tools := make([]*database.ToolCache, n)
+	manyTools := func(n int) []*app.ToolView {
+		tools := make([]*app.ToolView, n)
 		for i := range tools {
-			tools[i] = &database.ToolCache{Name: "tool", Provider: "brew"}
+			tools[i] = &app.ToolView{Name: "tool", Provider: "brew"}
 		}
 		return tools
 	}
@@ -599,7 +598,7 @@ func TestModel_EnterKey(t *testing.T) {
 	})
 
 	t.Run("enter on installed tool is a no-op", func(t *testing.T) {
-		tools := []*database.ToolCache{{Name: "git", Provider: "brew", Installed: true}}
+		tools := []*app.ToolView{{Name: "git", Provider: "brew", Installed: true}}
 		m := drive(baseModel(tools), pressEnter())
 		if m.mode != viewList {
 			t.Errorf("mode = %v, want viewList", m.mode)
@@ -658,7 +657,7 @@ func TestModel_ToolsLoadedMsg(t *testing.T) {
 
 	t.Run("startup snapshot provider candidates reach selected row details", func(t *testing.T) {
 		snapshot := &app.StartupSnapshot{
-			Tools: []*database.ToolCache{{Name: "prettier", Provider: "", Installed: false, Tracked: true}},
+			Tools: []*app.ToolView{{Name: "prettier", Provider: "", Installed: false, Tracked: true}},
 			ToolProviderCandidates: map[string][]config.ToolInstallSpec{
 				"prettier": {
 					{Provider: "npm", Package: "prettier"},
@@ -841,7 +840,7 @@ func TestModel_ToolsLoadedMsg(t *testing.T) {
 
 	t.Run("success from fresh config creation advances to step1", func(t *testing.T) {
 		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true, mode: viewSetup, setupStep: setupStepCreateConfig}
-		m.allTools = []*database.ToolCache{{Name: "snapshot", Provider: "brew"}}
+		m.allTools = []*app.ToolView{{Name: "snapshot", Provider: "brew"}}
 		got := drive(m, toolsLoadedMsg{tools: threeTools()})
 		if got.mode != viewSetup {
 			t.Errorf("mode = %v, want viewSetup", got.mode)
@@ -864,7 +863,7 @@ func TestModel_ToolsLoadedMsg(t *testing.T) {
 
 	t.Run("noHost does not start main data refresh", func(t *testing.T) {
 		m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true}
-		m.allTools = []*database.ToolCache{{Name: "snapshot", Provider: "brew"}}
+		m.allTools = []*app.ToolView{{Name: "snapshot", Provider: "brew"}}
 		cmds := m.handleToolsLoadedMsg(toolsLoadedMsg{
 			tools:  threeTools(),
 			noHost: true,
@@ -1097,7 +1096,7 @@ func TestModel_ConfirmQuit(t *testing.T) {
 
 func TestModel_QuitCancelsBackgroundContext(t *testing.T) {
 	parent := context.Background()
-	m := New(nil, parent)
+	m := New(parent, nil)
 
 	searchCtx, searchCancel := context.WithCancel(context.Background())
 	m.searchCancel = searchCancel
@@ -1320,19 +1319,19 @@ func TestModel_ToolsLoadedMsg_Settings(t *testing.T) {
 }
 
 func TestSectionOf(t *testing.T) {
-	if sectionOf(&database.ToolCache{Installed: true, Outdated: true}) != sectionUpdates {
+	if sectionOf(&app.ToolView{Installed: true, Outdated: true}) != sectionUpdates {
 		t.Error("installed+outdated → sectionUpdates")
 	}
-	if sectionOf(&database.ToolCache{Installed: true, Outdated: false}) != sectionInstalled {
+	if sectionOf(&app.ToolView{Installed: true, Outdated: false}) != sectionInstalled {
 		t.Error("installed+current → sectionInstalled")
 	}
-	if sectionOf(&database.ToolCache{Installed: false}) != sectionAvailable {
+	if sectionOf(&app.ToolView{Installed: false}) != sectionAvailable {
 		t.Error("not installed → sectionAvailable (used for search results; displaySection handles config-missing→sectionOutOfSync)")
 	}
 }
 
 func TestCountSection(t *testing.T) {
-	tools := []*database.ToolCache{
+	tools := []*app.ToolView{
 		{Installed: true, Outdated: true, Tracked: true},
 		{Installed: true, Outdated: false, Tracked: true},
 		{Installed: false, Tracked: true},
@@ -2119,7 +2118,7 @@ func TestModel_ProviderSubtabs(t *testing.T) {
 			}
 		}
 		// Inject search results containing both a python and a brew tool.
-		m.searchTools = []*database.ToolCache{
+		m.searchTools = []*app.ToolView{
 			{Name: "requests", Provider: "pip"}, // python ecosystem → should appear
 			{Name: "jq", Provider: "brew"},      // system ecosystem → should be filtered
 		}
@@ -2136,7 +2135,7 @@ func TestModel_ProviderSubtabs(t *testing.T) {
 		cancelled := false
 		m.searchCancel = func() { cancelled = true }
 		m.searching = true
-		m.searchTools = []*database.ToolCache{{Name: "ripgrep", Provider: "system"}}
+		m.searchTools = []*app.ToolView{{Name: "ripgrep", Provider: "system"}}
 		m.filter.SetValue("rip")
 		m.providerTabIdx = 1
 		m.groupFilter = "work"
@@ -2159,11 +2158,11 @@ func TestModel_ProviderSubtabs(t *testing.T) {
 	})
 
 	t.Run("group filter hides discovered tools without config group", func(t *testing.T) {
-		orphan := &database.ToolCache{Name: "fzf", Provider: "system", InstalledWith: "brew", Installed: true, Tracked: false}
+		orphan := &app.ToolView{Name: "fzf", Provider: "system", InstalledWith: "brew", Installed: true, Tracked: false}
 		m := modelWithProviders()
 		m.groupNames = []string{"base", "work"}
 		m.groupFilter = "base"
-		m.discoveredTools = []*database.ToolCache{orphan}
+		m.discoveredTools = []*app.ToolView{orphan}
 		m.rebuildDiscoveredKeys()
 		m.applyFilter()
 		for _, t2 := range m.visibleTools {
@@ -2176,21 +2175,21 @@ func TestModel_ProviderSubtabs(t *testing.T) {
 
 func TestHandleOpCompleteMsg_RemovesInstalledSearchResultAndCache(t *testing.T) {
 	key := toolKey("ripgrep", "system")
-	stale := &database.ToolCache{Name: "ripgrep", Provider: "system", Package: "ripgrep", Tracked: false}
-	installed := &database.ToolCache{Name: "ripgrep", Provider: "system", Package: "ripgrep", Installed: true, Tracked: true}
+	stale := &app.ToolView{Name: "ripgrep", Provider: "system", Package: "ripgrep", Tracked: false}
+	installed := &app.ToolView{Name: "ripgrep", Provider: "system", Package: "ripgrep", Installed: true, Tracked: true}
 	m := baseModel(nil)
 	m.mode = viewSearch
 	m.filter.SetValue("ripgrep")
 	m.filter.Blur()
-	m.searchTools = []*database.ToolCache{stale}
+	m.searchTools = []*app.ToolView{stale}
 	m.searchCache = map[string]searchCacheEntry{
-		searchCacheKey("ripgrep", ""): {tools: []*database.ToolCache{stale}},
+		searchCacheKey("ripgrep", ""): {tools: []*app.ToolView{stale}},
 	}
 	m.applyFilter()
 
 	m.handleOpCompleteMsg(opCompleteMsg{
 		message:              "installed ripgrep and added to config",
-		tools:                []*database.ToolCache{installed},
+		tools:                []*app.ToolView{installed},
 		removeDiscoveredKeys: []string{key},
 	})
 
@@ -2299,7 +2298,7 @@ func TestModel_DotsRootRowsOpenGroupMembershipPicker(t *testing.T) {
 }
 
 func TestModel_GroupMembershipPicker_SpaceTogglesConfirmSaves(t *testing.T) {
-	m := baseModel([]*database.ToolCache{{Name: "ripgrep", Provider: "system", Tracked: true}})
+	m := baseModel([]*app.ToolView{{Name: "ripgrep", Provider: "system", Tracked: true}})
 	key := toolKey("ripgrep", "system")
 	m.mode = viewGroupMembership
 	m.groupNames = []string{"base", "work"} // both reusable groups
@@ -2337,7 +2336,7 @@ func TestModel_GroupMembershipPicker_TargetSurvivesCursorMove(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "host")
 	rgKey := toolKey("ripgrep", "system")
 	fdKey := toolKey("fd", "system")
-	m := baseModel([]*database.ToolCache{
+	m := baseModel([]*app.ToolView{
 		{Name: "ripgrep", Provider: "system", Tracked: true},
 		{Name: "fd", Provider: "system", Tracked: true},
 	})
@@ -2371,7 +2370,7 @@ func TestModel_GroupMembershipPicker_TargetSurvivesCursorMove(t *testing.T) {
 }
 
 func TestModel_GroupPickerUsesCapturedClaimToolAfterCursorMoves(t *testing.T) {
-	m := baseModel([]*database.ToolCache{
+	m := baseModel([]*app.ToolView{
 		{Name: "ripgrep", Provider: "system", Installed: true},
 		{Name: "zoxide", Provider: "system", Installed: true},
 	})
@@ -2389,7 +2388,7 @@ func TestModel_GroupPickerUsesCapturedClaimToolAfterCursorMoves(t *testing.T) {
 }
 
 func TestModel_GroupPickerUsesCapturedInstallToolAfterCursorMoves(t *testing.T) {
-	m := baseModel([]*database.ToolCache{
+	m := baseModel([]*app.ToolView{
 		{Name: "ripgrep", Provider: "system"},
 		{Name: "zoxide", Provider: "system"},
 	})
@@ -2411,7 +2410,7 @@ func TestModel_GroupPickerUsesCapturedInstallToolAfterCursorMoves(t *testing.T) 
 
 func TestModel_GroupMembershipPicker_NewGroupDraft(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "host")
-	m := baseModel([]*database.ToolCache{{Name: "ripgrep", Provider: "system", Tracked: true}})
+	m := baseModel([]*app.ToolView{{Name: "ripgrep", Provider: "system", Tracked: true}})
 	key := toolKey("ripgrep", "system")
 	m.mode = viewGroupMembership
 	m.pickerGroups = []string{"host", groupPickerNewSentinel}
@@ -2445,7 +2444,7 @@ func TestModel_GroupMembershipPicker_NewGroupDraft(t *testing.T) {
 }
 
 func TestModel_ProviderScopePicker_SpaceSelectsAndSaves(t *testing.T) {
-	m := baseModel([]*database.ToolCache{{Name: "ripgrep", Provider: "system", Installed: true, InstalledWith: "brew", Tracked: true}})
+	m := baseModel([]*app.ToolView{{Name: "ripgrep", Provider: "system", Installed: true, InstalledWith: "brew", Tracked: true}})
 	m.mode = viewProviderScope
 	m.scopeOptions = []scopeOption{
 		{kind: "provider-host", label: "this tool on this host", detail: "brew"},
@@ -2468,7 +2467,7 @@ func TestModel_ProviderScopePicker_SpaceSelectsAndSaves(t *testing.T) {
 }
 
 func TestModel_IgnoreScopePicker_SpaceStillStages(t *testing.T) {
-	m := baseModel([]*database.ToolCache{{Name: "ripgrep", Provider: "system", Tracked: true}})
+	m := baseModel([]*app.ToolView{{Name: "ripgrep", Provider: "system", Tracked: true}})
 	m.mode = viewIgnoreScope
 	m.scopeOptions = []scopeOption{
 		{kind: "tool", label: "this tool everywhere"},
@@ -2493,7 +2492,7 @@ func TestModel_IgnoreScopePicker_SpaceStillStages(t *testing.T) {
 }
 
 func TestModel_SystemPackageScopeOpensGroupMembershipPicker(t *testing.T) {
-	m := baseModel([]*database.ToolCache{{Name: "libc6", Provider: "apt", Tracked: true}})
+	m := baseModel([]*app.ToolView{{Name: "libc6", Provider: "apt", Tracked: true}})
 	m.hostInfo = &app.HostInfo{Active: "testhost"}
 	m.toolMemberships = map[string][]string{toolKey("libc6", "apt"): {"work"}}
 	m.hostInventoryTools = map[string]bool{}
@@ -2512,7 +2511,7 @@ func TestModel_SystemPackageScopeOpensGroupMembershipPicker(t *testing.T) {
 }
 
 func TestModel_ScopePickerUsesCapturedToolAfterCursorMoves(t *testing.T) {
-	tools := []*database.ToolCache{
+	tools := []*app.ToolView{
 		{Name: "ripgrep", Provider: "system", Installed: true, InstalledWith: "brew", Tracked: true},
 		{Name: "zoxide", Provider: "system", Installed: true, InstalledWith: "brew", Tracked: true},
 	}
@@ -2537,7 +2536,7 @@ func TestModel_ScopePickerUsesCapturedToolAfterCursorMoves(t *testing.T) {
 }
 
 func TestModel_IgnoreScopePickerUsesCapturedToolAfterCursorMoves(t *testing.T) {
-	tools := []*database.ToolCache{
+	tools := []*app.ToolView{
 		{Name: "ripgrep", Provider: "system", Tracked: true},
 		{Name: "zoxide", Provider: "system", Tracked: true},
 	}
@@ -2813,7 +2812,7 @@ func TestModel_PriorityEditor_RenderDisabled(t *testing.T) {
 // ─── Delete / Upgrade / UpgradeAll key handlers ──────────────────────────────
 
 func TestModel_KeyD_DeleteRequiresConfirmation(t *testing.T) {
-	tools := []*database.ToolCache{
+	tools := []*app.ToolView{
 		{Name: "ripgrep", Provider: "brew", Installed: true},
 	}
 	m := baseModel(tools)
@@ -2832,7 +2831,7 @@ func TestModel_KeyD_DeleteRequiresConfirmation(t *testing.T) {
 }
 
 func TestModel_KeyD_DeleteNoopWhenNotInstalled(t *testing.T) {
-	tools := []*database.ToolCache{
+	tools := []*app.ToolView{
 		{Name: "ripgrep", Provider: "brew", Installed: false},
 	}
 	m := baseModel(tools)
@@ -2844,7 +2843,7 @@ func TestModel_KeyD_DeleteNoopWhenNotInstalled(t *testing.T) {
 }
 
 func TestModel_KeyU_UpgradeSetsKey(t *testing.T) {
-	tools := []*database.ToolCache{
+	tools := []*app.ToolView{
 		{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: true},
 	}
 	m := baseModel(tools)
@@ -2859,7 +2858,7 @@ func TestModel_KeyU_UpgradeSetsKey(t *testing.T) {
 }
 
 func TestModel_ActionRendersBeforeWorkIsScheduled(t *testing.T) {
-	tools := []*database.ToolCache{
+	tools := []*app.ToolView{
 		{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: true},
 	}
 	m := baseModel(tools)
@@ -2895,7 +2894,7 @@ func TestModel_ActionRendersBeforeWorkIsScheduled(t *testing.T) {
 }
 
 func TestModel_ActionRendersBeforeWorkWhenBackgroundAnimationIsActive(t *testing.T) {
-	m := baseModel([]*database.ToolCache{
+	m := baseModel([]*app.ToolView{
 		{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: true},
 	})
 	m.upgradingKeys = make(map[string]bool)
@@ -2938,7 +2937,7 @@ func TestSpinnerActivityActive_IncludesEveryAsyncActionFlag(t *testing.T) {
 }
 
 func TestModel_KeyU_UpgradeNoopWhenNotOutdated(t *testing.T) {
-	tools := []*database.ToolCache{
+	tools := []*app.ToolView{
 		{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: false},
 	}
 	m := baseModel(tools)
@@ -2950,7 +2949,7 @@ func TestModel_KeyU_UpgradeNoopWhenNotOutdated(t *testing.T) {
 }
 
 func TestModel_KeyCapU_UpgradeAllSetsWildcard(t *testing.T) {
-	tools := []*database.ToolCache{
+	tools := []*app.ToolView{
 		{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
 	}
 	m := baseModel(tools)
@@ -2965,7 +2964,7 @@ func TestModel_KeyCapU_UpgradeAllSetsWildcard(t *testing.T) {
 }
 
 func TestModel_KeyCapU_UpgradeAllNoopWhenNoUpdates(t *testing.T) {
-	tools := []*database.ToolCache{
+	tools := []*app.ToolView{
 		{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: false},
 	}
 	m := baseModel(tools)
@@ -3025,7 +3024,7 @@ func TestModel_SetupStep1_SpaceTogglesProvider(t *testing.T) {
 // ─── Group picker ─────────────────────────────────────────────────────────────
 
 func TestModel_GroupPicker_EnterSetsLoading(t *testing.T) {
-	tools := []*database.ToolCache{
+	tools := []*app.ToolView{
 		{Name: "ripgrep", Provider: "brew", Installed: true},
 	}
 	m := baseModel(tools)
@@ -3210,7 +3209,7 @@ func TestModel_ProgressMsg_UsesProgressEventProviderLabel(t *testing.T) {
 }
 
 func TestModel_ProgressMsg_RefreshesFinishedToolBeforeBatchDone(t *testing.T) {
-	m := baseModel([]*database.ToolCache{
+	m := baseModel([]*app.ToolView{
 		{Name: "ripgrep", Provider: "system", Installed: false, Tracked: true},
 		{Name: "fd", Provider: "system", Installed: false, Tracked: true},
 	})
@@ -3224,7 +3223,7 @@ func TestModel_ProgressMsg_RefreshesFinishedToolBeforeBatchDone(t *testing.T) {
 		text:    "Installed ripgrep",
 		rowKey:  key,
 		rowDone: true,
-		tools: []*database.ToolCache{
+		tools: []*app.ToolView{
 			{Name: "ripgrep", Provider: "system", Installed: true, Tracked: true},
 			{Name: "fd", Provider: "system", Installed: false, Tracked: true},
 		},
@@ -3249,7 +3248,7 @@ func TestModel_ProgressMsg_RefreshesFinishedToolBeforeBatchDone(t *testing.T) {
 }
 
 func TestModel_ProgressMsg_MarksFinishedToolWithoutSnapshot(t *testing.T) {
-	m := baseModel([]*database.ToolCache{
+	m := baseModel([]*app.ToolView{
 		{Name: "ripgrep", Provider: "system", Installed: false, Tracked: true},
 		{Name: "fd", Provider: "system", Installed: false, Tracked: true},
 	})
@@ -3650,7 +3649,7 @@ func TestModel_AllProvidersDoneMsg_RefreshesTools(t *testing.T) {
 }
 
 func TestModel_AllProvidersDoneMsg_IgnoresStaleGeneration(t *testing.T) {
-	oldTools := []*database.ToolCache{{Name: "old", Provider: "brew"}}
+	oldTools := []*app.ToolView{{Name: "old", Provider: "brew"}}
 	m := baseModel(oldTools)
 	m.scanGen = 2
 	got := drive(m, allProvidersDoneMsg{gen: 1, tools: threeTools()})
@@ -3660,14 +3659,14 @@ func TestModel_AllProvidersDoneMsg_IgnoresStaleGeneration(t *testing.T) {
 }
 
 func TestModel_DiscoveredRefreshedMsg_IgnoresStaleGeneration(t *testing.T) {
-	oldDiscovered := []*database.ToolCache{{Name: "old-orphan", Provider: "brew", Installed: true, Tracked: false}}
+	oldDiscovered := []*app.ToolView{{Name: "old-orphan", Provider: "brew", Installed: true, Tracked: false}}
 	m := baseModel(nil)
 	m.discoveryGen = 2
 	m.discoveredTools = oldDiscovered
 	m.rebuildDiscoveredKeys()
 	got := drive(m, discoveredRefreshedMsg{
 		gen:        1,
-		discovered: []*database.ToolCache{{Name: "new-orphan", Provider: "brew", Installed: true, Tracked: false}},
+		discovered: []*app.ToolView{{Name: "new-orphan", Provider: "brew", Installed: true, Tracked: false}},
 	})
 	if len(got.discoveredTools) != 1 || got.discoveredTools[0].Name != "old-orphan" {
 		t.Fatalf("stale discoveredRefreshedMsg overwrote discovered tools: %v", toolNames(got.discoveredTools))
@@ -5148,8 +5147,8 @@ func TestDefaultSetupHostName_ExistingHostsUsesHostname(t *testing.T) {
 
 // wrongProvTool returns an installed/tracked tool that will register as
 // syncWrongProv when the model's effectiveNodeManager is "bun".
-func wrongProvTool() *database.ToolCache {
-	return &database.ToolCache{
+func wrongProvTool() *app.ToolView {
+	return &app.ToolView{
 		Name:          "typescript",
 		Provider:      "node",
 		InstalledWith: "npm", // installed via npm but bun is the effective manager
@@ -5160,21 +5159,21 @@ func wrongProvTool() *database.ToolCache {
 
 // wrongProvModel returns a baseModel loaded with one syncWrongProv tool.
 func wrongProvModel() Model {
-	m := baseModel([]*database.ToolCache{wrongProvTool()})
+	m := baseModel([]*app.ToolView{wrongProvTool()})
 	m.effectiveNodeManager = "bun"
 	m.upgradingKeys = make(map[string]bool)
 	return m
 }
 
 func TestSyncStatusOf_PinnedProviderMismatchWinsOverDefault(t *testing.T) {
-	tool := &database.ToolCache{
+	tool := &app.ToolView{
 		Name:          "typescript",
 		Provider:      "node",
 		InstalledWith: "bun",
 		Installed:     true,
 		Tracked:       true,
 	}
-	m := baseModel([]*database.ToolCache{tool})
+	m := baseModel([]*app.ToolView{tool})
 	m.effectiveNodeManager = "bun"
 	m.toolProviderPins = map[string]string{"typescript": "npm"}
 
@@ -5184,14 +5183,14 @@ func TestSyncStatusOf_PinnedProviderMismatchWinsOverDefault(t *testing.T) {
 }
 
 func TestPinnedProvider_KeyPressArmsClearOverride(t *testing.T) {
-	tool := &database.ToolCache{
+	tool := &app.ToolView{
 		Name:          "typescript",
 		Provider:      "node",
 		InstalledWith: "npm",
 		Installed:     true,
 		Tracked:       true,
 	}
-	m := baseModel([]*database.ToolCache{tool})
+	m := baseModel([]*app.ToolView{tool})
 	m.effectiveNodeManager = "bun"
 	m.toolProviderPins = map[string]string{"typescript": "npm"}
 	m.upgradingKeys = make(map[string]bool)
@@ -5218,14 +5217,14 @@ func TestPinnedProvider_KeyPressArmsClearOverride(t *testing.T) {
 }
 
 func TestSyncStatusOf_NvmManagedBrewTool(t *testing.T) {
-	tool := &database.ToolCache{
+	tool := &app.ToolView{
 		Name:          "pnpm",
 		Provider:      "brew",
 		Installed:     true,
 		InstalledWith: "",
 		Tracked:       true,
 	}
-	m := baseModel([]*database.ToolCache{tool})
+	m := baseModel([]*app.ToolView{tool})
 	m.nvmManaged = map[string]bool{"pnpm": true}
 
 	if got := m.syncStatusOf(tool); got != syncNvmManaged {
@@ -5234,14 +5233,14 @@ func TestSyncStatusOf_NvmManagedBrewTool(t *testing.T) {
 }
 
 func TestNvmManaged_KeyPressArmsMigrateConfirm(t *testing.T) {
-	tool := &database.ToolCache{
+	tool := &app.ToolView{
 		Name:          "pnpm",
 		Provider:      "brew",
 		Installed:     true,
 		InstalledWith: "",
 		Tracked:       true,
 	}
-	m := baseModel([]*database.ToolCache{tool})
+	m := baseModel([]*app.ToolView{tool})
 	m.nvmManaged = map[string]bool{"pnpm": true}
 	m.effectiveNodeManager = "pnpm"
 	m.applyFilter()
@@ -5253,14 +5252,14 @@ func TestNvmManaged_KeyPressArmsMigrateConfirm(t *testing.T) {
 }
 
 func TestNvmRuntime_KeyPressArmsRemoveConfirm(t *testing.T) {
-	tool := &database.ToolCache{
+	tool := &app.ToolView{
 		Name:          "node",
 		Provider:      "brew",
 		Installed:     true,
 		InstalledWith: "",
 		Tracked:       true,
 	}
-	m := baseModel([]*database.ToolCache{tool})
+	m := baseModel([]*app.ToolView{tool})
 	m.nvmManaged = map[string]bool{"node": true}
 	m.applyFilter()
 
@@ -5709,7 +5708,7 @@ func TestGlobalDotsCommit_NothingToCommit(t *testing.T) {
 // startGroupReassignQueue with two names opens a group picker for the first
 // tool and leaves the second in pendingGroupReassign.
 func TestStartGroupReassignQueue_OpensFirstPicker(t *testing.T) {
-	m := baseModel([]*database.ToolCache{
+	m := baseModel([]*app.ToolView{
 		{Name: "ripgrep", Provider: "brew"},
 		{Name: "fd", Provider: "brew"},
 	})
@@ -5754,7 +5753,7 @@ func TestStartGroupReassignQueue_Empty(t *testing.T) {
 // completes with pickerPurposeReassign=true and more tools remain in
 // pendingGroupReassign, closeGroupPicker opens the next picker.
 func TestCloseGroupPicker_ChainsReassign(t *testing.T) {
-	m := baseModel([]*database.ToolCache{
+	m := baseModel([]*app.ToolView{
 		{Name: "fd", Provider: "brew"},
 	})
 	// Simulate being mid-reassign for "ripgrep", with "fd" still queued.
@@ -5823,7 +5822,7 @@ func TestCancelGroupPicker_DrainsQueue(t *testing.T) {
 // TestReassignCreatedGroups_CarryForward verifies that groups created during an
 // earlier reassign picker are included in the groups offered by the next picker.
 func TestReassignCreatedGroups_CarryForward(t *testing.T) {
-	m := baseModel([]*database.ToolCache{
+	m := baseModel([]*app.ToolView{
 		{Name: "fd", Provider: "brew"},
 	})
 	// Simulate: first picker created "dev" group; next tool is "fd".
@@ -5859,7 +5858,7 @@ func TestReassignCreatedGroups_CarryForward(t *testing.T) {
 // carrying claimedNames triggers startGroupReassignQueue: the first tool's
 // picker opens with pickerPurposeReassign=true.
 func TestProgressDoneMsg_StartsReassignQueue(t *testing.T) {
-	m := baseModel([]*database.ToolCache{
+	m := baseModel([]*app.ToolView{
 		{Name: "ripgrep", Provider: "brew"},
 	})
 	m.progressGen = 1
@@ -5867,7 +5866,7 @@ func TestProgressDoneMsg_StartsReassignQueue(t *testing.T) {
 	got := drive(m, progressDoneMsg{
 		gen:          1,
 		claimedNames: []string{"ripgrep"},
-		tools: []*database.ToolCache{
+		tools: []*app.ToolView{
 			{Name: "ripgrep", Provider: "brew"},
 		},
 	})
@@ -5888,7 +5887,7 @@ func TestProgressDoneMsg_StartsReassignQueue(t *testing.T) {
 // groupChangedMsg from tool 1 arrives (shouldn't break) → Enter →
 // queue drains → viewList.
 func TestReassignQueue_E2E_FullCycle(t *testing.T) {
-	tools := []*database.ToolCache{
+	tools := []*app.ToolView{
 		{Name: "ripgrep", Provider: "brew"},
 		{Name: "fd", Provider: "brew"},
 	}

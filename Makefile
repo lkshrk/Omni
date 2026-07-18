@@ -11,8 +11,21 @@ DEV_CONFIG  ?= $(DEV_DIR)/settings.json
 DEV_CACHE   ?= $(DEV_DIR)/cache
 DEV_GOCACHE ?= $(DEV_DIR)/go-build
 TEST_SAFE   := bash scripts/run-test-safe.sh
+TEST_UNIT_ROOT := $(TMP_DIR)/test-unit-root
 ARGS        ?= --help
 DOCKER      ?= docker
+
+define run_pm_test
+	GOCACHE="$(TMP_DIR)/go-build" CGO_ENABLED=0 GOOS=linux GOARCH=$(2) go test -tags=pmcontainer -c ./internal/provider/$(1) -o "$(TMP_DIR)/pm-tests/$(1).test"
+	@set -eu; \
+	container=$$($(DOCKER) create $(4) \
+		-e OMNI_PMCONTAINER=1 \
+		-e OMNI_PMCONTAINER_PROVIDER=$(1) \
+		$(5) $(3) /$(1).test -test.v); \
+	trap '$(DOCKER) rm -f "$$container" >/dev/null 2>&1 || true' EXIT HUP INT TERM; \
+	$(DOCKER) cp "$(TMP_DIR)/pm-tests/$(1).test" "$$container:/$(1).test"; \
+	$(DOCKER) start -a "$$container"
+endef
 
 # Embed version from git tags; fall back to "dev" on untagged repos.
 GIT_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -22,7 +35,7 @@ LDFLAGS     := -X $(MODULE)/internal/buildinfo.Version=$(GIT_VERSION) \
                -X $(MODULE)/internal/buildinfo.Commit=$(GIT_COMMIT) \
                -X $(MODULE)/internal/buildinfo.Date=$(BUILD_DATE)
 
-.PHONY: build run tui-live tui-dev cli cli-live cli-dev dev-bootstrap test test-scripts test-package-managers test-all test-integration-build test-integration docs-build lint clean clean-cache clean-docker prune-tmp install gen-schema demo-gif
+.PHONY: build run tui-live tui-dev cli cli-live cli-dev dev-bootstrap test test-unit test-scripts test-package-managers test-all test-integration-build test-integration docs-build lint clean clean-cache clean-docker prune-tmp install gen-schema demo-gif
 
 ## build: compile the binary to ./bin/omni
 build:
@@ -73,11 +86,16 @@ demo-gif:
 		vhs "$(DEMO_TAPE)"; \
 	fi
 
-## test: run unit tests with race detector and script regressions
-test: test-scripts
+## test: run unit tests and script regressions
+test: test-scripts test-unit
+
+## test-unit: run unit tests with race detector
+test-unit:
 	$(MAKE) --no-print-directory prune-tmp
-	$(TEST_SAFE) go clean -testcache
-	$(TEST_SAFE) go test -race -trimpath ./...
+	@mkdir -p "$(TEST_UNIT_ROOT)"
+	@chmod -R u+w "$(TEST_UNIT_ROOT)" 2>/dev/null || true
+	@find "$(TEST_UNIT_ROOT)" -mindepth 1 -delete
+	OMNI_TEST_ROOT="$(TEST_UNIT_ROOT)" $(TEST_SAFE) go test -race -trimpath ./...
 
 ## test-scripts: run shell-script regression tests
 test-scripts:
@@ -86,20 +104,13 @@ test-scripts:
 ## test-package-managers: run real package-manager provider tests in minimal distro containers
 test-package-managers: prune-tmp
 	@mkdir -p "$(TMP_DIR)/pm-tests"
-	GOCACHE="$(TMP_DIR)/go-build" CGO_ENABLED=0 GOOS=linux GOARCH=$$(go env GOARCH) go test -tags=pmcontainer -c ./internal/provider/apt -o "$(TMP_DIR)/pm-tests/apt.test"
-	docker run --rm -e OMNI_PMCONTAINER=1 -e OMNI_PMCONTAINER_PROVIDER=apt -v "$(TMP_DIR)/pm-tests/apt.test:/apt.test:ro" debian:bookworm-slim /apt.test -test.v
-	GOCACHE="$(TMP_DIR)/go-build" CGO_ENABLED=0 GOOS=linux GOARCH=$$(go env GOARCH) go test -tags=pmcontainer -c ./internal/provider/apk -o "$(TMP_DIR)/pm-tests/apk.test"
-	docker run --rm -e OMNI_PMCONTAINER=1 -e OMNI_PMCONTAINER_PROVIDER=apk -v "$(TMP_DIR)/pm-tests/apk.test:/apk.test:ro" alpine:3.20 /apk.test -test.v
-	GOCACHE="$(TMP_DIR)/go-build" CGO_ENABLED=0 GOOS=linux GOARCH=$$(go env GOARCH) go test -tags=pmcontainer -c ./internal/provider/brew -o "$(TMP_DIR)/pm-tests/brew.test"
-	docker run --rm -e OMNI_PMCONTAINER=1 -e OMNI_PMCONTAINER_PROVIDER=brew -v "$(TMP_DIR)/pm-tests/brew.test:/brew.test:ro" homebrew/brew:latest /brew.test -test.v
-	GOCACHE="$(TMP_DIR)/go-build" CGO_ENABLED=0 GOOS=linux GOARCH=$$(go env GOARCH) go test -tags=pmcontainer -c ./internal/provider/dnf -o "$(TMP_DIR)/pm-tests/dnf.test"
-	docker run --rm -e OMNI_PMCONTAINER=1 -e OMNI_PMCONTAINER_PROVIDER=dnf -v "$(TMP_DIR)/pm-tests/dnf.test:/dnf.test:ro" fedora:42 /dnf.test -test.v
-	GOCACHE="$(TMP_DIR)/go-build" CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go test -tags=pmcontainer -c ./internal/provider/pacman -o "$(TMP_DIR)/pm-tests/pacman.test"
-	docker run --rm --platform linux/amd64 -e OMNI_PMCONTAINER=1 -e OMNI_PMCONTAINER_PROVIDER=pacman -v "$(TMP_DIR)/pm-tests/pacman.test:/pacman.test:ro" archlinux/archlinux:base /pacman.test -test.v
-	GOCACHE="$(TMP_DIR)/go-build" CGO_ENABLED=0 GOOS=linux GOARCH=$$(go env GOARCH) go test -tags=pmcontainer -c ./internal/provider/zypper -o "$(TMP_DIR)/pm-tests/zypper.test"
-	docker run --rm -e OMNI_PMCONTAINER=1 -e OMNI_PMCONTAINER_PROVIDER=zypper -v "$(TMP_DIR)/pm-tests/zypper.test:/zypper.test:ro" opensuse/leap:15.6 /zypper.test -test.v
-	GOCACHE="$(TMP_DIR)/go-build" CGO_ENABLED=0 GOOS=linux GOARCH=$$(go env GOARCH) go test -tags=pmcontainer -c ./internal/provider/cargo -o "$(TMP_DIR)/pm-tests/cargo.test"
-	docker run --rm -e OMNI_PMCONTAINER=1 -e OMNI_PMCONTAINER_PROVIDER=cargo -v "$(TMP_DIR)/pm-tests/cargo.test:/cargo.test:ro" rust:1.88-slim-bookworm /cargo.test -test.v
+	$(call run_pm_test,apt,$$(go env GOARCH),debian:bookworm-slim)
+	$(call run_pm_test,apk,$$(go env GOARCH),alpine:3.20)
+	$(call run_pm_test,brew,$$(go env GOARCH),homebrew/brew:latest,,-e HOMEBREW_NO_AUTOREMOVE=1 -e HOMEBREW_NO_AUTO_UPDATE=1)
+	$(call run_pm_test,dnf,$$(go env GOARCH),fedora:42)
+	$(call run_pm_test,pacman,amd64,archlinux/archlinux:base,--platform linux/amd64)
+	$(call run_pm_test,zypper,$$(go env GOARCH),opensuse/leap:15.6)
+	$(call run_pm_test,cargo,$$(go env GOARCH),rust:1.88-slim-bookworm)
 
 ## test-all: run unit tests locally and integration tests in Docker
 test-all: test test-integration
@@ -108,7 +119,7 @@ test-all: test test-integration
 test-integration-build:
 	docker build -f Dockerfile.test --target integration-test --output=type=cacheonly .
 
-## test-integration: run all tests inside the isolated Docker environment
+## test-integration: run integration-tagged tests inside the isolated Docker environment
 test-integration: test-integration-build
 	@docker builder prune --keep-storage=2g -f >/dev/null 2>&1 || true
 

@@ -39,12 +39,16 @@ func (a *App) RecordCommandTrace(ctx context.Context, trace executor.TraceRecord
 }
 
 // CommandTraces returns recent command traces, newest first.
-func (a *App) CommandTraces(ctx context.Context, limit int) ([]database.CommandTrace, error) {
+func (a *App) CommandTraces(ctx context.Context, limit int) ([]CommandTraceView, error) {
 	db := a.readDB()
 	if db == nil {
 		return nil, fmt.Errorf("database is not initialized")
 	}
-	return db.ListCommandTraces(ctx, limit)
+	rows, err := db.ListCommandTraces(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+	return commandTraceViewsFromRows(rows), nil
 }
 
 func traceReason(ctx context.Context, action, name, providerName string) context.Context {

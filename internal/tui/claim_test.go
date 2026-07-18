@@ -13,7 +13,6 @@ import (
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/provider"
 )
 
@@ -98,13 +97,13 @@ func TestDoClaim_RefreshesToolMembershipState(t *testing.T) {
 func TestHandleClaimDoneMsg_ErrorStillRefreshesClaim(t *testing.T) {
 	m := modelForCmds(nil)
 	key := toolKey("ripgrep", "system")
-	m.discoveredTools = []*database.ToolCache{{Name: "ripgrep", Provider: "system", Installed: true}}
+	m.discoveredTools = []*app.ToolView{{Name: "ripgrep", Provider: "system", Installed: true}}
 	m.rebuildDiscoveredKeys()
 	msg := claimDoneMsg{
 		err:             errors.New("host update failed"),
 		name:            "ripgrep",
 		groupName:       "work",
-		tools:           []*database.ToolCache{{Name: "ripgrep", Provider: "system", Installed: true, Tracked: true}},
+		tools:           []*app.ToolView{{Name: "ripgrep", Provider: "system", Installed: true, Tracked: true}},
 		toolGroups:      map[string]string{key: "work"},
 		toolMemberships: map[string][]string{key: {"work"}},
 		groupNames:      []string{"work"},
@@ -122,21 +121,21 @@ func TestHandleClaimDoneMsg_ErrorStillRefreshesClaim(t *testing.T) {
 func TestHandleClaimDoneMsg_RemovesDiscoveredBeforeFiltering(t *testing.T) {
 	m := modelForCmds(nil)
 	key := toolKey("swiftlint", "system")
-	swiftformat := &database.ToolCache{Name: "swiftformat", Provider: "system", Package: "swiftformat", Installed: true, Tracked: true}
-	orphan := &database.ToolCache{Name: "swiftlint", Provider: "system", Package: "swiftlint", Installed: true, Tracked: false}
-	m.allTools = []*database.ToolCache{swiftformat, orphan}
-	m.discoveredTools = []*database.ToolCache{orphan}
+	swiftformat := &app.ToolView{Name: "swiftformat", Provider: "system", Package: "swiftformat", Installed: true, Tracked: true}
+	orphan := &app.ToolView{Name: "swiftlint", Provider: "system", Package: "swiftlint", Installed: true, Tracked: false}
+	m.allTools = []*app.ToolView{swiftformat, orphan}
+	m.discoveredTools = []*app.ToolView{orphan}
 	m.rebuildDiscoveredKeys()
 	m.applyFilter()
 	if len(m.visibleTools) != 2 || m.visibleTools[0].Name != "swiftlint" {
 		t.Fatalf("precondition visible order = %+v, want out-of-sync swiftlint first", m.visibleTools)
 	}
 
-	claimed := &database.ToolCache{Name: "swiftlint", Provider: "system", Package: "swiftlint", Installed: true, Tracked: true}
+	claimed := &app.ToolView{Name: "swiftlint", Provider: "system", Package: "swiftlint", Installed: true, Tracked: true}
 	m.handleClaimDoneMsg(claimDoneMsg{
 		name:            "swiftlint",
 		groupName:       "dev",
-		tools:           []*database.ToolCache{swiftformat, claimed},
+		tools:           []*app.ToolView{swiftformat, claimed},
 		toolGroups:      map[string]string{key: "dev"},
 		toolMemberships: map[string][]string{key: {"dev"}},
 		groupNames:      []string{"dev"},
@@ -345,7 +344,7 @@ func TestDoInstallAndAddTool_PassesSearchOptions(t *testing.T) {
 	brew := &installOptionCaptureProvider{okProvider: okProvider{name: "brew"}}
 	a, cfgPath := newCmdApp(t, brew, nil)
 	m := modelForCmds(a)
-	row := &database.ToolCache{
+	row := &app.ToolView{
 		Name:     "visual-studio-code",
 		Provider: "brew",
 		Options:  map[string]string{"brew_kind": "cask"},
@@ -384,7 +383,7 @@ func TestHandleOpCompleteMsg_ErrorStillRefreshesToolMembershipState(t *testing.T
 	key := toolKey("ripgrep", "system")
 	msg := opCompleteMsg{
 		err:             errors.New("host update failed"),
-		tools:           []*database.ToolCache{{Name: "ripgrep", Provider: "system", Installed: true, Tracked: true}},
+		tools:           []*app.ToolView{{Name: "ripgrep", Provider: "system", Installed: true, Tracked: true}},
 		toolGroups:      map[string]string{key: "work"},
 		toolMemberships: map[string][]string{key: {"work"}},
 		groupNames:      []string{"work"},
@@ -400,7 +399,7 @@ func TestHandleOpCompleteMsg_ErrorStillRefreshesToolMembershipState(t *testing.T
 }
 
 func TestHandleOpCompleteMsg_ProviderPinsRefreshBeforeFiltering(t *testing.T) {
-	tool := &database.ToolCache{
+	tool := &app.ToolView{
 		Name:          "ripgrep",
 		Provider:      "system",
 		Installed:     true,
@@ -408,7 +407,7 @@ func TestHandleOpCompleteMsg_ProviderPinsRefreshBeforeFiltering(t *testing.T) {
 		Tracked:       true,
 	}
 	m := modelForCmds(nil)
-	m.allTools = []*database.ToolCache{tool}
+	m.allTools = []*app.ToolView{tool}
 	m.effectiveSystemManager = "apt"
 	m.applyFilter()
 	if got := m.countSection(sectionOutOfSync); got != 1 {
@@ -417,7 +416,7 @@ func TestHandleOpCompleteMsg_ProviderPinsRefreshBeforeFiltering(t *testing.T) {
 
 	m.handleOpCompleteMsg(opCompleteMsg{
 		message:          "pinned ripgrep via this tool everywhere",
-		tools:            []*database.ToolCache{tool},
+		tools:            []*app.ToolView{tool},
 		toolProviderPins: map[string]string{"ripgrep": "brew"},
 	})
 	if got := m.countSection(sectionOutOfSync); got != 0 {
@@ -435,7 +434,7 @@ func TestDoSetProviderScope_ToolSuccess(t *testing.T) {
 	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
 	m := modelForCmds(a)
 
-	msg := m.doSetProviderScope("ripgrep", scopeOption{kind: "provider-tool", label: "this tool everywhere"}, &database.ToolCache{Name: "ripgrep", Provider: "brew", Package: "ripgrep", InstalledWith: "brew"})()
+	msg := m.doSetProviderScope("ripgrep", scopeOption{kind: "provider-tool", label: "this tool everywhere"}, &app.ToolView{Name: "ripgrep", Provider: "brew", Package: "ripgrep", InstalledWith: "brew"})()
 	got, ok := msg.(opCompleteMsg)
 	if !ok {
 		t.Fatalf("expected opCompleteMsg, got %T", msg)
@@ -464,7 +463,7 @@ func TestDoSetProviderScope_PersistsPackageAlias(t *testing.T) {
 	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
 	m := modelForCmds(a)
 
-	msg := m.doSetProviderScope("ripgrep", scopeOption{kind: "provider-tool", label: "this tool everywhere"}, &database.ToolCache{Name: "ripgrep", Provider: "brew", Package: "rg", InstalledWith: "brew"})()
+	msg := m.doSetProviderScope("ripgrep", scopeOption{kind: "provider-tool", label: "this tool everywhere"}, &app.ToolView{Name: "ripgrep", Provider: "brew", Package: "rg", InstalledWith: "brew"})()
 	got, ok := msg.(opCompleteMsg)
 	if !ok {
 		t.Fatalf("expected opCompleteMsg, got %T", msg)
@@ -488,7 +487,7 @@ func TestDoSetProviderScope_Error(t *testing.T) {
 	a, _ := newCmdApp(t, prov, nil) // empty config — no tools
 	m := modelForCmds(a)
 
-	msg := m.doSetProviderScope("notexist", scopeOption{kind: "provider-tool"}, &database.ToolCache{Name: "notexist", Provider: "system", InstalledWith: "brew"})()
+	msg := m.doSetProviderScope("notexist", scopeOption{kind: "provider-tool"}, &app.ToolView{Name: "notexist", Provider: "system", InstalledWith: "brew"})()
 	got, ok := msg.(opCompleteMsg)
 	if !ok {
 		t.Fatalf("expected opCompleteMsg, got %T", msg)
@@ -556,7 +555,7 @@ func TestDoMigrateProvider_Success(t *testing.T) {
 	if got.tools == nil {
 		t.Error("expected non-nil tools list on success")
 	}
-	if len(got.tools) != 1 || !got.tools[0].Description.Valid || got.tools[0].Description.String != "Python package installer" {
+	if len(got.tools) != 1 || got.tools[0].Description != "Python package installer" {
 		t.Fatalf("migrated tools description = %+v, want refreshed provider description", got.tools)
 	}
 }

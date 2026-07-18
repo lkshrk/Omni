@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	osExec "os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -30,7 +29,7 @@ func NewClaudeCodeMcpAdapter(
 func (a *claudeCodeMcpAdapter) ID() string { return "claude-code" }
 
 func (a *claudeCodeMcpAdapter) Available() bool {
-	_, err := osExec.LookPath("claude")
+	_, err := lookPath("claude")
 	return err == nil
 }
 

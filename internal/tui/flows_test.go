@@ -101,7 +101,6 @@ package tui
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"path/filepath"
 	"slices"
@@ -114,32 +113,31 @@ import (
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/dots"
 )
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 // oneInstalledOutdated returns a single installed+outdated tool.
-func oneInstalledOutdated() []*database.ToolCache {
-	return []*database.ToolCache{{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: true, Tracked: true}}
+func oneInstalledOutdated() []*app.ToolView {
+	return []*app.ToolView{{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: true, Tracked: true}}
 }
 
 // oneInstalled returns a single installed tool.
-func oneInstalled() []*database.ToolCache {
-	return []*database.ToolCache{{Name: "ripgrep", Provider: "brew", Installed: true, Tracked: true}}
+func oneInstalled() []*app.ToolView {
+	return []*app.ToolView{{Name: "ripgrep", Provider: "brew", Installed: true, Tracked: true}}
 }
 
 // oneMissing returns a single tracked-but-not-installed tool.
-func oneMissing() []*database.ToolCache {
-	return []*database.ToolCache{{Name: "curl", Provider: "brew", Installed: false, Tracked: true}}
+func oneMissing() []*app.ToolView {
+	return []*app.ToolView{{Name: "curl", Provider: "brew", Installed: false, Tracked: true}}
 }
 
 // manyTools returns n distinct tools for pagination tests.
-func manyTools(n int) []*database.ToolCache {
-	out := make([]*database.ToolCache, n)
+func manyTools(n int) []*app.ToolView {
+	out := make([]*app.ToolView, n)
 	for i := range out {
-		out[i] = &database.ToolCache{Name: "tool", Provider: "brew"}
+		out[i] = &app.ToolView{Name: "tool", Provider: "brew"}
 	}
 	return out
 }
@@ -640,9 +638,9 @@ func TestFlow_UC16_GroupPickerOpen(t *testing.T) {
 
 func TestFlow_UC17_ClaimOrphan(t *testing.T) {
 	// Build a model with one orphan tool (Tracked=false = discoveredTool).
-	orphan := &database.ToolCache{Name: "fzf", Provider: "brew", Installed: true, Tracked: false}
+	orphan := &app.ToolView{Name: "fzf", Provider: "brew", Installed: true, Tracked: false}
 	m := baseModel(nil)
-	m.discoveredTools = []*database.ToolCache{orphan}
+	m.discoveredTools = []*app.ToolView{orphan}
 	m.rebuildDiscoveredKeys()
 	m.applyFilter() // merges orphan into visibleTools
 	m.upgradingKeys = make(map[string]bool)
@@ -2887,9 +2885,9 @@ func TestFlow_UC50_DangerOpDoneMsg(t *testing.T) {
 // ── UC-51 claimDoneMsg ────────────────────────────────────────────────────────
 
 func TestFlow_UC51_ClaimDoneMsg(t *testing.T) {
-	orphan := &database.ToolCache{Name: "fzf", Provider: "brew", Installed: true, Tracked: false}
+	orphan := &app.ToolView{Name: "fzf", Provider: "brew", Installed: true, Tracked: false}
 	m := baseModel(nil)
-	m.discoveredTools = []*database.ToolCache{orphan}
+	m.discoveredTools = []*app.ToolView{orphan}
 	m.rebuildDiscoveredKeys()
 	m.applyFilter()
 	m.loading = true
@@ -2953,7 +2951,7 @@ func TestFlow_UC52_IgnoreDoneMsg(t *testing.T) {
 		got := drive(m, ignoreDoneMsg{
 			name:          tool.Name,
 			ignored:       true,
-			tools:         []*database.ToolCache{tool},
+			tools:         []*app.ToolView{tool},
 			ignoreLabels:  map[string]string{tool.Name: "tool"},
 			toolIgnoreSet: map[string]bool{tool.Name: true},
 		})
@@ -2973,10 +2971,10 @@ func TestFlow_UC52_IgnoreDoneMsg(t *testing.T) {
 }
 
 func TestFlow_SyncAllDoneRemovesClaimedDiscovered(t *testing.T) {
-	orphan := &database.ToolCache{Name: "fzf", Provider: "brew", Installed: true, Tracked: false}
+	orphan := &app.ToolView{Name: "fzf", Provider: "brew", Installed: true, Tracked: false}
 	m := baseModel(nil)
 	m.loading = true
-	m.discoveredTools = []*database.ToolCache{orphan}
+	m.discoveredTools = []*app.ToolView{orphan}
 	m.rebuildDiscoveredKeys()
 	m.applyFilter()
 
@@ -3382,17 +3380,17 @@ func TestFlow_UC61_PaletteExecution(t *testing.T) {
 
 func TestFlow_UC62_DiscoveredRefreshedMsg(t *testing.T) {
 	t.Run("success updates discoveredTools", func(t *testing.T) {
-		orphan := &database.ToolCache{Name: "fzf", Provider: "brew", Installed: true, Tracked: false}
-		got := drive(baseModel(nil), discoveredRefreshedMsg{discovered: []*database.ToolCache{orphan}})
+		orphan := &app.ToolView{Name: "fzf", Provider: "brew", Installed: true, Tracked: false}
+		got := drive(baseModel(nil), discoveredRefreshedMsg{discovered: []*app.ToolView{orphan}})
 		if len(got.discoveredTools) != 1 {
 			t.Errorf("discoveredTools = %d, want 1", len(got.discoveredTools))
 		}
 	})
 
 	t.Run("success with missing descriptions queues refresh", func(t *testing.T) {
-		orphan := &database.ToolCache{Name: "playwright", Provider: "node", Installed: true, Tracked: false}
+		orphan := &app.ToolView{Name: "playwright", Provider: "node", Installed: true, Tracked: false}
 		m := baseModel(nil)
-		cmd := m.handleDiscoveredRefreshedMsg(discoveredRefreshedMsg{discovered: []*database.ToolCache{orphan}})
+		cmd := m.handleDiscoveredRefreshedMsg(discoveredRefreshedMsg{discovered: []*app.ToolView{orphan}})
 		if cmd == nil {
 			t.Fatal("expected description refresh command for discovered tool without description")
 		}
@@ -3407,7 +3405,7 @@ func TestFlow_UC62_DiscoveredRefreshedMsg(t *testing.T) {
 
 	t.Run("success pruning last row clears discoveredTools", func(t *testing.T) {
 		m := baseModel(nil)
-		m.discoveredTools = []*database.ToolCache{{Name: "fzf", Provider: "brew", Installed: true, Tracked: false}}
+		m.discoveredTools = []*app.ToolView{{Name: "fzf", Provider: "brew", Installed: true, Tracked: false}}
 		m.discoveryGen = 5
 		got := drive(m, discoveredRefreshedMsg{gen: 5, discovered: nil, err: nil})
 		if len(got.discoveredTools) != 0 {
@@ -3417,7 +3415,7 @@ func TestFlow_UC62_DiscoveredRefreshedMsg(t *testing.T) {
 
 	t.Run("error leaves discoveredTools untouched", func(t *testing.T) {
 		m := baseModel(nil)
-		m.discoveredTools = []*database.ToolCache{{Name: "fzf", Provider: "brew", Installed: true, Tracked: false}}
+		m.discoveredTools = []*app.ToolView{{Name: "fzf", Provider: "brew", Installed: true, Tracked: false}}
 		m.discoveryGen = 5
 		got := drive(m, discoveredRefreshedMsg{gen: 5, discovered: nil, err: errors.New("scan failed")})
 		if len(got.discoveredTools) != 1 {
@@ -3429,23 +3427,23 @@ func TestFlow_UC62_DiscoveredRefreshedMsg(t *testing.T) {
 // ── UC-63 descRefreshDoneMsg ──────────────────────────────────────────────────
 
 func TestFlow_UC63_DescRefreshDoneMsg(t *testing.T) {
-	refreshedDiscovered := []*database.ToolCache{{
+	refreshedDiscovered := []*app.ToolView{{
 		Name:        "playwright",
 		Provider:    "node",
 		Installed:   true,
 		Tracked:     false,
-		Description: sql.NullString{String: "browser automation", Valid: true},
+		Description: "browser automation",
 	}}
 	got := drive(baseModel(nil), descRefreshDoneMsg{tools: threeTools(), discovered: refreshedDiscovered})
 	if len(got.allTools) != 3 {
 		t.Errorf("allTools = %d, want 3 after descRefreshDoneMsg", len(got.allTools))
 	}
-	if len(got.discoveredTools) != 1 || got.discoveredTools[0].Description.String != "browser automation" {
+	if len(got.discoveredTools) != 1 || got.discoveredTools[0].Description != "browser automation" {
 		t.Fatalf("discoveredTools = %+v, want refreshed discovered descriptions", got.discoveredTools)
 	}
 
-	m := baseModel([]*database.ToolCache{{Name: "fresh", Provider: "brew"}})
-	m.discoveredTools = []*database.ToolCache{{Name: "old-orphan", Provider: "brew"}}
+	m := baseModel([]*app.ToolView{{Name: "fresh", Provider: "brew"}})
+	m.discoveredTools = []*app.ToolView{{Name: "old-orphan", Provider: "brew"}}
 	m.descRefreshGen = 2
 	got = drive(m, descRefreshDoneMsg{gen: 1, tools: threeTools(), discovered: refreshedDiscovered})
 	if len(got.allTools) != 1 || got.allTools[0].Name != "fresh" {
@@ -3455,7 +3453,7 @@ func TestFlow_UC63_DescRefreshDoneMsg(t *testing.T) {
 		t.Fatalf("stale descRefreshDoneMsg replaced discoveredTools with %+v", got.discoveredTools)
 	}
 
-	m = baseModel([]*database.ToolCache{{Name: "fresh", Provider: "brew"}})
+	m = baseModel([]*app.ToolView{{Name: "fresh", Provider: "brew"}})
 	m.descRefreshGen = 2
 	m.descRefreshing = true
 	got = drive(m, descRefreshDoneMsg{gen: 2, err: errors.New("registry unavailable")})

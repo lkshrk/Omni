@@ -84,6 +84,22 @@ func syncFixtureExec(t *testing.T, repoBody string, exec executor.Executor) (*do
 
 func targetPath(home string) string { return filepath.Join(home, syncTargetRel) }
 
+func writeConflictTarget(t *testing.T, eng *dots.Engine, home string) {
+	t.Helper()
+	target := targetPath(home)
+	if err := os.WriteFile(target, []byte(syncLocalBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(eng.RepoPath, syncPackageDir, syncTargetRel)
+	info, err := os.Stat(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(target, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func assertManagedLink(t *testing.T, home, wantBody string) {
 	t.Helper()
 	target := targetPath(home)
@@ -141,9 +157,7 @@ func TestEngineSync_SkipsAlreadySynced(t *testing.T) {
 func TestEngineSync_RealFileConflictErrors(t *testing.T) {
 	eng, home := syncFixture(t, syncRepoBody)
 	target := targetPath(home)
-	if err := os.WriteFile(target, []byte(syncLocalBody), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictTarget(t, eng, home)
 
 	_, err := eng.Sync(context.Background(), dots.SyncOptions{})
 	if err == nil {
@@ -165,10 +179,7 @@ func TestEngineSync_RealFileConflictErrors(t *testing.T) {
 
 func TestEngineSync_ConflictUseRepo(t *testing.T) {
 	eng, home := syncFixture(t, syncRepoBody)
-	target := targetPath(home)
-	if err := os.WriteFile(target, []byte(syncLocalBody), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictTarget(t, eng, home)
 
 	if _, err := eng.Sync(context.Background(), dots.SyncOptions{ConflictStrategy: "use_repo"}); err != nil {
 		t.Fatalf("Sync use_repo: %v", err)
@@ -178,10 +189,7 @@ func TestEngineSync_ConflictUseRepo(t *testing.T) {
 
 func TestEngineSync_ConflictUseLocalAdopts(t *testing.T) {
 	eng, home := syncFixture(t, syncRepoBody)
-	target := targetPath(home)
-	if err := os.WriteFile(target, []byte(syncLocalBody), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictTarget(t, eng, home)
 
 	if _, err := eng.Sync(context.Background(), dots.SyncOptions{ConflictStrategy: "use_local"}); err != nil {
 		t.Fatalf("Sync use_local: %v", err)
@@ -255,9 +263,7 @@ func TestEngineSync_RestowFailureSurfacesError(t *testing.T) {
 func TestEngineSync_UseRepoRestowFailureRestoresLocal(t *testing.T) {
 	eng, home := syncFixtureExec(t, syncRepoBody, stowFailExecutor{executor.New()})
 	target := targetPath(home)
-	if err := os.WriteFile(target, []byte(syncLocalBody), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictTarget(t, eng, home)
 
 	if _, err := eng.Sync(context.Background(), dots.SyncOptions{ConflictStrategy: "use_repo"}); err == nil {
 		t.Fatal("use_repo over a failing restow should error")
@@ -278,10 +284,7 @@ func TestEngineSync_UseRepoRestowFailureRestoresLocal(t *testing.T) {
 
 func TestEngineSync_UseLocalRestowFailureRollsBackSource(t *testing.T) {
 	eng, home := syncFixtureExec(t, syncRepoBody, stowFailExecutor{executor.New()})
-	target := targetPath(home)
-	if err := os.WriteFile(target, []byte(syncLocalBody), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeConflictTarget(t, eng, home)
 
 	if _, err := eng.Sync(context.Background(), dots.SyncOptions{ConflictStrategy: "use_local"}); err == nil {
 		t.Fatal("use_local over a failing restow should error")

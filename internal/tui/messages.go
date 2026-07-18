@@ -2,16 +2,13 @@ package tui
 
 import (
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/database"
-	"github.com/lkshrk/omni/internal/provider"
 )
 
 // toolsLoadedMsg is sent when the initial tool list and settings have been fetched.
 type toolsLoadedMsg struct {
-	tools                  []*database.ToolCache
-	discovered             []*database.ToolCache // locally installed but not in config
-	settings               config.Settings
+	tools                  []*app.ToolView
+	discovered             []*app.ToolView // locally installed but not in config
+	settings               app.Settings
 	taps                   []string
 	groupNames             []string          // ordered reusable group names
 	toolGroups             map[string]string // "name\x00provider" → group name
@@ -22,8 +19,8 @@ type toolsLoadedMsg struct {
 	toolIgnoreSet          map[string]bool
 	groupIgnoreSet         map[string]map[string]bool
 	toolProviderPins       map[string]string
-	toolProviderCandidates map[string][]config.ToolInstallSpec
-	toolFallbacks          map[string]config.FallbackSpec
+	toolProviderCandidates map[string][]app.ToolInstallSpec
+	toolFallbacks          map[string]app.FallbackSpec
 	toolGit                map[string]string
 	hostInfo               *app.HostInfo
 	ignoreList             []string // tool names ignored by the active host
@@ -54,7 +51,7 @@ type toolsLoadedMsg struct {
 	setupProviders         []app.SetupProviderOption
 	ecosystemProviders     []string
 	enabledAgents          []string
-	agentsIgnore           config.AgentsIgnore
+	agentsIgnore           app.AgentsIgnore
 }
 
 type agentsSummaryLoadedMsg struct {
@@ -167,7 +164,7 @@ type providerScannedMsg struct {
 // and a single, consistent ListTools call has captured the final DB state.
 type allProvidersDoneMsg struct {
 	gen                    int
-	tools                  []*database.ToolCache
+	tools                  []*app.ToolView
 	effectiveSystemManager string
 	err                    error
 }
@@ -180,7 +177,7 @@ type providerOutdatedCheckedMsg struct {
 
 type outdatedProvidersDoneMsg struct {
 	gen                    int
-	tools                  []*database.ToolCache
+	tools                  []*app.ToolView
 	effectiveSystemManager string
 	err                    error
 }
@@ -189,7 +186,7 @@ type outdatedProvidersDoneMsg struct {
 // (orphan scan) completes.
 type discoveredRefreshedMsg struct {
 	gen        int
-	discovered []*database.ToolCache
+	discovered []*app.ToolView
 	err        error
 }
 
@@ -228,8 +225,8 @@ type opCompleteMsg struct {
 	key                    string
 	message                string
 	err                    error
-	tools                  []*database.ToolCache // refreshed list after op
-	removeDiscoveredKeys   []string              // exact "name\x00provider" orphan rows consumed by the op
+	tools                  []*app.ToolView // refreshed list after op
+	removeDiscoveredKeys   []string        // exact "name\x00provider" orphan rows consumed by the op
 	toolProviderPins       map[string]string
 	toolGroups             map[string]string
 	toolMemberships        map[string][]string
@@ -241,7 +238,7 @@ type opCompleteMsg struct {
 // settingsSavedMsg is sent after an async settings save completes.
 type settingsSavedMsg struct {
 	gen         int
-	settings    config.Settings
+	settings    app.Settings
 	hasSettings bool
 	err         error
 }
@@ -257,7 +254,7 @@ type fixIgnoreDoneMsg struct {
 }
 
 type configOptimizeDoneMsg struct {
-	report      *config.OptimizeReport
+	report      *app.OptimizeReport
 	modified    []string
 	optimizeErr error
 	ignoreErr   error
@@ -265,7 +262,7 @@ type configOptimizeDoneMsg struct {
 
 type fixNvmDoneMsg struct {
 	result     *app.NvmManagedMigrationBatchResult
-	tools      []*database.ToolCache
+	tools      []*app.ToolView
 	nvmManaged map[string]bool
 	err        error
 }
@@ -307,7 +304,7 @@ type progressUpdate struct {
 	refreshProvider      string
 	refreshProviderLabel string
 	refreshToolName      string
-	tools                []*database.ToolCache
+	tools                []*app.ToolView
 	claimedNames         []string
 	toolGroups           map[string]string
 	toolMemberships      map[string][]string
@@ -349,14 +346,14 @@ type progressDoneMsg struct {
 	key                     string
 	message                 string
 	err                     error
-	tools                   []*database.ToolCache
+	tools                   []*app.ToolView
 	claimedNames            []string
 	toolGroups              map[string]string
 	toolMemberships         map[string][]string
 	groupNames              []string
 	rowErrors               map[string]string
-	rowActionErrors         map[string]*provider.ActionError
-	promptPrivilegedActions map[string]provider.PrivilegeAction
+	rowActionErrors         map[string]*app.ActionError
+	promptPrivilegedActions map[string]app.PrivilegeAction
 }
 
 // descRefreshDoneMsg is sent when the background bulk-description refresh
@@ -364,8 +361,8 @@ type progressDoneMsg struct {
 type descRefreshDoneMsg struct {
 	gen        int
 	err        error
-	tools      []*database.ToolCache
-	discovered []*database.ToolCache
+	tools      []*app.ToolView
+	discovered []*app.ToolView
 }
 
 // setupImportDoneMsg is sent after the setup-wizard import step completes.
@@ -438,7 +435,7 @@ type dotsPeekLoadedMsg struct {
 
 type traceLogLoadedMsg struct {
 	gen    int
-	traces []database.CommandTrace
+	traces []app.CommandTraceView
 	err    error
 }
 
@@ -458,7 +455,7 @@ type dotsSyncedMsg struct {
 	entries        []app.DotStatus
 	gitStatus      string
 	dotMemberships map[string][]string
-	settings       config.Settings
+	settings       app.Settings
 	hasSettings    bool
 	err            error
 }
@@ -545,10 +542,10 @@ type dotsVariantChangedMsg struct {
 
 // searchResultsMsg is sent when a provider search completes.
 type searchResultsMsg struct {
-	query          string                // the query that produced these results (for caching)
-	providerFilter string                // provider tab filter active when the search started
-	gen            int                   // generation counter — stale results (gen mismatch) are dropped
-	tools          []*database.ToolCache // results converted to ToolCache (not installed)
+	query          string          // the query that produced these results (for caching)
+	providerFilter string          // provider tab filter active when the search started
+	gen            int             // generation counter — stale results (gen mismatch) are dropped
+	tools          []*app.ToolView // results converted to ToolCache (not installed)
 	err            error
 }
 
@@ -564,20 +561,20 @@ type dangerOpDoneMsg struct {
 	action        string
 	dotsGen       int
 	err           error
-	detail        string                // optional human-readable summary
-	tools         []*database.ToolCache // refreshed list (nil when not applicable)
-	reload        bool                  // true when the tools list should be reloaded
-	mode          viewMode              // optional top-level view to show after reload
-	setupComplete bool                  // true when an onboarding action should leave setup
+	detail        string          // optional human-readable summary
+	tools         []*app.ToolView // refreshed list (nil when not applicable)
+	reload        bool            // true when the tools list should be reloaded
+	mode          viewMode        // optional top-level view to show after reload
+	setupComplete bool            // true when an onboarding action should leave setup
 }
 
 // groupChangedMsg is sent after a group rename or delete completes.
 type groupChangedMsg struct {
 	err             error
 	detail          string
-	tools           []*database.ToolCache // refreshed tool list (non-nil on delete)
-	groupNames      []string              // refreshed reusable group names
-	toolGroups      map[string]string     // refreshed "name\x00provider" → group name
+	tools           []*app.ToolView   // refreshed tool list (non-nil on delete)
+	groupNames      []string          // refreshed reusable group names
+	toolGroups      map[string]string // refreshed "name\x00provider" → group name
 	toolMemberships map[string][]string
 	info            *app.HostInfo // refreshed host info
 }
@@ -586,7 +583,7 @@ type groupChangedMsg struct {
 type groupToolsChangedMsg struct {
 	err             error
 	detail          string
-	tools           []*database.ToolCache
+	tools           []*app.ToolView
 	groupNames      []string
 	toolGroups      map[string]string
 	toolMemberships map[string][]string
@@ -622,7 +619,7 @@ type claimDoneMsg struct {
 	err             error
 	name            string
 	groupName       string
-	tools           []*database.ToolCache
+	tools           []*app.ToolView
 	toolGroups      map[string]string
 	toolMemberships map[string][]string
 	groupNames      []string
@@ -634,7 +631,7 @@ type ignoreDoneMsg struct {
 	err            error
 	name           string
 	ignored        bool // true = was added to ignore list, false = was removed
-	tools          []*database.ToolCache
+	tools          []*app.ToolView
 	hostScope      bool
 	ignoreLabels   map[string]string
 	toolIgnoreSet  map[string]bool
@@ -648,7 +645,7 @@ type migrateProviderDoneMsg struct {
 	name                    string
 	fromProvider            string
 	toProvider              string
-	tools                   []*database.ToolCache
+	tools                   []*app.ToolView
 	toolProviderPins        map[string]string
 	clearedProviderOverride bool
 	removedFromConfig       bool
@@ -659,7 +656,7 @@ type fallbackSavedMsg struct {
 	err           error
 	name          string
 	repo          string
-	toolFallbacks map[string]config.FallbackSpec
+	toolFallbacks map[string]app.FallbackSpec
 }
 
 // dotsIgnoredMsg is sent after a dots ignore/include operation completes.

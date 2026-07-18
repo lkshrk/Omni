@@ -2,14 +2,14 @@
 
 This page explains the shape of `settings.json`. For narrative examples, use
 [Configuration](configuration.md). For the machine-readable schema, use
-[`spec/omni.settings.v16.schema.json`](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v16.schema.json).
+[`spec/omni.settings.schema.json`](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.schema.json).
 
 ## Root Object
 
 | Key | Type | Required | Description |
 | --- | --- | --- | --- |
 | `$schema` | string | no | Editor schema URI written by Omni. |
-| `version` | integer | yes | Settings format version. Current version is `16`. |
+| `version` | integer | yes | Settings format version. Current version is `17`. |
 | `settings` | object | no | Global defaults. |
 | `host_settings` | object | no | Per-host setting overrides. |
 | `tools` | object | no | Logical tool specs keyed by logical name. |
@@ -257,5 +257,6 @@ supported value. Notable steps since older tagged releases:
 | 14 | Drops dot entries tracking agent config directories (for example `.claude`, `.codex`, `.agents/skills`). Discovery no longer surfaces those paths. |
 | 15 | Adds optional `groups[].marketplaces` membership refs. |
 | 16 | Adds `agents.ignore.marketplaces`. |
+| 17 | Adds optional tool source, recipe, and `bin_dir` fields plus `$include` support. |
 
-See [Release Notes](release-notes.md) for a narrative summary since v0.8.8.
+See [GitHub Releases](https://github.com/lkshrk/omni/releases) for release notes.

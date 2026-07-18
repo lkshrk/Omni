@@ -8,7 +8,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/app"
 )
 
 func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
@@ -843,18 +843,18 @@ func (m *Model) handlePluginFormKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	return cmds
 }
 
-// buildMcpServerFromForm assembles a config.McpServer from the add-server
+// buildMcpServerFromForm assembles a app.McpServer from the add-server
 // form fields, validating the name and the transport-specific required field.
-func (m *Model) buildMcpServerFromForm() (config.McpServer, error) {
+func (m *Model) buildMcpServerFromForm() (app.McpServer, error) {
 	name := strings.TrimSpace(m.mcpFormName.Value())
 	if name == "" {
-		return config.McpServer{}, errors.New("name is required")
+		return app.McpServer{}, errors.New("name is required")
 	}
 
 	transports := []string{"stdio", "http", "sse"}
 	transport := transports[m.mcpFormTransport]
 
-	s := config.McpServer{
+	s := app.McpServer{
 		Name:      name,
 		Transport: transport,
 	}
@@ -863,13 +863,13 @@ func (m *Model) buildMcpServerFromForm() (config.McpServer, error) {
 	case "stdio":
 		command := strings.TrimSpace(m.mcpFormCommand.Value())
 		if command == "" {
-			return config.McpServer{}, errors.New("command is required for stdio transport")
+			return app.McpServer{}, errors.New("command is required for stdio transport")
 		}
 		s.Command = command
 	default:
 		url := strings.TrimSpace(m.mcpFormURL.Value())
 		if url == "" {
-			return config.McpServer{}, errors.New("URL is required for " + transport + " transport")
+			return app.McpServer{}, errors.New("URL is required for " + transport + " transport")
 		}
 		s.URL = url
 	}
@@ -892,11 +892,11 @@ func (m *Model) buildMcpServerFromForm() (config.McpServer, error) {
 			}
 			envKey, envValue, ok := strings.Cut(pair, "=")
 			if !ok {
-				return config.McpServer{}, errors.New("env literal entries must be KEY=VALUE: " + pair)
+				return app.McpServer{}, errors.New("env literal entries must be KEY=VALUE: " + pair)
 			}
 			envKey = strings.TrimSpace(envKey)
 			if envKey == "" {
-				return config.McpServer{}, errors.New("env literal entries must be KEY=VALUE: " + pair)
+				return app.McpServer{}, errors.New("env literal entries must be KEY=VALUE: " + pair)
 			}
 			lit[envKey] = strings.TrimSpace(envValue)
 		}

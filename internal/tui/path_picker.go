@@ -11,7 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/lkshrk/omni/internal/dots"
+	"github.com/lkshrk/omni/internal/app"
 )
 
 type pathPickerModel struct {
@@ -520,7 +520,7 @@ func expandPath(path string) string {
 	if path == "" {
 		return ""
 	}
-	if expanded, err := dots.ExpandPath(path); err == nil {
+	if expanded, err := app.DotExpandPath(path); err == nil {
 		path = expanded
 	}
 	if !filepath.IsAbs(path) {
@@ -536,7 +536,7 @@ func expandPathPreserveInput(path string) string {
 	if path == "" {
 		return ""
 	}
-	if expanded, err := dots.ExpandPath(path); err == nil {
+	if expanded, err := app.DotExpandPath(path); err == nil {
 		path = expanded
 	}
 	if !filepath.IsAbs(path) {
@@ -584,7 +584,7 @@ func resolvePathInput(path, baseDir string) string {
 		}
 		return pathPickerHomeDir()
 	}
-	if expanded, err := dots.ExpandPath(path); err == nil {
+	if expanded, err := app.DotExpandPath(path); err == nil {
 		path = expanded
 	}
 	if filepath.IsAbs(path) {

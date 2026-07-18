@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	osExec "os/exec"
 
 	"github.com/lkshrk/omni/internal/config"
 )
@@ -25,7 +24,7 @@ func NewCodexPluginAdapter(
 func (a *codexPluginAdapter) ID() string { return "codex" }
 
 func (a *codexPluginAdapter) Available() bool {
-	_, err := osExec.LookPath("codex")
+	_, err := lookPath("codex")
 	return err == nil
 }
 
@@ -71,7 +70,7 @@ func (a *codexPluginAdapter) AddMarketplace(ctx context.Context, m config.Market
 
 // codexPluginListEntry mirrors one element of the installed/available arrays
 // returned by `codex plugin list --json`, per the probe transcript in
-// docs/superpowers/research/2026-07-02-plugin-cli-probe.md. Unlike claude,
+// specs/plugin-cli-probe.md. Unlike claude,
 // codex reports name and marketplaceName as separate fields rather than a
 // combined id, and version is nullable for available-but-uninstalled entries.
 type codexPluginListEntry struct {

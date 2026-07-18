@@ -10,7 +10,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/config"
 )
 
 // combineMcpErrors folds a top-level error with per-adapter errors so callers that
@@ -86,7 +85,7 @@ func (m *Model) doRemoveMcp(name string) tea.Cmd {
 }
 
 // doAddMcp registers a new server built from the add-server form.
-func (m *Model) doAddMcp(s config.McpServer) tea.Cmd {
+func (m *Model) doAddMcp(s app.McpServer) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
 		res, err := a.AddMcpServer(ctx, s)
@@ -155,7 +154,7 @@ func (m *Model) doImportMcpServerWithGroup(agentID string, srv app.InstalledMcpS
 		if mcpUnmanagedConflict(unmanaged, srv.Name, srv) {
 			return mcpImportAdoptDoneMsg{serverName: srv.Name, err: fmt.Errorf("mcp server %q is unmanaged under multiple agents with conflicting configuration; import each manually", srv.Name)}
 		}
-		s := config.McpServer{
+		s := app.McpServer{
 			Name:      srv.Name,
 			Transport: srv.Transport,
 			Command:   srv.Command,

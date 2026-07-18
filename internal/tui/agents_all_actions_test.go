@@ -1830,9 +1830,29 @@ func flattenCmdMsgs(cmd tea.Cmd) []tea.Msg {
 		return nil
 	}
 	if batch, ok := msg.(tea.BatchMsg); ok {
+		type result struct {
+			index int
+			msgs  []tea.Msg
+		}
+		results := make(chan result, len(batch))
+		parts := make([][]tea.Msg, len(batch))
+		pending := 0
+		for i, c := range batch {
+			if c == nil {
+				continue
+			}
+			pending++
+			go func(index int, cmd tea.Cmd) {
+				results <- result{index: index, msgs: flattenCmdMsgs(cmd)}
+			}(i, c)
+		}
+		for range pending {
+			part := <-results
+			parts[part.index] = part.msgs
+		}
 		var out []tea.Msg
-		for _, c := range batch {
-			out = append(out, flattenCmdMsgs(c)...)
+		for _, part := range parts {
+			out = append(out, part...)
 		}
 		return out
 	}

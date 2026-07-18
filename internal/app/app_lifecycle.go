@@ -410,7 +410,7 @@ func (a *App) SyncWithState(ctx context.Context, opts isync.SyncOptions) (*SyncS
 }
 
 func (a *App) SyncAll(ctx context.Context, opts SyncAllOptions) (*SyncAllResult, error) {
-	discovered := opts.Discovered
+	discovered := toolCachesFromView(opts.Discovered)
 	if discovered == nil {
 		if opts.DryRun {
 			var err error
@@ -422,11 +422,11 @@ func (a *App) SyncAll(ctx context.Context, opts SyncAllOptions) (*SyncAllResult,
 			if err := a.RefreshDiscovered(ctx); err != nil {
 				return nil, fmt.Errorf("refreshing discovered tools: %w", err)
 			}
-			var err error
-			discovered, err = a.ListDiscovered(ctx)
+			views, err := a.ListDiscovered(ctx)
 			if err != nil {
 				return nil, fmt.Errorf("listing discovered tools: %w", err)
 			}
+			discovered = toolCachesFromView(views)
 		}
 	}
 
@@ -1121,7 +1121,7 @@ func (a *App) configuredPackageForTool(ctx context.Context, name, providerName s
 		return name, nil
 	}
 	if spec, ok := cfg.Tools[name]; ok {
-		install := a.resolveInstallSpec(ctx, name, spec)
+		install := a.resolveInstallSpecWithSettings(ctx, name, spec, nil, a.effectiveSettings(cfg))
 		return install.EffectivePackage(name), nil
 	}
 	return name, nil
@@ -1448,7 +1448,7 @@ func (a *App) UpgradeAllDetailedWithOptions(ctx context.Context, progress func(s
 			toolProgress(isync.ProgressEvent{Tool: tool, Message: "Upgrading " + t.Name + "…", TargetVersion: targetVersion})
 		}
 		if opts.SkipPrivileged {
-			if plan, planErr := a.ToolPrivilegePlan(ctx, t, provider.PrivilegeActionUpgrade); planErr == nil && plan.RequiresPrivilege() {
+			if plan, planErr := a.ToolPrivilegePlan(ctx, toolViewFromCache(t), provider.PrivilegeActionUpgrade); planErr == nil && plan.RequiresPrivilege() {
 				err := fmt.Errorf("requires sudo: %s", privilegeReason(plan))
 				if toolProgress != nil {
 					toolProgress(isync.ProgressEvent{Tool: tool, Message: "Admin approval needed for " + t.Name, TargetVersion: targetVersion, Err: err, Done: true})
@@ -1908,7 +1908,8 @@ func containsToolMembership(tools []config.ToolEntry, name string) bool {
 // install-spec resolver so host overrides, variants, and availability caching
 // all apply.
 func (a *App) buildProviderTools(ctx context.Context, cfg *config.RootConfig) []config.ToolEntry {
-	providers := a.effectiveSettings(cfg).Providers
+	settings := a.effectiveSettings(cfg)
+	providers := settings.Providers
 	if len(providers) == 0 {
 		return nil
 	}
@@ -1916,7 +1917,7 @@ func (a *App) buildProviderTools(ctx context.Context, cfg *config.RootConfig) []
 	tools := make([]config.ToolEntry, 0, len(providers))
 	for _, p := range providers {
 		spec := p.ToToolSpec()
-		install := a.resolveInstallSpecWithAvailability(ctx, p.Name, spec, availability)
+		install := a.resolveInstallSpecWithSettings(ctx, p.Name, spec, availability, settings)
 		tools = append(tools, spec.ToToolEntry(p.Name, install))
 	}
 	return tools
@@ -2140,8 +2141,10 @@ func (a *App) addProviderSearchForUnavailableTools(
 			matches, matchErr := a.ProviderMatches(ctx, name, spec, providerFilter)
 			if matchErr != nil {
 				warnings = append(warnings, fmt.Sprintf("provider search for %s: %v", name, matchErr))
-				a.recordProviderSearchMiss(ctx, name)
-				continue
+				if len(matches) == 0 {
+					a.recordProviderSearchMiss(ctx, name)
+					continue
+				}
 			}
 			// Only persist high-confidence matches (A4: no weak matches silently).
 			var highConf []config.ToolInstallSpec

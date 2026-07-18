@@ -1,7 +1,6 @@
 package tui
 
 import (
-	sql "database/sql"
 	"errors"
 	"fmt"
 	"image/color"
@@ -21,7 +20,6 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/buildinfo"
 	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/dots"
 	"github.com/lkshrk/omni/internal/provider"
 )
@@ -472,7 +470,7 @@ func TestViewString_PostSetupReloadShowsCenteredProgress(t *testing.T) {
 	m.loading = true
 	m.setupReloading = true
 	m.progressText = "Loading tools..."
-	m.allTools = []*database.ToolCache{{Name: "ripgrep", Provider: "brew", Installed: true}}
+	m.allTools = []*app.ToolView{{Name: "ripgrep", Provider: "brew", Installed: true}}
 	m.applyFilter()
 
 	out := m.viewString()
@@ -569,7 +567,7 @@ func TestRenderHeader_DotsMode(t *testing.T) {
 }
 
 func TestRenderHeaderInfo_UsesUniformRegularWeight(t *testing.T) {
-	tools := baseModel([]*database.ToolCache{{
+	tools := baseModel([]*app.ToolView{{
 		Name:      "git",
 		Provider:  "brew",
 		Installed: true,
@@ -788,7 +786,7 @@ func TestRenderHeader_ScanningProviders(t *testing.T) {
 }
 
 func TestRenderHeader_WithUpdates(t *testing.T) {
-	tools := []*database.ToolCache{
+	tools := []*app.ToolView{
 		{Name: "git", Provider: "brew", Installed: true, Outdated: true},
 	}
 	m := baseModel(tools)
@@ -800,7 +798,7 @@ func TestRenderHeader_WithUpdates(t *testing.T) {
 
 func TestRenderHeader_WithSearchTools(t *testing.T) {
 	m := baseModel(threeTools())
-	m.searchTools = []*database.ToolCache{{Name: "extra-tool", Provider: "brew"}}
+	m.searchTools = []*app.ToolView{{Name: "extra-tool", Provider: "brew"}}
 	out := renderHeader(m)
 	if !strings.Contains(out, "found") {
 		t.Errorf("expected 'found' in header with search tools, got: %q", out)
@@ -808,7 +806,7 @@ func TestRenderHeader_WithSearchTools(t *testing.T) {
 }
 
 func TestRenderHeader_RightEdgeMatchesListRows(t *testing.T) {
-	m := baseModel([]*database.ToolCache{{
+	m := baseModel([]*app.ToolView{{
 		Name:      "git",
 		Provider:  "brew",
 		Installed: true,
@@ -1680,7 +1678,7 @@ func TestHostGroupToolsPopup_FilterKeepsDimensions(t *testing.T) {
 	m.effectiveSystemManager = "brew"
 	m.effectiveNodeManager = "pnpm"
 	m.effectivePythonManager = "uv"
-	m.allTools = []*database.ToolCache{
+	m.allTools = []*app.ToolView{
 		{Name: "ripgrep", Provider: "system", InstalledWith: "brew", Tracked: true},
 		{Name: "fd", Provider: "system", InstalledWith: "brew", Tracked: true},
 		{Name: "eslint", Provider: "node", InstalledWith: "pnpm", Tracked: true},
@@ -1759,7 +1757,7 @@ func TestHostGroupEditorPopups_DoNotWrapDividersOrFooter(t *testing.T) {
 			m.effectiveSystemManager = "brew"
 			m.effectiveNodeManager = "pnpm"
 			m.effectivePythonManager = "uv"
-			m.allTools = []*database.ToolCache{
+			m.allTools = []*app.ToolView{
 				{Name: "@scope/toolkit", Provider: "node", Package: "@scope/toolkit", InstalledWith: "pnpm", Tracked: true},
 				{Name: "ripgrep", Provider: "system", InstalledWith: "brew", Tracked: true},
 				{Name: "ruff", Provider: "python", InstalledWith: "uv", Tracked: true},
@@ -2462,7 +2460,7 @@ func TestViewString_GroupPickerTitle(t *testing.T) {
 }
 
 func TestViewString_GroupPickerTitleUsesCapturedToolAfterCursorMoves(t *testing.T) {
-	m := baseModel([]*database.ToolCache{
+	m := baseModel([]*app.ToolView{
 		{Name: "ripgrep", Provider: "system", Installed: true},
 		{Name: "zoxide", Provider: "system", Installed: true},
 	})
@@ -2479,7 +2477,7 @@ func TestViewString_GroupPickerTitleUsesCapturedToolAfterCursorMoves(t *testing.
 }
 
 func TestViewString_GroupMembershipTitleUsesCapturedToolAfterCursorMoves(t *testing.T) {
-	m := baseModel([]*database.ToolCache{
+	m := baseModel([]*app.ToolView{
 		{Name: "ripgrep", Provider: "system", Tracked: true},
 		{Name: "zoxide", Provider: "system", Tracked: true},
 	})
@@ -2511,7 +2509,7 @@ func TestViewString_ProviderScopeTitleIncludesTool(t *testing.T) {
 }
 
 func TestViewString_ScopeTitleUsesCapturedToolAfterCursorMoves(t *testing.T) {
-	m := baseModel([]*database.ToolCache{
+	m := baseModel([]*app.ToolView{
 		{Name: "ripgrep", Provider: "system", Installed: true, InstalledWith: "brew", Tracked: true},
 		{Name: "zoxide", Provider: "system", Installed: true, InstalledWith: "brew", Tracked: true},
 	})
@@ -2528,7 +2526,7 @@ func TestViewString_ScopeTitleUsesCapturedToolAfterCursorMoves(t *testing.T) {
 }
 
 func TestRenderScopePicker_ProviderLabelsFitWithShortDetails(t *testing.T) {
-	m := baseModel([]*database.ToolCache{
+	m := baseModel([]*app.ToolView{
 		{Name: "npm", Provider: "node", Installed: true, InstalledWith: "npm", Tracked: true},
 	})
 	m.openProviderScopePicker(m.selectedTool())
@@ -2552,7 +2550,7 @@ func TestRenderScopePicker_ProviderLabelsFitWithShortDetails(t *testing.T) {
 }
 
 func TestScopePickerPopupFrameFitsContent(t *testing.T) {
-	m := baseModel([]*database.ToolCache{
+	m := baseModel([]*app.ToolView{
 		{Name: "npm", Provider: "node", Installed: true, InstalledWith: "npm", Tracked: true},
 	})
 	m.openProviderScopePicker(m.selectedTool())
@@ -2685,12 +2683,12 @@ func TestRenderSettings_StateColumnUsesResponsiveRightEdge(t *testing.T) {
 }
 
 func TestMainTabs_FirstSectionStartsAtSharedRow(t *testing.T) {
-	tool := &database.ToolCache{Name: "git", Provider: "system", Installed: true, Tracked: true}
-	toolsNoFilters := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "git", Provider: "system", Installed: true, Tracked: true}
+	toolsNoFilters := baseModel([]*app.ToolView{tool})
 	toolsNoFilters.providerNames = nil
 	toolsNoFilters.groupNames = nil
 
-	toolsWithFilters := baseModel([]*database.ToolCache{tool})
+	toolsWithFilters := baseModel([]*app.ToolView{tool})
 	toolsWithFilters.providerNames = []string{"all", "system"}
 	toolsWithFilters.providerTabIdx = 0
 
@@ -2893,8 +2891,8 @@ func TestRenderStatusBar_SyncAllConfirmUsesFooterOnly(t *testing.T) {
 }
 
 func TestRenderStatusBar_RowConfirmHidesFooterHints(t *testing.T) {
-	tool := &database.ToolCache{Name: "bat", Provider: "brew", Installed: true, Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "bat", Provider: "brew", Installed: true, Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 	m.armListConfirmation(listConfirmDelete, tool)
 	out := renderStatusBar(m)
 	for _, unwanted := range []string{"upgrade all", "sync all", "refresh", "search", "filter"} {
@@ -2930,7 +2928,7 @@ func TestRenderStatusBar_FilterActiveShowsClearHint(t *testing.T) {
 }
 
 func TestActiveConfirmationsUseSingleHelpHint(t *testing.T) {
-	tool := &database.ToolCache{Name: "bat", Provider: "brew", Installed: true, Tracked: true}
+	tool := &app.ToolView{Name: "bat", Provider: "brew", Installed: true, Tracked: true}
 	cases := []struct {
 		name string
 		m    Model
@@ -2939,7 +2937,7 @@ func TestActiveConfirmationsUseSingleHelpHint(t *testing.T) {
 		{
 			name: "tool delete",
 			m: func() Model {
-				m := baseModel([]*database.ToolCache{tool})
+				m := baseModel([]*app.ToolView{tool})
 				m.armListConfirmation(listConfirmDelete, tool)
 				return m
 			}(),
@@ -3182,7 +3180,7 @@ func TestTabKeyMap_ShortHelp_StatusMode(t *testing.T) {
 		}
 	}
 
-	m = baseModel([]*database.ToolCache{
+	m = baseModel([]*app.ToolView{
 		{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
 		{Name: "fd", Provider: "brew", Installed: false, Tracked: true},
 	})
@@ -3403,7 +3401,7 @@ func TestRenderHelpPopup_TabSpecificActionsAndLegend(t *testing.T) {
 				setDotsRepoForTest(&m, "/repo/dotfiles")
 			}
 			if tc.mode == viewStatus {
-				m.allTools = []*database.ToolCache{
+				m.allTools = []*app.ToolView{
 					{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
 					{Name: "fd", Provider: "brew", Installed: false, Tracked: true},
 				}
@@ -3433,7 +3431,7 @@ func TestRenderHelpPopup_DashboardSelectedRowActions(t *testing.T) {
 		{
 			name: "updates",
 			setup: func(m Model) Model {
-				m.allTools = []*database.ToolCache{{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true}}
+				m.allTools = []*app.ToolView{{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true}}
 				m.statusCursor = statusRowIndex(statusRows(m), "Tool Updates")
 				return m
 			},
@@ -3443,7 +3441,7 @@ func TestRenderHelpPopup_DashboardSelectedRowActions(t *testing.T) {
 		{
 			name: "tool sync",
 			setup: func(m Model) Model {
-				m.allTools = []*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}}
+				m.allTools = []*app.ToolView{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}}
 				m.statusCursor = statusRowIndex(statusRows(m), "Tool Sync")
 				return m
 			},
@@ -3629,20 +3627,20 @@ func bindingHelpDescs(bindings []key.Binding) []string {
 func TestProviderLabelForToolWithPinMarksExplicitOverride(t *testing.T) {
 	cases := []struct {
 		name, pin, systemBin, pythonBin, nodeBin, want string
-		tool                                           *database.ToolCache
+		tool                                           *app.ToolView
 	}{
 		{
 			name:    "installed pinned node manager",
 			pin:     "npm",
 			nodeBin: "bun",
-			tool:    &database.ToolCache{Name: "typescript", Provider: "node", Installed: true, InstalledWith: "npm", Tracked: true},
+			tool:    &app.ToolView{Name: "typescript", Provider: "node", Installed: true, InstalledWith: "npm", Tracked: true},
 			want:    "npm",
 		},
 		{
 			name:      "missing pinned python manager",
 			pin:       "pip3",
 			pythonBin: "uv",
-			tool:      &database.ToolCache{Name: "ruff", Provider: "python", Installed: false, Tracked: true},
+			tool:      &app.ToolView{Name: "ruff", Provider: "python", Installed: false, Tracked: true},
 			want:      "pip3",
 		},
 	}
@@ -3657,14 +3655,14 @@ func TestProviderLabelForToolWithPinMarksExplicitOverride(t *testing.T) {
 }
 
 func TestInlineDetailLines_WrongProviderShowsActualAndExpected(t *testing.T) {
-	tool := &database.ToolCache{
+	tool := &app.ToolView{
 		Name:          "typescript",
 		Provider:      "node",
 		InstalledWith: "bun",
 		Installed:     true,
 		Tracked:       true,
 	}
-	m := baseModel([]*database.ToolCache{tool})
+	m := baseModel([]*app.ToolView{tool})
 	m.effectiveNodeManager = "bun"
 	m.toolProviderPins = map[string]string{"typescript": "npm"}
 	m.applyFilter()
@@ -3686,8 +3684,8 @@ func TestInlineDetailLines_WrongProviderShowsActualAndExpected(t *testing.T) {
 }
 
 func TestInlineDetailLines_ConfiguredProviderCandidates(t *testing.T) {
-	tool := &database.ToolCache{Name: "prettier", Provider: "", Installed: false, Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "prettier", Provider: "", Installed: false, Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 	m.toolProviderCandidates = map[string][]config.ToolInstallSpec{
 		"prettier": {
 			{Provider: "npm", Package: "prettier"},
@@ -3709,17 +3707,17 @@ func TestInlineDetailLines_ConfiguredProviderCandidates(t *testing.T) {
 func TestInlineDetailLines_ConfiguredProviderCandidatesHiddenWhenNotActionable(t *testing.T) {
 	tests := []struct {
 		name       string
-		tool       *database.ToolCache
+		tool       *app.ToolView
 		candidates []config.ToolInstallSpec
 	}{
 		{
 			name:       "single candidate",
-			tool:       &database.ToolCache{Name: "prettier", Provider: "npm", Installed: false, Tracked: true},
+			tool:       &app.ToolView{Name: "prettier", Provider: "npm", Installed: false, Tracked: true},
 			candidates: []config.ToolInstallSpec{{Provider: "npm", Package: "prettier"}},
 		},
 		{
 			name: "installed row",
-			tool: &database.ToolCache{Name: "prettier", Provider: "npm", Installed: true, Tracked: true},
+			tool: &app.ToolView{Name: "prettier", Provider: "npm", Installed: true, Tracked: true},
 			candidates: []config.ToolInstallSpec{
 				{Provider: "npm", Package: "prettier"},
 				{Provider: "brew", Package: "prettier"},
@@ -3728,7 +3726,7 @@ func TestInlineDetailLines_ConfiguredProviderCandidatesHiddenWhenNotActionable(t
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			m := baseModel([]*database.ToolCache{tc.tool})
+			m := baseModel([]*app.ToolView{tc.tool})
 			m.toolProviderCandidates = map[string][]config.ToolInstallSpec{"prettier": tc.candidates}
 			m.applyFilter()
 
@@ -3743,8 +3741,8 @@ func TestInlineDetailLines_ConfiguredProviderCandidatesHiddenWhenNotActionable(t
 }
 
 func TestToolInlineHints_PinnedProviderOffersRemoveOverride(t *testing.T) {
-	tool := &database.ToolCache{Name: "typescript", Provider: "node", Installed: true, InstalledWith: "npm", Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "typescript", Provider: "node", Installed: true, InstalledWith: "npm", Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 	m.toolProviderPins = map[string]string{"typescript": "npm"}
 	m.effectiveNodeManager = "bun"
 
@@ -3759,7 +3757,7 @@ func TestToolInlineHints_PinnedProviderOffersRemoveOverride(t *testing.T) {
 
 func TestToolInlineHints_IgnoredToolOffersIncludeAndEdit(t *testing.T) {
 	tool := oneInstalled()[0]
-	m := baseModel([]*database.ToolCache{tool})
+	m := baseModel([]*app.ToolView{tool})
 	m.ignoreSet = map[string]bool{tool.Name: true}
 	m.applyFilter()
 	hints := toolInlineHints(m, tool)
@@ -3775,8 +3773,8 @@ func TestToolInlineHints_IgnoredToolOffersIncludeAndEdit(t *testing.T) {
 }
 
 func TestToolInlineHints_FallbackEligibleSystemToolOffersFallback(t *testing.T) {
-	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: false, Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "rg", Provider: "system", Installed: false, Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 
 	hints := toolInlineHints(m, tool)
 	if !hasHint(hints, m.keys.Fallback.Help().Key, actions.MustTUILabel(actions.ToolFallback)) {
@@ -3785,8 +3783,8 @@ func TestToolInlineHints_FallbackEligibleSystemToolOffersFallback(t *testing.T) 
 }
 
 func TestToolInlineHints_FallbackEligibleConcreteProviderToolOffersFallback(t *testing.T) {
-	tool := &database.ToolCache{Name: "rg", Provider: "apt", Installed: false, Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "rg", Provider: "apt", Installed: false, Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 	m.toolFallbacks = map[string]config.FallbackSpec{
 		"rg": {
 			Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
@@ -3801,8 +3799,8 @@ func TestToolInlineHints_FallbackEligibleConcreteProviderToolOffersFallback(t *t
 }
 
 func TestToolInlineHints_NativeInstalledSystemToolHidesFallback(t *testing.T) {
-	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: true, InstalledWith: "apt", Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "rg", Provider: "system", Installed: true, InstalledWith: "apt", Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 
 	hints := toolInlineHints(m, tool)
 	if hasHintKey(hints, m.keys.Fallback.Help().Key) {
@@ -3811,8 +3809,8 @@ func TestToolInlineHints_NativeInstalledSystemToolHidesFallback(t *testing.T) {
 }
 
 func TestToolInlineHints_NativeInstalledConcreteProviderToolHidesFallback(t *testing.T) {
-	tool := &database.ToolCache{Name: "rg", Provider: "apt", Installed: true, InstalledWith: "apt", Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "rg", Provider: "apt", Installed: true, InstalledWith: "apt", Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 
 	hints := toolInlineHints(m, tool)
 	if hasHintKey(hints, m.keys.Fallback.Help().Key) {
@@ -3821,8 +3819,8 @@ func TestToolInlineHints_NativeInstalledConcreteProviderToolHidesFallback(t *tes
 }
 
 func TestFallbackKey_NativeInstalledSystemToolNoOp(t *testing.T) {
-	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: true, InstalledWith: "apt", Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "rg", Provider: "system", Installed: true, InstalledWith: "apt", Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 
 	got := drive(m, pressRune('f'))
 	if got.mode == viewFallbackEditor || got.fallbackTargetSet {
@@ -3834,8 +3832,8 @@ func TestFallbackKey_NativeInstalledSystemToolNoOp(t *testing.T) {
 }
 
 func TestFallbackKey_GitHubInstalledSystemToolOpensEditor(t *testing.T) {
-	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: true, InstalledWith: "gh", Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "rg", Provider: "system", Installed: true, InstalledWith: "gh", Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 	m.toolFallbacks = map[string]config.FallbackSpec{
 		"rg": {
 			Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
@@ -3868,8 +3866,8 @@ func TestRenderList_ConfiguredGitHubFallbackShowsGHStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tool := &database.ToolCache{Name: "rg", Provider: tt.provider, Installed: false, Tracked: true}
-			m := baseModel([]*database.ToolCache{tool})
+			tool := &app.ToolView{Name: "rg", Provider: tt.provider, Installed: false, Tracked: true}
+			m := baseModel([]*app.ToolView{tool})
 			m.toolFallbacks = map[string]config.FallbackSpec{
 				"rg": {
 					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
@@ -3886,8 +3884,8 @@ func TestRenderList_ConfiguredGitHubFallbackShowsGHStatus(t *testing.T) {
 }
 
 func TestRenderList_ConfiguredGitHubFallbackHidesGHStatusForNativeInstalledTool(t *testing.T) {
-	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: true, InstalledWith: "apt", Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "rg", Provider: "system", Installed: true, InstalledWith: "apt", Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 	m.toolFallbacks = map[string]config.FallbackSpec{
 		"rg": {
 			Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
@@ -3905,8 +3903,8 @@ func TestRenderList_ConfiguredGitHubFallbackHidesGHStatusForNativeInstalledTool(
 }
 
 func TestRenderFallbackEditorPopup_ShowsStructuredFallbackFields(t *testing.T) {
-	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: false, Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "rg", Provider: "system", Installed: false, Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 	m.mode = viewFallbackEditor
 	m.fallbackTarget = *tool
 	m.fallbackTargetSet = true
@@ -3949,8 +3947,8 @@ func TestRenderFallbackEditorPopup_ShowsStructuredFallbackFields(t *testing.T) {
 }
 
 func TestOpenFallbackEditor_PrefillsExistingRecipe(t *testing.T) {
-	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: false, Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "rg", Provider: "system", Installed: false, Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 	m.toolFallbacks = map[string]config.FallbackSpec{
 		"rg": {
 			Source:         config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
@@ -3986,8 +3984,8 @@ func TestOpenFallbackEditor_PrefillsExistingRecipe(t *testing.T) {
 }
 
 func TestOpenFallbackEditor_PrefillsUnsupportedFallback(t *testing.T) {
-	tool := &database.ToolCache{Name: "gh", Provider: "system", Installed: false, Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "gh", Provider: "system", Installed: false, Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 	m.toolFallbacks = map[string]config.FallbackSpec{
 		"gh": {
 			Source:         config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "cli", Repo: "cli"},
@@ -4022,25 +4020,6 @@ func TestOpenFallbackEditor_PrefillsUnsupportedFallback(t *testing.T) {
 	}
 }
 
-func TestOpenFallbackEditor_PrefillsConfiguredGit(t *testing.T) {
-	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: false, Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
-	m.toolGit = map[string]string{"rg": "https://github.com/BurntSushi/ripgrep"}
-
-	if cmd := m.openFallbackEditor(tool); cmd == nil {
-		t.Fatal("openFallbackEditor returned nil command")
-	}
-	if m.mode != viewFallbackEditor {
-		t.Fatalf("mode = %v, want fallback editor", m.mode)
-	}
-	if got := m.fallbackEditor.fields[fallbackFieldRepo]; got != "BurntSushi/ripgrep" {
-		t.Fatalf("repo field = %q, want configured git repo", got)
-	}
-	if got := fallbackConcreteForTool(tool, m.toolFallbacks); got != "" {
-		t.Fatalf("fallback label = %q, want no gh status until fallback is configured", got)
-	}
-}
-
 func TestFallbackRepoFromToolGit(t *testing.T) {
 	tests := []struct {
 		in   string
@@ -4067,8 +4046,8 @@ func TestFallbackRepoFromToolGit(t *testing.T) {
 }
 
 func TestFallbackEditorKeyboardNavigationPersistsActiveField(t *testing.T) {
-	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: false, Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "rg", Provider: "system", Installed: false, Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 	if cmd := m.openFallbackEditor(tool); cmd == nil {
 		t.Fatal("openFallbackEditor returned nil command")
 	}
@@ -4106,8 +4085,8 @@ func TestFallbackEditorKeyboardNavigationPersistsActiveField(t *testing.T) {
 }
 
 func TestFallbackEditorEnterWithEmptyRepoStaysOpen(t *testing.T) {
-	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: false, Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "rg", Provider: "system", Installed: false, Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 	if cmd := m.openFallbackEditor(tool); cmd == nil {
 		t.Fatal("openFallbackEditor returned nil command")
 	}
@@ -4128,8 +4107,8 @@ func TestFallbackEditorEnterWithEmptyRepoStaysOpen(t *testing.T) {
 }
 
 func TestFallbackEditorPastePersistsActiveField(t *testing.T) {
-	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: false, Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "rg", Provider: "system", Installed: false, Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 	if cmd := m.openFallbackEditor(tool); cmd == nil {
 		t.Fatal("openFallbackEditor returned nil command")
 	}
@@ -4143,8 +4122,8 @@ func TestFallbackEditorPastePersistsActiveField(t *testing.T) {
 }
 
 func TestRenderFallbackEditorPopup_LongCommandsFitNarrowFrame(t *testing.T) {
-	tool := &database.ToolCache{Name: "rg", Provider: "system", Installed: false, Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "rg", Provider: "system", Installed: false, Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 	m.width = 52
 	m.mode = viewFallbackEditor
 	m.fallbackTarget = *tool
@@ -4248,7 +4227,7 @@ func TestProviderParts_Unknown(t *testing.T) {
 }
 
 func TestNewColWidths_BasicTools(t *testing.T) {
-	tools := []*database.ToolCache{
+	tools := []*app.ToolView{
 		{Name: "git", Provider: "brew"},
 		{Name: "a-very-long-tool-name", Provider: "npm"},
 	}
@@ -4262,7 +4241,7 @@ func TestNewColWidths_BasicTools(t *testing.T) {
 }
 
 func TestNewColWidths_WithGroups(t *testing.T) {
-	tools := []*database.ToolCache{
+	tools := []*app.ToolView{
 		{Name: "git", Provider: "brew"},
 	}
 	groups := []string{"dev"}
@@ -4275,7 +4254,7 @@ func TestNewColWidths_WithGroups(t *testing.T) {
 }
 
 func TestNewColWidths_IgnoreLabelsDoNotInflateGroupColumn(t *testing.T) {
-	tools := []*database.ToolCache{
+	tools := []*app.ToolView{
 		{Name: "git", Provider: "brew"},
 	}
 	cols := newColWidthsWithProviderPins(tools, map[string][]string{
@@ -4294,11 +4273,10 @@ func TestNewColWidths_NoTools(t *testing.T) {
 }
 
 func TestNewColWidths_UsesCompactVersionWidth(t *testing.T) {
-	tool := &database.ToolCache{Name: "git", Provider: "brew", Installed: true}
-	tool.Version.Valid = true
-	tool.Version.String = "2.40.0, abc1234567890"
+	tool := &app.ToolView{Name: "git", Provider: "brew", Installed: true}
+	tool.Version = "2.40.0, abc1234567890"
 
-	cols := newColWidthsWithProviderPins([]*database.ToolCache{tool}, nil, nil, nil, nil, nil, "", "", "", 80, nil)
+	cols := newColWidthsWithProviderPins([]*app.ToolView{tool}, nil, nil, nil, nil, nil, "", "", "", 80, nil)
 	wantName := 20
 	if cols.name != wantName {
 		t.Errorf("name column = %d, want %d with split row width", cols.name, wantName)
@@ -4307,7 +4285,7 @@ func TestNewColWidths_UsesCompactVersionWidth(t *testing.T) {
 
 func TestRenderToolRow_InstalledNormal(t *testing.T) {
 	p := defaultPalette()
-	tool := &database.ToolCache{Name: "git", Provider: "brew", Installed: true}
+	tool := &app.ToolView{Name: "git", Provider: "brew", Installed: true}
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
 	out := renderToolRowWithProviderPin(p, tool, cols, "", nil, nil, "", "", "", "", "", false, false, syncOK)
 	if !strings.Contains(out, "git") {
@@ -4317,7 +4295,7 @@ func TestRenderToolRow_InstalledNormal(t *testing.T) {
 
 func TestRenderToolRow_StatusColorStaysOnIcon(t *testing.T) {
 	p := defaultPalette()
-	tool := &database.ToolCache{Name: "git", Provider: "brew", Installed: true}
+	tool := &app.ToolView{Name: "git", Provider: "brew", Installed: true}
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
 
 	out := renderToolRowWithProviderPin(p, tool, cols, "", nil, nil, "", "", "", "", "", false, false, syncOK)
@@ -4335,7 +4313,7 @@ func TestRenderToolRow_StatusColorStaysOnIcon(t *testing.T) {
 
 func TestRenderToolRow_OrphanUsesOrphanIconColor(t *testing.T) {
 	p := defaultPalette()
-	tool := &database.ToolCache{Name: "utm", Provider: "system", Installed: true, InstalledWith: "brew", Tracked: false}
+	tool := &app.ToolView{Name: "utm", Provider: "system", Installed: true, InstalledWith: "brew", Tracked: false}
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
 
 	out := renderToolRowWithProviderPin(p, tool, cols, "", nil, nil, "", "", "brew", "", "", false, false, syncOrphan)
@@ -4350,7 +4328,7 @@ func TestRenderToolRow_OrphanUsesOrphanIconColor(t *testing.T) {
 
 func TestRenderToolRow_ShowsPackageAliasAfterLogicalName(t *testing.T) {
 	p := defaultPalette()
-	tool := &database.ToolCache{Name: "editor", Provider: "system", Package: "neovim", Installed: true, Tracked: true}
+	tool := &app.ToolView{Name: "editor", Provider: "system", Package: "neovim", Installed: true, Tracked: true}
 	cols := colWidths{name: 24, prov: 14, ver: 8, screenW: 120}
 
 	out := renderToolRowWithProviderPin(p, tool, cols, "", nil, nil, "", "", "brew", "", "", false, false, syncOK)
@@ -4365,7 +4343,7 @@ func TestRenderToolRow_ShowsPackageAliasAfterLogicalName(t *testing.T) {
 
 func TestRenderToolRow_PrivilegeMarkerUsesOwnColumn(t *testing.T) {
 	p := defaultPalette()
-	tool := &database.ToolCache{Name: "editor", Provider: "apt", Package: "neovim", Installed: true, Tracked: true}
+	tool := &app.ToolView{Name: "editor", Provider: "apt", Package: "neovim", Installed: true, Tracked: true}
 	cols := colWidths{name: 24, priv: lipgloss.Width(iconPrivileged), prov: 14, ver: 8, screenW: 120}
 
 	out := renderToolRowWithProviderPin(p, tool, cols, "", nil, nil, "", "", "", "", "", false, false, syncOK)
@@ -4391,7 +4369,7 @@ func TestRenderToolRow_PrivilegeMarkerUsesOwnColumn(t *testing.T) {
 
 func TestRenderToolRow_SystemBrewDoesNotShowPrivilegeMarker(t *testing.T) {
 	p := defaultPalette()
-	tool := &database.ToolCache{Name: "ripgrep", Provider: "system", Package: "ripgrep", Installed: false, Tracked: true}
+	tool := &app.ToolView{Name: "ripgrep", Provider: "system", Package: "ripgrep", Installed: false, Tracked: true}
 	cols := colWidths{name: 24, prov: 14, ver: 8, screenW: 120}
 
 	out := renderToolRowWithProviderPin(p, tool, cols, "", nil, nil, "", "", "brew", "", "", false, false, syncMissing)
@@ -4405,11 +4383,11 @@ func TestRenderList_SearchResultPrivilegeMarker(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewSearch
 	m.filter.SetValue("parsec")
-	m.searchTools = []*database.ToolCache{{
+	m.searchTools = []*app.ToolView{{
 		Name:          "parsec",
 		Provider:      "system",
 		InstalledWith: "brew",
-		Description:   sql.NullString{String: "remote desktop", Valid: true},
+		Description:   "remote desktop",
 		Privilege:     string(provider.PrivilegeMaybe),
 	}}
 	m.applyFilter()
@@ -4427,7 +4405,7 @@ func TestRenderList_SearchResultPrivilegeMarker(t *testing.T) {
 
 func TestRenderToolRow_MissingTool(t *testing.T) {
 	p := defaultPalette()
-	tool := &database.ToolCache{Name: "missing-tool", Provider: "brew", Installed: false}
+	tool := &app.ToolView{Name: "missing-tool", Provider: "brew", Installed: false}
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
 	out := renderToolRowWithProviderPin(p, tool, cols, "", nil, nil, "", "", "", "", "", false, false, syncMissing)
 	if !strings.Contains(out, "missing-tool") {
@@ -4440,7 +4418,7 @@ func TestRenderToolRow_MissingTool(t *testing.T) {
 
 func TestRenderToolRow_OrphanDoesNotShowBaseGroup(t *testing.T) {
 	p := defaultPalette()
-	tool := &database.ToolCache{Name: "fzf", Provider: "system", InstalledWith: "brew", Installed: true, Tracked: false}
+	tool := &app.ToolView{Name: "fzf", Provider: "system", InstalledWith: "brew", Installed: true, Tracked: false}
 	cols := colWidths{name: 20, prov: 12, ver: 8, group: len("[base]"), screenW: 120}
 
 	out := renderToolRowWithProviderPin(p, tool, cols, "", nil, nil, "", "", "", "", "", false, false, syncOrphan)
@@ -4454,16 +4432,14 @@ func TestRenderToolRow_OrphanDoesNotShowBaseGroup(t *testing.T) {
 
 func TestRenderToolRow_OutdatedTool(t *testing.T) {
 	p := defaultPalette()
-	tool := &database.ToolCache{
+	tool := &app.ToolView{
 		Name:      "git",
 		Provider:  "brew",
 		Installed: true,
 		Outdated:  true,
 	}
-	tool.Version.Valid = true
-	tool.Version.String = "2.40.0"
-	tool.LatestVersion.Valid = true
-	tool.LatestVersion.String = "2.41.0"
+	tool.Version = "2.40.0"
+	tool.LatestVersion = "2.41.0"
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
 	out := renderToolRowWithProviderPin(p, tool, cols, "", nil, nil, "", "", "", "", "", false, false, syncOK)
 	if !strings.Contains(out, "2.40.0") {
@@ -4473,13 +4449,12 @@ func TestRenderToolRow_OutdatedTool(t *testing.T) {
 
 func TestRenderToolRow_CompactsCommaVersionSuffix(t *testing.T) {
 	p := defaultPalette()
-	tool := &database.ToolCache{
+	tool := &app.ToolView{
 		Name:      "git",
 		Provider:  "brew",
 		Installed: true,
 	}
-	tool.Version.Valid = true
-	tool.Version.String = "2.40.0, abc123"
+	tool.Version = "2.40.0, abc123"
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
 	out := renderToolRowWithProviderPin(p, tool, cols, "", nil, nil, "", "", "", "", "", false, false, syncOK)
 	if !strings.Contains(out, "2.40.0") {
@@ -4492,7 +4467,7 @@ func TestRenderToolRow_CompactsCommaVersionSuffix(t *testing.T) {
 
 func TestRenderToolRow_IgnoredTool(t *testing.T) {
 	p := defaultPalette()
-	tool := &database.ToolCache{Name: "ignored-pkg", Provider: "pip", Installed: false, Tracked: true}
+	tool := &app.ToolView{Name: "ignored-pkg", Provider: "pip", Installed: false, Tracked: true}
 	cols := colWidths{name: 20, prov: 14, group: len("[work]"), screenW: 120}
 	out := renderToolRowWithProviderPin(p, tool, cols, "", []string{"work"}, nil, "", "", "", "", "", true, false, syncOK)
 	if !strings.Contains(out, "ignored-pkg") {
@@ -4508,9 +4483,8 @@ func TestRenderToolRow_IgnoredTool(t *testing.T) {
 
 func TestRenderToolRow_OneGapBetweenIconAndName(t *testing.T) {
 	p := defaultPalette()
-	tool := &database.ToolCache{Name: "rg", Provider: "brew", Installed: true, Tracked: true}
-	tool.Version.Valid = true
-	tool.Version.String = "1.0.0"
+	tool := &app.ToolView{Name: "rg", Provider: "brew", Installed: true, Tracked: true}
+	tool.Version = "1.0.0"
 	cols := colWidths{name: 20, prov: 10, group: 0, screenW: 120}
 
 	out := renderToolRowWithProviderPin(p, tool, cols, "", []string{"base"}, nil, "", "", "", "", "", false, false, syncOK)
@@ -4526,7 +4500,7 @@ func TestRenderToolRow_OneGapBetweenIconAndName(t *testing.T) {
 
 func TestRenderToolRow_InstalledEcosystemProviderWithoutInstalledWithDoesNotGuessManager(t *testing.T) {
 	p := defaultPalette()
-	tool := &database.ToolCache{Name: "typescript", Provider: "node", Installed: true, Tracked: true}
+	tool := &app.ToolView{Name: "typescript", Provider: "node", Installed: true, Tracked: true}
 	cols := colWidths{name: 20, prov: 10, group: 8, screenW: 120}
 	out := renderToolRowWithProviderPin(p, tool, cols, "", []string{"dev"}, nil, "", "", "", "", "pnpm", false, false, syncOK)
 	if strings.Contains(out, "node(pnpm)") {
@@ -4539,9 +4513,8 @@ func TestRenderToolRow_InstalledEcosystemProviderWithoutInstalledWithDoesNotGues
 
 func TestRenderToolRow_SelectedTool(t *testing.T) {
 	p := defaultPalette()
-	tool := &database.ToolCache{Name: "selected", Provider: "brew", Installed: true, Tracked: true}
-	tool.Version.Valid = true
-	tool.Version.String = "1.2.3"
+	tool := &app.ToolView{Name: "selected", Provider: "brew", Installed: true, Tracked: true}
+	tool.Version = "1.2.3"
 	cols := colWidths{name: 20, prov: 10, group: 8, screenW: 120}
 	out := renderToolRowWithProviderPin(p, tool, cols, "", []string{"dev"}, nil, "", "", "", "", "", false, true, syncOK)
 	if !strings.Contains(out, "selected") {
@@ -4560,7 +4533,7 @@ func TestRenderToolRow_SelectedTool(t *testing.T) {
 
 func TestRenderToolRow_WithSpinner(t *testing.T) {
 	p := defaultPalette()
-	tool := &database.ToolCache{Name: "upgrading", Provider: "brew", Installed: true}
+	tool := &app.ToolView{Name: "upgrading", Provider: "brew", Installed: true}
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
 	out := renderToolRowWithProviderPin(p, tool, cols, "⠋", nil, nil, "", "", "", "", "", false, false, syncOK)
 	if !strings.Contains(out, "upgrading") {
@@ -4570,7 +4543,7 @@ func TestRenderToolRow_WithSpinner(t *testing.T) {
 
 func TestRenderToolRow_WithGroup(t *testing.T) {
 	p := defaultPalette()
-	tool := &database.ToolCache{Name: "git", Provider: "brew", Installed: true, Tracked: true}
+	tool := &app.ToolView{Name: "git", Provider: "brew", Installed: true, Tracked: true}
 	cols := colWidths{name: 20, prov: 10, group: 8, screenW: 120}
 	out := renderToolRowWithProviderPin(p, tool, cols, "", []string{"dev"}, nil, "", "", "", "", "", false, false, syncOK)
 	if !strings.Contains(out, "dev") {
@@ -4580,7 +4553,7 @@ func TestRenderToolRow_WithGroup(t *testing.T) {
 
 func TestRenderList_MultiGroupBadgeAndFullDetail(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "beta.local")
-	m := baseModel([]*database.ToolCache{{Name: "git", Provider: "brew", Installed: true, Tracked: true}})
+	m := baseModel([]*app.ToolView{{Name: "git", Provider: "brew", Installed: true, Tracked: true}})
 	key := toolKey("git", "brew")
 	m.hostInfo = &app.HostInfo{
 		Active: "beta",
@@ -4606,7 +4579,7 @@ func TestRenderList_MultiGroupBadgeAndFullDetail(t *testing.T) {
 // a tool in two reusable groups (no active host filtering to collapse them)
 // must render both as separate pills, not a single compact badge.
 func TestRenderList_TwoGroupsShowTwoPills(t *testing.T) {
-	m := baseModel([]*database.ToolCache{{Name: "git", Provider: "brew", Installed: true, Tracked: true}})
+	m := baseModel([]*app.ToolView{{Name: "git", Provider: "brew", Installed: true, Tracked: true}})
 	key := toolKey("git", "brew")
 	m.groupNames = []string{"laptop", "work"}
 	m.toolMemberships = map[string][]string{key: {"laptop", "work"}}
@@ -4624,7 +4597,7 @@ func TestRenderList_TwoGroupsShowTwoPills(t *testing.T) {
 // pill plus a "+N" count instead of dropping or truncating groups silently.
 func TestRenderList_ThreeGroupsNarrowWidthCollapsesToHostPlusCount(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "laptop")
-	m := baseModel([]*database.ToolCache{{Name: "git", Provider: "brew", Installed: true, Tracked: true}})
+	m := baseModel([]*app.ToolView{{Name: "git", Provider: "brew", Installed: true, Tracked: true}})
 	m.width = 65
 	key := toolKey("git", "brew")
 	m.hostInfo = &app.HostInfo{
@@ -4690,7 +4663,7 @@ func TestFullMembershipDetailLines_WrapsWithoutLosingGroups(t *testing.T) {
 
 func TestRenderToolRow_RightAlignsGroupBadge(t *testing.T) {
 	p := defaultPalette()
-	tool := &database.ToolCache{Name: "git", Provider: "brew", Installed: true, Tracked: true}
+	tool := &app.ToolView{Name: "git", Provider: "brew", Installed: true, Tracked: true}
 	cols := colWidths{name: 20, prov: 10, group: 8, screenW: 120}
 	out := renderToolRowWithProviderPin(p, tool, cols, "", []string{"dev"}, nil, "", "", "", "", "", false, false, syncOK)
 	if !strings.Contains(out, p.styleHelp.Render("[dev]")) {
@@ -4700,9 +4673,8 @@ func TestRenderToolRow_RightAlignsGroupBadge(t *testing.T) {
 
 func TestRenderToolRow_ProviderVersionAndGroupShareRightGroup(t *testing.T) {
 	p := defaultPalette()
-	tool := &database.ToolCache{Name: "git", Provider: "brew", Installed: true, Tracked: true}
-	tool.Version.Valid = true
-	tool.Version.String = "2.40.0"
+	tool := &app.ToolView{Name: "git", Provider: "brew", Installed: true, Tracked: true}
+	tool.Version = "2.40.0"
 	cols := colWidths{name: 20, prov: 10, ver: 8, group: 8, screenW: 80}
 
 	out := renderToolRowWithProviderPin(p, tool, cols, "", []string{"dev"}, nil, "", "", "", "", "", false, false, syncOK)
@@ -4719,12 +4691,10 @@ func TestRenderToolRow_ProviderVersionAndGroupShareRightGroup(t *testing.T) {
 
 func TestRenderToolRow_EmptyGroupCellKeepsColumnsAligned(t *testing.T) {
 	p := defaultPalette()
-	grouped := &database.ToolCache{Name: "git", Provider: "brew", Installed: true, Tracked: true}
-	grouped.Version.Valid = true
-	grouped.Version.String = "2.40.0"
-	ungrouped := &database.ToolCache{Name: "fd", Provider: "brew", Installed: true, Tracked: false}
-	ungrouped.Version.Valid = true
-	ungrouped.Version.String = "9.10.0"
+	grouped := &app.ToolView{Name: "git", Provider: "brew", Installed: true, Tracked: true}
+	grouped.Version = "2.40.0"
+	ungrouped := &app.ToolView{Name: "fd", Provider: "brew", Installed: true, Tracked: false}
+	ungrouped.Version = "9.10.0"
 	cols := colWidths{name: 20, prov: 10, ver: 8, group: 8, screenW: 80}
 
 	withGroup := renderToolRowWithProviderPin(p, grouped, cols, "", []string{"dev"}, nil, "", "", "", "", "", false, false, syncOK)
@@ -4748,11 +4718,11 @@ func TestRenderToolRow_EmptyGroupCellKeepsColumnsAligned(t *testing.T) {
 
 func TestRenderToolRow_ProviderColumnAlignsWithAndWithoutMarker(t *testing.T) {
 	p := defaultPalette()
-	withMarker := &database.ToolCache{Name: "editor", Provider: "system", InstalledWith: "apt", Package: "neovim", Installed: true, Tracked: true}
-	withoutMarker := &database.ToolCache{Name: "runner", Provider: "node", Package: "sometool", Installed: true, Tracked: true}
-	tools := []*database.ToolCache{withMarker, withoutMarker}
+	withMarker := &app.ToolView{Name: "editor", Provider: "system", InstalledWith: "apt", Package: "neovim", Installed: true, Tracked: true}
+	withoutMarker := &app.ToolView{Name: "runner", Provider: "node", Package: "sometool", Installed: true, Tracked: true}
+	tools := []*app.ToolView{withMarker, withoutMarker}
 
-	cols := newColWidthsWithProviderPins(tools, nil, nil, nil, nil, nil, "apt", "", "bun", 120, func(t *database.ToolCache) bool {
+	cols := newColWidthsWithProviderPins(tools, nil, nil, nil, nil, nil, "apt", "", "bun", 120, func(t *app.ToolView) bool {
 		return t == withMarker
 	})
 
@@ -4830,13 +4800,11 @@ func TestRenderDotsRow_ShowsVariantMarker(t *testing.T) {
 
 func TestRenderToolRow_LongUpgradeVersionDoesNotPushGroupBadge(t *testing.T) {
 	p := defaultPalette()
-	tool := &database.ToolCache{Name: "typescript", Provider: "node", Installed: true, Outdated: true, Tracked: true}
-	tool.Version.Valid = true
-	tool.Version.String = "5.8.3"
-	tool.LatestVersion.Valid = true
-	tool.LatestVersion.String = "5.9.0-next.20260501+very-long-build-metadata"
+	tool := &app.ToolView{Name: "typescript", Provider: "node", Installed: true, Outdated: true, Tracked: true}
+	tool.Version = "5.8.3"
+	tool.LatestVersion = "5.9.0-next.20260501+very-long-build-metadata"
 	screenW := 80
-	cols := newColWidthsWithProviderPins([]*database.ToolCache{tool}, map[string][]string{toolKey("typescript", "node"): {"dev"}}, nil, []string{"dev"}, nil, nil, "", "", "pnpm", screenW, nil)
+	cols := newColWidthsWithProviderPins([]*app.ToolView{tool}, map[string][]string{toolKey("typescript", "node"): {"dev"}}, nil, []string{"dev"}, nil, nil, "", "", "pnpm", screenW, nil)
 
 	out := screenEdgeInset() + renderToolRowWithProviderPin(p, tool, cols, "", []string{"dev"}, nil, "", "", "", "", "pnpm", false, false, syncOK)
 	if got := lipgloss.Width(out); got > screenContentWidth(screenW) {
@@ -4906,7 +4874,7 @@ func TestRenderFilterBar_WithSingleProvider(t *testing.T) {
 }
 
 func TestRenderList_NarrowWidthFitsRows(t *testing.T) {
-	tool := &database.ToolCache{
+	tool := &app.ToolView{
 		Name:          "very-long-tool-name-that-needs-cutting",
 		Provider:      "node",
 		Installed:     true,
@@ -4914,10 +4882,9 @@ func TestRenderList_NarrowWidthFitsRows(t *testing.T) {
 		Tracked:       true,
 		Package:       "very-long-package-name-that-also-needs-cutting",
 	}
-	tool.Version.Valid = true
-	tool.Version.String = "1.2.3-beta-with-extra-build-metadata"
+	tool.Version = "1.2.3-beta-with-extra-build-metadata"
 
-	m := baseModel([]*database.ToolCache{tool})
+	m := baseModel([]*app.ToolView{tool})
 	m.width = 44
 	m.height = 12
 	m.toolGroups = map[string]string{toolKey(tool.Name, tool.Provider): "very-long-group-name"}
@@ -4928,7 +4895,7 @@ func TestRenderList_NarrowWidthFitsRows(t *testing.T) {
 }
 
 func TestApplyFilter_UsesEcosystemProviderFilters(t *testing.T) {
-	m := baseModel([]*database.ToolCache{{Name: "ripgrep", Provider: "system", Tracked: true}})
+	m := baseModel([]*app.ToolView{{Name: "ripgrep", Provider: "system", Tracked: true}})
 	m.providerNames = nil
 	m.applyFilter()
 	for _, want := range []string{"system", "node", "python"} {
@@ -5022,12 +4989,11 @@ func TestInlineDetailLines_NoTool(t *testing.T) {
 }
 
 func TestInlineDetailLines_WithDescription(t *testing.T) {
-	tool := &database.ToolCache{Name: "git", Provider: "brew", Installed: true}
-	tool.Description.Valid = true
-	tool.Description.String = "the fast version control system"
+	tool := &app.ToolView{Name: "git", Provider: "brew", Installed: true}
+	tool.Description = "the fast version control system"
 	tool.Tracked = true
 
-	m := baseModel([]*database.ToolCache{tool})
+	m := baseModel([]*app.ToolView{tool})
 	m.cursor = 0
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
 	lines := inlineDetailLines(m, 120, cols)
@@ -5056,13 +5022,11 @@ func TestToolDetailWrapWidth_ReachesProviderBoundary(t *testing.T) {
 }
 
 func TestInlineDetailLines_ConfirmationOnlyReplacesHints(t *testing.T) {
-	tool := &database.ToolCache{Name: "git", Provider: "brew", Installed: true, Tracked: true}
-	tool.Description.Valid = true
-	tool.Description.String = "the fast version control system"
-	tool.Version.Valid = true
-	tool.Version.String = "2.40.0, abc123"
+	tool := &app.ToolView{Name: "git", Provider: "brew", Installed: true, Tracked: true}
+	tool.Description = "the fast version control system"
+	tool.Version = "2.40.0, abc123"
 
-	m := baseModel([]*database.ToolCache{tool})
+	m := baseModel([]*app.ToolView{tool})
 	m.cursor = 0
 	m.armListConfirmation(listConfirmDelete, tool)
 
@@ -5087,11 +5051,10 @@ func TestInlineDetailLines_ConfirmationOnlyReplacesHints(t *testing.T) {
 }
 
 func TestInlineDetailLines_RowOperationReplacesHints(t *testing.T) {
-	tool := &database.ToolCache{Name: "curl", Provider: "brew", Installed: false, Tracked: true}
-	tool.Description.Valid = true
-	tool.Description.String = "transfer data with URLs"
+	tool := &app.ToolView{Name: "curl", Provider: "brew", Installed: false, Tracked: true}
+	tool.Description = "transfer data with URLs"
 
-	m := baseModel([]*database.ToolCache{tool})
+	m := baseModel([]*app.ToolView{tool})
 	m.cursor = 0
 	m.startRowOperation("curl", "brew", "Installing curl…")
 
@@ -5116,12 +5079,11 @@ func TestInlineDetailLines_RowOperationReplacesHints(t *testing.T) {
 }
 
 func TestRenderList_RowActionErrorShowsBehindToolName(t *testing.T) {
-	tool := &database.ToolCache{Name: "curl", Provider: "brew", Installed: false, Tracked: true}
-	tool.Description.Valid = true
-	tool.Description.String = "transfer data with URLs"
-	other := &database.ToolCache{Name: "git", Provider: "brew", Installed: true, Tracked: true}
+	tool := &app.ToolView{Name: "curl", Provider: "brew", Installed: false, Tracked: true}
+	tool.Description = "transfer data with URLs"
+	other := &app.ToolView{Name: "git", Provider: "brew", Installed: true, Tracked: true}
 
-	m := baseModel([]*database.ToolCache{tool, other})
+	m := baseModel([]*app.ToolView{tool, other})
 	m.cursor = 1
 	m.setToolActionError(toolKey("curl", "brew"), "provider not found")
 
@@ -5151,9 +5113,9 @@ func TestRenderList_RowActionErrorShowsBehindToolName(t *testing.T) {
 }
 
 func TestRenderList_RowActionErrorStaysSingleLine(t *testing.T) {
-	tool := &database.ToolCache{Name: "pip", Provider: "python", Installed: true, Outdated: true, Tracked: true}
-	other := &database.ToolCache{Name: "git", Provider: "brew", Installed: true, Tracked: true}
-	m := baseModel([]*database.ToolCache{tool, other})
+	tool := &app.ToolView{Name: "pip", Provider: "python", Installed: true, Outdated: true, Tracked: true}
+	other := &app.ToolView{Name: "git", Provider: "brew", Installed: true, Tracked: true}
+	m := baseModel([]*app.ToolView{tool, other})
 	m.width = 120
 	m.cursor = 1
 	m.setToolActionError(toolKey("pip", "python"), "\x1b[31mpip install --upgrade pip: exit status 1\x1b[0m (stderr: error: externally-managed-environment\n\n× This environment is externally managed\n\tThe PyPA recommended tool for installing Python packages)")
@@ -5190,8 +5152,8 @@ func TestRowErrorSummaryKeepsMultilineProblemDetails(t *testing.T) {
 }
 
 func TestRenderList_RowActionErrorShowsErrorLogHint(t *testing.T) {
-	tool := &database.ToolCache{Name: "curl", Provider: "brew", Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "curl", Provider: "brew", Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 	m.cursor = 0
 	m.setToolActionError(toolKey("curl", "brew"), "provider not found")
 
@@ -5203,8 +5165,8 @@ func TestRenderList_RowActionErrorShowsErrorLogHint(t *testing.T) {
 }
 
 func TestRenderList_FocusedSearchErrorHidesErrorLogHint(t *testing.T) {
-	tool := &database.ToolCache{Name: "curl", Provider: "brew", Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "curl", Provider: "brew", Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 	m.mode = viewSearch
 	m.filter.Focus()
 	m.cursor = 0
@@ -5217,11 +5179,10 @@ func TestRenderList_FocusedSearchErrorHidesErrorLogHint(t *testing.T) {
 }
 
 func TestInlineDetailLines_RowActionErrorShowsProviderSolution(t *testing.T) {
-	tool := &database.ToolCache{Name: "pip", Provider: "python", Installed: true, Outdated: true, Tracked: true}
-	tool.Description.Valid = true
-	tool.Description.String = "The PyPA recommended tool for installing Python packages."
+	tool := &app.ToolView{Name: "pip", Provider: "python", Installed: true, Outdated: true, Tracked: true}
+	tool.Description = "The PyPA recommended tool for installing Python packages."
 
-	m := baseModel([]*database.ToolCache{tool})
+	m := baseModel([]*app.ToolView{tool})
 	m.cursor = 0
 	err := provider.NewExternallyManagedPythonError("pip3", "upgrade", provider.Tool{Name: "pip", Provider: "python"}, nil, "externally-managed-environment", []provider.ErrorSolution{
 		{
@@ -5252,8 +5213,8 @@ func TestInlineDetailLines_RowActionErrorShowsProviderSolution(t *testing.T) {
 }
 
 func TestRenderList_BulkPendingUsesWaitingIcon(t *testing.T) {
-	tool := &database.ToolCache{Name: "curl", Provider: "brew", Installed: true, Outdated: true, Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "curl", Provider: "brew", Installed: true, Outdated: true, Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 	m.cursor = 0
 	m.upgradingKeys = make(map[string]bool)
 	m.upgradingKeys["*"] = true
@@ -5304,8 +5265,8 @@ func TestRenderDots_DoesNotRenderGroupPillBar(t *testing.T) {
 }
 
 func TestRenderList_RowSpinnerKeepsNameColumn(t *testing.T) {
-	tool := &database.ToolCache{Name: "curl", Provider: "brew", Installed: true, Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "curl", Provider: "brew", Installed: true, Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 	m.cursor = 0
 	normalLine := renderedLineContaining(renderList(m), "curl")
 
@@ -5340,8 +5301,8 @@ func TestRenderDots_RowSpinnerKeepsNameColumn(t *testing.T) {
 }
 
 func TestRenderList_RowOperationUsesSpinnerIcon(t *testing.T) {
-	tool := &database.ToolCache{Name: "curl", Provider: "brew", Installed: false, Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "curl", Provider: "brew", Installed: false, Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 	m.cursor = 0
 	m.startRowOperation("curl", "brew", "Installing curl…")
 
@@ -5415,11 +5376,10 @@ func TestRenderDots_SearchActiveHasControlLine(t *testing.T) {
 }
 
 func TestInlineDetailLines_ShowsFullCommaVersionSuffix(t *testing.T) {
-	tool := &database.ToolCache{Name: "git", Provider: "brew", Installed: true, Tracked: true}
-	tool.Version.Valid = true
-	tool.Version.String = "2.40.0, abc123"
+	tool := &app.ToolView{Name: "git", Provider: "brew", Installed: true, Tracked: true}
+	tool.Version = "2.40.0, abc123"
 
-	m := baseModel([]*database.ToolCache{tool})
+	m := baseModel([]*app.ToolView{tool})
 	m.cursor = 0
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
 	lines := inlineDetailLines(m, 120, cols)
@@ -5430,11 +5390,10 @@ func TestInlineDetailLines_ShowsFullCommaVersionSuffix(t *testing.T) {
 }
 
 func TestInlineDetailLines_ShowsIgnoreSource(t *testing.T) {
-	tool := &database.ToolCache{Name: "ignored-pkg", Provider: "python", Installed: false, Tracked: true}
-	tool.Description.Valid = true
-	tool.Description.String = "ignored test package"
+	tool := &app.ToolView{Name: "ignored-pkg", Provider: "python", Installed: false, Tracked: true}
+	tool.Description = "ignored test package"
 
-	m := baseModel([]*database.ToolCache{tool})
+	m := baseModel([]*app.ToolView{tool})
 	m.cursor = 0
 	m.ignoreLabels = map[string]string{"ignored-pkg": "group work"}
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
@@ -5447,9 +5406,8 @@ func TestInlineDetailLines_ShowsIgnoreSource(t *testing.T) {
 }
 
 func TestInlineDetailLines_NoDescription(t *testing.T) {
-	tool := &database.ToolCache{Name: "git", Provider: "brew", Installed: true, Tracked: true}
-	tool.Description.Valid = false
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "git", Provider: "brew", Installed: true, Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 	m.cursor = 0
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
 	lines := inlineDetailLines(m, 120, cols)
@@ -5506,12 +5464,12 @@ func TestRenderProviderCol_Selected(t *testing.T) {
 }
 
 func TestRenderToolRow_ConcreteWrongProviderShowsInstalledWithMarker(t *testing.T) {
-	tool := &database.ToolCache{
+	tool := &app.ToolView{
 		Name: "pnpm", Provider: "brew", InstalledWith: "bun",
-		Installed: true, Tracked: true, Version: sql.NullString{String: "11.11.0", Valid: true},
+		Installed: true, Tracked: true, Version: "11.11.0",
 	}
 	p := defaultPalette()
-	cols := newColWidthsWithProviderPins([]*database.ToolCache{tool}, nil, nil, nil, nil, nil, "", "", "bun", 120, func(t *database.ToolCache) bool {
+	cols := newColWidthsWithProviderPins([]*app.ToolView{tool}, nil, nil, nil, nil, nil, "", "", "bun", 120, func(t *app.ToolView) bool {
 		return t != nil && t.Name == tool.Name
 	})
 	out := stripANSIEscapeSequences(renderToolRowWithProviderPin(p, tool, cols, "", nil, nil, "", "", "", "", "bun", false, false, syncWrongProv))
@@ -5530,8 +5488,8 @@ func TestRenderToolRow_ConcreteWrongProviderShowsInstalledWithMarker(t *testing.
 }
 
 func TestNewColWidths_ProviderPinReservesAlignedMarkerWidth(t *testing.T) {
-	tool := &database.ToolCache{Name: "prettier", Provider: "node", Installed: true, Tracked: true}
-	cols := newColWidthsWithProviderPins([]*database.ToolCache{tool}, nil, nil, nil, map[string]string{"prettier": "bun"}, nil, "", "", "bun", 120, nil)
+	tool := &app.ToolView{Name: "prettier", Provider: "node", Installed: true, Tracked: true}
+	cols := newColWidthsWithProviderPins([]*app.ToolView{tool}, nil, nil, nil, map[string]string{"prettier": "bun"}, nil, "", "", "bun", 120, nil)
 	if cols.priv != lipgloss.Width(providerWrongGlyph) {
 		t.Fatalf("priv/mark column = %d, want pin marker width", cols.priv)
 	}
@@ -5750,8 +5708,8 @@ func TestToolInlineHints_OutdatedWrongProviderStartsWithUpgrade(t *testing.T) {
 	tool := wrongProvTool()
 	tool.Outdated = true
 	m := wrongProvModel()
-	m.allTools = []*database.ToolCache{tool}
-	m.visibleTools = []*database.ToolCache{tool}
+	m.allTools = []*app.ToolView{tool}
+	m.visibleTools = []*app.ToolView{tool}
 
 	hints := toolInlineHints(m, tool)
 	if len(hints) == 0 {
@@ -5773,8 +5731,8 @@ func TestToolInlineHints_OutdatedWrongProviderStartsWithUpgrade(t *testing.T) {
 }
 
 func TestToolInlineHints_DefaultActionOrder(t *testing.T) {
-	tool := &database.ToolCache{Name: "ripgrep", Provider: "system", Installed: true, Tracked: true, Outdated: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "ripgrep", Provider: "system", Installed: true, Tracked: true, Outdated: true}
+	m := baseModel([]*app.ToolView{tool})
 
 	got := hintKeys(toolInlineHints(m, tool))
 	want := []string{
@@ -5789,8 +5747,8 @@ func TestToolInlineHints_DefaultActionOrder(t *testing.T) {
 }
 
 func TestToolInlineHints_OrphanToolOffersIgnore(t *testing.T) {
-	tool := &database.ToolCache{Name: "grok", Provider: "brew", Installed: true, Tracked: false}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "grok", Provider: "brew", Installed: true, Tracked: false}
+	m := baseModel([]*app.ToolView{tool})
 
 	got := hintKeys(toolInlineHints(m, tool))
 	want := []string{
@@ -5804,8 +5762,8 @@ func TestToolInlineHints_OrphanToolOffersIgnore(t *testing.T) {
 }
 
 func TestToolInlineHints_MissingConfiguredToolCanDelete(t *testing.T) {
-	tool := &database.ToolCache{Name: "ripgrep", Provider: "brew", Installed: false, Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "ripgrep", Provider: "brew", Installed: false, Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 
 	hints := toolInlineHints(m, tool)
 	got := hintKeys(hints)
@@ -5821,8 +5779,8 @@ func TestToolInlineHints_MissingConfiguredToolCanDelete(t *testing.T) {
 }
 
 func TestListConfirmationDetailLine_MissingToolConfirmsDelete(t *testing.T) {
-	tool := &database.ToolCache{Name: "ripgrep", Provider: "brew", Installed: false, Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "ripgrep", Provider: "brew", Installed: false, Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 	m.armListConfirmation(listConfirmDelete, tool)
 
 	out := listConfirmationHintsLine(m, tool, "")
@@ -5849,14 +5807,14 @@ func TestListConfirmationHintsLine_ReinstallUsesInstallKey(t *testing.T) {
 }
 
 func TestToolInlineHints_PinnedMismatchOffersReinstall(t *testing.T) {
-	tool := &database.ToolCache{
+	tool := &app.ToolView{
 		Name:          "typescript",
 		Provider:      "node",
 		InstalledWith: "bun",
 		Installed:     true,
 		Tracked:       true,
 	}
-	m := baseModel([]*database.ToolCache{tool})
+	m := baseModel([]*app.ToolView{tool})
 	m.effectiveNodeManager = "bun"
 	m.toolProviderPins = map[string]string{"typescript": "npm"}
 	m.applyFilter()
@@ -5875,8 +5833,8 @@ func TestToolInlineHints_PinnedMismatchOffersReinstall(t *testing.T) {
 }
 
 func TestToolInlineHints_PinnedProviderDoesNotExposeLegacyUnpin(t *testing.T) {
-	tool := &database.ToolCache{Name: "typescript", Provider: "pnpm", Installed: true, Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "typescript", Provider: "pnpm", Installed: true, Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 
 	hints := toolInlineHints(m, tool)
 	got := hintKeys(hints)
@@ -6096,7 +6054,7 @@ func TestViewString_SettingsMode(t *testing.T) {
 }
 
 func TestViewString_StatusMode(t *testing.T) {
-	m := baseModel([]*database.ToolCache{
+	m := baseModel([]*app.ToolView{
 		{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
 		{Name: "fd", Provider: "brew", Installed: false, Tracked: true},
 		{Name: "certifi", Provider: "python", Installed: true, Tracked: true},
@@ -6128,7 +6086,7 @@ func TestViewString_StatusMode(t *testing.T) {
 func TestDashboardAttentionRowsCollapseOKDoctorChecks(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewStatus
-	m.allTools = []*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}}
+	m.allTools = []*app.ToolView{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}}
 	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
 	m.dotsEntries = []app.DotStatus{{Name: "zsh", State: dots.StateSynced, Health: app.HealthOK}}
 	m.doctorResult = &app.DoctorResult{
@@ -6429,7 +6387,7 @@ func TestDashboardDoctorPartialFixReportsOptimizeSuccessAndIgnoreError(t *testin
 func TestStatusSelectedRowExpandsDetails(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewStatus
-	m.allTools = []*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}}
+	m.allTools = []*app.ToolView{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}}
 	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
 	m.dotsEntries = []app.DotStatus{{Name: "zsh", State: dots.StateSynced, Health: app.HealthOK}}
 	m.doctorResult = &app.DoctorResult{
@@ -6535,7 +6493,7 @@ func TestDashboardDotfilesRowShowsRecentHistory(t *testing.T) {
 }
 
 func TestStatusNavigationAndEnterActions(t *testing.T) {
-	m := baseModel([]*database.ToolCache{
+	m := baseModel([]*app.ToolView{
 		{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
 		{Name: "fd", Provider: "brew", Installed: false, Tracked: true},
 	})
@@ -6559,7 +6517,7 @@ func TestStatusNavigationAndEnterActions(t *testing.T) {
 		t.Fatalf("U on updates should start upgrade all, loading=%v upgrading=%v", got.loading, got.upgradingKeys)
 	}
 
-	m = baseModel([]*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}})
+	m = baseModel([]*app.ToolView{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}})
 	m.mode = viewStatus
 	m.statusCursor = statusRowIndex(statusRows(m), "Tool Sync")
 	out = renderStatus(m)
@@ -6618,7 +6576,7 @@ func TestStatusNavigationAndEnterActions(t *testing.T) {
 	}
 }
 
-func dashboardDotsAppModel(t *testing.T, tools []*database.ToolCache) (Model, string) {
+func dashboardDotsAppModel(t *testing.T, tools []*app.ToolView) (Model, string) {
 	t.Helper()
 	appModel, repoDir := newDotsModelForCmds(t)
 	m := baseModel(tools)
@@ -6853,7 +6811,7 @@ func TestDashboardAutomationIconUsesCachedDotsAvailability(t *testing.T) {
 }
 
 func TestDashboardRowsUseMiddleSummaryColumn(t *testing.T) {
-	m := baseModel([]*database.ToolCache{
+	m := baseModel([]*app.ToolView{
 		{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
 		{Name: "fd", Provider: "brew", Installed: false, Tracked: true},
 	})
@@ -6869,8 +6827,8 @@ func TestDashboardRowsUseMiddleSummaryColumn(t *testing.T) {
 }
 
 func TestDashboardSelectedUpdateDoesNotDuplicateSummary(t *testing.T) {
-	m := baseModel([]*database.ToolCache{
-		{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true, Version: sql.NullString{String: "2.45", Valid: true}, LatestVersion: sql.NullString{String: "2.46", Valid: true}},
+	m := baseModel([]*app.ToolView{
+		{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true, Version: "2.45", LatestVersion: "2.46"},
 	})
 	m.mode = viewStatus
 	m.statusCursor = statusRowIndex(statusRows(m), "Tool Updates")
@@ -6886,8 +6844,8 @@ func TestDashboardSelectedUpdateDoesNotDuplicateSummary(t *testing.T) {
 }
 
 func TestDashboardUpdatesShowPendingProgress(t *testing.T) {
-	m := baseModel([]*database.ToolCache{
-		{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true, Version: sql.NullString{String: "2.45", Valid: true}, LatestVersion: sql.NullString{String: "2.46", Valid: true}},
+	m := baseModel([]*app.ToolView{
+		{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true, Version: "2.45", LatestVersion: "2.46"},
 		{Name: "fd", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
 	})
 	m.mode = viewStatus
@@ -6907,7 +6865,7 @@ func TestDashboardUpdatesShowPendingProgress(t *testing.T) {
 }
 
 func TestDashboardToolSyncShowsPendingProgress(t *testing.T) {
-	m := baseModel([]*database.ToolCache{
+	m := baseModel([]*app.ToolView{
 		{Name: "fd", Provider: "brew", Installed: false, Tracked: true},
 		{Name: "git", Provider: "brew", Installed: true, Tracked: true},
 	})
@@ -6958,7 +6916,7 @@ func TestDashboardRefreshPresentationWaitingAndActive(t *testing.T) {
 
 func TestDashboardDataRowsShowLoadingWithCurrentSnapshot(t *testing.T) {
 	t.Run("tools", func(t *testing.T) {
-		m := baseModel([]*database.ToolCache{{Name: "git", Provider: "brew", Installed: true, Tracked: true}})
+		m := baseModel([]*app.ToolView{{Name: "git", Provider: "brew", Installed: true, Tracked: true}})
 		m.mode = viewStatus
 		m.scanningProviders = map[string]bool{"brew": true}
 		m.refreshToolTotal = 1
@@ -7005,7 +6963,7 @@ func TestDashboardDataRowsShowLoadingWithCurrentSnapshot(t *testing.T) {
 
 func TestDashboardRowsUseSharedStatusIcons(t *testing.T) {
 	t.Run("attention rows", func(t *testing.T) {
-		m := baseModel([]*database.ToolCache{
+		m := baseModel([]*app.ToolView{
 			{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
 			{Name: "fd", Provider: "brew", Installed: false, Tracked: true},
 			{Name: "certifi", Provider: "python", Installed: true, Tracked: true},
@@ -7071,7 +7029,7 @@ func TestDashboardFooterBulkActions(t *testing.T) {
 	})
 
 	t.Run("reconcile opens planned operations", func(t *testing.T) {
-		m, _ := dashboardDotsAppModel(t, []*database.ToolCache{
+		m, _ := dashboardDotsAppModel(t, []*app.ToolView{
 			{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
 			{Name: "fd", Provider: "brew", Installed: false, Tracked: true},
 		})
@@ -7098,7 +7056,7 @@ func TestDashboardFooterBulkActions(t *testing.T) {
 	})
 
 	t.Run("lowercase apply fix does not trigger dashboard reconcile", func(t *testing.T) {
-		m := baseModel([]*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}})
+		m := baseModel([]*app.ToolView{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}})
 		m.mode = viewStatus
 		got := drive(m, pressRune('a'))
 		if got.dashboardReconcilePlanOpen || got.loading {
@@ -7107,7 +7065,7 @@ func TestDashboardFooterBulkActions(t *testing.T) {
 	})
 
 	t.Run("reconcile ignores non-auto-fixable provider mismatch", func(t *testing.T) {
-		m := baseModel([]*database.ToolCache{{Name: "fd", Provider: "system", Installed: true, InstalledWith: "apt", Tracked: true}})
+		m := baseModel([]*app.ToolView{{Name: "fd", Provider: "system", Installed: true, InstalledWith: "apt", Tracked: true}})
 		m.mode = viewStatus
 		m.effectiveSystemManager = "brew"
 		got := drive(m, pressRune('A'))
@@ -7125,7 +7083,7 @@ func TestDashboardFooterBulkActions(t *testing.T) {
 	})
 
 	t.Run("confirmed reconcile starts first operation and queues the rest", func(t *testing.T) {
-		m, _ := dashboardDotsAppModel(t, []*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}})
+		m, _ := dashboardDotsAppModel(t, []*app.ToolView{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}})
 		m.mode = viewStatus
 		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: dots.StateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 		got := drive(m, pressRune('A'), pressEnter())
@@ -7146,7 +7104,7 @@ func TestDashboardFooterBulkActions(t *testing.T) {
 	})
 
 	t.Run("reconcile skips queued operations that became clean", func(t *testing.T) {
-		m, _ := dashboardDotsAppModel(t, []*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}})
+		m, _ := dashboardDotsAppModel(t, []*app.ToolView{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}})
 		m.mode = viewStatus
 		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: dots.StateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 		got := drive(m, pressRune('A'), pressEnter())
@@ -7161,7 +7119,7 @@ func TestDashboardFooterBulkActions(t *testing.T) {
 	})
 
 	t.Run("deselected reconcile operation is skipped", func(t *testing.T) {
-		m, _ := dashboardDotsAppModel(t, []*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}})
+		m, _ := dashboardDotsAppModel(t, []*app.ToolView{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}})
 		m.mode = viewStatus
 		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: dots.StateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 		got := drive(m, pressRune('A'), pressRune(' '), pressEnter())
@@ -7190,7 +7148,7 @@ func TestDashboardFooterBulkActions(t *testing.T) {
 	})
 
 	t.Run("upgrade tools key is row scoped", func(t *testing.T) {
-		m := baseModel([]*database.ToolCache{{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true}})
+		m := baseModel([]*app.ToolView{{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true}})
 		m.mode = viewStatus
 		m.sectionCounts = map[section]int{}
 		m.statusCursor = statusRowIndex(statusRows(m), "Tools")
@@ -7225,8 +7183,8 @@ func statusRowIndexInSection(rows []statusListRow, section, label string) int {
 }
 
 func TestStatusToolCountsIncludesDiscoveredTools(t *testing.T) {
-	m := baseModel([]*database.ToolCache{{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true}})
-	m.discoveredTools = []*database.ToolCache{{Name: "fd", Provider: "brew", Installed: true}}
+	m := baseModel([]*app.ToolView{{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true}})
+	m.discoveredTools = []*app.ToolView{{Name: "fd", Provider: "brew", Installed: true}}
 	m.rebuildDiscoveredKeys()
 
 	counts := statusToolCounts(m)
@@ -7243,7 +7201,7 @@ func TestStatusToolCountsIncludesDiscoveredTools(t *testing.T) {
 
 func TestStatusToolsOverviewValue_UpdateCountUsesOutdatedStyle(t *testing.T) {
 	// Case 1: outdated tool → value contains "update", not "tracked"
-	m := baseModel([]*database.ToolCache{
+	m := baseModel([]*app.ToolView{
 		{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
 	})
 	counts := statusToolCounts(m)
@@ -7256,7 +7214,7 @@ func TestStatusToolsOverviewValue_UpdateCountUsesOutdatedStyle(t *testing.T) {
 	}
 
 	// Case 2: no outdated tools → value contains "tracked", not "update"
-	m2 := baseModel([]*database.ToolCache{
+	m2 := baseModel([]*app.ToolView{
 		{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: false, Tracked: true},
 	})
 	counts2 := statusToolCounts(m2)
@@ -7901,11 +7859,11 @@ func TestRenderDotsPeek_PopupAbsentOutsideDots(t *testing.T) {
 // ToolClassificationContext which is correct for brew.
 func TestRenderList_SectionHeadersPresent(t *testing.T) {
 	t.Run("installed brew tool renders Installed section header", func(t *testing.T) {
-		tool := &database.ToolCache{
+		tool := &app.ToolView{
 			Name: "git", Provider: "brew", Package: "git",
 			Installed: true, Tracked: true,
 		}
-		m := baseModel([]*database.ToolCache{tool})
+		m := baseModel([]*app.ToolView{tool})
 		m.mode = viewList
 		m.width = 120
 		m.height = 60
@@ -7927,16 +7885,14 @@ func TestRenderList_SectionHeadersPresent(t *testing.T) {
 	})
 
 	t.Run("outdated brew tool renders Updates Available section header", func(t *testing.T) {
-		outdated := &database.ToolCache{
+		outdated := &app.ToolView{
 			Name: "ripgrep", Provider: "brew", Package: "ripgrep",
 			Installed: true, Tracked: true, Outdated: true,
 		}
-		outdated.Version.Valid = true
-		outdated.Version.String = "13.0"
-		outdated.LatestVersion.Valid = true
-		outdated.LatestVersion.String = "14.1"
+		outdated.Version = "13.0"
+		outdated.LatestVersion = "14.1"
 
-		m := baseModel([]*database.ToolCache{outdated})
+		m := baseModel([]*app.ToolView{outdated})
 		m.mode = viewList
 		m.width = 120
 		m.height = 60
@@ -7955,20 +7911,18 @@ func TestRenderList_SectionHeadersPresent(t *testing.T) {
 	})
 
 	t.Run("both sections render when installed and outdated tools coexist", func(t *testing.T) {
-		installed := &database.ToolCache{
+		installed := &app.ToolView{
 			Name: "bat", Provider: "brew", Package: "bat",
 			Installed: true, Tracked: true,
 		}
-		outdated := &database.ToolCache{
+		outdated := &app.ToolView{
 			Name: "fd", Provider: "brew", Package: "fd",
 			Installed: true, Tracked: true, Outdated: true,
 		}
-		outdated.Version.Valid = true
-		outdated.Version.String = "8.7"
-		outdated.LatestVersion.Valid = true
-		outdated.LatestVersion.String = "9.0"
+		outdated.Version = "8.7"
+		outdated.LatestVersion = "9.0"
 
-		m := baseModel([]*database.ToolCache{installed, outdated})
+		m := baseModel([]*app.ToolView{installed, outdated})
 		m.mode = viewList
 		m.width = 120
 		m.height = 60
@@ -7993,15 +7947,13 @@ func TestRenderList_SectionHeadersPresent(t *testing.T) {
 // TestRenderList_UpdatesSectionHeader guards sectionLabel(): removing the sectionUpdates
 // case silently reverts the header to "Available" — this test catches that.
 func TestRenderList_UpdatesSectionHeader(t *testing.T) {
-	outdated := &database.ToolCache{
+	outdated := &app.ToolView{
 		Name: "fzf", Provider: "brew", Package: "fzf",
 		Installed: true, Tracked: true, Outdated: true,
 	}
-	outdated.Version.Valid = true
-	outdated.Version.String = "1.0"
-	outdated.LatestVersion.Valid = true
-	outdated.LatestVersion.String = "2.0"
-	m := baseModel([]*database.ToolCache{outdated})
+	outdated.Version = "1.0"
+	outdated.LatestVersion = "2.0"
+	m := baseModel([]*app.ToolView{outdated})
 	m.mode = viewList
 	m.width = 120
 	m.height = 60
@@ -8046,11 +7998,11 @@ func TestRenderDots_SectionHeadersPresent(t *testing.T) {
 // TestRenderStatus_SectionHeadersPresent catches renames or sectionOrder changes
 // that drop statusSectionOverview/"Data" from the rendered surface.
 func TestRenderStatus_SectionHeadersPresent(t *testing.T) {
-	installed := &database.ToolCache{
+	installed := &app.ToolView{
 		Name: "git", Provider: "brew", Package: "git",
 		Installed: true, Tracked: true,
 	}
-	m := baseModel([]*database.ToolCache{installed})
+	m := baseModel([]*app.ToolView{installed})
 	m.mode = viewStatus
 	m.width = 120
 	m.height = 60
@@ -8064,16 +8016,14 @@ func TestRenderStatus_SectionHeadersPresent(t *testing.T) {
 }
 
 func TestDisplayVersionText_SelfUpdates(t *testing.T) {
-	tool := &database.ToolCache{
+	tool := &app.ToolView{
 		Name:      "battle-net",
 		Provider:  "brew",
 		Installed: true,
 		Outdated:  true,
 	}
-	tool.Version.Valid = true
-	tool.Version.String = "1.0.0"
-	tool.LatestVersion.Valid = true
-	tool.LatestVersion.String = "2.0.0"
+	tool.Version = "1.0.0"
+	tool.LatestVersion = "2.0.0"
 	tool.UpdateBlocked = app.UpdateBlockSelfUpdates
 
 	got := displayVersionText(tool)
@@ -8083,16 +8033,14 @@ func TestDisplayVersionText_SelfUpdates(t *testing.T) {
 }
 
 func TestDisplayVersionText_NormalOutdated(t *testing.T) {
-	tool := &database.ToolCache{
+	tool := &app.ToolView{
 		Name:      "ripgrep",
 		Provider:  "brew",
 		Installed: true,
 		Outdated:  true,
 	}
-	tool.Version.Valid = true
-	tool.Version.String = "13.0.0"
-	tool.LatestVersion.Valid = true
-	tool.LatestVersion.String = "14.0.0"
+	tool.Version = "13.0.0"
+	tool.LatestVersion = "14.0.0"
 
 	got := displayVersionText(tool)
 	if got != "13.0.0 → 14.0.0" {
@@ -8102,16 +8050,14 @@ func TestDisplayVersionText_NormalOutdated(t *testing.T) {
 
 func TestRenderToolRow_SelfUpdatingCask(t *testing.T) {
 	p := defaultPalette()
-	tool := &database.ToolCache{
+	tool := &app.ToolView{
 		Name:      "battle-net",
 		Provider:  "brew",
 		Installed: true,
 		Outdated:  true,
 	}
-	tool.Version.Valid = true
-	tool.Version.String = "1.0.0"
-	tool.LatestVersion.Valid = true
-	tool.LatestVersion.String = "2.0.0"
+	tool.Version = "1.0.0"
+	tool.LatestVersion = "2.0.0"
 	tool.UpdateBlocked = app.UpdateBlockSelfUpdates
 
 	cols := colWidths{name: 20, prov: 10, ver: 20, screenW: 120}
@@ -8147,7 +8093,7 @@ func TestDashboardAgentsDataRowOrderAndLabels(t *testing.T) {
 
 func TestDashboardOverviewBreakdownFormats(t *testing.T) {
 	t.Run("tools", func(t *testing.T) {
-		m := baseModel([]*database.ToolCache{
+		m := baseModel([]*app.ToolView{
 			{Name: "ripgrep", Provider: "brew", Installed: true, Tracked: true},
 			{Name: "fzf", Provider: "brew", Installed: true, Tracked: true},
 			{Name: "bat", Provider: "brew", Installed: false, Tracked: false},
@@ -8697,7 +8643,7 @@ func TestStatusDashboardDataRows_ActivityConsistency(t *testing.T) {
 		return m
 	}
 	loadedNoActivity := func() Model {
-		m := baseModel([]*database.ToolCache{{Name: "ripgrep", Provider: "brew", Package: "ripgrep", Installed: true}})
+		m := baseModel([]*app.ToolView{{Name: "ripgrep", Provider: "brew", Package: "ripgrep", Installed: true}})
 		m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: dots.StateSynced}}
 		m.dotsReminderService = &app.DotsReminderService{Installed: true, Interval: time.Hour}
 		m.dotsWatchService = &app.DotsWatchService{Installed: true}
@@ -8902,7 +8848,7 @@ func TestHeaderInfo_EmptyOnDashboardAndSettings(t *testing.T) {
 		t.Errorf("settings header info should be empty (version renders separately), got: %q", out)
 	}
 
-	tools := baseModel([]*database.ToolCache{{Name: "git", Provider: "brew", Installed: true}})
+	tools := baseModel([]*app.ToolView{{Name: "git", Provider: "brew", Installed: true}})
 	if out := stripANSIEscapeSequences(renderHeaderInfo(tools)); strings.Contains(out, version) {
 		t.Errorf("tools header info should not embed version %q, got: %q", version, out)
 	}

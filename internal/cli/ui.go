@@ -15,7 +15,7 @@ func newUICmd(state *rootState) *cobra.Command {
 		Short: "Launch the interactive TUI",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
-			model := tui.New(state.app, ctx)
+			model := tui.New(ctx, state.app)
 			p := tea.NewProgram(model, tui.ProgramOptions()...)
 			if _, err := p.Run(); err != nil {
 				return fmt.Errorf("TUI error: %w", err)

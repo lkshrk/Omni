@@ -7,9 +7,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/database"
-	"github.com/lkshrk/omni/internal/dots"
-	"github.com/lkshrk/omni/internal/provider"
 )
 
 func (m *Model) doSetToolGroupMembership(name, group string, add bool) tea.Cmd {
@@ -257,7 +254,7 @@ func (m *Model) doSaveDotsRepoAndSync(repo string) tea.Cmd {
 	a := m.app
 	ctx, gen := m.currentDotsOperation()
 	return func() tea.Msg {
-		result, err := a.SaveDotsRepoAndSync(ctx, repo, dots.SyncOptions{})
+		result, err := a.SaveDotsRepoAndSync(ctx, repo, app.DotSyncOptions{})
 		entries, gitStatus, memberships := dotsSnapshotFromState(result)
 		msg := dotsSyncedMsg{gen: gen, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: err}
 		if result != nil && result.HasSettings {
@@ -530,7 +527,7 @@ func (m *Model) doSaveIgnoreScopes(name string, options []scopeOption) tea.Cmd {
 	}
 }
 
-func (m *Model) doInstallAndAddTool(t *database.ToolCache, groupAndHost ...string) tea.Cmd {
+func (m *Model) doInstallAndAddTool(t *app.ToolView, groupAndHost ...string) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
 	return func() tea.Msg {
 		if t == nil {
@@ -578,7 +575,7 @@ func (m *Model) doInstallAndAddTool(t *database.ToolCache, groupAndHost ...strin
 	}
 }
 
-func (m *Model) doSetProviderScope(name string, opt scopeOption, t *database.ToolCache) tea.Cmd {
+func (m *Model) doSetProviderScope(name string, opt scopeOption, t *app.ToolView) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
 		if t == nil || t.InstalledWith == "" {
@@ -612,7 +609,7 @@ func (m *Model) doClearProviderOverride(name, configProv, installedWith string) 
 		result, err := a.ClearProviderOverrideWithState(ctx, name, configProv, installedWith)
 		fromProvider := installedWith
 		toProvider := configProv
-		var tools []*database.ToolCache
+		var tools []*app.ToolView
 		var pins map[string]string
 		if result != nil {
 			fromProvider = result.FromProvider
@@ -641,7 +638,7 @@ func (m *Model) doMigrateNvmTool(name string) tea.Cmd {
 		}
 
 		result, err := a.MigrateNvmManagedToolWithState(ctx, name)
-		var tools []*database.ToolCache
+		var tools []*app.ToolView
 		var switchResult *app.SwitchResult
 		if result != nil {
 			tools = result.Tools
@@ -680,7 +677,7 @@ func (m *Model) doMigrateProvider(name, configProv, installedWith string) tea.Cm
 	a, ctx := m.app, m.beginCancellableAction()
 	return func() tea.Msg {
 		result, err := a.MigrateInstallationWithState(ctx, name, installedWith, configProv)
-		var tools []*database.ToolCache
+		var tools []*app.ToolView
 		if result != nil {
 			tools = result.Tools
 		}
@@ -691,13 +688,13 @@ func (m *Model) doMigrateProvider(name, configProv, installedWith string) tea.Cm
 	}
 }
 
-func (m *Model) doApplyProviderSolution(name, fromProvider string, solution provider.ErrorSolution) tea.Cmd {
+func (m *Model) doApplyProviderSolution(name, fromProvider string, solution app.ErrorSolution) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
 	target := solution.TargetProvider
 	return func() tea.Msg {
 		key := toolKey(name, fromProvider)
 		result, err := a.ApplyProviderSolutionWithState(ctx, name, fromProvider, solution)
-		var tools []*database.ToolCache
+		var tools []*app.ToolView
 		if result != nil {
 			tools = result.Tools
 		}

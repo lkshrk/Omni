@@ -4,7 +4,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/config"
 )
 
 func (m *Model) doSaveAgentsUse(ids []string) tea.Cmd {
@@ -285,6 +284,6 @@ func (m *Model) doReloadAgentsIgnore() tea.Cmd {
 }
 
 type agentsIgnoreReloadedMsg struct {
-	ignore config.AgentsIgnore
+	ignore app.AgentsIgnore
 	err    error
 }

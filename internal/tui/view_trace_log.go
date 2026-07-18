@@ -6,7 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/app"
 )
 
 const traceLogTitle = "Command Log"
@@ -68,13 +68,13 @@ func traceLogLines(m Model, width int) []string {
 	return lines
 }
 
-func traceLogEntryLines(m Model, trace database.CommandTrace, width int) []string {
+func traceLogEntryLines(m Model, trace app.CommandTraceView, width int) []string {
 	when := trace.StartedAt.Local().Format("15:04:05")
 	dur := fmt.Sprintf("%dms", trace.DurationMS)
 	status := traceLogStatusText(m, trace)
 	header := fmt.Sprintf("%s · %s · %s", when, status, dur)
-	if trace.ExitCode.Valid {
-		header += fmt.Sprintf(" · exit %d", trace.ExitCode.Int64)
+	if trace.ExitCode != nil {
+		header += fmt.Sprintf(" · exit %d", *trace.ExitCode)
 	}
 	out := []string{header}
 	out = append(out, traceLogFieldLines(m, "command", trace.Command, width, m.palette.styleNormal)...)
@@ -114,7 +114,7 @@ func traceLogFieldLines(m Model, label, value string, width int, style lipgloss.
 	return out
 }
 
-func traceLogProblem(trace database.CommandTrace) string {
+func traceLogProblem(trace app.CommandTraceView) string {
 	status := strings.ToUpper(strings.TrimSpace(trace.Status))
 	if trace.Error == "" && status != "ERROR" && status != "FAIL" && status != "FAILED" {
 		return ""
@@ -125,7 +125,7 @@ func traceLogProblem(trace database.CommandTrace) string {
 	return rowErrorSummary(trace.Error)
 }
 
-func traceLogStatusText(m Model, trace database.CommandTrace) string {
+func traceLogStatusText(m Model, trace app.CommandTraceView) string {
 	p := m.palette
 	switch strings.ToUpper(trace.Status) {
 	case "OK", "SUCCESS":

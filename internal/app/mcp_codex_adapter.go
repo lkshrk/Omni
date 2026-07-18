@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	osExec "os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -32,7 +31,7 @@ func NewCodexMcpAdapter(
 func (a *codexMcpAdapter) ID() string { return "codex" }
 
 func (a *codexMcpAdapter) Available() bool {
-	_, err := osExec.LookPath("codex")
+	_, err := lookPath("codex")
 	return err == nil
 }
 

@@ -13,6 +13,11 @@ exec git -C $WORK/home/dotfiles config user.email t@t.com
 exec git -C $WORK/home/dotfiles config user.name T
 exec git -C $WORK/home/dotfiles commit --allow-empty -m init
 
+exec omni --config settings.json --cache-dir cache dots reminder check
+stdout 'Dotfiles are in sync.'
+exec omni --config settings.json --cache-dir cache dots reminder run
+stdout 'Dotfiles are in sync.'
+
 exec omni --config settings.json --cache-dir cache dots reminder install --interval 2m --notify=false
 stdout 'Installed dots reminder service'
 stdout 'Platform: systemd'

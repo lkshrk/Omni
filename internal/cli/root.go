@@ -54,7 +54,7 @@ Already set up?
 		// behave the same as `omni ui` so the binary is self-contained.
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			defer profile.Start("cli.tui.run")()
-			model := tui.New(state.app, cmd.Context())
+			model := tui.New(cmd.Context(), state.app)
 			p := tea.NewProgram(model, tui.ProgramOptions()...)
 			if _, err := p.Run(); err != nil {
 				return fmt.Errorf("TUI error: %w", err)

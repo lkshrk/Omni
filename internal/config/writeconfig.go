@@ -148,37 +148,32 @@ func projectHostSettings(in map[string]Settings) map[string]hostSettingsProjecti
 }
 
 // snapshotTopLevel marshals the config to a per-top-level-key raw map so two
-// snapshots can be diffed key-by-key. host_settings goes through the overridable
-// projection; everything else marshals from its natural field.
+// snapshots can be diffed key-by-key. It marshals the whole *RootConfig rather
+// than a hand-mirrored struct, so a newly added top-level field participates in
+// the diff automatically and can never be silently dropped on save. Two keys
+// need special handling:
+//   - $include is a load-time merge directive, stripped before save.
+//   - host_settings goes through the host-overridable projection so
+//     non-overridable Settings fields never leak into a host_settings write and
+//     the diff stays byte-stable.
 func snapshotTopLevel(cfg *RootConfig) (map[string]json.RawMessage, error) {
-	doc := struct {
-		Schema       string                            `json:"$schema,omitempty"`
-		Version      int                               `json:"version"`
-		Settings     Settings                          `json:"settings"`
-		Tools        map[string]ToolSpec               `json:"tools,omitempty"`
-		Hosts        map[string][]string               `json:"hosts,omitempty"`
-		Ignore       GlobalIgnore                      `json:"ignore,omitempty"`
-		Groups       []*GroupConfig                    `json:"groups,omitempty"`
-		HostSettings map[string]hostSettingsProjection `json:"host_settings,omitempty"`
-		Agents       AgentsConfig                      `json:"agents,omitempty"`
-	}{
-		Schema:       cfg.Schema,
-		Version:      cfg.Version,
-		Settings:     cfg.Settings,
-		Tools:        cfg.Tools,
-		Hosts:        cfg.Hosts,
-		Ignore:       cfg.Ignore,
-		Groups:       cfg.Groups,
-		HostSettings: projectHostSettings(cfg.HostSettings),
-		Agents:       cfg.Agents,
-	}
-	data, err := json.Marshal(doc)
+	data, err := json.Marshal(cfg)
 	if err != nil {
 		return nil, err
 	}
 	out := make(map[string]json.RawMessage)
 	if err := json.Unmarshal(data, &out); err != nil {
 		return nil, err
+	}
+	delete(out, "$include")
+	if len(cfg.HostSettings) > 0 {
+		hs, err := json.Marshal(projectHostSettings(cfg.HostSettings))
+		if err != nil {
+			return nil, err
+		}
+		out["host_settings"] = hs
+	} else {
+		delete(out, "host_settings")
 	}
 	return out, nil
 }

@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/lkshrk/omni/internal/database"
 	textutil "github.com/lkshrk/omni/internal/text"
 )
 
@@ -22,8 +21,8 @@ const (
 )
 
 type DashboardReconcilePlanInput struct {
-	Tools           []*database.ToolCache
-	DiscoveredTools []*database.ToolCache
+	Tools           []*ToolView
+	DiscoveredTools []*ToolView
 	IgnoredTools    map[string]bool
 
 	UpgradeBusy     bool
@@ -49,8 +48,8 @@ type DashboardReconcilePlanStep struct {
 }
 
 type DashboardToolSummaryInput struct {
-	Tools           []*database.ToolCache
-	DiscoveredTools []*database.ToolCache
+	Tools           []*ToolView
+	DiscoveredTools []*ToolView
 	IgnoredTools    map[string]bool
 
 	ToolProviderPins       map[string]string
@@ -61,8 +60,8 @@ type DashboardToolSummaryInput struct {
 }
 
 type DashboardToolActivityInput struct {
-	Tools           []*database.ToolCache
-	DiscoveredTools []*database.ToolCache
+	Tools           []*ToolView
+	DiscoveredTools []*ToolView
 	IgnoredTools    map[string]bool
 
 	PendingKeys map[string]bool
@@ -101,7 +100,7 @@ func ToolRowKey(name, providerName string) string {
 
 func BuildDashboardToolSummary(input DashboardToolSummaryInput) DashboardToolSummary {
 	var summary DashboardToolSummary
-	dashboardVisitToolRows(input.Tools, input.DiscoveredTools, func(tool *database.ToolCache, discovered bool) {
+	dashboardVisitToolRows(input.Tools, input.DiscoveredTools, func(tool *ToolView, discovered bool) {
 		dashboardAccumulateToolSummary(&summary, input, tool, discovered)
 	})
 	sort.Strings(summary.UpdateNames)
@@ -114,7 +113,7 @@ func BuildDashboardToolSummary(input DashboardToolSummaryInput) DashboardToolSum
 
 func DashboardToolSyncQueuedNames(input DashboardToolActivityInput) []string {
 	var names []string
-	dashboardVisitToolRows(input.Tools, input.DiscoveredTools, func(tool *database.ToolCache, discovered bool) {
+	dashboardVisitToolRows(input.Tools, input.DiscoveredTools, func(tool *ToolView, discovered bool) {
 		if !input.PendingKeys[ToolRowKey(tool.Name, tool.Provider)] {
 			return
 		}
@@ -128,7 +127,7 @@ func DashboardToolSyncQueuedNames(input DashboardToolActivityInput) []string {
 }
 
 func DashboardUpgradeNames(input DashboardToolActivityInput) (active, waiting []string) {
-	dashboardVisitToolRows(input.Tools, input.DiscoveredTools, func(tool *database.ToolCache, discovered bool) {
+	dashboardVisitToolRows(input.Tools, input.DiscoveredTools, func(tool *ToolView, discovered bool) {
 		key := ToolRowKey(tool.Name, tool.Provider)
 		classification := dashboardToolActivityClassification(input, tool, discovered)
 		if classification.Section != ToolViewSectionUpdates {
@@ -158,7 +157,7 @@ func DashboardToolSyncBusy(input DashboardToolActivityInput) bool {
 	return strings.Contains(text, "sync") || strings.Contains(text, "install") || strings.Contains(text, "add")
 }
 
-func dashboardVisitToolRows(tools, discoveredTools []*database.ToolCache, visit func(*database.ToolCache, bool)) {
+func dashboardVisitToolRows(tools, discoveredTools []*ToolView, visit func(*ToolView, bool)) {
 	discoveredKeys := make(map[string]bool, len(discoveredTools))
 	for _, tool := range discoveredTools {
 		if tool != nil {
@@ -182,7 +181,7 @@ func dashboardVisitToolRows(tools, discoveredTools []*database.ToolCache, visit 
 	}
 }
 
-func dashboardToolActivityClassification(input DashboardToolActivityInput, tool *database.ToolCache, discovered bool) ToolViewClassification {
+func dashboardToolActivityClassification(input DashboardToolActivityInput, tool *ToolView, discovered bool) ToolViewClassification {
 	return ClassifyToolView(tool, ToolClassificationContext{
 		Ignored:                input.IgnoredTools[tool.Name],
 		Discovered:             discovered,
@@ -194,7 +193,7 @@ func dashboardToolActivityClassification(input DashboardToolActivityInput, tool 
 	})
 }
 
-func dashboardAccumulateToolSummary(summary *DashboardToolSummary, input DashboardToolSummaryInput, tool *database.ToolCache, discovered bool) {
+func dashboardAccumulateToolSummary(summary *DashboardToolSummary, input DashboardToolSummaryInput, tool *ToolView, discovered bool) {
 	if tool.Tracked {
 		summary.Tracked++
 	}
@@ -228,19 +227,19 @@ func dashboardAccumulateToolSummary(summary *DashboardToolSummary, input Dashboa
 	}
 }
 
-func dashboardToolName(tool *database.ToolCache) string {
+func dashboardToolName(tool *ToolView) string {
 	if tool == nil {
 		return ""
 	}
 	return tool.Name
 }
 
-func dashboardToolUpdateName(tool *database.ToolCache) string {
+func dashboardToolUpdateName(tool *ToolView) string {
 	if tool == nil {
 		return ""
 	}
-	latest := strings.TrimSpace(tool.LatestVersion.String)
-	if !tool.LatestVersion.Valid || latest == "" {
+	latest := strings.TrimSpace(tool.LatestVersion)
+	if latest == "" {
 		latest = "?"
 	}
 	if latest == "?" {
@@ -249,7 +248,7 @@ func dashboardToolUpdateName(tool *database.ToolCache) string {
 	return fmt.Sprintf("%s (%s)", tool.Name, latest)
 }
 
-func dashboardToolSyncIssueName(tool *database.ToolCache, status ToolSyncStatus) string {
+func dashboardToolSyncIssueName(tool *ToolView, status ToolSyncStatus) string {
 	name := dashboardToolName(tool)
 	switch status {
 	case ToolSyncMissing:
@@ -396,7 +395,7 @@ func dashboardToolUpdateCount(input DashboardReconcilePlanInput) int {
 	return count
 }
 
-func dashboardToolHasUpdate(tool *database.ToolCache, ignored map[string]bool) bool {
+func dashboardToolHasUpdate(tool *ToolView, ignored map[string]bool) bool {
 	return tool != nil && !ignored[tool.Name] && tool.Installed && tool.Outdated
 }
 

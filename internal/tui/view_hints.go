@@ -9,8 +9,6 @@ import (
 
 	"github.com/lkshrk/omni/internal/actions"
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/database"
-	"github.com/lkshrk/omni/internal/dots"
 )
 
 // hintItem pairs a key label and its action description for rendered hints.
@@ -457,7 +455,7 @@ func dotsRowHintItems(m Model) []hintItem {
 	}
 	if dotsRowInstallEligible(row) {
 		hints = append(hints, hintFromBindingDesc(m.keys.Install, "install"))
-	} else if (!row.isChild || dotsChildOutOfSync(row)) && app.DotStatusHasAction(entry, dots.ActionSync) {
+	} else if (!row.isChild || dotsChildOutOfSync(row)) && app.DotStatusHasAction(entry, app.DotActionSync) {
 		hints = append(hints, hintFromBindingDesc(m.keys.Sync, app.DotStatusSyncActionLabel(entry)))
 	}
 	if row.isChild && dotsChildOutOfSync(row) {
@@ -477,20 +475,20 @@ func dotsRowHintItems(m Model) []hintItem {
 	if dotsVariantEligible(row) {
 		hints = append(hints, hintFromBinding(m.keys.DotVariant))
 	}
-	if row.isChild && app.DotStatusHasAction(entry, dots.ActionIgnore) {
+	if row.isChild && app.DotStatusHasAction(entry, app.DotActionIgnore) {
 		desc := "ignore"
 		if row.child.Ignored {
 			desc = "include"
 		}
 		hints = append(hints, hintFromBindingDesc(m.keys.DotIgnore, desc))
-	} else if !row.isChild && (app.DotStatusHasAction(entry, dots.ActionIgnore) || app.DotStatusHasAction(entry, dots.ActionUnignore)) {
+	} else if !row.isChild && (app.DotStatusHasAction(entry, app.DotActionIgnore) || app.DotStatusHasAction(entry, app.DotActionUnignore)) {
 		desc := "ignore"
 		if app.DotStatusIgnored(entry) {
 			desc = "include"
 		}
 		hints = append(hints, hintFromBindingDesc(m.keys.DotIgnore, desc))
 	}
-	if !row.isChild && app.DotStatusHasAction(entry, dots.ActionRemove) {
+	if !row.isChild && app.DotStatusHasAction(entry, app.DotActionRemove) {
 		hints = append(hints, hintFromBinding(m.keys.DotDelete))
 	}
 	return hints
@@ -519,14 +517,14 @@ func dotsConflictHintItems(m Model) []hintItem {
 	if dotsVariantEligible(row) {
 		hints = append(hints, hintFromBinding(m.keys.DotVariant))
 	}
-	if app.DotStatusHasAction(entry, dots.ActionIgnore) || app.DotStatusHasAction(entry, dots.ActionUnignore) {
+	if app.DotStatusHasAction(entry, app.DotActionIgnore) || app.DotStatusHasAction(entry, app.DotActionUnignore) {
 		desc := "ignore"
 		if app.DotStatusIgnored(entry) {
 			desc = "include"
 		}
 		hints = append(hints, hintFromBindingDesc(m.keys.DotIgnore, desc))
 	}
-	if app.DotStatusHasAction(entry, dots.ActionRemove) {
+	if app.DotStatusHasAction(entry, app.DotActionRemove) {
 		hints = append(hints, hintFromBinding(m.keys.DotDelete))
 	}
 	if dotsConflictCount(m) > 1 {
@@ -561,7 +559,7 @@ func dotsIgnoreConfirmHintItems(m Model) []hintItem {
 	return confirmActionItems(m.keys.DotIgnore, desc, m.keys.Back)
 }
 
-func toolInlineHints(m Model, t *database.ToolCache) []hintItem {
+func toolInlineHints(m Model, t *app.ToolView) []hintItem {
 	if t == nil {
 		return nil
 	}

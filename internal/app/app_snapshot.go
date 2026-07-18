@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/profile"
 	"github.com/lkshrk/omni/internal/provider"
 )
@@ -12,8 +11,8 @@ import (
 // StartupSnapshot groups the read-heavy app state the TUI needs for its first
 // render. Config-derived fields are built from one settings.json load.
 type StartupSnapshot struct {
-	Tools                  []*database.ToolCache
-	Discovered             []*database.ToolCache
+	Tools                  []*ToolView
+	Discovered             []*ToolView
 	Settings               config.Settings
 	Taps                   []string
 	Groups                 []*config.GroupConfig
@@ -182,8 +181,8 @@ func (a *App) StartupSnapshot(ctx context.Context) (*StartupSnapshot, error) {
 	stop()
 
 	return &StartupSnapshot{
-		Tools:                  tools,
-		Discovered:             discovered,
+		Tools:                  toolViewsFromCache(tools),
+		Discovered:             toolViewsFromCache(discovered),
 		Settings:               settings,
 		Taps:                   collectTaps(cfg.Groups),
 		Groups:                 append([]*config.GroupConfig(nil), cfg.Groups...),

@@ -74,7 +74,7 @@ nav:
       - Architecture: architecture.md
       - Glossary: glossary.md
   - Operations:
-      - Release Notes: release-notes.md
+      - Release Notes: https://github.com/lkshrk/omni/releases
       - Runbooks: runbooks.md
       - FAQ: faq.md
       - Troubleshooting: troubleshooting.md

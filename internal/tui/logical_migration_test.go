@@ -1,19 +1,18 @@
 package tui
 
 import (
-	"database/sql"
 	"slices"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/provider"
 )
 
-func searchResultModel(tools []*database.ToolCache) Model {
+func searchResultModel(tools []*app.ToolView) Model {
 	m := baseModel(nil)
 	m.searchTools = tools
 	m.groupNames = []string{"work"}
@@ -22,7 +21,7 @@ func searchResultModel(tools []*database.ToolCache) Model {
 }
 
 func TestLogicalMigration_SearchResultAddToConfigOpensGroupPicker(t *testing.T) {
-	m := searchResultModel([]*database.ToolCache{{
+	m := searchResultModel([]*app.ToolView{{
 		Name:     "ripgrep",
 		Provider: "brew",
 		Tracked:  false,
@@ -48,7 +47,7 @@ func TestLogicalMigration_SearchResultGroupSelectionAddsExplicitGroup(t *testing
 	a, cfgPath := newCmdApp(t, prov, nil)
 
 	m := modelForCmds(a)
-	m.searchTools = []*database.ToolCache{{
+	m.searchTools = []*app.ToolView{{
 		Name:     "ripgrep",
 		Provider: "brew",
 		Tracked:  false,
@@ -135,7 +134,7 @@ func TestLogicalMigration_ConfiguredEmptyToolInstallKeyAddsHighConfidenceProvide
 		t.Fatalf("write config: %v", err)
 	}
 	m := modelForCmds(a)
-	m.allTools = []*database.ToolCache{{
+	m.allTools = []*app.ToolView{{
 		Name:      "prettier",
 		Provider:  "",
 		Installed: false,
@@ -190,7 +189,7 @@ func TestLogicalMigration_SearchInstallAndAddAsksGroup(t *testing.T) {
 	a, cfgPath := newCmdApp(t, prov, nil)
 
 	m := modelForCmds(a)
-	m.searchTools = []*database.ToolCache{{
+	m.searchTools = []*app.ToolView{{
 		Name:     "ripgrep",
 		Provider: "brew",
 		Tracked:  false,
@@ -247,7 +246,7 @@ func TestLogicalMigration_SearchInstallAndAddAsksGroup(t *testing.T) {
 }
 
 func TestLogicalMigration_SearchInstallEnterAsksGroup(t *testing.T) {
-	m := searchResultModel([]*database.ToolCache{{
+	m := searchResultModel([]*app.ToolView{{
 		Name:     "ripgrep",
 		Provider: "brew",
 		Tracked:  false,
@@ -267,13 +266,13 @@ func TestLogicalMigration_SearchInstallAndAddPrivilegedOpensAdminTerminal(t *tes
 	a, _ := newCmdApp(t, prov, nil)
 
 	m := modelForCmds(a)
-	m.searchTools = []*database.ToolCache{{
+	m.searchTools = []*app.ToolView{{
 		Name:            "vim",
 		Provider:        "apt",
 		Package:         "vim",
 		Tracked:         false,
 		Privilege:       string(provider.PrivilegeRequired),
-		PrivilegeReason: sql.NullString{String: "apt install vim", Valid: true},
+		PrivilegeReason: "apt install vim",
 	}}
 	m.groupNames = []string{"work"}
 	m.applyFilter()

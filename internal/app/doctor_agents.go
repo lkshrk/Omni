@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	osExec "os/exec"
 	"strings"
 
 	"github.com/lkshrk/omni/internal/config"
@@ -47,7 +46,7 @@ func (a *App) doctorAgentsSkills(cfg *config.RootConfig) (DoctorDetailGroup, boo
 	}
 	healthy := true
 	runner := skillRunner(nodeManager(cfg))
-	if _, err := osExec.LookPath(runner); err != nil {
+	if _, err := lookPath(runner); err != nil {
 		g.Items = append(g.Items, fmt.Sprintf("runner %s: not found on PATH", runner))
 		healthy = false
 	} else {
@@ -91,7 +90,7 @@ func (a *App) doctorAgentsPlugins(cfg *config.RootConfig) (DoctorDetailGroup, bo
 	}
 	healthy := doctorAdapterItems(&g, adapterAvailability(a.pluginAdapters()))
 	g.Items = append(g.Items, fmt.Sprintf("plugins: %d in manifest, marketplaces: %d", len(cfg.Agents.Plugins), len(cfg.Agents.Marketplaces)))
-	if _, err := osExec.LookPath("claude"); err == nil {
+	if _, err := lookPath("claude"); err == nil {
 		g.Items = append(g.Items, doctorClaudeShaSourceItem())
 	}
 	return g, healthy

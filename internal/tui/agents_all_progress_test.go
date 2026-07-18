@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"charm.land/bubbles/v2/textinput"
@@ -57,8 +58,8 @@ func agentsAllProgressModel(t *testing.T, cfg *config.RootConfig, skillsRows []a
 }
 
 // drainProgressCmds feeds msg into m.Update, then recursively resolves any
-// tea.Cmd / tea.BatchMsg produced (calling each Cmd to get its Msg and
-// feeding that Msg back into Update), capturing m.progressText after every
+// tea.Cmd / tea.BatchMsg produced (running batch commands concurrently like
+// Bubble Tea and feeding each result back into Update), capturing m.progressText after every
 // step along the way. This mirrors the inline "drain the Cmd batch" pattern
 // used by other tests in this package (see TestAgentsBoot_
 // InitDoesNotFireSectionLoadsBeforeSnapshot in agents_all_test.go), adapted
@@ -77,12 +78,18 @@ func drainProgressCmds(t *testing.T, m Model, msg tea.Msg, captured *[]string) M
 		return m
 	}
 	if batch, ok := resolved.(tea.BatchMsg); ok {
-		var terminal []tea.Msg
+		results := make(chan tea.Msg, len(batch))
+		pending := 0
 		for _, c := range batch {
 			if c == nil {
 				continue
 			}
-			sub := c()
+			pending++
+			go func(cmd tea.Cmd) { results <- cmd() }(c)
+		}
+		var terminal []tea.Msg
+		for range pending {
+			sub := <-results
 			if sub == nil {
 				continue
 			}
@@ -124,6 +131,7 @@ func indexOfContainsFold(list []string, substr string) int {
 // refresh-before-outdated ordering exists for: a plugin's LatestVersion comes
 // from the marketplace clone, so a stale clone shows nothing outdated.
 type progressStubPluginAdapter struct {
+	mu        sync.Mutex
 	id        string
 	refreshed bool
 	events    []string
@@ -132,6 +140,8 @@ type progressStubPluginAdapter struct {
 func (s *progressStubPluginAdapter) ID() string      { return s.id }
 func (s *progressStubPluginAdapter) Available() bool { return true }
 func (s *progressStubPluginAdapter) ListPlugins(context.Context) ([]app.InstalledPlugin, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.events = append(s.events, "list-plugins")
 	latest := "1.0.0"
 	if s.refreshed {
@@ -142,6 +152,8 @@ func (s *progressStubPluginAdapter) ListPlugins(context.Context) ([]app.Installe
 func (s *progressStubPluginAdapter) InstallPlugin(context.Context, config.Plugin) error { return nil }
 func (s *progressStubPluginAdapter) RemovePlugin(context.Context, config.Plugin) error  { return nil }
 func (s *progressStubPluginAdapter) UpdatePlugin(_ context.Context, name, _ string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.events = append(s.events, "update-plugin:"+name)
 	return nil
 }
@@ -152,6 +164,8 @@ func (s *progressStubPluginAdapter) AddMarketplace(context.Context, config.Marke
 	return nil
 }
 func (s *progressStubPluginAdapter) UpdateMarketplaces(context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.refreshed = true
 	s.events = append(s.events, "update-marketplaces")
 	return nil

@@ -4,7 +4,7 @@ FROM golang:1.26-alpine AS integration-test
 
 # stow  — dotfile symlink manager (needed by integration tests)
 # git   — used by dots pull/push/status in integration tests
-# bash  — used by release/test wrapper scripts and their regressions
+# bash  — shell runtime for command integration coverage
 # build-base provides the C toolchain required by `go test -race`.
 RUN apk add --no-cache \
         bash \
@@ -69,5 +69,4 @@ COPY --chown=omni:omni . .
 RUN --mount=type=cache,target=/home/omni/.cache/go-mod,uid=10001,gid=10001 \
     --mount=type=cache,target=/home/omni/.cache/go-build,uid=10001,gid=10001 \
     --mount=type=cache,target=/app/.tmp,uid=10001,gid=10001 \
-    go test -count=1 -race -trimpath ./... && \
     go test -count=1 -tags=integration -race -trimpath -v ./integration_tests/... ./internal/provider/...

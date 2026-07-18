@@ -7,9 +7,6 @@ import (
 
 	"github.com/lkshrk/omni/internal/actions"
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/database"
-	"github.com/lkshrk/omni/internal/provider"
 	"github.com/lkshrk/omni/internal/text"
 )
 
@@ -296,7 +293,8 @@ func renderList(m Model) string {
 	// Build a flat slice of display lines (section headers + tool rows).
 	type displayRow struct {
 		text    string
-		toolIdx int // -1 for headers/blanks
+		render  func() string // when non-nil, produced lazily; skips styling for off-screen rows
+		toolIdx int           // -1 for headers/blanks
 	}
 	var rows []displayRow
 	cursorRow := 0
@@ -320,7 +318,7 @@ func renderList(m Model) string {
 	}
 
 	// Pre-compute column widths then detail lines (detail needs cols for wrap width).
-	cols := newColWidthsWithProviderPins(m.visibleTools, m.toolMemberships, m.hostInfo, visibleGroupNames(m), m.toolProviderPins, m.toolFallbacks, m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager, m.width, func(t *database.ToolCache) bool {
+	cols := newColWidthsWithProviderPins(m.visibleTools, m.toolMemberships, m.hostInfo, visibleGroupNames(m), m.toolProviderPins, m.toolFallbacks, m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager, m.width, func(t *app.ToolView) bool {
 		return m.syncStatusOf(t) == syncWrongProv
 	})
 	detail := inlineDetailLines(m, m.width, cols)
@@ -358,10 +356,16 @@ func renderList(m Model) string {
 		isIgnored := sec == sectionIgnored
 		ss := m.syncStatusOf(t)
 		isCursor := i == m.cursor && !m.cursorHidden
-		line := renderToolRowWithProviderPin(p, t, cols, spinnerView, groups, m.hostInfo, providerPinForTool(t, m.toolProviderPins), fallbackConcreteForTool(t, m.toolFallbacks), m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager, isIgnored, isCursor, ss, rowActionErrorStatus(m, t))
+		// Defer the styled render so off-screen rows sliced away below never pay
+		// for lipgloss styling. View() runs on every Update (incl. ~10Hz spinner
+		// ticks); only the ~viewport-worth of rows in [start,end] get rendered.
+		renderRow := func() string {
+			return renderToolRowWithProviderPin(p, t, cols, spinnerView, groups, m.hostInfo, providerPinForTool(t, m.toolProviderPins), fallbackConcreteForTool(t, m.toolFallbacks), m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager, isIgnored, isCursor, ss, rowActionErrorStatus(m, t))
+		}
 		if isCursor {
 			cursorRow = len(rows)
-			rows = append(rows, displayRow{text: selectedRowPrefix(p) + line, toolIdx: i})
+			selPrefix := selectedRowPrefix(p)
+			rows = append(rows, displayRow{render: func() string { return selPrefix + renderRow() }, toolIdx: i})
 			for _, errorLine := range toolErrorLines(m, t, true) {
 				rows = append(rows, displayRow{text: errorLine, toolIdx: -1})
 			}
@@ -371,7 +375,7 @@ func renderList(m Model) string {
 			}
 			cursorBlockEnd = len(rows) - 1
 		} else {
-			rows = append(rows, displayRow{text: inactiveRowPrefix() + line, toolIdx: i})
+			rows = append(rows, displayRow{render: func() string { return inactiveRowPrefix() + renderRow() }, toolIdx: i})
 			for _, errorLine := range toolErrorLines(m, t, false) {
 				rows = append(rows, displayRow{text: errorLine, toolIdx: -1})
 			}
@@ -391,7 +395,11 @@ func renderList(m Model) string {
 	start, end := scrollWindowBounds(len(rows), bottomOfBlock, avail)
 
 	for _, r := range rows[start:end] {
-		sb.WriteString(r.text)
+		if r.render != nil {
+			sb.WriteString(r.render())
+		} else {
+			sb.WriteString(r.text)
+		}
 		sb.WriteByte('\n')
 	}
 	return sb.String()
@@ -439,7 +447,7 @@ type colWidths struct {
 // full pane width.  Short tool names remain short — rows don't pad to the edge.
 // groupNames is the list of reusable group names; when non-empty the group
 // column is always reserved so it does not flicker in/out as filters change.
-func newColWidthsWithProviderPins(tools []*database.ToolCache, toolMemberships map[string][]string, info *app.HostInfo, groupNames []string, providerPins map[string]string, fallbacks map[string]config.FallbackSpec, systemBin, pythonBin, nodeBin string, screenW int, wrongProvider func(*database.ToolCache) bool) colWidths {
+func newColWidthsWithProviderPins(tools []*app.ToolView, toolMemberships map[string][]string, info *app.HostInfo, groupNames []string, providerPins map[string]string, fallbacks map[string]app.FallbackSpec, systemBin, pythonBin, nodeBin string, screenW int, wrongProvider func(*app.ToolView) bool) colWidths {
 	seed := colWidths{name: 20, prov: 8, ver: len("missing"), screenW: screenW}
 
 	// Seed group column width from all known reusable group names so
@@ -517,12 +525,12 @@ func shrinkWidth(width *int, minWidth int, over *int) {
 	*over -= delta
 }
 
-func displayVersionText(t *database.ToolCache) string {
+func displayVersionText(t *app.ToolView) string {
 	switch {
-	case t.Installed && t.Outdated && t.LatestVersion.Valid:
-		return compactVersion(t.Version.String) + " → " + compactVersion(t.LatestVersion.String)
-	case t.Installed && t.Version.Valid:
-		return compactVersion(t.Version.String)
+	case t.Installed && t.Outdated && t.LatestVersion != "":
+		return compactVersion(t.Version) + " → " + compactVersion(t.LatestVersion)
+	case t.Installed && t.Version != "":
+		return compactVersion(t.Version)
 	case !t.Installed:
 		return "missing"
 	default:
@@ -530,7 +538,7 @@ func displayVersionText(t *database.ToolCache) string {
 	}
 }
 
-func renderToolRowWithProviderPin(p palette, t *database.ToolCache, cols colWidths, spinnerView string, groups []string, info *app.HostInfo, providerPin, fallbackConcrete, systemBin, pythonBin, nodeBin string, ignored, selected bool, ss syncStatus, rowErrValues ...string) string {
+func renderToolRowWithProviderPin(p palette, t *app.ToolView, cols colWidths, spinnerView string, groups []string, info *app.HostInfo, providerPin, fallbackConcrete, systemBin, pythonBin, nodeBin string, ignored, selected bool, ss syncStatus, rowErrValues ...string) string {
 	privileged := toolHasPrivilegeMarker(t, systemBin)
 	provSystemBin, provPythonBin, provNodeBin := systemBin, pythonBin, nodeBin
 	if t.Installed && t.InstalledWith == "" && providerPin == "" && fallbackConcrete == "" {
@@ -580,11 +588,11 @@ func renderToolRowWithProviderPin(p palette, t *database.ToolCache, cols colWidt
 		prov := ignoredStyle.Render(provText) + provPadding
 		var ver string
 		switch {
-		case t.Installed && t.Outdated && t.LatestVersion.Valid:
-			current, latest := fitUpgradeVersionText(compactVersion(t.Version.String), compactVersion(t.LatestVersion.String), cols.ver)
+		case t.Installed && t.Outdated && t.LatestVersion != "":
+			current, latest := fitUpgradeVersionText(compactVersion(t.Version), compactVersion(t.LatestVersion), cols.ver)
 			ver = ignoredStyle.Render(current) + emphasis(p.styleOutdated).Render(latest)
-		case t.Installed && t.Version.Valid:
-			ver = ignoredStyle.Render(fitCellText(compactVersion(t.Version.String), cols.ver))
+		case t.Installed && t.Version != "":
+			ver = ignoredStyle.Render(fitCellText(compactVersion(t.Version), cols.ver))
 		default:
 			ver = ignoredStyle.Render("ignored")
 		}
@@ -641,12 +649,12 @@ func renderToolRowWithProviderPin(p palette, t *database.ToolCache, cols colWidt
 
 	var ver string
 	switch {
-	case t.Installed && t.Outdated && t.LatestVersion.Valid:
+	case t.Installed && t.Outdated && t.LatestVersion != "":
 		// Current version styled same as missing (red) — it needs updating.
-		current, latest := fitUpgradeVersionText(compactVersion(t.Version.String), compactVersion(t.LatestVersion.String), cols.ver)
+		current, latest := fitUpgradeVersionText(compactVersion(t.Version), compactVersion(t.LatestVersion), cols.ver)
 		ver = emphasis(p.styleMissing).Render(current) + emphasis(p.styleOutdated).Render(latest)
-	case t.Installed && t.Version.Valid:
-		ver = emphasis(p.styleVersionMuted).Render(fitCellText(compactVersion(t.Version.String), cols.ver))
+	case t.Installed && t.Version != "":
+		ver = emphasis(p.styleVersionMuted).Render(fitCellText(compactVersion(t.Version), cols.ver))
 	case !t.Installed:
 		ver = emphasis(p.styleMissing).Render("missing")
 	}
@@ -658,11 +666,11 @@ func renderToolRowWithProviderPin(p palette, t *database.ToolCache, cols colWidt
 	return split(left, right)
 }
 
-func renderNameCell(p palette, nameStyle lipgloss.Style, t *database.ToolCache, width int, selected bool) string {
+func renderNameCell(p palette, nameStyle lipgloss.Style, t *app.ToolView, width int, selected bool) string {
 	return renderNameWithPackage(p, nameStyle, t, width, selected)
 }
 
-func renderNameWithPackage(p palette, nameStyle lipgloss.Style, t *database.ToolCache, width int, selected bool) string {
+func renderNameWithPackage(p palette, nameStyle lipgloss.Style, t *app.ToolView, width int, selected bool) string {
 	plain := nameDisplayText(t)
 	if lipgloss.Width(plain) > width {
 		return nameStyle.Render(fitCellText(plain, width))
@@ -685,7 +693,7 @@ func renderNameWithPackage(p palette, nameStyle lipgloss.Style, t *database.Tool
 	return rendered + strings.Repeat(" ", max(width-lipgloss.Width(plain), 0))
 }
 
-func nameDisplayText(t *database.ToolCache) string {
+func nameDisplayText(t *app.ToolView) string {
 	suffix := ""
 	if t.UpdateBlocked == app.UpdateBlockSelfUpdates {
 		suffix = " (self)"
@@ -696,14 +704,14 @@ func nameDisplayText(t *database.ToolCache) string {
 	return t.Name + suffix
 }
 
-func packageAlias(t *database.ToolCache) string {
+func packageAlias(t *app.ToolView) string {
 	if t == nil || t.Package == "" || t.Package == t.Name {
 		return ""
 	}
 	return t.Package
 }
 
-func toolHasPrivilegeMarker(t *database.ToolCache, systemBin string) bool {
+func toolHasPrivilegeMarker(t *app.ToolView, systemBin string) bool {
 	return app.ToolHasPrivilegeMarker(t, app.ToolClassificationContext{EffectiveSystemManager: systemBin})
 }
 
@@ -899,7 +907,7 @@ func providerPartsWithExplicit(raw, installedWith, explicitWith, systemBin, pyth
 	return parts.Meta, parts.Concrete, parts.Override
 }
 
-func providerLabelForToolWithPin(t *database.ToolCache, providerPin, fallbackConcrete, systemBin, pythonBin, nodeBin string) string {
+func providerLabelForToolWithPin(t *app.ToolView, providerPin, fallbackConcrete, systemBin, pythonBin, nodeBin string) string {
 	if t == nil {
 		return ""
 	}
@@ -917,7 +925,7 @@ func providerLabelForToolWithPin(t *database.ToolCache, providerPin, fallbackCon
 		EffectiveNodeManager:   nodeBin,
 	})
 	if providerPin == "" && installedWith != "" && installedWith != label && installedWith != providerName &&
-		!provider.BuiltinIsEcosystem(providerName) {
+		!app.BuiltinIsEcosystem(providerName) {
 		return installedWith
 	}
 	return label
@@ -935,11 +943,11 @@ func providerForFallbackDisplay(providerName, fallbackConcrete string) string {
 	}
 }
 
-func providerDisplayTextForToolWithPin(t *database.ToolCache, providerPin, fallbackConcrete, systemBin, pythonBin, nodeBin string) string {
+func providerDisplayTextForToolWithPin(t *app.ToolView, providerPin, fallbackConcrete, systemBin, pythonBin, nodeBin string) string {
 	return providerLabelForToolWithPin(t, providerPin, fallbackConcrete, systemBin, pythonBin, nodeBin)
 }
 
-func providerPinForTool(t *database.ToolCache, providerPins map[string]string) string {
+func providerPinForTool(t *app.ToolView, providerPins map[string]string) string {
 	if t == nil || providerPins == nil {
 		return ""
 	}
@@ -967,8 +975,8 @@ func inlineDetailLines(m Model, width int, cols colWidths) []string {
 	var lines []string
 
 	// Description — word-wrapped to terminal width.
-	if t.Description.Valid && t.Description.String != "" {
-		for _, dl := range text.WrapText(t.Description.String, wrapWidth) {
+	if t.Description != "" {
+		for _, dl := range text.WrapText(t.Description, wrapWidth) {
 			lines = append(lines, prefix+p.styleHelp.Render(dl))
 		}
 	} else {
@@ -1029,7 +1037,7 @@ func toolRightGroupWidth(cols colWidths) int {
 	return width
 }
 
-func ignoreDetailLine(m Model, t *database.ToolCache, prefix string) string {
+func ignoreDetailLine(m Model, t *app.ToolView, prefix string) string {
 	if t == nil {
 		return ""
 	}
@@ -1043,7 +1051,7 @@ func ignoreDetailLine(m Model, t *database.ToolCache, prefix string) string {
 	return prefix + m.palette.styleHelp.Render("ignored by ") + m.palette.styleIgnored.Render(label)
 }
 
-func nvmManagedDetailLine(m Model, t *database.ToolCache, prefix string) string {
+func nvmManagedDetailLine(m Model, t *app.ToolView, prefix string) string {
 	if t == nil || m.syncStatusOf(t) != syncNvmManaged {
 		return ""
 	}
@@ -1069,7 +1077,7 @@ func nvmManagedDetailLine(m Model, t *database.ToolCache, prefix string) string 
 		p.styleStatus.Render(mgr)
 }
 
-func providerMismatchDetailLine(m Model, t *database.ToolCache, prefix string) string {
+func providerMismatchDetailLine(m Model, t *app.ToolView, prefix string) string {
 	if t == nil || m.syncStatusOf(t) != syncWrongProv || t.InstalledWith == "" {
 		return ""
 	}
@@ -1086,7 +1094,7 @@ func providerMismatchDetailLine(m Model, t *database.ToolCache, prefix string) s
 		p.styleStatus.Render(desired)
 }
 
-func providerCandidateDetailLines(m Model, t *database.ToolCache, prefix string, _ int) []string {
+func providerCandidateDetailLines(m Model, t *app.ToolView, prefix string, _ int) []string {
 	candidates := providerCandidateOptions(m, t)
 	if len(candidates) == 0 {
 		return nil
@@ -1114,7 +1122,7 @@ func providerCandidateDetailLines(m Model, t *database.ToolCache, prefix string,
 	return lines
 }
 
-func rowActionErrorAdviceLines(m Model, t *database.ToolCache, prefix string, wrapWidth int) []string {
+func rowActionErrorAdviceLines(m Model, t *app.ToolView, prefix string, wrapWidth int) []string {
 	if t == nil || len(m.rowActionErrors) == 0 {
 		return nil
 	}
@@ -1153,14 +1161,14 @@ func rowActionErrorAdviceLines(m Model, t *database.ToolCache, prefix string, wr
 	return lines
 }
 
-func rowActionErrorStatus(m Model, t *database.ToolCache) string {
+func rowActionErrorStatus(m Model, t *app.ToolView) string {
 	if t == nil || len(m.rowErrors) == 0 {
 		return ""
 	}
 	return m.rowErrors[toolKey(t.Name, t.Provider)]
 }
 
-func toolErrorLines(m Model, t *database.ToolCache, selected bool) []string {
+func toolErrorLines(m Model, t *app.ToolView, selected bool) []string {
 	summary := rowErrorSummary(rowActionErrorStatus(m, t))
 	if summary == "" {
 		return nil
@@ -1179,7 +1187,7 @@ func toolErrorLines(m Model, t *database.ToolCache, selected bool) []string {
 	return []string{prefix + line}
 }
 
-func rowOperationStatusLine(m Model, t *database.ToolCache, prefix string) string {
+func rowOperationStatusLine(m Model, t *app.ToolView, prefix string) string {
 	if t == nil || m.rowOpKey == "" || m.rowOpStatus == "" {
 		return ""
 	}
@@ -1191,7 +1199,7 @@ func rowOperationStatusLine(m Model, t *database.ToolCache, prefix string) strin
 	return prefix + hintJoin(m.palette, status, cancel)
 }
 
-func listConfirmationHintsLine(m Model, t *database.ToolCache, prefix string) string {
+func listConfirmationHintsLine(m Model, t *app.ToolView, prefix string) string {
 	c := m.listConfirm
 	if c.action == "" {
 		return ""
@@ -1220,20 +1228,20 @@ func listConfirmationHintsLine(m Model, t *database.ToolCache, prefix string) st
 	}
 }
 
-func fullVersionDetailLine(p palette, t *database.ToolCache, prefix string) string {
-	if !t.Installed || !t.Version.Valid {
+func fullVersionDetailLine(p palette, t *app.ToolView, prefix string) string {
+	if !t.Installed || t.Version == "" {
 		return ""
 	}
-	if t.Outdated && t.LatestVersion.Valid {
-		if compactVersion(t.Version.String) == t.Version.String && compactVersion(t.LatestVersion.String) == t.LatestVersion.String {
+	if t.Outdated && t.LatestVersion != "" {
+		if compactVersion(t.Version) == t.Version && compactVersion(t.LatestVersion) == t.LatestVersion {
 			return ""
 		}
-		return prefix + p.styleHelp.Render("version ") + p.styleVersionMuted.Render(t.Version.String) + p.styleHelp.Render(" → ") + p.styleOutdated.Render(t.LatestVersion.String)
+		return prefix + p.styleHelp.Render("version ") + p.styleVersionMuted.Render(t.Version) + p.styleHelp.Render(" → ") + p.styleOutdated.Render(t.LatestVersion)
 	}
-	if compactVersion(t.Version.String) == t.Version.String {
+	if compactVersion(t.Version) == t.Version {
 		return ""
 	}
-	return prefix + p.styleHelp.Render("version ") + p.styleVersionMuted.Render(t.Version.String)
+	return prefix + p.styleHelp.Render("version ") + p.styleVersionMuted.Render(t.Version)
 }
 
 // wrapText wraps text to width runes. Kept for test compatibility; delegates to

@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/dots"
 	"github.com/lkshrk/omni/internal/provider"
 	isync "github.com/lkshrk/omni/internal/sync"
@@ -623,7 +622,7 @@ func SyncAllPhaseProgressText(phase string, total int) string {
 	return "Syncing tools: " + label + "…"
 }
 
-func SyncAllProgressTotal(tools []*database.ToolCache, discovered []*database.ToolCache) int {
+func SyncAllProgressTotal(tools []*ToolView, discovered []*ToolView) int {
 	count := 0
 	for _, tool := range tools {
 		if tool != nil && tool.Tracked && !tool.Installed {
@@ -760,7 +759,7 @@ func UpgradeAllProgressText(event isync.ProgressEvent, current, total int) strin
 	return "Upgrading tools: " + label
 }
 
-func UpgradeAllProgressTotal(tools []*database.ToolCache) int {
+func UpgradeAllProgressTotal(tools []*ToolView) int {
 	count := 0
 	for _, tool := range tools {
 		if tool != nil && tool.Installed && tool.Outdated {

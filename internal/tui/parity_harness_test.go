@@ -1,14 +1,12 @@
 package tui
 
 import (
-	"database/sql"
 	"image/color"
 	"testing"
 
 	"charm.land/lipgloss/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/database"
 )
 
 // parityWidth is the fixed terminal width every parity fixture renders at.
@@ -142,11 +140,11 @@ func parityPalette() palette {
 
 // --- fixture builders --------------------------------------------------
 
-// buildToolFixture converts a parityFixture into a *database.ToolCache plus
+// buildToolFixture converts a parityFixture into a *app.ToolView plus
 // the ambient state (group map, ignore-set) newColWidthsWithProviderPins and
 // renderToolRowWithProviderPin need.
-func buildToolFixture(f parityFixture) (*database.ToolCache, map[string]string, map[string][]string) {
-	t := &database.ToolCache{
+func buildToolFixture(f parityFixture) (*app.ToolView, map[string]string, map[string][]string) {
+	t := &app.ToolView{
 		Name:      f.name,
 		Provider:  "brew",
 		Package:   f.name,
@@ -154,11 +152,11 @@ func buildToolFixture(f parityFixture) (*database.ToolCache, map[string]string, 
 		Tracked:   true,
 	}
 	if f.version != "" {
-		t.Version = sql.NullString{String: f.version, Valid: true}
+		t.Version = f.version
 	}
 	if f.outdated {
 		t.Outdated = true
-		t.LatestVersion = sql.NullString{String: f.latestVersion, Valid: true}
+		t.LatestVersion = f.latestVersion
 	}
 	groups := map[string]string{}
 	memberships := map[string][]string{}
@@ -181,9 +179,9 @@ func renderToolsRowForTest(t *testing.T, f parityFixture) parityRow {
 	if f.group != "" {
 		groupNames = []string{f.group}
 	}
-	cols := newColWidthsWithProviderPins([]*database.ToolCache{tool}, memberships, nil, groupNames, nil, nil, "", "", "", parityWidth, nil)
+	cols := newColWidthsWithProviderPins([]*app.ToolView{tool}, memberships, nil, groupNames, nil, nil, "", "", "", parityWidth, nil)
 
-	m := baseModel([]*database.ToolCache{tool})
+	m := baseModel([]*app.ToolView{tool})
 	m.palette = pal
 	m.toolGroups = groups
 	m.toolMemberships = memberships
@@ -206,7 +204,7 @@ func renderToolsRowIgnoredOverride(t *testing.T, cols colWidths) parityRow {
 	t.Helper()
 	tool, groups, memberships := buildToolFixture(fixtureIgnored)
 	pal := parityPalette()
-	m := baseModel([]*database.ToolCache{tool})
+	m := baseModel([]*app.ToolView{tool})
 	m.palette = pal
 	m.toolGroups = groups
 	m.toolMemberships = memberships
@@ -896,7 +894,7 @@ func containsSubstring(s, sub string) bool {
 func TestParity_HintLineFormat_ToolInlineHintsAndAgentsRowHintsShareRenderer(t *testing.T) {
 	pal := parityPalette()
 	tool, _, _ := buildToolFixture(fixtureBase)
-	m := baseModel([]*database.ToolCache{tool})
+	m := baseModel([]*app.ToolView{tool})
 	toolHints := toolInlineHints(m, tool)
 
 	am, e := buildAgentsFixture(fixtureBase)

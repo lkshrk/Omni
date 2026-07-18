@@ -6,7 +6,6 @@ package tui
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"os"
 	"os/exec"
@@ -489,7 +488,7 @@ func TestHandleListActionInstallUsesSelectedProviderCandidate(t *testing.T) {
 	t.Cleanup(func() { _ = a.Close() })
 
 	m := modelForCmds(a)
-	m.allTools = []*database.ToolCache{{Name: "prettier", Provider: "", Installed: false, Tracked: true}}
+	m.allTools = []*app.ToolView{{Name: "prettier", Provider: "", Installed: false, Tracked: true}}
 	m.toolProviderCandidates = map[string][]config.ToolInstallSpec{
 		"prettier": {
 			{Provider: "npm", Package: "prettier"},
@@ -743,10 +742,10 @@ func TestDoDelete_RefreshesToolMembershipState(t *testing.T) {
 func TestHandleOpCompleteMsg_DeleteRemovesDiscoveredOrphan(t *testing.T) {
 	m := modelForCmds(nil)
 	key := toolKey("swiftlint", "system")
-	swiftformat := &database.ToolCache{Name: "swiftformat", Provider: "system", Package: "swiftformat", Installed: true, Tracked: true}
-	orphan := &database.ToolCache{Name: "swiftlint", Provider: "system", Package: "swiftlint", Installed: true, Tracked: false}
-	m.allTools = []*database.ToolCache{swiftformat}
-	m.discoveredTools = []*database.ToolCache{orphan}
+	swiftformat := &app.ToolView{Name: "swiftformat", Provider: "system", Package: "swiftformat", Installed: true, Tracked: true}
+	orphan := &app.ToolView{Name: "swiftlint", Provider: "system", Package: "swiftlint", Installed: true, Tracked: false}
+	m.allTools = []*app.ToolView{swiftformat}
+	m.discoveredTools = []*app.ToolView{orphan}
 	m.rebuildDiscoveredKeys()
 	m.applyFilter()
 	if got := m.countSection(sectionOutOfSync); got != 1 {
@@ -755,7 +754,7 @@ func TestHandleOpCompleteMsg_DeleteRemovesDiscoveredOrphan(t *testing.T) {
 
 	m.handleOpCompleteMsg(opCompleteMsg{
 		message:              "deleted swiftlint",
-		tools:                []*database.ToolCache{swiftformat},
+		tools:                []*app.ToolView{swiftformat},
 		removeDiscoveredKeys: []string{key},
 	})
 	if len(m.discoveredTools) != 0 {
@@ -883,7 +882,7 @@ func TestDoSyncAllWithProgress_ClaimsDiscoveredToHostnameGroup(t *testing.T) {
 	prov := &okProvider{name: "brew"}
 	a, cfgPath := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
-	discovered := []*database.ToolCache{
+	discovered := []*app.ToolView{
 		{Name: "fzf", Provider: "brew", Installed: true, Tracked: false},
 	}
 	ch := make(chan progressUpdate, 16)
@@ -926,7 +925,7 @@ func TestDoSyncAllWithProgress_PrivilegedInstallOpensAdminTerminal(t *testing.T)
 	a, _ := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("vim", "apt")})
 	m := modelForCmds(a)
 	m.mode = viewList
-	m.allTools = []*database.ToolCache{
+	m.allTools = []*app.ToolView{
 		{Name: "vim", Provider: "apt", Package: "vim", Tracked: true},
 	}
 	m.applyFilter()
@@ -963,7 +962,7 @@ func TestDoSyncAllWithProgress_PrivilegedInstallOpensAdminTerminal(t *testing.T)
 }
 
 func TestQueuedPrivilegedAdminTerminalContinuesAfterSuccess(t *testing.T) {
-	m := baseModel([]*database.ToolCache{
+	m := baseModel([]*app.ToolView{
 		{Name: "bat", Provider: "apt", Package: "bat"},
 	})
 	m.mode = viewList
@@ -1026,12 +1025,12 @@ func TestDoUpgradeAll_Success(t *testing.T) {
 func TestDoUpgradeAll_ProgressShowsCurrentTool(t *testing.T) {
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
-	tools := []*database.ToolCache{
+	tools := []*app.ToolView{
 		{Name: "bat", Provider: "brew", Package: "bat", Installed: true, Outdated: true, Tracked: true},
 		{Name: "ripgrep", Provider: "brew", Package: "ripgrep", Installed: true, Outdated: true, Tracked: true},
 	}
 	for _, tool := range tools {
-		if err := a.DB().Upsert(context.Background(), tool); err != nil {
+		if err := a.DB().Upsert(context.Background(), &database.ToolCache{Name: tool.Name, Provider: tool.Provider, Package: tool.Package, Installed: tool.Installed, Outdated: tool.Outdated, Tracked: tool.Tracked}); err != nil {
 			t.Fatalf("seed cache: %v", err)
 		}
 	}
@@ -1071,12 +1070,12 @@ func TestDoUpgradeAll_PrivilegedUpgradesOpenAdminTerminalQueue(t *testing.T) {
 		plan:       provider.PrivilegePlan{Requirement: provider.PrivilegeRequired, Reason: "apt upgrade package"},
 	}
 	a, _ := newCmdApp(t, prov, nil)
-	tools := []*database.ToolCache{
+	tools := []*app.ToolView{
 		{Name: "bat", Provider: "apt", Package: "bat", Installed: true, Outdated: true, Tracked: true},
 		{Name: "vim", Provider: "apt", Package: "vim", Installed: true, Outdated: true, Tracked: true},
 	}
 	for _, tool := range tools {
-		if err := a.DB().Upsert(context.Background(), tool); err != nil {
+		if err := a.DB().Upsert(context.Background(), &database.ToolCache{Name: tool.Name, Provider: tool.Provider, Package: tool.Package, Installed: tool.Installed, Outdated: tool.Outdated, Tracked: tool.Tracked}); err != nil {
 			t.Fatalf("seed cache: %v", err)
 		}
 	}
@@ -1464,7 +1463,7 @@ func TestDoSetToolGroupMemberships_ExistingGroupJoinsHost(t *testing.T) {
 		t.Fatalf("host %s groups = %v, want work", host, groups)
 	}
 
-	rowModel := baseModel([]*database.ToolCache{{
+	rowModel := baseModel([]*app.ToolView{{
 		Name:     "ripgrep",
 		Provider: "brew",
 		Tracked:  true,
@@ -1740,7 +1739,7 @@ func TestBlockPrivilegedToolAction_GenericPrivilegeOpensAdminTerminal(t *testing
 	}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
-	tool := &database.ToolCache{Name: "vim", Provider: "apt", Package: "vim"}
+	tool := &app.ToolView{Name: "vim", Provider: "apt", Package: "vim"}
 
 	if !m.blockPrivilegedToolAction(tool, provider.PrivilegeActionInstall) {
 		t.Fatal("generic privileged action should open the admin terminal")
@@ -1770,7 +1769,7 @@ func TestBlockPrivilegedToolAction_RejectsProviderToolUninstall(t *testing.T) {
 	}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
-	tool := &database.ToolCache{
+	tool := &app.ToolView{
 		Name:          "npm",
 		Provider:      "node",
 		Package:       "npm",
@@ -1806,7 +1805,7 @@ func TestBlockPrivilegedToolAction_OpensAdminTerminalForInteractiveBrewCask(t *t
 	}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
-	tool := &database.ToolCache{
+	tool := &app.ToolView{
 		Name:          "parsec",
 		Provider:      "system",
 		Package:       "parsec",
@@ -1844,14 +1843,14 @@ func TestBlockPrivilegedToolAction_RefreshesGenericCachedBrewPrivilegeIntoAdminP
 	}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
-	tool := &database.ToolCache{
+	tool := &app.ToolView{
 		Name:            "parsec",
 		Provider:        "system",
 		Package:         "parsec",
 		Installed:       true,
 		InstalledWith:   "brew",
 		Privilege:       string(provider.PrivilegeRequired),
-		PrivilegeReason: sql.NullString{String: "package manager needs sudo/root access", Valid: true},
+		PrivilegeReason: "package manager needs sudo/root access",
 	}
 
 	if !m.blockPrivilegedToolAction(tool, provider.PrivilegeActionUninstall) {
@@ -2077,8 +2076,8 @@ func TestSyncAllProgressText_AddAndInstallOnly(t *testing.T) {
 // ── displaySection ────────────────────────────────────────────────────────────
 
 func TestDisplaySection_IgnoredTool(t *testing.T) {
-	tc := &database.ToolCache{Name: "curl", Provider: "brew", Installed: true}
-	m := baseModel([]*database.ToolCache{tc})
+	tc := &app.ToolView{Name: "curl", Provider: "brew", Installed: true}
+	m := baseModel([]*app.ToolView{tc})
 	m.ignoreSet = map[string]bool{"curl": true}
 	if s := m.displaySection(tc); s != sectionIgnored {
 		t.Errorf("displaySection (ignored) = %v, want sectionIgnored", s)
@@ -2086,8 +2085,8 @@ func TestDisplaySection_IgnoredTool(t *testing.T) {
 }
 
 func TestDisplaySection_NormalTool(t *testing.T) {
-	tc := &database.ToolCache{Name: "curl", Provider: "brew", Installed: true}
-	m := baseModel([]*database.ToolCache{tc})
+	tc := &app.ToolView{Name: "curl", Provider: "brew", Installed: true}
+	m := baseModel([]*app.ToolView{tc})
 	m.ignoreSet = map[string]bool{} // not in ignore list
 	if s := m.displaySection(tc); s == sectionIgnored {
 		t.Errorf("displaySection (not ignored) = sectionIgnored, want sectionInstalled")

@@ -9,7 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/dots"
 )
 
 func (m *Model) beginDotsOperation(status string) {
@@ -351,7 +350,7 @@ func (m *Model) handleDotsActionKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibl
 			break
 		}
 		entry := row.entry
-		if !app.DotStatusHasAction(entry, dots.ActionSync) {
+		if !app.DotStatusHasAction(entry, app.DotActionSync) {
 			break
 		}
 		m.beginDotsOperation("Syncing " + entry.Name + "…")
@@ -386,7 +385,7 @@ func (m *Model) handleDotsActionKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibl
 		}
 		m.beginDotsOperation("Syncing dots…")
 		total := m.markDotsPendingSyncAll()
-		setActivityStatus(m, app.DotsSyncActivityProgressText(dots.SyncProgressEvent{Total: total}))
+		setActivityStatus(m, app.DotsSyncActivityProgressText(app.DotSyncProgressEvent{Total: total}))
 		order := dotsSyncAllEntryOrder(*m)
 		ch := m.beginDotsProgressStream()
 		cmds = append(cmds, m.spinner.Tick, m.doDotsSyncOnlyWithProgress(ch, order), waitForDotsProgress(ch, m.dotsOpGen))
@@ -781,7 +780,7 @@ func (m *Model) handleDotsResolveKeyMsg(visible []dotsVisibleRow, strategy app.D
 	return cmds
 }
 
-func dotsRowState(row dotsVisibleRow) dots.State {
+func dotsRowState(row dotsVisibleRow) app.DotState {
 	if row.isChild {
 		return app.DotChildDisplayState(row.child, app.DotStatusState(row.entry))
 	}
@@ -793,7 +792,7 @@ func dotsRowInstallEligible(row dotsVisibleRow) bool {
 		return false
 	}
 	switch dotsRowState(row) {
-	case dots.StateMissing, dots.StateRepoOnly:
+	case app.DotStateMissing, app.DotStateRepoOnly:
 		return true
 	default:
 		return false
@@ -802,9 +801,9 @@ func dotsRowInstallEligible(row dotsVisibleRow) bool {
 
 func dotsRowResolveEligible(row dotsVisibleRow, strategy app.DotsResolveStrategy) bool {
 	if !row.isChild {
-		action := dots.ActionUseRepo
+		action := app.DotActionUseRepo
 		if strategy == app.DotResolveUseLocal {
-			action = dots.ActionUseLocal
+			action = app.DotActionUseLocal
 		}
 		return app.DotStatusHasAction(row.entry, action)
 	}
@@ -814,12 +813,12 @@ func dotsRowResolveEligible(row dotsVisibleRow, strategy app.DotsResolveStrategy
 	switch strategy {
 	case app.DotResolveUseRepo:
 		switch dotsRowState(row) {
-		case dots.StateConflict, dots.StateModified, dots.StateBroken:
+		case app.DotStateConflict, app.DotStateModified, app.DotStateBroken:
 			return true
 		}
 	case app.DotResolveUseLocal:
 		switch dotsRowState(row) {
-		case dots.StateConflict, dots.StateModified, dots.StateLocalOnly:
+		case app.DotStateConflict, app.DotStateModified, app.DotStateLocalOnly:
 			return true
 		}
 	}
@@ -859,7 +858,7 @@ func (m *Model) handleDotsForceResolveAllKeyMsg(strategy app.DotsResolveStrategy
 func dotsConflictCount(m Model) int {
 	n := 0
 	for _, e := range m.dotsEntries {
-		if app.DotStatusState(e) == dots.StateConflict {
+		if app.DotStatusState(e) == app.DotStateConflict {
 			n++
 		}
 	}
@@ -875,7 +874,7 @@ func (m *Model) handleDotsDeleteKeyMsg(visible []dotsVisibleRow) []tea.Cmd {
 	if visible[m.dotsCursor].isChild {
 		return cmds
 	}
-	if !app.DotStatusHasAction(visible[m.dotsCursor].entry, dots.ActionRemove) {
+	if !app.DotStatusHasAction(visible[m.dotsCursor].entry, app.DotActionRemove) {
 		return cmds
 	}
 	m.dotsConfirmIdx = m.dotsCursor
@@ -930,7 +929,7 @@ func dotsChildOutOfSync(row dotsVisibleRow) bool {
 		return false
 	}
 	switch dotChildStateForDisplay(row.child, app.DotStatusState(row.entry)) {
-	case dots.StateSynced, dots.StateIgnored, dots.StateInactive, dots.StateDisabled, dots.StateNoSource:
+	case app.DotStateSynced, app.DotStateIgnored, app.DotStateInactive, app.DotStateDisabled, app.DotStateNoSource:
 		return false
 	default:
 		return true

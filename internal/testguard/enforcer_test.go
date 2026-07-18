@@ -55,13 +55,17 @@ func TestMakeTestTargetsUseSafeRunner(t *testing.T) {
 	makefile := string(data)
 	for _, want := range []string{
 		"TEST_SAFE   := bash scripts/run-test-safe.sh",
+		"TEST_UNIT_ROOT := $(TMP_DIR)/test-unit-root",
+		"test: test-scripts test-unit",
 		"$(TEST_SAFE) bash scripts/test-release.sh",
-		"$(TEST_SAFE) go clean -testcache",
-		"$(TEST_SAFE) go test -race -trimpath ./...",
+		"OMNI_TEST_ROOT=\"$(TEST_UNIT_ROOT)\" $(TEST_SAFE) go test -race -trimpath ./...",
 	} {
 		if !strings.Contains(makefile, want) {
 			t.Fatalf("Makefile test target is missing safe runner command %q", want)
 		}
+	}
+	if strings.Contains(makefile, "go clean -testcache") {
+		t.Fatal("Makefile test targets should preserve Go's test cache")
 	}
 }
 

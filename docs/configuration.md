@@ -15,8 +15,8 @@ omni --config /path/to/settings.json
 See [State And Files](state-and-files.md) for config path priority, cache path
 priority, environment variables, backups, and disposable cache behavior.
 
-The schema lives in
-[spec/omni.settings.v16.schema.json](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v16.schema.json).
+The current schema lives at
+[`spec/omni.settings.schema.json`](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.schema.json).
 Omni migrates older files to the current version on load.
 
 ## Smallest Valid File
@@ -25,7 +25,7 @@ The smallest legal file is:
 
 ```json
 {
-  "version": 16
+  "version": 17
 }
 ```
 
@@ -38,8 +38,8 @@ automatically by Omni config writes.
 
 ```json
 {
-  "$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v16.schema.json",
-  "version": 16,
+  "$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.schema.json",
+  "version": 17,
   "settings": {
     "fallback_bin_dir": "~/.local/share/omni/fallback/bin",
     "provider_priority": ["brew", "apt", "dnf", "zypper", "pacman", "apk", "npm", "pip"]

@@ -1,27 +1,25 @@
 package app_test
 
 import (
-	"database/sql"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/dots"
 	isync "github.com/lkshrk/omni/internal/sync"
 )
 
 func TestDashboardToolSummary_ClassifiesToolsAndDiscoveredRows(t *testing.T) {
 	summary := app.BuildDashboardToolSummary(app.DashboardToolSummaryInput{
-		Tools: []*database.ToolCache{
-			{Name: "git", Provider: "brew", Tracked: true, Installed: true, Outdated: true, LatestVersion: sql.NullString{String: "2.0", Valid: true}},
+		Tools: []*app.ToolView{
+			{Name: "git", Provider: "brew", Tracked: true, Installed: true, Outdated: true, LatestVersion: "2.0"},
 			{Name: "fd", Provider: "brew", Tracked: true, Installed: false},
 			{Name: "jq", Provider: "system", Tracked: true, Installed: true, InstalledWith: "apt"},
 			{Name: "bat", Provider: "brew", Tracked: true, Installed: true},
 			{Name: "slack", Provider: "brew", Tracked: true, Installed: true},
 		},
-		DiscoveredTools: []*database.ToolCache{
+		DiscoveredTools: []*app.ToolView{
 			{Name: "ripgrep", Provider: "brew", Installed: true},
 		},
 		IgnoredTools:           map[string]bool{"slack": true},
@@ -91,11 +89,11 @@ func TestReconcileSummaryCountsToolsDotsAndIssues(t *testing.T) {
 
 func TestDashboardToolSyncQueuedNamesLabelsPendingIssues(t *testing.T) {
 	names := app.DashboardToolSyncQueuedNames(app.DashboardToolActivityInput{
-		Tools: []*database.ToolCache{
+		Tools: []*app.ToolView{
 			{Name: "fd", Provider: "brew", Tracked: true, Installed: false},
 			{Name: "git", Provider: "brew", Tracked: true, Installed: true},
 		},
-		DiscoveredTools: []*database.ToolCache{
+		DiscoveredTools: []*app.ToolView{
 			{Name: "ripgrep", Provider: "brew", Installed: true},
 		},
 		PendingKeys: map[string]bool{
@@ -114,7 +112,7 @@ func TestDashboardToolSyncQueuedNamesLabelsPendingIssues(t *testing.T) {
 func TestDashboardToolSyncBusyUsesQueuedNamesAndProgressFallback(t *testing.T) {
 	base := app.DashboardToolActivityInput{
 		Loading: true,
-		Tools: []*database.ToolCache{
+		Tools: []*app.ToolView{
 			{Name: "fd", Provider: "brew", Tracked: true, Installed: false},
 		},
 	}
@@ -148,10 +146,10 @@ func TestDashboardToolSyncBusyUsesQueuedNamesAndProgressFallback(t *testing.T) {
 
 func TestDashboardUpgradeNamesSplitsActiveAndWaitingUpdates(t *testing.T) {
 	active, waiting := app.DashboardUpgradeNames(app.DashboardToolActivityInput{
-		Tools: []*database.ToolCache{
-			{Name: "bat", Provider: "brew", Tracked: true, Installed: true, Outdated: true, LatestVersion: sql.NullString{String: "1.0", Valid: true}},
+		Tools: []*app.ToolView{
+			{Name: "bat", Provider: "brew", Tracked: true, Installed: true, Outdated: true, LatestVersion: "1.0"},
 			{Name: "fd", Provider: "brew", Tracked: true, Installed: true, Outdated: true},
-			{Name: "git", Provider: "brew", Tracked: true, Installed: true, Outdated: true, LatestVersion: sql.NullString{String: "2.46", Valid: true}},
+			{Name: "git", Provider: "brew", Tracked: true, Installed: true, Outdated: true, LatestVersion: "2.46"},
 			{Name: "curl", Provider: "brew", Tracked: true, Installed: true},
 		},
 		ActiveKeys: map[string]bool{
@@ -174,7 +172,7 @@ func TestDashboardUpgradeNamesSplitsActiveAndWaitingUpdates(t *testing.T) {
 
 func TestDashboardReconcilePlan_EmptyHealthySnapshotHasNoSteps(t *testing.T) {
 	steps := app.DashboardReconcilePlan(app.DashboardReconcilePlanInput{
-		Tools: []*database.ToolCache{
+		Tools: []*app.ToolView{
 			{Name: "git", Provider: "brew", Tracked: true, Installed: true},
 		},
 		DotsRepo: "/repo",
@@ -190,11 +188,11 @@ func TestDashboardReconcilePlan_EmptyHealthySnapshotHasNoSteps(t *testing.T) {
 
 func TestDashboardReconcilePlan_PlansActionableToolDotAndIgnoreSteps(t *testing.T) {
 	steps := app.DashboardReconcilePlan(app.DashboardReconcilePlanInput{
-		Tools: []*database.ToolCache{
+		Tools: []*app.ToolView{
 			{Name: "fd", Provider: "brew", Tracked: true, Installed: false},
 			{Name: "git", Provider: "brew", Tracked: true, Installed: true, Outdated: true},
 		},
-		DiscoveredTools: []*database.ToolCache{
+		DiscoveredTools: []*app.ToolView{
 			{Name: "ripgrep", Provider: "brew", Installed: true},
 		},
 		DotsRepo: "/repo",
@@ -256,7 +254,7 @@ func TestDashboardReconcilePlan_IncludesFixNvmManagedStepFromDoctorDrift(t *test
 
 func TestDashboardReconcilePlan_IncludesFixNvmManagedStep(t *testing.T) {
 	steps := app.DashboardReconcilePlan(app.DashboardReconcilePlanInput{
-		Tools: []*database.ToolCache{
+		Tools: []*app.ToolView{
 			{Name: "pnpm", Provider: "brew", Tracked: true, Installed: true},
 		},
 		NvmManaged: map[string]bool{"pnpm": true},
@@ -314,11 +312,11 @@ func TestDashboardReconcilePlan_SuppressesDotsStepsWhenDotsUnavailable(t *testin
 
 func TestDashboardReconcilePlan_IgnoresSuppressedTools(t *testing.T) {
 	steps := app.DashboardReconcilePlan(app.DashboardReconcilePlanInput{
-		Tools: []*database.ToolCache{
+		Tools: []*app.ToolView{
 			{Name: "fd", Provider: "brew", Tracked: true, Installed: false},
 			{Name: "git", Provider: "brew", Tracked: true, Installed: true, Outdated: true},
 		},
-		DiscoveredTools: []*database.ToolCache{
+		DiscoveredTools: []*app.ToolView{
 			{Name: "ripgrep", Provider: "brew", Installed: true},
 		},
 		IgnoredTools: map[string]bool{

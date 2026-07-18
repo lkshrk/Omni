@@ -97,13 +97,14 @@ func (a *App) resolveTools(ctx context.Context, cfg *config.RootConfig, groups [
 	var warnings []string
 	resolved := make([]resolvedTool, 0, len(order))
 	availability := make(map[string]bool)
+	settings := a.effectiveSettings(cfg)
 	for _, name := range order {
 		spec, ok := cfg.Tools[name]
 		if !ok {
 			warnings = append(warnings, fmt.Sprintf("tool %q is referenced by a group but has no logical spec", name))
 			continue
 		}
-		route := a.planInstallRoute(ctx, name, spec, availability)
+		route := a.planInstallRouteWithSettings(ctx, name, spec, availability, settings)
 		install := route.Install
 		entry := spec.ToToolEntry(name, install)
 		if !includeIgnored && (toolNameIgnored(ignored, name) || entry.Ignore) {
@@ -164,9 +165,23 @@ func (a *App) resolveInstallSpecWithAvailability(ctx context.Context, logicalNam
 	return a.planInstallRoute(ctx, logicalName, spec, availability).Install
 }
 
+// resolveInstallSpecWithSettings is the loop-friendly variant: callers resolving
+// many tools in a row pass a settings snapshot they loaded once, avoiding a
+// per-tool config.Load + ValidateRoot on the hot list path.
+func (a *App) resolveInstallSpecWithSettings(ctx context.Context, logicalName string, spec config.ToolSpec, availability map[string]bool, settings config.Settings) config.ToolInstallSpec {
+	return a.planInstallRouteWithSettings(ctx, logicalName, spec, availability, settings).Install
+}
+
+// planInstallRoute loads settings once for a single-tool resolution. Callers in a
+// loop must instead resolve settings once and call planInstallRouteWithSettings,
+// so config is not re-read and re-validated per tool.
 func (a *App) planInstallRoute(ctx context.Context, logicalName string, spec config.ToolSpec, availability map[string]bool) installRoute {
-	hostname := currentHostname()
 	settings, _ := a.LoadSettings()
+	return a.planInstallRouteWithSettings(ctx, logicalName, spec, availability, settings)
+}
+
+func (a *App) planInstallRouteWithSettings(ctx context.Context, logicalName string, spec config.ToolSpec, availability map[string]bool, settings config.Settings) installRoute {
+	hostname := currentHostname()
 	fallbackBinDir := strings.TrimSpace(settings.FallbackBinDir)
 	if install, ok := spec.Hosts[hostname]; ok {
 		return a.makeInstallRoute(logicalName, spec, installRouteNative, install, nil, fallbackBinDir)
@@ -183,7 +198,7 @@ func (a *App) planInstallRoute(ctx context.Context, logicalName string, spec con
 		candidates = append([]config.ToolInstallSpec{defaultSpec}, spec.Variants...)
 	}
 	sortInstallCandidatesByPriority(candidates, settings.ProviderPriority)
-	disabled := a.installDisabledProviders()
+	disabled := disabledProviderSet(settings.DisabledProviders)
 	skipped := make([]installRouteSkip, 0, len(candidates))
 	for _, candidate := range candidates {
 		configured := cloneToolInstallSpec(candidate)
@@ -322,14 +337,6 @@ func allInstallRouteSkipsAreProviderUnavailable(skipped []installRouteSkip, cand
 		}
 	}
 	return true
-}
-
-func (a *App) installDisabledProviders() map[string]bool {
-	settings, err := a.LoadSettings()
-	if err != nil {
-		return nil
-	}
-	return disabledProviderSet(settings.DisabledProviders)
 }
 
 func (a *App) installCandidateUsableCached(ctx context.Context, logicalName string, candidate config.ToolInstallSpec, availability map[string]bool, disabled map[string]bool) (bool, installRouteSkip) {

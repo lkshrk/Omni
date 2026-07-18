@@ -21,16 +21,21 @@ make cli-dev ARGS='tools list'
 ## Tests
 
 ```sh
-make test
+make -j2 test
 ```
 
-`make test` runs shell regressions and `go test -race -trimpath ./...`.
+This runs shell regressions and `go test -race -trimpath ./...` concurrently,
+using a reset, stable isolated test root so unchanged packages reuse Go's test
+cache on repeat runs.
 
 Integration tests must use the Docker-isolated target:
 
 ```sh
 make test-integration
 ```
+
+This runs only integration-tagged coverage with the race detector; the full
+unit suite remains in `make test`.
 
 Do not run integration tests directly against the local machine. Dots and
 package-manager flows intentionally mutate files and package-manager state in
@@ -103,4 +108,4 @@ notes. Release automation is CI-gated by commit SHA.
 - [Documentation maintenance](documentation-maintenance.md)
 - [Test matrix](test-matrix.md)
 - [Contributing guide](https://github.com/lkshrk/omni/blob/main/CONTRIBUTING.md)
-- [Settings schema](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.v16.schema.json)
+- [Settings schema](https://github.com/lkshrk/omni/blob/main/spec/omni.settings.schema.json)

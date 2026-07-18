@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -89,7 +90,7 @@ func (a *App) updateQuarantineDecision(ctx context.Context, cfg *config.RootConf
 	}
 	metadata, err := a.readDB().GetUpdateMetadata(ctx, metadataProvider, pkg, tool.LatestVersion.String)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			return updateQuarantineDecision{Blocked: true, Reason: UpdateBlockMetadataMissing}, nil
 		}
 		return updateQuarantineDecision{}, err

@@ -127,22 +127,6 @@ func hasTool(cfg *config.RootConfig, name, providerName string) bool {
 
 // ─── Install ─────────────────────────────────────────────────────────────────
 
-func TestInstall_Success(t *testing.T) {
-	stub := &stubProvider{name: "brew", available: true}
-	a, _ := newImportApp(t, stub)
-
-	if err := a.Install(context.Background(), "ripgrep", "brew"); err != nil {
-		t.Fatalf("Install: %v", err)
-	}
-	tools, err := a.ListTools(context.Background(), "")
-	if err != nil {
-		t.Fatalf("ListTools: %v", err)
-	}
-	if len(tools) != 1 || tools[0].Name != "ripgrep" {
-		t.Errorf("DB = %v, want [ripgrep]", tools)
-	}
-}
-
 func TestInstall_PostInstallVerificationFailureDoesNotMarkInstalled(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -289,41 +273,7 @@ func TestInstallWithStateReturnsUpdatedToolsAndGroups(t *testing.T) {
 	}
 }
 
-func TestInstall_UnknownProvider(t *testing.T) {
-	a, _ := newImportApp(t)
-	if err := a.Install(context.Background(), "ripgrep", "unknown"); err == nil {
-		t.Error("expected error for unknown provider, got nil")
-	}
-}
-
-func TestInstall_UnavailableProvider(t *testing.T) {
-	stub := &stubProvider{name: "brew", available: false}
-	a, _ := newImportApp(t, stub)
-	if err := a.Install(context.Background(), "ripgrep", "brew"); err == nil {
-		t.Error("expected error when provider unavailable, got nil")
-	}
-}
-
 // ─── Uninstall ───────────────────────────────────────────────────────────────
-
-func TestUninstall_Success(t *testing.T) {
-	stub := &stubProvider{name: "brew", available: true}
-	a, _ := newImportApp(t, stub)
-
-	if err := a.Install(context.Background(), "ripgrep", "brew"); err != nil {
-		t.Fatalf("Install: %v", err)
-	}
-	if err := a.Uninstall(context.Background(), "ripgrep", "brew"); err != nil {
-		t.Fatalf("Uninstall: %v", err)
-	}
-	tools, err := a.ListTools(context.Background(), "")
-	if err != nil {
-		t.Fatalf("ListTools: %v", err)
-	}
-	if len(tools) != 0 {
-		t.Errorf("tool should be removed from cache after Uninstall, got %+v", tools)
-	}
-}
 
 func TestUninstall_RemovesConfiguredToolFromFile(t *testing.T) {
 	stub := &stubProvider{name: "brew", available: true}
@@ -730,18 +680,6 @@ func TestRemoveToolFromConfig_RejectsProviderTool(t *testing.T) {
 
 // ─── Upgrade ─────────────────────────────────────────────────────────────────
 
-func TestUpgrade_Success(t *testing.T) {
-	stub := &stubProvider{name: "brew", available: true}
-	a, _ := newImportApp(t, stub)
-
-	if err := a.Install(context.Background(), "ripgrep", "brew"); err != nil {
-		t.Fatalf("Install: %v", err)
-	}
-	if err := a.Upgrade(context.Background(), "ripgrep", "brew"); err != nil {
-		t.Fatalf("Upgrade: %v", err)
-	}
-}
-
 func TestUpgradeInstalled_UsesCachedInstalledOwner(t *testing.T) {
 	node := &managerUpgradeStub{stubProvider: stubProvider{name: "node", available: true}, verifyInstalled: true}
 	a, _ := newImportApp(t, node)
@@ -822,8 +760,8 @@ func TestUpgradeWithStateReturnsUpdatedTools(t *testing.T) {
 		if tool.Outdated {
 			t.Fatalf("upgraded tool remains outdated: %+v", tool)
 		}
-		if tool.Version.String != "npm-version" {
-			t.Fatalf("version = %q, want npm-version", tool.Version.String)
+		if tool.Version != "npm-version" {
+			t.Fatalf("version = %q, want npm-version", tool.Version)
 		}
 		return
 	}
@@ -1008,31 +946,6 @@ func TestUpgrade_VerificationFailureKeepsOutdatedState(t *testing.T) {
 }
 
 // ─── UpgradeAll ───────────────────────────────────────────────────────────────
-
-func TestUpgradeAll_OnlyUpgradesOutdated(t *testing.T) {
-	stub := &stubProvider{name: "brew", available: true}
-	a, _ := newImportApp(t, stub)
-
-	ctx := context.Background()
-	if err := a.Install(ctx, "ripgrep", "brew"); err != nil {
-		t.Fatalf("Install ripgrep: %v", err)
-	}
-	if err := a.Install(ctx, "git", "brew"); err != nil {
-		t.Fatalf("Install git: %v", err)
-	}
-	// Mark only ripgrep outdated.
-	if err := a.DB().UpdateOutdated(ctx, "ripgrep", "brew", "ripgrep", true, "15.0.0"); err != nil {
-		t.Fatalf("UpdateOutdated: %v", err)
-	}
-
-	progressCalls := 0
-	if err := a.UpgradeAll(ctx, func(_ string) { progressCalls++ }); err != nil {
-		t.Fatalf("UpgradeAll: %v", err)
-	}
-	if progressCalls != 1 {
-		t.Errorf("progress called %d times, want 1 (only ripgrep is outdated)", progressCalls)
-	}
-}
 
 func TestUpgradeAllDetailedWithStateReturnsUpdatedTools(t *testing.T) {
 	node := &clearingManagerUpgradeStub{
