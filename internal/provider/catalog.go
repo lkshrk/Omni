@@ -61,6 +61,11 @@ var builtinMetadata = map[string]Metadata{
 		DisplayOrder:        320,
 		DefaultInstallOrder: 40,
 	},
+	"cargo": {
+		Kind:                ProviderKindConcrete,
+		DisplayOrder:        330,
+		DefaultInstallOrder: 50,
+	},
 	"script":   {Kind: ProviderKindConcrete, DisplayOrder: 400},
 	"apt_repo": {Kind: ProviderKindConcrete, Ecosystem: EcosystemSystem, DisplayOrder: 105},
 }
@@ -101,14 +106,11 @@ func BuiltinConcreteEcosystems() map[string]string {
 	return out
 }
 
-func BuiltinConcreteEcosystemNames() []string {
-	concrete := BuiltinConcreteEcosystems()
+// BuiltinConcreteConfigNames returns concrete names accepted in tool config.
+// Script is appended separately by the schema because it has extra validation.
+func BuiltinConcreteConfigNames() []string {
 	return sortedMetadataNames(builtinMetadata, func(name string, meta Metadata) bool {
-		if meta.Kind == ProviderKindConcrete && meta.Ecosystem != "" {
-			return true
-		}
-		_, ok := concrete[name]
-		return ok
+		return meta.Kind == ProviderKindConcrete && name != "script"
 	})
 }
 

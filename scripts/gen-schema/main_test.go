@@ -168,7 +168,7 @@ func TestToolSchemaUsesConcreteProviderCandidates(t *testing.T) {
 	if providerProp == nil {
 		t.Fatal("ToolInstallSpec provider property missing")
 	}
-	for _, concrete := range []string{"brew", "apt", "npm", "pip", "script"} {
+	for _, concrete := range []string{"brew", "apt", "npm", "pip", "cargo", "script"} {
 		if !hasEnum(providerProp.Enum, concrete) {
 			t.Fatalf("ToolInstallSpec provider enum missing concrete provider %q: %v", concrete, providerProp.Enum)
 		}

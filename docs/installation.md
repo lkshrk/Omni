@@ -40,6 +40,7 @@ Supported built-in concrete providers:
 | System packages | `apt`, `apk`, `dnf`, `zypper`, `pacman`, `brew` |
 | Node packages | `bun`, `pnpm`, `npm` |
 | Python packages | `uv`, `pip` |
+| Rust binary crates | `cargo` |
 
 ## Install on Linux
 

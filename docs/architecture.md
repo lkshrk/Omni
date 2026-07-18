@@ -83,6 +83,7 @@ At app startup, Omni registers concrete providers first:
 - `pacman`
 - `zypper`
 - `pip`
+- `cargo`
 
 Provider metadata records each provider's package family, display order, manager
 options, and default install order. The legacy provider-family names

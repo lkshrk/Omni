@@ -61,6 +61,7 @@ Tool config stores concrete provider candidates in priority order:
 - System packages: `brew`, `apt`, `apk`, `dnf`, `pacman`, `zypper`
 - Node packages: `bun`, `pnpm`, `npm`
 - Python packages: `uv`, `pip`
+- Rust binary crates: `cargo`
 
 Use `providers[].package` when the package name differs from the logical tool
 name. Legacy `provider`/`install_with` fields are migrated on load.

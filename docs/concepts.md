@@ -25,6 +25,7 @@ Providers are the package managers or registries that install a tool:
 - `brew`, `apt`, `apk`, `dnf`, `pacman`, `zypper`
 - `bun`, `pnpm`, `npm`
 - `uv`, `pip`
+- `cargo`
 
 Each logical tool stores one or more concrete provider candidates in
 `providers[]`. The first entry is the default for normal install/sync. Search

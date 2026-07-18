@@ -25,6 +25,7 @@ import (
 	aptpkg "github.com/lkshrk/omni/internal/provider/apt"
 	"github.com/lkshrk/omni/internal/provider/aptrepo"
 	"github.com/lkshrk/omni/internal/provider/brew"
+	"github.com/lkshrk/omni/internal/provider/cargo"
 	dnfpkg "github.com/lkshrk/omni/internal/provider/dnf"
 	"github.com/lkshrk/omni/internal/provider/node"
 	pacmanpkg "github.com/lkshrk/omni/internal/provider/pacman"
@@ -295,6 +296,7 @@ func (a *App) initProviderRegistry(settings config.Settings) {
 	a.registry.RegisterWithMetadata(provider.Named("npm", node.New(exec, "npm")), provider.BuiltinMetadata("npm"))
 	a.registry.RegisterWithMetadata(provider.Named("uv", python.New(exec, "uv")), provider.BuiltinMetadata("uv"))
 	a.registry.RegisterWithMetadata(pip.New(exec), provider.BuiltinMetadata("pip"))
+	a.registry.RegisterWithMetadata(cargo.New(exec), provider.BuiltinMetadata("cargo"))
 	a.registry.RegisterWithMetadata(script.New(exec), provider.BuiltinMetadata("script"))
 	a.registry.RegisterWithMetadata(aptrepo.New(exec), provider.BuiltinMetadata("apt_repo"))
 
