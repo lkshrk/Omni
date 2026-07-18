@@ -2,10 +2,10 @@
 # in both global settings and per-host settings, preserving sibling keys.
 exec omni --config settings.json hosts ensure testhost
 
-# After startup normalization the file version must be 15 (v8->v9 disabled_providers
+# After startup normalization the file version must be current (v8->v9 disabled_providers
 # expansion under test, then the remaining chain to CurrentVersion).
 exec grep '"version"' settings.json
-stdout '"version": 17'
+stdout '"version": 19'
 
 # Global disabled_providers: ["node"] → ["bun","pnpm","npm"]
 # The values are on separate lines in pretty-printed JSON; grep for each name.

@@ -272,6 +272,7 @@ var configMigrations = []configMigration{
 	{from: 15, to: 16, apply: migrateConfigV15ToV16, applyRaw: migrateRawConfigV15ToV16},
 	{from: 16, to: 17, apply: migrateConfigV16ToV17, applyRaw: migrateRawConfigV16ToV17},
 	{from: 17, to: 18, apply: migrateConfigV17ToV18, applyRaw: migrateRawConfigV17ToV18},
+	{from: 18, to: 19, apply: migrateConfigV18ToV19, applyRaw: migrateRawConfigV18ToV19},
 }
 
 func configMigrationFrom(version int) (configMigration, bool) {
@@ -1073,6 +1074,18 @@ func migrateConfigV17ToV18(cfg *RootConfig) error {
 
 func migrateRawConfigV17ToV18(raw map[string]json.RawMessage) error {
 	raw["version"] = json.RawMessage(`18`)
+	return nil
+}
+
+// migrateConfigV18ToV19 is a no-op data migration: v19 adds optional
+// McpServer headers for remote transports.
+func migrateConfigV18ToV19(cfg *RootConfig) error {
+	cfg.Version = 19
+	return nil
+}
+
+func migrateRawConfigV18ToV19(raw map[string]json.RawMessage) error {
+	raw["version"] = json.RawMessage(`19`)
 	return nil
 }
 

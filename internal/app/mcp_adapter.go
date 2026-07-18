@@ -3,12 +3,12 @@ package app
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/lkshrk/omni/internal/config"
 )
 
-// McpAdapter manages MCP servers in one target agent by delegating to that
-// agent's own CLI. omni never edits agent config files directly.
+// McpAdapter manages MCP servers in one target agent.
 type McpAdapter interface {
 	ID() string
 	Available() bool
@@ -17,13 +17,32 @@ type McpAdapter interface {
 	Remove(ctx context.Context, name string) error
 }
 
+func headerFlags(headers map[string]string) []string {
+	names := make([]string, 0, len(headers))
+	for name := range headers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	args := make([]string, 0, 2*len(names))
+	for _, name := range names {
+		args = append(args, "--header", name+": "+headers[name])
+	}
+	return args
+}
+
 // InstalledMcpServer is one MCP server as reported by an agent's list output.
 type InstalledMcpServer struct {
-	Name      string
-	Transport string
-	Command   string
-	URL       string
-	Version   string
+	Name       string
+	Transport  string
+	Command    string
+	URL        string
+	Version    string
+	Headers    map[string]string
+	EnvLiteral map[string]string
+	// HeadersKnown distinguishes an agent that reported no headers from one
+	// whose list output cannot report headers at all.
+	HeadersKnown bool
 }
 
 // resolveEnvFlags builds flag pairs for env var names (resolved) and env_literal (inline).

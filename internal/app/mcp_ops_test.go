@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/app"
@@ -15,7 +17,10 @@ type stubMcpAdapter struct {
 	id           string
 	available    bool
 	addErr       error
+	addErrors    []error
+	addFunc      func(context.Context, config.McpServer) error
 	removeErr    error
+	removeHook   func()
 	listErr      error
 	listed       []app.InstalledMcpServer
 	addedServers []config.McpServer
@@ -32,12 +37,23 @@ func (s *stubMcpAdapter) List(_ context.Context) ([]app.InstalledMcpServer, erro
 	}
 	return append([]app.InstalledMcpServer(nil), s.listed...), nil
 }
-func (s *stubMcpAdapter) Add(_ context.Context, srv config.McpServer) error {
+func (s *stubMcpAdapter) Add(ctx context.Context, srv config.McpServer) error {
 	s.addedServers = append(s.addedServers, srv)
+	if s.addFunc != nil {
+		return s.addFunc(ctx, srv)
+	}
+	if len(s.addErrors) > 0 {
+		err := s.addErrors[0]
+		s.addErrors = s.addErrors[1:]
+		return err
+	}
 	return s.addErr
 }
 func (s *stubMcpAdapter) Remove(_ context.Context, name string) error {
 	s.removedNames = append(s.removedNames, name)
+	if s.removeHook != nil {
+		s.removeHook()
+	}
 	return s.removeErr
 }
 
@@ -82,6 +98,24 @@ func TestRestoreMcpServers_InstallsTargetedServer(t *testing.T) {
 	}
 	if len(res.Errors) != 0 {
 		t.Fatalf("unexpected errors: %v", res.Errors)
+	}
+}
+
+func TestAddMcpServer_ValidatesBeforeAdapterSideEffects(t *testing.T) {
+	stub := &stubMcpAdapter{id: "claude-code", available: true}
+	a := newMcpTestApp(t, config.AgentsConfig{}, app.WithMcpAdapters([]app.McpAdapter{stub}))
+	_, err := a.AddMcpServer(context.Background(), config.McpServer{
+		Name: "invalid", Transport: "http", URL: "https://mcp.example.com",
+		Headers: map[string]string{"Bad Name": "value"}, Agents: []string{"claude-code"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid HTTP header name") {
+		t.Fatalf("error = %v, want invalid header name", err)
+	}
+	if stub.listCalls != 0 || len(stub.addedServers) != 0 || len(stub.removedNames) != 0 {
+		t.Fatalf("invalid server touched adapter: list=%d add=%v remove=%v", stub.listCalls, stub.addedServers, stub.removedNames)
+	}
+	if len(loadMcpTestConfig(t, a).Agents.McpServers) != 0 {
+		t.Fatal("invalid server mutated manifest")
 	}
 }
 
@@ -160,6 +194,133 @@ func TestRestoreMcpServers_SkipsAlreadyInstalled(t *testing.T) {
 	}
 	if len(res.Installed) != 0 {
 		t.Fatalf("expected no installed entries, got %v", res.Installed)
+	}
+}
+
+func TestRestoreMcpServers_UpdatesChangedHeaders(t *testing.T) {
+	stub := &stubMcpAdapter{
+		id:        "codex",
+		available: true,
+		listed: []app.InstalledMcpServer{{
+			Name: "grafana", Transport: "http", URL: "https://mcp.example.com",
+			Headers: map[string]string{"X-Key": "old"}, HeadersKnown: true, EnvLiteral: map[string]string{"MODE": "old"},
+		}},
+	}
+	srv := config.McpServer{
+		Name: "grafana", Transport: "http", URL: "https://mcp.example.com",
+		Headers: map[string]string{"X-Key": "new"}, Agents: []string{"codex"},
+	}
+	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
+	res, err := a.RestoreMcpServers(context.Background(), app.RestoreMcpOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stub.removedNames) != 1 || stub.removedNames[0] != "grafana" || len(stub.addedServers) != 1 {
+		t.Fatalf("remove/add calls = %v/%v, want one update", stub.removedNames, stub.addedServers)
+	}
+	if got := stub.addedServers[0].Headers["X-Key"]; got != "new" {
+		t.Fatalf("updated header = %q, want new", got)
+	}
+	if len(res.Updated) != 1 || res.Updated[0] != "codex/grafana" {
+		t.Fatalf("Updated = %v, want [codex/grafana]", res.Updated)
+	}
+}
+
+func TestRestoreMcpServers_DryRunReportsChangedHeaders(t *testing.T) {
+	stub := &stubMcpAdapter{
+		id: "codex", available: true,
+		listed: []app.InstalledMcpServer{{Name: "grafana", Headers: map[string]string{"X-Key": "old"}, HeadersKnown: true}},
+	}
+	srv := config.McpServer{Name: "grafana", Transport: "http", URL: "https://mcp.example.com", Headers: map[string]string{"X-Key": "new"}, Agents: []string{"codex"}}
+	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
+	res, err := a.RestoreMcpServers(context.Background(), app.RestoreMcpOptions{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stub.removedNames)+len(stub.addedServers) != 0 {
+		t.Fatalf("dry run changed adapter: remove=%v add=%v", stub.removedNames, stub.addedServers)
+	}
+	if len(res.WouldUpdate) != 1 || res.WouldUpdate[0] != "codex/grafana" {
+		t.Fatalf("WouldUpdate = %v, want [codex/grafana]", res.WouldUpdate)
+	}
+}
+
+func TestRestoreMcpServers_HeaderUpdateRemoveFailureDoesNotAdd(t *testing.T) {
+	stub := &stubMcpAdapter{
+		id: "codex", available: true, removeErr: errors.New("remove failed"),
+		listed: []app.InstalledMcpServer{{Name: "grafana", Headers: map[string]string{"X-Key": "old"}, HeadersKnown: true}},
+	}
+	srv := config.McpServer{Name: "grafana", Transport: "http", URL: "https://mcp.example.com", Headers: map[string]string{"X-Key": "new"}, Agents: []string{"codex"}}
+	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
+	res, err := a.RestoreMcpServers(context.Background(), app.RestoreMcpOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stub.addedServers) != 0 {
+		t.Fatalf("Add called after failed remove: %v", stub.addedServers)
+	}
+	if len(res.Errors) != 1 {
+		t.Fatalf("Errors = %v, want one remove failure", res.Errors)
+	}
+}
+
+func TestRestoreMcpServers_HeaderUpdateAddFailureRestoresPrevious(t *testing.T) {
+	stub := &stubMcpAdapter{
+		id: "codex", available: true, addErrors: []error{errors.New("add failed"), nil},
+		listed: []app.InstalledMcpServer{{
+			Name: "grafana", Transport: "http", URL: "https://mcp.example.com",
+			Headers: map[string]string{"X-Key": "old"}, HeadersKnown: true, EnvLiteral: map[string]string{"MODE": "old"},
+		}},
+	}
+	srv := config.McpServer{Name: "grafana", Transport: "http", URL: "https://mcp.example.com", Headers: map[string]string{"X-Key": "new"}, Agents: []string{"codex"}}
+	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
+	res, err := a.RestoreMcpServers(context.Background(), app.RestoreMcpOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stub.addedServers) != 2 || stub.addedServers[1].Headers["X-Key"] != "old" || stub.addedServers[1].EnvLiteral["MODE"] != "old" {
+		t.Fatalf("Add calls = %v, want failed desired then previous registration", stub.addedServers)
+	}
+	if len(res.Errors) != 1 || !strings.Contains(res.Errors[0].Error(), "previous registration restored") {
+		t.Fatalf("Errors = %v, want restored-previous error", res.Errors)
+	}
+}
+
+func TestRestoreMcpServers_HeaderUpdateRollbackSurvivesRequestCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	addCalls := 0
+	stub := &stubMcpAdapter{
+		id: "codex", available: true,
+		listed: []app.InstalledMcpServer{{
+			Name: "grafana", Transport: "http", URL: "https://mcp.example.com",
+			Headers: map[string]string{"X-Key": "old"}, HeadersKnown: true,
+		}},
+		removeHook: cancel,
+		addFunc: func(addCtx context.Context, _ config.McpServer) error {
+			addCalls++
+			if addCalls == 1 {
+				return errors.New("add failed")
+			}
+			if err := addCtx.Err(); err != nil {
+				t.Fatalf("rollback inherited cancelled request context: %v", err)
+			}
+			return nil
+		},
+	}
+	srv := config.McpServer{
+		Name: "grafana", Transport: "http", URL: "https://mcp.example.com",
+		Headers: map[string]string{"X-Key": "new"}, Agents: []string{"codex"},
+	}
+	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
+	res, err := a.RestoreMcpServers(ctx, app.RestoreMcpOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if addCalls != 2 || len(stub.addedServers) != 2 || stub.addedServers[1].Headers["X-Key"] != "old" {
+		t.Fatalf("Add calls = %v, want failed desired then uncancelled rollback", stub.addedServers)
+	}
+	if len(res.Errors) != 1 || !strings.Contains(res.Errors[0].Error(), "previous registration restored") {
+		t.Fatalf("Errors = %v, want restored-previous error", res.Errors)
 	}
 }
 
@@ -293,6 +454,29 @@ func TestAddMcpServer_Upsert(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("expected exactly 1 entry for 'x', got %d", count)
+	}
+}
+
+func TestAddMcpServer_UpdatesChangedInstalledHeaders(t *testing.T) {
+	stub := &stubMcpAdapter{
+		id: "claude-code", available: true,
+		listed: []app.InstalledMcpServer{{
+			Name: "grafana", Transport: "http", URL: "https://mcp.example.com",
+			Headers: map[string]string{"X-Key": "old"}, HeadersKnown: true,
+		}},
+	}
+	a := newMcpTestApp(t, config.AgentsConfig{}, app.WithMcpAdapters([]app.McpAdapter{stub}))
+	desired := config.McpServer{Name: "grafana", Transport: "http", URL: "https://mcp.example.com", Headers: map[string]string{"X-Key": "new"}, Agents: []string{"claude-code"}}
+	res, err := a.AddMcpServer(context.Background(), desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Updated) != 1 || len(stub.removedNames) != 1 || len(stub.addedServers) != 1 {
+		t.Fatalf("result/remove/add = %+v/%v/%v, want one update", res, stub.removedNames, stub.addedServers)
+	}
+	cfg := loadMcpTestConfig(t, a)
+	if got := cfg.Agents.McpServers[0].Headers["X-Key"]; got != "new" {
+		t.Fatalf("persisted header = %q, want new", got)
 	}
 }
 
@@ -551,6 +735,25 @@ func TestSetMcpServerAgents_NoChangeTouchesNoAdapter(t *testing.T) {
 	}
 }
 
+func TestSetMcpServerAgents_ReconcilesChangedHeaders(t *testing.T) {
+	claude := &stubMcpAdapter{
+		id: "claude-code", available: true,
+		listed: []app.InstalledMcpServer{{
+			Name: "x", Transport: "http", URL: "https://mcp.example.com",
+			Headers: map[string]string{"X-Key": "old"}, HeadersKnown: true,
+		}},
+	}
+	existing := config.McpServer{Name: "x", Transport: "http", URL: "https://mcp.example.com", Headers: map[string]string{"X-Key": "new"}, Agents: []string{"claude-code"}}
+	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{existing}}, app.WithMcpAdapters([]app.McpAdapter{claude}))
+	res, err := a.SetMcpServerAgents(context.Background(), "x", []string{"claude-code"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Updated) != 1 || len(claude.removedNames) != 1 || len(claude.addedServers) != 1 {
+		t.Fatalf("result/remove/add = %+v/%v/%v, want one update", res, claude.removedNames, claude.addedServers)
+	}
+}
+
 func TestSetMcpServerAgents_ReconcilesMissingSelectedAdapter(t *testing.T) {
 	claude := &stubMcpAdapter{id: "claude-code", available: true}
 	existing := config.McpServer{Name: "x", Transport: "stdio", Command: "npx x", Agents: []string{"claude-code"}}
@@ -643,5 +846,72 @@ func TestImportMcpServers_ExcludesManaged(t *testing.T) {
 	}
 	if len(diff.Unmanaged["claude-code"]) != 1 || diff.Unmanaged["claude-code"][0].Name != "unmanaged" {
 		t.Fatalf("unexpected unmanaged: %v", diff.Unmanaged)
+	}
+}
+
+func TestAdoptUnmanagedMcpServers_PreservesHeaders(t *testing.T) {
+	stub := &stubMcpAdapter{
+		id: "claude-code", available: true,
+		listed: []app.InstalledMcpServer{{
+			Name: "remote", Transport: "http", URL: "https://mcp.example.com",
+			Headers: map[string]string{"X-Key": "${REMOTE_KEY}"}, HeadersKnown: true,
+		}},
+	}
+	a := newMcpTestApp(t, config.AgentsConfig{}, app.WithMcpAdapters([]app.McpAdapter{stub}))
+	adopted, err := a.AdoptUnmanagedMcpServers(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if adopted != 1 {
+		t.Fatalf("adopted = %d, want 1", adopted)
+	}
+	cfg := loadMcpTestConfig(t, a)
+	if got := cfg.Agents.McpServers[0].Headers["X-Key"]; got != "${REMOTE_KEY}" {
+		t.Fatalf("imported header = %q, want env reference", got)
+	}
+}
+
+func TestAdoptUnmanagedMcpServers_UnionsAgentsForIdenticalServer(t *testing.T) {
+	server := app.InstalledMcpServer{
+		Name: "remote", Transport: "http", URL: "https://mcp.example.com",
+		Headers: map[string]string{"X-Key": "${REMOTE_KEY}"}, HeadersKnown: true,
+	}
+	claude := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{server}}
+	codex := &stubMcpAdapter{id: "codex", available: true, listed: []app.InstalledMcpServer{server}}
+	a := newMcpTestApp(t, config.AgentsConfig{}, app.WithMcpAdapters([]app.McpAdapter{codex, claude}))
+
+	adopted, err := a.AdoptUnmanagedMcpServers(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if adopted != 1 {
+		t.Fatalf("adopted = %d, want 1", adopted)
+	}
+	got := loadMcpTestConfig(t, a).Agents.McpServers
+	if len(got) != 1 || !slices.Equal(got[0].Agents, []string{"claude-code", "codex"}) {
+		t.Fatalf("imported servers = %+v, want one server targeted at both agents", got)
+	}
+	if got[0].Headers["X-Key"] != "${REMOTE_KEY}" {
+		t.Fatalf("imported headers = %v, want env reference", got[0].Headers)
+	}
+}
+
+func TestAdoptUnmanagedMcpServers_RejectsConflictingHeaders(t *testing.T) {
+	claude := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{{
+		Name: "remote", Transport: "http", URL: "https://mcp.example.com",
+		Headers: map[string]string{"X-Key": "claude"}, HeadersKnown: true,
+	}}}
+	codex := &stubMcpAdapter{id: "codex", available: true, listed: []app.InstalledMcpServer{{
+		Name: "remote", Transport: "http", URL: "https://mcp.example.com",
+		Headers: map[string]string{"X-Key": "codex"}, HeadersKnown: true,
+	}}}
+	a := newMcpTestApp(t, config.AgentsConfig{}, app.WithMcpAdapters([]app.McpAdapter{claude, codex}))
+
+	adopted, err := a.AdoptUnmanagedMcpServers(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "conflicting configuration") {
+		t.Fatalf("error = %v, want conflicting configuration", err)
+	}
+	if adopted != 0 || len(loadMcpTestConfig(t, a).Agents.McpServers) != 0 {
+		t.Fatal("conflicting unmanaged servers must not mutate the manifest")
 	}
 }

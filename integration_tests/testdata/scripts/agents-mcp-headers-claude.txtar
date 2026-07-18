@@ -1,0 +1,75 @@
+# Real Claude Code integration: Omni passes remote headers through Claude's
+# supported CLI, Claude persists them, and a real connection attempt sends them.
+# @requires: claude
+env HOME=$WORK/home
+env OMNI_TEST_TOKEN=expanded-value
+mkdir $WORK/home
+
+exec omni-assert-claude-mcp-header settings.json headers-live X-Literal literal-value
+stdout 'captured header X-Literal'
+exec grep '"X-Literal": "literal-value"' $HOME/.claude.json
+exec claude mcp get headers-live
+stdout 'X-Literal: literal-value'
+
+exec omni-assert-claude-mcp-header settings-updated.json headers-live X-Literal updated-value
+stdout 'updated: claude-code/headers-live'
+stdout 'captured header X-Literal'
+
+exec omni-assert-claude-mcp-header settings-env.json headers-env X-Env expanded-value
+stdout 'captured header X-Env'
+exec grep '"X-Env": "\${OMNI_TEST_TOKEN}"' $HOME/.claude.json
+! exec grep '"X-Env": "expanded-value"' $HOME/.claude.json
+
+-- settings.json --
+{
+  "version": 18,
+  "agents": {
+    "mcp_servers": [
+      {
+        "name": "headers-live",
+        "transport": "http",
+        "url": "STUB_SERVER_URL/mcp",
+        "headers": {
+          "X-Literal": "literal-value"
+        },
+        "agents": ["claude-code"]
+      }
+    ]
+  }
+}
+
+-- settings-env.json --
+{
+  "version": 18,
+  "agents": {
+    "mcp_servers": [
+      {
+        "name": "headers-env",
+        "transport": "sse",
+        "url": "STUB_SERVER_URL/events",
+        "headers": {
+          "X-Env": "${OMNI_TEST_TOKEN}"
+        },
+        "agents": ["claude-code"]
+      }
+    ]
+  }
+}
+
+-- settings-updated.json --
+{
+  "version": 18,
+  "agents": {
+    "mcp_servers": [
+      {
+        "name": "headers-live",
+        "transport": "http",
+        "url": "STUB_SERVER_URL/mcp",
+        "headers": {
+          "X-Literal": "updated-value"
+        },
+        "agents": ["claude-code"]
+      }
+    ]
+  }
+}

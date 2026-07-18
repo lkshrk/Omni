@@ -3,7 +3,11 @@ package app
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
+	"sort"
+	"time"
 
 	"github.com/lkshrk/omni/internal/config"
 )
@@ -16,6 +20,7 @@ type RestoreMcpOptions struct {
 // RestoreMcpResult summarizes a restore run.
 type RestoreMcpResult struct {
 	Installed        []string
+	Updated          []string
 	AlreadyInstalled []string
 	Skipped          []string // servers not targeted at a given adapter
 	// ShadowedByPlugin lists "adapterID/name" servers skipped because an
@@ -24,6 +29,7 @@ type RestoreMcpResult struct {
 	// McpStatusShadowed).
 	ShadowedByPlugin []string
 	WouldInstall     []string // populated only when DryRun=true; servers that would be installed
+	WouldUpdate      []string // populated only when DryRun=true; installed servers whose headers differ
 	Warnings         []string
 	Errors           []McpServerError
 }
@@ -85,6 +91,42 @@ func mcpServerListed(installed []InstalledMcpServer, name string) bool {
 	return false
 }
 
+func installedMcpServer(installed []InstalledMcpServer, name string) (InstalledMcpServer, bool) {
+	for _, s := range installed {
+		if s.Name == name {
+			return s, true
+		}
+	}
+	return InstalledMcpServer{}, false
+}
+
+func mcpHeadersDiffer(desired config.McpServer, installed InstalledMcpServer) bool {
+	return installed.HeadersKnown && !maps.Equal(desired.Headers, installed.Headers)
+}
+
+func updateMcpServer(ctx context.Context, adapter McpAdapter, desired config.McpServer, previous InstalledMcpServer) error {
+	if err := adapter.Remove(ctx, desired.Name); err != nil {
+		return fmt.Errorf("remove before header update: %w", err)
+	}
+	if err := adapter.Add(ctx, desired); err != nil {
+		rollback := config.McpServer{
+			Name:       previous.Name,
+			Transport:  previous.Transport,
+			Command:    previous.Command,
+			URL:        previous.URL,
+			Headers:    previous.Headers,
+			EnvLiteral: previous.EnvLiteral,
+		}
+		rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		defer cancel()
+		if rollbackErr := adapter.Add(rollbackCtx, rollback); rollbackErr != nil {
+			return fmt.Errorf("add updated headers: %w; restore previous registration: %v", err, rollbackErr)
+		}
+		return fmt.Errorf("add updated headers: %w (previous registration restored)", err)
+	}
+	return nil
+}
+
 // resolveMcpServers returns the servers active for groupName.
 // Servers with no GroupConfig.McpServers membership restore on all hosts.
 // Servers listed in a GroupConfig.McpServers only restore when that group is active.
@@ -141,17 +183,29 @@ func (a *App) RestoreMcpServers(ctx context.Context, opts RestoreMcpOptions) (Re
 			res.Warnings = append(res.Warnings, fmt.Sprintf("agent %s: list mcp servers failed, attempting installs: %v", adapter.ID(), listErr))
 			installed = nil
 		}
-		alreadyInstalled := make(map[string]struct{}, len(installed))
+		alreadyInstalled := make(map[string]InstalledMcpServer, len(installed))
 		for _, is := range installed {
-			alreadyInstalled[is.Name] = struct{}{}
+			alreadyInstalled[is.Name] = is
 		}
 		for _, s := range servers {
 			if !serverTargetsAdapter(s, adapter.ID()) {
 				res.Skipped = append(res.Skipped, adapter.ID()+"/"+s.Name)
 				continue
 			}
-			if _, present := alreadyInstalled[s.Name]; present {
-				res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+s.Name)
+			if previous, present := alreadyInstalled[s.Name]; present {
+				if !mcpHeadersDiffer(s, previous) {
+					res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+s.Name)
+					continue
+				}
+				if opts.DryRun {
+					res.WouldUpdate = append(res.WouldUpdate, adapter.ID()+"/"+s.Name)
+					continue
+				}
+				if updateErr := updateMcpServer(ctx, adapter, s, previous); updateErr != nil {
+					res.Errors = append(res.Errors, McpServerError{AgentID: adapter.ID(), ServerName: s.Name, Err: updateErr})
+					continue
+				}
+				res.Updated = append(res.Updated, adapter.ID()+"/"+s.Name)
 				continue
 			}
 			if pluginShadowsName(pluginNames, adapter.ID(), s.Name) {
@@ -178,6 +232,7 @@ func (a *App) RestoreMcpServers(ctx context.Context, opts RestoreMcpOptions) (Re
 type AddMcpResult struct {
 	Errors           []McpServerError
 	AlreadyInstalled []string
+	Updated          []string
 	// SkippedUnavailable lists adapter/server pairs whose agent CLI is not on
 	// PATH: normal on multi-host manifests, an actionable warning on explicit installs.
 	SkippedUnavailable []string
@@ -193,10 +248,8 @@ type RemoveMcpResult struct {
 // Every targeted, available adapter is attempted regardless of earlier adapter failures;
 // the manifest is upserted afterward so live-install failures never leave the manifest
 // out of sync with the caller's intent (see RemoveMcpServer for the mirrored remove case).
-// An adapter that already reports s.Name present is skipped rather than re-added: neither
-// `claude mcp add` nor `codex mcp add` is documented as idempotent on an existing name, and
-// this path is reachable with an already-installed adapter whenever a caller targets an
-// unmanaged server found on multiple agents (e.g. claiming it from the TUI/CLI unmanaged list).
+// An adapter that already reports s.Name present is skipped when its reported headers
+// match, or replaced with rollback when they differ.
 func (a *App) AddMcpServer(ctx context.Context, s config.McpServer) (AddMcpResult, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
@@ -205,15 +258,33 @@ func (a *App) AddMcpServer(ctx context.Context, s config.McpServer) (AddMcpResul
 	if err := a.requireMcpEnabled(cfg); err != nil {
 		return AddMcpResult{}, err
 	}
+	preview := &config.RootConfig{Agents: config.AgentsConfig{McpServers: []config.McpServer{s}}}
+	if errs := fatalValidationErrors(config.ValidateRoot(preview, config.ProviderValidation{})); len(errs) > 0 {
+		return AddMcpResult{}, config.ValidationErrors(errs)
+	}
 	var res AddMcpResult
 	for _, adapter := range a.mcpAdapters() {
 		if !serverTargetsAdapter(s, adapter.ID()) {
 			continue
 		}
 		// listed check first: adopting an already-present server must not demand the CLI
-		if installed, listErr := adapter.List(ctx); listErr == nil && mcpServerListed(installed, s.Name) {
-			res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+s.Name)
-			continue
+		if installed, listErr := adapter.List(ctx); listErr == nil {
+			if previous, present := installedMcpServer(installed, s.Name); present {
+				if !mcpHeadersDiffer(s, previous) {
+					res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+s.Name)
+					continue
+				}
+				if !adapter.Available() {
+					res.SkippedUnavailable = append(res.SkippedUnavailable, adapter.ID()+"/"+s.Name)
+					continue
+				}
+				if updateErr := updateMcpServer(ctx, adapter, s, previous); updateErr != nil {
+					res.Errors = append(res.Errors, McpServerError{AgentID: adapter.ID(), ServerName: s.Name, Err: updateErr})
+				} else {
+					res.Updated = append(res.Updated, adapter.ID()+"/"+s.Name)
+				}
+				continue
+			}
 		}
 		if !adapter.Available() {
 			res.SkippedUnavailable = append(res.SkippedUnavailable, adapter.ID()+"/"+s.Name)
@@ -298,9 +369,23 @@ func (a *App) SetMcpServerAgents(ctx context.Context, name string, agents []stri
 		nowTargeted := serverTargetsAdapter(updated, adapter.ID())
 		switch {
 		case nowTargeted:
-			if installed, listErr := adapter.List(ctx); listErr == nil && mcpServerListed(installed, name) {
-				res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+name)
-				continue
+			if installed, listErr := adapter.List(ctx); listErr == nil {
+				if previous, present := installedMcpServer(installed, name); present {
+					if !mcpHeadersDiffer(updated, previous) {
+						res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+name)
+						continue
+					}
+					if !adapter.Available() {
+						res.SkippedUnavailable = append(res.SkippedUnavailable, adapter.ID()+"/"+name)
+						continue
+					}
+					if updateErr := updateMcpServer(ctx, adapter, updated, previous); updateErr != nil {
+						res.Errors = append(res.Errors, McpServerError{AgentID: adapter.ID(), ServerName: name, Err: updateErr})
+					} else {
+						res.Updated = append(res.Updated, adapter.ID()+"/"+name)
+					}
+					continue
+				}
 			}
 			if !adapter.Available() {
 				res.SkippedUnavailable = append(res.SkippedUnavailable, adapter.ID()+"/"+name)
@@ -384,36 +469,68 @@ func (a *App) ImportMcpServers(ctx context.Context) (McpImportDiff, error) {
 }
 
 // AdoptUnmanagedMcpServers folds ImportMcpServers' unmanaged results into the
-// manifest by name only (Transport/Command/URL come from agent list output,
-// which is the only shape available). This is manifest bookkeeping only,
-// distinct from AddMcpServer: it never calls an agent CLI, since the servers
-// are already installed there.
+// manifest by name using the transport, command, URL, and headers reported by
+// agent CLIs. Identical same-name registrations are adopted once and targeted
+// at their union of agents; conflicting registrations abort without mutation.
+// This is manifest bookkeeping only, distinct from AddMcpServer: it never calls
+// an agent CLI, since the servers are already installed there.
 func (a *App) AdoptUnmanagedMcpServers(ctx context.Context) (int, error) {
 	diff, err := a.ImportMcpServers(ctx)
 	if err != nil {
 		return 0, err
 	}
+	type candidate struct {
+		server InstalledMcpServer
+		agents []string
+	}
+	candidates := make(map[string]candidate)
+	agentIDs := make([]string, 0, len(diff.Unmanaged))
+	for agentID := range diff.Unmanaged {
+		agentIDs = append(agentIDs, agentID)
+	}
+	sort.Strings(agentIDs)
+	for _, agentID := range agentIDs {
+		for _, srv := range diff.Unmanaged[agentID] {
+			current, exists := candidates[srv.Name]
+			if !exists {
+				candidates[srv.Name] = candidate{server: srv, agents: []string{agentID}}
+				continue
+			}
+			if srv.Transport != current.server.Transport || srv.Command != current.server.Command || srv.URL != current.server.URL || !maps.Equal(srv.Headers, current.server.Headers) {
+				return 0, fmt.Errorf("mcp server %q is unmanaged under multiple agents with conflicting configuration", srv.Name)
+			}
+			if !slices.Contains(current.agents, agentID) {
+				current.agents = append(current.agents, agentID)
+				candidates[srv.Name] = current
+			}
+		}
+	}
+	names := make([]string, 0, len(candidates))
+	for name := range candidates {
+		names = append(names, name)
+	}
+	sort.Strings(names)
 	var adopted int
 	err = a.withConfig(func(c *config.RootConfig) error {
 		managed := make(map[string]struct{}, len(c.Agents.McpServers))
 		for _, s := range c.Agents.McpServers {
 			managed[s.Name] = struct{}{}
 		}
-		for agentID, servers := range diff.Unmanaged {
-			for _, srv := range servers {
-				if _, ok := managed[srv.Name]; ok {
-					continue
-				}
-				managed[srv.Name] = struct{}{}
-				c.Agents.McpServers = append(c.Agents.McpServers, config.McpServer{
-					Name:      srv.Name,
-					Transport: srv.Transport,
-					Command:   srv.Command,
-					URL:       srv.URL,
-					Agents:    []string{agentID},
-				})
-				adopted++
+		for _, name := range names {
+			if _, ok := managed[name]; ok {
+				continue
 			}
+			entry := candidates[name]
+			managed[name] = struct{}{}
+			c.Agents.McpServers = append(c.Agents.McpServers, config.McpServer{
+				Name:      entry.server.Name,
+				Transport: entry.server.Transport,
+				Command:   entry.server.Command,
+				URL:       entry.server.URL,
+				Headers:   entry.server.Headers,
+				Agents:    entry.agents,
+			})
+			adopted++
 		}
 		return nil
 	})

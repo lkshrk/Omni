@@ -147,3 +147,19 @@ func TestAgentsMcpImport_TwoArgsIsUsageError(t *testing.T) {
 		t.Fatal("expected usage error for two args")
 	}
 }
+
+func TestAgentsMcpImport_ConflictingHeadersErrors(t *testing.T) {
+	claude := &importStubMcpAdapter{
+		id:     "claude-code",
+		listed: []app.InstalledMcpServer{{Name: "shared", Transport: "http", URL: "https://mcp.example.com", Headers: map[string]string{"X-Key": "claude"}}},
+	}
+	codex := &importStubMcpAdapter{
+		id:     "codex",
+		listed: []app.InstalledMcpServer{{Name: "shared", Transport: "http", URL: "https://mcp.example.com", Headers: map[string]string{"X-Key": "codex"}}},
+	}
+	a := newImportTestApp(t, []app.McpAdapter{claude, codex})
+	_, err := runAgentsMcpImport(t, a, "shared")
+	if err == nil || !bytes.Contains([]byte(err.Error()), []byte("conflicting configuration")) {
+		t.Fatalf("error = %v, want conflicting configuration", err)
+	}
+}

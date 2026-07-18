@@ -2,7 +2,7 @@
 # manifest doesn't know about, then adopts one by name. claude-code's List()
 # reads $HOME/.claude.json's top-level "mcpServers" directly (no exec); the
 # claude binary only needs to exist on PATH for the adapter to be available.
-# Adoption stores name/transport/command only (never env values) and targets
+# Adoption stores the remote URL and headers reported by the agent, and targets
 # the agents the server was found under.
 chmod 0755 $WORK/bin/claude
 env PATH=$WORK/bin:$PATH
@@ -14,6 +14,8 @@ stdout 'extra'
 
 exec omni --config settings.json agents mcp import extra
 stdout 'imported extra'
+exec grep '"X-Import": "literal-value"' settings.json
+exec grep '"X-Env": "\${IMPORTED_TOKEN}"' settings.json
 
 # The server is now managed: a second import list no longer reports it.
 exec omni --config settings.json agents mcp import
@@ -27,7 +29,7 @@ stderr 'mcp server "ghost" is not unmanaged in any agent CLI'
 {}
 
 -- home/.claude.json --
-{"mcpServers":{"extra":{"command":"npx","args":["-y","@extra/mcp"]}}}
+{"mcpServers":{"extra":{"type":"http","url":"https://mcp.example.com","headers":{"X-Import":"literal-value","X-Env":"${IMPORTED_TOKEN}"}}}}
 
 -- bin/claude --
 #!/bin/sh

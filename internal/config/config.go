@@ -10,7 +10,7 @@ import (
 
 // CurrentVersion is the latest settings.json format version understood by omni.
 // Version 0 is the legacy unversioned format.
-const CurrentVersion = 18
+const CurrentVersion = 19
 
 const (
 	// FallbackSourceGitHub identifies a fallback recipe sourced from a GitHub repository.
@@ -468,6 +468,8 @@ type SkillPackage struct {
 // stdio requires Command; http/sse require URL. Mixing is rejected at validation.
 // Env holds env var names resolved from the calling environment at restore time.
 // EnvLiteral holds non-secret inline values forwarded verbatim.
+// Headers holds HTTP headers for remote transports. Exact ${VAR} values may
+// be stored as environment-backed headers by adapters that support them.
 // Agents lists target agent IDs (e.g. "claude-code", "codex"); empty means all.
 type McpServer struct {
 	Name       string            `json:"name"`
@@ -476,6 +478,7 @@ type McpServer struct {
 	URL        string            `json:"url,omitempty"`
 	Env        []string          `json:"env,omitempty"`
 	EnvLiteral map[string]string `json:"env_literal,omitempty"`
+	Headers    map[string]string `json:"headers,omitempty"`
 	Agents     []string          `json:"agents,omitempty"`
 }
 
@@ -949,6 +952,11 @@ func validateMcpServers(servers []McpServer, path string) []ValidationError {
 				errs = append(errs, ValidationError{Path: fmt.Sprintf("%s.env[%d]", p, j), Message: "env var name must not be empty"})
 			}
 		}
+		for name := range s.Headers {
+			if !validHTTPHeaderName(name) {
+				errs = append(errs, ValidationError{Path: p + ".headers", Message: fmt.Sprintf("invalid HTTP header name %q", name)})
+			}
+		}
 		switch s.Transport {
 		case "stdio":
 			if strings.TrimSpace(s.Command) == "" {
@@ -956,6 +964,9 @@ func validateMcpServers(servers []McpServer, path string) []ValidationError {
 			}
 			if s.URL != "" {
 				errs = append(errs, ValidationError{Path: p + ".url", Message: "stdio transport must not set url"})
+			}
+			if len(s.Headers) > 0 {
+				errs = append(errs, ValidationError{Path: p + ".headers", Message: "stdio transport must not set headers"})
 			}
 		case "http", "sse":
 			if strings.TrimSpace(s.URL) == "" {
@@ -969,6 +980,24 @@ func validateMcpServers(servers []McpServer, path string) []ValidationError {
 		}
 	}
 	return errs
+}
+
+func validHTTPHeaderName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i := range len(name) {
+		c := name[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
+			continue
+		}
+		switch c {
+		case '!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_', '`', '|', '~':
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func validateMarketplaces(marketplaces []Marketplace, names map[string]struct{}, path string) []ValidationError {

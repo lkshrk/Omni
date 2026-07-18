@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 
@@ -131,7 +132,7 @@ func mcpUnmanagedConflict(unmanaged map[string][]app.InstalledMcpServer, name st
 			if s.Name != name {
 				continue
 			}
-			if s.Transport != first.Transport || s.Command != first.Command || s.URL != first.URL {
+			if s.Transport != first.Transport || s.Command != first.Command || s.URL != first.URL || !maps.Equal(s.Headers, first.Headers) {
 				return true
 			}
 		}
@@ -159,6 +160,7 @@ func (m *Model) doImportMcpServerWithGroup(agentID string, srv app.InstalledMcpS
 			Transport: srv.Transport,
 			Command:   srv.Command,
 			URL:       srv.URL,
+			Headers:   srv.Headers,
 			Agents:    mcpUnmanagedAgentsFor(unmanaged, srv.Name, agentID),
 		}
 		res, err := a.AddMcpServer(ctx, s)

@@ -55,6 +55,7 @@ func (a *claudeCodeMcpAdapter) Add(ctx context.Context, s config.McpServer) erro
 		}
 		args := []string{"mcp", "add", "-s", "user", s.Name, "--transport", s.Transport, s.URL}
 		args = append(args, envFlags...)
+		args = append(args, headerFlags(s.Headers)...)
 		_, stderr, err := a.exec(ctx, "claude", args...)
 		if err != nil {
 			return fmt.Errorf("claude mcp add %s: %w: %s", s.Name, err, stderr)
@@ -108,6 +109,7 @@ type claudeConfigMcpServer struct {
 	Args    []string          `json:"args"`
 	URL     string            `json:"url"`
 	Env     map[string]string `json:"env"`
+	Headers map[string]string `json:"headers"`
 }
 
 // parseClaudeConfigMcpServers converts ~/.claude.json's mcpServers object
@@ -125,8 +127,9 @@ func parseClaudeConfigMcpServers(data []byte) ([]InstalledMcpServer, error) {
 	servers := make([]InstalledMcpServer, 0, len(names))
 	for _, name := range names {
 		entry := file.McpServers[name]
-		s := InstalledMcpServer{Name: name}
+		s := InstalledMcpServer{Name: name, EnvLiteral: entry.Env}
 		if entry.URL != "" {
+			s.HeadersKnown = true
 			switch entry.Type {
 			case "sse":
 				s.Transport = "sse"
@@ -134,6 +137,7 @@ func parseClaudeConfigMcpServers(data []byte) ([]InstalledMcpServer, error) {
 				s.Transport = "http"
 			}
 			s.URL = entry.URL
+			s.Headers = entry.Headers
 		} else {
 			s.Transport = "stdio"
 			s.Command = strings.TrimSpace(strings.Join(append([]string{entry.Command}, entry.Args...), " "))

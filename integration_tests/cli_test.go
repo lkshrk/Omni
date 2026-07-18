@@ -41,16 +41,211 @@ var githubCLILatestRelease []byte
 func TestMain(m *testing.M) {
 	os.Exit(testscript.RunMain(m, map[string]func() int{
 		"omni":                                func() int { cli.Execute(); return 0 },
+		"omni-assert-claude-mcp-header":       assertClaudeMcpHeaderMain,
+		"omni-assert-codex-mcp-header":        assertCodexMcpHeaderMain,
+		"omni-assert-grok-mcp-header":         assertGrokMcpHeaderMain,
 		"omni-mark-outdated-refresh-fresh":    markOutdatedRefreshFreshMain,
 		"omni-seed-cache":                     seedCacheMain,
 		"omni-seed-package-availability":      seedPackageAvailabilityMain,
 		"omni-seed-update-metadata":           seedUpdateMetadataMain,
 		"omni-assert-tool-provider-list":      assertToolProviderListMain,
 		"omni-with-npm-registry":              withNPMRegistryMain,
-		"omni-tools-fallback-configured-git":    toolsFallbackConfiguredGitMain,
-		"omni-tools-fallback-unsupported-git":   toolsFallbackUnsupportedGitMain,
-		"omni-native-fallback-install":           nativeFallbackInstallMain,
+		"omni-tools-fallback-configured-git":  toolsFallbackConfiguredGitMain,
+		"omni-tools-fallback-unsupported-git": toolsFallbackUnsupportedGitMain,
+		"omni-native-fallback-install":        nativeFallbackInstallMain,
 	}))
+}
+
+func rewriteStubServerURL(configPath, serverURL string) error {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return fmt.Errorf("read config: %w", err)
+	}
+	if !bytes.Contains(data, []byte("STUB_SERVER_URL")) {
+		return fmt.Errorf("config is missing STUB_SERVER_URL")
+	}
+	data = bytes.ReplaceAll(data, []byte("STUB_SERVER_URL"), []byte(serverURL))
+	if err := os.WriteFile(configPath, data, 0o644); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	return nil
+}
+
+func runMcpRestore(configPath string) error {
+	root := cli.NewRootCmd()
+	root.SetArgs([]string{"--config", configPath, "agents", "mcp", "restore"})
+	return root.Execute()
+}
+
+func assertClaudeMcpHeaderMain() int {
+	args := os.Args[1:]
+	if len(args) != 4 {
+		fmt.Fprintln(os.Stderr, "usage: omni-assert-claude-mcp-header <config> <server> <header> <value>")
+		return 2
+	}
+	configPath, serverName, headerName, want := args[0], args[1], args[2], args[3]
+	received := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case received <- r.Header.Get(headerName):
+		default:
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	if err := rewriteStubServerURL(configPath, server.URL); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if err := runMcpRestore(configPath); err != nil {
+		fmt.Fprintf(os.Stderr, "restore MCP server: %v\n", err)
+		return 1
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, "claude", "mcp", "get", serverName).CombinedOutput()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "claude mcp get: %v: %s\n", err, output)
+		return 1
+	}
+	select {
+	case got := <-received:
+		if got != want {
+			fmt.Fprintf(os.Stderr, "captured header %s = %q, want %q\n", headerName, got, want)
+			return 1
+		}
+		fmt.Printf("captured header %s\n", headerName)
+		return 0
+	case <-time.After(3 * time.Second):
+		fmt.Fprintln(os.Stderr, "claude did not contact the MCP server")
+		return 1
+	}
+}
+
+func assertGrokMcpHeaderMain() int {
+	args := os.Args[1:]
+	if len(args) != 4 {
+		fmt.Fprintln(os.Stderr, "usage: omni-assert-grok-mcp-header <config> <server> <header> <value>")
+		return 2
+	}
+	configPath, serverName, headerName, want := args[0], args[1], args[2], args[3]
+	received := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if value := r.Header.Get(headerName); value != "" {
+			select {
+			case received <- value:
+			default:
+			}
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	if err := rewriteStubServerURL(configPath, server.URL); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if err := runMcpRestore(configPath); err != nil {
+		fmt.Fprintf(os.Stderr, "restore MCP server: %v\n", err)
+		return 1
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "grok", "mcp", "doctor", serverName, "--json")
+	_ = cmd.Run() // A 500 response makes doctor fail after emitting the header.
+	if ctx.Err() != nil {
+		fmt.Fprintf(os.Stderr, "grok mcp doctor: %v\n", ctx.Err())
+		return 1
+	}
+	select {
+	case got := <-received:
+		if got != want {
+			fmt.Fprintf(os.Stderr, "captured header %s = %q, want %q\n", headerName, got, want)
+			return 1
+		}
+		fmt.Printf("captured header %s\n", headerName)
+		return 0
+	case <-time.After(3 * time.Second):
+		fmt.Fprintln(os.Stderr, "grok did not contact the MCP server")
+		return 1
+	}
+}
+
+func assertCodexMcpHeaderMain() int {
+	args := os.Args[1:]
+	if len(args) != 4 {
+		fmt.Fprintln(os.Stderr, "usage: omni-assert-codex-mcp-header <config> <server> <header> <value>")
+		return 2
+	}
+	configPath, _, headerName, want := args[0], args[1], args[2], args[3]
+	received := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/mcp":
+			if value := r.Header.Get(headerName); value != "" {
+				select {
+				case received <- value:
+				default:
+				}
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+		case "/v1/responses":
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp-probe\"}}\n\n")
+			fmt.Fprint(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp-probe\",\"usage\":{\"input_tokens\":0,\"input_tokens_details\":null,\"output_tokens\":0,\"output_tokens_details\":null,\"total_tokens\":0}}}\n\n")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	if err := rewriteStubServerURL(configPath, server.URL); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if err := runMcpRestore(configPath); err != nil {
+		fmt.Fprintf(os.Stderr, "restore MCP server: %v\n", err)
+		return 1
+	}
+	codexHome := os.Getenv("CODEX_HOME")
+	configFile := filepath.Join(codexHome, "config.toml")
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "read Codex config: %v\n", err)
+		return 1
+	}
+	prefix := fmt.Sprintf("model = \"gpt-5-codex\"\nmodel_provider = \"probe\"\n\n[model_providers.probe]\nname = \"Local probe\"\nbase_url = %q\nwire_api = \"responses\"\n\n", server.URL+"/v1")
+	if err := os.WriteFile(configFile, append([]byte(prefix), data...), 0o600); err != nil {
+		fmt.Fprintf(os.Stderr, "write Codex config: %v\n", err)
+		return 1
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "codex", "exec", "--skip-git-repo-check", "say done")
+	cmd.Stdin = strings.NewReader("")
+	for _, env := range os.Environ() {
+		if !strings.HasPrefix(env, "OPENAI_API_KEY=") {
+			cmd.Env = append(cmd.Env, env)
+		}
+	}
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "codex exec: %v: %s\n", err, output)
+		return 1
+	}
+	select {
+	case got := <-received:
+		if got != want {
+			fmt.Fprintf(os.Stderr, "captured header %s = %q, want %q\n", headerName, got, want)
+			return 1
+		}
+		fmt.Printf("captured header %s\n", headerName)
+		return 0
+	case <-time.After(3 * time.Second):
+		fmt.Fprintln(os.Stderr, "codex did not contact the MCP server")
+		return 1
+	}
 }
 
 func assertToolProviderListMain() int {
@@ -395,6 +590,9 @@ func stowAwareScriptFiles() ([]string, error) {
 
 	_, stowErr := exec.LookPath("stow")
 	_, brewErr := exec.LookPath("brew")
+	_, claudeErr := exec.LookPath("claude")
+	_, codexErr := exec.LookPath("codex")
+	_, grokErr := exec.LookPath("grok")
 	var stowMissing []string
 	var files []string
 	for _, entry := range entries {
@@ -423,6 +621,27 @@ func stowAwareScriptFiles() ([]string, error) {
 			return nil, err
 		}
 		if requiresBrew && brewErr != nil {
+			continue
+		}
+		requiresCodex, err := scriptRequires(path, "codex")
+		if err != nil {
+			return nil, err
+		}
+		if requiresCodex && codexErr != nil {
+			continue
+		}
+		requiresClaude, err := scriptRequires(path, "claude")
+		if err != nil {
+			return nil, err
+		}
+		if requiresClaude && claudeErr != nil {
+			continue
+		}
+		requiresGrok, err := scriptRequires(path, "grok")
+		if err != nil {
+			return nil, err
+		}
+		if requiresGrok && grokErr != nil {
 			continue
 		}
 		files = append(files, path)
@@ -482,9 +701,9 @@ func nativeFallbackInstallMain() int {
 	gw := gzip.NewWriter(&assetBuf)
 	tw := tar.NewWriter(gw)
 	tw.WriteHeader(&tar.Header{Name: "mytool_v1.0.0/mytool", Mode: 0o755, Size: int64(len(binaryContent))}) //nolint:errcheck
-	tw.Write(binaryContent)                                                                                  //nolint:errcheck
-	tw.Close()                                                                                               //nolint:errcheck
-	gw.Close()                                                                                               //nolint:errcheck
+	tw.Write(binaryContent)                                                                                 //nolint:errcheck
+	tw.Close()                                                                                              //nolint:errcheck
+	gw.Close()                                                                                              //nolint:errcheck
 	assetBytes := assetBuf.Bytes()
 
 	sum := sha256.Sum256(assetBytes)

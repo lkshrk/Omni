@@ -794,6 +794,14 @@ func buildWithID(id string) *schema {
 						Type:                 "object",
 						AdditionalProperties: &schema{Type: "string"},
 					},
+					"headers": {
+						Description:          "HTTP headers sent to remote http/sse servers. Exact ${VAR} values may be stored as environment-backed headers when supported.",
+						Type:                 "object",
+						AdditionalProperties: &schema{Type: "string"},
+						Examples: []any{map[string]any{
+							"Authorization": "Bearer token",
+						}},
+					},
 					"agents": {
 						Description: "Target agent IDs for this server. Empty means all configured agents.",
 						Type:        "array",

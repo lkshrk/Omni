@@ -63,11 +63,44 @@ func TestGrokMcpAdapter_Add_Http(t *testing.T) {
 		return "", "", nil
 	}
 	a := NewGrokMcpAdapter(exec, func(string) (string, bool) { return "", false })
-	s := config.McpServer{Name: "grafana", Transport: "http", URL: "https://mcp.example.com/mcp"}
+	s := config.McpServer{
+		Name:      "grafana",
+		Transport: "http",
+		URL:       "https://mcp.example.com/mcp",
+		Headers:   map[string]string{"X-Api-Key": "abc"},
+	}
 	if err := a.Add(context.Background(), s); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"mcp", "add", "-s", "user", "--transport", "http", "grafana", "https://mcp.example.com/mcp"}
+	want := []string{
+		"mcp", "add", "-s", "user", "--transport", "http", "grafana", "https://mcp.example.com/mcp",
+		"--header", "X-Api-Key: abc",
+	}
+	if !mcpSliceEq(gotArgs, want) {
+		t.Fatalf("args mismatch\ngot:  %v\nwant: %v", gotArgs, want)
+	}
+}
+
+func TestGrokMcpAdapter_Add_Sse(t *testing.T) {
+	var gotArgs []string
+	exec := func(_ context.Context, _ string, args ...string) (string, string, error) {
+		gotArgs = args
+		return "", "", nil
+	}
+	a := NewGrokMcpAdapter(exec, func(string) (string, bool) { return "", false })
+	s := config.McpServer{
+		Name:      "stream",
+		Transport: "sse",
+		URL:       "https://mcp.example.com/events",
+		Headers:   map[string]string{"X-Stream-Key": "abc"},
+	}
+	if err := a.Add(context.Background(), s); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"mcp", "add", "-s", "user", "--transport", "sse", "stream", "https://mcp.example.com/events",
+		"--header", "X-Stream-Key: abc",
+	}
 	if !mcpSliceEq(gotArgs, want) {
 		t.Fatalf("args mismatch\ngot:  %v\nwant: %v", gotArgs, want)
 	}
@@ -92,7 +125,7 @@ func TestGrokMcpAdapter_Remove(t *testing.T) {
 func TestParseGrokMcpList(t *testing.T) {
 	out := `[
 	  {"name":"stdio-srv","command":"npx","args":["-y","pkg"],"enabled":true,"scope":"user"},
-	  {"name":"http-srv","url":"https://mcp.example.com/mcp","enabled":true,"scope":"user"}
+	  {"name":"http-srv","url":"https://mcp.example.com/mcp","headers":{"X-Key":"value"},"enabled":true,"scope":"user"}
 	]`
 	got, err := parseGrokMcpList(out)
 	if err != nil {
@@ -106,5 +139,20 @@ func TestParseGrokMcpList(t *testing.T) {
 	}
 	if got[1].Transport != "http" || got[1].URL != "https://mcp.example.com/mcp" {
 		t.Fatalf("http = %+v", got[1])
+	}
+	if !got[1].HeadersKnown || got[1].Headers["X-Key"] != "value" {
+		t.Fatalf("http headers = %+v, known=%v", got[1].Headers, got[1].HeadersKnown)
+	}
+}
+
+func TestParseGrokMcpList_ReportsOmittedHeadersAsKnownEmpty(t *testing.T) {
+	got, err := parseGrokMcpList(`[{
+		"name":"http-srv","url":"https://mcp.example.com/mcp","enabled":true,"scope":"user"
+	}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || !got[0].HeadersKnown || len(got[0].Headers) != 0 {
+		t.Fatalf("server = %+v, want known empty headers", got)
 	}
 }
