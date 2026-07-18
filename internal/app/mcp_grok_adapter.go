@@ -49,6 +49,7 @@ func (a *grokMcpAdapter) Add(ctx context.Context, s config.McpServer) error {
 			return fmt.Errorf("grok does not support env for http/sse servers (server %q)", s.Name)
 		}
 		args := []string{"mcp", "add", "-s", "user", "--transport", s.Transport, s.Name, s.URL}
+		args = append(args, headerFlags(s.Headers)...)
 		_, stderr, err := a.exec(ctx, "grok", args...)
 		if err != nil {
 			return fmt.Errorf("grok mcp add %s: %w: %s", s.Name, err, stderr)
@@ -77,10 +78,12 @@ func (a *grokMcpAdapter) List(ctx context.Context) ([]InstalledMcpServer, error)
 
 // grokMcpListEntry mirrors one element of `grok mcp list --json`.
 type grokMcpListEntry struct {
-	Name    string   `json:"name"`
-	URL     string   `json:"url"`
-	Command string   `json:"command"`
-	Args    []string `json:"args"`
+	Name    string            `json:"name"`
+	URL     string            `json:"url"`
+	Command string            `json:"command"`
+	Args    []string          `json:"args"`
+	Headers map[string]string `json:"headers"`
+	Env     map[string]string `json:"env"`
 }
 
 func parseGrokMcpList(out string) ([]InstalledMcpServer, error) {
@@ -90,10 +93,12 @@ func parseGrokMcpList(out string) ([]InstalledMcpServer, error) {
 	}
 	servers := make([]InstalledMcpServer, 0, len(entries))
 	for _, e := range entries {
-		s := InstalledMcpServer{Name: e.Name}
+		s := InstalledMcpServer{Name: e.Name, EnvLiteral: e.Env}
 		if e.URL != "" {
 			s.Transport = "http"
 			s.URL = e.URL
+			s.Headers = e.Headers
+			s.HeadersKnown = true
 		} else {
 			s.Transport = "stdio"
 			s.Command = strings.TrimSpace(strings.Join(append([]string{e.Command}, e.Args...), " "))

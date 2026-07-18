@@ -16,6 +16,24 @@ RUN apk add --no-cache \
         python3 \
         stow
 
+RUN npm install --global \
+        @anthropic-ai/claude-code@2.1.214 \
+        @openai/codex@0.144.5
+
+ARG TARGETARCH
+ARG GROK_VERSION=0.2.103
+ARG GROK_SHA256_AMD64=9a597598dd798333f75d2b577960eaa80a479dea6ae891045fe2b03e10b179b2
+ARG GROK_SHA256_ARM64=3e5e6f7f90cb8c3f3338bb2abbf638838af0e42620f0f88d3b36a38e09189aba
+RUN case "$TARGETARCH" in \
+        amd64) grok_arch=x86_64; grok_sha256="$GROK_SHA256_AMD64" ;; \
+        arm64) grok_arch=aarch64; grok_sha256="$GROK_SHA256_ARM64" ;; \
+        *) echo "unsupported Grok architecture: $TARGETARCH" >&2; exit 1 ;; \
+    esac && \
+    wget -qO /usr/local/bin/grok "https://x.ai/cli/grok-${GROK_VERSION}-linux-${grok_arch}" && \
+    echo "${grok_sha256}  /usr/local/bin/grok" | sha256sum -c - && \
+    chmod 0755 /usr/local/bin/grok && \
+    grok --version
+
 # Pre-install a small pip package so pip integration tests have something to query.
 # --break-system-packages is required by externally-managed system Python installs.
 RUN pip3 install --break-system-packages cowsay==6.1

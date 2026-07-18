@@ -60,6 +60,17 @@ func TestMcpUnmanagedConflict(t *testing.T) {
 			t.Error("expected no conflict for matching config")
 		}
 	})
+
+	t.Run("differing headers across agents is a conflict", func(t *testing.T) {
+		withHeaders := app.InstalledMcpServer{Name: "srv", Transport: "http", URL: "https://mcp.example.com", Headers: map[string]string{"X-Key": "one"}}
+		unmanaged := map[string][]app.InstalledMcpServer{
+			"claude": {withHeaders},
+			"codex":  {{Name: "srv", Transport: "http", URL: "https://mcp.example.com", Headers: map[string]string{"X-Key": "two"}}},
+		}
+		if !mcpUnmanagedConflict(unmanaged, "srv", withHeaders) {
+			t.Error("expected conflict for differing headers")
+		}
+	})
 }
 
 func TestPluginUnmanagedAgentsFor(t *testing.T) {

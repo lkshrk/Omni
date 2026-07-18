@@ -14,6 +14,23 @@ stdout 'added myserver'
 exec omni --config settings.json agents mcp restore --dry-run
 stdout -count=1 'would install: claude-code/myserver'
 
+# Remote headers are repeatable CLI inputs and persist into the manifest.
+exec omni --config settings.json agents mcp add --name remote --transport http --url https://mcp.example.com --header 'X-Key: literal-value' --header 'X-Env: ${REMOTE_TOKEN}' --agents claude-code
+stdout 'added remote'
+exec grep '"X-Key": "literal-value"' settings.json
+exec grep '"X-Env": "\${REMOTE_TOKEN}"' settings.json
+exec grep -- '--header X-Key: literal-value' .omni-cache/claude-calls.log
+
+! exec omni --config settings.json agents mcp add --name bad --transport http --url https://mcp.example.com --header missing-colon --agents claude-code
+stderr 'must be NAME: VALUE'
+! exec omni --config settings.json agents mcp add --name bad --transport http --url https://mcp.example.com --header 'X-Key: one' --header 'X-Key: two' --agents claude-code
+stderr 'duplicate name "X-Key"'
+! exec omni --config settings.json agents mcp add --name bad --transport stdio --command 'npx bad' --header 'X-Key: value' --agents claude-code
+stderr '--header is not valid for stdio transport'
+! exec omni --config settings.json agents mcp add --name invalid-header --transport http --url https://mcp.example.com --header 'Bad Name: value' --agents claude-code
+stderr 'invalid HTTP header name'
+! exec grep 'invalid-header' .omni-cache/claude-calls.log
+
 # Re-adding the same name is an upsert: no duplicate manifest entry.
 exec omni --config settings.json agents mcp add --name myserver --transport stdio --command 'npx my-server' --agents claude-code
 stdout 'added myserver'

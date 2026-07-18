@@ -61,6 +61,34 @@ func TestMigrate_V11ConfigReachesCurrentVersion(t *testing.T) {
 	}
 }
 
+func TestMigrateV18ToV19_AllowsMissingMcpHeaders(t *testing.T) {
+	var cfg RootConfig
+	if err := json.Unmarshal([]byte(`{
+		"version": 18,
+		"agents": {
+			"mcp_servers": [{
+				"name": "grafana",
+				"transport": "http",
+				"url": "https://mcp.example.com"
+			}]
+		}
+	}`), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Migrate(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Version != 19 {
+		t.Fatalf("version = %d, want 19", cfg.Version)
+	}
+	if got := cfg.Agents.McpServers[0].Headers; len(got) != 0 {
+		t.Fatalf("headers = %v, want empty", got)
+	}
+	if errs := ValidateRoot(&cfg, ProviderValidation{}); len(errs) != 0 {
+		t.Fatalf("validation errors = %v", errs)
+	}
+}
+
 func TestMigrateRawVersion_UsesRegisteredMigrationChain(t *testing.T) {
 	raw := map[string]json.RawMessage{
 		"settings": json.RawMessage(`{}`),

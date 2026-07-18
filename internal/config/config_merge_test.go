@@ -18,6 +18,7 @@ func TestMergeRootConfig_AgentsAndHosts(t *testing.T) {
 			McpServers: []McpServer{{
 				Name: "srv", Transport: "stdio",
 				EnvLiteral: map[string]string{"A": "1"},
+				Headers:    map[string]string{"X-Base": "1"},
 			}},
 			Marketplaces: []Marketplace{{Name: "caveman"}},
 			Plugins:      []Plugin{{Name: "plug"}},
@@ -33,7 +34,7 @@ func TestMergeRootConfig_AgentsAndHosts(t *testing.T) {
 				{Source: "other/pkg"},
 			},
 			McpServers: []McpServer{
-				{Name: "srv", Command: "run", URL: "http://x", Env: []string{"B"}, EnvLiteral: map[string]string{"C": "2"}, Agents: []string{"codex"}},
+				{Name: "srv", Command: "run", URL: "http://x", Env: []string{"B"}, EnvLiteral: map[string]string{"C": "2"}, Headers: map[string]string{"X-Include": "2"}, Agents: []string{"codex"}},
 				{Name: "new-srv", Transport: "http"},
 			},
 			Marketplaces: []Marketplace{{Name: "caveman", Source: "a/b", Agents: []string{"codex"}}},
@@ -74,6 +75,9 @@ func TestMergeRootConfig_AgentsAndHosts(t *testing.T) {
 	}
 	if srv.EnvLiteral["A"] != "1" || srv.EnvLiteral["C"] != "2" {
 		t.Fatalf("merged EnvLiteral = %v, want union", srv.EnvLiteral)
+	}
+	if srv.Headers["X-Base"] != "1" || srv.Headers["X-Include"] != "2" {
+		t.Fatalf("merged Headers = %v, want union", srv.Headers)
 	}
 	if !reflect.DeepEqual(srv.Env, []string{"B"}) || !reflect.DeepEqual(srv.Agents, []string{"codex"}) {
 		t.Fatalf("merged env/agents = %v/%v", srv.Env, srv.Agents)

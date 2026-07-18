@@ -1513,8 +1513,8 @@ func TestMcpServerValidation(t *testing.T) {
 			servers: []config.McpServer{{Name: "x", Transport: "stdio", Command: "npx foo"}},
 		},
 		{
-			name:    "valid http",
-			servers: []config.McpServer{{Name: "x", Transport: "http", URL: "https://example.com"}},
+			name:    "valid http with headers",
+			servers: []config.McpServer{{Name: "x", Transport: "http", URL: "https://example.com", Headers: map[string]string{"Authorization": "Bearer token"}}},
 		},
 		{
 			name:    "valid sse",
@@ -1529,6 +1529,26 @@ func TestMcpServerValidation(t *testing.T) {
 			name:    "stdio with url",
 			servers: []config.McpServer{{Name: "x", Transport: "stdio", Command: "npx x", URL: "https://x.com"}},
 			wantErr: true, errFrag: "url",
+		},
+		{
+			name:    "stdio with headers",
+			servers: []config.McpServer{{Name: "x", Transport: "stdio", Command: "npx x", Headers: map[string]string{"X-Test": "value"}}},
+			wantErr: true, errFrag: "headers",
+		},
+		{
+			name:    "empty header name",
+			servers: []config.McpServer{{Name: "x", Transport: "http", URL: "https://x.com", Headers: map[string]string{" ": "value"}}},
+			wantErr: true, errFrag: "header name",
+		},
+		{
+			name:    "header name with colon",
+			servers: []config.McpServer{{Name: "x", Transport: "http", URL: "https://x.com", Headers: map[string]string{"X:Bad": "value"}}},
+			wantErr: true, errFrag: "header name",
+		},
+		{
+			name:    "header name with space",
+			servers: []config.McpServer{{Name: "x", Transport: "http", URL: "https://x.com", Headers: map[string]string{"Bad Name": "value"}}},
+			wantErr: true, errFrag: "header name",
 		},
 		{
 			name:    "http missing url",

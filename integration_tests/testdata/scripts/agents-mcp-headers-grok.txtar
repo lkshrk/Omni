@@ -1,0 +1,52 @@
+# Real Grok integration: Omni persists headers through the pinned official CLI,
+# and `grok mcp doctor` emits them without login credentials.
+# @requires: grok
+env HOME=$WORK/home
+mkdir $WORK/home
+
+exec omni-assert-grok-mcp-header settings.json headers-grok X-Grok-Probe grok-wire-value
+stdout 'captured header X-Grok-Probe'
+exec grok mcp list --json
+stdout '"X-Grok-Probe": "grok-wire-value"'
+
+exec omni-assert-grok-mcp-header settings-updated.json headers-grok X-Grok-Probe grok-updated-value
+stdout 'updated: grok/headers-grok'
+stdout 'captured header X-Grok-Probe'
+exec grok mcp list --json
+stdout '"X-Grok-Probe": "grok-updated-value"'
+
+-- settings.json --
+{
+  "version": 18,
+  "agents": {
+    "mcp_servers": [
+      {
+        "name": "headers-grok",
+        "transport": "http",
+        "url": "STUB_SERVER_URL/mcp",
+        "headers": {
+          "X-Grok-Probe": "grok-wire-value"
+        },
+        "agents": ["grok"]
+      }
+    ]
+  }
+}
+
+-- settings-updated.json --
+{
+  "version": 18,
+  "agents": {
+    "mcp_servers": [
+      {
+        "name": "headers-grok",
+        "transport": "http",
+        "url": "STUB_SERVER_URL/mcp",
+        "headers": {
+          "X-Grok-Probe": "grok-updated-value"
+        },
+        "agents": ["grok"]
+      }
+    ]
+  }
+}

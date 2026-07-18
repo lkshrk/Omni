@@ -65,11 +65,22 @@ func TestClaudeCodeAdapter_Add_Http(t *testing.T) {
 		return "", "", nil
 	}
 	a := NewClaudeCodeMcpAdapter(exec, func(string) (string, bool) { return "", false })
-	s := config.McpServer{Name: "grafana", Transport: "http", URL: "https://mcp.example.com/sse"}
+	s := config.McpServer{
+		Name:      "grafana",
+		Transport: "http",
+		URL:       "https://mcp.example.com/sse",
+		Headers: map[string]string{
+			"Authorization": "Bearer token",
+			"X-Api-Key":     "abc",
+		},
+	}
 	if err := a.Add(context.Background(), s); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"mcp", "add", "-s", "user", "grafana", "--transport", "http", "https://mcp.example.com/sse"}
+	want := []string{
+		"mcp", "add", "-s", "user", "grafana", "--transport", "http", "https://mcp.example.com/sse",
+		"--header", "Authorization: Bearer token", "--header", "X-Api-Key: abc",
+	}
 	if !mcpSliceEq(gotArgs, want) {
 		t.Fatalf("args mismatch\ngot:  %v\nwant: %v", gotArgs, want)
 	}
@@ -141,11 +152,19 @@ func TestClaudeCodeAdapter_Add_Sse(t *testing.T) {
 		return "", "", nil
 	}
 	a := NewClaudeCodeMcpAdapter(exec, func(string) (string, bool) { return "", false })
-	s := config.McpServer{Name: "stream", Transport: "sse", URL: "https://mcp.example.com/events"}
+	s := config.McpServer{
+		Name:      "stream",
+		Transport: "sse",
+		URL:       "https://mcp.example.com/events",
+		Headers:   map[string]string{"X-Stream-Key": "abc"},
+	}
 	if err := a.Add(context.Background(), s); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"mcp", "add", "-s", "user", "stream", "--transport", "sse", "https://mcp.example.com/events"}
+	want := []string{
+		"mcp", "add", "-s", "user", "stream", "--transport", "sse", "https://mcp.example.com/events",
+		"--header", "X-Stream-Key: abc",
+	}
 	if !mcpSliceEq(gotArgs, want) {
 		t.Fatalf("args mismatch\ngot:  %v\nwant: %v", gotArgs, want)
 	}

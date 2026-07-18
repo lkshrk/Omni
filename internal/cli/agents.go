@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 
@@ -308,13 +309,14 @@ func newAgentsMcpListCmd(state *rootState) *cobra.Command {
 
 func newAgentsMcpAddCmd(state *rootState) *cobra.Command {
 	var (
-		name       string
-		transport  string
-		command    string
-		url        string
-		envVars    []string
-		envLiteral []string
-		agents     []string
+		name        string
+		transport   string
+		command     string
+		url         string
+		envVars     []string
+		envLiteral  []string
+		headerSpecs []string
+		agents      []string
 	)
 	cmd := &cobra.Command{
 		Use:   "add",
@@ -330,6 +332,9 @@ func newAgentsMcpAddCmd(state *rootState) *cobra.Command {
 				}
 				if url != "" {
 					return fmt.Errorf("--url is not valid for stdio transport")
+				}
+				if len(headerSpecs) > 0 {
+					return fmt.Errorf("--header is not valid for stdio transport")
 				}
 			case "http", "sse":
 				if url == "" {
@@ -355,6 +360,21 @@ func newAgentsMcpAddCmd(state *rootState) *cobra.Command {
 					envLit[k] = v
 				}
 			}
+			var headers map[string]string
+			if len(headerSpecs) > 0 {
+				headers = make(map[string]string, len(headerSpecs))
+				for _, spec := range headerSpecs {
+					name, value, ok := strings.Cut(spec, ":")
+					name = strings.TrimSpace(name)
+					if !ok || name == "" {
+						return fmt.Errorf("--header %q: must be NAME: VALUE", spec)
+					}
+					if _, dup := headers[name]; dup {
+						return fmt.Errorf("--header %q: duplicate name %q", spec, name)
+					}
+					headers[name] = strings.TrimSpace(value)
+				}
+			}
 			s := config.McpServer{
 				Name:       name,
 				Transport:  transport,
@@ -362,6 +382,7 @@ func newAgentsMcpAddCmd(state *rootState) *cobra.Command {
 				URL:        url,
 				Env:        envVars,
 				EnvLiteral: envLit,
+				Headers:    headers,
 				Agents:     agents,
 			}
 			res, err := state.app.AddMcpServer(cmd.Context(), s)
@@ -382,6 +403,7 @@ func newAgentsMcpAddCmd(state *rootState) *cobra.Command {
 	cmd.Flags().StringVar(&url, "url", "", "URL for http/sse transport")
 	cmd.Flags().StringArrayVar(&envVars, "env", nil, "env var name to forward (repeatable)")
 	cmd.Flags().StringArrayVar(&envLiteral, "env-literal", nil, "env var as KEY=VALUE (repeatable)")
+	cmd.Flags().StringArrayVar(&headerSpecs, "header", nil, "HTTP header as NAME: VALUE (repeatable)")
 	cmd.Flags().StringArrayVar(&agents, "agents", nil, "target agent IDs (repeatable)")
 	return cmd
 }
@@ -424,10 +446,16 @@ func newAgentsMcpRestoreCmd(state *rootState) *cobra.Command {
 				for _, s := range res.WouldInstall {
 					fmt.Fprintf(w, "would install: %s\n", s)
 				}
+				for _, s := range res.WouldUpdate {
+					fmt.Fprintf(w, "would update: %s\n", s)
+				}
 				return nil
 			}
 			for _, s := range res.Installed {
 				fmt.Fprintf(w, "installed: %s\n", s)
+			}
+			for _, s := range res.Updated {
+				fmt.Fprintf(w, "updated: %s\n", s)
 			}
 			for _, s := range res.AlreadyInstalled {
 				fmt.Fprintf(w, "already installed: %s\n", s)
@@ -476,8 +504,8 @@ func newAgentsMcpImportCmd(state *rootState) *cobra.Command {
 }
 
 // importMcpServerByName adopts an unmanaged server into the manifest, mirroring the
-// TUI's doImportMcpServer (name/transport/command/url only, never env values — the
-// InstalledMcpServer the adapter reports carries no env data to begin with).
+// TUI's doImportMcpServer. Environment variables remain unavailable from agent list
+// output, while remote headers are preserved when the agent reports them.
 func importMcpServerByName(cmd *cobra.Command, state *rootState, diff app.McpImportDiff, name string) error {
 	agentIDs := make([]string, 0, len(diff.Unmanaged))
 	for id := range diff.Unmanaged {
@@ -496,7 +524,7 @@ func importMcpServerByName(cmd *cobra.Command, state *rootState, diff app.McpImp
 			if !found {
 				match = s
 				found = true
-			} else if s.Transport != match.Transport || s.Command != match.Command || s.URL != match.URL {
+			} else if s.Transport != match.Transport || s.Command != match.Command || s.URL != match.URL || !maps.Equal(s.Headers, match.Headers) {
 				return fmt.Errorf("mcp server %q is unmanaged under multiple agents with conflicting configuration; import each manually", name)
 			}
 			matchedAgents = append(matchedAgents, id)
@@ -511,6 +539,7 @@ func importMcpServerByName(cmd *cobra.Command, state *rootState, diff app.McpImp
 		Transport: match.Transport,
 		Command:   match.Command,
 		URL:       match.URL,
+		Headers:   match.Headers,
 		Agents:    matchedAgents,
 	}
 	res, err := state.app.AddMcpServer(cmd.Context(), s)

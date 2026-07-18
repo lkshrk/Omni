@@ -250,6 +250,14 @@ func mergeMcpServer(dst, src McpServer) McpServer {
 			dst.EnvLiteral[key] = value
 		}
 	}
+	if len(src.Headers) > 0 {
+		if dst.Headers == nil {
+			dst.Headers = make(map[string]string, len(src.Headers))
+		}
+		for key, value := range src.Headers {
+			dst.Headers[key] = value
+		}
+	}
 	dst.Agents = appendUniqueStrings(dst.Agents, src.Agents...)
 	return dst
 }

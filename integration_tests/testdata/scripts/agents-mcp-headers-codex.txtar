@@ -1,0 +1,109 @@
+# Real Codex integration: a v18 manifest may omit headers, while a remote
+# server with literal and environment-backed headers is persisted in syntax
+# that Codex itself parses.
+# @requires: codex
+env HOME=$WORK/home
+env CODEX_HOME=$WORK/home/.codex
+env OMNI_TEST_API_KEY=integration-secret
+env OMNI_TEST_API_KEY_2=updated-secret
+mkdir $WORK/home
+mkdir $CODEX_HOME
+
+exec omni --config settings.json agents mcp restore
+stdout 'installed: codex/legacy-no-headers'
+stdout 'installed: codex/headers-live'
+
+exec grep '"version": 19' settings.json
+exec codex mcp get legacy-no-headers --json
+stdout '"name": "legacy-no-headers"'
+exec codex mcp get headers-live --json
+stdout '"X-Literal": "literal-value"'
+stdout '"X-API-Key": "OMNI_TEST_API_KEY"'
+stdout '"X-Empty": ""'
+stdout '"X~Quoted": "quote=\\"value\\" slash=\\\\ unicode=雪"'
+stdout 'unicode=雪'
+
+exec grep '\[mcp_servers\."headers-live"\.http_headers\]' $CODEX_HOME/config.toml
+exec grep '"X-Literal" = "literal-value"' $CODEX_HOME/config.toml
+exec grep '\[mcp_servers\."headers-live"\.env_http_headers\]' $CODEX_HOME/config.toml
+exec grep '"X-API-Key" = "OMNI_TEST_API_KEY"' $CODEX_HOME/config.toml
+! exec grep 'integration-secret' $CODEX_HOME/config.toml
+
+# Import uses Codex's real list output and preserves literal/environment-backed
+# headers without resolving the secret into Omni's manifest.
+exec omni --config settings-import.json agents mcp import headers-live
+stdout 'imported headers-live'
+exec grep '"X-Literal": "literal-value"' settings-import.json
+exec grep '"X-API-Key": "\${OMNI_TEST_API_KEY}"' settings-import.json
+! exec grep 'integration-secret' settings-import.json
+
+# Restore reconciles changed headers on an existing registration.
+cp settings-updated.json settings.json
+exec omni --config settings.json agents mcp restore --dry-run
+stdout 'would update: codex/headers-live'
+exec codex mcp get headers-live --json
+stdout '"X-Literal": "literal-value"'
+exec omni --config settings.json agents mcp restore
+stdout 'already installed: codex/legacy-no-headers'
+stdout 'updated: codex/headers-live'
+exec codex mcp get headers-live --json
+stdout '"X-Literal": "updated-value"'
+stdout '"X-API-Key": "OMNI_TEST_API_KEY_2"'
+grep -count=1 '\[mcp_servers\."headers-live"\.http_headers\]' $CODEX_HOME/config.toml
+grep -count=1 '\[mcp_servers\."headers-live"\.env_http_headers\]' $CODEX_HOME/config.toml
+! exec grep 'updated-secret' $CODEX_HOME/config.toml
+
+-- settings.json --
+{
+  "version": 18,
+  "agents": {
+    "mcp_servers": [
+      {
+        "name": "legacy-no-headers",
+        "transport": "http",
+        "url": "https://legacy.example.com/mcp",
+        "agents": ["codex"]
+      },
+      {
+        "name": "headers-live",
+        "transport": "http",
+        "url": "https://headers.example.com/mcp",
+        "headers": {
+          "X-Empty": "",
+          "X~Quoted": "quote=\"value\" slash=\\ unicode=雪",
+          "X-Literal": "literal-value",
+          "X-API-Key": "${OMNI_TEST_API_KEY}"
+        },
+        "agents": ["codex"]
+      }
+    ]
+  }
+}
+
+-- settings-import.json --
+{}
+
+-- settings-updated.json --
+{
+  "version": 18,
+  "agents": {
+    "mcp_servers": [
+      {
+        "name": "legacy-no-headers",
+        "transport": "http",
+        "url": "https://legacy.example.com/mcp",
+        "agents": ["codex"]
+      },
+      {
+        "name": "headers-live",
+        "transport": "http",
+        "url": "https://headers.example.com/mcp",
+        "headers": {
+          "X-Literal": "updated-value",
+          "X-API-Key": "${OMNI_TEST_API_KEY_2}"
+        },
+        "agents": ["codex"]
+      }
+    ]
+  }
+}
