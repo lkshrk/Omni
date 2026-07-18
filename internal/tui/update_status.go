@@ -8,7 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/dots"
 )
 
 func (m *Model) handleStatusKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
@@ -93,6 +92,9 @@ func (m *Model) refreshDoctorAfterFix(cmds *[]tea.Cmd) {
 }
 
 func (m *Model) refreshDoctorAfterFixWithStatus(cmds *[]tea.Cmd, preserveStatus bool) {
+	if preserveStatus {
+		m.doctorPreserveStatus = true
+	}
 	if m.doctorRunning || m.doctorResult == nil {
 		m.doctorRefreshPending = true
 		return
@@ -284,12 +286,12 @@ func (m *Model) finishDashboardReconcile(cmds *[]tea.Cmd) {
 		}
 		m.dashboardReconcileErrors = nil
 		*cmds = append(*cmds, setStatus(m, msg, true))
-		m.refreshDoctorAfterFix(cmds)
+		m.refreshDoctorAfterFixWithStatus(cmds, true)
 		return
 	}
 	m.dashboardReconcileErrors = nil
 	*cmds = append(*cmds, setStatus(m, "✓ reconciled", false))
-	m.refreshDoctorAfterFix(cmds)
+	m.refreshDoctorAfterFixWithStatus(cmds, true)
 }
 
 func (m *Model) continueDashboardReconcile(kind dashboardReconcilePlanKind, err error, cmds *[]tea.Cmd) {
@@ -324,7 +326,7 @@ func (m *Model) startDashboardDotsSync(cmds *[]tea.Cmd) {
 	}
 	m.beginDotsOperation("Syncing dots…")
 	total := m.markDotsPendingSyncAll()
-	setActivityStatus(m, app.DotsSyncActivityProgressText(dots.SyncProgressEvent{Total: total}))
+	setActivityStatus(m, app.DotsSyncActivityProgressText(app.DotSyncProgressEvent{Total: total}))
 	order := dotsSyncAllEntryOrder(*m)
 	ch := m.beginDotsProgressStream()
 	*cmds = append(*cmds, m.spinner.Tick, m.doDotsSyncOnlyWithProgress(ch, order), waitForDotsProgress(ch, m.dotsOpGen))

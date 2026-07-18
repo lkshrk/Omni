@@ -88,7 +88,7 @@ func TestCodexPluginAdapter_AddMarketplace(t *testing.T) {
 
 // codexPluginListEmptyFixture is the exact stdout of `codex plugin list --json`
 // with no plugins installed and no marketplace configured, captured in
-// docs/superpowers/research/2026-07-02-plugin-cli-probe.md.
+// specs/plugin-cli-probe.md.
 const codexPluginListEmptyFixture = `{
   "installed": [],
   "available": []
@@ -114,7 +114,7 @@ func TestCodexPluginAdapter_ListPlugins_Empty(t *testing.T) {
 
 // codexPluginListInstalledFixture is the exact stdout of
 // `codex plugin list --json` with one installed plugin, captured in
-// docs/superpowers/research/2026-07-02-plugin-cli-probe.md. Note the
+// specs/plugin-cli-probe.md. Note the
 // {installed, available} wrapper is present even though --available was not
 // passed (probe Deviation 3) — a different shape convention than claude's
 // bare-array default.
@@ -254,7 +254,7 @@ func TestCodexPluginAdapter_ListPlugins_JoinsLatestVersionFromAvailable(t *testi
 
 // codexMarketplaceListFixture is the exact stdout of
 // `codex plugin marketplace list --json` with one marketplace configured,
-// captured in docs/superpowers/research/2026-07-02-plugin-cli-probe.md.
+// captured in specs/plugin-cli-probe.md.
 const codexMarketplaceListFixture = `{
   "marketplaces": [
     {

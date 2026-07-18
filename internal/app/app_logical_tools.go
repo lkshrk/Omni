@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/provider"
 )
 
@@ -247,7 +246,7 @@ type ToolIgnoreScopeChange struct {
 type ToolIgnoreScopesChange struct {
 	Ignored          bool
 	HostScopeChanged bool
-	Tools            []*database.ToolCache
+	Tools            []*ToolView
 	ScopeDisplay     *ToolScopeDisplayState
 }
 
@@ -341,20 +340,20 @@ type ToolProviderScopeChoice struct {
 }
 
 type ToolProviderScopeChange struct {
-	Tools        []*database.ToolCache
+	Tools        []*ToolView
 	ScopeDisplay *ToolScopeDisplayState
 }
 
-func DefaultToolProviderScopeChoices(t *database.ToolCache) []ToolProviderScopeChoice {
+func DefaultToolProviderScopeChoices(t *ToolView) []ToolProviderScopeChoice {
 	return toolProviderScopeChoices(t, provider.BuiltinEcosystemFor, provider.BuiltinIsEcosystem)
 }
 
-func (a *App) ToolProviderScopeChoices(t *database.ToolCache) []ToolProviderScopeChoice {
+func (a *App) ToolProviderScopeChoices(t *ToolView) []ToolProviderScopeChoice {
 	return toolProviderScopeChoices(t, a.providerEcosystem, a.knownEcosystemProvider)
 }
 
 func toolProviderScopeChoices(
-	t *database.ToolCache,
+	t *ToolView,
 	ecosystemFor func(string) (string, bool),
 	isEcosystem func(string) bool,
 ) []ToolProviderScopeChoice {

@@ -8,7 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/config"
 )
 
 // combineMarketplaceErrors folds a top-level error with per-adapter errors,
@@ -118,7 +117,7 @@ func (m *Model) doImportMarketplaceWithGroup(agentID string, mk app.InstalledMar
 		if marketplaceUnmanagedConflict(unmanaged, mk.Name, mk) {
 			return marketplaceImportAdoptDoneMsg{marketplaceName: mk.Name, err: fmt.Errorf("marketplace %q is unmanaged under multiple agents with conflicting sources; import each manually", mk.Name)}
 		}
-		res, err := a.AddMarketplace(ctx, config.Marketplace{Name: mk.Name, Source: mk.Source, Agents: marketplaceUnmanagedAgentsFor(unmanaged, mk.Name, agentID)})
+		res, err := a.AddMarketplace(ctx, app.Marketplace{Name: mk.Name, Source: mk.Source, Agents: marketplaceUnmanagedAgentsFor(unmanaged, mk.Name, agentID)})
 		if err := combineMarketplaceErrors(err, res.Errors); err != nil {
 			return marketplaceImportAdoptDoneMsg{marketplaceName: mk.Name, err: err}
 		}

@@ -4,7 +4,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/dots"
 	gosync "github.com/lkshrk/omni/internal/sync"
 )
 
@@ -164,7 +163,7 @@ func (m *Model) doSetupBootstrapTools() tea.Cmd {
 func (m *Model) doSetupBootstrapDots() tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
-		ops, err := a.DotsSyncContext(ctx, dots.SyncOptions{})
+		ops, err := a.DotsSyncContext(ctx, app.DotSyncOptions{})
 		if err != nil {
 			return setupBootstrapDoneMsg{action: "sync-dots", err: err}
 		}

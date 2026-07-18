@@ -1,7 +1,7 @@
 # Test Spec: Independent Doctor Fixers
 
 **Scope**: `doctor --fix` CLI and TUI orchestration
-**Source material**: `docs/superpowers/specs/2026-07-17-config-optimize-design.md`, P2 review finding, user-requested gap closure
+**Source material**: `design.md`, P2 review finding, user-requested gap closure
 **Testing posture**: baked-in default (`TESTING.md` absent)
 **Test report**: [test-report.md](./test-report.md)
 

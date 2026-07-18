@@ -9,9 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/database"
-	"github.com/lkshrk/omni/internal/provider"
 )
 
 const (
@@ -75,7 +72,7 @@ func (m *Model) closeGroupPicker() {
 	m.pickerPurposeReassign = false
 	m.pickerDotAddPath = ""
 	m.pickerDotAddRawPath = ""
-	m.pickerActionTool = database.ToolCache{}
+	m.pickerActionTool = app.ToolView{}
 	m.pickerActionToolSet = false
 	m.pickerClaimAgentsRow = agentsAllRow{}
 	m.pickerClaimAgentsSet = false
@@ -210,7 +207,7 @@ func (m *Model) runGroupPickerAction(group string, cmds *[]tea.Cmd) bool {
 		if m.pickerPurposeInstall {
 			activeHost := m.activeHostForCreatedGroup(group)
 			m.closeGroupPicker()
-			if m.blockPrivilegedToolAction(&t, provider.PrivilegeActionInstall) {
+			if m.blockPrivilegedToolAction(&t, app.PrivilegeActionInstall) {
 				if m.adminTerminal != nil {
 					m.adminTerminal.addToConfig = true
 					m.adminTerminal.addGroup = claimGroup
@@ -310,13 +307,13 @@ func (m *Model) runAgentsClaimGroupPickerAction(group string, cmds *[]tea.Cmd) b
 	return true
 }
 
-func (m *Model) groupPickerActionTool() (database.ToolCache, bool) {
+func (m *Model) groupPickerActionTool() (app.ToolView, bool) {
 	if m.pickerActionToolSet {
 		return m.pickerActionTool, true
 	}
 	t := m.selectedTool()
 	if t == nil {
-		return database.ToolCache{}, false
+		return app.ToolView{}, false
 	}
 	return *t, true
 }
@@ -401,7 +398,7 @@ func (m *Model) openAgentsClaimGroupPicker(e agentsAllRow) {
 	m.pickerPurposeClaim = true
 	m.pickerPurposeInstall = false
 	m.pickerCreatedGroups = nil
-	m.pickerActionTool = database.ToolCache{}
+	m.pickerActionTool = app.ToolView{}
 	m.pickerActionToolSet = false
 	m.pickerMembershipKind = agentsClaimMembershipKind(e.feature)
 	m.pickerClaimAgentsRow = e
@@ -890,7 +887,7 @@ func (m *Model) closeScopePicker() {
 	m.mode = viewList
 	m.scopeOptions = nil
 	m.scopeCursor = 0
-	m.scopeTarget = database.ToolCache{}
+	m.scopeTarget = app.ToolView{}
 	m.scopeTargetSet = false
 }
 
@@ -932,12 +929,12 @@ func (m *Model) saveScopePickerSelection(cmds *[]tea.Cmd) {
 			}
 			m.hostInventoryTools[t.Name] = opt.checked
 			m.toolMemberships[toolMembershipKey(&t)] = append([]string(nil), m.toolMemberships[toolMembershipKey(&t)]...)
-			if opt.checked && !slices.Contains(m.toolMemberships[toolMembershipKey(&t)], config.SystemInventoryGroup) {
-				m.toolMemberships[toolMembershipKey(&t)] = append(m.toolMemberships[toolMembershipKey(&t)], config.SystemInventoryGroup)
+			if opt.checked && !slices.Contains(m.toolMemberships[toolMembershipKey(&t)], app.SystemInventoryGroup) {
+				m.toolMemberships[toolMembershipKey(&t)] = append(m.toolMemberships[toolMembershipKey(&t)], app.SystemInventoryGroup)
 			}
 			if !opt.checked {
 				groups := m.toolMemberships[toolMembershipKey(&t)]
-				groups = slices.DeleteFunc(groups, func(g string) bool { return g == config.SystemInventoryGroup })
+				groups = slices.DeleteFunc(groups, func(g string) bool { return g == app.SystemInventoryGroup })
 				if m.hostInfo != nil && m.hostInfo.Active != "" && !slices.Contains(groups, m.hostInfo.Active) {
 					groups = append(groups, m.hostInfo.Active)
 				}

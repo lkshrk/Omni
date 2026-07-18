@@ -1,0 +1,61 @@
+# provider override normalization and nvm migration persist through the real CLI
+env HOME=$WORK/home
+env NVM_BIN=$WORK/home/.nvm/versions/node/v22.1.0/bin
+env PATH=$NVM_BIN:$WORK/bin:$PATH
+mkdir $WORK/home/.nvm/versions/node/v22.1.0/bin
+mkdir $WORK/bin
+exec chmod 755 $NVM_BIN/node $NVM_BIN/pnpm $WORK/bin/brew
+
+exec omni --config settings.json tools normalize --default-overrides --dry-run
+stdout 'No default provider overrides to normalize.'
+
+exec omni -y --config settings.json tools normalize --default-overrides
+stdout 'No default provider overrides to normalize.'
+
+exec omni -y --config settings.json tools migrate-nvm --all
+stdout 'migrated pnpm: brew .* pnpm'
+stdout 'removed node from omni config'
+exec grep '"provider": "pnpm"' settings.json
+stdout '"provider": "pnpm"'
+! exec grep '"node"' settings.json
+
+-- home/.nvm/versions/node/v22.1.0/bin/node --
+#!/bin/sh
+[ "${1:-}" = "--version" ] && echo 'v22.1.0'
+
+-- home/.nvm/versions/node/v22.1.0/bin/pnpm --
+#!/bin/sh
+case "${1:-}" in
+  --version)
+    echo '9.0.0'
+    ;;
+  add)
+    exit 0
+    ;;
+  ls)
+    echo '└── pnpm@9.0.0'
+    ;;
+esac
+
+-- bin/brew --
+#!/bin/sh
+case "${1:-}" in
+  --version)
+    echo 'Homebrew 4.0.0'
+    ;;
+  uninstall)
+    exit 0
+    ;;
+esac
+
+-- settings.json --
+{
+  "version": 17,
+  "settings": {"provider_priority": ["brew", "pnpm"]},
+  "tools": {
+    "pnpm": {"providers": [{"provider": "brew", "package": "pnpm"}]},
+    "node": {"providers": [{"provider": "brew", "package": "node"}]}
+  },
+  "hosts": {"testhost": []},
+  "groups": [{"name": "testhost", "special": "host", "tools": ["pnpm", "node"]}]
+}

@@ -722,16 +722,37 @@ func TestBackupConfigOnLaunch_CopiesExistingFile(t *testing.T) {
 	}
 }
 
-func TestInitProviderRegistry_RegistersStandaloneProviders(t *testing.T) {
+func TestInitProviderRegistry_RegistersAllBuiltins(t *testing.T) {
 	a := &App{}
 	a.initProviderRegistry(config.Settings{})
-	for _, name := range []string{"cargo", "script"} {
+
+	// Guards the full wiring in initProviderRegistry: the factory-registered
+	// concrete providers (built via provider.BuildConcreteProviders, linked by
+	// internal/provider/all), the explicitly-wired named ecosystem managers, and
+	// the settings-gated ecosystem families (all enabled with empty settings).
+	// A dropped factory registration, a missing provider/all blank import, or a
+	// removed explicit wiring line each break this.
+	concrete := []string{"brew", "apt", "apk", "cargo", "dnf", "pacman", "zypper", "pip", "script", "apt_repo"}
+	named := []string{"bun", "pnpm", "npm", "uv"}
+	families := []string{"node", "python", "system"}
+
+	for _, name := range append(append(append([]string{}, concrete...), named...), families...) {
 		p, ok := a.registry.Get(name)
 		if !ok {
-			t.Fatalf("%s provider not registered", name)
+			t.Errorf("provider %q not registered", name)
+			continue
 		}
 		if p.Name() != name {
-			t.Errorf("registered provider Name() = %q, want %s", p.Name(), name)
+			t.Errorf("provider %q registered under Name() = %q", name, p.Name())
+		}
+	}
+
+	// Every factory-registered concrete provider must be wired into the App
+	// registry — the seam is only real if BuildConcreteProviders' output is
+	// actually registered here.
+	for _, name := range provider.RegisteredConcreteNames() {
+		if _, ok := a.registry.Get(name); !ok {
+			t.Errorf("factory-registered concrete %q missing from App registry", name)
 		}
 	}
 }

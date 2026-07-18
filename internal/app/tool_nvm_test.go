@@ -8,7 +8,6 @@ import (
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/database"
 )
 
 func TestToolResolvesViaNvm_DetectsNvmBin(t *testing.T) {
@@ -34,7 +33,7 @@ func TestToolResolvesViaNvm_DetectsNvmBin(t *testing.T) {
 func TestClassifyToolView_NvmManagedSystemToolIsOutOfSync(t *testing.T) {
 	for _, prov := range []string{"brew", "apt"} {
 		t.Run(prov, func(t *testing.T) {
-			got := app.ClassifyToolView(&database.ToolCache{
+			got := app.ClassifyToolView(&app.ToolView{
 				Name:      "pnpm",
 				Provider:  prov,
 				Tracked:   true,

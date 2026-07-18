@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	osExec "os/exec"
 	"strings"
 
 	"github.com/lkshrk/omni/internal/config"
@@ -26,7 +25,7 @@ func NewGrokMcpAdapter(
 func (a *grokMcpAdapter) ID() string { return "grok" }
 
 func (a *grokMcpAdapter) Available() bool {
-	_, err := osExec.LookPath("grok")
+	_, err := lookPath("grok")
 	return err == nil
 }
 

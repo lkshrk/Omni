@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/executor"
 )
 
@@ -39,7 +38,7 @@ func (r *NvmManagedMigrationBatchResult) HasFailures() bool {
 // NvmManagedMigrationStateResult includes refreshed tool-list state for the TUI.
 type NvmManagedMigrationStateResult struct {
 	Batch      *NvmManagedMigrationBatchResult
-	Tools      []*database.ToolCache
+	Tools      []*ToolView
 	NvmManaged map[string]bool
 }
 
@@ -246,7 +245,7 @@ func (a *App) nvmManagedMigrationState(ctx context.Context) (*NvmManagedMigratio
 	if err != nil {
 		return nil, err
 	}
-	return &NvmManagedMigrationStateResult{Tools: tools, NvmManaged: nvmManaged}, nil
+	return &NvmManagedMigrationStateResult{Tools: toolViewsFromCache(tools), NvmManaged: nvmManaged}, nil
 }
 
 func sortedNvmManagedNames(managed map[string]bool, ignored map[string]bool) []string {

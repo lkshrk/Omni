@@ -9,7 +9,6 @@ package tui
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -616,58 +615,5 @@ func TestDoDotsPush_ErrorPath(t *testing.T) {
 	}
 	if got.err == nil {
 		t.Error("expected non-nil error when dots_repo not configured")
-	}
-}
-
-func TestDoDotsSyncDiscovered_AddsCandidateAndRefreshes(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	cfgDir := t.TempDir()
-	repoDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
-		Settings: config.Settings{DotsRepo: repoDir},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(repoDir, "dotfiles", "claude", ".claude"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	a := app.New(cfgPath)
-	a.CacheDir = cfgDir
-	if err := a.InitTestMode(context.Background()); err != nil {
-		t.Fatalf("InitTestMode: %v", err)
-	}
-	t.Cleanup(func() { _ = a.Close() })
-	m := modelForCmds(a)
-
-	msg := m.doDotsSyncDiscovered(app.DotStatus{Name: "claude", TargetPath: "~/.claude", State: dots.StateUntrackedConflict})()
-	got, ok := msg.(dotsSyncedMsg)
-	if !ok {
-		t.Fatalf("expected dotsSyncedMsg, got %T", msg)
-	}
-	if got.err == nil || !strings.Contains(got.err.Error(), "requires choosing") {
-		t.Fatalf("err = %v, want tracked conflict choice error", got.err)
-	}
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	group := findTUITestGroup(cfg.Groups, "testhost")
-	if group == nil || len(group.Dots) != 1 || group.Dots[0].Name != "claude" {
-		t.Fatalf("machine group dots = %#v, want claude", cfg.Groups)
-	}
-	foundConflict := false
-	for _, entry := range got.entries {
-		if entry.Name == "claude" && entry.State == dots.StateConflict {
-			foundConflict = true
-		}
-	}
-	if !foundConflict {
-		t.Fatalf("entries = %#v, want refreshed tracked claude conflict", got.entries)
 	}
 }

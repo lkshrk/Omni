@@ -53,6 +53,18 @@ Use `script` when no OS or ecosystem package manager carries a tool but an
 upstream installer exists (curl/bash, vendor script, or fixed command sequence).
 List it as a fallback candidate after native providers:
 
+> **Security — the `script` provider executes arbitrary shell.** Every `install`,
+> `check`, `detect`, `uninstall`, `upgrade`, `version`, and `latest` command is run
+> verbatim through `sh -c`, and these commands come from your `settings.json`.
+> Because `settings.json` is typically synced through your dotfiles repository,
+> **anyone who can write to that repository can run arbitrary code on every machine
+> that syncs it** — with `sudo` if a command escalates. Omni does not sandbox or
+> confirm these commands. Treat your dotfiles/config repository as a trusted,
+> access-controlled source: review changes to `script` recipes the way you would
+> review a shell script you are about to run as yourself. Prefer a native or
+> `github_release_asset` provider when one exists; reserve `script` for installers
+> you already trust.
+
 ```json
 {
   "tools": {

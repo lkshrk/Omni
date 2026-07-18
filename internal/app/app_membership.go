@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/database"
 )
 
 func (a *App) SetHostGroupsWithCreated(hostname string, groups, createdGroups []string) error {
@@ -207,7 +206,7 @@ func (a *App) SetGroupTools(group string, membership, originalMembership, ignore
 
 type GroupToolsChange struct {
 	Changed      int
-	Tools        []*database.ToolCache
+	Tools        []*ToolView
 	State        *ToolGroupState
 	ScopeDisplay *ToolScopeDisplayState
 }

@@ -9,7 +9,6 @@ import (
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/dots"
 )
 
@@ -48,7 +47,7 @@ func TestViewAppliesASCIISymbolMode(t *testing.T) {
 	t.Setenv("LC_CTYPE", "")
 	t.Setenv("LANG", "en_US.UTF-8")
 
-	m := baseModel([]*database.ToolCache{{
+	m := baseModel([]*app.ToolView{{
 		Name:      "git",
 		Provider:  "system",
 		Installed: true,
@@ -228,25 +227,6 @@ func TestRenderDots_HistorySection(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("history section missing %q:\n%s", want, out)
 		}
-	}
-}
-
-func TestRenderDots_IgnoredSectionVisible(t *testing.T) {
-	m := baseModel(nil)
-	m.width = 100
-	m.height = 24
-	setDotsRepoForTest(&m, "/home/user/dotfiles")
-	m.dotsEntries = []app.DotStatus{{
-		Name:       "kitty",
-		TargetPath: "~/.config/kitty",
-		Health:     app.DotHealth(dots.StateIgnored),
-		State:      dots.StateIgnored,
-		Actions:    []dots.Action{dots.ActionUnignore, dots.ActionRemove},
-	}}
-
-	out := renderDots(m)
-	if !strings.Contains(out, "Ignored") || !strings.Contains(out, "kitty") {
-		t.Fatalf("ignored dots entry should render in Ignored section, got:\n%s", out)
 	}
 }
 

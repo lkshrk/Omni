@@ -14,7 +14,6 @@ import (
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/provider"
 )
 
@@ -192,7 +191,7 @@ func TestDoSearch_PreservesSearchPrivilegeMetadata(t *testing.T) {
 	if got.tools[0].Privilege != string(provider.PrivilegeMaybe) {
 		t.Fatalf("Privilege = %q, want %q", got.tools[0].Privilege, provider.PrivilegeMaybe)
 	}
-	if !got.tools[0].PrivilegeReason.Valid || got.tools[0].PrivilegeReason.String == "" {
+	if got.tools[0].PrivilegeReason == "" {
 		t.Fatalf("PrivilegeReason = %+v, want populated reason", got.tools[0].PrivilegeReason)
 	}
 }
@@ -286,7 +285,7 @@ func TestSearchResultsMsg_PartialErrorStillShowsResults(t *testing.T) {
 	got := drive(m, searchResultsMsg{
 		query: "pre",
 		gen:   2,
-		tools: []*database.ToolCache{{Name: "prettyping", Provider: "brew"}},
+		tools: []*app.ToolView{{Name: "prettyping", Provider: "brew"}},
 		err:   errors.New("registry timeout"),
 	})
 
@@ -401,11 +400,11 @@ func TestDoSearch_VersionAndDescriptionPopulated(t *testing.T) {
 		t.Fatalf("tools = %d, want 1", len(got.tools))
 	}
 	tc := got.tools[0]
-	if !tc.Version.Valid || tc.Version.String != "1.7.1" {
-		t.Errorf("Version = %v, want {String:1.7.1, Valid:true}", tc.Version)
+	if tc.Version != "1.7.1" {
+		t.Errorf("Version = %v, want 1.7.1", tc.Version)
 	}
-	if !tc.Description.Valid || tc.Description.String != "JSON processor" {
-		t.Errorf("Description = %v, want {String:JSON processor, Valid:true}", tc.Description)
+	if tc.Description != "JSON processor" {
+		t.Errorf("Description = %v, want JSON processor", tc.Description)
 	}
 	meta, err := a.DB().GetMetadata(context.Background(), "jq", "brew", "jq")
 	if err != nil {
@@ -505,7 +504,7 @@ func TestDebouncedSearchMsg_CacheHit_ClearsSearching(t *testing.T) {
 	m.searching = true
 	m.searchGen = 1
 	m.searchCache[searchCacheKey("foo", "")] = searchCacheEntry{
-		tools: []*database.ToolCache{{Name: "foobar", Provider: "brew"}},
+		tools: []*app.ToolView{{Name: "foobar", Provider: "brew"}},
 		at:    time.Now(),
 	}
 
@@ -557,7 +556,7 @@ func TestSearchCache_IsScopedByProviderFilter(t *testing.T) {
 		searchGen:      1,
 	}
 	m.searchCache[searchCacheKey("foo", "brew")] = searchCacheEntry{
-		tools: []*database.ToolCache{{Name: "foo", Provider: "brew"}},
+		tools: []*app.ToolView{{Name: "foo", Provider: "brew"}},
 		at:    time.Now(),
 	}
 
@@ -573,7 +572,7 @@ func TestSearchCache_IsScopedByProviderFilter(t *testing.T) {
 }
 
 func TestSearchResultsMsg_DropsProviderMismatch(t *testing.T) {
-	m := baseModel([]*database.ToolCache{{Name: "existing", Provider: "brew"}})
+	m := baseModel([]*app.ToolView{{Name: "existing", Provider: "brew"}})
 	m.mode = viewSearch
 	m.searchGen = 2
 	m.searching = true
@@ -585,7 +584,7 @@ func TestSearchResultsMsg_DropsProviderMismatch(t *testing.T) {
 		query:          "foo",
 		providerFilter: "brew",
 		gen:            2,
-		tools:          []*database.ToolCache{{Name: "foo", Provider: "brew"}},
+		tools:          []*app.ToolView{{Name: "foo", Provider: "brew"}},
 	})
 
 	if len(got.searchTools) != 0 {

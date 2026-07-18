@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
-	osExec "os/exec"
 	"strings"
 
 	"github.com/lkshrk/omni/internal/config"
@@ -27,7 +26,7 @@ func NewGrokPluginAdapter(
 func (a *grokPluginAdapter) ID() string { return "grok" }
 
 func (a *grokPluginAdapter) Available() bool {
-	_, err := osExec.LookPath("grok")
+	_, err := lookPath("grok")
 	return err == nil
 }
 

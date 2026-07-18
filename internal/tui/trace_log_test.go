@@ -10,7 +10,6 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/executor"
 )
 
@@ -27,9 +26,9 @@ func settingsTraceLogModel() Model {
 }
 
 // fixtureTraces returns three deterministic CommandTrace values for use in tests.
-func fixtureTraces() []database.CommandTrace {
+func fixtureTraces() []app.CommandTraceView {
 	t0 := time.Date(2024, 1, 15, 10, 30, 45, 0, time.UTC)
-	return []database.CommandTrace{
+	return []app.CommandTraceView{
 		{
 			ID:         1,
 			StartedAt:  t0,
@@ -64,18 +63,18 @@ func fixtureTraces() []database.CommandTrace {
 //
 //  1. Enter on settingsRowTraceLog → sets traceLogLoading, dispatches cmd.
 //  2. Inject traceLogLoadedMsg with the given gen and traces.
-func injectTraces(m Model, traces []database.CommandTrace) Model {
+func injectTraces(m Model, traces []app.CommandTraceView) Model {
 	gen := m.traceLogGen + 1 // matches what handleSettingsConfirmAction will produce
 	m = drive(m, pressEnter())
 	return drive(m, traceLogLoadedMsg{gen: gen, traces: traces})
 }
 
 // manyTraces returns n identical trace rows for scroll testing.
-func manyTraces(n int) []database.CommandTrace {
-	out := make([]database.CommandTrace, n)
+func manyTraces(n int) []app.CommandTraceView {
+	out := make([]app.CommandTraceView, n)
 	t0 := time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC)
 	for i := range out {
-		out[i] = database.CommandTrace{
+		out[i] = app.CommandTraceView{
 			ID:         int64(i + 1),
 			StartedAt:  t0.Add(time.Duration(i) * time.Minute),
 			FinishedAt: t0.Add(time.Duration(i)*time.Minute + 50*time.Millisecond),
@@ -150,7 +149,7 @@ func TestTraceLog_ViewRendersTraceRows(t *testing.T) {
 
 func TestTraceLog_RendersStructuredFullFailure(t *testing.T) {
 	m := settingsTraceLogModel()
-	trace := database.CommandTrace{
+	trace := app.CommandTraceView{
 		StartedAt:  time.Date(2024, 1, 15, 10, 30, 45, 0, time.UTC),
 		DurationMS: 2560,
 		Command:    "brew install --cask font-intel-one-mono",
@@ -159,7 +158,7 @@ func TestTraceLog_RendersStructuredFullFailure(t *testing.T) {
 		Error:      "exit status 1",
 		Stderr:     "Error: A font is already installed at:\n/Library/Fonts/IntelOneMono.ttf\nRemove it before reinstalling.",
 	}
-	m = injectTraces(m, []database.CommandTrace{trace})
+	m = injectTraces(m, []app.CommandTraceView{trace})
 
 	view := stripANSIEscapeSequences(m.View().Content)
 	for _, want := range []string{
@@ -176,15 +175,15 @@ func TestTraceLog_RendersStructuredFullFailure(t *testing.T) {
 }
 
 func TestTraceLog_SuccessfulStderrIsNotLabeledProblem(t *testing.T) {
-	trace := database.CommandTrace{Status: "success", Stderr: "download progress"}
+	trace := app.CommandTraceView{Status: "success", Stderr: "download progress"}
 	if got := traceLogProblem(trace); got != "" {
 		t.Fatalf("traceLogProblem() = %q for a successful command", got)
 	}
 }
 
 func TestTraceLog_EFromFailedToolOpensPopup(t *testing.T) {
-	tool := &database.ToolCache{Name: "font-intel-one-mono", Provider: "brew", Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "font-intel-one-mono", Provider: "brew", Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 	m.mode = viewList
 	m.cursor = 0
 	m.setToolActionError(toolKey(tool.Name, tool.Provider), "brew install: exit status 1 (stderr: Error: font already installed)")
@@ -199,8 +198,8 @@ func TestTraceLog_EFromFailedToolOpensPopup(t *testing.T) {
 }
 
 func TestTraceLog_EFromBlurredSearchResultOpensPopup(t *testing.T) {
-	tool := &database.ToolCache{Name: "font-intel-one-mono", Provider: "brew", Tracked: true}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "font-intel-one-mono", Provider: "brew", Tracked: true}
+	m := baseModel([]*app.ToolView{tool})
 	m.mode = viewSearch
 	m.filter.Blur()
 	m.cursor = 0
@@ -255,7 +254,7 @@ func TestTraceLog_EmptySliceState(t *testing.T) {
 	m := settingsTraceLogModel()
 	gen := m.traceLogGen + 1
 	m = drive(m, pressEnter())
-	m = drive(m, traceLogLoadedMsg{gen: gen, traces: []database.CommandTrace{}})
+	m = drive(m, traceLogLoadedMsg{gen: gen, traces: []app.CommandTraceView{}})
 
 	view := m.View().Content
 

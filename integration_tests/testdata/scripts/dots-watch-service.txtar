@@ -6,12 +6,18 @@ env PATH=$WORK/bin:$PATH
 env OMNI_SYSTEMCTL_LOG=$WORK/systemctl.log
 mkdir $WORK/home
 mkdir $WORK/bin
-exec chmod 755 $WORK/bin/systemctl
+exec chmod 755 $WORK/bin/systemctl $WORK/bin/stow
 
 exec git init $WORK/home/dotfiles
 exec git -C $WORK/home/dotfiles config user.email t@t.com
 exec git -C $WORK/home/dotfiles config user.name T
 exec git -C $WORK/home/dotfiles commit --allow-empty -m init
+
+exec omni --config settings.json --cache-dir cache dots watch run --debounce 500ms &watch&
+exec sh -c 'sleep 1'
+kill -INT watch
+wait watch
+stdout 'Watching 0 dotfile path'
 
 exec omni --config settings.json --cache-dir cache dots watch install --debounce 2s
 stdout 'Installed dots watch service'
@@ -59,3 +65,7 @@ stdout 'Debounce: 5s'
 -- bin/systemctl --
 #!/bin/sh
 printf '%s\n' "$*" >> "$OMNI_SYSTEMCTL_LOG"
+
+-- bin/stow --
+#!/bin/sh
+[ "${1:-}" = "--version" ] && echo 'GNU Stow 2.4.1'

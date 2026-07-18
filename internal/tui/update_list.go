@@ -9,9 +9,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/database"
-	"github.com/lkshrk/omni/internal/provider"
 )
 
 const (
@@ -226,7 +223,7 @@ func (m *Model) handleListActionKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 			break
 		}
 		if t := m.selectedTool(); t != nil && t.Installed && t.Outdated {
-			if m.blockPrivilegedToolAction(t, provider.PrivilegeActionUpgrade) {
+			if m.blockPrivilegedToolAction(t, app.PrivilegeActionUpgrade) {
 				break
 			}
 			uk := toolKey(t.Name, t.Provider)
@@ -296,7 +293,7 @@ func (m *Model) handleListActionKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	return cmds
 }
 
-func (m *Model) startSelectedToolInstall(t *database.ToolCache) []tea.Cmd {
+func (m *Model) startSelectedToolInstall(t *app.ToolView) []tea.Cmd {
 	if t == nil || t.Installed {
 		return nil
 	}
@@ -305,7 +302,7 @@ func (m *Model) startSelectedToolInstall(t *database.ToolCache) []tea.Cmd {
 		return nil
 	}
 	installTool := m.selectedProviderCandidateTool(t)
-	if m.blockPrivilegedToolAction(installTool, provider.PrivilegeActionInstall) {
+	if m.blockPrivilegedToolAction(installTool, app.PrivilegeActionInstall) {
 		return nil
 	}
 	m.loading = true
@@ -340,7 +337,7 @@ func (m *Model) handleListConfirmationKeyMsg(msg tea.KeyPressMsg) (bool, []tea.C
 	case listConfirmDelete:
 		m.loading = true
 		if c.installed {
-			if m.blockPrivilegedToolAction(&database.ToolCache{Name: c.name, Provider: c.provider, Installed: true, InstalledWith: c.installedWith}, provider.PrivilegeActionUninstall) {
+			if m.blockPrivilegedToolAction(&app.ToolView{Name: c.name, Provider: c.provider, Installed: true, InstalledWith: c.installedWith}, app.PrivilegeActionUninstall) {
 				m.loading = false
 				break
 			}
@@ -437,16 +434,16 @@ func (m *Model) setToolActionError(key, message string, errValues ...error) {
 	}
 	m.rowErrors[key] = message
 	if len(errValues) > 0 {
-		if actionErr, ok := provider.ActionErrorFrom(errValues[0]); ok {
+		if actionErr, ok := app.ActionErrorFrom(errValues[0]); ok {
 			if m.rowActionErrors == nil {
-				m.rowActionErrors = make(map[string]*provider.ActionError)
+				m.rowActionErrors = make(map[string]*app.ActionError)
 			}
 			m.rowActionErrors[key] = actionErr
 		}
 	}
 }
 
-func (m *Model) isInstallAndAddCandidate(t *database.ToolCache) bool {
+func (m *Model) isInstallAndAddCandidate(t *app.ToolView) bool {
 	if t == nil {
 		return false
 	}
@@ -476,14 +473,14 @@ func (m *Model) clearRowActionError() {
 	clear(m.rowActionErrors)
 }
 
-func (m Model) selectedRowApplicableSolution() (provider.ErrorSolution, bool) {
+func (m Model) selectedRowApplicableSolution() (app.ErrorSolution, bool) {
 	t := m.selectedTool()
 	if t == nil || len(m.rowActionErrors) == 0 {
-		return provider.ErrorSolution{}, false
+		return app.ErrorSolution{}, false
 	}
 	actionErr := m.rowActionErrors[toolKey(t.Name, t.Provider)]
 	if actionErr == nil {
-		return provider.ErrorSolution{}, false
+		return app.ErrorSolution{}, false
 	}
 	return app.FirstApplicableProviderSolution(actionErr)
 }
@@ -506,7 +503,7 @@ func (m *Model) markBulkPendingSync() {
 	}
 }
 
-func (m *Model) markBulkPendingSyncAll(discovered []*database.ToolCache) {
+func (m *Model) markBulkPendingSyncAll(discovered []*app.ToolView) {
 	m.markBulkPendingSync()
 	for _, t := range discovered {
 		if t != nil && t.Name != "" && t.Provider != "" {
@@ -519,7 +516,7 @@ func (m *Model) clearBulkPending() {
 	clear(m.bulkPendingKeys)
 }
 
-func (m *Model) armListConfirmation(action string, t *database.ToolCache) tea.Cmd {
+func (m *Model) armListConfirmation(action string, t *app.ToolView) tea.Cmd {
 	m.listConfirm = listConfirmation{action: action}
 	if t != nil {
 		m.listConfirm.name = t.Name
@@ -575,7 +572,7 @@ func (m *Model) openGroupPicker(claim bool) {
 		m.pickerActionTool = *t
 		m.pickerActionToolSet = true
 	} else {
-		m.pickerActionTool = database.ToolCache{}
+		m.pickerActionTool = app.ToolView{}
 		m.pickerActionToolSet = false
 	}
 }
@@ -588,11 +585,11 @@ func (m *Model) openGroupMembershipPicker() {
 	m.openToolGroupMembershipPicker(t)
 }
 
-func (m *Model) openToolGroupMembershipPicker(t *database.ToolCache) {
+func (m *Model) openToolGroupMembershipPicker(t *app.ToolView) {
 	m.mode = viewGroupMembership
 	groups := prioritizedPickerGroups(*m)
-	if t != nil && m.hostInventoryTools[t.Name] && !slices.Contains(groups, config.SystemInventoryGroup) {
-		groups = append(groups, config.SystemInventoryGroup)
+	if t != nil && m.hostInventoryTools[t.Name] && !slices.Contains(groups, app.SystemInventoryGroup) {
+		groups = append(groups, app.SystemInventoryGroup)
 	}
 	m.pickerGroups = append(groups, groupPickerNewSentinel)
 	m.pickerCursor = 0
@@ -604,8 +601,8 @@ func (m *Model) openToolGroupMembershipPicker(t *database.ToolCache) {
 		m.pickerMembershipName = t.Name
 		m.pickerMembershipKey = toolMembershipKey(t)
 		m.pickerOriginalGroups = append([]string(nil), m.toolMemberships[m.pickerMembershipKey]...)
-		if m.hostInventoryTools[t.Name] && !slices.Contains(m.pickerOriginalGroups, config.SystemInventoryGroup) {
-			m.pickerOriginalGroups = append(m.pickerOriginalGroups, config.SystemInventoryGroup)
+		if m.hostInventoryTools[t.Name] && !slices.Contains(m.pickerOriginalGroups, app.SystemInventoryGroup) {
+			m.pickerOriginalGroups = append(m.pickerOriginalGroups, app.SystemInventoryGroup)
 			if m.toolMemberships == nil {
 				m.toolMemberships = make(map[string][]string)
 			}
@@ -619,7 +616,7 @@ func (m *Model) openInstallGroupPicker() {
 	m.pickerPurposeInstall = true
 }
 
-func (m *Model) openIgnoreScopePicker(t *database.ToolCache) {
+func (m *Model) openIgnoreScopePicker(t *app.ToolView) {
 	m.mode = viewIgnoreScope
 	m.scopeCursor = 0
 	m.scopeOptions = ignoreScopeOptions(*m, t)
@@ -627,7 +624,7 @@ func (m *Model) openIgnoreScopePicker(t *database.ToolCache) {
 	m.scopeTargetSet = true
 }
 
-func (m *Model) openProviderScopePicker(t *database.ToolCache) {
+func (m *Model) openProviderScopePicker(t *app.ToolView) {
 	m.mode = viewProviderScope
 	m.scopeCursor = 0
 	m.scopeOptions = m.providerScopeOptions(t)
@@ -654,7 +651,7 @@ func (m *Model) startToolSyncAllConfirmed(cmds *[]tea.Cmd) {
 	m.loading = true
 	m.progressText = ""
 	ch, gen := m.beginProgressStream()
-	discovered := append([]*database.ToolCache(nil), m.discoveredTools...)
+	discovered := append([]*app.ToolView(nil), m.discoveredTools...)
 	m.markBulkPendingSyncAll(discovered)
 	*cmds = append(*cmds, m.spinner.Tick, m.doSyncAllWithProgress(ch, gen, discovered), waitForProgress(ch, gen))
 }

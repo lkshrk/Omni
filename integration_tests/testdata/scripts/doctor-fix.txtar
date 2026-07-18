@@ -1,0 +1,30 @@
+# doctor previews safe include cleanup, applies it, then reloads cleanly
+exec omni --config settings.json --cache-dir cache doctor --fix --dry-run
+stdout 'would remove'
+stdout 'dry run: no files were changed'
+exec grep '"git"' settings.json
+stdout '"git"'
+
+exec omni --config settings.json --cache-dir cache doctor --fix
+stdout 'removed'
+exec omni --config settings.json --cache-dir cache doctor
+stdout 'settings.json is valid'
+! stdout 'duplicate definitions'
+! exec grep '"git"' settings.json
+exec grep '"git"' settings.d/dots.json
+stdout '"git"'
+
+-- settings.json --
+{
+  "$include": ["settings.d/dots.json"],
+  "hosts": {"testhost": ["dev"]},
+  "groups": [
+    {"name": "testhost", "special": "host"},
+    {"name": "dev", "dots": [{"name": "git", "path": "~/.gitconfig"}]}
+  ]
+}
+
+-- settings.d/dots.json --
+{
+  "groups": [{"name": "dev", "dots": [{"name": "git", "path": "~/.gitconfig"}]}]
+}

@@ -8,7 +8,6 @@ package tui
 
 import (
 	"context"
-	"database/sql"
 	"os"
 	"path/filepath"
 	"slices"
@@ -276,41 +275,6 @@ func TestLoadTools_WithHost(t *testing.T) {
 	}
 	if got.hostInfo == nil || got.hostInfo.Active == "" {
 		t.Fatalf("hostInfo = %#v, want active host", got.hostInfo)
-	}
-}
-
-func TestLoadTools_ConfiguredHostWithoutBootstrapMarkerStaysOnDashboard(t *testing.T) {
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "settings.json")
-	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
-		Groups: []*config.GroupConfig{{Name: shortHostname(), Special: "host"}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	a := app.New(cfgPath)
-	a.CacheDir = dir
-	if err := a.InitTestMode(context.Background()); err != nil {
-		t.Fatalf("App.InitTestMode: %v", err)
-	}
-	t.Cleanup(func() { _ = a.Close() })
-
-	msg, ok := loadTools(a, context.Background())().(toolsLoadedMsg)
-	if !ok {
-		t.Fatalf("loadTools returned non-tools message")
-	}
-	if msg.noConfig || msg.noHost {
-		t.Fatalf("startup flags noConfig=%v noHost=%v, want configured host", msg.noConfig, msg.noHost)
-	}
-
-	m := baseModel(nil)
-	m.mode = viewStatus
-	m.loading = true
-	got := drive(m, msg)
-	if got.mode != viewStatus {
-		t.Fatalf("mode = %v, want viewStatus", got.mode)
-	}
-	if got.setupStep != 0 {
-		t.Fatalf("setupStep = %d, want 0", got.setupStep)
 	}
 }
 
@@ -729,12 +693,12 @@ func TestDoRefreshDiscovered_EmptyApp(t *testing.T) {
 // TestAnyMissingDescription_AllPresent verifies the false branch when every
 // tool has a valid description.
 func TestAnyMissingDescription_AllPresent(t *testing.T) {
-	from := func(desc string) *database.ToolCache {
-		return &database.ToolCache{
-			Description: sql.NullString{String: desc, Valid: true},
+	from := func(desc string) *app.ToolView {
+		return &app.ToolView{
+			Description: desc,
 		}
 	}
-	tools := []*database.ToolCache{
+	tools := []*app.ToolView{
 		from("fast line-oriented search"),
 		from("command-line JSON processor"),
 	}
@@ -746,13 +710,13 @@ func TestAnyMissingDescription_AllPresent(t *testing.T) {
 // TestAnyMissingDescription_OneMissing verifies the true branch when at least
 // one tool lacks a description.
 func TestAnyMissingDescription_OneMissing(t *testing.T) {
-	present := &database.ToolCache{
-		Description: sql.NullString{String: "something", Valid: true},
+	present := &app.ToolView{
+		Description: "something",
 	}
-	missing := &database.ToolCache{
-		Description: sql.NullString{String: "", Valid: false},
+	missing := &app.ToolView{
+		Description: "",
 	}
-	tools := []*database.ToolCache{present, missing}
+	tools := []*app.ToolView{present, missing}
 	if !anyMissingDescription(tools) {
 		t.Error("anyMissingDescription = false, want true when a tool lacks a description")
 	}

@@ -8,7 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/dots"
 )
 
 func (m *Model) handleDotsLoadedMsg(msg dotsLoadedMsg) []tea.Cmd {
@@ -414,7 +413,7 @@ func (m *Model) doDotsSyncOnlyWithOptions(progressCh chan dotsProgressUpdate, en
 		if progressCh != nil {
 			defer close(progressCh)
 		}
-		opts := dots.SyncOptions{
+		opts := app.DotSyncOptions{
 			EntryOrder:               append([]string(nil), entryOrder...),
 			SuppressUnchangedHistory: suppressUnchangedHistory,
 		}
@@ -443,7 +442,7 @@ func (m *Model) doDotsSyncEntry(name string) tea.Cmd {
 	a := m.app
 	ctx, gen := m.currentDotsOperation()
 	return func() tea.Msg {
-		result, err := a.DotsSyncEntryWithState(ctx, name, dots.SyncOptions{})
+		result, err := a.DotsSyncEntryWithState(ctx, name, app.DotSyncOptions{})
 		entries, gitStatus, memberships := dotsSnapshotFromState(result)
 		return dotsSyncedMsg{gen: gen, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: err}
 	}

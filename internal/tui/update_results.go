@@ -215,6 +215,7 @@ func (m *Model) handleProgressDoneMsg(msg progressDoneMsg) []tea.Cmd {
 	if msg.err == nil && len(msg.rowErrors) > 0 && len(msg.promptPrivilegedActions) > 0 {
 		promptingPrivilegedAction = m.queuePrivilegedToolPrompts(msg.rowErrors, msg.promptPrivilegedActions)
 	}
+	progressErr := firstToolProgressError(msg)
 	if isContextCanceled(msg.err) {
 		m.adminTerminalQueue = nil
 		cmds = append(cmds, setStatus(m, "cancelled", false))
@@ -224,6 +225,8 @@ func (m *Model) handleProgressDoneMsg(msg progressDoneMsg) []tea.Cmd {
 	} else if promptingPrivilegedAction {
 		m.cancelDashboardReconcile()
 		return cmds
+	} else if progressErr != nil {
+		cmds = append(cmds, setStatus(m, "✗ "+rowErrorSummary(progressErr.Error()), true))
 	} else if msg.message != "" {
 		if msg.rowErrors == nil {
 			m.clearRowActionError()
@@ -232,9 +235,34 @@ func (m *Model) handleProgressDoneMsg(msg progressDoneMsg) []tea.Cmd {
 	}
 	switch m.dashboardReconcileCurrent {
 	case dashboardReconcilePlanSyncTools, dashboardReconcilePlanUpgradeTools:
-		m.continueDashboardReconcile(m.dashboardReconcileCurrent, msg.err, &cmds)
+		m.continueDashboardReconcile(m.dashboardReconcileCurrent, progressErr, &cmds)
 	}
 	return cmds
+}
+
+func firstToolProgressError(msg progressDoneMsg) error {
+	if msg.err != nil {
+		return msg.err
+	}
+	keys := make([]string, 0, len(msg.rowActionErrors)+len(msg.rowErrors))
+	for key := range msg.rowActionErrors {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if err := msg.rowActionErrors[key]; err != nil {
+			return err
+		}
+	}
+	keys = keys[:0]
+	for key := range msg.rowErrors {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	if len(keys) > 0 {
+		return errors.New(msg.rowErrors[keys[0]])
+	}
+	return nil
 }
 
 func (m *Model) removeDiscoveredByName(names []string) bool {
@@ -602,21 +630,27 @@ func (m *Model) handleDotsServiceChangedMsg(msg dotsServiceChangedMsg) []tea.Cmd
 func (m *Model) handleDoctorDoneMsg(msg doctorDoneMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 	m.doctorRunning = false
+	preserveStatus := m.doctorPreserveStatus
+	m.doctorPreserveStatus = false
 	if msg.err != nil {
 		m.doctorErr = msg.err.Error()
-		cmds = append(cmds, setStatus(m, "✗ doctor: "+msg.err.Error(), true))
+		if !preserveStatus {
+			cmds = append(cmds, setStatus(m, "✗ doctor: "+msg.err.Error(), true))
+		}
 	} else {
 		m.doctorResult = msg.result
 		m.doctorErr = ""
-		if msg.result != nil && msg.result.HasFailures() {
-			cmds = append(cmds, setStatus(m, "✗ doctor found failing checks", true))
-		} else {
-			cmds = append(cmds, setStatus(m, "✓ doctor complete", false))
+		if !preserveStatus {
+			if msg.result != nil && msg.result.HasFailures() {
+				cmds = append(cmds, setStatus(m, "✗ doctor found failing checks", true))
+			} else {
+				cmds = append(cmds, setStatus(m, "✓ doctor complete", false))
+			}
 		}
 	}
 	if m.doctorRefreshPending {
 		m.doctorRefreshPending = false
-		m.refreshDoctorAfterFix(&cmds)
+		m.refreshDoctorAfterFixWithStatus(&cmds, preserveStatus)
 	}
 	return cmds
 }

@@ -11,6 +11,11 @@ exec omni --config settings.json dots ignore nvim '*.log'
 stdout 'added ignore pattern'
 stdout 'nvim'
 
+exec omni --config settings.json dots unignore nvim '*.log'
+stdout 'removed ignore pattern'
+stdout 'from "nvim"'
+! exec grep '"*.log"' settings.json
+
 ! exec omni --config settings.json dots ignore nvim '['
 stderr 'invalid glob pattern'
 

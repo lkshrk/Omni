@@ -509,7 +509,7 @@ func (a *App) runFallbackInstall(ctx context.Context, name, action string, spec 
 		}
 		// Persist any checksum that was verified during the pipeline run.
 		if cs := strings.TrimSpace(fallback.Recipe.Checksum); cs != "" {
-			if persistErr := a.persistFallbackChecksum(name, cs); persistErr != nil {
+			if persistErr := a.persistFallbackChecksum(name, cs, fallback.Recipe.ChecksumAssetID); persistErr != nil {
 				return fmt.Errorf("fallback %s: persist checksum: %w", name, persistErr)
 			}
 		}
@@ -521,13 +521,14 @@ func (a *App) runFallbackInstall(ctx context.Context, name, action string, spec 
 
 // persistFallbackChecksum writes the verified checksum digest back to the
 // stored recipe so future installs can skip the network fetch.
-func (a *App) persistFallbackChecksum(name, digest string) error {
+func (a *App) persistFallbackChecksum(name, digest, assetID string) error {
 	return a.withConfig(func(cfg *config.RootConfig) error {
 		spec, ok := cfg.Tools[name]
 		if !ok || spec.Fallback == nil {
 			return nil
 		}
 		spec.Fallback.Recipe.Checksum = digest
+		spec.Fallback.Recipe.ChecksumAssetID = assetID
 		cfg.Tools[name] = spec
 		return nil
 	})

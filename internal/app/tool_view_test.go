@@ -4,13 +4,12 @@ import (
 	"testing"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/database"
 )
 
 func TestClassifyToolView(t *testing.T) {
 	tests := []struct {
 		name       string
-		tool       *database.ToolCache
+		tool       *app.ToolView
 		context    app.ToolClassificationContext
 		wantSec    app.ToolViewSection
 		wantSync   app.ToolSyncStatus
@@ -19,33 +18,33 @@ func TestClassifyToolView(t *testing.T) {
 	}{
 		{
 			name:     "ignored wins",
-			tool:     &database.ToolCache{Name: "fd", Provider: "brew", Tracked: true, Installed: false},
+			tool:     &app.ToolView{Name: "fd", Provider: "brew", Tracked: true, Installed: false},
 			context:  app.ToolClassificationContext{Ignored: true},
 			wantSec:  app.ToolViewSectionIgnored,
 			wantSync: app.ToolSyncMissing,
 		},
 		{
 			name:     "outdated update section",
-			tool:     &database.ToolCache{Name: "git", Provider: "brew", Tracked: true, Installed: true, Outdated: true},
+			tool:     &app.ToolView{Name: "git", Provider: "brew", Tracked: true, Installed: true, Outdated: true},
 			wantSec:  app.ToolViewSectionUpdates,
 			wantSync: app.ToolSyncOK,
 		},
 		{
 			name:     "discovered local tool is out of sync",
-			tool:     &database.ToolCache{Name: "rg", Provider: "brew", Installed: true},
+			tool:     &app.ToolView{Name: "rg", Provider: "brew", Installed: true},
 			context:  app.ToolClassificationContext{Discovered: true},
 			wantSec:  app.ToolViewSectionOutOfSync,
 			wantSync: app.ToolSyncUnclaimed,
 		},
 		{
 			name:     "missing tracked tool is out of sync",
-			tool:     &database.ToolCache{Name: "bat", Provider: "brew", Tracked: true, Installed: false},
+			tool:     &app.ToolView{Name: "bat", Provider: "brew", Tracked: true, Installed: false},
 			wantSec:  app.ToolViewSectionOutOfSync,
 			wantSync: app.ToolSyncMissing,
 		},
 		{
 			name: "pinned provider mismatch is out of sync",
-			tool: &database.ToolCache{Name: "typescript", Provider: "node", Tracked: true, Installed: true, InstalledWith: "bun"},
+			tool: &app.ToolView{Name: "typescript", Provider: "node", Tracked: true, Installed: true, InstalledWith: "bun"},
 			context: app.ToolClassificationContext{
 				ToolProviderPins:     map[string]string{"typescript": "npm"},
 				EffectiveNodeManager: "bun",
@@ -57,7 +56,7 @@ func TestClassifyToolView(t *testing.T) {
 		},
 		{
 			name: "effective manager mismatch is out of sync",
-			tool: &database.ToolCache{Name: "typescript", Provider: "node", Tracked: true, Installed: true, InstalledWith: "npm"},
+			tool: &app.ToolView{Name: "typescript", Provider: "node", Tracked: true, Installed: true, InstalledWith: "npm"},
 			context: app.ToolClassificationContext{
 				EffectiveNodeManager: "bun",
 			},
@@ -68,13 +67,13 @@ func TestClassifyToolView(t *testing.T) {
 		},
 		{
 			name:     "installed up to date",
-			tool:     &database.ToolCache{Name: "git", Provider: "brew", Tracked: true, Installed: true},
+			tool:     &app.ToolView{Name: "git", Provider: "brew", Tracked: true, Installed: true},
 			wantSec:  app.ToolViewSectionInstalled,
 			wantSync: app.ToolSyncOK,
 		},
 		{
 			name: "concrete provider mismatch is out of sync",
-			tool: &database.ToolCache{
+			tool: &app.ToolView{
 				Name: "pnpm", Provider: "brew", InstalledWith: "bun",
 				Installed: true, Tracked: true,
 			},
@@ -85,13 +84,13 @@ func TestClassifyToolView(t *testing.T) {
 		},
 		{
 			name:     "search result is available",
-			tool:     &database.ToolCache{Name: "jq", Provider: "brew", Tracked: false, Installed: false},
+			tool:     &app.ToolView{Name: "jq", Provider: "brew", Tracked: false, Installed: false},
 			wantSec:  app.ToolViewSectionAvailable,
 			wantSync: app.ToolSyncUnclaimed,
 		},
 		{
 			name:     "self-updating cask reads as an update, not quarantined",
-			tool:     &database.ToolCache{Name: "battle-net", Provider: "brew", Tracked: true, Installed: true, Outdated: true, UpdateBlocked: app.UpdateBlockSelfUpdates},
+			tool:     &app.ToolView{Name: "battle-net", Provider: "brew", Tracked: true, Installed: true, Outdated: true, UpdateBlocked: app.UpdateBlockSelfUpdates},
 			wantSec:  app.ToolViewSectionUpdates,
 			wantSync: app.ToolSyncOK,
 		},
@@ -142,18 +141,18 @@ func TestToolProviderDisplayLabel(t *testing.T) {
 func TestToolHasPrivilegeMarker(t *testing.T) {
 	tests := []struct {
 		name    string
-		tool    *database.ToolCache
+		tool    *app.ToolView
 		context app.ToolClassificationContext
 		want    bool
 	}{
 		{name: "nil tool", want: false},
-		{name: "cached privilege metadata", tool: &database.ToolCache{Name: "parsec", Provider: "system", InstalledWith: "brew", Privilege: "maybe"}, want: true},
-		{name: "concrete sudo backed provider", tool: &database.ToolCache{Name: "vim", Provider: "apt"}, want: true},
-		{name: "concrete brew provider", tool: &database.ToolCache{Name: "git", Provider: "brew"}, want: false},
-		{name: "logical system installed with sudo backed manager", tool: &database.ToolCache{Name: "vim", Provider: "system", InstalledWith: "dnf"}, want: true},
-		{name: "logical system defaulting to sudo backed manager", tool: &database.ToolCache{Name: "vim", Provider: "system"}, context: app.ToolClassificationContext{EffectiveSystemManager: "apk"}, want: true},
-		{name: "logical system defaulting to brew", tool: &database.ToolCache{Name: "ripgrep", Provider: "system"}, context: app.ToolClassificationContext{EffectiveSystemManager: "brew"}, want: false},
-		{name: "non system ecosystem ignores system manager", tool: &database.ToolCache{Name: "typescript", Provider: "node"}, context: app.ToolClassificationContext{EffectiveSystemManager: "apt", EffectiveNodeManager: "bun"}, want: false},
+		{name: "cached privilege metadata", tool: &app.ToolView{Name: "parsec", Provider: "system", InstalledWith: "brew", Privilege: "maybe"}, want: true},
+		{name: "concrete sudo backed provider", tool: &app.ToolView{Name: "vim", Provider: "apt"}, want: true},
+		{name: "concrete brew provider", tool: &app.ToolView{Name: "git", Provider: "brew"}, want: false},
+		{name: "logical system installed with sudo backed manager", tool: &app.ToolView{Name: "vim", Provider: "system", InstalledWith: "dnf"}, want: true},
+		{name: "logical system defaulting to sudo backed manager", tool: &app.ToolView{Name: "vim", Provider: "system"}, context: app.ToolClassificationContext{EffectiveSystemManager: "apk"}, want: true},
+		{name: "logical system defaulting to brew", tool: &app.ToolView{Name: "ripgrep", Provider: "system"}, context: app.ToolClassificationContext{EffectiveSystemManager: "brew"}, want: false},
+		{name: "non system ecosystem ignores system manager", tool: &app.ToolView{Name: "typescript", Provider: "node"}, context: app.ToolClassificationContext{EffectiveSystemManager: "apt", EffectiveNodeManager: "bun"}, want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -212,7 +211,7 @@ func TestToolProviderDisplayRole(t *testing.T) {
 }
 
 func TestBuildToolViewList_PlacesIgnoreLabelToolsInIgnoredBucket(t *testing.T) {
-	tools := []*database.ToolCache{
+	tools := []*app.ToolView{
 		{Name: "git", Provider: "system", Tracked: true, Installed: true},
 		{Name: "bat", Provider: "system", Tracked: true, Installed: true},
 	}
@@ -231,17 +230,17 @@ func TestBuildToolViewList_PlacesIgnoreLabelToolsInIgnoredBucket(t *testing.T) {
 }
 
 func TestBuildToolViewList_OrdersCountsAndDedupesSources(t *testing.T) {
-	tools := []*database.ToolCache{
+	tools := []*app.ToolView{
 		{Name: "git", Provider: "system", Tracked: true, Installed: true},
 		{Name: "bat", Provider: "system", Tracked: true},
 		{Name: "typescript", Provider: "node", Tracked: true, Installed: true, Outdated: true},
 		{Name: "ignored-a", Provider: "system", Tracked: true, Installed: true},
 	}
-	discovered := []*database.ToolCache{
+	discovered := []*app.ToolView{
 		{Name: "utm", Provider: "system", Installed: true},
 		{Name: "git", Provider: "brew", Installed: true},
 	}
-	search := []*database.ToolCache{
+	search := []*app.ToolView{
 		{Name: "jq", Provider: "system"},
 		{Name: "bat", Provider: "system"},
 		{Name: "utm", Provider: "system"},
@@ -265,15 +264,15 @@ func TestBuildToolViewList_OrdersCountsAndDedupesSources(t *testing.T) {
 }
 
 func TestBuildToolViewList_FiltersProviderAndGroupWithoutDroppingMatchingSearch(t *testing.T) {
-	tools := []*database.ToolCache{
+	tools := []*app.ToolView{
 		{Name: "git", Provider: "system", Tracked: true, Installed: true},
 		{Name: "eslint", Provider: "node", Tracked: true, Installed: true},
 		{Name: "ruff", Provider: "python", Tracked: true, Installed: true},
 	}
-	discovered := []*database.ToolCache{
+	discovered := []*app.ToolView{
 		{Name: "utm", Provider: "system", Installed: true},
 	}
-	search := []*database.ToolCache{
+	search := []*app.ToolView{
 		{Name: "ripgrep", Provider: "system"},
 		{Name: "prettier", Provider: "node"},
 	}
@@ -300,12 +299,12 @@ func TestBuildToolViewList_FiltersProviderAndGroupWithoutDroppingMatchingSearch(
 }
 
 func TestBuildToolViewList_FiltersQueryByToolNameAndProvider(t *testing.T) {
-	tools := []*database.ToolCache{
+	tools := []*app.ToolView{
 		{Name: "git", Provider: "system", Tracked: true, Installed: true},
 		{Name: "eslint", Provider: "node", Tracked: true, Installed: true},
 		{Name: "ruff", Provider: "python", Tracked: true, Installed: true},
 	}
-	discovered := []*database.ToolCache{
+	discovered := []*app.ToolView{
 		{Name: "node-exporter", Provider: "system", Installed: true},
 		{Name: "utm", Provider: "system", Installed: true},
 	}
@@ -323,7 +322,7 @@ func TestBuildToolViewList_FiltersQueryByToolNameAndProvider(t *testing.T) {
 	})
 }
 
-func assertToolViewNames(t *testing.T, tools []*database.ToolCache, want []string) {
+func assertToolViewNames(t *testing.T, tools []*app.ToolView, want []string) {
 	t.Helper()
 	if len(tools) != len(want) {
 		t.Fatalf("tool count = %d, want %d: %#v", len(tools), len(want), tools)
@@ -350,7 +349,7 @@ func assertToolViewCounts(t *testing.T, got map[app.ToolViewSection]int, want ma
 	}
 }
 
-func toolViewNames(tools []*database.ToolCache) []string {
+func toolViewNames(tools []*app.ToolView) []string {
 	names := make([]string, 0, len(tools))
 	for _, tool := range tools {
 		names = append(names, tool.Name)

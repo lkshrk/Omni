@@ -20,7 +20,6 @@ import (
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/database"
 )
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -306,8 +305,8 @@ func TestConfirmTimeoutClearsQuitConfirmation(t *testing.T) {
 }
 
 func TestConfirmTimeoutClearsListConfirmationStatus(t *testing.T) {
-	tool := &database.ToolCache{Name: "typescript", Provider: "node", Installed: true, Tracked: true, InstalledWith: "npm"}
-	m := baseModel([]*database.ToolCache{tool})
+	tool := &app.ToolView{Name: "typescript", Provider: "node", Installed: true, Tracked: true, InstalledWith: "npm"}
+	m := baseModel([]*app.ToolView{tool})
 	m.effectiveNodeManager = "pnpm"
 	cmd := m.armListConfirmation(listConfirmReinstallDefault, tool)
 	if cmd == nil {
@@ -354,7 +353,7 @@ func TestConfirmTimeoutClearsAllConfirmationState(t *testing.T) {
 }
 
 func TestGlobalNavigationClearsActiveConfirmations(t *testing.T) {
-	tool := &database.ToolCache{Name: "bat", Provider: "brew", Installed: true, Tracked: true}
+	tool := &app.ToolView{Name: "bat", Provider: "brew", Installed: true, Tracked: true}
 	cases := []struct {
 		name     string
 		model    Model
@@ -364,7 +363,7 @@ func TestGlobalNavigationClearsActiveConfirmations(t *testing.T) {
 		{
 			name: "list delete confirm tab",
 			model: func() Model {
-				m := baseModel([]*database.ToolCache{tool})
+				m := baseModel([]*app.ToolView{tool})
 				m.listConfirm = listConfirmation{action: listConfirmDelete, name: "bat", provider: "brew"}
 				return m
 			}(),
@@ -395,7 +394,7 @@ func TestGlobalNavigationClearsActiveConfirmations(t *testing.T) {
 		{
 			name: "list delete confirm palette",
 			model: func() Model {
-				m := baseModel([]*database.ToolCache{tool})
+				m := baseModel([]*app.ToolView{tool})
 				m.listConfirm = listConfirmation{action: listConfirmDelete, name: "bat", provider: "brew"}
 				return m
 			}(),
@@ -630,7 +629,7 @@ func TestFlow2_UC76_SetupStep5(t *testing.T) {
 		if !got.setupReloading || !got.providerSnapshotRefreshing || !got.discoveryRefreshing {
 			t.Fatalf("setup reload should wait for provider snapshot and discovery refresh, setupReloading=%v providerSnapshotRefreshing=%v discoveryRefreshing=%v", got.setupReloading, got.providerSnapshotRefreshing, got.discoveryRefreshing)
 		}
-		got = drive(got, discoveredRefreshedMsg{gen: got.discoveryGen, discovered: []*database.ToolCache{{Name: "orphan"}}})
+		got = drive(got, discoveredRefreshedMsg{gen: got.discoveryGen, discovered: []*app.ToolView{{Name: "orphan"}}})
 		if !got.setupReloading {
 			t.Fatal("setupReloading should stay visible after discovery while provider snapshot is pending")
 		}
@@ -648,7 +647,7 @@ func TestFlow2_UC76_SetupStep5(t *testing.T) {
 		m := setupStep5Model()
 		m.setupReloading = true
 		m.loading = true
-		got := drive(m, toolsLoadedMsg{tools: []*database.ToolCache{{Name: "git"}}})
+		got := drive(m, toolsLoadedMsg{tools: []*app.ToolView{{Name: "git"}}})
 		if !got.setupReloading || !got.descRefreshing {
 			t.Fatalf("setup reload should wait for descriptions, setupReloading=%v descRefreshing=%v", got.setupReloading, got.descRefreshing)
 		}
@@ -761,7 +760,7 @@ func TestFlow2_UC77_SetupStep6Esc(t *testing.T) {
 func TestFlow2_UC78_SetupImportDoneMsg(t *testing.T) {
 	// After import the wizard opens the provider-priority editor (step 3).
 	m := loadingSetup(1)
-	m.allTools = []*database.ToolCache{{Name: "snapshot", Provider: "brew"}}
+	m.allTools = []*app.ToolView{{Name: "snapshot", Provider: "brew"}}
 	got := drive(m, setupImportDoneMsg{added: 2})
 	if got.setupStep != 3 {
 		t.Fatalf("setupStep = %d, want 3 (priority editor) after import", got.setupStep)
@@ -1618,7 +1617,7 @@ func TestFlow2_HostGroupBlockedBeforeReusableGroups(t *testing.T) {
 // UC-109: t in group section → opens group tools editor.
 func TestFlow2_UC109_GroupSectionToolsKey(t *testing.T) {
 	m := hostsModel()
-	m.allTools = []*database.ToolCache{
+	m.allTools = []*app.ToolView{
 		{Name: "ripgrep", Provider: "system", Tracked: true},
 	}
 	m.toolMemberships = map[string][]string{toolKey("ripgrep", "system"): {"work"}}
@@ -1644,7 +1643,7 @@ func TestFlow2_GroupToolsKeyIgnoredOnHostSection(t *testing.T) {
 	m.mode = viewGroups
 	m.assignmentSection = 0
 	m.groupCursor = 1
-	m.allTools = []*database.ToolCache{
+	m.allTools = []*app.ToolView{
 		{Name: "ripgrep", Provider: "system", Tracked: true},
 	}
 	got := drive(m, pressRune('t'))
@@ -1686,7 +1685,7 @@ func TestFlow2_GroupToolsEditorStagesMembershipIgnoreAndFilters(t *testing.T) {
 	m := hostsModel()
 	m.mode = viewGroupTools
 	m.groupToolsEditor.group = "work"
-	m.allTools = []*database.ToolCache{
+	m.allTools = []*app.ToolView{
 		{Name: "ripgrep", Provider: "system", Tracked: true},
 		{Name: "eslint", Provider: "node", Tracked: true},
 	}
@@ -1813,7 +1812,7 @@ func TestFlow2_UC114_InlineNewGroupEnter(t *testing.T) {
 // UC-115: Inline new-group Enter (non-empty, claim) → loading=true.
 func TestFlow2_UC115_InlineNewGroupEnterClaim(t *testing.T) {
 	// Build a model with an orphan tool selected.
-	tools := []*database.ToolCache{
+	tools := []*app.ToolView{
 		{Name: "ripgrep", Provider: "brew", Installed: true, Tracked: false},
 	}
 	m := baseModel(tools)
@@ -1929,9 +1928,9 @@ func TestFlow2_UC118_GroupChangedMsg(t *testing.T) {
 }
 
 func TestFlow2_GroupToolsChangedMsgRefreshesGroupsAndMemberships(t *testing.T) {
-	ripgrep := &database.ToolCache{Name: "ripgrep", Provider: "system", Tracked: true}
-	eslint := &database.ToolCache{Name: "eslint", Provider: "node", Tracked: true}
-	m := baseModel([]*database.ToolCache{ripgrep, eslint})
+	ripgrep := &app.ToolView{Name: "ripgrep", Provider: "system", Tracked: true}
+	eslint := &app.ToolView{Name: "eslint", Provider: "node", Tracked: true}
+	m := baseModel([]*app.ToolView{ripgrep, eslint})
 	m.groupNames = []string{"old"}
 	m.toolMemberships = map[string][]string{
 		toolKey("ripgrep", "system"): {"old"},
@@ -1942,7 +1941,7 @@ func TestFlow2_GroupToolsChangedMsgRefreshesGroupsAndMemberships(t *testing.T) {
 
 	got := drive(m, groupToolsChangedMsg{
 		detail: "✓ updated 1 tool settings for work",
-		tools:  []*database.ToolCache{ripgrep, eslint},
+		tools:  []*app.ToolView{ripgrep, eslint},
 		toolMemberships: map[string][]string{
 			toolKey("eslint", "node"): {"work"},
 		},
@@ -1995,7 +1994,7 @@ func TestFlow2_GroupDotsChangedMsgRefreshesEntriesAndMemberships(t *testing.T) {
 
 // UC-119: hostGroupChangedMsg — add group.
 func TestFlow2_UC119_HostGroupChangedMsgAdd(t *testing.T) {
-	m := baseModel([]*database.ToolCache{{Name: "ripgrep", Provider: "system", Tracked: true}})
+	m := baseModel([]*app.ToolView{{Name: "ripgrep", Provider: "system", Tracked: true}})
 	key := toolKey("ripgrep", "system")
 	m.toolMemberships = map[string][]string{key: {"dev"}}
 	got := drive(m, hostGroupChangedMsg{
@@ -2275,9 +2274,9 @@ func TestFlow2_DotsAddFilePickerAllowsFiles(t *testing.T) {
 // ── UC-137: i on untracked uninstalled tool → group picker ───────────────────
 
 func TestFlow2_UC137_InstallUntrackedTool(t *testing.T) {
-	untracked := &database.ToolCache{Name: "fzf", Provider: "brew", Installed: false, Tracked: false}
+	untracked := &app.ToolView{Name: "fzf", Provider: "brew", Installed: false, Tracked: false}
 	m := baseModel(nil)
-	m.discoveredTools = []*database.ToolCache{untracked}
+	m.discoveredTools = []*app.ToolView{untracked}
 	m.rebuildDiscoveredKeys()
 	m.applyFilter()
 	m.upgradingKeys = make(map[string]bool)
@@ -2321,8 +2320,8 @@ func TestFlow2_UC139_DotsSyncIsRepeatNoOp(t *testing.T) {
 // ── UC-140: IsRepeat guards on all viewList action keys ───────────────────────
 
 func TestFlow2_UC140_ViewListIsRepeatNoOps(t *testing.T) {
-	outdatedTool := func() []*database.ToolCache {
-		return []*database.ToolCache{{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: true, Tracked: true}}
+	outdatedTool := func() []*app.ToolView {
+		return []*app.ToolView{{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: true, Tracked: true}}
 	}
 
 	cases := []struct {
@@ -2387,9 +2386,9 @@ func TestFlow2_UC140_ViewListIsRepeatNoOps(t *testing.T) {
 		{
 			name: "c IsRepeat",
 			setup: func() Model {
-				orphan := &database.ToolCache{Name: "fzf", Provider: "brew", Installed: true, Tracked: false}
+				orphan := &app.ToolView{Name: "fzf", Provider: "brew", Installed: true, Tracked: false}
 				m := baseModel(nil)
-				m.discoveredTools = []*database.ToolCache{orphan}
+				m.discoveredTools = []*app.ToolView{orphan}
 				m.rebuildDiscoveredKeys()
 				m.applyFilter()
 				m.upgradingKeys = make(map[string]bool)
@@ -2517,10 +2516,10 @@ func TestFlow2_UC142_SetupStep3PriorityEditor(t *testing.T) {
 // "base", "work", and "personal" groups, so group-filter tests have
 // a realistic fixture without touching the real app layer.
 func multiGroupModel() Model {
-	brew := func(name, group string) *database.ToolCache {
-		return &database.ToolCache{Name: name, Provider: "brew", Installed: true}
+	brew := func(name, group string) *app.ToolView {
+		return &app.ToolView{Name: name, Provider: "brew", Installed: true}
 	}
-	tools := []*database.ToolCache{
+	tools := []*app.ToolView{
 		brew("git", "base"),
 		brew("ripgrep", "work"),
 		brew("fzf", "personal"),
@@ -2590,7 +2589,7 @@ func TestFlow2_UC145_GroupPrevFilter(t *testing.T) {
 // or reusable group badge.
 func TestFlow2_UC146_GroupColAlwaysVisible(t *testing.T) {
 	// Two tools both in the host group.
-	tools := []*database.ToolCache{
+	tools := []*app.ToolView{
 		{Name: "git", Provider: "brew", Installed: true},
 		{Name: "curl", Provider: "brew", Installed: true},
 	}

@@ -14,7 +14,7 @@
 
 ## Source Material
 
-- `docs/superpowers/specs/2026-07-17-config-optimize-design.md`
+- `design.md`
 - User-requested closure of CLI end-to-end and TUI real-command gaps.
 - Changed implementation and existing doctor/fix tests.
 - Source material not found or not available: none.

@@ -311,8 +311,23 @@ type CLIToolProvider interface {
 }
 
 // Provider is the extensibility interface.
-// Add a new package manager by implementing this interface and
-// registering it in main.go — no other code changes required.
+//
+// Add a new concrete package manager without touching internal/app:
+//  1. Implement this interface in a new internal/provider/<name> package with a
+//     New(executor.Executor) constructor.
+//  2. Register its factory from that package's init() via RegisterConcrete (see
+//     factory.go); the pattern lives in each provider's register.go.
+//  3. Add a blank import of the package to internal/provider/all so its init()
+//     is linked, and a Metadata entry to the catalog (catalog.go).
+//
+// internal/app builds every registered concrete factory generically, so no
+// change to (*app.App).initProviderRegistry is needed. The exceptions wired
+// explicitly there are the parameterized/coordinated providers: the node and
+// python ecosystem families and their named managers, and the system family
+// that delegates to the concrete package managers.
+//
+// Optional capabilities (see the CapabilityXxx interfaces above) are discovered
+// by type assertion, so a provider only implements what it supports.
 type Provider interface {
 	// Name returns the unique identifier used in config (e.g. "brew", "npm").
 	Name() string

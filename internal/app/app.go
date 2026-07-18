@@ -21,19 +21,10 @@ import (
 	"github.com/lkshrk/omni/internal/dots"
 	"github.com/lkshrk/omni/internal/executor"
 	"github.com/lkshrk/omni/internal/provider"
-	apkpkg "github.com/lkshrk/omni/internal/provider/apk"
-	aptpkg "github.com/lkshrk/omni/internal/provider/apt"
-	"github.com/lkshrk/omni/internal/provider/aptrepo"
-	"github.com/lkshrk/omni/internal/provider/brew"
-	"github.com/lkshrk/omni/internal/provider/cargo"
-	dnfpkg "github.com/lkshrk/omni/internal/provider/dnf"
+	_ "github.com/lkshrk/omni/internal/provider/all"
 	"github.com/lkshrk/omni/internal/provider/node"
-	pacmanpkg "github.com/lkshrk/omni/internal/provider/pacman"
-	"github.com/lkshrk/omni/internal/provider/pip"
 	"github.com/lkshrk/omni/internal/provider/python"
-	"github.com/lkshrk/omni/internal/provider/script"
 	systempkg "github.com/lkshrk/omni/internal/provider/system"
-	zypppkg "github.com/lkshrk/omni/internal/provider/zypper"
 	isync "github.com/lkshrk/omni/internal/sync"
 	"github.com/lkshrk/omni/internal/testguard"
 )
@@ -122,7 +113,7 @@ func dotsTestTargetPath(path string) (string, error) {
 }
 
 type SyncAllOptions struct {
-	Discovered     []*database.ToolCache
+	Discovered     []*ToolView
 	DryRun         bool
 	Group          string // target group for discovered tools (default: machine hostname)
 	Progress       func(string)
@@ -140,13 +131,13 @@ type SyncAllResult struct {
 
 type SyncStateResult struct {
 	Result *isync.SyncResult
-	Tools  []*database.ToolCache
+	Tools  []*ToolView
 	State  *ToolGroupState
 }
 
 type SyncAllStateResult struct {
 	Result *SyncAllResult
-	Tools  []*database.ToolCache
+	Tools  []*ToolView
 	State  *ToolGroupState
 }
 
@@ -169,7 +160,7 @@ type UpgradeAllResult struct {
 
 type UpgradeAllStateResult struct {
 	Result *UpgradeAllResult
-	Tools  []*database.ToolCache
+	Tools  []*ToolView
 	State  *ToolGroupState
 }
 
@@ -272,33 +263,21 @@ func (a *App) initProviderRegistry(settings config.Settings) {
 	a.fallbackExec = exec
 	a.registry = provider.NewRegistry()
 
-	// concrete providers — always registered regardless of disabled_providers.
-	brewP := brew.New(exec)
-	aptP := aptpkg.New(exec)
-	apkP := apkpkg.New(exec)
-	dnfP := dnfpkg.New(exec)
-	pacmanP := pacmanpkg.New(exec)
-	zypperP := zypppkg.New(exec)
+	// Concrete providers self-register a factory from their package init()
+	// (linked via the blank import of internal/provider/all) and are built here
+	// regardless of disabled_providers. Adding a concrete provider needs no
+	// change to this file — see provider.RegisterConcrete.
+	concreteProviders := provider.BuildConcreteProviders(exec)
+	for name, p := range concreteProviders {
+		a.registry.RegisterWithMetadata(p, provider.BuiltinMetadata(name))
+	}
 
-	concreteProviders := map[string]provider.Provider{
-		brewP.Name():   brewP,
-		aptP.Name():    aptP,
-		apkP.Name():    apkP,
-		dnfP.Name():    dnfP,
-		pacmanP.Name(): pacmanP,
-		zypperP.Name(): zypperP,
-	}
-	for _, p := range concreteProviders {
-		a.registry.RegisterWithMetadata(p, provider.BuiltinMetadata(p.Name()))
-	}
+	// Named ecosystem managers and the settings-gated ecosystem families below
+	// take a manager hint or a delegate set, so they stay wired explicitly.
 	a.registry.RegisterWithMetadata(provider.Named("bun", node.New(exec, "bun")), provider.BuiltinMetadata("bun"))
 	a.registry.RegisterWithMetadata(provider.Named("pnpm", node.New(exec, "pnpm")), provider.BuiltinMetadata("pnpm"))
 	a.registry.RegisterWithMetadata(provider.Named("npm", node.New(exec, "npm")), provider.BuiltinMetadata("npm"))
 	a.registry.RegisterWithMetadata(provider.Named("uv", python.New(exec, "uv")), provider.BuiltinMetadata("uv"))
-	a.registry.RegisterWithMetadata(pip.New(exec), provider.BuiltinMetadata("pip"))
-	a.registry.RegisterWithMetadata(cargo.New(exec), provider.BuiltinMetadata("cargo"))
-	a.registry.RegisterWithMetadata(script.New(exec), provider.BuiltinMetadata("script"))
-	a.registry.RegisterWithMetadata(aptrepo.New(exec), provider.BuiltinMetadata("apt_repo"))
 
 	// provider families — skipped when the user has disabled them on this machine.
 	disabledSet := make(map[string]bool, len(settings.DisabledProviders))

@@ -211,7 +211,7 @@ func (a *App) MigrateInstallation(ctx context.Context, name, installedWith, conf
 
 type ProviderRepairStateResult struct {
 	Result *SwitchResult
-	Tools  []*database.ToolCache
+	Tools  []*ToolView
 }
 
 func (a *App) SwitchWithState(ctx context.Context, name, fromProvider, toProvider string) (*ProviderRepairStateResult, error) {
@@ -392,7 +392,7 @@ type ClearProviderOverrideStateResult struct {
 	Cleared      ClearInstallOverrideResult
 	FromProvider string
 	ToProvider   string
-	Tools        []*database.ToolCache
+	Tools        []*ToolView
 	ScopeDisplay *ToolScopeDisplayState
 }
 

@@ -37,7 +37,7 @@ type ConsolidateResult struct {
 
 type ConsolidateStateResult struct {
 	Result *ConsolidateResult
-	Tools  []*database.ToolCache
+	Tools  []*ToolView
 	State  *ToolGroupState
 }
 

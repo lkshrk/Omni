@@ -31,6 +31,16 @@ stdout 'deleted black'
 exec test ! -f .omni-cache/fake-brew/black
 ! exec grep '"black"' settings.json
 
+# Prune removes an installed package after its logical spec is deleted.
+exec omni --config settings.json tools set orphan --provider brew
+exec omni --config settings.json groups move-tool testhost orphan
+exec omni --config settings.json tools install orphan --provider brew
+exec test -f .omni-cache/fake-brew/orphan
+exec cp pruned.json settings.json
+exec omni --config settings.json tools sync --prune
+stdout 'pruned: orphan'
+exec test ! -f .omni-cache/fake-brew/orphan
+
 -- bin/brew --
 #!/usr/bin/env sh
 set -eu
@@ -44,7 +54,11 @@ case "${1:-}" in
     : > "$state/$2"
     ;;
   uninstall)
-    rm -f "$state/$2"
+    shift
+    if [ "${1:-}" = "--formula" ] || [ "${1:-}" = "--cask" ]; then
+      shift
+    fi
+    rm -f "$state/$1"
     ;;
 	  upgrade)
 	    shift
@@ -129,3 +143,10 @@ esac
 
 -- settings.json --
 {}
+
+-- pruned.json --
+{
+  "version": 17,
+  "hosts": {"testhost": []},
+  "groups": [{"name": "testhost", "special": "host"}]
+}

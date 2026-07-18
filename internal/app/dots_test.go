@@ -2492,11 +2492,7 @@ func TestDotsSync_TestModeRejectsNonTempHome(t *testing.T) {
 	if testguard.Isolated() {
 		t.Skip("Docker-isolated tests do not enforce local live-path rejection")
 	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("HOME", cwd)
+	t.Setenv("HOME", filepath.VolumeName(os.TempDir())+string(os.PathSeparator))
 	cfgDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
 	repoDir := t.TempDir()
@@ -2511,7 +2507,7 @@ func TestDotsSync_TestModeRejectsNonTempHome(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = a.Close() })
 
-	_, err = a.DotsSync(dots.SyncOptions{})
+	_, err := a.DotsSync(dots.SyncOptions{})
 	if err == nil {
 		t.Fatal("DotsSync should reject non-temp HOME in InitTestMode")
 	}

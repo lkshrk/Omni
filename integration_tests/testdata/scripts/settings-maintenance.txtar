@@ -1,0 +1,26 @@
+# lint exposes legacy host overrides; migration folds them into providers and survives reload
+! exec omni --config settings.json --cache-dir cache settings lint
+stdout 'hosts provider overrides are deprecated'
+stderr 'settings lint found warnings'
+
+exec omni --config settings.json --cache-dir cache settings migrate-host-overrides
+stdout 'migrated host install overrides for 1 tool'
+! exec grep '"hosts"' settings.json
+exec grep '"provider": "apt"' settings.json
+stdout '"provider": "apt"'
+exec grep '"provider": "brew"' settings.json
+stdout '"provider": "brew"'
+
+exec omni --config settings.json --cache-dir cache settings lint
+stdout 'no issues found'
+
+-- settings.json --
+{
+  "version": 17,
+  "tools": {
+    "rg": {
+      "hosts": {"box": {"provider": "apt", "package": "ripgrep"}},
+      "providers": [{"provider": "brew", "package": "ripgrep"}]
+    }
+  }
+}

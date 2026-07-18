@@ -413,7 +413,7 @@ func TestSyncAll_ClaimsDiscoveredToHostnameGroupAndSyncs(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
-	discovered := []*database.ToolCache{
+	discovered := []*app.ToolView{
 		{Name: "fzf", Provider: "brew", Installed: true, Tracked: false},
 	}
 
@@ -453,7 +453,7 @@ func TestSyncAllWithStateReturnsUpdatedToolsAndGroups(t *testing.T) {
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{testHostGroup()}}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
-	discovered := []*database.ToolCache{
+	discovered := []*app.ToolView{
 		{Name: "fzf", Provider: "brew", Package: "fzf", InstalledWith: "brew", Installed: true, Tracked: false},
 	}
 
@@ -488,7 +488,7 @@ func TestSyncAll_ClaimsMultipleDiscoveredTools(t *testing.T) {
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{testHostGroup()}}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
-	discovered := []*database.ToolCache{
+	discovered := []*app.ToolView{
 		{Name: "fzf", Provider: "brew", Package: "fzf", InstalledWith: "brew", Installed: true, Tracked: false},
 		{Name: "fd", Provider: "brew", Package: "fd", InstalledWith: "brew", Installed: true, Tracked: false},
 	}
@@ -544,7 +544,7 @@ func TestSyncAll_ClaimResolvedDefaultConcreteDoesNotWriteInstallWith(t *testing.
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{testHostGroup()}}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
-	discovered := []*database.ToolCache{
+	discovered := []*app.ToolView{
 		{Name: "fzf", Provider: "brew", InstalledWith: "brew", Installed: true, Tracked: false},
 	}
 
@@ -574,7 +574,7 @@ func TestSyncAll_ClaimNodeToolWritesConcreteNotFamily(t *testing.T) {
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{testHostGroup()}}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
-	discovered := []*database.ToolCache{
+	discovered := []*app.ToolView{
 		{Name: "tsx", Provider: "bun", InstalledWith: "bun", Installed: true, Tracked: false},
 	}
 
@@ -601,7 +601,7 @@ func TestSyncAll_DryRunDoesNotWriteClaims(t *testing.T) {
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{testHostGroup()}}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
-	discovered := []*database.ToolCache{
+	discovered := []*app.ToolView{
 		{Name: "fzf", Provider: "brew", Installed: true, Tracked: false},
 	}
 
@@ -629,7 +629,7 @@ func TestSyncAll_ReportsInvalidDiscoveredClaimWithoutWritingConfig(t *testing.T)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{testHostGroup()}}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
-	discovered := []*database.ToolCache{
+	discovered := []*app.ToolView{
 		{Name: "prettier", Provider: "node", Package: "prettier", Installed: true, Tracked: false},
 	}
 

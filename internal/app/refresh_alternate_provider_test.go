@@ -65,7 +65,7 @@ func TestRefreshInstalled_DetectsAlternateConfiguredProvider(t *testing.T) {
 		t.Fatalf("cache = installed:%v owner:%q version:%q, want true/bun/11.11.0", got.Installed, got.InstalledWith, got.Version.String)
 	}
 
-	class := app.ClassifyToolView(got, app.ToolClassificationContext{})
+	class := app.ClassifyToolView(viewFromCache(got), app.ToolClassificationContext{})
 	if class.SyncStatus != app.ToolSyncWrongProvider {
 		t.Fatalf("sync status = %q, want wrong-provider", class.SyncStatus)
 	}

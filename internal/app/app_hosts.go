@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/provider"
 )
 
@@ -813,7 +812,7 @@ type DeleteGroupOptions struct {
 }
 
 type ToolGroupMutationState struct {
-	Tools []*database.ToolCache
+	Tools []*ToolView
 	State *ToolGroupState
 }
 

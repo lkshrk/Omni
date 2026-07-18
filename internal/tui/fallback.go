@@ -10,8 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/app"
 )
 
 type fallbackEditorFieldID string
@@ -53,14 +52,14 @@ var fallbackEditorFields = []fallbackEditorField{
 	{id: fallbackFieldReleaseChannel, label: "channel", placeholder: "stable"},
 }
 
-func toolFallbackEligible(t *database.ToolCache) bool {
+func toolFallbackEligible(t *app.ToolView) bool {
 	if t == nil {
 		return false
 	}
 	return !t.Installed || t.InstalledWith == "gh"
 }
 
-func (m Model) toolFallbackActionEligible(t *database.ToolCache) bool {
+func (m Model) toolFallbackActionEligible(t *app.ToolView) bool {
 	if !toolFallbackEligible(t) {
 		return false
 	}
@@ -73,7 +72,7 @@ func (m Model) toolFallbackActionEligible(t *database.ToolCache) bool {
 	return fallbackRepoFromToolGit(m.toolGit[t.Name]) != ""
 }
 
-func (m *Model) openFallbackEditor(t *database.ToolCache) tea.Cmd {
+func (m *Model) openFallbackEditor(t *app.ToolView) tea.Cmd {
 	if !m.toolFallbackActionEligible(t) {
 		return nil
 	}
@@ -86,7 +85,7 @@ func (m *Model) openFallbackEditor(t *database.ToolCache) tea.Cmd {
 }
 
 func (m *Model) closeFallbackEditor() {
-	m.fallbackTarget = database.ToolCache{}
+	m.fallbackTarget = app.ToolView{}
 	m.fallbackTargetSet = false
 	m.fallbackEditor = fallbackEditorState{}
 	m.settingsInput.SetValue("")
@@ -139,7 +138,7 @@ func (m *Model) doSaveFallbackEditor(name string) tea.Cmd {
 	repo := strings.TrimSpace(m.fallbackEditor.fields[fallbackFieldRepo])
 	return func() tea.Msg {
 		err := a.SaveToolFallbackFromGitHubSpec(ctx, name, repo, fallback)
-		var fallbacks map[string]config.FallbackSpec
+		var fallbacks map[string]app.FallbackSpec
 		if err == nil {
 			scope, scopeErr := a.ToolScopeDisplayState(ctx)
 			if scopeErr != nil {
@@ -212,21 +211,21 @@ func popupTitleForFallbackTool(m Model) string {
 	return "Set Fallback"
 }
 
-func fallbackConcreteLabel(fallback config.FallbackSpec) string {
-	if fallback.Source.Type != config.FallbackSourceGitHub {
+func fallbackConcreteLabel(fallback app.FallbackSpec) string {
+	if fallback.Source.Type != app.FallbackSourceGitHub {
 		return "fallback"
 	}
 	switch fallback.Status {
-	case config.FallbackStatusVerified:
+	case app.FallbackStatusVerified:
 		return "gh"
-	case config.FallbackStatusUnresolved, config.FallbackStatusUnsupported, config.FallbackStatusFailed:
+	case app.FallbackStatusUnresolved, app.FallbackStatusUnsupported, app.FallbackStatusFailed:
 		return "gh!"
 	default:
 		return "gh?"
 	}
 }
 
-func fallbackConcreteForTool(t *database.ToolCache, fallbacks map[string]config.FallbackSpec) string {
+func fallbackConcreteForTool(t *app.ToolView, fallbacks map[string]app.FallbackSpec) string {
 	if !toolFallbackEligible(t) || fallbacks == nil {
 		return ""
 	}
@@ -237,7 +236,7 @@ func fallbackConcreteForTool(t *database.ToolCache, fallbacks map[string]config.
 	return fallbackConcreteLabel(fallback)
 }
 
-func fallbackEditorStateForTool(t *database.ToolCache, fallbacks map[string]config.FallbackSpec, toolGit map[string]string) fallbackEditorState {
+func fallbackEditorStateForTool(t *app.ToolView, fallbacks map[string]app.FallbackSpec, toolGit map[string]string) fallbackEditorState {
 	state := fallbackEditorState{fields: map[fallbackEditorFieldID]string{}}
 	for _, field := range fallbackEditorFields {
 		state.fields[field.id] = ""
@@ -259,7 +258,7 @@ func fallbackEditorStateForTool(t *database.ToolCache, fallbacks map[string]conf
 	if !ok {
 		return state
 	}
-	if fallback.Source.Type == config.FallbackSourceGitHub {
+	if fallback.Source.Type == app.FallbackSourceGitHub {
 		state.fields[fallbackFieldRepo] = fallback.Source.Owner + "/" + fallback.Source.Repo
 	}
 	state.fields[fallbackFieldBinary] = firstNonEmpty(fallback.Binary, name)
@@ -343,29 +342,29 @@ func (m *Model) saveFallbackEditorInput() {
 	m.fallbackEditor.fields[field.id] = strings.TrimSpace(m.settingsInput.Value())
 }
 
-func (m Model) fallbackSpecFromEditor() config.FallbackSpec {
+func (m Model) fallbackSpecFromEditor() app.FallbackSpec {
 	fields := m.fallbackEditor.fields
-	status := config.FallbackStatusUnresolved
+	status := app.FallbackStatusUnresolved
 	if strings.TrimSpace(fields[fallbackFieldInstallCommand]) != "" && strings.TrimSpace(fields[fallbackFieldCheckCommand]) != "" {
-		status = config.FallbackStatusUnverified
+		status = app.FallbackStatusUnverified
 	}
 	recipeType := ""
 	if strings.TrimSpace(fields[fallbackFieldAssetPattern]) != "" {
-		recipeType = config.FallbackRecipeGitHubReleaseAsset
+		recipeType = app.FallbackRecipeGitHubReleaseAsset
 	}
-	return config.FallbackSpec{
-		Source: config.FallbackSource{
-			Type: config.FallbackSourceGitHub,
+	return app.FallbackSpec{
+		Source: app.FallbackSource{
+			Type: app.FallbackSourceGitHub,
 		},
 		Status:         status,
 		Binary:         strings.TrimSpace(fields[fallbackFieldBinary]),
 		BinDir:         strings.TrimSpace(fields[fallbackFieldBinDir]),
 		ReleaseChannel: strings.TrimSpace(fields[fallbackFieldReleaseChannel]),
-		Recipe: config.FallbackRecipe{
+		Recipe: app.FallbackRecipe{
 			Type:         recipeType,
 			AssetPattern: strings.TrimSpace(fields[fallbackFieldAssetPattern]),
 		},
-		Commands: config.FallbackCommands{
+		Commands: app.FallbackCommands{
 			Install:   strings.TrimSpace(fields[fallbackFieldInstallCommand]),
 			Check:     strings.TrimSpace(fields[fallbackFieldCheckCommand]),
 			Uninstall: strings.TrimSpace(fields[fallbackFieldUninstall]),

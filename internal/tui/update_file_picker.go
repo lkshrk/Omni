@@ -8,7 +8,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/app"
 )
 
 func (m *Model) updateActiveFilePicker(msg tea.Msg) []tea.Cmd {
@@ -99,7 +99,7 @@ func (m *Model) openGroupPickerForDotAdd(absPath, rawPath string) {
 	m.pickerDotAddPath = absPath
 	m.pickerDotAddRawPath = rawPath
 	m.pickerCreatedGroups = nil
-	m.pickerActionTool = database.ToolCache{}
+	m.pickerActionTool = app.ToolView{}
 	m.pickerActionToolSet = false
 }
 

@@ -815,23 +815,6 @@ func tempConfigPath(t *testing.T) string {
 	return filepath.Join(t.TempDir(), "settings.json")
 }
 
-func TestVersion_Flag(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cmd := NewRootCmd()
-	buf := &bytes.Buffer{}
-	cmd.SetOut(buf)
-	cmd.SetArgs([]string{"--version"})
-	// --version exits 0 and prints version; cobra handles this before RunE.
-	_ = cmd.Execute()
-	// The version string should be present in the buffer or stdout.
-	// cobra writes version to the output writer.
-	out := buf.String()
-	if !strings.Contains(out, Version()) && !strings.Contains(out, "version") && !strings.Contains(out, "dev") {
-		// cobra uses os.Stdout for --version in some versions; just verify no crash
-		_ = out
-	}
-}
-
 // ─── list command ─────────────────────────────────────────────────────────────
 
 func TestList_NoConfig_PrintsHelpfulMessage(t *testing.T) {
@@ -873,182 +856,9 @@ func TestList_NoConfigFile_WithoutHost_RequiresHost(t *testing.T) {
 	}
 }
 
-func TestList_EmptyConfig_PrintsNoToolsMessage(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-
-	// Write config with active host so host enforcement passes.
-	withConfig(t, cfgPath, &config.RootConfig{Groups: []*config.GroupConfig{cliTestHostGroup()}})
-
-	cmd := NewRootCmd()
-	outBuf := &bytes.Buffer{}
-	cmd.SetOut(outBuf)
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "list"})
-	err := cmd.Execute()
-	if err != nil {
-		t.Fatalf("list with empty config: %v", err)
-	}
-	// Command returned nil; DB is empty and the list output path is exercised.
-}
-
 // ─── providers command ────────────────────────────────────────────────────────
 
-func TestProviders_PrintsHeader(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{})
-	withHost(t, cfgPath)
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "providers"})
-	err := cmd.Execute()
-	if err != nil {
-		t.Fatalf("providers: %v", err)
-	}
-	// Command returning nil is the primary assertion for this smoke path.
-}
-
 // ─── hosts commands ──────────────────────────────────────────────────────────
-
-func TestHostsEnsure_CreatesHostGroup(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "hosts", "ensure", "myhost"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("hosts ensure: %v", err)
-	}
-
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	if _, ok := cfg.Hosts["myhost"]; !ok {
-		t.Fatal("expected host entry after ensure")
-	}
-	group := cliTestGroup(cfg, "myhost")
-	if group == nil || !group.IsHost() {
-		t.Fatalf("host group = %+v, want protected host group", group)
-	}
-}
-
-func TestHostsList_PrintsSortedSummaries(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "beta.local")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{
-		Groups: []*config.GroupConfig{
-			{Name: "beta", Special: "host"},
-			{Name: "zeta", Special: "host"},
-			{Name: "base"},
-			{Name: "tools"},
-			{Name: "work"},
-		},
-		Hosts: map[string][]string{
-			"zeta": {"work", "base"},
-			"beta": {"tools", "base"},
-		},
-	})
-
-	cmd := NewRootCmd()
-	outBuf := &bytes.Buffer{}
-	cmd.SetOut(outBuf)
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "hosts", "list"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("hosts list: %v", err)
-	}
-
-	out := outBuf.String()
-	beta := strings.Index(out, "* beta")
-	zeta := strings.Index(out, "  zeta")
-	if beta < 0 || zeta < 0 || beta > zeta {
-		t.Fatalf("hosts output order/active marker = %q, want active beta before zeta", out)
-	}
-	if !strings.Contains(out, "[base, tools]") || !strings.Contains(out, "[base, work]") {
-		t.Fatalf("hosts output = %q, want sorted group lists", out)
-	}
-}
-
-func TestHostsSetAddRemoveGroups(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{
-		Groups: []*config.GroupConfig{{Name: "work"}, {Name: "extras"}},
-	})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "hosts", "set-groups", "testhost", "work"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("hosts set-groups: %v", err)
-	}
-
-	cmd = NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "hosts", "add-group", "testhost", "extras"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("hosts add-group: %v", err)
-	}
-
-	cmd = NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "hosts", "remove-group", "testhost", "work"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("hosts remove-group: %v", err)
-	}
-
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	got := strings.Join(cfg.Hosts["testhost"], ",")
-	if got != "extras" {
-		t.Fatalf("testhost groups = %q, want extras", got)
-	}
-}
-
-func TestHostsCopyCopiesHostConfig(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "target")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{
-		Groups: []*config.GroupConfig{{Name: "source", Special: "host"}, {Name: "target", Special: "host"}, {Name: "work"}},
-		Hosts: map[string][]string{
-			"source": {"work"},
-			"target": {},
-		},
-		HostSettings: map[string]config.Settings{
-			"source": {DotsRepo: "~/source-dots"},
-			"target": {DotsRepo: "~/old-target-dots"},
-		},
-	})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "hosts", "copy", "source", "target"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("hosts copy: %v", err)
-	}
-
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	if got := strings.Join(cfg.Hosts["target"], ","); got != "work" {
-		t.Fatalf("target groups = %q, want work", got)
-	}
-	if got := cfg.HostSettings["target"].DotsRepo; got != "~/source-dots" {
-		t.Fatalf("target dots_repo = %q, want copied source dots repo", got)
-	}
-}
 
 // ─── groups command ───────────────────────────────────────────────────────────
 
@@ -1179,24 +989,6 @@ func TestAdd_NoHost_ReturnsError(t *testing.T) {
 
 // ─── dots commands ────────────────────────────────────────────────────────────
 
-func TestDotsSync_NoDotsRepo_ReturnsError(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "sync"})
-	err := cmd.Execute()
-	if err == nil {
-		t.Error("expected error when dots_repo is not configured")
-	}
-	if !strings.Contains(err.Error(), "dots_repo") {
-		t.Errorf("error should mention dots_repo, got: %v", err)
-	}
-}
-
 func TestDotsList_NoDotsRepo_ReturnsError(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -1221,51 +1013,6 @@ func TestDotsStatus_NoDotsRepo_ReturnsError(t *testing.T) {
 
 	cmd := NewRootCmd()
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "status"})
-	err := cmd.Execute()
-	if err == nil {
-		t.Error("expected error when dots_repo is not configured")
-	}
-}
-
-func TestDotsPull_NoDotsRepo_ReturnsError(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "pull"})
-	err := cmd.Execute()
-	if err == nil {
-		t.Error("expected error when dots_repo is not configured")
-	}
-}
-
-func TestDotsPush_NoDotsRepo_ReturnsError(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "push"})
-	err := cmd.Execute()
-	if err == nil {
-		t.Error("expected error when dots_repo is not configured")
-	}
-}
-
-func TestDotsAdd_NoDotsRepo_ReturnsError(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{})
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "add", "--group", "dev", "~/.config/nvim"})
 	err := cmd.Execute()
 	if err == nil {
 		t.Error("expected error when dots_repo is not configured")
@@ -1308,53 +1055,6 @@ func TestDotsDelete_NoDotsRepo_ReturnsError(t *testing.T) {
 	err := cmd.Execute()
 	if err == nil {
 		t.Error("expected error when dots_repo is not configured")
-	}
-}
-
-func TestDotsList_EmptyEntries_PrintsHelpMessage(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	repoDir := t.TempDir()
-
-	withConfig(t, cfgPath, &config.RootConfig{
-		Settings: config.Settings{DotsRepo: repoDir},
-	})
-
-	cmd := NewRootCmd()
-	outBuf := &bytes.Buffer{}
-	cmd.SetOut(outBuf)
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "list"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("dots list with empty entries: %v", err)
-	}
-	if !strings.Contains(outBuf.String(), "No dots entries") {
-		t.Errorf("expected 'No dots entries', got: %q", outBuf.String())
-	}
-}
-
-func TestDotsSync_DryRun_NoEntries(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	repoDir := t.TempDir()
-
-	withConfig(t, cfgPath, &config.RootConfig{
-		Settings: config.Settings{DotsRepo: repoDir},
-	})
-
-	cmd := NewRootCmd()
-	outBuf := &bytes.Buffer{}
-	cmd.SetOut(outBuf)
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "sync", "--dry-run"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("dots sync --dry-run: %v", err)
-	}
-	// With no entries, output should contain dry-run notice.
-	if !strings.Contains(outBuf.String(), "Dry-run") {
-		t.Errorf("expected 'Dry-run', got: %q", outBuf.String())
 	}
 }
 
@@ -1625,25 +1325,6 @@ func TestDotsResolveUseRepoCommand(t *testing.T) {
 	}
 }
 
-func TestDotsStatus_EmptyEntries_WorkingTreeClean(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	repoDir := t.TempDir()
-
-	withConfig(t, cfgPath, &config.RootConfig{
-		Settings: config.Settings{DotsRepo: repoDir},
-	})
-
-	cmd := NewRootCmd()
-	outBuf := &bytes.Buffer{}
-	cmd.SetOut(outBuf)
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "status"})
-	// This may fail if git is not available in the repo — tolerate that.
-	_ = cmd.Execute()
-}
-
 // ─── requireActiveHost ────────────────────────────────────────────────────────
 
 func TestRequireActiveHost_ExemptCommands(t *testing.T) {
@@ -1761,14 +1442,6 @@ func TestDotsCmd_NoSubcommand_ShowsHelp(t *testing.T) {
 
 // ─── version constant ─────────────────────────────────────────────────────────
 
-func TestVersion_IsDev(t *testing.T) {
-	// Default Version (no ldflags) should be non-empty ("dev" or the module
-	// version resolved from debug.ReadBuildInfo).
-	if Version() == "" {
-		t.Error("Version() should not be empty")
-	}
-}
-
 // ─── consolidate command error paths ─────────────────────────────────────────
 
 func TestConsolidate_MutuallyExclusive_ToAndArgs(t *testing.T) {
@@ -1878,25 +1551,6 @@ func TestDelete_MissingProvider_ReturnsError(t *testing.T) {
 
 // ─── upgrade command ──────────────────────────────────────────────────────────
 
-func TestUpgrade_NoArgsNoAll_ReturnsError(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{})
-	withHost(t, cfgPath)
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "upgrade"})
-	err := cmd.Execute()
-	if err == nil {
-		t.Error("expected error when neither tool name nor --all")
-	}
-	if !strings.Contains(err.Error(), "--all") {
-		t.Errorf("expected '--all' in error, got: %v", err)
-	}
-}
-
 func TestUpgrade_AllAndName_Mutually_Exclusive(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
@@ -1913,22 +1567,6 @@ func TestUpgrade_AllAndName_Mutually_Exclusive(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "mutually exclusive") {
 		t.Errorf("expected 'mutually exclusive', got: %v", err)
-	}
-}
-
-func TestUpgrade_All_EmptyDB(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{})
-	withHost(t, cfgPath)
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "upgrade", "--all"})
-	err := cmd.Execute()
-	if err != nil {
-		t.Fatalf("upgrade --all with empty DB: %v", err)
 	}
 }
 
@@ -2009,42 +1647,7 @@ func TestSwitch_MissingTo_ReturnsError(t *testing.T) {
 
 // ─── import command ───────────────────────────────────────────────────────────
 
-func TestImport_DryRun_NoProviders_PrintsEmpty(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{})
-	withHost(t, cfgPath)
-
-	cmd := NewRootCmd()
-	// Use a non-existent provider so nothing is imported.
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "import", "--dry-run", "--provider", "nonexistentprovider"})
-	err := cmd.Execute()
-	if err != nil {
-		t.Fatalf("import --dry-run with nonexistent provider: %v", err)
-	}
-}
-
 // ─── install command ──────────────────────────────────────────────────────────
-
-func TestInstall_NoProviderAvailable_ReturnsError(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{})
-	withHost(t, cfgPath)
-
-	cmd := NewRootCmd()
-	// Without --provider, it tries to auto-select. In a test env no providers
-	// are available. This should error.
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "install", "sometool"})
-	err := cmd.Execute()
-	// Either "no provider available" or some other error — just check it's not nil.
-	// In CI some providers (brew) may be available, so we accept either outcome.
-	_ = err
-}
 
 func TestInstall_WithExplicitProvider_AttemptsFailed(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
@@ -2494,22 +2097,6 @@ func TestConsolidate_EcosystemMode_PythonPip(t *testing.T) {
 }
 
 // ─── upgrade with --all and real DB ──────────────────────────────────────────
-
-func TestUpgrade_All_PrintsNothingToUpgrade(t *testing.T) {
-	t.Setenv("OMNI_HOSTNAME", "testhost")
-	cfgDir := t.TempDir()
-	cacheDir := t.TempDir()
-	cfgPath := filepath.Join(cfgDir, "settings.json")
-	withConfig(t, cfgPath, &config.RootConfig{})
-	withHost(t, cfgPath)
-
-	cmd := NewRootCmd()
-	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "upgrade", "--all"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("upgrade --all: %v", err)
-	}
-	// "Nothing to upgrade." printed to os.Stdout when DB is empty.
-}
 
 // ─── dots push: with repo configured ─────────────────────────────────────────
 

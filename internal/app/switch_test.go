@@ -103,13 +103,13 @@ func TestSwitchWithStateReturnsUpdatedTools(t *testing.T) {
 		t.Fatalf("Result = %+v, want brew -> pip", result.Result)
 	}
 	if len(result.Tools) != 1 || result.Tools[0].Name != "black" {
-		t.Fatalf("Tools = %v, want black only", toolNames(result.Tools))
+		t.Fatalf("Tools = %v, want black only", viewNames(result.Tools))
 	}
 	tool := result.Tools[0]
 	if tool.Provider != "pip" || tool.InstalledWith != "pip" {
 		t.Fatalf("tool provider = %s/%s, want pip/pip", tool.Provider, tool.InstalledWith)
 	}
-	if !tool.Description.Valid || tool.Description.String != "description of black" {
+	if tool.Description != "description of black" {
 		t.Fatalf("description = %+v, want refreshed description", tool.Description)
 	}
 }
@@ -534,13 +534,13 @@ func TestMigrateInstallationWithStateReturnsUpdatedTools(t *testing.T) {
 		t.Fatalf("Result = %+v, want brew -> pip", result.Result)
 	}
 	if len(result.Tools) != 1 || result.Tools[0].Name != "black" {
-		t.Fatalf("Tools = %v, want black only", toolNames(result.Tools))
+		t.Fatalf("Tools = %v, want black only", viewNames(result.Tools))
 	}
 	tool := result.Tools[0]
 	if tool.Provider != "pip" || tool.InstalledWith != "pip" {
 		t.Fatalf("tool provider = %s/%s, want pip/pip", tool.Provider, tool.InstalledWith)
 	}
-	if !tool.Description.Valid || tool.Description.String != "description of black" {
+	if tool.Description != "description of black" {
 		t.Fatalf("description = %+v, want refreshed description", tool.Description)
 	}
 }

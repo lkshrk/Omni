@@ -154,7 +154,7 @@ func TestListToolsForView_IncludesIgnoredTools(t *testing.T) {
 		t.Fatalf("ListToolsForView: %v", err)
 	}
 	if len(visible) != 1 || visible[0].Name != "curl" {
-		t.Fatalf("ListToolsForView = %v, want curl retained", toolNames(visible))
+		t.Fatalf("ListToolsForView = %v, want curl retained", viewNames(visible))
 	}
 }
 
@@ -201,7 +201,7 @@ func TestSetToolIgnoreScopesWithStateReturnsToolsAndScopeDisplay(t *testing.T) {
 		t.Fatalf("ToolIgnores[curl] = false, want true")
 	}
 	if len(result.Tools) != 1 || result.Tools[0].Name != "curl" {
-		t.Fatalf("Tools = %v, want curl retained for TUI ignored section", toolNames(result.Tools))
+		t.Fatalf("Tools = %v, want curl retained for TUI ignored section", viewNames(result.Tools))
 	}
 	updated, err := config.Load(cfgPath)
 	if err != nil {
@@ -243,7 +243,7 @@ func TestSetToolIgnoreScopesWithStateSuppressesDiscoveredOrphan(t *testing.T) {
 		t.Fatalf("ListDiscovered: %v", err)
 	}
 	if len(discovered) != 0 {
-		t.Fatalf("discovered = %v, want asyncpg suppressed after global ignore", toolNames(discovered))
+		t.Fatalf("discovered = %v, want asyncpg suppressed after global ignore", viewNames(discovered))
 	}
 }
 
@@ -401,7 +401,7 @@ func TestRefreshDiscoveredSkipsGloballyIgnoredName(t *testing.T) {
 		t.Fatalf("ListDiscovered: %v", err)
 	}
 	if len(discovered) != 1 || discovered[0].Name != "fd" {
-		t.Fatalf("discovered = %v, want only fd", toolNames(discovered))
+		t.Fatalf("discovered = %v, want only fd", viewNames(discovered))
 	}
 }
 
@@ -431,7 +431,7 @@ func TestRefreshDiscoveredSkipsDisabledProvider(t *testing.T) {
 		t.Fatalf("ListDiscovered: %v", err)
 	}
 	if len(discovered) != 0 {
-		t.Fatalf("discovered = %v, want none (brew disabled)", toolNames(discovered))
+		t.Fatalf("discovered = %v, want none (brew disabled)", viewNames(discovered))
 	}
 }
 
@@ -449,7 +449,7 @@ func TestSyncAllSkipsIgnoredDiscoveredClaims(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("config.Save: %v", err)
 	}
-	discovered := []*database.ToolCache{
+	discovered := []*app.ToolView{
 		{Name: "fzf", Provider: "brew", Installed: true, Tracked: false},
 	}
 
@@ -551,6 +551,47 @@ func TestUpgradePathsSkipIgnoredTools(t *testing.T) {
 }
 
 func toolNames(tools []*database.ToolCache) []string {
+	names := make([]string, 0, len(tools))
+	for _, t := range tools {
+		if t != nil {
+			names = append(names, t.Name)
+		}
+	}
+	return names
+}
+
+func viewFromCache(t *database.ToolCache) *app.ToolView {
+	if t == nil {
+		return nil
+	}
+	return &app.ToolView{
+		ID:                 t.ID,
+		Name:               t.Name,
+		Provider:           t.Provider,
+		Package:            t.Package,
+		Installed:          t.Installed,
+		InstalledWith:      t.InstalledWith,
+		Version:            t.Version.String,
+		Outdated:           t.Outdated,
+		LatestVersion:      t.LatestVersion.String,
+		Description:        t.Description.String,
+		LastChecked:        t.LastChecked,
+		FailedAt:           t.FailedAt,
+		FailureCount:       t.FailureCount,
+		LastError:          t.LastError.String,
+		Tracked:            t.Tracked,
+		Privilege:          t.Privilege,
+		PrivilegeReason:    t.PrivilegeReason.String,
+		PrivilegeAt:        t.PrivilegeAt,
+		Options:            t.Options,
+		UpdateBlocked:      t.UpdateBlocked,
+		UpdateBlockedUntil: t.UpdateBlockedUntil,
+		UpdateAvailableAt:  t.UpdateAvailableAt,
+		UpdateDateSource:   t.UpdateDateSource,
+	}
+}
+
+func viewNames(tools []*app.ToolView) []string {
 	names := make([]string, 0, len(tools))
 	for _, t := range tools {
 		if t != nil {

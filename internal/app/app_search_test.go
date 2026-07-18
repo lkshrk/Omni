@@ -327,7 +327,7 @@ func TestToolDisplaySnapshotReturnsToolsDiscoveredAndManager(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToolDisplaySnapshot: %v", err)
 	}
-	if !slices.ContainsFunc(snapshot.Tools, func(t *database.ToolCache) bool { return t != nil && t.Name == "jq" }) {
+	if !slices.ContainsFunc(snapshot.Tools, func(t *app.ToolView) bool { return t != nil && t.Name == "jq" }) {
 		t.Fatalf("Tools = %+v, want jq present", snapshot.Tools)
 	}
 	if len(snapshot.Discovered) != 1 || snapshot.Discovered[0].Name != "jq" {

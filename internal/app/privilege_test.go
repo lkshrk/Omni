@@ -106,7 +106,7 @@ func TestPrivilegedToolCommand_BrewCaskActions(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := a.PrivilegedToolCommand(context.Background(), &tool, tt.action, plan)
+			got, ok := a.PrivilegedToolCommand(context.Background(), toolViewFromCache(&tool), tt.action, plan)
 			if !ok {
 				t.Fatal("PrivilegedToolCommand ok = false")
 			}
@@ -193,7 +193,7 @@ func TestPrivilegedToolCommand_SudoBackedProviders(t *testing.T) {
 			if tt.name == "system install uses plan provider when resolution missing" {
 				localPlan.Reason = "dnf install vim"
 			}
-			got, ok := a.PrivilegedToolCommand(context.Background(), &tt.tool, tt.action, localPlan)
+			got, ok := a.PrivilegedToolCommand(context.Background(), toolViewFromCache(&tt.tool), tt.action, localPlan)
 			if !ok {
 				t.Fatal("PrivilegedToolCommand ok = false")
 			}
@@ -209,7 +209,7 @@ func TestPrivilegedToolCommand_SystemPlanStoresConcreteInstalledWith(t *testing.
 	plan := provider.PrivilegePlan{Requirement: provider.PrivilegeRequired, Reason: "dnf install vim"}
 	tool := database.ToolCache{Name: "vim", Provider: provider.EcosystemSystem, Package: "vim"}
 
-	got, ok := a.PrivilegedToolCommand(context.Background(), &tool, provider.PrivilegeActionInstall, plan)
+	got, ok := a.PrivilegedToolCommand(context.Background(), toolViewFromCache(&tool), provider.PrivilegeActionInstall, plan)
 	if !ok {
 		t.Fatal("PrivilegedToolCommand ok = false")
 	}
@@ -221,12 +221,12 @@ func TestPrivilegedToolCommand_SystemPlanStoresConcreteInstalledWith(t *testing.
 func TestPrivilegedToolCommand_UnsupportedOrGenericBrewProvider(t *testing.T) {
 	tool := database.ToolCache{Name: "vim", Provider: "pip", Package: "vim"}
 	plan := provider.PrivilegePlan{Requirement: provider.PrivilegeRequired, Reason: "package manager needs sudo/root access"}
-	if _, ok := newPrivilegeCommandTestApp().PrivilegedToolCommand(context.Background(), &tool, provider.PrivilegeActionInstall, plan); ok {
+	if _, ok := newPrivilegeCommandTestApp().PrivilegedToolCommand(context.Background(), toolViewFromCache(&tool), provider.PrivilegeActionInstall, plan); ok {
 		t.Fatal("PrivilegedToolCommand ok = true for unsupported provider")
 	}
 
 	brewTool := database.ToolCache{Name: "parsec", Provider: "brew", Package: "parsec"}
-	if _, ok := newPrivilegeCommandTestApp(brew.New(nil)).PrivilegedToolCommand(context.Background(), &brewTool, provider.PrivilegeActionInstall, plan); ok {
+	if _, ok := newPrivilegeCommandTestApp(brew.New(nil)).PrivilegedToolCommand(context.Background(), toolViewFromCache(&brewTool), provider.PrivilegeActionInstall, plan); ok {
 		t.Fatal("PrivilegedToolCommand ok = true for generic brew privilege")
 	}
 }
@@ -249,7 +249,7 @@ func TestPrivilegeQueuePlan_PrefersSpecificRowReason(t *testing.T) {
 		Actions: map[string]provider.PrivilegeAction{
 			key: provider.PrivilegeActionInstall,
 		},
-		Tools: []*database.ToolCache{tool},
+		Tools: toolViewsFromCache([]*database.ToolCache{tool}),
 	})
 	if err != nil {
 		t.Fatalf("PrivilegeQueuePlan: %v", err)
@@ -294,7 +294,7 @@ func TestPrivilegeQueuePlan_UsesProviderPlanWhenRowReasonIsGeneric(t *testing.T)
 		Actions: map[string]provider.PrivilegeAction{
 			key: provider.PrivilegeActionInstall,
 		},
-		Tools: []*database.ToolCache{tool},
+		Tools: toolViewsFromCache([]*database.ToolCache{tool}),
 	})
 	if err != nil {
 		t.Fatalf("PrivilegeQueuePlan: %v", err)
@@ -342,7 +342,7 @@ func TestPrivilegeQueuePlanUsesMarkedPrivilegeMetadata(t *testing.T) {
 		Actions: map[string]provider.PrivilegeAction{
 			key: provider.PrivilegeActionInstall,
 		},
-		Tools: []*database.ToolCache{tool},
+		Tools: toolViewsFromCache([]*database.ToolCache{tool}),
 	})
 	if err != nil {
 		t.Fatalf("PrivilegeQueuePlan: %v", err)
@@ -405,7 +405,7 @@ func TestPrivilegeQueuePlanSkipsInvalidActionsAndInstalledInstalls(t *testing.T)
 			installedKey: provider.PrivilegeActionInstall,
 			invalidKey:   provider.PrivilegeAction("repair"),
 		},
-		Tools: []*database.ToolCache{installed, invalid},
+		Tools: toolViewsFromCache([]*database.ToolCache{installed, invalid}),
 	})
 	if err != nil {
 		t.Fatalf("PrivilegeQueuePlan: %v", err)
@@ -442,7 +442,7 @@ func TestPrivilegeQueuePlanRejectsProviderToolUninstall(t *testing.T) {
 		Actions: map[string]provider.PrivilegeAction{
 			key: provider.PrivilegeActionUninstall,
 		},
-		Tools: []*database.ToolCache{tool},
+		Tools: toolViewsFromCache([]*database.ToolCache{tool}),
 	})
 	if err != nil {
 		t.Fatalf("PrivilegeQueuePlan: %v", err)

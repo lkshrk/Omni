@@ -8,7 +8,6 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/config"
 	textutil "github.com/lkshrk/omni/internal/text"
 )
 
@@ -158,7 +157,7 @@ func statusToolsLoading(m Model) bool {
 // Duplicates app.AgentsIgnoreSet's body because that function takes a loaded
 // *config.RootConfig, which the TUI model doesn't hold (config is loaded on
 // demand inside specific cmds, not cached on Model).
-func agentsIgnoreSets(ignore config.AgentsIgnore) (skills, mcp, plugins, marketplaces map[string]bool) {
+func agentsIgnoreSets(ignore app.AgentsIgnore) (skills, mcp, plugins, marketplaces map[string]bool) {
 	toSet := func(names []string) map[string]bool {
 		set := make(map[string]bool, len(names))
 		for _, n := range names {
@@ -234,7 +233,7 @@ func agentsDashCountsFromRows(rows []agentsAllRow) agentsDashCounts {
 	return counts
 }
 
-func agentsDashCountsFromSummary(summary app.DashboardAgentsSummary, ignore config.AgentsIgnore) agentsDashCounts {
+func agentsDashCountsFromSummary(summary app.DashboardAgentsSummary, ignore app.AgentsIgnore) agentsDashCounts {
 	skillsIgnore, mcpIgnore, pluginIgnore, marketplaceIgnore := agentsIgnoreSets(ignore)
 	counts := agentsDashCounts{}
 	for _, name := range summary.SkillsMissingNames {

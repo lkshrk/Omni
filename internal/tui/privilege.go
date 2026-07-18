@@ -6,11 +6,9 @@ import (
 	"os"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/database"
-	"github.com/lkshrk/omni/internal/provider"
 )
 
-func (m *Model) blockPrivilegedToolAction(t *database.ToolCache, action provider.PrivilegeAction) bool {
+func (m *Model) blockPrivilegedToolAction(t *app.ToolView, action app.PrivilegeAction) bool {
 	if t == nil || m.app == nil {
 		return false
 	}
@@ -37,8 +35,8 @@ func (m *Model) blockPrivilegedToolAction(t *database.ToolCache, action provider
 	return true
 }
 
-func (m *Model) blockProtectedProviderToolDelete(t *database.ToolCache, action provider.PrivilegeAction) bool {
-	if t == nil || m.app == nil || action != provider.PrivilegeActionUninstall {
+func (m *Model) blockProtectedProviderToolDelete(t *app.ToolView, action app.PrivilegeAction) bool {
+	if t == nil || m.app == nil || action != app.PrivilegeActionUninstall {
 		return false
 	}
 	if err := m.app.ValidateToolDelete(t.Name); err != nil {
@@ -48,7 +46,7 @@ func (m *Model) blockProtectedProviderToolDelete(t *database.ToolCache, action p
 	return false
 }
 
-func (m *Model) queuePrivilegedToolPrompts(rowErrors map[string]string, actions map[string]provider.PrivilegeAction) bool {
+func (m *Model) queuePrivilegedToolPrompts(rowErrors map[string]string, actions map[string]app.PrivilegeAction) bool {
 	if len(rowErrors) == 0 || m.app == nil {
 		return false
 	}

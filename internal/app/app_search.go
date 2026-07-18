@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"sort"
 	"strings"
 	"sync"
@@ -100,8 +99,12 @@ func (a *App) ListTools(ctx context.Context, providerFilter string) ([]*database
 
 // ListToolsForView returns configured tools for TUI/CLI table rendering,
 // including ignored tools so they can appear in the Ignored section.
-func (a *App) ListToolsForView(ctx context.Context, providerFilter string) ([]*database.ToolCache, error) {
-	return a.listToolsForDisplay(ctx, providerFilter, true)
+func (a *App) ListToolsForView(ctx context.Context, providerFilter string) ([]*ToolView, error) {
+	tools, err := a.listToolsForDisplay(ctx, providerFilter, true)
+	if err != nil {
+		return nil, err
+	}
+	return toolViewsFromCache(tools), nil
 }
 
 func (a *App) listToolsForDisplay(ctx context.Context, providerFilter string, includeIgnored bool) ([]*database.ToolCache, error) {
@@ -507,7 +510,7 @@ func classifyToolState(t *database.ToolCache, ignoreSet map[string]struct{}, res
 		return ToolStateFailed
 	}
 	_, ignored := ignoreSet[t.Name]
-	classification := ClassifyToolView(t, ToolClassificationContext{
+	classification := ClassifyToolView(toolViewFromCache(t), ToolClassificationContext{
 		Ignored:                ignored,
 		EffectiveSystemManager: resolved[provider.EcosystemSystem],
 		EffectivePythonManager: resolved[provider.EcosystemPython],
@@ -581,7 +584,7 @@ func executableInstalledOnPath(binaryName string) bool {
 	if binaryName == "" {
 		return false
 	}
-	_, err := exec.LookPath(binaryName)
+	_, err := lookPath(binaryName)
 	return err == nil
 }
 
@@ -695,6 +698,121 @@ func toolStateMatches(state, filter ToolListState) bool {
 // Best-effort: errors on individual providers or tools are silently skipped.
 // The optional progress callback is called with provider scan progress
 // (e.g. "Scanning system/brew… (1/3)"); pass nil to omit progress.
+// scanInstalledBulkMaps probes every available provider's best bulk-installed
+// capability in parallel (MultiManager > Metadata > Simple via ProbeBulkInstalled)
+// and merges the results into a refreshLookupMaps in registry order, so output
+// stays deterministic. Providers implementing no bulk capability are skipped;
+// the per-tool resolution loop falls back to IsInstalled for them.
+//
+//   - multiMaps: provider → name → InstalledEntry (per-tool manager attribution).
+//   - installedMaps: provider → name → version (single-manager bulk path).
+//   - metadataMaps: provider → name → version plus provider metadata.
+//   - concreteForBulk: provider → concrete backend for BulkChecker providers.
+func (a *App) scanInstalledBulkMaps(ctx context.Context, available []provider.Provider, scanProgress *refreshInstalledScanProgress) refreshLookupMaps {
+	defer profile.Start("app.refresh.installed.bulk_maps")()
+	bulkMaps := refreshLookupMaps{
+		multiMaps:       make(map[string]map[string]provider.InstalledEntry),
+		installedMaps:   make(map[string]map[string]string),
+		metadataMaps:    make(map[string]map[string]provider.InstalledMetadata),
+		concreteForBulk: make(map[string]string),
+	}
+
+	type providerBulkResult struct {
+		name          string
+		multiMap      map[string]provider.InstalledEntry // non-nil → MultiManagerBulkChecker
+		metadataMap   map[string]provider.InstalledMetadata
+		installedMap  map[string]string
+		installedWith string
+	}
+
+	// refreshProviderTimeout caps each package-manager subprocess during a bulk
+	// scan. 2 minutes is generous for a single provider but prevents a hung
+	// subprocess from blocking wg.Wait() indefinitely.
+	const refreshProviderTimeout = 2 * time.Minute
+
+	results := make([]providerBulkResult, len(available))
+	var wg sync.WaitGroup
+	for i, p := range available {
+		i, p := i, p
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			provCtx, provCancel := context.WithTimeout(ctx, refreshProviderTimeout)
+			defer provCancel()
+			ctx := provCtx
+			res := providerBulkResult{name: p.Name()}
+			scan, scanErr := provider.ProbeBulkInstalled(ctx, p)
+			var m map[string]string
+			switch scan.Kind {
+			case provider.BulkInstalledByManager:
+				if scanErr != nil {
+					fmt.Fprintf(os.Stderr, "warning: omni: bulk scan %s: %v\n", p.Name(), scanErr)
+				} else {
+					res.multiMap = scan.ByManager
+				}
+				results[i] = res
+				return
+			case provider.BulkInstalledMetadata:
+				if scanErr != nil {
+					fmt.Fprintf(os.Stderr, "warning: omni: bulk scan %s: %v\n", p.Name(), scanErr)
+					results[i] = res
+					return
+				}
+				res.metadataMap = scan.Metadata
+				// Pre-computed here so the merge pass doesn't recompute from res.metadataMap.
+				m = installedMapFromMetadata(scan.Metadata)
+			case provider.BulkInstalledSimple:
+				if scanErr != nil {
+					fmt.Fprintf(os.Stderr, "warning: omni: bulk scan %s: %v\n", p.Name(), scanErr)
+					results[i] = res
+					return
+				}
+				m = scan.Installed
+			default:
+				results[i] = res
+				return
+			}
+			installedWith := p.Name()
+			if cr, ok := p.(provider.ConcreteResolver); ok {
+				if name, cached := scanProgress.resolvedProviderName(p.Name()); cached {
+					installedWith = name
+				} else if name, resolveErr := cr.ResolvedName(ctx); resolveErr == nil && name != "" {
+					installedWith = name
+				} else {
+					installedWith = "" // prefer unknown over stale ecosystem name
+				}
+			}
+			res.installedMap = m
+			res.installedWith = installedWith
+			results[i] = res
+		}()
+	}
+	wg.Wait()
+
+	// Merge results in registry order so output remains deterministic.
+	for _, res := range results {
+		if res.name == "" {
+			continue
+		}
+		scanProgress.emitProvider(res.name)
+		if res.multiMap != nil {
+			bulkMaps.multiMaps[res.name] = res.multiMap
+			continue
+		}
+		if res.metadataMap != nil {
+			bulkMaps.metadataMaps[res.name] = res.metadataMap
+			bulkMaps.installedMaps[res.name] = res.installedMap
+			bulkMaps.concreteForBulk[res.name] = res.installedWith
+			continue
+		}
+		if res.installedMap != nil {
+			bulkMaps.installedMaps[res.name] = res.installedMap
+			bulkMaps.concreteForBulk[res.name] = res.installedWith
+		}
+	}
+	return bulkMaps
+}
+
 func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error {
 	defer profile.Start("app.refresh.installed.total")()
 
@@ -728,120 +846,10 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 	stop()
 	scanProgress := a.newRefreshInstalledScanProgress(ctx, progress, tools, available)
 
-	// Build installed map per provider using bulk check where available.
-	// multiMaps: provider → name → InstalledEntry (per-tool manager attribution).
-	// installedMaps: provider → name → version (single-manager bulk path).
-	// metadataMaps: provider → name → version plus provider metadata.
-	// concreteForBulk: provider → concrete backend for BulkChecker providers.
-	multiMaps := make(map[string]map[string]provider.InstalledEntry)
-	installedMaps := make(map[string]map[string]string)
-	metadataMaps := make(map[string]map[string]provider.InstalledMetadata)
-	concreteForBulk := make(map[string]string)
-
-	type providerBulkResult struct {
-		name          string
-		multiMap      map[string]provider.InstalledEntry // non-nil → MultiManagerBulkChecker
-		metadataMap   map[string]provider.InstalledMetadata
-		installedMap  map[string]string
-		installedWith string
-	}
-
-	// refreshProviderTimeout caps each package-manager subprocess during a bulk
-	// scan. 2 minutes is generous for a single provider but prevents a hung
-	// subprocess from blocking wg.Wait() indefinitely.
-	const refreshProviderTimeout = 2 * time.Minute
-
-	stop = profile.Start("app.refresh.installed.bulk_maps")
-	results := make([]providerBulkResult, len(available))
-	var wg sync.WaitGroup
-	for i, p := range available {
-		i, p := i, p
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			provCtx, provCancel := context.WithTimeout(ctx, refreshProviderTimeout)
-			defer provCancel()
-			ctx := provCtx
-			res := providerBulkResult{name: p.Name()}
-			// MultiManagerBulkChecker takes priority: probes all backends for per-tool attribution.
-			if mbc, ok := p.(provider.MultiManagerBulkChecker); ok {
-				entries, err := mbc.InstalledByManager(ctx)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "warning: omni: bulk scan %s: %v\n", p.Name(), err)
-				} else {
-					res.multiMap = entries
-				}
-				results[i] = res
-				return
-			}
-			var m map[string]string
-			if mbc, ok := p.(provider.MetadataBulkChecker); ok {
-				metadata, err := mbc.InstalledMetadataMap(ctx)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "warning: omni: bulk scan %s: %v\n", p.Name(), err)
-					results[i] = res
-					return
-				}
-				res.metadataMap = metadata
-				// Pre-computed here so the merge pass doesn't recompute from res.metadataMap.
-				m = installedMapFromMetadata(metadata)
-			} else {
-				bc, ok := p.(provider.BulkChecker)
-				if !ok {
-					results[i] = res
-					return
-				}
-				var err error
-				m, err = bc.InstalledMap(ctx)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "warning: omni: bulk scan %s: %v\n", p.Name(), err)
-					results[i] = res
-					return
-				}
-			}
-			// resolvedConcrete is fully populated before any goroutine starts (happens-before via wg.Add), so reads under rcMu are safe.
-			installedWith := p.Name()
-			if cr, ok := p.(provider.ConcreteResolver); ok {
-				if name, cached := scanProgress.resolvedProviderName(p.Name()); cached {
-					installedWith = name
-				} else if name, resolveErr := cr.ResolvedName(ctx); resolveErr == nil && name != "" {
-					installedWith = name
-				} else {
-					installedWith = "" // prefer unknown over stale ecosystem name
-				}
-			}
-			res.installedMap = m
-			res.installedWith = installedWith
-			results[i] = res
-		}()
-	}
-	wg.Wait()
-
-	// Merge results in registry order so output remains deterministic.
-	for _, res := range results {
-		if res.name == "" {
-			continue
-		}
-		scanProgress.emitProvider(res.name)
-		if res.multiMap != nil {
-			multiMaps[res.name] = res.multiMap
-			continue
-		}
-		if res.metadataMap != nil {
-			metadataMaps[res.name] = res.metadataMap
-			installedMaps[res.name] = res.installedMap
-			concreteForBulk[res.name] = res.installedWith
-			continue
-		}
-		if res.installedMap != nil {
-			installedMaps[res.name] = res.installedMap
-			concreteForBulk[res.name] = res.installedWith
-		}
-	}
-	stop()
+	bulkMaps := a.scanInstalledBulkMaps(ctx, available, scanProgress)
 
 	stop = profile.Start("app.refresh.installed.capture_empty")
-	if captured, gitByTool := captureEmptyProviderInstalls(ctx, a, tools, available, multiMaps, installedMaps, metadataMaps, concreteForBulk); len(captured) > 0 {
+	if captured, gitByTool := captureEmptyProviderInstalls(ctx, a, tools, available, bulkMaps.multiMaps, bulkMaps.installedMaps, bulkMaps.metadataMaps, bulkMaps.concreteForBulk); len(captured) > 0 {
 		if updated, err := a.persistCapturedProviders(cfg, captured, gitByTool); err != nil {
 			stop()
 			return err
@@ -852,7 +860,15 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 	}
 	stop()
 
-	stop = profile.Start("app.refresh.installed.resolve_installed")
+	upserts, metadataUpdates := a.buildInstalledUpserts(ctx, cfg, tools, cachedOwners, bulkMaps, scanProgress)
+	return a.persistInstalledResults(ctx, tools, upserts, metadataUpdates)
+}
+
+// buildInstalledUpserts resolves each configured tool's installed state into
+// ToolCache upserts (+ metadata updates), using the pre-computed bulk maps where
+// possible and falling back to a per-tool IsInstalled / PATH probe otherwise.
+func (a *App) buildInstalledUpserts(ctx context.Context, cfg *config.RootConfig, tools []config.ToolEntry, cachedOwners map[string]string, bulkMaps refreshLookupMaps, scanProgress *refreshInstalledScanProgress) ([]*database.ToolCache, []database.MetadataUpdate) {
+	defer profile.Start("app.refresh.installed.resolve_installed")()
 	// nil on error — treated as "all failed" to protect retry-failed state.
 	failedTools, err := a.loadFailedToolSet(ctx)
 	if err != nil {
@@ -874,7 +890,7 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 
 		opProvider := a.operationProviderName(t)
 		if owner := cachedOwners[resolvedToolKey(t)]; owner != "" && owner != opProvider && t.InstallWith == "" {
-			if upsert, metadataUpdate, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, installedMaps, metadataMaps); handled {
+			if upsert, metadataUpdate, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, bulkMaps.installedMaps, bulkMaps.metadataMaps); handled {
 				if upsert == nil {
 					continue
 				}
@@ -889,7 +905,7 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 				}
 			}
 		}
-		if mm, hasMulti := multiMaps[opProvider]; hasMulti && t.InstallWith == "" {
+		if mm, hasMulti := bulkMaps.multiMaps[opProvider]; hasMulti && t.InstallWith == "" {
 			// Multi-manager path: per-tool InstalledWith from the manager that owns it.
 			entry := provider.LookupInstalledEntry(mm, keys) // zero InstalledEntry if tool not found in any backend
 			upserts = append(upserts, &database.ToolCache{
@@ -904,12 +920,12 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 			continue
 		}
 
-		if m, hasBulk := installedMaps[opProvider]; hasBulk && !(t.InstallWith != "" && opProvider == t.Provider) {
+		if m, hasBulk := bulkMaps.installedMaps[opProvider]; hasBulk && !(t.InstallWith != "" && opProvider == t.Provider) {
 			// Fast path: bulk map lookup (concrete providers with BulkChecker).
 			ver, installed := provider.LookupString(m, keys)
-			installedWith := concreteForBulk[opProvider]
+			installedWith := bulkMaps.concreteForBulk[opProvider]
 			if !installed {
-				if altVer, altInstalled, altWith := a.lookupAlternateConfiguredInstall(cfg, t, keys, multiMaps, installedMaps, concreteForBulk); altInstalled {
+				if altVer, altInstalled, altWith := a.lookupAlternateConfiguredInstall(cfg, t, keys, bulkMaps.multiMaps, bulkMaps.installedMaps, bulkMaps.concreteForBulk); altInstalled {
 					ver, installed, installedWith = altVer, true, altWith
 				}
 			}
@@ -922,7 +938,7 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 				Version:       sql.NullString{String: ver, Valid: ver != ""},
 				LastChecked:   time.Now(),
 			}
-			if metadata, ok := provider.LookupInstalledMetadata(metadataMaps[opProvider], keys); ok {
+			if metadata, ok := provider.LookupInstalledMetadata(bulkMaps.metadataMaps[opProvider], keys); ok {
 				applyPrivilegeMetadata(upsert, metadata.Privilege)
 				if update, ok := installedSourceMetadataUpdate(t, metadata); ok {
 					metadataUpdates = append(metadataUpdates, update)
@@ -970,27 +986,25 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 			LastChecked:   time.Now(),
 		})
 	}
-	stop()
+	return upserts, metadataUpdates
+}
+
+// persistInstalledResults writes the resolved installed rows and metadata, then
+// reconciles the resolved tool set. It runs on a non-cancellable context so a
+// cancelled refresh still commits the scan work it already completed.
+func (a *App) persistInstalledResults(ctx context.Context, tools []config.ToolEntry, upserts []*database.ToolCache, metadataUpdates []database.MetadataUpdate) error {
+	defer profile.Start("app.refresh.installed.write_reconcile")()
 	writeCtx := context.WithoutCancel(ctx)
-	stop = profile.Start("app.refresh.installed.write_reconcile")
 	if err := a.readDB().UpsertBatch(writeCtx, upserts); err != nil {
-		stop()
 		return fmt.Errorf("upserting installed status: %w", err)
 	}
 	if err := a.readDB().UpsertMetadataBatch(writeCtx, metadataUpdates); err != nil {
-		stop()
 		return fmt.Errorf("upserting installed metadata: %w", err)
 	}
 	if err := a.enrichToolGitFromMetadataUpdates(writeCtx, metadataUpdates); err != nil {
-		stop()
 		return fmt.Errorf("updating tool git metadata: %w", err)
 	}
-	if err := a.reconcileResolvedTools(writeCtx, tools); err != nil {
-		stop()
-		return err
-	}
-	stop()
-	return nil
+	return a.reconcileResolvedTools(writeCtx, tools)
 }
 
 type refreshInstalledScanProgress struct {
@@ -1090,6 +1104,22 @@ func (a *App) RefreshProviderInstalled(ctx context.Context, provName string) err
 	return a.RefreshProviderInstalledWithProgress(ctx, provName, nil)
 }
 
+// flushProviderInstalledUpserts writes one provider's resolved installed rows +
+// metadata and enriches tool git metadata. ctx should be non-cancellable so a
+// cancelled refresh still commits the rows it already resolved.
+func (a *App) flushProviderInstalledUpserts(ctx context.Context, provName string, upserts []*database.ToolCache, metadataUpdates []database.MetadataUpdate) error {
+	if err := a.readDB().UpsertBatch(ctx, upserts); err != nil {
+		return fmt.Errorf("upserting installed status for %s: %w", provName, err)
+	}
+	if err := a.readDB().UpsertMetadataBatch(ctx, metadataUpdates); err != nil {
+		return fmt.Errorf("upserting metadata for %s: %w", provName, err)
+	}
+	if err := a.enrichToolGitFromMetadataUpdates(ctx, metadataUpdates); err != nil {
+		return fmt.Errorf("updating tool git metadata for %s: %w", provName, err)
+	}
+	return nil
+}
+
 func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName string, progress func(RefreshInstalledProgressEvent)) error {
 	defer profile.Start("app.refresh.installed.provider." + provName)()
 
@@ -1152,16 +1182,7 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 	upserts := make([]*database.ToolCache, 0, len(provTools))
 	metadataUpdates := make([]database.MetadataUpdate, 0)
 	flushUpserts := func() error {
-		if err := a.readDB().UpsertBatch(writeCtx, upserts); err != nil {
-			return fmt.Errorf("upserting installed status for %s: %w", provName, err)
-		}
-		if err := a.readDB().UpsertMetadataBatch(writeCtx, metadataUpdates); err != nil {
-			return fmt.Errorf("upserting metadata for %s: %w", provName, err)
-		}
-		if err := a.enrichToolGitFromMetadataUpdates(writeCtx, metadataUpdates); err != nil {
-			return fmt.Errorf("updating tool git metadata for %s: %w", provName, err)
-		}
-		return nil
+		return a.flushProviderInstalledUpserts(writeCtx, provName, upserts, metadataUpdates)
 	}
 	ownerInstalledMaps := make(map[string]map[string]string)
 	ownerMetadataMaps := make(map[string]map[string]provider.InstalledMetadata)
@@ -1601,17 +1622,21 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 
 // ListDiscovered returns all tool entries that are installed locally but not
 // declared in config (tracked=false).
-func (a *App) ListDiscovered(ctx context.Context) ([]*database.ToolCache, error) {
+func (a *App) ListDiscovered(ctx context.Context) ([]*ToolView, error) {
 	cfg, err := a.loadConfig()
 	if err != nil {
 		return nil, err
 	}
-	return a.listDiscoveredFromConfig(ctx, cfg, a.ResolvedEcosystemProviders(ctx))
+	discovered, err := a.listDiscoveredFromConfig(ctx, cfg, a.ResolvedEcosystemProviders(ctx))
+	if err != nil {
+		return nil, err
+	}
+	return toolViewsFromCache(discovered), nil
 }
 
 type ToolDisplaySnapshot struct {
-	Tools                  []*database.ToolCache
-	Discovered             []*database.ToolCache
+	Tools                  []*ToolView
+	Discovered             []*ToolView
 	EffectiveSystemManager string
 }
 
@@ -1709,6 +1734,7 @@ func (a *App) appendConfigLedRows(ctx context.Context, cfg *config.RootConfig, t
 	}
 	if includeIgnored {
 		ignored := ignoredToolSet(cfg)
+		settings := a.effectiveSettings(cfg)
 		for name := range ignored {
 			if _, ok := present[name]; ok {
 				continue
@@ -1717,7 +1743,7 @@ func (a *App) appendConfigLedRows(ctx context.Context, cfg *config.RootConfig, t
 			if !ok {
 				continue
 			}
-			install := a.resolveInstallSpec(ctx, name, spec)
+			install := a.resolveInstallSpecWithSettings(ctx, name, spec, nil, settings)
 			entry := spec.ToToolEntry(name, install)
 			present[name] = struct{}{}
 			tools = append(tools, &database.ToolCache{
@@ -1862,23 +1888,21 @@ func (a *App) ensureProviderBulkSnapshot(ctx context.Context, providerName strin
 	if maps.concreteForBulk == nil {
 		maps.concreteForBulk = make(map[string]string)
 	}
-	if mbc, ok := p.(provider.MultiManagerBulkChecker); ok {
-		if entries, err := mbc.InstalledByManager(ctx); err == nil {
-			maps.multiMaps[providerName] = entries
+	scan, err := provider.ProbeBulkInstalled(ctx, p)
+	switch scan.Kind {
+	case provider.BulkInstalledByManager:
+		if err == nil {
+			maps.multiMaps[providerName] = scan.ByManager
 		}
-		return
-	}
-	if mbc, ok := p.(provider.MetadataBulkChecker); ok {
-		if metadata, err := mbc.InstalledMetadataMap(ctx); err == nil {
-			maps.metadataMaps[providerName] = metadata
-			maps.installedMaps[providerName] = installedMapFromMetadata(metadata)
+	case provider.BulkInstalledMetadata:
+		if err == nil {
+			maps.metadataMaps[providerName] = scan.Metadata
+			maps.installedMaps[providerName] = installedMapFromMetadata(scan.Metadata)
 			maps.concreteForBulk[providerName] = resolvedProviderConcreteName(ctx, p)
 		}
-		return
-	}
-	if bc, ok := p.(provider.BulkChecker); ok {
-		if m, err := bc.InstalledMap(ctx); err == nil {
-			maps.installedMaps[providerName] = m
+	case provider.BulkInstalledSimple:
+		if err == nil {
+			maps.installedMaps[providerName] = scan.Installed
 			maps.concreteForBulk[providerName] = resolvedProviderConcreteName(ctx, p)
 		}
 	}

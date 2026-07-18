@@ -10,7 +10,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/profile"
 	gosync "github.com/lkshrk/omni/internal/sync"
 )
@@ -304,7 +303,7 @@ func (m *Model) doSyncWithProgress(ch chan progressUpdate, gen int) tea.Cmd {
 
 // doSyncAllWithProgress installs configured missing tools and adds currently
 // discovered local tools to this machine's hostname group.
-func (m *Model) doSyncAllWithProgress(ch chan progressUpdate, gen int, discovered []*database.ToolCache) tea.Cmd {
+func (m *Model) doSyncAllWithProgress(ch chan progressUpdate, gen int, discovered []*app.ToolView) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
 	total := app.SyncAllProgressTotal(m.allTools, discovered)
 	return func() tea.Msg {
@@ -376,9 +375,9 @@ func syncAllClaimedNames(result *app.SyncAllResult) []string {
 // anyMissingDescription reports whether any tool in the list lacks a cached
 // description. Used to skip the background description warm-up on launches
 // where every tool is already populated.
-func anyMissingDescription(tools []*database.ToolCache) bool {
+func anyMissingDescription(tools []*app.ToolView) bool {
 	for _, t := range tools {
-		if !t.Description.Valid || t.Description.String == "" {
+		if t.Description == "" {
 			return true
 		}
 	}

@@ -19,9 +19,7 @@ import (
 	"github.com/creack/pty"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/executor"
-	"github.com/lkshrk/omni/internal/provider"
 )
 
 const (
@@ -31,7 +29,7 @@ const (
 )
 
 type adminTerminalState struct {
-	action                 provider.PrivilegeAction
+	action                 app.PrivilegeAction
 	name                   string
 	providerName           string
 	pkg                    string
@@ -80,7 +78,7 @@ type adminTerminalDoneMsg struct {
 	err   error
 }
 
-func (m *Model) openAdminTerminalPrompt(t *database.ToolCache, action provider.PrivilegeAction, plan provider.PrivilegePlan) bool {
+func (m *Model) openAdminTerminalPrompt(t *app.ToolView, action app.PrivilegeAction, plan app.PrivilegePlan) bool {
 	state, ok := m.adminTerminalStateForTool(t, action, plan)
 	if !ok {
 		return false
@@ -88,7 +86,7 @@ func (m *Model) openAdminTerminalPrompt(t *database.ToolCache, action provider.P
 	return m.openAdminTerminalState(state)
 }
 
-func (m *Model) adminTerminalStateForTool(t *database.ToolCache, action provider.PrivilegeAction, plan provider.PrivilegePlan) (adminTerminalState, bool) {
+func (m *Model) adminTerminalStateForTool(t *app.ToolView, action app.PrivilegeAction, plan app.PrivilegePlan) (adminTerminalState, bool) {
 	if t == nil || m.app == nil {
 		return adminTerminalState{}, false
 	}
@@ -171,7 +169,7 @@ func (m *Model) startAdminTerminalSession() tea.Cmd {
 	m.loading = true
 	startOp(m, adminTerminalRunningStatus(*state))
 	m.startRowOperation(state.name, state.providerName, "Admin terminal")
-	if state.action == provider.PrivilegeActionUpgrade {
+	if state.action == app.PrivilegeActionUpgrade {
 		if m.upgradingKeys == nil {
 			m.upgradingKeys = make(map[string]bool)
 		}
@@ -290,7 +288,7 @@ func (m *Model) doCompleteAdminTerminalAction(state adminTerminalState) tea.Cmd 
 				msg.hostInfo = result.GroupState.HostInfo
 			}
 		}
-		if state.addToConfig && state.action == provider.PrivilegeActionInstall {
+		if state.addToConfig && state.action == app.PrivilegeActionInstall {
 			msg.removeDiscoveredKeys = []string{toolKey(state.name, state.providerName)}
 			if err == nil {
 				msg.message = "installed " + state.name + " and added to config"
@@ -309,37 +307,37 @@ func adminTerminalRunningStatus(state adminTerminalState) string {
 
 func adminTerminalSuccessMessage(state adminTerminalState) string {
 	switch state.action {
-	case provider.PrivilegeActionInstall:
+	case app.PrivilegeActionInstall:
 		return "installed " + state.name
-	case provider.PrivilegeActionUninstall:
+	case app.PrivilegeActionUninstall:
 		return "deleted " + state.name
-	case provider.PrivilegeActionUpgrade:
+	case app.PrivilegeActionUpgrade:
 		return "upgraded " + state.name
 	default:
 		return externalAdminActionVerb(state.action) + " " + state.name
 	}
 }
 
-func externalAdminActionVerb(action provider.PrivilegeAction) string {
+func externalAdminActionVerb(action app.PrivilegeAction) string {
 	switch action {
-	case provider.PrivilegeActionInstall:
+	case app.PrivilegeActionInstall:
 		return "install"
-	case provider.PrivilegeActionUninstall:
+	case app.PrivilegeActionUninstall:
 		return "delete"
-	case provider.PrivilegeActionUpgrade:
+	case app.PrivilegeActionUpgrade:
 		return "upgrade"
 	default:
 		return string(action)
 	}
 }
 
-func externalAdminActionGerund(action provider.PrivilegeAction) string {
+func externalAdminActionGerund(action app.PrivilegeAction) string {
 	switch action {
-	case provider.PrivilegeActionInstall:
+	case app.PrivilegeActionInstall:
 		return "Installing"
-	case provider.PrivilegeActionUninstall:
+	case app.PrivilegeActionUninstall:
 		return "Deleting"
-	case provider.PrivilegeActionUpgrade:
+	case app.PrivilegeActionUpgrade:
 		return "Upgrading"
 	default:
 		return "Running"

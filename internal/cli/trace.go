@@ -37,8 +37,8 @@ func newTraceListCmd(state *rootState) *cobra.Command {
 				when := trace.StartedAt.Local().Format(time.RFC3339)
 				duration := fmt.Sprintf("%dms", trace.DurationMS)
 				exit := ""
-				if trace.ExitCode.Valid {
-					exit = fmt.Sprintf(" exit=%d", trace.ExitCode.Int64)
+				if trace.ExitCode != nil {
+					exit = fmt.Sprintf(" exit=%d", *trace.ExitCode)
 				}
 				reason := strings.TrimSpace(trace.Reason)
 				if reason == "" {

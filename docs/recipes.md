@@ -60,7 +60,7 @@ Expected result: this one tool uses `pnpm`.
 Use Homebrew when the formula is available, and fall back to the official x.ai
 installer everywhere else (Linux, or macOS when you installed outside Homebrew):
 
-Set `"version": 16` (or let Omni migrate on load). Multi-provider `providers[]`
+Set `"version": 17` (or let Omni migrate on load). Multi-provider `providers[]`
 entries require config version 6 or newer — without a version, the v5→v6
 migration can drop hand-authored provider lists that only used the new shape.
 

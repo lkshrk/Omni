@@ -4,7 +4,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/provider"
 )
 
@@ -77,9 +76,9 @@ type ToolViewClassification struct {
 }
 
 type ToolViewListOptions struct {
-	Tools           []*database.ToolCache
-	DiscoveredTools []*database.ToolCache
-	SearchTools     []*database.ToolCache
+	Tools           []*ToolView
+	DiscoveredTools []*ToolView
+	SearchTools     []*ToolView
 
 	Query          string
 	ProviderFilter string
@@ -93,11 +92,11 @@ type ToolViewListOptions struct {
 }
 
 type ToolViewList struct {
-	Tools  []*database.ToolCache
+	Tools  []*ToolView
 	Counts map[ToolViewSection]int
 }
 
-func ClassifyToolView(tool *database.ToolCache, context ToolClassificationContext) ToolViewClassification {
+func ClassifyToolView(tool *ToolView, context ToolClassificationContext) ToolViewClassification {
 	syncStatus := ToolSyncStatusForTool(tool, context)
 	return ToolViewClassification{
 		Section:    toolViewSection(tool, context, syncStatus),
@@ -108,8 +107,8 @@ func ClassifyToolView(tool *database.ToolCache, context ToolClassificationContex
 func BuildToolViewList(options ToolViewListOptions) ToolViewList {
 	q := strings.ToLower(options.Query)
 	targetProvider := options.ProviderFilter
-	normal := make([]*database.ToolCache, 0, len(options.Tools)+len(options.DiscoveredTools)+len(options.SearchTools))
-	ignored := make([]*database.ToolCache, 0)
+	normal := make([]*ToolView, 0, len(options.Tools)+len(options.DiscoveredTools)+len(options.SearchTools))
+	ignored := make([]*ToolView, 0)
 	discoveredKeys := toolViewKeySet(options.DiscoveredTools)
 
 	for _, tool := range options.Tools {
@@ -192,7 +191,7 @@ func BuildToolViewList(options ToolViewListOptions) ToolViewList {
 	return ToolViewList{Tools: visible, Counts: counts}
 }
 
-func ToolSyncStatusForTool(tool *database.ToolCache, context ToolClassificationContext) ToolSyncStatus {
+func ToolSyncStatusForTool(tool *ToolView, context ToolClassificationContext) ToolSyncStatus {
 	if tool == nil {
 		return ToolSyncOK
 	}
@@ -216,7 +215,7 @@ func ToolSyncStatusForTool(tool *database.ToolCache, context ToolClassificationC
 	return ToolSyncOK
 }
 
-func DesiredConcreteProviderForTool(tool *database.ToolCache, context ToolClassificationContext) (string, string) {
+func DesiredConcreteProviderForTool(tool *ToolView, context ToolClassificationContext) (string, string) {
 	if tool == nil {
 		return "", ""
 	}
@@ -238,7 +237,7 @@ func DesiredConcreteProviderForTool(tool *database.ToolCache, context ToolClassi
 // ExpectedConcreteProviderForTool returns the concrete manager omni expects for a
 // tracked tool: ecosystem defaults/pins for node/system/python, otherwise the
 // configured route provider for multi-concrete tools (e.g. brew vs bun).
-func ExpectedConcreteProviderForTool(tool *database.ToolCache, context ToolClassificationContext) (string, string) {
+func ExpectedConcreteProviderForTool(tool *ToolView, context ToolClassificationContext) (string, string) {
 	desired, source := DesiredConcreteProviderForTool(tool, context)
 	if desired != "" || tool == nil {
 		return desired, source
@@ -253,7 +252,7 @@ func ToolProviderDisplayLabel(input ToolProviderDisplayInput) string {
 	return ToolProviderDisplayParts(input).Label()
 }
 
-func ToolHasPrivilegeMarker(tool *database.ToolCache, context ToolClassificationContext) bool {
+func ToolHasPrivilegeMarker(tool *ToolView, context ToolClassificationContext) bool {
 	if tool == nil {
 		return false
 	}
@@ -315,7 +314,7 @@ func sudoBackedSystemProvider(name string) bool {
 	return provider.BuiltinMetadata(name).RequiresPrivilege
 }
 
-func toolViewSection(tool *database.ToolCache, context ToolClassificationContext, syncStatus ToolSyncStatus) ToolViewSection {
+func toolViewSection(tool *ToolView, context ToolClassificationContext, syncStatus ToolSyncStatus) ToolViewSection {
 	if tool == nil {
 		return ToolViewSectionAvailable
 	}
@@ -342,7 +341,7 @@ func toolViewSection(tool *database.ToolCache, context ToolClassificationContext
 	return ToolViewSectionAvailable
 }
 
-func classifyToolForList(tool *database.ToolCache, options ToolViewListOptions, discoveredKeys map[string]bool) ToolViewClassification {
+func classifyToolForList(tool *ToolView, options ToolViewListOptions, discoveredKeys map[string]bool) ToolViewClassification {
 	context := options.Classification
 	if tool != nil {
 		context.Ignored = options.IgnoreLabels[tool.Name] != "" || options.IgnoredTools[tool.Name]
@@ -351,7 +350,7 @@ func classifyToolForList(tool *database.ToolCache, options ToolViewListOptions, 
 	return ClassifyToolView(tool, context)
 }
 
-func toolMatchesGroup(tool *database.ToolCache, group string, memberships map[string][]string) bool {
+func toolMatchesGroup(tool *ToolView, group string, memberships map[string][]string) bool {
 	if group == "" {
 		return true
 	}
@@ -363,7 +362,7 @@ func toolMatchesGroup(tool *database.ToolCache, group string, memberships map[st
 	return false
 }
 
-func toolMatchesQuery(tool *database.ToolCache, q string) bool {
+func toolMatchesQuery(tool *ToolView, q string) bool {
 	if q == "" {
 		return true
 	}
@@ -409,14 +408,14 @@ func ToolProviderDisplayRoleFor(raw string) ToolProviderDisplayRole {
 	}
 }
 
-func toolViewKey(tool *database.ToolCache) string {
+func toolViewKey(tool *ToolView) string {
 	if tool == nil {
 		return ""
 	}
 	return tool.Name + "\x00" + tool.Provider
 }
 
-func toolViewKeySet(tools []*database.ToolCache) map[string]bool {
+func toolViewKeySet(tools []*ToolView) map[string]bool {
 	keys := make(map[string]bool, len(tools))
 	for _, tool := range tools {
 		if tool == nil {

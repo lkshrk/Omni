@@ -11,7 +11,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/config"
 )
 
 // combinePluginErrors folds a top-level error with per-adapter errors,
@@ -244,7 +243,7 @@ func (m *Model) doClaimPluginAndMarketplace(agentID string, p app.InstalledPlugi
 		if marketplaceUnmanagedConflict(marketplaceUnmanaged, marketplaceName, app.InstalledMarketplace{Name: marketplaceName, Source: source}) {
 			return pluginImportAdoptDoneMsg{pluginName: p.Name, err: fmt.Errorf("marketplace %q is unmanaged under multiple agents with conflicting sources; import each manually", marketplaceName)}
 		}
-		mres, err := a.AddMarketplace(ctx, config.Marketplace{Name: marketplaceName, Source: source, Agents: marketplaceAgentIDs})
+		mres, err := a.AddMarketplace(ctx, app.Marketplace{Name: marketplaceName, Source: source, Agents: marketplaceAgentIDs})
 		if err := combineMarketplaceErrors(err, mres.Errors); err != nil {
 			return pluginImportAdoptDoneMsg{pluginName: p.Name, err: fmt.Errorf("adding marketplace %q: %w", marketplaceName, err)}
 		}
@@ -456,19 +455,19 @@ func (m *Model) openPluginAgentsPicker(row app.PluginRow) tea.Cmd {
 	return nil
 }
 
-// pluginFromInstalled builds a config.Plugin for AddPlugin from an unmanaged
+// pluginFromInstalled builds a app.Plugin for AddPlugin from an unmanaged
 // InstalledPlugin, targeting agentIDs (every agent unmanaged reports this
 // plugin under, unioned with the clicked row's agent — see
 // pluginUnmanagedAgentsFor), mirroring how the mcp import path in
-// update_keys.go's "i" case builds a config.McpServer inline.
-func pluginFromInstalled(p app.InstalledPlugin, agentIDs []string) config.Plugin {
-	return config.Plugin{Name: p.Name, Marketplace: p.Marketplace, Agents: agentIDs}
+// update_keys.go's "i" case builds a app.McpServer inline.
+func pluginFromInstalled(p app.InstalledPlugin, agentIDs []string) app.Plugin {
+	return app.Plugin{Name: p.Name, Marketplace: p.Marketplace, Agents: agentIDs}
 }
 
 type pluginAddDoneMsg struct{ err error }
 
 // doAddPlugin registers a new plugin built from the add-plugin form.
-func (m *Model) doAddPlugin(p config.Plugin) tea.Cmd {
+func (m *Model) doAddPlugin(p app.Plugin) tea.Cmd {
 	a, ctx := m.app, m.ctx
 	return func() tea.Msg {
 		res, err := a.AddPlugin(ctx, p)
@@ -503,17 +502,17 @@ func (m *Model) focusPluginFormField() {
 	}
 }
 
-// buildPluginFromForm validates and constructs a config.Plugin from the
+// buildPluginFromForm validates and constructs a app.Plugin from the
 // add-plugin form's current field values. Name and marketplace are required;
 // agents is an optional comma-separated list (empty means all MVP agents).
-func (m *Model) buildPluginFromForm() (config.Plugin, error) {
+func (m *Model) buildPluginFromForm() (app.Plugin, error) {
 	name := strings.TrimSpace(m.pluginFormName.Value())
 	if name == "" {
-		return config.Plugin{}, errors.New("name is required")
+		return app.Plugin{}, errors.New("name is required")
 	}
 	marketplace := strings.TrimSpace(m.pluginFormMarketplace.Value())
 	if marketplace == "" {
-		return config.Plugin{}, errors.New("marketplace is required")
+		return app.Plugin{}, errors.New("marketplace is required")
 	}
 	var agents []string
 	raw := strings.TrimSpace(m.pluginFormAgents.Value())
@@ -525,5 +524,5 @@ func (m *Model) buildPluginFromForm() (config.Plugin, error) {
 			}
 		}
 	}
-	return config.Plugin{Name: name, Marketplace: marketplace, Agents: agents}, nil
+	return app.Plugin{Name: name, Marketplace: marketplace, Agents: agents}, nil
 }

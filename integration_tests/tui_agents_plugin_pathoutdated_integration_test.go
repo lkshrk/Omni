@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/vttest"
+
 	"github.com/lkshrk/omni/internal/config"
 )
 
@@ -73,12 +75,12 @@ func TestTUIAgentsTabDetectsPathOutdatedVersionlessPlugin(t *testing.T) {
 	}
 	runOmniCommand(t, bin, root, env, "--config", configPath, "--cache-dir", cache, "hosts", "ensure", "testhost")
 
-	screen := runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(tty *os.File, capture *lockedBuffer) string {
-		waitForRequiredScreen(t, capture, 6*time.Second, func(text string) bool {
+	screen := runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(term *vttest.Terminal) string {
+		waitForRequiredScreen(t, term, 6*time.Second, func(text string) bool {
 			return strings.Contains(text, "Dashboard") && strings.Contains(text, "Tools")
 		}, "TUI did not render main tabs")
-		writeTUIKeys(t, tty, "\t", "\t", "\t")
-		return waitForRequiredScreen(t, capture, 8*time.Second, func(text string) bool {
+		writeTUIKeys(t, term, "\t", "\t", "\t")
+		return waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
 			return strings.Contains(text, "Updates Available") && strings.Contains(text, "drifting-plugin")
 		}, "TUI did not render drifting-plugin under Updates Available")
 	})

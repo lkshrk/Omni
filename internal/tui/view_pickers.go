@@ -8,7 +8,6 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/lkshrk/omni/internal/app"
-	"github.com/lkshrk/omni/internal/database"
 )
 
 func renderScopePicker(m Model) string {
@@ -633,7 +632,7 @@ func scopePickerColumnWidths(m Model) (int, int) {
 	return labelW, detailW
 }
 
-func ignoreScopeOptions(m Model, t *database.ToolCache) []scopeOption {
+func ignoreScopeOptions(m Model, t *app.ToolView) []scopeOption {
 	if t == nil {
 		return nil
 	}
@@ -674,11 +673,11 @@ func ignoreScopeOptions(m Model, t *database.ToolCache) []scopeOption {
 	return options
 }
 
-func providerScopeOptions(t *database.ToolCache) []scopeOption {
+func providerScopeOptions(t *app.ToolView) []scopeOption {
 	return providerScopeOptionsFromChoices(app.DefaultToolProviderScopeChoices(t))
 }
 
-func (m Model) providerScopeOptions(t *database.ToolCache) []scopeOption {
+func (m Model) providerScopeOptions(t *app.ToolView) []scopeOption {
 	if m.app == nil {
 		return providerScopeOptions(t)
 	}
