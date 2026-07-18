@@ -12,9 +12,13 @@ import (
 )
 
 // doInstall installs a single tool.
-func (m *Model) doInstall(name, prov string) tea.Cmd {
+func (m *Model) doInstall(name, prov string, ch chan progressUpdate, gen int) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
+	ctx = withLiveOutput(ctx, ch, gen)
 	return func() tea.Msg {
+		if ch != nil {
+			defer close(ch)
+		}
 		result, err := installToolWithState(ctx, a, name, prov)
 		if err != nil {
 			return opCompleteMsg{err: err}
@@ -84,10 +88,14 @@ func (m *Model) doDeleteFromConfig(name, prov string) tea.Cmd {
 }
 
 // doUpgrade upgrades a single tool.
-func (m *Model) doUpgrade(name, prov string) tea.Cmd {
+func (m *Model) doUpgrade(name, prov string, ch chan progressUpdate, gen int) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
+	ctx = withLiveOutput(ctx, ch, gen)
 	uk := toolKey(name, prov)
 	return func() tea.Msg {
+		if ch != nil {
+			defer close(ch)
+		}
 		result, err := a.UpgradeWithState(ctx, name, prov)
 		if err != nil {
 			return opCompleteMsg{key: uk, err: err}

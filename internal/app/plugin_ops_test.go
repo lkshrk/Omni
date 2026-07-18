@@ -227,28 +227,37 @@ func TestRestorePlugins_PerPluginErrorIsNonFatal(t *testing.T) {
 	}
 }
 
-func TestRestorePlugins_SkipsAlreadyInstalled(t *testing.T) {
-	stub := &stubPluginAdapter{
+func TestRestorePlugins_EnsuresMarketplaceForAlreadyInstalledPlugin(t *testing.T) {
+	claude := &stubPluginAdapter{
 		id:            "claude-code",
 		available:     true,
 		listedPlugins: []app.InstalledPlugin{{Name: "caveman", Marketplace: "caveman"}},
 	}
-	agents := config.AgentsConfig{
-		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
-		Plugins:      []config.Plugin{{Name: "caveman", Marketplace: "caveman", Agents: []string{"claude-code"}}},
+	codex := &stubPluginAdapter{
+		id:            "codex",
+		available:     true,
+		listedPlugins: []app.InstalledPlugin{{Name: "caveman", Marketplace: "caveman"}},
+		listedMarkets: []app.InstalledMarketplace{{Name: "caveman", Source: "a/b"}},
 	}
-	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{stub}))
+	agents := config.AgentsConfig{
+		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b", Agents: []string{"claude-code", "codex"}}},
+		Plugins:      []config.Plugin{{Name: "caveman", Marketplace: "caveman", Agents: []string{"claude-code", "codex"}}},
+	}
+	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{claude, codex}))
 	res, err := a.RestorePlugins(context.Background(), app.RestorePluginOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(stub.installedPlugin) != 0 {
-		t.Fatalf("expected no install call for already-present plugin, got %v", stub.installedPlugin)
+	if len(claude.installedPlugin) != 0 || len(codex.installedPlugin) != 0 {
+		t.Fatalf("expected no plugin installs, got claude=%v codex=%v", claude.installedPlugin, codex.installedPlugin)
 	}
-	if len(stub.addedMarkets) != 0 {
-		t.Fatalf("expected no marketplace add for already-present plugin, got %v", stub.addedMarkets)
+	if len(claude.addedMarkets) != 1 || claude.addedMarkets[0].Name != "caveman" {
+		t.Fatalf("expected missing Claude marketplace to be added, got %v", claude.addedMarkets)
 	}
-	if len(res.AlreadyInstalled) != 1 || res.AlreadyInstalled[0] != "claude-code/caveman" {
+	if len(codex.addedMarkets) != 0 {
+		t.Fatalf("expected existing Codex marketplace to be left alone, got %v", codex.addedMarkets)
+	}
+	if len(res.AlreadyInstalled) != 2 {
 		t.Fatalf("expected already-installed entry, got %v", res.AlreadyInstalled)
 	}
 	if len(res.Installed) != 0 {
@@ -292,6 +301,40 @@ func TestAddPlugin_PersistsToManifestRegardlessOfAdapterOutcome(t *testing.T) {
 	cfg := loadPluginTestConfig(t, a)
 	if len(cfg.Agents.Plugins) != 1 || cfg.Agents.Plugins[0].Name != "caveman" {
 		t.Fatalf("manifest write must persist despite adapter failure, got %+v", cfg.Agents.Plugins)
+	}
+}
+
+func TestAddPlugin_EnsuresMarketplaceForAlreadyInstalledPlugin(t *testing.T) {
+	claude := &stubPluginAdapter{
+		id:            "claude-code",
+		available:     true,
+		listedPlugins: []app.InstalledPlugin{{Name: "caveman", Marketplace: "caveman"}},
+	}
+	codex := &stubPluginAdapter{
+		id:            "codex",
+		available:     true,
+		listedPlugins: []app.InstalledPlugin{{Name: "caveman", Marketplace: "caveman"}},
+		listedMarkets: []app.InstalledMarketplace{{Name: "caveman", Source: "a/b"}},
+	}
+	agents := config.AgentsConfig{
+		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b", Agents: []string{"claude-code", "codex"}}},
+	}
+	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{claude, codex}))
+	res, err := a.AddPlugin(context.Background(), config.Plugin{Name: "caveman", Marketplace: "caveman", Agents: []string{"claude-code", "codex"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Errors) != 0 {
+		t.Fatalf("unexpected errors: %v", res.Errors)
+	}
+	if len(claude.addedMarkets) != 1 || claude.addedMarkets[0].Name != "caveman" {
+		t.Fatalf("expected missing Claude marketplace to be added, got %v", claude.addedMarkets)
+	}
+	if len(codex.addedMarkets) != 0 {
+		t.Fatalf("expected existing Codex marketplace to be left alone, got %v", codex.addedMarkets)
+	}
+	if len(claude.installedPlugin) != 0 || len(codex.installedPlugin) != 0 {
+		t.Fatalf("expected no plugin installs, got claude=%v codex=%v", claude.installedPlugin, codex.installedPlugin)
 	}
 }
 

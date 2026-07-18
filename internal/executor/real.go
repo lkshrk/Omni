@@ -3,6 +3,7 @@ package executor
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,10 +38,48 @@ func (r *RealExecutor) Run(ctx context.Context, name string, args ...string) (st
 	cmd := exec.CommandContext(ctx, resolved, args...)
 	cmd.Env = env
 	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdoutWriter := &outputWriter{ctx: ctx, dst: io.Writer(&stdout)}
+	stderrWriter := &outputWriter{ctx: ctx, dst: io.Writer(&stderr)}
+	cmd.Stdout = stdoutWriter
+	cmd.Stderr = stderrWriter
 	err := cmd.Run()
+	stdoutWriter.flush()
+	stderrWriter.flush()
 	return stdout.String(), stderr.String(), err
+}
+
+type outputWriter struct {
+	ctx     context.Context
+	dst     io.Writer
+	pending []byte
+}
+
+func (w *outputWriter) Write(p []byte) (int, error) {
+	n, err := w.dst.Write(p)
+	var latest string
+	for _, b := range p[:n] {
+		if b != '\n' && b != '\r' {
+			w.pending = append(w.pending, b)
+			continue
+		}
+		if line := sanitizeOutputLine(w.pending); line != "" {
+			latest = line
+		}
+		w.pending = w.pending[:0]
+	}
+	// ponytail: the status bar can show one line; keep full logs in dst.
+	if observer := outputObserver(w.ctx); observer != nil && latest != "" {
+		observer(latest)
+	}
+	return n, err
+}
+
+func (w *outputWriter) flush() {
+	line := sanitizeOutputLine(w.pending)
+	w.pending = nil
+	if observer := outputObserver(w.ctx); observer != nil && line != "" {
+		observer(line)
+	}
 }
 
 // ResolveCommand returns the executable path and environment used by

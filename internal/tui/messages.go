@@ -2,6 +2,7 @@ package tui
 
 import (
 	"github.com/lkshrk/omni/internal/app"
+	"github.com/lkshrk/omni/internal/dots"
 )
 
 // toolsLoadedMsg is sent when the initial tool list and settings have been fetched.
@@ -431,6 +432,15 @@ type dotsPeekLoadedMsg struct {
 	gen    int
 	result app.DotsPeekResult
 	err    error
+}
+
+type dotsChildrenLoadedMsg struct {
+	gen        int
+	entryName  string
+	entryState dots.State
+	relPath    string
+	children   []app.DotChild
+	err        error
 }
 
 type traceLogLoadedMsg struct {

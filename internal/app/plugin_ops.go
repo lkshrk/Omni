@@ -201,12 +201,13 @@ func (a *App) restorePlugins(ctx context.Context, opts RestorePluginOptions, ref
 				res.Skipped = append(res.Skipped, adapter.ID()+"/"+p.Name)
 				continue
 			}
-			if _, present := alreadyInstalled[pluginIdentity(p.Name, p.Marketplace)]; present {
-				res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+p.Name)
-				continue
-			}
+			_, present := alreadyInstalled[pluginIdentity(p.Name, p.Marketplace)]
 			if opts.DryRun {
-				res.WouldInstall = append(res.WouldInstall, adapter.ID()+"/"+p.Name)
+				if present {
+					res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+p.Name)
+				} else {
+					res.WouldInstall = append(res.WouldInstall, adapter.ID()+"/"+p.Name)
+				}
 				continue
 			}
 			if _, done := addedMarketplace[p.Marketplace]; !done {
@@ -217,6 +218,10 @@ func (a *App) restorePlugins(ctx context.Context, opts RestorePluginOptions, ref
 					}
 				}
 				addedMarketplace[p.Marketplace] = struct{}{}
+			}
+			if present {
+				res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+p.Name)
+				continue
 			}
 			if installErr := adapter.InstallPlugin(ctx, p); installErr != nil {
 				res.Errors = append(res.Errors, PluginError{AgentID: adapter.ID(), Name: p.Name, Err: installErr})
@@ -384,17 +389,22 @@ func (a *App) AddPlugin(ctx context.Context, p config.Plugin) (AddPluginResult, 
 		if !pluginTargetsAdapter(p, adapter.ID()) {
 			continue
 		}
-		// listed check first: adopting an already-present plugin must not demand the CLI
-		if installed, listErr := adapter.ListPlugins(ctx); listErr == nil && pluginListed(installed, p.Name, p.Marketplace) {
-			res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+p.Name)
-			continue
-		}
+		installed, listErr := adapter.ListPlugins(ctx)
+		alreadyInstalled := listErr == nil && pluginListed(installed, p.Name, p.Marketplace)
 		if !adapter.Available() {
-			res.SkippedUnavailable = append(res.SkippedUnavailable, adapter.ID()+"/"+p.Name)
+			if alreadyInstalled {
+				res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+p.Name)
+			} else {
+				res.SkippedUnavailable = append(res.SkippedUnavailable, adapter.ID()+"/"+p.Name)
+			}
 			continue
 		}
 		if mErr := ensureMarketplace(ctx, adapter, *m); mErr != nil {
 			res.Errors = append(res.Errors, PluginError{AgentID: adapter.ID(), Name: p.Name, Err: fmt.Errorf("marketplace %s: %w", m.Name, mErr)})
+			continue
+		}
+		if alreadyInstalled {
+			res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+p.Name)
 			continue
 		}
 		if installErr := adapter.InstallPlugin(ctx, p); installErr != nil {

@@ -1386,10 +1386,6 @@ func (a *App) RefreshDiscoveredWithProgress(ctx context.Context, progress func(R
 	stop = profile.Start("app.refresh.discovered.scan")
 	discovered := a.discoverUntrackedInstalled(ctx, cfg, progress)
 	stop()
-	discovered, err = a.persistSystemInventory(discovered)
-	if err != nil {
-		return err
-	}
 
 	writeCtx := context.WithoutCancel(ctx)
 	stop = profile.Start("app.refresh.discovered.write")
@@ -1406,46 +1402,6 @@ func (a *App) RefreshDiscoveredWithProgress(ctx context.Context, progress func(R
 	}
 	stop()
 	return nil
-}
-
-func (a *App) persistSystemInventory(discovered []database.DiscoveredUpsert) ([]database.DiscoveredUpsert, error) {
-	var inventory, remaining []database.DiscoveredUpsert
-	for _, tool := range discovered {
-		if isSystemInventoryProvider(tool.InstalledWith) {
-			inventory = append(inventory, tool)
-		} else {
-			remaining = append(remaining, tool)
-		}
-	}
-	if len(inventory) == 0 {
-		return discovered, nil
-	}
-	err := a.withConfig(func(cfg *config.RootConfig) error {
-		group, err := ensureSystemInventoryGroupInConfig(cfg)
-		if err != nil {
-			return err
-		}
-		if cfg.Tools == nil {
-			cfg.Tools = make(map[string]config.ToolSpec)
-		}
-		for _, tool := range inventory {
-			providerName := tool.InstalledWith
-			if providerName == "" {
-				providerName = tool.Provider
-			}
-			spec := cfg.Tools[tool.Name]
-			setToolProviderCandidate(&spec, config.ToolInstallSpec{Provider: providerName, Package: tool.Name})
-			cfg.Tools[tool.Name] = spec
-			if !containsToolMembership(group.Tools, tool.Name) {
-				group.Tools = append(group.Tools, config.ToolEntry{Name: tool.Name})
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("persisting system package inventory: %w", err)
-	}
-	return remaining, nil
 }
 
 func isSystemInventoryProvider(name string) bool {
@@ -1599,9 +1555,22 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 		if err != nil {
 			continue // best-effort: skip erroring providers
 		}
+		var systemBaseline map[string]bool
+		if isSystemInventoryProvider(p.Name()) {
+			systemBaseline, err = a.systemInventoryBaseline(ctx, p.Name(), installed)
+			if err != nil {
+				continue // best-effort: skip providers whose baseline can't be read/recorded
+			}
+		}
 		for _, t := range installed {
 			if _, ok := configuredNames[t.Name]; ok {
 				continue // already in config; skip
+			}
+			if systemBaseline != nil && systemBaseline[t.Name] {
+				// Package predates the host's recorded baseline (image-build
+				// package or already observed): not a package the user just
+				// installed, so it stays out of discovery.
+				continue
 			}
 			if !discoverCLIToolAllowed(cliSets, p.Name(), t.Name) {
 				continue
@@ -1618,6 +1587,50 @@ func (a *App) discoverUntrackedInstalled(ctx context.Context, cfg *config.RootCo
 		}
 	}
 	return collapseSharedStoreDuplicates(discovered, ecosystemProviders)
+}
+
+// systemInventoryBaselineStateKey is the local_state key under which a
+// system package manager's baseline package set is recorded for this host.
+func systemInventoryBaselineStateKey(providerName string) string {
+	return "system-inventory-baseline:" + providerName
+}
+
+// systemInventoryBaseline returns the set of package names to treat as
+// pre-existing (not user-installed) for a system package manager on this
+// host. System package managers (apt, dnf, pacman, apk, zypper) report every
+// image-baked package as "manually installed" with no reliable marker to
+// distinguish those from packages a person actually installed later, so the
+// first time this host observes a given manager, its current installed set
+// is recorded as the baseline. Every later observation only ever surfaces
+// packages installed after that point as discovery candidates.
+func (a *App) systemInventoryBaseline(ctx context.Context, providerName string, installed []provider.InstalledTool) (map[string]bool, error) {
+	key := systemInventoryBaselineStateKey(providerName)
+	stored, err := a.readDB().GetState(ctx, key)
+	if err == nil {
+		return systemInventoryBaselineSet(stored), nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	names := make([]string, 0, len(installed))
+	for _, t := range installed {
+		names = append(names, t.Name)
+	}
+	sort.Strings(names)
+	if err := a.readDB().SetState(ctx, key, strings.Join(names, "\n")); err != nil {
+		return nil, err
+	}
+	return systemInventoryBaselineSet(strings.Join(names, "\n")), nil
+}
+
+func systemInventoryBaselineSet(stored string) map[string]bool {
+	set := make(map[string]bool)
+	for _, name := range strings.Split(stored, "\n") {
+		if name = strings.TrimSpace(name); name != "" {
+			set[name] = true
+		}
+	}
+	return set
 }
 
 // ListDiscovered returns all tool entries that are installed locally but not

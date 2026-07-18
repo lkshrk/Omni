@@ -4472,6 +4472,39 @@ func TestModel_DotsTab_Messages(t *testing.T) {
 		}
 	})
 
+	t.Run("stale dotsPreparedMsg does not erase a branch during lazy expansion", func(t *testing.T) {
+		m := baseModel(nil)
+		m.dotsPreparing = true
+		m.dotsPrepareGen = 1
+		m.dotsLoaded = true
+		m.dotsEntries = []app.DotStatus{{
+			Name: "nvim",
+			Children: []app.DotChild{{
+				Name:     "lua",
+				RelPath:  "lua",
+				IsDir:    true,
+				Children: []app.DotChild{{Name: "init.lua", RelPath: "lua/init.lua"}},
+			}},
+		}}
+		m.beginDotsOperation("Loading dotfile directory…")
+
+		got := drive(m, dotsPreparedMsg{
+			gen:   1,
+			opGen: 0,
+			entries: []app.DotStatus{{
+				Name:     "nvim",
+				Children: []app.DotChild{{Name: "lua", RelPath: "lua", IsDir: true}},
+			}},
+		})
+		if got.dotsPreparing {
+			t.Fatal("dotsPreparing should clear after stale snapshot")
+		}
+		children := got.dotsEntries[0].Children[0].Children
+		if len(children) != 1 || children[0].RelPath != "lua/init.lua" {
+			t.Fatalf("stale snapshot erased loaded branch: %#v", got.dotsEntries)
+		}
+	})
+
 	t.Run("stale dots status result is ignored", func(t *testing.T) {
 		m := baseModel(nil)
 		m.beginDotsOperation("Loading dots…")

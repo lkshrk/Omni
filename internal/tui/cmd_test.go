@@ -22,6 +22,7 @@ import (
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/dots"
+	"github.com/lkshrk/omni/internal/executor"
 	"github.com/lkshrk/omni/internal/provider"
 	gosync "github.com/lkshrk/omni/internal/sync"
 )
@@ -363,7 +364,7 @@ func TestDoInstall_Success(t *testing.T) {
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
 	m := modelForCmds(a)
-	msg := m.doInstall("ripgrep", "brew")()
+	msg := m.doInstall("ripgrep", "brew", nil, 0)()
 	got, ok := msg.(opCompleteMsg)
 	if !ok {
 		t.Fatalf("expected opCompleteMsg, got %T", msg)
@@ -397,7 +398,7 @@ func TestDoInstall_ConfiguredEmptyToolAddsHighConfidenceProviderMatch(t *testing
 	}
 
 	m := modelForCmds(a)
-	msg := m.doInstall("prettier", "")()
+	msg := m.doInstall("prettier", "", nil, 0)()
 	got, ok := msg.(opCompleteMsg)
 	if !ok {
 		t.Fatalf("expected opCompleteMsg, got %T", msg)
@@ -440,7 +441,7 @@ func TestDoInstall_ConfiguredEmptyToolDoesNotInstallWeakProviderMatch(t *testing
 	}
 
 	m := modelForCmds(a)
-	msg := m.doInstall("prettier", "")()
+	msg := m.doInstall("prettier", "", nil, 0)()
 	got, ok := msg.(opCompleteMsg)
 	if !ok {
 		t.Fatalf("expected opCompleteMsg, got %T", msg)
@@ -521,7 +522,7 @@ func TestDoInstall_Error(t *testing.T) {
 	prov := &errProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
-	msg := m.doInstall("curl", "brew")()
+	msg := m.doInstall("curl", "brew", nil, 0)()
 	got, ok := msg.(opCompleteMsg)
 	if !ok {
 		t.Fatalf("expected opCompleteMsg, got %T", msg)
@@ -838,7 +839,7 @@ func TestDoUpgrade_Success(t *testing.T) {
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
-	msg := m.doUpgrade("git", "brew")()
+	msg := m.doUpgrade("git", "brew", nil, 0)()
 	got, ok := msg.(opCompleteMsg)
 	if !ok {
 		t.Fatalf("expected opCompleteMsg, got %T", msg)
@@ -852,7 +853,7 @@ func TestDoUpgrade_Error(t *testing.T) {
 	prov := &errProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
-	msg := m.doUpgrade("git", "brew")()
+	msg := m.doUpgrade("git", "brew", nil, 0)()
 	got, ok := msg.(opCompleteMsg)
 	if !ok {
 		t.Fatalf("expected opCompleteMsg, got %T", msg)
@@ -2026,6 +2027,22 @@ func TestWaitForProgress_ReceivesText(t *testing.T) {
 	}
 	if got.text != "installing…" {
 		t.Errorf("text = %q, want 'installing…'", got.text)
+	}
+}
+
+func TestWithLiveOutputStreamsSanitizedLine(t *testing.T) {
+	ch := make(chan progressUpdate, 1)
+	ctx := withLiveOutput(context.Background(), ch, 7)
+	if _, _, err := executor.New().Run(ctx, "printf", "TOKEN=secret\n"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	msg := waitForProgress(ch, 7)()
+	progress, ok := msg.(progressMsg)
+	if !ok {
+		t.Fatalf("expected progressMsg, got %T", msg)
+	}
+	if progress.gen != 7 || progress.text != "TOKEN=[redacted]" {
+		t.Fatalf("progress = %#v", progress)
 	}
 }
 

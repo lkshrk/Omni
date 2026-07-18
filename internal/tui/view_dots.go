@@ -83,7 +83,7 @@ func dotsChildExpandKey(entryName, relPath string) string {
 }
 
 func dotsChildExpanded(m Model, entryName string, child app.DotChild) bool {
-	if !child.IsDir || len(child.Children) == 0 {
+	if !child.IsDir || child.Children == nil || len(child.Children) == 0 {
 		return false
 	}
 	return m.dotsExpandedChildren[dotsChildExpandKey(entryName, child.RelPath)]
@@ -91,7 +91,7 @@ func dotsChildExpanded(m Model, entryName string, child app.DotChild) bool {
 
 func dotsRowExpandable(row dotsVisibleRow) bool {
 	if row.isChild {
-		return dotsRowIsDir(row) && len(row.child.Children) > 0
+		return dotsRowIsDir(row) && (row.child.Children == nil || len(row.child.Children) > 0)
 	}
 	return dotsRowIsDir(row) && len(row.entry.Children) > 0
 }

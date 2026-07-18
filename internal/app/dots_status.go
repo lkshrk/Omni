@@ -19,7 +19,55 @@ func (a *App) DotsList() ([]DotStatus, error) {
 	if err != nil {
 		return nil, err
 	}
-	return entryHealth(m, groupMap, variantMap), nil
+	return entryHealth(m, groupMap, variantMap, 0, nil), nil
+}
+
+type dotsChildDepthKey struct{}
+type dotsExpandedChildrenKey struct{}
+
+// WithShallowDotsChildren makes status discovery load only direct children.
+// Directory descendants can then be fetched with DotsChildChildren as the TUI
+// expands them. Callers that do not opt in retain the full tree.
+func WithShallowDotsChildren(ctx context.Context) context.Context {
+	return context.WithValue(ctx, dotsChildDepthKey{}, 1)
+}
+
+// WithExpandedDotsChildren preserves already-expanded TUI branches while a
+// shallow status snapshot is rebuilt.
+func WithExpandedDotsChildren(ctx context.Context, paths map[string][]string) context.Context {
+	if len(paths) == 0 {
+		return ctx
+	}
+	expanded := make(map[string]map[string]bool, len(paths))
+	for name, relPaths := range paths {
+		for _, relPath := range relPaths {
+			rel := filepath.ToSlash(filepath.Clean(relPath))
+			if rel == "." || rel == ".." || strings.HasPrefix(rel, "../") {
+				continue
+			}
+			if expanded[name] == nil {
+				expanded[name] = make(map[string]bool)
+			}
+			expanded[name][rel] = true
+		}
+	}
+	return context.WithValue(ctx, dotsExpandedChildrenKey{}, expanded)
+}
+
+func dotsChildDepth(ctx context.Context) int {
+	if ctx == nil {
+		return 0
+	}
+	depth, _ := ctx.Value(dotsChildDepthKey{}).(int)
+	return depth
+}
+
+func dotsExpandedChildren(ctx context.Context) map[string]map[string]bool {
+	if ctx == nil {
+		return nil
+	}
+	expanded, _ := ctx.Value(dotsExpandedChildrenKey{}).(map[string]map[string]bool)
+	return expanded
 }
 
 func (a *App) QueryDots(opts DotsQueryOptions) ([]DotStatus, error) {
@@ -36,7 +84,9 @@ func (a *App) DotsStatus(ctx context.Context) (*DotsStatusResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	statuses := entryHealth(mgr, groupMap, variantMap)
+	childDepth := dotsChildDepth(ctx)
+	expandedChildren := dotsExpandedChildren(ctx)
+	statuses := entryHealth(mgr, groupMap, variantMap, childDepth, expandedChildren)
 	a.attachLastSyncErrors(ctx, statuses)
 	memberships, membershipErr := a.DotMembershipMap(ctx)
 	var gitStatus string
@@ -58,6 +108,8 @@ func (a *App) DotsStatus(ctx context.Context) (*DotsStatusResult, error) {
 // DiscoverDotsStatus returns current tracked status plus transient untracked
 // discovery candidates. It does not mutate config, the repo, or local files.
 func (a *App) DiscoverDotsStatus(ctx context.Context) (*DotsStatusResult, error) {
+	childDepth := dotsChildDepth(ctx)
+	expandedChildren := dotsExpandedChildren(ctx)
 	result, statusErr := a.DotsStatus(ctx)
 	if result == nil {
 		result = &DotsStatusResult{}
@@ -97,7 +149,7 @@ func (a *App) DiscoverDotsStatus(ctx context.Context) (*DotsStatusResult, error)
 		if err != nil {
 			return result, fmt.Errorf("dots discover: resolve candidates: %w", err)
 		}
-		discovered := entryHealth(mgr, nil, nil)
+		discovered := entryHealth(mgr, nil, nil, childDepth, expandedChildren)
 		for i := range discovered {
 			discovered[i].State = discoveredDotState(discovered[i])
 			discovered[i].Actions = discoveredDotActions(discovered[i].State)
@@ -111,7 +163,7 @@ func (a *App) DiscoverDotsStatus(ctx context.Context) (*DotsStatusResult, error)
 		if err != nil {
 			return result, fmt.Errorf("dots discover: resolve ignored candidates: %w", err)
 		}
-		ignored := entryHealth(mgr, nil, nil)
+		ignored := entryHealth(mgr, nil, nil, childDepth, expandedChildren)
 		for i := range ignored {
 			ignored[i].Actions = []dots.Action{dots.ActionUnignore}
 			ignored[i].State = dots.StateIgnored
@@ -179,9 +231,10 @@ func collectIgnoredFromChildren(children, ignoredChildren []DotChild) []DotChild
 		result = append(result, child)
 	}
 	for _, child := range ignoredChildren {
-		if child.Ignored {
-			add(child)
-		}
+		// Shallow snapshots keep descendants out of Children. The compact
+		// ignored scan also carries tracked leaves re-included beneath an
+		// ignored directory, and those must reach the synthesized tree too.
+		add(child)
 	}
 	var walk func(nodes []DotChild, underIgnored bool)
 	walk = func(nodes []DotChild, underIgnored bool) {
@@ -330,6 +383,9 @@ func countIgnoredTreeDepth(child DotChild, depth int) int {
 		if DotChildIsTrackedLeaf(child) {
 			return 0
 		}
+		if child.Counts.Ignored > 0 {
+			return child.Counts.Ignored
+		}
 		return 1
 	}
 	count := 0
@@ -354,6 +410,58 @@ func (a *App) QueryDotsStatus(ctx context.Context, opts DotsQueryOptions) (*Dots
 	}
 	result.Entries = filtered
 	return result, err
+}
+
+// DotsChildChildren loads one directory level for an already-resolved dots
+// entry. It is used by the TUI's on-demand expansion path.
+func (a *App) DotsChildChildren(ctx context.Context, name, relPath string, ancestorIgnored bool) ([]DotChild, error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
+	rel := filepath.Clean(strings.TrimSpace(relPath))
+	if rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil, fmt.Errorf("dots child path %q must stay within its entry", relPath)
+	}
+	mgr, _, _, err := a.buildDotsManager()
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range mgr.Entries {
+		if entry.Name != name {
+			continue
+		}
+		state, _ := dots.ClassifyEntry(entry)
+		contentRoot := dotStatusContentRoot(entry)
+		ignoreRoot := dotIgnoreRoot(entry.SourcePath, entry.TargetPath, contentRoot)
+		ignores := dots.CombinedIgnores(entry.Ignore)
+		roots := dotChildRoots(entry.SourcePath, entry.TargetPath, contentRoot)
+		for _, root := range roots {
+			dir := filepath.Join(root, rel)
+			if _, err := os.Stat(dir); err != nil {
+				continue
+			}
+			resolvedDir, err := filepath.EvalSymlinks(dir)
+			if err != nil {
+				return nil, fmt.Errorf("resolve dots child path %q: %w", relPath, err)
+			}
+			relToRoot, err := filepath.Rel(root, resolvedDir)
+			if err != nil || relToRoot == ".." || strings.HasPrefix(relToRoot, ".."+string(filepath.Separator)) {
+				return nil, fmt.Errorf("dots child path %q resolves outside its entry", relPath)
+			}
+		}
+		inheritedIgnores := make([]string, 0, len(ignores)+1)
+		inheritedIgnores = append(inheritedIgnores, "*")
+		inheritedIgnores = append(inheritedIgnores, ignores...)
+		depth := strings.Count(filepath.ToSlash(rel), "/") + 2
+		children := directDotChildrenAt(entry.SourcePath, entry.TargetPath, roots, ignoreRoot, rel, ignores, inheritedIgnores, ancestorIgnored, state, depth, depth, nil)
+		if children == nil {
+			children = []DotChild{}
+		}
+		return children, nil
+	}
+	return nil, fmt.Errorf("dots entry %q not found", name)
 }
 
 func filterDotStatuses(statuses []DotStatus, opts DotsQueryOptions) ([]DotStatus, error) {
@@ -411,39 +519,45 @@ func normalizeDotState(raw string) (dots.State, error) {
 	}
 }
 
-func entryHealth(m *dots.Engine, groupMap map[string]string, variantMap map[string]bool) []DotStatus {
+func entryHealth(m *dots.Engine, groupMap map[string]string, variantMap map[string]bool, maxChildDepth int, expandedChildren map[string]map[string]bool) []DotStatus {
 	statuses := make([]DotStatus, 0, len(m.Entries))
 	for _, e := range m.Entries {
 		state, actions := dots.ClassifyEntry(e)
 		contentRoot := dotStatusContentRoot(e)
 		ignoreRoot := dotIgnoreRoot(e.SourcePath, e.TargetPath, contentRoot)
 		ignores := dots.CombinedIgnores(e.Ignore)
-		children := directDotChildren(e.SourcePath, e.TargetPath, contentRoot, ignoreRoot, ignores, state)
+		children := directDotChildren(e.SourcePath, e.TargetPath, contentRoot, ignoreRoot, ignores, state, maxChildDepth, expandedChildren[e.Name])
 		counts := dotChildrenFileCounts(children)
 		if !dotStatusIsDir(e, contentRoot) {
-			counts = dotFileCountsUnion(e.SourcePath, e.TargetPath, contentRoot, ignoreRoot, ignores, state)
+			counts = dotFileCountsUnion(e.SourcePath, e.TargetPath, contentRoot, "", ignoreRoot, ignores, state)
+		}
+		var ignoredChildren []DotChild
+		if maxChildDepth > 0 {
+			ignoredChildren = ignoredDotChildren(e.SourcePath, e.TargetPath, contentRoot, ignoreRoot, ignores, state)
 		}
 		fileCount := counts.Managed()
 		if state == dots.StateIgnored {
 			counts = DotFileCounts{}
 			fileCount = 0
 			children = nil
+			ignoredChildren = nil
 		}
 		statuses = append(statuses, DotStatus{
-			Name:       e.Name,
-			Package:    e.Package,
-			Variant:    variantMap[e.Name],
-			SourcePath: e.SourcePath,
-			TargetPath: e.TargetPath,
-			ConfigPath: configPathForTarget(e.TargetPath),
-			Health:     healthForDotState(state),
-			State:      state,
-			Actions:    actions,
-			Group:      groupMap[e.Name],
-			FileCount:  fileCount,
-			Counts:     counts,
-			IsDir:      dotStatusIsDir(e, contentRoot),
-			Children:   children,
+			Name:            e.Name,
+			Package:         e.Package,
+			Variant:         variantMap[e.Name],
+			SourcePath:      e.SourcePath,
+			TargetPath:      e.TargetPath,
+			ConfigPath:      configPathForTarget(e.TargetPath),
+			Health:          healthForDotState(state),
+			State:           state,
+			Actions:         actions,
+			Group:           groupMap[e.Name],
+			FileCount:       fileCount,
+			Counts:          counts,
+			IsDir:           dotStatusIsDir(e, contentRoot),
+			Children:        children,
+			ignoredChildren: ignoredChildren,
 		})
 	}
 	return statuses
@@ -514,34 +628,105 @@ func dotIgnoreRoot(sourceRoot, targetRoot, contentRoot string) string {
 	return targetRoot
 }
 
-func dotFileCountsUnion(entrySourceRoot, targetRoot, contentRoot, ignoreRoot string, ignores []string, parentState dots.State) DotFileCounts {
+func dotFileCountsUnion(entrySourceRoot, targetRoot, contentRoot, relRoot, ignoreRoot string, ignores []string, parentState dots.State) DotFileCounts {
 	roots := dotExistingRoots(entrySourceRoot, targetRoot, contentRoot)
 	if len(roots) == 0 {
 		return DotFileCounts{}
 	}
-	tracked := false
-	ignored := false
+	tracked := make(map[string]bool)
+	ignored := make(map[string]bool)
 	for _, root := range roots {
-		info, err := os.Lstat(root)
-		if err != nil || info.IsDir() || !dots.IsManagedDotFile(info.Mode()) {
-			continue
-		}
-		if dots.ShouldIgnoreDotPath(ignoreRoot, ".", filepath.Base(root), ignores) {
-			ignored = true
+		collectDotFileCountRelsFromRoot(root, relRoot, ignoreRoot, ignores, tracked, ignored)
+	}
+	var counts DotFileCounts
+	for rel := range tracked {
+		if dotFileCountSynced(dotChildState(entrySourceRoot, targetRoot, filepath.FromSlash(rel), false, ignores, parentState)) {
+			counts.Synced++
 		} else {
-			tracked = true
+			counts.OutOfSync++
 		}
 	}
-	if tracked {
-		if dotFileCountSynced(parentState) {
-			return DotFileCounts{Synced: 1}
+	for rel := range ignored {
+		if !tracked[rel] {
+			counts.Ignored++
 		}
-		return DotFileCounts{OutOfSync: 1}
 	}
-	if ignored {
-		return DotFileCounts{Ignored: 1}
+	return counts
+}
+
+func collectDotFileCountRelsFromRoot(root, relRoot, ignoreRoot string, ignores []string, tracked, ignored map[string]bool) {
+	path := root
+	if relRoot != "" {
+		path = filepath.Join(root, relRoot)
 	}
-	return DotFileCounts{}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return
+	}
+	if !info.IsDir() {
+		rel := relRoot
+		if rel == "" {
+			rel = "."
+		}
+		if !dots.IsManagedDotFile(info.Mode()) {
+			return
+		}
+		if dots.ShouldIgnoreDotPath(ignoreRoot, rel, filepath.Base(path), ignores) {
+			ignored[filepath.ToSlash(rel)] = true
+			return
+		}
+		tracked[filepath.ToSlash(rel)] = true
+		return
+	}
+	if walkErr := filepath.WalkDir(path, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		walkRel, relErr := filepath.Rel(root, path)
+		if relErr != nil || walkRel == "." {
+			return nil
+		}
+		if dots.ShouldIgnoreDotPath(ignoreRoot, walkRel, d.Name(), ignores) {
+			if d.IsDir() {
+				if dots.IgnoredDotDirHasIncludedDescendant(ignoreRoot, walkRel, ignores) {
+					return nil
+				}
+				collectIgnoredDotFileCountRels(root, path, ignored)
+				return filepath.SkipDir
+			}
+			info, infoErr := d.Info()
+			if infoErr == nil && dots.IsManagedDotFile(info.Mode()) {
+				ignored[filepath.ToSlash(walkRel)] = true
+			}
+			return nil
+		}
+		info, infoErr := d.Info()
+		if infoErr == nil && !d.IsDir() && dots.IsManagedDotFile(info.Mode()) {
+			tracked[filepath.ToSlash(walkRel)] = true
+		}
+		return nil
+	}); walkErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: omni: scanning dot files in %s: %v\n", path, walkErr)
+	}
+}
+
+func collectIgnoredDotFileCountRels(root, path string, ignored map[string]bool) {
+	if walkErr := filepath.WalkDir(path, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		info, infoErr := d.Info()
+		if infoErr != nil || !dots.IsManagedDotFile(info.Mode()) {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr == nil {
+			ignored[filepath.ToSlash(rel)] = true
+		}
+		return nil
+	}); walkErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: omni: scanning ignored dot files in %s: %v\n", path, walkErr)
+	}
 }
 
 func dotFileCountSynced(state dots.State) bool {
@@ -595,7 +780,7 @@ func dotStatusIsDir(e dots.ResolvedEntry, contentRoot string) bool {
 	return false
 }
 
-func directDotChildren(entrySourceRoot, targetRoot, contentRoot, ignoreRoot string, ignores []string, parentState dots.State) []DotChild {
+func directDotChildren(entrySourceRoot, targetRoot, contentRoot, ignoreRoot string, ignores []string, parentState dots.State, maxDepth int, expanded map[string]bool) []DotChild {
 	roots := dotChildRoots(entrySourceRoot, targetRoot, contentRoot)
 	if len(roots) == 0 {
 		return nil
@@ -603,7 +788,7 @@ func directDotChildren(entrySourceRoot, targetRoot, contentRoot, ignoreRoot stri
 	inheritedIgnores := make([]string, 0, len(ignores)+1)
 	inheritedIgnores = append(inheritedIgnores, "*")
 	inheritedIgnores = append(inheritedIgnores, ignores...)
-	return directDotChildrenAt(entrySourceRoot, targetRoot, roots, ignoreRoot, "", ignores, inheritedIgnores, false, parentState, 1)
+	return directDotChildrenAt(entrySourceRoot, targetRoot, roots, ignoreRoot, "", ignores, inheritedIgnores, false, parentState, 1, maxDepth, expanded)
 }
 
 type dotChildCandidate struct {
@@ -612,7 +797,7 @@ type dotChildCandidate struct {
 	isDir bool
 }
 
-func directDotChildrenAt(entrySourceRoot, targetRoot string, roots []string, ignoreRoot, relRoot string, ignores, inheritedIgnores []string, ancestorIgnored bool, parentState dots.State, depth int) []DotChild {
+func directDotChildrenAt(entrySourceRoot, targetRoot string, roots []string, ignoreRoot, relRoot string, ignores, inheritedIgnores []string, ancestorIgnored bool, parentState dots.State, depth, maxDepth int, expanded map[string]bool) []DotChild {
 	candidates := make(map[string]dotChildCandidate)
 	for _, root := range roots {
 		dir := root
@@ -669,8 +854,15 @@ func directDotChildrenAt(entrySourceRoot, targetRoot string, roots []string, ign
 			Ignored: ignored,
 		}
 		if candidate.isDir {
-			child.Children = directDotChildrenAt(entrySourceRoot, targetRoot, roots, ignoreRoot, candidate.rel, ignores, inheritedIgnores, ignored, parentState, depth+1)
-			child.Counts = dotChildrenFileCounts(child.Children)
+			if maxDepth == 0 || depth < maxDepth || expanded[filepath.ToSlash(candidate.rel)] {
+				child.Children = directDotChildrenAt(entrySourceRoot, targetRoot, roots, ignoreRoot, candidate.rel, ignores, inheritedIgnores, ancestorIgnored || ignored, parentState, depth+1, maxDepth, expanded)
+				if child.Children == nil {
+					child.Children = []DotChild{}
+				}
+				child.Counts = dotChildrenFileCounts(child.Children)
+			} else {
+				child.Counts = dotFileCountsUnion(entrySourceRoot, targetRoot, "", candidate.rel, ignoreRoot, ignores, parentState)
+			}
 		} else if ignored {
 			child.Counts.Ignored = 1
 		} else if dotFileCountSynced(state) {
@@ -688,6 +880,99 @@ func directDotChildrenAt(entrySourceRoot, targetRoot string, roots []string, ign
 		children = append(children, child)
 	}
 	return children
+}
+
+func ignoredDotChildren(entrySourceRoot, targetRoot, contentRoot, ignoreRoot string, ignores []string, parentState dots.State) []DotChild {
+	roots := dotChildRoots(entrySourceRoot, targetRoot, contentRoot)
+	if len(roots) == 0 {
+		return nil
+	}
+	inheritedIgnores := make([]string, 0, len(ignores)+1)
+	inheritedIgnores = append(inheritedIgnores, "*")
+	inheritedIgnores = append(inheritedIgnores, ignores...)
+	var children []DotChild
+	collectIgnoredDotChildrenAt(entrySourceRoot, targetRoot, roots, ignoreRoot, "", ignores, inheritedIgnores, false, parentState, 1, &children)
+	return children
+}
+
+func collectIgnoredDotChildrenAt(entrySourceRoot, targetRoot string, roots []string, ignoreRoot, relRoot string, ignores, inheritedIgnores []string, ancestorIgnored bool, parentState dots.State, depth int, out *[]DotChild) {
+	candidates := make(map[string]dotChildCandidate)
+	for _, root := range roots {
+		dir := root
+		if relRoot != "" {
+			dir = filepath.Join(root, relRoot)
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			rel := entry.Name()
+			if relRoot != "" {
+				rel = filepath.Join(relRoot, entry.Name())
+			}
+			info, infoErr := entry.Info()
+			if infoErr != nil || (!entry.IsDir() && !dots.IsManagedDotFile(info.Mode())) {
+				continue
+			}
+			candidate := candidates[rel]
+			candidate.name = entry.Name()
+			candidate.rel = rel
+			candidate.isDir = candidate.isDir || entry.IsDir()
+			candidates[rel] = candidate
+		}
+	}
+	ordered := make([]dotChildCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		ordered = append(ordered, candidate)
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].isDir != ordered[j].isDir {
+			return ordered[i].isDir
+		}
+		return ordered[i].name < ordered[j].name
+	})
+	for _, candidate := range ordered {
+		ignored := dots.ShouldIgnoreDotPath(ignoreRoot, candidate.rel, candidate.name, ignores)
+		if ancestorIgnored {
+			ignored = dots.ShouldIgnoreDotPath(ignoreRoot, candidate.rel, candidate.name, inheritedIgnores)
+		}
+		if ignored {
+			child := DotChild{
+				Name:    candidate.name,
+				RelPath: candidate.rel,
+				Path:    filepath.Join(targetRoot, candidate.rel),
+				State:   dots.StateIgnored,
+				IsDir:   candidate.isDir,
+				Depth:   depth,
+				Ignored: true,
+			}
+			if candidate.isDir {
+				child.Counts = dotFileCountsUnion(entrySourceRoot, targetRoot, "", candidate.rel, ignoreRoot, ignores, parentState)
+				child.FileCount = child.Counts.Ignored
+			}
+			*out = append(*out, child)
+		} else if ancestorIgnored && !candidate.isDir {
+			state := dotChildState(entrySourceRoot, targetRoot, candidate.rel, false, ignores, parentState)
+			child := DotChild{
+				Name:      candidate.name,
+				RelPath:   candidate.rel,
+				Path:      filepath.Join(targetRoot, candidate.rel),
+				State:     state,
+				Depth:     depth,
+				FileCount: 1,
+			}
+			if dotFileCountSynced(state) {
+				child.Counts.Synced = 1
+			} else {
+				child.Counts.OutOfSync = 1
+			}
+			*out = append(*out, child)
+		}
+		if candidate.isDir && (!ignored || dots.IgnoredDotDirHasIncludedDescendant(ignoreRoot, candidate.rel, ignores)) {
+			collectIgnoredDotChildrenAt(entrySourceRoot, targetRoot, roots, ignoreRoot, candidate.rel, ignores, inheritedIgnores, ancestorIgnored || ignored, parentState, depth+1, out)
+		}
+	}
 }
 
 func dotChildrenFileCounts(children []DotChild) (counts DotFileCounts) {

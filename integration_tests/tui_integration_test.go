@@ -5,6 +5,7 @@ package integration_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -459,6 +460,74 @@ func TestTUISyncsDiscoveredDotCandidate(t *testing.T) {
 	if strings.Contains(strings.ToLower(screen), "error") {
 		t.Fatalf("TUI showed an error while syncing discovered candidate; screen:\n%s", screen)
 	}
+}
+
+func TestTUIDotsRootFileIgnoreCompletesPromptly(t *testing.T) {
+	bin := buildOmniBinary(t)
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	cache := filepath.Join(root, "cache")
+	configPath := filepath.Join(root, "settings.json")
+	repo := filepath.Join(home, "dotfiles")
+	env := isolatedTUIEnv(t, home, cache)
+
+	source := filepath.Join(repo, "dotfiles", "claude", ".claude")
+	writeIntegrationFile(t, filepath.Join(source, "settings.json"), "{}\n")
+	for i := range 5_000 {
+		writeIntegrationFile(t, filepath.Join(home, ".claude", "cache", fmt.Sprintf("entry-%05d", i), "data.json"), "x")
+	}
+	if err := os.Symlink(filepath.Join(source, "settings.json"), filepath.Join(home, ".claude", "settings.json")); err != nil {
+		t.Fatalf("link settings.json: %v", err)
+	}
+	initDotsRepo(t, repo, env)
+	runCommand(t, repo, env, "git", "add", ".")
+	runCommand(t, repo, env, "git", "commit", "-m", "fixture")
+	if err := config.Save(configPath, &config.RootConfig{
+		Version:  config.CurrentVersion,
+		Settings: config.Settings{DotsRepo: repo},
+		Hosts:    map[string][]string{"testhost": {}},
+		Groups: []*config.GroupConfig{{
+			Name:    "testhost",
+			Special: "host",
+			Dots: []config.DotEntry{{
+				Name: "claude",
+				Path: filepath.Join(home, ".claude"),
+			}},
+		}},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	const maxIgnoreLatency = 2 * time.Second
+	runTUI(t, bin, root, env, []string{"--config", configPath, "--cache-dir", cache}, func(term *vttest.Terminal) string {
+		waitForRequiredScreen(t, term, 6*time.Second, func(text string) bool {
+			return strings.Contains(text, "Dashboard") && strings.Contains(text, "Tools")
+		}, "TUI did not render main tabs")
+		writeTUIKeys(t, term, "\t", "\t")
+		waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
+			return strings.Contains(text, "Dots") && strings.Contains(text, "claude")
+		}, "TUI did not load the claude dots entry")
+		writeTUIKeys(t, term, " ")
+		waitForRequiredScreen(t, term, 3*time.Second, func(text string) bool {
+			return strings.Contains(text, "settings.json")
+		}, "TUI did not expand the claude dots entry")
+		writeTUIKeys(t, term, "j", "j", "x")
+		waitForRequiredScreen(t, term, 2*time.Second, func(text string) bool {
+			return strings.Contains(text, "confirm ignore")
+		}, "TUI did not arm settings.json ignore")
+
+		started := time.Now()
+		writeTUIKeys(t, term, "x")
+		screen := waitForRequiredScreen(t, term, 5*time.Second, func(text string) bool {
+			return strings.Contains(text, "settings.json ignored for claude")
+		}, "TUI did not finish settings.json ignore")
+		elapsed := time.Since(started)
+		t.Logf("actual TUI root-file ignore with 5,000 unrelated files: %s", elapsed)
+		if elapsed > maxIgnoreLatency {
+			t.Fatalf("actual TUI root-file ignore took %s, want <= %s; screen:\n%s", elapsed, maxIgnoreLatency, screen)
+		}
+		return screen
+	})
 }
 
 func TestTUIDashboardReconcileFixesDotIgnorePatterns(t *testing.T) {

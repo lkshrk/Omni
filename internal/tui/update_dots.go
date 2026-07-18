@@ -37,12 +37,27 @@ func (m *Model) cancelDotsOperation() {
 
 func (m *Model) currentDotsOperation() (context.Context, int) {
 	if m.dotsCtx != nil {
-		return m.dotsCtx, m.dotsOpGen
+		return m.dotsStatusContext(m.dotsCtx), m.dotsOpGen
 	}
 	if m.ctx == nil {
-		return context.Background(), m.dotsOpGen
+		return m.dotsStatusContext(context.Background()), m.dotsOpGen
 	}
-	return m.ctx, m.dotsOpGen
+	return m.dotsStatusContext(m.ctx), m.dotsOpGen
+}
+
+func (m *Model) dotsStatusContext(ctx context.Context) context.Context {
+	ctx = app.WithShallowDotsChildren(ctx)
+	expanded := make(map[string][]string)
+	for key, active := range m.dotsExpandedChildren {
+		if !active {
+			continue
+		}
+		name, relPath, ok := strings.Cut(key, "\x00")
+		if ok {
+			expanded[name] = append(expanded[name], relPath)
+		}
+	}
+	return app.WithExpandedDotsChildren(ctx, expanded)
 }
 
 func (m *Model) finishDotsOperation(gen int) bool {
@@ -540,6 +555,10 @@ func (m *Model) handleDotsToggleKeyMsg(visible []dotsVisibleRow) []tea.Cmd {
 		return nil
 	}
 	if row.isChild {
+		if row.child.Children == nil {
+			m.beginDotsOperation("Loading dotfile children…")
+			return []tea.Cmd{m.spinner.Tick, m.doDotsLoadChildren(row.entry, row.child)}
+		}
 		if m.dotsExpandedChildren == nil {
 			m.dotsExpandedChildren = make(map[string]bool)
 		}

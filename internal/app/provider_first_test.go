@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/config"
@@ -14,16 +15,27 @@ import (
 // recordingProvider is a fake provider that logs Install/Uninstall calls in
 // order so tests can assert sequencing.
 type recordingProvider struct {
-	name      string
-	available bool
-	failOn    map[string]bool
-	mu        *sync.Mutex
-	log       *[]string
+	name          string
+	available     bool
+	failOn        map[string]bool
+	mu            *sync.Mutex
+	log           *[]string
+	availableWhen func() bool
+	afterInstall  func(provider.Tool)
+	logAvailable  bool
 }
 
 func (p *recordingProvider) Name() string        { return p.name }
 func (p *recordingProvider) Description() string { return p.name + " stub" }
 func (p *recordingProvider) Available(_ context.Context) (bool, error) {
+	if p.logAvailable {
+		p.mu.Lock()
+		*p.log = append(*p.log, p.name+":available")
+		p.mu.Unlock()
+	}
+	if p.availableWhen != nil {
+		return p.availableWhen(), nil
+	}
 	return p.available, nil
 }
 func (p *recordingProvider) Install(_ context.Context, t provider.Tool) error {
@@ -32,6 +44,9 @@ func (p *recordingProvider) Install(_ context.Context, t provider.Tool) error {
 	p.mu.Unlock()
 	if p.failOn[t.Name] {
 		return fmt.Errorf("install %s failed", t.Name)
+	}
+	if p.afterInstall != nil {
+		p.afterInstall(t)
 	}
 	return nil
 }
@@ -62,49 +77,56 @@ func indexOf(log []string, want string) int {
 // declared in Settings.Providers is installed before any dependent tool that
 // relies on it.
 //
-// Scenario: uv is installed via brew in pass 1. ruff is then installed via the
-// configured concrete provider in pass 2. We assert brew:uv appears before
-// pip:ruff in the install log.
+// Scenario: pip is installed via brew in pass 1. ruff is then installed via the
+// configured concrete provider in pass 2. Both bootstrap and group/batch sync
+// must install pip before even checking the dependent provider.
 func TestSync_InstallsProvidersBeforeDependents(t *testing.T) {
-	var mu sync.Mutex
-	var log []string
-	// "brew" installs the bootstrap provider "uv" (pass 1).
-	// "pip" installs the dependent tool "ruff" (pass 2).
-	brew := &recordingProvider{name: "brew", available: true, mu: &mu, log: &log}
-	pip := &recordingProvider{name: "pip", available: true, mu: &mu, log: &log}
-	a, cfgPath := newImportApp(t, brew, pip)
+	for _, tc := range []struct {
+		name      string
+		groupName string
+		opts      isync.SyncOptions
+	}{
+		{name: "bootstrap"},
+		{name: "batch group", groupName: "dev", opts: isync.SyncOptions{Group: "dev"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var mu sync.Mutex
+			var log []string
+			var pipAvailable atomic.Bool
+			brew := &recordingProvider{
+				name: "brew", available: true, mu: &mu, log: &log,
+				afterInstall: func(tool provider.Tool) {
+					if tool.Name == "pip" {
+						pipAvailable.Store(true)
+					}
+				},
+			}
+			pip := &recordingProvider{name: "pip", availableWhen: pipAvailable.Load, mu: &mu, log: &log, logAvailable: true}
+			a, cfgPath := newImportApp(t, brew, pip)
+			cfg := &config.RootConfig{
+				Settings: config.Settings{Providers: []config.ProviderEntry{{Name: "pip", Provider: "brew"}}},
+				Tools:    map[string]config.ToolSpec{"ruff": {Providers: []config.ToolInstallSpec{{Provider: "pip"}}}},
+				Groups:   []*config.GroupConfig{{Name: tc.groupName, Tools: []config.ToolEntry{{Name: "ruff"}}}},
+			}
+			if err := saveAppConfig(t, cfgPath, cfg); err != nil {
+				t.Fatalf("saving config: %v", err)
+			}
+			if _, err := a.Sync(context.Background(), tc.opts); err != nil {
+				t.Fatalf("Sync: %v", err)
+			}
 
-	cfg := &config.RootConfig{
-		Settings: config.Settings{
-			// uv is a Python manager: install it via brew before other tools.
-			Providers: []config.ProviderEntry{{Name: "uv", Provider: "brew"}},
-		},
-		// ruff uses a concrete provider.
-		Tools: map[string]config.ToolSpec{"ruff": {Providers: []config.ToolInstallSpec{{Provider: "pip"}}}},
-		Groups: []*config.GroupConfig{{
-			Tools: []config.ToolEntry{{Name: "ruff"}},
-		}},
-	}
-	if err := saveAppConfig(t, cfgPath, cfg); err != nil {
-		t.Fatalf("saving config: %v", err)
-	}
-
-	if _, err := a.Sync(context.Background(), isync.SyncOptions{}); err != nil {
-		t.Fatalf("Sync: %v", err)
-	}
-
-	mu.Lock()
-	defer mu.Unlock()
-	// Pass 1 installs the bootstrap provider (uv) via brew.
-	// Pass 2 installs ruff via pip.
-	// The log entry for the bootstrap provider uses the ProviderEntry.Name as the tool name.
-	iUV := indexOf(log, "brew:uv")
-	iRuff := indexOf(log, "pip:ruff")
-	if iUV < 0 || iRuff < 0 {
-		t.Fatalf("missing installs in log %v (want brew:uv and pip:ruff)", log)
-	}
-	if iUV > iRuff {
-		t.Errorf("bootstrap provider uv (log idx %d) installed after dependent ruff (log idx %d): %v", iUV, iRuff, log)
+			mu.Lock()
+			defer mu.Unlock()
+			iPip := indexOf(log, "brew:pip")
+			iPipAvailable := indexOf(log, "pip:available")
+			iRuff := indexOf(log, "pip:ruff")
+			if iPip < 0 || iPipAvailable < 0 || iRuff < 0 {
+				t.Fatalf("missing events in log %v (want brew:pip, pip:available, and pip:ruff)", log)
+			}
+			if iPip > iPipAvailable || iPipAvailable > iRuff {
+				t.Errorf("want provider install before dependent provider check and tool install, got %v", log)
+			}
+		})
 	}
 }
 
