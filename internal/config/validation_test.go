@@ -483,19 +483,55 @@ func TestValidateRoot_ToolMayJoinHostAndOneReusableGroup(t *testing.T) {
 	}
 }
 
-// Two reusable groups for the same tool is still invalid.
-func TestValidateRoot_ToolRejectsTwoReusableGroups(t *testing.T) {
-	cfg := &config.RootConfig{
-		Tools: map[string]config.ToolSpec{"a": {Provider: "brew"}},
-		Groups: []*config.GroupConfig{
-			{Name: "base", Tools: []config.ToolEntry{{Name: "a"}}},
-			{Name: "work", Tools: []config.ToolEntry{{Name: "a"}}},
-		},
+// Unlike dots, a tool may belong to any number of reusable groups.
+func TestValidateRoot_ToolTwoReusableGroupsOK(t *testing.T) {
+	cfg := rootWithLogicalTool("eslint")
+	cfg.Groups = append(cfg.Groups,
+		reusableGroupWithTool("work", "eslint"),
+		reusableGroupWithTool("base", "eslint"),
+	)
+	if errs := config.ValidateRoot(cfg, config.ProviderValidation{}); len(errs) != 0 {
+		t.Fatalf("tool in two reusable groups should validate, got %v", errs)
 	}
-	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"brew"}})
-	if !containsErrorMessage(errs, `tool "a" already belongs to reusable group "base"`) {
-		t.Errorf("expected two-reusable-group tool error, got %v", errs)
+}
+
+func TestValidateRoot_DotTwoReusableGroupsRejected(t *testing.T) {
+	cfg := rootWithDot("nvim")
+	cfg.Groups = append(cfg.Groups,
+		reusableGroupWithDot("work", "nvim"),
+		reusableGroupWithDot("base", "nvim"),
+	)
+	errs := config.ValidateRoot(cfg, config.ProviderValidation{})
+	if len(errs) == 0 {
+		t.Fatal("dot in two reusable groups must be rejected")
 	}
+}
+
+// rootWithLogicalTool returns a minimal RootConfig declaring a single logical
+// tool with no groups yet.
+func rootWithLogicalTool(name string) *config.RootConfig {
+	return &config.RootConfig{
+		Tools: map[string]config.ToolSpec{name: {Provider: "brew"}},
+	}
+}
+
+// reusableGroupWithTool returns a non-host (reusable) group referencing the
+// given logical tool.
+func reusableGroupWithTool(groupName, toolName string) *config.GroupConfig {
+	return &config.GroupConfig{Name: groupName, Tools: []config.ToolEntry{{Name: toolName}}}
+}
+
+// rootWithDot returns a minimal RootConfig with no groups yet; dot
+// definitions live only inside groups, not at the root.
+func rootWithDot(name string) *config.RootConfig {
+	_ = name
+	return &config.RootConfig{}
+}
+
+// reusableGroupWithDot returns a non-host (reusable) group referencing the
+// given dotfile.
+func reusableGroupWithDot(groupName, dotName string) *config.GroupConfig {
+	return &config.GroupConfig{Name: groupName, Dots: []config.DotEntry{{Name: dotName, Path: "~/.config/" + dotName}}}
 }
 
 func TestValidateRoot_DotMayJoinHostAndOneReusableGroup(t *testing.T) {

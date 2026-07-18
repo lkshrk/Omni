@@ -69,7 +69,7 @@ func dotsContentDir(repoDir string) string {
 	return filepath.Join(repoDir, "dotfiles")
 }
 
-func assertDotState(t *testing.T, got app.DotStatus, wantState app.DotState, wantActions []app.DotAction) {
+func assertDotState(t *testing.T, got app.DotStatus, wantState dots.State, wantActions []dots.Action) {
 	t.Helper()
 	if got.State != wantState {
 		t.Fatalf("state = %q, want %q (status: %+v)", got.State, wantState, got)
@@ -237,7 +237,7 @@ func TestDiscoverDotsStatus_SkipsMisnamedAgentsSkillLockWhenTracked(t *testing.T
 		t.Fatalf("DiscoverDotsStatus: %v", err)
 	}
 	for _, entry := range result.Entries {
-		if entry.Name == "skill-lock.json" || (entry.Name == "agents-skill-lock" && entry.Group == "" && entry.State == app.DotStateNoSource) {
+		if entry.Name == "skill-lock.json" || (entry.Name == "agents-skill-lock" && entry.Group == "" && entry.State == dots.StateNoSource) {
 			t.Fatalf("tracked agents-skill-lock should suppress misnamed repo package candidate, got %#v", entry)
 		}
 	}
@@ -643,7 +643,7 @@ func TestDiscoverUntrackedDotsEntries_SkipsIgnoredEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DotsList: %v", err)
 	}
-	if len(statuses) != 1 || statuses[0].State != app.DotStateIgnored {
+	if len(statuses) != 1 || statuses[0].State != dots.StateIgnored {
 		t.Fatalf("statuses = %#v, want ignored kitty visible", statuses)
 	}
 }
@@ -784,10 +784,10 @@ func TestDiscoverDotsStatus_AddsTransientCandidates(t *testing.T) {
 	if result.DiscoveredCount != 1 {
 		t.Fatalf("DiscoveredCount = %d, want 1", result.DiscoveredCount)
 	}
-	if len(result.Entries) != 1 || result.Entries[0].Name != "kitty" || result.Entries[0].State != app.DotStateLocalOnly {
+	if len(result.Entries) != 1 || result.Entries[0].Name != "kitty" || result.Entries[0].State != dots.StateLocalOnly {
 		t.Fatalf("entries = %#v, want local-only kitty", result.Entries)
 	}
-	if !reflect.DeepEqual(result.Entries[0].Actions, []app.DotAction{app.DotActionSync, app.DotActionRemove, app.DotActionIgnore}) {
+	if !reflect.DeepEqual(result.Entries[0].Actions, []dots.Action{dots.ActionSync, dots.ActionRemove, dots.ActionIgnore}) {
 		t.Fatalf("actions = %#v, want sync+remove+ignore", result.Entries[0].Actions)
 	}
 }
@@ -801,7 +801,7 @@ func TestDotsDeleteLocal_RemovesDiscoveredLocalOnlyPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	status := app.DotStatus{Name: "kitty", TargetPath: target, State: app.DotStateLocalOnly}
+	status := app.DotStatus{Name: "kitty", TargetPath: target, State: dots.StateLocalOnly}
 	if err := a.DotsDeleteLocal(context.Background(), status); err != nil {
 		t.Fatalf("DotsDeleteLocal: %v", err)
 	}
@@ -815,24 +815,24 @@ func TestDotsDeleteLocal_RejectsTrackedAndUnsafeTargets(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	tracked := app.DotStatus{Name: "kitty", TargetPath: filepath.Join(home, ".config", "kitty"), State: app.DotStateLocalOnly, Group: "base"}
+	tracked := app.DotStatus{Name: "kitty", TargetPath: filepath.Join(home, ".config", "kitty"), State: dots.StateLocalOnly, Group: "base"}
 	if err := a.DotsDeleteLocal(context.Background(), tracked); err == nil {
 		t.Fatal("expected error for tracked entry")
 	}
-	wrongState := app.DotStatus{Name: "kitty", TargetPath: filepath.Join(home, ".config", "kitty"), State: app.DotStateRepoOnly}
+	wrongState := app.DotStatus{Name: "kitty", TargetPath: filepath.Join(home, ".config", "kitty"), State: dots.StateRepoOnly}
 	if err := a.DotsDeleteLocal(context.Background(), wrongState); err == nil {
 		t.Fatal("expected error for non-local-only state")
 	}
-	relative := app.DotStatus{Name: "kitty", TargetPath: ".config/kitty", State: app.DotStateLocalOnly}
+	relative := app.DotStatus{Name: "kitty", TargetPath: ".config/kitty", State: dots.StateLocalOnly}
 	if err := a.DotsDeleteLocal(context.Background(), relative); err == nil {
 		t.Fatal("expected error for relative path")
 	}
-	homeItself := app.DotStatus{Name: "home", TargetPath: home, State: app.DotStateLocalOnly}
+	homeItself := app.DotStatus{Name: "home", TargetPath: home, State: dots.StateLocalOnly}
 	if err := a.DotsDeleteLocal(context.Background(), homeItself); err == nil {
 		t.Fatal("expected error for home directory target")
 	}
 	outside := t.TempDir()
-	outsideHome := app.DotStatus{Name: "etc", TargetPath: outside, State: app.DotStateLocalOnly}
+	outsideHome := app.DotStatus{Name: "etc", TargetPath: outside, State: dots.StateLocalOnly}
 	if err := a.DotsDeleteLocal(context.Background(), outsideHome); err == nil {
 		t.Fatal("expected error for target outside home")
 	}
@@ -846,7 +846,7 @@ func TestDotsDeleteLocal_StaleMissingPathIsNoOp(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	stale := app.DotStatus{Name: "kitty", TargetPath: filepath.Join(home, ".config", "kitty"), State: app.DotStateLocalOnly}
+	stale := app.DotStatus{Name: "kitty", TargetPath: filepath.Join(home, ".config", "kitty"), State: dots.StateLocalOnly}
 	if err := a.DotsDeleteLocal(context.Background(), stale); err != nil {
 		t.Fatalf("DotsDeleteLocal on missing path: %v", err)
 	}
@@ -864,7 +864,7 @@ func TestDotsDeleteLocal_RejectsSymlinkedParentOutsideHome(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	status := app.DotStatus{Name: "kitty", TargetPath: filepath.Join(home, ".config", "kitty"), State: app.DotStateLocalOnly}
+	status := app.DotStatus{Name: "kitty", TargetPath: filepath.Join(home, ".config", "kitty"), State: dots.StateLocalOnly}
 	if err := a.DotsDeleteLocal(context.Background(), status); err == nil {
 		t.Fatal("expected error for symlinked parent escaping home")
 	}
@@ -888,10 +888,10 @@ func TestDiscoverDotsStatus_ConflictCandidateExposesResolutions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DiscoverDotsStatus: %v", err)
 	}
-	if len(result.Entries) != 1 || result.Entries[0].Name != "claude" || result.Entries[0].State != app.DotStateUntrackedConflict {
+	if len(result.Entries) != 1 || result.Entries[0].Name != "claude" || result.Entries[0].State != dots.StateUntrackedConflict {
 		t.Fatalf("entries = %#v, want untracked-conflict claude", result.Entries)
 	}
-	want := []app.DotAction{app.DotActionUseRepo, app.DotActionUseLocal, app.DotActionIgnore}
+	want := []dots.Action{dots.ActionUseRepo, dots.ActionUseLocal, dots.ActionIgnore}
 	if !reflect.DeepEqual(result.Entries[0].Actions, want) {
 		t.Fatalf("actions = %#v, want %#v", result.Entries[0].Actions, want)
 	}
@@ -965,7 +965,7 @@ func TestDiscoverDotsStatus_ShowsStaticIgnoredCandidates(t *testing.T) {
 	for _, entry := range result.Entries {
 		byName[entry.Name] = entry
 	}
-	if got := byName["node_modules"]; got.State != app.DotStateIgnored || !reflect.DeepEqual(got.Actions, []app.DotAction{app.DotActionUnignore}) {
+	if got := byName["node_modules"]; got.State != dots.StateIgnored || !reflect.DeepEqual(got.Actions, []dots.Action{dots.ActionUnignore}) {
 		t.Fatalf("node_modules status = %+v, want ignored with include action", got)
 	}
 	if err := a.DotsSetEntryIgnored("node_modules", "~/.config/node_modules", false); err != nil {
@@ -1004,7 +1004,7 @@ func TestDiscoverDotsStatus_CountExcludesIgnoredAndTracked(t *testing.T) {
 	seenIgnored := false
 	seenTracked := false
 	for _, entry := range result.Entries {
-		if entry.Name == "node_modules" && entry.State == app.DotStateIgnored {
+		if entry.Name == "node_modules" && entry.State == dots.StateIgnored {
 			seenIgnored = true
 		}
 		if entry.Name == "zshrc" && entry.Group == dotsTestHostGroupName() {
@@ -1039,7 +1039,7 @@ func TestRefreshDotsStatePersistsCachedSnapshot(t *testing.T) {
 			break
 		}
 	}
-	if refreshed.Name == "" || refreshed.State != app.DotStateRepoOnly || len(refreshed.Children) == 0 {
+	if refreshed.Name == "" || refreshed.State != dots.StateRepoOnly || len(refreshed.Children) == 0 {
 		t.Fatalf("refreshed nvim = %+v, want repo-only entry with children", refreshed)
 	}
 
@@ -1057,7 +1057,7 @@ func TestRefreshDotsStatePersistsCachedSnapshot(t *testing.T) {
 			break
 		}
 	}
-	if persisted.State != app.DotStateRepoOnly || len(persisted.Children) != len(refreshed.Children) {
+	if persisted.State != dots.StateRepoOnly || len(persisted.Children) != len(refreshed.Children) {
 		t.Fatalf("persisted nvim = %+v, want cached repo-only entry matching refreshed children", persisted)
 	}
 }
@@ -1154,7 +1154,7 @@ func TestDotsSyncContextPersistsCachedSnapshot(t *testing.T) {
 			break
 		}
 	}
-	if !cached.Loaded || synced.State != app.DotStateSynced {
+	if !cached.Loaded || synced.State != dots.StateSynced {
 		t.Fatalf("CachedDotsState = %+v, want synced nvim snapshot", cached)
 	}
 }
@@ -1227,7 +1227,7 @@ func TestDotsSyncWithStateProgressReturnsRefreshedSnapshots(t *testing.T) {
 		t.Fatalf("progress event = %+v, want named done event with display text", progress[0])
 	}
 	status := requireDotsStateWithEntry(t, progress[0].State, "nvim")
-	if status.State != app.DotStateSynced {
+	if status.State != dots.StateSynced {
 		t.Fatalf("progress state = %q, want synced", status.State)
 	}
 }
@@ -1279,7 +1279,7 @@ func TestSaveDotsRepoAndSyncUsesSavedRepo(t *testing.T) {
 		t.Fatalf("SaveDotsRepoAndSync: %v", err)
 	}
 	status := requireDotsStateWithEntry(t, result.State, "picked")
-	if status.State != app.DotStateSynced {
+	if status.State != dots.StateSynced {
 		t.Fatalf("picked state = %q, want synced", status.State)
 	}
 	if !result.HasSettings {
@@ -1322,7 +1322,7 @@ func TestDotsMutationWithStateReturnsRefreshedSnapshots(t *testing.T) {
 			t.Fatalf("DotsAddWithState: %v", err)
 		}
 		status := requireDotsStateWithEntry(t, result.State, "zshrc")
-		if status.State != app.DotStateSynced {
+		if status.State != dots.StateSynced {
 			t.Fatalf("zshrc state = %q, want synced", status.State)
 		}
 	})
@@ -1351,7 +1351,7 @@ func TestDotsMutationWithStateReturnsRefreshedSnapshots(t *testing.T) {
 			t.Fatalf("DotsDeleteWithState: %v", err)
 		}
 		status := requireDotsStateWithEntry(t, result.State, "nvim")
-		if result.State.DiscoveredCount != 1 || status.Group != "" || status.State != app.DotStateLocalOnly {
+		if result.State.DiscoveredCount != 1 || status.Group != "" || status.State != dots.StateLocalOnly {
 			t.Fatalf("DotsDeleteWithState state = %+v, want untracked local nvim candidate", result.State)
 		}
 	})
@@ -1403,6 +1403,13 @@ func TestDotsMutationWithStateReturnsRefreshedSnapshots(t *testing.T) {
 	t.Run("include ignored path", func(t *testing.T) {
 		a, cfgDir, repoDir := newDotsApp(t)
 		home := os.Getenv("HOME")
+		localPath := filepath.Join(home, ".claude", "projects", "session.json")
+		if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(localPath, []byte("local session"), 0o644); err != nil {
+			t.Fatal(err)
+		}
 		writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{{
 			Name:   "claude",
 			Path:   filepath.Join(home, ".claude"),
@@ -1413,7 +1420,120 @@ func TestDotsMutationWithStateReturnsRefreshedSnapshots(t *testing.T) {
 		if err != nil {
 			t.Fatalf("DotsIncludeIgnoredPathWithState: %v", err)
 		}
-		requireDotsStateWithEntry(t, result.State, "claude")
+		status := requireDotsStateWithEntry(t, result.State, "claude")
+		if status.State != dots.StateSynced {
+			t.Fatalf("claude state = %q, want synced after include", status.State)
+		}
+		sourcePath := filepath.Join(dotsContentDir(repoDir), "claude", ".claude", "projects", "session.json")
+		assertSymlinkResolvesTo(t, localPath, sourcePath)
+	})
+
+	t.Run("include path below ignored directory", func(t *testing.T) {
+		a, cfgDir, repoDir := newDotsApp(t)
+		home := os.Getenv("HOME")
+		localPath := filepath.Join(home, ".claude", "projects", "session.json")
+		if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(localPath, []byte("local session"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{{
+			Name:   "claude",
+			Path:   filepath.Join(home, ".claude"),
+			Ignore: []string{".claude/projects"},
+		}}, home)
+
+		result, err := a.DotsIncludeIgnoredPathWithState(ctx, "claude", "projects/session.json")
+		if err != nil {
+			t.Fatalf("DotsIncludeIgnoredPathWithState: %v", err)
+		}
+		status := requireDotsStateWithEntry(t, result.State, "claude")
+		if status.State != dots.StateSynced {
+			t.Fatalf("claude state = %q, want synced after include", status.State)
+		}
+		sourcePath := filepath.Join(dotsContentDir(repoDir), "claude", ".claude", "projects", "session.json")
+		assertSymlinkResolvesTo(t, localPath, sourcePath)
+	})
+
+	t.Run("include directory below ignored ancestor", func(t *testing.T) {
+		a, cfgDir, repoDir := newDotsApp(t)
+		home := os.Getenv("HOME")
+		localPath := filepath.Join(home, ".claude", "projects", "acme", "session.json")
+		if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(localPath, []byte("local session"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{{
+			Name:   "claude",
+			Path:   filepath.Join(home, ".claude"),
+			Ignore: []string{"*"},
+		}}, home)
+
+		result, err := a.DotsIncludeIgnoredPathWithState(ctx, "claude", "projects/acme")
+		if err != nil {
+			t.Fatalf("DotsIncludeIgnoredPathWithState: %v", err)
+		}
+		status := requireDotsStateWithEntry(t, result.State, "claude")
+		if status.State != dots.StateSynced {
+			t.Fatalf("claude state = %q, want synced after include", status.State)
+		}
+		sourcePath := filepath.Join(dotsContentDir(repoDir), "claude", ".claude", "projects", "acme", "session.json")
+		assertSymlinkResolvesTo(t, localPath, sourcePath)
+	})
+
+	t.Run("include repo-only directory below ignored ancestor", func(t *testing.T) {
+		a, cfgDir, repoDir := newDotsApp(t)
+		home := os.Getenv("HOME")
+		targetPath := filepath.Join(home, ".claude", "projects", "acme", "session.json")
+		sourcePath := filepath.Join(dotsContentDir(repoDir), "claude", ".claude", "projects", "acme", "session.json")
+		if err := os.MkdirAll(filepath.Dir(sourcePath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(sourcePath, []byte("repo session"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{{
+			Name:   "claude",
+			Path:   filepath.Join(home, ".claude"),
+			Ignore: []string{"*"},
+		}}, home)
+
+		result, err := a.DotsIncludeIgnoredPathWithState(ctx, "claude", "projects/acme")
+		if err != nil {
+			t.Fatalf("DotsIncludeIgnoredPathWithState: %v", err)
+		}
+		status := requireDotsStateWithEntry(t, result.State, "claude")
+		if status.State != dots.StateSynced {
+			t.Fatalf("claude state = %q, want synced after include", status.State)
+		}
+		assertSymlinkResolvesTo(t, targetPath, sourcePath)
+	})
+
+	t.Run("include ignored entry", func(t *testing.T) {
+		a, cfgDir, repoDir := newDotsApp(t)
+		home := os.Getenv("HOME")
+		target := filepath.Join(home, ".config", "kitty")
+		if err := os.MkdirAll(target, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(target, "kitty.conf"), []byte("font_size 12"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{{Name: "kitty", Path: target, Ignored: true}}, home)
+
+		result, err := a.DotsSetEntryIgnoredWithState(ctx, "kitty", target, false)
+		if err != nil {
+			t.Fatalf("DotsSetEntryIgnoredWithState include: %v", err)
+		}
+		status := requireDotsStateWithEntry(t, result.State, "kitty")
+		if status.State != dots.StateSynced {
+			t.Fatalf("kitty state = %q, want synced after include", status.State)
+		}
+		sourcePath := filepath.Join(dotsContentDir(repoDir), "kitty", ".config", "kitty", "kitty.conf")
+		assertSymlinkResolvesTo(t, filepath.Join(target, "kitty.conf"), sourcePath)
 	})
 
 	t.Run("entry ignored", func(t *testing.T) {
@@ -1428,7 +1548,7 @@ func TestDotsMutationWithStateReturnsRefreshedSnapshots(t *testing.T) {
 			t.Fatalf("DotsSetEntryIgnoredWithState: %v", err)
 		}
 		status := requireDotsStateWithEntry(t, result.State, "kitty")
-		if status.State != app.DotStateIgnored {
+		if status.State != dots.StateIgnored {
 			t.Fatalf("kitty state = %q, want ignored", status.State)
 		}
 	})
@@ -1659,7 +1779,7 @@ func TestDotsAddPersistsCachedSnapshot(t *testing.T) {
 			break
 		}
 	}
-	if !cached.Loaded || status.State != app.DotStateSynced {
+	if !cached.Loaded || status.State != dots.StateSynced {
 		t.Fatalf("CachedDotsState = %+v, want synced zshrc snapshot", cached)
 	}
 }
@@ -1706,7 +1826,7 @@ func TestDotsDeleteRefreshesCachedSnapshot(t *testing.T) {
 			break
 		}
 	}
-	if !cached.Loaded || cached.DiscoveredCount != 1 || candidate.Group != "" || candidate.State != app.DotStateLocalOnly {
+	if !cached.Loaded || cached.DiscoveredCount != 1 || candidate.Group != "" || candidate.State != dots.StateLocalOnly {
 		t.Fatalf("CachedDotsState = %+v, want untracked local nvim candidate after delete", cached)
 	}
 }
@@ -1777,7 +1897,7 @@ func TestDotsSetEntryIgnoredPersistsCachedSnapshot(t *testing.T) {
 			break
 		}
 	}
-	if !cached.Loaded || cached.DiscoveredCount != 0 || ignored.State != app.DotStateIgnored {
+	if !cached.Loaded || cached.DiscoveredCount != 0 || ignored.State != dots.StateIgnored {
 		t.Fatalf("CachedDotsState = %+v, want ignored kitty snapshot", cached)
 	}
 }
@@ -2751,6 +2871,23 @@ func TestDotsIncludeIgnoredPath_MovesShadowedIncludeAfterBroadIgnore(t *testing.
 	}
 }
 
+func TestDotsSync_NoActiveEntries_ReturnsNilWithoutError(t *testing.T) {
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	// A group with no dot entries: DotsSync resolves an empty active set and
+	// must short-circuit to (nil, nil) after building the engine — the edge the
+	// dotsService.engineFor + len(engine.Entries)==0 path preserves.
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{}, home)
+	ops, err := a.DotsSync(dots.SyncOptions{})
+	if err != nil {
+		t.Fatalf("DotsSync: %v", err)
+	}
+	if ops != nil {
+		t.Fatalf("expected nil ops for no active entries, got %v", ops)
+	}
+}
+
 func TestDotsSync_LinksFiles(t *testing.T) {
 	a, cfgDir, repoDir := newDotsApp(t)
 	home := t.TempDir()
@@ -2921,7 +3058,7 @@ func TestDotsSync_HealsAbsoluteSymlinkBeforeRestow(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 15-completion-paths.zsh is missing entirely, which puts the directory
-	// entry into DotStateMissing and triggers stow -R for the whole package.
+	// entry into dots.StateMissing and triggers stow -R for the whole package.
 
 	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
 		{Name: "zsh", Path: zshTargetDir},
@@ -3780,7 +3917,7 @@ func TestDotsSync_FileOverwrittenByNewerLocalAdoptsAndRelinks(t *testing.T) {
 	if len(statuses) != 1 {
 		t.Fatalf("got %d statuses, want 1", len(statuses))
 	}
-	assertDotState(t, statuses[0], app.DotStateModified, []app.DotAction{app.DotActionSync, app.DotActionRemove, app.DotActionIgnore})
+	assertDotState(t, statuses[0], dots.StateModified, []dots.Action{dots.ActionSync, dots.ActionRemove, dots.ActionIgnore})
 
 	ops, err := a.DotsSync(dots.SyncOptions{})
 	if err != nil {
@@ -3852,14 +3989,14 @@ func TestDotsSync_DirectoryChildOverwrittenByNewerLocalAdoptsAndRelinks(t *testi
 	if len(statuses) != 1 {
 		t.Fatalf("got %d statuses, want 1", len(statuses))
 	}
-	assertDotState(t, statuses[0], app.DotStateModified, []app.DotAction{app.DotActionSync, app.DotActionRemove, app.DotActionIgnore})
-	childStates := make(map[string]app.DotState)
+	assertDotState(t, statuses[0], dots.StateModified, []dots.Action{dots.ActionSync, dots.ActionRemove, dots.ActionIgnore})
+	childStates := make(map[string]dots.State)
 	for _, child := range statuses[0].Children {
 		childStates[child.Name] = child.State
 	}
-	wantChildStates := map[string]app.DotState{
-		"init.lua":  app.DotStateModified,
-		"local.lua": app.DotStateLocalOnly,
+	wantChildStates := map[string]dots.State{
+		"init.lua":  dots.StateModified,
+		"local.lua": dots.StateLocalOnly,
 	}
 	if !reflect.DeepEqual(childStates, wantChildStates) {
 		t.Fatalf("child states = %#v, want %#v", childStates, wantChildStates)
@@ -3923,7 +4060,7 @@ func TestDotsSync_DirectoryLocalOnlyNewFileAdoptsAndRelinks(t *testing.T) {
 	if len(statuses) != 1 {
 		t.Fatalf("got %d statuses, want 1", len(statuses))
 	}
-	assertDotState(t, statuses[0], app.DotStateModified, []app.DotAction{app.DotActionSync, app.DotActionRemove, app.DotActionIgnore})
+	assertDotState(t, statuses[0], dots.StateModified, []dots.Action{dots.ActionSync, dots.ActionRemove, dots.ActionIgnore})
 
 	ops, err := a.DotsSync(dots.SyncOptions{})
 	if err != nil {
@@ -4118,7 +4255,7 @@ func TestDotsList_FileCountAndChildrenSkipIgnoredPaths(t *testing.T) {
 	if childByName["lua"].Ignored || childByName["init.lua"].Ignored {
 		t.Fatalf("tracked direct children should not be marked ignored: %#v", statuses[0].Children)
 	}
-	if child := childByName["node_modules"]; !child.Ignored || child.State != app.DotStateIgnored {
+	if child := childByName["node_modules"]; !child.Ignored || child.State != dots.StateIgnored {
 		t.Fatalf("ignored direct child should stay in the full tree as ignored, got: %#v", child)
 	}
 	result, err := a.DiscoverDotsStatus(context.Background())
@@ -4127,7 +4264,7 @@ func TestDotsList_FileCountAndChildrenSkipIgnoredPaths(t *testing.T) {
 	}
 	var mergedIgnored *app.DotStatus
 	for i := range result.Entries {
-		if result.Entries[i].Name == "nvim" && result.Entries[i].State == app.DotStateIgnored {
+		if result.Entries[i].Name == "nvim" && result.Entries[i].State == dots.StateIgnored {
 			mergedIgnored = &result.Entries[i]
 			break
 		}
@@ -4141,6 +4278,50 @@ func TestDotsList_FileCountAndChildrenSkipIgnoredPaths(t *testing.T) {
 	if !dotChildTreeHasRel(mergedIgnored.Children, "node_modules") {
 		t.Fatalf("merged ignored nvim entry should contain node_modules: %#v", mergedIgnored.Children)
 	}
+}
+
+func TestDotsList_IgnoredDirectoriesExposeNestedChildren(t *testing.T) {
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
+	deepIgnoredPath := filepath.Join("node_modules", "a", "b", "c", "d", "e", "mod.js")
+	if err := os.MkdirAll(filepath.Join(srcDir, filepath.Dir(deepIgnoredPath)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, deepIgnoredPath), []byte("module"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(home, ".config", "nvim")
+	if err := os.Symlink(srcDir, target); err != nil {
+		t.Fatal(err)
+	}
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{{Name: "nvim", Path: target}}, home)
+
+	statuses, err := a.DotsList()
+	if err != nil {
+		t.Fatalf("DotsList: %v", err)
+	}
+	if len(statuses) != 1 || !dotChildTreeHasRel(statuses[0].Children, filepath.ToSlash(deepIgnoredPath)) {
+		t.Fatalf("ignored directory descendants should stay available for expansion: %#v", statuses)
+	}
+	result, err := a.DiscoverDotsStatus(context.Background())
+	if err != nil {
+		t.Fatalf("DiscoverDotsStatus: %v", err)
+	}
+	for _, status := range result.Entries {
+		if status.Name == "nvim" && status.State == dots.StateIgnored {
+			if !dotChildTreeHasRel(status.Children, filepath.ToSlash(deepIgnoredPath)) {
+				t.Fatalf("ignored section should expose nested descendants: %#v", status.Children)
+			}
+			return
+		}
+	}
+	t.Fatalf("ignored nvim status not found: %#v", result.Entries)
 }
 
 func dotChildTreeHasRel(children []app.DotChild, rel string) bool {
@@ -4201,7 +4382,7 @@ func TestDotsList_ClaudeAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *tes
 		t.Helper()
 		var found *app.DotStatus
 		for i := range result.Entries {
-			if result.Entries[i].State == app.DotStateIgnored && result.Entries[i].Name == "claude" {
+			if result.Entries[i].State == dots.StateIgnored && result.Entries[i].Name == "claude" {
 				found = &result.Entries[i]
 				break
 			}
@@ -4209,7 +4390,7 @@ func TestDotsList_ClaudeAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *tes
 		if found == nil {
 			names := make([]string, 0)
 			for _, e := range result.Entries {
-				if e.State == app.DotStateIgnored {
+				if e.State == dots.StateIgnored {
 					names = append(names, e.Name)
 				}
 			}
@@ -4319,7 +4500,7 @@ func TestDotsList_CodexAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *test
 		t.Helper()
 		var found *app.DotStatus
 		for i := range result.Entries {
-			if result.Entries[i].State == app.DotStateIgnored && result.Entries[i].Name == "codex" {
+			if result.Entries[i].State == dots.StateIgnored && result.Entries[i].Name == "codex" {
 				found = &result.Entries[i]
 				break
 			}
@@ -4327,7 +4508,7 @@ func TestDotsList_CodexAllowlistKeepsAllowedFilesAndListsIgnoredChildren(t *test
 		if found == nil {
 			names := make([]string, 0)
 			for _, e := range result.Entries {
-				if e.State == app.DotStateIgnored {
+				if e.State == dots.StateIgnored {
 					names = append(names, e.Name)
 				}
 			}
@@ -4501,7 +4682,7 @@ func TestDotsList_LocalOnlyDirectoryShowsChildren(t *testing.T) {
 	if len(statuses) != 1 {
 		t.Fatalf("got %d statuses, want 1", len(statuses))
 	}
-	if statuses[0].State != app.DotStateLocalOnly {
+	if statuses[0].State != dots.StateLocalOnly {
 		t.Fatalf("state = %q, want local-only", statuses[0].State)
 	}
 	if statuses[0].FileCount != 2 {
@@ -4527,7 +4708,7 @@ func TestDotsList_LocalOnlyDirectoryShowsChildren(t *testing.T) {
 	if len(luaChild.Children) != 1 || luaChild.Children[0].Name != "config.lua" {
 		t.Fatalf("lua children = %#v, want nested config.lua", luaChild.Children)
 	}
-	if luaChild.Children[0].State != app.DotStateLocalOnly {
+	if luaChild.Children[0].State != dots.StateLocalOnly {
 		t.Fatalf("nested config.lua state = %q, want local-only", luaChild.Children[0].State)
 	}
 	if want := (app.DotFileCounts{OutOfSync: 1}); luaChild.Counts != want {
@@ -4580,22 +4761,22 @@ func TestDotsList_DirectoryChildrenReportIndividualStates(t *testing.T) {
 	if len(statuses) != 1 {
 		t.Fatalf("got %d statuses, want 1", len(statuses))
 	}
-	if statuses[0].State != app.DotStateConflict {
+	if statuses[0].State != dots.StateConflict {
 		t.Fatalf("state = %q, want conflict", statuses[0].State)
 	}
 	if want := (app.DotFileCounts{Synced: 1, OutOfSync: 3}); statuses[0].Counts != want {
 		t.Fatalf("counts = %#v, want %#v", statuses[0].Counts, want)
 	}
-	childStates := make(map[string]app.DotState)
+	childStates := make(map[string]dots.State)
 	childCounts := make(map[string]app.DotFileCounts)
 	for _, child := range statuses[0].Children {
 		childStates[filepath.ToSlash(child.RelPath)] = child.State
 		childCounts[filepath.ToSlash(child.RelPath)] = child.Counts
 	}
-	want := map[string]app.DotState{
-		"init.lua":  app.DotStateSynced,
-		"lua":       app.DotStateConflict,
-		"local.lua": app.DotStateLocalOnly,
+	want := map[string]dots.State{
+		"init.lua":  dots.StateSynced,
+		"lua":       dots.StateConflict,
+		"local.lua": dots.StateLocalOnly,
 	}
 	if len(childStates) != len(want) {
 		t.Fatalf("child states = %#v, want direct children only: %#v", childStates, want)
@@ -4620,13 +4801,13 @@ func TestDotsList_DirectoryChildrenReportIndividualStates(t *testing.T) {
 			break
 		}
 	}
-	nestedStates := make(map[string]app.DotState)
+	nestedStates := make(map[string]dots.State)
 	for _, child := range luaChild.Children {
 		nestedStates[filepath.ToSlash(child.RelPath)] = child.State
 	}
-	wantNested := map[string]app.DotState{
-		"lua/config.lua":  app.DotStateConflict,
-		"lua/missing.lua": app.DotStateMissing,
+	wantNested := map[string]dots.State{
+		"lua/config.lua":  dots.StateConflict,
+		"lua/missing.lua": dots.StateMissing,
 	}
 	if !reflect.DeepEqual(nestedStates, wantNested) {
 		t.Fatalf("nested child states = %#v, want %#v", nestedStates, wantNested)
@@ -5266,22 +5447,22 @@ func TestDotsList_HealthConflict(t *testing.T) {
 }
 
 func TestDotsList_ClassifiesTrackedStateMatrix(t *testing.T) {
-	syncable := []app.DotAction{app.DotActionSync, app.DotActionRemove, app.DotActionIgnore}
-	conflict := []app.DotAction{app.DotActionUseRepo, app.DotActionUseLocal, app.DotActionRemove, app.DotActionIgnore}
-	noSource := []app.DotAction{app.DotActionRemove, app.DotActionIgnore}
-	healthy := []app.DotAction{app.DotActionRemove, app.DotActionIgnore}
+	syncable := []dots.Action{dots.ActionSync, dots.ActionRemove, dots.ActionIgnore}
+	conflict := []dots.Action{dots.ActionUseRepo, dots.ActionUseLocal, dots.ActionRemove, dots.ActionIgnore}
+	noSource := []dots.Action{dots.ActionRemove, dots.ActionIgnore}
+	healthy := []dots.Action{dots.ActionRemove, dots.ActionIgnore}
 
 	tests := []struct {
 		name        string
 		source      bool
 		setupTarget func(t *testing.T, sourcePath, targetPath string)
-		wantState   app.DotState
-		wantActions []app.DotAction
+		wantState   dots.State
+		wantActions []dots.Action
 	}{
 		{
 			name:        "source exists local missing",
 			source:      true,
-			wantState:   app.DotStateMissing,
+			wantState:   dots.StateMissing,
 			wantActions: syncable,
 		},
 		{
@@ -5296,7 +5477,7 @@ func TestDotsList_ClassifiesTrackedStateMatrix(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			wantState:   app.DotStateSynced,
+			wantState:   dots.StateSynced,
 			wantActions: healthy,
 		},
 		{
@@ -5308,7 +5489,7 @@ func TestDotsList_ClassifiesTrackedStateMatrix(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			wantState:   app.DotStateConflict,
+			wantState:   dots.StateConflict,
 			wantActions: conflict,
 		},
 		{
@@ -5324,7 +5505,7 @@ func TestDotsList_ClassifiesTrackedStateMatrix(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			wantState:   app.DotStateConflict,
+			wantState:   dots.StateConflict,
 			wantActions: conflict,
 		},
 		{
@@ -5339,12 +5520,12 @@ func TestDotsList_ClassifiesTrackedStateMatrix(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			wantState:   app.DotStateBroken,
+			wantState:   dots.StateBroken,
 			wantActions: syncable,
 		},
 		{
 			name:        "source missing local missing",
-			wantState:   app.DotStateNoSource,
+			wantState:   dots.StateNoSource,
 			wantActions: noSource,
 		},
 		{
@@ -5355,7 +5536,7 @@ func TestDotsList_ClassifiesTrackedStateMatrix(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			wantState:   app.DotStateLocalOnly,
+			wantState:   dots.StateLocalOnly,
 			wantActions: syncable,
 		},
 		{
@@ -5369,7 +5550,7 @@ func TestDotsList_ClassifiesTrackedStateMatrix(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			wantState:   app.DotStateNoSource,
+			wantState:   dots.StateNoSource,
 			wantActions: noSource,
 		},
 		{
@@ -5384,7 +5565,7 @@ func TestDotsList_ClassifiesTrackedStateMatrix(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			wantState:   app.DotStateLocalOnly,
+			wantState:   dots.StateLocalOnly,
 			wantActions: syncable,
 		},
 		{
@@ -5398,7 +5579,7 @@ func TestDotsList_ClassifiesTrackedStateMatrix(t *testing.T) {
 					t.Fatal(err)
 				}
 			},
-			wantState:   app.DotStateNoSource,
+			wantState:   dots.StateNoSource,
 			wantActions: noSource,
 		},
 	}
@@ -7094,6 +7275,29 @@ func TestDotsStatus_AttachesLastSyncErrorToOutOfSyncEntry(t *testing.T) {
 	}
 }
 
+// TestDotsExtractThenAddHostVariant_MissingParentErrorsWithoutVariant verifies
+// the composition fails atomically: a bad parent aborts at the extract step and
+// never creates a variant for the would-be child entry.
+func TestDotsExtractThenAddHostVariant_MissingParentErrorsWithoutVariant(t *testing.T) {
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{Name: "vim", Path: filepath.Join(home, ".vim")},
+	}, home)
+
+	_, ops, err := a.DotsExtractThenAddHostVariant(context.Background(), "nope", "colors", app.DotsAddVariantOptions{})
+	if err == nil {
+		t.Fatal("expected error extracting from a missing parent")
+	}
+	if len(ops) != 0 {
+		t.Fatalf("failed extract should yield no ops, got %d", len(ops))
+	}
+	if variants, verr := a.DotsListVariants(app.DotExtractName("nope", "colors")); verr == nil && len(variants) > 0 {
+		t.Fatalf("variant created despite failed extract: %v", variants)
+	}
+}
+
 func TestExtractedFragments_AppMutationsStayInFragments(t *testing.T) {
 	a, cfgDir, repoDir := newDotsApp(t)
 	home := t.TempDir()
@@ -7143,6 +7347,174 @@ func TestExtractedFragments_AppMutationsStayInFragments(t *testing.T) {
 	}
 	if len(statuses) != 1 {
 		t.Fatalf("statuses = %d, want 1", len(statuses))
+	}
+}
+
+// TestDotsExtractThenAddHostVariant_CreatesVariantForChild exercises the full
+// child-variant happy path on a real synced entry: extract a sub-path into its
+// own entry, then create a host variant for it.
+func TestDotsExtractThenAddHostVariant_CreatesVariantForChild(t *testing.T) {
+	if _, err := exec.LookPath("stow"); err != nil {
+		t.Skip("stow not available")
+	}
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	srcDir := filepath.Join(dotsContentDir(repoDir), "claude", ".claude")
+	if err := os.MkdirAll(filepath.Join(srcDir, "agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "CLAUDE.md"), []byte("md"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "agents", "analyst.md"), []byte("agent"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(home, ".claude")
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{Name: "claude", Path: target},
+	}, home)
+	if _, err := a.DotsSync(dots.SyncOptions{}); err != nil {
+		t.Fatalf("DotsSync: %v", err)
+	}
+
+	childName := app.DotExtractName("claude", "agents")
+	info, _, err := a.DotsExtractThenAddHostVariant(context.Background(), "claude", "agents", app.DotsAddVariantOptions{Sync: true})
+	if err != nil {
+		t.Fatalf("DotsExtractThenAddHostVariant: %v", err)
+	}
+	if info.Name != childName || info.Host == "" {
+		t.Fatalf("variant info = %+v, want name %q with a host", info, childName)
+	}
+	variants, err := a.DotsListVariants(childName)
+	if err != nil {
+		t.Fatalf("DotsListVariants(%q): %v", childName, err)
+	}
+	hasHostVariant := false
+	for _, v := range variants {
+		if !v.Default && v.Host != "" {
+			hasHostVariant = true
+		}
+	}
+	if !hasHostVariant {
+		t.Fatalf("extracted entry %q has no host variant: %+v", childName, variants)
+	}
+	statuses, err := a.DotsList()
+	if err != nil {
+		t.Fatalf("DotsList: %v", err)
+	}
+	foundChild := false
+	for _, s := range statuses {
+		if s.Name == childName {
+			foundChild = true
+		}
+	}
+	if !foundChild {
+		t.Fatalf("extracted entry %q not configured; statuses=%+v", childName, statuses)
+	}
+}
+
+// TestDotsAddHostVariant_IgnoredEntryStillWorks proves the un-gated eligibility
+// is real: a fully-ignored entry can still receive a host variant.
+func TestDotsAddHostVariant_IgnoredEntryStillWorks(t *testing.T) {
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	srcDir := filepath.Join(dotsContentDir(repoDir), "nvim", ".config", "nvim")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte("default"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(home, ".config", "nvim")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "init.lua"), []byte("default"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{Name: "nvim", Path: target, Ignore: []string{"*"}},
+	}, home)
+
+	statuses, err := a.DotsList()
+	if err != nil {
+		t.Fatalf("DotsList: %v", err)
+	}
+	if len(statuses) != 1 || statuses[0].State != dots.StateIgnored {
+		t.Fatalf("state = %+v, want a single ignored entry", statuses)
+	}
+	if !app.DotStatusVariantEligible(statuses[0]) {
+		t.Fatal("ignored entry should be variant-eligible")
+	}
+
+	info, _, err := a.DotsAddHostVariant(context.Background(), "nvim", app.DotsAddVariantOptions{})
+	if err != nil {
+		t.Fatalf("DotsAddHostVariant on ignored entry: %v", err)
+	}
+	if info.Host == "" {
+		t.Fatalf("variant info = %+v, want a host", info)
+	}
+	variants, err := a.DotsListVariants("nvim")
+	if err != nil || len(variants) == 0 {
+		t.Fatalf("DotsListVariants = %+v, err=%v; want a registered variant", variants, err)
+	}
+}
+
+// TestDiscoverDotsStatus_TrackedChildUnderIgnoredDirSurfaces proves Phase 1 end
+// to end from disk: a re-included file under an ignored directory appears in the
+// synthesized Ignored-section tree carrying a real, non-ignored state.
+func TestDiscoverDotsStatus_TrackedChildUnderIgnoredDirSurfaces(t *testing.T) {
+	a, cfgDir, repoDir := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	srcDir := filepath.Join(dotsContentDir(repoDir), "claude", ".claude")
+	if err := os.MkdirAll(filepath.Join(srcDir, "data"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "data", "keep.json"), []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "data", "drop.json"), []byte("drop"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(home, ".claude")
+	writeGroupWithDots(t, cfgDir, repoDir, []config.DotEntry{
+		{Name: "claude", Path: target, Ignore: []string{"*", "!/data/keep.json"}},
+	}, home)
+
+	res, err := a.DiscoverDotsStatus(context.Background())
+	if err != nil {
+		t.Fatalf("DiscoverDotsStatus: %v", err)
+	}
+
+	var keep *app.DotChild
+	var walk func(children []app.DotChild)
+	walk = func(children []app.DotChild) {
+		for i := range children {
+			if children[i].Name == "keep.json" {
+				keep = &children[i]
+			}
+			walk(children[i].Children)
+		}
+	}
+	for _, e := range res.Entries {
+		if e.Name == "claude" && e.State == dots.StateIgnored {
+			walk(e.Children)
+		}
+	}
+	if keep == nil {
+		t.Fatalf("re-included keep.json not surfaced in the Ignored-section tree; entries=%+v", res.Entries)
+	}
+	if keep.Ignored {
+		t.Errorf("keep.json should be tracked (Ignored=false)")
+	}
+	if keep.State == dots.StateIgnored {
+		t.Errorf("keep.json should carry a real state, got %q", keep.State)
 	}
 }
 
@@ -7261,7 +7633,7 @@ func TestDotsSync_WhitelistDirectoryConvergesMixedStates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DotsList: %v", err)
 	}
-	if len(statuses) != 1 || statuses[0].State != app.DotStateSynced {
+	if len(statuses) != 1 || statuses[0].State != dots.StateSynced {
 		t.Fatalf("state = %+v, want synced entry", statuses)
 	}
 }

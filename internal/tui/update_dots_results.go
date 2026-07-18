@@ -586,6 +586,30 @@ func (m *Model) doDotsResolve(name string, strategy app.DotsResolveStrategy) tea
 	}
 }
 
+func (m *Model) doDotsResolvePath(name, relPath string, strategy app.DotsResolveStrategy) tea.Cmd {
+	a := m.app
+	ctx, gen := m.currentDotsOperation()
+	return func() tea.Msg {
+		result, err := a.DotsResolveConflictPathWithState(ctx, name, relPath, strategy)
+		entries, gitStatus, memberships := dotsSnapshotFromState(result)
+		return dotsFixedMsg{gen: gen, name: name + "/" + relPath, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: err}
+	}
+}
+
+func (m *Model) doDotsResolveDiscoveredPath(status app.DotStatus, relPath string, strategy app.DotsResolveStrategy) tea.Cmd {
+	a := m.app
+	ctx, gen := m.currentDotsOperation()
+	return func() tea.Msg {
+		result, err := a.DotsResolveDiscoveredPathWithState(ctx, status.Name, status.Group, relPath, strategy)
+		name := status.Name
+		if result != nil && result.Added.Name != "" {
+			name = result.Added.Name
+		}
+		entries, gitStatus, memberships := dotsSnapshotFromDiscoveredState(result)
+		return dotsFixedMsg{gen: gen, name: name + "/" + relPath, entries: entries, gitStatus: gitStatus, dotMemberships: memberships, err: err}
+	}
+}
+
 func (m *Model) doDotsForceResolveAll(strategy app.DotsResolveStrategy) tea.Cmd {
 	a := m.app
 	ctx, gen := m.currentDotsOperation()
@@ -664,6 +688,10 @@ func (m *Model) doDotsVariantChange(req dotsVariantRequest) tea.Cmd {
 		)
 		if req.remove {
 			result, err = a.DotsRemoveHostVariantWithState(ctx, req.name, app.DotsRemoveVariantOptions{})
+		} else if req.parentName != "" {
+			result, err = a.DotsExtractThenAddHostVariantWithState(ctx, req.parentName, req.subpath, app.DotsAddVariantOptions{
+				Sync: true,
+			})
 		} else if req.discovered {
 			result, err = a.DotsAddDiscoveredHostVariantWithState(ctx, req.name, app.DotsAddVariantOptions{
 				Sync: true,

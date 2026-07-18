@@ -72,7 +72,7 @@ func truncateDotsTarget(path string, width int) string {
 	return "…" + string(runes[len(runes)-width+1:])
 }
 
-func truncateDotsActions(actions []app.DotAction, width int) string {
+func truncateDotsActions(actions []dots.Action, width int) string {
 	labels := make([]string, 0, len(actions))
 	for _, action := range actions {
 		labels = append(labels, string(action))

@@ -229,11 +229,27 @@ func TestTUIIncludesStaticIgnoredDotCandidate(t *testing.T) {
 		}, "TUI did not render main tabs")
 		writeTUIKeys(t, tty, "\t", "\t")
 		screen := waitForRequiredScreen(t, capture, 8*time.Second, func(text string) bool {
-			return strings.Contains(text, "node_modules") && strings.Contains(text, "Ignored")
+			return strings.Contains(text, "node_modules") &&
+				strings.Contains(text, "Ignored") &&
+				strings.Contains(text, "dots synced")
 		}, "TUI did not render ignored node_modules candidate")
-		writeTUIKeys(t, tty, "x", "x")
+		var confirmScreen string
+		deadline := time.Now().Add(8 * time.Second)
+		for time.Now().Before(deadline) {
+			writeTUIKeys(t, tty, "x")
+			if current, ok := waitForScreen(capture, 500*time.Millisecond, func(text string) bool {
+				return strings.Contains(text, "confirm include")
+			}); ok {
+				confirmScreen = current
+				break
+			}
+		}
+		if confirmScreen == "" {
+			t.Fatalf("TUI did not arm ignored candidate include; screen:\n%s", screen)
+		}
+		writeTUIKeys(t, tty, "x")
 		if !waitForConfigDot(configPath, "testhost", "node_modules", false, 8*time.Second) {
-			t.Fatalf("node_modules was not included after x,x; screen:\n%s", screen)
+			t.Fatalf("node_modules was not included after confirmation; screen:\n%s", confirmScreen)
 		}
 		return capture.Text()
 	})

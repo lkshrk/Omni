@@ -6,6 +6,13 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+func (m *Model) openTraceLog() tea.Cmd {
+	m.traceLogGen++
+	m.traceLog = nil
+	m.traceLogLoading = true
+	return m.doLoadTraces()
+}
+
 func (m *Model) doLoadTraces() tea.Cmd {
 	a := m.app
 	ctx := m.ctx

@@ -29,7 +29,17 @@ The real package manager that performs the operation: `brew`, `apt`, `bun`,
 
 The Omni provider implementation for a concrete manager.
 
-## Desired State
+## Config Write Seam
+
+The single safe path for editing `settings.json` in place: `config.WriteConfig`
+loads the config, runs a caller-supplied mutation over the `RootConfig`,
+validates the result, then writes only the changed top-level keys — each routed
+to the `$include` fragment that owns it, with stale copies in non-owner files
+nulled so removed entries cannot resurrect. Callers describe *what* to change;
+the seam owns *how* to persist it safely. The App's `withConfig` acquires the
+config lock and delegates here.
+
+See [State And Files](state-and-files.md).
 
 The tools and dotfiles Omni expects for the active host after expanding
 settings, host assignments, groups, tool specs, host overrides, and ignores.
@@ -38,6 +48,17 @@ settings, host assignments, groups, tool specs, host overrides, and ignores.
 
 A package found installed by a provider scan. It may or may not be tracked in
 `settings.json`.
+
+## Dots Engine
+
+The module in `internal/dots` that carries out dotfile sync, conflict
+resolution, and unlink against a resolved set of Dots Entries. It is
+constructed per operation from the Stow content root and already-resolved
+entries (`dots.NewEngine`, optionally `dots.WithExecutor`); the app layer owns
+config→entries resolution, history, and cache refresh, then delegates the work
+through the engine's small interface (`Sync`, `SyncEntry`, `UnlinkAll`).
+
+See [Dotfiles](dotfiles.md).
 
 ## Dots Entry
 

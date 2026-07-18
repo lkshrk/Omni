@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/lkshrk/omni/internal/app"
+	"github.com/lkshrk/omni/internal/dots"
 )
 
 func TestDotsPeekShowsRepoToLocalDiffForConflict(t *testing.T) {
@@ -23,7 +24,7 @@ func TestDotsPeekShowsRepoToLocalDiffForConflict(t *testing.T) {
 			Name:       "gitconfig",
 			SourcePath: repoPath,
 			TargetPath: localPath,
-			State:      app.DotStateConflict,
+			State:      dots.StateConflict,
 		},
 	})
 	if err != nil {
@@ -60,14 +61,14 @@ func TestDotsPeekChildReadsLocalOnlyFile(t *testing.T) {
 			Name:       "nvim",
 			SourcePath: repoRoot,
 			TargetPath: localRoot,
-			State:      app.DotStateSynced,
+			State:      dots.StateSynced,
 			IsDir:      true,
 		},
 		Child: &app.DotChild{
 			Name:    "init.lua",
 			RelPath: "init.lua",
 			Path:    localPath,
-			State:   app.DotStateLocalOnly,
+			State:   dots.StateLocalOnly,
 		},
 	})
 	if err != nil {
@@ -96,7 +97,7 @@ func TestDotsPeekOversizedDiffReturnsMetadata(t *testing.T) {
 	mustWriteFile(t, localPath, strings.Repeat("l", app.DotsPeekReadLimit+1))
 
 	got, err := a.DotsPeek(context.Background(), app.DotsPeekRequest{
-		Entry: app.DotStatus{Name: "zshrc", SourcePath: repoPath, TargetPath: localPath, State: app.DotStateModified},
+		Entry: app.DotStatus{Name: "zshrc", SourcePath: repoPath, TargetPath: localPath, State: dots.StateModified},
 	})
 	if err != nil {
 		t.Fatalf("DotsPeek: %v", err)
@@ -123,7 +124,7 @@ func TestDotsPeekOversizedSingleFileTruncatesText(t *testing.T) {
 	mustWriteFile(t, localPath, strings.Repeat("l", app.DotsPeekReadLimit+1))
 
 	got, err := a.DotsPeek(context.Background(), app.DotsPeekRequest{
-		Entry: app.DotStatus{Name: "zshrc", SourcePath: repoPath, TargetPath: localPath, State: app.DotStateLocalOnly},
+		Entry: app.DotStatus{Name: "zshrc", SourcePath: repoPath, TargetPath: localPath, State: dots.StateLocalOnly},
 	})
 	if err != nil {
 		t.Fatalf("DotsPeek: %v", err)
@@ -150,7 +151,7 @@ func TestDotsPeekBinaryReturnsMetadata(t *testing.T) {
 	mustWriteFile(t, localPath, "one\x00two")
 
 	got, err := a.DotsPeek(context.Background(), app.DotsPeekRequest{
-		Entry: app.DotStatus{Name: "secret", SourcePath: repoPath, TargetPath: localPath, State: app.DotStateLocalOnly},
+		Entry: app.DotStatus{Name: "secret", SourcePath: repoPath, TargetPath: localPath, State: dots.StateLocalOnly},
 	})
 	if err != nil {
 		t.Fatalf("DotsPeek: %v", err)
@@ -178,7 +179,7 @@ func TestDotsPeekLocalSymlinkFollowsTarget(t *testing.T) {
 	}
 
 	got, err := a.DotsPeek(context.Background(), app.DotsPeekRequest{
-		Entry: app.DotStatus{Name: "zshrc", SourcePath: repoPath, TargetPath: localPath, State: app.DotStateSynced},
+		Entry: app.DotStatus{Name: "zshrc", SourcePath: repoPath, TargetPath: localPath, State: dots.StateSynced},
 	})
 	if err != nil {
 		t.Fatalf("DotsPeek: %v", err)
@@ -207,7 +208,7 @@ func TestDotsPeekRepoSymlinkOutsideRepoReturnsMetadata(t *testing.T) {
 	}
 
 	got, err := a.DotsPeek(context.Background(), app.DotsPeekRequest{
-		Entry: app.DotStatus{Name: "secret", SourcePath: repoPath, TargetPath: filepath.Join(os.Getenv("HOME"), ".secret"), State: app.DotStateRepoOnly},
+		Entry: app.DotStatus{Name: "secret", SourcePath: repoPath, TargetPath: filepath.Join(os.Getenv("HOME"), ".secret"), State: dots.StateRepoOnly},
 	})
 	if err != nil {
 		t.Fatalf("DotsPeek: %v", err)
@@ -226,7 +227,7 @@ func TestDotsPeekRejectsDirectoryRequest(t *testing.T) {
 	localPath := filepath.Join(os.Getenv("HOME"), ".config", "nvim")
 
 	_, err := a.DotsPeek(context.Background(), app.DotsPeekRequest{
-		Entry: app.DotStatus{Name: "nvim", SourcePath: repoPath, TargetPath: localPath, State: app.DotStateSynced, IsDir: true},
+		Entry: app.DotStatus{Name: "nvim", SourcePath: repoPath, TargetPath: localPath, State: dots.StateSynced, IsDir: true},
 	})
 	if err == nil || !strings.Contains(err.Error(), "directory") {
 		t.Fatalf("error = %v, want directory rejection", err)

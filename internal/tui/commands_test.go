@@ -18,6 +18,7 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/dots"
 )
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -118,7 +119,7 @@ func TestLoadTools_IncludesCachedDotsState(t *testing.T) {
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
 		Health:     string(app.HealthOK),
-		State:      string(app.DotStateSynced),
+		State:      string(dots.StateSynced),
 		ObservedAt: observed,
 	}}, "M dotfiles/nvim", 0, observed); err != nil {
 		t.Fatalf("ReplaceDotsSnapshot: %v", err)

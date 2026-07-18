@@ -43,9 +43,9 @@ func (m *Model) handleTraceLogKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	case key.Matches(msg, m.keys.HalfPageDown):
 		m.scrollTraceLogBy(max(traceLogBodyHeight(*m), 1) / 2)
 	case key.Matches(msg, m.keys.PageUp):
-		m.scrollTraceLogBy(-max(traceLogBodyHeight(*m), 1))
+		m.scrollTraceLogBy(-max(traceLogBodyHeight(*m)-2, 1))
 	case key.Matches(msg, m.keys.PageDown):
-		m.scrollTraceLogBy(max(traceLogBodyHeight(*m), 1))
+		m.scrollTraceLogBy(max(traceLogBodyHeight(*m)-2, 1))
 	case key.Matches(msg, m.keys.Top):
 		m.traceLog.scroll = 0
 	case key.Matches(msg, m.keys.Bottom):

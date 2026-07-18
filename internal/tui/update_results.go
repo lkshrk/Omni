@@ -150,12 +150,12 @@ func (m *Model) handleRefreshToolProgress(msg progressMsg) {
 	if m.refreshToolTotal > 0 && m.refreshToolDone > m.refreshToolTotal {
 		m.refreshToolDone = m.refreshToolTotal
 	}
-	active := app.RefreshProviderScanLabel(providerName, m.providerScanLabels)
-	if label := strings.TrimSpace(msg.refreshProviderLabel); label != "" && (label != providerName || active == providerName) {
-		active = label
-	}
-	if msg.refreshToolName != "" {
-		active += "/" + msg.refreshToolName
+	active := strings.TrimSpace(msg.refreshToolName)
+	if active == "" {
+		active = app.RefreshProviderScanLabel(providerName, m.providerScanLabels)
+		if label := strings.TrimSpace(msg.refreshProviderLabel); label != "" && (label != providerName || active == providerName) {
+			active = label
+		}
 	}
 	m.progressText = app.RefreshToolProgressStatus(active, "", m.refreshToolDone, m.refreshToolTotal)
 }
@@ -220,7 +220,7 @@ func (m *Model) handleProgressDoneMsg(msg progressDoneMsg) []tea.Cmd {
 		cmds = append(cmds, setStatus(m, "cancelled", false))
 	} else if msg.err != nil {
 		m.adminTerminalQueue = nil
-		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
+		cmds = append(cmds, setStatus(m, "✗ "+rowErrorSummary(msg.err.Error()), true))
 	} else if promptingPrivilegedAction {
 		m.cancelDashboardReconcile()
 		return cmds
@@ -347,7 +347,7 @@ func (m *Model) handleOpCompleteMsg(msg opCompleteMsg) []tea.Cmd {
 	} else if msg.err != nil {
 		m.adminTerminalQueue = nil
 		m.setToolActionError(rowErrKey, msg.err.Error(), msg.err)
-		cmds = append(cmds, setStatus(m, "✗ "+msg.err.Error(), true))
+		cmds = append(cmds, setStatus(m, "✗ "+rowErrorSummary(msg.err.Error()), true))
 	} else {
 		if msg.preserveOtherRowErrors && rowErrKey != "" {
 			m.clearToolActionError(rowErrKey)

@@ -53,7 +53,7 @@ func TestCopyFile_DstParentReadOnly(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(filepath.Dir(dst), 0o755) })
 
-	m, err := dots.New(repo, []config.DotEntry{
+	m, err := dots.NewEngine(repo, []config.DotEntry{
 		{Name: "zsh", Path: "~/protected/.zshrc"},
 	})
 	if err != nil {
@@ -92,7 +92,7 @@ func TestCopyFile_SrcUnreadable(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(src, 0o644) })
 
-	m, err := dots.New(repo, []config.DotEntry{
+	m, err := dots.NewEngine(repo, []config.DotEntry{
 		{Name: "zsh", Path: "~/.zshrc"},
 	})
 	if err != nil {
@@ -130,7 +130,7 @@ func TestConflictOverwrite_ReplacesReadOnlyDstViaTrash(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(dst, 0o644) })
 
-	m, err := dots.New(repo, []config.DotEntry{
+	m, err := dots.NewEngine(repo, []config.DotEntry{
 		{Name: "zsh", Path: "~/.zshrc"},
 	})
 	if err != nil {
@@ -181,7 +181,7 @@ func TestUnlinkAll_ContinuesAfterEntryError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m, err := dots.New(repo, []config.DotEntry{
+	m, err := dots.NewEngine(repo, []config.DotEntry{
 		{Name: "bad", Path: "~/.badrc"},
 		{Name: "good", Path: "~/.goodrc"},
 	})
@@ -228,7 +228,7 @@ func TestUnlinkAll_RefusesRepoSourceSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m, err := dots.New(repo, []config.DotEntry{
+	m, err := dots.NewEngine(repo, []config.DotEntry{
 		{Name: "nvim", Path: "~/.config/nvim"},
 	})
 	if err != nil {
@@ -264,7 +264,7 @@ func TestUnlinkEntry_TargetIsDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m, err := dots.New(repo, []config.DotEntry{
+	m, err := dots.NewEngine(repo, []config.DotEntry{
 		{Name: "zsh", Path: "~/.zshrc"},
 	})
 	if err != nil {
@@ -295,7 +295,7 @@ func TestUnlinkEntry_TargetMissing(t *testing.T) {
 	writeFile(t, src, "# zsh")
 	// dst is never created.
 
-	m, err := dots.New(repo, []config.DotEntry{
+	m, err := dots.NewEngine(repo, []config.DotEntry{
 		{Name: "zsh", Path: "~/.zshrc"},
 	})
 	if err != nil {
@@ -503,7 +503,7 @@ func TestUnlinkAll_WalkErrorDoesNotClobberTarget(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(srcSubdir, 0o755) })
 
-	m, err := dots.New(repo, []config.DotEntry{
+	m, err := dots.NewEngine(repo, []config.DotEntry{
 		{Name: "zsh", Path: "~/subdir"},
 	})
 	if err != nil {
@@ -528,7 +528,7 @@ func TestNew_AllowsHomeLocalPathStartingWithDots(t *testing.T) {
 	repo := t.TempDir()
 	t.Setenv("HOME", home)
 
-	if _, err := dots.New(repo, []config.DotEntry{{Name: "dotconfig", Path: filepath.Join(home, "..config")}}); err != nil {
+	if _, err := dots.NewEngine(repo, []config.DotEntry{{Name: "dotconfig", Path: filepath.Join(home, "..config")}}); err != nil {
 		t.Fatalf("dots.New with home-local ..config path: %v", err)
 	}
 }

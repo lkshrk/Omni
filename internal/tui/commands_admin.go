@@ -42,7 +42,7 @@ func (m *Model) doSetToolGroupMemberships(name string, before, after, createdGro
 			return groupChangedMsg{err: err}
 		}
 		return groupChangedMsg{
-			detail:          groupMoveDetail(name, after),
+			detail:          groupChangeDetail(name, after),
 			tools:           result.Tools,
 			toolGroups:      result.State.ToolGroups,
 			toolMemberships: result.State.ToolMemberships,
@@ -63,7 +63,7 @@ func (m *Model) doSetDotGroupMemberships(name string, before, after, createdGrou
 		msg := dotsLoadedMsg{
 			gen:            gen,
 			dotMemberships: change.DotMemberships,
-			detail:         groupMoveDetail(name, after),
+			detail:         groupChangeDetail(name, after),
 		}
 		if change.DotsState != nil {
 			msg.entries = change.DotsState.Entries
@@ -113,11 +113,11 @@ func groupSuffix(groups []string) string {
 	return ""
 }
 
-func groupMoveDetail(name string, groups []string) string {
-	if len(groups) == 1 && groups[0] != "" {
-		return "✓ moved " + name + " to " + groups[0]
+func groupChangeDetail(name string, groups []string) string {
+	if len(groups) == 0 {
+		return "✓ cleared groups for " + name
 	}
-	return "✓ updated group for " + name
+	return "✓ changed groups for " + name
 }
 
 func (m *Model) doSetGroupTools(group string, membership, originalMembership, ignores, originalIgnores map[string]bool) tea.Cmd {

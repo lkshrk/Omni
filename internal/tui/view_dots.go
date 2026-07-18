@@ -8,6 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/lkshrk/omni/internal/app"
+	"github.com/lkshrk/omni/internal/dots"
 )
 
 // truncatePath clips s to maxW runes, appending "…" if truncated.
@@ -230,7 +231,7 @@ func renderDots(m Model) string {
 		for _, child := range children {
 			parentState := app.DotStatusState(e)
 			childStatus, childStatusStyle := dotChildStatusDisplay(p, child, parentState)
-			if inIgnoredSection && !child.Ignored {
+			if inIgnoredSection && app.DotChildIsSynthesizedContainer(child, parentState) {
 				childStatus = "-"
 				childStatusStyle = p.styleHelp
 			}
@@ -240,9 +241,10 @@ func renderDots(m Model) string {
 			childTargetPadded := renderCell(leftCell(childTarget, targetWidth))
 			isChildCursor := rowIndex == m.dotsCursor && !m.cursorHidden
 			childIgnoreConfirm := m.dotsIgnoreIdx == rowIndex
-			childRepoConfirm := m.dotsOverwriteIdx == rowIndex && app.DotStatusHasAction(e, app.DotActionUseRepo)
-			childLocalConfirm := m.dotsLocalIdx == rowIndex && app.DotStatusHasAction(e, app.DotActionUseLocal)
-			childRight := dotRightColumns(p, isChildCursor || childIgnoreConfirm || childRepoConfirm || childLocalConfirm, childStatusCol, childStatusStyle, app.DotChildFileCounts(child, app.DotStatusState(e)), cols.ratio, cols.ignore, "", cols.group)
+			childRepoConfirm := m.dotsOverwriteIdx == rowIndex && app.DotStatusHasAction(e, dots.ActionUseRepo)
+			childLocalConfirm := m.dotsLocalIdx == rowIndex && app.DotStatusHasAction(e, dots.ActionUseLocal)
+			childVariantCreate := m.dotsVariantIdx == rowIndex && m.dotsVariantMode == dotsVariantCreate
+			childRight := dotRightColumns(p, isChildCursor || childIgnoreConfirm || childRepoConfirm || childLocalConfirm || childVariantCreate, childStatusCol, childStatusStyle, app.DotChildFileCounts(child, app.DotStatusState(e)), cols.ratio, cols.ignore, nil, m.hostInfo, cols.group)
 			childLeft := func(iconStyle, nameStyle, targetStyle lipgloss.Style, iconText, childName, childTarget string) string {
 				return iconStyle.Render(iconText) +
 					iconNameGap +
@@ -267,6 +269,12 @@ func renderDots(m Model) string {
 				left := childLeft(p.styleOutdated.Bold(true), p.styleActiveText, p.styleHelp.Bold(true), "↳", childName, childTargetPadded)
 				write(renderDotsRow(true, left, childRight) + "\n")
 				write(renderContextHints(m, hintCtxDotsLocalConfirm, hintPrefix) + "\n")
+				buf.markCursorEnd()
+			} else if childVariantCreate {
+				buf.markCursor()
+				left := childLeft(p.styleProvider, p.styleActiveText, p.styleHelp.Bold(true), "↳", childName, childTargetPadded)
+				write(renderDotsRow(true, left, childRight) + "\n")
+				write(renderDotsVariantCreatePrompt(m, app.DotExtractName(e.Name, child.RelPath), hintPrefix, m.width) + "\n")
 				buf.markCursorEnd()
 			} else if isChildCursor {
 				buf.markCursor()
@@ -298,7 +306,7 @@ func renderDots(m Model) string {
 			iconStyle, icon, statusLabel := dotStateDisplay(p, app.DotStatusState(e))
 			// Synthesized container entries in the Ignored section (not
 			// explicitly ignored themselves) get muted "-" status.
-			ignoredContainer := inIgnoredSection && !app.DotStatusHasAction(e, app.DotActionUnignore)
+			ignoredContainer := inIgnoredSection && !app.DotStatusHasAction(e, dots.ActionUnignore)
 			if ignoredContainer {
 				statusLabel = "-"
 			}
@@ -318,11 +326,12 @@ func renderDots(m Model) string {
 			nameCol := renderCell(leftCell(fitCellText(dotEntryDisplayName(m, e), cols.name), cols.name))
 			statusCol := renderCell(leftCell(fitCellText(statusLabel, cols.status), cols.status))
 			target := truncatePath(tildePath(e.TargetPath), targetWidth)
-			right := dotRightColumns(p, false, statusCol, statusStyle, app.DotStatusFileCounts(e), cols.ratio, cols.ignore, e.Group, cols.group)
+			entryGroups := dotEntryGroups(m, e)
+			right := dotRightColumns(p, false, statusCol, statusStyle, app.DotStatusFileCounts(e), cols.ratio, cols.ignore, entryGroups, m.hostInfo, cols.group)
 
 			removingConfirm := m.dotsConfirmIdx == rowIndex
-			repoConfirm := m.dotsOverwriteIdx == rowIndex && app.DotStatusHasAction(e, app.DotActionUseRepo)
-			localConfirm := m.dotsLocalIdx == rowIndex && app.DotStatusHasAction(e, app.DotActionUseLocal)
+			repoConfirm := m.dotsOverwriteIdx == rowIndex && app.DotStatusHasAction(e, dots.ActionUseRepo)
+			localConfirm := m.dotsLocalIdx == rowIndex && app.DotStatusHasAction(e, dots.ActionUseLocal)
 			ignoreConfirm := m.dotsIgnoreIdx == rowIndex
 			variantCreate := m.dotsVariantIdx == rowIndex && m.dotsVariantMode == dotsVariantCreate
 			variantRemove := m.dotsVariantIdx == rowIndex && m.dotsVariantMode == dotsVariantRemove
@@ -339,7 +348,7 @@ func renderDots(m Model) string {
 					nameStyle.Render(nameCol) +
 					targetStyle.Render(nameTargetGap+targetPadded)
 			}
-			activeRight := dotRightColumns(p, true, statusCol, statusStyle, app.DotStatusFileCounts(e), cols.ratio, cols.ignore, e.Group, cols.group)
+			activeRight := dotRightColumns(p, true, statusCol, statusStyle, app.DotStatusFileCounts(e), cols.ratio, cols.ignore, entryGroups, m.hostInfo, cols.group)
 
 			switch {
 			case removingConfirm:
@@ -378,7 +387,12 @@ func renderDots(m Model) string {
 				if errLine := renderDotsLastError(p, e, m.width); errLine != "" {
 					write(errLine + "\n")
 				}
-				if app.DotStatusHasAction(e, app.DotActionUseRepo) || app.DotStatusHasAction(e, app.DotActionUseLocal) {
+				prefix := textRowContentPrefix()
+				width := max(m.width-lipgloss.Width(prefix)-screenEdgePadding, 1)
+				for _, detail := range fullMembershipDetailLines(m.dotMemberships[e.Name], width) {
+					write(prefix + p.styleHelp.Render(detail) + "\n")
+				}
+				if app.DotStatusHasAction(e, dots.ActionUseRepo) || app.DotStatusHasAction(e, dots.ActionUseLocal) {
 					write(renderDotsContextHints(m, hintCtxDotsConflict, hintPrefix, m.width) + "\n")
 					buf.markCursorEnd()
 				} else {
@@ -530,41 +544,41 @@ func renderDotsSearchControl(m Model) string {
 	return "  " + p.styleNormal.Render("/") + " " + renderEmptyAwareTextInputView(p, m.filter, m.filter.Placeholder, 0)
 }
 
-func dotStateDisplay(p palette, state app.DotState) (lipgloss.Style, string, string) {
+func dotStateDisplay(p palette, state dots.State) (lipgloss.Style, string, string) {
 	switch state {
-	case app.DotStateSynced:
+	case dots.StateSynced:
 		return dotSyncedStyle(p, false), "✓", "synced"
-	case app.DotStateModified:
+	case dots.StateModified:
 		return p.styleOutdated, "!", "local changes"
-	case app.DotStateConflict, app.DotStateUntrackedConflict, app.DotStateAmbiguous:
+	case dots.StateConflict, dots.StateUntrackedConflict, dots.StateAmbiguous:
 		return p.styleOutdated, "!", strings.TrimSuffix(string(state), "-conflict")
-	case app.DotStateNoSource:
+	case dots.StateNoSource:
 		return p.styleHelp, "·", "no-source"
-	case app.DotStateIgnored, app.DotStateInactive, app.DotStateDisabled:
+	case dots.StateIgnored, dots.StateInactive, dots.StateDisabled:
 		return p.styleHelp, "·", string(state)
 	default:
 		return p.styleMissing, "✗", string(state)
 	}
 }
 
-func dotStatusTextStyle(p palette, state app.DotState) lipgloss.Style {
+func dotStatusTextStyle(p palette, state dots.State) lipgloss.Style {
 	switch state {
-	case app.DotStateSynced:
+	case dots.StateSynced:
 		return dotSyncedStyle(p, false)
-	case app.DotStateModified:
+	case dots.StateModified:
 		return p.styleOutdated
-	case app.DotStateConflict, app.DotStateUntrackedConflict, app.DotStateAmbiguous:
+	case dots.StateConflict, dots.StateUntrackedConflict, dots.StateAmbiguous:
 		return p.styleOutdated
-	case app.DotStateIgnored, app.DotStateInactive, app.DotStateDisabled:
+	case dots.StateIgnored, dots.StateInactive, dots.StateDisabled:
 		return p.styleIgnored
-	case app.DotStateNoSource:
+	case dots.StateNoSource:
 		return p.styleHelp
 	default:
 		return p.styleMissing
 	}
 }
 
-func dotChildStatusDisplay(p palette, child app.DotChild, parentState app.DotState) (string, lipgloss.Style) {
+func dotChildStatusDisplay(p palette, child app.DotChild, parentState dots.State) (string, lipgloss.Style) {
 	if child.Ignored {
 		return "ignored", p.styleIgnored
 	}
@@ -573,27 +587,21 @@ func dotChildStatusDisplay(p palette, child app.DotChild, parentState app.DotSta
 	return label, dotStatusTextStyle(p, state)
 }
 
-func dotChildStateForDisplay(child app.DotChild, parentState app.DotState) app.DotState {
-	if child.Ignored {
-		return app.DotStateIgnored
-	}
-	if child.State != "" {
-		return child.State
-	}
-	return parentState
+func dotChildStateForDisplay(child app.DotChild, parentState dots.State) dots.State {
+	return app.DotChildDisplayState(child, parentState)
 }
 
-func dotChildRowStyles(p palette, child app.DotChild, parentState app.DotState, inIgnoredSection bool) (lipgloss.Style, lipgloss.Style, lipgloss.Style) {
-	if inIgnoredSection && !child.Ignored {
+func dotChildRowStyles(p palette, child app.DotChild, parentState dots.State, inIgnoredSection bool) (lipgloss.Style, lipgloss.Style, lipgloss.Style) {
+	if inIgnoredSection && app.DotChildIsSynthesizedContainer(child, parentState) {
 		return p.styleHelp, p.styleHelp, p.styleHelp
 	}
 	state := dotChildStateForDisplay(child, parentState)
 	iconStyle := dotStatusTextStyle(p, state)
 	var nameStyle lipgloss.Style
 	switch state {
-	case app.DotStateSynced:
+	case dots.StateSynced:
 		nameStyle = p.styleNormal
-	case app.DotStateNoSource:
+	case dots.StateNoSource:
 		nameStyle = p.styleHelp
 	default:
 		nameStyle = dotStatusTextStyle(p, state)
@@ -676,8 +684,8 @@ func dotsTableColumnWidths(p palette, m Model, entries []app.DotStatus) dotsTabl
 		if ignored := dotIgnoredText(counts); ignored != "" {
 			cols.ignore = max(cols.ignore, dotsIgnoredColW, lipgloss.Width(ignored))
 		}
-		if badge := dotGroupBadge(entry.Group); badge != "" {
-			cols.group = max(cols.group, lipgloss.Width(badge))
+		if pills := renderGroupPills(p, dotEntryGroups(m, entry), m.hostInfo, 0, nil); pills != "" {
+			cols.group = max(cols.group, lipgloss.Width(pills))
 		}
 		visitDotChildren(entry.Children, func(child app.DotChild) {
 			childStatus, _ := dotChildStatusDisplay(p, child, state)
@@ -729,10 +737,8 @@ func fitDotsColumnsToWidth(cols dotsTableColumns, contentW int) dotsTableColumns
 	return cols
 }
 
-func dotRightColumns(p palette, selected bool, status string, statusStyle lipgloss.Style, counts app.DotFileCounts, ratioW, ignoredW int, group string, groupW int) string {
-	style := p.styleHelp
+func dotRightColumns(p palette, selected bool, status string, statusStyle lipgloss.Style, counts app.DotFileCounts, ratioW, ignoredW int, groups []string, info *app.HostInfo, groupW int) string {
 	if selected {
-		style = style.Bold(true)
 		statusStyle = statusStyle.Bold(true)
 	}
 	right := statusStyle.Render(status) + strings.Repeat(" ", dotsGapW) + dotRatioView(p, selected, counts, ratioW)
@@ -742,15 +748,24 @@ func dotRightColumns(p palette, selected bool, status string, statusStyle lipglo
 	if groupW == 0 {
 		return right
 	}
-	groupCol := renderCell(rightCell(fitCellText(dotGroupBadge(group), groupW), groupW))
-	return right + strings.Repeat(" ", dotsGapW) + style.Render(groupCol)
+	pills := renderGroupPills(p, groups, info, groupW, func(s lipgloss.Style) lipgloss.Style {
+		return rowEmphasis(selected, s)
+	})
+	groupCol := renderCell(rightCell(pills, groupW))
+	return right + strings.Repeat(" ", dotsGapW) + groupCol
 }
 
-func dotGroupBadge(group string) string {
-	if group == "" {
-		return ""
+// dotEntryGroups returns the full group memberships for a dots entry,
+// falling back to its legacy single-group field when it has no membership
+// record (e.g. entries not yet migrated onto the multi-group model).
+func dotEntryGroups(m Model, entry app.DotStatus) []string {
+	if groups, ok := m.dotMemberships[entry.Name]; ok {
+		return groups
 	}
-	return "[" + group + "]"
+	if entry.Group == "" {
+		return nil
+	}
+	return []string{entry.Group}
 }
 
 func dotRatioText(counts app.DotFileCounts) string {

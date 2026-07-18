@@ -66,9 +66,7 @@ func (m *Model) handleSettingsConfirmAction(cmds *[]tea.Cmd) {
 	case settingsRowProviderPriority, settingsRowDotsRepo, settingsRowDotsSync, settingsRowAgentsEnabled, settingsRowSkillsEnabled, settingsRowMcpEnabled, settingsRowPluginsEnabled, settingsRowAgentsUse, settingsRowDotsReminderInterval, settingsRowDotsWatchDebounce, settingsRowDoctor, settingsRowBootstrap, settingsRowResetSettings, settingsRowResetCache:
 		m.handleSettingsEditAction(cmds)
 	case settingsRowTraceLog:
-		m.traceLogGen++
-		m.traceLogLoading = true
-		*cmds = append(*cmds, m.doLoadTraces())
+		*cmds = append(*cmds, m.openTraceLog())
 	}
 }
 

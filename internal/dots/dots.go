@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/executor"
 )
 
 // OpKind describes what happened (or would happen) for a single file.
@@ -124,10 +125,25 @@ type ResolvedEntry struct {
 	OnConflict string   // automatic sync conflict policy: "", "use_repo", "use_local"
 }
 
-// Manager holds a resolved set of dot entries and the stow package root.
-type Manager struct {
+// Engine holds a resolved set of dot entries and the stow package root, and
+// carries out sync, conflict resolution, and unlink operations against them. It
+// is constructed per operation from an already-resolved entry set (the app
+// layer owns config→entries resolution) and an optional executor used for the
+// git/stow shell-outs that mutating operations require.
+type Engine struct {
 	RepoPath string
 	Entries  []ResolvedEntry
+	exec     executor.Executor
+}
+
+// EngineOption configures an Engine at construction time.
+type EngineOption func(*Engine)
+
+// WithExecutor supplies the executor the Engine uses for git/stow shell-outs.
+// Read-only construction (status, resolve-only callers) may omit it; mutating
+// operations such as Sync require it and error when it is absent.
+func WithExecutor(exec executor.Executor) EngineOption {
+	return func(e *Engine) { e.exec = exec }
 }
 
 // ValidateEntryName rejects logical names that cannot also safely serve as the
@@ -145,17 +161,18 @@ func ValidateEntryName(name string) error {
 	return nil
 }
 
-// New creates a Manager from a stow package root and a slice of DotEntry values.
-// repoPath is expanded (~ resolved). The root does not need to exist: read-only
-// status paths use the resolved source paths to report missing packages without
-// creating the stow content directory.
+// NewEngine creates an Engine from a stow package root and a slice of DotEntry
+// values. repoPath is expanded (~ resolved). The root does not need to exist:
+// read-only status paths use the resolved source paths to report missing
+// packages without creating the stow content directory. Pass WithExecutor to
+// enable mutating operations.
 //
 // SourcePath for each entry is derived from the stow package tree convention:
 //
 //	<stow-root>/<package>/<rel-from-home>
 //
 // where rel-from-home is filepath.Rel($HOME, expanded(entry.Path)).
-func New(repoPath string, entries []config.DotEntry) (*Manager, error) {
+func NewEngine(repoPath string, entries []config.DotEntry, opts ...EngineOption) (*Engine, error) {
 	expanded, err := ExpandPath(repoPath)
 	if err != nil {
 		return nil, fmt.Errorf("dots: expand repo path: %w", err)
@@ -201,16 +218,20 @@ func New(repoPath string, entries []config.DotEntry) (*Manager, error) {
 		})
 	}
 
-	return &Manager{RepoPath: expanded, Entries: resolved}, nil
+	e := &Engine{RepoPath: expanded, Entries: resolved}
+	for _, opt := range opts {
+		opt(e)
+	}
+	return e, nil
 }
 
 // UnlinkAll removes managed symlinks for all entries and replaces them with
 // real file copies sourced from the repo, leaving the user in a clean local
 // state after disabling dots management.
-func (m *Manager) UnlinkAll(opts UnlinkOptions) ([]Op, error) {
+func (e *Engine) UnlinkAll(opts UnlinkOptions) ([]Op, error) {
 	var all []Op
 	var failures unlinkFailures
-	for _, e := range m.Entries {
+	for _, e := range e.Entries {
 		ops, err := unlinkEntry(e, opts)
 		all = append(all, ops...)
 		if err != nil {

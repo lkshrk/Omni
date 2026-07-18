@@ -2,12 +2,14 @@ package tui
 
 import (
 	"context"
+	"slices"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
+	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/provider"
 )
@@ -24,18 +26,22 @@ const (
 func (m *Model) handleListNavigationKeyMsg(msg tea.KeyPressMsg) bool {
 	switch {
 	case key.Matches(msg, m.keys.Up):
-		if candidates := providerCandidateOptions(*m, m.selectedTool()); len(candidates) > 0 && m.providerCandidateCursor > 0 {
-			m.providerCandidateCursor--
-		} else if n := len(m.visibleTools); n > 0 {
+		if n := len(m.visibleTools); n > 0 {
 			m.cursor = cursorMove(m.cursor, -1, n, true)
-			m.providerCandidateCursor = max(len(providerCandidateOptions(*m, m.selectedTool()))-1, 0)
+			m.providerCandidateCursor = 0
 		}
 	case key.Matches(msg, m.keys.Down):
-		if candidates := providerCandidateOptions(*m, m.selectedTool()); len(candidates) > 0 && m.providerCandidateCursor < len(candidates)-1 {
-			m.providerCandidateCursor++
-		} else if n := len(m.visibleTools); n > 0 {
+		if n := len(m.visibleTools); n > 0 {
 			m.cursor = cursorMove(m.cursor, 1, n, true)
 			m.providerCandidateCursor = 0
+		}
+	case key.Matches(msg, m.keys.ProviderPrev):
+		if candidates := providerCandidateOptions(*m, m.selectedTool()); len(candidates) > 0 && m.providerCandidateCursor > 0 {
+			m.providerCandidateCursor--
+		}
+	case key.Matches(msg, m.keys.ProviderNext):
+		if candidates := providerCandidateOptions(*m, m.selectedTool()); len(candidates) > 0 && m.providerCandidateCursor < len(candidates)-1 {
+			m.providerCandidateCursor++
 		}
 	case key.Matches(msg, m.keys.Top):
 		m.cursor = 0
@@ -119,12 +125,25 @@ func (m *Model) handleListNavigationKeyMsg(msg tea.KeyPressMsg) bool {
 
 func (m *Model) handleListActionKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 	var cmds []tea.Cmd
+	selected := m.selectedTool()
 
 	if handled, confirmCmds := m.handleListConfirmationKeyMsg(msg); handled {
 		return confirmCmds
 	}
 
 	switch {
+	case key.Matches(msg, m.keys.ErrorLog) && rowActionErrorStatus(*m, selected) != "":
+		if msg.IsRepeat {
+			break
+		}
+		cmds = append(cmds, m.openTraceLog())
+	case key.Matches(msg, m.keys.EditIgnore):
+		if msg.IsRepeat {
+			break
+		}
+		if selected != nil && m.displaySection(selected) == sectionIgnored {
+			m.openIgnoreScopePicker(selected)
+		}
 	case key.Matches(msg, m.keys.ApplySolution):
 		if msg.IsRepeat {
 			break
@@ -155,7 +174,17 @@ func (m *Model) handleListActionKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 			break
 		}
 		if t := m.selectedTool(); t != nil {
-			m.openIgnoreScopePicker(t)
+			if m.displaySection(t) == sectionIgnored {
+				options := ignoreScopeOptions(*m, t)
+				for i := range options {
+					options[i].checked = false
+				}
+				m.loading = true
+				startOp(m, "Including "+t.Name+"…")
+				cmds = append(cmds, m.spinner.Tick, m.doSaveIgnoreScopes(t.Name, options))
+			} else {
+				m.openIgnoreScopePicker(t)
+			}
 		}
 	case key.Matches(msg, m.keys.Confirm):
 		if t := m.selectedTool(); t != nil && !t.Installed {
@@ -552,17 +581,36 @@ func (m *Model) openGroupPicker(claim bool) {
 }
 
 func (m *Model) openGroupMembershipPicker() {
+	t := m.selectedTool()
+	if t == nil {
+		return
+	}
+	m.openToolGroupMembershipPicker(t)
+}
+
+func (m *Model) openToolGroupMembershipPicker(t *database.ToolCache) {
 	m.mode = viewGroupMembership
-	m.pickerGroups = append(prioritizedPickerGroups(*m), groupPickerNewSentinel)
+	groups := prioritizedPickerGroups(*m)
+	if t != nil && m.hostInventoryTools[t.Name] && !slices.Contains(groups, config.SystemInventoryGroup) {
+		groups = append(groups, config.SystemInventoryGroup)
+	}
+	m.pickerGroups = append(groups, groupPickerNewSentinel)
 	m.pickerCursor = 0
 	m.pickerCreatingGroup = false
 	m.pickerCreatedGroups = nil
 	m.pickerMembershipKind = pickerMembershipTool
 	m.pickerMembershipName = ""
-	if t := m.selectedTool(); t != nil {
+	if t != nil {
 		m.pickerMembershipName = t.Name
 		m.pickerMembershipKey = toolMembershipKey(t)
 		m.pickerOriginalGroups = append([]string(nil), m.toolMemberships[m.pickerMembershipKey]...)
+		if m.hostInventoryTools[t.Name] && !slices.Contains(m.pickerOriginalGroups, config.SystemInventoryGroup) {
+			m.pickerOriginalGroups = append(m.pickerOriginalGroups, config.SystemInventoryGroup)
+			if m.toolMemberships == nil {
+				m.toolMemberships = make(map[string][]string)
+			}
+			m.toolMemberships[m.pickerMembershipKey] = append([]string(nil), m.pickerOriginalGroups...)
+		}
 	}
 }
 
@@ -592,7 +640,14 @@ func (m *Model) refreshInstalledProviders() []tea.Cmd {
 		return nil
 	}
 	clearStatus(m)
-	return m.startCurrentProviderScans()
+	m.loading = true
+	setActivityStatus(m, "Refreshing tools…")
+	cmds := m.startCurrentProviderScans()
+	if len(m.scanningProviders) == 0 {
+		m.loading = false
+		m.progressText = ""
+	}
+	return cmds
 }
 
 func (m *Model) startToolSyncAllConfirmed(cmds *[]tea.Cmd) {

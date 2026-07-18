@@ -33,6 +33,11 @@ type Metadata struct {
 	DefaultInstallOrder            int
 	ManagerOptions                 []ManagerOption
 	SupportsTaps                   bool
+	// RequiresPrivilege marks providers whose install/uninstall are sudo-backed
+	// system package managers. It is a coarse display hint (drives the privilege
+	// marker in tool views); the precise per-action decision lives in each
+	// provider's PrivilegePlan.
+	RequiresPrivilege bool
 }
 
 // ManagerOption describes one concrete manager usable through an ecosystem

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/database"
@@ -147,6 +148,70 @@ func TestTraceLog_ViewRendersTraceRows(t *testing.T) {
 	}
 }
 
+func TestTraceLog_RendersStructuredFullFailure(t *testing.T) {
+	m := settingsTraceLogModel()
+	trace := database.CommandTrace{
+		StartedAt:  time.Date(2024, 1, 15, 10, 30, 45, 0, time.UTC),
+		DurationMS: 2560,
+		Command:    "brew install --cask font-intel-one-mono",
+		Status:     "failed",
+		Reason:     "installing font-intel-one-mono (brew)",
+		Error:      "exit status 1",
+		Stderr:     "Error: A font is already installed at:\n/Library/Fonts/IntelOneMono.ttf\nRemove it before reinstalling.",
+	}
+	m = injectTraces(m, []database.CommandTrace{trace})
+
+	view := stripANSIEscapeSequences(m.View().Content)
+	for _, want := range []string{
+		"command:", "brew install --cask font-intel-one-mono",
+		"reason:", "installing font-intel-one-mono (brew)",
+		"problem:", "A font is already installed at:",
+		"error:", "exit status 1",
+		"stderr:", "/Library/Fonts/IntelOneMono.ttf", "Remove it before reinstalling.",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("structured command log missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestTraceLog_SuccessfulStderrIsNotLabeledProblem(t *testing.T) {
+	trace := database.CommandTrace{Status: "success", Stderr: "download progress"}
+	if got := traceLogProblem(trace); got != "" {
+		t.Fatalf("traceLogProblem() = %q for a successful command", got)
+	}
+}
+
+func TestTraceLog_EFromFailedToolOpensPopup(t *testing.T) {
+	tool := &database.ToolCache{Name: "font-intel-one-mono", Provider: "brew", Tracked: true}
+	m := baseModel([]*database.ToolCache{tool})
+	m.mode = viewList
+	m.cursor = 0
+	m.setToolActionError(toolKey(tool.Name, tool.Provider), "brew install: exit status 1 (stderr: Error: font already installed)")
+
+	got := drive(m, pressRune('e'))
+	if !got.traceLogLoading {
+		t.Fatal("e on a failed tool should open the command log")
+	}
+	if got.mode != viewList {
+		t.Fatalf("opening command log should preserve the underlying view, got mode %v", got.mode)
+	}
+}
+
+func TestTraceLog_EFromBlurredSearchResultOpensPopup(t *testing.T) {
+	tool := &database.ToolCache{Name: "font-intel-one-mono", Provider: "brew", Tracked: true}
+	m := baseModel([]*database.ToolCache{tool})
+	m.mode = viewSearch
+	m.filter.Blur()
+	m.cursor = 0
+	m.setToolActionError(toolKey(tool.Name, tool.Provider), "font already installed")
+
+	got := drive(m, pressRune('e'))
+	if !got.traceLogLoading {
+		t.Fatal("e on a failed blurred search result should open the command log")
+	}
+}
+
 func TestTraceLog_ViewShowsPopupTitle(t *testing.T) {
 	m := settingsTraceLogModel()
 	m = injectTraces(m, fixtureTraces())
@@ -262,8 +327,22 @@ func TestTraceLog_PageDown_AdvancesScroll(t *testing.T) {
 	m = injectTraces(m, manyTraces(50))
 
 	m = drive(m, tea.KeyPressMsg{Code: tea.KeyPgDown})
-	if m.traceLog.scroll == 0 {
-		t.Error("scroll should advance after PageDown")
+	want := max(traceLogBodyHeight(m)-2, 1)
+	if m.traceLog.scroll != want {
+		t.Fatalf("scroll after PageDown = %d, want %d so ellipsis rows do not skip content", m.traceLog.scroll, want)
+	}
+}
+
+func TestTraceLog_WrapsWideCharactersByCellWidth(t *testing.T) {
+	got := hardWrapLine("界界a", 3)
+	want := []string{"界", "界a"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("hardWrapLine() = %#v, want %#v", got, want)
+	}
+	for _, line := range got {
+		if width := lipgloss.Width(line); width > 3 {
+			t.Fatalf("wrapped line %q is %d cells wide", line, width)
+		}
 	}
 }
 
@@ -378,7 +457,7 @@ func TestTraceLog_ErrorInLoadedMsg(t *testing.T) {
 	}
 }
 
-// ── UC-TL-08: render gate — popup only visible in viewSettings ────────────────
+// ── UC-TL-08: render gate ────────────────────────────────────────────────────
 
 // TestTraceLog_RenderGate_VisibleInSettings verifies the popup is drawn when
 // m.mode == viewSettings and traceLog is populated.
@@ -403,11 +482,7 @@ func TestTraceLog_RenderGate_VisibleInSettings(t *testing.T) {
 	}
 }
 
-// TestTraceLog_RenderGate_HiddenOutsideSettings verifies the popup is NOT drawn
-// when m.mode is not viewSettings, even if traceLog is populated. This is the
-// regression guard for the bug class where the popup silently disappears when
-// the view mode changes.
-func TestTraceLog_RenderGate_HiddenOutsideSettings(t *testing.T) {
+func TestTraceLog_RenderGate_VisibleInList(t *testing.T) {
 	// Build the model in settings mode so we can populate traceLog.
 	m := settingsTraceLogModel()
 	m = injectTraces(m, fixtureTraces())
@@ -416,15 +491,30 @@ func TestTraceLog_RenderGate_HiddenOutsideSettings(t *testing.T) {
 		t.Fatal("precondition: traceLog should be non-nil")
 	}
 
-	// Now force the mode to viewList — traceLog stays populated to verify the gate.
 	m.mode = viewList
 
 	view := m.View().Content
-	if strings.Contains(view, "brew install ripgrep") {
-		t.Error("popup trace command should NOT appear when mode != viewSettings")
+	if !strings.Contains(view, "brew install ripgrep") || !strings.Contains(view, "Command Log") {
+		t.Fatalf("command log should be visible over the tools list:\n%s", view)
 	}
-	if strings.Contains(view, "Command Log") {
-		t.Error("popup title 'Command Log' should NOT appear when mode != viewSettings")
+}
+
+func TestTraceLog_RenderGate_HiddenOutsideSupportedViews(t *testing.T) {
+	m := settingsTraceLogModel()
+	m = injectTraces(m, fixtureTraces())
+	m.mode = viewDots
+
+	view := m.View().Content
+	if strings.Contains(view, "brew install ripgrep") || strings.Contains(view, "Command Log") {
+		t.Fatalf("command log should stay hidden outside settings/tools views:\n%s", view)
+	}
+}
+
+func TestTraceLog_DisablesMainTabClicksWhileOpen(t *testing.T) {
+	m := settingsTraceLogModel()
+	m = injectTraces(m, fixtureTraces())
+	if m.mainTabsClickable() {
+		t.Fatal("main tabs should not be clickable behind the command log")
 	}
 }
 

@@ -83,6 +83,68 @@ func applyStatusRowActivity(m Model, value, summary, icon string, iconStyle lipg
 	return value, summary, icon, iconStyle
 }
 
+func applyDashboardRefreshPresentation(m Model, rows []statusListRow) []statusListRow {
+	for i := range rows {
+		state := dashboardRefreshStateForRow(m, rows[i].label)
+		switch state {
+		case dashboardRowWaiting:
+			rows[i].icon = iconPending
+			rows[i].iconStyle = m.palette.styleStatus
+			rows[i].value = m.palette.styleHelp.Render("-")
+			rows[i].details = []string{statusDetailLine(m, "waiting...")}
+		case dashboardRowRefreshing:
+			rows[i].icon, rows[i].iconStyle = statusRowWorkingIcon(m, true)
+			rows[i].value = m.palette.styleStatus.Render(iconPending)
+			text := strings.TrimSpace(m.progressText)
+			if text == "" {
+				text = "loading..."
+			}
+			rows[i].details = []string{statusDetailLine(m, text)}
+		}
+	}
+	return rows
+}
+
+type dashboardRowRefreshState uint8
+
+const (
+	dashboardRowReady dashboardRowRefreshState = iota
+	dashboardRowWaiting
+	dashboardRowRefreshing
+)
+
+func dashboardRefreshStateForRow(m Model, label string) dashboardRowRefreshState {
+	if m.loading && len(m.allTools) == 0 {
+		if label == "Doctor" && m.doctorRunning {
+			return dashboardRowRefreshing
+		}
+		return dashboardRowWaiting
+	}
+	active := false
+	switch label {
+	case "Tool Sync", "Tools":
+		active = statusToolsLoading(m)
+	case "Tool Updates":
+		// The Tool Updates row renders its own upgrade/pending progress
+		// (queued count, "Upgrading tools…", per-tool "name (version)") in
+		// statusToolUpdatesAttentionRow. Do not let the generic refresh
+		// presentation clobber that with a bare "loading…".
+		active = false
+	case "Dotfiles":
+		active = m.dotsLoading || m.dotsPreparing
+	case "Agents":
+		active = statusAgentsLoading(m)
+	case "Services":
+		active = m.dotsServicesRefreshing
+	case "Doctor":
+		active = m.doctorRunning
+	}
+	if active {
+		return dashboardRowRefreshing
+	}
+	return dashboardRowReady
+}
+
 func statusToolsLoading(m Model) bool {
 	return m.loading ||
 		len(m.upgradingKeys) > 0 ||

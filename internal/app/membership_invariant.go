@@ -76,3 +76,29 @@ func ReusablePredicate(names ...[]string) func(string) bool {
 	}
 	return func(name string) bool { return set[strings.TrimSpace(name)] }
 }
+
+// MembershipCapsReusable reports whether an item kind caps reusable-group
+// membership at one. Only dots cap (their symlinks collide); tools and the
+// agent-kinds (skill/mcp/plugin/marketplace) may join any number of groups.
+func MembershipCapsReusable(kind string) bool {
+	return kind == "dot"
+}
+
+// MembershipToggle adds group when absent and removes it when present, with no
+// reusable cap. Used by every non-dot kind. The input slice is not mutated.
+func MembershipToggle(current []string, group string) []string {
+	group = strings.TrimSpace(group)
+	if group == "" {
+		return append([]string(nil), current...)
+	}
+	if slices.Contains(current, group) {
+		out := make([]string, 0, len(current))
+		for _, g := range current {
+			if g != group {
+				out = append(out, g)
+			}
+		}
+		return out
+	}
+	return append(append([]string(nil), current...), group)
+}

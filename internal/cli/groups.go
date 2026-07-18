@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -39,6 +40,7 @@ how many tools each group contains.`,
 		newGroupsRenameCmd(state),
 		newGroupsDeleteCmd(state),
 		newGroupsMoveToolCmd(state),
+		newGroupsSetToolCmd(state),
 		newGroupsRemoveToolCmd(state),
 		newGroupsIgnoreToolCmd(state),
 		newGroupsUnignoreToolCmd(state),
@@ -164,6 +166,30 @@ func runGroupsMoveTool(cmd *cobra.Command, state *rootState, args []string) erro
 	}
 	fmt.Fprintf(cmdOut(cmd), "Moved %q to group %q.\n", args[1], args[0])
 	return nil
+}
+
+func newGroupsSetToolCmd(state *rootState) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "set-tool <tool> <group>...",
+		Short: "Set a logical tool's full group membership",
+		Args:  cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			tool := args[0]
+			groups := args[1:]
+			if err := state.app.SetToolGroups(tool, groups, nil, ""); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmdOut(cmd), "Set %q groups to %s.\n", tool, strings.Join(groups, ", "))
+			return nil
+		},
+	}
+	cmd.ValidArgsFunction = func(c *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) == 0 {
+			return completeToolNames(state)(c, args, toComplete)
+		}
+		return completeGroupNames(state)(c, args, toComplete)
+	}
+	return cmd
 }
 
 func newGroupsIgnoreToolCmd(state *rootState) *cobra.Command {

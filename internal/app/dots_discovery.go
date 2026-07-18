@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/dots"
 )
 
 var wellKnownDotPaths = map[string]string{
@@ -572,7 +573,7 @@ func inferDotPathFromRepoPackage(stowPath, packageName string) (string, bool) {
 	if err != nil || !info.IsDir() {
 		return "", false
 	}
-	if pathExists(filepath.Join(pkgDir, ".agents", ".skill-lock.json")) {
+	if dots.PathExists(filepath.Join(pkgDir, ".agents", ".skill-lock.json")) {
 		return "~/.agents/.skill-lock.json", true
 	}
 	return "", false

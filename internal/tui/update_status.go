@@ -89,11 +89,19 @@ func (m *Model) startDoctorRun(message string) {
 // When doctor is still running or has not produced its first snapshot yet, the
 // refresh is deferred until handleDoctorDoneMsg drains doctorRefreshPending.
 func (m *Model) refreshDoctorAfterFix(cmds *[]tea.Cmd) {
+	m.refreshDoctorAfterFixWithStatus(cmds, false)
+}
+
+func (m *Model) refreshDoctorAfterFixWithStatus(cmds *[]tea.Cmd, preserveStatus bool) {
 	if m.doctorRunning || m.doctorResult == nil {
 		m.doctorRefreshPending = true
 		return
 	}
-	m.startDoctorRun("Refreshing doctor…")
+	if preserveStatus {
+		m.doctorRunning = true
+	} else {
+		m.startDoctorRun("Refreshing doctor…")
+	}
 	*cmds = append(*cmds, m.spinner.Tick, m.doRunDoctor())
 }
 
@@ -375,12 +383,13 @@ func (m *Model) startDashboardFixConfig(cmds *[]tea.Cmd) {
 	}
 	a := m.app
 	*cmds = append(*cmds, func() tea.Msg {
-		_, err := a.OptimizeConfigIncludes(false)
-		if err != nil {
-			return configOptimizeDoneMsg{err: err}
+		result := a.FixDoctorIssues(false)
+		return configOptimizeDoneMsg{
+			report:      result.OptimizeReport,
+			modified:    result.IgnoreModified,
+			optimizeErr: result.OptimizeErr,
+			ignoreErr:   result.IgnoreErr,
 		}
-		_, err = a.DotsFixIgnorePatterns()
-		return configOptimizeDoneMsg{err: err}
 	})
 }
 
@@ -552,8 +561,28 @@ func (m *Model) handleFixIgnoreDoneMsg(msg fixIgnoreDoneMsg) []tea.Cmd {
 }
 
 func (m *Model) handleConfigOptimizeDoneMsg(msg configOptimizeDoneMsg) []tea.Cmd {
-	if msg.err != nil {
-		return []tea.Cmd{setStatus(m, "fix config issues: "+msg.err.Error(), true)}
+	if msg.optimizeErr != nil || msg.ignoreErr != nil {
+		var outcomes []string
+		changed := false
+		if removed := msg.report.TotalRemoved(); removed > 0 {
+			outcomes = append(outcomes, fmt.Sprintf("✓ fixed %d duplicate config entries", removed))
+			changed = true
+		}
+		if len(msg.modified) > 0 {
+			outcomes = append(outcomes, "✓ fixed ignore patterns for "+strings.Join(msg.modified, ", "))
+			changed = true
+		}
+		if msg.optimizeErr != nil {
+			outcomes = append(outcomes, "config optimize: "+msg.optimizeErr.Error())
+		}
+		if msg.ignoreErr != nil {
+			outcomes = append(outcomes, "fix ignore patterns: "+msg.ignoreErr.Error())
+		}
+		cmds := []tea.Cmd{setStatus(m, strings.Join(outcomes, "; "), true)}
+		if changed {
+			m.refreshDoctorAfterFixWithStatus(&cmds, true)
+		}
+		return cmds
 	}
 	var cmds []tea.Cmd
 	m.refreshDoctorAfterFix(&cmds)

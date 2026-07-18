@@ -645,7 +645,7 @@ func TestDoDotsSyncDiscovered_AddsCandidateAndRefreshes(t *testing.T) {
 	t.Cleanup(func() { _ = a.Close() })
 	m := modelForCmds(a)
 
-	msg := m.doDotsSyncDiscovered(app.DotStatus{Name: "claude", TargetPath: "~/.claude", State: app.DotStateUntrackedConflict})()
+	msg := m.doDotsSyncDiscovered(app.DotStatus{Name: "claude", TargetPath: "~/.claude", State: dots.StateUntrackedConflict})()
 	got, ok := msg.(dotsSyncedMsg)
 	if !ok {
 		t.Fatalf("expected dotsSyncedMsg, got %T", msg)
@@ -663,7 +663,7 @@ func TestDoDotsSyncDiscovered_AddsCandidateAndRefreshes(t *testing.T) {
 	}
 	foundConflict := false
 	for _, entry := range got.entries {
-		if entry.Name == "claude" && entry.State == app.DotStateConflict {
+		if entry.Name == "claude" && entry.State == dots.StateConflict {
 			foundConflict = true
 		}
 	}

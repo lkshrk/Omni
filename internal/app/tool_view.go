@@ -312,12 +312,7 @@ func concreteProviderDisplayLabel(ecosystem, raw string) string {
 }
 
 func sudoBackedSystemProvider(name string) bool {
-	switch name {
-	case "apt", "apk", "dnf", "pacman", "zypper":
-		return true
-	default:
-		return false
-	}
+	return provider.BuiltinMetadata(name).RequiresPrivilege
 }
 
 func toolViewSection(tool *database.ToolCache, context ToolClassificationContext, syncStatus ToolSyncStatus) ToolViewSection {

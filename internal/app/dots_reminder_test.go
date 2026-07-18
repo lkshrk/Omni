@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lkshrk/omni/internal/dots"
 )
 
 func TestAnalyzeDotsReminderStatus_ClassifiesReasons(t *testing.T) {
@@ -13,12 +15,12 @@ func TestAnalyzeDotsReminderStatus_ClassifiesReasons(t *testing.T) {
 		GitStatus:       " M dotfiles/nvim/init.lua\n?? dotfiles/zsh/.zshrc",
 		DiscoveredCount: 1,
 		Entries: []DotStatus{
-			{Name: "nvim", State: DotStateModified},
-			{Name: "gitconfig", State: DotStateConflict},
-			{Name: "kitty", State: DotStateUntrackedLinked},
-			{Name: "ghost", State: DotStateNoSource},
-			{Name: "synced", State: DotStateSynced},
-			{Name: "ignored", State: DotStateIgnored},
+			{Name: "nvim", State: dots.StateModified},
+			{Name: "gitconfig", State: dots.StateConflict},
+			{Name: "kitty", State: dots.StateUntrackedLinked},
+			{Name: "ghost", State: dots.StateNoSource},
+			{Name: "synced", State: dots.StateSynced},
+			{Name: "ignored", State: dots.StateIgnored},
 		},
 	})
 
@@ -43,7 +45,7 @@ func TestAnalyzeDotsReminderStatus_ClassifiesReasons(t *testing.T) {
 
 func TestAnalyzeDotsReminderStatus_Clean(t *testing.T) {
 	result := AnalyzeDotsReminderStatus(&DotsStatusResult{
-		Entries: []DotStatus{{Name: "nvim", State: DotStateSynced}},
+		Entries: []DotStatus{{Name: "nvim", State: dots.StateSynced}},
 	})
 
 	if result.NeedsReminder {

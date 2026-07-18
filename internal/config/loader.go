@@ -548,6 +548,11 @@ func groupBaseName(g *GroupConfig) string {
 //
 // If the file does not exist, Patch creates it with only the patch keys.
 // A patch entry whose value is JSON null deletes that top-level key.
+//
+// Patch is include-blind: it writes into path only, so a key that lives in an
+// $include fragment is duplicated into the main file and resurrects on the next
+// load. Prefer WriteConfig (or PatchRouted) for any real settings edit; Patch
+// remains only for single-file callers and test fixtures.
 func Patch(path string, patch interface{}) error {
 	patchData, err := json.Marshal(patch)
 	if err != nil {
@@ -791,6 +796,11 @@ func isJSONNull(v json.RawMessage) bool {
 
 // Save marshals cfg to JSON and writes it atomically to path.
 // Creates parent directories if they do not exist.
+//
+// Save is a whole-file, include-blind replace: it emits the entire RootConfig
+// into path and does not honor the $include chain. Use it only to materialize a
+// fresh file (init) or overwrite one wholesale (import). To edit settings in
+// place, use WriteConfig, which routes each changed key to its owning fragment.
 // Output is indented for human readability.
 // The "$schema" field is always stamped with SchemaURL on write.
 func Save(path string, cfg *RootConfig) error {

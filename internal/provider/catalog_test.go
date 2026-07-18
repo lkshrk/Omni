@@ -25,6 +25,19 @@ func TestBuiltinConcreteProviderPriorityNames(t *testing.T) {
 	}
 }
 
+func TestBuiltinMetadata_RequiresPrivilege(t *testing.T) {
+	// The sudo-backed system package managers carry the flag; everything else
+	// (brew, ecosystems, python/node managers, script) does not. This is the
+	// single source of truth the privilege display marker reads.
+	privileged := map[string]bool{"apt": true, "apk": true, "dnf": true, "pacman": true, "zypper": true}
+	for _, name := range []string{"apt", "apk", "dnf", "pacman", "zypper", "brew", "system", "pip", "pip3", "uv", "npm", "bun", "script", "unknown"} {
+		want := privileged[name]
+		if got := provider.BuiltinMetadata(name).RequiresPrivilege; got != want {
+			t.Errorf("BuiltinMetadata(%q).RequiresPrivilege = %v, want %v", name, got, want)
+		}
+	}
+}
+
 func TestBuiltinMetadata_Script(t *testing.T) {
 	meta := provider.BuiltinMetadata("script")
 	if meta.Kind != provider.ProviderKindConcrete {

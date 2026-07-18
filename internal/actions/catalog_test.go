@@ -284,6 +284,12 @@ func TestToolActionIDsAreUnique(t *testing.T) {
 	}
 }
 
+func TestToolChangeGroupLabelIsEditGroups(t *testing.T) {
+	if got := MustTUILabel(ToolChangeGroup); got != LabelEditGroups {
+		t.Fatalf("tools group hint = %q, want %q", got, LabelEditGroups)
+	}
+}
+
 func TestLogicalToolActionContracts(t *testing.T) {
 	claim := mustAction(t, ToolClaim)
 	for _, req := range []Requirement{RequiresGroupAssignment, RequiresEcosystemProvider} {
@@ -296,6 +302,9 @@ func TestLogicalToolActionContracts(t *testing.T) {
 	}
 
 	changeGroup := mustAction(t, ToolChangeGroup)
+	if changeGroup.Label != "edit groups" || changeGroup.TUI == nil || changeGroup.TUI.Label != "edit groups" {
+		t.Fatalf("change-group TUI wording must describe the multi-select action: %+v", changeGroup)
+	}
 	for _, command := range [][]string{{"groups", "move-tool"}, {"groups", "remove-tool"}} {
 		if !hasCLICommand(changeGroup, command) {
 			t.Fatalf("%s missing CLI command %v in %+v", changeGroup.ID, command, changeGroup.CLI)

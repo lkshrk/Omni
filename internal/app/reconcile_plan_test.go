@@ -179,7 +179,7 @@ func TestDashboardReconcilePlan_EmptyHealthySnapshotHasNoSteps(t *testing.T) {
 		},
 		DotsRepo: "/repo",
 		DotsEntries: []app.DotStatus{
-			{Name: "zsh", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}},
+			{Name: "zsh", State: dots.StateSynced, Counts: app.DotFileCounts{Synced: 1}},
 		},
 	})
 
@@ -199,7 +199,7 @@ func TestDashboardReconcilePlan_PlansActionableToolDotAndIgnoreSteps(t *testing.
 		},
 		DotsRepo: "/repo",
 		DotsEntries: []app.DotStatus{
-			{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 2}},
+			{Name: "nvim", State: dots.StateConflict, Counts: app.DotFileCounts{OutOfSync: 2}},
 		},
 		DotsGitStatus: " M dotfiles/zsh/.zshrc\n?? dotfiles/nvim/init.lua",
 		Doctor: &app.DoctorResult{Checks: []app.DoctorCheck{
@@ -274,7 +274,7 @@ func TestDashboardReconcilePlan_UsesExplicitDotsConfiguredFlag(t *testing.T) {
 	steps := app.DashboardReconcilePlan(app.DashboardReconcilePlanInput{
 		DotsConfigured: true,
 		DotsEntries: []app.DotStatus{
-			{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}},
+			{Name: "nvim", State: dots.StateConflict, Counts: app.DotFileCounts{OutOfSync: 1}},
 		},
 	})
 
@@ -288,7 +288,7 @@ func TestDashboardReconcilePlan_SuppressesDotsStepsWhenDotsUnavailable(t *testin
 	base := app.DashboardReconcilePlanInput{
 		DotsRepo: "/repo",
 		DotsEntries: []app.DotStatus{
-			{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}},
+			{Name: "nvim", State: dots.StateConflict, Counts: app.DotFileCounts{OutOfSync: 1}},
 		},
 		DotsGitStatus: " M dotfiles/zsh/.zshrc",
 	}

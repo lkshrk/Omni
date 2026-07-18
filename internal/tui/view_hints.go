@@ -10,6 +10,7 @@ import (
 	"github.com/lkshrk/omni/internal/actions"
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/dots"
 )
 
 // hintItem pairs a key label and its action description for rendered hints.
@@ -454,14 +455,16 @@ func dotsRowHintItems(m Model) []hintItem {
 	if dotsViewDisabled(m) {
 		return hints
 	}
-	if (!row.isChild || dotsChildOutOfSync(row)) && app.DotStatusHasAction(entry, app.DotActionSync) {
+	if dotsRowInstallEligible(row) {
+		hints = append(hints, hintFromBindingDesc(m.keys.Install, "install"))
+	} else if (!row.isChild || dotsChildOutOfSync(row)) && app.DotStatusHasAction(entry, dots.ActionSync) {
 		hints = append(hints, hintFromBindingDesc(m.keys.Sync, app.DotStatusSyncActionLabel(entry)))
 	}
 	if row.isChild && dotsChildOutOfSync(row) {
-		if app.DotStatusHasAction(entry, app.DotActionUseRepo) {
+		if dotsRowResolveEligible(row, app.DotResolveUseRepo) {
 			hints = append(hints, hintFromBindingDesc(m.keys.DotUseRepo, actions.MustTUILabel(actions.DotsResolveUseRepo)))
 		}
-		if app.DotStatusHasAction(entry, app.DotActionUseLocal) {
+		if dotsRowResolveEligible(row, app.DotResolveUseLocal) {
 			hints = append(hints, hintFromBindingDesc(m.keys.DotUseLocal, actions.MustTUILabel(actions.DotsResolveUseLocal)))
 		}
 	}
@@ -474,20 +477,20 @@ func dotsRowHintItems(m Model) []hintItem {
 	if dotsVariantEligible(row) {
 		hints = append(hints, hintFromBinding(m.keys.DotVariant))
 	}
-	if row.isChild && app.DotStatusHasAction(entry, app.DotActionIgnore) {
+	if row.isChild && app.DotStatusHasAction(entry, dots.ActionIgnore) {
 		desc := "ignore"
 		if row.child.Ignored {
 			desc = "include"
 		}
 		hints = append(hints, hintFromBindingDesc(m.keys.DotIgnore, desc))
-	} else if !row.isChild && (app.DotStatusHasAction(entry, app.DotActionIgnore) || app.DotStatusHasAction(entry, app.DotActionUnignore)) {
+	} else if !row.isChild && (app.DotStatusHasAction(entry, dots.ActionIgnore) || app.DotStatusHasAction(entry, dots.ActionUnignore)) {
 		desc := "ignore"
 		if app.DotStatusIgnored(entry) {
 			desc = "include"
 		}
 		hints = append(hints, hintFromBindingDesc(m.keys.DotIgnore, desc))
 	}
-	if !row.isChild && app.DotStatusHasAction(entry, app.DotActionRemove) {
+	if !row.isChild && app.DotStatusHasAction(entry, dots.ActionRemove) {
 		hints = append(hints, hintFromBinding(m.keys.DotDelete))
 	}
 	return hints
@@ -505,23 +508,25 @@ func dotsConflictHintItems(m Model) []hintItem {
 	if dotsViewDisabled(m) {
 		return hints
 	}
-	if app.DotStatusHasAction(entry, app.DotActionUseRepo) {
+	if dotsRowInstallEligible(row) {
+		hints = append(hints, hintFromBindingDesc(m.keys.Install, "install"))
+	} else if dotsRowResolveEligible(row, app.DotResolveUseRepo) {
 		hints = append(hints, hintFromBindingDesc(m.keys.DotUseRepo, actions.MustTUILabel(actions.DotsResolveUseRepo)))
 	}
-	if app.DotStatusHasAction(entry, app.DotActionUseLocal) {
+	if dotsRowResolveEligible(row, app.DotResolveUseLocal) {
 		hints = append(hints, hintFromBindingDesc(m.keys.DotUseLocal, actions.MustTUILabel(actions.DotsResolveUseLocal)))
 	}
 	if dotsVariantEligible(row) {
 		hints = append(hints, hintFromBinding(m.keys.DotVariant))
 	}
-	if app.DotStatusHasAction(entry, app.DotActionIgnore) || app.DotStatusHasAction(entry, app.DotActionUnignore) {
+	if app.DotStatusHasAction(entry, dots.ActionIgnore) || app.DotStatusHasAction(entry, dots.ActionUnignore) {
 		desc := "ignore"
 		if app.DotStatusIgnored(entry) {
 			desc = "include"
 		}
 		hints = append(hints, hintFromBindingDesc(m.keys.DotIgnore, desc))
 	}
-	if app.DotStatusHasAction(entry, app.DotActionRemove) {
+	if app.DotStatusHasAction(entry, dots.ActionRemove) {
 		hints = append(hints, hintFromBinding(m.keys.DotDelete))
 	}
 	if dotsConflictCount(m) > 1 {
@@ -597,7 +602,8 @@ func toolInlineHints(m Model, t *database.ToolCache) []hintItem {
 		showIgnore = true
 		showDelete = true
 	case isIgnored:
-		hints = append(hints, hintFromBindingDesc(m.keys.Ignore, "edit ignore"))
+		hints = append(hints, hintFromBindingDesc(m.keys.Ignore, "include"), hintFromBinding(m.keys.EditIgnore))
+		showDelete = true
 	case !t.Installed:
 		hints = append(hints, hintFromBinding(m.keys.Install))
 		if t.Tracked {

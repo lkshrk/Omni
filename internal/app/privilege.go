@@ -243,23 +243,36 @@ func PrivilegeFailureRequiresApproval(message string) bool {
 }
 
 func isPrivilegedInstallFailure(message string) bool {
-	if plan, ok := privilegePlanFromRowError(message); ok && plan.RequiresPrivilege() {
-		return true
-	}
-	message = strings.ToLower(message)
-	return strings.Contains(message, "requires sudo") ||
-		strings.Contains(message, "requires root") ||
-		strings.Contains(message, "requires admin") ||
-		strings.Contains(message, "administrator")
+	plan, ok := privilegePlanFromRowError(message)
+	return ok && plan.RequiresPrivilege()
 }
 
+// privilegePlanFromRowError is the single classifier for whether a stored or
+// serialized error message indicates a privilege requirement. It is a superset
+// of every prior ad-hoc keyword check: the "requires X:" wire prefix (with its
+// specific reason), the package-manager markers, provider.ClassifyPrivilegeError
+// (raw external stderr), and the bare "requires sudo/root/admin"/"administrator"
+// wire phrases. Callers must route through this rather than re-matching keywords,
+// so the lists cannot drift and a dropped phrase can't silently skip a sudo
+// prompt.
 func privilegePlanFromRowError(message string) (provider.PrivilegePlan, bool) {
 	message = strings.TrimSpace(message)
-	reason := privilegeReasonFromRowError(message)
-	if reason != "" {
+	if reason := privilegeReasonFromRowError(message); reason != "" {
 		return provider.PrivilegePlan{Requirement: provider.PrivilegeRequired, Reason: reason}, true
 	}
-	return provider.ClassifyPrivilegeError(errors.New(message))
+	if plan, ok := provider.ClassifyPrivilegeError(errors.New(message)); ok {
+		return plan, true
+	}
+	// Bare omni wire phrases carrying no ":" reason suffix (e.g. an event message
+	// "install requires root"). ClassifyPrivilegeError targets raw package-manager
+	// stderr and misses these, so catch them here.
+	lower := strings.ToLower(message)
+	for _, phrase := range []string{"requires sudo", "requires root", "requires admin", "administrator"} {
+		if strings.Contains(lower, phrase) {
+			return provider.PrivilegePlan{Requirement: provider.PrivilegeRequired, Reason: "package manager needs privileged access"}, true
+		}
+	}
+	return provider.PrivilegePlan{}, false
 }
 
 func shouldPreferRowPrivilegePlan(plan, rowPlan provider.PrivilegePlan) bool {

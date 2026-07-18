@@ -492,7 +492,7 @@ func (a *App) dotsWatchPaths() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	mgr, err := dots.New(dotsContentPath(rawRepo), entries)
+	mgr, err := dots.NewEngine(dotsContentPath(rawRepo), entries)
 	if err != nil {
 		return nil, fmt.Errorf("dots watch: resolve entries: %w", err)
 	}

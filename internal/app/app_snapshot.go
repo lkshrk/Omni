@@ -20,6 +20,7 @@ type StartupSnapshot struct {
 	GroupNames             []string
 	HostInfo               *HostInfo
 	ToolMemberships        map[string][]string
+	HostInventoryTools     map[string]bool
 	ToolGroups             map[string]string
 	DotMemberships         map[string][]string
 	IgnoreLabels           map[string]string
@@ -117,6 +118,14 @@ func (a *App) StartupSnapshot(ctx context.Context) (*StartupSnapshot, error) {
 	stop = profile.Start("app.startup.resolve_tools")
 	resolved, _ := a.currentResolvedTools(ctx, cfg)
 	toolMemberships := toolMembershipMapFromResolved(resolved)
+	hostInventoryTools := make(map[string]bool)
+	for _, group := range cfg.Groups {
+		if group.IsSystemInventory() {
+			for _, tool := range group.Tools {
+				hostInventoryTools[tool.Name] = true
+			}
+		}
+	}
 	toolGroupState := a.toolGroupStateFromConfigAndMemberships(cfg, toolMemberships, hostInfo)
 	toolScopeState := a.toolScopeStateFromConfig(cfg)
 	toolScopeDisplayState := BuildToolScopeDisplayState(toolScopeState)
@@ -181,6 +190,7 @@ func (a *App) StartupSnapshot(ctx context.Context) (*StartupSnapshot, error) {
 		GroupNames:             toolGroupState.GroupNames,
 		HostInfo:               hostInfo,
 		ToolMemberships:        toolMemberships,
+		HostInventoryTools:     hostInventoryTools,
 		ToolGroups:             toolGroupState.ToolGroups,
 		DotMemberships:         dotMembershipMapFromConfig(cfg),
 		IgnoreLabels:           toolScopeDisplayState.IgnoreLabels,

@@ -615,10 +615,10 @@ func cliTestGroupHasTool(group *config.GroupConfig, name string) bool {
 
 func TestPrintDotsTable_FormatsCorrectly(t *testing.T) {
 	statuses := []app.DotStatus{
-		{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, Actions: []app.DotAction{app.DotActionRemove}},
-		{Name: "zsh", TargetPath: "~/.zshrc", Health: app.HealthMissing, Actions: []app.DotAction{app.DotActionSync}},
-		{Name: "ssh", TargetPath: "~/.ssh", Health: app.HealthConflict, Actions: []app.DotAction{app.DotActionUseRepo, app.DotActionUseLocal}},
-		{Name: "none", TargetPath: "~/.none", Health: app.HealthNoSource, Actions: []app.DotAction{app.DotActionRemove}},
+		{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, Actions: []dots.Action{dots.ActionRemove}},
+		{Name: "zsh", TargetPath: "~/.zshrc", Health: app.HealthMissing, Actions: []dots.Action{dots.ActionSync}},
+		{Name: "ssh", TargetPath: "~/.ssh", Health: app.HealthConflict, Actions: []dots.Action{dots.ActionUseRepo, dots.ActionUseLocal}},
+		{Name: "none", TargetPath: "~/.none", Health: app.HealthNoSource, Actions: []dots.Action{dots.ActionRemove}},
 	}
 
 	cmd := &cobra.Command{}
@@ -2642,13 +2642,13 @@ func TestConsolidate_EcosystemDryRun_ASCIISymbolModeUsesCommandOutput(t *testing
 
 // ─── sync: warnings output ────────────────────────────────────────────────────
 
-func TestSync_DuplicateToolOwnership_ReturnsValidationError(t *testing.T) {
+func TestSync_DuplicateToolOwnership_IsAllowed(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
-	// Duplicate tool across two reusable groups is invalid (an item may hold at
-	// most one reusable group; host + one reusable would be fine).
+	// A tool may belong to any number of reusable groups, so having ripgrep in
+	// both "base" and "work" is valid and sync should succeed.
 	withConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"ripgrep": {Provider: "system", InstallWith: "brew"},
@@ -2656,18 +2656,19 @@ func TestSync_DuplicateToolOwnership_ReturnsValidationError(t *testing.T) {
 		Groups: []*config.GroupConfig{
 			{Name: "base", Tools: []config.ToolEntry{{Name: "ripgrep"}}},
 			{Name: "work", Tools: []config.ToolEntry{
-				{Name: "ripgrep"}, // duplicate name in a second reusable group
+				{Name: "ripgrep"}, // same tool in a second reusable group
 			}},
 		},
 	})
+	withHost(t, cfgPath)
 
 	cmd := NewRootCmd()
 	errBuf := &bytes.Buffer{}
 	cmd.SetErr(errBuf)
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "sync", "--dry-run"})
 	err := cmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), `tool "ripgrep" already belongs to reusable group`) {
-		t.Fatalf("sync error = %v, want duplicate reusable ownership validation error", err)
+	if err != nil {
+		t.Fatalf("sync error = %v, want nil for tool in multiple reusable groups", err)
 	}
 }
 
@@ -2892,6 +2893,34 @@ func TestImport_WithGroupFlag_DryRun(t *testing.T) {
 	}
 }
 
+// TestDotsVariantAddSubpath_MissingParentErrors verifies the --subpath flag
+// routes through the extract-then-variant composition and surfaces its error
+// when the parent entry does not exist.
+func TestDotsVariantAddSubpath_MissingParentErrors(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	repoDir := t.TempDir()
+	withConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{DotsRepo: repoDir},
+		Groups: []*config.GroupConfig{{
+			Name:    "testhost",
+			Special: "host",
+			Dots:    []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}},
+		}},
+		Hosts: map[string][]string{"testhost": {}},
+	})
+
+	add := NewRootCmd()
+	add.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "dots", "variant", "add", "nope", "--subpath", "lua"})
+	if err := add.Execute(); err == nil {
+		t.Fatal("expected error extracting subpath from a missing parent entry")
+	}
+}
+
 func TestDotsVariantAddListRemove(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost")
 	home := t.TempDir()
@@ -2964,6 +2993,101 @@ func TestDotsVariantAddListRemove(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(repoDir, "dotfiles", "nvim-work")); !os.IsNotExist(err) {
 		t.Fatalf("variant package after remove error = %v, want missing", err)
 	}
+}
+
+func TestDotsGroup_MultiHostOneReusableOK_TwoReusableRejected(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	repoDir := t.TempDir()
+	srcDir := filepath.Join(repoDir, "dotfiles", "nvim", ".config", "nvim")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "init.lua"), []byte("default"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{DotsRepo: repoDir},
+		Groups: []*config.GroupConfig{
+			{
+				Name:    "testhost",
+				Special: "host",
+				Dots:    []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}},
+			},
+			{Name: "work"},
+			{Name: "base"},
+		},
+		Hosts: map[string][]string{"testhost": {}},
+	})
+
+	// host group "testhost", reusable "work","base", dot "nvim"
+	ok := NewRootCmd()
+	ok.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir,
+		"dots", "group", "nvim", "--group", "testhost", "--group", "work"})
+	if err := ok.Execute(); err != nil {
+		t.Fatalf("host+one reusable should succeed: %v", err)
+	}
+	bad := NewRootCmd()
+	bad.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir,
+		"dots", "group", "nvim", "--group", "work", "--group", "base"})
+	if err := bad.Execute(); err == nil {
+		t.Fatal("two reusable groups for a dot must be rejected")
+	}
+}
+
+func TestGroupsSetTool_MultipleReusableGroups(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+
+	withConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"eslint": {Type: "package", Provider: "brew", Package: "eslint"},
+		},
+		Groups: []*config.GroupConfig{
+			{Name: "testhost", Special: "host"},
+			{Name: "work"},
+			{Name: "base"},
+		},
+		Hosts: map[string][]string{"testhost": {}},
+	})
+
+	root := NewRootCmd()
+	root.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir,
+		"groups", "set-tool", "eslint", "work", "base"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("set-tool multi: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	work := findCLIDotsTestGroup(cfg.Groups, "work")
+	base := findCLIDotsTestGroup(cfg.Groups, "base")
+	if work == nil || !cliGroupHasTool(work, "eslint") {
+		t.Fatalf("eslint should be a member of group work, groups=%#v", cfg.Groups)
+	}
+	if base == nil || !cliGroupHasTool(base, "eslint") {
+		t.Fatalf("eslint should be a member of group base, groups=%#v", cfg.Groups)
+	}
+}
+
+func cliGroupHasTool(g *config.GroupConfig, name string) bool {
+	if g == nil {
+		return false
+	}
+	for _, tool := range g.Tools {
+		if tool.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // ─── dots add command: with flags ─────────────────────────────────────────────
@@ -3997,7 +4121,7 @@ func TestInstall_ConfiguredToolAutoAddsHighConfidenceProviderMatches(t *testing.
 	if !strings.Contains(out.String(), "matched providers: prettier -> npm/prettier, brew/prettier") {
 		t.Fatalf("output = %q, want matched providers line", out.String())
 	}
-	if !strings.Contains(out.String(), "✓ installed prettier (npm)") {
+	if !strings.Contains(out.String(), textutil.SymbolsFromEnv().Apply("✓ installed prettier (npm)")) {
 		t.Fatalf("output = %q, want installed npm line", out.String())
 	}
 	cfg, err := config.Load(cfgPath)
@@ -4054,7 +4178,7 @@ func TestInstall_ConfiguredToolPrintsProviderMatchSearchWarning(t *testing.T) {
 	if !strings.Contains(output, "warning: searching npm: registry unavailable") {
 		t.Fatalf("output = %q, want partial search warning", output)
 	}
-	if !strings.Contains(output, "✓ installed prettier (brew)") {
+	if !strings.Contains(output, textutil.SymbolsFromEnv().Apply("✓ installed prettier (brew)")) {
 		t.Fatalf("output = %q, want installed brew line", output)
 	}
 }
@@ -4150,7 +4274,7 @@ func TestInstall_ConfiguredToolAllowWeakInstallsWeakProviderMatch(t *testing.T) 
 	if !strings.Contains(out.String(), "matched provider: prettier -> npm/prettier-plugin-tailwindcss") {
 		t.Fatalf("output = %q, want matched weak provider line", out.String())
 	}
-	if !strings.Contains(out.String(), "✓ installed prettier (npm)") {
+	if !strings.Contains(out.String(), textutil.SymbolsFromEnv().Apply("✓ installed prettier (npm)")) {
 		t.Fatalf("output = %q, want installed npm line", out.String())
 	}
 	cfg, err := config.Load(cfgPath)
@@ -4212,7 +4336,7 @@ func TestInstall_ConfiguredToolAllowWeakHonorsProviderFilter(t *testing.T) {
 	if !strings.Contains(out.String(), "matched provider: prettier -> brew/prettier-plugin-tailwindcss") {
 		t.Fatalf("output = %q, want matched filtered weak provider line", out.String())
 	}
-	if !strings.Contains(out.String(), "✓ installed prettier (brew)") {
+	if !strings.Contains(out.String(), textutil.SymbolsFromEnv().Apply("✓ installed prettier (brew)")) {
 		t.Fatalf("output = %q, want installed brew line", out.String())
 	}
 	cfg, err := config.Load(cfgPath)
@@ -4264,7 +4388,7 @@ func TestInstall_ConfiguredToolAllowWeakProviderFamilyFilterInstallsConcreteMatc
 	if !strings.Contains(out.String(), "matched provider: prettier -> brew/prettier-plugin-tailwindcss") {
 		t.Fatalf("output = %q, want matched family-filtered weak provider line", out.String())
 	}
-	if !strings.Contains(out.String(), "✓ installed prettier (brew)") {
+	if !strings.Contains(out.String(), textutil.SymbolsFromEnv().Apply("✓ installed prettier (brew)")) {
 		t.Fatalf("output = %q, want installed brew line", out.String())
 	}
 	cfg, err := config.Load(cfgPath)
@@ -4316,7 +4440,7 @@ func TestInstall_ConfiguredToolAllowWeakNodeFamilyFilterInstallsConcreteMatch(t 
 	if !strings.Contains(out.String(), "matched provider: prettier -> npm/prettier-plugin-tailwindcss") {
 		t.Fatalf("output = %q, want matched family-filtered weak provider line", out.String())
 	}
-	if !strings.Contains(out.String(), "✓ installed prettier (npm)") {
+	if !strings.Contains(out.String(), textutil.SymbolsFromEnv().Apply("✓ installed prettier (npm)")) {
 		t.Fatalf("output = %q, want installed npm line", out.String())
 	}
 	cfg, err := config.Load(cfgPath)
@@ -4368,7 +4492,7 @@ func TestInstall_ConfiguredToolAllowWeakPythonFamilyFilterInstallsConcreteMatch(
 	if !strings.Contains(out.String(), "matched provider: ruff -> pip/ruff-lsp") {
 		t.Fatalf("output = %q, want matched family-filtered weak provider line", out.String())
 	}
-	if !strings.Contains(out.String(), "✓ installed ruff (pip)") {
+	if !strings.Contains(out.String(), textutil.SymbolsFromEnv().Apply("✓ installed ruff (pip)")) {
 		t.Fatalf("output = %q, want installed pip line", out.String())
 	}
 	cfg, err := config.Load(cfgPath)
@@ -5432,6 +5556,59 @@ func TestDoctorFixRemovesDuplicateDotDefinitions(t *testing.T) {
 	}
 }
 
+func TestDoctorFixOptimizerFailureStillCleansIgnorePatterns(t *testing.T) {
+	cfgDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	if err := os.MkdirAll(filepath.Join(cfgDir, "settings.d"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(path, content string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(cfgPath, `{
+  "$include": ["settings.d/dots.json"],
+  "groups": [
+	{"dots": [{"name": "git", "path": "~/.gitconfig"}, {"name": "vim", "path": "~/.vimrc"}]},
+    {"name": "dev", "dots": [{"name": "myapp", "path": "~/.myapp", "ignore": ["*", "!/settings.json", "!/skills/", "skills"]}]}
+  ]
+}`)
+	write(filepath.Join(cfgDir, "settings.d", "dots.json"), `{
+  "groups": [{"dots": [{"name": "git", "path": "~/.gitconfig"}, {"name": "zsh", "path": "~/.zshrc"}]}]
+}`)
+
+	cmd := newDoctorCmd(&rootState{app: app.New(cfgPath)})
+	out := &bytes.Buffer{}
+	cmd.SetOut(out)
+	cmd.SetErr(out)
+	cmd.SetArgs([]string{"--fix"})
+	err := cmd.Execute()
+	output := out.String()
+	if err == nil {
+		t.Fatalf("doctor --fix should report optimizer failure:\n%s", output)
+	}
+	if !strings.Contains(err.Error(), "merged config would change") {
+		t.Fatalf("doctor --fix error = %v", err)
+	}
+	if !strings.Contains(output, "cleaned ignore patterns for: myapp") {
+		t.Fatalf("doctor --fix did not report independent ignore cleanup:\n%s", output)
+	}
+
+	cfg, loadErr := config.Load(cfgPath)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	dev := findCLIDotsTestGroup(cfg.Groups, "dev")
+	if dev == nil || len(dev.Dots) != 1 {
+		t.Fatalf("dev group after fix = %#v", dev)
+	}
+	if want := []string{"*", "!/settings.json"}; !slices.Equal(dev.Dots[0].Ignore, want) {
+		t.Fatalf("ignore patterns = %v, want %v", dev.Dots[0].Ignore, want)
+	}
+}
+
 func TestDoctorDryRunRequiresFix(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
 	cacheDir := t.TempDir()
@@ -6236,4 +6413,164 @@ func TestRunDotsInitSection_NonStandardPath_Nonexistent(t *testing.T) {
 	withMockStdin(t, stdinInput, func() {
 		_ = runDotsInitSection(context.Background(), a)
 	})
+}
+
+// TestAgentsSkillsGroup_MultipleGroups pins that `agents skills group` sets a
+// skill package's full group membership with no reusable-group cap: the
+// source must land in every named group.
+func TestAgentsSkillsGroup_MultipleGroups(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	skillSource := "acme/skills"
+
+	withConfig(t, cfgPath, &config.RootConfig{
+		Agents: config.AgentsConfig{
+			Packages: []config.SkillPackage{{Source: skillSource}},
+		},
+		Groups: []*config.GroupConfig{
+			{Name: "testhost", Special: "host"},
+			{Name: "work"},
+			{Name: "base"},
+		},
+	})
+
+	root := NewRootCmd()
+	root.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir,
+		"agents", "skills", "group", skillSource, "work", "base"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("skill multi-group set: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	for _, name := range []string{"work", "base"} {
+		group := cliTestGroup(cfg, name)
+		if group == nil || !slices.Contains(group.Skills, skillSource) {
+			t.Fatalf("skill %q should be a member of group %q, groups=%+v", skillSource, name, cfg.Groups)
+		}
+	}
+}
+
+// TestAgentsMcpGroup_MultipleGroups pins that `agents mcp group` sets an MCP
+// server's full group membership across every named group.
+func TestAgentsMcpGroup_MultipleGroups(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	mcpName := "acme-mcp"
+
+	withConfig(t, cfgPath, &config.RootConfig{
+		Agents: config.AgentsConfig{
+			McpServers: []config.McpServer{{Name: mcpName, Transport: "stdio", Command: "acme-mcp"}},
+		},
+		Groups: []*config.GroupConfig{
+			{Name: "testhost", Special: "host"},
+			{Name: "work"},
+			{Name: "base"},
+		},
+	})
+
+	root := NewRootCmd()
+	root.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir,
+		"agents", "mcp", "group", mcpName, "work", "base"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("mcp multi-group set: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	for _, name := range []string{"work", "base"} {
+		group := cliTestGroup(cfg, name)
+		if group == nil || !slices.Contains(group.McpServers, mcpName) {
+			t.Fatalf("mcp server %q should be a member of group %q, groups=%+v", mcpName, name, cfg.Groups)
+		}
+	}
+}
+
+// TestAgentsPluginGroup_MultipleGroups pins that `agents plugins group` sets
+// a plugin's full group membership across every named group.
+func TestAgentsPluginGroup_MultipleGroups(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	pluginName := "acme-plugin"
+	marketplaceName := "acme-marketplace"
+
+	withConfig(t, cfgPath, &config.RootConfig{
+		Agents: config.AgentsConfig{
+			Marketplaces: []config.Marketplace{{Name: marketplaceName, Source: "acme/marketplace"}},
+			Plugins:      []config.Plugin{{Name: pluginName, Marketplace: marketplaceName}},
+		},
+		Groups: []*config.GroupConfig{
+			{Name: "testhost", Special: "host"},
+			{Name: "work"},
+			{Name: "base"},
+		},
+	})
+
+	root := NewRootCmd()
+	root.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir,
+		"agents", "plugins", "group", pluginName, "work", "base"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("plugin multi-group set: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	for _, name := range []string{"work", "base"} {
+		group := cliTestGroup(cfg, name)
+		if group == nil || !slices.Contains(group.Plugins, pluginName) {
+			t.Fatalf("plugin %q should be a member of group %q, groups=%+v", pluginName, name, cfg.Groups)
+		}
+	}
+}
+
+// TestAgentsMarketplaceGroup_MultipleGroups pins that `agents plugins
+// marketplace group` sets a marketplace's full group membership across every
+// named group.
+func TestAgentsMarketplaceGroup_MultipleGroups(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	marketplaceName := "acme-marketplace"
+
+	withConfig(t, cfgPath, &config.RootConfig{
+		Agents: config.AgentsConfig{
+			Marketplaces: []config.Marketplace{{Name: marketplaceName, Source: "acme/marketplace"}},
+		},
+		Groups: []*config.GroupConfig{
+			{Name: "testhost", Special: "host"},
+			{Name: "work"},
+			{Name: "base"},
+		},
+	})
+
+	root := NewRootCmd()
+	root.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir,
+		"agents", "plugins", "marketplace", "group", marketplaceName, "work", "base"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("marketplace multi-group set: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	for _, name := range []string{"work", "base"} {
+		group := cliTestGroup(cfg, name)
+		if group == nil || !slices.Contains(group.Marketplaces, marketplaceName) {
+			t.Fatalf("marketplace %q should be a member of group %q, groups=%+v", marketplaceName, name, cfg.Groups)
+		}
+	}
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/dots"
 	"github.com/lkshrk/omni/internal/provider"
 	gosync "github.com/lkshrk/omni/internal/sync"
 )
@@ -1469,6 +1470,7 @@ func TestDoSetToolGroupMemberships_ExistingGroupJoinsHost(t *testing.T) {
 		Tracked:  true,
 	}})
 	rowModel.toolGroups = got.toolGroups
+	rowModel.toolMemberships = got.toolMemberships
 	rowModel.groupNames = []string{"work"}
 	rowModel.hostInfo = &app.HostInfo{
 		Active: host,
@@ -1478,6 +1480,81 @@ func TestDoSetToolGroupMemberships_ExistingGroupJoinsHost(t *testing.T) {
 	out := renderList(rowModel)
 	if !strings.Contains(out, "[work]") {
 		t.Fatalf("missing tool row should render group badge:\n%s", out)
+	}
+}
+
+func TestGroupMembershipPicker_PersistsMultipleHostGroups(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "beta.local")
+	prov := &okProvider{name: "brew"}
+	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	cfg.Groups = []*config.GroupConfig{
+		{Name: "alpha", Special: "host", Tools: []config.ToolEntry{{Name: "ripgrep"}}},
+		{Name: "beta", Special: "host"},
+		{Name: "work"},
+	}
+	cfg.Hosts = map[string][]string{
+		"alpha": {"work"},
+		"beta":  {"work"},
+	}
+	if err := saveTUIConfig(t, cfgPath, cfg); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	key := toolKey("ripgrep", "brew")
+	m := modelForCmds(a)
+	m.mode = viewGroupMembership
+	m.groupNames = []string{"work"}
+	m.pickerGroups = []string{"alpha", "beta", "work"}
+	m.pickerMembershipName = "ripgrep"
+	m.pickerMembershipKey = key
+	m.pickerOriginalGroups = []string{"alpha"}
+	m.toolMemberships = map[string][]string{key: {"alpha"}}
+	m.hostInfo = &app.HostInfo{
+		Active: "beta",
+		Hosts: map[string]config.HostAssignment{
+			"alpha": {Groups: []string{"work"}},
+			"beta":  {Groups: []string{"work"}},
+		},
+	}
+
+	space := tea.KeyPressMsg{Code: ' ', Text: " "}
+	m.pickerCursor = 1
+	if cmds := m.handleGroupMembershipKeyMsg(space); len(cmds) != 0 {
+		t.Fatalf("space should only update the draft, got %d commands", len(cmds))
+	}
+	m.pickerCursor = 2
+	m.handleGroupMembershipKeyMsg(space)
+	cmds := m.handleGroupMembershipKeyMsg(tea.KeyPressMsg{Code: tea.KeyEnter})
+
+	var saved groupChangedMsg
+	found := false
+	for _, cmd := range cmds {
+		for _, msg := range runBatchCmd(cmd) {
+			if result, ok := msg.(groupChangedMsg); ok {
+				saved, found = result, true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("confirm did not dispatch a group save; commands=%d", len(cmds))
+	}
+	if saved.err != nil {
+		t.Fatalf("group save: %v", saved.err)
+	}
+
+	cfg, err = config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load after picker save: %v", err)
+	}
+	for _, name := range []string{"alpha", "beta", "work"} {
+		group := findTestGroup(cfg, name)
+		if group == nil || !containsToolMembership(group.Tools, "ripgrep") {
+			t.Fatalf("ripgrep should remain in %q after picker save, groups=%+v", name, cfg.Groups)
+		}
 	}
 }
 
@@ -1564,7 +1641,7 @@ func TestDoSetDotGroupMemberships_ExistingGroupJoinsHost(t *testing.T) {
 	if len(got.entries) != 1 {
 		t.Fatalf("refreshed entries = %#v, want exactly nvim", got.entries)
 	}
-	if got.entries[0].Name != "nvim" || got.entries[0].Group != "work" || got.entries[0].State != app.DotStateSynced {
+	if got.entries[0].Name != "nvim" || got.entries[0].Group != "work" || got.entries[0].State != dots.StateSynced {
 		t.Fatalf("refreshed entry = %#v, want synced nvim in work", got.entries[0])
 	}
 }
@@ -2223,7 +2300,7 @@ func TestDoRefreshDotsHistory_ReadsRecentAppHistory(t *testing.T) {
 	m.height = 24
 	m.setSettings(config.Settings{DotsRepo: repoDir})
 	m.dotsLoaded = true
-	m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: app.DotStateSynced}}
+	m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: dots.StateSynced}}
 	m.dotsConfirmIdx = -1
 	m.dotsOverwriteIdx = -1
 	m.dotsLocalIdx = -1
@@ -2573,9 +2650,9 @@ func TestHandleDotsVariantKeyMsg_UsesAppActiveHostVariant(t *testing.T) {
 
 	m := modelForCmds(a)
 	visible := []dotsVisibleRow{
-		{entry: app.DotStatus{Name: "nvim", State: app.DotStateSynced}},
-		{entry: app.DotStatus{Name: "tmux", State: app.DotStateSynced}},
-		{entry: app.DotStatus{Name: "gitconfig", State: app.DotStateLocalOnly}},
+		{entry: app.DotStatus{Name: "nvim", State: dots.StateSynced}},
+		{entry: app.DotStatus{Name: "tmux", State: dots.StateSynced}},
+		{entry: app.DotStatus{Name: "gitconfig", State: dots.StateLocalOnly}},
 	}
 
 	m.dotsCursor = 0

@@ -11,6 +11,7 @@ import (
 
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/dots"
+	"github.com/lkshrk/omni/internal/executor"
 )
 
 // DotsAdd moves the file/dir at path into the dots repo and links it back via
@@ -107,7 +108,7 @@ func (a *App) DotsAdd(ctx context.Context, path string, opts DotsAddOptions) (op
 	if err := os.MkdirAll(filepath.Dir(pkgDst), 0o755); err != nil {
 		return nil, fmt.Errorf("dots add: create package dir: %w", err)
 	}
-	if err := copyDotPath(abs, pkgDst, combinedDotIgnores(entry.Ignore)); err != nil {
+	if err := dots.CopyDotPath(abs, pkgDst, dots.CombinedIgnores(entry.Ignore)); err != nil {
 		if cleanupErr := cleanupPackage(); cleanupErr != nil {
 			return nil, fmt.Errorf("dots add: copy to repo: %w (cleanup failed: %v)", err, cleanupErr)
 		}
@@ -154,7 +155,7 @@ func (a *App) DotsAdd(ctx context.Context, path string, opts DotsAddOptions) (op
 		}
 	}
 
-	return []dots.Op{lstatEntryOp(dots.ResolvedEntry{
+	return []dots.Op{dots.LstatEntryOp(dots.ResolvedEntry{
 		Name:       name,
 		Package:    pkgName,
 		SourcePath: pkgDst,
@@ -406,13 +407,13 @@ func (a *App) DotsRemoveHostVariant(ctx context.Context, name string, opts DotsR
 }
 
 // DotsDelete deletes the dots entry named name from all group files. Managed
-func rollbackDotsAdd(ctx context.Context, exec dots.BackupExecutor, targetPath, packagePath, backupPath string) error {
+func rollbackDotsAdd(ctx context.Context, exec executor.Executor, targetPath, packagePath, backupPath string) error {
 	var errs []string
 	if err := dots.RemoveLocalPathAfterBackupWithExecutor(ctx, exec, targetPath, backupPath); err != nil {
 		errs = append(errs, fmt.Sprintf("remove target link: %v", err))
 	}
 	if backupPath != "" {
-		if err := restoreBackupPath(backupPath, targetPath); err != nil {
+		if err := dots.RestoreBackupPath(backupPath, targetPath); err != nil {
 			errs = append(errs, fmt.Sprintf("restore backup: %v", err))
 		}
 	}

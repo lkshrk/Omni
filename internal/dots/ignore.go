@@ -178,6 +178,9 @@ func ShouldIgnoreAnyPathChecked(relPaths []string, basename string, patterns []s
 	seen := make(map[string]struct{}, len(relPaths))
 	for _, relPath := range relPaths {
 		rel := cleanIgnoreRelPath(relPath, basename)
+		if filepath.IsAbs(rel) || filepath.VolumeName(rel) != "" || rel == ".." || strings.HasPrefix(rel, "../") {
+			return false, fmt.Errorf("ignore path %q escapes the logical root", relPath)
+		}
 		if _, ok := seen[rel]; ok {
 			continue
 		}
@@ -216,18 +219,51 @@ func cleanIgnoreRelPath(relPath, basename string) string {
 }
 
 func ignorePatternTargets(pattern ignorePattern, relPaths []string, basename string) []string {
-	if !pattern.pathScoped {
-		return []string{basename}
+	if pattern.pathScoped {
+		return relPaths
 	}
-	return relPaths
+	targets := []string{basename}
+	seen := map[string]struct{}{basename: {}}
+	// Basename ignores follow ancestors from the primary walk-relative path.
+	// Extra candidates may prefix the logical root for path-scoped patterns;
+	// treating that synthetic prefix as an ancestor would re-ignore content
+	// after a caller deliberately starts a copy inside an ignored directory.
+	for ancestor := filepath.ToSlash(filepath.Dir(relPaths[0])); ancestor != "."; {
+		name := filepath.Base(ancestor)
+		if _, ok := seen[name]; !ok {
+			seen[name] = struct{}{}
+			targets = append(targets, name)
+		}
+		next := filepath.ToSlash(filepath.Dir(ancestor))
+		if next == ancestor {
+			break
+		}
+		ancestor = next
+	}
+	return targets
 }
 
 func matchIgnorePattern(pattern ignorePattern, target string) (bool, error) {
-	if !pattern.dirScoped {
-		return filepath.Match(pattern.glob, target)
-	}
-	if target == pattern.glob || strings.HasPrefix(target, pattern.glob+"/") {
+	if pattern.dirScoped && (target == pattern.glob || strings.HasPrefix(target, pattern.glob+"/")) {
 		return true, nil
+	}
+	matched, err := filepath.Match(pattern.glob, target)
+	if err != nil || matched || pattern.include || !pattern.pathScoped {
+		return matched, err
+	}
+	// A path-scoped ignore that matches a directory also ignores everything
+	// below it. Walkers may still descend to reach a later explicit include, so
+	// descendant checks must retain the ignored ancestor's state.
+	for ancestor := filepath.ToSlash(filepath.Dir(target)); ancestor != "."; {
+		matched, err = filepath.Match(pattern.glob, ancestor)
+		if err != nil || matched {
+			return matched, err
+		}
+		next := filepath.ToSlash(filepath.Dir(ancestor))
+		if next == ancestor {
+			break
+		}
+		ancestor = next
 	}
 	return false, nil
 }

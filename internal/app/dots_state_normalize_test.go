@@ -1,34 +1,38 @@
 package app
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/lkshrk/omni/internal/dots"
+)
 
 func TestNormalizeDotState(t *testing.T) {
-	cases := map[string]DotState{
+	cases := map[string]dots.State{
 		"":                   "",
-		"OK":                 DotStateSynced,
-		"linked":             DotStateSynced,
-		"healthy":            DotStateSynced,
-		"synced":             DotStateSynced,
-		" missing ":          DotStateMissing,
-		"unlinked":           DotStateMissing,
-		"conflict":           DotStateConflict,
-		"modified":           DotStateModified,
-		"broken":             DotStateBroken,
-		"no-source":          DotStateNoSource,
-		"nosource":           DotStateNoSource,
-		"source-missing":     DotStateNoSource,
-		"local-only":         DotStateLocalOnly,
-		"localonly":          DotStateLocalOnly,
-		"repo-only":          DotStateRepoOnly,
-		"repoonly":           DotStateRepoOnly,
-		"untracked-linked":   DotStateUntrackedLinked,
-		"untrackedlinked":    DotStateUntrackedLinked,
-		"untracked-conflict": DotStateUntrackedConflict,
-		"untrackedconflict":  DotStateUntrackedConflict,
-		"ignored":            DotStateIgnored,
-		"inactive":           DotStateInactive,
-		"disabled":           DotStateDisabled,
-		"ambiguous":          DotStateAmbiguous,
+		"OK":                 dots.StateSynced,
+		"linked":             dots.StateSynced,
+		"healthy":            dots.StateSynced,
+		"synced":             dots.StateSynced,
+		" missing ":          dots.StateMissing,
+		"unlinked":           dots.StateMissing,
+		"conflict":           dots.StateConflict,
+		"modified":           dots.StateModified,
+		"broken":             dots.StateBroken,
+		"no-source":          dots.StateNoSource,
+		"nosource":           dots.StateNoSource,
+		"source-missing":     dots.StateNoSource,
+		"local-only":         dots.StateLocalOnly,
+		"localonly":          dots.StateLocalOnly,
+		"repo-only":          dots.StateRepoOnly,
+		"repoonly":           dots.StateRepoOnly,
+		"untracked-linked":   dots.StateUntrackedLinked,
+		"untrackedlinked":    dots.StateUntrackedLinked,
+		"untracked-conflict": dots.StateUntrackedConflict,
+		"untrackedconflict":  dots.StateUntrackedConflict,
+		"ignored":            dots.StateIgnored,
+		"inactive":           dots.StateInactive,
+		"disabled":           dots.StateDisabled,
+		"ambiguous":          dots.StateAmbiguous,
 	}
 	for raw, want := range cases {
 		got, err := normalizeDotState(raw)

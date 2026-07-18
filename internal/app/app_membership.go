@@ -64,7 +64,9 @@ func (a *App) SetToolGroups(name string, groups, createdGroups []string, activeH
 		if err := createSelectedGroupsInConfig(cfg, createdGroups, targets); err != nil {
 			return err
 		}
-		ensureMembershipTargetGroups(cfg, targets)
+		if err := ensureMembershipTargetGroups(cfg, targets); err != nil {
+			return err
+		}
 		if err := ensureMembershipGroupsOnHostInConfig(cfg, activeHost, targets); err != nil {
 			return err
 		}
@@ -91,6 +93,16 @@ func (a *App) SetToolGroupMembershipWithState(ctx context.Context, name, group s
 type DotGroupsChange struct {
 	DotMemberships map[string][]string
 	DotsState      *DotsState
+}
+
+// ReusableGroupNames returns the names of all reusable (non-host) groups
+// currently configured.
+func (a *App) ReusableGroupNames() ([]string, error) {
+	cfg, err := a.loadConfig()
+	if err != nil {
+		return nil, err
+	}
+	return reusableGroupNames(cfg.Groups), nil
 }
 
 func (a *App) DotGroups(name string) ([]string, error) {
@@ -136,12 +148,15 @@ func (a *App) SetDotGroupsWithState(ctx context.Context, name string, groups, cr
 		if err := createSelectedGroupsInConfig(cfg, createdGroups, targets); err != nil {
 			return err
 		}
-		ensureMembershipTargetGroups(cfg, targets)
+		if err := ensureMembershipTargetGroups(cfg, targets); err != nil {
+			return err
+		}
 		if err := ensureMembershipGroupsOnHostInConfig(cfg, activeHost, targets); err != nil {
 			return err
 		}
 		if found {
-			setDotGroupsInConfig(cfg, name, template, targets)
+			reduced := EnforceMembershipInvariant(sortedMembershipGroups(targets), ReusablePredicate(reusableGroupNames(cfg.Groups)))
+			setDotGroupsInConfig(cfg, name, template, membershipGroupSet(reduced))
 		}
 		result.DotMemberships = dotMembershipMapFromConfig(cfg)
 		return nil
@@ -340,6 +355,46 @@ func toolGroupLabelsWithFilter(memberships map[string][]string, allowed map[stri
 		out[key] = CompactGroupLabel(FilterGroupsForHost(groups, allowed))
 	}
 	return out
+}
+
+// GroupLabelForHost returns the compact memberships visible on one host.
+func GroupLabelForHost(groups []string, info *HostInfo, machineGroup string) string {
+	return CompactGroupLabel(FilterGroupsForHost(groups, ActiveHostGroupSet(info, machineGroup)))
+}
+
+// GroupLabel returns the compact memberships visible on the current machine.
+func GroupLabel(groups []string, info *HostInfo) string {
+	return GroupLabelForHost(groups, info, currentMachineGroupName())
+}
+
+// HostFirstGroups returns groups visible on the current machine, ordered
+// with the host group first followed by reusable groups sorted
+// alphabetically. It applies the same active-host filter as GroupLabel.
+func HostFirstGroups(groups []string, info *HostInfo) []string {
+	filtered := FilterGroupsForHost(groups, ActiveHostGroupSet(info, currentMachineGroupName()))
+	host := ""
+	if info != nil {
+		host = machineGroupName(info.Active)
+	}
+	hostGroups := make([]string, 0, 1)
+	reusable := make([]string, 0, len(filtered))
+	for _, group := range filtered {
+		if host != "" && group == host {
+			hostGroups = append(hostGroups, group)
+			continue
+		}
+		reusable = append(reusable, group)
+	}
+	sort.Strings(reusable)
+	return append(hostGroups, reusable...)
+}
+
+// IsHostGroup reports whether name is the current host's own host group.
+func IsHostGroup(name string, info *HostInfo) bool {
+	if info == nil || name == "" {
+		return false
+	}
+	return name == machineGroupName(info.Active)
 }
 
 func ActiveHostGroupSet(info *HostInfo, machineGroup string) map[string]bool {
@@ -641,10 +696,33 @@ func createSelectedGroupsInConfig(cfg *config.RootConfig, createdGroups []string
 	return nil
 }
 
-func ensureMembershipTargetGroups(cfg *config.RootConfig, groups map[string]struct{}) {
+func ensureMembershipTargetGroups(cfg *config.RootConfig, groups map[string]struct{}) error {
 	for _, group := range sortedMembershipGroups(groups) {
+		if group == config.SystemInventoryGroup {
+			if _, err := ensureSystemInventoryGroupInConfig(cfg); err != nil {
+				return err
+			}
+			continue
+		}
 		ensureGroupInConfig(cfg, group)
 	}
+	return nil
+}
+
+func ensureSystemInventoryGroupInConfig(cfg *config.RootConfig) (*config.GroupConfig, error) {
+	group := findGroupInConfig(cfg, config.SystemInventoryGroup)
+	if group == nil {
+		group = &config.GroupConfig{Name: config.SystemInventoryGroup, Special: config.SystemInventoryGroup}
+		cfg.Groups = append(cfg.Groups, group)
+		return group, nil
+	}
+	if group.Special == "" {
+		group.Special = config.SystemInventoryGroup
+	}
+	if !group.IsSystemInventory() {
+		return nil, fmt.Errorf("reserved group %q has special marker %q", config.SystemInventoryGroup, group.Special)
+	}
+	return group, nil
 }
 
 func ensureMembershipGroupsOnHostInConfig(cfg *config.RootConfig, activeHost string, groups map[string]struct{}) error {
@@ -668,7 +746,9 @@ func ensureMembershipGroupsOnHostInConfig(cfg *config.RootConfig, activeHost str
 			return fmt.Errorf("group %q not found", group)
 		}
 		if g.IsHost() {
-			return fmt.Errorf("host group %q cannot be assigned to another host", group)
+			// Item memberships may span hosts. Host groups do not belong in
+			// another host's reusable-group assignment list.
+			continue
 		}
 		if !slices.Contains(cfg.Hosts[activeHost], group) {
 			cfg.Hosts[activeHost] = append(cfg.Hosts[activeHost], group)

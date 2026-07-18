@@ -1365,6 +1365,10 @@ func (a *App) RefreshDiscoveredWithProgress(ctx context.Context, progress func(R
 	stop = profile.Start("app.refresh.discovered.scan")
 	discovered := a.discoverUntrackedInstalled(ctx, cfg, progress)
 	stop()
+	discovered, err = a.persistSystemInventory(discovered)
+	if err != nil {
+		return err
+	}
 
 	writeCtx := context.WithoutCancel(ctx)
 	stop = profile.Start("app.refresh.discovered.write")
@@ -1381,6 +1385,55 @@ func (a *App) RefreshDiscoveredWithProgress(ctx context.Context, progress func(R
 	}
 	stop()
 	return nil
+}
+
+func (a *App) persistSystemInventory(discovered []database.DiscoveredUpsert) ([]database.DiscoveredUpsert, error) {
+	var inventory, remaining []database.DiscoveredUpsert
+	for _, tool := range discovered {
+		if isSystemInventoryProvider(tool.InstalledWith) {
+			inventory = append(inventory, tool)
+		} else {
+			remaining = append(remaining, tool)
+		}
+	}
+	if len(inventory) == 0 {
+		return discovered, nil
+	}
+	err := a.withConfig(func(cfg *config.RootConfig) error {
+		group, err := ensureSystemInventoryGroupInConfig(cfg)
+		if err != nil {
+			return err
+		}
+		if cfg.Tools == nil {
+			cfg.Tools = make(map[string]config.ToolSpec)
+		}
+		for _, tool := range inventory {
+			providerName := tool.InstalledWith
+			if providerName == "" {
+				providerName = tool.Provider
+			}
+			spec := cfg.Tools[tool.Name]
+			setToolProviderCandidate(&spec, config.ToolInstallSpec{Provider: providerName, Package: tool.Name})
+			cfg.Tools[tool.Name] = spec
+			if !containsToolMembership(group.Tools, tool.Name) {
+				group.Tools = append(group.Tools, config.ToolEntry{Name: tool.Name})
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("persisting system package inventory: %w", err)
+	}
+	return remaining, nil
+}
+
+func isSystemInventoryProvider(name string) bool {
+	switch name {
+	case "apt", "dnf", "pacman", "apk", "zypper":
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *App) previewDiscovered(ctx context.Context) ([]*database.ToolCache, error) {

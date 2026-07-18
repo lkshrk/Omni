@@ -118,7 +118,7 @@ func (a *App) DotsDeleteLocal(ctx context.Context, status DotStatus) (err error)
 		a.recordDotsHistoryResult(ctx, "delete", status.Name, "", nil, err, false)
 		a.refreshDotsStateAfterSuccess(ctx, &err, false)
 	}()
-	if !DotStatusTransientCandidate(status) || DotStatusState(status) != DotStateLocalOnly {
+	if !DotStatusTransientCandidate(status) || DotStatusState(status) != dots.StateLocalOnly {
 		return fmt.Errorf("dots delete %q: only discovered local-only entries can be deleted locally", status.Name)
 	}
 	target := strings.TrimSpace(status.TargetPath)
@@ -164,7 +164,7 @@ type deletedDotEntry struct {
 
 func (a *App) removeDeletedDotFiles(ctx context.Context, name, stowPath string, deleteDot *config.DotEntry, opts DotsDeleteOptions) error {
 	unlinkDots := dotEntriesForAllPackages(*deleteDot)
-	mgr, resolveErr := dots.New(stowPath, unlinkDots)
+	mgr, resolveErr := dots.NewEngine(stowPath, unlinkDots)
 	if resolveErr != nil {
 		return fmt.Errorf("dots delete %q: resolve entry: %w", name, resolveErr)
 	}

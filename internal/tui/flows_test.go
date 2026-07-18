@@ -115,6 +115,7 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/dots"
 )
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -599,6 +600,12 @@ func TestFlow_UC15_RefreshKey(t *testing.T) {
 	if len(got.scanningProviders) == 0 {
 		t.Error("scanningProviders should be populated after R")
 	}
+	if !got.loading {
+		t.Error("loading should be enabled immediately after R")
+	}
+	if got.progressText == "" {
+		t.Error("progressText should be visible immediately after R")
+	}
 }
 
 // ── UC-16 g key opens group membership picker ────────────────────────────────
@@ -656,6 +663,16 @@ func TestFlow_UC18_IgnoreKey(t *testing.T) {
 		m := baseModel(oneInstalled())
 		m.upgradingKeys = make(map[string]bool)
 		got := drive(m, pressRune('x'))
+		if got.mode != viewIgnoreScope {
+			t.Errorf("mode = %v, want viewIgnoreScope", got.mode)
+		}
+	})
+
+	t.Run("e on ignored tool opens edit picker", func(t *testing.T) {
+		m := baseModel(oneInstalled())
+		m.ignoreSet = map[string]bool{m.visibleTools[0].Name: true}
+		m.applyFilter()
+		got := drive(m, pressRune('e'))
 		if got.mode != viewIgnoreScope {
 			t.Errorf("mode = %v, want viewIgnoreScope", got.mode)
 		}
@@ -2072,7 +2089,7 @@ func TestFlow_UC45_DotsConflictOverwrite(t *testing.T) {
 		m.dotsLoaded = true
 		setDotsRepoForTest(&m, "/repo")
 		m.dotsEntries = []app.DotStatus{
-			{Name: "gitconfig", Health: app.HealthConflict, State: app.DotStateConflict, Actions: []app.DotAction{app.DotActionUseRepo, app.DotActionUseLocal, app.DotActionRemove}},
+			{Name: "gitconfig", Health: app.HealthConflict, State: dots.StateConflict, Actions: []dots.Action{dots.ActionUseRepo, dots.ActionUseLocal, dots.ActionRemove}},
 		}
 		return m
 	}
@@ -2120,7 +2137,7 @@ func TestFlow_UC45_DotsConflictOverwrite(t *testing.T) {
 		m.dotsLoaded = true
 		setDotsRepoForTest(&m, "/repo")
 		m.dotsEntries = []app.DotStatus{
-			{Name: "claude", State: app.DotStateUntrackedConflict, Actions: []app.DotAction{app.DotActionUseRepo, app.DotActionUseLocal, app.DotActionIgnore}},
+			{Name: "claude", State: dots.StateUntrackedConflict, Actions: []dots.Action{dots.ActionUseRepo, dots.ActionUseLocal, dots.ActionIgnore}},
 		}
 
 		if got := drive(m, pressRune('s')); got.dotsLoading {
@@ -2141,7 +2158,7 @@ func TestFlow_UC45_DotsConflictOverwrite(t *testing.T) {
 		m.mode = viewDots
 		m.dotsLoaded = true
 		setDotsRepoForTest(&m, "/repo")
-		m.dotsEntries = []app.DotStatus{{Name: "nvim", Health: app.HealthOK, State: app.DotStateSynced}}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", Health: app.HealthOK, State: dots.StateSynced}}
 		got := drive(m, pressRune('u'))
 		if got.dotsOverwriteIdx != -1 {
 			t.Errorf("dotsOverwriteIdx = %d, want -1 for non-conflict entry", got.dotsOverwriteIdx)
@@ -2161,7 +2178,7 @@ func TestFlow_DotsSynthesizedIgnoredChildUnignore(t *testing.T) {
 		TargetPath: "~/.config/nvim",
 		ConfigPath: "~/.config/nvim",
 		Health:     app.HealthOK,
-		State:      app.DotStateIgnored,
+		State:      dots.StateIgnored,
 		IsDir:      true,
 		Children: []app.DotChild{{
 			Name:    "lua",
@@ -2196,14 +2213,14 @@ func TestFlow_DotsMergedIgnoredExpandCollapse(t *testing.T) {
 	m.dotsEntries = []app.DotStatus{
 		{
 			Name:   "nvim",
-			State:  app.DotStateSynced,
+			State:  dots.StateSynced,
 			Health: app.HealthOK,
 			Counts: app.DotFileCounts{Synced: 2},
 		},
 		{
 			Name:       "nvim",
 			TargetPath: "~/.config/nvim",
-			State:      app.DotStateIgnored,
+			State:      dots.StateIgnored,
 			Health:     app.HealthOK,
 			IsDir:      true,
 			Children: []app.DotChild{
@@ -2241,7 +2258,7 @@ func TestFlow_DotsMergedIgnoredExpandCollapse(t *testing.T) {
 func TestFlow_DotsExpandIgnoredDoesNotExpandSyncedSameName(t *testing.T) {
 	// Regression: expanding an ignored entry must not also expand a synced entry
 	// with the same name. The fix introduced dotsExpandedState to scope expansion
-	// to the correct section (DotStateSynced vs DotStateIgnored).
+	// to the correct section (dots.StateSynced vs dots.StateIgnored).
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.dotsLoaded = true
@@ -2249,14 +2266,14 @@ func TestFlow_DotsExpandIgnoredDoesNotExpandSyncedSameName(t *testing.T) {
 
 	syncedEntry := app.DotStatus{
 		Name:   "nvim",
-		State:  app.DotStateSynced,
+		State:  dots.StateSynced,
 		Health: app.HealthOK,
 		Counts: app.DotFileCounts{Synced: 2},
 	}
 	ignoredEntry := app.DotStatus{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
-		State:      app.DotStateIgnored,
+		State:      dots.StateIgnored,
 		Health:     app.HealthOK,
 		IsDir:      true,
 		Children: []app.DotChild{
@@ -2272,9 +2289,9 @@ func TestFlow_DotsExpandIgnoredDoesNotExpandSyncedSameName(t *testing.T) {
 	// Expand the ignored nvim with space.
 	m = drive(m, pressRune(' '))
 
-	// 1. dotsExpandedState must be DotStateIgnored.
-	if m.dotsExpandedState != app.DotStateIgnored {
-		t.Fatalf("dotsExpandedState = %v, want DotStateIgnored", m.dotsExpandedState)
+	// 1. dotsExpandedState must be dots.StateIgnored.
+	if m.dotsExpandedState != dots.StateIgnored {
+		t.Fatalf("dotsExpandedState = %v, want dots.StateIgnored", m.dotsExpandedState)
 	}
 
 	// 2. Visible rows: synced nvim (collapsed) + ignored nvim + 2 children = 4.
@@ -2298,7 +2315,7 @@ func TestFlow_DotsMergedIgnoredNestedExpand(t *testing.T) {
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
-		State:      app.DotStateIgnored,
+		State:      dots.StateIgnored,
 		Health:     app.HealthOK,
 		IsDir:      true,
 		Children: []app.DotChild{
@@ -2359,11 +2376,11 @@ func TestFlow_DotsMergedIgnoredChildUnignoreDispatch(t *testing.T) {
 	m.dotsLoaded = true
 	setDotsRepoForTest(&m, repoDir)
 	m.dotsExpandedName = "nvim"
-	m.dotsExpandedState = app.DotStateIgnored
+	m.dotsExpandedState = dots.StateIgnored
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
-		State:      app.DotStateIgnored,
+		State:      dots.StateIgnored,
 		Health:     app.HealthOK,
 		IsDir:      true,
 		Children: []app.DotChild{
@@ -2409,12 +2426,12 @@ func TestFlow_DotsChildRowsCanBeIgnored(t *testing.T) {
 	m.dotsLoaded = true
 	setDotsRepoForTest(&m, "/repo")
 	m.dotsExpandedName = "nvim"
-	m.dotsExpandedState = app.DotStateSynced
+	m.dotsExpandedState = dots.StateSynced
 	m.dotsEntries = []app.DotStatus{{
 		Name:    "nvim",
 		Health:  app.HealthOK,
-		State:   app.DotStateSynced,
-		Actions: []app.DotAction{app.DotActionRemove, app.DotActionIgnore},
+		State:   dots.StateSynced,
+		Actions: []dots.Action{dots.ActionRemove, dots.ActionIgnore},
 		Children: []app.DotChild{{
 			Name:    "auth.json",
 			RelPath: "hosts/work/auth.json",
@@ -2437,7 +2454,7 @@ func TestFlow_DotsExpansionUsesSpaceAndNavigationDoesNotAutoExpand(t *testing.T)
 		{
 			Name:   "alpha",
 			Health: app.HealthOK,
-			State:  app.DotStateSynced,
+			State:  dots.StateSynced,
 			Children: []app.DotChild{
 				{Name: "one", RelPath: "one", Path: "~/.config/alpha/one"},
 				{Name: "two", RelPath: "two", Path: "~/.config/alpha/two"},
@@ -2446,7 +2463,7 @@ func TestFlow_DotsExpansionUsesSpaceAndNavigationDoesNotAutoExpand(t *testing.T)
 		{
 			Name:   "beta",
 			Health: app.HealthOK,
-			State:  app.DotStateSynced,
+			State:  dots.StateSynced,
 			Children: []app.DotChild{
 				{Name: "child", RelPath: "child", Path: "~/.config/beta/child"},
 			},
@@ -2492,13 +2509,13 @@ func TestFlow_DotsOutOfSyncDirectoryCanExpand(t *testing.T) {
 	setDotsRepoForTest(&m, "/repo")
 	m.dotsEntries = []app.DotStatus{{
 		Name:    "nvim",
-		State:   app.DotStateConflict,
-		Actions: []app.DotAction{app.DotActionUseRepo, app.DotActionUseLocal, app.DotActionRemove, app.DotActionIgnore},
+		State:   dots.StateConflict,
+		Actions: []dots.Action{dots.ActionUseRepo, dots.ActionUseLocal, dots.ActionRemove, dots.ActionIgnore},
 		Children: []app.DotChild{{
 			Name:    "init.lua",
 			RelPath: "init.lua",
 			Path:    "~/.config/nvim/init.lua",
-			State:   app.DotStateSynced,
+			State:   dots.StateSynced,
 		}},
 	}}
 
@@ -2519,20 +2536,20 @@ func TestFlow_DotsSubdirectoryCanExpand(t *testing.T) {
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
-		State:      app.DotStateConflict,
+		State:      dots.StateConflict,
 		IsDir:      true,
 		Children: []app.DotChild{{
 			Name:      "lua",
 			RelPath:   "lua",
 			Path:      "~/.config/nvim/lua",
-			State:     app.DotStateConflict,
+			State:     dots.StateConflict,
 			IsDir:     true,
 			FileCount: 1,
 			Children: []app.DotChild{{
 				Name:    "config.lua",
 				RelPath: "lua/config.lua",
 				Path:    "~/.config/nvim/lua/config.lua",
-				State:   app.DotStateMissing,
+				State:   dots.StateMissing,
 			}},
 		}},
 	}}
@@ -2608,6 +2625,28 @@ func TestFlow_UC46_OpCompleteMsg(t *testing.T) {
 		}
 		if got.rowErrors[toolKey("ripgrep", "brew")] != "provider not found" {
 			t.Fatalf("rowErrors = %#v, want ripgrep row error", got.rowErrors)
+		}
+	})
+
+	t.Run("error status shows the actual stderr problem", func(t *testing.T) {
+		m := baseModel(nil)
+		m.rowOpKey = toolKey("font-intel-one-mono", "brew")
+		err := errors.New("brew install font-intel-one-mono: exit status 1 (stderr: Error: A font is already installed at /Library/Fonts/IntelOneMono.ttf)")
+		got := drive(m, opCompleteMsg{err: err})
+		want := "✗ A font is already installed at /Library/Fonts/IntelOneMono.ttf"
+		if got.statusMsg != want {
+			t.Fatalf("statusMsg = %q, want %q", got.statusMsg, want)
+		}
+	})
+
+	t.Run("error status keeps multiline problem details", func(t *testing.T) {
+		m := baseModel(nil)
+		m.rowOpKey = toolKey("font-intel-one-mono", "brew")
+		err := errors.New("brew install font: exit status 1 (stderr: Error: A font is already installed at:\n/Library/Fonts/IntelOneMono.ttf\nRemove it before reinstalling.)")
+		got := drive(m, opCompleteMsg{err: err})
+		want := "✗ A font is already installed at: /Library/Fonts/IntelOneMono.ttf Remove it before reinstalling."
+		if got.statusMsg != want {
+			t.Fatalf("statusMsg = %q, want %q", got.statusMsg, want)
 		}
 	})
 
@@ -3038,7 +3077,7 @@ func TestFlow_UC54_DotsMsgs(t *testing.T) {
 	})
 
 	t.Run("dotsLoadedMsg error with partial entries still updates table", func(t *testing.T) {
-		entries := []app.DotStatus{{Name: "refreshed", Health: app.HealthConflict, State: app.DotStateConflict}}
+		entries := []app.DotStatus{{Name: "refreshed", Health: app.HealthConflict, State: dots.StateConflict}}
 		got := drive(baseModel(nil), dotsLoadedMsg{entries: entries, err: errors.New("dots status: git failed")})
 		if len(got.dotsEntries) != 1 || got.dotsEntries[0].Name != "refreshed" {
 			t.Fatalf("dotsLoadedMsg partial error should update table, got %+v", got.dotsEntries)
@@ -3080,12 +3119,12 @@ func TestFlow_UC54_DotsMsgs(t *testing.T) {
 	})
 
 	t.Run("dotsSyncedMsg error still updates conflict entries", func(t *testing.T) {
-		entries := []app.DotStatus{{Name: "nvim", Health: app.HealthConflict, State: app.DotStateConflict}}
+		entries := []app.DotStatus{{Name: "nvim", Health: app.HealthConflict, State: dots.StateConflict}}
 		got := drive(baseModel(nil), dotsSyncedMsg{entries: entries, err: errors.New("dots sync: nvim: requires choosing use repo version or use local version")})
 		if !got.dotsLoaded {
 			t.Fatal("dotsLoaded should be true after failed sync refresh")
 		}
-		if len(got.dotsEntries) != 1 || got.dotsEntries[0].State != app.DotStateConflict {
+		if len(got.dotsEntries) != 1 || got.dotsEntries[0].State != dots.StateConflict {
 			t.Fatalf("dotsEntries = %+v, want refreshed conflict entry", got.dotsEntries)
 		}
 		if !got.statusIsErr || !strings.Contains(got.statusMsg, "nvim: requires choosing") {
@@ -3580,8 +3619,8 @@ func dotsModelWithChild(childRelPath string, childIgnored bool) Model {
 			SourcePath: "/repo/config",
 			TargetPath: "~/.config",
 			Health:     app.HealthOK,
-			State:      app.DotStateSynced,
-			Actions:    []app.DotAction{app.DotActionRemove, app.DotActionIgnore},
+			State:      dots.StateSynced,
+			Actions:    []dots.Action{dots.ActionRemove, dots.ActionIgnore},
 			Children: []app.DotChild{
 				{RelPath: childRelPath, Ignored: childIgnored, IsDir: false},
 			},
@@ -3839,8 +3878,8 @@ func conflictDotsModel(entries []app.DotStatus) Model {
 
 func twoConflictEntries() []app.DotStatus {
 	return []app.DotStatus{
-		{Name: "gitconfig", Health: app.HealthConflict, State: app.DotStateConflict, Actions: []app.DotAction{app.DotActionUseRepo, app.DotActionUseLocal, app.DotActionRemove}},
-		{Name: "zshrc", Health: app.HealthConflict, State: app.DotStateConflict, Actions: []app.DotAction{app.DotActionUseRepo, app.DotActionUseLocal, app.DotActionRemove}},
+		{Name: "gitconfig", Health: app.HealthConflict, State: dots.StateConflict, Actions: []dots.Action{dots.ActionUseRepo, dots.ActionUseLocal, dots.ActionRemove}},
+		{Name: "zshrc", Health: app.HealthConflict, State: dots.StateConflict, Actions: []dots.Action{dots.ActionUseRepo, dots.ActionUseLocal, dots.ActionRemove}},
 	}
 }
 
@@ -3929,7 +3968,7 @@ func TestFlow_UC67_DotForceResolveAll_SwitchStrategyCancelsAndRearms(t *testing.
 func TestFlow_UC67_DotForceResolveAll_NoConflictsIsNoop(t *testing.T) {
 	m, _ := newDotsModelForCmdsReady(t)
 	m.dotsEntries = []app.DotStatus{
-		{Name: "nvim", Health: app.HealthOK, State: app.DotStateSynced},
+		{Name: "nvim", Health: app.HealthOK, State: dots.StateSynced},
 	}
 
 	cmds := m.handleDotsForceResolveAllKeyMsg(app.DotResolveUseRepo)
@@ -3984,7 +4023,7 @@ func TestFlow_UC67_DotsConflictHints_BulkKeysVisibleWhenMultipleConflicts(t *tes
 
 func TestFlow_UC67_DotsConflictHints_BulkKeysHiddenWithSingleConflict(t *testing.T) {
 	m := conflictDotsModel([]app.DotStatus{
-		{Name: "gitconfig", Health: app.HealthConflict, State: app.DotStateConflict, Actions: []app.DotAction{app.DotActionUseRepo, app.DotActionUseLocal}},
+		{Name: "gitconfig", Health: app.HealthConflict, State: dots.StateConflict, Actions: []dots.Action{dots.ActionUseRepo, dots.ActionUseLocal}},
 	})
 	hints := dotsConflictHintItems(m)
 
@@ -4003,7 +4042,7 @@ func TestFlow_UC67_DotsConflictHints_BulkKeysHiddenWithSingleConflict(t *testing
 
 func TestFlow_UC67_DotsConflictHints_BulkKeysHiddenWithNoConflicts(t *testing.T) {
 	m := conflictDotsModel([]app.DotStatus{
-		{Name: "nvim", Health: app.HealthOK, State: app.DotStateSynced},
+		{Name: "nvim", Health: app.HealthOK, State: dots.StateSynced},
 	})
 	// dotsConflictHintItems is only shown for conflict rows, but dotsConflictCount
 	// guards the bulk hints; verify they don't appear even if called directly.
@@ -4076,9 +4115,9 @@ func TestFlow_UC67_DotForceResolveAll_KeyDispatch_SecondUFires(t *testing.T) {
 func TestFlow_UC67_DotForceResolveAll_DotsConflictCount(t *testing.T) {
 	t.Run("counts only conflict entries", func(t *testing.T) {
 		m := conflictDotsModel([]app.DotStatus{
-			{Name: "a", State: app.DotStateConflict},
-			{Name: "b", State: app.DotStateSynced},
-			{Name: "c", State: app.DotStateConflict},
+			{Name: "a", State: dots.StateConflict},
+			{Name: "b", State: dots.StateSynced},
+			{Name: "c", State: dots.StateConflict},
 		})
 		if got := dotsConflictCount(m); got != 2 {
 			t.Errorf("dotsConflictCount = %d, want 2", got)
@@ -4087,7 +4126,7 @@ func TestFlow_UC67_DotForceResolveAll_DotsConflictCount(t *testing.T) {
 
 	t.Run("zero conflicts", func(t *testing.T) {
 		m := conflictDotsModel([]app.DotStatus{
-			{Name: "a", State: app.DotStateSynced},
+			{Name: "a", State: dots.StateSynced},
 		})
 		if got := dotsConflictCount(m); got != 0 {
 			t.Errorf("dotsConflictCount = %d, want 0", got)
@@ -4124,7 +4163,7 @@ func TestFlow_UC67_DotForceResolveAll_KeyDispatch_U_NoConflicts(t *testing.T) {
 	// Pressing U when there are no conflicts is a no-op even through real Update().
 	m, _ := newDotsModelForCmdsReady(t)
 	m.dotsEntries = []app.DotStatus{
-		{Name: "nvim", Health: app.HealthOK, State: app.DotStateSynced},
+		{Name: "nvim", Health: app.HealthOK, State: dots.StateSynced},
 	}
 
 	got := drive(m, pressRune('U'))

@@ -162,7 +162,7 @@ func statusRows(m Model) []statusListRow {
 	rows := make([]statusListRow, 0, 12)
 	rows = append(rows, statusAttentionRows(m, counts)...)
 	rows = append(rows, statusOverviewRows(m, counts)...)
-	return rows
+	return applyDashboardRefreshPresentation(m, rows)
 }
 
 func statusSections(m Model, rows []statusListRow) []sectionedTabSection {

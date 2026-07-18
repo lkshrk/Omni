@@ -3,9 +3,7 @@
 package app
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -72,6 +70,10 @@ type App struct {
 	// repository without retaining results across refresh operations.
 	githubReleaseMu       sync.Mutex
 	githubReleaseInFlight map[githubReleaseRepo]*githubReleaseLookupFlight
+
+	// dotSvc owns the App-layer dots orchestration (see dots_service.go). Built
+	// once in New; holds a back to App only through the narrow dotsHost seam.
+	dotSvc *dotsService
 }
 
 func (a *App) requireSafeTestHomeForDots() error {
@@ -182,6 +184,7 @@ func New(configPath string, opts ...func(*App)) *App {
 	for _, opt := range opts {
 		opt(a)
 	}
+	a.dotSvc = newDotsService(a)
 	return a
 }
 
@@ -501,60 +504,23 @@ func (a *App) backupConfigOnLaunch() {
 	}
 }
 
-var errSkipSave = errors.New("skip save")
+// errSkipSave aliases config.ErrSkipSave so a withConfig mutation can abort the
+// write cleanly and config.WriteConfig recognizes the same sentinel.
+var errSkipSave = config.ErrSkipSave
 
+// withConfig acquires the config mutex, then delegates the actual load →
+// mutate → validate → route → write to config.WriteConfig. The lock and the
+// app-specific load (loadConfig, which applies host/legacy migrations) stay
+// here; the include-safe write invariant lives behind the config seam.
 func (a *App) withConfig(fn func(*config.RootConfig) error) error {
 	a.configMu.Lock()
 	defer a.configMu.Unlock()
-	cfg, err := a.loadConfig()
-	if err != nil {
-		return err
-	}
-	before, err := topLevelKeys(cfg)
-	if err != nil {
-		return err
-	}
-	if err := fn(cfg); err != nil {
-		if errors.Is(err, errSkipSave) {
-			return nil
-		}
-		return err
-	}
+	var providers *config.ProviderValidation
 	if a.registry != nil {
-		if errs := fatalValidationErrors(config.ValidateRoot(cfg, a.providerValidation())); len(errs) > 0 {
-			return config.ValidationErrors(errs)
-		}
+		pv := a.providerValidation()
+		providers = &pv
 	}
-	after, err := topLevelKeys(cfg)
-	if err != nil {
-		return err
-	}
-	diff := make(map[string]json.RawMessage)
-	for k, v := range after {
-		if k == "$schema" {
-			continue
-		}
-		if !bytes.Equal(before[k], v) {
-			diff[k] = v
-		}
-	}
-	for k := range before {
-		if k == "$schema" {
-			continue
-		}
-		if _, ok := after[k]; !ok {
-			diff[k] = json.RawMessage(`null`)
-		}
-	}
-	if len(diff) == 0 {
-		return nil
-	}
-	if dir := a.configDir(); dir != "" {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("creating config directory: %w", err)
-		}
-	}
-	return config.PatchRawRouted(a.ConfigPath, diff)
+	return config.WriteConfig(a.ConfigPath, a.loadConfig, providers, fn)
 }
 
 // patchToolConfig edits a tool at the file that owns its effective definition.
@@ -582,39 +548,6 @@ func (a *App) patchToolConfig(name string, mutate func(*config.ToolSpec) error) 
 		}
 	}
 	return config.PatchTool(a.ConfigPath, name, mutate)
-}
-
-func topLevelKeys(cfg *config.RootConfig) (map[string]json.RawMessage, error) {
-	type rootConfigPatchDoc struct {
-		Schema       string                       `json:"$schema,omitempty"`
-		Version      int                          `json:"version"`
-		Settings     config.Settings              `json:"settings"`
-		Tools        map[string]config.ToolSpec   `json:"tools,omitempty"`
-		Hosts        map[string][]string          `json:"hosts,omitempty"`
-		Ignore       config.GlobalIgnore          `json:"ignore,omitempty"`
-		Groups       []*config.GroupConfig        `json:"groups,omitempty"`
-		HostSettings map[string]hostSettingsPatch `json:"host_settings,omitempty"`
-		Agents       config.AgentsConfig          `json:"agents,omitempty"`
-	}
-	data, err := json.Marshal(rootConfigPatchDoc{
-		Schema:       cfg.Schema,
-		Version:      cfg.Version,
-		Settings:     cfg.Settings,
-		Tools:        cfg.Tools,
-		Hosts:        cfg.Hosts,
-		Ignore:       cfg.Ignore,
-		Groups:       cfg.Groups,
-		HostSettings: hostSettingsPatchDoc(cfg.HostSettings),
-		Agents:       cfg.Agents,
-	})
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string]json.RawMessage)
-	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 // findGroupInConfig returns the first group whose BaseName matches name.

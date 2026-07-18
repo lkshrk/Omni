@@ -22,6 +22,7 @@ import (
 	"github.com/lkshrk/omni/internal/buildinfo"
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/dots"
 	"github.com/lkshrk/omni/internal/provider"
 )
 
@@ -558,7 +559,7 @@ func TestRenderHeader_DotsMode(t *testing.T) {
 	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
 	m.dotsEntries = []app.DotStatus{{
 		Name:   "nvim",
-		State:  app.DotStateConflict,
+		State:  dots.StateConflict,
 		Counts: app.DotFileCounts{Synced: 2, OutOfSync: 1, Ignored: 4},
 	}}
 	out := renderHeader(m)
@@ -574,12 +575,12 @@ func TestRenderHeaderInfo_UsesUniformRegularWeight(t *testing.T) {
 		Installed: true,
 		Outdated:  true,
 	}})
-	dots := baseModel(nil)
-	dots.mode = viewDots
-	dots.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
-	dots.dotsEntries = []app.DotStatus{{
+	dotsM := baseModel(nil)
+	dotsM.mode = viewDots
+	dotsM.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
+	dotsM.dotsEntries = []app.DotStatus{{
 		Name:   "nvim",
-		State:  app.DotStateConflict,
+		State:  dots.StateConflict,
 		Counts: app.DotFileCounts{Synced: 1, OutOfSync: 1, Ignored: 1},
 	}}
 	groups := baseModel(nil)
@@ -587,7 +588,7 @@ func TestRenderHeaderInfo_UsesUniformRegularWeight(t *testing.T) {
 	groups.groupNames = []string{"dev"}
 	for name, m := range map[string]Model{
 		"tools":  tools,
-		"dots":   dots,
+		"dots":   dotsM,
 		"groups": groups,
 	} {
 		out := renderHeaderInfo(m)
@@ -619,7 +620,7 @@ func TestRenderHeader_DotsLoadingKeepsCountSummary(t *testing.T) {
 	m.mode = viewDots
 	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
 	m.dotsLoading = true
-	m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}}}
+	m.dotsEntries = []app.DotStatus{{Name: "nvim", State: dots.StateSynced, Counts: app.DotFileCounts{Synced: 1}}}
 	out := renderHeader(m)
 	if strings.Contains(out, "loading") {
 		t.Errorf("dots refresh status belongs in footer, got loading header: %q", out)
@@ -633,7 +634,7 @@ func TestRenderHeader_DotsDisabledShowsNoInfo(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles", DotsDisabled: config.BoolPtr(true)})
-	m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}}}
+	m.dotsEntries = []app.DotStatus{{Name: "nvim", State: dots.StateSynced, Counts: app.DotFileCounts{Synced: 1}}}
 
 	out := stripANSIEscapeSequences(renderHeader(m))
 	if strings.Contains(out, "1/1") || strings.Contains(out, "entries") || strings.Contains(out, "dirty") {
@@ -646,7 +647,7 @@ func TestRenderHeader_DotsGitStatusShowsDirty(t *testing.T) {
 	m.mode = viewDots
 	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
 	m.dotsGitStatus = "M .zshrc"
-	m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}}}
+	m.dotsEntries = []app.DotStatus{{Name: "zsh", State: dots.StateSynced, Counts: app.DotFileCounts{Synced: 1}}}
 	out := stripANSIEscapeSequences(renderHeader(m))
 	if !strings.Contains(out, "dirty") {
 		t.Errorf("expected dirty dots repo in header summary, got: %q", out)
@@ -752,7 +753,7 @@ func TestRenderHeaderUsesCachedDotsAvailability(t *testing.T) {
 		m.mode = viewDots
 		m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
 		m.settings = config.Settings{DotsRepo: "/repo/dotfiles", DotsDisabled: config.BoolPtr(true)}
-		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}}}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: dots.StateSynced, Counts: app.DotFileCounts{Synced: 1}}}
 
 		out := stripANSIEscapeSequences(renderHeader(m))
 
@@ -818,7 +819,7 @@ func TestRenderHeader_RightEdgeMatchesListRows(t *testing.T) {
 	header := renderHeader(m)
 
 	cols := colWidths{name: 20, prov: 10, group: 8, screenW: m.width}
-	row := listRowPrefix(m.palette, true) + renderToolRowWithProviderPin(m.palette, m.allTools[0], cols, "", "dev", "", "", "", "", "", false, true, syncOK)
+	row := listRowPrefix(m.palette, true) + renderToolRowWithProviderPin(m.palette, m.allTools[0], cols, "", []string{"dev"}, nil, "", "", "", "", "", false, true, syncOK)
 	if got, want := lipgloss.Width(header), lipgloss.Width(row); got != want {
 		t.Fatalf("header right edge should align with list row right edge: header=%d row=%d\nheader=%q\nrow=%q", got, want, header, row)
 	}
@@ -1720,7 +1721,7 @@ func TestHostGroupDotsPopup_SearchKeepsDimensions(t *testing.T) {
 		{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK},
 		{Name: "tmux", TargetPath: "~/.tmux.conf", Health: app.HealthOK},
 		{Name: "zsh", TargetPath: "~/.zshrc", Health: app.HealthMissing},
-		{Name: "copilot", TargetPath: "~/.config/copilot", State: app.DotStateIgnored},
+		{Name: "copilot", TargetPath: "~/.config/copilot", State: dots.StateIgnored},
 	}
 	m.groupDotsEditor.membership = map[string]bool{"nvim": true, "tmux": true}
 	bg := strings.Repeat("\n", m.height-1)
@@ -2486,10 +2487,10 @@ func TestViewString_GroupMembershipTitleUsesCapturedToolAfterCursorMoves(t *test
 	m.cursor = 1
 
 	out := m.viewString()
-	if !strings.Contains(out, "Move Group: ripgrep") {
+	if !strings.Contains(out, "Change Groups: ripgrep") {
 		t.Fatalf("membership picker title should use captured tool:\n%s", out)
 	}
-	if strings.Contains(out, "Move Group: zoxide") {
+	if strings.Contains(out, "Change Groups: zoxide") {
 		t.Fatalf("membership picker title used live cursor:\n%s", out)
 	}
 }
@@ -2696,15 +2697,15 @@ func TestMainTabs_FirstSectionStartsAtSharedRow(t *testing.T) {
 	dotsNoFilters := baseModel(nil)
 	setDotsRepoForTest(&dotsNoFilters, "/repo")
 	dotsNoFilters.dotsLoaded = true
-	dotsNoFilters.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", State: app.DotStateSynced}}
+	dotsNoFilters.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", State: dots.StateSynced}}
 
 	dotsWithControls := baseModel(nil)
 	setDotsRepoForTest(&dotsWithControls, "/repo")
 	dotsWithControls.dotsLoaded = true
 	dotsWithControls.dotsSearchActive = true
 	dotsWithControls.dotsEntries = []app.DotStatus{
-		{Name: "nvim", TargetPath: "~/.config/nvim", State: app.DotStateSynced, Group: "config"},
-		{Name: "zsh", TargetPath: "~/.zshrc", State: app.DotStateSynced, Group: "home"},
+		{Name: "nvim", TargetPath: "~/.config/nvim", State: dots.StateSynced, Group: "config"},
+		{Name: "zsh", TargetPath: "~/.zshrc", State: dots.StateSynced, Group: "home"},
 	}
 
 	settings := baseModel(nil)
@@ -3187,7 +3188,7 @@ func TestTabKeyMap_ShortHelp_StatusMode(t *testing.T) {
 	})
 	m.mode = viewStatus
 	setDotsRepoForTest(&m, "/repo/dotfiles")
-	m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+	m.dotsEntries = []app.DotStatus{{Name: "nvim", State: dots.StateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 	got = strings.Join(bindingHelpDescs(tabKeyMap{&m}.ShortHelp()), ",")
 	for _, want := range []string{"reconcile all", "refresh dashboard"} {
 		if !strings.Contains(got, want) {
@@ -3407,7 +3408,7 @@ func TestRenderHelpPopup_TabSpecificActionsAndLegend(t *testing.T) {
 					{Name: "fd", Provider: "brew", Installed: false, Tracked: true},
 				}
 				setDotsRepoForTest(&m, "/repo/dotfiles")
-				m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+				m.dotsEntries = []app.DotStatus{{Name: "nvim", State: dots.StateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 			}
 			out := renderHelpPopupWithWidth(m, helpPopupContentWidth(m))
 			for _, want := range tc.want {
@@ -3453,7 +3454,7 @@ func TestRenderHelpPopup_DashboardSelectedRowActions(t *testing.T) {
 			name: "dotfiles sync",
 			setup: func(m Model) Model {
 				m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
-				m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+				m.dotsEntries = []app.DotStatus{{Name: "nvim", State: dots.StateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 				m.statusCursor = statusRowIndex(statusRows(m), "Dotfiles")
 				return m
 			},
@@ -3474,7 +3475,7 @@ func TestRenderHelpPopup_DashboardSelectedRowActions(t *testing.T) {
 			name: "healthy tool updates",
 			setup: func(m Model) Model {
 				m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
-				m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}}}
+				m.dotsEntries = []app.DotStatus{{Name: "zsh", State: dots.StateSynced, Counts: app.DotFileCounts{Synced: 1}}}
 				m.statusCursor = statusRowIndex(statusRows(m), "Tool Updates")
 				return m
 			},
@@ -3569,12 +3570,12 @@ func TestRenderHelpPopup_ActionOrderKeepsDeleteLast(t *testing.T) {
 		{
 			name:   "tools",
 			mode:   viewList,
-			before: []string{"install", "upgrade", "move group", "ignore"},
+			before: []string{"install", "upgrade", "edit groups", "ignore"},
 		},
 		{
 			name:   "dots",
 			mode:   viewDots,
-			before: []string{"add", "refresh", "move group", "ignore"},
+			before: []string{"add", "refresh", "edit groups", "ignore"},
 		},
 		{
 			name:   "groups",
@@ -3668,7 +3669,7 @@ func TestInlineDetailLines_WrongProviderShowsActualAndExpected(t *testing.T) {
 	m.toolProviderPins = map[string]string{"typescript": "npm"}
 	m.applyFilter()
 
-	cols := newColWidthsWithProviderPins(m.visibleTools, nil, nil, m.toolProviderPins, nil, "", "", m.effectiveNodeManager, 100, nil)
+	cols := newColWidthsWithProviderPins(m.visibleTools, nil, nil, nil, m.toolProviderPins, nil, "", "", m.effectiveNodeManager, 100, nil)
 	lines := inlineDetailLines(m, 100, cols)
 	got := stripANSIEscapeSequences(strings.Join(lines, "\n"))
 	want := "wrong provider: installed with bun, expected configured npm"
@@ -3695,10 +3696,10 @@ func TestInlineDetailLines_ConfiguredProviderCandidates(t *testing.T) {
 	}
 	m.applyFilter()
 
-	cols := newColWidthsWithProviderPins(m.visibleTools, nil, nil, m.toolProviderPins, nil, "", "", "", 120, nil)
+	cols := newColWidthsWithProviderPins(m.visibleTools, nil, nil, nil, m.toolProviderPins, nil, "", "", "", 120, nil)
 	lines := inlineDetailLines(m, 120, cols)
 	got := stripANSIEscapeSequences(strings.Join(lines, "\n"))
-	for _, want := range []string{"available providers", "npm/prettier", "brew/prettier"} {
+	for _, want := range []string{"available providers", "[npm]", "[brew]"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("inline detail = %q, want %q", got, want)
 		}
@@ -3731,7 +3732,7 @@ func TestInlineDetailLines_ConfiguredProviderCandidatesHiddenWhenNotActionable(t
 			m.toolProviderCandidates = map[string][]config.ToolInstallSpec{"prettier": tc.candidates}
 			m.applyFilter()
 
-			cols := newColWidthsWithProviderPins(m.visibleTools, nil, nil, m.toolProviderPins, nil, "", "", "", 120, nil)
+			cols := newColWidthsWithProviderPins(m.visibleTools, nil, nil, nil, m.toolProviderPins, nil, "", "", "", 120, nil)
 			lines := inlineDetailLines(m, 120, cols)
 			got := stripANSIEscapeSequences(strings.Join(lines, "\n"))
 			if strings.Contains(got, "available providers") {
@@ -3753,6 +3754,23 @@ func TestToolInlineHints_PinnedProviderOffersRemoveOverride(t *testing.T) {
 	}
 	if hints[0].key != m.keys.PinProvider.Help().Key || hints[0].desc != "remove override" {
 		t.Fatalf("first hint = %+v, want p remove override", hints[0])
+	}
+}
+
+func TestToolInlineHints_IgnoredToolOffersIncludeAndEdit(t *testing.T) {
+	tool := oneInstalled()[0]
+	m := baseModel([]*database.ToolCache{tool})
+	m.ignoreSet = map[string]bool{tool.Name: true}
+	m.applyFilter()
+	hints := toolInlineHints(m, tool)
+	if !hasHint(hints, m.keys.Ignore.Help().Key, "include") {
+		t.Fatalf("hints = %+v, want x include", hints)
+	}
+	if !hasHintKey(hints, m.keys.EditIgnore.Help().Key) {
+		t.Fatalf("hints = %+v, want e edit ignore", hints)
+	}
+	if !hasHintKey(hints, m.keys.Delete.Help().Key) {
+		t.Fatalf("hints = %+v, want d delete", hints)
 	}
 }
 
@@ -4234,7 +4252,7 @@ func TestNewColWidths_BasicTools(t *testing.T) {
 		{Name: "git", Provider: "brew"},
 		{Name: "a-very-long-tool-name", Provider: "npm"},
 	}
-	cols := newColWidthsWithProviderPins(tools, nil, nil, nil, nil, "", "", "", 120, nil)
+	cols := newColWidthsWithProviderPins(tools, nil, nil, nil, nil, nil, "", "", "", 120, nil)
 	if cols.name < len("a-very-long-tool-name") {
 		t.Errorf("name column %d should be >= longest tool name (%d)", cols.name, len("a-very-long-tool-name"))
 	}
@@ -4248,9 +4266,9 @@ func TestNewColWidths_WithGroups(t *testing.T) {
 		{Name: "git", Provider: "brew"},
 	}
 	groups := []string{"dev"}
-	cols := newColWidthsWithProviderPins(tools, map[string]string{
-		toolKey("git", "brew"): "dev",
-	}, groups, nil, nil, "", "", "", 120, nil)
+	cols := newColWidthsWithProviderPins(tools, map[string][]string{
+		toolKey("git", "brew"): {"dev"},
+	}, nil, groups, nil, nil, "", "", "", 120, nil)
 	if cols.group == 0 {
 		t.Error("expected non-zero group column width when groups exist")
 	}
@@ -4260,16 +4278,16 @@ func TestNewColWidths_IgnoreLabelsDoNotInflateGroupColumn(t *testing.T) {
 	tools := []*database.ToolCache{
 		{Name: "git", Provider: "brew"},
 	}
-	cols := newColWidthsWithProviderPins(tools, map[string]string{
-		toolKey("git", "brew"): "dev",
-	}, []string{"dev"}, nil, nil, "", "", "", 120, nil)
+	cols := newColWidthsWithProviderPins(tools, map[string][]string{
+		toolKey("git", "brew"): {"dev"},
+	}, nil, []string{"dev"}, nil, nil, "", "", "", 120, nil)
 	if cols.group != len("[dev]") {
 		t.Fatalf("group column = %d, want %d; ignore details belong in selected-row detail, not the group column", cols.group, len("[dev]"))
 	}
 }
 
 func TestNewColWidths_NoTools(t *testing.T) {
-	cols := newColWidthsWithProviderPins(nil, nil, nil, nil, nil, "", "", "", 120, nil)
+	cols := newColWidthsWithProviderPins(nil, nil, nil, nil, nil, nil, "", "", "", 120, nil)
 	if cols.name < 20 {
 		t.Errorf("name column %d should be >= floor of 20", cols.name)
 	}
@@ -4280,7 +4298,7 @@ func TestNewColWidths_UsesCompactVersionWidth(t *testing.T) {
 	tool.Version.Valid = true
 	tool.Version.String = "2.40.0, abc1234567890"
 
-	cols := newColWidthsWithProviderPins([]*database.ToolCache{tool}, nil, nil, nil, nil, "", "", "", 80, nil)
+	cols := newColWidthsWithProviderPins([]*database.ToolCache{tool}, nil, nil, nil, nil, nil, "", "", "", 80, nil)
 	wantName := 20
 	if cols.name != wantName {
 		t.Errorf("name column = %d, want %d with split row width", cols.name, wantName)
@@ -4291,7 +4309,7 @@ func TestRenderToolRow_InstalledNormal(t *testing.T) {
 	p := defaultPalette()
 	tool := &database.ToolCache{Name: "git", Provider: "brew", Installed: true}
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
-	out := renderToolRowWithProviderPin(p, tool, cols, "", "", "", "", "", "", "", false, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", nil, nil, "", "", "", "", "", false, false, syncOK)
 	if !strings.Contains(out, "git") {
 		t.Errorf("expected 'git' in tool row, got: %q", out)
 	}
@@ -4302,7 +4320,7 @@ func TestRenderToolRow_StatusColorStaysOnIcon(t *testing.T) {
 	tool := &database.ToolCache{Name: "git", Provider: "brew", Installed: true}
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
 
-	out := renderToolRowWithProviderPin(p, tool, cols, "", "", "", "", "", "", "", false, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", nil, nil, "", "", "", "", "", false, false, syncOK)
 
 	if !strings.Contains(out, p.styleInstalled.Render(iconInstalled)) {
 		t.Fatalf("row should color installed icon, got: %q", out)
@@ -4320,7 +4338,7 @@ func TestRenderToolRow_OrphanUsesOrphanIconColor(t *testing.T) {
 	tool := &database.ToolCache{Name: "utm", Provider: "system", Installed: true, InstalledWith: "brew", Tracked: false}
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
 
-	out := renderToolRowWithProviderPin(p, tool, cols, "", "", "", "", "brew", "", "", false, false, syncOrphan)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", nil, nil, "", "", "brew", "", "", false, false, syncOrphan)
 
 	if !strings.Contains(out, p.styleOrphan.Render(iconOrphan)) {
 		t.Fatalf("orphan row should color orphan icon, got: %q", out)
@@ -4335,7 +4353,7 @@ func TestRenderToolRow_ShowsPackageAliasAfterLogicalName(t *testing.T) {
 	tool := &database.ToolCache{Name: "editor", Provider: "system", Package: "neovim", Installed: true, Tracked: true}
 	cols := colWidths{name: 24, prov: 14, ver: 8, screenW: 120}
 
-	out := renderToolRowWithProviderPin(p, tool, cols, "", "", "", "", "brew", "", "", false, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", nil, nil, "", "", "brew", "", "", false, false, syncOK)
 
 	if !strings.Contains(out, "editor") || !strings.Contains(out, "{neovim}") {
 		t.Fatalf("row = %q, want logical name and package alias", out)
@@ -4350,7 +4368,7 @@ func TestRenderToolRow_PrivilegeMarkerUsesOwnColumn(t *testing.T) {
 	tool := &database.ToolCache{Name: "editor", Provider: "apt", Package: "neovim", Installed: true, Tracked: true}
 	cols := colWidths{name: 24, priv: lipgloss.Width(iconPrivileged), prov: 14, ver: 8, screenW: 120}
 
-	out := renderToolRowWithProviderPin(p, tool, cols, "", "", "", "", "", "", "", false, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", nil, nil, "", "", "", "", "", false, false, syncOK)
 
 	if strings.Contains(out, "editor "+iconPrivileged) || strings.Contains(out, "{neovim} "+iconPrivileged) {
 		t.Fatalf("row = %q, privilege marker should not be in name column", out)
@@ -4376,7 +4394,7 @@ func TestRenderToolRow_SystemBrewDoesNotShowPrivilegeMarker(t *testing.T) {
 	tool := &database.ToolCache{Name: "ripgrep", Provider: "system", Package: "ripgrep", Installed: false, Tracked: true}
 	cols := colWidths{name: 24, prov: 14, ver: 8, screenW: 120}
 
-	out := renderToolRowWithProviderPin(p, tool, cols, "", "", "", "", "brew", "", "", false, false, syncMissing)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", nil, nil, "", "", "brew", "", "", false, false, syncMissing)
 
 	if strings.Contains(out, iconPrivileged) {
 		t.Fatalf("row = %q, system rows resolved to brew should not show privilege marker", out)
@@ -4411,7 +4429,7 @@ func TestRenderToolRow_MissingTool(t *testing.T) {
 	p := defaultPalette()
 	tool := &database.ToolCache{Name: "missing-tool", Provider: "brew", Installed: false}
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
-	out := renderToolRowWithProviderPin(p, tool, cols, "", "", "", "", "", "", "", false, false, syncMissing)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", nil, nil, "", "", "", "", "", false, false, syncMissing)
 	if !strings.Contains(out, "missing-tool") {
 		t.Errorf("expected tool name in missing tool row, got: %q", out)
 	}
@@ -4425,7 +4443,7 @@ func TestRenderToolRow_OrphanDoesNotShowBaseGroup(t *testing.T) {
 	tool := &database.ToolCache{Name: "fzf", Provider: "system", InstalledWith: "brew", Installed: true, Tracked: false}
 	cols := colWidths{name: 20, prov: 12, ver: 8, group: len("[base]"), screenW: 120}
 
-	out := renderToolRowWithProviderPin(p, tool, cols, "", "", "", "", "", "", "", false, false, syncOrphan)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", nil, nil, "", "", "", "", "", false, false, syncOrphan)
 	if strings.Contains(out, "[base]") {
 		t.Fatalf("orphan row = %q, should not show base group", out)
 	}
@@ -4447,7 +4465,7 @@ func TestRenderToolRow_OutdatedTool(t *testing.T) {
 	tool.LatestVersion.Valid = true
 	tool.LatestVersion.String = "2.41.0"
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
-	out := renderToolRowWithProviderPin(p, tool, cols, "", "", "", "", "", "", "", false, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", nil, nil, "", "", "", "", "", false, false, syncOK)
 	if !strings.Contains(out, "2.40.0") {
 		t.Errorf("expected version in outdated tool row, got: %q", out)
 	}
@@ -4463,7 +4481,7 @@ func TestRenderToolRow_CompactsCommaVersionSuffix(t *testing.T) {
 	tool.Version.Valid = true
 	tool.Version.String = "2.40.0, abc123"
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
-	out := renderToolRowWithProviderPin(p, tool, cols, "", "", "", "", "", "", "", false, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", nil, nil, "", "", "", "", "", false, false, syncOK)
 	if !strings.Contains(out, "2.40.0") {
 		t.Errorf("expected compact version in tool row, got: %q", out)
 	}
@@ -4476,7 +4494,7 @@ func TestRenderToolRow_IgnoredTool(t *testing.T) {
 	p := defaultPalette()
 	tool := &database.ToolCache{Name: "ignored-pkg", Provider: "pip", Installed: false, Tracked: true}
 	cols := colWidths{name: 20, prov: 14, group: len("[work]"), screenW: 120}
-	out := renderToolRowWithProviderPin(p, tool, cols, "", "work", "", "", "", "", "", true, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", []string{"work"}, nil, "", "", "", "", "", true, false, syncOK)
 	if !strings.Contains(out, "ignored-pkg") {
 		t.Errorf("expected tool name in ignored row, got: %q", out)
 	}
@@ -4495,9 +4513,9 @@ func TestRenderToolRow_OneGapBetweenIconAndName(t *testing.T) {
 	tool.Version.String = "1.0.0"
 	cols := colWidths{name: 20, prov: 10, group: 0, screenW: 120}
 
-	out := renderToolRowWithProviderPin(p, tool, cols, "", "base", "", "", "", "", "", false, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", []string{"base"}, nil, "", "", "", "", "", false, false, syncOK)
 	icon := p.styleInstalled.Render(iconInstalled)
-	name := renderNameCell(p, p.styleNormal, tool, "", cols.name, false)
+	name := renderNameCell(p, p.styleNormal, tool, cols.name, false)
 	if !strings.Contains(out, icon+" "+name) {
 		t.Fatalf("tool row should render exactly one space between icon and name, got: %q", out)
 	}
@@ -4510,7 +4528,7 @@ func TestRenderToolRow_InstalledEcosystemProviderWithoutInstalledWithDoesNotGues
 	p := defaultPalette()
 	tool := &database.ToolCache{Name: "typescript", Provider: "node", Installed: true, Tracked: true}
 	cols := colWidths{name: 20, prov: 10, group: 8, screenW: 120}
-	out := renderToolRowWithProviderPin(p, tool, cols, "", "dev", "", "", "", "", "pnpm", false, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", []string{"dev"}, nil, "", "", "", "", "pnpm", false, false, syncOK)
 	if strings.Contains(out, "node(pnpm)") {
 		t.Fatalf("installed row without installed_with should not guess effective node manager, got: %q", out)
 	}
@@ -4525,7 +4543,7 @@ func TestRenderToolRow_SelectedTool(t *testing.T) {
 	tool.Version.Valid = true
 	tool.Version.String = "1.2.3"
 	cols := colWidths{name: 20, prov: 10, group: 8, screenW: 120}
-	out := renderToolRowWithProviderPin(p, tool, cols, "", "dev", "", "", "", "", "", false, true, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", []string{"dev"}, nil, "", "", "", "", "", false, true, syncOK)
 	if !strings.Contains(out, "selected") {
 		t.Errorf("expected 'selected' in selected tool row, got: %q", out)
 	}
@@ -4544,7 +4562,7 @@ func TestRenderToolRow_WithSpinner(t *testing.T) {
 	p := defaultPalette()
 	tool := &database.ToolCache{Name: "upgrading", Provider: "brew", Installed: true}
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
-	out := renderToolRowWithProviderPin(p, tool, cols, "⠋", "", "", "", "", "", "", false, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "⠋", nil, nil, "", "", "", "", "", false, false, syncOK)
 	if !strings.Contains(out, "upgrading") {
 		t.Errorf("expected tool name with spinner view, got: %q", out)
 	}
@@ -4554,9 +4572,119 @@ func TestRenderToolRow_WithGroup(t *testing.T) {
 	p := defaultPalette()
 	tool := &database.ToolCache{Name: "git", Provider: "brew", Installed: true, Tracked: true}
 	cols := colWidths{name: 20, prov: 10, group: 8, screenW: 120}
-	out := renderToolRowWithProviderPin(p, tool, cols, "", "dev", "", "", "", "", "", false, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", []string{"dev"}, nil, "", "", "", "", "", false, false, syncOK)
 	if !strings.Contains(out, "dev") {
 		t.Errorf("expected group badge 'dev' in tool row, got: %q", out)
+	}
+}
+
+func TestRenderList_MultiGroupBadgeAndFullDetail(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "beta.local")
+	m := baseModel([]*database.ToolCache{{Name: "git", Provider: "brew", Installed: true, Tracked: true}})
+	key := toolKey("git", "brew")
+	m.hostInfo = &app.HostInfo{
+		Active: "beta",
+		Hosts: map[string]config.HostAssignment{
+			"beta": {Groups: []string{"work"}},
+		},
+	}
+	m.groupNames = []string{"work"}
+	m.toolMemberships = map[string][]string{key: {"alpha", "beta", "work"}}
+	m.toolGroups = app.ToolGroupLabels(m.toolMemberships, m.hostInfo)
+	m.applyFilter()
+
+	out := stripANSIEscapeSequences(renderList(m))
+	if !strings.Contains(out, "[beta] [work]") {
+		t.Fatalf("tool row missing active-host multi-group pills:\n%s", out)
+	}
+	if !strings.Contains(out, "groups: alpha, beta, work") {
+		t.Fatalf("selected tool detail missing full memberships:\n%s", out)
+	}
+}
+
+// TestRenderList_TwoGroupsShowTwoPills is the Task 6 wiring regression guard:
+// a tool in two reusable groups (no active host filtering to collapse them)
+// must render both as separate pills, not a single compact badge.
+func TestRenderList_TwoGroupsShowTwoPills(t *testing.T) {
+	m := baseModel([]*database.ToolCache{{Name: "git", Provider: "brew", Installed: true, Tracked: true}})
+	key := toolKey("git", "brew")
+	m.groupNames = []string{"laptop", "work"}
+	m.toolMemberships = map[string][]string{key: {"laptop", "work"}}
+	m.applyFilter()
+
+	out := stripANSIEscapeSequences(renderList(m))
+	if !strings.Contains(out, "[laptop]") || !strings.Contains(out, "[work]") {
+		t.Fatalf("tool row lacks both group pills:\n%s", out)
+	}
+}
+
+// TestRenderList_ThreeGroupsNarrowWidthCollapsesToHostPlusCount verifies that
+// when a tool belongs to a host group plus two reusable groups and the group
+// column is too narrow to fit all three pills, the row collapses to the host
+// pill plus a "+N" count instead of dropping or truncating groups silently.
+func TestRenderList_ThreeGroupsNarrowWidthCollapsesToHostPlusCount(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "laptop")
+	m := baseModel([]*database.ToolCache{{Name: "git", Provider: "brew", Installed: true, Tracked: true}})
+	m.width = 65
+	key := toolKey("git", "brew")
+	m.hostInfo = &app.HostInfo{
+		Active: "laptop",
+		Hosts: map[string]config.HostAssignment{
+			"laptop": {Groups: []string{"laptop", "work", "base"}},
+		},
+	}
+	m.groupNames = []string{"work", "base"}
+	m.toolMemberships = map[string][]string{key: {"laptop", "work", "base"}}
+	m.toolGroups = app.ToolGroupLabels(m.toolMemberships, m.hostInfo)
+	m.applyFilter()
+
+	out := stripANSIEscapeSequences(renderList(m))
+	if !strings.Contains(out, "[laptop] +2") {
+		t.Fatalf("tool row missing collapsed host pill with count:\n%s", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "git") && strings.Contains(line, "[work]") {
+			t.Fatalf("tool row should collapse rather than show reusable pill in full:\n%s", out)
+		}
+	}
+}
+
+func TestFullMembershipDetailLines_WrapsWithoutLosingGroups(t *testing.T) {
+	tests := []struct {
+		name   string
+		groups []string
+		width  int
+		want   string
+	}{
+		{
+			name:   "long ASCII names",
+			groups: []string{"alpha-team-with-a-long-name", "beta-team", "work"},
+			width:  18,
+			want:   "groups: alpha-team-with-a-long-name, beta-team, work",
+		},
+		{
+			name:   "wide characters",
+			groups: []string{"工程團隊工程團隊", "工作"},
+			width:  12,
+			want:   "groups: 工作, 工程團隊工程團隊",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lines := fullMembershipDetailLines(tt.groups, tt.width)
+			if len(lines) < 2 {
+				t.Fatalf("expected wrapped membership details, got %q", lines)
+			}
+			for _, line := range lines {
+				if got := lipgloss.Width(line); got > tt.width {
+					t.Fatalf("membership detail width = %d, want <= %d: %q", got, tt.width, line)
+				}
+			}
+			if got := strings.Join(lines, ""); got != tt.want {
+				t.Fatalf("wrapped membership details lost content: %q", got)
+			}
+		})
 	}
 }
 
@@ -4564,7 +4692,7 @@ func TestRenderToolRow_RightAlignsGroupBadge(t *testing.T) {
 	p := defaultPalette()
 	tool := &database.ToolCache{Name: "git", Provider: "brew", Installed: true, Tracked: true}
 	cols := colWidths{name: 20, prov: 10, group: 8, screenW: 120}
-	out := renderToolRowWithProviderPin(p, tool, cols, "", "dev", "", "", "", "", "", false, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", []string{"dev"}, nil, "", "", "", "", "", false, false, syncOK)
 	if !strings.Contains(out, p.styleHelp.Render("[dev]")) {
 		t.Errorf("expected group badge in right group, got: %q", out)
 	}
@@ -4577,7 +4705,7 @@ func TestRenderToolRow_ProviderVersionAndGroupShareRightGroup(t *testing.T) {
 	tool.Version.String = "2.40.0"
 	cols := colWidths{name: 20, prov: 10, ver: 8, group: 8, screenW: 80}
 
-	out := renderToolRowWithProviderPin(p, tool, cols, "", "dev", "", "", "", "", "", false, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", []string{"dev"}, nil, "", "", "", "", "", false, false, syncOK)
 	providerCol := visualColumnOf(out, "brew")
 	versionCol := visualColumnOf(out, "2.40.0")
 	groupCol := visualColumnOf(out, "[dev]")
@@ -4599,8 +4727,8 @@ func TestRenderToolRow_EmptyGroupCellKeepsColumnsAligned(t *testing.T) {
 	ungrouped.Version.String = "9.10.0"
 	cols := colWidths{name: 20, prov: 10, ver: 8, group: 8, screenW: 80}
 
-	withGroup := renderToolRowWithProviderPin(p, grouped, cols, "", "dev", "", "", "", "", "", false, false, syncOK)
-	withoutGroup := renderToolRowWithProviderPin(p, ungrouped, cols, "", "", "", "", "", "", "", false, false, syncOrphan)
+	withGroup := renderToolRowWithProviderPin(p, grouped, cols, "", []string{"dev"}, nil, "", "", "", "", "", false, false, syncOK)
+	withoutGroup := renderToolRowWithProviderPin(p, ungrouped, cols, "", nil, nil, "", "", "", "", "", false, false, syncOrphan)
 	if strings.Contains(withoutGroup, "[base]") || strings.Contains(withoutGroup, "[dev]") {
 		t.Fatalf("ungrouped row should reserve an empty group cell, not render a badge: %q", withoutGroup)
 	}
@@ -4624,12 +4752,12 @@ func TestRenderToolRow_ProviderColumnAlignsWithAndWithoutMarker(t *testing.T) {
 	withoutMarker := &database.ToolCache{Name: "runner", Provider: "node", Package: "sometool", Installed: true, Tracked: true}
 	tools := []*database.ToolCache{withMarker, withoutMarker}
 
-	cols := newColWidthsWithProviderPins(tools, nil, nil, nil, nil, "apt", "", "bun", 120, func(t *database.ToolCache) bool {
+	cols := newColWidthsWithProviderPins(tools, nil, nil, nil, nil, nil, "apt", "", "bun", 120, func(t *database.ToolCache) bool {
 		return t == withMarker
 	})
 
-	rowWith := renderToolRowWithProviderPin(p, withMarker, cols, "", "", "", "", "apt", "", "bun", false, false, syncWrongProv)
-	rowWithout := renderToolRowWithProviderPin(p, withoutMarker, cols, "", "", "", "", "apt", "", "bun", false, false, syncOK)
+	rowWith := renderToolRowWithProviderPin(p, withMarker, cols, "", nil, nil, "", "", "apt", "", "bun", false, false, syncWrongProv)
+	rowWithout := renderToolRowWithProviderPin(p, withoutMarker, cols, "", nil, nil, "", "", "apt", "", "bun", false, false, syncOK)
 
 	plainWith := stripANSIEscapeSequences(rowWith)
 	plainWithout := stripANSIEscapeSequences(rowWithout)
@@ -4649,7 +4777,7 @@ func TestRenderDotsRow_UsesCompactSpacing(t *testing.T) {
 	m.width = 120
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{
-		{Name: name, TargetPath: target, State: app.DotStateSynced},
+		{Name: name, TargetPath: target, State: dots.StateSynced},
 	}
 
 	out := renderDots(m)
@@ -4687,8 +4815,8 @@ func TestRenderDotsRow_ShowsVariantMarker(t *testing.T) {
 	m.width = 100
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{
-		{Name: "nvim", Package: "nvim@laptop", Variant: true, TargetPath: "~/.config/nvim", State: app.DotStateSynced},
-		{Name: "zshrc", Package: "zshrc", TargetPath: "~/.zshrc", State: app.DotStateSynced},
+		{Name: "nvim", Package: "nvim@laptop", Variant: true, TargetPath: "~/.config/nvim", State: dots.StateSynced},
+		{Name: "zshrc", Package: "zshrc", TargetPath: "~/.zshrc", State: dots.StateSynced},
 	}
 
 	out := renderDots(m)
@@ -4708,9 +4836,9 @@ func TestRenderToolRow_LongUpgradeVersionDoesNotPushGroupBadge(t *testing.T) {
 	tool.LatestVersion.Valid = true
 	tool.LatestVersion.String = "5.9.0-next.20260501+very-long-build-metadata"
 	screenW := 80
-	cols := newColWidthsWithProviderPins([]*database.ToolCache{tool}, map[string]string{toolKey("typescript", "node"): "dev"}, []string{"dev"}, nil, nil, "", "", "pnpm", screenW, nil)
+	cols := newColWidthsWithProviderPins([]*database.ToolCache{tool}, map[string][]string{toolKey("typescript", "node"): {"dev"}}, nil, []string{"dev"}, nil, nil, "", "", "pnpm", screenW, nil)
 
-	out := screenEdgeInset() + renderToolRowWithProviderPin(p, tool, cols, "", "dev", "", "", "", "", "pnpm", false, false, syncOK)
+	out := screenEdgeInset() + renderToolRowWithProviderPin(p, tool, cols, "", []string{"dev"}, nil, "", "", "", "", "pnpm", false, false, syncOK)
 	if got := lipgloss.Width(out); got > screenContentWidth(screenW) {
 		t.Fatalf("row width = %d, want <= %d; row: %q", got, screenContentWidth(screenW), out)
 	}
@@ -4979,7 +5107,7 @@ func TestInlineDetailLines_RowOperationReplacesHints(t *testing.T) {
 	if !strings.Contains(combined, "ctrl+c") || !strings.Contains(combined, "cancel") {
 		t.Fatalf("row operation should show ctrl+c cancel hint, got:\n%s", combined)
 	}
-	if strings.Contains(combined, "move group") || strings.Contains(combined, "delete") {
+	if strings.Contains(combined, "edit groups") || strings.Contains(combined, "delete") {
 		t.Fatalf("row operation should replace normal action hints, got:\n%s", combined)
 	}
 	if strings.Index(combined, "Installing curl…") < strings.Index(combined, "transfer data") {
@@ -4997,12 +5125,28 @@ func TestRenderList_RowActionErrorShowsBehindToolName(t *testing.T) {
 	m.cursor = 1
 	m.setToolActionError(toolKey("curl", "brew"), "provider not found")
 
-	out := renderList(m)
+	out := stripANSIEscapeSequences(renderList(m))
 	if !strings.Contains(out, "provider not found") {
 		t.Fatalf("row action error should render on the tool row even when not selected, got:\n%s", out)
 	}
-	if !strings.Contains(out, m.palette.styleErr.Render(iconFailed)) {
+	if !strings.Contains(renderList(m), m.palette.styleErr.Render(iconFailed)) {
 		t.Fatalf("row action error should use error icon, got:\n%s", out)
+	}
+	lines := strings.Split(out, "\n")
+	toolLine, errorLine := -1, -1
+	for i, line := range lines {
+		if strings.Contains(line, "curl") {
+			toolLine = i
+		}
+		if strings.Contains(line, "provider not found") {
+			errorLine = i
+		}
+	}
+	if toolLine < 0 || errorLine != toolLine+1 {
+		t.Fatalf("row action error should use its own row immediately below the tool, got:\n%s", out)
+	}
+	if strings.Contains(lines[toolLine], "provider not found") {
+		t.Fatalf("tool row should not contain the error preview, got %q", lines[toolLine])
 	}
 }
 
@@ -5027,6 +5171,48 @@ func TestRowErrorSummaryNormalizesUnsafeOutput(t *testing.T) {
 	got := rowErrorSummary("\x1b[31mfailed\x1b[0m\n\tbecause package manager wrote multiline stderr")
 	if got != "failed because package manager wrote multiline stderr" {
 		t.Fatalf("rowErrorSummary() = %q", got)
+	}
+}
+
+func TestRowErrorSummaryExtractsActualProblem(t *testing.T) {
+	got := rowErrorSummary("brew install font-intel-one-mono: exit status 1 (stderr: Error: A font is already installed at /Library/Fonts/IntelOneMono.ttf)")
+	if got != "A font is already installed at /Library/Fonts/IntelOneMono.ttf" {
+		t.Fatalf("rowErrorSummary() = %q", got)
+	}
+}
+
+func TestRowErrorSummaryKeepsMultilineProblemDetails(t *testing.T) {
+	got := rowErrorSummary("brew install font: exit status 1 (stderr: Error: A font is already installed at:\n/Library/Fonts/IntelOneMono.ttf\nRemove it before reinstalling.)")
+	want := "A font is already installed at: /Library/Fonts/IntelOneMono.ttf Remove it before reinstalling."
+	if got != want {
+		t.Fatalf("rowErrorSummary() = %q, want %q", got, want)
+	}
+}
+
+func TestRenderList_RowActionErrorShowsErrorLogHint(t *testing.T) {
+	tool := &database.ToolCache{Name: "curl", Provider: "brew", Tracked: true}
+	m := baseModel([]*database.ToolCache{tool})
+	m.cursor = 0
+	m.setToolActionError(toolKey("curl", "brew"), "provider not found")
+
+	out := stripANSIEscapeSequences(renderList(m))
+	errorLine := renderedLineContaining(out, "provider not found")
+	if !strings.Contains(errorLine, "e") || !strings.Contains(errorLine, "error log") {
+		t.Fatalf("selected failed row should hint e error log, got %q", errorLine)
+	}
+}
+
+func TestRenderList_FocusedSearchErrorHidesErrorLogHint(t *testing.T) {
+	tool := &database.ToolCache{Name: "curl", Provider: "brew", Tracked: true}
+	m := baseModel([]*database.ToolCache{tool})
+	m.mode = viewSearch
+	m.filter.Focus()
+	m.cursor = 0
+	m.setToolActionError(toolKey("curl", "brew"), "provider not found")
+
+	errorLine := renderedLineContaining(stripANSIEscapeSequences(renderList(m)), "provider not found")
+	if strings.Contains(errorLine, "error log") {
+		t.Fatalf("focused search should not show an unavailable error-log hint, got %q", errorLine)
 	}
 }
 
@@ -5085,7 +5271,7 @@ func TestRenderDots_BulkPendingUsesWaitingIcon(t *testing.T) {
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
-		State:      app.DotStateMissing,
+		State:      dots.StateMissing,
 		Counts:     app.DotFileCounts{OutOfSync: 1},
 	}}
 	m.dotsPendingNames = map[string]bool{"nvim": true}
@@ -5100,8 +5286,8 @@ func TestRenderDots_DoesNotRenderGroupPillBar(t *testing.T) {
 	m := baseModel(nil)
 	setDotsRepoForTest(&m, "/repo")
 	m.dotsEntries = []app.DotStatus{
-		{Name: "nvim", TargetPath: "~/.config/nvim", State: app.DotStateSynced, Group: "config", Counts: app.DotFileCounts{Synced: 1}},
-		{Name: "zsh", TargetPath: "~/.zshrc", State: app.DotStateSynced, Group: "home", Counts: app.DotFileCounts{Synced: 1}},
+		{Name: "nvim", TargetPath: "~/.config/nvim", State: dots.StateSynced, Group: "config", Counts: app.DotFileCounts{Synced: 1}},
+		{Name: "zsh", TargetPath: "~/.zshrc", State: dots.StateSynced, Group: "home", Counts: app.DotFileCounts{Synced: 1}},
 	}
 
 	out := stripANSIEscapeSequences(renderDots(m))
@@ -5139,7 +5325,7 @@ func TestRenderDots_RowSpinnerKeepsNameColumn(t *testing.T) {
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
-		State:      app.DotStateSynced,
+		State:      dots.StateSynced,
 		Counts:     app.DotFileCounts{Synced: 1},
 	}}
 	normalLine := renderedLineContaining(renderDots(m), "nvim")
@@ -5174,7 +5360,7 @@ func TestRenderDots_RowOperationUsesSpinnerIcon(t *testing.T) {
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
-		State:      app.DotStateMissing,
+		State:      dots.StateMissing,
 		Counts:     app.DotFileCounts{OutOfSync: 1},
 	}}
 	m.dotsActiveName = "nvim"
@@ -5191,8 +5377,8 @@ func TestRenderDots_NoExtraBlankLineAtTop(t *testing.T) {
 	setDotsRepoForTest(&m, "/repo")
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{
-		{Name: "nvim", TargetPath: "~/.config/nvim", State: app.DotStateSynced},
-		{Name: "zsh", TargetPath: "~/.zshrc", State: app.DotStateSynced},
+		{Name: "nvim", TargetPath: "~/.config/nvim", State: dots.StateSynced},
+		{Name: "zsh", TargetPath: "~/.zshrc", State: dots.StateSynced},
 	}
 	// dotsSearchActive is false by default — the removed else-branch would have
 	// emitted a blank line here; verify the first line is not empty.
@@ -5212,8 +5398,8 @@ func TestRenderDots_SearchActiveHasControlLine(t *testing.T) {
 	setDotsRepoForTest(&m, "/repo")
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{
-		{Name: "nvim", TargetPath: "~/.config/nvim", State: app.DotStateSynced},
-		{Name: "zsh", TargetPath: "~/.zshrc", State: app.DotStateSynced},
+		{Name: "nvim", TargetPath: "~/.config/nvim", State: dots.StateSynced},
+		{Name: "zsh", TargetPath: "~/.zshrc", State: dots.StateSynced},
 	}
 	m.dotsSearchActive = true
 
@@ -5325,10 +5511,10 @@ func TestRenderToolRow_ConcreteWrongProviderShowsInstalledWithMarker(t *testing.
 		Installed: true, Tracked: true, Version: sql.NullString{String: "11.11.0", Valid: true},
 	}
 	p := defaultPalette()
-	cols := newColWidthsWithProviderPins([]*database.ToolCache{tool}, nil, nil, nil, nil, "", "", "bun", 120, func(t *database.ToolCache) bool {
+	cols := newColWidthsWithProviderPins([]*database.ToolCache{tool}, nil, nil, nil, nil, nil, "", "", "bun", 120, func(t *database.ToolCache) bool {
 		return t != nil && t.Name == tool.Name
 	})
-	out := stripANSIEscapeSequences(renderToolRowWithProviderPin(p, tool, cols, "", "", "", "", "", "", "bun", false, false, syncWrongProv))
+	out := stripANSIEscapeSequences(renderToolRowWithProviderPin(p, tool, cols, "", nil, nil, "", "", "", "", "bun", false, false, syncWrongProv))
 	if !strings.Contains(out, "bun") {
 		t.Fatalf("row = %q, want installed provider bun", out)
 	}
@@ -5345,11 +5531,11 @@ func TestRenderToolRow_ConcreteWrongProviderShowsInstalledWithMarker(t *testing.
 
 func TestNewColWidths_ProviderPinReservesAlignedMarkerWidth(t *testing.T) {
 	tool := &database.ToolCache{Name: "prettier", Provider: "node", Installed: true, Tracked: true}
-	cols := newColWidthsWithProviderPins([]*database.ToolCache{tool}, nil, nil, map[string]string{"prettier": "bun"}, nil, "", "", "bun", 120, nil)
+	cols := newColWidthsWithProviderPins([]*database.ToolCache{tool}, nil, nil, nil, map[string]string{"prettier": "bun"}, nil, "", "", "bun", 120, nil)
 	if cols.priv != lipgloss.Width(providerWrongGlyph) {
 		t.Fatalf("priv/mark column = %d, want pin marker width", cols.priv)
 	}
-	out := stripANSIEscapeSequences(renderToolRowWithProviderPin(defaultPalette(), tool, cols, "", "", "bun", "", "", "", "bun", false, false, syncOK))
+	out := stripANSIEscapeSequences(renderToolRowWithProviderPin(defaultPalette(), tool, cols, "", nil, nil, "bun", "", "", "", "bun", false, false, syncOK))
 	if !strings.Contains(out, providerWrongGlyph+strings.Repeat(" ", toolPrivilegeProviderGap)+"bun") {
 		t.Fatalf("row = %q, want provider pin prefix with single-space gap", out)
 	}
@@ -5925,7 +6111,7 @@ func TestViewString_StatusMode(t *testing.T) {
 		},
 		Summary: app.DoctorSummary{OK: 1, Warn: 1},
 	}
-	m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateConflict, Health: app.HealthConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+	m.dotsEntries = []app.DotStatus{{Name: "zsh", State: dots.StateConflict, Health: app.HealthConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 	out := m.viewString()
 	for _, want := range []string{"Health Check", "Data", "Tool Updates", "Tool Sync", "Dotfiles", "Services"} {
 		if !strings.Contains(out, want) {
@@ -5944,7 +6130,7 @@ func TestDashboardAttentionRowsCollapseOKDoctorChecks(t *testing.T) {
 	m.mode = viewStatus
 	m.allTools = []*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}}
 	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
-	m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateSynced, Health: app.HealthOK}}
+	m.dotsEntries = []app.DotStatus{{Name: "zsh", State: dots.StateSynced, Health: app.HealthOK}}
 	m.doctorResult = &app.DoctorResult{
 		Checks: []app.DoctorCheck{
 			{ID: "config", Label: "Config", Status: app.DoctorStatusOK, Message: "settings.json is valid"},
@@ -6118,8 +6304,8 @@ func TestDashboardDoctorFixActionDispatches(t *testing.T) {
 		t.Fatalf("fix action commands = %d, want 1", len(cmds))
 	}
 	msg := cmds[0]().(configOptimizeDoneMsg)
-	if msg.err != nil {
-		t.Fatalf("fix action: %v", msg.err)
+	if msg.optimizeErr != nil || msg.ignoreErr != nil {
+		t.Fatalf("fix action: optimize=%v ignore=%v", msg.optimizeErr, msg.ignoreErr)
 	}
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -6127,6 +6313,63 @@ func TestDashboardDoctorFixActionDispatches(t *testing.T) {
 	}
 	if len(cfg.MergeNotices) != 0 {
 		t.Fatalf("merge notices survived fix: %v", cfg.MergeNotices)
+	}
+}
+
+func TestDashboardDoctorFixCommandPartialFailure(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "settings.json")
+	if err := os.MkdirAll(filepath.Join(dir, "settings.d"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(path, content string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(configPath, `{
+	"$include": ["settings.d/dots.json"],
+	"groups": [
+		{"dots":[{"name":"git","path":"~/.gitconfig"},{"name":"vim","path":"~/.vimrc"}]},
+		{"name":"dev","dots":[{"name":"myapp","path":"~/.myapp","ignore":["*","!/settings.json","!/skills/","skills"]}]}
+	]
+}`)
+	write(filepath.Join(dir, "settings.d", "dots.json"), `{
+	"groups":[{"dots":[{"name":"git","path":"~/.gitconfig"},{"name":"zsh","path":"~/.zshrc"}]}]
+}`)
+
+	m := baseModel(nil)
+	m.app = app.New(configPath)
+	m.doctorResult = &app.DoctorResult{
+		Checks:  []app.DoctorCheck{{ID: "config", Status: app.DoctorStatusWarn, Message: "settings.json has duplicate definitions across $include fragments"}},
+		Summary: app.DoctorSummary{Warn: 1},
+	}
+	var cmds []tea.Cmd
+	m.handleStatusAction(statusAction{kind: statusActionFixConfig}, &cmds)
+	if len(cmds) != 1 {
+		t.Fatalf("fix action commands = %d, want 1", len(cmds))
+	}
+	msg := cmds[0]().(configOptimizeDoneMsg)
+	if msg.optimizeErr == nil || msg.ignoreErr != nil {
+		t.Fatalf("partial result: optimize=%v ignore=%v", msg.optimizeErr, msg.ignoreErr)
+	}
+	if want := []string{"myapp"}; !slices.Equal(msg.modified, want) {
+		t.Fatalf("modified = %v, want %v", msg.modified, want)
+	}
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, group := range cfg.Groups {
+		if group != nil && group.Name == "dev" && len(group.Dots) == 1 {
+			got = group.Dots[0].Ignore
+		}
+	}
+	if want := []string{"*", "!/settings.json"}; !slices.Equal(got, want) {
+		t.Fatalf("ignore patterns = %v, want %v", got, want)
 	}
 }
 
@@ -6145,12 +6388,50 @@ func TestDashboardDoctorFixDoneRefreshesDoctor(t *testing.T) {
 	}
 }
 
+func TestDashboardDoctorPartialFixReportsIgnoreSuccessAndOptimizeError(t *testing.T) {
+	m := baseModel(nil)
+	m.doctorResult = &app.DoctorResult{}
+	next, cmd := m.Update(configOptimizeDoneMsg{
+		modified:    []string{"myapp"},
+		optimizeErr: errors.New("unsafe dedupe"),
+	})
+	got := next.(Model)
+	for _, want := range []string{"fixed ignore patterns for myapp", "unsafe dedupe"} {
+		if !strings.Contains(got.statusMsg, want) {
+			t.Fatalf("status = %q, want %q", got.statusMsg, want)
+		}
+	}
+	if !got.doctorRunning || cmd == nil {
+		t.Fatalf("partial fix should refresh doctor, running=%v cmd=%v", got.doctorRunning, cmd != nil)
+	}
+}
+
+func TestDashboardDoctorPartialFixReportsOptimizeSuccessAndIgnoreError(t *testing.T) {
+	m := baseModel(nil)
+	m.doctorResult = &app.DoctorResult{}
+	next, cmd := m.Update(configOptimizeDoneMsg{
+		report: &config.OptimizeReport{Removals: []config.OptimizeRemoval{{
+			Key: "dots", Names: []string{"git"},
+		}}},
+		ignoreErr: errors.New("ignore write failed"),
+	})
+	got := next.(Model)
+	for _, want := range []string{"fixed 1 duplicate", "ignore write failed"} {
+		if !strings.Contains(got.statusMsg, want) {
+			t.Fatalf("status = %q, want %q", got.statusMsg, want)
+		}
+	}
+	if !got.doctorRunning || cmd == nil {
+		t.Fatalf("partial fix should refresh doctor, running=%v cmd=%v", got.doctorRunning, cmd != nil)
+	}
+}
+
 func TestStatusSelectedRowExpandsDetails(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewStatus
 	m.allTools = []*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}}
 	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
-	m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateSynced, Health: app.HealthOK}}
+	m.dotsEntries = []app.DotStatus{{Name: "zsh", State: dots.StateSynced, Health: app.HealthOK}}
 	m.doctorResult = &app.DoctorResult{
 		Checks: []app.DoctorCheck{
 			{ID: "dots", Label: "Dotfiles", Status: app.DoctorStatusWarn, Message: "dotfiles need attention"},
@@ -6186,7 +6467,7 @@ func TestDashboardServicesRowShowsActionableDetails(t *testing.T) {
 	m := baseModel(nil)
 	m.mode = viewStatus
 	setDotsRepoForTest(&m, "/repo/dotfiles")
-	m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateSynced, Health: app.HealthOK}}
+	m.dotsEntries = []app.DotStatus{{Name: "zsh", State: dots.StateSynced, Health: app.HealthOK}}
 	m.doctorResult = &app.DoctorResult{
 		Checks:  []app.DoctorCheck{{ID: "config", Label: "Config", Status: app.DoctorStatusOK, Message: "settings.json is valid"}},
 		Summary: app.DoctorSummary{OK: 1},
@@ -6234,7 +6515,7 @@ func TestDashboardDotfilesRowShowsRecentHistory(t *testing.T) {
 	m.mode = viewStatus
 	m.width = 72
 	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
-	m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 2}}}
+	m.dotsEntries = []app.DotStatus{{Name: "nvim", State: dots.StateSynced, Counts: app.DotFileCounts{Synced: 2}}}
 	m.dotsHistory = []app.DotsHistoryEntry{{
 		Operation: "sync",
 		Status:    "success",
@@ -6297,8 +6578,8 @@ func TestStatusNavigationAndEnterActions(t *testing.T) {
 		Summary: app.DoctorSummary{Warn: 1},
 	}
 	m.dotsEntries = []app.DotStatus{
-		{Name: "zsh", State: app.DotStateSynced},
-		{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}},
+		{Name: "zsh", State: dots.StateSynced},
+		{Name: "nvim", State: dots.StateConflict, Counts: app.DotFileCounts{OutOfSync: 1}},
 	}
 	m.statusCursor = statusRowIndex(statusRows(m), "Dotfiles")
 	out = renderStatus(m)
@@ -6351,7 +6632,7 @@ func TestDashboardReconcilePlanUsesCachedDotsAvailability(t *testing.T) {
 	t.Run("includes dot steps when app is configured despite stale empty settings", func(t *testing.T) {
 		m, _ := newDotsModelForCmds(t)
 		m.settings = config.Settings{}
-		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: dots.StateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 
 		steps := dashboardReconcilePlanItems(m)
 
@@ -6363,7 +6644,7 @@ func TestDashboardReconcilePlanUsesCachedDotsAvailability(t *testing.T) {
 	t.Run("omits dot steps when app is unconfigured despite stale local repo", func(t *testing.T) {
 		m := baseModel(nil)
 		m.settings = config.Settings{DotsRepo: "/tmp/stale-dotfiles"}
-		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: dots.StateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 		m.dotsGitStatus = " M dotfiles/nvim/init.lua"
 
 		steps := dashboardReconcilePlanItems(m)
@@ -6378,7 +6659,7 @@ func TestDashboardReconcilePlanUsesCachedDotsAvailability(t *testing.T) {
 	t.Run("includes dot steps when app is enabled despite stale local disabled flag", func(t *testing.T) {
 		m, repoDir := newDotsModelForCmds(t)
 		m.settings = config.Settings{DotsRepo: repoDir, DotsDisabled: config.BoolPtr(true)}
-		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: dots.StateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 
 		steps := dashboardReconcilePlanItems(m)
 
@@ -6431,7 +6712,7 @@ func TestDashboardDotfileRowsUseCachedDotsAvailability(t *testing.T) {
 		m, _ := newDotsModelForCmds(t)
 		m.mode = viewStatus
 		m.settings = config.Settings{}
-		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: dots.StateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 
 		row := statusDotfilesAttentionRow(m)
 		if !row.needsAttention {
@@ -6455,7 +6736,7 @@ func TestDashboardDotfileRowsUseCachedDotsAvailability(t *testing.T) {
 		m.mode = viewStatus
 		m.settings = config.Settings{DotsRepo: "/tmp/stale-dotfiles"}
 		m.dotsSyncAvailCached = app.DotsSyncAvailability{Reason: app.DotsSyncAvailabilityNoRepo}
-		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: dots.StateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 		m.dotsGitStatus = " M dotfiles/nvim/init.lua"
 
 		row := statusDotfilesAttentionRow(m)
@@ -6474,7 +6755,7 @@ func TestDashboardDotfileRowsUseCachedDotsAvailability(t *testing.T) {
 		m, repoDir := newDotsModelForCmds(t)
 		m.mode = viewStatus
 		m.settings = config.Settings{DotsRepo: repoDir, DotsDisabled: config.BoolPtr(true)}
-		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: dots.StateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 
 		row := statusDotfilesAttentionRow(m)
 		if !row.needsAttention {
@@ -6494,7 +6775,7 @@ func TestDashboardDotfileRowsUseCachedDotsAvailability(t *testing.T) {
 		m.width = 100
 		m.settings = config.Settings{DotsRepo: "/tmp/stale-dotfiles"}
 		m.dotsSyncAvailCached = app.DotsSyncAvailability{Configured: true, Reason: app.DotsSyncAvailabilityReady, RepoPath: "/repo/current-dotfiles"}
-		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}}}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: dots.StateSynced, Counts: app.DotFileCounts{Synced: 1}}}
 		m.statusCursor = statusRowIndexInSection(statusRows(m), statusSectionOverview, "Dotfiles")
 
 		out := stripANSIEscapeSequences(renderStatus(m))
@@ -6509,7 +6790,7 @@ func TestDashboardDotfileRowsUseCachedDotsAvailability(t *testing.T) {
 		m.app = &app.App{}
 		m.mode = viewStatus
 		m.settings = config.Settings{DotsRepo: "/tmp/stale-dotfiles"}
-		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: dots.StateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 		m.dotsGitStatus = " M dotfiles/nvim/init.lua"
 
 		row := statusDotfilesAttentionRow(m)
@@ -6528,7 +6809,7 @@ func TestDashboardDotfileRowsUseCachedDotsAvailability(t *testing.T) {
 		m := baseModel(nil)
 		m.mode = viewStatus
 		m.settings = config.Settings{DotsRepo: "/tmp/stale-dotfiles"}
-		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: dots.StateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 		m.dotsGitStatus = " M dotfiles/nvim/init.lua"
 
 		row := statusDotfilesAttentionRow(m)
@@ -6618,7 +6899,7 @@ func TestDashboardUpdatesShowPendingProgress(t *testing.T) {
 	m.statusCursor = statusRowIndex(statusRows(m), "Tool Updates")
 
 	out := renderStatus(m)
-	for _, want := range []string{iconPending, "2 queued", "Upgrading tools…", "ctrl+c", "queued:", "git (2.46)"} {
+	for _, want := range []string{iconPending, "2 queued", "Upgrading tools…", "git (2.46)"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("dashboard update row should show pending progress, missing %q:\n%s", want, out)
 		}
@@ -6639,9 +6920,38 @@ func TestDashboardToolSyncShowsPendingProgress(t *testing.T) {
 	m.statusCursor = statusRowIndex(statusRows(m), "Tool Sync")
 
 	out := renderStatus(m)
-	for _, want := range []string{iconPending, "syncing", "Syncing tools 1/1", "ctrl+c", "queued:", "fd missing"} {
+	for _, want := range []string{iconPending, "Syncing tools 1/1", "fd missing"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("dashboard tool sync row should show pending progress, missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestDashboardRefreshPresentationWaitingAndActive(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewStatus
+	m.loading = true
+	m.doctorRunning = false
+	for _, row := range statusRows(m) {
+		if row.value != m.palette.styleHelp.Render("-") {
+			t.Fatalf("%s value = %q, want waiting dash", row.label, row.value)
+		}
+		if got := stripANSIEscapeSequences(strings.Join(row.details, "\n")); !strings.Contains(got, "waiting...") {
+			t.Fatalf("%s details = %q, want waiting...", row.label, got)
+		}
+	}
+
+	m.loading = false
+	m.scanningProviders = map[string]bool{"brew": true}
+	for _, row := range statusRows(m) {
+		if row.label != "Tool Sync" && row.label != "Tools" {
+			continue
+		}
+		if row.value != m.palette.styleStatus.Render(iconPending) {
+			t.Fatalf("%s value = %q, want clock", row.label, row.value)
+		}
+		if got := stripANSIEscapeSequences(strings.Join(row.details, "\n")); !strings.Contains(got, "loading...") {
+			t.Fatalf("%s details = %q, want loading...", row.label, got)
 		}
 	}
 }
@@ -6668,7 +6978,7 @@ func TestDashboardDataRowsShowLoadingWithCurrentSnapshot(t *testing.T) {
 		m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
 		m.dotsLoading = true
 		m.progressText = "Syncing dots 1/2"
-		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 3}}}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: dots.StateSynced, Counts: app.DotFileCounts{Synced: 3}}}
 
 		out := renderStatus(m)
 		for _, want := range []string{iconPending, "Syncing dots 1/2", "3 synced"} {
@@ -6702,7 +7012,7 @@ func TestDashboardRowsUseSharedStatusIcons(t *testing.T) {
 		})
 		m.mode = viewStatus
 		setDotsRepoForTest(&m, "/repo/dotfiles")
-		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: dots.StateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 		m.dotsReminderServiceErr = "read service file: denied"
 		m.ignoreSet = map[string]bool{"certifi": true}
 
@@ -6728,7 +7038,7 @@ func TestDashboardRowsUseSharedStatusIcons(t *testing.T) {
 		m := baseModel(nil)
 		m.mode = viewStatus
 		m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
-		m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}}}
+		m.dotsEntries = []app.DotStatus{{Name: "zsh", State: dots.StateSynced, Counts: app.DotFileCounts{Synced: 1}}}
 		m.doctorResult = &app.DoctorResult{
 			Checks:  []app.DoctorCheck{{ID: "config", Label: "Config", Status: app.DoctorStatusOK, Message: "ok"}},
 			Summary: app.DoctorSummary{OK: 1},
@@ -6817,7 +7127,7 @@ func TestDashboardFooterBulkActions(t *testing.T) {
 	t.Run("confirmed reconcile starts first operation and queues the rest", func(t *testing.T) {
 		m, _ := dashboardDotsAppModel(t, []*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}})
 		m.mode = viewStatus
-		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: dots.StateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 		got := drive(m, pressRune('A'), pressEnter())
 		if !got.loading || !got.bulkPendingKeys[toolKey("fd", "brew")] {
 			t.Fatalf("tool sync should start and mark pending tools, loading=%v pending=%v", got.loading, got.bulkPendingKeys)
@@ -6838,9 +7148,9 @@ func TestDashboardFooterBulkActions(t *testing.T) {
 	t.Run("reconcile skips queued operations that became clean", func(t *testing.T) {
 		m, _ := dashboardDotsAppModel(t, []*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}})
 		m.mode = viewStatus
-		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: dots.StateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 		got := drive(m, pressRune('A'), pressEnter())
-		got.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}}}
+		got.dotsEntries = []app.DotStatus{{Name: "nvim", State: dots.StateSynced, Counts: app.DotFileCounts{Synced: 1}}}
 		got = drive(got, progressDoneMsg{gen: got.progressGen, message: "sync complete", tools: got.allTools})
 		if got.dashboardReconcileRunning || got.dotsLoading {
 			t.Fatalf("clean queued dot sync should be skipped, reconcileRunning=%v dotsLoading=%v", got.dashboardReconcileRunning, got.dotsLoading)
@@ -6853,7 +7163,7 @@ func TestDashboardFooterBulkActions(t *testing.T) {
 	t.Run("deselected reconcile operation is skipped", func(t *testing.T) {
 		m, _ := dashboardDotsAppModel(t, []*database.ToolCache{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}})
 		m.mode = viewStatus
-		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: dots.StateConflict, Counts: app.DotFileCounts{OutOfSync: 1}}}
 		got := drive(m, pressRune('A'), pressRune(' '), pressEnter())
 		if got.loading || got.bulkPendingKeys[toolKey("fd", "brew")] {
 			t.Fatalf("deselected tool sync should not start, loading=%v pending=%v", got.loading, got.bulkPendingKeys)
@@ -6866,7 +7176,7 @@ func TestDashboardFooterBulkActions(t *testing.T) {
 	t.Run("dirty dotfiles row can start commit", func(t *testing.T) {
 		m, _ := dashboardDotsAppModel(t, nil)
 		m.mode = viewStatus
-		m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}}}
+		m.dotsEntries = []app.DotStatus{{Name: "zsh", State: dots.StateSynced, Counts: app.DotFileCounts{Synced: 1}}}
 		m.dotsGitStatus = " M zsh/.zshrc"
 		rows := statusRows(m)
 		m.statusCursor = statusRowIndex(rows, "Dotfiles")
@@ -7714,8 +8024,8 @@ func TestRenderDots_SectionHeadersPresent(t *testing.T) {
 	m.setSettings(config.Settings{DotsRepo: "/home/user/dotfiles"})
 	// Two entries with different states so DotStatusSections returns multiple groups.
 	m.dotsEntries = []app.DotStatus{
-		{Name: "nvim", State: app.DotStateSynced, Health: app.HealthOK},
-		{Name: "zsh", State: app.DotStateIgnored},
+		{Name: "nvim", State: dots.StateSynced, Health: app.HealthOK},
+		{Name: "zsh", State: dots.StateIgnored},
 	}
 
 	out := stripANSIEscapeSequences(renderDots(m))
@@ -7725,7 +8035,7 @@ func TestRenderDots_SectionHeadersPresent(t *testing.T) {
 			t.Errorf("dots view missing entry %q\nview:\n%s", name, out)
 		}
 	}
-	// DotStateSynced → "Synced", DotStateIgnored → "Ignored" per DotStatusSections.
+	// dots.StateSynced → "Synced", dots.StateIgnored → "Ignored" per DotStatusSections.
 	for _, header := range []string{"Synced", "Ignored"} {
 		if !strings.Contains(out, header) {
 			t.Errorf("dots view missing section header %q — renderDots() section.Header() not called\nview:\n%s", header, out)
@@ -7805,7 +8115,7 @@ func TestRenderToolRow_SelfUpdatingCask(t *testing.T) {
 	tool.UpdateBlocked = app.UpdateBlockSelfUpdates
 
 	cols := colWidths{name: 20, prov: 10, ver: 20, screenW: 120}
-	out := renderToolRowWithProviderPin(p, tool, cols, "", "", "", "", "brew", "", "", false, false, syncOK)
+	out := renderToolRowWithProviderPin(p, tool, cols, "", nil, nil, "", "", "brew", "", "", false, false, syncOK)
 
 	plain := stripANSIEscapeSequences(out)
 	if !strings.Contains(plain, "(self)") {
@@ -8388,7 +8698,7 @@ func TestStatusDashboardDataRows_ActivityConsistency(t *testing.T) {
 	}
 	loadedNoActivity := func() Model {
 		m := baseModel([]*database.ToolCache{{Name: "ripgrep", Provider: "brew", Package: "ripgrep", Installed: true}})
-		m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: app.DotStateSynced}}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: dots.StateSynced}}
 		m.dotsReminderService = &app.DotsReminderService{Installed: true, Interval: time.Hour}
 		m.dotsWatchService = &app.DotsWatchService{Installed: true}
 		m.agentsSummary = app.DashboardAgentsSummary{
@@ -8605,7 +8915,7 @@ func TestRenderDots_CursorRowShowsLastError(t *testing.T) {
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
-		State:      app.DotStateModified,
+		State:      dots.StateModified,
 		Counts:     app.DotFileCounts{OutOfSync: 1},
 		LastError:  "permission denied",
 	}}
@@ -8623,7 +8933,7 @@ func TestRenderDots_CursorRowWithoutLastErrorOmitsErrorLine(t *testing.T) {
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
-		State:      app.DotStateModified,
+		State:      dots.StateModified,
 		Counts:     app.DotFileCounts{OutOfSync: 1},
 	}}
 

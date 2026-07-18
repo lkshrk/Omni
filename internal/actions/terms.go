@@ -8,7 +8,6 @@ const (
 	LabelEditDots   = "edit dots"
 	LabelEditTools  = "edit tools"
 	LabelIgnore     = "ignore"
-	LabelMoveGroup  = "move group"
 	LabelNewGroup   = "new group"
 	LabelNewHost    = "new host"
 	LabelRename     = "rename"

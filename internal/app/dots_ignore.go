@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	pathpkg "path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -73,7 +72,7 @@ func (a *App) DotsEjectIgnoredPathsContext(ctx context.Context, name, pattern st
 	}
 
 	patterns := []string{pattern}
-	// Build ignore list WITHOUT the new pattern so copyDotPath doesn't skip
+	// Build ignore list WITHOUT the new pattern so dots.CopyDotPath doesn't skip
 	// the very files we're ejecting.
 	var copyIgnores []string
 	for _, ig := range entry.Ignore {
@@ -106,7 +105,7 @@ func (a *App) DotsEjectIgnoredPathsContext(ctx context.Context, name, pattern st
 			return nil
 		}
 		sourcePath := filepath.Join(entry.SourcePath, rel)
-		if !sameResolvedPath(path, sourcePath) {
+		if !dots.SameResolvedPath(path, sourcePath) {
 			return nil
 		}
 		if err := os.Remove(path); err != nil {
@@ -118,14 +117,14 @@ func (a *App) DotsEjectIgnoredPathsContext(ctx context.Context, name, pattern st
 			return nil
 		}
 		if sInfo.IsDir() {
-			if cpErr := copyDotPath(sourcePath, path, copyIgnores); cpErr != nil {
+			if cpErr := dots.CopyDotPath(sourcePath, path, copyIgnores); cpErr != nil {
 				if restoreErr := dots.WriteStowShapedSymlink(path, sourcePath); restoreErr != nil {
 					return fmt.Errorf("copy dir %q → %q: %w (restore symlink failed: %v)", sourcePath, path, cpErr, restoreErr)
 				}
 				return fmt.Errorf("copy dir %q → %q: %w", sourcePath, path, cpErr)
 			}
 		} else {
-			if cpErr := copyDotFile(sourcePath, path, sInfo.Mode().Perm()); cpErr != nil {
+			if cpErr := dots.CopyDotFile(sourcePath, path, sInfo.Mode().Perm()); cpErr != nil {
 				if restoreErr := dots.WriteStowShapedSymlink(path, sourcePath); restoreErr != nil {
 					return fmt.Errorf("copy %q → %q: %w (restore symlink failed: %v)", sourcePath, path, cpErr, restoreErr)
 				}
@@ -326,6 +325,7 @@ func (a *App) DotsIncludeIgnoredPathContext(ctx context.Context, name, relPath s
 	if err != nil {
 		return err
 	}
+	includeDir := a.includedDotPathIsDir(name, rel)
 	defer func() {
 		a.refreshDotsStateAfterSuccess(ctx, &err, false)
 	}()
@@ -338,13 +338,21 @@ func (a *App) DotsIncludeIgnoredPathContext(ctx context.Context, name, relPath s
 				if d.Name != name {
 					continue
 				}
+				targetPath, expandErr := dots.ExpandPath(d.Path)
+				if expandErr != nil {
+					return expandErr
+				}
+				if includeDir {
+					includePattern += "/"
+				}
 				original := append([]string(nil), d.Ignore...)
 				d.Ignore = removeExactDotIgnorePath(d.Ignore, rel)
-				ignored, ignoreErr := dots.ShouldIgnorePathChecked(rel, pathpkg.Base(rel), append(dots.DefaultIgnores(), d.Ignore...))
+				ignored, ignoreErr := dotPathOrAncestorIgnored(targetPath, rel, append(dots.DefaultIgnores(), d.Ignore...))
 				if ignoreErr != nil {
 					return ignoreErr
 				}
 				if ignored {
+					d.Ignore = removeExactString(d.Ignore, strings.TrimSuffix(includePattern, "/"))
 					d.Ignore = removeExactString(d.Ignore, includePattern)
 					d.Ignore = append(d.Ignore, includePattern)
 				}
@@ -359,12 +367,40 @@ func (a *App) DotsIncludeIgnoredPathContext(ctx context.Context, name, relPath s
 	})
 }
 
-func dotIncludePattern(relPath string) (string, string, error) {
-	rel := filepath.ToSlash(filepath.Clean(strings.TrimSpace(relPath)))
-	rel = strings.TrimPrefix(rel, "/")
-	if rel == "." || rel == "" {
-		return "", "", fmt.Errorf("dots ignore path is required")
+func (a *App) includedDotPathIsDir(name, rel string) bool {
+	repoPath, err := resolveRepoPath(a.dotsRepoPath())
+	if err != nil {
+		return false
 	}
+	entry, err := a.resolvedDotEntry(name, dotsContentPath(repoPath))
+	if err != nil {
+		return false
+	}
+	for _, root := range []string{entry.TargetPath, entry.SourcePath} {
+		if info, statErr := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); statErr == nil {
+			return info.IsDir()
+		}
+	}
+	return false
+}
+
+func dotPathOrAncestorIgnored(root, rel string, patterns []string) (bool, error) {
+	for path := rel; path != "."; path = filepath.Dir(path) {
+		rooted := filepath.ToSlash(filepath.Join(filepath.Base(root), path))
+		ignored, err := dots.ShouldIgnoreAnyPathChecked([]string{path, rooted}, filepath.Base(path), patterns)
+		if err != nil || ignored {
+			return ignored, err
+		}
+	}
+	return false, nil
+}
+
+func dotIncludePattern(relPath string) (string, string, error) {
+	rel, err := cleanDotRelativePath(relPath)
+	if err != nil {
+		return "", "", err
+	}
+	rel = filepath.ToSlash(rel)
 	includePattern := "!/" + rel
 	if err := dots.ValidateIgnorePattern(includePattern); err != nil {
 		return "", "", err

@@ -87,8 +87,26 @@ func newAgentsSkillsCmd(state *rootState) *cobra.Command {
 		newAgentsUpdateSkillsCmd(state),
 		newAgentsRemoveSkillPackageCmd(state),
 		newAgentsUninstallSkillPackageCmd(state),
+		newAgentsSkillsGroupCmd(state),
 	)
 	return cmd
+}
+
+func newAgentsSkillsGroupCmd(state *rootState) *cobra.Command {
+	return &cobra.Command{
+		Use:   "group <source> <group>...",
+		Short: "Set a skill package's full group membership",
+		Args:  cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			source := args[0]
+			groups := args[1:]
+			if err := state.app.SetSkillGroups(source, groups, nil, ""); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmdOut(cmd), "Set %q groups to %s.\n", source, strings.Join(groups, ", "))
+			return nil
+		},
+	}
 }
 
 func newAgentsRemoveSkillPackageCmd(state *rootState) *cobra.Command {
@@ -217,8 +235,26 @@ func newAgentsMcpCmd(state *rootState) *cobra.Command {
 		newAgentsMcpRemoveCmd(state),
 		newAgentsMcpRestoreCmd(state),
 		newAgentsMcpImportCmd(state),
+		newAgentsMcpGroupCmd(state),
 	)
 	return cmd
+}
+
+func newAgentsMcpGroupCmd(state *rootState) *cobra.Command {
+	return &cobra.Command{
+		Use:   "group <name> <group>...",
+		Short: "Set an MCP server's full group membership",
+		Args:  cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			groups := args[1:]
+			if err := state.app.SetMcpGroups(cmd.Context(), name, groups); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmdOut(cmd), "Set %q groups to %s.\n", name, strings.Join(groups, ", "))
+			return nil
+		},
+	}
 }
 
 func newAgentsMcpListCmd(state *rootState) *cobra.Command {
@@ -500,9 +536,27 @@ func newAgentsPluginsCmd(state *rootState) *cobra.Command {
 		newAgentsPluginsRemoveCmd(state),
 		newAgentsPluginsRestoreCmd(state),
 		newAgentsPluginsImportCmd(state),
+		newAgentsPluginsGroupCmd(state),
 		newAgentsPluginsMarketplaceCmd(state),
 	)
 	return cmd
+}
+
+func newAgentsPluginsGroupCmd(state *rootState) *cobra.Command {
+	return &cobra.Command{
+		Use:   "group <name> <group>...",
+		Short: "Set a plugin's full group membership",
+		Args:  cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			groups := args[1:]
+			if err := state.app.SetPluginGroups(cmd.Context(), name, groups); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmdOut(cmd), "Set %q groups to %s.\n", name, strings.Join(groups, ", "))
+			return nil
+		},
+	}
 }
 
 func newAgentsPluginsListCmd(state *rootState) *cobra.Command {
@@ -772,8 +826,26 @@ func newAgentsPluginsMarketplaceCmd(state *rootState) *cobra.Command {
 		newAgentsPluginsMarketplaceListCmd(state),
 		newAgentsPluginsMarketplaceAddCmd(state),
 		newAgentsPluginsMarketplaceRemoveCmd(state),
+		newAgentsPluginsMarketplaceGroupCmd(state),
 	)
 	return cmd
+}
+
+func newAgentsPluginsMarketplaceGroupCmd(state *rootState) *cobra.Command {
+	return &cobra.Command{
+		Use:   "group <name> <group>...",
+		Short: "Set a marketplace's full group membership",
+		Args:  cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := args[0]
+			groups := args[1:]
+			if err := state.app.SetMarketplaceGroups(cmd.Context(), name, groups); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmdOut(cmd), "Set %q groups to %s.\n", name, strings.Join(groups, ", "))
+			return nil
+		},
+	}
 }
 
 func newAgentsPluginsMarketplaceListCmd(state *rootState) *cobra.Command {

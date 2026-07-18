@@ -320,11 +320,11 @@ func renderList(m Model) string {
 	}
 
 	// Pre-compute column widths then detail lines (detail needs cols for wrap width).
-	cols := newColWidthsWithProviderPins(m.visibleTools, m.toolGroups, visibleGroupNames(m), m.toolProviderPins, m.toolFallbacks, m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager, m.width, func(t *database.ToolCache) bool {
+	cols := newColWidthsWithProviderPins(m.visibleTools, m.toolMemberships, m.hostInfo, visibleGroupNames(m), m.toolProviderPins, m.toolFallbacks, m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager, m.width, func(t *database.ToolCache) bool {
 		return m.syncStatusOf(t) == syncWrongProv
 	})
-	cols = fitToolColumnsForRowErrors(cols, m.visibleTools, m.rowErrors)
 	detail := inlineDetailLines(m, m.width, cols)
+	cursorBlockEnd := 0
 
 	for i, t := range m.visibleTools {
 		sec := m.displaySection(t)
@@ -354,20 +354,27 @@ func renderList(m Model) string {
 		if m.rowOpKey == key {
 			spinnerView = rowSpinnerIcon(m)
 		}
-		group := m.toolGroups[key]
+		groups := m.toolMemberships[key]
 		isIgnored := sec == sectionIgnored
 		ss := m.syncStatusOf(t)
 		isCursor := i == m.cursor && !m.cursorHidden
-		line := renderToolRowWithProviderPin(p, t, cols, spinnerView, group, providerPinForTool(t, m.toolProviderPins), fallbackConcreteForTool(t, m.toolFallbacks), m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager, isIgnored, isCursor, ss, rowActionErrorStatus(m, t))
+		line := renderToolRowWithProviderPin(p, t, cols, spinnerView, groups, m.hostInfo, providerPinForTool(t, m.toolProviderPins), fallbackConcreteForTool(t, m.toolFallbacks), m.effectiveSystemManager, m.effectivePythonManager, m.effectiveNodeManager, isIgnored, isCursor, ss, rowActionErrorStatus(m, t))
 		if isCursor {
 			cursorRow = len(rows)
 			rows = append(rows, displayRow{text: selectedRowPrefix(p) + line, toolIdx: i})
+			for _, errorLine := range toolErrorLines(m, t, true) {
+				rows = append(rows, displayRow{text: errorLine, toolIdx: -1})
+			}
 			// Inline detail — expand the selected row with its info.
 			for _, dl := range detail {
 				rows = append(rows, displayRow{text: dl, toolIdx: -1})
 			}
+			cursorBlockEnd = len(rows) - 1
 		} else {
 			rows = append(rows, displayRow{text: inactiveRowPrefix() + line, toolIdx: i})
+			for _, errorLine := range toolErrorLines(m, t, false) {
+				rows = append(rows, displayRow{text: errorLine, toolIdx: -1})
+			}
 		}
 	}
 
@@ -379,7 +386,7 @@ func renderList(m Model) string {
 	}
 	bottomOfBlock := cursorRow
 	if m.cursor >= 0 {
-		bottomOfBlock = cursorRow + len(detail)
+		bottomOfBlock = cursorBlockEnd
 	}
 	start, end := scrollWindowBounds(len(rows), bottomOfBlock, avail)
 
@@ -432,7 +439,7 @@ type colWidths struct {
 // full pane width.  Short tool names remain short — rows don't pad to the edge.
 // groupNames is the list of reusable group names; when non-empty the group
 // column is always reserved so it does not flicker in/out as filters change.
-func newColWidthsWithProviderPins(tools []*database.ToolCache, toolGroups map[string]string, groupNames []string, providerPins map[string]string, fallbacks map[string]config.FallbackSpec, systemBin, pythonBin, nodeBin string, screenW int, wrongProvider func(*database.ToolCache) bool) colWidths {
+func newColWidthsWithProviderPins(tools []*database.ToolCache, toolMemberships map[string][]string, info *app.HostInfo, groupNames []string, providerPins map[string]string, fallbacks map[string]config.FallbackSpec, systemBin, pythonBin, nodeBin string, screenW int, wrongProvider func(*database.ToolCache) bool) colWidths {
 	seed := colWidths{name: 20, prov: 8, ver: len("missing"), screenW: screenW}
 
 	// Seed group column width from all known reusable group names so
@@ -462,10 +469,7 @@ func newColWidthsWithProviderPins(tools []*database.ToolCache, toolGroups map[st
 		ver: func(i int) string { return displayVersionText(tools[i]) },
 		group: func(i int) string {
 			t := tools[i]
-			if g := toolGroups[toolKey(t.Name, t.Provider)]; g != "" {
-				return "[" + g + "]"
-			}
-			return ""
+			return renderGroupPills(defaultPalette(), toolMemberships[toolKey(t.Name, t.Provider)], info, 0, nil)
 		},
 		priv: func(i int) bool {
 			if toolHasPrivilegeMarker(tools[i], systemBin) {
@@ -483,29 +487,6 @@ func newColWidthsWithProviderPins(tools []*database.ToolCache, toolGroups map[st
 	// their largest observed width so rows across tabs obey the same placement
 	// rule.
 	return seedWidenCapShrinkColWidths(seed, len(tools), measure)
-}
-
-func fitToolColumnsForRowErrors(cols colWidths, tools []*database.ToolCache, rowErrors map[string]string) colWidths {
-	if len(rowErrors) == 0 {
-		return cols
-	}
-	maxName := rowAvailableWidth(cols.screenW) - listIconWidth - toolIconNameGapWidth - listColumnGap - toolRightGroupWidth(cols)
-	if maxName <= cols.name {
-		return cols
-	}
-	for _, t := range tools {
-		if t == nil {
-			continue
-		}
-		rowErr := rowErrors[toolKey(t.Name, t.Provider)]
-		if rowErr == "" {
-			continue
-		}
-		rowErr = rowErrorSummary(rowErr)
-		needed := lipgloss.Width(nameDisplayText(t)) + 2 + lipgloss.Width(rowErr)
-		cols.name = min(max(cols.name, needed), maxName)
-	}
-	return cols
 }
 
 func fitToolColumnsToScreen(cols colWidths) colWidths {
@@ -549,7 +530,7 @@ func displayVersionText(t *database.ToolCache) string {
 	}
 }
 
-func renderToolRowWithProviderPin(p palette, t *database.ToolCache, cols colWidths, spinnerView, group, providerPin, fallbackConcrete, systemBin, pythonBin, nodeBin string, ignored, selected bool, ss syncStatus, rowErrValues ...string) string {
+func renderToolRowWithProviderPin(p palette, t *database.ToolCache, cols colWidths, spinnerView string, groups []string, info *app.HostInfo, providerPin, fallbackConcrete, systemBin, pythonBin, nodeBin string, ignored, selected bool, ss syncStatus, rowErrValues ...string) string {
 	privileged := toolHasPrivilegeMarker(t, systemBin)
 	provSystemBin, provPythonBin, provNodeBin := systemBin, pythonBin, nodeBin
 	if t.Installed && t.InstalledWith == "" && providerPin == "" && fallbackConcrete == "" {
@@ -567,15 +548,17 @@ func renderToolRowWithProviderPin(p palette, t *database.ToolCache, cols colWidt
 	showMarker := wrongProv || providerPin != ""
 
 	iconGap := strings.Repeat(" ", toolIconNameGapWidth)
-	groupCell := func(s lipgloss.Style) []rowCell {
+	groupPillEmphasis := func(s lipgloss.Style) lipgloss.Style {
+		if ignored {
+			return emphasis(p.styleIgnored)
+		}
+		return emphasis(s)
+	}
+	groupCell := func() []rowCell {
 		if !t.Tracked {
-			return rowGroupBadgeCell(s, "", cols.group)
+			return rowGroupPillsCell("", cols.group)
 		}
-		badge := ""
-		if group != "" {
-			badge = "[" + group + "]"
-		}
-		return rowGroupBadgeCell(s, badge, cols.group)
+		return rowGroupPillsCell(renderGroupPills(p, groups, info, cols.group, groupPillEmphasis), cols.group)
 	}
 	split := func(left, right []rowCell) string {
 		return renderSplitRow(left, right, rowAvailableWidth(cols.screenW), listColumnGap, listColumnGap)
@@ -584,7 +567,7 @@ func renderToolRowWithProviderPin(p palette, t *database.ToolCache, cols colWidt
 	if ignored {
 		ignoredStyle := emphasis(p.styleIgnored)
 		icon := ignoredStyle.Render(iconIgnored)
-		name := renderNameCell(p, ignoredStyle, t, "", cols.name, selected)
+		name := renderNameCell(p, ignoredStyle, t, cols.name, selected)
 		mark := ""
 		if privileged {
 			mark = iconPrivileged
@@ -608,7 +591,7 @@ func renderToolRowWithProviderPin(p palette, t *database.ToolCache, cols colWidt
 		left := []rowCell{leftCell(icon+iconGap+name, 0)}
 		right := privilegeProviderCells(priv, cols.priv, prov, cols.prov, toolPrivilegeProviderGap)
 		right = append(right, rightCell(ver, cols.ver))
-		right = append(right, groupCell(ignoredStyle)...)
+		right = append(right, groupCell()...)
 		return split(left, right)
 	}
 
@@ -636,7 +619,7 @@ func renderToolRowWithProviderPin(p palette, t *database.ToolCache, cols colWidt
 	if selected {
 		nameStyle = nameStyle.Bold(true)
 	}
-	name := renderNameCell(p, nameStyle, t, rowErr, cols.name, selected)
+	name := renderNameCell(p, nameStyle, t, cols.name, selected)
 	mark := ""
 	if privileged {
 		mark = iconPrivileged
@@ -671,37 +654,12 @@ func renderToolRowWithProviderPin(p palette, t *database.ToolCache, cols colWidt
 	left := []rowCell{leftCell(icon+iconGap+name, 0)}
 	right := privilegeProviderCells(priv, cols.priv, prov, cols.prov, toolPrivilegeProviderGap)
 	right = append(right, rightCell(ver, cols.ver))
-	right = append(right, groupCell(emphasis(p.styleHelp))...)
+	right = append(right, groupCell()...)
 	return split(left, right)
 }
 
-func renderNameCell(p palette, nameStyle lipgloss.Style, t *database.ToolCache, rowErr string, width int, selected bool) string {
-	if rowErr == "" {
-		return renderNameWithPackage(p, nameStyle, t, width, selected)
-	}
-	errStyle := p.styleErr
-	if selected {
-		errStyle = errStyle.Bold(true)
-	}
-	if lipgloss.Width(nameDisplayText(t))+2+lipgloss.Width(rowErr) > width {
-		errW := lipgloss.Width(rowErr)
-		nameW := lipgloss.Width(nameDisplayText(t))
-		if nameW+2+errW > width {
-			errW = min(errW, max(width-nameW-2, width/2))
-			nameW = max(width-errW-2, 1)
-		}
-		err := fitCellText(rowErr, errW)
-		name := renderNameWithPackage(p, nameStyle, t, nameW, selected)
-		return name + strings.Repeat(" ", 2) + errStyle.Render(err)
-	}
-	nameWidth := lipgloss.Width(nameDisplayText(t))
-	errWidth := width - nameWidth - 2
-	if errWidth <= 0 {
-		return nameStyle.Render(fitCellText(nameDisplayText(t), width))
-	}
-	err := fitCellText(rowErr, errWidth)
-	cellWidth := nameWidth + 2 + lipgloss.Width(err)
-	return renderNameWithPackage(p, nameStyle, t, nameWidth, selected) + strings.Repeat(" ", 2) + errStyle.Render(err) + strings.Repeat(" ", max(width-cellWidth, 0))
+func renderNameCell(p palette, nameStyle lipgloss.Style, t *database.ToolCache, width int, selected bool) string {
+	return renderNameWithPackage(p, nameStyle, t, width, selected)
 }
 
 func renderNameWithPackage(p palette, nameStyle lipgloss.Style, t *database.ToolCache, width int, selected bool) string {
@@ -805,7 +763,20 @@ func fitCellText(s string, width int) string {
 }
 
 func rowErrorSummary(s string) string {
-	return strings.Join(strings.Fields(stripANSIEscapeSequences(s)), " ")
+	s = stripANSIEscapeSequences(s)
+	if idx := strings.Index(strings.ToLower(s), "stderr:"); idx >= 0 {
+		s = s[idx+len("stderr:"):]
+		s = strings.TrimSuffix(strings.TrimSpace(s), ")")
+	}
+	lines := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
+	for i, line := range lines {
+		line = strings.TrimSpace(line)
+		if len(line) >= len("error:") && strings.EqualFold(line[:len("error:")], "error:") {
+			lines[i] = strings.TrimSpace(line[len("error:"):])
+			return strings.Join(strings.Fields(strings.Join(lines[i:], " ")), " ")
+		}
+	}
+	return strings.Join(strings.Fields(s), " ")
 }
 
 func stripANSIEscapeSequences(s string) string {
@@ -1007,6 +978,9 @@ func inlineDetailLines(m Model, width int, cols colWidths) []string {
 	if line := fullVersionDetailLine(p, t, prefix); line != "" {
 		lines = append(lines, line)
 	}
+	for _, detail := range fullMembershipDetailLines(m.toolMemberships[toolMembershipKey(t)], wrapWidth) {
+		lines = append(lines, prefix+p.styleHelp.Render(detail))
+	}
 
 	if line := ignoreDetailLine(m, t, prefix); line != "" {
 		lines = append(lines, line)
@@ -1112,7 +1086,7 @@ func providerMismatchDetailLine(m Model, t *database.ToolCache, prefix string) s
 		p.styleStatus.Render(desired)
 }
 
-func providerCandidateDetailLines(m Model, t *database.ToolCache, prefix string, wrapWidth int) []string {
+func providerCandidateDetailLines(m Model, t *database.ToolCache, prefix string, _ int) []string {
 	candidates := providerCandidateOptions(m, t)
 	if len(candidates) == 0 {
 		return nil
@@ -1120,21 +1094,22 @@ func providerCandidateDetailLines(m Model, t *database.ToolCache, prefix string,
 	p := m.palette
 	lines := []string{prefix + p.styleHelp.Render("available providers:")}
 	selected := clampIndex(m.providerCandidateCursor, len(candidates))
+	row := prefix
 	for i, candidate := range candidates {
 		provider := strings.TrimSpace(candidate.Provider)
-		pkg := strings.TrimSpace(candidate.EffectivePackage(t.Name))
-		if pkg == "" {
-			pkg = t.Name
-		}
-		marker := "  "
 		style := p.styleHelp
 		if i == selected {
-			marker = "› "
 			style = p.styleStatus
 		}
-		for _, line := range text.WrapText(marker+provider+"/"+pkg, wrapWidth) {
-			lines = append(lines, prefix+style.Render(line))
+		label := style.Render("[" + provider + "]")
+		separator := ""
+		if row != prefix {
+			separator = "  "
 		}
+		row += separator + label
+	}
+	if row != prefix {
+		lines = append(lines, row)
 	}
 	return lines
 }
@@ -1183,6 +1158,25 @@ func rowActionErrorStatus(m Model, t *database.ToolCache) string {
 		return ""
 	}
 	return m.rowErrors[toolKey(t.Name, t.Provider)]
+}
+
+func toolErrorLines(m Model, t *database.ToolCache, selected bool) []string {
+	summary := rowErrorSummary(rowActionErrorStatus(m, t))
+	if summary == "" {
+		return nil
+	}
+	prefix := listTextPrefix()
+	available := max(screenContentWidth(m.width)-lipgloss.Width(prefix), 1)
+	hint := ""
+	if selected && !(m.mode == viewSearch && m.filter.Focused()) {
+		hint = renderActionHintText(m.palette, []hintItem{hintFromBinding(m.keys.ErrorLog)})
+		available = max(available-lipgloss.Width(hint)-lipgloss.Width(" • "), 1)
+	}
+	line := m.palette.styleErr.Render(fitCellText(summary, available))
+	if hint != "" {
+		line = hintJoin(m.palette, line, hint)
+	}
+	return []string{prefix + line}
 }
 
 func rowOperationStatusLine(m Model, t *database.ToolCache, prefix string) string {

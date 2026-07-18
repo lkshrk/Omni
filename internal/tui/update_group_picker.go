@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
+	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/provider"
 )
@@ -721,11 +722,18 @@ func (m *Model) selectGroupMembership() []tea.Cmd {
 	if isNewGroupSentinel(group) {
 		return nil
 	}
-	// An item may belong to any number of host groups but at most one reusable
-	// group. m.groupNames holds the reusable names; groups created during this
-	// picker session are reusable too.
-	reusable := app.ReusablePredicate(m.groupNames, m.pickerCreatedGroups)
-	m.setSelectedMemberships(app.MembershipInvariantToggle(current, group, reusable))
+	// Dots may belong to any number of host groups but at most one reusable
+	// group; tools and agent-kinds (skill/mcp/plugin/marketplace) are free
+	// multi-select. m.groupNames holds the reusable names; groups created
+	// during this picker session are reusable too.
+	var next []string
+	if app.MembershipCapsReusable(m.pickerMembershipKind) {
+		reusable := app.ReusablePredicate(m.groupNames, m.pickerCreatedGroups)
+		next = app.MembershipInvariantToggle(current, group, reusable)
+	} else {
+		next = app.MembershipToggle(current, group)
+	}
+	m.setSelectedMemberships(next)
 	return nil
 }
 
@@ -748,10 +756,17 @@ func (m *Model) submitGroupMembershipNewGroup() {
 	if !ok {
 		return
 	}
-	// A freshly created group is reusable; adding it evicts any other reusable
-	// membership but keeps host-group memberships intact.
-	reusable := app.ReusablePredicate(m.groupNames, m.pickerCreatedGroups)
-	m.setSelectedMemberships(app.MembershipInvariantToggle(current, newGroup, reusable))
+	// A freshly created group is reusable. For dots, adding it evicts any
+	// other reusable membership but keeps host-group memberships intact;
+	// tools and agent-kinds are free multi-select.
+	var next []string
+	if app.MembershipCapsReusable(m.pickerMembershipKind) {
+		reusable := app.ReusablePredicate(m.groupNames, m.pickerCreatedGroups)
+		next = app.MembershipInvariantToggle(current, newGroup, reusable)
+	} else {
+		next = app.MembershipToggle(current, newGroup)
+	}
+	m.setSelectedMemberships(next)
 	for i, group := range m.pickerGroups {
 		if group == newGroup {
 			m.pickerCursor = i
@@ -903,6 +918,33 @@ func (m *Model) saveScopePickerSelection(cmds *[]tea.Cmd) {
 	case viewIgnoreScope:
 		if !scopeOptionsChanged(m.scopeOptions) {
 			m.closeScopePicker()
+			return
+		}
+		for _, opt := range m.scopeOptions {
+			if opt.kind != "system-package" || opt.checked == opt.initialChecked {
+				continue
+			}
+			if m.hostInventoryTools == nil {
+				m.hostInventoryTools = make(map[string]bool)
+			}
+			if m.toolMemberships == nil {
+				m.toolMemberships = make(map[string][]string)
+			}
+			m.hostInventoryTools[t.Name] = opt.checked
+			m.toolMemberships[toolMembershipKey(&t)] = append([]string(nil), m.toolMemberships[toolMembershipKey(&t)]...)
+			if opt.checked && !slices.Contains(m.toolMemberships[toolMembershipKey(&t)], config.SystemInventoryGroup) {
+				m.toolMemberships[toolMembershipKey(&t)] = append(m.toolMemberships[toolMembershipKey(&t)], config.SystemInventoryGroup)
+			}
+			if !opt.checked {
+				groups := m.toolMemberships[toolMembershipKey(&t)]
+				groups = slices.DeleteFunc(groups, func(g string) bool { return g == config.SystemInventoryGroup })
+				if m.hostInfo != nil && m.hostInfo.Active != "" && !slices.Contains(groups, m.hostInfo.Active) {
+					groups = append(groups, m.hostInfo.Active)
+				}
+				m.toolMemberships[toolMembershipKey(&t)] = groups
+			}
+			m.openToolGroupMembershipPicker(&t)
+			m.scopeOptions = nil
 			return
 		}
 		m.loading = true

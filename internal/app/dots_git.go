@@ -8,24 +8,14 @@ import (
 )
 
 func (a *App) DotsPull(ctx context.Context) (ops []dots.Op, err error) {
-	rootCfg, err := a.loadConfig()
+	pf, err := a.dotService().preflight()
 	if err != nil {
-		return nil, fmt.Errorf("dots pull: load config: %w", err)
-	}
-	if err := a.requireDotsEnabled(rootCfg); err != nil {
-		return nil, err
-	}
-	repoPath, err := resolveRepoPath(a.dotsRepoPath())
-	if err != nil {
-		return nil, err
-	}
-	if err := a.requireSafeTestDotsMutation(repoPath, nil); err != nil {
 		return nil, err
 	}
 	defer func() {
-		a.recordDotsHistoryResult(ctx, "pull", "", repoPath, ops, err, false)
+		a.recordDotsHistoryResult(ctx, "pull", "", pf.repoPath, ops, err, false)
 	}()
-	g := newGitForRepo(repoPath, a.newExecutor())
+	g := newGitForRepo(pf.repoPath, a.newExecutor())
 	if err := g.Pull(ctx); err != nil {
 		return nil, fmt.Errorf("dots pull: %w", err)
 	}
@@ -36,25 +26,15 @@ func (a *App) DotsPull(ctx context.Context) (ops []dots.Op, err error) {
 // When message is empty the commit message is auto-generated from the git
 // status of the repo (e.g. "dots: update nvim, zshrc").
 func (a *App) DotsPush(ctx context.Context, message string) (err error) {
-	rootCfg, err := a.loadConfig()
+	pf, err := a.dotService().preflight()
 	if err != nil {
-		return fmt.Errorf("dots push: load config: %w", err)
-	}
-	if err := a.requireDotsEnabled(rootCfg); err != nil {
-		return err
-	}
-	repoPath, err := resolveRepoPath(a.dotsRepoPath())
-	if err != nil {
-		return err
-	}
-	if err := a.requireSafeTestDotsMutation(repoPath, nil); err != nil {
 		return err
 	}
 	defer func() {
-		a.recordDotsHistoryResult(ctx, "push", "", repoPath, nil, err, false)
+		a.recordDotsHistoryResult(ctx, "push", "", pf.repoPath, nil, err, false)
 		a.refreshDotsStateAfterSuccess(ctx, &err, false)
 	}()
-	g := newGitForRepo(repoPath, a.newExecutor())
+	g := newGitForRepo(pf.repoPath, a.newExecutor())
 	if message == "" {
 		gitStatus, err := g.Status(ctx)
 		if err != nil {
@@ -69,25 +49,15 @@ func (a *App) DotsPush(ctx context.Context, message string) (err error) {
 // When message is empty the commit message is auto-generated from the git
 // status of the repo (e.g. "dots: update nvim, zshrc").
 func (a *App) DotsCommit(ctx context.Context, message string) (err error) {
-	rootCfg, err := a.loadConfig()
+	pf, err := a.dotService().preflight()
 	if err != nil {
-		return fmt.Errorf("dots commit: load config: %w", err)
-	}
-	if err := a.requireDotsEnabled(rootCfg); err != nil {
-		return err
-	}
-	repoPath, err := resolveRepoPath(a.dotsRepoPath())
-	if err != nil {
-		return err
-	}
-	if err := a.requireSafeTestDotsMutation(repoPath, nil); err != nil {
 		return err
 	}
 	defer func() {
-		a.recordDotsHistoryResult(ctx, "commit", "", repoPath, nil, err, false)
+		a.recordDotsHistoryResult(ctx, "commit", "", pf.repoPath, nil, err, false)
 		a.refreshDotsStateAfterSuccess(ctx, &err, false)
 	}()
-	g := newGitForRepo(repoPath, a.newExecutor())
+	g := newGitForRepo(pf.repoPath, a.newExecutor())
 	if message == "" {
 		gitStatus, err := g.Status(ctx)
 		if err != nil {

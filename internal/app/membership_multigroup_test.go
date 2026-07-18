@@ -52,6 +52,43 @@ func TestSetToolGroups_PersistsHostAndReusableGroup(t *testing.T) {
 	}
 }
 
+// A membership edited from one host may retain memberships in other hosts.
+// Only reusable groups are assigned to the active host's reusable group list.
+func TestSetToolGroups_PersistsMultipleHostGroups(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "beta.local")
+	a, cfgPath := newImportApp(t)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
+		Groups: []*config.GroupConfig{
+			{Name: "alpha", Special: "host", Tools: groupTools("ripgrep")},
+			{Name: "beta", Special: "host"},
+			{Name: "work"},
+		},
+		Hosts: map[string][]string{
+			"alpha": {"work"},
+			"beta":  {"work"},
+		},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	want := []string{"alpha", "beta", "work"}
+	if err := a.SetToolGroups("ripgrep", want, nil, "beta"); err != nil {
+		t.Fatalf("SetToolGroups across hosts: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	for _, name := range want {
+		group := logicalTestGroupByName(cfg, name)
+		if group == nil || !logicalTestGroupHasTool(group, "ripgrep") {
+			t.Fatalf("ripgrep should remain in %q, groups=%+v", name, cfg.Groups)
+		}
+	}
+}
+
 // End-to-end for dots: SetDotGroups persists a dot in host + one reusable group.
 func TestSetDotGroups_PersistsHostAndReusableGroup(t *testing.T) {
 	a, cfgDir, _ := newDotsApp(t)
@@ -84,6 +121,84 @@ func TestSetDotGroups_PersistsHostAndReusableGroup(t *testing.T) {
 	}
 	if !groupHasDot(logicalTestGroupByName(cfg, "work"), "nvim") {
 		t.Fatalf("nvim should be in reusable group work, groups=%+v", cfg.Groups)
+	}
+}
+
+func TestSetDotGroups_PersistsMultipleHostGroups(t *testing.T) {
+	a, cfgDir, _ := newDotsApp(t)
+	cfgPath := cfgDir + "/settings.json"
+	host := dotsTestHostGroupName()
+
+	rootCfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	rootCfg.Groups = []*config.GroupConfig{
+		{Name: "alpha", Special: "host", Dots: []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}}},
+		{Name: host, Special: "host"},
+		{Name: "work"},
+	}
+	rootCfg.Hosts = map[string][]string{
+		"alpha": {"work"},
+		host:    {"work"},
+	}
+	if err := saveAppConfig(t, cfgPath, rootCfg); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	want := []string{"alpha", host, "work"}
+	if _, err := a.SetDotGroups("nvim", want, nil, host); err != nil {
+		t.Fatalf("SetDotGroups across hosts: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	for _, name := range want {
+		if !groupHasDot(logicalTestGroupByName(cfg, name), "nvim") {
+			t.Fatalf("nvim should remain in %q, groups=%+v", name, cfg.Groups)
+		}
+	}
+}
+
+// SetDotGroups is a defensive backstop: even if a caller passes an unclamped
+// set with two reusable groups, the dot must persist in the host group plus
+// exactly one reusable group, never both.
+func TestSetDotGroups_ClampsMultipleReusableGroupsToOne(t *testing.T) {
+	a, cfgDir, _ := newDotsApp(t)
+	cfgPath := cfgDir + "/settings.json"
+	host := dotsTestHostGroupName()
+
+	rootCfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	rootCfg.Groups = []*config.GroupConfig{
+		{Name: host, Special: "host", Dots: []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}}},
+		{Name: "work"},
+		{Name: "base"},
+	}
+	rootCfg.Hosts = map[string][]string{host: {"work", "base"}}
+	if err := saveAppConfig(t, cfgPath, rootCfg); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+
+	if _, err := a.SetDotGroups("nvim", []string{host, "work", "base"}, nil, ""); err != nil {
+		t.Fatalf("SetDotGroups: %v", err)
+	}
+
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if !groupHasDot(logicalTestGroupByName(cfg, host), "nvim") {
+		t.Fatalf("nvim should remain in host group, groups=%+v", cfg.Groups)
+	}
+	inWork := groupHasDot(logicalTestGroupByName(cfg, "work"), "nvim")
+	inBase := groupHasDot(logicalTestGroupByName(cfg, "base"), "nvim")
+	if inWork == inBase {
+		t.Fatalf("nvim should be in exactly one reusable group, work=%v base=%v", inWork, inBase)
 	}
 }
 

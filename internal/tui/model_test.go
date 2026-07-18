@@ -262,27 +262,88 @@ func TestModel_ProviderCandidateNavigation(t *testing.T) {
 	m.applyFilter()
 
 	got := drive(m, pressRune('j'))
-	if got.cursor != 0 {
-		t.Fatalf("cursor after first down = %d, want tool row 0", got.cursor)
-	}
-	if got.providerCandidateCursor != 1 {
-		t.Fatalf("providerCandidateCursor after first down = %d, want second provider", got.providerCandidateCursor)
-	}
-
-	got = drive(got, pressRune('j'))
 	if got.cursor != 1 {
-		t.Fatalf("cursor after second down = %d, want next tool row", got.cursor)
+		t.Fatalf("cursor after down = %d, want next tool row", got.cursor)
 	}
 	if got.providerCandidateCursor != 0 {
 		t.Fatalf("providerCandidateCursor after moving tools = %d, want first provider", got.providerCandidateCursor)
 	}
 
+	got = drive(got, pressRune('l'))
+	if got.providerCandidateCursor != 1 {
+		t.Fatalf("providerCandidateCursor after l = %d, want second provider", got.providerCandidateCursor)
+	}
+
+	got = drive(got, pressRune('h'))
+	if got.providerCandidateCursor != 0 {
+		t.Fatalf("providerCandidateCursor after h = %d, want first provider", got.providerCandidateCursor)
+	}
+	got = drive(got, tea.KeyPressMsg{Code: tea.KeyRight})
+	if got.providerCandidateCursor != 1 {
+		t.Fatalf("providerCandidateCursor after right = %d, want second provider", got.providerCandidateCursor)
+	}
+
 	got = drive(got, pressRune('k'))
 	if got.cursor != 0 {
-		t.Fatalf("cursor after up from first provider = %d, want previous tool row", got.cursor)
+		t.Fatalf("cursor after up = %d, want previous tool row", got.cursor)
 	}
-	if got.providerCandidateCursor != 1 {
-		t.Fatalf("providerCandidateCursor after up = %d, want previous tool last provider", got.providerCandidateCursor)
+	if got.providerCandidateCursor != 0 {
+		t.Fatalf("providerCandidateCursor after up = %d, want first provider", got.providerCandidateCursor)
+	}
+}
+
+func TestProviderCandidateOptions_PreferredThenAlphabetical(t *testing.T) {
+	tool := &database.ToolCache{Name: "prettier", Tracked: true}
+	m := baseModel([]*database.ToolCache{tool})
+	m.toolProviderCandidates = map[string][]config.ToolInstallSpec{
+		"prettier": {
+			{Provider: "npm", Package: "prettier"},
+			{Provider: "zsh", Package: "prettier"},
+			{Provider: "brew", Package: "prettier"},
+		},
+	}
+	got := providerCandidateOptions(m, tool)
+	for i, want := range []string{"npm", "brew", "zsh"} {
+		if got[i].Provider != want {
+			t.Fatalf("candidate %d = %q, want %q", i, got[i].Provider, want)
+		}
+	}
+}
+
+func TestModelApplyFilter_HidesSystemAndOSProviderTools(t *testing.T) {
+	m := baseModel([]*database.ToolCache{
+		{Name: "git", Provider: "brew", Installed: true, Tracked: true},
+		{Name: "ls", Provider: "system", Installed: true, Tracked: true},
+		{Name: "dir", Provider: "os", Installed: true, Tracked: true},
+	})
+	m.hostInfo = &app.HostInfo{Active: "coder"}
+	m.toolMemberships = map[string][]string{
+		toolKey("git", "system"): {"core"},
+	}
+	m.hostInventoryTools = map[string]bool{"ls": true, "dir": true}
+	m.applyFilter()
+	if len(m.visibleTools) != 1 || m.visibleTools[0].Name != "git" {
+		t.Fatalf("visible tools = %+v, want only ordinary-group tool", m.visibleTools)
+	}
+}
+
+// TestModelApplyFilter_KeepsHostGroupTools pins the group-multiselect
+// reconciliation: a tool assigned to the active host group is a first-class,
+// user-visible assignment and must NOT be hidden — only provider-inventory
+// tools (the hostInventoryTools map) are filtered out.
+func TestModelApplyFilter_KeepsHostGroupTools(t *testing.T) {
+	m := baseModel([]*database.ToolCache{
+		{Name: "git", Provider: "brew", Installed: true, Tracked: true},
+		{Name: "ls", Provider: "system", Installed: true, Tracked: true},
+	})
+	m.hostInfo = &app.HostInfo{Active: "laptop"}
+	m.toolMemberships = map[string][]string{
+		toolKey("git", "brew"): {"laptop"}, // assigned to the active host group
+	}
+	m.hostInventoryTools = map[string]bool{"ls": true} // provider inventory
+	m.applyFilter()
+	if len(m.visibleTools) != 1 || m.visibleTools[0].Name != "git" {
+		t.Fatalf("visible tools = %+v, want host-group tool git visible, inventory ls hidden", m.visibleTools)
 	}
 }
 
@@ -380,8 +441,8 @@ func TestApplyFilter_SortsToolsBySectionThenName(t *testing.T) {
 }
 
 func TestApplyFilter_KeepsDiscoveredOrphansVisibleOutOfSync(t *testing.T) {
-	tracked := &database.ToolCache{Name: "git", Provider: "system", Installed: true, InstalledWith: "brew", Tracked: true}
-	orphan := &database.ToolCache{Name: "utm", Provider: "system", Installed: true, InstalledWith: "brew", Tracked: false}
+	tracked := &database.ToolCache{Name: "git", Provider: "brew", Installed: true, Tracked: true}
+	orphan := &database.ToolCache{Name: "utm", Provider: "brew", Installed: true, Tracked: false}
 	m := baseModel([]*database.ToolCache{tracked})
 	m.discoveredTools = []*database.ToolCache{orphan}
 	m.rebuildDiscoveredKeys()
@@ -611,9 +672,9 @@ func TestModel_ToolsLoadedMsg(t *testing.T) {
 		if len(got.toolProviderCandidates["prettier"]) != 2 {
 			t.Fatalf("toolProviderCandidates = %+v, want prettier candidates", got.toolProviderCandidates)
 		}
-		cols := newColWidthsWithProviderPins(got.visibleTools, nil, nil, got.toolProviderPins, nil, "", "", "", 120, nil)
+		cols := newColWidthsWithProviderPins(got.visibleTools, nil, nil, nil, got.toolProviderPins, nil, "", "", "", 120, nil)
 		detail := stripANSIEscapeSequences(strings.Join(inlineDetailLines(got, 120, cols), "\n"))
-		for _, want := range []string{"available providers", "npm/prettier", "brew/prettier"} {
+		for _, want := range []string{"available providers", "[npm]", "[brew]"} {
 			if !strings.Contains(detail, want) {
 				t.Fatalf("inline detail = %q, want %q", detail, want)
 			}
@@ -647,7 +708,7 @@ func TestModel_ToolsLoadedMsg(t *testing.T) {
 			dotsState: &app.DotsState{
 				Loaded:    true,
 				GitStatus: "M dotfiles/nvim",
-				Entries:   []app.DotStatus{{Name: "nvim", State: app.DotStateSynced, Health: app.HealthOK}},
+				Entries:   []app.DotStatus{{Name: "nvim", State: dots.StateSynced, Health: app.HealthOK}},
 			},
 		})
 		if len(got.dotsEntries) != 1 || got.dotsEntries[0].Name != "nvim" {
@@ -1193,7 +1254,7 @@ func TestModel_StatusTabActions(t *testing.T) {
 		m := baseModel(nil)
 		m.mode = viewStatus
 		m.settings.DotsRepo = "/repo/dotfiles"
-		m.dotsEntries = []app.DotStatus{{Name: "zsh", State: app.DotStateSynced}}
+		m.dotsEntries = []app.DotStatus{{Name: "zsh", State: dots.StateSynced}}
 		m.doctorErr = "previous failure"
 		m.statusCursor = statusRowIndex(statusRows(m), "Doctor")
 		got := drive(m, pressEnter())
@@ -2221,8 +2282,8 @@ func TestModel_DotsRootRowsOpenGroupMembershipPicker(t *testing.T) {
 	m.dotMemberships = map[string][]string{"nvim": {shortHostname()}}
 	m.dotsEntries = []app.DotStatus{{
 		Name:    "nvim",
-		State:   app.DotStateSynced,
-		Actions: []app.DotAction{app.DotActionRemove},
+		State:   dots.StateSynced,
+		Actions: []dots.Action{dots.ActionRemove},
 	}}
 
 	got := drive(m, pressRune('g'))
@@ -2248,11 +2309,11 @@ func TestModel_GroupMembershipPicker_SpaceTogglesConfirmSaves(t *testing.T) {
 	m.pickerMembershipKey = key
 	m.pickerOriginalGroups = []string{"base"}
 
-	// Space toggles work in; an item may hold at most one reusable group so the
-	// prior reusable membership (base) is evicted.
+	// Space toggles work in; tools are free multi-select, so both reusable
+	// groups (base and work) are kept.
 	got := drive(m, pressRune(' '))
-	if !slices.Equal(got.toolMemberships[key], []string{"work"}) {
-		t.Fatalf("space should replace the reusable group, got %v", got.toolMemberships[key])
+	if !slices.Equal(got.toolMemberships[key], []string{"base", "work"}) {
+		t.Fatalf("space should add the reusable group, got %v", got.toolMemberships[key])
 	}
 	// Space accumulates selections; it must not save or close the picker.
 	if got.loading {
@@ -2428,6 +2489,25 @@ func TestModel_IgnoreScopePicker_SpaceStillStages(t *testing.T) {
 	got = drive(got, pressEnter())
 	if !got.loading {
 		t.Fatal("enter should save staged ignore scope changes")
+	}
+}
+
+func TestModel_SystemPackageScopeOpensGroupMembershipPicker(t *testing.T) {
+	m := baseModel([]*database.ToolCache{{Name: "libc6", Provider: "apt", Tracked: true}})
+	m.hostInfo = &app.HostInfo{Active: "testhost"}
+	m.toolMemberships = map[string][]string{toolKey("libc6", "apt"): {"work"}}
+	m.hostInventoryTools = map[string]bool{}
+	m.mode = viewIgnoreScope
+	m.scopeTarget = *m.selectedTool()
+	m.scopeTargetSet = true
+	m.scopeOptions = []scopeOption{{kind: "system-package", checked: true, initialChecked: false}}
+	var cmds []tea.Cmd
+	m.saveScopePickerSelection(&cmds)
+	if m.mode != viewGroupMembership {
+		t.Fatalf("mode = %v, want group membership picker", m.mode)
+	}
+	if !slices.Contains(m.pickerOriginalGroups, config.SystemInventoryGroup) || !slices.Contains(m.pickerOriginalGroups, "work") {
+		t.Fatalf("picker groups = %v, want work and provider inventory", m.pickerOriginalGroups)
 	}
 }
 
@@ -3088,7 +3168,7 @@ func TestModel_ProgressMsg_AdvancesRefreshToolProgress(t *testing.T) {
 	if got.providerScanToolDone["brew"] != 1 {
 		t.Fatalf("providerScanToolDone[brew] = %d, want 1", got.providerScanToolDone["brew"])
 	}
-	if got.progressText != "Refreshing tools… 1/2: brew/ripgrep" {
+	if got.progressText != "Refreshing tools… 1/2: ripgrep" {
 		t.Fatalf("progressText = %q, want per-tool refresh progress", got.progressText)
 	}
 }
@@ -3104,7 +3184,7 @@ func TestModel_ProgressMsg_UsesConcreteEcosystemScanLabel(t *testing.T) {
 
 	got := drive(m, progressMsg{gen: 4, refreshProvider: "node", refreshToolName: "typescript"})
 
-	if got.progressText != "Refreshing tools… 1/2: node/bun/typescript" {
+	if got.progressText != "Refreshing tools… 1/2: typescript" {
 		t.Fatalf("progressText = %q, want concrete ecosystem tool progress", got.progressText)
 	}
 }
@@ -3124,7 +3204,7 @@ func TestModel_ProgressMsg_UsesProgressEventProviderLabel(t *testing.T) {
 		refreshToolName:      "typescript",
 	})
 
-	if got.progressText != "Refreshing tools… 1/2: node/bun/typescript" {
+	if got.progressText != "Refreshing tools… 1/2: typescript" {
 		t.Fatalf("progressText = %q, want event provider label", got.progressText)
 	}
 }
@@ -3725,9 +3805,9 @@ func dotsModel() Model {
 	m.dotsLoaded = true
 	setDotsRepoForTest(&m, "/repo/dotfiles")
 	m.dotsEntries = []app.DotStatus{
-		{Name: "gitconfig", SourcePath: "/repo/gitconfig", TargetPath: "~/.gitconfig", Health: app.HealthConflict, State: app.DotStateConflict, Actions: []app.DotAction{app.DotActionUseRepo, app.DotActionUseLocal, app.DotActionRemove, app.DotActionIgnore}},
-		{Name: "zshrc", SourcePath: "/repo/zshrc", TargetPath: "~/.zshrc", Health: app.HealthMissing, State: app.DotStateMissing, Actions: []app.DotAction{app.DotActionSync, app.DotActionRemove, app.DotActionIgnore}},
-		{Name: "nvim", SourcePath: "/repo/nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: app.DotStateSynced, Actions: []app.DotAction{app.DotActionRemove, app.DotActionIgnore}},
+		{Name: "gitconfig", SourcePath: "/repo/gitconfig", TargetPath: "~/.gitconfig", Health: app.HealthConflict, State: dots.StateConflict, Actions: []dots.Action{dots.ActionUseRepo, dots.ActionUseLocal, dots.ActionRemove, dots.ActionIgnore}},
+		{Name: "zshrc", SourcePath: "/repo/zshrc", TargetPath: "~/.zshrc", Health: app.HealthMissing, State: dots.StateMissing, Actions: []dots.Action{dots.ActionSync, dots.ActionRemove, dots.ActionIgnore}},
+		{Name: "nvim", SourcePath: "/repo/nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: dots.StateSynced, Actions: []dots.Action{dots.ActionRemove, dots.ActionIgnore}},
 	}
 	return m
 }
@@ -3769,7 +3849,7 @@ func dotsPeekFileModel(t *testing.T) (Model, string, string) {
 		SourcePath: repoPath,
 		TargetPath: localPath,
 		Health:     app.HealthConflict,
-		State:      app.DotStateConflict,
+		State:      dots.StateConflict,
 	}}
 	return m, repoPath, localPath
 }
@@ -3836,13 +3916,13 @@ func TestDotsSpaceExpandsDirectoryRows(t *testing.T) {
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
 		Health:     app.HealthOK,
-		State:      app.DotStateSynced,
+		State:      dots.StateSynced,
 		IsDir:      true,
 		Children: []app.DotChild{{
 			Name:    "init.lua",
 			RelPath: "init.lua",
 			Path:    "~/.config/nvim/init.lua",
-			State:   app.DotStateSynced,
+			State:   dots.StateSynced,
 		}},
 	}}
 
@@ -3862,7 +3942,7 @@ func TestDotsPrimaryActionDoesNotPeekEmptyDirectory(t *testing.T) {
 		SourcePath: filepath.Join(base.settings.DotsRepo, "dotfiles", "empty"),
 		TargetPath: filepath.Join(os.Getenv("HOME"), ".config", "empty"),
 		Health:     app.HealthOK,
-		State:      app.DotStateSynced,
+		State:      dots.StateSynced,
 		IsDir:      true,
 	}}
 
@@ -3897,7 +3977,7 @@ func TestDotsRowHintsUseSpaceAsContextAction(t *testing.T) {
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
 		Health:     app.HealthOK,
-		State:      app.DotStateSynced,
+		State:      dots.StateSynced,
 		IsDir:      true,
 		Children:   []app.DotChild{{Name: "init.lua", RelPath: "init.lua", Path: "~/.config/nvim/init.lua"}},
 	}}
@@ -4098,8 +4178,8 @@ func dotsVariantFlowModel(t *testing.T, withVariant bool) Model {
 		SourcePath: filepath.Join(repoDir, "dotfiles", pkg, ".config", "nvim"),
 		TargetPath: "~/.config/nvim",
 		Health:     app.HealthOK,
-		State:      app.DotStateSynced,
-		Actions:    []app.DotAction{app.DotActionRemove, app.DotActionIgnore},
+		State:      dots.StateSynced,
+		Actions:    []dots.Action{dots.ActionRemove, dots.ActionIgnore},
 		Group:      "laptop",
 	}}
 	return m
@@ -4122,10 +4202,10 @@ func TestModel_DotsSyncAllEntryOrderMatchesRenderedSections(t *testing.T) {
 	m := baseModel(nil)
 	m.settings.DotsRepo = "/repo/dotfiles"
 	m.dotsEntries = []app.DotStatus{
-		{Name: "synced", State: app.DotStateSynced},
-		{Name: "ignored", State: app.DotStateIgnored},
-		{Name: "conflict", State: app.DotStateConflict},
-		{Name: "missing", State: app.DotStateMissing},
+		{Name: "synced", State: dots.StateSynced},
+		{Name: "ignored", State: dots.StateIgnored},
+		{Name: "conflict", State: dots.StateConflict},
+		{Name: "missing", State: dots.StateMissing},
 	}
 
 	got := dotsSyncAllEntryOrder(m)
@@ -4161,7 +4241,7 @@ func TestModel_DotsProgressMsgUpdatesRowStateAndSnapshot(t *testing.T) {
 		text:    app.DotsSyncActivityProgressText(dots.SyncProgressEvent{Entry: "nvim", Index: 1, Total: 2, Done: true}),
 		name:    "nvim",
 		done:    true,
-		entries: []app.DotStatus{{Name: "nvim", State: app.DotStateSynced}},
+		entries: []app.DotStatus{{Name: "nvim", State: dots.StateSynced}},
 	})
 	if got.dotsActiveName != "" {
 		t.Fatalf("dotsActiveName = %q, want cleared", got.dotsActiveName)
@@ -4466,7 +4546,7 @@ func TestModel_DotsTab_Messages(t *testing.T) {
 		m.dotsSearchActive = true
 		m.dotsEntries = []app.DotStatus{{Name: "tracked", Group: "base"}}
 		got := drive(m, dotsDiscoveredMsg{entries: []app.DotStatus{
-			{Name: "kitty", TargetPath: "~/.config/kitty", State: app.DotStateLocalOnly},
+			{Name: "kitty", TargetPath: "~/.config/kitty", State: dots.StateLocalOnly},
 		}, discoveredCount: 1})
 		if got.dotsSearchActive || got.filter.Value() != "" {
 			t.Fatalf("filters not cleared: search=%v filter=%q", got.dotsSearchActive, got.filter.Value())
@@ -4478,8 +4558,8 @@ func TestModel_DotsTab_Messages(t *testing.T) {
 
 	t.Run("dotsDiscoveredMsg selects first transient candidate", func(t *testing.T) {
 		got := drive(baseModel(nil), dotsDiscoveredMsg{entries: []app.DotStatus{
-			{Name: "tracked-missing", TargetPath: "~/.tracked", State: app.DotStateMissing, Group: "base"},
-			{Name: "candidate", TargetPath: "~/.candidate", State: app.DotStateLocalOnly},
+			{Name: "tracked-missing", TargetPath: "~/.tracked", State: dots.StateMissing, Group: "base"},
+			{Name: "candidate", TargetPath: "~/.candidate", State: dots.StateLocalOnly},
 		}, discoveredCount: 1})
 		rows := dotsVisibleRows(got)
 		if got.dotsCursor < 0 || got.dotsCursor >= len(rows) {
@@ -4506,9 +4586,9 @@ func TestModel_DotsTab_Messages(t *testing.T) {
 
 	t.Run("dotsPushedMsg with error still updates entries", func(t *testing.T) {
 		m := baseModel(nil)
-		m.dotsEntries = []app.DotStatus{{Name: "old", State: app.DotStateConflict}}
+		m.dotsEntries = []app.DotStatus{{Name: "old", State: dots.StateConflict}}
 		got := drive(m, dotsPushedMsg{
-			entries: []app.DotStatus{{Name: "fresh", State: app.DotStateSynced}},
+			entries: []app.DotStatus{{Name: "fresh", State: dots.StateSynced}},
 			err:     errors.New("push failed"),
 		})
 		if got.statusMsg != "✗ push failed" {
@@ -4541,17 +4621,17 @@ func TestModel_DotsTab_Messages(t *testing.T) {
 
 	t.Run("dotsIgnoredMsg with error still updates entries", func(t *testing.T) {
 		m := baseModel(nil)
-		m.dotsEntries = []app.DotStatus{{Name: "old", State: app.DotStateConflict}}
+		m.dotsEntries = []app.DotStatus{{Name: "old", State: dots.StateConflict}}
 		got := drive(m, dotsIgnoredMsg{
 			name:    "old",
 			pattern: "old",
-			entries: []app.DotStatus{{Name: "old", State: app.DotStateIgnored}},
+			entries: []app.DotStatus{{Name: "old", State: dots.StateIgnored}},
 			err:     errors.New("ignore failed"),
 		})
 		if got.statusMsg != "✗ ignore failed" {
 			t.Errorf("statusMsg = %q", got.statusMsg)
 		}
-		if len(got.dotsEntries) != 1 || got.dotsEntries[0].State != app.DotStateIgnored {
+		if len(got.dotsEntries) != 1 || got.dotsEntries[0].State != dots.StateIgnored {
 			t.Fatalf("dotsEntries = %#v, want refreshed entries despite error", got.dotsEntries)
 		}
 	})
@@ -4564,7 +4644,7 @@ func TestModel_DotsTab_Messages(t *testing.T) {
 			gen:     gen,
 			name:    "nvim",
 			info:    app.DotVariantInfo{Name: "nvim", Host: "laptop", Package: "nvim@laptop"},
-			entries: []app.DotStatus{{Name: "nvim", Package: "nvim@laptop", State: app.DotStateSynced}},
+			entries: []app.DotStatus{{Name: "nvim", Package: "nvim@laptop", State: dots.StateSynced}},
 		})
 		if got.dotsLoading {
 			t.Fatal("dotsLoading should clear after variant change")
@@ -4585,7 +4665,7 @@ func TestModel_DotsTab_Messages(t *testing.T) {
 			gen:     gen,
 			name:    "nvim",
 			removed: true,
-			entries: []app.DotStatus{{Name: "nvim", Package: "nvim", State: app.DotStateSynced}},
+			entries: []app.DotStatus{{Name: "nvim", Package: "nvim", State: dots.StateSynced}},
 			err:     errors.New("variant failed"),
 		})
 		if got.statusMsg != "✗ variant failed" {
@@ -4607,9 +4687,9 @@ func TestModel_DotsTab_OverwriteConfirm(t *testing.T) {
 			{
 				Name:       "gitconfig",
 				Health:     app.HealthConflict,
-				State:      app.DotStateConflict,
+				State:      dots.StateConflict,
 				TargetPath: "~/.gitconfig",
-				Actions:    []app.DotAction{app.DotActionUseRepo, app.DotActionUseLocal, app.DotActionRemove},
+				Actions:    []dots.Action{dots.ActionUseRepo, dots.ActionUseLocal, dots.ActionRemove},
 			},
 		}
 		return m
@@ -4734,16 +4814,16 @@ func TestModel_DotsTab_FixedMsg(t *testing.T) {
 
 	t.Run("dotsFixedMsg with error still updates entries", func(t *testing.T) {
 		m := baseModel(nil)
-		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: app.DotStateConflict}}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", State: dots.StateConflict}}
 		got := drive(m, dotsFixedMsg{
 			name:    "nvim",
-			entries: []app.DotStatus{{Name: "nvim", State: app.DotStateSynced}},
+			entries: []app.DotStatus{{Name: "nvim", State: dots.StateSynced}},
 			err:     errors.New("resolve failed"),
 		})
 		if got.statusMsg != "✗ resolve failed" {
 			t.Errorf("statusMsg = %q", got.statusMsg)
 		}
-		if len(got.dotsEntries) != 1 || got.dotsEntries[0].State != app.DotStateSynced {
+		if len(got.dotsEntries) != 1 || got.dotsEntries[0].State != dots.StateSynced {
 			t.Fatalf("dotsEntries = %#v, want refreshed entries despite error", got.dotsEntries)
 		}
 	})
