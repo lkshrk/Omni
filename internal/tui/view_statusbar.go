@@ -44,7 +44,8 @@ func renderStatusBar(m Model) string {
 	if footerConfirmationPromptActive(m) {
 		return base
 	}
-	status := renderFooterStatusLayer(m, max(contentW-screenEdgePadding, 1))
+	statusWidth := max(contentW*95/100-screenEdgePadding, 1)
+	status := renderFooterStatusLayer(m, statusWidth)
 	if status == "" {
 		return base
 	}

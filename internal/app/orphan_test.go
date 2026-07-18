@@ -6,6 +6,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -165,6 +166,181 @@ func TestCheckSatisfiedGroups_ActiveGroupExcluded(t *testing.T) {
 }
 
 // ─── syncOrphansToMachineGroup (via Sync) ────────────────────────────────────
+
+func TestRefreshDiscovered_AutoGroupsSystemPackagesAsInventory(t *testing.T) {
+	apt := &stubProvider{
+		name:      "apt",
+		available: true,
+		installed: []provider.InstalledTool{
+			installedTool("ripgrep", "1.0", "apt"),
+			installedTool("libxcomposite1", "1.0", "apt"),
+		},
+	}
+	brew := &stubProvider{
+		name:      "brew",
+		available: true,
+		installed: []provider.InstalledTool{
+			installedTool("bat", "1.0", "brew"),
+			installedTool("fzf", "1.0", "brew"),
+		},
+	}
+	a, cfgPath := newImportApp(t, apt, brew)
+	short := testShortHostname()
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(
+			logicalTool("ripgrep", "apt"),
+			logicalTool("bat", "brew"),
+		),
+		Groups: []*config.GroupConfig{
+			{Name: short, Special: "host", Tools: groupTools("ripgrep", "bat")},
+			{Name: config.SystemInventoryGroup},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := a.RefreshDiscovered(context.Background()); err != nil {
+		t.Fatalf("RefreshDiscovered: %v", err)
+	}
+
+	updated, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	inventory := logicalTestGroupByName(updated, config.SystemInventoryGroup)
+	if inventory == nil || !inventory.IsSystemInventory() || !logicalTestGroupHasTool(inventory, "libxcomposite1") {
+		t.Fatalf("provider inventory = %+v, want libxcomposite1 in special inventory group", inventory)
+	}
+	if logicalTestGroupHasTool(inventory, "ripgrep") || logicalTestGroupHasTool(inventory, "fzf") {
+		t.Fatalf("provider inventory = %+v, configured apt and discovered brew tools must stay out", inventory)
+	}
+	discovered, err := a.ListDiscovered(context.Background())
+	if err != nil {
+		t.Fatalf("ListDiscovered: %v", err)
+	}
+	if len(discovered) != 1 || discovered[0].Name != "fzf" {
+		t.Fatalf("discovered = %+v, want only non-system fzf visible Out of Sync", discovered)
+	}
+}
+
+func TestRefreshDiscovered_AutoGroupsEverySystemPackageProvider(t *testing.T) {
+	for _, providerName := range []string{"apt", "dnf", "pacman", "apk", "zypper"} {
+		t.Run(providerName, func(t *testing.T) {
+			p := &stubProvider{
+				name:      providerName,
+				available: true,
+				installed: []provider.InstalledTool{
+					installedTool("tracked", "1.0", providerName),
+					installedTool("system-package", "1.0", providerName),
+				},
+			}
+			a, cfgPath := newImportApp(t, p)
+			if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+				Tools:  logicalToolSpecs(logicalTool("tracked", providerName)),
+				Groups: []*config.GroupConfig{{Name: testShortHostname(), Special: "host", Tools: groupTools("tracked")}},
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := a.RefreshDiscovered(context.Background()); err != nil {
+				t.Fatalf("RefreshDiscovered: %v", err)
+			}
+			updated, err := config.Load(cfgPath)
+			if err != nil {
+				t.Fatalf("config.Load: %v", err)
+			}
+			inventory := logicalTestGroupByName(updated, config.SystemInventoryGroup)
+			if inventory == nil || !inventory.IsSystemInventory() || !logicalTestGroupHasTool(inventory, "system-package") {
+				t.Fatalf("inventory = %+v, want %s package classified", inventory, providerName)
+			}
+		})
+	}
+}
+
+func TestRefreshDiscovered_SystemInventoryIsIdempotentUnderConcurrentRefresh(t *testing.T) {
+	apt := &stubProvider{
+		name:      "apt",
+		available: true,
+		installed: []provider.InstalledTool{
+			installedTool("tracked", "1.0", "apt"),
+			installedTool("system-package", "1.0", "apt"),
+		},
+	}
+	a, cfgPath := newImportApp(t, apt)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools:  logicalToolSpecs(logicalTool("tracked", "apt")),
+		Groups: []*config.GroupConfig{{Name: testShortHostname(), Special: "host", Tools: groupTools("tracked")}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- a.RefreshDiscovered(context.Background())
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("RefreshDiscovered: %v", err)
+		}
+	}
+
+	updated, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	inventory := logicalTestGroupByName(updated, config.SystemInventoryGroup)
+	count := 0
+	if inventory != nil {
+		for _, tool := range inventory.Tools {
+			if tool.Name == "system-package" {
+				count++
+			}
+		}
+	}
+	if count != 1 {
+		t.Fatalf("system-package inventory memberships = %d, want 1", count)
+	}
+}
+
+func TestRefreshDiscovered_InventoryPersistenceFailureDoesNotWriteDiscoveredDB(t *testing.T) {
+	apt := &stubProvider{
+		name:      "apt",
+		available: true,
+		installed: []provider.InstalledTool{
+			installedTool("tracked", "1.0", "apt"),
+			installedTool("system-package", "1.0", "apt"),
+		},
+	}
+	a, cfgPath := newImportApp(t, apt)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("tracked", "apt")),
+		Groups: []*config.GroupConfig{
+			{Name: testShortHostname(), Special: "host", Tools: groupTools("tracked")},
+			{Name: config.SystemInventoryGroup, Special: "host"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	err := a.RefreshDiscovered(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "reserved group") {
+		t.Fatalf("RefreshDiscovered error = %v, want reserved-group persistence error", err)
+	}
+	discovered, listErr := a.ListDiscovered(context.Background())
+	if listErr != nil {
+		t.Fatalf("ListDiscovered: %v", listErr)
+	}
+	if len(discovered) != 0 {
+		t.Fatalf("discovered DB rows = %+v, want none after persistence failure", discovered)
+	}
+}
 
 func TestSync_HostActive_OrphansAddedToHostnameGroup(t *testing.T) {
 	brew := &stubProvider{

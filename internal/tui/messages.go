@@ -16,6 +16,7 @@ type toolsLoadedMsg struct {
 	groupNames             []string          // ordered reusable group names
 	toolGroups             map[string]string // "name\x00provider" → group name
 	toolMemberships        map[string][]string
+	hostInventoryTools     map[string]bool
 	dotMemberships         map[string][]string
 	ignoreLabels           map[string]string // logical tool name → compact ignore source label
 	toolIgnoreSet          map[string]bool
@@ -256,7 +257,10 @@ type fixIgnoreDoneMsg struct {
 }
 
 type configOptimizeDoneMsg struct {
-	err error
+	report      *config.OptimizeReport
+	modified    []string
+	optimizeErr error
+	ignoreErr   error
 }
 
 type fixNvmDoneMsg struct {

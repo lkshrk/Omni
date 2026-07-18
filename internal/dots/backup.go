@@ -15,11 +15,7 @@ import (
 
 const BackupDirName = "dotfiles.bkp"
 
-type BackupExecutor interface {
-	Run(ctx context.Context, name string, args ...string) (stdout, stderr string, err error)
-}
-
-func backupExec(exec BackupExecutor) BackupExecutor {
+func backupExec(exec executor.Executor) executor.Executor {
 	if exec != nil {
 		return exec
 	}
@@ -32,7 +28,7 @@ func BackupLocalPath(path string) (string, error) {
 	return BackupLocalPathWithExecutor(context.Background(), nil, path)
 }
 
-func BackupLocalPathWithExecutor(ctx context.Context, exec BackupExecutor, path string) (string, error) {
+func BackupLocalPathWithExecutor(ctx context.Context, exec executor.Executor, path string) (string, error) {
 	return BackupLocalPathFromWithExecutor(ctx, exec, path, path)
 }
 
@@ -41,7 +37,7 @@ func BackupLocalPathWithExecutor(ctx context.Context, exec BackupExecutor, path 
 // the built-in defaults). Use it only when the mutation being guarded leaves
 // ignored paths untouched in place; destructive flows that remove the whole
 // target must keep taking full backups.
-func BackupLocalPathFilteredWithExecutor(ctx context.Context, exec BackupExecutor, path string, ignores []string) (string, error) {
+func BackupLocalPathFilteredWithExecutor(ctx context.Context, exec executor.Executor, path string, ignores []string) (string, error) {
 	return backupLocalPathFrom(ctx, exec, path, path, ignores)
 }
 
@@ -52,11 +48,11 @@ func BackupLocalPathFrom(path, source string) (string, error) {
 	return BackupLocalPathFromWithExecutor(context.Background(), nil, path, source)
 }
 
-func BackupLocalPathFromWithExecutor(ctx context.Context, exec BackupExecutor, path, source string) (string, error) {
+func BackupLocalPathFromWithExecutor(ctx context.Context, exec executor.Executor, path, source string) (string, error) {
 	return backupLocalPathFrom(ctx, exec, path, source, nil)
 }
 
-func backupLocalPathFrom(ctx context.Context, exec BackupExecutor, path, source string, ignores []string) (string, error) {
+func backupLocalPathFrom(ctx context.Context, exec executor.Executor, path, source string, ignores []string) (string, error) {
 	info, err := os.Lstat(source)
 	if err != nil {
 		return "", err
@@ -79,7 +75,7 @@ func BackupAndRemoveLocalPath(path string) (string, error) {
 	return BackupAndRemoveLocalPathWithExecutor(context.Background(), nil, path)
 }
 
-func BackupAndRemoveLocalPathWithExecutor(ctx context.Context, exec BackupExecutor, path string) (string, error) {
+func BackupAndRemoveLocalPathWithExecutor(ctx context.Context, exec executor.Executor, path string) (string, error) {
 	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
 		return "", nil
@@ -109,7 +105,7 @@ func RemoveLocalPathAfterBackup(path, backupPath string) error {
 	return RemoveLocalPathAfterBackupWithExecutor(context.Background(), nil, path, backupPath)
 }
 
-func RemoveLocalPathAfterBackupWithExecutor(ctx context.Context, exec BackupExecutor, path, backupPath string) error {
+func RemoveLocalPathAfterBackupWithExecutor(ctx context.Context, exec executor.Executor, path, backupPath string) error {
 	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
 		return nil
@@ -142,7 +138,7 @@ func RemoveLocalPathAfterBackupWithExecutor(ctx context.Context, exec BackupExec
 // TrashLocalPath moves path into the user's trash directory instead of
 // deleting it permanently. Symlinks are unlinked in place because the link
 // itself carries no data. Missing paths are a no-op.
-func TrashLocalPath(ctx context.Context, exec BackupExecutor, path string) error {
+func TrashLocalPath(ctx context.Context, exec executor.Executor, path string) error {
 	info, err := os.Lstat(path)
 	if os.IsNotExist(err) {
 		return nil
@@ -160,7 +156,7 @@ func TrashLocalPath(ctx context.Context, exec BackupExecutor, path string) error
 	return err
 }
 
-func moveLocalPathToTrash(ctx context.Context, exec BackupExecutor, path string, info os.FileInfo) (string, error) {
+func moveLocalPathToTrash(ctx context.Context, exec executor.Executor, path string, info os.FileInfo) (string, error) {
 	dst, err := trashDestination(path)
 	if err != nil {
 		return "", err
@@ -257,7 +253,7 @@ func uniqueBackupDestination(path string) string {
 	}
 }
 
-func backupCopyPath(ctx context.Context, exec BackupExecutor, src, dst string, info os.FileInfo, ignores []string) error {
+func backupCopyPath(ctx context.Context, exec executor.Executor, src, dst string, info os.FileInfo, ignores []string) error {
 	if info.Mode()&os.ModeSymlink != 0 {
 		target, err := os.Readlink(src)
 		if err != nil {
@@ -288,7 +284,7 @@ func backupCopyPath(ctx context.Context, exec BackupExecutor, src, dst string, i
 // backupCopyGitTracked copies only git-tracked files from src into dst.
 // Returns a non-nil error when src is not inside a git repo or git is
 // unavailable, signalling the caller to fall back.
-func backupCopyGitTracked(ctx context.Context, exec BackupExecutor, src, dst string) error {
+func backupCopyGitTracked(ctx context.Context, exec executor.Executor, src, dst string) error {
 	out, _, err := backupExec(exec).Run(ctx, "git", "-C", src, "ls-files", "-z")
 	if err != nil {
 		return err
@@ -341,7 +337,7 @@ func backupCopyGitTracked(ctx context.Context, exec BackupExecutor, src, dst str
 // backupCopyDirFiltered walks src recursively, skipping ignored paths. With
 // nil ignores it applies the built-in defaults; entry ignore lists are matched
 // with the same entry-root anchoring the sync classifier uses.
-func backupCopyDirFiltered(ctx context.Context, exec BackupExecutor, src, dst string, ignores []string) error {
+func backupCopyDirFiltered(ctx context.Context, exec executor.Executor, src, dst string, ignores []string) error {
 	if len(ignores) == 0 {
 		ignores = defaultIgnores
 	}

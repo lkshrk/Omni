@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/app"
@@ -516,17 +515,20 @@ func TestImport_ToNamedGroup(t *testing.T) {
 	t.Error("work group not found in config")
 }
 
-// ─── Cross-group duplicate rejection ─────────────────────────────────────────
+// ─── Cross-group duplicate membership ────────────────────────────────────────
 
-func TestSync_DuplicateToolAcrossGroups_IsInvalid(t *testing.T) {
+func TestSync_DuplicateToolAcrossGroups_IsValid(t *testing.T) {
 	brew := &installTracker{stubProvider: stubProvider{name: "brew", available: true}}
 	a, cfgPath := newImportApp(t, brew)
 
-	// Put ripgrep in TWO reusable groups. An item may hold at most one reusable
-	// group (host groups are unlimited), so this is invalid.
+	// Put ripgrep in TWO reusable groups. A tool may belong to any number of
+	// reusable groups, so this is valid and Sync should succeed and install it.
+	host := testShortHostname()
 	rootCfg := &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
+		Hosts: map[string][]string{host: {"base", "work"}},
 		Groups: []*config.GroupConfig{
+			{Name: host, Special: "host"},
 			{Name: "base", Tools: groupTools("ripgrep")},
 			{Name: "work", Tools: groupTools("ripgrep")},
 		},
@@ -536,11 +538,11 @@ func TestSync_DuplicateToolAcrossGroups_IsInvalid(t *testing.T) {
 	}
 
 	_, err := a.Sync(context.Background(), gosync.SyncOptions{})
-	if err == nil || !strings.Contains(err.Error(), `tool "ripgrep" already belongs to reusable group`) {
-		t.Fatalf("Sync error = %v, want duplicate reusable ownership validation error", err)
+	if err != nil {
+		t.Fatalf("Sync error = %v, want nil for tool in multiple reusable groups", err)
 	}
-	if len(brew.installCalled) != 0 {
-		t.Fatalf("install calls = %v, want none for invalid config", brew.installCalled)
+	if len(brew.installCalled) != 1 || brew.installCalled[0] != "ripgrep" {
+		t.Fatalf("installCalled = %v, want [ripgrep]", brew.installCalled)
 	}
 }
 

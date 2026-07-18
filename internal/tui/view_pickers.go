@@ -638,15 +638,13 @@ func ignoreScopeOptions(m Model, t *database.ToolCache) []scopeOption {
 		return nil
 	}
 	var options []scopeOption
-	if t.Tracked {
-		toolChecked := m.toolIgnoreSet[t.Name]
-		options = append(options, scopeOption{
-			kind:    "tool",
-			label:   "tool everywhere",
-			detail:  "config tools." + t.Name + ".ignore",
-			checked: toolChecked, initialChecked: toolChecked,
-		})
-	}
+	toolChecked := m.toolIgnoreSet[t.Name]
+	options = append(options, scopeOption{
+		kind:    "tool",
+		label:   "all hosts",
+		detail:  "global tool ignore",
+		checked: toolChecked, initialChecked: toolChecked,
+	})
 	if t.Tracked {
 		for _, group := range m.toolMemberships[toolMembershipKey(t)] {
 			checked := m.groupIgnoreSet[t.Name] != nil && m.groupIgnoreSet[t.Name][group]
@@ -668,6 +666,11 @@ func ignoreScopeOptions(m Model, t *database.ToolCache) []scopeOption {
 			checked: checked, initialChecked: checked,
 		})
 	}
+	checked := m.hostInventoryTools[t.Name]
+	options = append(options, scopeOption{
+		kind: "system-package", label: "system-package", detail: "assign to provider inventory",
+		checked: checked, initialChecked: checked,
+	})
 	return options
 }
 
@@ -753,7 +756,7 @@ func groupMembershipContentWidth(m Model) int {
 	for range m.pickerGroups {
 		width = max(width, pickerToggleRowWidth(labelW, detailW))
 	}
-	width = max(width, lipgloss.Width(toggleSaveCancelHintText(m)))
+	width = max(width, lipgloss.Width(renderActionHintText(m.palette, membershipPickerActionItems(m))))
 	for _, label := range []string{"Current Host", "Inactive"} {
 		width = max(width, lipgloss.Width(pickerSectionLabel(label))+2)
 	}

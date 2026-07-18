@@ -300,14 +300,14 @@ func TestDotStatusStateUsesExplicitStateAndHealthFallback(t *testing.T) {
 	tests := []struct {
 		name   string
 		status DotStatus
-		want   DotState
+		want   dots.State
 	}{
-		{name: "explicit state wins", status: DotStatus{State: DotStateModified, Health: HealthOK}, want: DotStateModified},
-		{name: "ok health", status: DotStatus{Health: HealthOK}, want: DotStateSynced},
-		{name: "missing health", status: DotStatus{Health: HealthMissing}, want: DotStateMissing},
-		{name: "conflict health", status: DotStatus{Health: HealthConflict}, want: DotStateConflict},
-		{name: "no source health", status: DotStatus{Health: HealthNoSource}, want: DotStateNoSource},
-		{name: "unknown health", status: DotStatus{Health: DotHealth("custom")}, want: DotState("custom")},
+		{name: "explicit state wins", status: DotStatus{State: dots.StateModified, Health: HealthOK}, want: dots.StateModified},
+		{name: "ok health", status: DotStatus{Health: HealthOK}, want: dots.StateSynced},
+		{name: "missing health", status: DotStatus{Health: HealthMissing}, want: dots.StateMissing},
+		{name: "conflict health", status: DotStatus{Health: HealthConflict}, want: dots.StateConflict},
+		{name: "no source health", status: DotStatus{Health: HealthNoSource}, want: dots.StateNoSource},
+		{name: "unknown health", status: DotStatus{Health: DotHealth("custom")}, want: dots.State("custom")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -320,13 +320,13 @@ func TestDotStatusStateUsesExplicitStateAndHealthFallback(t *testing.T) {
 
 func TestDotStatusSectionsClassifiesStates(t *testing.T) {
 	sections := DotStatusSections([]DotStatus{
-		{Name: "modified", State: DotStateModified},
-		{Name: "conflict", State: DotStateConflict},
-		{Name: "synced", State: DotStateSynced},
-		{Name: "ignored", State: DotStateIgnored},
-		{Name: "ambiguous", State: DotStateAmbiguous},
-		{Name: "transient", State: DotStateUntrackedConflict},
-		{Name: "grouped-transient", State: DotStateUntrackedConflict, Group: "base"},
+		{Name: "modified", State: dots.StateModified},
+		{Name: "conflict", State: dots.StateConflict},
+		{Name: "synced", State: dots.StateSynced},
+		{Name: "ignored", State: dots.StateIgnored},
+		{Name: "ambiguous", State: dots.StateAmbiguous},
+		{Name: "transient", State: dots.StateUntrackedConflict},
+		{Name: "grouped-transient", State: dots.StateUntrackedConflict, Group: "base"},
 	})
 
 	got := make(map[string][]string, len(sections))
@@ -348,12 +348,12 @@ func TestDotStatusSectionsClassifiesStates(t *testing.T) {
 
 func TestSortDotStatusesOrdersBySectionAndName(t *testing.T) {
 	statuses := []DotStatus{
-		{Name: "z-synced", State: DotStateSynced},
-		{Name: "b-modified", State: DotStateModified},
-		{Name: "ignored", State: DotStateIgnored},
-		{Name: "transient", State: DotStateUntrackedConflict},
-		{Name: "a-modified", State: DotStateModified},
-		{Name: "grouped-transient", State: DotStateUntrackedConflict, Group: "base"},
+		{Name: "z-synced", State: dots.StateSynced},
+		{Name: "b-modified", State: dots.StateModified},
+		{Name: "ignored", State: dots.StateIgnored},
+		{Name: "transient", State: dots.StateUntrackedConflict},
+		{Name: "a-modified", State: dots.StateModified},
+		{Name: "grouped-transient", State: dots.StateUntrackedConflict, Group: "base"},
 	}
 
 	SortDotStatuses(statuses)
@@ -370,13 +370,13 @@ func TestSortDotStatusesOrdersBySectionAndName(t *testing.T) {
 
 func TestDotSyncAllPendingNamesSkipsNonSyncableStatuses(t *testing.T) {
 	got := DotSyncAllPendingNames([]DotStatus{
-		{Name: "missing", State: DotStateMissing},
-		{Name: "synced", State: DotStateSynced},
-		{Name: "transient", State: DotStateUntrackedConflict},
-		{Name: "ignored", State: DotStateIgnored},
-		{Name: "inactive", State: DotStateInactive},
-		{Name: "disabled", State: DotStateDisabled},
-		{Name: "", State: DotStateMissing},
+		{Name: "missing", State: dots.StateMissing},
+		{Name: "synced", State: dots.StateSynced},
+		{Name: "transient", State: dots.StateUntrackedConflict},
+		{Name: "ignored", State: dots.StateIgnored},
+		{Name: "inactive", State: dots.StateInactive},
+		{Name: "disabled", State: dots.StateDisabled},
+		{Name: "", State: dots.StateMissing},
 	})
 
 	want := map[string]bool{"missing": true, "synced": true}
@@ -387,12 +387,12 @@ func TestDotSyncAllPendingNamesSkipsNonSyncableStatuses(t *testing.T) {
 
 func TestDotSyncAllEntryOrderUsesStatusSections(t *testing.T) {
 	got := DotSyncAllEntryOrder([]DotStatus{
-		{Name: "z-synced", State: DotStateSynced},
-		{Name: "ignored", State: DotStateIgnored},
-		{Name: "missing", State: DotStateMissing},
-		{Name: "conflict", State: DotStateConflict},
-		{Name: "transient", State: DotStateUntrackedConflict},
-		{Name: "", State: DotStateModified},
+		{Name: "z-synced", State: dots.StateSynced},
+		{Name: "ignored", State: dots.StateIgnored},
+		{Name: "missing", State: dots.StateMissing},
+		{Name: "conflict", State: dots.StateConflict},
+		{Name: "transient", State: dots.StateUntrackedConflict},
+		{Name: "", State: dots.StateModified},
 	})
 
 	want := []string{"conflict", "missing", "transient", "z-synced", "ignored"}
@@ -407,14 +407,14 @@ func TestDotStatusVariantEligibleSkipsUnsupportedStates(t *testing.T) {
 		status DotStatus
 		want   bool
 	}{
-		{name: "synced", status: DotStatus{Name: "nvim", State: DotStateSynced}, want: true},
-		{name: "missing", status: DotStatus{Name: "nvim", State: DotStateMissing}, want: true},
-		{name: "empty name", status: DotStatus{State: DotStateSynced}, want: false},
-		{name: "transient local-only candidate", status: DotStatus{Name: "nvim", State: DotStateLocalOnly}, want: true},
-		{name: "transient candidate", status: DotStatus{Name: "nvim", State: DotStateUntrackedConflict}, want: false},
-		{name: "ignored", status: DotStatus{Name: "nvim", State: DotStateIgnored}, want: false},
-		{name: "inactive", status: DotStatus{Name: "nvim", State: DotStateInactive}, want: false},
-		{name: "disabled", status: DotStatus{Name: "nvim", State: DotStateDisabled}, want: false},
+		{name: "synced", status: DotStatus{Name: "nvim", State: dots.StateSynced}, want: true},
+		{name: "missing", status: DotStatus{Name: "nvim", State: dots.StateMissing}, want: true},
+		{name: "empty name", status: DotStatus{State: dots.StateSynced}, want: false},
+		{name: "transient local-only candidate", status: DotStatus{Name: "nvim", State: dots.StateLocalOnly}, want: true},
+		{name: "transient candidate", status: DotStatus{Name: "nvim", State: dots.StateUntrackedConflict}, want: false},
+		{name: "ignored", status: DotStatus{Name: "nvim", State: dots.StateIgnored}, want: true},
+		{name: "inactive", status: DotStatus{Name: "nvim", State: dots.StateInactive}, want: false},
+		{name: "disabled", status: DotStatus{Name: "nvim", State: dots.StateDisabled}, want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -431,9 +431,9 @@ func TestDotStatusIgnoredUsesCanonicalState(t *testing.T) {
 		status DotStatus
 		want   bool
 	}{
-		{name: "explicit ignored", status: DotStatus{State: DotStateIgnored}, want: true},
-		{name: "legacy ignored health", status: DotStatus{Health: DotHealth(DotStateIgnored)}, want: true},
-		{name: "synced", status: DotStatus{State: DotStateSynced}, want: false},
+		{name: "explicit ignored", status: DotStatus{State: dots.StateIgnored}, want: true},
+		{name: "legacy ignored health", status: DotStatus{Health: DotHealth(dots.StateIgnored)}, want: true},
+		{name: "synced", status: DotStatus{State: dots.StateSynced}, want: false},
 		{name: "empty", status: DotStatus{}, want: false},
 	}
 	for _, tt := range tests {
@@ -451,10 +451,10 @@ func TestDotStatusNeedsAttentionSkipsSyncedAndIgnored(t *testing.T) {
 		status DotStatus
 		want   bool
 	}{
-		{name: "missing", status: DotStatus{State: DotStateMissing}, want: true},
-		{name: "conflict", status: DotStatus{State: DotStateConflict}, want: true},
-		{name: "synced", status: DotStatus{State: DotStateSynced}, want: false},
-		{name: "ignored", status: DotStatus{State: DotStateIgnored}, want: false},
+		{name: "missing", status: DotStatus{State: dots.StateMissing}, want: true},
+		{name: "conflict", status: DotStatus{State: dots.StateConflict}, want: true},
+		{name: "synced", status: DotStatus{State: dots.StateSynced}, want: false},
+		{name: "ignored", status: DotStatus{State: dots.StateIgnored}, want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -471,11 +471,11 @@ func TestDotStatusSyncActionLabelUsesState(t *testing.T) {
 		status DotStatus
 		want   string
 	}{
-		{name: "missing", status: DotStatus{State: DotStateMissing}, want: "use repo"},
-		{name: "broken", status: DotStatus{State: DotStateBroken}, want: "repair"},
-		{name: "local only", status: DotStatus{State: DotStateLocalOnly}, want: "use local"},
-		{name: "repo only", status: DotStatus{State: DotStateRepoOnly}, want: "use repo"},
-		{name: "default", status: DotStatus{State: DotStateModified}, want: "sync"},
+		{name: "missing", status: DotStatus{State: dots.StateMissing}, want: "use repo"},
+		{name: "broken", status: DotStatus{State: dots.StateBroken}, want: "repair"},
+		{name: "local only", status: DotStatus{State: dots.StateLocalOnly}, want: "use local"},
+		{name: "repo only", status: DotStatus{State: dots.StateRepoOnly}, want: "use repo"},
+		{name: "default", status: DotStatus{State: dots.StateModified}, want: "sync"},
 		{name: "legacy health", status: DotStatus{Health: HealthMissing}, want: "use repo"},
 	}
 	for _, tt := range tests {
@@ -495,12 +495,12 @@ func TestDotStatusFileCountsUsesExplicitCountsAndStateFallback(t *testing.T) {
 	}{
 		{
 			name:   "explicit counts win",
-			status: DotStatus{State: DotStateSynced, FileCount: 4, Counts: DotFileCounts{Synced: 2, OutOfSync: 1, Ignored: 1}},
+			status: DotStatus{State: dots.StateSynced, FileCount: 4, Counts: DotFileCounts{Synced: 2, OutOfSync: 1, Ignored: 1}},
 			want:   DotFileCounts{Synced: 2, OutOfSync: 1, Ignored: 1},
 		},
-		{name: "synced file count", status: DotStatus{State: DotStateSynced, FileCount: 3}, want: DotFileCounts{Synced: 3}},
-		{name: "missing file count", status: DotStatus{State: DotStateMissing, FileCount: 3}, want: DotFileCounts{OutOfSync: 3}},
-		{name: "zero file count", status: DotStatus{State: DotStateMissing}, want: DotFileCounts{}},
+		{name: "synced file count", status: DotStatus{State: dots.StateSynced, FileCount: 3}, want: DotFileCounts{Synced: 3}},
+		{name: "missing file count", status: DotStatus{State: dots.StateMissing, FileCount: 3}, want: DotFileCounts{OutOfSync: 3}},
+		{name: "zero file count", status: DotStatus{State: dots.StateMissing}, want: DotFileCounts{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -513,9 +513,9 @@ func TestDotStatusFileCountsUsesExplicitCountsAndStateFallback(t *testing.T) {
 
 func TestDotStatusesFileCountsSkipsIgnoredEntries(t *testing.T) {
 	got := DotStatusesFileCounts([]DotStatus{
-		{Name: "synced", State: DotStateSynced, FileCount: 2},
-		{Name: "missing", State: DotStateMissing, FileCount: 3},
-		{Name: "ignored", State: DotStateIgnored, Counts: DotFileCounts{Ignored: 5}},
+		{Name: "synced", State: dots.StateSynced, FileCount: 2},
+		{Name: "missing", State: dots.StateMissing, FileCount: 3},
+		{Name: "ignored", State: dots.StateIgnored, Counts: DotFileCounts{Ignored: 5}},
 	})
 	want := DotFileCounts{Synced: 2, OutOfSync: 3}
 	if got != want {
@@ -527,13 +527,13 @@ func TestDotChildFileCountsUsesChildStateFallback(t *testing.T) {
 	tests := []struct {
 		name        string
 		child       DotChild
-		parentState DotState
+		parentState dots.State
 		want        DotFileCounts
 	}{
-		{name: "explicit counts win", child: DotChild{State: DotStateMissing, FileCount: 4, Counts: DotFileCounts{Ignored: 2}}, parentState: DotStateSynced, want: DotFileCounts{Ignored: 2}},
-		{name: "child state synced", child: DotChild{State: DotStateSynced, FileCount: 4}, parentState: DotStateMissing, want: DotFileCounts{Synced: 4}},
-		{name: "parent state fallback", child: DotChild{FileCount: 4}, parentState: DotStateSynced, want: DotFileCounts{Synced: 4}},
-		{name: "out of sync fallback", child: DotChild{FileCount: 4}, parentState: DotStateMissing, want: DotFileCounts{OutOfSync: 4}},
+		{name: "explicit counts win", child: DotChild{State: dots.StateMissing, FileCount: 4, Counts: DotFileCounts{Ignored: 2}}, parentState: dots.StateSynced, want: DotFileCounts{Ignored: 2}},
+		{name: "child state synced", child: DotChild{State: dots.StateSynced, FileCount: 4}, parentState: dots.StateMissing, want: DotFileCounts{Synced: 4}},
+		{name: "parent state fallback", child: DotChild{FileCount: 4}, parentState: dots.StateSynced, want: DotFileCounts{Synced: 4}},
+		{name: "out of sync fallback", child: DotChild{FileCount: 4}, parentState: dots.StateMissing, want: DotFileCounts{OutOfSync: 4}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -546,14 +546,14 @@ func TestDotChildFileCountsUsesChildStateFallback(t *testing.T) {
 
 func TestDotStateIcon(t *testing.T) {
 	tests := []struct {
-		state DotState
+		state dots.State
 		want  string
 	}{
-		{state: DotStateSynced, want: "✓"},
-		{state: DotStateConflict, want: "✗"},
-		{state: DotStateNoSource, want: "?"},
-		{state: DotStateIgnored, want: "·"},
-		{state: DotStateModified, want: "!"},
+		{state: dots.StateSynced, want: "✓"},
+		{state: dots.StateConflict, want: "✗"},
+		{state: dots.StateNoSource, want: "?"},
+		{state: dots.StateIgnored, want: "·"},
+		{state: dots.StateModified, want: "!"},
 	}
 	for _, tt := range tests {
 		if got := DotStateIcon(tt.state); got != tt.want {
@@ -563,29 +563,29 @@ func TestDotStateIcon(t *testing.T) {
 }
 
 func TestDotStatusHasActionUsesExplicitActionsAndFallbackState(t *testing.T) {
-	explicit := DotStatus{State: DotStateSynced, Actions: []DotAction{DotActionUseRepo}}
-	if !DotStatusHasAction(explicit, DotActionUseRepo) {
+	explicit := DotStatus{State: dots.StateSynced, Actions: []dots.Action{dots.ActionUseRepo}}
+	if !DotStatusHasAction(explicit, dots.ActionUseRepo) {
 		t.Fatal("explicit action should be available")
 	}
-	if DotStatusHasAction(explicit, DotActionRemove) {
+	if DotStatusHasAction(explicit, dots.ActionRemove) {
 		t.Fatal("explicit action list should suppress state fallback")
 	}
 
 	tests := []struct {
 		name   string
 		status DotStatus
-		action DotAction
+		action dots.Action
 		want   bool
 	}{
-		{name: "modified sync", status: DotStatus{State: DotStateModified}, action: DotActionSync, want: true},
-		{name: "modified use repo", status: DotStatus{State: DotStateModified}, action: DotActionUseRepo, want: false},
-		{name: "untracked conflict use repo", status: DotStatus{State: DotStateUntrackedConflict}, action: DotActionUseRepo, want: true},
-		{name: "untracked conflict remove", status: DotStatus{State: DotStateUntrackedConflict}, action: DotActionRemove, want: false},
-		{name: "synced remove", status: DotStatus{State: DotStateSynced}, action: DotActionRemove, want: true},
-		{name: "conflict use local", status: DotStatus{State: DotStateConflict}, action: DotActionUseLocal, want: true},
-		{name: "no source ignore", status: DotStatus{State: DotStateNoSource}, action: DotActionIgnore, want: true},
-		{name: "ignored unignore", status: DotStatus{State: DotStateIgnored}, action: DotActionUnignore, want: true},
-		{name: "ignored sync", status: DotStatus{State: DotStateIgnored}, action: DotActionSync, want: false},
+		{name: "modified sync", status: DotStatus{State: dots.StateModified}, action: dots.ActionSync, want: true},
+		{name: "modified use repo", status: DotStatus{State: dots.StateModified}, action: dots.ActionUseRepo, want: false},
+		{name: "untracked conflict use repo", status: DotStatus{State: dots.StateUntrackedConflict}, action: dots.ActionUseRepo, want: true},
+		{name: "untracked conflict remove", status: DotStatus{State: dots.StateUntrackedConflict}, action: dots.ActionRemove, want: false},
+		{name: "synced remove", status: DotStatus{State: dots.StateSynced}, action: dots.ActionRemove, want: true},
+		{name: "conflict use local", status: DotStatus{State: dots.StateConflict}, action: dots.ActionUseLocal, want: true},
+		{name: "no source ignore", status: DotStatus{State: dots.StateNoSource}, action: dots.ActionIgnore, want: true},
+		{name: "ignored unignore", status: DotStatus{State: dots.StateIgnored}, action: dots.ActionUnignore, want: true},
+		{name: "ignored sync", status: DotStatus{State: dots.StateIgnored}, action: dots.ActionSync, want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

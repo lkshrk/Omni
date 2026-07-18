@@ -145,7 +145,7 @@ func parityPalette() palette {
 // buildToolFixture converts a parityFixture into a *database.ToolCache plus
 // the ambient state (group map, ignore-set) newColWidthsWithProviderPins and
 // renderToolRowWithProviderPin need.
-func buildToolFixture(f parityFixture) (*database.ToolCache, map[string]string) {
+func buildToolFixture(f parityFixture) (*database.ToolCache, map[string]string, map[string][]string) {
 	t := &database.ToolCache{
 		Name:      f.name,
 		Provider:  "brew",
@@ -161,10 +161,12 @@ func buildToolFixture(f parityFixture) (*database.ToolCache, map[string]string) 
 		t.LatestVersion = sql.NullString{String: f.latestVersion, Valid: true}
 	}
 	groups := map[string]string{}
+	memberships := map[string][]string{}
 	if f.group != "" {
 		groups[toolKey(t.Name, t.Provider)] = f.group
+		memberships[toolKey(t.Name, t.Provider)] = []string{f.group}
 	}
-	return t, groups
+	return t, groups, memberships
 }
 
 // renderToolsRowForTest renders one tools-tab row (plus the column widths it
@@ -172,25 +174,26 @@ func buildToolFixture(f parityFixture) (*database.ToolCache, map[string]string) 
 // exactly what renderList does for a single-tool list at parityWidth.
 func renderToolsRowForTest(t *testing.T, f parityFixture) parityRow {
 	t.Helper()
-	tool, groups := buildToolFixture(f)
+	tool, groups, memberships := buildToolFixture(f)
 	pal := parityPalette()
 
 	var groupNames []string
 	if f.group != "" {
 		groupNames = []string{f.group}
 	}
-	cols := newColWidthsWithProviderPins([]*database.ToolCache{tool}, groups, groupNames, nil, nil, "", "", "", parityWidth, nil)
+	cols := newColWidthsWithProviderPins([]*database.ToolCache{tool}, memberships, nil, groupNames, nil, nil, "", "", "", parityWidth, nil)
 
 	m := baseModel([]*database.ToolCache{tool})
 	m.palette = pal
 	m.toolGroups = groups
+	m.toolMemberships = memberships
 	if f.ignored {
 		m.ignoreSet = map[string]bool{tool.Name: true}
 	}
 	ss := m.syncStatusOf(tool)
 
-	group := groups[toolKey(tool.Name, tool.Provider)]
-	raw := renderToolRowWithProviderPin(pal, tool, cols, "", group, "", "", "", "", "", f.ignored, f.selected, ss)
+	rowGroups := memberships[toolKey(tool.Name, tool.Provider)]
+	raw := renderToolRowWithProviderPin(pal, tool, cols, "", rowGroups, nil, "", "", "", "", "", f.ignored, f.selected, ss)
 	return parityRow{plain: stripANSIEscapeSequences(raw), raw: raw, cols: cols}
 }
 
@@ -201,13 +204,14 @@ func renderToolsRowForTest(t *testing.T, f parityFixture) parityRow {
 // caused by ignored-vs-non-ignored content differences elsewhere in the row.
 func renderToolsRowIgnoredOverride(t *testing.T, cols colWidths) parityRow {
 	t.Helper()
-	tool, groups := buildToolFixture(fixtureIgnored)
+	tool, groups, memberships := buildToolFixture(fixtureIgnored)
 	pal := parityPalette()
 	m := baseModel([]*database.ToolCache{tool})
 	m.palette = pal
 	m.toolGroups = groups
+	m.toolMemberships = memberships
 	ss := m.syncStatusOf(tool)
-	raw := renderToolRowWithProviderPin(pal, tool, cols, "", "", "", "", "", "", "", false, false, ss)
+	raw := renderToolRowWithProviderPin(pal, tool, cols, "", nil, nil, "", "", "", "", "", false, false, ss)
 	return parityRow{plain: stripANSIEscapeSequences(raw), raw: raw, cols: cols}
 }
 
@@ -891,7 +895,7 @@ func containsSubstring(s, sub string) bool {
 // presentation-layer difference.
 func TestParity_HintLineFormat_ToolInlineHintsAndAgentsRowHintsShareRenderer(t *testing.T) {
 	pal := parityPalette()
-	tool, _ := buildToolFixture(fixtureBase)
+	tool, _, _ := buildToolFixture(fixtureBase)
 	m := baseModel([]*database.ToolCache{tool})
 	toolHints := toolInlineHints(m, tool)
 

@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
+	"github.com/lkshrk/omni/internal/config"
 )
 
 func TestSkillPackages_GroupBadgeRendered(t *testing.T) {
@@ -20,8 +21,94 @@ func TestSkillPackages_GroupBadgeRendered(t *testing.T) {
 	}
 
 	out := stripANSIEscapeSequences(m.viewSkillsBody())
-	if !strings.Contains(out, "[work,home]") {
-		t.Errorf("viewSkillsBody() missing group badge '[work,home]', got:\n%s", out)
+	if !strings.Contains(out, "[home] [work]") {
+		t.Errorf("viewSkillsBody() missing group pills '[home] [work]', got:\n%s", out)
+	}
+}
+
+func TestSkillPackages_MultiGroupBadgeAndFullDetail(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "beta.local")
+	m := baseModel(nil)
+	m.mode = viewSkills
+	m.agentsEnabled = true
+	m.width = 120
+	m.enabledAgents = []string{"claude"}
+	m.hostInfo = &app.HostInfo{
+		Active: "beta",
+		Hosts: map[string]config.HostAssignment{
+			"beta": {Groups: []string{"work"}},
+		},
+	}
+	m.skillsRows = []app.SkillPackageRow{{
+		Name:           "caveman",
+		Source:         "github.com/foo/caveman",
+		Groups:         []string{"alpha", "beta", "work"},
+		Installed:      true,
+		PerAgentStatus: map[string]bool{"claude": true},
+	}}
+
+	out := stripANSIEscapeSequences(m.viewSkillsBody())
+	if !strings.Contains(out, "[beta] [work]") {
+		t.Fatalf("skill row missing active-host multi-group pills:\n%s", out)
+	}
+	if strings.Contains(out, "[alpha") {
+		t.Fatalf("skill row exposed an inactive host group in its badge:\n%s", out)
+	}
+	if !strings.Contains(out, "groups: alpha, beta, work") {
+		t.Fatalf("selected skill detail missing full memberships:\n%s", out)
+	}
+}
+
+// TestSkillPackages_TwoGroupsShowTwoPills is the Task 6 wiring regression
+// guard: a skills row in two reusable groups (no active host filtering to
+// collapse them) must render both as separate pills, not a single compact
+// badge.
+func TestSkillPackages_TwoGroupsShowTwoPills(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewSkills
+	m.agentsEnabled = true
+	m.width = 120
+	m.enabledAgents = []string{"claude"}
+	m.skillsRows = []app.SkillPackageRow{
+		{Name: "caveman", Source: "github.com/foo/caveman", Groups: []string{"laptop", "work"}, Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
+	}
+
+	out := stripANSIEscapeSequences(m.viewSkillsBody())
+	if !strings.Contains(out, "[laptop]") || !strings.Contains(out, "[work]") {
+		t.Fatalf("skills row lacks both group pills:\n%s", out)
+	}
+}
+
+// TestSkillPackages_ThreeGroupsNarrowWidthCollapsesToHostPlusCount verifies
+// that when a skill package belongs to a host group plus two reusable
+// groups and the group column is too narrow to fit all three pills, the row
+// collapses to the host pill plus a "+N" count instead of dropping or
+// truncating groups silently.
+func TestSkillPackages_ThreeGroupsNarrowWidthCollapsesToHostPlusCount(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "laptop")
+	m := baseModel(nil)
+	m.mode = viewSkills
+	m.agentsEnabled = true
+	m.width = 75
+	m.enabledAgents = []string{"claude"}
+	m.hostInfo = &app.HostInfo{
+		Active: "laptop",
+		Hosts: map[string]config.HostAssignment{
+			"laptop": {Groups: []string{"laptop", "work", "base"}},
+		},
+	}
+	m.skillsRows = []app.SkillPackageRow{
+		{Name: "caveman", Source: "github.com/foo/caveman", Groups: []string{"laptop", "work", "base"}, Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
+	}
+
+	out := stripANSIEscapeSequences(m.viewSkillsBody())
+	if !strings.Contains(out, "[laptop] +2") {
+		t.Fatalf("skills row missing collapsed host pill with count:\n%s", out)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "caveman") && strings.Contains(line, "[work]") {
+			t.Fatalf("skills row should collapse rather than show reusable pill in full:\n%s", out)
+		}
 	}
 }
 

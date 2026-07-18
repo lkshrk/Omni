@@ -51,10 +51,12 @@ func agentsFeatureLabel(feature agentsSection) string {
 func agentsColWidths(m Model, rows []agentsAllRow) colWidths {
 	seed := colWidths{name: 20, typ: agentsTypeColW, prov: max(agentsAgentColW, agentsAgentIDColFloor), ver: len("missing"), screenW: m.width}
 	measure := rowColWidthMeasure{
-		name:  func(i int) string { return agentsRowName(m, rows[i]) },
-		prov:  func(i int) string { return agentsProvCellText(m, rows[i]) },
-		ver:   func(i int) string { return agentsVersionCellText(m, rows[i]) },
-		group: func(i int) string { return agentsGroupBadge(agentsRowGroups(m, rows[i])) },
+		name: func(i int) string { return agentsRowName(m, rows[i]) },
+		prov: func(i int) string { return agentsProvCellText(m, rows[i]) },
+		ver:  func(i int) string { return agentsVersionCellText(m, rows[i]) },
+		group: func(i int) string {
+			return agentsGroupBadge(m.palette, agentsRowGroups(m, rows[i]), m.hostInfo, 0, nil)
+		},
 	}
 	return seedWidenCapShrinkColWidths(seed, len(rows), measure)
 }
@@ -274,18 +276,8 @@ func styleForAgent(p palette, agentID string) lipgloss.Style {
 	return hues[h%uint32(len(hues))]
 }
 
-func agentsGroupBadge(groups []string) string {
-	if len(groups) == 0 {
-		return ""
-	}
-	badge := "["
-	for i, g := range groups {
-		if i > 0 {
-			badge += ","
-		}
-		badge += g
-	}
-	return badge + "]"
+func agentsGroupBadge(p palette, groups []string, info *app.HostInfo, colW int, emphasis func(lipgloss.Style) lipgloss.Style) string {
+	return renderGroupPills(p, groups, info, colW, emphasis)
 }
 
 // agentsRowRunKey identifies an agents-all row for in-flight op tracking,
@@ -325,6 +317,12 @@ func agentsRowCells(m Model, p palette, cols colWidths, e agentsAllRow, selected
 	emphasis := func(s lipgloss.Style) lipgloss.Style {
 		return rowEmphasis(selected, s)
 	}
+	groupEmphasis := func(s lipgloss.Style) lipgloss.Style {
+		if e.status == agentsStatusIgnored {
+			return emphasis(p.styleIgnored)
+		}
+		return emphasis(s)
+	}
 	iconGap := " "
 	mark := agentsMarkCell(p, e.status, e.mark, selected)
 	if m.agentsOpKey != "" && m.agentsOpKey == agentsRowRunKey(e) {
@@ -362,7 +360,7 @@ func agentsRowCells(m Model, p palette, cols colWidths, e agentsAllRow, selected
 		if e.localIdx >= 0 && e.localIdx < len(rows) {
 			r := rows[e.localIdx]
 			nameCell = nameStyle.Render(fitCellText(r.Name, cols.name))
-			groupBadge = agentsGroupBadge(r.Groups)
+			groupBadge = agentsGroupBadge(p, r.Groups, m.hostInfo, cols.group, groupEmphasis)
 			switch {
 			case e.mark == agentsMarkMissing:
 				ver = emphasis(p.styleMissing).Render("missing")
@@ -381,7 +379,7 @@ func agentsRowCells(m Model, p palette, cols colWidths, e agentsAllRow, selected
 		if e.localIdx < len(m.mcpRows) {
 			r := m.mcpRows[e.localIdx]
 			nameCell = nameStyle.Render(fitCellText(r.Name, cols.name))
-			groupBadge = agentsGroupBadge(r.Groups)
+			groupBadge = agentsGroupBadge(p, r.Groups, m.hostInfo, cols.group, groupEmphasis)
 			mcpVersion = r.Version
 		} else if flat := mcpUnmanagedFlat(m.mcpUnmanaged); e.localIdx-len(m.mcpRows) < len(flat) {
 			entry := flat[e.localIdx-len(m.mcpRows)]
@@ -402,21 +400,14 @@ func agentsRowCells(m Model, p palette, cols colWidths, e agentsAllRow, selected
 		if e.localIdx < len(m.pluginRows) {
 			r := m.pluginRows[e.localIdx]
 			nameCell = nameStyle.Render(fitCellText(r.Name, cols.name))
-			groupBadge = agentsGroupBadge(r.Groups)
+			groupBadge = agentsGroupBadge(p, r.Groups, m.hostInfo, cols.group, groupEmphasis)
 			switch {
 			case e.mark == agentsMarkMissing:
 				ver = emphasis(p.styleMissing).Render("missing")
 			case e.status == agentsStatusIgnored:
 				ver = emphasis(p.styleIgnored).Render(fitCellText(r.Version, cols.ver))
-			case r.Version != "" && r.LatestVersion != "" && r.Version != r.LatestVersion:
-				current, latest := fitUpgradeVersionText(compactVersion(r.Version), compactVersion(r.LatestVersion), cols.ver)
-				ver = emphasis(p.styleMissing).Render(current) + emphasis(p.styleOutdated).Render(latest)
-			case r.Sha != "" && r.LatestSha != "" && r.Sha != r.LatestSha:
-				ver = emphasis(p.styleMissing).Render(fitCellText(shaShort(r.Sha), cols.ver/2)) + emphasis(p.styleOutdated).Render(" → "+fitCellText(shaShort(r.LatestSha), cols.ver/2))
-			case r.Outdated():
-				ver = emphasis(p.styleOutdated).Render(fitCellText("update available", cols.ver))
 			default:
-				ver = emphasis(p.styleVersionMuted).Render(fitCellText(r.Version, cols.ver))
+				ver = renderPluginUpdateCell(p, emphasis, r.Update(), r.Version, cols.ver)
 			}
 		} else if flat := pluginUnmanagedFlat(m.pluginUnmanaged); e.localIdx-len(m.pluginRows) < len(flat) {
 			entry := flat[e.localIdx-len(m.pluginRows)]
@@ -425,13 +416,8 @@ func agentsRowCells(m Model, p palette, cols colWidths, e agentsAllRow, selected
 			switch {
 			case e.status == agentsStatusIgnored:
 				ver = emphasis(p.styleIgnored).Render(fitCellText(pl.Version, cols.ver))
-			case pl.Version != "" && pl.LatestVersion != "" && pl.Version != pl.LatestVersion:
-				current, latest := fitUpgradeVersionText(compactVersion(pl.Version), compactVersion(pl.LatestVersion), cols.ver)
-				ver = emphasis(p.styleMissing).Render(current) + emphasis(p.styleOutdated).Render(latest)
-			case pl.Sha != "" && pl.LatestSha != "" && pl.Sha != pl.LatestSha:
-				ver = emphasis(p.styleMissing).Render(fitCellText(shaShort(pl.Sha), cols.ver/2)) + emphasis(p.styleOutdated).Render(" → "+fitCellText(shaShort(pl.LatestSha), cols.ver/2))
-			case pl.Version != "":
-				ver = emphasis(p.styleVersionMuted).Render(fitCellText(pl.Version, cols.ver))
+			default:
+				ver = renderPluginUpdateCell(p, emphasis, pl.Update(), pl.Version, cols.ver)
 			}
 		}
 		if e.mark == agentsMarkMissing && ver == "" {
@@ -441,7 +427,7 @@ func agentsRowCells(m Model, p palette, cols colWidths, e agentsAllRow, selected
 		if e.localIdx < len(m.marketplaceRows) {
 			r := m.marketplaceRows[e.localIdx]
 			nameCell = nameStyle.Render(fitCellText(r.Name, cols.name))
-			groupBadge = agentsGroupBadge(r.Groups)
+			groupBadge = agentsGroupBadge(p, r.Groups, m.hostInfo, cols.group, groupEmphasis)
 			if e.status != agentsStatusIgnored {
 				ver = emphasis(p.styleVersionMuted).Render(fitCellText(marketplaceUpdatedAtText(r.UpdatedAt), cols.ver))
 			}
@@ -482,17 +468,26 @@ func agentsRowCells(m Model, p palette, cols colWidths, e agentsAllRow, selected
 		rightCell(ver, cols.ver),
 	}
 	if cols.group != 0 {
-		badgeStyle := p.styleHelp
-		if e.status == agentsStatusIgnored {
-			badgeStyle = p.styleIgnored
-		}
-		badgeText := ""
-		if groupBadge != "" {
-			badgeText = emphasis(badgeStyle).Render(groupBadge)
-		}
-		right = append(right, rightCell(badgeText, cols.group))
+		right = append(right, rightCell(groupBadge, cols.group))
 	}
 	return left, right
+}
+
+// renderPluginUpdateCell renders a plugin row's version cell from its update
+// verdict. The managed and unmanaged plugin paths share this one render so
+// neither re-decides "outdated" independently of app.PluginRow.Outdated.
+func renderPluginUpdateCell(p palette, emphasis func(lipgloss.Style) lipgloss.Style, u app.PluginUpdate, fallbackVersion string, width int) string {
+	switch u.Kind {
+	case app.PluginVersionUpgrade:
+		current, latest := fitUpgradeVersionText(compactVersion(u.Current), compactVersion(u.Latest), width)
+		return emphasis(p.styleMissing).Render(current) + emphasis(p.styleOutdated).Render(latest)
+	case app.PluginShaDrift:
+		return emphasis(p.styleMissing).Render(fitCellText(shaShort(u.Current), width/2)) + emphasis(p.styleOutdated).Render(" → "+fitCellText(shaShort(u.Latest), width/2))
+	case app.PluginUpdateAvailable:
+		return emphasis(p.styleOutdated).Render(fitCellText("update available", width))
+	default:
+		return emphasis(p.styleVersionMuted).Render(fitCellText(fallbackVersion, width))
+	}
 }
 
 // skillLinkedAgents returns the agent IDs with a confirmed symlink into the
@@ -720,6 +715,10 @@ func renderAgentsGroupedTab(m Model, p palette, topLines []string, only agentsSe
 		line := listRowPrefix(p, selected) + renderSplitRow(left, right, rowAvailableWidth(m.width), listColumnGap, listColumnGap)
 		var details []string
 		if selected {
+			width := max(m.width-lipgloss.Width(textRowContentPrefix())-screenEdgePadding, 12)
+			for _, detail := range fullMembershipDetailLines(agentsRowGroups(m, e), width) {
+				details = append(details, statusDetailLine(m, detail))
+			}
 			details = append(details, agentsRowDetailLines(m, e)...)
 			details = append(details, renderHintItems(p, hintPrefix, agentsRowHints(m, e)))
 		}

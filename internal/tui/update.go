@@ -914,7 +914,7 @@ func (m Model) toolFiltersClickable() bool {
 }
 
 func (m Model) mainTabsClickable() bool {
-	if m.hostRequired || m.showFilePicker || m.stowInstallPrompt || m.dashboardReconcilePlanOpen || m.help.ShowAll {
+	if m.hostRequired || m.showFilePicker || m.stowInstallPrompt || m.dashboardReconcilePlanOpen || m.help.ShowAll || m.traceLog != nil || m.traceLogLoading {
 		return false
 	}
 	if !isMainTabMode(m.mode) {
@@ -946,7 +946,7 @@ func (m *Model) handleMouseWheelMsg(msg tea.MouseWheelMsg) bool {
 		m.scrollDotsPeekBy(delta)
 		return true
 	}
-	if m.mode == viewSettings && m.traceLog != nil {
+	if (m.mode == viewSettings || m.mode == viewList || m.mode == viewSearch) && m.traceLog != nil {
 		m.scrollTraceLogBy(delta)
 		return true
 	}

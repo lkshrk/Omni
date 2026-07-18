@@ -385,8 +385,15 @@ type GroupConfig struct {
 	Ignore       []string    `json:"-"`
 }
 
+const SystemInventoryGroup = "provider-inventory"
+
 // IsHost reports whether this is the physical special group for a hostname.
 func (g *GroupConfig) IsHost() bool { return g != nil && g.Special == "host" }
+
+// IsSystemInventory marks provider inventory that is excluded from user tool views.
+func (g *GroupConfig) IsSystemInventory() bool {
+	return g != nil && g.Special == SystemInventoryGroup
+}
 
 // GroupName returns the display name.
 func (g *GroupConfig) GroupName() string { return g.Name }
@@ -741,7 +748,6 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 
 	groupNames := make(map[string]struct{}, len(cfg.Groups))
 	groupByName := make(map[string]*GroupConfig, len(cfg.Groups))
-	memberships := make(map[string]*GroupConfig)
 	dotMemberships := make(map[string]*GroupConfig)
 	dotPackages := make(map[string]string)
 	for gi, g := range cfg.Groups {
@@ -758,7 +764,7 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 		}
 		groupNames[groupName] = struct{}{}
 		groupByName[groupName] = g
-		if g.Special != "" && g.Special != "host" {
+		if g.Special != "" && g.Special != "host" && g.Special != SystemInventoryGroup {
 			errs = append(errs, ValidationError{Path: fmt.Sprintf("$.groups[%d].special", gi), Message: fmt.Sprintf("unknown special group kind %q", g.Special)})
 		}
 		seenInGroup := make(map[string]struct{}, len(g.Tools))
@@ -778,15 +784,6 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 				errs = append(errs, ValidationError{Path: path, Message: fmt.Sprintf("duplicate tool membership %q in group %q", tool.Name, groupName)})
 			}
 			seenInGroup[tool.Name] = struct{}{}
-			// An item may belong to any number of host groups but at most one
-			// reusable group, so only reusable memberships are tracked here.
-			if !g.IsHost() {
-				if first, ok := memberships[tool.Name]; ok {
-					errs = append(errs, ValidationError{Path: path, Message: fmt.Sprintf("tool %q already belongs to reusable group %q; an item may belong to at most one reusable group", tool.Name, first.BaseName())})
-				} else {
-					memberships[tool.Name] = g
-				}
-			}
 		}
 		seenDots := make(map[string]struct{}, len(g.Dots))
 		for di, dot := range g.Dots {

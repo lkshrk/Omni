@@ -10,6 +10,7 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/dots"
 )
 
 // ── truncatePath ──────────────────────────────────────────────────────────────
@@ -67,7 +68,7 @@ func TestViewAppliesASCIISymbolMode(t *testing.T) {
 
 func TestDotStateDisplay_TrimsConflictSuffix(t *testing.T) {
 	p := defaultPalette()
-	_, _, label := dotStateDisplay(p, app.DotStateUntrackedConflict)
+	_, _, label := dotStateDisplay(p, dots.StateUntrackedConflict)
 	if label != "untracked" {
 		t.Fatalf("untracked conflict label = %q, want untracked", label)
 	}
@@ -75,7 +76,7 @@ func TestDotStateDisplay_TrimsConflictSuffix(t *testing.T) {
 
 func TestDotStateDisplay_ModifiedShowsLocalChanges(t *testing.T) {
 	p := defaultPalette()
-	_, icon, label := dotStateDisplay(p, app.DotStateModified)
+	_, icon, label := dotStateDisplay(p, dots.StateModified)
 	if icon != "!" || label != "local changes" {
 		t.Fatalf("modified display = %q %q, want ! local changes", icon, label)
 	}
@@ -117,7 +118,7 @@ func TestRenderDotsUsesCachedDotsAvailability(t *testing.T) {
 		m := baseModel(nil)
 		m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
 		m.settings = config.Settings{}
-		m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: app.DotStateSynced}}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: dots.StateSynced}}
 
 		out := renderDots(m)
 
@@ -130,7 +131,7 @@ func TestRenderDotsUsesCachedDotsAvailability(t *testing.T) {
 		m := baseModel(nil)
 		m.settings = config.Settings{DotsRepo: "/tmp/stale-dotfiles"}
 		m.dotsSyncAvailCached = app.DotsSyncAvailability{Reason: app.DotsSyncAvailabilityNoRepo}
-		m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: app.DotStateSynced}}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: dots.StateSynced}}
 
 		out := renderDots(m)
 
@@ -143,7 +144,7 @@ func TestRenderDotsUsesCachedDotsAvailability(t *testing.T) {
 		m := baseModel(nil)
 		m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
 		m.settings = config.Settings{DotsRepo: "/repo/dotfiles", DotsDisabled: config.BoolPtr(true)}
-		m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: app.DotStateSynced}}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: dots.StateSynced}}
 
 		out := renderDots(m)
 
@@ -157,7 +158,7 @@ func TestRenderDotsUsesCachedDotsAvailability(t *testing.T) {
 		m.width = 120
 		m.settings = config.Settings{DotsRepo: "/tmp/stale-dotfiles"}
 		m.dotsSyncAvailCached = app.DotsSyncAvailability{Configured: true, Reason: app.DotsSyncAvailabilityReady, RepoPath: "/repo/current-dotfiles"}
-		m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: app.DotStateSynced}}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: dots.StateSynced}}
 
 		out := stripANSIEscapeSequences(renderDots(m))
 
@@ -170,7 +171,7 @@ func TestRenderDotsUsesCachedDotsAvailability(t *testing.T) {
 		m := baseModel(nil)
 		m.app = &app.App{}
 		m.settings = config.Settings{DotsRepo: "/tmp/stale-dotfiles"}
-		m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: app.DotStateSynced}}
+		m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: dots.StateSynced}}
 
 		out := stripANSIEscapeSequences(renderDots(m))
 
@@ -184,7 +185,7 @@ func TestRenderDots_LoadingKeepsExistingTable(t *testing.T) {
 	m := baseModel(nil)
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoading = true
-	m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: app.DotStateSynced}}
+	m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: dots.StateSynced}}
 	out := renderDots(m)
 	if strings.Contains(out, "Loading") {
 		t.Errorf("dots refresh should not replace table with loading text, got:\n%s", out)
@@ -198,7 +199,7 @@ func TestRenderDots_HistorySection(t *testing.T) {
 	m := baseModel(nil)
 	m.width = 100
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
-	m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: app.DotStateSynced}}
+	m.dotsEntries = []app.DotStatus{{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: dots.StateSynced}}
 
 	out := renderDots(m)
 	if strings.Contains(out, "History") {
@@ -238,9 +239,9 @@ func TestRenderDots_IgnoredSectionVisible(t *testing.T) {
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "kitty",
 		TargetPath: "~/.config/kitty",
-		Health:     app.DotHealth(app.DotStateIgnored),
-		State:      app.DotStateIgnored,
-		Actions:    []app.DotAction{app.DotActionUnignore, app.DotActionRemove},
+		Health:     app.DotHealth(dots.StateIgnored),
+		State:      dots.StateIgnored,
+		Actions:    []dots.Action{dots.ActionUnignore, dots.ActionRemove},
 	}}
 
 	out := renderDots(m)
@@ -260,8 +261,8 @@ func TestRenderDots_RemoveConfirmHasNoCancelHint(t *testing.T) {
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
 		Health:     app.HealthOK,
-		State:      app.DotStateSynced,
-		Actions:    []app.DotAction{app.DotActionRemove},
+		State:      dots.StateSynced,
+		Actions:    []dots.Action{dots.ActionRemove},
 	}}
 	m.dotsCursor = 0
 	m.dotsConfirmIdx = 0
@@ -306,9 +307,9 @@ func TestRenderDots_WithEntries(t *testing.T) {
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
-	m.dotsExpandedState = app.DotStateSynced
+	m.dotsExpandedState = dots.StateSynced
 	m.dotsEntries = []app.DotStatus{
-		{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: app.DotStateSynced, FileCount: 14, Counts: app.DotFileCounts{Synced: 12, OutOfSync: 2, Ignored: 3}, Children: []app.DotChild{
+		{Name: "nvim", TargetPath: "~/.config/nvim", Health: app.HealthOK, State: dots.StateSynced, FileCount: 14, Counts: app.DotFileCounts{Synced: 12, OutOfSync: 2, Ignored: 3}, Children: []app.DotChild{
 			{Name: "lua", RelPath: "lua", Path: "~/.config/nvim/lua", IsDir: true, FileCount: 10},
 			{Name: "empty", RelPath: "empty", Path: "~/.config/nvim/empty", IsDir: true},
 		}},
@@ -346,8 +347,8 @@ func TestRenderDots_SectionsUseSharedListSpacing(t *testing.T) {
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{
-		{Name: "nvim", TargetPath: "~/.config/nvim", State: app.DotStateSynced},
-		{Name: "zsh", TargetPath: "~/.zshrc", State: app.DotStateMissing},
+		{Name: "nvim", TargetPath: "~/.config/nvim", State: dots.StateSynced},
+		{Name: "zsh", TargetPath: "~/.zshrc", State: dots.StateMissing},
 	}
 
 	out := renderDots(m)
@@ -394,24 +395,24 @@ func TestRenderDots_SectionsUseSharedListSpacing(t *testing.T) {
 
 func TestRenderDots_IgnoredSectionChildrenStatus(t *testing.T) {
 	// Ignored section layout:
-	//   dotfiles  (synthesized container, no DotActionUnignore) → "-"
+	//   dotfiles  (synthesized container, no dots.ActionUnignore) → "-"
 	//     claude/ (intermediate dir, Ignored=false) → "-"
 	//       a     (explicitly ignored leaf, Ignored=true) → "ignored"
 	//       b     (explicitly ignored leaf, Ignored=true) → "ignored"
-	//   backup    (truly ignored entry, DotActionUnignore) → "ignored"
+	//   backup    (truly ignored entry, dots.ActionUnignore) → "ignored"
 	m := baseModel(nil)
 	m.width = 100
 	m.height = 40
 	setDotsRepoForTest(&m, "/repo")
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{
-		{Name: "zsh", TargetPath: "~/.zsh", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}},
+		{Name: "zsh", TargetPath: "~/.zsh", State: dots.StateSynced, Counts: app.DotFileCounts{Synced: 1}},
 		// Synthesized container (from ignoredChildDotStatuses).
 		{
 			Name:       "dotfiles",
 			TargetPath: "~/.config",
-			State:      app.DotStateIgnored,
-			Actions:    []app.DotAction{app.DotActionIgnore, app.DotActionRemove},
+			State:      dots.StateIgnored,
+			Actions:    []dots.Action{dots.ActionIgnore, dots.ActionRemove},
 			IsDir:      true,
 			Counts:     app.DotFileCounts{Ignored: 2},
 			Children: []app.DotChild{
@@ -430,14 +431,14 @@ func TestRenderDots_IgnoredSectionChildrenStatus(t *testing.T) {
 		{
 			Name:       "backup",
 			TargetPath: "~/.backup",
-			State:      app.DotStateIgnored,
-			Actions:    []app.DotAction{app.DotActionUnignore},
+			State:      dots.StateIgnored,
+			Actions:    []dots.Action{dots.ActionUnignore},
 			IsDir:      true,
 			Counts:     app.DotFileCounts{Ignored: 5},
 		},
 	}
 	m.dotsExpandedName = "dotfiles"
-	m.dotsExpandedState = app.DotStateIgnored
+	m.dotsExpandedState = dots.StateIgnored
 	m.dotsExpandedChildren = map[string]bool{
 		dotsChildExpandKey("dotfiles", "claude"): true,
 	}
@@ -488,7 +489,7 @@ func TestRenderDots_RepoInlineBeforeSections(t *testing.T) {
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsEntries = []app.DotStatus{
-		{Name: "nvim", TargetPath: "~/.config/nvim", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}},
+		{Name: "nvim", TargetPath: "~/.config/nvim", State: dots.StateSynced, Counts: app.DotFileCounts{Synced: 1}},
 	}
 	out := stripANSIEscapeSequences(renderDots(m))
 	repoLine := -1
@@ -520,7 +521,7 @@ func TestRenderDots_DirtyRepoShowsCommitHint(t *testing.T) {
 	m.dotsLoaded = true
 	m.dotsGitStatus = "M config.toml"
 	m.dotsEntries = []app.DotStatus{
-		{Name: "nvim", TargetPath: "~/.config/nvim", State: app.DotStateSynced, Counts: app.DotFileCounts{Synced: 1}},
+		{Name: "nvim", TargetPath: "~/.config/nvim", State: dots.StateSynced, Counts: app.DotFileCounts{Synced: 1}},
 	}
 	out := stripANSIEscapeSequences(renderDots(m))
 	if !strings.Contains(out, "commit") {
@@ -534,13 +535,13 @@ func TestRenderDots_ChildNamesShareNameColumnWidth(t *testing.T) {
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
-	m.dotsExpandedState = app.DotStateSynced
+	m.dotsExpandedState = dots.StateSynced
 	m.dotsCursor = -1
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
 		Health:     app.HealthOK,
-		State:      app.DotStateSynced,
+		State:      dots.StateSynced,
 		Children: []app.DotChild{{
 			Name:    "a-very-long-child-directory",
 			RelPath: "a-very-long-child-directory",
@@ -571,13 +572,13 @@ func TestRenderDots_ChildRowsIndentNamesInsideNameColumn(t *testing.T) {
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
-	m.dotsExpandedState = app.DotStateSynced
+	m.dotsExpandedState = dots.StateSynced
 	m.dotsCursor = -1
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
 		Health:     app.HealthOK,
-		State:      app.DotStateSynced,
+		State:      dots.StateSynced,
 		Children: []app.DotChild{{
 			Name:    "lua",
 			RelPath: "lua",
@@ -618,12 +619,12 @@ func TestRenderDots_ChildRowsUseParentStatusAndFileCountColumn(t *testing.T) {
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
-	m.dotsExpandedState = app.DotStateSynced
+	m.dotsExpandedState = dots.StateSynced
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
 		Health:     app.HealthOK,
-		State:      app.DotStateSynced,
+		State:      dots.StateSynced,
 		FileCount:  13,
 		Children: []app.DotChild{{
 			Name:      "lua",
@@ -653,15 +654,15 @@ func TestRenderDots_ChildRowsUseChildStateColor(t *testing.T) {
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
-	m.dotsExpandedState = app.DotStateSynced
+	m.dotsExpandedState = dots.StateSynced
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
-		State:      app.DotStateSynced,
+		State:      dots.StateSynced,
 		Children: []app.DotChild{
-			{Name: "tracked.lua", RelPath: "tracked.lua", Path: "~/.config/nvim/tracked.lua", State: app.DotStateSynced, FileCount: 1},
-			{Name: "local.lua", RelPath: "local.lua", Path: "~/.config/nvim/local.lua", State: app.DotStateLocalOnly, FileCount: 1},
-			{Name: "ignored.log", RelPath: "ignored.log", Path: "~/.config/nvim/ignored.log", State: app.DotStateIgnored, Ignored: true},
+			{Name: "tracked.lua", RelPath: "tracked.lua", Path: "~/.config/nvim/tracked.lua", State: dots.StateSynced, FileCount: 1},
+			{Name: "local.lua", RelPath: "local.lua", Path: "~/.config/nvim/local.lua", State: dots.StateLocalOnly, FileCount: 1},
+			{Name: "ignored.log", RelPath: "ignored.log", Path: "~/.config/nvim/ignored.log", State: dots.StateIgnored, Ignored: true},
 		},
 	}}
 
@@ -692,13 +693,13 @@ func TestRenderDots_CountColumnsAreSeparateAndRightAligned(t *testing.T) {
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "alpha",
 		TargetPath: "~/.config/alpha",
-		State:      app.DotStateSynced,
+		State:      dots.StateSynced,
 		Counts:     app.DotFileCounts{Synced: 12, OutOfSync: 2, Ignored: 3},
 		Group:      "base",
 	}, {
 		Name:       "beta",
 		TargetPath: "~/.config/beta",
-		State:      app.DotStateSynced,
+		State:      dots.StateSynced,
 		Counts:     app.DotFileCounts{Synced: 2, Ignored: 123},
 		Group:      "base",
 	}}
@@ -757,21 +758,21 @@ func TestRenderDots_ChildRowsUseChildStatusWhenPresent(t *testing.T) {
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
-	m.dotsExpandedState = app.DotStateConflict
+	m.dotsExpandedState = dots.StateConflict
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
-		State:      app.DotStateConflict,
+		State:      dots.StateConflict,
 		Children: []app.DotChild{{
 			Name:    "init.lua",
 			RelPath: "init.lua",
 			Path:    "~/.config/nvim/init.lua",
-			State:   app.DotStateSynced,
+			State:   dots.StateSynced,
 		}, {
 			Name:    "missing.lua",
 			RelPath: "lua/missing.lua",
 			Path:    "~/.config/nvim/lua/missing.lua",
-			State:   app.DotStateMissing,
+			State:   dots.StateMissing,
 		}},
 	}}
 
@@ -795,11 +796,11 @@ func TestRenderDots_RightColumnsKeepStableWidthAndRightMargin(t *testing.T) {
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
-	m.dotsExpandedState = app.DotStateSynced
+	m.dotsExpandedState = dots.StateSynced
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
-		State:      app.DotStateSynced,
+		State:      dots.StateSynced,
 		FileCount:  2,
 		Group:      "work",
 		Children: []app.DotChild{{
@@ -812,7 +813,7 @@ func TestRenderDots_RightColumnsKeepStableWidthAndRightMargin(t *testing.T) {
 	}, {
 		Name:       "zsh",
 		TargetPath: "~/.zshrc",
-		State:      app.DotStateSynced,
+		State:      dots.StateSynced,
 		FileCount:  1,
 		Group:      "base",
 	}}
@@ -846,13 +847,13 @@ func TestRenderDots_RightColumnsFitContentAcrossSections(t *testing.T) {
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "conflicted",
 		TargetPath: "~/.config/conflicted",
-		State:      app.DotStateUntrackedConflict,
+		State:      dots.StateUntrackedConflict,
 		FileCount:  1,
 		Group:      "base",
 	}, {
 		Name:       "synced",
 		TargetPath: "~/.config/synced",
-		State:      app.DotStateSynced,
+		State:      dots.StateSynced,
 		FileCount:  23,
 		Group:      "very-long-host-group",
 	}}
@@ -877,6 +878,98 @@ func TestRenderDots_RightColumnsFitContentAcrossSections(t *testing.T) {
 	}
 }
 
+func TestRenderDots_MultiGroupBadgeAndFullDetail(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "beta.local")
+	m := baseModel(nil)
+	m.width = 120
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
+	m.dotsLoaded = true
+	m.hostInfo = &app.HostInfo{
+		Active: "beta",
+		Hosts: map[string]config.HostAssignment{
+			"beta": {Groups: []string{"work"}},
+		},
+	}
+	m.dotMemberships = map[string][]string{"nvim": {"alpha", "beta", "work"}}
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		State:      dots.StateSynced,
+		FileCount:  1,
+		Group:      "legacy",
+	}}
+
+	out := stripANSIEscapeSequences(renderDots(m))
+	if !strings.Contains(out, "[beta] [work]") {
+		t.Fatalf("dot row missing active-host multi-group pills:\n%s", out)
+	}
+	if strings.Contains(out, "[legacy]") || strings.Contains(out, "[alpha") {
+		t.Fatalf("dot row used stale or inactive group data:\n%s", out)
+	}
+	if !strings.Contains(out, "groups: alpha, beta, work") {
+		t.Fatalf("selected dot detail missing full memberships:\n%s", out)
+	}
+}
+
+// TestRenderDots_TwoGroupsShowTwoPills is the Task 6 wiring regression guard:
+// an entry in two reusable groups (no active host filtering to collapse
+// them) must render both as separate pills, not a single compact badge.
+func TestRenderDots_TwoGroupsShowTwoPills(t *testing.T) {
+	m := baseModel(nil)
+	m.width = 120
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
+	m.dotsLoaded = true
+	m.dotMemberships = map[string][]string{"nvim": {"laptop", "work"}}
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		State:      dots.StateSynced,
+		FileCount:  1,
+	}}
+
+	out := stripANSIEscapeSequences(renderDots(m))
+	if !strings.Contains(out, "[laptop]") || !strings.Contains(out, "[work]") {
+		t.Fatalf("dots row lacks both group pills:\n%s", out)
+	}
+}
+
+// TestRenderDots_ThreeGroupsNarrowWidthCollapsesToHostPlusCount verifies that
+// when a dots entry belongs to a host group plus two reusable groups and the
+// group column is too narrow to fit all three pills, the row collapses to
+// the host pill plus a "+N" count instead of truncating or dropping groups
+// silently.
+func TestRenderDots_ThreeGroupsNarrowWidthCollapsesToHostPlusCount(t *testing.T) {
+	t.Setenv("OMNI_HOSTNAME", "laptop")
+	m := baseModel(nil)
+	m.width = 50
+	setDotsRepoForTest(&m, "/home/user/dotfiles")
+	m.dotsLoaded = true
+	m.hostInfo = &app.HostInfo{
+		Active: "laptop",
+		Hosts: map[string]config.HostAssignment{
+			"laptop": {Groups: []string{"laptop", "work", "base"}},
+		},
+	}
+	m.dotMemberships = map[string][]string{"nvim": {"laptop", "work", "base"}}
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		State:      dots.StateSynced,
+		FileCount:  1,
+	}}
+
+	out := stripANSIEscapeSequences(renderDots(m))
+	if !strings.Contains(out, "[laptop] +2") {
+		t.Fatalf("dots row missing collapsed host pill with count:\n%s", out)
+	}
+	rows := strings.Split(out, "\n")
+	for _, line := range rows {
+		if strings.Contains(line, "nvim") && strings.Contains(line, "[work]") {
+			t.Fatalf("dots row should collapse rather than show reusable pill in full:\n%s", out)
+		}
+	}
+}
+
 func TestRenderDots_TransientUntrackedConflictShowsAsOutOfSync(t *testing.T) {
 	m := baseModel(nil)
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
@@ -884,8 +977,8 @@ func TestRenderDots_TransientUntrackedConflictShowsAsOutOfSync(t *testing.T) {
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "claude",
 		TargetPath: "~/.claude",
-		State:      app.DotStateUntrackedConflict,
-		Actions:    []app.DotAction{app.DotActionUseRepo, app.DotActionUseLocal, app.DotActionIgnore},
+		State:      dots.StateUntrackedConflict,
+		Actions:    []dots.Action{dots.ActionUseRepo, dots.ActionUseLocal, dots.ActionIgnore},
 	}}
 
 	out := renderDots(m)
@@ -912,7 +1005,7 @@ func TestRenderDots_ConflictInfersResolveActionsWithoutExplicitActions(t *testin
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
-		State:      app.DotStateConflict,
+		State:      dots.StateConflict,
 	}}
 	m.dotsCursor = 0
 
@@ -931,13 +1024,13 @@ func TestRenderDots_ConflictDirectoryShowsExpandHint(t *testing.T) {
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
-		State:      app.DotStateConflict,
-		Actions:    []app.DotAction{app.DotActionUseRepo, app.DotActionUseLocal, app.DotActionIgnore},
+		State:      dots.StateConflict,
+		Actions:    []dots.Action{dots.ActionUseRepo, dots.ActionUseLocal, dots.ActionIgnore},
 		Children: []app.DotChild{{
 			Name:    "init.lua",
 			RelPath: "init.lua",
 			Path:    "~/.config/nvim/init.lua",
-			State:   app.DotStateSynced,
+			State:   dots.StateSynced,
 		}},
 	}}
 	m.dotsCursor = 0
@@ -953,13 +1046,13 @@ func TestRenderDots_ConflictDirectoryShowsExpandHint(t *testing.T) {
 func TestRenderDots_OutOfSyncSyncHintNamesResolutionSide(t *testing.T) {
 	tests := []struct {
 		name  string
-		state app.DotState
+		state dots.State
 		want  string
 	}{
-		{name: "missing", state: app.DotStateMissing, want: "s use repo"},
-		{name: "broken", state: app.DotStateBroken, want: "s repair"},
-		{name: "local only", state: app.DotStateLocalOnly, want: "s use local"},
-		{name: "repo only", state: app.DotStateRepoOnly, want: "s use repo"},
+		{name: "missing", state: dots.StateMissing, want: "i install"},
+		{name: "broken", state: dots.StateBroken, want: "s repair"},
+		{name: "local only", state: dots.StateLocalOnly, want: "s use local"},
+		{name: "repo only", state: dots.StateRepoOnly, want: "i install"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -987,13 +1080,13 @@ func TestRenderDots_LocalOnlyDirectoryShowsExpandHint(t *testing.T) {
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
-		State:      app.DotStateLocalOnly,
-		Actions:    []app.DotAction{app.DotActionSync, app.DotActionIgnore},
+		State:      dots.StateLocalOnly,
+		Actions:    []dots.Action{dots.ActionSync, dots.ActionIgnore},
 		Children: []app.DotChild{{
 			Name:    "init.lua",
 			RelPath: "init.lua",
 			Path:    "~/.config/nvim/init.lua",
-			State:   app.DotStateLocalOnly,
+			State:   dots.StateLocalOnly,
 		}},
 	}}
 	m.dotsCursor = 0
@@ -1011,24 +1104,24 @@ func TestRenderDots_SubdirectoryShowsExpandHint(t *testing.T) {
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
-	m.dotsExpandedState = app.DotStateConflict
+	m.dotsExpandedState = dots.StateConflict
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "~/.config/nvim",
-		State:      app.DotStateConflict,
+		State:      dots.StateConflict,
 		IsDir:      true,
 		Children: []app.DotChild{{
 			Name:      "lua",
 			RelPath:   "lua",
 			Path:      "~/.config/nvim/lua",
-			State:     app.DotStateConflict,
+			State:     dots.StateConflict,
 			IsDir:     true,
 			FileCount: 1,
 			Children: []app.DotChild{{
 				Name:    "config.lua",
 				RelPath: "lua/config.lua",
 				Path:    "~/.config/nvim/lua/config.lua",
-				State:   app.DotStateMissing,
+				State:   dots.StateMissing,
 			}},
 		}},
 	}}
@@ -1053,7 +1146,7 @@ func TestRenderDots_ScrollKeepsSelectedRowHintsVisibleAtBottom(t *testing.T) {
 		m.dotsEntries = append(m.dotsEntries, app.DotStatus{
 			Name:       name,
 			TargetPath: "~/.config/" + name,
-			State:      app.DotStateSynced,
+			State:      dots.StateSynced,
 			Children: []app.DotChild{{
 				Name:    "child",
 				RelPath: "child",
@@ -1078,13 +1171,13 @@ func TestRenderDots_IgnoreConfirmRendersInlineAction(t *testing.T) {
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
-	m.dotsExpandedState = app.DotStateSynced
+	m.dotsExpandedState = dots.StateSynced
 	m.dotsEntries = []app.DotStatus{
 		{
 			Name:       "nvim",
 			TargetPath: "~/.config/nvim",
 			Health:     app.HealthOK,
-			Actions:    []app.DotAction{app.DotActionIgnore},
+			Actions:    []dots.Action{dots.ActionIgnore},
 			Children: []app.DotChild{{
 				Name:    "cache",
 				RelPath: "cache",
@@ -1147,12 +1240,12 @@ func TestRenderDots_UsesHomeAliasForUserPaths(t *testing.T) {
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
 	m.dotsExpandedName = "nvim"
-	m.dotsExpandedState = app.DotStateSynced
+	m.dotsExpandedState = dots.StateSynced
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
 		TargetPath: "/home/user/.config/nvim",
 		Health:     app.HealthOK,
-		State:      app.DotStateSynced,
+		State:      dots.StateSynced,
 		Children: []app.DotChild{{
 			Name:    "init.lua",
 			RelPath: "init.lua",
@@ -1395,8 +1488,8 @@ func TestRenderDots_ConfirmOverwrite(t *testing.T) {
 			Name:       "nvim",
 			TargetPath: "~/.config/nvim",
 			Health:     app.HealthConflict,
-			State:      app.DotStateConflict,
-			Actions:    []app.DotAction{app.DotActionUseRepo, app.DotActionUseLocal, app.DotActionRemove},
+			State:      dots.StateConflict,
+			Actions:    []dots.Action{dots.ActionUseRepo, dots.ActionUseLocal, dots.ActionRemove},
 		},
 	}
 	m.dotsCursor = 0
@@ -1475,7 +1568,7 @@ func TestRenderDots_NarrowWidthFitsRows(t *testing.T) {
 		Name:       "very-long-dot-entry-name",
 		TargetPath: "/home/user/.config/some/really/long/path/that/needs/cutting",
 		Health:     app.HealthOK,
-		State:      app.DotStateSynced,
+		State:      dots.StateSynced,
 		Group:      "very-long-group",
 		FileCount:  1234,
 		Children: []app.DotChild{{
@@ -1486,7 +1579,7 @@ func TestRenderDots_NarrowWidthFitsRows(t *testing.T) {
 		}},
 	}}
 	m.dotsExpandedName = "very-long-dot-entry-name"
-	m.dotsExpandedState = app.DotStateSynced
+	m.dotsExpandedState = dots.StateSynced
 
 	assertLinesFitWidth(t, renderDots(m), m.width)
 }
@@ -1519,7 +1612,7 @@ var _ = config.BoolVal
 // ignoredSectionModel builds a model with one synthesized container (dotfiles)
 // in the Ignored section, expanded to show an intermediate dir (claude,
 // Ignored=false) with two explicitly-ignored leaves (a, b, Ignored=true).
-// The synthesized container has DotActionIgnore+DotActionRemove (no Unignore).
+// The synthesized container has dots.ActionIgnore+dots.ActionRemove (no Unignore).
 func ignoredSectionModel() Model {
 	m := baseModel(nil)
 	m.width = 120
@@ -1530,8 +1623,8 @@ func ignoredSectionModel() Model {
 		{
 			Name:       "dotfiles",
 			TargetPath: "~/.config",
-			State:      app.DotStateIgnored,
-			Actions:    []app.DotAction{app.DotActionIgnore, app.DotActionRemove},
+			State:      dots.StateIgnored,
+			Actions:    []dots.Action{dots.ActionIgnore, dots.ActionRemove},
 			IsDir:      true,
 			Counts:     app.DotFileCounts{Ignored: 2},
 			Children: []app.DotChild{
@@ -1548,7 +1641,7 @@ func ignoredSectionModel() Model {
 		},
 	}
 	m.dotsExpandedName = "dotfiles"
-	m.dotsExpandedState = app.DotStateIgnored
+	m.dotsExpandedState = dots.StateIgnored
 	m.dotsExpandedChildren = map[string]bool{
 		dotsChildExpandKey("dotfiles", "claude"): true,
 	}
@@ -1642,9 +1735,9 @@ func TestDotsRowHintItems_IgnoredChild_IntermediateDir(t *testing.T) {
 }
 
 // TestDotsRowHintItems_SynthesizedContainer_HasIgnoreHint verifies that a
-// synthesized container (DotActionIgnore, State=DotStateIgnored, no
-// DotActionUnignore) shows an "include" hint (State is Ignored → "include"),
-// confirming the hint branch is reached now that the entry has DotActionIgnore.
+// synthesized container (dots.ActionIgnore, State=dots.StateIgnored, no
+// dots.ActionUnignore) shows an "include" hint (State is Ignored → "include"),
+// confirming the hint branch is reached now that the entry has dots.ActionIgnore.
 func TestDotsRowHintItems_SynthesizedContainer_HasIgnoreHint(t *testing.T) {
 	m := ignoredSectionModel()
 
@@ -1661,7 +1754,7 @@ func TestDotsRowHintItems_SynthesizedContainer_HasIgnoreHint(t *testing.T) {
 	m.dotsCursor = containerIdx
 	hints := dotsRowHintItems(m)
 
-	// State is DotStateIgnored, so the hint desc must be "include"
+	// State is dots.StateIgnored, so the hint desc must be "include"
 	// (the entry is already ignored; the action un-ignores it).
 	var descs []string
 	for _, h := range hints {
@@ -1675,7 +1768,7 @@ func TestDotsRowHintItems_SynthesizedContainer_HasIgnoreHint(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("synthesized container with DotActionIgnore+State=Ignored should have 'include' hint, got hints: %v", descs)
+		t.Errorf("synthesized container with dots.ActionIgnore+State=Ignored should have 'include' hint, got hints: %v", descs)
 	}
 }
 

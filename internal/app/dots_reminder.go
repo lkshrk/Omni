@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/lkshrk/omni/internal/dots"
 	"github.com/lkshrk/omni/internal/executor"
 )
 
@@ -148,15 +149,15 @@ func AnalyzeDotsReminderStatus(status *DotsStatusResult) *DotsReminderResult {
 	return result
 }
 
-func dotsReminderKind(state DotState) string {
+func dotsReminderKind(state dots.State) string {
 	switch state {
-	case DotStateMissing, DotStateBroken, DotStateModified, DotStateLocalOnly, DotStateRepoOnly:
+	case dots.StateMissing, dots.StateBroken, dots.StateModified, dots.StateLocalOnly, dots.StateRepoOnly:
 		return "sync"
-	case DotStateConflict, DotStateUntrackedConflict, DotStateAmbiguous:
+	case dots.StateConflict, dots.StateUntrackedConflict, dots.StateAmbiguous:
 		return "conflict"
-	case DotStateUntrackedLinked:
+	case dots.StateUntrackedLinked:
 		return "new"
-	case DotStateNoSource:
+	case dots.StateNoSource:
 		return "source"
 	default:
 		return ""

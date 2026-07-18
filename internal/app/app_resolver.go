@@ -78,7 +78,7 @@ func (a *App) resolveTools(ctx context.Context, cfg *config.RootConfig, groups [
 	order := make([]string, 0)
 	seen := make(map[string]struct{})
 	for _, g := range groups {
-		if g == nil {
+		if g == nil || g.IsSystemInventory() {
 			continue
 		}
 		groupName := g.BaseName()

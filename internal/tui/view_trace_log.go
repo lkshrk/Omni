@@ -53,12 +53,9 @@ func traceLogLines(m Model, width int) []string {
 	if m.traceLog == nil || len(m.traceLog.traces) == 0 {
 		return []string{m.palette.styleHelp.Render("No commands recorded.")}
 	}
-	lines := make([]string, 0, len(m.traceLog.traces)*2)
+	lines := make([]string, 0, len(m.traceLog.traces)*6)
 	for _, trace := range m.traceLog.traces {
-		lines = append(lines, traceLogPrimaryLine(m, trace, width)...)
-		if sub := traceLogSubLine(m, trace); sub != "" {
-			lines = append(lines, sub)
-		}
+		lines = append(lines, traceLogEntryLines(m, trace, width)...)
 		lines = append(lines, "")
 	}
 	// trim trailing blank
@@ -71,26 +68,61 @@ func traceLogLines(m Model, width int) []string {
 	return lines
 }
 
-func traceLogPrimaryLine(m Model, trace database.CommandTrace, width int) []string {
+func traceLogEntryLines(m Model, trace database.CommandTrace, width int) []string {
 	when := trace.StartedAt.Local().Format("15:04:05")
 	dur := fmt.Sprintf("%dms", trace.DurationMS)
 	status := traceLogStatusText(m, trace)
-	prefix := fmt.Sprintf("%s · %s · %s · ", when, dur, status)
-	prefixWidth := lipgloss.Width(prefix)
-	cmdWidth := max(width-prefixWidth, 1)
-	wrapped := hardWrapLine(trace.Command, cmdWidth)
-	if len(wrapped) == 0 {
-		return []string{prefix}
+	header := fmt.Sprintf("%s · %s · %s", when, status, dur)
+	if trace.ExitCode.Valid {
+		header += fmt.Sprintf(" · exit %d", trace.ExitCode.Int64)
 	}
-	out := make([]string, 0, len(wrapped))
-	for i, seg := range wrapped {
-		if i == 0 {
-			out = append(out, prefix+seg)
-		} else {
-			out = append(out, strings.Repeat(" ", prefixWidth)+seg)
+	out := []string{header}
+	out = append(out, traceLogFieldLines(m, "command", trace.Command, width, m.palette.styleNormal)...)
+	out = append(out, traceLogFieldLines(m, "reason", trace.Reason, width, m.palette.styleHelp)...)
+	if problem := traceLogProblem(trace); problem != "" {
+		out = append(out, traceLogFieldLines(m, "problem", problem, width, m.palette.styleErr)...)
+	}
+	out = append(out, traceLogFieldLines(m, "error", trace.Error, width, m.palette.styleErr)...)
+	out = append(out, traceLogFieldLines(m, "stderr", trace.Stderr, width, m.palette.styleHelp)...)
+	return out
+}
+
+func traceLogFieldLines(m Model, label, value string, width int, style lipgloss.Style) []string {
+	value = stripANSIEscapeSequences(strings.TrimRight(value, "\r\n"))
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	prefix := fmt.Sprintf("  %-9s", label+":")
+	indent := strings.Repeat(" ", lipgloss.Width(prefix))
+	valueWidth := max(width-lipgloss.Width(prefix), 1)
+	var out []string
+	first := true
+	for _, physicalLine := range strings.Split(strings.ReplaceAll(value, "\r\n", "\n"), "\n") {
+		wrapped := hardWrapLine(physicalLine, valueWidth)
+		if len(wrapped) == 0 {
+			wrapped = []string{""}
+		}
+		for _, line := range wrapped {
+			linePrefix := indent
+			if first {
+				linePrefix = m.palette.styleHelp.Render(prefix)
+				first = false
+			}
+			out = append(out, linePrefix+style.Render(line))
 		}
 	}
 	return out
+}
+
+func traceLogProblem(trace database.CommandTrace) string {
+	status := strings.ToUpper(strings.TrimSpace(trace.Status))
+	if trace.Error == "" && status != "ERROR" && status != "FAIL" && status != "FAILED" {
+		return ""
+	}
+	if strings.TrimSpace(trace.Stderr) != "" {
+		return rowErrorSummary(trace.Stderr)
+	}
+	return rowErrorSummary(trace.Error)
 }
 
 func traceLogStatusText(m Model, trace database.CommandTrace) string {
@@ -106,12 +138,4 @@ func traceLogStatusText(m Model, trace database.CommandTrace) string {
 		}
 		return p.styleHelp.Render("unknown")
 	}
-}
-
-func traceLogSubLine(m Model, trace database.CommandTrace) string {
-	reason := strings.TrimSpace(trace.Reason)
-	if reason == "" {
-		return ""
-	}
-	return m.palette.styleHelp.Render("  reason: " + reason)
 }

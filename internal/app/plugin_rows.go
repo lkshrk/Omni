@@ -124,16 +124,70 @@ func looksLikeGitSha(s string) bool {
 //     Version as a prefix.
 //  4. No usable signal: not outdated (never guess).
 func (r PluginRow) Outdated() bool {
-	if r.Version != "" && r.LatestVersion != "" {
-		return r.Version != r.LatestVersion
+	return pluginOutdated(r.Version, r.LatestVersion, r.LatestSha, r.PathOutdated)
+}
+
+// pluginOutdated is the single "is an update available" verdict shared by
+// PluginRow and InstalledPlugin. See PluginRow.Outdated for the rule rationale.
+// It deliberately never compares Sha against LatestSha directly (repo-HEAD sha
+// drift is not a reliable update signal).
+func pluginOutdated(version, latestVersion, latestSha string, pathOutdated *bool) bool {
+	if version != "" && latestVersion != "" {
+		return version != latestVersion
 	}
-	if r.PathOutdated != nil {
-		return *r.PathOutdated
+	if pathOutdated != nil {
+		return *pathOutdated
 	}
-	if looksLikeGitSha(r.Version) && r.LatestSha != "" {
-		return !strings.HasPrefix(r.LatestSha, r.Version)
+	if looksLikeGitSha(version) && latestSha != "" {
+		return !strings.HasPrefix(latestSha, version)
 	}
 	return false
+}
+
+// PluginUpdateKind classifies how a plugin row's version cell should render.
+type PluginUpdateKind int
+
+const (
+	PluginUpToDate        PluginUpdateKind = iota // no update; render the plain version
+	PluginVersionUpgrade                          // authoritative version pair, newer available: Current→Latest
+	PluginShaDrift                                // no version pair; installed commit differs from source HEAD (informational only, not an "update available" claim)
+	PluginUpdateAvailable                         // outdated via PathOutdated / sha-prefix rule, nothing displayable to compare
+)
+
+// PluginUpdate is the display-ready update verdict for a plugin row. It is the
+// single source both the status mark (via Outdated) and the version cell
+// render from, so the two can never disagree.
+type PluginUpdate struct {
+	Kind    PluginUpdateKind
+	Current string
+	Latest  string
+}
+
+// pluginUpdateDisplay projects the version-comparison fields into a display
+// verdict. An authoritative Version/LatestVersion pair wins when present: if it
+// agrees, the row is up to date and any sha drift is suppressed (this is the
+// superpowers-6.1.1 false positive the Outdated doc comment warns about — a
+// current release installed from an earlier repo commit). Sha drift is shown
+// only for plugins that carry no comparable version pair.
+func pluginUpdateDisplay(version, latestVersion, sha, latestSha string, pathOutdated *bool) PluginUpdate {
+	if version != "" && latestVersion != "" {
+		if version != latestVersion {
+			return PluginUpdate{Kind: PluginVersionUpgrade, Current: version, Latest: latestVersion}
+		}
+		return PluginUpdate{Kind: PluginUpToDate}
+	}
+	if sha != "" && latestSha != "" && sha != latestSha {
+		return PluginUpdate{Kind: PluginShaDrift, Current: sha, Latest: latestSha}
+	}
+	if pluginOutdated(version, latestVersion, latestSha, pathOutdated) {
+		return PluginUpdate{Kind: PluginUpdateAvailable}
+	}
+	return PluginUpdate{Kind: PluginUpToDate}
+}
+
+// Update returns the display-ready update verdict for the managed plugin row.
+func (r PluginRow) Update() PluginUpdate {
+	return pluginUpdateDisplay(r.Version, r.LatestVersion, r.Sha, r.LatestSha, r.PathOutdated)
 }
 
 // PluginRows returns managed rows (from manifest) with per-adapter status,

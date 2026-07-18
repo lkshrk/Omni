@@ -2,6 +2,7 @@ package app
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -49,5 +50,32 @@ func TestEnforceMembershipInvariant(t *testing.T) {
 	want := []string{"laptop", "team", "server"} // all host groups kept, only first reusable survives
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("EnforceMembershipInvariant = %v, want %v", got, want)
+	}
+}
+
+func TestMembershipCapsReusable(t *testing.T) {
+	if !MembershipCapsReusable("dot") {
+		t.Error("dot should cap reusable")
+	}
+	for _, kind := range []string{"tool", "skill", "mcp", "plugin", "marketplace"} {
+		if MembershipCapsReusable(kind) {
+			t.Errorf("%s should not cap reusable", kind)
+		}
+	}
+}
+
+func TestMembershipToggle_FreeAddRemove(t *testing.T) {
+	got := MembershipToggle([]string{"a"}, "b")
+	if !slices.Equal(got, []string{"a", "b"}) {
+		t.Fatalf("add: got %v, want [a b]", got)
+	}
+	got = MembershipToggle([]string{"a", "b"}, "a")
+	if !slices.Equal(got, []string{"b"}) {
+		t.Fatalf("remove: got %v, want [b]", got)
+	}
+	// No reusable eviction: two reusable groups coexist.
+	got = MembershipToggle([]string{"work"}, "base")
+	if !slices.Equal(got, []string{"work", "base"}) {
+		t.Fatalf("free: got %v, want [work base]", got)
 	}
 }

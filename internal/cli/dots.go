@@ -350,10 +350,14 @@ func newDotsVariantAddCmd(state *rootState) *cobra.Command {
 	var host string
 	var pkgName string
 	var sync bool
+	var subpath string
 	cmd := &cobra.Command{
 		Use:   "add <name>",
 		Short: "Add a host-specific package variant for a dots entry",
-		Args:  cobra.ExactArgs(1),
+		Long: "Add a host-specific package variant for a dots entry.\n\n" +
+			"With --subpath, <name> is treated as the parent entry: the sub-path is " +
+			"first extracted into its own entry, then a host variant is created for it.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireDotsConfigured(state); err != nil {
 				return err
@@ -363,11 +367,17 @@ func newDotsVariantAddCmd(state *rootState) *cobra.Command {
 					return err
 				}
 			}
-			info, ops, err := state.app.DotsAddHostVariant(cmd.Context(), args[0], app.DotsAddVariantOptions{
-				Host:    host,
-				Package: pkgName,
-				Sync:    sync,
-			})
+			opts := app.DotsAddVariantOptions{Host: host, Package: pkgName, Sync: sync}
+			var info app.DotVariantInfo
+			var ops []dots.Op
+			var err error
+			msg := "added dots variant %[1]q for host %[3]q using package %[4]q\n"
+			if subpath != "" {
+				info, ops, err = state.app.DotsExtractThenAddHostVariant(cmd.Context(), args[0], subpath, opts)
+				msg = "extracted %[1]q from %[2]q and added dots variant for host %[3]q using package %[4]q\n"
+			} else {
+				info, ops, err = state.app.DotsAddHostVariant(cmd.Context(), args[0], opts)
+			}
 			if sync || len(ops) > 0 {
 				printDotOps(cmd, ops, false)
 			}
@@ -375,7 +385,7 @@ func newDotsVariantAddCmd(state *rootState) *cobra.Command {
 				return err
 			}
 			if info.Host != "" {
-				fmt.Fprintf(cmd.OutOrStdout(), "added dots variant %q for host %q using package %q\n", info.Name, info.Host, info.Package)
+				fmt.Fprintf(cmd.OutOrStdout(), msg, info.Name, args[0], info.Host, info.Package)
 			}
 			return nil
 		},
@@ -383,6 +393,7 @@ func newDotsVariantAddCmd(state *rootState) *cobra.Command {
 	cmd.Flags().StringVar(&host, "host", "", "Host for the variant (default: current host)")
 	cmd.Flags().StringVar(&pkgName, "package", "", "Stow package directory (default: <name>@<host>)")
 	cmd.Flags().BoolVar(&sync, "sync", false, "Sync immediately when the variant belongs to this host")
+	cmd.Flags().StringVar(&subpath, "subpath", "", "Extract this sub-path of <name> into its own entry first, then variant it")
 	cmd.ValidArgsFunction = completeDotNames(state)
 	_ = cmd.RegisterFlagCompletionFunc("host", completeHostNames(state))
 	return cmd
@@ -421,11 +432,13 @@ func newDotsVariantRemoveCmd(state *rootState) *cobra.Command {
 func newDotsGroupsCmd(state *rootState) *cobra.Command {
 	var moveGroup string
 	var removeGroups []string
+	var groups []string
 
 	cmd := &cobra.Command{
-		Use:   "groups <name>",
-		Short: "Show or move a dots entry's group assignment",
-		Args:  cobra.ExactArgs(1),
+		Use:     "groups <name>",
+		Aliases: []string{"group"},
+		Short:   "Show or move a dots entry's group assignment",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireDotsConfigured(state); err != nil {
 				return err
@@ -433,8 +446,13 @@ func newDotsGroupsCmd(state *rootState) *cobra.Command {
 			name := args[0]
 			moveGroup = strings.TrimSpace(moveGroup)
 			removeGroups = app.NormalizeGroupNames(removeGroups)
+			groups = app.NormalizeGroupNames(groups)
+			groupChanged := cmd.Flags().Changed("group")
 			moveChanged := cmd.Flags().Changed("move")
 			removeChanged := cmd.Flags().Changed("remove")
+			if groupChanged && (moveChanged || removeChanged) {
+				return fmt.Errorf("--group cannot be combined with --move or --remove")
+			}
 			if moveChanged && removeChanged {
 				return fmt.Errorf("--move cannot be combined with --remove")
 			}
@@ -444,8 +462,11 @@ func newDotsGroupsCmd(state *rootState) *cobra.Command {
 			if removeChanged && len(removeGroups) == 0 {
 				return fmt.Errorf("--remove requires at least one group")
 			}
+			if groupChanged && len(groups) == 0 {
+				return fmt.Errorf("--group requires at least one group")
+			}
 
-			if !moveChanged && !removeChanged {
+			if !groupChanged && !moveChanged && !removeChanged {
 				current, err := state.app.DotGroups(name)
 				if err != nil {
 					return err
@@ -454,11 +475,20 @@ func newDotsGroupsCmd(state *rootState) *cobra.Command {
 				return nil
 			}
 
+			if groupChanged {
+				if err := requireAtMostOneReusableGroup(state, name, groups); err != nil {
+					return err
+				}
+			}
+
 			var change app.DotGroupsChange
 			var err error
-			if moveChanged {
+			switch {
+			case groupChanged:
+				change, err = state.app.SetDotGroupsWithState(cmd.Context(), name, groups, nil, "")
+			case moveChanged:
 				change, err = state.app.SetDotGroupsWithState(cmd.Context(), name, []string{moveGroup}, nil, "")
-			} else {
+			default:
 				change, err = state.app.RemoveDotGroupsWithState(cmd.Context(), name, removeGroups)
 			}
 			if err != nil {
@@ -471,9 +501,35 @@ func newDotsGroupsCmd(state *rootState) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&moveGroup, "move", "", "Move this dots entry to a group")
 	cmd.Flags().StringSliceVar(&removeGroups, "remove", nil, "Remove this dots entry from a group")
+	cmd.Flags().StringArrayVar(&groups, "group", nil, "Set this dots entry's full group membership (repeatable; at most one reusable group)")
 	cmd.ValidArgsFunction = completeDotNames(state)
 	_ = cmd.RegisterFlagCompletionFunc("move", completeGroupNames(state))
+	_ = cmd.RegisterFlagCompletionFunc("group", completeGroupNames(state))
 	return cmd
+}
+
+// requireAtMostOneReusableGroup returns an error naming the conflicting
+// reusable groups if more than one of the supplied groups is reusable
+// (non-host). Mirrors the invariant enforced by config.ValidateRoot.
+func requireAtMostOneReusableGroup(state *rootState, dotName string, groups []string) error {
+	reusableNames, err := state.app.ReusableGroupNames()
+	if err != nil {
+		return err
+	}
+	reusable := make(map[string]bool, len(reusableNames))
+	for _, name := range reusableNames {
+		reusable[name] = true
+	}
+	var conflicting []string
+	for _, g := range groups {
+		if reusable[g] {
+			conflicting = append(conflicting, g)
+		}
+	}
+	if len(conflicting) > 1 {
+		return fmt.Errorf("dotfile %q would belong to reusable groups %s; an item may belong to at most one reusable group", dotName, strings.Join(conflicting, ", "))
+	}
+	return nil
 }
 
 // ─── dots delete ──────────────────────────────────────────────────────────────
@@ -521,7 +577,7 @@ func newDotsDeleteCmd(state *rootState) *cobra.Command {
 // candidate so the tracked-entry flow can produce its usual error.
 func runDotsDeleteDiscoveredLocal(cmd *cobra.Command, state *rootState, nameOrPath string) (bool, error) {
 	status, found, err := state.app.FindDiscoveredDotStatus(cmd.Context(), nameOrPath)
-	if !found || app.DotStatusState(status) != app.DotStateLocalOnly {
+	if !found || app.DotStatusState(status) != dots.StateLocalOnly {
 		return false, nil
 	}
 	if err != nil {

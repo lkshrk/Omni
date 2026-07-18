@@ -128,6 +128,46 @@ func TestShouldIgnorePath_RelativePatterns(t *testing.T) {
 	}
 }
 
+func TestShouldIgnoreAnyPath_DirectoryIgnoreAppliesToDescendants(t *testing.T) {
+	for _, patterns := range [][]string{
+		{".claude/projects", "!/.claude/projects/session.json"},
+		{"projects", "!/projects/session.json"},
+	} {
+		if dots.ShouldIgnoreAnyPath(
+			[]string{"projects/session.json", ".claude/projects/session.json"},
+			"session.json",
+			patterns,
+		) {
+			t.Fatalf("explicitly included descendant should not be ignored with %v", patterns)
+		}
+		if !dots.ShouldIgnoreAnyPath(
+			[]string{"projects/private.json", ".claude/projects/private.json"},
+			"private.json",
+			patterns,
+		) {
+			t.Fatalf("sibling below ignored directory should stay ignored with %v", patterns)
+		}
+	}
+}
+
+func TestShouldIgnoreAnyPath_BasenameAncestorDoesNotEscapeLogicalRoot(t *testing.T) {
+	if dots.ShouldIgnoreAnyPath(
+		[]string{"data.db", "cache/data.db"},
+		"data.db",
+		[]string{"cache"},
+	) {
+		t.Fatal("synthetic rooted candidate must not re-ignore content copied from an explicitly selected cache directory")
+	}
+}
+
+func TestShouldIgnoreAnyPathChecked_RejectsPathsOutsideLogicalRoot(t *testing.T) {
+	for _, rel := range []string{"/tmp/session.json", "../session.json", "projects/../../session.json"} {
+		if _, err := dots.ShouldIgnoreAnyPathChecked([]string{rel}, filepath.Base(rel), []string{"projects"}); err == nil {
+			t.Errorf("ShouldIgnoreAnyPathChecked(%q) error = nil, want logical-root error", rel)
+		}
+	}
+}
+
 func TestShouldIgnorePath_IncludesOverrideEarlierIgnores(t *testing.T) {
 	patterns := []string{
 		"*",

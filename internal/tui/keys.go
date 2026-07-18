@@ -17,6 +17,8 @@ type KeyMap struct {
 	HalfPageDown key.Binding // ctrl+d
 	PageUp       key.Binding // pgup, ctrl+b
 	PageDown     key.Binding // pgdown, ctrl+f
+	ProviderPrev key.Binding // h, left — previous provider candidate
+	ProviderNext key.Binding // l, right — next provider candidate
 
 	// Tool actions
 	Install         key.Binding
@@ -30,6 +32,8 @@ type KeyMap struct {
 	MigrateProvider key.Binding // r — reinstall alias (primary: Install/i)
 	Fallback        key.Binding // f — configure fallback source
 	ApplySolution   key.Binding // a — apply selected provider remedy
+	ErrorLog        key.Binding // e — inspect command errors
+	EditIgnore      key.Binding // e — edit ignore scopes for ignored tools
 	Reconcile       key.Binding // A — reconcile all safe host lifecycle fixes
 	NewGroup        key.Binding // n — new group
 	HostGroups      key.Binding // g — edit host group assignments
@@ -48,7 +52,7 @@ type KeyMap struct {
 	Toggle    key.Binding // space — toggle boolean setting
 	Palette   key.Binding // :
 	Help      key.Binding // ?
-	MoveGroup key.Binding // g — move selected tool's group assignment
+	MoveGroup key.Binding // g — change selected item's group memberships
 
 	// Tool list actions
 	Refresh   key.Binding // R — re-scan all providers and update install status
@@ -82,9 +86,9 @@ func (k KeyMap) ShortHelp() []key.Binding {
 // for the ? overlay.
 func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Top, k.Bottom, k.HalfPageUp, k.HalfPageDown, k.PageUp, k.PageDown, k.Tab},
-		{k.Install, k.Upgrade, k.UpgradeAll, k.SyncAll, k.DotCommit, k.Claim, k.MoveGroup, k.PinProvider, k.MigrateProvider, k.Fallback, k.Ignore, k.Delete, k.Refresh},
-		{k.DotRefresh, k.DotAdd, k.DotDelete, k.DotVariant, k.DotIgnore, k.DotUseRepo, k.DotUseLocal, k.DotUseRepoAll, k.DotUseLocalAll, k.Reconcile, k.ApplySolution},
+		{k.Top, k.Bottom, k.HalfPageUp, k.HalfPageDown, k.PageUp, k.PageDown, k.ProviderPrev, k.ProviderNext, k.Tab},
+		{k.Install, k.Upgrade, k.UpgradeAll, k.SyncAll, k.DotCommit, k.Claim, k.MoveGroup, k.PinProvider, k.MigrateProvider, k.Fallback, k.Ignore, k.EditIgnore, k.Delete, k.Refresh},
+		{k.DotRefresh, k.DotAdd, k.DotDelete, k.DotVariant, k.DotIgnore, k.DotUseRepo, k.DotUseLocal, k.DotUseRepoAll, k.DotUseLocalAll, k.Reconcile, k.ApplySolution, k.ErrorLog},
 		{k.Search, k.PrevTab, k.NextTab, k.GroupPrev, k.GroupNext, k.Palette, k.NewGroup, k.HostGroups, k.GroupTools, k.GroupDots, k.Rename, k.Help, k.Quit},
 	}
 }
@@ -118,6 +122,8 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("pgdown", "ctrl+f"),
 			key.WithHelp("pgdown,ctrl+f", "page down"),
 		),
+		ProviderPrev: key.NewBinding(key.WithKeys("h", "left"), key.WithHelp("h/←", "previous provider")),
+		ProviderNext: key.NewBinding(key.WithKeys("l", "right"), key.WithHelp("l/→", "next provider")),
 		Install: key.NewBinding(
 			key.WithKeys("i"),
 			key.WithHelp("i", actions.MustTUILabel(actions.ToolInstall)),
@@ -162,6 +168,11 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("a"),
 			key.WithHelp("a", "apply fix"),
 		),
+		ErrorLog: key.NewBinding(
+			key.WithKeys("e"),
+			key.WithHelp("e", "error log"),
+		),
+		EditIgnore: key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit ignore")),
 		Reconcile: key.NewBinding(
 			key.WithKeys("A"),
 			key.WithHelp("A", actions.MustTUILabel(actions.Reconcile)),

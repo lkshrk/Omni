@@ -38,7 +38,7 @@ func TestUnlinkEntry_DirSymlinkPointsElsewhere(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m, err := dots.New(repo, []config.DotEntry{
+	m, err := dots.NewEngine(repo, []config.DotEntry{
 		{Name: "nvim", Path: filepath.Join(home, ".config", "nvim")},
 	})
 	if err != nil {
@@ -71,7 +71,7 @@ func TestUnlinkEntry_SourceMissing(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	// Source dir is never created.
-	m, err := dots.New(repo, []config.DotEntry{
+	m, err := dots.NewEngine(repo, []config.DotEntry{
 		{Name: "nvim", Path: filepath.Join(home, ".config", "nvim")},
 	})
 	if err != nil {
@@ -109,7 +109,7 @@ func TestUnlinkEntry_RemoveLocalBacksUpTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m, err := dots.New(repo, []config.DotEntry{
+	m, err := dots.NewEngine(repo, []config.DotEntry{
 		{Name: "nvim", Path: target},
 	})
 	if err != nil {
@@ -166,7 +166,7 @@ func TestUnlinkEntry_RemoveLocalBacksUpManagedSymlinkContent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m, err := dots.New(repo, []config.DotEntry{
+	m, err := dots.NewEngine(repo, []config.DotEntry{
 		{Name: "nvim", Path: target},
 	})
 	if err != nil {
@@ -217,7 +217,7 @@ func TestUnlinkEntry_RemoveLocalBacksUpBrokenManagedSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m, err := dots.New(repo, []config.DotEntry{
+	m, err := dots.NewEngine(repo, []config.DotEntry{
 		{Name: "nvim", Path: target},
 	})
 	if err != nil {
@@ -278,7 +278,7 @@ func TestUnlinkEntry_WalkIgnoresPatterns(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m, err := dots.New(repo, []config.DotEntry{
+	m, err := dots.NewEngine(repo, []config.DotEntry{
 		{Name: "cfg", Path: dstDir, Ignore: []string{"*.log"}},
 	})
 	if err != nil {
@@ -330,7 +330,7 @@ func TestCopyDir_CopiesTree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m, err := dots.New(repo, []config.DotEntry{
+	m, err := dots.NewEngine(repo, []config.DotEntry{
 		{Name: "nvim", Path: dstLink},
 	})
 	if err != nil {
@@ -384,7 +384,7 @@ func TestUnlinkFile_WrongSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m, err := dots.New(repo, []config.DotEntry{
+	m, err := dots.NewEngine(repo, []config.DotEntry{
 		{Name: "zsh", Path: dst},
 	})
 	if err != nil {
@@ -431,7 +431,7 @@ func TestUnlinkFile_ManagedSymlinkReplaced(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m, err := dots.New(repo, []config.DotEntry{
+	m, err := dots.NewEngine(repo, []config.DotEntry{
 		{Name: "zsh", Path: dst},
 	})
 	if err != nil {
@@ -471,7 +471,7 @@ func TestNew_PathNotUnderHome(t *testing.T) {
 
 	// Use an absolute path outside home.
 	outsidePath := t.TempDir() // guaranteed different from home
-	_, err := dots.New(repo, []config.DotEntry{
+	_, err := dots.NewEngine(repo, []config.DotEntry{
 		{Name: "outside", Path: outsidePath},
 	})
 	if err == nil {
@@ -484,7 +484,7 @@ func TestNew_ExpandsEnvironmentVariables(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	m, err := dots.New(repo, []config.DotEntry{
+	m, err := dots.NewEngine(repo, []config.DotEntry{
 		{Name: "dot", Path: "$HOME/.config/zsh"},
 	})
 	if err != nil {
@@ -503,7 +503,7 @@ func TestNew_UsesExplicitDotPackage(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	m, err := dots.New(repo, []config.DotEntry{
+	m, err := dots.NewEngine(repo, []config.DotEntry{
 		{Name: "nvim", Package: "nvim-work", Path: "~/.config/nvim"},
 	})
 	if err != nil {

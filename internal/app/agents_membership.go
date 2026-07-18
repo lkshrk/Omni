@@ -43,7 +43,9 @@ func (a *App) SetSkillGroups(source string, groups, createdGroups []string, acti
 		if err := createSelectedGroupsInConfig(cfg, createdGroups, targets); err != nil {
 			return err
 		}
-		ensureMembershipTargetGroups(cfg, targets)
+		if err := ensureMembershipTargetGroups(cfg, targets); err != nil {
+			return err
+		}
 		if err := ensureMembershipGroupsOnHostInConfig(cfg, activeHost, targets); err != nil {
 			return err
 		}

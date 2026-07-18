@@ -375,6 +375,7 @@ func uncatalogedRunnableCLICommandAllowed(path []string) bool {
 		"agents skills update",
 		"agents skills remove",
 		"agents skills uninstall",
+		"agents skills group",
 		"agents add",
 		"agents find",
 		"agents mcp list",
@@ -382,14 +383,17 @@ func uncatalogedRunnableCLICommandAllowed(path []string) bool {
 		"agents mcp remove",
 		"agents mcp restore",
 		"agents mcp import",
+		"agents mcp group",
 		"agents plugins list",
 		"agents plugins add",
 		"agents plugins remove",
 		"agents plugins restore",
 		"agents plugins import",
+		"agents plugins group",
 		"agents plugins marketplace list",
 		"agents plugins marketplace add",
-		"agents plugins marketplace remove":
+		"agents plugins marketplace remove",
+		"agents plugins marketplace group":
 		return true
 	default:
 		return false

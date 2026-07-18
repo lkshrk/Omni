@@ -117,6 +117,43 @@ func TestPluginRow_OutdatedShaMatrix(t *testing.T) {
 
 func boolPtr(b bool) *bool { return &b }
 
+func TestPluginRow_UpdateDisplay(t *testing.T) {
+	cases := []struct {
+		name    string
+		row     app.PluginRow
+		want    app.PluginUpdateKind
+		current string
+		latest  string
+	}{
+		{"version pair differs -> upgrade with pair",
+			app.PluginRow{Version: "6.1.0", LatestVersion: "6.1.1"}, app.PluginVersionUpgrade, "6.1.0", "6.1.1"},
+		{"version pair equal, shas differ -> up to date (no sha-drift false positive)",
+			app.PluginRow{Version: "6.1.1", LatestVersion: "6.1.1", Sha: "f2cbfbef", LatestSha: "d884ae04"}, app.PluginUpToDate, "", ""},
+		{"no version pair, shas differ -> informational sha drift",
+			app.PluginRow{Sha: "abcdef1234567", LatestSha: "9876543210fed"}, app.PluginShaDrift, "abcdef1234567", "9876543210fed"},
+		{"sha-versioned outdated, no displayable pair -> update available",
+			app.PluginRow{Version: "25d22f864ad6", LatestSha: "d884ae04edebef577e82ff7c4e143debd0bbec9"}, app.PluginUpdateAvailable, "", ""},
+		{"PathOutdated with no version signal -> update available",
+			app.PluginRow{PathOutdated: boolPtr(true)}, app.PluginUpdateAvailable, "", ""},
+		{"nothing -> up to date", app.PluginRow{}, app.PluginUpToDate, "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.row.Update()
+			if got.Kind != tc.want {
+				t.Fatalf("Update().Kind = %v, want %v", got.Kind, tc.want)
+			}
+			if got.Current != tc.current || got.Latest != tc.latest {
+				t.Fatalf("Update() pair = (%q,%q), want (%q,%q)", got.Current, got.Latest, tc.current, tc.latest)
+			}
+			// The status verdict and the display verdict must agree on outdated-ness.
+			if outdated := got.Kind != app.PluginUpToDate; outdated != tc.row.Outdated() && got.Kind != app.PluginShaDrift {
+				t.Fatalf("Update() outdated=%v disagrees with Outdated()=%v", outdated, tc.row.Outdated())
+			}
+		})
+	}
+}
+
 // TestPluginRows_PathOutdatedMergedFromAdapter confirms PluginRows copies a
 // versionless plugin's PathOutdated signal from InstalledPlugin into the row
 // — this is the actual update-all bug: without it, plugins with no manifest

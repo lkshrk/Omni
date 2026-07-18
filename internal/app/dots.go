@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/dots"
 )
 
 // DotsAddOptions controls the behaviour of DotsAdd.
@@ -68,8 +69,8 @@ type DotStatus struct {
 	TargetPath string        `json:"target_path"`
 	ConfigPath string        `json:"path,omitempty"`
 	Health     DotHealth     `json:"health"`
-	State      DotState      `json:"state"`
-	Actions    []DotAction   `json:"actions,omitempty"`
+	State      dots.State    `json:"state"`
+	Actions    []dots.Action `json:"actions,omitempty"`
 	Group      string        `json:"group,omitempty"` // config group name (for example "work" or the current host group)
 	FileCount  int           `json:"file_count,omitempty"`
 	Counts     DotFileCounts `json:"counts,omitempty"`
@@ -87,7 +88,7 @@ type DotChild struct {
 	Name      string        `json:"name"`
 	RelPath   string        `json:"rel_path"`
 	Path      string        `json:"path"`
-	State     DotState      `json:"state,omitempty"`
+	State     dots.State    `json:"state,omitempty"`
 	IsDir     bool          `json:"is_dir"`
 	Depth     int           `json:"depth,omitempty"`
 	Ignored   bool          `json:"ignored,omitempty"`
@@ -145,10 +146,7 @@ type DotsSyncAvailability struct {
 	RepoPath   string
 }
 
-const (
-	dotsContentDirName  = "dotfiles"
-	dotChildrenMaxDepth = 4
-)
+const dotsContentDirName = "dotfiles"
 
 // ─── public API ───────────────────────────────────────────────────────────────
 

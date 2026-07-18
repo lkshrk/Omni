@@ -283,6 +283,28 @@ func TestResolveToolsCachesProviderAvailabilityPerPass(t *testing.T) {
 	}
 }
 
+func TestResolveToolsSkipsProviderInventoryGroups(t *testing.T) {
+	ctx := context.Background()
+	brew := &availabilityCountingProvider{name: "brew", available: true}
+	a := New(filepath.Join(t.TempDir(), "settings.json"))
+	if err := a.InitTestMode(ctx, brew); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	defer a.Close() //nolint:errcheck
+
+	cfg := &config.RootConfig{Tools: map[string]config.ToolSpec{
+		"git":   {Provider: "brew"},
+		"libc6": {Provider: "brew"},
+	}, Groups: []*config.GroupConfig{
+		{Name: "work", Tools: []config.ToolEntry{{Name: "git"}}},
+		{Name: "provider-inventory", Special: "provider-inventory", Tools: []config.ToolEntry{{Name: "libc6"}}},
+	}}
+	resolved, warnings := a.resolveTools(ctx, cfg, cfg.Groups, false)
+	if len(warnings) != 0 || len(resolved) != 1 || resolved[0].entry.Name != "git" {
+		t.Fatalf("resolved=%v warnings=%v, want only git", resolved, warnings)
+	}
+}
+
 func TestPlanInstallRoute_SelectsLaterCandidateWhenPackageUnavailable(t *testing.T) {
 	ctx := context.Background()
 	apt := &availabilityCountingProvider{name: "apt", available: true}

@@ -66,6 +66,12 @@ type InstalledPlugin struct {
 	PathOutdated *bool
 }
 
+// Update returns the display-ready update verdict for an unmanaged installed
+// plugin, using the same projection as managed PluginRow.Update.
+func (p InstalledPlugin) Update() PluginUpdate {
+	return pluginUpdateDisplay(p.Version, p.LatestVersion, p.Sha, p.LatestSha, p.PathOutdated)
+}
+
 // InstalledMarketplace is one marketplace as reported by an agent's list
 // output. Source is the real, re-addable source string when the agent CLI's
 // list output exposes one; it is empty when it does not, and omni must never

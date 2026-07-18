@@ -2594,20 +2594,20 @@ func TestFlow2_UC146_GroupColAlwaysVisible(t *testing.T) {
 		{Name: "git", Provider: "brew", Installed: true},
 		{Name: "curl", Provider: "brew", Installed: true},
 	}
-	tg := map[string]string{
-		toolKey("git", "brew"):  "host",
-		toolKey("curl", "brew"): "host",
+	tg := map[string][]string{
+		toolKey("git", "brew"):  {"host"},
+		toolKey("curl", "brew"): {"host"},
 	}
 
 	t.Run("host group only → cols.group shows host badge", func(t *testing.T) {
-		cols := newColWidthsWithProviderPins(tools, tg, nil, nil, nil, "", "", "", 120, nil)
+		cols := newColWidthsWithProviderPins(tools, tg, nil, nil, nil, nil, "", "", "", 120, nil)
 		if cols.group < len("[host]") {
 			t.Errorf("cols.group = %d, too narrow for [host]", cols.group)
 		}
 	})
 
 	t.Run("with reusable groups → cols.group>0 even if all tools are in host group", func(t *testing.T) {
-		cols := newColWidthsWithProviderPins(tools, tg, []string{"work"}, nil, nil, "", "", "", 120, nil)
+		cols := newColWidthsWithProviderPins(tools, tg, nil, []string{"work"}, nil, nil, "", "", "", 120, nil)
 		if cols.group == 0 {
 			t.Error("cols.group should be > 0 when reusable groups exist")
 		}

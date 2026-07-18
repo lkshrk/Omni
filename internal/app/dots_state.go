@@ -182,6 +182,23 @@ func (a *App) DotsResolveDiscoveredWithState(ctx context.Context, nameOrPath, gr
 	return &DotsDiscoveredOperationStateResult{Added: added, Ops: result.Ops, State: result.State}, err
 }
 
+func (a *App) DotsResolveDiscoveredPathWithState(ctx context.Context, nameOrPath, groupName, relPath string, strategy DotsResolveStrategy) (*DotsDiscoveredOperationStateResult, error) {
+	var added config.DotEntry
+	result, err := a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
+		var addErr error
+		added, addErr = a.DotsAddDiscoveredEntryContext(ctx, nameOrPath, groupName)
+		if addErr != nil {
+			return nil, addErr
+		}
+		name := added.Name
+		if name == "" {
+			name = nameOrPath
+		}
+		return a.DotsResolveConflictPath(ctx, name, relPath, strategy)
+	})
+	return &DotsDiscoveredOperationStateResult{Added: added, Ops: result.Ops, State: result.State}, err
+}
+
 func (a *App) DotsAddWithState(ctx context.Context, path string, opts DotsAddOptions) (*DotsOperationStateResult, error) {
 	return a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
 		return a.DotsAdd(ctx, path, opts)
@@ -203,6 +220,12 @@ func (a *App) DotsDeleteLocalWithState(ctx context.Context, status DotStatus) (*
 func (a *App) DotsResolveConflictWithState(ctx context.Context, name string, strategy DotsResolveStrategy) (*DotsOperationStateResult, error) {
 	return a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
 		return a.DotsResolveConflict(ctx, name, strategy)
+	})
+}
+
+func (a *App) DotsResolveConflictPathWithState(ctx context.Context, name, relPath string, strategy DotsResolveStrategy) (*DotsOperationStateResult, error) {
+	return a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
+		return a.DotsResolveConflictPath(ctx, name, relPath, strategy)
 	})
 }
 
@@ -230,14 +253,39 @@ func (a *App) DotsAddIgnorePatternWithState(ctx context.Context, name, pattern s
 
 func (a *App) DotsIncludeIgnoredPathWithState(ctx context.Context, name, relPath string) (*DotsOperationStateResult, error) {
 	return a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
-		return nil, a.DotsIncludeIgnoredPathContext(ctx, name, relPath)
+		if err := a.DotsIncludeIgnoredPathContext(ctx, name, relPath); err != nil {
+			return nil, err
+		}
+		return a.syncIncludedDotEntry(ctx, name)
 	})
 }
 
 func (a *App) DotsSetEntryIgnoredWithState(ctx context.Context, name, path string, ignored bool) (*DotsOperationStateResult, error) {
 	return a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
-		return nil, a.DotsSetEntryIgnoredContext(ctx, name, path, ignored)
+		if err := a.DotsSetEntryIgnoredContext(ctx, name, path, ignored); err != nil {
+			return nil, err
+		}
+		if ignored {
+			return nil, nil
+		}
+		return a.syncIncludedDotEntry(ctx, name)
 	})
+}
+
+func (a *App) syncIncludedDotEntry(ctx context.Context, name string) ([]dots.Op, error) {
+	repoPath, err := resolveRepoPath(a.dotsRepoPath())
+	if err != nil {
+		return nil, err
+	}
+	entry, err := a.resolvedDotEntry(name, dotsContentPath(repoPath))
+	if err != nil {
+		return nil, err
+	}
+	state, _ := dots.ClassifyEntry(entry)
+	if state == dots.StateNoSource {
+		return nil, nil
+	}
+	return a.DotsSyncEntry(ctx, name, dots.SyncOptions{})
 }
 
 func (a *App) DotsAddHostVariantWithState(ctx context.Context, name string, opts DotsAddVariantOptions) (*DotsVariantStateResult, error) {
@@ -246,6 +294,17 @@ func (a *App) DotsAddHostVariantWithState(ctx context.Context, name string, opts
 		var opErr error
 		var ops []dots.Op
 		info, ops, opErr = a.DotsAddHostVariant(ctx, name, opts)
+		return ops, opErr
+	})
+	return &DotsVariantStateResult{Info: info, Ops: result.Ops, State: result.State}, err
+}
+
+func (a *App) DotsExtractThenAddHostVariantWithState(ctx context.Context, parentName, subpath string, opts DotsAddVariantOptions) (*DotsVariantStateResult, error) {
+	var info DotVariantInfo
+	result, err := a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
+		var opErr error
+		var ops []dots.Op
+		info, ops, opErr = a.DotsExtractThenAddHostVariant(ctx, parentName, subpath, opts)
 		return ops, opErr
 	})
 	return &DotsVariantStateResult{Info: info, Ops: result.Ops, State: result.State}, err
@@ -411,7 +470,7 @@ func dotsStatusesFromCacheRows(rows []*database.DotStatusCache) ([]DotStatus, er
 		if row == nil {
 			continue
 		}
-		var actions []DotAction
+		var actions []dots.Action
 		if err := unmarshalDotsStateJSON(row.ActionsJSON, &actions); err != nil {
 			return nil, fmt.Errorf("decode actions for dots entry %q: %w", row.Name, err)
 		}
@@ -431,7 +490,7 @@ func dotsStatusesFromCacheRows(rows []*database.DotStatusCache) ([]DotStatus, er
 			TargetPath: row.TargetPath,
 			ConfigPath: row.ConfigPath,
 			Health:     DotHealth(row.Health),
-			State:      DotState(row.State),
+			State:      dots.State(row.State),
 			Actions:    actions,
 			Group:      row.Group,
 			FileCount:  row.FileCount,

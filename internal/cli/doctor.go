@@ -27,19 +27,22 @@ func newDoctorCmd(state *rootState) *cobra.Command {
 				return fmt.Errorf("--dry-run requires --fix")
 			}
 			if fix {
-				report, err := state.app.OptimizeConfigIncludes(dryRun)
-				if err != nil {
-					return err
+				fixResult := state.app.FixDoctorIssues(dryRun)
+				if fixResult.OptimizeErr == nil {
+					printOptimizeReport(out, fixResult.OptimizeReport, dryRun)
 				}
-				printOptimizeReport(out, report, dryRun)
 				if dryRun {
+					if err := fixResult.Err(); err != nil {
+						return err
+					}
 					fmt.Fprintln(out, "dry run: no files were changed (ignore-pattern cleanup runs only on a real --fix)")
 					return nil
 				}
-				if modified, err := state.app.DotsFixIgnorePatterns(); err != nil {
+				if len(fixResult.IgnoreModified) > 0 {
+					fmt.Fprintf(out, "cleaned ignore patterns for: %s\n", strings.Join(fixResult.IgnoreModified, ", "))
+				}
+				if err := fixResult.Err(); err != nil {
 					return err
-				} else if len(modified) > 0 {
-					fmt.Fprintf(out, "cleaned ignore patterns for: %s\n", strings.Join(modified, ", "))
 				}
 			}
 			result, err := state.app.Doctor(cmd.Context())

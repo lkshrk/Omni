@@ -4,6 +4,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
+	"github.com/lkshrk/omni/internal/dots"
 	"github.com/lkshrk/omni/internal/profile"
 	"github.com/lkshrk/omni/internal/provider"
 )
@@ -101,6 +103,11 @@ type dotsVariantRequest struct {
 	name       string
 	remove     bool
 	discovered bool
+	// parentName and subpath are set only for the child-row path: the subpath is
+	// first extracted out of parentName into its own entry (named name), then a
+	// host variant is created for it.
+	parentName string
+	subpath    string
 }
 
 type dotsPeekState struct {
@@ -281,6 +288,7 @@ type Model struct {
 	groupNames              []string          // ordered reusable group names
 	toolGroups              map[string]string // "name\x00provider" → group name
 	toolMemberships         map[string][]string
+	hostInventoryTools      map[string]bool
 	ignoreLabels            map[string]string // logical tool name → compact ignore source label
 	toolIgnoreSet           map[string]bool
 	groupIgnoreSet          map[string]map[string]bool
@@ -473,7 +481,7 @@ type Model struct {
 	dotMemberships         map[string][]string
 	dotsCursor             int
 	dotsExpandedName       string
-	dotsExpandedState      app.DotState
+	dotsExpandedState      dots.State
 	dotsExpandedChildren   map[string]bool
 	dotsLoading            bool
 	dotsLoaded             bool // true after first lazy load
@@ -869,6 +877,7 @@ func toolsLoadedMsgFromStartupState(snapshot *app.StartupSnapshot) toolsLoadedMs
 		groupNames:             snapshot.GroupNames,
 		toolGroups:             snapshot.ToolGroups,
 		toolMemberships:        snapshot.ToolMemberships,
+		hostInventoryTools:     snapshot.HostInventoryTools,
 		dotMemberships:         snapshot.DotMemberships,
 		ignoreLabels:           ignoreLabels,
 		toolIgnoreSet:          snapshot.ToolIgnores,
@@ -1003,9 +1012,9 @@ func (m *Model) applyFilter() {
 	}
 
 	result := app.BuildToolViewList(app.ToolViewListOptions{
-		Tools:           m.allTools,
-		DiscoveredTools: m.discoveredTools,
-		SearchTools:     m.searchTools,
+		Tools:           filterHostInventoryTools(m.allTools, m.hostInventoryTools),
+		DiscoveredTools: filterHostInventoryTools(m.discoveredTools, m.hostInventoryTools),
+		SearchTools:     filterHostInventoryTools(m.searchTools, m.hostInventoryTools),
 		Query:           m.filter.Value(),
 		ProviderFilter:  targetProvider,
 		GroupFilter:     m.groupFilter,
@@ -1022,6 +1031,24 @@ func (m *Model) applyFilter() {
 		counts[sectionFromToolView(sectionName)] = count
 	}
 	m.sectionCounts = counts
+}
+
+// filterHostInventoryTools drops tools that belong to the provider-inventory
+// group (auto-discovered system packages), identified by the hostInventory map.
+// Membership in a regular host group is a first-class, user-visible assignment
+// and is NOT filtered here.
+func filterHostInventoryTools(tools []*database.ToolCache, hostInventory map[string]bool) []*database.ToolCache {
+	filtered := make([]*database.ToolCache, 0, len(tools))
+	for _, tool := range tools {
+		if tool == nil {
+			continue
+		}
+		if hostInventory[tool.Name] {
+			continue
+		}
+		filtered = append(filtered, tool)
+	}
+	return filtered
 }
 
 func (m Model) skillsSectionEnabled() bool  { return m.agentsEnabled && m.skillsEnabled }
@@ -1196,6 +1223,11 @@ func providerCandidateOptions(m Model, t *database.ToolCache) []config.ToolInsta
 	if len(out) < 2 {
 		return nil
 	}
+	sort.SliceStable(out[1:], func(i, j int) bool {
+		left := strings.ToLower(strings.TrimSpace(out[i+1].Provider) + "/" + out[i+1].EffectivePackage(t.Name))
+		right := strings.ToLower(strings.TrimSpace(out[j+1].Provider) + "/" + out[j+1].EffectivePackage(t.Name))
+		return left < right
+	})
 	return out
 }
 

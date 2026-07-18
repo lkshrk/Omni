@@ -812,14 +812,9 @@ func progressEventNeedsAdmin(event isync.ProgressEvent) bool {
 }
 
 func isPrivilegeErrorText(message string) bool {
-	if plan, ok := provider.ClassifyPrivilegeError(errors.New(message)); ok && plan.RequiresPrivilege() {
-		return true
-	}
-	message = strings.ToLower(message)
-	return strings.Contains(message, "requires sudo") ||
-		strings.Contains(message, "requires root") ||
-		strings.Contains(message, "requires admin") ||
-		strings.Contains(message, "administrator")
+	// Route through the single classifier (privilege.go) so this consumer cannot
+	// drift from the other one.
+	return isPrivilegedInstallFailure(message)
 }
 
 func RefreshToolProgressStatus(providerLabel, toolName string, done, total int) string {

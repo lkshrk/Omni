@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/lkshrk/omni/internal/app"
 )
 
@@ -95,14 +97,15 @@ func dotsPeekLines(m Model, width int) []string {
 }
 
 func dotsPeekSourceLine(m Model, label string, side app.DotsPeekSide) string {
+	if !side.Exists {
+		return m.palette.styleHelp.Render(label+": ") + m.palette.styleMissing.Render("missing")
+	}
 	path := side.Path
 	if path == "" {
 		path = "-"
 	}
 	parts := []string{label + ": " + path}
 	switch {
-	case !side.Exists:
-		parts = append(parts, "missing")
 	case side.Binary:
 		parts = append(parts, "binary")
 	case side.Truncated:
@@ -163,20 +166,27 @@ func hardWrapLine(line string, width int) []string {
 	if width <= 0 {
 		return []string{""}
 	}
-	runes := []rune(line)
-	if len(runes) == 0 {
+	if line == "" {
 		return []string{""}
 	}
-	if len(runes) <= width {
+	if lipgloss.Width(line) <= width {
 		return []string{line}
 	}
-	out := make([]string, 0, len(runes)/width+1)
-	for len(runes) > width {
-		out = append(out, string(runes[:width]))
-		runes = runes[width:]
+	var out []string
+	var current strings.Builder
+	used := 0
+	for _, r := range line {
+		runeWidth := lipgloss.Width(string(r))
+		if used > 0 && used+runeWidth > width {
+			out = append(out, current.String())
+			current.Reset()
+			used = 0
+		}
+		current.WriteRune(r)
+		used += runeWidth
 	}
-	if len(runes) > 0 {
-		out = append(out, string(runes))
+	if current.Len() > 0 {
+		out = append(out, current.String())
 	}
 	return out
 }

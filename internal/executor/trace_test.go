@@ -70,3 +70,13 @@ func TestTracingExecutorIgnoresSinkFailure(t *testing.T) {
 		t.Fatalf("records = %d, want 1", len(sink.records))
 	}
 }
+
+func TestTracingExecutorLabelsTruncatedStderr(t *testing.T) {
+	sink := &traceSinkStub{}
+	next := &MockExecutor{Responses: []MockCall{{Stderr: strings.Repeat("x", tracePreviewLimit+1), Err: errors.New("failed")}}}
+
+	_, _, _ = NewTracing(next, sink).Run(context.Background(), "tool")
+	if len(sink.records) != 1 || !strings.HasSuffix(sink.records[0].Stderr, "...[truncated]") {
+		t.Fatalf("stored stderr should clearly label the capture limit: %#v", sink.records)
+	}
+}

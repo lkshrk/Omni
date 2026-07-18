@@ -2,6 +2,7 @@ package app
 
 import (
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/config"
@@ -156,6 +157,40 @@ func TestSetSkillGroups_RoundTrip(t *testing.T) {
 	}
 	if len(home.Skills) != 0 {
 		t.Errorf("home.Skills = %v, want empty after reassign", home.Skills)
+	}
+}
+
+func TestSetSkillGroups_PersistsMultipleHostGroups(t *testing.T) {
+	a := newMembershipTestApp(t)
+	if err := a.withConfig(func(cfg *config.RootConfig) error {
+		cfg.Agents.Packages = []config.SkillPackage{{Source: "o/r"}}
+		cfg.Groups = []*config.GroupConfig{
+			{Name: "alpha", Special: "host", Skills: []string{"o/r"}},
+			{Name: "beta", Special: "host"},
+			{Name: "work"},
+		}
+		cfg.Hosts = map[string][]string{
+			"alpha": {"work"},
+			"beta":  {"work"},
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{"alpha", "beta", "work"}
+	if err := a.SetSkillGroups("o/r", want, nil, "beta"); err != nil {
+		t.Fatalf("SetSkillGroups across hosts: %v", err)
+	}
+	cfg, err := a.loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range want {
+		group := findGroupInConfig(cfg, name)
+		if group == nil || !slices.Contains(group.Skills, "o/r") {
+			t.Fatalf("o/r should remain in %q, groups=%+v", name, cfg.Groups)
+		}
 	}
 }
 

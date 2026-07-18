@@ -49,107 +49,6 @@ func TestAgentConfigDotCandidateNames_DerivesFromCatalog(t *testing.T) {
 	}
 }
 
-func TestReplaceDotSourceFromLocal_CopyFailureKeepsOldSource(t *testing.T) {
-	sourcePath := filepath.Join(t.TempDir(), "repo", "nvim", ".config", "nvim")
-	packageRoot := filepath.Dir(filepath.Dir(sourcePath))
-	if err := os.MkdirAll(sourcePath, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	oldFile := filepath.Join(sourcePath, "init.lua")
-	if err := os.WriteFile(oldFile, []byte("old"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	_, err := replaceDotSourceFromLocal(filepath.Join(t.TempDir(), "missing"), sourcePath, packageRoot, nil)
-	if err == nil {
-		t.Fatal("replaceDotSourceFromLocal succeeded with missing copy source")
-	}
-	got, readErr := os.ReadFile(oldFile)
-	if readErr != nil || string(got) != "old" {
-		t.Fatalf("old source changed after copy failure: body=%q err=%v", got, readErr)
-	}
-}
-
-func TestReplaceDotSourceFromLocal_FollowsNestedSymlink(t *testing.T) {
-	tmp := t.TempDir()
-	sourcePath := filepath.Join(tmp, "repo", "nvim", ".config", "nvim")
-	copySource := filepath.Join(tmp, "home", ".config", "nvim")
-	if err := os.MkdirAll(sourcePath, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(copySource, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	oldFile := filepath.Join(sourcePath, "init.lua")
-	if err := os.WriteFile(oldFile, []byte("old"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(copySource, "init.lua"), []byte("new"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	externalFile := filepath.Join(tmp, "outside.lua")
-	if err := os.WriteFile(externalFile, []byte("external"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(externalFile, filepath.Join(copySource, "external.lua")); err != nil {
-		t.Fatal(err)
-	}
-
-	replacement, err := replaceDotSourceFromLocal(copySource, sourcePath, filepath.Join(tmp, "repo", "nvim"), nil)
-	if err != nil {
-		t.Fatalf("replaceDotSourceFromLocal: %v", err)
-	}
-	if err := replacement.commit(); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-	if got, readErr := os.ReadFile(oldFile); readErr != nil || string(got) != "new" {
-		t.Fatalf("regular local file copy = %q err=%v, want new", got, readErr)
-	}
-	got, readErr := os.ReadFile(filepath.Join(sourcePath, "external.lua"))
-	if readErr != nil || string(got) != "external" {
-		t.Fatalf("followed symlink copy = %q err=%v, want external content", got, readErr)
-	}
-	info, statErr := os.Lstat(filepath.Join(sourcePath, "external.lua"))
-	if statErr != nil {
-		t.Fatalf("copied external file stat: %v", statErr)
-	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		t.Fatal("copied external file is still a symlink")
-	}
-}
-
-func TestReplaceDotSourceFromLocal_RollbackRestoresOldSource(t *testing.T) {
-	tmp := t.TempDir()
-	sourcePath := filepath.Join(tmp, "repo", "nvim", ".config", "nvim")
-	copySource := filepath.Join(tmp, "home", ".config", "nvim")
-	if err := os.MkdirAll(sourcePath, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(copySource, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(sourcePath, "init.lua"), []byte("old"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(copySource, "init.lua"), []byte("new"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	replacement, err := replaceDotSourceFromLocal(copySource, sourcePath, filepath.Join(tmp, "repo", "nvim"), nil)
-	if err != nil {
-		t.Fatalf("replaceDotSourceFromLocal: %v", err)
-	}
-	if got, err := os.ReadFile(filepath.Join(sourcePath, "init.lua")); err != nil || string(got) != "new" {
-		t.Fatalf("replacement source = %q err=%v, want new", got, err)
-	}
-	if err := replacement.rollback(); err != nil {
-		t.Fatalf("rollback: %v", err)
-	}
-	if got, err := os.ReadFile(filepath.Join(sourcePath, "init.lua")); err != nil || string(got) != "old" {
-		t.Fatalf("rolled back source = %q err=%v, want old", got, err)
-	}
-}
-
 func TestRollbackDotsAdd_RemovesPartialTargetBeforeRestore(t *testing.T) {
 	tmp := t.TempDir()
 	home := filepath.Join(tmp, "home")
@@ -381,6 +280,72 @@ func TestBuildIgnoredChildTree_DeepTree(t *testing.T) {
 	}
 }
 
+// TestIgnoredChildDotStatuses_KeepsTrackedReincludedChildren verifies that a
+// tracked (re-included) child living inside an ignored directory surfaces in the
+// synthesized Ignored-section tree carrying its real state (not muted/dropped),
+// while the ignored sibling stays ignored and the container dir stays synthetic.
+func TestIgnoredChildDotStatuses_KeepsTrackedReincludedChildren(t *testing.T) {
+	status := DotStatus{
+		Name:       "claude",
+		TargetPath: "/home/.config",
+		State:      dots.StateSynced,
+		IsDir:      true,
+		Children: []DotChild{
+			{
+				Name:    "sub",
+				RelPath: "sub",
+				Ignored: true,
+				IsDir:   true,
+				Depth:   1,
+				Children: []DotChild{
+					{Name: "keep", RelPath: "sub/keep", State: dots.StateSynced, Depth: 2, FileCount: 1, Counts: DotFileCounts{Synced: 1}},
+					{Name: "drop", RelPath: "sub/drop", State: dots.StateIgnored, Ignored: true, Depth: 2},
+				},
+			},
+		},
+		ignoredChildren: []DotChild{
+			{Name: "drop", RelPath: "sub/drop", State: dots.StateIgnored, Ignored: true, Depth: 2},
+		},
+	}
+
+	out := ignoredChildDotStatuses([]DotStatus{status})
+	if len(out) != 1 {
+		t.Fatalf("expected 1 ignored-section entry, got %d", len(out))
+	}
+	tree := out[0].Children
+	if len(tree) != 1 || tree[0].Name != "sub" {
+		t.Fatalf("expected top container 'sub', got %+v", tree)
+	}
+	sub := tree[0]
+	if sub.Ignored {
+		t.Errorf("container 'sub' should be synthesized (Ignored=false)")
+	}
+	var keep, drop *DotChild
+	for i := range sub.Children {
+		switch sub.Children[i].Name {
+		case "keep":
+			keep = &sub.Children[i]
+		case "drop":
+			drop = &sub.Children[i]
+		}
+	}
+	if keep == nil {
+		t.Fatalf("tracked child 'keep' missing from ignored-section tree; children=%+v", sub.Children)
+	}
+	if keep.Ignored {
+		t.Errorf("tracked child 'keep' should have Ignored=false")
+	}
+	if keep.State != dots.StateSynced {
+		t.Errorf("tracked child 'keep' state = %q, want %q", keep.State, dots.StateSynced)
+	}
+	if keep.Counts.Synced != 1 {
+		t.Errorf("tracked child 'keep' Counts.Synced = %d, want 1", keep.Counts.Synced)
+	}
+	if drop == nil || !drop.Ignored {
+		t.Errorf("ignored sibling 'drop' should remain Ignored=true, got %+v", drop)
+	}
+}
+
 func TestClassifyDotPathState_AllIgnoredDirIsIgnoredNotConflict(t *testing.T) {
 	tmp := t.TempDir()
 	src := filepath.Join(tmp, "repo", ".claude", "plugins")
@@ -399,9 +364,9 @@ func TestClassifyDotPathState_AllIgnoredDirIsIgnoredNotConflict(t *testing.T) {
 	}
 	ignores := append(dots.DefaultIgnores(), "*", "!/plugins", "!/agents/")
 
-	state := classifyDotPathState(src, tgt, ignores, DotStateConflict)
-	if state != DotStateIgnored {
-		t.Fatalf("all-ignored dir state = %s, want %s", state, DotStateIgnored)
+	state := classifyDotPathState(src, tgt, ignores, dots.StateConflict)
+	if state != dots.StateIgnored {
+		t.Fatalf("all-ignored dir state = %s, want %s", state, dots.StateIgnored)
 	}
 }
 
@@ -426,9 +391,9 @@ func TestClassifyDotPathState_UnignoredContentStillConflicts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	state := classifyDotPathState(src, tgt, dots.DefaultIgnores(), DotStateConflict)
-	if state != DotStateConflict {
-		t.Fatalf("unignored differing content state = %s, want %s", state, DotStateConflict)
+	state := classifyDotPathState(src, tgt, dots.DefaultIgnores(), dots.StateConflict)
+	if state != dots.StateConflict {
+		t.Fatalf("unignored differing content state = %s, want %s", state, dots.StateConflict)
 	}
 }
 
@@ -455,17 +420,17 @@ func TestClassifyDotEntry_AllIgnoredRootDirIsIgnoredNotConflict(t *testing.T) {
 		Ignore:     append(dots.DefaultIgnores(), "*"),
 	}
 
-	state, actions := classifyDotEntry(entry)
-	if state != DotStateIgnored {
-		t.Fatalf("all-ignored root dir state = %s, want %s", state, DotStateIgnored)
+	state, actions := dots.ClassifyEntry(entry)
+	if state != dots.StateIgnored {
+		t.Fatalf("all-ignored root dir state = %s, want %s", state, dots.StateIgnored)
 	}
-	want := []DotAction{DotActionUnignore, DotActionRemove}
+	want := []dots.Action{dots.ActionUnignore, dots.ActionRemove}
 	if len(actions) != len(want) || actions[0] != want[0] || actions[1] != want[1] {
 		t.Fatalf("actions = %v, want %v", actions, want)
 	}
 
-	op := lstatEntryOp(entry, false)
+	op := dots.LstatEntryOp(entry, false)
 	if op.Kind != dots.OpSkip {
-		t.Fatalf("lstatEntryOp kind = %v, want %v", op.Kind, dots.OpSkip)
+		t.Fatalf("dots.LstatEntryOp kind = %v, want %v", op.Kind, dots.OpSkip)
 	}
 }

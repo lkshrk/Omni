@@ -351,7 +351,7 @@ func (m *Model) handleDotsActionKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibl
 			break
 		}
 		entry := row.entry
-		if !app.DotStatusHasAction(entry, app.DotActionSync) {
+		if !app.DotStatusHasAction(entry, dots.ActionSync) {
 			break
 		}
 		m.beginDotsOperation("Syncing " + entry.Name + "…")
@@ -359,6 +359,26 @@ func (m *Model) handleDotsActionKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibl
 			cmds = append(cmds, m.spinner.Tick, m.doDotsSyncDiscovered(entry))
 		} else {
 			cmds = append(cmds, m.spinner.Tick, m.doDotsSyncEntry(entry.Name))
+		}
+	case key.Matches(msg, m.keys.Install):
+		if msg.IsRepeat || len(visible) == 0 || m.dotsCursor >= len(visible) {
+			break
+		}
+		row := visible[m.dotsCursor]
+		if !dotsRowInstallEligible(row) {
+			break
+		}
+		m.beginDotsOperation("Installing " + row.entry.Name + "…")
+		if row.isChild {
+			if app.DotStatusTransientCandidate(row.entry) {
+				cmds = append(cmds, m.spinner.Tick, m.doDotsResolveDiscoveredPath(row.entry, row.child.RelPath, app.DotResolveUseRepo))
+			} else {
+				cmds = append(cmds, m.spinner.Tick, m.doDotsResolvePath(row.entry.Name, row.child.RelPath, app.DotResolveUseRepo))
+			}
+		} else if app.DotStatusTransientCandidate(row.entry) {
+			cmds = append(cmds, m.spinner.Tick, m.doDotsSyncDiscovered(row.entry))
+		} else {
+			cmds = append(cmds, m.spinner.Tick, m.doDotsSyncEntry(row.entry.Name))
 		}
 	case key.Matches(msg, m.keys.SyncAll):
 		if msg.IsRepeat {
@@ -414,7 +434,9 @@ func (m *Model) handleDotsActionKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibl
 
 func dotsVariantEligible(row dotsVisibleRow) bool {
 	if row.isChild {
-		return false
+		// A tracked child sub-path becomes a variant by first being extracted
+		// into its own entry, so variant eligibility mirrors extractability.
+		return dotsChildExtractable(row)
 	}
 	return app.DotStatusVariantEligible(row.entry)
 }
@@ -429,7 +451,9 @@ func (m *Model) handleDotsVariantKeyMsg(visible []dotsVisibleRow) []tea.Cmd {
 		return cmds
 	}
 	mode := dotsVariantCreate
-	if !app.DotStatusTransientCandidate(row.entry) {
+	// Child rows always create: they extract a fresh entry that cannot yet have
+	// an existing host variant, so skip the parent-entry active-variant probe.
+	if !row.isChild && !app.DotStatusTransientCandidate(row.entry) {
 		hasActiveVariant, err := m.app.DotsHasActiveHostVariant(row.entry.Name)
 		if err != nil {
 			cmds = append(cmds, setStatus(m, "✗ "+err.Error(), true))
@@ -463,6 +487,13 @@ func (m *Model) handleDotsVariantChoiceKeyMsg(msg tea.KeyPressMsg, visible []dot
 	case dotsVariantCreate:
 		if !key.Matches(msg, m.keys.DotVariant) {
 			return cmds
+		}
+		if row.isChild {
+			return m.startDotsVariantChange(dotsVariantRequest{
+				name:       app.DotExtractName(row.entry.Name, row.child.RelPath),
+				parentName: row.entry.Name,
+				subpath:    row.child.RelPath,
+			})
 		}
 		return m.startDotsVariantChange(dotsVariantRequest{
 			name:       name,
@@ -515,7 +546,11 @@ func (m *Model) handleDotsToggleKeyMsg(visible []dotsVisibleRow) []tea.Cmd {
 		}
 		key := dotsChildExpandKey(name, row.child.RelPath)
 		if m.dotsExpandedChildren[key] {
-			delete(m.dotsExpandedChildren, key)
+			for expanded := range m.dotsExpandedChildren {
+				if expanded == key || strings.HasPrefix(expanded, key+"/") {
+					delete(m.dotsExpandedChildren, expanded)
+				}
+			}
 		} else {
 			m.dotsExpandedChildren[key] = true
 		}
@@ -693,10 +728,7 @@ func (m *Model) handleDotsResolveKeyMsg(visible []dotsVisibleRow, strategy app.D
 		return cmds
 	}
 	entry := row.entry
-	if strategy == app.DotResolveUseRepo && !app.DotStatusHasAction(entry, app.DotActionUseRepo) {
-		return cmds
-	}
-	if strategy == app.DotResolveUseLocal && !app.DotStatusHasAction(entry, app.DotActionUseLocal) {
+	if !dotsRowResolveEligible(row, strategy) {
 		return cmds
 	}
 	idx := &m.dotsOverwriteIdx
@@ -711,7 +743,13 @@ func (m *Model) handleDotsResolveKeyMsg(visible []dotsVisibleRow, strategy app.D
 		m.dotsOverwriteIdx = -1
 		m.dotsLocalIdx = -1
 		m.beginDotsOperation("Using " + label + " for " + name + "…")
-		if app.DotStatusTransientCandidate(entry) {
+		if row.isChild {
+			if app.DotStatusTransientCandidate(entry) {
+				cmds = append(cmds, m.spinner.Tick, m.doDotsResolveDiscoveredPath(entry, row.child.RelPath, strategy))
+			} else {
+				cmds = append(cmds, m.spinner.Tick, m.doDotsResolvePath(entry.Name, row.child.RelPath, strategy))
+			}
+		} else if app.DotStatusTransientCandidate(entry) {
 			cmds = append(cmds, m.spinner.Tick, m.doDotsResolveDiscovered(entry, strategy))
 		} else {
 			cmds = append(cmds, m.spinner.Tick, m.doDotsResolve(name, strategy))
@@ -743,6 +781,55 @@ func (m *Model) handleDotsResolveKeyMsg(visible []dotsVisibleRow, strategy app.D
 	return cmds
 }
 
+func dotsRowState(row dotsVisibleRow) dots.State {
+	if row.isChild {
+		return app.DotChildDisplayState(row.child, app.DotStatusState(row.entry))
+	}
+	return app.DotStatusState(row.entry)
+}
+
+func dotsRowInstallEligible(row dotsVisibleRow) bool {
+	if row.isChild && !dotsRowIsResolvableChild(row) {
+		return false
+	}
+	switch dotsRowState(row) {
+	case dots.StateMissing, dots.StateRepoOnly:
+		return true
+	default:
+		return false
+	}
+}
+
+func dotsRowResolveEligible(row dotsVisibleRow, strategy app.DotsResolveStrategy) bool {
+	if !row.isChild {
+		action := dots.ActionUseRepo
+		if strategy == app.DotResolveUseLocal {
+			action = dots.ActionUseLocal
+		}
+		return app.DotStatusHasAction(row.entry, action)
+	}
+	if !dotsRowIsResolvableChild(row) {
+		return false
+	}
+	switch strategy {
+	case app.DotResolveUseRepo:
+		switch dotsRowState(row) {
+		case dots.StateConflict, dots.StateModified, dots.StateBroken:
+			return true
+		}
+	case app.DotResolveUseLocal:
+		switch dotsRowState(row) {
+		case dots.StateConflict, dots.StateModified, dots.StateLocalOnly:
+			return true
+		}
+	}
+	return false
+}
+
+func dotsRowIsResolvableChild(row dotsVisibleRow) bool {
+	return row.isChild && !row.child.Ignored && strings.TrimSpace(row.child.RelPath) != "" && len(row.child.Children) == 0
+}
+
 // handleDotsForceResolveAllKeyMsg arms (first press) then runs (second press) a
 // force-resolve of every conflicting entry with the given strategy.
 func (m *Model) handleDotsForceResolveAllKeyMsg(strategy app.DotsResolveStrategy) []tea.Cmd {
@@ -772,7 +859,7 @@ func (m *Model) handleDotsForceResolveAllKeyMsg(strategy app.DotsResolveStrategy
 func dotsConflictCount(m Model) int {
 	n := 0
 	for _, e := range m.dotsEntries {
-		if app.DotStatusState(e) == app.DotStateConflict {
+		if app.DotStatusState(e) == dots.StateConflict {
 			n++
 		}
 	}
@@ -788,7 +875,7 @@ func (m *Model) handleDotsDeleteKeyMsg(visible []dotsVisibleRow) []tea.Cmd {
 	if visible[m.dotsCursor].isChild {
 		return cmds
 	}
-	if !app.DotStatusHasAction(visible[m.dotsCursor].entry, app.DotActionRemove) {
+	if !app.DotStatusHasAction(visible[m.dotsCursor].entry, dots.ActionRemove) {
 		return cmds
 	}
 	m.dotsConfirmIdx = m.dotsCursor
@@ -843,7 +930,7 @@ func dotsChildOutOfSync(row dotsVisibleRow) bool {
 		return false
 	}
 	switch dotChildStateForDisplay(row.child, app.DotStatusState(row.entry)) {
-	case app.DotStateSynced, app.DotStateIgnored, app.DotStateInactive, app.DotStateDisabled, app.DotStateNoSource:
+	case dots.StateSynced, dots.StateIgnored, dots.StateInactive, dots.StateDisabled, dots.StateNoSource:
 		return false
 	default:
 		return true

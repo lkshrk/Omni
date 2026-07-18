@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -224,99 +223,10 @@ func TestDotConflictIsManagedStowLink(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			tmp := t.TempDir()
 			entry, stowPath := tc.setup(t, tmp)
-			got := dotConflictIsManagedStowLink(entry, stowPath)
+			got := dots.ConflictIsManagedStowLink(entry, stowPath)
 			if got != tc.want {
-				t.Fatalf("dotConflictIsManagedStowLink = %v, want %v", got, tc.want)
+				t.Fatalf("dots.ConflictIsManagedStowLink = %v, want %v", got, tc.want)
 			}
 		})
 	}
-}
-
-func TestRestoreDotTargetAfterFailedRestow(t *testing.T) {
-	t.Run("restores file backup", func(t *testing.T) {
-		tmp := t.TempDir()
-		home := filepath.Join(tmp, "home")
-		t.Setenv("HOME", home)
-
-		backupPath := filepath.Join(tmp, "backup.txt")
-		if err := os.WriteFile(backupPath, []byte("original"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		targetPath := filepath.Join(tmp, "target.txt")
-		if err := os.WriteFile(targetPath, []byte("partial"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-
-		entry := dots.ResolvedEntry{Name: "test", TargetPath: targetPath}
-		prep := preparedDotTarget{backupPath: backupPath, preservedDirectory: false}
-
-		if err := restoreDotTargetAfterFailedRestow(context.Background(), nil, entry, prep); err != nil {
-			t.Fatalf("restoreDotTargetAfterFailedRestow: %v", err)
-		}
-		got, err := os.ReadFile(targetPath)
-		if err != nil {
-			t.Fatalf("read target: %v", err)
-		}
-		if string(got) != "original" {
-			t.Fatalf("target content = %q, want %q", got, "original")
-		}
-	})
-
-	t.Run("restores directory backup", func(t *testing.T) {
-		tmp := t.TempDir()
-		home := filepath.Join(tmp, "home")
-		t.Setenv("HOME", home)
-
-		backupPath := filepath.Join(tmp, "backup")
-		if err := os.MkdirAll(filepath.Join(backupPath, "sub"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(backupPath, "sub", "file.txt"), []byte("original"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-
-		targetDir := filepath.Join(tmp, "targetdir")
-		if err := os.MkdirAll(targetDir, 0o755); err != nil {
-			t.Fatal(err)
-		}
-		// partial content from failed restow
-		if err := os.WriteFile(filepath.Join(targetDir, "partial.txt"), []byte("partial"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-
-		entry := dots.ResolvedEntry{Name: "test", TargetPath: targetDir}
-		prep := preparedDotTarget{
-			backupPath:          backupPath,
-			preservedDirectory:  true,
-			removedManagedPaths: true,
-		}
-
-		if err := restoreDotTargetAfterFailedRestow(context.Background(), nil, entry, prep); err != nil {
-			t.Fatalf("restoreDotTargetAfterFailedRestow: %v", err)
-		}
-		got, err := os.ReadFile(filepath.Join(targetDir, "sub", "file.txt"))
-		if err != nil {
-			t.Fatalf("read restored file: %v", err)
-		}
-		if string(got) != "original" {
-			t.Fatalf("restored file content = %q, want %q", got, "original")
-		}
-	})
-
-	t.Run("no-op when no backup and preservedDirectory", func(t *testing.T) {
-		tmp := t.TempDir()
-		home := filepath.Join(tmp, "home")
-		t.Setenv("HOME", home)
-
-		entry := dots.ResolvedEntry{Name: "test", TargetPath: filepath.Join(tmp, "target")}
-		prep := preparedDotTarget{
-			backupPath:          "",
-			preservedDirectory:  true,
-			removedManagedPaths: false,
-		}
-
-		if err := restoreDotTargetAfterFailedRestow(context.Background(), nil, entry, prep); err != nil {
-			t.Fatalf("restoreDotTargetAfterFailedRestow: %v", err)
-		}
-	})
 }

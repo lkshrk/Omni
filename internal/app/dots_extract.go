@@ -88,7 +88,7 @@ func (a *App) DotsExtract(ctx context.Context, parentName, subpath string, opts 
 	}
 
 	parentSub := filepath.Join(parent.SourcePath, subrel)
-	if !pathExists(parentSub) {
+	if !dots.PathExists(parentSub) {
 		return nil, fmt.Errorf("dots extract: %q is not tracked under %q", subrel, parentName)
 	}
 
@@ -124,7 +124,7 @@ func (a *App) DotsExtract(ctx context.Context, parentName, subpath string, opts 
 	if err := os.RemoveAll(childTarget); err != nil {
 		return nil, fmt.Errorf("dots extract: clear %q: %w", childTarget, err)
 	}
-	if err := copyDotPath(parentSub, childTarget, combinedDotIgnores(nil)); err != nil {
+	if err := dots.CopyDotPath(parentSub, childTarget, dots.CombinedIgnores(nil)); err != nil {
 		return nil, fmt.Errorf("dots extract: materialise %q: %w", childTarget, err)
 	}
 	if err := os.RemoveAll(parentSub); err != nil {
@@ -140,6 +140,20 @@ func (a *App) DotsExtract(ctx context.Context, parentName, subpath string, opts 
 		return nil, fmt.Errorf("dots extract: adopt %q as %q: %w", childTarget, childName, err)
 	}
 	return ops, nil
+}
+
+// DotsExtractThenAddHostVariant splits subpath out of parentName into its own
+// dot entry and then adds a host-specific variant for that new entry, letting a
+// child sub-path row become a host variant in a single step. It returns the new
+// entry's variant info plus the combined ops from both operations.
+func (a *App) DotsExtractThenAddHostVariant(ctx context.Context, parentName, subpath string, opts DotsAddVariantOptions) (DotVariantInfo, []dots.Op, error) {
+	childName := DotExtractName(parentName, subpath)
+	ops, err := a.DotsExtract(ctx, parentName, subpath, DotsExtractOptions{})
+	if err != nil {
+		return DotVariantInfo{}, ops, err
+	}
+	info, variantOps, err := a.DotsAddHostVariant(ctx, childName, opts)
+	return info, append(ops, variantOps...), err
 }
 
 // DotsExtractWithState runs DotsExtract and returns the refreshed dots state for

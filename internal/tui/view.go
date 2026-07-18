@@ -228,7 +228,7 @@ func (m Model) viewString() string {
 		return placePopup(bg, m, renderDotsPeekPopup(m), dotsPeekPopupFrame(m))
 	}
 
-	if m.mode == viewSettings && (m.traceLog != nil || m.traceLogLoading) {
+	if (m.mode == viewSettings || m.mode == viewList || m.mode == viewSearch) && (m.traceLog != nil || m.traceLogLoading) {
 		bgModel := m
 		bgModel.traceLog = nil
 		bgModel.traceLogLoading = false
@@ -698,12 +698,12 @@ func popupTitleForSelectedDot(m Model, action string) string {
 
 func groupMembershipPopupTitle(m Model) string {
 	if m.pickerMembershipKind == pickerMembershipDot {
-		return popupTitleForSelectedDot(m, "Move Group")
+		return popupTitleForSelectedDot(m, "Change Groups")
 	}
 	if m.pickerMembershipKind == pickerMembershipSkill {
-		return popupTitleForName("Move Group", m.pickerMembershipName)
+		return popupTitleForName("Change Groups", m.pickerMembershipName)
 	}
-	return popupTitleForMembershipTool(m, "Move Group")
+	return popupTitleForMembershipTool(m, "Change Groups")
 }
 
 func groupEditorPopupFrame(m Model) popupFrame {

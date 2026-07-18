@@ -627,6 +627,57 @@ func TestSetToolGroupsCreatesSelectedGroupAndAssignsHost(t *testing.T) {
 	}
 }
 
+func TestSetToolGroupsCreatesProviderInventoryMarker(t *testing.T) {
+	a, cfgPath := newImportApp(t)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools:  logicalToolSpecs(logicalTool("libc6", "apt")),
+		Groups: []*config.GroupConfig{{Name: "testhost", Special: "host", Tools: groupTools("libc6")}},
+		Hosts:  map[string][]string{"testhost": {}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	if err := a.SetToolGroups("libc6", []string{config.SystemInventoryGroup}, nil, "testhost"); err != nil {
+		t.Fatalf("SetToolGroups: %v", err)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	group := logicalTestGroupByName(cfg, config.SystemInventoryGroup)
+	if group == nil || !group.IsSystemInventory() || !logicalTestGroupHasTool(group, "libc6") {
+		t.Fatalf("provider inventory group = %+v, want special marker and libc6", group)
+	}
+}
+
+func TestSetToolGroupsRemovesProviderInventoryAndRestoresHost(t *testing.T) {
+	a, cfgPath := newImportApp(t)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: logicalToolSpecs(logicalTool("libc6", "apt")),
+		Groups: []*config.GroupConfig{
+			{Name: "testhost", Special: "host"},
+			{Name: config.SystemInventoryGroup, Special: config.SystemInventoryGroup, Tools: groupTools("libc6")},
+		},
+		Hosts: map[string][]string{"testhost": {}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	if err := a.SetToolGroups("libc6", []string{"testhost"}, nil, "testhost"); err != nil {
+		t.Fatalf("SetToolGroups: %v", err)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	inventory := logicalTestGroupByName(cfg, config.SystemInventoryGroup)
+	if inventory != nil && logicalTestGroupHasTool(inventory, "libc6") {
+		t.Fatalf("inventory group still contains libc6: %+v", inventory)
+	}
+	host := logicalTestGroupByName(cfg, "testhost")
+	if host == nil || !logicalTestGroupHasTool(host, "libc6") {
+		t.Fatalf("host group missing libc6 after restore: %+v", host)
+	}
+}
+
 func TestSetToolGroupsWithStateReturnsUpdatedToolsAndGroups(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "testhost.local")
 	a, cfgPath := newImportApp(t, &stubProvider{
@@ -701,6 +752,22 @@ func TestToolGroupLabelsForHostFiltersInactiveGroupsAndCompacts(t *testing.T) {
 	}
 	if got := labels["fd\x00system"]; got != "" {
 		t.Fatalf("fd label = %q, want empty inactive label", got)
+	}
+}
+
+func TestGroupLabelForHostFiltersInactiveGroupsAndCompacts(t *testing.T) {
+	got := app.GroupLabelForHost(
+		[]string{"testhost", "ops", "dev", "unused"},
+		&app.HostInfo{
+			Active: "testhost",
+			Hosts: map[string]config.HostAssignment{
+				"testhost": {Groups: []string{"dev", "ops"}},
+			},
+		},
+		"testhost",
+	)
+	if got != "dev,ops+1" {
+		t.Fatalf("group label = %q, want dev,ops+1", got)
 	}
 }
 
