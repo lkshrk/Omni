@@ -522,11 +522,12 @@ func TestSync_DuplicateToolAcrossGroups_IsInvalid(t *testing.T) {
 	brew := &installTracker{stubProvider: stubProvider{name: "brew", available: true}}
 	a, cfgPath := newImportApp(t, brew)
 
-	// Put ripgrep in BOTH base and work group.
+	// Put ripgrep in TWO reusable groups. An item may hold at most one reusable
+	// group (host groups are unlimited), so this is invalid.
 	rootCfg := &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
 		Groups: []*config.GroupConfig{
-			{Tools: groupTools("ripgrep")},
+			{Name: "base", Tools: groupTools("ripgrep")},
 			{Name: "work", Tools: groupTools("ripgrep")},
 		},
 	}
@@ -535,8 +536,8 @@ func TestSync_DuplicateToolAcrossGroups_IsInvalid(t *testing.T) {
 	}
 
 	_, err := a.Sync(context.Background(), gosync.SyncOptions{})
-	if err == nil || !strings.Contains(err.Error(), `tool "ripgrep" already belongs to group`) {
-		t.Fatalf("Sync error = %v, want duplicate ownership validation error", err)
+	if err == nil || !strings.Contains(err.Error(), `tool "ripgrep" already belongs to reusable group`) {
+		t.Fatalf("Sync error = %v, want duplicate reusable ownership validation error", err)
 	}
 	if len(brew.installCalled) != 0 {
 		t.Fatalf("install calls = %v, want none for invalid config", brew.installCalled)

@@ -41,19 +41,37 @@ func (m *Model) handleProviderScannedMsg(msg providerScannedMsg) []tea.Cmd {
 		m.discoveryGen++
 		m.providerSnapshotRefreshing = true
 		m.discoveryRefreshing = true
-		setActivityStatus(m, "Finding local tools…")
 		m.providerScanToolCounts = nil
 		m.providerScanToolDone = nil
 		m.providerScanLabels = nil
 		m.refreshToolDone = 0
 		m.refreshToolTotal = 0
-		if m.progressCh != nil {
-			close(m.progressCh)
-			m.progressCh = nil
-			m.progressGen++
+		// Close only the scan's own progress stream. m.progressCh may already
+		// belong to a newer stream begun by an unrelated operation while the
+		// scan was still running (e.g. agents update all); closing that channel
+		// here would crash its worker goroutine on sendProgress/its own close.
+		if m.scanProgressCh != nil {
+			close(m.scanProgressCh)
+			if m.progressCh == m.scanProgressCh {
+				m.progressCh = nil
+				m.progressGen++
+			}
+			m.scanProgressCh = nil
 		}
-		ch, progressGen := m.beginProgressStream()
-		cmds = append(cmds, m.doFetchFinalTools(msg.gen), m.doRefreshDiscovered(m.discoveryGen, ch, progressGen), waitForProgress(ch, progressGen))
+		// The discovered refresh takes over the shared status stream only when
+		// no other operation owns it. If a foreign stream is active (m.progressCh
+		// survived the block above), beginning a new stream here would bump
+		// progressGen and silently drop that operation's remaining progress
+		// updates — so the refresh runs without progress reporting instead
+		// (doRefreshDiscovered and sendProgress both accept a nil channel).
+		var ch chan progressUpdate
+		var progressGen int
+		if m.progressCh == nil {
+			setActivityStatus(m, "Finding local tools…")
+			ch, progressGen = m.beginProgressStream()
+			cmds = append(cmds, waitForProgress(ch, progressGen))
+		}
+		cmds = append(cmds, m.doFetchFinalTools(msg.gen), m.doRefreshDiscovered(m.discoveryGen, ch, progressGen))
 		cmds = append(cmds, m.startProviderOutdatedChecks(outdatedProviders, msg.gen)...)
 		if len(m.refreshScanErrors) > 0 {
 			cmds = append(cmds, setStatus(m, aggregateRefreshErrors(m.refreshScanErrors), true))

@@ -141,6 +141,30 @@ func (a *App) DotsSyncDiscoveredWithState(ctx context.Context, nameOrPath, group
 	return &DotsDiscoveredOperationStateResult{Added: added, Ops: result.Ops, State: result.State}, err
 }
 
+func (a *App) DotsAddDiscoveredHostVariantWithState(ctx context.Context, nameOrPath string, opts DotsAddVariantOptions) (*DotsVariantStateResult, error) {
+	var info DotVariantInfo
+	result, err := a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
+		added, addErr := a.DotsAddDiscoveredEntryContext(ctx, nameOrPath, "")
+		if addErr != nil {
+			return nil, addErr
+		}
+		name := added.Name
+		if name == "" {
+			name = nameOrPath
+		}
+		sync := opts.Sync
+		opts.Sync = false
+		var ops []dots.Op
+		info, ops, addErr = a.DotsAddHostVariant(ctx, name, opts)
+		if addErr != nil || !sync || !info.Active {
+			return ops, addErr
+		}
+		resolveOps, resolveErr := a.DotsResolveConflict(ctx, name, DotResolveUseRepo)
+		return append(ops, resolveOps...), resolveErr
+	})
+	return &DotsVariantStateResult{Info: info, Ops: result.Ops, State: result.State}, err
+}
+
 func (a *App) DotsResolveDiscoveredWithState(ctx context.Context, nameOrPath, groupName string, strategy DotsResolveStrategy) (*DotsDiscoveredOperationStateResult, error) {
 	var added config.DotEntry
 	result, err := a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {

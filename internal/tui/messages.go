@@ -255,6 +255,10 @@ type fixIgnoreDoneMsg struct {
 	err      error
 }
 
+type configOptimizeDoneMsg struct {
+	err error
+}
+
 type fixNvmDoneMsg struct {
 	result     *app.NvmManagedMigrationBatchResult
 	tools      []*database.ToolCache

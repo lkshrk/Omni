@@ -297,6 +297,23 @@ func TestVerifyRestoredSkillTargetsAcceptsEveryExpectedAgentLink(t *testing.T) {
 	}
 }
 
+func TestVerifyRestoredSkillTargetsIgnoresStaleLockEntries(t *testing.T) {
+	pkgs := []resolvedPackage{{SkillPackage: config.SkillPackage{
+		Source: "o/r", Agents: []string{"claude-code", "codex"},
+	}}}
+	lock := &config.SkillLockFile{Skills: map[string]config.SkillLockEntry{
+		"current": {Source: "o/r"},
+		"removed": {Source: "o/r"},
+	}}
+	entries := []skillsCLIListEntry{
+		{Name: "current", Scope: "global", Agents: []string{"Claude Code", "Codex"}},
+	}
+	res := verifyRestoredSkillTargets(pkgs, lock, entries, RestoreSkillsResult{Installed: []string{"o/r"}})
+	if !reflect.DeepEqual(res.Installed, []string{"o/r"}) || len(res.Failed) != 0 {
+		t.Fatalf("result = %+v, stale lock entries must not fail verification", res)
+	}
+}
+
 func TestVerifyRestoredSkillTargetsRejectsMissingAgentLink(t *testing.T) {
 	pkgs := []resolvedPackage{
 		{SkillPackage: config.SkillPackage{Source: "ok/r", Agents: []string{"codex"}}},

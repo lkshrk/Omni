@@ -2647,18 +2647,18 @@ func TestSync_DuplicateToolOwnership_ReturnsValidationError(t *testing.T) {
 	cfgDir := t.TempDir()
 	cacheDir := t.TempDir()
 	cfgPath := filepath.Join(cfgDir, "settings.json")
-	// Duplicate tool across the host group and one reusable group.
+	// Duplicate tool across two reusable groups is invalid (an item may hold at
+	// most one reusable group; host + one reusable would be fine).
 	withConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"ripgrep": {Provider: "system", InstallWith: "brew"},
 		},
 		Groups: []*config.GroupConfig{
-			cliTestHostGroup("ripgrep"),
+			{Name: "base", Tools: []config.ToolEntry{{Name: "ripgrep"}}},
 			{Name: "work", Tools: []config.ToolEntry{
-				{Name: "ripgrep"}, // duplicate name
+				{Name: "ripgrep"}, // duplicate name in a second reusable group
 			}},
 		},
-		Hosts: map[string][]string{"testhost": {"work"}},
 	})
 
 	cmd := NewRootCmd()
@@ -2666,8 +2666,8 @@ func TestSync_DuplicateToolOwnership_ReturnsValidationError(t *testing.T) {
 	cmd.SetErr(errBuf)
 	cmd.SetArgs([]string{"--config", cfgPath, "--cache-dir", cacheDir, "tools", "sync", "--dry-run"})
 	err := cmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), `tool "ripgrep" already belongs to group`) {
-		t.Fatalf("sync error = %v, want duplicate ownership validation error", err)
+	if err == nil || !strings.Contains(err.Error(), `tool "ripgrep" already belongs to reusable group`) {
+		t.Fatalf("sync error = %v, want duplicate reusable ownership validation error", err)
 	}
 }
 
@@ -5367,6 +5367,83 @@ func TestDoctor_InvalidConfigPrintsDiagnosticsAndFails(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("doctor output = %q, want %q", output, want)
 		}
+	}
+}
+
+func TestDoctorFixRemovesDuplicateDotDefinitions(t *testing.T) {
+	cfgDir := t.TempDir()
+	cacheDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	writeFile := func(rel, content string) {
+		p := filepath.Join(cfgDir, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile("settings.json", `{
+  "$include": ["settings.d/dots.json"],
+  "hosts": {"testhost": ["dev"]},
+  "groups": [
+    {"name": "testhost", "special": "host"},
+    {"name": "dev", "dots": [{"name": "git", "path": "~/.gitconfig"}]}
+  ]
+}`)
+	writeFile("settings.d/dots.json", `{
+  "groups": [{"name": "dev", "dots": [{"name": "git", "path": "~/.gitconfig"}]}]
+}`)
+
+	// Dry-run: reports, does not write.
+	output, err := runRootCommand(t, "--config", cfgPath, "--cache-dir", cacheDir, "doctor", "--fix", "--dry-run")
+	if err != nil {
+		t.Fatalf("doctor --fix --dry-run: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "git") || !strings.Contains(output, "would remove") {
+		t.Fatalf("dry-run output missing planned removal: %s", output)
+	}
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.MergeNotices) == 0 {
+		t.Fatal("dry-run must not have fixed anything")
+	}
+
+	// Real fix: removes the parent copy, doctor no longer warns.
+	output, err = runRootCommand(t, "--config", cfgPath, "--cache-dir", cacheDir, "doctor", "--fix")
+	if err != nil {
+		t.Fatalf("doctor --fix: %v\n%s", err, output)
+	}
+	if !strings.Contains(output, "removed") {
+		t.Fatalf("fix output missing removal summary: %s", output)
+	}
+	cfg, err = config.Load(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.MergeNotices) != 0 {
+		t.Fatalf("merge notices survived --fix: %v", cfg.MergeNotices)
+	}
+	if strings.Contains(output, "duplicate definitions") {
+		t.Fatalf("doctor report still shows duplicates after fix: %s", output)
+	}
+}
+
+func TestDoctorDryRunRequiresFix(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "settings.json")
+	cacheDir := t.TempDir()
+	t.Setenv("OMNI_HOSTNAME", "testhost")
+	withConfig(t, cfgPath, &config.RootConfig{})
+
+	output, err := runRootCommand(t, "--config", cfgPath, "--cache-dir", cacheDir, "doctor", "--dry-run")
+	if err == nil {
+		t.Fatalf("doctor --dry-run without --fix should error, got:\n%s", output)
+	}
+	if !strings.Contains(err.Error(), "--fix") {
+		t.Fatalf("error should mention --fix, got: %v", err)
 	}
 }
 

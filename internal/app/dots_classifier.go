@@ -398,10 +398,14 @@ func DotSyncAllEntryOrder(statuses []DotStatus) []string {
 }
 
 func DotStatusVariantEligible(status DotStatus) bool {
-	if status.Name == "" || DotStatusTransientCandidate(status) {
+	if status.Name == "" {
 		return false
 	}
-	switch DotStatusState(status) {
+	state := DotStatusState(status)
+	if DotStatusTransientCandidate(status) && state != DotStateLocalOnly {
+		return false
+	}
+	switch state {
 	case DotStateIgnored, DotStateInactive, DotStateDisabled:
 		return false
 	default:

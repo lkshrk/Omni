@@ -359,6 +359,31 @@ func (m *Model) startDashboardFixIgnore(cmds *[]tea.Cmd) {
 	})
 }
 
+func (m *Model) startDashboardFixConfig(cmds *[]tea.Cmd) {
+	if m.app == nil || m.doctorResult == nil {
+		return
+	}
+	fixable := false
+	for _, check := range m.doctorResult.Checks {
+		if statusDoctorCheckAction(check).kind == statusActionFixConfig {
+			fixable = true
+			break
+		}
+	}
+	if !fixable {
+		return
+	}
+	a := m.app
+	*cmds = append(*cmds, func() tea.Msg {
+		_, err := a.OptimizeConfigIncludes(false)
+		if err != nil {
+			return configOptimizeDoneMsg{err: err}
+		}
+		_, err = a.DotsFixIgnorePatterns()
+		return configOptimizeDoneMsg{err: err}
+	})
+}
+
 func (m *Model) startDashboardFixNvmManaged(cmds *[]tea.Cmd) {
 	if !statusDashboardNvmManagedActionable(*m) {
 		return
@@ -459,6 +484,8 @@ func (m *Model) handleStatusAction(action statusAction, cmds *[]tea.Cmd) {
 		m.startDashboardUpgradeAll(cmds)
 	case statusActionFixIgnore:
 		m.startDashboardFixIgnore(cmds)
+	case statusActionFixConfig:
+		m.startDashboardFixConfig(cmds)
 	case statusActionFixNvmManaged:
 		m.startDashboardFixNvmManaged(cmds)
 	case statusActionOpenAgents:
@@ -521,6 +548,15 @@ func (m *Model) handleFixIgnoreDoneMsg(msg fixIgnoreDoneMsg) []tea.Cmd {
 		m.refreshDoctorAfterFix(&cmds)
 	}
 	m.continueDashboardReconcile(dashboardReconcilePlanFixIgnore, nil, &cmds)
+	return cmds
+}
+
+func (m *Model) handleConfigOptimizeDoneMsg(msg configOptimizeDoneMsg) []tea.Cmd {
+	if msg.err != nil {
+		return []tea.Cmd{setStatus(m, "fix config issues: "+msg.err.Error(), true)}
+	}
+	var cmds []tea.Cmd
+	m.refreshDoctorAfterFix(&cmds)
 	return cmds
 }
 

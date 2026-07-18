@@ -98,8 +98,9 @@ const (
 )
 
 type dotsVariantRequest struct {
-	name   string
-	remove bool
+	name       string
+	remove     bool
+	discovered bool
 }
 
 type dotsPeekState struct {
@@ -238,14 +239,20 @@ type Model struct {
 	adminTerminalQueue        []adminTerminalState
 	adminTerminalGen          int
 
-	scanningProviders          map[string]bool
-	outdatedProviders          map[string]bool
-	providerScanToolCounts     map[string]int
-	providerScanToolDone       map[string]int
-	providerScanLabels         map[string]string
-	refreshToolDone            int
-	refreshToolTotal           int
-	scanGen                    int
+	scanningProviders      map[string]bool
+	outdatedProviders      map[string]bool
+	providerScanToolCounts map[string]int
+	providerScanToolDone   map[string]int
+	providerScanLabels     map[string]string
+	refreshToolDone        int
+	refreshToolTotal       int
+	scanGen                int
+	// scanProgressCh is the progress stream owned by the in-flight provider
+	// scan fan-out. The per-provider scan commands share it, so no producer
+	// can close it; the settle branch of handleProviderScannedMsg closes this
+	// field instead of m.progressCh, which may meanwhile belong to a newer
+	// stream started by an unrelated operation (e.g. agents update all).
+	scanProgressCh             chan progressUpdate
 	discoveryGen               int
 	providerSnapshotRefreshing bool
 	outdatedSnapshotRefreshing bool

@@ -3355,6 +3355,188 @@ func TestDotsAddHostVariant_SeedsFromLocalTargetWhenPresent(t *testing.T) {
 	}
 }
 
+func TestDotsAddDiscoveredHostVariant_TracksLocalContentAsHostSpecificAndRestows(t *testing.T) {
+	if _, err := exec.LookPath("stow"); err != nil {
+		t.Skip("stow not installed")
+	}
+	t.Setenv("OMNI_HOSTNAME", "work.local")
+
+	tests := []struct {
+		name    string
+		path    string
+		content string
+	}{
+		{name: "gitconfig", path: ".gitconfig", content: "[user]\n\tname = Local\n"},
+		{name: "kitty", path: filepath.Join(".config", "kitty", "kitty.conf"), content: "font_size 12\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a, cfgDir, repoDir := newDotsApp(t)
+			target := filepath.Join(os.Getenv("HOME"), tt.path)
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(target, []byte(tt.content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			result, err := a.DotsAddDiscoveredHostVariantWithState(context.Background(), tt.name, app.DotsAddVariantOptions{Sync: true})
+			if err != nil {
+				t.Fatalf("DotsAddDiscoveredHostVariantWithState: %v", err)
+			}
+			if result.Info.Package != tt.name+"@work" {
+				t.Fatalf("variant package = %q, want %q", result.Info.Package, tt.name+"@work")
+			}
+
+			variantSource := filepath.Join(repoDir, "dotfiles", tt.name+"@work", tt.path)
+			if got, readErr := os.ReadFile(variantSource); readErr != nil || string(got) != tt.content {
+				t.Fatalf("variant content = %q, %v; want %q", got, readErr, tt.content)
+			}
+			resolved, err := filepath.EvalSymlinks(target)
+			if err != nil {
+				t.Fatalf("EvalSymlinks target: %v", err)
+			}
+			wantResolved, err := filepath.EvalSymlinks(variantSource)
+			if err != nil {
+				t.Fatalf("EvalSymlinks variant source: %v", err)
+			}
+			if resolved != wantResolved {
+				t.Fatalf("target resolves to %q, want %q", resolved, wantResolved)
+			}
+
+			cfg, err := config.Load(filepath.Join(cfgDir, "settings.json"))
+			if err != nil {
+				t.Fatalf("config.Load: %v", err)
+			}
+			group := findDotsTestGroup(cfg.Groups, "work")
+			if group == nil || len(group.Dots) != 1 || group.Dots[0].Hosts["work"].Package != tt.name+"@work" {
+				t.Fatalf("work group dots = %#v, want host variant %q", group, tt.name+"@work")
+			}
+		})
+	}
+}
+
+func TestDotsAddDiscoveredHostVariant_RestowFailurePreservesLocalContent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test stow shim requires a POSIX shell")
+	}
+	t.Setenv("OMNI_HOSTNAME", "work.local")
+	a, cfgDir, repoDir := newDotsApp(t)
+
+	binDir := t.TempDir()
+	stowPath := filepath.Join(binDir, "stow")
+	stowScript := "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then exit 0; fi\necho forced restow failure >&2\nexit 1\n"
+	if err := os.WriteFile(stowPath, []byte(stowScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	target := filepath.Join(os.Getenv("HOME"), ".gitconfig")
+	content := "[user]\n\tname = Local\n"
+	if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := a.DotsAddDiscoveredHostVariantWithState(context.Background(), "gitconfig", app.DotsAddVariantOptions{Sync: true})
+	if err == nil || !strings.Contains(err.Error(), "forced restow failure") {
+		t.Fatalf("error = %v, want forced restow failure", err)
+	}
+	info, statErr := os.Lstat(target)
+	if statErr != nil {
+		t.Fatalf("restored target stat: %v", statErr)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("restored target is still a symlink")
+	}
+	if got, readErr := os.ReadFile(target); readErr != nil || string(got) != content {
+		t.Fatalf("restored local content = %q, %v; want %q", got, readErr, content)
+	}
+
+	variantSource := filepath.Join(repoDir, "dotfiles", "gitconfig@work", ".gitconfig")
+	if got, readErr := os.ReadFile(variantSource); readErr != nil || string(got) != content {
+		t.Fatalf("retryable variant content = %q, %v; want %q", got, readErr, content)
+	}
+	cfg, loadErr := config.Load(filepath.Join(cfgDir, "settings.json"))
+	if loadErr != nil {
+		t.Fatalf("config.Load: %v", loadErr)
+	}
+	group := findDotsTestGroup(cfg.Groups, "work")
+	if group == nil || len(group.Dots) != 1 || group.Dots[0].Hosts["work"].Package != "gitconfig@work" {
+		t.Fatalf("work group dots = %#v, want retryable gitconfig@work variant", group)
+	}
+}
+
+func TestDotsAddDiscoveredHostVariant_GitAutoActions(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	if _, err := exec.LookPath("stow"); err != nil {
+		t.Skip("stow not installed")
+	}
+	t.Setenv("OMNI_HOSTNAME", "work.local")
+	const wantCommit = "dots: add gitconfig variant for work"
+
+	t.Run("auto commit", func(t *testing.T) {
+		a, _, repoDir := newDotsAppWithGitCfg(t, config.DotsGitConfig{AutoCommit: true})
+		initDotsTestGitRepo(t, repoDir)
+		writeDotsTestGitconfig(t)
+
+		if _, err := a.DotsAddDiscoveredHostVariantWithState(context.Background(), "gitconfig", app.DotsAddVariantOptions{Sync: true}); err != nil {
+			t.Fatalf("DotsAddDiscoveredHostVariantWithState: %v", err)
+		}
+		if got := dotsTestGit(t, repoDir, "log", "-1", "--pretty=%s"); got != wantCommit {
+			t.Fatalf("commit subject = %q, want %q", got, wantCommit)
+		}
+	})
+
+	t.Run("auto push", func(t *testing.T) {
+		a, _, repoDir := newDotsAppWithGitCfg(t, config.DotsGitConfig{AutoPush: true})
+		remoteDir := t.TempDir()
+		dotsTestGit(t, remoteDir, "init", "--bare", "-q")
+		initDotsTestGitRepo(t, repoDir)
+		dotsTestGit(t, repoDir, "remote", "add", "origin", remoteDir)
+		dotsTestGit(t, repoDir, "commit", "--allow-empty", "-m", "init")
+		dotsTestGit(t, repoDir, "push", "-u", "origin", "HEAD")
+		writeDotsTestGitconfig(t)
+
+		if _, err := a.DotsAddDiscoveredHostVariantWithState(context.Background(), "gitconfig", app.DotsAddVariantOptions{Sync: true}); err != nil {
+			t.Fatalf("DotsAddDiscoveredHostVariantWithState: %v", err)
+		}
+		if got := dotsTestGit(t, remoteDir, "log", "-1", "--pretty=%s", "--all"); got != wantCommit {
+			t.Fatalf("remote commit subject = %q, want %q", got, wantCommit)
+		}
+	})
+}
+
+func initDotsTestGitRepo(t *testing.T, repoDir string) {
+	t.Helper()
+	dotsTestGit(t, repoDir, "init", "-q")
+	dotsTestGit(t, repoDir, "config", "user.email", "test@example.com")
+	dotsTestGit(t, repoDir, "config", "user.name", "Test")
+	dotsTestGit(t, repoDir, "config", "commit.gpgsign", "false")
+	dotsTestGit(t, repoDir, "config", "tag.gpgsign", "false")
+}
+
+func writeDotsTestGitconfig(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte("[user]\n\tname = Local\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func dotsTestGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git -C %s %v: %v\n%s", dir, args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
 func TestDotsAddHostVariant_UsesExistingRepoPackageWhenPresent(t *testing.T) {
 	t.Setenv("OMNI_HOSTNAME", "work")
 	a, cfgDir, repoDir := newDotsApp(t)

@@ -2391,13 +2391,11 @@ func TestRenderGroupMembershipPicker_SeparatesActiveAndInactiveGroups(t *testing
 		},
 	}
 	out := renderGroupMembershipPicker(m)
-	for _, want := range []string{"current host", "inactive groups", "base", "work", "personal", "space", "select", "esc", "cancel"} {
+	// Multi-select picker: space toggles, enter confirms, esc cancels.
+	for _, want := range []string{"current host", "inactive groups", "base", "work", "personal", "space", "toggle", "enter", "confirm", "esc", "cancel"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("group membership picker missing %q:\n%s", want, out)
 		}
-	}
-	if strings.Contains(out, "enter save") {
-		t.Fatalf("single-membership picker should not require a second save key:\n%s", out)
 	}
 }
 
@@ -6045,8 +6043,105 @@ func TestDashboardDoctorIgnoreWarningOffersFix(t *testing.T) {
 	if idx < 0 {
 		t.Fatalf("missing Doctor row: %#v", rows)
 	}
-	if rows[idx].action.kind != statusActionFixIgnore || rows[idx].action.desc != "fix ignore patterns" {
-		t.Fatalf("dots.ignore row action = %#v, want fix ignore patterns", rows[idx].action)
+	if rows[idx].action.kind != statusActionFixConfig || rows[idx].action.desc != "fix issues" {
+		t.Fatalf("dots.ignore row action = %#v, want fix issues", rows[idx].action)
+	}
+}
+
+func TestDashboardDoctorDuplicateConfigOffersFix(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewStatus
+	m.doctorResult = &app.DoctorResult{
+		Checks: []app.DoctorCheck{
+			{ID: "config", Label: "Config", Status: app.DoctorStatusWarn, Message: "settings.json has duplicate definitions across $include fragments"},
+		},
+		Summary: app.DoctorSummary{Warn: 1},
+	}
+
+	rows := statusRows(m)
+	idx := statusRowIndex(rows, "Doctor")
+	if idx < 0 {
+		t.Fatalf("missing Doctor row: %#v", rows)
+	}
+	if rows[idx].action.kind != statusActionFixConfig || rows[idx].action.desc != "fix issues" {
+		t.Fatalf("config row action = %#v, want fix issues", rows[idx].action)
+	}
+	binding, ok := statusActionHintBinding(m.keys, rows[idx].action)
+	if !ok || binding.Help().Key != "f" {
+		t.Fatalf("fix binding = %#v, want f", binding.Help())
+	}
+}
+
+func TestDashboardDoctorFixableFindingWinsWithOtherWarnings(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewStatus
+	m.doctorResult = &app.DoctorResult{
+		Checks: []app.DoctorCheck{
+			{ID: "config", Label: "Config", Status: app.DoctorStatusWarn, Message: "settings.json has duplicate definitions across $include fragments"},
+			{ID: "cache", Label: "Cache", Status: app.DoctorStatusWarn, Message: "cache stale"},
+		},
+		Summary: app.DoctorSummary{Warn: 2},
+	}
+
+	rows := statusRows(m)
+	idx := statusRowIndex(rows, "Doctor")
+	if idx < 0 {
+		t.Fatalf("missing Doctor row: %#v", rows)
+	}
+	if rows[idx].action.kind != statusActionFixConfig {
+		t.Fatalf("doctor action = %#v, want fix issues", rows[idx].action)
+	}
+}
+
+func TestDashboardDoctorFixActionDispatches(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "settings.json")
+	if err := os.MkdirAll(filepath.Join(dir, "settings.d"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, []byte(`{"$include":["settings.d/dots.json"],"groups":[{"name":"dev","dots":[{"name":"git"}]}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "settings.d", "dots.json"), []byte(`{"groups":[{"name":"dev","dots":[{"name":"git"}]}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := baseModel(nil)
+	m.app = app.New(configPath)
+	m.doctorResult = &app.DoctorResult{
+		Checks:  []app.DoctorCheck{{ID: "config", Status: app.DoctorStatusWarn, Message: "settings.json has duplicate definitions across $include fragments"}},
+		Summary: app.DoctorSummary{Warn: 1},
+	}
+
+	var cmds []tea.Cmd
+	m.handleStatusAction(statusAction{kind: statusActionFixConfig}, &cmds)
+	if len(cmds) != 1 {
+		t.Fatalf("fix action commands = %d, want 1", len(cmds))
+	}
+	msg := cmds[0]().(configOptimizeDoneMsg)
+	if msg.err != nil {
+		t.Fatalf("fix action: %v", msg.err)
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.MergeNotices) != 0 {
+		t.Fatalf("merge notices survived fix: %v", cfg.MergeNotices)
+	}
+}
+
+func TestDashboardDoctorFixDoneRefreshesDoctor(t *testing.T) {
+	m := baseModel(nil)
+	m.app = app.New(filepath.Join(t.TempDir(), "settings.json"))
+	m.doctorResult = &app.DoctorResult{}
+
+	next, cmd := m.Update(configOptimizeDoneMsg{})
+	got := next.(Model)
+	if got.statusMsg != "Refreshing doctor…" {
+		t.Fatalf("status = %q, want doctor refresh", got.statusMsg)
+	}
+	if !got.doctorRunning || cmd == nil {
+		t.Fatalf("doctor refresh = running:%v cmd:%v, want running command", got.doctorRunning, cmd != nil)
 	}
 }
 

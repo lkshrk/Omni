@@ -699,6 +699,9 @@ func moveToolToGroupInConfig(cfg *config.RootConfig, name, groupName string) err
 	if _, ok := cfg.Tools[name]; !ok {
 		return fmt.Errorf("logical tool %q not found; run 'omni tools set %s --provider <ecosystem-provider>' first", name, name)
 	}
+	// MoveToolToGroup is a relocate: the tool ends up in exactly one group. The
+	// multi-group model (unlimited host groups + one reusable group) is reached
+	// through the membership picker, which sets the full group set directly.
 	for _, existing := range cfg.Groups {
 		if existing == nil || existing.BaseName() == groupName {
 			continue
@@ -758,6 +761,7 @@ func moveDotToGroupInConfig(cfg *config.RootConfig, name, groupName string) erro
 	if !ok {
 		return fmt.Errorf("dots entry %q not found", name)
 	}
+	// MoveDotToGroup is a relocate to a single group; see moveToolToGroupInConfig.
 	for _, existing := range cfg.Groups {
 		if existing == nil || existing.BaseName() == groupName {
 			continue

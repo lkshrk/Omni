@@ -70,6 +70,7 @@ const (
 	SettingsExtract                ID = "settings.extract"
 	SetupInit                      ID = "setup.init"
 	Doctor                         ID = "doctor"
+	DoctorFix                      ID = "doctor.fix"
 )
 
 // Scope describes whether an action targets one row, a whole tab/domain, or
@@ -993,6 +994,17 @@ var Diagnostics = []Action{
 		Mutates:         false,
 		TUI:             &TUIBinding{KeyMapField: "Confirm", DefaultKey: "enter", Label: "run doctor", Description: "Run read-only diagnostics from the Status tab."},
 		CLI:             []CLIBinding{{Command: []string{"doctor"}, Flags: []string{"--format"}}},
+	},
+	{
+		ID:              DoctorFix,
+		Domain:          "diagnostics",
+		Scope:           ScopeGlobal,
+		Label:           "fix doctor issues",
+		Description:     "Apply safe config fixes, then rerun health checks.",
+		LongDescription: "Remove duplicate include-chain definitions and dead dotfile ignore patterns, then rerun doctor.",
+		Mutates:         true,
+		TUI:             &TUIBinding{KeyMapField: "Fallback", DefaultKey: "f", Label: "fix issues", Description: "Apply safe fixes for the current Doctor findings."},
+		CLI:             []CLIBinding{{Command: []string{"doctor"}, Flags: []string{"--fix", "--dry-run"}}},
 	},
 }
 

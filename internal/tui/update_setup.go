@@ -613,6 +613,7 @@ func (m *Model) startCurrentProviderScans() []tea.Cmd {
 	}
 	setActivityStatus(m, m.toolRefreshStatus(m.refreshToolDone, m.refreshToolTotal))
 	ch, progressGen := m.beginProgressStream()
+	m.scanProgressCh = ch
 	m.scanGen++
 	gen := m.scanGen
 	var cmds []tea.Cmd

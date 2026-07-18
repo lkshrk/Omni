@@ -230,6 +230,9 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	case fixIgnoreDoneMsg:
 		cmds = append(cmds, m.handleFixIgnoreDoneMsg(msg)...)
 
+	case configOptimizeDoneMsg:
+		cmds = append(cmds, m.handleConfigOptimizeDoneMsg(msg)...)
+
 	case fixNvmDoneMsg:
 		cmds = append(cmds, m.handleFixNvmDoneMsg(msg)...)
 

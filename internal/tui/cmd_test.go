@@ -2575,6 +2575,7 @@ func TestHandleDotsVariantKeyMsg_UsesAppActiveHostVariant(t *testing.T) {
 	visible := []dotsVisibleRow{
 		{entry: app.DotStatus{Name: "nvim", State: app.DotStateSynced}},
 		{entry: app.DotStatus{Name: "tmux", State: app.DotStateSynced}},
+		{entry: app.DotStatus{Name: "gitconfig", State: app.DotStateLocalOnly}},
 	}
 
 	m.dotsCursor = 0
@@ -2587,6 +2588,12 @@ func TestHandleDotsVariantKeyMsg_UsesAppActiveHostVariant(t *testing.T) {
 	cmds = m.handleDotsVariantKeyMsg(visible)
 	if len(cmds) == 0 || m.dotsVariantIdx != 1 || m.dotsVariantMode != dotsVariantCreate {
 		t.Fatalf("default variant mode = idx %d mode %d cmds %d, want create prompt at idx 1", m.dotsVariantIdx, m.dotsVariantMode, len(cmds))
+	}
+
+	m.dotsCursor = 2
+	cmds = m.handleDotsVariantKeyMsg(visible)
+	if len(cmds) == 0 || m.dotsVariantIdx != 2 || m.dotsVariantMode != dotsVariantCreate {
+		t.Fatalf("local-only variant mode = idx %d mode %d cmds %d, want create prompt at idx 2", m.dotsVariantIdx, m.dotsVariantMode, len(cmds))
 	}
 }
 
