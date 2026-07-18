@@ -489,6 +489,13 @@ func (m *Model) doRefreshDiscovered(gen int, progressCh chan progressUpdate, pro
 func (m *Model) startDescriptionRefresh() tea.Cmd {
 	m.descRefreshGen++
 	m.descRefreshing = true
+	// Background refresh: take over the shared status stream only when no
+	// other operation owns it, mirroring the scan-settle branch in
+	// handleProviderScannedMsg — beginning a stream here would bump
+	// progressGen and drop the active operation's remaining progress updates.
+	if m.progressCh != nil {
+		return m.doRefreshDescriptions(m.descRefreshGen, nil, 0)
+	}
 	setActivityStatus(m, "Refreshing tool descriptions…")
 	ch, progressGen := m.beginProgressStream()
 	return tea.Batch(m.doRefreshDescriptions(m.descRefreshGen, ch, progressGen), waitForProgress(ch, progressGen))

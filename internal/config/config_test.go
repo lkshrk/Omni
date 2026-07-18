@@ -307,6 +307,195 @@ func TestNormalizeFile_PersistsOrderAndPreservesUnknownKeys(t *testing.T) {
 	}
 }
 
+func TestNormalizeFile_RoutesIncludedGroupsBackToFragment(t *testing.T) {
+	dir := t.TempDir()
+	path := writeRoutedFixture(t, dir, map[string]string{
+		"settings.json": `{
+  "version": ` + strconv.Itoa(config.CurrentVersion) + `,
+  "$include": ["settings.d/extra.json"],
+  "groups": [
+    {"name": "zeta"}
+  ]
+}`,
+		"settings.d/extra.json": `{
+  "groups": [
+    {"name": "alpha"}
+  ]
+}`,
+	})
+
+	changed, err := config.NormalizeFile(path)
+	if err != nil {
+		t.Fatalf("NormalizeFile: %v", err)
+	}
+	if !changed {
+		t.Fatal("NormalizeFile changed = false, want true for group reorder")
+	}
+
+	mainRaw := rawKeys(t, path)
+	if strings.Contains(string(mainRaw["groups"]), "alpha") {
+		t.Fatalf("included group must not be inlined into main settings.json:\n%s", mainRaw["groups"])
+	}
+	fragRaw := rawKeys(t, filepath.Join(dir, "settings.d", "extra.json"))
+	if !strings.Contains(string(fragRaw["groups"]), "alpha") {
+		t.Fatalf("fragment must retain its own group: %s", fragRaw["groups"])
+	}
+	if strings.Contains(string(fragRaw["groups"]), "zeta") {
+		t.Fatalf("main-owned group must not leak into fragment: %s", fragRaw["groups"])
+	}
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got := []string{}
+	for _, g := range cfg.Groups {
+		got = append(got, g.BaseName())
+	}
+	if strings.Join(got, ",") != "alpha,zeta" {
+		t.Fatalf("groups = %v, want [alpha zeta]", got)
+	}
+}
+
+func TestNormalizeFile_SecondPassDoesNotRewriteMainFile(t *testing.T) {
+	dir := t.TempDir()
+	// A fragment group sorts before a main group, so the merged sort order can
+	// never be represented within either file. Normalize keeps reporting the
+	// order as unsorted, but the routed per-file content is already stable, so
+	// the second pass must not rewrite (rename) the main settings.json.
+	path := writeRoutedFixture(t, dir, map[string]string{
+		"settings.json": `{
+  "version": ` + strconv.Itoa(config.CurrentVersion) + `,
+  "$include": ["settings.d/extra.json"],
+  "groups": [
+    {"name": "zeta"}
+  ]
+}`,
+		"settings.d/extra.json": `{
+  "groups": [
+    {"name": "alpha"}
+  ]
+}`,
+	})
+
+	if _, err := config.NormalizeFile(path); err != nil {
+		t.Fatalf("NormalizeFile pass 1: %v", err)
+	}
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fragPath := filepath.Join(dir, "settings.d", "extra.json")
+	fragBefore, err := os.Stat(fragPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := config.NormalizeFile(path); err != nil {
+		t.Fatalf("NormalizeFile pass 2: %v", err)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fragAfter, err := os.Stat(fragPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(before, after) {
+		t.Fatal("main settings.json was rewritten on an idempotent normalize pass")
+	}
+	if !os.SameFile(fragBefore, fragAfter) {
+		t.Fatal("include fragment was rewritten on an idempotent normalize pass")
+	}
+}
+
+func TestNormalizeFile_RoutesFieldSplitGroupsAndFragmentHosts(t *testing.T) {
+	dir := t.TempDir()
+	// The "web" group is split across files: the main file owns its tools, the
+	// fragment owns its dots. Hosts live only in the fragment. Unsorted hosts
+	// force a normalize write. Each file must keep exactly its own contribution.
+	path := writeRoutedFixture(t, dir, map[string]string{
+		"settings.json": `{
+  "version": ` + strconv.Itoa(config.CurrentVersion) + `,
+  "$include": ["settings.d/frag.json"],
+  "tools": { "rg": { "providers": [{ "provider": "brew", "package": "ripgrep" }] } },
+  "groups": [
+    {"name": "web", "tools": ["rg"]}
+  ]
+}`,
+		"settings.d/frag.json": `{
+  "hosts": { "laptop": ["web", "app"] },
+  "groups": [
+    {"name": "web", "dots": [{"name": "nvim"}]},
+    {"name": "app"}
+  ]
+}`,
+	})
+	fragPath := filepath.Join(dir, "settings.d", "frag.json")
+
+	changed, err := config.NormalizeFile(path)
+	if err != nil {
+		t.Fatalf("NormalizeFile: %v", err)
+	}
+	if !changed {
+		t.Fatal("NormalizeFile changed = false, want true for unsorted hosts")
+	}
+
+	mainRaw := rawKeys(t, path)
+	mainGroups := string(mainRaw["groups"])
+	if !strings.Contains(mainGroups, "rg") {
+		t.Fatalf("main must keep the web group's tools: %s", mainGroups)
+	}
+	if strings.Contains(mainGroups, "nvim") {
+		t.Fatalf("fragment-owned dots must not be inlined into main: %s", mainGroups)
+	}
+	if strings.Contains(mainGroups, `"app"`) {
+		t.Fatalf("fragment-only group must not appear in main: %s", mainGroups)
+	}
+	if _, ok := mainRaw["hosts"]; ok {
+		t.Fatalf("fragment-owned hosts must not be re-inlined into main: %s", mainRaw["hosts"])
+	}
+
+	fragRaw := rawKeys(t, fragPath)
+	fragGroups := string(fragRaw["groups"])
+	if !strings.Contains(fragGroups, "nvim") || !strings.Contains(fragGroups, `"app"`) {
+		t.Fatalf("fragment must keep its dots and its own group: %s", fragGroups)
+	}
+	if strings.Contains(fragGroups, "rg") {
+		t.Fatalf("main-owned tools must not leak into fragment: %s", fragGroups)
+	}
+	if got := string(fragRaw["hosts"]); !strings.Contains(got, `"app"`) || strings.Index(got, "app") > strings.Index(got, "web") {
+		t.Fatalf("fragment hosts should be sorted [app web]: %s", got)
+	}
+
+	// The merged, reloaded view must reunite the split group and sort everything.
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	names := []string{}
+	var web *config.GroupConfig
+	for _, g := range cfg.Groups {
+		names = append(names, g.BaseName())
+		if g.BaseName() == "web" {
+			web = g
+		}
+	}
+	if strings.Join(names, ",") != "app,web" {
+		t.Fatalf("groups = %v, want [app web]", names)
+	}
+	if web == nil || len(web.Tools) != 1 || web.Tools[0].Name != "rg" {
+		t.Fatalf("web tools not reunited: %+v", web)
+	}
+	if len(web.Dots) != 1 || web.Dots[0].Name != "nvim" {
+		t.Fatalf("web dots not reunited: %+v", web)
+	}
+	if got := strings.Join(cfg.Hosts["laptop"], ","); got != "app,web" {
+		t.Fatalf("host groups = [%s], want [app web]", got)
+	}
+}
+
 func TestNormalizeFile_PersistsLegacyVersionWithoutOrderChange(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "settings.json")

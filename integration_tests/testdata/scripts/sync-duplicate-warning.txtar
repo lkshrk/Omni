@@ -1,6 +1,7 @@
-# duplicate tool group ownership is rejected before sync runs
+# duplicate tool ownership across two reusable groups is rejected before sync runs.
+# (An item may belong to any number of host groups plus at most one reusable group.)
 ! exec omni --config settings.json tools sync --dry-run
-stderr 'tool "ripgrep" already belongs to group "work"'
+stderr 'tool "ripgrep" already belongs to reusable group "base"'
 
 -- settings.json --
-{"tools":{"ripgrep":{"provider":"system","install_with":"brew"}},"hosts":{"testhost":["work"]},"groups":[{"name":"testhost","special":"host","tools":["ripgrep"]},{"name":"work","tools":["ripgrep"]}]}
+{"tools":{"ripgrep":{"provider":"system","install_with":"brew"}},"groups":[{"name":"base","tools":["ripgrep"]},{"name":"work","tools":["ripgrep"]}]}

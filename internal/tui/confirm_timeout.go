@@ -51,7 +51,7 @@ func (m *Model) hasActiveConfirmation() bool {
 }
 
 func (m *Model) clearActiveConfirmation() {
-	wipeStatus := m.confirmQuit || m.listConfirm.action != ""
+	wipeStatus := m.confirmQuit || m.listConfirm.action != "" || m.dotsOverwriteIdx >= 0 || m.dotsLocalIdx >= 0
 	m.confirmQuit = false
 	m.quitConfirmKey = ""
 	m.listConfirm = listConfirmation{}

@@ -17,6 +17,13 @@ import (
 // writes never corrupt an existing config. Each call gets its own temp name,
 // so concurrent callers for the same path do not collide on the temp file.
 func atomicWrite(path string, data []byte) error {
+	// Skip the write when the on-disk content already matches. Every launch
+	// re-normalizes and routes the config; without this, a byte-identical
+	// result would still rename a fresh temp file over the target, bumping its
+	// mtime each time and churning downstream dotfile sync.
+	if current, err := os.ReadFile(path); err == nil && bytes.Equal(current, data) {
+		return nil
+	}
 	if err := testguard.RequireTempPath("config write", path); err != nil {
 		return err
 	}
@@ -503,7 +510,7 @@ func NormalizeFile(path string) (bool, error) {
 		Hosts   map[string][]string `json:"hosts,omitempty"`
 		Groups  []*GroupConfig      `json:"groups,omitempty"`
 	}
-	if err := Patch(path, orderPatch{Version: cfg.Version, Hosts: cfg.Hosts, Groups: cfg.Groups}); err != nil {
+	if err := PatchRouted(path, orderPatch{Version: cfg.Version, Hosts: cfg.Hosts, Groups: cfg.Groups}); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -551,6 +558,24 @@ func Patch(path string, patch interface{}) error {
 		return fmt.Errorf("parsing patch: %w", err)
 	}
 	return PatchRaw(path, patchMap)
+}
+
+// PatchRouted is the routed form of Patch: it merges the top-level keys from
+// patch into path, but writes each key to the file that owns it across the
+// $include chain instead of inlining everything into the main file. Use this
+// whenever the patch value is a full merged section (for example the groups
+// list after loading includes), so included fragments are not resurrected into
+// the parent settings.json. With no $include chain it behaves exactly like Patch.
+func PatchRouted(path string, patch interface{}) error {
+	patchData, err := json.Marshal(patch)
+	if err != nil {
+		return fmt.Errorf("encoding patch: %w", err)
+	}
+	var patchMap map[string]json.RawMessage
+	if err := json.Unmarshal(patchData, &patchMap); err != nil {
+		return fmt.Errorf("parsing patch: %w", err)
+	}
+	return PatchRawRouted(path, patchMap)
 }
 
 // PatchRaw is the lower-level form of Patch that accepts an already-decoded

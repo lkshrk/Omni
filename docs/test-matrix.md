@@ -83,3 +83,4 @@ key routing, modal state, rendering, and async result handling.
 | `settings.extract` | yes | n/a | n/a | n/a | CLI-only config layout migration |
 | `setup.init` | yes | yes | yes | yes | CLI command is `bootstrap`; `init` remains an alias |
 | `doctor` | yes | yes | yes | yes | - |
+| `doctor.fix` | yes | yes | yes | yes | Covers include-chain dedupe, dry-run, catalog routing, TUI execution, and doctor refresh. |

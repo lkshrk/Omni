@@ -778,11 +778,14 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 				errs = append(errs, ValidationError{Path: path, Message: fmt.Sprintf("duplicate tool membership %q in group %q", tool.Name, groupName)})
 			}
 			seenInGroup[tool.Name] = struct{}{}
-			if first, ok := memberships[tool.Name]; ok {
-				errs = append(errs, ValidationError{Path: path, Message: fmt.Sprintf("tool %q already belongs to group %q", tool.Name, first.BaseName())})
-			}
-			if _, ok := memberships[tool.Name]; !ok {
-				memberships[tool.Name] = g
+			// An item may belong to any number of host groups but at most one
+			// reusable group, so only reusable memberships are tracked here.
+			if !g.IsHost() {
+				if first, ok := memberships[tool.Name]; ok {
+					errs = append(errs, ValidationError{Path: path, Message: fmt.Sprintf("tool %q already belongs to reusable group %q; an item may belong to at most one reusable group", tool.Name, first.BaseName())})
+				} else {
+					memberships[tool.Name] = g
+				}
 			}
 		}
 		seenDots := make(map[string]struct{}, len(g.Dots))
@@ -823,11 +826,13 @@ func ValidateRoot(cfg *RootConfig, providers ProviderValidation) []ValidationErr
 				errs = append(errs, ValidationError{Path: path, Message: fmt.Sprintf("duplicate dotfile membership %q in group %q", dot.Name, groupName)})
 			}
 			seenDots[dot.Name] = struct{}{}
-			if first, ok := dotMemberships[dot.Name]; ok {
-				errs = append(errs, ValidationError{Path: path, Message: fmt.Sprintf("dotfile %q already belongs to group %q", dot.Name, first.BaseName())})
-			}
-			if _, ok := dotMemberships[dot.Name]; !ok {
-				dotMemberships[dot.Name] = g
+			// Same invariant as tools: unlimited host groups, one reusable group.
+			if !g.IsHost() {
+				if first, ok := dotMemberships[dot.Name]; ok {
+					errs = append(errs, ValidationError{Path: path, Message: fmt.Sprintf("dotfile %q already belongs to reusable group %q; an item may belong to at most one reusable group", dot.Name, first.BaseName())})
+				} else {
+					dotMemberships[dot.Name] = g
+				}
 			}
 		}
 		for si, src := range g.Skills {

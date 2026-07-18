@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -2236,22 +2237,35 @@ func TestModel_DotsRootRowsOpenGroupMembershipPicker(t *testing.T) {
 	}
 }
 
-func TestModel_GroupMembershipPicker_SpaceSelectsAndSaves(t *testing.T) {
+func TestModel_GroupMembershipPicker_SpaceTogglesConfirmSaves(t *testing.T) {
 	m := baseModel([]*database.ToolCache{{Name: "ripgrep", Provider: "system", Tracked: true}})
 	key := toolKey("ripgrep", "system")
 	m.mode = viewGroupMembership
+	m.groupNames = []string{"base", "work"} // both reusable groups
 	m.pickerGroups = []string{"base", "work"}
 	m.pickerCursor = 1
 	m.toolMemberships = map[string][]string{key: {"base"}}
 	m.pickerMembershipKey = key
 	m.pickerOriginalGroups = []string{"base"}
 
+	// Space toggles work in; an item may hold at most one reusable group so the
+	// prior reusable membership (base) is evicted.
 	got := drive(m, pressRune(' '))
 	if !slices.Equal(got.toolMemberships[key], []string{"work"}) {
-		t.Fatalf("space should select work as the only membership, got %v", got.toolMemberships[key])
+		t.Fatalf("space should replace the reusable group, got %v", got.toolMemberships[key])
 	}
+	// Space accumulates selections; it must not save or close the picker.
+	if got.loading {
+		t.Fatal("space should not save; only confirm saves")
+	}
+	if got.mode != viewGroupMembership {
+		t.Fatalf("mode = %v, want still viewGroupMembership after toggle", got.mode)
+	}
+
+	// Confirm persists the accumulated set and returns to the list.
+	got = drive(got, pressEnter())
 	if !got.loading {
-		t.Fatal("space should save selected membership changes")
+		t.Fatal("confirm should save selected membership changes")
 	}
 	if got.mode != viewList {
 		t.Fatalf("mode = %v, want viewList after save", got.mode)
@@ -2358,8 +2372,8 @@ func TestModel_GroupMembershipPicker_NewGroupDraft(t *testing.T) {
 	if got.pickerCreatingGroup {
 		t.Fatal("new group input should close after submit")
 	}
-	if !slices.Equal(got.toolMemberships[key], []string{"work"}) {
-		t.Fatalf("new group should become the only selected group, got memberships %v", got.toolMemberships[key])
+	if !slices.Equal(got.toolMemberships[key], []string{"host", "work"}) {
+		t.Fatalf("new reusable group should be added alongside the host group, got memberships %v", got.toolMemberships[key])
 	}
 	if !groupInActiveHost(got, "work") {
 		t.Fatal("new group should be treated as part of the current host while staged")
@@ -3353,6 +3367,183 @@ func TestModel_ProviderScannedMsg_IgnoresUnknownProvider(t *testing.T) {
 	}
 	if len(got.allTools) != 0 {
 		t.Fatalf("unknown providerScannedMsg triggered final refresh: %v", toolNames(got.allTools))
+	}
+}
+
+// Scan settle must only close the scan's own progress stream. If another
+// operation (e.g. the agents tab's update all) began a new progress stream
+// while the scan was still running, closing m.progressCh at settle would close
+// that operation's channel out from under its worker goroutine, which then
+// panics on sendProgress / its own deferred close (crash seen live: pressing U
+// on the agents tab during the startup tool scan killed the TUI with "close of
+// closed channel").
+func TestModel_ProviderScannedMsg_SettleDoesNotCloseForeignProgressStream(t *testing.T) {
+	m := baseModel(nil)
+	m.scanningProviders = map[string]bool{"brew": true}
+	scanCh, _ := m.beginProgressStream()
+	m.scanProgressCh = scanCh
+	agentsCh, agentsGen := m.beginProgressStream()
+
+	got := drive(m, providerScannedMsg{provider: "brew"})
+
+	select {
+	case _, ok := <-scanCh:
+		if ok {
+			t.Fatal("scan progress channel delivered a value, want closed")
+		}
+	default:
+		t.Fatal("scan progress channel not closed at settle")
+	}
+	select {
+	case <-agentsCh:
+		t.Fatal("foreign progress channel was closed by scan settle")
+	default:
+	}
+	// The foreign stream's producer must still be able to report progress and
+	// close its own channel without panicking.
+	sendProgress(agentsCh, agentsGen, "installing missing plugins…")
+	close(agentsCh)
+	// Settle must not steal the shared status stream either: the foreign
+	// operation's remaining progress updates carry agentsGen and would be
+	// dropped if settle began a new stream (bumping progressGen).
+	if got.progressGen != agentsGen {
+		t.Fatalf("progressGen = %d, want %d (settle must not supersede an active foreign stream)", got.progressGen, agentsGen)
+	}
+	if got.progressCh != agentsCh {
+		t.Fatal("settle replaced the foreign progress stream pointer")
+	}
+}
+
+// With no foreign operation in flight, settle still hands the shared status
+// stream to the discovered refresh, as before.
+func TestModel_ProviderScannedMsg_SettleClaimsProgressStreamWhenFree(t *testing.T) {
+	m := baseModel(nil)
+	m.scanningProviders = map[string]bool{"brew": true}
+	scanCh, _ := m.beginProgressStream()
+	m.scanProgressCh = scanCh
+
+	got := drive(m, providerScannedMsg{provider: "brew"})
+
+	if got.progressCh == nil || got.progressCh == scanCh {
+		t.Fatal("settle should begin a fresh progress stream for the discovered refresh")
+	}
+	if got.progressText != "Finding local tools…" {
+		t.Fatalf("progressText = %q, want scan-settle activity status", got.progressText)
+	}
+}
+
+// Reproduces the concurrency the live crash needed: a scan is in flight (owns
+// scanProgressCh) when an agents "update all" begins its own stream and spins a
+// worker goroutine that streams progress and closes ITS OWN channel on exit.
+// Meanwhile the scan settles in the update loop. The settle must close only the
+// scan's channel — if it ever reverts to closing the shared m.progressCh field
+// (which now points at the agents worker's channel), the worker's deferred
+// close double-closes and the process panics with "close of closed channel".
+// Run under -race with many iterations to widen the window; a regression
+// crashes the test binary rather than silently passing.
+func TestModel_SettleDoesNotRaceForeignWorkerClose(t *testing.T) {
+	for i := 0; i < 200; i++ {
+		m := baseModel(nil)
+		m.scanningProviders = map[string]bool{"brew": true}
+		scanCh, _ := m.beginProgressStream()
+		m.scanProgressCh = scanCh
+		// Agents update-all begins its own stream; m.progressCh now points at
+		// the worker's channel, exactly as in production after pressing U.
+		agentsCh, agentsGen := m.beginProgressStream()
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// The worker owns agentsCh: it streams then closes only its own
+			// channel — never m.progressCh.
+			sendProgress(agentsCh, agentsGen, "updating marketplaces…")
+			sendProgress(agentsCh, agentsGen, "installing missing plugins…")
+			close(agentsCh)
+		}()
+
+		// The settle runs in the update loop concurrently with the worker.
+		drive(m, providerScannedMsg{provider: "brew"})
+		wg.Wait()
+
+		// scanCh must have been closed exactly once by the settle; a second
+		// close here would panic, proving it was left open.
+		if _, ok := <-scanCh; ok {
+			t.Fatal("scan channel delivered a value, want closed by settle")
+		}
+	}
+}
+
+// Agents "update all" can finish while a background scan is still running. Its
+// agentsProgressDoneMsg bumps progressGen and nils progressCh; the later scan
+// settle must still close its own channel without touching the (now newer)
+// progressGen, so nothing double-closes and no stale generation is resurrected.
+func TestModel_AgentsDoneMidScan_SettleStaysCrashSafe(t *testing.T) {
+	m := baseModel(nil)
+	m.scanningProviders = map[string]bool{"brew": true}
+	scanCh, _ := m.beginProgressStream()
+	m.scanProgressCh = scanCh
+	agentsCh, agentsGen := m.beginProgressStream()
+	_ = agentsCh
+
+	// Agents op completes first (matching generation) — bumps progressGen,
+	// nils progressCh, but must leave scanProgressCh alone.
+	m = drive(m, agentsProgressDoneMsg{gen: agentsGen})
+	if m.progressCh != nil {
+		t.Fatal("agents done should nil the shared progressCh")
+	}
+	if m.scanProgressCh != scanCh {
+		t.Fatal("agents done must not disturb the scan's own channel")
+	}
+	genAfterAgents := m.progressGen
+
+	// Scan settles afterward: closes its own channel, and because progressCh no
+	// longer equals scanProgressCh it must not bump progressGen again.
+	got := drive(m, providerScannedMsg{provider: "brew"})
+	if _, ok := <-scanCh; ok {
+		t.Fatal("scan channel not closed at settle")
+	}
+	if got.progressGen != genAfterAgents+1 {
+		t.Fatalf("progressGen = %d, want %d (settle claims one fresh stream, no extra bump)", got.progressGen, genAfterAgents+1)
+	}
+	if got.scanProgressCh != nil {
+		t.Fatal("settle should clear scanProgressCh")
+	}
+}
+
+// The automatic description refresh is a background task: it must not take
+// over the shared status stream while another operation owns it (same rule as
+// the scan-settle branch).
+func TestStartDescriptionRefresh_DoesNotSupersedeActiveProgressStream(t *testing.T) {
+	m := baseModel(nil)
+	agentsCh, agentsGen := m.beginProgressStream()
+
+	cmd := m.startDescriptionRefresh()
+
+	if cmd == nil {
+		t.Fatal("startDescriptionRefresh returned no command")
+	}
+	if m.progressCh != agentsCh || m.progressGen != agentsGen {
+		t.Fatalf("progress stream superseded: gen %d, want %d", m.progressGen, agentsGen)
+	}
+	if !m.descRefreshing {
+		t.Fatal("descRefreshing not set")
+	}
+}
+
+func TestStartDescriptionRefresh_ClaimsProgressStreamWhenFree(t *testing.T) {
+	m := baseModel(nil)
+
+	cmd := m.startDescriptionRefresh()
+
+	if cmd == nil {
+		t.Fatal("startDescriptionRefresh returned no command")
+	}
+	if m.progressCh == nil {
+		t.Fatal("free status stream not claimed")
+	}
+	if m.progressText != "Refreshing tool descriptions…" {
+		t.Fatalf("progressText = %q, want description-refresh activity status", m.progressText)
 	}
 }
 

@@ -286,6 +286,7 @@ func (m *Model) pruneDotsExpandedChildren(entry app.DotStatus) {
 }
 
 func (m *Model) clearDotsConfirmState() {
+	clearResolveStatus := m.dotsOverwriteIdx >= 0 || m.dotsLocalIdx >= 0
 	if m.dotsConfirmIdx >= 0 || m.dotsOverwriteIdx >= 0 || m.dotsLocalIdx >= 0 || m.dotsIgnoreIdx >= 0 || m.dotsVariantIdx >= 0 {
 		m.cancelConfirmationTimeout()
 	}
@@ -295,6 +296,9 @@ func (m *Model) clearDotsConfirmState() {
 	m.dotsIgnoreIdx = -1
 	m.dotsVariantIdx = -1
 	m.dotsVariantMode = dotsVariantNone
+	if clearResolveStatus {
+		clearStatus(m)
+	}
 }
 
 func (m *Model) handleDotsActionKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibleRow) []tea.Cmd {
@@ -425,13 +429,15 @@ func (m *Model) handleDotsVariantKeyMsg(visible []dotsVisibleRow) []tea.Cmd {
 		return cmds
 	}
 	mode := dotsVariantCreate
-	hasActiveVariant, err := m.app.DotsHasActiveHostVariant(row.entry.Name)
-	if err != nil {
-		cmds = append(cmds, setStatus(m, "✗ "+err.Error(), true))
-		return cmds
-	}
-	if hasActiveVariant {
-		mode = dotsVariantRemove
+	if !app.DotStatusTransientCandidate(row.entry) {
+		hasActiveVariant, err := m.app.DotsHasActiveHostVariant(row.entry.Name)
+		if err != nil {
+			cmds = append(cmds, setStatus(m, "✗ "+err.Error(), true))
+			return cmds
+		}
+		if hasActiveVariant {
+			mode = dotsVariantRemove
+		}
 	}
 	m.dotsConfirmIdx = -1
 	m.dotsOverwriteIdx = -1
@@ -458,7 +464,10 @@ func (m *Model) handleDotsVariantChoiceKeyMsg(msg tea.KeyPressMsg, visible []dot
 		if !key.Matches(msg, m.keys.DotVariant) {
 			return cmds
 		}
-		return m.startDotsVariantChange(dotsVariantRequest{name: name})
+		return m.startDotsVariantChange(dotsVariantRequest{
+			name:       name,
+			discovered: app.DotStatusTransientCandidate(row.entry),
+		})
 	case dotsVariantRemove:
 		if !key.Matches(msg, m.keys.DotVariant) {
 			return cmds
@@ -714,7 +723,23 @@ func (m *Model) handleDotsResolveKeyMsg(visible []dotsVisibleRow, strategy app.D
 	m.dotsIgnoreIdx = -1
 	*idx = m.dotsCursor
 	m.dotsConfirmIdx = -1
-	cmds = append(cmds, m.armConfirmationTimeout())
+	target := entry.Name
+	if row.isChild && strings.TrimSpace(row.child.RelPath) != "" {
+		target = row.child.RelPath
+	}
+	keyLabel := m.keys.DotUseRepo.Help().Key
+	keyOptions := m.keys.DotUseRepo.Keys()
+	if strategy == app.DotResolveUseLocal {
+		keyLabel = m.keys.DotUseLocal.Help().Key
+		keyOptions = m.keys.DotUseLocal.Keys()
+	}
+	if len(keyOptions) > 0 {
+		keyLabel = keyOptions[0]
+	}
+	cmds = append(cmds,
+		m.armConfirmationTimeout(),
+		setStatusFor(m, "Press "+keyLabel+" again to use "+label+" for "+target, false, confirmTimeout),
+	)
 	return cmds
 }
 

@@ -506,7 +506,6 @@ func renderGroupMembershipPicker(m Model) string {
 	if !ok || targetName == "" {
 		return p.styleHelp.Render("no entry selected")
 	}
-	selectedGroup := primaryMembershipGroup(memberships)
 	contentW := groupMembershipContentWidth(m)
 	labelW, detailW := groupMembershipColumnWidths(m)
 	labelW, detailW = fitPickerChoiceColumnWidths(contentW, true, labelW, detailW)
@@ -529,7 +528,7 @@ func renderGroupMembershipPicker(m Model) string {
 			continue
 		}
 		row.mark = "[ ]"
-		if group == selectedGroup {
+		if slices.Contains(memberships, group) {
 			row.mark = "[x]"
 		}
 		row.style = p.styleNormal
@@ -543,19 +542,12 @@ func renderGroupMembershipPicker(m Model) string {
 	var sb strings.Builder
 	sb.WriteString(renderPickerChoiceRows(p, rows, labelW, detailW))
 	sb.WriteString("\n")
-	hints := selectCancelActionItems(m)
+	hints := membershipPickerActionItems(m)
 	if m.pickerCreatingGroup {
 		hints = confirmActionItems(m.keys.Confirm, "create", m.keys.Back)
 	}
 	sb.WriteString(renderPickerHintItems(m, contentW, hints))
 	return lipgloss.NewStyle().Width(contentW).Render(sb.String())
-}
-
-func primaryMembershipGroup(memberships []string) string {
-	if len(memberships) == 0 {
-		return ""
-	}
-	return memberships[0]
 }
 
 func renderHostGroupEditor(m Model) string {

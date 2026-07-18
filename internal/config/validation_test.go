@@ -466,7 +466,9 @@ func TestValidateRoot_GroupDuplicateTool(t *testing.T) {
 	}
 }
 
-func TestValidateRoot_ToolSingleOwnerIncludesHostGroup(t *testing.T) {
+// An item may belong to any number of host groups plus one reusable group, so a
+// tool in the host group AND one reusable group is valid.
+func TestValidateRoot_ToolMayJoinHostAndOneReusableGroup(t *testing.T) {
 	cfg := &config.RootConfig{
 		Tools: map[string]config.ToolSpec{"a": {Provider: "brew"}},
 		Groups: []*config.GroupConfig{
@@ -476,12 +478,27 @@ func TestValidateRoot_ToolSingleOwnerIncludesHostGroup(t *testing.T) {
 		Hosts: map[string][]string{"host": {"work"}},
 	}
 	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"brew"}})
-	if !containsErrorMessage(errs, `tool "a" already belongs to group "host"`) {
-		t.Errorf("expected cross-group tool owner error, got %v", errs)
+	if containsErrorMessage(errs, "already belongs") {
+		t.Errorf("host group + one reusable group must be valid, got %v", errs)
 	}
 }
 
-func TestValidateRoot_DotSingleOwnerIncludesHostGroup(t *testing.T) {
+// Two reusable groups for the same tool is still invalid.
+func TestValidateRoot_ToolRejectsTwoReusableGroups(t *testing.T) {
+	cfg := &config.RootConfig{
+		Tools: map[string]config.ToolSpec{"a": {Provider: "brew"}},
+		Groups: []*config.GroupConfig{
+			{Name: "base", Tools: []config.ToolEntry{{Name: "a"}}},
+			{Name: "work", Tools: []config.ToolEntry{{Name: "a"}}},
+		},
+	}
+	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"brew"}})
+	if !containsErrorMessage(errs, `tool "a" already belongs to reusable group "base"`) {
+		t.Errorf("expected two-reusable-group tool error, got %v", errs)
+	}
+}
+
+func TestValidateRoot_DotMayJoinHostAndOneReusableGroup(t *testing.T) {
 	cfg := &config.RootConfig{
 		Groups: []*config.GroupConfig{
 			{Name: "host", Special: "host", Dots: []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}}},
@@ -490,8 +507,21 @@ func TestValidateRoot_DotSingleOwnerIncludesHostGroup(t *testing.T) {
 		Hosts: map[string][]string{"host": {"work"}},
 	}
 	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"brew"}})
-	if !containsErrorMessage(errs, `dotfile "nvim" already belongs to group "host"`) {
-		t.Errorf("expected cross-group dot owner error, got %v", errs)
+	if containsErrorMessage(errs, "already belongs") {
+		t.Errorf("host group + one reusable group must be valid, got %v", errs)
+	}
+}
+
+func TestValidateRoot_DotRejectsTwoReusableGroups(t *testing.T) {
+	cfg := &config.RootConfig{
+		Groups: []*config.GroupConfig{
+			{Name: "base", Dots: []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}}},
+			{Name: "work", Dots: []config.DotEntry{{Name: "nvim", Path: "~/.config/nvim"}}},
+		},
+	}
+	errs := config.ValidateRoot(cfg, config.ProviderValidation{Known: []string{"brew"}})
+	if !containsErrorMessage(errs, `dotfile "nvim" already belongs to reusable group "base"`) {
+		t.Errorf("expected two-reusable-group dot error, got %v", errs)
 	}
 }
 

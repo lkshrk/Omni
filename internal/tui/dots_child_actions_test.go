@@ -1,11 +1,16 @@
 package tui
 
 import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/app"
+	"github.com/lkshrk/omni/internal/config"
 )
 
 func dotsDiscoveredLocalOnlyModel() Model {
@@ -94,6 +99,15 @@ func TestDotsRowHints_DiscoveredLocalOnlyIncludesDelete(t *testing.T) {
 	deleteKey := m.keys.DotDelete.Help().Key
 	if !slices.ContainsFunc(hints, func(h hintItem) bool { return h.key == deleteKey }) {
 		t.Fatalf("row hints for discovered local-only entry lack delete key %q: %#v", deleteKey, hints)
+	}
+}
+
+func TestDotsRowHints_DiscoveredLocalOnlyIncludesVariant(t *testing.T) {
+	m := dotsDiscoveredLocalOnlyModel()
+	hints := dotsRowHintItems(m)
+	variantKey := m.keys.DotVariant.Help().Key
+	if !slices.ContainsFunc(hints, func(h hintItem) bool { return h.key == variantKey }) {
+		t.Fatalf("row hints for discovered local-only entry lack variant key %q: %#v", variantKey, hints)
 	}
 }
 
@@ -212,6 +226,9 @@ func TestFlow_DotsChildConflictResolve(t *testing.T) {
 		if got.dotsOverwriteIdx != 1 {
 			t.Fatalf("dotsOverwriteIdx = %d, want 1", got.dotsOverwriteIdx)
 		}
+		if got.statusMsg != "Press u again to use repo for nvim" {
+			t.Fatalf("statusMsg = %q, want visible confirmation prompt", got.statusMsg)
+		}
 	})
 
 	t.Run("second u resolves from child row", func(t *testing.T) {
@@ -224,6 +241,50 @@ func TestFlow_DotsChildConflictResolve(t *testing.T) {
 		}
 	})
 
+	t.Run("first l names the selected child in the confirmation prompt", func(t *testing.T) {
+		got := drive(conflictChildModel(), pressRune('l'))
+		if got.dotsLocalIdx != 1 {
+			t.Fatalf("dotsLocalIdx = %d, want 1", got.dotsLocalIdx)
+		}
+		if got.statusMsg != "Press l again to use local for nvim" {
+			t.Fatalf("statusMsg = %q, want visible confirmation prompt", got.statusMsg)
+		}
+	})
+
+	t.Run("remapped repo key appears in the confirmation prompt", func(t *testing.T) {
+		m := conflictChildModel()
+		m.keys.DotUseRepo.SetKeys("r")
+		got := drive(m, pressRune('r'))
+		if got.dotsOverwriteIdx != 1 {
+			t.Fatalf("dotsOverwriteIdx = %d, want 1", got.dotsOverwriteIdx)
+		}
+		if got.statusMsg != "Press r again to use repo for nvim" {
+			t.Fatalf("statusMsg = %q, want remapped key", got.statusMsg)
+		}
+	})
+
+	t.Run("timeout clears child confirmation and status", func(t *testing.T) {
+		armed := drive(conflictChildModel(), pressRune('u'))
+		got := drive(armed, confirmTimeoutMsg{gen: armed.confirmGen})
+		if got.dotsOverwriteIdx != -1 {
+			t.Fatalf("dotsOverwriteIdx = %d, want -1", got.dotsOverwriteIdx)
+		}
+		if got.statusMsg != "" {
+			t.Fatalf("statusMsg = %q, want cleared", got.statusMsg)
+		}
+	})
+
+	t.Run("escape clears child confirmation and status", func(t *testing.T) {
+		armed := drive(conflictChildModel(), pressRune('u'))
+		got := drive(armed, pressEsc())
+		if got.dotsOverwriteIdx != -1 {
+			t.Fatalf("dotsOverwriteIdx = %d, want -1", got.dotsOverwriteIdx)
+		}
+		if got.statusMsg != "" {
+			t.Fatalf("statusMsg = %q, want cleared", got.statusMsg)
+		}
+	})
+
 	t.Run("armed child row renders repo confirm hint", func(t *testing.T) {
 		got := drive(conflictChildModel(), pressRune('u'))
 		out := renderDots(got)
@@ -231,4 +292,154 @@ func TestFlow_DotsChildConflictResolve(t *testing.T) {
 			t.Fatalf("renderDots output lacks repo confirm hint for armed child row:\n%s", out)
 		}
 	})
+}
+
+type dotsChildConflictFixture struct {
+	model       Model
+	repoAgents  string
+	localAgents string
+}
+
+func newDotsChildConflictFixture(t *testing.T) dotsChildConflictFixture {
+	t.Helper()
+	cfgDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	repoDir := t.TempDir()
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	group := tuiTestHostGroup()
+	group.Dots = []config.DotEntry{{Name: "claude", Path: "~/.claude", Ignore: []string{"projects/**"}}}
+	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{DotsRepo: repoDir},
+		Groups:   []*config.GroupConfig{group},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	repoAgents := filepath.Join(repoDir, "dotfiles", "claude", ".claude", "agents")
+	localAgents := filepath.Join(homeDir, ".claude", "agents")
+	for i := range 24 {
+		name := fmt.Sprintf("agent-%02d.md", i)
+		if i == 0 {
+			name = "explore.md"
+		}
+		mustWriteTUIDotFile(t, filepath.Join(repoAgents, name), "repo "+name)
+		mustWriteTUIDotFile(t, filepath.Join(localAgents, name), "local "+name)
+	}
+	mustWriteTUIDotFile(t, filepath.Join(homeDir, ".claude", ".cache", "state.json"), "cache state")
+	mustWriteTUIDotFile(t, filepath.Join(homeDir, ".claude", "projects", "session.json"), "project state")
+
+	a := app.New(cfgPath)
+	a.CacheDir = cfgDir
+	if err := a.InitTestMode(context.Background()); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	result, err := a.DiscoverDotsStatus(context.Background())
+	if err != nil {
+		t.Fatalf("DiscoverDotsStatus: %v", err)
+	}
+	m := baseModel(nil)
+	m.app = a
+	m.ctx = context.Background()
+	m.mode = viewDots
+	m.dotsLoaded = true
+	m.stowInstalled = true
+	setDotsRepoForTest(&m, repoDir)
+	cacheDotsAvailability(&m, app.DotsSyncAvailability{Configured: true, Reason: app.DotsSyncAvailabilityReady, RepoPath: repoDir})
+	m.dotsEntries = result.Entries
+	m.dotsExpandedName = "claude"
+	m.dotsExpandedState = app.DotStateConflict
+	m.dotsExpandedChildren = map[string]bool{dotsChildExpandKey("claude", "agents"): true}
+	for i, row := range dotsVisibleRows(m) {
+		if row.isChild && filepath.ToSlash(row.child.RelPath) == "agents/explore.md" {
+			m.dotsCursor = i
+			break
+		}
+	}
+	return dotsChildConflictFixture{model: m, repoAgents: repoAgents, localAgents: localAgents}
+}
+
+func executeConfirmedChildResolve(t *testing.T, m Model, action rune) Model {
+	t.Helper()
+	armed := drive(m, pressRune(action))
+	next, cmd := armed.Update(pressRune(action))
+	resolving := next.(Model)
+	if cmd == nil {
+		t.Fatal("confirmed child resolve returned nil command")
+	}
+	msg := runLastBatchCommand(t, cmd)
+	return drive(resolving, msg)
+}
+
+func requireResolvedExploreChild(t *testing.T, resolved Model) {
+	t.Helper()
+	if strings.Contains(resolved.statusMsg, "✗") {
+		t.Fatalf("child resolve failed: %s", resolved.statusMsg)
+	}
+	found := false
+	for _, entry := range resolved.dotsEntries {
+		if entry.Name != "claude" {
+			continue
+		}
+		for _, child := range entry.Children {
+			for _, nested := range child.Children {
+				if filepath.ToSlash(nested.RelPath) == "agents/explore.md" {
+					found = true
+					if nested.State != app.DotStateSynced {
+						t.Fatalf("explore.md state = %q, want synced", nested.State)
+					}
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("refreshed dots state lacks agents/explore.md")
+	}
+}
+
+func requireSameResolvedPath(t *testing.T, gotPath, wantPath string) {
+	t.Helper()
+	resolvedLocal, err := filepath.EvalSymlinks(gotPath)
+	if err != nil {
+		t.Fatalf("resolve %s: %v", gotPath, err)
+	}
+	wantSource, err := filepath.EvalSymlinks(wantPath)
+	if err != nil {
+		t.Fatalf("resolve %s: %v", wantPath, err)
+	}
+	if resolvedLocal != wantSource {
+		t.Fatalf("%s resolves to %q, want %q", gotPath, resolvedLocal, wantSource)
+	}
+}
+
+func requireFileBody(t *testing.T, path, want string) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if string(got) != want {
+		t.Fatalf("%s = %q, want %q", path, got, want)
+	}
+}
+
+func TestFlow_DotsChildConflictUseRepoExecutesAndRefreshes(t *testing.T) {
+	f := newDotsChildConflictFixture(t)
+	resolved := executeConfirmedChildResolve(t, f.model, 'u')
+	requireResolvedExploreChild(t, resolved)
+	requireSameResolvedPath(t, filepath.Join(f.localAgents, "explore.md"), filepath.Join(f.repoAgents, "explore.md"))
+	requireFileBody(t, filepath.Join(filepath.Dir(f.localAgents), ".cache", "state.json"), "cache state")
+	requireFileBody(t, filepath.Join(filepath.Dir(f.localAgents), "projects", "session.json"), "project state")
+}
+
+func TestFlow_DotsChildConflictUseLocalExecutesAndRefreshes(t *testing.T) {
+	f := newDotsChildConflictFixture(t)
+	resolved := executeConfirmedChildResolve(t, f.model, 'l')
+	requireResolvedExploreChild(t, resolved)
+	requireSameResolvedPath(t, filepath.Join(f.localAgents, "explore.md"), filepath.Join(f.repoAgents, "explore.md"))
+	requireFileBody(t, filepath.Join(f.repoAgents, "explore.md"), "local explore.md")
+	requireFileBody(t, filepath.Join(filepath.Dir(f.localAgents), ".cache", "state.json"), "cache state")
+	requireFileBody(t, filepath.Join(filepath.Dir(f.localAgents), "projects", "session.json"), "project state")
 }

@@ -260,6 +260,17 @@ func selectCancelActionItems(m Model) []hintItem {
 	}
 }
 
+// membershipPickerActionItems describes the multi-select membership picker: an
+// item may join any number of host groups plus one reusable group, so Toggle
+// accumulates selections and Confirm persists them.
+func membershipPickerActionItems(m Model) []hintItem {
+	return []hintItem{
+		hintFromBindingDesc(m.keys.Toggle, "toggle"),
+		hintFromBindingDesc(m.keys.Confirm, "confirm"),
+		hintFromBindingDesc(m.keys.Back, "cancel"),
+	}
+}
+
 func renderPressAgainActionHint(pal palette, prefix, keyLabel, action string) string {
 	return renderActionHints(pal, actionHints{
 		prefix: prefix,

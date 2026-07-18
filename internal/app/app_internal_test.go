@@ -410,6 +410,7 @@ func TestDotStatusVariantEligibleSkipsUnsupportedStates(t *testing.T) {
 		{name: "synced", status: DotStatus{Name: "nvim", State: DotStateSynced}, want: true},
 		{name: "missing", status: DotStatus{Name: "nvim", State: DotStateMissing}, want: true},
 		{name: "empty name", status: DotStatus{State: DotStateSynced}, want: false},
+		{name: "transient local-only candidate", status: DotStatus{Name: "nvim", State: DotStateLocalOnly}, want: true},
 		{name: "transient candidate", status: DotStatus{Name: "nvim", State: DotStateUntrackedConflict}, want: false},
 		{name: "ignored", status: DotStatus{Name: "nvim", State: DotStateIgnored}, want: false},
 		{name: "inactive", status: DotStatus{Name: "nvim", State: DotStateInactive}, want: false},

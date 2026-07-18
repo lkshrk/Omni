@@ -354,8 +354,9 @@ func (m *Model) handleGroupMembershipKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 		if m.selectedPickerGroupIsNewSentinel() {
 			m.openPickerNewGroupInput(&cmds)
 		} else {
+			// Toggle membership in place and stay in the picker so multiple
+			// groups can be selected; Confirm persists the accumulated set.
 			cmds = append(cmds, m.selectGroupMembership()...)
-			m.saveGroupMembershipPicker(&cmds)
 		}
 	case key.Matches(msg, m.keys.Confirm):
 		if m.selectedPickerGroupIsNewSentinel() {
@@ -712,7 +713,7 @@ func (m *Model) setSelectedMemberships(memberships []string) {
 }
 
 func (m *Model) selectGroupMembership() []tea.Cmd {
-	_, _, ok := m.selectedMembershipTarget()
+	_, current, ok := m.selectedMembershipTarget()
 	if !ok || m.pickerCursor < 0 || m.pickerCursor >= len(m.pickerGroups) {
 		return nil
 	}
@@ -720,7 +721,11 @@ func (m *Model) selectGroupMembership() []tea.Cmd {
 	if isNewGroupSentinel(group) {
 		return nil
 	}
-	m.setSelectedMemberships([]string{group})
+	// An item may belong to any number of host groups but at most one reusable
+	// group. m.groupNames holds the reusable names; groups created during this
+	// picker session are reusable too.
+	reusable := app.ReusablePredicate(m.groupNames, m.pickerCreatedGroups)
+	m.setSelectedMemberships(app.MembershipInvariantToggle(current, group, reusable))
 	return nil
 }
 
@@ -739,10 +744,14 @@ func (m *Model) submitGroupMembershipNewGroup() {
 		m.pickerCreatedGroups = appendUniqueString(m.pickerCreatedGroups, newGroup)
 		m.pickerGroups = appendGroupToPicker(m, newGroup)
 	}
-	if _, _, ok := m.selectedMembershipTarget(); !ok {
+	_, current, ok := m.selectedMembershipTarget()
+	if !ok {
 		return
 	}
-	m.setSelectedMemberships([]string{newGroup})
+	// A freshly created group is reusable; adding it evicts any other reusable
+	// membership but keeps host-group memberships intact.
+	reusable := app.ReusablePredicate(m.groupNames, m.pickerCreatedGroups)
+	m.setSelectedMemberships(app.MembershipInvariantToggle(current, newGroup, reusable))
 	for i, group := range m.pickerGroups {
 		if group == newGroup {
 			m.pickerCursor = i

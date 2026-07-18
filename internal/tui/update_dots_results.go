@@ -664,6 +664,10 @@ func (m *Model) doDotsVariantChange(req dotsVariantRequest) tea.Cmd {
 		)
 		if req.remove {
 			result, err = a.DotsRemoveHostVariantWithState(ctx, req.name, app.DotsRemoveVariantOptions{})
+		} else if req.discovered {
+			result, err = a.DotsAddDiscoveredHostVariantWithState(ctx, req.name, app.DotsAddVariantOptions{
+				Sync: true,
+			})
 		} else {
 			result, err = a.DotsAddHostVariantWithState(ctx, req.name, app.DotsAddVariantOptions{
 				Sync: true,

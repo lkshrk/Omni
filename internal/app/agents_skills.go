@@ -523,9 +523,9 @@ func skillAgentDisplay(id string) string {
 }
 
 // verifyRestoredSkillTargets turns a nominal package success into a failure
-// when the upstream filesystem-backed list cannot see every lockfile skill on
-// every resolved target agent. This catches missing canonical copies and
-// missing per-agent links that a populated lockfile alone cannot detect.
+// when the upstream filesystem-backed list cannot see any current lockfile
+// skill or its per-agent links. Lockfiles may retain removed package skills,
+// so names absent from the authoritative list are ignored when siblings exist.
 func verifyRestoredSkillTargets(pkgs []resolvedPackage, lock *config.SkillLockFile, entries []skillsCLIListEntry, res RestoreSkillsResult) RestoreSkillsResult {
 	listed := make(map[string]map[string]bool, len(entries))
 	for _, entry := range entries {
@@ -559,12 +559,21 @@ func verifyRestoredSkillTargets(pkgs []resolvedPackage, lock *config.SkillLockFi
 		if len(names) == 0 {
 			missing = append(missing, "lockfile skill entries")
 		}
+		listedAny := false
 		for _, name := range names {
+			agents, ok := listed[name]
+			if !ok {
+				continue
+			}
+			listedAny = true
 			for _, agentID := range effectiveSkillAgents(nil, pkg.SkillPackage) {
-				if !listed[name][skillAgentDisplay(agentID)] {
+				if !agents[skillAgentDisplay(agentID)] {
 					missing = append(missing, name+" → "+agentID)
 				}
 			}
+		}
+		if len(names) > 0 && !listedAny {
+			missing = append(missing, "global skill entries")
 		}
 		if len(missing) > 0 {
 			res.Failed = append(res.Failed, SkillFailure{

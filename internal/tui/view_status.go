@@ -34,6 +34,7 @@ const (
 	statusActionCommitDots
 	statusActionUpgradeTools
 	statusActionFixIgnore
+	statusActionFixConfig
 	statusActionFixNvmManaged
 	statusActionOpenAgents
 	statusActionRestoreSkills
@@ -312,6 +313,11 @@ func statusDoctorSummaryAction(m Model, checks []app.DoctorCheck) statusAction {
 	if app.DoctorHasNvmManagedDrift(m.doctorResult) {
 		return statusAction{kind: statusActionFixNvmManaged, desc: "fix nvm-managed tools"}
 	}
+	for _, check := range checks {
+		if action := statusDoctorCheckAction(check); action.kind == statusActionFixConfig {
+			return action
+		}
+	}
 	if len(checks) == 1 {
 		return statusDoctorCheckAction(checks[0])
 	}
@@ -325,7 +331,12 @@ func statusDoctorCheckAction(check app.DoctorCheck) statusAction {
 			return statusAction{kind: statusActionFixNvmManaged, desc: "fix nvm-managed tools"}
 		}
 		return statusAction{kind: statusActionRunDoctor, desc: "rerun doctor"}
-	case "config", "host":
+	case "config":
+		if check.Status == app.DoctorStatusWarn && strings.Contains(check.Message, "duplicate definitions across $include") {
+			return statusAction{kind: statusActionFixConfig, desc: "fix issues"}
+		}
+		return statusAction{kind: statusActionOpenSettings, settingsRow: settingsRowBootstrap, desc: "open bootstrap"}
+	case "host":
 		return statusAction{kind: statusActionOpenSettings, settingsRow: settingsRowBootstrap, desc: "open bootstrap"}
 	case "providers":
 		return statusAction{kind: statusActionOpenSettings, settingsRow: settingsRowProviderPriority, desc: "open provider settings"}
@@ -338,7 +349,7 @@ func statusDoctorCheckAction(check app.DoctorCheck) statusAction {
 		}
 		return doctorDotsAction(check)
 	case "dots.ignore":
-		return statusAction{kind: statusActionFixIgnore, desc: "fix ignore patterns"}
+		return statusAction{kind: statusActionFixConfig, desc: "fix issues"}
 	case "services":
 		return statusAction{kind: statusActionOpenSettings, settingsRow: settingsRowDotsServices, desc: "open service settings"}
 	case "cache":
@@ -1045,6 +1056,8 @@ func statusActionKeyBinding(k KeyMap, action statusAction) key.Binding {
 		return k.SyncAll
 	case statusActionUpgradeTools:
 		return k.UpgradeAll
+	case statusActionFixConfig:
+		return k.Fallback
 	default:
 		return k.Confirm
 	}

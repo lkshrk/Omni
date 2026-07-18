@@ -944,3 +944,79 @@ func TestAdoptUnmanagedPlugins(t *testing.T) {
 		t.Fatalf("adopted plugin agents = %v, want [claude-code]", got)
 	}
 }
+
+// TestUpdateAllSequence_UpdatesOutdatedAndInstallsMissing exercises the exact
+// app-layer sequence the TUI's agents "update all" worker runs
+// (doAgentsUpdateAll): refresh marketplaces once, compute outdated plugins from
+// the rows, update only those with the pre-refreshed variant, then install any
+// manifest plugin still missing. This is the end-to-end coverage the live repro
+// lacked — the manual TUI run had nothing genuinely outdated, so the update
+// path executed but did no real work. Here an outdated plugin, an up-to-date
+// plugin, and a missing plugin are all present, pinning that update touches
+// only the outdated one and install touches only the missing one.
+func TestUpdateAllSequence_UpdatesOutdatedAndInstallsMissing(t *testing.T) {
+	stub := &stubPluginAdapter{
+		id:        "claude-code",
+		available: true,
+		listedPlugins: []app.InstalledPlugin{
+			{Name: "outdated-plugin", Marketplace: "mp", Version: "1.0.0", LatestVersion: "2.0.0"},
+			{Name: "current-plugin", Marketplace: "mp", Version: "2.0.0", LatestVersion: "2.0.0"},
+		},
+	}
+	agents := config.AgentsConfig{
+		Marketplaces: []config.Marketplace{{Name: "mp", Source: "acme/mp", Agents: []string{"claude-code"}}},
+		Plugins: []config.Plugin{
+			{Name: "outdated-plugin", Marketplace: "mp", Agents: []string{"claude-code"}},
+			{Name: "current-plugin", Marketplace: "mp", Agents: []string{"claude-code"}},
+			{Name: "missing-plugin", Marketplace: "mp", Agents: []string{"claude-code"}},
+		},
+	}
+	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{stub}))
+	ctx := context.Background()
+
+	// Step 1: refresh marketplaces once up front (as the TUI does before
+	// computing outdated, so the local clones aren't stale).
+	if _, err := a.UpdateMarketplaces(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Step 2: compute outdated from the rows.
+	rows, _, err := a.PluginRows(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var outdated []string
+	for _, row := range rows {
+		if row.Outdated() {
+			outdated = append(outdated, row.Name)
+		}
+	}
+	if len(outdated) != 1 || outdated[0] != "outdated-plugin" {
+		t.Fatalf("outdated = %v, want only [outdated-plugin]", outdated)
+	}
+
+	// Step 3: update only the outdated plugins, pre-refreshed (no second
+	// marketplace refresh).
+	marketRefreshesBefore := stub.updateMarketplacesCalls
+	if _, err := a.UpdatePluginsPreRefreshed(ctx, outdated, nil); err != nil {
+		t.Fatal(err)
+	}
+	if stub.updateMarketplacesCalls != marketRefreshesBefore {
+		t.Fatalf("UpdatePluginsPreRefreshed re-refreshed marketplaces (%d→%d), want no extra refresh", marketRefreshesBefore, stub.updateMarketplacesCalls)
+	}
+	if len(stub.updatedNames) != 1 || stub.updatedNames[0] != "outdated-plugin" {
+		t.Fatalf("updated = %v, want only [outdated-plugin] (current-plugin must not be touched)", stub.updatedNames)
+	}
+
+	// Step 4: install any manifest plugin still missing.
+	res, err := a.RestorePluginsPreRefreshed(ctx, app.RestorePluginOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Errors) != 0 {
+		t.Fatalf("restore errors: %v", res.Errors)
+	}
+	if len(stub.installedPlugin) != 1 || stub.installedPlugin[0].Name != "missing-plugin" {
+		t.Fatalf("installed = %v, want only [missing-plugin] (already-installed plugins must not be reinstalled)", stub.installedPlugin)
+	}
+}

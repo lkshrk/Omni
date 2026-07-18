@@ -3,20 +3,45 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/lkshrk/omni/internal/app"
+	"github.com/lkshrk/omni/internal/config"
+	textutil "github.com/lkshrk/omni/internal/text"
 )
 
 func newDoctorCmd(state *rootState) *cobra.Command {
 	var format string
+	var fix bool
+	var dryRun bool
 	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Run read-only health checks",
-		Long:  "Run read-only diagnostics for config, host setup, providers, dotfiles, native services, and local cache state.",
+		Long:  "Run read-only diagnostics for config, host setup, providers, dotfiles, native services, and local cache state. With --fix, apply safe auto-fixes (duplicate $include definitions, dead ignore patterns) first.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			out := cmd.OutOrStdout()
+			if dryRun && !fix {
+				return fmt.Errorf("--dry-run requires --fix")
+			}
+			if fix {
+				report, err := state.app.OptimizeConfigIncludes(dryRun)
+				if err != nil {
+					return err
+				}
+				printOptimizeReport(out, report, dryRun)
+				if dryRun {
+					fmt.Fprintln(out, "dry run: no files were changed (ignore-pattern cleanup runs only on a real --fix)")
+					return nil
+				}
+				if modified, err := state.app.DotsFixIgnorePatterns(); err != nil {
+					return err
+				} else if len(modified) > 0 {
+					fmt.Fprintf(out, "cleaned ignore patterns for: %s\n", strings.Join(modified, ", "))
+				}
+			}
 			result, err := state.app.Doctor(cmd.Context())
 			if err != nil {
 				return err
@@ -38,7 +63,28 @@ func newDoctorCmd(state *rootState) *cobra.Command {
 		},
 	}
 	addFormatFlag(cmd, &format, "text", "text", "json")
+	cmd.Flags().BoolVar(&fix, "fix", false, "apply safe auto-fixes before running checks")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "with --fix: show planned fixes without writing")
 	return cmd
+}
+
+func printOptimizeReport(out io.Writer, report *config.OptimizeReport, dryRun bool) {
+	if report.Empty() {
+		fmt.Fprintln(out, "no duplicate definitions across $include fragments")
+		return
+	}
+	verb := "removed"
+	if dryRun {
+		verb = "would remove"
+	}
+	for _, r := range report.Removals {
+		if r.Key == "group" {
+			fmt.Fprintf(out, "%s empty group %q from %s\n", verb, r.Group, r.File)
+			continue
+		}
+		fmt.Fprintf(out, "%s %s duplicate %s from %s (group %q): %s\n",
+			verb, textutil.PluralCount(len(r.Names), "entry", "entries"), r.Key, r.File, r.Group, strings.Join(r.Names, ", "))
+	}
 }
 
 func printDoctorResult(cmd *cobra.Command, result *app.DoctorResult) {
