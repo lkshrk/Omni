@@ -77,9 +77,9 @@ func buildWithID(id string) *schema {
 	ecosystemNames := stringsToAny(provider.BuiltinEcosystemNames())
 	managerNames := stringsToAny(provider.BuiltinSettingsManagerNames(provider.EcosystemNode))
 	managerNames = append(managerNames, stringsToAny(provider.BuiltinSettingsManagerNames(provider.EcosystemPython))...)
-	providerNames := stringsToAny(provider.BuiltinConcreteEcosystemNames())
+	providerNames := stringsToAny(provider.BuiltinConcreteConfigNames())
 	providerNames = append(providerNames, "script")
-	installWithNames := stringsToAny(provider.BuiltinConcreteEcosystemNames())
+	installWithNames := stringsToAny(provider.BuiltinConcreteConfigNames())
 	installWithExamples := stringsToAny(exampleInstallWithNames())
 	systemPriority := stringsToAny(provider.BuiltinSystemProviderPriorityNames())
 	return &schema{
@@ -912,7 +912,7 @@ func firstNAny(values []any, n int) []any {
 
 func exampleInstallWithNames() []string {
 	var examples []string
-	for _, name := range provider.BuiltinConcreteEcosystemNames() {
+	for _, name := range provider.BuiltinConcreteConfigNames() {
 		if provider.BuiltinMetadata(name).SupportsTaps {
 			examples = append(examples, name)
 			break

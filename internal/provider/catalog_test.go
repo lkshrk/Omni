@@ -8,7 +8,7 @@ import (
 
 func TestBuiltinConcreteProviderPriorityNames(t *testing.T) {
 	got := provider.BuiltinConcreteProviderPriorityNames()
-	want := []string{"brew", "apt", "apk", "dnf", "pacman", "zypper", "bun", "pnpm", "npm", "uv", "pip"}
+	want := []string{"brew", "apt", "apk", "dnf", "pacman", "zypper", "bun", "pnpm", "npm", "uv", "pip", "cargo"}
 	if len(got) != len(want) {
 		t.Fatalf("got %v (len %d), want %v (len %d)", got, len(got), want, len(want))
 	}
@@ -30,7 +30,7 @@ func TestBuiltinMetadata_RequiresPrivilege(t *testing.T) {
 	// (brew, ecosystems, python/node managers, script) does not. This is the
 	// single source of truth the privilege display marker reads.
 	privileged := map[string]bool{"apt": true, "apk": true, "dnf": true, "pacman": true, "zypper": true}
-	for _, name := range []string{"apt", "apk", "dnf", "pacman", "zypper", "brew", "system", "pip", "pip3", "uv", "npm", "bun", "script", "unknown"} {
+	for _, name := range []string{"apt", "apk", "dnf", "pacman", "zypper", "brew", "system", "pip", "pip3", "uv", "npm", "bun", "cargo", "script", "unknown"} {
 		want := privileged[name]
 		if got := provider.BuiltinMetadata(name).RequiresPrivilege; got != want {
 			t.Errorf("BuiltinMetadata(%q).RequiresPrivilege = %v, want %v", name, got, want)

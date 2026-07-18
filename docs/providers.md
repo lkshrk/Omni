@@ -7,7 +7,7 @@ the current machine.
 
 | Type | Examples | Role |
 | --- | --- | --- |
-| Concrete provider | `brew`, `apt`, `apk`, `dnf`, `pacman`, `zypper`, `bun`, `pnpm`, `npm`, `uv`, `pip` | Actual package manager or registry client. |
+| Concrete provider | `brew`, `apt`, `apk`, `dnf`, `pacman`, `zypper`, `bun`, `pnpm`, `npm`, `uv`, `pip`, `cargo` | Actual package manager or registry client. |
 | Script provider | `script` | User-authored shell install/check/uninstall commands. |
 | Bootstrap provider tool | `uv` installed by `brew` | A provider executable managed before dependent tools. |
 
@@ -44,6 +44,7 @@ omni tools sync --allow-weak
 | System packages | `apt`, `apk`, `dnf`, `zypper`, `pacman`, `brew` |
 | Node packages | `bun`, `pnpm`, `npm` |
 | Python packages | `uv`, `pip` |
+| Rust binary crates | `cargo` |
 | Script installs | `script` |
 
 ## Script Provider
@@ -203,7 +204,7 @@ Equivalent host setting:
 ```
 
 `disabled_providers` holds concrete provider names (e.g. `brew`, `apt`, `bun`,
-`pnpm`, `npm`, `uv`, `pip`). Legacy family names (`system`/`node`/`python`) are
+`pnpm`, `npm`, `uv`, `pip`, `cargo`). Legacy family names (`system`/`node`/`python`) are
 migrated to their concrete members automatically. Disabled providers are skipped
 both as install targets and during discovery on that host. In the TUI, the
 **Provider Priority** settings row edits the per-host order and toggles
@@ -241,6 +242,7 @@ which brew
 which apt
 which bun
 which uv
+which cargo
 ```
 
 After installing or removing a manager, rebuild observed state:

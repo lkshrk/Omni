@@ -2589,8 +2589,8 @@ func TestModel_PriorityEditor_Open(t *testing.T) {
 	if !m.editingPriority {
 		t.Fatal("editingPriority should be true after enter on priority row")
 	}
-	if len(m.priorityDraft) != 11 {
-		t.Fatalf("priorityDraft len = %d, want 11 (all concrete providers)", len(m.priorityDraft))
+	if len(m.priorityDraft) != 12 {
+		t.Fatalf("priorityDraft len = %d, want 12 (all concrete providers)", len(m.priorityDraft))
 	}
 	if m.priorityCursor != 0 {
 		t.Errorf("priorityCursor = %d, want 0", m.priorityCursor)
@@ -2613,7 +2613,7 @@ func TestModel_PriorityEditor_OpenFromSettings(t *testing.T) {
 	if !m.editingPriority {
 		t.Fatal("editingPriority should be true")
 	}
-	if len(m.priorityDraft) != 11 || m.priorityDraft[0] != "brew" || m.priorityDraft[1] != "apt" {
+	if len(m.priorityDraft) != 12 || m.priorityDraft[0] != "brew" || m.priorityDraft[1] != "apt" {
 		t.Errorf("priorityDraft = %v, want [brew apt ...all concrete defaults]", m.priorityDraft)
 	}
 }
@@ -2640,15 +2640,15 @@ func TestModel_PriorityEditor_CursorClamps(t *testing.T) {
 		t.Errorf("priorityCursor = %d, want 0 (clamped at top)", m.priorityCursor)
 	}
 
-	// j past last item — should stay at the last concrete provider (index 10, 11 items)
+	// j past last item — should stay at the last concrete provider (index 11, 12 items)
 	manyJ := make([]tea.Msg, 15)
 	for i := range manyJ {
 		manyJ[i] = pressRune('j')
 	}
 	msgs = append(goToPriorityRow(), append([]tea.Msg{pressEnter()}, manyJ...)...)
 	m = drive(baseModel(nil), msgs...)
-	if m.priorityCursor != 10 {
-		t.Errorf("priorityCursor = %d, want 10 (clamped at bottom of 11 items)", m.priorityCursor)
+	if m.priorityCursor != 11 {
+		t.Errorf("priorityCursor = %d, want 11 (clamped at bottom of 12 items)", m.priorityCursor)
 	}
 }
 

@@ -271,6 +271,7 @@ var configMigrations = []configMigration{
 	{from: 14, to: 15, apply: migrateConfigV14ToV15, applyRaw: migrateRawConfigV14ToV15},
 	{from: 15, to: 16, apply: migrateConfigV15ToV16, applyRaw: migrateRawConfigV15ToV16},
 	{from: 16, to: 17, apply: migrateConfigV16ToV17, applyRaw: migrateRawConfigV16ToV17},
+	{from: 17, to: 18, apply: migrateConfigV17ToV18, applyRaw: migrateRawConfigV17ToV18},
 }
 
 func configMigrationFrom(version int) (configMigration, bool) {
@@ -1060,6 +1061,18 @@ func migrateConfigV16ToV17(cfg *RootConfig) error {
 
 func migrateRawConfigV16ToV17(raw map[string]json.RawMessage) error {
 	raw["version"] = json.RawMessage(`17`)
+	return nil
+}
+
+// migrateConfigV17ToV18 is a no-op data migration: v18 adds cargo to the
+// provider enums without changing persisted config shape.
+func migrateConfigV17ToV18(cfg *RootConfig) error {
+	cfg.Version = 18
+	return nil
+}
+
+func migrateRawConfigV17ToV18(raw map[string]json.RawMessage) error {
+	raw["version"] = json.RawMessage(`18`)
 	return nil
 }
 

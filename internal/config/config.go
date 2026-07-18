@@ -10,7 +10,7 @@ import (
 
 // CurrentVersion is the latest settings.json format version understood by omni.
 // Version 0 is the legacy unversioned format.
-const CurrentVersion = 17
+const CurrentVersion = 18
 
 const (
 	// FallbackSourceGitHub identifies a fallback recipe sourced from a GitHub repository.

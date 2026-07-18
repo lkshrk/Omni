@@ -722,15 +722,17 @@ func TestBackupConfigOnLaunch_CopiesExistingFile(t *testing.T) {
 	}
 }
 
-func TestInitProviderRegistry_RegistersScript(t *testing.T) {
+func TestInitProviderRegistry_RegistersStandaloneProviders(t *testing.T) {
 	a := &App{}
 	a.initProviderRegistry(config.Settings{})
-	p, ok := a.registry.Get("script")
-	if !ok {
-		t.Fatal("script provider not registered")
-	}
-	if p.Name() != "script" {
-		t.Errorf("registered provider Name() = %q, want script", p.Name())
+	for _, name := range []string{"cargo", "script"} {
+		p, ok := a.registry.Get(name)
+		if !ok {
+			t.Fatalf("%s provider not registered", name)
+		}
+		if p.Name() != name {
+			t.Errorf("registered provider Name() = %q, want %s", p.Name(), name)
+		}
 	}
 }
 

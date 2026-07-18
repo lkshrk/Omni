@@ -98,6 +98,8 @@ test-package-managers: prune-tmp
 	docker run --rm --platform linux/amd64 -e OMNI_PMCONTAINER=1 -e OMNI_PMCONTAINER_PROVIDER=pacman -v "$(TMP_DIR)/pm-tests/pacman.test:/pacman.test:ro" archlinux/archlinux:base /pacman.test -test.v
 	GOCACHE="$(TMP_DIR)/go-build" CGO_ENABLED=0 GOOS=linux GOARCH=$$(go env GOARCH) go test -tags=pmcontainer -c ./internal/provider/zypper -o "$(TMP_DIR)/pm-tests/zypper.test"
 	docker run --rm -e OMNI_PMCONTAINER=1 -e OMNI_PMCONTAINER_PROVIDER=zypper -v "$(TMP_DIR)/pm-tests/zypper.test:/zypper.test:ro" opensuse/leap:15.6 /zypper.test -test.v
+	GOCACHE="$(TMP_DIR)/go-build" CGO_ENABLED=0 GOOS=linux GOARCH=$$(go env GOARCH) go test -tags=pmcontainer -c ./internal/provider/cargo -o "$(TMP_DIR)/pm-tests/cargo.test"
+	docker run --rm -e OMNI_PMCONTAINER=1 -e OMNI_PMCONTAINER_PROVIDER=cargo -v "$(TMP_DIR)/pm-tests/cargo.test:/cargo.test:ro" rust:1.88-slim-bookworm /cargo.test -test.v
 
 ## test-all: run unit tests locally and integration tests in Docker
 test-all: test test-integration
