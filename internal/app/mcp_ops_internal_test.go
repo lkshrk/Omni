@@ -74,6 +74,26 @@ func TestResolveMcpServers_GroupedServer_NonMatchingGroup_Excluded(t *testing.T)
 	}
 }
 
+func TestResolveMcpServers_HostAssignedGroup_Included(t *testing.T) {
+	cfg := &config.RootConfig{
+		Agents: config.AgentsConfig{
+			McpServers: []config.McpServer{
+				{Name: "litellm-tools", Transport: "http", URL: "https://litellm.example.com"},
+			},
+		},
+		Groups: []*config.GroupConfig{
+			{Name: "ai", McpServers: []string{"litellm-tools"}},
+		},
+		Hosts: map[string][]string{
+			"topaz": {"ai"},
+		},
+	}
+	got := resolveNames(cfg, "topaz")
+	if !containsName(got, "litellm-tools") {
+		t.Fatalf("server in a group assigned to the host via cfg.Hosts must appear; got %v", got)
+	}
+}
+
 func TestResolveMcpServers_ServerInMultipleGroups_AppearsOncePerActiveGroup(t *testing.T) {
 	cfg := &config.RootConfig{
 		Agents: config.AgentsConfig{

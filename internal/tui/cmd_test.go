@@ -500,10 +500,12 @@ func TestHandleListActionInstallUsesSelectedProviderCandidate(t *testing.T) {
 	m.applyFilter()
 
 	cmds := m.handleListActionKeyMsg(pressRune('i').(tea.KeyPressMsg))
-	if len(cmds) == 0 {
-		t.Fatal("install action returned no commands")
+	if len(cmds) != 3 {
+		t.Fatalf("install action returned %d commands, want [spinner.Tick, doInstall, waitForProgress]", len(cmds))
 	}
-	done, ok := opCompleteFromCmd(cmds[len(cmds)-1])
+	// cmds[2] is waitForProgress, which blocks on the channel doInstall (cmds[1])
+	// feeds; only doInstall itself resolves synchronously to opCompleteMsg here.
+	done, ok := opCompleteFromCmd(cmds[1])
 	if !ok {
 		t.Fatalf("expected opCompleteMsg from install command")
 	}

@@ -162,10 +162,12 @@ func TestLogicalMigration_ConfiguredEmptyToolInstallKeyAddsHighConfidenceProvide
 	if cmd == nil {
 		t.Fatal("install key should dispatch an install command")
 	}
-	msg := runLastBatchCommand(t, cmd)
-	done, ok := msg.(opCompleteMsg)
+	// cmd's batch trails a waitForProgress command that blocks on the channel
+	// doInstall feeds; runLastBatchCommand's last-child pick would hang on it,
+	// so search all children for opCompleteMsg like opCompleteFromCmd does.
+	done, ok := opCompleteFromCmd(cmd)
 	if !ok {
-		t.Fatalf("command msg = %T, want opCompleteMsg", msg)
+		t.Fatalf("expected opCompleteMsg from install command")
 	}
 	if done.err != nil {
 		t.Fatalf("install command error = %v", done.err)

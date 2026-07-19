@@ -64,10 +64,17 @@ func pluginTargetsAdapter(p config.Plugin, adapterID string) bool {
 	return false
 }
 
-// resolvePlugins returns the plugins active for groupName, mirroring
+// resolvePlugins returns the plugins active for hostname, mirroring
 // resolveMcpServers: ungrouped plugins restore everywhere; group-listed
-// plugins restore only when that group is active.
-func resolvePlugins(cfg *config.RootConfig, groupName string) []config.Plugin {
+// plugins restore when that group is active on hostname — either the host's
+// own group or one of the groups assigned to it via cfg.Hosts.
+func resolvePlugins(cfg *config.RootConfig, hostname string) []config.Plugin {
+	activeHostNames, _ := activeHostGroupNames(cfg, hostname)
+	activeHostSet := make(map[string]struct{}, len(activeHostNames))
+	for _, n := range activeHostNames {
+		activeHostSet[n] = struct{}{}
+	}
+
 	groupedNames := make(map[string]struct{})
 	activeNames := make(map[string]struct{})
 	for _, g := range cfg.Groups {
@@ -76,7 +83,7 @@ func resolvePlugins(cfg *config.RootConfig, groupName string) []config.Plugin {
 		}
 		for _, name := range g.Plugins {
 			groupedNames[name] = struct{}{}
-			if g.Name == groupName {
+			if _, active := activeHostSet[g.BaseName()]; active {
 				activeNames[name] = struct{}{}
 			}
 		}

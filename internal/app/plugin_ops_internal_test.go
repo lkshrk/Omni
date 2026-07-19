@@ -39,3 +39,17 @@ func TestResolvePlugins_GroupedPlugin_OnlyOnMatchingGroup(t *testing.T) {
 		t.Fatalf("expected work-only excluded on non-matching group, got %v", got)
 	}
 }
+
+func TestResolvePlugins_HostAssignedGroup_Included(t *testing.T) {
+	cfg := &config.RootConfig{
+		Agents: config.AgentsConfig{Plugins: []config.Plugin{{Name: "superpowers", Marketplace: "m"}}},
+		Groups: []*config.GroupConfig{{Name: "ai-plugins", Plugins: []string{"superpowers"}}},
+		Hosts: map[string][]string{
+			"topaz": {"ai-plugins"},
+		},
+	}
+	got := resolvePluginNames(cfg, "topaz")
+	if len(got) != 1 || got[0] != "superpowers" {
+		t.Fatalf("plugin in a group assigned to the host via cfg.Hosts must appear; got %v", got)
+	}
+}
