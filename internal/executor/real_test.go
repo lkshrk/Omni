@@ -138,7 +138,7 @@ func TestRealExecutor_RunObservesSanitizedLiveOutput(t *testing.T) {
 	if stdout != "first\nTOKEN=secret\n" {
 		t.Fatalf("stdout = %q", stdout)
 	}
-	if got := strings.Join(lines, "|"); got != "TOKEN=[redacted]" {
+	if got := strings.Join(lines, "|"); got != "first|TOKEN=[redacted]" {
 		t.Fatalf("observed output = %q", got)
 	}
 }

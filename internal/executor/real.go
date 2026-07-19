@@ -56,20 +56,16 @@ type outputWriter struct {
 
 func (w *outputWriter) Write(p []byte) (int, error) {
 	n, err := w.dst.Write(p)
-	var latest string
+	observer := outputObserver(w.ctx)
 	for _, b := range p[:n] {
 		if b != '\n' && b != '\r' {
 			w.pending = append(w.pending, b)
 			continue
 		}
-		if line := sanitizeOutputLine(w.pending); line != "" {
-			latest = line
+		if line := sanitizeOutputLine(w.pending); observer != nil && line != "" {
+			observer(line)
 		}
 		w.pending = w.pending[:0]
-	}
-	// ponytail: the status bar can show one line; keep full logs in dst.
-	if observer := outputObserver(w.ctx); observer != nil && latest != "" {
-		observer(latest)
 	}
 	return n, err
 }

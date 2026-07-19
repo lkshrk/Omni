@@ -2031,18 +2031,20 @@ func TestWaitForProgress_ReceivesText(t *testing.T) {
 }
 
 func TestWithLiveOutputStreamsSanitizedLine(t *testing.T) {
-	ch := make(chan progressUpdate, 1)
+	ch := make(chan progressUpdate, 2)
 	ctx := withLiveOutput(context.Background(), ch, 7)
-	if _, _, err := executor.New().Run(ctx, "printf", "TOKEN=secret\n"); err != nil {
+	if _, _, err := executor.New().Run(ctx, "printf", "first\nTOKEN=secret\n"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	msg := waitForProgress(ch, 7)()
-	progress, ok := msg.(progressMsg)
-	if !ok {
-		t.Fatalf("expected progressMsg, got %T", msg)
-	}
-	if progress.gen != 7 || progress.text != "TOKEN=[redacted]" {
-		t.Fatalf("progress = %#v", progress)
+	for _, want := range []string{"first", "TOKEN=[redacted]"} {
+		msg := waitForProgress(ch, 7)()
+		progress, ok := msg.(progressMsg)
+		if !ok {
+			t.Fatalf("expected progressMsg, got %T", msg)
+		}
+		if progress.gen != 7 || progress.text != want {
+			t.Fatalf("progress = %#v, want %q", progress, want)
+		}
 	}
 }
 
