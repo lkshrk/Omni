@@ -508,7 +508,8 @@ func TestTUIDotsRootFileIgnoreCompletesPromptly(t *testing.T) {
 			return strings.Contains(text, "Dots") && strings.Contains(text, "claude")
 		}, "TUI did not load the claude dots entry")
 		writeTUIKeys(t, term, " ")
-		waitForRequiredScreen(t, term, 3*time.Second, func(text string) bool {
+		// setup, not the measured latency: expanding scans ~5000 files
+		waitForRequiredScreen(t, term, 10*time.Second, func(text string) bool {
 			return strings.Contains(text, "settings.json")
 		}, "TUI did not expand the claude dots entry")
 		writeTUIKeys(t, term, "j", "j", "x")
