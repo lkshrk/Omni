@@ -7,7 +7,10 @@ import (
 )
 
 func TestMembershipInvariantToggle(t *testing.T) {
+	t.Parallel(
 	// reusable groups: "team", "web"; host groups: anything else ("laptop", "server").
+	)
+
 	reusable := ReusablePredicate([]string{"team", "web"})
 
 	tests := []struct {
@@ -36,6 +39,7 @@ func TestMembershipInvariantToggle(t *testing.T) {
 }
 
 func TestMembershipInvariantToggleDoesNotMutateInput(t *testing.T) {
+	t.Parallel()
 	reusable := ReusablePredicate([]string{"team", "web"})
 	current := []string{"team", "laptop"}
 	_ = MembershipInvariantToggle(current, "web", reusable)
@@ -45,6 +49,7 @@ func TestMembershipInvariantToggleDoesNotMutateInput(t *testing.T) {
 }
 
 func TestEnforceMembershipInvariant(t *testing.T) {
+	t.Parallel()
 	reusable := ReusablePredicate([]string{"team", "web", "infra"})
 	got := EnforceMembershipInvariant([]string{"laptop", "team", "server", "web", "infra"}, reusable)
 	want := []string{"laptop", "team", "server"} // all host groups kept, only first reusable survives
@@ -54,6 +59,7 @@ func TestEnforceMembershipInvariant(t *testing.T) {
 }
 
 func TestMembershipCapsReusable(t *testing.T) {
+	t.Parallel()
 	if !MembershipCapsReusable("dot") {
 		t.Error("dot should cap reusable")
 	}
@@ -65,6 +71,7 @@ func TestMembershipCapsReusable(t *testing.T) {
 }
 
 func TestMembershipToggle_FreeAddRemove(t *testing.T) {
+	t.Parallel()
 	got := MembershipToggle([]string{"a"}, "b")
 	if !slices.Equal(got, []string{"a", "b"}) {
 		t.Fatalf("add: got %v, want [a b]", got)

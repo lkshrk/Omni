@@ -9,6 +9,7 @@ import (
 )
 
 func TestRunDoctorFixers_IgnoreCleanupStillRunsAfterOptimizeError(t *testing.T) {
+	t.Parallel()
 	optimizeErr := errors.New("unsafe dedupe")
 	ignoreRan := false
 	result := runDoctorFixers(false,
@@ -31,6 +32,7 @@ func TestRunDoctorFixers_IgnoreCleanupStillRunsAfterOptimizeError(t *testing.T) 
 }
 
 func TestRunDoctorFixers_DryRunSkipsIgnoreCleanup(t *testing.T) {
+	t.Parallel()
 	ignoreRan := false
 	result := runDoctorFixers(true,
 		func(bool) (*config.OptimizeReport, error) { return &config.OptimizeReport{}, nil },

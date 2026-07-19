@@ -502,6 +502,10 @@ func (m *Model) handleAgentsGlobalActionKeyMsg(msg tea.KeyPressMsg) (handled boo
 		if agentsGlobalOpInFlight {
 			return true, nil
 		}
+	case "e":
+		// Falls through to the open-trace-log case below regardless of an
+		// in-flight bulk op: the log itself is a read-only view of past
+		// command output, unrelated to whatever bulk action is running.
 	default:
 		return false, nil
 	}
@@ -510,6 +514,8 @@ func (m *Model) handleAgentsGlobalActionKeyMsg(msg tea.KeyPressMsg) (handled boo
 		return true, m.doAgentsUpdateAll()
 	case "S":
 		return true, m.doAgentsSyncAll()
+	case "e":
+		return true, []tea.Cmd{m.openTraceLog()}
 	default:
 		return true, m.doAgentsRefreshAll()
 	}

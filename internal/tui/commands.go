@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
+	"github.com/lkshrk/omni/internal/executor"
 	"github.com/lkshrk/omni/internal/profile"
 	gosync "github.com/lkshrk/omni/internal/sync"
 )
@@ -74,6 +75,15 @@ func sendProgress(ch chan progressUpdate, gen int, text string) {
 	case ch <- progressUpdate{gen: gen, text: text}:
 	default:
 	}
+}
+
+func withLiveOutput(ctx context.Context, ch chan progressUpdate, gen int) context.Context {
+	if ch == nil {
+		return ctx
+	}
+	return executor.WithOutputObserver(ctx, func(line string) {
+		sendProgress(ch, gen, line)
+	})
 }
 
 func sendDotsProgressUpdate(ch chan dotsProgressUpdate, update dotsProgressUpdate) {
@@ -255,6 +265,7 @@ func launchBatchErrorStatus(errors []string) string {
 // doSyncWithProgress triggers a background sync with progress streaming.
 func (m *Model) doSyncWithProgress(ch chan progressUpdate, gen int) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
+	ctx = withLiveOutput(ctx, ch, gen)
 	return func() tea.Msg {
 		defer close(ch)
 		stateResult, err := a.SyncWithState(ctx, gosync.SyncOptions{
@@ -305,6 +316,7 @@ func (m *Model) doSyncWithProgress(ch chan progressUpdate, gen int) tea.Cmd {
 // discovered local tools to this machine's hostname group.
 func (m *Model) doSyncAllWithProgress(ch chan progressUpdate, gen int, discovered []*app.ToolView) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
+	ctx = withLiveOutput(ctx, ch, gen)
 	total := app.SyncAllProgressTotal(m.allTools, discovered)
 	return func() tea.Msg {
 		defer close(ch)
@@ -391,6 +403,7 @@ func anyMissingDescription(tools []*app.ToolView) bool {
 // by doFetchFinalTools once every providerScannedMsg has arrived.
 func (m *Model) doScanProvider(provName string, gen int, progressCh chan progressUpdate, progressGen int) tea.Cmd {
 	a, ctx := m.app, m.ctx
+	ctx = withLiveOutput(ctx, progressCh, progressGen)
 	return func() tea.Msg {
 		defer profile.Start("tui.refresh.installed.provider." + provName)()
 
@@ -464,6 +477,7 @@ func (m *Model) doFetchOutdatedTools(gen int) tea.Cmd {
 // does not delay the installedRefreshedMsg signal.
 func (m *Model) doRefreshDiscovered(gen int, progressCh chan progressUpdate, progressGen int) tea.Cmd {
 	a, ctx := m.app, m.ctx
+	ctx = withLiveOutput(ctx, progressCh, progressGen)
 	return func() tea.Msg {
 		defer profile.Start("tui.refresh.discovered.total")()
 
@@ -524,6 +538,7 @@ func (m *Model) doRefreshDescriptions(gen int, progressCh chan progressUpdate, p
 // doUpgradeAll upgrades every outdated tool with progress streaming.
 func (m *Model) doUpgradeAll(ch chan progressUpdate, gen int) tea.Cmd {
 	a, ctx := m.app, m.beginCancellableAction()
+	ctx = withLiveOutput(ctx, ch, gen)
 	total := app.UpgradeAllProgressTotal(m.allTools)
 	return func() tea.Msg {
 		defer close(ch)

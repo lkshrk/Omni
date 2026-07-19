@@ -42,6 +42,7 @@ func dotsChildRowModel(parent app.DotStatus, child app.DotChild) Model {
 }
 
 func TestFlow_DotsDiscoveredLocalOnlyDelete(t *testing.T) {
+	t.Parallel()
 	t.Run("d arms confirm on transient candidate", func(t *testing.T) {
 		got := drive(dotsDiscoveredLocalOnlyModel(), pressRune('d'))
 		if got.dotsConfirmIdx != 0 {
@@ -74,6 +75,7 @@ func TestFlow_DotsDiscoveredLocalOnlyDelete(t *testing.T) {
 }
 
 func TestRender_DotsDeleteKeepLocalPromptVariants(t *testing.T) {
+	t.Parallel()
 	t.Run("transient candidate asks about disk delete", func(t *testing.T) {
 		m := dotsDiscoveredLocalOnlyModel()
 		prompt := renderDotsDeleteKeepLocalPrompt(m, m.dotsEntries[0], "")
@@ -95,6 +97,7 @@ func TestRender_DotsDeleteKeepLocalPromptVariants(t *testing.T) {
 }
 
 func TestDotsRowHints_DiscoveredLocalOnlyIncludesDelete(t *testing.T) {
+	t.Parallel()
 	m := dotsDiscoveredLocalOnlyModel()
 	hints := dotsRowHintItems(m)
 	deleteKey := m.keys.DotDelete.Help().Key
@@ -104,6 +107,7 @@ func TestDotsRowHints_DiscoveredLocalOnlyIncludesDelete(t *testing.T) {
 }
 
 func TestDotsRowHints_DiscoveredLocalOnlyIncludesVariant(t *testing.T) {
+	t.Parallel()
 	m := dotsDiscoveredLocalOnlyModel()
 	hints := dotsRowHintItems(m)
 	variantKey := m.keys.DotVariant.Help().Key
@@ -113,6 +117,7 @@ func TestDotsRowHints_DiscoveredLocalOnlyIncludesVariant(t *testing.T) {
 }
 
 func TestDotsChildOutOfSync(t *testing.T) {
+	t.Parallel()
 	parent := func(state dots.State) app.DotStatus {
 		return app.DotStatus{Name: "config", State: state}
 	}
@@ -139,6 +144,7 @@ func TestDotsChildOutOfSync(t *testing.T) {
 }
 
 func TestDotsRowHints_ChildInlineActions(t *testing.T) {
+	t.Parallel()
 	hintDescs := func(m Model) []string {
 		hints := dotsRowHintItems(m)
 		descs := make([]string, len(hints))
@@ -204,6 +210,7 @@ func TestDotsRowHints_ChildInlineActions(t *testing.T) {
 }
 
 func TestFlow_DotsSyncKeyOnChildRow(t *testing.T) {
+	t.Parallel()
 	t.Run("out-of-sync child starts parent sync", func(t *testing.T) {
 		m := dotsChildRowModel(
 			app.DotStatus{Name: "config", State: dots.StateModified, Actions: []dots.Action{dots.ActionSync, dots.ActionRemove}},
@@ -231,6 +238,7 @@ func TestFlow_DotsSyncKeyOnChildRow(t *testing.T) {
 }
 
 func TestFlow_DotsChildConflictResolve(t *testing.T) {
+	t.Parallel()
 	conflictChildModel := func() Model {
 		return dotsChildRowModel(
 			app.DotStatus{Name: "config", State: dots.StateConflict, Actions: []dots.Action{dots.ActionUseRepo, dots.ActionUseLocal, dots.ActionRemove}},
@@ -312,6 +320,7 @@ func TestFlow_DotsChildConflictResolve(t *testing.T) {
 }
 
 func TestFlow_DotsMissingChildRejectsUseLocalAndAcceptsInstall(t *testing.T) {
+	t.Parallel()
 	m := dotsChildRowModel(
 		app.DotStatus{Name: "config", State: dots.StateConflict, Actions: []dots.Action{dots.ActionUseRepo, dots.ActionUseLocal, dots.ActionRemove}},
 		app.DotChild{RelPath: "explore.md", State: dots.StateMissing},
@@ -329,6 +338,7 @@ func TestFlow_DotsMissingChildRejectsUseLocalAndAcceptsInstall(t *testing.T) {
 }
 
 func TestDotsPeekSourceLine_MissingLocalIsConciseAndRed(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 100
 	m.height = 30
@@ -359,6 +369,7 @@ func TestDotsPeekSourceLine_MissingLocalIsConciseAndRed(t *testing.T) {
 // real status in the Ignored section instead of the muted "-" reserved for
 // synthesized structural containers.
 func TestRenderDots_IgnoredSectionTrackedChildShowsRealStatus(t *testing.T) {
+	t.Parallel()
 	container := app.DotChild{
 		Name:    "sub",
 		RelPath: "sub",
@@ -404,6 +415,7 @@ func TestRenderDots_IgnoredSectionTrackedChildShowsRealStatus(t *testing.T) {
 // the way down the tree, and toggling a deep dir via the key path reveals its
 // children.
 func TestDotsExpand_MultipleLayersDeep(t *testing.T) {
+	t.Parallel()
 	leaf := app.DotChild{Name: "c.txt", RelPath: "a/b/c.txt", State: dots.StateSynced, Depth: 3}
 	b := app.DotChild{Name: "b", RelPath: "a/b", State: dots.StateSynced, IsDir: true, Depth: 2, Children: []app.DotChild{leaf}}
 	a := app.DotChild{Name: "a", RelPath: "a", State: dots.StateSynced, IsDir: true, Depth: 1, Children: []app.DotChild{b}}
@@ -459,6 +471,7 @@ func TestDotsExpand_MultipleLayersDeep(t *testing.T) {
 }
 
 func TestFlow_DotsExpandCollapse_MultipleLayersDeep(t *testing.T) {
+	t.Parallel()
 	leaf := app.DotChild{Name: "c.txt", RelPath: "a/b/c.txt", State: dots.StateSynced, Depth: 3}
 	b := app.DotChild{Name: "b", RelPath: "a/b", State: dots.StateSynced, IsDir: true, Depth: 2, Children: []app.DotChild{leaf}}
 	a := app.DotChild{Name: "a", RelPath: "a", State: dots.StateSynced, IsDir: true, Depth: 1, Children: []app.DotChild{b}}

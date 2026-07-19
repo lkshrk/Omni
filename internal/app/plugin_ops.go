@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"sort"
 
 	"github.com/lkshrk/omni/internal/config"
 )
@@ -64,10 +65,17 @@ func pluginTargetsAdapter(p config.Plugin, adapterID string) bool {
 	return false
 }
 
-// resolvePlugins returns the plugins active for groupName, mirroring
+// resolvePlugins returns the plugins active for hostname, mirroring
 // resolveMcpServers: ungrouped plugins restore everywhere; group-listed
-// plugins restore only when that group is active.
-func resolvePlugins(cfg *config.RootConfig, groupName string) []config.Plugin {
+// plugins restore when that group is active on hostname — either the host's
+// own group or one of the groups assigned to it via cfg.Hosts.
+func resolvePlugins(cfg *config.RootConfig, hostname string) []config.Plugin {
+	activeHostNames, _ := activeHostGroupNames(cfg, hostname)
+	activeHostSet := make(map[string]struct{}, len(activeHostNames))
+	for _, n := range activeHostNames {
+		activeHostSet[n] = struct{}{}
+	}
+
 	groupedNames := make(map[string]struct{})
 	activeNames := make(map[string]struct{})
 	for _, g := range cfg.Groups {
@@ -76,7 +84,7 @@ func resolvePlugins(cfg *config.RootConfig, groupName string) []config.Plugin {
 		}
 		for _, name := range g.Plugins {
 			groupedNames[name] = struct{}{}
-			if g.Name == groupName {
+			if _, active := activeHostSet[g.BaseName()]; active {
 				activeNames[name] = struct{}{}
 			}
 		}
@@ -201,12 +209,13 @@ func (a *App) restorePlugins(ctx context.Context, opts RestorePluginOptions, ref
 				res.Skipped = append(res.Skipped, adapter.ID()+"/"+p.Name)
 				continue
 			}
-			if _, present := alreadyInstalled[pluginIdentity(p.Name, p.Marketplace)]; present {
-				res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+p.Name)
-				continue
-			}
+			_, present := alreadyInstalled[pluginIdentity(p.Name, p.Marketplace)]
 			if opts.DryRun {
-				res.WouldInstall = append(res.WouldInstall, adapter.ID()+"/"+p.Name)
+				if present {
+					res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+p.Name)
+				} else {
+					res.WouldInstall = append(res.WouldInstall, adapter.ID()+"/"+p.Name)
+				}
 				continue
 			}
 			if _, done := addedMarketplace[p.Marketplace]; !done {
@@ -217,6 +226,10 @@ func (a *App) restorePlugins(ctx context.Context, opts RestorePluginOptions, ref
 					}
 				}
 				addedMarketplace[p.Marketplace] = struct{}{}
+			}
+			if present {
+				res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+p.Name)
+				continue
 			}
 			if installErr := adapter.InstallPlugin(ctx, p); installErr != nil {
 				res.Errors = append(res.Errors, PluginError{AgentID: adapter.ID(), Name: p.Name, Err: installErr})
@@ -384,17 +397,22 @@ func (a *App) AddPlugin(ctx context.Context, p config.Plugin) (AddPluginResult, 
 		if !pluginTargetsAdapter(p, adapter.ID()) {
 			continue
 		}
-		// listed check first: adopting an already-present plugin must not demand the CLI
-		if installed, listErr := adapter.ListPlugins(ctx); listErr == nil && pluginListed(installed, p.Name, p.Marketplace) {
-			res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+p.Name)
-			continue
-		}
+		installed, listErr := adapter.ListPlugins(ctx)
+		alreadyInstalled := listErr == nil && pluginListed(installed, p.Name, p.Marketplace)
 		if !adapter.Available() {
-			res.SkippedUnavailable = append(res.SkippedUnavailable, adapter.ID()+"/"+p.Name)
+			if alreadyInstalled {
+				res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+p.Name)
+			} else {
+				res.SkippedUnavailable = append(res.SkippedUnavailable, adapter.ID()+"/"+p.Name)
+			}
 			continue
 		}
 		if mErr := ensureMarketplace(ctx, adapter, *m); mErr != nil {
 			res.Errors = append(res.Errors, PluginError{AgentID: adapter.ID(), Name: p.Name, Err: fmt.Errorf("marketplace %s: %w", m.Name, mErr)})
+			continue
+		}
+		if alreadyInstalled {
+			res.AlreadyInstalled = append(res.AlreadyInstalled, adapter.ID()+"/"+p.Name)
 			continue
 		}
 		if installErr := adapter.InstallPlugin(ctx, p); installErr != nil {
@@ -648,40 +666,67 @@ func (a *App) ImportPlugins(ctx context.Context) (PluginImportDiff, error) {
 }
 
 // AdoptUnmanagedPlugins folds ImportPlugins' unmanaged results into the
-// manifest by identity only. This is manifest bookkeeping, distinct from
-// AddPlugin: it never calls an agent CLI, since the plugins are already
-// installed there. A plugin whose reported marketplace has no matching
-// declared config.Marketplace is skipped rather than adopted with a dangling
-// reference (see config.Plugin doc comment); the caller should surface that
-// count if it wants to report skips.
+// manifest by identity only. Identical same-identity (name+marketplace)
+// reports from different agents are adopted once and targeted at their union
+// of agents, mirroring AdoptUnmanagedMcpServers. This is manifest
+// bookkeeping, distinct from AddPlugin: it never calls an agent CLI, since
+// the plugins are already installed there. A plugin whose reported
+// marketplace has no matching declared config.Marketplace is skipped rather
+// than adopted with a dangling reference (see config.Plugin doc comment);
+// the caller should surface that count if it wants to report skips.
 func (a *App) AdoptUnmanagedPlugins(ctx context.Context) (adopted, skipped int, err error) {
 	diff, err := a.ImportPlugins(ctx)
 	if err != nil {
 		return 0, 0, err
 	}
+	type candidate struct {
+		plugin InstalledPlugin
+		agents []string
+	}
+	candidates := make(map[string]candidate)
+	agentIDs := make([]string, 0, len(diff.Unmanaged))
+	for agentID := range diff.Unmanaged {
+		agentIDs = append(agentIDs, agentID)
+	}
+	sort.Strings(agentIDs)
+	var identities []string
+	for _, agentID := range agentIDs {
+		for _, plg := range diff.Unmanaged[agentID] {
+			key := pluginIdentity(plg.Name, plg.Marketplace)
+			current, exists := candidates[key]
+			if !exists {
+				candidates[key] = candidate{plugin: plg, agents: []string{agentID}}
+				identities = append(identities, key)
+				continue
+			}
+			if !slices.Contains(current.agents, agentID) {
+				current.agents = append(current.agents, agentID)
+				candidates[key] = current
+			}
+		}
+	}
+	sort.Strings(identities)
 	err = a.withConfig(func(c *config.RootConfig) error {
 		managed := make(map[string]struct{}, len(c.Agents.Plugins))
 		for _, p := range c.Agents.Plugins {
 			managed[pluginIdentity(p.Name, p.Marketplace)] = struct{}{}
 		}
-		for agentID, plugins := range diff.Unmanaged {
-			for _, plg := range plugins {
-				key := pluginIdentity(plg.Name, plg.Marketplace)
-				if _, ok := managed[key]; ok {
-					continue
-				}
-				if findMarketplace(c.Agents.Marketplaces, plg.Marketplace) == nil {
-					skipped++
-					continue
-				}
-				managed[key] = struct{}{}
-				c.Agents.Plugins = append(c.Agents.Plugins, config.Plugin{
-					Name:        plg.Name,
-					Marketplace: plg.Marketplace,
-					Agents:      []string{agentID},
-				})
-				adopted++
+		for _, key := range identities {
+			cand := candidates[key]
+			if _, ok := managed[key]; ok {
+				continue
 			}
+			if findMarketplace(c.Agents.Marketplaces, cand.plugin.Marketplace) == nil {
+				skipped++
+				continue
+			}
+			managed[key] = struct{}{}
+			c.Agents.Plugins = append(c.Agents.Plugins, config.Plugin{
+				Name:        cand.plugin.Name,
+				Marketplace: cand.plugin.Marketplace,
+				Agents:      cand.agents,
+			})
+			adopted++
 		}
 		return nil
 	})

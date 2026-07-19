@@ -72,6 +72,7 @@ func newCmdTestModelWithProvider(t *testing.T, prov interface{}) Model {
 // TestLoadTools_HappyPath verifies that loadTools returns a toolsLoadedMsg with
 // no error when the App has a valid settings.json.
 func TestLoadTools_HappyPath(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	if err := os.WriteFile(cfgPath, []byte("{}"), 0o644); err != nil {
@@ -100,6 +101,7 @@ func TestLoadTools_HappyPath(t *testing.T) {
 }
 
 func TestLoadTools_IncludesCachedDotsState(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
@@ -139,6 +141,7 @@ func TestLoadTools_IncludesCachedDotsState(t *testing.T) {
 // TestLoadTools_NoConfig verifies that loadTools returns noConfig=true when
 // there is no settings.json file.
 func TestLoadTools_NoConfig(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json") // file does NOT exist
 	a := app.New(cfgPath)
@@ -163,6 +166,7 @@ func TestLoadTools_NoConfig(t *testing.T) {
 // TestLoadTools_WithGroups verifies that loadTools correctly populates
 // groupNames and toolGroups when there are config groups.
 func TestLoadTools_WithGroups(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
@@ -246,6 +250,7 @@ func TestLoadTools_GroupDisplayIsScopedToActiveHost(t *testing.T) {
 // TestLoadTools_WithHost verifies that loadTools populates hostInfo when
 // a host entry is present.
 func TestLoadTools_WithHost(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
@@ -282,6 +287,7 @@ func TestLoadTools_WithHost(t *testing.T) {
 
 // TestModel_Init verifies that Init() returns a non-nil tea.Cmd without panicking.
 func TestModel_Init(t *testing.T) {
+	t.Parallel()
 	m := newCmdTestModel(t)
 	cmd := m.Init()
 	if cmd == nil {
@@ -294,6 +300,7 @@ func TestModel_Init(t *testing.T) {
 // TestDoRefreshDescriptions_HappyPath verifies that doRefreshDescriptions returns
 // a descRefreshDoneMsg when the app has no tools to describe (empty config).
 func TestDoRefreshDescriptions_HappyPath(t *testing.T) {
+	t.Parallel()
 	m := newCmdTestModel(t)
 	msg := m.doRefreshDescriptions(7, nil, 0)()
 	got, ok := msg.(descRefreshDoneMsg)
@@ -309,6 +316,7 @@ func TestDoRefreshDescriptions_HappyPath(t *testing.T) {
 // returns a descRefreshDoneMsg even when the App has tools (no descriptions to fetch
 // in test env, so the refresh returns empty results gracefully).
 func TestDoRefreshDescriptions_WithTools(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
@@ -342,6 +350,7 @@ func TestDoRefreshDescriptions_WithTools(t *testing.T) {
 // TestCancelSearch_NilCancel verifies that cancelSearch is safe to call when
 // searchCancel is nil (the common idle state).
 func TestCancelSearch_NilCancel(t *testing.T) {
+	t.Parallel()
 	m := newCmdTestModel(t)
 	m.searchCancel = nil
 	// Must not panic.
@@ -354,6 +363,7 @@ func TestCancelSearch_NilCancel(t *testing.T) {
 // TestCancelSearch_NonNilCancel verifies that cancelSearch invokes and clears a
 // non-nil cancel function.
 func TestCancelSearch_NonNilCancel(t *testing.T) {
+	t.Parallel()
 	m := newCmdTestModel(t)
 	cancelled := false
 	m.searchCancel = func() { cancelled = true }
@@ -371,6 +381,7 @@ func TestCancelSearch_NonNilCancel(t *testing.T) {
 // TestDoSaveDisabledProviders_HappyPath verifies that doSaveDisabledProviders
 // returns a setupProvidersDoneMsg with no error.
 func TestDoSaveDisabledProviders_HappyPath(t *testing.T) {
+	t.Parallel()
 	m := newCmdTestModel(t)
 	msg := m.doSaveDisabledProviders([]string{"python"})()
 	got, ok := msg.(setupProvidersDoneMsg)
@@ -385,6 +396,7 @@ func TestDoSaveDisabledProviders_HappyPath(t *testing.T) {
 // TestDoSaveDisabledProviders_Empty verifies that saving an empty slice (all
 // providers enabled) does not return an error.
 func TestDoSaveDisabledProviders_Empty(t *testing.T) {
+	t.Parallel()
 	m := newCmdTestModel(t)
 	msg := m.doSaveDisabledProviders(nil)()
 	got, ok := msg.(setupProvidersDoneMsg)
@@ -438,6 +450,7 @@ func TestDoSetupHost_HappyPath(t *testing.T) {
 // TestDoSetupHost_EmptyName verifies that doSetupHost surfaces an error
 // when passed an empty host name (app rejects blank names).
 func TestDoSetupHost_EmptyName(t *testing.T) {
+	t.Parallel()
 	m := newCmdTestModel(t)
 	msg := m.doSetupHost("")()
 	got, ok := msg.(setupHostDoneMsg)
@@ -594,6 +607,7 @@ func findTUITestGroup(groups []*config.GroupConfig, name string) *config.GroupCo
 // TestDoSetupDotsRepo_ErrorOnSave verifies that doSetupDotsRepo surfaces an
 // error without closing onboarding when the settings save fails.
 func TestDoSetupDotsRepo_ErrorOnSave(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	if err := os.WriteFile(cfgPath, []byte("{}"), 0o644); err != nil {
@@ -631,6 +645,7 @@ func TestDoSetupDotsRepo_ErrorOnSave(t *testing.T) {
 // TestDoUpgradeAll_EmptyApp verifies that doUpgradeAll on an empty app
 // (no tools to upgrade) returns a progressDoneMsg with key="*" and no error.
 func TestDoUpgradeAll_EmptyApp(t *testing.T) {
+	t.Parallel()
 	m := newCmdTestModel(t)
 	ch := make(chan progressUpdate, 16)
 	m.progressCh = ch
@@ -650,6 +665,7 @@ func TestDoUpgradeAll_EmptyApp(t *testing.T) {
 // TestDoUpgradeAll_ChannelClosed verifies that the channel is closed after
 // doUpgradeAll returns (so waitForProgress receives progressDoneMsg).
 func TestDoUpgradeAll_ChannelClosed(t *testing.T) {
+	t.Parallel()
 	m := newCmdTestModel(t)
 	ch := make(chan progressUpdate, 16)
 	m.progressCh = ch
@@ -672,6 +688,7 @@ func TestDoUpgradeAll_ChannelClosed(t *testing.T) {
 // with an empty DB and no providers that return discovered tools, it should
 // return a discoveredRefreshedMsg with nil discovered list and no error.
 func TestDoRefreshDiscovered_EmptyApp(t *testing.T) {
+	t.Parallel()
 	m := newCmdTestModel(t)
 	msg := m.doRefreshDiscovered(4, nil, 0)()
 	got, ok := msg.(discoveredRefreshedMsg)
@@ -693,6 +710,7 @@ func TestDoRefreshDiscovered_EmptyApp(t *testing.T) {
 // TestAnyMissingDescription_AllPresent verifies the false branch when every
 // tool has a valid description.
 func TestAnyMissingDescription_AllPresent(t *testing.T) {
+	t.Parallel()
 	from := func(desc string) *app.ToolView {
 		return &app.ToolView{
 			Description: desc,
@@ -710,6 +728,7 @@ func TestAnyMissingDescription_AllPresent(t *testing.T) {
 // TestAnyMissingDescription_OneMissing verifies the true branch when at least
 // one tool lacks a description.
 func TestAnyMissingDescription_OneMissing(t *testing.T) {
+	t.Parallel()
 	present := &app.ToolView{
 		Description: "something",
 	}
@@ -724,6 +743,7 @@ func TestAnyMissingDescription_OneMissing(t *testing.T) {
 
 // TestAnyMissingDescription_Empty verifies the false branch for an empty slice.
 func TestAnyMissingDescription_Empty(t *testing.T) {
+	t.Parallel()
 	if anyMissingDescription(nil) {
 		t.Error("anyMissingDescription(nil) = true, want false")
 	}

@@ -12,6 +12,7 @@ import (
 )
 
 func TestAgentConfigDotCandidateNames_DerivesFromCatalog(t *testing.T) {
+	t.Parallel()
 	names := agentConfigDotCandidateNames()
 	nameSet := make(map[string]struct{}, len(names))
 	for _, n := range names {
@@ -134,8 +135,11 @@ func TestDotsTestTargetPath_LeavesUnsupportedTildePrefixUntouched(t *testing.T) 
 }
 
 func TestCountIgnoredTree_DepthGuardPreventsRunaway(t *testing.T) {
+	t.Parallel(
 	// Build a chain deeper than countIgnoredTreeMaxDepth to verify
 	// the depth guard returns 0 instead of overflowing the stack.
+	)
+
 	leaf := DotChild{Name: "file.txt", IsDir: false}
 	for i := range countIgnoredTreeMaxDepth + 10 {
 		leaf = DotChild{
@@ -151,6 +155,7 @@ func TestCountIgnoredTree_DepthGuardPreventsRunaway(t *testing.T) {
 }
 
 func TestCountIgnoredTree_NormalDepthWorks(t *testing.T) {
+	t.Parallel()
 	tree := DotChild{
 		Name:  "root",
 		IsDir: true,
@@ -169,8 +174,11 @@ func TestCountIgnoredTree_NormalDepthWorks(t *testing.T) {
 }
 
 func TestCountIgnoredTree_LeafDirCountsAsOne(t *testing.T) {
+	t.Parallel(
 	// An ignored leaf directory (e.g. node_modules) with no sub-tree
 	// should count as 1, not 0.
+	)
+
 	tree := DotChild{
 		Name:  "root",
 		IsDir: true,
@@ -189,6 +197,7 @@ func TestCountIgnoredTree_LeafDirCountsAsOne(t *testing.T) {
 // directories synthesized by buildIgnoredChildTree have Ignored=false while
 // leaf entries (explicitly ignored files) keep Ignored=true.
 func TestBuildIgnoredChildTree_IntermediateNotIgnored(t *testing.T) {
+	t.Parallel()
 	flat := []DotChild{
 		{Name: "a", RelPath: "claude/a", Path: "/home/.config/claude/a", Ignored: true, Depth: 2},
 		{Name: "b", RelPath: "claude/b", Path: "/home/.config/claude/b", Ignored: true, Depth: 2},
@@ -230,6 +239,7 @@ func TestBuildIgnoredChildTree_IntermediateNotIgnored(t *testing.T) {
 // TestBuildIgnoredChildTree_FlatLeaves verifies that flat ignored children
 // (no intermediate dirs) are returned as-is with Ignored preserved.
 func TestBuildIgnoredChildTree_FlatLeaves(t *testing.T) {
+	t.Parallel()
 	flat := []DotChild{
 		{Name: "foo", RelPath: "foo", Path: "/home/foo", Ignored: true, Depth: 1},
 		{Name: "bar", RelPath: "bar", Path: "/home/bar", Ignored: true, Depth: 1},
@@ -252,6 +262,7 @@ func TestBuildIgnoredChildTree_FlatLeaves(t *testing.T) {
 // TestBuildIgnoredChildTree_DeepTree verifies multi-level nesting: only the
 // deepest leaf is Ignored=true; all intermediate dirs are Ignored=false.
 func TestBuildIgnoredChildTree_DeepTree(t *testing.T) {
+	t.Parallel()
 	flat := []DotChild{
 		{Name: "config.toml", RelPath: "a/b/config.toml", Path: "/root/a/b/config.toml", Ignored: true, Depth: 3},
 	}
@@ -285,6 +296,7 @@ func TestBuildIgnoredChildTree_DeepTree(t *testing.T) {
 // synthesized Ignored-section tree carrying its real state (not muted/dropped),
 // while the ignored sibling stays ignored and the container dir stays synthetic.
 func TestIgnoredChildDotStatuses_KeepsTrackedReincludedChildren(t *testing.T) {
+	t.Parallel()
 	status := DotStatus{
 		Name:       "claude",
 		TargetPath: "/home/.config",
@@ -347,6 +359,7 @@ func TestIgnoredChildDotStatuses_KeepsTrackedReincludedChildren(t *testing.T) {
 }
 
 func TestClassifyDotPathState_AllIgnoredDirIsIgnoredNotConflict(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	src := filepath.Join(tmp, "repo", ".claude", "plugins")
 	tgt := filepath.Join(tmp, "home", ".claude", "plugins")
@@ -371,6 +384,7 @@ func TestClassifyDotPathState_AllIgnoredDirIsIgnoredNotConflict(t *testing.T) {
 }
 
 func TestClassifyDotPathState_UnignoredContentStillConflicts(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	src := filepath.Join(tmp, "repo", ".claude", "plugins")
 	tgt := filepath.Join(tmp, "home", ".claude", "plugins")
@@ -398,6 +412,7 @@ func TestClassifyDotPathState_UnignoredContentStillConflicts(t *testing.T) {
 }
 
 func TestClassifyDotEntry_AllIgnoredRootDirIsIgnoredNotConflict(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	src := filepath.Join(tmp, "repo", "claude", ".claude")
 	tgt := filepath.Join(tmp, "home", ".claude")

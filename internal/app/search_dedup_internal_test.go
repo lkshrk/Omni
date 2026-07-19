@@ -7,6 +7,7 @@ import (
 )
 
 func TestDedupSearchResults_CollapsesNodeEcosystem(t *testing.T) {
+	t.Parallel()
 	rank := map[string]int{"brew": 0, "bun": 1, "pnpm": 2, "npm": 3, "uv": 4, "pip": 5}
 	in := []provider.SearchResult{
 		{Name: "typescript", Provider: "npm"},
@@ -24,6 +25,7 @@ func TestDedupSearchResults_CollapsesNodeEcosystem(t *testing.T) {
 }
 
 func TestDedupSearchResults_KeepsDifferentEcosystems(t *testing.T) {
+	t.Parallel()
 	rank := map[string]int{"brew": 0, "npm": 3}
 	in := []provider.SearchResult{
 		{Name: "prettier", Provider: "npm"},
@@ -39,6 +41,7 @@ func TestDedupSearchResults_KeepsDifferentEcosystems(t *testing.T) {
 }
 
 func TestDedupSearchResults_RelevanceFirst(t *testing.T) {
+	t.Parallel()
 	rank := map[string]int{"brew": 0, "npm": 1}
 	in := []provider.SearchResult{
 		{Name: "ripgrep-all", Provider: "brew"}, // prefix, high-priority provider
@@ -58,6 +61,7 @@ func TestDedupSearchResults_RelevanceFirst(t *testing.T) {
 }
 
 func TestDedupSearchResults_SortsByRankThenName(t *testing.T) {
+	t.Parallel()
 	rank := map[string]int{"brew": 0, "npm": 1}
 	in := []provider.SearchResult{
 		{Name: "zlib", Provider: "npm"},

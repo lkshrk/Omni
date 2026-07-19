@@ -21,6 +21,7 @@ import (
 // membership at one. "web" and "team" are reusable (in groupNames); "laptop"
 // is a host group.
 func TestSelectGroupMembership_MultiSelectInvariant(t *testing.T) {
+	t.Parallel()
 	m := &Model{
 		groupNames:           []string{"web", "team"},
 		pickerMembershipKind: pickerMembershipSkill,
@@ -63,6 +64,7 @@ func TestSelectGroupMembership_MultiSelectInvariant(t *testing.T) {
 // TestRenderGroupMembershipPicker_MarksEveryMember confirms the picker renders a
 // checkbox [x] on every group the item belongs to, not just one (multi-select).
 func TestRenderGroupMembershipPicker_MarksEveryMember(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.mode = viewGroupMembership
 	m.cursor = 0
@@ -80,6 +82,7 @@ func TestRenderGroupMembershipPicker_MarksEveryMember(t *testing.T) {
 }
 
 func TestRenderGroupMembershipPicker_FooterFitsOnOneLine(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.mode = viewGroupMembership
 	m.pickerGroups = []string{"base", "work"}
@@ -105,6 +108,7 @@ func TestRenderGroupMembershipPicker_FooterFitsOnOneLine(t *testing.T) {
 }
 
 func TestRenderGroupMembershipPicker_FooterLayoutAcrossThemesAndWidths(t *testing.T) {
+	t.Parallel()
 	for _, isDark := range []bool{true, false} {
 		for _, width := range []int{60, 90} {
 			name := fmt.Sprintf("dark=%t/width=%d", isDark, width)
@@ -143,6 +147,7 @@ func TestRenderGroupMembershipPicker_FooterLayoutAcrossThemesAndWidths(t *testin
 }
 
 func TestGroupMembershipPopupTitle_AllItemKinds(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{
 		pickerMembershipTool,
 		pickerMembershipDot,
@@ -168,6 +173,7 @@ func TestGroupMembershipPopupTitle_AllItemKinds(t *testing.T) {
 // caps reusable membership at one; the agent-kinds (mcp/plugin/marketplace)
 // are free multi-select and keep both reusable groups.
 func TestSelectGroupMembership_InvariantAcrossItemKinds(t *testing.T) {
+	t.Parallel()
 	kinds := []struct {
 		kind string
 		seed func(m *Model)
@@ -242,6 +248,7 @@ func membershipToggleTestModel(t *testing.T, kind string) *Model {
 }
 
 func TestSelectGroupMembership_ToolKeepsTwoReusable(t *testing.T) {
+	t.Parallel()
 	m := membershipToggleTestModel(t, pickerMembershipTool)
 	m.groupNames = []string{"work", "base"}
 	m.setSelectedMemberships([]string{"work"})
@@ -255,6 +262,7 @@ func TestSelectGroupMembership_ToolKeepsTwoReusable(t *testing.T) {
 }
 
 func TestSelectGroupMembership_DotEvictsSecondReusable(t *testing.T) {
+	t.Parallel()
 	m := membershipToggleTestModel(t, pickerMembershipDot)
 	m.groupNames = []string{"work", "base"}
 	m.setSelectedMemberships([]string{"work"})
@@ -362,6 +370,7 @@ func TestFlow_AgentsSkillMembership_FreeMultiToggleSavesBothGroups(t *testing.T)
 // ended up a member of BOTH reusable groups (tools are free multi-select,
 // like the agent-kinds).
 func TestFlow_ToolsMembership_FreeMultiToggleSavesBothReusableGroups(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
 	if err := a.CreateGroup("work"); err != nil {

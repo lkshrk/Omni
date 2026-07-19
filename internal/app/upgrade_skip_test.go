@@ -39,6 +39,7 @@ func (s *manualInstallerBrewStub) Upgrade(_ context.Context, tool provider.Tool)
 // Those require user intervention and should not fail an otherwise successful
 // upgrade-all/reconcile run.
 func TestUpgradeAll_SkipsBrewManualInstallerCaskWithoutError(t *testing.T) {
+	t.Parallel()
 	stub := &manualInstallerBrewStub{stubProvider: stubProvider{name: "brew", available: true}}
 	a, cfgPath := newImportApp(t, stub)
 	ctx := context.Background()
@@ -90,6 +91,7 @@ func TestUpgradeAll_SkipsBrewManualInstallerCaskWithoutError(t *testing.T) {
 // impossible (PEP 668) and not fixable by switching to uv, so upgrade-all must
 // skip it gracefully rather than failing the whole run.
 func TestUpgradeAll_SkipsExternallyManagedPipSelfWithoutError(t *testing.T) {
+	t.Parallel()
 	stub := &externallyManagedPipStub{stubProvider: stubProvider{name: "pip", available: true}}
 	a, cfgPath := newImportApp(t, stub)
 	ctx := context.Background()

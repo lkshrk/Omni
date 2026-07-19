@@ -205,6 +205,7 @@ func TestSetDotGroups_ClampsMultipleReusableGroupsToOne(t *testing.T) {
 // MoveToolToGroup is a relocate even from a valid multi-group state: it collapses
 // the tool to exactly the target group (used by claim/reassign flows).
 func TestMoveToolToGroup_CollapsesMultiGroupMembership(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),

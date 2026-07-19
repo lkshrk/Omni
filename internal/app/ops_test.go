@@ -128,6 +128,7 @@ func hasTool(cfg *config.RootConfig, name, providerName string) bool {
 // ─── Install ─────────────────────────────────────────────────────────────────
 
 func TestInstall_PostInstallVerificationFailureDoesNotMarkInstalled(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		provider  *installVerifyStub
@@ -168,6 +169,7 @@ func TestInstall_PostInstallVerificationFailureDoesNotMarkInstalled(t *testing.T
 }
 
 func TestInstall_UsesConfiguredPackageAndProvider(t *testing.T) {
+	t.Parallel()
 	brew := &installCaptureStub{stubProvider: stubProvider{name: "brew", available: true}, version: "14.1.0"}
 	a, cfgPath := newImportApp(t, brew)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -204,6 +206,7 @@ func TestInstall_UsesConfiguredPackageAndProvider(t *testing.T) {
 }
 
 func TestInstall_BrewPopulatesGit(t *testing.T) {
+	t.Parallel()
 	brew := &metadataCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		metadata: map[string]provider.InstalledMetadata{
@@ -276,6 +279,7 @@ func TestInstallWithStateReturnsUpdatedToolsAndGroups(t *testing.T) {
 // ─── Uninstall ───────────────────────────────────────────────────────────────
 
 func TestUninstall_RemovesConfiguredToolFromFile(t *testing.T) {
+	t.Parallel()
 	stub := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, stub)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -308,6 +312,7 @@ func TestUninstall_RemovesConfiguredToolFromFile(t *testing.T) {
 }
 
 func TestUninstall_UsesConfiguredPackage(t *testing.T) {
+	t.Parallel()
 	stub := &uninstallCaptureStub{stubProvider: stubProvider{name: "brew", available: true}}
 	a, cfgPath := newImportApp(t, stub)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -332,6 +337,7 @@ func TestUninstall_UsesConfiguredPackage(t *testing.T) {
 }
 
 func TestUninstall_RejectsProviderTool(t *testing.T) {
+	t.Parallel()
 	npm := &managerUninstallCaptureStub{
 		uninstallCaptureStub: uninstallCaptureStub{stubProvider: stubProvider{name: "npm", available: true}},
 	}
@@ -362,6 +368,7 @@ func TestUninstall_RejectsProviderTool(t *testing.T) {
 }
 
 func TestUninstall_RemovesConfiguredEntry(t *testing.T) {
+	t.Parallel()
 	stub := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, stub)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -387,6 +394,7 @@ func TestUninstall_RemovesConfiguredEntry(t *testing.T) {
 }
 
 func TestUninstall_ProviderFailureLeavesConfigUntouched(t *testing.T) {
+	t.Parallel()
 	stub := &uninstallErrStub{stubProvider: stubProvider{name: "brew", available: true}}
 	a, cfgPath := newImportApp(t, stub)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -410,6 +418,7 @@ func TestUninstall_ProviderFailureLeavesConfigUntouched(t *testing.T) {
 }
 
 func TestUninstall_UnknownProvider(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	if err := a.Uninstall(context.Background(), "ripgrep", "unknown"); err == nil {
 		t.Error("expected error for unknown provider, got nil")
@@ -469,6 +478,7 @@ func TestUninstallWithStateReturnsUpdatedToolsAndGroups(t *testing.T) {
 }
 
 func TestRemoveToolFromConfig_RemovesMissingConfiguredTool(t *testing.T) {
+	t.Parallel()
 	stub := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, stub)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -507,6 +517,7 @@ func TestRemoveToolFromConfig_RemovesMissingConfiguredTool(t *testing.T) {
 }
 
 func TestRemoveToolFromConfig_RemovesConcreteConfiguredCacheForLogicalProvider(t *testing.T) {
+	t.Parallel()
 	apt := &stubProvider{name: "apt", available: true}
 	a, cfgPath := newImportApp(t, apt)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -548,6 +559,7 @@ func TestRemoveToolFromConfig_RemovesConcreteConfiguredCacheForLogicalProvider(t
 }
 
 func TestRemoveToolFromConfig_RemovesConfiguredAndRequestedCacheRows(t *testing.T) {
+	t.Parallel()
 	apt := &stubProvider{name: "apt", available: true}
 	brew := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, apt, brew)
@@ -653,6 +665,7 @@ func TestRemoveToolFromConfigWithStateReturnsUpdatedToolsAndGroups(t *testing.T)
 }
 
 func TestRemoveToolFromConfig_RejectsProviderTool(t *testing.T) {
+	t.Parallel()
 	bun := &stubProvider{name: "bun", available: true}
 	a, cfgPath := newImportApp(t, bun)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -681,6 +694,7 @@ func TestRemoveToolFromConfig_RejectsProviderTool(t *testing.T) {
 // ─── Upgrade ─────────────────────────────────────────────────────────────────
 
 func TestUpgradeInstalled_UsesCachedInstalledOwner(t *testing.T) {
+	t.Parallel()
 	node := &managerUpgradeStub{stubProvider: stubProvider{name: "node", available: true}, verifyInstalled: true}
 	a, _ := newImportApp(t, node)
 	ctx := context.Background()
@@ -706,6 +720,7 @@ func TestUpgradeInstalled_UsesCachedInstalledOwner(t *testing.T) {
 }
 
 func TestUpgradeInstalled_NoInstalledOwner(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t, &stubProvider{name: "brew", available: true})
 	if err := a.UpgradeInstalled(context.Background(), "ripgrep"); err == nil || !strings.Contains(err.Error(), "not installed") {
 		t.Fatalf("UpgradeInstalled error = %v, want not installed", err)
@@ -713,6 +728,7 @@ func TestUpgradeInstalled_NoInstalledOwner(t *testing.T) {
 }
 
 func TestUpgradeInstalled_MultipleInstalledOwners(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t,
 		&stubProvider{name: "brew", available: true},
 		&stubProvider{name: "pip", available: true},
@@ -733,6 +749,7 @@ func TestUpgradeInstalled_MultipleInstalledOwners(t *testing.T) {
 }
 
 func TestUpgradeWithStateReturnsUpdatedTools(t *testing.T) {
+	t.Parallel()
 	node := &managerUpgradeStub{stubProvider: stubProvider{name: "node", available: true}, verifyInstalled: true}
 	a, _ := newImportApp(t, node)
 	ctx := context.Background()
@@ -769,6 +786,7 @@ func TestUpgradeWithStateReturnsUpdatedTools(t *testing.T) {
 }
 
 func TestUpgrade_UnknownProvider(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	if err := a.Upgrade(context.Background(), "ripgrep", "unknown"); err == nil {
 		t.Error("expected error for unknown provider, got nil")
@@ -841,6 +859,7 @@ func (s *clearingManagerUpgradeStub) OutdatedByManager(_ context.Context) (map[s
 }
 
 func TestUpgrade_UsesInstalledWithManager(t *testing.T) {
+	t.Parallel()
 	node := &managerUpgradeStub{stubProvider: stubProvider{name: "node", available: true}, verifyInstalled: true}
 	a, _ := newImportApp(t, node)
 	ctx := context.Background()
@@ -879,6 +898,7 @@ func TestUpgrade_UsesInstalledWithManager(t *testing.T) {
 }
 
 func TestUpgrade_RechecksOutdatedAfterVerification(t *testing.T) {
+	t.Parallel()
 	node := &managerUpgradeStub{
 		stubProvider:      stubProvider{name: "node", available: true},
 		verifyInstalled:   true,
@@ -916,6 +936,7 @@ func TestUpgrade_RechecksOutdatedAfterVerification(t *testing.T) {
 }
 
 func TestUpgrade_VerificationFailureKeepsOutdatedState(t *testing.T) {
+	t.Parallel()
 	node := &managerUpgradeStub{stubProvider: stubProvider{name: "node", available: true}, verifyErr: errors.New("status failed")}
 	a, _ := newImportApp(t, node)
 	ctx := context.Background()
@@ -948,6 +969,7 @@ func TestUpgrade_VerificationFailureKeepsOutdatedState(t *testing.T) {
 // ─── UpgradeAll ───────────────────────────────────────────────────────────────
 
 func TestUpgradeAllDetailedWithStateReturnsUpdatedTools(t *testing.T) {
+	t.Parallel()
 	node := &clearingManagerUpgradeStub{
 		managerUpgradeStub: managerUpgradeStub{
 			stubProvider:    stubProvider{name: "node", available: true},
@@ -989,6 +1011,7 @@ func TestUpgradeAllDetailedWithStateReturnsUpdatedTools(t *testing.T) {
 }
 
 func TestUpgradeAll_NothingOutdated(t *testing.T) {
+	t.Parallel()
 	stub := &stubProvider{name: "brew", available: true}
 	a, _ := newImportApp(t, stub)
 
@@ -1006,6 +1029,7 @@ func TestUpgradeAll_NothingOutdated(t *testing.T) {
 }
 
 func TestUpgradeAll_SkipsUninstalledOutdatedRows(t *testing.T) {
+	t.Parallel()
 	stub := &stubProvider{name: "brew", available: true}
 	a, _ := newImportApp(t, stub)
 	ctx := context.Background()
@@ -1030,6 +1054,7 @@ func TestUpgradeAll_SkipsUninstalledOutdatedRows(t *testing.T) {
 }
 
 func TestUpgradeAllDetailedReportsTargetVersionProgress(t *testing.T) {
+	t.Parallel()
 	stub := &stubProvider{
 		name:      "brew",
 		available: true,
@@ -1251,6 +1276,7 @@ func (s *selectiveUpgradeStub) OutdatedMap(_ context.Context) (map[string]string
 }
 
 func TestUpgradeAll_ContinuesAfterToolFailure(t *testing.T) {
+	t.Parallel()
 	stub := &selectiveUpgradeStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		failName:     "ripgrep",
@@ -1307,6 +1333,7 @@ func TestUpgradeAll_ContinuesAfterToolFailure(t *testing.T) {
 // ─── Search ───────────────────────────────────────────────────────────────────
 
 func TestSearch_FansOut(t *testing.T) {
+	t.Parallel()
 	s := &searchStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		results:      []provider.SearchResult{{Name: "ripgrep", Provider: "brew"}},
@@ -1326,6 +1353,7 @@ func TestSearch_FansOut(t *testing.T) {
 }
 
 func TestSearchResultDisplayProviderKeepsConcreteWithinSameEcosystem(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		in   provider.SearchResult
@@ -1361,6 +1389,7 @@ func TestSearchResultDisplayProviderKeepsConcreteWithinSameEcosystem(t *testing.
 }
 
 func TestClassifyProviderMatch_HighConfidenceExactPackageNative(t *testing.T) {
+	t.Parallel()
 	got := app.ClassifyProviderMatch("ripgrep", config.ToolSpec{}, provider.SearchResult{
 		Name:     "ripgrep",
 		Provider: "brew",
@@ -1371,6 +1400,7 @@ func TestClassifyProviderMatch_HighConfidenceExactPackageNative(t *testing.T) {
 }
 
 func TestClassifyProviderMatch_EcosystemExactPackageWeakWithoutSource(t *testing.T) {
+	t.Parallel()
 	got := app.ClassifyProviderMatch("prettier", config.ToolSpec{}, provider.SearchResult{
 		Name:     "prettier",
 		Provider: "npm",
@@ -1381,6 +1411,7 @@ func TestClassifyProviderMatch_EcosystemExactPackageWeakWithoutSource(t *testing
 }
 
 func TestClassifyProviderMatch_HighConfidenceMatchingGitSource(t *testing.T) {
+	t.Parallel()
 	got := app.ClassifyProviderMatch("rg", config.ToolSpec{
 		Git: "https://github.com/BurntSushi/ripgrep",
 	}, provider.SearchResult{
@@ -1399,6 +1430,7 @@ func TestClassifyProviderMatch_HighConfidenceMatchingGitSource(t *testing.T) {
 }
 
 func TestClassifyProviderMatch_HighConfidenceMatchingGitSourceURL(t *testing.T) {
+	t.Parallel()
 	got := app.ClassifyProviderMatch("rg", config.ToolSpec{
 		Git: "git@github.com:BurntSushi/ripgrep.git",
 	}, provider.SearchResult{
@@ -1415,6 +1447,7 @@ func TestClassifyProviderMatch_HighConfidenceMatchingGitSourceURL(t *testing.T) 
 }
 
 func TestClassifyProviderMatch_WeakForLooseSearchHit(t *testing.T) {
+	t.Parallel()
 	got := app.ClassifyProviderMatch("prettier", config.ToolSpec{}, provider.SearchResult{
 		Name:        "prettier-plugin-tailwindcss",
 		Provider:    "npm",
@@ -1426,6 +1459,7 @@ func TestClassifyProviderMatch_WeakForLooseSearchHit(t *testing.T) {
 }
 
 func TestClassifyProviderMatch_NativeNameMatchHigh(t *testing.T) {
+	t.Parallel()
 	for _, prov := range []string{"brew", "apt", "dnf", "apk", "pacman", "zypper"} {
 		got := app.ClassifyProviderMatch("ripgrep", config.ToolSpec{}, provider.SearchResult{
 			Name:     "ripgrep",
@@ -1438,6 +1472,7 @@ func TestClassifyProviderMatch_NativeNameMatchHigh(t *testing.T) {
 }
 
 func TestClassifyProviderMatch_EcosystemNameMatchWeakWithoutSource(t *testing.T) {
+	t.Parallel()
 	for _, prov := range []string{"npm", "pnpm", "bun", "pip", "uv"} {
 		got := app.ClassifyProviderMatch("ripgrep", config.ToolSpec{}, provider.SearchResult{
 			Name:     "ripgrep",
@@ -1450,6 +1485,7 @@ func TestClassifyProviderMatch_EcosystemNameMatchWeakWithoutSource(t *testing.T)
 }
 
 func TestClassifyProviderMatch_EcosystemNameMatchHighWithMatchingGitSource(t *testing.T) {
+	t.Parallel()
 	got := app.ClassifyProviderMatch("prettier", config.ToolSpec{
 		Git: "https://github.com/prettier/prettier",
 	}, provider.SearchResult{
@@ -1466,6 +1502,7 @@ func TestClassifyProviderMatch_EcosystemNameMatchHighWithMatchingGitSource(t *te
 }
 
 func TestProviderMatches_SortsHighConfidenceByProviderPriority(t *testing.T) {
+	t.Parallel()
 	prettierSource := provider.SourceMetadata{Type: provider.SourceTypeGitHub, URL: "https://github.com/prettier/prettier"}
 	brew := &searchStub{
 		stubProvider: stubProvider{name: "brew", available: true},
@@ -1537,6 +1574,7 @@ func TestSync_CachesProviderSearchMiss(t *testing.T) {
 }
 
 func TestSearchForDisplay_DedupsSharedStoreAndSorts(t *testing.T) {
+	t.Parallel()
 	mk := func(name string) *searchStub {
 		return &searchStub{
 			stubProvider: stubProvider{name: name, available: true},
@@ -1567,6 +1605,7 @@ func TestSearchForDisplay_DedupsSharedStoreAndSorts(t *testing.T) {
 }
 
 func TestProviderMatches_PutsHighConfidenceBeforeWeakEvenWhenPriorityIsLower(t *testing.T) {
+	t.Parallel()
 	brew := &searchStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		results: []provider.SearchResult{{
@@ -1602,6 +1641,7 @@ func TestProviderMatches_PutsHighConfidenceBeforeWeakEvenWhenPriorityIsLower(t *
 }
 
 func TestProviderMatches_ConsensusSourcePromotesEcosystemToHigh(t *testing.T) {
+	t.Parallel()
 	src := provider.SourceMetadata{Type: provider.SourceTypeGitHub, URL: "https://github.com/prettier/prettier"}
 	brew := &searchStub{
 		stubProvider: stubProvider{name: "brew", available: true},
@@ -1631,6 +1671,7 @@ func TestProviderMatches_ConsensusSourcePromotesEcosystemToHigh(t *testing.T) {
 }
 
 func TestProviderMatches_SingleEcosystemSourceStaysWeakWithoutConsensus(t *testing.T) {
+	t.Parallel()
 	src := provider.SourceMetadata{Type: provider.SourceTypeGitHub, URL: "https://github.com/prettier/prettier"}
 	npm := &searchStub{
 		stubProvider: stubProvider{name: "npm", available: true},
@@ -1647,6 +1688,7 @@ func TestProviderMatches_SingleEcosystemSourceStaysWeakWithoutConsensus(t *testi
 }
 
 func TestProviderMatches_SkipsDisabledProviders(t *testing.T) {
+	t.Parallel()
 	brew := &searchStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		results: []provider.SearchResult{{
@@ -1682,6 +1724,7 @@ func TestProviderMatches_SkipsDisabledProviders(t *testing.T) {
 }
 
 func TestProviderMatches_ReturnsMatchesWithPartialSearchError(t *testing.T) {
+	t.Parallel()
 	brew := &searchStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		results: []provider.SearchResult{{
@@ -1708,6 +1751,7 @@ func TestProviderMatches_ReturnsMatchesWithPartialSearchError(t *testing.T) {
 }
 
 func TestInstallHighConfidenceProviderMatches_AddsAllHighAndInstallsPriority(t *testing.T) {
+	t.Parallel()
 	prettierSource := provider.SourceMetadata{Type: provider.SourceTypeGitHub, URL: "https://github.com/prettier/prettier"}
 	brew := &searchStub{
 		stubProvider: stubProvider{name: "brew", available: true},
@@ -1768,6 +1812,7 @@ func TestInstallHighConfidenceProviderMatches_AddsAllHighAndInstallsPriority(t *
 }
 
 func TestAddHighConfidenceProviderMatches_AddsAllHighWithoutInstalling(t *testing.T) {
+	t.Parallel()
 	prettierSource := provider.SourceMetadata{Type: provider.SourceTypeGitHub, URL: "https://github.com/prettier/prettier"}
 	brew := &searchStub{
 		stubProvider: stubProvider{name: "brew", available: true},
@@ -1821,6 +1866,7 @@ func TestAddHighConfidenceProviderMatches_AddsAllHighWithoutInstalling(t *testin
 }
 
 func TestInstallHighConfidenceProviderMatchesWithState_ReturnsUpdatedToolsAndGroups(t *testing.T) {
+	t.Parallel()
 	prettierSource := provider.SourceMetadata{Type: provider.SourceTypeGitHub, URL: "https://github.com/prettier/prettier"}
 	brew := &searchStub{
 		stubProvider: stubProvider{name: "brew", available: true},
@@ -1870,6 +1916,7 @@ func TestInstallHighConfidenceProviderMatchesWithState_ReturnsUpdatedToolsAndGro
 }
 
 func TestInstallHighConfidenceProviderMatches_AddsConcreteProviderBreadth(t *testing.T) {
+	t.Parallel()
 	ripgrepSource := provider.SourceMetadata{Type: provider.SourceTypeGitHub, URL: "https://github.com/BurntSushi/ripgrep"}
 	providerNames := []string{"apk", "apt", "dnf", "pacman", "zypper", "pip"}
 	providers := make([]provider.Provider, 0, len(providerNames))
@@ -1985,6 +2032,7 @@ func TestSync_ConfiguredToolAutoAddsHighConfidenceProviderMatches(t *testing.T) 
 }
 
 func TestInstallHighConfidenceProviderMatches_SkipsEcosystemSearchCandidates(t *testing.T) {
+	t.Parallel()
 	prettierSource := provider.SourceMetadata{Type: provider.SourceTypeGitHub, URL: "https://github.com/prettier/prettier"}
 	node := &searchStub{
 		stubProvider: stubProvider{name: "node", available: true},
@@ -2043,6 +2091,7 @@ func TestInstallHighConfidenceProviderMatches_SkipsEcosystemSearchCandidates(t *
 }
 
 func TestInstallHighConfidenceProviderMatches_IgnoresWeakMatches(t *testing.T) {
+	t.Parallel()
 	npm := &searchStub{
 		stubProvider: stubProvider{name: "npm", available: true},
 		results: []provider.SearchResult{{
@@ -2085,6 +2134,7 @@ func TestInstallHighConfidenceProviderMatches_IgnoresWeakMatches(t *testing.T) {
 }
 
 func TestInstallProviderMatches_AllowWeakInstallsPriorityWeakMatch(t *testing.T) {
+	t.Parallel()
 	npm := &searchStub{
 		stubProvider: stubProvider{name: "npm", available: true},
 		results: []provider.SearchResult{{
@@ -2128,6 +2178,7 @@ func TestInstallProviderMatches_AllowWeakInstallsPriorityWeakMatch(t *testing.T)
 }
 
 func TestInstallProviderMatches_AllowWeakHonorsProviderFilter(t *testing.T) {
+	t.Parallel()
 	npm := &searchStub{
 		stubProvider: stubProvider{name: "npm", available: true},
 		results: []provider.SearchResult{{
@@ -2179,6 +2230,7 @@ func TestInstallProviderMatches_AllowWeakHonorsProviderFilter(t *testing.T) {
 }
 
 func TestInstallProviderMatches_AllowWeakProviderFamilyFilterInstallsConcreteMatch(t *testing.T) {
+	t.Parallel()
 	brew := &searchStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		results: []provider.SearchResult{{
@@ -2223,6 +2275,7 @@ func TestInstallProviderMatches_AllowWeakProviderFamilyFilterInstallsConcreteMat
 }
 
 func TestInstallProviderMatches_AllowWeakNodeFamilyFilterInstallsConcreteMatch(t *testing.T) {
+	t.Parallel()
 	npm := &searchStub{
 		stubProvider: stubProvider{name: "npm", available: true},
 		results: []provider.SearchResult{{
@@ -2267,6 +2320,7 @@ func TestInstallProviderMatches_AllowWeakNodeFamilyFilterInstallsConcreteMatch(t
 }
 
 func TestInstallProviderMatches_AllowWeakPythonFamilyFilterInstallsConcreteMatch(t *testing.T) {
+	t.Parallel()
 	pip := &searchStub{
 		stubProvider: stubProvider{name: "pip", available: true},
 		results: []provider.SearchResult{{
@@ -2445,6 +2499,7 @@ func TestSync_AllowWeakProviderFamilyFilterInstallsConcreteMatch(t *testing.T) {
 }
 
 func TestInstallHighConfidenceProviderMatches_SkipsFallbackOnlyTool(t *testing.T) {
+	t.Parallel()
 	npm := &searchStub{
 		stubProvider: stubProvider{name: "npm", available: true},
 		results: []provider.SearchResult{{
@@ -2485,6 +2540,7 @@ func TestInstallHighConfidenceProviderMatches_SkipsFallbackOnlyTool(t *testing.T
 }
 
 func TestInstallHighConfidenceProviderMatches_InstallsWithPartialSearchError(t *testing.T) {
+	t.Parallel()
 	brew := &searchStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		results: []provider.SearchResult{{
@@ -2520,6 +2576,7 @@ func TestInstallHighConfidenceProviderMatches_InstallsWithPartialSearchError(t *
 }
 
 func TestSearch_CachesResultMetadata(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := &searchStub{
 		stubProvider: stubProvider{name: "brew", available: true},
@@ -2577,6 +2634,7 @@ func TestSearch_CachesResultMetadata(t *testing.T) {
 }
 
 func TestAdd_UsesCachedSearchSourceMetadataForGit(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	s := &searchStub{
 		stubProvider: stubProvider{name: "brew", available: true},
@@ -2610,6 +2668,7 @@ func TestAdd_UsesCachedSearchSourceMetadataForGit(t *testing.T) {
 }
 
 func TestSearch_ProviderFilter(t *testing.T) {
+	t.Parallel()
 	brew := &searchStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		results:      []provider.SearchResult{{Name: "ripgrep", Provider: "brew"}},
@@ -2632,6 +2691,7 @@ func TestSearch_ProviderFilter(t *testing.T) {
 }
 
 func TestSearch_ConcreteProviderFilterUsesConcreteSearcher(t *testing.T) {
+	t.Parallel()
 	pip := &searchStub{
 		stubProvider: stubProvider{name: "pip", available: true},
 		results:      []provider.SearchResult{{Name: "black", Provider: "pip"}},
@@ -2651,6 +2711,7 @@ func TestSearch_ConcreteProviderFilterUsesConcreteSearcher(t *testing.T) {
 }
 
 func TestSearch_SkipsNonSearcher(t *testing.T) {
+	t.Parallel()
 	stub := &stubProvider{name: "brew", available: true}
 	a, _ := newImportApp(t, stub)
 
@@ -2666,6 +2727,7 @@ func TestSearch_SkipsNonSearcher(t *testing.T) {
 // ─── ListTools ────────────────────────────────────────────────────────────────
 
 func TestListTools_Empty(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	tools, err := a.ListTools(context.Background(), "")
 	if err != nil {
@@ -2677,6 +2739,7 @@ func TestListTools_Empty(t *testing.T) {
 }
 
 func TestListTools_ProviderFilter(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	npm := &stubProvider{name: "npm", available: true}
 	a, _ := newImportApp(t, brew, npm)
@@ -2699,6 +2762,7 @@ func TestListTools_ProviderFilter(t *testing.T) {
 }
 
 func TestQueryTools_ProviderFilterMatchesInstalledWith(t *testing.T) {
+	t.Parallel()
 	system := &stubProvider{name: "system", available: true}
 	brew := &stubProvider{name: "brew", available: true}
 	a, _ := newImportApp(t, system, brew)
@@ -2728,6 +2792,7 @@ func TestQueryTools_ProviderFilterMatchesInstalledWith(t *testing.T) {
 // ─── Providers ────────────────────────────────────────────────────────────────
 
 func TestProviders_ListsAll(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	npm := &stubProvider{name: "npm", available: false}
 	a, _ := newImportApp(t, brew, npm)
@@ -2754,6 +2819,7 @@ func TestProviders_ListsAll(t *testing.T) {
 // ─── LoadSettings / SaveSettings ─────────────────────────────────────────────
 
 func TestLoadSettings_MissingConfig(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	s, err := a.LoadSettings()
 	if err != nil {
@@ -2765,6 +2831,7 @@ func TestLoadSettings_MissingConfig(t *testing.T) {
 }
 
 func TestLoadSettings_WithConfig(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Settings: config.Settings{ProviderPriority: []string{"brew", "apt"}},
@@ -2782,6 +2849,7 @@ func TestLoadSettings_WithConfig(t *testing.T) {
 }
 
 func TestSaveSettings_PreservesTools(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	// Write tools to the current host group.
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -2815,6 +2883,7 @@ func TestSaveSettings_PreservesTools(t *testing.T) {
 }
 
 func TestSaveSettings_CreatesConfigWhenMissing(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 
 	if err := a.SaveSettings(context.Background(), testSettingsWithManager("python", "uv")); err != nil {
@@ -2861,6 +2930,7 @@ func TestSaveSettings_NormalizesDotsRepoUnderHome(t *testing.T) {
 // ─── ResetSettings ───────────────────────────────────────────────────────────
 
 func TestResetSettings_ClearsSettings(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	ctx := context.Background()
 
@@ -2883,6 +2953,7 @@ func TestResetSettings_ClearsSettings(t *testing.T) {
 }
 
 func TestResetSettings_PreservesTools(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	ctx := context.Background()
 
@@ -2917,6 +2988,7 @@ func TestResetSettings_PreservesTools(t *testing.T) {
 // ─── ResetCache ───────────────────────────────────────────────────────────────
 
 func TestResetCache_DBIsUsableAfterReset(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	ctx := context.Background()
 
@@ -2934,6 +3006,7 @@ func TestResetCache_DBIsUsableAfterReset(t *testing.T) {
 }
 
 func TestResetCache_IdempotentOnEmptyDB(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	ctx := context.Background()
 
@@ -2949,7 +3022,10 @@ func TestResetCache_IdempotentOnEmptyDB(t *testing.T) {
 // ─── ResolveProvider ─────────────────────────────────────────────────────────
 
 func TestResolveProvider_DefaultOrder(t *testing.T) {
+	t.Parallel(
 	// Only "node" is available; brew is registered but unavailable.
+	)
+
 	brew := &stubProvider{name: "brew", available: false}
 	node := &stubProvider{name: "node", available: true}
 	a, _ := newImportApp(t, brew, node)
@@ -2964,6 +3040,7 @@ func TestResolveProvider_DefaultOrder(t *testing.T) {
 }
 
 func TestResolveProvider_CustomPriority(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	node := &stubProvider{name: "node", available: true}
 	a, _ := newImportApp(t, brew, node)
@@ -2979,6 +3056,7 @@ func TestResolveProvider_CustomPriority(t *testing.T) {
 }
 
 func TestResolveProvider_NoneAvailable(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: false}
 	a, _ := newImportApp(t, brew)
 
@@ -2989,7 +3067,10 @@ func TestResolveProvider_NoneAvailable(t *testing.T) {
 }
 
 func TestResolveProvider_UnregisteredSkipped(t *testing.T) {
+	t.Parallel(
 	// Priority list names a provider that isn't registered; falls through.
+	)
+
 	node := &stubProvider{name: "node", available: true}
 	a, _ := newImportApp(t, node)
 
@@ -3005,6 +3086,7 @@ func TestResolveProvider_UnregisteredSkipped(t *testing.T) {
 // ─── Install (auto-resolve) ───────────────────────────────────────────────────
 
 func TestInstall_AutoResolve(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	a, _ := newImportApp(t, brew)
 
@@ -3022,6 +3104,7 @@ func TestInstall_AutoResolve(t *testing.T) {
 }
 
 func TestInstall_AutoResolveNoneAvailable(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t) // no providers registered
 	if err := a.Install(context.Background(), "ripgrep", ""); err == nil {
 		t.Error("expected error when no provider available, got nil")
@@ -3029,6 +3112,7 @@ func TestInstall_AutoResolveNoneAvailable(t *testing.T) {
 }
 
 func TestInstall_AutoResolveFromSettings(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	npm := &stubProvider{name: "npm", available: true}
 	a, _ := newImportApp(t, brew, npm)
@@ -3052,6 +3136,7 @@ func TestInstall_AutoResolveFromSettings(t *testing.T) {
 }
 
 func TestInstall_AutoResolveFromSettingsSkipsUnavailablePriority(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	npm := &stubProvider{name: "npm", available: false}
 	a, _ := newImportApp(t, npm, brew)
@@ -3080,6 +3165,7 @@ func TestInstall_AutoResolveFromSettingsSkipsUnavailablePriority(t *testing.T) {
 }
 
 func TestDefaultInstallProviderUsesSettingsPriority(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	npm := &stubProvider{name: "npm", available: true}
 	a, _ := newImportApp(t, brew, npm)
@@ -3099,6 +3185,7 @@ func TestDefaultInstallProviderUsesSettingsPriority(t *testing.T) {
 }
 
 func TestDefaultInstallProviderNoAvailableProvider(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 
 	settings := config.Settings{ProviderPriority: []string{"__nonexistent__"}}
@@ -3113,6 +3200,7 @@ func TestDefaultInstallProviderNoAvailableProvider(t *testing.T) {
 }
 
 func TestDefaultInstallProviderSkipsDisabledProviders(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	npm := &stubProvider{name: "npm", available: true}
 	a, _ := newImportApp(t, brew, npm)
@@ -3135,6 +3223,7 @@ func TestDefaultInstallProviderSkipsDisabledProviders(t *testing.T) {
 }
 
 func TestDefaultInstallProviderSkipsDisabledProviderFamily(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	npm := &stubProvider{name: "npm", available: true}
 	a, _ := newImportApp(t, brew, npm)

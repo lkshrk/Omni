@@ -14,6 +14,7 @@ import (
 // TestSkillsSearch_SlashOpensSearch verifies that pressing / in viewSkills
 // activates search mode and focuses the filter input.
 func TestSkillsSearch_SlashOpensSearch(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -31,6 +32,7 @@ func TestSkillsSearch_SlashOpensSearch(t *testing.T) {
 // TestSkillsSearch_EscClosesSearch verifies that Esc while search is active
 // clears the search state.
 func TestSkillsSearch_EscClosesSearch(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 
@@ -48,6 +50,7 @@ func TestSkillsSearch_EscClosesSearch(t *testing.T) {
 // TestSkillsSearch_TypeFiltersLocalRows verifies that typing a query while
 // search is focused filters the visible local rows.
 func TestSkillsSearch_TypeFiltersLocalRows(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -73,6 +76,7 @@ func TestSkillsSearch_TypeFiltersLocalRows(t *testing.T) {
 // TestSkillsSearch_EnterWithFreeTextDispatchesFind verifies that pressing Enter
 // on a free-text query (no slash, no https) sets skillAddRunning (triggering find).
 func TestSkillsSearch_EnterWithFreeTextDispatchesFind(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -92,6 +96,7 @@ func TestSkillsSearch_EnterWithFreeTextDispatchesFind(t *testing.T) {
 // TestSkillsSearch_EnterWithSourceDispatchesAdd verifies that pressing Enter
 // on a source-like query (owner/repo) sets skillAddRunning (triggering add).
 func TestSkillsSearch_EnterWithSourceDispatchesAdd(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -108,6 +113,7 @@ func TestSkillsSearch_EnterWithSourceDispatchesAdd(t *testing.T) {
 // TestSkillsSearch_FoundMsgPopulatesFindResults verifies that skillsFoundMsg
 // stores results and clears skillAddRunning.
 func TestSkillsSearch_FoundMsgPopulatesFindResults(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillAddRunning = true
@@ -132,6 +138,7 @@ func TestSkillsSearch_FoundMsgPopulatesFindResults(t *testing.T) {
 // TestSkillsSearch_FindResultsRenderSection verifies that find results are rendered
 // under the shared "Available" status section.
 func TestSkillsSearch_FindResultsRenderSection(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -157,6 +164,7 @@ func TestSkillsSearch_FindResultsRenderSection(t *testing.T) {
 // TestSkillsSearch_CursorOnFindRowEnterTriggersAdd verifies that pressing Enter
 // when the cursor is on a find row (cursor >= findStart) sets skillAddRunning.
 func TestSkillsSearch_CursorOnFindRowEnterTriggersAdd(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -183,6 +191,7 @@ func TestSkillsSearch_CursorOnFindRowEnterTriggersAdd(t *testing.T) {
 
 // TestSkillsSearch_FoundMsgWithErrorSetsErr verifies error handling on skillsFoundMsg.
 func TestSkillsSearch_FoundMsgWithErrorSetsErr(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillAddRunning = true
@@ -200,6 +209,7 @@ func TestSkillsSearch_FoundMsgWithErrorSetsErr(t *testing.T) {
 // TestSkillsSearch_AddedMsgClearsState verifies that skillAddedMsg clears
 // search state and find results.
 func TestSkillsSearch_AddedMsgClearsState(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillAddRunning = true
@@ -228,6 +238,7 @@ func TestSkillsSearch_AddedMsgClearsState(t *testing.T) {
 
 // TestLooksLikeSkillSource_OwnerRepo verifies that owner/repo is recognized as a source.
 func TestLooksLikeSkillSource_OwnerRepo(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		input string
 		want  bool
@@ -249,6 +260,7 @@ func TestLooksLikeSkillSource_OwnerRepo(t *testing.T) {
 }
 
 func TestSkillAdd_FindRowEnterQueuesSpinnerTick(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -277,6 +289,7 @@ func TestSkillAdd_FindRowEnterQueuesSpinnerTick(t *testing.T) {
 }
 
 func TestSkillAdd_DirectSourceSubmitQueuesSpinnerTick(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -299,6 +312,7 @@ func TestSkillAdd_DirectSourceSubmitQueuesSpinnerTick(t *testing.T) {
 }
 
 func TestSkillAdd_ActivityLabelAddingSkill(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.skillAddRunning = true
 	m.searching = false
@@ -310,6 +324,7 @@ func TestSkillAdd_ActivityLabelAddingSkill(t *testing.T) {
 }
 
 func TestSkillAdd_ActivityLabelSearchingWins(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.skillAddRunning = true
 	m.searching = true
@@ -321,6 +336,7 @@ func TestSkillAdd_ActivityLabelSearchingWins(t *testing.T) {
 }
 
 func TestSkillAdd_StatusbarSpinnerVisibleWhenRunning(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.skillAddRunning = true
 	m.searching = false
@@ -337,6 +353,7 @@ func TestSkillAdd_StatusbarSpinnerVisibleWhenRunning(t *testing.T) {
 }
 
 func TestSkillAdd_SpinnerTickContinuesWhileRunning(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.focused = true
 	m.skillAddRunning = true
@@ -348,6 +365,7 @@ func TestSkillAdd_SpinnerTickContinuesWhileRunning(t *testing.T) {
 }
 
 func TestSkillAdd_SpinnerTickStopsWhenDone(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.focused = true
 	m.skillAddRunning = false

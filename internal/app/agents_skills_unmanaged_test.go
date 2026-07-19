@@ -173,6 +173,7 @@ func TestAdoptSkillPackage_PersistsAndClearsFromUnmanaged(t *testing.T) {
 }
 
 func TestAdoptSkillPackage_GatedBySkillsDisabled(t *testing.T) {
+	t.Parallel()
 	a := newSkillsGateTestApp(t, config.Settings{SkillsDisabled: config.BoolPtr(true)})
 	_, err := a.AdoptSkillPackage("o/unmanaged")
 	if err == nil || err.Error() != "skills are disabled for this host" {

@@ -8,6 +8,7 @@ import (
 )
 
 func TestStatusAgentsOutOfSyncBreakdown(t *testing.T) {
+	t.Parallel()
 	if got := statusAgentsOutOfSyncBreakdown(agentsDashCounts{}); got != "" {
 		t.Errorf("breakdown of zero counts = %q, want empty", got)
 	}
@@ -35,6 +36,7 @@ func TestStatusAgentsOutOfSyncBreakdown(t *testing.T) {
 }
 
 func TestStatusUpgradeSummary(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name                     string
 		active, waiting, updates []string
@@ -54,6 +56,7 @@ func TestStatusUpgradeSummary(t *testing.T) {
 }
 
 func TestStatusOverflowDetails(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 
 	if got := statusOverflowDetails(m, []string{"a", "b", "c"}); got != nil {
@@ -76,6 +79,7 @@ func TestStatusOverflowDetails(t *testing.T) {
 }
 
 func TestStatusDashboardUpgradeActionable(t *testing.T) {
+	t.Parallel()
 	quiet := baseModel(nil)
 	if statusDashboardUpgradeActionable(quiet) {
 		t.Error("no tools → upgrade step should not be actionable")
@@ -88,6 +92,7 @@ func TestStatusDashboardUpgradeActionable(t *testing.T) {
 }
 
 func TestStatusDashboardFixIgnoreActionable_AndDoctorHasIgnoreFindings(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	if statusDashboardFixIgnoreActionable(m) {
 		t.Error("no doctor result → fix-ignore step should not be actionable")

@@ -5,6 +5,7 @@ import (
 )
 
 func TestNormalizeFallbackVersion(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  string
@@ -26,6 +27,7 @@ func TestNormalizeFallbackVersion(t *testing.T) {
 }
 
 func TestFallbackVersionNewer(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		candidate string
 		current   string

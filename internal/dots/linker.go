@@ -102,6 +102,7 @@ func unlinkEntry(e ResolvedEntry, opts UnlinkOptions) ([]Op, error) {
 	}
 
 	var ops []Op
+	im := CompileIgnoresLenient(e.Ignore)
 	walkErr := filepath.WalkDir(e.SourcePath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -113,9 +114,9 @@ func unlinkEntry(e ResolvedEntry, opts UnlinkOptions) ([]Op, error) {
 		if rel == "." {
 			return nil
 		}
-		if ShouldIgnorePath(rel, d.Name(), e.Ignore) {
+		if im.Ignored(rel, d.Name()) {
 			if d.IsDir() {
-				if HasIncludedDescendant(rel, e.Ignore) {
+				if im.HasIncludedDescendant(rel) {
 					return nil
 				}
 				return filepath.SkipDir
@@ -184,6 +185,7 @@ func backupAndRemoveUnlinkedTarget(e ResolvedEntry) (string, error) {
 
 func targetDirectoryHasManagedLinks(e ResolvedEntry) (bool, error) {
 	found := false
+	im := CompileIgnoresLenient(e.Ignore)
 	walkErr := filepath.WalkDir(e.SourcePath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -198,9 +200,9 @@ func targetDirectoryHasManagedLinks(e ResolvedEntry) (bool, error) {
 		if rel == "." {
 			return nil
 		}
-		if ShouldIgnorePath(rel, d.Name(), e.Ignore) {
+		if im.Ignored(rel, d.Name()) {
 			if d.IsDir() {
-				if HasIncludedDescendant(rel, e.Ignore) {
+				if im.HasIncludedDescendant(rel) {
 					return nil
 				}
 				return filepath.SkipDir

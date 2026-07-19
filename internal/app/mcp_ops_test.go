@@ -86,6 +86,7 @@ func loadMcpTestConfig(t *testing.T, a *app.App) *config.RootConfig {
 }
 
 func TestRestoreMcpServers_InstallsTargetedServer(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{id: "claude-code", available: true}
 	srv := config.McpServer{Name: "linear", Transport: "stdio", Command: "npx x", Agents: []string{"claude-code"}}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
@@ -102,6 +103,7 @@ func TestRestoreMcpServers_InstallsTargetedServer(t *testing.T) {
 }
 
 func TestAddMcpServer_ValidatesBeforeAdapterSideEffects(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{id: "claude-code", available: true}
 	a := newMcpTestApp(t, config.AgentsConfig{}, app.WithMcpAdapters([]app.McpAdapter{stub}))
 	_, err := a.AddMcpServer(context.Background(), config.McpServer{
@@ -120,6 +122,7 @@ func TestAddMcpServer_ValidatesBeforeAdapterSideEffects(t *testing.T) {
 }
 
 func TestRestoreMcpServers_SkipsNonTargetedAgent(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{id: "codex", available: true}
 	srv := config.McpServer{Name: "linear", Transport: "stdio", Command: "npx x", Agents: []string{"claude-code"}}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
@@ -133,6 +136,7 @@ func TestRestoreMcpServers_SkipsNonTargetedAgent(t *testing.T) {
 }
 
 func TestRestoreMcpServers_EmptyAgentsMeansAll(t *testing.T) {
+	t.Parallel()
 	claude := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{{Name: "x"}}}
 	codex := &stubMcpAdapter{id: "codex", available: true}
 	srv := config.McpServer{Name: "grafana", Transport: "http", URL: "https://mcp.example.com", Agents: nil}
@@ -150,6 +154,7 @@ func TestRestoreMcpServers_EmptyAgentsMeansAll(t *testing.T) {
 }
 
 func TestRestoreMcpServers_SkipsUnavailableAgent(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{id: "claude-code", available: false}
 	srv := config.McpServer{Name: "x", Transport: "stdio", Command: "npx x"}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
@@ -165,20 +170,32 @@ func TestRestoreMcpServers_SkipsUnavailableAgent(t *testing.T) {
 	}
 }
 
-func TestRestoreMcpServers_PerServerErrorIsNonFatal(t *testing.T) {
-	stub := &stubMcpAdapter{id: "claude-code", available: true, addErr: errors.New("env var MISSING not set")}
-	srv := config.McpServer{Name: "x", Transport: "stdio", Command: "npx x"}
-	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
+func TestRestoreMcpServers_ContinuesAfterServerInstallFailure(t *testing.T) {
+	t.Parallel()
+	addErr := errors.New("env var MISSING not set")
+	stub := &stubMcpAdapter{id: "claude-code", available: true, addErrors: []error{addErr, nil}}
+	servers := []config.McpServer{
+		{Name: "fails", Transport: "stdio", Command: "npx fails"},
+		{Name: "succeeds", Transport: "stdio", Command: "npx succeeds"},
+	}
+	a := newMcpTestApp(t, config.AgentsConfig{McpServers: servers}, app.WithMcpAdapters([]app.McpAdapter{stub}))
 	res, err := a.RestoreMcpServers(context.Background(), app.RestoreMcpOptions{})
 	if err != nil {
 		t.Fatalf("restore must not return top-level error for per-server failure: %v", err)
 	}
-	if len(res.Errors) == 0 {
-		t.Fatal("expected per-server error in result")
+	if len(res.Errors) != 1 || res.Errors[0].AgentID != "claude-code" || res.Errors[0].ServerName != "fails" || !errors.Is(res.Errors[0].Err, addErr) {
+		t.Fatalf("Errors = %v, want claude-code/fails: %v", res.Errors, addErr)
+	}
+	if !slices.Equal(res.Installed, []string{"claude-code/succeeds"}) {
+		t.Fatalf("Installed = %v, want [claude-code/succeeds]", res.Installed)
+	}
+	if len(stub.addedServers) != 2 || stub.addedServers[0].Name != "fails" || stub.addedServers[1].Name != "succeeds" {
+		t.Fatalf("Add calls = %v, want [fails succeeds]", stub.addedServers)
 	}
 }
 
 func TestRestoreMcpServers_SkipsAlreadyInstalled(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{{Name: "linear"}}}
 	srv := config.McpServer{Name: "linear", Transport: "stdio", Command: "npx x", Agents: []string{"claude-code"}}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
@@ -198,6 +215,7 @@ func TestRestoreMcpServers_SkipsAlreadyInstalled(t *testing.T) {
 }
 
 func TestRestoreMcpServers_UpdatesChangedHeaders(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{
 		id:        "codex",
 		available: true,
@@ -227,6 +245,7 @@ func TestRestoreMcpServers_UpdatesChangedHeaders(t *testing.T) {
 }
 
 func TestRestoreMcpServers_DryRunReportsChangedHeaders(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{
 		id: "codex", available: true,
 		listed: []app.InstalledMcpServer{{Name: "grafana", Headers: map[string]string{"X-Key": "old"}, HeadersKnown: true}},
@@ -246,6 +265,7 @@ func TestRestoreMcpServers_DryRunReportsChangedHeaders(t *testing.T) {
 }
 
 func TestRestoreMcpServers_HeaderUpdateRemoveFailureDoesNotAdd(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{
 		id: "codex", available: true, removeErr: errors.New("remove failed"),
 		listed: []app.InstalledMcpServer{{Name: "grafana", Headers: map[string]string{"X-Key": "old"}, HeadersKnown: true}},
@@ -265,6 +285,7 @@ func TestRestoreMcpServers_HeaderUpdateRemoveFailureDoesNotAdd(t *testing.T) {
 }
 
 func TestRestoreMcpServers_HeaderUpdateAddFailureRestoresPrevious(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{
 		id: "codex", available: true, addErrors: []error{errors.New("add failed"), nil},
 		listed: []app.InstalledMcpServer{{
@@ -287,6 +308,7 @@ func TestRestoreMcpServers_HeaderUpdateAddFailureRestoresPrevious(t *testing.T) 
 }
 
 func TestRestoreMcpServers_HeaderUpdateRollbackSurvivesRequestCancellation(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	addCalls := 0
 	stub := &stubMcpAdapter{
@@ -329,6 +351,7 @@ func TestRestoreMcpServers_HeaderUpdateRollbackSurvivesRequestCancellation(t *te
 // server would be harm, not repair, so restore must skip it and report it
 // separately rather than as installed/already-installed/erroring.
 func TestRestoreMcpServers_SkipsShadowedByPlugin(t *testing.T) {
+	t.Parallel()
 	mcpStub := &stubMcpAdapter{id: "claude-code", available: true}
 	pluginStub := &stubPluginAdapter{
 		id:            "claude-code",
@@ -356,6 +379,7 @@ func TestRestoreMcpServers_SkipsShadowedByPlugin(t *testing.T) {
 }
 
 func TestRestoreMcpServers_ListErrorWarnsAndAttemptsInstall(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{id: "claude-code", available: true, listErr: errors.New("list failed")}
 	srv := config.McpServer{Name: "linear", Transport: "stdio", Command: "npx x", Agents: []string{"claude-code"}}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
@@ -375,6 +399,7 @@ func TestRestoreMcpServers_ListErrorWarnsAndAttemptsInstall(t *testing.T) {
 }
 
 func TestRestoreMcpServers_DryRun(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{id: "claude-code", available: true}
 	srv := config.McpServer{Name: "x", Transport: "stdio", Command: "npx x"}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
@@ -394,6 +419,7 @@ func TestRestoreMcpServers_DryRun(t *testing.T) {
 }
 
 func TestRestoreMcpServers_DryRun_NonTargetedNotInWouldInstall(t *testing.T) {
+	t.Parallel()
 	claudeStub := &stubMcpAdapter{id: "claude-code", available: true}
 	codexStub := &stubMcpAdapter{id: "codex", available: true}
 	// server targets only claude-code; codex must NOT appear in WouldInstall
@@ -413,6 +439,7 @@ func TestRestoreMcpServers_DryRun_NonTargetedNotInWouldInstall(t *testing.T) {
 }
 
 func TestAddMcpServer_PersistsToManifest(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{id: "claude-code", available: true}
 	a := newMcpTestApp(t, config.AgentsConfig{}, app.WithMcpAdapters([]app.McpAdapter{stub}))
 	srv := config.McpServer{Name: "new", Transport: "stdio", Command: "npx new", Agents: []string{"claude-code"}}
@@ -435,6 +462,7 @@ func TestAddMcpServer_PersistsToManifest(t *testing.T) {
 }
 
 func TestAddMcpServer_Upsert(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{id: "claude-code", available: true}
 	existing := config.McpServer{Name: "x", Transport: "stdio", Command: "npx old"}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{existing}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
@@ -458,6 +486,7 @@ func TestAddMcpServer_Upsert(t *testing.T) {
 }
 
 func TestAddMcpServer_UpdatesChangedInstalledHeaders(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{
 		id: "claude-code", available: true,
 		listed: []app.InstalledMcpServer{{
@@ -485,6 +514,7 @@ func TestAddMcpServer_UpdatesChangedInstalledHeaders(t *testing.T) {
 // on another must not leave the manifest missing the server (the manifest is the
 // source of intent, not a mirror of adapter success).
 func TestAddMcpServer_PartialAdapterFailureStillPersistsManifest(t *testing.T) {
+	t.Parallel()
 	ok := &stubMcpAdapter{id: "claude-code", available: true}
 	fails := &stubMcpAdapter{id: "codex", available: true, addErr: errors.New("boom")}
 	a := newMcpTestApp(t, config.AgentsConfig{}, app.WithMcpAdapters([]app.McpAdapter{ok, fails}))
@@ -515,6 +545,7 @@ func TestAddMcpServer_PartialAdapterFailureStillPersistsManifest(t *testing.T) {
 }
 
 func TestMcpServerByName_ReturnsFullEntry(t *testing.T) {
+	t.Parallel()
 	existing := config.McpServer{Name: "x", Transport: "stdio", Command: "npx x", Env: []string{"FOO"}, EnvLiteral: map[string]string{"BAR": "baz"}}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{existing}})
 	got, ok, err := a.McpServerByName("x")
@@ -530,6 +561,7 @@ func TestMcpServerByName_ReturnsFullEntry(t *testing.T) {
 }
 
 func TestMcpServerByName_NotFound(t *testing.T) {
+	t.Parallel()
 	a := newMcpTestApp(t, config.AgentsConfig{})
 	_, ok, err := a.McpServerByName("missing")
 	if err != nil {
@@ -541,6 +573,7 @@ func TestMcpServerByName_NotFound(t *testing.T) {
 }
 
 func TestRemoveMcpServer_PersistsRemoval(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{{Name: "del"}}}
 	existing := config.McpServer{Name: "del", Transport: "stdio", Command: "npx del", Agents: []string{"claude-code"}}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{existing}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
@@ -563,6 +596,7 @@ func TestRemoveMcpServer_PersistsRemoval(t *testing.T) {
 // carrying a second "agents" key must not resurrect a deleted server through the
 // union merge on the next load.
 func TestRemoveMcpServer_PersistsAcrossStaleDuplicateFragment(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "settings.d"), 0o755); err != nil {
 		t.Fatal(err)
@@ -604,6 +638,7 @@ func TestRemoveMcpServer_PersistsAcrossStaleDuplicateFragment(t *testing.T) {
 }
 
 func TestRemoveMcpServer_ScrubsGroupRefs(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{id: "codex", available: true}
 	existing := config.McpServer{Name: "del", Transport: "stdio", Command: "npx del", Agents: []string{"codex"}}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{existing}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
@@ -624,6 +659,7 @@ func TestRemoveMcpServer_ScrubsGroupRefs(t *testing.T) {
 }
 
 func TestRemoveMcpServer_RejectsUnmanaged(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{id: "claude-code", available: true}
 	a := newMcpTestApp(t, config.AgentsConfig{}, app.WithMcpAdapters([]app.McpAdapter{stub}))
 	_, err := a.RemoveMcpServer(context.Background(), "not-in-manifest")
@@ -639,6 +675,7 @@ func TestRemoveMcpServer_RejectsUnmanaged(t *testing.T) {
 // partial-application drift on remove: the manifest must drop the server even when
 // one of the targeted adapters fails to remove it live.
 func TestRemoveMcpServer_PartialAdapterFailureStillPersistsManifest(t *testing.T) {
+	t.Parallel()
 	ok := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{{Name: "del"}}}
 	fails := &stubMcpAdapter{id: "codex", available: true, removeErr: errors.New("boom"), listed: []app.InstalledMcpServer{{Name: "del"}}}
 	existing := config.McpServer{Name: "del", Transport: "stdio", Command: "npx del"}
@@ -665,6 +702,7 @@ func TestRemoveMcpServer_PartialAdapterFailureStillPersistsManifest(t *testing.T
 }
 
 func TestSetMcpServerAgents_NarrowingRemovesFromDeselectedAdapter(t *testing.T) {
+	t.Parallel()
 	claude := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{{Name: "x"}}}
 	codex := &stubMcpAdapter{id: "codex", available: true}
 	existing := config.McpServer{Name: "x", Transport: "stdio", Command: "npx x", Agents: []string{"claude-code", "codex"}}
@@ -694,6 +732,7 @@ func TestSetMcpServerAgents_NarrowingRemovesFromDeselectedAdapter(t *testing.T) 
 }
 
 func TestSetMcpServerAgents_WideningAddsToNewlySelectedAdapter(t *testing.T) {
+	t.Parallel()
 	claude := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{{Name: "x"}}}
 	codex := &stubMcpAdapter{id: "codex", available: true}
 	existing := config.McpServer{Name: "x", Transport: "stdio", Command: "npx x", Agents: []string{"claude-code"}}
@@ -720,6 +759,7 @@ func TestSetMcpServerAgents_WideningAddsToNewlySelectedAdapter(t *testing.T) {
 }
 
 func TestSetMcpServerAgents_NoChangeTouchesNoAdapter(t *testing.T) {
+	t.Parallel()
 	claude := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{{Name: "x"}}}
 	existing := config.McpServer{Name: "x", Transport: "stdio", Command: "npx x", Agents: []string{"claude-code"}}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{existing}}, app.WithMcpAdapters([]app.McpAdapter{claude}))
@@ -736,6 +776,7 @@ func TestSetMcpServerAgents_NoChangeTouchesNoAdapter(t *testing.T) {
 }
 
 func TestSetMcpServerAgents_ReconcilesChangedHeaders(t *testing.T) {
+	t.Parallel()
 	claude := &stubMcpAdapter{
 		id: "claude-code", available: true,
 		listed: []app.InstalledMcpServer{{
@@ -755,6 +796,7 @@ func TestSetMcpServerAgents_ReconcilesChangedHeaders(t *testing.T) {
 }
 
 func TestSetMcpServerAgents_ReconcilesMissingSelectedAdapter(t *testing.T) {
+	t.Parallel()
 	claude := &stubMcpAdapter{id: "claude-code", available: true}
 	existing := config.McpServer{Name: "x", Transport: "stdio", Command: "npx x", Agents: []string{"claude-code"}}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{existing}}, app.WithMcpAdapters([]app.McpAdapter{claude}))
@@ -767,6 +809,7 @@ func TestSetMcpServerAgents_ReconcilesMissingSelectedAdapter(t *testing.T) {
 }
 
 func TestSetMcpServerAgents_AdapterErrorIsNonFatalAndManifestStillPersists(t *testing.T) {
+	t.Parallel()
 	fails := &stubMcpAdapter{id: "codex", available: true, removeErr: errors.New("boom")}
 	existing := config.McpServer{Name: "x", Transport: "stdio", Command: "npx x", Agents: []string{"codex"}}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{existing}}, app.WithMcpAdapters([]app.McpAdapter{fails}))
@@ -786,6 +829,7 @@ func TestSetMcpServerAgents_AdapterErrorIsNonFatalAndManifestStillPersists(t *te
 }
 
 func TestSetMcpServerAgents_TargetedUnavailableAdapterSkips(t *testing.T) {
+	t.Parallel()
 	claude := &stubMcpAdapter{id: "claude-code", available: false}
 	existing := config.McpServer{Name: "x", Transport: "stdio", Command: "npx x", Agents: []string{}}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{existing}}, app.WithMcpAdapters([]app.McpAdapter{claude}))
@@ -802,6 +846,7 @@ func TestSetMcpServerAgents_TargetedUnavailableAdapterSkips(t *testing.T) {
 }
 
 func TestSetMcpServerAgents_RejectsUnmanaged(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{id: "claude-code", available: true}
 	a := newMcpTestApp(t, config.AgentsConfig{}, app.WithMcpAdapters([]app.McpAdapter{stub}))
 	_, err := a.SetMcpServerAgents(context.Background(), "not-in-manifest", []string{"claude-code"})
@@ -811,6 +856,7 @@ func TestSetMcpServerAgents_RejectsUnmanaged(t *testing.T) {
 }
 
 func TestImportMcpServers_ReturnsUnmanaged(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{
 		id:        "claude-code",
 		available: true,
@@ -830,6 +876,7 @@ func TestImportMcpServers_ReturnsUnmanaged(t *testing.T) {
 }
 
 func TestImportMcpServers_ExcludesManaged(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{
 		id:        "claude-code",
 		available: true,
@@ -850,6 +897,7 @@ func TestImportMcpServers_ExcludesManaged(t *testing.T) {
 }
 
 func TestAdoptUnmanagedMcpServers_PreservesHeaders(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{
 		id: "claude-code", available: true,
 		listed: []app.InstalledMcpServer{{
@@ -872,6 +920,7 @@ func TestAdoptUnmanagedMcpServers_PreservesHeaders(t *testing.T) {
 }
 
 func TestAdoptUnmanagedMcpServers_UnionsAgentsForIdenticalServer(t *testing.T) {
+	t.Parallel()
 	server := app.InstalledMcpServer{
 		Name: "remote", Transport: "http", URL: "https://mcp.example.com",
 		Headers: map[string]string{"X-Key": "${REMOTE_KEY}"}, HeadersKnown: true,
@@ -897,6 +946,7 @@ func TestAdoptUnmanagedMcpServers_UnionsAgentsForIdenticalServer(t *testing.T) {
 }
 
 func TestAdoptUnmanagedMcpServers_RejectsConflictingHeaders(t *testing.T) {
+	t.Parallel()
 	claude := &stubMcpAdapter{id: "claude-code", available: true, listed: []app.InstalledMcpServer{{
 		Name: "remote", Transport: "http", URL: "https://mcp.example.com",
 		Headers: map[string]string{"X-Key": "claude"}, HeadersKnown: true,

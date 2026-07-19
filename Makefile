@@ -97,6 +97,17 @@ test-unit:
 	@find "$(TEST_UNIT_ROOT)" -mindepth 1 -delete
 	OMNI_TEST_ROOT="$(TEST_UNIT_ROOT)" $(TEST_SAFE) go test -race -trimpath ./...
 
+## test-unit-fast: run unit tests without the race detector, for quick local iteration
+test-unit-fast:
+	$(MAKE) --no-print-directory prune-tmp
+	@mkdir -p "$(TEST_UNIT_ROOT)"
+	@chmod -R u+w "$(TEST_UNIT_ROOT)" 2>/dev/null || true
+	@find "$(TEST_UNIT_ROOT)" -mindepth 1 -delete
+	OMNI_TEST_ROOT="$(TEST_UNIT_ROOT)" $(TEST_SAFE) go test -trimpath ./...
+
+## test-fast: run unit tests (no race detector) and script regressions, for quick local iteration
+test-fast: test-scripts test-unit-fast
+
 ## test-scripts: run shell-script regression tests
 test-scripts:
 	$(TEST_SAFE) bash scripts/test-release.sh
@@ -117,7 +128,7 @@ test-all: test test-integration
 
 ## test-integration-build: run the isolated integration test Docker build stage
 test-integration-build:
-	docker build -f Dockerfile.test --target integration-test --output=type=cacheonly .
+	docker buildx build -f Dockerfile.test --target integration-test $(DOCKER_TEST_CACHE) --output=type=cacheonly .
 
 ## test-integration: run integration-tagged tests inside the isolated Docker environment
 test-integration: test-integration-build

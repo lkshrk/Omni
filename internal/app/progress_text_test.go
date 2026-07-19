@@ -14,6 +14,7 @@ import (
 )
 
 func TestProviderScanDisplayLabel(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		provider string
@@ -35,6 +36,7 @@ func TestProviderScanDisplayLabel(t *testing.T) {
 }
 
 func TestRefreshToolsStatus(t *testing.T) {
+	t.Parallel()
 	got := RefreshToolsStatus([]string{"node/bun", "system/brew"}, 1, 2)
 	want := "Refreshing tools… 1/2: node/bun, system/brew"
 	if got != want {
@@ -43,6 +45,7 @@ func TestRefreshToolsStatus(t *testing.T) {
 }
 
 func TestProgressNormalization(t *testing.T) {
+	t.Parallel()
 	progressIndex, progressTotal := normalizedProgress(-1, 0)
 	if progressIndex != 0 || progressTotal != 0 {
 		t.Fatalf("normalizedProgress(-1, 0) = %d/%d, want 0/0", progressIndex, progressTotal)
@@ -63,6 +66,7 @@ func TestProgressNormalization(t *testing.T) {
 }
 
 func TestRefreshProviderScanLabels(t *testing.T) {
+	t.Parallel()
 	labels := RefreshProviderScanLabels(
 		map[string]bool{"node": true, "system": true, "": true},
 		map[string]string{"node": "node/bun"},
@@ -75,6 +79,7 @@ func TestRefreshProviderScanLabels(t *testing.T) {
 }
 
 func TestRefreshProviderScanLabel(t *testing.T) {
+	t.Parallel()
 	labels := map[string]string{
 		"node":   " node/bun ",
 		"system": " ",
@@ -88,6 +93,7 @@ func TestRefreshProviderScanLabel(t *testing.T) {
 }
 
 func TestRefreshToolProgressStatus(t *testing.T) {
+	t.Parallel()
 	got := RefreshToolProgressStatus("node/bun", "typescript", 1, 2)
 	want := "Refreshing tools… 1/2: node/bun/typescript"
 	if got != want {
@@ -96,6 +102,7 @@ func TestRefreshToolProgressStatus(t *testing.T) {
 }
 
 func TestRefreshProviderScanProgressText(t *testing.T) {
+	t.Parallel()
 	got := RefreshProviderScanProgressText("system/brew", 1, 3)
 	want := "Scanning system/brew… (1/3)"
 	if got != want {
@@ -104,6 +111,7 @@ func TestRefreshProviderScanProgressText(t *testing.T) {
 }
 
 func TestRefreshProgressStatusBranches(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		got  string
@@ -150,6 +158,7 @@ func TestRefreshProgressStatusBranches(t *testing.T) {
 }
 
 func TestProviderMatchProgressText(t *testing.T) {
+	t.Parallel()
 	if got := providerMatchProgressText("ripgrep", nil); got != "" {
 		t.Fatalf("providerMatchProgressText empty = %q, want empty", got)
 	}
@@ -166,6 +175,7 @@ func TestProviderMatchProgressText(t *testing.T) {
 }
 
 func TestRefreshDescriptionAndDiscoveryProgressText(t *testing.T) {
+	t.Parallel()
 	desc := RefreshDescriptionsProgressText(RefreshDescriptionsProgressEvent{Name: "ripgrep", Index: -1})
 	if want := "Refreshing descriptions 0/-1: tool/ripgrep…"; desc != want {
 		t.Fatalf("RefreshDescriptionsProgressText fallback = %q, want %q", desc, want)
@@ -186,6 +196,7 @@ func TestRefreshDescriptionAndDiscoveryProgressText(t *testing.T) {
 }
 
 func TestImportSummaryText(t *testing.T) {
+	t.Parallel()
 	result := &ImportResult{
 		Added: []ImportedTool{
 			{Name: "typescript", Provider: "node"},
@@ -211,6 +222,7 @@ func TestImportSummaryText(t *testing.T) {
 }
 
 func TestImportProviderCountSummaries(t *testing.T) {
+	t.Parallel()
 	result := &ImportResult{Added: []ImportedTool{
 		{Name: "typescript", Provider: "node"},
 		{Name: "eslint", Provider: "node"},
@@ -234,6 +246,7 @@ func TestImportProviderCountSummaries(t *testing.T) {
 }
 
 func TestSummarizeSyncResultCountsProviderUnavailable(t *testing.T) {
+	t.Parallel()
 	result := &isync.SyncResult{Ops: []isync.SyncOp{
 		{Kind: isync.OpInstall},
 		{Kind: isync.OpAlreadyInstalled},
@@ -255,6 +268,7 @@ func TestSummarizeSyncResultCountsProviderUnavailable(t *testing.T) {
 }
 
 func TestSetupBootstrapToolsMessageUsesSyncSummary(t *testing.T) {
+	t.Parallel()
 	result := &isync.SyncResult{Ops: []isync.SyncOp{
 		{Kind: isync.OpInstall},
 		{Kind: isync.OpInstall},
@@ -272,6 +286,7 @@ func TestSetupBootstrapToolsMessageUsesSyncSummary(t *testing.T) {
 }
 
 func TestSetupBootstrapDotsMessageCountsOperations(t *testing.T) {
+	t.Parallel()
 	ops := []dots.Op{
 		{Kind: dots.OpLink},
 		{Kind: dots.OpRepair},
@@ -285,6 +300,7 @@ func TestSetupBootstrapDotsMessageCountsOperations(t *testing.T) {
 }
 
 func TestDotsSyncedSummaryTextCountsOperations(t *testing.T) {
+	t.Parallel()
 	ops := []dots.Op{
 		{Kind: dots.OpLink},
 		{Kind: dots.OpRepair},
@@ -298,6 +314,7 @@ func TestDotsSyncedSummaryTextCountsOperations(t *testing.T) {
 }
 
 func TestDotsOperationReportClassifiesOperationsAndSummaries(t *testing.T) {
+	t.Parallel()
 	report := DotsOperationReport([]dots.Op{
 		{Kind: dots.OpLink, Src: "/repo/nvim", Dst: "/home/user/.config/nvim"},
 		{Kind: dots.OpRepair, Dst: "/home/user/.zshrc"},
@@ -323,6 +340,7 @@ func TestDotsOperationReportClassifiesOperationsAndSummaries(t *testing.T) {
 }
 
 func TestDotsOperationReportDryRunAndNoChanges(t *testing.T) {
+	t.Parallel()
 	dryRun := DotsOperationReport([]dots.Op{{Kind: dots.OpDryLink, Dst: "/home/user/.zshrc"}}, true)
 	wantDryRun := []string{
 		"  → would link:   /home/user/.zshrc",
@@ -340,6 +358,7 @@ func TestDotsOperationReportDryRunAndNoChanges(t *testing.T) {
 }
 
 func TestSyncResultSummaryTextUsesSyncSummary(t *testing.T) {
+	t.Parallel()
 	result := &isync.SyncResult{Ops: []isync.SyncOp{
 		{Kind: isync.OpInstall},
 		{Kind: isync.OpInstall, Err: errors.New("boom")},
@@ -357,6 +376,7 @@ func TestSyncResultSummaryTextUsesSyncSummary(t *testing.T) {
 }
 
 func TestSyncOperationLineFormatsCommandAndBootstrapStyles(t *testing.T) {
+	t.Parallel()
 	tool := provider.Tool{Name: "fd", Provider: "brew"}
 	errBoom := errors.New("boom")
 
@@ -387,6 +407,7 @@ func TestSyncOperationLineFormatsCommandAndBootstrapStyles(t *testing.T) {
 }
 
 func TestSyncResultSummaryLinesPluralizesCounts(t *testing.T) {
+	t.Parallel()
 	result := &isync.SyncResult{Ops: []isync.SyncOp{
 		{Kind: isync.OpInstall},
 		{Kind: isync.OpAlreadyInstalled},
@@ -421,6 +442,7 @@ func TestSyncResultSummaryLinesPluralizesCounts(t *testing.T) {
 }
 
 func TestSyncProviderUnavailableLines(t *testing.T) {
+	t.Parallel()
 	result := &isync.SyncResult{Ops: []isync.SyncOp{
 		{Kind: isync.OpProviderUnavailable, Tool: provider.Tool{Name: "fd", Provider: "brew"}},
 		{Kind: isync.OpInstall, Tool: provider.Tool{Name: "rg", Provider: "system"}},
@@ -450,6 +472,7 @@ func TestClaimSuccessStatusTextUsesCurrentHostFallback(t *testing.T) {
 }
 
 func TestDotsSyncProgressText(t *testing.T) {
+	t.Parallel()
 	active := dots.SyncProgressEvent{Entry: "nvim", Index: 1, Total: 2}
 	if got, want := DotsSyncProgressLineText(active), "checking dots 1/2: nvim"; got != want {
 		t.Fatalf("DotsSyncProgressLineText = %q, want %q", got, want)
@@ -478,6 +501,7 @@ func TestDotsSyncProgressText(t *testing.T) {
 }
 
 func TestProviderScanFailureStatus(t *testing.T) {
+	t.Parallel()
 	err := errors.Join(
 		errors.New("upserting installed status for system/fd: context deadline exceeded"),
 		context.DeadlineExceeded,
@@ -492,6 +516,7 @@ func TestProviderScanFailureStatus(t *testing.T) {
 }
 
 func TestSyncAllSummaryText(t *testing.T) {
+	t.Parallel()
 	result := &SyncAllResult{
 		SyncResult: &isync.SyncResult{Ops: []isync.SyncOp{
 			{Kind: isync.OpInstall},
@@ -517,6 +542,7 @@ func TestSyncAllSummaryText(t *testing.T) {
 }
 
 func TestConsolidateSummaryText(t *testing.T) {
+	t.Parallel()
 	result := &ConsolidateResult{
 		Migrated: []ConsolidateTool{
 			{Name: "eslint", FromProvider: "npm"},
@@ -545,6 +571,7 @@ func TestConsolidateSummaryText(t *testing.T) {
 }
 
 func TestReconcileSummaryText(t *testing.T) {
+	t.Parallel()
 	result := &ReconcileResult{
 		SyncAll: &SyncAllResult{
 			SyncResult:   &isync.SyncResult{Ops: []isync.SyncOp{{Kind: isync.OpInstall}}},
@@ -566,6 +593,7 @@ func TestReconcileSummaryText(t *testing.T) {
 }
 
 func TestReconcileIssueLinesPluralizesCounts(t *testing.T) {
+	t.Parallel()
 	result := &ReconcileResult{
 		SyncAll:    &SyncAllResult{Failures: []BulkToolError{{Name: "fd", Provider: "brew"}}},
 		UpgradeAll: &UpgradeAllResult{Failures: []BulkToolError{{Name: "git", Provider: "brew"}, {Name: "go", Provider: "brew"}}},
@@ -598,6 +626,7 @@ func TestReconcileIssueLinesPluralizesCounts(t *testing.T) {
 }
 
 func TestSyncFailureRows(t *testing.T) {
+	t.Parallel()
 	actionErr := provider.NewExternallyManagedPythonError("pip3", "install", provider.Tool{Name: "ruff", Provider: "python"}, errors.New("exit 1"), "stderr", nil)
 	result := &isync.SyncResult{Ops: []isync.SyncOp{
 		{
@@ -633,6 +662,7 @@ func TestSyncFailureRows(t *testing.T) {
 }
 
 func TestSyncFailurePrivilegeAction(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		op         isync.SyncOp
@@ -673,6 +703,7 @@ func TestSyncFailurePrivilegeAction(t *testing.T) {
 }
 
 func TestUpgradeAllFailureRowsAndSummaryText(t *testing.T) {
+	t.Parallel()
 	rows := UpgradeAllFailureRows(&UpgradeAllResult{Failures: []BulkToolError{
 		{Name: "bat", Provider: "system", Message: "requires sudo: apt upgrade bat"},
 		{Name: "fd", Provider: "system", Message: "network failed"},
@@ -689,6 +720,7 @@ func TestUpgradeAllFailureRowsAndSummaryText(t *testing.T) {
 }
 
 func TestUpgradeAllSummaryLines(t *testing.T) {
+	t.Parallel()
 	got := UpgradeAllSummaryLines(&UpgradeAllResult{
 		Upgraded:    []string{"ripgrep"},
 		Quarantined: []QuarantinedUpdate{{Name: "bat"}, {Name: "fd"}},
@@ -708,6 +740,7 @@ func TestUpgradeAllSummaryLines(t *testing.T) {
 }
 
 func TestSyncAllFailureRowsMergesDirectAndSyncFailures(t *testing.T) {
+	t.Parallel()
 	rows := SyncAllFailureRows(&SyncAllResult{
 		Failures: []BulkToolError{
 			{Name: "fd", Provider: "system", Message: "network failed"},
@@ -739,6 +772,7 @@ func TestSyncAllFailureRowsMergesDirectAndSyncFailures(t *testing.T) {
 }
 
 func TestBulkToolFailureSummaryTextBranches(t *testing.T) {
+	t.Parallel()
 	adminKey := toolResultKey("vim", "system")
 	tests := []struct {
 		name string
@@ -778,6 +812,7 @@ func TestBulkToolFailureSummaryTextBranches(t *testing.T) {
 }
 
 func TestSyncAllPhaseProgressText(t *testing.T) {
+	t.Parallel()
 	got := SyncAllPhaseProgressText("reading installed packages…", 2)
 	want := "Syncing tools 0/2: checking installed state…"
 	if got != want {
@@ -786,6 +821,7 @@ func TestSyncAllPhaseProgressText(t *testing.T) {
 }
 
 func TestSyncAllToolProgressText(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		message string
@@ -829,6 +865,7 @@ func TestSyncAllToolProgressText(t *testing.T) {
 }
 
 func TestSyncAllProgressTotalCountsAddAndInstallOnly(t *testing.T) {
+	t.Parallel()
 	discovered := []*database.ToolCache{{Name: "fzf", Provider: "brew", Installed: true}}
 	tools := []*database.ToolCache{
 		{Name: "bat", Provider: "brew", Tracked: true, Installed: false},
@@ -841,6 +878,7 @@ func TestSyncAllProgressTotalCountsAddAndInstallOnly(t *testing.T) {
 }
 
 func TestUpgradeAllProgressText(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		message       string
@@ -884,6 +922,7 @@ func TestUpgradeAllProgressText(t *testing.T) {
 }
 
 func TestIsPrivilegeErrorText(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		message string
@@ -903,6 +942,7 @@ func TestIsPrivilegeErrorText(t *testing.T) {
 }
 
 func TestUpgradeAllProgressTotalCountsInstalledOutdatedTools(t *testing.T) {
+	t.Parallel()
 	tools := []*database.ToolCache{
 		{Name: "bat", Installed: true, Outdated: true},
 		{Name: "fd", Installed: true, Outdated: false},

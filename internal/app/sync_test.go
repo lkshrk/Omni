@@ -40,6 +40,7 @@ func (s *tapBrewStub) Trust(_ context.Context, name string) error {
 }
 
 func TestSync_AddsMissingTaps(t *testing.T) {
+	t.Parallel()
 	stub := &tapBrewStub{existingTaps: []string{}}
 	a, cfgPath := newImportApp(t, stub)
 
@@ -68,8 +69,11 @@ func TestSync_AddsMissingTaps(t *testing.T) {
 }
 
 func TestSync_TrustsAlreadyTappedRepo(t *testing.T) {
+	t.Parallel(
 	// A tap that is already present must still be trusted (it may predate
 	// tap-trust enforcement).
+	)
+
 	stub := &tapBrewStub{existingTaps: []string{"hashicorp/tap"}}
 	a, cfgPath := newImportApp(t, stub)
 	cfg := &config.RootConfig{
@@ -93,9 +97,12 @@ func TestSync_TrustsAlreadyTappedRepo(t *testing.T) {
 }
 
 func TestSync_TrustsUntrackedInstalledTap(t *testing.T) {
+	t.Parallel(
 	// A tap present on the machine but absent from config must still be trusted,
 	// otherwise Homebrew 5.2+ hides its installed formulae from the scan and omni
 	// wrongly treats those tools as missing.
+	)
+
 	stub := &tapBrewStub{existingTaps: []string{"quarkdown-labs/quarkdown"}}
 	a, cfgPath := newImportApp(t, stub)
 	cfg := &config.RootConfig{
@@ -117,7 +124,10 @@ func TestSync_TrustsUntrackedInstalledTap(t *testing.T) {
 }
 
 func TestSync_SkipsAlreadyTrustedTap(t *testing.T) {
+	t.Parallel(
 	// A tap recorded as trusted in the DB must not be re-trusted (no brew call).
+	)
+
 	stub := &tapBrewStub{existingTaps: []string{"hashicorp/tap"}}
 	a, cfgPath := newImportApp(t, stub)
 	if err := a.DB().MarkTapTrusted(context.Background(), "hashicorp/tap", time.Now()); err != nil {
@@ -141,6 +151,7 @@ func TestSync_SkipsAlreadyTrustedTap(t *testing.T) {
 }
 
 func TestSync_RecordsTrustedTapInDB(t *testing.T) {
+	t.Parallel()
 	stub := &tapBrewStub{existingTaps: []string{"hashicorp/tap"}}
 	a, cfgPath := newImportApp(t, stub)
 	cfg := &config.RootConfig{
@@ -165,6 +176,7 @@ func TestSync_RecordsTrustedTapInDB(t *testing.T) {
 }
 
 func TestSync_SkipsAlreadyTapped(t *testing.T) {
+	t.Parallel()
 	stub := &tapBrewStub{existingTaps: []string{"hashicorp/tap"}}
 	a, cfgPath := newImportApp(t, stub)
 
@@ -190,6 +202,7 @@ func TestSync_SkipsAlreadyTapped(t *testing.T) {
 }
 
 func TestSync_DryRunDoesNotTap(t *testing.T) {
+	t.Parallel()
 	stub := &tapBrewStub{existingTaps: []string{}}
 	a, cfgPath := newImportApp(t, stub)
 
@@ -212,6 +225,7 @@ func TestSync_DryRunDoesNotTap(t *testing.T) {
 }
 
 func TestSync_NoTapsConfigured_NoTapCalls(t *testing.T) {
+	t.Parallel()
 	stub := &tapBrewStub{existingTaps: []string{}}
 	a, cfgPath := newImportApp(t, stub)
 

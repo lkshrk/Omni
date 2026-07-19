@@ -10,6 +10,7 @@ import (
 )
 
 func TestBestGitHubReleaseAsset_PrefersExtractableArchive(t *testing.T) {
+	t.Parallel()
 	osName := githubOSNames()[0]
 	archName := githubArchNames()[0]
 	asset, ok := bestGitHubReleaseAsset([]githubAsset{
@@ -27,6 +28,7 @@ func TestBestGitHubReleaseAsset_PrefersExtractableArchive(t *testing.T) {
 }
 
 func TestBestGitHubReleaseAsset_SkipsMetadataAndWrongBinary(t *testing.T) {
+	t.Parallel()
 	osName := githubOSNames()[0]
 	archName := githubArchNames()[0]
 	wantName := fmt.Sprintf("fd_10.3.0_%s_%s.zip", osName, archName)
@@ -46,6 +48,7 @@ func TestBestGitHubReleaseAsset_SkipsMetadataAndWrongBinary(t *testing.T) {
 }
 
 func TestBestGitHubReleaseAsset_AcceptsPlatformAliases(t *testing.T) {
+	t.Parallel()
 	osNames := githubOSNames()
 	archNames := githubArchNames()
 	osName := osNames[len(osNames)-1]
@@ -64,6 +67,7 @@ func TestBestGitHubReleaseAsset_AcceptsPlatformAliases(t *testing.T) {
 }
 
 func TestBestGitHubReleaseAsset_ReturnsNoMatchWhenNoUsableAssetExists(t *testing.T) {
+	t.Parallel()
 	osName := githubOSNames()[0]
 	archName := githubArchNames()[0]
 	// Only a checksum asset and a wrong-OS archive — no extractable current-platform asset.
@@ -78,6 +82,7 @@ func TestBestGitHubReleaseAsset_ReturnsNoMatchWhenNoUsableAssetExists(t *testing
 }
 
 func TestGitHubReleaseAssetIgnored(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		want bool
@@ -108,6 +113,7 @@ func TestGitHubReleaseAssetIgnored(t *testing.T) {
 }
 
 func TestNormalizedGitHubPublishedAt(t *testing.T) {
+	t.Parallel()
 	got, err := normalizedGitHubPublishedAt("2026-06-07T12:34:56+02:00")
 	if err != nil {
 		t.Fatalf("normalizedGitHubPublishedAt: %v", err)
@@ -124,6 +130,7 @@ func TestNormalizedGitHubPublishedAt(t *testing.T) {
 }
 
 func TestGitHubFallbackHasSavedReleaseMetadata(t *testing.T) {
+	t.Parallel()
 	valid := &config.FallbackSpec{
 		Source: config.FallbackSource{
 			Type:  config.FallbackSourceGitHub,
@@ -179,6 +186,7 @@ func TestGitHubFallbackHasSavedReleaseMetadata(t *testing.T) {
 }
 
 func TestGitHubReleaseAssetInstallCommandUsesAssetBasename(t *testing.T) {
+	t.Parallel()
 	got := githubReleaseAssetInstallCommand("https://github.com/cli/cli/releases/download/v2.93.0/gh_2.93.0_macOS_arm64.zip")
 	// Placeholders are bare so the rendered single-quoted value is the only quoting.
 	// The asset name and URL are shell-quoted at construction; no surrounding quotes in the template.
@@ -200,6 +208,7 @@ func TestGitHubReleaseAssetInstallCommandUsesAssetBasename(t *testing.T) {
 }
 
 func TestShellSingleQuote(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		in   string
 		want string
@@ -223,9 +232,12 @@ func TestShellSingleQuote(t *testing.T) {
 }
 
 func TestRenderFallbackCommandNeutralisesInjection(t *testing.T) {
+	t.Parallel(
 	// A binary name containing shell metacharacters (as could arrive from a
 	// compromised settings.json) must be single-quoted so it cannot break out
 	// of the generated sh -c string.
+	)
+
 	a := New(t.TempDir() + "/settings.json")
 	spec := config.ToolSpec{}
 	poison := `'; touch /tmp/pwned; echo '`
@@ -258,6 +270,7 @@ func TestRenderFallbackCommandNeutralisesInjection(t *testing.T) {
 }
 
 func TestIsGitHubHost(t *testing.T) {
+	t.Parallel()
 	for _, host := range []string{"api.github.com", "github.com", "API.GITHUB.COM"} {
 		if !isGitHubHost(host) {
 			t.Fatalf("isGitHubHost(%q) = false, want true", host)
@@ -271,6 +284,7 @@ func TestIsGitHubHost(t *testing.T) {
 }
 
 func TestParseGitHubRepo(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		in        string
 		wantOwner string
@@ -315,6 +329,7 @@ func TestParseGitHubRepo(t *testing.T) {
 // TestScoreGitHubAsset_OSAliases verifies that OS canonical names and their
 // aliases both produce a positive score, with the exact GOOS term scoring higher.
 func TestScoreGitHubAsset_OSAliases(t *testing.T) {
+	t.Parallel()
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
 
@@ -369,8 +384,11 @@ func TestScoreGitHubAsset_OSAliases(t *testing.T) {
 
 // TestScoreGitHubAsset_ArchAliases386 verifies 386↔i386↔x86 aliases on linux/386.
 func TestScoreGitHubAsset_ArchAliases386(t *testing.T) {
+	t.Parallel(
 	// scoreGitHubAsset is a pure function; test 386 aliases directly regardless
 	// of the current runtime arch.
+	)
+
 	cases := []struct {
 		name    string
 		wantPos bool // should score positive (OS matches linux)
@@ -390,6 +408,7 @@ func TestScoreGitHubAsset_ArchAliases386(t *testing.T) {
 // TestScoreGitHubAsset_ArchivePriority verifies that .tar.gz beats .zip beats .tar.xz
 // when all other factors are equal.
 func TestScoreGitHubAsset_ArchivePriority(t *testing.T) {
+	t.Parallel()
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
 
@@ -419,6 +438,7 @@ func TestScoreGitHubAsset_ArchivePriority(t *testing.T) {
 // yield a non-positive score (they should be filtered before scoring, but
 // scoreGitHubAsset itself should return 0 or negative for safety).
 func TestScoreGitHubAsset_IgnoredSuffix(t *testing.T) {
+	t.Parallel()
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
 
@@ -435,6 +455,7 @@ func TestScoreGitHubAsset_IgnoredSuffix(t *testing.T) {
 
 // TestScoreGitHubAsset_SBOMIgnored verifies .sbom is in the ignored-asset list.
 func TestScoreGitHubAsset_SBOMIgnored(t *testing.T) {
+	t.Parallel()
 	if !githubReleaseAssetIgnored("tool_linux_amd64.sbom") {
 		t.Error("githubReleaseAssetIgnored: .sbom should be ignored")
 	}
@@ -446,6 +467,7 @@ func TestScoreGitHubAsset_SBOMIgnored(t *testing.T) {
 // TestBestGitHubReleaseAsset_Scoring verifies the scorer picks the highest-scoring
 // asset deterministically when multiple candidates are present.
 func TestBestGitHubReleaseAsset_Scoring(t *testing.T) {
+	t.Parallel()
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
 
@@ -492,6 +514,7 @@ func TestBestGitHubReleaseAsset_Scoring(t *testing.T) {
 // TestBestGitHubReleaseAsset_TieIsDeterministic verifies that when two assets
 // have identical scores, the pick is stable (same result regardless of input order).
 func TestBestGitHubReleaseAsset_TieIsDeterministic(t *testing.T) {
+	t.Parallel()
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
 
@@ -512,6 +535,7 @@ func TestBestGitHubReleaseAsset_TieIsDeterministic(t *testing.T) {
 // TestBestGitHubReleaseAsset_LinuxLibcPreference verifies that on Linux,
 // a musl asset is preferred over a glibc/gnu asset when both otherwise match.
 func TestBestGitHubReleaseAsset_LinuxLibcPreference(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS != "linux" {
 		t.Skip("libc preference only applies on linux")
 	}
@@ -532,6 +556,7 @@ func TestBestGitHubReleaseAsset_LinuxLibcPreference(t *testing.T) {
 // TestBestGitHubReleaseAsset_PrefersTarGzOverZip verifies archive-type preference
 // when the platform tokens match equally.
 func TestBestGitHubReleaseAsset_PrefersTarGzOverZip(t *testing.T) {
+	t.Parallel()
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
 

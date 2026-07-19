@@ -16,6 +16,7 @@ func resolvePluginNames(cfg *config.RootConfig, group string) []string {
 }
 
 func TestResolvePlugins_UngroupedPlugin_AppearsOnAllHosts(t *testing.T) {
+	t.Parallel()
 	cfg := &config.RootConfig{
 		Agents: config.AgentsConfig{Plugins: []config.Plugin{{Name: "global", Marketplace: "m"}}},
 	}
@@ -28,6 +29,7 @@ func TestResolvePlugins_UngroupedPlugin_AppearsOnAllHosts(t *testing.T) {
 }
 
 func TestResolvePlugins_GroupedPlugin_OnlyOnMatchingGroup(t *testing.T) {
+	t.Parallel()
 	cfg := &config.RootConfig{
 		Agents: config.AgentsConfig{Plugins: []config.Plugin{{Name: "work-only", Marketplace: "m"}}},
 		Groups: []*config.GroupConfig{{Name: "work", Plugins: []string{"work-only"}}},
@@ -37,5 +39,20 @@ func TestResolvePlugins_GroupedPlugin_OnlyOnMatchingGroup(t *testing.T) {
 	}
 	if got := resolvePluginNames(cfg, "personal"); len(got) != 0 {
 		t.Fatalf("expected work-only excluded on non-matching group, got %v", got)
+	}
+}
+
+func TestResolvePlugins_HostAssignedGroup_Included(t *testing.T) {
+	t.Parallel()
+	cfg := &config.RootConfig{
+		Agents: config.AgentsConfig{Plugins: []config.Plugin{{Name: "superpowers", Marketplace: "m"}}},
+		Groups: []*config.GroupConfig{{Name: "ai-plugins", Plugins: []string{"superpowers"}}},
+		Hosts: map[string][]string{
+			"topaz": {"ai-plugins"},
+		},
+	}
+	got := resolvePluginNames(cfg, "topaz")
+	if len(got) != 1 || got[0] != "superpowers" {
+		t.Fatalf("plugin in a group assigned to the host via cfg.Hosts must appear; got %v", got)
 	}
 }

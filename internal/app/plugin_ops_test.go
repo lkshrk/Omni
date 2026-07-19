@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -15,8 +16,10 @@ type stubPluginAdapter struct {
 	id                      string
 	available               bool
 	installErr              error
+	installErrs             map[string]error
 	removeErr               error
 	updateErr               error
+	updateErrs              map[string]error
 	addMarketErr            error
 	listErr                 error
 	updateMarketplacesErr   error
@@ -42,6 +45,9 @@ func (s *stubPluginAdapter) ListPlugins(_ context.Context) ([]app.InstalledPlugi
 }
 func (s *stubPluginAdapter) InstallPlugin(_ context.Context, p config.Plugin) error {
 	s.installedPlugin = append(s.installedPlugin, p)
+	if err := s.installErrs[p.Name]; err != nil {
+		return err
+	}
 	return s.installErr
 }
 func (s *stubPluginAdapter) RemovePlugin(_ context.Context, p config.Plugin) error {
@@ -51,6 +57,9 @@ func (s *stubPluginAdapter) RemovePlugin(_ context.Context, p config.Plugin) err
 func (s *stubPluginAdapter) UpdatePlugin(_ context.Context, name, marketplace string) error {
 	s.updatedNames = append(s.updatedNames, name)
 	s.updatedIdentities = append(s.updatedIdentities, name+"@"+marketplace)
+	if err := s.updateErrs[name]; err != nil {
+		return err
+	}
 	return s.updateErr
 }
 func (s *stubPluginAdapter) ListMarketplaces(_ context.Context) ([]app.InstalledMarketplace, error) {
@@ -91,6 +100,7 @@ func loadPluginTestConfig(t *testing.T, a *app.App) *config.RootConfig {
 }
 
 func TestRestorePlugins_AddsMarketplaceBeforePlugin(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{id: "claude-code", available: true}
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "lkshrk/agent-marketplace", Agents: []string{"claude-code"}}},
@@ -118,6 +128,7 @@ func TestRestorePlugins_AddsMarketplaceBeforePlugin(t *testing.T) {
 // before that adapter's plugin list/install loop runs, so a stale clone never
 // precedes an install that reads from it.
 func TestRestorePlugins_RefreshesMarketplacesOnEveryAvailableAdapter(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{id: "claude-code", available: true}
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "lkshrk/agent-marketplace", Agents: []string{"claude-code"}}},
@@ -140,6 +151,7 @@ func TestRestorePlugins_RefreshesMarketplacesOnEveryAvailableAdapter(t *testing.
 // marketplace refresh failure surfaces as a warning and does not block the
 // plugin install loop that follows.
 func TestRestorePlugins_MarketplaceRefreshFailureIsWarningNotFatal(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{id: "claude-code", available: true, updateMarketplacesErr: errBoom}
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "lkshrk/agent-marketplace", Agents: []string{"claude-code"}}},
@@ -162,6 +174,7 @@ func TestRestorePlugins_MarketplaceRefreshFailureIsWarningNotFatal(t *testing.T)
 // restore (which never mutates adapter state) also skips the marketplace
 // refresh call, mirroring how it skips ensureMarketplace/InstallPlugin.
 func TestRestorePlugins_DryRun_DoesNotRefreshMarketplaces(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{id: "claude-code", available: true}
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "lkshrk/agent-marketplace", Agents: []string{"claude-code"}}},
@@ -178,6 +191,7 @@ func TestRestorePlugins_DryRun_DoesNotRefreshMarketplaces(t *testing.T) {
 }
 
 func TestRestorePlugins_SkipsNonTargetedAgent(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{id: "codex", available: true}
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
@@ -193,6 +207,7 @@ func TestRestorePlugins_SkipsNonTargetedAgent(t *testing.T) {
 }
 
 func TestRestorePlugins_DryRun_ReportsWouldInstall(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{id: "claude-code", available: true}
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
@@ -211,44 +226,68 @@ func TestRestorePlugins_DryRun_ReportsWouldInstall(t *testing.T) {
 	}
 }
 
-func TestRestorePlugins_PerPluginErrorIsNonFatal(t *testing.T) {
-	stub := &stubPluginAdapter{id: "claude-code", available: true, installErr: errBoom}
+func TestRestorePlugins_ContinuesAfterPluginInstallFailure(t *testing.T) {
+	t.Parallel()
+	stub := &stubPluginAdapter{
+		id:          "claude-code",
+		available:   true,
+		installErrs: map[string]error{"one": errBoom},
+	}
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
-		Plugins:      []config.Plugin{{Name: "caveman", Marketplace: "caveman"}},
+		Plugins: []config.Plugin{
+			{Name: "one", Marketplace: "caveman"},
+			{Name: "two", Marketplace: "caveman"},
+		},
 	}
 	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{stub}))
 	res, err := a.RestorePlugins(context.Background(), app.RestorePluginOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Errors) != 1 {
-		t.Fatalf("expected 1 collected error, got %v", res.Errors)
+	if len(res.Errors) != 1 || res.Errors[0].Name != "one" {
+		t.Fatalf("expected one collected error for one, got %v", res.Errors)
+	}
+	if len(stub.installedPlugin) != 2 || stub.installedPlugin[0].Name != "one" || stub.installedPlugin[1].Name != "two" {
+		t.Fatalf("expected install attempts for one then two, got %v", stub.installedPlugin)
+	}
+	if len(res.Installed) != 1 || res.Installed[0] != "claude-code/two" {
+		t.Fatalf("expected later plugin two to install, got %v", res.Installed)
 	}
 }
 
-func TestRestorePlugins_SkipsAlreadyInstalled(t *testing.T) {
-	stub := &stubPluginAdapter{
+func TestRestorePlugins_EnsuresMarketplaceForAlreadyInstalledPlugin(t *testing.T) {
+	t.Parallel()
+	claude := &stubPluginAdapter{
 		id:            "claude-code",
 		available:     true,
 		listedPlugins: []app.InstalledPlugin{{Name: "caveman", Marketplace: "caveman"}},
 	}
-	agents := config.AgentsConfig{
-		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
-		Plugins:      []config.Plugin{{Name: "caveman", Marketplace: "caveman", Agents: []string{"claude-code"}}},
+	codex := &stubPluginAdapter{
+		id:            "codex",
+		available:     true,
+		listedPlugins: []app.InstalledPlugin{{Name: "caveman", Marketplace: "caveman"}},
+		listedMarkets: []app.InstalledMarketplace{{Name: "caveman", Source: "a/b"}},
 	}
-	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{stub}))
+	agents := config.AgentsConfig{
+		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b", Agents: []string{"claude-code", "codex"}}},
+		Plugins:      []config.Plugin{{Name: "caveman", Marketplace: "caveman", Agents: []string{"claude-code", "codex"}}},
+	}
+	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{claude, codex}))
 	res, err := a.RestorePlugins(context.Background(), app.RestorePluginOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(stub.installedPlugin) != 0 {
-		t.Fatalf("expected no install call for already-present plugin, got %v", stub.installedPlugin)
+	if len(claude.installedPlugin) != 0 || len(codex.installedPlugin) != 0 {
+		t.Fatalf("expected no plugin installs, got claude=%v codex=%v", claude.installedPlugin, codex.installedPlugin)
 	}
-	if len(stub.addedMarkets) != 0 {
-		t.Fatalf("expected no marketplace add for already-present plugin, got %v", stub.addedMarkets)
+	if len(claude.addedMarkets) != 1 || claude.addedMarkets[0].Name != "caveman" {
+		t.Fatalf("expected missing Claude marketplace to be added, got %v", claude.addedMarkets)
 	}
-	if len(res.AlreadyInstalled) != 1 || res.AlreadyInstalled[0] != "claude-code/caveman" {
+	if len(codex.addedMarkets) != 0 {
+		t.Fatalf("expected existing Codex marketplace to be left alone, got %v", codex.addedMarkets)
+	}
+	if len(res.AlreadyInstalled) != 2 {
 		t.Fatalf("expected already-installed entry, got %v", res.AlreadyInstalled)
 	}
 	if len(res.Installed) != 0 {
@@ -257,6 +296,7 @@ func TestRestorePlugins_SkipsAlreadyInstalled(t *testing.T) {
 }
 
 func TestRestorePlugins_ListPluginsErrorWarnsAndAttemptsInstall(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{id: "claude-code", available: true, listErr: errBoom}
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
@@ -279,6 +319,7 @@ func TestRestorePlugins_ListPluginsErrorWarnsAndAttemptsInstall(t *testing.T) {
 }
 
 func TestAddPlugin_PersistsToManifestRegardlessOfAdapterOutcome(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{id: "claude-code", available: true, installErr: errBoom}
 	agents := config.AgentsConfig{Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}}}
 	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{stub}))
@@ -295,7 +336,43 @@ func TestAddPlugin_PersistsToManifestRegardlessOfAdapterOutcome(t *testing.T) {
 	}
 }
 
+func TestAddPlugin_EnsuresMarketplaceForAlreadyInstalledPlugin(t *testing.T) {
+	t.Parallel()
+	claude := &stubPluginAdapter{
+		id:            "claude-code",
+		available:     true,
+		listedPlugins: []app.InstalledPlugin{{Name: "caveman", Marketplace: "caveman"}},
+	}
+	codex := &stubPluginAdapter{
+		id:            "codex",
+		available:     true,
+		listedPlugins: []app.InstalledPlugin{{Name: "caveman", Marketplace: "caveman"}},
+		listedMarkets: []app.InstalledMarketplace{{Name: "caveman", Source: "a/b"}},
+	}
+	agents := config.AgentsConfig{
+		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b", Agents: []string{"claude-code", "codex"}}},
+	}
+	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{claude, codex}))
+	res, err := a.AddPlugin(context.Background(), config.Plugin{Name: "caveman", Marketplace: "caveman", Agents: []string{"claude-code", "codex"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Errors) != 0 {
+		t.Fatalf("unexpected errors: %v", res.Errors)
+	}
+	if len(claude.addedMarkets) != 1 || claude.addedMarkets[0].Name != "caveman" {
+		t.Fatalf("expected missing Claude marketplace to be added, got %v", claude.addedMarkets)
+	}
+	if len(codex.addedMarkets) != 0 {
+		t.Fatalf("expected existing Codex marketplace to be left alone, got %v", codex.addedMarkets)
+	}
+	if len(claude.installedPlugin) != 0 || len(codex.installedPlugin) != 0 {
+		t.Fatalf("expected no plugin installs, got claude=%v codex=%v", claude.installedPlugin, codex.installedPlugin)
+	}
+}
+
 func TestAddPlugin_RejectsUnknownMarketplace(t *testing.T) {
+	t.Parallel()
 	a := newPluginTestApp(t, config.AgentsConfig{}, app.WithPluginAdapters(nil))
 	if _, err := a.AddPlugin(context.Background(), config.Plugin{Name: "caveman", Marketplace: "ghost"}); err == nil {
 		t.Fatal("expected error for unknown marketplace ref")
@@ -303,6 +380,7 @@ func TestAddPlugin_RejectsUnknownMarketplace(t *testing.T) {
 }
 
 func TestPluginByName_ReturnsFullEntry(t *testing.T) {
+	t.Parallel()
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "m", Source: "a/b"}},
 		Plugins:      []config.Plugin{{Name: "caveman", Marketplace: "m", Agents: []string{"claude-code"}}},
@@ -321,6 +399,7 @@ func TestPluginByName_ReturnsFullEntry(t *testing.T) {
 }
 
 func TestPluginByName_NotFound(t *testing.T) {
+	t.Parallel()
 	a := newPluginTestApp(t, config.AgentsConfig{}, app.WithPluginAdapters(nil))
 	_, ok, err := a.PluginByName("missing")
 	if err != nil {
@@ -332,6 +411,7 @@ func TestPluginByName_NotFound(t *testing.T) {
 }
 
 func TestRemovePlugin_RemovesFromAdapterAndManifestButKeepsMarketplace(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{id: "claude-code", available: true, listedPlugins: []app.InstalledPlugin{{Name: "caveman", Marketplace: "caveman"}}}
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
@@ -354,6 +434,7 @@ func TestRemovePlugin_RemovesFromAdapterAndManifestButKeepsMarketplace(t *testin
 }
 
 func TestRemovePlugin_ListErrorStillUninstallsAndDeletesManifest(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{id: "codex", available: true, listErr: errors.New("codex plugin list: boom")}
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "ponytail", Source: "a/b"}},
@@ -380,6 +461,7 @@ func TestRemovePlugin_ListErrorStillUninstallsAndDeletesManifest(t *testing.T) {
 }
 
 func TestRemovePlugin_ListErrorDowngradesUninstallFailureToWarning(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{
 		id:        "codex",
 		available: true,
@@ -414,6 +496,7 @@ func TestRemovePlugin_ListErrorDowngradesUninstallFailureToWarning(t *testing.T)
 }
 
 func TestRemovePlugin_ScrubsGroupRefs(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{id: "codex", available: true}
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "ponytail", Source: "a/b"}},
@@ -437,6 +520,7 @@ func TestRemovePlugin_ScrubsGroupRefs(t *testing.T) {
 }
 
 func TestRemovePlugin_RejectsUnmanaged(t *testing.T) {
+	t.Parallel()
 	a := newPluginTestApp(t, config.AgentsConfig{}, app.WithPluginAdapters(nil))
 	if _, err := a.RemovePlugin(context.Background(), "ghost"); err == nil {
 		t.Fatal("expected error removing unmanaged plugin")
@@ -444,6 +528,7 @@ func TestRemovePlugin_RejectsUnmanaged(t *testing.T) {
 }
 
 func TestRemoveMarketplace_DeletesManifestEntryOnly(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{id: "claude-code", available: true}
 	agents := config.AgentsConfig{Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}}}
 	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{stub}))
@@ -460,6 +545,7 @@ func TestRemoveMarketplace_DeletesManifestEntryOnly(t *testing.T) {
 }
 
 func TestSetPluginAgents_WideningInstallsOnNewlySelectedAdapter(t *testing.T) {
+	t.Parallel()
 	claude := &stubPluginAdapter{id: "claude-code", available: true, listedPlugins: []app.InstalledPlugin{{Name: "caveman", Marketplace: "caveman"}}}
 	codex := &stubPluginAdapter{id: "codex", available: true}
 	agents := config.AgentsConfig{
@@ -479,6 +565,7 @@ func TestSetPluginAgents_WideningInstallsOnNewlySelectedAdapter(t *testing.T) {
 }
 
 func TestSetPluginAgents_NarrowingRemovesFromDeselectedAdapterOnly(t *testing.T) {
+	t.Parallel()
 	claude := &stubPluginAdapter{id: "claude-code", available: true}
 	codex := &stubPluginAdapter{id: "codex", available: true}
 	agents := config.AgentsConfig{
@@ -502,6 +589,7 @@ func TestSetPluginAgents_NarrowingRemovesFromDeselectedAdapterOnly(t *testing.T)
 }
 
 func TestSetPluginAgents_ReconcilesMissingSelectedAdapter(t *testing.T) {
+	t.Parallel()
 	claude := &stubPluginAdapter{id: "claude-code", available: true}
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
@@ -517,6 +605,7 @@ func TestSetPluginAgents_ReconcilesMissingSelectedAdapter(t *testing.T) {
 }
 
 func TestSetPluginAgents_TargetedUnavailableAdapterSkips(t *testing.T) {
+	t.Parallel()
 	claude := &stubPluginAdapter{id: "claude-code", available: false}
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
@@ -536,6 +625,7 @@ func TestSetPluginAgents_TargetedUnavailableAdapterSkips(t *testing.T) {
 }
 
 func TestSetPluginAgents_RejectsUnmanaged(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{id: "claude-code", available: true}
 	a := newPluginTestApp(t, config.AgentsConfig{}, app.WithPluginAdapters([]app.PluginAdapter{stub}))
 	if _, err := a.SetPluginAgents(context.Background(), "ghost", []string{"claude-code"}); err == nil {
@@ -547,6 +637,7 @@ func TestSetPluginAgents_RejectsUnmanaged(t *testing.T) {
 }
 
 func TestImportPlugins_ReturnsUnmanagedAndKnownMarketplace(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{
 		id:            "claude-code",
 		available:     true,
@@ -567,6 +658,7 @@ func TestImportPlugins_ReturnsUnmanagedAndKnownMarketplace(t *testing.T) {
 var errBoom = errors.New("boom")
 
 func TestUpdatePlugin_PassesNameToAdapter(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{id: "claude-code", available: true}
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
@@ -589,6 +681,7 @@ func TestUpdatePlugin_PassesNameToAdapter(t *testing.T) {
 }
 
 func TestUpdatePlugin_GuardedByPluginsEnabled(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	root := config.RootConfig{
@@ -619,6 +712,7 @@ func TestUpdatePlugin_GuardedByPluginsEnabled(t *testing.T) {
 }
 
 func TestUpdatePlugin_NotFoundInManifest(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{id: "claude-code", available: true}
 	a := newPluginTestApp(t, config.AgentsConfig{}, app.WithPluginAdapters([]app.PluginAdapter{stub}))
 	if _, err := a.UpdatePlugin(context.Background(), "absent"); err == nil {
@@ -631,6 +725,7 @@ func TestUpdatePlugin_NotFoundInManifest(t *testing.T) {
 // local clone, so the clone must be refreshed first or the update can silently
 // install a stale version even though the CLI call itself succeeds.
 func TestUpdatePlugin_RefreshesMarketplacesBeforeUpdating(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{id: "claude-code", available: true}
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
@@ -657,6 +752,7 @@ func TestUpdatePlugin_RefreshesMarketplacesBeforeUpdating(t *testing.T) {
 // update attempt itself (best-effort refresh, tolerant like every other
 // per-adapter step in this file).
 func TestUpdatePlugin_MarketplaceRefreshFailureIsNonFatal(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{id: "claude-code", available: true, updateMarketplacesErr: errBoom}
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
@@ -676,6 +772,7 @@ func TestUpdatePlugin_MarketplaceRefreshFailureIsNonFatal(t *testing.T) {
 }
 
 func TestUpdatePlugin_MultiAdapterPartialFailureTolerant(t *testing.T) {
+	t.Parallel()
 	ok := &stubPluginAdapter{id: "claude-code", available: true}
 	fails := &stubPluginAdapter{id: "codex", available: true, updateErr: errBoom}
 	agents := config.AgentsConfig{
@@ -700,6 +797,7 @@ func TestUpdatePlugin_MultiAdapterPartialFailureTolerant(t *testing.T) {
 // marketplace refresh, not N — the refresh is an update-all CLI call, so
 // repeating it per plugin multiplies the same slow network fetch.
 func TestUpdatePlugins_RefreshesMarketplacesOncePerAdapter(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{id: "claude-code", available: true}
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
@@ -736,6 +834,7 @@ func TestUpdatePlugins_RefreshesMarketplacesOncePerAdapter(t *testing.T) {
 // in that case, so marketplaces need their own standalone refresh to avoid
 // going stale.
 func TestUpdateMarketplaces_RefreshesEveryAvailableAdapter(t *testing.T) {
+	t.Parallel()
 	claude := &stubPluginAdapter{id: "claude-code", available: true}
 	codex := &stubPluginAdapter{id: "codex", available: false}
 	agents := config.AgentsConfig{
@@ -759,6 +858,7 @@ func TestUpdateMarketplaces_RefreshesEveryAvailableAdapter(t *testing.T) {
 }
 
 func TestUpdateMarketplaces_CollectsPerAdapterErrors(t *testing.T) {
+	t.Parallel()
 	failing := &stubPluginAdapter{id: "claude-code", available: true, updateMarketplacesErr: errors.New("boom")}
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
@@ -775,6 +875,7 @@ func TestUpdateMarketplaces_CollectsPerAdapterErrors(t *testing.T) {
 }
 
 func TestRemoveMarketplace_BlockedByReferencingPlugins(t *testing.T) {
+	t.Parallel()
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
 		Plugins:      []config.Plugin{{Name: "keeper", Marketplace: "caveman"}},
@@ -797,6 +898,7 @@ func TestRemoveMarketplace_BlockedByReferencingPlugins(t *testing.T) {
 // contract: callers that just ran UpdateMarketplaces themselves (the TUI's
 // update-all) must not pay a second refresh, while the updates still run.
 func TestUpdatePluginsPreRefreshed_SkipsMarketplaceRefresh(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{id: "claude-code", available: true}
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
@@ -827,7 +929,35 @@ func TestUpdatePluginsPreRefreshed_SkipsMarketplaceRefresh(t *testing.T) {
 	}
 }
 
+func TestUpdatePluginsPreRefreshed_ContinuesAfterPluginUpdateFailure(t *testing.T) {
+	t.Parallel()
+	stub := &stubPluginAdapter{
+		id:         "claude-code",
+		available:  true,
+		updateErrs: map[string]error{"one": errBoom},
+	}
+	agents := config.AgentsConfig{
+		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
+		Plugins: []config.Plugin{
+			{Name: "one", Marketplace: "caveman"},
+			{Name: "two", Marketplace: "caveman"},
+		},
+	}
+	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{stub}))
+	res, err := a.UpdatePluginsPreRefreshed(context.Background(), []string{"one", "two"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Errors) != 1 || res.Errors[0].Name != "one" {
+		t.Fatalf("expected one collected error for one, got %v", res.Errors)
+	}
+	if len(stub.updatedNames) != 2 || stub.updatedNames[0] != "one" || stub.updatedNames[1] != "two" {
+		t.Fatalf("expected update attempts for one then two, got %v", stub.updatedNames)
+	}
+}
+
 func TestUpdatePluginsPreRefreshed_UnknownPluginStillErrors(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{id: "claude-code", available: true}
 	a := newPluginTestApp(t, config.AgentsConfig{}, app.WithPluginAdapters([]app.PluginAdapter{stub}))
 	if _, err := a.UpdatePluginsPreRefreshed(context.Background(), []string{"absent"}, nil); err == nil {
@@ -836,6 +966,7 @@ func TestUpdatePluginsPreRefreshed_UnknownPluginStillErrors(t *testing.T) {
 }
 
 func TestAddMarketplace_UpsertsManifestAndAddsToAdapters(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{id: "claude-code", available: true}
 	a := newPluginTestApp(t, config.AgentsConfig{}, app.WithPluginAdapters([]app.PluginAdapter{stub}))
 	res, err := a.AddMarketplace(context.Background(), config.Marketplace{Name: "caveman", Source: "a/b"})
@@ -870,6 +1001,7 @@ func TestAddMarketplace_UpsertsManifestAndAddsToAdapters(t *testing.T) {
 }
 
 func TestAddMarketplace_SkipsAlreadyListedAndUnavailableAdapters(t *testing.T) {
+	t.Parallel()
 	listed := &stubPluginAdapter{
 		id: "claude-code", available: true,
 		listedMarkets: []app.InstalledMarketplace{{Name: "caveman", Source: "a/b"}},
@@ -889,6 +1021,7 @@ func TestAddMarketplace_SkipsAlreadyListedAndUnavailableAdapters(t *testing.T) {
 }
 
 func TestFindUndeclaredMarketplace(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{
 		id: "claude-code", available: true,
 		listedMarkets: []app.InstalledMarketplace{
@@ -915,6 +1048,7 @@ func TestFindUndeclaredMarketplace(t *testing.T) {
 // marketplace is declared get manifest entries scoped to the reporting agent;
 // ones with undeclared marketplaces are counted as skipped, not adopted.
 func TestAdoptUnmanagedPlugins(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{
 		id: "claude-code", available: true,
 		listedPlugins: []app.InstalledPlugin{
@@ -945,6 +1079,35 @@ func TestAdoptUnmanagedPlugins(t *testing.T) {
 	}
 }
 
+// TestAdoptUnmanagedPlugins_UnionsAgentsForIdenticalPlugin pins that when two
+// agent adapters both report the same unmanaged plugin identity (name +
+// marketplace), it is adopted once and scoped to the union of both agents,
+// mirroring AdoptUnmanagedMcpServers rather than dropping the second report.
+func TestAdoptUnmanagedPlugins_UnionsAgentsForIdenticalPlugin(t *testing.T) {
+	plugin := app.InstalledPlugin{Name: "shared-plugin", Marketplace: "caveman"}
+	claude := &stubPluginAdapter{id: "claude-code", available: true, listedPlugins: []app.InstalledPlugin{plugin}}
+	codex := &stubPluginAdapter{id: "codex", available: true, listedPlugins: []app.InstalledPlugin{plugin}}
+	agents := config.AgentsConfig{
+		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
+	}
+	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{codex, claude}))
+
+	adopted, skipped, err := a.AdoptUnmanagedPlugins(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if adopted != 1 || skipped != 0 {
+		t.Fatalf("adopted=%d skipped=%d, want 1/0", adopted, skipped)
+	}
+	cfg, err := a.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Agents.Plugins) != 1 || !slices.Equal(cfg.Agents.Plugins[0].Agents, []string{"claude-code", "codex"}) {
+		t.Fatalf("manifest plugins = %+v, want one plugin targeted at both agents", cfg.Agents.Plugins)
+	}
+}
+
 // TestUpdateAllSequence_UpdatesOutdatedAndInstallsMissing exercises the exact
 // app-layer sequence the TUI's agents "update all" worker runs
 // (doAgentsUpdateAll): refresh marketplaces once, compute outdated plugins from
@@ -955,6 +1118,7 @@ func TestAdoptUnmanagedPlugins(t *testing.T) {
 // plugin, and a missing plugin are all present, pinning that update touches
 // only the outdated one and install touches only the missing one.
 func TestUpdateAllSequence_UpdatesOutdatedAndInstallsMissing(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{
 		id:        "claude-code",
 		available: true,

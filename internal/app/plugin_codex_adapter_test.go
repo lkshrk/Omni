@@ -9,6 +9,7 @@ import (
 )
 
 func TestCodexPluginAdapter_ID(t *testing.T) {
+	t.Parallel()
 	a := NewCodexPluginAdapter(nil, nil)
 	if a.ID() != "codex" {
 		t.Fatalf("got %q", a.ID())
@@ -16,6 +17,7 @@ func TestCodexPluginAdapter_ID(t *testing.T) {
 }
 
 func TestCodexPluginAdapter_InstallPlugin(t *testing.T) {
+	t.Parallel()
 	var gotCmd string
 	var gotArgs []string
 	exec := func(_ context.Context, cmd string, args ...string) (string, string, error) {
@@ -38,6 +40,7 @@ func TestCodexPluginAdapter_InstallPlugin(t *testing.T) {
 }
 
 func TestCodexPluginAdapter_RemovePlugin(t *testing.T) {
+	t.Parallel()
 	var gotArgs []string
 	exec := func(_ context.Context, _ string, args ...string) (string, string, error) {
 		gotArgs = args
@@ -55,6 +58,7 @@ func TestCodexPluginAdapter_RemovePlugin(t *testing.T) {
 }
 
 func TestCodexPluginAdapter_UpdatePlugin_NotSupported(t *testing.T) {
+	t.Parallel()
 	called := false
 	exec := func(_ context.Context, _ string, _ ...string) (string, string, error) {
 		called = true
@@ -70,6 +74,7 @@ func TestCodexPluginAdapter_UpdatePlugin_NotSupported(t *testing.T) {
 }
 
 func TestCodexPluginAdapter_AddMarketplace(t *testing.T) {
+	t.Parallel()
 	var gotArgs []string
 	exec := func(_ context.Context, _ string, args ...string) (string, string, error) {
 		gotArgs = args
@@ -95,6 +100,7 @@ const codexPluginListEmptyFixture = `{
 }`
 
 func TestCodexPluginAdapter_ListPlugins_Empty(t *testing.T) {
+	t.Parallel()
 	exec := func(_ context.Context, _ string, args ...string) (string, string, error) {
 		want := []string{"plugin", "list", "--json"}
 		if !mcpSliceEq(args, want) {
@@ -144,6 +150,7 @@ const codexPluginListInstalledFixture = `{
 }`
 
 func TestCodexPluginAdapter_ListPlugins_ParsesRealFixture(t *testing.T) {
+	t.Parallel()
 	exec := func(_ context.Context, _ string, _ ...string) (string, string, error) {
 		return codexPluginListInstalledFixture, "", nil
 	}
@@ -196,6 +203,7 @@ const codexPluginListAvailableFixture = `{
 }`
 
 func TestCodexPluginAdapter_ListPlugins_IgnoresAvailableOnlyEntries(t *testing.T) {
+	t.Parallel()
 	exec := func(_ context.Context, _ string, _ ...string) (string, string, error) {
 		return codexPluginListAvailableFixture, "", nil
 	}
@@ -236,6 +244,7 @@ const codexPluginListInstalledWithAvailableUpdateFixture = `{
 }`
 
 func TestCodexPluginAdapter_ListPlugins_JoinsLatestVersionFromAvailable(t *testing.T) {
+	t.Parallel()
 	exec := func(_ context.Context, _ string, _ ...string) (string, string, error) {
 		return codexPluginListInstalledWithAvailableUpdateFixture, "", nil
 	}
@@ -269,6 +278,7 @@ const codexMarketplaceListFixture = `{
 }`
 
 func TestCodexPluginAdapter_ListMarketplaces_ParsesRealFixture(t *testing.T) {
+	t.Parallel()
 	exec := func(_ context.Context, _ string, args ...string) (string, string, error) {
 		want := []string{"plugin", "marketplace", "list", "--json"}
 		if !mcpSliceEq(args, want) {
@@ -296,6 +306,7 @@ const codexMarketplaceListEmptyFixture = `{
 }`
 
 func TestCodexPluginAdapter_ListMarketplaces_Empty(t *testing.T) {
+	t.Parallel()
 	exec := func(_ context.Context, _ string, _ ...string) (string, string, error) {
 		return codexMarketplaceListEmptyFixture, "", nil
 	}
@@ -313,6 +324,7 @@ func TestCodexPluginAdapter_ListMarketplaces_Empty(t *testing.T) {
 // UpdatedAt is derived from the root clone directory's mtime, since codex's
 // marketplace list JSON carries no date field of its own.
 func TestCodexPluginAdapter_ListMarketplaces_UpdatedAtFromRootMtime(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	fixture := `{"marketplaces":[{"name":"lkshrk","root":"` + dir + `","marketplaceSource":{"sourceType":"git","source":"https://github.com/lkshrk/agent-marketplace.git"}}]}`
 	exec := func(_ context.Context, _ string, _ ...string) (string, string, error) {
@@ -339,6 +351,7 @@ func TestCodexPluginAdapter_ListMarketplaces_UpdatedAtFromRootMtime(t *testing.T
 // verifies a missing/unreadable root yields a zero UpdatedAt rather than an
 // error — best-effort enrichment, never fatal.
 func TestCodexPluginAdapter_ListMarketplaces_UpdatedAtZeroWhenRootMissing(t *testing.T) {
+	t.Parallel()
 	fixture := `{"marketplaces":[{"name":"lkshrk","root":"/does/not/exist","marketplaceSource":{"sourceType":"git","source":"https://github.com/lkshrk/agent-marketplace.git"}}]}`
 	exec := func(_ context.Context, _ string, _ ...string) (string, string, error) {
 		return fixture, "", nil
@@ -354,6 +367,7 @@ func TestCodexPluginAdapter_ListMarketplaces_UpdatedAtZeroWhenRootMissing(t *tes
 }
 
 func TestCodexPluginAdapter_UpdateMarketplaces(t *testing.T) {
+	t.Parallel()
 	var gotCmd string
 	var gotArgs []string
 	exec := func(_ context.Context, cmd string, args ...string) (string, string, error) {
@@ -375,6 +389,7 @@ func TestCodexPluginAdapter_UpdateMarketplaces(t *testing.T) {
 }
 
 func TestCodexPluginAdapter_UpdateMarketplaces_PropagatesError(t *testing.T) {
+	t.Parallel()
 	exec := func(_ context.Context, _ string, _ ...string) (string, string, error) {
 		return "", "boom stderr", errBoom
 	}

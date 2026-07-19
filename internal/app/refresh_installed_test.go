@@ -15,6 +15,7 @@ import (
 )
 
 func TestRefreshInstalled_ScriptVersionFailurePreservesCachedState(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	mock := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "sh -c exit 0", Response: executor.MockCall{}},
@@ -95,6 +96,7 @@ func (s *isInstalledStub) IsInstalled(_ context.Context, t provider.Tool) (bool,
 }
 
 func TestRefreshInstalled_CapturesConcreteProviderForEmptyProviderTool(t *testing.T) {
+	t.Parallel()
 	prov := &metadataCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		metadata: map[string]provider.InstalledMetadata{
@@ -146,8 +148,11 @@ func TestRefreshInstalled_CapturesConcreteProviderForEmptyProviderTool(t *testin
 }
 
 func TestRefreshInstalled_CapturesViaIsInstalledFallbackWhenBulkMisses(t *testing.T) {
+	t.Parallel(
 	// A configured empty-provider tool installed as a brew dependency/cask is not
 	// in the bulk "leaves" map, but a per-tool IsInstalled probe finds it.
+	)
+
 	prov := &isInstalledStub{
 		stubProvider:  stubProvider{name: "brew", available: true},
 		installedName: "cmake",
@@ -179,8 +184,11 @@ func TestRefreshInstalled_CapturesViaIsInstalledFallbackWhenBulkMisses(t *testin
 }
 
 func TestRefreshInstalled_CapturesConcreteManagerNotFamilyForEcosystemTool(t *testing.T) {
+	t.Parallel(
 	// A python-ecosystem tool installed via uv must be captured as the concrete
 	// "uv" provider, never the "python" family (which fails config validation).
+	)
+
 	prov := &multiManagerStub{
 		stubProvider: stubProvider{name: "python", available: true},
 		entries: map[string]provider.InstalledEntry{
@@ -216,6 +224,7 @@ func TestRefreshInstalled_CapturesConcreteManagerNotFamilyForEcosystemTool(t *te
 }
 
 func TestRefreshInstalled_BulkPath_MarksInstalled(t *testing.T) {
+	t.Parallel()
 	prov := &bulkCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		bulk:         map[string]string{"ripgrep": "14.1.0"},
@@ -251,6 +260,7 @@ func TestRefreshInstalled_BulkPath_MarksInstalled(t *testing.T) {
 }
 
 func TestRefreshInstalled_MetadataBulkPath_PersistsPrivilege(t *testing.T) {
+	t.Parallel()
 	prov := &metadataCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		metadata: map[string]provider.InstalledMetadata{
@@ -314,6 +324,7 @@ func TestRefreshInstalled_MetadataBulkPath_PersistsPrivilege(t *testing.T) {
 }
 
 func TestRefreshInstalled_MetadataBulkPath_DoesNotOverwriteDifferentGit(t *testing.T) {
+	t.Parallel()
 	prov := &metadataCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		metadata: map[string]provider.InstalledMetadata{
@@ -353,6 +364,7 @@ func TestRefreshInstalled_MetadataBulkPath_DoesNotOverwriteDifferentGit(t *testi
 }
 
 func TestRefreshInstalled_CachedOwnerMetadataPopulatesGit(t *testing.T) {
+	t.Parallel()
 	system := &stubProvider{name: "system", available: true}
 	brew := &metadataCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
@@ -400,6 +412,7 @@ func TestRefreshInstalled_CachedOwnerMetadataPopulatesGit(t *testing.T) {
 }
 
 func TestRefreshInstalled_BulkPath_MarksNotInstalled(t *testing.T) {
+	t.Parallel()
 	prov := &bulkCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		bulk:         map[string]string{}, // ripgrep absent
@@ -433,6 +446,7 @@ func TestRefreshInstalled_BulkPath_MarksNotInstalled(t *testing.T) {
 }
 
 func TestRefreshInstalled_MissingToolPreservesFailureState(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	prov := &bulkCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
@@ -469,7 +483,10 @@ func TestRefreshInstalled_MissingToolPreservesFailureState(t *testing.T) {
 }
 
 func TestRefreshInstalled_SlowPath_MarksInstalled(t *testing.T) {
+	t.Parallel(
 	// Provider has no BulkChecker — falls back to per-tool IsInstalled.
+	)
+
 	prov := &isInstalledStub{
 		stubProvider:  stubProvider{name: "pip", available: true},
 		installedName: "black",
@@ -503,6 +520,7 @@ func TestRefreshInstalled_SlowPath_MarksInstalled(t *testing.T) {
 }
 
 func TestRefreshInstalled_UnavailableProvider_SkipsTool(t *testing.T) {
+	t.Parallel()
 	prov := &bulkCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: false},
 		bulk:         map[string]string{"ripgrep": "14.1.0"},
@@ -535,6 +553,7 @@ func TestRefreshInstalled_UnavailableProvider_SkipsTool(t *testing.T) {
 }
 
 func TestRefreshInstalled_EmptyConfig_Noop(t *testing.T) {
+	t.Parallel()
 	prov := &stubProvider{name: "brew", available: true}
 	a, _ := newImportApp(t, prov)
 
@@ -544,6 +563,7 @@ func TestRefreshInstalled_EmptyConfig_Noop(t *testing.T) {
 }
 
 func TestRefreshInstalled_Progress_BulkProvider(t *testing.T) {
+	t.Parallel()
 	prov := &bulkCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		bulk:         map[string]string{"ripgrep": "14.1.0"},
@@ -580,6 +600,7 @@ func TestRefreshInstalled_Progress_BulkProvider(t *testing.T) {
 // TestRefreshInstalled_Progress_SlowPath verifies that the progress callback is
 // called for a non-BulkChecker provider (slow-path IsInstalled per tool).
 func TestRefreshInstalled_Progress_SlowPath(t *testing.T) {
+	t.Parallel()
 	prov := &isInstalledStub{
 		stubProvider:  stubProvider{name: "pip", available: true},
 		installedName: "black",
@@ -617,6 +638,7 @@ func TestRefreshInstalled_Progress_SlowPath(t *testing.T) {
 // TestRefreshInstalled_Progress_NilCallback verifies that passing nil as the
 // progress callback works without panicking.
 func TestRefreshInstalled_Progress_NilCallback(t *testing.T) {
+	t.Parallel()
 	prov := &bulkCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		bulk:         map[string]string{"ripgrep": "14.1.0"},
@@ -639,6 +661,7 @@ func TestRefreshInstalled_Progress_NilCallback(t *testing.T) {
 }
 
 func TestRefreshInstalled_Progress_XofY(t *testing.T) {
+	t.Parallel()
 	brew := &bulkCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		bulk:         map[string]string{"ripgrep": "14.1.0"},
@@ -710,6 +733,7 @@ func (s *multiManagerStub) InstalledByManager(_ context.Context) (map[string]pro
 }
 
 func TestRefreshInstalled_MultiManagerPath_UsesFullSlashPackage(t *testing.T) {
+	t.Parallel()
 	prov := &multiManagerStub{
 		stubProvider: stubProvider{name: "npm", available: true},
 		entries: map[string]provider.InstalledEntry{
@@ -744,6 +768,7 @@ func TestRefreshInstalled_MultiManagerPath_UsesFullSlashPackage(t *testing.T) {
 }
 
 func TestRefreshInstalled_UsesCachedConcreteOwnerWhenDifferentFromConfiguredProvider(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	apt := &bulkCheckingStub{
 		stubProvider: stubProvider{name: "apt", available: true},
@@ -768,6 +793,7 @@ func TestRefreshInstalled_UsesCachedConcreteOwnerWhenDifferentFromConfiguredProv
 }
 
 func TestRefreshInstalled_UsesCachedConcreteOwnerSlowPath(t *testing.T) {
+	t.Parallel()
 	brew, apt := cachedOwnerSlowPathProviders()
 	a, cfgPath := newImportApp(t, brew, apt)
 	ctx := context.Background()
@@ -782,6 +808,7 @@ func TestRefreshInstalled_UsesCachedConcreteOwnerSlowPath(t *testing.T) {
 }
 
 func TestRefreshInstalled_FallsBackWhenCachedOwnerUnavailable(t *testing.T) {
+	t.Parallel()
 	brew := &bulkCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		bulk:         map[string]string{"ripgrep": "14.2.0"},
@@ -816,6 +843,7 @@ func TestRefreshInstalled_FallsBackWhenCachedOwnerUnavailable(t *testing.T) {
 }
 
 func TestRefreshInstalled_UsesCachedConcreteOwnerMetadata(t *testing.T) {
+	t.Parallel()
 	brew, apt := cachedOwnerMetadataProviders()
 	a, cfgPath := newImportApp(t, brew, apt)
 	ctx := context.Background()

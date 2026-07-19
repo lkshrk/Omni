@@ -44,6 +44,7 @@ func wantWarning(t *testing.T, warnings []string, substr string) {
 }
 
 func TestOpsGatedByFeatureFlags(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("skills add", func(t *testing.T) {
@@ -69,6 +70,7 @@ func TestOpsGatedByFeatureFlags(t *testing.T) {
 }
 
 func TestRestoreSkipsDisabledFeatureWithWarning(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("skills", func(t *testing.T) {

@@ -83,7 +83,7 @@ func dotsChildExpandKey(entryName, relPath string) string {
 }
 
 func dotsChildExpanded(m Model, entryName string, child app.DotChild) bool {
-	if !child.IsDir || len(child.Children) == 0 {
+	if !child.IsDir || child.Children == nil || len(child.Children) == 0 {
 		return false
 	}
 	return m.dotsExpandedChildren[dotsChildExpandKey(entryName, child.RelPath)]
@@ -91,7 +91,7 @@ func dotsChildExpanded(m Model, entryName string, child app.DotChild) bool {
 
 func dotsRowExpandable(row dotsVisibleRow) bool {
 	if row.isChild {
-		return dotsRowIsDir(row) && len(row.child.Children) > 0
+		return dotsRowIsDir(row) && (row.child.Children == nil || len(row.child.Children) > 0)
 	}
 	return dotsRowIsDir(row) && len(row.entry.Children) > 0
 }
@@ -383,7 +383,7 @@ func renderDots(m Model) string {
 			case isCursor:
 				left := rowLeft(iconStyle.Bold(true), p.styleActiveText, p.styleHelp.Bold(true))
 				write(renderDotsRow(true, left, activeRight) + "\n")
-				if errLine := renderDotsLastError(p, e, m.width); errLine != "" {
+				if errLine := renderDotsLastError(m, e, m.width); errLine != "" {
 					write(errLine + "\n")
 				}
 				prefix := textRowContentPrefix()
@@ -838,7 +838,7 @@ func dotSyncedStyle(p palette, selected bool) lipgloss.Style {
 // renderDotsLastError shows the recorded failure reason for the selected
 // out-of-sync entry, wrapped so multi-line tool output (e.g. stow stderr)
 // stays readable instead of being truncated into a transient status line.
-func renderDotsLastError(p palette, e app.DotStatus, width int) string {
+func renderDotsLastError(m Model, e app.DotStatus, width int) string {
 	text := strings.Join(strings.Fields(e.LastError), " ")
 	if text == "" {
 		return ""
@@ -847,6 +847,9 @@ func renderDotsLastError(p palette, e app.DotStatus, width int) string {
 	if runes := []rune(text); len(runes) > maxErrorRunes {
 		text = string(runes[:maxErrorRunes-1]) + "…"
 	}
+	p := m.palette
 	avail := max(rowAvailableWidth(width)-4, 20)
-	return p.styleMissing.PaddingLeft(4).Width(avail).Render("✗ " + text)
+	line := p.styleMissing.PaddingLeft(4).Width(avail).Render("✗ " + text)
+	hint := renderActionHintText(p, []hintItem{hintFromBinding(m.keys.ErrorLog)})
+	return line + "\n" + strings.Repeat(" ", 4) + hint
 }

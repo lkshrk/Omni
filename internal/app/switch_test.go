@@ -48,6 +48,7 @@ func materializeTestTools(cfg *config.RootConfig, memberships []config.ToolEntry
 }
 
 func TestSwitch_Success(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	pip := &stubProvider{name: "pip", available: true}
 	a, cfgPath := newImportApp(t, brew, pip)
@@ -82,6 +83,7 @@ func TestSwitch_Success(t *testing.T) {
 }
 
 func TestSwitchWithStateReturnsUpdatedTools(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	brew := &stubProvider{name: "brew", available: true}
 	pip := &describingProvider{stubProvider: stubProvider{name: "pip", available: true}}
@@ -115,6 +117,7 @@ func TestSwitchWithStateReturnsUpdatedTools(t *testing.T) {
 }
 
 func TestFirstApplicableProviderSolutionSelectsSwitchProviderTarget(t *testing.T) {
+	t.Parallel()
 	actionErr := &provider.ActionError{Solutions: []provider.ErrorSolution{
 		{Label: "Run manually", Command: "omni switch black --from python --to uv"},
 		{Action: provider.ErrorSolutionActionSwitchProvider},
@@ -134,6 +137,7 @@ func TestFirstApplicableProviderSolutionSelectsSwitchProviderTarget(t *testing.T
 }
 
 func TestFirstApplicableProviderSolutionRejectsMissingSwitchTarget(t *testing.T) {
+	t.Parallel()
 	for _, actionErr := range []*provider.ActionError{
 		nil,
 		{},
@@ -152,6 +156,7 @@ func TestFirstApplicableProviderSolutionRejectsMissingSwitchTarget(t *testing.T)
 }
 
 func TestApplyProviderSolutionWithStateSwitchesTargetProvider(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	brew := &stubProvider{name: "brew", available: true}
 	pip := &describingProvider{stubProvider: stubProvider{name: "pip", available: true}}
@@ -181,6 +186,7 @@ func TestApplyProviderSolutionWithStateSwitchesTargetProvider(t *testing.T) {
 }
 
 func TestApplyProviderSolutionWithStateRejectsMissingTarget(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t, &stubProvider{name: "brew", available: true})
 
 	_, err := a.ApplyProviderSolutionWithState(context.Background(), "black", "brew", provider.ErrorSolution{})
@@ -202,6 +208,7 @@ func (p *uninstallFailProvider) Uninstall(_ context.Context, _ provider.Tool) er
 }
 
 func TestSwitch_PreservesUninstallWarning(t *testing.T) {
+	t.Parallel()
 	uninstallErr := errors.New("old provider cleanup failed")
 	brew := &uninstallFailProvider{stubProvider: stubProvider{name: "brew", available: true}, err: uninstallErr}
 	pip := &stubProvider{name: "pip", available: true}
@@ -233,6 +240,7 @@ func TestSwitch_PreservesUninstallWarning(t *testing.T) {
 }
 
 func TestSwitch_UpdatesDB(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	pip := &stubProvider{name: "pip", available: true}
 	a, cfgPath := newImportApp(t, brew, pip)
@@ -275,6 +283,7 @@ func TestSwitch_UpdatesDB(t *testing.T) {
 }
 
 func TestSwitch_PersistsResolvedConcreteOwner(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	apt := &lifecycleProvider{
 		stubProvider: stubProvider{name: "apt", available: true},
@@ -308,6 +317,7 @@ func TestSwitch_PersistsResolvedConcreteOwner(t *testing.T) {
 }
 
 func TestSwitch_VerificationFailureDoesNotRewriteConfigOrCache(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	apt := &lifecycleProvider{
 		stubProvider: stubProvider{name: "apt", available: true},
@@ -350,6 +360,7 @@ func TestSwitch_VerificationFailureDoesNotRewriteConfigOrCache(t *testing.T) {
 }
 
 func TestSwitch_ReturnsDBUpdateError(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	pip := &stubProvider{name: "pip", available: true}
 	a, cfgPath := newImportApp(t, brew, pip)
@@ -372,6 +383,7 @@ func TestSwitch_ReturnsDBUpdateError(t *testing.T) {
 }
 
 func TestSwitch_UnknownFromProvider(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	_, err := a.Switch(context.Background(), "black", "unknown", "pip")
 	if err == nil {
@@ -380,6 +392,7 @@ func TestSwitch_UnknownFromProvider(t *testing.T) {
 }
 
 func TestSwitch_UnknownToProvider(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	a, _ := newImportApp(t, brew)
 	_, err := a.Switch(context.Background(), "black", "brew", "unknown")
@@ -389,6 +402,7 @@ func TestSwitch_UnknownToProvider(t *testing.T) {
 }
 
 func TestSwitch_ToolNotInConfig(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	pip := &stubProvider{name: "pip", available: true}
 	a, cfgPath := newImportApp(t, brew, pip)
@@ -408,6 +422,7 @@ func TestSwitch_ToolNotInConfig(t *testing.T) {
 }
 
 func TestSwitch_PreservesOtherTools(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	pip := &stubProvider{name: "pip", available: true}
 	a, cfgPath := newImportApp(t, brew, pip)
@@ -478,6 +493,7 @@ func (e *envCleanerProvider) UninstallFrom(_ context.Context, tool provider.Tool
 // is a known registered provider, from=installedWith and Switch(installedWith→configProv)
 // runs — cross-provider migration, no oldEnvCleaner cleanup needed.
 func TestMigrateInstallation_InstalledWithRegistered(t *testing.T) {
+	t.Parallel()
 	pip := &stubProvider{name: "pip", available: true}
 	brew := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, pip, brew)
@@ -513,6 +529,7 @@ func TestMigrateInstallation_InstalledWithRegistered(t *testing.T) {
 }
 
 func TestMigrateInstallationWithStateReturnsUpdatedTools(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	pip := &describingProvider{stubProvider: stubProvider{name: "pip", available: true}}
 	brew := &stubProvider{name: "brew", available: true}
@@ -546,6 +563,7 @@ func TestMigrateInstallationWithStateReturnsUpdatedTools(t *testing.T) {
 }
 
 func TestMigrateInstallation_RegisteredWrongProviderPersistsResolvedConcreteOwner(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	apt := &lifecycleProvider{
 		stubProvider: stubProvider{name: "apt", available: true},
@@ -579,6 +597,7 @@ func TestMigrateInstallation_RegisteredWrongProviderPersistsResolvedConcreteOwne
 }
 
 func TestMigrateInstallation_UnregisteredBackendCleansOldEnvironment(t *testing.T) {
+	t.Parallel()
 	pip := &envCleanerProvider{stubProvider: stubProvider{name: "pip", available: true}}
 	a, cfgPath := newImportApp(t, pip)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -618,6 +637,7 @@ func TestMigrateInstallation_UnregisteredBackendCleansOldEnvironment(t *testing.
 }
 
 func TestReinstallWithDefault_UsesConfiguredProviderAfterDefaultChange(t *testing.T) {
+	t.Parallel()
 	pip := &lifecycleProvider{
 		stubProvider: stubProvider{name: "pip", available: true},
 		installed:    false,
@@ -659,6 +679,7 @@ func TestReinstallWithDefault_UsesConfiguredProviderAfterDefaultChange(t *testin
 }
 
 func TestMigrateInstallation_VerificationFailureDoesNotUninstallOldProvider(t *testing.T) {
+	t.Parallel()
 	brew := &lifecycleProvider{
 		stubProvider: stubProvider{name: "brew", available: true},
 		installed:    true,

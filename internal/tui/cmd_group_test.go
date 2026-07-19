@@ -112,6 +112,7 @@ func TestDoSetHostGroups_UpdatesMemberships(t *testing.T) {
 }
 
 func TestDoSetHostGroupTools_UpdatesMembershipsAndIgnores(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
@@ -193,6 +194,7 @@ func TestDoSetHostGroupTools_UpdatesMembershipsAndIgnores(t *testing.T) {
 }
 
 func TestDoSetHostGroupDots_UpdatesMemberships(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
@@ -325,6 +327,7 @@ func TestDoRemoveHostFromTab_NonexistentIsOK(t *testing.T) {
 }
 
 func TestHostDeleteConfirm_UsesCapturedHostName(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
@@ -595,6 +598,7 @@ func newNoDotsModel(t *testing.T) Model {
 }
 
 func TestDoDotsPull_ErrorPath(t *testing.T) {
+	t.Parallel()
 	m := newNoDotsModel(t)
 	msg := m.doDotsPull()()
 	got, ok := msg.(dotsPulledMsg)
@@ -607,6 +611,7 @@ func TestDoDotsPull_ErrorPath(t *testing.T) {
 }
 
 func TestDoDotsPush_ErrorPath(t *testing.T) {
+	t.Parallel()
 	m := newNoDotsModel(t)
 	msg := m.doDotsPush()()
 	got, ok := msg.(dotsPushedMsg)

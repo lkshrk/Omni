@@ -65,6 +65,7 @@ func newSearchCmdApp(t *testing.T, providers ...provider.Provider) *app.App {
 // TestDebounceSearch_EmitsMsg verifies that debounceSearch sleeps briefly and
 // then emits a debouncedSearchMsg with the correct query and generation.
 func TestDebounceSearch_EmitsMsg(t *testing.T) {
+	t.Parallel()
 	cmd := debounceSearch("rg", 1)
 	msg := cmd()
 	got, ok := msg.(debouncedSearchMsg)
@@ -84,6 +85,7 @@ func TestDebounceSearch_EmitsMsg(t *testing.T) {
 // TestDoSearch_ReturnsResults verifies that doSearch calls app.Search and
 // returns a searchResultsMsg with the converted ToolCache results.
 func TestDoSearch_ReturnsResults(t *testing.T) {
+	t.Parallel()
 	prov := &searchProvider{
 		name: "brew",
 		results: []provider.SearchResult{
@@ -135,6 +137,7 @@ func TestDoSearch_ReturnsResults(t *testing.T) {
 }
 
 func TestDoSearch_EcosystemFilterReturnsOnlyMatchingSearchResults(t *testing.T) {
+	t.Parallel()
 	brew := &searchProvider{
 		name:    "brew",
 		results: []provider.SearchResult{{Name: "presenterm", Provider: "brew"}},
@@ -165,6 +168,7 @@ func TestDoSearch_EcosystemFilterReturnsOnlyMatchingSearchResults(t *testing.T) 
 }
 
 func TestDoSearch_PreservesSearchPrivilegeMetadata(t *testing.T) {
+	t.Parallel()
 	prov := &searchProvider{
 		name: "brew",
 		results: []provider.SearchResult{{
@@ -201,7 +205,10 @@ func TestDoSearch_PreservesSearchPrivilegeMetadata(t *testing.T) {
 // TestDoSearch_CancelledReturnsNil verifies that when the context is already
 // cancelled before the search runs, doSearch returns nil (no message dispatched).
 func TestDoSearch_CancelledReturnsNil(t *testing.T) {
+	t.Parallel(
 	// Use a provider that would return results, but context is cancelled first.
+	)
+
 	prov := &searchProvider{
 		name:    "brew",
 		results: []provider.SearchResult{{Name: "git", Provider: "brew"}},
@@ -223,6 +230,7 @@ func TestDoSearch_CancelledReturnsNil(t *testing.T) {
 // TestDoSearch_ErrorReturnsMsg verifies that when app.Search returns an error,
 // doSearch returns a searchResultsMsg with the err field set.
 func TestDoSearch_ErrorReturnsMsg(t *testing.T) {
+	t.Parallel()
 	prov := &searchProvider{
 		name:      "brew",
 		searchErr: errors.New("network timeout"),
@@ -251,6 +259,7 @@ func TestDoSearch_ErrorReturnsMsg(t *testing.T) {
 }
 
 func TestDoSearch_PreservesPartialResultsWithError(t *testing.T) {
+	t.Parallel()
 	okProvider := &searchProvider{
 		name:    "brew",
 		results: []provider.SearchResult{{Name: "prettyping", Provider: "brew"}},
@@ -276,6 +285,7 @@ func TestDoSearch_PreservesPartialResultsWithError(t *testing.T) {
 }
 
 func TestSearchResultsMsg_PartialErrorStillShowsResults(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSearch
 	m.searchGen = 2
@@ -301,6 +311,7 @@ func TestSearchResultsMsg_PartialErrorStillShowsResults(t *testing.T) {
 }
 
 func TestSearchResultsMsg_EmptyResultsUsesNonErrorStatus(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSearch
 	m.searchGen = 2
@@ -332,6 +343,7 @@ func TestSearchResultsMsg_EmptyResultsUsesNonErrorStatus(t *testing.T) {
 // The "Searching…" label is rendered by activityLabel — startSearch only
 // sets statusMsg = "" so that activityLabel is unambiguously shown.
 func TestStartSearch_SetsSearchingFlag(t *testing.T) {
+	t.Parallel()
 	prov := &searchProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 
@@ -362,6 +374,7 @@ func TestStartSearch_SetsSearchingFlag(t *testing.T) {
 // TestDebounceSearch_DelayIsRoughly300ms verifies the debounce delay is at
 // least 250ms (allowing for timer imprecision) and under 1s (sanity bound).
 func TestDebounceSearch_DelayIsRoughly300ms(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping timing test in short mode")
 	}
@@ -382,6 +395,7 @@ func TestDebounceSearch_DelayIsRoughly300ms(t *testing.T) {
 // TestDoSearch_VersionAndDescriptionPopulated verifies that Version and
 // Description from SearchResult are stored in the ToolCache NullString fields.
 func TestDoSearch_VersionAndDescriptionPopulated(t *testing.T) {
+	t.Parallel()
 	prov := &searchProvider{
 		name: "brew",
 		results: []provider.SearchResult{
@@ -420,6 +434,7 @@ func TestDoSearch_VersionAndDescriptionPopulated(t *testing.T) {
 // TestStartSearch_CancelsInFlightSearch verifies that calling startSearch a
 // second time cancels the previous search context (m.searchCancel is replaced).
 func TestStartSearch_CancelsInFlightSearch(t *testing.T) {
+	t.Parallel()
 	prov := &searchProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 
@@ -454,6 +469,7 @@ func TestStartSearch_CancelsInFlightSearch(t *testing.T) {
 // would show "found 5" (or an error) under the activity indicator instead of
 // letting activityLabel render "Searching…".
 func TestStartSearch_ClearsStaleStatusMsg(t *testing.T) {
+	t.Parallel()
 	prov := &searchProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 
@@ -487,6 +503,7 @@ func TestStartSearch_ClearsStaleStatusMsg(t *testing.T) {
 // but m.searching was not cleared in the cache-hit branch, leaving the spinner
 // running forever.
 func TestDebouncedSearchMsg_CacheHit_ClearsSearching(t *testing.T) {
+	t.Parallel()
 	prov := &searchProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	fi := textinput.New()
@@ -520,6 +537,7 @@ func TestDebouncedSearchMsg_CacheHit_ClearsSearching(t *testing.T) {
 }
 
 func TestDoSearch_CapturesProviderFilter(t *testing.T) {
+	t.Parallel()
 	prov := &searchProvider{
 		name:    "brew",
 		results: []provider.SearchResult{{Name: "rg", Provider: "brew"}},
@@ -540,6 +558,7 @@ func TestDoSearch_CapturesProviderFilter(t *testing.T) {
 }
 
 func TestSearchCache_IsScopedByProviderFilter(t *testing.T) {
+	t.Parallel()
 	prov := &searchProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	fi := textinput.New()
@@ -572,6 +591,7 @@ func TestSearchCache_IsScopedByProviderFilter(t *testing.T) {
 }
 
 func TestSearchResultsMsg_DropsProviderMismatch(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{{Name: "existing", Provider: "brew"}})
 	m.mode = viewSearch
 	m.searchGen = 2

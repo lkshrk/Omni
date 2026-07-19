@@ -306,6 +306,7 @@ func TestDoctorDrift_NoDrift_WhenInstalledWithEmptyPathDetected(t *testing.T) {
 }
 
 func TestDoctorNvmManagedDriftHelpers(t *testing.T) {
+	t.Parallel()
 	check := app.DoctorCheck{
 		ID:     "drift",
 		Status: app.DoctorStatusWarn,

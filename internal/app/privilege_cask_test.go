@@ -7,6 +7,7 @@ import (
 )
 
 func TestBrewCaskMayPromptForPassword(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		reason string
 		want   bool

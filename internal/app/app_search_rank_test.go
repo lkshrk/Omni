@@ -7,6 +7,7 @@ import (
 )
 
 func TestSortByProviderRank(t *testing.T) {
+	t.Parallel()
 	provs := []config.ToolInstallSpec{
 		{Provider: "pip"},
 		{Provider: "zebra"},

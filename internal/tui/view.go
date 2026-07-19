@@ -228,7 +228,7 @@ func (m Model) viewString() string {
 		return placePopup(bg, m, renderDotsPeekPopup(m), dotsPeekPopupFrame(m))
 	}
 
-	if (m.mode == viewSettings || m.mode == viewList || m.mode == viewSearch) && (m.traceLog != nil || m.traceLogLoading) {
+	if (m.mode == viewSettings || m.mode == viewList || m.mode == viewSearch || m.mode == viewDots || m.mode == viewSkills) && (m.traceLog != nil || m.traceLogLoading) {
 		bgModel := m
 		bgModel.traceLog = nil
 		bgModel.traceLogLoading = false

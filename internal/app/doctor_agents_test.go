@@ -37,6 +37,7 @@ func doctorAgentsGroup(check *app.DoctorCheck, header string) *app.DoctorDetailG
 }
 
 func TestDoctorAgents_MasterDisabled(t *testing.T) {
+	t.Parallel()
 	a := newFeatureGateApp(t, config.Settings{AgentsDisabled: config.BoolPtr(true)})
 	result, err := a.Doctor(context.Background())
 	if err != nil {
@@ -55,6 +56,7 @@ func TestDoctorAgents_MasterDisabled(t *testing.T) {
 }
 
 func TestDoctorAgents_FeatureDisabledSingleLine(t *testing.T) {
+	t.Parallel()
 	a := newFeatureGateApp(t, config.Settings{McpDisabled: config.BoolPtr(true)})
 	result, err := a.Doctor(context.Background())
 	if err != nil {
@@ -73,6 +75,7 @@ func TestDoctorAgents_FeatureDisabledSingleLine(t *testing.T) {
 }
 
 func TestDoctorAgents_AdapterUnavailableWarns(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{id: "codex", available: false}
 	a := newFeatureGateApp(t, config.Settings{}, app.WithMcpAdapters([]app.McpAdapter{stub}))
 	result, err := a.Doctor(context.Background())
@@ -97,6 +100,7 @@ func TestDoctorAgents_AdapterUnavailableWarns(t *testing.T) {
 }
 
 func TestDoctorAgents_NeverCallsAdapterList(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{id: "codex", available: true}
 	a := newFeatureGateApp(t, config.Settings{}, app.WithMcpAdapters([]app.McpAdapter{stub}))
 	if _, err := a.Doctor(context.Background()); err != nil {
@@ -108,6 +112,7 @@ func TestDoctorAgents_NeverCallsAdapterList(t *testing.T) {
 }
 
 func TestDoctorAgents_SkillsMissingWarn(t *testing.T) {
+	t.Parallel()
 	mcpStub := &stubMcpAdapter{id: "claude-code", available: true}
 	pluginStub := &stubPluginAdapter{id: "claude-code", available: true}
 	agents := config.AgentsConfig{
@@ -166,6 +171,7 @@ func TestDoctorAgents_SkillsRunnerNotFoundWarn(t *testing.T) {
 }
 
 func TestDoctorAgents_PluginsUnavailableWarn(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{id: "codex", available: false}
 	a := newDoctorAgentsApp(t, config.AgentsConfig{}, app.WithPluginAdapters([]app.PluginAdapter{stub}))
 	result, err := a.Doctor(context.Background())
@@ -190,6 +196,7 @@ func TestDoctorAgents_PluginsUnavailableWarn(t *testing.T) {
 }
 
 func TestDoctorAgents_SkillsDisabledSingleLine(t *testing.T) {
+	t.Parallel()
 	a := newFeatureGateApp(t, config.Settings{SkillsDisabled: config.BoolPtr(true)})
 	result, err := a.Doctor(context.Background())
 	if err != nil {
@@ -203,6 +210,7 @@ func TestDoctorAgents_SkillsDisabledSingleLine(t *testing.T) {
 }
 
 func TestDoctorAgents_PluginsDisabledSingleLine(t *testing.T) {
+	t.Parallel()
 	a := newFeatureGateApp(t, config.Settings{PluginsDisabled: config.BoolPtr(true)})
 	result, err := a.Doctor(context.Background())
 	if err != nil {

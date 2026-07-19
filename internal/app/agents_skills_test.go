@@ -13,6 +13,7 @@ import (
 )
 
 func TestSkillRunnerFromManager(t *testing.T) {
+	t.Parallel()
 	if got := skillRunner("bun"); got != "bunx" {
 		t.Fatalf("bun -> %s, want bunx", got)
 	}
@@ -23,17 +24,18 @@ func TestSkillRunnerFromManager(t *testing.T) {
 	}
 }
 
-func TestRestoreSkillsAggregatesResults(t *testing.T) {
+func TestRestoreSkills_ContinuesAfterPackageFailure(t *testing.T) {
+	t.Parallel()
 	pkgs := []resolvedPackage{
 		{SkillPackage: config.SkillPackage{Source: "o/r", Agents: []string{"claude-code"}}},
 		{SkillPackage: config.SkillPackage{Source: "o/r2", Agents: []string{"claude-code"}}},
 	}
-	inst := stubInstaller{fail: map[string]bool{"o/r2": true}}
+	inst := stubInstaller{fail: map[string]bool{"o/r": true}}
 	res := restoreSkills(context.Background(), pkgs, nil, inst)
-	if len(res.Installed) != 1 || res.Installed[0] != "o/r" {
+	if len(res.Installed) != 1 || res.Installed[0] != "o/r2" {
 		t.Fatalf("installed = %v", res.Installed)
 	}
-	if len(res.Failed) != 1 || res.Failed[0].Name != "o/r2" {
+	if len(res.Failed) != 1 || res.Failed[0].Name != "o/r" {
 		t.Fatalf("failed = %v", res.Failed)
 	}
 }
@@ -48,6 +50,7 @@ func (s stubInstaller) Install(_ context.Context, pkg config.SkillPackage, _ []s
 }
 
 func TestRestoreSkillsOptionsDryRun(t *testing.T) {
+	t.Parallel()
 	pkgs := []resolvedPackage{
 		{SkillPackage: config.SkillPackage{Source: "o/r", Ref: "main", Agents: []string{"claude-code"}}},
 	}
@@ -62,6 +65,7 @@ func TestRestoreSkillsOptionsDryRun(t *testing.T) {
 }
 
 func TestRestoreSkillsOptionsDryRunEmptyAgentSetIsNoOp(t *testing.T) {
+	t.Parallel()
 	pkgs := []resolvedPackage{
 		{SkillPackage: config.SkillPackage{Source: "o/r"}},
 	}
@@ -77,6 +81,7 @@ func TestRestoreSkillsOptionsDryRunEmptyAgentSetIsNoOp(t *testing.T) {
 // create a user-scope duplicate of plugin-scoped content, which is harm, not
 // repair (see RestoreSkillsResult.ShadowedByPlugin's doc comment).
 func TestFilterShadowedSkillPackages_SkipsPluginProvided(t *testing.T) {
+	t.Parallel()
 	pkgs := []resolvedPackage{
 		{SkillPackage: config.SkillPackage{Source: "owner/academic-research-skills", Agents: []string{"claude-code"}}},
 		{SkillPackage: config.SkillPackage{Source: "o/normal-package", Agents: []string{"claude-code"}}},
@@ -156,6 +161,7 @@ func TestResolveRestoreTargets_NilUseFallsBackToDetectedAgents(t *testing.T) {
 }
 
 func TestResolveRestoreTargets_PreservesPackageAgentsWithoutHostSelection(t *testing.T) {
+	t.Parallel()
 	pkgs := []resolvedPackage{{
 		SkillPackage: config.SkillPackage{Source: "o/r", Agents: []string{"claude-code"}},
 	}}
@@ -166,6 +172,7 @@ func TestResolveRestoreTargets_PreservesPackageAgentsWithoutHostSelection(t *tes
 }
 
 func TestResolveRestoreTargets_ExplicitEmptyHostSelectionDisablesPackages(t *testing.T) {
+	t.Parallel()
 	pkgs := []resolvedPackage{{
 		SkillPackage: config.SkillPackage{Source: "o/r", Agents: []string{"claude-code"}},
 	}}
@@ -176,6 +183,7 @@ func TestResolveRestoreTargets_ExplicitEmptyHostSelectionDisablesPackages(t *tes
 }
 
 func TestImportPackagesUpsert(t *testing.T) {
+	t.Parallel()
 	existing := []config.SkillPackage{
 		{Source: "o/keep", Ref: "main"},
 		{Source: "o/changed", Ref: "old"},
@@ -201,6 +209,7 @@ func TestImportPackagesUpsert(t *testing.T) {
 }
 
 func TestImportPackagesCarriesOnlySourceRef(t *testing.T) {
+	t.Parallel()
 	lock := &config.SkillLockFile{Skills: map[string]config.SkillLockEntry{
 		"x": {Source: "o/x", Ref: "v2", SkillFolderHash: "abc123", InstalledAt: "2026-06-01T00:00:00Z"},
 	}}
@@ -218,6 +227,7 @@ func TestImportPackagesCarriesOnlySourceRef(t *testing.T) {
 }
 
 func TestSkillDriftDiff(t *testing.T) {
+	t.Parallel()
 	before := map[string]string{"a": "h1", "b": "h2", "gone": "h9"}
 	after := map[string]string{"a": "h1", "b": "h2new", "c": "h3"}
 	drift := skillDrift(before, after)
@@ -227,6 +237,7 @@ func TestSkillDriftDiff(t *testing.T) {
 }
 
 func TestSkillUpdateArgs(t *testing.T) {
+	t.Parallel()
 	got := skillUpdateArgs([]string{"frontend-design", "tdd"})
 	want := []string{"skills", "update", "-g", "-y", "frontend-design", "tdd"}
 	if !reflect.DeepEqual(got, want) {
@@ -238,6 +249,7 @@ func TestSkillUpdateArgs(t *testing.T) {
 }
 
 func TestSkillListArgs(t *testing.T) {
+	t.Parallel()
 	want := []string{"skills", "list", "-g", "--json"}
 	if got := skillListArgs(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("args mismatch:\n got %v\nwant %v", got, want)
@@ -245,6 +257,7 @@ func TestSkillListArgs(t *testing.T) {
 }
 
 func TestSupportedAgentDisplaysAreUniqueForSkillsListMapping(t *testing.T) {
+	t.Parallel()
 	seen := make(map[string]string, len(supportedAgents))
 	for _, agent := range supportedAgents {
 		if previous, ok := seen[agent.Display]; ok {
@@ -258,6 +271,7 @@ func TestSupportedAgentDisplaysAreUniqueForSkillsListMapping(t *testing.T) {
 }
 
 func TestParseSkillsCLIList(t *testing.T) {
+	t.Parallel()
 	got, err := parseSkillsCLIList(`[
   {"name":"one","path":"/tmp/one","scope":"global","agents":["Claude Code","Codex"]},
   {"name":"two","path":"/tmp/two","scope":"global","agents":["Codex"]}
@@ -280,6 +294,7 @@ func TestParseSkillsCLIList(t *testing.T) {
 }
 
 func TestVerifyRestoredSkillTargetsAcceptsEveryExpectedAgentLink(t *testing.T) {
+	t.Parallel()
 	pkgs := []resolvedPackage{{SkillPackage: config.SkillPackage{
 		Source: "o/r", Agents: []string{"claude-code", "codex"},
 	}}}
@@ -298,6 +313,7 @@ func TestVerifyRestoredSkillTargetsAcceptsEveryExpectedAgentLink(t *testing.T) {
 }
 
 func TestVerifyRestoredSkillTargetsIgnoresStaleLockEntries(t *testing.T) {
+	t.Parallel()
 	pkgs := []resolvedPackage{{SkillPackage: config.SkillPackage{
 		Source: "o/r", Agents: []string{"claude-code", "codex"},
 	}}}
@@ -315,6 +331,7 @@ func TestVerifyRestoredSkillTargetsIgnoresStaleLockEntries(t *testing.T) {
 }
 
 func TestVerifyRestoredSkillTargetsRejectsMissingAgentLink(t *testing.T) {
+	t.Parallel()
 	pkgs := []resolvedPackage{
 		{SkillPackage: config.SkillPackage{Source: "ok/r", Agents: []string{"codex"}}},
 		{SkillPackage: config.SkillPackage{Source: "broken/r", Agents: []string{"claude-code", "codex"}}},
@@ -345,6 +362,7 @@ func TestVerifyRestoredSkillTargetsRejectsMissingAgentLink(t *testing.T) {
 }
 
 func TestVerifyRestoredSkillTargetsRejectsProjectScopeRecord(t *testing.T) {
+	t.Parallel()
 	pkgs := []resolvedPackage{{SkillPackage: config.SkillPackage{Source: "o/r", Agents: []string{"codex"}}}}
 	lock := &config.SkillLockFile{Skills: map[string]config.SkillLockEntry{"one": {Source: "o/r"}}}
 	entries := []skillsCLIListEntry{{Name: "one", Scope: "project", Agents: []string{"Codex"}}}
@@ -355,6 +373,7 @@ func TestVerifyRestoredSkillTargetsRejectsProjectScopeRecord(t *testing.T) {
 }
 
 func TestFailRestoredSkillVerificationDemotesEveryNominalSuccess(t *testing.T) {
+	t.Parallel()
 	res := failRestoredSkillVerification(RestoreSkillsResult{
 		Installed: []string{"a/one", "b/two"},
 		Failed:    []SkillFailure{{Name: "earlier/r", Message: "boom"}},
@@ -370,6 +389,7 @@ func TestFailRestoredSkillVerificationDemotesEveryNominalSuccess(t *testing.T) {
 }
 
 func TestSkillPackageRemoveArgs(t *testing.T) {
+	t.Parallel()
 	got := skillPackageRemoveArgs([]string{"taste-skill"}, []string{"claude-code", "codex"})
 	want := []string{"skills", "remove", "-g", "-a", "claude-code", "codex", "-y", "taste-skill"}
 	if !reflect.DeepEqual(got, want) {
@@ -378,6 +398,7 @@ func TestSkillPackageRemoveArgs(t *testing.T) {
 }
 
 func TestSkillsCLIFailureMarkers(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name           string
 		stdout, stderr string
@@ -402,6 +423,7 @@ func TestSkillsCLIFailureMarkers(t *testing.T) {
 }
 
 func TestSkillsCLIFailureIncludesDetailLines(t *testing.T) {
+	t.Parallel()
 	stdout := "cloning repo\nFailed to install 2 skill(s)\n  ✗ my-skill → claude-code: EACCES permission denied\ndone"
 	err := skillsCLIFailure("skills add owner/repo", stdout, "")
 	if err == nil {
@@ -415,6 +437,7 @@ func TestSkillsCLIFailureIncludesDetailLines(t *testing.T) {
 }
 
 func TestSkillsFailureDetailCapsLines(t *testing.T) {
+	t.Parallel()
 	stdout := strings.Repeat("✗ broken line\n", 6)
 	detail := skillsFailureDetail(stdout, "")
 	if got := strings.Count(detail, "✗"); got != 4 {
@@ -453,6 +476,7 @@ func TestUpdateSkillsExitZeroFailureMarker(t *testing.T) {
 }
 
 func TestUnconfiguredHostSkillsWarning(t *testing.T) {
+	t.Parallel()
 	grouped := &config.RootConfig{Groups: []*config.GroupConfig{{Name: "dev", Skills: []string{"o/r"}}}}
 	if w := unconfiguredHostSkillsWarning(grouped); w == "" {
 		t.Fatal("want warning for unregistered host with grouped skills")

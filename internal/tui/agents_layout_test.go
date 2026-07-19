@@ -8,6 +8,7 @@ import (
 )
 
 func TestAgentsLayout_FixedGridColumnsAlignAcrossMixedRows(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{
 			{Name: "widget-dated", Source: "a/a", Installed: true, Updated: "2026-01-02", PerAgentStatus: map[string]bool{"claude": true}},
@@ -52,6 +53,7 @@ func TestAgentsLayout_FixedGridColumnsAlignAcrossMixedRows(t *testing.T) {
 }
 
 func TestAgentsLayout_MissingMarkRendersStyledMissingVersion(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "absent-skill", Source: "a/a", Installed: false}},
 		nil, nil,
@@ -88,6 +90,7 @@ func TestAgentsLayout_MissingMarkRendersStyledMissingVersion(t *testing.T) {
 }
 
 func TestAgentsLayout_ProvColumnNeverShrinksBelowAgentIDFloor(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "s", Source: "a/a", Installed: true}},
 		nil, nil,
@@ -101,6 +104,7 @@ func TestAgentsLayout_ProvColumnNeverShrinksBelowAgentIDFloor(t *testing.T) {
 }
 
 func TestAgentsLayout_SkillsOrphanAgentCellBlankButMcpPluginOrphansKeepAgentID(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.skillsUnmanagedRows = []app.SkillPackageRow{
 		{Name: "owner/orphan-skill", Source: "owner/orphan-skill", Installed: true},

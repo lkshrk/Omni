@@ -9,6 +9,7 @@ import (
 )
 
 func TestCurrentRefreshProviderScanPlan_GroupsConcreteProviderTools(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, brew)
 	host := testShortHostname()
@@ -44,6 +45,7 @@ func TestCurrentRefreshProviderScanPlan_GroupsConcreteProviderTools(t *testing.T
 }
 
 func TestRefreshProviderScanProviderNamesFromCountsDropsEmptyProviders(t *testing.T) {
+	t.Parallel()
 	got := app.RefreshProviderScanProviderNames(map[string]int{
 		"system": 2,
 		"":       3,
@@ -65,6 +67,7 @@ func TestRefreshProviderScanProviderNamesFromCountsDropsEmptyProviders(t *testin
 }
 
 func TestRefreshProviderScanPlanAccessorsSkipEmptyProviders(t *testing.T) {
+	t.Parallel()
 	plan := app.RefreshProviderScanPlan{Steps: []app.RefreshProviderScanStep{
 		{Provider: "system", Label: "system (apt)", Count: 2},
 		{Provider: "", Label: "ignored", Count: 9},
@@ -97,6 +100,7 @@ func TestRefreshProviderScanPlanAccessorsSkipEmptyProviders(t *testing.T) {
 }
 
 func TestCurrentRefreshProviderScanPlan_KeepsConfiguredConcreteProvider(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, brew)
 	host := testShortHostname()
@@ -126,6 +130,7 @@ func TestCurrentRefreshProviderScanPlan_KeepsConfiguredConcreteProvider(t *testi
 }
 
 func TestCurrentRefreshProviderScanPlan_SkipsDisabledProvider(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	pnpm := &stubProvider{name: "pnpm", available: true}
 	a, cfgPath := newImportApp(t, brew, pnpm)
@@ -155,6 +160,7 @@ func TestCurrentRefreshProviderScanPlan_SkipsDisabledProvider(t *testing.T) {
 }
 
 func TestCurrentRefreshProviderScanPlanReadsCurrentAppState(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, brew)
 	host := testShortHostname()

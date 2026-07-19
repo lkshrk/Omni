@@ -2209,6 +2209,7 @@ func TestRemoveDotGroupsNormalizesRequestedGroups(t *testing.T) {
 }
 
 func TestNormalizeGroupNamesTrimsDedupesAndSorts(t *testing.T) {
+	t.Parallel()
 	got := app.NormalizeGroupNames([]string{" work ", "base", "work", "", "base"})
 	if !reflect.DeepEqual(got, []string{"base", "work"}) {
 		t.Fatalf("NormalizeGroupNames = %v, want [base work]", got)
@@ -2576,6 +2577,7 @@ func writeGroupWithDots(t *testing.T, cfgDir, _ string, entries []config.DotEntr
 }
 
 func TestDotsConfigured_False(t *testing.T) {
+	t.Parallel()
 	cfgDir := t.TempDir()
 	a := app.New(filepath.Join(cfgDir, "settings.json"))
 	if err := a.InitTestMode(context.Background()); err != nil {
@@ -2683,6 +2685,7 @@ func TestDotsMutationsRejectWhenHostDotsDisabled(t *testing.T) {
 }
 
 func TestDotsAddIgnorePattern_AppendsToExistingEntry(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Groups: []*config.GroupConfig{{
@@ -2707,6 +2710,7 @@ func TestDotsAddIgnorePattern_AppendsToExistingEntry(t *testing.T) {
 }
 
 func TestDotsAddIgnorePatternAllowsMissingConfiguredRepo(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	missingRepo := filepath.Join(t.TempDir(), "missing-dotfiles")
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -2733,6 +2737,7 @@ func TestDotsAddIgnorePatternAllowsMissingConfiguredRepo(t *testing.T) {
 }
 
 func TestDotsAddIgnorePattern_DuplicateIsNoop(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Groups: []*config.GroupConfig{{
@@ -2757,6 +2762,7 @@ func TestDotsAddIgnorePattern_DuplicateIsNoop(t *testing.T) {
 }
 
 func TestDotsDeleteIgnorePattern_RemovesExistingEntry(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Groups: []*config.GroupConfig{{
@@ -2781,6 +2787,7 @@ func TestDotsDeleteIgnorePattern_RemovesExistingEntry(t *testing.T) {
 }
 
 func TestDotsIncludeIgnoredPath_AppendsIncludeOverrideForBroadIgnore(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Settings: config.Settings{DotsRepo: t.TempDir()},
@@ -2810,6 +2817,7 @@ func TestDotsIncludeIgnoredPath_AppendsIncludeOverrideForBroadIgnore(t *testing.
 }
 
 func TestDotsIncludeIgnoredPath_RemovesExactPatternWhenEnough(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Settings: config.Settings{DotsRepo: t.TempDir()},
@@ -2838,6 +2846,7 @@ func TestDotsIncludeIgnoredPath_RemovesExactPatternWhenEnough(t *testing.T) {
 }
 
 func TestDotsIncludeIgnoredPath_MovesShadowedIncludeAfterBroadIgnore(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Settings: config.Settings{DotsRepo: t.TempDir()},
@@ -5327,6 +5336,7 @@ func TestDotsAdd_AdoptSkipsDefaultIgnoredChildren(t *testing.T) {
 // ─── coverage gap tests ───────────────────────────────────────────────────────
 
 func TestDotsSync_NotConfigured(t *testing.T) {
+	t.Parallel()
 	cfgDir := t.TempDir()
 	a := app.New(filepath.Join(cfgDir, "settings.json"))
 	if err := a.InitTestMode(context.Background()); err != nil {
@@ -5339,6 +5349,7 @@ func TestDotsSync_NotConfigured(t *testing.T) {
 }
 
 func TestDotsDelete_NotConfigured(t *testing.T) {
+	t.Parallel()
 	cfgDir := t.TempDir()
 	a := app.New(filepath.Join(cfgDir, "settings.json"))
 	if err := a.InitTestMode(context.Background()); err != nil {
@@ -5725,6 +5736,7 @@ func TestDotsCommitRefreshesCachedGitStatus(t *testing.T) {
 }
 
 func TestDotsStatus_NotConfigured(t *testing.T) {
+	t.Parallel()
 	cfgDir := t.TempDir()
 	a := app.New(filepath.Join(cfgDir, "settings.json"))
 	if err := a.InitTestMode(context.Background()); err != nil {
@@ -5737,6 +5749,7 @@ func TestDotsStatus_NotConfigured(t *testing.T) {
 }
 
 func TestDotsPull_NotConfigured(t *testing.T) {
+	t.Parallel()
 	cfgDir := t.TempDir()
 	a := app.New(filepath.Join(cfgDir, "settings.json"))
 	if err := a.InitTestMode(context.Background()); err != nil {
@@ -5857,6 +5870,7 @@ func TestDotsPullAndPush_WithGitRemote(t *testing.T) {
 }
 
 func TestDotsPush_NotConfigured(t *testing.T) {
+	t.Parallel()
 	cfgDir := t.TempDir()
 	a := app.New(filepath.Join(cfgDir, "settings.json"))
 	if err := a.InitTestMode(context.Background()); err != nil {
@@ -6137,6 +6151,7 @@ func TestDotsGitConfig_NoAutoCommit(t *testing.T) {
 // ─── DotsResolveConflict tests ────────────────────────────────────────────────
 
 func TestDotsResolveConflict_NotConfigured(t *testing.T) {
+	t.Parallel()
 	cfgDir := t.TempDir()
 	a := app.New(filepath.Join(cfgDir, "settings.json"))
 	if err := a.InitTestMode(context.Background()); err != nil {
@@ -6720,6 +6735,7 @@ func TestDisableDotsForHost_PersistsDisabledAfterUnlinkError(t *testing.T) {
 }
 
 func TestDotsDisable_NotConfigured(t *testing.T) {
+	t.Parallel()
 	cfgDir := t.TempDir()
 	a := app.New(filepath.Join(cfgDir, "settings.json"))
 	if err := a.InitTestMode(context.Background()); err != nil {

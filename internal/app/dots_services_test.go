@@ -47,6 +47,7 @@ func TestDotsServicesStatus_PreservesPartialServiceResult(t *testing.T) {
 }
 
 func TestDotsServiceTimingFallbacks(t *testing.T) {
+	t.Parallel()
 	if got := DotsReminderInterval(nil); got != DefaultDotsReminderInterval() {
 		t.Fatalf("nil reminder interval = %s, want default", got)
 	}
@@ -62,6 +63,7 @@ func TestDotsServiceTimingFallbacks(t *testing.T) {
 }
 
 func TestDotsServiceTimingChoices(t *testing.T) {
+	t.Parallel()
 	wantReminder := []time.Duration{
 		15 * time.Minute,
 		30 * time.Minute,
@@ -100,6 +102,7 @@ func TestDotsServiceTimingChoices(t *testing.T) {
 }
 
 func TestBuildDashboardDotsAutomationStatus(t *testing.T) {
+	t.Parallel()
 	status := BuildDashboardDotsAutomationStatus(DashboardDotsAutomationInput{
 		Services: DotsServicesStatus{
 			Reminder: &DotsReminderService{Installed: true},

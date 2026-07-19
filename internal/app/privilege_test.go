@@ -20,8 +20,11 @@ import (
 )
 
 func TestRecordPrivilegeError_NilDB(t *testing.T) {
+	t.Parallel(
 	// App with no DB initialised — readDB() returns nil.
 	// recordPrivilegeError must not panic.
+	)
+
 	a := &App{}
 	err := errors.New("sudo: a password is required")
 	a.recordPrivilegeError(context.Background(), "vim", "apt", "vim", err)
@@ -29,13 +32,17 @@ func TestRecordPrivilegeError_NilDB(t *testing.T) {
 }
 
 func TestRecordPrivilegeError_NonPrivilegeError(t *testing.T) {
+	t.Parallel(
 	// Non-privilege errors should be silently ignored (no DB access).
+	)
+
 	a := &App{} // nil DB — would panic if it tried to access DB
 	err := errors.New("network timeout")
 	a.recordPrivilegeError(context.Background(), "vim", "apt", "vim", err)
 }
 
 func TestExternalPrivilegeActionText(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		action provider.PrivilegeAction
 		want   string
@@ -59,6 +66,7 @@ func TestExternalPrivilegeActionText(t *testing.T) {
 }
 
 func TestPrivilegedApprovalRowMessage(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		action provider.PrivilegeAction
 		want   string
@@ -75,6 +83,7 @@ func TestPrivilegedApprovalRowMessage(t *testing.T) {
 }
 
 func TestShellJoinQuotesUnsafeCommandParts(t *testing.T) {
+	t.Parallel()
 	got := shellJoin([]string{"apt-get", "install", "-y", "safe_pkg", "name with spaces", "owner's-tool", ""})
 	want := "apt-get install -y safe_pkg 'name with spaces' 'owner'\\''s-tool' ''"
 	if got != want {
@@ -83,6 +92,7 @@ func TestShellJoinQuotesUnsafeCommandParts(t *testing.T) {
 }
 
 func TestPrivilegedToolCommand_BrewCaskActions(t *testing.T) {
+	t.Parallel()
 	a := newPrivilegeCommandTestApp(brew.New(nil))
 	plan := provider.PrivilegePlan{
 		Requirement: provider.PrivilegeMaybe,
@@ -124,6 +134,7 @@ func TestPrivilegedToolCommand_BrewCaskActions(t *testing.T) {
 }
 
 func TestPrivilegedToolCommand_SudoBackedProviders(t *testing.T) {
+	t.Parallel()
 	a := newPrivilegeCommandTestApp(
 		aptpkg.New(nil),
 		apkpkg.New(nil),
@@ -205,6 +216,7 @@ func TestPrivilegedToolCommand_SudoBackedProviders(t *testing.T) {
 }
 
 func TestPrivilegedToolCommand_SystemPlanStoresConcreteInstalledWith(t *testing.T) {
+	t.Parallel()
 	a := newPrivilegeCommandTestApp(dnfpkg.New(nil))
 	plan := provider.PrivilegePlan{Requirement: provider.PrivilegeRequired, Reason: "dnf install vim"}
 	tool := database.ToolCache{Name: "vim", Provider: provider.EcosystemSystem, Package: "vim"}
@@ -219,6 +231,7 @@ func TestPrivilegedToolCommand_SystemPlanStoresConcreteInstalledWith(t *testing.
 }
 
 func TestPrivilegedToolCommand_UnsupportedOrGenericBrewProvider(t *testing.T) {
+	t.Parallel()
 	tool := database.ToolCache{Name: "vim", Provider: "pip", Package: "vim"}
 	plan := provider.PrivilegePlan{Requirement: provider.PrivilegeRequired, Reason: "package manager needs sudo/root access"}
 	if _, ok := newPrivilegeCommandTestApp().PrivilegedToolCommand(context.Background(), toolViewFromCache(&tool), provider.PrivilegeActionInstall, plan); ok {
@@ -232,6 +245,7 @@ func TestPrivilegedToolCommand_UnsupportedOrGenericBrewProvider(t *testing.T) {
 }
 
 func TestPrivilegeQueuePlan_PrefersSpecificRowReason(t *testing.T) {
+	t.Parallel()
 	a := newPrivilegeCommandTestApp(brew.New(nil))
 	tool := &database.ToolCache{
 		Name:            "karabiner-elements",
@@ -273,6 +287,7 @@ func TestPrivilegeQueuePlan_PrefersSpecificRowReason(t *testing.T) {
 }
 
 func TestPrivilegeQueuePlan_UsesProviderPlanWhenRowReasonIsGeneric(t *testing.T) {
+	t.Parallel()
 	a := newPrivilegeCommandTestApp(&privilegePlanningProvider{
 		name: "brew",
 		plan: provider.PrivilegePlan{
@@ -312,6 +327,7 @@ func TestPrivilegeQueuePlan_UsesProviderPlanWhenRowReasonIsGeneric(t *testing.T)
 }
 
 func TestPrivilegeQueuePlanUsesMarkedPrivilegeMetadata(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a := New(filepath.Join(t.TempDir(), "settings.json"))
 	if err := a.InitTestMode(ctx, aptpkg.New(nil)); err != nil {
@@ -363,6 +379,7 @@ func TestPrivilegeQueuePlanUsesMarkedPrivilegeMetadata(t *testing.T) {
 }
 
 func TestPrivilegeQueuePlanBuildsItemFromRowErrorOnly(t *testing.T) {
+	t.Parallel()
 	a := newPrivilegeCommandTestApp(aptpkg.New(nil))
 	key := privilegeQueueToolKey("vim", "apt")
 
@@ -390,6 +407,7 @@ func TestPrivilegeQueuePlanBuildsItemFromRowErrorOnly(t *testing.T) {
 }
 
 func TestPrivilegeQueuePlanSkipsInvalidActionsAndInstalledInstalls(t *testing.T) {
+	t.Parallel()
 	a := newPrivilegeCommandTestApp(aptpkg.New(nil))
 	installed := &database.ToolCache{Name: "vim", Provider: "apt", Package: "vim", Installed: true}
 	invalid := &database.ToolCache{Name: "fd", Provider: "apt", Package: "fd"}
@@ -419,6 +437,7 @@ func TestPrivilegeQueuePlanSkipsInvalidActionsAndInstalledInstalls(t *testing.T)
 }
 
 func TestPrivilegeQueuePlanRejectsProviderToolUninstall(t *testing.T) {
+	t.Parallel()
 	a := New(filepath.Join(t.TempDir(), "settings.json"))
 	ctx := context.Background()
 	if err := a.InitTestMode(ctx, aptpkg.New(nil)); err != nil {

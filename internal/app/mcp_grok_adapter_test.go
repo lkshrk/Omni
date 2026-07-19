@@ -8,6 +8,7 @@ import (
 )
 
 func TestGrokMcpAdapter_ID(t *testing.T) {
+	t.Parallel()
 	a := NewGrokMcpAdapter(nil, nil)
 	if a.ID() != "grok" {
 		t.Fatalf("got %q", a.ID())
@@ -15,6 +16,7 @@ func TestGrokMcpAdapter_ID(t *testing.T) {
 }
 
 func TestGrokMcpAdapter_Add_Stdio(t *testing.T) {
+	t.Parallel()
 	var gotCmd string
 	var gotArgs []string
 	exec := func(_ context.Context, cmd string, args ...string) (string, string, error) {
@@ -57,6 +59,7 @@ func TestGrokMcpAdapter_Add_Stdio(t *testing.T) {
 }
 
 func TestGrokMcpAdapter_Add_Http(t *testing.T) {
+	t.Parallel()
 	var gotArgs []string
 	exec := func(_ context.Context, _ string, args ...string) (string, string, error) {
 		gotArgs = args
@@ -82,6 +85,7 @@ func TestGrokMcpAdapter_Add_Http(t *testing.T) {
 }
 
 func TestGrokMcpAdapter_Add_Sse(t *testing.T) {
+	t.Parallel()
 	var gotArgs []string
 	exec := func(_ context.Context, _ string, args ...string) (string, string, error) {
 		gotArgs = args
@@ -107,6 +111,7 @@ func TestGrokMcpAdapter_Add_Sse(t *testing.T) {
 }
 
 func TestGrokMcpAdapter_Remove(t *testing.T) {
+	t.Parallel()
 	var gotArgs []string
 	exec := func(_ context.Context, _ string, args ...string) (string, string, error) {
 		gotArgs = args
@@ -123,6 +128,7 @@ func TestGrokMcpAdapter_Remove(t *testing.T) {
 }
 
 func TestParseGrokMcpList(t *testing.T) {
+	t.Parallel()
 	out := `[
 	  {"name":"stdio-srv","command":"npx","args":["-y","pkg"],"enabled":true,"scope":"user"},
 	  {"name":"http-srv","url":"https://mcp.example.com/mcp","headers":{"X-Key":"value"},"enabled":true,"scope":"user"}
@@ -146,6 +152,7 @@ func TestParseGrokMcpList(t *testing.T) {
 }
 
 func TestParseGrokMcpList_ReportsOmittedHeadersAsKnownEmpty(t *testing.T) {
+	t.Parallel()
 	got, err := parseGrokMcpList(`[{
 		"name":"http-srv","url":"https://mcp.example.com/mcp","enabled":true,"scope":"user"
 	}]`)

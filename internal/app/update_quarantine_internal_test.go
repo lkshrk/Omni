@@ -7,6 +7,7 @@ import (
 )
 
 func TestParseQuarantineDuration(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		raw     string
@@ -43,6 +44,7 @@ func TestParseQuarantineDuration(t *testing.T) {
 }
 
 func TestQuarantineBlockedErrorMessages(t *testing.T) {
+	t.Parallel()
 	blockedUntil := time.Date(2026, 6, 7, 10, 30, 0, 0, time.UTC)
 	tests := []struct {
 		name     string

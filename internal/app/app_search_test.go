@@ -26,6 +26,7 @@ func anyToolInstalled(tools []*database.ToolCache) bool {
 // ─── ListDiscovered ───────────────────────────────────────────────────────────
 
 func TestListDiscovered_EmptyInitially(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 
 	discovered, err := a.ListDiscovered(context.Background())
@@ -38,6 +39,7 @@ func TestListDiscovered_EmptyInitially(t *testing.T) {
 }
 
 func TestListDiscovered_HidesRowsOutsideTrackedProviders(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	pip := &stubProvider{name: "pip", available: true}
 	a, cfgPath := newImportApp(t, brew, pip)
@@ -74,6 +76,7 @@ func TestListDiscovered_HidesRowsOutsideTrackedProviders(t *testing.T) {
 }
 
 func TestListDiscovered_HidesUnattributedLegacyRows(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	system := &lifecycleProvider{stubProvider: stubProvider{name: "system", available: true}, resolvedName: "brew"}
 	a, cfgPath := newImportApp(t, system, brew)
@@ -110,6 +113,7 @@ func TestListDiscovered_HidesUnattributedLegacyRows(t *testing.T) {
 }
 
 func TestListTools_ShowsConfiguredToolWithoutCacheRow(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, brew)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -139,6 +143,7 @@ func TestListTools_ShowsConfiguredToolWithoutCacheRow(t *testing.T) {
 }
 
 func TestListTools_ShowsEmptyProviderToolAsUnresolved(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{"fd": {}},
@@ -159,6 +164,7 @@ func TestListTools_ShowsEmptyProviderToolAsUnresolved(t *testing.T) {
 }
 
 func TestListTools_HidesTrackedRowsRemovedFromConfig(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	brew := &stubProvider{name: "brew", available: true}
 	system := &lifecycleProvider{stubProvider: stubProvider{name: "system", available: true}, resolvedName: "brew"}
@@ -200,6 +206,7 @@ func TestListTools_HidesTrackedRowsRemovedFromConfig(t *testing.T) {
 }
 
 func TestListTools_HidesTrackedRowsWhenConfigHasNoEffectiveTools(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	brew := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, brew)
@@ -305,6 +312,7 @@ func TestListToolsAndRefreshUseActiveHostGroups(t *testing.T) {
 }
 
 func TestToolDisplaySnapshotReturnsToolsDiscoveredAndManager(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	brew := &stubProvider{name: "brew", available: true}
 	system := &lifecycleProvider{stubProvider: stubProvider{name: "system", available: true}, resolvedName: "brew"}

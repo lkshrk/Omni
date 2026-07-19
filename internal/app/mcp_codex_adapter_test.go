@@ -17,6 +17,7 @@ import (
 )
 
 func TestCodexAdapter_ID(t *testing.T) {
+	t.Parallel()
 	a := NewCodexMcpAdapter(nil, nil)
 	if a.ID() != "codex" {
 		t.Fatalf("got %q", a.ID())
@@ -24,6 +25,7 @@ func TestCodexAdapter_ID(t *testing.T) {
 }
 
 func TestCodexAdapter_Add_Stdio(t *testing.T) {
+	t.Parallel()
 	var gotArgs []string
 	exec := func(_ context.Context, _ string, args ...string) (string, string, error) {
 		gotArgs = args
@@ -74,6 +76,7 @@ func TestCodexAdapter_Add_Stdio(t *testing.T) {
 }
 
 func TestCodexAdapter_Add_Http(t *testing.T) {
+	t.Parallel()
 	codexHome := t.TempDir()
 	var gotArgs []string
 	exec := func(_ context.Context, _ string, args ...string) (string, string, error) {
@@ -92,6 +95,7 @@ func TestCodexAdapter_Add_Http(t *testing.T) {
 }
 
 func TestCodexAdapter_Add_Http_WritesHeadersToConfig(t *testing.T) {
+	t.Parallel()
 	codexHome := t.TempDir()
 	configPath := filepath.Join(codexHome, "config.toml")
 	var gotArgs []string
@@ -143,6 +147,7 @@ func TestCodexAdapter_Add_Http_WritesHeadersToConfig(t *testing.T) {
 }
 
 func TestCodexAdapter_Add_Sse_WritesHeadersToConfig(t *testing.T) {
+	t.Parallel()
 	codexHome := t.TempDir()
 	configPath := filepath.Join(codexHome, "config.toml")
 	var gotArgs []string
@@ -178,6 +183,7 @@ func TestCodexAdapter_Add_Sse_WritesHeadersToConfig(t *testing.T) {
 }
 
 func TestCodexAdapter_Add_Http_RollsBackWhenHeadersCannotBeWritten(t *testing.T) {
+	t.Parallel()
 	codexHome := t.TempDir()
 	var calls [][]string
 	exec := func(_ context.Context, _ string, args ...string) (string, string, error) {
@@ -206,6 +212,7 @@ func TestCodexAdapter_Add_Http_RollsBackWhenHeadersCannotBeWritten(t *testing.T)
 }
 
 func TestCodexAdapter_Add_Http_ReportsRollbackFailure(t *testing.T) {
+	t.Parallel()
 	codexHome := t.TempDir()
 	var calls [][]string
 	exec := func(_ context.Context, _ string, args ...string) (string, string, error) {
@@ -234,6 +241,7 @@ func TestCodexAdapter_Add_Http_ReportsRollbackFailure(t *testing.T) {
 }
 
 func TestCodexAdapter_Add_Http_PreservesConfigSymlinkAndMode(t *testing.T) {
+	t.Parallel()
 	codexHome := t.TempDir()
 	target := filepath.Join(t.TempDir(), "config.toml")
 	const original = "[mcp_servers.grafana]\nurl = \"https://mcp.example.com\"\n"
@@ -308,6 +316,7 @@ func TestCodexAdapter_Add_Http_UsesDefaultCodexHome(t *testing.T) {
 }
 
 func TestExactEnvReference(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		value string
 		want  string
@@ -331,6 +340,7 @@ func TestExactEnvReference(t *testing.T) {
 }
 
 func TestRenderCodexHeaders_ReplacesExistingTables(t *testing.T) {
+	t.Parallel()
 	input := []byte(`[mcp_servers.grafana]
 url = "https://mcp.example.com"
 
@@ -363,6 +373,7 @@ apps = true
 }
 
 func TestReplaceFileAtomically_RejectsStaleSnapshot(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(path, []byte("newer\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -384,6 +395,7 @@ func TestReplaceFileAtomically_RejectsStaleSnapshot(t *testing.T) {
 }
 
 func TestCodexAdapter_WriteHeaders_SerializesConcurrentWriters(t *testing.T) {
+	t.Parallel()
 	codexHome := t.TempDir()
 	path := filepath.Join(codexHome, "config.toml")
 	if err := os.WriteFile(path, []byte("model = \"test\"\n"), 0o600); err != nil {
@@ -443,6 +455,7 @@ func TestCodexAdapter_WriteHeaders_SerializesConcurrentWriters(t *testing.T) {
 }
 
 func TestCodexAdapter_Add_Http_SerializesCompleteTransactions(t *testing.T) {
+	t.Parallel()
 	codexHome := t.TempDir()
 	path := filepath.Join(codexHome, "config.toml")
 	if err := os.WriteFile(path, []byte("model = \"test\"\n"), 0o600); err != nil {
@@ -511,6 +524,7 @@ func TestCodexAdapter_Add_Http_SerializesCompleteTransactions(t *testing.T) {
 // --env as "Only valid with stdio servers". omni must refuse before exec
 // rather than silently dropping the env vars.
 func TestCodexAdapter_Add_Http_RejectsEnv(t *testing.T) {
+	t.Parallel()
 	called := false
 	exec := func(_ context.Context, _ string, _ ...string) (string, string, error) {
 		called = true
@@ -539,6 +553,7 @@ func TestCodexAdapter_Add_Http_RejectsEnv(t *testing.T) {
 }
 
 func TestCodexAdapter_Add_Sse_RejectsEnvLiteral(t *testing.T) {
+	t.Parallel()
 	called := false
 	exec := func(_ context.Context, _ string, _ ...string) (string, string, error) {
 		called = true
@@ -561,6 +576,7 @@ func TestCodexAdapter_Add_Sse_RejectsEnvLiteral(t *testing.T) {
 }
 
 func TestCodexAdapter_Add_Http_MissingEnv(t *testing.T) {
+	t.Parallel()
 	called := false
 	exec := func(_ context.Context, _ string, _ ...string) (string, string, error) {
 		called = true
@@ -578,6 +594,7 @@ func TestCodexAdapter_Add_Http_MissingEnv(t *testing.T) {
 }
 
 func TestCodexAdapter_Add_MissingEnv(t *testing.T) {
+	t.Parallel()
 	a := NewCodexMcpAdapter(
 		func(_ context.Context, _ string, _ ...string) (string, string, error) { return "", "", nil },
 		func(string) (string, bool) { return "", false },
@@ -627,6 +644,7 @@ const codexMcpListJSONFixture = `[
 ]`
 
 func TestCodexAdapter_List_ParsesJSON(t *testing.T) {
+	t.Parallel()
 	var gotArgs []string
 	exec := func(_ context.Context, _ string, args ...string) (string, string, error) {
 		gotArgs = args
@@ -655,6 +673,7 @@ func TestCodexAdapter_List_ParsesJSON(t *testing.T) {
 }
 
 func TestCodexAdapter_Remove(t *testing.T) {
+	t.Parallel()
 	var gotArgs []string
 	exec := func(_ context.Context, _ string, args ...string) (string, string, error) {
 		gotArgs = args

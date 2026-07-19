@@ -11,6 +11,7 @@ import (
 )
 
 func TestAnalyzeDotsReminderStatus_ClassifiesReasons(t *testing.T) {
+	t.Parallel()
 	result := AnalyzeDotsReminderStatus(&DotsStatusResult{
 		GitStatus:       " M dotfiles/nvim/init.lua\n?? dotfiles/zsh/.zshrc",
 		DiscoveredCount: 1,
@@ -44,6 +45,7 @@ func TestAnalyzeDotsReminderStatus_ClassifiesReasons(t *testing.T) {
 }
 
 func TestAnalyzeDotsReminderStatus_Clean(t *testing.T) {
+	t.Parallel()
 	result := AnalyzeDotsReminderStatus(&DotsStatusResult{
 		Entries: []DotStatus{{Name: "nvim", State: dots.StateSynced}},
 	})
@@ -197,6 +199,7 @@ func TestDotsReminderServiceStatus_ParsesLaunchdIntervalAndNotify(t *testing.T) 
 }
 
 func TestValidateReminderInterval(t *testing.T) {
+	t.Parallel()
 	if err := validateReminderInterval(time.Minute); err != nil {
 		t.Fatalf("time.Minute should be valid: %v", err)
 	}

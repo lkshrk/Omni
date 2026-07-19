@@ -342,6 +342,7 @@ func backupCopyDirFiltered(ctx context.Context, exec executor.Executor, src, dst
 		ignores = defaultIgnores
 	}
 	base := filepath.Base(src)
+	im := CompileIgnoresLenient(ignores)
 	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -353,11 +354,11 @@ func backupCopyDirFiltered(ctx context.Context, exec executor.Executor, src, dst
 		if rel != "." {
 			relSlash := filepath.ToSlash(rel)
 			candidates := []string{relSlash, base + "/" + relSlash}
-			if ShouldIgnoreAnyPath(candidates, d.Name(), ignores) {
+			if matched, _ := im.MatchAnyPath(candidates, d.Name()); matched {
 				if !d.IsDir() {
 					return nil
 				}
-				if HasIncludedDescendant(relSlash, ignores) || HasIncludedDescendant(base+"/"+relSlash, ignores) {
+				if im.HasIncludedDescendant(relSlash) || im.HasIncludedDescendant(base+"/"+relSlash) {
 					return nil
 				}
 				return filepath.SkipDir

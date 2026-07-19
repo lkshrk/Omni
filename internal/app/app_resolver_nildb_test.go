@@ -8,6 +8,7 @@ import (
 )
 
 func TestInstallCandidateUsableCached_NilDBDoesNotPanic(t *testing.T) {
+	t.Parallel()
 	a := &App{}
 	candidate := config.ToolInstallSpec{Provider: "brew", Package: "jq"}
 	usable, skip := a.installCandidateUsableCached(context.Background(), "jq", candidate, map[string]bool{"brew": true}, nil)

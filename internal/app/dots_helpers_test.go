@@ -10,6 +10,7 @@ import (
 )
 
 func TestAppendUniqueStringValue(t *testing.T) {
+	t.Parallel()
 	values := []string{"base", "work"}
 	if got := appendUniqueStringValue(values, "work"); !reflect.DeepEqual(got, values) {
 		t.Fatalf("append existing = %v, want %v", got, values)
@@ -22,6 +23,7 @@ func TestAppendUniqueStringValue(t *testing.T) {
 }
 
 func TestCompactDotGroupLabel(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		groups []string
@@ -42,6 +44,7 @@ func TestCompactDotGroupLabel(t *testing.T) {
 }
 
 func TestDotConflictIsManagedStowLink(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		setup func(t *testing.T, tmp string) (entry dots.ResolvedEntry, stowPath string)

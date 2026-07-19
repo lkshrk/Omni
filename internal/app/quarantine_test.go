@@ -189,6 +189,7 @@ func TestQueryTools_UpdateQuarantinePolicyPrecedence(t *testing.T) {
 }
 
 func TestUpgrade_BlocksQuarantinedToolUnlessForced(t *testing.T) {
+	t.Parallel()
 	stub := &quarantineUpgradeStub{
 		stubProvider: stubProvider{
 			name:      "brew",
@@ -250,6 +251,7 @@ func TestUpgrade_BlocksQuarantinedToolUnlessForced(t *testing.T) {
 }
 
 func TestUpgradeAll_SkipsQuarantinedUpdatesWithoutError(t *testing.T) {
+	t.Parallel()
 	stub := &quarantineUpgradeStub{stubProvider: stubProvider{name: "brew", available: true}}
 	a, cfgPath := newImportApp(t, stub)
 	ctx := context.Background()

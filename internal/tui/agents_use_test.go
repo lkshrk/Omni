@@ -11,6 +11,7 @@ import (
 )
 
 func TestAgentsUse_RowMeta(t *testing.T) {
+	t.Parallel()
 	row := settingsRows[settingsRowAgentsUse]
 	if row.label != "Agents" {
 		t.Errorf("label = %q, want %q", row.label, "Agents")
@@ -21,6 +22,7 @@ func TestAgentsUse_RowMeta(t *testing.T) {
 }
 
 func TestAgentsUse_EditorRenderWithRows(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.editingAgents = true
 	m.agentsEditRows = []app.AgentPickerRow{
@@ -57,6 +59,7 @@ func TestAgentsUse_EditorRenderWithRows(t *testing.T) {
 }
 
 func TestAgentsUse_EditorEmptyState(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.editingAgents = true
 	m.agentsEditRows = nil
@@ -69,6 +72,7 @@ func TestAgentsUse_EditorEmptyState(t *testing.T) {
 }
 
 func TestAgentsUse_SpaceToggles(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	m.settingsCursor = settingsRowAgentsUse
@@ -89,6 +93,7 @@ func TestAgentsUse_SpaceToggles(t *testing.T) {
 }
 
 func TestAgentsUse_CursorMove(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	m.settingsCursor = settingsRowAgentsUse
@@ -126,6 +131,7 @@ func TestAgentsUse_CursorMove(t *testing.T) {
 }
 
 func TestAgentsUse_EscCancels(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	m.settingsCursor = settingsRowAgentsUse
@@ -141,6 +147,7 @@ func TestAgentsUse_EscCancels(t *testing.T) {
 }
 
 func TestAgentsUse_EnterExitsEditor(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	m.settingsCursor = settingsRowAgentsUse
@@ -156,6 +163,7 @@ func TestAgentsUse_EnterExitsEditor(t *testing.T) {
 }
 
 func TestAgentsUse_SavedMsgSetsSettings(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	got := drive(m, agentsUseSavedMsg{ids: []string{"codex"}})
 	if len(got.settings.AgentsUse) != 1 || got.settings.AgentsUse[0] != "codex" {
@@ -164,6 +172,7 @@ func TestAgentsUse_SavedMsgSetsSettings(t *testing.T) {
 }
 
 func TestAgentsUse_ValFn(t *testing.T) {
+	t.Parallel()
 	t.Run("nil AgentsUse contains 'all detected'", func(t *testing.T) {
 		m := baseModel(nil)
 		m.settings.AgentsUse = nil
@@ -197,6 +206,7 @@ func TestAgentsUse_ValFn(t *testing.T) {
 
 // TestDoToggleAgents_NilAppReturnsNil verifies the nil-app guard.
 func TestDoToggleAgents_NilAppReturnsNil(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.app = nil
 	if cmd := m.doToggleAgents(); cmd != nil {
@@ -207,6 +217,7 @@ func TestDoToggleAgents_NilAppReturnsNil(t *testing.T) {
 // TestDoToggleAgents_SuccessFlipsEnabled verifies the toggle persists the
 // per-host agents_disabled flag and reports the flipped enabled state.
 func TestDoToggleAgents_SuccessFlipsEnabled(t *testing.T) {
+	t.Parallel()
 	a := newScanPlanTestApp(t)
 	m := baseModel(nil)
 	m.app = a
@@ -246,6 +257,7 @@ func TestDoToggleAgents_SuccessFlipsEnabled(t *testing.T) {
 // TestDoToggleAgents_ErrorPropagates verifies a config save failure lands in
 // agentsToggledMsg.err.
 func TestDoToggleAgents_ErrorPropagates(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.app = newBrokenConfigApp(t)
 	m.agentsEnabled = true

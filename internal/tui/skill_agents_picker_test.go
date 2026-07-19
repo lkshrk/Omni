@@ -30,6 +30,7 @@ func skillsModelWithRows(rows []app.SkillPackageRow) Model {
 // row with a nil app does not panic and does open the picker (openSkillAgentsPicker
 // guards nil app for the AgentPickerRows call, but still sets skillAgentsPicker=true).
 func TestSkillAgents_OpenPickerNilApp(t *testing.T) {
+	t.Parallel()
 	m := skillsModelWithRows([]app.SkillPackageRow{
 		{Source: "github.com/foo/caveman", Name: "caveman", Installed: true, Agents: []string{"codex"}},
 	})
@@ -46,6 +47,7 @@ func TestSkillAgents_OpenPickerNilApp(t *testing.T) {
 // TestSkillAgents_PopupRenderChecks verifies renderSkillAgentsPicker shows
 // [x]/[ ] marks and the toggle/save/cancel footer hints.
 func TestSkillAgents_PopupRenderChecks(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.agentsEnabled = true
@@ -86,6 +88,7 @@ func TestSkillAgents_PopupRenderChecks(t *testing.T) {
 // TestSkillAgents_SpaceToggles verifies space toggles the Targeted flag on the
 // cursor row.
 func TestSkillAgents_SpaceToggles(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.agentsEnabled = true
@@ -108,6 +111,7 @@ func TestSkillAgents_SpaceToggles(t *testing.T) {
 
 // TestSkillAgents_UpDownMoveCursor verifies up/down move the cursor and clamp.
 func TestSkillAgents_UpDownMoveCursor(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.agentsEnabled = true
@@ -150,6 +154,7 @@ func TestSkillAgents_UpDownMoveCursor(t *testing.T) {
 
 // TestSkillAgents_EscCancels verifies esc closes the picker.
 func TestSkillAgents_EscCancels(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.agentsEnabled = true
@@ -168,6 +173,7 @@ func TestSkillAgents_EscCancels(t *testing.T) {
 // TestSkillAgents_EnterSavesAndExits verifies enter closes the picker.
 // With nil app the save command is a no-op, but the picker state must close.
 func TestSkillAgents_EnterSavesAndExits(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.agentsEnabled = true
@@ -188,6 +194,7 @@ func TestSkillAgents_EnterSavesAndExits(t *testing.T) {
 // skillsRows. The picker is already closed by the enter key handler before the
 // async cmd fires; the saved msg only updates row state.
 func TestSkillAgents_SavedMsgUpdatesRows(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.agentsEnabled = true
@@ -212,6 +219,7 @@ func TestSkillAgents_SavedMsgUpdatesRows(t *testing.T) {
 // TestSkillAgents_SavedMsgWithErrorPreservesRows verifies a failed save does
 // not replace skillsRows and sets skillsErr.
 func TestSkillAgents_SavedMsgWithErrorPreservesRows(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.agentsEnabled = true
@@ -237,6 +245,7 @@ func TestSkillAgents_SavedMsgWithErrorPreservesRows(t *testing.T) {
 // list-level actions (restore/import/update) are not mixed into it — those
 // now live only in the tab footer.
 func TestSkillAgents_PerRowHintsEligibilityDriven(t *testing.T) {
+	t.Parallel()
 	m := skillsModelWithRows([]app.SkillPackageRow{
 		{Source: "github.com/foo/caveman", Name: "caveman", Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
 	})
@@ -271,6 +280,7 @@ func TestSkillAgents_PerRowHintsEligibilityDriven(t *testing.T) {
 // (not a stray body line) surfaces the list-level bulk-action and refresh
 // actions.
 func TestSkillAgents_FooterShowsListLevelActions(t *testing.T) {
+	t.Parallel()
 	m := skillsModelWithRows([]app.SkillPackageRow{
 		{Source: "github.com/foo/caveman", Name: "caveman", Installed: true},
 	})
@@ -308,6 +318,7 @@ func newBrokenConfigApp(t *testing.T) *app.App {
 // when SkillAgentRows fails, openSkillAgentsPicker returns a "✗ …" status cmd
 // and does NOT open the picker or mutate picker state.
 func TestOpenSkillAgentsPicker_ErrorSetsStatusAndKeepsPickerClosed(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.app = newBrokenConfigApp(t)
 
@@ -334,6 +345,7 @@ func TestOpenSkillAgentsPicker_ErrorSetsStatusAndKeepsPickerClosed(t *testing.T)
 // a live app: picker opens, source and rows are set, cursor resets to 0, and
 // no status cmd is returned.
 func TestOpenSkillAgentsPicker_SuccessOpensPicker(t *testing.T) {
+	t.Parallel()
 	a := newScanPlanTestApp(t)
 	m := baseModel(nil)
 	m.app = a
@@ -359,6 +371,7 @@ func TestOpenSkillAgentsPicker_SuccessOpensPicker(t *testing.T) {
 // update (unknown package source) propagates its error into
 // skillsGroupsUpdatedMsg with no rows.
 func TestDoSetSkillGroupMemberships_ErrorCarriedInMsg(t *testing.T) {
+	t.Parallel()
 	a := newScanPlanTestApp(t)
 	m := baseModel(nil)
 	m.app = a
@@ -383,6 +396,7 @@ func TestDoSetSkillGroupMemberships_ErrorCarriedInMsg(t *testing.T) {
 // TestDoSetSkillGroupMemberships_SuccessReturnsRows verifies a successful
 // group update returns refreshed rows carrying the new membership.
 func TestDoSetSkillGroupMemberships_SuccessReturnsRows(t *testing.T) {
+	t.Parallel()
 	a := newScanPlanTestApp(t)
 	const source = "github.com/foo/pkg"
 	if _, err := a.AdoptSkillPackage(source); err != nil {

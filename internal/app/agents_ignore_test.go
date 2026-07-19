@@ -8,6 +8,7 @@ import (
 )
 
 func TestAgentsIgnoreSet(t *testing.T) {
+	t.Parallel()
 	a := &App{}
 	cfg := &config.RootConfig{
 		Agents: config.AgentsConfig{Ignore: config.AgentsIgnore{
@@ -33,6 +34,7 @@ func TestAgentsIgnoreSet(t *testing.T) {
 }
 
 func TestAgentsIgnoreSet_NeverNil(t *testing.T) {
+	t.Parallel()
 	a := &App{}
 	skills, mcp, plugins, marketplaces := a.AgentsIgnoreSet(&config.RootConfig{})
 	if skills == nil || mcp == nil || plugins == nil || marketplaces == nil {
@@ -56,6 +58,7 @@ func newAgentsIgnoreTestApp(t *testing.T) *App {
 }
 
 func TestToggleAgentsIgnore_AddThenRemoveRoundTrip(t *testing.T) {
+	t.Parallel()
 	a := newAgentsIgnoreTestApp(t)
 
 	nowIgnored, err := a.ToggleAgentsIgnore(t.Context(), "skills", "o/r")
@@ -90,6 +93,7 @@ func TestToggleAgentsIgnore_AddThenRemoveRoundTrip(t *testing.T) {
 }
 
 func TestToggleAgentsIgnore_McpAndPlugins(t *testing.T) {
+	t.Parallel()
 	a := newAgentsIgnoreTestApp(t)
 
 	if _, err := a.ToggleAgentsIgnore(t.Context(), "mcp", "srv"); err != nil {
@@ -111,6 +115,7 @@ func TestToggleAgentsIgnore_McpAndPlugins(t *testing.T) {
 }
 
 func TestToggleAgentsIgnore_InvalidFeature(t *testing.T) {
+	t.Parallel()
 	a := newAgentsIgnoreTestApp(t)
 	if _, err := a.ToggleAgentsIgnore(t.Context(), "bogus", "name"); err == nil {
 		t.Fatal("expected error for invalid feature")
@@ -118,6 +123,7 @@ func TestToggleAgentsIgnore_InvalidFeature(t *testing.T) {
 }
 
 func TestToggleAgentsIgnore_EmptyName(t *testing.T) {
+	t.Parallel()
 	a := newAgentsIgnoreTestApp(t)
 	if _, err := a.ToggleAgentsIgnore(t.Context(), "skills", "  "); err == nil {
 		t.Fatal("expected error for empty name")
@@ -125,6 +131,7 @@ func TestToggleAgentsIgnore_EmptyName(t *testing.T) {
 }
 
 func TestToggleAgentsIgnore_PersistsAcrossReload(t *testing.T) {
+	t.Parallel()
 	a := newAgentsIgnoreTestApp(t)
 	if _, err := a.ToggleAgentsIgnore(t.Context(), "skills", "o/r"); err != nil {
 		t.Fatal(err)
@@ -140,6 +147,7 @@ func TestToggleAgentsIgnore_PersistsAcrossReload(t *testing.T) {
 }
 
 func TestToggleAgentsIgnore_Marketplaces(t *testing.T) {
+	t.Parallel()
 	a := newAgentsIgnoreTestApp(t)
 
 	nowIgnored, err := a.ToggleAgentsIgnore(t.Context(), "marketplaces", "mkt")

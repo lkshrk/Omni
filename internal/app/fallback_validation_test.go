@@ -11,6 +11,7 @@ import (
 )
 
 func TestFatalValidationErrorsDropsFallback(t *testing.T) {
+	t.Parallel()
 	errs := []config.ValidationError{
 		{Path: `$.tools."pi".fallback.source`, Message: "github fallback source requires owner and repo"},
 		{Path: `$.tools."glow".fallback.commands.check`, Message: "fallback check command is required"},
@@ -29,6 +30,7 @@ func TestFatalValidationErrorsDropsFallback(t *testing.T) {
 }
 
 func TestFatalValidationErrorsAllFallbackYieldsNone(t *testing.T) {
+	t.Parallel()
 	errs := []config.ValidationError{
 		{Path: `$.tools."pi".fallback.source`, Message: "github fallback source requires owner and repo"},
 	}
@@ -41,6 +43,7 @@ func TestFatalValidationErrorsAllFallbackYieldsNone(t *testing.T) {
 // whose only validation problem is in a tool fallback must still load (omni must
 // start), while a non-fallback validation error must still block the load.
 func TestLoadConfigIgnoresFallbackValidationErrors(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	brew := &availabilityCountingProvider{name: "brew", available: true}
 	path := filepath.Join(t.TempDir(), "settings.json")

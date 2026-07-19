@@ -198,6 +198,7 @@ func setupStep1Model() Model {
 // ── UC-01 Cursor navigation j/k ──────────────────────────────────────────────
 
 func TestFlow_UC01_CursorNavigation(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 
 	t.Run("j moves cursor down", func(t *testing.T) {
@@ -232,6 +233,7 @@ func TestFlow_UC01_CursorNavigation(t *testing.T) {
 // ── UC-02 Top/Bottom home/G ───────────────────────────────────────────────────
 
 func TestFlow_UC02_TopBottom(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 
 	t.Run("G jumps to bottom", func(t *testing.T) {
@@ -252,6 +254,7 @@ func TestFlow_UC02_TopBottom(t *testing.T) {
 // ── UC-03 Page navigation ─────────────────────────────────────────────────────
 
 func TestFlow_UC03_PageNavigation(t *testing.T) {
+	t.Parallel()
 	m := baseModel(manyTools(20))
 	m.height = 30
 
@@ -288,6 +291,7 @@ func TestFlow_UC03_PageNavigation(t *testing.T) {
 // ── UC-04 Empty list navigation ───────────────────────────────────────────────
 
 func TestFlow_UC04_EmptyListNavigation(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	msgs := []tea.Msg{pressRune('j'), pressRune('k'), pressHome(), pressRune('G')}
 	got := drive(m, msgs...)
@@ -299,6 +303,7 @@ func TestFlow_UC04_EmptyListNavigation(t *testing.T) {
 // ── UC-05 Search mode enter/exit ─────────────────────────────────────────────
 
 func TestFlow_UC05_SearchMode(t *testing.T) {
+	t.Parallel()
 	t.Run("/ enters viewSearch", func(t *testing.T) {
 		got := drive(baseModel(threeTools()), pressRune('/'))
 		if got.mode != viewSearch {
@@ -353,7 +358,10 @@ func TestFlow_UC05_SearchMode(t *testing.T) {
 // ── UC-06 Typing in viewSearch live-filters ──────────────────────────────────
 
 func TestFlow_UC06_LiveFilter(t *testing.T) {
+	t.Parallel(
 	// 'g' matches only "git" among [git/brew, node/npm, python/pip].
+	)
+
 	got := drive(baseModel(threeTools()), pressRune('/'), pressRune('g'))
 	if len(got.visibleTools) != 1 {
 		t.Errorf("visibleTools = %d, want 1 after live filter", len(got.visibleTools))
@@ -366,6 +374,7 @@ func TestFlow_UC06_LiveFilter(t *testing.T) {
 // ── UC-07 Provider filter pills ──────────────────────────────────────────────
 
 func TestFlow_UC07_ProviderFilterPills(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.applyFilter() // populates providerNames
 
@@ -399,6 +408,7 @@ func TestFlow_UC07_ProviderFilterPills(t *testing.T) {
 // ── UC-08 Esc in viewList clears filters ─────────────────────────────────────
 
 func TestFlow_UC08_EscClearsFilter(t *testing.T) {
+	t.Parallel()
 	t.Run("Esc clears provider filter", func(t *testing.T) {
 		m := baseModel(threeTools())
 		m.applyFilter()
@@ -426,6 +436,7 @@ func TestFlow_UC08_EscClearsFilter(t *testing.T) {
 // ── UC-09 Enter on tool (install / no-op) ────────────────────────────────────
 
 func TestFlow_UC09_EnterOnTool(t *testing.T) {
+	t.Parallel()
 	t.Run("Enter on uninstalled tool sets loading", func(t *testing.T) {
 		got := drive(baseModel(oneMissing()), pressEnter())
 		if !got.loading {
@@ -454,6 +465,7 @@ func TestFlow_UC09_EnterOnTool(t *testing.T) {
 // ── UC-10 i key install ───────────────────────────────────────────────────────
 
 func TestFlow_UC10_InstallKey(t *testing.T) {
+	t.Parallel()
 	t.Run("i on uninstalled tracked tool sets loading", func(t *testing.T) {
 		got := drive(baseModel(oneMissing()), pressRune('i'))
 		if !got.loading {
@@ -478,6 +490,7 @@ func TestFlow_UC10_InstallKey(t *testing.T) {
 // ── UC-11 d key delete ─────────────────────────────────────────────────────
 
 func TestFlow_UC11_DeleteKey(t *testing.T) {
+	t.Parallel()
 	t.Run("d on installed tool arms confirmation", func(t *testing.T) {
 		got := drive(baseModel(oneInstalled()), pressRune('d'))
 		if got.loading {
@@ -512,6 +525,7 @@ func TestFlow_UC11_DeleteKey(t *testing.T) {
 // ── UC-12 u key upgrade ───────────────────────────────────────────────────────
 
 func TestFlow_UC12_UpgradeKey(t *testing.T) {
+	t.Parallel()
 	t.Run("u on outdated tool sets upgradingKeys", func(t *testing.T) {
 		m := baseModel(oneInstalledOutdated())
 		m.upgradingKeys = make(map[string]bool)
@@ -534,6 +548,7 @@ func TestFlow_UC12_UpgradeKey(t *testing.T) {
 // ── UC-13 U key upgrade-all ───────────────────────────────────────────────────
 
 func TestFlow_UC13_UpgradeAllKey(t *testing.T) {
+	t.Parallel()
 	t.Run("U with outdated tools sets wildcard key", func(t *testing.T) {
 		m := baseModel(oneInstalledOutdated())
 		m.upgradingKeys = make(map[string]bool)
@@ -556,6 +571,7 @@ func TestFlow_UC13_UpgradeAllKey(t *testing.T) {
 // ── UC-14 S key sync all ─────────────────────────────────────────────────────
 
 func TestFlow_UC14_SyncKey(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.upgradingKeys = make(map[string]bool)
 	got := drive(m, pressRune('S'))
@@ -578,6 +594,7 @@ func TestFlow_UC14_SyncKey(t *testing.T) {
 }
 
 func TestFlow_UC14_LowercaseSyncNoopOnTools(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	got := drive(m, pressRune('s'))
 	if got.loading {
@@ -591,6 +608,7 @@ func TestFlow_UC14_LowercaseSyncNoopOnTools(t *testing.T) {
 // ── UC-15 R key refresh scan ─────────────────────────────────────────────────
 
 func TestFlow_UC15_RefreshKey(t *testing.T) {
+	t.Parallel()
 	m := baseModel(oneInstalled())
 	m.app = newScanPlanTestApp(t, &scanPlanProvider{name: "brew"})
 	m.upgradingKeys = make(map[string]bool)
@@ -609,6 +627,7 @@ func TestFlow_UC15_RefreshKey(t *testing.T) {
 // ── UC-16 g key opens group membership picker ────────────────────────────────
 
 func TestFlow_UC16_GroupPickerOpen(t *testing.T) {
+	t.Parallel()
 	t.Run("g on tool opens group membership picker", func(t *testing.T) {
 		got := drive(baseModel(threeTools()), pressRune('g'))
 		if got.mode != viewGroupMembership {
@@ -637,7 +656,10 @@ func TestFlow_UC16_GroupPickerOpen(t *testing.T) {
 // ── UC-17 c key claim orphan ─────────────────────────────────────────────────
 
 func TestFlow_UC17_ClaimOrphan(t *testing.T) {
+	t.Parallel(
 	// Build a model with one orphan tool (Tracked=false = discoveredTool).
+	)
+
 	orphan := &app.ToolView{Name: "fzf", Provider: "brew", Installed: true, Tracked: false}
 	m := baseModel(nil)
 	m.discoveredTools = []*app.ToolView{orphan}
@@ -657,6 +679,7 @@ func TestFlow_UC17_ClaimOrphan(t *testing.T) {
 // ── UC-18 x key ignore/un-ignore ─────────────────────────────────────────────
 
 func TestFlow_UC18_IgnoreKey(t *testing.T) {
+	t.Parallel()
 	t.Run("x on tool opens ignore scope picker", func(t *testing.T) {
 		m := baseModel(oneInstalled())
 		m.upgradingKeys = make(map[string]bool)
@@ -689,6 +712,7 @@ func TestFlow_UC18_IgnoreKey(t *testing.T) {
 // ── UC-19 p/r key pin/reinstall provider ─────────────────────────────────────
 
 func TestFlow_UC19_PinMigrateProvider(t *testing.T) {
+	t.Parallel()
 	m := wrongProvModel()
 
 	t.Run("p opens provider scope picker", func(t *testing.T) {
@@ -738,6 +762,7 @@ func TestFlow_UC19_PinMigrateProvider(t *testing.T) {
 // ── UC-20 Help overlay ───────────────────────────────────────────────────────
 
 func TestFlow_UC20_HelpOverlay(t *testing.T) {
+	t.Parallel()
 	t.Run("? opens help overlay", func(t *testing.T) {
 		got := drive(baseModel(nil), pressRune('?'))
 		if !got.help.ShowAll {
@@ -763,6 +788,7 @@ func TestFlow_UC20_HelpOverlay(t *testing.T) {
 // ── UC-21 Confirm quit ────────────────────────────────────────────────────────
 
 func TestFlow_UC21_ConfirmQuit(t *testing.T) {
+	t.Parallel()
 	t.Run("first q sets confirmQuit for footer prompt", func(t *testing.T) {
 		got := drive(baseModel(nil), pressRune('q'))
 		if !got.confirmQuit {
@@ -790,6 +816,7 @@ func TestFlow_UC21_ConfirmQuit(t *testing.T) {
 // ── UC-22 Keys ignored while loading ─────────────────────────────────────────
 
 func TestFlow_UC22_KeysIgnoredWhileLoading(t *testing.T) {
+	t.Parallel()
 	m := Model{
 		keys:    DefaultKeyMap(),
 		spinner: spinner.New(),
@@ -808,6 +835,7 @@ func TestFlow_UC22_KeysIgnoredWhileLoading(t *testing.T) {
 // ── UC-23 Command palette open/close ─────────────────────────────────────────
 
 func TestFlow_UC23_CommandPalette(t *testing.T) {
+	t.Parallel()
 	t.Run(": opens command palette", func(t *testing.T) {
 		got := drive(baseModel(nil), pressRune(':'))
 		if got.mode != viewCommand {
@@ -923,6 +951,7 @@ func TestFlow_UC24_TabCycle(t *testing.T) {
 }
 
 func TestFlow_UC24_ClickTabs(t *testing.T) {
+	t.Parallel()
 	clickTab := func(m Model, target viewMode) Model {
 		for _, zone := range mainTabHitZones(m) {
 			if zone.mode == target {
@@ -965,6 +994,7 @@ func TestFlow_UC24_ClickTabs(t *testing.T) {
 }
 
 func TestFlow_UC24_ClickToolFilters(t *testing.T) {
+	t.Parallel()
 	clickFilter := func(m Model, kind toolFilterKind, idx int) Model {
 		for _, zone := range toolFilterHitZones(m) {
 			if zone.kind == kind && zone.index == idx {
@@ -1001,6 +1031,7 @@ func TestFlow_UC24_ClickToolFilters(t *testing.T) {
 }
 
 func TestDotsRepoSetupFromDotsTabKeepsDotsContext(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := baseModel(nil)
@@ -1022,6 +1053,7 @@ func TestDotsRepoSetupFromDotsTabKeepsDotsContext(t *testing.T) {
 }
 
 func TestDotsEmptyStateEnterDoesNotStartOnboarding(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewDots
 	setDotsRepoForTest(&m, "/tmp/dots")
@@ -1039,6 +1071,7 @@ func TestDotsEmptyStateEnterDoesNotStartOnboarding(t *testing.T) {
 // ── UC-25 Tab blocked when hostRequired ────────────────────────────────────
 
 func TestFlow_UC25_TabBlockedWhenHostRequired(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewGroups
 	m.hostRequired = true
@@ -1052,6 +1085,7 @@ func TestFlow_UC25_TabBlockedWhenHostRequired(t *testing.T) {
 // ── UC-26 Setup step 0: create config ────────────────────────────────────────
 
 func TestFlow_UC26_SetupStep0(t *testing.T) {
+	t.Parallel()
 	setupModel := func() Model {
 		return Model{
 			keys:    DefaultKeyMap(),
@@ -1103,6 +1137,7 @@ func TestFlow_UC26_SetupStep0(t *testing.T) {
 // ── UC-27 Setup step 1: provider selection ────────────────────────────────────
 
 func TestFlow_UC27_SetupStep1(t *testing.T) {
+	t.Parallel()
 	t.Run("space toggles first provider off", func(t *testing.T) {
 		got := drive(setupStep1Model(), pressRune(' '))
 		if got.setupProviders[0].Enabled {
@@ -1155,6 +1190,7 @@ func setupAgentsStepModel() Model {
 }
 
 func TestSetupAgentsStep_SkipsWhenAgentsDisabled(t *testing.T) {
+	t.Parallel()
 	m := setupAgentsStepModel()
 	m.agentsEnabled = false
 	var cmds []tea.Cmd
@@ -1183,6 +1219,7 @@ func TestSetupAgentsStep_SkipsWhenNoAgentsDetected(t *testing.T) {
 }
 
 func TestSetupAgentsStep_PopulatesStateWhenNotSkipped(t *testing.T) {
+	t.Parallel()
 	m := setupAgentsStepModel()
 	m.setupStep = 4
 	m.setupAgentsList = []app.AgentInfo{
@@ -1210,6 +1247,7 @@ func TestSetupAgentsStep_PopulatesStateWhenNotSkipped(t *testing.T) {
 }
 
 func TestSetupAgentsStep_PressIWhileLoadedArmsImport(t *testing.T) {
+	t.Parallel()
 	m := setupAgentsStepModel()
 	m.setupStep = 4
 	m.setupAgentsDiffLoaded = true
@@ -1225,6 +1263,7 @@ func TestSetupAgentsStep_PressIWhileLoadedArmsImport(t *testing.T) {
 }
 
 func TestSetupAgentsStep_PressIWhileDiffLoadingIsNoOp(t *testing.T) {
+	t.Parallel()
 	m := setupAgentsStepModel()
 	m.setupStep = 4
 	m.setupAgentsDiffLoading = true
@@ -1239,6 +1278,7 @@ func TestSetupAgentsStep_PressIWhileDiffLoadingIsNoOp(t *testing.T) {
 }
 
 func TestSetupAgentsStep_PressSAdvancesWithoutImport(t *testing.T) {
+	t.Parallel()
 	m := setupAgentsStepModel()
 	m.setupStep = 4
 	m.setupAgentsDiffLoaded = true
@@ -1253,6 +1293,7 @@ func TestSetupAgentsStep_PressSAdvancesWithoutImport(t *testing.T) {
 }
 
 func TestHandleSetupAgentsDiffMsg_Success(t *testing.T) {
+	t.Parallel()
 	m := setupAgentsStepModel()
 	m.setupStep = 4
 	m.setupAgentsDiffLoading = true
@@ -1276,6 +1317,7 @@ func TestHandleSetupAgentsDiffMsg_Success(t *testing.T) {
 }
 
 func TestHandleSetupAgentsImportDoneMsg_SuccessAdvances(t *testing.T) {
+	t.Parallel()
 	m := setupAgentsStepModel()
 	m.setupStep = 4
 	m.loading = true
@@ -1291,6 +1333,7 @@ func TestHandleSetupAgentsImportDoneMsg_SuccessAdvances(t *testing.T) {
 }
 
 func TestHandleSetupAgentsImportDoneMsg_ErrorDoesNotAdvance(t *testing.T) {
+	t.Parallel()
 	m := setupAgentsStepModel()
 	m.setupStep = 4
 	m.loading = true
@@ -1306,6 +1349,7 @@ func TestHandleSetupAgentsImportDoneMsg_ErrorDoesNotAdvance(t *testing.T) {
 }
 
 func TestSetupAgentsStep_BackgroundModePreservedAcrossSkip(t *testing.T) {
+	t.Parallel()
 	m := setupAgentsStepModel()
 	m.setupStep = 4
 	m.setupAgentsDiffLoaded = true
@@ -1317,6 +1361,7 @@ func TestSetupAgentsStep_BackgroundModePreservedAcrossSkip(t *testing.T) {
 }
 
 func TestSetupAgentsStep_BackgroundModePreservedAcrossImportDone(t *testing.T) {
+	t.Parallel()
 	m := setupAgentsStepModel()
 	m.setupStep = 4
 	m.loading = true
@@ -1331,6 +1376,7 @@ func TestSetupAgentsStep_BackgroundModePreservedAcrossImportDone(t *testing.T) {
 // ── UC-29 toolsLoadedMsg state transitions ────────────────────────────────────
 
 func TestFlow_UC29_ToolsLoadedMsg(t *testing.T) {
+	t.Parallel()
 	loadingModel := func() Model {
 		return Model{
 			keys:          DefaultKeyMap(),
@@ -1423,6 +1469,7 @@ func TestFlow_UC29_ToolsLoadedMsg(t *testing.T) {
 // ── UC-30 Settings tab: j/k navigation ──────────────────────────────────────
 
 func TestFlow_UC30_SettingsNavigation(t *testing.T) {
+	t.Parallel()
 	t.Run("j moves settingsCursor down", func(t *testing.T) {
 		msgs := append(toSettings(), pressRune('j'))
 		got := drive(baseModel(nil), msgs...)
@@ -1451,6 +1498,7 @@ func TestFlow_UC30_SettingsNavigation(t *testing.T) {
 // ── UC-31 Settings tab: toggle AutoImport row 0 ──────────────────────────────
 
 func TestFlow_UC31_SettingsToggleAutoImport(t *testing.T) {
+	t.Parallel()
 	t.Run("space toggles AutoImport on", func(t *testing.T) {
 		msgs := append(toSettings(), pressRune(' '))
 		got := drive(baseModel(nil), msgs...)
@@ -1471,6 +1519,7 @@ func TestFlow_UC31_SettingsToggleAutoImport(t *testing.T) {
 // ── UC-32 Settings tab: row 7 opens file picker ──────────────────────────────
 
 func TestFlow_UC32_SettingsOpenFilePicker(t *testing.T) {
+	t.Parallel()
 	msgs := append(toSettings(), nj(settingsRowDotsRepo)...)
 	msgs = append(msgs, pressEnter())
 	got := drive(baseModel(nil), msgs...)
@@ -1482,6 +1531,7 @@ func TestFlow_UC32_SettingsOpenFilePicker(t *testing.T) {
 // ── UC-33 Settings tab: Esc from file picker closes it ───────────────────────
 
 func TestFlow_UC33_FilePickerEscCloses(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	setDotsRepoForTest(&m, "~/dotfiles")
 	msgs := append(toSettings(), nj(settingsRowDotsRepo)...)
@@ -1659,7 +1709,10 @@ func TestFlow_UC35_DangerDotsDisableKeepLocalChoice(t *testing.T) {
 // ── UC-36 Priority editor ─────────────────────────────────────────────────────
 
 func TestFlow_UC36_PriorityEditor(t *testing.T) {
+	t.Parallel(
 	// Navigate to settings and to the provider-order row.
+	)
+
 	toPriority := func() []tea.Msg {
 		return append(toSettings(), nj(settingsRowProviderPriority)...)
 	}
@@ -1725,6 +1778,7 @@ func TestFlow_UC36_PriorityEditor(t *testing.T) {
 // ── UC-37 Hosts tab navigation ────────────────────────────────────────────
 
 func TestFlow_UC37_GroupsNavigation(t *testing.T) {
+	t.Parallel()
 	toHosts := func() []tea.Msg { return []tea.Msg{pressTab(), pressTab(), pressTab()} }
 
 	t.Run("Esc from hosts returns to list", func(t *testing.T) {
@@ -1755,6 +1809,7 @@ func TestFlow_UC37_GroupsNavigation(t *testing.T) {
 // ── UC-38 Host creation is onboarding/CLI only ────────────────────────────────
 
 func TestFlow_UC38_NewHostRemovedFromHostsTab(t *testing.T) {
+	t.Parallel()
 	toHosts := func() []tea.Msg { return []tea.Msg{pressTab(), pressTab(), pressTab()} }
 
 	t.Run("p does not open host creation", func(t *testing.T) {
@@ -1775,6 +1830,7 @@ func TestFlow_UC38_NewHostRemovedFromHostsTab(t *testing.T) {
 // ── UC-39 Host delete confirm ─────────────────────────────────────────────
 
 func TestFlow_UC39_HostDeleteConfirm(t *testing.T) {
+	t.Parallel()
 	toHosts := func() []tea.Msg { return []tea.Msg{pressTab(), pressTab(), pressTab()} }
 
 	m := baseModel(nil)
@@ -1800,6 +1856,7 @@ func TestFlow_UC39_HostDeleteConfirm(t *testing.T) {
 // ── UC-40 Group picker: j/k/Enter/Esc ────────────────────────────────────────
 
 func TestFlow_UC40_GroupPickerNav(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.mode = viewGroupPicker
 	m.pickerGroups = []string{"base", "work", "+ new group…"}
@@ -1841,6 +1898,7 @@ func TestFlow_UC40_GroupPickerNav(t *testing.T) {
 // ── UC-41 Group picker: sentinel "+ new group…" ──────────────────────────────
 
 func TestFlow_UC41_GroupPickerSentinel(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.mode = viewGroupPicker
 	m.pickerGroups = []string{"base", "+ new group…"}
@@ -1869,6 +1927,7 @@ func TestFlow_UC41_GroupPickerSentinel(t *testing.T) {
 // ── UC-42 Dots tab: navigation ───────────────────────────────────────────────
 
 func TestFlow_UC42_DotsNavigation(t *testing.T) {
+	t.Parallel()
 	m := dotsModel()
 
 	t.Run("j moves dotsCursor down", func(t *testing.T) {
@@ -1905,6 +1964,7 @@ func TestFlow_UC42_DotsNavigation(t *testing.T) {
 // ── UC-43 Dots tab: delete confirm ───────────────────────────────────────────
 
 func TestFlow_UC43_DotsDeleteConfirm(t *testing.T) {
+	t.Parallel()
 	t.Run("d arms confirm (dotsConfirmIdx=cursor)", func(t *testing.T) {
 		got := drive(dotsModel(), pressRune('d'))
 		if got.dotsConfirmIdx != 0 {
@@ -1955,6 +2015,7 @@ func TestFlow_UC43_DotsDeleteConfirm(t *testing.T) {
 // ── UC-44 Dots tab: s syncs dots ─────────────────────────────────────────────
 
 func TestFlow_UC44_DotsSyncKey(t *testing.T) {
+	t.Parallel()
 	m := dotsModel()
 	m.dotsCursor = 1
 	got := drive(m, pressRune('s'))
@@ -2029,6 +2090,7 @@ func TestFlow_DotsDisabledBlocksMutatingKeys(t *testing.T) {
 }
 
 func TestRender_DotsDisabledHidesMutatingHints(t *testing.T) {
+	t.Parallel()
 	m := dotsModel()
 	setDotsDisabledForTest(&m, "/repo/dotfiles", true)
 	m.dotMemberships = map[string][]string{"gitconfig": {"default"}}
@@ -2058,6 +2120,7 @@ func TestRender_DotsDisabledHidesMutatingHints(t *testing.T) {
 }
 
 func TestRender_DotsHintsUseCachedDotsAvailability(t *testing.T) {
+	t.Parallel()
 	m := dotsModel()
 	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
 	m.settings.DotsDisabled = config.BoolPtr(true)
@@ -2081,6 +2144,7 @@ func TestRender_DotsHintsUseCachedDotsAvailability(t *testing.T) {
 // ── UC-45 Dots tab: explicit conflict choice ──────────────────────────────────
 
 func TestFlow_UC45_DotsConflictOverwrite(t *testing.T) {
+	t.Parallel()
 	conflictModel := func() Model {
 		m := baseModel(nil)
 		m.mode = viewDots
@@ -2165,8 +2229,11 @@ func TestFlow_UC45_DotsConflictOverwrite(t *testing.T) {
 }
 
 func TestFlow_DotsSynthesizedIgnoredChildUnignore(t *testing.T) {
+	t.Parallel(
 	// Merged ignored-child entries with Children expand instead of toggling
 	// the whole entry; individual children can then be unignored.
+	)
+
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.dotsLoaded = true
@@ -2203,7 +2270,10 @@ func TestFlow_DotsSynthesizedIgnoredChildUnignore(t *testing.T) {
 }
 
 func TestFlow_DotsMergedIgnoredExpandCollapse(t *testing.T) {
+	t.Parallel(
 	// Merged ignored entries expand/collapse with space like synced entries.
+	)
+
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.dotsLoaded = true
@@ -2254,9 +2324,12 @@ func TestFlow_DotsMergedIgnoredExpandCollapse(t *testing.T) {
 }
 
 func TestFlow_DotsExpandIgnoredDoesNotExpandSyncedSameName(t *testing.T) {
+	t.Parallel(
 	// Regression: expanding an ignored entry must not also expand a synced entry
 	// with the same name. The fix introduced dotsExpandedState to scope expansion
 	// to the correct section (dots.StateSynced vs dots.StateIgnored).
+	)
+
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.dotsLoaded = true
@@ -2305,7 +2378,10 @@ func TestFlow_DotsExpandIgnoredDoesNotExpandSyncedSameName(t *testing.T) {
 }
 
 func TestFlow_DotsMergedIgnoredNestedExpand(t *testing.T) {
+	t.Parallel(
 	// Expanding a child directory inside a merged ignored entry works.
+	)
+
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.dotsLoaded = true
@@ -2419,6 +2495,7 @@ func TestFlow_DotsMergedIgnoredChildUnignoreDispatch(t *testing.T) {
 }
 
 func TestFlow_DotsChildRowsCanBeIgnored(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.dotsLoaded = true
@@ -2444,6 +2521,7 @@ func TestFlow_DotsChildRowsCanBeIgnored(t *testing.T) {
 }
 
 func TestFlow_DotsExpansionUsesSpaceAndNavigationDoesNotAutoExpand(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.dotsLoaded = true
@@ -2501,6 +2579,7 @@ func TestFlow_DotsExpansionUsesSpaceAndNavigationDoesNotAutoExpand(t *testing.T)
 }
 
 func TestFlow_DotsOutOfSyncDirectoryCanExpand(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.dotsLoaded = true
@@ -2527,6 +2606,7 @@ func TestFlow_DotsOutOfSyncDirectoryCanExpand(t *testing.T) {
 }
 
 func TestFlow_DotsSubdirectoryCanExpand(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.dotsLoaded = true
@@ -2593,6 +2673,7 @@ func TestFlow_DotsSubdirectoryCanExpand(t *testing.T) {
 // ── UC-46 opCompleteMsg ───────────────────────────────────────────────────────
 
 func TestFlow_UC46_OpCompleteMsg(t *testing.T) {
+	t.Parallel()
 	t.Run("success sets ✓ status and clears loading", func(t *testing.T) {
 		m := baseModel(nil)
 		m.loading = true
@@ -2673,6 +2754,7 @@ func TestFlow_UC46_OpCompleteMsg(t *testing.T) {
 // ── UC-47 progressDoneMsg ─────────────────────────────────────────────────────
 
 func TestFlow_UC47_ProgressDoneMsg(t *testing.T) {
+	t.Parallel()
 	t.Run("clears loading when not migrating", func(t *testing.T) {
 		m := baseModel(nil)
 		m.loading = true
@@ -2711,6 +2793,7 @@ func TestFlow_UC47_ProgressDoneMsg(t *testing.T) {
 // ── UC-48 providerScannedMsg / allProvidersDoneMsg ───────────────────────────
 
 func TestFlow_UC48_ProviderScanMsgs(t *testing.T) {
+	t.Parallel()
 	t.Run("providerScannedMsg removes entry from scanningProviders", func(t *testing.T) {
 		m := baseModel(nil)
 		m.scanningProviders = map[string]bool{"brew": true, "node": true}
@@ -2810,6 +2893,7 @@ func TestFlow_UC48_ProviderScanMsgs(t *testing.T) {
 // ── UC-49 groupChangedMsg ─────────────────────────────────────────────────────
 
 func TestFlow_UC49_GroupChangedMsg(t *testing.T) {
+	t.Parallel()
 	t.Run("success sets status and clears loading", func(t *testing.T) {
 		m := baseModel(nil)
 		m.loading = true
@@ -2833,6 +2917,7 @@ func TestFlow_UC49_GroupChangedMsg(t *testing.T) {
 // ── UC-50 dangerOpDoneMsg ─────────────────────────────────────────────────────
 
 func TestFlow_UC50_DangerOpDoneMsg(t *testing.T) {
+	t.Parallel()
 	t.Run("success shows detail in status", func(t *testing.T) {
 		got := drive(baseModel(nil), dangerOpDoneMsg{action: "reset-settings", detail: "settings cleared"})
 		if got.statusMsg != "✓ settings cleared" {
@@ -2885,6 +2970,7 @@ func TestFlow_UC50_DangerOpDoneMsg(t *testing.T) {
 // ── UC-51 claimDoneMsg ────────────────────────────────────────────────────────
 
 func TestFlow_UC51_ClaimDoneMsg(t *testing.T) {
+	t.Parallel()
 	orphan := &app.ToolView{Name: "fzf", Provider: "brew", Installed: true, Tracked: false}
 	m := baseModel(nil)
 	m.discoveredTools = []*app.ToolView{orphan}
@@ -2921,6 +3007,7 @@ func TestFlow_UC51_ClaimDoneMsg(t *testing.T) {
 // ── UC-52 ignoreDoneMsg ───────────────────────────────────────────────────────
 
 func TestFlow_UC52_IgnoreDoneMsg(t *testing.T) {
+	t.Parallel()
 	t.Run("ignored=true adds to ignoreSet", func(t *testing.T) {
 		m := baseModel(nil)
 		m.ignoreSet = make(map[string]bool)
@@ -2971,6 +3058,7 @@ func TestFlow_UC52_IgnoreDoneMsg(t *testing.T) {
 }
 
 func TestFlow_SyncAllDoneRemovesClaimedDiscovered(t *testing.T) {
+	t.Parallel()
 	orphan := &app.ToolView{Name: "fzf", Provider: "brew", Installed: true, Tracked: false}
 	m := baseModel(nil)
 	m.loading = true
@@ -2997,6 +3085,7 @@ func TestFlow_SyncAllDoneRemovesClaimedDiscovered(t *testing.T) {
 // ── UC-53 migrateProviderDoneMsg ─────────────────────────────────────────────
 
 func TestFlow_UC53_MigrateProviderDoneMsg(t *testing.T) {
+	t.Parallel()
 	t.Run("success clears loading+migrating and shows status", func(t *testing.T) {
 		m := baseModel(nil)
 		m.loading = true
@@ -3044,6 +3133,7 @@ func TestFlow_UC53_MigrateProviderDoneMsg(t *testing.T) {
 // ── UC-54 dots tab message handlers ──────────────────────────────────────────
 
 func TestFlow_UC54_DotsMsgs(t *testing.T) {
+	t.Parallel()
 	t.Run("dotsLoadedMsg sets entries and marks loaded", func(t *testing.T) {
 		entries := []app.DotStatus{{Name: "nvim", Health: app.HealthOK}}
 		got := drive(baseModel(nil), dotsLoadedMsg{entries: entries, gitStatus: "M nvim"})
@@ -3172,6 +3262,7 @@ func TestFlow_UC54_DotsMsgs(t *testing.T) {
 // ── UC-55 dotsDeletedMsg cursor clamp ────────────────────────────────────────
 
 func TestFlow_UC55_DotsDeletedMsg(t *testing.T) {
+	t.Parallel()
 	t.Run("cursor clamped after remove", func(t *testing.T) {
 		remaining := []app.DotStatus{{Name: "nvim", Health: app.HealthOK}}
 		m := dotsModel()
@@ -3192,6 +3283,7 @@ func TestFlow_UC55_DotsDeletedMsg(t *testing.T) {
 // ── UC-56 dotsFixedMsg ────────────────────────────────────────────────────────
 
 func TestFlow_UC56_DotsFixedMsg(t *testing.T) {
+	t.Parallel()
 	t.Run("success clears overwriteIdx and sets status", func(t *testing.T) {
 		entries := []app.DotStatus{{Name: "gitconfig", Health: app.HealthOK}}
 		m := dotsModel()
@@ -3216,7 +3308,10 @@ func TestFlow_UC56_DotsFixedMsg(t *testing.T) {
 // ── UC-57 Migration race guards ───────────────────────────────────────────────
 
 func TestFlow_UC57_MigrationRaceGuards(t *testing.T) {
+	t.Parallel(
 	// Regression: progressDoneMsg cleared loading mid-migration.
+	)
+
 	t.Run("progressDoneMsg does not clear loading while migrating", func(t *testing.T) {
 		m := baseModel(nil)
 		m.loading = true
@@ -3252,6 +3347,7 @@ func TestFlow_UC57_MigrationRaceGuards(t *testing.T) {
 // ── UC-58 settingsSavedMsg ────────────────────────────────────────────────────
 
 func TestFlow_UC58_SettingsSavedMsg(t *testing.T) {
+	t.Parallel()
 	t.Run("success sets ✓ settings saved", func(t *testing.T) {
 		got := drive(baseModel(nil), settingsSavedMsg{})
 		if got.statusMsg != "✓ settings saved" {
@@ -3270,6 +3366,7 @@ func TestFlow_UC58_SettingsSavedMsg(t *testing.T) {
 // ── UC-59 progressMsg ─────────────────────────────────────────────────────────
 
 func TestFlow_UC59_ProgressMsg(t *testing.T) {
+	t.Parallel()
 	got := drive(baseModel(nil), progressMsg{text: "installing…"})
 	if got.progressText != "installing…" {
 		t.Errorf("progressText = %q, want installing…", got.progressText)
@@ -3300,6 +3397,7 @@ func TestFlow_UC59_ProgressMsg(t *testing.T) {
 // ── UC-60 clearStatusMsg ──────────────────────────────────────────────────────
 
 func TestFlow_UC60_ClearStatusMsg(t *testing.T) {
+	t.Parallel()
 	t.Run("matching gen clears statusMsg", func(t *testing.T) {
 		m := baseModel(nil)
 		m.statusMsg = "some status"
@@ -3324,6 +3422,7 @@ func TestFlow_UC60_ClearStatusMsg(t *testing.T) {
 // ── UC-61 Command palette execution ──────────────────────────────────────────
 
 func TestFlow_UC61_PaletteExecution(t *testing.T) {
+	t.Parallel()
 	t.Run("sync command sets loading", func(t *testing.T) {
 		m := Model{
 			keys:          DefaultKeyMap(),
@@ -3379,6 +3478,7 @@ func TestFlow_UC61_PaletteExecution(t *testing.T) {
 // ── UC-62 discoveredRefreshedMsg ─────────────────────────────────────────────
 
 func TestFlow_UC62_DiscoveredRefreshedMsg(t *testing.T) {
+	t.Parallel()
 	t.Run("success updates discoveredTools", func(t *testing.T) {
 		orphan := &app.ToolView{Name: "fzf", Provider: "brew", Installed: true, Tracked: false}
 		got := drive(baseModel(nil), discoveredRefreshedMsg{discovered: []*app.ToolView{orphan}})
@@ -3427,6 +3527,7 @@ func TestFlow_UC62_DiscoveredRefreshedMsg(t *testing.T) {
 // ── UC-63 descRefreshDoneMsg ──────────────────────────────────────────────────
 
 func TestFlow_UC63_DescRefreshDoneMsg(t *testing.T) {
+	t.Parallel()
 	refreshedDiscovered := []*app.ToolView{{
 		Name:        "playwright",
 		Provider:    "node",
@@ -3468,6 +3569,7 @@ func TestFlow_UC63_DescRefreshDoneMsg(t *testing.T) {
 // ── UC-64 Mouse wheel scrolling ──────────────────────────────────────────────
 
 func TestFlow_UC64_MouseWheelScroll(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.cursor = 0
 
@@ -3585,6 +3687,7 @@ func TestFlow_UC64_MouseWheelScroll(t *testing.T) {
 // ── UC-65 WindowSizeMsg updates dimensions ────────────────────────────────────
 
 func TestFlow_UC65_WindowSize(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	got := drive(m, tea.WindowSizeMsg{Width: 200, Height: 60})
 	if got.width != 200 {
@@ -3745,6 +3848,7 @@ func TestFlow_UC66_DotChildExtractPickerOpens(t *testing.T) {
 }
 
 func TestFlow_UC66_DotsChildExtractable(t *testing.T) {
+	t.Parallel()
 	t.Run("extractable: isChild=true, not ignored, non-empty RelPath", func(t *testing.T) {
 		row := dotsVisibleRow{
 			entry:   app.DotStatus{Name: "config"},
@@ -3815,8 +3919,11 @@ func TestFlow_UC66_DotsChildExtractable(t *testing.T) {
 }
 
 func TestFlow_UC66_DotChildExtractPickerCancelClears(t *testing.T) {
+	t.Parallel(
 	// Drive through openDotChildExtractPicker directly (no real app needed for the
 	// cancel/finish path — finishGroupMembershipPicker has no app dependency).
+	)
+
 	t.Run("esc from extract picker clears extract context and phantom membership", func(t *testing.T) {
 		m := dotsModelWithChild("nvim", false)
 		visible := dotsVisibleRows(m)
@@ -3996,6 +4103,7 @@ func TestFlow_UC67_DotForceResolveAll_ClearActiveConfirmationClearsArm(t *testin
 }
 
 func TestFlow_UC67_DotsConflictHints_BulkKeysVisibleWhenMultipleConflicts(t *testing.T) {
+	t.Parallel()
 	m := conflictDotsModel(twoConflictEntries())
 	hints := dotsConflictHintItems(m)
 
@@ -4020,6 +4128,7 @@ func TestFlow_UC67_DotsConflictHints_BulkKeysVisibleWhenMultipleConflicts(t *tes
 }
 
 func TestFlow_UC67_DotsConflictHints_BulkKeysHiddenWithSingleConflict(t *testing.T) {
+	t.Parallel()
 	m := conflictDotsModel([]app.DotStatus{
 		{Name: "gitconfig", Health: app.HealthConflict, State: dots.StateConflict, Actions: []dots.Action{dots.ActionUseRepo, dots.ActionUseLocal}},
 	})
@@ -4039,6 +4148,7 @@ func TestFlow_UC67_DotsConflictHints_BulkKeysHiddenWithSingleConflict(t *testing
 }
 
 func TestFlow_UC67_DotsConflictHints_BulkKeysHiddenWithNoConflicts(t *testing.T) {
+	t.Parallel()
 	m := conflictDotsModel([]app.DotStatus{
 		{Name: "nvim", Health: app.HealthOK, State: dots.StateSynced},
 	})
@@ -4060,7 +4170,10 @@ func TestFlow_UC67_DotsConflictHints_BulkKeysHiddenWithNoConflicts(t *testing.T)
 }
 
 func TestFlow_UC67_DotForceResolveAll_AppNilIsNoop(t *testing.T) {
+	t.Parallel(
 	// baseModel has no app wired; handleDotsForceResolveAllKeyMsg should return nil
+	)
+
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.dotsLoaded = true
@@ -4111,6 +4224,7 @@ func TestFlow_UC67_DotForceResolveAll_KeyDispatch_SecondUFires(t *testing.T) {
 }
 
 func TestFlow_UC67_DotForceResolveAll_DotsConflictCount(t *testing.T) {
+	t.Parallel()
 	t.Run("counts only conflict entries", func(t *testing.T) {
 		m := conflictDotsModel([]app.DotStatus{
 			{Name: "a", State: dots.StateConflict},
@@ -4176,6 +4290,7 @@ func TestFlow_UC67_DotForceResolveAll_KeyDispatch_U_NoConflicts(t *testing.T) {
 // ── UC-66 (existing) ──────────────────────────────────────────────────────────
 
 func TestFlow_UC66_DotChildExtractHintVisible(t *testing.T) {
+	t.Parallel()
 	t.Run("g/edit-groups hint appears for extractable child row", func(t *testing.T) {
 		m := dotsModelWithChild("nvim", false)
 		visible := dotsVisibleRows(m)

@@ -112,6 +112,7 @@ func (s *selfUnupgradeableStub) SelfPackageName() string                       {
 func (s *selfUnupgradeableStub) SelfPackageUpgradeable(_ context.Context) bool { return s.upgradeable }
 
 func TestRefreshOutdated_SuppressesSelfUnupgradeableManager(t *testing.T) {
+	t.Parallel()
 	prov := &selfUnupgradeableStub{
 		provOutdatedStub: provOutdatedStub{
 			stubProvider: stubProvider{name: "pip", available: true},
@@ -141,6 +142,7 @@ func TestRefreshOutdated_SuppressesSelfUnupgradeableManager(t *testing.T) {
 }
 
 func TestRefreshOutdated_KeepsSelfUpgradeableManagerOutdated(t *testing.T) {
+	t.Parallel()
 	prov := &selfUnupgradeableStub{
 		provOutdatedStub: provOutdatedStub{
 			stubProvider: stubProvider{name: "pip", available: true},
@@ -172,6 +174,7 @@ func TestRefreshOutdated_KeepsSelfUpgradeableManagerOutdated(t *testing.T) {
 // TestRefreshProviderOutdated_UnknownProvider verifies that an unregistered
 // provider name is silently skipped (returns nil, no panic).
 func TestRefreshProviderOutdated_UnknownProvider(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	if err := a.RefreshProviderOutdated(context.Background(), "nonexistent", false); err != nil {
 		t.Errorf("RefreshProviderOutdated with unknown provider: %v", err)
@@ -181,6 +184,7 @@ func TestRefreshProviderOutdated_UnknownProvider(t *testing.T) {
 // TestRefreshProviderOutdated_ProviderNotOutdatedChecker verifies that a
 // provider registered without OutdatedChecker is silently skipped.
 func TestRefreshProviderOutdated_ProviderNotOutdatedChecker(t *testing.T) {
+	t.Parallel()
 	prov := &stubProvider{name: "brew", available: true}
 	a, _ := newImportApp(t, prov)
 	if err := a.RefreshProviderOutdated(context.Background(), "brew", false); err != nil {
@@ -191,6 +195,7 @@ func TestRefreshProviderOutdated_ProviderNotOutdatedChecker(t *testing.T) {
 // TestRefreshProviderOutdated_UnavailableProvider verifies that when the
 // provider is not available, the function returns nil without querying.
 func TestRefreshProviderOutdated_UnavailableProvider(t *testing.T) {
+	t.Parallel()
 	prov := &provOutdatedStub{
 		stubProvider: stubProvider{name: "brew", available: false},
 		outdatedMap:  map[string]string{"ripgrep": "15.0.0"},
@@ -202,6 +207,7 @@ func TestRefreshProviderOutdated_UnavailableProvider(t *testing.T) {
 }
 
 func TestRefreshProviderOutdated_ReturnsOutdatedMapError(t *testing.T) {
+	t.Parallel()
 	prov := &provOutdatedStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		outdatedErr:  errors.New("outdated command failed"),
@@ -230,6 +236,7 @@ func TestRefreshProviderOutdated_ReturnsOutdatedMapError(t *testing.T) {
 // provider is registered, available, implements OutdatedChecker, and the
 // outdated map is empty (nothing to update).
 func TestRefreshProviderOutdated_NoOutdatedTools(t *testing.T) {
+	t.Parallel()
 	prov := &provOutdatedStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		outdatedMap:  map[string]string{}, // no outdated tools
@@ -269,6 +276,7 @@ func newMetadataRefreshApp(t *testing.T) (*app.App, *metadataRefreshStub) {
 // TestRefreshProviderOutdated_RefreshMetadataTrue verifies a user-initiated
 // refresh refreshes the provider's local index before checking outdated status.
 func TestRefreshProviderOutdated_RefreshMetadataTrue(t *testing.T) {
+	t.Parallel()
 	a, prov := newMetadataRefreshApp(t)
 	if err := a.RefreshProviderOutdated(context.Background(), "brew", true); err != nil {
 		t.Fatalf("RefreshProviderOutdated: %v", err)
@@ -281,6 +289,7 @@ func TestRefreshProviderOutdated_RefreshMetadataTrue(t *testing.T) {
 // TestRefreshProviderOutdated_RefreshMetadataFalse verifies a passive scan does
 // not pay the index-refresh cost.
 func TestRefreshProviderOutdated_RefreshMetadataFalse(t *testing.T) {
+	t.Parallel()
 	a, prov := newMetadataRefreshApp(t)
 	if err := a.RefreshProviderOutdated(context.Background(), "brew", false); err != nil {
 		t.Fatalf("RefreshProviderOutdated: %v", err)
@@ -293,6 +302,7 @@ func TestRefreshProviderOutdated_RefreshMetadataFalse(t *testing.T) {
 // TestRefreshProviderOutdated_MarksOutdated verifies that when a tool is in
 // the outdated map, its DB entry is updated.
 func TestRefreshProviderOutdated_MarksOutdated(t *testing.T) {
+	t.Parallel()
 	prov := &provOutdatedStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		outdatedMap:  map[string]string{"ripgrep": "15.0.0"},
@@ -332,6 +342,7 @@ func TestRefreshProviderOutdated_MarksOutdated(t *testing.T) {
 }
 
 func TestRefreshProviderOutdated_UsesInstalledWithManager(t *testing.T) {
+	t.Parallel()
 	prov := &managerOutdatedStub{
 		stubProvider: stubProvider{name: "node", available: true},
 		byManager: map[string]map[string]string{
@@ -371,6 +382,7 @@ func TestRefreshProviderOutdated_UsesInstalledWithManager(t *testing.T) {
 }
 
 func TestRefreshProviderOutdated_PersistsManagerUpdateMetadata(t *testing.T) {
+	t.Parallel()
 	availableAt := time.Date(2026, 5, 28, 12, 0, 0, 0, time.UTC)
 	prov := &managerOutdatedInfoStub{
 		stubProvider: stubProvider{name: "node", available: true},
@@ -455,6 +467,7 @@ func (s *onlyManagerOutdatedInfoStub) OutdatedInfoMap(_ context.Context) (map[st
 // by npm's outdated entry for typescript, wrongly flipping the pnpm-owned row
 // to Outdated=true even though its own manager (pnpm) has no update.
 func TestRefreshProviderOutdated_NamedAliasPreservesManagerAttribution(t *testing.T) {
+	t.Parallel()
 	base := &onlyManagerOutdatedInfoStub{
 		stubProvider: stubProvider{name: "node", available: true},
 		byManager: map[string]map[string]provider.OutdatedInfo{
@@ -495,6 +508,7 @@ func TestRefreshProviderOutdated_NamedAliasPreservesManagerAttribution(t *testin
 }
 
 func TestRefreshProviderOutdated_UsesFullSlashPackage(t *testing.T) {
+	t.Parallel()
 	prov := &managerOutdatedStub{
 		stubProvider: stubProvider{name: "node", available: true},
 		byManager: map[string]map[string]string{
@@ -531,6 +545,7 @@ func TestRefreshProviderOutdated_UsesFullSlashPackage(t *testing.T) {
 }
 
 func TestRefreshProviderOutdated_UsesRegisteredInstalledWithOwner(t *testing.T) {
+	t.Parallel()
 	brew := &provOutdatedStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		outdatedMap:  map[string]string{"ripgrep": "15.0.0"},
@@ -567,6 +582,7 @@ func TestRefreshProviderOutdated_UsesRegisteredInstalledWithOwner(t *testing.T) 
 // TestRefreshProviderInstalled_UnknownProvider verifies that an unregistered
 // provider is silently skipped.
 func TestRefreshProviderInstalled_UnknownProvider(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	if err := a.RefreshProviderInstalled(context.Background(), "nonexistent"); err != nil {
 		t.Errorf("RefreshProviderInstalled unknown provider: %v", err)
@@ -576,6 +592,7 @@ func TestRefreshProviderInstalled_UnknownProvider(t *testing.T) {
 // TestRefreshProviderInstalled_NoTools verifies that when there are no config
 // tools for the named provider, the function returns nil immediately.
 func TestRefreshProviderInstalled_NoTools(t *testing.T) {
+	t.Parallel()
 	prov := &bulkCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		bulk:         map[string]string{"ripgrep": "14.1.0"},
@@ -597,6 +614,7 @@ func TestRefreshProviderInstalled_NoTools(t *testing.T) {
 // TestRefreshProviderInstalled_BulkPath_MarksInstalled tests the BulkChecker
 // path of RefreshProviderInstalled with an installed tool.
 func TestRefreshProviderInstalled_BulkPath_MarksInstalled(t *testing.T) {
+	t.Parallel()
 	prov := &bulkCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		bulk:         map[string]string{"ripgrep": "14.1.0"},
@@ -632,6 +650,7 @@ func TestRefreshProviderInstalled_BulkPath_MarksInstalled(t *testing.T) {
 }
 
 func TestRefreshProviderInstalledWithProgress_ReportsEachTool(t *testing.T) {
+	t.Parallel()
 	prov := &bulkCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		bulk:         map[string]string{"git": "2.45.0", "ripgrep": "14.1.0"},
@@ -668,6 +687,7 @@ func TestRefreshProviderInstalledWithProgress_ReportsEachTool(t *testing.T) {
 }
 
 func TestRefreshProviderInstalled_UsesCachedConcreteOwnerMetadata(t *testing.T) {
+	t.Parallel()
 	brew, apt := cachedOwnerMetadataProviders()
 	a, cfgPath := newImportApp(t, brew, apt)
 	ctx := context.Background()
@@ -682,6 +702,7 @@ func TestRefreshProviderInstalled_UsesCachedConcreteOwnerMetadata(t *testing.T) 
 }
 
 func TestRefreshProviderInstalled_UsesCachedConcreteOwnerSlowPath(t *testing.T) {
+	t.Parallel()
 	brew, apt := cachedOwnerSlowPathProviders()
 	a, cfgPath := newImportApp(t, brew, apt)
 	ctx := context.Background()
@@ -709,6 +730,7 @@ func cachedOwnerSlowPathProviders() (*stubProvider, *stubProvider) {
 }
 
 func TestRefreshProviderInstalled_FallsBackWhenCachedOwnerUnavailable(t *testing.T) {
+	t.Parallel()
 	brew := &bulkCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		bulk:         map[string]string{"ripgrep": "14.2.0"},
@@ -842,6 +864,7 @@ func (b *countingBulkConcreteStub) ResolvedName(_ context.Context) (string, erro
 }
 
 func TestRefreshProviderInstalled_WritesAfterScanContextExpires(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	prov := &cancelingBulkStub{
 		bulkCheckingStub: bulkCheckingStub{
@@ -874,6 +897,7 @@ func TestRefreshProviderInstalled_WritesAfterScanContextExpires(t *testing.T) {
 }
 
 func TestRefreshProviderInstalled_ReturnsBulkScanDeadline(t *testing.T) {
+	t.Parallel()
 	prov := &errorBulkStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		err:          context.DeadlineExceeded,
@@ -898,6 +922,7 @@ func TestRefreshProviderInstalled_ReturnsBulkScanDeadline(t *testing.T) {
 // TestRefreshProviderInstalled_BulkPath_MarksNotInstalled tests the BulkChecker
 // path when the tool is absent from the bulk map.
 func TestRefreshProviderInstalled_BulkPath_MarksNotInstalled(t *testing.T) {
+	t.Parallel()
 	prov := &bulkCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		bulk:         map[string]string{}, // ripgrep not installed
@@ -932,6 +957,7 @@ func TestRefreshProviderInstalled_BulkPath_MarksNotInstalled(t *testing.T) {
 // TestRefreshProviderInstalled_SlowPath verifies the per-tool IsInstalled path
 // when the provider has no BulkChecker.
 func TestRefreshProviderInstalled_SlowPath(t *testing.T) {
+	t.Parallel()
 	prov := &isInstalledStub{
 		stubProvider:  stubProvider{name: "pip", available: true},
 		installedName: "black",
@@ -967,6 +993,7 @@ func TestRefreshProviderInstalled_SlowPath(t *testing.T) {
 // TestRefreshProviderInstalled_UnavailableProvider verifies that when a provider
 // is not available, all tools for it are skipped.
 func TestRefreshProviderInstalled_UnavailableProvider(t *testing.T) {
+	t.Parallel()
 	prov := &bulkCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: false},
 		bulk:         map[string]string{"ripgrep": "14.1.0"},
@@ -998,6 +1025,7 @@ func TestRefreshProviderInstalled_UnavailableProvider(t *testing.T) {
 }
 
 func TestRefreshProviderInstalled_MultiManagerPath_UsesFullSlashPackage(t *testing.T) {
+	t.Parallel()
 	prov := &multiManagerStub{
 		stubProvider: stubProvider{name: "npm", available: true},
 		entries: map[string]provider.InstalledEntry{
@@ -1055,6 +1083,7 @@ func (s *cliFilteredListInstalledStub) CLIToolSet(context.Context) (map[string]b
 // TestRefreshDiscovered_PopulatesDB verifies that tools reported by
 // ListInstalled are stored as discovered (tracked=false) entries.
 func TestRefreshDiscovered_PopulatesDB(t *testing.T) {
+	t.Parallel()
 	prov := &listInstalledStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		installed: []provider.InstalledTool{
@@ -1089,6 +1118,7 @@ func TestRefreshDiscovered_PopulatesDB(t *testing.T) {
 }
 
 func TestRefreshDiscovered_ScansOnlyTrackedProviders(t *testing.T) {
+	t.Parallel()
 	brew := &listInstalledStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		installed: []provider.InstalledTool{
@@ -1126,6 +1156,7 @@ func TestRefreshDiscovered_ScansOnlyTrackedProviders(t *testing.T) {
 }
 
 func TestRefreshDiscovered_SkipsUnconfiguredPipPackages(t *testing.T) {
+	t.Parallel()
 	pip := &cliFilteredListInstalledStub{
 		listInstalledStub: listInstalledStub{
 			stubProvider: stubProvider{name: "pip", available: true},
@@ -1160,6 +1191,7 @@ func TestRefreshDiscovered_SkipsUnconfiguredPipPackages(t *testing.T) {
 // TestRefreshDiscovered_SkipsConfiguredTools verifies that tools already
 // declared in config are not added to the discovered set.
 func TestRefreshDiscovered_SkipsConfiguredTools(t *testing.T) {
+	t.Parallel()
 	prov := &listInstalledStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		installed: []provider.InstalledTool{
@@ -1198,6 +1230,7 @@ func TestRefreshDiscovered_SkipsConfiguredTools(t *testing.T) {
 // TestRefreshDiscovered_SkipsUnavailableProvider verifies that an unavailable
 // provider is silently skipped.
 func TestRefreshDiscovered_SkipsUnavailableProvider(t *testing.T) {
+	t.Parallel()
 	prov := &listInstalledStub{
 		stubProvider: stubProvider{name: "brew", available: false},
 		installed: []provider.InstalledTool{
@@ -1274,6 +1307,7 @@ func (s *concurrentConcreteStub) ResolvedName(_ context.Context) (string, error)
 // provB implements ConcreteResolver so the rcMu-guarded resolvedConcrete read
 // inside the goroutine is exercised under -race.
 func TestRefreshInstalled_BulkScansRunConcurrently(t *testing.T) {
+	t.Parallel()
 	tracker := &bulkScanTracker{}
 
 	provA := &concurrentBulkStub{

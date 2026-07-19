@@ -10,6 +10,7 @@ import (
 )
 
 func TestMarketplaceRows_ManagedRowReportsPerAgentStatus(t *testing.T) {
+	t.Parallel()
 	claude := &stubPluginAdapter{id: "claude-code", available: true}
 	codex := &stubPluginAdapter{id: "codex", available: false}
 	agents := config.AgentsConfig{
@@ -35,6 +36,7 @@ func TestMarketplaceRows_ManagedRowReportsPerAgentStatus(t *testing.T) {
 }
 
 func TestMarketplaceRows_InstalledStatus(t *testing.T) {
+	t.Parallel()
 	claude := &stubPluginAdapter{
 		id:        "claude-code",
 		available: true,
@@ -59,6 +61,7 @@ func TestMarketplaceRows_InstalledStatus(t *testing.T) {
 }
 
 func TestMarketplaceRows_UnmanagedEntriesReported(t *testing.T) {
+	t.Parallel()
 	claude := &stubPluginAdapter{
 		id:        "claude-code",
 		available: true,
@@ -84,6 +87,7 @@ func TestMarketplaceRows_UnmanagedEntriesReported(t *testing.T) {
 // TestMarketplaceRows_GroupsPopulatedFromConfig is marketplace_rows' twin of
 // plugin_rows_test.go's group-population coverage for PluginRow.Groups.
 func TestMarketplaceRows_GroupsPopulatedFromConfig(t *testing.T) {
+	t.Parallel()
 	claude := &stubPluginAdapter{id: "claude-code", available: true}
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
@@ -107,6 +111,7 @@ func TestMarketplaceRows_GroupsPopulatedFromConfig(t *testing.T) {
 // flows from the adapter's InstalledMarketplace through to the row, mirroring
 // how PluginRow.Version is joined from InstalledPlugin.
 func TestMarketplaceRows_UpdatedAtFromInstalledMarketplace(t *testing.T) {
+	t.Parallel()
 	updated := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	claude := &stubPluginAdapter{
 		id:        "claude-code",
@@ -131,6 +136,7 @@ func TestMarketplaceRows_UpdatedAtFromInstalledMarketplace(t *testing.T) {
 // TestMarketplaceRows_UpdatedAtZeroWhenUnknown verifies UpdatedAt stays the
 // zero value when no adapter reports the marketplace as installed.
 func TestMarketplaceRows_UpdatedAtZeroWhenUnknown(t *testing.T) {
+	t.Parallel()
 	claude := &stubPluginAdapter{id: "claude-code", available: true}
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},

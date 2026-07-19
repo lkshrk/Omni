@@ -57,16 +57,13 @@ ENV TMPDIR=/app/.tmp
 ENV GOTMPDIR=/app/.tmp
 ENV OMNI_TEST_ISOLATED=1
 
-# Keep module downloads in BuildKit cache instead of baking them into a large
-# reusable test image layer.
+# modules live in a layer, not a cache mount: cache mounts never reach the CI layer cache
 COPY go.mod go.sum ./
-RUN --mount=type=cache,target=/home/omni/.cache/go-mod,uid=10001,gid=10001 \
-    --mount=type=cache,target=/app/.tmp,uid=10001,gid=10001 \
+RUN --mount=type=cache,target=/app/.tmp,uid=10001,gid=10001 \
     go mod download
 
 COPY --chown=omni:omni . .
 
-RUN --mount=type=cache,target=/home/omni/.cache/go-mod,uid=10001,gid=10001 \
-    --mount=type=cache,target=/home/omni/.cache/go-build,uid=10001,gid=10001 \
+RUN --mount=type=cache,target=/home/omni/.cache/go-build,uid=10001,gid=10001 \
     --mount=type=cache,target=/app/.tmp,uid=10001,gid=10001 \
     go test -count=1 -tags=integration -race -trimpath -v ./integration_tests/... ./internal/provider/...

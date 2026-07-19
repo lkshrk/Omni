@@ -10,6 +10,7 @@ import (
 )
 
 func TestClaudeCodeAdapter_ID(t *testing.T) {
+	t.Parallel()
 	a := NewClaudeCodeMcpAdapter(nil, nil)
 	if a.ID() != "claude-code" {
 		t.Fatalf("got %q", a.ID())
@@ -17,6 +18,7 @@ func TestClaudeCodeAdapter_ID(t *testing.T) {
 }
 
 func TestClaudeCodeAdapter_Add_Stdio(t *testing.T) {
+	t.Parallel()
 	var gotCmd string
 	var gotArgs []string
 	exec := func(_ context.Context, cmd string, args ...string) (string, string, error) {
@@ -59,6 +61,7 @@ func TestClaudeCodeAdapter_Add_Stdio(t *testing.T) {
 }
 
 func TestClaudeCodeAdapter_Add_Http(t *testing.T) {
+	t.Parallel()
 	var gotArgs []string
 	exec := func(_ context.Context, _ string, args ...string) (string, string, error) {
 		gotArgs = args
@@ -87,6 +90,7 @@ func TestClaudeCodeAdapter_Add_Http(t *testing.T) {
 }
 
 func TestClaudeCodeAdapter_Add_Http_WithEnv(t *testing.T) {
+	t.Parallel()
 	var gotArgs []string
 	exec := func(_ context.Context, _ string, args ...string) (string, string, error) {
 		gotArgs = args
@@ -129,6 +133,7 @@ func TestClaudeCodeAdapter_Add_Http_WithEnv(t *testing.T) {
 }
 
 func TestClaudeCodeAdapter_Add_Http_MissingEnv(t *testing.T) {
+	t.Parallel()
 	called := false
 	exec := func(_ context.Context, _ string, _ ...string) (string, string, error) {
 		called = true
@@ -146,6 +151,7 @@ func TestClaudeCodeAdapter_Add_Http_MissingEnv(t *testing.T) {
 }
 
 func TestClaudeCodeAdapter_Add_Sse(t *testing.T) {
+	t.Parallel()
 	var gotArgs []string
 	exec := func(_ context.Context, _ string, args ...string) (string, string, error) {
 		gotArgs = args
@@ -171,6 +177,7 @@ func TestClaudeCodeAdapter_Add_Sse(t *testing.T) {
 }
 
 func TestClaudeCodeAdapter_Add_MissingEnv(t *testing.T) {
+	t.Parallel()
 	called := false
 	exec := func(_ context.Context, _ string, _ ...string) (string, string, error) {
 		called = true
@@ -188,6 +195,7 @@ func TestClaudeCodeAdapter_Add_MissingEnv(t *testing.T) {
 }
 
 func TestClaudeCodeAdapter_Remove(t *testing.T) {
+	t.Parallel()
 	var gotArgs []string
 	exec := func(_ context.Context, _ string, args ...string) (string, string, error) {
 		gotArgs = args
@@ -260,6 +268,7 @@ func TestClaudeCodeAdapter_List_MissingConfigFile(t *testing.T) {
 }
 
 func TestParseClaudeConfigMcpServers_PopulatesVersion(t *testing.T) {
+	t.Parallel()
 	data := []byte(`{"mcpServers":{"pinned": {"command": "npx", "args": ["-y", "@example/mcp@1.2.3"]}}}`)
 	servers, err := parseClaudeConfigMcpServers(data)
 	if err != nil {
@@ -274,6 +283,7 @@ func TestParseClaudeConfigMcpServers_PopulatesVersion(t *testing.T) {
 }
 
 func TestExtractMcpPinnedVersion(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		command string

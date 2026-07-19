@@ -14,6 +14,7 @@ import (
 // ─── RenameGroup ──────────────────────────────────────────────────────────────
 
 func TestRenameGroup_HappyPath(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
 	// Seed config with a "dev" group containing two tools.
@@ -60,6 +61,7 @@ func TestRenameGroup_HappyPath(t *testing.T) {
 }
 
 func TestRenameGroup_UpdatesHostReferences(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -146,6 +148,7 @@ func TestRenameGroupWithStateReturnsUpdatedGroupState(t *testing.T) {
 }
 
 func TestRenameGroup_DuplicateNameReturnsError(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -170,6 +173,7 @@ func TestRenameGroup_DuplicateNameReturnsError(t *testing.T) {
 }
 
 func TestRenameGroup_EmptyNameReturnsError(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -188,6 +192,7 @@ func TestRenameGroup_EmptyNameReturnsError(t *testing.T) {
 }
 
 func TestRenameGroup_NotFoundReturnsError(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -208,6 +213,7 @@ func TestRenameGroup_NotFoundReturnsError(t *testing.T) {
 // ─── DeleteGroup ──────────────────────────────────────────────────────────────
 
 func TestDeleteGroup_HappyPath_MovesToolsToHost(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -336,6 +342,7 @@ func TestDeleteGroupWithDefaultMoveTargetUsesCurrentHost(t *testing.T) {
 }
 
 func TestDeleteGroup_RemovesFromHostReferences(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -378,6 +385,7 @@ func TestDeleteGroup_RemovesFromHostReferences(t *testing.T) {
 }
 
 func TestDeleteGroup_RequiresHandlingForLastMembershipTools(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -396,6 +404,7 @@ func TestDeleteGroup_RequiresHandlingForLastMembershipTools(t *testing.T) {
 }
 
 func TestDeleteGroup_MoveTargetMustDiffer(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 
 	err := a.DeleteGroup(context.Background(), "dev", app.DeleteGroupOptions{MoveTo: "dev"})
@@ -405,6 +414,7 @@ func TestDeleteGroup_MoveTargetMustDiffer(t *testing.T) {
 }
 
 func TestDeleteGroup_MoveToHostPreservesToolSpec(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -435,6 +445,7 @@ func TestDeleteGroup_MoveToHostPreservesToolSpec(t *testing.T) {
 }
 
 func TestDeleteGroup_DeleteToolsRemovesLastMembershipSpecs(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -495,6 +506,7 @@ func TestDeleteGroup_DeleteToolsRejectsProviderTool(t *testing.T) {
 }
 
 func TestDeleteGroup_EmptyNameReturnsError(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -513,8 +525,11 @@ func TestDeleteGroup_EmptyNameReturnsError(t *testing.T) {
 }
 
 func TestDeleteGroup_NonExistentGroupReturnsNoError(t *testing.T) {
+	t.Parallel(
 	// DeleteGroup is idempotent for non-existent groups — the implementation
 	// performs a filter that naturally produces a no-op when the name is absent.
+	)
+
 	a, cfgPath := newImportApp(t)
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{

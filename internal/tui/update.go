@@ -263,6 +263,9 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	case dotsPeekLoadedMsg:
 		cmds = append(cmds, m.handleDotsPeekLoadedMsg(msg)...)
 
+	case dotsChildrenLoadedMsg:
+		cmds = append(cmds, m.handleDotsChildrenLoadedMsg(msg)...)
+
 	case traceLogLoadedMsg:
 		cmds = append(cmds, m.handleTraceLogLoadedMsg(msg)...)
 
