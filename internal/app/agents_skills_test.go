@@ -23,17 +23,17 @@ func TestSkillRunnerFromManager(t *testing.T) {
 	}
 }
 
-func TestRestoreSkillsAggregatesResults(t *testing.T) {
+func TestRestoreSkills_ContinuesAfterPackageFailure(t *testing.T) {
 	pkgs := []resolvedPackage{
 		{SkillPackage: config.SkillPackage{Source: "o/r", Agents: []string{"claude-code"}}},
 		{SkillPackage: config.SkillPackage{Source: "o/r2", Agents: []string{"claude-code"}}},
 	}
-	inst := stubInstaller{fail: map[string]bool{"o/r2": true}}
+	inst := stubInstaller{fail: map[string]bool{"o/r": true}}
 	res := restoreSkills(context.Background(), pkgs, nil, inst)
-	if len(res.Installed) != 1 || res.Installed[0] != "o/r" {
+	if len(res.Installed) != 1 || res.Installed[0] != "o/r2" {
 		t.Fatalf("installed = %v", res.Installed)
 	}
-	if len(res.Failed) != 1 || res.Failed[0].Name != "o/r2" {
+	if len(res.Failed) != 1 || res.Failed[0].Name != "o/r" {
 		t.Fatalf("failed = %v", res.Failed)
 	}
 }

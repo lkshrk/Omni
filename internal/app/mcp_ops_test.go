@@ -165,16 +165,26 @@ func TestRestoreMcpServers_SkipsUnavailableAgent(t *testing.T) {
 	}
 }
 
-func TestRestoreMcpServers_PerServerErrorIsNonFatal(t *testing.T) {
-	stub := &stubMcpAdapter{id: "claude-code", available: true, addErr: errors.New("env var MISSING not set")}
-	srv := config.McpServer{Name: "x", Transport: "stdio", Command: "npx x"}
-	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
+func TestRestoreMcpServers_ContinuesAfterServerInstallFailure(t *testing.T) {
+	addErr := errors.New("env var MISSING not set")
+	stub := &stubMcpAdapter{id: "claude-code", available: true, addErrors: []error{addErr, nil}}
+	servers := []config.McpServer{
+		{Name: "fails", Transport: "stdio", Command: "npx fails"},
+		{Name: "succeeds", Transport: "stdio", Command: "npx succeeds"},
+	}
+	a := newMcpTestApp(t, config.AgentsConfig{McpServers: servers}, app.WithMcpAdapters([]app.McpAdapter{stub}))
 	res, err := a.RestoreMcpServers(context.Background(), app.RestoreMcpOptions{})
 	if err != nil {
 		t.Fatalf("restore must not return top-level error for per-server failure: %v", err)
 	}
-	if len(res.Errors) == 0 {
-		t.Fatal("expected per-server error in result")
+	if len(res.Errors) != 1 || res.Errors[0].AgentID != "claude-code" || res.Errors[0].ServerName != "fails" || !errors.Is(res.Errors[0].Err, addErr) {
+		t.Fatalf("Errors = %v, want claude-code/fails: %v", res.Errors, addErr)
+	}
+	if !slices.Equal(res.Installed, []string{"claude-code/succeeds"}) {
+		t.Fatalf("Installed = %v, want [claude-code/succeeds]", res.Installed)
+	}
+	if len(stub.addedServers) != 2 || stub.addedServers[0].Name != "fails" || stub.addedServers[1].Name != "succeeds" {
+		t.Fatalf("Add calls = %v, want [fails succeeds]", stub.addedServers)
 	}
 }
 

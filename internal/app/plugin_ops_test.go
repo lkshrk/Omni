@@ -15,8 +15,10 @@ type stubPluginAdapter struct {
 	id                      string
 	available               bool
 	installErr              error
+	installErrs             map[string]error
 	removeErr               error
 	updateErr               error
+	updateErrs              map[string]error
 	addMarketErr            error
 	listErr                 error
 	updateMarketplacesErr   error
@@ -42,6 +44,9 @@ func (s *stubPluginAdapter) ListPlugins(_ context.Context) ([]app.InstalledPlugi
 }
 func (s *stubPluginAdapter) InstallPlugin(_ context.Context, p config.Plugin) error {
 	s.installedPlugin = append(s.installedPlugin, p)
+	if err := s.installErrs[p.Name]; err != nil {
+		return err
+	}
 	return s.installErr
 }
 func (s *stubPluginAdapter) RemovePlugin(_ context.Context, p config.Plugin) error {
@@ -51,6 +56,9 @@ func (s *stubPluginAdapter) RemovePlugin(_ context.Context, p config.Plugin) err
 func (s *stubPluginAdapter) UpdatePlugin(_ context.Context, name, marketplace string) error {
 	s.updatedNames = append(s.updatedNames, name)
 	s.updatedIdentities = append(s.updatedIdentities, name+"@"+marketplace)
+	if err := s.updateErrs[name]; err != nil {
+		return err
+	}
 	return s.updateErr
 }
 func (s *stubPluginAdapter) ListMarketplaces(_ context.Context) ([]app.InstalledMarketplace, error) {
@@ -211,19 +219,32 @@ func TestRestorePlugins_DryRun_ReportsWouldInstall(t *testing.T) {
 	}
 }
 
-func TestRestorePlugins_PerPluginErrorIsNonFatal(t *testing.T) {
-	stub := &stubPluginAdapter{id: "claude-code", available: true, installErr: errBoom}
+func TestRestorePlugins_ContinuesAfterPluginInstallFailure(t *testing.T) {
+	stub := &stubPluginAdapter{
+		id:          "claude-code",
+		available:   true,
+		installErrs: map[string]error{"one": errBoom},
+	}
 	agents := config.AgentsConfig{
 		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
-		Plugins:      []config.Plugin{{Name: "caveman", Marketplace: "caveman"}},
+		Plugins: []config.Plugin{
+			{Name: "one", Marketplace: "caveman"},
+			{Name: "two", Marketplace: "caveman"},
+		},
 	}
 	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{stub}))
 	res, err := a.RestorePlugins(context.Background(), app.RestorePluginOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Errors) != 1 {
-		t.Fatalf("expected 1 collected error, got %v", res.Errors)
+	if len(res.Errors) != 1 || res.Errors[0].Name != "one" {
+		t.Fatalf("expected one collected error for one, got %v", res.Errors)
+	}
+	if len(stub.installedPlugin) != 2 || stub.installedPlugin[0].Name != "one" || stub.installedPlugin[1].Name != "two" {
+		t.Fatalf("expected install attempts for one then two, got %v", stub.installedPlugin)
+	}
+	if len(res.Installed) != 1 || res.Installed[0] != "claude-code/two" {
+		t.Fatalf("expected later plugin two to install, got %v", res.Installed)
 	}
 }
 
@@ -867,6 +888,32 @@ func TestUpdatePluginsPreRefreshed_SkipsMarketplaceRefresh(t *testing.T) {
 	}
 	if len(seen) != 2 || seen[0] != "one" || seen[1] != "two" {
 		t.Fatalf("progress callback order wrong: %v", seen)
+	}
+}
+
+func TestUpdatePluginsPreRefreshed_ContinuesAfterPluginUpdateFailure(t *testing.T) {
+	stub := &stubPluginAdapter{
+		id:         "claude-code",
+		available:  true,
+		updateErrs: map[string]error{"one": errBoom},
+	}
+	agents := config.AgentsConfig{
+		Marketplaces: []config.Marketplace{{Name: "caveman", Source: "a/b"}},
+		Plugins: []config.Plugin{
+			{Name: "one", Marketplace: "caveman"},
+			{Name: "two", Marketplace: "caveman"},
+		},
+	}
+	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{stub}))
+	res, err := a.UpdatePluginsPreRefreshed(context.Background(), []string{"one", "two"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Errors) != 1 || res.Errors[0].Name != "one" {
+		t.Fatalf("expected one collected error for one, got %v", res.Errors)
+	}
+	if len(stub.updatedNames) != 2 || stub.updatedNames[0] != "one" || stub.updatedNames[1] != "two" {
+		t.Fatalf("expected update attempts for one then two, got %v", stub.updatedNames)
 	}
 }
 
