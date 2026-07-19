@@ -1,4 +1,4 @@
-package app
+package agent
 
 import (
 	"context"
@@ -299,8 +299,8 @@ func TestExtractMcpPinnedVersion(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := extractMcpPinnedVersion(tc.command); got != tc.want {
-				t.Errorf("extractMcpPinnedVersion(%q) = %q, want %q", tc.command, got, tc.want)
+			if got := ExtractMcpPinnedVersion(tc.command); got != tc.want {
+				t.Errorf("ExtractMcpPinnedVersion(%q) = %q, want %q", tc.command, got, tc.want)
 			}
 		})
 	}

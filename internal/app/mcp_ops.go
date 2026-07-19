@@ -9,6 +9,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/lkshrk/omni/internal/agent"
 	"github.com/lkshrk/omni/internal/config"
 )
 
@@ -52,19 +53,36 @@ type McpImportDiff struct {
 
 // WithMcpAdapters replaces the production adapter list for testing.
 func WithMcpAdapters(adapters []McpAdapter) func(*App) {
-	return func(a *App) { a.testMcpAdapters = adapters }
+	return func(a *App) {
+		var option agent.Option
+		if adapters != nil {
+			option = agent.WithMcpAdapters(adapters)
+		}
+		a.setAgentTargetOption(agentTargetsMcpOverride, option)
+	}
+}
+
+func (a *App) initAgentTargets() {
+	options := make([]agent.Option, 0, len(a.agentTargetOptions)+2)
+	var overrides uint8
+	for _, option := range a.agentTargetOptions {
+		overrides |= option.capability
+		options = append(options, option.option)
+	}
+	exec := func(ctx context.Context, name string, args ...string) (string, string, error) {
+		return a.fallbackExecutor().Run(ctx, name, args...)
+	}
+	if overrides&agentTargetsMcpOverride == 0 {
+		options = append(options, agent.WithDefaultMcpAdapters(exec, os.LookupEnv))
+	}
+	if overrides&agentTargetsPluginOverride == 0 {
+		options = append(options, agent.WithDefaultPluginAdapters(exec, os.LookupEnv))
+	}
+	a.agentTargets = mustAgentRegistry(agent.NewRegistry(options...))
 }
 
 func (a *App) mcpAdapters() []McpAdapter {
-	if a.testMcpAdapters != nil {
-		return a.testMcpAdapters
-	}
-	exec := a.fallbackExecutor().Run
-	return []McpAdapter{
-		NewClaudeCodeMcpAdapter(exec, os.LookupEnv),
-		NewCodexMcpAdapter(exec, os.LookupEnv),
-		NewGrokMcpAdapter(exec, os.LookupEnv),
-	}
+	return a.agentRegistry().McpAdapters()
 }
 
 // serverTargetsAdapter reports whether s should be applied to adapterID.

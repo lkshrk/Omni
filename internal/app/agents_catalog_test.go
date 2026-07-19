@@ -74,10 +74,8 @@ func TestInstalledAgentsSharedDirNoBinaryNeverDetected(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := InstalledAgents(home)
-	for _, a := range got {
-		if a.configDir == ".agents" {
-			t.Errorf("agent %q on shared dir with no binary must never be detected, got %+v", a.ID, got)
-		}
+	if len(got) != 0 {
+		t.Fatalf("InstalledAgents = %+v, want none from shared dir without a target binary", got)
 	}
 }
 
@@ -166,7 +164,10 @@ func TestInstalledAgentsHonorsConfigEnvOverride(t *testing.T) {
 func TestAgentHasAnySkill(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
-	codex := AgentInfo{ID: "codex", configDir: ".codex", extraSkillsDirs: []string{".agents/skills"}}
+	codex, ok := newAgentRegistry().ByID("codex")
+	if !ok {
+		t.Fatal("codex target missing")
+	}
 	// primary dir hit
 	if err := os.MkdirAll(filepath.Join(home, ".codex", "skills", "demo"), 0o755); err != nil {
 		t.Fatal(err)
@@ -218,32 +219,6 @@ func TestEffectiveSkillAgents(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// TestAgentsCatalog_ConfigDirsMatchConfigList guards against supportedAgents
-// and config.AgentConfigDirs() (the duplicate list config/migrate_v14.go and
-// dots discovery rely on, since internal/config cannot import internal/app)
-// silently drifting apart.
-func TestAgentsCatalog_ConfigDirsMatchConfigList(t *testing.T) {
-	t.Parallel()
-	catalog := make(map[string]struct{}, len(supportedAgents))
-	for _, a := range supportedAgents {
-		catalog[a.configDir] = struct{}{}
-	}
-	fromConfig := make(map[string]struct{}, len(config.AgentConfigDirs()))
-	for _, dir := range config.AgentConfigDirs() {
-		fromConfig[dir] = struct{}{}
-	}
-	for dir := range catalog {
-		if _, ok := fromConfig[dir]; !ok {
-			t.Errorf("supportedAgents configDir %q missing from config.AgentConfigDirs()", dir)
-		}
-	}
-	for dir := range fromConfig {
-		if _, ok := catalog[dir]; !ok {
-			t.Errorf("config.AgentConfigDirs() has %q not present in any supportedAgents configDir", dir)
-		}
 	}
 }
 

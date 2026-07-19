@@ -28,6 +28,17 @@ type stubMcpAdapter struct {
 	listCalls    int
 }
 
+type recordingMcpExecutor struct {
+	names []string
+	args  [][]string
+}
+
+func (e *recordingMcpExecutor) Run(_ context.Context, name string, args ...string) (string, string, error) {
+	e.names = append(e.names, name)
+	e.args = append(e.args, append([]string(nil), args...))
+	return "", "", nil
+}
+
 func (s *stubMcpAdapter) ID() string      { return s.id }
 func (s *stubMcpAdapter) Available() bool { return s.available }
 func (s *stubMcpAdapter) List(_ context.Context) ([]app.InstalledMcpServer, error) {
@@ -83,6 +94,34 @@ func loadMcpTestConfig(t *testing.T, a *app.App) *config.RootConfig {
 		t.Fatal(err)
 	}
 	return cfg
+}
+
+func TestProductionMcpAdaptersUseFallbackExecutorSetAfterNew(t *testing.T) {
+	binDir := t.TempDir()
+	writeTestExecutable(t, binDir, "claude")
+	t.Setenv("PATH", binDir)
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+
+	a := newMcpTestApp(t, config.AgentsConfig{})
+	exec := &recordingMcpExecutor{}
+	a.SetFallbackExecutor(exec)
+
+	server := config.McpServer{
+		Name:      "demo",
+		Transport: "stdio",
+		Command:   "demo-server",
+		Agents:    []string{"claude-code"},
+	}
+	res, err := a.AddMcpServer(context.Background(), server)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Errors) != 0 {
+		t.Fatalf("AddMcpServer errors = %v", res.Errors)
+	}
+	if len(exec.names) != 1 || exec.names[0] != "claude" {
+		t.Fatalf("fallback executor calls = %v %v, want one claude call", exec.names, exec.args)
+	}
 }
 
 func TestRestoreMcpServers_InstallsTargetedServer(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/lkshrk/omni/internal/config"
@@ -97,10 +98,15 @@ func (a *App) doctorAgentsPlugins(cfg *config.RootConfig) (DoctorDetailGroup, bo
 }
 
 func doctorClaudeShaSourceItem() string {
-	path, err := claudeInstalledPluginsPath()
+	home, err := os.UserHomeDir()
 	if err == nil {
+		path := filepath.Join(home, ".claude", "plugins", "installed_plugins.json")
 		if data, readErr := os.ReadFile(path); readErr == nil {
-			var file claudeInstalledPluginsFile
+			var file struct {
+				Plugins map[string][]struct {
+					GitCommitSha string `json:"gitCommitSha"`
+				} `json:"plugins"`
+			}
 			if json.Unmarshal(data, &file) == nil {
 				return "update detection: sha source ok"
 			}

@@ -13,7 +13,7 @@ import (
 
 func TestAgentConfigDotCandidateNames_DerivesFromCatalog(t *testing.T) {
 	t.Parallel()
-	names := agentConfigDotCandidateNames()
+	names := agentConfigDotCandidateNames(newAgentRegistry())
 	nameSet := make(map[string]struct{}, len(names))
 	for _, n := range names {
 		nameSet[n] = struct{}{}
@@ -38,16 +38,6 @@ func TestAgentConfigDotCandidateNames_DerivesFromCatalog(t *testing.T) {
 		}
 	}
 
-	// Multi-segment configDirs (e.g. ".gemini/antigravity") must never
-	// contribute a derived name here at all: they don't start with
-	// ".config/", so the parent-blanket-ignore risk doesn't apply, but assert
-	// the guard rejects any accidental ".config/foo/bar" catalog entry too.
-	if leaf, ok := configDotSubdirLeaf(".config/foo/bar"); ok {
-		t.Fatalf("configDotSubdirLeaf(%q) = %q, ok=true, want ok=false for multi-segment path", ".config/foo/bar", leaf)
-	}
-	if leaf, ok := configDotSubdirLeaf(".gemini/antigravity"); ok {
-		t.Fatalf("configDotSubdirLeaf(%q) = %q, ok=true, want ok=false for non-.config path", ".gemini/antigravity", leaf)
-	}
 }
 
 func TestRollbackDotsAdd_RemovesPartialTargetBeforeRestore(t *testing.T) {

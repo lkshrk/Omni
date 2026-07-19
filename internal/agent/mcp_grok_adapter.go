@@ -1,4 +1,4 @@
-package app
+package agent
 
 import (
 	"context"
@@ -101,7 +101,7 @@ func parseGrokMcpList(out string) ([]InstalledMcpServer, error) {
 		} else {
 			s.Transport = "stdio"
 			s.Command = strings.TrimSpace(strings.Join(append([]string{e.Command}, e.Args...), " "))
-			s.Version = extractMcpPinnedVersion(s.Command)
+			s.Version = ExtractMcpPinnedVersion(s.Command)
 		}
 		servers = append(servers, s)
 	}

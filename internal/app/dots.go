@@ -95,6 +95,8 @@ type DotChild struct {
 	FileCount int           `json:"file_count,omitempty"`
 	Counts    DotFileCounts `json:"counts,omitempty"`
 	Children  []DotChild    `json:"children,omitempty"`
+
+	matchedIgnored bool
 }
 
 type DotFileCounts struct {

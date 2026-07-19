@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,6 +12,61 @@ import (
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
 )
+
+func TestDotsListReportsReincludedSubfolderDrift(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	repo := filepath.Join(root, "repo")
+	cache := filepath.Join(root, "cache")
+	configPath := filepath.Join(root, "settings.json")
+	sourceDir := filepath.Join(repo, "dotfiles", "claude", ".claude", "hooks")
+	targetDir := filepath.Join(home, ".claude", "hooks")
+	for _, dir := range []string{sourceDir, targetDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("create %q: %v", dir, err)
+		}
+	}
+	writeIntegrationFile(t, filepath.Join(targetDir, "openwolf-git-gate.sh"), "local-only")
+	if err := config.Save(configPath, &config.RootConfig{
+		Version:  config.CurrentVersion,
+		Settings: config.Settings{DotsRepo: repo},
+		Hosts:    map[string][]string{"testhost": {}},
+		Groups: []*config.GroupConfig{{
+			Name:    "testhost",
+			Special: "host",
+			Dots: []config.DotEntry{{
+				Name:   "claude",
+				Path:   filepath.Join(home, ".claude"),
+				Ignore: []string{"*", "!/hooks/openwolf-git-gate.sh"},
+			}},
+		}},
+	}); err != nil {
+		t.Fatalf("save dots config: %v", err)
+	}
+
+	out := runOmniOutput(t, buildOmniBinary(t), root, isolatedTUIEnv(t, home, cache),
+		"--config", configPath, "--cache-dir", cache, "dots", "list", "--format", "json")
+	var statuses []app.DotStatus
+	if err := json.Unmarshal([]byte(out), &statuses); err != nil {
+		t.Fatalf("decode dots list: %v\n%s", err, out)
+	}
+	if len(statuses) != 1 || statuses[0].Name != "claude" {
+		t.Fatalf("dots statuses = %#v, want only claude", statuses)
+	}
+	for _, child := range statuses[0].Children {
+		if child.RelPath != "hooks" {
+			continue
+		}
+		if child.Ignored || child.State == app.DotStateIgnored {
+			t.Fatalf("hooks = %#v, want actionable state for its re-included local-only file", child)
+		}
+		if child.Counts.OutOfSync != 1 {
+			t.Fatalf("hooks counts = %#v, want one out-of-sync descendant", child.Counts)
+		}
+		return
+	}
+	t.Fatalf("hooks child missing: %#v", statuses[0].Children)
+}
 
 func TestDotsNestedIgnoredIncludeCriticalPaths(t *testing.T) {
 	for _, tc := range []struct {

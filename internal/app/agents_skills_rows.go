@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -100,14 +99,7 @@ type SkillAgentRow struct {
 }
 
 func agentHasAnySkill(home string, a AgentInfo, names []string) bool {
-	for _, dir := range agentSkillsDirs(home, a) {
-		for _, name := range names {
-			if _, err := os.Lstat(filepath.Join(dir, name)); err == nil {
-				return true
-			}
-		}
-	}
-	return false
+	return a.HasAnySkill(home, names)
 }
 
 // SkillAgentRows returns, for a package source, every installed agent with
@@ -137,7 +129,7 @@ func (a *App) SkillAgentRows(source string) ([]SkillAgentRow, error) {
 	}
 	names := packageSkills(lock, source)
 	rows := make([]SkillAgentRow, 0)
-	for _, ag := range InstalledAgents(home) {
+	for _, ag := range a.installedAgents(home) {
 		rows = append(rows, SkillAgentRow{
 			ID:        ag.ID,
 			Display:   ag.Display,
@@ -181,7 +173,7 @@ func (a *App) SkillPackageRows(ctx context.Context) ([]SkillPackageRow, error) {
 		perAgent := make(map[string]bool, len(targets))
 		shadowed := false
 		for _, id := range targets {
-			ag, ok := agentInfoByID(home, id)
+			ag, ok := a.agentInfoByID(home, id)
 			if !ok {
 				perAgent[id] = false
 				continue
@@ -242,7 +234,7 @@ func (a *App) UnmanagedSkillPackages(ctx context.Context) ([]SkillPackageRow, er
 		}
 	}
 	sort.Strings(sources)
-	installedAgents := InstalledAgents(home)
+	installedAgents := a.installedAgents(home)
 	// display-only builder: shadow warnings surface via RestoreSkills
 	pluginNames, _ := installedPluginNames(ctx, a)
 	rows := make([]SkillPackageRow, 0, len(sources))

@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/lkshrk/omni/internal/agent"
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/dots"
@@ -29,6 +30,16 @@ import (
 	"github.com/lkshrk/omni/internal/testguard"
 )
 
+const (
+	agentTargetsMcpOverride uint8 = 1 << iota
+	agentTargetsPluginOverride
+)
+
+type agentTargetOption struct {
+	capability uint8
+	option     agent.Option
+}
+
 type App struct {
 	ConfigPath string // full path to settings.json
 	CacheDir   string // where omni.db lives; derived from XDG_CACHE_HOME when empty
@@ -40,8 +51,8 @@ type App struct {
 	githubAPI          string
 	githubClient       *http.Client
 	testMode           bool
-	testMcpAdapters    []McpAdapter
-	testPluginAdapters []PluginAdapter
+	agentTargetOptions []agentTargetOption
+	agentTargets       *agent.Registry
 
 	// configMu serialises all read-modify-write cycles on settings.json. Held
 	// for the duration of withConfig; read-only loadConfig calls do not need it.
@@ -66,6 +77,23 @@ type App struct {
 	// dotSvc owns the App-layer dots orchestration (see dots_service.go). Built
 	// once in New; holds a back to App only through the narrow dotsHost seam.
 	dotSvc *dotsService
+}
+
+func (a *App) setAgentTargetOption(capability uint8, option agent.Option) {
+	for i := range a.agentTargetOptions {
+		if a.agentTargetOptions[i].capability != capability {
+			continue
+		}
+		if option == nil {
+			a.agentTargetOptions = slices.Delete(a.agentTargetOptions, i, i+1)
+		} else {
+			a.agentTargetOptions[i].option = option
+		}
+		return
+	}
+	if option != nil {
+		a.agentTargetOptions = append(a.agentTargetOptions, agentTargetOption{capability: capability, option: option})
+	}
 }
 
 func (a *App) requireSafeTestHomeForDots() error {
@@ -176,6 +204,7 @@ func New(configPath string, opts ...func(*App)) *App {
 	for _, opt := range opts {
 		opt(a)
 	}
+	a.initAgentTargets()
 	a.dotSvc = newDotsService(a)
 	return a
 }

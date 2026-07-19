@@ -3,10 +3,10 @@ package app
 import (
 	"context"
 	"fmt"
-	"os"
 	"slices"
 	"sort"
 
+	"github.com/lkshrk/omni/internal/agent"
 	"github.com/lkshrk/omni/internal/config"
 )
 
@@ -38,19 +38,17 @@ type PluginImportDiff struct {
 }
 
 func WithPluginAdapters(adapters []PluginAdapter) func(*App) {
-	return func(a *App) { a.testPluginAdapters = adapters }
+	return func(a *App) {
+		var option agent.Option
+		if adapters != nil {
+			option = agent.WithPluginAdapters(adapters)
+		}
+		a.setAgentTargetOption(agentTargetsPluginOverride, option)
+	}
 }
 
 func (a *App) pluginAdapters() []PluginAdapter {
-	if a.testPluginAdapters != nil {
-		return a.testPluginAdapters
-	}
-	exec := a.fallbackExecutor().Run
-	return []PluginAdapter{
-		NewClaudeCodePluginAdapter(exec, os.LookupEnv),
-		NewCodexPluginAdapter(exec, os.LookupEnv),
-		NewGrokPluginAdapter(exec, os.LookupEnv),
-	}
+	return a.agentRegistry().PluginAdapters()
 }
 
 func pluginTargetsAdapter(p config.Plugin, adapterID string) bool {

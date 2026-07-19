@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/lkshrk/omni/internal/agent"
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/dots"
 )
@@ -54,9 +55,7 @@ var wellKnownDotPaths = map[string]string{
 	"gnupg":             "~/.gnupg",
 }
 
-var ignoredDotCandidateNames = buildIgnoredDotCandidateNames()
-
-func buildIgnoredDotCandidateNames() map[string]struct{} {
+func buildIgnoredDotCandidateNames(registry *agent.Registry) map[string]struct{} {
 	names := map[string]struct{}{
 		"cache":        {},
 		"caches":       {},
@@ -67,62 +66,16 @@ func buildIgnoredDotCandidateNames() map[string]struct{} {
 		"tmp":          {},
 		"trash":        {},
 	}
-	for _, name := range agentConfigDotCandidateNames() {
+	for _, name := range agentConfigDotCandidateNames(registry) {
 		names[name] = struct{}{}
 	}
 	return names
 }
 
-// agentConfigDotCandidateNames derives the ~/.config/<name> leaf names that
-// dotfiles discovery must never surface as candidates, because they are
-// machine-managed by the agents feature/CLIs (internal/app/agents_catalog.go
-// supportedAgents), not user dotfiles.
-//
-// Only supportedAgents configDir values that live directly under ".config/"
-// are included, using the exact leaf directory name — this is the only
-// namespace discoverLocalConfigDotsEntries scans generically (via
-// os.ReadDir(~/.config)). Home-level agent dirs (".claude", ".codex", ".grok",
-// ".agents", ".gemini", etc.) are never swept up by that generic scan, so they
-// are intentionally excluded here.
-//
-// A configDir that is itself a parent of other catalog entries (e.g.
-// ".gemini" parenting ".gemini/antigravity") is excluded by construction:
-// only entries with a literal "config/" prefix and no further nesting below
-// the leaf are derived, and only the leaf segment is used — never a partial
-// or ancestor path — so a legitimate dotfile dir sharing a name prefix can
-// never be blanket-ignored.
-func agentConfigDotCandidateNames() []string {
-	seen := make(map[string]struct{})
-	var names []string
-	for _, agent := range supportedAgents {
-		leaf, ok := configDotSubdirLeaf(agent.configDir)
-		if !ok {
-			continue
-		}
-		if _, dup := seen[leaf]; dup {
-			continue
-		}
-		seen[leaf] = struct{}{}
-		names = append(names, leaf)
-	}
-	return names
-}
-
-// configDotSubdirLeaf reports whether configDir is a direct child of
-// ".config" (exactly one path segment below it, e.g. ".config/crush") and, if
-// so, returns that leaf segment. Multi-level entries like ".config/foo/bar"
-// are excluded: deriving only the top segment ("foo") would ignore siblings
-// under ".config/foo" that the catalog does not actually own.
-func configDotSubdirLeaf(configDir string) (string, bool) {
-	const prefix = ".config/"
-	if !strings.HasPrefix(configDir, prefix) {
-		return "", false
-	}
-	rest := strings.TrimPrefix(configDir, prefix)
-	if rest == "" || strings.Contains(rest, "/") {
-		return "", false
-	}
-	return rest, true
+// agentConfigDotCandidateNames returns agent-owned direct children of
+// ~/.config that dotfiles discovery must not surface as user dotfiles.
+func agentConfigDotCandidateNames(registry *agent.Registry) []string {
+	return registry.ConfigDotCandidateNames()
 }
 
 var claudeDotIgnorePatterns = dotAllowlistIgnorePatterns(
@@ -162,14 +115,18 @@ var omniDotIgnorePatterns = dotAllowlistIgnorePatterns(
 // DiscoverDotsEntries returns initial dots candidates from the managed repo
 // subtree, ~/.config, and well-known home-level dotfile paths.
 func DiscoverDotsEntries(repoPath string) ([]config.DotEntry, error) {
-	return discoverDotsEntries(repoPath, false)
+	return discoverDotsEntries(repoPath, false, buildIgnoredDotCandidateNames(newAgentRegistry()))
 }
 
-func discoverDotsEntriesIncludingIgnored(repoPath string) ([]config.DotEntry, error) {
-	return discoverDotsEntries(repoPath, true)
+func (a *App) discoverDotsEntries(repoPath string, includeIgnored bool) ([]config.DotEntry, error) {
+	return discoverDotsEntries(repoPath, includeIgnored, buildIgnoredDotCandidateNames(a.agentRegistry()))
 }
 
-func discoverDotsEntries(repoPath string, includeIgnored bool) ([]config.DotEntry, error) {
+func (a *App) discoverDotsEntriesIncludingIgnored(repoPath string) ([]config.DotEntry, error) {
+	return a.discoverDotsEntries(repoPath, true)
+}
+
+func discoverDotsEntries(repoPath string, includeIgnored bool, ignoredNames map[string]struct{}) ([]config.DotEntry, error) {
 	info, err := os.Lstat(repoPath)
 	if err != nil {
 		return nil, fmt.Errorf("repo path %q: %w", repoPath, err)
@@ -187,7 +144,7 @@ func discoverDotsEntries(repoPath string, includeIgnored bool) ([]config.DotEntr
 		if entry.Name == "" || entry.Path == "" {
 			return
 		}
-		if ignoredDotCandidate(entry.Name) {
+		if ignoredDotCandidate(entry.Name, ignoredNames) {
 			if !includeIgnored {
 				return
 			}
@@ -207,14 +164,14 @@ func discoverDotsEntries(repoPath string, includeIgnored bool) ([]config.DotEntr
 		out = append(out, entry)
 	}
 
-	if entries, err := discoverRepoDotsEntries(repoPath, includeIgnored); err != nil {
+	if entries, err := discoverRepoDotsEntries(repoPath, includeIgnored, ignoredNames); err != nil {
 		return nil, err
 	} else {
 		for _, entry := range entries {
 			add(entry)
 		}
 	}
-	if entries, err := discoverLocalConfigDotsEntries(includeIgnored); err != nil {
+	if entries, err := discoverLocalConfigDotsEntries(includeIgnored, ignoredNames); err != nil {
 		return nil, err
 	} else {
 		for _, entry := range entries {
@@ -294,7 +251,7 @@ func (a *App) BootstrapDotsEntries() ([]config.DotEntry, error) {
 		if err := a.requireSafeTestDotsMutation(repoPath, nil); err != nil {
 			return err
 		}
-		candidates, err := DiscoverDotsEntries(repoPath)
+		candidates, err := a.discoverDotsEntries(repoPath, false)
 		if err != nil {
 			return fmt.Errorf("dots bootstrap: discover entries: %w", err)
 		}
@@ -342,7 +299,7 @@ func (a *App) DotsAddDiscoveredEntryContext(ctx context.Context, nameOrPath, gro
 		if err := a.requireSafeTestDotsMutation(repoPath, nil); err != nil {
 			return err
 		}
-		candidates, err := DiscoverDotsEntries(repoPath)
+		candidates, err := a.discoverDotsEntries(repoPath, false)
 		if err != nil {
 			return fmt.Errorf("dots add discovered: discover entries: %w", err)
 		}
@@ -419,7 +376,7 @@ func (a *App) DiscoverUntrackedDotsEntries() ([]config.DotEntry, error) {
 	if err := a.requireSafeTestDotsMutation(repoPath, nil); err != nil {
 		return nil, err
 	}
-	candidates, err := DiscoverDotsEntries(repoPath)
+	candidates, err := a.discoverDotsEntries(repoPath, false)
 	if err != nil {
 		return nil, fmt.Errorf("dots discover: discover entries: %w", err)
 	}
@@ -457,7 +414,7 @@ func untrackedDotCandidates(rootCfg *config.RootConfig, candidates []config.DotE
 	return out
 }
 
-func discoverRepoDotsEntries(repoPath string, includeIgnored bool) ([]config.DotEntry, error) {
+func discoverRepoDotsEntries(repoPath string, includeIgnored bool, ignoredNames map[string]struct{}) ([]config.DotEntry, error) {
 	dotfilesPath := filepath.Join(repoPath, dotsContentDirName)
 	info, err := os.Lstat(dotfilesPath)
 	if err != nil {
@@ -479,14 +436,14 @@ func discoverRepoDotsEntries(repoPath string, includeIgnored bool) ([]config.Dot
 	}
 	var out []config.DotEntry
 	for _, entry := range entries {
-		if candidate, ok := dotEntryForRepoPackage(dotfilesPath, entry.Name(), entry.IsDir(), includeIgnored); ok {
+		if candidate, ok := dotEntryForRepoPackage(dotfilesPath, entry.Name(), entry.IsDir(), includeIgnored, ignoredNames); ok {
 			out = append(out, candidate)
 		}
 	}
 	return out, nil
 }
 
-func discoverLocalConfigDotsEntries(includeIgnored bool) ([]config.DotEntry, error) {
+func discoverLocalConfigDotsEntries(includeIgnored bool, ignoredNames map[string]struct{}) ([]config.DotEntry, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("home dir: %w", err)
@@ -505,7 +462,7 @@ func discoverLocalConfigDotsEntries(includeIgnored bool) ([]config.DotEntry, err
 		if strings.HasPrefix(name, ".") {
 			continue
 		}
-		ignored := ignoredDotCandidate(name)
+		ignored := ignoredDotCandidate(name, ignoredNames)
 		if ignored && !includeIgnored {
 			continue
 		}
@@ -537,12 +494,12 @@ func discoverLocalWellKnownDotsEntries() ([]config.DotEntry, error) {
 	return out, nil
 }
 
-func dotEntryForRepoPackage(stowPath, name string, isDir, includeIgnored bool) (config.DotEntry, bool) {
+func dotEntryForRepoPackage(stowPath, name string, isDir, includeIgnored bool, ignoredNames map[string]struct{}) (config.DotEntry, bool) {
 	canon := strings.TrimPrefix(name, ".")
 	if strings.Contains(canon, "@") {
 		return config.DotEntry{}, false
 	}
-	if ignoredDotCandidate(canon) {
+	if ignoredDotCandidate(canon, ignoredNames) {
 		if !includeIgnored || !isDir {
 			return config.DotEntry{}, false
 		}
@@ -589,8 +546,8 @@ func wellKnownDotNameForPath(path string) (string, bool) {
 	return "", false
 }
 
-func ignoredDotCandidate(name string) bool {
+func ignoredDotCandidate(name string, ignoredNames map[string]struct{}) bool {
 	canon := strings.Trim(strings.ToLower(strings.TrimPrefix(name, ".")), " ")
-	_, ok := ignoredDotCandidateNames[canon]
+	_, ok := ignoredNames[canon]
 	return ok
 }

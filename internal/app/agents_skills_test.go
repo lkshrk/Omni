@@ -258,13 +258,15 @@ func TestSkillListArgs(t *testing.T) {
 
 func TestSupportedAgentDisplaysAreUniqueForSkillsListMapping(t *testing.T) {
 	t.Parallel()
-	seen := make(map[string]string, len(supportedAgents))
-	for _, agent := range supportedAgents {
+	registry := newAgentRegistry()
+	targets := registry.All()
+	seen := make(map[string]string, len(targets))
+	for _, agent := range targets {
 		if previous, ok := seen[agent.Display]; ok {
 			t.Fatalf("agents %q and %q share upstream display name %q", previous, agent.ID, agent.Display)
 		}
 		seen[agent.Display] = agent.ID
-		if got := skillAgentDisplay(agent.ID); got != agent.Display {
+		if got := skillAgentDisplay(registry, agent.ID); got != agent.Display {
 			t.Fatalf("skillAgentDisplay(%q) = %q, want %q", agent.ID, got, agent.Display)
 		}
 	}
@@ -306,7 +308,7 @@ func TestVerifyRestoredSkillTargetsAcceptsEveryExpectedAgentLink(t *testing.T) {
 		{Name: "one", Scope: "global", Agents: []string{"Claude Code", "Codex"}},
 		{Name: "two", Scope: "global", Agents: []string{"Claude Code", "Codex"}},
 	}
-	res := verifyRestoredSkillTargets(pkgs, lock, entries, RestoreSkillsResult{Installed: []string{"o/r"}})
+	res := verifyRestoredSkillTargets(newAgentRegistry(), pkgs, lock, entries, RestoreSkillsResult{Installed: []string{"o/r"}})
 	if !reflect.DeepEqual(res.Installed, []string{"o/r"}) || len(res.Failed) != 0 {
 		t.Fatalf("result = %+v, want verified install", res)
 	}
@@ -324,7 +326,7 @@ func TestVerifyRestoredSkillTargetsIgnoresStaleLockEntries(t *testing.T) {
 	entries := []skillsCLIListEntry{
 		{Name: "current", Scope: "global", Agents: []string{"Claude Code", "Codex"}},
 	}
-	res := verifyRestoredSkillTargets(pkgs, lock, entries, RestoreSkillsResult{Installed: []string{"o/r"}})
+	res := verifyRestoredSkillTargets(newAgentRegistry(), pkgs, lock, entries, RestoreSkillsResult{Installed: []string{"o/r"}})
 	if !reflect.DeepEqual(res.Installed, []string{"o/r"}) || len(res.Failed) != 0 {
 		t.Fatalf("result = %+v, stale lock entries must not fail verification", res)
 	}
@@ -344,7 +346,7 @@ func TestVerifyRestoredSkillTargetsRejectsMissingAgentLink(t *testing.T) {
 		{Name: "ok", Scope: "global", Agents: []string{"Codex"}},
 		{Name: "broken", Scope: "global", Agents: []string{"Codex"}},
 	}
-	res := verifyRestoredSkillTargets(pkgs, lock, entries, RestoreSkillsResult{
+	res := verifyRestoredSkillTargets(newAgentRegistry(), pkgs, lock, entries, RestoreSkillsResult{
 		Installed: []string{"ok/r", "broken/r"},
 		Failed:    []SkillFailure{{Name: "earlier/r", Message: "boom"}},
 	})
@@ -366,7 +368,7 @@ func TestVerifyRestoredSkillTargetsRejectsProjectScopeRecord(t *testing.T) {
 	pkgs := []resolvedPackage{{SkillPackage: config.SkillPackage{Source: "o/r", Agents: []string{"codex"}}}}
 	lock := &config.SkillLockFile{Skills: map[string]config.SkillLockEntry{"one": {Source: "o/r"}}}
 	entries := []skillsCLIListEntry{{Name: "one", Scope: "project", Agents: []string{"Codex"}}}
-	res := verifyRestoredSkillTargets(pkgs, lock, entries, RestoreSkillsResult{Installed: []string{"o/r"}})
+	res := verifyRestoredSkillTargets(newAgentRegistry(), pkgs, lock, entries, RestoreSkillsResult{Installed: []string{"o/r"}})
 	if len(res.Installed) != 0 || len(res.Failed) != 1 {
 		t.Fatalf("result = %+v, project record must not verify global restore", res)
 	}
