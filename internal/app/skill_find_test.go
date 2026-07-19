@@ -6,6 +6,7 @@ import (
 )
 
 func TestParseFindOutput(t *testing.T) {
+	t.Parallel()
 	out := "" +
 		"vercel-labs/agent-skills@find-skills  1.2k installs\n" +
 		"└ https://skills.sh/find-skills\n" +
@@ -27,12 +28,14 @@ func TestParseFindOutput(t *testing.T) {
 }
 
 func TestParseFindOutputEmpty(t *testing.T) {
+	t.Parallel()
 	if got := parseFindOutput("No skills found.\n"); len(got) != 0 {
 		t.Errorf("want 0 results, got %+v", got)
 	}
 }
 
 func TestFindSkillPackagesParsesRunnerOutput(t *testing.T) {
+	t.Parallel()
 	var gotName string
 	var gotArgs []string
 	fakeExec := func(_ context.Context, name string, args ...string) (string, string, error) {

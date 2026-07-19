@@ -9,6 +9,7 @@ import (
 )
 
 func TestStartupSnapshotBuildsConfigDerivedState(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	system := &stubProvider{name: "system", available: true}
 	apt := &stubProvider{name: "apt", available: true}
@@ -88,6 +89,7 @@ func TestStartupSnapshotBuildsConfigDerivedState(t *testing.T) {
 }
 
 func TestCreateEmptyConfigStartupStateCreatesConfigAndReturnsSetupState(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	a, _ := newImportApp(t, brew)
 	if a.HasConfig() {
@@ -113,6 +115,7 @@ func TestCreateEmptyConfigStartupStateCreatesConfigAndReturnsSetupState(t *testi
 }
 
 func TestToolScopeStateBuildsIgnoredToolsAndProviderPins(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	host := testShortHostname()
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -164,6 +167,7 @@ func TestToolScopeStateBuildsIgnoredToolsAndProviderPins(t *testing.T) {
 }
 
 func TestToolScopeDisplayStateBuildsTUIDerivedScopeMaps(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	host := testShortHostname()
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -203,6 +207,7 @@ func TestToolScopeDisplayStateBuildsTUIDerivedScopeMaps(t *testing.T) {
 }
 
 func TestToolScopeDisplayStateWithFallbackUsesFallbackOnlyWhenLoadedHostIgnoresAreEmpty(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	host := testShortHostname()
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -244,6 +249,7 @@ func TestToolScopeDisplayStateWithFallbackUsesFallbackOnlyWhenLoadedHostIgnoresA
 }
 
 func TestToolGroupStateBuildsHostFilteredLabelsAndGroupNames(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	host := testShortHostname()
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{

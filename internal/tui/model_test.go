@@ -85,6 +85,7 @@ func shortHostname() string {
 }
 
 func TestDotsAvailabilityHelpersUseCachedSnapshot(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	cacheDotsAvailability(&m, app.DotsSyncAvailability{
 		Configured: true,
@@ -215,6 +216,7 @@ func saveScanPlanTestConfig(t *testing.T, a *app.App, settings config.Settings, 
 }
 
 func TestModel_CursorNavigation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		msgs       []tea.Msg
@@ -243,6 +245,7 @@ func TestModel_CursorNavigation(t *testing.T) {
 }
 
 func TestModel_ProviderCandidateNavigation(t *testing.T) {
+	t.Parallel()
 	tools := []*app.ToolView{
 		{Name: "prettier", Provider: "", Installed: false, Tracked: true},
 		{Name: "eslint", Provider: "", Installed: false, Tracked: true},
@@ -292,6 +295,7 @@ func TestModel_ProviderCandidateNavigation(t *testing.T) {
 }
 
 func TestProviderCandidateOptions_PreferredThenAlphabetical(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "prettier", Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 	m.toolProviderCandidates = map[string][]config.ToolInstallSpec{
@@ -310,6 +314,7 @@ func TestProviderCandidateOptions_PreferredThenAlphabetical(t *testing.T) {
 }
 
 func TestModelApplyFilter_HidesSystemAndOSProviderTools(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{
 		{Name: "git", Provider: "brew", Installed: true, Tracked: true},
 		{Name: "ls", Provider: "system", Installed: true, Tracked: true},
@@ -331,6 +336,7 @@ func TestModelApplyFilter_HidesSystemAndOSProviderTools(t *testing.T) {
 // user-visible assignment and must NOT be hidden — only provider-inventory
 // tools (the hostInventoryTools map) are filtered out.
 func TestModelApplyFilter_KeepsHostGroupTools(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{
 		{Name: "git", Provider: "brew", Installed: true, Tracked: true},
 		{Name: "ls", Provider: "system", Installed: true, Tracked: true},
@@ -347,6 +353,7 @@ func TestModelApplyFilter_KeepsHostGroupTools(t *testing.T) {
 }
 
 func TestModel_TopBottomOnEmptyList(t *testing.T) {
+	t.Parallel()
 	t.Run("home on empty list stays at 0", func(t *testing.T) {
 		m := drive(baseModel(nil), pressHome())
 		if m.cursor != 0 {
@@ -363,6 +370,7 @@ func TestModel_TopBottomOnEmptyList(t *testing.T) {
 }
 
 func TestApplyFilter_PreservesWorkflowCursor(t *testing.T) {
+	t.Parallel()
 	t.Run("same index selects next visible row after current row disappears", func(t *testing.T) {
 		m := baseModel(threeTools())
 		m.cursor = 1
@@ -416,6 +424,7 @@ func TestApplyFilter_PreservesWorkflowCursor(t *testing.T) {
 }
 
 func TestApplyFilter_SortsToolsBySectionThenName(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{
 		{Name: "zoxide", Provider: "brew", Installed: true, Tracked: true},
 		{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
@@ -440,6 +449,7 @@ func TestApplyFilter_SortsToolsBySectionThenName(t *testing.T) {
 }
 
 func TestApplyFilter_KeepsDiscoveredOrphansVisibleOutOfSync(t *testing.T) {
+	t.Parallel()
 	tracked := &app.ToolView{Name: "git", Provider: "brew", Installed: true, Tracked: true}
 	orphan := &app.ToolView{Name: "utm", Provider: "brew", Installed: true, Tracked: false}
 	m := baseModel([]*app.ToolView{tracked})
@@ -468,7 +478,10 @@ func toolNames(tools []*app.ToolView) []string {
 }
 
 func TestModel_PageNavigation(t *testing.T) {
+	t.Parallel(
 	// Build a longer list to make page/half-page meaningful.
+	)
+
 	manyTools := func(n int) []*app.ToolView {
 		tools := make([]*app.ToolView, n)
 		for i := range tools {
@@ -535,6 +548,7 @@ func TestModel_PageNavigation(t *testing.T) {
 }
 
 func TestModel_FilterMode(t *testing.T) {
+	t.Parallel()
 	t.Run("slash enters filter mode", func(t *testing.T) {
 		m := drive(baseModel(threeTools()), pressRune('/'))
 		if m.mode != viewSearch {
@@ -584,8 +598,11 @@ func TestModel_FilterMode(t *testing.T) {
 }
 
 func TestModel_EnterKey(t *testing.T) {
+	t.Parallel(
 	// enter = primary action: installs if tool is missing, no-op if already installed.
 	// Mode never changes (no separate detail view — accordion expansion is inline).
+	)
+
 	t.Run("enter on missing tool triggers install (loading=true)", func(t *testing.T) {
 		// threeTools all have Installed=false by default.
 		m := drive(baseModel(threeTools()), pressEnter())
@@ -909,6 +926,7 @@ func TestModel_ToolsLoadedMsg(t *testing.T) {
 }
 
 func TestModel_SetupMode(t *testing.T) {
+	t.Parallel()
 	setupModel := func() Model {
 		return Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), mode: viewSetup}
 	}
@@ -959,6 +977,7 @@ func TestModel_SetupMode(t *testing.T) {
 }
 
 func TestModel_OpCompleteMsg(t *testing.T) {
+	t.Parallel()
 	t.Run("success sets checkmark status", func(t *testing.T) {
 		got := drive(baseModel(nil), opCompleteMsg{message: "sync complete"})
 		if got.statusMsg != "✓ sync complete" {
@@ -987,6 +1006,7 @@ func TestModel_OpCompleteMsg(t *testing.T) {
 func pressCtrlC() tea.Msg { return tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl} }
 
 func TestModel_HelpOverlay(t *testing.T) {
+	t.Parallel()
 	t.Run("? toggles help overlay on", func(t *testing.T) {
 		m := drive(baseModel(threeTools()), pressRune('?'))
 		if !m.help.ShowAll {
@@ -1034,6 +1054,7 @@ func TestModel_HelpOverlay(t *testing.T) {
 }
 
 func TestModel_ConfirmQuit(t *testing.T) {
+	t.Parallel()
 	t.Run("first q sets confirmQuit and shows prompt", func(t *testing.T) {
 		m := drive(baseModel(nil), pressRune('q'))
 		if !m.confirmQuit {
@@ -1095,6 +1116,7 @@ func TestModel_ConfirmQuit(t *testing.T) {
 }
 
 func TestModel_QuitCancelsBackgroundContext(t *testing.T) {
+	t.Parallel()
 	parent := context.Background()
 	m := New(parent, nil)
 
@@ -1127,6 +1149,7 @@ func TestModel_QuitCancelsBackgroundContext(t *testing.T) {
 }
 
 func TestModel_CancelledOperationDoesNotCreateRowError(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.loading = true
 	m.startRowOperation("git", "brew", "Deleting git…")
@@ -1144,6 +1167,7 @@ func TestModel_CancelledOperationDoesNotCreateRowError(t *testing.T) {
 }
 
 func TestModel_KeysIgnoredWhileLoading(t *testing.T) {
+	t.Parallel()
 	m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true}
 	got := drive(m, pressRune('j'), pressRune('j'), pressEnter(), pressRune('/'), pressRune(':'))
 
@@ -1156,8 +1180,11 @@ func TestModel_KeysIgnoredWhileLoading(t *testing.T) {
 }
 
 func TestModel_SettingsTab(t *testing.T) {
+	t.Parallel(
 	// Tab order: Dashboard → Tools → Agents → Dots → Groups → Settings → Dashboard.
 	// Within Groups, j/k cascades through sections; Tab switches main tabs.
+	)
+
 	t.Run("tab from dashboard opens list", func(t *testing.T) {
 		m := baseModel(threeTools())
 		m.mode = viewStatus
@@ -1249,6 +1276,7 @@ func TestModel_SettingsTab(t *testing.T) {
 }
 
 func TestModel_StatusTabActions(t *testing.T) {
+	t.Parallel()
 	t.Run("enter starts doctor without locking loading", func(t *testing.T) {
 		m := baseModel(nil)
 		m.mode = viewStatus
@@ -1285,6 +1313,7 @@ func TestModel_StatusTabActions(t *testing.T) {
 }
 
 func TestModel_SettingsToggle(t *testing.T) {
+	t.Parallel()
 	t.Run("space toggles auto import on", func(t *testing.T) {
 		m := drive(baseModel(nil), append(toSettings(), pressRune(' '))...)
 		if !m.settings.AutoImport {
@@ -1308,6 +1337,7 @@ func TestModel_SettingsToggle(t *testing.T) {
 }
 
 func TestModel_ToolsLoadedMsg_Settings(t *testing.T) {
+	t.Parallel()
 	m := Model{keys: DefaultKeyMap(), spinner: spinner.New(), filter: textinput.New(), loading: true}
 	got := drive(m, toolsLoadedMsg{
 		tools:    threeTools(),
@@ -1319,6 +1349,7 @@ func TestModel_ToolsLoadedMsg_Settings(t *testing.T) {
 }
 
 func TestSectionOf(t *testing.T) {
+	t.Parallel()
 	if sectionOf(&app.ToolView{Installed: true, Outdated: true}) != sectionUpdates {
 		t.Error("installed+outdated → sectionUpdates")
 	}
@@ -1331,6 +1362,7 @@ func TestSectionOf(t *testing.T) {
 }
 
 func TestCountSection(t *testing.T) {
+	t.Parallel()
 	tools := []*app.ToolView{
 		{Installed: true, Outdated: true, Tracked: true},
 		{Installed: true, Outdated: false, Tracked: true},
@@ -1350,6 +1382,7 @@ func TestCountSection(t *testing.T) {
 }
 
 func TestModel_SettingsCursor(t *testing.T) {
+	t.Parallel()
 	t.Run("j moves cursor down in settings", func(t *testing.T) {
 		m := drive(baseModel(nil), append(toSettings(), pressRune('j'))...)
 		if m.settingsCursor != 1 {
@@ -1550,6 +1583,7 @@ func TestModel_SettingsWatchTogglePromptsForStow(t *testing.T) {
 }
 
 func TestModel_SettingsServiceToggleRequiresDotsRepo(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.settingsCursor = settingsRowDotsReminder
 
@@ -1612,6 +1646,7 @@ func TestModel_SettingsServiceTogglesUseAppDotsConfig(t *testing.T) {
 }
 
 func TestModel_SettingsReminderIntervalPickerSetsPendingValue(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.settingsCursor = settingsRowDotsReminderInterval
 	m.dotsReminderInterval = 15 * time.Minute
@@ -1721,6 +1756,7 @@ func TestModel_SettingsWatchDebouncePickerPromptsForStowBeforeInstalledServiceUp
 }
 
 func TestModel_DotsWatchDebounceRevertsWhenInstalledServiceUpdateFails(t *testing.T) {
+	t.Parallel()
 	oldService := &app.DotsWatchService{Installed: true, Debounce: time.Second}
 	m := baseModel(nil)
 	m.dotsWatchService = oldService
@@ -1749,6 +1785,7 @@ func TestModel_DotsWatchDebounceRevertsWhenInstalledServiceUpdateFails(t *testin
 }
 
 func TestModel_DotsReminderIntervalRevertsWhenInstalledServiceUpdateFails(t *testing.T) {
+	t.Parallel()
 	oldService := &app.DotsReminderService{Installed: true, Interval: 2 * time.Hour}
 	m := baseModel(nil)
 	m.dotsReminderService = oldService
@@ -1777,6 +1814,7 @@ func TestModel_DotsReminderIntervalRevertsWhenInstalledServiceUpdateFails(t *tes
 }
 
 func TestModel_DotsServiceChangedMsgUpdatesStatus(t *testing.T) {
+	t.Parallel()
 	got := drive(baseModel(nil), dotsServiceChangedMsg{
 		kind:     dotsReminderServiceKind,
 		enabled:  true,
@@ -1797,6 +1835,7 @@ func TestModel_DotsServiceChangedMsgUpdatesStatus(t *testing.T) {
 }
 
 func TestModel_DoctorDoneMsgStoresResult(t *testing.T) {
+	t.Parallel()
 	result := &app.DoctorResult{Summary: app.DoctorSummary{OK: 2, Warn: 1}}
 	m := baseModel(nil)
 	m.doctorRunning = true
@@ -1814,6 +1853,7 @@ func TestModel_DoctorDoneMsgStoresResult(t *testing.T) {
 }
 
 func TestModel_DoctorDoneMsgDoesNotClearUnrelatedLoading(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.loading = true
 	m.doctorRunning = true
@@ -1860,6 +1900,7 @@ func setupDotsCommitModel(mode viewMode, hasDoctorResult bool, doctorRunning boo
 }
 
 func TestRefreshDoctorAfterFix_DotsCommitted(t *testing.T) {
+	t.Parallel()
 	t.Run("re-runs doctor when viewStatus and doctorResult is set", func(t *testing.T) {
 		m := setupDotsCommitModel(viewStatus, true, false)
 		msg := committedMsgForModel(m)
@@ -1926,6 +1967,7 @@ func TestRefreshDoctorAfterFix_DotsCommitted(t *testing.T) {
 }
 
 func TestRefreshDoctorAfterFix_DotsSynced(t *testing.T) {
+	t.Parallel()
 	t.Run("re-runs doctor when viewStatus and doctorResult is set", func(t *testing.T) {
 		m := baseModel(nil)
 		m.mode = viewStatus
@@ -1972,7 +2014,10 @@ func TestRefreshDoctorAfterFix_DotsSynced(t *testing.T) {
 }
 
 func TestModel_DotsRepoEdit(t *testing.T) {
+	t.Parallel(
 	// navigate to settings, then down to settingsRowDotsRepo (row 7)
+	)
+
 	toRow4 := func() []tea.Msg {
 		return append(toSettings(), nj(settingsRowDotsRepo)...)
 	}
@@ -2032,6 +2077,7 @@ func TestModel_DotsRepoEdit(t *testing.T) {
 }
 
 func TestModel_HostsTab(t *testing.T) {
+	t.Parallel()
 	t.Run("tab from dots opens hosts", func(t *testing.T) {
 		m := drive(baseModel(threeTools()), pressTab(), pressTab(), pressTab())
 		if m.mode != viewGroups {
@@ -2056,6 +2102,7 @@ func TestModel_HostsTab(t *testing.T) {
 }
 
 func TestModel_ProviderSubtabs(t *testing.T) {
+	t.Parallel()
 	modelWithProviders := func() Model {
 		m := baseModel(threeTools()) // git/brew, node/npm, python/pip
 		m.applyFilter()              // populates providerNames from allTools
@@ -2174,6 +2221,7 @@ func TestModel_ProviderSubtabs(t *testing.T) {
 }
 
 func TestHandleOpCompleteMsg_RemovesInstalledSearchResultAndCache(t *testing.T) {
+	t.Parallel()
 	key := toolKey("ripgrep", "system")
 	stale := &app.ToolView{Name: "ripgrep", Provider: "system", Package: "ripgrep", Tracked: false}
 	installed := &app.ToolView{Name: "ripgrep", Provider: "system", Package: "ripgrep", Installed: true, Tracked: true}
@@ -2255,6 +2303,7 @@ func TestModel_GroupPicker(t *testing.T) {
 }
 
 func TestModel_DotsRootRowsOpenGroupMembershipPicker(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
@@ -2298,6 +2347,7 @@ func TestModel_DotsRootRowsOpenGroupMembershipPicker(t *testing.T) {
 }
 
 func TestModel_GroupMembershipPicker_SpaceTogglesConfirmSaves(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{{Name: "ripgrep", Provider: "system", Tracked: true}})
 	key := toolKey("ripgrep", "system")
 	m.mode = viewGroupMembership
@@ -2370,6 +2420,7 @@ func TestModel_GroupMembershipPicker_TargetSurvivesCursorMove(t *testing.T) {
 }
 
 func TestModel_GroupPickerUsesCapturedClaimToolAfterCursorMoves(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{
 		{Name: "ripgrep", Provider: "system", Installed: true},
 		{Name: "zoxide", Provider: "system", Installed: true},
@@ -2388,6 +2439,7 @@ func TestModel_GroupPickerUsesCapturedClaimToolAfterCursorMoves(t *testing.T) {
 }
 
 func TestModel_GroupPickerUsesCapturedInstallToolAfterCursorMoves(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{
 		{Name: "ripgrep", Provider: "system"},
 		{Name: "zoxide", Provider: "system"},
@@ -2444,6 +2496,7 @@ func TestModel_GroupMembershipPicker_NewGroupDraft(t *testing.T) {
 }
 
 func TestModel_ProviderScopePicker_SpaceSelectsAndSaves(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{{Name: "ripgrep", Provider: "system", Installed: true, InstalledWith: "brew", Tracked: true}})
 	m.mode = viewProviderScope
 	m.scopeOptions = []scopeOption{
@@ -2467,6 +2520,7 @@ func TestModel_ProviderScopePicker_SpaceSelectsAndSaves(t *testing.T) {
 }
 
 func TestModel_IgnoreScopePicker_SpaceStillStages(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{{Name: "ripgrep", Provider: "system", Tracked: true}})
 	m.mode = viewIgnoreScope
 	m.scopeOptions = []scopeOption{
@@ -2492,6 +2546,7 @@ func TestModel_IgnoreScopePicker_SpaceStillStages(t *testing.T) {
 }
 
 func TestModel_SystemPackageScopeOpensGroupMembershipPicker(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{{Name: "libc6", Provider: "apt", Tracked: true}})
 	m.hostInfo = &app.HostInfo{Active: "testhost"}
 	m.toolMemberships = map[string][]string{toolKey("libc6", "apt"): {"work"}}
@@ -2511,6 +2566,7 @@ func TestModel_SystemPackageScopeOpensGroupMembershipPicker(t *testing.T) {
 }
 
 func TestModel_ScopePickerUsesCapturedToolAfterCursorMoves(t *testing.T) {
+	t.Parallel()
 	tools := []*app.ToolView{
 		{Name: "ripgrep", Provider: "system", Installed: true, InstalledWith: "brew", Tracked: true},
 		{Name: "zoxide", Provider: "system", Installed: true, InstalledWith: "brew", Tracked: true},
@@ -2536,6 +2592,7 @@ func TestModel_ScopePickerUsesCapturedToolAfterCursorMoves(t *testing.T) {
 }
 
 func TestModel_IgnoreScopePickerUsesCapturedToolAfterCursorMoves(t *testing.T) {
+	t.Parallel()
 	tools := []*app.ToolView{
 		{Name: "ripgrep", Provider: "system", Tracked: true},
 		{Name: "zoxide", Provider: "system", Tracked: true},
@@ -2560,6 +2617,7 @@ func TestModel_IgnoreScopePickerUsesCapturedToolAfterCursorMoves(t *testing.T) {
 }
 
 func TestModel_SettingsSavedMsg(t *testing.T) {
+	t.Parallel()
 	t.Run("success sets status", func(t *testing.T) {
 		got := drive(baseModel(nil), settingsSavedMsg{})
 		if got.statusMsg != "✓ settings saved" {
@@ -2583,6 +2641,7 @@ func goToPriorityRow() []tea.Msg {
 }
 
 func TestModel_PriorityEditor_Open(t *testing.T) {
+	t.Parallel()
 	msgs := append(goToPriorityRow(), pressEnter())
 	m := drive(baseModel(nil), msgs...)
 	if !m.editingPriority {
@@ -2597,6 +2656,7 @@ func TestModel_PriorityEditor_Open(t *testing.T) {
 }
 
 func TestModel_PriorityEditor_SpaceDoesNotOpen(t *testing.T) {
+	t.Parallel()
 	msgs := append(goToPriorityRow(), pressRune(' '))
 	m := drive(baseModel(nil), msgs...)
 	if m.editingPriority {
@@ -2605,6 +2665,7 @@ func TestModel_PriorityEditor_SpaceDoesNotOpen(t *testing.T) {
 }
 
 func TestModel_PriorityEditor_OpenFromSettings(t *testing.T) {
+	t.Parallel()
 	base := baseModel(nil)
 	base.settings = tuiSettingsWithPriority("brew", "apt")
 	msgs := append(goToPriorityRow(), pressEnter())
@@ -2618,6 +2679,7 @@ func TestModel_PriorityEditor_OpenFromSettings(t *testing.T) {
 }
 
 func TestModel_PriorityEditor_JKNavigation(t *testing.T) {
+	t.Parallel()
 	msgs := append(goToPriorityRow(), pressEnter(), pressRune('j'))
 	m := drive(baseModel(nil), msgs...)
 	if m.priorityCursor != 1 {
@@ -2632,7 +2694,10 @@ func TestModel_PriorityEditor_JKNavigation(t *testing.T) {
 }
 
 func TestModel_PriorityEditor_CursorClamps(t *testing.T) {
+	t.Parallel(
 	// k at top — should stay at 0
+	)
+
 	msgs := append(goToPriorityRow(), pressEnter(), pressRune('k'))
 	m := drive(baseModel(nil), msgs...)
 	if m.priorityCursor != 0 {
@@ -2652,8 +2717,11 @@ func TestModel_PriorityEditor_CursorClamps(t *testing.T) {
 }
 
 func TestModel_PriorityEditor_GrabCarryDown(t *testing.T) {
+	t.Parallel(
 	// Open editor; default draft starts [brew, apt, apk, ...].
 	// cursor starts at 0 (brew); space grabs, j carries brew down, space drops.
+	)
+
 	msgs := append(goToPriorityRow(), pressEnter(), pressRune(' '), pressRune('j'), pressRune(' '))
 	m := drive(baseModel(nil), msgs...)
 	if m.priorityDraft[0] != "apt" || m.priorityDraft[1] != "brew" {
@@ -2668,8 +2736,11 @@ func TestModel_PriorityEditor_GrabCarryDown(t *testing.T) {
 }
 
 func TestModel_PriorityEditor_GrabCarryUp(t *testing.T) {
+	t.Parallel(
 	// Default draft: [brew, apt, apk, ...]. Move cursor to index 1 (apt),
 	// grab, k carries apt up past brew, drop.
+	)
+
 	msgs := append(goToPriorityRow(), pressEnter(), pressRune('j'), pressRune(' '), pressRune('k'), pressRune(' '))
 	m := drive(baseModel(nil), msgs...)
 	if m.priorityDraft[0] != "apt" || m.priorityDraft[1] != "brew" {
@@ -2684,8 +2755,11 @@ func TestModel_PriorityEditor_GrabCarryUp(t *testing.T) {
 }
 
 func TestModel_PriorityEditor_SaveOnEnter(t *testing.T) {
+	t.Parallel(
 	// Reorder via grab-carry and confirm; settings.ProviderPriority should update.
 	// Default draft is [brew, apt, apk, ...]; space+j+space carries brew down → [apt, brew, apk, ...].
+	)
+
 	msgs := append(goToPriorityRow(), pressEnter(), pressRune(' '), pressRune('j'), pressRune(' '), pressEnter())
 	m := drive(baseModel(nil), msgs...)
 	if m.editingPriority {
@@ -2697,6 +2771,7 @@ func TestModel_PriorityEditor_SaveOnEnter(t *testing.T) {
 }
 
 func TestModel_PriorityEditor_DiscardOnEsc(t *testing.T) {
+	t.Parallel()
 	base := baseModel(nil)
 	base.settings.ProviderPriority = []string{"brew", "apt", "apk"}
 	// Reorder via grab-carry and then esc — original settings.ProviderPriority should be unchanged.
@@ -2711,10 +2786,13 @@ func TestModel_PriorityEditor_DiscardOnEsc(t *testing.T) {
 }
 
 func TestModel_PriorityEditor_SavedOrderRoundTrips(t *testing.T) {
+	t.Parallel(
 	// Seed ProviderPriority directly (the field the editor reads/writes).
 	// ConcreteProviderPriorityDraft with no app appends remaining catalog
 	// providers after the seeded ones, so draft = [uv, brew, apt, apk, ...].
 	// Confirm persists the full draft; first three must match the seed.
+	)
+
 	base := baseModel(nil)
 	base.settings.ProviderPriority = []string{"uv", "brew", "apt"}
 	msgs := append(goToPriorityRow(), pressEnter(), pressEnter())
@@ -2730,8 +2808,11 @@ func TestModel_PriorityEditor_SavedOrderRoundTrips(t *testing.T) {
 // ─── Priority editor — space-toggle and rendering ────────────────────────────
 
 func TestModel_PriorityEditor_XTogglesDisables(t *testing.T) {
+	t.Parallel(
 	// Open editor (default draft starts with "brew" at index 0), press x
 	// to disable brew (browse mode), then Enter to confirm.
+	)
+
 	msgs := append(goToPriorityRow(), pressEnter(), pressRune('x'), pressEnter())
 	m := drive(baseModel(nil), msgs...)
 	if m.editingPriority {
@@ -2743,7 +2824,10 @@ func TestModel_PriorityEditor_XTogglesDisables(t *testing.T) {
 }
 
 func TestModel_PriorityEditor_XToggleTwiceReenables(t *testing.T) {
+	t.Parallel(
 	// Toggle off then on with x — provider must NOT be in DisabledProviders after confirm.
+	)
+
 	msgs := append(goToPriorityRow(), pressEnter(), pressRune('x'), pressRune('x'), pressEnter())
 	m := drive(baseModel(nil), msgs...)
 	if m.editingPriority {
@@ -2755,8 +2839,11 @@ func TestModel_PriorityEditor_XToggleTwiceReenables(t *testing.T) {
 }
 
 func TestModel_PriorityEditor_RenderUnavailable(t *testing.T) {
+	t.Parallel(
 	// Open the editor, then inject a small priorityAvailable map so that only
 	// "brew" is available; unavailable rows are greyed (dim) — no "(n/a)" text.
+	)
+
 	msgs := append(goToPriorityRow(), pressEnter())
 	m := drive(baseModel(nil), msgs...)
 	if !m.editingPriority {
@@ -2783,8 +2870,11 @@ func TestModel_PriorityEditor_RenderUnavailable(t *testing.T) {
 }
 
 func TestModel_PriorityEditor_RenderDisabled(t *testing.T) {
+	t.Parallel(
 	// Open the editor, inject priorityDisabled so "brew" is marked off,
 	// then render and verify the ○ dot appears on the brew line (no "(off)" text).
+	)
+
 	msgs := append(goToPriorityRow(), pressEnter())
 	m := drive(baseModel(nil), msgs...)
 	if !m.editingPriority {
@@ -2812,6 +2902,7 @@ func TestModel_PriorityEditor_RenderDisabled(t *testing.T) {
 // ─── Delete / Upgrade / UpgradeAll key handlers ──────────────────────────────
 
 func TestModel_KeyD_DeleteRequiresConfirmation(t *testing.T) {
+	t.Parallel()
 	tools := []*app.ToolView{
 		{Name: "ripgrep", Provider: "brew", Installed: true},
 	}
@@ -2831,6 +2922,7 @@ func TestModel_KeyD_DeleteRequiresConfirmation(t *testing.T) {
 }
 
 func TestModel_KeyD_DeleteNoopWhenNotInstalled(t *testing.T) {
+	t.Parallel()
 	tools := []*app.ToolView{
 		{Name: "ripgrep", Provider: "brew", Installed: false},
 	}
@@ -2843,6 +2935,7 @@ func TestModel_KeyD_DeleteNoopWhenNotInstalled(t *testing.T) {
 }
 
 func TestModel_KeyU_UpgradeSetsKey(t *testing.T) {
+	t.Parallel()
 	tools := []*app.ToolView{
 		{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: true},
 	}
@@ -2858,6 +2951,7 @@ func TestModel_KeyU_UpgradeSetsKey(t *testing.T) {
 }
 
 func TestModel_ActionRendersBeforeWorkIsScheduled(t *testing.T) {
+	t.Parallel()
 	tools := []*app.ToolView{
 		{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: true},
 	}
@@ -2894,6 +2988,7 @@ func TestModel_ActionRendersBeforeWorkIsScheduled(t *testing.T) {
 }
 
 func TestModel_ActionRendersBeforeWorkWhenBackgroundAnimationIsActive(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{
 		{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: true},
 	})
@@ -2916,6 +3011,7 @@ func TestModel_ActionRendersBeforeWorkWhenBackgroundAnimationIsActive(t *testing
 }
 
 func TestSpinnerActivityActive_IncludesEveryAsyncActionFlag(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		set  func(*Model)
@@ -2937,6 +3033,7 @@ func TestSpinnerActivityActive_IncludesEveryAsyncActionFlag(t *testing.T) {
 }
 
 func TestModel_KeyU_UpgradeNoopWhenNotOutdated(t *testing.T) {
+	t.Parallel()
 	tools := []*app.ToolView{
 		{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: false},
 	}
@@ -2949,6 +3046,7 @@ func TestModel_KeyU_UpgradeNoopWhenNotOutdated(t *testing.T) {
 }
 
 func TestModel_KeyCapU_UpgradeAllSetsWildcard(t *testing.T) {
+	t.Parallel()
 	tools := []*app.ToolView{
 		{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
 	}
@@ -2964,6 +3062,7 @@ func TestModel_KeyCapU_UpgradeAllSetsWildcard(t *testing.T) {
 }
 
 func TestModel_KeyCapU_UpgradeAllNoopWhenNoUpdates(t *testing.T) {
+	t.Parallel()
 	tools := []*app.ToolView{
 		{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: false},
 	}
@@ -2978,6 +3077,7 @@ func TestModel_KeyCapU_UpgradeAllNoopWhenNoUpdates(t *testing.T) {
 // ─── Setup wizard step 1 ─────────────────────────────────────────────────────
 
 func TestModel_SetupStep1_YSetsLoading(t *testing.T) {
+	t.Parallel()
 	m := Model{
 		keys:          DefaultKeyMap(),
 		spinner:       spinner.New(),
@@ -2998,6 +3098,7 @@ func TestModel_SetupStep1_YSetsLoading(t *testing.T) {
 }
 
 func TestModel_SetupStep1_SpaceTogglesProvider(t *testing.T) {
+	t.Parallel()
 	m := Model{
 		keys:          DefaultKeyMap(),
 		spinner:       spinner.New(),
@@ -3024,6 +3125,7 @@ func TestModel_SetupStep1_SpaceTogglesProvider(t *testing.T) {
 // ─── Group picker ─────────────────────────────────────────────────────────────
 
 func TestModel_GroupPicker_EnterSetsLoading(t *testing.T) {
+	t.Parallel()
 	tools := []*app.ToolView{
 		{Name: "ripgrep", Provider: "brew", Installed: true},
 	}
@@ -3040,6 +3142,7 @@ func TestModel_GroupPicker_EnterSetsLoading(t *testing.T) {
 }
 
 func TestModel_GroupPicker_EscReturnsToList(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.mode = viewGroupPicker
 	m.pickerGroups = []string{"work"}
@@ -3054,6 +3157,7 @@ func TestModel_GroupPicker_EscReturnsToList(t *testing.T) {
 }
 
 func TestVisibleGroupNames_UsesActiveHostGroups(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.groupNames = []string{"archive", "personal", "work"}
 	m.hostInfo = &app.HostInfo{
@@ -3087,6 +3191,7 @@ func TestVisibleGroupNames_IncludesCurrentMachineGroup(t *testing.T) {
 }
 
 func TestDotAddOpensGroupPicker(t *testing.T) {
+	t.Parallel()
 	m := dotsModel()
 	m.openGroupPickerForDotAdd("/home/test/.config/zed", "~/.config/zed")
 	if m.mode != viewGroupPicker {
@@ -3120,6 +3225,7 @@ func TestPrioritizedPickerGroups_ActiveHostGroupsFirst(t *testing.T) {
 // ─── FullHelp ─────────────────────────────────────────────────────────────────
 
 func TestKeyMap_FullHelp_ReturnsColumns(t *testing.T) {
+	t.Parallel()
 	km := DefaultKeyMap()
 	cols := km.FullHelp()
 	if len(cols) < 3 {
@@ -3135,6 +3241,7 @@ func TestKeyMap_FullHelp_ReturnsColumns(t *testing.T) {
 // ─── Message handlers ─────────────────────────────────────────────────────────
 
 func TestModel_ClearStatusMsg_ClearsStatus(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.statusMsg = "some status"
 	got := drive(m, clearStatusMsg{})
@@ -3144,6 +3251,7 @@ func TestModel_ClearStatusMsg_ClearsStatus(t *testing.T) {
 }
 
 func TestModel_ProgressMsg_SetsProgressText(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	got := drive(m, progressMsg{text: "installing…"})
 	if got.progressText != "installing…" {
@@ -3152,6 +3260,7 @@ func TestModel_ProgressMsg_SetsProgressText(t *testing.T) {
 }
 
 func TestModel_ProgressMsg_AdvancesRefreshToolProgress(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.progressGen = 4
 	m.scanningProviders = map[string]bool{"brew": true}
@@ -3173,6 +3282,7 @@ func TestModel_ProgressMsg_AdvancesRefreshToolProgress(t *testing.T) {
 }
 
 func TestModel_ProgressMsg_UsesConcreteEcosystemScanLabel(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.progressGen = 4
 	m.scanningProviders = map[string]bool{"node": true}
@@ -3189,6 +3299,7 @@ func TestModel_ProgressMsg_UsesConcreteEcosystemScanLabel(t *testing.T) {
 }
 
 func TestModel_ProgressMsg_UsesProgressEventProviderLabel(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.progressGen = 4
 	m.scanningProviders = map[string]bool{"node": true}
@@ -3209,6 +3320,7 @@ func TestModel_ProgressMsg_UsesProgressEventProviderLabel(t *testing.T) {
 }
 
 func TestModel_ProgressMsg_RefreshesFinishedToolBeforeBatchDone(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{
 		{Name: "ripgrep", Provider: "system", Installed: false, Tracked: true},
 		{Name: "fd", Provider: "system", Installed: false, Tracked: true},
@@ -3248,6 +3360,7 @@ func TestModel_ProgressMsg_RefreshesFinishedToolBeforeBatchDone(t *testing.T) {
 }
 
 func TestModel_ProgressMsg_MarksFinishedToolWithoutSnapshot(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{
 		{Name: "ripgrep", Provider: "system", Installed: false, Tracked: true},
 		{Name: "fd", Provider: "system", Installed: false, Tracked: true},
@@ -3283,6 +3396,7 @@ func TestModel_ProgressMsg_MarksFinishedToolWithoutSnapshot(t *testing.T) {
 }
 
 func TestModel_ProgressMsg_IgnoresStaleGeneration(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.progressGen = 2
 	m.progressText = "current"
@@ -3293,6 +3407,7 @@ func TestModel_ProgressMsg_IgnoresStaleGeneration(t *testing.T) {
 }
 
 func TestModel_ProgressMsg_IgnoresLateSameGenerationAfterDone(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.progressGen = 4
 	m.loading = true
@@ -3309,6 +3424,7 @@ func TestModel_ProgressMsg_IgnoresLateSameGenerationAfterDone(t *testing.T) {
 }
 
 func TestModel_ProgressStreamClosedMsg_IsNotFinalResult(t *testing.T) {
+	t.Parallel()
 	ch := make(chan progressUpdate)
 	m := baseModel(nil)
 	m.progressGen = 3
@@ -3335,6 +3451,7 @@ func TestModel_ProgressStreamClosedMsg_IsNotFinalResult(t *testing.T) {
 }
 
 func TestModel_ProgressDoneMsg_Success(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.upgradingKeys = map[string]bool{"*": true}
 	m.loading = true
@@ -3351,6 +3468,7 @@ func TestModel_ProgressDoneMsg_Success(t *testing.T) {
 }
 
 func TestModel_ProgressDoneMsg_IgnoresStaleGeneration(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.progressGen = 2
 	m.loading = true
@@ -3368,6 +3486,7 @@ func TestModel_ProgressDoneMsg_IgnoresStaleGeneration(t *testing.T) {
 }
 
 func TestModel_ProgressDoneMsg_Error(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.upgradingKeys = map[string]bool{"*": true}
 	got := drive(m, progressDoneMsg{key: "*", err: errors.New("network error")})
@@ -3377,6 +3496,7 @@ func TestModel_ProgressDoneMsg_Error(t *testing.T) {
 }
 
 func TestModel_ProgressDoneMsg_ErrorRefreshesTools(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.upgradingKeys = map[string]bool{"*": true}
 	tools := threeTools()
@@ -3390,6 +3510,7 @@ func TestModel_ProgressDoneMsg_ErrorRefreshesTools(t *testing.T) {
 }
 
 func TestModel_ProviderScannedMsg_ClearsScanningProviders(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.scanningProviders = map[string]bool{"brew": true}
 	got := drive(m, providerScannedMsg{provider: "brew"})
@@ -3399,6 +3520,7 @@ func TestModel_ProviderScannedMsg_ClearsScanningProviders(t *testing.T) {
 }
 
 func TestModel_ProviderScannedMsg_RefreshStatusShowsRemainingProviders(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.scanningProviders = map[string]bool{"brew": true, "node": true}
 	m.providerScanToolCounts = map[string]int{"brew": 2, "node": 3}
@@ -3419,6 +3541,7 @@ func TestModel_ProviderScannedMsg_RefreshStatusShowsRemainingProviders(t *testin
 }
 
 func TestModel_ProviderScannedMsg_IgnoresStaleGeneration(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.scanGen = 2
 	m.scanningProviders = map[string]bool{"brew": true}
@@ -3433,6 +3556,7 @@ func TestModel_ProviderScannedMsg_IgnoresStaleGeneration(t *testing.T) {
 }
 
 func TestModel_ProviderScannedMsg_IgnoresUnknownProvider(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.scanGen = 2
 	m.scanningProviders = map[string]bool{"brew": true}
@@ -3457,6 +3581,7 @@ func TestModel_ProviderScannedMsg_IgnoresUnknownProvider(t *testing.T) {
 // on the agents tab during the startup tool scan killed the TUI with "close of
 // closed channel").
 func TestModel_ProviderScannedMsg_SettleDoesNotCloseForeignProgressStream(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.scanningProviders = map[string]bool{"brew": true}
 	scanCh, _ := m.beginProgressStream()
@@ -3496,6 +3621,7 @@ func TestModel_ProviderScannedMsg_SettleDoesNotCloseForeignProgressStream(t *tes
 // With no foreign operation in flight, settle still hands the shared status
 // stream to the discovered refresh, as before.
 func TestModel_ProviderScannedMsg_SettleClaimsProgressStreamWhenFree(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.scanningProviders = map[string]bool{"brew": true}
 	scanCh, _ := m.beginProgressStream()
@@ -3521,6 +3647,7 @@ func TestModel_ProviderScannedMsg_SettleClaimsProgressStreamWhenFree(t *testing.
 // Run under -race with many iterations to widen the window; a regression
 // crashes the test binary rather than silently passing.
 func TestModel_SettleDoesNotRaceForeignWorkerClose(t *testing.T) {
+	t.Parallel()
 	for i := 0; i < 200; i++ {
 		m := baseModel(nil)
 		m.scanningProviders = map[string]bool{"brew": true}
@@ -3558,6 +3685,7 @@ func TestModel_SettleDoesNotRaceForeignWorkerClose(t *testing.T) {
 // settle must still close its own channel without touching the (now newer)
 // progressGen, so nothing double-closes and no stale generation is resurrected.
 func TestModel_AgentsDoneMidScan_SettleStaysCrashSafe(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.scanningProviders = map[string]bool{"brew": true}
 	scanCh, _ := m.beginProgressStream()
@@ -3594,6 +3722,7 @@ func TestModel_AgentsDoneMidScan_SettleStaysCrashSafe(t *testing.T) {
 // over the shared status stream while another operation owns it (same rule as
 // the scan-settle branch).
 func TestStartDescriptionRefresh_DoesNotSupersedeActiveProgressStream(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	agentsCh, agentsGen := m.beginProgressStream()
 
@@ -3611,6 +3740,7 @@ func TestStartDescriptionRefresh_DoesNotSupersedeActiveProgressStream(t *testing
 }
 
 func TestStartDescriptionRefresh_ClaimsProgressStreamWhenFree(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 
 	cmd := m.startDescriptionRefresh()
@@ -3627,6 +3757,7 @@ func TestStartDescriptionRefresh_ClaimsProgressStreamWhenFree(t *testing.T) {
 }
 
 func TestProviderScanFailureStatus_DeadlineIsConcise(t *testing.T) {
+	t.Parallel()
 	err := errors.Join(
 		errors.New("upserting installed status for system/fd: context deadline exceeded"),
 		context.DeadlineExceeded,
@@ -3641,6 +3772,7 @@ func TestProviderScanFailureStatus_DeadlineIsConcise(t *testing.T) {
 }
 
 func TestModel_AllProvidersDoneMsg_RefreshesTools(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	got := drive(m, allProvidersDoneMsg{tools: threeTools()})
 	if len(got.allTools) != 3 {
@@ -3649,6 +3781,7 @@ func TestModel_AllProvidersDoneMsg_RefreshesTools(t *testing.T) {
 }
 
 func TestModel_AllProvidersDoneMsg_IgnoresStaleGeneration(t *testing.T) {
+	t.Parallel()
 	oldTools := []*app.ToolView{{Name: "old", Provider: "brew"}}
 	m := baseModel(oldTools)
 	m.scanGen = 2
@@ -3659,6 +3792,7 @@ func TestModel_AllProvidersDoneMsg_IgnoresStaleGeneration(t *testing.T) {
 }
 
 func TestModel_DiscoveredRefreshedMsg_IgnoresStaleGeneration(t *testing.T) {
+	t.Parallel()
 	oldDiscovered := []*app.ToolView{{Name: "old-orphan", Provider: "brew", Installed: true, Tracked: false}}
 	m := baseModel(nil)
 	m.discoveryGen = 2
@@ -3677,6 +3811,7 @@ func TestModel_DiscoveredRefreshedMsg_IgnoresStaleGeneration(t *testing.T) {
 }
 
 func TestModel_GroupChangedMsg_Success(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.loading = true
 	got := drive(m, groupChangedMsg{detail: "✓ git added to work", tools: threeTools()})
@@ -3689,6 +3824,7 @@ func TestModel_GroupChangedMsg_Success(t *testing.T) {
 }
 
 func TestModel_GroupChangedMsg_Error(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	got := drive(m, groupChangedMsg{err: errors.New("file not found")})
 	if !stringContains(got.statusMsg, "file not found") {
@@ -3699,8 +3835,11 @@ func TestModel_GroupChangedMsg_Error(t *testing.T) {
 // ─── Palette command execution ────────────────────────────────────────────────
 
 func TestModel_PaletteSync_SetsLoading(t *testing.T) {
+	t.Parallel(
 	// Simulate: palette is already open with "sync" as the only suggestion.
 	// Pressing enter should execute the sync command's run func, setting loading=true.
+	)
+
 	m := Model{
 		keys:          DefaultKeyMap(),
 		spinner:       spinner.New(),
@@ -3721,6 +3860,7 @@ func TestModel_PaletteSync_SetsLoading(t *testing.T) {
 }
 
 func TestModel_PaletteConsolidate_SetsLoading(t *testing.T) {
+	t.Parallel()
 	m := Model{
 		keys:               DefaultKeyMap(),
 		spinner:            spinner.New(),
@@ -3910,6 +4050,7 @@ func TestDotsSpacePeeksSelectedFile(t *testing.T) {
 }
 
 func TestDotsSpaceExpandsDirectoryRows(t *testing.T) {
+	t.Parallel()
 	m := dotsModel()
 	m.dotsEntries = []app.DotStatus{{
 		Name:       "nvim",
@@ -3966,6 +4107,7 @@ func TestDotsPrimaryActionDoesNotPeekEmptyDirectory(t *testing.T) {
 }
 
 func TestDotsRowHintsUseSpaceAsContextAction(t *testing.T) {
+	t.Parallel()
 	m := dotsModel()
 	got := dotsPrimaryHintItem(m, dotsVisibleRows(m)[0])
 	if got.key != "space" || got.desc != "peek" {
@@ -3993,6 +4135,7 @@ func TestDotsRowHintsUseSpaceAsContextAction(t *testing.T) {
 }
 
 func TestDotsPeekPopupLabelsRepoAndLocalSources(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.width = 100
@@ -4056,6 +4199,7 @@ func TestDotsPeekPopupTitleUsesHomeAliasedTargetPath(t *testing.T) {
 }
 
 func TestDotsPeekEscClosesPopup(t *testing.T) {
+	t.Parallel()
 	m := dotsModel()
 	m.dotsPeek = &dotsPeekState{result: app.DotsPeekResult{Title: "gitconfig", Mode: app.DotsPeekModeText, Content: "body"}}
 
@@ -4066,6 +4210,7 @@ func TestDotsPeekEscClosesPopup(t *testing.T) {
 }
 
 func TestDotsPeekEscWhileLoadingIgnoresLateResult(t *testing.T) {
+	t.Parallel()
 	m := dotsModel()
 	m.dotsPeekLoading = true
 	m.dotsPeekGen = 1
@@ -4085,6 +4230,7 @@ func TestDotsPeekEscWhileLoadingIgnoresLateResult(t *testing.T) {
 // TestTraceLogStaleGenIgnoresLateResult covers the generation-mismatch path:
 // Back bumps traceLogGen so the in-flight response no longer matches.
 func TestTraceLogStaleGenIgnoresLateResult(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	m.settingsCursor = settingsRowTraceLog
@@ -4108,6 +4254,7 @@ func TestTraceLogStaleGenIgnoresLateResult(t *testing.T) {
 // short-circuit: gen matches but loading was already cleared (e.g. a second Back
 // keypress raced the goroutine). The response must not re-populate traceLog.
 func TestTraceLogLoadingClearedIgnoresCurrentGenResult(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	m.traceLogGen = 3
@@ -4185,6 +4332,7 @@ func dotsVariantFlowModel(t *testing.T, withVariant bool) Model {
 }
 
 func TestModel_DotsSyncAllMarksRowsPending(t *testing.T) {
+	t.Parallel()
 	got := drive(dotsModel(), pressRune('S'))
 	if !got.dotsLoading {
 		t.Fatal("dotsLoading should start after sync all")
@@ -4198,6 +4346,7 @@ func TestModel_DotsSyncAllMarksRowsPending(t *testing.T) {
 }
 
 func TestModel_DotsSyncAllEntryOrderMatchesRenderedSections(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.settings.DotsRepo = "/repo/dotfiles"
 	m.dotsEntries = []app.DotStatus{
@@ -4215,6 +4364,7 @@ func TestModel_DotsSyncAllEntryOrderMatchesRenderedSections(t *testing.T) {
 }
 
 func TestModel_DotsProgressMsgUpdatesRowStateAndSnapshot(t *testing.T) {
+	t.Parallel()
 	m := dotsModel()
 	m.beginDotsOperation("Syncing dots…")
 	gen := m.dotsOpGen
@@ -4254,6 +4404,7 @@ func TestModel_DotsProgressMsgUpdatesRowStateAndSnapshot(t *testing.T) {
 }
 
 func TestModel_DotsTab_Navigation(t *testing.T) {
+	t.Parallel()
 	t.Run("j moves cursor down", func(t *testing.T) {
 		m := drive(dotsModel(), pressRune('j'))
 		if m.dotsCursor != 1 {
@@ -4286,6 +4437,7 @@ func TestModel_DotsTab_Navigation(t *testing.T) {
 }
 
 func TestModel_DotsTab_ConfirmDelete(t *testing.T) {
+	t.Parallel()
 	t.Run("first d arms confirm", func(t *testing.T) {
 		m := drive(dotsModel(), pressRune('d'))
 		if m.dotsConfirmIdx != 0 {
@@ -4392,6 +4544,7 @@ func TestModel_DotsTab_HostVariantFlow(t *testing.T) {
 }
 
 func TestModel_DotsTab_Messages(t *testing.T) {
+	t.Parallel()
 	t.Run("dotsLoadedMsg sets entries", func(t *testing.T) {
 		entries := []app.DotStatus{{Name: "nvim", Health: app.HealthOK}}
 		m := drive(baseModel(nil), dotsLoadedMsg{entries: entries, gitStatus: "M  nvim/init.lua"})
@@ -4710,6 +4863,7 @@ func TestModel_DotsTab_Messages(t *testing.T) {
 }
 
 func TestModel_DotsTab_OverwriteConfirm(t *testing.T) {
+	t.Parallel()
 	conflictModel := func() Model {
 		m := baseModel(nil)
 		m.mode = viewDots
@@ -4804,6 +4958,7 @@ func TestModel_DotsTab_OverwriteConfirm(t *testing.T) {
 }
 
 func TestModel_DotsTab_FixedMsg(t *testing.T) {
+	t.Parallel()
 	t.Run("snapshot clears armed confirmations", func(t *testing.T) {
 		m := dotsModel()
 		m.dotsConfirmIdx = 0
@@ -4963,6 +5118,7 @@ func TestDangerZone_SettingsCursor(t *testing.T) {
 }
 
 func TestDangerZone_DangerOpDoneMsg(t *testing.T) {
+	t.Parallel()
 	t.Run("success sets statusMsg with detail", func(t *testing.T) {
 		m := drive(baseModel(nil), dangerOpDoneMsg{action: "reset-settings", detail: "settings cleared"})
 		if !stringContains(m.statusMsg, "settings cleared") {
@@ -4994,6 +5150,7 @@ func TestDangerZone_DangerOpDoneMsg(t *testing.T) {
 // ─── activityLabel ───────────────────────────────────────────────────────────
 
 func TestActivityLabel_Branches(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		m    Model
@@ -5019,6 +5176,7 @@ func TestActivityLabel_Branches(t *testing.T) {
 }
 
 func TestStatusbar_SpinnerVisibleWhenMCPOrPluginRunning(t *testing.T) {
+	t.Parallel()
 	t.Run("mcpRunning", func(t *testing.T) {
 		m := baseModel(nil)
 		m.mcpRunning = true
@@ -5051,6 +5209,7 @@ func TestStatusbar_SpinnerVisibleWhenMCPOrPluginRunning(t *testing.T) {
 }
 
 func TestActivityLabel_ScanningUsesConcreteEcosystemLabel(t *testing.T) {
+	t.Parallel()
 	m := Model{
 		scanningProviders:  map[string]bool{"system": true},
 		providerScanLabels: map[string]string{"system": "system/brew"},
@@ -5065,6 +5224,7 @@ func TestActivityLabel_ScanningUsesConcreteEcosystemLabel(t *testing.T) {
 // ─── selectedHostName ─────────────────────────────────────────────────────
 
 func TestSelectedHostName_NilInfo(t *testing.T) {
+	t.Parallel()
 	m := Model{}
 	if got := m.selectedHostName(); got != "" {
 		t.Errorf("got %q, want empty", got)
@@ -5072,6 +5232,7 @@ func TestSelectedHostName_NilInfo(t *testing.T) {
 }
 
 func TestSelectedHostName_ValidCursor(t *testing.T) {
+	t.Parallel()
 	m := Model{
 		hostInfo: &app.HostInfo{
 			Hosts: map[string]config.HostAssignment{
@@ -5088,6 +5249,7 @@ func TestSelectedHostName_ValidCursor(t *testing.T) {
 }
 
 func TestSelectedHostName_UsesRenderedActiveHostOrder(t *testing.T) {
+	t.Parallel()
 	m := Model{
 		hostInfo: &app.HostInfo{
 			Active: "beta",
@@ -5105,6 +5267,7 @@ func TestSelectedHostName_UsesRenderedActiveHostOrder(t *testing.T) {
 }
 
 func TestSelectedHostName_OutOfRange(t *testing.T) {
+	t.Parallel()
 	m := Model{
 		hostInfo: &app.HostInfo{
 			Hosts: map[string]config.HostAssignment{"alpha": {}},
@@ -5119,6 +5282,7 @@ func TestSelectedHostName_OutOfRange(t *testing.T) {
 // ─── windowTitle ─────────────────────────────────────────────────────────────
 
 func TestWindowTitle_Modes(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		mode viewMode
 		want string
@@ -5199,6 +5363,7 @@ func wrongProvModel() Model {
 }
 
 func TestSyncStatusOf_PinnedProviderMismatchWinsOverDefault(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{
 		Name:          "typescript",
 		Provider:      "node",
@@ -5216,6 +5381,7 @@ func TestSyncStatusOf_PinnedProviderMismatchWinsOverDefault(t *testing.T) {
 }
 
 func TestPinnedProvider_KeyPressArmsClearOverride(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{
 		Name:          "typescript",
 		Provider:      "node",
@@ -5250,6 +5416,7 @@ func TestPinnedProvider_KeyPressArmsClearOverride(t *testing.T) {
 }
 
 func TestSyncStatusOf_NvmManagedBrewTool(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{
 		Name:          "pnpm",
 		Provider:      "brew",
@@ -5266,6 +5433,7 @@ func TestSyncStatusOf_NvmManagedBrewTool(t *testing.T) {
 }
 
 func TestNvmManaged_KeyPressArmsMigrateConfirm(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{
 		Name:          "pnpm",
 		Provider:      "brew",
@@ -5285,6 +5453,7 @@ func TestNvmManaged_KeyPressArmsMigrateConfirm(t *testing.T) {
 }
 
 func TestNvmRuntime_KeyPressArmsRemoveConfirm(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{
 		Name:          "node",
 		Provider:      "brew",
@@ -5306,6 +5475,7 @@ func TestNvmRuntime_KeyPressArmsRemoveConfirm(t *testing.T) {
 // tool sets both m.loading and m.migrating and populates the status message.
 // Regression: previously m.migrating was never set, breaking the race guard.
 func TestMigration_KeyPressSetsFlags(t *testing.T) {
+	t.Parallel()
 	m := wrongProvModel()
 	got := drive(m, tea.KeyPressMsg{Code: 'r', Text: "r"})
 	if got.loading {
@@ -5340,6 +5510,7 @@ func TestMigration_KeyPressSetsFlags(t *testing.T) {
 // Regression: the launch scan's channel-close fired progressDoneMsg which set
 // m.loading=false, making the spinner disappear mid-migration.
 func TestMigration_ProgressDoneMsg_DoesNotClearLoadingWhileMigrating(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.loading = true
 	m.migrating = true
@@ -5358,6 +5529,7 @@ func TestMigration_ProgressDoneMsg_DoesNotClearLoadingWhileMigrating(t *testing.
 // Regression: previously installedRefreshedMsg/updatesRefreshedMsg would clear
 // the "Migrating…" banner unconditionally mid-flight.
 func TestMigration_AllProvidersDoneMsg_DoesNotClearStatusWhileMigrating(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.migrating = true
 	m.statusMsg = "Migrating typescript to correct provider…"
@@ -5371,6 +5543,7 @@ func TestMigration_AllProvidersDoneMsg_DoesNotClearStatusWhileMigrating(t *testi
 // TestMigration_DoneMsg_ClearsBothFlags verifies that migrateProviderDoneMsg
 // correctly clears m.loading and m.migrating and sets a success status.
 func TestMigration_DoneMsg_ClearsBothFlags(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.loading = true
 	m.migrating = true
@@ -5393,6 +5566,7 @@ func TestMigration_DoneMsg_ClearsBothFlags(t *testing.T) {
 // TestMigration_DoneMsg_Error_ClearsBothFlags verifies that even on error
 // both m.loading and m.migrating are cleared by migrateProviderDoneMsg.
 func TestMigration_DoneMsg_Error_ClearsBothFlags(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.loading = true
 	m.migrating = true
@@ -5437,8 +5611,11 @@ func toSettingsRaw() []tea.Msg {
 // keypress after a tab switch reveals the cursor at its current position (row 0)
 // without moving it, and that the second keypress navigates normally.
 func TestCursorReveal_FirstDownAfterTabSwitch(t *testing.T) {
+	t.Parallel(
 	// After 4 tabs cursorHidden is true and settingsCursor is 0.
 	// First j should reveal (cursorHidden→false) but NOT advance the cursor.
+	)
+
 	m := drive(baseModel(nil), append(toSettingsRaw(), pressRune('j'))...)
 	if m.mode != viewSettings {
 		t.Fatalf("mode = %v, want viewSettings", m.mode)
@@ -5460,8 +5637,11 @@ func TestCursorReveal_FirstDownAfterTabSwitch(t *testing.T) {
 // TestCursorReveal_ActionKeyNotConsumed verifies that a non-navigation key
 // (Enter) is NOT consumed by the reveal logic and fires its action on row 0.
 func TestCursorReveal_ActionKeyNotConsumed(t *testing.T) {
+	t.Parallel(
 	// Row 0 in settings is AutoImport; space toggles it.
 	// After raw tab-switch (cursorHidden=true), space should still toggle.
+	)
+
 	m := drive(baseModel(nil), append(toSettingsRaw(), pressRune(' '))...)
 	if m.mode != viewSettings {
 		t.Fatalf("mode = %v, want viewSettings", m.mode)
@@ -5474,7 +5654,10 @@ func TestCursorReveal_ActionKeyNotConsumed(t *testing.T) {
 // TestCursorReveal_CursorHiddenFalseAfterKeypress verifies that any keypress
 // clears cursorHidden, regardless of whether it was a navigation key.
 func TestCursorReveal_CursorHiddenFalseAfterKeypress(t *testing.T) {
+	t.Parallel(
 	// Verify cursorHidden is set after the tab switch.
+	)
+
 	mHidden := drive(baseModel(nil), toSettingsRaw()...)
 	if !mHidden.cursorHidden {
 		t.Fatal("cursorHidden should be true immediately after tab switch to settings")
@@ -5499,7 +5682,10 @@ func TestCursorReveal_CursorHiddenFalseAfterKeypress(t *testing.T) {
 // TestWrapAround_ListTab verifies that Up at index 0 wraps to last and Down at
 // last wraps to first in the list (tools) view.
 func TestWrapAround_ListTab(t *testing.T) {
+	t.Parallel(
 	// k at cursor 0 should wrap to last item (index 2).
+	)
+
 	m := drive(baseModel(threeTools()), pressRune('k'))
 	if m.cursor != 2 {
 		t.Errorf("cursor after k at 0 = %d, want 2 (wrap to bottom)", m.cursor)
@@ -5515,8 +5701,11 @@ func TestWrapAround_ListTab(t *testing.T) {
 // TestWrapAround_SettingsTab verifies that Up at row 0 wraps to the last
 // settings row and Down at the last row wraps back to 0.
 func TestWrapAround_SettingsTab(t *testing.T) {
+	t.Parallel(
 	// toSettings() = 3 tabs + reveal j; cursor is at 0 and ready to navigate.
 	// k at row 0 should wrap to numSettingRows-1.
+	)
+
 	m := drive(baseModel(nil), append(toSettings(), pressRune('k'))...)
 	if m.settingsCursor != numSettingRows-1 {
 		t.Errorf("settingsCursor after k at 0 = %d, want %d (wrap to bottom)", m.settingsCursor, numSettingRows-1)
@@ -5532,7 +5721,10 @@ func TestWrapAround_SettingsTab(t *testing.T) {
 // TestWrapAround_DotsTab verifies that Up at dotsCursor 0 wraps to the last
 // visible dot entry and Down at the last entry wraps to 0.
 func TestWrapAround_DotsTab(t *testing.T) {
+	t.Parallel(
 	// dotsModel() has 3 entries; dotsCursor starts at 0 and cursorHidden is false.
+	)
+
 	m := dotsModel()
 
 	// k at cursor 0 should wrap to index 2.
@@ -5552,7 +5744,10 @@ func TestWrapAround_DotsTab(t *testing.T) {
 // switching to the groups tab reveals the cursor at hostCursor 0 without
 // moving it, and that the second keypress navigates normally.
 func TestCursorReveal_GroupsTab(t *testing.T) {
+	t.Parallel(
 	// Build a model in list mode with 2 hosts so the groups tab has content.
+	)
+
 	m := baseModel(nil)
 	m.hostInfo = &app.HostInfo{
 		Hosts: map[string]config.HostAssignment{
@@ -5593,6 +5788,7 @@ func TestCursorReveal_GroupsTab(t *testing.T) {
 // the top of the hosts section (assignmentSection=0, hostCursor=0) wraps the
 // cursor to the bottom of the groups section.
 func TestWrapAround_GroupsTab_UpWrapsToGroups(t *testing.T) {
+	t.Parallel()
 	m := hostsModel()
 	m.assignmentSection = 0
 	m.hostCursor = 0
@@ -5613,6 +5809,7 @@ func TestWrapAround_GroupsTab_UpWrapsToGroups(t *testing.T) {
 // the bottom of the groups section wraps the cursor back to the top of the
 // hosts section (assignmentSection=0, hostCursor=0).
 func TestWrapAround_GroupsTab_DownWrapsToHosts(t *testing.T) {
+	t.Parallel()
 	m := hostsModel()
 	allGroups := buildAllGroupNames(m.groupNames)
 	m.assignmentSection = 1
@@ -5677,6 +5874,7 @@ func TestGlobalDotsCommit_FromSettingsTab(t *testing.T) {
 // TestGlobalDotsCommit_NoRepoShowsError verifies that pressing C when DotsRepo
 // is empty sets an error status and does not start a commit operation.
 func TestGlobalDotsCommit_NoRepoShowsError(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
@@ -5741,6 +5939,7 @@ func TestGlobalDotsCommit_NothingToCommit(t *testing.T) {
 // startGroupReassignQueue with two names opens a group picker for the first
 // tool and leaves the second in pendingGroupReassign.
 func TestStartGroupReassignQueue_OpensFirstPicker(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{
 		{Name: "ripgrep", Provider: "brew"},
 		{Name: "fd", Provider: "brew"},
@@ -5769,6 +5968,7 @@ func TestStartGroupReassignQueue_OpensFirstPicker(t *testing.T) {
 // TestStartGroupReassignQueue_Empty verifies that calling startGroupReassignQueue
 // with a nil or empty slice is a no-op (mode stays viewList).
 func TestStartGroupReassignQueue_Empty(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 
 	m.startGroupReassignQueue(nil)
@@ -5786,6 +5986,7 @@ func TestStartGroupReassignQueue_Empty(t *testing.T) {
 // completes with pickerPurposeReassign=true and more tools remain in
 // pendingGroupReassign, closeGroupPicker opens the next picker.
 func TestCloseGroupPicker_ChainsReassign(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{
 		{Name: "fd", Provider: "brew"},
 	})
@@ -5814,6 +6015,7 @@ func TestCloseGroupPicker_ChainsReassign(t *testing.T) {
 // remain in pendingGroupReassign, closeGroupPicker returns to viewList and
 // clears reassignCreatedGroups.
 func TestCloseGroupPicker_LastInQueueCleansUp(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewGroupPicker
 	m.pickerPurposeReassign = true
@@ -5833,6 +6035,7 @@ func TestCloseGroupPicker_LastInQueueCleansUp(t *testing.T) {
 // TestCancelGroupPicker_DrainsQueue verifies that cancelGroupPicker clears
 // pendingGroupReassign and reassignCreatedGroups, then closes the picker.
 func TestCancelGroupPicker_DrainsQueue(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewGroupPicker
 	m.pickerPurposeReassign = true
@@ -5855,6 +6058,7 @@ func TestCancelGroupPicker_DrainsQueue(t *testing.T) {
 // TestReassignCreatedGroups_CarryForward verifies that groups created during an
 // earlier reassign picker are included in the groups offered by the next picker.
 func TestReassignCreatedGroups_CarryForward(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{
 		{Name: "fd", Provider: "brew"},
 	})
@@ -5891,6 +6095,7 @@ func TestReassignCreatedGroups_CarryForward(t *testing.T) {
 // carrying claimedNames triggers startGroupReassignQueue: the first tool's
 // picker opens with pickerPurposeReassign=true.
 func TestProgressDoneMsg_StartsReassignQueue(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{
 		{Name: "ripgrep", Provider: "brew"},
 	})
@@ -5920,6 +6125,7 @@ func TestProgressDoneMsg_StartsReassignQueue(t *testing.T) {
 // groupChangedMsg from tool 1 arrives (shouldn't break) → Enter →
 // queue drains → viewList.
 func TestReassignQueue_E2E_FullCycle(t *testing.T) {
+	t.Parallel()
 	tools := []*app.ToolView{
 		{Name: "ripgrep", Provider: "brew"},
 		{Name: "fd", Provider: "brew"},
@@ -5987,6 +6193,7 @@ func TestReassignQueue_E2E_FullCycle(t *testing.T) {
 }
 
 func TestEffectiveNodeManagerLabel(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	if got := m.effectiveNodeManagerLabel(); got != "pnpm" {
 		t.Errorf("default label = %q, want pnpm fallback", got)
@@ -6011,6 +6218,7 @@ func hasSelectedRowLine(out string) bool {
 }
 
 func TestCursorHidden_TabGlobalKeysKeepCursorHidden_ToolsTab(t *testing.T) {
+	t.Parallel()
 	for _, k := range []rune{'S', 'U', 'R', 'C', '?', 'q'} {
 		m := baseModel(threeTools())
 		m.width = 120
@@ -6047,6 +6255,7 @@ func TestCursorHidden_TabGlobalKeysKeepCursorHidden_ToolsTab(t *testing.T) {
 }
 
 func TestCursorHidden_TabGlobalKeysKeepCursorHidden_AgentsTab(t *testing.T) {
+	t.Parallel()
 	fixture := func() Model {
 		m := agentsAllModel(
 			[]app.SkillPackageRow{{Name: "caveman", Source: "o/caveman", Installed: true}},
@@ -6070,6 +6279,7 @@ func TestCursorHidden_TabGlobalKeysKeepCursorHidden_AgentsTab(t *testing.T) {
 }
 
 func TestCursorHidden_NavigationRevealsWithoutMoving_ToolsTab(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.cursorHidden = true
 	m.cursor = 0
@@ -6089,6 +6299,7 @@ func TestCursorHidden_NavigationRevealsWithoutMoving_ToolsTab(t *testing.T) {
 }
 
 func TestCursorHidden_RowActionKeyStillReveals_ToolsTab(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.cursorHidden = true
 
@@ -6099,6 +6310,7 @@ func TestCursorHidden_RowActionKeyStillReveals_ToolsTab(t *testing.T) {
 }
 
 func TestCursorHidden_TabGlobalKeys_DashboardReconcileAndDotsBulk(t *testing.T) {
+	t.Parallel()
 	dash := baseModel(threeTools())
 	dash.mode = viewStatus
 	dash.cursorHidden = true
@@ -6117,6 +6329,7 @@ func TestCursorHidden_TabGlobalKeys_DashboardReconcileAndDotsBulk(t *testing.T) 
 }
 
 func TestCursorHidden_DotAddTabGlobalOnlyOnDotsTab(t *testing.T) {
+	t.Parallel()
 	dots := baseModel(nil)
 	dots.mode = viewDots
 	dots.cursorHidden = true

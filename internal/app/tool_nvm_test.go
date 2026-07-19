@@ -31,6 +31,7 @@ func TestToolResolvesViaNvm_DetectsNvmBin(t *testing.T) {
 }
 
 func TestClassifyToolView_NvmManagedSystemToolIsOutOfSync(t *testing.T) {
+	t.Parallel()
 	for _, prov := range []string{"brew", "apt"} {
 		t.Run(prov, func(t *testing.T) {
 			got := app.ClassifyToolView(&app.ToolView{

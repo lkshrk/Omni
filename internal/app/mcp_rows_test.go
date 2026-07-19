@@ -9,6 +9,7 @@ import (
 )
 
 func TestMcpServerRows_InstalledStatus(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{
 		id:        "claude-code",
 		available: true,
@@ -35,6 +36,7 @@ func TestMcpServerRows_InstalledStatus(t *testing.T) {
 // mapping back onto McpServerRow.Groups, so the TUI always renders an mcp
 // row's group membership as empty regardless of what was persisted.
 func TestMcpServerRows_ReflectsGroupMembership(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{id: "claude-code", available: true, listed: nil}
 	srv := config.McpServer{Name: "linear", Transport: "stdio", Command: "npx x"}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
@@ -59,6 +61,7 @@ func TestMcpServerRows_ReflectsGroupMembership(t *testing.T) {
 }
 
 func TestMcpServerRows_MissingStatus(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{id: "claude-code", available: true, listed: nil}
 	srv := config.McpServer{Name: "linear", Transport: "stdio", Command: "npx x"}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
@@ -72,6 +75,7 @@ func TestMcpServerRows_MissingStatus(t *testing.T) {
 }
 
 func TestMcpServerRows_UnavailableStatus(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{id: "claude-code", available: false}
 	srv := config.McpServer{Name: "linear", Transport: "stdio", Command: "npx x"}
 	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}}, app.WithMcpAdapters([]app.McpAdapter{stub}))
@@ -85,6 +89,7 @@ func TestMcpServerRows_UnavailableStatus(t *testing.T) {
 }
 
 func TestMcpServerRows_PopulatesVersionFromCommand(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{
 		id:        "claude-code",
 		available: true,
@@ -105,6 +110,7 @@ func TestMcpServerRows_PopulatesVersionFromCommand(t *testing.T) {
 }
 
 func TestMcpServerRows_UnmanagedSection(t *testing.T) {
+	t.Parallel()
 	stub := &stubMcpAdapter{
 		id:        "claude-code",
 		available: true,
@@ -131,6 +137,7 @@ func TestMcpServerRows_UnmanagedSection(t *testing.T) {
 // same-named plugin on the agent, the entry must be suppressed from
 // unmanaged rather than offered for claim.
 func TestMcpServerRows_UnmanagedSuppressedByInstalledPlugin(t *testing.T) {
+	t.Parallel()
 	mcpStub := &stubMcpAdapter{
 		id:        "claude-code",
 		available: true,
@@ -162,6 +169,7 @@ func TestMcpServerRows_UnmanagedSuppressedByInstalledPlugin(t *testing.T) {
 // visible even when a plugin now provides it, but flagged as shadowed rather
 // than reported as a real gap.
 func TestMcpServerRows_ManifestEntryShadowedByPlugin_NotHidden(t *testing.T) {
+	t.Parallel()
 	mcpStub := &stubMcpAdapter{id: "claude-code", available: true, listed: nil}
 	pluginStub := &stubPluginAdapter{
 		id:            "claude-code",

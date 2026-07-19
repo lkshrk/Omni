@@ -18,6 +18,7 @@ func mcpChipFixture(rows []app.McpServerRow) Model {
 }
 
 func TestMcpFlow_NOpensAddFormWithNameFocused(t *testing.T) {
+	t.Parallel()
 	m := mcpChipFixture(nil)
 
 	m = drive(m, pressRune('n'))
@@ -34,6 +35,7 @@ func TestMcpFlow_NOpensAddFormWithNameFocused(t *testing.T) {
 }
 
 func TestMcpFlow_TabCyclesFieldsForwardAndWraps(t *testing.T) {
+	t.Parallel()
 	m := mcpChipFixture(nil)
 	m = drive(m, pressRune('n'))
 
@@ -47,6 +49,7 @@ func TestMcpFlow_TabCyclesFieldsForwardAndWraps(t *testing.T) {
 }
 
 func TestMcpFlow_EscCancelsAndResetsForm(t *testing.T) {
+	t.Parallel()
 	m := mcpChipFixture(nil)
 	m = drive(m, pressRune('n'))
 	m.mcpFormName.SetValue("half-typed")
@@ -63,6 +66,7 @@ func TestMcpFlow_EscCancelsAndResetsForm(t *testing.T) {
 }
 
 func TestMcpFlow_StdioWithoutCommandShowsValidationError(t *testing.T) {
+	t.Parallel()
 	m := mcpChipFixture(nil)
 	m = drive(m, pressRune('n'))
 	m.mcpFormName.SetValue("my-server")
@@ -82,6 +86,7 @@ func TestMcpFlow_StdioWithoutCommandShowsValidationError(t *testing.T) {
 }
 
 func TestMcpFlow_ValidSubmitQueuesSpinnerTickAndSetsRunning(t *testing.T) {
+	t.Parallel()
 	m := mcpChipFixture(nil)
 	m = drive(m, pressRune('n'))
 	m.mcpFormName.SetValue("my-server")
@@ -105,6 +110,7 @@ func TestMcpFlow_ValidSubmitQueuesSpinnerTickAndSetsRunning(t *testing.T) {
 }
 
 func TestMcpFlow_DeleteConfirmTwoStep(t *testing.T) {
+	t.Parallel()
 	t.Run("first d arms confirm", func(t *testing.T) {
 		m := mcpChipFixture([]app.McpServerRow{{Name: "arm-target"}})
 
@@ -148,6 +154,7 @@ func TestMcpFlow_DeleteConfirmTwoStep(t *testing.T) {
 }
 
 func TestMcpFlow_AgentsPickerOpensWithTargetingFromRow(t *testing.T) {
+	t.Parallel()
 	rows := []app.McpServerRow{
 		{
 			Name:      "picker-target",
@@ -191,6 +198,7 @@ func TestMcpFlow_AgentsPickerOpensWithTargetingFromRow(t *testing.T) {
 }
 
 func TestMcpFlow_AgentsPickerConfirmSavesAndCloses(t *testing.T) {
+	t.Parallel()
 	rows := []app.McpServerRow{
 		{
 			Name:      "save-target",
@@ -220,6 +228,7 @@ func TestMcpFlow_AgentsPickerConfirmSavesAndCloses(t *testing.T) {
 }
 
 func TestMcpFlow_AgentsPickerEscCancelsWithoutSaving(t *testing.T) {
+	t.Parallel()
 	rows := []app.McpServerRow{{Name: "esc-target", PerAgentStatus: map[string]app.McpStatus{"codex": app.McpStatusInstalled}}}
 	m := mcpChipFixture(rows)
 
@@ -234,6 +243,7 @@ func TestMcpFlow_AgentsPickerEscCancelsWithoutSaving(t *testing.T) {
 }
 
 func TestMcpFlow_RestoreKeySetsRunningFlag(t *testing.T) {
+	t.Parallel()
 	m := mcpChipFixture([]app.McpServerRow{{Name: "restore-target"}})
 
 	m = drive(m, pressRune('r'))
@@ -253,6 +263,7 @@ func TestMcpFlow_RestoreKeySetsRunningFlag(t *testing.T) {
 // the exact "URL is required for http transport" message, leave the form
 // open, and retain the already-typed name.
 func TestMcpFlow_HttpTransportWithoutURLShowsValidationError(t *testing.T) {
+	t.Parallel()
 	m := mcpChipFixture(nil)
 	m = drive(m, pressRune('n'))
 	m.mcpFormName.SetValue("http-server")
@@ -294,6 +305,7 @@ func TestMcpFlow_HttpTransportWithoutURLShowsValidationError(t *testing.T) {
 // buildMcpServerFromForm's transports slice: stdio(0) -> http(1) -> sse(2),
 // clamping (not wrapping) at each end per handleMcpFormKeyMsg's guards.
 func TestMcpFlow_TransportCycleWrapsThroughAllValues(t *testing.T) {
+	t.Parallel()
 	m := mcpChipFixture(nil)
 	m = drive(m, pressRune('n'), pressTab())
 	if m.mcpFormField != 1 {
@@ -337,6 +349,7 @@ func TestMcpFlow_TransportCycleWrapsThroughAllValues(t *testing.T) {
 // helper shortcut) to prove shift+tab actually reverses field focus rather
 // than behaving like a second plain tab.
 func TestMcpFlow_ShiftTabNavigatesBackwardThroughUpdate(t *testing.T) {
+	t.Parallel()
 	m := mcpChipFixture(nil)
 	m = drive(m, pressRune('n'))
 	if m.mcpFormField != 0 {
@@ -364,6 +377,7 @@ func TestMcpFlow_ShiftTabNavigatesBackwardThroughUpdate(t *testing.T) {
 // open must close the form, clear any form error, and queue a reload command
 // (doLoadMcpRows), per the mcpAddDoneMsg case in update.go.
 func TestMcpFlow_AddDoneMsgSuccessClosesFormAndReloads(t *testing.T) {
+	t.Parallel()
 	m := mcpChipFixture(nil)
 	m = drive(m, pressRune('n'))
 	m.mcpFormName.SetValue("nav-focus-server")
@@ -400,6 +414,7 @@ func TestMcpFlow_AddDoneMsgSuccessClosesFormAndReloads(t *testing.T) {
 // keep the form open and set mcpFormErr (not the global statusMsg), per the
 // "if m.mcpFormOpen" branch in update.go's mcpAddDoneMsg case.
 func TestMcpFlow_AddDoneMsgErrorKeepsFormOpenWithError(t *testing.T) {
+	t.Parallel()
 	m := mcpChipFixture(nil)
 	m = drive(m, pressRune('n'))
 	m.mcpFormName.SetValue("nav-focus-server")
@@ -438,6 +453,7 @@ func TestMcpFlow_AddDoneMsgErrorKeepsFormOpenWithError(t *testing.T) {
 // nil app — this stops at "a real adopt command was queued" instead of
 // running the network/DB call.
 func TestMcpFlow_ClaimKeyOnUnmanagedRowQueuesAdoptCommand(t *testing.T) {
+	t.Parallel()
 	m := mcpChipFixture(nil)
 	m.mcpUnmanaged = map[string][]app.InstalledMcpServer{
 		"codex": {{Name: "unmanaged-mcp-srv", Transport: "stdio", Command: "npx unmanaged"}},
@@ -465,6 +481,7 @@ func TestMcpFlow_ClaimKeyOnUnmanagedRowQueuesAdoptCommand(t *testing.T) {
 // never clear it (on success OR error), leaving the row's spinner running
 // forever whenever AddMcpServer/SetMcpGroups failed.
 func TestMcpFlow_ImportAdoptErrorClearsOpKeyAndSurfacesStatus(t *testing.T) {
+	t.Parallel()
 	m := mcpChipFixture(nil)
 	m.startAgentsOp("stuck-key")
 	m.mcpRunning = true
@@ -484,6 +501,7 @@ func TestMcpFlow_ImportAdoptErrorClearsOpKeyAndSurfacesStatus(t *testing.T) {
 }
 
 func TestMcpFlow_ImportKeyOnUnmanagedRowIsInert(t *testing.T) {
+	t.Parallel()
 	m := mcpChipFixture(nil)
 	m.mcpUnmanaged = map[string][]app.InstalledMcpServer{
 		"codex": {{Name: "unmanaged-mcp-srv", Transport: "stdio", Command: "npx unmanaged"}},
@@ -507,6 +525,7 @@ func TestMcpFlow_ImportKeyOnUnmanagedRowIsInert(t *testing.T) {
 // until a new status/clearStatusMsg replaces it, unlike mcpFormErr which is
 // reset on form open.
 func TestMcpFlow_GroupsStatusMessagePersistsUntilReplaced(t *testing.T) {
+	t.Parallel()
 	rows := []app.McpServerRow{{Name: "groups-status-server", Groups: []string{"work"}}}
 	m := mcpChipFixture(rows)
 

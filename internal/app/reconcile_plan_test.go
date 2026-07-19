@@ -11,6 +11,7 @@ import (
 )
 
 func TestDashboardToolSummary_ClassifiesToolsAndDiscoveredRows(t *testing.T) {
+	t.Parallel()
 	summary := app.BuildDashboardToolSummary(app.DashboardToolSummaryInput{
 		Tools: []*app.ToolView{
 			{Name: "git", Provider: "brew", Tracked: true, Installed: true, Outdated: true, LatestVersion: "2.0"},
@@ -47,6 +48,7 @@ func TestDashboardToolSummary_ClassifiesToolsAndDiscoveredRows(t *testing.T) {
 }
 
 func TestReconcileSummaryCountsToolsDotsAndIssues(t *testing.T) {
+	t.Parallel()
 	result := &app.ReconcileResult{
 		SyncAll: &app.SyncAllResult{
 			SyncResult: &isync.SyncResult{Ops: []isync.SyncOp{
@@ -88,6 +90,7 @@ func TestReconcileSummaryCountsToolsDotsAndIssues(t *testing.T) {
 }
 
 func TestDashboardToolSyncQueuedNamesLabelsPendingIssues(t *testing.T) {
+	t.Parallel()
 	names := app.DashboardToolSyncQueuedNames(app.DashboardToolActivityInput{
 		Tools: []*app.ToolView{
 			{Name: "fd", Provider: "brew", Tracked: true, Installed: false},
@@ -110,6 +113,7 @@ func TestDashboardToolSyncQueuedNamesLabelsPendingIssues(t *testing.T) {
 }
 
 func TestDashboardToolSyncBusyUsesQueuedNamesAndProgressFallback(t *testing.T) {
+	t.Parallel()
 	base := app.DashboardToolActivityInput{
 		Loading: true,
 		Tools: []*app.ToolView{
@@ -145,6 +149,7 @@ func TestDashboardToolSyncBusyUsesQueuedNamesAndProgressFallback(t *testing.T) {
 }
 
 func TestDashboardUpgradeNamesSplitsActiveAndWaitingUpdates(t *testing.T) {
+	t.Parallel()
 	active, waiting := app.DashboardUpgradeNames(app.DashboardToolActivityInput{
 		Tools: []*app.ToolView{
 			{Name: "bat", Provider: "brew", Tracked: true, Installed: true, Outdated: true, LatestVersion: "1.0"},
@@ -171,6 +176,7 @@ func TestDashboardUpgradeNamesSplitsActiveAndWaitingUpdates(t *testing.T) {
 }
 
 func TestDashboardReconcilePlan_EmptyHealthySnapshotHasNoSteps(t *testing.T) {
+	t.Parallel()
 	steps := app.DashboardReconcilePlan(app.DashboardReconcilePlanInput{
 		Tools: []*app.ToolView{
 			{Name: "git", Provider: "brew", Tracked: true, Installed: true},
@@ -187,6 +193,7 @@ func TestDashboardReconcilePlan_EmptyHealthySnapshotHasNoSteps(t *testing.T) {
 }
 
 func TestDashboardReconcilePlan_PlansActionableToolDotAndIgnoreSteps(t *testing.T) {
+	t.Parallel()
 	steps := app.DashboardReconcilePlan(app.DashboardReconcilePlanInput{
 		Tools: []*app.ToolView{
 			{Name: "fd", Provider: "brew", Tracked: true, Installed: false},
@@ -227,6 +234,7 @@ func TestDashboardReconcilePlan_PlansActionableToolDotAndIgnoreSteps(t *testing.
 }
 
 func TestDashboardReconcilePlan_IncludesMissingAgents(t *testing.T) {
+	t.Parallel()
 	steps := app.DashboardReconcilePlan(app.DashboardReconcilePlanInput{AgentsOutOfSync: 2})
 	if !app.DashboardReconcilePlanHasStep(steps, app.ReconcileStepSyncAgents) {
 		t.Fatalf("steps = %#v, want sync-agents step", steps)
@@ -235,6 +243,7 @@ func TestDashboardReconcilePlan_IncludesMissingAgents(t *testing.T) {
 }
 
 func TestDashboardReconcilePlan_IncludesFixNvmManagedStepFromDoctorDrift(t *testing.T) {
+	t.Parallel()
 	steps := app.DashboardReconcilePlan(app.DashboardReconcilePlanInput{
 		Doctor: &app.DoctorResult{
 			Checks: []app.DoctorCheck{{
@@ -253,6 +262,7 @@ func TestDashboardReconcilePlan_IncludesFixNvmManagedStepFromDoctorDrift(t *test
 }
 
 func TestDashboardReconcilePlan_IncludesFixNvmManagedStep(t *testing.T) {
+	t.Parallel()
 	steps := app.DashboardReconcilePlan(app.DashboardReconcilePlanInput{
 		Tools: []*app.ToolView{
 			{Name: "pnpm", Provider: "brew", Tracked: true, Installed: true},
@@ -269,6 +279,7 @@ func TestDashboardReconcilePlan_IncludesFixNvmManagedStep(t *testing.T) {
 }
 
 func TestDashboardReconcilePlan_UsesExplicitDotsConfiguredFlag(t *testing.T) {
+	t.Parallel()
 	steps := app.DashboardReconcilePlan(app.DashboardReconcilePlanInput{
 		DotsConfigured: true,
 		DotsEntries: []app.DotStatus{
@@ -283,6 +294,7 @@ func TestDashboardReconcilePlan_UsesExplicitDotsConfiguredFlag(t *testing.T) {
 }
 
 func TestDashboardReconcilePlan_SuppressesDotsStepsWhenDotsUnavailable(t *testing.T) {
+	t.Parallel()
 	base := app.DashboardReconcilePlanInput{
 		DotsRepo: "/repo",
 		DotsEntries: []app.DotStatus{
@@ -311,6 +323,7 @@ func TestDashboardReconcilePlan_SuppressesDotsStepsWhenDotsUnavailable(t *testin
 }
 
 func TestDashboardReconcilePlan_IgnoresSuppressedTools(t *testing.T) {
+	t.Parallel()
 	steps := app.DashboardReconcilePlan(app.DashboardReconcilePlanInput{
 		Tools: []*app.ToolView{
 			{Name: "fd", Provider: "brew", Tracked: true, Installed: false},

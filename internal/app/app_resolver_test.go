@@ -71,6 +71,7 @@ func (p *managerRoutingProvider) IsInstalledWithManager(_ context.Context, tool 
 }
 
 func TestToolKeyDefaultsPackageAndString(t *testing.T) {
+	t.Parallel()
 	key := NewToolKey("rg", "brew", "")
 	if key != (ToolKey{Name: "rg", Provider: "brew", Package: "rg"}) {
 		t.Fatalf("key = %+v, want package defaulted to name", key)
@@ -112,6 +113,7 @@ func TestPlanInstallRoute_HostOverrideBeatsGlobalProviders(t *testing.T) {
 }
 
 func TestResolverProviderIdentityHelpers(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	node := &availabilityCountingProvider{name: "node", available: true}
 	bun := &availabilityCountingProvider{name: "bun", available: true}
@@ -162,6 +164,7 @@ func TestResolverProviderIdentityHelpers(t *testing.T) {
 }
 
 func TestManagerSpecificInstallAndCheckRouting(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	manager := newManagerRoutingProvider("node")
 	tool := provider.Tool{Name: "prettier", Provider: "node", Package: "prettier"}
@@ -233,6 +236,7 @@ func TestManagerSpecificInstallAndCheckRouting(t *testing.T) {
 }
 
 func TestResolveToolsCachesProviderAvailabilityPerPass(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	unavailable := &availabilityCountingProvider{name: "missing", available: false}
 	available := &availabilityCountingProvider{name: "available", available: true}
@@ -284,6 +288,7 @@ func TestResolveToolsCachesProviderAvailabilityPerPass(t *testing.T) {
 }
 
 func TestResolveToolsSkipsProviderInventoryGroups(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	brew := &availabilityCountingProvider{name: "brew", available: true}
 	a := New(filepath.Join(t.TempDir(), "settings.json"))
@@ -306,6 +311,7 @@ func TestResolveToolsSkipsProviderInventoryGroups(t *testing.T) {
 }
 
 func TestPlanInstallRoute_SelectsLaterCandidateWhenPackageUnavailable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	apt := &availabilityCountingProvider{name: "apt", available: true}
 	brew := &availabilityCountingProvider{name: "brew", available: true}
@@ -353,6 +359,7 @@ func TestPlanInstallRoute_SelectsLaterCandidateWhenPackageUnavailable(t *testing
 }
 
 func TestPlanInstallRoute_MarksFallbackEligibleWhenAllNativeCandidatesUnavailable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	apt := &availabilityCountingProvider{name: "apt", available: true}
 	brew := &availabilityCountingProvider{name: "brew", available: true}
@@ -401,6 +408,7 @@ func TestPlanInstallRoute_MarksFallbackEligibleWhenAllNativeCandidatesUnavailabl
 }
 
 func TestPlanInstallRoute_BrewUnavailableUsesScriptAlternative(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	brew := &availabilityCountingProvider{name: "brew", available: false}
 	script := &availabilityCountingProvider{name: "script", available: true}
@@ -435,6 +443,7 @@ func TestPlanInstallRoute_BrewUnavailableUsesScriptAlternative(t *testing.T) {
 }
 
 func TestPlanInstallRoute_DoesNotUseFallbackWhenProviderUnavailable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	apt := &availabilityCountingProvider{name: "apt", available: false}
 	a := New(filepath.Join(t.TempDir(), "settings.json"))
@@ -459,6 +468,7 @@ func TestPlanInstallRoute_DoesNotUseFallbackWhenProviderUnavailable(t *testing.T
 }
 
 func TestPlanInstallRoute_DoesNotUseFallbackForMixedSkipReasons(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	apt := &availabilityCountingProvider{name: "apt", available: true}
 	brew := &availabilityCountingProvider{name: "brew", available: false}
@@ -668,6 +678,7 @@ func TestPlanInstallRoute_HostOverrideBypassesDisabledProviders(t *testing.T) {
 }
 
 func TestPlanInstallRoute_SortsCandidatesByProviderPriority(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	brew := &availabilityCountingProvider{name: "brew", available: true}
 	script := &availabilityCountingProvider{name: "script", available: true}
@@ -741,6 +752,7 @@ func saveCodexConfig(t *testing.T, configPath string, spec config.ToolSpec) {
 }
 
 func TestInstall_ExplicitProviderMatchesSecondaryConfiguredCandidate(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	configPath := filepath.Join(t.TempDir(), "settings.json")
 	brew := newManagerRoutingProvider("brew")
@@ -775,6 +787,7 @@ func TestInstall_ExplicitProviderMatchesSecondaryConfiguredCandidate(t *testing.
 }
 
 func TestInstall_UnmatchedRequestedProviderReturnsErrorNotLiteralNameFallback(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	configPath := filepath.Join(t.TempDir(), "settings.json")
 	brew := newManagerRoutingProvider("brew")
@@ -803,6 +816,7 @@ func TestInstall_UnmatchedRequestedProviderReturnsErrorNotLiteralNameFallback(t 
 }
 
 func TestInstall_UnconfiguredToolStillUsesLiteralNameFallback(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	configPath := filepath.Join(t.TempDir(), "settings.json")
 	brew := newManagerRoutingProvider("brew")

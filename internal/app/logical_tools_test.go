@@ -19,6 +19,7 @@ import (
 )
 
 func TestSetTool_UpsertsLogicalSpecWithoutMembership(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
 	if err := a.SetTool("ripgrep", "brew", "rg", ""); err != nil {
@@ -46,6 +47,7 @@ func TestSetTool_UpsertsLogicalSpecWithoutMembership(t *testing.T) {
 }
 
 func TestSetTool_PromotesProviderToDefault(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -71,6 +73,7 @@ func TestSetTool_PromotesProviderToDefault(t *testing.T) {
 }
 
 func TestSetTool_PreservesToolMetadataWhenPromotingProvider(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	fallback := config.FallbackSpec{
 		Source:   config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "cli", Repo: "cli"},
@@ -116,6 +119,7 @@ func TestSetTool_PreservesToolMetadataWhenPromotingProvider(t *testing.T) {
 }
 
 func TestSetToolDefaultInstallSpec_PromotesProviderWithoutChangingHostOverride(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -154,6 +158,7 @@ func TestSetToolDefaultInstallSpec_PromotesProviderWithoutChangingHostOverride(t
 }
 
 func TestSetTool_RejectsMissingProvider(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 
 	err := a.SetTool("ripgrep", "", "ripgrep", "")
@@ -166,6 +171,7 @@ func TestSetTool_RejectsMissingProvider(t *testing.T) {
 }
 
 func TestToolProviderScopeChoices_PlansEcosystemChoice(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	tool := &app.ToolView{Name: "typescript", Provider: "node", InstalledWith: "bun"}
 
@@ -261,6 +267,7 @@ func TestSetToolProviderScopeWithStatePersistsHostPinInInclude(t *testing.T) {
 }
 
 func TestSetToolProviderScopeWithStatePersistsToolProviderPin(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
@@ -378,6 +385,7 @@ func TestClearToolInstallOverrideRemovesHostProviderPin(t *testing.T) {
 }
 
 func TestSetToolProviderScopeWithStateRejectsInvalidScopeOptions(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 
 	if _, err := a.SetToolProviderScopeWithState(context.Background(), "prettier", app.ToolProviderScopeOptions{
@@ -396,6 +404,7 @@ func TestSetToolProviderScopeWithStateRejectsInvalidScopeOptions(t *testing.T) {
 }
 
 func TestClearToolInstallOverrideReportsMissingOverride(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
@@ -423,6 +432,7 @@ func TestClearToolInstallOverrideReportsMissingOverride(t *testing.T) {
 }
 
 func TestClearToolInstallOverrideRejectsMissingInputs(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 
 	if _, err := a.ClearToolInstallOverride(context.Background(), "", ""); err == nil || err.Error() != "tool name is required" {
@@ -434,6 +444,7 @@ func TestClearToolInstallOverrideRejectsMissingInputs(t *testing.T) {
 }
 
 func TestSetTool_RejectsEcosystemProviderWithoutConcrete(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 
 	err := a.SetTool("ripgrep", "system", "ripgrep", "")
@@ -446,6 +457,7 @@ func TestSetTool_RejectsEcosystemProviderWithoutConcrete(t *testing.T) {
 }
 
 func TestMoveToolToGroup_RequiresLogicalSpec(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 
 	if err := a.MoveToolToGroup("ripgrep", "base"); err == nil {
@@ -454,6 +466,7 @@ func TestMoveToolToGroup_RequiresLogicalSpec(t *testing.T) {
 }
 
 func TestAddAndRemoveToolToGroup_UpdatesMembershipOnly(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools:  logicalToolSpecs(logicalTool("ripgrep", "brew")),
@@ -491,6 +504,7 @@ func TestAddAndRemoveToolToGroup_UpdatesMembershipOnly(t *testing.T) {
 }
 
 func TestMoveToolToGroupMovesSingleOwnerMembership(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
@@ -592,6 +606,7 @@ func TestSetToolGroupMembershipWithStateReturnsStateAfterAddAndRemove(t *testing
 }
 
 func TestSetToolGroupsCreatesSelectedGroupAndAssignsHost(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
@@ -628,6 +643,7 @@ func TestSetToolGroupsCreatesSelectedGroupAndAssignsHost(t *testing.T) {
 }
 
 func TestSetToolGroupsCreatesProviderInventoryMarker(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools:  logicalToolSpecs(logicalTool("libc6", "apt")),
@@ -650,6 +666,7 @@ func TestSetToolGroupsCreatesProviderInventoryMarker(t *testing.T) {
 }
 
 func TestSetToolGroupsRemovesProviderInventoryAndRestoresHost(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("libc6", "apt")),
@@ -733,6 +750,7 @@ func TestSetToolGroupsWithStateReturnsUpdatedToolsAndGroups(t *testing.T) {
 }
 
 func TestToolGroupLabelsForHostFiltersInactiveGroupsAndCompacts(t *testing.T) {
+	t.Parallel()
 	labels := app.ToolGroupLabelsForHost(
 		map[string][]string{
 			"git\x00system": {"testhost", "ops", "dev", "unused"},
@@ -756,6 +774,7 @@ func TestToolGroupLabelsForHostFiltersInactiveGroupsAndCompacts(t *testing.T) {
 }
 
 func TestGroupLabelForHostFiltersInactiveGroupsAndCompacts(t *testing.T) {
+	t.Parallel()
 	got := app.GroupLabelForHost(
 		[]string{"testhost", "ops", "dev", "unused"},
 		&app.HostInfo{
@@ -796,6 +815,7 @@ func TestToolGroupLabelsUsesCurrentMachineHostFilter(t *testing.T) {
 }
 
 func TestVisibleGroupNamesForHostUsesActiveHostGroups(t *testing.T) {
+	t.Parallel()
 	got := app.VisibleGroupNamesForHost(
 		[]string{"archive", "personal", "work"},
 		&app.HostInfo{
@@ -812,6 +832,7 @@ func TestVisibleGroupNamesForHostUsesActiveHostGroups(t *testing.T) {
 }
 
 func TestVisibleGroupNamesForHostIncludesMachineGroup(t *testing.T) {
+	t.Parallel()
 	got := app.VisibleGroupNamesForHost(
 		[]string{"archive", "testhost", "work"},
 		&app.HostInfo{
@@ -890,6 +911,7 @@ func TestSetupHostGroupDraftUsesActiveOrCurrentHost(t *testing.T) {
 }
 
 func TestSetupSelectedHostGroupsPreservesGroupOrder(t *testing.T) {
+	t.Parallel()
 	got := app.SetupSelectedHostGroups(
 		[]string{"archive", "work", "dev"},
 		map[string]bool{"dev": true, "work": true, "missing": true},
@@ -903,6 +925,7 @@ func TestSetupSelectedHostGroupsPreservesGroupOrder(t *testing.T) {
 }
 
 func TestDotMembershipNamesReturnsSortedNonEmptyNames(t *testing.T) {
+	t.Parallel()
 	got := app.DotMembershipNames(map[string][]string{
 		"zsh":  {"shell"},
 		"":     {"ignored"},
@@ -918,6 +941,7 @@ func TestDotMembershipNamesReturnsSortedNonEmptyNames(t *testing.T) {
 }
 
 func TestAllGroupNamesForMachinePutsHostBeforeSortedReusableGroups(t *testing.T) {
+	t.Parallel()
 	got := app.AllGroupNamesForMachine([]string{"work", "apps", "testhost", "personal", "apps"}, "testhost")
 	want := []string{"testhost", "apps", "personal", "work"}
 	if !slices.Equal(got, want) {
@@ -926,6 +950,7 @@ func TestAllGroupNamesForMachinePutsHostBeforeSortedReusableGroups(t *testing.T)
 }
 
 func TestHostAssignmentGroupsKeepLocalHostSeparate(t *testing.T) {
+	t.Parallel()
 	picker := app.HostAssignmentPickerGroups("testhost", []string{"work", "apps", "testhost", "work"})
 	if !slices.Equal(picker, []string{"testhost", "apps", "work"}) {
 		t.Fatalf("picker groups = %v, want local host then reusable groups", picker)
@@ -941,6 +966,7 @@ func TestHostAssignmentGroupsKeepLocalHostSeparate(t *testing.T) {
 }
 
 func TestIsLocalHostGroupUsesMachineGroupName(t *testing.T) {
+	t.Parallel()
 	if !app.IsLocalHostGroup("", "testhost") {
 		t.Fatal("empty group should be protected")
 	}
@@ -953,6 +979,7 @@ func TestIsLocalHostGroupUsesMachineGroupName(t *testing.T) {
 }
 
 func TestGroupPickerNamesForHostPrioritizesActiveGroups(t *testing.T) {
+	t.Parallel()
 	got := app.GroupPickerNamesForHost(
 		[]string{"archive", "personal", "work"},
 		&app.HostInfo{
@@ -970,6 +997,7 @@ func TestGroupPickerNamesForHostPrioritizesActiveGroups(t *testing.T) {
 }
 
 func TestActiveHostGroupSetForPickerIncludesCreatedGroupsWithHostContext(t *testing.T) {
+	t.Parallel()
 	info := &app.HostInfo{
 		Active: "main",
 		Hosts: map[string]config.HostAssignment{
@@ -985,6 +1013,7 @@ func TestActiveHostGroupSetForPickerIncludesCreatedGroupsWithHostContext(t *test
 }
 
 func TestSetGroupToolsAppliesEditorDiff(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(
@@ -1040,6 +1069,7 @@ func TestSetGroupToolsAppliesEditorDiff(t *testing.T) {
 }
 
 func TestGroupAssignmentChangedDetectsEditorDiff(t *testing.T) {
+	t.Parallel()
 	if app.GroupAssignmentChanged(map[string]bool{"ripgrep": true}, map[string]bool{"ripgrep": true}) {
 		t.Fatal("GroupAssignmentChanged unchanged = true, want false")
 	}
@@ -1068,6 +1098,7 @@ func TestGroupAssignmentChangedDetectsEditorDiff(t *testing.T) {
 }
 
 func TestGroupMembershipsChangedAndCreatedGroups(t *testing.T) {
+	t.Parallel()
 	if app.GroupMembershipsChanged([]string{"work", "base"}, []string{"base", "work"}) {
 		t.Fatal("GroupMembershipsChanged reordered = true, want false")
 	}
@@ -1178,6 +1209,7 @@ func TestSync_MachineGroupIgnoreSuppressesSharedLogicalTool(t *testing.T) {
 }
 
 func TestRemoveLogicalTool_RemovesMembershipsIgnoresAndCache(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	ctx := context.Background()
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -1249,6 +1281,7 @@ func TestRemoveLogicalTool_RemovesMembershipsIgnoresAndCache(t *testing.T) {
 }
 
 func TestRemoveLogicalTool_RejectsProviderTool(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalFixtureTool{Name: "pnpm", Provider: "node", InstallWith: "pnpm"}),

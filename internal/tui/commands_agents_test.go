@@ -10,6 +10,7 @@ import (
 )
 
 func TestAgentsCmds_NilAppReturnsNil(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	cmds := map[string]tea.Cmd{
 		"doSaveAgentsUse":              m.doSaveAgentsUse([]string{"claude"}),
@@ -34,6 +35,7 @@ func TestAgentsCmds_NilAppReturnsNil(t *testing.T) {
 }
 
 func TestAgentsCmds_SuccessMsgs(t *testing.T) {
+	t.Parallel()
 	m := agentsAllProgressModel(t, nil, nil, nil)
 
 	if msg, ok := m.doSaveAgentsUse([]string{"claude"})().(agentsUseSavedMsg); !ok || msg.err != nil {
@@ -69,6 +71,7 @@ func TestAgentsCmds_SuccessMsgs(t *testing.T) {
 }
 
 func TestAgentsCmds_RemoveSkillPackage(t *testing.T) {
+	t.Parallel()
 	m := agentsAllProgressModel(t, &config.RootConfig{
 		Agents: config.AgentsConfig{Packages: []config.SkillPackage{{Source: "owner/seed-pkg"}}},
 	}, nil, nil)
@@ -85,6 +88,7 @@ func TestAgentsCmds_RemoveSkillPackage(t *testing.T) {
 // against an app with SkillsDisabled, so the app-layer guard errors before
 // any CLI or network work and the error branch of each closure is exercised.
 func TestAgentsCmds_SkillsDisabledErrorPaths(t *testing.T) {
+	t.Parallel()
 	m := agentsAllProgressModel(t, &config.RootConfig{
 		Settings: config.Settings{SkillsDisabled: config.BoolPtr(true)},
 	}, nil, nil)
@@ -114,6 +118,7 @@ func TestAgentsCmds_SkillsDisabledErrorPaths(t *testing.T) {
 }
 
 func TestAgentsCmds_ReloadAgentsIgnore_CorruptConfigErrors(t *testing.T) {
+	t.Parallel()
 	m := agentsAllProgressModel(t, nil, nil, nil)
 	if err := os.WriteFile(m.app.ConfigPath, []byte("{not json"), 0o644); err != nil {
 		t.Fatalf("corrupting config: %v", err)

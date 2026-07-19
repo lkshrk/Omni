@@ -81,6 +81,7 @@ func indexOf(log []string, want string) int {
 // configured concrete provider in pass 2. Both bootstrap and group/batch sync
 // must install pip before even checking the dependent provider.
 func TestSync_InstallsProvidersBeforeDependents(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name      string
 		groupName string
@@ -133,6 +134,7 @@ func TestSync_InstallsProvidersBeforeDependents(t *testing.T) {
 // TestSync_SelfContainedProviderNotPruned verifies that a bootstrap provider
 // declared in Settings.Providers is not pruned even when no group tool uses it.
 func TestSync_SelfContainedProviderNotPruned(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	var log []string
 	brew := &recordingProvider{name: "brew", available: true, mu: &mu, log: &log}
@@ -166,6 +168,7 @@ func TestSync_SelfContainedProviderNotPruned(t *testing.T) {
 // install does not abort the sync: the provider op gets OpFailed, and tools
 // that depended on the unavailable provider get OpProviderUnavailable.
 func TestSync_ProviderFailureContinues(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	var log []string
 	brew := &recordingProvider{

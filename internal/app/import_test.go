@@ -76,6 +76,7 @@ func installedTool(name, ver string, prov string) provider.InstalledTool {
 }
 
 func TestImport_AddsNewTools(t *testing.T) {
+	t.Parallel()
 	stub := &stubProvider{
 		name:      "brew",
 		available: true,
@@ -117,6 +118,7 @@ func TestImport_AddsNewTools(t *testing.T) {
 }
 
 func TestImport_SkipsAlreadyConfigured(t *testing.T) {
+	t.Parallel()
 	stub := &stubProvider{
 		name:      "brew",
 		available: true,
@@ -153,6 +155,7 @@ func TestImport_SkipsAlreadyConfigured(t *testing.T) {
 }
 
 func TestImport_DryRunDoesNotWriteConfig(t *testing.T) {
+	t.Parallel()
 	stub := &stubProvider{
 		name:      "brew",
 		available: true,
@@ -177,6 +180,7 @@ func TestImport_DryRunDoesNotWriteConfig(t *testing.T) {
 }
 
 func TestImport_ProviderFilter(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{
 		name:      "brew",
 		available: true,
@@ -211,6 +215,7 @@ func TestImport_ProviderFilter(t *testing.T) {
 }
 
 func TestImport_UnavailableProviderSkipped(t *testing.T) {
+	t.Parallel()
 	stub := &stubProvider{
 		name:      "brew",
 		available: false, // not on this system
@@ -228,9 +233,12 @@ func TestImport_UnavailableProviderSkipped(t *testing.T) {
 }
 
 func TestImport_EcosystemProvidersWithRegisteredDelegatesSkipped(t *testing.T) {
+	t.Parallel(
 	// system is the provider family whose ListInstalled output is a subset of
 	// its concrete delegates. It must be skipped during a full import to
 	// prevent duplicate config entries.
+	)
+
 	brewStub := &stubProvider{
 		name:      "brew",
 		available: true,
@@ -263,6 +271,7 @@ func TestImport_EcosystemProvidersWithRegisteredDelegatesSkipped(t *testing.T) {
 }
 
 func TestImport_ResolvedDefaultConcreteDoesNotWriteInstallWith(t *testing.T) {
+	t.Parallel()
 	brewStub := &stubProvider{
 		name:      "brew",
 		available: true,
@@ -296,8 +305,11 @@ func TestImport_ResolvedDefaultConcreteDoesNotWriteInstallWith(t *testing.T) {
 }
 
 func TestImport_EcosystemProviderExplicitFilter(t *testing.T) {
+	t.Parallel(
 	// When the user explicitly requests a provider family via --provider,
 	// the skip set is bypassed and the provider family IS iterated.
+	)
+
 	system := &stubProvider{
 		name:      "system",
 		available: true,
@@ -315,8 +327,11 @@ func TestImport_EcosystemProviderExplicitFilter(t *testing.T) {
 }
 
 func TestImport_TapQualifiedPackageSkipped(t *testing.T) {
+	t.Parallel(
 	// A tool with package = "homebrew/tap/tool" must be recognised as already
 	// configured when ListInstalled returns just the plain name "tool".
+	)
+
 	stub := &stubProvider{
 		name:      "brew",
 		available: true,
@@ -346,6 +361,7 @@ func TestImport_TapQualifiedPackageSkipped(t *testing.T) {
 }
 
 func TestImport_NoDuplicatesAcrossRuns(t *testing.T) {
+	t.Parallel()
 	stub := &stubProvider{
 		name:      "brew",
 		available: true,

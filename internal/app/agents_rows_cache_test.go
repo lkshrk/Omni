@@ -13,6 +13,7 @@ import (
 // returns it with the section's Loaded flag set, and a corrupt payload is
 // treated as cache-absent (Loaded false) instead of failing the call.
 func TestCachedAgentsRows_RoundTripAndCorruptSection(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{
 		id:        "claude-code",
 		available: true,
@@ -94,6 +95,7 @@ func TestCachedAgentsRows_RoundTripAndCorruptSection(t *testing.T) {
 // load, yet the live listings must come back intact with a nil error — a
 // render-cache write may never discard the authoritative adapter data.
 func TestAgentsRowsCache_WriteFailureKeepsLiveRows(t *testing.T) {
+	t.Parallel()
 	stub := &stubPluginAdapter{
 		id:        "claude-code",
 		available: true,

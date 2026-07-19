@@ -10,6 +10,7 @@ import (
 )
 
 func TestLastNonEmptyLine(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"/usr/bin\n/new/bin\n": "/new/bin",
 		"/only/bin":            "/only/bin",
@@ -25,6 +26,7 @@ func TestLastNonEmptyLine(t *testing.T) {
 }
 
 func TestPass1InstalledScriptTool(t *testing.T) {
+	t.Parallel()
 	none := &isync.SyncResult{Ops: []isync.SyncOp{
 		{Kind: isync.OpInstall, Tool: provider.Tool{Provider: "brew"}},
 	}}

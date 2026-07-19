@@ -427,6 +427,7 @@ var allParityFixtures = []parityFixture{fixtureBase, fixtureMissing, fixtureGrou
 // constants — a formula-based check can silently drift out of sync with the
 // renderer it's meant to guard, so this deliberately reads the real string.
 func TestParity_ColumnOffsets_NameStartsRightAfterIconGap(t *testing.T) {
+	t.Parallel()
 	for _, f := range allParityFixtures {
 		f := f
 		t.Run(f.name, func(t *testing.T) {
@@ -457,6 +458,7 @@ func TestParity_ColumnOffsets_NameStartsRightAfterIconGap(t *testing.T) {
 // equal (see knownDivergentProvWidth below); the group/right-block offsets
 // downstream of cols.prov necessarily inherit the same divergence.
 func TestParity_ColumnOffsets_ProviderAgentColumnWidthIsAKnownContentShapeDivergence(t *testing.T) {
+	t.Parallel()
 	tr := renderToolsRowForTest(t, fixtureGrouped)
 	ar := renderAgentsRowForTest(t, fixtureGrouped)
 
@@ -499,6 +501,7 @@ func TestParity_ColumnOffsets_ProviderAgentColumnWidthIsAKnownContentShapeDiverg
 // "known divergent" or make this test fail for a second, unrelated reason —
 // it gets its own dedicated test instead.
 func TestParity_ColumnOffsets_RightBlockOffsetsMatch(t *testing.T) {
+	t.Parallel()
 	for _, f := range []parityFixture{fixtureBase, fixtureMissing, fixtureGrouped} {
 		f := f
 		t.Run(f.name, func(t *testing.T) {
@@ -568,6 +571,7 @@ func providerLabelForFixture(f parityFixture) string {
 // wrapper's own padding a no-op, i.e. effectively left-aligned. This test
 // pins the fixed (consistent) behavior.
 func TestParity_ColumnOffsets_IgnoredToolsRowProviderCellAlignsLikeEveryOtherState(t *testing.T) {
+	t.Parallel()
 	trIgnored := renderToolsRowForTest(t, fixtureIgnored)
 	// Render the SAME tool/cols through the non-ignored branch so the only
 	// variable is which branch built the provider cell — comparing against a
@@ -614,6 +618,7 @@ func TestParity_ColumnOffsets_IgnoredToolsRowProviderCellAlignsLikeEveryOtherSta
 // row type), so right-edge comparison there is covered instead by
 // TestParity_Style_OutdatedArrowStylesMatch.
 func TestParity_ColumnOffsets_VersionColumnRightEdgeAligns(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		f       parityFixture
 		verText string
@@ -645,6 +650,7 @@ func TestParity_ColumnOffsets_VersionColumnRightEdgeAligns(t *testing.T) {
 // --- Assertion 2: style parity --------------------------------------------
 
 func TestParity_Style_SelectedRowEmphasisIsBoldOnBothTabs(t *testing.T) {
+	t.Parallel()
 	unselected := parityFixture{name: fixtureSelected.name, version: fixtureSelected.version, installed: true}
 	trSel := renderToolsRowForTest(t, fixtureSelected)
 	trUnsel := renderToolsRowForTest(t, unselected)
@@ -681,6 +687,7 @@ func TestParity_Style_SelectedRowEmphasisIsBoldOnBothTabs(t *testing.T) {
 }
 
 func TestParity_Style_MissingCellIsRedOnBothTabs(t *testing.T) {
+	t.Parallel()
 	pal := parityPalette()
 	tr := renderToolsRowForTest(t, fixtureMissing)
 	ar := renderAgentsRowForTest(t, fixtureMissing)
@@ -697,6 +704,7 @@ func extractMissingCell(raw string) string {
 }
 
 func TestParity_Style_OutdatedArrowStylesMatch(t *testing.T) {
+	t.Parallel()
 	pal := parityPalette()
 	tr := renderToolsRowForTest(t, fixtureBase)
 	ar := renderAgentsRowForTest(t, fixtureBase)
@@ -714,6 +722,7 @@ func TestParity_Style_OutdatedArrowStylesMatch(t *testing.T) {
 }
 
 func TestParity_Style_IgnoredRowIsFullyDimmed(t *testing.T) {
+	t.Parallel()
 	pal := parityPalette()
 	trIgnored := renderToolsRowForTest(t, fixtureIgnored)
 	arIgnored := renderAgentsRowForTest(t, fixtureIgnored)
@@ -737,6 +746,7 @@ func TestParity_Style_IgnoredRowIsFullyDimmed(t *testing.T) {
 // agent it named. This asserts BOTH tabs' category/identity label resolves
 // to something other than the flat "muted help text" style.
 func TestParity_Style_ProviderAgentLabelCarriesNonDefaultColor(t *testing.T) {
+	t.Parallel()
 	pal := parityPalette()
 
 	// renderProviderColWithExplicit pads the rendered label with *unstyled*
@@ -853,6 +863,7 @@ func indexOf(s, sub string) int {
 // pins that shared path so a future refactor that splits them apart is
 // caught immediately.
 func TestParity_HintLineFormat_SameSeparatorAndKeyDescShape(t *testing.T) {
+	t.Parallel()
 	pal := parityPalette()
 	toolHints := []hintItem{{key: "u", desc: "upgrade"}, {key: "x", desc: "ignore"}}
 	agentHints := []hintItem{{key: "u", desc: "update"}, {key: "g", desc: "group"}}
@@ -892,6 +903,7 @@ func containsSubstring(s, sub string) bool {
 // hint-vocabulary or eligibility drift can silently reappear as a
 // presentation-layer difference.
 func TestParity_HintLineFormat_ToolInlineHintsAndAgentsRowHintsShareRenderer(t *testing.T) {
+	t.Parallel()
 	pal := parityPalette()
 	tool, _, _ := buildToolFixture(fixtureBase)
 	m := baseModel([]*app.ToolView{tool})
@@ -927,6 +939,7 @@ func TestParity_HintLineFormat_ToolInlineHintsAndAgentsRowHintsShareRenderer(t *
 // --- Assertion 4: section header parity ------------------------------------
 
 func TestParity_SectionHeader_SameFunctionSameLabelSameOutput(t *testing.T) {
+	t.Parallel()
 	pal := parityPalette()
 	toolHeader := renderSectionHeader(pal, "Updates Available", parityWidth)
 	agentHeader := renderSectionHeader(pal, agentsStatusLabel(agentsStatusUpdates), parityWidth)

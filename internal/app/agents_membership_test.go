@@ -21,6 +21,7 @@ func newMembershipTestApp(t *testing.T) *App {
 }
 
 func TestSetMcpGroups_RoundTrip(t *testing.T) {
+	t.Parallel()
 	a := newMembershipTestApp(t)
 	if err := a.withConfig(func(cfg *config.RootConfig) error {
 		cfg.Agents.McpServers = []config.McpServer{{Name: "srv", Transport: "stdio", Command: "echo"}}
@@ -64,6 +65,7 @@ func TestSetMcpGroups_RoundTrip(t *testing.T) {
 }
 
 func TestSetMcpGroups_GuardedByMcpEnabled(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	root := config.RootConfig{
@@ -94,6 +96,7 @@ func TestSetMcpGroups_GuardedByMcpEnabled(t *testing.T) {
 // silently no-op (setMcpGroupsInConfig writes into cfg.Groups regardless of
 // whether name is a real manifest server) instead of surfacing an error.
 func TestSetMcpGroups_NotFoundReturnsError(t *testing.T) {
+	t.Parallel()
 	a := newMembershipTestApp(t)
 	if err := a.withConfig(func(cfg *config.RootConfig) error {
 		cfg.Groups = []*config.GroupConfig{{Name: "work"}}
@@ -118,6 +121,7 @@ func TestSetMcpGroups_NotFoundReturnsError(t *testing.T) {
 }
 
 func TestSetSkillGroups_RoundTrip(t *testing.T) {
+	t.Parallel()
 	a := newMembershipTestApp(t)
 	if err := a.withConfig(func(cfg *config.RootConfig) error {
 		cfg.Agents.Packages = []config.SkillPackage{{Source: "o/r"}}
@@ -161,6 +165,7 @@ func TestSetSkillGroups_RoundTrip(t *testing.T) {
 }
 
 func TestSetSkillGroups_PersistsMultipleHostGroups(t *testing.T) {
+	t.Parallel()
 	a := newMembershipTestApp(t)
 	if err := a.withConfig(func(cfg *config.RootConfig) error {
 		cfg.Agents.Packages = []config.SkillPackage{{Source: "o/r"}}
@@ -195,6 +200,7 @@ func TestSetSkillGroups_PersistsMultipleHostGroups(t *testing.T) {
 }
 
 func TestSetSkillGroups_GuardedBySkillsEnabled(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	root := config.RootConfig{
@@ -224,6 +230,7 @@ func TestSetSkillGroups_GuardedBySkillsEnabled(t *testing.T) {
 // SetMcpGroups/SetPluginGroups: a source absent from the manifest must not
 // be written into group Skills lists as an orphan reference.
 func TestSetSkillGroups_NotFoundReturnsError(t *testing.T) {
+	t.Parallel()
 	a := newMembershipTestApp(t)
 	if err := a.withConfig(func(cfg *config.RootConfig) error {
 		cfg.Groups = []*config.GroupConfig{{Name: "work"}}
@@ -248,6 +255,7 @@ func TestSetSkillGroups_NotFoundReturnsError(t *testing.T) {
 }
 
 func TestSetPluginGroups_RoundTrip(t *testing.T) {
+	t.Parallel()
 	a := newMembershipTestApp(t)
 	if err := a.withConfig(func(cfg *config.RootConfig) error {
 		cfg.Agents.Marketplaces = []config.Marketplace{{Name: "mkt", Source: "a/b"}}
@@ -296,6 +304,7 @@ func TestSetPluginGroups_RoundTrip(t *testing.T) {
 // same mechanical way for consistency (plugin group-assign wasn't reported
 // broken, but had the identical silent-no-op hole).
 func TestSetPluginGroups_NotFoundReturnsError(t *testing.T) {
+	t.Parallel()
 	a := newMembershipTestApp(t)
 	if err := a.withConfig(func(cfg *config.RootConfig) error {
 		cfg.Groups = []*config.GroupConfig{{Name: "work"}}
@@ -320,6 +329,7 @@ func TestSetPluginGroups_NotFoundReturnsError(t *testing.T) {
 }
 
 func TestSetPluginGroups_GuardedByPluginsEnabled(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	root := config.RootConfig{
@@ -347,6 +357,7 @@ func TestSetPluginGroups_GuardedByPluginsEnabled(t *testing.T) {
 }
 
 func TestSetMarketplaceGroups_RoundTrip(t *testing.T) {
+	t.Parallel()
 	a := newMembershipTestApp(t)
 	if err := a.withConfig(func(cfg *config.RootConfig) error {
 		cfg.Agents.Marketplaces = []config.Marketplace{{Name: "mkt", Source: "a/b"}}
@@ -392,6 +403,7 @@ func TestSetMarketplaceGroups_RoundTrip(t *testing.T) {
 // TestSetMarketplaceGroups_NotFoundReturnsError is the marketplace twin of
 // TestSetPluginGroups_NotFoundReturnsError.
 func TestSetMarketplaceGroups_NotFoundReturnsError(t *testing.T) {
+	t.Parallel()
 	a := newMembershipTestApp(t)
 	if err := a.withConfig(func(cfg *config.RootConfig) error {
 		cfg.Groups = []*config.GroupConfig{{Name: "work"}}
@@ -416,6 +428,7 @@ func TestSetMarketplaceGroups_NotFoundReturnsError(t *testing.T) {
 }
 
 func TestSetMarketplaceGroups_GuardedByPluginsEnabled(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	root := config.RootConfig{

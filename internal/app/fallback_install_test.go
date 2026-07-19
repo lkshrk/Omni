@@ -180,6 +180,7 @@ func init() {
 // --- full pipeline tests ---
 
 func TestNativeInstallPipeline_TarGz(t *testing.T) {
+	t.Parallel()
 	binaryContent := []byte("#!/bin/sh\nexit 0\n")
 	assetContent := buildTarGz(t, "tool_v1.0/mytool", binaryContent)
 
@@ -213,6 +214,7 @@ func TestNativeInstallPipeline_TarGz(t *testing.T) {
 }
 
 func TestNativeInstallPipeline_TarXz(t *testing.T) {
+	t.Parallel()
 	binaryContent := []byte("#!/bin/sh\nexit 0\n")
 	assetContent := buildTarXz(t, "tool_v1.0/mytool", binaryContent)
 
@@ -246,6 +248,7 @@ func TestNativeInstallPipeline_TarXz(t *testing.T) {
 }
 
 func TestNativeInstallPipeline_Zip(t *testing.T) {
+	t.Parallel()
 	binaryContent := []byte("#!/bin/sh\nexit 0\n")
 	sw := newStringWriter()
 	zw := zip.NewWriter(sw)
@@ -283,6 +286,7 @@ func TestNativeInstallPipeline_Zip(t *testing.T) {
 }
 
 func TestNativeInstallPipeline_RawBinary(t *testing.T) {
+	t.Parallel()
 	binaryContent := []byte("ELF binary data here")
 
 	srv := (&stubGitHubServer{
@@ -314,6 +318,7 @@ func TestNativeInstallPipeline_RawBinary(t *testing.T) {
 }
 
 func TestNativeInstallPipeline_ChecksumMatch_Persisted(t *testing.T) {
+	t.Parallel()
 	binaryContent := []byte("binary content")
 	assetContent := buildTarGz(t, "mytool", binaryContent)
 
@@ -355,6 +360,7 @@ func TestNativeInstallPipeline_ChecksumMatch_Persisted(t *testing.T) {
 }
 
 func TestNativeInstallPipeline_ChecksumMismatch_HardFail(t *testing.T) {
+	t.Parallel()
 	binaryContent := []byte("binary content")
 	assetContent := buildTarGz(t, "mytool", binaryContent)
 
@@ -393,6 +399,7 @@ func TestNativeInstallPipeline_ChecksumMismatch_HardFail(t *testing.T) {
 }
 
 func TestNativeInstallPipeline_ChecksumsAbsent_Proceeds(t *testing.T) {
+	t.Parallel()
 	binaryContent := []byte("binary content")
 	assetContent := buildTarGz(t, "mytool", binaryContent)
 
@@ -426,6 +433,7 @@ func TestNativeInstallPipeline_ChecksumsAbsent_Proceeds(t *testing.T) {
 }
 
 func TestNativeInstallPipeline_DownloadFailure_SetsStatusFailed(t *testing.T) {
+	t.Parallel()
 	srv := (&stubGitHubServer{
 		assetName:       "tool_darwin_arm64.tar.gz",
 		assetContent:    []byte("data"),
@@ -456,6 +464,7 @@ func TestNativeInstallPipeline_DownloadFailure_SetsStatusFailed(t *testing.T) {
 }
 
 func TestNativeInstallPipeline_NativeUninstall(t *testing.T) {
+	t.Parallel()
 	binaryContent := []byte("#!/bin/sh\nexit 0\n")
 	assetContent := buildTarGz(t, "mytool", binaryContent)
 
@@ -507,6 +516,7 @@ func TestNativeInstallPipeline_NativeUninstall(t *testing.T) {
 // path: the stub returns 503 on the first asset request and 200 on the second.
 // The install must succeed — the retry absorbed the transient failure.
 func TestNativeInstallPipeline_TransientFailureRetried(t *testing.T) {
+	t.Parallel()
 	binaryContent := []byte("#!/bin/sh\nexit 0\n")
 	assetContent := buildTarGz(t, "mytool", binaryContent)
 
@@ -565,6 +575,7 @@ func TestNativeInstallPipeline_TransientFailureRetried(t *testing.T) {
 // TestNativeInstallPipeline_NonRetriable404NeverRetried verifies that a 404
 // response is not retried — the endpoint must be called exactly once.
 func TestNativeInstallPipeline_NonRetriable404NeverRetried(t *testing.T) {
+	t.Parallel()
 	var attempts int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -694,6 +705,7 @@ func assertFallbackStatusFailed(t *testing.T, cfgPath, toolName string) {
 }
 
 func TestInstallToolFallback_PersistsInstalledVersion(t *testing.T) {
+	t.Parallel()
 	binaryContent := []byte("#!/bin/sh\nexit 0\n")
 	assetContent := buildTarGz(t, "tool_v1.0/mytool", binaryContent)
 
@@ -736,6 +748,7 @@ func TestInstallToolFallback_PersistsInstalledVersion(t *testing.T) {
 }
 
 func TestInstallToolFallback_NoTagName_InstalledVersionEmpty(t *testing.T) {
+	t.Parallel()
 	binaryContent := []byte("#!/bin/sh\nexit 0\n")
 	assetContent := buildTarGz(t, "tool_v1.0/mytool", binaryContent)
 

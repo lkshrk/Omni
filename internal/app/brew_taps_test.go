@@ -38,6 +38,7 @@ func loadRootConfig(t *testing.T, path string) *config.RootConfig {
 }
 
 func TestBackfillBrewTaps_RewritesBarePackageAndAddsTap(t *testing.T) {
+	t.Parallel()
 	stub := newTapResolverStub(map[string][2]string{
 		"quarkdown": {"quarkdown-labs/quarkdown/quarkdown", "quarkdown-labs/quarkdown"},
 	})
@@ -75,6 +76,7 @@ func TestBackfillBrewTaps_RewritesBarePackageAndAddsTap(t *testing.T) {
 }
 
 func TestBackfillBrewTaps_DryRunDoesNotWrite(t *testing.T) {
+	t.Parallel()
 	stub := newTapResolverStub(map[string][2]string{
 		"yabai": {"asmvik/formulae/yabai", "asmvik/formulae"},
 	})
@@ -103,8 +105,11 @@ func TestBackfillBrewTaps_DryRunDoesNotWrite(t *testing.T) {
 }
 
 func TestBackfillBrewTaps_LeavesCoreFormulaeAndQualifiedAlone(t *testing.T) {
+	t.Parallel(
 	// wget is a core formula (ResolveTap returns false); terraform is already
 	// tap-qualified. Neither should be touched.
+	)
+
 	stub := newTapResolverStub(map[string][2]string{})
 	a, cfgPath := newImportApp(t, stub)
 	cfg := &config.RootConfig{

@@ -41,6 +41,7 @@ func TestBootstrapPlanDetectsManagersAndHost(t *testing.T) {
 }
 
 func TestBootstrapPlanDetectsAnyAvailableProvider(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t,
 		&stubProvider{name: "apt", available: false},
 		&stubProvider{name: "brew", available: true},
@@ -440,6 +441,7 @@ func TestConfigureDotsRepoNormalizesRelativePathAndRejectsMissingWithoutSaving(t
 }
 
 func TestDotsSyncConfiguredRequiresRepoAndEnabled(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 
 	availability, err := a.DotsSyncAvailability()

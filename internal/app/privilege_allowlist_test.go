@@ -12,6 +12,7 @@ import (
 // (present or future) returning an arbitrary command built from a git-synced
 // settings.json cannot be silently run as root.
 func TestInteractivePrivilegedCommand_RejectsNonPackageManagers(t *testing.T) {
+	t.Parallel()
 	for _, cmd := range []string{"sh", "bash", "rm", "curl", "/bin/sh", "apt", "brew", ""} {
 		gotCmd, gotArgs, ok := interactivePrivilegedCommand(cmd, "install", "evil")
 		if ok {
@@ -24,6 +25,7 @@ func TestInteractivePrivilegedCommand_RejectsNonPackageManagers(t *testing.T) {
 }
 
 func TestInteractivePrivilegedCommand_AllowsPackageManagers(t *testing.T) {
+	t.Parallel()
 	for _, cmd := range []string{"apk", "apt-get", "dnf", "pacman", "zypper"} {
 		gotCmd, gotArgs, ok := interactivePrivilegedCommand(cmd, "install", "ripgrep")
 		if !ok {

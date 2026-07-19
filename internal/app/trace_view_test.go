@@ -8,6 +8,7 @@ import (
 )
 
 func TestCommandTraceViewFromRow_FlattensExitCodeAndFields(t *testing.T) {
+	t.Parallel()
 	code := int64(0)
 	row := database.CommandTrace{
 		ID:         7,
@@ -35,6 +36,7 @@ func TestCommandTraceViewFromRow_FlattensExitCodeAndFields(t *testing.T) {
 }
 
 func TestCommandTraceViewFromRow_AbsentExitCodeIsNil(t *testing.T) {
+	t.Parallel()
 	v := commandTraceViewFromRow(database.CommandTrace{ExitCode: sql.NullInt64{Valid: false}})
 	if v.ExitCode != nil {
 		t.Errorf("ExitCode = %v, want nil for an invalid NullInt64", *v.ExitCode)

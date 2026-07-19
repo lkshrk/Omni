@@ -7,6 +7,7 @@ import (
 )
 
 func TestAnnotateSelfUpdatingCasks(t *testing.T) {
+	t.Parallel()
 	var a *App // the annotation reads only the tool slice; no app state needed
 
 	selfUpdating := &database.ToolCache{Name: "battle-net", Provider: "brew", Installed: true, Outdated: true, Options: map[string]string{"brew_kind": "cask", "self_updates": "true"}}

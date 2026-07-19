@@ -23,6 +23,7 @@ func agentsKeysBaseModel() Model {
 }
 
 func TestAgentsKeys_BracketMovesFirstBar_AllToSkills(t *testing.T) {
+	t.Parallel()
 	m := agentsKeysBaseModel()
 	m.skillTypeIdx = agentsChipAll
 
@@ -33,6 +34,7 @@ func TestAgentsKeys_BracketMovesFirstBar_AllToSkills(t *testing.T) {
 }
 
 func TestAgentsKeys_BracketMovesFirstBar_Reverse(t *testing.T) {
+	t.Parallel()
 	m := agentsKeysBaseModel()
 	m.skillTypeIdx = agentsChipSkills
 
@@ -43,6 +45,7 @@ func TestAgentsKeys_BracketMovesFirstBar_Reverse(t *testing.T) {
 }
 
 func TestAgentsKeys_CurlyCyclesAgentFilter_OnAllChip(t *testing.T) {
+	t.Parallel()
 	m := agentsKeysBaseModel()
 	m.skillTypeIdx = agentsChipAll
 	m.skillAgentIdx = 0
@@ -62,6 +65,7 @@ func TestAgentsKeys_CurlyCyclesAgentFilter_OnAllChip(t *testing.T) {
 }
 
 func TestAgentsKeys_CurlyCyclesAgentFilter_OnSkillsChip(t *testing.T) {
+	t.Parallel()
 	m := agentsKeysBaseModel()
 	m.skillTypeIdx = agentsChipSkills
 	m.skillAgentIdx = 0
@@ -78,6 +82,7 @@ func TestAgentsKeys_CurlyCyclesAgentFilter_OnSkillsChip(t *testing.T) {
 }
 
 func TestAgentsKeys_BracketMovesFirstBar_OnSkillsChip(t *testing.T) {
+	t.Parallel()
 	m := agentsKeysBaseModel()
 	m.skillTypeIdx = agentsChipSkills
 
@@ -93,6 +98,7 @@ func TestAgentsKeys_BracketMovesFirstBar_OnSkillsChip(t *testing.T) {
 }
 
 func TestAgentsKeys_CurlyDoesNotMoveChip(t *testing.T) {
+	t.Parallel()
 	m := agentsKeysBaseModel()
 	m.skillTypeIdx = agentsChipSkills
 
@@ -103,6 +109,7 @@ func TestAgentsKeys_CurlyDoesNotMoveChip(t *testing.T) {
 }
 
 func TestAgentsKeys_BracketAtBoundsClamps(t *testing.T) {
+	t.Parallel()
 	m := agentsKeysBaseModel()
 	m.skillTypeIdx = agentsChipMarketplace
 
@@ -113,6 +120,7 @@ func TestAgentsKeys_BracketAtBoundsClamps(t *testing.T) {
 }
 
 func TestAgentsFooter_ShowsSeparateFilterHints(t *testing.T) {
+	t.Parallel()
 	m := agentsKeysBaseModel()
 	m.width = 120
 
@@ -133,6 +141,7 @@ func TestAgentsFooter_ShowsSeparateFilterHints(t *testing.T) {
 }
 
 func TestAgentsFooter_RenderedStatusBarContainsFilterHint(t *testing.T) {
+	t.Parallel()
 	m := agentsKeysBaseModel()
 	m.width = 120
 

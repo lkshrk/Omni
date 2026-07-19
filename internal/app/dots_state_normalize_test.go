@@ -7,6 +7,7 @@ import (
 )
 
 func TestNormalizeDotState(t *testing.T) {
+	t.Parallel()
 	cases := map[string]dots.State{
 		"":                   "",
 		"OK":                 dots.StateSynced,

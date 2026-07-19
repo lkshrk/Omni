@@ -3,6 +3,7 @@ package app
 import "testing"
 
 func TestNormalizeSkillSource(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct{ source, ref string }{
 		"owner/repo":                              {"owner/repo", ""},
 		"owner/repo#main":                         {"owner/repo", "main"},
@@ -31,6 +32,7 @@ func TestNormalizeSkillSource(t *testing.T) {
 }
 
 func TestNormalizeSkillSourceRejectsTraversalSegments(t *testing.T) {
+	t.Parallel()
 	for _, in := range []string{"../..", "./.", "../repo", "owner/..", "owner/."} {
 		if _, _, err := normalizeSkillSource(in); err == nil {
 			t.Errorf("normalizeSkillSource(%q) = nil error, want traversal rejection", in)

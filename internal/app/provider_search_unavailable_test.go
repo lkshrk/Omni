@@ -91,6 +91,7 @@ func (p *unavailableProvider) ListInstalled(_ context.Context) ([]provider.Insta
 // (via GitHub source agreement, which is decisive regardless of provider type).
 // Sync must install the tool through npm, not skip it.
 func TestSync_UnavailableProvider_SearchesAvailableProviders(t *testing.T) {
+	t.Parallel()
 	brew := &unavailableProvider{name: "brew"}
 	// npm is a concrete provider (not ecosystem-filtered) that can install @openai/codex.
 	npm := &searchableProvider{
@@ -161,6 +162,7 @@ func TestSync_UnavailableProvider_SearchesAvailableProviders(t *testing.T) {
 // when the configured provider IS available, provider search does not bypass it
 // in favour of another matching provider.
 func TestSync_AvailableProvider_NotBypassed(t *testing.T) {
+	t.Parallel()
 	brew := &searchableProvider{
 		name:      "brew",
 		available: true, // configured provider IS available
@@ -216,6 +218,7 @@ func TestSync_AvailableProvider_NotBypassed(t *testing.T) {
 // A3: a Git/GitHub fallback is only attempted when no native provider route is
 // available (i.e. provider search found nothing and the fallback is configured).
 func TestSync_UnavailableProvider_FallbackLastResort(t *testing.T) {
+	t.Parallel()
 	brew := &unavailableProvider{name: "brew"}
 	// apt is available but returns no search results for this tool.
 	apt := &searchableProvider{
@@ -283,6 +286,7 @@ func TestSync_UnavailableProvider_FallbackLastResort(t *testing.T) {
 // A name-only match on a language ecosystem provider (npm) without a
 // corroborating GitHub source is considered weak and must not be used.
 func TestSync_UnavailableProvider_WeakMatchNotInstalled(t *testing.T) {
+	t.Parallel()
 	brew := &unavailableProvider{name: "brew"}
 	// npm returns a name-only match with no source corroboration: this is weak.
 	npm := &searchableProvider{

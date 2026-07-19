@@ -14,6 +14,7 @@ import (
 )
 
 func TestAgentsRowUpgrade_SkillsIgnoredRow_NotHandled(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	e := agentsAllRow{feature: agentsSectionSkills, status: agentsStatusIgnored, mark: agentsMarkNone}
 
@@ -31,6 +32,7 @@ func TestAgentsRowUpgrade_SkillsIgnoredRow_NotHandled(t *testing.T) {
 }
 
 func TestAgentsRowUpgrade_SkillsAvailableRow_NotHandled(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	e := agentsAllRow{feature: agentsSectionSkills, status: agentsStatusAvailable, mark: agentsMarkNone}
 
@@ -48,6 +50,7 @@ func TestAgentsRowUpgrade_SkillsAvailableRow_NotHandled(t *testing.T) {
 }
 
 func TestAgentsRowUpgrade_SkillsInstalledRow_Handled(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	e := agentsAllRow{feature: agentsSectionSkills, status: agentsStatusInstalled, mark: agentsMarkNone}
 
@@ -65,6 +68,7 @@ func TestAgentsRowUpgrade_SkillsInstalledRow_Handled(t *testing.T) {
 }
 
 func TestAgentsRowHints_SkillsIgnoredRow_NoUpdateHint(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	e := agentsAllRow{feature: agentsSectionSkills, status: agentsStatusIgnored, mark: agentsMarkNone}
 
@@ -78,6 +82,7 @@ func TestAgentsRowHints_SkillsIgnoredRow_NoUpdateHint(t *testing.T) {
 }
 
 func TestAgentsRowHints_SkillsAvailableRow_NoUpdateHint(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	e := agentsAllRow{feature: agentsSectionSkills, status: agentsStatusAvailable, mark: agentsMarkNone}
 
@@ -91,6 +96,7 @@ func TestAgentsRowHints_SkillsAvailableRow_NoUpdateHint(t *testing.T) {
 }
 
 func TestAgentsRowHints_SkillsInstalledRow_HasUpdateHint(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	e := agentsAllRow{feature: agentsSectionSkills, status: agentsStatusInstalled, mark: agentsMarkNone}
 
@@ -108,10 +114,13 @@ func TestAgentsRowHints_SkillsInstalledRow_HasUpdateHint(t *testing.T) {
 }
 
 func TestAgentsRowUpgrade_McpRowNeverHandled(t *testing.T) {
+	t.Parallel(
 	// mcpAgentRowStatus (agents_status.go) only ever returns agentsStatusOutOfSync
 	// or agentsStatusInstalled — never agentsStatusUpdates — so agentsRowUpgrade
 	// has no case for agentsSectionMcp at all. Pin that 'u' is unhandled for any
 	// mcp row regardless of status/mark.
+	)
+
 	m := agentsAllModel(nil, nil, nil)
 	for _, e := range []agentsAllRow{
 		{feature: agentsSectionMcp, status: agentsStatusInstalled, mark: agentsMarkNone},
@@ -129,6 +138,7 @@ func TestAgentsRowUpgrade_McpRowNeverHandled(t *testing.T) {
 }
 
 func TestAgentsRowInstall_Skills_SetsOnlySkillAddRunning(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "alpha-mcp-skill", Source: "o/alpha-mcp-skill", Installed: false}},
 		nil, nil,
@@ -152,6 +162,7 @@ func TestAgentsRowInstall_Skills_SetsOnlySkillAddRunning(t *testing.T) {
 }
 
 func TestAgentsRowInstall_Mcp_SetsOnlyMcpRunning(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		nil,
 		[]app.McpServerRow{{Name: "beta-mcp", PerAgentStatus: map[string]app.McpStatus{"claude": app.McpStatusMissing}}},
@@ -176,6 +187,7 @@ func TestAgentsRowInstall_Mcp_SetsOnlyMcpRunning(t *testing.T) {
 }
 
 func TestAgentsRowInstall_Plugin_SetsOnlyPluginRunning(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		nil, nil,
 		[]app.PluginRow{{Name: "gamma-plugin", PerAgentStatus: map[string]app.PluginStatus{"claude": app.PluginStatusMissing}}},
@@ -199,6 +211,7 @@ func TestAgentsRowInstall_Plugin_SetsOnlyPluginRunning(t *testing.T) {
 }
 
 func TestOpenMcpGroupMembershipPicker_SeedsCurrentGroups(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		nil,
 		[]app.McpServerRow{{Name: "delta-mcp", Groups: []string{"work", "personal"}, PerAgentStatus: map[string]app.McpStatus{"claude": app.McpStatusInstalled}}},
@@ -215,6 +228,7 @@ func TestOpenMcpGroupMembershipPicker_SeedsCurrentGroups(t *testing.T) {
 }
 
 func TestOpenPluginGroupMembershipPicker_SeedsCurrentGroups(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		nil, nil,
 		[]app.PluginRow{{Name: "epsilon-plugin", Groups: []string{"ops"}, PerAgentStatus: map[string]app.PluginStatus{"claude": app.PluginStatusInstalled}}},
@@ -230,6 +244,7 @@ func TestOpenPluginGroupMembershipPicker_SeedsCurrentGroups(t *testing.T) {
 }
 
 func TestOpenMarketplaceGroupMembershipPicker_SeedsCurrentGroups(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.marketplaceRows = []app.MarketplaceRow{
 		{Name: "theta-market", Groups: []string{"ops"}, Agents: []string{"claude"}, PerAgentStatus: map[string]app.PluginStatus{"claude": app.PluginStatusInstalled}},
@@ -248,6 +263,7 @@ func TestOpenMarketplaceGroupMembershipPicker_SeedsCurrentGroups(t *testing.T) {
 }
 
 func TestAgentsAll_IgnoreReclassification_ManifestChangeReflectsInRowsList(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		nil, nil,
 		[]app.PluginRow{{Name: "zeta-plugin", PerAgentStatus: map[string]app.PluginStatus{"claude": app.PluginStatusInstalled}}},
@@ -284,6 +300,7 @@ func TestAgentsAll_IgnoreReclassification_ManifestChangeReflectsInRowsList(t *te
 // from before the plugin was installed: the shadow takes precedence, so the
 // row must classify as installed/shadowed, not ignored.
 func TestAgentsAll_StaleIgnore_ShadowedSkillRowStaysInstalled(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "iota-skill", Source: "o/iota-skill", Installed: false, ShadowedByPlugin: true}},
 		nil, nil,
@@ -311,6 +328,7 @@ func TestAgentsAll_StaleIgnore_ShadowedSkillRowStaysInstalled(t *testing.T) {
 // into a single ignored row, even when it's still in a stale ignore.mcp_servers
 // entry.
 func TestAgentsAll_StaleIgnore_ShadowedMcpRowStaysInstalled(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		nil,
 		[]app.McpServerRow{{
@@ -339,6 +357,7 @@ func TestAgentsAll_StaleIgnore_ShadowedMcpRowStaysInstalled(t *testing.T) {
 }
 
 func TestHandleAgentsDeleteConfirmKeyMsg_AnyOtherKeyCancelsArmedDelete(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "eta-skill", Source: "o/eta-skill", Installed: true}},
 		nil, nil,
@@ -363,6 +382,7 @@ func TestHandleAgentsDeleteConfirmKeyMsg_AnyOtherKeyCancelsArmedDelete(t *testin
 }
 
 func TestAgentsAll_DeleteTargetsItemLevelNameRegardlessOfWhichPerAgentRowArmed(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		nil,
 		[]app.McpServerRow{{
@@ -402,6 +422,7 @@ func TestAgentsAll_DeleteTargetsItemLevelNameRegardlessOfWhichPerAgentRowArmed(t
 }
 
 func TestAgentsRowHints_Table(t *testing.T) {
+	t.Parallel()
 	hasKey := func(hints []hintItem, key string) bool {
 		for _, h := range hints {
 			if h.key == key {
@@ -553,6 +574,7 @@ func TestAgentsRowHints_Table(t *testing.T) {
 }
 
 func TestAgentsRowToggleIgnore_SkillsAvailableRow_Handled(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.skillFindResults = []app.FindResult{{Source: "owner/found-skill", Skill: "found-skill"}}
 	e := agentsAllRow{feature: agentsSectionSkills, localIdx: 0, status: agentsStatusAvailable, mark: agentsMarkNone}
@@ -568,6 +590,7 @@ func TestAgentsRowToggleIgnore_SkillsAvailableRow_Handled(t *testing.T) {
 }
 
 func TestAgentsRowToggleIgnore_SkillsIgnoredRow_StillHandled(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "caveman", Source: "owner/caveman", Installed: true}},
 		nil, nil,
@@ -585,6 +608,7 @@ func TestAgentsRowToggleIgnore_SkillsIgnoredRow_StillHandled(t *testing.T) {
 }
 
 func TestAgentsRowHints_SkillsAvailableRow_HasIgnoreHint(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	e := agentsAllRow{feature: agentsSectionSkills, status: agentsStatusAvailable, mark: agentsMarkNone}
 
@@ -606,6 +630,7 @@ func TestAgentsRowHints_SkillsAvailableRow_HasIgnoreHint(t *testing.T) {
 // hint-visible (agentsRowHints) and action-handled (the corresponding
 // agentsRow* func) agree — the two must never independently drift again.
 func TestAgentsEligibilityMatrix_InstallGroupDelete(t *testing.T) {
+	t.Parallel()
 	statuses := []agentsRowStatus{
 		agentsStatusUpdates,
 		agentsStatusOutOfSync,
@@ -692,6 +717,7 @@ func TestAgentsEligibilityMatrix_InstallGroupDelete(t *testing.T) {
 // false — a shadowed row has nothing missing to install — but delete stays
 // true so removing the stale manifest entry remains a cleanup path.
 func TestAgentsEligibility_ShadowedRow_InstallFalseDeleteTrue(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "shadow-skill", Source: "o/shadow-skill", ShadowedByPlugin: true}},
 		nil, nil,
@@ -712,6 +738,7 @@ func TestAgentsEligibility_ShadowedRow_InstallFalseDeleteTrue(t *testing.T) {
 }
 
 func TestAgentsOrphanSkillRow_UninstallDeleteEligible(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.skillsUnmanagedRows = []app.SkillPackageRow{
 		{Name: "Leonxlnx/taste-skill", Source: "Leonxlnx/taste-skill", Installed: true},
@@ -760,6 +787,7 @@ func TestAgentsOrphanSkillRow_UninstallDeleteEligible(t *testing.T) {
 }
 
 func TestAgentsInstallEligible_Marketplace_AlwaysFalse(t *testing.T) {
+	t.Parallel()
 	statuses := []agentsRowStatus{agentsStatusUpdates, agentsStatusOutOfSync, agentsStatusInstalled, agentsStatusAvailable, agentsStatusIgnored}
 	marks := []agentsSyncMark{agentsMarkNone, agentsMarkMissing, agentsMarkOrphan}
 	for _, status := range statuses {
@@ -773,6 +801,7 @@ func TestAgentsInstallEligible_Marketplace_AlwaysFalse(t *testing.T) {
 }
 
 func TestAgentsGroupEligible_Marketplace_MatchesPluginParity(t *testing.T) {
+	t.Parallel()
 	statuses := []agentsRowStatus{agentsStatusUpdates, agentsStatusOutOfSync, agentsStatusInstalled, agentsStatusAvailable, agentsStatusIgnored}
 	marks := []agentsSyncMark{agentsMarkNone, agentsMarkMissing, agentsMarkOrphan}
 	for _, status := range statuses {
@@ -787,6 +816,7 @@ func TestAgentsGroupEligible_Marketplace_MatchesPluginParity(t *testing.T) {
 }
 
 func TestAgentsRowInstall_Marketplace_NoOp(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.marketplaceRows = []app.MarketplaceRow{
 		{Name: "acme-market", Source: "acme/repo", Agents: []string{"claude"}, PerAgentStatus: map[string]app.PluginStatus{"claude": app.PluginStatusMissing}},
@@ -807,6 +837,7 @@ func TestAgentsRowInstall_Marketplace_NoOp(t *testing.T) {
 }
 
 func TestAgentsRowGroup_Marketplace_OpensGroupMembershipPicker(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.marketplaceRows = []app.MarketplaceRow{
 		{Name: "acme-market", Source: "acme/repo", Groups: []string{"ops"}, Agents: []string{"claude"}, PerAgentStatus: map[string]app.PluginStatus{"claude": app.PluginStatusInstalled}},
@@ -833,6 +864,7 @@ func TestAgentsRowGroup_Marketplace_OpensGroupMembershipPicker(t *testing.T) {
 }
 
 func TestAgentsRowClaim_Marketplace_ManagedRowNoOp(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.marketplaceRows = []app.MarketplaceRow{
 		{Name: "acme-market", Source: "acme/repo", Agents: []string{"claude"}, PerAgentStatus: map[string]app.PluginStatus{"claude": app.PluginStatusInstalled}},
@@ -850,6 +882,7 @@ func TestAgentsRowClaim_Marketplace_ManagedRowNoOp(t *testing.T) {
 }
 
 func TestAgentsRowClaim_MarketplaceOrphan_OpensGroupPickerWithoutAdopting(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.marketplaceUnmanaged = map[string][]app.InstalledMarketplace{
 		"claude-code": {{Name: "orphan-market", Source: "orphan/repo"}},
@@ -876,6 +909,7 @@ func TestAgentsRowClaim_MarketplaceOrphan_OpensGroupPickerWithoutAdopting(t *tes
 }
 
 func TestAgentsRowClaim_Marketplace_MissingAgentID_NoOp(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.marketplaceUnmanaged = map[string][]app.InstalledMarketplace{
 		"claude-code": {{Name: "orphan-market", Source: "orphan/repo"}},
@@ -890,6 +924,7 @@ func TestAgentsRowClaim_Marketplace_MissingAgentID_NoOp(t *testing.T) {
 }
 
 func TestHandleMarketplaceKeyMsg_ClaimUnmanagedRow_OpensGroupPicker(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.marketplaceUnmanaged = map[string][]app.InstalledMarketplace{
 		"claude-code": {{Name: "orphan-market", Source: "orphan/repo"}},
@@ -911,6 +946,7 @@ func TestHandleMarketplaceKeyMsg_ClaimUnmanagedRow_OpensGroupPicker(t *testing.T
 }
 
 func TestHandleMarketplaceKeyMsg_DeleteArmsConfirmOnManagedRowOnly(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.marketplaceRows = []app.MarketplaceRow{
 		{Name: "acme-market", Source: "acme/repo", Agents: []string{"claude"}, PerAgentStatus: map[string]app.PluginStatus{"claude": app.PluginStatusInstalled}},
@@ -929,6 +965,7 @@ func TestHandleMarketplaceKeyMsg_DeleteArmsConfirmOnManagedRowOnly(t *testing.T)
 }
 
 func TestHandleMarketplaceKeyMsg_DeleteDoesNotArmOnUnmanagedRow(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.marketplaceUnmanaged = map[string][]app.InstalledMarketplace{
 		"claude-code": {{Name: "orphan-market", Source: "orphan/repo"}},
@@ -944,6 +981,7 @@ func TestHandleMarketplaceKeyMsg_DeleteDoesNotArmOnUnmanagedRow(t *testing.T) {
 }
 
 func TestHandleMarketplaceKeyMsg_ConfirmDeleteTriggersRemovalAndClearsConfirm(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.marketplaceRows = []app.MarketplaceRow{
 		{Name: "acme-market", Source: "acme/repo", Agents: []string{"claude"}, PerAgentStatus: map[string]app.PluginStatus{"claude": app.PluginStatusInstalled}},
@@ -970,6 +1008,7 @@ func TestHandleMarketplaceKeyMsg_ConfirmDeleteTriggersRemovalAndClearsConfirm(t 
 }
 
 func TestHandleMarketplaceKeyMsg_BackCancelsArmedDeleteWithoutRemoving(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.marketplaceRows = []app.MarketplaceRow{
 		{Name: "acme-market", Source: "acme/repo", Agents: []string{"claude"}, PerAgentStatus: map[string]app.PluginStatus{"claude": app.PluginStatusInstalled}},
@@ -993,6 +1032,7 @@ func TestHandleMarketplaceKeyMsg_BackCancelsArmedDeleteWithoutRemoving(t *testin
 }
 
 func TestClearActiveConfirmation_ClearsMarketplaceDeleteState(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.marketplaceDeleteConfirm = true
 	m.marketplaceDeleteName = "acme-market"
@@ -1008,6 +1048,7 @@ func TestClearActiveConfirmation_ClearsMarketplaceDeleteState(t *testing.T) {
 }
 
 func TestAgentsRowToggleIgnore_ArmsConfirmWithoutTogglingImmediately(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "iota-skill", Source: "o/iota-skill", Installed: true}},
 		nil, nil,
@@ -1035,6 +1076,7 @@ func TestAgentsRowToggleIgnore_ArmsConfirmWithoutTogglingImmediately(t *testing.
 }
 
 func TestHandleAgentsIgnoreConfirmKeyMsg_SecondXExecutesToggleAndClearsConfirm(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "kappa-skill", Source: "o/kappa-skill", Installed: true}},
 		nil, nil,
@@ -1067,6 +1109,7 @@ func TestHandleAgentsIgnoreConfirmKeyMsg_SecondXExecutesToggleAndClearsConfirm(t
 }
 
 func TestHandleAgentsIgnoreConfirmKeyMsg_AnyOtherKeyCancelsWithoutToggling(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "lambda-skill", Source: "o/lambda-skill", Installed: true}},
 		nil, nil,
@@ -1094,6 +1137,7 @@ func TestHandleAgentsIgnoreConfirmKeyMsg_AnyOtherKeyCancelsWithoutToggling(t *te
 }
 
 func TestConfirmTimeoutMsg_ClearsAgentsIgnoreConfirmWithoutToggling(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "mu-skill", Source: "o/mu-skill", Installed: true}},
 		nil, nil,
@@ -1120,6 +1164,7 @@ func TestConfirmTimeoutMsg_ClearsAgentsIgnoreConfirmWithoutToggling(t *testing.T
 }
 
 func TestAgentsRowHints_IgnoreConfirmArmed_NonIgnoredRowShowsConfirmIgnore(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.agentsIgnoreConfirm = true
 	m.agentsIgnoreFeature = agentsSectionSkills
@@ -1133,6 +1178,7 @@ func TestAgentsRowHints_IgnoreConfirmArmed_NonIgnoredRowShowsConfirmIgnore(t *te
 }
 
 func TestAgentsRowHints_IgnoreConfirmArmed_IgnoredRowShowsConfirmInclude(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.agentsIgnoreConfirm = true
 	m.agentsIgnoreFeature = agentsSectionSkills
@@ -1146,6 +1192,7 @@ func TestAgentsRowHints_IgnoreConfirmArmed_IgnoredRowShowsConfirmInclude(t *test
 }
 
 func TestActiveConfirmationHelpItems_IgnoreConfirmArmed_NonIgnoredRowShowsConfirmIgnore(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "nu-skill", Source: "o/nu-skill", Installed: true}},
 		nil, nil,
@@ -1167,6 +1214,7 @@ func TestActiveConfirmationHelpItems_IgnoreConfirmArmed_NonIgnoredRowShowsConfir
 }
 
 func TestActiveConfirmationHelpItems_IgnoreConfirmArmed_IgnoredRowShowsConfirmInclude(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "xi-skill", Source: "o/xi-skill", Installed: true}},
 		nil, nil,
@@ -1189,6 +1237,7 @@ func TestActiveConfirmationHelpItems_IgnoreConfirmArmed_IgnoredRowShowsConfirmIn
 }
 
 func TestAgentsIgnoreToggle_SpinnerClearsAfterToggledMsg(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "omicron-skill", Source: "o/omicron-skill", Installed: true}},
 		nil, nil,
@@ -1222,12 +1271,14 @@ func TestAgentsIgnoreToggle_SpinnerClearsAfterToggledMsg(t *testing.T) {
 }
 
 func TestAgentsIgnoreFeatureName_Marketplaces(t *testing.T) {
+	t.Parallel()
 	if got := agentsIgnoreFeatureName(agentsSectionMarketplaces); got != "marketplaces" {
 		t.Errorf("agentsIgnoreFeatureName(agentsSectionMarketplaces) = %q, want %q", got, "marketplaces")
 	}
 }
 
 func TestAgentsAllRowsList_MarketplaceIgnoreParity_ManagedAndUnmanagedRows(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.marketplaceRows = []app.MarketplaceRow{
 		{Name: "managed-market", Source: "acme/repo", Agents: []string{"claude"}, PerAgentStatus: map[string]app.PluginStatus{"claude": app.PluginStatusInstalled}},
@@ -1273,6 +1324,7 @@ func TestAgentsAllRowsList_MarketplaceIgnoreParity_ManagedAndUnmanagedRows(t *te
 }
 
 func TestAgentsAllRowsList_UnignoredOrphanMarketplaceKeepsOutOfSyncOrphanMark(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.marketplaceUnmanaged = map[string][]app.InstalledMarketplace{
 		"claude-code": {{Name: "unignored-orphan", Source: "orphan/repo"}},
@@ -1297,6 +1349,7 @@ func TestAgentsAllRowsList_UnignoredOrphanMarketplaceKeepsOutOfSyncOrphanMark(t 
 }
 
 func TestDoAgentsUpdateAll_NoOutdatedPlugins_RunsMarketplacesSynchronously(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		nil, nil,
 		[]app.PluginRow{{Name: "up-to-date-plugin", Version: "1.0.0", LatestVersion: "1.0.0", PerAgentStatus: map[string]app.PluginStatus{"claude": app.PluginStatusInstalled}}},
@@ -1314,6 +1367,7 @@ func TestDoAgentsUpdateAll_NoOutdatedPlugins_RunsMarketplacesSynchronously(t *te
 }
 
 func TestDashboardReconcilePlan_IncludesMissingAgents(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel([]app.SkillPackageRow{{Name: "missing", Installed: false}}, nil, nil)
 	if !app.DashboardReconcilePlanHasStep(dashboardReconcilePlanItems(m), app.ReconcileStepSyncAgents) {
 		t.Fatalf("steps = %#v, want sync-agents step", dashboardReconcilePlanItems(m))
@@ -1321,6 +1375,7 @@ func TestDashboardReconcilePlan_IncludesMissingAgents(t *testing.T) {
 }
 
 func TestDoAgentsUpdateAll_OutdatedPluginsPresent_MarketplacesStillRunSynchronously(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		nil, nil,
 		[]app.PluginRow{{Name: "old-plugin", Version: "1.0.0", LatestVersion: "2.0.0", PerAgentStatus: map[string]app.PluginStatus{"claude": app.PluginStatusInstalled}}},
@@ -1341,6 +1396,7 @@ func TestDoAgentsUpdateAll_OutdatedPluginsPresent_MarketplacesStillRunSynchronou
 }
 
 func TestUpdate_AgentsProgressDoneMsg_MarketplaceTrue_KeepsRunningUntilRowsMsg(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.marketplaceRunning = true
 	m.marketplaceErr = nil
@@ -1359,6 +1415,7 @@ func TestUpdate_AgentsProgressDoneMsg_MarketplaceTrue_KeepsRunningUntilRowsMsg(t
 }
 
 func TestUpdate_AgentsProgressDoneMsg_MarketplaceError_ClearsRunningImmediately(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.marketplaceRunning = true
 
@@ -1374,6 +1431,7 @@ func TestUpdate_AgentsProgressDoneMsg_MarketplaceError_ClearsRunningImmediately(
 }
 
 func TestUpdate_AgentsProgressDoneMsg_PluginTrueWithoutMarketplace_TriggersMarketplaceReload(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.pluginRunning = true
 
@@ -1389,6 +1447,7 @@ func TestUpdate_AgentsProgressDoneMsg_PluginTrueWithoutMarketplace_TriggersMarke
 }
 
 func TestUpdate_AgentsProgressDoneMsg_StaleGen_NoOp(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.marketplaceRunning = true
 	m.progressGen = 5
@@ -1405,6 +1464,7 @@ func TestUpdate_AgentsProgressDoneMsg_StaleGen_NoOp(t *testing.T) {
 }
 
 func TestAgentsClaimGroupPicker_Marketplace_ConfirmAdoptsAndAssignsGroup(t *testing.T) {
+	t.Parallel()
 	a := newScanPlanTestApp(t)
 	m := agentsAllModel(nil, nil, nil)
 	m.app = a
@@ -1455,6 +1515,7 @@ func newPluginClaimTestApp(t *testing.T) *app.App {
 }
 
 func TestPluginNeedsMarketplaceMsg_ArmsOfferConfirm(t *testing.T) {
+	t.Parallel()
 	a := newPluginClaimTestApp(t)
 	m := agentsAllModel(nil, nil, nil)
 	m.app = a
@@ -1503,6 +1564,7 @@ func TestPluginNeedsMarketplaceMsg_ArmsOfferConfirm(t *testing.T) {
 }
 
 func TestHandlePluginMarketplaceOfferConfirmKeyMsg_ConfirmClaimsMarketplaceThenPlugin(t *testing.T) {
+	t.Parallel()
 	a := newPluginClaimTestApp(t)
 	m := agentsAllModel(nil, nil, nil)
 	m.app = a
@@ -1596,6 +1658,7 @@ func TestHandlePluginMarketplaceOfferConfirmKeyMsg_ConfirmClaimsMarketplaceThenP
 }
 
 func TestHandlePluginMarketplaceOfferConfirmKeyMsg_OtherKeyCancelsWithoutWriting(t *testing.T) {
+	t.Parallel()
 	a := newPluginClaimTestApp(t)
 	m := agentsAllModel(nil, nil, nil)
 	m.app = a
@@ -1636,6 +1699,7 @@ func TestHandlePluginMarketplaceOfferConfirmKeyMsg_OtherKeyCancelsWithoutWriting
 }
 
 func TestDoClaimPluginAndMarketplace_MarketplaceSucceedsPluginFailsNoRollback(t *testing.T) {
+	t.Parallel()
 	a := newPluginClaimTestApp(t)
 	m := agentsAllModel(nil, nil, nil)
 	m.app = a
@@ -1674,6 +1738,7 @@ func TestDoClaimPluginAndMarketplace_MarketplaceSucceedsPluginFailsNoRollback(t 
 }
 
 func TestDoClaimPluginAndMarketplace_ConflictingUnmanagedSources(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.marketplaceUnmanaged = map[string][]app.InstalledMarketplace{
 		"claude-code": {{Name: "acme-market", Source: "acme/repo-a"}},
@@ -1699,6 +1764,7 @@ func TestDoClaimPluginAndMarketplace_ConflictingUnmanagedSources(t *testing.T) {
 }
 
 func TestDoImportPluginWithGroup_NoDiscoverableSource_HardErrors(t *testing.T) {
+	t.Parallel()
 	a := newPluginClaimTestApp(t)
 	m := agentsAllModel(nil, nil, nil)
 	m.app = a
@@ -1720,6 +1786,7 @@ func TestDoImportPluginWithGroup_NoDiscoverableSource_HardErrors(t *testing.T) {
 }
 
 func TestConfirmTimeoutMsg_ClearsArmedPluginMarketplaceOffer(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.pluginMarketplaceOfferConfirm = true
 	m.pluginMarketplaceOfferAgentID = "claude-code"
@@ -1743,6 +1810,7 @@ func TestConfirmTimeoutMsg_ClearsArmedPluginMarketplaceOffer(t *testing.T) {
 }
 
 func TestConfirmTimeoutMsg_StaleGen_LeavesOfferArmed(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.pluginMarketplaceOfferConfirm = true
 	m.pluginMarketplaceOfferMarket = "acme-market"
@@ -1764,6 +1832,7 @@ func TestConfirmTimeoutMsg_StaleGen_LeavesOfferArmed(t *testing.T) {
 // dashboard agents summary is always appended regardless of gates. The
 // marketplaces gate shares pluginsEnabled (see marketplacesSectionEnabled).
 func TestDoAgentsRefreshAll_SectionGates(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name                   string
 		agents, skills         bool
@@ -1860,6 +1929,7 @@ func flattenCmdMsgs(cmd tea.Cmd) []tea.Msg {
 }
 
 func TestPluginAgentsSavedMsg_SuccessKeepsSpinnerUntilPluginRowsAndReloadsMarketplaces(t *testing.T) {
+	t.Parallel()
 	a := newPluginClaimTestApp(t)
 	m := agentsAllModel(nil, nil, nil)
 	m.app = a
@@ -1914,6 +1984,7 @@ func TestPluginAgentsSavedMsg_SuccessKeepsSpinnerUntilPluginRowsAndReloadsMarket
 }
 
 func TestPluginAgentsSavedMsg_ErrorClearsRunningAndOpImmediately(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.pluginRunning = true
 	m.startAgentsOp(agentsRowRunKey(agentsAllRow{feature: agentsSectionPlugins, localIdx: 0, agentID: "claude-code"}))
@@ -1933,6 +2004,7 @@ func TestPluginAgentsSavedMsg_ErrorClearsRunningAndOpImmediately(t *testing.T) {
 }
 
 func TestPluginRestoreDoneMsg_SuccessReloadsMarketplaceRowsToo(t *testing.T) {
+	t.Parallel()
 	a := newPluginClaimTestApp(t)
 	m := agentsAllModel(nil, nil, nil)
 	m.app = a
@@ -1957,6 +2029,7 @@ func TestPluginRestoreDoneMsg_SuccessReloadsMarketplaceRowsToo(t *testing.T) {
 }
 
 func TestPluginRemoveDoneMsg_ErrorStillReloadsRows(t *testing.T) {
+	t.Parallel()
 	a := newPluginClaimTestApp(t)
 	m := agentsAllModel(nil, nil, nil)
 	m.app = a
@@ -1987,6 +2060,7 @@ func TestPluginRemoveDoneMsg_ErrorStillReloadsRows(t *testing.T) {
 }
 
 func TestPluginRemoveDoneMsg_SuccessReloadsRows(t *testing.T) {
+	t.Parallel()
 	a := newPluginClaimTestApp(t)
 	m := agentsAllModel(nil, nil, nil)
 	m.app = a
@@ -2012,6 +2086,7 @@ func TestPluginRemoveDoneMsg_SuccessReloadsRows(t *testing.T) {
 }
 
 func TestPluginRemoveDoneMsg_WarningSetsStatusAndReloadsRows(t *testing.T) {
+	t.Parallel()
 	a := newPluginClaimTestApp(t)
 	m := agentsAllModel(nil, nil, nil)
 	m.app = a
@@ -2039,6 +2114,7 @@ func TestPluginRemoveDoneMsg_WarningSetsStatusAndReloadsRows(t *testing.T) {
 }
 
 func TestPluginWarningsText_JoinsEntries(t *testing.T) {
+	t.Parallel()
 	if got := pluginWarningsText(nil); got != "" {
 		t.Errorf("pluginWarningsText(nil) = %q, want empty", got)
 	}

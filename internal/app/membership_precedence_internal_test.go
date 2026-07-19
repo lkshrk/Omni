@@ -11,6 +11,7 @@ import (
 // collectDots dedups by name first-wins. This is the conflict-resolution
 // guarantee behind "unlimited host groups + one reusable group".
 func TestCollectDots_HostGroupDefinitionWinsOverReusable(t *testing.T) {
+	t.Parallel()
 	cfg := &config.RootConfig{
 		Groups: []*config.GroupConfig{
 			// Deliberately list the reusable group first to prove ordering,

@@ -14,6 +14,7 @@ func lintTestApp(t *testing.T) *app.App {
 }
 
 func TestLintSettings(t *testing.T) {
+	t.Parallel()
 	a := lintTestApp(t)
 
 	if got := a.LintSettings(nil); got != nil {
@@ -60,6 +61,7 @@ func TestLintSettings(t *testing.T) {
 }
 
 func TestSettingsLintIssueString(t *testing.T) {
+	t.Parallel()
 	if got := (app.SettingsLintIssue{Message: "m"}).String(); got != "m" {
 		t.Fatalf("String() without path = %q", got)
 	}

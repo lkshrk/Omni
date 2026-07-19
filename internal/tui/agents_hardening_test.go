@@ -11,6 +11,7 @@ import (
 // not render any selected-row marker when cursorHidden is true, and that it does
 // render the marker after cursorHidden is cleared.
 func TestAgentsHarden_NoSelectionWhenCursorHidden(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.width = 120
@@ -47,6 +48,7 @@ func TestAgentsHarden_NoSelectionWhenCursorHidden(t *testing.T) {
 // true the search control line ("/ ...") appears above the pill bar line that
 // contains "skills".
 func TestAgentsHarden_SearchBoxAbovePills(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.width = 120
@@ -84,6 +86,7 @@ func TestAgentsHarden_SearchBoxAbovePills(t *testing.T) {
 // TestAgentsHarden_FindSetsSearching verifies that submitting a free-text query
 // via Enter sets m.searching=true, and that receiving skillsFoundMsg clears it.
 func TestAgentsHarden_FindSetsSearching(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills

@@ -52,6 +52,7 @@ func (s *managerInstallStub) IsInstalledWithManager(_ context.Context, tool prov
 }
 
 func TestConsolidateToProvider_MigratesToolAndCleansOldCache(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	brew := &stubProvider{name: "brew", available: true}
 	npm := &uninstallCaptureStub{stubProvider: stubProvider{name: "npm", available: true}}
@@ -122,6 +123,7 @@ func TestConsolidateToProvider_MigratesToolAndCleansOldCache(t *testing.T) {
 }
 
 func TestConsolidateOptions_ReturnsAvailableEcosystemManagers(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t, &stubProvider{name: "node", available: true})
 
 	var got []string
@@ -137,6 +139,7 @@ func TestConsolidateOptions_ReturnsAvailableEcosystemManagers(t *testing.T) {
 }
 
 func TestConsolidatePlan_CurrentConcreteProviderListDoesNotMigrate(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	node := &managerInstallStub{stubProvider: stubProvider{name: "node", available: true}}
 	a, cfgPath := newImportApp(t, node)
@@ -171,6 +174,7 @@ func TestConsolidatePlan_CurrentConcreteProviderListDoesNotMigrate(t *testing.T)
 }
 
 func TestConsolidateWithState_UpdatesManagerSettingAndReturnsState(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	node := &managerInstallStub{stubProvider: stubProvider{name: "node", available: true}, version: "3.1.0"}
 	a, cfgPath := newImportApp(t, node)
@@ -208,6 +212,7 @@ func TestConsolidateWithState_UpdatesManagerSettingAndReturnsState(t *testing.T)
 }
 
 func TestConsolidateToProvider_CollectsInstallAndVerificationFailures(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	installErr := errors.New("install failed")
 	verifyErr := errors.New("status failed")

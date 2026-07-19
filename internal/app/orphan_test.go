@@ -55,6 +55,7 @@ func testEcosystemForConcrete(providerName string) string {
 }
 
 func TestCheckSatisfiedGroups_FullySatisfied(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, brew)
 
@@ -83,6 +84,7 @@ func TestCheckSatisfiedGroups_FullySatisfied(t *testing.T) {
 }
 
 func TestCheckSatisfiedGroups_PartiallyInstalled(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, brew)
 
@@ -112,6 +114,7 @@ func TestCheckSatisfiedGroups_PartiallyInstalled(t *testing.T) {
 }
 
 func TestCheckSatisfiedGroups_EmptyGroupSkipped(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, brew)
 
@@ -136,6 +139,7 @@ func TestCheckSatisfiedGroups_EmptyGroupSkipped(t *testing.T) {
 }
 
 func TestCheckSatisfiedGroups_ActiveGroupExcluded(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, brew)
 
@@ -167,6 +171,7 @@ func TestCheckSatisfiedGroups_ActiveGroupExcluded(t *testing.T) {
 // ─── syncOrphansToMachineGroup (via Sync) ────────────────────────────────────
 
 func TestRefreshDiscovered_BaselinesSystemPackagesOnFirstObservation(t *testing.T) {
+	t.Parallel()
 	apt := &stubProvider{
 		name:      "apt",
 		available: true,
@@ -221,6 +226,7 @@ func TestRefreshDiscovered_BaselinesSystemPackagesOnFirstObservation(t *testing.
 }
 
 func TestRefreshDiscovered_SurfacesSystemPackageInstalledAfterBaseline(t *testing.T) {
+	t.Parallel()
 	apt := &stubProvider{
 		name:      "apt",
 		available: true,
@@ -267,6 +273,7 @@ func TestRefreshDiscovered_SurfacesSystemPackageInstalledAfterBaseline(t *testin
 }
 
 func TestRefreshDiscovered_BaselinesEverySystemPackageProviderOnFirstObservation(t *testing.T) {
+	t.Parallel()
 	for _, providerName := range []string{"apt", "dnf", "pacman", "apk", "zypper"} {
 		t.Run(providerName, func(t *testing.T) {
 			p := &stubProvider{
@@ -310,6 +317,7 @@ func TestRefreshDiscovered_BaselinesEverySystemPackageProviderOnFirstObservation
 }
 
 func TestSync_HostActive_SystemPackageOrphansUseBaseline(t *testing.T) {
+	t.Parallel()
 	apt := &stubProvider{
 		name:      "apt",
 		available: true,
@@ -368,6 +376,7 @@ func TestSync_HostActive_SystemPackageOrphansUseBaseline(t *testing.T) {
 }
 
 func TestSync_HostActive_OrphansAddedToHostnameGroup(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{
 		name:      "brew",
 		available: true,
@@ -721,6 +730,7 @@ func TestSyncAll_DryRunDiscoversWithoutWritingDB(t *testing.T) {
 }
 
 func TestSync_HostActive_NoOrphansSkipsHostnameGroup(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{
 		name:      "brew",
 		available: true,
@@ -782,6 +792,7 @@ func testGroupHasTool(group *config.GroupConfig, name string) bool {
 }
 
 func TestSync_HostActive_ReturnsSatisfiedGroups(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{
 		name:      "brew",
 		available: true,
@@ -825,6 +836,7 @@ func TestSync_HostActive_ReturnsSatisfiedGroups(t *testing.T) {
 // ─── hostname group injection ─────────────────────────────────────────────────
 
 func TestSync_HostActive_HostnameGroupInjected(t *testing.T) {
+	t.Parallel()
 	brew := &installTracker{stubProvider: stubProvider{name: "brew", available: true}}
 	a, cfgPath := newImportApp(t, brew)
 	short := testShortHostname()
@@ -866,6 +878,7 @@ func TestSync_HostActive_HostnameGroupInjected(t *testing.T) {
 // ─── ClaimFromMachineGroup ────────────────────────────────────────────────────
 
 func TestClaimFromMachineGroup_PrunesMachineGroup(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	short := testShortHostname()
 
@@ -928,6 +941,7 @@ func TestClaimFromMachineGroup_PrunesMachineGroup(t *testing.T) {
 // whose ListInstalled returns an error causes a warning in the Sync result
 // instead of silently swallowing the failure.
 func TestSync_OrphanScanProviderError_SurfacedAsWarning(t *testing.T) {
+	t.Parallel()
 	scanErr := errors.New("boom: list installed failed")
 	bad := &listErrProvider{
 		stubProvider: stubProvider{name: "brew", available: true},

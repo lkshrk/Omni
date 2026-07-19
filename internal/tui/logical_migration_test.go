@@ -21,6 +21,7 @@ func searchResultModel(tools []*app.ToolView) Model {
 }
 
 func TestLogicalMigration_SearchResultAddToConfigOpensGroupPicker(t *testing.T) {
+	t.Parallel()
 	m := searchResultModel([]*app.ToolView{{
 		Name:     "ripgrep",
 		Provider: "brew",
@@ -43,6 +44,7 @@ func TestLogicalMigration_SearchResultAddToConfigOpensGroupPicker(t *testing.T) 
 }
 
 func TestLogicalMigration_SearchResultGroupSelectionAddsExplicitGroup(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, cfgPath := newCmdApp(t, prov, nil)
 
@@ -115,6 +117,7 @@ func TestLogicalMigration_SearchResultGroupSelectionAddsExplicitGroup(t *testing
 }
 
 func TestLogicalMigration_ConfiguredEmptyToolInstallKeyAddsHighConfidenceProviderMatch(t *testing.T) {
+	t.Parallel()
 	prov := &searchOKProvider{
 		okProvider: okProvider{name: "brew"},
 		results: []provider.SearchResult{{
@@ -187,6 +190,7 @@ func TestLogicalMigration_ConfiguredEmptyToolInstallKeyAddsHighConfidenceProvide
 }
 
 func TestLogicalMigration_SearchInstallAndAddAsksGroup(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, cfgPath := newCmdApp(t, prov, nil)
 
@@ -248,6 +252,7 @@ func TestLogicalMigration_SearchInstallAndAddAsksGroup(t *testing.T) {
 }
 
 func TestLogicalMigration_SearchInstallEnterAsksGroup(t *testing.T) {
+	t.Parallel()
 	m := searchResultModel([]*app.ToolView{{
 		Name:     "ripgrep",
 		Provider: "brew",
@@ -264,6 +269,7 @@ func TestLogicalMigration_SearchInstallEnterAsksGroup(t *testing.T) {
 }
 
 func TestLogicalMigration_SearchInstallAndAddPrivilegedOpensAdminTerminal(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "apt"}
 	a, _ := newCmdApp(t, prov, nil)
 
@@ -311,6 +317,7 @@ func TestLogicalMigration_SearchInstallAndAddPrivilegedOpensAdminTerminal(t *tes
 }
 
 func TestLogicalMigration_AdminTerminalInstallAndAddPersistsGroup(t *testing.T) {
+	t.Parallel()
 	brew := &okProvider{name: "brew"}
 	a := newSearchCmdApp(t, brew)
 	cfgPath := a.ConfigPath
@@ -379,6 +386,7 @@ func opCompleteFromCmd(cmd tea.Cmd) (opCompleteMsg, bool) {
 }
 
 func TestLogicalMigration_ReinstallDefaultConfirmationShowsWrongProviderPrompt(t *testing.T) {
+	t.Parallel()
 	got := drive(wrongProvModel(), pressRune('r'))
 	if got.loading {
 		t.Fatal("loading should stay false until reinstall is confirmed")

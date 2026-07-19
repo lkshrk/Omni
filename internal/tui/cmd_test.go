@@ -361,6 +361,7 @@ func cmdTestToolInConfig(cfg *config.RootConfig, name, providerName string) bool
 // ── doInstall ─────────────────────────────────────────────────────────────────
 
 func TestDoInstall_Success(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
 	m := modelForCmds(a)
@@ -378,6 +379,7 @@ func TestDoInstall_Success(t *testing.T) {
 }
 
 func TestDoInstall_ConfiguredEmptyToolAddsHighConfidenceProviderMatch(t *testing.T) {
+	t.Parallel()
 	prov := &searchOKProvider{
 		okProvider: okProvider{name: "brew"},
 		results: []provider.SearchResult{{
@@ -421,6 +423,7 @@ func TestDoInstall_ConfiguredEmptyToolAddsHighConfidenceProviderMatch(t *testing
 }
 
 func TestDoInstall_ConfiguredEmptyToolDoesNotInstallWeakProviderMatch(t *testing.T) {
+	t.Parallel()
 	prov := &searchOKProvider{
 		okProvider: okProvider{name: "brew"},
 		results: []provider.SearchResult{{
@@ -463,6 +466,7 @@ func TestDoInstall_ConfiguredEmptyToolDoesNotInstallWeakProviderMatch(t *testing
 }
 
 func TestHandleListActionInstallUsesSelectedProviderCandidate(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
@@ -521,6 +525,7 @@ func TestHandleListActionInstallUsesSelectedProviderCandidate(t *testing.T) {
 }
 
 func TestDoInstall_Error(t *testing.T) {
+	t.Parallel()
 	prov := &errProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
@@ -537,6 +542,7 @@ func TestDoInstall_Error(t *testing.T) {
 // ── doDelete ───────────────────────────────────────────────────────────────
 
 func TestDoDelete_Success(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
@@ -554,6 +560,7 @@ func TestDoDelete_Success(t *testing.T) {
 }
 
 func TestDoDelete_DeletesConfigEntry(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
 	m := modelForCmds(a)
@@ -577,6 +584,7 @@ func TestDoDelete_DeletesConfigEntry(t *testing.T) {
 }
 
 func TestDoSaveFallbackEditor_PersistsStructuredRecipe(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "apt"}
 	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("rg", "apt")})
 	m := modelForCmds(a)
@@ -637,6 +645,7 @@ func TestDoSaveFallbackEditor_PersistsStructuredRecipe(t *testing.T) {
 }
 
 func TestDoSaveFallbackEditor_InvalidRepoReturnsError(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "apt"}
 	a, _ := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("rg", "apt")})
 	m := modelForCmds(a)
@@ -663,6 +672,7 @@ func TestDoSaveFallbackEditor_InvalidRepoReturnsError(t *testing.T) {
 }
 
 func TestDoSaveFallbackEditor_InvalidTemplateReturnsError(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "apt"}
 	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("rg", "apt")})
 	m := modelForCmds(a)
@@ -696,6 +706,7 @@ func TestDoSaveFallbackEditor_InvalidTemplateReturnsError(t *testing.T) {
 }
 
 func TestDoDelete_RefreshesToolMembershipState(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
 	m := modelForCmds(a)
@@ -743,6 +754,7 @@ func TestDoDelete_RefreshesToolMembershipState(t *testing.T) {
 }
 
 func TestHandleOpCompleteMsg_DeleteRemovesDiscoveredOrphan(t *testing.T) {
+	t.Parallel()
 	m := modelForCmds(nil)
 	key := toolKey("swiftlint", "system")
 	swiftformat := &app.ToolView{Name: "swiftformat", Provider: "system", Package: "swiftformat", Installed: true, Tracked: true}
@@ -772,6 +784,7 @@ func TestHandleOpCompleteMsg_DeleteRemovesDiscoveredOrphan(t *testing.T) {
 }
 
 func TestDoDeleteFromConfig_DeletesMissingConfigEntry(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
 	m := modelForCmds(a)
@@ -802,6 +815,7 @@ func TestDoDeleteFromConfig_DeletesMissingConfigEntry(t *testing.T) {
 }
 
 func TestDoDeleteFromConfig_RefreshesToolMembershipState(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
 	m := modelForCmds(a)
@@ -838,6 +852,7 @@ func TestDoDeleteFromConfig_RefreshesToolMembershipState(t *testing.T) {
 // ── doUpgrade ─────────────────────────────────────────────────────────────────
 
 func TestDoUpgrade_Success(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
@@ -852,6 +867,7 @@ func TestDoUpgrade_Success(t *testing.T) {
 }
 
 func TestDoUpgrade_Error(t *testing.T) {
+	t.Parallel()
 	prov := &errProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
@@ -868,6 +884,7 @@ func TestDoUpgrade_Error(t *testing.T) {
 // ── doSyncWithProgress ────────────────────────────────────────────────────────
 
 func TestDoSyncWithProgress_Success(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
@@ -919,6 +936,7 @@ func TestDoSyncAllWithProgress_ClaimsDiscoveredToHostnameGroup(t *testing.T) {
 }
 
 func TestDoSyncAllWithProgress_PrivilegedInstallOpensAdminTerminal(t *testing.T) {
+	t.Parallel()
 	prov := &privilegedMissingProvider{
 		privilegedOKProvider: privilegedOKProvider{
 			okProvider: okProvider{name: "apt"},
@@ -965,6 +983,7 @@ func TestDoSyncAllWithProgress_PrivilegedInstallOpensAdminTerminal(t *testing.T)
 }
 
 func TestQueuedPrivilegedAdminTerminalContinuesAfterSuccess(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{
 		{Name: "bat", Provider: "apt", Package: "bat"},
 	})
@@ -1010,6 +1029,7 @@ func TestQueuedPrivilegedAdminTerminalContinuesAfterSuccess(t *testing.T) {
 // ── doUpgradeAll ──────────────────────────────────────────────────────────────
 
 func TestDoUpgradeAll_Success(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
@@ -1026,6 +1046,7 @@ func TestDoUpgradeAll_Success(t *testing.T) {
 }
 
 func TestDoUpgradeAll_ProgressShowsCurrentTool(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	tools := []*app.ToolView{
@@ -1068,6 +1089,7 @@ func TestDoUpgradeAll_ProgressShowsCurrentTool(t *testing.T) {
 }
 
 func TestDoUpgradeAll_PrivilegedUpgradesOpenAdminTerminalQueue(t *testing.T) {
+	t.Parallel()
 	prov := &privilegedOKProvider{
 		okProvider: okProvider{name: "apt"},
 		plan:       provider.PrivilegePlan{Requirement: provider.PrivilegeRequired, Reason: "apt upgrade package"},
@@ -1126,6 +1148,7 @@ func TestDoUpgradeAll_PrivilegedUpgradesOpenAdminTerminalQueue(t *testing.T) {
 }
 
 func TestUpgradeAllProgressText_DeduplicatesBulkVerb(t *testing.T) {
+	t.Parallel()
 	tool := provider.Tool{Name: "bat", Provider: "brew"}
 	tests := []struct {
 		name    string
@@ -1153,6 +1176,7 @@ func TestUpgradeAllProgressText_DeduplicatesBulkVerb(t *testing.T) {
 }
 
 func TestDoUpgradeAll_FailureReturnsRowErrorAndContinues(t *testing.T) {
+	t.Parallel()
 	prov := &errProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	if err := a.DB().Upsert(context.Background(), &database.ToolCache{
@@ -1183,6 +1207,7 @@ func TestDoUpgradeAll_FailureReturnsRowErrorAndContinues(t *testing.T) {
 // ── doCreateConfig ────────────────────────────────────────────────────────────
 
 func TestDoCreateConfig_Success(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a := newCmdAppNoConfig(t, prov)
 	m := modelForCmds(a)
@@ -1204,6 +1229,7 @@ func TestDoCreateConfig_Success(t *testing.T) {
 }
 
 func TestDoCreateConfig_ExistingConfig_Noop(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	// Config already exists → CreateEmptyConfig is a no-op, still succeeds.
 	a, _ := newCmdApp(t, prov, nil)
@@ -1216,6 +1242,7 @@ func TestDoCreateConfig_ExistingConfig_Noop(t *testing.T) {
 }
 
 func TestDoImportConfigFile_Success(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a := newCmdAppNoConfig(t, prov)
 	m := modelForCmds(a)
@@ -1250,6 +1277,7 @@ func TestDoImportConfigFile_Success(t *testing.T) {
 }
 
 func TestHandleSetupConfigImportDoneMsg_SuccessReloadsTools(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
@@ -1276,6 +1304,7 @@ func TestHandleSetupConfigImportDoneMsg_SuccessReloadsTools(t *testing.T) {
 }
 
 func TestHandleSetupConfigImportDoneMsg_ErrorStopsLoading(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a := newCmdAppNoConfig(t, prov)
 	m := modelForCmds(a)
@@ -1297,8 +1326,11 @@ func TestHandleSetupConfigImportDoneMsg_ErrorStopsLoading(t *testing.T) {
 // ── doSetupImport ─────────────────────────────────────────────────────────────
 
 func TestDoSetupImport_Success(t *testing.T) {
+	t.Parallel(
 	// Use a provider that returns real tools from ListInstalled so that the
 	// import step actually processes entries and got.added > 0.
+	)
+
 	prov := &listableProvider{
 		name: "brew",
 		tools: []provider.InstalledTool{
@@ -1340,6 +1372,7 @@ func TestDoSetupImport_Success(t *testing.T) {
 // ── doSetToolGroupMembership ─────────────────────────────────────────────────
 
 func TestDoSetToolGroupMembership_AddSuccess(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
 	m := modelForCmds(a)
@@ -1369,6 +1402,7 @@ func TestDoSetToolGroupMembership_AddSuccess(t *testing.T) {
 }
 
 func TestDoSetToolGroupMembership_RemoveSuccess(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
 	m := modelForCmds(a)
@@ -1394,6 +1428,7 @@ func TestDoSetToolGroupMembership_RemoveSuccess(t *testing.T) {
 }
 
 func TestDoSetToolGroupMembership_Error(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
@@ -1408,6 +1443,7 @@ func TestDoSetToolGroupMembership_Error(t *testing.T) {
 }
 
 func TestDoSetToolGroupMemberships_CreatedGroupJoinsHost(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
 	m := modelForCmds(a)
@@ -1438,6 +1474,7 @@ func TestDoSetToolGroupMemberships_CreatedGroupJoinsHost(t *testing.T) {
 }
 
 func TestDoSetToolGroupMemberships_ExistingGroupJoinsHost(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
 	if err := a.CreateGroup("work"); err != nil {
@@ -1651,6 +1688,7 @@ func TestDoSetDotGroupMemberships_ExistingGroupJoinsHost(t *testing.T) {
 // ── doSaveSettingsChange ──────────────────────────────────────────────────────
 
 func TestDoSaveSettingsChange_Success(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, cfgPath := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
@@ -1736,6 +1774,7 @@ func TestDoSaveSettingsChange_QueuesPendingChanges(t *testing.T) {
 }
 
 func TestBlockPrivilegedToolAction_GenericPrivilegeOpensAdminTerminal(t *testing.T) {
+	t.Parallel()
 	prov := &privilegedOKProvider{
 		okProvider: okProvider{name: "apt"},
 		plan:       provider.PrivilegePlan{Requirement: provider.PrivilegeRequired, Reason: "apt install vim"},
@@ -1766,6 +1805,7 @@ func TestBlockPrivilegedToolAction_GenericPrivilegeOpensAdminTerminal(t *testing
 }
 
 func TestBlockPrivilegedToolAction_RejectsProviderToolUninstall(t *testing.T) {
+	t.Parallel()
 	prov := &privilegedOKProvider{
 		okProvider: okProvider{name: "node"},
 		plan:       provider.PrivilegePlan{Requirement: provider.PrivilegeRequired, Reason: "npm uninstall npm"},
@@ -1799,6 +1839,7 @@ func expectedInteractiveAdminDisplay(direct string) string {
 }
 
 func TestBlockPrivilegedToolAction_OpensAdminTerminalForInteractiveBrewCask(t *testing.T) {
+	t.Parallel()
 	prov := &privilegedOKProvider{
 		okProvider: okProvider{name: "brew"},
 		plan: provider.PrivilegePlan{
@@ -1837,6 +1878,7 @@ func TestBlockPrivilegedToolAction_OpensAdminTerminalForInteractiveBrewCask(t *t
 }
 
 func TestBlockPrivilegedToolAction_RefreshesGenericCachedBrewPrivilegeIntoAdminPrompt(t *testing.T) {
+	t.Parallel()
 	prov := &privilegedOKProvider{
 		okProvider: okProvider{name: "brew"},
 		plan: provider.PrivilegePlan{
@@ -1976,6 +2018,7 @@ func TestSettingsRowActionDoesNotOverwriteConfigWithStaleModel(t *testing.T) {
 // ── doConsolidate ─────────────────────────────────────────────────────────────
 
 func TestDoConsolidate_Success(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "node"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
@@ -1991,6 +2034,7 @@ func TestDoConsolidate_Success(t *testing.T) {
 }
 
 func TestDoConsolidate_UnknownEcosystem(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
@@ -2007,6 +2051,7 @@ func TestDoConsolidate_UnknownEcosystem(t *testing.T) {
 // ── waitForProgress ───────────────────────────────────────────────────────────
 
 func TestWaitForProgress_ClosedChannel(t *testing.T) {
+	t.Parallel()
 	ch := make(chan progressUpdate)
 	close(ch)
 	cmd := waitForProgress(ch, 7)
@@ -2019,6 +2064,7 @@ func TestWaitForProgress_ClosedChannel(t *testing.T) {
 }
 
 func TestWaitForProgress_ReceivesText(t *testing.T) {
+	t.Parallel()
 	ch := make(chan progressUpdate, 1)
 	ch <- progressUpdate{gen: 7, text: "installing…"}
 	cmd := waitForProgress(ch, 7)
@@ -2033,6 +2079,7 @@ func TestWaitForProgress_ReceivesText(t *testing.T) {
 }
 
 func TestWithLiveOutputStreamsSanitizedLine(t *testing.T) {
+	t.Parallel()
 	ch := make(chan progressUpdate, 2)
 	ctx := withLiveOutput(context.Background(), ch, 7)
 	if _, _, err := executor.New().Run(ctx, "printf", "first\nTOKEN=secret\n"); err != nil {
@@ -2051,6 +2098,7 @@ func TestWithLiveOutputStreamsSanitizedLine(t *testing.T) {
 }
 
 func TestToolProgressUpdate_ContextCanceledCompletesWithoutRowError(t *testing.T) {
+	t.Parallel()
 	got := toolProgressUpdate(3, gosync.ProgressEvent{
 		Tool: provider.Tool{
 			Name:     "ripgrep",
@@ -2073,6 +2121,7 @@ func TestToolProgressUpdate_ContextCanceledCompletesWithoutRowError(t *testing.T
 }
 
 func TestSyncAllProgressText_AddAndInstallOnly(t *testing.T) {
+	t.Parallel()
 	addText := app.SyncAllToolProgressText(gosync.ProgressEvent{
 		Tool:    provider.Tool{Name: "fzf", Provider: "brew"},
 		Message: "Adding fzf to config…",
@@ -2097,6 +2146,7 @@ func TestSyncAllProgressText_AddAndInstallOnly(t *testing.T) {
 // ── displaySection ────────────────────────────────────────────────────────────
 
 func TestDisplaySection_IgnoredTool(t *testing.T) {
+	t.Parallel()
 	tc := &app.ToolView{Name: "curl", Provider: "brew", Installed: true}
 	m := baseModel([]*app.ToolView{tc})
 	m.ignoreSet = map[string]bool{"curl": true}
@@ -2106,6 +2156,7 @@ func TestDisplaySection_IgnoredTool(t *testing.T) {
 }
 
 func TestDisplaySection_NormalTool(t *testing.T) {
+	t.Parallel()
 	tc := &app.ToolView{Name: "curl", Provider: "brew", Installed: true}
 	m := baseModel([]*app.ToolView{tc})
 	m.ignoreSet = map[string]bool{} // not in ignore list
@@ -2154,7 +2205,10 @@ func (p *listableProvider) ListInstalled(_ context.Context) ([]provider.Installe
 }
 
 func TestDoDelete_Error(t *testing.T) {
+	t.Parallel(
 	// Use a provider name that is not registered → Uninstall returns an error.
+	)
+
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
@@ -2169,7 +2223,10 @@ func TestDoDelete_Error(t *testing.T) {
 }
 
 func TestDoSyncWithProgress_Installed(t *testing.T) {
+	t.Parallel(
 	// installableProvider reports IsInstalled=false so sync actually installs tools.
+	)
+
 	prov := &installableProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
 	m := modelForCmds(a)
@@ -2232,6 +2289,7 @@ func newDotsModelForCmds(t *testing.T) (Model, string) {
 // ── doLoadDots ────────────────────────────────────────────────────────────────
 
 func TestDoLoadDots_NoRepo(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil) // no dots_repo configured in settings.json
 	m := modelForCmds(a)
@@ -2350,6 +2408,7 @@ func TestDoRefreshDotsHistory_ReadsRecentAppHistory(t *testing.T) {
 // ── doDotsSyncOnly ────────────────────────────────────────────────────────────
 
 func TestDoDotsSyncOnly_NoRepo(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
@@ -2808,6 +2867,7 @@ func TestPrepareDotsSnapshotOnLaunch_UsesCachedDotsConfigured(t *testing.T) {
 }
 
 func TestPrepareDotsSnapshotOnLaunch_SkipsWhenCachedDotsUnconfigured(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
@@ -3000,6 +3060,7 @@ func TestHandleToolsLoadedMsg_DotsRepoPromptsForStowBeforeScans(t *testing.T) {
 // ── doDotsPull ────────────────────────────────────────────────────────────────
 
 func TestDoDotsPull_NoRepo(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
@@ -3029,6 +3090,7 @@ func TestDoDotsPull_NonGitDir(t *testing.T) {
 // ── doDotsPush ────────────────────────────────────────────────────────────────
 
 func TestDoDotsPush_NoRepo(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
@@ -3117,6 +3179,7 @@ func TestDoDotsDelete_Success(t *testing.T) {
 // ── doResetSettings ───────────────────────────────────────────────────────────
 
 func TestDoResetSettings_Success(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
@@ -3139,6 +3202,7 @@ func TestDoResetSettings_Success(t *testing.T) {
 // ── doResetCache ──────────────────────────────────────────────────────────────
 
 func TestDoResetCache_Success(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
@@ -3161,8 +3225,11 @@ func TestDoResetCache_Success(t *testing.T) {
 // ── doDisableDots ─────────────────────────────────────────────────────────────
 
 func TestDoDisableDots_NoDotsRepo(t *testing.T) {
+	t.Parallel(
 	// When dots is not configured, doDisableDots skips physical unlink work
 	// but still persists the disabled flag and triggers a reload.
+	)
+
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
@@ -3303,6 +3370,7 @@ func TestDoDisableDots_RemoveLocal(t *testing.T) {
 // ── doEnableDots ──────────────────────────────────────────────────────────────
 
 func TestDoEnableDots_ClearsDisabledFlag(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, cfgPath := newCmdApp(t, prov, nil)
 	if err := a.SaveDotsDisabled(context.Background(), true); err != nil {
@@ -3337,6 +3405,7 @@ func TestDoEnableDots_ClearsDisabledFlag(t *testing.T) {
 // providerScannedMsg with the correct provider name. Tools are not fetched
 // here — doFetchFinalTools handles that after all providers finish.
 func TestDoScanProvider_ReturnsMsg(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
 	m := modelForCmds(a)
@@ -3357,6 +3426,7 @@ func TestDoScanProvider_ReturnsMsg(t *testing.T) {
 // TestDoFetchFinalTools_ReturnsMsg verifies that doFetchFinalTools returns an
 // allProvidersDoneMsg (DB may be empty so tools can be nil/empty).
 func TestDoFetchFinalTools_ReturnsMsg(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
 	m := modelForCmds(a)
@@ -3372,6 +3442,7 @@ func TestDoFetchFinalTools_ReturnsMsg(t *testing.T) {
 }
 
 func TestDoCheckProviderOutdated_ReturnsMsg(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
 	m := modelForCmds(a)
@@ -3394,6 +3465,7 @@ func TestDoCheckProviderOutdated_ReturnsMsg(t *testing.T) {
 // TestDoRefreshDiscovered_ReturnsMsg verifies that doRefreshDiscovered always
 // returns a discoveredRefreshedMsg (never nil, never an error type).
 func TestDoRefreshDiscovered_ReturnsMsg(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
@@ -3412,6 +3484,7 @@ func TestDoRefreshDiscovered_ReturnsMsg(t *testing.T) {
 // tab's zero-entry state: while the startup snapshot hasn't landed yet
 // (m.loading) it must render nothing, not "No dotfiles tracked yet".
 func TestRenderDots_EmptyState_BlankWhileStartupSnapshotPending(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.dotsSyncAvailCached = app.DotsSyncAvailability{Reason: app.DotsSyncAvailabilityReady}
@@ -3430,6 +3503,7 @@ func TestRenderDots_EmptyState_BlankWhileStartupSnapshotPending(t *testing.T) {
 }
 
 func TestRenderDotsVariantPrompts(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 120
 

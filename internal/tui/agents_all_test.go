@@ -38,6 +38,7 @@ func agentsAllModel(skills []app.SkillPackageRow, mcpRows []app.McpServerRow, pl
 }
 
 func TestAgentsAll_RenderShowsAllThreeSectionsInOrder(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{
 			{Name: "caveman", Source: "github.com/foo/caveman", Installed: true},
@@ -63,6 +64,7 @@ func TestAgentsAll_RenderShowsAllThreeSectionsInOrder(t *testing.T) {
 }
 
 func TestAgentsAll_EnabledEmptySectionDoesNotBreakRender(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "caveman", Source: "github.com/foo/caveman", Installed: true}},
 		nil,
@@ -81,6 +83,7 @@ func TestAgentsAll_EnabledEmptySectionDoesNotBreakRender(t *testing.T) {
 }
 
 func TestAgentsAll_DisabledSectionAbsentFromRender(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		nil,
 		[]app.McpServerRow{{Name: "ripgrep-mcp", PerAgentStatus: map[string]app.McpStatus{"claude": app.McpStatusInstalled}}},
@@ -106,9 +109,12 @@ func TestAgentsAll_DisabledSectionAbsentFromRender(t *testing.T) {
 }
 
 func TestAgentsAll_DisabledChipRendersDimmed(t *testing.T) {
+	t.Parallel(
 	// renderPillBarDim treats a disabled chip as never-active even when
 	// activeIdx points at it, so it always renders via the dim help style
 	// (bracket-less " mcp ") rather than the active title style ("[mcp]").
+	)
+
 	p := palette{}
 	names := []string{"all", "skills", "mcp", "plugin"}
 	disabled := map[int]bool{agentsChipMcp: true}
@@ -123,6 +129,7 @@ func TestAgentsAll_DisabledChipRendersDimmed(t *testing.T) {
 }
 
 func TestAgentsAll_CursorTraversesSectionBoundary(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{
 			{Name: "skill-a", Source: "a/a", Installed: true},
@@ -162,6 +169,7 @@ func TestAgentsAll_CursorTraversesSectionBoundary(t *testing.T) {
 }
 
 func TestAgentsAll_KeyDispatch_McpRowOpensAddForm(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "skill-a", Source: "a/a", Installed: true}},
 		[]app.McpServerRow{{Name: "mcp-a", PerAgentStatus: map[string]app.McpStatus{"claude": app.McpStatusInstalled}}},
@@ -187,6 +195,7 @@ func TestAgentsAll_KeyDispatch_McpRowOpensAddForm(t *testing.T) {
 }
 
 func TestAgentsAll_KeyDispatch_DeleteConfirmScopedToRowFeature(t *testing.T) {
+	t.Parallel()
 	base := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "skill-a", Source: "a/a", Installed: true}},
 		nil,
@@ -224,6 +233,7 @@ func TestAgentsAll_KeyDispatch_DeleteConfirmScopedToRowFeature(t *testing.T) {
 }
 
 func TestAgentsAll_KeyDispatch_SkillsSearchOnlyOnSkillsRow(t *testing.T) {
+	t.Parallel()
 	base := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "skill-a", Source: "a/a", Installed: true}},
 		[]app.McpServerRow{{Name: "mcp-a", PerAgentStatus: map[string]app.McpStatus{"claude": app.McpStatusInstalled}}},
@@ -260,6 +270,7 @@ func TestAgentsAll_KeyDispatch_SkillsSearchOnlyOnSkillsRow(t *testing.T) {
 }
 
 func TestAgentsAll_ChipSwitchSyncsCursorRoundTrip(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{
 			{Name: "skill-a", Source: "a/a", Installed: true},
@@ -315,6 +326,7 @@ func TestAgentsAll_ChipSwitchSyncsCursorRoundTrip(t *testing.T) {
 }
 
 func TestFlow_ClickAgentsFilters(t *testing.T) {
+	t.Parallel()
 	clickAgentsFilter := func(t *testing.T, m Model, kind toolFilterKind, idx int) Model {
 		t.Helper()
 		for _, zone := range agentsFilterHitZones(m) {
@@ -376,6 +388,7 @@ func TestFlow_ClickAgentsFilters(t *testing.T) {
 }
 
 func TestAgentsAll_EmptyStateCTAsPerChip(t *testing.T) {
+	t.Parallel()
 	t.Run("mcp chip empty state hints install, not the flat generic line", func(t *testing.T) {
 		m := agentsAllModel(nil, nil, nil)
 		m.skillTypeIdx = agentsChipMcp
@@ -433,6 +446,7 @@ func TestAgentsAll_EmptyStateCTAsPerChip(t *testing.T) {
 }
 
 func TestAgentsAll_ChipNavigationSkipsDisabledMcp(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.mcpEnabled = false
 
@@ -448,6 +462,7 @@ func TestAgentsAll_ChipNavigationSkipsDisabledMcp(t *testing.T) {
 }
 
 func TestAgentsAll_SkillsChipFiltersToSkillsOnlyContent(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "skill-a", Source: "a/a", Installed: true}},
 		[]app.McpServerRow{{Name: "mcp-a", PerAgentStatus: map[string]app.McpStatus{"claude": app.McpStatusInstalled}}},
@@ -468,6 +483,7 @@ func TestAgentsAll_SkillsChipFiltersToSkillsOnlyContent(t *testing.T) {
 }
 
 func TestAgentsAll_TabEntryResetsChipAndClampsCursor(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.skillTypeIdx = agentsChipMcp
@@ -492,6 +508,7 @@ func TestAgentsAll_TabEntryResetsChipAndClampsCursor(t *testing.T) {
 }
 
 func TestAgentsAll_AllFeaturesDisabledShowsHelpScreen(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.skillsEnabled = false
 	m.mcpEnabled = false
@@ -508,6 +525,7 @@ func TestAgentsAll_AllFeaturesDisabledShowsHelpScreen(t *testing.T) {
 }
 
 func TestAgentsAll_ClampAfterRowCountShrink(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{
 			{Name: "skill-a", Source: "a/a", Installed: true},
@@ -545,6 +563,7 @@ func firstRowCursor(m Model, feature agentsSection) int {
 }
 
 func TestAgentsAll_KeyDispatch_IgnoreTogglesFromRow(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "skill-a", Source: "a/a", Installed: true}},
 		nil,
@@ -568,6 +587,7 @@ func TestAgentsAll_KeyDispatch_IgnoreTogglesFromRow(t *testing.T) {
 }
 
 func TestAgentsAll_KeyDispatch_GroupOpensMcpMembershipPicker(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		nil,
 		[]app.McpServerRow{{Name: "mcp-a", Groups: []string{"work"}, PerAgentStatus: map[string]app.McpStatus{"claude": app.McpStatusInstalled}}},
@@ -592,6 +612,7 @@ func TestAgentsAll_KeyDispatch_GroupOpensMcpMembershipPicker(t *testing.T) {
 }
 
 func TestAgentsAll_KeyDispatch_GroupOpensPluginMembershipPicker(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		nil,
 		nil,
@@ -616,6 +637,7 @@ func TestAgentsAll_KeyDispatch_GroupOpensPluginMembershipPicker(t *testing.T) {
 }
 
 func TestAgentsAll_KeyDispatch_InstallFiresOnMissingMcpRow(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		nil,
 		[]app.McpServerRow{{Name: "mcp-a", PerAgentStatus: map[string]app.McpStatus{"claude": app.McpStatusMissing}}},
@@ -634,6 +656,7 @@ func TestAgentsAll_KeyDispatch_InstallFiresOnMissingMcpRow(t *testing.T) {
 }
 
 func TestAgentsAll_KeyDispatch_UpgradeFiresOnOutdatedPluginRow(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		nil,
 		nil,
@@ -652,6 +675,7 @@ func TestAgentsAll_KeyDispatch_UpgradeFiresOnOutdatedPluginRow(t *testing.T) {
 }
 
 func TestAgentsAll_Expansion_ExplicitAgentsListIndependentPerAgentStatus(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		nil,
 		[]app.McpServerRow{{
@@ -690,6 +714,7 @@ func TestAgentsAll_Expansion_ExplicitAgentsListIndependentPerAgentStatus(t *test
 }
 
 func TestAgentsAll_Expansion_EmptyAgentsFallsBackToEnabledAgents(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		nil,
 		[]app.McpServerRow{{
@@ -716,6 +741,7 @@ func TestAgentsAll_Expansion_EmptyAgentsFallsBackToEnabledAgents(t *testing.T) {
 }
 
 func TestAgentsAll_Expansion_ExplicitAgentNotInEnabledAgentsUsedVerbatim(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		nil,
 		[]app.McpServerRow{{
@@ -739,6 +765,7 @@ func TestAgentsAll_Expansion_ExplicitAgentNotInEnabledAgentsUsedVerbatim(t *test
 }
 
 func TestAgentsAll_Expansion_AgentUnavailablePairingSkipped(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		nil,
 		[]app.McpServerRow{{
@@ -768,6 +795,7 @@ func TestAgentsAll_Expansion_AgentUnavailablePairingSkipped(t *testing.T) {
 // per the lockfile), independent of m.enabledAgents/PerAgentStatus, and
 // rendering never panics even when there is no linked agent to report.
 func TestAgentsAll_SkillsRowIsPackageLevelRegardlessOfEnabledAgents(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "zeta-skill", Source: "o/zeta-skill", Installed: true}},
 		nil,
@@ -804,6 +832,7 @@ func TestAgentsAll_SkillsRowIsPackageLevelRegardlessOfEnabledAgents(t *testing.T
 }
 
 func TestAgentsAllRowsList_IgnoredFindResultRendersUnderIgnoredNotAvailable(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.skillFindResults = []app.FindResult{{Source: "owner/found-skill", Skill: "found-skill"}}
 	m.agentsIgnore.Skills = []string{"found-skill"}
@@ -825,9 +854,12 @@ func TestAgentsAllRowsList_IgnoredFindResultRendersUnderIgnoredNotAvailable(t *t
 }
 
 func TestAgentsAll_PinDimming_IgnoredOutdatedPluginRowUsesIgnoredStyleNotMissingOrOutdated(t *testing.T) {
+	t.Parallel(
 	// Pins commit 44338c6: an ignored+outdated row must render entirely via
 	// styleIgnored, never leaking styleMissing/styleOutdated/styleProvider
 	// coloring into the mark/name/version/group cells.
+	)
+
 	m := agentsAllModel(nil, nil, nil)
 	m.palette = buildPaletteFor(true)
 	m.agentsIgnore.Plugins = []string{"theta-plugin"}
@@ -888,6 +920,7 @@ func TestAgentsAll_PinDimming_IgnoredOutdatedPluginRowUsesIgnoredStyleNotMissing
 }
 
 func TestAgentsAll_ShaDriftRendering_UsesShaShortArrowFormat(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.palette = buildPaletteFor(true)
 	m.pluginRows = []app.PluginRow{{
@@ -921,6 +954,7 @@ func ansiCodePrefix(rendered string) string {
 // must not flip the loaded flags — those loads must wait for
 // handleToolsLoadedMsg to run with the real snapshot flags.
 func TestAgentsBoot_InitDoesNotFireSectionLoadsBeforeSnapshot(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.agentsEnabled = true
 	m.skillsEnabled = true
@@ -961,6 +995,7 @@ func TestAgentsBoot_InitDoesNotFireSectionLoadsBeforeSnapshot(t *testing.T) {
 }
 
 func TestAgentsBoot_ToolsLoadedGatesPerSectionBySectionEnabled(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.agentsEnabled = true
 	m.skillsEnabled = true
@@ -989,6 +1024,7 @@ func TestAgentsBoot_ToolsLoadedGatesPerSectionBySectionEnabled(t *testing.T) {
 }
 
 func TestAgentsBoot_ToolsLoadedDisabledFlagsFireNoLoads(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.agentsEnabled = true
 	m.skillsEnabled = true
@@ -1012,6 +1048,7 @@ func TestAgentsBoot_ToolsLoadedDisabledFlagsFireNoLoads(t *testing.T) {
 }
 
 func TestAgentsBoot_ToolsLoadedIdempotentOnSecondMsg(t *testing.T) {
+	t.Parallel()
 	base := baseModel(nil)
 	base.agentsEnabled = true
 	base.skillsEnabled = true
@@ -1044,6 +1081,7 @@ func TestAgentsBoot_ToolsLoadedIdempotentOnSecondMsg(t *testing.T) {
 }
 
 func TestAgentsAllRowsListAgentFilterMcpPlugin(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		nil,
 		[]app.McpServerRow{{
@@ -1127,6 +1165,7 @@ func TestAgentsAllRowsListAgentFilterMcpPlugin(t *testing.T) {
 }
 
 func TestAgentsAll_KeyDispatch_DeleteConfirmTimeoutThenSecondPressDeletes(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "skill-a", Source: "a/a", Installed: true}},
 		nil,
@@ -1158,6 +1197,7 @@ func TestAgentsAll_KeyDispatch_DeleteConfirmTimeoutThenSecondPressDeletes(t *tes
 }
 
 func TestScrollBy_ViewSkills(t *testing.T) {
+	t.Parallel()
 	base := agentsAllModel(
 		[]app.SkillPackageRow{
 			{Name: "skill-a", Source: "a/a", Installed: true},
@@ -1278,6 +1318,7 @@ func TestScrollBy_ViewSkills(t *testing.T) {
 }
 
 func TestMarketplaceRowsMsg_PopulatesRowsAndUnmanaged(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.marketplaceRunning = true
 
@@ -1324,6 +1365,7 @@ func TestMarketplaceRowsMsg_PopulatesRowsAndUnmanaged(t *testing.T) {
 }
 
 func TestAgentsAllRowsListAgentFilter_Marketplace(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		nil, nil, nil,
 	)
@@ -1371,6 +1413,7 @@ func TestAgentsAllRowsListAgentFilter_Marketplace(t *testing.T) {
 }
 
 func TestAgentsAll_ZeroRows_LoadingLineVsOnboardingEmptyState(t *testing.T) {
+	t.Parallel()
 	t.Run("chip with rows unknown renders no empty-state lines", func(t *testing.T) {
 		m := agentsAllModel(nil, nil, nil)
 		m.mcpRowsKnown = false
@@ -1429,6 +1472,7 @@ func TestAgentsAll_ZeroRows_LoadingLineVsOnboardingEmptyState(t *testing.T) {
 // reload no longer wipes the rows on screen: the previous (cache-seeded or
 // live) rows stay put and only the section's err field is set.
 func TestAgentsRowsMsgs_ErrorKeepsPreviouslySeededRows(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "seed-skill", Source: "o/seed-skill", Installed: true}},
 		[]app.McpServerRow{{Name: "seed-mcp", PerAgentStatus: map[string]app.McpStatus{"claude": app.McpStatusInstalled}}},
@@ -1463,6 +1507,7 @@ func TestAgentsRowsMsgs_ErrorKeepsPreviouslySeededRows(t *testing.T) {
 }
 
 func TestAgentsRowsMsgs_ErrorDoesNotMarkRowsKnown(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	boom := errors.New("adapter unavailable")
 
@@ -1480,6 +1525,7 @@ func TestAgentsRowsMsgs_ErrorDoesNotMarkRowsKnown(t *testing.T) {
 }
 
 func TestAgentsMarketplaceRowAt(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.marketplaceRows = []app.MarketplaceRow{{Name: "managed-market", Source: "acme/repo"}}
 	m.marketplaceUnmanaged = map[string][]app.InstalledMarketplace{

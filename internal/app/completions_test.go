@@ -82,6 +82,7 @@ func TestCompletionCandidatesFilterAppState(t *testing.T) {
 }
 
 func TestSettingKeysExposeCanonicalOrder(t *testing.T) {
+	t.Parallel()
 	want := []string{
 		"auto_import",
 		"update_quarantine",

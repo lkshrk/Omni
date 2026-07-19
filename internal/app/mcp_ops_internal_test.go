@@ -25,6 +25,7 @@ func containsName(names []string, name string) bool {
 }
 
 func TestResolveMcpServers_UngroupedServer_AppearsOnAllHosts(t *testing.T) {
+	t.Parallel()
 	cfg := &config.RootConfig{
 		Agents: config.AgentsConfig{
 			McpServers: []config.McpServer{
@@ -41,6 +42,7 @@ func TestResolveMcpServers_UngroupedServer_AppearsOnAllHosts(t *testing.T) {
 }
 
 func TestResolveMcpServers_GroupedServer_MatchingGroup_Included(t *testing.T) {
+	t.Parallel()
 	cfg := &config.RootConfig{
 		Agents: config.AgentsConfig{
 			McpServers: []config.McpServer{
@@ -58,6 +60,7 @@ func TestResolveMcpServers_GroupedServer_MatchingGroup_Included(t *testing.T) {
 }
 
 func TestResolveMcpServers_GroupedServer_NonMatchingGroup_Excluded(t *testing.T) {
+	t.Parallel()
 	cfg := &config.RootConfig{
 		Agents: config.AgentsConfig{
 			McpServers: []config.McpServer{
@@ -75,6 +78,7 @@ func TestResolveMcpServers_GroupedServer_NonMatchingGroup_Excluded(t *testing.T)
 }
 
 func TestResolveMcpServers_HostAssignedGroup_Included(t *testing.T) {
+	t.Parallel()
 	cfg := &config.RootConfig{
 		Agents: config.AgentsConfig{
 			McpServers: []config.McpServer{
@@ -95,6 +99,7 @@ func TestResolveMcpServers_HostAssignedGroup_Included(t *testing.T) {
 }
 
 func TestResolveMcpServers_ServerInMultipleGroups_AppearsOncePerActiveGroup(t *testing.T) {
+	t.Parallel()
 	cfg := &config.RootConfig{
 		Agents: config.AgentsConfig{
 			McpServers: []config.McpServer{

@@ -285,6 +285,7 @@ func TestSetToolIgnoreScopesWithStateReportsHostScope(t *testing.T) {
 }
 
 func TestRefreshInstalledSkipsIgnoredToolsAndUntracksStaleCache(t *testing.T) {
+	t.Parallel()
 	stub := &ignoredProcessingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		installed:    map[string]string{"ripgrep": "14.1.0"},
@@ -333,6 +334,7 @@ func TestRefreshInstalledSkipsIgnoredToolsAndUntracksStaleCache(t *testing.T) {
 }
 
 func TestOutdatedRefreshSkipsIgnoredTools(t *testing.T) {
+	t.Parallel()
 	stub := &ignoredProcessingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		outdated:     map[string]string{"ripgrep": "15.0.0"},
@@ -377,6 +379,7 @@ func TestOutdatedRefreshSkipsIgnoredTools(t *testing.T) {
 }
 
 func TestRefreshDiscoveredSkipsGloballyIgnoredName(t *testing.T) {
+	t.Parallel()
 	stub := &ignoredProcessingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		listInstalled: []provider.InstalledTool{
@@ -471,6 +474,7 @@ func TestSyncAllSkipsIgnoredDiscoveredClaims(t *testing.T) {
 }
 
 func TestImportSkipsGloballyIgnoredName(t *testing.T) {
+	t.Parallel()
 	stub := &ignoredProcessingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		listInstalled: []provider.InstalledTool{
@@ -505,6 +509,7 @@ func TestImportSkipsGloballyIgnoredName(t *testing.T) {
 }
 
 func TestUpgradePathsSkipIgnoredTools(t *testing.T) {
+	t.Parallel()
 	stub := &ignoredProcessingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		installed:    map[string]string{"ripgrep": "14.1.0"},

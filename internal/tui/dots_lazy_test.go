@@ -8,6 +8,7 @@ import (
 )
 
 func TestDotsExpandLoadsUnloadedDirectoryThenExpandsIt(t *testing.T) {
+	t.Parallel()
 	child := app.DotChild{Name: "a", RelPath: "a", IsDir: true, State: dots.StateSynced}
 	entry := app.DotStatus{Name: "nvim", State: dots.StateSynced, IsDir: true, Children: []app.DotChild{child}}
 	m := baseModel(nil)
@@ -42,6 +43,7 @@ func TestDotsExpandLoadsUnloadedDirectoryThenExpandsIt(t *testing.T) {
 }
 
 func TestSetDotsChildChildrenPreservesLoadedEmptySlice(t *testing.T) {
+	t.Parallel()
 	children := []app.DotChild{{Name: "empty", RelPath: "empty", IsDir: true}}
 	loaded := []app.DotChild{}
 	if !setDotsChildChildren(children, "empty", loaded) {

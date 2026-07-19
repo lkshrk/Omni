@@ -13,6 +13,7 @@ import (
 )
 
 func TestActionCatalogMatchesDefaultKeyMap(t *testing.T) {
+	t.Parallel()
 	keys := DefaultKeyMap()
 	value := reflect.ValueOf(keys)
 	fieldRefs := map[string]int{}
@@ -45,6 +46,7 @@ func TestActionCatalogMatchesDefaultKeyMap(t *testing.T) {
 }
 
 func TestActionCatalogTUIBindingsExist(t *testing.T) {
+	t.Parallel()
 	keys := DefaultKeyMap()
 	value := reflect.ValueOf(keys)
 
@@ -67,6 +69,7 @@ func TestActionCatalogTUIBindingsExist(t *testing.T) {
 }
 
 func TestCanonicalActionKeys(t *testing.T) {
+	t.Parallel()
 	for _, id := range []actions.ID{
 		actions.ToolDelete,
 		actions.ToolDeleteSpec,
@@ -103,6 +106,7 @@ func TestCanonicalActionKeys(t *testing.T) {
 }
 
 func TestDurableTUIActionsAreCataloged(t *testing.T) {
+	t.Parallel()
 	for _, id := range []actions.ID{
 		actions.ToolInstall,
 		actions.ToolDelete,

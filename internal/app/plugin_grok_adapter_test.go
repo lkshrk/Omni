@@ -8,6 +8,7 @@ import (
 )
 
 func TestGrokPluginAdapter_ID(t *testing.T) {
+	t.Parallel()
 	a := NewGrokPluginAdapter(nil, nil)
 	if a.ID() != "grok" {
 		t.Fatalf("got %q", a.ID())
@@ -15,6 +16,7 @@ func TestGrokPluginAdapter_ID(t *testing.T) {
 }
 
 func TestGrokPluginAdapter_InstallPlugin(t *testing.T) {
+	t.Parallel()
 	var gotArgs []string
 	marketJSON := `[{"name":"ecc","kind":"git","source":{"url":"https://github.com/affaan-m/everything-claude-code.git"}}]`
 	call := 0
@@ -44,6 +46,7 @@ func TestGrokPluginAdapter_InstallPlugin(t *testing.T) {
 }
 
 func TestGrokPluginAdapter_RemovePlugin(t *testing.T) {
+	t.Parallel()
 	var gotArgs []string
 	exec := func(_ context.Context, _ string, args ...string) (string, string, error) {
 		gotArgs = args
@@ -61,6 +64,7 @@ func TestGrokPluginAdapter_RemovePlugin(t *testing.T) {
 }
 
 func TestGrokPluginAdapter_UpdatePlugin(t *testing.T) {
+	t.Parallel()
 	var gotArgs []string
 	exec := func(_ context.Context, _ string, args ...string) (string, string, error) {
 		gotArgs = args
@@ -77,6 +81,7 @@ func TestGrokPluginAdapter_UpdatePlugin(t *testing.T) {
 }
 
 func TestGrokPluginAdapter_AddMarketplace(t *testing.T) {
+	t.Parallel()
 	var gotArgs []string
 	exec := func(_ context.Context, _ string, args ...string) (string, string, error) {
 		gotArgs = args
@@ -94,6 +99,7 @@ func TestGrokPluginAdapter_AddMarketplace(t *testing.T) {
 }
 
 func TestParseGrokPluginList_Available(t *testing.T) {
+	t.Parallel()
 	out := `[
 	  {"status":"installed","name":"caveman","version":"1.2.3","marketplace":"caveman"},
 	  {"status":"available","name":"caveman","version":"9.9.9","marketplace":"caveman"}
@@ -111,6 +117,7 @@ func TestParseGrokPluginList_Available(t *testing.T) {
 }
 
 func TestGrokMarketplaceQualifier(t *testing.T) {
+	t.Parallel()
 	entry := grokMarketplaceListEntry{Name: "ecc"}
 	entry.Source.URL = "https://github.com/affaan-m/everything-claude-code.git"
 	if got := grokMarketplaceQualifier(entry); got != "affaan-m/everything-claude-code" {
@@ -119,6 +126,7 @@ func TestGrokMarketplaceQualifier(t *testing.T) {
 }
 
 func TestGrokPluginAdapter_ListMarketplaces(t *testing.T) {
+	t.Parallel()
 	exec := func(_ context.Context, _ string, args ...string) (string, string, error) {
 		if !mcpSliceEq(args, []string{"plugin", "marketplace", "list", "--json"}) {
 			t.Fatalf("unexpected args: %v", args)

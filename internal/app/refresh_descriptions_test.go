@@ -24,6 +24,7 @@ func (d *describingProvider) Describe(_ context.Context, t provider.Tool) (strin
 }
 
 func TestRefreshDescriptions_FetchesMissing(t *testing.T) {
+	t.Parallel()
 	prov := &describingProvider{stubProvider: stubProvider{name: "brew", available: true}}
 	a, cfgPath := newImportApp(t, prov)
 
@@ -50,6 +51,7 @@ func TestRefreshDescriptions_FetchesMissing(t *testing.T) {
 }
 
 func TestRefreshDescriptions_SkipsCached(t *testing.T) {
+	t.Parallel()
 	prov := &describingProvider{stubProvider: stubProvider{name: "brew", available: true}}
 	a, cfgPath := newImportApp(t, prov)
 
@@ -78,6 +80,7 @@ func TestRefreshDescriptions_SkipsCached(t *testing.T) {
 }
 
 func TestRefreshDescriptions_RespectsContextCancel(t *testing.T) {
+	t.Parallel()
 	prov := &describingProvider{stubProvider: stubProvider{name: "brew", available: true}}
 	a, cfgPath := newImportApp(t, prov)
 
@@ -122,6 +125,7 @@ func (b *bulkDescribingProvider) BulkDescribe(_ context.Context, tools []provide
 }
 
 func TestRefreshDescriptions_UsesBulkDescriber(t *testing.T) {
+	t.Parallel()
 	prov := &bulkDescribingProvider{stubProvider: stubProvider{name: "apt", available: true}}
 	a, cfgPath := newImportApp(t, prov)
 
@@ -149,6 +153,7 @@ func TestRefreshDescriptions_UsesBulkDescriber(t *testing.T) {
 }
 
 func TestRefreshDescriptions_BulkDescriberMatchesPackageAlias(t *testing.T) {
+	t.Parallel()
 	prov := &bulkDescribingProvider{stubProvider: stubProvider{name: "apt", available: true}}
 	a, cfgPath := newImportApp(t, prov)
 
@@ -190,6 +195,7 @@ func (b *basenameBulkDescribingProvider) BulkDescribe(_ context.Context, _ []pro
 }
 
 func TestRefreshDescriptions_BulkDescriberMatchesPackageBasename(t *testing.T) {
+	t.Parallel()
 	prov := &basenameBulkDescribingProvider{stubProvider: stubProvider{name: "brew", available: true}}
 	a, cfgPath := newImportApp(t, prov)
 
@@ -217,6 +223,7 @@ func TestRefreshDescriptions_BulkDescriberMatchesPackageBasename(t *testing.T) {
 }
 
 func TestRefreshDescriptions_BulkDescriberPrefersFullScopedPackage(t *testing.T) {
+	t.Parallel()
 	prov := &basenameBulkDescribingProvider{stubProvider: stubProvider{name: "npm", available: true}}
 	a, cfgPath := newImportApp(t, prov)
 
@@ -257,6 +264,7 @@ func (b *partialBulkDescribingProvider) BulkDescribe(_ context.Context, tools []
 }
 
 func TestRefreshDescriptions_FallsBackForBulkMisses(t *testing.T) {
+	t.Parallel()
 	prov := &partialBulkDescribingProvider{
 		describingProvider: describingProvider{stubProvider: stubProvider{name: "brew", available: true}},
 	}
@@ -301,6 +309,7 @@ func TestRefreshDescriptions_FallsBackForBulkMisses(t *testing.T) {
 }
 
 func TestRefreshDescriptions_FetchesDiscoveredTools(t *testing.T) {
+	t.Parallel()
 	prov := &describingProvider{stubProvider: stubProvider{name: "npm", available: true}}
 	a, _ := newImportApp(t, prov)
 	ctx := context.Background()
@@ -326,6 +335,7 @@ func TestRefreshDescriptions_FetchesDiscoveredTools(t *testing.T) {
 }
 
 func TestRefreshDescriptions_FetchesConfiguredNodeRowsInstalledWithManager(t *testing.T) {
+	t.Parallel()
 	prov := &describingProvider{stubProvider: stubProvider{name: "npm", available: true}}
 	a, cfgPath := newImportApp(t, prov)
 	ctx := context.Background()
@@ -366,6 +376,7 @@ func TestRefreshDescriptions_FetchesConfiguredNodeRowsInstalledWithManager(t *te
 }
 
 func TestRefreshDescriptions_UsesInstalledWithEcosystemWhenCacheProviderMissing(t *testing.T) {
+	t.Parallel()
 	prov := &describingProvider{stubProvider: stubProvider{name: "node", available: true}}
 	a, _ := newImportApp(t, prov)
 	ctx := context.Background()
@@ -397,6 +408,7 @@ func TestRefreshDescriptions_UsesInstalledWithEcosystemWhenCacheProviderMissing(
 }
 
 func TestRefreshDescriptions_FetchesConcreteManagerCacheRows(t *testing.T) {
+	t.Parallel()
 	prov := &describingProvider{stubProvider: stubProvider{name: "npm", available: true}}
 	a, _ := newImportApp(t, prov)
 	ctx := context.Background()
@@ -443,6 +455,7 @@ func (d *concurrentDescribingProvider) Describe(_ context.Context, t provider.To
 }
 
 func TestRefreshDescriptions_IndividualFallbackIsBoundedConcurrent(t *testing.T) {
+	t.Parallel()
 	prov := &concurrentDescribingProvider{stubProvider: stubProvider{name: "npm", available: true}}
 	a, cfgPath := newImportApp(t, prov)
 
@@ -480,6 +493,7 @@ func (b *failingBulkDescribingProvider) BulkDescribe(_ context.Context, _ []prov
 }
 
 func TestRefreshDescriptions_FallsBackWhenBulkDescribeFails(t *testing.T) {
+	t.Parallel()
 	prov := &failingBulkDescribingProvider{
 		describingProvider: describingProvider{stubProvider: stubProvider{name: "apt", available: true}},
 	}
@@ -507,6 +521,7 @@ func TestRefreshDescriptions_FallsBackWhenBulkDescribeFails(t *testing.T) {
 }
 
 func TestRefreshDescriptions_EmptyConfig(t *testing.T) {
+	t.Parallel()
 	prov := &describingProvider{stubProvider: stubProvider{name: "brew", available: true}}
 	a, _ := newImportApp(t, prov)
 	// No config file at all — should return nil without panic.

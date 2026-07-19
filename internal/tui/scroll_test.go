@@ -7,6 +7,7 @@ import (
 )
 
 func TestScrollDotsPeekBy(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.scrollDotsPeekBy(1) // nil peek: no-op, no panic
 
@@ -22,6 +23,7 @@ func TestScrollDotsPeekBy(t *testing.T) {
 }
 
 func TestScrollSetupBy(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.setupStep = 1
 	m.setupProviders = []app.SetupProviderOption{{}, {}, {}}
@@ -52,6 +54,7 @@ func TestScrollSetupBy(t *testing.T) {
 }
 
 func TestScrollSettingsBy(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.editingPriority = true
 	m.priorityDraft = []string{"brew", "node", "python"}
@@ -80,6 +83,7 @@ func TestScrollSettingsBy(t *testing.T) {
 }
 
 func TestScrollGroupsBy(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.hostEditMode = 1
 	m.hostGroupPicker = []string{"work", "home", "lab"}

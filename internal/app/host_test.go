@@ -33,6 +33,7 @@ func TestCurrentMachineGroupNameUsesOmniHostname(t *testing.T) {
 }
 
 func TestEnsureHostCreatesSpecialGroupAndHostEntry(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
 	if err := a.EnsureHost("testhost.example"); err != nil {
@@ -53,6 +54,7 @@ func TestEnsureHostCreatesSpecialGroupAndHostEntry(t *testing.T) {
 }
 
 func TestEnsureHostRejectsReusableGroupNameCollision(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Groups: []*config.GroupConfig{{Name: "laptop"}},
@@ -149,6 +151,7 @@ func TestHostSummariesReturnSortedDisplayFields(t *testing.T) {
 }
 
 func TestPrioritizedHostSummariesMoveActiveHostFirst(t *testing.T) {
+	t.Parallel()
 	info := &app.HostInfo{
 		Active: "work",
 		Hosts: map[string]config.HostAssignment{
@@ -178,6 +181,7 @@ func TestPrioritizedHostSummariesMoveActiveHostFirst(t *testing.T) {
 }
 
 func TestSetupCopyHostNamesUsesPrioritizedHosts(t *testing.T) {
+	t.Parallel()
 	info := &app.HostInfo{
 		Active: "work",
 		Hosts: map[string]config.HostAssignment{
@@ -198,6 +202,7 @@ func TestSetupCopyHostNamesUsesPrioritizedHosts(t *testing.T) {
 }
 
 func TestSetupHostAlreadyConfiguredRequiresActiveExistingHost(t *testing.T) {
+	t.Parallel()
 	info := &app.HostInfo{
 		Active: "work",
 		Hosts: map[string]config.HostAssignment{
@@ -221,6 +226,7 @@ func TestSetupHostAlreadyConfiguredRequiresActiveExistingHost(t *testing.T) {
 }
 
 func TestHostNamesForGroupReturnsSortedHosts(t *testing.T) {
+	t.Parallel()
 	info := &app.HostInfo{
 		Hosts: map[string]config.HostAssignment{
 			"zeta":  {Groups: []string{"work", "base"}},
@@ -237,6 +243,7 @@ func TestHostNamesForGroupReturnsSortedHosts(t *testing.T) {
 }
 
 func TestHasHostAssignmentsReportsConfiguredHosts(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{}); err != nil {
 		t.Fatalf("config.Save empty: %v", err)
@@ -265,6 +272,7 @@ func TestHasHostAssignmentsReportsConfiguredHosts(t *testing.T) {
 }
 
 func TestGroupContentCountsReturnsCountsAndErrors(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew"), logicalTool("fd", "brew")),
@@ -298,6 +306,7 @@ func TestGroupContentCountsReturnsCountsAndErrors(t *testing.T) {
 }
 
 func TestHostStateWrappersPropagateConfigLoadErrors(t *testing.T) {
+	t.Parallel()
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
 	if err := os.WriteFile(cfgPath, []byte("{"), 0o600); err != nil {
 		t.Fatalf("write invalid config: %v", err)
@@ -316,6 +325,7 @@ func TestHostStateWrappersPropagateConfigLoadErrors(t *testing.T) {
 }
 
 func TestSetHostGroupsPersistsReusableGroups(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := a.CreateGroup("work"); err != nil {
 		t.Fatalf("CreateGroup(work): %v", err)
@@ -341,6 +351,7 @@ func TestSetHostGroupsPersistsReusableGroups(t *testing.T) {
 }
 
 func TestSetHostGroupsWithCreatedCreatesSelectedDraftGroups(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
 	if err := a.SetHostGroupsWithCreated("testhost", []string{"work"}, []string{"unused", "work"}); err != nil {
@@ -434,6 +445,7 @@ func TestHostGroupMutationsWithStateReturnUpdatedState(t *testing.T) {
 }
 
 func TestSetHostGroupsRejectsHostGroupAssignment(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	if err := a.EnsureHost("testhost"); err != nil {
 		t.Fatalf("EnsureHost: %v", err)
@@ -493,6 +505,7 @@ func TestActiveHostInfoAlwaysIncludesProtectedHostGroup(t *testing.T) {
 }
 
 func TestRenameHostMovesSpecialHostGroup(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalToolPackage("fd", "brew", "fd-find")),
@@ -567,6 +580,7 @@ func TestRenameHostMovesSpecialHostGroup(t *testing.T) {
 }
 
 func TestCopyHostConfigCopiesHostScopedSettingsAndOverrides(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	tools := logicalToolSpecs(
 		logicalFixtureTool{Name: "fd", Provider: "brew", Package: "fd-find", Options: map[string]string{"scope": "source"}},
@@ -674,6 +688,7 @@ func TestCopyHostConfigCopiesHostScopedSettingsAndOverrides(t *testing.T) {
 }
 
 func TestRemoveHostDeletesSpecialHostGroup(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("fd", "brew"), logicalTool("ripgrep", "brew")),
@@ -809,6 +824,7 @@ func TestRequireActiveHost(t *testing.T) {
 }
 
 func TestSetGlobalToolIgnore(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools:  logicalToolSpecs(logicalTool("node", "brew"), logicalTool("ripgrep", "brew")),
@@ -840,6 +856,7 @@ func TestSetGlobalToolIgnore(t *testing.T) {
 }
 
 func TestSetGlobalToolIgnore_AllowsDiscoveredSuppressionWithoutLogicalTool(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools:  logicalToolSpecs(logicalTool("ripgrep", "brew")),
@@ -883,6 +900,7 @@ func containsToolMembershipForTest(tools []config.ToolEntry, name string) bool {
 }
 
 func TestHostGroupsAllGroupsUsesContext(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	if _, err := a.HostGroups(context.Background(), "missing"); err == nil {
 		t.Fatal("HostGroups should reject missing host")

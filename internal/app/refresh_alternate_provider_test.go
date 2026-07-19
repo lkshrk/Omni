@@ -10,6 +10,7 @@ import (
 )
 
 func TestRefreshInstalled_DetectsAlternateConfiguredProvider(t *testing.T) {
+	t.Parallel()
 	brew := &bulkCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		bulk:         map[string]string{},
@@ -72,6 +73,7 @@ func TestRefreshInstalled_DetectsAlternateConfiguredProvider(t *testing.T) {
 }
 
 func TestRefreshInstalled_StaleCachedOwnerFallsThroughToAlternateProvider(t *testing.T) {
+	t.Parallel()
 	brew := &bulkCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		bulk:         map[string]string{},
@@ -126,6 +128,7 @@ func TestRefreshInstalled_StaleCachedOwnerFallsThroughToAlternateProvider(t *tes
 }
 
 func TestRefreshProviderInstalled_DetectsAlternateConfiguredProvider(t *testing.T) {
+	t.Parallel()
 	brew := &bulkCheckingStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		bulk:         map[string]string{},

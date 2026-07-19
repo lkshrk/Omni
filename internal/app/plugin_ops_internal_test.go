@@ -16,6 +16,7 @@ func resolvePluginNames(cfg *config.RootConfig, group string) []string {
 }
 
 func TestResolvePlugins_UngroupedPlugin_AppearsOnAllHosts(t *testing.T) {
+	t.Parallel()
 	cfg := &config.RootConfig{
 		Agents: config.AgentsConfig{Plugins: []config.Plugin{{Name: "global", Marketplace: "m"}}},
 	}
@@ -28,6 +29,7 @@ func TestResolvePlugins_UngroupedPlugin_AppearsOnAllHosts(t *testing.T) {
 }
 
 func TestResolvePlugins_GroupedPlugin_OnlyOnMatchingGroup(t *testing.T) {
+	t.Parallel()
 	cfg := &config.RootConfig{
 		Agents: config.AgentsConfig{Plugins: []config.Plugin{{Name: "work-only", Marketplace: "m"}}},
 		Groups: []*config.GroupConfig{{Name: "work", Plugins: []string{"work-only"}}},
@@ -41,6 +43,7 @@ func TestResolvePlugins_GroupedPlugin_OnlyOnMatchingGroup(t *testing.T) {
 }
 
 func TestResolvePlugins_HostAssignedGroup_Included(t *testing.T) {
+	t.Parallel()
 	cfg := &config.RootConfig{
 		Agents: config.AgentsConfig{Plugins: []config.Plugin{{Name: "superpowers", Marketplace: "m"}}},
 		Groups: []*config.GroupConfig{{Name: "ai-plugins", Plugins: []string{"superpowers"}}},

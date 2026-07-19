@@ -15,6 +15,7 @@ import (
 )
 
 func TestSaveToolFallbackFromGitHub_ResolvesReleaseAssetFromGitHubAPI(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	expectedAsset := currentPlatformGitHubCLIAsset(t)
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -93,6 +94,7 @@ func TestSaveToolFallbackFromGitHub_ResolvesReleaseAssetFromGitHubAPI(t *testing
 }
 
 func TestSaveToolFallbackFromGitHub_UsesConfiguredGitWhenRepoOmitted(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	currentPlatformGitHubCLIAsset(t)
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -140,6 +142,7 @@ func TestSaveToolFallbackFromGitHub_UsesConfiguredGitWhenRepoOmitted(t *testing.
 }
 
 func TestSaveToolFallbackFromGitHub_SavesUnsupportedWhenReleaseHasNoCurrentPlatformAsset(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if req.URL.Path != "/repos/cli/cli/releases/latest" {
@@ -205,6 +208,7 @@ func TestSaveToolFallbackFromGitHub_SavesUnsupportedWhenReleaseHasNoCurrentPlatf
 }
 
 func TestSaveToolFallbackFromGitHub_RejectsReleaseWithoutPublishedAtAndPreservesConfig(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	expectedAsset := currentPlatformGitHubCLIAsset(t)
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -281,6 +285,7 @@ func TestSaveToolFallbackFromGitHub_RejectsReleaseWithoutPublishedAtAndPreserves
 }
 
 func TestSaveToolFallbackFromGitHub_PreservesConfigWhenGitHubLookupFails(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if req.URL.Path != "/repos/cli/cli/releases/latest" {
@@ -385,6 +390,7 @@ func githubNotFoundClient() *http.Client {
 }
 
 func TestGitHubFallbackLiveAPI_ResolvesLatestRelease(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("live GitHub API test is skipped in short mode")
 	}

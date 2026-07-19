@@ -3,6 +3,7 @@ package tui
 import "testing"
 
 func TestCursorMove(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		cur   int
@@ -35,6 +36,7 @@ func TestCursorMove(t *testing.T) {
 }
 
 func TestClampIndex(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		cur   int

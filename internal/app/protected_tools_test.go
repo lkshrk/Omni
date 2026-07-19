@@ -8,6 +8,7 @@ import (
 )
 
 func TestValidateToolDeleteRejectsProviderAndManagerNames(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t,
 		&stubProvider{name: "brew", available: true},
 		&stubProvider{name: "apt", available: true},

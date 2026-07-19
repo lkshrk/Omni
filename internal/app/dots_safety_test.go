@@ -12,6 +12,7 @@ import (
 )
 
 func TestDotsLocalTargetRemovalsUseBackupGuards(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		file      string
 		forbidden []string

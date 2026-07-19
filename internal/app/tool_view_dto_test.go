@@ -10,6 +10,7 @@ import (
 )
 
 func TestToolViewRoundTripLossless(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC().Truncate(time.Second)
 	failedAt := now.Add(-time.Hour)
 	blockedUntil := now.Add(time.Hour)
@@ -49,6 +50,7 @@ func TestToolViewRoundTripLossless(t *testing.T) {
 }
 
 func TestToolViewFromCacheNilSafe(t *testing.T) {
+	t.Parallel()
 	if toolViewFromCache(nil) != nil {
 		t.Fatal("toolViewFromCache(nil) should be nil")
 	}
@@ -61,6 +63,7 @@ func TestToolViewFromCacheNilSafe(t *testing.T) {
 }
 
 func TestToolViewEmptyNullableIsAbsent(t *testing.T) {
+	t.Parallel()
 	v := toolViewFromCache(&database.ToolCache{Name: "x"})
 	if v.Version != "" || v.Description != "" {
 		t.Fatal("absent nullable columns should flatten to empty string")
