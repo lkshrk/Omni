@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/lkshrk/omni/internal/agent"
 	"github.com/lkshrk/omni/internal/config"
 	"github.com/lkshrk/omni/internal/provider"
 )
@@ -339,7 +340,7 @@ func (a *App) RestoreSkills(ctx context.Context, opts RestoreSkillsOptions) (Res
 		if err != nil {
 			res = failRestoredSkillVerification(res, err)
 		} else {
-			res = verifyRestoredSkillTargets(pkgs, lock, listed, res)
+			res = verifyRestoredSkillTargets(a.agentRegistry(), pkgs, lock, listed, res)
 		}
 	}
 	after, err := lockHashes(home)
@@ -513,11 +514,9 @@ func listGlobalSkills(ctx context.Context, runner string, exec func(context.Cont
 	return parseSkillsCLIList(stdout)
 }
 
-func skillAgentDisplay(id string) string {
-	for _, agent := range supportedAgents {
-		if agent.ID == id {
-			return agent.Display
-		}
+func skillAgentDisplay(registry *agent.Registry, id string) string {
+	if target, ok := registry.ByID(id); ok {
+		return target.Display
 	}
 	return id
 }
@@ -526,7 +525,7 @@ func skillAgentDisplay(id string) string {
 // when the upstream filesystem-backed list cannot see any current lockfile
 // skill or its per-agent links. Lockfiles may retain removed package skills,
 // so names absent from the authoritative list are ignored when siblings exist.
-func verifyRestoredSkillTargets(pkgs []resolvedPackage, lock *config.SkillLockFile, entries []skillsCLIListEntry, res RestoreSkillsResult) RestoreSkillsResult {
+func verifyRestoredSkillTargets(registry *agent.Registry, pkgs []resolvedPackage, lock *config.SkillLockFile, entries []skillsCLIListEntry, res RestoreSkillsResult) RestoreSkillsResult {
 	listed := make(map[string]map[string]bool, len(entries))
 	for _, entry := range entries {
 		if entry.Scope != "global" {
@@ -567,7 +566,7 @@ func verifyRestoredSkillTargets(pkgs []resolvedPackage, lock *config.SkillLockFi
 			}
 			listedAny = true
 			for _, agentID := range effectiveSkillAgents(nil, pkg.SkillPackage) {
-				if !agents[skillAgentDisplay(agentID)] {
+				if !agents[skillAgentDisplay(registry, agentID)] {
 					missing = append(missing, name+" → "+agentID)
 				}
 			}
@@ -613,13 +612,13 @@ func skillPackageRemoveArgs(skillNames, agents []string) []string {
 
 // agentsWithPackageSkills returns sorted agent IDs where any of the package's
 // lockfile skill names are present in that agent's skills dirs.
-func agentsWithPackageSkills(home string, lock *config.SkillLockFile, source string) []string {
+func (a *App) agentsWithPackageSkills(home string, lock *config.SkillLockFile, source string) []string {
 	names := packageSkills(lock, source)
 	if len(names) == 0 {
 		return nil
 	}
 	var agents []string
-	for _, ag := range InstalledAgents(home) {
+	for _, ag := range a.installedAgents(home) {
 		if agentHasAnySkill(home, ag, names) {
 			agents = append(agents, ag.ID)
 		}

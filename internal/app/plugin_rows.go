@@ -70,16 +70,10 @@ func pluginManifestEntry(manifestPath, name string) marketplaceManifestEntry {
 	return marketplaceManifestEntry{}
 }
 
-// claudeMarketplaceRepoRoot builds the on-disk clone root for one of claude's
-// marketplaces given its name.
-func claudeMarketplaceRepoRoot(home, marketplace string) string {
-	return filepath.Join(home, ".claude", "plugins", "marketplaces", marketplace)
-}
-
 // pluginMarketplaceManifestPath builds the on-disk path to a marketplace's
 // manifest.json given the marketplace name.
 func pluginMarketplaceManifestPath(home, marketplace string) string {
-	return filepath.Join(claudeMarketplaceRepoRoot(home, marketplace), ".claude-plugin", "marketplace.json")
+	return filepath.Join(home, ".claude", "plugins", "marketplaces", marketplace, ".claude-plugin", "marketplace.json")
 }
 
 // looksLikeGitSha reports whether s is plausibly a git commit sha rather than

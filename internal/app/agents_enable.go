@@ -114,7 +114,7 @@ func (a *App) AgentPickerRows() ([]AgentPickerRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	installed := InstalledAgents(home)
+	installed := a.installedAgents(home)
 	use := a.effectiveSettings(cfg).AgentsUse
 	enabled := make(map[string]bool)
 	if use == nil {
@@ -146,7 +146,7 @@ func (a *App) EnabledAgentIDs(cfg *config.RootConfig) []string {
 	if err != nil {
 		return []string{}
 	}
-	installed := InstalledAgents(home)
+	installed := a.installedAgents(home)
 	use := a.effectiveSettings(cfg).AgentsUse
 	var ids []string
 	if use == nil {

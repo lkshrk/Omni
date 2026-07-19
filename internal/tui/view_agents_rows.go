@@ -417,7 +417,7 @@ func agentsRowCells(m Model, p palette, cols colWidths, e agentsAllRow, selected
 			case e.status == agentsStatusIgnored:
 				ver = emphasis(p.styleIgnored).Render(fitCellText(pl.Version, cols.ver))
 			default:
-				ver = renderPluginUpdateCell(p, emphasis, pl.Update(), pl.Version, cols.ver)
+				ver = renderPluginUpdateCell(p, emphasis, app.InstalledPluginUpdate(pl), pl.Version, cols.ver)
 			}
 		}
 		if e.mark == agentsMarkMissing && ver == "" {

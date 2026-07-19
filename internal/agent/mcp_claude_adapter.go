@@ -1,4 +1,4 @@
-package app
+package agent
 
 import (
 	"context"
@@ -140,7 +140,7 @@ func parseClaudeConfigMcpServers(data []byte) ([]InstalledMcpServer, error) {
 		} else {
 			s.Transport = "stdio"
 			s.Command = strings.TrimSpace(strings.Join(append([]string{entry.Command}, entry.Args...), " "))
-			s.Version = extractMcpPinnedVersion(s.Command)
+			s.Version = ExtractMcpPinnedVersion(s.Command)
 		}
 		servers = append(servers, s)
 	}
@@ -154,11 +154,11 @@ func parseClaudeConfigMcpServers(data []byte) ([]InstalledMcpServer, error) {
 // leading "\d+\.\d+\.\d+" so tags like "@latest"/"@next" never match.
 var mcpPinnedVersionRe = regexp.MustCompile(`(?:npx|bunx)\s+(?:-\S+\s+)*(?:@[^\s@]+/)?[^\s@]+@(\d+\.\d+\.\d+[^\s]*)`)
 
-// extractMcpPinnedVersion statically parses a pinned semver-ish version out
+// ExtractMcpPinnedVersion statically parses a pinned semver-ish version out
 // of an npx/bunx invocation in command, or "" if none is present (bare
 // paths, http/sse transports with no command, or untagged/@latest/@next
 // packages). No exec, no network — regex parsing only.
-func extractMcpPinnedVersion(command string) string {
+func ExtractMcpPinnedVersion(command string) string {
 	m := mcpPinnedVersionRe.FindStringSubmatch(command)
 	if m == nil {
 		return ""

@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+
+	"github.com/lkshrk/omni/internal/agent"
 )
 
 // McpStatus is the per-adapter install state of a manifest server.
@@ -74,7 +76,7 @@ func (a *App) McpServerRows(ctx context.Context) (managed []McpServerRow, unmana
 			Transport:      s.Transport,
 			Command:        s.Command,
 			URL:            s.URL,
-			Version:        extractMcpPinnedVersion(s.Command),
+			Version:        agent.ExtractMcpPinnedVersion(s.Command),
 			Groups:         mcpGroupsForName(cfg, s.Name),
 			Agents:         append([]string(nil), s.Agents...),
 			PerAgentStatus: make(map[string]McpStatus),

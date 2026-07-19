@@ -109,6 +109,13 @@ func TestDotsStatusShallowPreservesReincludedChildUnderIgnoredDirectory(t *testi
 	if err != nil {
 		t.Fatalf("shallow discover: %v", err)
 	}
+	children, err := a.DotsChildChildren(context.Background(), "claude", "data", false)
+	if err != nil {
+		t.Fatalf("load promoted ignored directory: %v", err)
+	}
+	if !childTreeContains(children, "data/keep.json", false) || !childTreeContains(children, "data/drop.json", true) {
+		t.Fatalf("loaded data children lost ignore ancestry: %#v", children)
+	}
 	for _, status := range result.Entries {
 		if status.Name != "claude" || status.State != dots.StateIgnored {
 			continue
@@ -141,6 +148,13 @@ func TestDotsStatusShallowPreservesIgnoredAncestorThroughReincludedDirectory(t *
 	result, err := a.DiscoverDotsStatus(app.WithShallowDotsChildren(context.Background()))
 	if err != nil {
 		t.Fatalf("shallow discover: %v", err)
+	}
+	children, err := a.DotsChildChildren(context.Background(), "claude", filepath.Join("data", "nested"), false)
+	if err != nil {
+		t.Fatalf("load promoted nested directory: %v", err)
+	}
+	if !childTreeContains(children, "data/nested/keep.json", false) || !childTreeContains(children, "data/nested/drop.json", true) {
+		t.Fatalf("loaded nested children lost ignore ancestry: %#v", children)
 	}
 	for _, status := range result.Entries {
 		if status.Name != "claude" || status.State != dots.StateIgnored {

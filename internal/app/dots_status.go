@@ -127,7 +127,7 @@ func (a *App) DiscoverDotsStatus(ctx context.Context) (*DotsStatusResult, error)
 	if err := a.requireSafeTestDotsMutation(repoPath, nil); err != nil {
 		return result, err
 	}
-	allCandidates, discoverErr := discoverDotsEntriesIncludingIgnored(repoPath)
+	allCandidates, discoverErr := a.discoverDotsEntriesIncludingIgnored(repoPath)
 	if discoverErr != nil {
 		return result, discoverErr
 	}
@@ -242,6 +242,8 @@ func collectIgnoredFromChildren(children, ignoredChildren []DotChild) []DotChild
 			switch {
 			case child.Ignored:
 				add(child)
+				walk(child.Children, true)
+			case child.matchedIgnored:
 				walk(child.Children, true)
 			case underIgnored && len(child.Children) == 0:
 				add(child)
@@ -436,6 +438,16 @@ func (a *App) DotsChildChildren(ctx context.Context, name, relPath string, ances
 		contentRoot := dotStatusContentRoot(entry)
 		ignoreRoot := dotIgnoreRoot(entry.SourcePath, entry.TargetPath, contentRoot)
 		im := compileDotIgnores(entry.Ignore)
+		inheritedIM := compileInheritedDotIgnores(im)
+		var prefix string
+		for _, part := range strings.Split(filepath.ToSlash(rel), "/") {
+			prefix = filepath.Join(prefix, part)
+			matcher := im
+			if ancestorIgnored {
+				matcher = inheritedIM
+			}
+			ancestorIgnored = ancestorIgnored || matcher.IgnoredDotPath(ignoreRoot, prefix, part)
+		}
 		roots := dotChildRoots(entry.SourcePath, entry.TargetPath, contentRoot)
 		for _, root := range roots {
 			dir := filepath.Join(root, rel)
@@ -452,7 +464,7 @@ func (a *App) DotsChildChildren(ctx context.Context, name, relPath string, ances
 			}
 		}
 		depth := strings.Count(filepath.ToSlash(rel), "/") + 2
-		children := directDotChildrenAt(entry.SourcePath, entry.TargetPath, roots, ignoreRoot, rel, im, compileInheritedDotIgnores(im), ancestorIgnored, state, depth, depth, nil)
+		children := directDotChildrenAt(entry.SourcePath, entry.TargetPath, roots, ignoreRoot, rel, im, inheritedIM, ancestorIgnored, state, depth, depth, nil)
 		if children == nil {
 			children = []DotChild{}
 		}
@@ -868,23 +880,26 @@ func directDotChildrenAt(entrySourceRoot, targetRoot string, roots []string, ign
 	})
 	children := make([]DotChild, 0, len(ordered))
 	for _, candidate := range ordered {
-		ignored := im.IgnoredDotPath(ignoreRoot, candidate.rel, candidate.name)
+		matcher := im
 		if ancestorIgnored {
-			ignored = inheritedIM.IgnoredDotPath(ignoreRoot, candidate.rel, candidate.name)
+			matcher = inheritedIM
 		}
+		matchedIgnored := matcher.IgnoredDotPath(ignoreRoot, candidate.rel, candidate.name)
+		ignored := matchedIgnored && !(candidate.isDir && matcher.DotDirHasIncludedDescendant(ignoreRoot, candidate.rel))
 		state := dotChildState(entrySourceRoot, targetRoot, candidate.rel, ignored, im.Raw(), parentState)
 		child := DotChild{
-			Name:    candidate.name,
-			RelPath: candidate.rel,
-			Path:    filepath.Join(targetRoot, candidate.rel),
-			State:   state,
-			IsDir:   candidate.isDir,
-			Depth:   depth,
-			Ignored: ignored,
+			Name:           candidate.name,
+			RelPath:        candidate.rel,
+			Path:           filepath.Join(targetRoot, candidate.rel),
+			State:          state,
+			IsDir:          candidate.isDir,
+			Depth:          depth,
+			Ignored:        ignored,
+			matchedIgnored: matchedIgnored,
 		}
 		if candidate.isDir {
 			if maxDepth == 0 || depth < maxDepth || expanded[filepath.ToSlash(candidate.rel)] {
-				child.Children = directDotChildrenAt(entrySourceRoot, targetRoot, roots, ignoreRoot, candidate.rel, im, inheritedIM, ancestorIgnored || ignored, parentState, depth+1, maxDepth, expanded)
+				child.Children = directDotChildrenAt(entrySourceRoot, targetRoot, roots, ignoreRoot, candidate.rel, im, inheritedIM, ancestorIgnored || matchedIgnored, parentState, depth+1, maxDepth, expanded)
 				if child.Children == nil {
 					child.Children = []DotChild{}
 				}

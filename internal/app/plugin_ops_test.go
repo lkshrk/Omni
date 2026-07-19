@@ -34,6 +34,20 @@ type stubPluginAdapter struct {
 	updateMarketplacesCalls int
 }
 
+type recordingPluginExecutor struct {
+	names []string
+	args  [][]string
+}
+
+func (e *recordingPluginExecutor) Run(_ context.Context, name string, args ...string) (string, string, error) {
+	e.names = append(e.names, name)
+	e.args = append(e.args, append([]string(nil), args...))
+	if slices.Contains(args, "list") {
+		return "[]", "", nil
+	}
+	return "", "", nil
+}
+
 func (s *stubPluginAdapter) ID() string      { return s.id }
 func (s *stubPluginAdapter) Available() bool { return s.available }
 func (s *stubPluginAdapter) ListPlugins(_ context.Context) ([]app.InstalledPlugin, error) {
@@ -97,6 +111,74 @@ func loadPluginTestConfig(t *testing.T, a *app.App) *config.RootConfig {
 		t.Fatal(err)
 	}
 	return cfg
+}
+
+func TestProductionPluginAdaptersUseFallbackExecutorSetAfterNew(t *testing.T) {
+	binDir := t.TempDir()
+	writeTestExecutable(t, binDir, "claude")
+	t.Setenv("PATH", binDir)
+
+	ignored := &stubPluginAdapter{id: "claude-code", available: true}
+	a := newPluginTestApp(t, config.AgentsConfig{},
+		app.WithPluginAdapters([]app.PluginAdapter{ignored}),
+		app.WithPluginAdapters(nil),
+	)
+	exec := &recordingPluginExecutor{}
+	a.SetFallbackExecutor(exec)
+
+	marketplace := config.Marketplace{
+		Name:   "demo",
+		Source: "owner/repo",
+		Agents: []string{"claude-code"},
+	}
+	res, err := a.AddMarketplace(context.Background(), marketplace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Errors) != 0 {
+		t.Fatalf("AddMarketplace errors = %v", res.Errors)
+	}
+	if len(exec.names) != 3 || exec.names[0] != "claude" || exec.names[1] != "claude" || exec.names[2] != "claude" {
+		t.Fatalf("fallback executor calls = %v %v, want three claude calls", exec.names, exec.args)
+	}
+	wantAdd := []string{"plugins", "marketplace", "add", "owner/repo"}
+	if !slices.Equal(exec.args[2], wantAdd) {
+		t.Fatalf("fallback executor add args = %v, want %v", exec.args[2], wantAdd)
+	}
+	if len(ignored.addedMarkets) != 0 {
+		t.Fatalf("superseded adapter calls = %v, want none", ignored.addedMarkets)
+	}
+}
+
+func TestWithPluginAdaptersNonNilEmptyDisablesProduction(t *testing.T) {
+	binDir := t.TempDir()
+	writeTestExecutable(t, binDir, "claude")
+	t.Setenv("PATH", binDir)
+
+	a := newPluginTestApp(t, config.AgentsConfig{}, app.WithPluginAdapters([]app.PluginAdapter{}))
+	exec := &recordingPluginExecutor{}
+	a.SetFallbackExecutor(exec)
+	if _, err := a.AddMarketplace(context.Background(), config.Marketplace{Name: "demo", Source: "owner/repo"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(exec.names) != 0 {
+		t.Fatalf("fallback executor calls = %v %v, want none", exec.names, exec.args)
+	}
+}
+
+func TestWithPluginAdaptersLastNonNilOptionWins(t *testing.T) {
+	first := &stubPluginAdapter{id: "claude-code", available: true}
+	last := &stubPluginAdapter{id: "claude-code", available: true}
+	a := newPluginTestApp(t, config.AgentsConfig{},
+		app.WithPluginAdapters([]app.PluginAdapter{first}),
+		app.WithPluginAdapters([]app.PluginAdapter{last}),
+	)
+	if _, err := a.AddMarketplace(context.Background(), config.Marketplace{Name: "demo", Source: "owner/repo"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(first.addedMarkets) != 0 || len(last.addedMarkets) != 1 {
+		t.Fatalf("marketplace adds: first=%v last=%v, want only last", first.addedMarkets, last.addedMarkets)
+	}
 }
 
 func TestRestorePlugins_AddsMarketplaceBeforePlugin(t *testing.T) {

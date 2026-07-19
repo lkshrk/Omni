@@ -1,4 +1,4 @@
-package app
+package agent
 
 import (
 	"context"
@@ -268,6 +268,10 @@ func (a *claudeCodePluginAdapter) pathOutdated(ctx context.Context, home, market
 	}
 	outdated := latest != asOfInstall
 	return &outdated
+}
+
+func claudeMarketplaceRepoRoot(home, marketplace string) string {
+	return filepath.Join(home, ".claude", "plugins", "marketplaces", marketplace)
 }
 
 // gitPluginPathCommit returns the sha of the most recent commit reachable

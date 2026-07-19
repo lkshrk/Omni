@@ -84,7 +84,7 @@ func (a *App) UninstallSkillPackage(ctx context.Context, source string) error {
 	if len(names) == 0 {
 		return fmt.Errorf("skill package %q has no lockfile entries to uninstall", source)
 	}
-	agents := agentsWithPackageSkills(home, lock, source)
+	agents := a.agentsWithPackageSkills(home, lock, source)
 	if len(agents) == 0 {
 		return fmt.Errorf("skill package %q is not installed on any detected agent", source)
 	}
