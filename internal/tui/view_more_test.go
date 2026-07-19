@@ -8893,7 +8893,7 @@ func TestRenderDotsLastError_CollapsesWhitespace(t *testing.T) {
 	m := baseModel(nil)
 	e := app.DotStatus{LastError: "stow: error\n  something   failed\n"}
 
-	out := stripANSIEscapeSequences(renderDotsLastError(m.palette, e, m.width))
+	out := stripANSIEscapeSequences(renderDotsLastError(m, e, m.width))
 	if !strings.Contains(out, "✗ stow: error something failed") {
 		t.Fatalf("multi-line error should collapse to single-spaced text, got: %q", out)
 	}
@@ -8903,19 +8903,29 @@ func TestRenderDotsLastError_TruncatesLongText(t *testing.T) {
 	m := baseModel(nil)
 	e := app.DotStatus{LastError: strings.Repeat("a", 450)}
 
-	out := stripANSIEscapeSequences(renderDotsLastError(m.palette, e, m.width))
-	flat := strings.NewReplacer("\n", "", " ", "").Replace(out)
+	out := stripANSIEscapeSequences(renderDotsLastError(m, e, m.width))
+	lines := strings.Split(out, "\n")
+	hintLine := lines[len(lines)-1]
+	textPart := strings.Join(lines[:len(lines)-1], "\n")
+	flat := strings.NewReplacer("\n", "", " ", "").Replace(textPart)
 	if !strings.HasSuffix(flat, "…") {
-		t.Fatalf("long error should end with ellipsis, got tail: %q", flat[len(flat)-8:])
+		tail := flat
+		if len(tail) > 8 {
+			tail = tail[len(tail)-8:]
+		}
+		t.Fatalf("long error should end with ellipsis, got tail: %q", tail)
 	}
 	if got, want := strings.Count(flat, "a"), 399; got != want {
 		t.Fatalf("truncated error rune count = %d, want %d", got, want)
+	}
+	if !strings.Contains(hintLine, "error log") {
+		t.Fatalf("rendered error should include the error-log hint, got: %q", hintLine)
 	}
 }
 
 func TestRenderDotsLastError_EmptyReturnsNothing(t *testing.T) {
 	m := baseModel(nil)
-	if out := renderDotsLastError(m.palette, app.DotStatus{}, m.width); out != "" {
+	if out := renderDotsLastError(m, app.DotStatus{}, m.width); out != "" {
 		t.Fatalf("empty LastError should render nothing, got: %q", out)
 	}
 }

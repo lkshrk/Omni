@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/lkshrk/omni/internal/app"
+	"github.com/lkshrk/omni/internal/dots"
 	"github.com/lkshrk/omni/internal/executor"
 )
 
@@ -208,6 +209,162 @@ func TestTraceLog_EFromBlurredSearchResultOpensPopup(t *testing.T) {
 	got := drive(m, pressRune('e'))
 	if !got.traceLogLoading {
 		t.Fatal("e on a failed blurred search result should open the command log")
+	}
+}
+
+func TestTraceLog_EFromDotsEntryWithLastErrorOpensPopup(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.dotsLoaded = true
+	setDotsRepoForTest(&m, "/repo/dotfiles")
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		State:      dots.StateModified,
+		LastError:  "stow: error: existing target is not a symlink",
+	}}
+	m.dotsCursor = 0
+
+	got := drive(m, pressRune('e'))
+	if !got.traceLogLoading {
+		t.Fatal("e on a dots entry with a last error should open the command log")
+	}
+}
+
+func TestTraceLog_EFromDotsEntryWithoutLastErrorIsNoOp(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.dotsLoaded = true
+	setDotsRepoForTest(&m, "/repo/dotfiles")
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		State:      dots.StateModified,
+	}}
+	m.dotsCursor = 0
+
+	got := drive(m, pressRune('e'))
+	if got.traceLogLoading {
+		t.Fatal("e on a dots entry without a last error should not open the command log")
+	}
+}
+
+func TestTraceLog_EFromAgentsTabOpensPopup(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewSkills
+	m.agentsEnabled = true
+	m.skillTypeIdx = agentsChipAll
+
+	got := drive(m, pressRune('e'))
+	if !got.traceLogLoading {
+		t.Fatal("e on the agents tab should open the command log")
+	}
+}
+
+func TestTraceLog_EFromDotsEntryRendersPopup(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.dotsLoaded = true
+	setDotsRepoForTest(&m, "/repo/dotfiles")
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		State:      dots.StateModified,
+		LastError:  "stow: error: existing target is not a symlink",
+	}}
+	m.dotsCursor = 0
+
+	gen := m.traceLogGen + 1
+	m = drive(m, pressRune('e'))
+	m = drive(m, traceLogLoadedMsg{gen: gen, traces: fixtureTraces()})
+
+	view := m.View().Content
+	if !strings.Contains(view, "Command Log") || !strings.Contains(view, "brew install ripgrep") {
+		t.Fatalf("e on a dots entry with a last error should render the command log popup:\n%s", view)
+	}
+}
+
+func TestTraceLog_EFromAgentsTabRendersPopup(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewSkills
+	m.agentsEnabled = true
+	m.skillTypeIdx = agentsChipAll
+
+	gen := m.traceLogGen + 1
+	m = drive(m, pressRune('e'))
+	m = drive(m, traceLogLoadedMsg{gen: gen, traces: fixtureTraces()})
+
+	view := m.View().Content
+	if !strings.Contains(view, "Command Log") || !strings.Contains(view, "brew install ripgrep") {
+		t.Fatalf("e on the agents tab should render the command log popup:\n%s", view)
+	}
+}
+
+func TestTraceLog_EFromDotsEntryIsRepeatNoOp(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.dotsLoaded = true
+	setDotsRepoForTest(&m, "/repo/dotfiles")
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		State:      dots.StateModified,
+		LastError:  "stow: error: existing target is not a symlink",
+	}}
+	m.dotsCursor = 0
+
+	got := drive(m, tea.KeyPressMsg{Code: 'e', Text: "e", IsRepeat: true})
+	if got.traceLogLoading {
+		t.Fatal("e IsRepeat on a dots entry with a last error should not open the command log")
+	}
+}
+
+func TestTraceLog_EFromDotsChildRowUsesParentLastError(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.dotsLoaded = true
+	setDotsRepoForTest(&m, "/repo/dotfiles")
+	parent := app.DotStatus{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		State:      dots.StateModified,
+		LastError:  "stow: error: existing target is not a symlink",
+		Children:   []app.DotChild{{RelPath: "init.lua"}},
+	}
+	m.dotsEntries = []app.DotStatus{parent}
+	m.dotsExpandedName = parent.Name
+	m.dotsExpandedState = app.DotStatusState(parent)
+	m.dotsCursor = 1 // the child row, not the parent
+
+	got := drive(m, pressRune('e'))
+	if !got.traceLogLoading {
+		t.Fatal("e on a child row should fall back to the parent entry's last error and open the command log")
+	}
+}
+
+func TestTraceLog_EFromAgentsTabBlockedDuringDeleteConfirm(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewSkills
+	m.agentsEnabled = true
+	m.skillTypeIdx = agentsChipAll
+	m.agentsDeleteConfirm = true
+
+	got := drive(m, pressRune('e'))
+	if got.traceLogLoading {
+		t.Fatal("e on the agents tab during a delete confirmation should not open the command log")
+	}
+}
+
+func TestTraceLog_EFromAgentsTabOpensDuringBulkOp(t *testing.T) {
+	m := baseModel(nil)
+	m.mode = viewSkills
+	m.agentsEnabled = true
+	m.skillTypeIdx = agentsChipAll
+	m.skillsRunning = true
+
+	got := drive(m, pressRune('e'))
+	if !got.traceLogLoading {
+		t.Fatal("e on the agents tab should open the command log even while a bulk op is running")
 	}
 }
 
@@ -501,11 +658,35 @@ func TestTraceLog_RenderGate_VisibleInList(t *testing.T) {
 func TestTraceLog_RenderGate_HiddenOutsideSupportedViews(t *testing.T) {
 	m := settingsTraceLogModel()
 	m = injectTraces(m, fixtureTraces())
-	m.mode = viewDots
+	m.mode = viewGroups
 
 	view := m.View().Content
 	if strings.Contains(view, "brew install ripgrep") || strings.Contains(view, "Command Log") {
-		t.Fatalf("command log should stay hidden outside settings/tools views:\n%s", view)
+		t.Fatalf("command log should stay hidden outside settings/tools/dots/agents views:\n%s", view)
+	}
+}
+
+func TestTraceLog_RenderGate_VisibleInDots(t *testing.T) {
+	m := settingsTraceLogModel()
+	m = injectTraces(m, fixtureTraces())
+	m.mode = viewDots
+
+	view := m.View().Content
+	if !strings.Contains(view, "brew install ripgrep") || !strings.Contains(view, "Command Log") {
+		t.Fatalf("command log should be visible over the dots view:\n%s", view)
+	}
+}
+
+func TestTraceLog_RenderGate_VisibleInAgents(t *testing.T) {
+	m := settingsTraceLogModel()
+	m = injectTraces(m, fixtureTraces())
+	m.mode = viewSkills
+	m.agentsEnabled = true
+	m.skillTypeIdx = agentsChipAll
+
+	view := m.View().Content
+	if !strings.Contains(view, "brew install ripgrep") || !strings.Contains(view, "Command Log") {
+		t.Fatalf("command log should be visible over the agents view:\n%s", view)
 	}
 }
 

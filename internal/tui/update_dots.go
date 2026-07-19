@@ -441,6 +441,14 @@ func (m *Model) handleDotsActionKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibl
 			break
 		}
 		cmds = append(cmds, m.handleDotsIgnoreActionKeyMsg(visible)...)
+	case key.Matches(msg, m.keys.ErrorLog):
+		if msg.IsRepeat || len(visible) == 0 || m.dotsCursor >= len(visible) {
+			break
+		}
+		if visible[m.dotsCursor].entry.LastError == "" {
+			break
+		}
+		cmds = append(cmds, m.openTraceLog())
 	}
 
 	return cmds
