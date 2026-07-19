@@ -64,7 +64,7 @@ func (a *App) RefreshDotsState(ctx context.Context) (*DotsState, error) {
 }
 
 func (a *App) DotsSyncContextWithState(ctx context.Context, opts dots.SyncOptions) (*DotsOperationStateResult, error) {
-	return a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
+	return a.dotsOperationStateAfter(ctx, func(ctx context.Context) ([]dots.Op, error) {
 		return a.DotsSyncContext(ctx, opts)
 	})
 }
@@ -96,7 +96,7 @@ func (a *App) DotsSyncContextWithStateProgress(ctx context.Context, opts dots.Sy
 }
 
 func (a *App) DotsSyncEntryWithState(ctx context.Context, name string, opts dots.SyncOptions) (*DotsOperationStateResult, error) {
-	return a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
+	return a.dotsOperationStateAfter(ctx, func(ctx context.Context) ([]dots.Op, error) {
 		return a.DotsSyncEntry(ctx, name, opts)
 	})
 }
@@ -126,7 +126,7 @@ func (a *App) SaveDotsRepoAndSync(ctx context.Context, repo string, opts dots.Sy
 
 func (a *App) DotsSyncDiscoveredWithState(ctx context.Context, nameOrPath, groupName string) (*DotsDiscoveredOperationStateResult, error) {
 	var added config.DotEntry
-	result, err := a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
+	result, err := a.dotsOperationStateAfter(ctx, func(ctx context.Context) ([]dots.Op, error) {
 		var addErr error
 		added, addErr = a.DotsAddDiscoveredEntryContext(ctx, nameOrPath, groupName)
 		if addErr != nil {
@@ -143,7 +143,7 @@ func (a *App) DotsSyncDiscoveredWithState(ctx context.Context, nameOrPath, group
 
 func (a *App) DotsAddDiscoveredHostVariantWithState(ctx context.Context, nameOrPath string, opts DotsAddVariantOptions) (*DotsVariantStateResult, error) {
 	var info DotVariantInfo
-	result, err := a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
+	result, err := a.dotsOperationStateAfter(ctx, func(ctx context.Context) ([]dots.Op, error) {
 		added, addErr := a.DotsAddDiscoveredEntryContext(ctx, nameOrPath, "")
 		if addErr != nil {
 			return nil, addErr
@@ -167,7 +167,7 @@ func (a *App) DotsAddDiscoveredHostVariantWithState(ctx context.Context, nameOrP
 
 func (a *App) DotsResolveDiscoveredWithState(ctx context.Context, nameOrPath, groupName string, strategy DotsResolveStrategy) (*DotsDiscoveredOperationStateResult, error) {
 	var added config.DotEntry
-	result, err := a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
+	result, err := a.dotsOperationStateAfter(ctx, func(ctx context.Context) ([]dots.Op, error) {
 		var addErr error
 		added, addErr = a.DotsAddDiscoveredEntryContext(ctx, nameOrPath, groupName)
 		if addErr != nil {
@@ -184,7 +184,7 @@ func (a *App) DotsResolveDiscoveredWithState(ctx context.Context, nameOrPath, gr
 
 func (a *App) DotsResolveDiscoveredPathWithState(ctx context.Context, nameOrPath, groupName, relPath string, strategy DotsResolveStrategy) (*DotsDiscoveredOperationStateResult, error) {
 	var added config.DotEntry
-	result, err := a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
+	result, err := a.dotsOperationStateAfter(ctx, func(ctx context.Context) ([]dots.Op, error) {
 		var addErr error
 		added, addErr = a.DotsAddDiscoveredEntryContext(ctx, nameOrPath, groupName)
 		if addErr != nil {
@@ -200,31 +200,31 @@ func (a *App) DotsResolveDiscoveredPathWithState(ctx context.Context, nameOrPath
 }
 
 func (a *App) DotsAddWithState(ctx context.Context, path string, opts DotsAddOptions) (*DotsOperationStateResult, error) {
-	return a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
+	return a.dotsOperationStateAfter(ctx, func(ctx context.Context) ([]dots.Op, error) {
 		return a.DotsAdd(ctx, path, opts)
 	})
 }
 
 func (a *App) DotsDeleteWithState(ctx context.Context, name string, opts DotsDeleteOptions) (*DotsOperationStateResult, error) {
-	return a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
+	return a.dotsOperationStateAfter(ctx, func(ctx context.Context) ([]dots.Op, error) {
 		return nil, a.DotsDeleteWithOptions(ctx, name, opts)
 	})
 }
 
 func (a *App) DotsDeleteLocalWithState(ctx context.Context, status DotStatus) (*DotsOperationStateResult, error) {
-	return a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
+	return a.dotsOperationStateAfter(ctx, func(ctx context.Context) ([]dots.Op, error) {
 		return nil, a.DotsDeleteLocal(ctx, status)
 	})
 }
 
 func (a *App) DotsResolveConflictWithState(ctx context.Context, name string, strategy DotsResolveStrategy) (*DotsOperationStateResult, error) {
-	return a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
+	return a.dotsOperationStateAfter(ctx, func(ctx context.Context) ([]dots.Op, error) {
 		return a.DotsResolveConflict(ctx, name, strategy)
 	})
 }
 
 func (a *App) DotsResolveConflictPathWithState(ctx context.Context, name, relPath string, strategy DotsResolveStrategy) (*DotsOperationStateResult, error) {
-	return a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
+	return a.dotsOperationStateAfter(ctx, func(ctx context.Context) ([]dots.Op, error) {
 		return a.DotsResolveConflictPath(ctx, name, relPath, strategy)
 	})
 }
@@ -240,19 +240,19 @@ func (a *App) DotsForceResolveAllWithState(ctx context.Context, strategy DotsRes
 	case DotResolveUseLocal:
 		conflictStrategy = "use_local"
 	}
-	return a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
-		return a.DotsSync(dots.SyncOptions{ConflictStrategy: conflictStrategy})
+	return a.dotsOperationStateAfter(ctx, func(ctx context.Context) ([]dots.Op, error) {
+		return a.DotsSyncContext(ctx, dots.SyncOptions{ConflictStrategy: conflictStrategy})
 	})
 }
 
 func (a *App) DotsAddIgnorePatternWithState(ctx context.Context, name, pattern string) (*DotsOperationStateResult, error) {
-	return a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
+	return a.dotsOperationStateAfter(ctx, func(ctx context.Context) ([]dots.Op, error) {
 		return nil, a.DotsAddIgnorePatternContext(ctx, name, pattern)
 	})
 }
 
 func (a *App) DotsIncludeIgnoredPathWithState(ctx context.Context, name, relPath string) (*DotsOperationStateResult, error) {
-	return a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
+	return a.dotsOperationStateAfter(ctx, func(ctx context.Context) ([]dots.Op, error) {
 		if err := a.DotsIncludeIgnoredPathContext(ctx, name, relPath); err != nil {
 			return nil, err
 		}
@@ -261,7 +261,7 @@ func (a *App) DotsIncludeIgnoredPathWithState(ctx context.Context, name, relPath
 }
 
 func (a *App) DotsSetEntryIgnoredWithState(ctx context.Context, name, path string, ignored bool) (*DotsOperationStateResult, error) {
-	return a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
+	return a.dotsOperationStateAfter(ctx, func(ctx context.Context) ([]dots.Op, error) {
 		if err := a.DotsSetEntryIgnoredContext(ctx, name, path, ignored); err != nil {
 			return nil, err
 		}
@@ -290,7 +290,7 @@ func (a *App) syncIncludedDotEntry(ctx context.Context, name string) ([]dots.Op,
 
 func (a *App) DotsAddHostVariantWithState(ctx context.Context, name string, opts DotsAddVariantOptions) (*DotsVariantStateResult, error) {
 	var info DotVariantInfo
-	result, err := a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
+	result, err := a.dotsOperationStateAfter(ctx, func(ctx context.Context) ([]dots.Op, error) {
 		var opErr error
 		var ops []dots.Op
 		info, ops, opErr = a.DotsAddHostVariant(ctx, name, opts)
@@ -301,7 +301,7 @@ func (a *App) DotsAddHostVariantWithState(ctx context.Context, name string, opts
 
 func (a *App) DotsExtractThenAddHostVariantWithState(ctx context.Context, parentName, subpath string, opts DotsAddVariantOptions) (*DotsVariantStateResult, error) {
 	var info DotVariantInfo
-	result, err := a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
+	result, err := a.dotsOperationStateAfter(ctx, func(ctx context.Context) ([]dots.Op, error) {
 		var opErr error
 		var ops []dots.Op
 		info, ops, opErr = a.DotsExtractThenAddHostVariant(ctx, parentName, subpath, opts)
@@ -312,7 +312,7 @@ func (a *App) DotsExtractThenAddHostVariantWithState(ctx context.Context, parent
 
 func (a *App) DotsRemoveHostVariantWithState(ctx context.Context, name string, opts DotsRemoveVariantOptions) (*DotsVariantStateResult, error) {
 	var info DotVariantInfo
-	result, err := a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
+	result, err := a.dotsOperationStateAfter(ctx, func(ctx context.Context) ([]dots.Op, error) {
 		var opErr error
 		info, opErr = a.DotsRemoveHostVariant(ctx, name, opts)
 		return nil, opErr
@@ -321,25 +321,27 @@ func (a *App) DotsRemoveHostVariantWithState(ctx context.Context, name string, o
 }
 
 func (a *App) DotsPullWithState(ctx context.Context) (*DotsOperationStateResult, error) {
-	return a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
+	return a.dotsOperationStateAfter(ctx, func(ctx context.Context) ([]dots.Op, error) {
 		return a.DotsPull(ctx)
 	})
 }
 
 func (a *App) DotsPushWithState(ctx context.Context, message string) (*DotsOperationStateResult, error) {
-	return a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
+	return a.dotsOperationStateAfter(ctx, func(ctx context.Context) ([]dots.Op, error) {
 		return nil, a.DotsPush(ctx, message)
 	})
 }
 
 func (a *App) DotsCommitWithState(ctx context.Context, message string) (*DotsOperationStateResult, error) {
-	return a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
+	return a.dotsOperationStateAfter(ctx, func(ctx context.Context) ([]dots.Op, error) {
 		return nil, a.DotsCommit(ctx, message)
 	})
 }
 
-func (a *App) dotsOperationStateAfter(ctx context.Context, run func() ([]dots.Op, error)) (*DotsOperationStateResult, error) {
-	ops, opErr := run()
+type dotsRefreshSuppressKey struct{}
+
+func (a *App) dotsOperationStateAfter(ctx context.Context, run func(context.Context) ([]dots.Op, error)) (*DotsOperationStateResult, error) {
+	ops, opErr := run(context.WithValue(ctx, dotsRefreshSuppressKey{}, true))
 	state, stateErr := a.RefreshDotsState(ctx)
 	return &DotsOperationStateResult{Ops: ops, State: state}, errors.Join(opErr, stateErr)
 }
@@ -404,7 +406,7 @@ func (a *App) CachedDotsState(ctx context.Context) (*DotsState, error) {
 }
 
 func (a *App) refreshDotsStateAfterSuccess(ctx context.Context, opErr *error, skip bool) *DotsState {
-	if skip || opErr == nil || *opErr != nil {
+	if skip || opErr == nil || *opErr != nil || ctx.Value(dotsRefreshSuppressKey{}) == true {
 		return nil
 	}
 	if !a.DotsConfigured() {

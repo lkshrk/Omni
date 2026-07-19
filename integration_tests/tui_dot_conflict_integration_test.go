@@ -66,13 +66,13 @@ func TestTUIDotConflictCancelThenUseRepo(t *testing.T) {
 
 		writeTUIKeys(t, term, "u")
 		waitForRequiredScreen(t, term, 3*time.Second, func(text string) bool {
-			return strings.Contains(text, "confirm use repo")
+			return strings.Contains(text, "again to use repo")
 		}, "TUI did not arm use-repo confirmation")
 		writeTUIKeys(t, term, "\x1b")
 		waitForRequiredScreen(t, term, 3*time.Second, func(text string) bool {
 			return strings.Contains(text, "nvim") &&
 				strings.Contains(strings.ToLower(text), "conflict") &&
-				!strings.Contains(text, "confirm use repo")
+				!strings.Contains(text, "again to use repo")
 		}, "TUI did not cancel use-repo confirmation")
 		assertRegularFileContent(t, target, "local version\n")
 		if _, err := os.Stat(backup); !os.IsNotExist(err) {
@@ -81,7 +81,7 @@ func TestTUIDotConflictCancelThenUseRepo(t *testing.T) {
 
 		writeTUIKeys(t, term, "u")
 		waitForRequiredScreen(t, term, 3*time.Second, func(text string) bool {
-			return strings.Contains(text, "confirm use repo")
+			return strings.Contains(text, "again to use repo")
 		}, "TUI did not re-arm use-repo confirmation")
 		writeTUIKeys(t, term, "u")
 		waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {

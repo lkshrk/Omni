@@ -7,6 +7,7 @@ import (
 )
 
 func TestAgentsMarkCell_IconAndStyleByState(t *testing.T) {
+	t.Parallel()
 	pal := parityPalette()
 
 	cases := []struct {
@@ -216,6 +217,7 @@ func agentsIconEndToEndCases() []agentsIconEndToEndCase {
 // agentsMarkCell unit test above cannot (e.g. a wrong status/mark computed
 // upstream in agentsAllRowsList never reaching agentsMarkCell as expected).
 func TestAgentsIconEndToEnd_StateFeatureMatrix(t *testing.T) {
+	t.Parallel()
 	pal := parityPalette()
 
 	for _, c := range agentsIconEndToEndCases() {

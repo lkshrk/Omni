@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/lkshrk/omni/internal/app"
+	"github.com/lkshrk/omni/internal/dots"
 	"github.com/lkshrk/omni/internal/executor"
 )
 
@@ -89,6 +90,7 @@ func manyTraces(n int) []app.CommandTraceView {
 // ── UC-TL-01: Enter on settingsRowTraceLog opens popup ───────────────────────
 
 func TestTraceLog_EnterSetsLoadingState(t *testing.T) {
+	t.Parallel()
 	m := settingsTraceLogModel()
 	prevGen := m.traceLogGen
 
@@ -103,6 +105,7 @@ func TestTraceLog_EnterSetsLoadingState(t *testing.T) {
 }
 
 func TestTraceLog_LoadedMsgPopulatesState(t *testing.T) {
+	t.Parallel()
 	m := settingsTraceLogModel()
 	traces := fixtureTraces()
 	got := injectTraces(m, traces)
@@ -121,6 +124,7 @@ func TestTraceLog_LoadedMsgPopulatesState(t *testing.T) {
 // ── UC-TL-02: popup renders trace rows ───────────────────────────────────────
 
 func TestTraceLog_ViewRendersTraceRows(t *testing.T) {
+	t.Parallel()
 	m := settingsTraceLogModel()
 	m = injectTraces(m, fixtureTraces())
 
@@ -148,6 +152,7 @@ func TestTraceLog_ViewRendersTraceRows(t *testing.T) {
 }
 
 func TestTraceLog_RendersStructuredFullFailure(t *testing.T) {
+	t.Parallel()
 	m := settingsTraceLogModel()
 	trace := app.CommandTraceView{
 		StartedAt:  time.Date(2024, 1, 15, 10, 30, 45, 0, time.UTC),
@@ -175,6 +180,7 @@ func TestTraceLog_RendersStructuredFullFailure(t *testing.T) {
 }
 
 func TestTraceLog_SuccessfulStderrIsNotLabeledProblem(t *testing.T) {
+	t.Parallel()
 	trace := app.CommandTraceView{Status: "success", Stderr: "download progress"}
 	if got := traceLogProblem(trace); got != "" {
 		t.Fatalf("traceLogProblem() = %q for a successful command", got)
@@ -182,6 +188,7 @@ func TestTraceLog_SuccessfulStderrIsNotLabeledProblem(t *testing.T) {
 }
 
 func TestTraceLog_EFromFailedToolOpensPopup(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "font-intel-one-mono", Provider: "brew", Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 	m.mode = viewList
@@ -198,6 +205,7 @@ func TestTraceLog_EFromFailedToolOpensPopup(t *testing.T) {
 }
 
 func TestTraceLog_EFromBlurredSearchResultOpensPopup(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "font-intel-one-mono", Provider: "brew", Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 	m.mode = viewSearch
@@ -211,7 +219,173 @@ func TestTraceLog_EFromBlurredSearchResultOpensPopup(t *testing.T) {
 	}
 }
 
+func TestTraceLog_EFromDotsEntryWithLastErrorOpensPopup(t *testing.T) {
+	t.Parallel()
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.dotsLoaded = true
+	setDotsRepoForTest(&m, "/repo/dotfiles")
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		State:      dots.StateModified,
+		LastError:  "stow: error: existing target is not a symlink",
+	}}
+	m.dotsCursor = 0
+
+	got := drive(m, pressRune('e'))
+	if !got.traceLogLoading {
+		t.Fatal("e on a dots entry with a last error should open the command log")
+	}
+}
+
+func TestTraceLog_EFromDotsEntryWithoutLastErrorIsNoOp(t *testing.T) {
+	t.Parallel()
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.dotsLoaded = true
+	setDotsRepoForTest(&m, "/repo/dotfiles")
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		State:      dots.StateModified,
+	}}
+	m.dotsCursor = 0
+
+	got := drive(m, pressRune('e'))
+	if got.traceLogLoading {
+		t.Fatal("e on a dots entry without a last error should not open the command log")
+	}
+}
+
+func TestTraceLog_EFromAgentsTabOpensPopup(t *testing.T) {
+	t.Parallel()
+	m := baseModel(nil)
+	m.mode = viewSkills
+	m.agentsEnabled = true
+	m.skillTypeIdx = agentsChipAll
+
+	got := drive(m, pressRune('e'))
+	if !got.traceLogLoading {
+		t.Fatal("e on the agents tab should open the command log")
+	}
+}
+
+func TestTraceLog_EFromDotsEntryRendersPopup(t *testing.T) {
+	t.Parallel()
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.dotsLoaded = true
+	setDotsRepoForTest(&m, "/repo/dotfiles")
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		State:      dots.StateModified,
+		LastError:  "stow: error: existing target is not a symlink",
+	}}
+	m.dotsCursor = 0
+
+	gen := m.traceLogGen + 1
+	m = drive(m, pressRune('e'))
+	m = drive(m, traceLogLoadedMsg{gen: gen, traces: fixtureTraces()})
+
+	view := m.View().Content
+	if !strings.Contains(view, "Command Log") || !strings.Contains(view, "brew install ripgrep") {
+		t.Fatalf("e on a dots entry with a last error should render the command log popup:\n%s", view)
+	}
+}
+
+func TestTraceLog_EFromAgentsTabRendersPopup(t *testing.T) {
+	t.Parallel()
+	m := baseModel(nil)
+	m.mode = viewSkills
+	m.agentsEnabled = true
+	m.skillTypeIdx = agentsChipAll
+
+	gen := m.traceLogGen + 1
+	m = drive(m, pressRune('e'))
+	m = drive(m, traceLogLoadedMsg{gen: gen, traces: fixtureTraces()})
+
+	view := m.View().Content
+	if !strings.Contains(view, "Command Log") || !strings.Contains(view, "brew install ripgrep") {
+		t.Fatalf("e on the agents tab should render the command log popup:\n%s", view)
+	}
+}
+
+func TestTraceLog_EFromDotsEntryIsRepeatNoOp(t *testing.T) {
+	t.Parallel()
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.dotsLoaded = true
+	setDotsRepoForTest(&m, "/repo/dotfiles")
+	m.dotsEntries = []app.DotStatus{{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		State:      dots.StateModified,
+		LastError:  "stow: error: existing target is not a symlink",
+	}}
+	m.dotsCursor = 0
+
+	got := drive(m, tea.KeyPressMsg{Code: 'e', Text: "e", IsRepeat: true})
+	if got.traceLogLoading {
+		t.Fatal("e IsRepeat on a dots entry with a last error should not open the command log")
+	}
+}
+
+func TestTraceLog_EFromDotsChildRowUsesParentLastError(t *testing.T) {
+	t.Parallel()
+	m := baseModel(nil)
+	m.mode = viewDots
+	m.dotsLoaded = true
+	setDotsRepoForTest(&m, "/repo/dotfiles")
+	parent := app.DotStatus{
+		Name:       "nvim",
+		TargetPath: "~/.config/nvim",
+		State:      dots.StateModified,
+		LastError:  "stow: error: existing target is not a symlink",
+		Children:   []app.DotChild{{RelPath: "init.lua"}},
+	}
+	m.dotsEntries = []app.DotStatus{parent}
+	m.dotsExpandedName = parent.Name
+	m.dotsExpandedState = app.DotStatusState(parent)
+	m.dotsCursor = 1 // the child row, not the parent
+
+	got := drive(m, pressRune('e'))
+	if !got.traceLogLoading {
+		t.Fatal("e on a child row should fall back to the parent entry's last error and open the command log")
+	}
+}
+
+func TestTraceLog_EFromAgentsTabBlockedDuringDeleteConfirm(t *testing.T) {
+	t.Parallel()
+	m := baseModel(nil)
+	m.mode = viewSkills
+	m.agentsEnabled = true
+	m.skillTypeIdx = agentsChipAll
+	m.agentsDeleteConfirm = true
+
+	got := drive(m, pressRune('e'))
+	if got.traceLogLoading {
+		t.Fatal("e on the agents tab during a delete confirmation should not open the command log")
+	}
+}
+
+func TestTraceLog_EFromAgentsTabOpensDuringBulkOp(t *testing.T) {
+	t.Parallel()
+	m := baseModel(nil)
+	m.mode = viewSkills
+	m.agentsEnabled = true
+	m.skillTypeIdx = agentsChipAll
+	m.skillsRunning = true
+
+	got := drive(m, pressRune('e'))
+	if !got.traceLogLoading {
+		t.Fatal("e on the agents tab should open the command log even while a bulk op is running")
+	}
+}
+
 func TestTraceLog_ViewShowsPopupTitle(t *testing.T) {
+	t.Parallel()
 	m := settingsTraceLogModel()
 	m = injectTraces(m, fixtureTraces())
 
@@ -225,6 +399,7 @@ func TestTraceLog_ViewShowsPopupTitle(t *testing.T) {
 // ── UC-TL-03: empty and loading states ───────────────────────────────────────
 
 func TestTraceLog_LoadingState(t *testing.T) {
+	t.Parallel()
 	m := settingsTraceLogModel()
 	// Press Enter but do NOT inject the loaded msg — popup is in loading state.
 	m = drive(m, pressEnter())
@@ -237,6 +412,7 @@ func TestTraceLog_LoadingState(t *testing.T) {
 }
 
 func TestTraceLog_EmptyState(t *testing.T) {
+	t.Parallel()
 	m := settingsTraceLogModel()
 	gen := m.traceLogGen + 1
 	m = drive(m, pressEnter())
@@ -251,6 +427,7 @@ func TestTraceLog_EmptyState(t *testing.T) {
 }
 
 func TestTraceLog_EmptySliceState(t *testing.T) {
+	t.Parallel()
 	m := settingsTraceLogModel()
 	gen := m.traceLogGen + 1
 	m = drive(m, pressEnter())
@@ -266,6 +443,7 @@ func TestTraceLog_EmptySliceState(t *testing.T) {
 // ── UC-TL-04: scrolling clamps correctly ─────────────────────────────────────
 
 func TestTraceLog_ScrollDown(t *testing.T) {
+	t.Parallel()
 	m := settingsTraceLogModel()
 	m = injectTraces(m, manyTraces(50)) // enough rows to scroll
 
@@ -281,6 +459,7 @@ func TestTraceLog_ScrollDown(t *testing.T) {
 }
 
 func TestTraceLog_ScrollUp_ClampsAtZero(t *testing.T) {
+	t.Parallel()
 	m := settingsTraceLogModel()
 	m = injectTraces(m, manyTraces(50))
 
@@ -296,6 +475,7 @@ func TestTraceLog_ScrollUp_ClampsAtZero(t *testing.T) {
 }
 
 func TestTraceLog_GoToBottom_G(t *testing.T) {
+	t.Parallel()
 	m := settingsTraceLogModel()
 	m = injectTraces(m, manyTraces(50))
 
@@ -310,6 +490,7 @@ func TestTraceLog_GoToBottom_G(t *testing.T) {
 }
 
 func TestTraceLog_GoToTop_Home(t *testing.T) {
+	t.Parallel()
 	m := settingsTraceLogModel()
 	m = injectTraces(m, manyTraces(50))
 
@@ -322,6 +503,7 @@ func TestTraceLog_GoToTop_Home(t *testing.T) {
 }
 
 func TestTraceLog_PageDown_AdvancesScroll(t *testing.T) {
+	t.Parallel()
 	m := settingsTraceLogModel()
 	m = injectTraces(m, manyTraces(50))
 
@@ -333,6 +515,7 @@ func TestTraceLog_PageDown_AdvancesScroll(t *testing.T) {
 }
 
 func TestTraceLog_WrapsWideCharactersByCellWidth(t *testing.T) {
+	t.Parallel()
 	got := hardWrapLine("界界a", 3)
 	want := []string{"界", "界a"}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
@@ -346,6 +529,7 @@ func TestTraceLog_WrapsWideCharactersByCellWidth(t *testing.T) {
 }
 
 func TestTraceLog_ScrollClampsAtMax(t *testing.T) {
+	t.Parallel()
 	m := settingsTraceLogModel()
 	m = injectTraces(m, manyTraces(50))
 
@@ -362,6 +546,7 @@ func TestTraceLog_ScrollClampsAtMax(t *testing.T) {
 // ── UC-TL-05: Esc closes the popup ───────────────────────────────────────────
 
 func TestTraceLog_EscClosesPopup(t *testing.T) {
+	t.Parallel()
 	m := settingsTraceLogModel()
 	m = injectTraces(m, fixtureTraces())
 
@@ -383,6 +568,7 @@ func TestTraceLog_EscClosesPopup(t *testing.T) {
 }
 
 func TestTraceLog_EscFromLoadingClosesPopup(t *testing.T) {
+	t.Parallel()
 	m := settingsTraceLogModel()
 	m = drive(m, pressEnter()) // loading state, no msg yet
 
@@ -403,6 +589,7 @@ func TestTraceLog_EscFromLoadingClosesPopup(t *testing.T) {
 // ── UC-TL-06: stale-gen guard ─────────────────────────────────────────────────
 
 func TestTraceLog_StaleGenIgnored(t *testing.T) {
+	t.Parallel()
 	m := settingsTraceLogModel()
 	m = drive(m, pressEnter()) // gen is now traceLogGen (e.g. 1)
 
@@ -424,6 +611,7 @@ func TestTraceLog_StaleGenIgnored(t *testing.T) {
 }
 
 func TestTraceLog_CorrectGenAccepted(t *testing.T) {
+	t.Parallel()
 	m := settingsTraceLogModel()
 	m = drive(m, pressEnter())
 
@@ -443,6 +631,7 @@ func TestTraceLog_CorrectGenAccepted(t *testing.T) {
 // ── UC-TL-07: error in loaded msg does not crash ─────────────────────────────
 
 func TestTraceLog_ErrorInLoadedMsg(t *testing.T) {
+	t.Parallel()
 	m := settingsTraceLogModel()
 	gen := m.traceLogGen + 1
 	m = drive(m, pressEnter())
@@ -461,6 +650,7 @@ func TestTraceLog_ErrorInLoadedMsg(t *testing.T) {
 // TestTraceLog_RenderGate_VisibleInSettings verifies the popup is drawn when
 // m.mode == viewSettings and traceLog is populated.
 func TestTraceLog_RenderGate_VisibleInSettings(t *testing.T) {
+	t.Parallel()
 	m := settingsTraceLogModel()
 	m = injectTraces(m, fixtureTraces())
 
@@ -482,7 +672,10 @@ func TestTraceLog_RenderGate_VisibleInSettings(t *testing.T) {
 }
 
 func TestTraceLog_RenderGate_VisibleInList(t *testing.T) {
+	t.Parallel(
 	// Build the model in settings mode so we can populate traceLog.
+	)
+
 	m := settingsTraceLogModel()
 	m = injectTraces(m, fixtureTraces())
 
@@ -499,17 +692,45 @@ func TestTraceLog_RenderGate_VisibleInList(t *testing.T) {
 }
 
 func TestTraceLog_RenderGate_HiddenOutsideSupportedViews(t *testing.T) {
+	t.Parallel()
+	m := settingsTraceLogModel()
+	m = injectTraces(m, fixtureTraces())
+	m.mode = viewGroups
+
+	view := m.View().Content
+	if strings.Contains(view, "brew install ripgrep") || strings.Contains(view, "Command Log") {
+		t.Fatalf("command log should stay hidden outside settings/tools/dots/agents views:\n%s", view)
+	}
+}
+
+func TestTraceLog_RenderGate_VisibleInDots(t *testing.T) {
+	t.Parallel()
 	m := settingsTraceLogModel()
 	m = injectTraces(m, fixtureTraces())
 	m.mode = viewDots
 
 	view := m.View().Content
-	if strings.Contains(view, "brew install ripgrep") || strings.Contains(view, "Command Log") {
-		t.Fatalf("command log should stay hidden outside settings/tools views:\n%s", view)
+	if !strings.Contains(view, "brew install ripgrep") || !strings.Contains(view, "Command Log") {
+		t.Fatalf("command log should be visible over the dots view:\n%s", view)
+	}
+}
+
+func TestTraceLog_RenderGate_VisibleInAgents(t *testing.T) {
+	t.Parallel()
+	m := settingsTraceLogModel()
+	m = injectTraces(m, fixtureTraces())
+	m.mode = viewSkills
+	m.agentsEnabled = true
+	m.skillTypeIdx = agentsChipAll
+
+	view := m.View().Content
+	if !strings.Contains(view, "brew install ripgrep") || !strings.Contains(view, "Command Log") {
+		t.Fatalf("command log should be visible over the agents view:\n%s", view)
 	}
 }
 
 func TestTraceLog_DisablesMainTabClicksWhileOpen(t *testing.T) {
+	t.Parallel()
 	m := settingsTraceLogModel()
 	m = injectTraces(m, fixtureTraces())
 	if m.mainTabsClickable() {
@@ -526,6 +747,7 @@ func TestTraceLog_DisablesMainTabClicksWhileOpen(t *testing.T) {
 //	(b) does NOT render "No commands recorded.", and
 //	(c) sets m.statusMsg with m.statusIsErr == true.
 func TestTraceLog_ErrorPath_RendersFailureMessage(t *testing.T) {
+	t.Parallel()
 	m := settingsTraceLogModel()
 	gen := m.traceLogGen + 1
 	m = drive(m, pressEnter())
@@ -561,6 +783,7 @@ func TestTraceLog_ErrorPath_RendersFailureMessage(t *testing.T) {
 // TestTraceLog_HalfPageDown_AdvancesScroll verifies that ctrl+d moves the
 // scroll position forward by at least 1 row.
 func TestTraceLog_HalfPageDown_AdvancesScroll(t *testing.T) {
+	t.Parallel()
 	m := settingsTraceLogModel()
 	m = injectTraces(m, manyTraces(50)) // enough rows to scroll
 
@@ -583,6 +806,7 @@ func TestTraceLog_HalfPageDown_AdvancesScroll(t *testing.T) {
 
 // TestTraceLog_HalfPageUp_ClampsAtZero verifies ctrl+u cannot go below scroll=0.
 func TestTraceLog_HalfPageUp_ClampsAtZero(t *testing.T) {
+	t.Parallel()
 	m := settingsTraceLogModel()
 	m = injectTraces(m, manyTraces(50))
 

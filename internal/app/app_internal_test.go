@@ -55,6 +55,7 @@ func (s *internalProviderStub) InstalledMetadataMap(context.Context) (map[string
 }
 
 func TestTapFromPackage(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		pkg  string
 		want string
@@ -74,6 +75,7 @@ func TestTapFromPackage(t *testing.T) {
 }
 
 func TestShortHostname(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  string
@@ -116,6 +118,7 @@ func TestProbeFirstPrefersAvailableHintThenPriority(t *testing.T) {
 }
 
 func TestCloneSettingsStringMapCopiesInput(t *testing.T) {
+	t.Parallel()
 	if got := cloneSettingsStringMap(nil); got != nil {
 		t.Fatalf("cloneSettingsStringMap(nil) = %#v, want nil", got)
 	}
@@ -149,6 +152,7 @@ func TestExpandHomePath(t *testing.T) {
 }
 
 func TestNormalizeToolState(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		raw  string
 		want ToolListState
@@ -181,6 +185,7 @@ func TestNormalizeToolState(t *testing.T) {
 }
 
 func TestProviderMatchInstallCandidateSkipsEcosystemProviders(t *testing.T) {
+	t.Parallel()
 	a := New(filepath.Join(t.TempDir(), "settings.json"))
 	a.registry = provider.NewRegistry()
 	a.registry.RegisterWithMetadata(&internalProviderStub{name: "system"}, provider.Metadata{Kind: provider.ProviderKindEcosystem})
@@ -201,6 +206,7 @@ func TestProviderMatchInstallCandidateSkipsEcosystemProviders(t *testing.T) {
 }
 
 func TestRefreshInstalledScanLabelUsesExplicitInstallWithForEcosystem(t *testing.T) {
+	t.Parallel()
 	a := New(filepath.Join(t.TempDir(), "settings.json"))
 	a.registry = provider.NewRegistry()
 	system := &internalProviderStub{name: "system", concrete: "apt"}
@@ -218,6 +224,7 @@ func TestRefreshInstalledScanLabelUsesExplicitInstallWithForEcosystem(t *testing
 }
 
 func TestRefreshInstalledScanLabelCachesConcreteResolver(t *testing.T) {
+	t.Parallel()
 	a := New(filepath.Join(t.TempDir(), "settings.json"))
 	a.registry = provider.NewRegistry()
 	system := &internalProviderStub{name: "system", concrete: "apt"}
@@ -236,6 +243,7 @@ func TestRefreshInstalledScanLabelCachesConcreteResolver(t *testing.T) {
 }
 
 func TestRefreshInstalledScanLabelFallsBackOnResolverError(t *testing.T) {
+	t.Parallel()
 	a := New(filepath.Join(t.TempDir(), "settings.json"))
 	a.registry = provider.NewRegistry()
 	system := &internalProviderStub{name: "system", err: errors.New("resolver failed")}
@@ -252,6 +260,7 @@ func TestRefreshInstalledScanLabelFallsBackOnResolverError(t *testing.T) {
 }
 
 func TestNewRefreshProviderScanPlanSkipsConcreteCoveredByEcosystem(t *testing.T) {
+	t.Parallel()
 	plan := newRefreshProviderScanPlan(
 		[]*database.ToolCache{{Name: "typescript", Provider: "npm", Tracked: true}},
 		[]string{"node", "npm"},
@@ -270,6 +279,7 @@ func TestNewRefreshProviderScanPlanSkipsConcreteCoveredByEcosystem(t *testing.T)
 }
 
 func TestNewRefreshProviderScanPlanCountsTrackedRowsWhenConfigCountsMissing(t *testing.T) {
+	t.Parallel()
 	plan := newRefreshProviderScanPlan(
 		[]*database.ToolCache{
 			{Name: "fd", Provider: "brew", Tracked: true},
@@ -297,6 +307,7 @@ func TestNewRefreshProviderScanPlanCountsTrackedRowsWhenConfigCountsMissing(t *t
 }
 
 func TestDotStatusStateUsesExplicitStateAndHealthFallback(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		status DotStatus
@@ -319,6 +330,7 @@ func TestDotStatusStateUsesExplicitStateAndHealthFallback(t *testing.T) {
 }
 
 func TestDotStatusSectionsClassifiesStates(t *testing.T) {
+	t.Parallel()
 	sections := DotStatusSections([]DotStatus{
 		{Name: "modified", State: dots.StateModified},
 		{Name: "conflict", State: dots.StateConflict},
@@ -347,6 +359,7 @@ func TestDotStatusSectionsClassifiesStates(t *testing.T) {
 }
 
 func TestSortDotStatusesOrdersBySectionAndName(t *testing.T) {
+	t.Parallel()
 	statuses := []DotStatus{
 		{Name: "z-synced", State: dots.StateSynced},
 		{Name: "b-modified", State: dots.StateModified},
@@ -369,6 +382,7 @@ func TestSortDotStatusesOrdersBySectionAndName(t *testing.T) {
 }
 
 func TestDotSyncAllPendingNamesSkipsNonSyncableStatuses(t *testing.T) {
+	t.Parallel()
 	got := DotSyncAllPendingNames([]DotStatus{
 		{Name: "missing", State: dots.StateMissing},
 		{Name: "synced", State: dots.StateSynced},
@@ -386,6 +400,7 @@ func TestDotSyncAllPendingNamesSkipsNonSyncableStatuses(t *testing.T) {
 }
 
 func TestDotSyncAllEntryOrderUsesStatusSections(t *testing.T) {
+	t.Parallel()
 	got := DotSyncAllEntryOrder([]DotStatus{
 		{Name: "z-synced", State: dots.StateSynced},
 		{Name: "ignored", State: dots.StateIgnored},
@@ -402,6 +417,7 @@ func TestDotSyncAllEntryOrderUsesStatusSections(t *testing.T) {
 }
 
 func TestDotStatusVariantEligibleSkipsUnsupportedStates(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		status DotStatus
@@ -426,6 +442,7 @@ func TestDotStatusVariantEligibleSkipsUnsupportedStates(t *testing.T) {
 }
 
 func TestDotStatusIgnoredUsesCanonicalState(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		status DotStatus
@@ -446,6 +463,7 @@ func TestDotStatusIgnoredUsesCanonicalState(t *testing.T) {
 }
 
 func TestDotStatusNeedsAttentionSkipsSyncedAndIgnored(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		status DotStatus
@@ -466,6 +484,7 @@ func TestDotStatusNeedsAttentionSkipsSyncedAndIgnored(t *testing.T) {
 }
 
 func TestDotStatusSyncActionLabelUsesState(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		status DotStatus
@@ -488,6 +507,7 @@ func TestDotStatusSyncActionLabelUsesState(t *testing.T) {
 }
 
 func TestDotStatusFileCountsUsesExplicitCountsAndStateFallback(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		status DotStatus
@@ -512,6 +532,7 @@ func TestDotStatusFileCountsUsesExplicitCountsAndStateFallback(t *testing.T) {
 }
 
 func TestDotStatusesFileCountsSkipsIgnoredEntries(t *testing.T) {
+	t.Parallel()
 	got := DotStatusesFileCounts([]DotStatus{
 		{Name: "synced", State: dots.StateSynced, FileCount: 2},
 		{Name: "missing", State: dots.StateMissing, FileCount: 3},
@@ -524,6 +545,7 @@ func TestDotStatusesFileCountsSkipsIgnoredEntries(t *testing.T) {
 }
 
 func TestDotChildFileCountsUsesChildStateFallback(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		child       DotChild
@@ -545,6 +567,7 @@ func TestDotChildFileCountsUsesChildStateFallback(t *testing.T) {
 }
 
 func TestDotStateIcon(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		state dots.State
 		want  string
@@ -563,6 +586,7 @@ func TestDotStateIcon(t *testing.T) {
 }
 
 func TestDotStatusHasActionUsesExplicitActionsAndFallbackState(t *testing.T) {
+	t.Parallel()
 	explicit := DotStatus{State: dots.StateSynced, Actions: []dots.Action{dots.ActionUseRepo}}
 	if !DotStatusHasAction(explicit, dots.ActionUseRepo) {
 		t.Fatal("explicit action should be available")
@@ -597,6 +621,7 @@ func TestDotStatusHasActionUsesExplicitActionsAndFallbackState(t *testing.T) {
 }
 
 func TestDotsHistorySummarySeparatesChangedAndUnchangedOps(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		ops  []dots.Op
@@ -628,6 +653,7 @@ func TestDotsHistorySummarySeparatesChangedAndUnchangedOps(t *testing.T) {
 }
 
 func TestNormalizeDotsHistoryEntryUpdatesLegacySuccessSummary(t *testing.T) {
+	t.Parallel()
 	entry := DotsHistoryEntry{
 		Operation: "sync",
 		Status:    "success",
@@ -641,6 +667,7 @@ func TestNormalizeDotsHistoryEntryUpdatesLegacySuccessSummary(t *testing.T) {
 }
 
 func TestNormalizeDotsHistoryEntryPreservesFailureSummary(t *testing.T) {
+	t.Parallel()
 	entry := DotsHistoryEntry{
 		Operation: "sync",
 		Status:    "partial",
@@ -654,6 +681,7 @@ func TestNormalizeDotsHistoryEntryPreservesFailureSummary(t *testing.T) {
 }
 
 func TestCountDotsWatchSyncOps(t *testing.T) {
+	t.Parallel()
 	got := CountDotsWatchSyncOps([]dots.Op{
 		{Kind: dots.OpLink},
 		{Kind: dots.OpUnlinkSkip},
@@ -667,6 +695,7 @@ func TestCountDotsWatchSyncOps(t *testing.T) {
 }
 
 func TestDotsDisableDetail(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		ops  []dots.Op
@@ -699,12 +728,14 @@ func TestDotsDisableDetail(t *testing.T) {
 }
 
 func TestMachineGroupName(t *testing.T) {
+	t.Parallel()
 	if got := machineGroupName("macbook.corp.local"); got != "macbook" {
 		t.Errorf("machineGroupName = %q, want macbook", got)
 	}
 }
 
 func TestBackupConfigOnLaunch_CopiesExistingFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "settings.json")
 	body := []byte(`{"$schema":"x","settings":{}}` + "\n")
@@ -723,6 +754,7 @@ func TestBackupConfigOnLaunch_CopiesExistingFile(t *testing.T) {
 }
 
 func TestInitProviderRegistry_RegistersAllBuiltins(t *testing.T) {
+	t.Parallel()
 	a := &App{}
 	a.initProviderRegistry(config.Settings{})
 
@@ -758,6 +790,7 @@ func TestInitProviderRegistry_RegistersAllBuiltins(t *testing.T) {
 }
 
 func TestBackupConfigOnLaunch_MissingSourceIsNoOp(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "settings.json")
 	a := &App{ConfigPath: src}
@@ -768,6 +801,7 @@ func TestBackupConfigOnLaunch_MissingSourceIsNoOp(t *testing.T) {
 }
 
 func TestBackupConfigOnLaunch_OverwritesPriorBackup(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := filepath.Join(dir, "settings.json")
 	bak := src + settingsBackupSuffix
@@ -861,8 +895,11 @@ func TestEffectiveHostGroupsIncludesHostGroupFirst(t *testing.T) {
 }
 
 func TestDotsHistoryIDUniqueness(t *testing.T) {
+	t.Parallel(
 	// Generate IDs rapidly — the atomic counter suffix must prevent collisions
 	// even when time.Now().UnixNano() returns the same value.
+	)
+
 	const n = 100
 	ids := make(map[string]struct{}, n)
 	for range n {

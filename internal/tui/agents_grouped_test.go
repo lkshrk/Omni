@@ -14,6 +14,7 @@ import (
 )
 
 func TestAgentsGrouped_SectionOrderAndEmptySectionsOmitted(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{
 			{Name: "skill-ok", Source: "a/a", Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
@@ -47,6 +48,7 @@ func TestAgentsGrouped_SectionOrderAndEmptySectionsOmitted(t *testing.T) {
 }
 
 func TestAgentsGrouped_PluginOutdatedRowUnderUpdatesWithArrow(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, []app.PluginRow{
 		{Name: "old-plugin", Marketplace: "acme", Version: "1.0.0", LatestVersion: "2.0.0", PerAgentStatus: map[string]app.PluginStatus{"claude": app.PluginStatusInstalled}},
 	})
@@ -64,6 +66,7 @@ func TestAgentsGrouped_PluginOutdatedRowUnderUpdatesWithArrow(t *testing.T) {
 }
 
 func TestAgentsGrouped_PluginUpToDateRowUnderInstalledNoArrow(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, []app.PluginRow{
 		{Name: "current-plugin", Marketplace: "acme", Version: "2.0.0", LatestVersion: "2.0.0", PerAgentStatus: map[string]app.PluginStatus{"claude": app.PluginStatusInstalled}},
 	})
@@ -84,6 +87,7 @@ func TestAgentsGrouped_PluginUpToDateRowUnderInstalledNoArrow(t *testing.T) {
 }
 
 func TestAgentsGrouped_MissingRowsUseMissingMark(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "absent-skill", Source: "a/a", Installed: false}},
 		nil, nil,
@@ -107,6 +111,7 @@ func TestAgentsGrouped_MissingRowsUseMissingMark(t *testing.T) {
 }
 
 func TestAgentsGrouped_UnmanagedRowsUseOrphanMarkDistinctFromMissing(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.mcpUnmanaged = map[string][]app.InstalledMcpServer{
 		"claude-code": {{Name: "unmanaged-mcp", Transport: "stdio"}},
@@ -131,6 +136,7 @@ func TestAgentsGrouped_UnmanagedRowsUseOrphanMarkDistinctFromMissing(t *testing.
 }
 
 func TestAgentsProvCellText_OrphanSkillsRowMatchesManagedRowLinkageSummary(t *testing.T) {
+	t.Parallel()
 	status := map[string]bool{"claude": true}
 	managed := agentsAllModel([]app.SkillPackageRow{
 		{Name: "shared-skill", Source: "a/a", Installed: true, PerAgentStatus: status},
@@ -166,6 +172,7 @@ func TestAgentsProvCellText_OrphanSkillsRowMatchesManagedRowLinkageSummary(t *te
 }
 
 func TestAgentsRowCells_OrphanSkillsRowShowsLinkageInAgentColumn(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.skillsUnmanagedRows = []app.SkillPackageRow{
 		{Name: "orphan-skill", Source: "a/a", Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
@@ -187,6 +194,7 @@ func TestAgentsRowCells_OrphanSkillsRowShowsLinkageInAgentColumn(t *testing.T) {
 }
 
 func TestAgentsGrouped_SkillVersionSlotShowsUpdatedDate(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel([]app.SkillPackageRow{
 		{Name: "dated-skill", Source: "a/a", Installed: true, Updated: "2026-01-02", PerAgentStatus: map[string]bool{"claude": true}},
 	}, nil, nil)
@@ -198,6 +206,7 @@ func TestAgentsGrouped_SkillVersionSlotShowsUpdatedDate(t *testing.T) {
 }
 
 func TestAgentsGrouped_McpVersionSlotBlank(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, []app.McpServerRow{{Name: "srv-a", Transport: "stdio"}}, nil)
 
 	out := stripANSIEscapeSequences(m.viewSkillsBody())
@@ -224,6 +233,7 @@ func TestAgentsGrouped_McpVersionSlotBlank(t *testing.T) {
 // summary derived from PerAgentStatus — here a single linked agent, so the
 // summary is that agent's id too.
 func TestAgentsGrouped_AgentColumnLabelsExact(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "s", Source: "a/a", Installed: true, PerAgentStatus: map[string]bool{"claude": true}}},
 		[]app.McpServerRow{{Name: "m", Transport: "stdio", PerAgentStatus: map[string]app.McpStatus{"claude": app.McpStatusInstalled}}},
@@ -249,6 +259,7 @@ func TestAgentsGrouped_AgentColumnLabelsExact(t *testing.T) {
 }
 
 func TestAgentsGrouped_ChipFilterGroupsByStatusWithinFeature(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{
 			{Name: "installed-skill", Source: "a/a", Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
@@ -287,6 +298,7 @@ func TestAgentsGrouped_ChipFilterGroupsByStatusWithinFeature(t *testing.T) {
 }
 
 func TestAgentsGrouped_CursorTraversalMovesAcrossFeatureBoundariesWithinStatus(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "z-skill", Source: "a/a", Installed: true}},
 		[]app.McpServerRow{{Name: "a-mcp", PerAgentStatus: map[string]app.McpStatus{"claude": app.McpStatusInstalled}}},
@@ -316,6 +328,7 @@ func TestAgentsGrouped_CursorTraversalMovesAcrossFeatureBoundariesWithinStatus(t
 }
 
 func TestAgentsGrouped_ClaimUnmanagedSkillRowDispatchesAdopt(t *testing.T) {
+	t.Parallel()
 	a := newScanPlanTestApp(t)
 	m := agentsAllModel(nil, nil, nil)
 	m.app = a
@@ -355,6 +368,7 @@ func TestAgentsGrouped_ClaimUnmanagedSkillRowDispatchesAdopt(t *testing.T) {
 }
 
 func TestAgentsGrouped_EmptyGroupBadgeAbsentEvenWhenSelected(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, []app.PluginRow{
 		{Name: "grouped-plugin", Marketplace: "acme", Groups: []string{"g1"}, PerAgentStatus: map[string]app.PluginStatus{"claude": app.PluginStatusInstalled}},
 		{Name: "ungrouped-plugin", Marketplace: "acme", PerAgentStatus: map[string]app.PluginStatus{"claude": app.PluginStatusInstalled}},
@@ -403,8 +417,11 @@ func TestAgentsGrouped_EmptyGroupBadgeAbsentEvenWhenSelected(t *testing.T) {
 }
 
 func TestAgentsGrouped_ColumnAlignmentUnaffectedBySelectionOnNoGroupsRow(t *testing.T) {
+	t.Parallel(
 	// Fixture name deliberately avoids "plugin"/"mcp"/"skills" substrings so
 	// the type-column search below can't false-match inside the name cell.
+	)
+
 	m := agentsAllModel(nil, nil, []app.PluginRow{
 		{Name: "widget-a", Marketplace: "acme", PerAgentStatus: map[string]app.PluginStatus{"claude": app.PluginStatusInstalled}},
 	})
@@ -434,12 +451,15 @@ func TestAgentsGrouped_ColumnAlignmentUnaffectedBySelectionOnNoGroupsRow(t *test
 }
 
 func TestAgentsGrouped_ColumnAlignmentMatchesAcrossGroupsAndNoGroupsRows(t *testing.T) {
+	t.Parallel(
 	// Same-length names isolate the badge-cell effect from the (expected,
 	// unrelated) effect of differing name lengths. Names avoid
 	// "plugin"/"mcp"/"skills" substrings so the LastIndex search below
 	// can't false-match inside the name cell. The fixed grid means both rows
 	// get 3 right cells (badge-less rows reserve an empty cols.group-width
 	// badge cell), so the type/version block lands at identical offsets.
+	)
+
 	m := agentsAllModel(nil, nil, []app.PluginRow{
 		{Name: "widget-aaaaaaaaaaaaaaaaaaa", Marketplace: "acme", Groups: []string{"g1"}, PerAgentStatus: map[string]app.PluginStatus{"claude": app.PluginStatusInstalled}},
 		{Name: "widget-bbbbbbbbbbbbbbbbbbb", Marketplace: "acme", PerAgentStatus: map[string]app.PluginStatus{"claude": app.PluginStatusInstalled}},
@@ -497,6 +517,7 @@ func TestAgentsGrouped_ColumnAlignmentMatchesAcrossGroupsAndNoGroupsRows(t *test
 }
 
 func TestAgentsRowDetailLines_SkillsRowShowsAllSkillsNoTruncation(t *testing.T) {
+	t.Parallel()
 	skillNames := []string{"s1", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10", "s11", "s12"}
 	agentIDs := []string{"a1", "a2", "a3", "a4", "a5", "a6"}
 	perAgent := make(map[string]bool, len(agentIDs))
@@ -565,6 +586,7 @@ func TestAgentsRowDetailLines_SkillsRowShowsAllSkillsNoTruncation(t *testing.T) 
 // each line to the available width (not a fixed name count) and continuation
 // lines hang-indent under the first name, at two different terminal widths.
 func TestWrapNamesLines_FillsToWidthWithHangIndent(t *testing.T) {
+	t.Parallel()
 	names := []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet"}
 
 	t.Run("narrow width wraps across more lines with hang indent", func(t *testing.T) {
@@ -618,6 +640,7 @@ func TestWrapNamesLines_FillsToWidthWithHangIndent(t *testing.T) {
 // produces exactly one row (not one per agent), the agent cell summarizes
 // as "2 agents", and the detail line lists both linked agents.
 func TestAgentsAll_SkillsFlatten_TwoAgentTargetsProduceOneRow(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel([]app.SkillPackageRow{
 		{
 			Name: "skillpack", Source: "a/a", Installed: true,
@@ -659,6 +682,7 @@ func TestAgentsAll_SkillsFlatten_TwoAgentTargetsProduceOneRow(t *testing.T) {
 }
 
 func TestAgentsRowDetailLines_McpManagedRowShowsTransportAndCommand(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, []app.McpServerRow{
 		{
 			Name:           "mcp-a",
@@ -687,6 +711,7 @@ func TestAgentsRowDetailLines_McpManagedRowShowsTransportAndCommand(t *testing.T
 }
 
 func TestAgentsRowDetailLines_SkillsOrphanIncludesLinkedLine(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.skillsUnmanagedRows = []app.SkillPackageRow{
 		{Name: "orphan-skill", Source: "a/a", Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
@@ -711,6 +736,7 @@ func TestAgentsRowDetailLines_SkillsOrphanIncludesLinkedLine(t *testing.T) {
 }
 
 func TestAgentsRowDetailLines_McpOrphanNoOwnerText(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.mcpUnmanaged = map[string][]app.InstalledMcpServer{
 		"claude-code": {{Name: "orphan-mcp", Transport: "stdio", Command: "npx -y orphan-mcp"}},
@@ -737,6 +763,7 @@ func TestAgentsRowDetailLines_McpOrphanNoOwnerText(t *testing.T) {
 }
 
 func TestAgentsRowDetailLines_PluginRowShowsMarketplaceAndVersion(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, []app.PluginRow{
 		{
 			Name:           "plugin-a",
@@ -761,6 +788,7 @@ func TestAgentsRowDetailLines_PluginRowShowsMarketplaceAndVersion(t *testing.T) 
 }
 
 func TestAgentsRowDetailLines_UnmanagedRowShowsSummary(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.pluginUnmanaged = map[string][]app.InstalledPlugin{
 		"claude-code": {{Name: "unmanaged-plugin", Marketplace: "some-marketplace", Version: "1.2.3"}},
@@ -787,6 +815,7 @@ func TestAgentsRowDetailLines_UnmanagedRowShowsSummary(t *testing.T) {
 }
 
 func TestAgentsRowDetailLines_UnmanagedRowShaFallback(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.pluginUnmanaged = map[string][]app.InstalledPlugin{
 		"claude-code": {{Name: "unmanaged-plugin", Marketplace: "some-marketplace", Sha: "abcdef1234567890"}},
@@ -813,6 +842,7 @@ func TestAgentsRowDetailLines_UnmanagedRowShaFallback(t *testing.T) {
 }
 
 func TestAgentsRowDetailLines_MarketplaceManagedRowShowsSource(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.marketplaceRows = []app.MarketplaceRow{
 		{
@@ -841,6 +871,7 @@ func TestAgentsRowDetailLines_MarketplaceManagedRowShowsSource(t *testing.T) {
 }
 
 func TestAgentsRowDetailLines_MarketplaceUnmanagedRowShowsSourceUnmanaged(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.marketplaceUnmanaged = map[string][]app.InstalledMarketplace{
 		"claude-code": {{Name: "orphan-market", Source: "orphan/marketplace-repo"}},
@@ -864,6 +895,7 @@ func TestAgentsRowDetailLines_MarketplaceUnmanagedRowShowsSourceUnmanaged(t *tes
 }
 
 func TestAgentsRowDetailLines_UnselectedRowShowsNoDetails(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel([]app.SkillPackageRow{
 		{Name: "skillpack-a", Source: "a/a", Installed: true, Skills: []string{"s1"}},
 		{Name: "skillpack-b", Source: "b/b", Installed: true, Skills: []string{"s2"}},
@@ -880,6 +912,7 @@ func TestAgentsRowDetailLines_UnselectedRowShowsNoDetails(t *testing.T) {
 }
 
 func TestAgentsGrouped_VersionWidthConsistencyAcrossAllAndPluginChip(t *testing.T) {
+	t.Parallel()
 	longPlugin := app.PluginRow{
 		Name:           "long-version-plugin",
 		Marketplace:    "acme",
@@ -915,6 +948,7 @@ func TestAgentsGrouped_VersionWidthConsistencyAcrossAllAndPluginChip(t *testing.
 }
 
 func TestFitUpgradeVersionText_ArrowVisibleWhenCurrentOverflows(t *testing.T) {
+	t.Parallel()
 	const width = 12
 	current, latest := fitUpgradeVersionText("1.2.3-alpha.long-prerelease-tag", "2.0.0-beta.another-long-tag", width)
 
@@ -931,6 +965,7 @@ func TestFitUpgradeVersionText_ArrowVisibleWhenCurrentOverflows(t *testing.T) {
 }
 
 func TestStyleForAgent_DeterministicForSameAgentID(t *testing.T) {
+	t.Parallel()
 	p := buildPaletteFor(true)
 
 	s1 := styleForAgent(p, "claude-code")
@@ -942,6 +977,7 @@ func TestStyleForAgent_DeterministicForSameAgentID(t *testing.T) {
 }
 
 func TestStyleForAgent_EmptyAgentIDReturnsStyleHelp(t *testing.T) {
+	t.Parallel()
 	p := buildPaletteFor(true)
 
 	got := styleForAgent(p, "")
@@ -955,6 +991,7 @@ func TestStyleForAgent_EmptyAgentIDReturnsStyleHelp(t *testing.T) {
 // single-agent mcp row's agent-label cell is colored via styleForAgent
 // (hue-varied by agentID) rather than the flat p.styleHelp it used before.
 func TestAgentsRowCells_McpAgentLabelUsesHuedStyleNotStyleHelp(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, []app.McpServerRow{
 		{Name: "mcp-a", Transport: "stdio", PerAgentStatus: map[string]app.McpStatus{"claude": app.McpStatusInstalled}},
 	}, nil)
@@ -1001,6 +1038,7 @@ func TestAgentsRowCells_McpAgentLabelUsesHuedStyleNotStyleHelp(t *testing.T) {
 // agents", not a literal single agentID) is unaffected by styleForAgent and
 // still renders with the flat p.styleHelp styling.
 func TestAgentsRowCells_SkillsMultiAgentSummaryKeepsStyleHelp(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel([]app.SkillPackageRow{
 		{
 			Name: "skillpack", Source: "a/a", Installed: true,
@@ -1071,6 +1109,7 @@ func findSkillAddedMsg(msgs []tea.Msg) (skillAddedMsg, bool) {
 }
 
 func TestAgentsRowCells_InFlightOpShowsSpinnerInsteadOfMark(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "skill-ok", Source: "a/a", Installed: true, PerAgentStatus: map[string]bool{"claude": true}}},
 		nil,
@@ -1120,6 +1159,7 @@ func TestAgentsRowCells_InFlightOpShowsSpinnerInsteadOfMark(t *testing.T) {
 // on the mcp chip but correctly hid it on the all chip. Both paths must now
 // render byte-identical hint text for the same row state.
 func TestAgentsGrouped_HintLineParityBetweenAllAndFilteredChip(t *testing.T) {
+	t.Parallel()
 	for _, feature := range []agentsSection{agentsSectionSkills, agentsSectionMcp, agentsSectionPlugins} {
 		t.Run(feature.String(), func(t *testing.T) {
 			m := agentsAllModel(
@@ -1206,6 +1246,7 @@ func (f agentsSection) String() string {
 // localIdx, different agentID) rather than skipping to a different item
 // or failing to move at all.
 func TestAgentsFilteredNav_McpChipDownMovesOneRenderedAgentRow(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		nil,
 		[]app.McpServerRow{{
@@ -1263,6 +1304,7 @@ func TestAgentsFilteredNav_McpChipDownMovesOneRenderedAgentRow(t *testing.T) {
 // an item moves to the previous expanded row of the SAME item (same
 // localIdx, different agentID), not to an unrelated item.
 func TestAgentsFilteredNav_McpChipUpFromLastRowReturnsToPriorAgentRowSameItem(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		nil,
 		[]app.McpServerRow{{
@@ -1299,6 +1341,7 @@ func TestAgentsFilteredNav_McpChipUpFromLastRowReturnsToPriorAgentRowSameItem(t 
 // TestAgentsFilteredNav_PluginChipDownMovesOneRenderedAgentRow mirrors the
 // mcp case for the plugin chip, confirming the fix is not mcp-specific.
 func TestAgentsFilteredNav_PluginChipDownMovesOneRenderedAgentRow(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		nil,
 		nil,
@@ -1359,6 +1402,7 @@ func TestAgentsFilteredNav_PluginChipDownMovesOneRenderedAgentRow(t *testing.T) 
 // agentsFilteredRowsList, case-insensitive alphabetical by name within each
 // status group.
 func TestAgentsGrouped_SkillsChipDownNavigationMatchesCaseInsensitiveRenderOrder(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel([]app.SkillPackageRow{
 		{Name: "beta", Source: "o/beta", Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
 		{Name: "Alpha", Source: "o/Alpha", Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
@@ -1420,6 +1464,7 @@ func TestAgentsGrouped_SkillsChipDownNavigationMatchesCaseInsensitiveRenderOrder
 // desync fix via the "down" key path (handleSkillsKeyMsg), rather than
 // calling agentsChipMoveRow directly.
 func TestAgentsGrouped_SkillsDownKeyMatchesRenderOrder(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel([]app.SkillPackageRow{
 		{Name: "Zebra", Source: "o/Zebra", Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
 		{Name: "apple", Source: "o/apple", Installed: true, PerAgentStatus: map[string]bool{"claude": true}},
@@ -1442,6 +1487,7 @@ func TestAgentsGrouped_SkillsDownKeyMatchesRenderOrder(t *testing.T) {
 }
 
 func TestAgentsRowClaim_SkillsOrphan_OpensGroupPickerWithoutAdopting(t *testing.T) {
+	t.Parallel()
 	a := newScanPlanTestApp(t)
 	m := agentsAllModel(nil, nil, nil)
 	m.app = a
@@ -1486,6 +1532,7 @@ func TestAgentsRowClaim_SkillsOrphan_OpensGroupPickerWithoutAdopting(t *testing.
 // already worked. Pins the fix for McpServerRows never joining
 // cfg.Groups[*].McpServers back onto McpServerRow.Groups.
 func TestMcpGroupMembershipPicker_ConfirmPersistsAndReloadsRowGroups(t *testing.T) {
+	t.Parallel()
 	a := newScanPlanTestApp(t)
 	if err := a.CreateGroup("work"); err != nil {
 		t.Fatal(err)
@@ -1545,6 +1592,7 @@ func TestMcpGroupMembershipPicker_ConfirmPersistsAndReloadsRowGroups(t *testing.
 // agent. Both unmanaged entries share the same Transport/Command/URL so the
 // scenario stays on the union path rather than tripping mcpUnmanagedConflict.
 func TestAgentsClaimGroupPicker_McpUnionsAllUnmanagedAgents(t *testing.T) {
+	t.Parallel()
 	a := newScanPlanTestApp(t)
 	m := agentsAllModel(nil, nil, nil)
 	m.app = a
@@ -1616,6 +1664,7 @@ func TestAgentsClaimGroupPicker_McpUnionsAllUnmanagedAgents(t *testing.T) {
 }
 
 func TestAgentsRowClaim_McpOrphan_OpensGroupPickerWithoutAdopting(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.mcpUnmanaged = map[string][]app.InstalledMcpServer{
 		"codex": {{Name: "unmanaged-mcp", Transport: "stdio"}},
@@ -1642,6 +1691,7 @@ func TestAgentsRowClaim_McpOrphan_OpensGroupPickerWithoutAdopting(t *testing.T) 
 }
 
 func TestAgentsRowClaim_PluginOrphan_OpensGroupPickerWithoutAdopting(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.pluginUnmanaged = map[string][]app.InstalledPlugin{
 		"codex": {{Name: "unmanaged-plugin", Marketplace: "acme"}},
@@ -1668,6 +1718,7 @@ func TestAgentsRowClaim_PluginOrphan_OpensGroupPickerWithoutAdopting(t *testing.
 }
 
 func TestAgentsClaimGroupPicker_ConfirmAdoptsAndAssignsGroup(t *testing.T) {
+	t.Parallel()
 	a := newScanPlanTestApp(t)
 	m := agentsAllModel(nil, nil, nil)
 	m.app = a
@@ -1701,6 +1752,7 @@ func TestAgentsClaimGroupPicker_ConfirmAdoptsAndAssignsGroup(t *testing.T) {
 }
 
 func TestAgentsClaimGroupPicker_CancelDoesNotAdopt(t *testing.T) {
+	t.Parallel()
 	a := newScanPlanTestApp(t)
 	m := agentsAllModel(nil, nil, nil)
 	m.app = a
@@ -1739,6 +1791,7 @@ func TestAgentsClaimGroupPicker_CancelDoesNotAdopt(t *testing.T) {
 }
 
 func TestAgentsClaimGroupPicker_OpenSetsClaimAgentsFlag(t *testing.T) {
+	t.Parallel()
 	a := newScanPlanTestApp(t)
 	m := agentsAllModel(nil, nil, nil)
 	m.app = a
@@ -1764,6 +1817,7 @@ func TestAgentsClaimGroupPicker_OpenSetsClaimAgentsFlag(t *testing.T) {
 // regression where confirming the claim picker landed on viewList instead of
 // back on the agents tab it was opened from.
 func TestAgentsClaimGroupPicker_ConfirmReturnsToSkillsTab(t *testing.T) {
+	t.Parallel()
 	a := newScanPlanTestApp(t)
 	m := agentsAllModel(nil, nil, nil)
 	m.app = a
@@ -1790,6 +1844,7 @@ func TestAgentsClaimGroupPicker_ConfirmReturnsToSkillsTab(t *testing.T) {
 // TestAgentsClaimGroupPicker_CancelReturnsToSkillsTab pins the fix for the
 // same regression on the escape/cancel path.
 func TestAgentsClaimGroupPicker_CancelReturnsToSkillsTab(t *testing.T) {
+	t.Parallel()
 	a := newScanPlanTestApp(t)
 	m := agentsAllModel(nil, nil, nil)
 	m.app = a
@@ -1815,6 +1870,7 @@ func TestAgentsClaimGroupPicker_CancelReturnsToSkillsTab(t *testing.T) {
 // closeGroupPicker's mode-restore switch for the wasAgentsClaim branch,
 // isolated from the open flow.
 func TestCloseGroupPicker_AgentsClaimModeRestoresSkills(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewGroupPicker
 	m.pickerClaimAgentsSet = true
@@ -1830,6 +1886,7 @@ func TestCloseGroupPicker_AgentsClaimModeRestoresSkills(t *testing.T) {
 }
 
 func TestCloseGroupPicker_DefaultRestoresList(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewGroupPicker
 
@@ -1841,6 +1898,7 @@ func TestCloseGroupPicker_DefaultRestoresList(t *testing.T) {
 }
 
 func TestCloseGroupPicker_DotAddRestoresDots(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewGroupPicker
 	m.pickerPurposeDotAdd = true
@@ -1853,6 +1911,7 @@ func TestCloseGroupPicker_DotAddRestoresDots(t *testing.T) {
 }
 
 func TestAgentsRowHints_OrphanRow_ShowsClaimNotAdoptOrImport(t *testing.T) {
+	t.Parallel()
 	for _, feature := range []agentsSection{agentsSectionSkills, agentsSectionMcp, agentsSectionPlugins} {
 		m := agentsAllModel(nil, nil, nil)
 		e := agentsAllRow{feature: feature, mark: agentsMarkOrphan}
@@ -1882,6 +1941,7 @@ func TestAgentsRowHints_OrphanRow_ShowsClaimNotAdoptOrImport(t *testing.T) {
 }
 
 func TestSkillsKeyMsg_OrphanRow_EnterNoop_CImports_IBulkImportUnaffected(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -1914,6 +1974,7 @@ func TestSkillsKeyMsg_OrphanRow_EnterNoop_CImports_IBulkImportUnaffected(t *test
 }
 
 func TestSkillsKeyMsg_FindResultRow_EnterCallsAddSkillPackage(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -1939,6 +2000,7 @@ func TestSkillsKeyMsg_FindResultRow_EnterCallsAddSkillPackage(t *testing.T) {
 // true in PerAgentStatus but absent from enabledAgents must be excluded, even
 // though it is exactly as "true" as one that is present.
 func TestSkillLinkedAgents_FiltersToEnabledAgentsOnly(t *testing.T) {
+	t.Parallel()
 	r := app.SkillPackageRow{
 		Name: "skillpack",
 		PerAgentStatus: map[string]bool{
@@ -1972,6 +2034,7 @@ func TestSkillLinkedAgents_FiltersToEnabledAgentsOnly(t *testing.T) {
 // TestAgentsVersionCellText_McpManagedRowShowsVersion and its blank-version
 // sibling pin Change 6: the mcp version cell now surfaces row.Version.
 func TestAgentsVersionCellText_McpManagedRowShowsVersion(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, []app.McpServerRow{
 		{
 			Name:           "mcp-a",
@@ -2002,6 +2065,7 @@ func TestAgentsVersionCellText_McpManagedRowShowsVersion(t *testing.T) {
 }
 
 func TestAgentsVersionCellText_McpManagedRowEmptyVersionBlank(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, []app.McpServerRow{
 		{
 			Name:           "mcp-b",
@@ -2028,6 +2092,7 @@ func TestAgentsVersionCellText_McpManagedRowEmptyVersionBlank(t *testing.T) {
 }
 
 func TestSkillDetailLines_WithDescriptionPrependsLine(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel([]app.SkillPackageRow{
 		{
 			Name:        "skillpack",
@@ -2059,6 +2124,7 @@ func TestSkillDetailLines_WithDescriptionPrependsLine(t *testing.T) {
 }
 
 func TestSkillDetailLines_WithoutDescriptionOmitsLine(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	r := app.SkillPackageRow{Name: "skillpack", Source: "a/a", Skills: []string{"s1"}}
 	lines := skillDetailLines(m, r)
@@ -2077,6 +2143,7 @@ func TestSkillDetailLines_WithoutDescriptionOmitsLine(t *testing.T) {
 }
 
 func TestSkillDetailLines_OrderPreservedWithDescription(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.enabledAgents = []string{"claude"}
 	r := app.SkillPackageRow{
@@ -2110,6 +2177,7 @@ func TestSkillDetailLines_OrderPreservedWithDescription(t *testing.T) {
 }
 
 func TestAgentsRowDetailLines_PluginRowWithDescriptionPrependsLine(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, []app.PluginRow{
 		{
 			Name:           "plugin-a",
@@ -2139,6 +2207,7 @@ func TestAgentsRowDetailLines_PluginRowWithDescriptionPrependsLine(t *testing.T)
 }
 
 func TestAgentsRowDetailLines_PluginRowWithoutDescriptionShowsOnlySummary(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, []app.PluginRow{
 		{
 			Name:           "plugin-a",
@@ -2163,6 +2232,7 @@ func TestAgentsRowDetailLines_PluginRowWithoutDescriptionShowsOnlySummary(t *tes
 }
 
 func TestAgentsRowDetailLines_UnmanagedPluginRowUnchangedByDescriptionChange(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.pluginUnmanaged = map[string][]app.InstalledPlugin{
 		"claude-code": {{Name: "unmanaged-plugin", Marketplace: "some-marketplace", Version: "1.2.3"}},
@@ -2192,6 +2262,7 @@ func TestAgentsRowDetailLines_UnmanagedPluginRowUnchangedByDescriptionChange(t *
 // the picker no longer leaks that tool's "current" group or name into the
 // claim popup.
 func TestAgentsClaimGroupPicker_IgnoresUnrelatedToolsListCursor(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.allTools = threeTools()
 	m.visibleTools = threeTools()
@@ -2227,6 +2298,7 @@ func TestAgentsClaimGroupPicker_IgnoresUnrelatedToolsListCursor(t *testing.T) {
 // accidentally removing the "current" label from the legitimate tools-tab
 // group-picker flow (pickerActionToolSet, no agents claim in progress).
 func TestGroupPicker_ToolsTabStillMarksCurrentGroup(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.mode = viewGroupPicker
 	tool := *m.allTools[0]
@@ -2242,6 +2314,7 @@ func TestGroupPicker_ToolsTabStillMarksCurrentGroup(t *testing.T) {
 }
 
 func TestRenderGroupPicker_NoClaimNoSelectionFallsBackToNoToolSelected(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewGroupPicker
 	m.cursor = -1
@@ -2253,6 +2326,7 @@ func TestRenderGroupPicker_NoClaimNoSelectionFallsBackToNoToolSelected(t *testin
 }
 
 func TestAgentsAllRowsList_OrphanedIgnoreEntry_RendersAsSyntheticIgnoredRow(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		feature   agentsSection
@@ -2306,6 +2380,7 @@ func TestAgentsAllRowsList_OrphanedIgnoreEntry_RendersAsSyntheticIgnoredRow(t *t
 // ignore map (not per-agent rows), so a synthetic row must stay visible
 // regardless of which agent-pill filter or feature chip is active.
 func TestAgentsAllRowsList_SyntheticRowSurvivesAgentPillFilter(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(
 		[]app.SkillPackageRow{{Name: "skill-a", Source: "a/a", Installed: true, PerAgentStatus: map[string]bool{"claude": true}}},
 		nil, nil,
@@ -2327,6 +2402,7 @@ func TestAgentsAllRowsList_SyntheticRowSurvivesAgentPillFilter(t *testing.T) {
 }
 
 func TestAgentsAllRowsList_NameInBothIgnoreAndLiveRow_RendersOnce(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		feature agentsSection
@@ -2383,6 +2459,7 @@ func TestAgentsAllRowsList_NameInBothIgnoreAndLiveRow_RendersOnce(t *testing.T) 
 }
 
 func TestSyntheticRow_OnlyUnignoreIsValid(t *testing.T) {
+	t.Parallel()
 	for _, feature := range []agentsSection{agentsSectionSkills, agentsSectionPlugins} {
 		t.Run(agentsFeatureLabel(feature), func(t *testing.T) {
 			m := agentsAllModel(nil, nil, nil)
@@ -2415,6 +2492,7 @@ func TestSyntheticRow_OnlyUnignoreIsValid(t *testing.T) {
 }
 
 func TestSyntheticRow_ToggleIgnoreRoutesCorrectFeatureAndName(t *testing.T) {
+	t.Parallel()
 	features := []struct {
 		feature agentsSection
 		setUp   func(*Model)
@@ -2453,6 +2531,7 @@ func TestSyntheticRow_ToggleIgnoreRoutesCorrectFeatureAndName(t *testing.T) {
 }
 
 func TestSetAgentsChip_CursorOnSyntheticSkillsRow_NoClampGuardsMinusOne(t *testing.T) {
+	t.Parallel()
 	m := agentsAllModel(nil, nil, nil)
 	m.agentsIgnore.Skills = []string{"ghost-skill"}
 	m.skillTypeIdx = agentsChipAll
@@ -2477,6 +2556,7 @@ func TestSetAgentsChip_CursorOnSyntheticSkillsRow_NoClampGuardsMinusOne(t *testi
 }
 
 func TestSetAgentsChip_CursorOnSyntheticRow_McpPluginMarketplace_NoPanicNoClamp(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		feature agentsSection
 		chip    int

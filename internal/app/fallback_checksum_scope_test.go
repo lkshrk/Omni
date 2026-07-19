@@ -15,6 +15,7 @@ import (
 // AssetID). On a version bump or rotated asset the stale digest must NOT be
 // trusted; verification re-fetches the authoritative checksum instead.
 func TestVerifyFallbackChecksum_ReusesStoredOnlyWhenAssetScopeMatches(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	assetPath := filepath.Join(dir, "tool.tar.gz")
 	if err := os.WriteFile(assetPath, []byte("payload bytes"), 0o644); err != nil {

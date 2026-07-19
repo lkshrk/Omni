@@ -19,6 +19,7 @@ import (
 )
 
 func TestRefreshOutdated_ScriptLatestCommandMarksConfiguredToolOutdated(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	mock := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "sh -c exit 0", Response: executor.MockCall{}},
@@ -67,6 +68,7 @@ func TestRefreshOutdated_ScriptLatestCommandMarksConfiguredToolOutdated(t *testi
 }
 
 func TestRefreshOutdated_ScriptLatestCommandClearsCurrentTool(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	mock := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "sh -c exit 0", Response: executor.MockCall{}},
@@ -107,6 +109,7 @@ func TestRefreshOutdated_ScriptLatestCommandClearsCurrentTool(t *testing.T) {
 }
 
 func TestRefreshOutdated_ScriptLatestCommandChecksSecondaryConfiguredCandidate(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	mock := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "sh -c exit 0", Response: executor.MockCall{}},
@@ -145,6 +148,7 @@ func TestRefreshOutdated_ScriptLatestCommandChecksSecondaryConfiguredCandidate(t
 }
 
 func TestRefreshOutdated_GitHubRecipeMarksConfiguredScriptOutdated(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	asset := currentPlatformGitHubCLIAsset(t)
 	calls := int32(0)
@@ -195,6 +199,7 @@ func TestRefreshOutdated_GitHubRecipeMarksConfiguredScriptOutdated(t *testing.T)
 }
 
 func TestRefreshOutdated_GitHubRecipeRequiresConfiguredReleaseAsset(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	asset := currentPlatformGitHubCLIAsset(t)
 	a, cfgPath := newImportApp(t, script.New(executor.NewMatchMock().WithFallback(executor.MockCall{})))
@@ -231,6 +236,7 @@ func TestRefreshOutdated_GitHubRecipeRequiresConfiguredReleaseAsset(t *testing.T
 }
 
 func TestRefreshProviderOutdated_ScriptLatestCommandMarksConfiguredToolOutdated(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	mock := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "sh -c exit 0", Response: executor.MockCall{}},
@@ -268,6 +274,7 @@ func TestRefreshProviderOutdated_ScriptLatestCommandMarksConfiguredToolOutdated(
 }
 
 func TestRefreshOutdated_GitHubRecipesShareLatestReleaseLookup(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	asset := currentPlatformGitHubCLIAsset(t)
 	calls := int32(0)
@@ -304,6 +311,7 @@ func TestRefreshOutdated_GitHubRecipesShareLatestReleaseLookup(t *testing.T) {
 }
 
 func TestRefreshProviderOutdated_ConcurrentGitHubRecipesShareLatestReleaseLookup(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	asset := currentPlatformGitHubCLIAsset(t)
 	calls := int32(0)
@@ -354,6 +362,7 @@ func TestRefreshProviderOutdated_ConcurrentGitHubRecipesShareLatestReleaseLookup
 }
 
 func TestRefreshOutdated_PinnedGitHubRecipeDoesNotTrackLatest(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	asset := currentPlatformGitHubCLIAsset(t)
 	calls := int32(0)
@@ -398,6 +407,7 @@ func TestRefreshOutdated_PinnedGitHubRecipeDoesNotTrackLatest(t *testing.T) {
 }
 
 func TestRefreshOutdated_GitHubFallbackMarksOutdatedFromLatestRelease(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
 	asset := currentPlatformGitHubCLIAsset(t)
@@ -433,6 +443,7 @@ func TestRefreshOutdated_GitHubFallbackMarksOutdatedFromLatestRelease(t *testing
 }
 
 func TestRefreshOutdated_GitHubFallbackClearsOutdatedWhenLatestNotNewer(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
 	asset := currentPlatformGitHubCLIAsset(t)
@@ -464,6 +475,7 @@ func TestRefreshOutdated_GitHubFallbackClearsOutdatedWhenLatestNotNewer(t *testi
 }
 
 func TestRefreshOutdated_GitHubFallbackClearsOutdatedWhenLatestOlder(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
 	asset := currentPlatformGitHubCLIAsset(t)
@@ -495,6 +507,7 @@ func TestRefreshOutdated_GitHubFallbackClearsOutdatedWhenLatestOlder(t *testing.
 }
 
 func TestRefreshOutdated_GitHubFallbackSkipsLatestReleaseWithoutCurrentPlatformAsset(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
 	asset := currentPlatformGitHubCLIAsset(t)
@@ -526,6 +539,7 @@ func TestRefreshOutdated_GitHubFallbackSkipsLatestReleaseWithoutCurrentPlatformA
 }
 
 func TestRefreshOutdated_GitHubFallbackSkipsIncompleteReleaseMetadata(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
 	calls := int32(0)
@@ -557,6 +571,7 @@ func TestRefreshOutdated_GitHubFallbackSkipsIncompleteReleaseMetadata(t *testing
 }
 
 func TestRefreshOutdated_GitHubFallbackIgnoresNativeOwnedRows(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	brew := &provOutdatedStub{
 		stubProvider: stubProvider{name: "brew", available: true},
@@ -598,6 +613,7 @@ func TestRefreshOutdated_GitHubFallbackIgnoresNativeOwnedRows(t *testing.T) {
 }
 
 func TestRefreshProviderOutdated_GitHubFallbackMarksOutdatedFromLatestRelease(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
 	asset := currentPlatformGitHubCLIAsset(t)
@@ -717,6 +733,7 @@ func githubFallbackLatestReleaseClient(t *testing.T, calls *int32, body func() i
 // verifies that when InstalledVersion is recorded in the recipe, the outdated
 // decision uses version comparison instead of (or in addition to) published_at.
 func TestRefreshOutdated_GitHubFallbackUsesVersionComparisonWhenInstalledVersionStored(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
 	asset := currentPlatformGitHubCLIAsset(t)
@@ -747,6 +764,7 @@ func TestRefreshOutdated_GitHubFallbackUsesVersionComparisonWhenInstalledVersion
 // verifies that a tool is not marked outdated when its installed version equals
 // the latest release tag, even when published_at timestamps differ.
 func TestRefreshOutdated_GitHubFallbackNotOutdatedWhenInstalledVersionMatchesLatest(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
 	asset := currentPlatformGitHubCLIAsset(t)

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -56,6 +55,7 @@ func testEcosystemForConcrete(providerName string) string {
 }
 
 func TestCheckSatisfiedGroups_FullySatisfied(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, brew)
 
@@ -84,6 +84,7 @@ func TestCheckSatisfiedGroups_FullySatisfied(t *testing.T) {
 }
 
 func TestCheckSatisfiedGroups_PartiallyInstalled(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, brew)
 
@@ -113,6 +114,7 @@ func TestCheckSatisfiedGroups_PartiallyInstalled(t *testing.T) {
 }
 
 func TestCheckSatisfiedGroups_EmptyGroupSkipped(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, brew)
 
@@ -137,6 +139,7 @@ func TestCheckSatisfiedGroups_EmptyGroupSkipped(t *testing.T) {
 }
 
 func TestCheckSatisfiedGroups_ActiveGroupExcluded(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, brew)
 
@@ -167,7 +170,8 @@ func TestCheckSatisfiedGroups_ActiveGroupExcluded(t *testing.T) {
 
 // ─── syncOrphansToMachineGroup (via Sync) ────────────────────────────────────
 
-func TestRefreshDiscovered_AutoGroupsSystemPackagesAsInventory(t *testing.T) {
+func TestRefreshDiscovered_BaselinesSystemPackagesOnFirstObservation(t *testing.T) {
+	t.Parallel()
 	apt := &stubProvider{
 		name:      "apt",
 		available: true,
@@ -193,7 +197,6 @@ func TestRefreshDiscovered_AutoGroupsSystemPackagesAsInventory(t *testing.T) {
 		),
 		Groups: []*config.GroupConfig{
 			{Name: short, Special: "host", Tools: groupTools("ripgrep", "bat")},
-			{Name: config.SystemInventoryGroup},
 		},
 	}); err != nil {
 		t.Fatal(err)
@@ -207,12 +210,11 @@ func TestRefreshDiscovered_AutoGroupsSystemPackagesAsInventory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	inventory := logicalTestGroupByName(updated, config.SystemInventoryGroup)
-	if inventory == nil || !inventory.IsSystemInventory() || !logicalTestGroupHasTool(inventory, "libxcomposite1") {
-		t.Fatalf("provider inventory = %+v, want libxcomposite1 in special inventory group", inventory)
+	if _, ok := updated.Tools["libxcomposite1"]; ok {
+		t.Fatalf("config tools = %+v, want system apt package left untracked", updated.Tools)
 	}
-	if logicalTestGroupHasTool(inventory, "ripgrep") || logicalTestGroupHasTool(inventory, "fzf") {
-		t.Fatalf("provider inventory = %+v, configured apt and discovered brew tools must stay out", inventory)
+	if logicalTestGroupByName(updated, config.SystemInventoryGroup) != nil {
+		t.Fatalf("provider inventory group should not be auto-created")
 	}
 	discovered, err := a.ListDiscovered(context.Background())
 	if err != nil {
@@ -223,7 +225,55 @@ func TestRefreshDiscovered_AutoGroupsSystemPackagesAsInventory(t *testing.T) {
 	}
 }
 
-func TestRefreshDiscovered_AutoGroupsEverySystemPackageProvider(t *testing.T) {
+func TestRefreshDiscovered_SurfacesSystemPackageInstalledAfterBaseline(t *testing.T) {
+	t.Parallel()
+	apt := &stubProvider{
+		name:      "apt",
+		available: true,
+		installed: []provider.InstalledTool{
+			installedTool("ripgrep", "1.0", "apt"),        // configured tool, in scope
+			installedTool("libxcomposite1", "1.0", "apt"), // pre-existing image package
+		},
+	}
+	a, cfgPath := newImportApp(t, apt)
+	short := testShortHostname()
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools:  logicalToolSpecs(logicalTool("ripgrep", "apt")),
+		Groups: []*config.GroupConfig{{Name: short, Special: "host", Tools: groupTools("ripgrep")}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// First observation on this host: libxcomposite1 becomes the baseline and
+	// must not surface as discovered.
+	if err := a.RefreshDiscovered(context.Background()); err != nil {
+		t.Fatalf("RefreshDiscovered (baseline): %v", err)
+	}
+	discovered, err := a.ListDiscovered(context.Background())
+	if err != nil {
+		t.Fatalf("ListDiscovered: %v", err)
+	}
+	if len(discovered) != 0 {
+		t.Fatalf("discovered after baseline = %+v, want none", discovered)
+	}
+
+	// A person now runs `apt install htop` by hand: it postdates the baseline
+	// and must surface as an importable discovered tool.
+	apt.installed = append(apt.installed, installedTool("htop", "1.0", "apt"))
+	if err := a.RefreshDiscovered(context.Background()); err != nil {
+		t.Fatalf("RefreshDiscovered (post-baseline): %v", err)
+	}
+	discovered, err = a.ListDiscovered(context.Background())
+	if err != nil {
+		t.Fatalf("ListDiscovered: %v", err)
+	}
+	if len(discovered) != 1 || discovered[0].Name != "htop" {
+		t.Fatalf("discovered = %+v, want only post-baseline htop visible", discovered)
+	}
+}
+
+func TestRefreshDiscovered_BaselinesEverySystemPackageProviderOnFirstObservation(t *testing.T) {
+	t.Parallel()
 	for _, providerName := range []string{"apt", "dnf", "pacman", "apk", "zypper"} {
 		t.Run(providerName, func(t *testing.T) {
 			p := &stubProvider{
@@ -249,100 +299,84 @@ func TestRefreshDiscovered_AutoGroupsEverySystemPackageProvider(t *testing.T) {
 			if err != nil {
 				t.Fatalf("config.Load: %v", err)
 			}
-			inventory := logicalTestGroupByName(updated, config.SystemInventoryGroup)
-			if inventory == nil || !inventory.IsSystemInventory() || !logicalTestGroupHasTool(inventory, "system-package") {
-				t.Fatalf("inventory = %+v, want %s package classified", inventory, providerName)
+			if _, ok := updated.Tools["system-package"]; ok {
+				t.Fatalf("config tools = %+v, want %s system package left untracked", updated.Tools, providerName)
+			}
+			if logicalTestGroupByName(updated, config.SystemInventoryGroup) != nil {
+				t.Fatalf("provider inventory group should not be auto-created")
+			}
+			discovered, err := a.ListDiscovered(context.Background())
+			if err != nil {
+				t.Fatalf("ListDiscovered: %v", err)
+			}
+			if len(discovered) != 0 {
+				t.Fatalf("discovered = %+v, want no system package rows", discovered)
 			}
 		})
 	}
 }
 
-func TestRefreshDiscovered_SystemInventoryIsIdempotentUnderConcurrentRefresh(t *testing.T) {
+func TestSync_HostActive_SystemPackageOrphansUseBaseline(t *testing.T) {
+	t.Parallel()
 	apt := &stubProvider{
 		name:      "apt",
 		available: true,
 		installed: []provider.InstalledTool{
-			installedTool("tracked", "1.0", "apt"),
-			installedTool("system-package", "1.0", "apt"),
+			installedTool("ripgrep", "1.0", "apt"),        // configured
+			installedTool("libxcomposite1", "1.0", "apt"), // pre-existing image package
 		},
 	}
 	a, cfgPath := newImportApp(t, apt)
-	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools:  logicalToolSpecs(logicalTool("tracked", "apt")),
-		Groups: []*config.GroupConfig{{Name: testShortHostname(), Special: "host", Tools: groupTools("tracked")}},
-	}); err != nil {
+	short := testShortHostname()
+	rootCfg := &config.RootConfig{
+		Tools:  logicalToolSpecs(logicalTool("ripgrep", "apt")),
+		Groups: []*config.GroupConfig{{Name: short, Special: "host", Tools: groupTools("ripgrep")}},
+	}
+	if err := saveAppConfig(t, cfgPath, rootCfg); err != nil {
 		t.Fatal(err)
 	}
 
-	var wg sync.WaitGroup
-	errs := make(chan error, 2)
-	for range 2 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			errs <- a.RefreshDiscovered(context.Background())
-		}()
+	// First sync on this host: libxcomposite1 becomes the baseline and must
+	// not be claimed into the hostname group.
+	if _, err := a.Sync(context.Background(), gosync.SyncOptions{}); err != nil {
+		t.Fatalf("Sync (baseline): %v", err)
 	}
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		if err != nil {
-			t.Fatalf("RefreshDiscovered: %v", err)
-		}
-	}
-
 	updated, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
 	}
-	inventory := logicalTestGroupByName(updated, config.SystemInventoryGroup)
-	count := 0
-	if inventory != nil {
-		for _, tool := range inventory.Tools {
-			if tool.Name == "system-package" {
-				count++
-			}
-		}
+	hostGroup := findTestGroup(updated, short)
+	if hostGroup == nil {
+		t.Fatalf("hostname group not found, groups=%+v", updated.Groups)
 	}
-	if count != 1 {
-		t.Fatalf("system-package inventory memberships = %d, want 1", count)
-	}
-}
-
-func TestRefreshDiscovered_InventoryPersistenceFailureDoesNotWriteDiscoveredDB(t *testing.T) {
-	apt := &stubProvider{
-		name:      "apt",
-		available: true,
-		installed: []provider.InstalledTool{
-			installedTool("tracked", "1.0", "apt"),
-			installedTool("system-package", "1.0", "apt"),
-		},
-	}
-	a, cfgPath := newImportApp(t, apt)
-	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
-		Tools: logicalToolSpecs(logicalTool("tracked", "apt")),
-		Groups: []*config.GroupConfig{
-			{Name: testShortHostname(), Special: "host", Tools: groupTools("tracked")},
-			{Name: config.SystemInventoryGroup, Special: "host"},
-		},
-	}); err != nil {
-		t.Fatal(err)
+	if testGroupHasTool(hostGroup, "libxcomposite1") {
+		t.Fatalf("hostname group tools = %+v, want baseline package left unclaimed", hostGroup.Tools)
 	}
 
-	err := a.RefreshDiscovered(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "reserved group") {
-		t.Fatalf("RefreshDiscovered error = %v, want reserved-group persistence error", err)
+	// A person now runs `apt install htop` by hand: it postdates the baseline
+	// and must be claimed as an orphan into the hostname group.
+	apt.installed = append(apt.installed, installedTool("htop", "1.0", "apt"))
+	if _, err := a.Sync(context.Background(), gosync.SyncOptions{}); err != nil {
+		t.Fatalf("Sync (post-baseline): %v", err)
 	}
-	discovered, listErr := a.ListDiscovered(context.Background())
-	if listErr != nil {
-		t.Fatalf("ListDiscovered: %v", listErr)
+	updated, err = config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
 	}
-	if len(discovered) != 0 {
-		t.Fatalf("discovered DB rows = %+v, want none after persistence failure", discovered)
+	hostGroup = findTestGroup(updated, short)
+	if hostGroup == nil {
+		t.Fatalf("hostname group not found, groups=%+v", updated.Groups)
+	}
+	if !testGroupHasTool(hostGroup, "htop") {
+		t.Fatalf("hostname group tools = %+v, want post-baseline htop claimed", hostGroup.Tools)
+	}
+	if testGroupHasTool(hostGroup, "libxcomposite1") {
+		t.Fatalf("hostname group tools = %+v, want baseline package still unclaimed", hostGroup.Tools)
 	}
 }
 
 func TestSync_HostActive_OrphansAddedToHostnameGroup(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{
 		name:      "brew",
 		available: true,
@@ -696,6 +730,7 @@ func TestSyncAll_DryRunDiscoversWithoutWritingDB(t *testing.T) {
 }
 
 func TestSync_HostActive_NoOrphansSkipsHostnameGroup(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{
 		name:      "brew",
 		available: true,
@@ -757,6 +792,7 @@ func testGroupHasTool(group *config.GroupConfig, name string) bool {
 }
 
 func TestSync_HostActive_ReturnsSatisfiedGroups(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{
 		name:      "brew",
 		available: true,
@@ -800,6 +836,7 @@ func TestSync_HostActive_ReturnsSatisfiedGroups(t *testing.T) {
 // ─── hostname group injection ─────────────────────────────────────────────────
 
 func TestSync_HostActive_HostnameGroupInjected(t *testing.T) {
+	t.Parallel()
 	brew := &installTracker{stubProvider: stubProvider{name: "brew", available: true}}
 	a, cfgPath := newImportApp(t, brew)
 	short := testShortHostname()
@@ -841,6 +878,7 @@ func TestSync_HostActive_HostnameGroupInjected(t *testing.T) {
 // ─── ClaimFromMachineGroup ────────────────────────────────────────────────────
 
 func TestClaimFromMachineGroup_PrunesMachineGroup(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	short := testShortHostname()
 
@@ -903,6 +941,7 @@ func TestClaimFromMachineGroup_PrunesMachineGroup(t *testing.T) {
 // whose ListInstalled returns an error causes a warning in the Sync result
 // instead of silently swallowing the failure.
 func TestSync_OrphanScanProviderError_SurfacedAsWarning(t *testing.T) {
+	t.Parallel()
 	scanErr := errors.New("boom: list installed failed")
 	bad := &listErrProvider{
 		stubProvider: stubProvider{name: "brew", available: true},

@@ -8,6 +8,7 @@ import (
 )
 
 func TestSeedAgentsRowsFromCache_SeedsOnlyLoadedSectionsAndSetsKnown(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	cache := &app.CachedAgentsRows{
 		SkillsLoaded:  true,
@@ -43,6 +44,7 @@ func TestSeedAgentsRowsFromCache_SeedsOnlyLoadedSectionsAndSetsKnown(t *testing.
 }
 
 func TestSeedAgentsRowsFromCache_NeverOverwritesNonEmptyRows(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.pluginRows = []app.PluginRow{{Name: "live-plugin", Marketplace: "acme"}}
 	cache := &app.CachedAgentsRows{
@@ -61,6 +63,7 @@ func TestSeedAgentsRowsFromCache_NeverOverwritesNonEmptyRows(t *testing.T) {
 }
 
 func TestSeedAgentsRowsFromCache_NilCache_NoOp(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 
 	(&m).seedAgentsRowsFromCache(nil)
@@ -75,6 +78,7 @@ func TestSeedAgentsRowsFromCache_NilCache_NoOp(t *testing.T) {
 // the cache-seeded rows right away — not the loading line or the onboarding
 // empty state — while the live section loads are still in flight.
 func TestToolsLoadedMsg_AgentsRowsCache_RendersRowsImmediately(t *testing.T) {
+	t.Parallel()
 	m := agentsAllProgressModel(t, nil, nil, nil)
 	m.skillTypeIdx = agentsChipAll
 	cache := &app.CachedAgentsRows{

@@ -16,6 +16,7 @@ import (
 // ─── HasConfig / CreateEmptyConfig ───────────────────────────────────────────
 
 func TestHasConfig_False(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	// No settings.json written yet.
 	if a.HasConfig() {
@@ -24,6 +25,7 @@ func TestHasConfig_False(t *testing.T) {
 }
 
 func TestHasConfig_True(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := os.WriteFile(cfgPath, []byte(""), 0o644); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -34,6 +36,7 @@ func TestHasConfig_True(t *testing.T) {
 }
 
 func TestCreateEmptyConfig_CreatesFile(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := a.CreateEmptyConfig(); err != nil {
 		t.Fatalf("CreateEmptyConfig: %v", err)
@@ -47,6 +50,7 @@ func TestCreateEmptyConfig_CreatesFile(t *testing.T) {
 }
 
 func TestCreateEmptyConfig_Noop(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	// Write an existing non-empty config.
 	existing := &config.RootConfig{
@@ -66,6 +70,7 @@ func TestCreateEmptyConfig_Noop(t *testing.T) {
 }
 
 func TestImportConfigFile_CopiesExistingSettings(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	sourcePath := filepath.Join(t.TempDir(), "settings.json")
 	source := &config.RootConfig{
@@ -100,6 +105,7 @@ func TestImportConfigFile_CopiesExistingSettings(t *testing.T) {
 }
 
 func TestImportConfigFile_RejectsMissingSource(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	err := a.ImportConfigFile(filepath.Join(t.TempDir(), "missing-settings.json"))
 	if err == nil || !strings.Contains(err.Error(), "settings import") {
@@ -108,6 +114,7 @@ func TestImportConfigFile_RejectsMissingSource(t *testing.T) {
 }
 
 func TestImportConfigFile_RejectsDirectorySource(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	err := a.ImportConfigFile(t.TempDir())
 	if err == nil || !strings.Contains(err.Error(), "is a directory") {
@@ -116,6 +123,7 @@ func TestImportConfigFile_RejectsDirectorySource(t *testing.T) {
 }
 
 func TestImportConfigFile_RejectsMalformedSource(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	sourcePath := filepath.Join(t.TempDir(), "settings.json")
 	if err := os.WriteFile(sourcePath, []byte(`{"version":`), 0o644); err != nil {
@@ -129,6 +137,7 @@ func TestImportConfigFile_RejectsMalformedSource(t *testing.T) {
 }
 
 func TestSaveToolFallback_PersistsRecipeWithoutInstalling(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("rg", "system")),
@@ -171,6 +180,7 @@ func TestSaveToolFallback_PersistsRecipeWithoutInstalling(t *testing.T) {
 }
 
 func TestToolFallback_ReturnsSavedSpec(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(
@@ -219,6 +229,7 @@ func TestToolFallback_ReturnsSavedSpec(t *testing.T) {
 }
 
 func TestSaveToolFallback_RejectsUnknownTemplateVariable(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("rg", "system")),
@@ -247,6 +258,7 @@ func TestSaveToolFallback_RejectsUnknownTemplateVariable(t *testing.T) {
 }
 
 func TestSaveToolFallbackFromGitHubSpec_NormalizesSourceAndPersistsRecipe(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true})
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("rg", "system")),
@@ -289,6 +301,7 @@ func TestSaveToolFallbackFromGitHubSpec_NormalizesSourceAndPersistsRecipe(t *tes
 }
 
 func TestSaveToolFallback_RejectsMissingTool(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t, &stubProvider{name: "system", available: true})
 	err := a.SaveToolFallback(context.Background(), "ghost", config.FallbackSpec{
 		Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
@@ -300,6 +313,7 @@ func TestSaveToolFallback_RejectsMissingTool(t *testing.T) {
 }
 
 func TestSaveToolFallback_PersistsForConcreteProviderTool(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t, &stubProvider{name: "npm", available: true})
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("eslint", "npm")),
@@ -324,6 +338,7 @@ func TestSaveToolFallback_PersistsForConcreteProviderTool(t *testing.T) {
 }
 
 func TestImportConfigFile_RejectsActiveConfigSource(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{}); err != nil {
 		t.Fatalf("config.Save: %v", err)
@@ -338,6 +353,7 @@ func TestImportConfigFile_RejectsActiveConfigSource(t *testing.T) {
 // ─── LoadTaps ─────────────────────────────────────────────────────────────────
 
 func TestLoadTaps_Empty(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	taps, err := a.LoadTaps()
 	if err != nil {
@@ -349,6 +365,7 @@ func TestLoadTaps_Empty(t *testing.T) {
 }
 
 func TestLoadTaps_ReturnsUnion(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
 	rootCfg := &config.RootConfig{
@@ -374,6 +391,7 @@ func TestLoadTaps_ReturnsUnion(t *testing.T) {
 // ─── ActiveHostInfo ───────────────────────────────────────────────────────────
 
 func TestActiveHostInfo_NoConfig(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	name, groups, ok := a.ActiveHostInfo()
 	if ok {
@@ -408,6 +426,7 @@ func TestActiveHostInfo_MatchesHostname(t *testing.T) {
 }
 
 func TestToolMembershipMap_ReturnsSingleOwnerMembership(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	rootCfg := &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
@@ -431,6 +450,7 @@ func TestToolMembershipMap_ReturnsSingleOwnerMembership(t *testing.T) {
 }
 
 func TestToolGroupMapReturnsFirstMembership(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	rootCfg := &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew"), logicalTool("fd", "brew")),
@@ -457,6 +477,7 @@ func TestToolGroupMapReturnsFirstMembership(t *testing.T) {
 }
 
 func TestSetToolAndGroupIgnoreScopes(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	rootCfg := &config.RootConfig{
 		Tools:  logicalToolSpecs(logicalTool("ripgrep", "brew")),
@@ -485,6 +506,7 @@ func TestSetToolAndGroupIgnoreScopes(t *testing.T) {
 }
 
 func TestSetToolQuarantine_PersistsToolOverride(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	rootCfg := &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("ripgrep", "brew")),
@@ -518,6 +540,7 @@ func (o *outdatedStub) OutdatedMap(_ context.Context) (map[string]string, error)
 }
 
 func TestRefreshOutdated_SetsOutdatedFlag(t *testing.T) {
+	t.Parallel()
 	stub := &outdatedStub{
 		stubProvider: stubProvider{name: "brew", available: true},
 		outdated:     map[string]string{"ripgrep": "15.0.0"},
@@ -553,7 +576,10 @@ func TestRefreshOutdated_SetsOutdatedFlag(t *testing.T) {
 }
 
 func TestRefreshOutdated_NoOutdatedChecker(t *testing.T) {
+	t.Parallel(
 	// Provider without OutdatedChecker should be silently skipped.
+	)
+
 	stub := &stubProvider{name: "brew", available: true}
 	a, _ := newImportApp(t, stub)
 	ctx := context.Background()
@@ -574,6 +600,7 @@ func TestRefreshOutdated_NoOutdatedChecker(t *testing.T) {
 // ─── Registry ─────────────────────────────────────────────────────────────────
 
 func TestRegistry_ReturnsNonNil(t *testing.T) {
+	t.Parallel()
 	stub := &stubProvider{name: "brew", available: true}
 	a, _ := newImportApp(t, stub)
 	if r := a.Registry(); r == nil {
@@ -582,6 +609,7 @@ func TestRegistry_ReturnsNonNil(t *testing.T) {
 }
 
 func TestRegistry_ContainsRegisteredProviders(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	npm := &stubProvider{name: "npm", available: true}
 	a, _ := newImportApp(t, brew, npm)
@@ -620,6 +648,7 @@ func TestInit_CreatesCacheDir(t *testing.T) {
 }
 
 func TestInit_CacheDirOverride(t *testing.T) {
+	t.Parallel()
 	configDir := t.TempDir()
 	cfgPath := filepath.Join(configDir, "settings.json")
 	cacheDir := t.TempDir()

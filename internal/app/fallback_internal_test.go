@@ -13,6 +13,7 @@ import (
 )
 
 func TestAutomaticFallbackUsableStatusRules(t *testing.T) {
+	t.Parallel()
 	base := config.FallbackSpec{
 		Status: config.FallbackStatusUnverified,
 		Commands: config.FallbackCommands{
@@ -45,6 +46,7 @@ func TestAutomaticFallbackUsableStatusRules(t *testing.T) {
 }
 
 func TestAutomaticFallbackUsableForToolHandlesConfiguredMissingFallback(t *testing.T) {
+	t.Parallel()
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
 	a := New(cfgPath)
 	if err := config.Save(cfgPath, &config.RootConfig{
@@ -69,6 +71,7 @@ func TestAutomaticFallbackUsableForToolHandlesConfiguredMissingFallback(t *testi
 }
 
 func TestFallbackOwnershipHelpers(t *testing.T) {
+	t.Parallel()
 	githubFallback := &config.FallbackSpec{
 		Source: config.FallbackSource{Type: config.FallbackSourceGitHub},
 	}
@@ -113,6 +116,7 @@ func TestFallbackOwnershipHelpers(t *testing.T) {
 }
 
 func TestSyncNativeUnavailableFallbacksUsesCachedFallbackInstall(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
 	a := New(cfgPath)

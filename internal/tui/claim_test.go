@@ -41,6 +41,7 @@ func redirectToReadOnlyConfig(t *testing.T, a *app.App) {
 // ── doClaim ───────────────────────────────────────────────────────────────────
 
 func TestDoClaim_Success(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
@@ -63,6 +64,7 @@ func TestDoClaim_Success(t *testing.T) {
 }
 
 func TestDoClaim_RefreshesToolMembershipState(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	m := modelForCmds(a)
@@ -95,6 +97,7 @@ func TestDoClaim_RefreshesToolMembershipState(t *testing.T) {
 }
 
 func TestHandleClaimDoneMsg_ErrorStillRefreshesClaim(t *testing.T) {
+	t.Parallel()
 	m := modelForCmds(nil)
 	key := toolKey("ripgrep", "system")
 	m.discoveredTools = []*app.ToolView{{Name: "ripgrep", Provider: "system", Installed: true}}
@@ -119,6 +122,7 @@ func TestHandleClaimDoneMsg_ErrorStillRefreshesClaim(t *testing.T) {
 }
 
 func TestHandleClaimDoneMsg_RemovesDiscoveredBeforeFiltering(t *testing.T) {
+	t.Parallel()
 	m := modelForCmds(nil)
 	key := toolKey("swiftlint", "system")
 	swiftformat := &app.ToolView{Name: "swiftformat", Provider: "system", Package: "swiftformat", Installed: true, Tracked: true}
@@ -152,7 +156,10 @@ func TestHandleClaimDoneMsg_RemovesDiscoveredBeforeFiltering(t *testing.T) {
 }
 
 func TestDoClaim_AddError(t *testing.T) {
+	t.Parallel(
 	// Redirect ConfigPath to a read-only directory so Add's saveConfig fails.
+	)
+
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil)
 	redirectToReadOnlyConfig(t, a)
@@ -341,6 +348,7 @@ func (p *installOptionCaptureProvider) Install(_ context.Context, tool provider.
 }
 
 func TestDoInstallAndAddTool_PassesSearchOptions(t *testing.T) {
+	t.Parallel()
 	brew := &installOptionCaptureProvider{okProvider: okProvider{name: "brew"}}
 	a, cfgPath := newCmdApp(t, brew, nil)
 	m := modelForCmds(a)
@@ -379,6 +387,7 @@ func TestDoInstallAndAddTool_PassesSearchOptions(t *testing.T) {
 }
 
 func TestHandleOpCompleteMsg_ErrorStillRefreshesToolMembershipState(t *testing.T) {
+	t.Parallel()
 	m := modelForCmds(nil)
 	key := toolKey("ripgrep", "system")
 	msg := opCompleteMsg{
@@ -399,6 +408,7 @@ func TestHandleOpCompleteMsg_ErrorStillRefreshesToolMembershipState(t *testing.T
 }
 
 func TestHandleOpCompleteMsg_ProviderPinsRefreshBeforeFiltering(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{
 		Name:          "ripgrep",
 		Provider:      "system",
@@ -430,6 +440,7 @@ func TestHandleOpCompleteMsg_ProviderPinsRefreshBeforeFiltering(t *testing.T) {
 // ── doSetProviderScope ────────────────────────────────────────────────────────
 
 func TestDoSetProviderScope_ToolSuccess(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
 	m := modelForCmds(a)
@@ -459,6 +470,7 @@ func TestDoSetProviderScope_ToolSuccess(t *testing.T) {
 }
 
 func TestDoSetProviderScope_PersistsPackageAlias(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, cfgPath := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("ripgrep", "brew")})
 	m := modelForCmds(a)
@@ -483,6 +495,7 @@ func TestDoSetProviderScope_PersistsPackageAlias(t *testing.T) {
 }
 
 func TestDoSetProviderScope_Error(t *testing.T) {
+	t.Parallel()
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, nil) // empty config — no tools
 	m := modelForCmds(a)
@@ -509,6 +522,7 @@ func (p *describingOKProvider) Describe(_ context.Context, _ provider.Tool) (str
 }
 
 func TestDoMigrateProvider_Success(t *testing.T) {
+	t.Parallel()
 	brew := &okProvider{name: "brew"}
 	pip := &describingOKProvider{okProvider: okProvider{name: "pip"}, desc: "Python package installer"}
 	// Real-world scenario: config already declares "pip" as the intended provider
@@ -561,7 +575,10 @@ func TestDoMigrateProvider_Success(t *testing.T) {
 }
 
 func TestDoMigrateProvider_SwitchError(t *testing.T) {
+	t.Parallel(
 	// "pip" is not registered as a provider → Switch returns "unknown provider" error.
+	)
+
 	prov := &okProvider{name: "brew"}
 	a, _ := newCmdApp(t, prov, []tuiFixtureTool{tuiTool("black", "pip")})
 	m := modelForCmds(a)

@@ -13,6 +13,7 @@ import (
 )
 
 func TestAgentsEnabledDefaultAndDisabled(t *testing.T) {
+	t.Parallel()
 	a := &App{}
 
 	if !a.AgentsEnabled(&config.RootConfig{}) {
@@ -34,6 +35,7 @@ func TestAgentsEnabledDefaultAndDisabled(t *testing.T) {
 }
 
 func TestSkillsEnabledMatrix(t *testing.T) {
+	t.Parallel()
 	a := &App{}
 	if !a.SkillsEnabled(&config.RootConfig{}) {
 		t.Error("skills must be enabled by default")
@@ -59,6 +61,7 @@ func TestSkillsEnabledMatrix(t *testing.T) {
 }
 
 func TestMcpEnabledMatrix(t *testing.T) {
+	t.Parallel()
 	a := &App{}
 	if !a.McpEnabled(&config.RootConfig{}) {
 		t.Error("mcp must be enabled by default")
@@ -84,6 +87,7 @@ func TestMcpEnabledMatrix(t *testing.T) {
 }
 
 func TestPluginsEnabledMatrix(t *testing.T) {
+	t.Parallel()
 	a := &App{}
 	if !a.PluginsEnabled(&config.RootConfig{}) {
 		t.Error("plugins must be enabled by default")

@@ -159,7 +159,7 @@ func (a *App) DotsExtractThenAddHostVariant(ctx context.Context, parentName, sub
 // DotsExtractWithState runs DotsExtract and returns the refreshed dots state for
 // TUI callers.
 func (a *App) DotsExtractWithState(ctx context.Context, parentName, subpath string, opts DotsExtractOptions) (*DotsOperationStateResult, error) {
-	return a.dotsOperationStateAfter(ctx, func() ([]dots.Op, error) {
+	return a.dotsOperationStateAfter(ctx, func(ctx context.Context) ([]dots.Op, error) {
 		return a.DotsExtract(ctx, parentName, subpath, opts)
 	})
 }

@@ -100,6 +100,7 @@ func collectAdminTerminalTestOutput(events <-chan tea.Msg, timeout time.Duration
 }
 
 func TestStartAdminTerminalSessionDoesNotStartProcessBeforeCommandRuns(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("PTY admin terminal is unsupported on Windows")
 	}
@@ -127,6 +128,7 @@ func TestStartAdminTerminalSessionDoesNotStartProcessBeforeCommandRuns(t *testin
 }
 
 func TestSendAdminTerminalOutputPreservesRecentOutputWhenBufferFull(t *testing.T) {
+	t.Parallel()
 	events := make(chan tea.Msg, adminTerminalEventBuffer)
 	for i := 0; i < adminTerminalEventBuffer+8; i++ {
 		sendAdminTerminalOutput(events, adminTerminalOutputMsg{id: 7, chunk: "old output line\n"})
@@ -151,6 +153,7 @@ func TestSendAdminTerminalOutputPreservesRecentOutputWhenBufferFull(t *testing.T
 }
 
 func TestSendAdminTerminalOutputPreservesDoneMsg(t *testing.T) {
+	t.Parallel()
 	events := make(chan tea.Msg, adminTerminalEventBuffer)
 	// Fill channel completely with output messages.
 	for i := range adminTerminalEventBuffer {
@@ -180,6 +183,7 @@ func TestSendAdminTerminalOutputPreservesDoneMsg(t *testing.T) {
 }
 
 func TestAdminTerminalKeyBytes(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		msg  tea.KeyPressMsg
@@ -201,6 +205,7 @@ func TestAdminTerminalKeyBytes(t *testing.T) {
 }
 
 func TestRenderAdminTerminalPopup_PreRunStyling(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 90
 	m.height = 24
@@ -241,6 +246,7 @@ func TestRenderAdminTerminalPopup_PreRunStyling(t *testing.T) {
 }
 
 func TestAdminTerminalPopupFrame_TitleReflectsState(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.adminTerminal = &adminTerminalState{name: "vim", action: provider.PrivilegeActionInstall}
 	if got := adminTerminalPopupFrame(m).Title; got != "Admin Approval Required" {
@@ -257,6 +263,7 @@ func TestAdminTerminalPopupFrame_TitleReflectsState(t *testing.T) {
 }
 
 func TestAdminTerminalApprovalSummary_ShowsQueuePosition(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	state := &adminTerminalState{
 		name:       "vim",
@@ -272,6 +279,7 @@ func TestAdminTerminalApprovalSummary_ShowsQueuePosition(t *testing.T) {
 }
 
 func TestRenderAdminTerminalPopup_RunningViewportStyling(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 90
 	m.height = 24
@@ -299,6 +307,7 @@ func TestRenderAdminTerminalPopup_RunningViewportStyling(t *testing.T) {
 }
 
 func TestRenderAdminTerminalPopup_EmphasizesPasswordPrompt(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 90
 	m.height = 24
@@ -326,6 +335,7 @@ func TestRenderAdminTerminalPopup_EmphasizesPasswordPrompt(t *testing.T) {
 }
 
 func TestRenderAdminTerminalOutput_LeftAlignsInputRequiredStatus(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.height = 24
 	state := &adminTerminalState{
@@ -341,6 +351,7 @@ func TestRenderAdminTerminalOutput_LeftAlignsInputRequiredStatus(t *testing.T) {
 }
 
 func TestAdminTerminalPasswordPromptFitsConstrainedWindows(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		width  int
@@ -380,6 +391,7 @@ func TestAdminTerminalPasswordPromptFitsConstrainedWindows(t *testing.T) {
 }
 
 func TestAdminTerminalAwaitingPassword(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		output string
@@ -406,6 +418,7 @@ func TestAdminTerminalAwaitingPassword(t *testing.T) {
 }
 
 func TestAdminTerminalProcessEnvSetsDistinctSudoPrompt(t *testing.T) {
+	t.Parallel()
 	original := []string{"PATH=/usr/bin", "SUDO_PROMPT=old prompt", "TERM=xterm-256color"}
 	got := adminTerminalProcessEnv(original)
 
@@ -428,6 +441,7 @@ func TestAdminTerminalProcessEnvSetsDistinctSudoPrompt(t *testing.T) {
 }
 
 func TestVisibleAdminTerminalOutputLines_TruncatesWithIndicator(t *testing.T) {
+	t.Parallel()
 	got := visibleAdminTerminalOutputLines("one\ntwo\nthree", 40, 2)
 	if len(got) != 2 {
 		t.Fatalf("line count = %d, want 2", len(got))

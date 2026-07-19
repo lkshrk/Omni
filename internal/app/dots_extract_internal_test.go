@@ -3,6 +3,7 @@ package app
 import "testing"
 
 func TestCleanExtractSubpath(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		in      string
 		want    string
@@ -37,6 +38,7 @@ func TestCleanExtractSubpath(t *testing.T) {
 }
 
 func TestDeriveExtractName(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		parent string
 		subrel string
@@ -54,6 +56,7 @@ func TestDeriveExtractName(t *testing.T) {
 }
 
 func TestSanitizeEntryName(t *testing.T) {
+	t.Parallel()
 	tests := []struct{ in, want string }{
 		{in: "ok-name_1.2", want: "ok-name_1.2"},
 		{in: "with/slash", want: "with-slash"},

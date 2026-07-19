@@ -24,6 +24,7 @@ func skillFilterBaseModel() Model {
 }
 
 func TestSkillFilter_TypeCyclesRight(t *testing.T) {
+	t.Parallel()
 	m := skillFilterBaseModel()
 	m.skillTypeIdx = agentsChipSkills
 
@@ -50,6 +51,7 @@ func TestSkillFilter_TypeCyclesRight(t *testing.T) {
 }
 
 func TestSkillFilter_TypeCyclesLeft(t *testing.T) {
+	t.Parallel()
 	m := skillFilterBaseModel()
 	m.skillTypeIdx = agentsChipMarketplace
 
@@ -81,6 +83,7 @@ func TestSkillFilter_TypeCyclesLeft(t *testing.T) {
 }
 
 func TestSkillFilter_MCPTypeShowsPlaceholder(t *testing.T) {
+	t.Parallel()
 	m := skillFilterBaseModel()
 	m.skillTypeIdx = agentsChipMcp
 
@@ -91,6 +94,7 @@ func TestSkillFilter_MCPTypeShowsPlaceholder(t *testing.T) {
 }
 
 func TestSkillFilter_PluginTypeShowsPlaceholder(t *testing.T) {
+	t.Parallel()
 	m := skillFilterBaseModel()
 	m.skillTypeIdx = agentsChipPlugin
 
@@ -101,6 +105,7 @@ func TestSkillFilter_PluginTypeShowsPlaceholder(t *testing.T) {
 }
 
 func TestSkillFilter_SkillsTypeShowsTable(t *testing.T) {
+	t.Parallel()
 	m := skillFilterBaseModel()
 	m.skillTypeIdx = agentsChipSkills
 	m.skillsRows = []app.SkillPackageRow{
@@ -120,6 +125,7 @@ func TestSkillFilter_SkillsTypeShowsTable(t *testing.T) {
 }
 
 func TestSkillFilter_AgentBarListsAgents(t *testing.T) {
+	t.Parallel()
 	m := skillFilterBaseModel()
 	m.skillTypeIdx = agentsChipSkills
 	m.skillsRows = []app.SkillPackageRow{
@@ -137,6 +143,7 @@ func TestSkillFilter_AgentBarListsAgents(t *testing.T) {
 }
 
 func TestSkillFilter_AgentFilterShowsOnlyMatchingRows(t *testing.T) {
+	t.Parallel()
 	m := skillFilterBaseModel()
 	m.skillTypeIdx = agentsChipSkills
 	m.skillsRows = []app.SkillPackageRow{
@@ -170,6 +177,7 @@ func TestSkillFilter_AgentFilterShowsOnlyMatchingRows(t *testing.T) {
 }
 
 func TestSkillFilter_AgentFilterAllShowsBothRows(t *testing.T) {
+	t.Parallel()
 	m := skillFilterBaseModel()
 	m.skillTypeIdx = agentsChipSkills
 	m.skillsRows = []app.SkillPackageRow{
@@ -188,6 +196,7 @@ func TestSkillFilter_AgentFilterAllShowsBothRows(t *testing.T) {
 }
 
 func TestSkillFilter_CurlyKeysCycleAgentIdx(t *testing.T) {
+	t.Parallel()
 	m := skillFilterBaseModel()
 	m.skillTypeIdx = agentsChipSkills
 	m.skillsRows = []app.SkillPackageRow{
@@ -244,6 +253,7 @@ func TestSkillFilter_CurlyKeysCycleAgentIdx(t *testing.T) {
 }
 
 func TestSkillFilter_SkillAgentIDs(t *testing.T) {
+	t.Parallel()
 	rows := []app.SkillPackageRow{
 		{Agents: []string{"codex", "claude-code"}},
 		{Agents: []string{"codex"}},
@@ -271,6 +281,7 @@ func TestSkillFilter_SkillAgentIDs(t *testing.T) {
 }
 
 func TestSkillFilter_PillBarListsEnabledAgentsEvenWithNoDeclaredAgents(t *testing.T) {
+	t.Parallel()
 	m := skillFilterBaseModel()
 	m.skillTypeIdx = agentsChipSkills
 	m.settings.AgentsUse = []string{"claude-code", "codex"}
@@ -290,6 +301,7 @@ func TestSkillFilter_PillBarListsEnabledAgentsEvenWithNoDeclaredAgents(t *testin
 }
 
 func TestSkillFilter_FilterByEnabledAgentKeepsRowsWithEmptyAgents(t *testing.T) {
+	t.Parallel()
 	m := skillFilterBaseModel()
 	m.skillTypeIdx = agentsChipSkills
 	m.settings.AgentsUse = []string{"claude-code", "codex"}

@@ -164,6 +164,7 @@ func TestInstalledAgentsHonorsConfigEnvOverride(t *testing.T) {
 }
 
 func TestAgentHasAnySkill(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	codex := AgentInfo{ID: "codex", configDir: ".codex", extraSkillsDirs: []string{".agents/skills"}}
 	// primary dir hit
@@ -186,6 +187,7 @@ func TestAgentHasAnySkill(t *testing.T) {
 }
 
 func TestEffectiveSkillAgents(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		use  []string
@@ -224,6 +226,7 @@ func TestEffectiveSkillAgents(t *testing.T) {
 // dots discovery rely on, since internal/config cannot import internal/app)
 // silently drifting apart.
 func TestAgentsCatalog_ConfigDirsMatchConfigList(t *testing.T) {
+	t.Parallel()
 	catalog := make(map[string]struct{}, len(supportedAgents))
 	for _, a := range supportedAgents {
 		catalog[a.configDir] = struct{}{}

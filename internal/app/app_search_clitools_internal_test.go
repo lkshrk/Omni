@@ -20,6 +20,7 @@ func (s *cliToolErrorProviderStub) CLIToolSet(context.Context) (map[string]bool,
 }
 
 func TestDiscoverCLIToolSetsFailsClosedWhenProviderErrors(t *testing.T) {
+	t.Parallel()
 	a := New(filepath.Join(t.TempDir(), "settings.json"))
 	a.registry = provider.NewRegistry()
 	broken := &cliToolErrorProviderStub{internalProviderStub: internalProviderStub{name: "pip"}}
@@ -33,6 +34,7 @@ func TestDiscoverCLIToolSetsFailsClosedWhenProviderErrors(t *testing.T) {
 }
 
 func TestDiscoverCLIToolSetsAllowsAllForNonCLIToolProvider(t *testing.T) {
+	t.Parallel()
 	a := New(filepath.Join(t.TempDir(), "settings.json"))
 	a.registry = provider.NewRegistry()
 	brew := &internalProviderStub{name: "brew"}

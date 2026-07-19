@@ -85,6 +85,7 @@ func ansiEscapeBefore(t *testing.T, s, bracketed string) string {
 }
 
 func TestRenderGroupPills_Empty(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	if got := renderGroupPills(p, nil, nil, 80, nil); got != "" {
 		t.Fatalf("renderGroupPills(nil) = %q, want empty", got)

@@ -9,6 +9,7 @@ import (
 )
 
 func TestPluginRows_ManagedRowReportsPerAgentStatus(t *testing.T) {
+	t.Parallel()
 	claude := &stubPluginAdapter{id: "claude-code", available: true}
 	codex := &stubPluginAdapter{id: "codex", available: false}
 	agents := config.AgentsConfig{
@@ -35,6 +36,7 @@ func TestPluginRows_ManagedRowReportsPerAgentStatus(t *testing.T) {
 }
 
 func TestPluginRows_VersionAndOutdated(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name          string
 		version       string
@@ -79,6 +81,7 @@ func TestPluginRows_VersionAndOutdated(t *testing.T) {
 }
 
 func TestPluginRow_OutdatedShaMatrix(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		row  app.PluginRow
@@ -118,6 +121,7 @@ func TestPluginRow_OutdatedShaMatrix(t *testing.T) {
 func boolPtr(b bool) *bool { return &b }
 
 func TestPluginRow_UpdateDisplay(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		row     app.PluginRow
@@ -160,6 +164,7 @@ func TestPluginRow_UpdateDisplay(t *testing.T) {
 // version (the common case) never show as outdated regardless of adapter
 // signal, so "U" silently has nothing to update.
 func TestPluginRows_PathOutdatedMergedFromAdapter(t *testing.T) {
+	t.Parallel()
 	claude := &stubPluginAdapter{
 		id:        "claude-code",
 		available: true,

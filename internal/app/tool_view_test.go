@@ -7,6 +7,7 @@ import (
 )
 
 func TestClassifyToolView(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		tool       *app.ToolView
@@ -113,6 +114,7 @@ func TestClassifyToolView(t *testing.T) {
 }
 
 func TestToolProviderDisplayLabel(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input app.ToolProviderDisplayInput
@@ -139,6 +141,7 @@ func TestToolProviderDisplayLabel(t *testing.T) {
 }
 
 func TestToolHasPrivilegeMarker(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		tool    *app.ToolView
@@ -164,6 +167,7 @@ func TestToolHasPrivilegeMarker(t *testing.T) {
 }
 
 func TestToolProviderEcosystem(t *testing.T) {
+	t.Parallel()
 	tests := []struct{ input, want string }{
 		{"system", "system"},
 		{"brew", "system"},
@@ -191,6 +195,7 @@ func TestToolProviderEcosystem(t *testing.T) {
 }
 
 func TestToolProviderDisplayRole(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  app.ToolProviderDisplayRole
@@ -211,6 +216,7 @@ func TestToolProviderDisplayRole(t *testing.T) {
 }
 
 func TestBuildToolViewList_PlacesIgnoreLabelToolsInIgnoredBucket(t *testing.T) {
+	t.Parallel()
 	tools := []*app.ToolView{
 		{Name: "git", Provider: "system", Tracked: true, Installed: true},
 		{Name: "bat", Provider: "system", Tracked: true, Installed: true},
@@ -230,6 +236,7 @@ func TestBuildToolViewList_PlacesIgnoreLabelToolsInIgnoredBucket(t *testing.T) {
 }
 
 func TestBuildToolViewList_OrdersCountsAndDedupesSources(t *testing.T) {
+	t.Parallel()
 	tools := []*app.ToolView{
 		{Name: "git", Provider: "system", Tracked: true, Installed: true},
 		{Name: "bat", Provider: "system", Tracked: true},
@@ -264,6 +271,7 @@ func TestBuildToolViewList_OrdersCountsAndDedupesSources(t *testing.T) {
 }
 
 func TestBuildToolViewList_FiltersProviderAndGroupWithoutDroppingMatchingSearch(t *testing.T) {
+	t.Parallel()
 	tools := []*app.ToolView{
 		{Name: "git", Provider: "system", Tracked: true, Installed: true},
 		{Name: "eslint", Provider: "node", Tracked: true, Installed: true},
@@ -299,6 +307,7 @@ func TestBuildToolViewList_FiltersProviderAndGroupWithoutDroppingMatchingSearch(
 }
 
 func TestBuildToolViewList_FiltersQueryByToolNameAndProvider(t *testing.T) {
+	t.Parallel()
 	tools := []*app.ToolView{
 		{Name: "git", Provider: "system", Tracked: true, Installed: true},
 		{Name: "eslint", Provider: "node", Tracked: true, Installed: true},

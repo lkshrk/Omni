@@ -172,6 +172,7 @@ func agentsComposedCases() []agentsComposedCase {
 // above, mirroring parity_harness_test.go's documented-divergence style
 // rather than silently skipping them.
 func TestAgentsComposedPath_DetailLinesAndHintsPresentAcrossStateFeatureMatrix(t *testing.T) {
+	t.Parallel()
 	for _, c := range agentsComposedCases() {
 		t.Run(c.name, func(t *testing.T) {
 			m := c.build()

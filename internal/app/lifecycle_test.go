@@ -77,6 +77,7 @@ func (p *lifecycleProvider) ResolvedName(_ context.Context) (string, error) {
 }
 
 func TestCompleteExternalToolAction_UpgradeVerifiesAndClearsOutdated(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	brew := &lifecycleProvider{
 		stubProvider: stubProvider{name: "brew", available: true},
@@ -119,6 +120,7 @@ func TestCompleteExternalToolAction_UpgradeVerifiesAndClearsOutdated(t *testing.
 }
 
 func TestUpgrade_SystemBrewFormulaUsesFormulaMode(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	exec := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "brew list --versions flux", Response: executor.MockCall{Stdout: "flux 2.8.8\n"}},
@@ -163,6 +165,7 @@ func TestUpgrade_SystemBrewFormulaUsesFormulaMode(t *testing.T) {
 }
 
 func TestCompleteExternalToolAction_UninstallRemovesConfigAndCache(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	brew := &lifecycleProvider{stubProvider: stubProvider{name: "brew", available: true}}
 	a, cfgPath := newImportApp(t, brew)
@@ -207,6 +210,7 @@ func TestCompleteExternalToolAction_UninstallRemovesConfigAndCache(t *testing.T)
 }
 
 func TestCompleteExternalToolActionWithState_InstallAndAddReturnsState(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	brew := &lifecycleProvider{
 		stubProvider: stubProvider{name: "brew", available: true},
@@ -257,6 +261,7 @@ func TestCompleteExternalToolActionWithState_InstallAndAddReturnsState(t *testin
 }
 
 func TestCompleteExternalToolActionWithState_PersistsInstallOptions(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	brew := &lifecycleProvider{
 		stubProvider: stubProvider{name: "brew", available: true},
@@ -294,6 +299,7 @@ func TestCompleteExternalToolActionWithState_PersistsInstallOptions(t *testing.T
 }
 
 func TestCompleteExternalToolActionWithState_UninstallReturnsState(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	brew := &lifecycleProvider{stubProvider: stubProvider{name: "brew", available: true}}
 	a, cfgPath := newImportApp(t, brew)
@@ -341,6 +347,7 @@ func TestCompleteExternalToolActionWithState_UninstallReturnsState(t *testing.T)
 }
 
 func TestCompleteExternalToolAction_UninstallRejectsProviderTool(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	node := &lifecycleProvider{stubProvider: stubProvider{name: "node", available: true}}
 	a, cfgPath := newImportApp(t, node)
@@ -386,6 +393,7 @@ func TestCompleteExternalToolAction_UninstallRejectsProviderTool(t *testing.T) {
 }
 
 func TestUninstall_UsesRegisteredInstalledWithProvider(t *testing.T) {
+	t.Parallel()
 	system := &lifecycleProvider{stubProvider: stubProvider{name: "system", available: true}}
 	brew := &lifecycleProvider{stubProvider: stubProvider{name: "brew", available: true}}
 	a, cfgPath := newImportApp(t, system, brew)
@@ -422,6 +430,7 @@ func TestUninstall_UsesRegisteredInstalledWithProvider(t *testing.T) {
 }
 
 func TestUninstall_ReturnsCacheReadErrorBeforeProviderCall(t *testing.T) {
+	t.Parallel()
 	brew := &lifecycleProvider{stubProvider: stubProvider{name: "brew", available: true}}
 	a, cfgPath := newImportApp(t, brew)
 	cfg := &config.RootConfig{
@@ -446,6 +455,7 @@ func TestUninstall_ReturnsCacheReadErrorBeforeProviderCall(t *testing.T) {
 }
 
 func TestUninstall_UsesCachedManagerForEcosystemProvider(t *testing.T) {
+	t.Parallel()
 	python := &lifecycleProvider{stubProvider: stubProvider{name: "python", available: true}}
 	a, cfgPath := newImportApp(t, python)
 	cfg := &config.RootConfig{
@@ -478,6 +488,7 @@ func TestUninstall_UsesCachedManagerForEcosystemProvider(t *testing.T) {
 }
 
 func TestUpgrade_UsesRegisteredInstalledWithProvider(t *testing.T) {
+	t.Parallel()
 	system := &lifecycleProvider{stubProvider: stubProvider{name: "system", available: true}}
 	brew := &lifecycleProvider{
 		stubProvider: stubProvider{name: "brew", available: true},
@@ -520,6 +531,7 @@ func TestUpgrade_UsesRegisteredInstalledWithProvider(t *testing.T) {
 }
 
 func TestUpgrade_ConfiguredScriptPreservesLifecycleCommands(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	exec := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "sh -c exit 0", Response: executor.MockCall{}},
@@ -555,6 +567,7 @@ func TestUpgrade_ConfiguredScriptPreservesLifecycleCommands(t *testing.T) {
 }
 
 func TestUpgrade_GitHubRecipeUsesCachedLatestRelease(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	const assetURL = "https://downloads.example.test/gh_2.93.0_linux_amd64.tar.gz"
 	exec := executor.NewMatchMock(executor.MatchRule{
@@ -607,6 +620,7 @@ func TestUpgrade_GitHubRecipeUsesCachedLatestRelease(t *testing.T) {
 }
 
 func TestUpgrade_ConcreteProviderRequestUsesConfiguredEcosystemTool(t *testing.T) {
+	t.Parallel()
 	system := &lifecycleProvider{stubProvider: stubProvider{name: "system", available: true}, resolvedName: "brew"}
 	brew := &lifecycleProvider{
 		stubProvider: stubProvider{name: "brew", available: true},
@@ -656,6 +670,7 @@ func TestUpgrade_ConcreteProviderRequestUsesConfiguredEcosystemTool(t *testing.T
 }
 
 func TestUpgrade_ReturnsCacheReadErrorBeforeProviderCall(t *testing.T) {
+	t.Parallel()
 	brew := &lifecycleProvider{stubProvider: stubProvider{name: "brew", available: true}}
 	a, cfgPath := newImportApp(t, brew)
 	cfg := &config.RootConfig{

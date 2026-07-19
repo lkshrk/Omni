@@ -18,6 +18,7 @@ import (
 // ─── HostGroups ───────────────────────────────────────────────────────────────
 
 func TestHostGroups_HostWithAssignedGroup(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -57,6 +58,7 @@ func TestHostGroups_HostWithAssignedGroup(t *testing.T) {
 }
 
 func TestHostGroups_HostWithNoAssignedGroups(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 
 	if err := a.EnsureHost("testhost"); err != nil {
@@ -73,6 +75,7 @@ func TestHostGroups_HostWithNoAssignedGroups(t *testing.T) {
 }
 
 func TestHostGroups_UnknownHost_ReturnsError(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 
 	_, err := a.HostGroups(context.Background(), "nonexistent")
@@ -85,6 +88,7 @@ func TestHostGroups_UnknownHost_ReturnsError(t *testing.T) {
 }
 
 func TestHostGroups_EmptyHostName_ReturnsAllGroups(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -120,6 +124,7 @@ func groupNamesForTest(groups []*config.GroupConfig) []string {
 // ─── SaveDisabledProviders ────────────────────────────────────────────────────
 
 func TestSaveDisabledProviders_PersistsList(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
 	// Concrete names persist as-is.
@@ -145,6 +150,7 @@ func TestSaveDisabledProviders_PersistsList(t *testing.T) {
 }
 
 func TestSetupProviderOptionsFromManagers(t *testing.T) {
+	t.Parallel()
 	options := app.SetupProviderOptionsFromManagers(
 		map[string]string{"system": "apt"},
 		[]string{"uv", "pip3"},
@@ -200,6 +206,7 @@ func TestSetupProviderOptionsUsesResolvedProvidersAndAvailableManagers(t *testin
 }
 
 func TestSetupProviderEnabled(t *testing.T) {
+	t.Parallel()
 	options := []app.SetupProviderOption{
 		{Name: "system", Enabled: true},
 		{Name: "node", Enabled: false},
@@ -212,6 +219,7 @@ func TestSetupProviderEnabled(t *testing.T) {
 }
 
 func TestApplySettingsChange_DraftSemantics(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	base := config.Settings{DisabledProviders: []string{"node"}}
 
@@ -253,6 +261,7 @@ func TestApplySettingsChange_DraftSemantics(t *testing.T) {
 }
 
 func TestApplySettingsChange_SetProviderLayout_SetsOrderAndDisabled(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 
 	got, _, err := a.ApplySettingsChange(context.Background(), config.Settings{}, app.SetProviderLayout(
@@ -279,6 +288,7 @@ func TestApplySettingsChange_SetProviderLayout_SetsOrderAndDisabled(t *testing.T
 }
 
 func TestConcreteProviderPriorityDraft_SeedsThenAppendsAll(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	draft := a.ConcreteProviderPriorityDraft([]string{"uv", "brew"})
 	if len(draft) < 2 || draft[0] != "uv" || draft[1] != "brew" {
@@ -290,6 +300,7 @@ func TestConcreteProviderPriorityDraft_SeedsThenAppendsAll(t *testing.T) {
 }
 
 func TestDefaultConcreteProviderPriorityDraft_NoApp(t *testing.T) {
+	t.Parallel()
 	draft := app.DefaultConcreteProviderPriorityDraft(nil)
 	want := []string{"brew", "apt", "apk", "dnf", "pacman", "zypper", "bun", "pnpm", "npm", "uv", "pip", "cargo"}
 	if strings.Join(draft, ",") != strings.Join(want, ",") {
@@ -298,6 +309,7 @@ func TestDefaultConcreteProviderPriorityDraft_NoApp(t *testing.T) {
 }
 
 func TestAvailableConcreteProviderSet(t *testing.T) {
+	t.Parallel()
 	brew := &stubProvider{name: "brew", available: true}
 	a, _ := newImportApp(t, brew)
 	set := a.AvailableConcreteProviderSet(context.Background())
@@ -307,6 +319,7 @@ func TestAvailableConcreteProviderSet(t *testing.T) {
 }
 
 func TestApplySettingsChange_ToggleConcreteProvider(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 
 	got, _, err := a.ApplySettingsChange(context.Background(), config.Settings{}, app.SetSettingsProviderEnabled("bun", false))
@@ -400,6 +413,7 @@ func TestPinEcosystemForHostRejectsInvalidProviderPins(t *testing.T) {
 }
 
 func TestSettingsProviderSummary(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	settings := config.Settings{DisabledProviders: []string{"node", "brew", "node"}}
 
@@ -415,6 +429,7 @@ func TestSettingsProviderSummary(t *testing.T) {
 }
 
 func TestSettingsChangeForAction(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	tests := []struct {
 		name   string
@@ -470,6 +485,7 @@ func TestSettingsChangeForAction(t *testing.T) {
 }
 
 func TestSettingsActionAvailable(t *testing.T) {
+	t.Parallel()
 	if !app.SettingsActionAvailable(config.Settings{}, app.SettingsActionToggleDotsCommit) {
 		t.Fatal("dots commit action should be available when auto push is disabled")
 	}
@@ -483,6 +499,7 @@ func TestSettingsActionAvailable(t *testing.T) {
 }
 
 func TestDefaultEcosystemProviderNames(t *testing.T) {
+	t.Parallel()
 	got := app.DefaultEcosystemProviderNames()
 	want := []string{"system", "node", "python"}
 	if !slices.Equal(got, want) {
@@ -568,6 +585,7 @@ func TestSaveSettingsChanges_AppliesBatchToCurrentConfig(t *testing.T) {
 }
 
 func TestSaveDisabledProviders_SecondCallOverwrites(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
 	if err := a.SaveDisabledProviders(context.Background(), []string{"system", "node"}); err != nil {
@@ -589,6 +607,7 @@ func TestSaveDisabledProviders_SecondCallOverwrites(t *testing.T) {
 }
 
 func TestSaveDisabledProviders_EmptyList(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
 	// Start with something, then clear it.
@@ -621,6 +640,7 @@ func TestSaveDisabledProviders_EmptyList(t *testing.T) {
 }
 
 func TestSaveDisabledProviders_ExpandsFamilyAndAcceptsConcrete(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 	// A family name is expanded to its concrete members.
 	if err := a.SaveDisabledProviders(context.Background(), []string{provider.EcosystemNode}); err != nil {
@@ -647,6 +667,7 @@ func TestSaveDisabledProviders_ExpandsFamilyAndAcceptsConcrete(t *testing.T) {
 // ─── SaveDotsDisabled ─────────────────────────────────────────────────────────
 
 func TestSaveDotsDisabled_True(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
 	if err := a.SaveDotsDisabled(context.Background(), true); err != nil {
@@ -663,6 +684,7 @@ func TestSaveDotsDisabled_True(t *testing.T) {
 }
 
 func TestSaveDotsDisabled_False(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
 	// Set to true first, then explicitly set to false.
@@ -751,6 +773,7 @@ func TestSaveSettings_PersistsGlobalAndHostSpecificShape(t *testing.T) {
 }
 
 func TestDisableDotsForHost_NoRepoPersistsDisabled(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
 	ops, err := a.DisableDotsForHost(context.Background(), app.DisableDotsOptions{})
@@ -771,6 +794,7 @@ func TestDisableDotsForHost_NoRepoPersistsDisabled(t *testing.T) {
 }
 
 func TestEnableDotsForHost_NoRepoClearsDisabled(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t)
 
 	if err := a.SaveDotsDisabled(context.Background(), true); err != nil {
@@ -796,6 +820,7 @@ func TestEnableDotsForHost_NoRepoClearsDisabled(t *testing.T) {
 // ─── Effective managers ──────────────────────────────────────────────────────
 
 func TestAllAvailableManagers_SupersetOfEffective(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	pyBin, nodeBin := a.EffectiveManagers()
 	pyBins, nodeBins := a.AllAvailableManagers()
@@ -828,6 +853,7 @@ func TestAllAvailableManagers_SupersetOfEffective(t *testing.T) {
 }
 
 func TestAllAvailableManagers_NoDuplicates(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	pyBins, nodeBins := a.AllAvailableManagers()
 
@@ -889,6 +915,7 @@ func TestSetSetting_PersistsParsedValues(t *testing.T) {
 }
 
 func TestSetSetting_RejectsInvalidValues(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	tests := []struct {
 		key   string

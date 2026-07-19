@@ -11,6 +11,7 @@ import (
 )
 
 func TestFetchLatestGitHubReleaseCached_CanceledLeaderDoesNotPoisonWaiter(t *testing.T) {
+	t.Parallel()
 	var calls int32
 	firstStarted := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -58,6 +59,7 @@ func TestFetchLatestGitHubReleaseCached_CanceledLeaderDoesNotPoisonWaiter(t *tes
 }
 
 func TestFetchLatestGitHubReleaseCached_ScopesCompletedResultsToOperation(t *testing.T) {
+	t.Parallel()
 	var calls int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		call := atomic.AddInt32(&calls, 1)

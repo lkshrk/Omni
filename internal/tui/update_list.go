@@ -232,7 +232,8 @@ func (m *Model) handleListActionKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 				m.loading = true
 				startOp(m, "Upgrading "+t.Name+"…")
 				m.startRowOperation(t.Name, t.Provider, m.statusMsg)
-				cmds = append(cmds, m.spinner.Tick, m.doUpgrade(t.Name, t.Provider))
+				ch, gen := m.beginProgressStream()
+				cmds = append(cmds, m.spinner.Tick, m.doUpgrade(t.Name, t.Provider, ch, gen), waitForProgress(ch, gen))
 			}
 		}
 	case key.Matches(msg, m.keys.UpgradeAll):
@@ -308,7 +309,8 @@ func (m *Model) startSelectedToolInstall(t *app.ToolView) []tea.Cmd {
 	m.loading = true
 	startOp(m, "Installing "+t.Name+"…")
 	m.startRowOperation(t.Name, installTool.Provider, m.statusMsg)
-	return []tea.Cmd{m.spinner.Tick, m.doInstall(t.Name, installTool.Provider)}
+	ch, gen := m.beginProgressStream()
+	return []tea.Cmd{m.spinner.Tick, m.doInstall(t.Name, installTool.Provider, ch, gen), waitForProgress(ch, gen)}
 }
 
 func (m *Model) handleListConfirmationKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {

@@ -146,7 +146,7 @@ func InspectManagedDotDirectory(e ResolvedEntry) LocalKind {
 	sawNonIgnoredPath := false
 	sawIgnoredPath := false
 	sawLinkedManagedPath := false
-	ignores := CombinedIgnores(e.Ignore)
+	im := CompileIgnoresLenient(CombinedIgnores(e.Ignore))
 	walkErr := filepath.WalkDir(e.SourcePath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			kind = LocalContent
@@ -160,10 +160,10 @@ func InspectManagedDotDirectory(e ResolvedEntry) LocalKind {
 		if rel == "." {
 			return nil
 		}
-		if ShouldIgnoreDotPath(e.SourcePath, rel, d.Name(), ignores) {
+		if im.IgnoredDotPath(e.SourcePath, rel, d.Name()) {
 			sawIgnoredPath = true
 			if d.IsDir() {
-				if IgnoredDotDirHasIncludedDescendant(e.SourcePath, rel, ignores) {
+				if im.DotDirHasIncludedDescendant(e.SourcePath, rel) {
 					return nil
 				}
 				return filepath.SkipDir
@@ -331,6 +331,7 @@ func SelfHealDotEntryLinkShape(entry ResolvedEntry) error {
 		return nil
 	}
 	if srcInfo.IsDir() && srcInfo.Mode()&os.ModeSymlink == 0 {
+		im := CompileIgnoresLenient(CombinedIgnores(entry.Ignore))
 		return filepath.WalkDir(entry.SourcePath, func(path string, d os.DirEntry, walkErr error) error {
 			if walkErr != nil {
 				return walkErr
@@ -339,9 +340,9 @@ func SelfHealDotEntryLinkShape(entry ResolvedEntry) error {
 			if relErr != nil || rel == "." {
 				return relErr
 			}
-			if ShouldIgnoreDotPath(entry.SourcePath, rel, d.Name(), CombinedIgnores(entry.Ignore)) {
+			if im.IgnoredDotPath(entry.SourcePath, rel, d.Name()) {
 				if d.IsDir() {
-					if IgnoredDotDirHasIncludedDescendant(entry.SourcePath, rel, CombinedIgnores(entry.Ignore)) {
+					if im.DotDirHasIncludedDescendant(entry.SourcePath, rel) {
 						return nil
 					}
 					return filepath.SkipDir
@@ -410,6 +411,7 @@ func ConflictIsManagedStowLink(entry ResolvedEntry, stowPath string) bool {
 		return false
 	}
 	managedWrongLink := false
+	im := CompileIgnoresLenient(CombinedIgnores(entry.Ignore))
 	walkErr := filepath.WalkDir(entry.SourcePath, func(sourcePath string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -421,9 +423,9 @@ func ConflictIsManagedStowLink(entry ResolvedEntry, stowPath string) bool {
 		if rel == "." {
 			return nil
 		}
-		if ShouldIgnoreDotPath(entry.SourcePath, rel, d.Name(), CombinedIgnores(entry.Ignore)) {
+		if im.IgnoredDotPath(entry.SourcePath, rel, d.Name()) {
 			if d.IsDir() {
-				if IgnoredDotDirHasIncludedDescendant(entry.SourcePath, rel, CombinedIgnores(entry.Ignore)) {
+				if im.DotDirHasIncludedDescendant(entry.SourcePath, rel) {
 					return nil
 				}
 				return filepath.SkipDir
@@ -521,7 +523,7 @@ func WalkLocalOnlyDotFiles(entry ResolvedEntry, addOne func(sourcePath, targetPa
 	if !sourceInfo.IsDir() || sourceInfo.Mode()&os.ModeSymlink != 0 || !targetInfo.IsDir() || targetInfo.Mode()&os.ModeSymlink != 0 {
 		return false, nil
 	}
-	ignores := CombinedIgnores(entry.Ignore)
+	im := CompileIgnoresLenient(CombinedIgnores(entry.Ignore))
 	found := false
 	err := filepath.WalkDir(entry.TargetPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -534,9 +536,9 @@ func WalkLocalOnlyDotFiles(entry ResolvedEntry, addOne func(sourcePath, targetPa
 		if rel == "." {
 			return nil
 		}
-		if ShouldIgnoreDotPath(entry.SourcePath, rel, d.Name(), ignores) {
+		if im.IgnoredDotPath(entry.SourcePath, rel, d.Name()) {
 			if d.IsDir() {
-				if IgnoredDotDirHasIncludedDescendant(entry.SourcePath, rel, ignores) {
+				if im.DotDirHasIncludedDescendant(entry.SourcePath, rel) {
 					return nil
 				}
 				return filepath.SkipDir
@@ -591,18 +593,44 @@ func CombinedIgnores(ignores []string) []string {
 // ShouldIgnoreDotPath reports whether a path (relative to root) should be
 // ignored, matching both the raw relative path and a root-prefixed variant.
 func ShouldIgnoreDotPath(root, relPath, basename string, ignores []string) bool {
+	matcher, err := CompileIgnores(ignores)
+	if err != nil {
+		return false
+	}
+	return matcher.IgnoredDotPath(root, relPath, basename)
+}
+
+// IgnoredDotPath reports whether a path (relative to root) should be ignored,
+// matching both the raw relative path and a root-prefixed variant.
+func (m *IgnoreMatcher) IgnoredDotPath(root, relPath, basename string) bool {
+	// Plain concat instead of filepath.Join: the matcher cleans every
+	// candidate itself, and Join's extra Clean is measurable on large walks.
+	rooted := filepath.Base(root) + "/" + relPath
+	matched, _ := m.MatchAnyPath([]string{relPath, rooted}, basename)
+	return matched
+}
+
+// DotDirHasIncludedDescendant reports whether an ignored directory contains a
+// descendant re-included by a negated ignore pattern.
+func (m *IgnoreMatcher) DotDirHasIncludedDescendant(root, relPath string) bool {
+	if !m.hasIncluded {
+		return false
+	}
+	if m.HasIncludedDescendant(relPath) {
+		return true
+	}
 	rooted := filepath.ToSlash(filepath.Join(filepath.Base(root), relPath))
-	return ShouldIgnoreAnyPath([]string{relPath, rooted}, basename, ignores)
+	return m.HasIncludedDescendant(rooted)
 }
 
 // IgnoredDotDirHasIncludedDescendant reports whether an ignored directory
 // contains a descendant re-included by a negated ignore pattern.
 func IgnoredDotDirHasIncludedDescendant(root, relPath string, ignores []string) bool {
-	if HasIncludedDescendant(relPath, ignores) {
-		return true
+	matcher, err := CompileIgnores(ignores)
+	if err != nil {
+		return false
 	}
-	rooted := filepath.ToSlash(filepath.Join(filepath.Base(root), relPath))
-	return HasIncludedDescendant(rooted, ignores)
+	return matcher.DotDirHasIncludedDescendant(root, relPath)
 }
 
 // IsManagedDotFile reports whether a file mode is one dots manages (a regular

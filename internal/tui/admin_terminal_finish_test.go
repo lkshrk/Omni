@@ -21,6 +21,7 @@ func adminTerminalRunning(returnMode viewMode) *adminTerminalState {
 }
 
 func TestHandleAdminTerminalDoneMsg_NonNilTerminal_ErrorKeepsViewOpen(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewAdminTerminal
 	m.adminTerminal = adminTerminalRunning(viewList)
@@ -47,6 +48,7 @@ func TestHandleAdminTerminalDoneMsg_NonNilTerminal_ErrorKeepsViewOpen(t *testing
 }
 
 func TestHandleAdminTerminalDoneMsg_NonNilTerminal_SuccessKeepsViewOpen(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewAdminTerminal
 	m.adminTerminal = adminTerminalRunning(viewList)
@@ -72,6 +74,7 @@ func TestHandleAdminTerminalDoneMsg_NonNilTerminal_SuccessKeepsViewOpen(t *testi
 }
 
 func TestHandleAdminTerminalKeyMsg_FinishedState_DismissesOnAnyKey(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewAdminTerminal
 	m.adminTerminal = adminTerminalRunning(viewList)
@@ -90,6 +93,7 @@ func TestHandleAdminTerminalKeyMsg_FinishedState_DismissesOnAnyKey(t *testing.T)
 }
 
 func TestRenderAdminTerminalFinishedPopup_SuccessShowsDone(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 90
 	m.height = 24
@@ -115,6 +119,7 @@ func TestRenderAdminTerminalFinishedPopup_SuccessShowsDone(t *testing.T) {
 }
 
 func TestRenderAdminTerminalFinishedPopup_ErrorShowsFailed(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 90
 	m.height = 24
@@ -141,6 +146,7 @@ func TestRenderAdminTerminalFinishedPopup_ErrorShowsFailed(t *testing.T) {
 }
 
 func TestHandleAdminTerminalDoneMsg_StaleID_IsIgnored(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewAdminTerminal
 	m.adminTerminal = adminTerminalRunning(viewList)

@@ -33,6 +33,7 @@ func saveGitMetadataToolConfig(t *testing.T, cfgPath string) {
 }
 
 func TestGitURLFromMetadataPrefersOwnerRepo(t *testing.T) {
+	t.Parallel()
 	t.Run("provider source", func(t *testing.T) {
 		got := gitURLFromSourceMetadata(provider.SourceMetadata{
 			Type:  provider.SourceTypeGitHub,
@@ -95,6 +96,7 @@ func TestGitURLFromMetadataPrefersOwnerRepo(t *testing.T) {
 }
 
 func TestMergeToolGitPreservesUserEditedDifferentRepo(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		existing    string
@@ -138,6 +140,7 @@ func TestMergeToolGitPreservesUserEditedDifferentRepo(t *testing.T) {
 }
 
 func TestEnrichToolGitFromInstalledProviderMetadataUsesConcreteOwner(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
 	brew := &internalProviderStub{name: "brew"}
@@ -171,6 +174,7 @@ func TestEnrichToolGitFromInstalledProviderMetadataUsesConcreteOwner(t *testing.
 }
 
 func TestEnrichToolGitFromInstalledProviderMetadataUsesOperationProviderWhenOwnerSame(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
 	brew := &internalProviderStub{
@@ -204,6 +208,7 @@ func TestEnrichToolGitFromInstalledProviderMetadataUsesOperationProviderWhenOwne
 }
 
 func TestEnrichToolGitFromCachedMetadata(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	cfgPath := filepath.Join(t.TempDir(), "settings.json")
 	a := newGitMetadataTestApp(t, cfgPath)

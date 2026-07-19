@@ -14,6 +14,7 @@ import (
 )
 
 func TestPathPickerFiltersTypedPath(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	mustMkdir(t, filepath.Join(tmp, "alpha"))
 	mustMkdir(t, filepath.Join(tmp, "cider"))
@@ -31,6 +32,7 @@ func TestPathPickerFiltersTypedPath(t *testing.T) {
 }
 
 func TestPathPickerQueryAllowsDotDotPrefixChild(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	child := filepath.Join(tmp, "..config")
 	mustMkdir(t, child)
@@ -44,6 +46,7 @@ func TestPathPickerQueryAllowsDotDotPrefixChild(t *testing.T) {
 }
 
 func TestPathPickerTabCyclesFilteredMatches(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	mustMkdir(t, filepath.Join(tmp, "alpha"))
 	mustMkdir(t, filepath.Join(tmp, "alpine"))
@@ -71,6 +74,7 @@ func TestPathPickerTabCyclesFilteredMatches(t *testing.T) {
 }
 
 func TestPathPickerTabStartsCycleFromHighlightedMatch(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	mustMkdir(t, filepath.Join(tmp, "alpha"))
 	mustMkdir(t, filepath.Join(tmp, "alpine"))
@@ -88,6 +92,7 @@ func TestPathPickerTabStartsCycleFromHighlightedMatch(t *testing.T) {
 }
 
 func TestPathPickerTabCycleResetsAfterTextEdit(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	mustMkdir(t, filepath.Join(tmp, "alpha"))
 	mustMkdir(t, filepath.Join(tmp, "alpine"))
@@ -111,6 +116,7 @@ func TestPathPickerTabCycleResetsAfterTextEdit(t *testing.T) {
 }
 
 func TestPathPickerTabWithNoMatchesLeavesInput(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	mustMkdir(t, filepath.Join(tmp, "alpha"))
 
@@ -129,6 +135,7 @@ func TestPathPickerTabWithNoMatchesLeavesInput(t *testing.T) {
 }
 
 func TestPathPickerTabCycleRespectsAllowFiles(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	dir := filepath.Join(tmp, "alpha")
 	file := filepath.Join(tmp, "alpine")
@@ -230,6 +237,7 @@ func TestPathPickerPartialHomeBasenamePrefersRealChild(t *testing.T) {
 }
 
 func TestPathPickerSelectedPathUsesTypedExistingPath(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	selected := filepath.Join(tmp, "dotfiles")
 	mustMkdir(t, selected)
@@ -245,6 +253,7 @@ func TestPathPickerSelectedPathUsesTypedExistingPath(t *testing.T) {
 }
 
 func TestPathPickerAllowsFilesWhenConfigured(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	file := filepath.Join(tmp, "settings.json")
 	mustWriteFile(t, file)
@@ -260,6 +269,7 @@ func TestPathPickerAllowsFilesWhenConfigured(t *testing.T) {
 }
 
 func TestPathPickerSlashDescendsAndShowsFiles(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	cache := filepath.Join(tmp, ".cache")
 	mustMkdir(t, cache)
@@ -368,6 +378,7 @@ func TestPathPickerKeepsRealHomeBasenameChild(t *testing.T) {
 }
 
 func TestPathPickerDotFiltersHiddenEntries(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	mustMkdir(t, filepath.Join(tmp, ".cache"))
 	mustMkdir(t, filepath.Join(tmp, ".config"))
@@ -541,6 +552,7 @@ func TestPathPickerRefreshesAfterInvalidDirectoryInput(t *testing.T) {
 }
 
 func TestPathPickerRejectsFilesWhenDirectoryOnly(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	file := filepath.Join(tmp, "settings.json")
 	mustWriteFile(t, file)
@@ -556,6 +568,7 @@ func TestPathPickerRejectsFilesWhenDirectoryOnly(t *testing.T) {
 }
 
 func TestPathPickerRejectsInvalidTypedPath(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	p, _ := newPathPicker(tmp, false, 60, 8)
 	p.input.SetValue(filepath.Join(tmp, "missing"))
@@ -569,6 +582,7 @@ func TestPathPickerRejectsInvalidTypedPath(t *testing.T) {
 }
 
 func TestPathPickerPasteUpdatesMatches(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	mustMkdir(t, filepath.Join(tmp, "alpha"))
 	mustMkdir(t, filepath.Join(tmp, "cider"))
@@ -585,6 +599,7 @@ func TestPathPickerPasteUpdatesMatches(t *testing.T) {
 }
 
 func TestPathPickerLeftKeyEditsCursorInsteadOfParent(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	child := filepath.Join(tmp, "child")
 	mustMkdir(t, child)
@@ -601,6 +616,7 @@ func TestPathPickerLeftKeyEditsCursorInsteadOfParent(t *testing.T) {
 }
 
 func TestPathPickerBackspaceEditsPathInsteadOfParent(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	mustMkdir(t, filepath.Join(tmp, "alpha"))
 
@@ -644,6 +660,7 @@ func TestPathPickerDotDotInputMovesAboveHome(t *testing.T) {
 }
 
 func TestPathPickerViewScrollsToCursor(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	for i := range 12 {
 		mustMkdir(t, filepath.Join(tmp, fmt.Sprintf("dir-%02d", i)))
@@ -662,6 +679,7 @@ func TestPathPickerViewScrollsToCursor(t *testing.T) {
 }
 
 func TestPathPickerSelectedRowHasNoBackgroundFill(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	mustMkdir(t, filepath.Join(tmp, "alpha"))
 
@@ -677,6 +695,7 @@ func TestPathPickerSelectedRowHasNoBackgroundFill(t *testing.T) {
 }
 
 func TestModelFilePickerResizesWithWindow(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	mustMkdir(t, filepath.Join(tmp, "alpha"))
 
@@ -701,6 +720,7 @@ func TestModelFilePickerResizesWithWindow(t *testing.T) {
 }
 
 func TestModelFilePickerAcceptsTypedCompletedPath(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	selected := filepath.Join(tmp, "alpha")
 	mustMkdir(t, selected)
@@ -761,6 +781,7 @@ func TestModelFilePickerDefersDotsRepoSettingsToAppResult(t *testing.T) {
 }
 
 func TestModelFilePickerCapturesQuitKey(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	mustMkdir(t, filepath.Join(tmp, "quitdir"))
 
@@ -780,6 +801,7 @@ func TestModelFilePickerCapturesQuitKey(t *testing.T) {
 }
 
 func TestModelFilePickerEscClosesPathInput(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	m := baseModel(nil)
 	m.openFilePicker("Dots repo path", tmp, false)
@@ -791,6 +813,7 @@ func TestModelFilePickerEscClosesPathInput(t *testing.T) {
 }
 
 func TestModelFilePickerKeepsInvalidTypedPathOpen(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	m := baseModel(nil)
 	m.mode = viewSettings
@@ -814,6 +837,7 @@ func TestModelFilePickerKeepsInvalidTypedPathOpen(t *testing.T) {
 }
 
 func TestModelFilePickerCapturesPasteFromBackgroundInputs(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	mustMkdir(t, filepath.Join(tmp, "alpha"))
 
@@ -831,6 +855,7 @@ func TestModelFilePickerCapturesPasteFromBackgroundInputs(t *testing.T) {
 }
 
 func TestModelFilePickerCapturesMouseWheel(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.cursor = 0
 	m.showFilePicker = true
@@ -842,6 +867,7 @@ func TestModelFilePickerCapturesMouseWheel(t *testing.T) {
 }
 
 func TestPathPickerViewShowsInputAndMatches(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	mustMkdir(t, filepath.Join(tmp, "dotfiles"))
 	p, _ := newPathPicker(tmp, false, 60, 8)
@@ -859,6 +885,7 @@ func TestPathPickerViewShowsInputAndMatches(t *testing.T) {
 }
 
 func TestPathPickerFocusedEmptyInputDoesNotRenderPlaceholder(t *testing.T) {
+	t.Parallel()
 	p, _ := newPathPicker(t.TempDir(), false, 60, 8)
 	p.input.SetValue("")
 	p.input.Focus()
@@ -870,6 +897,7 @@ func TestPathPickerFocusedEmptyInputDoesNotRenderPlaceholder(t *testing.T) {
 }
 
 func TestPathPickerViewAnchorsInputBelowFixedResultArea(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	mustMkdir(t, filepath.Join(tmp, "dotfiles"))
 	p, _ := newPathPicker(tmp, false, 60, 8)
@@ -982,6 +1010,7 @@ func TestExpandPathExpandsHomeTilde(t *testing.T) {
 }
 
 func TestPathPickerContainsString(t *testing.T) {
+	t.Parallel()
 	values := []string{"alpha", "bravo"}
 	if !containsString(values, "alpha") || containsString(values, "charlie") {
 		t.Fatalf("containsString failed: %#v", values)
@@ -989,6 +1018,7 @@ func TestPathPickerContainsString(t *testing.T) {
 }
 
 func TestPathPickerContainsString_Empty(t *testing.T) {
+	t.Parallel()
 	if containsString(nil, "alpha") {
 		t.Fatal("containsString on empty slice should be false")
 	}

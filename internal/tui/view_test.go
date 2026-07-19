@@ -15,6 +15,7 @@ import (
 // ── truncatePath ──────────────────────────────────────────────────────────────
 
 func TestTruncatePath(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -66,6 +67,7 @@ func TestViewAppliesASCIISymbolMode(t *testing.T) {
 }
 
 func TestDotStateDisplay_TrimsConflictSuffix(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	_, _, label := dotStateDisplay(p, dots.StateUntrackedConflict)
 	if label != "untracked" {
@@ -74,6 +76,7 @@ func TestDotStateDisplay_TrimsConflictSuffix(t *testing.T) {
 }
 
 func TestDotStateDisplay_ModifiedShowsLocalChanges(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	_, icon, label := dotStateDisplay(p, dots.StateModified)
 	if icon != "!" || label != "local changes" {
@@ -84,6 +87,7 @@ func TestDotStateDisplay_ModifiedShowsLocalChanges(t *testing.T) {
 // ── renderDots ────────────────────────────────────────────────────────────────
 
 func TestRenderDots_NotConfigured(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	// Zero-value cached availability: startup snapshot not landed — nothing renders.
 	if out := renderDots(m); out != "" {
@@ -98,6 +102,7 @@ func TestRenderDots_NotConfigured(t *testing.T) {
 }
 
 func TestRenderDots_Disabled(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles", DotsDisabled: config.BoolPtr(true)})
 	out := renderDots(m)
@@ -113,6 +118,7 @@ func TestRenderDots_Disabled(t *testing.T) {
 }
 
 func TestRenderDotsUsesCachedDotsAvailability(t *testing.T) {
+	t.Parallel()
 	t.Run("renders entries when app is configured despite stale empty settings", func(t *testing.T) {
 		m := baseModel(nil)
 		m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
@@ -181,6 +187,7 @@ func TestRenderDotsUsesCachedDotsAvailability(t *testing.T) {
 }
 
 func TestRenderDots_LoadingKeepsExistingTable(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoading = true
@@ -195,6 +202,7 @@ func TestRenderDots_LoadingKeepsExistingTable(t *testing.T) {
 }
 
 func TestRenderDots_HistorySection(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 100
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
@@ -231,6 +239,7 @@ func TestRenderDots_HistorySection(t *testing.T) {
 }
 
 func TestRenderDots_RemoveConfirmHasNoCancelHint(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 100
 	m.height = 24
@@ -270,6 +279,7 @@ func TestRenderDots_RemoveConfirmHasNoCancelHint(t *testing.T) {
 }
 
 func TestRenderDots_Empty(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
@@ -283,6 +293,7 @@ func TestRenderDots_Empty(t *testing.T) {
 }
 
 func TestRenderDots_WithEntries(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
@@ -321,6 +332,7 @@ func TestRenderDots_WithEntries(t *testing.T) {
 }
 
 func TestRenderDots_SectionsUseSharedListSpacing(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 100
 	m.height = 30
@@ -374,12 +386,15 @@ func TestRenderDots_SectionsUseSharedListSpacing(t *testing.T) {
 }
 
 func TestRenderDots_IgnoredSectionChildrenStatus(t *testing.T) {
+	t.Parallel(
 	// Ignored section layout:
 	//   dotfiles  (synthesized container, no dots.ActionUnignore) → "-"
 	//     claude/ (intermediate dir, Ignored=false) → "-"
 	//       a     (explicitly ignored leaf, Ignored=true) → "ignored"
 	//       b     (explicitly ignored leaf, Ignored=true) → "ignored"
 	//   backup    (truly ignored entry, dots.ActionUnignore) → "ignored"
+	)
+
 	m := baseModel(nil)
 	m.width = 100
 	m.height = 40
@@ -463,6 +478,7 @@ func TestRenderDots_IgnoredSectionChildrenStatus(t *testing.T) {
 }
 
 func TestRenderDots_RepoInlineBeforeSections(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 100
 	m.height = 30
@@ -494,6 +510,7 @@ func TestRenderDots_RepoInlineBeforeSections(t *testing.T) {
 }
 
 func TestRenderDots_DirtyRepoShowsCommitHint(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 100
 	m.height = 30
@@ -510,6 +527,7 @@ func TestRenderDots_DirtyRepoShowsCommitHint(t *testing.T) {
 }
 
 func TestRenderDots_ChildNamesShareNameColumnWidth(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 140
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
@@ -547,6 +565,7 @@ func TestRenderDots_ChildNamesShareNameColumnWidth(t *testing.T) {
 }
 
 func TestRenderDots_ChildRowsIndentNamesInsideNameColumn(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 140
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
@@ -594,6 +613,7 @@ func TestRenderDots_ChildRowsIndentNamesInsideNameColumn(t *testing.T) {
 }
 
 func TestRenderDots_ChildRowsUseParentStatusAndFileCountColumn(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 120
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
@@ -629,6 +649,7 @@ func TestRenderDots_ChildRowsUseParentStatusAndFileCountColumn(t *testing.T) {
 }
 
 func TestRenderDots_ChildRowsUseChildStateColor(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 140
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
@@ -666,6 +687,7 @@ func TestRenderDots_ChildRowsUseChildStateColor(t *testing.T) {
 }
 
 func TestRenderDots_CountColumnsAreSeparateAndRightAligned(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 140
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
@@ -711,6 +733,7 @@ func TestRenderDots_CountColumnsAreSeparateAndRightAligned(t *testing.T) {
 }
 
 func TestDotRatioStyleReflectsSyncCoverage(t *testing.T) {
+	t.Parallel()
 	p := baseModel(nil).palette
 	tests := []struct {
 		name   string
@@ -733,6 +756,7 @@ func TestDotRatioStyleReflectsSyncCoverage(t *testing.T) {
 }
 
 func TestRenderDots_ChildRowsUseChildStatusWhenPresent(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 120
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
@@ -771,6 +795,7 @@ func TestRenderDots_ChildRowsUseChildStatusWhenPresent(t *testing.T) {
 }
 
 func TestRenderDots_RightColumnsKeepStableWidthAndRightMargin(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 110
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
@@ -819,6 +844,7 @@ func TestRenderDots_RightColumnsKeepStableWidthAndRightMargin(t *testing.T) {
 }
 
 func TestRenderDots_RightColumnsFitContentAcrossSections(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 140
 	m.height = 24
@@ -895,6 +921,7 @@ func TestRenderDots_MultiGroupBadgeAndFullDetail(t *testing.T) {
 // an entry in two reusable groups (no active host filtering to collapse
 // them) must render both as separate pills, not a single compact badge.
 func TestRenderDots_TwoGroupsShowTwoPills(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 120
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
@@ -951,6 +978,7 @@ func TestRenderDots_ThreeGroupsNarrowWidthCollapsesToHostPlusCount(t *testing.T)
 }
 
 func TestRenderDots_TransientUntrackedConflictShowsAsOutOfSync(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
@@ -979,6 +1007,7 @@ func TestRenderDots_TransientUntrackedConflictShowsAsOutOfSync(t *testing.T) {
 }
 
 func TestRenderDots_ConflictInfersResolveActionsWithoutExplicitActions(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
@@ -998,6 +1027,7 @@ func TestRenderDots_ConflictInfersResolveActionsWithoutExplicitActions(t *testin
 }
 
 func TestRenderDots_ConflictDirectoryShowsExpandHint(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
@@ -1024,6 +1054,7 @@ func TestRenderDots_ConflictDirectoryShowsExpandHint(t *testing.T) {
 }
 
 func TestRenderDots_OutOfSyncSyncHintNamesResolutionSide(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		state dots.State
@@ -1054,6 +1085,7 @@ func TestRenderDots_OutOfSyncSyncHintNamesResolutionSide(t *testing.T) {
 }
 
 func TestRenderDots_LocalOnlyDirectoryShowsExpandHint(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
@@ -1080,6 +1112,7 @@ func TestRenderDots_LocalOnlyDirectoryShowsExpandHint(t *testing.T) {
 }
 
 func TestRenderDots_SubdirectoryShowsExpandHint(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
@@ -1116,6 +1149,7 @@ func TestRenderDots_SubdirectoryShowsExpandHint(t *testing.T) {
 }
 
 func TestRenderDots_ScrollKeepsSelectedRowHintsVisibleAtBottom(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 100
 	m.height = 8
@@ -1147,6 +1181,7 @@ func TestRenderDots_ScrollKeepsSelectedRowHintsVisibleAtBottom(t *testing.T) {
 }
 
 func TestRenderDots_IgnoreConfirmRendersInlineAction(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
@@ -1175,6 +1210,7 @@ func TestRenderDots_IgnoreConfirmRendersInlineAction(t *testing.T) {
 }
 
 func TestRenderDots_WithConflict(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
@@ -1188,6 +1224,7 @@ func TestRenderDots_WithConflict(t *testing.T) {
 }
 
 func TestRenderDots_GitStatusDirty(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
@@ -1202,6 +1239,7 @@ func TestRenderDots_GitStatusDirty(t *testing.T) {
 }
 
 func TestRenderDots_DotsRepoDisplayed(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
 	m.dotsLoaded = true
@@ -1247,6 +1285,7 @@ func TestRenderDots_UsesHomeAliasForUserPaths(t *testing.T) {
 // ── hintKey ───────────────────────────────────────────────────────────────────
 
 func TestHintKey_NonEmpty(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	got := hintKey(p, "q", "quit")
 	if len(got) == 0 {
@@ -1258,6 +1297,7 @@ func TestHintKey_NonEmpty(t *testing.T) {
 }
 
 func TestHintKey_ContainsKeyAndDesc(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	tests := []struct{ key, desc string }{
 		{"enter", "confirm"},
@@ -1276,6 +1316,7 @@ func TestHintKey_ContainsKeyAndDesc(t *testing.T) {
 // ── hintJoin ──────────────────────────────────────────────────────────────────
 
 func TestHintJoin(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	tests := []struct {
 		name  string
@@ -1327,6 +1368,7 @@ func TestHintJoin(t *testing.T) {
 // ── placeOverlay ──────────────────────────────────────────────────────────────
 
 func TestPlaceOverlay_ContainsOverlayContent(t *testing.T) {
+	t.Parallel()
 	bg := strings.Repeat("background text here\n", 10)
 	overlay := "POPUP CONTENT"
 	result := placeOverlay(bg, overlay, 80, 24)
@@ -1336,6 +1378,7 @@ func TestPlaceOverlay_ContainsOverlayContent(t *testing.T) {
 }
 
 func TestPlaceOverlay_SmallBgLargeOverlay(t *testing.T) {
+	t.Parallel()
 	bg := "bg\n"
 	overlay := "overlay content that is long"
 	// Should not panic with negative startX/Y — both clamped to 0.
@@ -1349,6 +1392,7 @@ func TestPlaceOverlay_SmallBgLargeOverlay(t *testing.T) {
 // ── integration: renderDots does not panic under various states ───────────────
 
 func TestRenderDots_NoPanic(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		fn   func() Model
@@ -1430,6 +1474,7 @@ func TestRenderDots_NoPanic(t *testing.T) {
 // ── renderDots with settings.DotsDisabled false-value pointer ────────────────
 
 func TestRenderDots_DotsDisabledFalse(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	disabled := false
 	m.settings.DotsDisabled = &disabled
@@ -1444,6 +1489,7 @@ func TestRenderDots_DotsDisabledFalse(t *testing.T) {
 // ── BoolVal nil safety (used inside renderDots) ───────────────────────────────
 
 func TestRenderDots_NilDotsDisabled(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.settings.DotsDisabled = nil // ensure nil is handled
 	setDotsRepoForTest(&m, "/tmp/dots")
@@ -1460,6 +1506,7 @@ func TestRenderDots_NilDotsDisabled(t *testing.T) {
 // ── renderDots confirm overwrite overlay ─────────────────────────────────────
 
 func TestRenderDots_ConfirmOverwrite(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	setDotsRepoForTest(&m, "/tmp/dots")
 	m.dotsLoaded = true
@@ -1483,6 +1530,7 @@ func TestRenderDots_ConfirmOverwrite(t *testing.T) {
 // ── hintJoin separator presence ──────────────────────────────────────────────
 
 func TestHintJoin_SeparatorPresent(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	got := hintJoin(p, "a", "b", "c")
 	// The separator matches the footer help separator. Strip any ANSI so we can
@@ -1500,6 +1548,7 @@ func TestHintJoin_SeparatorPresent(t *testing.T) {
 // ── placeOverlay does not lose bg dimensions ─────────────────────────────────
 
 func TestPlaceOverlay_NoPanic_Variants(t *testing.T) {
+	t.Parallel()
 	variants := []struct {
 		bg, fg string
 		w, h   int
@@ -1524,6 +1573,7 @@ func TestPlaceOverlay_NoPanic_Variants(t *testing.T) {
 // ── renderDots: long target path is truncated ─────────────────────────────────
 
 func TestRenderDots_LongPathTruncated(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	setDotsRepoForTest(&m, "/tmp/dots")
 	m.dotsLoaded = true
@@ -1539,6 +1589,7 @@ func TestRenderDots_LongPathTruncated(t *testing.T) {
 }
 
 func TestRenderDots_NarrowWidthFitsRows(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 44
 	m.height = 12
@@ -1567,6 +1618,7 @@ func TestRenderDots_NarrowWidthFitsRows(t *testing.T) {
 // ── config.BoolVal is used in renderDots; just verify it is consistent ────────
 
 func TestRenderDots_DotsDisabledTrue(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	b := true
 	m.settings.DotsDisabled = &b
@@ -1632,6 +1684,7 @@ func ignoredSectionModel() Model {
 // cursor is on an explicitly-ignored leaf (Ignored=true) inside the ignored
 // section, dotsRowHintItems returns a hint whose description is "include".
 func TestDotsRowHintItems_IgnoredChild_ExplicitlyIgnored(t *testing.T) {
+	t.Parallel()
 	m := ignoredSectionModel()
 
 	// Enumerate visible rows to find a leaf with Ignored=true.
@@ -1675,6 +1728,7 @@ func TestDotsRowHintItems_IgnoredChild_ExplicitlyIgnored(t *testing.T) {
 // cursor is on an intermediate directory (Ignored=false) inside the ignored
 // section, dotsRowHintItems returns a hint whose description is "ignore".
 func TestDotsRowHintItems_IgnoredChild_IntermediateDir(t *testing.T) {
+	t.Parallel()
 	m := ignoredSectionModel()
 
 	// Enumerate visible rows to find an intermediate dir child (Ignored=false).
@@ -1719,6 +1773,7 @@ func TestDotsRowHintItems_IgnoredChild_IntermediateDir(t *testing.T) {
 // dots.ActionUnignore) shows an "include" hint (State is Ignored → "include"),
 // confirming the hint branch is reached now that the entry has dots.ActionIgnore.
 func TestDotsRowHintItems_SynthesizedContainer_HasIgnoreHint(t *testing.T) {
+	t.Parallel()
 	m := ignoredSectionModel()
 
 	// The synthesized container is the first visible row (index 0).
@@ -1753,6 +1808,7 @@ func TestDotsRowHintItems_SynthesizedContainer_HasIgnoreHint(t *testing.T) {
 }
 
 func TestViewStatus_RendersWhileStartupSnapshotPending(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewStatus
 	m.loading = true
@@ -1770,6 +1826,7 @@ func TestViewStatus_RendersWhileStartupSnapshotPending(t *testing.T) {
 }
 
 func TestViewStatus_SuppressedDuringLaunchBatch(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.mode = viewStatus
 	m.launchBatchActive = true

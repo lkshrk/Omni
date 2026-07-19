@@ -11,6 +11,7 @@ import (
 )
 
 func TestSkills_MainTabsContainsSkills(t *testing.T) {
+	t.Parallel()
 	tabs := mainTabs()
 	for _, tab := range tabs {
 		if tab.mode == viewSkills && tab.label == "Agents" {
@@ -21,6 +22,7 @@ func TestSkills_MainTabsContainsSkills(t *testing.T) {
 }
 
 func TestSkills_ViewBodyEmptyManifest(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -35,6 +37,7 @@ func TestSkills_ViewBodyEmptyManifest(t *testing.T) {
 }
 
 func TestSkills_ViewBodyRowsNotYetKnown(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -48,6 +51,7 @@ func TestSkills_ViewBodyRowsNotYetKnown(t *testing.T) {
 }
 
 func TestSkills_ViewBodyWithSkills(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -76,6 +80,7 @@ func TestSkills_ViewBodyWithSkills(t *testing.T) {
 }
 
 func TestSkills_ViewBodySectionHeaders(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -101,6 +106,7 @@ func TestSkills_ViewBodySectionHeaders(t *testing.T) {
 }
 
 func TestSkills_ViewBodyInstalledIcon(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -119,6 +125,7 @@ func TestSkills_ViewBodyInstalledIcon(t *testing.T) {
 }
 
 func TestSkills_ViewBodyFooterUpdate(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -137,6 +144,7 @@ func TestSkills_ViewBodyFooterUpdate(t *testing.T) {
 }
 
 func TestSkills_ViewBodyError(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -148,6 +156,7 @@ func TestSkills_ViewBodyError(t *testing.T) {
 }
 
 func TestSkills_ViewBodyAllChipShowsSectionError(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipAll
@@ -159,6 +168,7 @@ func TestSkills_ViewBodyAllChipShowsSectionError(t *testing.T) {
 }
 
 func TestSkills_ViewBodyMcpChipError(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipMcp
@@ -170,6 +180,7 @@ func TestSkills_ViewBodyMcpChipError(t *testing.T) {
 }
 
 func TestSkills_RestoredMsgPopulatesResult(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillsRunning = true
@@ -194,6 +205,7 @@ func TestSkills_RestoredMsgPopulatesResult(t *testing.T) {
 }
 
 func TestSkills_RestoredMsgWithErrorSetsErr(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillsRunning = true
@@ -212,6 +224,7 @@ func TestSkills_RestoredMsgWithErrorSetsErr(t *testing.T) {
 }
 
 func TestSkills_ImportedMsgPopulatesDiff(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillsRunning = true
@@ -236,6 +249,7 @@ func TestSkills_ImportedMsgPopulatesDiff(t *testing.T) {
 }
 
 func TestSkills_ImportedMsgWithErrorSetsErr(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillsRunning = true
@@ -254,6 +268,7 @@ func TestSkills_ImportedMsgWithErrorSetsErr(t *testing.T) {
 }
 
 func TestSkills_RKeyStartsRestore(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -266,6 +281,7 @@ func TestSkills_RKeyStartsRestore(t *testing.T) {
 }
 
 func TestSkills_IKeyStartsImport(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -278,6 +294,7 @@ func TestSkills_IKeyStartsImport(t *testing.T) {
 }
 
 func TestSkills_RKeyClearsResult(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -292,6 +309,7 @@ func TestSkills_RKeyClearsResult(t *testing.T) {
 }
 
 func TestSkills_IKeyClearsImportDiff(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -306,6 +324,7 @@ func TestSkills_IKeyClearsImportDiff(t *testing.T) {
 }
 
 func TestSkills_UKeyStartsUpdate(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -318,6 +337,7 @@ func TestSkills_UKeyStartsUpdate(t *testing.T) {
 }
 
 func TestSkills_UpdatedMsgClearsRunning(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillsRunning = true
@@ -335,6 +355,7 @@ func TestSkills_UpdatedMsgClearsRunning(t *testing.T) {
 }
 
 func TestSkills_UpdatedMsgWithErrorSetsErr(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillsRunning = true
@@ -350,6 +371,7 @@ func TestSkills_UpdatedMsgWithErrorSetsErr(t *testing.T) {
 }
 
 func TestSkills_DisabledBody(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.agentsEnabled = false
@@ -368,6 +390,7 @@ func TestSkills_DisabledBody(t *testing.T) {
 }
 
 func TestSkills_DisabledGatesKeys(t *testing.T) {
+	t.Parallel()
 	for _, key := range []rune{'r', 'i', 'u'} {
 		m := baseModel(nil)
 		m.mode = viewSkills
@@ -382,6 +405,7 @@ func TestSkills_DisabledGatesKeys(t *testing.T) {
 }
 
 func TestSkills_AgentsToggledMsgEnables(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.agentsEnabled = false
 
@@ -393,6 +417,7 @@ func TestSkills_AgentsToggledMsgEnables(t *testing.T) {
 }
 
 func TestSkills_AgentsToggledMsgError(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.agentsEnabled = false
 	want := errors.New("save failed")
@@ -408,6 +433,7 @@ func TestSkills_AgentsToggledMsgError(t *testing.T) {
 }
 
 func TestSkills_SettingsRowAgentsEnabledMeta(t *testing.T) {
+	t.Parallel()
 	meta := settingsRows[settingsRowAgentsEnabled]
 	if meta.label != "Agent Skills" {
 		t.Errorf("label = %q, want %q", meta.label, "Agent Skills")
@@ -418,6 +444,7 @@ func TestSkills_SettingsRowAgentsEnabledMeta(t *testing.T) {
 }
 
 func TestSkills_BodyNoRedundantTitle(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -435,6 +462,7 @@ func TestSkills_BodyNoRedundantTitle(t *testing.T) {
 }
 
 func TestSkills_StatusColumn(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -491,6 +519,7 @@ func TestSkills_StatusColumn(t *testing.T) {
 }
 
 func TestSkills_LayoutColumnsAligned(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -546,6 +575,7 @@ func TestSkills_LayoutColumnsAligned(t *testing.T) {
 }
 
 func TestFeatureToggles_RowMetaLabels(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		row   int
 		label string
@@ -566,6 +596,7 @@ func TestFeatureToggles_RowMetaLabels(t *testing.T) {
 }
 
 func TestFeatureToggles_RenderShowsOnOff(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	m.width = 120
@@ -600,6 +631,7 @@ func TestFeatureToggles_RenderShowsOnOff(t *testing.T) {
 }
 
 func TestFeatureToggles_RenderShowsOffWhenDisabled(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	m.width = 120
@@ -628,6 +660,7 @@ func TestFeatureToggles_RenderShowsOffWhenDisabled(t *testing.T) {
 }
 
 func TestFeatureToggles_NilAppTogglesReturnNilCmd(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 
 	if cmd := m.doToggleSkillsFeature(); cmd != nil {
@@ -642,6 +675,7 @@ func TestFeatureToggles_NilAppTogglesReturnNilCmd(t *testing.T) {
 }
 
 func TestFeatureToggles_ConfirmDispatchesNilCmdWithNilApp(t *testing.T) {
+	t.Parallel()
 	cases := []int{settingsRowSkillsEnabled, settingsRowMcpEnabled, settingsRowPluginsEnabled}
 	for _, row := range cases {
 		m := baseModel(nil)
@@ -659,6 +693,7 @@ func TestFeatureToggles_ConfirmDispatchesNilCmdWithNilApp(t *testing.T) {
 }
 
 func TestFeatureToggles_SkillsReloadsWhenAgentsEnabled(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.agentsEnabled = true
 	m.skillsLoaded = true
@@ -674,6 +709,7 @@ func TestFeatureToggles_SkillsReloadsWhenAgentsEnabled(t *testing.T) {
 }
 
 func TestFeatureToggles_SkillsNoReloadWhenAgentsDisabled(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.agentsEnabled = false
 	m.skillsLoaded = true
@@ -689,6 +725,7 @@ func TestFeatureToggles_SkillsNoReloadWhenAgentsDisabled(t *testing.T) {
 }
 
 func TestFeatureToggles_McpReloadsWhenAgentsEnabled(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.agentsEnabled = true
 	m.mcpLoaded = true
@@ -708,6 +745,7 @@ func TestFeatureToggles_McpReloadsWhenAgentsEnabled(t *testing.T) {
 }
 
 func TestFeatureToggles_McpNoReloadWhenAgentsDisabled(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.agentsEnabled = false
 	m.mcpLoaded = true
@@ -727,6 +765,7 @@ func TestFeatureToggles_McpNoReloadWhenAgentsDisabled(t *testing.T) {
 }
 
 func TestFeatureToggles_PluginsReloadsWhenAgentsEnabled(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.agentsEnabled = true
 	m.pluginLoaded = true
@@ -746,6 +785,7 @@ func TestFeatureToggles_PluginsReloadsWhenAgentsEnabled(t *testing.T) {
 }
 
 func TestFeatureToggles_PluginsNoReloadWhenAgentsDisabled(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.agentsEnabled = false
 	m.pluginLoaded = true
@@ -765,6 +805,7 @@ func TestFeatureToggles_PluginsNoReloadWhenAgentsDisabled(t *testing.T) {
 }
 
 func TestFeatureToggles_SkillsErrorPreservesState(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.skillsEnabled = false
 	want := errors.New("save failed")
@@ -780,6 +821,7 @@ func TestFeatureToggles_SkillsErrorPreservesState(t *testing.T) {
 }
 
 func TestFeatureToggles_McpErrorPreservesState(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mcpEnabled = false
 	want := errors.New("save failed")
@@ -795,6 +837,7 @@ func TestFeatureToggles_McpErrorPreservesState(t *testing.T) {
 }
 
 func TestFeatureToggles_PluginsErrorPreservesState(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.pluginsEnabled = false
 	want := errors.New("save failed")
@@ -814,6 +857,7 @@ func TestFeatureToggles_PluginsErrorPreservesState(t *testing.T) {
 // Help" for viewSkills, and the popup must render the agents Row/Bulk action
 // groups instead of Tools-only actions like "pin provider".
 func TestHelpPopup_AgentsTab_TitleAndActions(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.agentsEnabled = true
@@ -835,6 +879,7 @@ func TestHelpPopup_AgentsTab_TitleAndActions(t *testing.T) {
 
 // TestDoUninstallSkillPackage_NilAppReturnsNil verifies the nil-app guard.
 func TestDoUninstallSkillPackage_NilAppReturnsNil(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.app = nil
 	if cmd := m.doUninstallSkillPackage("github.com/foo/pkg"); cmd != nil {
@@ -845,6 +890,7 @@ func TestDoUninstallSkillPackage_NilAppReturnsNil(t *testing.T) {
 // TestDoUninstallSkillPackage_ErrorPropagates verifies an app failure lands
 // in skillRemovedMsg.err.
 func TestDoUninstallSkillPackage_ErrorPropagates(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.app = newBrokenConfigApp(t)
 

@@ -7,6 +7,7 @@ import (
 )
 
 func TestParseFrontmatterDescription(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		content string
@@ -77,6 +78,7 @@ description: "unterminated"
 }
 
 func TestSkillDescription_MissingFile(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	if got := skillDescription(home, "nonexistent-skill"); got != "" {
 		t.Errorf("got %q, want empty for missing file", got)
@@ -84,6 +86,7 @@ func TestSkillDescription_MissingFile(t *testing.T) {
 }
 
 func TestSkillDescription_ReadsFromDisk(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	dir := filepath.Join(home, ".agents", "skills", "my-skill")
 	if err := os.MkdirAll(dir, 0o755); err != nil {

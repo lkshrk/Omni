@@ -21,17 +21,13 @@ import (
 
 // ─── Sync ─────────────────────────────────────────────────────────────────────
 
-// Sync syncs taps first, then tools. When AutoImport is enabled it also runs
-// Import so newly installed tools are captured in the config.
+// Sync installs bootstrap providers first, then syncs taps and tools. When
+// AutoImport is enabled it also runs Import so newly installed tools are
+// captured in the config.
 // opts.Group restricts the sync to one named group.
 // When opts.Group is empty, the active host's special group plus assigned
 // reusable groups are synced.
 func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResult, error) {
-	if !opts.DryRun {
-		if err := a.refreshInstalledIfStale(ctx, opts.Progress); err != nil {
-			return nil, fmt.Errorf("refreshing installed state: %w", err)
-		}
-	}
 	cfg, err := a.loadConfig()
 	if err != nil {
 		return nil, err
@@ -54,6 +50,38 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 		}
 		groups = effective
 		activeGroups = active
+	}
+
+	opts.IgnoreList = cfg.Ignore.Tools
+	providerTools := a.buildProviderTools(ctx, cfg)
+	var result *isync.SyncResult
+	if len(providerTools) > 0 {
+		pass1Opts := opts
+		pass1Opts.Prune = false
+		pass1Opts.Group = ""
+		pass1Opts.Provider = ""
+		pass1Opts.RetryFailed = false
+		providerCfg := &config.Config{Tools: providerTools, Settings: cfg.Settings}
+		pass1, perr := isync.New(a.registry, a.readDB()).Sync(ctx, providerCfg, pass1Opts)
+		if perr != nil {
+			return nil, perr
+		}
+		result = pass1
+
+		// A manager installed by a script in pass 1 may land in a dir not yet on
+		// PATH; refresh before any provider-sensitive tool planning begins.
+		refreshPathAfterScriptInstalls(ctx, a.newExecutor(), pass1, func(p string) {
+			if err := os.Setenv("PATH", p); err != nil {
+				// best effort: dependents fall back to the existing PATH
+				return
+			}
+		})
+	}
+
+	if !opts.DryRun {
+		if err := a.refreshInstalledIfStale(ctx, opts.Progress); err != nil {
+			return nil, fmt.Errorf("refreshing installed state: %w", err)
+		}
 	}
 
 	if !opts.DryRun {
@@ -99,45 +127,13 @@ func (a *App) Sync(ctx context.Context, opts isync.SyncOptions) (*isync.SyncResu
 		return nil, err
 	}
 
-	opts.IgnoreList = cfg.Ignore.Tools
-
 	// Build a flat config view for the syncer; logical tools are deduplicated
 	// by the resolver across group memberships.
 	flatCfg := &config.Config{Tools: resolvedTools, Settings: cfg.Settings}
 
-	// Two-pass provider-first sync:
-	//   Pass 1 — install bootstrap providers (Settings.Providers) first,
-	//             unconditionally, with no prune / group / provider filter.
-	//   Pass 2 — install the rest with the caller's original options; the
-	//             union of group tools + provider tools ensures bootstrap
-	//             providers are not pruned as orphans.
-	providerTools := a.buildProviderTools(ctx, cfg)
-
-	var result *isync.SyncResult
+	// Pass 2 keeps bootstrap providers in the desired set so prune does not
+	// treat the providers installed during preflight as orphans.
 	if len(providerTools) > 0 {
-		pass1Opts := opts
-		pass1Opts.Prune = false
-		pass1Opts.Group = ""
-		pass1Opts.Provider = ""
-		pass1Opts.RetryFailed = false
-		providerCfg := &config.Config{Tools: providerTools, Settings: cfg.Settings}
-		pass1, perr := isync.New(a.registry, a.readDB()).Sync(ctx, providerCfg, pass1Opts)
-		if perr != nil {
-			return nil, perr
-		}
-		result = pass1
-
-		// A manager installed by a script in pass 1 may land in a dir not yet on
-		// PATH; refresh from the login shell so pass-2 dependents can find it.
-		refreshPathAfterScriptInstalls(ctx, a.newExecutor(), pass1, func(p string) {
-			if err := os.Setenv("PATH", p); err != nil {
-				// best effort: pass-2 dependents fall back to the existing PATH
-				return
-			}
-		})
-
-		// Pass 2: union keeps bootstrap providers in the desired set so they
-		// are not pruned when the user runs --prune.
 		pass2Tools := unionToolEntries(resolvedTools, providerTools)
 		flatCfg = &config.Config{Tools: pass2Tools, Settings: cfg.Settings}
 	}

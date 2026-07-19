@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -122,6 +123,46 @@ func TestRealExecutor_Run(t *testing.T) {
 	}
 	if strings.TrimRight(stdout, "\n") != "hello" {
 		t.Errorf("stdout = %q, want hello", stdout)
+	}
+}
+
+func TestRealExecutor_RunObservesSanitizedLiveOutput(t *testing.T) {
+	var lines []string
+	ctx := WithOutputObserver(context.Background(), func(line string) {
+		lines = append(lines, line)
+	})
+	stdout, _, err := (&RealExecutor{}).Run(ctx, "printf", "first\nTOKEN=secret\n")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if stdout != "first\nTOKEN=secret\n" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if got := strings.Join(lines, "|"); got != "first|TOKEN=[redacted]" {
+		t.Fatalf("observed output = %q", got)
+	}
+}
+
+func TestOutputWriterFramesSplitOutputBeforeSanitizing(t *testing.T) {
+	var captured bytes.Buffer
+	var lines []string
+	w := outputWriter{
+		ctx: WithOutputObserver(context.Background(), func(line string) {
+			lines = append(lines, line)
+		}),
+		dst: &captured,
+	}
+
+	_, _ = w.Write([]byte("TOK"))
+	_, _ = w.Write([]byte("EN=secret\n\x1b]0;bad"))
+	_, _ = w.Write([]byte("\x07safe\ntail"))
+	w.flush()
+
+	if got := strings.Join(lines, "|"); got != "TOKEN=[redacted]|safe|tail" {
+		t.Fatalf("observed output = %q", got)
+	}
+	if got := captured.String(); got != "TOKEN=secret\n\x1b]0;bad\x07safe\ntail" {
+		t.Fatalf("captured output = %q", got)
 	}
 }
 

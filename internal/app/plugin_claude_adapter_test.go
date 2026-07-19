@@ -14,6 +14,7 @@ import (
 var errBoom = errors.New("boom")
 
 func TestClaudeCodePluginAdapter_ID(t *testing.T) {
+	t.Parallel()
 	a := NewClaudeCodePluginAdapter(nil, nil)
 	if a.ID() != "claude-code" {
 		t.Fatalf("got %q", a.ID())
@@ -21,6 +22,7 @@ func TestClaudeCodePluginAdapter_ID(t *testing.T) {
 }
 
 func TestClaudeCodePluginAdapter_InstallPlugin(t *testing.T) {
+	t.Parallel()
 	var gotCmd string
 	var gotArgs []string
 	exec := func(_ context.Context, cmd string, args ...string) (string, string, error) {
@@ -43,6 +45,7 @@ func TestClaudeCodePluginAdapter_InstallPlugin(t *testing.T) {
 }
 
 func TestClaudeCodePluginAdapter_RemovePlugin(t *testing.T) {
+	t.Parallel()
 	var gotArgs []string
 	exec := func(_ context.Context, _ string, args ...string) (string, string, error) {
 		gotArgs = args
@@ -60,6 +63,7 @@ func TestClaudeCodePluginAdapter_RemovePlugin(t *testing.T) {
 }
 
 func TestClaudeCodePluginAdapter_ExitZeroFailureMarkers(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		stdout string
@@ -93,6 +97,7 @@ func TestClaudeCodePluginAdapter_ExitZeroFailureMarkers(t *testing.T) {
 }
 
 func TestClaudeCodePluginAdapter_UpdatePlugin_Success(t *testing.T) {
+	t.Parallel()
 	var gotCmd string
 	var gotArgs []string
 	exec := func(_ context.Context, cmd string, args ...string) (string, string, error) {
@@ -117,6 +122,7 @@ func TestClaudeCodePluginAdapter_UpdatePlugin_Success(t *testing.T) {
 // regressing to the bare-name arg shape: live verification 2026-07-10 showed
 // `claude plugin update <bare-name>` returns the not-found failure marker.
 func TestClaudeCodePluginAdapter_UpdatePlugin_BareNameArgsWouldFail(t *testing.T) {
+	t.Parallel()
 	var gotArgs []string
 	exec := func(_ context.Context, _ string, args ...string) (string, string, error) {
 		gotArgs = args
@@ -141,6 +147,7 @@ func TestClaudeCodePluginAdapter_UpdatePlugin_BareNameArgsWouldFail(t *testing.T
 // the live-verified case where `claude plugin update name@marketplace` prints
 // a failure line but still exits 0 — the exit code alone cannot detect this.
 func TestClaudeCodePluginAdapter_UpdatePlugin_ExitZeroFailureMarkerIsError(t *testing.T) {
+	t.Parallel()
 	exec := func(_ context.Context, _ string, _ ...string) (string, string, error) {
 		return `✘ Failed to update plugin "useful-skills": Plugin "useful-skills" not found`, "", nil
 	}
@@ -153,6 +160,7 @@ func TestClaudeCodePluginAdapter_UpdatePlugin_ExitZeroFailureMarkerIsError(t *te
 // TestClaudeCodePluginAdapter_UpdatePlugin_RealExecErrorStillPropagates
 // ensures the marker-parsing path does not swallow genuine exec failures.
 func TestClaudeCodePluginAdapter_UpdatePlugin_RealExecErrorStillPropagates(t *testing.T) {
+	t.Parallel()
 	exec := func(_ context.Context, _ string, _ ...string) (string, string, error) {
 		return "", "connection refused", errBoom
 	}
@@ -163,6 +171,7 @@ func TestClaudeCodePluginAdapter_UpdatePlugin_RealExecErrorStillPropagates(t *te
 }
 
 func TestClaudeCodePluginAdapter_AddMarketplace(t *testing.T) {
+	t.Parallel()
 	var gotArgs []string
 	exec := func(_ context.Context, _ string, args ...string) (string, string, error) {
 		gotArgs = args
@@ -256,6 +265,7 @@ const claudeMarketplaceListConfiguredFixture = `[
 ]`
 
 func TestClaudeCodePluginAdapter_ListMarketplaces_ParsesRealFixture(t *testing.T) {
+	t.Parallel()
 	var gotArgs []string
 	exec := func(_ context.Context, _ string, args ...string) (string, string, error) {
 		gotArgs = args
@@ -283,6 +293,7 @@ func TestClaudeCodePluginAdapter_ListMarketplaces_ParsesRealFixture(t *testing.T
 const claudeMarketplaceListEmptyFixture = `[]`
 
 func TestClaudeCodePluginAdapter_ListMarketplaces_Empty(t *testing.T) {
+	t.Parallel()
 	exec := func(_ context.Context, _ string, _ ...string) (string, string, error) {
 		return claudeMarketplaceListEmptyFixture, "", nil
 	}
@@ -301,6 +312,7 @@ func TestClaudeCodePluginAdapter_ListMarketplaces_Empty(t *testing.T) {
 // since claude's marketplace list JSON carries no date field of its own
 // (unlike its plugin list JSON's installedAt/lastUpdated).
 func TestClaudeCodePluginAdapter_ListMarketplaces_UpdatedAtFromInstallLocationMtime(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	fixture := `[{"name":"lkshrk","source":"github","repo":"lkshrk/agent-marketplace","installLocation":"` + dir + `"}]`
 	exec := func(_ context.Context, _ string, _ ...string) (string, string, error) {
@@ -327,6 +339,7 @@ func TestClaudeCodePluginAdapter_ListMarketplaces_UpdatedAtFromInstallLocationMt
 // verifies a missing/unreadable installLocation yields a zero UpdatedAt
 // rather than an error — best-effort enrichment, never fatal.
 func TestClaudeCodePluginAdapter_ListMarketplaces_UpdatedAtZeroWhenLocationMissing(t *testing.T) {
+	t.Parallel()
 	fixture := `[{"name":"lkshrk","source":"github","repo":"lkshrk/agent-marketplace","installLocation":"/does/not/exist"}]`
 	exec := func(_ context.Context, _ string, _ ...string) (string, string, error) {
 		return fixture, "", nil
@@ -342,6 +355,7 @@ func TestClaudeCodePluginAdapter_ListMarketplaces_UpdatedAtZeroWhenLocationMissi
 }
 
 func TestClaudeCodePluginAdapter_UpdateMarketplaces(t *testing.T) {
+	t.Parallel()
 	var gotCmd string
 	var gotArgs []string
 	exec := func(_ context.Context, cmd string, args ...string) (string, string, error) {
@@ -363,6 +377,7 @@ func TestClaudeCodePluginAdapter_UpdateMarketplaces(t *testing.T) {
 }
 
 func TestClaudeCodePluginAdapter_UpdateMarketplaces_PropagatesError(t *testing.T) {
+	t.Parallel()
 	exec := func(_ context.Context, _ string, _ ...string) (string, string, error) {
 		return "", "boom stderr", errBoom
 	}

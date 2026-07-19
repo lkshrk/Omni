@@ -218,6 +218,10 @@ func Execute() {
 
 	root := NewRootCmd()
 	if err := root.ExecuteContext(ctx); err != nil {
+		// interrupt is shutdown, not failure — even when the canceled operation's error beats the force-exit goroutine here
+		if ctx.Err() != nil {
+			os.Exit(0)
+		}
 		fmt.Fprintln(os.Stderr, "error:", err)
 		printProviderErrorAdvice(os.Stderr, err)
 		os.Exit(1)

@@ -12,6 +12,7 @@ import (
 )
 
 func TestUpsertPackage(t *testing.T) {
+	t.Parallel()
 	existing := []config.SkillPackage{{Source: "a/b", Ref: "main"}}
 	got, added := upsertPackage(existing, "c/d", "v1")
 	if !added || len(got) != 2 || got[1].Source != "c/d" || got[1].Ref != "v1" {
@@ -24,6 +25,7 @@ func TestUpsertPackage(t *testing.T) {
 }
 
 func TestRemoveSkillPackage_PersistsRemoval(t *testing.T) {
+	t.Parallel()
 	a := newSkillsTestApp(t, config.AgentsConfig{
 		Packages: []config.SkillPackage{{Source: "o/keep"}, {Source: "o/del"}},
 	})
@@ -40,6 +42,7 @@ func TestRemoveSkillPackage_PersistsRemoval(t *testing.T) {
 }
 
 func TestRemoveSkillPackage_RejectsUnmanaged(t *testing.T) {
+	t.Parallel()
 	a := newSkillsTestApp(t, config.AgentsConfig{})
 	if err := a.RemoveSkillPackage("not-in-manifest"); err == nil {
 		t.Fatal("expected error: omni must not remove packages it did not add")
@@ -47,6 +50,7 @@ func TestRemoveSkillPackage_RejectsUnmanaged(t *testing.T) {
 }
 
 func TestRemoveSkillPackage_ClearsGroupAndIgnoreRefs(t *testing.T) {
+	t.Parallel()
 	a := newSkillsTestApp(t, config.AgentsConfig{
 		Packages: []config.SkillPackage{{Source: "alirezarezvani/claude-skills"}, {Source: "o/keep"}},
 		Ignore: config.AgentsIgnore{
@@ -139,6 +143,7 @@ func TestUninstallSkillPackage_RunsSkillsRemoveForLockfilePackage(t *testing.T) 
 }
 
 func TestUninstallSkillPackage_RejectsMissingLockfileEntries(t *testing.T) {
+	t.Parallel()
 	a := newSkillsTestApp(t, config.AgentsConfig{})
 	if err := a.UninstallSkillPackage(context.Background(), "ghost/pkg"); err == nil {
 		t.Fatal("expected error when package has no lockfile entries")

@@ -127,10 +127,18 @@ func updateMcpServer(ctx context.Context, adapter McpAdapter, desired config.Mcp
 	return nil
 }
 
-// resolveMcpServers returns the servers active for groupName.
+// resolveMcpServers returns the servers active for hostname.
 // Servers with no GroupConfig.McpServers membership restore on all hosts.
-// Servers listed in a GroupConfig.McpServers only restore when that group is active.
-func resolveMcpServers(cfg *config.RootConfig, groupName string) []config.McpServer {
+// Servers listed in a GroupConfig.McpServers restore when that group is
+// active on hostname — either the host's own group or one of the groups
+// assigned to it via cfg.Hosts, mirroring resolveSkillPackages.
+func resolveMcpServers(cfg *config.RootConfig, hostname string) []config.McpServer {
+	activeHostNames, _ := activeHostGroupNames(cfg, hostname)
+	activeHostSet := make(map[string]struct{}, len(activeHostNames))
+	for _, n := range activeHostNames {
+		activeHostSet[n] = struct{}{}
+	}
+
 	groupedNames := make(map[string]struct{})
 	activeNames := make(map[string]struct{})
 	for _, g := range cfg.Groups {
@@ -139,7 +147,7 @@ func resolveMcpServers(cfg *config.RootConfig, groupName string) []config.McpSer
 		}
 		for _, name := range g.McpServers {
 			groupedNames[name] = struct{}{}
-			if g.Name == groupName {
+			if _, active := activeHostSet[g.BaseName()]; active {
 				activeNames[name] = struct{}{}
 			}
 		}

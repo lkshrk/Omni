@@ -51,10 +51,18 @@ if [ "$1" = "plugins" ] && [ "$2" = "list" ] && [ "$3" = "--json" ] && [ "$4" = 
   exit 0
 fi
 if [ "$1" = "plugins" ] && [ "$2" = "marketplace" ] && [ "$3" = "list" ] && [ "$4" = "--json" ]; then
-  printf '[]\n'
+  if [ -f "${OMNI_CACHE_DIR}/marketplace-added" ]; then
+    printf '[{"name":"lkshrk","source":"github","repo":"lkshrk/marketplace"}]\n'
+  else
+    printf '[]\n'
+  fi
   exit 0
 fi
 if [ "$1" = "plugins" ] && [ "$2" = "marketplace" ] && [ "$3" = "add" ]; then
+  touch "${OMNI_CACHE_DIR}/marketplace-added"
+  exit 0
+fi
+if [ "$1" = "plugin" ] && [ "$2" = "marketplace" ] && [ "$3" = "update" ]; then
   exit 0
 fi
 if [ "$1" = "plugins" ] && [ "$2" = "install" ]; then

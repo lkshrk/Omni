@@ -36,7 +36,10 @@ func assertLinesFitWidth(t *testing.T, out string, width int) {
 // ── view_theme.go ─────────────────────────────────────────────────────────────
 
 func TestBuildPaletteFor_Dark(t *testing.T) {
+	t.Parallel(
 	// Check that colour tokens differ between dark and light.
+	)
+
 	darkP := buildPaletteFor(true)
 	lightP := buildPaletteFor(false)
 	if darkP.colInstalled == lightP.colInstalled {
@@ -45,6 +48,7 @@ func TestBuildPaletteFor_Dark(t *testing.T) {
 }
 
 func TestBuildPaletteFor_Light(t *testing.T) {
+	t.Parallel()
 	p := buildPaletteFor(false)
 	// Verify the light palette is non-zero (colInstalled should differ from zero).
 	if p.colInstalled == nil {
@@ -53,6 +57,7 @@ func TestBuildPaletteFor_Light(t *testing.T) {
 }
 
 func TestDefaultPalette_IsDark(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	darkP := buildPaletteFor(true)
 	// Default palette must match the dark variant (same colour tokens).
@@ -62,6 +67,7 @@ func TestDefaultPalette_IsDark(t *testing.T) {
 }
 
 func TestApplyTheme_Dark(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.applyTheme(true)
 	darkP := buildPaletteFor(true)
@@ -71,6 +77,7 @@ func TestApplyTheme_Dark(t *testing.T) {
 }
 
 func TestApplyTheme_Light(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.applyTheme(false)
 	lightP := buildPaletteFor(false)
@@ -82,6 +89,7 @@ func TestApplyTheme_Light(t *testing.T) {
 // ── view_scroll.go ────────────────────────────────────────────────────────────
 
 func TestApplyScrollWindow_BasicWindow(t *testing.T) {
+	t.Parallel()
 	content := "line0\nline1\nline2\nline3\nline4\n"
 	// avail=3, cursor=1 → lines 0-2
 	got := applyScrollWindow(content, 1, 3)
@@ -94,6 +102,7 @@ func TestApplyScrollWindow_BasicWindow(t *testing.T) {
 }
 
 func TestApplyScrollWindow_CursorAtBottom(t *testing.T) {
+	t.Parallel()
 	content := "a\nb\nc\nd\ne\n"
 	// cursor at line 4, avail=3 → should show c,d,e
 	got := applyScrollWindow(content, 4, 3)
@@ -103,6 +112,7 @@ func TestApplyScrollWindow_CursorAtBottom(t *testing.T) {
 }
 
 func TestApplyScrollWindow_StartsScrollingAtBottomFifth(t *testing.T) {
+	t.Parallel()
 	content := strings.Join([]string{
 		"L0", "L1", "L2", "L3", "L4",
 		"L5", "L6", "L7", "L8", "L9",
@@ -121,6 +131,7 @@ func TestApplyScrollWindow_StartsScrollingAtBottomFifth(t *testing.T) {
 }
 
 func TestApplyScrollWindow_EmptyContent(t *testing.T) {
+	t.Parallel()
 	got := applyScrollWindow("", 0, 5)
 	if got != "" {
 		t.Errorf("expected empty result for empty content, got: %q", got)
@@ -128,6 +139,7 @@ func TestApplyScrollWindow_EmptyContent(t *testing.T) {
 }
 
 func TestApplyScrollWindow_AvailLessThanOne(t *testing.T) {
+	t.Parallel()
 	content := "line0\nline1\n"
 	// avail=0 should be clamped to 1
 	got := applyScrollWindow(content, 0, 0)
@@ -137,7 +149,10 @@ func TestApplyScrollWindow_AvailLessThanOne(t *testing.T) {
 }
 
 func TestApplyScrollWindow_TrailingNewline(t *testing.T) {
+	t.Parallel(
 	// trailing empty entry from strings.Split should be dropped
+	)
+
 	content := "a\nb\nc\n"
 	got := applyScrollWindow(content, 0, 10)
 	// all three lines should be visible
@@ -147,6 +162,7 @@ func TestApplyScrollWindow_TrailingNewline(t *testing.T) {
 }
 
 func TestApplyScrollWindow_TableDriven(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		content string
@@ -194,6 +210,7 @@ func TestApplyScrollWindow_TableDriven(t *testing.T) {
 // ── view_header.go ────────────────────────────────────────────────────────────
 
 func TestRenderSetup_Step0(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSetup
 	m.setupStep = 0
@@ -223,6 +240,7 @@ func TestRenderSetup_Step0(t *testing.T) {
 }
 
 func TestRenderSetupPopup_UsesSharedCenteredTitle(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSetup
 	m.setupStep = 0
@@ -246,6 +264,7 @@ func TestRenderSetupPopup_UsesSharedCenteredTitle(t *testing.T) {
 }
 
 func TestRenderSetup_Step1(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSetup
 	m.setupStep = 1
@@ -279,6 +298,7 @@ func TestRenderSetup_Step1(t *testing.T) {
 }
 
 func TestRenderSetup_Step2(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSetup
 	m.setupStep = 2
@@ -293,6 +313,7 @@ func TestRenderSetup_Step2(t *testing.T) {
 }
 
 func TestRenderSetup_Step3(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSetup
 	m.setupStep = 3
@@ -308,6 +329,7 @@ func TestRenderSetup_Step3(t *testing.T) {
 }
 
 func TestRenderSetup_Step5(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSetup
 	m.setupStep = 5
@@ -321,6 +343,7 @@ func TestRenderSetup_Step5(t *testing.T) {
 }
 
 func TestRenderSetup_Step6(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSetup
 	m.setupStep = 6
@@ -332,6 +355,7 @@ func TestRenderSetup_Step6(t *testing.T) {
 }
 
 func TestRenderSetup_CopyHostAndGroups(t *testing.T) {
+	t.Parallel()
 	t.Run("copy prompt", func(t *testing.T) {
 		m := setupRenderModel(7)
 		m.hostInfo = &app.HostInfo{Hosts: map[string]config.HostAssignment{"laptop": {}}}
@@ -381,6 +405,7 @@ func TestRenderSetup_CopyHostAndGroups(t *testing.T) {
 }
 
 func TestRenderSetup_AllActionFootersUsePopupAlignment(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		model     Model
@@ -450,6 +475,7 @@ func assertActionRightAligned(t *testing.T, out, needle string, width int) {
 }
 
 func TestRenderSetup_LoadingUsesFooterOnly(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSetup
 	m.setupStep = 0
@@ -465,6 +491,7 @@ func TestRenderSetup_LoadingUsesFooterOnly(t *testing.T) {
 }
 
 func TestViewString_PostSetupReloadShowsCenteredProgress(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewList
 	m.loading = true
@@ -507,6 +534,7 @@ func TestViewString_PostSetupReloadShowsCenteredProgress(t *testing.T) {
 }
 
 func TestViewString_PostSetupReloadEmphasizesProviderRefresh(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewList
 	m.loading = true
@@ -524,6 +552,7 @@ func TestViewString_PostSetupReloadEmphasizesProviderRefresh(t *testing.T) {
 }
 
 func TestViewString_PostSetupReloadClosesSetupPopupFirst(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSetup
 	m.setupStep = 5
@@ -541,6 +570,7 @@ func TestViewString_PostSetupReloadClosesSetupPopupFirst(t *testing.T) {
 }
 
 func TestRenderHeader_DefaultMode(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	out := renderHeader(m)
 	if out == "" {
@@ -552,6 +582,7 @@ func TestRenderHeader_DefaultMode(t *testing.T) {
 }
 
 func TestRenderHeader_DotsMode(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
@@ -567,6 +598,7 @@ func TestRenderHeader_DotsMode(t *testing.T) {
 }
 
 func TestRenderHeaderInfo_UsesUniformRegularWeight(t *testing.T) {
+	t.Parallel()
 	tools := baseModel([]*app.ToolView{{
 		Name:      "git",
 		Provider:  "brew",
@@ -614,6 +646,7 @@ func headerInfoHasBoldANSI(s string) bool {
 }
 
 func TestRenderHeader_DotsLoadingKeepsCountSummary(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
@@ -629,6 +662,7 @@ func TestRenderHeader_DotsLoadingKeepsCountSummary(t *testing.T) {
 }
 
 func TestRenderHeader_DotsDisabledShowsNoInfo(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles", DotsDisabled: config.BoolPtr(true)})
@@ -641,6 +675,7 @@ func TestRenderHeader_DotsDisabledShowsNoInfo(t *testing.T) {
 }
 
 func TestRenderHeader_DotsGitStatusShowsDirty(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
@@ -656,6 +691,7 @@ func TestRenderHeader_DotsGitStatusShowsDirty(t *testing.T) {
 }
 
 func TestRenderHeader_GroupsModeUsesGroupInfo(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.mode = viewGroups
 	m.groupNames = []string{"dev", "ops"}
@@ -677,6 +713,7 @@ func TestRenderHeader_GroupsModeUsesGroupInfo(t *testing.T) {
 // top-right shows only the version (renderHeaderVersion); the summaries live
 // in the settings tab body.
 func TestRenderHeader_SettingsModeShowsNoSummary(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.mode = viewSettings
 	m.settings.DisabledProviders = []string{"node", "node", "brew"}
@@ -690,6 +727,7 @@ func TestRenderHeader_SettingsModeShowsNoSummary(t *testing.T) {
 }
 
 func TestRenderSettings_ShowsProviderPriorityRow(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	m.width = 120
@@ -721,6 +759,7 @@ func TestRenderSettings_ShowsProviderPriorityRow(t *testing.T) {
 // future row added to the const/meta but dropped from the render slice will
 // also fail.
 func TestRenderSettings_AllRowsRendered(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	m.width = 120
@@ -742,10 +781,13 @@ func TestRenderSettings_AllRowsRendered(t *testing.T) {
 }
 
 func TestRenderHeaderUsesCachedDotsAvailability(t *testing.T) {
+	t.Parallel(
 	// The settings-header dots-label subtests were removed with the label
 	// itself: the settings top-right now carries only the version (see
 	// renderHeaderVersion); dots availability remains covered on the dots
 	// tab below.
+	)
+
 	t.Run("dots header keeps counts when app is enabled despite stale disabled setting", func(t *testing.T) {
 		m := baseModel(nil)
 		m.mode = viewDots
@@ -762,6 +804,7 @@ func TestRenderHeaderUsesCachedDotsAvailability(t *testing.T) {
 }
 
 func TestRenderHeader_Searching(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.searching = true
 	out := stripANSIEscapeSequences(renderHeader(m))
@@ -774,6 +817,7 @@ func TestRenderHeader_Searching(t *testing.T) {
 }
 
 func TestRenderHeader_ScanningProviders(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.scanningProviders = map[string]bool{"brew": true}
 	out := stripANSIEscapeSequences(renderHeader(m))
@@ -786,6 +830,7 @@ func TestRenderHeader_ScanningProviders(t *testing.T) {
 }
 
 func TestRenderHeader_WithUpdates(t *testing.T) {
+	t.Parallel()
 	tools := []*app.ToolView{
 		{Name: "git", Provider: "brew", Installed: true, Outdated: true},
 	}
@@ -797,6 +842,7 @@ func TestRenderHeader_WithUpdates(t *testing.T) {
 }
 
 func TestRenderHeader_WithSearchTools(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.searchTools = []*app.ToolView{{Name: "extra-tool", Provider: "brew"}}
 	out := renderHeader(m)
@@ -806,6 +852,7 @@ func TestRenderHeader_WithSearchTools(t *testing.T) {
 }
 
 func TestRenderHeader_RightEdgeMatchesListRows(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{{
 		Name:      "git",
 		Provider:  "brew",
@@ -824,6 +871,7 @@ func TestRenderHeader_RightEdgeMatchesListRows(t *testing.T) {
 }
 
 func TestRenderHeader_UsesSharedEdgePadding(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.width = 100
 
@@ -850,6 +898,7 @@ func TestRenderHeader_DoesNotShowHostname(t *testing.T) {
 }
 
 func TestRenderStatusBar_UsesSharedEdgePadding(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 100
 	m.statusMsg = "ready"
@@ -864,6 +913,7 @@ func TestRenderStatusBar_UsesSharedEdgePadding(t *testing.T) {
 }
 
 func TestRenderTabs_DefaultMode(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewList
 	out := renderTabs(m)
@@ -873,11 +923,13 @@ func TestRenderTabs_DefaultMode(t *testing.T) {
 }
 
 func TestRenderTabs_Order(t *testing.T) {
+	t.Parallel()
 	out := renderTabs(baseModel(nil))
 	assertOrderedSubstrings(t, out, "Dashboard", "Tools", "Dots", "Groups", "Settings")
 }
 
 func TestRenderTabs_DotsMode(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewDots
 	out := renderTabs(m)
@@ -887,6 +939,7 @@ func TestRenderTabs_DotsMode(t *testing.T) {
 }
 
 func TestRenderTabs_HostsMode(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewGroups
 	out := renderTabs(m)
@@ -896,6 +949,7 @@ func TestRenderTabs_HostsMode(t *testing.T) {
 }
 
 func TestRenderTabs_StatusMode(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewStatus
 	out := renderTabs(m)
@@ -905,6 +959,7 @@ func TestRenderTabs_StatusMode(t *testing.T) {
 }
 
 func TestRenderTabs_SettingsMode(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	out := renderTabs(m)
@@ -914,6 +969,7 @@ func TestRenderTabs_SettingsMode(t *testing.T) {
 }
 
 func TestRenderTabs_HasStableWidthAcrossModes(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	base := lipgloss.Width(renderTabs(m))
 	for _, mode := range []viewMode{viewDots, viewStatus, viewGroups, viewSettings} {
@@ -926,6 +982,7 @@ func TestRenderTabs_HasStableWidthAcrossModes(t *testing.T) {
 }
 
 func TestRenderPopupFrame_TitleDoesNotWrapDividerLine(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 64
 	m.height = 28
@@ -945,6 +1002,7 @@ func TestRenderPopupFrame_TitleDoesNotWrapDividerLine(t *testing.T) {
 }
 
 func TestRenderPopupFrame_CentersTitle(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	frame := popupFrame{
 		Title:    "Header",
@@ -968,6 +1026,7 @@ func TestRenderPopupFrame_CentersTitle(t *testing.T) {
 }
 
 func TestRenderPopupFrame_ClampsContentDividers(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	frame := popupFrame{
 		Title:    "Picker",
@@ -992,6 +1051,7 @@ func TestRenderPopupFrame_ClampsContentDividers(t *testing.T) {
 }
 
 func TestRenderPopupFrame_DoesNotPaintDefaultBackgroundAfterStyledContentReset(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.palette = defaultPalette()
 	content := m.palette.styleNormal.Render("Enable dotfile sync?")
@@ -1014,6 +1074,7 @@ func TestRenderPopupFrame_DoesNotPaintDefaultBackgroundAfterStyledContentReset(t
 }
 
 func TestRenderPopupFrame_DoesNotPaintDefaultFrameBackground(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.palette = defaultPalette()
 	innerWidth := popupInnerContentWidth(popupFrame{Width: 44, PaddingX: 2})
@@ -1038,6 +1099,7 @@ func TestRenderPopupFrame_DoesNotPaintDefaultFrameBackground(t *testing.T) {
 }
 
 func TestRenderPickerHints_DividerUsesPopupBodyWidth(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	width := 24
 	out := renderPickerHintItems(m, width, confirmActionItems(m.keys.Confirm, "create", m.keys.Back))
@@ -1051,6 +1113,7 @@ func TestRenderPickerHints_DividerUsesPopupBodyWidth(t *testing.T) {
 }
 
 func TestRenderPickerHintItems_AlignsAbortLeftPrimaryRight(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	width := 36
 	out := renderPickerHintItems(m, width, confirmActionItems(m.keys.Confirm, "create", m.keys.Back))
@@ -1071,6 +1134,7 @@ func TestRenderPickerHintItems_AlignsAbortLeftPrimaryRight(t *testing.T) {
 }
 
 func TestRenderPalette_Empty(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.commandSuggestions = nil
 	out := renderPalette(m)
@@ -1080,6 +1144,7 @@ func TestRenderPalette_Empty(t *testing.T) {
 }
 
 func TestRenderPalette_WithSuggestions(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.commandSuggestions = []palCmd{
 		{name: "sync", desc: "sync tools"},
@@ -1096,6 +1161,7 @@ func TestRenderPalette_WithSuggestions(t *testing.T) {
 }
 
 func TestRenderProviderPickerStep_Step1(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.setupProviders = []app.SetupProviderOption{
 		{Name: "system", Label: "system(brew)", Enabled: true},
@@ -1113,6 +1179,7 @@ func TestRenderProviderPickerStep_Step1(t *testing.T) {
 }
 
 func TestRenderProviderPickerStep_Step2(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.setupProviders = []app.SetupProviderOption{
 		{Name: "system", Label: "system(apt)", Enabled: true},
@@ -1124,6 +1191,7 @@ func TestRenderProviderPickerStep_Step2(t *testing.T) {
 }
 
 func TestRenderProviderPickerStep_CheckboxStates(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.setupProviders = []app.SetupProviderOption{
 		{Name: "system", Label: "system(brew)", Enabled: true},
@@ -1138,6 +1206,7 @@ func TestRenderProviderPickerStep_CheckboxStates(t *testing.T) {
 // ── view_settings.go ─────────────────────────────────────────────────────────
 
 func TestRenderSettings_Basic(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	out := renderSettings(m)
@@ -1150,6 +1219,7 @@ func TestRenderSettings_Basic(t *testing.T) {
 }
 
 func TestRenderSettings_SectionHeaders(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	out := renderSettings(m)
@@ -1165,6 +1235,7 @@ func TestRenderSettings_SectionHeaders(t *testing.T) {
 }
 
 func TestRenderSettings_LabelOrderAndLegacyNames(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	out := renderSettings(m)
@@ -1232,6 +1303,7 @@ func TestRenderSettings_LabelOrderAndLegacyNames(t *testing.T) {
 }
 
 func TestRenderSettings_AutoImportON(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	m.settings.AutoImport = true
@@ -1242,6 +1314,7 @@ func TestRenderSettings_AutoImportON(t *testing.T) {
 }
 
 func TestRenderSettings_OnlySelectedRowShowsDetail(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	m.settingsCursor = settingsRowProviderPriority
@@ -1257,6 +1330,7 @@ func TestRenderSettings_OnlySelectedRowShowsDetail(t *testing.T) {
 }
 
 func TestRenderSettings_DisabledProvider(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	m.settings.DisabledProviders = []string{"node"}
@@ -1268,6 +1342,7 @@ func TestRenderSettings_DisabledProvider(t *testing.T) {
 }
 
 func TestRenderSettings_NodeManagerSet(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	m.settings.ProviderPriority = append([]string{"bun"}, m.settings.ProviderPriority...)
@@ -1278,6 +1353,7 @@ func TestRenderSettings_NodeManagerSet(t *testing.T) {
 }
 
 func TestRenderSettings_DotsRepo(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
@@ -1288,6 +1364,7 @@ func TestRenderSettings_DotsRepo(t *testing.T) {
 }
 
 func TestRenderSettingsUsesCachedDotsAvailability(t *testing.T) {
+	t.Parallel()
 	t.Run("repo row shows app repo when local settings are stale", func(t *testing.T) {
 		m := baseModel(nil)
 		m.mode = viewSettings
@@ -1336,6 +1413,7 @@ func TestRenderSettingsUsesCachedDotsAvailability(t *testing.T) {
 }
 
 func TestRenderSettings_DotsServiceRows(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
@@ -1351,6 +1429,7 @@ func TestRenderSettings_DotsServiceRows(t *testing.T) {
 }
 
 func TestRenderSettings_DotsServiceDashboard(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	setDotsRepoForTest(&m, "/home/user/dotfiles")
@@ -1370,6 +1449,7 @@ func TestRenderSettings_DotsServiceDashboard(t *testing.T) {
 }
 
 func TestRenderSettings_DoctorDashboard(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	m.settingsCursor = settingsRowDoctor
@@ -1391,6 +1471,7 @@ func TestRenderSettings_DoctorDashboard(t *testing.T) {
 }
 
 func TestRenderSettings_CursorHighlight(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	m.settingsCursor = 0
@@ -1402,6 +1483,7 @@ func TestRenderSettings_CursorHighlight(t *testing.T) {
 }
 
 func TestRenderSettings_DangerConfirmRow(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	m.dangerConfirmRow = settingsRowResetSettings
@@ -1415,6 +1497,7 @@ func TestRenderSettings_DangerConfirmRow(t *testing.T) {
 }
 
 func TestRenderSettings_EditingPriority(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	m.settingsCursor = 1
@@ -1435,6 +1518,7 @@ func TestRenderSettings_EditingPriority(t *testing.T) {
 }
 
 func TestRenderSettings_DotsDisableKeepLocalPrompt(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	m.settingsCursor = settingsRowDotsSync
@@ -1448,6 +1532,7 @@ func TestRenderSettings_DotsDisableKeepLocalPrompt(t *testing.T) {
 }
 
 func TestRenderSettings_ProviderPriority(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	// Set a custom provider priority order; the collapsed row should reflect it.
@@ -1459,6 +1544,7 @@ func TestRenderSettings_ProviderPriority(t *testing.T) {
 }
 
 func TestRenderSettings_AutoPushImpliesAutoCommit(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	m.settings.DotsGit.AutoPush = true
@@ -1470,6 +1556,7 @@ func TestRenderSettings_AutoPushImpliesAutoCommit(t *testing.T) {
 }
 
 func TestRenderHosts_Empty(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewGroups
 	m.hostInfo = &app.HostInfo{
@@ -1485,6 +1572,7 @@ func TestRenderHosts_Empty(t *testing.T) {
 }
 
 func TestRenderHosts_WithHosts(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewGroups
 	m.hostInfo = &app.HostInfo{
@@ -1506,6 +1594,7 @@ func TestRenderHosts_WithHosts(t *testing.T) {
 }
 
 func TestRenderHosts_HostGroupsAlphabetical(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewGroups
 	m.hostInfo = &app.HostInfo{
@@ -1520,6 +1609,7 @@ func TestRenderHosts_HostGroupsAlphabetical(t *testing.T) {
 }
 
 func TestRenderHosts_ActiveHostMarker(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewGroups
 	m.hostInfo = &app.HostInfo{
@@ -1535,6 +1625,7 @@ func TestRenderHosts_ActiveHostMarker(t *testing.T) {
 }
 
 func TestRenderHosts_HostRequired(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewGroups
 	m.hostRequired = true
@@ -1548,6 +1639,7 @@ func TestRenderHosts_HostRequired(t *testing.T) {
 }
 
 func TestRenderHosts_WithGroups(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewGroups
 	m.hostInfo = &app.HostInfo{
@@ -1564,6 +1656,7 @@ func TestRenderHosts_WithGroups(t *testing.T) {
 }
 
 func TestRenderHosts_NoBlankLineDirectlyAfterDivider(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewGroups
 	m.hostInfo = &app.HostInfo{
@@ -1594,6 +1687,7 @@ func TestRenderHosts_NoBlankLineDirectlyAfterDivider(t *testing.T) {
 }
 
 func TestRenderHosts_NilHostInfo(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewGroups
 	m.hostInfo = nil
@@ -1606,6 +1700,7 @@ func TestRenderHosts_NilHostInfo(t *testing.T) {
 }
 
 func TestRenderHosts_GroupCreating(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewGroups
 	m.width = 80
@@ -1634,6 +1729,7 @@ func TestRenderHosts_GroupCreating(t *testing.T) {
 }
 
 func TestPlacePopup_ClampsTallContentToTerminalHeight(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 80
 	m.height = 12
@@ -1670,6 +1766,7 @@ func TestPlacePopup_ClampsTallContentToTerminalHeight(t *testing.T) {
 }
 
 func TestHostGroupToolsPopup_FilterKeepsDimensions(t *testing.T) {
+	t.Parallel()
 	m := hostsModel()
 	m.mode = viewGroupTools
 	m.width = 100
@@ -1710,6 +1807,7 @@ func TestHostGroupToolsPopup_FilterKeepsDimensions(t *testing.T) {
 }
 
 func TestHostGroupDotsPopup_SearchKeepsDimensions(t *testing.T) {
+	t.Parallel()
 	m := hostsModel()
 	m.mode = viewGroupDots
 	m.width = 100
@@ -1747,6 +1845,7 @@ func TestHostGroupDotsPopup_SearchKeepsDimensions(t *testing.T) {
 }
 
 func TestHostGroupEditorPopups_DoNotWrapDividersOrFooter(t *testing.T) {
+	t.Parallel()
 	for _, width := range []int{90, 110} {
 		t.Run(fmt.Sprintf("tools width %d", width), func(t *testing.T) {
 			m := hostsModel()
@@ -1810,6 +1909,7 @@ func assertPopupFrameDoesNotWrap(t *testing.T, out string, width int, footerKeys
 }
 
 func TestRenderHosts_DeleteConfirm(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewGroups
 	m.hostInfo = &app.HostInfo{
@@ -1829,6 +1929,7 @@ func TestRenderHosts_DeleteConfirm(t *testing.T) {
 }
 
 func TestRenderHosts_LegacyHostnameMappingSectionRemoved(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewGroups
 	m.hostInfo = &app.HostInfo{
@@ -1903,6 +2004,7 @@ func TestRenderHosts_CurrentHostSummaryAggregatesAssignedGroups(t *testing.T) {
 }
 
 func TestRenderHosts_HostAndGroupColumnsAlign(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewGroups
 	m.hostInfo = &app.HostInfo{
@@ -2005,6 +2107,7 @@ func TestRenderHosts_ProtectedGroupDetail(t *testing.T) {
 }
 
 func TestRenderHosts_GroupCountsRightAlign(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewGroups
 	m.hostInfo = &app.HostInfo{Hosts: map[string]config.HostAssignment{}}
@@ -2056,6 +2159,7 @@ func colsNameWidthForHostTest(m Model) int {
 }
 
 func TestRenderHosts_HostActionsAndRename(t *testing.T) {
+	t.Parallel()
 	m := hostsModel()
 	m.hostCursor = 0
 	out := renderGroups(m)
@@ -2077,6 +2181,7 @@ func TestRenderHosts_HostActionsAndRename(t *testing.T) {
 }
 
 func TestRenderHosts_CurrentHostDoesNotOfferCopyGroups(t *testing.T) {
+	t.Parallel()
 	m := hostsModel()
 	m.hostInfo.Active = "alpha"
 	m.hostCursor = 0
@@ -2093,6 +2198,7 @@ func TestRenderHosts_CurrentHostDoesNotOfferCopyGroups(t *testing.T) {
 }
 
 func TestRenderHostGroupEditor_LocalHostGroupLocked(t *testing.T) {
+	t.Parallel()
 	m := hostsModel()
 	m.hostInfo.Active = "alpha"
 	m.hostCursor = 0
@@ -2111,6 +2217,7 @@ func TestRenderHostGroupEditor_LocalHostGroupLocked(t *testing.T) {
 }
 
 func TestRenderHosts_GroupActions(t *testing.T) {
+	t.Parallel()
 	m := hostsModel()
 	m.assignmentSection = 1
 	for i, group := range buildAllGroupNames(m.groupNames) {
@@ -2164,6 +2271,7 @@ func assertOrderedSubstrings(t *testing.T, out string, wants ...string) {
 }
 
 func TestRenderHostGroupEditor(t *testing.T) {
+	t.Parallel()
 	m := hostsModel()
 	m.hostEditMode = 1
 	m.hostEditName = "alpha"
@@ -2179,6 +2287,7 @@ func TestRenderHostGroupEditor(t *testing.T) {
 }
 
 func TestHostGroupEditorPopupFrameMatchesBodyWidth(t *testing.T) {
+	t.Parallel()
 	m := hostsModel()
 	m.width = 100
 	m.height = 30
@@ -2203,6 +2312,7 @@ func TestHostGroupEditorPopupFrameMatchesBodyWidth(t *testing.T) {
 }
 
 func TestHostGroupEditorPopupUsesTerminalDefaultBackground(t *testing.T) {
+	t.Parallel()
 	m := hostsModel()
 	m.width = 100
 	m.height = 30
@@ -2221,6 +2331,7 @@ func TestHostGroupEditorPopupUsesTerminalDefaultBackground(t *testing.T) {
 }
 
 func TestViewDoesNotForceCanvasToPopupSurfaceColor(t *testing.T) {
+	t.Parallel()
 	m := hostsModel()
 	m.width = 100
 	m.height = 30
@@ -2234,6 +2345,7 @@ func TestViewDoesNotForceCanvasToPopupSurfaceColor(t *testing.T) {
 }
 
 func TestRenderHostGroupEditorCreatingGroupPlaceholder(t *testing.T) {
+	t.Parallel()
 	m := hostsModel()
 	m.hostEditMode = 1
 	m.hostEditName = "alpha"
@@ -2255,6 +2367,7 @@ func TestRenderHostGroupEditorCreatingGroupPlaceholder(t *testing.T) {
 }
 
 func TestRenderFocusedEmptyInputsDoNotDuplicatePlaceholderFirstRune(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name        string
 		placeholder string
@@ -2316,6 +2429,7 @@ func TestRenderFocusedEmptyInputsDoNotDuplicatePlaceholderFirstRune(t *testing.T
 }
 
 func TestViewHostEditorTitlesUseCapturedHostAfterCursorMoves(t *testing.T) {
+	t.Parallel()
 	m := hostsModel()
 	m.width = 100
 	m.height = 40
@@ -2334,6 +2448,7 @@ func TestViewHostEditorTitlesUseCapturedHostAfterCursorMoves(t *testing.T) {
 }
 
 func TestRenderGroupPicker_NoToolSelected(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewGroupPicker
 	// cursor=-1 → no tool selected
@@ -2345,6 +2460,7 @@ func TestRenderGroupPicker_NoToolSelected(t *testing.T) {
 }
 
 func TestRenderGroupPicker_WithTool(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.mode = viewGroupPicker
 	m.cursor = 0
@@ -2357,6 +2473,7 @@ func TestRenderGroupPicker_WithTool(t *testing.T) {
 }
 
 func TestRenderGroupPicker_SeparatesActiveAndInactiveGroups(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.mode = viewGroupPicker
 	m.cursor = 0
@@ -2376,6 +2493,7 @@ func TestRenderGroupPicker_SeparatesActiveAndInactiveGroups(t *testing.T) {
 }
 
 func TestRenderGroupMembershipPicker_SeparatesActiveAndInactiveGroups(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.mode = viewGroupMembership
 	m.cursor = 0
@@ -2399,6 +2517,7 @@ func TestRenderGroupMembershipPicker_SeparatesActiveAndInactiveGroups(t *testing
 }
 
 func TestRenderGroupPicker_ClaimPurpose(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.mode = viewGroupPicker
 	m.cursor = 0
@@ -2411,6 +2530,7 @@ func TestRenderGroupPicker_ClaimPurpose(t *testing.T) {
 }
 
 func TestRenderGroupPicker_CreatingGroup(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.mode = viewGroupPicker
 	m.cursor = 0
@@ -2425,6 +2545,7 @@ func TestRenderGroupPicker_CreatingGroup(t *testing.T) {
 }
 
 func TestRenderGroupPicker_CreatingGroupKeepsSize(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.mode = viewGroupPicker
 	m.cursor = 0
@@ -2448,6 +2569,7 @@ func TestRenderGroupPicker_CreatingGroupKeepsSize(t *testing.T) {
 }
 
 func TestViewString_GroupPickerTitle(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.mode = viewGroupPicker
 	m.cursor = 0
@@ -2460,6 +2582,7 @@ func TestViewString_GroupPickerTitle(t *testing.T) {
 }
 
 func TestViewString_GroupPickerTitleUsesCapturedToolAfterCursorMoves(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{
 		{Name: "ripgrep", Provider: "system", Installed: true},
 		{Name: "zoxide", Provider: "system", Installed: true},
@@ -2477,6 +2600,7 @@ func TestViewString_GroupPickerTitleUsesCapturedToolAfterCursorMoves(t *testing.
 }
 
 func TestViewString_GroupMembershipTitleUsesCapturedToolAfterCursorMoves(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{
 		{Name: "ripgrep", Provider: "system", Tracked: true},
 		{Name: "zoxide", Provider: "system", Tracked: true},
@@ -2494,6 +2618,7 @@ func TestViewString_GroupMembershipTitleUsesCapturedToolAfterCursorMoves(t *test
 }
 
 func TestViewString_ProviderScopeTitleIncludesTool(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.mode = viewProviderScope
 	m.cursor = 0
@@ -2509,6 +2634,7 @@ func TestViewString_ProviderScopeTitleIncludesTool(t *testing.T) {
 }
 
 func TestViewString_ScopeTitleUsesCapturedToolAfterCursorMoves(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{
 		{Name: "ripgrep", Provider: "system", Installed: true, InstalledWith: "brew", Tracked: true},
 		{Name: "zoxide", Provider: "system", Installed: true, InstalledWith: "brew", Tracked: true},
@@ -2526,6 +2652,7 @@ func TestViewString_ScopeTitleUsesCapturedToolAfterCursorMoves(t *testing.T) {
 }
 
 func TestRenderScopePicker_ProviderLabelsFitWithShortDetails(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{
 		{Name: "npm", Provider: "node", Installed: true, InstalledWith: "npm", Tracked: true},
 	})
@@ -2550,6 +2677,7 @@ func TestRenderScopePicker_ProviderLabelsFitWithShortDetails(t *testing.T) {
 }
 
 func TestScopePickerPopupFrameFitsContent(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{
 		{Name: "npm", Provider: "node", Installed: true, InstalledWith: "npm", Tracked: true},
 	})
@@ -2565,6 +2693,7 @@ func TestScopePickerPopupFrameFitsContent(t *testing.T) {
 }
 
 func TestRenderSettings_InlineHintsUseSharedIndent(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	out := renderSettings(m)
@@ -2581,6 +2710,7 @@ func TestRenderSettings_InlineHintsUseSharedIndent(t *testing.T) {
 }
 
 func TestRenderSettings_RowLabelUsesSharedListEdge(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	out := renderSettings(m)
@@ -2595,6 +2725,7 @@ func TestRenderSettings_RowLabelUsesSharedListEdge(t *testing.T) {
 }
 
 func TestSelectedRowDetailPrefixesUseSmallInset(t *testing.T) {
+	t.Parallel()
 	listBase := rowMarkerWidth + listIconWidth + listIconGapWidth
 	textBase := rowMarkerWidth + 2
 
@@ -2613,6 +2744,7 @@ func TestSelectedRowDetailPrefixesUseSmallInset(t *testing.T) {
 }
 
 func TestRenderSettings_ExpandableRowsUseEnterHint(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	for _, tc := range []struct {
@@ -2642,6 +2774,7 @@ func TestRenderSettings_ExpandableRowsUseEnterHint(t *testing.T) {
 }
 
 func TestRenderSettings_EditModeShowsCancelHint(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	m.settingsCursor = 1
@@ -2665,6 +2798,7 @@ func TestRenderSettings_EditModeShowsCancelHint(t *testing.T) {
 }
 
 func TestRenderSettings_StateColumnUsesResponsiveRightEdge(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	out := renderSettings(m)
@@ -2683,6 +2817,7 @@ func TestRenderSettings_StateColumnUsesResponsiveRightEdge(t *testing.T) {
 }
 
 func TestMainTabs_FirstSectionStartsAtSharedRow(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "git", Provider: "system", Installed: true, Tracked: true}
 	toolsNoFilters := baseModel([]*app.ToolView{tool})
 	toolsNoFilters.providerNames = nil
@@ -2743,6 +2878,7 @@ func TestMainTabs_FirstSectionStartsAtSharedRow(t *testing.T) {
 }
 
 func TestRenderHosts_InlineHintsUseSharedIndent(t *testing.T) {
+	t.Parallel()
 	m := hostsModel()
 	m.assignmentSection = 0
 	out := renderGroups(m)
@@ -2805,6 +2941,7 @@ func settingsLabelLineIndex(out, label string, header bool) int {
 // ── view_statusbar.go ─────────────────────────────────────────────────────────
 
 func TestRenderStatusBar_Idle(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	out := renderStatusBar(m)
 	if out == "" {
@@ -2813,6 +2950,7 @@ func TestRenderStatusBar_Idle(t *testing.T) {
 }
 
 func TestRenderStatusBar_WithStatusMsg(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.statusMsg = "sync complete"
 	out := renderStatusBar(m)
@@ -2822,6 +2960,7 @@ func TestRenderStatusBar_WithStatusMsg(t *testing.T) {
 }
 
 func TestRenderStatusBar_StatusMsgHidesFooterHintsWhenCrowded(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.width = 96
 	m.mode = viewList
@@ -2844,6 +2983,7 @@ func TestRenderStatusBar_StatusMsgHidesFooterHintsWhenCrowded(t *testing.T) {
 }
 
 func TestRenderStatusBar_LongStatusMsgHidesFooterHints(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.width = 72
 	m.mode = viewList
@@ -2866,6 +3006,7 @@ func TestRenderStatusBar_LongStatusMsgHidesFooterHints(t *testing.T) {
 }
 
 func TestRenderStatusBar_SuccessMsgUsesGreenStyle(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.statusMsg = "✓ sync complete"
 	out := renderStatusBar(m)
@@ -2876,6 +3017,7 @@ func TestRenderStatusBar_SuccessMsgUsesGreenStyle(t *testing.T) {
 }
 
 func TestRenderStatusBar_SyncAllConfirmUsesFooterOnly(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.armListConfirmation(listConfirmSyncAll, nil)
 	out := renderStatusBar(m)
@@ -2891,6 +3033,7 @@ func TestRenderStatusBar_SyncAllConfirmUsesFooterOnly(t *testing.T) {
 }
 
 func TestRenderStatusBar_RowConfirmHidesFooterHints(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "bat", Provider: "brew", Installed: true, Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 	m.armListConfirmation(listConfirmDelete, tool)
@@ -2913,6 +3056,7 @@ func TestRenderStatusBar_RowConfirmHidesFooterHints(t *testing.T) {
 }
 
 func TestRenderStatusBar_FilterActiveShowsClearHint(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	out := renderStatusBar(m)
 	if strings.Contains(out, "clear") {
@@ -2928,6 +3072,7 @@ func TestRenderStatusBar_FilterActiveShowsClearHint(t *testing.T) {
 }
 
 func TestActiveConfirmationsUseSingleHelpHint(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "bat", Provider: "brew", Installed: true, Tracked: true}
 	cases := []struct {
 		name string
@@ -3039,6 +3184,7 @@ func TestActiveConfirmationsUseSingleHelpHint(t *testing.T) {
 }
 
 func TestRenderStatusBar_QuitConfirmReplacesFooterHints(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.confirmQuit = true
 	m.quitConfirmKey = "ctrl+c"
@@ -3059,6 +3205,7 @@ func TestRenderStatusBar_QuitConfirmReplacesFooterHints(t *testing.T) {
 }
 
 func TestRenderStatusBar_ErrorMsg(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.statusMsg = "something went wrong"
 	m.statusIsErr = true
@@ -3069,6 +3216,7 @@ func TestRenderStatusBar_ErrorMsg(t *testing.T) {
 }
 
 func TestRenderStatusBar_Loading(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.loading = true
 	out := renderStatusBar(m)
@@ -3078,6 +3226,7 @@ func TestRenderStatusBar_Loading(t *testing.T) {
 }
 
 func TestViewString_LoadingListUsesFooterOnly(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.loading = true
 	m.mode = viewList
@@ -3089,6 +3238,7 @@ func TestViewString_LoadingListUsesFooterOnly(t *testing.T) {
 }
 
 func TestRenderStatusBar_ProgressText(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.loading = true
 	m.progressText = "installing git…"
@@ -3099,6 +3249,7 @@ func TestRenderStatusBar_ProgressText(t *testing.T) {
 }
 
 func TestRenderStatusBar_ToolsFooterShowsCombinedFilter(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.mode = viewList
 	m.help = newHelp()
@@ -3111,6 +3262,7 @@ func TestRenderStatusBar_ToolsFooterShowsCombinedFilter(t *testing.T) {
 }
 
 func TestActivityLabel_Searching(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.searching = true
 	got := activityLabel(m)
@@ -3120,6 +3272,7 @@ func TestActivityLabel_Searching(t *testing.T) {
 }
 
 func TestActivityLabel_Scanning(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.scanningProviders = map[string]bool{"brew": true, "npm": true}
 	m.refreshToolTotal = 4
@@ -3130,6 +3283,7 @@ func TestActivityLabel_Scanning(t *testing.T) {
 }
 
 func TestActivityLabel_DotsLoading(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.dotsLoading = true
 	got := activityLabel(m)
@@ -3139,6 +3293,7 @@ func TestActivityLabel_DotsLoading(t *testing.T) {
 }
 
 func TestActivityLabel_DefaultFallback(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.loading = true
 	got := activityLabel(m)
@@ -3148,6 +3303,7 @@ func TestActivityLabel_DefaultFallback(t *testing.T) {
 }
 
 func TestTabKeyMap_ShortHelp_DotsMode(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewDots
 	km := tabKeyMap{&m}
@@ -3158,6 +3314,7 @@ func TestTabKeyMap_ShortHelp_DotsMode(t *testing.T) {
 }
 
 func TestTabKeyMap_ShortHelp_SettingsMode(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	km := tabKeyMap{&m}
@@ -3168,6 +3325,7 @@ func TestTabKeyMap_ShortHelp_SettingsMode(t *testing.T) {
 }
 
 func TestTabKeyMap_ShortHelp_StatusMode(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewStatus
 	got := strings.Join(bindingHelpDescs(tabKeyMap{&m}.ShortHelp()), ",")
@@ -3204,6 +3362,7 @@ func TestTabKeyMap_ShortHelp_StatusMode(t *testing.T) {
 }
 
 func TestTabKeyMap_ShortHelp_HostsMode(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewGroups
 	km := tabKeyMap{&m}
@@ -3220,6 +3379,7 @@ func TestTabKeyMap_ShortHelp_HostsMode(t *testing.T) {
 }
 
 func TestTabKeyMap_ShortHelp_HostsGroupSection(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewGroups
 	m.assignmentSection = 1
@@ -3233,6 +3393,7 @@ func TestTabKeyMap_ShortHelp_HostsGroupSection(t *testing.T) {
 }
 
 func TestTabKeyMap_ShortHelp_DefaultWithGroups(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.mode = viewList
 	m.groupNames = []string{"dev"}
@@ -3244,6 +3405,7 @@ func TestTabKeyMap_ShortHelp_DefaultWithGroups(t *testing.T) {
 }
 
 func TestTabKeyMap_ShortHelp_DefaultNoGroups(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.mode = viewList
 	m.groupNames = nil
@@ -3259,6 +3421,7 @@ func TestTabKeyMap_ShortHelp_DefaultNoGroups(t *testing.T) {
 }
 
 func TestTabKeyMap_ShortHelp_ListOrder(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.mode = viewList
 	m.groupNames = []string{"dev"}
@@ -3275,6 +3438,7 @@ func TestTabKeyMap_ShortHelp_ListOrder(t *testing.T) {
 }
 
 func TestTabKeyMap_ShortHelp_DotsOrder(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.mode = viewDots
 	m.setSettings(config.Settings{DotsRepo: "/repo/dotfiles"})
@@ -3291,6 +3455,7 @@ func TestTabKeyMap_ShortHelp_DotsOrder(t *testing.T) {
 }
 
 func TestFooterFilterBinding_DerivesCombinedLabel(t *testing.T) {
+	t.Parallel()
 	k := DefaultKeyMap()
 	got := footerFilterBinding(k, true).Help()
 	if got.Key != "[],{}" {
@@ -3302,6 +3467,7 @@ func TestFooterFilterBinding_DerivesCombinedLabel(t *testing.T) {
 }
 
 func TestTabKeyMap_ShortHelp_OmitsRowActions(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.mode = viewList
 	got := strings.Join(bindingHelpKeys(tabKeyMap{&m}.ShortHelp()), ",")
@@ -3320,6 +3486,7 @@ func TestTabKeyMap_ShortHelp_OmitsRowActions(t *testing.T) {
 }
 
 func TestTabKeyMap_ShortHelp_StaticSuffix(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		mode viewMode
@@ -3348,6 +3515,7 @@ func TestTabKeyMap_ShortHelp_StaticSuffix(t *testing.T) {
 }
 
 func TestTabKeyMap_FullHelp(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	km := tabKeyMap{&m}
 	bindings := km.FullHelp()
@@ -3357,6 +3525,7 @@ func TestTabKeyMap_FullHelp(t *testing.T) {
 }
 
 func TestRenderHelpPopup_ToolsSectionsUseCompactDescriptions(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.groupNames = []string{"base", "work"}
 
@@ -3383,6 +3552,7 @@ func TestRenderHelpPopup_ToolsSectionsUseCompactDescriptions(t *testing.T) {
 }
 
 func TestRenderHelpPopup_TabSpecificActionsAndLegend(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		mode viewMode
@@ -3422,6 +3592,7 @@ func TestRenderHelpPopup_TabSpecificActionsAndLegend(t *testing.T) {
 }
 
 func TestRenderHelpPopup_DashboardSelectedRowActions(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		setup    func(Model) Model
@@ -3502,6 +3673,7 @@ func TestRenderHelpPopup_DashboardSelectedRowActions(t *testing.T) {
 }
 
 func TestRenderHelpPopup_DotsLegendOmitsTreeKindIcons(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewDots
 	setDotsRepoForTest(&m, "/repo/dotfiles")
@@ -3514,6 +3686,7 @@ func TestRenderHelpPopup_DotsLegendOmitsTreeKindIcons(t *testing.T) {
 }
 
 func TestHelpPopup_DividerRendersAsSingleLineInPopupFrame(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 80
 	m.height = 34
@@ -3542,6 +3715,7 @@ func TestHelpPopup_DividerRendersAsSingleLineInPopupFrame(t *testing.T) {
 }
 
 func TestRenderHelpPopup_ContentLinesFitAvailableWidth(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 90
 	m.height = 34
@@ -3560,6 +3734,7 @@ func TestRenderHelpPopup_ContentLinesFitAvailableWidth(t *testing.T) {
 }
 
 func TestRenderHelpPopup_ActionOrderKeepsDeleteLast(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		mode   viewMode
@@ -3625,6 +3800,7 @@ func bindingHelpDescs(bindings []key.Binding) []string {
 // ── view_list.go ──────────────────────────────────────────────────────────────
 
 func TestProviderLabelForToolWithPinMarksExplicitOverride(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, pin, systemBin, pythonBin, nodeBin, want string
 		tool                                           *app.ToolView
@@ -3655,6 +3831,7 @@ func TestProviderLabelForToolWithPinMarksExplicitOverride(t *testing.T) {
 }
 
 func TestInlineDetailLines_WrongProviderShowsActualAndExpected(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{
 		Name:          "typescript",
 		Provider:      "node",
@@ -3684,6 +3861,7 @@ func TestInlineDetailLines_WrongProviderShowsActualAndExpected(t *testing.T) {
 }
 
 func TestInlineDetailLines_ConfiguredProviderCandidates(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "prettier", Provider: "", Installed: false, Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 	m.toolProviderCandidates = map[string][]config.ToolInstallSpec{
@@ -3705,6 +3883,7 @@ func TestInlineDetailLines_ConfiguredProviderCandidates(t *testing.T) {
 }
 
 func TestInlineDetailLines_ConfiguredProviderCandidatesHiddenWhenNotActionable(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		tool       *app.ToolView
@@ -3741,6 +3920,7 @@ func TestInlineDetailLines_ConfiguredProviderCandidatesHiddenWhenNotActionable(t
 }
 
 func TestToolInlineHints_PinnedProviderOffersRemoveOverride(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "typescript", Provider: "node", Installed: true, InstalledWith: "npm", Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 	m.toolProviderPins = map[string]string{"typescript": "npm"}
@@ -3756,6 +3936,7 @@ func TestToolInlineHints_PinnedProviderOffersRemoveOverride(t *testing.T) {
 }
 
 func TestToolInlineHints_IgnoredToolOffersIncludeAndEdit(t *testing.T) {
+	t.Parallel()
 	tool := oneInstalled()[0]
 	m := baseModel([]*app.ToolView{tool})
 	m.ignoreSet = map[string]bool{tool.Name: true}
@@ -3773,6 +3954,7 @@ func TestToolInlineHints_IgnoredToolOffersIncludeAndEdit(t *testing.T) {
 }
 
 func TestToolInlineHints_FallbackEligibleSystemToolOffersFallback(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "rg", Provider: "system", Installed: false, Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 
@@ -3783,6 +3965,7 @@ func TestToolInlineHints_FallbackEligibleSystemToolOffersFallback(t *testing.T) 
 }
 
 func TestToolInlineHints_FallbackEligibleConcreteProviderToolOffersFallback(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "rg", Provider: "apt", Installed: false, Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 	m.toolFallbacks = map[string]config.FallbackSpec{
@@ -3799,6 +3982,7 @@ func TestToolInlineHints_FallbackEligibleConcreteProviderToolOffersFallback(t *t
 }
 
 func TestToolInlineHints_NativeInstalledSystemToolHidesFallback(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "rg", Provider: "system", Installed: true, InstalledWith: "apt", Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 
@@ -3809,6 +3993,7 @@ func TestToolInlineHints_NativeInstalledSystemToolHidesFallback(t *testing.T) {
 }
 
 func TestToolInlineHints_NativeInstalledConcreteProviderToolHidesFallback(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "rg", Provider: "apt", Installed: true, InstalledWith: "apt", Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 
@@ -3819,6 +4004,7 @@ func TestToolInlineHints_NativeInstalledConcreteProviderToolHidesFallback(t *tes
 }
 
 func TestFallbackKey_NativeInstalledSystemToolNoOp(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "rg", Provider: "system", Installed: true, InstalledWith: "apt", Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 
@@ -3832,6 +4018,7 @@ func TestFallbackKey_NativeInstalledSystemToolNoOp(t *testing.T) {
 }
 
 func TestFallbackKey_GitHubInstalledSystemToolOpensEditor(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "rg", Provider: "system", Installed: true, InstalledWith: "gh", Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 	m.toolFallbacks = map[string]config.FallbackSpec{
@@ -3851,6 +4038,7 @@ func TestFallbackKey_GitHubInstalledSystemToolOpensEditor(t *testing.T) {
 }
 
 func TestRenderList_ConfiguredGitHubFallbackShowsGHStatus(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		provider string
@@ -3884,6 +4072,7 @@ func TestRenderList_ConfiguredGitHubFallbackShowsGHStatus(t *testing.T) {
 }
 
 func TestRenderList_ConfiguredGitHubFallbackHidesGHStatusForNativeInstalledTool(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "rg", Provider: "system", Installed: true, InstalledWith: "apt", Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 	m.toolFallbacks = map[string]config.FallbackSpec{
@@ -3903,6 +4092,7 @@ func TestRenderList_ConfiguredGitHubFallbackHidesGHStatusForNativeInstalledTool(
 }
 
 func TestRenderFallbackEditorPopup_ShowsStructuredFallbackFields(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "rg", Provider: "system", Installed: false, Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 	m.mode = viewFallbackEditor
@@ -3947,6 +4137,7 @@ func TestRenderFallbackEditorPopup_ShowsStructuredFallbackFields(t *testing.T) {
 }
 
 func TestOpenFallbackEditor_PrefillsExistingRecipe(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "rg", Provider: "system", Installed: false, Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 	m.toolFallbacks = map[string]config.FallbackSpec{
@@ -3984,6 +4175,7 @@ func TestOpenFallbackEditor_PrefillsExistingRecipe(t *testing.T) {
 }
 
 func TestOpenFallbackEditor_PrefillsUnsupportedFallback(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "gh", Provider: "system", Installed: false, Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 	m.toolFallbacks = map[string]config.FallbackSpec{
@@ -4021,6 +4213,7 @@ func TestOpenFallbackEditor_PrefillsUnsupportedFallback(t *testing.T) {
 }
 
 func TestFallbackRepoFromToolGit(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		in   string
 		want string
@@ -4046,6 +4239,7 @@ func TestFallbackRepoFromToolGit(t *testing.T) {
 }
 
 func TestFallbackEditorKeyboardNavigationPersistsActiveField(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "rg", Provider: "system", Installed: false, Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 	if cmd := m.openFallbackEditor(tool); cmd == nil {
@@ -4085,6 +4279,7 @@ func TestFallbackEditorKeyboardNavigationPersistsActiveField(t *testing.T) {
 }
 
 func TestFallbackEditorEnterWithEmptyRepoStaysOpen(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "rg", Provider: "system", Installed: false, Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 	if cmd := m.openFallbackEditor(tool); cmd == nil {
@@ -4107,6 +4302,7 @@ func TestFallbackEditorEnterWithEmptyRepoStaysOpen(t *testing.T) {
 }
 
 func TestFallbackEditorPastePersistsActiveField(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "rg", Provider: "system", Installed: false, Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 	if cmd := m.openFallbackEditor(tool); cmd == nil {
@@ -4122,6 +4318,7 @@ func TestFallbackEditorPastePersistsActiveField(t *testing.T) {
 }
 
 func TestRenderFallbackEditorPopup_LongCommandsFitNarrowFrame(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "rg", Provider: "system", Installed: false, Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 	m.width = 52
@@ -4171,6 +4368,7 @@ func hasHintKey(hints []hintItem, key string) bool {
 }
 
 func TestProviderParts_System(t *testing.T) {
+	t.Parallel()
 	meta, concrete, isOverride := providerPartsWithExplicit("system", "brew", "", "", "", "")
 	if meta != "system" {
 		t.Errorf("expected meta=system, got %q", meta)
@@ -4184,6 +4382,7 @@ func TestProviderParts_System(t *testing.T) {
 }
 
 func TestProviderParts_Brew(t *testing.T) {
+	t.Parallel()
 	meta, concrete, isOverride := providerPartsWithExplicit("brew", "", "", "", "", "")
 	if meta != "system" {
 		t.Errorf("expected meta=system, got %q", meta)
@@ -4197,6 +4396,7 @@ func TestProviderParts_Brew(t *testing.T) {
 }
 
 func TestProviderParts_Python(t *testing.T) {
+	t.Parallel()
 	meta, _, _ := providerPartsWithExplicit("python", "uv", "", "", "uv", "")
 	if meta != "python" {
 		t.Errorf("expected meta=python, got %q", meta)
@@ -4204,6 +4404,7 @@ func TestProviderParts_Python(t *testing.T) {
 }
 
 func TestProviderParts_Node(t *testing.T) {
+	t.Parallel()
 	meta, concrete, _ := providerPartsWithExplicit("node", "", "", "", "", "bun")
 	if meta != "node" {
 		t.Errorf("expected meta=node, got %q", meta)
@@ -4214,6 +4415,7 @@ func TestProviderParts_Node(t *testing.T) {
 }
 
 func TestProviderParts_Unknown(t *testing.T) {
+	t.Parallel()
 	meta, concrete, isOverride := providerPartsWithExplicit("cargo", "", "", "", "", "")
 	if meta != "cargo" {
 		t.Errorf("expected meta=cargo for unknown, got %q", meta)
@@ -4227,6 +4429,7 @@ func TestProviderParts_Unknown(t *testing.T) {
 }
 
 func TestNewColWidths_BasicTools(t *testing.T) {
+	t.Parallel()
 	tools := []*app.ToolView{
 		{Name: "git", Provider: "brew"},
 		{Name: "a-very-long-tool-name", Provider: "npm"},
@@ -4241,6 +4444,7 @@ func TestNewColWidths_BasicTools(t *testing.T) {
 }
 
 func TestNewColWidths_WithGroups(t *testing.T) {
+	t.Parallel()
 	tools := []*app.ToolView{
 		{Name: "git", Provider: "brew"},
 	}
@@ -4254,6 +4458,7 @@ func TestNewColWidths_WithGroups(t *testing.T) {
 }
 
 func TestNewColWidths_IgnoreLabelsDoNotInflateGroupColumn(t *testing.T) {
+	t.Parallel()
 	tools := []*app.ToolView{
 		{Name: "git", Provider: "brew"},
 	}
@@ -4266,6 +4471,7 @@ func TestNewColWidths_IgnoreLabelsDoNotInflateGroupColumn(t *testing.T) {
 }
 
 func TestNewColWidths_NoTools(t *testing.T) {
+	t.Parallel()
 	cols := newColWidthsWithProviderPins(nil, nil, nil, nil, nil, nil, "", "", "", 120, nil)
 	if cols.name < 20 {
 		t.Errorf("name column %d should be >= floor of 20", cols.name)
@@ -4273,6 +4479,7 @@ func TestNewColWidths_NoTools(t *testing.T) {
 }
 
 func TestNewColWidths_UsesCompactVersionWidth(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "git", Provider: "brew", Installed: true}
 	tool.Version = "2.40.0, abc1234567890"
 
@@ -4284,6 +4491,7 @@ func TestNewColWidths_UsesCompactVersionWidth(t *testing.T) {
 }
 
 func TestRenderToolRow_InstalledNormal(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	tool := &app.ToolView{Name: "git", Provider: "brew", Installed: true}
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
@@ -4294,6 +4502,7 @@ func TestRenderToolRow_InstalledNormal(t *testing.T) {
 }
 
 func TestRenderToolRow_StatusColorStaysOnIcon(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	tool := &app.ToolView{Name: "git", Provider: "brew", Installed: true}
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
@@ -4312,6 +4521,7 @@ func TestRenderToolRow_StatusColorStaysOnIcon(t *testing.T) {
 }
 
 func TestRenderToolRow_OrphanUsesOrphanIconColor(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	tool := &app.ToolView{Name: "utm", Provider: "system", Installed: true, InstalledWith: "brew", Tracked: false}
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
@@ -4327,6 +4537,7 @@ func TestRenderToolRow_OrphanUsesOrphanIconColor(t *testing.T) {
 }
 
 func TestRenderToolRow_ShowsPackageAliasAfterLogicalName(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	tool := &app.ToolView{Name: "editor", Provider: "system", Package: "neovim", Installed: true, Tracked: true}
 	cols := colWidths{name: 24, prov: 14, ver: 8, screenW: 120}
@@ -4342,6 +4553,7 @@ func TestRenderToolRow_ShowsPackageAliasAfterLogicalName(t *testing.T) {
 }
 
 func TestRenderToolRow_PrivilegeMarkerUsesOwnColumn(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	tool := &app.ToolView{Name: "editor", Provider: "apt", Package: "neovim", Installed: true, Tracked: true}
 	cols := colWidths{name: 24, priv: lipgloss.Width(iconPrivileged), prov: 14, ver: 8, screenW: 120}
@@ -4368,6 +4580,7 @@ func TestRenderToolRow_PrivilegeMarkerUsesOwnColumn(t *testing.T) {
 }
 
 func TestRenderToolRow_SystemBrewDoesNotShowPrivilegeMarker(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	tool := &app.ToolView{Name: "ripgrep", Provider: "system", Package: "ripgrep", Installed: false, Tracked: true}
 	cols := colWidths{name: 24, prov: 14, ver: 8, screenW: 120}
@@ -4380,6 +4593,7 @@ func TestRenderToolRow_SystemBrewDoesNotShowPrivilegeMarker(t *testing.T) {
 }
 
 func TestRenderList_SearchResultPrivilegeMarker(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSearch
 	m.filter.SetValue("parsec")
@@ -4404,6 +4618,7 @@ func TestRenderList_SearchResultPrivilegeMarker(t *testing.T) {
 }
 
 func TestRenderToolRow_MissingTool(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	tool := &app.ToolView{Name: "missing-tool", Provider: "brew", Installed: false}
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
@@ -4417,6 +4632,7 @@ func TestRenderToolRow_MissingTool(t *testing.T) {
 }
 
 func TestRenderToolRow_OrphanDoesNotShowBaseGroup(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	tool := &app.ToolView{Name: "fzf", Provider: "system", InstalledWith: "brew", Installed: true, Tracked: false}
 	cols := colWidths{name: 20, prov: 12, ver: 8, group: len("[base]"), screenW: 120}
@@ -4431,6 +4647,7 @@ func TestRenderToolRow_OrphanDoesNotShowBaseGroup(t *testing.T) {
 }
 
 func TestRenderToolRow_OutdatedTool(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	tool := &app.ToolView{
 		Name:      "git",
@@ -4448,6 +4665,7 @@ func TestRenderToolRow_OutdatedTool(t *testing.T) {
 }
 
 func TestRenderToolRow_CompactsCommaVersionSuffix(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	tool := &app.ToolView{
 		Name:      "git",
@@ -4466,6 +4684,7 @@ func TestRenderToolRow_CompactsCommaVersionSuffix(t *testing.T) {
 }
 
 func TestRenderToolRow_IgnoredTool(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	tool := &app.ToolView{Name: "ignored-pkg", Provider: "pip", Installed: false, Tracked: true}
 	cols := colWidths{name: 20, prov: 14, group: len("[work]"), screenW: 120}
@@ -4482,6 +4701,7 @@ func TestRenderToolRow_IgnoredTool(t *testing.T) {
 }
 
 func TestRenderToolRow_OneGapBetweenIconAndName(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	tool := &app.ToolView{Name: "rg", Provider: "brew", Installed: true, Tracked: true}
 	tool.Version = "1.0.0"
@@ -4499,6 +4719,7 @@ func TestRenderToolRow_OneGapBetweenIconAndName(t *testing.T) {
 }
 
 func TestRenderToolRow_InstalledEcosystemProviderWithoutInstalledWithDoesNotGuessManager(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	tool := &app.ToolView{Name: "typescript", Provider: "node", Installed: true, Tracked: true}
 	cols := colWidths{name: 20, prov: 10, group: 8, screenW: 120}
@@ -4512,6 +4733,7 @@ func TestRenderToolRow_InstalledEcosystemProviderWithoutInstalledWithDoesNotGues
 }
 
 func TestRenderToolRow_SelectedTool(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	tool := &app.ToolView{Name: "selected", Provider: "brew", Installed: true, Tracked: true}
 	tool.Version = "1.2.3"
@@ -4532,6 +4754,7 @@ func TestRenderToolRow_SelectedTool(t *testing.T) {
 }
 
 func TestRenderToolRow_WithSpinner(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	tool := &app.ToolView{Name: "upgrading", Provider: "brew", Installed: true}
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
@@ -4542,6 +4765,7 @@ func TestRenderToolRow_WithSpinner(t *testing.T) {
 }
 
 func TestRenderToolRow_WithGroup(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	tool := &app.ToolView{Name: "git", Provider: "brew", Installed: true, Tracked: true}
 	cols := colWidths{name: 20, prov: 10, group: 8, screenW: 120}
@@ -4579,6 +4803,7 @@ func TestRenderList_MultiGroupBadgeAndFullDetail(t *testing.T) {
 // a tool in two reusable groups (no active host filtering to collapse them)
 // must render both as separate pills, not a single compact badge.
 func TestRenderList_TwoGroupsShowTwoPills(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{{Name: "git", Provider: "brew", Installed: true, Tracked: true}})
 	key := toolKey("git", "brew")
 	m.groupNames = []string{"laptop", "work"}
@@ -4623,6 +4848,7 @@ func TestRenderList_ThreeGroupsNarrowWidthCollapsesToHostPlusCount(t *testing.T)
 }
 
 func TestFullMembershipDetailLines_WrapsWithoutLosingGroups(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		groups []string
@@ -4662,6 +4888,7 @@ func TestFullMembershipDetailLines_WrapsWithoutLosingGroups(t *testing.T) {
 }
 
 func TestRenderToolRow_RightAlignsGroupBadge(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	tool := &app.ToolView{Name: "git", Provider: "brew", Installed: true, Tracked: true}
 	cols := colWidths{name: 20, prov: 10, group: 8, screenW: 120}
@@ -4672,6 +4899,7 @@ func TestRenderToolRow_RightAlignsGroupBadge(t *testing.T) {
 }
 
 func TestRenderToolRow_ProviderVersionAndGroupShareRightGroup(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	tool := &app.ToolView{Name: "git", Provider: "brew", Installed: true, Tracked: true}
 	tool.Version = "2.40.0"
@@ -4690,6 +4918,7 @@ func TestRenderToolRow_ProviderVersionAndGroupShareRightGroup(t *testing.T) {
 }
 
 func TestRenderToolRow_EmptyGroupCellKeepsColumnsAligned(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	grouped := &app.ToolView{Name: "git", Provider: "brew", Installed: true, Tracked: true}
 	grouped.Version = "2.40.0"
@@ -4717,6 +4946,7 @@ func TestRenderToolRow_EmptyGroupCellKeepsColumnsAligned(t *testing.T) {
 }
 
 func TestRenderToolRow_ProviderColumnAlignsWithAndWithoutMarker(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	withMarker := &app.ToolView{Name: "editor", Provider: "system", InstalledWith: "apt", Package: "neovim", Installed: true, Tracked: true}
 	withoutMarker := &app.ToolView{Name: "runner", Provider: "node", Package: "sometool", Installed: true, Tracked: true}
@@ -4738,6 +4968,7 @@ func TestRenderToolRow_ProviderColumnAlignsWithAndWithoutMarker(t *testing.T) {
 }
 
 func TestRenderDotsRow_UsesCompactSpacing(t *testing.T) {
+	t.Parallel()
 	const name = "abcdefghijkl"
 	const target = "~/dot-target"
 
@@ -4779,6 +5010,7 @@ func TestRenderDotsRow_UsesCompactSpacing(t *testing.T) {
 }
 
 func TestRenderDotsRow_ShowsVariantMarker(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewDots
 	setDotsRepoForTest(&m, "/repo")
@@ -4799,6 +5031,7 @@ func TestRenderDotsRow_ShowsVariantMarker(t *testing.T) {
 }
 
 func TestRenderToolRow_LongUpgradeVersionDoesNotPushGroupBadge(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	tool := &app.ToolView{Name: "typescript", Provider: "node", Installed: true, Outdated: true, Tracked: true}
 	tool.Version = "5.8.3"
@@ -4816,6 +5049,7 @@ func TestRenderToolRow_LongUpgradeVersionDoesNotPushGroupBadge(t *testing.T) {
 }
 
 func TestRenderFilterBar_Empty(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.groupNames = nil
 	m.providerNames = nil
@@ -4826,6 +5060,7 @@ func TestRenderFilterBar_Empty(t *testing.T) {
 }
 
 func TestRenderFilterBar_WithGroups(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.groupNames = []string{"dev", "personal"}
 	m.groupTabIdx = 0
@@ -4853,6 +5088,7 @@ func TestRenderFilterBar_GroupsAlphabeticalAfterHost(t *testing.T) {
 }
 
 func TestRenderFilterBar_WithProviders(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.providerNames = []string{"system", "node"}
 	m.providerTabIdx = 0
@@ -4863,6 +5099,7 @@ func TestRenderFilterBar_WithProviders(t *testing.T) {
 }
 
 func TestRenderFilterBar_WithSingleProvider(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.providerNames = []string{"system"}
 	out := renderFilterBar(m)
@@ -4874,6 +5111,7 @@ func TestRenderFilterBar_WithSingleProvider(t *testing.T) {
 }
 
 func TestRenderList_NarrowWidthFitsRows(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{
 		Name:          "very-long-tool-name-that-needs-cutting",
 		Provider:      "node",
@@ -4895,6 +5133,7 @@ func TestRenderList_NarrowWidthFitsRows(t *testing.T) {
 }
 
 func TestApplyFilter_UsesEcosystemProviderFilters(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{{Name: "ripgrep", Provider: "system", Tracked: true}})
 	m.providerNames = nil
 	m.applyFilter()
@@ -4906,6 +5145,7 @@ func TestApplyFilter_UsesEcosystemProviderFilters(t *testing.T) {
 }
 
 func TestRenderList_Empty(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	out := renderList(m)
 	if !strings.Contains(out, "no tools yet") {
@@ -4919,6 +5159,7 @@ func TestRenderList_Empty(t *testing.T) {
 }
 
 func TestRenderList_SearchEmptyPrompt(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSearch
 	m.filter.SetValue("r")
@@ -4934,6 +5175,7 @@ func TestRenderList_SearchEmptyPrompt(t *testing.T) {
 }
 
 func TestRenderList_SearchNoResults(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSearch
 	m.filter.SetValue("zzzz")
@@ -4951,6 +5193,7 @@ func TestRenderList_SearchNoResults(t *testing.T) {
 }
 
 func TestRenderList_WithTools(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	out := renderList(m)
 	for _, want := range []string{"all", "system", "node", "python"} {
@@ -4967,6 +5210,7 @@ func TestRenderList_WithTools(t *testing.T) {
 }
 
 func TestRenderList_LoadingState(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.loading = true
 	m.scanningProviders = map[string]bool{"brew": true}
@@ -4979,6 +5223,7 @@ func TestRenderList_LoadingState(t *testing.T) {
 }
 
 func TestInlineDetailLines_NoTool(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.cursor = -1
 	cols := colWidths{name: 20, prov: 10, screenW: 120}
@@ -4989,6 +5234,7 @@ func TestInlineDetailLines_NoTool(t *testing.T) {
 }
 
 func TestInlineDetailLines_WithDescription(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "git", Provider: "brew", Installed: true}
 	tool.Description = "the fast version control system"
 	tool.Tracked = true
@@ -5007,6 +5253,7 @@ func TestInlineDetailLines_WithDescription(t *testing.T) {
 }
 
 func TestToolDetailWrapWidth_ReachesProviderBoundary(t *testing.T) {
+	t.Parallel()
 	cols := colWidths{name: 20, prov: 10, ver: 8, group: 8, screenW: 100}
 	prefixW := lipgloss.Width(listTextPrefix())
 	got := toolDetailWrapWidth(100, cols, prefixW)
@@ -5022,6 +5269,7 @@ func TestToolDetailWrapWidth_ReachesProviderBoundary(t *testing.T) {
 }
 
 func TestInlineDetailLines_ConfirmationOnlyReplacesHints(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "git", Provider: "brew", Installed: true, Tracked: true}
 	tool.Description = "the fast version control system"
 	tool.Version = "2.40.0, abc123"
@@ -5051,6 +5299,7 @@ func TestInlineDetailLines_ConfirmationOnlyReplacesHints(t *testing.T) {
 }
 
 func TestInlineDetailLines_RowOperationReplacesHints(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "curl", Provider: "brew", Installed: false, Tracked: true}
 	tool.Description = "transfer data with URLs"
 
@@ -5079,6 +5328,7 @@ func TestInlineDetailLines_RowOperationReplacesHints(t *testing.T) {
 }
 
 func TestRenderList_RowActionErrorShowsBehindToolName(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "curl", Provider: "brew", Installed: false, Tracked: true}
 	tool.Description = "transfer data with URLs"
 	other := &app.ToolView{Name: "git", Provider: "brew", Installed: true, Tracked: true}
@@ -5113,6 +5363,7 @@ func TestRenderList_RowActionErrorShowsBehindToolName(t *testing.T) {
 }
 
 func TestRenderList_RowActionErrorStaysSingleLine(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "pip", Provider: "python", Installed: true, Outdated: true, Tracked: true}
 	other := &app.ToolView{Name: "git", Provider: "brew", Installed: true, Tracked: true}
 	m := baseModel([]*app.ToolView{tool, other})
@@ -5130,6 +5381,7 @@ func TestRenderList_RowActionErrorStaysSingleLine(t *testing.T) {
 }
 
 func TestRowErrorSummaryNormalizesUnsafeOutput(t *testing.T) {
+	t.Parallel()
 	got := rowErrorSummary("\x1b[31mfailed\x1b[0m\n\tbecause package manager wrote multiline stderr")
 	if got != "failed because package manager wrote multiline stderr" {
 		t.Fatalf("rowErrorSummary() = %q", got)
@@ -5137,6 +5389,7 @@ func TestRowErrorSummaryNormalizesUnsafeOutput(t *testing.T) {
 }
 
 func TestRowErrorSummaryExtractsActualProblem(t *testing.T) {
+	t.Parallel()
 	got := rowErrorSummary("brew install font-intel-one-mono: exit status 1 (stderr: Error: A font is already installed at /Library/Fonts/IntelOneMono.ttf)")
 	if got != "A font is already installed at /Library/Fonts/IntelOneMono.ttf" {
 		t.Fatalf("rowErrorSummary() = %q", got)
@@ -5144,6 +5397,7 @@ func TestRowErrorSummaryExtractsActualProblem(t *testing.T) {
 }
 
 func TestRowErrorSummaryKeepsMultilineProblemDetails(t *testing.T) {
+	t.Parallel()
 	got := rowErrorSummary("brew install font: exit status 1 (stderr: Error: A font is already installed at:\n/Library/Fonts/IntelOneMono.ttf\nRemove it before reinstalling.)")
 	want := "A font is already installed at: /Library/Fonts/IntelOneMono.ttf Remove it before reinstalling."
 	if got != want {
@@ -5152,6 +5406,7 @@ func TestRowErrorSummaryKeepsMultilineProblemDetails(t *testing.T) {
 }
 
 func TestRenderList_RowActionErrorShowsErrorLogHint(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "curl", Provider: "brew", Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 	m.cursor = 0
@@ -5165,6 +5420,7 @@ func TestRenderList_RowActionErrorShowsErrorLogHint(t *testing.T) {
 }
 
 func TestRenderList_FocusedSearchErrorHidesErrorLogHint(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "curl", Provider: "brew", Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 	m.mode = viewSearch
@@ -5179,6 +5435,7 @@ func TestRenderList_FocusedSearchErrorHidesErrorLogHint(t *testing.T) {
 }
 
 func TestInlineDetailLines_RowActionErrorShowsProviderSolution(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "pip", Provider: "python", Installed: true, Outdated: true, Tracked: true}
 	tool.Description = "The PyPA recommended tool for installing Python packages."
 
@@ -5213,6 +5470,7 @@ func TestInlineDetailLines_RowActionErrorShowsProviderSolution(t *testing.T) {
 }
 
 func TestRenderList_BulkPendingUsesWaitingIcon(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "curl", Provider: "brew", Installed: true, Outdated: true, Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 	m.cursor = 0
@@ -5227,6 +5485,7 @@ func TestRenderList_BulkPendingUsesWaitingIcon(t *testing.T) {
 }
 
 func TestRenderDots_BulkPendingUsesWaitingIcon(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	setDotsRepoForTest(&m, "/repo")
 	m.dotsEntries = []app.DotStatus{{
@@ -5244,6 +5503,7 @@ func TestRenderDots_BulkPendingUsesWaitingIcon(t *testing.T) {
 }
 
 func TestRenderDots_DoesNotRenderGroupPillBar(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	setDotsRepoForTest(&m, "/repo")
 	m.dotsEntries = []app.DotStatus{
@@ -5265,6 +5525,7 @@ func TestRenderDots_DoesNotRenderGroupPillBar(t *testing.T) {
 }
 
 func TestRenderList_RowSpinnerKeepsNameColumn(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "curl", Provider: "brew", Installed: true, Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 	m.cursor = 0
@@ -5280,6 +5541,7 @@ func TestRenderList_RowSpinnerKeepsNameColumn(t *testing.T) {
 }
 
 func TestRenderDots_RowSpinnerKeepsNameColumn(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	setDotsRepoForTest(&m, "/repo")
 	m.dotsCursor = 0
@@ -5301,6 +5563,7 @@ func TestRenderDots_RowSpinnerKeepsNameColumn(t *testing.T) {
 }
 
 func TestRenderList_RowOperationUsesSpinnerIcon(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "curl", Provider: "brew", Installed: false, Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 	m.cursor = 0
@@ -5316,6 +5579,7 @@ func TestRenderList_RowOperationUsesSpinnerIcon(t *testing.T) {
 }
 
 func TestRenderDots_RowOperationUsesSpinnerIcon(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	setDotsRepoForTest(&m, "/repo")
 	m.dotsEntries = []app.DotStatus{{
@@ -5333,6 +5597,7 @@ func TestRenderDots_RowOperationUsesSpinnerIcon(t *testing.T) {
 }
 
 func TestRenderDots_NoExtraBlankLineAtTop(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewDots
 	setDotsRepoForTest(&m, "/repo")
@@ -5354,6 +5619,7 @@ func TestRenderDots_NoExtraBlankLineAtTop(t *testing.T) {
 }
 
 func TestRenderDots_SearchActiveHasControlLine(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewDots
 	setDotsRepoForTest(&m, "/repo")
@@ -5376,6 +5642,7 @@ func TestRenderDots_SearchActiveHasControlLine(t *testing.T) {
 }
 
 func TestInlineDetailLines_ShowsFullCommaVersionSuffix(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "git", Provider: "brew", Installed: true, Tracked: true}
 	tool.Version = "2.40.0, abc123"
 
@@ -5390,6 +5657,7 @@ func TestInlineDetailLines_ShowsFullCommaVersionSuffix(t *testing.T) {
 }
 
 func TestInlineDetailLines_ShowsIgnoreSource(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "ignored-pkg", Provider: "python", Installed: false, Tracked: true}
 	tool.Description = "ignored test package"
 
@@ -5406,6 +5674,7 @@ func TestInlineDetailLines_ShowsIgnoreSource(t *testing.T) {
 }
 
 func TestInlineDetailLines_NoDescription(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "git", Provider: "brew", Installed: true, Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 	m.cursor = 0
@@ -5421,6 +5690,7 @@ func TestInlineDetailLines_NoDescription(t *testing.T) {
 }
 
 func TestWrapText_Basic(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		input string
 		width int
@@ -5439,6 +5709,7 @@ func TestWrapText_Basic(t *testing.T) {
 }
 
 func TestRenderProviderCol_NoConcreteProvider(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	out := renderProviderColWithExplicit(p, "cargo", "", "", "", "", "", "cargo", 10, false, false)
 	if !strings.Contains(out, "cargo") {
@@ -5447,6 +5718,7 @@ func TestRenderProviderCol_NoConcreteProvider(t *testing.T) {
 }
 
 func TestRenderProviderCol_WithConcrete(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	// system meta with brew concrete — label is just the concrete name
 	out := renderProviderColWithExplicit(p, "system", "brew", "", "", "", "", "brew", 14, false, false)
@@ -5456,6 +5728,7 @@ func TestRenderProviderCol_WithConcrete(t *testing.T) {
 }
 
 func TestRenderProviderCol_Selected(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	out := renderProviderColWithExplicit(p, "system", "brew", "", "", "", "", "brew", 14, true, false)
 	if !strings.Contains(out, "brew") {
@@ -5464,6 +5737,7 @@ func TestRenderProviderCol_Selected(t *testing.T) {
 }
 
 func TestRenderToolRow_ConcreteWrongProviderShowsInstalledWithMarker(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{
 		Name: "pnpm", Provider: "brew", InstalledWith: "bun",
 		Installed: true, Tracked: true, Version: "11.11.0",
@@ -5488,6 +5762,7 @@ func TestRenderToolRow_ConcreteWrongProviderShowsInstalledWithMarker(t *testing.
 }
 
 func TestNewColWidths_ProviderPinReservesAlignedMarkerWidth(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "prettier", Provider: "node", Installed: true, Tracked: true}
 	cols := newColWidthsWithProviderPins([]*app.ToolView{tool}, nil, nil, nil, map[string]string{"prettier": "bun"}, nil, "", "", "bun", 120, nil)
 	if cols.priv != lipgloss.Width(providerWrongGlyph) {
@@ -5502,6 +5777,7 @@ func TestNewColWidths_ProviderPinReservesAlignedMarkerWidth(t *testing.T) {
 // ── view_helpers.go ───────────────────────────────────────────────────────────
 
 func TestRenderHRule_NonEmpty(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	out := renderHRule(p, 80)
 	if out == "" {
@@ -5510,6 +5786,7 @@ func TestRenderHRule_NonEmpty(t *testing.T) {
 }
 
 func TestRenderHRule_SmallWidth(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	out := renderHRule(p, 10)
 	if out == "" {
@@ -5521,6 +5798,7 @@ func TestRenderHRule_SmallWidth(t *testing.T) {
 }
 
 func TestSelectedRowPrefix_UsesMarker(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	if got := selectedRowPrefix(p); !strings.Contains(got, selectedRowMarker) {
 		t.Fatalf("selected row prefix should use marker %q, got %q", selectedRowMarker, got)
@@ -5528,6 +5806,7 @@ func TestSelectedRowPrefix_UsesMarker(t *testing.T) {
 }
 
 func TestPopupFrame_ClampsToWindow(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 38
 	m.height = 12
@@ -5538,6 +5817,7 @@ func TestPopupFrame_ClampsToWindow(t *testing.T) {
 }
 
 func TestPopupDefaultWidth_DependsOnWindowNotContent(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.width = 100
 	shortFrame := fitPopupFrameToWindow(m, popupFrame{})
@@ -5555,6 +5835,7 @@ func TestPopupDefaultWidth_DependsOnWindowNotContent(t *testing.T) {
 }
 
 func TestAlignLR_Basic(t *testing.T) {
+	t.Parallel()
 	out := alignLR("left", "right", 20, 1)
 	if !strings.Contains(out, "left") {
 		t.Errorf("expected 'left' in alignLR output, got: %q", out)
@@ -5565,7 +5846,10 @@ func TestAlignLR_Basic(t *testing.T) {
 }
 
 func TestAlignLR_MinGap(t *testing.T) {
+	t.Parallel(
 	// When totalWidth is smaller than content, minGap should be used.
+	)
+
 	out := alignLR("left", "right", 1, 2)
 	if !strings.Contains(out, "left") || !strings.Contains(out, "right") {
 		t.Errorf("expected both parts in alignLR output, got: %q", out)
@@ -5573,6 +5857,7 @@ func TestAlignLR_MinGap(t *testing.T) {
 }
 
 func TestRenderSplitRow_MaximizesGapBetweenGroups(t *testing.T) {
+	t.Parallel()
 	out := renderSplitRow(
 		[]rowCell{leftCell("name", 8), leftCell("provider", 8)},
 		[]rowCell{rightCell("[dev]", 8)},
@@ -5592,6 +5877,7 @@ func TestRenderSplitRow_MaximizesGapBetweenGroups(t *testing.T) {
 }
 
 func TestRenderSectionHeader_NonEmpty(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	out := renderSectionHeader(p, "Test Section", 80)
 	if !strings.Contains(out, "Test Section") {
@@ -5600,6 +5886,7 @@ func TestRenderSectionHeader_NonEmpty(t *testing.T) {
 }
 
 func TestRenderSectionHeaderDanger_NonEmpty(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	out := renderSectionHeaderDanger(p, "Maintenance", 80)
 	if !strings.Contains(out, "Maintenance") {
@@ -5608,6 +5895,7 @@ func TestRenderSectionHeaderDanger_NonEmpty(t *testing.T) {
 }
 
 func TestRenderPillBar_Basic(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	out := renderPillBar(p, []string{"system", "node"}, 0)
 	if !strings.Contains(out, "all") {
@@ -5619,6 +5907,7 @@ func TestRenderPillBar_Basic(t *testing.T) {
 }
 
 func TestRenderPillBar_ActiveNonZero(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	out := renderPillBar(p, []string{"system", "node"}, 1)
 	if !strings.Contains(out, "system") {
@@ -5627,6 +5916,7 @@ func TestRenderPillBar_ActiveNonZero(t *testing.T) {
 }
 
 func TestRenderInlineHints_Empty(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	out := renderInlineHints(p, nil, "  ")
 	if out != "" {
@@ -5635,6 +5925,7 @@ func TestRenderInlineHints_Empty(t *testing.T) {
 }
 
 func TestRenderInlineHints_WithHints(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	hints := []hintItem{
 		rawHint("enter", "confirm"),
@@ -5650,6 +5941,7 @@ func TestRenderInlineHints_WithHints(t *testing.T) {
 }
 
 func TestActionHintBuilders_RenderSharedConfirmAndPressAgain(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	confirm := renderConfirmActionHints(m, "  ", m.keys.Delete, "confirm delete")
 	for _, want := range []string{m.keys.Delete.Help().Key, "confirm delete"} {
@@ -5680,6 +5972,7 @@ func TestActionHintBuilders_RenderSharedConfirmAndPressAgain(t *testing.T) {
 }
 
 func TestContextConfirmHintsUseDangerStyle(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	cases := []struct {
 		name string
@@ -5705,6 +5998,7 @@ func TestContextConfirmHintsUseDangerStyle(t *testing.T) {
 }
 
 func TestToolInlineHints_OutdatedWrongProviderStartsWithUpgrade(t *testing.T) {
+	t.Parallel()
 	tool := wrongProvTool()
 	tool.Outdated = true
 	m := wrongProvModel()
@@ -5731,6 +6025,7 @@ func TestToolInlineHints_OutdatedWrongProviderStartsWithUpgrade(t *testing.T) {
 }
 
 func TestToolInlineHints_DefaultActionOrder(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "ripgrep", Provider: "system", Installed: true, Tracked: true, Outdated: true}
 	m := baseModel([]*app.ToolView{tool})
 
@@ -5747,6 +6042,7 @@ func TestToolInlineHints_DefaultActionOrder(t *testing.T) {
 }
 
 func TestToolInlineHints_OrphanToolOffersIgnore(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "grok", Provider: "brew", Installed: true, Tracked: false}
 	m := baseModel([]*app.ToolView{tool})
 
@@ -5762,6 +6058,7 @@ func TestToolInlineHints_OrphanToolOffersIgnore(t *testing.T) {
 }
 
 func TestToolInlineHints_MissingConfiguredToolCanDelete(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "ripgrep", Provider: "brew", Installed: false, Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 
@@ -5779,6 +6076,7 @@ func TestToolInlineHints_MissingConfiguredToolCanDelete(t *testing.T) {
 }
 
 func TestListConfirmationDetailLine_MissingToolConfirmsDelete(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "ripgrep", Provider: "brew", Installed: false, Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 	m.armListConfirmation(listConfirmDelete, tool)
@@ -5790,6 +6088,7 @@ func TestListConfirmationDetailLine_MissingToolConfirmsDelete(t *testing.T) {
 }
 
 func TestListConfirmationHintsLine_ReinstallUsesInstallKey(t *testing.T) {
+	t.Parallel()
 	tool := wrongProvTool()
 	m := wrongProvModel()
 	m.armListConfirmation(listConfirmReinstallDefault, tool)
@@ -5807,6 +6106,7 @@ func TestListConfirmationHintsLine_ReinstallUsesInstallKey(t *testing.T) {
 }
 
 func TestToolInlineHints_PinnedMismatchOffersReinstall(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{
 		Name:          "typescript",
 		Provider:      "node",
@@ -5833,6 +6133,7 @@ func TestToolInlineHints_PinnedMismatchOffersReinstall(t *testing.T) {
 }
 
 func TestToolInlineHints_PinnedProviderDoesNotExposeLegacyUnpin(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{Name: "typescript", Provider: "pnpm", Installed: true, Tracked: true}
 	m := baseModel([]*app.ToolView{tool})
 
@@ -5849,6 +6150,7 @@ func TestToolInlineHints_PinnedProviderDoesNotExposeLegacyUnpin(t *testing.T) {
 }
 
 func TestScrollBuf_WriteMark(t *testing.T) {
+	t.Parallel()
 	var buf scrollBuf
 	buf.write("line1\n")
 	buf.write("line2\n")
@@ -5861,6 +6163,7 @@ func TestScrollBuf_WriteMark(t *testing.T) {
 }
 
 func TestScrollBuf_Render(t *testing.T) {
+	t.Parallel()
 	var buf scrollBuf
 	for i := 0; i < 10; i++ {
 		buf.write("line\n")
@@ -5875,6 +6178,7 @@ func TestScrollBuf_Render(t *testing.T) {
 // ── view.go remaining functions ───────────────────────────────────────────────
 
 func TestWindowTitle_AllModes(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		mode viewMode
 		want string
@@ -5899,6 +6203,7 @@ func TestWindowTitle_AllModes(t *testing.T) {
 }
 
 func TestListAvailableHeight_Default(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.height = 40
 	h := listAvailableHeight(m)
@@ -5912,6 +6217,7 @@ func TestListAvailableHeight_Default(t *testing.T) {
 }
 
 func TestListAvailableHeight_SearchMode(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.height = 40
 	m.mode = viewSearch
@@ -5923,6 +6229,7 @@ func TestListAvailableHeight_SearchMode(t *testing.T) {
 }
 
 func TestListAvailableHeight_CommandMode(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.height = 40
 	m.mode = viewCommand
@@ -5933,6 +6240,7 @@ func TestListAvailableHeight_CommandMode(t *testing.T) {
 }
 
 func TestListAvailableHeight_TooSmall(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.height = 1
 	h := listAvailableHeight(m)
@@ -5942,6 +6250,7 @@ func TestListAvailableHeight_TooSmall(t *testing.T) {
 }
 
 func TestViewString_DefaultMode(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	out := m.viewString()
 	if out == "" {
@@ -5950,6 +6259,7 @@ func TestViewString_DefaultMode(t *testing.T) {
 }
 
 func TestViewString_SetupMode(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSetup
 	m.setupStep = 0
@@ -5966,6 +6276,7 @@ func TestViewString_SetupMode(t *testing.T) {
 }
 
 func TestViewString_SetupModeCanRenderOverDotsTab(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSetup
 	m.setupBackgroundMode = viewDots
@@ -5982,6 +6293,7 @@ func TestViewString_SetupModeCanRenderOverDotsTab(t *testing.T) {
 }
 
 func TestViewString_SetupDefaultBackgroundIsDashboard(t *testing.T) {
+	t.Parallel()
 	t.Run("zero-value setupBackgroundMode resolves to Dashboard", func(t *testing.T) {
 		var m Model
 		// Zero-value viewMode should be viewStatus (Dashboard), not viewList.
@@ -6025,6 +6337,7 @@ func TestViewString_SetupDefaultBackgroundIsDashboard(t *testing.T) {
 }
 
 func TestViewString_WithError(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.err = errForTest("something failed")
 	out := m.viewString()
@@ -6034,6 +6347,7 @@ func TestViewString_WithError(t *testing.T) {
 }
 
 func TestViewString_GroupPickerMode(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.mode = viewGroupPicker
 	m.cursor = 0
@@ -6045,6 +6359,7 @@ func TestViewString_GroupPickerMode(t *testing.T) {
 }
 
 func TestViewString_SettingsMode(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	out := m.viewString()
@@ -6054,6 +6369,7 @@ func TestViewString_SettingsMode(t *testing.T) {
 }
 
 func TestViewString_StatusMode(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{
 		{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
 		{Name: "fd", Provider: "brew", Installed: false, Tracked: true},
@@ -6084,6 +6400,7 @@ func TestViewString_StatusMode(t *testing.T) {
 }
 
 func TestDashboardAttentionRowsCollapseOKDoctorChecks(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewStatus
 	m.allTools = []*app.ToolView{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}}
@@ -6111,6 +6428,7 @@ func TestDashboardAttentionRowsCollapseOKDoctorChecks(t *testing.T) {
 }
 
 func TestDashboardDoctorDriftOffersNvmFix(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewStatus
 	m.doctorResult = &app.DoctorResult{
@@ -6143,6 +6461,7 @@ func TestDashboardDoctorDriftOffersNvmFix(t *testing.T) {
 }
 
 func TestDashboardDoctorDriftOffersNvmFixWithOtherChecks(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewStatus
 	m.doctorResult = &app.DoctorResult{
@@ -6173,6 +6492,7 @@ func TestDashboardDoctorDriftOffersNvmFixWithOtherChecks(t *testing.T) {
 }
 
 func TestDashboardDoctorIgnoreWarningOffersFix(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewStatus
 	m.doctorResult = &app.DoctorResult{
@@ -6193,6 +6513,7 @@ func TestDashboardDoctorIgnoreWarningOffersFix(t *testing.T) {
 }
 
 func TestDashboardDoctorDuplicateConfigOffersFix(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewStatus
 	m.doctorResult = &app.DoctorResult{
@@ -6217,6 +6538,7 @@ func TestDashboardDoctorDuplicateConfigOffersFix(t *testing.T) {
 }
 
 func TestDashboardDoctorFixableFindingWinsWithOtherWarnings(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewStatus
 	m.doctorResult = &app.DoctorResult{
@@ -6238,6 +6560,7 @@ func TestDashboardDoctorFixableFindingWinsWithOtherWarnings(t *testing.T) {
 }
 
 func TestDashboardDoctorFixActionDispatches(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "settings.json")
 	if err := os.MkdirAll(filepath.Join(dir, "settings.d"), 0o755); err != nil {
@@ -6275,6 +6598,7 @@ func TestDashboardDoctorFixActionDispatches(t *testing.T) {
 }
 
 func TestDashboardDoctorFixCommandPartialFailure(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "settings.json")
 	if err := os.MkdirAll(filepath.Join(dir, "settings.d"), 0o755); err != nil {
@@ -6332,6 +6656,7 @@ func TestDashboardDoctorFixCommandPartialFailure(t *testing.T) {
 }
 
 func TestDashboardDoctorFixDoneRefreshesDoctor(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.app = app.New(filepath.Join(t.TempDir(), "settings.json"))
 	m.doctorResult = &app.DoctorResult{}
@@ -6347,6 +6672,7 @@ func TestDashboardDoctorFixDoneRefreshesDoctor(t *testing.T) {
 }
 
 func TestDashboardDoctorPartialFixReportsIgnoreSuccessAndOptimizeError(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.doctorResult = &app.DoctorResult{}
 	next, cmd := m.Update(configOptimizeDoneMsg{
@@ -6365,6 +6691,7 @@ func TestDashboardDoctorPartialFixReportsIgnoreSuccessAndOptimizeError(t *testin
 }
 
 func TestDashboardDoctorPartialFixReportsOptimizeSuccessAndIgnoreError(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.doctorResult = &app.DoctorResult{}
 	next, cmd := m.Update(configOptimizeDoneMsg{
@@ -6385,6 +6712,7 @@ func TestDashboardDoctorPartialFixReportsOptimizeSuccessAndIgnoreError(t *testin
 }
 
 func TestStatusSelectedRowExpandsDetails(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewStatus
 	m.allTools = []*app.ToolView{{Name: "fd", Provider: "brew", Installed: false, Tracked: true}}
@@ -6422,6 +6750,7 @@ func TestStatusSelectedRowExpandsDetails(t *testing.T) {
 }
 
 func TestDashboardServicesRowShowsActionableDetails(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewStatus
 	setDotsRepoForTest(&m, "/repo/dotfiles")
@@ -6469,6 +6798,7 @@ func TestDashboardServicesRowShowsActionableDetails(t *testing.T) {
 }
 
 func TestDashboardDotfilesRowShowsRecentHistory(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewStatus
 	m.width = 72
@@ -6811,6 +7141,7 @@ func TestDashboardAutomationIconUsesCachedDotsAvailability(t *testing.T) {
 }
 
 func TestDashboardRowsUseMiddleSummaryColumn(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{
 		{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
 		{Name: "fd", Provider: "brew", Installed: false, Tracked: true},
@@ -6827,6 +7158,7 @@ func TestDashboardRowsUseMiddleSummaryColumn(t *testing.T) {
 }
 
 func TestDashboardSelectedUpdateDoesNotDuplicateSummary(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{
 		{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true, Version: "2.45", LatestVersion: "2.46"},
 	})
@@ -6844,6 +7176,7 @@ func TestDashboardSelectedUpdateDoesNotDuplicateSummary(t *testing.T) {
 }
 
 func TestDashboardUpdatesShowPendingProgress(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{
 		{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true, Version: "2.45", LatestVersion: "2.46"},
 		{Name: "fd", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
@@ -6865,6 +7198,7 @@ func TestDashboardUpdatesShowPendingProgress(t *testing.T) {
 }
 
 func TestDashboardToolSyncShowsPendingProgress(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{
 		{Name: "fd", Provider: "brew", Installed: false, Tracked: true},
 		{Name: "git", Provider: "brew", Installed: true, Tracked: true},
@@ -6886,6 +7220,7 @@ func TestDashboardToolSyncShowsPendingProgress(t *testing.T) {
 }
 
 func TestDashboardRefreshPresentationWaitingAndActive(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewStatus
 	m.loading = true
@@ -6915,6 +7250,7 @@ func TestDashboardRefreshPresentationWaitingAndActive(t *testing.T) {
 }
 
 func TestDashboardDataRowsShowLoadingWithCurrentSnapshot(t *testing.T) {
+	t.Parallel()
 	t.Run("tools", func(t *testing.T) {
 		m := baseModel([]*app.ToolView{{Name: "git", Provider: "brew", Installed: true, Tracked: true}})
 		m.mode = viewStatus
@@ -6962,6 +7298,7 @@ func TestDashboardDataRowsShowLoadingWithCurrentSnapshot(t *testing.T) {
 }
 
 func TestDashboardRowsUseSharedStatusIcons(t *testing.T) {
+	t.Parallel()
 	t.Run("attention rows", func(t *testing.T) {
 		m := baseModel([]*app.ToolView{
 			{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
@@ -7183,6 +7520,7 @@ func statusRowIndexInSection(rows []statusListRow, section, label string) int {
 }
 
 func TestStatusToolCountsIncludesDiscoveredTools(t *testing.T) {
+	t.Parallel()
 	m := baseModel([]*app.ToolView{{Name: "git", Provider: "brew", Installed: true, Outdated: true, Tracked: true}})
 	m.discoveredTools = []*app.ToolView{{Name: "fd", Provider: "brew", Installed: true}}
 	m.rebuildDiscoveredKeys()
@@ -7200,7 +7538,10 @@ func TestStatusToolCountsIncludesDiscoveredTools(t *testing.T) {
 }
 
 func TestStatusToolsOverviewValue_UpdateCountUsesOutdatedStyle(t *testing.T) {
+	t.Parallel(
 	// Case 1: outdated tool → value contains "update", not "tracked"
+	)
+
 	m := baseModel([]*app.ToolView{
 		{Name: "ripgrep", Provider: "brew", Installed: true, Outdated: true, Tracked: true},
 	})
@@ -7228,6 +7569,7 @@ func TestStatusToolsOverviewValue_UpdateCountUsesOutdatedStyle(t *testing.T) {
 }
 
 func TestViewString_HostsMode(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewGroups
 	m.hostInfo = &app.HostInfo{
@@ -7240,6 +7582,7 @@ func TestViewString_HostsMode(t *testing.T) {
 }
 
 func TestViewString_DotsMode(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewDots
 	out := m.viewString()
@@ -7249,6 +7592,7 @@ func TestViewString_DotsMode(t *testing.T) {
 }
 
 func TestViewString_CommandMode(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewCommand
 	out := m.viewString()
@@ -7258,6 +7602,7 @@ func TestViewString_CommandMode(t *testing.T) {
 }
 
 func TestViewString_SearchMode(t *testing.T) {
+	t.Parallel()
 	m := baseModel(threeTools())
 	m.mode = viewSearch
 	out := m.viewString()
@@ -7267,6 +7612,7 @@ func TestViewString_SearchMode(t *testing.T) {
 }
 
 func TestViewString_HelpOverlay(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.help.ShowAll = true
 	defer func() {
@@ -7281,6 +7627,7 @@ func TestViewString_HelpOverlay(t *testing.T) {
 }
 
 func TestViewString_HelpOverlay_StableOnNarrowWidths(t *testing.T) {
+	t.Parallel()
 	widths := []int{40, 58, 70, 90, 120}
 	for _, w := range widths {
 		t.Run(fmt.Sprintf("width=%d", w), func(t *testing.T) {
@@ -7327,6 +7674,7 @@ func TestViewString_HelpOverlay_StableOnNarrowWidths(t *testing.T) {
 }
 
 func TestViewString_HelpOverlay_DividerLineUsesPopupInnerWidth(t *testing.T) {
+	t.Parallel()
 	const helpPopupPaddingW = 3
 	m := baseModel(nil)
 	m.width = 72
@@ -7360,6 +7708,7 @@ func TestViewString_HelpOverlay_DividerLineUsesPopupInnerWidth(t *testing.T) {
 }
 
 func TestViewString_FilePickerOverlay(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.showFilePicker = true
 	m.filePickerTitle = "Select dotfiles repo"
@@ -7387,6 +7736,7 @@ func TestViewString_FilePickerOverlay(t *testing.T) {
 }
 
 func TestOpenFilePicker_UsesPathInput(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.openFilePicker("Select dotfiles repo", "", false)
 
@@ -7405,6 +7755,7 @@ func TestOpenFilePicker_UsesPathInput(t *testing.T) {
 }
 
 func TestRenderFilePickerPopup_BrowsingMode(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.showFilePicker = true
 	m.filePickerTitle = "Select dotfiles repo"
@@ -7435,6 +7786,7 @@ func TestRenderFilePickerPopup_BrowsingMode(t *testing.T) {
 }
 
 func TestRenderFilePickerPopup_BoundedBrowsingMode(t *testing.T) {
+	t.Parallel()
 	tmp := t.TempDir()
 	for i := range 32 {
 		if err := os.Mkdir(filepath.Join(tmp, fmt.Sprintf("dir-%02d", i)), 0o755); err != nil {
@@ -7495,6 +7847,7 @@ type errForTest string
 func (e errForTest) Error() string { return string(e) }
 
 func TestTruncatedGitStatus(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		status       string
@@ -7562,7 +7915,10 @@ func TestTruncatedGitStatus(t *testing.T) {
 // ── renderSetupOptions ────────────────────────────────────────────────────────
 
 func TestRenderSetupOptions_DescriptionAlignment(t *testing.T) {
+	t.Parallel(
 	// Labels of different lengths: descriptions must all start at the same column.
+	)
+
 	m := baseModel(nil)
 	m.width = 80
 	options := []setupOption{
@@ -7593,7 +7949,10 @@ func TestRenderSetupOptions_DescriptionAlignment(t *testing.T) {
 }
 
 func TestRenderSetupOptions_DescriptionColumnMatchesFormula(t *testing.T) {
+	t.Parallel(
 	// Verify that the desc column equals prefixW + maxLabelW + detailGap (2).
+	)
+
 	m := baseModel(nil)
 	m.width = 80
 	options := []setupOption{
@@ -7616,8 +7975,11 @@ func TestRenderSetupOptions_DescriptionColumnMatchesFormula(t *testing.T) {
 }
 
 func TestRenderSetupOptions_DescriptionColumnWithCheckbox(t *testing.T) {
+	t.Parallel(
 	// When all options have Checked fields, prefix grows by 4 ("[ ] " or "[x] ").
 	// All descriptions must start at the same column.
+	)
+
 	m := baseModel(nil)
 	m.width = 80
 	checkedTrue := true
@@ -7651,7 +8013,10 @@ func TestRenderSetupOptions_DescriptionColumnWithCheckbox(t *testing.T) {
 }
 
 func TestRenderSetupOptions_LineWrapping(t *testing.T) {
+	t.Parallel(
 	// A detail longer than availW should wrap to a continuation line.
+	)
+
 	m := baseModel(nil)
 	// prefixW=2, maxLabelW=4 ("opt1"), detailGap=2 → descCol=8; availW=m.width-8
 	m.width = 30 // availW = 30-8 = 22
@@ -7682,7 +8047,10 @@ func TestRenderSetupOptions_LineWrapping(t *testing.T) {
 }
 
 func TestRenderSetupOptions_NoDetail_NoTrailingGap(t *testing.T) {
+	t.Parallel(
 	// When Detail is empty, the line should contain only prefix + label with no trailing padding.
+	)
+
 	m := baseModel(nil)
 	m.width = 80
 	options := []setupOption{
@@ -7703,7 +8071,10 @@ func TestRenderSetupOptions_NoDetail_NoTrailingGap(t *testing.T) {
 }
 
 func TestRenderSetupOptions_SelectedRowCursorDiffers(t *testing.T) {
+	t.Parallel(
 	// The selected row's cursor character must differ from the unselected cursor.
+	)
+
 	m := baseModel(nil)
 	m.width = 80
 	options := []setupOption{
@@ -7723,7 +8094,10 @@ func TestRenderSetupOptions_SelectedRowCursorDiffers(t *testing.T) {
 }
 
 func TestRenderSetupOptions_CheckboxState(t *testing.T) {
+	t.Parallel(
 	// Checked and unchecked options must render "[x]" and "[ ]" respectively.
+	)
+
 	m := baseModel(nil)
 	m.width = 80
 	checkedTrue := true
@@ -7742,7 +8116,10 @@ func TestRenderSetupOptions_CheckboxState(t *testing.T) {
 }
 
 func TestRenderSetupOptions_MultipleOptions_LineCount(t *testing.T) {
+	t.Parallel(
 	// n options with single-line details → exactly n lines.
+	)
+
 	m := baseModel(nil)
 	m.width = 80
 	options := []setupOption{
@@ -7758,7 +8135,10 @@ func TestRenderSetupOptions_MultipleOptions_LineCount(t *testing.T) {
 }
 
 func TestRenderSetupOptions_WrapIndentMatchesDescCol(t *testing.T) {
+	t.Parallel(
 	// Continuation lines from wrapping must be indented by exactly descCol spaces.
+	)
+
 	m := baseModel(nil)
 	// prefixW=2, labels "go"(2)/"rust"(4) → maxLabelW=4, detailGap=2 → descCol=8
 	m.width = 20 // availW = 20-8 = 12
@@ -7802,6 +8182,7 @@ func TestRenderSetupOptions_WrapIndentMatchesDescCol(t *testing.T) {
 // TestRenderSettings_SectionHeadersPresent catches rows added to the settingsRows
 // iota that are never emitted by renderSettings() (section present in data but absent in render).
 func TestRenderSettings_SectionHeadersPresent(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	m.width = 120
@@ -7824,6 +8205,7 @@ func TestRenderSettings_SectionHeadersPresent(t *testing.T) {
 // TestRenderDotsPeek_PopupVisibleInDots is the render-gate guard: popup added to
 // the model but missing from the View() switch will fail here.
 func TestRenderDotsPeek_PopupVisibleInDots(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.width = 120
@@ -7840,6 +8222,7 @@ func TestRenderDotsPeek_PopupVisibleInDots(t *testing.T) {
 // TestRenderDotsPeek_PopupAbsentOutsideDots catches a missing render gate that
 // would let the popup bleed into unrelated views.
 func TestRenderDotsPeek_PopupAbsentOutsideDots(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	m.width = 120
@@ -7858,6 +8241,7 @@ func TestRenderDotsPeek_PopupAbsentOutsideDots(t *testing.T) {
 // Brew tools use only ToolCache fields (no provider pins); baseModel sets an empty
 // ToolClassificationContext which is correct for brew.
 func TestRenderList_SectionHeadersPresent(t *testing.T) {
+	t.Parallel()
 	t.Run("installed brew tool renders Installed section header", func(t *testing.T) {
 		tool := &app.ToolView{
 			Name: "git", Provider: "brew", Package: "git",
@@ -7947,6 +8331,7 @@ func TestRenderList_SectionHeadersPresent(t *testing.T) {
 // TestRenderList_UpdatesSectionHeader guards sectionLabel(): removing the sectionUpdates
 // case silently reverts the header to "Available" — this test catches that.
 func TestRenderList_UpdatesSectionHeader(t *testing.T) {
+	t.Parallel()
 	outdated := &app.ToolView{
 		Name: "fzf", Provider: "brew", Package: "fzf",
 		Installed: true, Tracked: true, Outdated: true,
@@ -7968,6 +8353,7 @@ func TestRenderList_UpdatesSectionHeader(t *testing.T) {
 // TestRenderDots_SectionHeadersPresent ensures renderDots() calls sections.Header();
 // a bypass in the render loop would drop entries without failing otherwise.
 func TestRenderDots_SectionHeadersPresent(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewDots
 	m.width = 120
@@ -7998,6 +8384,7 @@ func TestRenderDots_SectionHeadersPresent(t *testing.T) {
 // TestRenderStatus_SectionHeadersPresent catches renames or sectionOrder changes
 // that drop statusSectionOverview/"Data" from the rendered surface.
 func TestRenderStatus_SectionHeadersPresent(t *testing.T) {
+	t.Parallel()
 	installed := &app.ToolView{
 		Name: "git", Provider: "brew", Package: "git",
 		Installed: true, Tracked: true,
@@ -8016,6 +8403,7 @@ func TestRenderStatus_SectionHeadersPresent(t *testing.T) {
 }
 
 func TestDisplayVersionText_SelfUpdates(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{
 		Name:      "battle-net",
 		Provider:  "brew",
@@ -8033,6 +8421,7 @@ func TestDisplayVersionText_SelfUpdates(t *testing.T) {
 }
 
 func TestDisplayVersionText_NormalOutdated(t *testing.T) {
+	t.Parallel()
 	tool := &app.ToolView{
 		Name:      "ripgrep",
 		Provider:  "brew",
@@ -8049,6 +8438,7 @@ func TestDisplayVersionText_NormalOutdated(t *testing.T) {
 }
 
 func TestRenderToolRow_SelfUpdatingCask(t *testing.T) {
+	t.Parallel()
 	p := defaultPalette()
 	tool := &app.ToolView{
 		Name:      "battle-net",
@@ -8073,6 +8463,7 @@ func TestRenderToolRow_SelfUpdatingCask(t *testing.T) {
 }
 
 func TestDashboardAgentsDataRowOrderAndLabels(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewStatus
 
@@ -8092,6 +8483,7 @@ func TestDashboardAgentsDataRowOrderAndLabels(t *testing.T) {
 }
 
 func TestDashboardOverviewBreakdownFormats(t *testing.T) {
+	t.Parallel()
 	t.Run("tools", func(t *testing.T) {
 		m := baseModel([]*app.ToolView{
 			{Name: "ripgrep", Provider: "brew", Installed: true, Tracked: true},
@@ -8141,6 +8533,7 @@ func TestDashboardOverviewBreakdownFormats(t *testing.T) {
 }
 
 func TestAgentsDashboardEnabled_ShowsLoadingNotDisabledBeforeSnapshot(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.agentsEnabled = true
 	if !agentsDashboardEnabled(m) {
@@ -8160,6 +8553,7 @@ func TestAgentsDashboardEnabled_ShowsLoadingNotDisabledBeforeSnapshot(t *testing
 }
 
 func TestAgentsDashboardViewFor_UsesLiveSkillRows(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.agentsEnabled = true
 	m.agentsSummary = app.DashboardAgentsSummary{
@@ -8190,6 +8584,7 @@ func TestAgentsDashboardViewFor_UsesLiveSkillRows(t *testing.T) {
 }
 
 func TestDashboardAgentsOverviewRow(t *testing.T) {
+	t.Parallel()
 	t.Run("enabled", func(t *testing.T) {
 		m := baseModel(nil)
 		m.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: true, SkillPackages: 7, McpServers: 3, Plugins: 5}
@@ -8281,6 +8676,7 @@ func TestDashboardAgentsOverviewRow(t *testing.T) {
 }
 
 func TestDashboardAgentsAttentionRow(t *testing.T) {
+	t.Parallel()
 	t.Run("ok when all managed", func(t *testing.T) {
 		m := baseModel(nil)
 		m.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: true}
@@ -8428,6 +8824,7 @@ func TestDashboardAgentsAttentionRow(t *testing.T) {
 // ints — so a live mcp-missing row that agentsSummary knows nothing about
 // still trips the warning icon and produces an attention row.
 func TestDashboardAgentsOverviewIconAndAttentionAgree(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.agentsSummary = app.DashboardAgentsSummary{AgentsEnabled: true}
 	m.skillsLoaded = true
@@ -8459,6 +8856,7 @@ func TestDashboardAgentsOverviewIconAndAttentionAgree(t *testing.T) {
 // Agents tab Out of Sync section: one issue per flattened row, not per manifest
 // item with any adapter missing.
 func TestStatusAgentsCounts_CountsPerAgentRows(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mcpLoaded = true
 	m.pluginLoaded = true
@@ -8482,6 +8880,7 @@ func TestStatusAgentsCounts_CountsPerAgentRows(t *testing.T) {
 }
 
 func TestStatusAgentsCounts_IgnoresNonTargetedAgentMissing(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mcpLoaded = true
 	m.enabledAgents = []string{"claude-code"}
@@ -8505,6 +8904,7 @@ func TestStatusAgentsCounts_IgnoresNonTargetedAgentMissing(t *testing.T) {
 // (via agentsSummary name lists) and out of mcp/plugin missing-or-unmanaged
 // (via live rows), for all three features simultaneously.
 func TestStatusAgentsCounts_IgnoredItemsExcludedAcrossAllThreeFeatures(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.agentsIgnore = config.AgentsIgnore{
 		Skills:     []string{"lambda-skill-ignored"},
@@ -8563,6 +8963,7 @@ func TestStatusAgentsCounts_IgnoredItemsExcludedAcrossAllThreeFeatures(t *testin
 }
 
 func TestDashboardAgentsSummaryLoadedMsgHandler(t *testing.T) {
+	t.Parallel()
 	t.Run("error path keeps previous summary", func(t *testing.T) {
 		m := baseModel(nil)
 		seeded := app.DashboardAgentsSummary{SkillPackages: 41, AgentsEnabled: true}
@@ -8604,6 +9005,7 @@ func TestDashboardAgentsSummaryRefreshWiring(t *testing.T) {
 }
 
 func TestDashboardAgentsRestoreSkillsDispatch(t *testing.T) {
+	t.Parallel()
 	t.Run("restore skills", func(t *testing.T) {
 		m := baseModel(nil)
 		m.agentsSummary = app.DashboardAgentsSummary{
@@ -8632,6 +9034,7 @@ func TestDashboardAgentsRestoreSkillsDispatch(t *testing.T) {
 }
 
 func TestStatusDashboardDataRows_ActivityConsistency(t *testing.T) {
+	t.Parallel()
 	freshLoadingNoData := func() Model {
 		m := baseModel(nil)
 		m.loading = true
@@ -8766,6 +9169,7 @@ func TestStatusDashboardDataRows_ActivityConsistency(t *testing.T) {
 }
 
 func TestRenderHeaderVersion_DashboardAndSettingsOnly(t *testing.T) {
+	t.Parallel()
 	version := buildinfo.Short()
 	if version == "" {
 		t.Fatal("buildinfo.Short() must never be empty")
@@ -8798,6 +9202,7 @@ func TestRenderHeaderVersion_DashboardAndSettingsOnly(t *testing.T) {
 }
 
 func TestRenderHeader_DashboardVersionOnlyAcrossStatusStates(t *testing.T) {
+	t.Parallel()
 	version := buildinfo.Short()
 
 	m := baseModel(nil)
@@ -8817,6 +9222,7 @@ func TestRenderHeader_DashboardVersionOnlyAcrossStatusStates(t *testing.T) {
 }
 
 func TestRenderHeader_SettingsShowsVersionOnly(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSettings
 	m.setSettings(config.Settings{DotsRepo: "~/dotfiles"})
@@ -8833,6 +9239,7 @@ func TestRenderHeader_SettingsShowsVersionOnly(t *testing.T) {
 }
 
 func TestHeaderInfo_EmptyOnDashboardAndSettings(t *testing.T) {
+	t.Parallel()
 	version := buildinfo.Short()
 
 	status := baseModel(nil)
@@ -8855,6 +9262,7 @@ func TestHeaderInfo_EmptyOnDashboardAndSettings(t *testing.T) {
 }
 
 func TestRenderDots_CursorRowShowsLastError(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	setDotsRepoForTest(&m, "/repo")
 	m.dotsCursor = 0
@@ -8873,6 +9281,7 @@ func TestRenderDots_CursorRowShowsLastError(t *testing.T) {
 }
 
 func TestRenderDots_CursorRowWithoutLastErrorOmitsErrorLine(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	setDotsRepoForTest(&m, "/repo")
 	m.dotsCursor = 0
@@ -8890,32 +9299,45 @@ func TestRenderDots_CursorRowWithoutLastErrorOmitsErrorLine(t *testing.T) {
 }
 
 func TestRenderDotsLastError_CollapsesWhitespace(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	e := app.DotStatus{LastError: "stow: error\n  something   failed\n"}
 
-	out := stripANSIEscapeSequences(renderDotsLastError(m.palette, e, m.width))
+	out := stripANSIEscapeSequences(renderDotsLastError(m, e, m.width))
 	if !strings.Contains(out, "✗ stow: error something failed") {
 		t.Fatalf("multi-line error should collapse to single-spaced text, got: %q", out)
 	}
 }
 
 func TestRenderDotsLastError_TruncatesLongText(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	e := app.DotStatus{LastError: strings.Repeat("a", 450)}
 
-	out := stripANSIEscapeSequences(renderDotsLastError(m.palette, e, m.width))
-	flat := strings.NewReplacer("\n", "", " ", "").Replace(out)
+	out := stripANSIEscapeSequences(renderDotsLastError(m, e, m.width))
+	lines := strings.Split(out, "\n")
+	hintLine := lines[len(lines)-1]
+	textPart := strings.Join(lines[:len(lines)-1], "\n")
+	flat := strings.NewReplacer("\n", "", " ", "").Replace(textPart)
 	if !strings.HasSuffix(flat, "…") {
-		t.Fatalf("long error should end with ellipsis, got tail: %q", flat[len(flat)-8:])
+		tail := flat
+		if len(tail) > 8 {
+			tail = tail[len(tail)-8:]
+		}
+		t.Fatalf("long error should end with ellipsis, got tail: %q", tail)
 	}
 	if got, want := strings.Count(flat, "a"), 399; got != want {
 		t.Fatalf("truncated error rune count = %d, want %d", got, want)
 	}
+	if !strings.Contains(hintLine, "error log") {
+		t.Fatalf("rendered error should include the error-log hint, got: %q", hintLine)
+	}
 }
 
 func TestRenderDotsLastError_EmptyReturnsNothing(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
-	if out := renderDotsLastError(m.palette, app.DotStatus{}, m.width); out != "" {
+	if out := renderDotsLastError(m, app.DotStatus{}, m.width); out != "" {
 		t.Fatalf("empty LastError should render nothing, got: %q", out)
 	}
 }

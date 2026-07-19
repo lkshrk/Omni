@@ -7,6 +7,7 @@ import (
 )
 
 func TestPluginManifestEntry(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manifestPath := filepath.Join(dir, "marketplace.json")
 
@@ -39,6 +40,7 @@ func TestPluginManifestEntry(t *testing.T) {
 }
 
 func TestPluginMarketplaceManifestPath(t *testing.T) {
+	t.Parallel()
 	got := pluginMarketplaceManifestPath("/home/user", "caveman")
 	want := filepath.Join("/home/user", ".claude", "plugins", "marketplaces", "caveman", ".claude-plugin", "marketplace.json")
 	if got != want {

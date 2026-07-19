@@ -72,6 +72,7 @@ func (a *App) DotsEjectIgnoredPathsContext(ctx context.Context, name, pattern st
 	}
 
 	patterns := []string{pattern}
+	patternIM := dots.CompileIgnoresLenient(patterns)
 	// Build ignore list WITHOUT the new pattern so dots.CopyDotPath doesn't skip
 	// the very files we're ejecting.
 	var copyIgnores []string
@@ -88,7 +89,7 @@ func (a *App) DotsEjectIgnoredPathsContext(ctx context.Context, name, pattern st
 		if relErr != nil || rel == "." {
 			return relErr
 		}
-		if !dots.ShouldIgnorePath(rel, d.Name(), patterns) {
+		if !patternIM.Ignored(rel, d.Name()) {
 			return nil
 		}
 		info, infoErr := os.Lstat(path)
@@ -154,7 +155,7 @@ func (a *App) DotsEjectIgnoredPathsContext(ctx context.Context, name, pattern st
 		if relErr != nil || rel == "." {
 			return relErr
 		}
-		if !dots.ShouldIgnorePath(rel, d.Name(), patterns) {
+		if !patternIM.Ignored(rel, d.Name()) {
 			return nil
 		}
 		if removeErr := os.RemoveAll(path); removeErr != nil {
@@ -385,9 +386,13 @@ func (a *App) includedDotPathIsDir(name, rel string) bool {
 }
 
 func dotPathOrAncestorIgnored(root, rel string, patterns []string) (bool, error) {
+	matcher, err := dots.CompileIgnores(patterns)
+	if err != nil {
+		return false, err
+	}
 	for path := rel; path != "."; path = filepath.Dir(path) {
 		rooted := filepath.ToSlash(filepath.Join(filepath.Base(root), path))
-		ignored, err := dots.ShouldIgnoreAnyPathChecked([]string{path, rooted}, filepath.Base(path), patterns)
+		ignored, err := matcher.MatchAnyPath([]string{path, rooted}, filepath.Base(path))
 		if err != nil || ignored {
 			return ignored, err
 		}

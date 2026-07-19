@@ -178,6 +178,7 @@ func (s *progressStubPluginAdapter) UpdateMarketplaces(context.Context) error {
 // so the plugin only gets updated if doAgentsUpdateAll recomputes outdated
 // rows from a.PluginRows post-refresh.
 func TestAgentsAll_UpdateAll_StreamsProgressText(t *testing.T) {
+	t.Parallel()
 	fake := &progressStubPluginAdapter{id: "claude-code"}
 	cfg := &config.RootConfig{
 		Agents: config.AgentsConfig{
@@ -294,6 +295,7 @@ func (s *progressStubMcpAdapter) Remove(context.Context, string) error { return 
 // aren't installed yet on this host — mirroring what "S" does for those two
 // sections, without requiring a full "S" sync.
 func TestAgentsAll_UpdateAll_InstallsMissingPluginsAndMcpServers(t *testing.T) {
+	t.Parallel()
 	pluginStub := &missingPluginStubAdapter{id: "claude-code"}
 	mcpStub := &progressStubMcpAdapter{id: "claude-code"}
 	cfg := &config.RootConfig{
@@ -389,6 +391,7 @@ func (s *combinedPluginStubAdapter) UpdateMarketplaces(context.Context) error {
 // StreamsProgressText); this drives a plugin manifest with BOTH an outdated
 // and a missing entry in the same "U" press so both sub-steps actually run.
 func TestAgentsAll_UpdateAll_RefreshesMarketplacesOnceAcrossUpdateAndInstall(t *testing.T) {
+	t.Parallel()
 	fake := &combinedPluginStubAdapter{id: "claude-code"}
 	cfg := &config.RootConfig{
 		Agents: config.AgentsConfig{
@@ -477,6 +480,7 @@ func (s *erroringMcpStubAdapter) Remove(context.Context, string) error { return 
 // flag still clears (mirrors the existing skills-error-doesn't-stick-running
 // coverage in TestAgentsAll_UpdateAll_SkillsErrorDoesNotStickRunning).
 func TestAgentsAll_UpdateAll_InstallMissingFailures_PropagateAsPluginAndMcpErr(t *testing.T) {
+	t.Parallel()
 	pluginStub := &erroringPluginStubAdapter{id: "claude-code"}
 	mcpStub := &erroringMcpStubAdapter{id: "claude-code"}
 	cfg := &config.RootConfig{
@@ -518,6 +522,7 @@ func TestAgentsAll_UpdateAll_InstallMissingFailures_PropagateAsPluginAndMcpErr(t
 // exact order. Today doAgentsSyncAll never calls sendProgress, so this test
 // is expected to FAIL until that production change lands.
 func TestAgentsAll_SyncAll_StreamsProgressTextInOrder(t *testing.T) {
+	t.Parallel()
 	m := agentsAllProgressModel(t, nil,
 		[]app.SkillPackageRow{{Name: "caveman", Source: "github.com/foo/caveman", Installed: true}},
 		nil,
@@ -553,6 +558,7 @@ func TestAgentsAll_SyncAll_StreamsProgressTextInOrder(t *testing.T) {
 // the skills Cmd. After a full drain, m.skillsErr must be set and no running
 // flag must be left stuck true, even though the sequence errors mid-way.
 func TestAgentsAll_UpdateAll_SkillsErrorDoesNotStickRunning(t *testing.T) {
+	t.Parallel()
 	cfg := &config.RootConfig{
 		Settings: config.Settings{SkillsDisabled: config.BoolPtr(true)},
 	}
@@ -589,6 +595,7 @@ func TestAgentsAll_UpdateAll_SkillsErrorDoesNotStickRunning(t *testing.T) {
 // internal/tui/agents_all.go's doc comment on combineSkillErrors).
 
 func TestCombineSkillErrors_NilErrNoFailed_ReturnsNil(t *testing.T) {
+	t.Parallel()
 	got := combineSkillErrors(nil, app.RestoreSkillsResult{})
 	if got != nil {
 		t.Fatalf("combineSkillErrors(nil, no Failed) = %v, want nil", got)
@@ -596,6 +603,7 @@ func TestCombineSkillErrors_NilErrNoFailed_ReturnsNil(t *testing.T) {
 }
 
 func TestCombineSkillErrors_NilErrWithFailed_ReturnsErrorPerPackage(t *testing.T) {
+	t.Parallel()
 	res := app.RestoreSkillsResult{Failed: []app.SkillFailure{
 		{Name: "acme/foo", Message: "install failed"},
 		{Name: "acme/bar", Message: "timeout"},
@@ -613,6 +621,7 @@ func TestCombineSkillErrors_NilErrWithFailed_ReturnsErrorPerPackage(t *testing.T
 }
 
 func TestCombineSkillErrors_ErrAndFailed_JoinsBoth(t *testing.T) {
+	t.Parallel()
 	topErr := errors.New("restore skills: manifest load failed")
 	res := app.RestoreSkillsResult{Failed: []app.SkillFailure{
 		{Name: "acme/foo", Message: "install failed"},
@@ -640,6 +649,7 @@ func TestCombineSkillErrors_ErrAndFailed_JoinsBoth(t *testing.T) {
 // == nil branch in update.go's agentsProgressDoneMsg case).
 
 func TestAgentsProgressDoneMsg_SkillsErrorFromFailedPackages_StopsRunningNoReload(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.skillsRunning = true
 	m.skillsLoaded = true // sentinel: only the err==nil branch resets this to false

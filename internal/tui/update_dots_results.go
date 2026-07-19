@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lkshrk/omni/internal/app"
+	"github.com/lkshrk/omni/internal/dots"
 )
 
 func (m *Model) handleDotsLoadedMsg(msg dotsLoadedMsg) []tea.Cmd {
@@ -41,6 +42,43 @@ func (m *Model) handleDotsPeekLoadedMsg(msg dotsPeekLoadedMsg) []tea.Cmd {
 	return nil
 }
 
+func (m *Model) handleDotsChildrenLoadedMsg(msg dotsChildrenLoadedMsg) []tea.Cmd {
+	if !m.finishDotsOperation(msg.gen) {
+		return nil
+	}
+	if msg.err != nil {
+		return []tea.Cmd{setStatus(m, "✗ "+msg.err.Error(), true)}
+	}
+	for i := range m.dotsEntries {
+		entry := &m.dotsEntries[i]
+		if entry.Name != msg.entryName || app.DotStatusState(*entry) != msg.entryState {
+			continue
+		}
+		if setDotsChildChildren(entry.Children, msg.relPath, msg.children) {
+			if m.dotsExpandedChildren == nil {
+				m.dotsExpandedChildren = make(map[string]bool)
+			}
+			m.dotsExpandedChildren[dotsChildExpandKey(msg.entryName, msg.relPath)] = true
+			return nil
+		}
+	}
+	return []tea.Cmd{setStatus(m, "✗ dotfile directory disappeared during expansion", true)}
+}
+
+func setDotsChildChildren(children []app.DotChild, relPath string, loaded []app.DotChild) bool {
+	want := filepath.ToSlash(relPath)
+	for i := range children {
+		if filepath.ToSlash(children[i].RelPath) == want {
+			children[i].Children = loaded
+			return true
+		}
+		if setDotsChildChildren(children[i].Children, want, loaded) {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Model) handleDotsPreparedMsg(msg dotsPreparedMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 
@@ -48,7 +86,10 @@ func (m *Model) handleDotsPreparedMsg(msg dotsPreparedMsg) []tea.Cmd {
 		return cmds
 	}
 	m.dotsPreparing = false
-	if msg.opGen != m.dotsOpGen && !m.dotsLoading {
+	// An initial launch snapshot may still hydrate an empty list while another
+	// operation is active. Once a tree is loaded, however, an older snapshot
+	// must not replace newer mutations or lazily loaded branches.
+	if msg.opGen != m.dotsOpGen && m.dotsLoaded {
 		return cmds
 	}
 	if msg.entries != nil {
@@ -381,6 +422,24 @@ func (m *Model) doLoadDots() tea.Cmd {
 	}
 }
 
+func (m *Model) doDotsLoadChildren(entry app.DotStatus, child app.DotChild) tea.Cmd {
+	a := m.app
+	ctx, gen := m.currentDotsOperation()
+	entryState := app.DotStatusState(entry)
+	ancestorIgnored := child.Ignored || app.DotChildDisplayState(child, entryState) == dots.StateIgnored
+	return func() tea.Msg {
+		children, err := a.DotsChildChildren(ctx, entry.Name, child.RelPath, ancestorIgnored)
+		return dotsChildrenLoadedMsg{
+			gen:        gen,
+			entryName:  entry.Name,
+			entryState: entryState,
+			relPath:    child.RelPath,
+			children:   children,
+			err:        err,
+		}
+	}
+}
+
 func (m *Model) doPrepareDotsSnapshot(gen, opGen int) tea.Cmd {
 	a := m.app
 	ctx := m.ctx
@@ -480,7 +539,7 @@ func (m *Model) doDotsRefresh() tea.Cmd {
 }
 
 func refreshDotsSnapshot(a *app.App, ctx context.Context) ([]app.DotStatus, string, map[string][]string, error) {
-	result, err := a.RefreshDotsState(ctx)
+	result, err := a.RefreshDotsState(app.WithShallowDotsChildren(ctx))
 	if result == nil {
 		return nil, "", nil, err
 	}

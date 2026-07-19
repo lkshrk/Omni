@@ -517,6 +517,7 @@ func TestDotsWatch_SyncsAfterManagedSymlinkReplaced(t *testing.T) {
 }
 
 func TestCollectDotsWatchPaths_MissingPathWatchesNearestParentOnly(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	configDir := filepath.Join(home, ".config")
 	if err := os.MkdirAll(configDir, 0o755); err != nil {
@@ -535,6 +536,7 @@ func TestCollectDotsWatchPaths_MissingPathWatchesNearestParentOnly(t *testing.T)
 }
 
 func TestCollectDotsWatchPaths_ExactSymlinkWatchesLocalParentAndResolvedTarget(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	localDir := filepath.Join(home, ".config")
 	targetDir := filepath.Join(t.TempDir(), "nvim")
@@ -567,6 +569,7 @@ func TestCollectDotsWatchPaths_ExactSymlinkWatchesLocalParentAndResolvedTarget(t
 }
 
 func TestSetDotsWatchPaths_IgnoresNonExistentWatchOnRemove(t *testing.T) {
+	t.Parallel()
 	watcher := &fakeDotsPathWatcher{removeErr: fsnotify.ErrNonExistentWatch}
 	current := map[string]struct{}{"/tmp/gone": {}}
 
@@ -600,6 +603,7 @@ func (w *fakeDotsPathWatcher) Remove(path string) error {
 }
 
 func TestDotsWatchRejectsTooSmallDebounce(t *testing.T) {
+	t.Parallel()
 	a := &App{}
 	err := a.DotsWatch(context.Background(), DotsWatchOptions{Debounce: time.Millisecond})
 	if err == nil {

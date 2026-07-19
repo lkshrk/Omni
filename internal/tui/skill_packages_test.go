@@ -11,6 +11,7 @@ import (
 )
 
 func TestSkillPackages_GroupBadgeRendered(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.agentsEnabled = true
@@ -64,6 +65,7 @@ func TestSkillPackages_MultiGroupBadgeAndFullDetail(t *testing.T) {
 // collapse them) must render both as separate pills, not a single compact
 // badge.
 func TestSkillPackages_TwoGroupsShowTwoPills(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.agentsEnabled = true
@@ -113,6 +115,7 @@ func TestSkillPackages_ThreeGroupsNarrowWidthCollapsesToHostPlusCount(t *testing
 }
 
 func TestSkillPackages_NoBadgeWhenNoGroups(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.agentsEnabled = true
@@ -141,6 +144,7 @@ func TestSkillPackages_NoBadgeWhenNoGroups(t *testing.T) {
 }
 
 func TestSkillPackages_StatusGroupingSections(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.agentsEnabled = true
@@ -180,6 +184,7 @@ func TestSkillPackages_StatusGroupingSections(t *testing.T) {
 }
 
 func TestSkillPackages_FooterHasGroupKey(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.agentsEnabled = true
@@ -199,6 +204,7 @@ func TestSkillPackages_FooterHasGroupKey(t *testing.T) {
 }
 
 func TestSkillPackages_GKeyOpensGroupMembershipPicker(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -222,6 +228,7 @@ func TestSkillPackages_GKeyOpensGroupMembershipPicker(t *testing.T) {
 }
 
 func TestAgentsNav_RoundRobin(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -262,6 +269,7 @@ func TestAgentsNav_RoundRobin(t *testing.T) {
 }
 
 func TestSkillPackages_CursorMovesDown(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -285,6 +293,7 @@ func TestSkillPackages_CursorMovesDown(t *testing.T) {
 }
 
 func TestSkillPackages_CursorWrapsAtBottom(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -303,6 +312,7 @@ func TestSkillPackages_CursorWrapsAtBottom(t *testing.T) {
 }
 
 func TestSkillPackages_CursorMovesUp(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills
@@ -320,6 +330,7 @@ func TestSkillPackages_CursorMovesUp(t *testing.T) {
 }
 
 func TestSkillPackages_CursorWrapsAtTop(t *testing.T) {
+	t.Parallel()
 	m := baseModel(nil)
 	m.mode = viewSkills
 	m.skillTypeIdx = agentsChipSkills

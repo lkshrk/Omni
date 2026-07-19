@@ -8,6 +8,7 @@ import (
 )
 
 func TestMcpUnmanagedAgentsFor(t *testing.T) {
+	t.Parallel()
 	unmanaged := map[string][]app.InstalledMcpServer{
 		"claude": {{Name: "srv", Transport: "stdio", Command: "echo"}},
 		"codex":  {{Name: "srv", Transport: "stdio", Command: "echo"}},
@@ -39,6 +40,7 @@ func TestMcpUnmanagedAgentsFor(t *testing.T) {
 }
 
 func TestMcpUnmanagedConflict(t *testing.T) {
+	t.Parallel()
 	first := app.InstalledMcpServer{Name: "srv", Transport: "stdio", Command: "echo"}
 
 	t.Run("differing command across agents is a conflict", func(t *testing.T) {
@@ -74,6 +76,7 @@ func TestMcpUnmanagedConflict(t *testing.T) {
 }
 
 func TestPluginUnmanagedAgentsFor(t *testing.T) {
+	t.Parallel()
 	unmanaged := map[string][]app.InstalledPlugin{
 		"claude": {{Name: "plugin", Marketplace: "acme"}},
 		"codex":  {{Name: "plugin", Marketplace: "acme"}},
@@ -105,6 +108,7 @@ func TestPluginUnmanagedAgentsFor(t *testing.T) {
 }
 
 func TestPluginUnmanagedConflict(t *testing.T) {
+	t.Parallel()
 	first := app.InstalledPlugin{Name: "plugin", Marketplace: "acme"}
 
 	t.Run("differing marketplace across agents is a conflict", func(t *testing.T) {
@@ -129,6 +133,7 @@ func TestPluginUnmanagedConflict(t *testing.T) {
 }
 
 func TestMarketplaceUnmanagedAgentsFor(t *testing.T) {
+	t.Parallel()
 	unmanaged := map[string][]app.InstalledMarketplace{
 		"claude": {{Name: "mk", Source: "acme/mk"}},
 		"codex":  {{Name: "mk", Source: "acme/mk"}},
@@ -160,6 +165,7 @@ func TestMarketplaceUnmanagedAgentsFor(t *testing.T) {
 }
 
 func TestMarketplaceUnmanagedConflict(t *testing.T) {
+	t.Parallel()
 	first := app.InstalledMarketplace{Name: "mk", Source: "acme/mk"}
 
 	t.Run("differing source across agents is a conflict", func(t *testing.T) {

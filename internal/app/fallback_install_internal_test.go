@@ -23,6 +23,7 @@ import (
 // --- isChecksumAsset ---
 
 func TestIsChecksumAsset(t *testing.T) {
+	t.Parallel()
 	yes := []string{
 		"sha256sums",
 		"SHA256SUMS",
@@ -58,6 +59,7 @@ func TestIsChecksumAsset(t *testing.T) {
 // --- extractChecksumForFile ---
 
 func TestExtractChecksumForFile_MatchesFilename(t *testing.T) {
+	t.Parallel()
 	content := "abc123  fd_1.0_darwin_arm64.tar.gz\ndef456  fd_1.0_linux_amd64.tar.gz\n"
 	got, err := extractChecksumForFile(strings.NewReader(content), "fd_1.0_darwin_arm64.tar.gz")
 	if err != nil {
@@ -69,6 +71,7 @@ func TestExtractChecksumForFile_MatchesFilename(t *testing.T) {
 }
 
 func TestExtractChecksumForFile_StripsLeadingPath(t *testing.T) {
+	t.Parallel()
 	content := "abc123  ./dist/fd_1.0_darwin_arm64.tar.gz\n"
 	got, err := extractChecksumForFile(strings.NewReader(content), "fd_1.0_darwin_arm64.tar.gz")
 	if err != nil {
@@ -80,6 +83,7 @@ func TestExtractChecksumForFile_StripsLeadingPath(t *testing.T) {
 }
 
 func TestExtractChecksumForFile_NotFound(t *testing.T) {
+	t.Parallel()
 	content := "abc123  other_file.tar.gz\n"
 	_, err := extractChecksumForFile(strings.NewReader(content), "fd_1.0_darwin_arm64.tar.gz")
 	if err == nil {
@@ -88,6 +92,7 @@ func TestExtractChecksumForFile_NotFound(t *testing.T) {
 }
 
 func TestExtractChecksumForFile_SkipsComments(t *testing.T) {
+	t.Parallel()
 	content := "# comment\nabc123  target.tar.gz\n"
 	got, err := extractChecksumForFile(strings.NewReader(content), "target.tar.gz")
 	if err != nil {
@@ -101,6 +106,7 @@ func TestExtractChecksumForFile_SkipsComments(t *testing.T) {
 // --- verifyFileChecksum ---
 
 func TestVerifyFileChecksum_Match(t *testing.T) {
+	t.Parallel()
 	content := []byte("hello world")
 	sum := sha256.Sum256(content)
 	expected := hex.EncodeToString(sum[:])
@@ -120,6 +126,7 @@ func TestVerifyFileChecksum_Match(t *testing.T) {
 }
 
 func TestVerifyFileChecksum_Mismatch(t *testing.T) {
+	t.Parallel()
 	f, err := os.CreateTemp(t.TempDir(), "checkfile-*")
 	if err != nil {
 		t.Fatal(err)
@@ -141,6 +148,7 @@ func TestVerifyFileChecksum_Mismatch(t *testing.T) {
 // --- extractAndInstall: zip ---
 
 func TestExtractAndInstall_Zip(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	content := []byte("#!/bin/sh\nexit 0\n")
 	archivePath := filepath.Join(dir, "tool_v1.0_darwin_arm64.zip")
@@ -182,6 +190,7 @@ func TestExtractAndInstall_Zip(t *testing.T) {
 }
 
 func TestExtractAndInstall_ZipExactPath(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	content := []byte("correct binary")
 	wrong := []byte("wrong binary")
@@ -215,6 +224,7 @@ func TestExtractAndInstall_ZipExactPath(t *testing.T) {
 }
 
 func TestExtractAndInstall_ZipBinaryNotFound(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	archivePath := filepath.Join(dir, "archive.zip")
 	zf, _ := os.Create(archivePath)
@@ -233,6 +243,7 @@ func TestExtractAndInstall_ZipBinaryNotFound(t *testing.T) {
 // --- extractAndInstall: tar.gz ---
 
 func TestExtractAndInstall_TarGz(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	content := []byte("#!/bin/sh\nexit 0\n")
 	archivePath := filepath.Join(dir, "tool.tar.gz")
@@ -258,6 +269,7 @@ func TestExtractAndInstall_TarGz(t *testing.T) {
 // --- extractAndInstall: tar.xz ---
 
 func TestExtractAndInstall_TarXz(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	content := []byte("#!/bin/sh\nexit 0\n")
 	archivePath := filepath.Join(dir, "tool.tar.xz")
@@ -283,6 +295,7 @@ func TestExtractAndInstall_TarXz(t *testing.T) {
 // --- extractAndInstall: raw binary ---
 
 func TestExtractAndInstall_RawBinary(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	content := []byte("ELF binary data")
 	srcPath := filepath.Join(dir, "mytool-v1.0-raw")
@@ -310,6 +323,7 @@ func TestExtractAndInstall_RawBinary(t *testing.T) {
 // --- tar exact-path match (parity with zip) ---
 
 func TestExtractAndInstall_TarGzExactPath(t *testing.T) {
+	t.Parallel()
 	for _, compression := range []string{"gz", "xz"} {
 		compression := compression
 		t.Run(compression, func(t *testing.T) {
@@ -341,6 +355,7 @@ func TestExtractAndInstall_TarGzExactPath(t *testing.T) {
 }
 
 func TestExtractAndInstall_TarBinaryNotFound(t *testing.T) {
+	t.Parallel()
 	for _, compression := range []string{"gz", "xz"} {
 		compression := compression
 		t.Run(compression, func(t *testing.T) {
@@ -363,6 +378,7 @@ func TestExtractAndInstall_TarBinaryNotFound(t *testing.T) {
 // --- symlink edge: symlink with matching name must not be selected ---
 
 func TestExtractAndInstall_TarSymlinkSkipped(t *testing.T) {
+	t.Parallel()
 	for _, compression := range []string{"gz", "xz"} {
 		compression := compression
 		t.Run(compression, func(t *testing.T) {
@@ -396,7 +412,10 @@ func TestExtractAndInstall_TarSymlinkSkipped(t *testing.T) {
 // --- size cap: oversized download and tar entry are rejected ---
 
 func TestDownloadToFile_OversizedBodyRejected(t *testing.T) {
+	t.Parallel(
 	// Override the cap via a tiny limit so the test stays fast.
+	)
+
 	const testLimit = 16
 	origMax := maxDownloadBytes
 	// Can't change the constant at runtime; test via a crafted response body
@@ -424,6 +443,7 @@ func TestDownloadToFile_OversizedBodyRejected(t *testing.T) {
 }
 
 func TestExtractAndInstall_TarOversizedEntryRejected(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	archivePath := filepath.Join(dir, "big.tar.gz")
 
@@ -470,6 +490,7 @@ func TestExtractAndInstall_TarOversizedEntryRejected(t *testing.T) {
 // --- atomic install: no partial file on write failure ---
 
 func TestWriteExecutable_AtomicNoBinaryOnFailure(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	destPath := filepath.Join(dir, "mytool")
 
@@ -485,6 +506,7 @@ func TestWriteExecutable_AtomicNoBinaryOnFailure(t *testing.T) {
 }
 
 func TestWriteExecutable_Mode0755(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	destPath := filepath.Join(dir, "mytool")
 	content := []byte("binary content")
@@ -644,6 +666,7 @@ func writeTarXz(t *testing.T, path, entryName string, content []byte) {
 // --- path traversal guard ---
 
 func TestNativeGitHubInstallPipeline_RejectsTraversalAssetName(t *testing.T) {
+	t.Parallel()
 	traversalCases := []string{
 		"../../etc/passwd",
 		"../outside",
@@ -687,8 +710,11 @@ func TestNativeGitHubInstallPipeline_RejectsTraversalAssetName(t *testing.T) {
 }
 
 func TestNativeGitHubInstallPipeline_RejectsTraversalBinary(t *testing.T) {
+	t.Parallel(
 	// Build a minimal tar.gz so the download phase would succeed if the binary
 	// guard were absent. The guard must reject before extraction.
+	)
+
 	content := []byte("#!/bin/sh\necho hi")
 	tmpDir := t.TempDir()
 	archivePath := filepath.Join(tmpDir, "tool.tar.gz")

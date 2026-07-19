@@ -645,7 +645,21 @@ func (a *App) syncOrphansToMachineGroup(ctx context.Context, activeGroups []*con
 				scanErrs = append(scanErrs, fmt.Errorf("listing installed for %s: %w", p.Name(), err))
 				return nil
 			}
+			var systemBaseline map[string]bool
+			if isSystemInventoryProvider(p.Name()) {
+				systemBaseline, err = a.systemInventoryBaseline(ctx, p.Name(), installed)
+				if err != nil {
+					scanErrs = append(scanErrs, fmt.Errorf("recording system inventory baseline for %s: %w", p.Name(), err))
+					return nil
+				}
+			}
 			for _, t := range installed {
+				if systemBaseline != nil && systemBaseline[t.Name] {
+					// Package predates the host's recorded baseline (image-build
+					// package or already observed): not something the user just
+					// installed, so it stays out of the orphan claim.
+					continue
+				}
 				configProvider := a.searchResultConfigProvider(p.Name())
 				key := configProvider + "\x00" + t.Name
 				if _, ok := covered[key]; ok {

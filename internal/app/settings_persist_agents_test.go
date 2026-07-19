@@ -28,6 +28,7 @@ func newPersistTestApp(t *testing.T) (*app.App, string) {
 }
 
 func TestSaveAgentFeatureFlags_PersistToHostSettings(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newPersistTestApp(t)
 	ctx := context.Background()
 	for name, save := range map[string]func(context.Context, bool) error{
@@ -50,6 +51,7 @@ func TestSaveAgentFeatureFlags_PersistToHostSettings(t *testing.T) {
 }
 
 func TestSaveSettings_PreservesAgentFeatureFlags(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newPersistTestApp(t)
 	ctx := context.Background()
 	if err := a.SaveAgentsDisabled(ctx, true); err != nil {
@@ -68,6 +70,7 @@ func TestSaveSettings_PreservesAgentFeatureFlags(t *testing.T) {
 }
 
 func TestSaveAgentsUse_PersistsToHostSettings(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newPersistTestApp(t)
 	ctx := context.Background()
 	if err := a.SaveAgentsUse(ctx, []string{"claude-code"}); err != nil {
@@ -83,6 +86,7 @@ func TestSaveAgentsUse_PersistsToHostSettings(t *testing.T) {
 }
 
 func TestSaveAgentsUse_PersistsExplicitEmptyList(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newPersistTestApp(t)
 	ctx := context.Background()
 	if err := a.SaveAgentsUse(ctx, []string{}); err != nil {
@@ -98,6 +102,7 @@ func TestSaveAgentsUse_PersistsExplicitEmptyList(t *testing.T) {
 }
 
 func TestSaveSettings_PreservesAgentsUse(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newPersistTestApp(t)
 	ctx := context.Background()
 	if err := a.SaveAgentsUse(ctx, []string{"claude-code"}); err != nil {
@@ -116,6 +121,7 @@ func TestSaveSettings_PreservesAgentsUse(t *testing.T) {
 }
 
 func TestPatchCurrentHostSettings_PreservesProviders(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
 	rawHostname, err := os.Hostname()

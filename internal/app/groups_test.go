@@ -16,6 +16,7 @@ import (
 // ─── Groups ──────────────────────────────────────────────────────────────────
 
 func TestGroups_EmptyDir(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	groups, err := a.Groups(context.Background())
 	if err != nil {
@@ -27,6 +28,7 @@ func TestGroups_EmptyDir(t *testing.T) {
 }
 
 func TestGroups_ReturnsAllDiscovered(t *testing.T) {
+	t.Parallel()
 	stub := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, stub)
 
@@ -65,6 +67,7 @@ func TestGroups_ReturnsAllDiscovered(t *testing.T) {
 }
 
 func TestGroupSummaries_ReturnsDisplayFields(t *testing.T) {
+	t.Parallel()
 	stub := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, stub)
 
@@ -103,6 +106,7 @@ func TestGroupSummaries_ReturnsDisplayFields(t *testing.T) {
 }
 
 func TestInitTestMode_NormalizesConfigGroupOrderOnDisk(t *testing.T) {
+	t.Parallel()
 	stub := &stubProvider{name: "brew", available: true}
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "settings.json")
@@ -143,6 +147,7 @@ func TestInitTestMode_NormalizesConfigGroupOrderOnDisk(t *testing.T) {
 // ─── Add to group ─────────────────────────────────────────────────────────────
 
 func TestAdd_ToBaseGroup(t *testing.T) {
+	t.Parallel()
 	stub := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, stub)
 
@@ -161,6 +166,7 @@ func TestAdd_ToBaseGroup(t *testing.T) {
 }
 
 func TestAdd_RecordsTapQualifiedPackageForBrewInstallWith(t *testing.T) {
+	t.Parallel()
 	stub := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, stub)
 
@@ -179,6 +185,7 @@ func TestAdd_RecordsTapQualifiedPackageForBrewInstallWith(t *testing.T) {
 }
 
 func TestAdd_ToNamedGroup(t *testing.T) {
+	t.Parallel()
 	stub := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, stub)
 
@@ -210,6 +217,7 @@ func TestAdd_ToNamedGroup(t *testing.T) {
 }
 
 func TestAdd_ToNamedGroup_AppendsIfExists(t *testing.T) {
+	t.Parallel()
 	stub := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, stub)
 
@@ -373,6 +381,7 @@ func TestInstallAndAddWithStatePersistsAndPassesOptions(t *testing.T) {
 }
 
 func TestInstallAndAddWithStateRejectsInvalidInstallWith(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		name        string
 		installWith string
@@ -431,6 +440,7 @@ func assertHostAssignedToGroup(t *testing.T, info *app.HostInfo, host, group str
 // ─── Sync group filter ────────────────────────────────────────────────────────
 
 func TestSync_GroupFilter_UnknownGroup(t *testing.T) {
+	t.Parallel()
 	stub := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, stub)
 
@@ -451,6 +461,7 @@ func TestSync_GroupFilter_UnknownGroup(t *testing.T) {
 }
 
 func TestSync_GroupFilter_OnlySyncsGroup(t *testing.T) {
+	t.Parallel()
 	brew := &installTracker{stubProvider: stubProvider{name: "brew", available: true}}
 	a, cfgPath := newImportApp(t, brew)
 
@@ -482,6 +493,7 @@ func TestSync_GroupFilter_OnlySyncsGroup(t *testing.T) {
 // ─── Import group ─────────────────────────────────────────────────────────────
 
 func TestImport_ToNamedGroup(t *testing.T) {
+	t.Parallel()
 	stub := &stubProvider{
 		name:      "brew",
 		available: true,
@@ -518,6 +530,7 @@ func TestImport_ToNamedGroup(t *testing.T) {
 // ─── Cross-group duplicate membership ────────────────────────────────────────
 
 func TestSync_DuplicateToolAcrossGroups_IsValid(t *testing.T) {
+	t.Parallel()
 	brew := &installTracker{stubProvider: stubProvider{name: "brew", available: true}}
 	a, cfgPath := newImportApp(t, brew)
 
@@ -549,6 +562,7 @@ func TestSync_DuplicateToolAcrossGroups_IsValid(t *testing.T) {
 // ─── CreateGroup ──────────────────────────────────────────────────────────────
 
 func TestCreateGroup_Success(t *testing.T) {
+	t.Parallel()
 	stub := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, stub)
 
@@ -572,6 +586,7 @@ func TestCreateGroup_Success(t *testing.T) {
 }
 
 func TestCreateGroup_EmptyName_Error(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	if err := a.CreateGroup(""); err == nil {
 		t.Error("expected error for empty group name, got nil")
@@ -582,6 +597,7 @@ func TestCreateGroup_EmptyName_Error(t *testing.T) {
 }
 
 func TestCreateGroup_BaseAllowed(t *testing.T) {
+	t.Parallel()
 	a, _ := newImportApp(t)
 	if err := a.CreateGroup("base"); err != nil {
 		t.Fatalf("CreateGroup(base): %v", err)
@@ -589,6 +605,7 @@ func TestCreateGroup_BaseAllowed(t *testing.T) {
 }
 
 func TestCreateGroup_Duplicate_Error(t *testing.T) {
+	t.Parallel()
 	stub := &stubProvider{name: "brew", available: true}
 	a, cfgPath := newImportApp(t, stub)
 

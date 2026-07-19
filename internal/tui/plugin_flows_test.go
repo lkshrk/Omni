@@ -19,6 +19,7 @@ func pluginChipFixture(rows []app.PluginRow) Model {
 }
 
 func TestPluginFlow_NOpensAddFormWithNameFocused(t *testing.T) {
+	t.Parallel()
 	m := pluginChipFixture(nil)
 
 	m = drive(m, pressRune('n'))
@@ -35,6 +36,7 @@ func TestPluginFlow_NOpensAddFormWithNameFocused(t *testing.T) {
 }
 
 func TestPluginFlow_NResetsFieldsFromPreviousSession(t *testing.T) {
+	t.Parallel()
 	m := pluginChipFixture(nil)
 	m = drive(m, pressRune('n'))
 	m.pluginFormName.SetValue("half-typed")
@@ -51,6 +53,7 @@ func TestPluginFlow_NResetsFieldsFromPreviousSession(t *testing.T) {
 }
 
 func TestPluginFlow_TabCyclesFieldsForwardAndWraps(t *testing.T) {
+	t.Parallel()
 	m := pluginChipFixture(nil)
 	m = drive(m, pressRune('n'))
 
@@ -64,6 +67,7 @@ func TestPluginFlow_TabCyclesFieldsForwardAndWraps(t *testing.T) {
 }
 
 func TestPluginFlow_EmptyNameShowsValidationError(t *testing.T) {
+	t.Parallel()
 	m := pluginChipFixture(nil)
 	m = drive(m, pressRune('n'))
 
@@ -82,6 +86,7 @@ func TestPluginFlow_EmptyNameShowsValidationError(t *testing.T) {
 }
 
 func TestPluginFlow_EmptyMarketplaceShowsValidationError(t *testing.T) {
+	t.Parallel()
 	m := pluginChipFixture(nil)
 	m = drive(m, pressRune('n'))
 	m.pluginFormName.SetValue("my-plugin")
@@ -104,6 +109,7 @@ func TestPluginFlow_EmptyMarketplaceShowsValidationError(t *testing.T) {
 }
 
 func TestPluginFlow_ValidSubmitBuildsExpectedPluginAndQueuesSpinnerTick(t *testing.T) {
+	t.Parallel()
 	m := pluginChipFixture(nil)
 	m = drive(m, pressRune('n'))
 	m.pluginFormName.SetValue("my-plugin")
@@ -142,6 +148,7 @@ func TestPluginFlow_ValidSubmitBuildsExpectedPluginAndQueuesSpinnerTick(t *testi
 }
 
 func TestPluginFlow_DeleteConfirmTwoStep(t *testing.T) {
+	t.Parallel()
 	t.Run("first d arms confirm", func(t *testing.T) {
 		m := pluginChipFixture([]app.PluginRow{{Name: "arm-plugin"}})
 
@@ -185,6 +192,7 @@ func TestPluginFlow_DeleteConfirmTwoStep(t *testing.T) {
 }
 
 func TestPluginFlow_AgentsPickerOpensWithTargetingFromRow(t *testing.T) {
+	t.Parallel()
 	rows := []app.PluginRow{
 		{
 			Name:        "picker-plugin",
@@ -228,6 +236,7 @@ func TestPluginFlow_AgentsPickerOpensWithTargetingFromRow(t *testing.T) {
 }
 
 func TestPluginFlow_AgentsPickerConfirmSavesAndCloses(t *testing.T) {
+	t.Parallel()
 	rows := []app.PluginRow{
 		{
 			Name:        "save-plugin",
@@ -257,6 +266,7 @@ func TestPluginFlow_AgentsPickerConfirmSavesAndCloses(t *testing.T) {
 }
 
 func TestPluginFlow_AgentsPickerEscCancelsWithoutSaving(t *testing.T) {
+	t.Parallel()
 	rows := []app.PluginRow{
 		{Name: "esc-plugin", PerAgentStatus: map[string]app.PluginStatus{"codex": app.PluginStatusInstalled}},
 	}
@@ -273,6 +283,7 @@ func TestPluginFlow_AgentsPickerEscCancelsWithoutSaving(t *testing.T) {
 }
 
 func TestPluginFlow_RestoreKeySetsRunningFlag(t *testing.T) {
+	t.Parallel()
 	m := pluginChipFixture([]app.PluginRow{{Name: "restore-plugin"}})
 
 	m = drive(m, pressRune('r'))
@@ -297,6 +308,7 @@ func TestPluginFlow_RestoreKeySetsRunningFlag(t *testing.T) {
 // helper shortcut) to prove shift+tab actually reverses field focus rather
 // than behaving like a second plain tab.
 func TestPluginFlow_ShiftTabNavigatesBackwardThroughUpdate(t *testing.T) {
+	t.Parallel()
 	m := pluginChipFixture(nil)
 	m = drive(m, pressRune('n'))
 	if m.pluginFormField != 0 {
@@ -324,6 +336,7 @@ func TestPluginFlow_ShiftTabNavigatesBackwardThroughUpdate(t *testing.T) {
 // is open must close the form, clear any form error, and queue a reload
 // command (doLoadPluginRows), per the pluginAddDoneMsg case in update.go.
 func TestPluginFlow_AddDoneMsgSuccessClosesFormAndReloads(t *testing.T) {
+	t.Parallel()
 	m := pluginChipFixture(nil)
 	m = drive(m, pressRune('n'))
 	m.pluginFormName.SetValue("nav-focus-plugin")
@@ -360,6 +373,7 @@ func TestPluginFlow_AddDoneMsgSuccessClosesFormAndReloads(t *testing.T) {
 // must keep the form open and set pluginFormErr (not the global statusMsg),
 // per the "if m.pluginFormOpen" branch in update.go's pluginAddDoneMsg case.
 func TestPluginFlow_AddDoneMsgErrorKeepsFormOpenWithError(t *testing.T) {
+	t.Parallel()
 	m := pluginChipFixture(nil)
 	m = drive(m, pressRune('n'))
 	m.pluginFormName.SetValue("nav-focus-plugin")
@@ -395,6 +409,7 @@ func TestPluginFlow_AddDoneMsgErrorKeepsFormOpenWithError(t *testing.T) {
 // no-op. Mirrors the mcp import test's rationale for asserting on the queued
 // batch instead of executing doImportPlugin against a nil app.
 func TestPluginFlow_ClaimKeyOnUnmanagedRowQueuesAdoptCommand(t *testing.T) {
+	t.Parallel()
 	m := pluginChipFixture(nil)
 	m.pluginUnmanaged = map[string][]app.InstalledPlugin{
 		"codex": {{Name: "unmanaged-plugin-pkg", Marketplace: "acme"}},
@@ -421,6 +436,7 @@ func TestPluginFlow_ClaimKeyOnUnmanagedRowQueuesAdoptCommand(t *testing.T) {
 // handler used to never clear agentsOpKey, leaving the claimed row's spinner
 // stuck whenever AddPlugin/SetPluginGroups failed.
 func TestPluginFlow_ImportAdoptErrorClearsOpKeyAndSurfacesStatus(t *testing.T) {
+	t.Parallel()
 	m := pluginChipFixture(nil)
 	m.startAgentsOp("stuck-key")
 	m.pluginRunning = true
@@ -440,6 +456,7 @@ func TestPluginFlow_ImportAdoptErrorClearsOpKeyAndSurfacesStatus(t *testing.T) {
 }
 
 func TestPluginFlow_ImportKeyOnUnmanagedRowIsInert(t *testing.T) {
+	t.Parallel()
 	m := pluginChipFixture(nil)
 	m.pluginUnmanaged = map[string][]app.InstalledPlugin{
 		"codex": {{Name: "unmanaged-plugin-pkg", Marketplace: "acme"}},
@@ -463,6 +480,7 @@ func TestPluginFlow_ImportKeyOnUnmanagedRowIsInert(t *testing.T) {
 // untouched until a new status/clearStatusMsg replaces it, unlike
 // pluginFormErr which is reset on form open.
 func TestPluginFlow_GroupsStatusMessagePersistsUntilReplaced(t *testing.T) {
+	t.Parallel()
 	rows := []app.PluginRow{{Name: "groups-status-plugin", Groups: []string{"work"}}}
 	m := pluginChipFixture(rows)
 

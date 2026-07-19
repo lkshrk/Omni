@@ -20,6 +20,7 @@ import (
 )
 
 func TestInstallToolFallback_RunsInstallCheckAndUpdatesState(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	mock := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "sh -c install rg", Response: executor.MockCall{}},
@@ -122,6 +123,7 @@ func TestInstallToolFallback_MaterializesTemplateRecipe(t *testing.T) {
 }
 
 func TestInstallToolFallback_RejectsUnknownTemplateVariable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	mock := executor.NewMatchMock().WithFallback(executor.MockCall{})
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
@@ -161,6 +163,7 @@ func TestInstallToolFallback_RejectsUnknownTemplateVariable(t *testing.T) {
 }
 
 func TestInstallToolFallback_CheckFailureMarksFailed(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	mock := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "sh -c install rg", Response: executor.MockCall{}},
@@ -200,6 +203,7 @@ func TestInstallToolFallback_CheckFailureMarksFailed(t *testing.T) {
 }
 
 func TestUninstallToolFallback_RunsUninstallAndDeletesCache(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	mock := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "sh -c uninstall rg", Response: executor.MockCall{}},
@@ -252,6 +256,7 @@ func TestUninstallToolFallback_RunsUninstallAndDeletesCache(t *testing.T) {
 }
 
 func TestInstall_UsesFallbackWhenNativePackageUnavailable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	system := &lifecycleProvider{
 		stubProvider: stubProvider{name: "system", available: true},
@@ -325,6 +330,7 @@ func TestInstall_UsesFallbackWhenNativePackageUnavailable(t *testing.T) {
 }
 
 func TestSync_UsesFallbackWhenNativePackageUnavailable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	system := &lifecycleProvider{
 		stubProvider: stubProvider{name: "system", available: true},
@@ -385,6 +391,7 @@ func TestSync_UsesFallbackWhenNativePackageUnavailable(t *testing.T) {
 }
 
 func TestSync_UsesNativeCandidateBeforeFallbackWhenAnyProviderAvailable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	apt := &stubProvider{name: "apt", available: true}
 	brew := &stubProvider{name: "brew", available: true}
@@ -454,6 +461,7 @@ func TestSync_UsesNativeCandidateBeforeFallbackWhenAnyProviderAvailable(t *testi
 }
 
 func TestSync_UsesFallbackOnlyWhenAllNativeCandidatesUnavailable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	apt := &stubProvider{name: "apt", available: true}
 	brew := &stubProvider{name: "brew", available: true}
@@ -518,6 +526,7 @@ func TestSync_UsesFallbackOnlyWhenAllNativeCandidatesUnavailable(t *testing.T) {
 }
 
 func TestSync_SkipsUnsupportedFallbackWhenNativePackageUnavailable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	apt := &stubProvider{name: "apt", available: true}
 	fallbackExec := executor.NewMatchMock().WithFallback(executor.MockCall{Err: errors.New("unexpected fallback command")})
@@ -566,6 +575,7 @@ func TestSync_SkipsUnsupportedFallbackWhenNativePackageUnavailable(t *testing.T)
 // AND no native provider search finds a high-confidence alternative, a usable
 // configured Git/GitHub fallback is attempted as the last resort.
 func TestSync_UsesFallbackWhenProviderUnavailableAndNoNativeAlternative(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	// apt is unavailable; no other provider is registered to find alternatives.
 	apt := &stubProvider{name: "apt", available: false}
@@ -609,6 +619,7 @@ func TestSync_UsesFallbackWhenProviderUnavailableAndNoNativeAlternative(t *testi
 }
 
 func TestSync_UsesFallbackRecipeSavedFromGitHubSpec(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	system := &lifecycleProvider{
 		stubProvider: stubProvider{name: "system", available: true},
@@ -676,6 +687,7 @@ func TestSync_UsesFallbackRecipeSavedFromGitHubSpec(t *testing.T) {
 }
 
 func TestSync_DryRunPlansFallbackWhenNativePackageUnavailable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	system := &lifecycleProvider{
 		stubProvider: stubProvider{name: "system", available: true},
@@ -730,6 +742,7 @@ func TestSync_DryRunPlansFallbackWhenNativePackageUnavailable(t *testing.T) {
 }
 
 func TestSync_RetryFailedRerunsFailedFallback(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	system := &lifecycleProvider{
 		stubProvider: stubProvider{name: "system", available: true},
@@ -792,6 +805,7 @@ func TestSync_RetryFailedRerunsFailedFallback(t *testing.T) {
 }
 
 func TestSync_RecoversFailedFallbackThroughNativeWhenPackageAvailable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	apt := &stubProvider{name: "apt", available: true}
 	fallbackExec := executor.NewMatchMock().WithFallback(executor.MockCall{Err: errors.New("unexpected fallback command")})
@@ -868,6 +882,7 @@ func TestSync_RecoversFailedFallbackThroughNativeWhenPackageAvailable(t *testing
 }
 
 func TestInstall_DoesNotRetryFailedFallbackWhenNativePackageUnavailable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	system := &lifecycleProvider{
 		stubProvider: stubProvider{name: "system", available: true},
@@ -915,6 +930,7 @@ func TestInstall_DoesNotRetryFailedFallbackWhenNativePackageUnavailable(t *testi
 }
 
 func TestInstall_DoesNotUseFallbackForMixedRouteSkips(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	apt := &lifecycleProvider{stubProvider: stubProvider{name: "apt", available: true}}
 	brew := &lifecycleProvider{stubProvider: stubProvider{name: "brew", available: false}}
@@ -974,6 +990,7 @@ func TestInstall_DoesNotUseFallbackForMixedRouteSkips(t *testing.T) {
 }
 
 func TestUninstall_UsesFallbackUninstallForGitHubInstall(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	fallbackExec := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "sh -c uninstall rg", Response: executor.MockCall{}},
@@ -1027,6 +1044,7 @@ func TestUninstall_UsesFallbackUninstallForGitHubInstall(t *testing.T) {
 }
 
 func TestUninstall_FallbackWithoutScriptLeavesConfig(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -1072,6 +1090,7 @@ func TestUninstall_FallbackWithoutScriptLeavesConfig(t *testing.T) {
 }
 
 func TestUpgrade_UsesFallbackForGitHubInstall(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	fallbackExec := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "sh -c upgrade rg", Response: executor.MockCall{}},
@@ -1125,6 +1144,7 @@ func TestUpgrade_UsesFallbackForGitHubInstall(t *testing.T) {
 }
 
 func TestUpgradeToolFallback_GitHubOutdatedRefreshesRecipeBeforeUpgrade(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	latestAsset := currentPlatformGitHubCLIAsset(t)
 	calls := int32(0)
@@ -1184,6 +1204,7 @@ func TestUpgradeToolFallback_GitHubOutdatedRefreshesRecipeBeforeUpgrade(t *testi
 }
 
 func TestUpgradeToolFallback_GitHubRefreshFailureKeepsOldRecipeAndOutdatedRow(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	latestAsset := currentPlatformGitHubCLIAsset(t)
 	calls := int32(0)
@@ -1245,6 +1266,7 @@ func TestUpgradeToolFallback_GitHubRefreshFailureKeepsOldRecipeAndOutdatedRow(t 
 }
 
 func TestUpgradeToolFallback_GitHubRefreshCheckFailureKeepsOldRecipeAndOutdatedRow(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	latestAsset := currentPlatformGitHubCLIAsset(t)
 	calls := int32(0)
@@ -1304,6 +1326,7 @@ func TestUpgradeToolFallback_GitHubRefreshCheckFailureKeepsOldRecipeAndOutdatedR
 }
 
 func TestUpgradeToolFallback_GitHubResolverFailureKeepsOldRecipeAndOutdatedRow(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	calls := int32(0)
 	fallbackExec := executor.NewMatchMock().WithFallback(executor.MockCall{Err: errors.New("unexpected fallback command")})
@@ -1371,6 +1394,7 @@ func TestUpgradeToolFallback_GitHubResolverFailureKeepsOldRecipeAndOutdatedRow(t
 }
 
 func TestUpgradeToolFallback_GitHubNotOutdatedUsesSavedRecipeWithoutReleaseLookup(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	fallbackExec := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "sh -c curl -fsSL https://github.com/cli/cli/releases/download/v2.92.0/gh_2.92.0_old.zip", Response: executor.MockCall{}},
@@ -1411,6 +1435,7 @@ func TestUpgradeToolFallback_GitHubNotOutdatedUsesSavedRecipeWithoutReleaseLooku
 }
 
 func TestUpgradeToolFallback_GitHubWithoutCacheRowUsesSavedRecipeWithoutReleaseLookup(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	fallbackExec := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "sh -c curl -fsSL https://github.com/cli/cli/releases/download/v2.92.0/gh_2.92.0_old.zip", Response: executor.MockCall{}},
@@ -1450,6 +1475,7 @@ func TestUpgradeToolFallback_GitHubWithoutCacheRowUsesSavedRecipeWithoutReleaseL
 }
 
 func TestUninstallToolFallback_ReportsUnavailableWithoutCommand(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
@@ -1473,6 +1499,7 @@ func TestUninstallToolFallback_ReportsUnavailableWithoutCommand(t *testing.T) {
 }
 
 func TestSaveToolFallbackFromGitHub_ResolverFailureDoesNotSaveFallback(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
 	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubNotFoundClient())
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
@@ -1501,6 +1528,7 @@ func TestSaveToolFallbackFromGitHub_ResolverFailureDoesNotSaveFallback(t *testin
 }
 
 func TestSaveToolFallbackFromGitHub_NormalizesSSHRepoURL(t *testing.T) {
+	t.Parallel()
 	currentPlatformGitHubCLIAsset(t)
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if req.URL.Path != "/repos/cli/cli/releases/latest" {
@@ -1544,6 +1572,7 @@ func TestSaveToolFallbackFromGitHub_NormalizesSSHRepoURL(t *testing.T) {
 }
 
 func TestSaveToolFallbackFromGitHub_RejectsInvalidRepo(t *testing.T) {
+	t.Parallel()
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: logicalToolSpecs(logicalTool("rg", "system")),

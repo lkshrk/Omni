@@ -9,6 +9,7 @@ import (
 )
 
 func TestSetSkillAgents(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	brew := &availabilityCountingProvider{name: "brew", available: true}
 	path := filepath.Join(t.TempDir(), "settings.json")
@@ -47,6 +48,7 @@ func TestSetSkillAgents(t *testing.T) {
 }
 
 func TestWithConfigPersistsPackagesAndGroupRefs(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	brew := &availabilityCountingProvider{name: "brew", available: true}
 	path := filepath.Join(t.TempDir(), "settings.json")
@@ -83,6 +85,7 @@ func TestWithConfigPersistsPackagesAndGroupRefs(t *testing.T) {
 }
 
 func TestSkillPackageAddArgs(t *testing.T) {
+	t.Parallel()
 	pkg := config.SkillPackage{Source: "o/r", Ref: "main"}
 	got := skillPackageAddArgs(pkg, []string{"claude-code", "codex"})
 	want := []string{"skills", "add", "o/r#main", "-g", "-a", "claude-code", "-a", "codex", "-y"}
@@ -97,6 +100,7 @@ func TestSkillPackageAddArgs(t *testing.T) {
 }
 
 func TestSkillLockSourceIndex(t *testing.T) {
+	t.Parallel()
 	lock := &config.SkillLockFile{Skills: map[string]config.SkillLockEntry{
 		"foo": {Source: "o/r", UpdatedAt: "2026-06-10T00:00:00Z"},
 		"bar": {Source: "o/r", UpdatedAt: "2026-06-12T00:00:00Z"},
@@ -115,6 +119,7 @@ func TestSkillLockSourceIndex(t *testing.T) {
 }
 
 func TestPackageSkills(t *testing.T) {
+	t.Parallel()
 	lock := &config.SkillLockFile{Skills: map[string]config.SkillLockEntry{
 		"beta":  {Source: "o/r"},
 		"alpha": {Source: "o/r"},
@@ -130,6 +135,7 @@ func TestPackageSkills(t *testing.T) {
 }
 
 func TestImportPackages(t *testing.T) {
+	t.Parallel()
 	existing := []config.SkillPackage{{Source: "o/r", Ref: "main"}}
 	lock := &config.SkillLockFile{Skills: map[string]config.SkillLockEntry{
 		"a": {Source: "o/r", Ref: "main"},
@@ -149,6 +155,7 @@ func TestImportPackages(t *testing.T) {
 }
 
 func TestSetSkillGroupsInConfig(t *testing.T) {
+	t.Parallel()
 	cfg := &config.RootConfig{
 		Agents: config.AgentsConfig{Packages: []config.SkillPackage{{Source: "o/r"}}},
 		Groups: []*config.GroupConfig{
@@ -168,6 +175,7 @@ func TestSetSkillGroupsInConfig(t *testing.T) {
 }
 
 func TestResolveSkillPackages(t *testing.T) {
+	t.Parallel()
 	cfg := &config.RootConfig{
 		Agents: config.AgentsConfig{Packages: []config.SkillPackage{
 			{Source: "glob/al"},
