@@ -1384,7 +1384,7 @@ func TestDefaultCacheDir_UsesXDGCacheHome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DefaultCacheDir: %v", err)
 	}
-	if !strings.HasPrefix(got, dir) {
+	if !strings.HasPrefix(filepath.Clean(got), filepath.Clean(dir)) {
 		t.Errorf("dir %q does not start with XDG_CACHE_HOME %q", got, dir)
 	}
 	if filepath.Base(got) != "omni" {
@@ -1438,7 +1438,7 @@ func TestDefaultConfigPath_UsesXDGConfigHome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DefaultConfigPath: %v", err)
 	}
-	if !strings.HasPrefix(p, dir) {
+	if !strings.HasPrefix(filepath.Clean(p), filepath.Clean(dir)) {
 		t.Errorf("path %q does not start with XDG_CONFIG_HOME %q", p, dir)
 	}
 	if !strings.HasSuffix(p, "settings.json") {

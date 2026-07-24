@@ -88,6 +88,53 @@ func TestDotsStatusShallowChildrenLoadOneLevelAtATime(t *testing.T) {
 	}
 }
 
+func TestDotsChildChildrenLoadsTransientCandidate(t *testing.T) {
+	a, _, _ := newDotsApp(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	backups := filepath.Join(home, ".claude", "backups", "nested")
+	if err := os.MkdirAll(backups, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(backups, "session.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := a.DiscoverDotsStatus(app.WithShallowDotsChildren(context.Background()))
+	if err != nil {
+		t.Fatalf("discover transient dots: %v", err)
+	}
+	var candidate app.DotStatus
+	for _, status := range result.Entries {
+		if status.Name == "claude" && app.DotStatusTransientCandidate(status) {
+			candidate = status
+			break
+		}
+	}
+	if candidate.Name == "" {
+		t.Fatalf("transient claude candidate missing: %#v", result.Entries)
+	}
+	var child app.DotChild
+	for _, current := range candidate.Children {
+		if current.RelPath == "backups" {
+			child = current
+			break
+		}
+	}
+	if child.RelPath == "" || child.Children != nil {
+		t.Fatalf("backups child = %#v, want unloaded transient directory", child)
+	}
+
+	children, err := a.DotsChildChildren(context.Background(), candidate.Name, child.RelPath, child.Ignored)
+	if err != nil {
+		t.Fatalf("load transient backups: %v", err)
+	}
+	if len(children) != 1 || children[0].RelPath != filepath.Join("backups", "nested") {
+		t.Fatalf("backups children = %#v, want backups/nested", children)
+	}
+}
+
 func TestDotsStatusShallowPreservesReincludedChildUnderIgnoredDirectory(t *testing.T) {
 	a, cfgDir, repoDir := newDotsApp(t)
 	home := t.TempDir()

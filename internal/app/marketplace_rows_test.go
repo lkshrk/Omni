@@ -2,12 +2,34 @@ package app_test
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
 )
+
+func TestMarketplaceRows_ListErrorIsSurfaced(t *testing.T) {
+	t.Parallel()
+	adapter := &stubPluginAdapter{
+		id:            "claude-code",
+		available:     true,
+		listMarketErr: errors.New("parse json: expected array, got null"),
+	}
+	agents := config.AgentsConfig{
+		Marketplaces: []config.Marketplace{{Name: "market", Source: "owner/repo"}},
+	}
+	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{adapter}))
+	rows, _, err := a.MarketplaceRows(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "expected array, got null") {
+		t.Fatalf("MarketplaceRows error = %v, want adapter parse error", err)
+	}
+	if rows != nil {
+		t.Fatalf("MarketplaceRows returned misleading rows after adapter parse error: %+v", rows)
+	}
+}
 
 func TestMarketplaceRows_ManagedRowReportsPerAgentStatus(t *testing.T) {
 	t.Parallel()

@@ -83,7 +83,7 @@ func (m Model) viewString() string {
 		return placePopup(bg, m, renderFilePickerPopup(m), filePickerPopupFrame(m))
 	}
 
-	if m.err != nil {
+	if m.err != nil && (!m.startupLoadErr || m.mode == viewStatus) {
 		return p.styleErr.Render("Error: "+m.err.Error()) + "\n" + p.styleHelp.Render("Press q to quit.")
 	}
 
@@ -463,6 +463,9 @@ func fitPopupFrameToWindow(m Model, frame popupFrame) popupFrame {
 	} else {
 		frame.Width = min(frame.Width, maxWidth)
 	}
+	const minContentWidth = 14
+	maxPaddingX := max((frame.Width-2-minContentWidth)/2, 0)
+	frame.PaddingX = min(frame.PaddingX, maxPaddingX)
 	return frame
 }
 
@@ -541,7 +544,17 @@ func renderPopupFrame(p palette, content string, frame popupFrame) string {
 	if frame.Width > 0 {
 		style = style.Width(frame.Width)
 	}
-	return style.Render(content)
+	rendered := style.Render(content)
+	canvas := lipgloss.NewCanvas(lipgloss.Width(rendered), lipgloss.Height(rendered))
+	canvas.Compose(lipgloss.NewLayer(rendered))
+	for y := range canvas.Height() {
+		for x := range canvas.Width() {
+			if cell := canvas.CellAt(x, y); cell.Width > 0 && cell.Style.Bg == nil {
+				cell.Style.Bg = p.colSurface
+			}
+		}
+	}
+	return canvas.Render()
 }
 
 func fitPopupContent(p palette, content string, maxLines int) string {
@@ -558,7 +571,8 @@ func fitPopupContent(p palette, content string, maxLines int) string {
 	footer := lines[footerStart:]
 	bodyLines := maxLines - len(footer)
 	if bodyLines < 1 {
-		return strings.Join(scrollPopupLines(p, lines, maxLines), "\n")
+		footer = footer[max(len(footer)-maxLines, 0):]
+		return strings.Join(footer, "\n")
 	}
 	body = scrollPopupLines(p, body, bodyLines)
 	out := append(append([]string(nil), body...), footer...)
@@ -609,6 +623,10 @@ func popupContentMaxHeight(m Model, frame popupFrame) int {
 	if m.height <= 0 {
 		return 0
 	}
+	return max(m.height-popupFrameChromeHeight(frame), 1)
+}
+
+func popupFrameChromeHeight(frame popupFrame) int {
 	used := 2 + frame.PaddingY*2 // border + vertical padding
 	if frame.Title != "" {
 		if frame.NoTitleDivider {
@@ -617,7 +635,28 @@ func popupContentMaxHeight(m Model, frame popupFrame) int {
 			used += 4 // title + blank line + divider + blank line
 		}
 	}
-	return max(m.height-used, 1)
+	return used
+}
+
+func fitPopupFrameHeightToContent(m Model, frame popupFrame, content string) popupFrame {
+	if m.height <= 0 {
+		return frame
+	}
+	lines := strings.Split(content, "\n")
+	required := 1
+	if footerStart := popupFooterStart(lines); footerStart >= 0 {
+		required = len(lines) - footerStart
+	}
+	available := func() int {
+		return max(m.height-popupFrameChromeHeight(frame), 0)
+	}
+	for frame.PaddingY > 0 && available() < required {
+		frame.PaddingY--
+	}
+	if frame.Title != "" && !frame.NoTitleDivider && available() < required {
+		frame.NoTitleDivider = true
+	}
+	return frame
 }
 
 func popupContentTargetHeight(m Model, frame popupFrame) int {
@@ -743,6 +782,7 @@ func groupDotsPopupFrameWithLayout(m Model, layout groupDotsPopupLayout) popupFr
 
 func placePopup(bg string, m Model, content string, frame popupFrame) string {
 	frame = fitPopupFrameToWindow(m, frame)
+	frame = fitPopupFrameHeightToContent(m, frame, content)
 	targetHeight := popupContentTargetHeight(m, frame)
 	content = fitPopupContent(m.palette, content, targetHeight)
 	if frame.ContentHeight > 0 {

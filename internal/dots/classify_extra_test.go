@@ -386,6 +386,7 @@ func TestSelfHealDotEntryLinkShape_RewritesAbsoluteLinkToRelative(t *testing.T) 
 	src := filepath.Join(tmp, "repo", ".zshrc")
 	mkFile(t, src, "repo")
 	target := filepath.Join(tmp, "home", ".zshrc")
+	t.Setenv("HOME", filepath.Dir(target))
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -416,6 +417,43 @@ func TestSelfHealDotEntryLinkShape_RewritesAbsoluteLinkToRelative(t *testing.T) 
 	body, err := os.ReadFile(target)
 	if err != nil || string(body) != "repo" {
 		t.Fatalf("healed link content = %q err = %v, want repo", body, err)
+	}
+}
+
+func TestSelfHealDotEntryLinkShape_RejectsNestedIntermediateSymlinkOutsideHome(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	sourceRoot := filepath.Join(tmp, "repo", "nvim")
+	sourceFile := filepath.Join(sourceRoot, "plugins", "init.lua")
+	outside := filepath.Join(tmp, "sibling")
+	targetRoot := filepath.Join(home, ".config", "nvim")
+	if err := os.MkdirAll(filepath.Dir(sourceFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sourceFile, []byte("managed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(targetRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	if err := os.Symlink(outside, filepath.Join(targetRoot, "plugins")); err != nil {
+		t.Fatal(err)
+	}
+	outsideLink := filepath.Join(outside, "init.lua")
+	if err := os.Symlink(sourceFile, outsideLink); err != nil {
+		t.Fatal(err)
+	}
+
+	err := dots.SelfHealDotEntryLinkShape(dots.ResolvedEntry{Name: "nvim", SourcePath: sourceRoot, TargetPath: targetRoot})
+	if err == nil {
+		t.Error("SelfHealDotEntryLinkShape accepted a nested intermediate symlink outside HOME")
+	}
+	if got, readErr := os.Readlink(outsideLink); readErr != nil || got != sourceFile {
+		t.Fatalf("outside link changed: target=%q err=%v", got, readErr)
 	}
 }
 

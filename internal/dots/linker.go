@@ -31,6 +31,9 @@ func StowRelativeSymlinkTarget(linkPath, targetPath string) (string, error) {
 // must already be a symlink; the caller is responsible for confirming it
 // resolves to targetPath before calling this.
 func WriteStowShapedSymlink(linkPath, targetPath string) error {
+	if err := ValidateHomeTargetPath(linkPath); err != nil {
+		return fmt.Errorf("refusing to write symlink %q: %w", linkPath, err)
+	}
 	rel, err := StowRelativeSymlinkTarget(linkPath, targetPath)
 	if err != nil {
 		return fmt.Errorf("compute stow-relative target for %q: %w", linkPath, err)

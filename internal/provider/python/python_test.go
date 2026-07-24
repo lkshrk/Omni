@@ -487,7 +487,7 @@ func TestOutdatedMap_UV_Found(t *testing.T) {
 	}
 }
 
-func TestOutdatedMap_UV_FlagNotSupported(t *testing.T) {
+func TestOutdatedMap_UV_ErrorPropagates(t *testing.T) {
 	m := executor.NewMatchMock(
 		uvOK(),
 		executor.MatchRule{
@@ -498,12 +498,21 @@ func TestOutdatedMap_UV_FlagNotSupported(t *testing.T) {
 		executor.MatchRule{Pattern: "pip --version", Response: executor.MockCall{Err: errors.New("not found")}},
 	)
 	p := New(m, "uv")
-	got, err := p.OutdatedMap(context.Background())
-	if err != nil {
-		t.Fatalf("expected nil error for unsupported flag, got %v", err)
+	if _, err := p.OutdatedMap(context.Background()); err == nil {
+		t.Fatal("expected uv outdated command error to propagate")
 	}
-	if got != nil {
-		t.Errorf("expected nil map, got %v", got)
+}
+
+func TestOutdatedMap_UV_CancellationPropagates(t *testing.T) {
+	m := executor.NewMatchMock(
+		uvOK(),
+		executor.MatchRule{Pattern: "uv tool list --outdated", Response: executor.MockCall{Err: context.Canceled}},
+		executor.MatchRule{Pattern: "pip3 --version", Response: executor.MockCall{Err: errors.New("not found")}},
+		executor.MatchRule{Pattern: "pip --version", Response: executor.MockCall{Err: errors.New("not found")}},
+	)
+	_, err := New(m, "uv").OutdatedMap(context.Background())
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("OutdatedMap error = %v, want context.Canceled", err)
 	}
 }
 
@@ -538,6 +547,36 @@ func TestOutdatedMap_Pip3_InvalidJSONReturnsError(t *testing.T) {
 	p := New(m, "")
 	if _, err := p.OutdatedMap(context.Background()); err == nil {
 		t.Fatal("expected invalid pip outdated JSON error, got nil")
+	}
+}
+
+func TestOutdatedMap_Pip3_NullReturnsError(t *testing.T) {
+	m := executor.NewMatchMock(
+		uvMissing(),
+		pip3OK(),
+		executor.MatchRule{Pattern: "pip3 list --outdated --format=json", Response: executor.MockCall{Stdout: "null"}},
+		executor.MatchRule{Pattern: "python3 -c", Response: executor.MockCall{Stdout: `{"black":1}`}},
+	)
+	if _, err := New(m, "").OutdatedMap(context.Background()); err == nil {
+		t.Fatal("expected top-level null to be rejected")
+	}
+}
+
+func TestOutdatedMap_Pip3_DuplicateKeepsNonemptyLatest(t *testing.T) {
+	out := `[{"name":"Black","latest_version":"24.1.0"},{"name":"black","latest_version":""}]`
+	m := executor.NewMatchMock(
+		uvMissing(),
+		pip3OK(),
+		executor.MatchRule{Pattern: "pip3 list --outdated --format=json", Response: executor.MockCall{Stdout: out}},
+		executor.MatchRule{Pattern: "python3 -c", Response: executor.MockCall{Stdout: `{"black":1}`}},
+		executor.MatchRule{Pattern: "pip --version", Response: executor.MockCall{Err: errors.New("not found")}},
+	)
+	got, err := New(m, "").OutdatedMap(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["black"] != "24.1.0" {
+		t.Fatalf("black latest = %q, want retained nonempty 24.1.0", got["black"])
 	}
 }
 

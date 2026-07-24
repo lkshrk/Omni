@@ -79,6 +79,15 @@ func TestSafeRunnerDisablesGoTelemetry(t *testing.T) {
 	}
 }
 
+func TestSafeRunnerMarksEnvironmentIsolated(t *testing.T) {
+	root := repoRoot(t)
+	cmd := exec.Command("bash", filepath.Join(root, "scripts", "run-test-safe.sh"), "bash", "-c", `test "$OMNI_TEST_ISOLATED" = 1`)
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("safe runner should mark its environment isolated: %v\n%s", err, out)
+	}
+}
+
 func TestSafeRunnerCleansReadOnlyGoModuleCache(t *testing.T) {
 	root := repoRoot(t)
 	cmd := exec.Command("bash", filepath.Join(root, "scripts", "run-test-safe.sh"), "bash", "-c", `mkdir -p "$HOME/go/pkg/mod/example"; touch "$HOME/go/pkg/mod/example/go.mod"; chmod -R a-w "$HOME/go/pkg/mod"`)

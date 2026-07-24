@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 
 	tea "charm.land/bubbletea/v2"
@@ -203,24 +204,39 @@ func requireActiveHost(cmd *cobra.Command, a *app.App) error {
 // A background goroutine ensures the process exits immediately on signal even
 // when the main goroutine is blocked reading stdin (e.g. confirmation prompts).
 func Execute() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(signals)
+	var signalExitCode atomic.Int32
 
 	// Force-exit on signal so blocking stdin reads cannot prevent shutdown.
 	// When the TUI is active the terminal is in raw mode and Ctrl+C is
 	// delivered as a byte on stdin (not SIGINT), so this only fires for
 	// non-TUI code paths.
 	go func() {
-		<-ctx.Done()
+		sig := <-signals
+		exitCode := 1
+		if signalValue, ok := sig.(syscall.Signal); ok {
+			exitCode = 128 + int(signalValue)
+		}
+		signalExitCode.Store(int32(exitCode))
+		cancel()
 		fmt.Fprintln(os.Stderr)
-		os.Exit(0)
+		os.Exit(exitCode)
 	}()
 
 	root := NewRootCmd()
 	if err := root.ExecuteContext(ctx); err != nil {
-		// interrupt is shutdown, not failure — even when the canceled operation's error beats the force-exit goroutine here
+		// Preserve failure status even when the canceled operation's error beats
+		// the force-exit goroutine here.
 		if ctx.Err() != nil {
-			os.Exit(0)
+			exitCode := int(signalExitCode.Load())
+			if exitCode == 0 {
+				exitCode = 1
+			}
+			os.Exit(exitCode)
 		}
 		fmt.Fprintln(os.Stderr, "error:", err)
 		printProviderErrorAdvice(os.Stderr, err)

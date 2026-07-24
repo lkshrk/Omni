@@ -6,8 +6,9 @@ env PATH=$WORK/bin:/usr/bin:/bin:/usr/sbin:/sbin
 exec omni --config settings.json hosts ensure testhost
 exec omni-seed-package-availability rg apt ripgrep false 'no candidate'
 
-exec omni --config settings.json tools sync
+! exec omni --config settings.json tools sync
 stdout 'failed: rg \(apt\): fallback rg install: exit status 1'
+stderr 'error: 1 tool failed'
 exec grep '"status": "failed"' settings.json
 stdout '"status": "failed"'
 ! exec test -f .omni-cache/fake-apt/ripgrep

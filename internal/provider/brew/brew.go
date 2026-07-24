@@ -450,6 +450,9 @@ func (p *Provider) InstalledMetadataMap(ctx context.Context) (map[string]provide
 		if _, ok := caskTokens[key]; !ok {
 			continue
 		}
+		if existing, ok := metadata[key]; ok && existing.ArtifactKind == brewKindFormula {
+			return nil, fmt.Errorf("brew installed metadata: %q is installed as both a formula and a cask", key)
+		}
 		entry := provider.InstalledMetadata{
 			Version:      c.Installed,
 			Source:       brewSourceHint(c.Homepage, c.URL),
@@ -474,13 +477,11 @@ func (p *Provider) InstalledMetadataMap(ctx context.Context) (map[string]provide
 	// Union those in so configured tools backed by untrusted taps are detected
 	// as installed instead of wrongly reported missing.
 	//
-	// Best-effort: brew info above is the authoritative installed set; this union
-	// only recovers formulae brew info hides. A failure here degrades to the
-	// brew-info result rather than failing the whole scan, mirroring how
-	// Available treats a missing/erroring brew as non-fatal.
+	// This union is required for a complete installed set. Treat a failed list as
+	// an error so callers do not mistake partial metadata for authoritative state.
 	listOut, _, listErr := p.exec.Run(ctx, "brew", "list", "--versions", "--formula")
 	if listErr != nil {
-		return metadata, nil
+		return nil, fmt.Errorf("brew list --versions --formula: %w", listErr)
 	}
 	for _, line := range strings.Split(listOut, "\n") {
 		fields := strings.Fields(line)
@@ -491,7 +492,12 @@ func (p *Provider) InstalledMetadataMap(ctx context.Context) (map[string]provide
 		if !validBrewFormulaName(name) {
 			continue
 		}
-		if _, ok := metadata[name]; ok {
+		if existing, ok := metadata[name]; ok {
+			if existing.ArtifactKind == brewKindCask {
+				if _, knownToInfo := infoFormulae[name]; !knownToInfo {
+					return nil, fmt.Errorf("brew installed metadata: %q is installed as both a formula and a cask", name)
+				}
+			}
 			continue
 		}
 		// brew info already accounted for this formula (e.g. an intentionally
@@ -513,6 +519,9 @@ func (p *Provider) info(ctx context.Context, args ...string) (brewInfoOutput, er
 	stdout, _, err := p.exec.Run(ctx, "brew", args...)
 	if err != nil {
 		return brewInfoOutput{}, fmt.Errorf("brew info: %w", err)
+	}
+	if strings.TrimSpace(stdout) == "null" {
+		return brewInfoOutput{}, fmt.Errorf("parsing brew info output: top-level null")
 	}
 	var out brewInfoOutput
 	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
@@ -684,6 +693,9 @@ func (p *Provider) OutdatedMap(ctx context.Context) (map[string]string, error) {
 	stdout, _, err := p.exec.Run(ctx, "brew", "outdated", "--json=v2", "--greedy")
 	if err != nil {
 		return nil, fmt.Errorf("brew outdated: %w", err)
+	}
+	if strings.TrimSpace(stdout) == "null" {
+		return nil, fmt.Errorf("parsing brew outdated: top-level null")
 	}
 	var out brewOutdatedOutput
 	if err := json.Unmarshal([]byte(stdout), &out); err != nil {

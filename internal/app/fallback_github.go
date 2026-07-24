@@ -87,14 +87,19 @@ func (a *App) resolveGitHubFallback(ctx context.Context, name, owner, repoName s
 			AssetName:        asset.Name,
 			AssetDownloadURL: asset.BrowserDownloadURL,
 		},
-		Commands: config.FallbackCommands{
-			Install:   githubReleaseAssetInstallCommand(asset.BrowserDownloadURL),
-			Check:     `test -x {{bin_dir}}/{{binary}}`,
-			Uninstall: `rm -f {{bin_dir}}/{{binary}}`,
-			Upgrade:   githubReleaseAssetInstallCommand(asset.BrowserDownloadURL),
-			Version:   `{{bin_dir}}/{{binary}} --version`,
-		},
+		Commands: githubReleaseAssetCommands(asset.BrowserDownloadURL),
 	}, true, nil
+}
+
+func githubReleaseAssetCommands(downloadURL string) config.FallbackCommands {
+	install := githubReleaseAssetInstallCommand(downloadURL)
+	return config.FallbackCommands{
+		Install:   install,
+		Check:     `test -x {{bin_dir}}/{{binary}}`,
+		Uninstall: `rm -f {{bin_dir}}/{{binary}}`,
+		Upgrade:   install,
+		Version:   `{{bin_dir}}/{{binary}} --version`,
+	}
 }
 
 func (a *App) fetchLatestGitHubRelease(ctx context.Context, owner, repoName string) (githubRelease, error) {

@@ -430,6 +430,30 @@ func (a *App) DotsChildChildren(ctx context.Context, name, relPath string, ances
 	if err != nil {
 		return nil, err
 	}
+	found := false
+	for _, entry := range mgr.Entries {
+		if entry.Name == name {
+			found = true
+			break
+		}
+	}
+	if !found {
+		candidates, err := a.DiscoverUntrackedDotsEntries()
+		if err != nil {
+			return nil, err
+		}
+		for _, candidate := range candidates {
+			if candidate.Name != name {
+				continue
+			}
+			transient, err := dots.NewEngine(mgr.RepoPath, []config.DotEntry{candidate})
+			if err != nil {
+				return nil, err
+			}
+			mgr.Entries = append(mgr.Entries, transient.Entries...)
+			break
+		}
+	}
 	for _, entry := range mgr.Entries {
 		if entry.Name != name {
 			continue

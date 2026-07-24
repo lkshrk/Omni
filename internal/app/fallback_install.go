@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"bufio"
+	"compress/bzip2"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -113,11 +114,98 @@ type errNoRetry struct{ cause error }
 func (e errNoRetry) Error() string { return e.cause.Error() }
 func (e errNoRetry) Unwrap() error { return e.cause }
 
+type nativeFallbackBinaryBackup struct {
+	destination string
+	path        string
+	existed     bool
+}
+
+func (a *App) backupNativeFallbackBinary(name string, fallback *config.FallbackSpec) (*nativeFallbackBinaryBackup, error) {
+	cacheDir, err := a.fallbackCacheDir()
+	if err != nil {
+		return nil, err
+	}
+	binDir, err := a.fallbackBinDir(fallback, cacheDir)
+	if err != nil {
+		return nil, err
+	}
+	rawBinary := strings.TrimSpace(fallback.Binary)
+	if rawBinary == "" {
+		rawBinary = name
+	}
+	binary := filepath.Base(rawBinary)
+	if binary == "" || binary == "." || binary == ".." {
+		return nil, fmt.Errorf("fallback %s: binary %q is not a valid filename", name, rawBinary)
+	}
+	destination := filepath.Join(binDir, binary)
+	backup := &nativeFallbackBinaryBackup{destination: destination}
+	src, err := os.Open(destination)
+	if os.IsNotExist(err) {
+		return backup, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("open existing fallback binary: %w", err)
+	}
+	defer src.Close() //nolint:errcheck
+	info, err := src.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat existing fallback binary: %w", err)
+	}
+	tmp, err := os.CreateTemp(binDir, ".omni-upgrade-backup-*")
+	if err != nil {
+		return nil, fmt.Errorf("create fallback binary backup: %w", err)
+	}
+	backup.path = tmp.Name()
+	if _, err := io.Copy(tmp, src); err != nil {
+		_ = tmp.Close()
+		backup.cleanup()
+		return nil, fmt.Errorf("copy fallback binary backup: %w", err)
+	}
+	if err := tmp.Chmod(info.Mode().Perm()); err != nil {
+		_ = tmp.Close()
+		backup.cleanup()
+		return nil, fmt.Errorf("set fallback binary backup mode: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		backup.cleanup()
+		return nil, fmt.Errorf("close fallback binary backup: %w", err)
+	}
+	backup.existed = true
+	return backup, nil
+}
+
+func (b *nativeFallbackBinaryBackup) restore() error {
+	if b == nil {
+		return nil
+	}
+	if !b.existed {
+		if err := os.Remove(b.destination); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	if err := os.Rename(b.path, b.destination); err != nil {
+		return err
+	}
+	b.path = ""
+	return nil
+}
+
+func (b *nativeFallbackBinaryBackup) cleanup() {
+	if b != nil && b.path != "" {
+		_ = os.Remove(b.path)
+		b.path = ""
+	}
+}
+
 // downloadFallbackAsset fetches downloadURL to destPath, retrying up to
 // downloadRetries times on transient errors (5xx, network). 4xx errors are
 // not retried because the resource is definitively absent or forbidden.
 func (a *App) downloadFallbackAsset(ctx context.Context, name, downloadURL, destPath string) error {
-	client := a.githubHTTPClient()
+	client := *a.githubHTTPClient()
+	// API calls use a short client timeout. Asset downloads own their longer
+	// deadline through downloadToFile's request context instead.
+	client.Timeout = 0
 	var lastErr error
 	for attempt := range downloadRetries {
 		if attempt > 0 {
@@ -127,7 +215,7 @@ func (a *App) downloadFallbackAsset(ctx context.Context, name, downloadURL, dest
 			case <-time.After(time.Duration(attempt) * 500 * time.Millisecond):
 			}
 		}
-		lastErr = downloadToFile(ctx, client, downloadURL, destPath)
+		lastErr = downloadToFile(ctx, &client, downloadURL, destPath)
 		if lastErr == nil {
 			return nil
 		}
@@ -168,6 +256,12 @@ func downloadToFile(ctx context.Context, client *http.Client, rawURL, destPath s
 		}
 		return err
 	}
+	if resp.StatusCode == http.StatusNoContent {
+		return errNoRetry{fmt.Errorf("HTTP %s: response has no content", resp.Status)}
+	}
+	if contentType := strings.TrimSpace(resp.Header.Get("Content-Type")); strings.HasPrefix(strings.ToLower(contentType), "text/html") {
+		return errNoRetry{fmt.Errorf("HTTP %s: unexpected Content-Type %q", resp.Status, contentType)}
+	}
 
 	tmp, err := os.CreateTemp(filepath.Dir(destPath), ".omni-dl-*")
 	if err != nil {
@@ -192,6 +286,10 @@ func downloadToFile(ctx context.Context, client *http.Client, rawURL, destPath s
 	if n > maxDownloadBytes {
 		_ = tmp.Close()
 		return fmt.Errorf("download exceeds %d MiB limit", maxDownloadBytes>>20)
+	}
+	if n == 0 {
+		_ = tmp.Close()
+		return errNoRetry{fmt.Errorf("empty download")}
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close temp file: %w", err)
@@ -232,6 +330,9 @@ func (a *App) verifyFallbackChecksum(ctx context.Context, name string, fallback 
 
 	digest, err := a.fetchReleaseChecksum(ctx, owner, repo, tagName, assetName)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("fallback %s: checksum fetch: %w", name, err)
+		}
 		// Best-effort: absent or unreachable checksums do not block install.
 		return nil
 	}
@@ -254,36 +355,58 @@ func (a *App) fetchReleaseChecksum(ctx context.Context, owner, repo, tagName, as
 		return "", err
 	}
 
-	checksumURL := ""
+	client := a.githubHTTPClient()
+	var assetErrs []error
+	recognized := 0
 	for _, asset := range release.Assets {
-		if isChecksumAsset(strings.ToLower(asset.Name)) {
-			checksumURL = asset.BrowserDownloadURL
-			break
+		if !isChecksumAsset(strings.ToLower(asset.Name)) {
+			continue
 		}
+		recognized++
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+
+		checksumURL := asset.BrowserDownloadURL
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, checksumURL, nil)
+		if err != nil {
+			assetErrs = append(assetErrs, fmt.Errorf("checksum asset %q: %w", asset.Name, err))
+			continue
+		}
+		req.Header.Set("User-Agent", "omni")
+		attachGitHubToken(req, checksumURL)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return "", err
+			}
+			assetErrs = append(assetErrs, fmt.Errorf("checksum asset %q: %w", asset.Name, err))
+			continue
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			_ = resp.Body.Close()
+			assetErrs = append(assetErrs, fmt.Errorf("checksum asset %q: HTTP %s", asset.Name, resp.Status))
+			continue
+		}
+
+		digest, parseErr := extractChecksumForFile(resp.Body, assetName)
+		_ = resp.Body.Close()
+		if parseErr == nil {
+			return digest, nil
+		}
+		if errors.Is(parseErr, context.Canceled) || errors.Is(parseErr, context.DeadlineExceeded) {
+			return "", parseErr
+		}
+		assetErrs = append(assetErrs, fmt.Errorf("checksum asset %q: %w", asset.Name, parseErr))
 	}
-	if checksumURL == "" {
+	if recognized == 0 {
 		return "", fmt.Errorf("no checksums asset in release %s/%s %s", owner, repo, tagName)
 	}
-
-	client := a.githubHTTPClient()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, checksumURL, nil)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "omni")
-	attachGitHubToken(req, checksumURL)
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close() //nolint:errcheck
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("checksums fetch HTTP %s", resp.Status)
-	}
-
-	return extractChecksumForFile(resp.Body, assetName)
+	return "", fmt.Errorf("no usable checksum entry for %q: %w", assetName, errors.Join(assetErrs...))
 }
 
 // fetchGitHubReleaseByTag fetches a specific release by tag from the GitHub API.
@@ -349,12 +472,19 @@ func extractChecksumForFile(r io.Reader, targetName string) (string, error) {
 		if len(parts) < 2 {
 			continue
 		}
-		digest := parts[0]
-		// The filename field may carry a leading path; use only the base.
-		filename := filepath.Base(parts[len(parts)-1])
-		if filename == targetName {
-			return strings.ToLower(digest), nil
+		// GNU sha256sum uses a leading '*' to mark binary-mode input.
+		filename := filepath.Base(strings.TrimPrefix(parts[len(parts)-1], "*"))
+		if filename != targetName {
+			continue
 		}
+		digest := strings.ToLower(parts[0])
+		if len(digest) != sha256.Size*2 {
+			return "", fmt.Errorf("invalid SHA-256 digest for %q: got %d hex characters", targetName, len(digest))
+		}
+		if _, err := hex.DecodeString(digest); err != nil {
+			return "", fmt.Errorf("invalid SHA-256 digest for %q: %w", targetName, err)
+		}
+		return digest, nil
 	}
 	if err := scanner.Err(); err != nil {
 		return "", fmt.Errorf("reading checksums: %w", err)
@@ -387,7 +517,7 @@ func verifyFileChecksum(path, expectedHex, name string) error {
 // extractAndInstall extracts binaryName from archivePath and writes it
 // atomically to destPath with mode 0755.
 //
-// archiveName drives format detection: .zip, .tar.gz/.tgz, .tar.xz, or raw.
+// archiveName drives format detection: .zip, tar archives, .gz, or raw.
 // Within an archive, binaryPath is tried as an exact entry name first;
 // otherwise the first entry whose base name equals binaryName is used.
 func extractAndInstall(archivePath, archiveName, binaryName, binaryPath, destPath string) error {
@@ -397,8 +527,12 @@ func extractAndInstall(archivePath, archiveName, binaryName, binaryPath, destPat
 		return extractZip(archivePath, binaryName, binaryPath, destPath)
 	case strings.HasSuffix(lower, ".tar.gz") || strings.HasSuffix(lower, ".tgz"):
 		return extractTarGz(archivePath, binaryName, binaryPath, destPath)
+	case strings.HasSuffix(lower, ".tar.bz2"):
+		return extractTarBz2(archivePath, binaryName, binaryPath, destPath)
 	case strings.HasSuffix(lower, ".tar.xz"):
 		return extractTarXz(archivePath, binaryName, binaryPath, destPath)
+	case strings.HasSuffix(lower, ".gz"):
+		return extractGzipBinary(archivePath, destPath)
 	default:
 		return installRawBinary(archivePath, destPath)
 	}
@@ -413,7 +547,7 @@ func extractZip(archivePath, binaryName, binaryPath, destPath string) error {
 
 	var fallbackFile *zip.File
 	for _, f := range r.File {
-		if f.FileInfo().IsDir() {
+		if !f.Mode().IsRegular() {
 			continue
 		}
 		if binaryPath != "" && f.Name == binaryPath {
@@ -454,6 +588,16 @@ func extractTarGz(archivePath, binaryName, binaryPath, destPath string) error {
 	return extractTarStream(tar.NewReader(gz), binaryName, binaryPath, destPath)
 }
 
+func extractTarBz2(archivePath, binaryName, binaryPath, destPath string) error {
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return fmt.Errorf("open archive: %w", err)
+	}
+	defer f.Close() //nolint:errcheck
+
+	return extractTarStream(tar.NewReader(bzip2.NewReader(f)), binaryName, binaryPath, destPath)
+}
+
 func extractTarXz(archivePath, binaryName, binaryPath, destPath string) error {
 	f, err := os.Open(archivePath)
 	if err != nil {
@@ -467,6 +611,22 @@ func extractTarXz(archivePath, binaryName, binaryPath, destPath string) error {
 	}
 
 	return extractTarStream(tar.NewReader(xzr), binaryName, binaryPath, destPath)
+}
+
+func extractGzipBinary(archivePath, destPath string) error {
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return fmt.Errorf("open archive: %w", err)
+	}
+	defer f.Close() //nolint:errcheck
+
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return fmt.Errorf("gzip reader: %w", err)
+	}
+	defer gz.Close() //nolint:errcheck
+
+	return writeExecutable(io.LimitReader(gz, maxEntryBytes+1), destPath)
 }
 
 // extractTarStream iterates over tr and installs the first matching entry.
@@ -528,11 +688,7 @@ func extractTarStream(tr *tar.Reader, binaryName, binaryPath, destPath string) e
 			return fmt.Errorf("reopen tar buffer: %w", err)
 		}
 		defer tmp.Close() //nolint:errcheck
-		if err := writeExecutable(tmp, destPath); err != nil {
-			return err
-		}
-		bufPath = "" // prevent deferred Remove
-		return nil
+		return writeExecutable(tmp, destPath)
 	}
 	return fmt.Errorf("binary %q not found in tar archive", binaryName)
 }
@@ -571,6 +727,10 @@ func writeExecutable(r io.Reader, destPath string) error {
 	if n > maxEntryBytes {
 		_ = tmp.Close()
 		return fmt.Errorf("entry exceeds %d MiB limit", maxEntryBytes>>20)
+	}
+	if n == 0 {
+		_ = tmp.Close()
+		return fmt.Errorf("binary is empty")
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close install temp: %w", err)

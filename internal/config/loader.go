@@ -184,7 +184,7 @@ func load(path string, normalize bool) (*RootConfig, bool, error) {
 	}
 
 	var cfg RootConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	if err := unmarshalJSONObject(data, &cfg); err != nil {
 		return nil, false, fmt.Errorf("parsing config file: %w", err)
 	}
 	if err := loadIncludes(path, &cfg); err != nil {
@@ -561,7 +561,7 @@ func Patch(path string, patch interface{}) error {
 		return fmt.Errorf("encoding patch: %w", err)
 	}
 	var patchMap map[string]json.RawMessage
-	if err := json.Unmarshal(patchData, &patchMap); err != nil {
+	if err := unmarshalJSONObject(patchData, &patchMap); err != nil {
 		return fmt.Errorf("parsing patch: %w", err)
 	}
 	return PatchRaw(path, patchMap)
@@ -579,7 +579,7 @@ func PatchRouted(path string, patch interface{}) error {
 		return fmt.Errorf("encoding patch: %w", err)
 	}
 	var patchMap map[string]json.RawMessage
-	if err := json.Unmarshal(patchData, &patchMap); err != nil {
+	if err := unmarshalJSONObject(patchData, &patchMap); err != nil {
 		return fmt.Errorf("parsing patch: %w", err)
 	}
 	return PatchRawRouted(path, patchMap)
@@ -595,7 +595,7 @@ func PatchRaw(path string, patch map[string]json.RawMessage) error {
 	exists := false
 	if data, err := os.ReadFile(path); err == nil {
 		exists = true
-		if err := json.Unmarshal(data, &raw); err != nil {
+		if err := unmarshalJSONObject(data, &raw); err != nil {
 			return fmt.Errorf("parsing existing config: %w", err)
 		}
 		if err := migrateRawVersion(raw); err != nil {
@@ -657,7 +657,8 @@ func ToolSource(path, name string) (string, error) {
 	if strings.TrimSpace(name) == "" {
 		return "", fmt.Errorf("tool name is required")
 	}
-	source, found, err := toolSource(path, name)
+	var stack includePathStack
+	source, found, err := toolSource(path, name, &stack)
 	if err != nil {
 		return "", err
 	}
@@ -667,13 +668,18 @@ func ToolSource(path, name string) (string, error) {
 	return source, nil
 }
 
-func toolSource(path, name string) (string, bool, error) {
+func toolSource(path, name string, stack *includePathStack) (string, bool, error) {
+	if err := stack.push(path); err != nil {
+		return "", false, err
+	}
+	defer stack.pop()
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return "", false, fmt.Errorf("reading config file: %w", err)
 	}
 	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
+	if err := unmarshalJSONObject(data, &raw); err != nil {
 		return "", false, fmt.Errorf("parsing config file: %w", err)
 	}
 
@@ -699,7 +705,7 @@ func toolSource(path, name string) (string, bool, error) {
 		if !filepath.IsAbs(includePath) {
 			includePath = filepath.Join(includeBaseDir(path), includePath)
 		}
-		includedSource, included, err := toolSource(includePath, name)
+		includedSource, included, err := toolSource(includePath, name, stack)
 		if err != nil {
 			return "", false, err
 		}
@@ -723,7 +729,7 @@ func PatchTool(path, name string, mutate func(*ToolSpec) error) error {
 		return fmt.Errorf("reading config file: %w", err)
 	}
 	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
+	if err := unmarshalJSONObject(data, &raw); err != nil {
 		return fmt.Errorf("parsing config file: %w", err)
 	}
 	tools := make(map[string]ToolSpec)
@@ -794,6 +800,14 @@ func rawConfigVersion(raw map[string]json.RawMessage) (int, error) {
 func isJSONNull(v json.RawMessage) bool {
 	trimmed := bytes.TrimSpace(v)
 	return len(trimmed) == 4 && string(trimmed) == "null"
+}
+
+func unmarshalJSONObject(data []byte, dst any) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return fmt.Errorf("top-level value must be a JSON object")
+	}
+	return json.Unmarshal(data, dst)
 }
 
 // Save marshals cfg to JSON and writes it atomically to path.
@@ -1097,6 +1111,51 @@ func includeBaseDir(configPath string) string {
 }
 
 func loadIncludes(path string, cfg *RootConfig) error {
+	var stack includePathStack
+	return loadIncludesFrom(path, cfg, &stack)
+}
+
+type includePathEntry struct {
+	canonical string
+	display   string
+}
+
+type includePathStack []includePathEntry
+
+func (s *includePathStack) push(path string) error {
+	display, err := filepath.Abs(path)
+	if err != nil {
+		display = filepath.Clean(path)
+	}
+	canonical := display
+	if resolved, err := filepath.EvalSymlinks(display); err == nil {
+		canonical = resolved
+	}
+	for idx, entry := range *s {
+		if entry.canonical != canonical {
+			continue
+		}
+		cycle := make([]string, 0, len(*s)-idx+1)
+		for _, active := range (*s)[idx:] {
+			cycle = append(cycle, active.display)
+		}
+		cycle = append(cycle, display)
+		return fmt.Errorf("config include cycle: %s", strings.Join(cycle, " -> "))
+	}
+	*s = append(*s, includePathEntry{canonical: canonical, display: display})
+	return nil
+}
+
+func (s *includePathStack) pop() {
+	*s = (*s)[:len(*s)-1]
+}
+
+func loadIncludesFrom(path string, cfg *RootConfig, stack *includePathStack) error {
+	if err := stack.push(path); err != nil {
+		return err
+	}
+	defer stack.pop()
+
 	if cfg == nil || len(cfg.Include) == 0 {
 		return nil
 	}
@@ -1117,10 +1176,10 @@ func loadIncludes(path string, cfg *RootConfig) error {
 			return fmt.Errorf("reading included config %q: %w", include, err)
 		}
 		var fragment RootConfig
-		if err := json.Unmarshal(data, &fragment); err != nil {
+		if err := unmarshalJSONObject(data, &fragment); err != nil {
 			return fmt.Errorf("parsing included config %q: %w", include, err)
 		}
-		if err := loadIncludes(includePath, &fragment); err != nil {
+		if err := loadIncludesFrom(includePath, &fragment, stack); err != nil {
 			return err
 		}
 		cfg.MergeNotices = append(cfg.MergeNotices, fragment.MergeNotices...)

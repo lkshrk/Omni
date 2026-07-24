@@ -64,6 +64,68 @@ func TestSetMcpGroups_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestAgentGroupSetters_MaterializeMixedTargets(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []string{"mcp", "plugin", "marketplace"} {
+		kind := kind
+		t.Run(kind, func(t *testing.T) {
+			t.Parallel()
+			a := newMembershipTestApp(t)
+			if err := a.withConfig(func(cfg *config.RootConfig) error {
+				cfg.Agents.McpServers = []config.McpServer{{Name: "srv", Transport: "stdio", Command: "echo"}}
+				cfg.Agents.Marketplaces = []config.Marketplace{{Name: "mkt", Source: "a/b"}}
+				cfg.Agents.Plugins = []config.Plugin{{Name: "plg", Marketplace: "mkt"}}
+				cfg.Groups = []*config.GroupConfig{{Name: "work"}}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			var (
+				err        error
+				wantMember string
+			)
+			switch kind {
+			case "mcp":
+				err = a.SetMcpGroups(t.Context(), "srv", []string{"work", "new"})
+				wantMember = "srv"
+			case "plugin":
+				err = a.SetPluginGroups(t.Context(), "plg", []string{"work", "new"})
+				wantMember = "plg"
+			case "marketplace":
+				err = a.SetMarketplaceGroups(t.Context(), "mkt", []string{"work", "new"})
+				wantMember = "mkt"
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			cfg, err := a.loadConfig()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, groupName := range []string{"work", "new"} {
+				group := findGroupInConfig(cfg, groupName)
+				if group == nil {
+					t.Fatalf("group %q was not materialized", groupName)
+				}
+				var members []string
+				switch kind {
+				case "mcp":
+					members = group.McpServers
+				case "plugin":
+					members = group.Plugins
+				case "marketplace":
+					members = group.Marketplaces
+				}
+				if !slices.Equal(members, []string{wantMember}) {
+					t.Fatalf("%s members in %q = %v, want [%s]", kind, groupName, members, wantMember)
+				}
+			}
+		})
+	}
+}
+
 func TestSetMcpGroups_GuardedByMcpEnabled(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

@@ -82,8 +82,8 @@ type codexPluginListEntry struct {
 // codexPluginListResponse is always wrapped in {installed, available}, even
 // without --available, unlike claude's bare-array default (probe Deviation 3).
 type codexPluginListResponse struct {
-	Installed []codexPluginListEntry `json:"installed"`
-	Available []codexPluginListEntry `json:"available"`
+	Installed *[]codexPluginListEntry `json:"installed"`
+	Available *[]codexPluginListEntry `json:"available"`
 }
 
 func (a *codexPluginAdapter) ListPlugins(ctx context.Context) ([]InstalledPlugin, error) {
@@ -91,18 +91,24 @@ func (a *codexPluginAdapter) ListPlugins(ctx context.Context) ([]InstalledPlugin
 	if err != nil {
 		return nil, fmt.Errorf("codex plugin list: %w: %s", err, stderr)
 	}
-	var resp codexPluginListResponse
+	var resp *codexPluginListResponse
 	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
 		return nil, fmt.Errorf("codex plugin list: parse json: %w", err)
 	}
-	latestByIdentity := make(map[string]string, len(resp.Available))
-	for _, e := range resp.Available {
+	if resp == nil {
+		return nil, fmt.Errorf("codex plugin list: parse json: expected object, got null")
+	}
+	if resp.Installed == nil || resp.Available == nil {
+		return nil, fmt.Errorf("codex plugin list: parse json: expected installed and available arrays")
+	}
+	latestByIdentity := make(map[string]string, len(*resp.Available))
+	for _, e := range *resp.Available {
 		if e.Version != nil && *e.Version != "" {
 			latestByIdentity[e.Name+"@"+e.MarketplaceName] = *e.Version
 		}
 	}
-	plugins := make([]InstalledPlugin, 0, len(resp.Installed))
-	for _, e := range resp.Installed {
+	plugins := make([]InstalledPlugin, 0, len(*resp.Installed))
+	for _, e := range *resp.Installed {
 		version := ""
 		if e.Version != nil {
 			version = *e.Version
@@ -132,7 +138,7 @@ type codexMarketplaceListEntry struct {
 }
 
 type codexMarketplaceListResponse struct {
-	Marketplaces []codexMarketplaceListEntry `json:"marketplaces"`
+	Marketplaces *[]codexMarketplaceListEntry `json:"marketplaces"`
 }
 
 func (a *codexPluginAdapter) ListMarketplaces(ctx context.Context) ([]InstalledMarketplace, error) {
@@ -140,12 +146,18 @@ func (a *codexPluginAdapter) ListMarketplaces(ctx context.Context) ([]InstalledM
 	if err != nil {
 		return nil, fmt.Errorf("codex plugin marketplace list: %w: %s", err, stderr)
 	}
-	var resp codexMarketplaceListResponse
+	var resp *codexMarketplaceListResponse
 	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
 		return nil, fmt.Errorf("codex plugin marketplace list: parse json: %w", err)
 	}
-	out := make([]InstalledMarketplace, 0, len(resp.Marketplaces))
-	for _, m := range resp.Marketplaces {
+	if resp == nil {
+		return nil, fmt.Errorf("codex plugin marketplace list: parse json: expected object, got null")
+	}
+	if resp.Marketplaces == nil {
+		return nil, fmt.Errorf("codex plugin marketplace list: parse json: expected marketplaces array")
+	}
+	out := make([]InstalledMarketplace, 0, len(*resp.Marketplaces))
+	for _, m := range *resp.Marketplaces {
 		out = append(out, InstalledMarketplace{Name: m.Name, Source: m.MarketplaceSource.Source, UpdatedAt: dirModTime(m.Root)})
 	}
 	return out, nil

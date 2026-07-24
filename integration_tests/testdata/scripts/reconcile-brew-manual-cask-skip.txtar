@@ -28,6 +28,9 @@ case "${1:-}" in
   leaves)
     ;;
   list)
+    if [ "$#" -eq 3 ] && [ "${2:-}" = "--versions" ] && [ "${3:-}" = "--formula" ]; then
+      exit 0
+    fi
     shift
     if [ "${1:-}" = "--cask" ]; then
       echo "battle-net"

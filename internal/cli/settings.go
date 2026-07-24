@@ -145,6 +145,7 @@ func newSettingsLintCmd(state *rootState) *cobra.Command {
 	return &cobra.Command{
 		Use:   "lint",
 		Short: "Check settings.json for common hygiene issues",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := config.Load(state.app.ConfigPath)
 			if err != nil {
@@ -167,6 +168,7 @@ func newSettingsMigrateHostOverridesCmd(state *rootState) *cobra.Command {
 	return &cobra.Command{
 		Use:   "migrate-host-overrides",
 		Short: "Fold tools.*.hosts install overrides into providers[]",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			count, err := state.app.MigrateHostOverrides(cmd.Context())
 			if err != nil {
@@ -186,6 +188,7 @@ func newSettingsResetCmd(state *rootState) *cobra.Command {
 	return &cobra.Command{
 		Use:   "reset",
 		Short: "Reset settings to defaults while preserving tools and hosts",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ok, err := confirmAction(cmd, state, "Reset settings to defaults?")
 			if err != nil || !ok {
@@ -204,6 +207,7 @@ func newSettingsResetCacheCmd(state *rootState) *cobra.Command {
 	return &cobra.Command{
 		Use:   "reset-cache",
 		Short: "Clear and reinitialise the tool cache",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ok, err := confirmAction(cmd, state, "Clear and reinitialise the tool cache?")
 			if err != nil || !ok {
@@ -281,6 +285,7 @@ func newSettingsExtractCmd(state *rootState) *cobra.Command {
 	return &cobra.Command{
 		Use:   "extract",
 		Short: "Extract agents, tools, groups, and dots into settings.d fragments",
+		Args:  cobra.NoArgs,
 		Long: `Extract decomposes settings.json into the canonical settings.d layout:
 agents.json (agents), tools.json (tools), groups.json (groups without dots),
 and dots.json (dot entries per group). The moved keys are removed from

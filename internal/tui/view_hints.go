@@ -174,9 +174,21 @@ func isPopupPrimaryHint(h hintItem) bool {
 }
 
 func renderPopupActionColumns(pal palette, width int, left, middle, right []hintItem) string {
-	leftText := renderActionHintText(pal, append(append([]hintItem(nil), left...), middle...))
+	leftText := renderActionHintText(pal, left)
+	middleText := renderActionHintText(pal, middle)
 	rightText := renderActionHintText(pal, right)
-	return renderPopupActionEdgeLine(width, leftText, rightText)
+	leftAndMiddle := renderActionHintText(pal, append(append([]hintItem(nil), left...), middle...))
+	if leftText != "" && middleText != "" && lipgloss.Width(leftAndMiddle) > width {
+		rows := []string{
+			fitPopupLine(leftText, width),
+			fitPopupLine(middleText, width),
+		}
+		if rightText != "" {
+			rows = append(rows, renderPopupActionEdgeLine(width, "", rightText))
+		}
+		return strings.Join(rows, "\n")
+	}
+	return renderPopupActionEdgeLine(width, leftAndMiddle, rightText)
 }
 
 func renderPopupActionEdgeLine(width int, left, right string) string {

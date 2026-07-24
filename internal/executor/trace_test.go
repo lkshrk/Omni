@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 type traceSinkStub struct {
@@ -78,5 +79,81 @@ func TestTracingExecutorLabelsTruncatedStderr(t *testing.T) {
 	_, _, _ = NewTracing(next, sink).Run(context.Background(), "tool")
 	if len(sink.records) != 1 || !strings.HasSuffix(sink.records[0].Stderr, "...[truncated]") {
 		t.Fatalf("stored stderr should clearly label the capture limit: %#v", sink.records)
+	}
+}
+
+func TestTracingExecutorTruncatesStderrAtUTF8Boundary(t *testing.T) {
+	sink := &traceSinkStub{}
+	next := &MockExecutor{Responses: []MockCall{{
+		Stderr: strings.Repeat("x", tracePreviewLimit-1) + "界",
+	}}}
+
+	_, _, _ = NewTracing(next, sink).Run(context.Background(), "tool")
+
+	if len(sink.records) != 1 {
+		t.Fatalf("records = %d, want 1", len(sink.records))
+	}
+	stderr := sink.records[0].Stderr
+	if !utf8.ValidString(stderr) {
+		t.Fatalf("stderr is not valid UTF-8: %q", stderr)
+	}
+	if stderr != strings.Repeat("x", tracePreviewLimit-1)+"...[truncated]" {
+		t.Fatalf("stderr = %q, want truncation before partial Unicode rune", stderr)
+	}
+}
+
+func TestSanitizeTraceRecordTruncationIsIdempotentWithoutMarkerBypass(t *testing.T) {
+	rawUnicode := TraceRecord{Stderr: strings.Repeat("x", tracePreviewLimit-3) + "😀"}
+	once := SanitizeTraceRecord(rawUnicode)
+	twice := SanitizeTraceRecord(once)
+	if twice.Stderr != once.Stderr {
+		t.Fatalf("second sanitization changed truncated Unicode preview:\nonce:  %q\ntwice: %q", once.Stderr, twice.Stderr)
+	}
+
+	rawMarker := strings.Repeat("x", 4100-len(traceTruncatedMark)) + traceTruncatedMark
+	got := SanitizeTraceRecord(TraceRecord{Stderr: rawMarker}).Stderr
+	if got == rawMarker {
+		t.Fatalf("natural marker suffix bypassed truncation for %d-byte input", len(rawMarker))
+	}
+	if !strings.HasSuffix(got, traceTruncatedMark) {
+		t.Fatalf("stderr = %q, want explicit truncation marker", got)
+	}
+}
+
+func TestTracingExecutorSanitizesTraceTextBeforePersistence(t *testing.T) {
+	sink := &traceSinkStub{}
+	invalidUTF8 := string([]byte{0xff})
+	next := &MockExecutor{Responses: []MockCall{{
+		Stderr: "line1\rline2\r\nline3\tcol\x00\x01\x08\x0b\x0c\x0e\x1f\x7f\u0080\u0085\u009f" +
+			"\x1b[31mred\x1b[0m\x1b]0;title\x07 TOKEN=topsecret " + invalidUTF8 + "界",
+		Err: errors.New("AUTH_TOKEN=errsecret\rretry\x08"),
+	}}}
+	exec := NewTracing(next, sink)
+	ctx := WithTraceReason(context.Background(), "checking\x00 trace\rnext\t界")
+
+	_, _, _ = exec.Run(
+		ctx,
+		"to\x08ol",
+		"--pass\x08word", "argsecret",
+		"API_KEY=inline",
+		"plain\targ",
+		"\x1b[32msnow\x1b[0m"+invalidUTF8+"界",
+	)
+
+	if len(sink.records) != 1 {
+		t.Fatalf("records = %d, want 1", len(sink.records))
+	}
+	trace := sink.records[0]
+	if trace.Reason != "checking trace\nnext\t界" {
+		t.Errorf("reason = %q", trace.Reason)
+	}
+	if trace.Command != "tool --password '[redacted]' 'API_KEY=[redacted]' 'plain\targ' 'snow界'" {
+		t.Errorf("command = %q", trace.Command)
+	}
+	if trace.Error != "AUTH_TOKEN=[redacted]\nretry" {
+		t.Errorf("error = %q", trace.Error)
+	}
+	if trace.Stderr != "line1\nline2\nline3\tcolred TOKEN=[redacted] 界" {
+		t.Errorf("stderr = %q", trace.Stderr)
 	}
 }

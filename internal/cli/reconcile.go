@@ -21,6 +21,7 @@ func newReconcileCmd(state *rootState) *cobra.Command {
 		Use:   "reconcile",
 		Short: "Sync, upgrade, repair dotfiles, and commit dotfile changes",
 		Long:  actions.MustLongDescription(actions.Reconcile),
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ok, err := confirmAction(cmd, state, actions.MustConfirmDescription(actions.Reconcile))
 			if err != nil || !ok {

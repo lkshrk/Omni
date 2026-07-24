@@ -7,6 +7,7 @@ package python
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -516,8 +517,6 @@ func (p *Provider) CLIToolSet(ctx context.Context) (map[string]bool, error) {
 }
 
 // OutdatedMap implements provider.OutdatedChecker.
-// For uv, `uv tool list --outdated` is attempted; if the flag is not supported
-// by the installed version the call is silently skipped (returns nil, nil).
 func (p *Provider) OutdatedMap(ctx context.Context) (map[string]string, error) {
 	byManager, err := p.OutdatedByManager(ctx)
 	if err != nil {
@@ -550,6 +549,9 @@ func (p *Provider) OutdatedByManager(ctx context.Context) (map[string]map[string
 	result := make(map[string]map[string]string)
 	probeBackend := func(b *backend) error {
 		if _, _, err := p.exec.Run(ctx, b.binary, "--version"); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return err
+			}
 			return nil
 		}
 		var outdated map[string]string
@@ -557,7 +559,7 @@ func (p *Provider) OutdatedByManager(ctx context.Context) (map[string]map[string
 		if b.usesTool {
 			stdout, _, runErr := p.exec.Run(ctx, b.binary, "tool", "list", "--outdated")
 			if runErr != nil {
-				return nil // flag not supported or no outdated tools
+				return fmt.Errorf("%s tool list --outdated: %w", b.binary, runErr)
 			}
 			outdated = parseUVOutdatedList(stdout)
 		} else {
@@ -591,9 +593,12 @@ func (p *Provider) OutdatedByManager(ctx context.Context) (map[string]map[string
 	}
 	for i := range supported {
 		if supported[i].binary != effectiveBinary {
-			// A broken fill-in backend (e.g. an externally-managed pip) must not
-			// fail the whole outdated check when the effective backend succeeded.
+			// Generic pip fill-in failures remain best-effort, but uv and context
+			// errors must propagate because either makes the aggregate incomplete.
 			if err := probeBackend(&supported[i]); err != nil {
+				if supported[i].usesTool || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return nil, err
+				}
 				continue
 			}
 		}
@@ -926,13 +931,23 @@ type pipOutdatedEntry struct {
 
 // parsePipOutdatedMap parses `pip list --outdated --format=json`.
 func parsePipOutdatedMap(stdout string) (map[string]string, error) {
+	if strings.TrimSpace(stdout) == "null" {
+		return nil, fmt.Errorf("top-level null")
+	}
 	var entries []pipOutdatedEntry
 	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout)), &entries); err != nil {
 		return nil, err
 	}
 	m := make(map[string]string, len(entries))
 	for _, e := range entries {
-		m[strings.ToLower(e.Name)] = e.LatestVersion
+		name := strings.ToLower(strings.TrimSpace(e.Name))
+		latest := strings.TrimSpace(e.LatestVersion)
+		if name == "" || latest == "" {
+			continue
+		}
+		if _, exists := m[name]; !exists {
+			m[name] = latest
+		}
 	}
 	return m, nil
 }

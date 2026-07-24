@@ -36,6 +36,10 @@ case "${1:-}" in
     : > "$state/$1"
     ;;
   list)
+    if [ "$#" -eq 3 ] && [ "${2:-}" = "--versions" ] && [ "${3:-}" = "--formula" ]; then
+      [ -f "$state/prettier" ] && echo "prettier 1.0.0"
+      exit 0
+    fi
     shift
     if [ "${1:-}" = "--cask" ]; then
       exit 0

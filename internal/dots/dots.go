@@ -161,6 +161,77 @@ func ValidateEntryName(name string) error {
 	return nil
 }
 
+// ValidateHomeTargetPath verifies that target's physical parent stays within
+// HOME. The final path component is deliberately not resolved so an existing
+// managed symlink can still be unlinked or replaced safely.
+func ValidateHomeTargetPath(target string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("resolve home directory: %w", err)
+	}
+	if filepath.Clean(target) == filepath.Clean(home) {
+		return nil
+	}
+	resolvedHome, err := resolveRootPath(home)
+	if err != nil {
+		return fmt.Errorf("resolve home directory: %w", err)
+	}
+	resolvedTarget, err := resolveParentPreservingFinal(target)
+	if err != nil {
+		return fmt.Errorf("resolve target parent for %q: %w", target, err)
+	}
+	rel, err := filepath.Rel(resolvedHome, resolvedTarget)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("target path %q is outside home directory %q", target, home)
+	}
+	return nil
+}
+
+func resolveRootPath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(filepath.Clean(abs))
+	if err == nil {
+		return filepath.Clean(resolved), nil
+	}
+	if !os.IsNotExist(err) {
+		return "", err
+	}
+	return resolveParentPreservingFinal(abs)
+}
+
+func resolveParentPreservingFinal(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	abs = filepath.Clean(abs)
+	leaf := filepath.Base(abs)
+	parent := filepath.Dir(abs)
+	var missing []string
+	for {
+		resolved, resolveErr := filepath.EvalSymlinks(parent)
+		if resolveErr == nil {
+			resolved = filepath.Clean(resolved)
+			for i := len(missing) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, missing[i])
+			}
+			return filepath.Join(resolved, leaf), nil
+		}
+		if !os.IsNotExist(resolveErr) {
+			return "", resolveErr
+		}
+		next := filepath.Dir(parent)
+		if next == parent {
+			return "", resolveErr
+		}
+		missing = append(missing, filepath.Base(parent))
+		parent = next
+	}
+}
+
 // NewEngine creates an Engine from a stow package root and a slice of DotEntry
 // values. repoPath is expanded (~ resolved). The root does not need to exist:
 // read-only status paths use the resolved source paths to report missing
@@ -195,6 +266,9 @@ func NewEngine(repoPath string, entries []config.DotEntry, opts ...EngineOption)
 		dstAbs, err := ExpandPath(e.Path)
 		if err != nil {
 			return nil, fmt.Errorf("dots: expand path for %q: %w", e.Name, err)
+		}
+		if err := ValidateHomeTargetPath(dstAbs); err != nil {
+			return nil, fmt.Errorf("dots: path %q for entry %q is not under home directory: %w", e.Path, e.Name, err)
 		}
 
 		rel, relErr := filepath.Rel(home, dstAbs)

@@ -172,8 +172,8 @@ func (e claudeAvailableEntry) versionLike() string {
 }
 
 type claudePluginListAvailableResponse struct {
-	Installed []claudePluginListEntry `json:"installed"`
-	Available []claudeAvailableEntry  `json:"available"`
+	Installed *[]claudePluginListEntry `json:"installed"`
+	Available *[]claudeAvailableEntry  `json:"available"`
 }
 
 func (a *claudeCodePluginAdapter) ListPlugins(ctx context.Context) ([]InstalledPlugin, error) {
@@ -182,14 +182,20 @@ func (a *claudeCodePluginAdapter) ListPlugins(ctx context.Context) ([]InstalledP
 
 	stdout, _, err := a.exec(ctx, "claude", "plugins", "list", "--json", "--available")
 	if err == nil {
-		var resp claudePluginListAvailableResponse
+		var resp *claudePluginListAvailableResponse
 		if jsonErr := json.Unmarshal([]byte(stdout), &resp); jsonErr != nil {
 			return nil, fmt.Errorf("claude plugins list --available: parse json: %w", jsonErr)
 		}
-		latestByIdentity := make(map[string]string, len(resp.Available))
-		latestShaByIdentity := make(map[string]string, len(resp.Available))
-		pathByIdentity := make(map[string]string, len(resp.Available))
-		for _, e := range resp.Available {
+		if resp == nil {
+			return nil, fmt.Errorf("claude plugins list --available: parse json: expected object, got null")
+		}
+		if resp.Installed == nil || resp.Available == nil {
+			return nil, fmt.Errorf("claude plugins list --available: parse json: expected installed and available arrays")
+		}
+		latestByIdentity := make(map[string]string, len(*resp.Available))
+		latestShaByIdentity := make(map[string]string, len(*resp.Available))
+		pathByIdentity := make(map[string]string, len(*resp.Available))
+		for _, e := range *resp.Available {
 			identity := e.Name + "@" + e.MarketplaceName
 			if v := e.versionLike(); v != "" {
 				latestByIdentity[identity] = v
@@ -201,8 +207,8 @@ func (a *claudeCodePluginAdapter) ListPlugins(ctx context.Context) ([]InstalledP
 				pathByIdentity[identity] = e.Source.Path
 			}
 		}
-		plugins := make([]InstalledPlugin, 0, len(resp.Installed))
-		for _, e := range resp.Installed {
+		plugins := make([]InstalledPlugin, 0, len(*resp.Installed))
+		for _, e := range *resp.Installed {
 			name, marketplace := splitPluginIdentity(e.ID)
 			identity := name + "@" + marketplace
 			plugin := InstalledPlugin{
@@ -230,6 +236,9 @@ func (a *claudeCodePluginAdapter) ListPlugins(ctx context.Context) ([]InstalledP
 	var entries []claudePluginListEntry
 	if err := json.Unmarshal([]byte(stdout), &entries); err != nil {
 		return nil, fmt.Errorf("claude plugins list: parse json: %w", err)
+	}
+	if entries == nil {
+		return nil, fmt.Errorf("claude plugins list: parse json: expected array, got null")
 	}
 	plugins := make([]InstalledPlugin, 0, len(entries))
 	for _, e := range entries {
@@ -365,6 +374,9 @@ func (a *claudeCodePluginAdapter) ListMarketplaces(ctx context.Context) ([]Insta
 	var entries []claudeMarketplaceListEntry
 	if err := json.Unmarshal([]byte(stdout), &entries); err != nil {
 		return nil, fmt.Errorf("claude plugins marketplace list: parse json: %w", err)
+	}
+	if entries == nil {
+		return nil, fmt.Errorf("claude plugins marketplace list: parse json: expected array, got null")
 	}
 	out := make([]InstalledMarketplace, 0, len(entries))
 	for _, e := range entries {

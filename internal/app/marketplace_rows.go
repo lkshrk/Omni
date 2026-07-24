@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -31,7 +32,7 @@ func (a *App) MarketplaceRows(ctx context.Context) (managed []MarketplaceRow, un
 		}
 		listed, listErr := adapter.ListMarketplaces(ctx)
 		if listErr != nil {
-			continue
+			return nil, nil, fmt.Errorf("list marketplaces for %s: %w", adapter.ID(), listErr)
 		}
 		byName := make(map[string]InstalledMarketplace, len(listed))
 		for _, mk := range listed {

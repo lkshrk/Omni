@@ -11,7 +11,6 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -2414,13 +2413,6 @@ func setDotsRepoForTest(t *testing.T, cfgDir, repoDir string) {
 	rootCfg.Settings.DotsRepo = repoDir
 	if err := saveAppConfig(t, cfgPath, rootCfg); err != nil {
 		t.Fatalf("config.Save: %v", err)
-	}
-}
-
-func makeIgnoredSpecialFile(t *testing.T, path string) {
-	t.Helper()
-	if err := syscall.Mkfifo(path, 0o600); err != nil {
-		t.Fatalf("mkfifo %q: %v", path, err)
 	}
 }
 

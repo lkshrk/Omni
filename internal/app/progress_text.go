@@ -255,7 +255,11 @@ func SyncProviderUnavailableLines(result *isync.SyncResult) []string {
 }
 
 func SyncProviderUnavailableLine(op isync.SyncOp) string {
-	return fmt.Sprintf("provider unavailable: %s (skipping %s)", op.Tool.Provider, op.Tool.Name)
+	providerName := strings.TrimSpace(op.Tool.Provider)
+	if providerName == "" {
+		providerName = "no configured provider"
+	}
+	return fmt.Sprintf("provider unavailable: %s (skipping %s)", providerName, op.Tool.Name)
 }
 
 type SyncOperationLineOptions struct {

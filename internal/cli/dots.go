@@ -177,7 +177,7 @@ func newDotsSyncCmd(state *rootState) *cobra.Command {
 			if len(args) > 0 {
 				ops, err = state.app.DotsSyncEntry(cmd.Context(), args[0], opts)
 			} else {
-				ops, err = state.app.DotsSync(opts)
+				ops, err = state.app.DotsSyncContext(cmd.Context(), opts)
 			}
 			printDotOps(cmd, ops, dryRun) // print before returning err so partial results are visible
 			return err
@@ -828,6 +828,7 @@ func newDotsEnableCmd(state *rootState) *cobra.Command {
 	return &cobra.Command{
 		Use:   "enable",
 		Short: "Enable dotfile sync for this host",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := ensureDotsStowForCLI(cmd, state); err != nil {
 				return err
@@ -850,6 +851,7 @@ func newDotsDisableCmd(state *rootState) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "disable",
 		Short: "Disable dotfile sync for this host",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if overwrite && removeLocal {
 				return fmt.Errorf("--overwrite and --remove-local cannot be combined")
@@ -882,6 +884,7 @@ func newDotsPullCmd(state *rootState) *cobra.Command {
 	return &cobra.Command{
 		Use:   "pull",
 		Short: "Pull latest changes from remote and re-sync symlinks",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := requireDotsConfigured(state); err != nil {
 				return err
@@ -905,6 +908,7 @@ func newDotsPushCmd(state *rootState) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "push",
 		Short: "Stage, commit, and push all changes in the dots repo",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := requireDotsConfigured(state); err != nil {
 				return err
@@ -926,6 +930,7 @@ func newDotsCommitCmd(state *rootState) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "commit",
 		Short: "Stage and commit all changes in the dots repo",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := requireDotsConfigured(state); err != nil {
 				return err

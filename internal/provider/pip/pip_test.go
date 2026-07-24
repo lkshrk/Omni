@@ -331,6 +331,31 @@ func TestOutdatedMap_OwnershipProbeError(t *testing.T) {
 	}
 }
 
+func TestOutdatedMap_NullReturnsError(t *testing.T) {
+	p, _ := newPip(
+		executor.MockCall{Stdout: "null"},
+		executor.MockCall{Stdout: `{"black":1}`},
+	)
+	if _, err := p.OutdatedMap(context.Background()); err == nil {
+		t.Fatal("expected top-level null to be rejected")
+	}
+}
+
+func TestOutdatedMap_DuplicateKeepsNonemptyLatest(t *testing.T) {
+	out := `[{"name":"Black","latest_version":"24.1.0"},{"name":"black","latest_version":""}]`
+	p, _ := newPip(
+		executor.MockCall{Stdout: out},
+		executor.MockCall{Stdout: `{"black":1}`},
+	)
+	got, err := p.OutdatedMap(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["black"] != "24.1.0" {
+		t.Fatalf("black latest = %q, want retained nonempty 24.1.0", got["black"])
+	}
+}
+
 // --- SelfPackageUpgradeable (PEP 668 externally-managed detection) ---
 
 func TestSelfPackageName_IsPip(t *testing.T) {

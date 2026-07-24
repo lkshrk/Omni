@@ -162,6 +162,7 @@ type cliStubProvider struct {
 	name           string
 	resolvedName   string
 	unavailable    bool
+	installErr     error
 	installed      []provider.InstalledTool
 	installedCalls []string
 	searchResults  []provider.SearchResult
@@ -178,6 +179,9 @@ func (p *cliStubProvider) ResolvedName(_ context.Context) (string, error) {
 	return p.resolvedName, nil
 }
 func (p *cliStubProvider) Install(_ context.Context, tool provider.Tool) error {
+	if p.installErr != nil {
+		return p.installErr
+	}
 	p.installedCalls = append(p.installedCalls, tool.Name)
 	for _, installed := range p.installed {
 		if installed.Tool.Name == tool.Name && installed.Tool.Provider == tool.Provider {
@@ -795,12 +799,12 @@ func TestRequireDotsConfigured_Configured(t *testing.T) {
 
 // buildTestApp creates an App via InitTestMode (no real providers) with the
 // given config path, using a temp cache dir.
-func buildTestApp(t *testing.T, cfgPath string) (*app.App, error) {
+func buildTestApp(t *testing.T, cfgPath string, providers ...provider.Provider) (*app.App, error) {
 	t.Helper()
 	cacheDir := t.TempDir()
 	a := app.New(cfgPath)
 	a.CacheDir = cacheDir
-	if err := a.InitTestMode(t.Context()); err != nil {
+	if err := a.InitTestMode(t.Context(), providers...); err != nil {
 		return nil, err
 	}
 	t.Cleanup(func() { _ = a.Close() })
@@ -1242,6 +1246,81 @@ func TestDotsSync_NameDryRunUsesSingleEntry(t *testing.T) {
 	got := outBuf.String()
 	if !strings.Contains(got, "checking dots 1/1: nvim") || !strings.Contains(got, "would link") || strings.Contains(got, ".zshrc") {
 		t.Fatalf("output = %q, want only nvim dry-run link", got)
+	}
+}
+
+func TestDotsSyncCommandsPropagateCancellation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{name: "all"},
+		{name: "named", args: []string{"zsh"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("OMNI_HOSTNAME", "testhost")
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			binDir := t.TempDir()
+			started := filepath.Join(t.TempDir(), "stow-started")
+			t.Setenv("OMNI_TEST_STOW_STARTED", started)
+			t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+			if err := os.WriteFile(filepath.Join(binDir, "stow"), []byte("#!/bin/sh\n: > \"$OMNI_TEST_STOW_STARTED\"\nexec /bin/sleep 2\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			cfgPath := filepath.Join(t.TempDir(), "settings.json")
+			repoDir := t.TempDir()
+			source := filepath.Join(repoDir, "dotfiles", "zsh", ".zshrc")
+			if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(source, []byte("setopt promptsubst\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			withConfig(t, cfgPath, &config.RootConfig{
+				Settings: config.Settings{DotsRepo: repoDir},
+				Groups: []*config.GroupConfig{{
+					Name:    "testhost",
+					Special: "host",
+					Dots:    []config.DotEntry{{Name: "zsh", Path: filepath.Join(home, ".zshrc")}},
+				}},
+			})
+
+			a, err := buildTestApp(t, cfgPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			cmd := newDotsSyncCmd(&rootState{app: a})
+			cmd.SetContext(ctx)
+			cmd.SetArgs(tc.args)
+			cmd.SetOut(&bytes.Buffer{})
+			done := make(chan error, 1)
+			go func() { done <- cmd.Execute() }()
+
+			deadline := time.Now().Add(time.Second)
+			for {
+				if _, err := os.Stat(started); err == nil {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("stow did not start")
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			cancel()
+
+			select {
+			case err := <-done:
+				if err == nil {
+					t.Fatal("dots sync succeeded after cancellation")
+				}
+			case <-time.After(500 * time.Millisecond):
+				err := <-done
+				t.Fatalf("dots sync ignored cancellation; eventual error: %v", err)
+			}
+		})
 	}
 }
 

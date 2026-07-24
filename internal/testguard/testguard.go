@@ -2,11 +2,13 @@
 package testguard
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 )
 
 const isolatedEnv = "OMNI_TEST_ISOLATED"
@@ -102,14 +104,29 @@ func PathInTempRoot(path string) bool {
 
 // PathInRoot reports whether path is root or a descendant of root.
 func PathInRoot(path, root string) bool {
-	for _, p := range canonicalPathCandidates(path) {
-		for _, r := range canonicalPathCandidates(root) {
-			if p == r || strings.HasPrefix(p, r+string(os.PathSeparator)) {
-				return true
-			}
-		}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
 	}
-	return false
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	absPath = filepath.Clean(absPath)
+	absRoot = filepath.Clean(absRoot)
+	if absPath == absRoot {
+		return true
+	}
+	resolvedRoot, err := resolveContainmentRoot(absRoot)
+	if err != nil {
+		return false
+	}
+	resolvedPath, err := resolveContainmentParent(absPath)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(resolvedRoot, resolvedPath)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }
 
 func runningUnderGoTest() bool {
@@ -125,17 +142,39 @@ func tempRoots() []string {
 	return roots
 }
 
-func canonicalPathCandidates(path string) []string {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		abs = filepath.Clean(path)
+func resolveContainmentRoot(path string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err == nil {
+		return filepath.Clean(resolved), nil
 	}
-	out := []string{filepath.Clean(abs)}
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		resolved = filepath.Clean(resolved)
-		if resolved != out[0] {
-			out = append(out, resolved)
+	if !os.IsNotExist(err) {
+		return "", err
+	}
+	return resolveContainmentParent(path)
+}
+
+func resolveContainmentParent(path string) (string, error) {
+	path = filepath.Clean(path)
+	leaf := filepath.Base(path)
+	parent := filepath.Dir(path)
+	var missing []string
+	for {
+		resolved, err := filepath.EvalSymlinks(parent)
+		if err == nil {
+			resolved = filepath.Clean(resolved)
+			for i := len(missing) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, missing[i])
+			}
+			return filepath.Join(resolved, leaf), nil
 		}
+		if !os.IsNotExist(err) && !errors.Is(err, syscall.ENOTDIR) {
+			return "", err
+		}
+		next := filepath.Dir(parent)
+		if next == parent {
+			return "", err
+		}
+		missing = append(missing, filepath.Base(parent))
+		parent = next
 	}
-	return out
 }

@@ -40,6 +40,10 @@ case "${1:-}" in
     fi
     ;;
   list)
+    if [ "$#" -eq 3 ] && [ "${2:-}" = "--versions" ] && [ "${3:-}" = "--formula" ]; then
+      printf 'ripgrep %s\n' "$(version_for ripgrep)"
+      exit 0
+    fi
     shift
     if [ "${1:-}" = "--cask" ]; then
       exit 0

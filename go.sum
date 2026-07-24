@@ -26,8 +26,6 @@ github.com/charmbracelet/x/termios v0.1.1 h1:o3Q2bT8eqzGnGPOYheoYS8eEleT5ZVNYNy8
 github.com/charmbracelet/x/termios v0.1.1/go.mod h1:rB7fnv1TgOPOyyKRJ9o+AsTU/vK5WHJ2ivHeut/Pcwo=
 github.com/charmbracelet/x/vt v0.0.0-20260713092006-0d683c34c74b h1:QxlENMN90qpOZU1PMCPl7i1KgHdG80peq8dC0uMF1rU=
 github.com/charmbracelet/x/vt v0.0.0-20260713092006-0d683c34c74b/go.mod h1:u1LOIABor9JqY54oZdktK3TCRrgzP6tzHrDYx1nd3wY=
-github.com/charmbracelet/x/vttest v0.0.0-20260713092006-0d683c34c74b h1:JMn7xtj2s67lvkVWALLWkaLKSylrTIel568EeCq2mbk=
-github.com/charmbracelet/x/vttest v0.0.0-20260713092006-0d683c34c74b/go.mod h1:NJrAI0otIhA5qqMet4oZmF3wwzX6a1niDmeLRsxohcY=
 github.com/charmbracelet/x/vttest v0.0.0-20260719004043-bb9a97036f23 h1:l1vlEfrYt8ABu39B+OiNnvysM7r371Fspwrfdz4WVOo=
 github.com/charmbracelet/x/vttest v0.0.0-20260719004043-bb9a97036f23/go.mod h1:NJrAI0otIhA5qqMet4oZmF3wwzX6a1niDmeLRsxohcY=
 github.com/charmbracelet/x/windows v0.2.2 h1:IofanmuvaxnKHuV04sC0eBy/smG6kIKrWG2/jYn2GuM=

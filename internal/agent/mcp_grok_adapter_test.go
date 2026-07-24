@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/config"
@@ -148,6 +149,25 @@ func TestParseGrokMcpList(t *testing.T) {
 	}
 	if !got[1].HeadersKnown || got[1].Headers["X-Key"] != "value" {
 		t.Fatalf("http headers = %+v, known=%v", got[1].Headers, got[1].HeadersKnown)
+	}
+}
+
+func TestParseGrokMcpList_RejectsNull(t *testing.T) {
+	t.Parallel()
+	_, err := parseGrokMcpList("null")
+	if err == nil || !strings.Contains(err.Error(), "expected array, got null") {
+		t.Fatalf("parseGrokMcpList(null) error = %v, want null-shape error", err)
+	}
+}
+
+func TestParseGrokMcpList_AcceptsEmptyArray(t *testing.T) {
+	t.Parallel()
+	servers, err := parseGrokMcpList("[]")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(servers) != 0 {
+		t.Fatalf("parseGrokMcpList([]) = %+v, want empty inventory", servers)
 	}
 }
 

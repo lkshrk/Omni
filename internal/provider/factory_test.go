@@ -2,24 +2,31 @@ package provider_test
 
 import (
 	"slices"
+	"strconv"
+	"sync/atomic"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/executor"
 	"github.com/lkshrk/omni/internal/provider"
 )
 
+var factoryTestID atomic.Uint64
+
 func TestRegisterConcrete_BuildAndNames(t *testing.T) {
+	suffix := strconv.FormatUint(factoryTestID.Add(1), 10)
+	zetaName := "factorytest-zeta-" + suffix
+	alphaName := "factorytest-alpha-" + suffix
 	var gotExec executor.Executor
-	provider.RegisterConcrete("factorytest-zeta", func(exec executor.Executor) provider.Provider {
+	provider.RegisterConcrete(zetaName, func(exec executor.Executor) provider.Provider {
 		gotExec = exec
-		return &fakeProvider{name: "factorytest-zeta"}
+		return &fakeProvider{name: zetaName}
 	})
-	provider.RegisterConcrete("factorytest-alpha", func(executor.Executor) provider.Provider {
-		return &fakeProvider{name: "factorytest-alpha"}
+	provider.RegisterConcrete(alphaName, func(executor.Executor) provider.Provider {
+		return &fakeProvider{name: alphaName}
 	})
 
 	names := provider.RegisteredConcreteNames()
-	if !slices.Contains(names, "factorytest-alpha") || !slices.Contains(names, "factorytest-zeta") {
+	if !slices.Contains(names, alphaName) || !slices.Contains(names, zetaName) {
 		t.Fatalf("RegisteredConcreteNames missing registrations: %v", names)
 	}
 	if !slices.IsSorted(names) {
@@ -28,12 +35,12 @@ func TestRegisterConcrete_BuildAndNames(t *testing.T) {
 
 	exec := &executor.MockExecutor{}
 	built := provider.BuildConcreteProviders(exec)
-	zeta, ok := built["factorytest-zeta"]
-	if !ok || zeta.Name() != "factorytest-zeta" {
-		t.Fatalf("BuildConcreteProviders missing factorytest-zeta: %+v", built)
+	zeta, ok := built[zetaName]
+	if !ok || zeta.Name() != zetaName {
+		t.Fatalf("BuildConcreteProviders missing %s: %+v", zetaName, built)
 	}
-	if _, ok := built["factorytest-alpha"]; !ok {
-		t.Fatalf("BuildConcreteProviders missing factorytest-alpha: %+v", built)
+	if _, ok := built[alphaName]; !ok {
+		t.Fatalf("BuildConcreteProviders missing %s: %+v", alphaName, built)
 	}
 	if gotExec != exec {
 		t.Fatal("factory should receive the executor passed to BuildConcreteProviders")
@@ -59,15 +66,16 @@ func TestRegisterConcrete_PanicsOnNilFactory(t *testing.T) {
 }
 
 func TestRegisterConcrete_PanicsOnDuplicate(t *testing.T) {
-	provider.RegisterConcrete("factorytest-dup", func(executor.Executor) provider.Provider {
-		return &fakeProvider{name: "factorytest-dup"}
+	name := "factorytest-dup-" + strconv.FormatUint(factoryTestID.Add(1), 10)
+	provider.RegisterConcrete(name, func(executor.Executor) provider.Provider {
+		return &fakeProvider{name: name}
 	})
 	defer func() {
 		if recover() == nil {
 			t.Fatal("duplicate RegisterConcrete should panic")
 		}
 	}()
-	provider.RegisterConcrete("factorytest-dup", func(executor.Executor) provider.Provider {
-		return &fakeProvider{name: "factorytest-dup"}
+	provider.RegisterConcrete(name, func(executor.Executor) provider.Provider {
+		return &fakeProvider{name: name}
 	})
 }

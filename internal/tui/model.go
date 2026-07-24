@@ -228,6 +228,7 @@ type Model struct {
 	statusIsErr         bool // true when statusMsg is an error (shown red, 2× duration)
 	statusGen           int  // incremented on each setStatus call; stale clearStatusMsg events are dropped
 	err                 error
+	startupLoadErr      bool
 	launchBatchActive   bool
 	launchBatchErrors   []string
 	launchBatchStatus   int

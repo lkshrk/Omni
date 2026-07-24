@@ -319,3 +319,72 @@ func TestEngineSync_RequiresExecutor(t *testing.T) {
 		t.Fatal("Sync without an executor should error")
 	}
 }
+
+func TestNewEngine_RejectsIntermediateSymlinkOutsideHome(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	outside := filepath.Join(tmp, "sibling")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	target := filepath.Join(outside, "settings.json")
+	if err := os.WriteFile(target, []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(home, ".config")); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := dots.NewEngine(filepath.Join(tmp, "repo"), []config.DotEntry{{
+		Name: "settings",
+		Path: filepath.Join(home, ".config", "settings.json"),
+	}})
+	if err == nil {
+		t.Fatal("NewEngine accepted a target through an intermediate symlink outside HOME")
+	}
+	if got, readErr := os.ReadFile(target); readErr != nil || string(got) != "outside" {
+		t.Fatalf("outside file changed: body=%q err=%v", got, readErr)
+	}
+}
+
+func TestNewEngine_AllowsFinalManagedSymlink(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	targetParent := filepath.Join(home, ".config")
+	source := filepath.Join(tmp, "repo", "settings", ".config", "settings.json")
+	if err := os.MkdirAll(targetParent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("managed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	target := filepath.Join(targetParent, "settings.json")
+	if err := os.Symlink(source, target); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := dots.NewEngine(filepath.Join(tmp, "repo"), []config.DotEntry{{Name: "settings", Path: target}}); err != nil {
+		t.Fatalf("NewEngine rejected final managed symlink: %v", err)
+	}
+}
+
+func TestNewEngine_PreservesHomeTargetCompatibility(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+
+	if _, err := dots.NewEngine(filepath.Join(tmp, "repo"), []config.DotEntry{{Name: "home", Path: home}}); err != nil {
+		t.Fatalf("NewEngine rejected target equal to HOME: %v", err)
+	}
+}

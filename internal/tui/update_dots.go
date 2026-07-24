@@ -23,7 +23,6 @@ func (m *Model) beginDotsOperation(status string) {
 	m.dotsCtx = ctx
 	m.dotsCancel = cancel
 	m.dotsLoading = true
-	startOp(m, status)
 	setActivityStatus(m, status)
 }
 
@@ -93,7 +92,7 @@ func (m *Model) handleDotsSubmodeKeyMsg(msg tea.KeyPressMsg) (bool, []tea.Cmd) {
 	switch {
 	case m.dotsPeek != nil || m.dotsPeekLoading:
 		return true, m.handleDotsPeekKeyMsg(msg)
-	case m.dotsSearchActive:
+	case m.dotsSearchActive && m.filter.Focused():
 		return true, m.handleDotsSearchKeyMsg(msg)
 	default:
 		return false, nil

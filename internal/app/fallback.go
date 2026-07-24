@@ -143,16 +143,16 @@ func (a *App) InstallToolFallback(ctx context.Context, name string) error {
 	if err := a.runFallbackInstall(ctx, name, "install", spec, fallback, fallback.Commands.Install); err != nil {
 		// Pass the clean message as the DB reason before any wrapping so the DB
 		// stores the original failure, not the composite status annotation.
-		return a.recordFallbackFailure(ctx, name, spec, err, err.Error())
+		return a.recordFallbackFailure(ctx, name, spec, err, err.Error(), false)
 	}
 	installed, err := a.CheckToolFallback(ctx, name)
 	if err != nil {
-		return a.recordFallbackFailure(ctx, name, spec, err, err.Error())
+		return a.recordFallbackFailure(ctx, name, spec, err, err.Error(), false)
 	}
 	if !installed {
 		const verifyMsg = "fallback install verification failed"
 		primaryErr := fmt.Errorf("%s for %s: check command did not pass", verifyMsg, name)
-		return a.recordFallbackFailure(ctx, name, spec, primaryErr, verifyMsg)
+		return a.recordFallbackFailure(ctx, name, spec, primaryErr, verifyMsg, false)
 	}
 	if err := a.setToolFallbackStatus(name, config.FallbackStatusVerified); err != nil {
 		return err
@@ -201,7 +201,7 @@ func (a *App) UpgradeToolFallback(ctx context.Context, name string) error {
 	}
 	upgradeFallback, refreshed, err := a.githubFallbackUpgradeCandidate(ctx, name, spec, fallback)
 	if err != nil {
-		return a.recordFallbackFailure(ctx, name, spec, err, err.Error())
+		return a.recordFallbackFailure(ctx, name, spec, err, err.Error(), true)
 	}
 	upgradeCmd := strings.TrimSpace(upgradeFallback.Commands.Upgrade)
 	if upgradeCmd == "" {
@@ -211,17 +211,40 @@ func (a *App) UpgradeToolFallback(ctx context.Context, name string) error {
 	if upgradeCmd == upgradeFallback.Commands.Install {
 		upgradeAction = "install"
 	}
+	nativeUpgrade := usesNativeGitHubInstallPipeline(upgradeFallback, upgradeCmd)
+	var binaryBackup *nativeFallbackBinaryBackup
+	if nativeUpgrade {
+		binaryBackup, err = a.backupNativeFallbackBinary(name, upgradeFallback)
+		if err != nil {
+			return a.recordFallbackFailure(ctx, name, spec, err, err.Error(), true)
+		}
+		defer binaryBackup.cleanup()
+	}
+	recordVerificationFailure := func(baseErr error, dbReason string) error {
+		preserveInstalled := false
+		if binaryBackup != nil {
+			preserveInstalled = binaryBackup.existed
+			if restoreErr := binaryBackup.restore(); restoreErr != nil {
+				preserveInstalled = false
+				baseErr = errors.Join(baseErr, fmt.Errorf("restore previous fallback binary: %w", restoreErr))
+			}
+		}
+		return a.recordFallbackFailure(ctx, name, spec, baseErr, dbReason, preserveInstalled)
+	}
 	if err := a.runFallbackInstall(ctx, name, upgradeAction, spec, upgradeFallback, upgradeCmd); err != nil {
-		return a.recordFallbackFailure(ctx, name, spec, err, err.Error())
+		// A native pipeline error before verification retains the previous DB
+		// state. Custom shell commands can partially mutate before failing, so
+		// their installed state is no longer trustworthy.
+		return a.recordFallbackFailure(ctx, name, spec, err, err.Error(), nativeUpgrade)
 	}
 	installed, err := a.checkToolFallbackWithSpec(ctx, name, spec, upgradeFallback)
 	if err != nil {
-		return a.recordFallbackFailure(ctx, name, spec, err, err.Error())
+		return recordVerificationFailure(err, err.Error())
 	}
 	if !installed {
 		const verifyMsg = "fallback upgrade verification failed"
 		primaryErr := fmt.Errorf("%s for %s: check command did not pass", verifyMsg, name)
-		return a.recordFallbackFailure(ctx, name, spec, primaryErr, verifyMsg)
+		return recordVerificationFailure(primaryErr, verifyMsg)
 	}
 	if refreshed {
 		verified := *upgradeFallback
@@ -265,12 +288,27 @@ func (a *App) githubFallbackUpgradeCandidate(ctx context.Context, name string, s
 	if err != nil {
 		return nil, false, err
 	}
-	if !ok {
+	if !ok || resolved.Status == config.FallbackStatusUnsupported {
 		return nil, false, fmt.Errorf("github fallback %s/%s: no supported release asset for %s on %s/%s", strings.TrimSpace(fallback.Source.Owner), strings.TrimSpace(fallback.Source.Repo), name, runtime.GOOS, runtime.GOARCH)
 	}
 	resolved.Source = fallback.Source
 	resolved.BinDir = fallback.BinDir
+	preserveCustomGitHubFallbackCommands(fallback, &resolved)
 	return &resolved, true, nil
+}
+
+func preserveCustomGitHubFallbackCommands(current, refreshed *config.FallbackSpec) {
+	generated := githubReleaseAssetCommands(current.Recipe.AssetDownloadURL)
+	preserve := func(value, defaultValue string, destination *string) {
+		if strings.TrimSpace(value) != "" && strings.TrimSpace(value) != defaultValue {
+			*destination = value
+		}
+	}
+	preserve(current.Commands.Install, generated.Install, &refreshed.Commands.Install)
+	preserve(current.Commands.Check, generated.Check, &refreshed.Commands.Check)
+	preserve(current.Commands.Uninstall, generated.Uninstall, &refreshed.Commands.Uninstall)
+	preserve(current.Commands.Upgrade, generated.Upgrade, &refreshed.Commands.Upgrade)
+	preserve(current.Commands.Version, generated.Version, &refreshed.Commands.Version)
 }
 
 func (a *App) UninstallToolFallback(ctx context.Context, name string) error {
@@ -300,12 +338,16 @@ func (a *App) UninstallToolFallback(ctx context.Context, name string) error {
 // failure message stored in the DB (captured before baseErr is wrapped, so the
 // DB keeps the original cause rather than the composite annotation). This is
 // the single place that knows a fallback outcome is dual-store persisted.
-func (a *App) recordFallbackFailure(ctx context.Context, name string, spec config.ToolSpec, baseErr error, dbReason string) error {
+func (a *App) recordFallbackFailure(ctx context.Context, name string, spec config.ToolSpec, baseErr error, dbReason string, preserveInstalled bool) error {
 	err := baseErr
 	if statusErr := a.setToolFallbackStatus(name, config.FallbackStatusFailed); statusErr != nil {
 		err = errors.Join(err, fmt.Errorf("failed to record fallback status: %w", statusErr))
 	}
-	if markErr := a.readDB().MarkFailed(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec), dbReason); markErr != nil {
+	markFailure := a.readDB().MarkFailed
+	if preserveInstalled {
+		markFailure = a.readDB().MarkUpgradeFailed
+	}
+	if markErr := markFailure(ctx, name, fallbackProvider(spec), fallbackPackage(name, spec), dbReason); markErr != nil {
 		err = errors.Join(err, fmt.Errorf("failed to record DB failure: %w", markErr))
 	}
 	return err
@@ -477,12 +519,8 @@ func (a *App) fallbackBinDir(fallback *config.FallbackSpec, cacheDir string) (st
 	return expanded, nil
 }
 
-// isNativeGitHubRecipe reports whether the fallback should use the native Go
-// download/extract/install pipeline rather than shell commands.
-//
-// The native pipeline is used when the recipe is a GitHub release asset with a
-// resolved download URL AND the caller has not supplied explicit install/upgrade
-// shell commands (the custom-shell escape hatch).
+// isNativeGitHubRecipe reports whether the fallback has enough release-asset
+// metadata for native lifecycle operations.
 func isNativeGitHubRecipe(fallback *config.FallbackSpec) bool {
 	if fallback == nil {
 		return false
@@ -493,9 +531,16 @@ func isNativeGitHubRecipe(fallback *config.FallbackSpec) bool {
 	if strings.TrimSpace(fallback.Recipe.AssetDownloadURL) == "" {
 		return false
 	}
-	// Explicit install or upgrade shell commands opt out of the native pipeline.
-	return strings.TrimSpace(fallback.Commands.Install) == "" &&
-		strings.TrimSpace(fallback.Commands.Upgrade) == ""
+	return true
+}
+
+func usesNativeGitHubInstallPipeline(fallback *config.FallbackSpec, command string) bool {
+	if !isNativeGitHubRecipe(fallback) {
+		return false
+	}
+	generated := githubReleaseAssetInstallCommand(fallback.Recipe.AssetDownloadURL)
+	command = strings.TrimSpace(command)
+	return command == "" || command == generated
 }
 
 // runFallbackInstall dispatches to the native pipeline for GitHub release asset
@@ -503,7 +548,7 @@ func isNativeGitHubRecipe(fallback *config.FallbackSpec) bool {
 // (raw_commands recipes and custom-shell escape-hatch overrides).
 // action and shellCommand are used only for the shell-command path.
 func (a *App) runFallbackInstall(ctx context.Context, name, action string, spec config.ToolSpec, fallback *config.FallbackSpec, shellCommand string) error {
-	if isNativeGitHubRecipe(fallback) {
+	if usesNativeGitHubInstallPipeline(fallback, shellCommand) {
 		if err := a.nativeGitHubInstallPipeline(ctx, name, fallback); err != nil {
 			return err
 		}
@@ -639,7 +684,7 @@ func automaticFallbackUsable(fallback *config.FallbackSpec, allowFailed bool) bo
 	}
 	// Native GitHub release asset recipes use the Go pipeline; they do not
 	// require a shell install command to be usable.
-	if isNativeGitHubRecipe(fallback) {
+	if usesNativeGitHubInstallPipeline(fallback, fallback.Commands.Install) {
 		return true
 	}
 	return strings.TrimSpace(fallback.Commands.Install) != "" && strings.TrimSpace(fallback.Commands.Check) != ""

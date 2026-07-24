@@ -3,8 +3,10 @@ exec chmod 755 bin/brew
 env PATH=$WORK/bin:$PATH
 
 exec omni --config settings.json hosts ensure testhost
-exec omni --config settings.json tools sync --dry-run
+! exec omni --config settings.json tools sync --dry-run
 stdout 'Dry-run'
+stdout 'provider unavailable: no configured provider \(skipping prettier\)'
+stderr 'error: 1 tool unavailable'
 ! stdout 'matched provider'
 ! exec test -f .omni-cache/fake-brew/prettier
 exec omni-assert-tool-provider-list settings.json prettier
@@ -35,6 +37,9 @@ case "${1:-}" in
     : > "$state/$1"
     ;;
   list)
+    if [ "$#" -eq 3 ] && [ "${2:-}" = "--versions" ] && [ "${3:-}" = "--formula" ]; then
+      exit 0
+    fi
     shift
     if [ "${1:-}" = "--cask" ]; then
       exit 0

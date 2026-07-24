@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -204,7 +205,7 @@ func (a *App) PluginRows(ctx context.Context) (managed []PluginRow, unmanaged ma
 		}
 		listed, listErr := adapter.ListPlugins(ctx)
 		if listErr != nil {
-			continue
+			return nil, nil, fmt.Errorf("list plugins for %s: %w", adapter.ID(), listErr)
 		}
 		byName := make(map[string]InstalledPlugin, len(listed))
 		for _, p := range listed {

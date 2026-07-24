@@ -493,7 +493,7 @@ func TestNew_ExpandsEnvironmentVariables(t *testing.T) {
 	if len(m.Entries) != 1 {
 		t.Fatalf("len(Entries) = %d, want 1", len(m.Entries))
 	}
-	if got := m.Entries[0].TargetPath; got != filepath.Join(home, ".config/zsh") {
+	if got := m.Entries[0].TargetPath; filepath.Clean(got) != filepath.Clean(filepath.Join(home, ".config/zsh")) {
 		t.Fatalf("TargetPath = %q, want %q", got, filepath.Join(home, ".config/zsh"))
 	}
 }

@@ -33,6 +33,7 @@ export XDG_CONFIG_HOME="$root/xdg-config"
 export XDG_CACHE_HOME="$root/xdg-cache"
 export OMNI_CACHE_DIR="$root/omni-cache"
 export OMNI_CONFIG="$root/xdg-config/omni/settings.json"
+export OMNI_TEST_ISOLATED=1
 
 go telemetry off >/dev/null
 

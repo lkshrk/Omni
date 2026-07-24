@@ -154,9 +154,8 @@ func setMcpGroupsInConfig(cfg *config.RootConfig, name string, groups map[string
 	}
 }
 
-// SetMcpGroups persists group membership for an MCP server, assuming the
-// target groups already exist (unlike SetSkillGroups, this does not create
-// groups or auto-assign them to a host).
+// SetMcpGroups persists group membership for an MCP server, creating missing
+// target groups like the other membership setters.
 func (a *App) SetMcpGroups(ctx context.Context, name string, groups []string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -169,6 +168,9 @@ func (a *App) SetMcpGroups(ctx context.Context, name string, groups []string) er
 		}
 		if !slices.ContainsFunc(cfg.Agents.McpServers, func(s config.McpServer) bool { return s.Name == name }) {
 			return fmt.Errorf("mcp server %q not found", name)
+		}
+		if err := ensureMembershipTargetGroups(cfg, targets); err != nil {
+			return err
 		}
 		setMcpGroupsInConfig(cfg, name, targets)
 		return nil
@@ -190,8 +192,8 @@ func setPluginGroupsInConfig(cfg *config.RootConfig, name string, groups map[str
 	}
 }
 
-// SetPluginGroups persists group membership for a plugin, assuming the target
-// groups already exist (see SetMcpGroups).
+// SetPluginGroups persists group membership for a plugin, creating missing
+// target groups like the other membership setters.
 func (a *App) SetPluginGroups(ctx context.Context, name string, groups []string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -204,6 +206,9 @@ func (a *App) SetPluginGroups(ctx context.Context, name string, groups []string)
 		}
 		if !slices.ContainsFunc(cfg.Agents.Plugins, func(p config.Plugin) bool { return p.Name == name }) {
 			return fmt.Errorf("plugin %q not found", name)
+		}
+		if err := ensureMembershipTargetGroups(cfg, targets); err != nil {
+			return err
 		}
 		setPluginGroupsInConfig(cfg, name, targets)
 		return nil
@@ -225,8 +230,8 @@ func setMarketplaceGroupsInConfig(cfg *config.RootConfig, name string, groups ma
 	}
 }
 
-// SetMarketplaceGroups persists group membership for a marketplace, assuming
-// the target groups already exist (see SetMcpGroups).
+// SetMarketplaceGroups persists group membership for a marketplace, creating
+// missing target groups like the other membership setters.
 func (a *App) SetMarketplaceGroups(ctx context.Context, name string, groups []string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -239,6 +244,9 @@ func (a *App) SetMarketplaceGroups(ctx context.Context, name string, groups []st
 		}
 		if !slices.ContainsFunc(cfg.Agents.Marketplaces, func(mk config.Marketplace) bool { return mk.Name == name }) {
 			return fmt.Errorf("marketplace %q not found", name)
+		}
+		if err := ensureMembershipTargetGroups(cfg, targets); err != nil {
+			return err
 		}
 		setMarketplaceGroupsInConfig(cfg, name, targets)
 		return nil
