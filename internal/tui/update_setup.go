@@ -32,6 +32,10 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 	if !wasSetupReloading {
 		m.setupReloading = false
 	}
+	if msg.err == nil && m.startupLoadErr {
+		m.err = nil
+		m.startupLoadErr = false
+	}
 	if msg.noConfig {
 		m.finishSetupReload()
 		m.mode = viewSetup
@@ -42,6 +46,7 @@ func (m *Model) handleToolsLoadedMsg(msg toolsLoadedMsg) []tea.Cmd {
 	if msg.err != nil {
 		m.finishSetupReload()
 		m.err = msg.err
+		m.startupLoadErr = true
 		return nil
 	}
 	// Config was just created in setup — advance to provider/import step.

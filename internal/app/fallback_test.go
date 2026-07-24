@@ -1,9 +1,11 @@
 package app_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -18,6 +20,12 @@ import (
 	"github.com/lkshrk/omni/internal/executor"
 	isync "github.com/lkshrk/omni/internal/sync"
 )
+
+type fallbackTestExecutorFunc func(context.Context, string, ...string) (string, string, error)
+
+func (f fallbackTestExecutorFunc) Run(ctx context.Context, name string, args ...string) (string, string, error) {
+	return f(ctx, name, args...)
+}
 
 func TestInstallToolFallback_RunsInstallCheckAndUpdatesState(t *testing.T) {
 	t.Parallel()
@@ -387,6 +395,66 @@ func TestSync_UsesFallbackWhenNativePackageUnavailable(t *testing.T) {
 	}
 	if !cached.Installed || cached.InstalledWith != "gh" {
 		t.Fatalf("cached = installed %v with %q, want installed with gh", cached.Installed, cached.InstalledWith)
+	}
+}
+
+func TestSync_FailedFallbackInstallRecordsOneAttempt(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	system := &lifecycleProvider{
+		stubProvider: stubProvider{name: "system", available: true},
+		resolvedName: "apt",
+	}
+	apt := &lifecycleProvider{stubProvider: stubProvider{name: "apt", available: true}}
+	fallbackExec := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "sh -c install rg", Response: executor.MockCall{Err: errors.New("install failed")}},
+	).WithFallback(executor.MockCall{Err: errors.New("unexpected fallback command")})
+	a, cfgPath := newImportApp(t, system, apt)
+	a.SetFallbackExecutor(fallbackExec)
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"rg": {
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
+				Fallback: &config.FallbackSpec{
+					Source: config.FallbackSource{Type: config.FallbackSourceGitHub, Owner: "BurntSushi", Repo: "ripgrep"},
+					Status: config.FallbackStatusUnverified,
+					Commands: config.FallbackCommands{
+						Install: "install rg",
+						Check:   "command -v rg",
+					},
+				},
+			},
+		},
+		Groups: []*config.GroupConfig{{Tools: groupTools("rg")}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	if err := a.DB().UpsertPackageAvailability(ctx, database.PackageAvailability{
+		Name: "rg", Provider: "apt", Package: "rg", Available: false, Reason: "no candidate",
+	}); err != nil {
+		t.Fatalf("seed package availability: %v", err)
+	}
+
+	result, err := a.Sync(ctx, isync.SyncOptions{})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if failed := result.Failed(); len(failed) != 1 || !strings.Contains(failed[0].Err.Error(), "install failed") {
+		t.Fatalf("failed ops = %+v, want one install failure", failed)
+	}
+	cached, err := a.DB().Get(ctx, "rg", "apt", "rg")
+	if err != nil {
+		t.Fatalf("Get failed fallback row: %v", err)
+	}
+	if cached.FailureCount != 1 {
+		t.Fatalf("FailureCount = %d, want one record for one failed attempt", cached.FailureCount)
+	}
+	got, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if got.Tools["rg"].Fallback.Status != config.FallbackStatusFailed {
+		t.Fatalf("fallback status = %q, want failed", got.Tools["rg"].Fallback.Status)
 	}
 }
 
@@ -1147,22 +1215,25 @@ func TestUpgradeToolFallback_GitHubOutdatedRefreshesRecipeBeforeUpgrade(t *testi
 	t.Parallel()
 	ctx := context.Background()
 	latestAsset := currentPlatformGitHubCLIAsset(t)
+	binaryContent := []byte("new gh binary")
+	assetContent := buildTarGz(t, "gh", binaryContent)
 	calls := int32(0)
 	fallbackExec := executor.NewMatchMock().WithFallback(executor.MockCall{})
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
+	a.CacheDir = t.TempDir()
 	a.SetFallbackExecutor(fallbackExec)
-	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubFallbackLatestReleaseClient(t, &calls, func() io.ReadCloser {
+	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubFallbackUpgradeClient(t, &calls, func() io.ReadCloser {
 		body, err := os.Open("testdata/github_cli_latest_release.json")
 		if err != nil {
 			t.Fatalf("open GitHub fixture: %v", err)
 		}
 		return body
-	}))
+	}, assetContent, http.StatusOK))
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"gh": {
 				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
-				Fallback:  oldGitHubCLIFallbackSpec(),
+				Fallback:  nativeOldGitHubCLIFallbackSpec(),
 			},
 		},
 		Groups: []*config.GroupConfig{{Tools: groupTools("gh")}},
@@ -1178,8 +1249,8 @@ func TestUpgradeToolFallback_GitHubOutdatedRefreshesRecipeBeforeUpgrade(t *testi
 	if got := atomic.LoadInt32(&calls); got != 1 {
 		t.Fatalf("GitHub latest release calls = %d, want 1", got)
 	}
-	assertFallbackCommandContains(t, fallbackExec, latestAsset.downloadURL)
 	assertFallbackCommandNotContains(t, fallbackExec, "https://github.com/cli/cli/releases/download/v2.92.0/gh_2.92.0_old.zip")
+	assertFallbackCommandNotContains(t, fallbackExec, latestAsset.downloadURL)
 	got, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
@@ -1200,17 +1271,18 @@ func TestUpgradeToolFallback_GitHubOutdatedRefreshesRecipeBeforeUpgrade(t *testi
 	if fallback.Recipe.AssetDownloadURL != latestAsset.downloadURL {
 		t.Fatalf("fallback asset URL = %q, want %q", fallback.Recipe.AssetDownloadURL, latestAsset.downloadURL)
 	}
+	assertBinaryInstalled(t, a, *fallback, "gh", binaryContent)
 	assertGitHubFallbackOutdated(t, a.DB(), false, "")
 }
 
-func TestUpgradeToolFallback_GitHubRefreshFailureKeepsOldRecipeAndOutdatedRow(t *testing.T) {
+func TestUpgradeToolFallback_GitHubRefreshPreservesCustomCommands(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	latestAsset := currentPlatformGitHubCLIAsset(t)
 	calls := int32(0)
 	fallbackExec := executor.NewMatchMock(
-		executor.MatchRule{Pattern: "sh -c mkdir -p", Response: executor.MockCall{Err: errors.New("download failed"), Stderr: "curl failed"}},
-	).WithFallback(executor.MockCall{})
+		executor.MatchRule{Pattern: "sh -c custom upgrade", Response: executor.MockCall{}},
+		executor.MatchRule{Pattern: "sh -c custom check", Response: executor.MockCall{}},
+	).WithFallback(executor.MockCall{Err: errors.New("unexpected fallback command")})
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
 	a.SetFallbackExecutor(fallbackExec)
 	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubFallbackLatestReleaseClient(t, &calls, func() io.ReadCloser {
@@ -1220,11 +1292,20 @@ func TestUpgradeToolFallback_GitHubRefreshFailureKeepsOldRecipeAndOutdatedRow(t 
 		}
 		return body
 	}))
+	fallback := oldGitHubCLIFallbackSpec()
+	want := config.FallbackCommands{
+		Install:   "custom install",
+		Check:     "custom check",
+		Uninstall: "custom uninstall",
+		Upgrade:   "custom upgrade",
+		Version:   "custom version",
+	}
+	fallback.Commands = want
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"gh": {
 				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
-				Fallback:  oldGitHubCLIFallbackSpec(),
+				Fallback:  fallback,
 			},
 		},
 		Groups: []*config.GroupConfig{{Tools: groupTools("gh")}},
@@ -1233,15 +1314,107 @@ func TestUpgradeToolFallback_GitHubRefreshFailureKeepsOldRecipeAndOutdatedRow(t 
 	}
 	seedGitHubFallbackUpgradeCacheRow(t, a.DB(), true, "v2.93.0")
 
+	if err := a.UpgradeToolFallback(ctx, "gh"); err != nil {
+		t.Fatalf("UpgradeToolFallback: %v", err)
+	}
+	fallbackExec.AssertCalled(t, "sh -c custom upgrade")
+	fallbackExec.AssertCalled(t, "sh -c custom check")
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("GitHub latest release calls = %d, want 1", got)
+	}
+
+	got, err := config.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	if commands := got.Tools["gh"].Fallback.Commands; commands != want {
+		t.Fatalf("commands after refresh = %+v, want custom commands %+v", commands, want)
+	}
+}
+
+func TestUpgradeToolFallback_CustomCommandFailureMarksInstalledStateUnknown(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	fallbackExec := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "sh -c custom upgrade", Response: executor.MockCall{Err: errors.New("custom upgrade failed after mutation")}},
+	).WithFallback(executor.MockCall{Err: errors.New("unexpected fallback command")})
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
+	a.SetFallbackExecutor(fallbackExec)
+	fallback := oldGitHubCLIFallbackSpec()
+	fallback.Commands.Upgrade = "custom upgrade"
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"gh": {
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
+				Fallback:  fallback,
+			},
+		},
+		Groups: []*config.GroupConfig{{Tools: groupTools("gh")}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	seedGitHubFallbackUpgradeCacheRow(t, a.DB(), false, "")
+
 	err := a.UpgradeToolFallback(ctx, "gh")
-	if err == nil || !strings.Contains(err.Error(), "download failed") {
-		t.Fatalf("UpgradeToolFallback err = %v, want upgrade command failure", err)
+	if err == nil || !strings.Contains(err.Error(), "custom upgrade failed after mutation") {
+		t.Fatalf("UpgradeToolFallback err = %v, want custom upgrade failure", err)
+	}
+	fallbackExec.AssertCalled(t, "sh -c custom upgrade")
+
+	cached, err := a.DB().Get(ctx, "gh", "apt", "gh")
+	if err != nil {
+		t.Fatalf("Get gh after failed custom upgrade: %v", err)
+	}
+	if cached.Installed || cached.FailedAt == nil || cached.FailureCount != 1 {
+		t.Fatalf("cache after failed custom upgrade = installed:%v failed_at:%v count:%d, want unknown installation with one failure", cached.Installed, cached.FailedAt, cached.FailureCount)
+	}
+}
+
+func TestUpgradeToolFallback_GitHubRefreshFailureKeepsOldRecipeAndOutdatedRow(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	latestAsset := currentPlatformGitHubCLIAsset(t)
+	calls := int32(0)
+	fallbackExec := executor.NewMatchMock().WithFallback(executor.MockCall{})
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
+	a.CacheDir = t.TempDir()
+	a.SetFallbackExecutor(fallbackExec)
+	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubFallbackUpgradeClient(t, &calls, func() io.ReadCloser {
+		body, err := os.Open("testdata/github_cli_latest_release.json")
+		if err != nil {
+			t.Fatalf("open GitHub fixture: %v", err)
+		}
+		return body
+	}, nil, http.StatusNotFound))
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"gh": {
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
+				Fallback:  nativeOldGitHubCLIFallbackSpec(),
+			},
+		},
+		Groups: []*config.GroupConfig{{Tools: groupTools("gh")}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	seedGitHubFallbackUpgradeCacheRow(t, a.DB(), true, "v2.93.0")
+	if err := a.DB().UpsertPackageAvailability(ctx, database.PackageAvailability{
+		Name: "gh", Provider: "apt", Package: "gh", Available: false, Reason: "no candidate",
+	}); err != nil {
+		t.Fatalf("seed package availability: %v", err)
+	}
+
+	err := a.UpgradeToolFallback(ctx, "gh")
+	if err == nil || !strings.Contains(err.Error(), "HTTP 404") {
+		t.Fatalf("UpgradeToolFallback err = %v, want native download failure", err)
 	}
 
 	if got := atomic.LoadInt32(&calls); got != 1 {
 		t.Fatalf("GitHub latest release calls = %d, want 1", got)
 	}
-	assertFallbackCommandContains(t, fallbackExec, latestAsset.downloadURL)
+	if got := fallbackExec.CallCount(); got != 0 {
+		t.Fatalf("fallback shell command count = %d, want zero before native download failure", got)
+	}
 	got, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
@@ -1263,31 +1436,43 @@ func TestUpgradeToolFallback_GitHubRefreshFailureKeepsOldRecipeAndOutdatedRow(t 
 		t.Fatalf("fallback upgrade command = %q, want old command preserved after failure", fallback.Commands.Upgrade)
 	}
 	assertGitHubFallbackOutdated(t, a.DB(), true, "v2.93.0")
+
+	result, err := a.Sync(ctx, isync.SyncOptions{})
+	if err != nil {
+		t.Fatalf("Sync after failed fallback download: %v", err)
+	}
+	if failed := result.Failed(); len(failed) != 0 {
+		t.Fatalf("failed ops after retained fallback download = %+v, want none", failed)
+	}
+	if skipped := result.Skipped(); len(skipped) != 1 || skipped[0].Tool.Name != "gh" || skipped[0].Version != "2.92.0" {
+		t.Fatalf("skipped ops after retained fallback download = %+v, want already-installed gh@2.92.0", skipped)
+	}
 }
 
 func TestUpgradeToolFallback_GitHubRefreshCheckFailureKeepsOldRecipeAndOutdatedRow(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	latestAsset := currentPlatformGitHubCLIAsset(t)
+	assetContent := buildTarGz(t, "gh", []byte("new gh binary"))
 	calls := int32(0)
 	fallbackExec := executor.NewMatchMock(
-		executor.MatchRule{Pattern: "sh -c mkdir -p", Response: executor.MockCall{}},
 		executor.MatchRule{Pattern: "sh -c test -x", Response: executor.MockCall{Err: errors.New("missing refreshed binary")}},
-	).WithFallback(executor.MockCall{})
+	).WithFallback(executor.MockCall{Err: errors.New("old binary is not runnable")})
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
+	a.CacheDir = t.TempDir()
 	a.SetFallbackExecutor(fallbackExec)
-	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubFallbackLatestReleaseClient(t, &calls, func() io.ReadCloser {
+	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubFallbackUpgradeClient(t, &calls, func() io.ReadCloser {
 		body, err := os.Open("testdata/github_cli_latest_release.json")
 		if err != nil {
 			t.Fatalf("open GitHub fixture: %v", err)
 		}
 		return body
-	}))
+	}, assetContent, http.StatusOK))
 	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
 		Tools: map[string]config.ToolSpec{
 			"gh": {
 				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
-				Fallback:  oldGitHubCLIFallbackSpec(),
+				Fallback:  nativeOldGitHubCLIFallbackSpec(),
 			},
 		},
 		Groups: []*config.GroupConfig{{Tools: groupTools("gh")}},
@@ -1295,16 +1480,36 @@ func TestUpgradeToolFallback_GitHubRefreshCheckFailureKeepsOldRecipeAndOutdatedR
 		t.Fatalf("config.Save: %v", err)
 	}
 	seedGitHubFallbackUpgradeCacheRow(t, a.DB(), true, "v2.93.0")
+	if err := a.DB().UpsertPackageAvailability(ctx, database.PackageAvailability{
+		Name: "gh", Provider: "apt", Package: "gh", Available: false, Reason: "no candidate",
+	}); err != nil {
+		t.Fatalf("seed package availability: %v", err)
+	}
+	cacheDir, err := a.FallbackCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	binPath := filepath.Join(cacheDir, "bin", "gh")
+	if err := os.MkdirAll(filepath.Dir(binPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldBinary := []byte("old gh binary")
+	if err := os.WriteFile(binPath, oldBinary, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
-	err := a.UpgradeToolFallback(ctx, "gh")
+	err = a.UpgradeToolFallback(ctx, "gh")
 	if err == nil || !strings.Contains(err.Error(), "upgrade verification failed") {
 		t.Fatalf("UpgradeToolFallback err = %v, want check failure", err)
+	}
+	if got, readErr := os.ReadFile(binPath); readErr != nil || !bytes.Equal(got, oldBinary) {
+		t.Fatalf("binary after failed upgrade = %q err=%v, want restored %q", got, readErr, oldBinary)
 	}
 
 	if got := atomic.LoadInt32(&calls); got != 1 {
 		t.Fatalf("GitHub latest release calls = %d, want 1", got)
 	}
-	assertFallbackCommandContains(t, fallbackExec, latestAsset.downloadURL)
+	assertFallbackCommandNotContains(t, fallbackExec, latestAsset.downloadURL)
 	got, err := config.Load(cfgPath)
 	if err != nil {
 		t.Fatalf("config.Load: %v", err)
@@ -1323,13 +1528,113 @@ func TestUpgradeToolFallback_GitHubRefreshCheckFailureKeepsOldRecipeAndOutdatedR
 		t.Fatalf("fallback check command = %q, want old command preserved after check failure", fallback.Commands.Check)
 	}
 	assertGitHubFallbackOutdated(t, a.DB(), true, "v2.93.0")
+	cached, err := a.DB().Get(ctx, "gh", "apt", "gh")
+	if err != nil {
+		t.Fatalf("Get gh after failed upgrade: %v", err)
+	}
+	if !cached.Installed || !cached.Version.Valid || cached.Version.String != "2.92.0" {
+		t.Fatalf("cache after failed upgrade = installed:%v version:%+v, want installed gh@2.92.0", cached.Installed, cached.Version)
+	}
+
+	result, err := a.Sync(ctx, isync.SyncOptions{})
+	if err != nil {
+		t.Fatalf("Sync after fallback verification failure: %v", err)
+	}
+	if skipped := result.Skipped(); len(skipped) != 0 {
+		t.Fatalf("skipped ops after unusable fallback upgrade = %+v, want none", skipped)
+	}
+	if failed := result.Failed(); len(failed) != 1 || failed[0].Tool.Name != "gh" {
+		t.Fatalf("failed ops after unusable fallback upgrade = %+v, want gh failure", failed)
+	}
+	cached, err = a.DB().Get(ctx, "gh", "apt", "gh")
+	if err != nil {
+		t.Fatalf("Get gh after unusable fallback upgrade: %v", err)
+	}
+	if cached.Installed || cached.FailedAt == nil || cached.FailureCount != 1 {
+		t.Fatalf("cache after unusable fallback upgrade = installed:%v failed_at:%v count:%d, want missing with one retained failure", cached.Installed, cached.FailedAt, cached.FailureCount)
+	}
+}
+
+func TestUpgradeToolFallback_NativeRollbackFailureMarksInstalledStateUnknown(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	assetContent := buildTarGz(t, "gh", []byte("new gh binary"))
+	calls := int32(0)
+	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
+	a.CacheDir = t.TempDir()
+	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubFallbackUpgradeClient(t, &calls, func() io.ReadCloser {
+		body, err := os.Open("testdata/github_cli_latest_release.json")
+		if err != nil {
+			t.Fatalf("open GitHub fixture: %v", err)
+		}
+		return body
+	}, assetContent, http.StatusOK))
+	if err := saveAppConfig(t, cfgPath, &config.RootConfig{
+		Tools: map[string]config.ToolSpec{
+			"gh": {
+				Providers: []config.ToolInstallSpec{{Provider: "apt"}},
+				Fallback:  nativeOldGitHubCLIFallbackSpec(),
+			},
+		},
+		Groups: []*config.GroupConfig{{Tools: groupTools("gh")}},
+	}); err != nil {
+		t.Fatalf("config.Save: %v", err)
+	}
+	seedGitHubFallbackUpgradeCacheRow(t, a.DB(), true, "v2.93.0")
+
+	cacheDir, err := a.FallbackCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	binDir := filepath.Join(cacheDir, "bin")
+	binPath := filepath.Join(binDir, "gh")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(binPath, []byte("old gh binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	movedBinDir := binDir + ".moved"
+	a.SetFallbackExecutor(fallbackTestExecutorFunc(func(_ context.Context, name string, args ...string) (string, string, error) {
+		if name != "sh" || len(args) != 2 || args[0] != "-c" || !strings.Contains(args[1], "test -x") {
+			return "", "", fmt.Errorf("unexpected fallback command: %s %s", name, strings.Join(args, " "))
+		}
+		if err := os.Rename(binDir, movedBinDir); err != nil {
+			return "", "", fmt.Errorf("move fallback bin dir: %w", err)
+		}
+		if err := os.WriteFile(binDir, []byte("block rollback destination"), 0o644); err != nil {
+			return "", "", fmt.Errorf("block fallback bin dir: %w", err)
+		}
+		return "", "", errors.New("refreshed binary check failed")
+	}))
+
+	err = a.UpgradeToolFallback(ctx, "gh")
+	if removeErr := os.Remove(binDir); removeErr != nil {
+		t.Fatalf("remove rollback blocker: %v", removeErr)
+	}
+	if renameErr := os.Rename(movedBinDir, binDir); renameErr != nil {
+		t.Fatalf("restore fallback bin dir fixture: %v", renameErr)
+	}
+	if err == nil || !strings.Contains(err.Error(), "restore previous fallback binary") {
+		t.Fatalf("UpgradeToolFallback err = %v, want joined rollback failure", err)
+	}
+
+	cached, err := a.DB().Get(ctx, "gh", "apt", "gh")
+	if err != nil {
+		t.Fatalf("Get gh after failed rollback: %v", err)
+	}
+	if cached.Installed || cached.FailedAt == nil || cached.FailureCount != 1 {
+		t.Fatalf("cache after failed rollback = installed:%v failed_at:%v count:%d, want unknown installation with one failure", cached.Installed, cached.FailedAt, cached.FailureCount)
+	}
 }
 
 func TestUpgradeToolFallback_GitHubResolverFailureKeepsOldRecipeAndOutdatedRow(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	calls := int32(0)
-	fallbackExec := executor.NewMatchMock().WithFallback(executor.MockCall{Err: errors.New("unexpected fallback command")})
+	fallbackExec := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "sh -c command -v gh", Response: executor.MockCall{}},
+	).WithFallback(executor.MockCall{Err: errors.New("unexpected fallback command")})
 	a, cfgPath := newImportApp(t, &stubProvider{name: "system", available: true}, &stubProvider{name: "apt", available: true})
 	a.SetFallbackExecutor(fallbackExec)
 	a.SetGitHubFallbackAPIForTest("https://api.github.test", githubFallbackLatestReleaseClient(t, &calls, func() io.ReadCloser {
@@ -1352,6 +1657,11 @@ func TestUpgradeToolFallback_GitHubResolverFailureKeepsOldRecipeAndOutdatedRow(t
 		t.Fatalf("config.Save: %v", err)
 	}
 	seedGitHubFallbackUpgradeCacheRow(t, a.DB(), true, "v2.93.0")
+	if err := a.DB().UpsertPackageAvailability(ctx, database.PackageAvailability{
+		Name: "gh", Provider: "apt", Package: "gh", Available: false, Reason: "no candidate",
+	}); err != nil {
+		t.Fatalf("seed package availability: %v", err)
+	}
 
 	err := a.UpgradeToolFallback(ctx, "gh")
 	if err == nil {
@@ -1362,7 +1672,7 @@ func TestUpgradeToolFallback_GitHubResolverFailureKeepsOldRecipeAndOutdatedRow(t
 		t.Fatalf("GitHub latest release calls = %d, want 1", got)
 	}
 	if got := fallbackExec.CallCount(); got != 0 {
-		t.Fatalf("fallback command count = %d, want zero when resolver fails", got)
+		t.Fatalf("fallback command count = %d, want zero when resolver fails; calls = %+v", got, fallbackExec.Calls)
 	}
 	got, err := config.Load(cfgPath)
 	if err != nil {
@@ -1391,6 +1701,32 @@ func TestUpgradeToolFallback_GitHubResolverFailureKeepsOldRecipeAndOutdatedRow(t
 		t.Fatalf("fallback check command = %q, want old command preserved", fallback.Commands.Check)
 	}
 	assertGitHubFallbackOutdated(t, a.DB(), true, "v2.93.0")
+	cached, err := a.DB().Get(ctx, "gh", "apt", "gh")
+	if err != nil {
+		t.Fatalf("Get gh after failed upgrade: %v", err)
+	}
+	if !cached.Installed || cached.InstalledWith != "gh" || !cached.Version.Valid || cached.Version.String != "2.92.0" {
+		t.Fatalf("installed state after failed upgrade = installed:%v with:%q version:%+v, want installed gh@2.92.0", cached.Installed, cached.InstalledWith, cached.Version)
+	}
+	if cached.FailedAt == nil || cached.FailureCount != 1 || !cached.LastError.Valid {
+		t.Fatalf("failure state after failed upgrade = failed_at:%v count:%d error:%+v, want one recorded failure", cached.FailedAt, cached.FailureCount, cached.LastError)
+	}
+
+	result, err := a.Sync(ctx, isync.SyncOptions{})
+	if err != nil {
+		t.Fatalf("Sync after failed fallback upgrade: %v", err)
+	}
+	if failed := result.Failed(); len(failed) != 0 {
+		t.Fatalf("failed ops after retained fallback upgrade = %+v, want none; calls = %+v", failed, fallbackExec.Calls)
+	}
+	if skipped := result.Skipped(); len(skipped) != 1 || skipped[0].Tool.Name != "gh" || skipped[0].Version != "2.92.0" {
+		t.Fatalf("skipped ops after retained fallback upgrade = %+v, want already-installed gh@2.92.0", skipped)
+	}
+	fallbackExec.AssertCalled(t, "sh -c command -v gh")
+	checks := fallbackExec.CallsMatching("sh -c command -v gh")
+	if got := fallbackExec.CallCount(); got != len(checks) {
+		t.Fatalf("fallback commands after failed upgrade and sync = %+v, want checks only", fallbackExec.Calls)
+	}
 }
 
 func TestUpgradeToolFallback_GitHubNotOutdatedUsesSavedRecipeWithoutReleaseLookup(t *testing.T) {
@@ -1614,6 +1950,12 @@ func oldGitHubCLIFallbackSpec() *config.FallbackSpec {
 	}
 }
 
+func nativeOldGitHubCLIFallbackSpec() *config.FallbackSpec {
+	fallback := oldGitHubCLIFallbackSpec()
+	fallback.Commands = config.FallbackCommands{}
+	return fallback
+}
+
 func seedGitHubFallbackUpgradeCacheRow(t *testing.T, db *database.DB, outdated bool, latestVersion string) {
 	t.Helper()
 	ctx := context.Background()
@@ -1623,6 +1965,7 @@ func seedGitHubFallbackUpgradeCacheRow(t *testing.T, db *database.DB, outdated b
 		Package:       "gh",
 		Installed:     true,
 		InstalledWith: "gh",
+		Version:       sql.NullString{String: "2.92.0", Valid: true},
 		Outdated:      outdated,
 		LastChecked:   time.Now(),
 	}); err != nil {
@@ -1635,14 +1978,30 @@ func seedGitHubFallbackUpgradeCacheRow(t *testing.T, db *database.DB, outdated b
 	}
 }
 
-func assertFallbackCommandContains(t *testing.T, exec *executor.MatchMockExecutor, value string) {
+func githubFallbackUpgradeClient(t *testing.T, calls *int32, latest func() io.ReadCloser, asset []byte, assetStatus int) *http.Client {
 	t.Helper()
-	for _, call := range exec.CallsMatching("sh -c ") {
-		if strings.Contains(call.Name+" "+strings.Join(call.Args, " "), value) {
-			return
+	return &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		status := http.StatusOK
+		body := io.NopCloser(strings.NewReader(string(asset)))
+		switch {
+		case req.URL.Path == "/repos/cli/cli/releases/latest":
+			atomic.AddInt32(calls, 1)
+			body = latest()
+		case strings.Contains(req.URL.Path, "/releases/download/"):
+			status = assetStatus
+		case req.URL.Path == "/repos/cli/cli/releases/tags/v2.93.0":
+			status = http.StatusNotFound
+		default:
+			t.Fatalf("unexpected GitHub path %q", req.URL.Path)
 		}
-	}
-	t.Fatalf("fallback commands did not contain %q; calls = %+v", value, exec.Calls)
+		return &http.Response{
+			StatusCode: status,
+			Status:     fmt.Sprintf("%d %s", status, http.StatusText(status)),
+			Body:       body,
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})}
 }
 
 func assertFallbackCommandNotContains(t *testing.T, exec *executor.MatchMockExecutor, value string) {

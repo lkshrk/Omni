@@ -304,6 +304,9 @@ func parseCodexMcpList(out string) ([]InstalledMcpServer, error) {
 	if err := json.Unmarshal([]byte(out), &entries); err != nil {
 		return nil, fmt.Errorf("codex mcp list: parse json: %w", err)
 	}
+	if entries == nil {
+		return nil, fmt.Errorf("codex mcp list: parse json: expected array, got null")
+	}
 	servers := make([]InstalledMcpServer, 0, len(entries))
 	for _, e := range entries {
 		s := InstalledMcpServer{Name: e.Name}

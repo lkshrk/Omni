@@ -846,7 +846,7 @@ func recordAdminTerminalTrace(ctx context.Context, sink executor.TraceSink, stat
 	if errors.As(err, &exitErr) {
 		exitCode = sql.NullInt64{Int64: int64(exitErr.ExitCode()), Valid: true}
 	}
-	_ = sink.RecordCommandTrace(context.WithoutCancel(ctx), executor.TraceRecord{
+	trace := executor.SanitizeTraceRecord(executor.TraceRecord{
 		StartedAt:  started,
 		FinishedAt: finished,
 		DurationMS: finished.Sub(started).Milliseconds(),
@@ -856,6 +856,7 @@ func recordAdminTerminalTrace(ctx context.Context, sink executor.TraceSink, stat
 		ExitCode:   exitCode,
 		Error:      adminTerminalTraceError(err),
 	})
+	_ = sink.RecordCommandTrace(context.WithoutCancel(ctx), trace)
 }
 
 func adminTerminalTraceError(err error) string {

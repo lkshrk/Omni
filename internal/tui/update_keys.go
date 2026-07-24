@@ -27,7 +27,7 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 		return *m, tea.Batch(cmds...)
 	}
 
-	if key.Matches(msg, m.keys.Help) {
+	if !m.focusedTextInputActive() && key.Matches(msg, m.keys.Help) {
 		m.help.ShowAll = !m.help.ShowAll
 		return *m, nil
 	}
@@ -46,7 +46,7 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 		}
 	}
 
-	if key.Matches(msg, m.keys.Quit) {
+	if key.Matches(msg, m.keys.Quit) && (!m.focusedTextInputActive() || isCtrlC(msg)) {
 		if m.confirmQuit {
 			m.shutdown()
 			return *m, tea.Quit
@@ -111,7 +111,7 @@ func (m *Model) handleKeyPressMsg(msg tea.KeyPressMsg, cmds []tea.Cmd) (tea.Mode
 	}
 
 	// Global actions available from any main tab.
-	if isMainTabMode(m.mode) && key.Matches(msg, m.keys.DotCommit) {
+	if isMainTabMode(m.mode) && !m.focusedTextInputActive() && key.Matches(msg, m.keys.DotCommit) {
 		m.startDashboardDotsCommit(&cmds)
 		return *m, tea.Batch(cmds...)
 	}
@@ -219,6 +219,41 @@ func isCtrlC(msg tea.KeyPressMsg) bool {
 	return msg.Mod == tea.ModCtrl && msg.Code == 'c'
 }
 
+func (m *Model) focusedTextInputActive() bool {
+	if m.showFilePicker {
+		return m.dotsFilePicker.input.Focused()
+	}
+	switch m.mode {
+	case viewSearch:
+		return m.filter.Focused()
+	case viewDots:
+		return m.dotsSearchActive && m.filter.Focused()
+	case viewSkills:
+		if m.skillsSearchActive && m.filter.Focused() {
+			return true
+		}
+		if m.pluginFormOpen {
+			return m.pluginFormName.Focused() || m.pluginFormMarketplace.Focused() || m.pluginFormAgents.Focused()
+		}
+		return m.mcpFormOpen && (m.mcpFormName.Focused() || m.mcpFormCommand.Focused() || m.mcpFormURL.Focused() || m.mcpFormEnv.Focused() || m.mcpFormEnvLit.Focused())
+	case viewCommand:
+		return m.commandInput.Focused()
+	case viewFallbackEditor:
+		return m.settingsInput.Focused()
+	case viewGroups:
+		editing := m.hostRenameMode || m.groupRenameMode || m.groupCreating || (m.hostEditMode == 1 && m.pickerCreatingGroup)
+		return editing && m.settingsInput.Focused()
+	case viewGroupPicker, viewGroupMembership:
+		return m.pickerCreatingGroup && m.settingsInput.Focused()
+	case viewGroupTools:
+		return m.groupToolsEditor.searchActive && m.settingsInput.Focused()
+	case viewGroupDots:
+		return m.groupDotsEditor.searchActive && m.settingsInput.Focused()
+	default:
+		return false
+	}
+}
+
 // handleSkillsKeyMsg dispatches keys for the skills chip (skillTypeIdx ==
 // agentsChipSkills): chip switching, agent filter cycling, cursor movement
 // across local + find-result rows, and r/i/u/g/a/c actions. 'c' claims an
@@ -311,7 +346,7 @@ func (m *Model) handleSkillsKeyMsg(msg tea.KeyPressMsg) []tea.Cmd {
 }
 
 func (m *Model) handleTabKeyMsg(msg tea.KeyPressMsg, cmds *[]tea.Cmd) bool {
-	if !key.Matches(msg, m.keys.Tab) || m.mode == viewSearch || m.mode == viewCommand || m.mode == viewGroupPicker || m.mode == viewGroupMembership || m.mode == viewGroupTools || m.mode == viewGroupDots || m.mode == viewIgnoreScope || m.mode == viewProviderScope || m.mode == viewAdminTerminal || m.hostRequired || m.mcpFormOpen || m.mcpAgentsPicker || m.skillAgentsPicker || m.pluginAgentsPicker || m.pluginFormOpen {
+	if m.focusedTextInputActive() || !key.Matches(msg, m.keys.Tab) || m.mode == viewSearch || m.mode == viewCommand || m.mode == viewGroupPicker || m.mode == viewGroupMembership || m.mode == viewGroupTools || m.mode == viewGroupDots || m.mode == viewIgnoreScope || m.mode == viewProviderScope || m.mode == viewAdminTerminal || m.hostRequired || m.mcpFormOpen || m.mcpAgentsPicker || m.skillAgentsPicker || m.pluginAgentsPicker || m.pluginFormOpen {
 		return false
 	}
 	tabs := mainTabs()
@@ -390,7 +425,7 @@ func isMainTabMode(mode viewMode) bool {
 }
 
 func (m *Model) handlePaletteOpenKeyMsg(msg tea.KeyPressMsg, cmds *[]tea.Cmd) bool {
-	if !key.Matches(msg, m.keys.Palette) {
+	if m.focusedTextInputActive() || !key.Matches(msg, m.keys.Palette) {
 		return false
 	}
 	if m.loading {

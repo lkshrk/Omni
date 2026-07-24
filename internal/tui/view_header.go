@@ -244,7 +244,8 @@ func renderSetupPanel(m Model, panel setupPanel) string {
 }
 
 func renderSetupFooter(m Model, left, middle, right []hintItem) string {
-	return renderPopupActionColumns(m.palette, max(m.width, 1), left, middle, right)
+	width := max(m.width, 1)
+	return popupDivider(m.palette, width) + "\n" + renderPopupActionColumns(m.palette, width, left, middle, right)
 }
 
 func renderSetupOptions(m Model, options []setupOption) string {
@@ -433,10 +434,9 @@ func renderHeaderInfo(m Model) string {
 		return renderDotsHeaderInfo(m)
 	case viewGroups:
 		return renderGroupsHeaderInfo(m)
-	case viewStatus, viewSettings:
+	case viewStatus, viewSettings, viewSkills:
 		// Dashboard and settings keep the top-right for the version only
-		// (renderHeaderVersion); attention/provider summaries live in the
-		// tab bodies.
+		// (renderHeaderVersion); agents has no header summary.
 		return ""
 	default:
 		return renderToolsHeaderInfo(m)

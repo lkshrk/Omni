@@ -25,6 +25,7 @@ type palette struct {
 	colStatus         color.Color
 	colSection        color.Color
 	colDanger         color.Color
+	colSurface        color.Color
 
 	// Pre-built styles.
 	styleTitle          lipgloss.Style
@@ -74,6 +75,7 @@ func buildPaletteFor(isDark bool) palette {
 		p.colStatus = lipgloss.Color("#7dcfff")
 		p.colSection = lipgloss.Color("#7dcfff")
 		p.colDanger = lipgloss.Color("#ff5d7a")
+		p.colSurface = lipgloss.Color("#1a1b26")
 
 		p.styleNormal = lipgloss.NewStyle().Foreground(lipgloss.Color("#c8d3f5"))
 		p.styleSelected = lipgloss.NewStyle().Background(p.colSelected).Foreground(lipgloss.Color("#e3e9ff"))
@@ -94,6 +96,7 @@ func buildPaletteFor(isDark bool) palette {
 		p.colStatus = lipgloss.Color("#006d9c")
 		p.colSection = lipgloss.Color("#1f63d8")
 		p.colDanger = lipgloss.Color("#c9214d")
+		p.colSurface = lipgloss.Color("#e1e2e7")
 
 		p.styleNormal = lipgloss.NewStyle().Foreground(lipgloss.Color("#24304f"))
 		p.styleSelected = lipgloss.NewStyle().Background(p.colSelected).Foreground(lipgloss.Color("#111827"))

@@ -2,11 +2,34 @@ package app_test
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
 )
+
+func TestPluginRows_ListErrorIsSurfaced(t *testing.T) {
+	t.Parallel()
+	adapter := &stubPluginAdapter{
+		id:        "claude-code",
+		available: true,
+		listErr:   errors.New("parse json: expected object, got null"),
+	}
+	agents := config.AgentsConfig{
+		Marketplaces: []config.Marketplace{{Name: "market", Source: "owner/repo"}},
+		Plugins:      []config.Plugin{{Name: "plugin", Marketplace: "market"}},
+	}
+	a := newPluginTestApp(t, agents, app.WithPluginAdapters([]app.PluginAdapter{adapter}))
+	rows, _, err := a.PluginRows(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "expected object, got null") {
+		t.Fatalf("PluginRows error = %v, want adapter parse error", err)
+	}
+	if rows != nil {
+		t.Fatalf("PluginRows returned misleading rows after adapter parse error: %+v", rows)
+	}
+}
 
 func TestPluginRows_ManagedRowReportsPerAgentStatus(t *testing.T) {
 	t.Parallel()

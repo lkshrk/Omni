@@ -745,8 +745,8 @@ func TestModel_ToolsLoadedMsg(t *testing.T) {
 		got := drive(m, toolsLoadedMsg{
 			settings: config.Settings{DotsRepo: repoDir},
 		})
-		if got.statusMsg != "Syncing dots…" {
-			t.Fatalf("statusMsg = %q, want initial dots operation status", got.statusMsg)
+		if got.statusMsg != "" {
+			t.Fatalf("statusMsg = %q, want dots activity kept out of durable status", got.statusMsg)
 		}
 		if got.progressText != "Refreshing tools… 0/1: brew" {
 			t.Fatalf("progressText = %q, want provider refresh to replace dots activity", got.progressText)
@@ -3918,8 +3918,8 @@ func TestModel_PaletteDotsCommandsStartDotsOperations(t *testing.T) {
 			if !got.dotsLoading {
 				t.Fatal("dotsLoading = false, want true")
 			}
-			if got.statusMsg != tc.wantStatus {
-				t.Fatalf("statusMsg = %q, want %q", got.statusMsg, tc.wantStatus)
+			if got.progressText != tc.wantStatus {
+				t.Fatalf("progressText = %q, want %q", got.progressText, tc.wantStatus)
 			}
 		})
 	}
@@ -4510,8 +4510,8 @@ func TestModel_DotsTab_HostVariantFlow(t *testing.T) {
 		if m.dotsVariantIdx != -1 || m.dotsVariantMode != dotsVariantNone {
 			t.Fatalf("variant prompt = idx:%d mode:%v, want cleared", m.dotsVariantIdx, m.dotsVariantMode)
 		}
-		if !strings.Contains(m.statusMsg, "Creating variant for nvim") {
-			t.Fatalf("statusMsg = %q, want create variant status", m.statusMsg)
+		if !strings.Contains(m.progressText, "Creating variant for nvim") {
+			t.Fatalf("progressText = %q, want create variant status", m.progressText)
 		}
 	})
 
@@ -4530,8 +4530,8 @@ func TestModel_DotsTab_HostVariantFlow(t *testing.T) {
 		if !m.dotsLoading {
 			t.Fatal("dotsLoading should start after confirming variant removal")
 		}
-		if !strings.Contains(m.statusMsg, "Removing variant for nvim") {
-			t.Fatalf("statusMsg = %q, want remove variant status", m.statusMsg)
+		if !strings.Contains(m.progressText, "Removing variant for nvim") {
+			t.Fatalf("progressText = %q, want remove variant status", m.progressText)
 		}
 	})
 
@@ -4683,6 +4683,19 @@ func TestModel_DotsTab_Messages(t *testing.T) {
 		}
 	})
 
+	t.Run("detail-less dots load clears loading footer", func(t *testing.T) {
+		m := baseModel(nil)
+		m.beginDotsOperation("Loading dots…")
+
+		got := drive(m, dotsLoadedMsg{gen: m.dotsOpGen, entries: []app.DotStatus{}})
+		if got.dotsLoading {
+			t.Fatal("completed dots load retained loading state")
+		}
+		if footer := stripANSIEscapeSequences(renderStatusBar(got)); strings.Contains(footer, "Loading dots") {
+			t.Fatalf("completed dots load retained loading footer: %q", footer)
+		}
+	})
+
 	t.Run("begin dots operation cancels previous operation", func(t *testing.T) {
 		m := baseModel(nil)
 		cancelled := false
@@ -4691,8 +4704,8 @@ func TestModel_DotsTab_Messages(t *testing.T) {
 		if !cancelled {
 			t.Fatal("previous dots operation was not cancelled")
 		}
-		if !m.dotsLoading || m.statusMsg != "Discovering dots…" || m.dotsOpGen != 1 {
-			t.Fatalf("dots operation state = loading:%v status:%q gen:%d", m.dotsLoading, m.statusMsg, m.dotsOpGen)
+		if !m.dotsLoading || m.progressText != "Discovering dots…" || m.dotsOpGen != 1 {
+			t.Fatalf("dots operation state = loading:%v progress:%q gen:%d", m.dotsLoading, m.progressText, m.dotsOpGen)
 		}
 	})
 

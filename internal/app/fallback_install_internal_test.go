@@ -4,16 +4,21 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/ulikunitz/xz"
 
@@ -60,25 +65,27 @@ func TestIsChecksumAsset(t *testing.T) {
 
 func TestExtractChecksumForFile_MatchesFilename(t *testing.T) {
 	t.Parallel()
-	content := "abc123  fd_1.0_darwin_arm64.tar.gz\ndef456  fd_1.0_linux_amd64.tar.gz\n"
+	want := strings.Repeat("a", sha256.Size*2)
+	content := want + "  fd_1.0_darwin_arm64.tar.gz\n" + strings.Repeat("b", sha256.Size*2) + "  fd_1.0_linux_amd64.tar.gz\n"
 	got, err := extractChecksumForFile(strings.NewReader(content), "fd_1.0_darwin_arm64.tar.gz")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got != "abc123" {
-		t.Errorf("got %q, want abc123", got)
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }
 
 func TestExtractChecksumForFile_StripsLeadingPath(t *testing.T) {
 	t.Parallel()
-	content := "abc123  ./dist/fd_1.0_darwin_arm64.tar.gz\n"
+	want := strings.Repeat("a", sha256.Size*2)
+	content := want + "  ./dist/fd_1.0_darwin_arm64.tar.gz\n"
 	got, err := extractChecksumForFile(strings.NewReader(content), "fd_1.0_darwin_arm64.tar.gz")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got != "abc123" {
-		t.Errorf("got %q, want abc123", got)
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }
 
@@ -93,13 +100,185 @@ func TestExtractChecksumForFile_NotFound(t *testing.T) {
 
 func TestExtractChecksumForFile_SkipsComments(t *testing.T) {
 	t.Parallel()
-	content := "# comment\nabc123  target.tar.gz\n"
+	want := strings.Repeat("a", sha256.Size*2)
+	content := "# comment\n" + want + "  target.tar.gz\n"
 	got, err := extractChecksumForFile(strings.NewReader(content), "target.tar.gz")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got != "abc123" {
-		t.Errorf("got %q, want abc123", got)
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestExtractChecksumForFile_GNUBinaryMarker(t *testing.T) {
+	t.Parallel()
+	want := strings.Repeat("a", sha256.Size*2)
+	got, err := extractChecksumForFile(strings.NewReader(want+" *target.tar.gz\n"), "target.tar.gz")
+	if err != nil {
+		t.Fatalf("extractChecksumForFile: %v", err)
+	}
+	if got != want {
+		t.Fatalf("checksum = %q, want %q", got, want)
+	}
+}
+
+func TestExtractChecksumForFile_RejectsInvalidSHA256(t *testing.T) {
+	t.Parallel()
+	for _, digest := range []string{
+		"abc123",
+		strings.Repeat("g", sha256.Size*2),
+		strings.Repeat("a", sha256.Size*2+1),
+	} {
+		_, err := extractChecksumForFile(strings.NewReader(digest+"  target.tar.gz\n"), "target.tar.gz")
+		if err == nil || !strings.Contains(err.Error(), "invalid SHA-256") {
+			t.Errorf("digest %q: error = %v, want invalid SHA-256", digest, err)
+		}
+	}
+}
+
+func TestFetchReleaseChecksum_TriesEveryRecognizedAsset(t *testing.T) {
+	t.Parallel()
+	want := strings.Repeat("b", sha256.Size*2)
+	var checksumRequests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/owner/repo/releases/tags/v1":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": 1,
+				"assets": []map[string]any{
+					{"id": 2, "name": "first.sha256sum", "browser_download_url": "http://" + r.Host + "/unavailable"},
+					{"id": 3, "name": "checksums.txt", "browser_download_url": "http://" + r.Host + "/other"},
+					{"id": 4, "name": "release-checksums.txt", "browser_download_url": "http://" + r.Host + "/matching"},
+				},
+			})
+		case "/unavailable":
+			checksumRequests.Add(1)
+			http.Error(w, "try another manifest", http.StatusServiceUnavailable)
+		case "/other":
+			checksumRequests.Add(1)
+			_, _ = w.Write([]byte(strings.Repeat("c", sha256.Size*2) + "  other.tar.gz\n"))
+		case "/matching":
+			checksumRequests.Add(1)
+			_, _ = w.Write([]byte(want + "  tool.tar.gz\n"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	a := &App{}
+	a.SetGitHubFallbackAPIForTest(srv.URL, srv.Client())
+	got, err := a.fetchReleaseChecksum(t.Context(), "owner", "repo", "v1", "tool.tar.gz")
+	if err != nil {
+		t.Fatalf("fetchReleaseChecksum: %v", err)
+	}
+	if got != want {
+		t.Fatalf("checksum = %q, want %q", got, want)
+	}
+	if got := checksumRequests.Load(); got != 3 {
+		t.Fatalf("checksum requests = %d, want 3", got)
+	}
+}
+
+func TestFetchReleaseChecksum_AllRecognizedAssetsFail(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/owner/repo/releases/tags/v1":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": 1,
+				"assets": []map[string]any{
+					{"id": 2, "name": "first.sha256sum", "browser_download_url": "http://" + r.Host + "/unavailable"},
+					{"id": 3, "name": "checksums.txt", "browser_download_url": "http://" + r.Host + "/other"},
+				},
+			})
+		case "/unavailable":
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		case "/other":
+			_, _ = w.Write([]byte(strings.Repeat("c", sha256.Size*2) + "  other.tar.gz\n"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	a := &App{}
+	a.SetGitHubFallbackAPIForTest(srv.URL, srv.Client())
+	_, err := a.fetchReleaseChecksum(t.Context(), "owner", "repo", "v1", "tool.tar.gz")
+	if err == nil || !strings.Contains(err.Error(), "first.sha256sum") || !strings.Contains(err.Error(), "checksums.txt") {
+		t.Fatalf("error = %v, want failures for both recognized assets", err)
+	}
+}
+
+func TestVerifyFallbackChecksum_NonContextFailuresRemainBestEffort(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/owner/repo/releases/tags/v1":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": 1,
+				"assets": []map[string]any{
+					{"id": 2, "name": "first.sha256sum", "browser_download_url": "http://" + r.Host + "/unavailable"},
+					{"id": 3, "name": "checksums.txt", "browser_download_url": "http://" + r.Host + "/malformed"},
+				},
+			})
+		case "/unavailable":
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+		case "/malformed":
+			_, _ = w.Write([]byte("not-a-digest  tool.tar.gz\n"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	dir := t.TempDir()
+	assetPath := filepath.Join(dir, "tool.tar.gz")
+	if err := os.WriteFile(assetPath, []byte("payload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fallback := &config.FallbackSpec{
+		Source: config.FallbackSource{Owner: "owner", Repo: "repo"},
+		Recipe: config.FallbackRecipe{TagName: "v1", AssetID: "1"},
+	}
+	a := &App{}
+	a.SetGitHubFallbackAPIForTest(srv.URL, srv.Client())
+	if err := a.verifyFallbackChecksum(t.Context(), "tool", fallback, assetPath, "tool.tar.gz"); err != nil {
+		t.Fatalf("non-context checksum failures must remain best-effort: %v", err)
+	}
+}
+
+func TestVerifyFallbackChecksum_PropagatesContextErrors(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	assetPath := filepath.Join(dir, "tool.tar.gz")
+	if err := os.WriteFile(assetPath, []byte("payload"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fallback := &config.FallbackSpec{
+		Source: config.FallbackSource{Owner: "owner", Repo: "repo"},
+		Recipe: config.FallbackRecipe{TagName: "v1", AssetID: "1"},
+	}
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	deadline, deadlineCancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer deadlineCancel()
+	for _, tt := range []struct {
+		name string
+		ctx  context.Context
+		want error
+	}{
+		{name: "cancelled", ctx: cancelled, want: context.Canceled},
+		{name: "deadline", ctx: deadline, want: context.DeadlineExceeded},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := (&App{}).verifyFallbackChecksum(tt.ctx, "tool", fallback, assetPath, "tool.tar.gz")
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("error = %v, want %v", err, tt.want)
+			}
+		})
 	}
 }
 
@@ -240,6 +419,129 @@ func TestExtractAndInstall_ZipBinaryNotFound(t *testing.T) {
 	}
 }
 
+func TestExtractAndInstall_ZipRequiresRegularEntry(t *testing.T) {
+	t.Parallel()
+
+	specialModes := []struct {
+		name string
+		mode os.FileMode
+	}{
+		{name: "symlink", mode: os.ModeSymlink | 0o777},
+		{name: "named_pipe", mode: os.ModeNamedPipe | 0o666},
+	}
+	placements := []struct {
+		name       string
+		special    string
+		regular    string
+		binaryPath string
+	}{
+		{name: "basename", special: "first/mytool", regular: "later/mytool"},
+		{name: "exact_path", special: "exact/path/mytool", regular: "exact/path/mytool", binaryPath: "exact/path/mytool"},
+	}
+
+	for _, placement := range placements {
+		placement := placement
+		for _, specialMode := range specialModes {
+			specialMode := specialMode
+			t.Run(placement.name+"_"+specialMode.name, func(t *testing.T) {
+				t.Parallel()
+				dir := t.TempDir()
+				archivePath := filepath.Join(dir, "archive.zip")
+				zf, err := os.Create(archivePath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				zw := zip.NewWriter(zf)
+				hdr := &zip.FileHeader{Name: placement.special, Method: zip.Store}
+				hdr.SetMode(specialMode.mode)
+				w, err := zw.CreateHeader(hdr)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := w.Write([]byte("special entry")); err != nil {
+					t.Fatal(err)
+				}
+				w, err = zw.Create(placement.regular)
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := []byte("regular binary")
+				if _, err := w.Write(want); err != nil {
+					t.Fatal(err)
+				}
+				if err := zw.Close(); err != nil {
+					t.Fatal(err)
+				}
+				if err := zf.Close(); err != nil {
+					t.Fatal(err)
+				}
+
+				destPath := filepath.Join(dir, "mytool")
+				if err := extractAndInstall(archivePath, "archive.zip", "mytool", placement.binaryPath, destPath); err != nil {
+					t.Fatalf("extractAndInstall: %v", err)
+				}
+				got, err := os.ReadFile(destPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(got) != string(want) {
+					t.Fatalf("installed content = %q, want later regular candidate %q", got, want)
+				}
+			})
+		}
+	}
+}
+
+func TestExtractAndInstall_ZipSpecialOnlyPreservesDestination(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	archivePath := filepath.Join(dir, "archive.zip")
+	zf, err := os.Create(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zw := zip.NewWriter(zf)
+	hdr := &zip.FileHeader{Name: "mytool", Method: zip.Store}
+	hdr.SetMode(os.ModeSymlink | 0o777)
+	w, err := zw.CreateHeader(hdr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("target")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := zf.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	destPath := filepath.Join(dir, "mytool")
+	want := []byte("existing binary")
+	if err := os.WriteFile(destPath, want, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err = extractAndInstall(archivePath, "archive.zip", "mytool", "", destPath)
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("expected not-found error, got %v", err)
+	}
+	got, err := os.ReadFile(destPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("destination changed: got %q, want %q", got, want)
+	}
+	temps, err := filepath.Glob(filepath.Join(dir, ".omni-install-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(temps) != 0 {
+		t.Fatalf("temporary install files left behind: %v", temps)
+	}
+}
+
 // --- extractAndInstall: tar.gz ---
 
 func TestExtractAndInstall_TarGz(t *testing.T) {
@@ -264,6 +566,7 @@ func TestExtractAndInstall_TarGz(t *testing.T) {
 	if info.Mode()&0o111 == 0 {
 		t.Error("tar.gz: installed binary is not executable")
 	}
+	assertNoTarBuffers(t, dir)
 }
 
 // --- extractAndInstall: tar.xz ---
@@ -289,6 +592,166 @@ func TestExtractAndInstall_TarXz(t *testing.T) {
 	info, _ := os.Stat(destPath)
 	if info.Mode()&0o111 == 0 {
 		t.Error("tar.xz: installed binary is not executable")
+	}
+	assertNoTarBuffers(t, dir)
+}
+
+func TestExtractAndInstall_TarBz2(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	archivePath := filepath.Join(dir, "tool.tar.bz2")
+	encoded := "QlpoOTFBWSZTWdtQ40AAAHL7gMqQIABoAPOAAQB2Z55gCAggAFQ0p6ho0NANPUAZpBJSBkAAGgAfPoIEIGxIQivhjSuZ0iBDEPgOrPrZ+bpRMcYIIZA36bZIGTMMXoj4ddrGqBt+noU2yissSIgPxdyRThQkNtQ40AA="
+	archive, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(archivePath, archive, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	destPath := filepath.Join(dir, "mytool")
+	if err := extractAndInstall(archivePath, "tool.tar.bz2", "mytool", "", destPath); err != nil {
+		t.Fatalf("extractAndInstall tar.bz2: %v", err)
+	}
+	got, err := os.ReadFile(destPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "#!/bin/sh\nexit 0\n"; string(got) != want {
+		t.Fatalf("tar.bz2 installed content = %q, want %q", got, want)
+	}
+	assertNoTarBuffers(t, dir)
+}
+
+func TestExtractAndInstall_GzipBinary(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	archivePath := filepath.Join(dir, "mytool.gz")
+	f, err := os.Create(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw := gzip.NewWriter(f)
+	want := []byte("ELF binary data")
+	if _, err := gw.Write(want); err != nil {
+		t.Fatal(err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	destPath := filepath.Join(dir, "mytool")
+	if err := extractAndInstall(archivePath, "mytool.gz", "mytool", "", destPath); err != nil {
+		t.Fatalf("extractAndInstall gzip: %v", err)
+	}
+	got, err := os.ReadFile(destPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("gzip installed content = %q, want %q", got, want)
+	}
+}
+
+func TestExtractAndInstall_InvalidCompressedAssetPreservesDestination(t *testing.T) {
+	t.Parallel()
+	for _, ext := range []string{".gz", ".tar.bz2"} {
+		ext := ext
+		t.Run(ext, func(t *testing.T) {
+			dir := t.TempDir()
+			archivePath := filepath.Join(dir, "mytool"+ext)
+			if err := os.WriteFile(archivePath, []byte("compressed bytes are invalid"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			destPath := filepath.Join(dir, "mytool")
+			want := []byte("existing binary")
+			if err := os.WriteFile(destPath, want, 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			if err := extractAndInstall(archivePath, "mytool"+ext, "mytool", "", destPath); err == nil {
+				t.Fatal("invalid compressed asset installed without error")
+			}
+			got, err := os.ReadFile(destPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != string(want) {
+				t.Fatalf("destination changed: got %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestExtractAndInstall_EmptyArchiveMemberPreservesDestination(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		write func(*testing.T, string)
+	}{
+		{
+			name: "zip",
+			write: func(t *testing.T, archivePath string) {
+				f, err := os.Create(archivePath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				zw := zip.NewWriter(f)
+				if _, err := zw.Create("dir/mytool"); err != nil {
+					t.Fatal(err)
+				}
+				if err := zw.Close(); err != nil {
+					t.Fatal(err)
+				}
+				if err := f.Close(); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "tar.gz",
+			write: func(t *testing.T, archivePath string) {
+				writeTarGz(t, archivePath, "dir/mytool", nil)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			archivePath := filepath.Join(dir, "archive."+tt.name)
+			tt.write(t, archivePath)
+			destPath := filepath.Join(dir, "mytool")
+			want := []byte("existing binary")
+			if err := os.WriteFile(destPath, want, 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			err := extractAndInstall(archivePath, "archive."+tt.name, "mytool", "", destPath)
+			if err == nil || !strings.Contains(err.Error(), "empty") {
+				t.Fatalf("empty archive member error = %v, want empty-entry error", err)
+			}
+			got, err := os.ReadFile(destPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != string(want) {
+				t.Fatalf("destination changed: got %q, want %q", got, want)
+			}
+			for _, pattern := range []string{".omni-install-*", ".omni-tar-*"} {
+				temps, err := filepath.Glob(filepath.Join(dir, pattern))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(temps) != 0 {
+					t.Fatalf("temporary files left behind: %v", temps)
+				}
+			}
+		})
 	}
 }
 
@@ -350,6 +813,7 @@ func TestExtractAndInstall_TarGzExactPath(t *testing.T) {
 			if string(got) != string(correct) {
 				t.Errorf("%s exact path: got %q, want %q", compression, got, correct)
 			}
+			assertNoTarBuffers(t, dir)
 		})
 	}
 }
@@ -439,6 +903,123 @@ func TestDownloadToFile_OversizedBodyRejected(t *testing.T) {
 	// destPath must not exist (temp file cleaned up on error).
 	if _, statErr := os.Stat(destPath); !os.IsNotExist(statErr) {
 		t.Error("partial download file left behind after size-cap error")
+	}
+}
+
+func TestDownloadFallbackAsset_RejectsInvalidSuccessfulResponses(t *testing.T) {
+	tests := []struct {
+		name        string
+		status      int
+		contentType string
+		body        string
+	}{
+		{name: "no_content", status: http.StatusNoContent, contentType: "text/plain"},
+		{name: "zero_byte", status: http.StatusOK, contentType: "application/octet-stream"},
+		{name: "text_html", status: http.StatusOK, contentType: "text/html; charset=utf-8", body: "<html>not an asset</html>"},
+		{name: "malformed_text_html", status: http.StatusOK, contentType: "text/html; charset", body: "<html>not an asset</html>"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			destPath := filepath.Join(dir, "asset")
+			want := []byte("existing asset")
+			if err := os.WriteFile(destPath, want, 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			var requests atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				requests.Add(1)
+				w.Header().Set("Content-Type", tt.contentType)
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			t.Cleanup(srv.Close)
+
+			err := (&App{}).downloadFallbackAsset(t.Context(), "mytool", srv.URL+"/asset", destPath)
+			if err == nil {
+				t.Fatal("expected invalid successful response to fail")
+			}
+			if got := requests.Load(); got != 1 {
+				t.Fatalf("requests = %d, want exactly 1 for definitive response", got)
+			}
+			got, err := os.ReadFile(destPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != string(want) {
+				t.Fatalf("destination changed: got %q, want %q", got, want)
+			}
+			temps, err := filepath.Glob(filepath.Join(dir, ".omni-dl-*"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(temps) != 0 {
+				t.Fatalf("temporary download files left behind: %v", temps)
+			}
+		})
+	}
+}
+
+func TestDownloadToFile_AcceptsNonEmptyFallbackAssets(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name        string
+		contentType string
+		body        []byte
+	}{
+		{name: "text_script", contentType: "text/plain; charset=utf-8", body: []byte("#!/bin/sh\nexit 0\n")},
+		{name: "binary", contentType: "application/octet-stream", body: []byte{0x7f, 'E', 'L', 'F'}},
+		{name: "zip", contentType: "application/zip", body: []byte("zip archive")},
+		{name: "gzip", contentType: "application/gzip", body: []byte("gzip archive")},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", tt.contentType)
+				_, _ = w.Write(tt.body)
+			}))
+			t.Cleanup(srv.Close)
+
+			dir := t.TempDir()
+			destPath := filepath.Join(dir, "asset")
+			if err := downloadToFile(t.Context(), srv.Client(), srv.URL+"/asset", destPath); err != nil {
+				t.Fatalf("downloadToFile: %v", err)
+			}
+			got, err := os.ReadFile(destPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != string(tt.body) {
+				t.Fatalf("downloaded content = %q, want %q", got, tt.body)
+			}
+		})
+	}
+}
+
+func TestDownloadFallbackAsset_UsesDownloadDeadlineWithoutMutatingAPIClient(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(20 * time.Millisecond)
+		_, _ = w.Write([]byte("binary"))
+	}))
+	t.Cleanup(srv.Close)
+
+	apiClient := srv.Client()
+	apiClient.Timeout = time.Millisecond
+	a := &App{}
+	a.SetGitHubFallbackAPIForTest(srv.URL, apiClient)
+	destPath := filepath.Join(t.TempDir(), "asset")
+	if err := a.downloadFallbackAsset(t.Context(), "tool", srv.URL+"/asset", destPath); err != nil {
+		t.Fatalf("downloadFallbackAsset: %v", err)
+	}
+	if got := a.githubHTTPClient().Timeout; got != time.Millisecond {
+		t.Fatalf("API client timeout mutated to %s", got)
 	}
 }
 
@@ -611,6 +1192,17 @@ func newSingleUseServer(t *testing.T, h http.Handler) *httptest.Server {
 }
 
 // --- helpers ---
+
+func assertNoTarBuffers(t *testing.T, dir string) {
+	t.Helper()
+	temps, err := filepath.Glob(filepath.Join(dir, ".omni-tar-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(temps) != 0 {
+		t.Fatalf("temporary tar buffers left behind: %v", temps)
+	}
+}
 
 func writeTarGz(t *testing.T, path, entryName string, content []byte) {
 	t.Helper()

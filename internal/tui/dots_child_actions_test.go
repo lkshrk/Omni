@@ -41,6 +41,53 @@ func dotsChildRowModel(parent app.DotStatus, child app.DotChild) Model {
 	return m
 }
 
+func TestRenderDots_TransientCandidateDoesNotRepeatIgnoredProjection(t *testing.T) {
+	t.Parallel()
+	m := dotsDiscoveredLocalOnlyModel()
+	m.width = 120
+	m.height = 60
+	ignoredChild := app.DotChild{
+		Name:    "history.jsonl",
+		RelPath: "history.jsonl",
+		Path:    "~/.claude/history.jsonl",
+		Ignored: true,
+	}
+	m.dotsEntries = []app.DotStatus{
+		{
+			Name:       "claude",
+			TargetPath: "~/.claude",
+			State:      dots.StateLocalOnly,
+			Actions:    []dots.Action{dots.ActionSync, dots.ActionRemove, dots.ActionIgnore},
+			Counts:     app.DotFileCounts{OutOfSync: 1, Ignored: 1},
+			IsDir:      true,
+			Children:   []app.DotChild{ignoredChild},
+		},
+		{
+			Name:       "claude",
+			TargetPath: "~/.claude",
+			State:      dots.StateIgnored,
+			Actions:    []dots.Action{dots.ActionIgnore, dots.ActionRemove},
+			Counts:     app.DotFileCounts{Ignored: 1},
+			IsDir:      true,
+			Children:   []app.DotChild{ignoredChild},
+		},
+	}
+
+	out := stripANSIEscapeSequences(renderDots(m))
+	var rows []string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "~/.claude") {
+			rows = append(rows, line)
+		}
+	}
+	if len(rows) != 1 {
+		t.Fatalf("claude candidate rows = %d, want 1:\n%s", len(rows), out)
+	}
+	if !strings.Contains(out, "Out Of Sync") {
+		t.Fatalf("claude candidate missing Out Of Sync section:\n%s", out)
+	}
+}
+
 func TestFlow_DotsDiscoveredLocalOnlyDelete(t *testing.T) {
 	t.Parallel()
 	t.Run("d arms confirm on transient candidate", func(t *testing.T) {
@@ -55,8 +102,8 @@ func TestFlow_DotsDiscoveredLocalOnlyDelete(t *testing.T) {
 		if !got.dotsLoading {
 			t.Fatal("dotsLoading should be true after y confirms local delete")
 		}
-		if got.statusMsg != "Deleting kitty…" {
-			t.Errorf("statusMsg = %q, want %q", got.statusMsg, "Deleting kitty…")
+		if got.progressText != "Deleting kitty…" {
+			t.Errorf("progressText = %q, want %q", got.progressText, "Deleting kitty…")
 		}
 		if got.dotsConfirmIdx != -1 {
 			t.Errorf("dotsConfirmIdx = %d, want -1 after confirm", got.dotsConfirmIdx)
@@ -220,8 +267,8 @@ func TestFlow_DotsSyncKeyOnChildRow(t *testing.T) {
 		if !got.dotsLoading {
 			t.Fatal("dotsLoading should be true after s on out-of-sync child")
 		}
-		if got.statusMsg != "Syncing config…" {
-			t.Errorf("statusMsg = %q, want %q", got.statusMsg, "Syncing config…")
+		if got.progressText != "Syncing config…" {
+			t.Errorf("progressText = %q, want %q", got.progressText, "Syncing config…")
 		}
 	})
 
@@ -261,8 +308,8 @@ func TestFlow_DotsChildConflictResolve(t *testing.T) {
 		if !got.dotsLoading {
 			t.Fatal("dotsLoading should be true after second u on conflict child")
 		}
-		if got.statusMsg != "Using repo for config…" {
-			t.Errorf("statusMsg = %q, want %q", got.statusMsg, "Using repo for config…")
+		if got.progressText != "Using repo for config…" {
+			t.Errorf("progressText = %q, want %q", got.progressText, "Using repo for config…")
 		}
 	})
 
@@ -723,8 +770,8 @@ func TestFlow_DotsChildVariant_ExtractsThenCreates(t *testing.T) {
 	if !got.dotsLoading {
 		t.Fatal("dotsLoading should be true after confirming child variant")
 	}
-	if !strings.Contains(got.statusMsg, "Creating variant") {
-		t.Fatalf("statusMsg = %q, want a Creating variant… message", got.statusMsg)
+	if !strings.Contains(got.progressText, "Creating variant") {
+		t.Fatalf("progressText = %q, want a Creating variant… message", got.progressText)
 	}
 }
 

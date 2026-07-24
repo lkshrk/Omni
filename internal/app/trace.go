@@ -25,6 +25,7 @@ func (a *App) RecordCommandTrace(ctx context.Context, trace executor.TraceRecord
 	if db == nil {
 		return nil
 	}
+	trace = executor.SanitizeTraceRecord(trace)
 	return db.RecordCommandTrace(context.WithoutCancel(ctx), &database.CommandTrace{
 		StartedAt:  trace.StartedAt,
 		FinishedAt: trace.FinishedAt,

@@ -2,12 +2,120 @@ package app
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/config"
+	"github.com/lkshrk/omni/internal/executor"
 )
+
+func TestResolveGitHubFallback_GeneratedRecipeUsesNativePipeline(t *testing.T) {
+	t.Parallel()
+	osName := githubOSNames()[0]
+	archName := githubArchNames()[0]
+	assetName := fmt.Sprintf("tool_1.0_%s_%s.tar.gz", osName, archName)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"id":1,"tag_name":"v1.0.0","published_at":"2026-07-20T00:00:00Z","assets":[{"id":2,"name":%q,"browser_download_url":"https://example.test/tool.tar.gz"}]}`, assetName)
+	}))
+	t.Cleanup(srv.Close)
+
+	a := &App{}
+	a.SetGitHubFallbackAPIForTest(srv.URL, srv.Client())
+	fallback, resolved, err := a.resolveGitHubFallback(t.Context(), "tool", "owner", "repo")
+	if err != nil {
+		t.Fatalf("resolveGitHubFallback: %v", err)
+	}
+	if !resolved {
+		t.Fatal("resolveGitHubFallback resolved = false, want true")
+	}
+	if !isNativeGitHubRecipe(&fallback) {
+		t.Fatalf("generated fallback routed to shell commands: %+v", fallback.Commands)
+	}
+}
+
+func TestIsNativeGitHubRecipe_PreservesCustomCommandOverrides(t *testing.T) {
+	t.Parallel()
+	const downloadURL = "https://example.test/tool.tar.gz"
+	generated := githubReleaseAssetInstallCommand(downloadURL)
+	base := config.FallbackSpec{
+		Recipe: config.FallbackRecipe{
+			Type:             config.FallbackRecipeGitHubReleaseAsset,
+			AssetDownloadURL: downloadURL,
+		},
+		Commands: config.FallbackCommands{Install: generated, Upgrade: generated},
+	}
+	if !isNativeGitHubRecipe(&base) {
+		t.Fatal("generated fallback must be recognized as a native recipe")
+	}
+
+	customInstall := base
+	customInstall.Commands.Install = "custom install"
+	if !isNativeGitHubRecipe(&customInstall) {
+		t.Fatal("custom install command must not hide native recipe shape")
+	}
+
+	customUpgrade := base
+	customUpgrade.Commands.Upgrade = "custom upgrade"
+	if !isNativeGitHubRecipe(&customUpgrade) {
+		t.Fatal("custom upgrade command must not hide native recipe shape")
+	}
+}
+
+func TestRunFallbackInstall_CustomCommandsAreActionScoped(t *testing.T) {
+	t.Parallel()
+	for _, action := range []string{"install", "upgrade"} {
+		action := action
+		t.Run(action, func(t *testing.T) {
+			t.Parallel()
+			asset := []byte("native binary")
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write(asset)
+			}))
+			t.Cleanup(srv.Close)
+
+			dir := t.TempDir()
+			a := &App{ConfigPath: filepath.Join(dir, "settings.json"), CacheDir: dir}
+			a.SetGitHubFallbackAPIForTest(srv.URL, srv.Client())
+			a.SetFallbackExecutor(executor.NewMatchMock().WithFallback(executor.MockCall{Err: fmt.Errorf("shell path invoked")}))
+			downloadURL := srv.URL + "/tool"
+			generated := githubReleaseAssetInstallCommand(downloadURL)
+			fallback := &config.FallbackSpec{
+				Binary: "tool",
+				Recipe: config.FallbackRecipe{
+					Type:             config.FallbackRecipeGitHubReleaseAsset,
+					AssetName:        "tool",
+					AssetDownloadURL: downloadURL,
+				},
+				Commands: config.FallbackCommands{Install: generated, Upgrade: generated},
+			}
+			command := fallback.Commands.Install
+			if action == "install" {
+				fallback.Commands.Upgrade = "custom upgrade"
+			} else {
+				fallback.Commands.Install = "custom install"
+				command = fallback.Commands.Upgrade
+			}
+
+			if err := a.runFallbackInstall(t.Context(), "tool", action, config.ToolSpec{}, fallback, command); err != nil {
+				t.Fatalf("runFallbackInstall: %v", err)
+			}
+			got, err := os.ReadFile(filepath.Join(dir, "fallback", "bin", "tool"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != string(asset) {
+				t.Fatalf("installed content = %q, want %q", got, asset)
+			}
+		})
+	}
+}
 
 func TestBestGitHubReleaseAsset_PrefersExtractableArchive(t *testing.T) {
 	t.Parallel()
@@ -405,8 +513,8 @@ func TestScoreGitHubAsset_ArchAliases386(t *testing.T) {
 	}
 }
 
-// TestScoreGitHubAsset_ArchivePriority verifies that .tar.gz beats .zip beats .tar.xz
-// when all other factors are equal.
+// TestScoreGitHubAsset_ArchivePriority verifies every positively scored archive
+// format is supported and preferred in the documented order.
 func TestScoreGitHubAsset_ArchivePriority(t *testing.T) {
 	t.Parallel()
 	goos := runtime.GOOS
@@ -416,6 +524,8 @@ func TestScoreGitHubAsset_ArchivePriority(t *testing.T) {
 	tgz := scoreGitHubAsset(fmt.Sprintf("tool_1.0_%s_%s.tgz", goos, goarch))
 	zip := scoreGitHubAsset(fmt.Sprintf("tool_1.0_%s_%s.zip", goos, goarch))
 	tarXz := scoreGitHubAsset(fmt.Sprintf("tool_1.0_%s_%s.tar.xz", goos, goarch))
+	tarBz2 := scoreGitHubAsset(fmt.Sprintf("tool_1.0_%s_%s.tar.bz2", goos, goarch))
+	gz := scoreGitHubAsset(fmt.Sprintf("tool_1.0_%s_%s.gz", goos, goarch))
 
 	if tarGz <= 0 {
 		t.Errorf("tar.gz score = %d, want >0", tarGz)
@@ -431,6 +541,9 @@ func TestScoreGitHubAsset_ArchivePriority(t *testing.T) {
 	}
 	if tarXz <= 0 {
 		t.Errorf("tar.xz score = %d, want >0", tarXz)
+	}
+	if tarBz2 <= 0 || gz <= 0 {
+		t.Errorf("supported scores: tar.bz2=%d gz=%d, want both >0", tarBz2, gz)
 	}
 }
 

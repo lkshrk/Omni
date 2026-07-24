@@ -1213,6 +1213,17 @@ func (db *DB) MarkInstalled(ctx context.Context, name, provider, pkg, version st
 // MarkFailed records a failed install attempt, incrementing the failure count
 // and storing the error message. Creates a stub row if none exists yet.
 func (db *DB) MarkFailed(ctx context.Context, name, prov, pkg, errMsg string) error {
+	return db.markFailed(ctx, name, prov, pkg, errMsg, false)
+}
+
+// MarkUpgradeFailed records a failed upgrade without marking an existing
+// installation missing. If no row exists, it creates the same stub as
+// MarkFailed.
+func (db *DB) MarkUpgradeFailed(ctx context.Context, name, prov, pkg, errMsg string) error {
+	return db.markFailed(ctx, name, prov, pkg, errMsg, true)
+}
+
+func (db *DB) markFailed(ctx context.Context, name, prov, pkg, errMsg string, preserveInstalled bool) error {
 	if err := requirePackage(name, prov, pkg); err != nil {
 		return err
 	}
@@ -1223,9 +1234,9 @@ func (db *DB) MarkFailed(ctx context.Context, name, prov, pkg, errMsg string) er
 		     failure_count = tool_cache.failure_count + 1,
 		     failed_at     = CURRENT_TIMESTAMP,
 		     last_error    = EXCLUDED.last_error,
-		     installed     = FALSE,
+		     installed     = CASE WHEN ? THEN tool_cache.installed ELSE FALSE END,
 		     last_checked  = CURRENT_TIMESTAMP`,
-		name, prov, pkg, errMsg)
+		name, prov, pkg, errMsg, preserveInstalled)
 	if err != nil {
 		return fmt.Errorf("marking failed for %s/%s: %w", prov, name, err)
 	}

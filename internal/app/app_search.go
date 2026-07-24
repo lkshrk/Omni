@@ -287,7 +287,7 @@ func (a *App) cachedInstalledOwners(ctx context.Context) (map[string]string, err
 		if t == nil || !t.Installed || t.InstalledWith == "" {
 			continue
 		}
-		if _, ok := a.registry.Get(t.InstalledWith); !ok {
+		if _, ok := a.registry.Get(t.InstalledWith); !ok && !fallbackLifecycleOwner(t.InstalledWith) {
 			continue
 		}
 		owners[NewToolKey(t.Name, t.Provider, t.Package).String()] = t.InstalledWith
@@ -379,14 +379,33 @@ func refreshContextErr(ctx context.Context, err error) error {
 	return ctx.Err()
 }
 
-func (a *App) refreshWithCachedOwner(ctx context.Context, t config.ToolEntry, keys []string, owner string, installedMaps map[string]map[string]string, metadataMaps map[string]map[string]provider.InstalledMetadata) (*database.ToolCache, *database.MetadataUpdate, bool) {
+func (a *App) refreshWithCachedOwner(ctx context.Context, t config.ToolEntry, keys []string, owner string, installedMaps map[string]map[string]string, metadataMaps map[string]map[string]provider.InstalledMetadata) (*database.ToolCache, *database.MetadataUpdate, bool, error) {
+	if fallbackLifecycleOwner(owner) {
+		installed, err := a.CheckToolFallback(ctx, t.Name)
+		if err != nil {
+			if ctxErr := refreshContextErr(ctx, err); ctxErr != nil {
+				return nil, nil, true, ctxErr
+			}
+			if errors.Is(err, errFallbackNotConfigured) {
+				return nil, nil, false, nil
+			}
+			return nil, nil, true, nil
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, nil, true, err
+		}
+		if installed {
+			return nil, nil, true, nil
+		}
+		return installedOwnerUpsert(t, owner, false, ""), nil, true, nil
+	}
 	ownerProv, ok := a.registry.Get(owner)
 	if !ok {
-		return nil, nil, false
+		return nil, nil, false, nil
 	}
 	available, err := ownerProv.Available(ctx)
 	if err != nil || !available {
-		return nil, nil, false
+		return nil, nil, false, nil
 	}
 	var (
 		installed bool
@@ -395,13 +414,13 @@ func (a *App) refreshWithCachedOwner(ctx context.Context, t config.ToolEntry, ke
 	if metadataMaps != nil {
 		if m, ok := metadataMaps[owner]; ok {
 			entry, installed := provider.LookupInstalledMetadata(m, keys)
-			return installedOwnerUpsertWithMetadata(t, owner, installed, entry), installedSourceMetadataUpdatePtr(t, entry), true
+			return installedOwnerUpsertWithMetadata(t, owner, installed, entry), installedSourceMetadataUpdatePtr(t, entry), true, nil
 		}
 	}
 	if installedMaps != nil {
 		if m, ok := installedMaps[owner]; ok {
 			ver, installed = provider.LookupString(m, keys)
-			return installedOwnerUpsert(t, owner, installed, ver), nil, true
+			return installedOwnerUpsert(t, owner, installed, ver), nil, true, nil
 		}
 	}
 	if mbc, ok := ownerProv.(provider.MetadataBulkChecker); ok {
@@ -410,7 +429,7 @@ func (a *App) refreshWithCachedOwner(ctx context.Context, t config.ToolEntry, ke
 				metadataMaps[owner] = m
 			}
 			entry, installed := provider.LookupInstalledMetadata(m, keys)
-			return installedOwnerUpsertWithMetadata(t, owner, installed, entry), installedSourceMetadataUpdatePtr(t, entry), true
+			return installedOwnerUpsertWithMetadata(t, owner, installed, entry), installedSourceMetadataUpdatePtr(t, entry), true, nil
 		}
 	}
 	if bc, ok := ownerProv.(provider.BulkChecker); ok {
@@ -419,15 +438,15 @@ func (a *App) refreshWithCachedOwner(ctx context.Context, t config.ToolEntry, ke
 				installedMaps[owner] = m
 			}
 			ver, installed = provider.LookupString(m, keys)
-			return installedOwnerUpsert(t, owner, installed, ver), nil, true
+			return installedOwnerUpsert(t, owner, installed, ver), nil, true, nil
 		}
 	}
 	tool := provider.Tool{Name: t.Name, Provider: owner, Package: t.EffectivePackage(), Options: t.Options}
 	installed, ver, err = ownerProv.IsInstalled(ctx, tool)
 	if err != nil {
-		return nil, nil, true
+		return nil, nil, true, nil
 	}
-	return installedOwnerUpsert(t, owner, installed, ver), nil, true
+	return installedOwnerUpsert(t, owner, installed, ver), nil, true, nil
 }
 
 func installedOwnerUpsert(t config.ToolEntry, owner string, installed bool, ver string) *database.ToolCache {
@@ -860,14 +879,17 @@ func (a *App) RefreshInstalled(ctx context.Context, progress func(string)) error
 	}
 	stop()
 
-	upserts, metadataUpdates := a.buildInstalledUpserts(ctx, cfg, tools, cachedOwners, bulkMaps, scanProgress)
+	upserts, metadataUpdates, err := a.buildInstalledUpserts(ctx, cfg, tools, cachedOwners, bulkMaps, scanProgress)
+	if err != nil {
+		return err
+	}
 	return a.persistInstalledResults(ctx, tools, upserts, metadataUpdates)
 }
 
 // buildInstalledUpserts resolves each configured tool's installed state into
 // ToolCache upserts (+ metadata updates), using the pre-computed bulk maps where
 // possible and falling back to a per-tool IsInstalled / PATH probe otherwise.
-func (a *App) buildInstalledUpserts(ctx context.Context, cfg *config.RootConfig, tools []config.ToolEntry, cachedOwners map[string]string, bulkMaps refreshLookupMaps, scanProgress *refreshInstalledScanProgress) ([]*database.ToolCache, []database.MetadataUpdate) {
+func (a *App) buildInstalledUpserts(ctx context.Context, cfg *config.RootConfig, tools []config.ToolEntry, cachedOwners map[string]string, bulkMaps refreshLookupMaps, scanProgress *refreshInstalledScanProgress) ([]*database.ToolCache, []database.MetadataUpdate, error) {
 	defer profile.Start("app.refresh.installed.resolve_installed")()
 	// nil on error — treated as "all failed" to protect retry-failed state.
 	failedTools, err := a.loadFailedToolSet(ctx)
@@ -890,7 +912,11 @@ func (a *App) buildInstalledUpserts(ctx context.Context, cfg *config.RootConfig,
 
 		opProvider := a.operationProviderName(t)
 		if owner := cachedOwners[resolvedToolKey(t)]; owner != "" && owner != opProvider && t.InstallWith == "" {
-			if upsert, metadataUpdate, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, bulkMaps.installedMaps, bulkMaps.metadataMaps); handled {
+			upsert, metadataUpdate, handled, err := a.refreshWithCachedOwner(ctx, t, keys, owner, bulkMaps.installedMaps, bulkMaps.metadataMaps)
+			if err != nil {
+				return nil, nil, err
+			}
+			if handled {
 				if upsert == nil {
 					continue
 				}
@@ -986,7 +1012,7 @@ func (a *App) buildInstalledUpserts(ctx context.Context, cfg *config.RootConfig,
 			LastChecked:   time.Now(),
 		})
 	}
-	return upserts, metadataUpdates
+	return upserts, metadataUpdates, nil
 }
 
 // persistInstalledResults writes the resolved installed rows and metadata, then
@@ -1201,7 +1227,11 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 			emitTool(i, t)
 			keys := toolEntryLookupKeys(t)
 			if owner := cachedOwners[resolvedToolKey(t)]; owner != "" && owner != provName && t.InstallWith == "" {
-				if upsert, metadataUpdate, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, ownerInstalledMaps, ownerMetadataMaps); handled {
+				upsert, metadataUpdate, handled, err := a.refreshWithCachedOwner(ctx, t, keys, owner, ownerInstalledMaps, ownerMetadataMaps)
+				if err != nil {
+					return err
+				}
+				if handled {
 					if useCachedOwnerUpsert(upsert, metadataUpdate, &upserts, &metadataUpdates) {
 						continue
 					}
@@ -1261,7 +1291,11 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 				emitTool(i, t)
 				keys := toolEntryLookupKeys(t)
 				if owner := cachedOwners[resolvedToolKey(t)]; owner != "" && owner != provName && t.InstallWith == "" {
-					if upsert, metadataUpdate, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, ownerInstalledMaps, ownerMetadataMaps); handled {
+					upsert, metadataUpdate, handled, err := a.refreshWithCachedOwner(ctx, t, keys, owner, ownerInstalledMaps, ownerMetadataMaps)
+					if err != nil {
+						return err
+					}
+					if handled {
 						if useCachedOwnerUpsert(upsert, metadataUpdate, &upserts, &metadataUpdates) {
 							continue
 						}
@@ -1308,7 +1342,11 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 				emitTool(i, t)
 				keys := toolEntryLookupKeys(t)
 				if owner := cachedOwners[resolvedToolKey(t)]; owner != "" && owner != provName && t.InstallWith == "" {
-					if upsert, metadataUpdate, handled := a.refreshWithCachedOwner(ctx, t, keys, owner, ownerInstalledMaps, ownerMetadataMaps); handled {
+					upsert, metadataUpdate, handled, err := a.refreshWithCachedOwner(ctx, t, keys, owner, ownerInstalledMaps, ownerMetadataMaps)
+					if err != nil {
+						return err
+					}
+					if handled {
 						if useCachedOwnerUpsert(upsert, metadataUpdate, &upserts, &metadataUpdates) {
 							continue
 						}
@@ -1337,7 +1375,11 @@ func (a *App) RefreshProviderInstalledWithProgress(ctx context.Context, provName
 	for i, t := range provTools {
 		emitTool(i, t)
 		if owner := cachedOwners[resolvedToolKey(t)]; owner != "" && owner != provName && t.InstallWith == "" {
-			if upsert, metadataUpdate, handled := a.refreshWithCachedOwner(ctx, t, toolEntryLookupKeys(t), owner, ownerInstalledMaps, ownerMetadataMaps); handled {
+			upsert, metadataUpdate, handled, err := a.refreshWithCachedOwner(ctx, t, toolEntryLookupKeys(t), owner, ownerInstalledMaps, ownerMetadataMaps)
+			if err != nil {
+				return err
+			}
+			if handled {
 				if useCachedOwnerUpsert(upsert, metadataUpdate, &upserts, &metadataUpdates) {
 					continue
 				}

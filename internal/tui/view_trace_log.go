@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/lkshrk/omni/internal/app"
 )
@@ -48,7 +49,7 @@ func traceLogLines(m Model, width int) []string {
 		return []string{m.palette.styleHelp.Render("Loading command log...")}
 	}
 	if m.traceLog != nil && m.traceLog.err != nil {
-		return []string{m.palette.styleMissing.Render("Failed to load command log: " + m.traceLog.err.Error())}
+		return []string{m.palette.styleMissing.Render("Failed to load command log: " + sanitizeTraceLogText(m.traceLog.err.Error()))}
 	}
 	if m.traceLog == nil || len(m.traceLog.traces) == 0 {
 		return []string{m.palette.styleHelp.Render("No commands recorded.")}
@@ -88,7 +89,7 @@ func traceLogEntryLines(m Model, trace app.CommandTraceView, width int) []string
 }
 
 func traceLogFieldLines(m Model, label, value string, width int, style lipgloss.Style) []string {
-	value = stripANSIEscapeSequences(strings.TrimRight(value, "\r\n"))
+	value = strings.TrimRight(sanitizeTraceLogText(value), "\n")
 	if strings.TrimSpace(value) == "" {
 		return nil
 	}
@@ -115,27 +116,54 @@ func traceLogFieldLines(m Model, label, value string, width int, style lipgloss.
 }
 
 func traceLogProblem(trace app.CommandTraceView) string {
-	status := strings.ToUpper(strings.TrimSpace(trace.Status))
-	if trace.Error == "" && status != "ERROR" && status != "FAIL" && status != "FAILED" {
+	status := strings.ToUpper(strings.TrimSpace(sanitizeTraceLogText(trace.Status)))
+	errText := sanitizeTraceLogText(trace.Error)
+	stderr := sanitizeTraceLogText(trace.Stderr)
+	if errText == "" && status != "ERROR" && status != "FAIL" && status != "FAILED" {
 		return ""
 	}
-	if strings.TrimSpace(trace.Stderr) != "" {
-		return rowErrorSummary(trace.Stderr)
+	if strings.TrimSpace(stderr) != "" {
+		return rowErrorSummary(stderr)
 	}
-	return rowErrorSummary(trace.Error)
+	return rowErrorSummary(errText)
 }
 
 func traceLogStatusText(m Model, trace app.CommandTraceView) string {
 	p := m.palette
-	switch strings.ToUpper(trace.Status) {
+	status := strings.TrimSpace(sanitizeTraceLogText(trace.Status))
+	switch strings.ToUpper(status) {
 	case "OK", "SUCCESS":
-		return p.styleInstalled.Render(trace.Status)
+		return p.styleInstalled.Render(status)
 	case "ERROR", "FAIL", "FAILED":
-		return p.styleMissing.Render(trace.Status)
+		return p.styleMissing.Render(status)
 	default:
-		if trace.Status != "" {
-			return p.styleHelp.Render(trace.Status)
+		if status != "" {
+			return p.styleHelp.Render(status)
 		}
 		return p.styleHelp.Render("unknown")
 	}
+}
+
+// sanitizeTraceLogText protects the terminal from legacy rows that predate
+// capture-time trace sanitization. Keep readable layout controls only.
+func sanitizeTraceLogText(s string) string {
+	if s == "" {
+		return ""
+	}
+	s = strings.ToValidUTF8(s, "")
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	s = ansi.Strip(s)
+
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r == '\n' || r == '\t':
+			b.WriteRune(r)
+		case r >= 0x20 && r != 0x7f && (r < 0x80 || r > 0x9f):
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }

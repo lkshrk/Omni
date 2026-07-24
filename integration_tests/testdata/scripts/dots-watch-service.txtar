@@ -13,10 +13,7 @@ exec git -C $WORK/home/dotfiles config user.email t@t.com
 exec git -C $WORK/home/dotfiles config user.name T
 exec git -C $WORK/home/dotfiles commit --allow-empty -m init
 
-exec omni --config settings.json --cache-dir cache dots watch run --debounce 500ms &watch&
-exec sh -c 'sleep 1'
-kill -INT watch
-wait watch
+! exec sh -c 'omni --config settings.json --cache-dir cache dots watch run --debounce 500ms & watch=$!; sleep 1; kill -INT "$watch"; wait "$watch"'
 stdout 'Watching 0 dotfile path'
 
 exec omni --config settings.json --cache-dir cache dots watch install --debounce 2s

@@ -22,6 +22,8 @@ import (
 	"github.com/lkshrk/omni/internal/database"
 )
 
+const tuiQuitTimeout = 3 * time.Second
+
 func TestTUIConfiguredHostStartsDashboard(t *testing.T) {
 	bin := buildOmniBinary(t)
 	root := t.TempDir()
@@ -505,29 +507,46 @@ func TestTUIDotsRootFileIgnoreCompletesPromptly(t *testing.T) {
 		}, "TUI did not render main tabs")
 		writeTUIKeys(t, term, "\t", "\t")
 		waitForRequiredScreen(t, term, 8*time.Second, func(text string) bool {
-			return strings.Contains(text, "Dots") && strings.Contains(text, "claude")
-		}, "TUI did not load the claude dots entry")
+			return strings.Contains(text, "Dots") &&
+				strings.Contains(text, "claude") &&
+				strings.Contains(text, "dots synced")
+		}, "TUI did not finish the launch sync for the claude dots entry")
 		writeTUIKeys(t, term, " ")
 		// setup, not the measured latency: expanding scans ~5000 files
 		waitForRequiredScreen(t, term, 10*time.Second, func(text string) bool {
 			return strings.Contains(text, "settings.json")
 		}, "TUI did not expand the claude dots entry")
-		writeTUIKeys(t, term, "j", "j", "x")
+		writeTUIKeys(t, term, "j", "j")
+		waitForRequiredScreen(t, term, 2*time.Second, func(text string) bool {
+			return slices.ContainsFunc(strings.Split(text, "\n"), func(line string) bool {
+				return strings.HasPrefix(strings.TrimSpace(line), ">") && strings.Contains(line, "settings.json")
+			})
+		}, "TUI did not select settings.json")
+		writeTUIKeys(t, term, "x")
 		waitForRequiredScreen(t, term, 2*time.Second, func(text string) bool {
 			return strings.Contains(text, "confirm ignore")
 		}, "TUI did not arm settings.json ignore")
 
 		started := time.Now()
 		writeTUIKeys(t, term, "x")
-		screen := waitForRequiredScreen(t, term, 5*time.Second, func(text string) bool {
-			return strings.Contains(text, "settings.json ignored for claude")
-		}, "TUI did not finish settings.json ignore")
+		if !waitForConfigDotIgnore(configPath, "testhost", "claude", []string{"settings.json"}, 5*time.Second) {
+			t.Fatalf("TUI did not persist settings.json ignore; screen:\n%s", currentScreenText(term))
+		}
+		completedScreen := waitForRequiredScreen(t, term, 5*time.Second, func(text string) bool {
+			if strings.Contains(text, "✓ settings.json ignored for claude") {
+				return true
+			}
+			return slices.ContainsFunc(strings.Split(text, "\n"), func(line string) bool {
+				line = strings.TrimSpace(line)
+				return strings.HasPrefix(line, ">") && strings.Contains(line, "claude") && strings.Contains(line, "ignored")
+			})
+		}, "TUI persisted settings.json ignore but did not show the completed dots-state refresh")
 		elapsed := time.Since(started)
 		t.Logf("actual TUI root-file ignore with 5,000 unrelated files: %s", elapsed)
 		if elapsed > maxIgnoreLatency {
-			t.Fatalf("actual TUI root-file ignore took %s, want <= %s; screen:\n%s", elapsed, maxIgnoreLatency, screen)
+			t.Fatalf("actual TUI root-file ignore took %s, want <= %s; screen:\n%s", elapsed, maxIgnoreLatency, completedScreen)
 		}
-		return screen
+		return completedScreen
 	})
 }
 
@@ -783,10 +802,11 @@ func runTUI(t *testing.T, bin, dir string, env []string, args []string, interact
 	}
 	started := false
 	waited := false
+	var waitDone <-chan error
 	defer func() {
 		if started && !waited {
 			_ = cmd.Process.Kill()
-			_ = term.Wait(cmd)
+			_, waited = awaitTUIWait(waitDone, tuiQuitTimeout)
 		}
 		// x/vttest.Close races its emulator reader (upstream x/vt Close is not
 		// synchronized). The package process owns this bounded set of PTYs, so
@@ -796,24 +816,42 @@ func runTUI(t *testing.T, bin, dir string, env []string, args []string, interact
 		t.Fatalf("start TUI: %v", err)
 	}
 	started = true
+	waitDone = startTUIWait(func() error { return term.Wait(cmd) })
 
 	screen := interact(term)
-	writeTUIKeys(t, term, "q", "q")
+	// One ctrl+c may cancel the single active operation; the next two quit.
+	writeTUIKeys(t, term, "\x03", "\x03", "\x03")
 
-	waitDone := make(chan error, 1)
-	go func() { waitDone <- term.Wait(cmd) }()
-	select {
-	case err := <-waitDone:
+	if err, ok := awaitTUIWait(waitDone, tuiQuitTimeout); ok {
 		waited = true
 		if err != nil {
 			t.Fatalf("TUI exit: %v\n%s", err, screen)
 		}
-	case <-time.After(3 * time.Second):
-		_ = cmd.Process.Kill()
-		t.Fatalf("TUI did not quit after confirmation keys; screen:\n%s", currentScreenText(term))
+		return screen
 	}
 
-	return screen
+	failureScreen := currentScreenText(term)
+	_ = cmd.Process.Kill()
+	_, waited = awaitTUIWait(waitDone, tuiQuitTimeout)
+	t.Fatalf("TUI did not quit after confirmation keys; screen:\n%s", failureScreen)
+	return ""
+}
+
+func startTUIWait(wait func() error) <-chan error {
+	done := make(chan error, 1)
+	go func() { done <- wait() }()
+	return done
+}
+
+func awaitTUIWait(done <-chan error, timeout time.Duration) (error, bool) {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		return err, true
+	case <-timer.C:
+		return nil, false
+	}
 }
 
 func writeTUIKeys(t *testing.T, term *vttest.Terminal, keys ...string) {

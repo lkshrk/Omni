@@ -395,7 +395,7 @@ func TestExpandPath_WithEnvironmentVariable(t *testing.T) {
 		t.Fatalf("ExpandPath($HOME/.config/nvim) unexpected error: %v", err)
 	}
 	want := filepath.Join(home, ".config", "nvim")
-	if got != want {
+	if filepath.Clean(got) != filepath.Clean(want) {
 		t.Errorf("ExpandPath(%q) = %q, want %q", "$HOME/.config/nvim", got, want)
 	}
 }

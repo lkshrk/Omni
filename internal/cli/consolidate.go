@@ -50,8 +50,7 @@ Ecosystems and managers:
 				if err != nil {
 					return err
 				}
-				printProviderConsolidateResult(out, res, toProvider, dryRun)
-				return nil
+				return printProviderConsolidateResult(out, res, toProvider, dryRun)
 			}
 
 			// Ecosystem mode: <ecosystem> <manager>
@@ -94,8 +93,7 @@ Ecosystems and managers:
 			}
 
 			fmt.Fprintf(out, "Consolidated %s tools → %s:\n", ecosystem, manager)
-			printConsolidateLines(out, res, manager)
-			return nil
+			return printConsolidateLines(out, res, manager)
 		},
 	}
 
@@ -105,30 +103,30 @@ Ecosystems and managers:
 	return cmd
 }
 
-func printProviderConsolidateResult(out io.Writer, res *app.ConsolidateResult, provider string, dryRun bool) {
+func printProviderConsolidateResult(out io.Writer, res *app.ConsolidateResult, provider string, dryRun bool) error {
 	if dryRun {
 		fmt.Fprintf(out, "Dry-run — consolidating all tools → %s\n\n", provider)
 		if len(res.Migrated) == 0 {
 			fmt.Fprintln(out, "  Nothing to migrate.")
-			return
+			return nil
 		}
 		for _, m := range res.Migrated {
 			fmt.Fprintf(out, "  → would migrate: %s (from %s)\n", m.Name, m.FromProvider)
 		}
 		fmt.Fprintf(out, "\n  %s would be migrated.\n", textutil.PluralCount(len(res.Migrated), "tool", "tools"))
-		return
+		return nil
 	}
 
 	if len(res.Migrated) == 0 && len(res.Failed) == 0 {
 		fmt.Fprintf(out, "All tools already on %s.\n", provider)
-		return
+		return nil
 	}
 
 	fmt.Fprintf(out, "Consolidated all tools → %s:\n", provider)
-	printConsolidateLines(out, res, provider)
+	return printConsolidateLines(out, res, provider)
 }
 
-func printConsolidateLines(out io.Writer, res *app.ConsolidateResult, manager string) {
+func printConsolidateLines(out io.Writer, res *app.ConsolidateResult, manager string) error {
 	for _, m := range res.Migrated {
 		fmt.Fprintf(out, "  ✓ %s  %s → %s\n", m.Name, m.FromProvider, manager)
 	}
@@ -139,4 +137,8 @@ func printConsolidateLines(out io.Writer, res *app.ConsolidateResult, manager st
 		fmt.Fprintf(out, "  ! %s  could not remove from %s: %v\n", w.Name, w.FromProvider, w.Err)
 	}
 	fmt.Fprintln(out, "  "+app.ConsolidateSummaryText(res, ""))
+	if len(res.Failed) > 0 {
+		return fmt.Errorf("%s failed", textutil.PluralCount(len(res.Failed), "tool", "tools"))
+	}
+	return nil
 }

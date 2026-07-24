@@ -8,11 +8,15 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/x/ansi"
 )
 
-const tracePreviewLimit = 4096
+const (
+	tracePreviewLimit  = 4096
+	traceTruncatedMark = "...[truncated]"
+)
 
 type traceReasonKey struct{}
 
@@ -74,7 +78,7 @@ func (t *TracingExecutor) Run(ctx context.Context, name string, args ...string) 
 	started := t.now()
 	stdout, stderr, err := t.Next.Run(ctx, name, args...)
 	finished := t.now()
-	t.record(ctx, TraceRecord{
+	t.record(ctx, SanitizeTraceRecord(TraceRecord{
 		StartedAt:  started,
 		FinishedAt: finished,
 		DurationMS: finished.Sub(started).Milliseconds(),
@@ -82,9 +86,9 @@ func (t *TracingExecutor) Run(ctx context.Context, name string, args ...string) 
 		Command:    RenderCommand(name, args...),
 		Status:     traceStatus(ctx, err),
 		ExitCode:   traceExitCode(err),
-		Error:      limitTracePreview(redactTraceText(errorString(err))),
-		Stderr:     limitTracePreview(redactTraceText(stderr)),
-	})
+		Error:      errorString(err),
+		Stderr:     stderr,
+	}))
 	return stdout, stderr, err
 }
 
@@ -141,9 +145,22 @@ func errorString(err error) string {
 	return err.Error()
 }
 
+// SanitizeTraceRecord neutralizes every textual trace field and applies trace
+// redaction before the record reaches a sink. It is safe for direct trace
+// producers and sinks to call repeatedly. Commands should be built with
+// RenderCommand so flag/value pairs are redacted before shell quoting.
+func SanitizeTraceRecord(trace TraceRecord) TraceRecord {
+	trace.Reason = redactTraceText(trace.Reason)
+	trace.Command = redactTraceText(trace.Command)
+	trace.Status = redactTraceText(trace.Status)
+	trace.Error = limitTracePreview(redactTraceText(trace.Error))
+	trace.Stderr = limitTracePreview(redactTraceText(trace.Stderr))
+	return trace
+}
+
 // RenderCommand returns a shell-readable, redacted command line.
 func RenderCommand(name string, args ...string) string {
-	parts := append([]string{name}, redactArgs(args)...)
+	parts := append([]string{redactTraceText(name)}, redactArgs(args)...)
 	for i, part := range parts {
 		parts[i] = shellQuote(part)
 	}
@@ -154,6 +171,8 @@ func redactArgs(args []string) []string {
 	out := append([]string(nil), args...)
 	redactNext := false
 	for i, arg := range out {
+		arg = sanitizeTraceText(arg)
+		out[i] = arg
 		if redactNext {
 			out[i] = "[redacted]"
 			redactNext = false
@@ -203,10 +222,33 @@ func redactTraceText(s string) string {
 	if s == "" {
 		return ""
 	}
-	// Strip terminal escape/control sequences so command output captured from
-	// untrusted formulae/taps can't corrupt the TUI when the trace is rendered.
-	s = ansi.Strip(s)
+	s = sanitizeTraceText(s)
 	return envAssignmentPattern.ReplaceAllString(s, "$1=[redacted]")
+}
+
+// sanitizeTraceText neutralizes terminal control input before a trace crosses
+// the persistence boundary. Newlines and tabs remain readable; carriage
+// returns become newlines so they cannot overwrite already-rendered content.
+func sanitizeTraceText(s string) string {
+	if s == "" {
+		return ""
+	}
+	s = strings.ToValidUTF8(s, "")
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	s = ansi.Strip(s)
+
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r == '\n' || r == '\t':
+			b.WriteRune(r)
+		case r >= 0x20 && r != 0x7f && (r < 0x80 || r > 0x9f):
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func limitTracePreview(s string) string {
@@ -214,7 +256,17 @@ func limitTracePreview(s string) string {
 	if len(s) <= tracePreviewLimit {
 		return s
 	}
-	return s[:tracePreviewLimit] + "...[truncated]"
+	if strings.HasSuffix(s, traceTruncatedMark) {
+		contentLen := len(s) - len(traceTruncatedMark)
+		if contentLen >= tracePreviewLimit-(utf8.UTFMax-1) && contentLen <= tracePreviewLimit {
+			return s
+		}
+	}
+	end := tracePreviewLimit
+	for end > 0 && !utf8.ValidString(s[:end]) {
+		end--
+	}
+	return s[:end] + traceTruncatedMark
 }
 
 func shellQuote(s string) string {

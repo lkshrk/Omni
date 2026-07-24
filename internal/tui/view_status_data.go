@@ -153,6 +153,16 @@ func statusToolsLoading(m Model) bool {
 		m.descRefreshing
 }
 
+// statusReconcileToolPlanBusy blocks tool-derived reconcile steps while their
+// snapshot can change underneath the plan. statusToolsLoading covers both
+// foreground mutations (including manual installs via m.loading) and the main
+// refresh phases; outdated checks are separate background snapshot owners.
+func statusReconcileToolPlanBusy(m Model) bool {
+	return statusToolsLoading(m) ||
+		len(m.outdatedProviders) > 0 ||
+		m.outdatedSnapshotRefreshing
+}
+
 // agentsIgnoreSets turns the manifest's ignore lists into name-lookup sets.
 // Duplicates app.AgentsIgnoreSet's body because that function takes a loaded
 // *config.RootConfig, which the TUI model doesn't hold (config is loaded on
@@ -739,6 +749,7 @@ func dashboardReconcilePlanInput(m Model) app.DashboardReconcilePlanInput {
 		Tools:           m.allTools,
 		DiscoveredTools: m.discoveredTools,
 		IgnoredTools:    dashboardIgnoredTools(m),
+		ToolsBusy:       statusReconcileToolPlanBusy(m),
 		UpgradeBusy:     len(m.upgradingKeys) > 0,
 		AgentsOutOfSync: agents.SkillsMissing + agents.McpMissing + agents.PluginsMissing,
 		AgentsBusy:      m.skillsRunning || m.mcpRunning || m.pluginRunning,

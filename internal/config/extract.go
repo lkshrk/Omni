@@ -51,7 +51,7 @@ func ExtractIncludeFragments(path string) (*ExtractReport, error) {
 
 	mainRaw := make(map[string]json.RawMessage)
 	if data, err := os.ReadFile(writePath); err == nil {
-		if err := json.Unmarshal(data, &mainRaw); err != nil {
+		if err := unmarshalJSONObject(data, &mainRaw); err != nil {
 			return nil, fmt.Errorf("parsing config %q: %w", writePath, err)
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -105,7 +105,7 @@ func ExtractIncludeFragments(path string) (*ExtractReport, error) {
 		var existingData []byte
 		if data, err := os.ReadFile(fragmentPath); err == nil {
 			existingData = data
-			if err := json.Unmarshal(data, &existingRaw); err != nil {
+			if err := unmarshalJSONObject(data, &existingRaw); err != nil {
 				return nil, fmt.Errorf("parsing fragment %q: %w", fragmentPath, err)
 			}
 		} else if !errors.Is(err, os.ErrNotExist) {

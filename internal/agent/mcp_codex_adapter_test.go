@@ -672,6 +672,25 @@ func TestCodexAdapter_List_ParsesJSON(t *testing.T) {
 	}
 }
 
+func TestParseCodexMcpList_RejectsNull(t *testing.T) {
+	t.Parallel()
+	_, err := parseCodexMcpList("null")
+	if err == nil || !strings.Contains(err.Error(), "expected array, got null") {
+		t.Fatalf("parseCodexMcpList(null) error = %v, want null-shape error", err)
+	}
+}
+
+func TestParseCodexMcpList_AcceptsEmptyArray(t *testing.T) {
+	t.Parallel()
+	servers, err := parseCodexMcpList("[]")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(servers) != 0 {
+		t.Fatalf("parseCodexMcpList([]) = %+v, want empty inventory", servers)
+	}
+}
+
 func TestCodexAdapter_Remove(t *testing.T) {
 	t.Parallel()
 	var gotArgs []string

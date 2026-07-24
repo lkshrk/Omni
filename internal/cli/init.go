@@ -22,6 +22,7 @@ func newBootstrapCmd(state *rootState) *cobra.Command {
 		Use:     "bootstrap",
 		Aliases: []string{"init"},
 		Short:   "Bootstrap omni on this machine",
+		Args:    cobra.NoArgs,
 		Long: `bootstrap guides this machine into a working omni config:
   1. Detects available package managers (brew, bun, pnpm, npm, uv, pip3)
   2. Creates settings.json with sensible defaults

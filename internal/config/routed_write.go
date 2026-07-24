@@ -26,13 +26,19 @@ func loadIncludeChain(mainPath string) ([]routedFile, error) {
 	if writePath, err := resolveConfigWritePath(mainPath); err == nil {
 		resolved = writePath
 	}
-	return loadIncludeChainFrom(resolved)
+	var stack includePathStack
+	return loadIncludeChainFrom(resolved, &stack)
 }
 
-func loadIncludeChainFrom(path string) ([]routedFile, error) {
+func loadIncludeChainFrom(path string, stack *includePathStack) ([]routedFile, error) {
+	if err := stack.push(path); err != nil {
+		return nil, err
+	}
+	defer stack.pop()
+
 	raw := make(map[string]json.RawMessage)
 	if data, err := os.ReadFile(path); err == nil {
-		if err := json.Unmarshal(data, &raw); err != nil {
+		if err := unmarshalJSONObject(data, &raw); err != nil {
 			return nil, fmt.Errorf("parsing config %q: %w", path, err)
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -57,7 +63,7 @@ func loadIncludeChainFrom(path string) ([]routedFile, error) {
 		if resolvedInclude, err := resolveConfigWritePath(includePath); err == nil {
 			includePath = resolvedInclude
 		}
-		sub, err := loadIncludeChainFrom(includePath)
+		sub, err := loadIncludeChainFrom(includePath, stack)
 		if err != nil {
 			return nil, err
 		}

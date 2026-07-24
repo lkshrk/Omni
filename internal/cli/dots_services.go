@@ -82,6 +82,7 @@ func newDotsReminderInstallCmd(state *rootState) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "install",
 		Short: "Install a periodic user service for dotfile reminders",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := requireDotsConfigured(state); err != nil {
 				return err
@@ -107,6 +108,7 @@ func newDotsReminderUninstallCmd(state *rootState) *cobra.Command {
 	return &cobra.Command{
 		Use:   "uninstall",
 		Short: "Uninstall the periodic dotfile reminder service",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			info, err := state.app.UninstallDotsReminderService(cmd.Context())
 			if err != nil {
@@ -226,6 +228,7 @@ func newDotsWatchRunCmd(state *rootState) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "Run the dotfile watcher in the foreground",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := requireDotsConfigured(state); err != nil {
 				return err
@@ -253,6 +256,7 @@ func newDotsWatchInstallCmd(state *rootState) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "install",
 		Short: "Install a user service for automatic dotfile sync",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := requireDotsConfigured(state); err != nil {
 				return err
@@ -279,6 +283,7 @@ func newDotsWatchUninstallCmd(state *rootState) *cobra.Command {
 	return &cobra.Command{
 		Use:   "uninstall",
 		Short: "Uninstall the automatic dotfile sync service",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			info, err := state.app.UninstallDotsWatchService(cmd.Context())
 			if err != nil {

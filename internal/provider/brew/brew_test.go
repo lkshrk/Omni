@@ -444,6 +444,17 @@ func TestInstalledMetadataMap_CaskPkgutilRequiresPrivilege(t *testing.T) {
 	}
 }
 
+func TestInstalledMetadataMap_NullInfoReturnsError(t *testing.T) {
+	p, _ := newBrew(
+		executor.MockCall{Stdout: "null"},
+		executor.MockCall{},
+		executor.MockCall{},
+	)
+	if _, err := p.InstalledMetadataMap(context.Background()); err == nil {
+		t.Fatal("expected top-level null brew info to be rejected")
+	}
+}
+
 func TestPrivilegePlan_CaskPkgInstallerRequiresPrivilege(t *testing.T) {
 	output := `{"formulae":[],"casks":[` +
 		`{"token":"parsec","installed":"150-103a","artifacts":[{"uninstall":[{"pkgutil":"tv.parsec.www"}]},{"pkg":["parsec-macos.pkg"]}]}` +
@@ -863,23 +874,31 @@ func TestInstalledMetadataMap_UntrustedTapFormulaHiddenFromInfo(t *testing.T) {
 	}
 }
 
-func TestInstalledMetadataMap_ListFormulaErrorIsBestEffort(t *testing.T) {
-	// `brew list --versions --formula` failing must not fail the whole scan:
-	// the brew info result is still returned, with no error.
+func TestInstalledMetadataMap_ListFormulaErrorPropagates(t *testing.T) {
 	installedInfo := `{"formulae":[` +
 		`{"name":"ripgrep","full_name":"ripgrep","installed":[{"version":"14.1.1","installed_on_request":true}]}` +
 		`],"casks":[]}`
+	for _, runErr := range []error{errors.New("exit status 2"), context.Canceled} {
+		p, _ := newBrew(
+			executor.MockCall{Stdout: installedInfo},
+			executor.MockCall{},
+			executor.MockCall{Err: runErr},
+		)
+		if _, err := p.InstalledMetadataMap(context.Background()); !errors.Is(err, runErr) {
+			t.Fatalf("InstalledMetadataMap error = %v, want %v", err, runErr)
+		}
+	}
+}
+
+func TestInstalledMetadataMap_FormulaCaskCollisionReturnsError(t *testing.T) {
+	installedInfo := `{"formulae":[{"name":"shared","installed":[{"version":"1.0","installed_on_request":true}]}],` +
+		`"casks":[{"token":"shared","installed":"2.0"}]}`
 	p, _ := newBrew(
 		executor.MockCall{Stdout: installedInfo},
-		executor.MockCall{},
-		executor.MockCall{Err: errors.New("exit 1")},
+		executor.MockCall{Stdout: "shared\n"},
 	)
-	got, err := p.InstalledMetadataMap(context.Background())
-	if err != nil {
-		t.Fatalf("InstalledMetadataMap should degrade gracefully, got error: %v", err)
-	}
-	if got["ripgrep"].Version != "14.1.1" {
-		t.Errorf("ripgrep missing after best-effort list failure: %+v", got)
+	if _, err := p.InstalledMetadataMap(context.Background()); err == nil {
+		t.Fatal("expected ambiguity error for installed formula and cask with the same token")
 	}
 }
 
@@ -1075,6 +1094,13 @@ func TestOutdatedMap_OutdatedError(t *testing.T) {
 	}
 }
 
+func TestOutdatedMap_NullReturnsError(t *testing.T) {
+	p, _ := newBrew(executor.MockCall{Stdout: "null"})
+	if _, err := p.OutdatedMap(context.Background()); err == nil {
+		t.Fatal("expected top-level null to be rejected")
+	}
+}
+
 // --- Describe ---
 
 func TestDescribe_ReturnsDesc(t *testing.T) {
@@ -1105,6 +1131,13 @@ func TestDescribe_Error(t *testing.T) {
 	p, _ := newBrew(executor.MockCall{Err: errors.New("exit 1")})
 	if _, err := p.Describe(context.Background(), tool("bad")); err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestDescribe_NullInfoReturnsError(t *testing.T) {
+	p, _ := newBrew(executor.MockCall{Stdout: "null"})
+	if _, err := p.Describe(context.Background(), tool("ripgrep")); err == nil {
+		t.Fatal("expected top-level null brew info to be rejected")
 	}
 }
 

@@ -14,6 +14,7 @@ func newImportCmd(state *rootState) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "import",
 		Short: "Import installed tools into the config",
+		Args:  cobra.NoArgs,
 		Long: `Import discovers tools already installed by each provider and
 adds them to your config file. Tools already present in the config are skipped.
 

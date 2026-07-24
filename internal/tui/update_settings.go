@@ -244,6 +244,7 @@ func (m *Model) applySettingsActionAndSave(cmds *[]tea.Cmd, action app.SettingsA
 	change, err := app.SettingsChangeForAction(action)
 	if err != nil {
 		m.err = err
+		m.startupLoadErr = false
 		return
 	}
 	m.applySettingsChangeAndSave(cmds, change)
@@ -267,6 +268,7 @@ func (m *Model) applySettingsChange(change app.SettingsChange) bool {
 	next, _, err := a.ApplySettingsChange(ctx, m.settings, change)
 	if err != nil {
 		m.err = err
+		m.startupLoadErr = false
 		return false
 	}
 	m.setSettings(next)

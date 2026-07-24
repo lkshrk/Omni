@@ -8,6 +8,7 @@ import (
 	"github.com/lkshrk/omni/internal/actions"
 	"github.com/lkshrk/omni/internal/app"
 	gosync "github.com/lkshrk/omni/internal/sync"
+	textutil "github.com/lkshrk/omni/internal/text"
 )
 
 func newSyncCmd(state *rootState) *cobra.Command {
@@ -131,6 +132,12 @@ Use --all to ` + actions.MustLongDescription(actions.ToolSyncAll) + `.`,
 			}
 			for _, line := range summaryLines {
 				fmt.Fprintln(out, line)
+			}
+			if len(summary.ProviderUnavailable) > 0 {
+				return fmt.Errorf("%s unavailable", textutil.PluralCount(len(summary.ProviderUnavailable), "tool", "tools"))
+			}
+			if summary.Failed > 0 {
+				return fmt.Errorf("%s failed", textutil.PluralCount(summary.Failed, "tool", "tools"))
 			}
 
 			hostname, _, hasHost := state.app.ActiveHostInfo()

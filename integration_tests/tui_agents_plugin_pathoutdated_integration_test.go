@@ -200,6 +200,10 @@ case "$*" in
   printf '{"installed":[{"id":"stable-plugin@acme","version":"unknown","scope":"user","enabled":true},{"id":"drifting-plugin@acme","version":"unknown","scope":"user","enabled":true}],"available":[{"name":"stable-plugin","marketplaceName":"acme","source":{"path":"plugins/stable-plugin"}},{"name":"drifting-plugin","marketplaceName":"acme","source":{"path":"plugins/drifting-plugin"}}]}\n'
   exit 0
   ;;
+"plugins marketplace list --json")
+  printf '[]\n'
+  exit 0
+  ;;
 "mcp list")
   printf 'Checking MCP server health…\n'
   printf '\n'

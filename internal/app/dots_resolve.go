@@ -121,6 +121,9 @@ func cleanDotRelativePath(relPath string) (string, error) {
 }
 
 func linkResolvedDotPath(entry dots.ResolvedEntry) error {
+	if err := dots.ValidateHomeTargetPath(entry.TargetPath); err != nil {
+		return fmt.Errorf("refusing to relink %q: %w", entry.TargetPath, err)
+	}
 	if err := os.MkdirAll(filepath.Dir(entry.TargetPath), 0o755); err != nil {
 		return err
 	}

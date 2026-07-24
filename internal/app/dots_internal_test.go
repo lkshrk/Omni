@@ -95,6 +95,114 @@ func TestRollbackDotsAdd_RemovesPartialTargetBeforeRestore(t *testing.T) {
 	}
 }
 
+func TestLinkResolvedDotPath_RejectsIntermediateSymlinkOutsideHome(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	outside := filepath.Join(tmp, "sibling")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	outsideFile := filepath.Join(outside, "settings.json")
+	if err := os.WriteFile(outsideFile, []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(home, ".config")); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(tmp, "repo", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("repo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := linkResolvedDotPath(dots.ResolvedEntry{
+		Name:       "settings",
+		SourcePath: source,
+		TargetPath: filepath.Join(home, ".config", "settings.json"),
+	})
+	if err == nil {
+		t.Error("linkResolvedDotPath accepted an intermediate symlink outside HOME")
+	}
+	if info, statErr := os.Lstat(outsideFile); statErr != nil {
+		t.Fatalf("outside file missing: %v", statErr)
+	} else if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("outside file was replaced by a symlink")
+	}
+	if got, readErr := os.ReadFile(outsideFile); readErr != nil || string(got) != "outside" {
+		t.Fatalf("outside file changed: body=%q err=%v", got, readErr)
+	}
+}
+
+func TestLinkResolvedDotPath_RejectsChildBelowManagedDirectorySymlink(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	targetParent := filepath.Join(home, ".config")
+	sourceDir := filepath.Join(tmp, "repo", "nvim", ".config", "nvim")
+	if err := os.MkdirAll(targetParent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	sourceFile := filepath.Join(sourceDir, "init.lua")
+	if err := os.WriteFile(sourceFile, []byte("managed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(sourceDir, filepath.Join(targetParent, "nvim")); err != nil {
+		t.Fatal(err)
+	}
+
+	err := linkResolvedDotPath(dots.ResolvedEntry{
+		Name:       "nvim/init.lua",
+		SourcePath: sourceFile,
+		TargetPath: filepath.Join(targetParent, "nvim", "init.lua"),
+	})
+	if err == nil {
+		t.Error("linkResolvedDotPath accepted a child below a managed directory symlink")
+	}
+	if info, statErr := os.Lstat(sourceFile); statErr != nil {
+		t.Fatalf("managed source missing: %v", statErr)
+	} else if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("managed source was replaced by a symlink")
+	}
+	if got, readErr := os.ReadFile(sourceFile); readErr != nil || string(got) != "managed" {
+		t.Fatalf("managed source changed: body=%q err=%v", got, readErr)
+	}
+}
+
+func TestLinkResolvedDotPath_CreatesMissingParentsWithinHome(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	source := filepath.Join(tmp, "repo", "nvim", "init.lua")
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("managed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	target := filepath.Join(home, ".config", "nvim", "init.lua")
+
+	if err := linkResolvedDotPath(dots.ResolvedEntry{Name: "nvim/init.lua", SourcePath: source, TargetPath: target}); err != nil {
+		t.Fatalf("linkResolvedDotPath with missing HOME-local parents: %v", err)
+	}
+	if info, err := os.Lstat(target); err != nil {
+		t.Fatalf("linked target missing: %v", err)
+	} else if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("linked target is not a symlink")
+	}
+}
+
 func TestDotsTestTargetPath_LeavesUnsupportedTildePrefixUntouched(t *testing.T) {
 	tmp := t.TempDir()
 	home := filepath.Join(tmp, "home")

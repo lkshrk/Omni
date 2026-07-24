@@ -233,6 +233,36 @@ func TestDashboardReconcilePlan_PlansActionableToolDotAndIgnoreSteps(t *testing.
 	assertReconcileDetail(t, steps, app.ReconcileStepFixIgnore, "2 ignore patterns need cleanup")
 }
 
+func TestDashboardReconcilePlan_SuppressesToolStepsWhileToolsAreBusy(t *testing.T) {
+	t.Parallel()
+	steps := app.DashboardReconcilePlan(app.DashboardReconcilePlanInput{
+		ToolsBusy: true,
+		Tools: []*app.ToolView{
+			{Name: "fd", Provider: "brew", Tracked: true, Installed: false},
+			{Name: "git", Provider: "brew", Tracked: true, Installed: true, Outdated: true},
+			{Name: "pnpm", Provider: "brew", Tracked: true, Installed: true},
+		},
+		NvmManaged:     map[string]bool{"pnpm": true},
+		DotsConfigured: true,
+		DotsEntries: []app.DotStatus{
+			{Name: "nvim", State: dots.StateConflict, Counts: app.DotFileCounts{OutOfSync: 1}},
+		},
+	})
+
+	for _, id := range []app.DashboardReconcileStepID{
+		app.ReconcileStepFixNvmManaged,
+		app.ReconcileStepSyncTools,
+		app.ReconcileStepUpgradeTools,
+	} {
+		if app.DashboardReconcilePlanHasStep(steps, id) {
+			t.Fatalf("steps = %#v, want no %s while tool state is busy", steps, id)
+		}
+	}
+	if !app.DashboardReconcilePlanHasStep(steps, app.ReconcileStepSyncDots) {
+		t.Fatalf("steps = %#v, want unrelated dot sync to remain actionable", steps)
+	}
+}
+
 func TestDashboardReconcilePlan_IncludesMissingAgents(t *testing.T) {
 	t.Parallel()
 	steps := app.DashboardReconcilePlan(app.DashboardReconcilePlanInput{AgentsOutOfSync: 2})

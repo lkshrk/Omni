@@ -1661,8 +1661,8 @@ func TestFlow_UC34_DangerZoneConfirm(t *testing.T) {
 		if got.dangerConfirmRow == settingsRowDotsSync {
 			t.Fatal("settings dots sync row should enable dots instead of asking to disable when app config is disabled")
 		}
-		if !got.dotsLoading || !strings.Contains(got.statusMsg, "Enabling dots") {
-			t.Fatalf("dotsLoading=%v status=%q, want enabling dots operation", got.dotsLoading, got.statusMsg)
+		if !got.dotsLoading || !strings.Contains(got.progressText, "Enabling dots") {
+			t.Fatalf("dotsLoading=%v progress=%q, want enabling dots operation", got.dotsLoading, got.progressText)
 		}
 	})
 }

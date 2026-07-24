@@ -263,6 +263,52 @@ func TestRenderSetupPopup_UsesSharedCenteredTitle(t *testing.T) {
 	t.Fatalf("setup popup title missing:\n%s", out)
 }
 
+func TestRenderSetupPopup_PreservesImportActionsAtMinimumTerminalHeight(t *testing.T) {
+	t.Parallel()
+	for _, isDark := range []bool{true, false} {
+		t.Run(fmt.Sprintf("dark=%t", isDark), func(t *testing.T) {
+			m := setupRenderModel(0)
+			m.width = 40
+			m.height = 12
+			m.palette = buildPaletteFor(isDark)
+
+			out := m.viewString()
+			plain := stripANSIEscapeSequences(out)
+			if !strings.Contains(plain, "Omni - Import settings") {
+				t.Fatalf("setup popup title missing:\n%s", out)
+			}
+			for _, action := range []string{"esc quit", "n create new", "enter import existing"} {
+				if !strings.Contains(plain, action) {
+					t.Errorf("setup action %q missing at 40x12:\n%s", action, out)
+				}
+			}
+		})
+	}
+}
+
+func TestRenderSetupPopup_FitsImportActionsAtExtremeTerminalSize(t *testing.T) {
+	t.Parallel()
+	for _, isDark := range []bool{true, false} {
+		t.Run(fmt.Sprintf("dark=%t", isDark), func(t *testing.T) {
+			m := setupRenderModel(0)
+			m.width = 20
+			m.height = 8
+			m.palette = buildPaletteFor(isDark)
+
+			out := m.viewString()
+			if got := lipgloss.Height(out); got > m.height {
+				t.Errorf("rendered view height=%d exceeds terminal height=%d:\n%s", got, m.height, out)
+			}
+			plain := stripANSIEscapeSequences(out)
+			for _, action := range []string{"esc quit", "n create", "enter import"} {
+				if !strings.Contains(plain, action) {
+					t.Errorf("setup action %q is not discoverable at 20x8:\n%s", action, out)
+				}
+			}
+		})
+	}
+}
+
 func TestRenderSetup_Step1(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
@@ -1050,51 +1096,40 @@ func TestRenderPopupFrame_ClampsContentDividers(t *testing.T) {
 	}
 }
 
-func TestRenderPopupFrame_DoesNotPaintDefaultBackgroundAfterStyledContentReset(t *testing.T) {
+func TestRenderPopupFrame_PaintsOpaqueBackground(t *testing.T) {
 	t.Parallel()
-	m := baseModel(nil)
-	m.palette = defaultPalette()
-	content := m.palette.styleNormal.Render("Enable dotfile sync?")
-	popup := renderPopupFrame(m.palette, content, popupFrame{
-		Width:    42,
-		PaddingY: 0,
-		PaddingX: 2,
-	})
+	for _, tt := range []struct {
+		name   string
+		isDark bool
+	}{{"dark", true}, {"light", false}} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := buildPaletteFor(tt.isDark)
+			popup := renderPopupFrame(p, p.styleSelected.Render("Selected"), popupFrame{
+				Title:    "Popup",
+				Width:    32,
+				PaddingY: 1,
+				PaddingX: 2,
+			})
 
-	for _, line := range strings.Split(popup, "\n") {
-		if !strings.Contains(stripANSIEscapeSequences(line), "Enable dotfile sync?") {
-			continue
-		}
-		if strings.Contains(line, "[48;") {
-			t.Fatalf("popup content line should leave the terminal background unpainted:\n%q", line)
-		}
-		return
-	}
-	t.Fatalf("popup content missing:\n%s", popup)
-}
-
-func TestRenderPopupFrame_DoesNotPaintDefaultFrameBackground(t *testing.T) {
-	t.Parallel()
-	m := baseModel(nil)
-	m.palette = defaultPalette()
-	innerWidth := popupInnerContentWidth(popupFrame{Width: 44, PaddingX: 2})
-	content := strings.Join([]string{
-		m.palette.styleNormal.Render("Body"),
-		popupDivider(m.palette, innerWidth),
-		renderPopupActionHintText(m.palette, innerWidth, confirmActionItems(m.keys.Confirm, "save", m.keys.Back)),
-	}, "\n")
-
-	popup := renderPopupFrame(m.palette, content, popupFrame{
-		Title:    "Styled Popup",
-		Width:    44,
-		PaddingY: 1,
-		PaddingX: 2,
-	})
-
-	for i, line := range strings.Split(popup, "\n") {
-		if strings.Contains(line, "[48;") {
-			t.Fatalf("popup line %d should leave the terminal background unpainted:\n%q\n\n%s", i+1, line, popup)
-		}
+			canvas := lipgloss.NewCanvas(lipgloss.Width(popup), lipgloss.Height(popup))
+			canvas.Compose(lipgloss.NewLayer(popup))
+			var foundSurface, foundSelected bool
+			for y := 1; y < canvas.Height()-1; y++ {
+				for x := 1; x < canvas.Width()-1; x++ {
+					bg := canvas.CellAt(x, y).Style.Bg
+					if bg == nil {
+						t.Fatalf("popup cell (%d,%d) has a transparent background:\n%s", x, y, popup)
+					}
+					foundSurface = foundSurface || colorsEqual(bg, p.colSurface)
+					foundSelected = foundSelected || colorsEqual(bg, p.colSelected)
+				}
+			}
+			distinct := !colorsEqual(p.colSurface, p.colSelected)
+			if !foundSurface || !foundSelected || !distinct {
+				t.Fatalf("popup surface must stay distinct from selected rows: surface=%t selected=%t distinct=%t", foundSurface, foundSelected, distinct)
+			}
+		})
 	}
 }
 
@@ -2308,25 +2343,6 @@ func TestHostGroupEditorPopupFrameMatchesBodyWidth(t *testing.T) {
 		if strings.Contains(line, "─") && lipgloss.Width(line) != contentWidth {
 			t.Fatalf("host group editor divider width=%d, want %d:\n%s", lipgloss.Width(line), contentWidth, out)
 		}
-	}
-}
-
-func TestHostGroupEditorPopupUsesTerminalDefaultBackground(t *testing.T) {
-	t.Parallel()
-	m := hostsModel()
-	m.width = 100
-	m.height = 30
-	m = drive(m, tea.BackgroundColorMsg{Color: color.RGBA{R: 12, G: 13, B: 14, A: 255}})
-	m.hostEditMode = 1
-	m.hostEditName = "helmfile"
-	m.hostGroupPicker = []string{"Topaz", "infra", groupPickerNewSentinel}
-	m.hostGroupDraft = []string{"infra"}
-	m.hostGroupIdx = 1
-
-	frame := groupEditorPopupFrame(m)
-	out := renderPopupFrame(m.palette, renderHostGroupEditor(m), frame)
-	if strings.Contains(out, "48;2;12;13;14") {
-		t.Fatalf("popup should not repaint the terminal background color:\n%s", out)
 	}
 }
 
@@ -6339,7 +6355,13 @@ func TestViewString_SetupDefaultBackgroundIsDashboard(t *testing.T) {
 func TestViewString_WithError(t *testing.T) {
 	t.Parallel()
 	m := baseModel(nil)
-	m.err = errForTest("something failed")
+	m.mode = viewSettings
+	m.startupLoadErr = true
+	var cmds []tea.Cmd
+	m.applySettingsActionAndSave(&cmds, app.SettingsActionID("invalid"))
+	if m.err == nil || m.startupLoadErr {
+		t.Fatalf("settings error = %v startup=%v, want ordinary fatal error", m.err, m.startupLoadErr)
+	}
 	out := m.viewString()
 	if !strings.Contains(out, "Error:") {
 		t.Errorf("expected 'Error:' in error view, got:\n%s", out)
@@ -6888,8 +6910,8 @@ func TestStatusNavigationAndEnterActions(t *testing.T) {
 		t.Fatalf("dirty dotfiles row should use the Dots commit key inline:\n%s", out)
 	}
 	got = drive(m, pressEnter())
-	if !got.dotsLoading || got.statusMsg != "Committing dots…" {
-		t.Fatalf("enter on dirty dotfiles should commit, loading=%v status=%q", got.dotsLoading, got.statusMsg)
+	if !got.dotsLoading || got.progressText != "Committing dots…" {
+		t.Fatalf("enter on dirty dotfiles should commit, loading=%v progress=%q", got.dotsLoading, got.progressText)
 	}
 
 	m = baseModel(nil)
@@ -9238,7 +9260,7 @@ func TestRenderHeader_SettingsShowsVersionOnly(t *testing.T) {
 	}
 }
 
-func TestHeaderInfo_EmptyOnDashboardAndSettings(t *testing.T) {
+func TestHeaderInfo_EmptyOnDashboardSettingsAndAgents(t *testing.T) {
 	t.Parallel()
 	version := buildinfo.Short()
 
@@ -9253,6 +9275,12 @@ func TestHeaderInfo_EmptyOnDashboardAndSettings(t *testing.T) {
 	settings.setSettings(config.Settings{DotsRepo: "~/dotfiles"})
 	if out := renderHeaderInfo(settings); out != "" {
 		t.Errorf("settings header info should be empty (version renders separately), got: %q", out)
+	}
+
+	agents := baseModel(threeTools())
+	agents.mode = viewSkills
+	if out := renderHeaderInfo(agents); out != "" {
+		t.Errorf("agents header info should not show tools counts, got: %q", out)
 	}
 
 	tools := baseModel([]*app.ToolView{{Name: "git", Provider: "brew", Installed: true}})

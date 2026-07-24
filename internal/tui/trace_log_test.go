@@ -5,11 +5,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/lkshrk/omni/internal/app"
+	"github.com/lkshrk/omni/internal/database"
 	"github.com/lkshrk/omni/internal/dots"
 	"github.com/lkshrk/omni/internal/executor"
 )
@@ -176,6 +178,46 @@ func TestTraceLog_RendersStructuredFullFailure(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Fatalf("structured command log missing %q:\n%s", want, view)
 		}
+	}
+}
+
+func TestTraceLog_LegacyControlsNeverReachRenderedPopup(t *testing.T) {
+	invalidUTF8 := string([]byte{0xff})
+	legacyText := "before\x00\x01\x08\r\x7f\u0080\u0085\u009f" +
+		"\x1b[31mred\x1b[0m\x1b]0;title\x07" + invalidUTF8 + "界\tafter\nnext"
+	m, _ := newDotsModelForCmds(t)
+	if err := m.app.DB().RecordCommandTrace(context.Background(), &database.CommandTrace{
+		StartedAt: time.Date(2024, 1, 15, 10, 30, 45, 0, time.UTC),
+		Command:   legacyText,
+		Status:    "failed\x08\r\u009f",
+		Reason:    legacyText,
+		Error:     legacyText,
+		Stderr:    legacyText,
+	}); err != nil {
+		t.Fatalf("record legacy command trace: %v", err)
+	}
+	m.mode = viewSettings
+	m.settingsCursor = settingsRowTraceLog
+	m.dangerConfirmRow = -1
+	m = drive(m, pressEnter())
+	m = drive(m, m.doLoadTraces()())
+
+	plain := stripANSIEscapeSequences(m.View().Content)
+	if !utf8.ValidString(plain) {
+		t.Fatalf("rendered command log is not valid UTF-8: %q", plain)
+	}
+	for _, r := range plain {
+		if (r < 0x20 && r != '\n' && r != '\t') || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			t.Fatalf("rendered command log contains control U+%04X: %q", r, plain)
+		}
+	}
+	for _, want := range []string{"before", "red", "界", "after", "next"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("rendered command log missing readable text %q: %q", want, plain)
+		}
+	}
+	if strings.Contains(plain, "title") {
+		t.Fatalf("rendered command log retained OSC payload: %q", plain)
 	}
 }
 

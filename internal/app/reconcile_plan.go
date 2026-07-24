@@ -25,6 +25,7 @@ type DashboardReconcilePlanInput struct {
 	DiscoveredTools []*ToolView
 	IgnoredTools    map[string]bool
 
+	ToolsBusy       bool
 	UpgradeBusy     bool
 	AgentsOutOfSync int
 	AgentsBusy      bool
@@ -266,26 +267,28 @@ func dashboardToolSyncIssueName(tool *ToolView, status ToolSyncStatus) string {
 
 func DashboardReconcilePlan(input DashboardReconcilePlanInput) []DashboardReconcilePlanStep {
 	steps := make([]DashboardReconcilePlanStep, 0, 7)
-	if nvm := dashboardNvmManagedCount(input); nvm > 0 {
-		steps = append(steps, DashboardReconcilePlanStep{
-			ID:     ReconcileStepFixNvmManaged,
-			Label:  "Fix nvm-managed tools",
-			Detail: textutil.PluralCount(nvm, "nvm-managed tool", "nvm-managed tools"),
-		})
-	}
-	if missing, discovered := dashboardToolSyncCounts(input); missing > 0 || discovered > 0 {
-		steps = append(steps, DashboardReconcilePlanStep{
-			ID:     ReconcileStepSyncTools,
-			Label:  "Sync tools",
-			Detail: dashboardToolSyncDetail(missing, discovered),
-		})
-	}
-	if updates := dashboardToolUpdateCount(input); updates > 0 && !input.UpgradeBusy {
-		steps = append(steps, DashboardReconcilePlanStep{
-			ID:     ReconcileStepUpgradeTools,
-			Label:  "Upgrade tools",
-			Detail: textutil.PluralCount(updates, "outdated tool", "outdated tools"),
-		})
+	if !input.ToolsBusy {
+		if nvm := dashboardNvmManagedCount(input); nvm > 0 {
+			steps = append(steps, DashboardReconcilePlanStep{
+				ID:     ReconcileStepFixNvmManaged,
+				Label:  "Fix nvm-managed tools",
+				Detail: textutil.PluralCount(nvm, "nvm-managed tool", "nvm-managed tools"),
+			})
+		}
+		if missing, discovered := dashboardToolSyncCounts(input); missing > 0 || discovered > 0 {
+			steps = append(steps, DashboardReconcilePlanStep{
+				ID:     ReconcileStepSyncTools,
+				Label:  "Sync tools",
+				Detail: dashboardToolSyncDetail(missing, discovered),
+			})
+		}
+		if updates := dashboardToolUpdateCount(input); updates > 0 && !input.UpgradeBusy {
+			steps = append(steps, DashboardReconcilePlanStep{
+				ID:     ReconcileStepUpgradeTools,
+				Label:  "Upgrade tools",
+				Detail: textutil.PluralCount(updates, "outdated tool", "outdated tools"),
+			})
+		}
 	}
 	if input.AgentsOutOfSync > 0 && !input.AgentsBusy {
 		steps = append(steps, DashboardReconcilePlanStep{

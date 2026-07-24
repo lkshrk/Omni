@@ -93,6 +93,9 @@ func parseGrokPluginList(out string, hasAvailable bool) ([]InstalledPlugin, erro
 	if err := json.Unmarshal([]byte(out), &entries); err != nil {
 		return nil, fmt.Errorf("grok plugin list: parse json: %w", err)
 	}
+	if entries == nil {
+		return nil, fmt.Errorf("grok plugin list: parse json: expected array, got null")
+	}
 	latestByIdentity := make(map[string]string)
 	if hasAvailable {
 		for _, e := range entries {
@@ -164,6 +167,9 @@ func (a *grokPluginAdapter) listMarketplaceEntries(ctx context.Context) ([]grokM
 	var entries []grokMarketplaceListEntry
 	if err := json.Unmarshal([]byte(stdout), &entries); err != nil {
 		return nil, fmt.Errorf("grok plugin marketplace list: parse json: %w", err)
+	}
+	if entries == nil {
+		return nil, fmt.Errorf("grok plugin marketplace list: parse json: expected array, got null")
 	}
 	return entries, nil
 }

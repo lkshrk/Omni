@@ -277,6 +277,9 @@ func (p *Provider) OutdatedMap(ctx context.Context) (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("pip list --outdated: %w", err)
 	}
+	if strings.TrimSpace(stdout) == "null" {
+		return nil, fmt.Errorf("parsing pip outdated: top-level null")
+	}
 	var entries []pipOutdatedEntry
 	if err := json.Unmarshal([]byte(stdout), &entries); err != nil {
 		return nil, fmt.Errorf("parsing pip outdated: %w", err)
@@ -287,9 +290,13 @@ func (p *Provider) OutdatedMap(ctx context.Context) (map[string]string, error) {
 	}
 	m := make(map[string]string, len(entries))
 	for _, e := range entries {
-		name := strings.ToLower(e.Name)
-		if owned[name] {
-			m[name] = e.LatestVersion
+		name := strings.ToLower(strings.TrimSpace(e.Name))
+		latest := strings.TrimSpace(e.LatestVersion)
+		if name == "" || latest == "" || !owned[name] {
+			continue
+		}
+		if _, exists := m[name]; !exists {
+			m[name] = latest
 		}
 	}
 	return m, nil

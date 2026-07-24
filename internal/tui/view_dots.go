@@ -111,7 +111,23 @@ func dotsRowExpanded(m Model, row dotsVisibleRow) bool {
 }
 
 func dotsSections(entries []app.DotStatus) []app.DotStatusSection {
-	return app.DotStatusSections(entries)
+	type key struct{ name, target string }
+	transient := make(map[key]bool)
+	for _, entry := range entries {
+		if app.DotStatusTransientCandidate(entry) {
+			transient[key{entry.Name, entry.TargetPath}] = true
+		}
+	}
+	visible := make([]app.DotStatus, 0, len(entries))
+	for _, entry := range entries {
+		duplicate := transient[key{entry.Name, entry.TargetPath}] &&
+			app.DotStatusState(entry) == app.DotStateIgnored &&
+			!app.DotStatusHasAction(entry, app.DotActionUnignore)
+		if !duplicate {
+			visible = append(visible, entry)
+		}
+	}
+	return app.DotStatusSections(visible)
 }
 
 func renderDots(m Model) string {

@@ -445,14 +445,13 @@ func (p *Provider) OutdatedByManager(ctx context.Context) (map[string]map[string
 			probe(&supported[i])
 		}
 	}
-	// A broken manager (e.g. pnpm whose global bin dir is not in PATH) must not
-	// fail the whole check: succeed as long as any manager reported, and only
-	// error when every available manager failed.
-	if anyOK {
-		return result, nil
-	}
+	// Any available manager that fails makes the aggregate incomplete. Return the
+	// error so callers preserve prior state instead of clearing omitted tools.
 	if len(errs) > 0 {
 		return nil, errors.Join(errs...)
+	}
+	if anyOK {
+		return result, nil
 	}
 	return nil, nil
 }
@@ -509,7 +508,7 @@ func (p *Provider) OutdatedInfoByManager(ctx context.Context) (map[string]map[st
 func (p *Provider) outdatedMapForManager(ctx context.Context, m *mgr) (map[string]string, error) {
 	stdout, stderr, err := p.exec.Run(ctx, m.binary, "outdated", "-g", "--json")
 	stdout = strings.TrimSpace(stdout)
-	if stdout == "" || stdout == "{}" || stdout == "null" {
+	if stdout == "" || stdout == "{}" {
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w\n%s", cmdStr(m.binary, []string{"outdated", "-g", "--json"}), err, strings.TrimSpace(stderr))
 		}
@@ -521,15 +520,72 @@ func (p *Provider) outdatedMapForManager(ctx context.Context, m *mgr) (map[strin
 		}
 		return parseBunOutdatedMap(stdout), nil
 	}
-	var payload map[string]npmOutdatedEntry
-	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
-		return nil, fmt.Errorf("parsing %s outdated output: %w", m.binary, err)
+	if err != nil && !isExpectedNPMOutdatedExit(err) {
+		return nil, fmt.Errorf("%s: %w\n%s", cmdStr(m.binary, []string{"outdated", "-g", "--json"}), err, strings.TrimSpace(stderr))
 	}
-	result := make(map[string]string, len(payload))
-	for name, info := range payload {
-		if info.Latest != "" {
-			result[strings.ToLower(name)] = info.Latest
+	result, parseErr := parseNPMOutdatedMap(stdout)
+	if parseErr != nil {
+		return nil, fmt.Errorf("parsing %s outdated output: %w", m.binary, parseErr)
+	}
+	return result, nil
+}
+
+func isExpectedNPMOutdatedExit(err error) bool {
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode() == 1
+	}
+	switch strings.ToLower(strings.TrimSpace(err.Error())) {
+	case "exit 1", "exit status 1":
+		return true
+	default:
+		return false
+	}
+}
+
+func parseNPMOutdatedMap(stdout string) (map[string]string, error) {
+	if !json.Valid([]byte(stdout)) {
+		return nil, fmt.Errorf("invalid JSON")
+	}
+	dec := json.NewDecoder(strings.NewReader(stdout))
+	token, err := dec.Token()
+	if err != nil {
+		return nil, err
+	}
+	if delim, ok := token.(json.Delim); !ok || delim != '{' {
+		return nil, fmt.Errorf("expected JSON object")
+	}
+	result := make(map[string]string)
+	for dec.More() {
+		token, err := dec.Token()
+		if err != nil {
+			return nil, err
 		}
+		name, ok := token.(string)
+		if !ok {
+			return nil, fmt.Errorf("expected package name")
+		}
+		var info npmOutdatedEntry
+		if err := dec.Decode(&info); err != nil {
+			return nil, err
+		}
+		key := strings.ToLower(strings.TrimSpace(name))
+		latest := strings.TrimSpace(info.Latest)
+		if key == "" || latest == "" {
+			continue
+		}
+		if _, exists := result[key]; !exists {
+			result[key] = latest
+		}
+	}
+	if _, err := dec.Token(); err != nil {
+		return nil, err
 	}
 	return result, nil
 }

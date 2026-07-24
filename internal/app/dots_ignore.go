@@ -109,6 +109,9 @@ func (a *App) DotsEjectIgnoredPathsContext(ctx context.Context, name, pattern st
 		if !dots.SameResolvedPath(path, sourcePath) {
 			return nil
 		}
+		if err := dots.ValidateHomeTargetPath(path); err != nil {
+			return fmt.Errorf("refusing to eject managed symlink %q: %w", path, err)
+		}
 		if err := os.Remove(path); err != nil {
 			return fmt.Errorf("remove managed symlink %q: %w", path, err)
 		}

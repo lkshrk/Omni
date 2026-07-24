@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,8 +14,45 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/lkshrk/omni/internal/executor"
 	"github.com/lkshrk/omni/internal/provider"
 )
+
+type adminTerminalTraceSinkStub struct {
+	records []executor.TraceRecord
+}
+
+func (s *adminTerminalTraceSinkStub) RecordCommandTrace(_ context.Context, trace executor.TraceRecord) error {
+	s.records = append(s.records, trace)
+	return nil
+}
+
+func TestRecordAdminTerminalTraceSanitizesBeforeSink(t *testing.T) {
+	sink := &adminTerminalTraceSinkStub{}
+	state := adminTerminalState{
+		reason:  "admin\x00 AUTH_TOKEN=reasonsecret\rnext\t界",
+		command: "to\x08ol",
+		args:    []string{"--pass\x08word", "argsecret", "\x1b[31mplain\x1b[0m"},
+	}
+	err := errors.New("TOKEN=errorsecret\rretry\x08\x7f\u0085\x1b]0;title\x07" + string([]byte{0xff}) + "界")
+	started := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
+
+	recordAdminTerminalTrace(context.Background(), sink, state, started, started.Add(time.Second), err)
+
+	if len(sink.records) != 1 {
+		t.Fatalf("records = %d, want 1", len(sink.records))
+	}
+	trace := sink.records[0]
+	if trace.Reason != "admin AUTH_TOKEN=[redacted]\nnext\t界" {
+		t.Errorf("reason = %q", trace.Reason)
+	}
+	if trace.Command != "tool --password '[redacted]' plain" {
+		t.Errorf("command = %q", trace.Command)
+	}
+	if trace.Error != "TOKEN=[redacted]\nretry界" {
+		t.Errorf("error = %q", trace.Error)
+	}
+}
 
 func TestAdminTerminalProcess_FakeBrewCaskGetsTTYAndInput(t *testing.T) {
 	if runtime.GOOS == "windows" {

@@ -607,6 +607,43 @@ func TestOutdatedMap_Empty(t *testing.T) {
 	}
 }
 
+func TestOutdatedMap_NPMManagersRequireJSONObject(t *testing.T) {
+	t.Parallel()
+	for _, manager := range []string{"npm", "pnpm"} {
+		manager := manager
+		for _, tt := range []struct {
+			name    string
+			stdout  string
+			wantErr bool
+		}{
+			{name: "null", stdout: "null", wantErr: true},
+			{name: "empty_object", stdout: "{}"},
+		} {
+			tt := tt
+			t.Run(manager+"_"+tt.name, func(t *testing.T) {
+				t.Parallel()
+				m := executor.NewMatchMock(
+					executor.MatchRule{Pattern: manager + " --version", Response: executor.MockCall{Stdout: "1.0.0"}},
+					executor.MatchRule{Pattern: manager + " outdated -g --json", Response: executor.MockCall{Stdout: tt.stdout}},
+				).WithFallback(executor.MockCall{Err: errors.New("not found")})
+				got, err := node.New(m, manager).OutdatedMap(context.Background())
+				if tt.wantErr {
+					if err == nil || !strings.Contains(err.Error(), "expected JSON object") {
+						t.Fatalf("OutdatedMap error = %v, want JSON object error", err)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("OutdatedMap: %v", err)
+				}
+				if len(got) != 0 {
+					t.Fatalf("OutdatedMap = %v, want empty", got)
+				}
+			})
+		}
+	}
+}
+
 func TestOutdatedMap_Found(t *testing.T) {
 	out := `{"typescript":{"latest":"5.4.0"},"prettier":{"latest":"3.2.0"}}`
 	m := executor.NewMatchMock(
@@ -620,6 +657,44 @@ func TestOutdatedMap_Found(t *testing.T) {
 	}
 	if got["typescript"] != "5.4.0" {
 		t.Errorf("map[typescript] = %q, want 5.4.0", got["typescript"])
+	}
+}
+
+func TestOutdatedMap_CancellationWithPartialStdoutReturnsError(t *testing.T) {
+	out := `{"typescript":{"latest":"5.4.0"}}`
+	m := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "npm --version", Response: executor.MockCall{Stdout: "10.0.0"}},
+		executor.MatchRule{Pattern: "npm outdated -g --json", Response: executor.MockCall{Stdout: out, Err: context.Canceled}},
+	).WithFallback(executor.MockCall{Err: errors.New("not found")})
+	_, err := node.New(m, "npm").OutdatedMap(context.Background())
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("OutdatedMap error = %v, want context.Canceled", err)
+	}
+}
+
+func TestOutdatedMap_NonExitOnePartialStdoutReturnsError(t *testing.T) {
+	out := `{"typescript":{"latest":"5.4.0"}}`
+	m := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "npm --version", Response: executor.MockCall{Stdout: "10.0.0"}},
+		executor.MatchRule{Pattern: "npm outdated -g --json", Response: executor.MockCall{Stdout: out, Err: errors.New("exit status 2")}},
+	).WithFallback(executor.MockCall{Err: errors.New("not found")})
+	if _, err := node.New(m, "npm").OutdatedMap(context.Background()); err == nil {
+		t.Fatal("expected non-exit-one command failure to be returned")
+	}
+}
+
+func TestOutdatedMap_DuplicateKeyKeepsNonemptyLatest(t *testing.T) {
+	out := `{"TypeScript":{"latest":"5.4.0"},"typescript":{"latest":""}}`
+	m := executor.NewMatchMock(
+		executor.MatchRule{Pattern: "npm --version", Response: executor.MockCall{Stdout: "10.0.0"}},
+		executor.MatchRule{Pattern: "npm outdated -g --json", Response: executor.MockCall{Stdout: out, Err: errors.New("exit status 1")}},
+	).WithFallback(executor.MockCall{Err: errors.New("not found")})
+	got, err := node.New(m, "npm").OutdatedMap(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["typescript"] != "5.4.0" {
+		t.Fatalf("typescript latest = %q, want retained nonempty 5.4.0", got["typescript"])
 	}
 }
 
@@ -668,7 +743,7 @@ func TestOutdatedMap_BunNonJSONFailureReturnsCommandError(t *testing.T) {
 	}
 }
 
-func TestOutdatedMap_ProbesAllAvailableManagers(t *testing.T) {
+func TestOutdatedMap_AvailableManagerErrorAbortsScan(t *testing.T) {
 	pnpmOut := `{"typescript":{"latest":"5.4.0"}}`
 	npmOut := `{"prettier":{"latest":"3.2.0"}}`
 	m := executor.NewMatchMock(
@@ -680,19 +755,9 @@ func TestOutdatedMap_ProbesAllAvailableManagers(t *testing.T) {
 		executor.MatchRule{Pattern: "npm outdated -g --json", Response: executor.MockCall{Stdout: npmOut, Err: errors.New("exit 1")}},
 	)
 	p := node.New(m, "")
-	got, err := p.OutdatedMap(context.Background())
-	if err != nil {
-		t.Fatalf("OutdatedMap: %v", err)
+	if _, err := p.OutdatedMap(context.Background()); err == nil {
+		t.Fatal("expected an available manager's failed outdated scan to abort the aggregate")
 	}
-	if got["typescript"] != "5.4.0" {
-		t.Errorf("map[typescript] = %q, want 5.4.0", got["typescript"])
-	}
-	if got["prettier"] != "3.2.0" {
-		t.Errorf("map[prettier] = %q, want 3.2.0", got["prettier"])
-	}
-	m.AssertCalled(t, "bun outdated -g --json")
-	m.AssertCalled(t, "pnpm outdated -g --json")
-	m.AssertCalled(t, "npm outdated -g --json")
 }
 
 func TestOutdatedByManager_PreservesManagerAttribution(t *testing.T) {
@@ -731,10 +796,7 @@ func TestOutdatedMap_EmptyFailureReturnsError(t *testing.T) {
 	}
 }
 
-func TestOutdatedMap_BrokenFillInManagerTolerated(t *testing.T) {
-	// bun is effective and reports nothing outdated (success); pnpm is available
-	// but `pnpm outdated` exits 1 (global bin dir not in PATH). A broken fill-in
-	// manager must not fail the whole outdated check.
+func TestOutdatedMap_BrokenFillInManagerReturnsError(t *testing.T) {
 	m := executor.NewMatchMock(
 		executor.MatchRule{Pattern: "bun --version", Response: executor.MockCall{Stdout: "1.1.0"}},
 		executor.MatchRule{Pattern: "bun outdated -g --json", Response: executor.MockCall{Stdout: "{}"}},
@@ -743,12 +805,8 @@ func TestOutdatedMap_BrokenFillInManagerTolerated(t *testing.T) {
 		executor.MatchRule{Pattern: "npm --version", Response: executor.MockCall{Err: errors.New("not found")}},
 	)
 	p := node.New(m, "bun")
-	got, err := p.OutdatedMap(context.Background())
-	if err != nil {
-		t.Fatalf("OutdatedMap error = %v, want nil (broken pnpm tolerated)", err)
-	}
-	if len(got) != 0 {
-		t.Errorf("OutdatedMap = %v, want empty", got)
+	if _, err := p.OutdatedMap(context.Background()); err == nil {
+		t.Fatal("expected available fill-in manager failure to abort the scan")
 	}
 }
 

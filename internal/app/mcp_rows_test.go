@@ -2,11 +2,32 @@ package app_test
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
 )
+
+func TestMcpServerRows_ListErrorIsSurfaced(t *testing.T) {
+	t.Parallel()
+	listErr := errors.New("parse json: expected array, got null")
+	adapter := &stubMcpAdapter{
+		id:        "codex",
+		available: true,
+		listErr:   listErr,
+	}
+	srv := config.McpServer{Name: "linear", Transport: "stdio", Command: "npx x"}
+	a := newMcpTestApp(t, config.AgentsConfig{McpServers: []config.McpServer{srv}}, app.WithMcpAdapters([]app.McpAdapter{adapter}))
+	rows, _, err := a.McpServerRows(t.Context())
+	if err == nil || !errors.Is(err, listErr) || !strings.Contains(err.Error(), "list mcp servers for codex") {
+		t.Fatalf("McpServerRows error = %v, want adapter parse error", err)
+	}
+	if rows != nil {
+		t.Fatalf("McpServerRows returned misleading rows after adapter parse error: %+v", rows)
+	}
+}
 
 func TestMcpServerRows_InstalledStatus(t *testing.T) {
 	t.Parallel()

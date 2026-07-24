@@ -392,6 +392,7 @@ func TestSyncOperationLineFormatsCommandAndBootstrapStyles(t *testing.T) {
 		{name: "command already installed", op: isync.SyncOp{Kind: isync.OpAlreadyInstalled, Tool: tool, Version: "9.0.0"}, opts: SyncOperationLineOptions{IncludeVersion: true}, want: "  ✓ already installed: fd (brew) 9.0.0"},
 		{name: "command prune", op: isync.SyncOp{Kind: isync.OpUninstall, Tool: tool}, opts: SyncOperationLineOptions{IncludeVersion: true}, want: "  ✗ pruned: fd (brew)"},
 		{name: "provider unavailable", op: isync.SyncOp{Kind: isync.OpProviderUnavailable, Tool: tool}, opts: SyncOperationLineOptions{IncludeVersion: true}, want: "  ! provider unavailable: brew (skipping fd)"},
+		{name: "provider not configured", op: isync.SyncOp{Kind: isync.OpProviderUnavailable, Tool: provider.Tool{Name: "fd"}}, opts: SyncOperationLineOptions{IncludeVersion: true}, want: "  ! provider unavailable: no configured provider (skipping fd)"},
 		{name: "bootstrap install", op: isync.SyncOp{Kind: isync.OpInstall, Tool: tool, Version: "9.0.0"}, opts: SyncOperationLineOptions{BootstrapStyle: true}, want: "  ✓ installed: fd (brew)"},
 		{name: "bootstrap install error", op: isync.SyncOp{Kind: isync.OpInstall, Tool: tool, Err: errBoom}, opts: SyncOperationLineOptions{BootstrapStyle: true}, want: "  ✗ brew/fd: boom"},
 		{name: "bootstrap already installed", op: isync.SyncOp{Kind: isync.OpAlreadyInstalled, Tool: tool, Version: "9.0.0"}, opts: SyncOperationLineOptions{BootstrapStyle: true}, want: "  ✓ already installed: fd (brew)"},

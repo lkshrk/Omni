@@ -293,6 +293,14 @@ func (a *App) syncNativeUnavailableFallbacks(ctx context.Context, tools []resolv
 			filtered = append(filtered, resolved)
 			continue
 		}
+		// A failed upgrade retains the previously installed fallback. Verify that
+		// existing binary before applying eligibility rules for a new install.
+		if !opts.DryRun {
+			if installed, version := a.fallbackInstalledCached(ctx, entry); installed {
+				ops = append(ops, isync.SyncOp{Tool: tool, Kind: isync.OpAlreadyInstalled, Version: version})
+				continue
+			}
+		}
 		fallbackUsable, fallbackErr := a.automaticFallbackUsableForTool(entry.Name, opts.RetryFailed)
 		if fallbackErr != nil {
 			ops = append(ops, isync.SyncOp{Tool: tool, Kind: isync.OpFailed, Err: fallbackErr})
@@ -306,10 +314,6 @@ func (a *App) syncNativeUnavailableFallbacks(ctx context.Context, tools []resolv
 			ops = append(ops, isync.SyncOp{Tool: tool, Kind: isync.OpInstall})
 			continue
 		}
-		if installed, version := a.fallbackInstalledCached(ctx, entry); installed {
-			ops = append(ops, isync.SyncOp{Tool: tool, Kind: isync.OpAlreadyInstalled, Version: version})
-			continue
-		}
 		if opts.Progress != nil {
 			opts.Progress("installing " + entry.Name + " with fallback…")
 		}
@@ -318,9 +322,6 @@ func (a *App) syncNativeUnavailableFallbacks(ctx context.Context, tools []resolv
 		}
 		if err := a.InstallToolFallback(ctx, entry.Name); err != nil {
 			ops = append(ops, isync.SyncOp{Tool: tool, Kind: isync.OpFailed, Err: err})
-			if markErr := a.readDB().MarkFailed(ctx, entry.Name, entry.Provider, entry.EffectivePackage(), err.Error()); markErr != nil {
-				ops[len(ops)-1].Err = fmt.Errorf("%w (failed to record fallback failure: %v)", err, markErr)
-			}
 			if opts.ToolProgress != nil {
 				opts.ToolProgress(isync.ProgressEvent{Tool: tool, Message: "Failed installing " + entry.Name + " with fallback", Err: err, Done: true})
 			}

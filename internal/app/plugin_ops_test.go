@@ -22,6 +22,7 @@ type stubPluginAdapter struct {
 	updateErrs              map[string]error
 	addMarketErr            error
 	listErr                 error
+	listMarketErr           error
 	updateMarketplacesErr   error
 	listedPlugins           []app.InstalledPlugin
 	listedMarkets           []app.InstalledMarketplace
@@ -77,6 +78,9 @@ func (s *stubPluginAdapter) UpdatePlugin(_ context.Context, name, marketplace st
 	return s.updateErr
 }
 func (s *stubPluginAdapter) ListMarketplaces(_ context.Context) ([]app.InstalledMarketplace, error) {
+	if s.listMarketErr != nil {
+		return nil, s.listMarketErr
+	}
 	return append([]app.InstalledMarketplace(nil), s.listedMarkets...), nil
 }
 func (s *stubPluginAdapter) AddMarketplace(_ context.Context, m config.Marketplace) error {

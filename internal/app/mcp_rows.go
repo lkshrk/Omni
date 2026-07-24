@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/lkshrk/omni/internal/agent"
 )
@@ -58,7 +59,7 @@ func (a *App) McpServerRows(ctx context.Context) (managed []McpServerRow, unmana
 		}
 		listed, listErr := adapter.List(ctx)
 		if listErr != nil {
-			continue
+			return nil, nil, fmt.Errorf("list mcp servers for %s: %w", adapter.ID(), listErr)
 		}
 		byName := make(map[string]InstalledMcpServer, len(listed))
 		for _, s := range listed {
