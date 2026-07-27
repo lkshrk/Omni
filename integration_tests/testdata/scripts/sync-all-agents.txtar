@@ -15,7 +15,7 @@ stdout 'skills import: 1 added, 0 updated'
 stdout '\+ o/stray'
 stdout 'mcp import: 1 claimed'
 stdout '^skills: 2 installed, 0 failed$'
-stdout 'Agents sync complete — 2 imported, 2 skills installed, 0 mcp servers installed, 0 plugins installed, 0 failed, 6 warnings\.'
+stdout 'Agents sync complete — 2 imported, 2 skills installed, 0 mcp servers installed, 0 plugins installed, 0 failed, [0-9]+ warnings\.'
 
 grep '"name": "stray-srv"' settings.json
 

@@ -66,6 +66,7 @@ func TestAddSkillPackageDetectsTargetsWhenAgentsUseUnset(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
+	stubBinariesOnPath(t, "codex")
 	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
 		t.Fatal(err)
 	}
