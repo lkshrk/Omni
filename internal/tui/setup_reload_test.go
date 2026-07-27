@@ -8,6 +8,7 @@ import (
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
+	textutil "github.com/lkshrk/omni/internal/text"
 )
 
 // The offline first-run state: onboarding is done, the overlay is up, and provider scans that never answer keep setupReloadPending() true forever.
@@ -156,7 +157,8 @@ func TestSetupReloadOverlayKeepsBackgroundFooter(t *testing.T) {
 		bg.setupReloading = false
 		bg.loading = true
 		bg.visibleTools = nil
-		want := strings.TrimRight(stripANSIEscapeSequences(renderStatusBar(bg)), " ")
+		footer := textutil.SymbolsFromEnv().Apply(renderStatusBar(bg))
+		want := strings.TrimRight(stripANSIEscapeSequences(footer), " ")
 
 		lines := strings.Split(stripANSIEscapeSequences(m.View().Content), "\n")
 		last := strings.TrimRight(lines[len(lines)-1], " ")

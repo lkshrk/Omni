@@ -373,8 +373,11 @@ func (m *Model) handleOpCompleteMsg(msg opCompleteMsg) []tea.Cmd {
 		m.adminTerminalQueue = nil
 		cmds = append(cmds, setStatus(m, "cancelled", false))
 	} else if msg.err != nil {
-		m.adminTerminalQueue = nil
 		m.setToolActionError(rowErrKey, msg.err.Error(), msg.err)
+		if msg.preserveOtherRowErrors && m.openNextQueuedAdminTerminalAction() {
+			return cmds
+		}
+		m.adminTerminalQueue = nil
 		cmds = append(cmds, setStatus(m, "✗ "+rowErrorSummary(msg.err.Error()), true))
 	} else {
 		if msg.preserveOtherRowErrors && rowErrKey != "" {

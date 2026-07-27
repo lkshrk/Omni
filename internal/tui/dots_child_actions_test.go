@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lkshrk/omni/internal/app"
 	"github.com/lkshrk/omni/internal/config"
@@ -254,11 +255,32 @@ func TestDotsRowHints_ChildInlineActions(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("out-of-sync container hides path actions", func(t *testing.T) {
+		m := dotsChildRowModel(
+			app.DotStatus{Name: "config", State: dots.StateModified, Actions: []dots.Action{dots.ActionSync, dots.ActionUseRepo, dots.ActionUseLocal}},
+			app.DotChild{
+				RelPath: "profiles",
+				State:   dots.StateModified,
+				IsDir:   true,
+				Children: []app.DotChild{{
+					RelPath: "profiles/default.json",
+					State:   dots.StateModified,
+				}},
+			},
+		)
+		descs := hintDescs(m)
+		for _, blocked := range []string{app.DotStatusSyncActionLabel(m.dotsEntries[0]), "use repo", "use local"} {
+			if slices.Contains(descs, blocked) {
+				t.Fatalf("container child row hints = %v, must not include %q", descs, blocked)
+			}
+		}
+	})
 }
 
 func TestFlow_DotsSyncKeyOnChildRow(t *testing.T) {
 	t.Parallel()
-	t.Run("out-of-sync child starts parent sync", func(t *testing.T) {
+	t.Run("out-of-sync child starts path sync", func(t *testing.T) {
 		m := dotsChildRowModel(
 			app.DotStatus{Name: "config", State: dots.StateModified, Actions: []dots.Action{dots.ActionSync, dots.ActionRemove}},
 			app.DotChild{RelPath: "nvim", State: dots.StateModified},
@@ -267,8 +289,8 @@ func TestFlow_DotsSyncKeyOnChildRow(t *testing.T) {
 		if !got.dotsLoading {
 			t.Fatal("dotsLoading should be true after s on out-of-sync child")
 		}
-		if got.progressText != "Syncing config…" {
-			t.Errorf("progressText = %q, want %q", got.progressText, "Syncing config…")
+		if got.progressText != "Syncing nvim…" {
+			t.Errorf("progressText = %q, want %q", got.progressText, "Syncing nvim…")
 		}
 	})
 
@@ -857,6 +879,113 @@ func TestFlow_DotsChildConflictUseLocalExecutesAndRefreshes(t *testing.T) {
 	requireFileBody(t, filepath.Join(f.repoAgents, "agent-01.md"), "repo agent-01.md")
 	requireFileBody(t, filepath.Join(filepath.Dir(f.localAgents), ".cache", "state.json"), "cache state")
 	requireFileBody(t, filepath.Join(filepath.Dir(f.localAgents), "projects", "session.json"), "project state")
+}
+
+func TestFlow_DotsNestedChildSyncExecutesOnlySelectedPath(t *testing.T) {
+	cfgDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "settings.json")
+	repoDir := t.TempDir()
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	group := tuiTestHostGroup()
+	group.Dots = []config.DotEntry{{Name: "nested", Path: "~/.nested", Ignore: []string{"cache/**"}}}
+	if err := saveTUIConfig(t, cfgPath, &config.RootConfig{
+		Settings: config.Settings{DotsRepo: repoDir},
+		Groups:   []*config.GroupConfig{group},
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	repoNested := filepath.Join(repoDir, "dotfiles", "nested", ".nested", "profiles", "default")
+	localNested := filepath.Join(homeDir, ".nested", "profiles", "default")
+	mustWriteTUIDotFile(t, filepath.Join(repoNested, "selected.json"), "repo selected")
+	mustWriteTUIDotFile(t, filepath.Join(repoNested, "sibling.json"), "repo sibling")
+	if err := os.MkdirAll(localNested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"selected.json", "sibling.json"} {
+		if err := os.Symlink(filepath.Join(repoNested, name), filepath.Join(localNested, name)); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(filepath.Join(localNested, name)); err != nil {
+			t.Fatal(err)
+		}
+		mustWriteTUIDotFile(t, filepath.Join(localNested, name), "local "+strings.TrimSuffix(name, ".json"))
+	}
+	mustWriteTUIDotFile(t, filepath.Join(homeDir, ".nested", "cache", "state.json"), "machine state")
+	oldTime := time.Now().Add(-2 * time.Hour)
+	newTime := time.Now().Add(-time.Hour)
+	for _, name := range []string{"selected.json", "sibling.json"} {
+		if err := os.Chtimes(filepath.Join(repoNested, name), oldTime, oldTime); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(filepath.Join(localNested, name), newTime, newTime); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	a := app.New(cfgPath)
+	a.CacheDir = cfgDir
+	if err := a.InitTestMode(context.Background()); err != nil {
+		t.Fatalf("InitTestMode: %v", err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+	result, err := a.DiscoverDotsStatus(context.Background())
+	if err != nil {
+		t.Fatalf("DiscoverDotsStatus: %v", err)
+	}
+	m := baseModel(nil)
+	m.app = a
+	m.ctx = context.Background()
+	m.mode = viewDots
+	m.dotsLoaded = true
+	m.stowInstalled = true
+	setDotsRepoForTest(&m, repoDir)
+	cacheDotsAvailability(&m, app.DotsSyncAvailability{Configured: true, Reason: app.DotsSyncAvailabilityReady, RepoPath: repoDir})
+	m.dotsEntries = result.Entries
+	m.dotsExpandedName = "nested"
+	m.dotsExpandedChildren = map[string]bool{
+		dotsChildExpandKey("nested", "profiles"):         true,
+		dotsChildExpandKey("nested", "profiles/default"): true,
+	}
+	found := false
+	foundEntry := false
+	for _, entry := range result.Entries {
+		if entry.Name != "nested" || entry.Package == "" {
+			continue
+		}
+		foundEntry = true
+		if app.DotStatusState(entry) != dots.StateModified {
+			t.Fatalf("nested state = %q, want modified: %+v", app.DotStatusState(entry), entry)
+		}
+		m.dotsExpandedState = app.DotStatusState(entry)
+	}
+	if !foundEntry {
+		t.Fatalf("configured nested entry was not discovered: %+v", result.Entries)
+	}
+	for i, row := range dotsVisibleRows(m) {
+		if row.entry.Package != "" && row.isChild && filepath.ToSlash(row.child.RelPath) == "profiles/default/selected.json" {
+			if dotsRowState(row) != dots.StateModified {
+				t.Fatalf("selected.json state = %q, want modified", dotsRowState(row))
+			}
+			m.dotsCursor = i
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("modified nested selected.json child was not visible")
+	}
+
+	synced := executeDotsAction(t, m, 's')
+	if strings.Contains(synced.statusMsg, "✗") {
+		t.Fatalf("nested child sync failed: %s", synced.statusMsg)
+	}
+	requireSameResolvedPath(t, filepath.Join(localNested, "selected.json"), filepath.Join(repoNested, "selected.json"))
+	requireFileBody(t, filepath.Join(repoNested, "selected.json"), "local selected")
+	requireFileBody(t, filepath.Join(localNested, "sibling.json"), "local sibling")
+	requireFileBody(t, filepath.Join(repoNested, "sibling.json"), "repo sibling")
+	requireFileBody(t, filepath.Join(homeDir, ".nested", "cache", "state.json"), "machine state")
 }
 
 func TestFlow_DotsMissingChildInstallExecutesAndRefreshes(t *testing.T) {

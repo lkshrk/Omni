@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/lkshrk/omni/internal/app"
 )
 
 func adminTerminalRunning(returnMode viewMode) *adminTerminalState {
@@ -89,6 +91,56 @@ func TestHandleAdminTerminalKeyMsg_FinishedState_DismissesOnAnyKey(t *testing.T)
 	}
 	if m.mode == viewAdminTerminal {
 		t.Fatal("mode should no longer be viewAdminTerminal after dismiss")
+	}
+}
+
+func TestHandleAdminTerminalKeyMsg_FailedBulkActionContinuesQueue(t *testing.T) {
+	t.Parallel()
+	currentKey := toolKey("bat", "apt")
+	nextKey := toolKey("vim", "apt")
+	m := baseModel(nil)
+	m.mode = viewAdminTerminal
+	m.adminTerminal = adminTerminalRunning(viewList)
+	m.adminTerminal.action = app.PrivilegeActionUpgrade
+	m.adminTerminal.name = "bat"
+	m.adminTerminal.providerName = "apt"
+	m.adminTerminal.rowKey = currentKey
+	m.adminTerminal.preserveOtherRowErrors = true
+	m.adminTerminal.running = false
+	m.adminTerminal.finished = true
+	m.adminTerminal.finishErr = errors.New("exit status 1")
+	m.adminTerminalQueue = []adminTerminalState{{
+		action:                 app.PrivilegeActionUpgrade,
+		name:                   "vim",
+		providerName:           "apt",
+		command:                "sudo",
+		args:                   []string{"apt-get", "install", "--only-upgrade", "-y", "vim"},
+		display:                "sudo apt-get install --only-upgrade -y vim",
+		returnMode:             viewList,
+		rowKey:                 nextKey,
+		preserveOtherRowErrors: true,
+	}}
+	m.rowErrors = map[string]string{
+		currentKey: "admin approval required to upgrade",
+		nextKey:    "admin approval required to upgrade",
+	}
+
+	m = drive(m, pressEnter())
+
+	if m.mode != viewAdminTerminal || m.adminTerminal == nil {
+		t.Fatalf("mode=%v adminTerminal=%v, want next queued admin terminal after first failure", m.mode, m.adminTerminal != nil)
+	}
+	if m.adminTerminal.name != "vim" {
+		t.Fatalf("next admin terminal target = %q, want vim", m.adminTerminal.name)
+	}
+	if got := m.rowErrors[currentKey]; !strings.Contains(got, "admin terminal: exit status 1") {
+		t.Fatalf("current row error = %q, want failed sudo action retained", got)
+	}
+	if got := m.rowErrors[nextKey]; got != "admin approval required to upgrade" {
+		t.Fatalf("queued row error = %q, want untouched approval state", got)
+	}
+	if m.loading {
+		t.Fatal("failed item should release loading before the next approval prompt")
 	}
 }
 

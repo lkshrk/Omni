@@ -364,7 +364,20 @@ func (m *Model) handleDotsActionKeyMsg(msg tea.KeyPressMsg, visible []dotsVisibl
 			break
 		}
 		entry := row.entry
-		if !app.DotStatusHasAction(entry, app.DotActionSync) {
+		if !dotsRowSyncEligible(row) {
+			break
+		}
+		if row.isChild {
+			strategy, ok := dotsChildSyncStrategy(row)
+			if !ok {
+				break
+			}
+			m.beginDotsOperation("Syncing " + row.child.RelPath + "…")
+			if app.DotStatusTransientCandidate(entry) {
+				cmds = append(cmds, m.spinner.Tick, m.doDotsResolveDiscoveredPath(entry, row.child.RelPath, strategy))
+			} else {
+				cmds = append(cmds, m.spinner.Tick, m.doDotsResolvePath(entry.Name, row.child.RelPath, strategy))
+			}
 			break
 		}
 		m.beginDotsOperation("Syncing " + entry.Name + "…")
@@ -805,6 +818,31 @@ func dotsRowState(row dotsVisibleRow) app.DotState {
 		return app.DotChildDisplayState(row.child, app.DotStatusState(row.entry))
 	}
 	return app.DotStatusState(row.entry)
+}
+
+func dotsChildSyncStrategy(row dotsVisibleRow) (app.DotsResolveStrategy, bool) {
+	if !dotsRowIsResolvableChild(row) {
+		return "", false
+	}
+	switch dotsRowState(row) {
+	case app.DotStateModified, app.DotStateLocalOnly:
+		return app.DotResolveUseLocal, true
+	case app.DotStateBroken:
+		return app.DotResolveUseRepo, true
+	default:
+		return "", false
+	}
+}
+
+func dotsRowSyncEligible(row dotsVisibleRow) bool {
+	if !app.DotStatusHasAction(row.entry, app.DotActionSync) {
+		return false
+	}
+	if !row.isChild {
+		return true
+	}
+	_, ok := dotsChildSyncStrategy(row)
+	return ok
 }
 
 func dotsRowInstallEligible(row dotsVisibleRow) bool {

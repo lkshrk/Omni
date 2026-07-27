@@ -10,61 +10,61 @@ import (
 
 	"github.com/lkshrk/omni/internal/agent"
 	"github.com/lkshrk/omni/internal/config"
-	"github.com/lkshrk/omni/internal/dots"
 )
 
 var wellKnownDotPaths = map[string]string{
-	"zshrc":             "~/.zshrc",
-	"zprofile":          "~/.zprofile",
-	"zshenv":            "~/.zshenv",
-	"zlogin":            "~/.zlogin",
-	"bashrc":            "~/.bashrc",
-	"bash_profile":      "~/.bash_profile",
-	"bash_logout":       "~/.bash_logout",
-	"profile":           "~/.profile",
-	"inputrc":           "~/.inputrc",
-	"gitconfig":         "~/.gitconfig",
-	"gitignore":         "~/.gitignore",
-	"gitignore_global":  "~/.gitignore_global",
-	"gitattributes":     "~/.gitattributes",
-	"vimrc":             "~/.vimrc",
-	"vim":               "~/.vim",
-	"gvimrc":            "~/.gvimrc",
-	"emacs":             "~/.emacs",
-	"emacs.d":           "~/.emacs.d",
-	"tmux.conf":         "~/.tmux.conf",
-	"tmux":              "~/.tmux",
-	"npmrc":             "~/.npmrc",
-	"yarnrc":            "~/.yarnrc",
-	"curlrc":            "~/.curlrc",
-	"wgetrc":            "~/.wgetrc",
-	"gemrc":             "~/.gemrc",
-	"bundle":            "~/.bundle",
-	"cargo":             "~/.cargo",
-	"pyenv":             "~/.pyenv",
-	"rbenv":             "~/.rbenv",
-	"rustup":            "~/.rustup",
-	"aws":               "~/.aws",
-	"agents-skill-lock": "~/.agents/.skill-lock.json",
-	"hushlogin":         "~/.hushlogin",
-	"editorconfig":      "~/.editorconfig",
-	"claude":            "~/.claude",
-	"codex":             "~/.codex",
-	"grok":              "~/.grok",
-	"ssh":               "~/.ssh",
-	"gnupg":             "~/.gnupg",
+	"zshrc":            "~/.zshrc",
+	"zprofile":         "~/.zprofile",
+	"zshenv":           "~/.zshenv",
+	"zlogin":           "~/.zlogin",
+	"bashrc":           "~/.bashrc",
+	"bash_profile":     "~/.bash_profile",
+	"bash_logout":      "~/.bash_logout",
+	"profile":          "~/.profile",
+	"inputrc":          "~/.inputrc",
+	"gitconfig":        "~/.gitconfig",
+	"gitignore":        "~/.gitignore",
+	"gitignore_global": "~/.gitignore_global",
+	"gitattributes":    "~/.gitattributes",
+	"vimrc":            "~/.vimrc",
+	"vim":              "~/.vim",
+	"gvimrc":           "~/.gvimrc",
+	"emacs":            "~/.emacs",
+	"emacs.d":          "~/.emacs.d",
+	"tmux.conf":        "~/.tmux.conf",
+	"tmux":             "~/.tmux",
+	"npmrc":            "~/.npmrc",
+	"yarnrc":           "~/.yarnrc",
+	"curlrc":           "~/.curlrc",
+	"wgetrc":           "~/.wgetrc",
+	"gemrc":            "~/.gemrc",
+	"bundle":           "~/.bundle",
+	"cargo":            "~/.cargo",
+	"pyenv":            "~/.pyenv",
+	"rbenv":            "~/.rbenv",
+	"rustup":           "~/.rustup",
+	"aws":              "~/.aws",
+	"hushlogin":        "~/.hushlogin",
+	"editorconfig":     "~/.editorconfig",
+	"claude":           "~/.claude",
+	"codex":            "~/.codex",
+	"grok":             "~/.grok",
+	"ssh":              "~/.ssh",
+	"gnupg":            "~/.gnupg",
 }
 
 func buildIgnoredDotCandidateNames(registry *agent.Registry) map[string]struct{} {
 	names := map[string]struct{}{
-		"cache":        {},
-		"caches":       {},
-		"local":        {},
-		"logs":         {},
-		"node_modules": {},
-		"temp":         {},
-		"tmp":          {},
-		"trash":        {},
+		"agents-skill-lock": {},
+		"cache":             {},
+		"caches":            {},
+		"local":             {},
+		"logs":              {},
+		"node_modules":      {},
+		"skill-lock.json":   {},
+		"temp":              {},
+		"tmp":               {},
+		"trash":             {},
 	}
 	for _, name := range agentConfigDotCandidateNames(registry) {
 		names[name] = struct{}{}
@@ -79,9 +79,6 @@ func agentConfigDotCandidateNames(registry *agent.Registry) []string {
 var claudeDotIgnorePatterns = dotAllowlistIgnorePatterns(
 	"settings.json",
 	"CLAUDE.md",
-	"mcp.json",
-	"plugins",
-	"plugins/installed_plugins.json",
 	"agents/",
 	"hooks/",
 	"scripts/",
@@ -92,7 +89,6 @@ var claudeDotIgnorePatterns = dotAllowlistIgnorePatterns(
 
 var codexDotIgnorePatterns = dotAllowlistIgnorePatterns(
 	"config.toml",
-	"mcp.json",
 	"AGENTS.md",
 	"RTK.md",
 	"rules/",
@@ -100,7 +96,6 @@ var codexDotIgnorePatterns = dotAllowlistIgnorePatterns(
 
 var grokDotIgnorePatterns = dotAllowlistIgnorePatterns(
 	"config.toml",
-	"skills/",
 	"commands/",
 	"hooks/",
 )
@@ -426,7 +421,7 @@ func discoverRepoDotsEntries(repoPath string, includeIgnored bool, ignoredNames 
 	}
 	var out []config.DotEntry
 	for _, entry := range entries {
-		if candidate, ok := dotEntryForRepoPackage(dotfilesPath, entry.Name(), entry.IsDir(), includeIgnored, ignoredNames); ok {
+		if candidate, ok := dotEntryForRepoPackage(entry.Name(), entry.IsDir(), includeIgnored, ignoredNames); ok {
 			out = append(out, candidate)
 		}
 	}
@@ -484,7 +479,7 @@ func discoverLocalWellKnownDotsEntries() ([]config.DotEntry, error) {
 	return out, nil
 }
 
-func dotEntryForRepoPackage(stowPath, name string, isDir, includeIgnored bool, ignoredNames map[string]struct{}) (config.DotEntry, bool) {
+func dotEntryForRepoPackage(name string, isDir, includeIgnored bool, ignoredNames map[string]struct{}) (config.DotEntry, bool) {
 	canon := strings.TrimPrefix(name, ".")
 	if strings.Contains(canon, "@") {
 		return config.DotEntry{}, false
@@ -499,39 +494,9 @@ func dotEntryForRepoPackage(stowPath, name string, isDir, includeIgnored bool, i
 		return config.DotEntry{Name: canon, Path: path}, true
 	}
 	if isDir && !strings.HasPrefix(name, ".") {
-		if inferred, ok := inferDotPathFromRepoPackage(stowPath, name); ok {
-			entryName := canon
-			if knownName, ok := wellKnownDotNameForPath(inferred); ok {
-				entryName = knownName
-			}
-			return config.DotEntry{Name: entryName, Path: inferred}, true
-		}
 		return config.DotEntry{Name: name, Path: "~/.config/" + name}, true
 	}
 	return config.DotEntry{}, false
-}
-
-// Handles a package directory whose name does not match the mirrored home path.
-func inferDotPathFromRepoPackage(stowPath, packageName string) (string, bool) {
-	pkgDir := filepath.Join(stowPath, packageName)
-	info, err := os.Lstat(pkgDir)
-	if err != nil || !info.IsDir() {
-		return "", false
-	}
-	if dots.PathExists(filepath.Join(pkgDir, ".agents", ".skill-lock.json")) {
-		return "~/.agents/.skill-lock.json", true
-	}
-	return "", false
-}
-
-func wellKnownDotNameForPath(path string) (string, bool) {
-	norm := strings.ToLower(filepath.ToSlash(strings.TrimSpace(path)))
-	for name, candidate := range wellKnownDotPaths {
-		if strings.ToLower(filepath.ToSlash(candidate)) == norm {
-			return name, true
-		}
-	}
-	return "", false
 }
 
 func ignoredDotCandidate(name string, ignoredNames map[string]struct{}) bool {

@@ -459,7 +459,7 @@ func dotsRowHintItems(m Model) []hintItem {
 	}
 	if dotsRowInstallEligible(row) {
 		hints = append(hints, hintFromBindingDesc(m.keys.Install, "install"))
-	} else if (!row.isChild || dotsChildOutOfSync(row)) && app.DotStatusHasAction(entry, app.DotActionSync) {
+	} else if (!row.isChild || dotsChildOutOfSync(row)) && dotsRowSyncEligible(row) {
 		hints = append(hints, hintFromBindingDesc(m.keys.Sync, app.DotStatusSyncActionLabel(entry)))
 	}
 	if row.isChild && dotsChildOutOfSync(row) {

@@ -383,6 +383,7 @@ claude)
 grok)
   case "$args" in
   "mcp list --json")
+    # Deliberate URL drift lets the Agents screen demonstrate managed/local resolution.
     printf '%s\n' '[{"name":"grafana","url":"https://mcp.example.com/mcp","enabled":true,"scope":"user"}]'
     ;;
   "plugin list --json --available")
@@ -408,42 +409,36 @@ esac
 EOF
 chmod +x "$root/bin/agent-stub"
 
+skill_package_id="7327b3821ba34d6bff5c64321da6c5c73399c11f11cd174746e4b15b5c94c020"
+skill_package_root="$root/home/.local/share/omni/skills/packages/$skill_package_id"
+
 mkdir -p \
-  "$root/home/.claude/skills/frontend-design" \
-  "$root/home/.grok/skills/frontend-design" \
-  "$root/home/.agents"
+  "$skill_package_root/skills/frontend-design" \
+  "$root/home/.claude/skills" \
+  "$root/home/.grok/skills"
 
-cat > "$root/home/.claude/skills/frontend-design/SKILL.md" <<'EOF'
+cat > "$skill_package_root/skills/frontend-design/SKILL.md" <<'EOF'
 ---
 name: frontend-design
 description: Opinionated UI craft guidance for agent-generated interfaces and design systems.
 ---
 EOF
 
-cat > "$root/home/.grok/skills/frontend-design/SKILL.md" <<'EOF'
----
-name: frontend-design
-description: Opinionated UI craft guidance for agent-generated interfaces and design systems.
----
-EOF
-
-cat > "$root/home/.agents/.skill-lock.json" <<'EOF'
+cat > "$skill_package_root/.omni-package.json" <<'EOF'
 {
-  "version": 3,
-  "skills": {
-    "frontend-design": {
-      "source": "vercel-labs/agent-skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/vercel-labs/agent-skills",
-      "ref": "main",
-      "skillPath": "skills/frontend-design",
-      "skillFolderHash": "demo-vhs-lock",
-      "installedAt": "2026-06-01T00:00:00Z",
-      "updatedAt": "2026-06-01T00:00:00Z"
-    }
-  }
+  "source": "vercel-labs/agent-skills",
+  "ref": "main",
+  "selectors": ["frontend-design"],
+  "all_skills": false
 }
 EOF
+
+ln -s \
+  "../../.local/share/omni/skills/packages/$skill_package_id/skills/frontend-design" \
+  "$root/home/.claude/skills/frontend-design"
+ln -s \
+  "../../.local/share/omni/skills/packages/$skill_package_id/skills/frontend-design" \
+  "$root/home/.grok/skills/frontend-design"
 
 cat > "$root/home/.claude.json" <<'EOF'
 {
@@ -477,8 +472,7 @@ mkdir -p \
   "$root/dotfiles/dotfiles/alacritty/.config/alacritty" \
   "$root/dotfiles/dotfiles/wezterm/.config/wezterm" \
   "$root/dotfiles/dotfiles/tmux" \
-  "$root/dotfiles/dotfiles/grok/.grok" \
-  "$root/dotfiles/dotfiles/agents-skill-lock/.agents"
+  "$root/dotfiles/dotfiles/grok/.grok"
 
 cat > "$root/dotfiles/dotfiles/nvim/.config/nvim/init.lua" <<'EOF'
 vim.opt.number = true
@@ -523,24 +517,6 @@ cat > "$root/dotfiles/dotfiles/grok/.grok/config.toml" <<'EOF'
 default_model = "grok-3"
 EOF
 
-cat > "$root/dotfiles/dotfiles/agents-skill-lock/.agents/.skill-lock.json" <<'EOF'
-{
-  "version": 3,
-  "skills": {
-    "frontend-design": {
-      "source": "vercel-labs/agent-skills",
-      "sourceType": "github",
-      "sourceUrl": "https://github.com/vercel-labs/agent-skills",
-      "ref": "main",
-      "skillPath": "skills/frontend-design",
-      "skillFolderHash": "demo-vhs-lock",
-      "installedAt": "2026-06-01T00:00:00Z",
-      "updatedAt": "2026-06-01T00:00:00Z"
-    }
-  }
-}
-EOF
-
 git -C "$root/dotfiles" init -q
 git -C "$root/dotfiles" add .
 git -C "$root/dotfiles" \
@@ -555,8 +531,8 @@ EOF
 
 cat > "$root/settings.json" <<EOF
 {
-  "\$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v16.schema.json",
-  "version": 16,
+  "\$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v20.schema.json",
+  "version": 20,
   "settings": {
     "auto_import": true,
     "provider_priority": ["brew", "pnpm", "bun", "npm", "uv", "pip"],
@@ -568,6 +544,7 @@ cat > "$root/settings.json" <<EOF
       {
         "source": "vercel-labs/agent-skills",
         "ref": "main",
+        "skills": ["frontend-design"],
         "agents": ["claude-code", "grok"]
       }
     ],
@@ -664,8 +641,7 @@ cat > "$root/settings.json" <<EOF
       "marketplaces": ["lkshrk"],
       "dots": [
         { "name": "starship", "path": "~/.config/starship.toml" },
-        { "name": "tmux", "path": "~/.tmux.conf" },
-        { "name": "agents-skill-lock", "path": "~/.agents/.skill-lock.json" }
+        { "name": "tmux", "path": "~/.tmux.conf" }
       ]
     },
     {
@@ -689,8 +665,8 @@ EOF
 
 cat > "$root/onboarding-settings.json" <<EOF
 {
-  "\$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v16.schema.json",
-  "version": 16,
+  "\$schema": "https://raw.githubusercontent.com/lkshrk/omni/main/spec/omni.settings.v20.schema.json",
+  "version": 20,
   "settings": {
     "provider_priority": ["brew", "pnpm", "bun", "npm", "uv", "pip"]
   },
@@ -702,66 +678,12 @@ EOF
 
 db="$root/cache/omni.db"
 
-# Create tables directly because the removed "omni providers" command cannot initialize the schema.
-sqlite3 "$db" <<'SCHEMA'
-CREATE TABLE IF NOT EXISTS tool_cache (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
-  provider TEXT NOT NULL,
-  package TEXT NOT NULL,
-  installed BOOLEAN NOT NULL DEFAULT 0,
-  installed_with TEXT NOT NULL DEFAULT '',
-  version TEXT,
-  outdated BOOLEAN NOT NULL DEFAULT 0,
-  latest_version TEXT,
-  description TEXT,
-  last_checked DATETIME NOT NULL,
-  failed_at DATETIME,
-  failure_count INTEGER NOT NULL DEFAULT 0,
-  last_error TEXT,
-  tracked BOOLEAN NOT NULL DEFAULT 1,
-  privilege TEXT NOT NULL DEFAULT '',
-  privilege_reason TEXT,
-  privilege_at DATETIME
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_tool_cache_name_provider_package
-  ON tool_cache (name, provider, package);
-
-CREATE TABLE IF NOT EXISTS tool_metadata (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL,
-  provider TEXT NOT NULL,
-  package TEXT NOT NULL,
-  version TEXT,
-  description TEXT,
-  privilege TEXT NOT NULL DEFAULT '',
-  privilege_reason TEXT,
-  updated_at DATETIME NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_tool_metadata_name_provider_package
-  ON tool_metadata (name, provider, package);
-
-CREATE TABLE IF NOT EXISTS local_state (
-  key TEXT PRIMARY KEY NOT NULL,
-  value TEXT NOT NULL,
-  updated_at DATETIME NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS command_traces (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  started_at DATETIME NOT NULL,
-  finished_at DATETIME NOT NULL,
-  duration_ms INTEGER NOT NULL DEFAULT 0,
-  reason TEXT NOT NULL DEFAULT '',
-  command TEXT NOT NULL DEFAULT '',
-  status TEXT NOT NULL DEFAULT '',
-  exit_code INTEGER,
-  error TEXT NOT NULL DEFAULT '',
-  stderr TEXT NOT NULL DEFAULT ''
-);
-CREATE INDEX IF NOT EXISTS idx_command_traces_started_at
-  ON command_traces (started_at);
-SCHEMA
+# Let Omni own its cache schema so the fixture cannot drift from migrations.
+OMNI_CONFIG="$root/onboarding-settings.json" \
+OMNI_CACHE_DIR="$root/cache" \
+OMNI_HOSTNAME="demo-macbook" \
+HOME="$root/home" \
+"$omni_bin" trace list >/dev/null
 config_path="$root/settings.json"
 if command -v shasum >/dev/null 2>&1; then
   hash_line="$(printf '%s' "$config_path" | shasum -a 256)"

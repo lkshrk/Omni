@@ -244,7 +244,11 @@ func (m *Model) handleAdminTerminalDoneMsg(msg adminTerminalDoneMsg) []tea.Cmd {
 
 func (m *Model) finalizeAdminTerminal(state adminTerminalState, err error) []tea.Cmd {
 	if err != nil {
-		return m.handleOpCompleteMsg(opCompleteMsg{key: state.rowKey, err: fmt.Errorf("admin terminal: %w", err)})
+		return m.handleOpCompleteMsg(opCompleteMsg{
+			key:                    state.rowKey,
+			err:                    fmt.Errorf("admin terminal: %w", err),
+			preserveOtherRowErrors: state.preserveOtherRowErrors,
+		})
 	}
 	m.startRowOperation(state.name, state.providerName, "Refreshing…")
 	return []tea.Cmd{m.doCompleteAdminTerminalAction(state)}
