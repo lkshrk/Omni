@@ -146,6 +146,7 @@ func TestAddSkillPackage_RefusesPluginShadowedPackage(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
+	writeFakeClaudeOnPath(t)
 	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}

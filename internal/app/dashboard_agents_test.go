@@ -13,6 +13,7 @@ func TestDashboardAgentsSummary_Enabled(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_DATA_HOME", filepath.Join(home, "data"))
 	t.Setenv("XDG_STATE_HOME", "")
+	stubBinariesOnPath(t, "claude")
 	installedSource := filepath.Join(t.TempDir(), "installed")
 	writeAppSkill(t, filepath.Join(installedSource, "skills", "installed-skill"), "installed-skill")
 	writeSkillLockFixture(t, home, config.SkillLockFile{
